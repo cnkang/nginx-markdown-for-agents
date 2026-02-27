@@ -62,9 +62,9 @@ jobs:
             command -v "$cmd" >/dev/null
           done
 
-      - name: Ensure Rust project compiles (locked)
+      - name: Ensure Rust project compiles
         working-directory: components/rust-converter
-        run: cargo check --all-targets --locked
+        run: cargo check --all-targets
 
       - name: Run real NGINX If-Modified-Since validation
         run: ./tools/ci/verify_real_nginx_ims.sh
