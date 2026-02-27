@@ -1,0 +1,78 @@
+name: CodeQL
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main, master]
+    paths:
+      - "components/**"
+      - "Makefile"
+      - ".github/workflows/codeql.yml"
+  push:
+    branches: [main, master]
+    paths:
+      - "components/**"
+      - "Makefile"
+      - ".github/workflows/codeql.yml"
+  schedule:
+    - cron: "37 2 * * 0"
+
+permissions:
+  actions: read
+  contents: read
+  security-events: write
+
+concurrency:
+  group: codeql-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: c-cpp
+            build-mode: manual
+          - language: rust
+            build-mode: manual
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+          queries: security-extended,security-and-quality
+
+      - name: Install C toolchain deps
+        if: matrix.language == 'c-cpp'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            zlib1g-dev
+
+      - name: Build C test targets for analysis
+        if: matrix.language == 'c-cpp'
+        run: make test-nginx-unit
+
+      - name: Set up Rust toolchain
+        if: matrix.language == 'rust'
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build Rust targets for analysis
+        if: matrix.language == 'rust'
+        working-directory: components/rust-converter
+        run: cargo build --workspace --all-targets
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:${{ matrix.language }}"
