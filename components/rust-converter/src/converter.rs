@@ -576,57 +576,57 @@ impl MarkdownConverter {
         output.push_str("---\n");
 
         // Add title (required field per FR-15.4)
-        if let Some(ref title) = metadata.title {
-            if !title.is_empty() {
-                output.push_str("title: ");
-                self.write_yaml_string(output, title);
-                output.push('\n');
-            }
+        if let Some(ref title) = metadata.title
+            && !title.is_empty()
+        {
+            output.push_str("title: ");
+            self.write_yaml_string(output, title);
+            output.push('\n');
         }
 
         // Add URL (required field per FR-15.4)
-        if let Some(ref url) = metadata.url {
-            if !url.is_empty() {
-                output.push_str("url: ");
-                self.write_yaml_string(output, url);
-                output.push('\n');
-            }
+        if let Some(ref url) = metadata.url
+            && !url.is_empty()
+        {
+            output.push_str("url: ");
+            self.write_yaml_string(output, url);
+            output.push('\n');
         }
 
         // Add description (optional field per FR-15.5)
-        if let Some(ref description) = metadata.description {
-            if !description.is_empty() {
-                output.push_str("description: ");
-                self.write_yaml_string(output, description);
-                output.push('\n');
-            }
+        if let Some(ref description) = metadata.description
+            && !description.is_empty()
+        {
+            output.push_str("description: ");
+            self.write_yaml_string(output, description);
+            output.push('\n');
         }
 
         // Add image with resolved absolute URL (optional field per FR-15.5)
-        if let Some(ref image) = metadata.image {
-            if !image.is_empty() {
-                output.push_str("image: ");
-                self.write_yaml_string(output, image);
-                output.push('\n');
-            }
+        if let Some(ref image) = metadata.image
+            && !image.is_empty()
+        {
+            output.push_str("image: ");
+            self.write_yaml_string(output, image);
+            output.push('\n');
         }
 
         // Add author (optional field)
-        if let Some(ref author) = metadata.author {
-            if !author.is_empty() {
-                output.push_str("author: ");
-                self.write_yaml_string(output, author);
-                output.push('\n');
-            }
+        if let Some(ref author) = metadata.author
+            && !author.is_empty()
+        {
+            output.push_str("author: ");
+            self.write_yaml_string(output, author);
+            output.push('\n');
         }
 
         // Add published date (optional field)
-        if let Some(ref published) = metadata.published {
-            if !published.is_empty() {
-                output.push_str("published: ");
-                self.write_yaml_string(output, published);
-                output.push('\n');
-            }
+        if let Some(ref published) = metadata.published
+            && !published.is_empty()
+        {
+            output.push_str("published: ");
+            self.write_yaml_string(output, published);
+            output.push('\n');
         }
 
         // End YAML front matter block with blank line separator
@@ -686,13 +686,11 @@ impl MarkdownConverter {
         if self.options.include_front_matter
             && self.options.extract_metadata
             && output.starts_with("---\n")
+            && let Some(rest) = output.strip_prefix("---\n")
+            && let Some(end_offset) = rest.find("\n---\n")
         {
-            if let Some(rest) = output.strip_prefix("---\n") {
-                if let Some(end_offset) = rest.find("\n---\n") {
-                    let body = &rest[end_offset + 5..];
-                    return body.chars().any(|ch| !ch.is_whitespace());
-                }
-            }
+            let body = &rest[end_offset + 5..];
+            return body.chars().any(|ch| !ch.is_whitespace());
         }
 
         true
@@ -1351,10 +1349,10 @@ impl MarkdownConverter {
         // Store the list type in the context for list items
         // Process all list item children
         for child in node.children.borrow().iter() {
-            if let NodeData::Element { ref name, .. } = child.data {
-                if name.local.as_ref() == "li" {
-                    self.handle_list_item_with_marker(child, output, depth, ordered)?;
-                }
+            if let NodeData::Element { ref name, .. } = child.data
+                && name.local.as_ref() == "li"
+            {
+                self.handle_list_item_with_marker(child, output, depth, ordered)?;
             }
         }
 
@@ -1503,25 +1501,24 @@ impl MarkdownConverter {
                 ref attrs,
                 ..
             } = child.data
+                && name.local.as_ref() == "code"
             {
-                if name.local.as_ref() == "code" {
-                    // Look for class attribute with language- prefix
-                    for attr in attrs.borrow().iter() {
-                        if attr.name.local.as_ref() == "class" {
-                            let class_value = attr.value.to_string();
-                            // Look for language-* or lang-* patterns
-                            for class in class_value.split_whitespace() {
-                                if let Some(lang) = class.strip_prefix("language-") {
-                                    language = lang.to_string();
-                                    break;
-                                } else if let Some(lang) = class.strip_prefix("lang-") {
-                                    language = lang.to_string();
-                                    break;
-                                }
-                            }
-                            if !language.is_empty() {
+                // Look for class attribute with language- prefix
+                for attr in attrs.borrow().iter() {
+                    if attr.name.local.as_ref() == "class" {
+                        let class_value = attr.value.to_string();
+                        // Look for language-* or lang-* patterns
+                        for class in class_value.split_whitespace() {
+                            if let Some(lang) = class.strip_prefix("language-") {
+                                language = lang.to_string();
+                                break;
+                            } else if let Some(lang) = class.strip_prefix("lang-") {
+                                language = lang.to_string();
                                 break;
                             }
+                        }
+                        if !language.is_empty() {
+                            break;
                         }
                     }
                 }
@@ -1784,19 +1781,15 @@ impl MarkdownConverter {
                                     let mut is_first = true;
                                     for tbody_child in children.iter() {
                                         if let NodeData::Element { ref name, .. } = tbody_child.data
+                                            && name.local.as_ref() == "tr"
                                         {
-                                            if name.local.as_ref() == "tr" {
-                                                if is_first {
-                                                    is_first = false;
-                                                    continue; // Skip header row
-                                                }
-                                                let mut row_cells = Vec::new();
-                                                self.extract_table_row(
-                                                    tbody_child,
-                                                    &mut row_cells,
-                                                )?;
-                                                rows.push(row_cells);
+                                            if is_first {
+                                                is_first = false;
+                                                continue; // Skip header row
                                             }
+                                            let mut row_cells = Vec::new();
+                                            self.extract_table_row(tbody_child, &mut row_cells)?;
+                                            rows.push(row_cells);
                                         }
                                     }
                                 } else {
@@ -1810,19 +1803,15 @@ impl MarkdownConverter {
                                     let mut is_first = true;
                                     for tbody_child in children.iter() {
                                         if let NodeData::Element { ref name, .. } = tbody_child.data
+                                            && name.local.as_ref() == "tr"
                                         {
-                                            if name.local.as_ref() == "tr" {
-                                                if is_first {
-                                                    is_first = false;
-                                                    continue; // Skip header row
-                                                }
-                                                let mut row_cells = Vec::new();
-                                                self.extract_table_row(
-                                                    tbody_child,
-                                                    &mut row_cells,
-                                                )?;
-                                                rows.push(row_cells);
+                                            if is_first {
+                                                is_first = false;
+                                                continue; // Skip header row
                                             }
+                                            let mut row_cells = Vec::new();
+                                            self.extract_table_row(tbody_child, &mut row_cells)?;
+                                            rows.push(row_cells);
                                         }
                                     }
                                 }
@@ -1885,11 +1874,11 @@ impl MarkdownConverter {
     ) -> Result<(), ConversionError> {
         // Find first tr in thead
         for child in thead.children.borrow().iter() {
-            if let NodeData::Element { ref name, .. } = child.data {
-                if name.local.as_ref() == "tr" {
-                    self.extract_table_row_as_header(child, headers, alignments)?;
-                    break;
-                }
+            if let NodeData::Element { ref name, .. } = child.data
+                && name.local.as_ref() == "tr"
+            {
+                self.extract_table_row_as_header(child, headers, alignments)?;
+                break;
             }
         }
         Ok(())
@@ -1937,12 +1926,12 @@ impl MarkdownConverter {
         rows: &mut Vec<Vec<String>>,
     ) -> Result<(), ConversionError> {
         for child in tbody.children.borrow().iter() {
-            if let NodeData::Element { ref name, .. } = child.data {
-                if name.local.as_ref() == "tr" {
-                    let mut row_cells = Vec::new();
-                    self.extract_table_row(child, &mut row_cells)?;
-                    rows.push(row_cells);
-                }
+            if let NodeData::Element { ref name, .. } = child.data
+                && name.local.as_ref() == "tr"
+            {
+                let mut row_cells = Vec::new();
+                self.extract_table_row(child, &mut row_cells)?;
+                rows.push(row_cells);
             }
         }
         Ok(())

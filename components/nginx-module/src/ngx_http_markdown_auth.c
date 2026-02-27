@@ -270,7 +270,8 @@ ngx_http_markdown_is_authenticated(ngx_http_request_t *r,
  * @return           1 if directive found, 0 otherwise
  */
 static ngx_int_t
-ngx_http_markdown_cache_control_has_directive(ngx_str_t *value, const char *directive)
+ngx_http_markdown_cache_control_has_directive(const ngx_str_t *value,
+    const ngx_str_t *directive)
 {
     size_t directive_len;
     u_char *p, *end;
@@ -279,7 +280,7 @@ ngx_http_markdown_cache_control_has_directive(ngx_str_t *value, const char *dire
         return 0;
     }
 
-    directive_len = ngx_strlen(directive);
+    directive_len = directive->len;
     p = value->data;
     end = p + value->len;
 
@@ -296,7 +297,7 @@ ngx_http_markdown_cache_control_has_directive(ngx_str_t *value, const char *dire
 
         /* Check if this token matches the directive */
         if ((size_t)(end - p) >= directive_len &&
-            ngx_strncasecmp(p, (u_char *)directive, directive_len) == 0)
+            ngx_strncasecmp(p, directive->data, directive_len) == 0)
         {
             /* Verify it's a complete token (not part of another word) */
             if (p + directive_len == end ||
@@ -340,6 +341,9 @@ ngx_http_markdown_cache_control_has_directive(ngx_str_t *value, const char *dire
 ngx_int_t
 ngx_http_markdown_modify_cache_control_for_auth(ngx_http_request_t *r)
 {
+    static ngx_str_t  ngx_http_markdown_no_store = ngx_string("no-store");
+    static ngx_str_t  ngx_http_markdown_private = ngx_string("private");
+    static ngx_str_t  ngx_http_markdown_public = ngx_string("public");
     ngx_table_elt_t  *cache_control;
     ngx_table_elt_t  *h;
     ngx_int_t         has_no_store;
@@ -406,11 +410,11 @@ ngx_http_markdown_modify_cache_control_for_auth(ngx_http_request_t *r)
      * Cache-Control header exists - check directives
      */
     has_no_store = ngx_http_markdown_cache_control_has_directive(
-        &cache_control->value, "no-store");
+        &cache_control->value, &ngx_http_markdown_no_store);
     has_private = ngx_http_markdown_cache_control_has_directive(
-        &cache_control->value, "private");
+        &cache_control->value, &ngx_http_markdown_private);
     has_public = ngx_http_markdown_cache_control_has_directive(
-        &cache_control->value, "public");
+        &cache_control->value, &ngx_http_markdown_public);
 
     /*
      * Rule 3: Preserve "no-store" - NEVER downgrade

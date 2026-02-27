@@ -55,11 +55,13 @@ static ngx_int_t ngx_http_markdown_metrics_handler(ngx_http_request_t *r);
 
 /* Configuration logging helpers */
 static ngx_uint_t ngx_http_markdown_log_verbosity_to_ngx_level(ngx_uint_t verbosity);
-static const char *ngx_http_markdown_on_error_name(ngx_uint_t value);
-static const char *ngx_http_markdown_flavor_name(ngx_uint_t value);
-static const char *ngx_http_markdown_auth_policy_name(ngx_uint_t value);
-static const char *ngx_http_markdown_conditional_requests_name(ngx_uint_t value);
-static const char *ngx_http_markdown_log_verbosity_name(ngx_uint_t value);
+static const ngx_str_t *ngx_http_markdown_on_error_name(ngx_uint_t value);
+static const ngx_str_t *ngx_http_markdown_flavor_name(ngx_uint_t value);
+static const ngx_str_t *ngx_http_markdown_auth_policy_name(ngx_uint_t value);
+static const ngx_str_t *ngx_http_markdown_conditional_requests_name(ngx_uint_t value);
+static const ngx_str_t *ngx_http_markdown_log_verbosity_name(ngx_uint_t value);
+static const ngx_str_t *ngx_http_markdown_compression_name(
+    ngx_http_markdown_compression_type_e compression_type);
 static void ngx_http_markdown_log_merged_conf(ngx_conf_t *cf, ngx_http_markdown_conf_t *conf);
 static ngx_int_t ngx_http_markdown_forward_headers(ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx);
@@ -68,7 +70,7 @@ static ngx_int_t ngx_http_markdown_send_buffered_original_response(
 static ngx_int_t ngx_http_markdown_fail_open_with_buffered_prefix(
     ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx, ngx_chain_t *remaining);
 static ngx_table_elt_t *ngx_http_markdown_find_request_header(ngx_http_request_t *r,
-    const char *name, size_t name_len);
+    const ngx_str_t *name);
 
 /* Next filter pointers for filter chain */
 static ngx_http_output_header_filter_pt ngx_http_next_header_filter;
@@ -832,74 +834,120 @@ ngx_http_markdown_log_verbosity_to_ngx_level(ngx_uint_t verbosity)
     }
 }
 
-static const char *
+static const ngx_str_t *
 ngx_http_markdown_on_error_name(ngx_uint_t value)
 {
+    static ngx_str_t  pass = ngx_string("pass");
+    static ngx_str_t  reject = ngx_string("reject");
+    static ngx_str_t  unknown = ngx_string("unknown");
+
     switch (value) {
         case NGX_HTTP_MARKDOWN_ON_ERROR_PASS:
-            return "pass";
+            return &pass;
         case NGX_HTTP_MARKDOWN_ON_ERROR_REJECT:
-            return "reject";
+            return &reject;
         default:
-            return "unknown";
+            return &unknown;
     }
 }
 
-static const char *
+static const ngx_str_t *
 ngx_http_markdown_flavor_name(ngx_uint_t value)
 {
+    static ngx_str_t  commonmark = ngx_string("commonmark");
+    static ngx_str_t  gfm = ngx_string("gfm");
+    static ngx_str_t  unknown = ngx_string("unknown");
+
     switch (value) {
         case NGX_HTTP_MARKDOWN_FLAVOR_COMMONMARK:
-            return "commonmark";
+            return &commonmark;
         case NGX_HTTP_MARKDOWN_FLAVOR_GFM:
-            return "gfm";
+            return &gfm;
         default:
-            return "unknown";
+            return &unknown;
     }
 }
 
-static const char *
+static const ngx_str_t *
 ngx_http_markdown_auth_policy_name(ngx_uint_t value)
 {
+    static ngx_str_t  allow = ngx_string("allow");
+    static ngx_str_t  deny = ngx_string("deny");
+    static ngx_str_t  unknown = ngx_string("unknown");
+
     switch (value) {
         case NGX_HTTP_MARKDOWN_AUTH_POLICY_ALLOW:
-            return "allow";
+            return &allow;
         case NGX_HTTP_MARKDOWN_AUTH_POLICY_DENY:
-            return "deny";
+            return &deny;
         default:
-            return "unknown";
+            return &unknown;
     }
 }
 
-static const char *
+static const ngx_str_t *
 ngx_http_markdown_conditional_requests_name(ngx_uint_t value)
 {
+    static ngx_str_t  full_support = ngx_string("full_support");
+    static ngx_str_t  if_modified_since_only = ngx_string("if_modified_since_only");
+    static ngx_str_t  disabled = ngx_string("disabled");
+    static ngx_str_t  unknown = ngx_string("unknown");
+
     switch (value) {
         case NGX_HTTP_MARKDOWN_CONDITIONAL_FULL_SUPPORT:
-            return "full_support";
+            return &full_support;
         case NGX_HTTP_MARKDOWN_CONDITIONAL_IF_MODIFIED_SINCE:
-            return "if_modified_since_only";
+            return &if_modified_since_only;
         case NGX_HTTP_MARKDOWN_CONDITIONAL_DISABLED:
-            return "disabled";
+            return &disabled;
         default:
-            return "unknown";
+            return &unknown;
     }
 }
 
-static const char *
+static const ngx_str_t *
 ngx_http_markdown_log_verbosity_name(ngx_uint_t value)
 {
+    static ngx_str_t  error = ngx_string("error");
+    static ngx_str_t  warn = ngx_string("warn");
+    static ngx_str_t  info = ngx_string("info");
+    static ngx_str_t  debug = ngx_string("debug");
+    static ngx_str_t  unknown = ngx_string("unknown");
+
     switch (value) {
         case NGX_HTTP_MARKDOWN_LOG_ERROR:
-            return "error";
+            return &error;
         case NGX_HTTP_MARKDOWN_LOG_WARN:
-            return "warn";
+            return &warn;
         case NGX_HTTP_MARKDOWN_LOG_INFO:
-            return "info";
+            return &info;
         case NGX_HTTP_MARKDOWN_LOG_DEBUG:
-            return "debug";
+            return &debug;
         default:
-            return "unknown";
+            return &unknown;
+    }
+}
+
+static const ngx_str_t *
+ngx_http_markdown_compression_name(ngx_http_markdown_compression_type_e compression_type)
+{
+    static ngx_str_t  gzip = ngx_string("gzip");
+    static ngx_str_t  deflate = ngx_string("deflate");
+    static ngx_str_t  brotli = ngx_string("brotli");
+    static ngx_str_t  unknown = ngx_string("unknown");
+    static ngx_str_t  invalid = ngx_string("invalid");
+
+    switch (compression_type) {
+        case NGX_HTTP_MARKDOWN_COMPRESSION_GZIP:
+            return &gzip;
+        case NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE:
+            return &deflate;
+        case NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI:
+            return &brotli;
+        case NGX_HTTP_MARKDOWN_COMPRESSION_UNKNOWN:
+            return &unknown;
+        default:
+            return &invalid;
     }
 }
 
@@ -918,9 +966,9 @@ ngx_http_markdown_log_merged_conf(ngx_conf_t *cf, ngx_http_markdown_conf_t *conf
 
     ngx_conf_log_error(log_level, cf, 0,
                       "markdown filter config: enabled=%ui max_size=%uz timeout_ms=%M "
-                      "on_error=%s flavor=%s token_estimate=%ui front_matter=%ui "
-                      "on_wildcard=%ui auth_policy=%s auth_cookie_patterns=%ui "
-                      "etag=%ui conditional_requests=%s log_verbosity=%s "
+                      "on_error=%V flavor=%V token_estimate=%ui front_matter=%ui "
+                      "on_wildcard=%ui auth_policy=%V auth_cookie_patterns=%ui "
+                      "etag=%ui conditional_requests=%V log_verbosity=%V "
                       "buffer_chunked=%ui stream_types=%ui",
                       (ngx_uint_t) conf->enabled,
                       conf->max_size,
@@ -1301,7 +1349,7 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
     if (eligibility != NGX_HTTP_MARKDOWN_ELIGIBLE) {
         /* Not eligible, pass through */
         ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                      "markdown filter: response not eligible: %s",
+                      "markdown filter: response not eligible: %V",
                       ngx_http_markdown_eligibility_string(eligibility));
         return ngx_http_next_header_filter(r);
     }
@@ -1921,30 +1969,14 @@ ngx_http_markdown_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
              * or ngx_http_markdown_decompress_brotli). Here we log a summary with the
              * compression type name for easier troubleshooting.
              */
-            const char *compression_name;
-            
-            /* Map compression type to human-readable name */
-            switch (ctx->compression_type) {
-                case NGX_HTTP_MARKDOWN_COMPRESSION_GZIP:
-                    compression_name = "gzip";
-                    break;
-                case NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE:
-                    compression_name = "deflate";
-                    break;
-                case NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI:
-                    compression_name = "brotli";
-                    break;
-                case NGX_HTTP_MARKDOWN_COMPRESSION_UNKNOWN:
-                    compression_name = "unknown";
-                    break;
-                default:
-                    compression_name = "invalid";
-                    break;
-            }
+            const ngx_str_t *compression_name;
+
+            compression_name = ngx_http_markdown_compression_name(
+                ctx->compression_type);
             
             /* Log summary error (detailed error already logged by decompression function) */
             ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                         "markdown filter: decompression failed, compression=%s, "
+                         "markdown filter: decompression failed, compression=%V, "
                          "error=\"decompression error\", category=conversion",
                          compression_name);
             
@@ -1975,26 +2007,14 @@ ngx_http_markdown_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
              * This is a system error - the decompression function should never
              * return NGX_OK with a NULL chain.
              */
-            const char *compression_name;
-            
-            switch (ctx->compression_type) {
-                case NGX_HTTP_MARKDOWN_COMPRESSION_GZIP:
-                    compression_name = "gzip";
-                    break;
-                case NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE:
-                    compression_name = "deflate";
-                    break;
-                case NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI:
-                    compression_name = "brotli";
-                    break;
-                default:
-                    compression_name = "unknown";
-                    break;
-            }
+            const ngx_str_t *compression_name;
+
+            compression_name = ngx_http_markdown_compression_name(
+                ctx->compression_type);
             
             ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                          "markdown filter: decompression returned NULL chain, "
-                         "compression=%s, category=system",
+                         "compression=%V, category=system",
                          compression_name);
             
             ngx_atomic_fetch_add(&ngx_http_markdown_metrics.decompressions_failed, 1);
@@ -2023,26 +2043,14 @@ ngx_http_markdown_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
              */
             u_char *new_data = ngx_alloc(ctx->decompressed_size, r->connection->log);
             if (new_data == NULL) {
-                const char *compression_name;
-                
-                switch (ctx->compression_type) {
-                    case NGX_HTTP_MARKDOWN_COMPRESSION_GZIP:
-                        compression_name = "gzip";
-                        break;
-                    case NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE:
-                        compression_name = "deflate";
-                        break;
-                    case NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI:
-                        compression_name = "brotli";
-                        break;
-                    default:
-                        compression_name = "unknown";
-                        break;
-                }
+                const ngx_str_t *compression_name;
+
+                compression_name = ngx_http_markdown_compression_name(
+                    ctx->compression_type);
                 
                 ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                              "markdown filter: failed to allocate decompressed buffer, "
-                             "compression=%s, size=%uz, category=system",
+                             "compression=%V, size=%uz, category=system",
                              compression_name, ctx->decompressed_size);
                 
                 ngx_atomic_fetch_add(&ngx_http_markdown_metrics.decompressions_failed, 1);
@@ -2290,7 +2298,7 @@ ngx_http_markdown_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
     if (result.error_code != ERROR_SUCCESS) {
         /* Conversion failed - classify error (FR-09.6, FR-09.7) */
         ngx_http_markdown_error_category_t error_category;
-        const char *category_str;
+        const ngx_str_t                *category_str;
         
         error_category = ngx_http_markdown_classify_error(result.error_code);
         category_str = ngx_http_markdown_error_category_string(error_category);
@@ -2314,7 +2322,7 @@ ngx_http_markdown_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
         /* Log error with classification (FR-09.5, FR-09.6) */
         ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
                      "markdown filter: conversion failed, "
-                     "error_code=%ud, category=%s, message=\"%*s\", elapsed_ms=%M",
+                     "error_code=%ud, category=%V, message=\"%*s\", elapsed_ms=%M",
                      result.error_code,
                      category_str,
                      result.error_len, result.error_message,
@@ -2554,8 +2562,10 @@ ngx_http_markdown_metrics_handler(ngx_http_request_t *r)
 #if (NGX_HTTP_HEADERS)
         accept_header = r->headers_in.accept;
 #else
+        static ngx_str_t  accept_name = ngx_string("Accept");
+
         accept_header = ngx_http_markdown_find_request_header(
-            r, "Accept", sizeof("Accept") - 1);
+            r, &accept_name);
 #endif
 
         if (accept_header != NULL
@@ -2795,14 +2805,13 @@ ngx_http_markdown_metrics_handler(ngx_http_request_t *r)
  * ngx_http_headers_in_t (for example `accept`) are not compiled in.
  */
 static ngx_table_elt_t *
-ngx_http_markdown_find_request_header(ngx_http_request_t *r, const char *name,
-    size_t name_len)
+ngx_http_markdown_find_request_header(ngx_http_request_t *r, const ngx_str_t *name)
 {
     ngx_list_part_t *part;
     ngx_table_elt_t *headers;
     ngx_uint_t       i;
 
-    if (r == NULL || name == NULL || name_len == 0) {
+    if (r == NULL || name == NULL || name->len == 0) {
         return NULL;
     }
 
@@ -2811,8 +2820,8 @@ ngx_http_markdown_find_request_header(ngx_http_request_t *r, const char *name,
 
     for ( ;; ) {
         for (i = 0; i < part->nelts; i++) {
-            if (headers[i].key.len == name_len
-                && ngx_strncasecmp(headers[i].key.data, (u_char *) name, name_len) == 0)
+            if (headers[i].key.len == name->len
+                && ngx_strncasecmp(headers[i].key.data, name->data, name->len) == 0)
             {
                 return &headers[i];
             }

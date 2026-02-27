@@ -9,6 +9,25 @@
 
 #include "ngx_http_markdown_filter_module.h"
 
+static ngx_str_t ngx_http_markdown_eligible_str = ngx_string("eligible");
+static ngx_str_t ngx_http_markdown_ineligible_method_str =
+    ngx_string("ineligible: method not GET/HEAD");
+static ngx_str_t ngx_http_markdown_ineligible_status_str =
+    ngx_string("ineligible: status not 200");
+static ngx_str_t ngx_http_markdown_ineligible_content_type_str =
+    ngx_string("ineligible: content-type not text/html");
+static ngx_str_t ngx_http_markdown_ineligible_size_str =
+    ngx_string("ineligible: size exceeds limit");
+static ngx_str_t ngx_http_markdown_ineligible_streaming_str =
+    ngx_string("ineligible: unbounded streaming");
+static ngx_str_t ngx_http_markdown_ineligible_auth_str =
+    ngx_string("ineligible: auth policy denies");
+static ngx_str_t ngx_http_markdown_ineligible_range_str =
+    ngx_string("ineligible: range request");
+static ngx_str_t ngx_http_markdown_ineligible_config_str =
+    ngx_string("ineligible: disabled by config");
+static ngx_str_t ngx_http_markdown_eligibility_unknown_str = ngx_string("unknown");
+
 /*
  * Check if request method is eligible for conversion
  *
@@ -302,29 +321,29 @@ ngx_http_markdown_check_eligibility(ngx_http_request_t *r,
  * Returns:
  *   Static string describing the eligibility result
  */
-const char *
+const ngx_str_t *
 ngx_http_markdown_eligibility_string(ngx_http_markdown_eligibility_t eligibility)
 {
     switch (eligibility) {
         case NGX_HTTP_MARKDOWN_ELIGIBLE:
-            return "eligible";
+            return &ngx_http_markdown_eligible_str;
         case NGX_HTTP_MARKDOWN_INELIGIBLE_METHOD:
-            return "ineligible: method not GET/HEAD";
+            return &ngx_http_markdown_ineligible_method_str;
         case NGX_HTTP_MARKDOWN_INELIGIBLE_STATUS:
-            return "ineligible: status not 200";
+            return &ngx_http_markdown_ineligible_status_str;
         case NGX_HTTP_MARKDOWN_INELIGIBLE_CONTENT_TYPE:
-            return "ineligible: content-type not text/html";
+            return &ngx_http_markdown_ineligible_content_type_str;
         case NGX_HTTP_MARKDOWN_INELIGIBLE_SIZE:
-            return "ineligible: size exceeds limit";
+            return &ngx_http_markdown_ineligible_size_str;
         case NGX_HTTP_MARKDOWN_INELIGIBLE_STREAMING:
-            return "ineligible: unbounded streaming";
+            return &ngx_http_markdown_ineligible_streaming_str;
         case NGX_HTTP_MARKDOWN_INELIGIBLE_AUTH:
-            return "ineligible: auth policy denies";
+            return &ngx_http_markdown_ineligible_auth_str;
         case NGX_HTTP_MARKDOWN_INELIGIBLE_RANGE:
-            return "ineligible: range request";
+            return &ngx_http_markdown_ineligible_range_str;
         case NGX_HTTP_MARKDOWN_INELIGIBLE_CONFIG:
-            return "ineligible: disabled by config";
+            return &ngx_http_markdown_ineligible_config_str;
         default:
-            return "unknown";
+            return &ngx_http_markdown_eligibility_unknown_str;
     }
 }

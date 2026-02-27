@@ -479,7 +479,7 @@ pub struct MarkdownConverterHandle {
 ///
 /// This function is safe to call from C code. It performs no pointer
 /// dereferencing and handles all allocation failures gracefully.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn markdown_converter_new() -> *mut MarkdownConverterHandle {
     // Catch any panics to prevent unwinding into C code
     let result = panic::catch_unwind(|| {
@@ -627,7 +627,7 @@ pub extern "C" fn markdown_converter_new() -> *mut MarkdownConverterHandle {
 /// - Using a freed handle is undefined behavior
 /// - Concurrent calls on same handle is undefined behavior
 /// - Not calling `markdown_result_free()` causes memory leak (not UB)
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn markdown_convert(
     handle: *mut MarkdownConverterHandle,
     html: *const u8,
@@ -891,7 +891,7 @@ pub unsafe extern "C" fn markdown_convert(
 /// - Passing invalid (non-NULL but bad) pointer is undefined behavior
 /// - Freeing a result that wasn't populated by `markdown_convert()` is UB
 /// - Mixing Rust and C allocators (calling C `free()`) is UB
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn markdown_result_free(result: *mut MarkdownResult) {
     if result.is_null() {
         return;
@@ -1010,7 +1010,7 @@ pub unsafe extern "C" fn markdown_result_free(result: *mut MarkdownResult) {
 /// - Using handle after free is undefined behavior
 /// - Freeing handle while conversion is in progress is undefined behavior
 /// - Mixing Rust and C allocators (calling C `free()`) is UB
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn markdown_converter_free(handle: *mut MarkdownConverterHandle) {
     if handle.is_null() {
         return;

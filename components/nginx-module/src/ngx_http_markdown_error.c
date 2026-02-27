@@ -13,6 +13,11 @@
 #include "ngx_http_markdown_filter_module.h"
 #include "markdown_converter.h"
 
+static ngx_str_t ngx_http_markdown_error_conversion_str = ngx_string("conversion");
+static ngx_str_t ngx_http_markdown_error_resource_limit_str = ngx_string("resource_limit");
+static ngx_str_t ngx_http_markdown_error_system_str = ngx_string("system");
+static ngx_str_t ngx_http_markdown_error_unknown_str = ngx_string("unknown");
+
 /*
  * Map Rust error code to error category
  *
@@ -73,17 +78,17 @@ ngx_http_markdown_classify_error(uint32_t error_code)
  * Returns:
  *   String representation of the category
  */
-const char *
+const ngx_str_t *
 ngx_http_markdown_error_category_string(ngx_http_markdown_error_category_t category)
 {
     switch (category) {
         case NGX_HTTP_MARKDOWN_ERROR_CONVERSION:
-            return "conversion";
+            return &ngx_http_markdown_error_conversion_str;
         case NGX_HTTP_MARKDOWN_ERROR_RESOURCE_LIMIT:
-            return "resource_limit";
+            return &ngx_http_markdown_error_resource_limit_str;
         case NGX_HTTP_MARKDOWN_ERROR_SYSTEM:
-            return "system";
+            return &ngx_http_markdown_error_system_str;
         default:
-            return "unknown";
+            return &ngx_http_markdown_error_unknown_str;
     }
 }

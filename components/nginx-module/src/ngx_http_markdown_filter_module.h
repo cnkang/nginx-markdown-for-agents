@@ -161,16 +161,16 @@ typedef struct {
  *
  * Usage Example:
  *
- *   // On conversion attempt
+ *   On conversion attempt:
  *   ngx_atomic_fetch_add(&metrics->conversions_attempted, 1);
  *
- *   // On success
+ *   On success:
  *   ngx_atomic_fetch_add(&metrics->conversions_succeeded, 1);
  *   ngx_atomic_fetch_add(&metrics->input_bytes, html_len);
  *   ngx_atomic_fetch_add(&metrics->output_bytes, markdown_len);
  *   ngx_atomic_fetch_add(&metrics->conversion_time_sum_ms, elapsed_ms);
  *
- *   // On failure
+ *   On failure:
  *   ngx_atomic_fetch_add(&metrics->conversions_failed, 1);
  *   switch (category) {
  *       case NGX_HTTP_MARKDOWN_ERROR_CONVERSION:
@@ -184,7 +184,7 @@ typedef struct {
  *           break;
  *   }
  *
- *   // On bypass (ineligible request)
+ *   On bypass (ineligible request):
  *   ngx_atomic_fetch_add(&metrics->conversions_bypassed, 1);
  *
  * Thread Safety:
@@ -283,7 +283,7 @@ typedef enum {
 ngx_http_markdown_error_category_t ngx_http_markdown_classify_error(uint32_t error_code);
 
 /* Get human-readable string for error category */
-const char *ngx_http_markdown_error_category_string(
+const ngx_str_t *ngx_http_markdown_error_category_string(
     ngx_http_markdown_error_category_t category);
 
 /*
@@ -310,7 +310,7 @@ ngx_http_markdown_eligibility_t ngx_http_markdown_check_eligibility(
     ngx_http_request_t *r, ngx_http_markdown_conf_t *conf);
 
 /* Get human-readable string for eligibility result */
-const char *ngx_http_markdown_eligibility_string(
+const ngx_str_t *ngx_http_markdown_eligibility_string(
     ngx_http_markdown_eligibility_t eligibility);
 
 /*

@@ -9,7 +9,7 @@ pragma_once = false
 include_version = true
 
 [export]
-# Export only items explicitly marked with #[no_mangle]
+# Export only items explicitly marked with #[unsafe(no_mangle)] (Rust 2024)
 include = []
 exclude = []
 

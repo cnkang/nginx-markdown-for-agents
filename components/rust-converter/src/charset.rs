@@ -88,10 +88,10 @@ const META_SCAN_LIMIT: usize = 1024;
 /// - "windows-1252" → "WINDOWS-1252"
 pub fn detect_charset(content_type: Option<&str>, html: &[u8]) -> String {
     // Level 1: Check Content-Type header charset parameter (FR-05.1)
-    if let Some(ct) = content_type {
-        if let Some(charset) = extract_charset_from_content_type(ct) {
-            return normalize_charset(&charset);
-        }
+    if let Some(ct) = content_type
+        && let Some(charset) = extract_charset_from_content_type(ct)
+    {
+        return normalize_charset(&charset);
     }
 
     // Level 2: Check HTML meta charset tags (FR-05.2)
@@ -145,9 +145,10 @@ pub fn detect_charset(content_type: Option<&str>, html: &[u8]) -> String {
 pub fn extract_charset_from_content_type(content_type: &str) -> Option<String> {
     // Regex pattern to match charset parameter
     // Matches: charset=VALUE or charset="VALUE"
-    static CHARSET_REGEX: OnceLock<Regex> = OnceLock::new();
+    static CHARSET_REGEX: OnceLock<Option<Regex>> = OnceLock::new();
     let regex =
-        CHARSET_REGEX.get_or_init(|| Regex::new(r#"(?i)charset\s*=\s*"?([^";,\s]+)"?"#).unwrap());
+        CHARSET_REGEX.get_or_init(|| Regex::new(r#"(?i)charset\s*=\s*"?([^";,\s]+)"?"#).ok());
+    let regex = regex.as_ref()?;
 
     regex
         .captures(content_type)
@@ -203,26 +204,31 @@ pub fn extract_charset_from_html(html: &[u8]) -> Option<String> {
     let html_str = String::from_utf8_lossy(html_prefix);
 
     // Try HTML5 meta charset format first
-    static HTML5_REGEX: OnceLock<Regex> = OnceLock::new();
-    let html5_regex = HTML5_REGEX
-        .get_or_init(|| Regex::new(r#"(?i)<meta\s+charset\s*=\s*"?([^";>\s]+)"?"#).unwrap());
+    static HTML5_REGEX: OnceLock<Option<Regex>> = OnceLock::new();
+    let html5_regex =
+        HTML5_REGEX.get_or_init(|| Regex::new(r#"(?i)<meta\s+charset\s*=\s*"?([^";>\s]+)"?"#).ok());
+    let html5_regex = html5_regex.as_ref()?;
 
-    if let Some(caps) = html5_regex.captures(&html_str) {
-        if let Some(m) = caps.get(1) {
-            return Some(m.as_str().to_string());
-        }
+    if let Some(caps) = html5_regex.captures(&html_str)
+        && let Some(m) = caps.get(1)
+    {
+        return Some(m.as_str().to_string());
     }
 
     // Try HTML4 meta http-equiv format
-    static HTML4_REGEX: OnceLock<Regex> = OnceLock::new();
+    static HTML4_REGEX: OnceLock<Option<Regex>> = OnceLock::new();
     let html4_regex = HTML4_REGEX.get_or_init(|| {
-        Regex::new(r#"(?i)<meta\s+http-equiv\s*=\s*"?Content-Type"?\s+content\s*=\s*"?[^">]*charset\s*=\s*([^";>\s]+)"?"#).unwrap()
+        Regex::new(
+            r#"(?i)<meta\s+http-equiv\s*=\s*"?Content-Type"?\s+content\s*=\s*"?[^">]*charset\s*=\s*([^";>\s]+)"?"#,
+        )
+        .ok()
     });
+    let html4_regex = html4_regex.as_ref()?;
 
-    if let Some(caps) = html4_regex.captures(&html_str) {
-        if let Some(m) = caps.get(1) {
-            return Some(m.as_str().to_string());
-        }
+    if let Some(caps) = html4_regex.captures(&html_str)
+        && let Some(m) = caps.get(1)
+    {
+        return Some(m.as_str().to_string());
     }
 
     None

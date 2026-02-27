@@ -12,7 +12,7 @@
 //! 4. Both disabled
 
 use nginx_markdown_converter::ffi::{
-    markdown_converter_new, MarkdownOptions, MarkdownResult, ERROR_SUCCESS,
+    ERROR_SUCCESS, MarkdownOptions, MarkdownResult, markdown_converter_new,
 };
 use proptest::prelude::*;
 use std::ptr;
@@ -156,11 +156,13 @@ fn markdown_body_without_front_matter(markdown: &str) -> &str {
 
 /// Helper function to convert result markdown to string
 unsafe fn result_markdown_to_string(result: &MarkdownResult) -> String {
-    if result.markdown.is_null() || result.markdown_len == 0 {
-        return String::new();
+    unsafe {
+        if result.markdown.is_null() || result.markdown_len == 0 {
+            return String::new();
+        }
+        let slice = slice::from_raw_parts(result.markdown, result.markdown_len);
+        String::from_utf8_lossy(slice).to_string()
     }
-    let slice = slice::from_raw_parts(result.markdown, result.markdown_len);
-    String::from_utf8_lossy(slice).to_string()
 }
 
 /// Test Case 1: Both token estimation and front matter enabled

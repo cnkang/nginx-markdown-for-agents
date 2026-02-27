@@ -4,7 +4,7 @@
 /// which is critical for stable ETag generation and predictable caching behavior.
 ///
 /// Run with: cargo run --example deterministic_output
-use nginx_markdown_converter::{parse_html, MarkdownConverter};
+use nginx_markdown_converter::{MarkdownConverter, parse_html};
 
 fn main() {
     println!("=== Deterministic Markdown Output Example ===\n");

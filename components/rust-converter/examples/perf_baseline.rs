@@ -9,8 +9,8 @@ use nginx_markdown_converter::converter::{
 };
 use nginx_markdown_converter::etag_generator::ETagGenerator;
 use nginx_markdown_converter::ffi::{
-    markdown_convert, markdown_converter_free, markdown_converter_new, markdown_result_free,
-    MarkdownConverterHandle, MarkdownOptions, MarkdownResult, ERROR_SUCCESS,
+    ERROR_SUCCESS, MarkdownConverterHandle, MarkdownOptions, MarkdownResult, markdown_convert,
+    markdown_converter_free, markdown_converter_new, markdown_result_free,
 };
 use nginx_markdown_converter::parser::parse_html_with_charset;
 use nginx_markdown_converter::token_estimator::TokenEstimator;
@@ -65,7 +65,7 @@ fn percentile_ms(sorted: &[f64], p: f64) -> f64 {
 
 fn summarize(durations_s: &[f64], input_bytes: usize) -> Stats {
     let mut ms: Vec<f64> = durations_s.iter().map(|d| d * 1000.0).collect();
-    ms.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    ms.sort_by(|a, b| a.total_cmp(b));
     let total_s: f64 = durations_s.iter().sum();
     let total_ms = total_s * 1000.0;
     let avg_ms = if durations_s.is_empty() {
@@ -277,8 +277,12 @@ fn run_breakdown(sample: &Sample, iterations: usize) -> BreakdownSummary {
 fn print_ffi_table(results: &[(Sample, FfiSummary)]) {
     println!("# FFI Baseline (local, release build)");
     println!();
-    println!("| Sample | HTML bytes | Markdown bytes (avg) | Tokens (avg) | Avg ms | P50 ms | P95 ms | P99 ms | Req/s | Input MB/s |");
-    println!("|--------|------------|----------------------|--------------|--------|--------|--------|--------|-------|------------|");
+    println!(
+        "| Sample | HTML bytes | Markdown bytes (avg) | Tokens (avg) | Avg ms | P50 ms | P95 ms | P99 ms | Req/s | Input MB/s |"
+    );
+    println!(
+        "|--------|------------|----------------------|--------------|--------|--------|--------|--------|-------|------------|"
+    );
     for (s, r) in results {
         println!(
             "| {} ({}) | {} | {} | {} | {:.3} | {:.3} | {:.3} | {:.3} | {:.1} | {:.2} |",
