@@ -288,6 +288,14 @@ echo "==> Building Rust converter (${RUST_TARGET})"
   if [[ "$(cd "$(dirname "$src_lib")" && pwd)/$(basename "$src_lib")" != "$(cd "$(dirname "$dst_lib")" && pwd)/$(basename "$dst_lib")" ]]; then
     cp "$src_lib" "$dst_lib" 2>/dev/null || true
   fi
+
+  header_src="${WORKSPACE_ROOT}/components/rust-converter/include/markdown_converter.h"
+  header_dst="${WORKSPACE_ROOT}/components/nginx-module/src/markdown_converter.h"
+  if [[ ! -f "${header_src}" ]]; then
+    echo "Missing generated header: ${header_src}" >&2
+    exit 1
+  fi
+  cp "${header_src}" "${header_dst}"
 )
 
 echo "==> Downloading/building NGINX ${NGINX_VERSION}"

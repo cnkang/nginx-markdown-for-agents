@@ -113,6 +113,14 @@ echo "==> Building Rust converter (${RUST_TARGET})"
   mkdir -p target/release
   cp "target/${RUST_TARGET}/release/libnginx_markdown_converter.a" \
      "target/release/libnginx_markdown_converter.a"
+
+  header_src="${WORKSPACE_ROOT}/components/rust-converter/include/markdown_converter.h"
+  header_dst="${WORKSPACE_ROOT}/components/nginx-module/src/markdown_converter.h"
+  if [[ ! -f "${header_src}" ]]; then
+    echo "Missing generated header: ${header_src}" >&2
+    exit 1
+  fi
+  cp "${header_src}" "${header_dst}"
 )
 
 echo "==> Downloading NGINX ${NGINX_VERSION}"
