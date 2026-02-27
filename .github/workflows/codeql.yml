@@ -38,14 +38,14 @@ jobs:
           - language: c-cpp
             build-mode: manual
           - language: rust
-            build-mode: manual
+            build-mode: none
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@v3
+        uses: github/codeql-action/init@v4
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
@@ -63,16 +63,7 @@ jobs:
         if: matrix.language == 'c-cpp'
         run: make test-nginx-unit
 
-      - name: Set up Rust toolchain
-        if: matrix.language == 'rust'
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Build Rust targets for analysis
-        if: matrix.language == 'rust'
-        working-directory: components/rust-converter
-        run: cargo build --workspace --all-targets
-
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@v3
+        uses: github/codeql-action/analyze@v4
         with:
           category: "/language:${{ matrix.language }}"
