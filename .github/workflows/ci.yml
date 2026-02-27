@@ -1,0 +1,176 @@
+name: CI
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main, master]
+    paths:
+      - "components/**"
+      - "tools/**"
+      - "tests/**"
+      - "docs/**"
+      - "Makefile"
+      - "README.md"
+      - ".github/workflows/ci.yml"
+  push:
+    branches: [main, master]
+    paths:
+      - "components/**"
+      - "tools/**"
+      - "tests/**"
+      - "docs/**"
+      - "Makefile"
+      - "README.md"
+      - ".github/workflows/ci.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    name: Detect Changed Areas
+    runs-on: ubuntu-latest
+    outputs:
+      docs: ${{ steps.filter.outputs.docs }}
+      rust: ${{ steps.filter.outputs.rust }}
+      nginx: ${{ steps.filter.outputs.nginx }}
+      e2e: ${{ steps.filter.outputs.e2e }}
+      workflows: ${{ steps.filter.outputs.workflows }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Filter changed paths
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            docs:
+              - 'docs/**'
+              - 'README.md'
+              - 'tools/docs/**'
+            rust:
+              - 'components/rust-converter/**'
+              - 'Makefile'
+            nginx:
+              - 'components/nginx-module/**'
+              - 'Makefile'
+            e2e:
+              - 'components/nginx-module/**'
+              - 'components/rust-converter/**'
+              - 'tests/corpus/**'
+              - 'tools/e2e/**'
+              - 'Makefile'
+            workflows:
+              - '.github/workflows/**'
+
+  docs-check:
+    name: Docs Check
+    needs: changes
+    if: needs.changes.outputs.docs == 'true' || needs.changes.outputs.workflows == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Validate docs
+        run: python3 tools/docs/check_docs.py
+
+  rust-quality:
+    name: Rust Quality Gate
+    needs: changes
+    if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.e2e == 'true' || needs.changes.outputs.workflows == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt,clippy
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            components/rust-converter -> target
+
+      - name: Check formatting
+        working-directory: components/rust-converter
+        run: cargo fmt --all -- --check
+
+      - name: Clippy (deny warnings)
+        working-directory: components/rust-converter
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Run Rust tests
+        run: make test-rust
+
+  nginx-c-tests:
+    name: NGINX C Tests (Unit + Integration-C)
+    needs: changes
+    if: needs.changes.outputs.nginx == 'true' || needs.changes.outputs.workflows == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install C toolchain deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            zlib1g-dev
+
+      - name: Run NGINX C unit tests
+        run: make test-nginx-unit
+
+      - name: Run NGINX C integration harness
+        run: make -C components/nginx-module/tests integration-c
+
+  e2e-large-response:
+    name: E2E Regression (Large Response)
+    needs: [changes, rust-quality, nginx-c-tests]
+    if: needs.changes.outputs.e2e == 'true' || needs.changes.outputs.workflows == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install E2E system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            curl \
+            pkg-config \
+            python3 \
+            rsync \
+            zlib1g-dev \
+            apache2-utils
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            components/rust-converter -> target
+
+      - name: Run large-response native E2E verification
+        run: ./tools/e2e/verify_large_markdown_response_e2e.sh

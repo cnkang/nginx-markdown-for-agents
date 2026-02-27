@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>nginx-markdown-for-agents/README.md at main</title>
+    <meta property="og:title" content="NGINX Markdown for Agents">
+    <meta property="og:description" content="NGINX module for converting HTML to Markdown for AI agents">
+</head>
+<body>
+    <!-- Test Purpose: Simulate GitHub README with GFM features -->
+    
+    <article class="markdown-body">
+        <h1>NGINX Markdown for Agents</h1>
+        
+        <p>
+            <img src="https://img.shields.io/badge/version-1.0.0-blue" alt="Version">
+            <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
+        </p>
+        
+        <p>An NGINX module that converts HTML responses to Markdown format for AI agents through HTTP content negotiation.</p>
+        
+        <h2>Features</h2>
+        
+        <ul class="task-list">
+            <li><input type="checkbox" checked disabled> Content negotiation via Accept header</li>
+            <li><input type="checkbox" checked disabled> HTML to Markdown conversion</li>
+            <li><input type="checkbox" checked disabled> Resource protection (size limits, timeouts)</li>
+            <li><input type="checkbox" disabled> Caching support (planned)</li>
+        </ul>
+        
+        <h2>Installation</h2>
+        
+        <p>Build the Rust converter:</p>
+        
+        <pre><code class="language-bash">cd rust-converter
+cargo build --release
+</code></pre>
+        
+        <p>Build the NGINX module:</p>
+        
+        <pre><code class="language-bash">./configure --add-module=/path/to/nginx-markdown-for-agents/nginx-module
+make
+make install
+</code></pre>
+        
+        <h2>Configuration</h2>
+        
+        <table>
+            <thead>
+                <tr>
+                    <th>Directive</th>
+                    <th>Default</th>
+                    <th>Description</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><code>markdown_filter</code></td>
+                    <td><code>off</code></td>
+                    <td>Enable/disable conversion</td>
+                </tr>
+                <tr>
+                    <td><code>markdown_max_size</code></td>
+                    <td><code>10m</code></td>
+                    <td>Maximum response size</td>
+                </tr>
+                <tr>
+                    <td><code>markdown_timeout</code></td>
+                    <td><code>5s</code></td>
+                    <td>Conversion timeout</td>
+                </tr>
+            </tbody>
+        </table>
+        
+        <h2>Usage</h2>
+        
+        <p>Request Markdown content:</p>
+        
+        <pre><code class="language-bash">curl -H "Accept: text/markdown" https://example.com/page
+</code></pre>
+        
+        <h2>Architecture</h2>
+        
+        <p>The module consists of two components:</p>
+        
+        <ol>
+            <li><strong>Rust Conversion Engine</strong>: Parses HTML and generates Markdown</li>
+            <li><strong>NGINX Module</strong>: Integrates with NGINX filter chain</li>
+        </ol>
+        
+        <blockquote>
+            <p><strong>Note:</strong> The module uses <del>synchronous</del> asynchronous conversion for better performance.</p>
+        </blockquote>
+        
+        <h2>Contributing</h2>
+        
+        <p>Contributions are welcome! Please read <a href="CONTRIBUTING.md">CONTRIBUTING.md</a> for details.</p>
+        
+        <h2>License</h2>
+        
+        <p>This project is licensed under the MIT License - see the <a href="LICENSE">LICENSE</a> file for details.</p>
+    </article>
+</body>
+</html>

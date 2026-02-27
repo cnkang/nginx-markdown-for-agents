@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>API Documentation - Markdown Converter</title>
+    <meta name="description" content="Complete API documentation for the Markdown Converter library">
+</head>
+<body>
+    <!-- Test Purpose: Technical documentation with code examples and API references -->
+    
+    <header>
+        <nav>
+            <a href="#overview">Overview</a> |
+            <a href="#api">API Reference</a> |
+            <a href="#examples">Examples</a>
+        </nav>
+    </header>
+    
+    <main>
+        <h1>Markdown Converter API Documentation</h1>
+        
+        <section id="overview">
+            <h2>Overview</h2>
+            <p>The Markdown Converter library provides a simple API for converting HTML to Markdown format.</p>
+            
+            <h3>Key Features</h3>
+            <ul>
+                <li>Fast HTML parsing using html5ever</li>
+                <li>CommonMark and GFM output formats</li>
+                <li>Configurable conversion options</li>
+                <li>Memory-safe Rust implementation</li>
+            </ul>
+        </section>
+        
+        <section id="api">
+            <h2>API Reference</h2>
+            
+            <h3>markdown_converter_new</h3>
+            <p>Creates a new converter instance.</p>
+            
+            <h4>Signature</h4>
+            <pre><code class="language-c">markdown_converter_t* markdown_converter_new(void);
+</code></pre>
+            
+            <h4>Returns</h4>
+            <p>Pointer to a new converter instance, or <code>NULL</code> on failure.</p>
+            
+            <h4>Example</h4>
+            <pre><code class="language-c">markdown_converter_t *converter = markdown_converter_new();
+if (converter == NULL) {
+    fprintf(stderr, "Failed to create converter\n");
+    return 1;
+}
+</code></pre>
+            
+            <h3>markdown_convert</h3>
+            <p>Converts HTML to Markdown.</p>
+            
+            <h4>Signature</h4>
+            <pre><code class="language-c">void markdown_convert(
+    markdown_converter_t *converter,
+    const uint8_t *html,
+    size_t html_len,
+    const markdown_options_t *options,
+    markdown_result_t *result
+);
+</code></pre>
+            
+            <h4>Parameters</h4>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Parameter</th>
+                        <th>Type</th>
+                        <th>Description</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><code>converter</code></td>
+                        <td><code>markdown_converter_t*</code></td>
+                        <td>Converter instance</td>
+                    </tr>
+                    <tr>
+                        <td><code>html</code></td>
+                        <td><code>const uint8_t*</code></td>
+                        <td>Input HTML bytes</td>
+                    </tr>
+                    <tr>
+                        <td><code>html_len</code></td>
+                        <td><code>size_t</code></td>
+                        <td>Length of HTML input</td>
+                    </tr>
+                    <tr>
+                        <td><code>options</code></td>
+                        <td><code>const markdown_options_t*</code></td>
+                        <td>Conversion options</td>
+                    </tr>
+                    <tr>
+                        <td><code>result</code></td>
+                        <td><code>markdown_result_t*</code></td>
+                        <td>Output result structure</td>
+                    </tr>
+                </tbody>
+            </table>
+            
+            <h4>Example</h4>
+            <pre><code class="language-c">const char *html = "&lt;h1&gt;Hello&lt;/h1&gt;&lt;p&gt;World&lt;/p&gt;";
+markdown_options_t options = {
+    .flavor = MARKDOWN_FLAVOR_COMMONMARK,
+    .timeout_ms = 5000,
+    .generate_etag = 1,
+    .estimate_tokens = 1,
+    .front_matter = 0
+};
+
+markdown_result_t result;
+markdown_convert(converter, (const uint8_t*)html, strlen(html), &amp;options, &amp;result);
+
+if (result.error_code == 0) {
+    printf("Markdown: %.*s\n", (int)result.markdown_len, result.markdown);
+    printf("Tokens: %u\n", result.token_estimate);
+    markdown_result_free(&amp;result);
+} else {
+    fprintf(stderr, "Error: %.*s\n", (int)result.error_len, result.error_message);
+}
+</code></pre>
+        </section>
+        
+        <section id="examples">
+            <h2>Examples</h2>
+            
+            <h3>Basic Conversion</h3>
+            <pre><code class="language-rust">use markdown_converter::convert_html_to_markdown;
+
+let html = "&lt;h1&gt;Title&lt;/h1&gt;&lt;p&gt;Content&lt;/p&gt;";
+let markdown = convert_html_to_markdown(html)?;
+println!("{}", markdown);
+</code></pre>
+            
+            <h3>With Options</h3>
+            <pre><code class="language-rust">use markdown_converter::{Converter, Options, Flavor};
+
+let options = Options {
+    flavor: Flavor::GitHubFlavoredMarkdown,
+    timeout_ms: 10000,
+    generate_etag: true,
+    estimate_tokens: true,
+    front_matter: true,
+};
+
+let converter = Converter::new();
+let result = converter.convert(html, &amp;options)?;
+</code></pre>
+        </section>
+    </main>
+    
+    <footer>
+        <p>© 2026 Markdown Converter Project. Licensed under MIT.</p>
+    </footer>
+</body>
+</html>

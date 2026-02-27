@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Tables Test</title>
+</head>
+<body>
+    <!-- Test Purpose: Verify HTML tables convert to GFM table format -->
+    <h1>Table Examples</h1>
+    
+    <h2>Simple Table</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Age</th>
+                <th>City</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>Alice</td>
+                <td>30</td>
+                <td>New York</td>
+            </tr>
+            <tr>
+                <td>Bob</td>
+                <td>25</td>
+                <td>London</td>
+            </tr>
+            <tr>
+                <td>Charlie</td>
+                <td>35</td>
+                <td>Tokyo</td>
+            </tr>
+        </tbody>
+    </table>
+    
+    <h2>Table with Alignment</h2>
+    <table>
+        <thead>
+            <tr>
+                <th align="left">Left</th>
+                <th align="center">Center</th>
+                <th align="right">Right</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td align="left">Text</td>
+                <td align="center">123</td>
+                <td align="right">$99.99</td>
+            </tr>
+        </tbody>
+    </table>
+    
+    <h2>Table without thead</h2>
+    <table>
+        <tr>
+            <td><strong>Header 1</strong></td>
+            <td><strong>Header 2</strong></td>
+        </tr>
+        <tr>
+            <td>Data 1</td>
+            <td>Data 2</td>
+        </tr>
+    </table>
+    
+    <h2>Table with Complex Content</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Feature</th>
+                <th>Description</th>
+                <th>Status</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td><code>markdown_filter</code></td>
+                <td>Enable/disable conversion</td>
+                <td>✓ Implemented</td>
+            </tr>
+            <tr>
+                <td><code>markdown_max_size</code></td>
+                <td>Maximum response size</td>
+                <td>✓ Implemented</td>
+            </tr>
+        </tbody>
+    </table>
+</body>
+</html>

@@ -1,0 +1,59 @@
+# NGINX module configuration file
+# This file is used by NGINX's ./configure script to build the module
+
+ngx_addon_name=ngx_http_markdown_filter_module
+
+# Resolve Rust converter static library path.
+# Prefer legacy target/release path, but also support target-specific paths
+# used by the repository Makefile (e.g. target/aarch64-apple-darwin/release).
+ngx_markdown_rust_lib="$ngx_addon_dir/../rust-converter/target/release/libnginx_markdown_converter.a"
+
+if [ ! -f "$ngx_markdown_rust_lib" ]; then
+    for candidate in "$ngx_addon_dir"/../rust-converter/target/*/release/libnginx_markdown_converter.a; do
+        if [ -f "$candidate" ]; then
+            ngx_markdown_rust_lib="$candidate"
+            break
+        fi
+    done
+fi
+
+# Libraries required by the Rust FFI converter.
+# Use ngx_module_libs so dynamic-module builds link them into the module .so.
+ngx_module_libs="$ngx_markdown_rust_lib -lpthread -ldl -lm"
+
+# Check if module is configured as dynamic
+if test -n "$ngx_module_link"; then
+    # Dynamic module
+    ngx_module_type=HTTP_FILTER
+    ngx_module_name=$ngx_addon_name
+    ngx_module_srcs="$ngx_addon_dir/src/ngx_http_markdown_filter_module.c \
+                     $ngx_addon_dir/src/ngx_http_markdown_accept.c \
+                     $ngx_addon_dir/src/ngx_http_markdown_auth.c \
+                     $ngx_addon_dir/src/ngx_http_markdown_buffer.c \
+                     $ngx_addon_dir/src/ngx_http_markdown_eligibility.c \
+                     $ngx_addon_dir/src/ngx_http_markdown_error.c \
+                     $ngx_addon_dir/src/ngx_http_markdown_headers.c \
+                     $ngx_addon_dir/src/ngx_http_markdown_conditional.c \
+                     $ngx_addon_dir/src/ngx_http_markdown_decompression.c"
+    ngx_module_deps="$ngx_addon_dir/src/ngx_http_markdown_filter_module.h"
+    
+    . auto/module
+else
+    # Static module
+    HTTP_FILTER_MODULES="$HTTP_FILTER_MODULES $ngx_addon_name"
+    NGX_ADDON_SRCS="$NGX_ADDON_SRCS \
+                    $ngx_addon_dir/src/ngx_http_markdown_filter_module.c \
+                    $ngx_addon_dir/src/ngx_http_markdown_accept.c \
+                    $ngx_addon_dir/src/ngx_http_markdown_auth.c \
+                    $ngx_addon_dir/src/ngx_http_markdown_buffer.c \
+                    $ngx_addon_dir/src/ngx_http_markdown_eligibility.c \
+                    $ngx_addon_dir/src/ngx_http_markdown_error.c \
+                    $ngx_addon_dir/src/ngx_http_markdown_headers.c \
+                    $ngx_addon_dir/src/ngx_http_markdown_conditional.c \
+                    $ngx_addon_dir/src/ngx_http_markdown_decompression.c"
+    NGX_ADDON_DEPS="$NGX_ADDON_DEPS $ngx_addon_dir/src/ngx_http_markdown_filter_module.h"
+fi
+
+# Note: ngx_module_libs is consumed by NGINX's auto/module logic for both
+# dynamic-module and static-module builds. Avoid writing directly to CORE_LIBS
+# here, or dynamic-module builds will miss the Rust FFI symbols at runtime.

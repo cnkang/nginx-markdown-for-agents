@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Mixed Entities Test</title>
+</head>
+<body>
+    <!-- Test Purpose: Verify handling of mix of HTML entities and Unicode characters -->
+    
+    <h1>Mixed Entities and Unicode</h1>
+    
+    <h2>Named Entities</h2>
+    <p>Basic: &lt; &gt; &amp; &quot; &apos;</p>
+    <p>Spaces: &nbsp; &ensp; &emsp; &thinsp;</p>
+    <p>Symbols: &copy; &reg; &trade; &euro; &pound;</p>
+    <p>Math: &plusmn; &times; &divide; &ne; &le; &ge;</p>
+    <p>Arrows: &larr; &rarr; &uarr; &darr; &harr;</p>
+    
+    <h2>Numeric Entities (Decimal)</h2>
+    <p>Basic: &#60; &#62; &#38; &#34; &#39;</p>
+    <p>Unicode: &#8364; &#8482; &#169; &#174;</p>
+    <p>Emoji: &#128512; &#128513; &#128514;</p>
+    
+    <h2>Numeric Entities (Hexadecimal)</h2>
+    <p>Basic: &#x3C; &#x3E; &#x26; &#x22; &#x27;</p>
+    <p>Unicode: &#x20AC; &#x2122; &#xA9; &#xAE;</p>
+    <p>Emoji: &#x1F600; &#x1F601; &#x1F602;</p>
+    
+    <h2>Mixed: Entities and Direct Unicode</h2>
+    <p>Copyright: &copy; vs ©</p>
+    <p>Euro: &euro; vs €</p>
+    <p>Less than: &lt; vs <</p>
+    <p>Greater than: &gt; vs ></p>
+    <p>Ampersand: &amp; vs &</p>
+    
+    <h2>Complex Mixing</h2>
+    <p>Text with &lt;tags&gt; and <em>emphasis</em> and &#169; and © symbols.</p>
+    <p>Math: x &lt; 5 &amp;&amp; y &gt; 10 &#8594; result</p>
+    <p>Price: &euro;99.99 or €99.99 or &#8364;99.99</p>
+    
+    <h2>Entities in Attributes</h2>
+    <a href="/page?a=1&amp;b=2" title="Link with &quot;quotes&quot;">Link with entities</a>
+    <img src="/image.png" alt="Image &copy; 2026">
+    
+    <h2>Entities in Code</h2>
+    <code>&lt;div class=&quot;container&quot;&gt;Content&lt;/div&gt;</code>
+    <pre><code>
+if (x &lt; 5 &amp;&amp; y &gt; 10) {
+    return &quot;success&quot;;
+}
+    </code></pre>
+    
+    <h2>Rare and Obscure Entities</h2>
+    <p>Greek: &alpha; &beta; &gamma; &delta; &pi; &sigma; &omega;</p>
+    <p>Cards: &spades; &clubs; &hearts; &diams;</p>
+    <p>Music: &#9834; &#9835; &#9836; &#9837;</p>
+</body>
+</html>

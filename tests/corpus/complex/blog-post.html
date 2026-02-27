@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Building an NGINX Module for AI Agents</title>
+    <meta name="description" content="A deep dive into building an NGINX module that converts HTML to Markdown for AI agents">
+    <meta name="author" content="Jane Developer">
+    <meta property="og:title" content="Building an NGINX Module for AI Agents">
+    <meta property="og:description" content="A deep dive into building an NGINX module">
+    <meta property="og:image" content="https://blog.example.com/images/nginx-module.png">
+    <meta property="og:url" content="https://blog.example.com/nginx-module-ai-agents">
+    <meta name="twitter:card" content="summary_large_image">
+    <link rel="stylesheet" href="/css/style.css">
+    <script src="/js/analytics.js"></script>
+</head>
+<body>
+    <!-- Test Purpose: Blog post with metadata, ads, social sharing, comments -->
+    
+    <!-- Header with navigation -->
+    <header class="site-header">
+        <nav>
+            <a href="/">Home</a>
+            <a href="/blog">Blog</a>
+            <a href="/about">About</a>
+            <a href="/contact">Contact</a>
+        </nav>
+    </header>
+    
+    <!-- Sidebar with ads (should be removed) -->
+    <aside class="sidebar">
+        <div class="ad-banner">
+            <img src="/ads/banner.jpg" alt="Advertisement">
+        </div>
+        <div class="social-links">
+            <a href="https://twitter.com/example">Twitter</a>
+            <a href="https://github.com/example">GitHub</a>
+        </div>
+    </aside>
+    
+    <!-- Main article content -->
+    <article class="blog-post">
+        <header>
+            <h1>Building an NGINX Module for AI Agents</h1>
+            <p class="meta">
+                <time datetime="2026-02-25">February 25, 2026</time> by 
+                <a href="/author/jane">Jane Developer</a>
+            </p>
+        </header>
+        
+        <img src="https://blog.example.com/images/nginx-module.png" alt="NGINX Module Architecture" class="featured-image">
+        
+        <section>
+            <h2>Introduction</h2>
+            <p>AI agents are becoming increasingly important in web automation and content processing. However, they often struggle with HTML parsing and extracting meaningful content from web pages.</p>
+            
+            <p>In this post, I'll share my experience building an NGINX module that converts HTML to Markdown format, making it easier for AI agents to consume web content.</p>
+        </section>
+        
+        <section>
+            <h2>The Problem</h2>
+            <p>Modern web pages contain a lot of noise:</p>
+            <ul>
+                <li>Navigation menus</li>
+                <li>Advertisements</li>
+                <li>Tracking scripts</li>
+                <li>Social media widgets</li>
+            </ul>
+            
+            <p>AI agents need clean, semantic content without all this clutter.</p>
+        </section>
+        
+        <section>
+            <h2>The Solution</h2>
+            <p>We built an NGINX module that:</p>
+            <ol>
+                <li>Intercepts HTTP responses</li>
+                <li>Checks if the client accepts Markdown</li>
+                <li>Converts HTML to clean Markdown</li>
+                <li>Returns the Markdown response</li>
+            </ol>
+            
+            <h3>Architecture</h3>
+            <p>The module consists of two parts:</p>
+            
+            <h4>Rust Conversion Engine</h4>
+            <p>We chose Rust for memory safety and performance:</p>
+            <pre><code class="language-rust">pub fn convert_html_to_markdown(html: &amp;str) -&gt; Result&lt;String, Error&gt; {
+    let dom = parse_html(html)?;
+    let markdown = generate_markdown(&amp;dom)?;
+    Ok(markdown)
+}
+</code></pre>
+            
+            <h4>NGINX C Module</h4>
+            <p>The C module integrates with NGINX's filter chain:</p>
+            <pre><code class="language-c">static ngx_int_t
+ngx_http_markdown_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
+{
+    // Buffer response
+    // Call Rust converter
+    // Update headers
+    // Return converted response
+}
+</code></pre>
+        </section>
+        
+        <section>
+            <h2>Results</h2>
+            <p>The module achieves impressive results:</p>
+            <ul>
+                <li><strong>70-85% token reduction</strong> compared to raw HTML</li>
+                <li><strong>&lt;50ms latency</strong> for typical pages</li>
+                <li><strong>Zero crashes</strong> thanks to Rust's memory safety</li>
+            </ul>
+            
+            <blockquote>
+                <p>"This module has transformed how our AI agents consume web content. The token savings alone justify the implementation effort."</p>
+                <footer>— Engineering Lead at Example Corp</footer>
+            </blockquote>
+        </section>
+        
+        <section>
+            <h2>Conclusion</h2>
+            <p>Building an NGINX module for AI agents was a rewarding challenge. The combination of Rust's safety and NGINX's performance creates a powerful solution for content transformation.</p>
+            
+            <p>Check out the <a href="https://github.com/example/nginx-markdown">source code on GitHub</a> and let me know what you think!</p>
+        </section>
+        
+        <!-- Social sharing buttons (should be removed) -->
+        <div class="social-share">
+            <button>Share on Twitter</button>
+            <button>Share on LinkedIn</button>
+            <button>Share on Facebook</button>
+        </div>
+        
+        <!-- Related posts (may be simplified) -->
+        <aside class="related-posts">
+            <h3>Related Posts</h3>
+            <ul>
+                <li><a href="/post1">Introduction to NGINX Modules</a></li>
+                <li><a href="/post2">Rust FFI Best Practices</a></li>
+            </ul>
+        </aside>
+        
+        <!-- Comments section (should be removed) -->
+        <section class="comments">
+            <h3>Comments</h3>
+            <div id="disqus_thread"></div>
+            <script>/* Disqus embed code */</script>
+        </section>
+    </article>
+    
+    <!-- Footer -->
+    <footer class="site-footer">
+        <p>© 2026 Example Blog. All rights reserved.</p>
+        <nav>
+            <a href="/privacy">Privacy</a>
+            <a href="/terms">Terms</a>
+        </nav>
+    </footer>
+    
+    <!-- Analytics (should be removed) -->
+    <script>
+        // Google Analytics tracking code
+    </script>
+</body>
+</html>

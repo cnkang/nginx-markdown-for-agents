@@ -1,0 +1,38 @@
+version: 2
+
+updates:
+  - package-ecosystem: cargo
+    directory: "/components/rust-converter"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "03:00"
+      timezone: "UTC"
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - rust
+    commit-message:
+      prefix: "chore"
+      include: scope
+    groups:
+      rust-patch-minor:
+        applies-to: version-updates
+        update-types:
+          - patch
+          - minor
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "03:30"
+      timezone: "UTC"
+    open-pull-requests-limit: 3
+    labels:
+      - dependencies
+      - ci
+    commit-message:
+      prefix: "chore"
+      include: scope

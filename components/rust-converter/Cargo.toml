@@ -1,0 +1,42 @@
+[package]
+name = "nginx-markdown-converter"
+version = "0.1.0"
+edition = "2021"
+authors = ["NGINX Markdown for Agents Contributors"]
+description = "Rust-based HTML to Markdown conversion engine for NGINX"
+license = "BSD-2-Clause"
+repository = "https://github.com/example/nginx-markdown-for-agents"
+
+[lib]
+# Build as both staticlib (for NGINX linking), cdylib (for testing), and rlib (for examples/tests)
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[dependencies]
+# HTML5 parser - handles malformed markup gracefully
+html5ever = "0.26"
+# DOM tree representation
+markup5ever_rcdom = "0.2"
+# Fast hashing for ETags (using version compatible with older Rust)
+blake3 = "1.2"
+# Hex encoding for ETag generation
+hex = "0.4"
+# Regular expressions for charset detection
+regex = "1.10"
+# Character encoding transcoding for non-UTF-8 HTML inputs
+encoding_rs = "0.8"
+
+[dev-dependencies]
+# Property-based testing framework
+proptest = "1.4"
+# Additional testing utilities
+criterion = "0.5"
+
+[profile.release]
+# Optimize for performance
+opt-level = 3
+lto = true
+codegen-units = 1
+
+[profile.dev]
+# Faster compilation during development
+opt-level = 0

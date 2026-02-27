@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Invalid Nesting Test</title>
+</head>
+<body>
+    <!-- Test Purpose: Verify handling of incorrectly nested elements -->
+    
+    <!-- Paragraph inside heading (invalid) -->
+    <h1>Heading with <p>paragraph inside</p></h1>
+    
+    <!-- Block element inside inline element (invalid) -->
+    <span>
+        <div>Block inside inline</div>
+    </span>
+    
+    <!-- List item outside list (invalid) -->
+    <li>Orphaned list item</li>
+    
+    <!-- Overlapping tags (invalid) -->
+    <strong>Bold <em>and italic</strong> but em not closed</em>
+    
+    <!-- Table elements in wrong order -->
+    <table>
+        <tbody>
+            <tr>
+                <td>Cell 1</td>
+                <td>Cell 2</td>
+            </tr>
+        </tbody>
+        <thead>
+            <tr>
+                <th>Header 1</th>
+                <th>Header 2</th>
+            </tr>
+        </thead>
+    </table>
+    
+    <!-- Anchor inside anchor (invalid) -->
+    <a href="/outer">
+        Outer link
+        <a href="/inner">Inner link</a>
+    </a>
+    
+    <!-- Button inside anchor (questionable) -->
+    <a href="/page">
+        <button>Click me</button>
+    </a>
+    
+    <!-- Form elements in wrong context -->
+    <option>Option without select</option>
+    
+    <!-- Heading inside paragraph (invalid) -->
+    <p>
+        This is a paragraph
+        <h2>With a heading inside</h2>
+        More paragraph text
+    </p>
+</body>
+</html>
