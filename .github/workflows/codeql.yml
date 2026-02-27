@@ -140,4 +140,4 @@ jobs:
         run: cargo audit --deny warnings
 
       - name: Rust copyleft license policy check
-        run: python3 tools/ci/check_rust_licenses.py --manifest-path components/rust-converter/Cargo.toml --locked
+        run: python3 tools/ci/check_rust_licenses.py --locked

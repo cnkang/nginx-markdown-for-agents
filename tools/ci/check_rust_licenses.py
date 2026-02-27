@@ -10,7 +10,6 @@ Policy goal:
 
 from __future__ import annotations
 
-import argparse
 import json
 import re
 import subprocess
@@ -25,6 +24,9 @@ STRONG_COPYLEFT_PREFIXES = (
     "LGPL-",
     "SSPL-",
 )
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+RUST_MANIFEST_REL = "components/rust-converter/Cargo.toml"
 
 
 @dataclass
@@ -146,54 +148,65 @@ def requires_strong_copyleft(expr: str) -> bool:
     return result
 
 
-def run_metadata(manifest_path: Path, locked: bool) -> dict:
-    cmd = [
-        "cargo",
-        "metadata",
-        "--format-version",
-        "1",
-        "--all-features",
-        "--manifest-path",
-        str(manifest_path),
-    ]
+def run_metadata(locked: bool) -> dict:
     if locked:
-        cmd.append("--locked")
-    completed = subprocess.run(
-        cmd,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
+        completed = subprocess.run(
+            [
+                "cargo",
+                "metadata",
+                "--format-version",
+                "1",
+                "--all-features",
+                "--manifest-path",
+                RUST_MANIFEST_REL,
+                "--locked",
+            ],
+            cwd=REPO_ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    else:
+        completed = subprocess.run(
+            [
+                "cargo",
+                "metadata",
+                "--format-version",
+                "1",
+                "--all-features",
+                "--manifest-path",
+                RUST_MANIFEST_REL,
+            ],
+            cwd=REPO_ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
     return json.loads(completed.stdout)
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--manifest-path",
-        default="components/rust-converter/Cargo.toml",
-        help="Path to Cargo.toml for the Rust workspace/project to evaluate.",
-    )
-    parser.add_argument(
-        "--locked",
-        action="store_true",
-        help="Require Cargo.lock to be present and up-to-date.",
-    )
-    return parser.parse_args()
+def parse_locked_flag(argv: list[str]) -> bool:
+    valid = {"--locked"}
+    unknown = [arg for arg in argv if arg not in valid]
+    if unknown:
+        print(f"Unknown arguments: {' '.join(unknown)}", file=sys.stderr)
+        print("Usage: check_rust_licenses.py [--locked]", file=sys.stderr)
+        raise SystemExit(2)
+    return "--locked" in argv
 
 
 def main() -> int:
-    args = parse_args()
-    manifest_path = Path(args.manifest_path).resolve()
-    repo_root = Path(__file__).resolve().parents[2]
-    if repo_root not in manifest_path.parents and manifest_path != repo_root:
+    locked = parse_locked_flag(sys.argv[1:])
+
+    manifest_path = (REPO_ROOT / RUST_MANIFEST_REL).resolve()
+    if REPO_ROOT not in manifest_path.parents and manifest_path != REPO_ROOT:
         print(f"Refusing manifest path outside repository: {manifest_path}", file=sys.stderr)
         return 2
     if not manifest_path.is_file():
         print(f"Manifest path does not exist: {manifest_path}", file=sys.stderr)
         return 2
 
-    metadata = run_metadata(manifest_path, locked=args.locked)
+    metadata = run_metadata(locked=locked)
 
     violations: list[str] = []
     for pkg in metadata.get("packages", []):
