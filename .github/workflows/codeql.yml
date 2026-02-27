@@ -7,6 +7,8 @@ on:
     paths:
       - "components/**"
       - "tools/ci/build_nginx_for_codeql.sh"
+      - "tools/ci/check_c_licenses.py"
+      - "tools/ci/check_rust_licenses.py"
       - "Makefile"
       - ".github/workflows/codeql.yml"
   push:
@@ -14,6 +16,8 @@ on:
     paths:
       - "components/**"
       - "tools/ci/build_nginx_for_codeql.sh"
+      - "tools/ci/check_c_licenses.py"
+      - "tools/ci/check_rust_licenses.py"
       - "Makefile"
       - ".github/workflows/codeql.yml"
   schedule:
@@ -62,6 +66,9 @@ jobs:
         with:
           workspaces: |
             components/rust-converter -> target
+
+      - name: C copyleft license policy check
+        run: python3 tools/ci/check_c_licenses.py
 
       - name: Build production C sources for CodeQL
         run: ./tools/ci/build_nginx_for_codeql.sh
@@ -131,3 +138,6 @@ jobs:
       - name: Rust dependency vulnerability audit
         working-directory: components/rust-converter
         run: cargo audit --deny warnings
+
+      - name: Rust copyleft license policy check
+        run: python3 tools/ci/check_rust_licenses.py --manifest-path components/rust-converter/Cargo.toml --locked
