@@ -528,6 +528,9 @@ ngx_http_markdown_modify_cache_control_for_auth(ngx_http_request_t *r)
         u_char *new_value;
         size_t  new_len;
 
+        if (cache_control->value.len > ((size_t) -1) - (sizeof(", private") - 1)) {
+            return NGX_ERROR;
+        }
         new_len = cache_control->value.len + sizeof(", private") - 1;
         new_value = ngx_pnalloc(r->pool, new_len);
         if (new_value == NULL) {

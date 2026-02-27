@@ -189,6 +189,7 @@ pub const ERROR_INTERNAL: u32 = 99;
 /// - `content_type`: Optional Content-Type header value for charset detection
 ///   - Pointer to UTF-8 string (e.g., "text/html; charset=UTF-8")
 ///   - NULL if not available
+///   - If pointer is NULL, `content_type_len` must be 0
 ///   - Used for charset detection cascade (FR-05.1)
 ///
 /// - `content_type_len`: Length of content_type string in bytes
@@ -197,6 +198,7 @@ pub const ERROR_INTERNAL: u32 = 99;
 /// - `base_url`: Optional base URL for resolving relative URLs in HTML
 ///   - Pointer to UTF-8 string (e.g., "https://example.com/page")
 ///   - NULL if not available
+///   - If pointer is NULL, `base_url_len` must be 0
 ///   - Used for metadata extraction and URL resolution
 ///   - Format: scheme://host/path (e.g., "https://example.com/docs/page.html")
 ///
@@ -438,6 +440,181 @@ pub struct MarkdownConverterHandle {
     token_estimator: TokenEstimator,
 }
 
+struct ConversionOutput {
+    markdown: Box<[u8]>,
+    etag: Option<Box<[u8]>>,
+    token_estimate: u32,
+}
+
+fn reset_result(result: &mut MarkdownResult) {
+    result.markdown = ptr::null_mut();
+    result.markdown_len = 0;
+    result.etag = ptr::null_mut();
+    result.etag_len = 0;
+    result.token_estimate = 0;
+    result.error_code = ERROR_SUCCESS;
+    result.error_message = ptr::null_mut();
+    result.error_len = 0;
+}
+
+fn set_error_result(result: &mut MarkdownResult, error_code: u32, error_message: String) {
+    let error_bytes = error_message.into_bytes().into_boxed_slice();
+    result.error_code = error_code;
+    result.error_len = error_bytes.len();
+    result.error_message = Box::into_raw(error_bytes) as *mut u8;
+}
+
+fn set_success_result(result: &mut MarkdownResult, output: ConversionOutput) {
+    result.markdown_len = output.markdown.len();
+    result.markdown = Box::into_raw(output.markdown) as *mut u8;
+    result.token_estimate = output.token_estimate;
+    result.error_code = ERROR_SUCCESS;
+    result.error_message = ptr::null_mut();
+    result.error_len = 0;
+
+    if let Some(etag_bytes) = output.etag {
+        result.etag_len = etag_bytes.len();
+        result.etag = Box::into_raw(etag_bytes) as *mut u8;
+    } else {
+        result.etag = ptr::null_mut();
+        result.etag_len = 0;
+    }
+}
+
+fn required_ref<'a, T>(ptr: *const T, name: &str) -> Result<&'a T, ConversionError> {
+    if ptr.is_null() {
+        return Err(ConversionError::InvalidInput(format!(
+            "{name} pointer is NULL"
+        )));
+    }
+
+    // SAFETY: Caller provided a non-NULL pointer and accepts FFI contract
+    // that this points to a valid, properly aligned value.
+    Ok(unsafe { &*ptr })
+}
+
+fn required_bytes<'a>(ptr: *const u8, len: usize, name: &str) -> Result<&'a [u8], ConversionError> {
+    if ptr.is_null() {
+        return Err(ConversionError::InvalidInput(format!(
+            "{name} pointer is NULL"
+        )));
+    }
+
+    // SAFETY: Pointer was validated as non-NULL above; caller guarantees `len`
+    // bytes are valid and readable for the duration of this call.
+    Ok(unsafe { slice::from_raw_parts(ptr, len) })
+}
+
+fn optional_utf8<'a>(
+    ptr: *const u8,
+    len: usize,
+    field_name: &str,
+) -> Result<Option<&'a str>, ConversionError> {
+    if len == 0 {
+        return Ok(None);
+    }
+
+    if ptr.is_null() {
+        return Err(ConversionError::InvalidInput(format!(
+            "{field_name}_len > 0 with NULL {field_name} pointer"
+        )));
+    }
+
+    // SAFETY: Pointer is non-NULL and caller guarantees `len` readable bytes.
+    let bytes = unsafe { slice::from_raw_parts(ptr, len) };
+
+    Ok(std::str::from_utf8(bytes).ok())
+}
+
+fn convert_inner(
+    handle_ref: &MarkdownConverterHandle,
+    html_slice: &[u8],
+    options_ref: &MarkdownOptions,
+) -> Result<ConversionOutput, ConversionError> {
+    let content_type_str = optional_utf8(
+        options_ref.content_type,
+        options_ref.content_type_len,
+        "content_type",
+    )?;
+    let base_url_str = optional_utf8(options_ref.base_url, options_ref.base_url_len, "base_url")?
+        .map(ToOwned::to_owned);
+
+    // Parse HTML with charset detection cascade (FR-05.1, FR-05.2, FR-05.3)
+    let dom = parse_html_with_charset(html_slice, content_type_str)?;
+
+    // Create conversion context with timeout
+    let timeout_ms = options_ref.timeout_ms;
+    let timeout_duration = if timeout_ms > 0 {
+        Duration::from_millis(timeout_ms as u64)
+    } else {
+        Duration::ZERO // No timeout
+    };
+    let mut ctx = ConversionContext::new(timeout_duration);
+
+    // Check timeout after parsing
+    ctx.check_timeout()?;
+
+    // Build conversion options
+    let flavor = match options_ref.flavor {
+        1 => MarkdownFlavor::GitHubFlavoredMarkdown,
+        _ => MarkdownFlavor::CommonMark,
+    };
+
+    let resolve_relative_urls = base_url_str.is_some();
+    let conv_options = ConversionOptions {
+        flavor,
+        include_front_matter: options_ref.front_matter != 0,
+        extract_metadata: options_ref.front_matter != 0,
+        simplify_navigation: true,
+        preserve_tables: true,
+        base_url: base_url_str,
+        resolve_relative_urls,
+    };
+
+    // Create converter and perform conversion with timeout support
+    let converter = MarkdownConverter::with_options(conv_options);
+    let markdown = converter.convert_with_context(&dom, &mut ctx)?;
+
+    // Estimate tokens while Markdown is still in String form (avoids reconstructing
+    // a UTF-8 view from raw bytes after allocation).
+    let token_estimate = if options_ref.estimate_tokens != 0 {
+        handle_ref.token_estimator.estimate(&markdown)
+    } else {
+        0
+    };
+
+    let markdown_bytes = markdown.into_bytes().into_boxed_slice();
+    let etag_bytes = if options_ref.generate_etag != 0 {
+        Some(
+            handle_ref
+                .etag_generator
+                .generate(markdown_bytes.as_ref())
+                .into_bytes()
+                .into_boxed_slice(),
+        )
+    } else {
+        None
+    };
+
+    Ok(ConversionOutput {
+        markdown: markdown_bytes,
+        etag: etag_bytes,
+        token_estimate,
+    })
+}
+
+fn free_buffer(ptr_field: &mut *mut u8, len_field: &mut usize) {
+    if (*ptr_field).is_null() {
+        return;
+    }
+
+    let raw = ptr::slice_from_raw_parts_mut(*ptr_field, *len_field);
+    // SAFETY: `raw` was allocated by `Box<[u8]>` via `Box::into_raw`.
+    let _ = unsafe { Box::from_raw(raw) };
+    *ptr_field = ptr::null_mut();
+    *len_field = 0;
+}
+
 // ============================================================================
 // FFI Functions
 // ============================================================================
@@ -635,182 +812,36 @@ pub unsafe extern "C" fn markdown_convert(
     options: *const MarkdownOptions,
     result: *mut MarkdownResult,
 ) {
-    // SAFETY: Validate result pointer first so we can report errors
+    // Validate result pointer first so we can report errors.
     if result.is_null() {
-        // Cannot report error if result pointer is NULL
+        // Cannot report error if result pointer is NULL.
         return;
     }
 
-    // Initialize result to safe error state
-    // SAFETY: We validated result is non-NULL above
-    unsafe {
-        (*result).markdown = ptr::null_mut();
-        (*result).markdown_len = 0;
-        (*result).etag = ptr::null_mut();
-        (*result).etag_len = 0;
-        (*result).token_estimate = 0;
-        (*result).error_code = ERROR_SUCCESS;
-        (*result).error_message = ptr::null_mut();
-        (*result).error_len = 0;
-    }
+    // SAFETY: `result` was validated as non-NULL above.
+    let result_ref = unsafe { &mut *result };
+    reset_result(result_ref);
 
-    // Catch any panics to prevent unwinding into C code
-    let panic_result = panic::catch_unwind(|| {
-        // Validate all input pointers
-        if handle.is_null() {
-            return Err(ConversionError::InvalidInput(
-                "Converter handle is NULL".to_string(),
-            ));
-        }
-
-        if html.is_null() {
-            return Err(ConversionError::InvalidInput(
-                "HTML pointer is NULL".to_string(),
-            ));
-        }
-
-        if options.is_null() {
-            return Err(ConversionError::InvalidInput(
-                "Options pointer is NULL".to_string(),
-            ));
-        }
-
-        // SAFETY: We validated all pointers are non-NULL above
-        unsafe {
-            // Extract HTML slice
-            let html_slice = slice::from_raw_parts(html, html_len);
-
-            // Extract content_type from options if present
-            let content_type_str =
-                if !(*options).content_type.is_null() && (*options).content_type_len > 0 {
-                    let ct_slice =
-                        slice::from_raw_parts((*options).content_type, (*options).content_type_len);
-                    std::str::from_utf8(ct_slice).ok()
-                } else {
-                    None
-                };
-
-            // Extract base_url from options if present
-            let base_url_str = if !(*options).base_url.is_null() && (*options).base_url_len > 0 {
-                let base_slice =
-                    slice::from_raw_parts((*options).base_url, (*options).base_url_len);
-                std::str::from_utf8(base_slice).ok().map(|s| s.to_string())
-            } else {
-                None
-            };
-
-            // Parse HTML with charset detection cascade (FR-05.1, FR-05.2, FR-05.3)
-            let dom = parse_html_with_charset(html_slice, content_type_str)?;
-
-            // Create conversion context with timeout
-            let timeout_ms = (*options).timeout_ms;
-            let timeout_duration = if timeout_ms > 0 {
-                Duration::from_millis(timeout_ms as u64)
-            } else {
-                Duration::ZERO // No timeout
-            };
-            let mut ctx = ConversionContext::new(timeout_duration);
-
-            // Check timeout after parsing
-            ctx.check_timeout()?;
-
-            // Build conversion options
-            let flavor = match (*options).flavor {
-                1 => MarkdownFlavor::GitHubFlavoredMarkdown,
-                _ => MarkdownFlavor::CommonMark,
-            };
-
-            let resolve_relative_urls = base_url_str.is_some();
-            let conv_options = ConversionOptions {
-                flavor,
-                include_front_matter: (*options).front_matter != 0,
-                extract_metadata: (*options).front_matter != 0,
-                simplify_navigation: true,
-                preserve_tables: true,
-                base_url: base_url_str,
-                resolve_relative_urls,
-            };
-
-            // Create converter and perform conversion with timeout support
-            let converter = MarkdownConverter::with_options(conv_options);
-            let markdown = converter.convert_with_context(&dom, &mut ctx)?;
-
-            // Estimate tokens while Markdown is still in String form (avoids reconstructing
-            // a UTF-8 view from raw bytes after allocation).
-            let token_estimate = if (*options).estimate_tokens != 0 {
-                (*handle).token_estimator.estimate(&markdown)
-            } else {
-                0
-            };
-
-            // Allocate markdown output
-            // SAFETY: We use Box to allocate and transfer ownership to C
-            let markdown_bytes = markdown.into_bytes().into_boxed_slice();
-            let markdown_len = markdown_bytes.len();
-            let markdown_ptr = Box::into_raw(markdown_bytes) as *mut u8;
-
-            // Generate ETag if requested
-            let (etag_ptr, etag_len) = if (*options).generate_etag != 0 {
-                let etag_str = (*handle)
-                    .etag_generator
-                    .generate(slice::from_raw_parts(markdown_ptr, markdown_len));
-                let etag_bytes = etag_str.into_bytes().into_boxed_slice();
-                let len = etag_bytes.len();
-                let ptr = Box::into_raw(etag_bytes) as *mut u8;
-                (ptr, len)
-            } else {
-                (ptr::null_mut(), 0)
-            };
-
-            // Populate result with success
-            (*result).markdown = markdown_ptr;
-            (*result).markdown_len = markdown_len;
-            (*result).etag = etag_ptr;
-            (*result).etag_len = etag_len;
-            (*result).token_estimate = token_estimate;
-            (*result).error_code = ERROR_SUCCESS;
-            (*result).error_message = ptr::null_mut();
-            (*result).error_len = 0;
-
-            Ok(())
-        }
+    // Catch any panics to prevent unwinding into C code.
+    let panic_result = panic::catch_unwind(|| -> Result<ConversionOutput, ConversionError> {
+        let handle_ref = required_ref(handle.cast_const(), "Converter handle")?;
+        let options_ref = required_ref(options, "Options")?;
+        let html_slice = required_bytes(html, html_len, "HTML")?;
+        convert_inner(handle_ref, html_slice, options_ref)
     });
 
-    // Handle panic or error
+    // Handle panic or error.
     match panic_result {
-        Ok(Ok(())) => {
-            // Success - result already populated
-        }
+        Ok(Ok(output)) => set_success_result(result_ref, output),
         Ok(Err(e)) => {
-            // Conversion error - populate error fields
-            // SAFETY: We validated result is non-NULL at function start
-            unsafe {
-                (*result).error_code = e.code();
-
-                // Allocate error message
-                let error_msg = e.to_string();
-                let error_bytes = error_msg.into_bytes().into_boxed_slice();
-                let error_len = error_bytes.len();
-                let error_ptr = Box::into_raw(error_bytes) as *mut u8;
-
-                (*result).error_message = error_ptr;
-                (*result).error_len = error_len;
-            }
+            set_error_result(result_ref, e.code(), e.to_string());
         }
         Err(_) => {
-            // Panic occurred - report internal error
-            // SAFETY: We validated result is non-NULL at function start
-            unsafe {
-                (*result).error_code = ERROR_INTERNAL;
-
-                let error_msg = "Internal panic during conversion";
-                let error_bytes = error_msg.as_bytes().to_vec().into_boxed_slice();
-                let error_len = error_bytes.len();
-                let error_ptr = Box::into_raw(error_bytes) as *mut u8;
-
-                (*result).error_message = error_ptr;
-                (*result).error_len = error_len;
-            }
+            set_error_result(
+                result_ref,
+                ERROR_INTERNAL,
+                "Internal panic during conversion".to_string(),
+            );
         }
     }
 }
@@ -897,45 +928,15 @@ pub unsafe extern "C" fn markdown_result_free(result: *mut MarkdownResult) {
         return;
     }
 
-    // SAFETY: We validated result is non-NULL above
-    // Free all allocated memory and reset pointers
-    unsafe {
-        // Free markdown if allocated
-        // SAFETY: markdown was allocated as Box<[u8]> in markdown_convert
-        // We reconstruct the slice and let Box drop it
-        if !(*result).markdown.is_null() && (*result).markdown_len > 0 {
-            let slice = slice::from_raw_parts_mut((*result).markdown, (*result).markdown_len);
-            let _ = Box::from_raw(slice as *mut [u8]);
-            (*result).markdown = ptr::null_mut();
-            (*result).markdown_len = 0;
-        }
-
-        // Free etag if allocated
-        // SAFETY: etag was allocated as Box<[u8]> in markdown_convert
-        // We reconstruct the slice and let Box drop it
-        if !(*result).etag.is_null() && (*result).etag_len > 0 {
-            let slice = slice::from_raw_parts_mut((*result).etag, (*result).etag_len);
-            let _ = Box::from_raw(slice as *mut [u8]);
-            (*result).etag = ptr::null_mut();
-            (*result).etag_len = 0;
-        }
-
-        // Free error_message if allocated
-        // SAFETY: error_message was allocated as Box<[u8]> in markdown_convert
-        // We reconstruct the slice and let Box drop it
-        // NOTE: We do NOT use CString::from_raw() because error_message
-        // is NOT a NUL-terminated C string - it's UTF-8 bytes with length
-        if !(*result).error_message.is_null() && (*result).error_len > 0 {
-            let slice = slice::from_raw_parts_mut((*result).error_message, (*result).error_len);
-            let _ = Box::from_raw(slice as *mut [u8]);
-            (*result).error_message = ptr::null_mut();
-            (*result).error_len = 0;
-        }
-
-        // Reset other fields
-        (*result).token_estimate = 0;
-        (*result).error_code = 0;
-    }
+    // SAFETY: `result` was validated as non-NULL above.
+    let result_ref = unsafe { &mut *result };
+    free_buffer(&mut result_ref.markdown, &mut result_ref.markdown_len);
+    free_buffer(&mut result_ref.etag, &mut result_ref.etag_len);
+    // NOTE: We do NOT use CString::from_raw() because error_message
+    // is NOT a NUL-terminated C string - it's UTF-8 bytes with length.
+    free_buffer(&mut result_ref.error_message, &mut result_ref.error_len);
+    result_ref.token_estimate = 0;
+    result_ref.error_code = 0;
 }
 
 /// Destroy converter instance
@@ -1016,9 +1017,7 @@ pub unsafe extern "C" fn markdown_converter_free(handle: *mut MarkdownConverterH
         return;
     }
 
-    // SAFETY: We validated handle is non-NULL above
-    // Reconstruct Box and let it drop to deallocate
-    unsafe {
-        let _ = Box::from_raw(handle);
-    }
+    // SAFETY: `handle` was validated as non-NULL above and was originally
+    // created by `Box::into_raw` in `markdown_converter_new`.
+    unsafe { drop(Box::from_raw(handle)) };
 }

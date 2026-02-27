@@ -12,6 +12,7 @@
 #include <ngx_config.h>
 #include <ngx_core.h>
 #include <ngx_http.h>
+#include <limits.h>
 #include <zlib.h>
 
 /* Conditionally include brotli header if support is compiled in */
@@ -92,13 +93,18 @@ static size_t
 ngx_http_markdown_chain_size(ngx_chain_t *in)
 {
     size_t        size;
+    size_t        len;
     ngx_chain_t  *cl;
     
     size = 0;
     
     for (cl = in; cl != NULL; cl = cl->next) {
         if (cl->buf != NULL) {
-            size += cl->buf->last - cl->buf->pos;
+            len = cl->buf->last - cl->buf->pos;
+            if (len > ((size_t) -1) - size) {
+                return (size_t) -1;
+            }
+            size += len;
         }
     }
     
@@ -134,7 +140,7 @@ ngx_http_markdown_chain_to_buffer(ngx_chain_t *in, u_char *dest, size_t size)
         
         len = cl->buf->last - cl->buf->pos;
         
-        if (copied + len > size) {
+        if (copied > size || len > size - copied) {
             return NGX_ERROR;
         }
         
@@ -142,6 +148,46 @@ ngx_http_markdown_chain_to_buffer(ngx_chain_t *in, u_char *dest, size_t size)
         copied += len;
     }
     
+    return NGX_OK;
+}
+
+static ngx_int_t
+ngx_http_markdown_calc_output_size(ngx_http_request_t *r, size_t input_size,
+                                   size_t max_size, size_t *output_size)
+{
+    size_t estimated;
+
+    if (max_size == 0) {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                     "markdown filter: invalid max_size=0 for decompression");
+        return NGX_ERROR;
+    }
+
+    if (input_size > ((size_t) -1) / 10) {
+        estimated = max_size;
+    } else {
+        estimated = input_size * 10;
+    }
+
+    if (estimated > max_size) {
+        estimated = max_size;
+    }
+
+    /*
+     * zlib/brotli decoder output counters use unsigned int/size_t combinations.
+     * Clamp to UINT_MAX to avoid truncation when assigning `avail_out`.
+     */
+    if (estimated > (size_t) UINT_MAX) {
+        estimated = (size_t) UINT_MAX;
+    }
+
+    if (estimated == 0) {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                     "markdown filter: computed decompression buffer size is zero");
+        return NGX_ERROR;
+    }
+
+    *output_size = estimated;
     return NGX_OK;
 }
 
@@ -204,10 +250,10 @@ ngx_http_markdown_decompress_gzip(ngx_http_request_t *r,
     input_size = ngx_http_markdown_chain_size(in);
     
     /* Validate input size (Requirement 6.5) */
-    if (input_size == 0) {
+    if (input_size == 0 || input_size == (size_t) -1) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                      "markdown filter: decompression failed, "
-                     "empty input data, category=conversion");
+                     "invalid input size, category=conversion");
         return NGX_ERROR;
     }
     
@@ -250,12 +296,12 @@ ngx_http_markdown_decompress_gzip(ngx_http_request_t *r,
         return NGX_ERROR;
     }
     
-    /* Estimate output size (typically input_size * 10) (Requirement 9.1) */
-    output_size = input_size * 10;
-    
-    /* Check size limit (Requirement 9.3, 9.4) */
-    if (output_size > conf->max_size) {
-        output_size = conf->max_size;
+    /* Estimate output size (typically input_size * 10) with overflow protection. */
+    if (ngx_http_markdown_calc_output_size(r, input_size, conf->max_size, &output_size)
+        != NGX_OK)
+    {
+        inflateEnd(&stream);
+        return NGX_ERROR;
     }
     
     /* Allocate output buffer using nginx memory pool (Requirement 9.1, 14.2) */
@@ -410,10 +456,10 @@ ngx_http_markdown_decompress_brotli(ngx_http_request_t *r,
     input_size = ngx_http_markdown_chain_size(in);
     
     /* Validate input size */
-    if (input_size == 0) {
+    if (input_size == 0 || input_size == (size_t) -1) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                      "markdown filter: decompression failed, "
-                     "empty input data, category=conversion");
+                     "invalid input size, category=conversion");
         return NGX_ERROR;
     }
     
@@ -442,12 +488,12 @@ ngx_http_markdown_decompress_brotli(ngx_http_request_t *r,
         return NGX_ERROR;
     }
     
-    /* Estimate output size (typically input_size * 10) */
-    output_size = input_size * 10;
-    
-    /* Check size limit (Requirement 3.2) */
-    if (output_size > conf->max_size) {
-        output_size = conf->max_size;
+    /* Estimate output size (typically input_size * 10) with overflow protection. */
+    if (ngx_http_markdown_calc_output_size(r, input_size, conf->max_size, &output_size)
+        != NGX_OK)
+    {
+        BrotliDecoderDestroyInstance(decoder);
+        return NGX_ERROR;
     }
     
     /* Allocate output buffer using nginx memory pool (Requirement 3.2, 14.1) */

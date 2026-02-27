@@ -395,13 +395,14 @@ ngx_http_markdown_handle_if_none_match(ngx_http_request_t *r,
     if (conv_result->error_code != 0) {
         /* Conversion failed */
         ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-                     "markdown filter: conversion failed during If-None-Match check: %s",
-                     conv_result->error_message ? (char *)conv_result->error_message : "unknown error");
+                     "markdown filter: conversion failed during If-None-Match check: "
+                     "error_code=%ud message=\"%*s\"",
+                     conv_result->error_code,
+                     (conv_result->error_message != NULL) ? (ngx_int_t) conv_result->error_len : 0,
+                     (conv_result->error_message != NULL) ? conv_result->error_message : (u_char *) "");
         
         /* Free result */
-        if (conv_result->error_message != NULL) {
-            markdown_result_free(conv_result);
-        }
+        markdown_result_free(conv_result);
         
         return NGX_ERROR;
     }

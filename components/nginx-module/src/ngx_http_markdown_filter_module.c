@@ -1607,7 +1607,25 @@ construct_url:
      * Format: <scheme>://<host><uri>
      * Example: https://example.com/docs/page.html
      */
-    len = scheme.len + sizeof("://") - 1 + host.len + r->uri.len;
+    len = scheme.len;
+    if (len > ((size_t) -1) - (sizeof("://") - 1)) {
+        ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
+                     "markdown filter: base_url length overflow (scheme)");
+        return NGX_ERROR;
+    }
+    len += sizeof("://") - 1;
+    if (len > ((size_t) -1) - host.len) {
+        ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
+                     "markdown filter: base_url length overflow (host)");
+        return NGX_ERROR;
+    }
+    len += host.len;
+    if (len > ((size_t) -1) - r->uri.len) {
+        ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
+                     "markdown filter: base_url length overflow (uri)");
+        return NGX_ERROR;
+    }
+    len += r->uri.len;
     
     p = ngx_pnalloc(pool, len);
     if (p == NULL) {
@@ -2325,7 +2343,8 @@ ngx_http_markdown_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
                      "error_code=%ud, category=%V, message=\"%*s\", elapsed_ms=%M",
                      result.error_code,
                      category_str,
-                     result.error_len, result.error_message,
+                     (result.error_message != NULL) ? (ngx_int_t) result.error_len : 0,
+                     (result.error_message != NULL) ? result.error_message : (u_char *) "",
                      elapsed_ms);
         
         /* Free result memory */
@@ -2350,6 +2369,35 @@ ngx_http_markdown_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
 
     /* Conversion succeeded */
     ctx->conversion_succeeded = 1;
+
+    /*
+     * Validate FFI pointer/length invariants before consuming result buffers.
+     * This prevents null-dereference/overread if upstream FFI contracts are broken.
+     */
+    if ((result.markdown == NULL && result.markdown_len > 0)
+        || (result.error_message == NULL && result.error_len > 0)
+        || (result.etag == NULL && result.etag_len > 0))
+    {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                     "markdown filter: invalid FFI result invariants: "
+                     "markdown=%p markdown_len=%uz etag=%p etag_len=%uz "
+                     "error_message=%p error_len=%uz",
+                     result.markdown, result.markdown_len,
+                     result.etag, result.etag_len,
+                     result.error_message, result.error_len);
+        markdown_result_free(&result);
+
+        if (conf->on_error == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT) {
+            return NGX_ERROR;
+        }
+
+        ctx->eligible = 0;
+        r->buffered &= ~NGX_HTTP_MARKDOWN_BUFFERED;
+        if (ngx_http_markdown_forward_headers(r, ctx) != NGX_OK) {
+            return NGX_ERROR;
+        }
+        return ngx_http_markdown_send_buffered_original_response(r, ctx);
+    }
     
     /* Update success metrics */
     ngx_atomic_fetch_add(&ngx_http_markdown_metrics.conversions_succeeded, 1);
@@ -2421,26 +2469,33 @@ conversion_complete:
         markdown_result_free(&result);
     } else {
         /* Regular GET request - include Markdown content in response body */
-        
-        /* Allocate memory for Markdown output in NGINX pool */
-        b->pos = ngx_pnalloc(r->pool, result.markdown_len);
-        if (b->pos == NULL) {
-            /*
-             * Memory allocation failed for output - critical system error.
-             * 
-             * Log level: NGX_LOG_CRIT (critical system failure)
-             * Requirements: FR-09.5, FR-09.6, FR-09.7
-             */
-            ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0,
-                         "markdown filter: failed to allocate output memory, category=system");
-            markdown_result_free(&result);
-            return NGX_ERROR;
+        if (result.markdown_len > 0) {
+            /* Allocate memory for Markdown output in NGINX pool */
+            b->pos = ngx_pnalloc(r->pool, result.markdown_len);
+            if (b->pos == NULL) {
+                /*
+                 * Memory allocation failed for output - critical system error.
+                 * 
+                 * Log level: NGX_LOG_CRIT (critical system failure)
+                 * Requirements: FR-09.5, FR-09.6, FR-09.7
+                 */
+                ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0,
+                             "markdown filter: failed to allocate output memory, category=system");
+                markdown_result_free(&result);
+                return NGX_ERROR;
+            }
+
+            /* Copy Markdown content to NGINX-managed memory */
+            ngx_memcpy(b->pos, result.markdown, result.markdown_len);
+            b->last = b->pos + result.markdown_len;
+            b->memory = 1;
+        } else {
+            /* Empty markdown output is valid; send an empty body safely. */
+            b->pos = NULL;
+            b->last = NULL;
+            b->memory = 0;
         }
 
-        /* Copy Markdown content to NGINX-managed memory */
-        ngx_memcpy(b->pos, result.markdown, result.markdown_len);
-        b->last = b->pos + result.markdown_len;
-        b->memory = 1;
         b->last_buf = (r == r->main) ? 1 : 0;
         b->last_in_chain = 1;
 

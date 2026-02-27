@@ -117,6 +117,9 @@ ngx_http_markdown_add_vary_accept(ngx_http_request_t *r)
     }
 
     /* Vary header exists but doesn't contain "Accept" - append it */
+    if (vary->value.len > ((size_t) -1) - (sizeof(", Accept") - 1)) {
+        return NGX_ERROR;
+    }
     len = vary->value.len + sizeof(", Accept") - 1;
     p = ngx_pnalloc(r->pool, len);
     if (p == NULL) {
