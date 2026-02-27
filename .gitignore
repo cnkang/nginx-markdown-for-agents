@@ -9,7 +9,6 @@ docs/archive/
 
 # Rust artifacts
 components/rust-converter/target/
-components/rust-converter/Cargo.lock
 
 # Generated C header mirror (copy from Rust include)
 components/nginx-module/src/markdown_converter.h

@@ -1,0 +1,143 @@
+name: Security Scanning (CodeQL + Rust Audit)
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main, master]
+    paths:
+      - "components/**"
+      - "tools/ci/build_nginx_for_codeql.sh"
+      - "tools/ci/check_c_licenses.py"
+      - "tools/ci/check_rust_licenses.py"
+      - "Makefile"
+      - ".github/workflows/codeql.yml"
+  push:
+    branches: [main, master]
+    paths:
+      - "components/**"
+      - "tools/ci/build_nginx_for_codeql.sh"
+      - "tools/ci/check_c_licenses.py"
+      - "tools/ci/check_rust_licenses.py"
+      - "Makefile"
+      - ".github/workflows/codeql.yml"
+  schedule:
+    - cron: "37 2 * * 0"
+
+permissions:
+  actions: read
+  contents: read
+  security-events: write
+
+concurrency:
+  group: security-scan-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  codeql-c-cpp:
+    name: CodeQL (C/C++ Production Sources)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Initialize CodeQL for C/C++
+        uses: github/codeql-action/init@v4
+        with:
+          languages: c-cpp
+          build-mode: manual
+          queries: security-extended,security-and-quality
+
+      - name: Install C build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            curl \
+            python3 \
+            zlib1g-dev
+
+      - name: Set up Rust toolchain for module linkage
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            components/rust-converter -> target
+
+      - name: C copyleft license policy check
+        run: python3 tools/ci/check_c_licenses.py
+
+      - name: Build production C sources for CodeQL
+        run: ./tools/ci/build_nginx_for_codeql.sh
+
+      - name: Run CodeQL analysis for C/C++
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: "/language:c-cpp"
+
+  codeql-rust:
+    name: CodeQL (Rust)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Initialize CodeQL for Rust
+        uses: github/codeql-action/init@v4
+        with:
+          languages: rust
+          build-mode: none
+          queries: security-extended,security-and-quality
+
+      - name: Run CodeQL analysis for Rust
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: "/language:rust"
+
+  rust-security-quality:
+    name: Rust Security & Quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt,clippy
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            components/rust-converter -> target
+
+      - name: Rust format check
+        working-directory: components/rust-converter
+        run: cargo fmt --all -- --check
+
+      - name: Rust clippy check
+        working-directory: components/rust-converter
+        run: cargo clippy --all-targets --all-features --locked -- -D warnings
+
+      - name: Rust compile sanity check
+        working-directory: components/rust-converter
+        run: cargo check --all-targets --locked
+
+      - name: Install cargo-audit
+        working-directory: components/rust-converter
+        run: cargo install cargo-audit --locked
+
+      - name: Rust dependency vulnerability audit
+        working-directory: components/rust-converter
+        run: cargo audit --deny warnings
+
+      - name: Rust copyleft license policy check
+        run: python3 tools/ci/check_rust_licenses.py --locked

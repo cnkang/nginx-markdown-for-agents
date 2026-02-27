@@ -69,8 +69,10 @@ static ngx_int_t ngx_http_markdown_send_buffered_original_response(
     ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx);
 static ngx_int_t ngx_http_markdown_fail_open_with_buffered_prefix(
     ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx, ngx_chain_t *remaining);
+#if !(NGX_HTTP_HEADERS)
 static ngx_table_elt_t *ngx_http_markdown_find_request_header(ngx_http_request_t *r,
     const ngx_str_t *name);
+#endif
 
 /* Next filter pointers for filter chain */
 static ngx_http_output_header_filter_pt ngx_http_next_header_filter;
@@ -2859,6 +2861,7 @@ ngx_http_markdown_metrics_handler(ngx_http_request_t *r)
  * This fallback is used for builds where some convenience pointers in
  * ngx_http_headers_in_t (for example `accept`) are not compiled in.
  */
+#if !(NGX_HTTP_HEADERS)
 static ngx_table_elt_t *
 ngx_http_markdown_find_request_header(ngx_http_request_t *r, const ngx_str_t *name)
 {
@@ -2892,6 +2895,7 @@ ngx_http_markdown_find_request_header(ngx_http_request_t *r, const ngx_str_t *na
 
     return NULL;
 }
+#endif
 
 static ngx_int_t
 ngx_http_markdown_forward_headers(ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx)
