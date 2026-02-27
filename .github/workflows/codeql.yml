@@ -63,6 +63,15 @@ jobs:
         if: matrix.language == 'c-cpp'
         run: make test-nginx-unit
 
+      - name: Set up Rust toolchain
+        if: matrix.language == 'rust'
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust sanity check
+        if: matrix.language == 'rust'
+        working-directory: components/rust-converter
+        run: cargo check --all-targets
+
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v4
         with:
