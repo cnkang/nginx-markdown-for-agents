@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-NGINX_VERSION="${NGINX_VERSION:-1.26.2}"
+NGINX_VERSION="${NGINX_VERSION:-stable}"
 PORT="${PORT:-18088}"
 KEEP_ARTIFACTS=0
 WORKSPACE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -16,8 +16,13 @@ Usage: $(basename "$0") [--keep-artifacts] [--nginx-version VERSION] [--port POR
 Builds a local NGINX from source with the markdown module and validates delegated
 If-Modified-Since behavior for Markdown-negotiated responses.
 
+VERSION accepts:
+  - stable    (resolve latest stable from nginx.org)
+  - mainline  (resolve latest mainline from nginx.org)
+  - x.y.z     (use explicit nginx release)
+
 Environment variables:
-  NGINX_VERSION   Default: 1.26.2
+  NGINX_VERSION   Default: stable (or explicit x.y.z)
   PORT            Default: 18088
 EOF
 }
@@ -55,9 +60,54 @@ need_cmd() {
   }
 }
 
+resolve_nginx_version() {
+  local requested page version
+  requested="$1"
+
+  case "${requested}" in
+    stable|mainline)
+      page="$(curl -fsSL https://nginx.org/en/download.html)"
+      version="$(
+        NGINX_DOWNLOAD_HTML="${page}" CHANNEL="${requested}" python3 - <<'PY'
+import os
+import re
+
+html = os.environ.get("NGINX_DOWNLOAD_HTML", "")
+channel = os.environ.get("CHANNEL", "")
+
+if channel == "mainline":
+    pattern = r"Mainline version.*?nginx-([0-9]+\.[0-9]+\.[0-9]+)\.tar\.gz"
+elif channel == "stable":
+    pattern = r"Stable version.*?nginx-([0-9]+\.[0-9]+\.[0-9]+)\.tar\.gz"
+else:
+    raise SystemExit(1)
+
+match = re.search(pattern, html, flags=re.IGNORECASE | re.DOTALL)
+if not match:
+    raise SystemExit(1)
+
+print(match.group(1))
+PY
+      )"
+
+      if [[ -z "${version}" ]]; then
+        echo "Failed to resolve latest ${requested} NGINX version from nginx.org" >&2
+        exit 1
+      fi
+
+      printf '%s\n' "${version}"
+      ;;
+    *)
+      printf '%s\n' "${requested}"
+      ;;
+  esac
+}
+
 for cmd in curl tar make cargo rsync awk python3; do
   need_cmd "$cmd"
 done
+
+NGINX_VERSION="$(resolve_nginx_version "${NGINX_VERSION}")"
 
 detect_rust_target() {
   local os arch

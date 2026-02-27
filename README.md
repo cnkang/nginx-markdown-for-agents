@@ -615,6 +615,7 @@ Notes:
   - Runs real NGINX large-response E2E regression for relevant changes
 - `.github/workflows/real-nginx-ims.yml`
   - Dedicated real-NGINX delegated `If-Modified-Since` validation
+  - Runs matrix jobs for latest `stable` and `mainline` NGINX channels in isolated ports/environments
   - Triggered on module/converter/IMS-script/workflow changes and manual dispatch
 
 ## Documentation

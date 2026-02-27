@@ -27,9 +27,17 @@ concurrency:
 
 jobs:
   verify-real-nginx-ims:
-    name: Verify Delegated IMS with Real NGINX
+    name: Verify Delegated IMS with Real NGINX (${{ matrix.nginx_channel }})
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - nginx_channel: stable
+            port: 18088
+          - nginx_channel: mainline
+            port: 18089
 
     steps:
       - name: Checkout repository
@@ -67,4 +75,4 @@ jobs:
         run: cargo check --all-targets
 
       - name: Run real NGINX If-Modified-Since validation
-        run: ./tools/ci/verify_real_nginx_ims.sh
+        run: bash ./tools/ci/verify_real_nginx_ims.sh --nginx-version "${{ matrix.nginx_channel }}" --port "${{ matrix.port }}"
