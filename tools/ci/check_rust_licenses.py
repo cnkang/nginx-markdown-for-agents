@@ -158,8 +158,13 @@ def run_metadata(manifest_path: Path, locked: bool) -> dict:
     ]
     if locked:
         cmd.append("--locked")
-    out = subprocess.check_output(cmd, text=True)
-    return json.loads(out)
+    completed = subprocess.run(
+        cmd,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return json.loads(completed.stdout)
 
 
 def parse_args() -> argparse.Namespace:
@@ -180,6 +185,14 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     manifest_path = Path(args.manifest_path).resolve()
+    repo_root = Path(__file__).resolve().parents[2]
+    if repo_root not in manifest_path.parents and manifest_path != repo_root:
+        print(f"Refusing manifest path outside repository: {manifest_path}", file=sys.stderr)
+        return 2
+    if not manifest_path.is_file():
+        print(f"Manifest path does not exist: {manifest_path}", file=sys.stderr)
+        return 2
+
     metadata = run_metadata(manifest_path, locked=args.locked)
 
     violations: list[str] = []
