@@ -74,11 +74,26 @@ ngx_int_t ngx_http_output_filter(ngx_http_request_t *r, ngx_chain_t *in) {
 }
 
 u_char *ngx_slprintf(u_char *buf, u_char *last, const char *fmt, ...) {
-    UNUSED(last);
+    size_t avail = 0;
+    if (last > buf) {
+        avail = (size_t)(last - buf);
+    }
+    if (avail == 0) {
+        return buf;
+    }
+
     va_list args;
     va_start(args, fmt);
-    int len = vsnprintf((char *)buf, 1024, fmt, args);
+    int len = vsnprintf((char *)buf, avail, fmt, args);
     va_end(args);
+
+    if (len < 0) {
+        return buf;
+    }
+    if ((size_t)len >= avail) {
+        return buf + avail - 1;
+    }
+
     return buf + len;
 }
 

@@ -26,7 +26,32 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    src = Path(args.source).read_text(encoding="utf-8")
+    workspace_root = Path.cwd().resolve()
+    source_arg = Path(args.source)
+
+    try:
+        if source_arg.is_absolute():
+            source_path = source_arg.resolve(strict=True)
+        else:
+            source_path = (workspace_root / source_arg).resolve(strict=True)
+    except FileNotFoundError:
+        print(f"source file not found: {args.source}", file=sys.stderr)
+        return 1
+
+    try:
+        source_path.relative_to(workspace_root)
+    except ValueError:
+        print(
+            f"source path escapes workspace root: {args.source} (root: {workspace_root})",
+            file=sys.stderr,
+        )
+        return 1
+
+    if not source_path.is_file():
+        print(f"source path is not a file: {args.source}", file=sys.stderr)
+        return 1
+
+    src = source_path.read_text(encoding="utf-8")
 
     target_line = f"{args.function_name}("
     if args.signature_prefix:
