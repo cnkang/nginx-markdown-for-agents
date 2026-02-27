@@ -13,7 +13,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 [dependencies]
 # HTML5 parser - handles malformed markup gracefully
-html5ever = "0.26"
+html5ever = "0.38"
 # DOM tree representation
 markup5ever_rcdom = "0.2"
 # Fast hashing for ETags (using version compatible with older Rust)
