@@ -1,0 +1,70 @@
+name: Real NGINX IMS Validation
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "components/nginx-module/**"
+      - "components/rust-converter/**"
+      - "tools/ci/verify_real_nginx_ims.sh"
+      - "tools/c-extract/extract_c_function.py"
+      - ".github/workflows/real-nginx-ims.yml"
+  push:
+    branches: [main, master]
+    paths:
+      - "components/nginx-module/**"
+      - "components/rust-converter/**"
+      - "tools/ci/verify_real_nginx_ims.sh"
+      - "tools/c-extract/extract_c_function.py"
+      - ".github/workflows/real-nginx-ims.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ims-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify-real-nginx-ims:
+    name: Verify Delegated IMS with Real NGINX
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            curl \
+            pkg-config \
+            python3 \
+            rsync \
+            zlib1g-dev
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            components/rust-converter -> target
+
+      - name: Sanity check required commands
+        run: |
+          set -euo pipefail
+          for cmd in bash gcc make python3 cargo rustc rustup curl rsync awk tar; do
+            command -v "$cmd" >/dev/null
+          done
+
+      - name: Ensure Rust project compiles (locked)
+        working-directory: components/rust-converter
+        run: cargo check --all-targets --locked
+
+      - name: Run real NGINX If-Modified-Since validation
+        run: ./tools/ci/verify_real_nginx_ims.sh

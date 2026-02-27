@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Unescaped Entities Test</title>
+</head>
+<body>
+    <!-- Test Purpose: Verify handling of raw < > & characters -->
+    
+    <h1>Unescaped Characters</h1>
+    
+    <p>This paragraph has a < character without escaping.</p>
+    <p>This paragraph has a > character without escaping.</p>
+    <p>This paragraph has an & character without escaping.</p>
+    
+    <p>Multiple unescaped: < > & < > &</p>
+    
+    <p>In context: if x < 5 && y > 10 then...</p>
+    
+    <p>Math expression: 3 < 5 & 5 > 3</p>
+    
+    <p>Code-like: function<T> where T > 0</p>
+    
+    <!-- Partially escaped -->
+    <p>Mixed: &lt; is escaped but < is not</p>
+    <p>Mixed: &gt; is escaped but > is not</p>
+    <p>Mixed: &amp; is escaped but & is not</p>
+    
+    <!-- In attributes -->
+    <div title="Value with < and > and &">Content</div>
+    
+    <!-- In code blocks (should be preserved) -->
+    <pre><code>
+    if (x < 5 && y > 10) {
+        return x & y;
+    }
+    </code></pre>
+    
+    <!-- Incomplete entities -->
+    <p>Incomplete: &lt without semicolon</p>
+    <p>Incomplete: &gt without semicolon</p>
+    <p>Incomplete: &amp without semicolon</p>
+    
+    <!-- Unknown entities -->
+    <p>Unknown: &unknown; &fake; &notreal;</p>
+    
+    <!-- Numeric entities mixed with raw -->
+    <p>Mixed: &#60; is numeric but < is raw</p>
+    <p>Mixed: &#62; is numeric but > is raw</p>
+    <p>Mixed: &#38; is numeric but & is raw</p>
+</body>
+</html>

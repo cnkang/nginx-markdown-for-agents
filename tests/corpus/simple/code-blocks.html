@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Code Blocks Test</title>
+</head>
+<body>
+    <!-- Test Purpose: Verify pre and code tags convert to fenced code blocks -->
+    <h1>Code Block Examples</h1>
+    
+    <h2>Simple Code Block</h2>
+    <pre><code>function hello() {
+    console.log("Hello, World!");
+}
+</code></pre>
+    
+    <h2>Code Block with Language</h2>
+    <pre><code class="language-python">def greet(name):
+    print(f"Hello, {name}!")
+
+greet("World")
+</code></pre>
+    
+    <h2>Code Block with JavaScript</h2>
+    <pre><code class="language-javascript">const add = (a, b) => a + b;
+console.log(add(2, 3));
+</code></pre>
+    
+    <h2>Inline Code vs Block</h2>
+    <p>Use <code>console.log()</code> for debugging.</p>
+    <p>Here's a full example:</p>
+    <pre><code>const debug = (msg) => {
+    console.log(`[DEBUG] ${msg}`);
+};
+</code></pre>
+    
+    <h2>Multiple Code Blocks</h2>
+    <p>First example:</p>
+    <pre><code>echo "Hello"
+</code></pre>
+    <p>Second example:</p>
+    <pre><code>echo "World"
+</code></pre>
+    
+    <h2>Code Block with Special Characters</h2>
+    <pre><code>const html = "&lt;div&gt;Hello&lt;/div&gt;";
+const regex = /\d+/g;
+const template = `Value: ${x}`;
+</code></pre>
+</body>
+</html>

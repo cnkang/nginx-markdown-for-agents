@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Broken Attributes Test</title>
+</head>
+<body>
+    <!-- Test Purpose: Verify handling of malformed attribute syntax -->
+    
+    <!-- Missing quotes -->
+    <a href=https://example.com>Link without quotes</a>
+    
+    <!-- Mismatched quotes -->
+    <a href="https://example.com'>Mismatched quotes</a>
+    
+    <!-- Unclosed attribute value -->
+    <a href="https://example.com>Unclosed attribute</a>
+    
+    <!-- Multiple equals signs -->
+    <div class=="container">Content</div>
+    
+    <!-- Attribute without value -->
+    <input type="text" required=>
+    
+    <!-- Space in attribute name -->
+    <div data name="value">Content</div>
+    
+    <!-- Special characters in unquoted attribute -->
+    <div class=my-class&other>Content</div>
+    
+    <!-- Empty attribute -->
+    <div class="">Empty class</div>
+    
+    <!-- Duplicate attributes -->
+    <div id="first" id="second">Duplicate IDs</div>
+    
+    <!-- Attribute with newline -->
+    <a href="https://example.com
+    /page">Link with newline in href</a>
+    
+    <!-- Invalid attribute characters -->
+    <div data-@#$%="value">Invalid chars</div>
+    
+    <!-- Attribute without equals -->
+    <div class "container">No equals</div>
+    
+    <!-- Boolean attribute with value -->
+    <input type="checkbox" checked="yes">
+    
+    <!-- Attribute value with unescaped quotes -->
+    <div title="This is a "quoted" word">Content</div>
+</body>
+</html>

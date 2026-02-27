@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Only Scripts Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+    </style>
+    <script>
+        console.log("This is a script in head");
+        function initialize() {
+            console.log("Initializing...");
+        }
+    </script>
+</head>
+<body>
+    <!-- Test Purpose: Verify handling of document with only scripts/styles (no content) -->
+    
+    <script>
+        console.log("This is a script in body");
+        
+        function loadData() {
+            fetch('/api/data')
+                .then(response => response.json())
+                .then(data => {
+                    console.log("Data loaded:", data);
+                });
+        }
+        
+        document.addEventListener('DOMContentLoaded', function() {
+            initialize();
+            loadData();
+        });
+    </script>
+    
+    <style>
+        .hidden {
+            display: none;
+        }
+    </style>
+    
+    <script type="application/json" id="config">
+    {
+        "apiUrl": "https://api.example.com",
+        "timeout": 5000
+    }
+    </script>
+    
+    <noscript>
+        <p>JavaScript is required to view this page.</p>
+    </noscript>
+</body>
+</html>

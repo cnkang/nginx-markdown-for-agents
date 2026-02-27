@@ -1,0 +1,67 @@
+# Local collaboration / editor state
+.kiro/
+.serena/
+.vscode/
+.idea/
+
+# Documentation local archive (not source-of-truth)
+docs/archive/
+
+# Rust artifacts
+components/rust-converter/target/
+components/rust-converter/Cargo.lock
+
+# Generated C header mirror (copy from Rust include)
+components/nginx-module/src/markdown_converter.h
+
+# NGINX module test artifacts
+components/nginx-module/tests/build/
+components/nginx-module/tests/**/*.dSYM/
+components/nginx-module/tests/**/*.o
+components/nginx-module/tests/**/*.log
+components/nginx-module/tests/**/*.tmp
+components/nginx-module/tests/**/*.pid
+
+# Generic build output
+build/
+dist/
+out/
+coverage/
+test-output/
+test-results/
+
+# Tool caches
+tools/**/.cache/
+tests/**/tmp/
+
+# Compiler / profiler artifacts
+*.profraw
+*.profdata
+*.gcda
+*.gcno
+*.gcov
+*.a
+*.so
+*.dylib
+*.dll
+*.exe
+
+# Logs / temp / backups
+*.log
+*.tmp
+*.cache
+*.pid
+*.bak
+*.orig
+*.rej
+*~
+
+# macOS / Linux noise
+.DS_Store
+.AppleDouble
+.LSOverride
+.directory
+
+# Vim swap
+*.swp
+*.swo
