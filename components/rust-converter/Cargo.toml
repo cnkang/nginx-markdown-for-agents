@@ -29,7 +29,7 @@ encoding_rs = "0.8"
 # Property-based testing framework
 proptest = "1.4"
 # Additional testing utilities
-criterion = "0.5"
+criterion = "0.8"
 
 [profile.release]
 # Optimize for performance
