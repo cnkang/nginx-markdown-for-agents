@@ -1888,6 +1888,7 @@ ngx_http_markdown_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
         ngx_chain_t  *decompressed_chain;
         ngx_buf_t    *compressed_buf;
         ngx_int_t     decompress_rc;
+        u_char       *decompressed_data;
         
         ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                       "markdown filter: starting decompression, type=%d, size=%uz bytes",
@@ -2053,6 +2054,7 @@ ngx_http_markdown_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
         
         /* Calculate decompressed size */
         ctx->decompressed_size = decompressed_chain->buf->last - decompressed_chain->buf->pos;
+        decompressed_data = decompressed_chain->buf->pos;
         
         /* Ensure buffer has enough capacity */
         if (ctx->decompressed_size > ctx->buffer.capacity) {
@@ -2087,15 +2089,26 @@ ngx_http_markdown_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
                 }
             }
 
+            /*
+             * Copy first, then release old backing storage.
+             * This keeps the operation safe even if decompressed_data aliases
+             * the existing buffer in any future refactor.
+             */
+            if (ctx->decompressed_size > 0) {
+                ngx_memcpy(new_data, decompressed_data, ctx->decompressed_size);
+            }
+
             if (ctx->buffer.data != NULL) {
                 ngx_free(ctx->buffer.data);
             }
             ctx->buffer.data = new_data;
             ctx->buffer.capacity = ctx->decompressed_size;
+        } else if (ctx->decompressed_size > 0
+                   && ctx->buffer.data != decompressed_data)
+        {
+            ngx_memcpy(ctx->buffer.data, decompressed_data, ctx->decompressed_size);
         }
-        
-        /* Copy decompressed data to buffer */
-        ngx_memcpy(ctx->buffer.data, decompressed_chain->buf->pos, ctx->decompressed_size);
+
         ctx->buffer.size = ctx->decompressed_size;
         
         /* Mark decompression as done */
