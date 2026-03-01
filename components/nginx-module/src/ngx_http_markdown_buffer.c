@@ -213,8 +213,10 @@ ngx_http_markdown_buffer_ensure_capacity(ngx_http_markdown_buffer_t *buf, size_t
         return NGX_ERROR;
     }
 
-    if (buf->data != NULL && buf->size > 0) {
-        ngx_memcpy(new_data, buf->data, buf->size);
+    if (buf->data != NULL) {
+        if (buf->size > 0) {
+            ngx_memcpy(new_data, buf->data, buf->size);
+        }
         ngx_free(buf->data);
     }
 
