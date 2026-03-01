@@ -253,7 +253,10 @@ fn test_null_pointer_handling() {
         result.error_code, 0,
         "NULL HTML with zero length should succeed"
     );
-    assert_eq!(result.markdown_len, 0, "Zero-length input should produce empty output");
+    assert_eq!(
+        result.markdown_len, 0,
+        "Zero-length input should produce empty output"
+    );
     ffi_markdown_result_free(&mut result);
 
     // Reset result
@@ -795,7 +798,10 @@ fn test_zero_length_html_with_null_pointer() {
         "NULL pointer with zero length should succeed"
     );
     assert_eq!(result.markdown_len, 0, "Markdown output should be empty");
-    assert!(!result.markdown.is_null(), "Owned empty buffer should be returned");
+    assert!(
+        !result.markdown.is_null(),
+        "Owned empty buffer should be returned"
+    );
 
     ffi_markdown_result_free(&mut result);
     ffi_markdown_converter_free(converter);
