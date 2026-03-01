@@ -1888,7 +1888,8 @@ ngx_http_markdown_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
         ngx_chain_t  *decompressed_chain;
         ngx_buf_t    *compressed_buf;
         ngx_int_t     decompress_rc;
-        u_char       *decompressed_data;
+        const u_char *decompressed_data;
+        u_char       *target_data;
         
         ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                       "markdown filter: starting decompression, type=%d, size=%uz bytes",
@@ -2056,6 +2057,12 @@ ngx_http_markdown_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
         ctx->decompressed_size = decompressed_chain->buf->last - decompressed_chain->buf->pos;
         decompressed_data = decompressed_chain->buf->pos;
         
+        /*
+         * Compute copy target once so decompressed payload copy uses a single
+         * code path regardless of whether reallocation is needed.
+         */
+        target_data = ctx->buffer.data;
+
         /* Ensure buffer has enough capacity */
         if (ctx->decompressed_size > ctx->buffer.capacity) {
             /* 
@@ -2089,24 +2096,28 @@ ngx_http_markdown_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
                 }
             }
 
-            /*
-             * Copy first, then release old backing storage.
-             * This keeps the operation safe even if decompressed_data aliases
-             * the existing buffer in any future refactor.
-             */
-            if (ctx->decompressed_size > 0) {
-                ngx_memcpy(new_data, decompressed_data, ctx->decompressed_size);
-            }
+            target_data = new_data;
+        }
 
+        /*
+         * Copy payload once using a unified condition. Skip when source/dest
+         * are identical to avoid undefined behavior with overlapping memcpy.
+         */
+        if (ctx->decompressed_size > 0 && target_data != decompressed_data) {
+            ngx_memcpy(target_data, decompressed_data, ctx->decompressed_size);
+        }
+
+        if (target_data != ctx->buffer.data) {
+            /*
+             * Copy has completed; now it is safe to release previous storage.
+             * This ordering protects against future aliasing regressions.
+             */
             if (ctx->buffer.data != NULL) {
                 ngx_free(ctx->buffer.data);
             }
-            ctx->buffer.data = new_data;
+
+            ctx->buffer.data = target_data;
             ctx->buffer.capacity = ctx->decompressed_size;
-        } else if (ctx->decompressed_size > 0
-                   && ctx->buffer.data != decompressed_data)
-        {
-            ngx_memcpy(ctx->buffer.data, decompressed_data, ctx->decompressed_size);
         }
 
         ctx->buffer.size = ctx->decompressed_size;
