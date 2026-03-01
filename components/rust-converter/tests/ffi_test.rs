@@ -247,10 +247,13 @@ fn test_null_pointer_handling() {
         error_len: 0,
     };
 
-    // Test NULL HTML pointer
+    // Test NULL HTML pointer with zero length (allowed, treated as empty input)
     ffi_markdown_convert(converter, ptr::null(), 0, &options, &mut result);
-    assert_ne!(result.error_code, 0, "Should return error for NULL HTML");
-    assert!(!result.error_message.is_null(), "Should have error message");
+    assert_eq!(
+        result.error_code, 0,
+        "NULL HTML with zero length should succeed"
+    );
+    assert_eq!(result.markdown_len, 0, "Zero-length input should produce empty output");
     ffi_markdown_result_free(&mut result);
 
     // Reset result
@@ -641,8 +644,8 @@ fn test_memory_cleanup_error_case() {
         error_len: 0,
     };
 
-    // Trigger error with NULL HTML pointer
-    ffi_markdown_convert(converter, ptr::null(), 0, &options, &mut result);
+    // Trigger error with NULL HTML pointer and non-zero length.
+    ffi_markdown_convert(converter, ptr::null(), 1, &options, &mut result);
 
     assert_ne!(result.error_code, 0, "Should have error code");
     assert!(
@@ -725,7 +728,7 @@ fn test_panic_catching_invalid_utf8() {
 #[test]
 fn test_zero_length_html() {
     // Test conversion with zero-length HTML
-    // Note: Zero-length HTML with valid pointer should succeed
+    // Zero-length HTML should succeed and produce empty markdown.
     let converter = markdown_converter_new();
     assert!(!converter.is_null(), "Converter should not be NULL");
 
@@ -756,21 +759,43 @@ fn test_zero_length_html() {
 
     ffi_markdown_convert(converter, html.as_ptr(), html.len(), &options, &mut result);
 
-    // Empty HTML may succeed or fail depending on parser behavior
-    // The important thing is it doesn't crash
-    if result.error_code == 0 {
-        // Success case - verify result is valid
-        assert!(
-            !result.markdown.is_null() || result.markdown_len == 0,
-            "If successful, markdown should be valid"
-        );
-    } else {
-        // Error case - verify error message is set
-        assert!(
-            !result.error_message.is_null(),
-            "Error message should be set on error"
-        );
-    }
+    assert_eq!(result.error_code, 0, "Zero-length input should succeed");
+    assert_eq!(result.markdown_len, 0, "Markdown output should be empty");
+    assert!(
+        !result.markdown.is_null(),
+        "Success result should carry an owned markdown buffer"
+    );
+
+    ffi_markdown_result_free(&mut result);
+    ffi_markdown_converter_free(converter);
+}
+
+#[test]
+fn test_zero_length_html_with_null_pointer() {
+    let converter = markdown_converter_new();
+    assert!(!converter.is_null(), "Converter should not be NULL");
+
+    let options = MarkdownOptions {
+        flavor: 0,
+        timeout_ms: 5000,
+        generate_etag: 0,
+        estimate_tokens: 0,
+        front_matter: 0,
+        content_type: ptr::null(),
+        content_type_len: 0,
+        base_url: ptr::null(),
+        base_url_len: 0,
+    };
+
+    let mut result = ffi_test_empty_result();
+    ffi_markdown_convert(converter, ptr::null(), 0, &options, &mut result);
+
+    assert_eq!(
+        result.error_code, 0,
+        "NULL pointer with zero length should succeed"
+    );
+    assert_eq!(result.markdown_len, 0, "Markdown output should be empty");
+    assert!(!result.markdown.is_null(), "Owned empty buffer should be returned");
 
     ffi_markdown_result_free(&mut result);
     ffi_markdown_converter_free(converter);

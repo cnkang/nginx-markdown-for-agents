@@ -1921,7 +1921,27 @@ ngx_http_markdown_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
             }
         }
         
-        ngx_memcpy(compressed_buf->pos, ctx->buffer.data, ctx->buffer.size);
+        if (ctx->buffer.size > 0) {
+            if (ctx->buffer.data == NULL) {
+                ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                             "markdown filter: buffered payload pointer is NULL with non-zero size, "
+                             "size=%uz, category=system",
+                             ctx->buffer.size);
+
+                if (conf->on_error == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT) {
+                    return NGX_ERROR;
+                } else {
+                    ctx->eligible = 0;
+                    r->buffered &= ~NGX_HTTP_MARKDOWN_BUFFERED;
+                    if (ngx_http_markdown_forward_headers(r, ctx) != NGX_OK) {
+                        return NGX_ERROR;
+                    }
+                    return ngx_http_markdown_send_buffered_original_response(r, ctx);
+                }
+            }
+
+            ngx_memcpy(compressed_buf->pos, ctx->buffer.data, ctx->buffer.size);
+        }
         compressed_buf->last = compressed_buf->pos + ctx->buffer.size;
         compressed_buf->last_buf = 1;
         

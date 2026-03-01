@@ -23,7 +23,6 @@ src/
 ├── ngx_http_markdown_filter_module.c    # Main module and configuration
 ├── ngx_http_markdown_filter_module.h    # Module header
 ├── ngx_http_markdown_accept.c           # Accept header parsing
-├── ngx_http_markdown_accept_impl.c      # Accept parsing implementation
 ├── ngx_http_markdown_auth.c             # Authentication detection
 ├── ngx_http_markdown_buffer.c           # Response buffering
 ├── ngx_http_markdown_conditional.c      # Conditional request handling

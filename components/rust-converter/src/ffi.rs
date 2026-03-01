@@ -494,6 +494,10 @@ fn required_ref<'a, T>(ptr: *const T, name: &str) -> Result<&'a T, ConversionErr
 }
 
 fn required_bytes<'a>(ptr: *const u8, len: usize, name: &str) -> Result<&'a [u8], ConversionError> {
+    if len == 0 {
+        return Ok(&[]);
+    }
+
     if ptr.is_null() {
         return Err(ConversionError::InvalidInput(format!(
             "{name} pointer is NULL"
@@ -538,6 +542,33 @@ fn convert_inner(
     )?;
     let base_url_str = optional_utf8(options_ref.base_url, options_ref.base_url_len, "base_url")?
         .map(ToOwned::to_owned);
+
+    if html_slice.is_empty() {
+        let markdown_bytes = Box::<[u8]>::default();
+        let token_estimate = if options_ref.estimate_tokens != 0 {
+            handle_ref.token_estimator.estimate("")
+        } else {
+            0
+        };
+
+        let etag_bytes = if options_ref.generate_etag != 0 {
+            Some(
+                handle_ref
+                    .etag_generator
+                    .generate(markdown_bytes.as_ref())
+                    .into_bytes()
+                    .into_boxed_slice(),
+            )
+        } else {
+            None
+        };
+
+        return Ok(ConversionOutput {
+            markdown: markdown_bytes,
+            etag: etag_bytes,
+            token_estimate,
+        });
+    }
 
     // Parse HTML with charset detection cascade (FR-05.1, FR-05.2, FR-05.3)
     let dom = parse_html_with_charset(html_slice, content_type_str)?;
@@ -692,8 +723,9 @@ pub extern "C" fn markdown_converter_new() -> *mut MarkdownConverterHandle {
 ///   - Must not be used concurrently from multiple threads
 ///
 /// - `html`: Pointer to HTML input bytes
-///   - Must be non-NULL
+///   - Must be non-NULL when `html_len > 0`
 ///   - Must point to valid memory of at least `html_len` bytes
+///   - May be NULL when `html_len == 0`
 ///   - Should be valid UTF-8 (invalid UTF-8 will cause encoding error)
 ///   - Content is not modified (read-only)
 ///
