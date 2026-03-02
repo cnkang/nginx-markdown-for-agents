@@ -7,24 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-- Comprehensive documentation improvements
-- Configuration example templates in `examples/nginx-configs/`
-- Quick verification section in README
-- Common issues quick reference guide
-- Enhanced Rust converter README with usage examples
-- CONTRIBUTING.md with development guidelines
-- This CHANGELOG.md file
+No unreleased changes yet.
 
-### Changed
-- Improved README structure for better user experience
-- Enhanced documentation navigation and cross-references
-- Standardized project license declarations to BSD-2-Clause across repository docs and component metadata
-- Aligned GitHub repository metadata baseline (description/topics/labels) for issue triage and discoverability
-- Installer now auto-wires runtime configuration by generating module loader and markdown-enable snippets, with `nginx -t` validation and manual fallback guidance only when needed
-- Installer now supports both absolute and relative module load styles (for example `load_module /usr/lib/nginx/modules/...` and `load_module modules/...`) based on detected NGINX build metadata
-
-## [0.1.0] - 2026-02-26
+## [0.1.0] - 2026-03-02
 
 ### Added
 - Initial release of NGINX Markdown for Agents
@@ -55,6 +40,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Operations guide
   - Feature documentation
   - Testing documentation
+- Comprehensive documentation improvements
+- Configuration example templates in `examples/nginx-configs/`
+- Quick verification section in README
+- Common issues quick reference guide
+- Enhanced Rust converter README with usage examples
+- CONTRIBUTING.md with development guidelines
+- This CHANGELOG.md file
+
+### Changed
+- Improved README structure for better user experience
+- Enhanced documentation navigation and cross-references
+- Standardized project license declarations to BSD-2-Clause across repository docs and component metadata
+- Aligned GitHub repository metadata baseline (description/topics/labels) for issue triage and discoverability
+- Installer now auto-wires runtime configuration by generating module loader and markdown-enable snippets, with `nginx -t` validation and manual fallback guidance only when needed
+- Installer now supports both absolute and relative module load styles (for example `load_module /usr/lib/nginx/modules/...` and `load_module modules/...`) based on detected NGINX build metadata
 
 ### Configuration Directives
 - `markdown_filter` - Enable/disable conversion
