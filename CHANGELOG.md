@@ -22,7 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Standardized project license declarations to BSD-2-Clause across repository docs and component metadata
 - Aligned GitHub repository metadata baseline (description/topics/labels) for issue triage and discoverability
 
-## [1.0.0] - 2026-02-26
+## [0.1.0] - 2026-02-26
 
 ### Added
 - Initial release of NGINX Markdown for Agents
@@ -95,7 +95,7 @@ This project uses Semantic Versioning:
 
 ### Upgrade Notes
 
-#### Upgrading to 1.0.0
+#### Upgrading to 0.1.0
 
 This is the initial release. No upgrade path from previous versions.
 

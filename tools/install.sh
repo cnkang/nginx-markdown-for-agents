@@ -4,7 +4,7 @@ set -euo pipefail
 # NGINX Markdown for Agents Install Script
 # Usage: curl -sSL https://raw.githubusercontent.com/cnkang/nginx-markdown-for-agents/main/tools/install.sh | sudo bash
 # OR (if using specific release version):
-# VERSION=v1.0.0 curl -sSL https://raw.githubusercontent.com/cnkang/nginx-markdown-for-agents/main/tools/install.sh | sudo bash
+# VERSION=v0.1.0 curl -sSL https://raw.githubusercontent.com/cnkang/nginx-markdown-for-agents/main/tools/install.sh | sudo bash
 
 REPO="cnkang/nginx-markdown-for-agents"
 RELEASE_VERSION="${VERSION:-}"

@@ -422,7 +422,7 @@ After running E2E tests, document baselines in `PERFORMANCE_BASELINES.md`:
 **Test Date:** 2024-01-15  
 **System:** Ubuntu 22.04, 4 CPU cores, 8GB RAM  
 **NGINX Version:** 1.24.0  
-**Rust Converter:** v1.0.0
+**Rust Converter:** v0.1.0
 
 ## Latency
 
