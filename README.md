@@ -70,9 +70,9 @@ Start narrow (`markdown_filter on;` on one route), verify, then expand. For prod
 
 ```mermaid
 flowchart TD
-    A["Client\nAccept: text/markdown"] --> B["NGINX Core"]
-    B --> C["Markdown Filter Module (C)\nrequest routing · eligibility · headers"]
-    C -->|FFI| D["Conversion Engine (Rust)\nHTML parsing · Markdown generation"]
+    A["Client<br/>Accept: text/markdown"] --> B["NGINX Core"]
+    B --> C["Markdown Filter Module (C)<br/>request routing · eligibility · headers"]
+    C -->|FFI| D["Conversion Engine (Rust)<br/>HTML parsing · Markdown generation"]
     D --> E["Markdown Response"]
 
     style A fill:#2d333b,stroke:#58a6ff,color:#e6edf3

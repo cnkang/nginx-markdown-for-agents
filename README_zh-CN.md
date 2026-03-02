@@ -70,9 +70,9 @@ http {
 
 ```mermaid
 flowchart TD
-    A["客户端\nAccept: text/markdown"] --> B["NGINX 核心"]
-    B --> C["Markdown 过滤模块 (C)\n请求路由 · 准入判断 · 响应头处理"]
-    C -->|FFI| D["转换引擎 (Rust)\nHTML 解析 · Markdown 生成"]
+    A["客户端<br/>Accept: text/markdown"] --> B["NGINX 核心"]
+    B --> C["Markdown 过滤模块 (C)<br/>请求路由 · 准入判断 · 响应头处理"]
+    C -->|FFI| D["转换引擎 (Rust)<br/>HTML 解析 · Markdown 生成"]
     D --> E["Markdown 响应"]
 
     style A fill:#2d333b,stroke:#58a6ff,color:#e6edf3
