@@ -15,17 +15,21 @@ permissions:
 
 jobs:
   prepare:
-    name: Resolve NGINX Versions
+    name: Resolve Default NGINX Versions
     runs-on: ubuntu-latest
     outputs:
       nginx_versions: ${{ steps.resolve.outputs.nginx_versions }}
       checkout_ref: ${{ steps.checkout_ref.outputs.checkout_ref }}
     steps:
-      - name: Resolve stable/mainline versions
+      - name: Resolve default NGINX versions
         id: resolve
         run: |
+          # Build set = nginx.org stable/mainline + common distro package versions:
+          # - deb: Ubuntu 24.04/25.10/26.04(dev), Debian 12/13
+          # - rpm: EL9 baseline + openSUSE Leap + Fedora current stable
+          # - apk: Alpine 3.22/3.23
           page="$(curl -fsSL https://nginx.org/en/download.html)"
-          versions="$(NGINX_DOWNLOAD_HTML="${page}" python3 -c 'import json, os, re, sys; html=os.environ.get(\"NGINX_DOWNLOAD_HTML\", \"\"); stable=re.search(r\"Stable version.*?nginx-([0-9]+\\.[0-9]+\\.[0-9]+)\\.tar\\.gz\", html, flags=re.IGNORECASE | re.DOTALL); mainline=re.search(r\"Mainline version.*?nginx-([0-9]+\\.[0-9]+\\.[0-9]+)\\.tar\\.gz\", html, flags=re.IGNORECASE | re.DOTALL); sys.exit(\"Failed to resolve stable/mainline versions from nginx.org\") if (not stable or not mainline) else None; out=[]; [out.append(v) for v in (stable.group(1), mainline.group(1)) if v not in out]; print(json.dumps(out))')"
+          versions="$(NGINX_DOWNLOAD_HTML="${page}" python3 -c 'import json, os, re, sys; html=os.environ.get("NGINX_DOWNLOAD_HTML", ""); stable=re.search(r"Stable version.*?nginx-([0-9]+\.[0-9]+\.[0-9]+)\.tar\.gz", html, flags=re.IGNORECASE | re.DOTALL); mainline=re.search(r"Mainline version.*?nginx-([0-9]+\.[0-9]+\.[0-9]+)\.tar\.gz", html, flags=re.IGNORECASE | re.DOTALL); sys.exit("Failed to resolve stable/mainline versions from nginx.org") if (not stable or not mainline) else None; distro_versions=["1.20.1","1.21.5","1.22.1","1.24.0","1.26.3","1.28.0","1.28.2"]; out=sorted({stable.group(1), mainline.group(1), *distro_versions}, key=lambda v: tuple(int(p) for p in v.split("."))); print(json.dumps(out))')"
 
           echo "nginx_versions=${versions}" >> "$GITHUB_OUTPUT"
 
@@ -79,7 +83,86 @@ jobs:
         with:
           path: artifacts
 
+      - name: Generate Grouped Version Manifest
+        run: |
+          python3 - <<'PY'
+          import datetime
+          import glob
+          import json
+          import os
+          import re
+
+          paths = glob.glob("artifacts/**/*.tar.gz", recursive=True)
+          pattern = re.compile(
+              r"ngx_http_markdown_filter_module-([0-9]+\.[0-9]+\.[0-9]+)-(glibc|musl)-(x86_64|aarch64)\.tar\.gz$"
+          )
+
+          by_series = {}
+          for path in paths:
+              name = os.path.basename(path)
+              match = pattern.match(name)
+              if not match:
+                  continue
+              version, os_type, arch = match.groups()
+              series = ".".join(version.split(".")[:2])
+
+              series_entry = by_series.setdefault(series, {"versions": {}, "latest": None})
+              version_entry = series_entry["versions"].setdefault(version, [])
+              target = f"{os_type}/{arch}"
+              if target not in version_entry:
+                  version_entry.append(target)
+
+              if series_entry["latest"] is None:
+                  series_entry["latest"] = version
+              else:
+                  current = tuple(int(p) for p in series_entry["latest"].split("."))
+                  candidate = tuple(int(p) for p in version.split("."))
+                  if candidate > current:
+                      series_entry["latest"] = version
+
+          for series in by_series.values():
+              for version in series["versions"].values():
+                  version.sort()
+
+          grouped = {
+              "generated_at_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+              "series": dict(
+                  sorted(
+                      by_series.items(),
+                      key=lambda item: tuple(int(p) for p in item[0].split(".")),
+                  )
+              ),
+          }
+
+          with open("artifacts/nginx-version-groups.json", "w", encoding="utf-8") as f:
+              json.dump(grouped, f, indent=2, sort_keys=False)
+              f.write("\n")
+
+          lines = [
+              "# NGINX Binary Version Groups",
+              "",
+              "Assets are grouped by major.minor for readability.",
+              "Dynamic-module compatibility still requires exact patch matching.",
+              "",
+          ]
+          for series, data in grouped["series"].items():
+              lines.append(f"## {series}.x (latest: {data['latest']})")
+              for version in sorted(
+                  data["versions"].keys(),
+                  key=lambda v: tuple(int(p) for p in v.split(".")),
+              ):
+                  targets = ", ".join(data["versions"][version])
+                  lines.append(f"- `{version}` -> {targets}")
+              lines.append("")
+
+          with open("artifacts/nginx-version-groups.md", "w", encoding="utf-8") as f:
+              f.write("\n".join(lines))
+          PY
+
       - name: Upload Assets
         uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/**/*.tar.gz
+          files: |
+            artifacts/**/*.tar.gz
+            artifacts/nginx-version-groups.json
+            artifacts/nginx-version-groups.md

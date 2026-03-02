@@ -42,7 +42,12 @@ See [Installation Guide](guides/INSTALLATION.md) for details.
 
 ### Can I use pre-compiled binaries?
 
-Currently, pre-compiled binaries are not provided due to NGINX version compatibility requirements. You must build the module against your specific NGINX version.
+Yes, for selected Linux targets, pre-compiled dynamic module binaries are published and can be installed with `tools/install.sh`.
+
+However, NGINX dynamic modules are version-specific:
+- The binary must match your `nginx -v` version exactly
+- Release assets may be grouped by major.minor for readability, but you must still use the exact patch version
+- If your version is not published yet, build from source or switch to one of the available pre-built versions
 
 ### Does it work with Docker?
 

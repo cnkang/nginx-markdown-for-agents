@@ -32,6 +32,10 @@ Run the installation script to automatically detect your NGINX version, OS, and 
 curl -sSL https://raw.githubusercontent.com/cnkang/nginx-markdown-for-agents/main/tools/install.sh | sudo bash
 ```
 
+Important notes:
+- Pre-compiled dynamic modules are NGINX-version-specific. Your local `nginx -v` version must match exactly.
+- If the exact version is not found, the installer will list available pre-built versions grouped by major.minor (for readability), but you still need an exact patch match.
+
 After the script completes, simply add the `load_module` directive to the top of your `nginx.conf`:
 
 ```nginx
