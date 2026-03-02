@@ -33,6 +33,7 @@ curl -sSL https://raw.githubusercontent.com/cnkang/nginx-markdown-for-agents/mai
 ```
 
 Important notes:
+- Minimum supported NGINX version is `1.24.0`.
 - Pre-compiled dynamic modules are NGINX-version-specific. Your local `nginx -v` version must match exactly.
 - If the exact version is not found, the installer will list available pre-built versions grouped by major.minor (for readability), but you still need an exact patch match.
 
@@ -70,7 +71,7 @@ If you use a custom NGINX build, or a platform not supported by the pre-compiled
 | **Rust Toolchain** | 1.70.0+ | Building the Rust converter |
 | **Cargo** | 1.70.0+ | Rust package manager (included with Rust) |
 | **cbindgen** | 0.24.0+ | Generating C header files from Rust |
-| **NGINX** | 1.18.0+ | Web server (source code required for module compilation) |
+| **NGINX** | 1.24.0+ | Web server (source code required for module compilation) |
 | **GCC/Clang** | GCC 4.8+ or Clang 3.4+ | C compiler for NGINX module |
 | **Make** | 3.81+ | Build automation |
 | **PCRE** | 8.0+ | Regular expression library (NGINX dependency) |

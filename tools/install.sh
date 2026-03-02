@@ -10,6 +10,38 @@ REPO="cnkang/nginx-markdown-for-agents"
 RELEASE_VERSION="${VERSION:-}"
 DOWNLOAD_URL_OVERRIDE="${DOWNLOAD_URL_OVERRIDE:-}"
 DOWNLOAD_SHA256="${DOWNLOAD_SHA256:-}"
+MIN_SUPPORTED_NGINX_VERSION="1.24.0"
+
+semver_lt() {
+  local lhs="$1"
+  local rhs="$2"
+  local l1 l2 l3 r1 r2 r3
+  local IFS='.'
+
+  read -r l1 l2 l3 <<<"$lhs"
+  read -r r1 r2 r3 <<<"$rhs"
+
+  l1="${l1:-0}"; l2="${l2:-0}"; l3="${l3:-0}"
+  r1="${r1:-0}"; r2="${r2:-0}"; r3="${r3:-0}"
+
+  if ((10#$l1 < 10#$r1)); then
+    return 0
+  elif ((10#$l1 > 10#$r1)); then
+    return 1
+  fi
+
+  if ((10#$l2 < 10#$r2)); then
+    return 0
+  elif ((10#$l2 > 10#$r2)); then
+    return 1
+  fi
+
+  if ((10#$l3 < 10#$r3)); then
+    return 0
+  fi
+
+  return 1
+}
 
 sha256_file() {
   local file="$1"
@@ -229,6 +261,14 @@ if [ -z "$NGINX_VERSION" ]; then
   exit 1
 fi
 echo "[+] Detected NGINX version: $NGINX_VERSION"
+
+if semver_lt "$NGINX_VERSION" "$MIN_SUPPORTED_NGINX_VERSION"; then
+  echo "Error: NGINX $NGINX_VERSION is not supported."
+  echo "Minimum supported NGINX version is $MIN_SUPPORTED_NGINX_VERSION."
+  echo "Support baseline was raised to simplify compatibility and release coverage."
+  echo "Please upgrade NGINX, or build and maintain your own custom module for older versions."
+  exit 1
+fi
 
 # Detect OS type (glibc vs musl)
 OS_TYPE="glibc"

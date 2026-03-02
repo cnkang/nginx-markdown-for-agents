@@ -1056,9 +1056,8 @@ curl -H "Accept: text/markdown" http://localhost/test
 
 | Module Version | NGINX Version | Status |
 |----------------|---------------|--------|
-| 1.0.x | 1.18.0 - 1.24.x | Supported |
-| 1.0.x | 1.25.x+ | Untested |
-| 1.0.x | < 1.18.0 | Not supported |
+| 1.0.x | 1.24.x+ | Supported |
+| 1.0.x | < 1.24.0 | Not supported |
 
 #### Rust Version Compatibility
 

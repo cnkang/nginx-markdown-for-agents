@@ -78,7 +78,7 @@ See [Configuration Guide](../../docs/guides/CONFIGURATION.md) for complete direc
 
 ### Prerequisites
 
-- NGINX source code (1.18.0+)
+- NGINX source code (1.24.0+)
 - Rust converter library built
 - C compiler (GCC or Clang)
 

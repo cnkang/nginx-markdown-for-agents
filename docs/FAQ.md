@@ -27,10 +27,12 @@ This project is inspired by Cloudflare's announcement but provides a self-hostab
 
 ### What are the system requirements?
 
-- **NGINX**: 1.18.0 or higher
+- **NGINX**: 1.24.0 or higher
 - **Rust**: 1.70.0 or higher (for building)
 - **Operating System**: macOS or Linux (x86_64 or aarch64)
 - **Memory**: Minimum 512MB RAM per worker (more for large documents)
+
+If your distro ships an older NGINX (for example 1.22.x or earlier), upgrade NGINX first or maintain a custom build for that version.
 
 ### Do I need to rebuild NGINX?
 

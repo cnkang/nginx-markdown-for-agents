@@ -746,7 +746,7 @@ See:
 
 - **Rust**: 1.70+ (install from [rustup.rs](https://rustup.rs/))
 - **cbindgen**: C header generator (`cargo install cbindgen`)
-- **NGINX**: 1.18.0+ source code (for module compilation)
+- **NGINX**: 1.24.0+ source code (for module compilation)
 - **GCC/Clang**: C compiler
 - **Make**: Build automation
 
