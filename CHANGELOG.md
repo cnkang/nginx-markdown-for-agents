@@ -21,6 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Enhanced documentation navigation and cross-references
 - Standardized project license declarations to BSD-2-Clause across repository docs and component metadata
 - Aligned GitHub repository metadata baseline (description/topics/labels) for issue triage and discoverability
+- Installer now auto-wires runtime configuration by generating module loader and markdown-enable snippets, with `nginx -t` validation and manual fallback guidance only when needed
+- Installer now supports both absolute and relative module load styles (for example `load_module /usr/lib/nginx/modules/...` and `load_module modules/...`) based on detected NGINX build metadata
 
 ## [0.1.0] - 2026-02-26
 

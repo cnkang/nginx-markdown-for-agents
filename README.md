@@ -63,17 +63,21 @@ If you are using an official NGINX release (like those from the `nginx` PPA, Alp
 curl -sSL https://raw.githubusercontent.com/cnkang/nginx-markdown-for-agents/main/tools/install.sh | sudo bash
 ```
 
-After the script completes, simply add the `load_module` directive to the top of your `nginx.conf`:
+After the script completes, it now auto-generates configuration snippets and runs `nginx -t` for you:
 
-```nginx
-load_module /etc/nginx/modules/ngx_http_markdown_filter_module.so;
-# Note: The script will specify the exact path to use
-```
+- It installs the module to the detected modules directory (based on `nginx -V`).
+- It generates a module loader snippet (for example `modules-enabled/50-ngx-http-markdown-filter-module.conf`).
+- It writes `load_module` using the correct runtime path style from your build:
+  - absolute style: `load_module /usr/lib/nginx/modules/ngx_http_markdown_filter_module.so;`
+  - relative style: `load_module modules/ngx_http_markdown_filter_module.so;`
+- It enables `markdown_filter on;` via `conf.d` snippet when possible, or injects into `http {}` as fallback.
 
 Then reload NGINX:
 ```bash
 sudo nginx -t && sudo nginx -s reload
 ```
+
+If `nginx -t` fails, the installer output includes manual follow-up actions.
 
 ### Installation from Source
 

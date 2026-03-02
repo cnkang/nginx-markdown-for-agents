@@ -37,12 +37,15 @@ Important notes:
 - Pre-compiled dynamic modules are NGINX-version-specific. Your local `nginx -v` version must match exactly.
 - If the exact version is not found, the installer will list available pre-built versions grouped by major.minor (for readability), but you still need an exact patch match.
 
-After the script completes, simply add the `load_module` directive to the top of your `nginx.conf`:
+After the script completes, it auto-generates and wires runtime configuration for you:
 
-```nginx
-load_module /etc/nginx/modules/ngx_http_markdown_filter_module.so;
-# Note: The script will specify the exact path to use
-```
+- Detects `nginx.conf` and modules path from `nginx -V` metadata.
+- Creates a main-context include for module snippets when needed (for example `modules-enabled/*.conf`).
+- Writes a module loader snippet, using the path style expected by your build:
+  - absolute: `load_module /usr/lib/nginx/modules/ngx_http_markdown_filter_module.so;`
+  - relative: `load_module modules/ngx_http_markdown_filter_module.so;`
+- Enables `markdown_filter on;` automatically (prefer `conf.d` snippet, fallback to `http {}` insertion).
+- Runs `nginx -t` and prints a targeted manual-action list only if auto wiring is incomplete.
 
 Then reload NGINX:
 ```bash

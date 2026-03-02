@@ -239,6 +239,120 @@ for series in sorted(groups.keys(), key=lambda s: tuple(int(p) for p in s.split(
 PY
 }
 
+extract_configure_arg() {
+  local key="$1"
+  local nginx_v_output="$2"
+  printf '%s\n' "$nginx_v_output" | sed -n "s/.*--${key}=\\([^ ]*\\).*/\\1/p" | head -n1
+}
+
+resolve_path_with_prefix() {
+  local candidate="$1"
+  local prefix="$2"
+
+  if [ -z "$candidate" ]; then
+    printf '\n'
+    return 0
+  fi
+
+  if [[ "$candidate" = /* ]]; then
+    printf '%s\n' "$candidate"
+    return 0
+  fi
+
+  if [ -n "$prefix" ]; then
+    printf '%s/%s\n' "${prefix%/}" "$candidate"
+  else
+    printf '%s\n' "$candidate"
+  fi
+}
+
+resolve_include_dir() {
+  local include_pattern="$1"
+  local conf_dir="$2"
+  local include_dir
+
+  include_dir="$(dirname "$include_pattern")"
+  if [ "$include_dir" = "." ]; then
+    include_dir="$conf_dir"
+  fi
+
+  if [[ "$include_dir" != /* ]]; then
+    include_dir="${conf_dir%/}/${include_dir}"
+  fi
+
+  printf '%s\n' "$include_dir"
+}
+
+backup_file_once() {
+  local file="$1"
+  local backup_file="${file}.bak.nginx-markdown-for-agents"
+  if [ ! -f "$backup_file" ]; then
+    cp "$file" "$backup_file"
+  fi
+}
+
+ensure_main_include_directive() {
+  local conf_file="$1"
+  local include_directive="$2"
+
+  if grep -Fq "$include_directive" "$conf_file"; then
+    return 0
+  fi
+
+  backup_file_once "$conf_file"
+
+  local tmp_file
+  tmp_file="$(mktemp)"
+
+  awk -v include_line="$include_directive" '
+    BEGIN { inserted = 0 }
+    /^[[:space:]]*(events|http|stream|mail)[[:space:]]*\{/ && inserted == 0 {
+      print include_line
+      inserted = 1
+    }
+    { print }
+    END {
+      if (inserted == 0) {
+        print include_line
+      }
+    }
+  ' "$conf_file" > "$tmp_file"
+
+  cat "$tmp_file" > "$conf_file"
+  rm -f "$tmp_file"
+}
+
+insert_markdown_filter_into_http_block() {
+  local conf_file="$1"
+
+  local tmp_file
+  tmp_file="$(mktemp)"
+
+  if ! awk '
+    BEGIN { inserted = 0 }
+    /^[[:space:]]*http[[:space:]]*\{/ && inserted == 0 {
+      print
+      print "    markdown_filter on;"
+      inserted = 1
+      next
+    }
+    { print }
+    END {
+      if (inserted == 0) {
+        exit 1
+      }
+    }
+  ' "$conf_file" > "$tmp_file"; then
+    rm -f "$tmp_file"
+    return 1
+  fi
+
+  backup_file_once "$conf_file"
+  cat "$tmp_file" > "$conf_file"
+  rm -f "$tmp_file"
+  return 0
+}
+
 echo "=================================================================================="
 echo " NGINX Markdown for Agents - Binary Module Installer"
 echo "=================================================================================="
@@ -248,19 +362,38 @@ if [ "$EUID" -ne 0 ]; then
   exit 1
 fi
 
-# Detect Nginx version
+# Detect Nginx runtime/build metadata
 if ! command -v nginx > /dev/null 2>&1; then
   echo "Error: nginx is not installed or not in PATH."
   echo "Please install NGINX first before running this script."
   exit 1
 fi
 
-NGINX_VERSION="$(nginx -v 2>&1 | grep -oE 'nginx/[0-9]+\.[0-9]+\.[0-9]+' | cut -d/ -f2)"
+NGINX_V_OUTPUT="$(nginx -V 2>&1)"
+NGINX_VERSION="$(printf '%s\n' "$NGINX_V_OUTPUT" | grep -oE 'nginx/[0-9]+\.[0-9]+\.[0-9]+' | cut -d/ -f2)"
 if [ -z "$NGINX_VERSION" ]; then
   echo "Error: Could not determine NGINX version."
   exit 1
 fi
 echo "[+] Detected NGINX version: $NGINX_VERSION"
+
+NGINX_PREFIX_RAW="$(extract_configure_arg "prefix" "$NGINX_V_OUTPUT")"
+NGINX_MODULES_PATH_RAW="$(extract_configure_arg "modules-path" "$NGINX_V_OUTPUT")"
+NGINX_CONF_PATH_RAW="$(extract_configure_arg "conf-path" "$NGINX_V_OUTPUT")"
+
+NGINX_PREFIX="$(resolve_path_with_prefix "$NGINX_PREFIX_RAW" "")"
+NGINX_MODULES_PATH="$(resolve_path_with_prefix "$NGINX_MODULES_PATH_RAW" "$NGINX_PREFIX")"
+NGINX_CONF_PATH="$(resolve_path_with_prefix "$NGINX_CONF_PATH_RAW" "$NGINX_PREFIX")"
+
+if [ -z "$NGINX_CONF_PATH" ]; then
+  NGINX_CONF_PATH="/etc/nginx/nginx.conf"
+fi
+NGINX_CONF_DIR="$(dirname "$NGINX_CONF_PATH")"
+
+echo "[+] NGINX conf path: $NGINX_CONF_PATH"
+if [ -n "$NGINX_MODULES_PATH_RAW" ]; then
+  echo "[+] NGINX modules path from build: $NGINX_MODULES_PATH_RAW"
+fi
 
 if semver_lt "$NGINX_VERSION" "$MIN_SUPPORTED_NGINX_VERSION"; then
   echo "Error: NGINX $NGINX_VERSION is not supported."
@@ -376,9 +509,11 @@ if [ ! -f "$MODULE_SO" ]; then
 fi
 
 # Determine NGINX modules directory
-# Official NGINX packages usually use /usr/lib/nginx/modules or /etc/nginx/modules
+# Prefer the build-time path from nginx -V when available.
 MODULES_DIR=""
-if [ -d "/etc/nginx/modules" ]; then
+if [ -n "$NGINX_MODULES_PATH" ]; then
+  MODULES_DIR="$NGINX_MODULES_PATH"
+elif [ -d "/etc/nginx/modules" ]; then
   MODULES_DIR="/etc/nginx/modules"
 elif [ -d "/usr/lib/nginx/modules" ]; then
   MODULES_DIR="/usr/lib/nginx/modules"
@@ -387,24 +522,140 @@ elif [ -d "/usr/share/nginx/modules" ]; then
 elif [ -d "/usr/local/nginx/modules" ]; then
   MODULES_DIR="/usr/local/nginx/modules"
 else
-  # Default fallback
   MODULES_DIR="/etc/nginx/modules"
-  mkdir -p "$MODULES_DIR"
 fi
+mkdir -p "$MODULES_DIR"
 
 echo "[+] Installing module to $MODULES_DIR/"
 cp "$MODULE_SO" "$MODULES_DIR/"
 chmod 644 "$MODULES_DIR/$MODULE_SO"
 
+MODULE_LOAD_PATH="${MODULES_DIR%/}/${MODULE_SO}"
+if [ -n "$NGINX_MODULES_PATH_RAW" ]; then
+  MODULE_LOAD_PATH="${NGINX_MODULES_PATH_RAW%/}/${MODULE_SO}"
+fi
+
+MODULE_CONF_SNIPPET=""
+MARKDOWN_CONF_SNIPPET=""
+MODULE_ALREADY_CONFIGURED=0
+MARKDOWN_ALREADY_CONFIGURED=0
+MARKDOWN_INSERTED_IN_MAIN=0
+MANUAL_ACTIONS=()
+
+if [ -f "$NGINX_CONF_PATH" ]; then
+  if [ -d "$NGINX_CONF_DIR" ] && grep -R --include='*.conf' -Eq "^[[:space:]]*load_module[[:space:]]+.*${MODULE_SO}[[:space:]]*;" "$NGINX_CONF_DIR"; then
+    MODULE_ALREADY_CONFIGURED=1
+  fi
+
+  MODULE_INCLUDE_PATTERN="$(grep -E '^[[:space:]]*include[[:space:]]+[^;]*(modules|modules-enabled)[^;]*\.conf[[:space:]]*;' "$NGINX_CONF_PATH" | sed -E 's/^[[:space:]]*include[[:space:]]+([^;]+);/\1/' | head -n1 || true)"
+  if [ -z "$MODULE_INCLUDE_PATTERN" ]; then
+    MODULE_INCLUDE_PATTERN="${NGINX_CONF_DIR%/}/modules-enabled/*.conf"
+    ensure_main_include_directive "$NGINX_CONF_PATH" "include ${MODULE_INCLUDE_PATTERN};"
+    echo "[+] Added main-context include: include ${MODULE_INCLUDE_PATTERN};"
+  fi
+
+  if [ "$MODULE_ALREADY_CONFIGURED" -eq 0 ]; then
+    MODULE_INCLUDE_DIR="$(resolve_include_dir "$MODULE_INCLUDE_PATTERN" "$NGINX_CONF_DIR")"
+    mkdir -p "$MODULE_INCLUDE_DIR"
+    MODULE_CONF_SNIPPET="${MODULE_INCLUDE_DIR%/}/50-ngx-http-markdown-filter-module.conf"
+    cat > "$MODULE_CONF_SNIPPET" <<EOF
+# Generated by nginx-markdown-for-agents install.sh
+load_module ${MODULE_LOAD_PATH};
+EOF
+    chmod 644 "$MODULE_CONF_SNIPPET"
+    echo "[+] Wrote module loader snippet: $MODULE_CONF_SNIPPET"
+  else
+    echo "[+] Existing load_module directive found for ${MODULE_SO}, skipping snippet creation"
+  fi
+
+  if [ -d "$NGINX_CONF_DIR" ] && grep -R --include='*.conf' -Eq "^[[:space:]]*markdown_filter[[:space:]]+on[[:space:]]*;" "$NGINX_CONF_DIR"; then
+    MARKDOWN_ALREADY_CONFIGURED=1
+  fi
+
+  if [ "$MARKDOWN_ALREADY_CONFIGURED" -eq 0 ]; then
+    HTTP_INCLUDE_PATTERN="$(grep -E '^[[:space:]]*include[[:space:]]+[^;]*conf\.d/[^;]*\.conf[[:space:]]*;' "$NGINX_CONF_PATH" | sed -E 's/^[[:space:]]*include[[:space:]]+([^;]+);/\1/' | head -n1 || true)"
+    if [ -n "$HTTP_INCLUDE_PATTERN" ]; then
+      HTTP_INCLUDE_DIR="$(resolve_include_dir "$HTTP_INCLUDE_PATTERN" "$NGINX_CONF_DIR")"
+      mkdir -p "$HTTP_INCLUDE_DIR"
+      MARKDOWN_CONF_SNIPPET="${HTTP_INCLUDE_DIR%/}/90-markdown-filter-enable.conf"
+      cat > "$MARKDOWN_CONF_SNIPPET" <<'EOF'
+# Generated by nginx-markdown-for-agents install.sh
+markdown_filter on;
+
+# Optional tuning examples:
+# markdown_max_size 5m;
+# markdown_on_error pass;
+EOF
+      chmod 644 "$MARKDOWN_CONF_SNIPPET"
+      echo "[+] Wrote markdown enable snippet: $MARKDOWN_CONF_SNIPPET"
+    else
+      if insert_markdown_filter_into_http_block "$NGINX_CONF_PATH"; then
+        MARKDOWN_INSERTED_IN_MAIN=1
+        echo "[+] Injected 'markdown_filter on;' into http block of $NGINX_CONF_PATH"
+      else
+        MANUAL_ACTIONS+=("Add 'markdown_filter on;' into your http/server/location block.")
+      fi
+    fi
+  else
+    echo "[+] Existing 'markdown_filter on;' directive found, skipping auto-enable"
+  fi
+else
+  MANUAL_ACTIONS+=("Could not find nginx.conf at $NGINX_CONF_PATH. Add a load_module line and enable markdown_filter manually.")
+fi
+
+NGINX_TEST_RESULT="not-run"
+NGINX_TEST_LOG="$(mktemp)"
+if nginx -t >"$NGINX_TEST_LOG" 2>&1; then
+  NGINX_TEST_RESULT="ok"
+else
+  NGINX_TEST_RESULT="failed"
+fi
+
 echo "=================================================================================="
 echo " Installation Complete!"
 echo "=================================================================================="
-echo "Next steps:"
-echo "1. Edit your nginx.conf and add the following at the top (main context):"
-echo "   load_module $MODULES_DIR/ngx_http_markdown_filter_module.so;"
+echo "Auto-generated configuration:"
+if [ -n "$MODULE_CONF_SNIPPET" ]; then
+  echo "1. Module loader snippet: $MODULE_CONF_SNIPPET"
+  echo "   -> load_module ${MODULE_LOAD_PATH};"
+elif [ "$MODULE_ALREADY_CONFIGURED" -eq 1 ]; then
+  echo "1. Module loader already exists in current nginx config."
+else
+  echo "1. Module loader snippet was not created automatically."
+fi
+
+if [ -n "$MARKDOWN_CONF_SNIPPET" ]; then
+  echo "2. Markdown enable snippet: $MARKDOWN_CONF_SNIPPET"
+  echo "   -> markdown_filter on;"
+elif [ "$MARKDOWN_ALREADY_CONFIGURED" -eq 1 ]; then
+  echo "2. markdown_filter is already enabled in current nginx config."
+elif [ "$MARKDOWN_INSERTED_IN_MAIN" -eq 1 ]; then
+  echo "2. Added 'markdown_filter on;' directly into $NGINX_CONF_PATH (http block)."
+else
+  echo "2. markdown_filter was not auto-enabled."
+fi
+
+if [ "${#MANUAL_ACTIONS[@]}" -gt 0 ]; then
+  echo ""
+  echo "Manual actions required:"
+  for action in "${MANUAL_ACTIONS[@]}"; do
+    echo " - $action"
+  done
+fi
+
 echo ""
-echo "2. Add 'markdown_filter on;' in your http, server, or location block."
+if [ "$NGINX_TEST_RESULT" = "ok" ]; then
+  echo "[+] nginx -t passed"
+  echo "Run: nginx -s reload"
+else
+  echo "[!] nginx -t failed. Review errors below:"
+  sed -n '1,20p' "$NGINX_TEST_LOG"
+  echo "Fix config and run: nginx -t && nginx -s reload"
+fi
+rm -f "$NGINX_TEST_LOG"
+
 echo ""
-echo "3. Test config and reload NGINX:"
-echo "   nginx -t && nginx -s reload"
+echo "You can continue fine-tuning later (recommended):"
+echo "- Scope rollout with server/location-level markdown_filter on/off"
+echo "- Adjust markdown_max_size / markdown_on_error by workload"
 echo "=================================================================================="
