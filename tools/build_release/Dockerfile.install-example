@@ -1,0 +1,29 @@
+# Example Dockerfile showing optimized installation
+# This demonstrates how to use the install script efficiently in Docker builds
+
+ARG NGINX_VERSION=1.28.2
+FROM nginx:${NGINX_VERSION}-alpine
+
+# Install dependencies needed by the install script
+RUN apk add --no-cache \
+    bash \
+    curl \
+    python3 \
+    tar \
+    gzip
+
+# Use the install script directly from GitHub (recommended for production)
+# This avoids copying the entire project context
+RUN SKIP_ROOT_CHECK=1 \
+    curl -sSL https://raw.githubusercontent.com/cnkang/nginx-markdown-for-agents/main/tools/install.sh | bash
+
+# OR: If you need a specific version
+# RUN SKIP_ROOT_CHECK=1 VERSION=v0.1.0 \
+#     curl -sSL https://raw.githubusercontent.com/cnkang/nginx-markdown-for-agents/main/tools/install.sh | bash
+
+# OR: For local development/testing, copy only the install script
+# COPY tools/install.sh /tmp/install.sh
+# RUN SKIP_ROOT_CHECK=1 bash /tmp/install.sh && rm /tmp/install.sh
+
+EXPOSE 80
+CMD ["nginx", "-g", "daemon off;"]

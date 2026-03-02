@@ -5,6 +5,8 @@ set -euo pipefail
 # Usage: curl -sSL https://raw.githubusercontent.com/cnkang/nginx-markdown-for-agents/main/tools/install.sh | sudo bash
 # OR (if using specific release version):
 # VERSION=v0.1.0 curl -sSL https://raw.githubusercontent.com/cnkang/nginx-markdown-for-agents/main/tools/install.sh | sudo bash
+# OR (in Docker, skip root check):
+# SKIP_ROOT_CHECK=1 bash /path/to/install.sh
 
 REPO="cnkang/nginx-markdown-for-agents"
 RELEASE_VERSION="${VERSION:-}"
@@ -357,7 +359,7 @@ echo "==========================================================================
 echo " NGINX Markdown for Agents - Binary Module Installer"
 echo "=================================================================================="
 
-if [ "$EUID" -ne 0 ]; then
+if [ "${SKIP_ROOT_CHECK:-0}" != "1" ] && [ "$EUID" -ne 0 ]; then
   echo "Please run as root (or with sudo)."
   exit 1
 fi
