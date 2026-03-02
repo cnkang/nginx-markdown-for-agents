@@ -3,24 +3,36 @@
 UNAME_S := $(shell uname -s)
 UNAME_M := $(shell uname -m)
 
-ifeq ($(UNAME_S),Darwin)
-  ifeq ($(UNAME_M),arm64)
-    RUST_TARGET = aarch64-apple-darwin
-  else ifeq ($(UNAME_M),x86_64)
-    RUST_TARGET = x86_64-apple-darwin
+LINUX_LIBC := $(shell if command -v ldd >/dev/null 2>&1 && ldd --version 2>&1 | grep -qi musl; then echo musl; elif command -v ldd >/dev/null 2>&1 && ldd /bin/sh 2>&1 | grep -qi musl; then echo musl; else echo gnu; fi)
+
+ifndef RUST_TARGET
+  ifeq ($(UNAME_S),Darwin)
+    ifeq ($(UNAME_M),arm64)
+      RUST_TARGET = aarch64-apple-darwin
+    else ifeq ($(UNAME_M),x86_64)
+      RUST_TARGET = x86_64-apple-darwin
+    else
+      $(error Unsupported Darwin architecture: $(UNAME_M))
+    endif
+  else ifeq ($(UNAME_S),Linux)
+    ifeq ($(UNAME_M),aarch64)
+      ifeq ($(LINUX_LIBC),musl)
+        RUST_TARGET = aarch64-unknown-linux-musl
+      else
+        RUST_TARGET = aarch64-unknown-linux-gnu
+      endif
+    else ifeq ($(UNAME_M),x86_64)
+      ifeq ($(LINUX_LIBC),musl)
+        RUST_TARGET = x86_64-unknown-linux-musl
+      else
+        RUST_TARGET = x86_64-unknown-linux-gnu
+      endif
+    else
+      $(error Unsupported Linux architecture: $(UNAME_M))
+    endif
   else
-    $(error Unsupported Darwin architecture: $(UNAME_M))
+    $(error Unsupported OS/architecture: $(UNAME_S)/$(UNAME_M))
   endif
-else ifeq ($(UNAME_S),Linux)
-  ifeq ($(UNAME_M),aarch64)
-    RUST_TARGET = aarch64-unknown-linux-gnu
-  else ifeq ($(UNAME_M),x86_64)
-    RUST_TARGET = x86_64-unknown-linux-gnu
-  else
-    $(error Unsupported Linux architecture: $(UNAME_M))
-  endif
-else
-  $(error Unsupported OS/architecture: $(UNAME_S)/$(UNAME_M))
 endif
 
 RUST_DIR := components/rust-converter
