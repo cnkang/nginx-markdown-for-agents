@@ -20,14 +20,40 @@ The NGINX Markdown filter module enables AI agents to retrieve web content in Ma
 - **Rust converter**: HTML-to-Markdown conversion library (`libnginx_markdown_converter.a`)
 - **NGINX filter module (C)**: NGINX integration layer that invokes the Rust converter via FFI
 
-This guide provides step-by-step instructions for building and installing the module on various platforms.
+This guide provides step-by-step instructions for installing the module. The easiest and recommended way is to use the pre-compiled binaries via the installation script. Alternatively, you can build the module from source.
+
+### Setup using Pre-Compiled Binaries (Recommended)
+
+If you are using an official NGINX build (like those from the `nginx` PPA, Alpine `nginx` package, or the official Docker images), you can install the module without compiling anything. 
+
+Run the installation script to automatically detect your NGINX version, OS, and Architecture, and download the correct pre-compiled module:
+
+```bash
+curl -sSL https://raw.githubusercontent.com/cnkang/nginx-markdown-for-agents/main/tools/install.sh | sudo bash
+```
+
+After the script completes, simply add the `load_module` directive to the top of your `nginx.conf`:
+
+```nginx
+load_module /etc/nginx/modules/ngx_http_markdown_filter_module.so;
+# Note: The script will specify the exact path to use
+```
+
+Then reload NGINX:
+```bash
+sudo nginx -t && sudo nginx -s reload
+```
+
+### Installation from Source
+
+If you use a custom NGINX build, or a platform not supported by the pre-compiled binaries, follow the instructions below to compile from source.
 
 ### Scope and Verification Notes
 
-- This guide includes both Rust converter build steps and manual NGINX module compilation steps.
+- This guide includes both Rust converter build steps and manual NGINX module compilation steps for custom builds.
 - The top-level repository `Makefile` builds the Rust library and generated header, but does **not** currently compile NGINX itself.
 - NGINX compilation and installation steps in this document require a local NGINX source tree and platform-specific build dependencies.
-- For local development builds and standalone test binaries, see `BUILD_INSTRUCTIONS.md`.
+- For local development builds and standalone test binaries, see `docs/guides/BUILD_INSTRUCTIONS.md`.
 
 ---
 

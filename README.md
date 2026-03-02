@@ -55,9 +55,29 @@ This project uses C and Rust together for practical reasons:
 
 ## Build & Quick Start
 
-### Quick Start (Fastest Path)
+### Pre-compiled Binary Installation (Recommended)
 
-If you just want to confirm the project builds and the converter integration works locally (without building NGINX itself), the shortest path is:
+If you are using an official NGINX release (like those from the `nginx` PPA, Alpine `nginx` package, or official Docker images), the easiest way to install the module is using the installation script. This avoids the need to compile Rust or C code.
+
+```bash
+curl -sSL https://raw.githubusercontent.com/cnkang/nginx-markdown-for-agents/main/tools/install.sh | sudo bash
+```
+
+After the script completes, simply add the `load_module` directive to the top of your `nginx.conf`:
+
+```nginx
+load_module /etc/nginx/modules/ngx_http_markdown_filter_module.so;
+# Note: The script will specify the exact path to use
+```
+
+Then reload NGINX:
+```bash
+sudo nginx -t && sudo nginx -s reload
+```
+
+### Installation from Source
+
+If you want to compile the module from source, the shortest path to confirm the project builds locally is:
 
 ```bash
 # One-time setup

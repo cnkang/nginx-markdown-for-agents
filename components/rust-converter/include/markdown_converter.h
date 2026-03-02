@@ -129,6 +129,7 @@ typedef struct MarkdownConverterHandle MarkdownConverterHandle;
  * - `content_type`: Optional Content-Type header value for charset detection
  *   - Pointer to UTF-8 string (e.g., "text/html; charset=UTF-8")
  *   - NULL if not available
+ *   - If pointer is NULL, `content_type_len` must be 0
  *   - Used for charset detection cascade (FR-05.1)
  *
  * - `content_type_len`: Length of content_type string in bytes
@@ -137,6 +138,7 @@ typedef struct MarkdownConverterHandle MarkdownConverterHandle;
  * - `base_url`: Optional base URL for resolving relative URLs in HTML
  *   - Pointer to UTF-8 string (e.g., "https://example.com/page")
  *   - NULL if not available
+ *   - If pointer is NULL, `base_url_len` must be 0
  *   - Used for metadata extraction and URL resolution
  *   - Format: scheme://host/path (e.g., "https://example.com/docs/page.html")
  *
@@ -417,8 +419,9 @@ struct MarkdownConverterHandle *markdown_converter_new(void);
  *   - Must not be used concurrently from multiple threads
  *
  * - `html`: Pointer to HTML input bytes
- *   - Must be non-NULL
+ *   - Must be non-NULL when `html_len > 0`
  *   - Must point to valid memory of at least `html_len` bytes
+ *   - May be NULL when `html_len == 0`
  *   - Should be valid UTF-8 (invalid UTF-8 will cause encoding error)
  *   - Content is not modified (read-only)
  *
