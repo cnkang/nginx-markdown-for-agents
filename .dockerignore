@@ -1,0 +1,43 @@
+# Rust build artifacts
+**/target/
+**/*.rs.bk
+**/Cargo.lock
+
+# Git
+.git/
+.github/
+.gitignore
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Kiro and Serena
+.kiro/
+.serena/
+
+# Build artifacts
+**/build/
+**/*.o
+**/*.so
+**/*.a
+**/*.dylib
+
+# Test artifacts
+components/nginx-module/tests/build/
+
+# Documentation (if not needed for build)
+*.md
+!README.md
+
+# Logs
+*.log
+
+# Temporary files
+tmp/
+temp/
+*.tmp
