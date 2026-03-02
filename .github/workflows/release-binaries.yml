@@ -1,0 +1,85 @@
+name: Release Binaries
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Git ref to build (e.g. v1.0.0, main, or commit SHA)'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    name: Resolve NGINX Versions
+    runs-on: ubuntu-latest
+    outputs:
+      nginx_versions: ${{ steps.resolve.outputs.nginx_versions }}
+      checkout_ref: ${{ steps.checkout_ref.outputs.checkout_ref }}
+    steps:
+      - name: Resolve stable/mainline versions
+        id: resolve
+        run: |
+          page="$(curl -fsSL https://nginx.org/en/download.html)"
+          versions="$(NGINX_DOWNLOAD_HTML="${page}" python3 -c 'import json, os, re, sys; html=os.environ.get(\"NGINX_DOWNLOAD_HTML\", \"\"); stable=re.search(r\"Stable version.*?nginx-([0-9]+\\.[0-9]+\\.[0-9]+)\\.tar\\.gz\", html, flags=re.IGNORECASE | re.DOTALL); mainline=re.search(r\"Mainline version.*?nginx-([0-9]+\\.[0-9]+\\.[0-9]+)\\.tar\\.gz\", html, flags=re.IGNORECASE | re.DOTALL); sys.exit(\"Failed to resolve stable/mainline versions from nginx.org\") if (not stable or not mainline) else None; out=[]; [out.append(v) for v in (stable.group(1), mainline.group(1)) if v not in out]; print(json.dumps(out))')"
+
+          echo "nginx_versions=${versions}" >> "$GITHUB_OUTPUT"
+
+      - id: checkout_ref
+        env:
+          VERSION_INPUT: ${{ github.event.inputs.version || '' }}
+          DEFAULT_REF: ${{ github.ref }}
+        run: |
+          ref="${DEFAULT_REF}"
+          if [ -n "${VERSION_INPUT}" ]; then
+            ref="${VERSION_INPUT}"
+          fi
+          echo "checkout_ref=${ref}" >> "$GITHUB_OUTPUT"
+
+  build-binaries:
+    name: Build - NGINX ${{ matrix.nginx }} - ${{ matrix.os_type }} - ${{ matrix.arch }}
+    needs: prepare
+    runs-on: ${{ matrix.arch == 'aarch64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
+    strategy:
+      matrix:
+        nginx: ${{ fromJson(needs.prepare.outputs.nginx_versions) }}
+        os_type: ['glibc', 'musl']
+        arch: ['x86_64', 'aarch64']
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.checkout_ref }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Module
+        run: |
+          ./tools/build_release.sh ${{ matrix.nginx }} ${{ matrix.os_type }} ${{ matrix.arch }}
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ngx_http_markdown_filter_module-${{ matrix.nginx }}-${{ matrix.os_type }}-${{ matrix.arch }}
+          path: dist/${{ matrix.nginx }}-${{ matrix.os_type }}-${{ matrix.arch }}/*.tar.gz
+
+  publish-release:
+    name: Publish Binaries to Release
+    needs: build-binaries
+    runs-on: ubuntu-latest
+    if: github.event_name == 'release'
+    steps:
+      - name: Download Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Upload Assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*.tar.gz

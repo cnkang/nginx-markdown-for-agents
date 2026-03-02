@@ -1,0 +1,35 @@
+# tools/build_release/Dockerfile.musl
+ARG OS_BASE=alpine:3.20
+FROM ${OS_BASE}
+
+RUN apk add --no-cache \
+    build-base \
+    pcre-dev \
+    zlib-dev \
+    openssl-dev \
+    linux-headers \
+    curl \
+    python3
+
+# Install Rust
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+ENV PATH="/root/.cargo/bin:${PATH}"
+RUN cargo install cbindgen
+
+ARG NGINX_VERSION=1.28.2
+
+WORKDIR /build
+RUN curl -fsSL "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" | tar xz
+
+COPY . /src
+
+WORKDIR /src
+RUN rm -rf components/rust-converter/target
+RUN make build
+
+WORKDIR /build/nginx-${NGINX_VERSION}
+RUN ./configure --with-compat --add-dynamic-module=/src/components/nginx-module \
+    && make modules
+
+RUN mkdir /out \
+    && cp objs/ngx_http_markdown_filter_module.so /out/ngx_http_markdown_filter_module.so
