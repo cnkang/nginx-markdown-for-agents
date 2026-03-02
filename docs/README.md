@@ -29,6 +29,7 @@ User-facing and maintainer-facing operational documentation:
 - build and local smoke-test workflow
 - installation and NGINX integration setup
 - directive configuration reference
+- deployment examples, verification steps, and common deployment notes
 - operational monitoring and troubleshooting guidance
 
 Index: [guides/README.md](guides/README.md)

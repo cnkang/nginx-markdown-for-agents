@@ -7,6 +7,7 @@ This directory contains maintained operator and maintainer guides for building, 
 - [BUILD_INSTRUCTIONS.md](BUILD_INSTRUCTIONS.md) - local build, smoke-test, and development workflows
 - [INSTALLATION.md](INSTALLATION.md) - platform prerequisites and NGINX module installation
 - [CONFIGURATION.md](CONFIGURATION.md) - directive reference and configuration examples
+- [DEPLOYMENT_EXAMPLES.md](DEPLOYMENT_EXAMPLES.md) - NGINX config examples, verification steps, and common deployment notes
 - [OPERATIONS.md](OPERATIONS.md) - monitoring, troubleshooting, runbooks, and operations guidance
 
 ## Usage Order (Recommended)

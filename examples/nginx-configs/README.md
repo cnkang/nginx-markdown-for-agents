@@ -55,5 +55,5 @@ Before deploying to production:
 
 For issues or questions:
 - Check the [troubleshooting guide](../../docs/guides/OPERATIONS.md#troubleshooting)
-- Review [common issues](../../README.md#common-issues-quick-reference)
+- Review [deployment examples](../../docs/guides/DEPLOYMENT_EXAMPLES.md)
 - Consult your repository's issue tracker

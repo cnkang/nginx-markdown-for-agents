@@ -378,6 +378,7 @@ The project is organized as:
 ### Where can I find more documentation?
 
 - [README](../README.md) - Project overview and quick start
+- [Deployment Examples](guides/DEPLOYMENT_EXAMPLES.md) - NGINX config examples and verification
 - [Build Instructions](guides/BUILD_INSTRUCTIONS.md) - Building the module
 - [Installation Guide](guides/INSTALLATION.md) - Installation steps
 - [Configuration Guide](guides/CONFIGURATION.md) - Configuration reference
