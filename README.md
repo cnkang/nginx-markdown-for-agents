@@ -1,5 +1,8 @@
 # NGINX Markdown for Agents
 
+[![CI](https://github.com/cnkang/nginx-markdown-for-agents/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/cnkang/nginx-markdown-for-agents/actions/workflows/ci.yml) [![Security Scanning](https://github.com/cnkang/nginx-markdown-for-agents/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/cnkang/nginx-markdown-for-agents/actions/workflows/codeql.yml) [![Known Vulnerabilities](https://snyk.io/test/github/cnkang/nginx-markdown-for-agents/badge.svg)](https://snyk.io/test/github/cnkang/nginx-markdown-for-agents) [![Release Binaries](https://github.com/cnkang/nginx-markdown-for-agents/actions/workflows/release-binaries.yml/badge.svg)](https://github.com/cnkang/nginx-markdown-for-agents/actions/workflows/release-binaries.yml)
+[![License](https://img.shields.io/github/license/cnkang/nginx-markdown-for-agents)](https://github.com/cnkang/nginx-markdown-for-agents/blob/main/LICENSE) [![NGINX](https://img.shields.io/badge/NGINX-%3E%3D1.24.0-009639?logo=nginx&logoColor=white)](https://github.com/cnkang/nginx-markdown-for-agents/blob/main/docs/guides/INSTALLATION.md) [![libc](https://img.shields.io/badge/libc-glibc%20%7C%20musl-2ea44f)](https://github.com/cnkang/nginx-markdown-for-agents/actions/workflows/release-binaries.yml) [![arch](https://img.shields.io/badge/arch-x86__64%20%7C%20aarch64-555)](https://github.com/cnkang/nginx-markdown-for-agents/actions/workflows/release-binaries.yml) [![Latest Release](https://img.shields.io/github/v/release/cnkang/nginx-markdown-for-agents?sort=semver)](https://github.com/cnkang/nginx-markdown-for-agents/releases)
+
 An NGINX module that converts HTML to Markdown for AI agents through HTTP content negotiation.
 
 Inspired by Cloudflare's [Markdown for Agents](https://blog.cloudflare.com/markdown-for-agents/) announcement, this project explores the same agent-friendly content delivery idea as a self-hostable NGINX filter module.
@@ -637,6 +640,12 @@ Notes:
   - Path-aware CI entrypoint for PR/push
   - Runs docs checks, Rust quality gate (`fmt`/`clippy`/tests), NGINX C unit + integration-c tests
   - Runs real NGINX large-response E2E regression for relevant changes
+- `.github/workflows/codeql.yml`
+  - Security scanning workflow (`CodeQL` + Rust security/quality checks)
+  - Runs on PR/push for code/security-relevant paths, scheduled weekly, and manual dispatch
+- `.github/workflows/release-binaries.yml`
+  - Builds and publishes release artifacts for multiple NGINX versions and target platforms
+  - Supports release-triggered publish and manual build dispatch
 - `.github/workflows/real-nginx-ims.yml`
   - Dedicated real-NGINX delegated `If-Modified-Since` validation
   - Runs matrix jobs for latest `stable` and `mainline` NGINX channels in isolated ports/environments
