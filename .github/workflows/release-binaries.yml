@@ -67,7 +67,7 @@ jobs:
           ./tools/build_release.sh ${{ matrix.nginx }} ${{ matrix.os_type }} ${{ matrix.arch }}
 
       - name: Upload Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ngx_http_markdown_filter_module-${{ matrix.nginx }}-${{ matrix.os_type }}-${{ matrix.arch }}
           path: dist/${{ matrix.nginx }}-${{ matrix.os_type }}-${{ matrix.arch }}/*.tar.gz
