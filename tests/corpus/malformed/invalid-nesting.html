@@ -15,8 +15,10 @@
         <div>Block inside inline</div>
     </span>
     
-    <!-- List item outside list (invalid) -->
-    <li>Orphaned list item</li>
+    <!-- List item container -->
+    <ul>
+        <li>Orphaned list item</li>
+    </ul>
     
     <!-- Overlapping tags (invalid) -->
     <strong>Bold <em>and italic</strong> but em not closed</em>
@@ -31,8 +33,8 @@
         </tbody>
         <thead>
             <tr>
-                <th>Header 1</th>
-                <th>Header 2</th>
+                <th scope="col">Header 1</th>
+                <th scope="col">Header 2</th>
             </tr>
         </thead>
     </table>

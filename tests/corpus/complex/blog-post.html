@@ -18,7 +18,7 @@
     
     <!-- Header with navigation -->
     <header class="site-header">
-        <nav>
+        <nav aria-label="Primary">
             <a href="/">Home</a>
             <a href="/blog">Blog</a>
             <a href="/about">About</a>
@@ -27,7 +27,7 @@
     </header>
     
     <!-- Sidebar with ads (should be removed) -->
-    <aside class="sidebar">
+    <aside class="sidebar" aria-label="Sidebar">
         <div class="ad-banner">
             <img src="/ads/banner.jpg" alt="Advertisement">
         </div>
@@ -134,7 +134,7 @@ ngx_http_markdown_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
         </div>
         
         <!-- Related posts (may be simplified) -->
-        <aside class="related-posts">
+        <aside class="related-posts" aria-label="Related posts">
             <h3>Related Posts</h3>
             <ul>
                 <li><a href="/post1">Introduction to NGINX Modules</a></li>
@@ -153,7 +153,7 @@ ngx_http_markdown_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
     <!-- Footer -->
     <footer class="site-footer">
         <p>© 2026 Example Blog. All rights reserved.</p>
-        <nav>
+        <nav aria-label="Footer">
             <a href="/privacy">Privacy</a>
             <a href="/terms">Terms</a>
         </nav>
