@@ -446,8 +446,12 @@ ngx_http_markdown_should_convert(ngx_http_request_t *r,
     ngx_http_markdown_accept_entry_t     *entry;
     ngx_uint_t                            i;
     
-    /* Check if conversion is enabled */
-    if (!ngx_http_markdown_is_enabled(r, conf)) {
+    /*
+     * markdown_filter is resolved once in header filter and cached in request
+     * context for phase consistency. Keep this function focused on Accept
+     * matching only.
+     */
+    if (conf == NULL) {
         return 0;
     }
     
