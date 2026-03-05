@@ -43,23 +43,34 @@ TESTS_RUN=0
 TESTS_PASSED=0
 TESTS_FAILED=0
 
+# Reused literals
+SEPARATOR_LINE="=========================================="
+MEDIA_TYPE_MARKDOWN="text/markdown"
+HEADER_CONTENT_TYPE="Content-Type"
+STATUS_CODE_OK_MESSAGE="Status code: 200 OK"
+NGINX_START_FAILURE_MSG="Failed to start NGINX"
+CONFIG_ERROR_LOG_LINE="error_log ${NGINX_ERROR_LOG} debug;"
+CONFIG_PID_LINE="pid ${NGINX_PID};"
+
 # Cleanup function
 cleanup() {
     echo ""
     echo "Cleaning up..."
+    local pid
     
     # Stop NGINX if running
-    if [ -f "$NGINX_PID" ]; then
-        PID=$(cat "$NGINX_PID")
-        if kill -0 "$PID" 2>/dev/null; then
-            echo "Stopping NGINX (PID: $PID)..."
-            kill -QUIT "$PID" 2>/dev/null || true
+    if [[ -f "$NGINX_PID" ]]; then
+        pid=$(cat "$NGINX_PID")
+        if kill -0 "$pid" 2>/dev/null; then
+            echo "Stopping NGINX (PID: $pid)..."
+            kill -QUIT "$pid" 2>/dev/null || true
             sleep 1
         fi
     fi
     
     # Remove test files
     rm -f "$NGINX_CONF" "$NGINX_PID" "$NGINX_ERROR_LOG" "$NGINX_ACCESS_LOG"
+    return 0
 }
 
 # Set trap to cleanup on exit
@@ -67,29 +78,45 @@ trap cleanup EXIT INT TERM
 
 # Helper functions
 log_test() {
+    local test_id
+    local test_name
+    test_id="$1"
+    test_name="$2"
+
     echo ""
-    echo "=========================================="
-    echo "Test $1: $2"
-    echo "=========================================="
+    echo "$SEPARATOR_LINE"
+    echo "Test $test_id: $test_name"
+    echo "$SEPARATOR_LINE"
     TESTS_RUN=$((TESTS_RUN + 1))
+    return 0
 }
 
 log_pass() {
-    echo -e "${GREEN}✓${NC} $1"
+    local message
+    message="$1"
+    echo -e "${GREEN}✓${NC} $message"
+    return 0
 }
 
 log_fail() {
-    echo -e "${RED}✗${NC} $1"
+    local message
+    message="$1"
+    echo -e "${RED}✗${NC} $message"
     TESTS_FAILED=$((TESTS_FAILED + 1))
+    return 0
 }
 
 log_info() {
-    echo -e "${YELLOW}ℹ${NC} $1"
+    local message
+    message="$1"
+    echo -e "${YELLOW}ℹ${NC} $message"
+    return 0
 }
 
 # Start NGINX with given configuration
 start_nginx() {
     local config="$1"
+    local pid
     
     # Write configuration
     cat > "$NGINX_CONF" << EOF
@@ -98,9 +125,7 @@ EOF
     
     # Start NGINX
     echo "Starting NGINX..."
-    nginx -c "$NGINX_CONF" -p /tmp 2>&1 | tee /tmp/nginx-start.log
-    
-    if [ $? -ne 0 ]; then
+    if ! nginx -c "$NGINX_CONF" -p /tmp 2>&1 | tee /tmp/nginx-start.log; then
         echo "Failed to start NGINX"
         cat /tmp/nginx-start.log
         return 1
@@ -110,31 +135,33 @@ EOF
     sleep 2
     
     # Verify NGINX is running
-    if [ ! -f "$NGINX_PID" ]; then
+    if [[ ! -f "$NGINX_PID" ]]; then
         echo "NGINX PID file not found"
         return 1
     fi
     
-    PID=$(cat "$NGINX_PID")
-    if ! kill -0 "$PID" 2>/dev/null; then
+    pid=$(cat "$NGINX_PID")
+    if ! kill -0 "$pid" 2>/dev/null; then
         echo "NGINX process not running"
         return 1
     fi
     
-    echo "NGINX started (PID: $PID)"
+    echo "NGINX started (PID: $pid)"
     return 0
 }
 
 # Stop NGINX
 stop_nginx() {
-    if [ -f "$NGINX_PID" ]; then
-        PID=$(cat "$NGINX_PID")
-        if kill -0 "$PID" 2>/dev/null; then
-            echo "Stopping NGINX (PID: $PID)..."
-            kill -QUIT "$PID" 2>/dev/null || true
+    local pid
+    if [[ -f "$NGINX_PID" ]]; then
+        pid=$(cat "$NGINX_PID")
+        if kill -0 "$pid" 2>/dev/null; then
+            echo "Stopping NGINX (PID: $pid)..."
+            kill -QUIT "$pid" 2>/dev/null || true
             sleep 1
         fi
     fi
+    return 0
 }
 
 # Make HTTP request and return response
@@ -148,6 +175,7 @@ make_request() {
         -H "Accept: $accept" \
         $extra_headers \
         "http://localhost:$TEST_PORT$path"
+    return 0
 }
 
 # Extract header value from response
@@ -156,18 +184,21 @@ get_header() {
     local header_name="$2"
     
     echo "$response" | grep -i "^$header_name:" | head -1 | cut -d' ' -f2- | tr -d '\r\n'
+    return 0
 }
 
 # Extract status code from response
 get_status() {
     local response="$1"
     echo "$response" | head -1 | cut -d' ' -f2
+    return 0
 }
 
 # Extract body from response
 get_body() {
     local response="$1"
     echo "$response" | sed -n '/^\r$/,$p' | tail -n +2
+    return 0
 }
 
 #
@@ -178,8 +209,8 @@ test_basic_conversion() {
     
     local config='
 worker_processes 1;
-error_log '"$NGINX_ERROR_LOG"' debug;
-pid '"$NGINX_PID"';
+'"$CONFIG_ERROR_LOG_LINE"'
+'"$CONFIG_PID_LINE"'
 events { worker_connections 1024; }
 http {
     access_log '"$NGINX_ACCESS_LOG"';
@@ -194,24 +225,24 @@ http {
 }
 '
     
-    start_nginx "$config" || { log_fail "Failed to start NGINX"; return 1; }
+    start_nginx "$config" || { log_fail "$NGINX_START_FAILURE_MSG"; return 1; }
     
     # Make request
-    local response=$(make_request "GET" "/test" "text/markdown" "")
+    local response=$(make_request "GET" "/test" "$MEDIA_TYPE_MARKDOWN" "")
     local status=$(get_status "$response")
-    local content_type=$(get_header "$response" "Content-Type")
+    local content_type=$(get_header "$response" "$HEADER_CONTENT_TYPE")
     local vary=$(get_header "$response" "Vary")
     local body=$(get_body "$response")
     
     # Verify results
-    if [ "$status" = "200" ]; then
-        log_pass "Status code: 200 OK"
+    if [[ "$status" == "200" ]]; then
+        log_pass "$STATUS_CODE_OK_MESSAGE"
     else
         log_fail "Status code: Expected 200, got $status"
     fi
     
-    if echo "$content_type" | grep -q "text/markdown"; then
-        log_pass "Content-Type: text/markdown"
+    if echo "$content_type" | grep -q "$MEDIA_TYPE_MARKDOWN"; then
+        log_pass "Content-Type: ${MEDIA_TYPE_MARKDOWN}"
     else
         log_fail "Content-Type: Expected text/markdown, got $content_type"
     fi
@@ -231,6 +262,7 @@ http {
     
     stop_nginx
     TESTS_PASSED=$((TESTS_PASSED + 1))
+    return 0
 }
 
 #
@@ -241,8 +273,8 @@ test_passthrough() {
     
     local config='
 worker_processes 1;
-error_log '"$NGINX_ERROR_LOG"' debug;
-pid '"$NGINX_PID"';
+'"$CONFIG_ERROR_LOG_LINE"'
+'"$CONFIG_PID_LINE"'
 events { worker_connections 1024; }
 http {
     access_log '"$NGINX_ACCESS_LOG"';
@@ -257,17 +289,17 @@ http {
 }
 '
     
-    start_nginx "$config" || { log_fail "Failed to start NGINX"; return 1; }
+    start_nginx "$config" || { log_fail "$NGINX_START_FAILURE_MSG"; return 1; }
     
     # Make request
     local response=$(make_request "GET" "/test" "text/html" "")
     local status=$(get_status "$response")
-    local content_type=$(get_header "$response" "Content-Type")
+    local content_type=$(get_header "$response" "$HEADER_CONTENT_TYPE")
     local body=$(get_body "$response")
     
     # Verify results
-    if [ "$status" = "200" ]; then
-        log_pass "Status code: 200 OK"
+    if [[ "$status" == "200" ]]; then
+        log_pass "$STATUS_CODE_OK_MESSAGE"
     else
         log_fail "Status code: Expected 200, got $status"
     fi
@@ -286,6 +318,7 @@ http {
     
     stop_nginx
     TESTS_PASSED=$((TESTS_PASSED + 1))
+    return 0
 }
 
 #
@@ -296,8 +329,8 @@ test_configuration_inheritance() {
     
     local config='
 worker_processes 1;
-error_log '"$NGINX_ERROR_LOG"' debug;
-pid '"$NGINX_PID"';
+'"$CONFIG_ERROR_LOG_LINE"'
+'"$CONFIG_PID_LINE"'
 events { worker_connections 1024; }
 http {
     access_log '"$NGINX_ACCESS_LOG"';
@@ -321,21 +354,21 @@ http {
 }
 '
     
-    start_nginx "$config" || { log_fail "Failed to start NGINX"; return 1; }
+    start_nginx "$config" || { log_fail "$NGINX_START_FAILURE_MSG"; return 1; }
     
     # Test /enabled - should convert
-    local response=$(make_request "GET" "/enabled" "text/markdown" "")
-    local content_type=$(get_header "$response" "Content-Type")
+    local response=$(make_request "GET" "/enabled" "$MEDIA_TYPE_MARKDOWN" "")
+    local content_type=$(get_header "$response" "$HEADER_CONTENT_TYPE")
     
-    if echo "$content_type" | grep -q "text/markdown"; then
+    if echo "$content_type" | grep -q "$MEDIA_TYPE_MARKDOWN"; then
         log_pass "/enabled: Conversion occurs (inherits http-level setting)"
     else
         log_fail "/enabled: Expected conversion, got $content_type"
     fi
     
     # Test /disabled - should NOT convert
-    response=$(make_request "GET" "/disabled" "text/markdown" "")
-    content_type=$(get_header "$response" "Content-Type")
+    response=$(make_request "GET" "/disabled" "$MEDIA_TYPE_MARKDOWN" "")
+    content_type=$(get_header "$response" "$HEADER_CONTENT_TYPE")
     
     if echo "$content_type" | grep -q "text/html"; then
         log_pass "/disabled: No conversion (location override)"
@@ -345,6 +378,7 @@ http {
     
     stop_nginx
     TESTS_PASSED=$((TESTS_PASSED + 1))
+    return 0
 }
 
 #
@@ -355,8 +389,8 @@ test_authenticated_content() {
     
     local config='
 worker_processes 1;
-error_log '"$NGINX_ERROR_LOG"' debug;
-pid '"$NGINX_PID"';
+'"$CONFIG_ERROR_LOG_LINE"'
+'"$CONFIG_PID_LINE"'
 events { worker_connections 1024; }
 http {
     access_log '"$NGINX_ACCESS_LOG"';
@@ -372,23 +406,23 @@ http {
 }
 '
     
-    start_nginx "$config" || { log_fail "Failed to start NGINX"; return 1; }
+    start_nginx "$config" || { log_fail "$NGINX_START_FAILURE_MSG"; return 1; }
     
     # Make request with Authorization header
-    local response=$(make_request "GET" "/test" "text/markdown" "-H 'Authorization: Bearer token123'")
+    local response=$(make_request "GET" "/test" "$MEDIA_TYPE_MARKDOWN" "-H 'Authorization: Bearer token123'")
     local status=$(get_status "$response")
-    local content_type=$(get_header "$response" "Content-Type")
+    local content_type=$(get_header "$response" "$HEADER_CONTENT_TYPE")
     local cache_control=$(get_header "$response" "Cache-Control")
     
     # Verify results
-    if [ "$status" = "200" ]; then
-        log_pass "Status code: 200 OK"
+    if [[ "$status" == "200" ]]; then
+        log_pass "$STATUS_CODE_OK_MESSAGE"
     else
         log_fail "Status code: Expected 200, got $status"
     fi
     
-    if echo "$content_type" | grep -q "text/markdown"; then
-        log_pass "Content-Type: text/markdown (conversion occurs)"
+    if echo "$content_type" | grep -q "$MEDIA_TYPE_MARKDOWN"; then
+        log_pass "Content-Type: ${MEDIA_TYPE_MARKDOWN} (conversion occurs)"
     else
         log_fail "Content-Type: Expected text/markdown, got $content_type"
     fi
@@ -401,28 +435,29 @@ http {
     
     stop_nginx
     TESTS_PASSED=$((TESTS_PASSED + 1))
+    return 0
 }
 
 #
 # Main test execution
 #
 main() {
-    echo "=========================================="
+    echo "$SEPARATOR_LINE"
     echo "NGINX Markdown Filter - Integration Tests"
-    echo "=========================================="
+    echo "$SEPARATOR_LINE"
     echo ""
     
     # Check prerequisites
     log_info "Checking prerequisites..."
     
     if ! command -v nginx &> /dev/null; then
-        echo "ERROR: nginx not found in PATH"
-        exit 1
+        echo "ERROR: nginx not found in PATH" >&2
+        return 1
     fi
     
     if ! command -v curl &> /dev/null; then
-        echo "ERROR: curl not found in PATH"
-        exit 1
+        echo "ERROR: curl not found in PATH" >&2
+        return 1
     fi
     
     log_pass "Prerequisites OK"
@@ -435,22 +470,23 @@ main() {
     
     # Summary
     echo ""
-    echo "=========================================="
+    echo "$SEPARATOR_LINE"
     echo "Test Summary"
-    echo "=========================================="
+    echo "$SEPARATOR_LINE"
     echo "Tests run:    $TESTS_RUN"
     echo "Tests passed: $TESTS_PASSED"
     echo "Tests failed: $TESTS_FAILED"
     echo ""
     
-    if [ $TESTS_FAILED -eq 0 ]; then
+    if [[ $TESTS_FAILED -eq 0 ]]; then
         echo -e "${GREEN}All tests passed!${NC}"
-        exit 0
+        return 0
     else
         echo -e "${RED}Some tests failed!${NC}"
-        exit 1
+        return 1
     fi
 }
 
 # Run main
-main
+main "$@"
+exit $?

@@ -51,6 +51,14 @@ TESTS_RUN=0
 TESTS_PASSED=0
 TESTS_FAILED=0
 
+# Reused literals (helps readability and avoids literal duplication)
+SEPARATOR_LINE="=========================================="
+PATH_SIMPLE="/simple"
+MEDIA_TYPE_MARKDOWN="text/markdown"
+HEADER_CONTENT_TYPE="Content-Type"
+STATUS_CODE_OK_MESSAGE="Status code: 200 OK"
+AWK_PRINT_FIELD4='{print $4}'
+
 # Performance baseline storage
 declare -A PERF_BASELINES
 
@@ -58,29 +66,31 @@ declare -A PERF_BASELINES
 cleanup() {
     echo ""
     echo "Cleaning up..."
+    local pid
     
     # Stop NGINX if running
-    if [ -f "$NGINX_PID" ]; then
-        PID=$(cat "$NGINX_PID")
-        if kill -0 "$PID" 2>/dev/null; then
-            echo "Stopping NGINX (PID: $PID)..."
-            kill -QUIT "$PID" 2>/dev/null || true
+    if [[ -f "$NGINX_PID" ]]; then
+        pid=$(cat "$NGINX_PID")
+        if kill -0 "$pid" 2>/dev/null; then
+            echo "Stopping NGINX (PID: $pid)..."
+            kill -QUIT "$pid" 2>/dev/null || true
             sleep 1
         fi
     fi
     
     # Stop backend server if running
-    if [ -f "$BACKEND_PID" ]; then
-        PID=$(cat "$BACKEND_PID")
-        if kill -0 "$PID" 2>/dev/null; then
-            echo "Stopping backend server (PID: $PID)..."
-            kill -TERM "$PID" 2>/dev/null || true
+    if [[ -f "$BACKEND_PID" ]]; then
+        pid=$(cat "$BACKEND_PID")
+        if kill -0 "$pid" 2>/dev/null; then
+            echo "Stopping backend server (PID: $pid)..."
+            kill -TERM "$pid" 2>/dev/null || true
             sleep 1
         fi
     fi
     
     # Remove test files
     rm -f "$NGINX_CONF" "$NGINX_PID" "$NGINX_ERROR_LOG" "$NGINX_ACCESS_LOG" "$BACKEND_PID"
+    return 0
 }
 
 # Set trap to cleanup on exit
@@ -88,28 +98,46 @@ trap cleanup EXIT INT TERM
 
 # Helper functions
 log_test() {
+    local test_id
+    local test_name
+    test_id="$1"
+    test_name="$2"
+
     echo ""
-    echo "=========================================="
-    echo "Test $1: $2"
-    echo "=========================================="
+    echo "$SEPARATOR_LINE"
+    echo "Test $test_id: $test_name"
+    echo "$SEPARATOR_LINE"
     TESTS_RUN=$((TESTS_RUN + 1))
+    return 0
 }
 
 log_pass() {
-    echo -e "${GREEN}✓${NC} $1"
+    local message
+    message="$1"
+    echo -e "${GREEN}✓${NC} $message"
+    return 0
 }
 
 log_fail() {
-    echo -e "${RED}✗${NC} $1"
+    local message
+    message="$1"
+    echo -e "${RED}✗${NC} $message"
     TESTS_FAILED=$((TESTS_FAILED + 1))
+    return 0
 }
 
 log_info() {
-    echo -e "${BLUE}ℹ${NC} $1"
+    local message
+    message="$1"
+    echo -e "${BLUE}ℹ${NC} $message"
+    return 0
 }
 
 log_warn() {
-    echo -e "${YELLOW}⚠${NC} $1"
+    local message
+    message="$1"
+    echo -e "${YELLOW}⚠${NC} $message"
+    return 0
 }
 
 # Start backend server
@@ -129,13 +157,14 @@ start_backend() {
         return 1
     fi
     
-    echo "Backend server started (PID: $(cat $BACKEND_PID))"
+    echo "Backend server started (PID: $(cat "$BACKEND_PID"))"
     return 0
 }
 
 # Start NGINX with given configuration
 start_nginx() {
     local config="$1"
+    local pid
     
     # Write configuration
     cat > "$NGINX_CONF" << EOF
@@ -144,9 +173,7 @@ EOF
     
     # Start NGINX
     echo "Starting NGINX on port $TEST_PORT..."
-    nginx -c "$NGINX_CONF" -p /tmp 2>&1 | tee /tmp/nginx-start.log
-    
-    if [ $? -ne 0 ]; then
+    if ! nginx -c "$NGINX_CONF" -p /tmp 2>&1 | tee /tmp/nginx-start.log; then
         echo "Failed to start NGINX"
         cat /tmp/nginx-start.log
         return 1
@@ -156,31 +183,33 @@ EOF
     sleep 2
     
     # Verify NGINX is running
-    if [ ! -f "$NGINX_PID" ]; then
+    if [[ ! -f "$NGINX_PID" ]]; then
         echo "NGINX PID file not found"
         return 1
     fi
     
-    PID=$(cat "$NGINX_PID")
-    if ! kill -0 "$PID" 2>/dev/null; then
+    pid=$(cat "$NGINX_PID")
+    if ! kill -0 "$pid" 2>/dev/null; then
         echo "NGINX process not running"
         return 1
     fi
     
-    echo "NGINX started (PID: $PID)"
+    echo "NGINX started (PID: $pid)"
     return 0
 }
 
 # Stop NGINX
 stop_nginx() {
-    if [ -f "$NGINX_PID" ]; then
-        PID=$(cat "$NGINX_PID")
-        if kill -0 "$PID" 2>/dev/null; then
-            echo "Stopping NGINX (PID: $PID)..."
-            kill -QUIT "$PID" 2>/dev/null || true
+    local pid
+    if [[ -f "$NGINX_PID" ]]; then
+        pid=$(cat "$NGINX_PID")
+        if kill -0 "$pid" 2>/dev/null; then
+            echo "Stopping NGINX (PID: $pid)..."
+            kill -QUIT "$pid" 2>/dev/null || true
             sleep 1
         fi
     fi
+    return 0
 }
 
 # Make HTTP request and return response
@@ -194,6 +223,7 @@ make_request() {
         -H "Accept: $accept" \
         $extra_headers \
         "http://localhost:$TEST_PORT$path"
+    return 0
 }
 
 # Extract header value from response
@@ -202,18 +232,21 @@ get_header() {
     local header_name="$2"
     
     echo "$response" | grep -i "^$header_name:" | head -1 | cut -d' ' -f2- | tr -d '\r\n'
+    return 0
 }
 
 # Extract status code from response
 get_status() {
     local response="$1"
     echo "$response" | head -1 | cut -d' ' -f2
+    return 0
 }
 
 # Extract body from response
 get_body() {
     local response="$1"
     echo "$response" | sed -n '/^\r$/,$p' | tail -n +2
+    return 0
 }
 
 # Measure request latency
@@ -229,6 +262,7 @@ measure_latency() {
     local latency_ms=$((latency_ns / 1000000))
     
     echo "$latency_ms"
+    return 0
 }
 
 #
@@ -238,21 +272,21 @@ test_proxy_chain_basic() {
     log_test 1 "Complete Proxy Chain - Basic Conversion"
     
     # Make request through NGINX proxy to backend
-    local response=$(make_request "GET" "/simple" "text/markdown" "")
+    local response=$(make_request "GET" "$PATH_SIMPLE" "$MEDIA_TYPE_MARKDOWN" "")
     local status=$(get_status "$response")
-    local content_type=$(get_header "$response" "Content-Type")
+    local content_type=$(get_header "$response" "$HEADER_CONTENT_TYPE")
     local vary=$(get_header "$response" "Vary")
     local body=$(get_body "$response")
     
     # Verify results
-    if [ "$status" = "200" ]; then
-        log_pass "Status code: 200 OK"
+    if [[ "$status" == "200" ]]; then
+        log_pass "$STATUS_CODE_OK_MESSAGE"
     else
         log_fail "Status code: Expected 200, got $status"
     fi
     
-    if echo "$content_type" | grep -q "text/markdown"; then
-        log_pass "Content-Type: text/markdown (converted)"
+    if echo "$content_type" | grep -q "$MEDIA_TYPE_MARKDOWN"; then
+        log_pass "Content-Type: ${MEDIA_TYPE_MARKDOWN} (converted)"
     else
         log_fail "Content-Type: Expected text/markdown, got $content_type"
     fi
@@ -277,6 +311,7 @@ test_proxy_chain_basic() {
     fi
     
     TESTS_PASSED=$((TESTS_PASSED + 1))
+    return 0
 }
 
 #
@@ -286,7 +321,7 @@ test_header_propagation() {
     log_test 2 "Header Propagation Through Chain"
     
     # Make request and check headers
-    local response=$(make_request "GET" "/simple" "text/markdown" "")
+    local response=$(make_request "GET" "$PATH_SIMPLE" "$MEDIA_TYPE_MARKDOWN" "")
     local cache_control=$(get_header "$response" "Cache-Control")
     local etag=$(get_header "$response" "ETag")
     
@@ -298,8 +333,8 @@ test_header_propagation() {
     fi
     
     # Module should generate new ETag (not preserve backend's)
-    if [ -n "$etag" ]; then
-        if [ "$etag" != '"simple-v1"' ]; then
+    if [[ -n "$etag" ]]; then
+        if [[ "$etag" != '"simple-v1"' ]]; then
             log_pass "ETag generated by module (not backend's ETag)"
         else
             log_fail "ETag: Module should generate new ETag, not preserve backend's"
@@ -309,6 +344,7 @@ test_header_propagation() {
     fi
     
     TESTS_PASSED=$((TESTS_PASSED + 1))
+    return 0
 }
 
 #
@@ -317,12 +353,12 @@ test_header_propagation() {
 test_complex_html() {
     log_test 3 "Complex HTML Conversion"
     
-    local response=$(make_request "GET" "/complex" "text/markdown" "")
+    local response=$(make_request "GET" "/complex" "$MEDIA_TYPE_MARKDOWN" "")
     local status=$(get_status "$response")
     local body=$(get_body "$response")
     
-    if [ "$status" = "200" ]; then
-        log_pass "Status code: 200 OK"
+    if [[ "$status" == "200" ]]; then
+        log_pass "$STATUS_CODE_OK_MESSAGE"
     else
         log_fail "Status code: Expected 200, got $status"
     fi
@@ -366,6 +402,7 @@ test_complex_html() {
     fi
     
     TESTS_PASSED=$((TESTS_PASSED + 1))
+    return 0
 }
 
 #
@@ -375,12 +412,12 @@ test_backend_error() {
     log_test 4 "Backend Error Handling"
     
     # Backend returns 500 error
-    local response=$(make_request "GET" "/error" "text/markdown" "")
+    local response=$(make_request "GET" "/error" "$MEDIA_TYPE_MARKDOWN" "")
     local status=$(get_status "$response")
-    local content_type=$(get_header "$response" "Content-Type")
+    local content_type=$(get_header "$response" "$HEADER_CONTENT_TYPE")
     
     # Module should NOT convert non-200 responses
-    if [ "$status" = "500" ]; then
+    if [[ "$status" == "500" ]]; then
         log_pass "Status code: 500 (passed through)"
     else
         log_fail "Status code: Expected 500, got $status"
@@ -393,6 +430,7 @@ test_backend_error() {
     fi
     
     TESTS_PASSED=$((TESTS_PASSED + 1))
+    return 0
 }
 
 #
@@ -401,20 +439,20 @@ test_backend_error() {
 test_large_response() {
     log_test 5 "Large Response Handling"
     
-    local response=$(make_request "GET" "/large" "text/markdown" "")
+    local response=$(make_request "GET" "/large" "$MEDIA_TYPE_MARKDOWN" "")
     local status=$(get_status "$response")
-    local content_type=$(get_header "$response" "Content-Type")
+    local content_type=$(get_header "$response" "$HEADER_CONTENT_TYPE")
     local body=$(get_body "$response")
     local body_size=${#body}
     
-    if [ "$status" = "200" ]; then
-        log_pass "Status code: 200 OK"
+    if [[ "$status" == "200" ]]; then
+        log_pass "$STATUS_CODE_OK_MESSAGE"
     else
         log_fail "Status code: Expected 200, got $status"
     fi
     
     # Check if conversion occurred or was bypassed due to size limit
-    if echo "$content_type" | grep -q "text/markdown"; then
+    if echo "$content_type" | grep -q "$MEDIA_TYPE_MARKDOWN"; then
         log_pass "Large response converted to Markdown"
         log_info "Converted body size: $body_size bytes"
     else
@@ -423,6 +461,7 @@ test_large_response() {
     fi
     
     TESTS_PASSED=$((TESTS_PASSED + 1))
+    return 0
 }
 
 #
@@ -431,18 +470,18 @@ test_large_response() {
 test_chunked_encoding() {
     log_test 6 "Chunked Transfer Encoding"
     
-    local response=$(make_request "GET" "/chunked" "text/markdown" "")
+    local response=$(make_request "GET" "/chunked" "$MEDIA_TYPE_MARKDOWN" "")
     local status=$(get_status "$response")
-    local content_type=$(get_header "$response" "Content-Type")
+    local content_type=$(get_header "$response" "$HEADER_CONTENT_TYPE")
     local body=$(get_body "$response")
     
-    if [ "$status" = "200" ]; then
-        log_pass "Status code: 200 OK"
+    if [[ "$status" == "200" ]]; then
+        log_pass "$STATUS_CODE_OK_MESSAGE"
     else
         log_fail "Status code: Expected 200, got $status"
     fi
     
-    if echo "$content_type" | grep -q "text/markdown"; then
+    if echo "$content_type" | grep -q "$MEDIA_TYPE_MARKDOWN"; then
         log_pass "Chunked response converted to Markdown"
     else
         log_fail "Content-Type: Expected text/markdown, got $content_type"
@@ -455,6 +494,7 @@ test_chunked_encoding() {
     fi
     
     TESTS_PASSED=$((TESTS_PASSED + 1))
+    return 0
 }
 
 #
@@ -469,9 +509,9 @@ test_concurrent_requests() {
     local pids=()
     for i in {1..10}; do
         (
-            response=$(make_request "GET" "/simple" "text/markdown" "")
+            response=$(make_request "GET" "$PATH_SIMPLE" "$MEDIA_TYPE_MARKDOWN" "")
             status=$(get_status "$response")
-            if [ "$status" = "200" ]; then
+            if [[ "$status" == "200" ]]; then
                 echo "OK" > /tmp/concurrent-$i.result
             else
                 echo "FAIL" > /tmp/concurrent-$i.result
@@ -488,22 +528,23 @@ test_concurrent_requests() {
     # Check results
     local success_count=0
     for i in {1..10}; do
-        if [ -f /tmp/concurrent-$i.result ]; then
+        if [[ -f /tmp/concurrent-$i.result ]]; then
             result=$(cat /tmp/concurrent-$i.result)
-            if [ "$result" = "OK" ]; then
+            if [[ "$result" == "OK" ]]; then
                 success_count=$((success_count + 1))
             fi
             rm -f /tmp/concurrent-$i.result
         fi
     done
     
-    if [ $success_count -eq 10 ]; then
+    if [[ $success_count -eq 10 ]]; then
         log_pass "All 10 concurrent requests succeeded"
     else
         log_fail "Only $success_count/10 concurrent requests succeeded"
     fi
     
     TESTS_PASSED=$((TESTS_PASSED + 1))
+    return 0
 }
 
 #
@@ -517,7 +558,7 @@ test_performance_latency() {
     # Measure latency for Markdown conversion
     local total_latency_md=0
     for i in {1..10}; do
-        latency=$(measure_latency "/simple" "text/markdown")
+        latency=$(measure_latency "$PATH_SIMPLE" "$MEDIA_TYPE_MARKDOWN")
         total_latency_md=$((total_latency_md + latency))
     done
     local avg_latency_md=$((total_latency_md / 10))
@@ -525,7 +566,7 @@ test_performance_latency() {
     # Measure latency for passthrough (no conversion)
     local total_latency_html=0
     for i in {1..10}; do
-        latency=$(measure_latency "/simple" "text/html")
+        latency=$(measure_latency "$PATH_SIMPLE" "text/html")
         total_latency_html=$((total_latency_html + latency))
     done
     local avg_latency_html=$((total_latency_html / 10))
@@ -533,7 +574,7 @@ test_performance_latency() {
     # Calculate overhead
     local overhead=$((avg_latency_md - avg_latency_html))
     local overhead_pct=0
-    if [ $avg_latency_html -gt 0 ]; then
+    if [[ $avg_latency_html -gt 0 ]]; then
         overhead_pct=$((overhead * 100 / avg_latency_html))
     fi
     
@@ -548,13 +589,14 @@ test_performance_latency() {
     PERF_BASELINES[overhead_pct]=$overhead_pct
     
     # Pass if overhead is reasonable (< 100ms or < 200%)
-    if [ $overhead -lt 100 ] || [ $overhead_pct -lt 200 ]; then
+    if [[ $overhead -lt 100 ]] || [[ $overhead_pct -lt 200 ]]; then
         log_pass "Conversion overhead is acceptable"
     else
         log_warn "Conversion overhead may be high"
     fi
     
     TESTS_PASSED=$((TESTS_PASSED + 1))
+    return 0
 }
 
 #
@@ -567,24 +609,24 @@ test_performance_throughput() {
     if ! command -v ab &> /dev/null; then
         log_warn "Apache Bench (ab) not found, skipping throughput test"
         TESTS_PASSED=$((TESTS_PASSED + 1))
-        return
+        return 0
     fi
     
     log_info "Running throughput test (100 requests, concurrency 10)..."
     
     # Test Markdown conversion throughput
-    ab -n 100 -c 10 -H "Accept: text/markdown" \
-        "http://localhost:$TEST_PORT/simple" > /tmp/ab-markdown.txt 2>&1
+    ab -n 100 -c 10 -H "Accept: ${MEDIA_TYPE_MARKDOWN}" \
+        "http://localhost:$TEST_PORT${PATH_SIMPLE}" > /tmp/ab-markdown.txt 2>&1
     
-    local rps_md=$(grep "Requests per second" /tmp/ab-markdown.txt | awk '{print $4}')
-    local time_per_req_md=$(grep "Time per request.*mean\)" /tmp/ab-markdown.txt | awk '{print $4}')
+    local rps_md=$(grep "Requests per second" /tmp/ab-markdown.txt | awk "$AWK_PRINT_FIELD4")
+    local time_per_req_md=$(grep "Time per request.*mean\)" /tmp/ab-markdown.txt | awk "$AWK_PRINT_FIELD4")
     
     # Test HTML passthrough throughput
     ab -n 100 -c 10 -H "Accept: text/html" \
-        "http://localhost:$TEST_PORT/simple" > /tmp/ab-html.txt 2>&1
+        "http://localhost:$TEST_PORT${PATH_SIMPLE}" > /tmp/ab-html.txt 2>&1
     
-    local rps_html=$(grep "Requests per second" /tmp/ab-html.txt | awk '{print $4}')
-    local time_per_req_html=$(grep "Time per request.*mean\)" /tmp/ab-html.txt | awk '{print $4}')
+    local rps_html=$(grep "Requests per second" /tmp/ab-html.txt | awk "$AWK_PRINT_FIELD4")
+    local time_per_req_html=$(grep "Time per request.*mean\)" /tmp/ab-html.txt | awk "$AWK_PRINT_FIELD4")
     
     log_info "Throughput (Markdown): ${rps_md} req/s"
     log_info "Throughput (HTML passthrough): ${rps_html} req/s"
@@ -600,6 +642,7 @@ test_performance_throughput() {
     log_pass "Throughput baseline measured"
     
     TESTS_PASSED=$((TESTS_PASSED + 1))
+    return 0
 }
 
 #
@@ -608,75 +651,76 @@ test_performance_throughput() {
 test_head_request() {
     log_test 10 "HEAD Request Through Proxy"
     
-    local response=$(make_request "HEAD" "/simple" "text/markdown" "")
+    local response=$(make_request "HEAD" "$PATH_SIMPLE" "$MEDIA_TYPE_MARKDOWN" "")
     local status=$(get_status "$response")
-    local content_type=$(get_header "$response" "Content-Type")
+    local content_type=$(get_header "$response" "$HEADER_CONTENT_TYPE")
     local content_length=$(get_header "$response" "Content-Length")
     local body=$(get_body "$response")
     
-    if [ "$status" = "200" ]; then
-        log_pass "Status code: 200 OK"
+    if [[ "$status" == "200" ]]; then
+        log_pass "$STATUS_CODE_OK_MESSAGE"
     else
         log_fail "Status code: Expected 200, got $status"
     fi
     
-    if echo "$content_type" | grep -q "text/markdown"; then
-        log_pass "Content-Type: text/markdown"
+    if echo "$content_type" | grep -q "$MEDIA_TYPE_MARKDOWN"; then
+        log_pass "Content-Type: ${MEDIA_TYPE_MARKDOWN}"
     else
         log_fail "Content-Type: Expected text/markdown, got $content_type"
     fi
     
-    if [ -n "$content_length" ] && [ "$content_length" -gt 0 ]; then
+    if [[ -n "$content_length" ]] && [[ "$content_length" -gt 0 ]]; then
         log_pass "Content-Length header present: $content_length bytes"
     else
         log_warn "Content-Length header missing or zero"
     fi
     
-    if [ -z "$body" ]; then
+    if [[ -z "$body" ]]; then
         log_pass "No body in HEAD response"
     else
         log_fail "HEAD response should not have body"
     fi
     
     TESTS_PASSED=$((TESTS_PASSED + 1))
+    return 0
 }
 
 #
 # Main test execution
 #
 main() {
-    echo "=========================================="
+    echo "$SEPARATOR_LINE"
     echo "NGINX Markdown Filter - E2E Tests"
-    echo "=========================================="
+    echo "$SEPARATOR_LINE"
     echo ""
     
     # Check prerequisites
     log_info "Checking prerequisites..."
     
     if ! command -v nginx &> /dev/null; then
-        echo "ERROR: nginx not found in PATH"
-        exit 1
+        echo "ERROR: nginx not found in PATH" >&2
+        return 1
     fi
     
     if ! command -v curl &> /dev/null; then
-        echo "ERROR: curl not found in PATH"
-        exit 1
+        echo "ERROR: curl not found in PATH" >&2
+        return 1
     fi
     
     if ! command -v python3 &> /dev/null; then
-        echo "ERROR: python3 not found in PATH"
-        exit 1
+        echo "ERROR: python3 not found in PATH" >&2
+        return 1
     fi
     
-    if [ ! -f "$SCRIPT_DIR/test_backend_server.py" ]; then
-        echo "ERROR: $SCRIPT_DIR/test_backend_server.py not found"
-        exit 1
+    if [[ ! -f "$SCRIPT_DIR/test_backend_server.py" ]]; then
+        echo "ERROR: $SCRIPT_DIR/test_backend_server.py not found" >&2
+        return 1
     fi
     
     log_pass "Prerequisites OK"
     
     # Start backend server
-    start_backend || exit 1
+    start_backend || return 1
     
     # Configure and start NGINX
     local nginx_config='
@@ -715,7 +759,7 @@ http {
 }
 '
     
-    start_nginx "$nginx_config" || exit 1
+    start_nginx "$nginx_config" || return 1
     
     # Run tests
     test_proxy_chain_basic
@@ -731,24 +775,24 @@ http {
     
     # Summary
     echo ""
-    echo "=========================================="
+    echo "$SEPARATOR_LINE"
     echo "Test Summary"
-    echo "=========================================="
+    echo "$SEPARATOR_LINE"
     echo "Tests run:    $TESTS_RUN"
     echo "Tests passed: $TESTS_PASSED"
     echo "Tests failed: $TESTS_FAILED"
     echo ""
     
     # Performance baselines
-    if [ ${#PERF_BASELINES[@]} -gt 0 ]; then
-        echo "=========================================="
+    if [[ ${#PERF_BASELINES[@]} -gt 0 ]]; then
+        echo "$SEPARATOR_LINE"
         echo "Performance Baselines"
-        echo "=========================================="
+        echo "$SEPARATOR_LINE"
         echo "Latency (Markdown):       ${PERF_BASELINES[latency_md]}ms"
         echo "Latency (HTML):           ${PERF_BASELINES[latency_html]}ms"
         echo "Conversion overhead:      ${PERF_BASELINES[overhead_ms]}ms (${PERF_BASELINES[overhead_pct]}%)"
         
-        if [ -n "${PERF_BASELINES[rps_md]}" ]; then
+        if [[ -n "${PERF_BASELINES[rps_md]}" ]]; then
             echo "Throughput (Markdown):    ${PERF_BASELINES[rps_md]} req/s"
             echo "Throughput (HTML):        ${PERF_BASELINES[rps_html]} req/s"
             echo "Time per request (MD):    ${PERF_BASELINES[time_per_req_md]}ms"
@@ -757,14 +801,15 @@ http {
         echo ""
     fi
     
-    if [ $TESTS_FAILED -eq 0 ]; then
+    if [[ $TESTS_FAILED -eq 0 ]]; then
         echo -e "${GREEN}All tests passed!${NC}"
-        exit 0
+        return 0
     else
         echo -e "${RED}Some tests failed!${NC}"
-        exit 1
+        return 1
     fi
 }
 
 # Run main
-main
+main "$@"
+exit $?
