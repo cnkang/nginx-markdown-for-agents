@@ -98,10 +98,8 @@ trap cleanup EXIT INT TERM
 
 # Helper functions
 log_test() {
-    local test_id
-    local test_name
-    test_id="$1"
-    test_name="$2"
+    local test_id="$1"
+    local test_name="$2"
 
     echo ""
     echo "$SEPARATOR_LINE"
@@ -112,30 +110,26 @@ log_test() {
 }
 
 log_pass() {
-    local message
-    message="$1"
+    local message="$1"
     echo -e "${GREEN}✓${NC} $message"
     return 0
 }
 
 log_fail() {
-    local message
-    message="$1"
+    local message="$1"
     echo -e "${RED}✗${NC} $message"
     TESTS_FAILED=$((TESTS_FAILED + 1))
     return 0
 }
 
 log_info() {
-    local message
-    message="$1"
+    local message="$1"
     echo -e "${BLUE}ℹ${NC} $message"
     return 0
 }
 
 log_warn() {
-    local message
-    message="$1"
+    local message="$1"
     echo -e "${YELLOW}⚠${NC} $message"
     return 0
 }
@@ -152,8 +146,8 @@ start_backend() {
     
     # Verify backend is running
     if ! curl -s http://localhost:$BACKEND_PORT/health > /dev/null; then
-        echo "Failed to start backend server"
-        cat /tmp/backend-server.log
+        echo "Failed to start backend server" >&2
+        cat /tmp/backend-server.log >&2
         return 1
     fi
     
@@ -174,8 +168,8 @@ EOF
     # Start NGINX
     echo "Starting NGINX on port $TEST_PORT..."
     if ! nginx -c "$NGINX_CONF" -p /tmp 2>&1 | tee /tmp/nginx-start.log; then
-        echo "Failed to start NGINX"
-        cat /tmp/nginx-start.log
+        echo "Failed to start NGINX" >&2
+        cat /tmp/nginx-start.log >&2
         return 1
     fi
     
@@ -184,13 +178,13 @@ EOF
     
     # Verify NGINX is running
     if [[ ! -f "$NGINX_PID" ]]; then
-        echo "NGINX PID file not found"
+        echo "NGINX PID file not found" >&2
         return 1
     fi
     
     pid=$(cat "$NGINX_PID")
     if ! kill -0 "$pid" 2>/dev/null; then
-        echo "NGINX process not running"
+        echo "NGINX process not running" >&2
         return 1
     fi
     

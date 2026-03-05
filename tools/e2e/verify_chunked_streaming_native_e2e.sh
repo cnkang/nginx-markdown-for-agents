@@ -19,6 +19,7 @@ RUNTIME=""
 RUST_TARGET=""
 UPSTREAM_PID=""
 ORIG_ARGS=("$@")
+ACCEPT_MARKDOWN_HEADER='Accept: text/markdown'
 
 usage() {
   cat <<EOF
@@ -31,6 +32,7 @@ Build local NGINX with the markdown module and run chunked/streaming E2E checks:
 
 This script auto-reexecs under native arm64 on Apple Silicon if launched under Rosetta.
 EOF
+  return 0
 }
 
 ensure_native_apple_silicon() {
@@ -47,10 +49,12 @@ ensure_native_apple_silicon() {
 }
 
 need_cmd() {
-  command -v "$1" >/dev/null 2>&1 || {
-    echo "Missing required command: $1" >&2
+  local cmd_name="$1"
+  command -v "${cmd_name}" >/dev/null 2>&1 || {
+    echo "Missing required command: ${cmd_name}" >&2
     exit 1
   }
+  return 0
 }
 
 detect_rust_target() {
@@ -64,6 +68,7 @@ detect_rust_target() {
       exit 1
       ;;
   esac
+  return 0
 }
 
 cleanup() {
@@ -87,6 +92,7 @@ cleanup() {
   elif [[ "${KEEP_ARTIFACTS}" -eq 1 && -n "${BUILDROOT}" ]]; then
     echo "Chunked/streaming E2E validation succeeded. Artifacts kept at: ${BUILDROOT}"
   fi
+  return 0
 }
 trap cleanup EXIT
 
@@ -364,7 +370,7 @@ sleep 1
 
 echo "==> Case 1: chunked below max_size should convert to Markdown"
 small_line="$(curl -sS -D "${RAW_DIR}/small.hdr" -o "${RAW_DIR}/small.body" \
-  -H 'Accept: text/markdown' --max-time 180 \
+  -H "${ACCEPT_MARKDOWN_HEADER}" --max-time 180 \
   "http://127.0.0.1:${PORT}/stream/small-valid" \
   -w 'http=%{http_code} size=%{size_download} total=%{time_total}\n')"
 echo "${small_line}" | tee "${RAW_DIR}/small.metrics" >/dev/null
@@ -384,7 +390,7 @@ grep -q "${SMALL_END_TOKEN}" "${RAW_DIR}/small.body" || {
 
 echo "==> Case 2: chunked above max_size should fail-open without truncation"
 oversize_line="$(curl -sS -D "${RAW_DIR}/oversize.hdr" -o "${RAW_DIR}/oversize.body" \
-  -H 'Accept: text/markdown' --max-time 240 \
+  -H "${ACCEPT_MARKDOWN_HEADER}" --max-time 240 \
   "http://127.0.0.1:${PORT}/stream/oversize" \
   -w 'http=%{http_code} size=%{size_download} total=%{time_total}\n')"
 echo "${oversize_line}" | tee "${RAW_DIR}/oversize.metrics" >/dev/null
@@ -413,9 +419,9 @@ grep -q 'response size exceeds limit' "${RUNTIME}/logs/error.log" || {
 if [[ "${PROFILE}" == "stress" ]]; then
   echo "==> Stress profile: ApacheBench for chunked conversion and fail-open paths"
 
-  ab -H 'Accept: text/markdown' -n 60 -c 6 \
+  ab -H "${ACCEPT_MARKDOWN_HEADER}" -n 60 -c 6 \
     "http://127.0.0.1:${PORT}/stream/small-valid" > "${RAW_DIR}/ab_small.txt" 2>&1
-  ab -H 'Accept: text/markdown' -n 20 -c 2 \
+  ab -H "${ACCEPT_MARKDOWN_HEADER}" -n 20 -c 2 \
     "http://127.0.0.1:${PORT}/stream/oversize" > "${RAW_DIR}/ab_oversize.txt" 2>&1
 
   small_failed="$(awk -F': *' '/Failed requests/ {print $2}' "${RAW_DIR}/ab_small.txt" | tr -d ' ')"

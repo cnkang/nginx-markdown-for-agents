@@ -2,24 +2,23 @@
 # This demonstrates how to use the install script efficiently in Docker builds
 
 ARG NGINX_VERSION=1.28.2
+ARG MODULE_REF=v0.1.0
 FROM nginx:${NGINX_VERSION}-alpine
 
-# Install dependencies needed by the install script
+# Install dependencies and install the module in one layer.
 RUN apk add --no-cache \
     bash \
     curl \
     python3 \
     tar \
-    gzip
-
-# Use the install script directly from GitHub (recommended for production)
-# This avoids copying the entire project context
-RUN SKIP_ROOT_CHECK=1 \
-    curl -sSL https://raw.githubusercontent.com/cnkang/nginx-markdown-for-agents/main/tools/install.sh | bash
+    gzip \
+    && curl -fsSL "https://raw.githubusercontent.com/cnkang/nginx-markdown-for-agents/${MODULE_REF}/tools/install.sh" -o /tmp/install.sh \
+    && chmod +x /tmp/install.sh \
+    && SKIP_ROOT_CHECK=1 /tmp/install.sh \
+    && rm -f /tmp/install.sh
 
 # OR: If you need a specific version
-# RUN SKIP_ROOT_CHECK=1 VERSION=v0.1.0 \
-#     curl -sSL https://raw.githubusercontent.com/cnkang/nginx-markdown-for-agents/main/tools/install.sh | bash
+# ARG MODULE_REF=v0.1.0
 
 # OR: For local development/testing, copy only the install script
 # COPY tools/install.sh /tmp/install.sh

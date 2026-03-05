@@ -25,6 +25,7 @@ Environment variables:
   NGINX_VERSION   Default: stable (or explicit x.y.z)
   PORT            Default: 18088
 EOF
+  return 0
 }
 
 while [[ $# -gt 0 ]]; do
@@ -54,15 +55,18 @@ while [[ $# -gt 0 ]]; do
 done
 
 need_cmd() {
-  command -v "$1" >/dev/null 2>&1 || {
-    echo "Missing required command: $1" >&2
+  local cmd_name="$1"
+  command -v "${cmd_name}" >/dev/null 2>&1 || {
+    echo "Missing required command: ${cmd_name}" >&2
     exit 1
   }
+  return 0
 }
 
 resolve_nginx_version() {
-  local requested page version
-  requested="$1"
+  local requested="$1"
+  local page
+  local version
 
   case "${requested}" in
     stable|mainline)
@@ -125,6 +129,7 @@ detect_rust_target() {
       exit 1
       ;;
   esac
+  return 0
 }
 
 cleanup() {
@@ -151,6 +156,7 @@ PY
   elif [[ "${KEEP_ARTIFACTS}" -eq 1 ]]; then
     echo "Validation succeeded. Artifacts kept at: ${BUILDROOT}"
   fi
+  return 0
 }
 trap cleanup EXIT
 
