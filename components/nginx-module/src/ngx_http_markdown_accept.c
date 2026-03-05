@@ -447,7 +447,7 @@ ngx_http_markdown_should_convert(ngx_http_request_t *r,
     ngx_uint_t                            i;
     
     /* Check if conversion is enabled */
-    if (!conf->enabled) {
+    if (!ngx_http_markdown_is_enabled(r, conf)) {
         return 0;
     }
     

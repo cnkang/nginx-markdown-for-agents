@@ -34,6 +34,9 @@ typedef struct {
 static int valid_on_error(const char *v) { return STR_EQ(v, "pass") || STR_EQ(v, "reject"); }
 static int valid_flavor(const char *v) { return STR_EQ(v, "commonmark") || STR_EQ(v, "gfm"); }
 static int valid_auth_policy(const char *v) { return STR_EQ(v, "allow") || STR_EQ(v, "deny"); }
+static int valid_markdown_filter(const char *v) {
+    return STR_EQ(v, "on") || STR_EQ(v, "off") || (v != NULL && strchr(v, '$') != NULL);
+}
 static int valid_conditional(const char *v) {
     return STR_EQ(v, "full_support") || STR_EQ(v, "if_modified_since_only") || STR_EQ(v, "disabled");
 }
@@ -67,6 +70,11 @@ test_value_validation(void)
     TEST_ASSERT(valid_on_error("pass"), "on_error should accept pass");
     TEST_ASSERT(valid_on_error("reject"), "on_error should accept reject");
     TEST_ASSERT(!valid_on_error("PASS"), "on_error should be case-sensitive");
+    TEST_ASSERT(valid_markdown_filter("on"), "markdown_filter should accept on");
+    TEST_ASSERT(valid_markdown_filter("off"), "markdown_filter should accept off");
+    TEST_ASSERT(valid_markdown_filter("$convert_html"), "markdown_filter should accept variable");
+    TEST_ASSERT(!valid_markdown_filter("yes"), "markdown_filter should reject invalid static value");
+    TEST_ASSERT(!valid_markdown_filter("1"), "markdown_filter should reject numeric literal");
     TEST_ASSERT(valid_flavor("commonmark"), "flavor should accept commonmark");
     TEST_ASSERT(valid_flavor("gfm"), "flavor should accept gfm");
     TEST_ASSERT(!valid_flavor("markdown"), "flavor should reject invalid value");

@@ -268,7 +268,7 @@ ngx_http_markdown_check_eligibility(ngx_http_request_t *r,
                                     ngx_http_markdown_conf_t *conf)
 {
     /* Check if conversion is enabled in configuration (FR-02.6) */
-    if (!conf->enabled) {
+    if (!ngx_http_markdown_is_enabled(r, conf)) {
         return NGX_HTTP_MARKDOWN_INELIGIBLE_CONFIG;
     }
     

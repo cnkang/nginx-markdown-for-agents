@@ -38,6 +38,7 @@ static void *ngx_http_markdown_create_conf(ngx_conf_t *cf);
 static char *ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child);
 
 /* Configuration directive handlers */
+static char *ngx_http_markdown_filter(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 static char *ngx_http_markdown_on_error(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 static char *ngx_http_markdown_flavor(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 static char *ngx_http_markdown_auth_policy(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
@@ -98,6 +99,10 @@ static const ngx_str_t *ngx_http_markdown_conditional_requests_name(ngx_uint_t v
 static const ngx_str_t *ngx_http_markdown_log_verbosity_name(ngx_uint_t value);
 static const ngx_str_t *ngx_http_markdown_compression_name(
     ngx_http_markdown_compression_type_e compression_type);
+static const ngx_str_t *ngx_http_markdown_enabled_source_name(ngx_uint_t value);
+static ngx_int_t ngx_http_markdown_parse_filter_flag(ngx_str_t *value, ngx_flag_t *enabled);
+ngx_flag_t ngx_http_markdown_is_enabled(ngx_http_request_t *r,
+    ngx_http_markdown_conf_t *conf);
 static void ngx_http_markdown_log_merged_conf(ngx_conf_t *cf, ngx_http_markdown_conf_t *conf);
 static ngx_int_t ngx_http_markdown_forward_headers(ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx);
@@ -122,9 +127,10 @@ static ngx_http_output_body_filter_pt ngx_http_next_body_filter;
  */
 static ngx_command_t ngx_http_markdown_filter_commands[] = {
     /*
-     * markdown_filter on|off
+     * markdown_filter on|off|$variable
      * 
      * Enables or disables Markdown conversion for this context.
+     * Also supports per-request toggle via nginx variables/complex values.
      * Default: off
      * Context: http, server, location
      * 
@@ -135,10 +141,10 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      */
     {
         ngx_string("markdown_filter"),
-        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_FLAG,
-        ngx_conf_set_flag_slot,
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+        ngx_http_markdown_filter,
         NGX_HTTP_LOC_CONF_OFFSET,
-        offsetof(ngx_http_markdown_conf_t, enabled),
+        0,
         NULL
     },
     
@@ -510,6 +516,8 @@ ngx_http_markdown_create_conf(ngx_conf_t *cf)
     
     /* Set unset values (NGX_CONF_UNSET*) for proper inheritance */
     conf->enabled = NGX_CONF_UNSET;
+    conf->enabled_source = NGX_HTTP_MARKDOWN_ENABLED_UNSET;
+    conf->enabled_complex = NULL;
     conf->max_size = NGX_CONF_UNSET_SIZE;
     conf->timeout = NGX_CONF_UNSET_MSEC;
     conf->on_error = NGX_CONF_UNSET_UINT;
@@ -560,8 +568,29 @@ ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
     ngx_http_markdown_conf_t *prev = parent;
     ngx_http_markdown_conf_t *conf = child;
     
+    /*
+     * Merge markdown_filter with explicit source tracking.
+     *
+     * Priority:
+     * 1. Child explicit value (on/off or complex expression)
+     * 2. Parent inherited value
+     * 3. Default off
+     */
+    if (conf->enabled_source == NGX_HTTP_MARKDOWN_ENABLED_UNSET) {
+        if (prev->enabled_source == NGX_HTTP_MARKDOWN_ENABLED_UNSET) {
+            conf->enabled_source = NGX_HTTP_MARKDOWN_ENABLED_STATIC;
+            conf->enabled = 0;
+            conf->enabled_complex = NULL;
+        } else {
+            conf->enabled_source = prev->enabled_source;
+            conf->enabled = prev->enabled;
+            conf->enabled_complex = prev->enabled_complex;
+        }
+    } else if (conf->enabled_source == NGX_HTTP_MARKDOWN_ENABLED_STATIC) {
+        conf->enabled_complex = NULL;
+    }
+
     /* Merge flag and scalar configuration values */
-    ngx_conf_merge_value(conf->enabled, prev->enabled, 0);
     ngx_conf_merge_size_value(conf->max_size, prev->max_size, 10 * 1024 * 1024); /* 10MB */
     ngx_conf_merge_msec_value(conf->timeout, prev->timeout, 5000); /* 5 seconds */
     ngx_conf_merge_uint_value(conf->on_error, prev->on_error, 
@@ -588,6 +617,79 @@ ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
     /* Startup/reload-time configuration snapshot (FR-12.7) */
     ngx_http_markdown_log_merged_conf(cf, conf);
     
+    return NGX_CONF_OK;
+}
+
+/*
+ * Configuration directive handler: markdown_filter
+ *
+ * Supported values:
+ * - on | off          (static configuration)
+ * - $variable         (dynamic per-request switch)
+ * - complex value containing variables
+ */
+static char *
+ngx_http_markdown_filter(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
+{
+    ngx_http_markdown_conf_t          *mcf = conf;
+    ngx_http_compile_complex_value_t   ccv;
+    ngx_http_complex_value_t          *complex_value;
+    ngx_str_t                         *value;
+    u_char                            *var_marker;
+
+    (void) cmd;
+
+    if (mcf->enabled_source != NGX_HTTP_MARKDOWN_ENABLED_UNSET) {
+        return "is duplicate";
+    }
+
+    value = cf->args->elts;
+
+    if (value[1].len == 2
+        && ngx_strcasecmp(value[1].data, (u_char *) "on") == 0)
+    {
+        mcf->enabled = 1;
+        mcf->enabled_source = NGX_HTTP_MARKDOWN_ENABLED_STATIC;
+        mcf->enabled_complex = NULL;
+        return NGX_CONF_OK;
+    }
+
+    if (value[1].len == 3
+        && ngx_strcasecmp(value[1].data, (u_char *) "off") == 0)
+    {
+        mcf->enabled = 0;
+        mcf->enabled_source = NGX_HTTP_MARKDOWN_ENABLED_STATIC;
+        mcf->enabled_complex = NULL;
+        return NGX_CONF_OK;
+    }
+
+    var_marker = ngx_strlchr(value[1].data, value[1].data + value[1].len, '$');
+    if (var_marker == NULL) {
+        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+                           "invalid value \"%V\" in \"markdown_filter\" directive, "
+                           "it must be \"on\", \"off\", or contain a variable",
+                           &value[1]);
+        return NGX_CONF_ERROR;
+    }
+
+    complex_value = ngx_palloc(cf->pool, sizeof(ngx_http_complex_value_t));
+    if (complex_value == NULL) {
+        return NGX_CONF_ERROR;
+    }
+
+    ngx_memzero(&ccv, sizeof(ngx_http_compile_complex_value_t));
+    ccv.cf = cf;
+    ccv.value = &value[1];
+    ccv.complex_value = complex_value;
+
+    if (ngx_http_compile_complex_value(&ccv) != NGX_OK) {
+        return NGX_CONF_ERROR;
+    }
+
+    mcf->enabled = 0;
+    mcf->enabled_source = NGX_HTTP_MARKDOWN_ENABLED_COMPLEX;
+    mcf->enabled_complex = complex_value;
+
     return NGX_CONF_OK;
 }
 
@@ -989,6 +1091,133 @@ ngx_http_markdown_compression_name(ngx_http_markdown_compression_type_e compress
     }
 }
 
+static const ngx_str_t *
+ngx_http_markdown_enabled_source_name(ngx_uint_t value)
+{
+    static ngx_str_t unset = ngx_string("unset");
+    static ngx_str_t static_value = ngx_string("static");
+    static ngx_str_t complex = ngx_string("complex");
+    static ngx_str_t unknown = ngx_string("unknown");
+
+    switch (value) {
+        case NGX_HTTP_MARKDOWN_ENABLED_UNSET:
+            return &unset;
+        case NGX_HTTP_MARKDOWN_ENABLED_STATIC:
+            return &static_value;
+        case NGX_HTTP_MARKDOWN_ENABLED_COMPLEX:
+            return &complex;
+        default:
+            return &unknown;
+    }
+}
+
+static ngx_int_t
+ngx_http_markdown_parse_filter_flag(ngx_str_t *value, ngx_flag_t *enabled)
+{
+    if (value == NULL || enabled == NULL) {
+        return NGX_ERROR;
+    }
+
+    if (value->len == 0) {
+        *enabled = 0;
+        return NGX_OK;
+    }
+
+    if (value->len == 1) {
+        if (value->data[0] == '1') {
+            *enabled = 1;
+            return NGX_OK;
+        }
+
+        if (value->data[0] == '0') {
+            *enabled = 0;
+            return NGX_OK;
+        }
+    }
+
+    if (value->len == 2
+        && ngx_strncasecmp(value->data, (u_char *) "on", 2) == 0)
+    {
+        *enabled = 1;
+        return NGX_OK;
+    }
+
+    if (value->len == 3
+        && ngx_strncasecmp(value->data, (u_char *) "off", 3) == 0)
+    {
+        *enabled = 0;
+        return NGX_OK;
+    }
+
+    if (value->len == 3
+        && ngx_strncasecmp(value->data, (u_char *) "yes", 3) == 0)
+    {
+        *enabled = 1;
+        return NGX_OK;
+    }
+
+    if (value->len == 2
+        && ngx_strncasecmp(value->data, (u_char *) "no", 2) == 0)
+    {
+        *enabled = 0;
+        return NGX_OK;
+    }
+
+    if (value->len == 4
+        && ngx_strncasecmp(value->data, (u_char *) "true", 4) == 0)
+    {
+        *enabled = 1;
+        return NGX_OK;
+    }
+
+    if (value->len == 5
+        && ngx_strncasecmp(value->data, (u_char *) "false", 5) == 0)
+    {
+        *enabled = 0;
+        return NGX_OK;
+    }
+
+    return NGX_ERROR;
+}
+
+ngx_flag_t
+ngx_http_markdown_is_enabled(ngx_http_request_t *r, ngx_http_markdown_conf_t *conf)
+{
+    ngx_str_t    evaluated;
+    ngx_flag_t   enabled;
+    ngx_int_t    rc;
+
+    if (conf == NULL) {
+        return 0;
+    }
+
+    if (conf->enabled_source != NGX_HTTP_MARKDOWN_ENABLED_COMPLEX
+        || conf->enabled_complex == NULL)
+    {
+        return conf->enabled;
+    }
+
+    if (r == NULL) {
+        return 0;
+    }
+
+    if (ngx_http_complex_value(r, conf->enabled_complex, &evaluated) != NGX_OK) {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                      "markdown filter: failed to evaluate markdown_filter variable");
+        return 0;
+    }
+
+    rc = ngx_http_markdown_parse_filter_flag(&evaluated, &enabled);
+    if (rc != NGX_OK) {
+        ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
+                      "markdown filter: markdown_filter variable resolved to invalid value "
+                      "\"%V\", treating as off", &evaluated);
+        return 0;
+    }
+
+    return enabled;
+}
+
 static void
 ngx_http_markdown_log_merged_conf(ngx_conf_t *cf, ngx_http_markdown_conf_t *conf)
 {
@@ -1003,12 +1232,13 @@ ngx_http_markdown_log_merged_conf(ngx_conf_t *cf, ngx_http_markdown_conf_t *conf
     log_level = ngx_http_markdown_log_verbosity_to_ngx_level(conf->log_verbosity);
 
     ngx_conf_log_error(log_level, cf, 0,
-                      "markdown filter config: enabled=%ui max_size=%uz timeout_ms=%M "
+                      "markdown filter config: enabled=%ui enabled_source=%V max_size=%uz timeout_ms=%M "
                       "on_error=%V flavor=%V token_estimate=%ui front_matter=%ui "
                       "on_wildcard=%ui auth_policy=%V auth_cookie_patterns=%ui "
                       "etag=%ui conditional_requests=%V log_verbosity=%V "
                       "buffer_chunked=%ui stream_types=%ui",
                       (ngx_uint_t) conf->enabled,
+                      ngx_http_markdown_enabled_source_name(conf->enabled_source),
                       conf->max_size,
                       conf->timeout,
                       ngx_http_markdown_on_error_name(conf->on_error),
@@ -1370,7 +1600,7 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
 
     /* Get module configuration */
     conf = ngx_http_get_module_loc_conf(r, ngx_http_markdown_filter_module);
-    if (conf == NULL || conf->enabled == 0) {
+    if (conf == NULL || !ngx_http_markdown_is_enabled(r, conf)) {
         /* Module disabled, pass through */
         return ngx_http_next_header_filter(r);
     }
@@ -2478,7 +2708,7 @@ ngx_http_markdown_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
 
     /* Get module configuration */
     conf = ngx_http_get_module_loc_conf(r, ngx_http_markdown_filter_module);
-    if (conf == NULL || conf->enabled == 0) {
+    if (conf == NULL || !ngx_http_markdown_is_enabled(r, conf)) {
         /* Module disabled, pass through */
         return ngx_http_next_body_filter(r, in);
     }

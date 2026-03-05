@@ -49,6 +49,13 @@
 #define NGX_HTTP_MARKDOWN_LOG_DEBUG  3  /* Debug and above */
 
 /*
+ * Configuration source for markdown_filter directive
+ */
+#define NGX_HTTP_MARKDOWN_ENABLED_UNSET    0  /* Not configured in this scope */
+#define NGX_HTTP_MARKDOWN_ENABLED_STATIC   1  /* markdown_filter on|off */
+#define NGX_HTTP_MARKDOWN_ENABLED_COMPLEX  2  /* markdown_filter <variable/expr> */
+
+/*
  * Compression type enumeration
  *
  * Identifies the compression format of upstream response content.
@@ -70,6 +77,8 @@ typedef enum {
  *
  * Configuration defaults (defined in ngx_http_markdown_create_loc_conf):
  * - enabled: NGX_CONF_UNSET (inherit from parent)
+ * - enabled_source: NGX_HTTP_MARKDOWN_ENABLED_UNSET (inherit from parent)
+ * - enabled_complex: NULL
  * - max_size: 10MB (10 * 1024 * 1024 bytes)
  * - timeout: 5000ms (5 seconds)
  * - on_error: NGX_HTTP_MARKDOWN_ON_ERROR_PASS (fail-open)
@@ -87,7 +96,9 @@ typedef enum {
  * - auto_decompress: 1 (on by default)
  */
 typedef struct {
-    ngx_flag_t   enabled;              /* markdown_filter on|off */
+    ngx_flag_t   enabled;              /* markdown_filter static resolved value */
+    ngx_uint_t   enabled_source;       /* markdown_filter source (static|complex|unset) */
+    ngx_http_complex_value_t *enabled_complex; /* markdown_filter variable/complex expression */
     size_t       max_size;             /* markdown_max_size (default: 10MB) */
     ngx_msec_t   timeout;              /* markdown_timeout (default: 5000ms) */
     ngx_uint_t   on_error;             /* markdown_on_error pass|reject (default: pass) */
@@ -245,6 +256,10 @@ void ngx_http_markdown_sort_accept_entries(ngx_array_t *entries);
 
 /* Determine if request should be converted based on Accept header */
 ngx_int_t ngx_http_markdown_should_convert(ngx_http_request_t *r,
+    ngx_http_markdown_conf_t *conf);
+
+/* Resolve markdown_filter on/off state for the current request */
+ngx_flag_t ngx_http_markdown_is_enabled(ngx_http_request_t *r,
     ngx_http_markdown_conf_t *conf);
 
 /*
