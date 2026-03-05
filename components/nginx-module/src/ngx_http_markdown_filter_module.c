@@ -1657,7 +1657,7 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
     }
 
     /* Check if response is eligible for conversion */
-    eligibility = ngx_http_markdown_check_eligibility(r, conf);
+    eligibility = ngx_http_markdown_check_eligibility(r, conf, filter_enabled);
     if (eligibility != NGX_HTTP_MARKDOWN_ELIGIBLE) {
         /* Not eligible, pass through */
         ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,

@@ -1,6 +1,11 @@
 /*
  * Test: markdown_filter_runtime
  * Description: markdown_filter runtime parsing and resolution behavior
+ *
+ * NOTE:
+ * This file uses a lightweight behavioral model (not direct linkage against
+ * nginx module objects). Real runtime wiring is covered by integration tests
+ * in tests/integration/run_integration_tests.sh.
  */
 
 #include "test_common.h"

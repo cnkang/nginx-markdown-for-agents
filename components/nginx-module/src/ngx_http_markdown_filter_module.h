@@ -323,7 +323,8 @@ typedef enum {
 
 /* Check if response is eligible for conversion */
 ngx_http_markdown_eligibility_t ngx_http_markdown_check_eligibility(
-    ngx_http_request_t *r, ngx_http_markdown_conf_t *conf);
+    ngx_http_request_t *r, ngx_http_markdown_conf_t *conf,
+    ngx_flag_t filter_enabled);
 
 /* Get human-readable string for eligibility result */
 const ngx_str_t *ngx_http_markdown_eligibility_string(
