@@ -40,6 +40,7 @@ has_auth_cookie(const char *cookie_header, const char **patterns, size_t pattern
 {
     char buf[512];
     char *cursor;
+    char *cookie_saveptr;
 
     if (cookie_header == NULL || *cookie_header == '\0') {
         return 0;
@@ -47,22 +48,32 @@ has_auth_cookie(const char *cookie_header, const char **patterns, size_t pattern
 
     strncpy(buf, cookie_header, sizeof(buf) - 1);
     buf[sizeof(buf) - 1] = '\0';
-    cursor = strtok(buf, ";");
+    cookie_saveptr = NULL;
+    cursor = strtok_r(buf, ";", &cookie_saveptr);
 
     while (cursor != NULL) {
-        char *eq = strchr(cursor, '=');
-        size_t i;
-        if (eq != NULL) {
-            char *name = cursor;
-            while (*name == ' ') name++;
-            *eq = '\0';
-            for (i = 0; i < pattern_count; i++) {
-                if (cookie_matches_pattern(name, patterns[i])) {
-                    return 1;
-                }
+        char *eq;
+        char *name;
+
+        eq = strchr(cursor, '=');
+        if (eq == NULL) {
+            cursor = strtok_r(NULL, ";", &cookie_saveptr);
+            continue;
+        }
+
+        name = cursor;
+        while (*name == ' ') {
+            name++;
+        }
+        *eq = '\0';
+
+        for (size_t i = 0; i < pattern_count; i++) {
+            if (cookie_matches_pattern(name, patterns[i])) {
+                return 1;
             }
         }
-        cursor = strtok(NULL, ";");
+
+        cursor = strtok_r(NULL, ";", &cookie_saveptr);
     }
     return 0;
 }
@@ -82,6 +93,7 @@ adjust_cache_control_for_auth(const char *cache_control, int authenticated)
     static char rewritten[512];
     char scratch[512];
     char *cursor;
+    char *directive_saveptr;
     int wrote;
 
     if (!authenticated) {
@@ -102,7 +114,8 @@ adjust_cache_control_for_auth(const char *cache_control, int authenticated)
 
     rewritten[0] = '\0';
     wrote = 0;
-    cursor = strtok(scratch, ",");
+    directive_saveptr = NULL;
+    cursor = strtok_r(scratch, ",", &directive_saveptr);
     while (cursor != NULL) {
         char *token = cursor;
         while (*token == ' ' || *token == '\t') token++;
@@ -113,7 +126,7 @@ adjust_cache_control_for_auth(const char *cache_control, int authenticated)
             strncat(rewritten, token, sizeof(rewritten) - strlen(rewritten) - 1);
             wrote = 1;
         }
-        cursor = strtok(NULL, ",");
+        cursor = strtok_r(NULL, ",", &directive_saveptr);
     }
 
     if (wrote) {

@@ -6,7 +6,7 @@
  * 
  * Usage:
  *   #include "test_common.h"
- *   // ... rest of your test code
+ *   ... rest of your test code
  */
 
 #ifndef TEST_COMMON_H
@@ -124,7 +124,7 @@
  * 
  * Example:
  *   int arr[] = {1, 2, 3};
- *   size_t count = ARRAY_SIZE(arr);  // Returns 3
+ *   size_t count = ARRAY_SIZE(arr);  (returns 3)
  */
 #define ARRAY_SIZE(arr) (sizeof(arr) / sizeof((arr)[0]))
 

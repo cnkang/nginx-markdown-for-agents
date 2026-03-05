@@ -11,6 +11,109 @@
 #include "ngx_http_markdown_filter_module.h"
 #include "markdown_converter.h"
 
+static u_char ngx_http_markdown_if_none_match_header[] = "If-None-Match";
+static u_char ngx_http_markdown_etag_wildcard[] = "*";
+static u_char ngx_http_markdown_empty_string[] = "";
+
+static ngx_table_elt_t *
+ngx_http_markdown_find_request_header(ngx_http_request_t *r, u_char *name, size_t name_len)
+{
+    ngx_list_part_t  *part;
+
+    if (r->headers_in.headers.part.nelts == 0) {
+        return NULL;
+    }
+
+    for (part = &r->headers_in.headers.part; part != NULL; part = part->next) {
+        ngx_table_elt_t  *headers;
+        ngx_uint_t        i;
+
+        headers = part->elts;
+        for (i = 0; i < part->nelts; i++) {
+            if (headers[i].key.len == name_len
+                && ngx_strncasecmp(headers[i].key.data, name, name_len) == 0)
+            {
+                return &headers[i];
+            }
+        }
+    }
+
+    return NULL;
+}
+
+static ngx_int_t
+ngx_http_markdown_push_etag_token(ngx_array_t *etags, u_char *data, size_t len)
+{
+    ngx_str_t  *etag;
+
+    etag = ngx_array_push(etags);
+    if (etag == NULL) {
+        return NGX_ERROR;
+    }
+
+    etag->data = data;
+    etag->len = len;
+    return NGX_OK;
+}
+
+static void
+ngx_http_markdown_skip_if_none_match_separators(u_char **cursor, u_char *end)
+{
+    while (*cursor < end
+           && (**cursor == ' ' || **cursor == '\t' || **cursor == ','))
+    {
+        (*cursor)++;
+    }
+}
+
+static ngx_int_t
+ngx_http_markdown_parse_quoted_etag(ngx_http_request_t *r,
+                                    u_char **cursor,
+                                    u_char *end,
+                                    ngx_array_t *etags)
+{
+    u_char  *start;
+    size_t   len;
+
+    (*cursor)++;
+    start = *cursor;
+
+    while (*cursor < end && **cursor != '"') {
+        (*cursor)++;
+    }
+
+    if (*cursor >= end) {
+        ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
+                     "markdown filter: malformed If-None-Match header, "
+                     "missing closing quote");
+        return NGX_DECLINED;
+    }
+
+    len = (size_t) (*cursor - start);
+    (*cursor)++;
+
+    return ngx_http_markdown_push_etag_token(etags, start, len);
+}
+
+static ngx_int_t
+ngx_http_markdown_parse_unquoted_etag(u_char **cursor, u_char *end, ngx_array_t *etags)
+{
+    u_char  *start;
+    size_t   len;
+
+    start = *cursor;
+    while (*cursor < end
+           && **cursor != ','
+           && **cursor != ' '
+           && **cursor != '\t')
+    {
+        (*cursor)++;
+    }
+
+    len = (size_t) (*cursor - start);
+    return ngx_http_markdown_push_etag_token(etags, start, len);
+}
+
 /*
  * Parse If-None-Match header
  *
@@ -30,48 +133,19 @@ static ngx_int_t
 ngx_http_markdown_parse_if_none_match(ngx_http_request_t *r, ngx_array_t **etags)
 {
     ngx_table_elt_t  *if_none_match;
-    ngx_str_t        *etag;
-    u_char           *p, *start, *end;
-    size_t            len;
+    ngx_int_t         rc;
+    u_char           *p;
+    u_char           *end;
 
-    /* Find If-None-Match header */
-    if_none_match = NULL;
-    if (r->headers_in.headers.part.nelts > 0) {
-        ngx_list_part_t  *part;
-        ngx_table_elt_t  *header;
-        ngx_uint_t        i;
-
-        part = &r->headers_in.headers.part;
-        header = part->elts;
-
-        for (i = 0; /* void */; i++) {
-            if (i >= part->nelts) {
-                if (part->next == NULL) {
-                    break;
-                }
-                part = part->next;
-                header = part->elts;
-                i = 0;
-            }
-
-            /* Case-insensitive comparison for If-None-Match */
-            if (header[i].key.len == sizeof("If-None-Match") - 1
-                && ngx_strncasecmp(header[i].key.data,
-                                  (u_char *) "If-None-Match",
-                                  sizeof("If-None-Match") - 1) == 0)
-            {
-                if_none_match = &header[i];
-                break;
-            }
-        }
-    }
+    if_none_match = ngx_http_markdown_find_request_header(
+        r,
+        ngx_http_markdown_if_none_match_header,
+        sizeof(ngx_http_markdown_if_none_match_header) - 1);
 
     if (if_none_match == NULL) {
-        /* No If-None-Match header present */
         return NGX_DECLINED;
     }
 
-    /* Create array for ETags */
     *etags = ngx_array_create(r->pool, 4, sizeof(ngx_str_t));
     if (*etags == NULL) {
         return NGX_ERROR;
@@ -82,73 +156,30 @@ ngx_http_markdown_parse_if_none_match(ngx_http_request_t *r, ngx_array_t **etags
     end = p + if_none_match->value.len;
 
     while (p < end) {
-        /* Skip whitespace and commas */
-        while (p < end && (*p == ' ' || *p == '\t' || *p == ',')) {
-            p++;
-        }
-
+        ngx_http_markdown_skip_if_none_match_separators(&p, end);
         if (p >= end) {
             break;
         }
 
-        /* Check for wildcard "*" */
         if (*p == '*') {
-            etag = ngx_array_push(*etags);
-            if (etag == NULL) {
-                return NGX_ERROR;
+            rc = ngx_http_markdown_push_etag_token(*etags,
+                                                   ngx_http_markdown_etag_wildcard,
+                                                   1);
+            if (rc != NGX_OK) {
+                return rc;
             }
-            etag->data = (u_char *) "*";
-            etag->len = 1;
             p++;
             continue;
         }
 
-        /* Check for quoted ETag */
         if (*p == '"') {
-            p++;  /* Skip opening quote */
-            start = p;
-
-            /* Find closing quote */
-            while (p < end && *p != '"') {
-                p++;
-            }
-
-            if (p >= end) {
-                /* Malformed ETag - missing closing quote */
-                ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-                             "markdown filter: malformed If-None-Match header, "
-                             "missing closing quote");
-                return NGX_DECLINED;
-            }
-
-            len = p - start;
-            p++;  /* Skip closing quote */
-
-            /* Add ETag to array */
-            etag = ngx_array_push(*etags);
-            if (etag == NULL) {
-                return NGX_ERROR;
-            }
-            etag->data = start;
-            etag->len = len;
+            rc = ngx_http_markdown_parse_quoted_etag(r, &p, end, *etags);
         } else {
-            /* Unquoted ETag (less common but valid) */
-            start = p;
+            rc = ngx_http_markdown_parse_unquoted_etag(&p, end, *etags);
+        }
 
-            /* Find end of ETag (comma, whitespace, or end of string) */
-            while (p < end && *p != ',' && *p != ' ' && *p != '\t') {
-                p++;
-            }
-
-            len = p - start;
-
-            /* Add ETag to array */
-            etag = ngx_array_push(*etags);
-            if (etag == NULL) {
-                return NGX_ERROR;
-            }
-            etag->data = start;
-            etag->len = len;
+        if (rc != NGX_OK) {
+            return rc;
         }
     }
 
@@ -399,7 +430,7 @@ ngx_http_markdown_handle_if_none_match(ngx_http_request_t *r,
                      "error_code=%ud message=\"%*s\"",
                      conv_result->error_code,
                      (conv_result->error_message != NULL) ? (ngx_int_t) conv_result->error_len : 0,
-                     (conv_result->error_message != NULL) ? conv_result->error_message : (u_char *) "");
+                     (conv_result->error_message != NULL) ? conv_result->error_message : ngx_http_markdown_empty_string);
         
         /* Free result */
         markdown_result_free(conv_result);

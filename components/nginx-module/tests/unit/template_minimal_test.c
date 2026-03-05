@@ -81,11 +81,15 @@ u_char *ngx_slprintf(u_char *buf, u_char *last, const char *fmt, ...) {
     if (avail == 0) {
         return buf;
     }
+    if (fmt == NULL) {
+        return buf;
+    }
 
-    va_list args;
-    va_start(args, fmt);
-    int len = vsnprintf((char *)buf, avail, fmt, args);
-    va_end(args);
+    /*
+     * Minimal template helper: preserve deterministic behavior without
+     * evaluating arbitrary format strings in this lightweight mock.
+     */
+    int len = snprintf((char *)buf, avail, "%s", fmt);
 
     if (len < 0) {
         return buf;

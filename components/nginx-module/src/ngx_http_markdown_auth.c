@@ -29,6 +29,281 @@
 
 #include "ngx_http_markdown_filter_module.h"
 
+static u_char ngx_http_markdown_hdr_cache_control[] = "Cache-Control";
+static u_char ngx_http_markdown_cc_private[] = "private";
+static u_char ngx_http_markdown_cc_public[] = "public";
+static u_char ngx_http_markdown_cc_no_store[] = "no-store";
+static u_char ngx_http_markdown_cc_suffix_private[] = ", private";
+
+static ngx_int_t ngx_http_markdown_cookie_matches_pattern(ngx_str_t *cookie_name,
+                                                          ngx_str_t *pattern);
+
+static ngx_table_elt_t *
+ngx_http_markdown_find_response_header(ngx_http_request_t *r,
+                                       u_char *name,
+                                       size_t name_len)
+{
+    ngx_list_part_t  *part;
+
+    if (r->headers_out.headers.part.nelts == 0) {
+        return NULL;
+    }
+
+    for (part = &r->headers_out.headers.part; part != NULL; part = part->next) {
+        ngx_table_elt_t  *headers;
+        ngx_uint_t        i;
+
+        headers = part->elts;
+        for (i = 0; i < part->nelts; i++) {
+            if (headers[i].key.len == name_len
+                && ngx_strncasecmp(headers[i].key.data, name, name_len) == 0)
+            {
+                return &headers[i];
+            }
+        }
+    }
+
+    return NULL;
+}
+
+static ngx_int_t
+ngx_http_markdown_add_private_cache_control_header(ngx_http_request_t *r)
+{
+    ngx_table_elt_t  *h;
+
+    h = ngx_list_push(&r->headers_out.headers);
+    if (h == NULL) {
+        return NGX_ERROR;
+    }
+
+    h->hash = 1;
+    h->key.data = ngx_http_markdown_hdr_cache_control;
+    h->key.len = sizeof(ngx_http_markdown_hdr_cache_control) - 1;
+    h->value.data = ngx_http_markdown_cc_private;
+    h->value.len = sizeof(ngx_http_markdown_cc_private) - 1;
+
+    ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                  "markdown filter: added Cache-Control: private for authenticated content");
+
+    return NGX_OK;
+}
+
+static ngx_int_t
+ngx_http_markdown_append_private_directive(ngx_http_request_t *r,
+                                           ngx_table_elt_t *cache_control)
+{
+    u_char  *new_value;
+    size_t   new_len;
+
+    if (cache_control->value.len > ((size_t) -1) - (sizeof(ngx_http_markdown_cc_suffix_private) - 1)) {
+        return NGX_ERROR;
+    }
+
+    new_len = cache_control->value.len + sizeof(ngx_http_markdown_cc_suffix_private) - 1;
+    new_value = ngx_pnalloc(r->pool, new_len);
+    if (new_value == NULL) {
+        return NGX_ERROR;
+    }
+
+    ngx_memcpy(new_value, cache_control->value.data, cache_control->value.len);
+    ngx_memcpy(new_value + cache_control->value.len,
+               ngx_http_markdown_cc_suffix_private,
+               sizeof(ngx_http_markdown_cc_suffix_private) - 1);
+
+    cache_control->value.data = new_value;
+    cache_control->value.len = new_len;
+
+    ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                  "markdown filter: added private to Cache-Control: \"%V\"",
+                  &cache_control->value);
+
+    return NGX_OK;
+}
+
+static ngx_int_t
+ngx_http_markdown_strip_public_and_append_private(ngx_http_request_t *r,
+                                                  ngx_table_elt_t *cache_control)
+{
+    u_char     *new_value;
+    size_t      new_len;
+    u_char     *p;
+    u_char     *end;
+    u_char     *token_start;
+    u_char     *token_end;
+    u_char     *dst;
+    ngx_flag_t  wrote_token;
+
+    if (cache_control->value.len > (((size_t) -1) - (sizeof(ngx_http_markdown_cc_suffix_private) - 1)) / 2) {
+        return NGX_ERROR;
+    }
+
+    new_len = (cache_control->value.len * 2) + (sizeof(ngx_http_markdown_cc_suffix_private) - 1);
+    new_value = ngx_pnalloc(r->pool, new_len);
+    if (new_value == NULL) {
+        return NGX_ERROR;
+    }
+
+    p = cache_control->value.data;
+    end = cache_control->value.data + cache_control->value.len;
+    dst = new_value;
+    wrote_token = 0;
+
+    while (p < end) {
+        while (p < end && (*p == ' ' || *p == '\t' || *p == ',')) {
+            p++;
+        }
+        if (p >= end) {
+            break;
+        }
+
+        token_start = p;
+        while (p < end && *p != ',') {
+            p++;
+        }
+        token_end = p;
+
+        while (token_start < token_end
+               && (*token_start == ' ' || *token_start == '\t'))
+        {
+            token_start++;
+        }
+        while (token_end > token_start
+               && (*(token_end - 1) == ' ' || *(token_end - 1) == '\t'))
+        {
+            token_end--;
+        }
+
+        if ((size_t) (token_end - token_start) == sizeof(ngx_http_markdown_cc_public) - 1
+            && ngx_strncasecmp(token_start,
+                               ngx_http_markdown_cc_public,
+                               sizeof(ngx_http_markdown_cc_public) - 1) == 0)
+        {
+            continue;
+        }
+
+        if (token_end <= token_start) {
+            continue;
+        }
+
+        if (wrote_token) {
+            *dst++ = ',';
+            *dst++ = ' ';
+        }
+        dst = ngx_cpymem(dst, token_start, token_end - token_start);
+        wrote_token = 1;
+    }
+
+    if (wrote_token) {
+        *dst++ = ',';
+        *dst++ = ' ';
+    }
+    dst = ngx_cpymem(dst,
+                     ngx_http_markdown_cc_private,
+                     sizeof(ngx_http_markdown_cc_private) - 1);
+
+    cache_control->value.data = new_value;
+    cache_control->value.len = (size_t) (dst - new_value);
+
+    ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                  "markdown filter: upgraded Cache-Control from public to private: \"%V\"",
+                  &cache_control->value);
+
+    return NGX_OK;
+}
+
+static void
+ngx_http_markdown_get_auth_patterns(ngx_http_markdown_conf_t *conf,
+                                    ngx_str_t **patterns,
+                                    ngx_uint_t *pattern_count)
+{
+    static ngx_str_t default_patterns[] = {
+        ngx_string("session*"),
+        ngx_string("auth*"),
+        ngx_string("PHPSESSID"),
+        ngx_string("wordpress_logged_in_*"),
+        ngx_null_string
+    };
+
+    if (conf != NULL && conf->auth_cookies != NULL && conf->auth_cookies->nelts > 0) {
+        *patterns = conf->auth_cookies->elts;
+        *pattern_count = conf->auth_cookies->nelts;
+        return;
+    }
+
+    *patterns = default_patterns;
+    *pattern_count = 4;
+}
+
+static void
+ngx_http_markdown_skip_cookie_whitespace(u_char **cursor, u_char *end)
+{
+    while (*cursor < end && (**cursor == ' ' || **cursor == '\t')) {
+        (*cursor)++;
+    }
+}
+
+static void
+ngx_http_markdown_skip_cookie_value(u_char **cursor, u_char *end)
+{
+    while (*cursor < end && **cursor != ';') {
+        (*cursor)++;
+    }
+    if (*cursor < end && **cursor == ';') {
+        (*cursor)++;
+    }
+}
+
+static ngx_int_t
+ngx_http_markdown_read_cookie_name(u_char **cursor, u_char *end, ngx_str_t *cookie_name)
+{
+    u_char  *name_start;
+    u_char  *name_end;
+
+    ngx_http_markdown_skip_cookie_whitespace(cursor, end);
+    if (*cursor >= end) {
+        return NGX_DECLINED;
+    }
+
+    name_start = *cursor;
+    while (*cursor < end && **cursor != '=' && **cursor != ';') {
+        (*cursor)++;
+    }
+    name_end = *cursor;
+
+    while (name_start < name_end && (*name_start == ' ' || *name_start == '\t')) {
+        name_start++;
+    }
+    while (name_end > name_start && (*(name_end - 1) == ' ' || *(name_end - 1) == '\t')) {
+        name_end--;
+    }
+
+    cookie_name->data = name_start;
+    cookie_name->len = (size_t) (name_end - name_start);
+
+    ngx_http_markdown_skip_cookie_value(cursor, end);
+    return NGX_OK;
+}
+
+static ngx_int_t
+ngx_http_markdown_cookie_matches_any_pattern(ngx_str_t *cookie_name,
+                                             ngx_str_t *patterns,
+                                             ngx_uint_t pattern_count,
+                                             ngx_str_t **matched_pattern)
+{
+    ngx_uint_t  j;
+
+    for (j = 0; j < pattern_count; j++) {
+        if (ngx_http_markdown_cookie_matches_pattern(cookie_name, &patterns[j])) {
+            if (matched_pattern != NULL) {
+                *matched_pattern = &patterns[j];
+            }
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
 /*
  * Check if request has Authorization header
  *
@@ -70,8 +345,10 @@ ngx_http_markdown_has_authorization_header(ngx_http_request_t *r)
 static ngx_int_t
 ngx_http_markdown_cookie_matches_pattern(ngx_str_t *cookie_name, ngx_str_t *pattern)
 {
-    size_t pattern_len, cookie_len;
-    u_char *pattern_data, *cookie_data;
+    size_t  pattern_len;
+    size_t  cookie_len;
+    u_char *pattern_data;
+    u_char *cookie_data;
 
     if (cookie_name == NULL || pattern == NULL ||
         cookie_name->len == 0 || pattern->len == 0)
@@ -86,34 +363,33 @@ ngx_http_markdown_cookie_matches_pattern(ngx_str_t *cookie_name, ngx_str_t *patt
 
     /* Check for wildcard patterns */
     if (pattern_data[pattern_len - 1] == '*') {
-        /* Prefix match: "session*" matches "session", "session_id", etc. */
-        size_t prefix_len = pattern_len - 1;
-        
+        size_t prefix_len;
+
+        prefix_len = pattern_len - 1;
         if (cookie_len < prefix_len) {
             return 0;
         }
-        
-        return (ngx_strncmp(cookie_data, pattern_data, prefix_len) == 0);
+
+        return ngx_strncmp(cookie_data, pattern_data, prefix_len) == 0;
     }
-    else if (pattern_data[0] == '*') {
-        /* Suffix match: "*_logged_in" matches "wordpress_logged_in", etc. */
-        size_t suffix_len = pattern_len - 1;
-        
+
+    if (pattern_data[0] == '*') {
+        size_t suffix_len;
+
+        suffix_len = pattern_len - 1;
         if (cookie_len < suffix_len) {
             return 0;
         }
-        
-        return (ngx_strncmp(cookie_data + (cookie_len - suffix_len),
-                           pattern_data + 1, suffix_len) == 0);
+
+        return ngx_strncmp(cookie_data + (cookie_len - suffix_len),
+                           pattern_data + 1, suffix_len) == 0;
     }
-    else {
-        /* Exact match */
-        if (cookie_len != pattern_len) {
-            return 0;
-        }
-        
-        return (ngx_strncmp(cookie_data, pattern_data, pattern_len) == 0);
+
+    if (cookie_len != pattern_len) {
+        return 0;
     }
+
+    return ngx_strncmp(cookie_data, pattern_data, pattern_len) == 0;
 }
 
 /*
@@ -139,17 +415,10 @@ ngx_http_markdown_has_auth_cookies(ngx_http_request_t *r,
                                    ngx_http_markdown_conf_t *conf)
 {
     ngx_table_elt_t  *cookie_header;
-    u_char           *p, *end, *name_start, *name_end;
+    ngx_str_t        *patterns;
+    ngx_uint_t        pattern_count;
+    ngx_str_t        *matched_pattern;
     ngx_str_t         cookie_name;
-
-    /* Default patterns if none configured */
-    static ngx_str_t default_patterns[] = {
-        ngx_string("session*"),
-        ngx_string("auth*"),
-        ngx_string("PHPSESSID"),
-        ngx_string("wordpress_logged_in_*"),
-        ngx_null_string
-    };
 
     if (r == NULL) {
         return 0;
@@ -161,64 +430,34 @@ ngx_http_markdown_has_auth_cookies(ngx_http_request_t *r,
         return 0;
     }
 
-    /* Determine which patterns to use */
-    ngx_str_t *patterns;
-    ngx_uint_t pattern_count;
+    ngx_http_markdown_get_auth_patterns(conf, &patterns, &pattern_count);
 
-    if (conf != NULL && conf->auth_cookies != NULL && conf->auth_cookies->nelts > 0) {
-        /* Use configured patterns */
-        patterns = conf->auth_cookies->elts;
-        pattern_count = conf->auth_cookies->nelts;
-    } else {
-        /* Use default patterns */
-        patterns = default_patterns;
-        pattern_count = 4;  /* Number of default patterns */
-    }
-
-    /* Parse each Cookie header (there can be multiple linked headers) */
     for (; cookie_header != NULL; cookie_header = cookie_header->next) {
+        u_char *p;
+        u_char *end;
+
         p = cookie_header->value.data;
         end = p + cookie_header->value.len;
 
-        /* Parse cookies in format: "name1=value1; name2=value2; ..." */
         while (p < end) {
-            /* Skip whitespace */
-            while (p < end && (*p == ' ' || *p == '\t')) {
-                p++;
+            if (ngx_http_markdown_read_cookie_name(&p, end, &cookie_name) != NGX_OK) {
+                continue;
             }
 
-            if (p >= end) {
-                break;
+            if (cookie_name.len == 0) {
+                continue;
             }
 
-            /* Find cookie name */
-            name_start = p;
-            while (p < end && *p != '=' && *p != ';') {
-                p++;
-            }
-            name_end = p;
-
-            /* Extract cookie name */
-            cookie_name.data = name_start;
-            cookie_name.len = name_end - name_start;
-
-            /* Check against patterns */
-            for (ngx_uint_t j = 0; j < pattern_count; j++) {
-                if (ngx_http_markdown_cookie_matches_pattern(&cookie_name, &patterns[j])) {
-                    ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                                  "markdown filter: detected auth cookie \"%V\" "
-                                  "matching pattern \"%V\"",
-                                  &cookie_name, &patterns[j]);
-                    return 1;
-                }
-            }
-
-            /* Skip to next cookie */
-            while (p < end && *p != ';') {
-                p++;
-            }
-            if (p < end && *p == ';') {
-                p++;
+            if (ngx_http_markdown_cookie_matches_any_pattern(&cookie_name,
+                                                             patterns,
+                                                             pattern_count,
+                                                             &matched_pattern))
+            {
+                ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                              "markdown filter: detected auth cookie \"%V\" "
+                              "matching pattern \"%V\"",
+                              &cookie_name, matched_pattern);
+                return 1;
             }
         }
     }
@@ -341,11 +580,13 @@ ngx_http_markdown_cache_control_has_directive(const ngx_str_t *value,
 ngx_int_t
 ngx_http_markdown_modify_cache_control_for_auth(ngx_http_request_t *r)
 {
-    static ngx_str_t  ngx_http_markdown_no_store = ngx_string("no-store");
-    static ngx_str_t  ngx_http_markdown_private = ngx_string("private");
-    static ngx_str_t  ngx_http_markdown_public = ngx_string("public");
+    static ngx_str_t  ngx_http_markdown_no_store =
+        { sizeof(ngx_http_markdown_cc_no_store) - 1, ngx_http_markdown_cc_no_store };
+    static ngx_str_t  ngx_http_markdown_private =
+        { sizeof(ngx_http_markdown_cc_private) - 1, ngx_http_markdown_cc_private };
+    static ngx_str_t  ngx_http_markdown_public =
+        { sizeof(ngx_http_markdown_cc_public) - 1, ngx_http_markdown_cc_public };
     ngx_table_elt_t  *cache_control;
-    ngx_table_elt_t  *h;
     ngx_int_t         has_no_store;
     ngx_int_t         has_private;
     ngx_int_t         has_public;
@@ -354,56 +595,13 @@ ngx_http_markdown_modify_cache_control_for_auth(ngx_http_request_t *r)
         return NGX_ERROR;
     }
 
-    /* Find existing Cache-Control header */
-    cache_control = NULL;
-    if (r->headers_out.headers.part.nelts > 0) {
-        ngx_list_part_t  *part;
-        ngx_table_elt_t  *header;
-        ngx_uint_t        i;
-
-        part = &r->headers_out.headers.part;
-        header = part->elts;
-
-        for (i = 0; /* void */; i++) {
-            if (i >= part->nelts) {
-                if (part->next == NULL) {
-                    break;
-                }
-                part = part->next;
-                header = part->elts;
-                i = 0;
-            }
-
-            /* Case-insensitive comparison for Cache-Control */
-            if (header[i].key.len == sizeof("Cache-Control") - 1
-                && ngx_strncasecmp(header[i].key.data,
-                                  (u_char *) "Cache-Control",
-                                  sizeof("Cache-Control") - 1) == 0)
-            {
-                cache_control = &header[i];
-                break;
-            }
-        }
-    }
+    cache_control = ngx_http_markdown_find_response_header(
+        r,
+        ngx_http_markdown_hdr_cache_control,
+        sizeof(ngx_http_markdown_hdr_cache_control) - 1);
 
     if (cache_control == NULL) {
-        /*
-         * Rule 1: No Cache-Control header present
-         * Add "Cache-Control: private" to prevent public caching
-         */
-        h = ngx_list_push(&r->headers_out.headers);
-        if (h == NULL) {
-            return NGX_ERROR;
-        }
-
-        h->hash = 1;
-        ngx_str_set(&h->key, "Cache-Control");
-        ngx_str_set(&h->value, "private");
-
-        ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                      "markdown filter: added Cache-Control: private for authenticated content");
-
-        return NGX_OK;
+        return ngx_http_markdown_add_private_cache_control_header(r);
     }
 
     /*
@@ -438,116 +636,9 @@ ngx_http_markdown_modify_cache_control_for_auth(ngx_http_request_t *r)
         return NGX_OK;
     }
 
-    /*
-     * Rule 2: Upgrade public caching to private
-     * If Cache-Control allows public caching (has "public" or no privacy directive),
-     * upgrade to "private" to prevent public cache storage.
-     */
     if (has_public) {
-        /*
-         * Rewrite directives by removing "public" tokens and appending
-         * "private". We pre-allocate using an upper bound to avoid
-         * under-allocation when replacing 6-byte "public" with 7-byte "private".
-         */
-        u_char *new_value;
-        size_t  new_len;
-        u_char *p, *end, *token_start, *token_end, *dst;
-        ngx_flag_t wrote_token;
-
-        /* Worst-case output can add spaces after commas, so reserve a safe upper bound. */
-        if (cache_control->value.len > (((size_t) -1) - (sizeof(", private") - 1)) / 2) {
-            return NGX_ERROR;
-        }
-        new_len = (cache_control->value.len * 2) + (sizeof(", private") - 1);
-        new_value = ngx_pnalloc(r->pool, new_len);
-        if (new_value == NULL) {
-            return NGX_ERROR;
-        }
-
-        p = cache_control->value.data;
-        end = cache_control->value.data + cache_control->value.len;
-        dst = new_value;
-        wrote_token = 0;
-
-        while (p < end) {
-            while (p < end && (*p == ' ' || *p == '\t' || *p == ',')) {
-                p++;
-            }
-            if (p >= end) {
-                break;
-            }
-
-            token_start = p;
-            while (p < end && *p != ',') {
-                p++;
-            }
-            token_end = p;
-
-            while (token_start < token_end
-                   && (*token_start == ' ' || *token_start == '\t'))
-            {
-                token_start++;
-            }
-            while (token_end > token_start
-                   && (*(token_end - 1) == ' ' || *(token_end - 1) == '\t'))
-            {
-                token_end--;
-            }
-
-            if ((size_t) (token_end - token_start) == sizeof("public") - 1
-                && ngx_strncasecmp(token_start, (u_char *) "public",
-                                   sizeof("public") - 1) == 0)
-            {
-                continue;
-            }
-
-            if (token_end > token_start) {
-                if (wrote_token) {
-                    *dst++ = ',';
-                    *dst++ = ' ';
-                }
-                dst = ngx_cpymem(dst, token_start, token_end - token_start);
-                wrote_token = 1;
-            }
-        }
-
-        if (wrote_token) {
-            *dst++ = ',';
-            *dst++ = ' ';
-        }
-        dst = ngx_cpymem(dst, "private", sizeof("private") - 1);
-
-        cache_control->value.data = new_value;
-        cache_control->value.len = dst - new_value;
-
-        ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                      "markdown filter: upgraded Cache-Control from public to private: \"%V\"",
-                      &cache_control->value);
-    } else {
-        /* No "public" or "private" - add "private" to existing directives */
-        u_char *new_value;
-        size_t  new_len;
-
-        if (cache_control->value.len > ((size_t) -1) - (sizeof(", private") - 1)) {
-            return NGX_ERROR;
-        }
-        new_len = cache_control->value.len + sizeof(", private") - 1;
-        new_value = ngx_pnalloc(r->pool, new_len);
-        if (new_value == NULL) {
-            return NGX_ERROR;
-        }
-
-        /* Copy existing value and append ", private" */
-        ngx_memcpy(new_value, cache_control->value.data, cache_control->value.len);
-        ngx_memcpy(new_value + cache_control->value.len, ", private", sizeof(", private") - 1);
-
-        cache_control->value.data = new_value;
-        cache_control->value.len = new_len;
-
-        ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                      "markdown filter: added private to Cache-Control: \"%V\"",
-                      &cache_control->value);
+        return ngx_http_markdown_strip_public_and_append_private(r, cache_control);
     }
 
-    return NGX_OK;
+    return ngx_http_markdown_append_private_directive(r, cache_control);
 }
