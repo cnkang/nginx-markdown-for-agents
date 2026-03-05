@@ -58,19 +58,19 @@ jobs:
         arch: ['x86_64', 'aarch64']
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           ref: ${{ needs.prepare.outputs.checkout_ref }}
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
       - name: Build Module
         run: |
           ./tools/build_release.sh ${{ matrix.nginx }} ${{ matrix.os_type }} ${{ matrix.arch }}
 
       - name: Upload Artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
         with:
           name: ngx_http_markdown_filter_module-${{ matrix.nginx }}-${{ matrix.os_type }}-${{ matrix.arch }}
           path: dist/${{ matrix.nginx }}-${{ matrix.os_type }}-${{ matrix.arch }}/*.tar.gz
@@ -84,7 +84,7 @@ jobs:
       contents: write
     steps:
       - name: Download Artifacts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3 # v8
         with:
           path: artifacts
 
@@ -165,7 +165,7 @@ jobs:
           PY
 
       - name: Upload Assets
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b # v2
         with:
           files: |
             artifacts/**/*.tar.gz
