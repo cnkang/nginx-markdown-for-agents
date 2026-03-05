@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import ssl
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -97,9 +98,15 @@ class Handler(BaseHTTPRequestHandler):
 def main():
     parser = argparse.ArgumentParser(description="Test backend for NGINX markdown E2E")
     parser.add_argument("--port", type=int, default=9999)
+    parser.add_argument("--tls-cert", required=True, help="Path to TLS certificate file")
+    parser.add_argument("--tls-key", required=True, help="Path to TLS private key file")
     args = parser.parse_args()
 
     server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
+    tls_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    tls_ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+    tls_ctx.load_cert_chain(certfile=args.tls_cert, keyfile=args.tls_key)
+    server.socket = tls_ctx.wrap_socket(server.socket, server_side=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

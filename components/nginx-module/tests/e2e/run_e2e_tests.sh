@@ -38,6 +38,7 @@ NGINX_PID="/tmp/nginx-markdown-e2e.pid"
 NGINX_ERROR_LOG="/tmp/nginx-markdown-e2e-error.log"
 NGINX_ACCESS_LOG="/tmp/nginx-markdown-e2e-access.log"
 BACKEND_PID="/tmp/backend-server.pid"
+BACKEND_TLS_DIR=""
 
 # Colors for output
 RED='\033[0;31m'
@@ -90,6 +91,9 @@ cleanup() {
     
     # Remove test files
     rm -f "$NGINX_CONF" "$NGINX_PID" "$NGINX_ERROR_LOG" "$NGINX_ACCESS_LOG" "$BACKEND_PID"
+    if [[ -n "$BACKEND_TLS_DIR" ]]; then
+        rm -rf "$BACKEND_TLS_DIR"
+    fi
     return 0
 }
 
@@ -136,16 +140,38 @@ log_warn() {
 
 # Start backend server
 start_backend() {
+    local tls_cert
+    local tls_key
+
     echo "Starting backend server on port $BACKEND_PORT..."
+
+    BACKEND_TLS_DIR="$(mktemp -d /tmp/backend-server-tls.XXXXXX)"
+    tls_cert="$BACKEND_TLS_DIR/server.crt"
+    tls_key="$BACKEND_TLS_DIR/server.key"
+    if ! openssl req \
+        -x509 -newkey rsa:2048 -sha256 -days 1 -nodes \
+        -keyout "$tls_key" \
+        -out "$tls_cert" \
+        -subj "/CN=localhost" \
+        -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" \
+        >/tmp/backend-tls-cert.log 2>&1; then
+        echo "Failed to generate backend TLS certificate" >&2
+        cat /tmp/backend-tls-cert.log >&2
+        return 1
+    fi
     
-    python3 "$SCRIPT_DIR/test_backend_server.py" --port "$BACKEND_PORT" > /tmp/backend-server.log 2>&1 &
+    python3 "$SCRIPT_DIR/test_backend_server.py" \
+        --port "$BACKEND_PORT" \
+        --tls-cert "$tls_cert" \
+        --tls-key "$tls_key" \
+        > /tmp/backend-server.log 2>&1 &
     echo $! > "$BACKEND_PID"
     
     # Wait for backend to start
     sleep 2
     
     # Verify backend is running
-    if ! curl -s http://localhost:$BACKEND_PORT/health > /dev/null; then
+    if ! curl -sk https://localhost:$BACKEND_PORT/health > /dev/null; then
         echo "Failed to start backend server" >&2
         cat /tmp/backend-server.log >&2
         return 1
@@ -705,6 +731,11 @@ main() {
         echo "ERROR: python3 not found in PATH" >&2
         return 1
     fi
+
+    if ! command -v openssl &> /dev/null; then
+        echo "ERROR: openssl not found in PATH" >&2
+        return 1
+    fi
     
     if [[ ! -f "$SCRIPT_DIR/test_backend_server.py" ]]; then
         echo "ERROR: $SCRIPT_DIR/test_backend_server.py not found" >&2
@@ -743,7 +774,10 @@ http {
         
         # Proxy to backend server
         location / {
-            proxy_pass http://127.0.0.1:'"$BACKEND_PORT"';
+            proxy_pass https://127.0.0.1:'"$BACKEND_PORT"';
+            proxy_ssl_server_name on;
+            proxy_ssl_name localhost;
+            proxy_ssl_verify off;
             proxy_set_header Host $host;
             proxy_set_header X-Real-IP $remote_addr;
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
