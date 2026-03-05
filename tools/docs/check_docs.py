@@ -27,23 +27,33 @@ def iter_markdown_files() -> list[Path]:
     )
 
 
+def iter_unfenced_lines(text: str) -> list[tuple[int, str]]:
+    lines: list[tuple[int, str]] = []
+    in_fence = False
+    for line_no, line in enumerate(text.splitlines(), 1):
+        if line.strip().startswith("```"):
+            in_fence = not in_fence
+            continue
+        if not in_fence:
+            lines.append((line_no, line))
+    return lines
+
+
+def normalized_link_target(raw_target: str) -> str:
+    target = raw_target.strip().strip("<>")
+    if target.startswith(("http://", "https://", "mailto:", "#")):
+        return ""
+    return target.split("#", 1)[0].split("?", 1)[0]
+
+
 def check_links(files: list[Path]) -> list[str]:
     errors: list[str] = []
     for f in files:
-        in_fence = False
         text = f.read_text(encoding="utf-8", errors="ignore")
-        for line_no, line in enumerate(text.splitlines(), 1):
-            if line.strip().startswith("```"):
-                in_fence = not in_fence
-                continue
-            if in_fence:
-                continue
+        for line_no, line in iter_unfenced_lines(text):
             line_no_code = re.sub(r"`[^`]*`", "", line)
             for _, target in LINK_RE.findall(line_no_code):
-                t = target.strip().strip("<>")
-                if t.startswith(("http://", "https://", "mailto:", "#")):
-                    continue
-                p = t.split("#", 1)[0].split("?", 1)[0]
+                p = normalized_link_target(target)
                 if not p:
                     continue
                 if not (f.parent / p).resolve().exists():
@@ -55,15 +65,9 @@ def check_heading_hierarchy(files: list[Path]) -> list[str]:
     errors: list[str] = []
     for f in files:
         prev = 0
-        in_fence = False
         text = f.read_text(encoding="utf-8", errors="ignore")
-        for line_no, line in enumerate(text.splitlines(), 1):
+        for line_no, line in iter_unfenced_lines(text):
             s = line.strip()
-            if s.startswith("```"):
-                in_fence = not in_fence
-                continue
-            if in_fence:
-                continue
             if not s.startswith("#"):
                 continue
             level = len(s) - len(s.lstrip("#"))
@@ -75,7 +79,7 @@ def check_heading_hierarchy(files: list[Path]) -> list[str]:
     return errors
 
 
-def check_english_policy(files: list[Path]) -> list[str]:
+def check_english_policy() -> list[str]:
     # Detect CJK Han ideographs only (avoid false positives from punctuation such as middle dots).
     try:
         proc = subprocess.run(
@@ -127,7 +131,7 @@ def main() -> int:
 
     failures.extend(check_links(files))
     failures.extend(check_heading_hierarchy(files))
-    failures.extend(check_english_policy(files))
+    failures.extend(check_english_policy())
     failures.extend(check_duplicate_sync())
 
     if failures:

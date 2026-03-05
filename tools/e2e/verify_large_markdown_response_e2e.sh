@@ -24,6 +24,7 @@ run a real HTTP E2E regression check for large (~1MB) Markdown conversion.
 This script auto-reexecs to native arm64 on Apple Silicon when launched under
 Rosetta translation.
 EOF
+  return 0
 }
 
 ensure_native_apple_silicon() {
@@ -40,10 +41,12 @@ ensure_native_apple_silicon() {
 }
 
 need_cmd() {
-  command -v "$1" >/dev/null 2>&1 || {
-    echo "Missing required command: $1" >&2
+  local cmd_name="$1"
+  command -v "${cmd_name}" >/dev/null 2>&1 || {
+    echo "Missing required command: ${cmd_name}" >&2
     exit 1
   }
+  return 0
 }
 
 detect_rust_target() {
@@ -57,6 +60,7 @@ detect_rust_target() {
       exit 1
       ;;
   esac
+  return 0
 }
 
 cleanup() {
@@ -75,6 +79,7 @@ cleanup() {
   elif [[ "${KEEP_ARTIFACTS}" -eq 1 && -n "${BUILDROOT}" ]]; then
     echo "Regression check succeeded. Artifacts kept at: ${BUILDROOT}"
   fi
+  return 0
 }
 trap cleanup EXIT
 

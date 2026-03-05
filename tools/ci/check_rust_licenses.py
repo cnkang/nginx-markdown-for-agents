@@ -43,7 +43,7 @@ TOKEN_RE = re.compile(
   | (?P<and>\bAND\b)
   | (?P<or>\bOR\b)
   | (?P<with>\bWITH\b)
-  | (?P<id>[A-Z0-9.+-]+)
+  | (?P<id>[-+.0-9A-Z]+)
 """,
     re.IGNORECASE | re.VERBOSE,
 )

@@ -31,6 +31,7 @@ Validation expectation:
 
 This script auto-reexecs under native arm64 on Apple Silicon if launched under Rosetta.
 EOF
+  return 0
 }
 
 ensure_native_apple_silicon() {
@@ -47,10 +48,12 @@ ensure_native_apple_silicon() {
 }
 
 need_cmd() {
-  command -v "$1" >/dev/null 2>&1 || {
-    echo "Missing required command: $1" >&2
+  local cmd_name="$1"
+  command -v "${cmd_name}" >/dev/null 2>&1 || {
+    echo "Missing required command: ${cmd_name}" >&2
     exit 1
   }
+  return 0
 }
 
 detect_rust_target() {
@@ -64,6 +67,7 @@ detect_rust_target() {
       exit 1
       ;;
   esac
+  return 0
 }
 
 cleanup() {
@@ -82,6 +86,7 @@ cleanup() {
   elif [[ "${KEEP_ARTIFACTS}" -eq 1 && -n "${BUILDROOT}" ]]; then
     echo "Huge-body E2E validation succeeded. Artifacts kept at: ${BUILDROOT}"
   fi
+  return 0
 }
 trap cleanup EXIT
 
@@ -224,6 +229,7 @@ check_head() {
     echo "${name}: Content-Length mismatch (expected ${expected_bytes}, got ${cl:-missing})" >&2
     exit 1
   }
+  return 0
 }
 
 check_get() {
@@ -251,6 +257,7 @@ check_get() {
     echo "${name}: expected pass-through Content-Type text/html on GET" >&2
     exit 1
   }
+  return 0
 }
 
 echo "==> HEAD validation (size-bypass correctness)"

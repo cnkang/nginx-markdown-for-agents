@@ -7,8 +7,7 @@ WORKSPACE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 BUILDROOT=""
 
 need_cmd() {
-  local cmd_name
-  cmd_name="$1"
+  local cmd_name="$1"
 
   command -v "${cmd_name}" >/dev/null 2>&1 || {
     echo "Missing required command: ${cmd_name}" >&2
@@ -19,8 +18,9 @@ need_cmd() {
 }
 
 resolve_nginx_version() {
-  local requested page version
-  requested="$1"
+  local requested="$1"
+  local page
+  local version
 
   case "${requested}" in
     stable|mainline)

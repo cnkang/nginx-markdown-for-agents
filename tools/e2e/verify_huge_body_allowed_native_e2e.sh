@@ -40,6 +40,7 @@ Notes:
   - This script auto-reexecs under native arm64 on Apple Silicon if launched under Rosetta.
   - 1GB GET can be skipped with --skip-1g-get.
 EOF
+  return 0
 }
 
 ensure_native_apple_silicon() {
@@ -56,10 +57,12 @@ ensure_native_apple_silicon() {
 }
 
 need_cmd() {
-  command -v "$1" >/dev/null 2>&1 || {
-    echo "Missing required command: $1" >&2
+  local cmd_name="$1"
+  command -v "${cmd_name}" >/dev/null 2>&1 || {
+    echo "Missing required command: ${cmd_name}" >&2
     exit 1
   }
+  return 0
 }
 
 detect_rust_target() {
@@ -73,6 +76,7 @@ detect_rust_target() {
       exit 1
       ;;
   esac
+  return 0
 }
 
 cleanup() {
@@ -91,6 +95,7 @@ cleanup() {
   elif [[ "${KEEP_ARTIFACTS}" -eq 1 && -n "${BUILDROOT}" ]]; then
     echo "Allowed-size huge-body E2E validation succeeded. Artifacts kept at: ${BUILDROOT}"
   fi
+  return 0
 }
 trap cleanup EXIT
 
@@ -252,6 +257,7 @@ check_head_markdown() {
     echo "${name}: expected markdown Content-Type on HEAD" >&2
     exit 1
   }
+  return 0
 }
 
 check_get_markdown() {
@@ -279,6 +285,7 @@ check_get_markdown() {
   local sz
   sz="$(wc -c < "${body}" | tr -d ' ')"
   [[ "${sz}" -gt 0 ]] || { echo "${name}: markdown body empty" >&2; exit 1; }
+  return 0
 }
 
 check_head_failopen_passthrough() {
@@ -301,6 +308,7 @@ check_head_failopen_passthrough() {
     echo "${name}: Content-Length mismatch (expected ${expected_bytes}, got ${cl:-missing})" >&2
     exit 1
   }
+  return 0
 }
 
 check_get_failopen_passthrough() {
@@ -326,6 +334,7 @@ check_get_failopen_passthrough() {
     echo "${name}: expected pass-through Content-Type text/html on GET" >&2
     exit 1
   }
+  return 0
 }
 
 echo "==> 100MB conversion validation (max_size allowed)"

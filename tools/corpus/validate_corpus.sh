@@ -18,10 +18,11 @@ NC='\033[0m'
 TOTAL=0
 PASSED=0
 FAILED=0
+SEPARATOR_LINE="========================================="
 
-echo "========================================="
+echo "$SEPARATOR_LINE"
 echo "Comprehensive Corpus Validation"
-echo "========================================="
+echo "$SEPARATOR_LINE"
 echo ""
 
 # Build the converter first
@@ -50,7 +51,7 @@ for html_file in $HTML_FILES; do
     TOTAL=$((TOTAL + 1))
     filename=$(basename "$html_file")
 
-    if [ ! -f "$html_file" ] || [ ! -s "$html_file" ]; then
+    if [[ ! -f "$html_file" ]] || [[ ! -s "$html_file" ]]; then
         echo -e "${RED}✗${NC} $filename (empty or missing)"
         FAILED=$((FAILED + 1))
         continue
@@ -66,17 +67,17 @@ for html_file in $HTML_FILES; do
 done
 
 echo ""
-echo "========================================="
+echo "$SEPARATOR_LINE"
 echo "Results:"
 echo "  Total:  $TOTAL"
 echo -e "  ${GREEN}Passed: $PASSED${NC}"
-if [ $FAILED -gt 0 ]; then
+if [[ $FAILED -gt 0 ]]; then
     echo -e "  ${RED}Failed: $FAILED${NC}"
 else
     echo -e "  ${GREEN}Failed: $FAILED${NC}"
 fi
-echo "========================================="
+echo "$SEPARATOR_LINE"
 
-if [ $FAILED -gt 0 ]; then
+if [[ $FAILED -gt 0 ]]; then
     exit 1
 fi
