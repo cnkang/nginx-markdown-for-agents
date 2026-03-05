@@ -140,6 +140,7 @@ typedef struct {
     ngx_chain_t                 *in;           /* Input chain */
     ngx_chain_t                 *out;          /* Output chain */
     ngx_http_markdown_buffer_t   buffer;       /* Response buffer */
+    ngx_flag_t                   filter_enabled; /* Cached markdown_filter decision from header phase */
     ngx_flag_t                   buffer_initialized;
     ngx_flag_t                   eligible;     /* Eligible for conversion */
     ngx_flag_t                   headers_forwarded; /* Whether downstream headers were sent */

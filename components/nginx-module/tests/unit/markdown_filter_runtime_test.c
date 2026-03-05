@@ -23,6 +23,10 @@ typedef struct {
     const char *enabled_complex;
 } conf_t;
 
+typedef struct {
+    int filter_enabled;
+} ctx_t;
+
 static int
 is_ascii_space(char ch)
 {
@@ -150,6 +154,16 @@ is_enabled_runtime(const request_t *r, const conf_t *conf)
     }
 
     return enabled;
+}
+
+static int
+body_enabled_from_cached_ctx(const conf_t *conf, const ctx_t *ctx)
+{
+    if (conf == NULL || ctx == NULL) {
+        return 0;
+    }
+
+    return ctx->filter_enabled;
 }
 
 static void
@@ -284,6 +298,42 @@ test_is_enabled_complex_resolution(void)
 }
 
 static void
+test_body_phase_uses_cached_header_decision(void)
+{
+    conf_t conf;
+    request_t header_req;
+    request_t body_req;
+    ctx_t ctx;
+
+    TEST_SUBSECTION("body phase uses cached header decision");
+
+    conf = unset_conf();
+    conf.enabled = 0;
+    conf.enabled_source = ENABLED_COMPLEX;
+    conf.enabled_complex = "compiled";
+
+    header_req.eval_status = TEST_NGX_OK;
+    header_req.value = "on";
+    ctx.filter_enabled = is_enabled_runtime(&header_req, &conf);
+    TEST_ASSERT(ctx.filter_enabled == 1, "header should cache enabled decision");
+
+    body_req.eval_status = TEST_NGX_OK;
+    body_req.value = "off";
+
+    TEST_ASSERT(is_enabled_runtime(&body_req, &conf) == 0,
+                "fresh body-time evaluation can resolve differently");
+    TEST_ASSERT(body_enabled_from_cached_ctx(&conf, &ctx) == 1,
+                "body phase should use cached header decision");
+
+    TEST_ASSERT(body_enabled_from_cached_ctx(NULL, &ctx) == 0,
+                "NULL conf should disable body processing");
+    TEST_ASSERT(body_enabled_from_cached_ctx(&conf, NULL) == 0,
+                "NULL ctx should disable body processing");
+
+    TEST_PASS("cached header decision behavior is correct");
+}
+
+static void
 test_enabled_merge_behavior(void)
 {
     conf_t parent;
@@ -345,6 +395,7 @@ main(void)
     test_parse_filter_flag_values();
     test_is_enabled_static_and_edge_cases();
     test_is_enabled_complex_resolution();
+    test_body_phase_uses_cached_header_decision();
     test_enabled_merge_behavior();
 
     printf("\n========================================\n");

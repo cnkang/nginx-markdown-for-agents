@@ -1628,11 +1628,23 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
     ngx_http_markdown_ctx_t         *ctx;
     ngx_http_markdown_conf_t        *conf;
     ngx_http_markdown_eligibility_t  eligibility;
+    ngx_flag_t                       filter_enabled;
     ngx_int_t                        should_convert;
 
     /* Get module configuration */
     conf = ngx_http_get_module_loc_conf(r, ngx_http_markdown_filter_module);
-    if (conf == NULL || !ngx_http_markdown_is_enabled(r, conf)) {
+    if (conf == NULL) {
+        /* Module not configured, pass through */
+        return ngx_http_next_header_filter(r);
+    }
+
+    /*
+     * Resolve markdown_filter once in header phase and cache the result in
+     * request context. Body phase must reuse this decision to avoid
+     * header/body inconsistencies for dynamic variables.
+     */
+    filter_enabled = ngx_http_markdown_is_enabled(r, conf);
+    if (!filter_enabled) {
         /* Module disabled, pass through */
         return ngx_http_next_header_filter(r);
     }
@@ -1671,6 +1683,7 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
 
     /* Initialize context */
     ctx->request = r;
+    ctx->filter_enabled = filter_enabled;
     ctx->eligible = 1;
     ctx->buffer_initialized = 0;
     ctx->headers_forwarded = 0;
@@ -2740,16 +2753,27 @@ ngx_http_markdown_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
 
     /* Get module configuration */
     conf = ngx_http_get_module_loc_conf(r, ngx_http_markdown_filter_module);
-    if (conf == NULL || !ngx_http_markdown_is_enabled(r, conf)) {
+    if (conf == NULL) {
         /* Module disabled, pass through */
         return ngx_http_next_body_filter(r, in);
     }
 
-    /* Get or create request context */
+    /*
+     * Get request context created by header filter.
+     *
+     * IMPORTANT: Do not re-evaluate markdown_filter here. Dynamic expressions
+     * can resolve differently between phases; body filter must follow the
+     * cached header-phase decision.
+     */
     ctx = ngx_http_get_module_ctx(r, ngx_http_markdown_filter_module);
     if (ctx == NULL) {
         /* No context means header filter didn't set up conversion */
         /* Pass through unchanged */
+        return ngx_http_next_body_filter(r, in);
+    }
+
+    if (!ctx->filter_enabled) {
+        r->buffered &= ~NGX_HTTP_MARKDOWN_BUFFERED;
         return ngx_http_next_body_filter(r, in);
     }
 
