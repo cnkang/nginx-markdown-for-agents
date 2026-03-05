@@ -10,13 +10,12 @@ on:
         required: false
         default: ''
 
-permissions:
-  contents: write
-
 jobs:
   prepare:
     name: Resolve Default NGINX Versions
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     outputs:
       nginx_versions: ${{ steps.resolve.outputs.nginx_versions }}
       checkout_ref: ${{ steps.checkout_ref.outputs.checkout_ref }}
@@ -48,6 +47,8 @@ jobs:
     name: Build - NGINX ${{ matrix.nginx }} - ${{ matrix.os_type }} - ${{ matrix.arch }}
     needs: prepare
     runs-on: ${{ matrix.arch == 'aarch64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
+    permissions:
+      contents: read
     strategy:
       matrix:
         nginx: ${{ fromJson(needs.prepare.outputs.nginx_versions) }}
@@ -77,6 +78,8 @@ jobs:
     needs: build-binaries
     runs-on: ubuntu-latest
     if: github.event_name == 'release'
+    permissions:
+      contents: write
     steps:
       - name: Download Artifacts
         uses: actions/download-artifact@v8

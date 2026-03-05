@@ -23,9 +23,6 @@ on:
       - "README.md"
       - ".github/workflows/ci.yml"
 
-permissions:
-  contents: read
-
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -34,6 +31,8 @@ jobs:
   changes:
     name: Detect Changed Areas
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     outputs:
       docs: ${{ steps.filter.outputs.docs }}
       rust: ${{ steps.filter.outputs.rust }}
@@ -74,6 +73,8 @@ jobs:
     if: needs.changes.outputs.docs == 'true' || needs.changes.outputs.workflows == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: read
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
@@ -92,6 +93,8 @@ jobs:
     if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.e2e == 'true' || needs.changes.outputs.workflows == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    permissions:
+      contents: read
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
@@ -124,6 +127,8 @@ jobs:
     if: needs.changes.outputs.nginx == 'true' || needs.changes.outputs.workflows == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    permissions:
+      contents: read
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
@@ -147,6 +152,8 @@ jobs:
     if: needs.changes.outputs.e2e == 'true' || needs.changes.outputs.workflows == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 35
+    permissions:
+      contents: read
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6

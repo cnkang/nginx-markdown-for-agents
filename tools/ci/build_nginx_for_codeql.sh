@@ -7,10 +7,15 @@ WORKSPACE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 BUILDROOT=""
 
 need_cmd() {
-  command -v "$1" >/dev/null 2>&1 || {
-    echo "Missing required command: $1" >&2
+  local cmd_name
+  cmd_name="$1"
+
+  command -v "${cmd_name}" >/dev/null 2>&1 || {
+    echo "Missing required command: ${cmd_name}" >&2
     exit 1
   }
+
+  return 0
 }
 
 resolve_nginx_version() {
@@ -54,6 +59,8 @@ PY
       printf '%s\n' "${requested}"
       ;;
   esac
+
+  return 0
 }
 
 cleanup() {
@@ -65,6 +72,8 @@ cleanup() {
   if [[ $rc -ne 0 && -n "${BUILDROOT}" && -d "${BUILDROOT}" ]]; then
     echo "Build failed. Artifacts kept at: ${BUILDROOT}" >&2
   fi
+
+  return 0
 }
 trap cleanup EXIT
 

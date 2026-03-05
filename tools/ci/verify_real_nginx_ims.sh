@@ -101,6 +101,8 @@ PY
       printf '%s\n' "${requested}"
       ;;
   esac
+
+  return 0
 }
 
 for cmd in curl tar make cargo rsync awk python3; do

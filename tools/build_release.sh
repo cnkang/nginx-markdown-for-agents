@@ -45,7 +45,7 @@ print(match.group(1))
 PY
             )"
 
-            if [ -z "$version" ]; then
+            if [[ -z "$version" ]]; then
                 echo "Failed to resolve latest ${requested} nginx version."
                 exit 1
             fi
@@ -55,6 +55,8 @@ PY
             printf '%s\n' "$requested"
             ;;
     esac
+
+    return 0
 }
 
 case "$OS_TYPE" in
@@ -85,7 +87,7 @@ NGINX_VERSION="$(resolve_nginx_version "$NGINX_VERSION")"
 DOCKERFILE="tools/build_release/Dockerfile.$OS_TYPE"
 OUT_DIR="dist/${NGINX_VERSION}-${OS_TYPE}-${ARCH}"
 
-if [ ! -f "$DOCKERFILE" ]; then
+if [[ ! -f "$DOCKERFILE" ]]; then
     echo "Dockerfile not found: $DOCKERFILE"
     exit 1
 fi

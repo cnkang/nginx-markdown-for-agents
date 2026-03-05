@@ -5,7 +5,7 @@ WORKSPACE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TEST_ARCH="x86_64"
 DOCKER_PLATFORM="linux/amd64"
 HOST_ARCH="$(uname -m)"
-if [ "$HOST_ARCH" = "aarch64" ] || [ "$HOST_ARCH" = "arm64" ]; then
+if [[ "$HOST_ARCH" == "aarch64" ]] || [[ "$HOST_ARCH" == "arm64" ]]; then
   TEST_ARCH="aarch64"
   DOCKER_PLATFORM="linux/arm64"
 fi
@@ -23,21 +23,25 @@ sha256_file() {
   else
     openssl dgst -sha256 "$file" | awk '{print $2}'
   fi
+
+  return 0
 }
 
 cleanup() {
-  if [ -n "$SERVER_PID" ] && kill -0 "$SERVER_PID" >/dev/null 2>&1; then
+  if [[ -n "$SERVER_PID" ]] && kill -0 "$SERVER_PID" >/dev/null 2>&1; then
     kill "$SERVER_PID" >/dev/null 2>&1 || true
     wait "$SERVER_PID" >/dev/null 2>&1 || true
   fi
 
-  if [ -n "$MOCK_DIR" ] && [ -d "$MOCK_DIR" ]; then
+  if [[ -n "$MOCK_DIR" ]] && [[ -d "$MOCK_DIR" ]]; then
     rm -rf "$MOCK_DIR"
   fi
+
+  return 0
 }
 trap cleanup EXIT
 
-if [ ! -f "$ARTIFACT" ]; then
+if [[ ! -f "$ARTIFACT" ]]; then
   echo "Missing artifact: $ARTIFACT"
   echo "Build it first: ./tools/build_release.sh 1.28.2 glibc ${TEST_ARCH}"
   exit 1
