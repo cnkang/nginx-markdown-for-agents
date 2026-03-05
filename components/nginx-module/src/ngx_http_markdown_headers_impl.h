@@ -43,7 +43,7 @@ ngx_http_markdown_find_header_in_part(ngx_list_part_t *part,
         i = 0;
         while (i < part->nelts) {
             if (headers[i].key.len == name_len
-                && ngx_strncasecmp(headers[i].key.data, name, name_len) == 0)
+                && ngx_strncasecmp(headers[i].key.data, (u_char *) name, name_len) == 0)
             {
                 return &headers[i];
             }
@@ -83,7 +83,7 @@ ngx_http_markdown_invalidate_headers_in_part(ngx_http_request_t *r,
         i = 0;
         while (i < part->nelts) {
             if (headers[i].key.len != name_len
-                || ngx_strncasecmp(headers[i].key.data, name, name_len) != 0)
+                || ngx_strncasecmp(headers[i].key.data, (u_char *) name, name_len) != 0)
             {
                 i++;
                 continue;
@@ -147,7 +147,7 @@ ngx_http_markdown_contains_csv_token(const ngx_str_t *value,
         }
 
         if (end - start == token_len
-            && ngx_strncasecmp(value->data + start, token, token_len) == 0)
+            && ngx_strncasecmp(value->data + start, (u_char *) token, token_len) == 0)
         {
             return 1;
         }

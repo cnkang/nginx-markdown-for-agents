@@ -212,7 +212,7 @@ ngx_http_markdown_strip_public_and_append_private(ngx_http_request_t *r,
 }
 
 static void
-ngx_http_markdown_get_auth_patterns(ngx_http_markdown_conf_t *conf,
+ngx_http_markdown_get_auth_patterns(const ngx_http_markdown_conf_t *conf,
                                     ngx_str_t **patterns,
                                     ngx_uint_t *pattern_count)
 {
@@ -412,7 +412,7 @@ ngx_http_markdown_cookie_matches_pattern(ngx_str_t *cookie_name, ngx_str_t *patt
  */
 static ngx_int_t
 ngx_http_markdown_has_auth_cookies(ngx_http_request_t *r,
-                                   ngx_http_markdown_conf_t *conf)
+                                   const ngx_http_markdown_conf_t *conf)
 {
     ngx_table_elt_t  *cookie_header;
     ngx_str_t        *patterns;
@@ -480,7 +480,7 @@ ngx_http_markdown_has_auth_cookies(ngx_http_request_t *r,
  */
 ngx_int_t
 ngx_http_markdown_is_authenticated(ngx_http_request_t *r,
-                                   ngx_http_markdown_conf_t *conf)
+                                   const ngx_http_markdown_conf_t *conf)
 {
     if (r == NULL) {
         return 0;

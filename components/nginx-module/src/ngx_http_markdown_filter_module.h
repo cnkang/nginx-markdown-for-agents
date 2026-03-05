@@ -352,7 +352,7 @@ void ngx_http_markdown_remove_content_encoding(ngx_http_request_t *r);
 
 /* Check if request is authenticated (Authorization header or auth cookies) */
 ngx_int_t ngx_http_markdown_is_authenticated(ngx_http_request_t *r,
-    ngx_http_markdown_conf_t *conf);
+    const ngx_http_markdown_conf_t *conf);
 
 /* Modify Cache-Control header for authenticated content */
 ngx_int_t ngx_http_markdown_modify_cache_control_for_auth(ngx_http_request_t *r);
