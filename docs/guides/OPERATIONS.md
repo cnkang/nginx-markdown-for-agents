@@ -305,6 +305,12 @@ nginx -T | grep markdown_filter
 # Verify markdown_filter is "on"
 ```
 
+If you use variable-driven enablement (`markdown_filter $some_var;`), also inspect related `map` blocks:
+```bash
+nginx -T | sed -n '/map \\$http_accept/,/}/p'
+nginx -T | sed -n '/map \\$uri/,/}/p'
+```
+
 3. **Verify response eligibility:**
 ```bash
 curl -I http://localhost/test
@@ -319,12 +325,17 @@ tail -100 /var/log/nginx/error.log | grep markdown
 **Common Causes:**
 - `markdown_filter off` in configuration
 - Accept header missing or incorrect
+- `markdown_filter` variable map not matching real `Accept` header format
+- Extension/path map uses `$request_uri` and fails when query strings are present
+- `text/*` path in map enabled but `markdown_on_wildcard` is still `off`
 - Response not eligible (non-200 status, non-HTML content)
 - Response exceeds `markdown_max_size` limit
 
 **Solutions:**
 - Enable filter: `markdown_filter on;`
 - Verify client sends `Accept: text/markdown`
+- For map-based config, use regex for `Accept` matching and prefer `$uri` for extension checks
+- Enable wildcard support when required: `markdown_on_wildcard on;`
 - Check backend returns 200 with `Content-Type: text/html`
 - Increase size limit if needed: `markdown_max_size 20m;`
 

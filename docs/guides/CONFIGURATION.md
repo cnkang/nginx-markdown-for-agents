@@ -41,11 +41,13 @@ Configuration follows NGINX's standard inheritance model where inner scopes inhe
 
 #### markdown_filter
 
-**Syntax:** `markdown_filter on | off;`  
+**Syntax:** `markdown_filter on | off | $variable;`  
 **Default:** `off`  
 **Context:** http, server, location
 
 Enables or disables Markdown conversion for the current context.
+You can also use an NGINX variable/complex value for per-request control.
+Resolved values accept `1/0`, `on/off`, `true/false`, `yes/no` (case-insensitive).
 
 **Example:**
 ```nginx
@@ -53,6 +55,23 @@ location /docs {
     markdown_filter on;
 }
 ```
+
+**Dynamic Example:**
+```nginx
+map $http_user_agent $markdown_enabled {
+    default 1;
+    "~*curl" 0;
+}
+
+location /docs {
+    markdown_filter $markdown_enabled;
+}
+```
+
+**Best Practices for Variable-Driven `markdown_filter`:**
+- Prefer regex matching for `Accept` header maps because real clients often send comma-separated values and q-factors.
+- Prefer `$uri` (normalized path without query string) over `$request_uri` when matching file extensions.
+- If your variable map enables conversion for `Accept: text/*` or `Accept: */*`, also set `markdown_on_wildcard on;`.
 
 ---
 
@@ -477,6 +496,43 @@ http {
     }
 }
 ```
+
+---
+
+### Variable-Driven Conversion (Accept + Path Aware)
+
+Use `markdown_filter` with NGINX variables when you want conversion only for specific request patterns (for example, `.html` pages requested as text/markdown or text wildcard clients).
+
+```nginx
+# Parse Accept robustly (supports multiple media types and q-values)
+map $http_accept $markdown_accept {
+    default 0;
+    "~*(^|,)\\s*text/markdown(\\s*;|,|$)" 1;
+    "~*(^|,)\\s*text/\\*(\\s*;|,|$)" 1;
+}
+
+# Match path on normalized URI (query string excluded)
+map $uri $convert_html {
+    default 0;
+    "~*\\.html$" $markdown_accept;
+}
+
+server {
+    listen 80;
+    server_name example.com;
+
+    location / {
+        proxy_pass http://backend;
+        markdown_on_wildcard on;
+        markdown_filter $convert_html;
+    }
+}
+```
+
+**Why this pattern is recommended:**
+- `map $http_accept` with exact string values is brittle; many clients send `Accept` with multiple values.
+- `$request_uri` includes query strings (for example `/index.html?x=1`) and can break extension matching.
+- `markdown_on_wildcard on` is required if you intentionally treat `text/*` as convertible.
 
 ---
 
