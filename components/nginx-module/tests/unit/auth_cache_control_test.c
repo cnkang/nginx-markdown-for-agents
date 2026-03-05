@@ -35,12 +35,49 @@ cookie_matches_pattern(const char *cookie_name, const char *pattern)
     return strcmp(cookie_name, pattern) == 0;
 }
 
+static char *
+next_delimited_token(char **cursor, char delimiter)
+{
+    char *start;
+    char *sep;
+    char *end;
+
+    if (cursor == NULL || *cursor == NULL) {
+        return NULL;
+    }
+
+    start = *cursor;
+    while (*start == delimiter || *start == ' ' || *start == '\t') {
+        start++;
+    }
+    if (*start == '\0') {
+        *cursor = NULL;
+        return NULL;
+    }
+
+    sep = strchr(start, delimiter);
+    if (sep != NULL) {
+        *sep = '\0';
+        *cursor = sep + 1;
+    } else {
+        *cursor = NULL;
+    }
+
+    end = start + strlen(start);
+    while (end > start && (end[-1] == ' ' || end[-1] == '\t')) {
+        end--;
+        *end = '\0';
+    }
+
+    return start;
+}
+
 static int
 has_auth_cookie(const char *cookie_header, const char **patterns, size_t pattern_count)
 {
     char buf[512];
     char *cursor;
-    char *cookie_saveptr;
+    char *cookie_cursor;
 
     if (cookie_header == NULL || *cookie_header == '\0') {
         return 0;
@@ -48,8 +85,8 @@ has_auth_cookie(const char *cookie_header, const char **patterns, size_t pattern
 
     strncpy(buf, cookie_header, sizeof(buf) - 1);
     buf[sizeof(buf) - 1] = '\0';
-    cookie_saveptr = NULL;
-    cursor = strtok_r(buf, ";", &cookie_saveptr);
+    cookie_cursor = buf;
+    cursor = next_delimited_token(&cookie_cursor, ';');
 
     while (cursor != NULL) {
         char *eq;
@@ -57,7 +94,7 @@ has_auth_cookie(const char *cookie_header, const char **patterns, size_t pattern
 
         eq = strchr(cursor, '=');
         if (eq == NULL) {
-            cursor = strtok_r(NULL, ";", &cookie_saveptr);
+            cursor = next_delimited_token(&cookie_cursor, ';');
             continue;
         }
 
@@ -73,7 +110,7 @@ has_auth_cookie(const char *cookie_header, const char **patterns, size_t pattern
             }
         }
 
-        cursor = strtok_r(NULL, ";", &cookie_saveptr);
+        cursor = next_delimited_token(&cookie_cursor, ';');
     }
     return 0;
 }
@@ -93,7 +130,7 @@ adjust_cache_control_for_auth(const char *cache_control, int authenticated)
     static char rewritten[512];
     char scratch[512];
     char *cursor;
-    char *directive_saveptr;
+    char *directive_cursor;
     int wrote;
 
     if (!authenticated) {
@@ -114,8 +151,8 @@ adjust_cache_control_for_auth(const char *cache_control, int authenticated)
 
     rewritten[0] = '\0';
     wrote = 0;
-    directive_saveptr = NULL;
-    cursor = strtok_r(scratch, ",", &directive_saveptr);
+    directive_cursor = scratch;
+    cursor = next_delimited_token(&directive_cursor, ',');
     while (cursor != NULL) {
         char *token = cursor;
         while (*token == ' ' || *token == '\t') token++;
@@ -126,7 +163,7 @@ adjust_cache_control_for_auth(const char *cache_control, int authenticated)
             strncat(rewritten, token, sizeof(rewritten) - strlen(rewritten) - 1);
             wrote = 1;
         }
-        cursor = strtok_r(NULL, ",", &directive_saveptr);
+        cursor = next_delimited_token(&directive_cursor, ',');
     }
 
     if (wrote) {
