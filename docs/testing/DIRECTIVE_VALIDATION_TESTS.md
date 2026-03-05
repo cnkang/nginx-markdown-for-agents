@@ -4,18 +4,19 @@ This document provides validation test cases for all configuration directives ex
 
 ## Test Configuration Examples
 
-### 1. markdown_filter (on|off)
+### 1. markdown_filter (on|off|$variable)
 
 **Valid configurations:**
 ```nginx
 markdown_filter on;
 markdown_filter off;
+markdown_filter $convert_html;
 ```
 
 **Invalid configurations:**
 ```nginx
-markdown_filter yes;        # Error: invalid value, must be "on" or "off"
-markdown_filter 1;          # Error: invalid value, must be "on" or "off"
+markdown_filter yes;        # Error: invalid value, must be "on", "off", or a variable
+markdown_filter 1;          # Error: invalid value, must be "on", "off", or a variable
 markdown_filter;            # Error: missing value
 ```
 
@@ -23,6 +24,7 @@ markdown_filter;            # Error: missing value
 - Default: off
 - Context: http, server, location
 - Inheritance: child overrides parent
+- Variables/complex values are evaluated per request; resolved values support 1/0, on/off, true/false, yes/no
 
 ---
 

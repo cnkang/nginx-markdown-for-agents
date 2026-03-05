@@ -34,6 +34,38 @@ typedef struct {
 static int valid_on_error(const char *v) { return STR_EQ(v, "pass") || STR_EQ(v, "reject"); }
 static int valid_flavor(const char *v) { return STR_EQ(v, "commonmark") || STR_EQ(v, "gfm"); }
 static int valid_auth_policy(const char *v) { return STR_EQ(v, "allow") || STR_EQ(v, "deny"); }
+static int valid_var_start_char(char c)
+{
+    return c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+}
+
+static int valid_markdown_filter_complex(const char *v)
+{
+    const char *p;
+
+    if (v == NULL) {
+        return 0;
+    }
+
+    p = v;
+    while ((p = strchr(p, '$')) != NULL) {
+        if (p[1] == '{') {
+            const char *close = strchr(p + 2, '}');
+            if (close != NULL && close > (p + 2)) {
+                return 1;
+            }
+        } else if (valid_var_start_char(p[1])) {
+            return 1;
+        }
+        p++;
+    }
+
+    return 0;
+}
+
+static int valid_markdown_filter(const char *v) {
+    return STR_EQ(v, "on") || STR_EQ(v, "off") || valid_markdown_filter_complex(v);
+}
 static int valid_conditional(const char *v) {
     return STR_EQ(v, "full_support") || STR_EQ(v, "if_modified_since_only") || STR_EQ(v, "disabled");
 }
@@ -67,6 +99,15 @@ test_value_validation(void)
     TEST_ASSERT(valid_on_error("pass"), "on_error should accept pass");
     TEST_ASSERT(valid_on_error("reject"), "on_error should accept reject");
     TEST_ASSERT(!valid_on_error("PASS"), "on_error should be case-sensitive");
+    TEST_ASSERT(valid_markdown_filter("on"), "markdown_filter should accept on");
+    TEST_ASSERT(valid_markdown_filter("off"), "markdown_filter should accept off");
+    TEST_ASSERT(valid_markdown_filter("$convert_html"), "markdown_filter should accept variable");
+    TEST_ASSERT(valid_markdown_filter("${convert_html}"), "markdown_filter should accept braced variable");
+    TEST_ASSERT(valid_markdown_filter("pre_$convert_html_post"), "markdown_filter should accept complex expression");
+    TEST_ASSERT(!valid_markdown_filter("convert_html"), "markdown_filter should reject expression without variable");
+    TEST_ASSERT(!valid_markdown_filter("$"), "markdown_filter should reject degenerate variable marker");
+    TEST_ASSERT(!valid_markdown_filter("yes"), "markdown_filter should reject invalid static value");
+    TEST_ASSERT(!valid_markdown_filter("1"), "markdown_filter should reject numeric literal");
     TEST_ASSERT(valid_flavor("commonmark"), "flavor should accept commonmark");
     TEST_ASSERT(valid_flavor("gfm"), "flavor should accept gfm");
     TEST_ASSERT(!valid_flavor("markdown"), "flavor should reject invalid value");
