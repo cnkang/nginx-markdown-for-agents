@@ -51,6 +51,7 @@ STATUS_CODE_OK_MESSAGE="Status code: 200 OK"
 NGINX_START_FAILURE_MSG="Failed to start NGINX"
 CONFIG_ERROR_LOG_LINE="error_log ${NGINX_ERROR_LOG} debug;"
 CONFIG_PID_LINE="pid ${NGINX_PID};"
+VAR_TOGGLE_HTML="<html><body><h1>Var Toggle</h1></body></html>"
 
 # Cleanup function
 cleanup() {
@@ -439,15 +440,16 @@ http {
 test_variable_driven_markdown_filter() {
     log_test 5 "Variable-driven markdown_filter resolution"
 
-    local config='
+    local config
+    config="$(cat <<EOF
 worker_processes 1;
-'"${CONFIG_ERROR_LOG_LINE}"'
-'"${CONFIG_PID_LINE}"'
+${CONFIG_ERROR_LOG_LINE}
+${CONFIG_PID_LINE}
 events { worker_connections 1024; }
 http {
-    access_log '"${NGINX_ACCESS_LOG}"';
+    access_log ${NGINX_ACCESS_LOG};
 
-    map $arg_md $markdown_enabled {
+    map \$arg_md \$markdown_enabled {
         default "maybe";
         "1" " on ";
         "0" "off";
@@ -455,15 +457,16 @@ http {
     }
 
     server {
-        listen '"${TEST_PORT}"';
+        listen ${TEST_PORT};
         location /test {
-            markdown_filter $markdown_enabled;
-            return 200 '"'"'<html><body><h1>Var Toggle</h1></body></html>'"'"';
+            markdown_filter \$markdown_enabled;
+            return 200 '${VAR_TOGGLE_HTML}';
             default_type text/html;
         }
     }
 }
-'
+EOF
+)"
 
     start_nginx "$config" || { log_fail "$NGINX_START_FAILURE_MSG"; return 1; }
 

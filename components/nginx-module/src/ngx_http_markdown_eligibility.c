@@ -301,7 +301,6 @@ ngx_http_markdown_check_eligibility(ngx_http_request_t *r,
         return NGX_HTTP_MARKDOWN_INELIGIBLE_STREAMING;
     }
     
-    /* Check Content-Type (FR-02.3) */
     if (!ngx_http_markdown_check_content_type(r)) {
         return NGX_HTTP_MARKDOWN_INELIGIBLE_CONTENT_TYPE;
     }

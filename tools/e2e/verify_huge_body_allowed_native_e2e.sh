@@ -17,6 +17,7 @@ PORT="${PORT:-18093}"
 KEEP_ARTIFACTS=0
 RUN_1G_GET="${RUN_1G_GET:-1}"
 MARKDOWN_MAX_SIZE="${MARKDOWN_MAX_SIZE:-1536m}"
+ACCEPT_MARKDOWN_HEADER='Accept: text/markdown'
 
 WORKSPACE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 BUILDROOT=""
@@ -250,7 +251,7 @@ check_head_markdown() {
   local name="$1"
   local hdr="${RAW_DIR}/${name}.head.hdr"
   local code
-  code="$(curl -sS -I -D "${hdr}" -o /dev/null -H 'Accept: text/markdown' \
+  code="$(curl -sS -I -D "${hdr}" -o /dev/null -H "${ACCEPT_MARKDOWN_HEADER}" \
     --max-time 600 "http://127.0.0.1:${PORT}/allow/${name}.html" -w '%{http_code}')"
   [[ "${code}" == "200" ]] || { echo "${name}: expected HEAD 200, got ${code}" >&2; exit 1; }
   grep -qi '^Content-Type: text/markdown; charset=utf-8' "${hdr}" || {
@@ -268,7 +269,7 @@ check_get_markdown() {
   local metrics="${RAW_DIR}/${name}.get.metrics"
   local line
 
-  line="$(curl -sS -D "${hdr}" -o "${body}" -H 'Accept: text/markdown' \
+  line="$(curl -sS -D "${hdr}" -o "${body}" -H "${ACCEPT_MARKDOWN_HEADER}" \
     --max-time "${timeout_s}" "http://127.0.0.1:${PORT}/allow/${name}.html" \
     -w 'http=%{http_code} size=%{size_download} total=%{time_total}\n')"
   echo "${line}" | tee "${metrics}" >/dev/null
@@ -293,7 +294,7 @@ check_head_failopen_passthrough() {
   local hdr="${RAW_DIR}/${name}.head.hdr"
   local code
 
-  code="$(curl -sS -I -D "${hdr}" -o /dev/null -H 'Accept: text/markdown' \
+  code="$(curl -sS -I -D "${hdr}" -o /dev/null -H "${ACCEPT_MARKDOWN_HEADER}" \
     --max-time 180 "http://127.0.0.1:${PORT}/allow/${name}.html" -w '%{http_code}')"
   [[ "${code}" == "200" ]] || { echo "${name}: expected HEAD 200, got ${code}" >&2; exit 1; }
 
@@ -317,7 +318,7 @@ check_get_failopen_passthrough() {
   local metrics="${RAW_DIR}/${name}.get.metrics"
   local line
 
-  line="$(curl -sS -D "${hdr}" -o /dev/null -H 'Accept: text/markdown' \
+  line="$(curl -sS -D "${hdr}" -o /dev/null -H "${ACCEPT_MARKDOWN_HEADER}" \
     --max-time "${timeout_s}" "http://127.0.0.1:${PORT}/allow/${name}.html" \
     -w 'http=%{http_code} size=%{size_download} total=%{time_total}\n')"
   echo "${line}" | tee "${metrics}" >/dev/null

@@ -19,7 +19,9 @@ ARG NGINX_VERSION=1.28.2
 WORKDIR /build
 RUN curl -fsSL "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" | tar xz
 
-COPY . /src
+COPY Makefile /src/Makefile
+COPY components/rust-converter /src/components/rust-converter
+COPY components/nginx-module /src/components/nginx-module
 
 WORKDIR /src
 RUN rm -rf components/rust-converter/target \

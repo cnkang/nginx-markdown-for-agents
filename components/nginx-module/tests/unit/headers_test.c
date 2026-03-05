@@ -223,7 +223,7 @@ find_header(ngx_http_request_t *r, const char *key)
 static ngx_uint_t
 count_active_headers(ngx_http_request_t *r, const char *key)
 {
-    ngx_table_elt_t *elts = (ngx_table_elt_t *) r->headers_out.headers.part.elts;
+    const ngx_table_elt_t *elts = (const ngx_table_elt_t *) r->headers_out.headers.part.elts;
     ngx_uint_t count = 0;
     const u_char *key_u = (const u_char *) key;
 
