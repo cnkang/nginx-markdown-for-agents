@@ -327,7 +327,19 @@ The script will:
 #### Start Backend Server
 
 ```bash
-python3 components/nginx-module/tests/e2e/test_backend_server.py --port 9999
+TMP_TLS_DIR="$(mktemp -d /tmp/backend-server-tls.XXXXXX)"
+openssl req -x509 -newkey rsa:2048 -sha256 -days 1 -nodes \
+  -keyout "$TMP_TLS_DIR/server.key" \
+  -out "$TMP_TLS_DIR/server.crt" \
+  -subj "/CN=localhost" \
+  -addext "subjectAltName=DNS:localhost,IP:127.0.0.1"
+
+python3 components/nginx-module/tests/e2e/test_backend_server.py \
+  --port 9999 \
+  --tls-cert "$TMP_TLS_DIR/server.crt" \
+  --tls-key "$TMP_TLS_DIR/server.key"
+
+curl -sk https://localhost:9999/health
 ```
 
 Available endpoints:
