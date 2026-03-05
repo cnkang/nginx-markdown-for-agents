@@ -439,6 +439,80 @@ http {
 }
 
 #
+# Test 5: Variable-Driven markdown_filter
+#
+test_variable_driven_markdown_filter() {
+    log_test 5 "Variable-driven markdown_filter resolution"
+
+    local config='
+worker_processes 1;
+'"${CONFIG_ERROR_LOG_LINE}"'
+'"${CONFIG_PID_LINE}"'
+events { worker_connections 1024; }
+http {
+    access_log '"${NGINX_ACCESS_LOG}"';
+
+    map $arg_md $markdown_enabled {
+        default "maybe";
+        "1" " on ";
+        "0" "off";
+        "true" "yes";
+    }
+
+    server {
+        listen '"${TEST_PORT}"';
+        location /test {
+            markdown_filter $markdown_enabled;
+            return 200 '"'"'<html><body><h1>Var Toggle</h1></body></html>'"'"';
+            default_type text/html;
+        }
+    }
+}
+'
+
+    start_nginx "$config" || { log_fail "$NGINX_START_FAILURE_MSG"; return 1; }
+
+    local response
+    local content_type
+
+    response=$(make_request "GET" "/test?md=1" "$MEDIA_TYPE_MARKDOWN" "")
+    content_type=$(get_header "$response" "$HEADER_CONTENT_TYPE")
+    if echo "$content_type" | grep -q "$MEDIA_TYPE_MARKDOWN"; then
+        log_pass "md=1 enables conversion (trimmed \" on \" value)"
+    else
+        log_fail "md=1 should convert, got $content_type"
+    fi
+
+    response=$(make_request "GET" "/test?md=0" "$MEDIA_TYPE_MARKDOWN" "")
+    content_type=$(get_header "$response" "$HEADER_CONTENT_TYPE")
+    if echo "$content_type" | grep -q "text/html"; then
+        log_pass "md=0 disables conversion"
+    else
+        log_fail "md=0 should not convert, got $content_type"
+    fi
+
+    response=$(make_request "GET" "/test?md=true" "$MEDIA_TYPE_MARKDOWN" "")
+    content_type=$(get_header "$response" "$HEADER_CONTENT_TYPE")
+    if echo "$content_type" | grep -q "$MEDIA_TYPE_MARKDOWN"; then
+        log_pass "md=true enables conversion (yes/true mapping)"
+    else
+        log_fail "md=true should convert, got $content_type"
+    fi
+
+    response=$(make_request "GET" "/test?md=bad" "$MEDIA_TYPE_MARKDOWN" "")
+    content_type=$(get_header "$response" "$HEADER_CONTENT_TYPE")
+    if echo "$content_type" | grep -q "text/html"; then
+        log_pass "Invalid variable value safely disables conversion"
+    else
+        log_fail "Invalid value should not convert, got $content_type"
+    fi
+
+    stop_nginx
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+    return 0
+}
+
+#
 # Main test execution
 #
 main() {
@@ -467,6 +541,7 @@ main() {
     test_passthrough
     test_configuration_inheritance
     test_authenticated_content
+    test_variable_driven_markdown_filter
     
     # Summary
     echo ""

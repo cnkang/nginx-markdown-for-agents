@@ -13,6 +13,8 @@ The `ngx_http_markdown_conf_t` structure holds all configuration directives for 
 ```c
 typedef struct {
     ngx_flag_t   enabled;              /* markdown_filter on|off */
+    ngx_uint_t   enabled_source;       /* markdown_filter source: static/complex/unset */
+    ngx_http_complex_value_t *enabled_complex; /* markdown_filter variable expression */
     size_t       max_size;             /* markdown_max_size (default: 10MB) */
     ngx_msec_t   timeout;              /* markdown_timeout (default: 5000ms) */
     ngx_uint_t   on_error;             /* markdown_on_error pass|reject (default: pass) */
@@ -35,7 +37,9 @@ typedef struct {
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `enabled` | `ngx_flag_t` | `0` (off) | Enable/disable Markdown conversion |
+| `enabled` | `ngx_flag_t` | `0` (off) | Static fallback for Markdown conversion |
+| `enabled_source` | `ngx_uint_t` | `STATIC` (after merge) | Tracks whether markdown_filter is static or variable-driven |
+| `enabled_complex` | `ngx_http_complex_value_t*` | `NULL` | Optional compiled variable/complex expression for per-request toggle |
 | `max_size` | `size_t` | `10MB` | Maximum response size to convert |
 | `timeout` | `ngx_msec_t` | `5000ms` | Conversion timeout |
 

@@ -4,7 +4,7 @@
 Runs lightweight checks for maintained Markdown docs (excluding docs/archive):
 - local link validity
 - heading hierarchy consistency (ignoring code fences)
-- non-English Han characters (enforces English docs policy)
+- non-English Han characters (enforces English docs policy for canonical docs)
 - duplicate doc sync (via tools/docs/check_duplicate_docs.py)
 """
 
@@ -76,18 +76,20 @@ def check_heading_hierarchy(files: list[Path]) -> list[str]:
 
 
 def check_english_policy(files: list[Path]) -> list[str]:
-    # Python's stdlib re does not support \p{Han}; use subprocess rg for accuracy.
+    # Detect CJK Han ideographs only (avoid false positives from punctuation such as middle dots).
     try:
         proc = subprocess.run(
             [
                 "rg",
                 "-n",
                 "--pcre2",
-                r"[\p{Han}]",
+                r"[\x{3400}-\x{4DBF}\x{4E00}-\x{9FFF}\x{F900}-\x{FAFF}]",
                 "--glob",
                 "!docs/archive/**",
                 "--glob",
                 "*.md",
+                "--glob",
+                "!README_zh-CN.md",
                 ".",
             ],
             cwd=ROOT,

@@ -244,7 +244,7 @@ ngx_http_markdown_is_streaming(ngx_http_request_t *r,
  * 4. Content-Type is text/html (FR-02.3)
  * 5. Response size within configured limit (FR-10.1)
  * 6. Not unbounded streaming (FR-02.8)
- * 7. Conversion enabled in configuration (FR-02.6)
+ * 7. Conversion enabled for this request (FR-02.6), as resolved by caller
  *
  * Note: Chunked Transfer-Encoding responses are ELIGIBLE per FR-02.7.
  * The module buffers all chunks before conversion. Only unbounded streaming
@@ -258,17 +258,22 @@ ngx_http_markdown_is_streaming(ngx_http_request_t *r,
  *
  * Parameters:
  *   r    - NGINX request structure
- *   conf - Module configuration
+ *   conf           - Module configuration
+ *   filter_enabled - Caller-resolved markdown_filter decision for this request
  *
  * Returns:
  *   Eligibility enum indicating result and reason
  */
 ngx_http_markdown_eligibility_t
 ngx_http_markdown_check_eligibility(ngx_http_request_t *r,
-                                    ngx_http_markdown_conf_t *conf)
+                                    ngx_http_markdown_conf_t *conf,
+                                    ngx_flag_t filter_enabled)
 {
-    /* Check if conversion is enabled in configuration (FR-02.6) */
-    if (!conf->enabled) {
+    /*
+     * markdown_filter enablement is resolved once by header filter to avoid
+     * repeated evaluation of dynamic expressions in the same request.
+     */
+    if (conf == NULL || !filter_enabled) {
         return NGX_HTTP_MARKDOWN_INELIGIBLE_CONFIG;
     }
     

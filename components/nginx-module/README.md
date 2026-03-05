@@ -55,7 +55,7 @@ See [Configuration Guide](../../docs/guides/CONFIGURATION.md) for complete direc
 
 ### Core Directives
 
-- `markdown_filter on|off` - Enable/disable conversion
+- `markdown_filter on|off|$variable` - Enable/disable conversion (supports per-request variable toggle)
 - `markdown_max_size <size>` - Maximum response size
 - `markdown_timeout <time>` - Conversion timeout
 - `markdown_on_error pass|reject` - Failure strategy

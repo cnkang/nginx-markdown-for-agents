@@ -175,8 +175,13 @@ The module automatically detects and decompresses upstream compressed content (g
 Common causes:
 1. **Module not enabled**: Check `markdown_filter on;` is set
 2. **Missing Accept header**: Ensure client sends `Accept: text/markdown`
-3. **Response not eligible**: Must be 200 status with `text/html` content type
-4. **Size limit exceeded**: Response larger than `markdown_max_size`
+3. **Variable map mismatch** (when using `markdown_filter $var`):
+   - Exact `map $http_accept` strings often miss real-world multi-value `Accept` headers
+   - Use regex map rules for `Accept` matching
+   - Prefer `$uri` over `$request_uri` for extension checks (query strings can break matches)
+   - If map includes `text/*`, enable `markdown_on_wildcard on;`
+4. **Response not eligible**: Must be 200 status with `text/html` content type
+5. **Size limit exceeded**: Response larger than `markdown_max_size`
 
 ### Why is conversion failing?
 
