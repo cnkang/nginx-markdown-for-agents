@@ -8,17 +8,42 @@ source file without depending on brittle line-number or grep/sed pipelines.
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from pathlib import Path
 
+_SAFE_REL_PATH_RE = re.compile(r"^[A-Za-z0-9._/-]+$")
+
+
+def sanitize_source_arg(source: str) -> Path | None:
+    if not source:
+        print("source path is empty", file=sys.stderr)
+        return None
+    if "\x00" in source:
+        print("source path contains NUL byte", file=sys.stderr)
+        return None
+    if not _SAFE_REL_PATH_RE.fullmatch(source):
+        print(f"source path contains unsupported characters: {source}", file=sys.stderr)
+        return None
+
+    source_arg = Path(source)
+    if source_arg.is_absolute():
+        print(f"absolute source path is not allowed: {source}", file=sys.stderr)
+        return None
+    if any(part == ".." for part in source_arg.parts):
+        print(f"parent directory traversal is not allowed: {source}", file=sys.stderr)
+        return None
+
+    return source_arg
+
 
 def resolve_source_path(source: str, workspace_root: Path) -> Path | None:
-    source_arg = Path(source)
+    source_arg = sanitize_source_arg(source)
+    if source_arg is None:
+        return None
+
     try:
-        if source_arg.is_absolute():
-            source_path = source_arg.resolve(strict=True)
-        else:
-            source_path = (workspace_root / source_arg).resolve(strict=True)
+        source_path = (workspace_root / source_arg).resolve(strict=True)
     except FileNotFoundError:
         print(f"source file not found: {source}", file=sys.stderr)
         return None

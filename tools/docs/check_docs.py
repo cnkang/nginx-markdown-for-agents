@@ -14,6 +14,7 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+from urllib.parse import urlsplit
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -41,7 +42,10 @@ def iter_unfenced_lines(text: str) -> list[tuple[int, str]]:
 
 def normalized_link_target(raw_target: str) -> str:
     target = raw_target.strip().strip("<>")
-    if target.startswith(("http://", "https://", "mailto:", "#")):
+    if target.startswith("#"):
+        return ""
+    scheme = urlsplit(target).scheme.lower()
+    if scheme in {"http", "https", "mailto"}:
         return ""
     return target.split("#", 1)[0].split("?", 1)[0]
 
