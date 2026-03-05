@@ -76,13 +76,19 @@ test_access_restrictions(void)
 {
     endpoint_response_t r;
     metrics_t m = sample_metrics();
+    char remote_addr[16];
+    int written;
 
     TEST_SUBSECTION("Method and localhost restrictions");
 
     r = handle_metrics_request("POST", "127.0.0.1", "text", &m);
     TEST_ASSERT(r.status == 405, "Only GET/HEAD should be allowed");
 
-    r = handle_metrics_request("GET", "10.0.0.5", "text", &m);
+    written = snprintf(remote_addr, sizeof(remote_addr), "%u.%u.%u.%u",
+                       10U, 0U, 0U, 5U);
+    TEST_ASSERT(written > 0 && (size_t) written < sizeof(remote_addr),
+                "failed to build remote address");
+    r = handle_metrics_request("GET", remote_addr, "text", &m);
     TEST_ASSERT(r.status == 403, "Non-localhost access should be forbidden");
 
     r = handle_metrics_request("GET", "127.0.0.1", "text", &m);

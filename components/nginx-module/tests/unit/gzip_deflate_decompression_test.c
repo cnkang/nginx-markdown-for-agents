@@ -128,6 +128,7 @@ static void
 test_valid_roundtrip(compression_kind_t type, const char *label)
 {
     const char *text;
+    size_t text_len;
     unsigned char *compressed;
     size_t compressed_len;
     unsigned char *decompressed;
@@ -137,15 +138,16 @@ test_valid_roundtrip(compression_kind_t type, const char *label)
     TEST_SUBSECTION(label);
 
     text = "Hello from nginx markdown module. This payload should round-trip correctly.";
+    text_len = test_cstrnlen(text, 1024);
     compressed = NULL;
     decompressed = NULL;
 
-    rc = compress_payload((const unsigned char *) text, strlen(text), type, &compressed, &compressed_len);
+    rc = compress_payload((const unsigned char *) text, text_len, type, &compressed, &compressed_len);
     TEST_ASSERT(rc == NGX_OK, "Compression should succeed");
 
     rc = decompress_payload(compressed, compressed_len, type, &decompressed, &decompressed_len, 4096);
     TEST_ASSERT(rc == NGX_OK, "Decompression should succeed");
-    TEST_ASSERT(decompressed_len == strlen(text), "Decompressed length should match source");
+    TEST_ASSERT(decompressed_len == text_len, "Decompressed length should match source");
     TEST_ASSERT(MEM_EQ(decompressed, text, decompressed_len), "Decompressed payload should match source");
 
     free(compressed);
@@ -157,6 +159,7 @@ static void
 test_corrupted_data(void)
 {
     const char *text;
+    size_t text_len;
     unsigned char *compressed;
     size_t compressed_len;
     unsigned char *decompressed;
@@ -166,10 +169,11 @@ test_corrupted_data(void)
     TEST_SUBSECTION("Corrupted gzip data returns error");
 
     text = "Corruption test payload";
+    text_len = test_cstrnlen(text, 256);
     compressed = NULL;
     decompressed = NULL;
 
-    rc = compress_payload((const unsigned char *) text, strlen(text), TYPE_GZIP, &compressed, &compressed_len);
+    rc = compress_payload((const unsigned char *) text, text_len, TYPE_GZIP, &compressed, &compressed_len);
     TEST_ASSERT(rc == NGX_OK, "Compression should succeed");
     TEST_ASSERT(compressed_len > 8, "Compressed payload should be long enough to mutate");
 

@@ -17,26 +17,19 @@ typedef enum {
 static int
 str_case_eq(const char *a, const char *b)
 {
-    size_t alen;
-    size_t blen;
-
     if (a == NULL || b == NULL) {
         return 0;
     }
 
-    alen = strlen(a);
-    blen = strlen(b);
-    if (alen != blen) {
-        return 0;
-    }
-
-    for (size_t i = 0; i < alen; i++) {
-        if (tolower((unsigned char) a[i]) != tolower((unsigned char) b[i])) {
+    while (*a != '\0' && *b != '\0') {
+        if (tolower((unsigned char) *a) != tolower((unsigned char) *b)) {
             return 0;
         }
+        a++;
+        b++;
     }
 
-    return 1;
+    return *a == '\0' && *b == '\0';
 }
 
 static compression_type_t

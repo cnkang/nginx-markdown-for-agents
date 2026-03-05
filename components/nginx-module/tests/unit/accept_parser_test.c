@@ -93,7 +93,7 @@ copy_token(char *dst, size_t dst_size, const char *src)
         return 0;
     }
 
-    len = strlen(src);
+    len = test_cstrnlen(src, dst_size);
     if (len >= dst_size) {
         return 0;
     }
@@ -140,7 +140,7 @@ parse_accept(const char *header, accept_entry_t *entries, int max_entries)
         ent->order = n;
 
         s = token;
-        e = token + strlen(token);
+        e = token + test_cstrnlen(token, sizeof(token));
         trim(&s, &e);
         *e = '\0';
 
