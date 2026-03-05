@@ -90,7 +90,7 @@ has_auth_cookie(const char *cookie_header, const char **patterns, size_t pattern
 
     while (cursor != NULL) {
         char *eq;
-        char *name;
+        const char *name;
 
         eq = strchr(cursor, '=');
         if (eq == NULL) {
@@ -129,7 +129,7 @@ adjust_cache_control_for_auth(const char *cache_control, int authenticated)
 {
     static char rewritten[512];
     char scratch[512];
-    char *cursor;
+    const char *cursor;
     char *directive_cursor;
     int wrote;
 
@@ -154,7 +154,7 @@ adjust_cache_control_for_auth(const char *cache_control, int authenticated)
     directive_cursor = scratch;
     cursor = next_delimited_token(&directive_cursor, ',');
     while (cursor != NULL) {
-        char *token = cursor;
+        const char *token = cursor;
         while (*token == ' ' || *token == '\t') token++;
         if (!STR_EQ(token, "public")) {
             if (wrote) {

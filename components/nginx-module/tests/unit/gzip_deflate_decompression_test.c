@@ -22,6 +22,7 @@ compress_payload(const unsigned char *in, size_t in_len, compression_kind_t type
     int rc;
     int window_bits;
     size_t cap;
+    unsigned char *in_copy;
 
     if (in == NULL || in_len == 0 || out == NULL || out_len == NULL) {
         return NGX_ERROR;
@@ -34,14 +35,22 @@ compress_payload(const unsigned char *in, size_t in_len, compression_kind_t type
         return NGX_ERROR;
     }
 
+    in_copy = (unsigned char *) malloc(in_len);
+    if (in_copy == NULL) {
+        deflateEnd(&s);
+        return NGX_ERROR;
+    }
+    memcpy(in_copy, in, in_len);
+
     cap = in_len + (in_len / 8) + 64;
     *out = (unsigned char *) malloc(cap);
     if (*out == NULL) {
+        free(in_copy);
         deflateEnd(&s);
         return NGX_ERROR;
     }
 
-    s.next_in = (unsigned char *) in;
+    s.next_in = in_copy;
     s.avail_in = (uInt) in_len;
     s.next_out = *out;
     s.avail_out = (uInt) cap;
@@ -49,12 +58,14 @@ compress_payload(const unsigned char *in, size_t in_len, compression_kind_t type
     rc = deflate(&s, Z_FINISH);
     if (rc != Z_STREAM_END) {
         free(*out);
+        free(in_copy);
         *out = NULL;
         deflateEnd(&s);
         return NGX_ERROR;
     }
 
     *out_len = s.total_out;
+    free(in_copy);
     deflateEnd(&s);
     return NGX_OK;
 }
@@ -66,6 +77,7 @@ decompress_payload(const unsigned char *in, size_t in_len, compression_kind_t ty
     z_stream s;
     int rc;
     int window_bits;
+    unsigned char *in_copy;
 
     if (in == NULL || in_len == 0 || out == NULL || out_len == NULL || max_size == 0) {
         return NGX_ERROR;
@@ -78,13 +90,21 @@ decompress_payload(const unsigned char *in, size_t in_len, compression_kind_t ty
         return NGX_ERROR;
     }
 
+    in_copy = (unsigned char *) malloc(in_len);
+    if (in_copy == NULL) {
+        inflateEnd(&s);
+        return NGX_ERROR;
+    }
+    memcpy(in_copy, in, in_len);
+
     *out = (unsigned char *) malloc(max_size);
     if (*out == NULL) {
+        free(in_copy);
         inflateEnd(&s);
         return NGX_ERROR;
     }
 
-    s.next_in = (unsigned char *) in;
+    s.next_in = in_copy;
     s.avail_in = (uInt) in_len;
     s.next_out = *out;
     s.avail_out = (uInt) max_size;
@@ -92,12 +112,14 @@ decompress_payload(const unsigned char *in, size_t in_len, compression_kind_t ty
     rc = inflate(&s, Z_FINISH);
     if (rc != Z_STREAM_END || s.total_out > max_size) {
         free(*out);
+        free(in_copy);
         *out = NULL;
         inflateEnd(&s);
         return NGX_ERROR;
     }
 
     *out_len = s.total_out;
+    free(in_copy);
     inflateEnd(&s);
     return NGX_OK;
 }

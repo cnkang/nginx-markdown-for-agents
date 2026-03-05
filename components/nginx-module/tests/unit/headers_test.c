@@ -93,12 +93,12 @@ typedef struct {
 
 /* Exported by ngx_http_markdown_headers_standalone.c */
 ngx_int_t ngx_http_markdown_update_headers(ngx_http_request_t *r,
-                                           MarkdownResult *result,
-                                           ngx_http_markdown_conf_t *conf);
+                                           const MarkdownResult *result,
+                                           const ngx_http_markdown_conf_t *conf);
 
 /* Mocks required by ngx_http_markdown_headers_standalone.c */
 void *
-ngx_pnalloc(ngx_pool_t *pool, size_t size)
+ngx_pnalloc(const ngx_pool_t *pool, size_t size)
 {
     UNUSED(pool);
     return malloc(size);
@@ -124,17 +124,23 @@ ngx_http_clear_content_length(ngx_http_request_t *r)
     r->headers_out.content_length_n = -1;
 }
 
-void ngx_log_error(int level, void *log, int err, const char *fmt, ...) { UNUSED(level); UNUSED(log); UNUSED(err); UNUSED(fmt); }
+void ngx_log_error(int level, void *log, int err, const char *fmt) { UNUSED(level); UNUSED(log); UNUSED(err); UNUSED(fmt); }
 void ngx_log_debug0(int level, void *log, int err, const char *fmt) { UNUSED(level); UNUSED(log); UNUSED(err); UNUSED(fmt); }
-void ngx_log_debug1(int level, void *log, int err, const char *fmt, ...) { UNUSED(level); UNUSED(log); UNUSED(err); UNUSED(fmt); }
+void ngx_http_markdown_log_debug1(int level, void *log, int err, const char *fmt, uintptr_t arg)
+{
+    UNUSED(level);
+    UNUSED(log);
+    UNUSED(err);
+    UNUSED(fmt);
+    UNUSED(arg);
+}
 
 int
-ngx_strncasecmp(u_char *s1, u_char *s2, size_t n)
+ngx_strncasecmp(const u_char *s1, const u_char *s2, size_t n)
 {
-    size_t i;
-    for (i = 0; i < n; i++) {
-        int c1 = tolower((unsigned char) s1[i]);
-        int c2 = tolower((unsigned char) s2[i]);
+    for (size_t i = 0; i < n; i++) {
+        int c1 = tolower(s1[i]);
+        int c2 = tolower(s2[i]);
         if (c1 != c2) {
             return c1 - c2;
         }
@@ -153,28 +159,11 @@ ngx_cpymem(u_char *dst, const void *src, size_t n)
 }
 
 u_char *
-ngx_sprintf(u_char *buf, const char *fmt, ...)
+ngx_http_markdown_sprintf_token(u_char *buf, ngx_uint_t token_count)
 {
-    char fmt_buf[128];
-    va_list args;
     int len;
-    size_t i;
-    size_t j = 0;
 
-    for (i = 0; fmt[i] != '\0' && j + 1 < sizeof(fmt_buf); i++) {
-        if (fmt[i] == '%' && fmt[i + 1] == 'u' && fmt[i + 2] == 'i') {
-            fmt_buf[j++] = '%';
-            fmt_buf[j++] = 'u';
-            i += 2;
-            continue;
-        }
-        fmt_buf[j++] = fmt[i];
-    }
-    fmt_buf[j] = '\0';
-
-    va_start(args, fmt);
-    len = vsnprintf((char *) buf, 128, fmt_buf, args);
-    va_end(args);
+    len = snprintf((char *) buf, 128, "%u", (unsigned int) token_count);
 
     if (len < 0) {
         len = 0;
@@ -218,11 +207,12 @@ static ngx_table_elt_t *
 find_header(ngx_http_request_t *r, const char *key)
 {
     ngx_table_elt_t *elts = (ngx_table_elt_t *) r->headers_out.headers.part.elts;
-    ngx_uint_t i;
-    for (i = 0; i < r->headers_out.headers.part.nelts; i++) {
+    const u_char *key_u = (const u_char *) key;
+
+    for (ngx_uint_t i = 0; i < r->headers_out.headers.part.nelts; i++) {
         if (elts[i].hash != 0 &&
             elts[i].key.len == strlen(key) &&
-            ngx_strncasecmp(elts[i].key.data, (u_char *) key, elts[i].key.len) == 0)
+            ngx_strncasecmp(elts[i].key.data, key_u, elts[i].key.len) == 0)
         {
             return &elts[i];
         }
@@ -234,13 +224,13 @@ static ngx_uint_t
 count_active_headers(ngx_http_request_t *r, const char *key)
 {
     ngx_table_elt_t *elts = (ngx_table_elt_t *) r->headers_out.headers.part.elts;
-    ngx_uint_t i;
     ngx_uint_t count = 0;
+    const u_char *key_u = (const u_char *) key;
 
-    for (i = 0; i < r->headers_out.headers.part.nelts; i++) {
+    for (ngx_uint_t i = 0; i < r->headers_out.headers.part.nelts; i++) {
         if (elts[i].hash != 0 &&
             elts[i].key.len == strlen(key) &&
-            ngx_strncasecmp(elts[i].key.data, (u_char *) key, elts[i].key.len) == 0)
+            ngx_strncasecmp(elts[i].key.data, key_u, elts[i].key.len) == 0)
         {
             count++;
         }
@@ -268,6 +258,7 @@ test_update_headers_full_path(void)
     ngx_http_request_t r = new_request();
     ngx_http_markdown_conf_t conf;
     MarkdownResult result;
+    static uint8_t etag_value[] = "\"etag-1\"";
     ngx_table_elt_t *vary;
     ngx_table_elt_t *token_h;
 
@@ -279,8 +270,8 @@ test_update_headers_full_path(void)
 
     memset(&result, 0, sizeof(result));
     result.markdown_len = 42;
-    result.etag = (uint8_t *) "\"etag-1\"";
-    result.etag_len = strlen((char *) result.etag);
+    result.etag = etag_value;
+    result.etag_len = sizeof(etag_value) - 1;
     result.token_estimate = 123;
 
     push_header(&r, "Vary", "User-Agent");

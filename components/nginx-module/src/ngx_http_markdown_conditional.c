@@ -57,7 +57,7 @@ ngx_http_markdown_push_etag_token(ngx_array_t *etags, u_char *data, size_t len)
 }
 
 static void
-ngx_http_markdown_skip_if_none_match_separators(u_char **cursor, u_char *end)
+ngx_http_markdown_skip_if_none_match_separators(u_char **cursor, const u_char *end)
 {
     while (*cursor < end
            && (**cursor == ' ' || **cursor == '\t' || **cursor == ','))
@@ -69,7 +69,7 @@ ngx_http_markdown_skip_if_none_match_separators(u_char **cursor, u_char *end)
 static ngx_int_t
 ngx_http_markdown_parse_quoted_etag(ngx_http_request_t *r,
                                     u_char **cursor,
-                                    u_char *end,
+                                    const u_char *end,
                                     ngx_array_t *etags)
 {
     u_char  *start;
@@ -96,7 +96,8 @@ ngx_http_markdown_parse_quoted_etag(ngx_http_request_t *r,
 }
 
 static ngx_int_t
-ngx_http_markdown_parse_unquoted_etag(u_char **cursor, u_char *end, ngx_array_t *etags)
+ngx_http_markdown_parse_unquoted_etag(u_char **cursor, const u_char *end,
+                                      ngx_array_t *etags)
 {
     u_char  *start;
     size_t   len;
@@ -135,7 +136,7 @@ ngx_http_markdown_parse_if_none_match(ngx_http_request_t *r, ngx_array_t **etags
     ngx_table_elt_t  *if_none_match;
     ngx_int_t         rc;
     u_char           *p;
-    u_char           *end;
+    const u_char     *end;
 
     if_none_match = ngx_http_markdown_find_request_header(
         r,

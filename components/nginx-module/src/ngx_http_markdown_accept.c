@@ -40,6 +40,10 @@ typedef struct {
 /* Forward declarations */
 static ngx_int_t ngx_http_markdown_parse_accept_entry(ngx_str_t *entry_str,
     ngx_http_markdown_accept_entry_t *entry, ngx_uint_t order);
+static ngx_int_t ngx_http_markdown_parse_accept_segment(ngx_http_request_t *r,
+    u_char *start, u_char *end, ngx_array_t *entries, ngx_uint_t *order);
+static void ngx_http_markdown_skip_accept_spaces(u_char **p, u_char *end);
+static void ngx_http_markdown_skip_accept_comma(u_char **p, u_char *end);
 static float ngx_http_markdown_parse_q_value(ngx_str_t *params);
 static ngx_http_markdown_specificity_t ngx_http_markdown_get_specificity(
     ngx_str_t *type, ngx_str_t *subtype);
@@ -65,10 +69,9 @@ ngx_int_t
 ngx_http_markdown_parse_accept(ngx_http_request_t *r, ngx_str_t *accept,
     ngx_array_t *entries)
 {
-    u_char                              *p, *start, *end;
-    ngx_str_t                            entry_str;
-    ngx_http_markdown_accept_entry_t    *entry;
-    ngx_uint_t                           order;
+    u_char      *p, *start, *end;
+    ngx_uint_t   order;
+    ngx_int_t    rc;
     
     if (accept == NULL || accept->len == 0) {
         return NGX_ERROR;
@@ -83,10 +86,7 @@ ngx_http_markdown_parse_accept(ngx_http_request_t *r, ngx_str_t *accept,
      * Example: "text/markdown, text/html;q=0.9, star/slash-star;q=0.8"
      */
     while (p < end) {
-        /* Skip leading whitespace */
-        while (p < end && (*p == ' ' || *p == '\t')) {
-            p++;
-        }
+        ngx_http_markdown_skip_accept_spaces(&p, end);
         
         if (p >= end) {
             break;
@@ -98,45 +98,70 @@ ngx_http_markdown_parse_accept(ngx_http_request_t *r, ngx_str_t *accept,
             p++;
         }
         
-        /* Parse this entry */
-        entry_str.data = start;
-        entry_str.len = p - start;
-        
-        /* Trim trailing whitespace */
-        while (entry_str.len > 0 && 
-               (entry_str.data[entry_str.len - 1] == ' ' ||
-                entry_str.data[entry_str.len - 1] == '\t')) {
-            entry_str.len--;
+        rc = ngx_http_markdown_parse_accept_segment(r, start, p, entries, &order);
+        if (rc != NGX_OK) {
+            return NGX_ERROR;
         }
         
-        if (entry_str.len > 0) {
-            /* Allocate entry in array */
-            entry = ngx_array_push(entries);
-            if (entry == NULL) {
-                ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                             "markdown: failed to allocate Accept entry");
-                return NGX_ERROR;
-            }
-            
-            /* Parse the entry */
-            if (ngx_http_markdown_parse_accept_entry(&entry_str, entry, order) != NGX_OK) {
-                ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-                             "markdown: failed to parse Accept entry: \"%V\"",
-                             &entry_str);
-                /* Remove the failed entry from array */
-                entries->nelts--;
-                /* Continue parsing other entries */
-            } else {
-                order++;
-            }
-        }
-        
-        /* Skip comma */
-        if (p < end && *p == ',') {
-            p++;
-        }
+        ngx_http_markdown_skip_accept_comma(&p, end);
     }
     
+    return NGX_OK;
+}
+
+static void
+ngx_http_markdown_skip_accept_spaces(u_char **p, u_char *end)
+{
+    while (*p < end && (**p == ' ' || **p == '\t')) {
+        (*p)++;
+    }
+}
+
+static void
+ngx_http_markdown_skip_accept_comma(u_char **p, u_char *end)
+{
+    if (*p < end && **p == ',') {
+        (*p)++;
+    }
+}
+
+static ngx_int_t
+ngx_http_markdown_parse_accept_segment(ngx_http_request_t *r,
+    u_char *start, u_char *end, ngx_array_t *entries, ngx_uint_t *order)
+{
+    ngx_str_t                            entry_str;
+    ngx_http_markdown_accept_entry_t    *entry;
+
+    entry_str.data = start;
+    entry_str.len = end - start;
+
+    while (entry_str.len > 0
+           && (entry_str.data[entry_str.len - 1] == ' '
+               || entry_str.data[entry_str.len - 1] == '\t'))
+    {
+        entry_str.len--;
+    }
+
+    if (entry_str.len == 0) {
+        return NGX_OK;
+    }
+
+    entry = ngx_array_push(entries);
+    if (entry == NULL) {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                     "markdown: failed to allocate Accept entry");
+        return NGX_ERROR;
+    }
+
+    if (ngx_http_markdown_parse_accept_entry(&entry_str, entry, *order) != NGX_OK) {
+        ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
+                     "markdown: failed to parse Accept entry: \"%V\"",
+                     &entry_str);
+        entries->nelts--;
+        return NGX_OK;
+    }
+
+    (*order)++;
     return NGX_OK;
 }
 
