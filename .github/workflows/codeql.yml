@@ -27,6 +27,8 @@ concurrency:
   group: security-scan-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions: {}
+
 jobs:
   codeql-c-cpp:
     name: CodeQL (C/C++ Production Sources)
