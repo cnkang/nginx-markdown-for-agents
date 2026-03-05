@@ -19,9 +19,6 @@ import sys
 ROOT = Path(__file__).resolve().parents[2]
 ARCHIVE_SEGMENT = "docs/archive/"
 LINK_RE = re.compile(r"(!?\[[^\]]+\]\(([^)]+)\))")
-ENGLISH_POLICY_EXCLUDE = [
-    "README_zh-CN.md",
-]
 
 
 def iter_markdown_files() -> list[Path]:
@@ -81,20 +78,24 @@ def check_heading_hierarchy(files: list[Path]) -> list[str]:
 def check_english_policy(files: list[Path]) -> list[str]:
     # Detect CJK Han ideographs only (avoid false positives from punctuation such as middle dots).
     try:
-        cmd = [
-            "rg",
-            "-n",
-            "--pcre2",
-            r"[\x{3400}-\x{4DBF}\x{4E00}-\x{9FFF}\x{F900}-\x{FAFF}]",
-            "--glob",
-            "!docs/archive/**",
-            "--glob",
-            "*.md",
-        ]
-        for exclude in ENGLISH_POLICY_EXCLUDE:
-            cmd.extend(["--glob", f"!{exclude}"])
-        cmd.append(".")
-        proc = subprocess.run(cmd, cwd=ROOT, text=True, capture_output=True)
+        proc = subprocess.run(
+            [
+                "rg",
+                "-n",
+                "--pcre2",
+                r"[\x{3400}-\x{4DBF}\x{4E00}-\x{9FFF}\x{F900}-\x{FAFF}]",
+                "--glob",
+                "!docs/archive/**",
+                "--glob",
+                "*.md",
+                "--glob",
+                "!README_zh-CN.md",
+                ".",
+            ],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+        )
     except FileNotFoundError:
         # Fallback: no check if rg is unavailable; caller can still rely on other checks.
         return []
