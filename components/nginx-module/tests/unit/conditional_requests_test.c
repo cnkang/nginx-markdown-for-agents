@@ -13,37 +13,88 @@
 #define RC_DECLINED -5
 #define RC_ERROR -1
 
+static const char *
+skip_if_none_match_separators(const char *p)
+{
+    while (*p == ' ' || *p == '\t' || *p == ',') {
+        p++;
+    }
+    return p;
+}
+
+static int
+parse_quoted_etag_token(const char **cursor, char *out, size_t out_size)
+{
+    size_t len;
+    const char *p;
+
+    p = *cursor + 1;
+    len = 0;
+
+    while (*p && *p != '"' && len + 1 < out_size) {
+        out[len++] = *p++;
+    }
+    if (*p != '"') {
+        return RC_ERROR;
+    }
+
+    out[len] = '\0';
+    *cursor = p + 1;
+    return RC_MATCH;
+}
+
+static void
+parse_unquoted_etag_token(const char **cursor, char *out, size_t out_size)
+{
+    size_t len;
+    const char *p;
+
+    p = *cursor;
+    len = 0;
+
+    while (*p && *p != ',' && *p != ' ' && *p != '\t' && len + 1 < out_size) {
+        out[len++] = *p++;
+    }
+
+    out[len] = '\0';
+    *cursor = p;
+}
+
 static size_t
 parse_if_none_match(const char *header, char tokens[][128], size_t max_tokens)
 {
-    const char *p = header;
+    const char *p;
     size_t n = 0;
+    int rc;
 
     if (header == NULL || *header == '\0') {
         return 0;
     }
 
+    p = header;
     while (*p && n < max_tokens) {
-        char *out = tokens[n];
-        size_t len = 0;
-
-        while (*p == ' ' || *p == '\t' || *p == ',') p++;
-        if (*p == '\0') break;
+        p = skip_if_none_match_separators(p);
+        if (*p == '\0') {
+            break;
+        }
 
         if (*p == '"') {
-            p++;
-            while (*p && *p != '"' && len + 1 < 128) out[len++] = *p++;
-            if (*p != '"') {
-                return 0; /* malformed header: ignore conditional */
+            rc = parse_quoted_etag_token(&p, tokens[n], 128);
+            if (rc != RC_MATCH) {
+                return 0;
             }
-            p++;
         } else {
-            while (*p && *p != ',' && *p != ' ' && *p != '\t' && len + 1 < 128) out[len++] = *p++;
+            parse_unquoted_etag_token(&p, tokens[n], 128);
         }
-        out[len] = '\0';
+
         n++;
-        while (*p && *p != ',') p++;
-        if (*p == ',') p++;
+
+        while (*p && *p != ',') {
+            p++;
+        }
+        if (*p == ',') {
+            p++;
+        }
     }
 
     return n;

@@ -140,7 +140,9 @@ def is_strong_copyleft_license(license_id: str) -> bool:
 def requires_strong_copyleft(expr: str) -> bool:
     # Some crates still publish slash-separated legacy expressions like
     # "MIT/Apache-2.0". Treat "/" as OR.
-    expr = re.sub(r"\s*/\s*", " OR ", expr)
+    if "/" in expr:
+        pieces = [piece.strip() for piece in expr.split("/") if piece.strip()]
+        expr = " OR ".join(pieces)
     parser = Parser(tokenize(expr))
     result = parser.parse_expression()
     if parser.peek() is not None:

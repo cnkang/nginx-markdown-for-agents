@@ -35,6 +35,26 @@ cookie_matches_pattern(const char *cookie_name, const char *pattern)
     return strcmp(cookie_name, pattern) == 0;
 }
 
+static int
+append_with_bound(char *dst, size_t dst_size, const char *src)
+{
+    size_t dst_len;
+    size_t src_len;
+
+    if (dst == NULL || src == NULL || dst_size == 0) {
+        return 0;
+    }
+
+    dst_len = strlen(dst);
+    src_len = strlen(src);
+    if (dst_len >= dst_size || src_len > dst_size - dst_len - 1) {
+        return 0;
+    }
+
+    memcpy(dst + dst_len, src, src_len + 1);
+    return 1;
+}
+
 static char *
 next_delimited_token(char **cursor, char delimiter)
 {
@@ -76,21 +96,22 @@ static int
 has_auth_cookie(const char *cookie_header, const char **patterns, size_t pattern_count)
 {
     char buf[512];
-    char *cursor;
+    const char *cursor;
     char *cookie_cursor;
 
     if (cookie_header == NULL || *cookie_header == '\0') {
         return 0;
     }
 
-    strncpy(buf, cookie_header, sizeof(buf) - 1);
-    buf[sizeof(buf) - 1] = '\0';
+    snprintf(buf, sizeof(buf), "%s", cookie_header);
     cookie_cursor = buf;
     cursor = next_delimited_token(&cookie_cursor, ';');
 
     while (cursor != NULL) {
-        char *eq;
+        const char *eq;
         const char *name;
+        size_t name_len;
+        char name_buf[128];
 
         eq = strchr(cursor, '=');
         if (eq == NULL) {
@@ -102,10 +123,20 @@ has_auth_cookie(const char *cookie_header, const char **patterns, size_t pattern
         while (*name == ' ') {
             name++;
         }
-        *eq = '\0';
+        name_len = (size_t) (eq - name);
+        while (name_len > 0 && (name[name_len - 1] == ' ' || name[name_len - 1] == '\t')) {
+            name_len--;
+        }
+        if (name_len == 0 || name_len >= sizeof(name_buf)) {
+            cursor = next_delimited_token(&cookie_cursor, ';');
+            continue;
+        }
+
+        memcpy(name_buf, name, name_len);
+        name_buf[name_len] = '\0';
 
         for (size_t i = 0; i < pattern_count; i++) {
-            if (cookie_matches_pattern(name, patterns[i])) {
+            if (cookie_matches_pattern(name_buf, patterns[i])) {
                 return 1;
             }
         }
@@ -146,8 +177,7 @@ adjust_cache_control_for_auth(const char *cache_control, int authenticated)
         return cache_control;
     }
 
-    strncpy(scratch, cache_control, sizeof(scratch) - 1);
-    scratch[sizeof(scratch) - 1] = '\0';
+    snprintf(scratch, sizeof(scratch), "%s", cache_control);
 
     rewritten[0] = '\0';
     wrote = 0;
@@ -158,18 +188,26 @@ adjust_cache_control_for_auth(const char *cache_control, int authenticated)
         while (*token == ' ' || *token == '\t') token++;
         if (!STR_EQ(token, "public")) {
             if (wrote) {
-                strncat(rewritten, ", ", sizeof(rewritten) - strlen(rewritten) - 1);
+                if (!append_with_bound(rewritten, sizeof(rewritten), ", ")) {
+                    return "private";
+                }
             }
-            strncat(rewritten, token, sizeof(rewritten) - strlen(rewritten) - 1);
+            if (!append_with_bound(rewritten, sizeof(rewritten), token)) {
+                return "private";
+            }
             wrote = 1;
         }
         cursor = next_delimited_token(&directive_cursor, ',');
     }
 
     if (wrote) {
-        strncat(rewritten, ", private", sizeof(rewritten) - strlen(rewritten) - 1);
+        if (!append_with_bound(rewritten, sizeof(rewritten), ", private")) {
+            return "private";
+        }
     } else {
-        strncat(rewritten, "private", sizeof(rewritten) - strlen(rewritten) - 1);
+        if (!append_with_bound(rewritten, sizeof(rewritten), "private")) {
+            return "private";
+        }
     }
 
     return rewritten;

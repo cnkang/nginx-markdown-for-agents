@@ -67,7 +67,7 @@ clamp_q_value(float *q_value)
 }
 
 static void
-parse_q_param(accept_entry_t *entry, char *params)
+parse_q_param(accept_entry_t *entry, const char *params)
 {
     const char *q;
 
@@ -82,6 +82,24 @@ parse_q_param(accept_entry_t *entry, char *params)
 
     entry->q = (float) atof(q + 2);
     clamp_q_value(&entry->q);
+}
+
+static int
+copy_token(char *dst, size_t dst_size, const char *src)
+{
+    size_t len;
+
+    if (dst == NULL || src == NULL || dst_size == 0) {
+        return 0;
+    }
+
+    len = strlen(src);
+    if (len >= dst_size) {
+        return 0;
+    }
+
+    memcpy(dst, src, len + 1);
+    return 1;
 }
 
 static int
@@ -131,14 +149,18 @@ parse_accept(const char *header, accept_entry_t *entries, int max_entries)
             continue;
         }
         *slash = '\0';
-        strncpy(ent->type, s, sizeof(ent->type) - 1);
+        if (!copy_token(ent->type, sizeof(ent->type), s)) {
+            continue;
+        }
 
         semi = strchr(slash + 1, ';');
         if (semi != NULL) {
             *semi = '\0';
             parse_q_param(ent, semi + 1);
         }
-        strncpy(ent->subtype, slash + 1, sizeof(ent->subtype) - 1);
+        if (!copy_token(ent->subtype, sizeof(ent->subtype), slash + 1)) {
+            continue;
+        }
 
         ent->specificity = specificity_for(ent->type, ent->subtype);
         ent->valid = 1;

@@ -31,15 +31,11 @@ static u_char ngx_http_markdown_content_type[] = "text/markdown; charset=utf-8";
 static u_char ngx_http_markdown_vary_suffix[] = ", Accept";
 
 static ngx_table_elt_t *
-ngx_http_markdown_find_header(ngx_http_request_t *r, u_char *name, size_t name_len)
+ngx_http_markdown_find_header_in_part(ngx_list_part_t *part,
+                                      const u_char *name,
+                                      size_t name_len)
 {
-    ngx_list_part_t *part;
-
-    if (r->headers_out.headers.part.nelts == 0) {
-        return NULL;
-    }
-
-    for (part = &r->headers_out.headers.part; part != NULL; part = part->next) {
+    while (part != NULL) {
         ngx_table_elt_t *headers;
         ngx_uint_t i;
 
@@ -53,25 +49,33 @@ ngx_http_markdown_find_header(ngx_http_request_t *r, u_char *name, size_t name_l
             }
             i++;
         }
+
+        part = part->next;
     }
 
     return NULL;
 }
 
-static void
-ngx_http_markdown_invalidate_headers(ngx_http_request_t *r,
-                                     u_char *name,
-                                     size_t name_len,
-                                     ngx_flag_t stop_after_first,
-                                     const char *log_message)
+static ngx_table_elt_t *
+ngx_http_markdown_find_header(ngx_http_request_t *r, const u_char *name, size_t name_len)
 {
-    ngx_list_part_t *part;
-
     if (r->headers_out.headers.part.nelts == 0) {
-        return;
+        return NULL;
     }
 
-    for (part = &r->headers_out.headers.part; part != NULL; part = part->next) {
+    return ngx_http_markdown_find_header_in_part(&r->headers_out.headers.part,
+                                                 name, name_len);
+}
+
+static void
+ngx_http_markdown_invalidate_headers_in_part(ngx_http_request_t *r,
+                                             ngx_list_part_t *part,
+                                             const u_char *name,
+                                             size_t name_len,
+                                             ngx_flag_t stop_after_first,
+                                             const char *log_message)
+{
+    while (part != NULL) {
         ngx_table_elt_t *headers;
         ngx_uint_t i;
 
@@ -95,12 +99,30 @@ ngx_http_markdown_invalidate_headers(ngx_http_request_t *r,
             }
             i++;
         }
+
+        part = part->next;
     }
+}
+
+static void
+ngx_http_markdown_invalidate_headers(ngx_http_request_t *r,
+                                     const u_char *name,
+                                     size_t name_len,
+                                     ngx_flag_t stop_after_first,
+                                     const char *log_message)
+{
+    if (r->headers_out.headers.part.nelts == 0) {
+        return;
+    }
+
+    ngx_http_markdown_invalidate_headers_in_part(r, &r->headers_out.headers.part,
+                                                 name, name_len, stop_after_first,
+                                                 log_message);
 }
 
 static ngx_flag_t
 ngx_http_markdown_contains_csv_token(const ngx_str_t *value,
-                                     u_char *token,
+                                     const u_char *token,
                                      size_t token_len)
 {
     size_t i;
