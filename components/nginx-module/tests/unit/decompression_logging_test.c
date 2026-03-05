@@ -13,39 +13,33 @@ static char g_log_msg[1024];
 static int g_log_level;
 
 static void
-capture_log(int level, const char *fmt, ...)
-{
-    va_list args;
-    g_log_level = level;
-    va_start(args, fmt);
-    vsnprintf(g_log_msg, sizeof(g_log_msg), fmt, args);
-    va_end(args);
-}
-
-static void
 log_detection(int compression_type)
 {
-    capture_log(LOG_DEBUG, "markdown filter: decompression detected compression type: %d",
-                compression_type);
+    g_log_level = LOG_DEBUG;
+    snprintf(g_log_msg, sizeof(g_log_msg),
+             "markdown filter: decompression detected compression type: %d",
+             compression_type);
 }
 
 static void
 log_success(int compression_type, size_t compressed, size_t decompressed)
 {
     double ratio = (compressed == 0) ? 0.0 : ((double) decompressed / (double) compressed);
-    capture_log(LOG_INFO,
-                "markdown filter: decompression succeeded, compression=%d, "
-                "compressed=%zu bytes, decompressed=%zu bytes, ratio=%.1fx",
-                compression_type, compressed, decompressed, ratio);
+    g_log_level = LOG_INFO;
+    snprintf(g_log_msg, sizeof(g_log_msg),
+             "markdown filter: decompression succeeded, compression=%d, "
+             "compressed=%zu bytes, decompressed=%zu bytes, ratio=%.1fx",
+             compression_type, compressed, decompressed, ratio);
 }
 
 static void
 log_failure(int compression_type, const char *category)
 {
-    capture_log(LOG_ERR,
-                "markdown filter: decompression failed, compression=%d, "
-                "error=\"decompression error\", category=%s",
-                compression_type, category);
+    g_log_level = LOG_ERR;
+    snprintf(g_log_msg, sizeof(g_log_msg),
+             "markdown filter: decompression failed, compression=%d, "
+             "error=\"decompression error\", category=%s",
+             compression_type, category);
 }
 
 static void

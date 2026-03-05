@@ -338,7 +338,7 @@ const ngx_str_t *ngx_http_markdown_eligibility_string(
 
 /* Update response headers after successful conversion */
 ngx_int_t ngx_http_markdown_update_headers(ngx_http_request_t *r,
-    struct MarkdownResult *result, ngx_http_markdown_conf_t *conf);
+    const struct MarkdownResult *result, const ngx_http_markdown_conf_t *conf);
 
 /* Remove Content-Encoding header (called after decompression) */
 void ngx_http_markdown_remove_content_encoding(ngx_http_request_t *r);

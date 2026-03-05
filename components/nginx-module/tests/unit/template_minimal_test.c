@@ -46,12 +46,12 @@ typedef struct {
 } ngx_http_request_t;
 
 /* Mock nginx functions */
-ngx_int_t ngx_http_discard_request_body(ngx_http_request_t *r) {
+ngx_int_t ngx_http_discard_request_body(const ngx_http_request_t *r) {
     UNUSED(r);
     return NGX_OK;
 }
 
-ngx_buf_t *ngx_create_temp_buf(ngx_pool_t *pool, size_t size) {
+ngx_buf_t *ngx_create_temp_buf(const ngx_pool_t *pool, size_t size) {
     UNUSED(pool);
     ngx_buf_t *b = malloc(sizeof(ngx_buf_t) + size);
     if (b) {
@@ -62,18 +62,18 @@ ngx_buf_t *ngx_create_temp_buf(ngx_pool_t *pool, size_t size) {
     return b;
 }
 
-ngx_int_t ngx_http_send_header(ngx_http_request_t *r) {
+ngx_int_t ngx_http_send_header(const ngx_http_request_t *r) {
     UNUSED(r);
     return NGX_OK;
 }
 
-ngx_int_t ngx_http_output_filter(ngx_http_request_t *r, ngx_chain_t *in) {
+ngx_int_t ngx_http_output_filter(const ngx_http_request_t *r, const ngx_chain_t *in) {
     UNUSED(r);
     UNUSED(in);
     return NGX_OK;
 }
 
-u_char *ngx_slprintf(u_char *buf, u_char *last, const char *fmt, ...) {
+u_char *ngx_slprintf(u_char *buf, const u_char *last, const char *fmt) {
     size_t avail = 0;
     if (last > buf) {
         avail = (size_t)(last - buf);
@@ -89,7 +89,7 @@ u_char *ngx_slprintf(u_char *buf, u_char *last, const char *fmt, ...) {
      * Minimal template helper: preserve deterministic behavior without
      * evaluating arbitrary format strings in this lightweight mock.
      */
-    int len = snprintf((char *)buf, avail, "%s", fmt);
+    int len = snprintf((char *) buf, avail, "%s", fmt);
 
     if (len < 0) {
         return buf;
@@ -101,8 +101,8 @@ u_char *ngx_slprintf(u_char *buf, u_char *last, const char *fmt, ...) {
     return buf + len;
 }
 
-void ngx_log_error_core(ngx_uint_t level, ngx_log_t *log, int err,
-                        const char *fmt, ...) {
+void ngx_log_error_core(ngx_uint_t level, const ngx_log_t *log, int err,
+                        const char *fmt) {
     UNUSED(level);
     UNUSED(log);
     UNUSED(err);

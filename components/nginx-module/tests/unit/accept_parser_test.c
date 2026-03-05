@@ -54,6 +54,36 @@ specificity_for(const char *type, const char *subtype)
     return 3;
 }
 
+static void
+clamp_q_value(float *q_value)
+{
+    if (*q_value < 0.0f) {
+        *q_value = 0.0f;
+        return;
+    }
+    if (*q_value > 1.0f) {
+        *q_value = 1.0f;
+    }
+}
+
+static void
+parse_q_param(accept_entry_t *entry, char *params)
+{
+    const char *q;
+
+    if (entry == NULL || params == NULL) {
+        return;
+    }
+
+    q = strstr(params, "q=");
+    if (q == NULL) {
+        return;
+    }
+
+    entry->q = (float) atof(q + 2);
+    clamp_q_value(&entry->q);
+}
+
 static int
 parse_accept(const char *header, accept_entry_t *entries, int max_entries)
 {
@@ -105,13 +135,8 @@ parse_accept(const char *header, accept_entry_t *entries, int max_entries)
 
         semi = strchr(slash + 1, ';');
         if (semi != NULL) {
-            char *q = strstr(semi + 1, "q=");
             *semi = '\0';
-            if (q != NULL) {
-                ent->q = (float) atof(q + 2);
-                if (ent->q < 0.0f) ent->q = 0.0f;
-                if (ent->q > 1.0f) ent->q = 1.0f;
-            }
+            parse_q_param(ent, semi + 1);
         }
         strncpy(ent->subtype, slash + 1, sizeof(ent->subtype) - 1);
 
@@ -145,7 +170,6 @@ static int
 should_convert(const char *accept_header, int on_wildcard)
 {
     accept_entry_t entries[32];
-    int i;
     int n;
     int best = -1;
     int explicit_reject_markdown = 0;
@@ -155,7 +179,7 @@ should_convert(const char *accept_header, int on_wildcard)
         return 0;
     }
 
-    for (i = 0; i < n; i++) {
+    for (int i = 0; i < n; i++) {
         if (str_case_eq(entries[i].type, "text") &&
             str_case_eq(entries[i].subtype, "markdown") &&
             entries[i].q == 0.0f)

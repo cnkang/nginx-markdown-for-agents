@@ -1119,6 +1119,13 @@ ngx_http_markdown_is_ascii_space(u_char ch)
             || ch == '\n' || ch == '\f' || ch == '\v');
 }
 
+static u_char ngx_http_markdown_flag_on[] = "on";
+static u_char ngx_http_markdown_flag_off[] = "off";
+static u_char ngx_http_markdown_flag_yes[] = "yes";
+static u_char ngx_http_markdown_flag_no[] = "no";
+static u_char ngx_http_markdown_flag_true[] = "true";
+static u_char ngx_http_markdown_flag_false[] = "false";
+
 static ngx_int_t
 ngx_http_markdown_parse_filter_flag(ngx_str_t *value, ngx_flag_t *enabled)
 {
@@ -1168,42 +1175,42 @@ ngx_http_markdown_parse_filter_flag(ngx_str_t *value, ngx_flag_t *enabled)
     }
 
     if (value->len == 2
-        && ngx_strncasecmp(value->data, (u_char *) "on", 2) == 0)
+        && ngx_strncasecmp(value->data, ngx_http_markdown_flag_on, 2) == 0)
     {
         *enabled = 1;
         return NGX_OK;
     }
 
     if (value->len == 3
-        && ngx_strncasecmp(value->data, (u_char *) "off", 3) == 0)
+        && ngx_strncasecmp(value->data, ngx_http_markdown_flag_off, 3) == 0)
     {
         *enabled = 0;
         return NGX_OK;
     }
 
     if (value->len == 3
-        && ngx_strncasecmp(value->data, (u_char *) "yes", 3) == 0)
+        && ngx_strncasecmp(value->data, ngx_http_markdown_flag_yes, 3) == 0)
     {
         *enabled = 1;
         return NGX_OK;
     }
 
     if (value->len == 2
-        && ngx_strncasecmp(value->data, (u_char *) "no", 2) == 0)
+        && ngx_strncasecmp(value->data, ngx_http_markdown_flag_no, 2) == 0)
     {
         *enabled = 0;
         return NGX_OK;
     }
 
     if (value->len == 4
-        && ngx_strncasecmp(value->data, (u_char *) "true", 4) == 0)
+        && ngx_strncasecmp(value->data, ngx_http_markdown_flag_true, 4) == 0)
     {
         *enabled = 1;
         return NGX_OK;
     }
 
     if (value->len == 5
-        && ngx_strncasecmp(value->data, (u_char *) "false", 5) == 0)
+        && ngx_strncasecmp(value->data, ngx_http_markdown_flag_false, 5) == 0)
     {
         *enabled = 0;
         return NGX_OK;

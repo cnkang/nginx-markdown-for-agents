@@ -17,7 +17,6 @@ typedef enum {
 static int
 str_case_eq(const char *a, const char *b)
 {
-    size_t i;
     size_t alen;
     size_t blen;
 
@@ -31,7 +30,7 @@ str_case_eq(const char *a, const char *b)
         return 0;
     }
 
-    for (i = 0; i < alen; i++) {
+    for (size_t i = 0; i < alen; i++) {
         if (tolower((unsigned char) a[i]) != tolower((unsigned char) b[i])) {
             return 0;
         }
