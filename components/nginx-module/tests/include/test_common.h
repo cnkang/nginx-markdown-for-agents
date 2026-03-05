@@ -151,4 +151,27 @@
 #define MEM_EQ(a, b, size) \
     (memcmp((a), (b), (size)) == 0)
 
+/*
+ * Bounded string length helper
+ *
+ * Computes length up to max_len and never reads past max_len bytes.
+ */
+static inline size_t
+test_cstrnlen(const char *s, size_t max_len)
+{
+    size_t n;
+
+    if (s == NULL) {
+        return 0;
+    }
+
+    for (n = 0; n < max_len; n++) {
+        if (s[n] == '\0') {
+            return n;
+        }
+    }
+
+    return max_len;
+}
+
 #endif /* TEST_COMMON_H */

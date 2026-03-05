@@ -185,21 +185,25 @@ init_headers_list(ngx_list_t *list, ngx_uint_t capacity)
 static ngx_table_elt_t *
 push_header(ngx_http_request_t *r, const char *key, const char *value)
 {
-    size_t key_len = strlen(key) + 1;
-    size_t val_len = strlen(value) + 1;
+    size_t key_data_len = test_cstrnlen(key, 256);
+    size_t val_data_len = test_cstrnlen(value, 512);
+    size_t key_len = key_data_len + 1;
+    size_t val_len = val_data_len + 1;
     char *key_copy = (char *) malloc(key_len);
     char *val_copy = (char *) malloc(val_len);
     ngx_table_elt_t *h = ngx_list_push(&r->headers_out.headers);
     TEST_ASSERT(h != NULL, "header list push failed");
     TEST_ASSERT(key_copy != NULL, "alloc key failed");
     TEST_ASSERT(val_copy != NULL, "alloc value failed");
+    TEST_ASSERT(key_data_len < 256, "key must be null-terminated within 255 bytes");
+    TEST_ASSERT(val_data_len < 512, "value must be null-terminated within 511 bytes");
     memcpy(key_copy, key, key_len);
     memcpy(val_copy, value, val_len);
     h->hash = 1;
     h->key.data = (u_char *) key_copy;
-    h->key.len = strlen(key);
+    h->key.len = key_data_len;
     h->value.data = (u_char *) val_copy;
-    h->value.len = strlen(value);
+    h->value.len = val_data_len;
     return h;
 }
 
@@ -207,11 +211,12 @@ static ngx_table_elt_t *
 find_header(ngx_http_request_t *r, const char *key)
 {
     ngx_table_elt_t *elts = (ngx_table_elt_t *) r->headers_out.headers.part.elts;
+    size_t key_len = test_cstrnlen(key, 256);
     const u_char *key_u = (const u_char *) key;
 
     for (ngx_uint_t i = 0; i < r->headers_out.headers.part.nelts; i++) {
         if (elts[i].hash != 0 &&
-            elts[i].key.len == strlen(key) &&
+            elts[i].key.len == key_len &&
             ngx_strncasecmp(elts[i].key.data, key_u, elts[i].key.len) == 0)
         {
             return &elts[i];
@@ -225,11 +230,12 @@ count_active_headers(ngx_http_request_t *r, const char *key)
 {
     const ngx_table_elt_t *elts = (const ngx_table_elt_t *) r->headers_out.headers.part.elts;
     ngx_uint_t count = 0;
+    size_t key_len = test_cstrnlen(key, 256);
     const u_char *key_u = (const u_char *) key;
 
     for (ngx_uint_t i = 0; i < r->headers_out.headers.part.nelts; i++) {
         if (elts[i].hash != 0 &&
-            elts[i].key.len == strlen(key) &&
+            elts[i].key.len == key_len &&
             ngx_strncasecmp(elts[i].key.data, key_u, elts[i].key.len) == 0)
         {
             count++;

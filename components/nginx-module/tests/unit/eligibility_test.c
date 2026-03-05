@@ -55,8 +55,21 @@ strncasecmp_ascii(const char *a, const char *b, size_t n)
 static int
 starts_with_ci(const char *s, const char *prefix)
 {
-    size_t plen = strlen(prefix);
-    return strlen(s) >= plen && strncasecmp_ascii(s, prefix, plen) == 0;
+    size_t plen;
+
+    if (s == NULL || prefix == NULL) {
+        return 0;
+    }
+
+    plen = 0;
+    while (prefix[plen] != '\0') {
+        if (s[plen] == '\0') {
+            return 0;
+        }
+        plen++;
+    }
+
+    return strncasecmp_ascii(s, prefix, plen) == 0;
 }
 
 static int

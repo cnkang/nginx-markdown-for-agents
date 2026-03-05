@@ -12,6 +12,7 @@
 #define RC_MATCH 304
 #define RC_DECLINED -5
 #define RC_ERROR -1
+#define TEST_ETAG_INPUT_MAX 1024
 
 static const char *
 skip_if_none_match_separators(const char *p)
@@ -116,7 +117,7 @@ normalize_etag_token(const char *input, char *out, size_t out_len)
         return;
     }
 
-    len = strlen(input);
+    len = test_cstrnlen(input, TEST_ETAG_INPUT_MAX);
     if (len >= 2 && (start[0] == 'W' || start[0] == 'w') && start[1] == '/') {
         start += 2;
         len -= 2;

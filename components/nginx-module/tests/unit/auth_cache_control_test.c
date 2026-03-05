@@ -5,6 +5,9 @@
 
 #include "test_common.h"
 
+#define TEST_COOKIE_NAME_MAX 256
+#define TEST_COOKIE_PATTERN_MAX 256
+
 typedef struct {
     const char *authorization;
     const char *cookie_header;
@@ -20,8 +23,11 @@ cookie_matches_pattern(const char *cookie_name, const char *pattern)
         return 0;
     }
 
-    name_len = strlen(cookie_name);
-    pat_len = strlen(pattern);
+    name_len = test_cstrnlen(cookie_name, TEST_COOKIE_NAME_MAX);
+    pat_len = test_cstrnlen(pattern, TEST_COOKIE_PATTERN_MAX);
+    if (name_len == TEST_COOKIE_NAME_MAX || pat_len == TEST_COOKIE_PATTERN_MAX) {
+        return 0;
+    }
 
     if (pattern[pat_len - 1] == '*') {
         size_t prefix_len = pat_len - 1;
@@ -45,8 +51,8 @@ append_with_bound(char *dst, size_t dst_size, const char *src)
         return 0;
     }
 
-    dst_len = strlen(dst);
-    src_len = strlen(src);
+    dst_len = test_cstrnlen(dst, dst_size);
+    src_len = test_cstrnlen(src, dst_size);
     if (dst_len >= dst_size || src_len > dst_size - dst_len - 1) {
         return 0;
     }
@@ -83,7 +89,10 @@ next_delimited_token(char **cursor, char delimiter)
         *cursor = NULL;
     }
 
-    end = start + strlen(start);
+    end = start;
+    while (*end != '\0') {
+        end++;
+    }
     while (end > start && (end[-1] == ' ' || end[-1] == '\t')) {
         end--;
         *end = '\0';

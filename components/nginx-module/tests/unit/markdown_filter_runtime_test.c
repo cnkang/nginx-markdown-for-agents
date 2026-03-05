@@ -16,6 +16,7 @@
 #define ENABLED_UNSET 0
 #define ENABLED_STATIC 1
 #define ENABLED_COMPLEX 2
+#define TEST_RUNTIME_VALUE_MAX 256
 
 typedef struct {
     const char *value;
@@ -57,7 +58,10 @@ eq_nocase_lit(const char *start, size_t len, const char *lit)
         return 0;
     }
 
-    lit_len = strlen(lit);
+    lit_len = test_cstrnlen(lit, 16);
+    if (lit_len == 16) {
+        return 0;
+    }
     if (len != lit_len) {
         return 0;
     }
@@ -83,7 +87,7 @@ parse_filter_flag_runtime(const char *raw, int *enabled)
     }
 
     start = raw;
-    end = raw + strlen(raw);
+    end = raw + test_cstrnlen(raw, TEST_RUNTIME_VALUE_MAX);
 
     while (start < end && is_ascii_space(*start)) {
         start++;

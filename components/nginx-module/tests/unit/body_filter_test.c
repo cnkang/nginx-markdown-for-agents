@@ -19,7 +19,11 @@ typedef struct {
 static void
 append_chunk(body_ctx_t *ctx, const char *chunk)
 {
-    size_t len = strlen(chunk);
+    size_t remaining;
+    size_t len;
+
+    remaining = sizeof(ctx->buffer) - ctx->size;
+    len = test_cstrnlen(chunk, remaining);
     TEST_ASSERT(ctx->size + len < sizeof(ctx->buffer), "test buffer overflow");
     memcpy(ctx->buffer + ctx->size, chunk, len);
     ctx->size += len;
