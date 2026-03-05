@@ -10,6 +10,8 @@ on:
         required: false
         default: ''
 
+permissions: {}
+
 jobs:
   prepare:
     name: Resolve Default NGINX Versions
