@@ -100,6 +100,7 @@ static const ngx_str_t *ngx_http_markdown_log_verbosity_name(ngx_uint_t value);
 static const ngx_str_t *ngx_http_markdown_compression_name(
     ngx_http_markdown_compression_type_e compression_type);
 static const ngx_str_t *ngx_http_markdown_enabled_source_name(ngx_uint_t value);
+static ngx_uint_t ngx_http_markdown_is_ascii_space(u_char ch);
 static ngx_int_t ngx_http_markdown_parse_filter_flag(ngx_str_t *value, ngx_flag_t *enabled);
 ngx_flag_t ngx_http_markdown_is_enabled(ngx_http_request_t *r,
     ngx_http_markdown_conf_t *conf);
@@ -1111,12 +1112,43 @@ ngx_http_markdown_enabled_source_name(ngx_uint_t value)
     }
 }
 
+static ngx_uint_t
+ngx_http_markdown_is_ascii_space(u_char ch)
+{
+    return (ch == ' ' || ch == '\t' || ch == '\r'
+            || ch == '\n' || ch == '\f' || ch == '\v');
+}
+
 static ngx_int_t
 ngx_http_markdown_parse_filter_flag(ngx_str_t *value, ngx_flag_t *enabled)
 {
+    ngx_str_t  normalized;
+    u_char    *start;
+    u_char    *end;
+
     if (value == NULL || enabled == NULL) {
         return NGX_ERROR;
     }
+
+    /*
+     * Normalize by trimming surrounding ASCII whitespace.
+     * This keeps per-request variable parsing tolerant to values such as
+     * " on " or "\t1\n" without allocating new buffers.
+     */
+    start = value->data;
+    end = value->data + value->len;
+
+    while (start < end && ngx_http_markdown_is_ascii_space(*start)) {
+        start++;
+    }
+
+    while (end > start && ngx_http_markdown_is_ascii_space(*(end - 1))) {
+        end--;
+    }
+
+    normalized.data = start;
+    normalized.len = (size_t) (end - start);
+    value = &normalized;
 
     if (value->len == 0) {
         *enabled = 0;
