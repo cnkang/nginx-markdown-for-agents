@@ -122,7 +122,8 @@ build_image() {
 }
 
 sanitize_tag() {
-  printf '%s' "$1" | tr -c '[:alnum:]._-:' '-'
+  # Force C collation and keep "-" last so tag normalization is locale-stable.
+  printf '%s' "$1" | LC_ALL=C tr -c '[:alnum:].:_-' '-'
 }
 
 append_step_summary() {
