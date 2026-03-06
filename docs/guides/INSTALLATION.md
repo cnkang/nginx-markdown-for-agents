@@ -52,6 +52,78 @@ Then reload NGINX:
 sudo nginx -t && sudo nginx -s reload
 ```
 
+### Docker (Official NGINX Images + Source Build)
+
+If you want a fully self-contained Docker image that compiles the module from source against the exact official `nginx` image you run, use:
+
+- `examples/docker/Dockerfile.official-nginx-source-build`
+
+This follows the official-image multi-stage pattern:
+
+- start from an official `nginx` image
+- install build dependencies in the build stage
+- `git clone` this repository inside the image
+- compile the module in the build stage
+- copy the resulting `.so` into a clean official `nginx` runtime image for functional verification
+
+Platform-specific build notes:
+
+- Alpine-based official images use `nginx-mod-dev`, which provides a matching NGINX source tree in the container.
+- Debian-based official images do not currently provide a matching `nginx-dev` package for the official `nginx` image version, so the Dockerfile downloads the exact matching NGINX source tarball only for the build stage.
+- In all cases, the runtime and verification container remains the official `nginx` image.
+
+Build examples for the most common official variants:
+
+```bash
+# mainline
+docker build \
+  -f examples/docker/Dockerfile.official-nginx-source-build \
+  --build-arg NGINX_IMAGE=nginx:mainline \
+  --build-arg MODULE_REPO=https://github.com/cnkang/nginx-markdown-for-agents.git \
+  --build-arg MODULE_REF=main \
+  -t nginx-markdown:mainline \
+  .
+
+# mainline-alpine
+docker build \
+  -f examples/docker/Dockerfile.official-nginx-source-build \
+  --build-arg NGINX_IMAGE=nginx:mainline-alpine \
+  --build-arg MODULE_REPO=https://github.com/cnkang/nginx-markdown-for-agents.git \
+  --build-arg MODULE_REF=main \
+  -t nginx-markdown:mainline-alpine \
+  .
+
+# stable
+docker build \
+  -f examples/docker/Dockerfile.official-nginx-source-build \
+  --build-arg NGINX_IMAGE=nginx:stable \
+  --build-arg MODULE_REPO=https://github.com/cnkang/nginx-markdown-for-agents.git \
+  --build-arg MODULE_REF=main \
+  -t nginx-markdown:stable \
+  .
+
+# stable-alpine
+docker build \
+  -f examples/docker/Dockerfile.official-nginx-source-build \
+  --build-arg NGINX_IMAGE=nginx:stable-alpine \
+  --build-arg MODULE_REPO=https://github.com/cnkang/nginx-markdown-for-agents.git \
+  --build-arg MODULE_REF=main \
+  -t nginx-markdown:stable-alpine \
+  .
+```
+
+Run and verify behavior:
+
+```bash
+docker run --rm -p 8080:80 nginx-markdown:mainline
+
+# markdown variant
+curl -sD - -o /dev/null -H "Accept: text/markdown" http://127.0.0.1:8080/
+
+# html variant remains unchanged
+curl -sD - -o /dev/null -H "Accept: text/html" http://127.0.0.1:8080/
+```
+
 ### Installation from Source
 
 If you use a custom NGINX build, or a platform not supported by the pre-compiled binaries, follow the instructions below to compile from source.

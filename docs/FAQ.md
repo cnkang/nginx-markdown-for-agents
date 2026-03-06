@@ -62,7 +62,20 @@ However, NGINX dynamic modules are version-specific:
 
 ### Does it work with Docker?
 
-Yes. The usual pattern is to add the published dynamic module or a source build step to your image, then load it from `nginx.conf`. This repository currently ships NGINX configuration examples rather than Docker-specific image templates.
+Yes. The usual pattern is to add the published dynamic module or a source build step to your image, then load it from `nginx.conf`.
+
+This repository now ships an official-image source-build template:
+- `examples/docker/Dockerfile.official-nginx-source-build`
+
+It is designed for the common official tags:
+- `nginx:mainline`
+- `nginx:mainline-alpine`
+- `nginx:stable`
+- `nginx:stable-alpine`
+
+The Dockerfile clones this repository in the build stage, compiles the module there, and then copies the built module into a clean official `nginx` runtime image.
+
+See [Installation Guide](guides/INSTALLATION.md) for build and verification commands.
 
 ---
 
