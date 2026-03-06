@@ -46,6 +46,7 @@ AI agent     -> Accept: text/markdown  -> Markdown
 | Minimal application change | NGINX-side enablement with per-path control |
 | Safe rollout | Fail-open mode, size limits, timeouts, and metrics |
 | Cache-aware behavior | Variant `ETag`, `Vary: Accept`, and conditional-request support |
+| Flexible configuration | Variable-driven per-request control and authentication policies |
 
 ## Quick Start
 
@@ -135,6 +136,8 @@ It is a weaker fit if you:
 | Security sanitization | Applies XSS, XXE, and SSRF-oriented protections in the converter |
 | Optional metadata | Supports token estimates and YAML front matter |
 | Metrics endpoint | Exposes module conversion counters for operations |
+| Variable-driven config | Use NGINX variables for per-request conversion control |
+| Authentication-aware | Configurable policies for authenticated requests with cache control |
 
 ## How It Works
 
@@ -238,24 +241,46 @@ components/
   nginx-module/        NGINX filter module and NGINX-facing tests
   rust-converter/      HTML-to-Markdown engine and FFI layer
 docs/                  User, operator, testing, and architecture docs
-examples/nginx-configs/ Example configurations
+  architecture/        System design, ADRs, and config behavior maps
+  features/            Implementation details for specific features
+  guides/              Installation, configuration, deployment, and operations
+  project/             Project status and roadmap
+  testing/             Testing strategy and references
+examples/
+  docker/              Docker build examples and configurations
+  nginx-configs/       Example NGINX configurations
+tests/                 Top-level test corpus and shared test resources
 tools/                 Installers, CI scripts, and developer tooling
+  build_release/       Release build automation
+  ci/                  Continuous integration scripts
+  corpus/              Test corpus generation tools
+  docs/                Documentation tooling
+  e2e/                 End-to-end testing utilities
+.github/workflows/     CI/CD pipeline definitions
 Makefile               Top-level build and test entrypoints
 ```
 
 ## Roadmap
 
-Current release focus:
+Current release (0.2.0):
 
-- stable HTML-to-Markdown conversion in the NGINX request path
-- cache-aware response handling and conditional requests
-- operational safety features such as limits, sanitization, and metrics
+- Variable-driven configuration support
+- Enhanced installation tooling
+- Comprehensive documentation refresh
+- Hardened CI/CD pipeline
 
-Near-term areas of improvement:
+Near-term focus:
 
-- more production-scale benchmarking
-- more deployment validation across environments
-- future exploration of streaming-oriented conversion approaches
+- Production-scale benchmarking and performance profiling
+- Deployment validation across diverse environments
+- Community feedback integration
+- Performance optimization opportunities
+
+Future exploration:
+
+- Streaming-oriented conversion approaches for large documents
+- Additional Markdown flavors and output formats
+- Enhanced metrics and observability features
 
 ## License
 

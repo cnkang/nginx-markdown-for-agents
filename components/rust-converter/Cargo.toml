@@ -5,7 +5,7 @@ edition = "2024"
 authors = ["NGINX Markdown for Agents Contributors"]
 description = "Rust-based HTML to Markdown conversion engine for NGINX"
 license = "BSD-2-Clause"
-repository = "https://github.com/example/nginx-markdown-for-agents"
+repository = "https://github.com/cnkang/nginx-markdown-for-agents"
 
 [lib]
 # Build as both staticlib (for NGINX linking), cdylib (for testing), and rlib (for examples/tests)
