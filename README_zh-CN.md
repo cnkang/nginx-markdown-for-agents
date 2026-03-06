@@ -46,6 +46,7 @@ AI Agent     -> Accept: text/markdown  -> Markdown
 | 尽量少动应用层 | 在 NGINX 侧按路径、按站点启用 |
 | 可控上线 | 失败透传、大小限制、超时限制和指标 |
 | 更符合 HTTP 语义的缓存行为 | 变体 `ETag`、`Vary: Accept` 与条件请求支持 |
+| 灵活的配置 | 变量驱动的按请求控制与认证策略 |
 
 ## 快速上手
 第一次试用只要三步：
@@ -134,6 +135,8 @@ curl -sD - -o /dev/null -H "Accept: text/html" http://localhost/docs/
 | 安全清洗 | 在转换器中处理 XSS、XXE、SSRF 相关风险 |
 | 可选元数据 | 支持 token 估算与 YAML front matter |
 | 指标端点 | 提供转换计数等运行指标 |
+| 变量驱动配置 | 使用 NGINX 变量实现按请求的转换控制 |
+| 认证感知 | 可配置的认证请求策略与缓存控制 |
 
 ## 工作原理
 
@@ -237,24 +240,46 @@ components/
   nginx-module/        NGINX 过滤模块与 NGINX 侧测试
   rust-converter/      HTML 到 Markdown 的转换引擎与 FFI 层
 docs/                  用户、运维、测试与架构文档
-examples/nginx-configs/ 示例配置
+  architecture/        系统设计、ADR 与配置行为映射
+  features/            具体功能的实现细节
+  guides/              安装、配置、部署与运维指南
+  project/             项目状态与路线图
+  testing/             测试策略与参考文档
+examples/
+  docker/              Docker 构建示例与配置
+  nginx-configs/       NGINX 配置示例
+tests/                 顶层测试语料库与共享测试资源
 tools/                 安装脚本、CI 脚本与开发工具
+  build_release/       发布构建自动化
+  ci/                  持续集成脚本
+  corpus/              测试语料生成工具
+  docs/                文档工具
+  e2e/                 端到端测试工具
+.github/workflows/     CI/CD 流水线定义
 Makefile               顶层构建与测试入口
 ```
 
 ## 路线方向
 
-当前版本重点：
+当前版本 (0.2.0)：
 
-- 在 NGINX 请求路径里稳定完成 HTML 到 Markdown 转换
-- 处理缓存变体与条件请求
-- 提供资源限制、安全清洗和指标等运行保障
+- 变量驱动的配置支持
+- 增强的安装工具
+- 全面的文档更新
+- 强化的 CI/CD 流水线
 
-接下来会继续加强：
+近期重点：
 
-- 更贴近生产环境的性能基准
-- 更多部署环境下的验证
-- 对流式转换方案的持续探索
+- 生产规模的性能基准测试与性能分析
+- 多样化环境下的部署验证
+- 社区反馈整合
+- 性能优化机会
+
+未来探索：
+
+- 大文档的流式转换方案
+- 更多 Markdown 风格与输出格式
+- 增强的指标与可观测性功能
 
 ## 许可证
 
