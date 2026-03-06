@@ -80,15 +80,27 @@ jobs:
 
       - name: Resolve source clone target
         id: source
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_REPO: ${{ github.event.pull_request.head.repo.clone_url || '' }}
+          PR_REF: ${{ github.event.pull_request.head.ref || '' }}
+          PR_SHA: ${{ github.event.pull_request.head.sha || '' }}
+          DEFAULT_REPO: ${{ github.server_url }}/${{ github.repository }}.git
+          DEFAULT_REF: ${{ github.ref_name }}
+          DEFAULT_SHA: ${{ github.sha }}
         run: |
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            echo "repo=${{ github.event.pull_request.head.repo.clone_url }}" >> "$GITHUB_OUTPUT"
-            echo "ref=${{ github.event.pull_request.head.ref }}" >> "$GITHUB_OUTPUT"
-            echo "sha=${{ github.event.pull_request.head.sha }}" >> "$GITHUB_OUTPUT"
+          if [[ "${EVENT_NAME}" == "pull_request" ]]; then
+            {
+              printf 'repo=%s\n' "${PR_REPO}"
+              printf 'ref=%s\n' "${PR_REF}"
+              printf 'sha=%s\n' "${PR_SHA}"
+            } >> "$GITHUB_OUTPUT"
           else
-            echo "repo=${{ github.server_url }}/${{ github.repository }}.git" >> "$GITHUB_OUTPUT"
-            echo "ref=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
-            echo "sha=${{ github.sha }}" >> "$GITHUB_OUTPUT"
+            {
+              printf 'repo=%s\n' "${DEFAULT_REPO}"
+              printf 'ref=%s\n' "${DEFAULT_REF}"
+              printf 'sha=%s\n' "${DEFAULT_SHA}"
+            } >> "$GITHUB_OUTPUT"
           fi
 
       - name: Build from source on official nginx base
@@ -107,16 +119,24 @@ jobs:
           cache-to: type=gha,mode=max,scope=official-nginx-docker-${{ matrix.nginx_tag }}-${{ matrix.arch }}
 
       - name: Verify runtime behavior
+        env:
+          IMAGE_NAME: nginx-markdown-official-check:${{ matrix.nginx_tag }}-${{ matrix.arch }}
+          JOB_NGINX_TAG: ${{ matrix.nginx_tag }}
+          MODULE_REPO: ${{ steps.source.outputs.repo }}
+          MODULE_REF: ${{ steps.source.outputs.ref }}
+          MODULE_SHA: ${{ steps.source.outputs.sha }}
+          ARTIFACT_DIR: ${{ runner.temp }}/official-nginx-docker/${{ matrix.nginx_tag }}-${{ matrix.arch }}
+          JOB_PORT: ${{ matrix.port }}
         run: |
           bash ./tools/ci/verify_official_nginx_docker.sh \
             --skip-build \
-            --image-name "nginx-markdown-official-check:${{ matrix.nginx_tag }}-${{ matrix.arch }}" \
-            --nginx-tag "${{ matrix.nginx_tag }}" \
-            --module-repo "${{ steps.source.outputs.repo }}" \
-            --module-ref "${{ steps.source.outputs.ref }}" \
-            --module-sha "${{ steps.source.outputs.sha }}" \
-            --artifact-dir "${{ runner.temp }}/official-nginx-docker/${{ matrix.nginx_tag }}-${{ matrix.arch }}" \
-            --port "${{ matrix.port }}"
+            --image-name "${IMAGE_NAME}" \
+            --nginx-tag "${JOB_NGINX_TAG}" \
+            --module-repo "${MODULE_REPO}" \
+            --module-ref "${MODULE_REF}" \
+            --module-sha "${MODULE_SHA}" \
+            --artifact-dir "${ARTIFACT_DIR}" \
+            --port "${JOB_PORT}"
 
       - name: Upload failure artifacts
         if: failure()
