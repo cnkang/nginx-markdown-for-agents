@@ -45,7 +45,7 @@ The current runtime script provides direct end-to-end coverage for:
 - core content negotiation and conversion path
 - passthrough behavior
 - configuration inheritance and override behavior
-- authenticated content policy handling
+- authenticated-request policy handling
 - variable-driven `markdown_filter` resolution behavior
 
 Additional scenarios (for example conditional requests, range bypass, chunked/streaming edge paths) are covered by other tests and can be expanded in this runtime suite later.

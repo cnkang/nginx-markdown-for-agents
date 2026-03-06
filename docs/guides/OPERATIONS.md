@@ -35,6 +35,7 @@ This operational guide provides procedures for monitoring, troubleshooting, tuni
 - This guide includes example commands, sample metrics, and suggested thresholds. Validate them in staging before production use.
 - Metric field names in this guide should match the current metrics endpoint implementation in `components/nginx-module/src/ngx_http_markdown_filter_module.c`.
 - The built-in metrics endpoint returns a human-readable plain-text report or a JSON object (selected by `Accept` header); it is not a native Prometheus exposition endpoint.
+- For “why this request took a specific branch,” use [../architecture/REQUEST_LIFECYCLE.md](../architecture/REQUEST_LIFECYCLE.md) and [../architecture/CONFIG_BEHAVIOR_MAP.md](../architecture/CONFIG_BEHAVIOR_MAP.md) alongside this runbook.
 
 ### Terminology and Command Conventions
 
@@ -70,6 +71,17 @@ The module exposes metrics via the `markdown_metrics` endpoint. Configure monito
 | `input_bytes` | Total input bytes processed | Cumulative counter field | N/A (informational) |
 | `output_bytes` | Total output bytes generated | Cumulative counter field | N/A (informational) |
 
+#### Decompression Metrics
+
+| Metric | Description | Type | Alert Threshold |
+|--------|-------------|------|-----------------|
+| `decompressions_attempted` | Responses decompressed before conversion | Cumulative counter field | N/A (informational) |
+| `decompressions_succeeded` | Successful decompressions | Cumulative counter field | N/A (informational) |
+| `decompressions_failed` | Failed decompressions | Cumulative counter field | > 1% of decompression attempts |
+| `decompressions_gzip` | Successful gzip decompressions | Cumulative counter field | N/A (informational) |
+| `decompressions_deflate` | Successful deflate decompressions | Cumulative counter field | N/A (informational) |
+| `decompressions_brotli` | Successful brotli decompressions | Cumulative counter field | N/A (informational) |
+
 #### Derived Metrics
 
 Calculate these metrics from the raw counters:
@@ -86,6 +98,9 @@ size_reduction = ((input_bytes - output_bytes) / input_bytes) * 100
 
 # Success rate
 success_rate = (conversions_succeeded / conversions_attempted) * 100
+
+# Decompression success rate
+decompression_success_rate = (decompressions_succeeded / decompressions_attempted) * 100
 ```
 
 
@@ -136,7 +151,13 @@ Performance:
   "failures_system": 5,
   "conversion_time_sum_ms": 45000,
   "input_bytes": 52428800,
-  "output_bytes": 15728640
+  "output_bytes": 15728640,
+  "decompressions_attempted": 210,
+  "decompressions_succeeded": 205,
+  "decompressions_failed": 5,
+  "decompressions_gzip": 160,
+  "decompressions_deflate": 25,
+  "decompressions_brotli": 20
 }
 ```
 
@@ -169,6 +190,9 @@ rate(conversions_succeeded[1m])
 
 # Size reduction percentage (proxy for token reduction trend)
 (1 - (rate(output_bytes[5m]) / rate(input_bytes[5m]))) * 100
+
+# Decompression failure rate
+rate(decompressions_failed[5m]) / rate(decompressions_attempted[5m]) * 100
 ```
 
 ---
@@ -957,7 +981,7 @@ cp -r /usr/local/nginx/conf /usr/local/nginx/conf.backup
 
 ```bash
 # Download new version
-git clone https://github.com/example/nginx-markdown-for-agents.git
+git clone https://github.com/cnkang/nginx-markdown-for-agents.git
 cd nginx-markdown-for-agents
 git checkout v1.1.0  # New version
 
@@ -1541,7 +1565,9 @@ curl -sD - -o /dev/null -H "Accept: text/markdown" http://localhost/test
 - **Automatic Decompression:** [../features/AUTOMATIC_DECOMPRESSION.md](../features/AUTOMATIC_DECOMPRESSION.md)
 - **E2E Tests:** [../testing/E2E_TESTS.md](../testing/E2E_TESTS.md)
 - **Requirements Traceability:** [../project/PROJECT_STATUS.md](../project/PROJECT_STATUS.md)
-- **Architecture Design:** [../architecture/REPOSITORY_STRUCTURE.md](../architecture/REPOSITORY_STRUCTURE.md)
+- **Architecture Index:** [../architecture/README.md](../architecture/README.md)
+- **Request Lifecycle:** [../architecture/REQUEST_LIFECYCLE.md](../architecture/REQUEST_LIFECYCLE.md)
+- **Configuration to Behavior Map:** [../architecture/CONFIG_BEHAVIOR_MAP.md](../architecture/CONFIG_BEHAVIOR_MAP.md)
 
 ---
 

@@ -4,6 +4,8 @@
 
 This document describes the configuration structure used by the NGINX Markdown filter module.
 
+It is an implementation reference for the merged configuration object in code. For public directive syntax and examples, use `docs/guides/CONFIGURATION.md`.
+
 ## Configuration Structure
 
 The `ngx_http_markdown_conf_t` structure holds all configuration directives for the Markdown filter module. It supports NGINX's configuration inheritance model (http, server, location contexts).
@@ -26,8 +28,10 @@ typedef struct {
     ngx_array_t *auth_cookies;         /* markdown_auth_cookies patterns (default: NULL) */
     ngx_flag_t   generate_etag;        /* markdown_etag on|off (default: on) */
     ngx_uint_t   conditional_requests; /* markdown_conditional_requests mode (default: full_support) */
+    ngx_uint_t   log_verbosity;        /* markdown_log_verbosity error|warn|info|debug (default: info) */
     ngx_flag_t   buffer_chunked;       /* markdown_buffer_chunked on|off (default: on) */
     ngx_array_t *stream_types;         /* markdown_stream_types exclusion list (default: NULL) */
+    ngx_flag_t   auto_decompress;      /* internal decompression toggle (default: on) */
 } ngx_http_markdown_conf_t;
 ```
 
@@ -74,8 +78,14 @@ typedef struct {
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `generate_etag` | `ngx_flag_t` | `1` (on) | Generate ETags for Markdown variants |
+| `generate_etag` | `ngx_flag_t` | `1` (on) | Generate ETags for Markdown responses |
 | `conditional_requests` | `ngx_uint_t` | `FULL_SUPPORT` | Conditional request mode: full_support, if_modified_since_only, or disabled |
+
+### Observability
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `log_verbosity` | `ngx_uint_t` | `INFO` | Module-local log threshold for module-generated messages |
 
 ### Streaming & Buffering
 
@@ -83,6 +93,12 @@ typedef struct {
 |-------|------|---------|-------------|
 | `buffer_chunked` | `ngx_flag_t` | `1` (on) | Buffer and convert chunked responses |
 | `stream_types` | `ngx_array_t*` | `NULL` | Content types to exclude from conversion (e.g., text/event-stream) |
+
+### Internal Runtime Fields
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `auto_decompress` | `ngx_flag_t` | `1` (on) | Internal merged flag used by the decompression path |
 
 ## Configuration Constants
 
@@ -115,6 +131,15 @@ typedef struct {
 #define NGX_HTTP_MARKDOWN_CONDITIONAL_DISABLED             2  /* No conditional request support */
 ```
 
+### log_verbosity Values
+
+```c
+#define NGX_HTTP_MARKDOWN_LOG_ERROR  0  /* Only error/critical */
+#define NGX_HTTP_MARKDOWN_LOG_WARN   1  /* Warnings and above */
+#define NGX_HTTP_MARKDOWN_LOG_INFO   2  /* Informational and above */
+#define NGX_HTTP_MARKDOWN_LOG_DEBUG  3  /* Debug and above */
+```
+
 ## Configuration Lifecycle
 
 ### Creation (`ngx_http_markdown_create_conf`)
@@ -142,12 +167,14 @@ All default values are applied during configuration merging:
 - **token_estimate**: `0` (off) - Optional feature
 - **front_matter**: `0` (off) - Optional feature
 - **on_wildcard**: `0` (off) - Conservative default
-- **auth_policy**: `ALLOW` - Allow authenticated content conversion
+- **auth_policy**: `ALLOW` - Allow conversion of authenticated requests
 - **auth_cookies**: `NULL` - No patterns configured
 - **generate_etag**: `1` (on) - Enable proper caching
 - **conditional_requests**: `FULL_SUPPORT` - Full HTTP semantics
+- **log_verbosity**: `INFO` - Informational module logs by default
 - **buffer_chunked**: `1` (on) - Handle chunked responses
 - **stream_types**: `NULL` - No exclusions by default
+- **auto_decompress**: `1` (on) - Internal decompression path enabled by default
 
 ## Requirements Satisfied
 
@@ -157,9 +184,10 @@ This implementation satisfies the following requirements:
 - **FR-12.2**: Secure defaults for all configuration parameters
 - **FR-12.6**: Configuration inheritance and override support
 
-## Next Steps
+## Notes
 
-Task 12.2 will implement the directive handlers that parse and validate these configuration values from the NGINX configuration file.
+- `auto_decompress` is part of the merged runtime configuration object, but public docs currently describe decompression as built-in behavior rather than as a standalone documented directive.
+- This page should track the current structure in `components/nginx-module/src/ngx_http_markdown_filter_module.h` rather than older task-plan wording.
 
 ## Files Modified
 

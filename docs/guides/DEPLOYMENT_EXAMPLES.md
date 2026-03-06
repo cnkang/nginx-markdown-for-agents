@@ -27,7 +27,7 @@ http {
 
         location /docs/ {
             markdown_filter on;
-            # Ask upstream for uncompressed HTML to simplify conversion
+            # Optional for a first rollout: ask upstream for uncompressed HTML
             proxy_set_header Accept-Encoding "";
             proxy_pass http://backend;
         }
@@ -215,7 +215,7 @@ http {
 }
 ```
 
-If you are using a reverse proxy upstream instead of PHP-FPM, add `proxy_set_header Accept-Encoding "";` on converted locations so the upstream returns uncompressed HTML.
+If you are using a reverse proxy upstream instead of PHP-FPM, `proxy_set_header Accept-Encoding "";` is still a useful first-step simplification, but it is optional. The module can automatically decompress upstream `gzip`, `br`, and `deflate` responses when you keep compression enabled end to end.
 
 ### Ready-to-Use Configuration Templates
 

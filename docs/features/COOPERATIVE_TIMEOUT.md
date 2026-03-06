@@ -4,6 +4,8 @@
 
 The NGINX Markdown for Agents converter implements a **cooperative timeout mechanism** to protect against resource exhaustion from slow or malicious HTML conversions. This mechanism provides timeout enforcement without thread spawning, making it compatible with NGINX's event-driven worker model.
 
+This document focuses on the converter-side implementation. For user-facing directive syntax and deployment tuning, use `docs/guides/CONFIGURATION.md`.
+
 ## Design Principles
 
 ### Cooperative vs. Preemptive
@@ -121,32 +123,14 @@ markdown_convert(handle, html, html_len, &options, &result);
 
 If `timeout_ms = 0`, no timeout is enforced.
 
-## Configuration Examples
+## Public Configuration Surface
 
-### NGINX Configuration
+At the NGINX layer, this mechanism is exercised through `markdown_timeout`. The converter receives that value through the FFI boundary as `timeout_ms`.
 
-```nginx
-# Conservative timeout (default: 5 seconds)
-markdown_timeout 5s;
+Keep directive syntax, examples, and rollout choices in:
 
-# Generous timeout for complex pages
-markdown_timeout 10s;
-
-# Very short timeout for simple pages
-markdown_timeout 1s;
-
-# No timeout (not recommended for production)
-markdown_timeout 0;
-```
-
-### Recommended Values
-
-| Use Case | Timeout | Rationale |
-|----------|---------|-----------|
-| **Simple pages** | 1-2 seconds | Most pages convert in < 100ms |
-| **Complex pages** | 5 seconds (default) | Handles large documents safely |
-| **Very large pages** | 10 seconds | For documentation sites, wikis |
-| **Development** | 0 (no timeout) | Easier debugging |
+- `docs/guides/CONFIGURATION.md`
+- `docs/architecture/CONFIG_BEHAVIOR_MAP.md`
 
 ## Performance Characteristics
 

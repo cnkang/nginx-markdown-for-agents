@@ -1,101 +1,89 @@
 # Documentation Guide
 
-This directory contains the primary project documentation for `nginx-markdown-for-agents`.
+This directory contains the maintained documentation for `nginx-markdown-for-agents`.
 
-## Start Here
+If you are new to the project, start with [README.md](../README.md). It explains what the module does, why you would use it, and how to verify a first deployment quickly.
 
-For most users and maintainers, begin with the repository overview and then choose a documentation section:
+Think of this directory as the maintained map behind that landing page: guides for rollout and operations, feature notes for implementation details, and testing references for validation work.
 
-- [README.md](../README.md) - project overview and quick start
-- [guides/README.md](guides/README.md) - build, installation, configuration, and operations guides
-- [project/README.md](project/README.md) - status and project-level maintenance docs
+## Choose a Starting Point
 
-Deployment-first note:
-
-- The repository `README.md` is optimized for users who want to enable and deploy the module quickly (setup patterns, verification, common production notes).
-- Use `docs/guides/` for canonical step-by-step installation, directive reference, and operations runbooks.
+| If you want to... | Start here |
+|-------------------|------------|
+| Understand the project quickly | [../README.md](../README.md) |
+| Install or deploy the module | [guides/README.md](guides/README.md) |
+| Configure directives and behavior | [guides/CONFIGURATION.md](guides/CONFIGURATION.md) |
+| Operate and troubleshoot a deployment | [guides/OPERATIONS.md](guides/OPERATIONS.md) |
+| Understand the architecture and design rationale | [architecture/README.md](architecture/README.md) |
+| Understand implementation details | [features/README.md](features/README.md) |
+| Review tests and validation references | [testing/README.md](testing/README.md) |
+| Check current status and maintenance notes | [project/README.md](project/README.md) |
 
 ## Documentation Sections
 
-### Quick Start
+### `guides/`
 
-- [README](../README.md) - Project overview and quick start
-- [FAQ](FAQ.md) - Frequently asked questions and answers
+Canonical user and operator documentation:
 
-### Guides (`docs/guides/`)
-
-User-facing and maintainer-facing operational documentation:
-
-- build and local smoke-test workflow
-- installation and NGINX integration setup
-- directive configuration reference
-- deployment examples, verification steps, and common deployment notes
-- operational monitoring and troubleshooting guidance
+- installation and deployment
+- source builds and local verification
+- directive reference
+- deployment examples and runbooks
 
 Index: [guides/README.md](guides/README.md)
 
-### Feature Documentation (`docs/features/`)
+### `features/`
 
-Detailed implementation and design notes for major features such as:
+Feature-focused technical notes for behavior that is too detailed for the top-level guides:
 
-- security controls and sanitization
+- decompression and charset handling
 - deterministic output behavior
-- timeout handling
-- token estimation
-- YAML front matter generation
-- charset detection and entity decoding
+- security protections and sanitization
+- token estimation and YAML front matter
 
 Index: [features/README.md](features/README.md)
 
-### Testing Documentation (`docs/testing/`)
+### `architecture/`
 
-Testing strategy, integration test notes, end-to-end validation, and performance baselines.
+System structure, component boundaries, and decision rationale:
+
+- runtime architecture overview
+- configuration-to-behavior mapping
+- repository structure
+- ADRs for major technical choices
+
+Index: [architecture/README.md](architecture/README.md)
+
+### `testing/`
+
+Test strategy and verification references:
+
+- integration and E2E coverage
+- directive validation
+- decompression validation
+- performance baselines
 
 Index: [testing/README.md](testing/README.md)
 
-### Archive (`docs/archive/`)
+### `project/`
 
-`docs/archive/` is reserved for local or historical process documentation.
+Project-level status and maintenance-oriented references.
 
-Important notes:
+Index: [project/README.md](project/README.md)
 
-- The archive is intentionally excluded by `.gitignore` in this repository.
-- A fresh clone may not include local archive content.
-- Do not rely on archived documents as the source of truth for current behavior.
-- Move implementation-process notes and one-off reports here when they are no longer part of the maintained documentation set.
+## Reader Paths
 
-## Duplication and Sync Policy
+- Operators and deployers: start with `guides/`
+- Readers evaluating the design: start with `architecture/`
+- Contributors changing behavior: use `guides/` plus `features/`
+- Contributors validating behavior: use `testing/`
+- Maintainers checking repository posture: use `project/`
 
-Some documents are intentionally mirrored near source code for developer convenience.
+## Documentation Rules
 
-- Canonical policy and duplicate mapping: [DOCUMENTATION_DUPLICATION_POLICY.md](DOCUMENTATION_DUPLICATION_POLICY.md)
+- Prefer stable behavior and operational guidance over transient progress notes.
+- Keep commands copy-paste friendly.
+- Link to the canonical source instead of duplicating volatile details.
+- Keep archived or historical notes out of the maintained path.
 
-## Documentation Conventions
-
-Use these conventions when updating documentation:
-
-1. Write in English.
-2. Prefer stable facts over transient progress notes.
-3. Keep operational steps executable (copy/paste friendly commands).
-4. Link to the source-of-truth document instead of duplicating volatile details.
-5. Archive process/history documents instead of keeping them in the repository root.
-
-## Terminology Conventions
-
-Use consistent terms across docs to reduce ambiguity:
-
-- **Project**: `NGINX Markdown for Agents` (the repository/project as a whole)
-- **Module**: the **NGINX Markdown filter module** (the NGINX C module component)
-- **Rust converter**: the Rust HTML-to-Markdown conversion library (`components/rust-converter`)
-- **Metrics endpoint**: the HTTP endpoint enabled by the `markdown_metrics` directive (not a Prometheus-native endpoint)
-- **Standalone/mock tests**: `components/nginx-module/tests` unit tests that do not require a system `nginx` binary
-
-## How to Choose the Right Document
-
-- Build or test locally: [guides/BUILD_INSTRUCTIONS.md](guides/BUILD_INSTRUCTIONS.md)
-- Install and integrate with NGINX: [guides/INSTALLATION.md](guides/INSTALLATION.md)
-- Configure directives: [guides/CONFIGURATION.md](guides/CONFIGURATION.md)
-- Run and operate in environments: [guides/OPERATIONS.md](guides/OPERATIONS.md)
-- Review implementation/validation status: [project/PROJECT_STATUS.md](project/PROJECT_STATUS.md)
-- Understand implementation details: [docs/features/](features/)
-- Review test strategy and validation references: [docs/testing/](testing/)
+For duplication policy and mirrored-doc rules, see [DOCUMENTATION_DUPLICATION_POLICY.md](DOCUMENTATION_DUPLICATION_POLICY.md).

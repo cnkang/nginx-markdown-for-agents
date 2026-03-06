@@ -6,18 +6,19 @@ This document describes the end-to-end (E2E) test suite for the NGINX Markdown f
 
 **Client → NGINX (proxy) → Backend Server → NGINX (filter) → Client**
 
-**Scope:** End-to-end validation with a test NGINX instance and backend server  
-**Requirements:** FR-01.1, FR-02.1-FR-02.9, FR-03.1-FR-03.7, FR-04.1-FR-04.10, FR-06.1-FR-06.4, FR-07.1-FR-07.3, FR-08.1-FR-08.3, FR-09.1-FR-09.2, FR-10.1-FR-10.3
+**Scope:** End-to-end validation with a test NGINX instance and backend server
+
+This page is a scenario and execution reference. Treat any latency or throughput values captured here as local measurements, not product guarantees. Canonical recorded numbers belong in [PERFORMANCE_BASELINES.md](PERFORMANCE_BASELINES.md).
 
 ## Differences from Integration Tests
 
 | Aspect | Integration Tests | E2E Tests |
 |--------|-------------------------|------------------|
-| **Backend** | Mock/inline responses | Real HTTP server |
+| **Backend** | Mock/inline responses | Real TLS backend service |
 | **Proxy Chain** | Direct NGINX response | NGINX → Backend → NGINX |
 | **Header Propagation** | Limited testing | Full chain validation |
 | **Network** | No network I/O | Real TCP connections |
-| **Performance** | Not measured | Latency & throughput baselines |
+| **Performance** | Not measured | Can capture local latency and throughput baselines |
 | **Concurrency** | Single requests | Concurrent load testing |
 | **Realism** | Simplified scenarios | Production-like setup |
 
@@ -25,20 +26,20 @@ This document describes the end-to-end (E2E) test suite for the NGINX Markdown f
 
 ```
 ┌─────────┐         ┌──────────────────┐         ┌─────────────┐
-│         │  HTTP   │      NGINX       │  HTTP   │   Backend   │
+│         │  HTTP   │      NGINX       │  HTTPS  │   Backend   │
 │  curl   ├────────>│  (proxy+filter)  ├────────>│   Server    │
 │ Client  │<────────┤   Port 8889      │<────────┤  Port 9999  │
 │         │         └──────────────────┘         └─────────────┘
-└─────────┘                                       (Python HTTP)
+└─────────┘                                       (Python TLS)
 ```
 
 ### Components
 
 1. **Test Backend Server** (`test_backend_server.py`)
-   - Simple Python HTTP server
+   - Simple Python TLS test server
    - Serves HTML content with various scenarios
-   - Configurable responses (status, headers, delays)
-   - Endpoints: /simple, /complex, /large, /error, /slow, /chunked
+   - Deterministic endpoints for proxy, conversion, and chunked-response scenarios
+   - Endpoints: /health, /simple, /complex, /large, /error, /chunked
 
 2. **NGINX Instance**
    - Configured as reverse proxy to backend
@@ -50,7 +51,7 @@ This document describes the end-to-end (E2E) test suite for the NGINX Markdown f
    - Bash script that orchestrates tests
    - Starts backend server and NGINX
    - Executes test scenarios
-   - Measures performance baselines
+   - Can capture local performance measurements
    - Reports results
 
 ## Test Scenarios
@@ -224,9 +225,7 @@ This document describes the end-to-end (E2E) test suite for the NGINX Markdown f
 
 ---
 
-### Test 8: Performance Baseline - Latency
-
-**Validates:** NFR-02.4 (Performance)
+### Test 8: Performance Reference - Latency
 
 **Scenario:**
 1. Measure latency for 10 Markdown conversion requests
@@ -239,20 +238,14 @@ This document describes the end-to-end (E2E) test suite for the NGINX Markdown f
 - Conversion overhead: (X - Y) ms
 - Overhead percentage: ((X - Y) / Y) * 100%
 
-**Acceptance Criteria:**
-- Overhead < 100ms OR
-- Overhead < 200% of passthrough latency
-
 **Validates:**
 - Conversion performance
 - Latency overhead
-- Performance baseline for monitoring
+- Local regression reference for the current environment
 
 ---
 
-### Test 9: Performance Baseline - Throughput
-
-**Validates:** NFR-02.4 (Performance)
+### Test 9: Performance Reference - Throughput
 
 **Scenario:**
 1. Use Apache Bench (ab) to send 100 requests with concurrency 10
@@ -348,9 +341,7 @@ Available endpoints:
 - `/complex` - Complex HTML with various elements
 - `/large` - Large HTML page (>1MB)
 - `/error` - 500 error response
-- `/slow` - Slow response (2s delay)
 - `/chunked` - Chunked transfer encoding
-- `/custom?status=200&body=<html>...</html>` - Custom response
 
 #### Start NGINX
 
@@ -412,49 +403,9 @@ wait
 
 ## Performance Baselines
 
-### Expected Performance Characteristics
+Use E2E measurements to compare one local run against another, or to populate [PERFORMANCE_BASELINES.md](PERFORMANCE_BASELINES.md) with real numbers captured on a stated machine and workload.
 
-Based on design goals and similar implementations:
-
-| Metric | Target | Notes |
-|--------|--------|-------|
-| **Latency Overhead** | < 50ms | For typical web pages (<100KB) |
-| **Throughput** | > 100 req/s | Single worker, simple pages |
-| **Token Reduction** | 70-85% | Compared to raw HTML |
-| **Memory Usage** | < 10MB per request | With 10MB size limit |
-| **CPU Usage** | < 100ms CPU time | Per conversion |
-
-### Baseline Documentation
-
-After running E2E tests, document baselines in `PERFORMANCE_BASELINES.md`:
-
-```markdown
-# Performance Baselines
-
-**Test Date:** 2024-01-15  
-**System:** Ubuntu 22.04, 4 CPU cores, 8GB RAM  
-**NGINX Version:** 1.24.0  
-**Rust Converter:** v0.1.0
-
-## Latency
-
-- Average latency (Markdown): 45ms
-- Average latency (HTML passthrough): 12ms
-- Conversion overhead: 33ms (275%)
-
-## Throughput
-
-- Throughput (Markdown): 120 req/s
-- Throughput (HTML passthrough): 450 req/s
-- Time per request (Markdown): 83ms
-- Time per request (HTML): 22ms
-
-## Resource Usage
-
-- Memory per request: ~2MB
-- CPU time per conversion: ~30ms
-- Peak memory usage: 50MB (10 concurrent requests)
-```
+Do not treat example values from this document as deployment promises. Hardware, NGINX build, backend behavior, document size, and concurrency all materially change the result.
 
 ## Troubleshooting
 
@@ -473,9 +424,9 @@ After running E2E tests, document baselines in `PERFORMANCE_BASELINES.md`:
 **Problem:** Backend returns unexpected responses
 
 **Solutions:**
-- Test backend directly: `curl http://localhost:9999/simple`
+- Test backend directly: `curl -sk https://localhost:9999/simple`
 - Check backend logs: `cat /tmp/backend-server.log`
-- Verify endpoint exists: `curl http://localhost:9999/health`
+- Verify endpoint exists: `curl -sk https://localhost:9999/health`
 
 ### NGINX Issues
 
@@ -496,14 +447,14 @@ After running E2E tests, document baselines in `PERFORMANCE_BASELINES.md`:
 - Verify markdown_filter is enabled in config
 - Check response is eligible (GET/HEAD, 200, text/html)
 - Check NGINX error log for conversion failures
-- Verify backend returns text/html: `curl -I http://localhost:9999/simple`
+- Verify backend returns text/html: `curl -skI https://localhost:9999/simple`
 
 ---
 
 **Problem:** Proxy connection fails
 
 **Solutions:**
-- Verify backend is running: `curl http://localhost:9999/health`
+- Verify backend is running: `curl -sk https://localhost:9999/health`
 - Check proxy_pass configuration
 - Check firewall allows localhost connections
 - Verify backend port in NGINX config matches backend server port
@@ -528,7 +479,6 @@ After running E2E tests, document baselines in `PERFORMANCE_BASELINES.md`:
 - Check system load: `top`, `htop`
 - Verify no other processes consuming resources
 - Run tests multiple times for consistency
-- Adjust acceptance criteria if needed
 
 ---
 
@@ -540,67 +490,21 @@ After running E2E tests, document baselines in `PERFORMANCE_BASELINES.md`:
 - Check for resource exhaustion in logs
 - Reduce concurrency level if needed
 
-## Next Steps
-
-After E2E tests pass:
-
-1. **Document Performance Baselines**
-   - Create `PERFORMANCE_BASELINES.md`
-   - Include system specifications
-   - Document all metrics
-
-2. **Operational Testing**
-   - Test with production-like traffic patterns
-   - Validate resource usage under sustained load
-   - Test failure scenarios (backend down, network issues)
-
-3. **Security Testing**
-   - Test with malicious HTML input
-   - Validate XSS prevention
-   - Test resource exhaustion attacks
-
-4. **Documentation**
-   - Update operational guide with E2E test results
-   - Document known limitations
-   - Provide troubleshooting procedures
-
 ## References
 
-- Requirements: `.kiro/specs/nginx-markdown-for-agents/requirements.md`
-- Design: `.kiro/specs/nginx-markdown-for-agents/design.md`
 - Integration Tests: `docs/testing/INTEGRATION_TESTS.md`
 - Test Backend: `components/nginx-module/tests/e2e/test_backend_server.py`
 - Test Runner: `components/nginx-module/tests/e2e/run_e2e_tests.sh`
+- Performance Baselines: `docs/testing/PERFORMANCE_BASELINES.md`
 
-## Test Coverage Summary
+## Coverage Summary
 
-| Requirement Category | Coverage | Tests |
-|---------------------|----------|-------|
-| Content Negotiation | 100% | 1, 2 |
-| Eligibility Checking | 95% | 1, 4, 6 |
-| HTML Conversion | 90% | 1, 3 |
-| HTTP Semantics | 95% | 1, 2, 10 |
-| Header Management | 100% | 2, 10 |
-| Error Handling | 85% | 4, 5 |
-| Performance | 100% | 8, 9 |
-| Concurrency | 90% | 7 |
-| Proxy Chain | 100% | All tests |
+This suite is most useful for:
 
-**Overall E2E Coverage:** ~95% of critical paths with real backend
+- real proxy-chain validation
+- header propagation across backend and filter boundaries
+- chunked and large-response runtime behavior
+- HEAD handling and concurrency smoke coverage
+- local performance reference capture
 
-## Comparison with Integration Tests
-
-| Test Aspect | Integration Tests | E2E Tests |
-|-------------|------------------|-----------|
-| Backend | Mock/inline | Real HTTP server |
-| Realism | Medium | High |
-| Setup Complexity | Low | Medium |
-| Execution Time | Fast (~10s) | Slower (~30s) |
-| Network I/O | No | Yes |
-| Performance Testing | No | Yes |
-| Debugging | Easy | Moderate |
-| CI/CD Suitability | Excellent | Good |
-
-**Recommendation:** Run both test suites:
-- Integration tests for fast feedback during development
-- E2E tests for release validation and performance baselines
+Use [INTEGRATION_TESTS.md](INTEGRATION_TESTS.md) for faster runtime validation when you do not need the full proxy chain.

@@ -1,5 +1,9 @@
 # Frequently Asked Questions (FAQ)
 
+This document is for quick answers and orientation.
+
+For canonical directive syntax and defaults, use [Configuration Guide](guides/CONFIGURATION.md). For production diagnostics and monitoring, use [Operations Guide](guides/OPERATIONS.md). For runtime design details, use [Architecture Documentation](architecture/README.md).
+
 ## General Questions
 
 ### What is NGINX Markdown for Agents?
@@ -36,9 +40,14 @@ If your distro ships an older NGINX (for example 1.22.x or earlier), upgrade NGI
 
 ### Do I need to rebuild NGINX?
 
-Yes, you need to compile the module against your NGINX source code. The module can be built as either:
-- **Dynamic module** (recommended): Load with `load_module` directive
-- **Static module**: Compiled into NGINX binary
+Not always.
+
+- If you use one of the supported official NGINX builds and a matching release artifact exists, you can install the published dynamic module without rebuilding NGINX.
+- If you use a custom NGINX build, or there is no exact version match for your runtime, compile the module against your NGINX source tree.
+
+The module can be integrated as either:
+- **Dynamic module** (recommended): Load with `load_module`
+- **Static module**: Compile it into the NGINX binary
 
 See [Installation Guide](guides/INSTALLATION.md) for details.
 
@@ -53,7 +62,7 @@ However, NGINX dynamic modules are version-specific:
 
 ### Does it work with Docker?
 
-Yes! You can use this module in Docker containers. See the `examples/docker/` directory for Dockerfile examples (coming soon).
+Yes. The usual pattern is to add the published dynamic module or a source build step to your image, then load it from `nginx.conf`. This repository currently ships NGINX configuration examples rather than Docker-specific image templates.
 
 ---
 
@@ -70,6 +79,8 @@ http {
 }
 ```
 
+For rollout patterns and exceptions by path, see [Deployment Examples](guides/DEPLOYMENT_EXAMPLES.md).
+
 ### How do I exclude specific paths from conversion?
 
 Use `markdown_filter off;` in specific locations:
@@ -82,7 +93,9 @@ location /api/ {
 
 ### What happens if conversion fails?
 
-By default, the module uses a "fail-open" strategy (`markdown_on_error pass;`), returning the original HTML. You can change this to "fail-closed" (`markdown_on_error reject;`) to return a 502 error instead.
+By default, the module uses a fail-open strategy (`markdown_on_error pass;`), so the original eligible HTML response is returned. If you want strict behavior instead, `markdown_on_error reject;` makes failures fail-closed.
+
+For the canonical directive behavior, see [Configuration Guide](guides/CONFIGURATION.md). For the exact runtime branches, see [Request Lifecycle](architecture/REQUEST_LIFECYCLE.md).
 
 ### How do I adjust resource limits?
 
@@ -93,21 +106,22 @@ markdown_max_size 10m;    # Maximum response size
 markdown_timeout 5s;      # Maximum conversion time
 ```
 
+For defaults, examples, and tradeoffs, see [Configuration Guide](guides/CONFIGURATION.md) and [Configuration to Behavior Map](architecture/CONFIG_BEHAVIOR_MAP.md).
+
 ---
 
 ## Performance
 
 ### What is the performance impact?
 
-Typical overhead:
-- **Latency**: 20-50ms for average pages
-- **Memory**: 5-10MB per conversion
-- **CPU**: Minimal (< 5% increase)
+There is no single fixed overhead number that applies to every deployment. Performance depends on:
 
-Performance depends on:
-- Document size and complexity
-- System resources
-- Configuration settings
+- document size and complexity
+- whether upstream responses need decompression
+- enabled features such as token estimation or YAML front matter
+- system resources, cache behavior, and concurrency
+
+The current design buffers the full eligible response before conversion, so large HTML bodies are the main driver of latency and memory use. Use your own workload to establish baselines, then tune limits and rollout scope accordingly.
 
 ### How can I improve performance?
 
@@ -120,7 +134,9 @@ See [Performance Tuning](guides/OPERATIONS.md#performance-tuning) for details.
 
 ### Does it support streaming?
 
-No, the current version requires full buffering. Streaming support may be added in future versions.
+The current design requires full buffering for eligible responses before conversion. Chunked transfer responses can still be buffered and converted when `markdown_buffer_chunked on;` is enabled, but the module does not yet provide true streaming Markdown generation.
+
+See [Request Lifecycle](architecture/REQUEST_LIFECYCLE.md) and [ADR-0002](architecture/ADR/0002-full-buffering-approach.md) for the reasoning behind this design.
 
 ---
 
@@ -155,6 +171,8 @@ location / {
 }
 ```
 
+If you want the simplest first rollout, you can temporarily disable upstream compression with `proxy_set_header Accept-Encoding "";`. Once the path is verified, the module can also handle upstream `gzip`, `br`, and `deflate` responses directly.
+
 ### Does it work with CDNs?
 
 Yes, but you may need to:
@@ -164,7 +182,9 @@ Yes, but you may need to:
 
 ### What about compressed responses?
 
-The module automatically detects and decompresses upstream compressed content (gzip, brotli, deflate). No special configuration needed.
+The module automatically detects and decompresses supported upstream compressed content (`gzip`, `br`, `deflate`) as part of the conversion path.
+
+For operational guidance, see [Operations Guide](guides/OPERATIONS.md). For implementation details, see [Automatic Decompression](features/AUTOMATIC_DECOMPRESSION.md).
 
 ---
 
@@ -182,6 +202,8 @@ Common causes:
    - If map includes `text/*`, enable `markdown_on_wildcard on;`
 4. **Response not eligible**: Must be 200 status with `text/html` content type
 5. **Size limit exceeded**: Response larger than `markdown_max_size`
+
+If you need to trace the decision path rather than just the checklist, use [Request Lifecycle](architecture/REQUEST_LIFECYCLE.md) and [Configuration to Behavior Map](architecture/CONFIG_BEHAVIOR_MAP.md).
 
 ### Why is conversion failing?
 
@@ -240,16 +262,18 @@ Yes, the module includes multiple security protections:
 
 No, the module only converts HTML to Markdown. It doesn't add or expose information not already in the HTML response.
 
-### Should I convert authenticated content?
+### Should I convert authenticated requests?
 
 You can, but consider:
 - Use `markdown_auth_policy deny;` to skip authenticated requests
 - Or use `markdown_auth_policy allow;` with proper cookie detection
-- The module automatically adds `Cache-Control: private` for authenticated responses
+- The module automatically adds `Cache-Control: private` for Markdown responses generated from authenticated requests
+
+See [Configuration Guide](guides/CONFIGURATION.md) for the canonical directive semantics.
 
 ### How do I secure the metrics endpoint?
 
-Always restrict metrics to localhost:
+The handler already enforces localhost-only access. In practice, you should still keep explicit NGINX `allow`/`deny` rules on the metrics location:
 
 ```nginx
 location /markdown-metrics {
@@ -259,6 +283,8 @@ location /markdown-metrics {
     deny all;
 }
 ```
+
+For response formats, metric fields, and monitoring usage, see [Configuration Guide](guides/CONFIGURATION.md) and [Operations Guide](guides/OPERATIONS.md).
 
 ---
 
@@ -388,6 +414,7 @@ The project is organized as:
 - [Installation Guide](guides/INSTALLATION.md) - Installation steps
 - [Configuration Guide](guides/CONFIGURATION.md) - Configuration reference
 - [Operations Guide](guides/OPERATIONS.md) - Monitoring and troubleshooting
+- [Architecture Documentation](architecture/README.md) - Structure, lifecycle, and design rationale
 
 ### How do I get support?
 
@@ -423,13 +450,9 @@ Yes. Keep the copyright notice and license text in source and binary redistribut
 
 ## Roadmap
 
-### What features are planned?
+### Where should I look for future direction?
 
-See the project roadmap in [README](../README.md#roadmap) for planned features.
-
-### When will feature X be available?
-
-Check the issue tracker for feature requests and their status.
+Use the roadmap section in [README](../README.md#roadmap) for broad project direction, and check the issue tracker for current feature requests and discussion.
 
 ### Can I sponsor development?
 
@@ -437,4 +460,4 @@ Check the repository for sponsorship information (if available).
 
 ---
 
-*Last updated: February 27, 2026*
+*Last updated: March 6, 2026*

@@ -4,6 +4,8 @@
 
 This document describes the security architecture, threat model, and security measures implemented in the NGINX Markdown for Agents Rust converter. The primary security concern is **untrusted HTML input** from upstream servers that may contain malicious content.
 
+This page focuses on implementation-level defenses and threat boundaries. For operator-facing rollout, configuration, and monitoring guidance, use `docs/guides/CONFIGURATION.md` and `docs/guides/OPERATIONS.md`.
+
 ## Threat Model
 
 ### Threats Addressed
@@ -227,7 +229,7 @@ cargo fuzz run fuzz_converter
 - No file system access beyond NGINX configuration
 
 ### 2. Fail Secure
-- Default to fail-open (return original HTML) to maintain availability
+- Default to fail-open (return the original eligible HTML response) to maintain availability
 - Conversion failures do not expose internal details
 - Error messages are generic to clients, detailed in logs
 
@@ -258,8 +260,7 @@ cargo fuzz run fuzz_converter
 **DO NOT** open public GitHub issues for security vulnerabilities.
 
 Instead, please report security issues via:
-- Email: [security contact to be added]
-- Private security advisory on GitHub
+- A private security advisory on GitHub
 
 ### Response Process
 
@@ -275,44 +276,13 @@ Security updates are released as:
 - Minor releases for moderate vulnerabilities
 - Documented in CHANGELOG.md with CVE references
 
-## Security Considerations for Operators
+## Operator Follow-Through
 
-### Configuration
+The implementation details in this document feed into a few operator-facing concerns, but those concerns are maintained elsewhere:
 
-**Recommended Settings**:
-```nginx
-markdown_max_size 10m;           # Limit document size
-markdown_timeout 5s;             # Prevent slow conversions
-markdown_on_error pass;          # Fail-open for availability
-markdown_auth_policy allow;      # Allow authenticated content
-markdown_auth_cache private;     # Prevent public caching
-```
-
-**Security-Critical Directives**:
-- `markdown_max_size`: Prevents resource exhaustion
-- `markdown_timeout`: Prevents slow conversion DoS
-- `markdown_auth_cache`: Prevents sensitive data leakage
-
-### Monitoring
-
-**Security Metrics to Monitor**:
-- Conversion failure rate (sudden spikes may indicate attacks)
-- Resource limit violations (size/timeout exceeded)
-- Error classification (conversion_error vs system_error)
-
-**Log Analysis**:
-- Watch for repeated conversion failures from same source
-- Monitor for unusual HTML patterns
-- Alert on system errors (may indicate exploitation attempts)
-
-### Deployment
-
-**Best Practices**:
-1. Run NGINX workers as non-root user
-2. Use resource limits (ulimit) for NGINX processes
-3. Deploy behind WAF for additional protection
-4. Keep NGINX and module updated
-5. Monitor security advisories
+- resource limits and failure policy: `docs/guides/CONFIGURATION.md`
+- metrics, logs, and troubleshooting: `docs/guides/OPERATIONS.md`
+- request-path security boundaries and failure branches: `docs/architecture/REQUEST_LIFECYCLE.md`
 
 ## Known Limitations
 

@@ -23,15 +23,15 @@ Several implementation approaches were possible:
 
 ## Decision
 
-We will implement the HTML-to-Markdown conversion engine in Rust and integrate it with the NGINX C module via FFI (Foreign Function Interface).
+The project uses a Rust HTML-to-Markdown conversion engine integrated with the NGINX C module via FFI (Foreign Function Interface).
 
-The Rust component will:
+The Rust component:
 - Handle all HTML parsing and Markdown generation
 - Provide a C-compatible FFI interface
 - Manage its own memory safely
 - Expose a simple API for the NGINX module
 
-The NGINX module will:
+The NGINX module:
 - Handle HTTP request/response processing
 - Manage NGINX-specific concerns (configuration, logging, etc.)
 - Call into Rust via FFI for conversion

@@ -6,7 +6,7 @@ This project is a production-oriented NGINX filter module backed by a Rust HTML-
 
 ## Current Assessment (Code + Tests + Spec Tracker)
 
-As of **February 26, 2026**, the repository shows a **high level of implementation completeness** across the Rust converter and NGINX module components, with the remaining work concentrated in final validation, environment-specific integration checks, and operational hardening.
+As of **March 6, 2026**, the repository shows a **high level of implementation completeness** across the Rust converter and NGINX module components, with the remaining work concentrated in final validation, environment-specific integration checks, and operational hardening.
 
 This status is based on:
 
@@ -101,7 +101,7 @@ The main remaining work is validation-oriented rather than core implementation-o
 
 - Core operational guides exist under `docs/guides/` (`BUILD_INSTRUCTIONS.md`, `INSTALLATION.md`, `CONFIGURATION.md`, `OPERATIONS.md`)
 - Feature and testing documentation indexes exist under `docs/features/` and `docs/testing/`
-- Process/history documents have been moved to `docs/archive/` (local archive; excluded by `.gitignore`)
+- Project-level status is maintained under `docs/project/`
 
 ## Source of Truth and How to Re-Verify
 

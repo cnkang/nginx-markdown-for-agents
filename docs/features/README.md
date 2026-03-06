@@ -1,47 +1,46 @@
 # Feature Documentation
 
-This directory contains feature-focused documentation for the Rust converter and NGINX module.
+This directory contains feature-level references for the NGINX module and Rust converter.
 
-## Contents
+These documents are for readers who already understand the high-level product behavior and want to study specific implementation areas, constraints, or safety properties.
 
-- `CONFIGURATION_STRUCTURE.md` - configuration model and directive structure details
-- `AUTOMATIC_DECOMPRESSION.md` - automatic upstream decompression behavior and safeguards
-- `COOPERATIVE_TIMEOUT.md` - cooperative timeout design and behavior
-- `DETERMINISTIC_OUTPUT_IMPLEMENTATION.md` - implementation notes for deterministic output handling
-- `TOKEN_ESTIMATOR.md` - token estimation behavior and rationale
-- `YAML_FRONT_MATTER.md` - YAML front matter generation rules
-- `charset-detection.md` - charset detection cascade and fallback behavior
-- `deterministic-output.md` - deterministic output behavior overview
-- `html-entity-decoding.md` - HTML entity decoding behavior
-- `non-content-element-removal.md` - removal of non-content HTML elements
-- `security.md` - security protections (XSS, XXE, SSRF-related safeguards)
+Read this section when the top-level guides answer what to configure, but you still need to understand why the implementation behaves the way it does.
 
-## How to Use These Documents
+If you need rollout steps, operator checklists, or directive syntax, go back to:
 
-Use this section when you need implementation details that are too specific for the top-level guides.
+- [../guides/README.md](../guides/README.md) for user- and operator-facing guidance
+- [../architecture/README.md](../architecture/README.md) for runtime flow and design rationale
 
-Recommended reading paths:
+## Read by Topic
 
-- Content quality and output stability:
-  - `deterministic-output.md`
-  - `DETERMINISTIC_OUTPUT_IMPLEMENTATION.md`
-  - `html-entity-decoding.md`
-  - `non-content-element-removal.md`
-- Metadata and enrichment:
-  - `YAML_FRONT_MATTER.md`
-  - `TOKEN_ESTIMATOR.md`
-- Input handling and safety:
-  - `AUTOMATIC_DECOMPRESSION.md`
-  - `charset-detection.md`
-  - `security.md`
-- NGINX configuration internals:
-  - `CONFIGURATION_STRUCTURE.md`
+### Output quality and determinism
 
-## Maintenance Notes
+- [deterministic-output.md](deterministic-output.md)
+- [DETERMINISTIC_OUTPUT_IMPLEMENTATION.md](DETERMINISTIC_OUTPUT_IMPLEMENTATION.md)
+- [html-entity-decoding.md](html-entity-decoding.md)
+- [non-content-element-removal.md](non-content-element-removal.md)
 
-When adding a new feature document:
+### Input handling and safety
 
-1. Prefer one topic per file.
-2. Include behavior, constraints, and edge cases.
-3. Reference tests or verification docs when useful.
-4. Keep user-facing setup steps in the top-level guides instead of duplicating them here.
+- [AUTOMATIC_DECOMPRESSION.md](AUTOMATIC_DECOMPRESSION.md)
+- [charset-detection.md](charset-detection.md)
+- [security.md](security.md)
+
+### Metadata and enrichment
+
+- [TOKEN_ESTIMATOR.md](TOKEN_ESTIMATOR.md)
+- [YAML_FRONT_MATTER.md](YAML_FRONT_MATTER.md)
+
+### Configuration internals
+
+- [CONFIGURATION_STRUCTURE.md](CONFIGURATION_STRUCTURE.md)
+- [COOPERATIVE_TIMEOUT.md](COOPERATIVE_TIMEOUT.md)
+
+## What Belongs Here
+
+- behavior that is too detailed for user-facing guides
+- rationale for non-obvious implementation choices
+- edge cases, constraints, and safeguards
+- source-level structures and implementation contracts
+
+Keep setup instructions and rollout steps in [../guides/README.md](../guides/README.md) instead of duplicating them here.
