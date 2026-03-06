@@ -193,7 +193,10 @@ The project includes documentation covering:
 - [AUTOMATIC_DECOMPRESSION.md](../features/AUTOMATIC_DECOMPRESSION.md)
 - [CACHE_AWARE_RESPONSES.md](../features/CACHE_AWARE_RESPONSES.md)
 - [CONTENT_NEGOTIATION.md](../features/CONTENT_NEGOTIATION.md)
-- [SECURITY_PROTECTIONS.md](../features/SECURITY_PROTECTIONS.md)
+- [COOPERATIVE_TIMEOUT.md](../features/COOPERATIVE_TIMEOUT.md)
+- [TOKEN_ESTIMATOR.md](../features/TOKEN_ESTIMATOR.md)
+- [YAML_FRONT_MATTER.md](../features/YAML_FRONT_MATTER.md)
+- [security.md](../features/security.md)
 - Additional features under [docs/features/](../features/)
 
 ### Testing Documentation
