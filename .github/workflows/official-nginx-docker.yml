@@ -1,0 +1,127 @@
+name: Official NGINX Docker Validation
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main, master]
+    paths:
+      - "Makefile"
+      - "components/nginx-module/**"
+      - "components/rust-converter/**"
+      - "examples/docker/**"
+      - "tools/ci/verify_official_nginx_docker.sh"
+      - ".github/workflows/official-nginx-docker.yml"
+  push:
+    branches: [main, master]
+    paths:
+      - "Makefile"
+      - "components/nginx-module/**"
+      - "components/rust-converter/**"
+      - "examples/docker/**"
+      - "tools/ci/verify_official_nginx_docker.sh"
+      - ".github/workflows/official-nginx-docker.yml"
+
+permissions: {}
+
+concurrency:
+  group: official-nginx-docker-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-verify:
+    name: Build + Functional Check (${{ matrix.nginx_tag }} / ${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 75
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - nginx_tag: mainline
+            arch: amd64
+            runner: ubuntu-latest
+            port: 18080
+          - nginx_tag: mainline
+            arch: arm64
+            runner: ubuntu-24.04-arm
+            port: 18080
+          - nginx_tag: mainline-alpine
+            arch: amd64
+            runner: ubuntu-latest
+            port: 18081
+          - nginx_tag: mainline-alpine
+            arch: arm64
+            runner: ubuntu-24.04-arm
+            port: 18081
+          - nginx_tag: stable
+            arch: amd64
+            runner: ubuntu-latest
+            port: 18082
+          - nginx_tag: stable
+            arch: arm64
+            runner: ubuntu-24.04-arm
+            port: 18082
+          - nginx_tag: stable-alpine
+            arch: amd64
+            runner: ubuntu-latest
+            port: 18083
+          - nginx_tag: stable-alpine
+            arch: arm64
+            runner: ubuntu-24.04-arm
+            port: 18083
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Resolve source clone target
+        id: source
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            echo "repo=${{ github.event.pull_request.head.repo.clone_url }}" >> "$GITHUB_OUTPUT"
+            echo "ref=${{ github.event.pull_request.head.ref }}" >> "$GITHUB_OUTPUT"
+            echo "sha=${{ github.event.pull_request.head.sha }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "repo=${{ github.server_url }}/${{ github.repository }}.git" >> "$GITHUB_OUTPUT"
+            echo "ref=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+            echo "sha=${{ github.sha }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build from source on official nginx base
+        uses: docker/build-push-action@f2a1d5e99d037542a71f64918e516c093c6f3fc4 # v6
+        with:
+          context: .
+          file: ./examples/docker/Dockerfile.official-nginx-source-build
+          load: true
+          tags: nginx-markdown-official-check:${{ matrix.nginx_tag }}-${{ matrix.arch }}
+          build-args: |
+            NGINX_IMAGE=nginx:${{ matrix.nginx_tag }}
+            MODULE_REPO=${{ steps.source.outputs.repo }}
+            MODULE_REF=${{ steps.source.outputs.ref }}
+            MODULE_SHA=${{ steps.source.outputs.sha }}
+          cache-from: type=gha,scope=official-nginx-docker-${{ matrix.nginx_tag }}-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=official-nginx-docker-${{ matrix.nginx_tag }}-${{ matrix.arch }}
+
+      - name: Verify runtime behavior
+        run: |
+          bash ./tools/ci/verify_official_nginx_docker.sh \
+            --skip-build \
+            --image-name "nginx-markdown-official-check:${{ matrix.nginx_tag }}-${{ matrix.arch }}" \
+            --nginx-tag "${{ matrix.nginx_tag }}" \
+            --module-repo "${{ steps.source.outputs.repo }}" \
+            --module-ref "${{ steps.source.outputs.ref }}" \
+            --module-sha "${{ steps.source.outputs.sha }}" \
+            --artifact-dir "${{ runner.temp }}/official-nginx-docker/${{ matrix.nginx_tag }}-${{ matrix.arch }}" \
+            --port "${{ matrix.port }}"
+
+      - name: Upload failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
+        with:
+          name: official-nginx-docker-${{ matrix.nginx_tag }}-${{ matrix.arch }}-failure
+          path: ${{ runner.temp }}/official-nginx-docker/${{ matrix.nginx_tag }}-${{ matrix.arch }}
+          if-no-files-found: ignore

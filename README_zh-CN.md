@@ -64,6 +64,7 @@ sudo nginx -t && sudo nginx -s reload
 安装脚本会识别本机 NGINX 版本，下载匹配的模块制品，并为常见官方 NGINX 构建完成基础 `load_module` 集成。
 
 如果你使用自编译 NGINX 或希望从源码构建，请从 [安装指南](docs/guides/INSTALLATION.md) 开始。
+如果你希望基于官方 NGINX Docker 镜像进行源码构建，请参考 `examples/docker/Dockerfile.official-nginx-source-build` 以及 [docs/guides/INSTALLATION.md](docs/guides/INSTALLATION.md) 里的 Docker 小节。
 
 ### 2. 在一个路由上开启 Markdown
 

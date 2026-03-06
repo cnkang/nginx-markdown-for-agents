@@ -65,6 +65,7 @@ sudo nginx -t && sudo nginx -s reload
 The installer detects the local NGINX version, downloads the matching module artifact, and wires up the basic `load_module` integration for common official NGINX builds.
 
 Building from source or using a custom NGINX build? Start with the [Installation Guide](docs/guides/INSTALLATION.md).
+For official NGINX Docker image source builds, see `examples/docker/Dockerfile.official-nginx-source-build` and the Docker section in [docs/guides/INSTALLATION.md](docs/guides/INSTALLATION.md).
 
 ### 2. Enable Markdown on one route
 
