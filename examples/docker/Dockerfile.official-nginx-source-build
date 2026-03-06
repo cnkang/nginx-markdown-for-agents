@@ -103,46 +103,44 @@ COPY --from=build /out/ngx_http_markdown_filter_module.so /etc/nginx/modules/ngx
 COPY --from=build /out/nginx-version.txt /etc/nginx/modules/ngx_http_markdown_filter_module.version
 
 RUN set -eux; \
-    cat > /etc/nginx/nginx.conf <<'EOF'
-load_module modules/ngx_http_markdown_filter_module.so;
-worker_processes auto;
-events {
-    worker_connections 1024;
-}
-http {
-    include       /etc/nginx/mime.types;
-    default_type  application/octet-stream;
-    sendfile      on;
-    keepalive_timeout 65;
-
-    server {
-        listen 80;
-        server_name _;
-        root /usr/share/nginx/html;
-
-        location / {
-            markdown_filter on;
-            markdown_on_wildcard on;
-            markdown_etag on;
-            markdown_conditional_requests full_support;
-        }
-    }
-}
-EOF
-
-RUN set -eux; \
-    cat > /usr/share/nginx/html/index.html <<'EOF'
-<!doctype html>
-<html>
-  <head>
-    <meta charset="utf-8">
-    <title>NGINX Markdown Docker Example</title>
-  </head>
-  <body>
-    <h1>Docker Example Heading</h1>
-    <p>This image compiles the markdown module from source against the official nginx image.</p>
-  </body>
-</html>
-EOF
+    printf '%s\n' \
+      'load_module modules/ngx_http_markdown_filter_module.so;' \
+      'worker_processes auto;' \
+      'events {' \
+      '    worker_connections 1024;' \
+      '}' \
+      'http {' \
+      '    include       /etc/nginx/mime.types;' \
+      '    default_type  application/octet-stream;' \
+      '    sendfile      on;' \
+      '    keepalive_timeout 65;' \
+      '' \
+      '    server {' \
+      '        listen 80;' \
+      '        server_name _;' \
+      '        root /usr/share/nginx/html;' \
+      '' \
+      '        location / {' \
+      '            markdown_filter on;' \
+      '            markdown_on_wildcard on;' \
+      '            markdown_etag on;' \
+      '            markdown_conditional_requests full_support;' \
+      '        }' \
+      '    }' \
+      '}' \
+      > /etc/nginx/nginx.conf; \
+    printf '%s\n' \
+      '<!doctype html>' \
+      '<html>' \
+      '  <head>' \
+      '    <meta charset="utf-8">' \
+      '    <title>NGINX Markdown Docker Example</title>' \
+      '  </head>' \
+      '  <body>' \
+      '    <h1>Docker Example Heading</h1>' \
+      '    <p>This image compiles the markdown module from source against the official nginx image.</p>' \
+      '  </body>' \
+      '</html>' \
+      > /usr/share/nginx/html/index.html
 
 EXPOSE 80

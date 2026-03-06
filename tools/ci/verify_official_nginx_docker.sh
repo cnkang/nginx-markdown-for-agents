@@ -119,11 +119,16 @@ build_image() {
     -f "${WORKSPACE_ROOT}/examples/docker/Dockerfile.official-nginx-source-build" \
     -t "${IMAGE_NAME}" \
     "${WORKSPACE_ROOT}"
+
+  return 0
 }
 
 sanitize_tag() {
+  local raw_tag="$1"
   # Force C collation and keep "-" last so tag normalization is locale-stable.
-  printf '%s' "$1" | LC_ALL=C tr -c '[:alnum:].:_-' '-'
+  printf '%s' "${raw_tag}" | LC_ALL=C tr -c '[:alnum:].:_-' '-'
+
+  return 0
 }
 
 append_step_summary() {
@@ -183,14 +188,12 @@ cleanup() {
     append_step_summary "failed"
   fi
 
-  if [[ -n "${CONTAINER_NAME}" ]]; then
-    if docker ps -a --format '{{.Names}}' | grep -qx "${CONTAINER_NAME}"; then
-      if [[ $rc -ne 0 ]]; then
-        echo "==> Container logs (${CONTAINER_NAME})" >&2
-        docker logs "${CONTAINER_NAME}" >&2 || true
-      fi
-      docker rm -f "${CONTAINER_NAME}" >/dev/null 2>&1 || true
+  if [[ -n "${CONTAINER_NAME}" ]] && docker ps -a --format '{{.Names}}' | grep -qx "${CONTAINER_NAME}"; then
+    if [[ $rc -ne 0 ]]; then
+      echo "==> Container logs (${CONTAINER_NAME})" >&2
+      docker logs "${CONTAINER_NAME}" >&2 || true
     fi
+    docker rm -f "${CONTAINER_NAME}" >/dev/null 2>&1 || true
   fi
 
   if [[ "${KEEP_IMAGE}" -ne 1 && -n "${IMAGE_NAME}" ]]; then
