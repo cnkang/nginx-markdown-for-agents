@@ -4,125 +4,274 @@
 
 This project is a production-oriented NGINX filter module backed by a Rust HTML-to-Markdown converter (via FFI). It performs HTTP content negotiation and returns Markdown when clients request `Accept: text/markdown`.
 
-## Current Assessment (Code + Tests + Spec Tracker)
+## Current Assessment
 
-As of **March 6, 2026**, the repository shows a **high level of implementation completeness** across the Rust converter and NGINX module components, with the remaining work concentrated in final validation, environment-specific integration checks, and operational hardening.
+As of **March 6, 2026**, the project is at **version 0.2.0**. Core features are implemented and tested. The codebase includes unit, integration, and E2E tests, along with documentation covering installation, configuration, and operations.
 
-This status is based on:
+This assessment is based on:
 
-- repository code inspection (Rust and C implementation)
-- local test execution in this workspace (Rust tests and multiple standalone/mock NGINX-module test targets)
-- the spec task tracker in `.kiro/specs/nginx-markdown-for-agents/tasks.md`
+- Implementation of core features and runtime configurability
+- Test coverage across unit, integration, E2E, and property-based tests
+- Documentation suite covering installation, configuration, operations, and architecture
+- CI/CD pipeline with automated builds and security scanning
+- Release artifacts and installation tooling
 
-### Spec Checklist (Raw Marker Snapshot)
+## Release 0.2.0 Highlights
 
-The spec task file currently contains many checklist items across implementation tasks, optional property tests, and checkpoints. Raw marker counts are **not** a reliable linear completion percentage, but they are useful for trend/status visibility.
+The latest release (0.2.0, March 6, 2026) includes:
 
-Current raw counts from `.kiro/specs/nginx-markdown-for-agents/tasks.md`:
+### New Features
+- Variable-driven `markdown_filter` support using NGINX variables and complex values
+- Phase-consistent decision caching for reliable header and body processing
+- Enhanced installation script with Docker support (`SKIP_ROOT_CHECK=1`)
+- Simplified Chinese documentation (`README_zh-CN.md`)
+- Comprehensive deployment examples guide
+- Complete architecture documentation suite
 
-- `117` completed (`[x]`)
-- `95` in progress / checkpoint markers (`[~]`)
-- `22` not started / remaining (`[ ]`)
+### Improvements
+- Refactored NGINX module internals for better maintainability
+- Tightened authenticated-request cache-control handling
+- Hardened E2E validation with TLS backend support
+- Enhanced CI/CD workflows and release automation
+- Refreshed documentation across all guides and references
 
-Notes:
+### Bug Fixes
+- Normalized `markdown_filter` runtime parsing for consistent variable resolution
+- Restored const compatibility for stricter compiler builds
+- Hardened path and URL-scheme parsing utilities
+- Corrected installation paths and documentation details
 
-- This includes checkpoints and optional tasks.
-- The recent optional property-test work has been completed and checked off.
-- Remaining unchecked items should be interpreted as workflow checkpoints and final validation/verification work until reviewed individually.
-
-## Verified Implementation Areas
-
-The following areas are implemented in code and exercised by the existing test suite (with varying levels of environment dependency):
+## Implemented Features
 
 ### Rust Converter (`components/rust-converter/`)
 
 - HTML parsing and HTML-to-Markdown conversion
-- output normalization and deterministic output behavior
-- charset detection and entity decoding
+- Output normalization and deterministic output behavior
+- Charset detection and entity decoding
 - YAML front matter generation
-- token estimation
-- ETag generation
-- FFI boundary (`markdown_converter.h`) with panic safety and memory management APIs
-- security-oriented input sanitization and URL scheme validation
-- property-based tests for core correctness invariants and resilience
+- Token estimation for LLM context management
+- ETag generation for cache-aware responses
+- FFI boundary with panic safety and memory management
+- Security-oriented input sanitization (XSS, XXE, SSRF prevention)
+- Property-based tests for correctness and resilience
+- Cooperative timeout mechanism
 
 ### NGINX Module (`components/nginx-module/`)
 
-- directive parsing and configuration structure
-- content negotiation (`Accept` parsing) and eligibility checks
-- response buffering and conversion decision flow
-- response header updates (`Content-Type`, `Vary`, `ETag`, token header)
-- HEAD handling and conditional request support
-- range bypass and passthrough logic
-- fail-open / fail-closed strategy handling
-- error classification and logging paths
-- metrics collection structures and related tests
+- Directive parsing and configuration structure
+- Content negotiation based on `Accept` header
+- Response buffering and conversion decision flow
+- Response header updates (`Content-Type`, `Vary`, `ETag`)
+- HEAD request handling
+- Conditional request support (If-None-Match)
+- Range request bypass logic
+- Fail-open / fail-closed strategy handling
+- Error classification and logging
+- Metrics collection and endpoint
+- Automatic upstream decompression (gzip, brotli, deflate)
+- Authentication-aware caching (Cache-Control: private)
+- Variable-driven configuration support
 
-## Validation Status (What Was Actually Verified Locally)
+## Test Coverage
 
-The repository contains both standalone/mock tests and environment-dependent integration tests. In this workspace, the following categories were verified recently:
+The project includes tests at multiple levels:
 
-### Rust Tests (Verified)
+### Rust Tests
 
-- `cargo test --test ffi_test` (FFI lifecycle, error handling, crash resistance, graceful recovery)
-- multiple Rust library/unit/property tests in earlier validation passes
+- Unit tests for all core modules (converter, parser, security, etc.)
+- Integration tests for FFI boundary and lifecycle management
+- Property-based tests for invariants and edge cases
+- Timeout and error handling tests
+- YAML front matter and ETag generation tests
+- Security tests for XSS, XXE, and SSRF prevention
 
-### NGINX Module Standalone/Mock Tests (Verified)
+Run with: `cargo test --all` or `make test-rust`
 
-Recent successful runs include unit targets under:
+### NGINX Module Tests
 
-- `components/nginx-module/tests` (`make unit`, `make unit-<name>`)
+- Unit tests for major components (30+ test targets)
+- Standalone tests that don't require system NGINX
+- Mock-based tests for filter chain behavior
+- Configuration parsing and merge tests
+- Header manipulation and cache-control tests
+- Metrics collection and endpoint tests
 
-These tests validate significant portions of behavior without requiring a system NGINX installation.
+Run with: `make test-nginx-unit` or `make -C components/nginx-module/tests unit`
 
-### Environment-Dependent Validation (Not Universally Portable)
+### Integration Tests
 
-Some integration and E2E validations require a local `nginx` binary and environment setup. Those checks should be treated as a separate validation phase and run explicitly in a prepared environment.
+- NGINX runtime integration with real module loading
+- End-to-end proxy chain validation with TLS backend
+- Content negotiation and variant handling
+- Compression and decompression flows
+- Authentication and caching behavior
 
-## What This Status Document Does Not Claim
+Run with: `make test-nginx-integration` and `make test-nginx-e2e`
 
-To avoid stale or misleading status reporting, this document intentionally does **not** claim:
+### CI/CD Pipeline
 
-- a precise task completion percentage derived from mixed checkpoint/task markers
-- that every integration/E2E test passes in every environment
-- that production rollout is complete
+- Automated builds for multiple platforms (macOS, Linux)
+- Security scanning with CodeQL and Snyk
+- Release artifact generation and validation
+- Docker image builds and testing
 
-## Remaining Work (High-Level)
+## Production Readiness
 
-The main remaining work is validation-oriented rather than core implementation-oriented:
+### Current State
 
-1. Full end-to-end validation in a real NGINX runtime environment
-2. Performance benchmarking under realistic workloads
-3. Security review / deployment hardening review
-4. Documentation review and consistency checks (ongoing)
-5. Production readiness checklist and rollout planning
+The project includes:
+
+- HTML-to-Markdown conversion with deterministic output
+- Resource limits, timeouts, and configurable failure strategies
+- ETag generation, conditional requests, and Vary header support
+- Input sanitization and XSS/XXE/SSRF prevention
+- Metrics endpoint, structured logging, and error classification
+- Installation script, Docker examples, and configuration templates
+- Documentation for installation, configuration, and operations
+
+### Deployment Considerations
+
+When deploying:
+
+1. **Start incrementally**: Enable on one location or path first
+2. **Monitor behavior**: Use the metrics endpoint to track conversions
+3. **Set appropriate limits**: Configure `markdown_max_size` and `markdown_timeout`
+4. **Choose failure mode**: Select `markdown_on_error` based on requirements
+5. **Test caching**: Verify cache behavior with your CDN or caching layer
+6. **Review security**: Ensure authentication policies match your security model
+
+See [DEPLOYMENT_EXAMPLES.md](../guides/DEPLOYMENT_EXAMPLES.md) for configuration patterns.
+
+## Current Focus and Roadmap
+
+### Current Release (0.2.0)
+- Variable-driven configuration
+- Enhanced installation tooling
+- Documentation refresh
+- Hardened CI/CD pipeline
+
+### Near-Term
+- Production-scale benchmarking and performance profiling
+- Deployment validation across diverse environments
+- Community feedback integration
+- Performance optimization opportunities
+
+### Future Exploration
+- Streaming-oriented conversion approaches for large documents
+- Additional Markdown flavors and output formats
+- Enhanced metrics and observability features
+- Performance improvements for high-throughput scenarios
+
+## Known Limitations
+
+The following limitations are documented:
+
+1. **Full Buffering Required**: The module buffers the entire response before conversion (no streaming)
+2. **HTML Input**: Requires HTML input (uncompressed or automatically decompressed)
+3. **Conversion Fidelity**: Some complex HTML structures may not convert perfectly to Markdown
+4. **Performance Overhead**: Large documents incur conversion overhead (mitigated by caching)
+
+These limitations are acceptable for current use cases and may be addressed in future releases.
 
 ## Documentation Status
 
-- Core operational guides exist under `docs/guides/` (`BUILD_INSTRUCTIONS.md`, `INSTALLATION.md`, `CONFIGURATION.md`, `OPERATIONS.md`)
-- Feature and testing documentation indexes exist under `docs/features/` and `docs/testing/`
-- Project-level status is maintained under `docs/project/`
+The project includes documentation covering:
 
-## Source of Truth and How to Re-Verify
+### User Guides
+- [BUILD_INSTRUCTIONS.md](../guides/BUILD_INSTRUCTIONS.md) - Building from source
+- [INSTALLATION.md](../guides/INSTALLATION.md) - Installation and setup
+- [CONFIGURATION.md](../guides/CONFIGURATION.md) - Configuration reference
+- [DEPLOYMENT_EXAMPLES.md](../guides/DEPLOYMENT_EXAMPLES.md) - Production deployment patterns
+- [OPERATIONS.md](../guides/OPERATIONS.md) - Operations and troubleshooting
 
-Use these artifacts as the primary references:
+### Architecture Documentation
+- [SYSTEM_ARCHITECTURE.md](../architecture/SYSTEM_ARCHITECTURE.md) - System design overview
+- [CONFIG_BEHAVIOR_MAP.md](../architecture/CONFIG_BEHAVIOR_MAP.md) - Directive behavior mapping
+- [ADR/](../architecture/ADR/) - Architecture decision records
 
-- Requirements: `.kiro/specs/nginx-markdown-for-agents/requirements.md`
-- Design: `.kiro/specs/nginx-markdown-for-agents/design.md`
-- Task tracker: `.kiro/specs/nginx-markdown-for-agents/tasks.md`
-- Build and test entry points: `Makefile`, `components/nginx-module/tests/Makefile`, `components/rust-converter/Cargo.toml`
+### Feature Documentation
+- [AUTOMATIC_DECOMPRESSION.md](../features/AUTOMATIC_DECOMPRESSION.md)
+- [CACHE_AWARE_RESPONSES.md](../features/CACHE_AWARE_RESPONSES.md)
+- [CONTENT_NEGOTIATION.md](../features/CONTENT_NEGOTIATION.md)
+- [SECURITY_PROTECTIONS.md](../features/SECURITY_PROTECTIONS.md)
+- Additional features under [docs/features/](../features/)
 
-Recommended re-verification commands:
+### Testing Documentation
+- [Testing README](../testing/README.md) - Test suite overview
+- Test execution guides for unit, integration, and E2E tests
+- Performance testing references
+
+### Project Documentation
+- [README.md](../../README.md) - Project overview (English)
+- [README_zh-CN.md](../../README_zh-CN.md) - Project overview (Simplified Chinese)
+- [CHANGELOG.md](../../CHANGELOG.md) - Version history
+- [CONTRIBUTING.md](../../CONTRIBUTING.md) - Contribution guidelines
+- This status document
+
+## Verification and Testing
+
+### Quick Verification
+
+To verify the current state of the project:
 
 ```bash
-# Rust
-cd components/rust-converter
-cargo test --all
+# Clone and build
+git clone https://github.com/cnkang/nginx-markdown-for-agents.git
+cd nginx-markdown-for-agents
+make test
 
-# NGINX module standalone/mock tests
-make -C components/nginx-module/tests unit
+# Run comprehensive tests
+make test-rust              # Rust converter tests
+make test-nginx-unit        # NGINX module unit tests
+make test-nginx-integration # Integration tests (requires nginx)
+make test-nginx-e2e         # End-to-end tests (requires nginx)
 ```
+
+### Continuous Integration
+
+The project uses GitHub Actions for automated testing:
+
+- **CI Workflow**: Builds and tests on multiple platforms
+- **Security Scanning**: CodeQL and Snyk vulnerability scanning
+- **Release Automation**: Automated artifact generation and publishing
+
+View the latest CI status: [GitHub Actions](https://github.com/cnkang/nginx-markdown-for-agents/actions)
+
+## Platform Support
+
+### Supported Platforms
+- macOS (Apple Silicon and Intel)
+- Linux (x86_64 and aarch64)
+- NGINX 1.24.0 and later
+- Rust 1.70.0 and later
+
+### Docker Support
+- Official NGINX base images
+- Source build examples
+- Installation script integration
+
+See `examples/docker/` for Docker build examples.
 
 ## Summary
 
-The implementation is substantially complete, and the most important remaining work is final validation in deployment-like environments plus ongoing documentation and operational refinement.
+**NGINX Markdown for Agents** is at version 0.2.0. The project provides HTML-to-Markdown conversion through NGINX content negotiation.
+
+### Key Components
+- Core feature implementation
+- Test coverage (unit, integration, E2E, property-based)
+- Documentation for users, operators, and developers
+- Deployment tooling and examples
+- CI/CD pipeline with security scanning
+- Multi-platform support (macOS, Linux, Docker)
+
+### Current State
+Core features are implemented and tested. The focus is on operational validation, performance optimization, and community feedback integration.
+
+### Getting Started
+- **Evaluate**: Read the [README](../../README.md) and [DEPLOYMENT_EXAMPLES](../guides/DEPLOYMENT_EXAMPLES.md)
+- **Install**: Follow the [INSTALLATION](../guides/INSTALLATION.md) guide
+- **Configure**: Use the [CONFIGURATION](../guides/CONFIGURATION.md) reference
+- **Operate**: Consult the [OPERATIONS](../guides/OPERATIONS.md) guide
+- **Contribute**: See [CONTRIBUTING](../../CONTRIBUTING.md) for guidelines
+
+For questions, issues, or feature requests, use the [GitHub issue tracker](https://github.com/cnkang/nginx-markdown-for-agents/issues).
