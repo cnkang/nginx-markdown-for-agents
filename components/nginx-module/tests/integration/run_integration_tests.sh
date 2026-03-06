@@ -52,6 +52,7 @@ NGINX_START_FAILURE_MSG="Failed to start NGINX"
 CONFIG_ERROR_LOG_LINE="error_log ${NGINX_ERROR_LOG} debug;"
 CONFIG_PID_LINE="pid ${NGINX_PID};"
 VAR_TOGGLE_HTML="<html><body><h1>Var Toggle</h1></body></html>"
+AUTH_PRIVATE_HTML="<html><body><h1>Private</h1></body></html>"
 
 # Cleanup function
 cleanup() {
@@ -382,25 +383,27 @@ http {
 #
 test_authenticated_content() {
     log_test 4 "Authenticated Content Handling"
-    
-    local config='
+    local config
+
+    config="$(cat <<EOF
 worker_processes 1;
-'"$CONFIG_ERROR_LOG_LINE"'
-'"$CONFIG_PID_LINE"'
+${CONFIG_ERROR_LOG_LINE}
+${CONFIG_PID_LINE}
 events { worker_connections 1024; }
 http {
-    access_log '"$NGINX_ACCESS_LOG"';
+    access_log ${NGINX_ACCESS_LOG};
     server {
-        listen '"$TEST_PORT"';
+        listen ${TEST_PORT};
         location /test {
             markdown_filter on;
             markdown_auth_policy allow;
-            return 200 '"'"'<html><body><h1>Private</h1></body></html>'"'"';
+            return 200 '${AUTH_PRIVATE_HTML}';
             default_type text/html;
         }
     }
 }
-'
+EOF
+)"
     
     start_nginx "$config" || { log_fail "$NGINX_START_FAILURE_MSG"; return 1; }
     
