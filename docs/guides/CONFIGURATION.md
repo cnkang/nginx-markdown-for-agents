@@ -22,6 +22,7 @@ The NGINX Markdown filter module provides fine-grained control over HTML-to-Mark
 - Example configurations are operational templates, not guaranteed drop-in configs for every deployment.
 - For build/runtime preparation steps, use `BUILD_INSTRUCTIONS.md` and `INSTALLATION.md`.
 - Metrics endpoint examples use `/markdown-metrics` as a placeholder path. Use your configured `location` path if different.
+- For “which directive changes which runtime branch,” use [../architecture/CONFIG_BEHAVIOR_MAP.md](../architecture/CONFIG_BEHAVIOR_MAP.md) instead of duplicating that rationale here.
 
 ### Configuration Contexts
 
@@ -420,6 +421,12 @@ location /markdown-metrics {
 - `conversion_time_sum_ms`: Total conversion time (sum)
 - `input_bytes`: Total input bytes processed
 - `output_bytes`: Total output bytes generated
+- `decompressions_attempted`: Responses that required decompression before conversion
+- `decompressions_succeeded`: Successful decompressions
+- `decompressions_failed`: Failed decompressions
+- `decompressions_gzip`: Successful gzip decompressions
+- `decompressions_deflate`: Successful deflate decompressions
+- `decompressions_brotli`: Successful brotli decompressions
 
 ---
 
@@ -592,7 +599,7 @@ http {
 
 ### Security Hardening
 
-Configuration with enhanced security for authenticated content:
+Configuration with enhanced controls for authenticated requests:
 
 ```nginx
 http {
@@ -958,7 +965,7 @@ markdown_timeout 3s;       # Limit conversion time
 
 ### 2. Authenticated Content
 
-Protect authenticated content from public caching:
+Protect responses from authenticated requests from public caching:
 
 ```nginx
 # Deny conversion for authenticated requests
@@ -1526,5 +1533,6 @@ tail -f /var/log/nginx/error.log | grep "conversion time"
 - **Operational Guide:** [OPERATIONS.md](OPERATIONS.md)
 - **Project README:** [../../README.md](../../README.md)
 - **Requirements Traceability:** [../project/PROJECT_STATUS.md](../project/PROJECT_STATUS.md)
-- **Architecture Design:** [../architecture/REPOSITORY_STRUCTURE.md](../architecture/REPOSITORY_STRUCTURE.md)
+- **Architecture Index:** [../architecture/README.md](../architecture/README.md)
+- **Configuration to Behavior Map:** [../architecture/CONFIG_BEHAVIOR_MAP.md](../architecture/CONFIG_BEHAVIOR_MAP.md)
 - **NGINX Documentation:** https://nginx.org/en/docs/

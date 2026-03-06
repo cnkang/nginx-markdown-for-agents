@@ -4,6 +4,8 @@
 
 This document describes the YAML front matter generation feature in the Rust converter.
 
+It focuses on converter behavior and output shape. For NGINX directive syntax and deployment usage, use `docs/guides/CONFIGURATION.md`.
+
 ## Requirements Validated
 
 - **FR-15.3**: Extract metadata from HTML (title, description, URL, image, author, published date)
@@ -105,7 +107,7 @@ cargo run --example yaml_front_matter_demo
 
 ## Integration with NGINX Module
 
-The NGINX module will control this feature via the FFI layer:
+The NGINX module controls this feature through the FFI layer:
 
 ```c
 markdown_options_t options = {
@@ -119,7 +121,7 @@ markdown_options_t options = {
 };
 ```
 
-The NGINX configuration directive will be:
+At the NGINX layer, the corresponding public directive is:
 
 ```nginx
 markdown_front_matter on;  # Enable YAML front matter
@@ -139,9 +141,9 @@ markdown_front_matter on;  # Enable YAML front matter
 - Only enabled when explicitly configured
 - No impact when disabled (default)
 
-## Future Enhancements
+## Possible Extensions
 
-Potential improvements for future versions:
+Areas that could be expanded later without changing the current feature contract:
 
 1. Configurable field selection (choose which fields to include)
 2. Custom field mapping (rename fields in output)

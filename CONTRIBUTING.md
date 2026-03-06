@@ -64,7 +64,7 @@ Before contributing, ensure you have:
 
 ### Branch Strategy
 
-- `main` - Stable, production-ready code
+- `main` - Stable primary branch
 - `develop` - Integration branch for features
 - `feature/*` - Feature development branches
 - `bugfix/*` - Bug fix branches

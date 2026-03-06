@@ -1,53 +1,55 @@
 # Testing Documentation
 
-This directory contains test strategy and validation reference documents for the project.
+This directory maps the project's validation strategy and test-reference documents.
 
-## Contents
+Use it to answer three practical questions: what is covered already, which tests need a real NGINX runtime, and which command is the right starting point for the change you just made.
 
-- `DIRECTIVE_VALIDATION_TESTS.md` - directive parsing and configuration validation coverage
-- `DECOMPRESSION_TESTS.md` - decompression-specific unit/integration/E2E coverage
-- `INTEGRATION_TESTS.md` - integration test scenarios and expectations
-- `E2E_TESTS.md` - end-to-end testing guidance and workflows
-- `PERFORMANCE_BASELINES.md` - performance baseline definitions and comparison guidance
+## Start Here
 
-## Running Tests
-
-### Rust Converter Tests
-
-```bash
-cd components/rust-converter
-cargo test --all
-```
-
-### NGINX Module Unit Tests
-
-```bash
-make -C components/nginx-module/tests unit
-```
-
-Run a specific unit test:
-
-```bash
-make -C components/nginx-module/tests unit-eligibility
-```
-
-### Integration and E2E
-
-```bash
-make -C components/nginx-module/tests integration-c
-make -C components/nginx-module/tests integration-nginx
-make -C components/nginx-module/tests e2e
-```
-
-### Root-Level Smoke Test
+For most contributors, these are the most useful entrypoints:
 
 ```bash
 make test
+make test-rust
+make test-nginx-unit
+```
+
+Use the documents in this directory when you need to understand what is covered, what requires a real `nginx` runtime, and where performance expectations are documented.
+
+## Test Reference Index
+
+| Document | Purpose |
+|----------|---------|
+| [DIRECTIVE_VALIDATION_TESTS.md](DIRECTIVE_VALIDATION_TESTS.md) | Directive parsing and configuration validation coverage |
+| [DECOMPRESSION_TESTS.md](DECOMPRESSION_TESTS.md) | Decompression-related unit, integration, and E2E coverage |
+| [INTEGRATION_TESTS.md](INTEGRATION_TESTS.md) | Integration scenarios and expected behavior |
+| [E2E_TESTS.md](E2E_TESTS.md) | End-to-end workflows with real NGINX and backend services |
+| [PERFORMANCE_BASELINES.md](PERFORMANCE_BASELINES.md) | Performance expectations and comparison guidance |
+
+## Common Commands
+
+```bash
+# Rust converter tests
+make test-rust
+
+# Full NGINX module unit suite
+make test-nginx-unit
+
+# Integration tests
+make test-nginx-integration
+
+# End-to-end tests
+make test-e2e
 ```
 
 ## Terminology
 
-- **Module** means the NGINX Markdown filter module (NGINX C component).
-- **Rust converter** means the Rust HTML-to-Markdown library and FFI layer.
-- **Standalone/mock tests** means local `components/nginx-module/tests` unit tests that do not require a system `nginx` binary.
-- **Integration/E2E tests** generally require a real `nginx` runtime and additional environment setup.
+- Standalone or mock tests do not require a system `nginx` binary.
+- Integration and E2E tests usually require a real `nginx` runtime and more environment setup.
+- Performance references are guidance for regression detection, not hard SLAs.
+
+As a working rule:
+
+- small parser or converter changes usually start with `make test` or `make test-rust`
+- module behavior changes usually need `make test-nginx-unit`
+- proxy-chain, header-propagation, and runtime-path changes usually need integration or E2E coverage

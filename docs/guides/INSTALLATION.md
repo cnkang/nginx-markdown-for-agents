@@ -195,7 +195,7 @@ The Rust converter must be built before compiling the NGINX module.
 ### Step 1: Clone the Repository
 
 ```bash
-git clone https://github.com/example/nginx-markdown-for-agents.git
+git clone https://github.com/cnkang/nginx-markdown-for-agents.git
 cd nginx-markdown-for-agents
 ```
 
@@ -221,7 +221,7 @@ cd components/rust-converter
 cargo build --release
 
 # Generate C header file
-cbindgen --config cbindgen.toml --crate nginx-markdown-converter --output markdown_converter.h
+cbindgen --config cbindgen.toml --crate nginx-markdown-converter --output include/markdown_converter.h
 
 # Copy header to nginx-module directory
 cp include/markdown_converter.h ../nginx-module/src/
@@ -543,7 +543,7 @@ curl -H "Accept: application/json" http://localhost/markdown-metrics
 **Solution:**
 ```bash
 cd components/rust-converter
-cbindgen --config cbindgen.toml --crate nginx-markdown-converter --output markdown_converter.h
+cbindgen --config cbindgen.toml --crate nginx-markdown-converter --output include/markdown_converter.h
 cp include/markdown_converter.h ../nginx-module/src/
 ```
 
@@ -821,7 +821,8 @@ For production deployments, consider:
 - **Project README:** [../../README.md](../../README.md)
 - **Documentation Index:** [../README.md](../README.md)
 - **Requirements Traceability:** [../project/PROJECT_STATUS.md](../project/PROJECT_STATUS.md)
-- **Architecture Design:** [../architecture/REPOSITORY_STRUCTURE.md](../architecture/REPOSITORY_STRUCTURE.md)
+- **Architecture Index:** [../architecture/README.md](../architecture/README.md)
+- **System Architecture:** [../architecture/SYSTEM_ARCHITECTURE.md](../architecture/SYSTEM_ARCHITECTURE.md)
 - **Build Instructions (macOS):** [BUILD_INSTRUCTIONS.md](BUILD_INSTRUCTIONS.md)
 - **NGINX Documentation:** https://nginx.org/en/docs/
 - **Rust Documentation:** https://doc.rust-lang.org/

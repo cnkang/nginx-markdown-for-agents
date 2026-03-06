@@ -9,6 +9,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 No unreleased changes yet.
 
+## [0.2.0] - 2026-03-06
+
+This release expands runtime configurability, tightens module internals and validation infrastructure, and refreshes the documentation and release workflow around the current implementation.
+
+### Added
+- Variable-driven `markdown_filter` support using NGINX variables and complex values
+- Phase-consistent `markdown_filter` decision caching so header and body processing do not re-evaluate divergent values mid-request
+- Standalone runtime coverage for `markdown_filter` parsing, merge behavior, and cached decision handling
+- `SKIP_ROOT_CHECK=1` support in `tools/install.sh` for Docker-oriented install flows
+- `tools/build_release/Dockerfile.install-example` as a reference image for install-script-based packaging
+- Simplified Chinese top-level README (`README_zh-CN.md`)
+- Deployment examples guide under `docs/guides/DEPLOYMENT_EXAMPLES.md`
+- Architecture documentation index and runtime references under `docs/architecture/`
+
+### Changed
+- Refactored the NGINX module's filter, conditional, auth, and header-handling paths into smaller helpers with a shared header-manipulation implementation used by production code and standalone tests
+- Tightened authenticated-request cache-control rewriting so public cache directives are upgraded to private while preserving stronger directives such as `no-store`
+- Reworked E2E proxy-chain validation to run the backend over TLS, and hardened integration/E2E runner scripts around that flow
+- Hardened CI workflows, release build images, QA scripts, and Docker build context handling
+- Refreshed the top-level README, component READMEs, guides, feature notes, testing docs, and FAQ to match the current runtime behavior and supported workflows
+- Added clearer architecture, repository-structure, and request-path references so operational docs, implementation docs, and release notes describe the same system boundaries
+
+### Fixed
+- Normalized `markdown_filter` runtime parsing and helper behavior so variable-driven enablement resolves consistently across phases
+- Restored const compatibility for stricter `-Werror` builds and addressed remaining Sonar/security-hotspot cleanup in core code and unit tests
+- Hardened path and URL-scheme parsing utilities, bounded string handling in tests, and related helper code used by validation tooling
+- Corrected installation and documentation details such as repository URLs, generated header paths, metrics fields, compression rollout guidance, and outdated placeholders
+- Refreshed corpus fixtures and validation assets for better semantic coverage in tables, images, malformed HTML, and mixed-entity cases
+
 ## [0.1.0] - 2026-03-02
 
 ### Added
@@ -77,7 +106,7 @@ No unreleased changes yet.
 ### Supported Platforms
 - macOS (Apple Silicon and Intel)
 - Linux (x86_64 and aarch64)
-- NGINX 1.18.0+
+- NGINX 1.24.0+
 - Rust 1.70.0+
 
 ### Known Limitations
@@ -96,6 +125,10 @@ This project uses Semantic Versioning:
 - PATCH version for backwards-compatible bug fixes
 
 ### Upgrade Notes
+
+#### Upgrading to 0.2.0
+
+No public directive renames are introduced in this release. If you relied on older documentation, review the updated guides for clarified installation paths, compression rollout guidance, metrics fields, and architecture references.
 
 #### Upgrading to 0.1.0
 

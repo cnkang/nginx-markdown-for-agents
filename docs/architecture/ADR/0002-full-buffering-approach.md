@@ -20,13 +20,13 @@ Key considerations:
 
 ## Decision
 
-For version 1.0, we will use a **full buffering approach**:
+Version 1 uses a **full buffering approach**:
 
 1. Buffer the entire HTML response in memory
 2. Once complete, perform conversion
 3. Output the complete Markdown response
 
-Streaming conversion may be considered for future versions if needed.
+Streaming conversion remains a possible later direction, but it is not part of the current architecture.
 
 ## Consequences
 

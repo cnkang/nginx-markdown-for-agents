@@ -27,28 +27,15 @@ Upstream response (possibly compressed HTML)
   -> Response headers/body updated for Markdown variant
 ```
 
-## Configuration
+## Interface Surface
 
-Directive:
+Public user-facing docs currently describe automatic decompression as built-in behavior in the conversion path. This page documents the runtime flow and safeguards, not rollout guidance.
 
-```nginx
-markdown_auto_decompress on | off;
-```
+For deployment and troubleshooting guidance, use:
 
-Default: `on`
-
-Recommended baseline:
-
-```nginx
-http {
-    markdown_filter on;
-    markdown_on_error pass;
-    # markdown_auto_decompress is on by default
-}
-```
-
-If you disable it (`off`), ensure upstream returns uncompressed HTML for
-requests expected to be converted.
+- `docs/guides/CONFIGURATION.md`
+- `docs/guides/OPERATIONS.md`
+- `docs/architecture/REQUEST_LIFECYCLE.md`
 
 ## Failure Handling
 
@@ -63,7 +50,7 @@ Decompression failures (corrupt data, resource limits, system errors):
 - Categorized and logged.
 - Counted in decompression metrics.
 - Controlled by `markdown_on_error`:
-  - `pass` returns original content (fail-open).
+  - `pass` returns the original eligible HTML response (fail-open).
   - `reject` propagates an error response (fail-closed).
 
 ## Safety and Resource Controls
