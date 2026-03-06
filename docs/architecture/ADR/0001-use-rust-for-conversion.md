@@ -133,7 +133,7 @@ The NGINX module:
 - [Rust FFI Guide](https://doc.rust-lang.org/nomicon/ffi.html)
 - [html5ever Documentation](https://docs.rs/html5ever/)
 - [cbindgen Documentation](https://github.com/eqrion/cbindgen)
-- Design Document: `../../.kiro/specs/nginx-markdown-for-agents/design.md`
+- System Architecture: `../SYSTEM_ARCHITECTURE.md`
 - FFI Implementation: `../../components/rust-converter/src/ffi.rs`
 
 ## Date

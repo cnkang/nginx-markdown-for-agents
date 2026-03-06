@@ -866,7 +866,7 @@ If you encounter issues not covered in this guide:
 2. **Enable debug logging:** `error_log /path/to/log debug;`
 3. **Review configuration:** `nginx -t -c /path/to/nginx.conf`
 4. **Check your repository issue tracker:** use the issue tracker configured for your deployment/fork
-5. **Consult the maintained guides and specs:** see `../../README.md`, `../README.md`, and `.kiro/specs/...`
+5. **Consult the maintained guides:** see `../../README.md`, `../README.md`, and the documentation under `docs/`
 
 ---
 

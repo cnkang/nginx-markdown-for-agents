@@ -164,7 +164,7 @@ Track these metrics to inform future decisions:
 ## References
 
 - [NGINX Buffer Management](https://nginx.org/en/docs/dev/development_guide.html#buffers)
-- Design Document: `../../.kiro/specs/nginx-markdown-for-agents/design.md`
+- System Architecture: `../SYSTEM_ARCHITECTURE.md`
 - Buffer Implementation: `../../components/nginx-module/src/ngx_http_markdown_buffer.c`
 - Performance Baselines: `../testing/PERFORMANCE_BASELINES.md`
 
