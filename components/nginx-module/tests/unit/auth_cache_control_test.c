@@ -61,6 +61,44 @@ append_with_bound(char *dst, size_t dst_size, const char *src)
     return 1;
 }
 
+static int
+append_cache_control_directive(char *rewritten,
+                               size_t rewritten_size,
+                               const char *token,
+                               int *wrote)
+{
+    if (STR_EQ(token, "public")) {
+        return 1;
+    }
+
+    if (*wrote != 0 && !append_with_bound(rewritten, rewritten_size, ", ")) {
+        return 0;
+    }
+
+    if (!append_with_bound(rewritten, rewritten_size, token)) {
+        return 0;
+    }
+
+    *wrote = 1;
+    return 1;
+}
+
+static const char *
+finalize_private_cache_control(char *rewritten, size_t rewritten_size, int wrote)
+{
+    if (wrote != 0) {
+        if (!append_with_bound(rewritten, rewritten_size, ", private")) {
+            return "private";
+        }
+    } else {
+        if (!append_with_bound(rewritten, rewritten_size, "private")) {
+            return "private";
+        }
+    }
+
+    return rewritten;
+}
+
 static char *
 next_delimited_token(char **cursor, char delimiter)
 {
@@ -194,32 +232,22 @@ adjust_cache_control_for_auth(const char *cache_control, int authenticated)
     cursor = next_delimited_token(&directive_cursor, ',');
     while (cursor != NULL) {
         const char *token = cursor;
-        while (*token == ' ' || *token == '\t') token++;
-        if (!STR_EQ(token, "public")) {
-            if (wrote) {
-                if (!append_with_bound(rewritten, sizeof(rewritten), ", ")) {
-                    return "private";
-                }
-            }
-            if (!append_with_bound(rewritten, sizeof(rewritten), token)) {
-                return "private";
-            }
-            wrote = 1;
+        while (*token == ' ' || *token == '\t') {
+            token++;
         }
+
+        if (!append_cache_control_directive(rewritten,
+                                            sizeof(rewritten),
+                                            token,
+                                            &wrote))
+        {
+            return "private";
+        }
+
         cursor = next_delimited_token(&directive_cursor, ',');
     }
 
-    if (wrote) {
-        if (!append_with_bound(rewritten, sizeof(rewritten), ", private")) {
-            return "private";
-        }
-    } else {
-        if (!append_with_bound(rewritten, sizeof(rewritten), "private")) {
-            return "private";
-        }
-    }
-
-    return rewritten;
+    return finalize_private_cache_control(rewritten, sizeof(rewritten), wrote);
 }
 
 static void

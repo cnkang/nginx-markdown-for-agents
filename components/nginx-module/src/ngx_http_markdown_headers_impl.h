@@ -30,6 +30,41 @@ static u_char ngx_http_markdown_hdr_token_count[] = "X-Markdown-Tokens";
 static u_char ngx_http_markdown_content_type[] = "text/markdown; charset=utf-8";
 static u_char ngx_http_markdown_vary_suffix[] = ", Accept";
 
+static ngx_uint_t
+ngx_http_markdown_tolower_ascii(ngx_uint_t c)
+{
+    if (c >= 'A' && c <= 'Z') {
+        return c | 0x20;
+    }
+
+    return c;
+}
+
+static ngx_int_t
+ngx_http_markdown_strncasecmp_const(const u_char *s1, const u_char *s2, size_t n)
+{
+    ngx_uint_t c1;
+    ngx_uint_t c2;
+
+    while (n != 0) {
+        c1 = ngx_http_markdown_tolower_ascii((ngx_uint_t) *s1++);
+        c2 = ngx_http_markdown_tolower_ascii((ngx_uint_t) *s2++);
+
+        if (c1 == c2) {
+            if (c1 == 0) {
+                return 0;
+            }
+
+            n--;
+            continue;
+        }
+
+        return c1 - c2;
+    }
+
+    return 0;
+}
+
 static ngx_table_elt_t *
 ngx_http_markdown_find_header_in_part(ngx_list_part_t *part,
                                       const u_char *name,
@@ -43,7 +78,10 @@ ngx_http_markdown_find_header_in_part(ngx_list_part_t *part,
         i = 0;
         while (i < part->nelts) {
             if (headers[i].key.len == name_len
-                && ngx_strncasecmp(headers[i].key.data, (u_char *) name, name_len) == 0)
+                && ngx_http_markdown_strncasecmp_const(headers[i].key.data,
+                                                       name,
+                                                       name_len)
+                   == 0)
             {
                 return &headers[i];
             }
@@ -83,7 +121,10 @@ ngx_http_markdown_invalidate_headers_in_part(ngx_http_request_t *r,
         i = 0;
         while (i < part->nelts) {
             if (headers[i].key.len != name_len
-                || ngx_strncasecmp(headers[i].key.data, (u_char *) name, name_len) != 0)
+                || ngx_http_markdown_strncasecmp_const(headers[i].key.data,
+                                                       name,
+                                                       name_len)
+                   != 0)
             {
                 i++;
                 continue;
@@ -147,7 +188,10 @@ ngx_http_markdown_contains_csv_token(const ngx_str_t *value,
         }
 
         if (end - start == token_len
-            && ngx_strncasecmp(value->data + start, (u_char *) token, token_len) == 0)
+            && ngx_http_markdown_strncasecmp_const(value->data + start,
+                                                   token,
+                                                   token_len)
+               == 0)
         {
             return 1;
         }

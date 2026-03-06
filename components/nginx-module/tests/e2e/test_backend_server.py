@@ -3,9 +3,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import socketserver
 import ssl
 import time
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 SIMPLE_HTML = """<html><head><title>Simple</title></head><body><h1>Simple Test Page</h1><p>Visit <a href=\"https://example.com\">Example</a>.</p></body></html>"""
 
@@ -26,73 +26,130 @@ CHUNKED_HTML_PARTS = [
 
 LARGE_HTML = "<html><body><h1>Large Document</h1><p>" + ("content " * 40000) + "</p></body></html>"
 
+HTTP_STATUS_MESSAGES = {
+    200: "OK",
+    404: "Not Found",
+    405: "Method Not Allowed",
+    500: "Internal Server Error",
+}
 
-class Handler(BaseHTTPRequestHandler):
-    protocol_version = "HTTP/1.1"
 
-    def log_message(self, fmt: str, *args):
-        return
+def status_line(status: int) -> bytes:
+    message = HTTP_STATUS_MESSAGES.get(status, "Unknown")
+    return f"HTTP/1.1 {status} {message}\r\n".encode("ascii")
 
-    def _send_html(self, status: int, body: str, extra_headers: dict[str, str] | None = None):
-        payload = body.encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
-        self.send_header("Content-Length", str(len(payload)))
-        self.send_header("Cache-Control", "public, max-age=3600")
-        self.send_header("ETag", '"simple-v1"')
-        if extra_headers:
-            for k, v in extra_headers.items():
-                self.send_header(k, v)
-        self.end_headers()
-        if self.command != "HEAD":
-            self.wfile.write(payload)
 
-    def do_GET(self):
-        if self.path == "/health":
+class TLSBackendHandler(socketserver.StreamRequestHandler):
+    def handle(self):
+        request_line = self.rfile.readline(65537)
+        if not request_line:
+            return
+
+        try:
+            method, target, _version = request_line.decode("iso-8859-1").strip().split(" ", 2)
+        except ValueError:
+            self._send_response(500, "text/plain; charset=utf-8", b"invalid request\n", "GET")
+            return
+
+        while True:
+            header_line = self.rfile.readline(65537)
+            if not header_line or header_line in {b"\r\n", b"\n"}:
+                break
+
+        path = target.split("?", 1)[0]
+        if method not in {"GET", "HEAD"}:
+            self._send_html(405, "<html><body><h1>Method Not Allowed</h1></body></html>", method)
+            return
+
+        if path == "/health":
             payload = json.dumps({"ok": True}).encode("utf-8")
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(payload)))
-            self.end_headers()
+            self._send_response(200, "application/json", payload, method)
+            return
+
+        if path == "/simple":
+            self._send_html(200, SIMPLE_HTML, method)
+            return
+
+        if path == "/complex":
+            self._send_html(200, COMPLEX_HTML, method)
+            return
+
+        if path == "/error":
+            self._send_html(500, "<html><body><h1>Backend Error</h1></body></html>", method)
+            return
+
+        if path == "/large":
+            self._send_html(200, LARGE_HTML, method)
+            return
+
+        if path == "/chunked":
+            self._send_chunked(method)
+            return
+
+        self._send_html(404, "<html><body><h1>Not Found</h1></body></html>", method)
+
+    def _send_headers(self, status: int, headers: dict[str, str]) -> None:
+        self.wfile.write(status_line(status))
+        for key, value in headers.items():
+            self.wfile.write(f"{key}: {value}\r\n".encode("iso-8859-1"))
+        self.wfile.write(b"\r\n")
+
+    def _send_response(self, status: int, content_type: str, payload: bytes, method: str) -> None:
+        headers = {
+            "Content-Type": content_type,
+            "Content-Length": str(len(payload)),
+            "Connection": "close",
+        }
+        self._send_headers(status, headers)
+        if method != "HEAD":
             self.wfile.write(payload)
+
+    def _send_html(self, status: int, body: str, method: str) -> None:
+        payload = body.encode("utf-8")
+        headers = {
+            "Content-Type": "text/html; charset=utf-8",
+            "Content-Length": str(len(payload)),
+            "Cache-Control": "public, max-age=3600",
+            "ETag": '"simple-v1"',
+            "Connection": "close",
+        }
+        self._send_headers(status, headers)
+        if method != "HEAD":
+            self.wfile.write(payload)
+
+    def _send_chunked(self, method: str) -> None:
+        headers = {
+            "Content-Type": "text/html; charset=utf-8",
+            "Transfer-Encoding": "chunked",
+            "Cache-Control": "public, max-age=3600",
+            "Connection": "close",
+        }
+        self._send_headers(200, headers)
+        if method == "HEAD":
             return
 
-        if self.path == "/simple":
-            self._send_html(200, SIMPLE_HTML)
-            return
+        for part in CHUNKED_HTML_PARTS:
+            chunk = part.encode("utf-8")
+            self.wfile.write(f"{len(chunk):X}\r\n".encode("ascii"))
+            self.wfile.write(chunk + b"\r\n")
+            self.wfile.flush()
+            time.sleep(0.05)
 
-        if self.path == "/complex":
-            self._send_html(200, COMPLEX_HTML)
-            return
+        self.wfile.write(b"0\r\n\r\n")
 
-        if self.path == "/error":
-            self._send_html(500, "<html><body><h1>Backend Error</h1></body></html>")
-            return
 
-        if self.path == "/large":
-            self._send_html(200, LARGE_HTML)
-            return
+class ThreadingTLSServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
+    allow_reuse_address = True
+    daemon_threads = True
 
-        if self.path == "/chunked":
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Transfer-Encoding", "chunked")
-            self.send_header("Cache-Control", "public, max-age=3600")
-            self.end_headers()
-            if self.command != "HEAD":
-                for part in CHUNKED_HTML_PARTS:
-                    chunk = part.encode("utf-8")
-                    self.wfile.write(f"{len(chunk):X}\r\n".encode("ascii"))
-                    self.wfile.write(chunk + b"\r\n")
-                    self.wfile.flush()
-                    time.sleep(0.05)
-                self.wfile.write(b"0\r\n\r\n")
-            return
+    def __init__(self, server_address: tuple[str, int], tls_ctx: ssl.SSLContext):
+        self._tls_ctx = tls_ctx
+        super().__init__(server_address, TLSBackendHandler)
 
-        self._send_html(404, "<html><body><h1>Not Found</h1></body></html>")
-
-    def do_HEAD(self):
-        self.do_GET()
+    def get_request(self):
+        sock, addr = super().get_request()
+        tls_sock = self._tls_ctx.wrap_socket(sock, server_side=True)
+        return tls_sock, addr
 
 
 def main():
@@ -102,11 +159,11 @@ def main():
     parser.add_argument("--tls-key", required=True, help="Path to TLS private key file")
     args = parser.parse_args()
 
-    server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
     tls_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     tls_ctx.minimum_version = ssl.TLSVersion.TLSv1_2
     tls_ctx.load_cert_chain(certfile=args.tls_cert, keyfile=args.tls_key)
-    server.socket = tls_ctx.wrap_socket(server.socket, server_side=True)
+
+    server = ThreadingTLSServer(("127.0.0.1", args.port), tls_ctx)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
