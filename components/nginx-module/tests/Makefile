@@ -5,7 +5,12 @@ SANITIZER_FLAGS ?= -O1 -fno-omit-frame-pointer -fsanitize=address,undefined
 UNAME_S ?= $(shell uname -s)
 ASAN_OPTIONS_BASE ?= abort_on_error=1
 ifeq ($(UNAME_S),Linux)
-ASAN_OPTIONS_BASE += :detect_leaks=1
+ASAN_OPTIONS_BASE := $(strip $(ASAN_OPTIONS_BASE))
+ifeq ($(ASAN_OPTIONS_BASE),)
+ASAN_OPTIONS_BASE := detect_leaks=1
+else
+ASAN_OPTIONS_BASE := $(ASAN_OPTIONS_BASE):detect_leaks=1
+endif
 endif
 SANITIZER_ENV ?= ASAN_OPTIONS=$(ASAN_OPTIONS_BASE) UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1
 
