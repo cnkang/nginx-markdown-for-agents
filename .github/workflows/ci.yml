@@ -148,6 +148,50 @@ jobs:
       - name: Run NGINX C integration harness
         run: make -C components/nginx-module/tests integration-c
 
+  nginx-c-clang-smoke:
+    name: NGINX C Clang Smoke
+    needs: changes
+    if: needs.changes.outputs.nginx == 'true' || needs.changes.outputs.workflows == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Install clang toolchain deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang \
+            zlib1g-dev
+
+      - name: Run NGINX C smoke tests with clang
+        run: make test-nginx-unit-clang-smoke
+
+  nginx-c-sanitizers:
+    name: NGINX C Sanitizer Smoke
+    needs: changes
+    if: needs.changes.outputs.nginx == 'true' || needs.changes.outputs.workflows == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Install clang toolchain deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang \
+            zlib1g-dev
+
+      - name: Run NGINX C smoke tests with ASan/UBSan
+        run: make test-nginx-unit-sanitize-smoke
+
   e2e-large-response:
     name: E2E Regression (Large Response)
     needs: [changes, rust-quality, nginx-c-tests]

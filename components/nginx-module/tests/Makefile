@@ -1,6 +1,15 @@
 include make/targets.mk
 
-.PHONY: unit unit-smoke $(addprefix unit-,$(UNIT_NAMES)) integration-c integration-nginx e2e clean
+CLANG ?= clang
+SANITIZER_FLAGS ?= -O1 -fno-omit-frame-pointer -fsanitize=address,undefined
+UNAME_S ?= $(shell uname -s)
+ASAN_OPTIONS_BASE ?= abort_on_error=1
+ifeq ($(UNAME_S),Linux)
+ASAN_OPTIONS_BASE += :detect_leaks=1
+endif
+SANITIZER_ENV ?= ASAN_OPTIONS=$(ASAN_OPTIONS_BASE) UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1
+
+.PHONY: unit unit-smoke unit-clang-smoke unit-sanitize-smoke $(addprefix unit-,$(UNIT_NAMES)) integration-c integration-nginx e2e clean
 
 build/unit build/integration build/generated:
 	@mkdir -p $@
@@ -27,6 +36,17 @@ unit-smoke: build/unit/body_filter build/unit/eligibility build/unit/headers
 	@build/unit/body_filter
 	@build/unit/eligibility
 	@build/unit/headers
+
+unit-clang-smoke:
+	@$(MAKE) clean
+	@$(MAKE) unit-smoke CC=$(CLANG)
+
+unit-sanitize-smoke:
+	@$(MAKE) clean
+	@$(SANITIZER_ENV) $(MAKE) unit-smoke \
+		CC=$(CLANG) \
+		CFLAGS_COMMON="-Wall -Wextra -Werror=implicit-function-declaration -Werror=incompatible-pointer-types -g $(SANITIZER_FLAGS) -std=$(CSTD) -Iinclude" \
+		LDFLAGS_COMMON="$(SANITIZER_FLAGS)"
 
 $(addprefix unit-,$(UNIT_NAMES)): unit-%: build/unit/%
 	@"$<"

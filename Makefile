@@ -44,7 +44,8 @@ RUST_HEADER := $(RUST_DIR)/include/markdown_converter.h
 NGINX_HEADER := $(NGINX_MODULE_DIR)/src/markdown_converter.h
 
 .PHONY: all build rust-lib rust-lib-debug copy-headers check-headers \
-        test test-rust test-nginx-unit test-nginx-integration test-e2e test-all \
+        test test-rust test-nginx-unit test-nginx-unit-clang-smoke test-nginx-unit-sanitize-smoke \
+        test-nginx-integration test-e2e test-all \
         docs-check verify-large-e2e verify-huge-native-e2e verify-huge-allowed-native-e2e \
         verify-chunked-native-e2e verify-chunked-native-e2e-smoke verify-chunked-native-e2e-stress \
         clean help
@@ -82,6 +83,12 @@ test-rust:
 
 test-nginx-unit:
 	$(MAKE) -C $(NGINX_TEST_DIR) unit
+
+test-nginx-unit-clang-smoke:
+	$(MAKE) -C $(NGINX_TEST_DIR) unit-clang-smoke
+
+test-nginx-unit-sanitize-smoke:
+	$(MAKE) -C $(NGINX_TEST_DIR) unit-sanitize-smoke
 
 test-nginx-integration:
 	$(MAKE) -C $(NGINX_TEST_DIR) integration-c
@@ -126,6 +133,8 @@ help:
 	@echo "  test                     - Fast smoke tests"
 	@echo "  test-rust                - Run Rust test suite"
 	@echo "  test-nginx-unit          - Run nginx C unit tests"
+	@echo "  test-nginx-unit-clang-smoke - Run nginx C smoke tests with clang"
+	@echo "  test-nginx-unit-sanitize-smoke - Run nginx C smoke tests with ASan/UBSan"
 	@echo "  test-nginx-integration   - Run integration tests"
 	@echo "  test-e2e                 - Run end-to-end tests"
 	@echo "  test-all                 - Run build + rust + unit tests"
