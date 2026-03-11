@@ -42,7 +42,17 @@ typedef struct {
     void *pool;
 } ngx_list_t;
 
-typedef struct { int dummy; } ngx_pool_t;
+typedef struct pool_alloc_s pool_alloc_t;
+
+struct pool_alloc_s {
+    void *ptr;
+    pool_alloc_t *next;
+};
+
+typedef struct {
+    pool_alloc_t *allocs;
+} ngx_pool_t;
+
 typedef struct { void *log; } ngx_connection_t;
 
 typedef struct {
@@ -60,6 +70,7 @@ typedef struct {
     ngx_pool_t *pool;
     ngx_connection_t *connection;
     ngx_http_headers_out_t headers_out;
+    ngx_flag_t allow_ranges;
     void *main;
 } ngx_http_request_t;
 
@@ -100,8 +111,29 @@ ngx_int_t ngx_http_markdown_update_headers(ngx_http_request_t *r,
 void *
 ngx_pnalloc(const ngx_pool_t *pool, size_t size)
 {
-    UNUSED(pool);
-    return malloc(size);
+    ngx_pool_t *mutable_pool = (ngx_pool_t *) pool;
+    pool_alloc_t *node;
+    void *ptr;
+
+    if (mutable_pool == NULL) {
+        return NULL;
+    }
+
+    ptr = malloc(size);
+    if (ptr == NULL) {
+        return NULL;
+    }
+
+    node = (pool_alloc_t *) malloc(sizeof(*node));
+    if (node == NULL) {
+        free(ptr);
+        return NULL;
+    }
+
+    node->ptr = ptr;
+    node->next = mutable_pool->allocs;
+    mutable_pool->allocs = node;
+    return ptr;
 }
 
 ngx_table_elt_t *
@@ -182,6 +214,26 @@ init_headers_list(ngx_list_t *list, ngx_uint_t capacity)
     list->part.next = NULL;
 }
 
+static void
+destroy_pool(ngx_pool_t *pool)
+{
+    pool_alloc_t *node;
+
+    if (pool == NULL) {
+        return;
+    }
+
+    node = pool->allocs;
+    while (node != NULL) {
+        pool_alloc_t *next = node->next;
+        free(node->ptr);
+        free(node);
+        node = next;
+    }
+
+    free(pool);
+}
+
 static ngx_table_elt_t *
 push_header(ngx_http_request_t *r, const char *key, const char *value)
 {
@@ -189,8 +241,8 @@ push_header(ngx_http_request_t *r, const char *key, const char *value)
     size_t val_data_len = test_cstrnlen(value, 512);
     size_t key_len = key_data_len + 1;
     size_t val_len = val_data_len + 1;
-    char *key_copy = (char *) malloc(key_len);
-    char *val_copy = (char *) malloc(val_len);
+    char *key_copy = (char *) ngx_pnalloc(r->pool, key_len);
+    char *val_copy = (char *) ngx_pnalloc(r->pool, val_len);
     ngx_table_elt_t *h = ngx_list_push(&r->headers_out.headers);
     TEST_ASSERT(h != NULL, "header list push failed");
     TEST_ASSERT(key_copy != NULL, "alloc key failed");
@@ -259,6 +311,24 @@ new_request(void)
 }
 
 static void
+free_request(ngx_http_request_t *r)
+{
+    if (r == NULL) {
+        return;
+    }
+
+    free(r->headers_out.headers.part.elts);
+    r->headers_out.headers.part.elts = NULL;
+    r->headers_out.headers.part.nelts = 0;
+
+    free(r->connection);
+    r->connection = NULL;
+
+    destroy_pool(r->pool);
+    r->pool = NULL;
+}
+
+static void
 test_update_headers_full_path(void)
 {
     ngx_http_request_t r = new_request();
@@ -304,6 +374,7 @@ test_update_headers_full_path(void)
     TEST_ASSERT(token_h != NULL, "Token header should be present when enabled");
     TEST_ASSERT(strstr((char *) token_h->value.data, "123") != NULL, "Token header value should contain token count");
 
+    free_request(&r);
     TEST_PASS("Full header update path works");
 }
 
@@ -331,6 +402,8 @@ test_update_headers_without_optional_fields(void)
                 "No active ETag header should remain when generation disabled");
     TEST_ASSERT(find_header(&r, "X-Markdown-Tokens") == NULL,
                 "Token header should not be added when disabled");
+
+    free_request(&r);
     TEST_PASS("Optional field handling works");
 }
 
