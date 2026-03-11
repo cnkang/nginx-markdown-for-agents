@@ -35,6 +35,12 @@ make test-rust
 # Full NGINX module unit suite
 make test-nginx-unit
 
+# NGINX module unit smoke tests with clang
+make test-nginx-unit-clang-smoke
+
+# NGINX module unit smoke tests with AddressSanitizer/UndefinedBehaviorSanitizer
+make test-nginx-unit-sanitize-smoke
+
 # Integration tests
 make test-nginx-integration
 
@@ -52,4 +58,5 @@ As a working rule:
 
 - small parser or converter changes usually start with `make test` or `make test-rust`
 - module behavior changes usually need `make test-nginx-unit`
+- compiler compatibility checks use `make test-nginx-unit-clang-smoke` and `make test-nginx-unit-sanitize-smoke`
 - proxy-chain, header-propagation, and runtime-path changes usually need integration or E2E coverage

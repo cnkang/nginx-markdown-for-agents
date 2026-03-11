@@ -1091,39 +1091,25 @@ curl -H "Accept: text/markdown" http://localhost/test
 
 | Module Version | NGINX Version | Status |
 |----------------|---------------|--------|
-| 1.0.x | 1.24.x+ | Supported |
-| 1.0.x | < 1.24.0 | Not supported |
+| 0.2.x | 1.24.0+ | Supported |
+| 0.2.x | < 1.24.0 | Not supported |
 
 #### Rust Version Compatibility
 
 | Module Version | Rust Version | Status |
 |----------------|--------------|--------|
-| 1.0.x | 1.70.0+ | Supported |
-| 1.0.x | < 1.70.0 | Not supported |
+| 0.2.x | 1.85.0+ | Supported (edition 2024) |
+| 0.2.x | < 1.85.0 | Not supported |
 
 ---
 
 ### Migration Notes
 
-#### Migrating from v1.0 to v1.1
+#### Upgrading to 0.2.x
 
-**New Features:**
-- Enhanced token estimation
-- Additional metrics
-- Performance improvements
+No public directive renames are introduced. If you relied on older documentation, review the updated guides for clarified installation paths, compression rollout guidance, metrics fields, and architecture references.
 
-**Breaking Changes:**
-- None
-
-**Configuration Changes:**
-- New directive: `markdown_normalize_output` (default: on)
-- New directive: `markdown_validate_commonmark` (default: off)
-
-**Migration Steps:**
-1. Review new directives
-2. Update configuration if needed
-3. Follow standard upgrade procedure
-4. No data migration required
+Variable-driven `markdown_filter` support is new in 0.2.0. Existing static `on`/`off` configurations continue to work without changes.
 
 ---
 

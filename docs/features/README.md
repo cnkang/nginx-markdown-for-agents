@@ -26,6 +26,11 @@ If you need rollout steps, operator checklists, or directive syntax, go back to:
 - [charset-detection.md](charset-detection.md)
 - [security.md](security.md)
 
+### Content negotiation and caching
+
+- [CONTENT_NEGOTIATION.md](CONTENT_NEGOTIATION.md)
+- [CACHE_AWARE_RESPONSES.md](CACHE_AWARE_RESPONSES.md)
+
 ### Metadata and enrichment
 
 - [TOKEN_ESTIMATOR.md](TOKEN_ESTIMATOR.md)

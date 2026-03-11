@@ -5,9 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.2.1] - 2026-03-11
 
-No unreleased changes yet.
+### Added
+- CI jobs for clang compiler and AddressSanitizer/UndefinedBehaviorSanitizer smoke tests (`unit-clang-smoke`, `unit-sanitize-smoke`)
+- SonarCloud Quality Gate Status badge in both English and Chinese READMEs
+
+### Changed
+- Updated documentation to reflect correct Rust minimum version (1.85.0+ for edition 2024)
+- Corrected NGINX minimum version references across all documentation (1.24.0+)
+- Added missing feature documentation references (CONTENT_NEGOTIATION.md, CACHE_AWARE_RESPONSES.md) to feature index
+- Updated component README source layouts to match current file structure
+- Removed placeholder migration notes for non-existent future versions from Operations guide
+- Corrected `make test-nginx-e2e` references to actual `make test-e2e` target
+- Added clang and sanitizer smoke test targets to testing documentation
+
+### Fixed
+- Rust minimum version requirement in all documentation (was 1.70.0+, now 1.85.0+ to match `edition = "2024"`)
+- NGINX minimum version in CONTRIBUTING.md (was 1.18.0, now 1.24.0)
 
 ## [0.2.0] - 2026-03-06
 
@@ -107,7 +122,7 @@ This release expands runtime configurability, tightens module internals and vali
 - macOS (Apple Silicon and Intel)
 - Linux (x86_64 and aarch64)
 - NGINX 1.24.0+
-- Rust 1.70.0+
+- Rust 1.85.0+
 
 ### Known Limitations
 - Full buffering required (no streaming conversion)

@@ -27,8 +27,8 @@ This project follows a professional and respectful code of conduct. Please:
 
 Before contributing, ensure you have:
 
-- Rust 1.70.0 or higher
-- NGINX 1.18.0 or higher (source code for module development)
+- Rust 1.85.0 or higher
+- NGINX 1.24.0 or higher (source code for module development)
 - cbindgen for C header generation
 - Basic understanding of NGINX module development (for C contributions)
 - Familiarity with Rust (for converter contributions)

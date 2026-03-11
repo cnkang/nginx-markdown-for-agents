@@ -21,6 +21,7 @@ In practice, this is the layer that decides whether a request should stay as HTM
 ```text
 src/
   ngx_http_markdown_filter_module.c   main module entrypoint and configuration
+  ngx_http_markdown_filter_module.h   module types and function declarations
   ngx_http_markdown_accept.c          Accept header parsing
   ngx_http_markdown_auth.c            authentication and cache policy handling
   ngx_http_markdown_buffer.c          response buffering
@@ -29,6 +30,7 @@ src/
   ngx_http_markdown_eligibility.c     conversion eligibility checks
   ngx_http_markdown_error.c           failure handling
   ngx_http_markdown_headers.c         response header updates
+  ngx_http_markdown_headers_impl.h    shared header manipulation helpers
   markdown_converter.h                generated Rust FFI header
 ```
 
