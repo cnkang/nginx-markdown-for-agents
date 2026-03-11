@@ -83,6 +83,8 @@ Available targets include:
 - `make copy-headers` - Copy generated header to `components/nginx-module/src/`
 - `make check-headers` - Verify the generated/copy headers are identical
 - `make test` - Build and run the default smoke test (`components/nginx-module/tests` smoke targets)
+- `make test-nginx-unit-clang-smoke` - Run smoke tests with clang compiler
+- `make test-nginx-unit-sanitize-smoke` - Run smoke tests with AddressSanitizer/UndefinedBehaviorSanitizer
 - `make clean` - Clean Rust and selected NGINX module test artifacts
 
 ## Detailed Build Steps

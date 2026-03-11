@@ -41,6 +41,7 @@ src/
   metadata.rs           metadata extraction
   token_estimator.rs    token estimation
   etag_generator.rs     ETag generation
+  charset.rs            charset detection and encoding
   error.rs              error types
 ```
 

@@ -6,7 +6,7 @@ This project is a production-oriented NGINX filter module backed by a Rust HTML-
 
 ## Current Assessment
 
-As of **March 6, 2026**, the project is at **version 0.2.0**. Core features are implemented and tested. The codebase includes unit, integration, and E2E tests, along with documentation covering installation, configuration, and operations.
+As of **March 11, 2026**, the project is at **version 0.2.1**. Core features are implemented and tested. The codebase includes unit, integration, and E2E tests, along with documentation covering installation, configuration, and operations.
 
 This assessment is based on:
 
@@ -16,9 +16,28 @@ This assessment is based on:
 - CI/CD pipeline with automated builds and security scanning
 - Release artifacts and installation tooling
 
-## Release 0.2.0 Highlights
+## Release 0.2.1 Highlights
 
-The latest release (0.2.0, March 6, 2026) includes:
+The latest release (0.2.1, March 11, 2026) includes:
+
+### Added
+- CI jobs for clang compiler and AddressSanitizer/UndefinedBehaviorSanitizer smoke tests
+- SonarCloud Quality Gate Status badge in both English and Chinese READMEs
+
+### Changed
+- Updated documentation to reflect correct Rust minimum version (1.85.0+ for edition 2024)
+- Corrected NGINX minimum version references across all documentation (1.24.0+)
+- Added missing feature documentation references (CONTENT_NEGOTIATION.md, CACHE_AWARE_RESPONSES.md) to feature index
+- Updated component README source layouts to match current file structure
+- Removed placeholder migration notes for non-existent future versions from Operations guide
+- Corrected make target references throughout documentation
+- Added clang and sanitizer smoke test targets to testing documentation
+
+### Fixed
+- Rust minimum version requirement in all documentation (was 1.70.0+, now 1.85.0+)
+- NGINX minimum version in CONTRIBUTING.md (was 1.18.0, now 1.24.0)
+
+## Previous Release: 0.2.0 (March 6, 2026)
 
 ### New Features
 - Variable-driven `markdown_filter` support using NGINX variables and complex values
@@ -106,7 +125,7 @@ Run with: `make test-nginx-unit` or `make -C components/nginx-module/tests unit`
 - Compression and decompression flows
 - Authentication and caching behavior
 
-Run with: `make test-nginx-integration` and `make test-nginx-e2e`
+Run with: `make test-nginx-integration` and `make test-e2e`
 
 ### CI/CD Pipeline
 
@@ -144,11 +163,12 @@ See [DEPLOYMENT_EXAMPLES.md](../guides/DEPLOYMENT_EXAMPLES.md) for configuration
 
 ## Current Focus and Roadmap
 
-### Current Release (0.2.0)
-- Variable-driven configuration
-- Enhanced installation tooling
-- Documentation refresh
-- Hardened CI/CD pipeline
+### Current Release (0.2.1)
+- Documentation accuracy improvements
+- Corrected version requirements (Rust 1.85.0+, NGINX 1.24.0+)
+- Enhanced CI with clang and sanitizer smoke tests
+- Updated feature documentation index
+- Improved testing documentation
 
 ### Near-Term
 - Production-scale benchmarking and performance profiling
@@ -227,7 +247,7 @@ make test
 make test-rust              # Rust converter tests
 make test-nginx-unit        # NGINX module unit tests
 make test-nginx-integration # Integration tests (requires nginx)
-make test-nginx-e2e         # End-to-end tests (requires nginx)
+make test-e2e                # End-to-end tests (requires nginx)
 ```
 
 ### Continuous Integration
@@ -246,7 +266,7 @@ View the latest CI status: [GitHub Actions](https://github.com/cnkang/nginx-mark
 - macOS (Apple Silicon and Intel)
 - Linux (x86_64 and aarch64)
 - NGINX 1.24.0 and later
-- Rust 1.70.0 and later
+- Rust 1.85.0 and later
 
 ### Docker Support
 - Official NGINX base images
