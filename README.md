@@ -216,6 +216,7 @@ See [docs/testing/README.md](docs/testing/README.md) for integration, E2E, and p
 | Configure directives | [docs/guides/CONFIGURATION.md](docs/guides/CONFIGURATION.md) |
 | Start from deployment examples | [docs/guides/DEPLOYMENT_EXAMPLES.md](docs/guides/DEPLOYMENT_EXAMPLES.md) |
 | Operate and troubleshoot | [docs/guides/OPERATIONS.md](docs/guides/OPERATIONS.md) |
+| Report a vulnerability or review security support | [SECURITY.md](SECURITY.md) |
 | Understand architecture and design choices | [docs/architecture/README.md](docs/architecture/README.md) |
 | Map directives to runtime behavior | [docs/architecture/CONFIG_BEHAVIOR_MAP.md](docs/architecture/CONFIG_BEHAVIOR_MAP.md) |
 | Explore implementation details | [docs/features/README.md](docs/features/README.md) |
@@ -229,6 +230,7 @@ See [docs/testing/README.md](docs/testing/README.md) for integration, E2E, and p
 - Installing in a real environment: go to [docs/guides/INSTALLATION.md](docs/guides/INSTALLATION.md)
 - Tuning behavior or policy: use [docs/guides/CONFIGURATION.md](docs/guides/CONFIGURATION.md)
 - Operating in production: use [docs/guides/OPERATIONS.md](docs/guides/OPERATIONS.md)
+- Reporting a vulnerability: use [SECURITY.md](SECURITY.md)
 - Understanding system design: use [docs/architecture/README.md](docs/architecture/README.md)
 - Understanding what directives change in the runtime path: use [docs/architecture/CONFIG_BEHAVIOR_MAP.md](docs/architecture/CONFIG_BEHAVIOR_MAP.md)
 - Reading implementation details: use [docs/features/README.md](docs/features/README.md)
