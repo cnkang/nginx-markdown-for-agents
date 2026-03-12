@@ -109,13 +109,12 @@ ngx_int_t ngx_http_markdown_update_headers(ngx_http_request_t *r,
 
 /* Mocks required by ngx_http_markdown_headers_standalone.c */
 void *
-ngx_pnalloc(const ngx_pool_t *pool, size_t size)
+ngx_pnalloc(ngx_pool_t *pool, size_t size)
 {
-    ngx_pool_t *mutable_pool = (ngx_pool_t *) pool;
     pool_alloc_t *node;
     void *ptr;
 
-    if (mutable_pool == NULL) {
+    if (pool == NULL) {
         return NULL;
     }
 
@@ -131,8 +130,8 @@ ngx_pnalloc(const ngx_pool_t *pool, size_t size)
     }
 
     node->ptr = ptr;
-    node->next = mutable_pool->allocs;
-    mutable_pool->allocs = node;
+    node->next = pool->allocs;
+    pool->allocs = node;
     return ptr;
 }
 
