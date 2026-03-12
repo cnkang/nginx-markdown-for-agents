@@ -215,6 +215,7 @@ make test-nginx-unit
 | 配置指令 | [docs/guides/CONFIGURATION.md](docs/guides/CONFIGURATION.md) |
 | 查看部署示例 | [docs/guides/DEPLOYMENT_EXAMPLES.md](docs/guides/DEPLOYMENT_EXAMPLES.md) |
 | 运维与排障 | [docs/guides/OPERATIONS.md](docs/guides/OPERATIONS.md) |
+| 报告漏洞或查看安全支持范围 | [SECURITY.md](SECURITY.md) |
 | 了解架构与设计取舍 | [docs/architecture/README.md](docs/architecture/README.md) |
 | 理解配置如何映射到运行时行为 | [docs/architecture/CONFIG_BEHAVIOR_MAP.md](docs/architecture/CONFIG_BEHAVIOR_MAP.md) |
 | 深入实现细节 | [docs/features/README.md](docs/features/README.md) |
@@ -228,6 +229,7 @@ make test-nginx-unit
 - 准备落地安装：看 [docs/guides/INSTALLATION.md](docs/guides/INSTALLATION.md)
 - 需要配置和策略细节：看 [docs/guides/CONFIGURATION.md](docs/guides/CONFIGURATION.md)
 - 准备上线运维：看 [docs/guides/OPERATIONS.md](docs/guides/OPERATIONS.md)
+- 报告漏洞：看 [SECURITY.md](SECURITY.md)
 - 想理解系统结构和技术选型：看 [docs/architecture/README.md](docs/architecture/README.md)
 - 想理解 directive 会改动哪段运行时路径：看 [docs/architecture/CONFIG_BEHAVIOR_MAP.md](docs/architecture/CONFIG_BEHAVIOR_MAP.md)
 - 想深入实现：看 [docs/features/README.md](docs/features/README.md)

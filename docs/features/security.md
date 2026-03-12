@@ -264,9 +264,11 @@ Instead, please report security issues via:
 
 ### Response Process
 
-1. **Acknowledgment**: Within 48 hours
-2. **Assessment**: Within 7 days
-3. **Fix Development**: Priority based on severity
+This is a maintainer-run project, so response times are best effort and may be slower during holidays or periods of limited availability.
+
+1. **Acknowledgment**: Target within 14 calendar days
+2. **Assessment**: Target within 45 calendar days when enough detail is available
+3. **Fix Development**: Priority based on severity and maintainer availability
 4. **Disclosure**: Coordinated with reporter
 
 ### Security Updates
