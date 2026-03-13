@@ -124,6 +124,7 @@ typedef struct {
  */
 typedef struct {
     ngx_shm_zone_t *metrics_shm_zone;  /* Shared-memory zone for cross-worker metrics */
+    size_t          metrics_shm_size;  /* Configured metrics SHM size (default: 8 pages) */
 } ngx_http_markdown_main_conf_t;
 
 /*
@@ -156,6 +157,7 @@ typedef struct {
     ngx_flag_t                   headers_forwarded; /* Whether downstream headers were sent */
     ngx_flag_t                   conversion_attempted;
     ngx_flag_t                   conversion_succeeded;
+    ngx_flag_t                   bypass_counted; /* Whether conversions_bypassed was incremented */
     
     /* Decompression state */
     ngx_http_markdown_compression_type_e  compression_type;    /* Detected compression type */

@@ -322,6 +322,25 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
     },
 
     /*
+     * markdown_metrics_shm_size <size>
+     *
+     * Size of the shared-memory zone used to aggregate metrics across workers.
+     * Default: 8 * ngx_pagesize
+     * Context: http
+     *
+     * Example:
+     *   markdown_metrics_shm_size 128k;
+     */
+    {
+        ngx_string("markdown_metrics_shm_size"),
+        NGX_HTTP_MAIN_CONF|NGX_CONF_TAKE1,
+        ngx_conf_set_size_slot,
+        NGX_HTTP_MAIN_CONF_OFFSET,
+        offsetof(ngx_http_markdown_main_conf_t, metrics_shm_size),
+        NULL
+    },
+
+    /*
      * markdown_metrics
      *
      * Enables metrics exposure endpoint at this location.

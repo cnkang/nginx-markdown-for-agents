@@ -16,6 +16,7 @@
 
 /* Configuration-unit forward declarations. */
 static void *ngx_http_markdown_create_main_conf(ngx_conf_t *cf);
+static char *ngx_http_markdown_init_main_conf(ngx_conf_t *cf, void *conf);
 static void *ngx_http_markdown_create_conf(ngx_conf_t *cf);
 static char *ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child);
 static ngx_int_t ngx_http_markdown_init_metrics_zone(ngx_shm_zone_t *shm_zone, void *data);

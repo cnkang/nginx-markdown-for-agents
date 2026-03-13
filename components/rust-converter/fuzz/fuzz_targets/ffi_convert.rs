@@ -30,7 +30,7 @@ fuzz_target!(|data: &[u8]| {
     let base_url = b"https://example.com/fuzz";
     let options = MarkdownOptions {
         flavor: u32::from(bits & 1),
-        timeout_ms: u32::from(bits.wrapping_shr(1) & 0x0F) + 1,
+        timeout_ms: u32::from((bits >> 1) & 0x0F) + 1,
         generate_etag: (bits >> 5) & 1,
         estimate_tokens: (bits >> 6) & 1,
         front_matter: (bits >> 7) & 1,

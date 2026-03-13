@@ -25,7 +25,7 @@ static ngx_http_module_t ngx_http_markdown_filter_module_ctx = {
     NULL,                                   /* preconfiguration */
     ngx_http_markdown_filter_init,          /* postconfiguration */
     ngx_http_markdown_create_main_conf,     /* create main configuration */
-    NULL,                                   /* init main configuration */
+    ngx_http_markdown_init_main_conf,       /* init main configuration */
     NULL,                                   /* create server configuration */
     NULL,                                   /* merge server configuration */
     ngx_http_markdown_create_conf,          /* create location configuration */
