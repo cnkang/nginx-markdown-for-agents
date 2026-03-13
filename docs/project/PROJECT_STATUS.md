@@ -46,6 +46,15 @@ The latest release (0.2.1, March 11, 2026) includes:
 - Rust minimum version requirement in all documentation (was 1.70.0+, now 1.85.0+)
 - NGINX minimum version in CONTRIBUTING.md (was 1.18.0, now 1.24.0)
 
+## Unreleased / Current Work
+
+- Further decomposition of the NGINX module into focused config wiring/core/handlers, request-state, payload buffering/replay, conversion/output, lifecycle, and metrics helper units
+- Split Rust converter internals into focused renderer submodules
+- Tightened authenticated-request cache-control handling
+- Hardened canonical E2E validation with TLS backend support
+- Enhanced CI/CD workflows and release automation
+- Refreshed documentation across guides and references
+
 ## Previous Release: 0.2.0 (March 6, 2026)
 
 ### New Features
@@ -55,15 +64,6 @@ The latest release (0.2.1, March 11, 2026) includes:
 - Simplified Chinese documentation (`README_zh-CN.md`)
 - Comprehensive deployment examples guide
 - Complete architecture documentation suite
-
-### Improvements
-- Refactored NGINX module internals for better maintainability
-- Split Rust converter internals into focused renderer submodules
-- Split NGINX module config wiring/core/handlers, request-state, payload buffering/replay, conversion/output, lifecycle, and metrics endpoint logic into focused helper units
-- Tightened authenticated-request cache-control handling
-- Hardened canonical E2E validation with TLS backend support
-- Enhanced CI/CD workflows and release automation
-- Refreshed documentation across all guides and references
 
 ### Bug Fixes
 - Normalized `markdown_filter` runtime parsing for consistent variable resolution
@@ -296,7 +296,7 @@ See `examples/docker/` for Docker build examples.
 
 ## Summary
 
-**NGINX Markdown for Agents** is at version 0.2.1. The project provides HTML-to-Markdown conversion through NGINX content negotiation.
+**NGINX Markdown for Agents** is at version 0.2.1. The project provides HTML-to-Markdown conversion through NGINX content negotiation, with runtime validation reuse, fuzzing workflows, and shared metrics aggregation for observability.
 
 ### Key Components
 - Core feature implementation
