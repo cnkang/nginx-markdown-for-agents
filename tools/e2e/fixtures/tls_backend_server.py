@@ -5,26 +5,9 @@ import argparse
 import json
 import socketserver
 import ssl
-import time
 
 SIMPLE_HTML = """<html><head><title>Simple</title></head><body><h1>Simple Test Page</h1><p>Visit <a href=\"https://example.com\">Example</a>.</p></body></html>"""
-
-COMPLEX_HTML = """<html><head><title>Complex</title></head><body>
-<h1>Main Heading</h1>
-<h2>Subheading</h2>
-<p>This is <strong>complex</strong> content with <em>various</em> elements.</p>
-<pre><code>let x = 1;</code></pre>
-<script>console.log('remove me')</script>
-</body></html>"""
-
-CHUNKED_HTML_PARTS = [
-    "<html><body>",
-    "<h1>Chunked Response</h1>",
-    "<p>This response is sent in chunks.</p>",
-    "</body></html>",
-]
-
-LARGE_HTML = "<html><body><h1>Large Document</h1><p>" + ("content " * 40000) + "</p></body></html>"
+ERROR_HTML = """<html><body><h1>Backend Error</h1></body></html>"""
 
 HTTP_STATUS_MESSAGES = {
     200: "OK",
@@ -40,7 +23,7 @@ def status_line(status: int) -> bytes:
 
 
 class TLSBackendHandler(socketserver.StreamRequestHandler):
-    def handle(self):
+    def handle(self) -> None:
         request_line = self.rfile.readline(65537)
         if not request_line:
             return
@@ -70,20 +53,8 @@ class TLSBackendHandler(socketserver.StreamRequestHandler):
             self._send_html(200, SIMPLE_HTML, method)
             return
 
-        if path == "/complex":
-            self._send_html(200, COMPLEX_HTML, method)
-            return
-
         if path == "/error":
-            self._send_html(500, "<html><body><h1>Backend Error</h1></body></html>", method)
-            return
-
-        if path == "/large":
-            self._send_html(200, LARGE_HTML, method)
-            return
-
-        if path == "/chunked":
-            self._send_chunked(method)
+            self._send_html(500, ERROR_HTML, method)
             return
 
         self._send_html(404, "<html><body><h1>Not Found</h1></body></html>", method)
@@ -117,26 +88,6 @@ class TLSBackendHandler(socketserver.StreamRequestHandler):
         if method != "HEAD":
             self.wfile.write(payload)
 
-    def _send_chunked(self, method: str) -> None:
-        headers = {
-            "Content-Type": "text/html; charset=utf-8",
-            "Transfer-Encoding": "chunked",
-            "Cache-Control": "public, max-age=3600",
-            "Connection": "close",
-        }
-        self._send_headers(200, headers)
-        if method == "HEAD":
-            return
-
-        for part in CHUNKED_HTML_PARTS:
-            chunk = part.encode("utf-8")
-            self.wfile.write(f"{len(chunk):X}\r\n".encode("ascii"))
-            self.wfile.write(chunk + b"\r\n")
-            self.wfile.flush()
-            time.sleep(0.05)
-
-        self.wfile.write(b"0\r\n\r\n")
-
 
 class ThreadingTLSServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
     allow_reuse_address = True
@@ -152,11 +103,11 @@ class ThreadingTLSServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
         return tls_sock, addr
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Test backend for NGINX markdown E2E")
+def main() -> None:
+    parser = argparse.ArgumentParser(description="TLS backend for markdown proxy E2E checks")
     parser.add_argument("--port", type=int, default=9999)
-    parser.add_argument("--tls-cert", required=True, help="Path to TLS certificate file")
-    parser.add_argument("--tls-key", required=True, help="Path to TLS private key file")
+    parser.add_argument("--tls-cert", required=True)
+    parser.add_argument("--tls-key", required=True)
     args = parser.parse_args()
 
     tls_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
