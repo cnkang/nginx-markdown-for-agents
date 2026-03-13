@@ -92,12 +92,14 @@ The module exposes metrics via the `markdown_metrics` endpoint. Configure monito
 
 Calculate these metrics from the raw counters:
 
+Guard denominator-based formulas so dashboards and alerts emit `0`/`null` instead of `Inf` or `NaN` when the corresponding counter is still zero.
+
 ```
 # Failure rate
 failure_rate = (conversions_failed / conversions_attempted) * 100
 
 # Average conversion time
-avg_conversion_time = conversion_time_sum_ms / conversion_completed
+avg_conversion_time = conversion_completed > 0 ? (conversion_time_sum_ms / conversion_completed) : 0
 
 # Size reduction (proxy for token reduction trend)
 size_reduction = ((input_bytes - output_bytes) / input_bytes) * 100
@@ -459,7 +461,9 @@ grep "conversion failed" /var/log/nginx/error.log | \
 1. **Check average conversion time:**
 ```bash
 curl "${METRICS_URL:-http://localhost/markdown-metrics}"
-# Calculate: total_conversion_time_ms / conversions_succeeded
+# Calculate only when conversion_completed > 0:
+#   total_conversion_time_ms / conversion_completed
+# Otherwise record 0 (or null in your dashboard) to avoid Inf/NaN.
 ```
 
 2. **Identify slow conversions:**
@@ -1267,7 +1271,9 @@ watch -n 30 'curl -s "${METRICS_URL:-http://localhost/markdown-metrics}" | grep 
 ```bash
 # Check average conversion time
 curl "${METRICS_URL:-http://localhost/markdown-metrics}"
-# Calculate: total_conversion_time_ms / conversions_succeeded
+# Calculate only when conversion_completed > 0:
+#   total_conversion_time_ms / conversion_completed
+# Otherwise record 0 (or null in your dashboard) to avoid Inf/NaN.
 ```
 
 2. **Identify slow requests:**
@@ -1610,7 +1616,7 @@ success_rate = (conversions_succeeded / conversions_attempted) * 100
 failure_rate = (conversions_failed / conversions_attempted) * 100
 
 # Average conversion time (ms)
-avg_conversion_time = conversion_time_sum_ms / conversions_succeeded
+avg_conversion_time = conversion_completed > 0 ? (conversion_time_sum_ms / conversion_completed) : 0
 
 # Size reduction (%)
 size_reduction = ((input_bytes - output_bytes) / input_bytes) * 100
