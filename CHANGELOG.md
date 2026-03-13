@@ -24,6 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Hardened native E2E/runtime scripts so reusable `NGINX_BIN` paths are only reused when the runtime layout and module support are actually compatible
 - Aligned Darwin native builds around a consistent `MACOSX_DEPLOYMENT_TARGET` to avoid mismatched static-library link warnings in verification flows
+- Restored Darwin Rust target detection in the shared native-build helper after Linux libc-variant matching expanded the host key used by macOS smoke validation
+- Fixed `markdown_stream_types` content-type validation so stricter `-Werror` official NGINX builds do not fail on `ngx_strchr()` pointer signedness/type checks
 - Restored the Rust perf baseline artifact path resolution used by GitHub Actions so the benchmark job can locate repository corpus fixtures again
 - Cleaned up SonarCloud maintainability findings in native E2E/integration scripts and top-level NGINX implementation include ordering without regressing native builds
 - Synchronized architecture, testing, operations, security, status, and top-level README documentation with the refactored implementation and validation surface
