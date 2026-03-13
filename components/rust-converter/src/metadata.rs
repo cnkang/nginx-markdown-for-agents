@@ -25,6 +25,7 @@ pub struct PageMetadata {
 }
 
 impl PageMetadata {
+    /// Create an empty metadata container.
     pub fn new() -> Self {
         Self::default()
     }
@@ -37,6 +38,11 @@ pub struct MetadataExtractor {
 }
 
 impl MetadataExtractor {
+    /// Create a metadata extractor.
+    ///
+    /// `base_url` is used for canonical fallback and optional relative URL
+    /// resolution; `resolve_urls` toggles whether relative references are
+    /// rewritten to absolute URLs.
     pub fn new(base_url: Option<String>, resolve_urls: bool) -> Self {
         Self {
             base_url,

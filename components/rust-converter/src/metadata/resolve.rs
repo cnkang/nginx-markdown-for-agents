@@ -27,10 +27,12 @@ impl MetadataExtractor {
         format!("{}/{}", base_dir.trim_end_matches('/'), url)
     }
 
+    /// Validate whether `url` has an absolute HTTP(S)-style base form.
     fn is_valid_base_url(&self, url: &str) -> bool {
         url.starts_with("http://") || url.starts_with("https://")
     }
 
+    /// Extract scheme + authority origin from an absolute URL string.
     fn get_origin(&self, url: &str) -> String {
         let after_scheme = if let Some(stripped) = url.strip_prefix("https://") {
             stripped
@@ -48,6 +50,7 @@ impl MetadataExtractor {
         }
     }
 
+    /// Return the directory prefix used for relative-path resolution.
     fn get_base_directory(&self, url: &str) -> String {
         let trimmed = url.trim_end_matches('/');
 

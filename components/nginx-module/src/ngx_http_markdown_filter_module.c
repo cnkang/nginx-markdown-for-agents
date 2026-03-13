@@ -57,6 +57,10 @@ ngx_module_t ngx_http_markdown_filter_module = {
  * ngx_http_headers_in_t (for example `accept`) are not compiled in.
  */
 #if !(NGX_HTTP_HEADERS)
+/*
+ * Fallback header lookup for builds without typed header shortcuts in
+ * `ngx_http_headers_in_t`.
+ */
 static ngx_table_elt_t *
 ngx_http_markdown_find_request_header(ngx_http_request_t *r, const ngx_str_t *name)
 {

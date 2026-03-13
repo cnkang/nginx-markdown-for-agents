@@ -146,10 +146,15 @@ pub fn parse_html_with_charset(
     Ok(dom)
 }
 
+/// Decode source bytes into UTF-8 according to detected charset.
+///
+/// The return type is `Cow<str>` so UTF-8 input can stay borrowed (zero-copy),
+/// while non-UTF-8 input is transcoded into owned UTF-8.
 fn decode_html_to_utf8<'a>(
     html: &'a [u8],
     detected_charset: &str,
 ) -> Result<Cow<'a, str>, ConversionError> {
+    // Keep the UTF-8 hot path allocation-free.
     if detected_charset.eq_ignore_ascii_case("UTF-8") {
         return std::str::from_utf8(html).map(Cow::Borrowed).map_err(|e| {
             ConversionError::EncodingError(format!(
