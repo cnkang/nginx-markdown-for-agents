@@ -80,6 +80,23 @@ ngx_http_markdown_collect_metrics_snapshot(ngx_http_markdown_metrics_snapshot_t 
     snapshot->decompressions_brotli = metrics->decompressions_brotli;
 }
 
+/*
+ * HTTP handler for the /markdown_metrics endpoint.
+ *
+ * - Only responds to GET and HEAD requests; other methods are rejected with
+ *   NGX_HTTP_NOT_ALLOWED.
+ * - Access is restricted to localhost: IPv4 and (when enabled) IPv6 source
+ *   addresses are checked and non-local clients receive NGX_HTTP_FORBIDDEN.
+ * - Collects a best-effort snapshot of the shared markdown metrics counters
+ *   via ngx_http_markdown_collect_metrics_snapshot() and derives aggregate
+ *   values (such as averages) from that snapshot.
+ * - Serializes the resulting metrics into an in-memory buffer in either a
+ *   plain-text or JSON format, depending on the request, and sends the data
+ *   as the response body.
+ *
+ * The function is intentionally self-contained so that metrics formatting and
+ * access-control policy can evolve without impacting the main filter logic.
+ */
 static ngx_int_t
 ngx_http_markdown_metrics_handler(ngx_http_request_t *r)
 {
