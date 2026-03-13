@@ -422,7 +422,7 @@ mod tests {
 
     #[test]
     fn test_parse_chinese_characters() {
-        // Chinese characters: 世界 (world)
+        // Chinese characters (UTF-8 encoded: "world" in Chinese)
         let html = b"<html><body><p>\xE4\xB8\x96\xE7\x95\x8C</p></body></html>";
         let result = parse_html(html);
         assert!(result.is_ok(), "Should parse Chinese characters");

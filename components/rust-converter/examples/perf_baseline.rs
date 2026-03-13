@@ -97,10 +97,12 @@ fn summarize(durations_s: &[f64], input_bytes: usize) -> Stats {
 }
 
 fn repo_root() -> PathBuf {
-    // examples/ -> components/rust-converter/ -> repo root
+    // `CARGO_MANIFEST_DIR` points at `components/rust-converter`, so walk up
+    // through `components/` to reach the repository root.
     let here = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     here.parent()
-        .expect("rust-converter has parent")
+        .and_then(Path::parent)
+        .expect("rust-converter crate lives under components/")
         .to_path_buf()
 }
 
