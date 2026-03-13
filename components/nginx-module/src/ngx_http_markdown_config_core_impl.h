@@ -6,6 +6,10 @@
  * helpers used outside directive parsing.
  */
 
+/* Helper declared early because merge logic uses it before its definition. */
+static void ngx_http_markdown_log_merged_conf(ngx_conf_t *cf,
+    ngx_http_markdown_conf_t *conf);
+
 static ngx_int_t
 ngx_http_markdown_init_metrics_zone(ngx_shm_zone_t *shm_zone, void *data)
 {

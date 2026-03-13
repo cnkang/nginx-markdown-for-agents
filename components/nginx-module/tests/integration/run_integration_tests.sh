@@ -52,6 +52,7 @@ TESTS_FAILED=0
 
 # Reused literals
 SEPARATOR_LINE="=========================================="
+MEDIA_TYPE_HTML="text/html"
 MEDIA_TYPE_MARKDOWN="text/markdown"
 HEADER_CONTENT_TYPE="Content-Type"
 STATUS_CODE_OK_MESSAGE="Status code: 200 OK"
@@ -291,7 +292,7 @@ http {
         location = /test {
             alias '"${STATIC_ROOT}"'/basic.html;
             markdown_filter on;
-            default_type text/html;
+            default_type '"${MEDIA_TYPE_HTML}"';
         }
     }
 }
@@ -358,7 +359,7 @@ http {
         location = /test {
             alias '"${STATIC_ROOT}"'/passthrough.html;
             markdown_filter on;
-            default_type text/html;
+            default_type '"${MEDIA_TYPE_HTML}"';
         }
     }
 }
@@ -367,7 +368,7 @@ http {
     start_nginx "$config" || { log_fail "$NGINX_START_FAILURE_MSG"; return 1; }
     
     # Make request
-    local response=$(make_request "GET" "/test" "text/html")
+    local response=$(make_request "GET" "/test" "$MEDIA_TYPE_HTML")
     local status=$(get_status "$response")
     local content_type=$(get_header "$response" "$HEADER_CONTENT_TYPE")
     local body=$(get_body "$response")
@@ -379,10 +380,10 @@ http {
         log_fail "Status code: Expected 200, got $status"
     fi
     
-    if echo "$content_type" | grep -q "text/html"; then
-        log_pass "Content-Type: text/html (unchanged)"
+    if echo "$content_type" | grep -q "$MEDIA_TYPE_HTML"; then
+        log_pass "Content-Type: ${MEDIA_TYPE_HTML} (unchanged)"
     else
-        log_fail "Content-Type: Expected text/html, got $content_type"
+        log_fail "Content-Type: Expected ${MEDIA_TYPE_HTML}, got $content_type"
     fi
     
     if echo "$body" | grep -q "<html>"; then
@@ -422,13 +423,13 @@ http {
         
         location = /enabled {
             alias '"${STATIC_ROOT}"'/enabled.html;
-            default_type text/html;
+            default_type '"${MEDIA_TYPE_HTML}"';
         }
         
         location = /disabled {
             markdown_filter off;
             alias '"${STATIC_ROOT}"'/disabled.html;
-            default_type text/html;
+            default_type '"${MEDIA_TYPE_HTML}"';
         }
     }
 }
@@ -450,7 +451,7 @@ http {
     response=$(make_request "GET" "/disabled" "$MEDIA_TYPE_MARKDOWN")
     content_type=$(get_header "$response" "$HEADER_CONTENT_TYPE")
     
-    if echo "$content_type" | grep -q "text/html"; then
+    if echo "$content_type" | grep -q "$MEDIA_TYPE_HTML"; then
         log_pass "/disabled: No conversion (location override)"
     else
         log_fail "/disabled: Expected no conversion, got $content_type"
@@ -484,7 +485,7 @@ http {
             markdown_filter on;
             markdown_auth_policy allow;
             add_header Cache-Control private always;
-            default_type text/html;
+            default_type ${MEDIA_TYPE_HTML};
         }
     }
 }
@@ -551,7 +552,7 @@ http {
         location = /test {
             alias ${STATIC_ROOT}/variable.html;
             markdown_filter \$markdown_enabled;
-            default_type text/html;
+            default_type ${MEDIA_TYPE_HTML};
         }
     }
 }
@@ -573,7 +574,7 @@ EOF
 
     response=$(make_request "GET" "/test?md=0" "$MEDIA_TYPE_MARKDOWN")
     content_type=$(get_header "$response" "$HEADER_CONTENT_TYPE")
-    if echo "$content_type" | grep -q "text/html"; then
+    if echo "$content_type" | grep -q "$MEDIA_TYPE_HTML"; then
         log_pass "md=0 disables conversion"
     else
         log_fail "md=0 should not convert, got $content_type"
@@ -589,7 +590,7 @@ EOF
 
     response=$(make_request "GET" "/test?md=bad" "$MEDIA_TYPE_MARKDOWN")
     content_type=$(get_header "$response" "$HEADER_CONTENT_TYPE")
-    if echo "$content_type" | grep -q "text/html"; then
+    if echo "$content_type" | grep -q "$MEDIA_TYPE_HTML"; then
         log_pass "Invalid variable value safely disables conversion"
     else
         log_fail "Invalid value should not convert, got $content_type"
@@ -624,7 +625,7 @@ http {
         location /range.html {
             root ${STATIC_ROOT};
             markdown_filter on;
-            default_type text/html;
+            default_type ${MEDIA_TYPE_HTML};
         }
     }
 }
@@ -633,11 +634,11 @@ EOF
 
     start_nginx "$config" || { log_fail "$NGINX_START_FAILURE_MSG"; return 1; }
 
-    local response
     local status
     local content_type
     local body
 
+    local response
     response=$(make_request "GET" "/range.html" "$MEDIA_TYPE_MARKDOWN" -H "Range: bytes=0-31")
     status=$(get_status "$response")
     content_type=$(get_header "$response" "$HEADER_CONTENT_TYPE")
@@ -649,10 +650,10 @@ EOF
         log_fail "Status code: Expected 206, got $status"
     fi
 
-    if echo "$content_type" | grep -q "text/html"; then
-        log_pass "Content-Type remains text/html for Range bypass"
+    if echo "$content_type" | grep -q "$MEDIA_TYPE_HTML"; then
+        log_pass "Content-Type remains ${MEDIA_TYPE_HTML} for Range bypass"
     else
-        log_fail "Content-Type: Expected text/html, got $content_type"
+        log_fail "Content-Type: Expected ${MEDIA_TYPE_HTML}, got $content_type"
     fi
 
     if echo "$body" | grep -q "<html><body><h1>Range"; then
@@ -698,7 +699,7 @@ http {
         location = /test {
             alias ${STATIC_ROOT}/metrics.html;
             markdown_filter on;
-            default_type text/html;
+            default_type ${MEDIA_TYPE_HTML};
         }
         location /markdown-metrics {
             markdown_metrics;

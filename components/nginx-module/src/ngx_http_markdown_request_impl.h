@@ -6,6 +6,9 @@
  * evolve separately from payload buffering, decompression, and output shaping.
  */
 
+#include "ngx_http_markdown_payload_impl.h"
+#include "ngx_http_markdown_conversion_impl.h"
+
 /*
  * Header filter
  *
@@ -171,14 +174,6 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
      */
     return NGX_OK;
 }
-
-/*
- * Payload coordination lives in a separate implementation include so the
- * request state machine only has to express body-filter phase decisions.
- */
-#include "ngx_http_markdown_payload_impl.h"
-
-#include "ngx_http_markdown_conversion_impl.h"
 
 static ngx_int_t
 ngx_http_markdown_body_filter_convert_and_output(ngx_http_request_t *r,

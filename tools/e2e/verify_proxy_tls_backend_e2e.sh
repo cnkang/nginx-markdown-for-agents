@@ -38,6 +38,7 @@ EOF
 nginx_supports_ssl_upstream() {
   local nginx_bin="$1"
   "${nginx_bin}" -V 2>&1 | grep -q -- '--with-http_ssl_module'
+  return $?
 }
 
 while [[ $# -gt 0 ]]; do
@@ -98,6 +99,7 @@ header_value() {
       exit;
     }
   ' "${file_path}"
+  return $?
 }
 
 cleanup() {
@@ -129,11 +131,9 @@ for cmd in curl python3 openssl awk grep sed; do
   markdown_need_cmd "${cmd}"
 done
 
-if [[ -n "${NGINX_BIN}" ]]; then
-  if ! nginx_supports_ssl_upstream "${NGINX_BIN}"; then
-    echo "==> Reusable NGINX binary lacks http_ssl_module; falling back to self-build"
-    NGINX_BIN=""
-  fi
+if [[ -n "${NGINX_BIN}" ]] && ! nginx_supports_ssl_upstream "${NGINX_BIN}"; then
+  echo "==> Reusable NGINX binary lacks http_ssl_module; falling back to self-build"
+  NGINX_BIN=""
 fi
 
 if [[ -z "${NGINX_BIN}" ]]; then
