@@ -66,7 +66,7 @@ integration-nginx:
 	@bash integration/run_integration_tests.sh
 
 e2e:
-	@bash e2e/run_e2e_tests.sh
+	@bash ../../../tools/e2e/run_e2e_suite.sh
 
 clean:
 	rm -rf build

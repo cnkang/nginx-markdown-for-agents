@@ -11,15 +11,19 @@ NGINX_VERSION="${NGINX_VERSION:-1.28.2}"
 PORT="${PORT:-18094}"
 UPSTREAM_PORT="${UPSTREAM_PORT:-19094}"
 KEEP_ARTIFACTS=0
+NGINX_BIN="${NGINX_BIN:-}"
 MARKDOWN_MAX_SIZE="${MARKDOWN_MAX_SIZE:-10m}"
 PROFILE="${PROFILE:-smoke}"
 WORKSPACE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+NATIVE_BUILD_HELPER="${WORKSPACE_ROOT}/tools/lib/nginx_markdown_native_build.sh"
 BUILDROOT=""
 RUNTIME=""
 RUST_TARGET=""
+NGINX_EXECUTABLE=""
 UPSTREAM_PID=""
 ORIG_ARGS=("$@")
 ACCEPT_MARKDOWN_HEADER='Accept: text/markdown'
+source "${NATIVE_BUILD_HELPER}"
 
 usage() {
   cat <<EOF
@@ -31,43 +35,8 @@ Build local NGINX with the markdown module and run chunked/streaming E2E checks:
   - chunked above max_size -> fail-open pass-through without truncation
 
 This script auto-reexecs under native arm64 on Apple Silicon if launched under Rosetta.
+Set NGINX_BIN to reuse an existing module-enabled nginx binary and skip rebuilding.
 EOF
-  return 0
-}
-
-ensure_native_apple_silicon() {
-  if [[ "$(uname -s)" != "Darwin" ]]; then
-    return 0
-  fi
-
-  local translated
-  translated="$(sysctl -in sysctl.proc_translated 2>/dev/null || echo 0)"
-  if [[ "${translated}" == "1" ]]; then
-    echo "Re-executing under native arm64 (/bin/bash) to avoid Rosetta..." >&2
-    exec arch -arm64 /bin/bash "$0" "$@"
-  fi
-}
-
-need_cmd() {
-  local cmd_name="$1"
-  command -v "${cmd_name}" >/dev/null 2>&1 || {
-    echo "Missing required command: ${cmd_name}" >&2
-    exit 1
-  }
-  return 0
-}
-
-detect_rust_target() {
-  case "$(uname -s):$(uname -m)" in
-    Darwin:arm64) echo "aarch64-apple-darwin" ;;
-    Darwin:x86_64) echo "x86_64-apple-darwin" ;;
-    Linux:x86_64) echo "x86_64-unknown-linux-gnu" ;;
-    Linux:aarch64) echo "aarch64-unknown-linux-gnu" ;;
-    *)
-      echo "Unsupported host for Rust target detection: $(uname -s)/$(uname -m)" >&2
-      exit 1
-      ;;
-  esac
   return 0
 }
 
@@ -79,8 +48,8 @@ cleanup() {
     wait "${UPSTREAM_PID}" >/dev/null 2>&1 || true
   fi
 
-  if [[ -n "${RUNTIME}" && -x "${RUNTIME}/sbin/nginx" ]]; then
-    "${RUNTIME}/sbin/nginx" -p "${RUNTIME}" -c conf/nginx.conf -s stop >/dev/null 2>&1 || true
+  if [[ -n "${RUNTIME}" && -n "${NGINX_EXECUTABLE}" && -x "${NGINX_EXECUTABLE}" ]]; then
+    "${NGINX_EXECUTABLE}" -p "${RUNTIME}" -c conf/nginx.conf -s stop >/dev/null 2>&1 || true
   fi
 
   if [[ $rc -eq 0 && "${KEEP_ARTIFACTS}" -eq 0 && -n "${BUILDROOT}" && -d "${BUILDROOT}" ]]; then
@@ -143,19 +112,24 @@ case "${PROFILE}" in
 esac
 
 if (( ${#ORIG_ARGS[@]} )); then
-  ensure_native_apple_silicon "${ORIG_ARGS[@]}"
+  markdown_ensure_native_apple_silicon "$0" "${ORIG_ARGS[@]}"
 else
-  ensure_native_apple_silicon
+  markdown_ensure_native_apple_silicon "$0"
 fi
 
-for cmd in curl tar make cargo python3 awk grep sed wc; do
-  need_cmd "$cmd"
+for cmd in curl python3 awk grep sed wc; do
+  markdown_need_cmd "$cmd"
 done
 if [[ "${PROFILE}" == "stress" ]]; then
-  need_cmd ab
+  markdown_need_cmd ab
+fi
+if [[ -z "${NGINX_BIN}" ]]; then
+  for cmd in tar make cargo; do
+    markdown_need_cmd "$cmd"
+  done
 fi
 
-RUST_TARGET="$(detect_rust_target)"
+RUST_TARGET="$(markdown_detect_rust_target)"
 BUILDROOT="$(mktemp -d /tmp/nginx-chunked-native.XXXXXX)"
 RUNTIME="${BUILDROOT}/runtime"
 RAW_DIR="${BUILDROOT}/raw"
@@ -284,38 +258,28 @@ chmod +x "${UPSTREAM_SCRIPT}"
 eval "$(python3 "${UPSTREAM_SCRIPT}" --print-metrics)"
 
 echo "==> Host architecture: $(uname -m)"
-echo "==> Building Rust converter (${RUST_TARGET})"
-(
-  cd "${WORKSPACE_ROOT}/components/rust-converter"
-  cargo build --target "${RUST_TARGET}" --release >/dev/null
-  mkdir -p target/release
-  src_lib="target/${RUST_TARGET}/release/libnginx_markdown_converter.a"
-  dst_lib="target/release/libnginx_markdown_converter.a"
-  if [[ "$(cd "$(dirname "$src_lib")" && pwd)/$(basename "$src_lib")" != "$(cd "$(dirname "$dst_lib")" && pwd)/$(basename "$dst_lib")" ]]; then
-    cp "$src_lib" "$dst_lib" 2>/dev/null || true
-  fi
+if [[ -n "${NGINX_BIN}" ]]; then
+  echo "==> Reusing existing NGINX binary (${NGINX_BIN})"
+  markdown_copy_runtime_conf_from_nginx_bin "${NGINX_BIN}" "${RUNTIME}"
+  NGINX_EXECUTABLE="${NGINX_BIN}"
+else
+  echo "==> Building Rust converter (${RUST_TARGET})"
+  markdown_prepare_rust_converter_release "${WORKSPACE_ROOT}" "${RUST_TARGET}" >/dev/null
 
-  header_src="${WORKSPACE_ROOT}/components/rust-converter/include/markdown_converter.h"
-  header_dst="${WORKSPACE_ROOT}/components/nginx-module/src/markdown_converter.h"
-  if [[ ! -f "${header_src}" ]]; then
-    echo "Missing generated header: ${header_src}" >&2
-    exit 1
-  fi
-  cp "${header_src}" "${header_dst}"
-)
+  echo "==> Downloading/building NGINX ${NGINX_VERSION}"
+  curl -fsSL "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" -o "${BUILDROOT}/nginx.tar.gz"
+  mkdir -p "${BUILDROOT}/src"
+  tar -xzf "${BUILDROOT}/nginx.tar.gz" -C "${BUILDROOT}/src" --strip-components=1
+  (
+    cd "${BUILDROOT}/src"
+    ./configure --without-http_rewrite_module --prefix="${RUNTIME}" --add-module="${WORKSPACE_ROOT}/components/nginx-module" >/dev/null
+    make -j"$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)" >/dev/null
+    make install >/dev/null
+  )
+  NGINX_EXECUTABLE="${RUNTIME}/sbin/nginx"
+fi
 
-echo "==> Downloading/building NGINX ${NGINX_VERSION}"
-curl -fsSL "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" -o "${BUILDROOT}/nginx.tar.gz"
-mkdir -p "${BUILDROOT}/src"
-tar -xzf "${BUILDROOT}/nginx.tar.gz" -C "${BUILDROOT}/src" --strip-components=1
-(
-  cd "${BUILDROOT}/src"
-  ./configure --without-http_rewrite_module --prefix="${RUNTIME}" --add-module="${WORKSPACE_ROOT}/components/nginx-module" >/dev/null
-  make -j"$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)" >/dev/null
-  make install >/dev/null
-)
-
-mkdir -p "${RUNTIME}/conf"
+mkdir -p "${RUNTIME}/conf" "${RUNTIME}/logs"
 
 echo "==> Starting chunked upstream on 127.0.0.1:${UPSTREAM_PORT}"
 python3 "${UPSTREAM_SCRIPT}" --serve --host 127.0.0.1 --port "${UPSTREAM_PORT}" > "${RAW_DIR}/upstream.log" 2>&1 &
@@ -365,7 +329,7 @@ http {
 EOF
 
 echo "==> Starting NGINX on 127.0.0.1:${PORT}"
-"${RUNTIME}/sbin/nginx" -p "${RUNTIME}" -c conf/nginx.conf
+"${NGINX_EXECUTABLE}" -p "${RUNTIME}" -c conf/nginx.conf
 sleep 1
 
 echo "==> Case 1: chunked below max_size should convert to Markdown"

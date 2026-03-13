@@ -5,6 +5,11 @@ UNAME_M := $(shell uname -m)
 
 LINUX_LIBC := $(shell if command -v ldd >/dev/null 2>&1 && ldd --version 2>&1 | grep -qi musl; then echo musl; elif command -v ldd >/dev/null 2>&1 && ldd /bin/sh 2>&1 | grep -qi musl; then echo musl; else echo gnu; fi)
 
+ifeq ($(UNAME_S),Darwin)
+  MACOSX_DEPLOYMENT_TARGET ?= $(shell sw_vers -productVersion 2>/dev/null | awk -F. '{print $$1 ".0"}')
+  export MACOSX_DEPLOYMENT_TARGET
+endif
+
 ifndef RUST_TARGET
   ifeq ($(UNAME_S),Darwin)
     ifeq ($(UNAME_M),arm64)
@@ -45,7 +50,7 @@ NGINX_HEADER := $(NGINX_MODULE_DIR)/src/markdown_converter.h
 
 .PHONY: all build rust-lib rust-lib-debug copy-headers check-headers \
         test test-rust test-nginx-unit test-nginx-unit-clang-smoke test-nginx-unit-sanitize-smoke \
-        test-nginx-integration test-e2e test-all \
+        test-nginx-integration test-e2e test-all test-rust-fuzz-smoke \
         docs-check verify-large-e2e verify-huge-native-e2e verify-huge-allowed-native-e2e \
         verify-chunked-native-e2e verify-chunked-native-e2e-smoke verify-chunked-native-e2e-stress \
         clean help
@@ -80,6 +85,11 @@ test: build
 
 test-rust:
 	cd $(RUST_DIR) && cargo test --all
+
+test-rust-fuzz-smoke:
+	cd $(RUST_DIR) && cargo +nightly fuzz run parser_html -- -max_total_time=5
+	cd $(RUST_DIR) && cargo +nightly fuzz run ffi_convert -- -max_total_time=5
+	cd $(RUST_DIR) && cargo +nightly fuzz run security_validator -- -max_total_time=5
 
 test-nginx-unit:
 	$(MAKE) -C $(NGINX_TEST_DIR) unit
@@ -132,6 +142,7 @@ help:
 	@echo "  build                    - Build Rust library + sync header"
 	@echo "  test                     - Fast smoke tests"
 	@echo "  test-rust                - Run Rust test suite"
+	@echo "  test-rust-fuzz-smoke     - Run short cargo-fuzz smoke checks"
 	@echo "  test-nginx-unit          - Run nginx C unit tests"
 	@echo "  test-nginx-unit-clang-smoke - Run nginx C smoke tests with clang"
 	@echo "  test-nginx-unit-sanitize-smoke - Run nginx C smoke tests with ASan/UBSan"

@@ -1,0 +1,97 @@
+name: macOS Smoke
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main, master]
+    paths:
+      - "components/**"
+      - "tools/**"
+      - "tests/**"
+      - "docs/**"
+      - "Makefile"
+      - "README.md"
+      - "README_zh-CN.md"
+      - ".github/workflows/macos-smoke.yml"
+  push:
+    branches: [main, master]
+    paths:
+      - "components/**"
+      - "tools/**"
+      - "tests/**"
+      - "docs/**"
+      - "Makefile"
+      - "README.md"
+      - "README_zh-CN.md"
+      - ".github/workflows/macos-smoke.yml"
+
+concurrency:
+  group: macos-smoke-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  darwin-native-smoke:
+    name: Darwin Native Smoke
+    runs-on: macos-15
+    timeout-minutes: 90
+    continue-on-error: true
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
+        with:
+          workspaces: |
+            components/rust-converter -> target
+
+      - name: Build Rust converter
+        run: make build
+
+      - name: Run real-nginx IMS validation
+        id: ims_runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          nginx_bin_file="$(mktemp)"
+          buildroot_file="$(mktemp)"
+          ./tools/ci/verify_real_nginx_ims.sh \
+            --keep-artifacts \
+            --nginx-bin-output "${nginx_bin_file}" \
+            --buildroot-output "${buildroot_file}"
+
+          buildroot="$(cat "${buildroot_file}")"
+          nginx_bin="$(cat "${nginx_bin_file}")"
+
+          if [[ -z "${buildroot}" || ! -d "${buildroot}" ]]; then
+            echo "Failed to locate retained IMS build artifacts" >&2
+            exit 1
+          fi
+          if [[ ! -x "${nginx_bin}" ]]; then
+            echo "Retained IMS nginx binary is missing: ${nginx_bin}" >&2
+            exit 1
+          fi
+
+          echo "buildroot=${buildroot}" >> "${GITHUB_OUTPUT}"
+          echo "nginx_bin=${nginx_bin}" >> "${GITHUB_OUTPUT}"
+
+      - name: Run chunked streaming native smoke validation
+        env:
+          NGINX_BIN: ${{ steps.ims_runtime.outputs.nginx_bin }}
+        run: ./tools/e2e/verify_chunked_streaming_native_e2e.sh --profile smoke
+
+      - name: Remove retained IMS build artifacts
+        if: always()
+        env:
+          IMS_BUILDROOT: ${{ steps.ims_runtime.outputs.buildroot }}
+        run: |
+          if [[ -n "${IMS_BUILDROOT}" && -d "${IMS_BUILDROOT}" ]]; then
+            rm -rf "${IMS_BUILDROOT}"
+          fi
