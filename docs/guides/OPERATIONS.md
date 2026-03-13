@@ -94,7 +94,7 @@ Calculate these metrics from the raw counters:
 
 Guard denominator-based formulas so dashboards and alerts emit `0`/`null` instead of `Inf` or `NaN` when the corresponding counter is still zero.
 
-```
+```text
 # Failure rate
 failure_rate = (conversions_failed / conversions_attempted) * 100
 
@@ -209,7 +209,7 @@ scrape_configs:
 rate(conversions_failed[5m]) / rate(conversions_attempted[5m]) * 100
 
 # Average conversion time
-rate(conversion_time_sum_ms[5m]) / rate(conversion_completed[5m])
+rate(conversion_time_sum_ms[5m]) / clamp_min(rate(conversion_completed[5m]), 1)
 
 # Throughput (conversions per second)
 rate(conversions_succeeded[1m])
@@ -462,7 +462,7 @@ grep "conversion failed" /var/log/nginx/error.log | \
 ```bash
 curl "${METRICS_URL:-http://localhost/markdown-metrics}"
 # Calculate only when conversion_completed > 0:
-#   total_conversion_time_ms / conversion_completed
+#   conversion_time_sum_ms / conversion_completed
 # Otherwise record 0 (or null in your dashboard) to avoid Inf/NaN.
 ```
 
@@ -1272,7 +1272,7 @@ watch -n 30 'curl -s "${METRICS_URL:-http://localhost/markdown-metrics}" | grep 
 # Check average conversion time
 curl "${METRICS_URL:-http://localhost/markdown-metrics}"
 # Calculate only when conversion_completed > 0:
-#   total_conversion_time_ms / conversion_completed
+#   conversion_time_sum_ms / conversion_completed
 # Otherwise record 0 (or null in your dashboard) to avoid Inf/NaN.
 ```
 
