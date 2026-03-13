@@ -30,8 +30,17 @@ Key areas:
 
 | Path | Responsibility |
 |------|----------------|
-| `src/ngx_http_markdown_filter_module.c` | Main module entrypoint, directive registration, filter wiring, and request-path orchestration |
+| `src/ngx_http_markdown_filter_module.c` | Main module entrypoint, shared globals, and internal module wiring |
 | `src/ngx_http_markdown_filter_module.h` | Shared module types, constants, and interfaces |
+| `src/ngx_http_markdown_config_impl.h` | Small config wiring include that aggregates the focused config helper units for the main module |
+| `src/ngx_http_markdown_config_core_impl.h` | Config object lifecycle, runtime markdown_filter resolution, merged-config logging, and shared-metrics bootstrap |
+| `src/ngx_http_markdown_config_handlers_impl.h` | Custom directive parsing and validation helpers |
+| `src/ngx_http_markdown_config_directives_impl.h` | Public directive registry table and inline usage notes |
+| `src/ngx_http_markdown_request_impl.h` | Header/body flow and request-phase state-machine helpers included by the main module |
+| `src/ngx_http_markdown_payload_impl.h` | Request-body buffering, decompression coordination, header forwarding, and fail-open replay helpers included by the request-path implementation |
+| `src/ngx_http_markdown_conversion_impl.h` | Base-URL construction, FFI conversion, and Markdown-output shaping helpers included by the request-path implementation |
+| `src/ngx_http_markdown_lifecycle_impl.h` | Worker lifecycle and filter-chain registration helpers included by the main module |
+| `src/ngx_http_markdown_metrics_impl.h` | Metrics-endpoint formatting, snapshotting, and access-control helpers |
 | `src/ngx_http_markdown_accept.c` | `Accept` header parsing and media-type negotiation helpers |
 | `src/ngx_http_markdown_auth.c` | Auth detection and cache-policy handling for authenticated requests |
 | `src/ngx_http_markdown_buffer.c` | Response buffering helpers and size-management logic |
@@ -50,7 +59,6 @@ Supporting areas:
 | `config` | NGINX build integration for compiling/linking the module |
 | `tests/unit/` | Standalone C unit tests for module behaviors |
 | `tests/integration/` | Integration tests that exercise runtime behavior with an NGINX environment |
-| `tests/e2e/` | End-to-end tests using a real NGINX instance and backend service |
 | `tests/helpers/` | Small helper sources used by standalone test builds |
 | `tests/include/` | Shared test harness headers |
 | `tests/make/` | Test build target definitions |
@@ -72,11 +80,14 @@ Key areas:
 | Path | Responsibility |
 |------|----------------|
 | `src/lib.rs` | Crate entrypoint and public conversion surface |
-| `src/ffi.rs` | C-compatible FFI boundary used by the NGINX module |
+| `src/ffi.rs` | C-compatible FFI boundary entrypoint and public re-exports used by the NGINX module |
+| `src/ffi/` | ABI types/constants, option decoding, conversion wiring, memory helpers, and exported FFI functions |
 | `src/parser.rs` | HTML parsing and DOM construction |
 | `src/converter.rs` | Markdown rendering and output normalization |
+| `src/converter/` | Internal renderer submodules for traversal, blocks, inline handling, tables, front matter, and normalization |
 | `src/security.rs` | Sanitization, input hardening, and URL-safety rules |
-| `src/metadata.rs` | Metadata extraction used by front matter and related features |
+| `src/metadata.rs` | Metadata extraction entrypoint and public metadata types |
+| `src/metadata/` | Metadata traversal, URL resolution, and metadata-focused tests |
 | `src/token_estimator.rs` | Token estimation support for agent-facing metadata |
 | `src/etag_generator.rs` | Markdown-variant ETag generation |
 | `src/charset.rs` | Charset detection and decoding support |
@@ -87,6 +98,7 @@ Supporting areas:
 | Path | Responsibility |
 |------|----------------|
 | `tests/` | Rust integration and FFI tests |
+| `fuzz/` | `cargo-fuzz` targets and fuzz-specific manifest |
 | `examples/` | Small runnable examples and benchmark-oriented demos |
 | `include/markdown_converter.h` | Generated public header for C integration |
 | `cbindgen.toml` | Header-generation configuration |
@@ -124,7 +136,8 @@ Scripts are grouped by domain rather than scattered at repo root.
 |------|---------|
 | `tools/docs/` | Documentation validation and duplicate-doc checks |
 | `tools/ci/` | CI-specific helpers such as license and environment checks |
-| `tools/e2e/` | Additional native E2E verification scripts |
+| `tools/e2e/` | Canonical native E2E verification scripts, including the proxy/TLS backend suite and shared runtime orchestration |
+| `tools/lib/` | Shared shell helpers for native build/test orchestration |
 | `tools/corpus/` | Corpus validation and conversion tooling |
 | `tools/build_release/` | Release packaging support and packaging Dockerfiles |
 | `tools/c-extract/` | Small developer utility for extracting C functions |
@@ -139,6 +152,8 @@ Common examples:
 
 - `components/nginx-module/tests/build/`
 - `components/rust-converter/target/`
+- `components/rust-converter/fuzz/artifacts/`
+- `components/rust-converter/fuzz/corpus/`
 
 These directories are useful when running tests locally, but they are not the source of truth for behavior or repository structure.
 
