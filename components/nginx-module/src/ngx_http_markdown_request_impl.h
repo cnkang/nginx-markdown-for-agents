@@ -95,6 +95,7 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
     ctx->headers_forwarded = 0;
     ctx->conversion_attempted = 0;
     ctx->conversion_succeeded = 0;
+    ctx->bypass_counted = 0;
     
     /* Initialize decompression state (Task 2.4 - Fast path initialization)
      * 
@@ -272,8 +273,11 @@ ngx_http_markdown_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
     /* If not eligible for conversion, pass through */
     if (!ctx->eligible) {
         r->buffered &= ~NGX_HTTP_MARKDOWN_BUFFERED;
-        /* Track bypassed request (ineligible for conversion) */
-        NGX_HTTP_MARKDOWN_METRIC_INC(conversions_bypassed);
+        if (!ctx->bypass_counted) {
+            /* Track bypassed request once even if the body arrives in chunks. */
+            NGX_HTTP_MARKDOWN_METRIC_INC(conversions_bypassed);
+            ctx->bypass_counted = 1;
+        }
         if (ngx_http_markdown_forward_headers(r, ctx) != NGX_OK) {
             return NGX_ERROR;
         }

@@ -9,7 +9,9 @@ impl MarkdownConverter {
         depth: usize,
         ctx: Option<&mut ConversionContext>,
     ) -> Result<(), ConversionError> {
-        if !matches!(self.options.flavor, MarkdownFlavor::GitHubFlavoredMarkdown) {
+        if !(matches!(self.options.flavor, MarkdownFlavor::GitHubFlavoredMarkdown)
+            && self.options.preserve_tables)
+        {
             return self.traverse_children(node, output, depth + 1, ctx);
         }
 
@@ -204,22 +206,40 @@ impl MarkdownConverter {
 
         for attr in attrs.iter() {
             if attr.name.local.as_ref() == "style" {
-                let style = attr.value.to_string().to_lowercase();
-                if style.contains("text-align") {
-                    if style.contains("center") {
-                        return TableAlignment::Center;
-                    }
-                    if style.contains("right") {
-                        return TableAlignment::Right;
-                    }
-                    if style.contains("left") {
-                        return TableAlignment::Left;
+                let style = attr.value.to_string();
+                for declaration in style.split(';') {
+                    let mut parts = declaration.splitn(2, ':');
+                    let key = parts
+                        .next()
+                        .map(str::trim)
+                        .unwrap_or_default()
+                        .to_lowercase();
+                    let value = parts
+                        .next()
+                        .map(str::trim)
+                        .unwrap_or_default()
+                        .to_lowercase();
+
+                    if key == "text-align" {
+                        return match value.as_str() {
+                            "center" => TableAlignment::Center,
+                            "right" => TableAlignment::Right,
+                            "left" => TableAlignment::Left,
+                            _ => TableAlignment::Left,
+                        };
                     }
                 }
             }
         }
 
         TableAlignment::Left
+    }
+
+    fn escape_gfm_table_cell(&self, cell: &str) -> String {
+        cell.replace("\r\n", "\n")
+            .replace('\r', "\n")
+            .replace('\n', "<br>")
+            .replace('|', "\\|")
     }
 
     pub(super) fn write_gfm_table(
@@ -232,7 +252,7 @@ impl MarkdownConverter {
         output.push('|');
         for header in headers {
             output.push(' ');
-            output.push_str(header);
+            output.push_str(&self.escape_gfm_table_cell(header));
             output.push_str(" |");
         }
         output.push('\n');
@@ -251,17 +271,12 @@ impl MarkdownConverter {
 
         for row in rows {
             output.push('|');
-            for (i, cell) in row.iter().enumerate() {
+            for i in 0..headers.len() {
                 output.push(' ');
-                output.push_str(cell);
-                output.push_str(" |");
-
-                if i >= headers.len() - 1 {
-                    break;
+                if let Some(cell) = row.get(i) {
+                    output.push_str(&self.escape_gfm_table_cell(cell));
                 }
-            }
-            for _ in row.len()..headers.len() {
-                output.push_str("  |");
+                output.push_str(" |");
             }
             output.push('\n');
         }

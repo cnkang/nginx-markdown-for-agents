@@ -2,11 +2,18 @@ use nginx_markdown_converter::converter::{ConversionOptions, MarkdownConverter, 
 use nginx_markdown_converter::parser::parse_html;
 
 fn convert_table_html(html: &[u8], flavor: MarkdownFlavor) -> String {
+    convert_table_html_with_options(
+        html,
+        ConversionOptions {
+            flavor,
+            ..Default::default()
+        },
+    )
+}
+
+fn convert_table_html_with_options(html: &[u8], options: ConversionOptions) -> String {
     let dom = parse_html(html).expect("Parse failed");
-    let converter = MarkdownConverter::with_options(ConversionOptions {
-        flavor,
-        ..Default::default()
-    });
+    let converter = MarkdownConverter::with_options(options);
 
     converter.convert(&dom).expect("Conversion failed")
 }
@@ -222,4 +229,44 @@ fn table_should_normalize_cell_whitespace() {
 
     assert!(result.contains("| Header |"));
     assert!(result.contains("| Data with spaces |"));
+}
+
+#[test]
+fn table_should_flatten_when_preserve_tables_is_disabled() {
+    let result = convert_table_html_with_options(
+        b"<table><thead><tr><th>Header</th></tr></thead><tbody><tr><td>Cell</td></tr></tbody></table>",
+        ConversionOptions {
+            flavor: MarkdownFlavor::GitHubFlavoredMarkdown,
+            preserve_tables: false,
+            ..Default::default()
+        },
+    );
+
+    assert!(!result.contains("| Header |"));
+    assert!(result.contains("Header"));
+    assert!(result.contains("Cell"));
+}
+
+#[test]
+fn table_should_ignore_non_text_align_style_tokens() {
+    let result = convert_table_html(
+        b"<table><thead><tr><th style=\"padding-right: 10px\">Styled</th></tr></thead><tbody><tr><td>Data</td></tr></tbody></table>",
+        MarkdownFlavor::GitHubFlavoredMarkdown,
+    );
+
+    assert!(result.contains("| --- |"));
+    assert!(!result.contains("| ---: |"));
+}
+
+#[test]
+fn table_should_escape_cell_delimiters_and_newlines() {
+    let result = convert_table_html(
+        b"<table><thead><tr><th>A|B</th><th>C</th></tr></thead><tbody><tr><td>x|y</td><td>line1\nline2</td><td>extra</td></tr></tbody></table>",
+        MarkdownFlavor::GitHubFlavoredMarkdown,
+    );
+
+    assert!(result.contains("| A\\|B | C |"));
+    assert!(
+        result.contains("| x\\|y | line1<br>line2 |") || result.contains("| x\\|y | line1 line2 |")
+    );
 }

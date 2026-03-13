@@ -30,13 +30,27 @@ markdown_ensure_native_apple_silicon() {
 }
 
 markdown_detect_rust_target() {
-  case "$(uname -s):$(uname -m)" in
+  local host_os host_arch libc_variant
+
+  host_os="$(uname -s)"
+  host_arch="$(uname -m)"
+  libc_variant="gnu"
+
+  if [[ "${host_os}" == "Linux" ]]; then
+    if ldd --version 2>&1 | grep -qi musl || compgen -G '/lib/ld-musl*' >/dev/null; then
+      libc_variant="musl"
+    fi
+  fi
+
+  case "${host_os}:${host_arch}:${libc_variant}" in
     Darwin:arm64) echo "aarch64-apple-darwin" ;;
     Darwin:x86_64) echo "x86_64-apple-darwin" ;;
-    Linux:x86_64) echo "x86_64-unknown-linux-gnu" ;;
-    Linux:aarch64) echo "aarch64-unknown-linux-gnu" ;;
+    Linux:x86_64:gnu) echo "x86_64-unknown-linux-gnu" ;;
+    Linux:aarch64:gnu) echo "aarch64-unknown-linux-gnu" ;;
+    Linux:x86_64:musl) echo "x86_64-unknown-linux-musl" ;;
+    Linux:aarch64:musl) echo "aarch64-unknown-linux-musl" ;;
     *)
-      echo "Unsupported host for Rust target detection: $(uname -s)/$(uname -m)" >&2
+      echo "Unsupported host for Rust target detection: ${host_os}/${host_arch}" >&2
       return 1
       ;;
   esac

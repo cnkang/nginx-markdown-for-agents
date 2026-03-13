@@ -7,11 +7,9 @@ impl MarkdownConverter {
         node: &Handle,
         output: &mut String,
         depth: usize,
-        _ctx: Option<&mut ConversionContext>,
+        ctx: Option<&mut ConversionContext>,
     ) -> Result<(), ConversionError> {
-        // Links use extract_text (not traverse_node) for child content,
-        // so timeout propagation through children is not needed here.
-        self.handle_link(node, output, depth)
+        self.handle_link(node, output, depth, ctx)
     }
 
     /// Handle anchor (link) elements.
@@ -19,7 +17,8 @@ impl MarkdownConverter {
         &self,
         node: &Handle,
         output: &mut String,
-        _depth: usize,
+        depth: usize,
+        ctx: Option<&mut ConversionContext>,
     ) -> Result<(), ConversionError> {
         let href = if let NodeData::Element { ref attrs, .. } = node.data {
             attrs
@@ -32,8 +31,9 @@ impl MarkdownConverter {
         };
 
         let mut link_text = String::new();
+        let mut ctx = ctx;
         for child in node.children.borrow().iter() {
-            self.extract_text(child, &mut link_text)?;
+            self.extract_text(child, &mut link_text, depth + 1, ctx.as_deref_mut())?;
         }
         let normalized_text = self.normalize_text(&link_text);
 
@@ -97,13 +97,15 @@ impl MarkdownConverter {
         &self,
         node: &Handle,
         output: &mut String,
-        _depth: usize,
+        depth: usize,
+        ctx: Option<&mut ConversionContext>,
     ) -> Result<(), ConversionError> {
         let mut code_content = String::new();
-        self.extract_code_content(node, &mut code_content)?;
-        output.push('`');
+        self.extract_code_content(node, &mut code_content, depth, ctx)?;
+        let fence = "`".repeat(self.longest_backtick_run(&code_content) + 1);
+        output.push_str(&fence);
         output.push_str(&code_content);
-        output.push('`');
+        output.push_str(&fence);
         Ok(())
     }
 
@@ -140,12 +142,27 @@ impl MarkdownConverter {
         &self,
         node: &Handle,
         output: &mut String,
+        depth: usize,
+        ctx: Option<&mut ConversionContext>,
     ) -> Result<(), ConversionError> {
+        let mut ctx = ctx;
+
+        if let Some(ctx) = ctx.as_deref_mut() {
+            ctx.increment_and_check()?;
+        }
+        self.security_validator
+            .validate_depth(depth)
+            .map_err(ConversionError::InvalidInput)?;
+
         match node.data {
             NodeData::Text { ref contents } => output.push_str(&contents.borrow()),
-            NodeData::Element { .. } => {
+            NodeData::Element { ref name, .. } => {
+                if matches!(name.local.as_ref(), "script" | "style" | "noscript") {
+                    return Ok(());
+                }
+
                 for child in node.children.borrow().iter() {
-                    self.extract_code_content(child, output)?;
+                    self.extract_code_content(child, output, depth + 1, ctx.as_deref_mut())?;
                 }
             }
             _ => {}
@@ -158,12 +175,27 @@ impl MarkdownConverter {
         &self,
         node: &Handle,
         output: &mut String,
+        depth: usize,
+        ctx: Option<&mut ConversionContext>,
     ) -> Result<(), ConversionError> {
+        let mut ctx = ctx;
+
+        if let Some(ctx) = ctx.as_deref_mut() {
+            ctx.increment_and_check()?;
+        }
+        self.security_validator
+            .validate_depth(depth)
+            .map_err(ConversionError::InvalidInput)?;
+
         match node.data {
             NodeData::Text { ref contents } => output.push_str(&contents.borrow()),
-            NodeData::Element { .. } => {
+            NodeData::Element { ref name, .. } => {
+                if matches!(name.local.as_ref(), "script" | "style" | "noscript") {
+                    return Ok(());
+                }
+
                 for child in node.children.borrow().iter() {
-                    self.extract_text(child, output)?;
+                    self.extract_text(child, output, depth + 1, ctx.as_deref_mut())?;
                 }
             }
             _ => {}

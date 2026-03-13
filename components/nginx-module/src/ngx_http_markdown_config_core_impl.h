@@ -51,28 +51,45 @@ static void *
 ngx_http_markdown_create_main_conf(ngx_conf_t *cf)
 {
     ngx_http_markdown_main_conf_t *conf;
-    ngx_shm_zone_t                *zone;
 
     conf = ngx_pcalloc(cf->pool, sizeof(ngx_http_markdown_main_conf_t));
     if (conf == NULL) {
         return NULL;
     }
 
+    conf->metrics_shm_size = NGX_CONF_UNSET_SIZE;
+    conf->metrics_shm_zone = NULL;
+
+    return conf;
+}
+
+static char *
+ngx_http_markdown_init_main_conf(ngx_conf_t *cf, void *conf)
+{
+    ngx_http_markdown_main_conf_t *mcf = conf;
+    ngx_shm_zone_t                *zone;
+
+    /*
+     * Default to 8 pages so the shared slab has enough room for the metrics
+     * struct plus allocator metadata without oversizing small deployments.
+     */
+    ngx_conf_init_size_value(mcf->metrics_shm_size, 8 * ngx_pagesize);
+
     zone = ngx_shared_memory_add(
         cf,
         &ngx_http_markdown_metrics_shm_name,
-        (size_t) (8 * ngx_pagesize),
+        mcf->metrics_shm_size,
         &ngx_http_markdown_filter_module
     );
     if (zone == NULL) {
-        return NULL;
+        return NGX_CONF_ERROR;
     }
 
     zone->init = ngx_http_markdown_init_metrics_zone;
-    conf->metrics_shm_zone = zone;
+    mcf->metrics_shm_zone = zone;
     ngx_http_markdown_metrics_shm_zone = zone;
 
-    return conf;
+    return NGX_CONF_OK;
 }
 
 /*

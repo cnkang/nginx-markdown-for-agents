@@ -200,6 +200,7 @@ extract_json_number_field() {
 start_nginx() {
     local config="$1"
     local pid
+    local nginx_rc=0
 
     mkdir -p /tmp/logs
     
@@ -210,7 +211,11 @@ EOF
     
     # Start NGINX
     echo "Starting NGINX..."
-    if ! "$NGINX_BIN" -c "$NGINX_CONF" -p /tmp 2>&1 | tee /tmp/nginx-start.log; then
+    set +e
+    "$NGINX_BIN" -c "$NGINX_CONF" -p /tmp 2>&1 | tee /tmp/nginx-start.log
+    nginx_rc=${PIPESTATUS[0]}
+    set -e
+    if [[ $nginx_rc -ne 0 ]]; then
         echo "Failed to start NGINX" >&2
         cat /tmp/nginx-start.log >&2
         return 1
@@ -622,10 +627,8 @@ EOF
 test_range_bypass() {
     log_test 6 "Range request bypass with real NGINX file serving"
 
-    mkdir -p "$STATIC_ROOT"
-    cat > "$RANGE_HTML_PATH" <<EOF
-<html><body><h1>Range Content</h1><p>This body should stay HTML when Range is used.</p></body></html>
-EOF
+    write_static_html "$RANGE_HTML_PATH" \
+        '<html><body><h1>Range Content</h1><p>This body should stay HTML when Range is used.</p></body></html>'
 
     local config
     config="$(cat <<EOF
@@ -726,7 +729,7 @@ EOF
     start_nginx "$config" || { log_fail "$NGINX_START_FAILURE_MSG"; return 1; }
 
     seq "$total_requests" | xargs -I{} -P 8 sh -c \
-        "curl -s -H 'Accept: ${MEDIA_TYPE_MARKDOWN}' 'http://localhost:${TEST_PORT}/test?req={}' > /dev/null"
+        "curl -s -H 'Accept: ${MEDIA_TYPE_MARKDOWN}' 'http://localhost:${TEST_PORT}/test?req={}' > /dev/null" || true
 
     metrics=$(curl -s -H "Accept: application/json" "http://localhost:${TEST_PORT}/markdown-metrics")
     if ! attempted=$(extract_json_number_field "$metrics" "conversions_attempted"); then
@@ -800,12 +803,18 @@ main() {
     test_variable_driven_markdown_filter
     test_range_bypass
     test_metrics_shared_aggregation
-    run_external_check 8 "Delegated If-Modified-Since runtime validation" \
-        "${REPO_ROOT}/tools/ci/verify_real_nginx_ims.sh"
-    run_external_check 9 "Chunked streaming native smoke validation" \
-        "${REPO_ROOT}/tools/e2e/verify_chunked_streaming_native_e2e.sh" --profile smoke
-    run_external_check 10 "Large response native validation" \
-        "${REPO_ROOT}/tools/e2e/verify_large_markdown_response_e2e.sh"
+    if ! run_external_check 8 "Delegated If-Modified-Since runtime validation" \
+        "${REPO_ROOT}/tools/ci/verify_real_nginx_ims.sh"; then
+        :
+    fi
+    if ! run_external_check 9 "Chunked streaming native smoke validation" \
+        "${REPO_ROOT}/tools/e2e/verify_chunked_streaming_native_e2e.sh" --profile smoke; then
+        :
+    fi
+    if ! run_external_check 10 "Large response native validation" \
+        "${REPO_ROOT}/tools/e2e/verify_large_markdown_response_e2e.sh"; then
+        :
+    fi
     
     # Summary
     echo ""
