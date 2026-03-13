@@ -24,6 +24,25 @@ impl MarkdownConverter {
             if index == 0 {
                 output.push_str(&base_indent);
                 output.push_str(marker);
+                let first_trimmed = line.trim_start();
+                if first_trimmed.starts_with("- ")
+                    || first_trimmed.starts_with("* ")
+                    || first_trimmed.starts_with("1. ")
+                {
+                    output.push('\n');
+                    if !line.is_empty() {
+                        let already_indented =
+                            (!base_indent.is_empty() && line.starts_with(&base_indent))
+                                || line.starts_with(' ')
+                                || line.starts_with('\t');
+                        if !already_indented {
+                            output.push_str(&continuation_indent);
+                        }
+                        output.push_str(line);
+                        output.push('\n');
+                    }
+                    continue;
+                }
             } else if !line.is_empty() {
                 let already_indented = (!base_indent.is_empty() && line.starts_with(&base_indent))
                     || line.starts_with(' ')
@@ -247,7 +266,7 @@ impl MarkdownConverter {
         node: &Handle,
         output: &mut String,
         _depth: usize,
-        _ctx: Option<&mut ConversionContext>,
+        ctx: Option<&mut ConversionContext>,
     ) -> Result<(), ConversionError> {
         if !output.is_empty() && !output.ends_with("\n\n") {
             if output.ends_with('\n') {
@@ -287,7 +306,7 @@ impl MarkdownConverter {
         }
 
         let mut code_content = String::new();
-        self.extract_code_content(node, &mut code_content, 0, None)?;
+        self.extract_code_content(node, &mut code_content, 0, ctx)?;
         let fence = self.choose_code_fence(&code_content);
 
         output.push_str(&fence);
