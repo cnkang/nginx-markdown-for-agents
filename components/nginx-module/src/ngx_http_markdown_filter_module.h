@@ -117,6 +117,16 @@ typedef struct {
 } ngx_http_markdown_conf_t;
 
 /*
+ * Main configuration structure
+ *
+ * Holds process-wide shared state that is initialized once during
+ * configuration parsing and then reused by all worker processes.
+ */
+typedef struct {
+    ngx_shm_zone_t *metrics_shm_zone;  /* Shared-memory zone for cross-worker metrics */
+} ngx_http_markdown_main_conf_t;
+
+/*
  * Response buffer structure
  *
  * This structure accumulates upstream response body chunks before conversion.
@@ -202,12 +212,12 @@ typedef struct {
  * Thread Safety:
  * - All fields use ngx_atomic_t for lock-free atomic operations
  * - Safe to update from multiple NGINX worker processes concurrently
- * - No mutex or spinlock required
+ * - No per-request mutex or spinlock required for counter updates
  *
  * Memory Layout:
- * - Structure should be allocated in shared memory for cross-worker visibility
- * - In v1, per-worker metrics are acceptable (simpler implementation)
- * - Future versions may aggregate across workers
+ * - Structure is allocated in shared memory for cross-worker visibility
+ * - All workers update the same counters, so the metrics endpoint reports
+ *   aggregate values instead of worker-local snapshots
  */
 typedef struct {
     /* Conversion attempt tracking */
@@ -225,6 +235,10 @@ typedef struct {
     ngx_atomic_t  conversion_time_sum_ms;   /* Sum of conversion times in milliseconds (for averaging) */
     ngx_atomic_t  input_bytes;              /* Sum of input HTML sizes in bytes */
     ngx_atomic_t  output_bytes;             /* Sum of output Markdown sizes in bytes */
+    ngx_atomic_t  conversion_latency_le_10ms;    /* Completed conversions <= 10ms */
+    ngx_atomic_t  conversion_latency_le_100ms;   /* Completed conversions <= 100ms */
+    ngx_atomic_t  conversion_latency_le_1000ms;  /* Completed conversions <= 1000ms */
+    ngx_atomic_t  conversion_latency_gt_1000ms;  /* Completed conversions > 1000ms */
     
     /* Decompression metrics */
     ngx_atomic_t  decompressions_attempted;  /* Total decompression attempts */
