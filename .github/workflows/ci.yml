@@ -11,6 +11,7 @@ on:
       - "docs/**"
       - "Makefile"
       - "README.md"
+      - "README_zh-CN.md"
       - ".github/workflows/ci.yml"
   push:
     branches: [main, master]
@@ -21,6 +22,7 @@ on:
       - "docs/**"
       - "Makefile"
       - "README.md"
+      - "README_zh-CN.md"
       - ".github/workflows/ci.yml"
 
 concurrency:
@@ -53,6 +55,7 @@ jobs:
             docs:
               - 'docs/**'
               - 'README.md'
+              - 'README_zh-CN.md'
               - 'tools/docs/**'
             rust:
               - 'components/rust-converter/**'
@@ -87,7 +90,9 @@ jobs:
           python-version: '3.11'
 
       - name: Validate docs
-        run: python3 tools/docs/check_docs.py
+        run: |
+          python3 tools/docs/check_duplicate_docs.py
+          python3 tools/docs/check_docs.py
 
   rust-quality:
     name: Rust Quality Gate
@@ -192,12 +197,12 @@ jobs:
       - name: Run NGINX C smoke tests with ASan/UBSan
         run: make test-nginx-unit-sanitize-smoke
 
-  e2e-large-response:
-    name: E2E Regression (Large Response)
+  runtime-regressions:
+    name: Runtime Regressions (IMS + Chunked + Large)
     needs: [changes, rust-quality, nginx-c-tests]
     if: needs.changes.outputs.e2e == 'true' || needs.changes.outputs.workflows == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 75
     permissions:
       contents: read
     steps:
@@ -225,5 +230,92 @@ jobs:
           workspaces: |
             components/rust-converter -> target
 
+      - name: Run delegated If-Modified-Since runtime validation
+        id: ims_runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          nginx_bin_file="$(mktemp)"
+          buildroot_file="$(mktemp)"
+          ./tools/ci/verify_real_nginx_ims.sh \
+            --keep-artifacts \
+            --nginx-bin-output "${nginx_bin_file}" \
+            --buildroot-output "${buildroot_file}"
+
+          buildroot="$(cat "${buildroot_file}")"
+          if [[ -z "${buildroot}" ]]; then
+            echo "Failed to locate retained IMS build artifacts" >&2
+            exit 1
+          fi
+
+          nginx_bin="$(cat "${nginx_bin_file}")"
+          if [[ ! -x "${nginx_bin}" ]]; then
+            echo "Retained IMS nginx binary is missing: ${nginx_bin}" >&2
+            exit 1
+          fi
+
+          echo "buildroot=${buildroot}" >> "${GITHUB_OUTPUT}"
+          echo "nginx_bin=${nginx_bin}" >> "${GITHUB_OUTPUT}"
+
+      - name: Run chunked streaming native smoke validation
+        env:
+          NGINX_BIN: ${{ steps.ims_runtime.outputs.nginx_bin }}
+        run: ./tools/e2e/verify_chunked_streaming_native_e2e.sh --profile smoke
+
       - name: Run large-response native E2E verification
+        env:
+          NGINX_BIN: ${{ steps.ims_runtime.outputs.nginx_bin }}
         run: ./tools/e2e/verify_large_markdown_response_e2e.sh
+
+      - name: Remove retained IMS build artifacts
+        if: always()
+        env:
+          IMS_BUILDROOT: ${{ steps.ims_runtime.outputs.buildroot }}
+        run: |
+          if [[ -n "${IMS_BUILDROOT}" && -d "${IMS_BUILDROOT}" ]]; then
+            rm -rf "${IMS_BUILDROOT}"
+          fi
+
+  perf-artifacts:
+    name: Perf Baseline Artifact
+    needs: changes
+    if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.workflows == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    continue-on-error: true
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
+        with:
+          workspaces: |
+            components/rust-converter -> target
+
+      - name: Collect performance baselines
+        run: |
+          mkdir -p artifacts/perf
+          cd components/rust-converter
+          cargo run --release --example perf_baseline | tee ../../artifacts/perf/perf_baseline_full.txt
+          /usr/bin/time -v cargo run --release --example perf_baseline -- --single medium \
+            > ../../artifacts/perf/perf_baseline_medium.txt \
+            2> ../../artifacts/perf/perf_baseline_medium.time.txt
+          /usr/bin/time -v cargo run --release --example perf_baseline -- --single medium-front-matter \
+            > ../../artifacts/perf/perf_baseline_medium_front_matter.txt \
+            2> ../../artifacts/perf/perf_baseline_medium_front_matter.time.txt
+          /usr/bin/time -v cargo run --release --example perf_baseline -- --single large \
+            > ../../artifacts/perf/perf_baseline_large.txt \
+            2> ../../artifacts/perf/perf_baseline_large.time.txt
+
+      - name: Upload performance artifacts
+        if: always()
+        uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808 # v4
+        with:
+          name: perf-baseline-artifacts
+          path: artifacts/perf

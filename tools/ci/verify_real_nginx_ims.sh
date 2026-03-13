@@ -4,14 +4,21 @@ set -euo pipefail
 NGINX_VERSION="${NGINX_VERSION:-stable}"
 PORT="${PORT:-18088}"
 KEEP_ARTIFACTS=0
+NGINX_BIN="${NGINX_BIN:-}"
 WORKSPACE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+NATIVE_BUILD_HELPER="${WORKSPACE_ROOT}/tools/lib/nginx_markdown_native_build.sh"
 BUILDROOT=""
 RUNTIME=""
 RUST_TARGET=""
+NGINX_EXECUTABLE=""
+NGINX_BIN_OUTPUT_FILE=""
+BUILDROOT_OUTPUT_FILE=""
+ORIG_ARGS=("$@")
 
 usage() {
   cat <<EOF
 Usage: $(basename "$0") [--keep-artifacts] [--nginx-version VERSION] [--port PORT]
+                         [--nginx-bin-output FILE] [--buildroot-output FILE]
 
 Builds a local NGINX from source with the markdown module and validates delegated
 If-Modified-Since behavior for Markdown-negotiated responses.
@@ -24,6 +31,7 @@ VERSION accepts:
 Environment variables:
   NGINX_VERSION   Default: stable (or explicit x.y.z)
   PORT            Default: 18088
+  NGINX_BIN       Optional module-enabled nginx binary to reuse instead of rebuilding
 EOF
   return 0
 }
@@ -42,6 +50,14 @@ while [[ $# -gt 0 ]]; do
       PORT="$2"
       shift 2
       ;;
+    --nginx-bin-output)
+      NGINX_BIN_OUTPUT_FILE="$2"
+      shift 2
+      ;;
+    --buildroot-output)
+      BUILDROOT_OUTPUT_FILE="$2"
+      shift 2
+      ;;
     -h|--help)
       usage
       exit 0
@@ -54,14 +70,13 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-need_cmd() {
-  local cmd_name="$1"
-  command -v "${cmd_name}" >/dev/null 2>&1 || {
-    echo "Missing required command: ${cmd_name}" >&2
-    exit 1
-  }
-  return 0
-}
+source "${NATIVE_BUILD_HELPER}"
+
+if (( ${#ORIG_ARGS[@]} )); then
+  markdown_ensure_native_apple_silicon "$0" "${ORIG_ARGS[@]}"
+else
+  markdown_ensure_native_apple_silicon "$0"
+fi
 
 resolve_nginx_version() {
   local requested="$1"
@@ -109,33 +124,21 @@ PY
   return 0
 }
 
-for cmd in curl tar make cargo rsync awk python3; do
-  need_cmd "$cmd"
+for cmd in curl rsync awk python3; do
+  markdown_need_cmd "$cmd"
 done
+if [[ -z "${NGINX_BIN}" ]]; then
+  for cmd in tar make cargo; do
+    markdown_need_cmd "$cmd"
+  done
+fi
 
 NGINX_VERSION="$(resolve_nginx_version "${NGINX_VERSION}")"
 
-detect_rust_target() {
-  local os arch
-  os="$(uname -s)"
-  arch="$(uname -m)"
-  case "${os}:${arch}" in
-    Darwin:arm64) echo "aarch64-apple-darwin" ;;
-    Darwin:x86_64) echo "x86_64-apple-darwin" ;;
-    Linux:x86_64) echo "x86_64-unknown-linux-gnu" ;;
-    Linux:aarch64) echo "aarch64-unknown-linux-gnu" ;;
-    *)
-      echo "Unsupported host for automatic Rust target detection: ${os}/${arch}" >&2
-      exit 1
-      ;;
-  esac
-  return 0
-}
-
 cleanup() {
   local rc=$?
-  if [[ -n "${RUNTIME}" && -x "${RUNTIME}/sbin/nginx" ]]; then
-    "${RUNTIME}/sbin/nginx" -p "${RUNTIME}" -c conf/nginx.conf -s stop >/dev/null 2>&1 || true
+  if [[ -n "${RUNTIME}" && -n "${NGINX_EXECUTABLE}" && -x "${NGINX_EXECUTABLE}" ]]; then
+    "${NGINX_EXECUTABLE}" -p "${RUNTIME}" -c conf/nginx.conf -s stop >/dev/null 2>&1 || true
   fi
 
   if [[ $rc -eq 0 && "${KEEP_ARTIFACTS}" -eq 0 && -n "${BUILDROOT}" && -d "${BUILDROOT}" ]]; then
@@ -160,48 +163,42 @@ PY
 }
 trap cleanup EXIT
 
-RUST_TARGET="$(detect_rust_target)"
+RUST_TARGET="$(markdown_detect_rust_target)"
 BUILDROOT="$(mktemp -d /tmp/nginx-ims-verify.XXXXXX)"
 RUNTIME="${BUILDROOT}/runtime"
 
-echo "==> Building Rust converter (${RUST_TARGET})"
-(
-  cd "${WORKSPACE_ROOT}/components/rust-converter"
-  cargo build --target "${RUST_TARGET}" --release
-  mkdir -p target/release
-  cp "target/${RUST_TARGET}/release/libnginx_markdown_converter.a" \
-     "target/release/libnginx_markdown_converter.a"
+mkdir -p "${RUNTIME}/conf" "${RUNTIME}/html" "${RUNTIME}/logs"
 
-  header_src="${WORKSPACE_ROOT}/components/rust-converter/include/markdown_converter.h"
-  header_dst="${WORKSPACE_ROOT}/components/nginx-module/src/markdown_converter.h"
-  if [[ ! -f "${header_src}" ]]; then
-    echo "Missing generated header: ${header_src}" >&2
-    exit 1
-  fi
-  cp "${header_src}" "${header_dst}"
-)
+if [[ -n "${NGINX_BIN}" ]]; then
+  echo "==> Reusing existing NGINX binary (${NGINX_BIN})"
+  markdown_copy_runtime_conf_from_nginx_bin "${NGINX_BIN}" "${RUNTIME}"
+  NGINX_EXECUTABLE="${NGINX_BIN}"
+else
+  echo "==> Building Rust converter (${RUST_TARGET})"
+  markdown_prepare_rust_converter_release "${WORKSPACE_ROOT}" "${RUST_TARGET}"
 
-echo "==> Downloading NGINX ${NGINX_VERSION}"
-curl -fsSL "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" -o "${BUILDROOT}/nginx.tar.gz"
-tar -xzf "${BUILDROOT}/nginx.tar.gz" -C "${BUILDROOT}" --strip-components=1
+  echo "==> Downloading NGINX ${NGINX_VERSION}"
+  curl -fsSL "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" -o "${BUILDROOT}/nginx.tar.gz"
+  tar -xzf "${BUILDROOT}/nginx.tar.gz" -C "${BUILDROOT}" --strip-components=1
 
-echo "==> Configuring NGINX"
-(
-  cd "${BUILDROOT}"
-  ./configure \
-    --without-http_rewrite_module \
-    --prefix="${RUNTIME}" \
-    --add-module="${WORKSPACE_ROOT}/components/nginx-module"
-)
+  echo "==> Configuring NGINX"
+  (
+    cd "${BUILDROOT}"
+    ./configure \
+      --without-http_rewrite_module \
+      --prefix="${RUNTIME}" \
+      --add-module="${WORKSPACE_ROOT}/components/nginx-module"
+  )
 
-echo "==> Building and installing NGINX"
-(
-  cd "${BUILDROOT}"
-  make -j"$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)"
-  make install
-)
+  echo "==> Building and installing NGINX"
+  (
+    cd "${BUILDROOT}"
+    make -j"$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)"
+    make install
+  )
 
-mkdir -p "${RUNTIME}/conf" "${RUNTIME}/html"
+  NGINX_EXECUTABLE="${RUNTIME}/sbin/nginx"
+fi
 
 cat > "${RUNTIME}/conf/nginx.conf" <<EOF
 worker_processes  1;
@@ -241,7 +238,7 @@ cat > "${RUNTIME}/html/index.html" <<'EOF'
 EOF
 
 echo "==> Starting NGINX on 127.0.0.1:${PORT}"
-"${RUNTIME}/sbin/nginx" -p "${RUNTIME}" -c conf/nginx.conf
+"${NGINX_EXECUTABLE}" -p "${RUNTIME}" -c conf/nginx.conf
 sleep 1
 
 echo "==> Running If-Modified-Since validation scenario"
@@ -308,3 +305,11 @@ echo "==> Running If-Modified-Since validation scenario"
 )
 
 echo "==> Real NGINX IMS validation passed"
+
+if [[ -n "${NGINX_BIN_OUTPUT_FILE}" ]]; then
+  printf '%s\n' "${NGINX_EXECUTABLE}" > "${NGINX_BIN_OUTPUT_FILE}"
+fi
+
+if [[ -n "${BUILDROOT_OUTPUT_FILE}" ]]; then
+  printf '%s\n' "${BUILDROOT}" > "${BUILDROOT_OUTPUT_FILE}"
+fi

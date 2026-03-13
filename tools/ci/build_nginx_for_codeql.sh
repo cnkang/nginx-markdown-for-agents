@@ -4,18 +4,10 @@ set -euo pipefail
 NGINX_VERSION="${NGINX_VERSION:-stable}"
 KEEP_ARTIFACTS="${KEEP_ARTIFACTS:-0}"
 WORKSPACE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+NATIVE_BUILD_HELPER="${WORKSPACE_ROOT}/tools/lib/nginx_markdown_native_build.sh"
 BUILDROOT=""
-
-need_cmd() {
-  local cmd_name="$1"
-
-  command -v "${cmd_name}" >/dev/null 2>&1 || {
-    echo "Missing required command: ${cmd_name}" >&2
-    exit 1
-  }
-
-  return 0
-}
+RUST_TARGET=""
+source "${NATIVE_BUILD_HELPER}"
 
 resolve_nginx_version() {
   local requested="$1"
@@ -78,25 +70,15 @@ cleanup() {
 trap cleanup EXIT
 
 for cmd in curl tar make cargo python3; do
-  need_cmd "$cmd"
+  markdown_need_cmd "$cmd"
 done
 
 NGINX_VERSION="$(resolve_nginx_version "${NGINX_VERSION}")"
 BUILDROOT="$(mktemp -d /tmp/nginx-codeql-build.XXXXXX)"
+RUST_TARGET="$(markdown_detect_rust_target)"
 
-echo "==> Building Rust converter static library"
-(
-  cd "${WORKSPACE_ROOT}/components/rust-converter"
-  cargo build --release --locked
-
-  header_src="${WORKSPACE_ROOT}/components/rust-converter/include/markdown_converter.h"
-  header_dst="${WORKSPACE_ROOT}/components/nginx-module/src/markdown_converter.h"
-  if [[ ! -f "${header_src}" ]]; then
-    echo "Missing generated header: ${header_src}" >&2
-    exit 1
-  fi
-  cp "${header_src}" "${header_dst}"
-)
+echo "==> Building Rust converter static library (${RUST_TARGET})"
+markdown_prepare_rust_converter_release "${WORKSPACE_ROOT}" "${RUST_TARGET}" --locked
 
 echo "==> Downloading NGINX ${NGINX_VERSION}"
 curl -fsSL "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" -o "${BUILDROOT}/nginx.tar.gz"

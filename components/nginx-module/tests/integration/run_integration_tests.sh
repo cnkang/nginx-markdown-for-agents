@@ -24,6 +24,9 @@
 set -e  # Exit on error
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../../../.." && pwd)"
+NATIVE_BUILD_HELPER="${REPO_ROOT}/tools/lib/nginx_markdown_native_build.sh"
+source "${NATIVE_BUILD_HELPER}"
 
 # Configuration
 TEST_PORT=8888
@@ -31,6 +34,10 @@ NGINX_CONF="/tmp/nginx-markdown-test.conf"
 NGINX_PID="/tmp/nginx-markdown-test.pid"
 NGINX_ERROR_LOG="/tmp/nginx-markdown-test-error.log"
 NGINX_ACCESS_LOG="/tmp/nginx-markdown-test-access.log"
+STATIC_ROOT="/tmp/nginx-markdown-test-root"
+RANGE_HTML_PATH="${STATIC_ROOT}/range.html"
+NGINX_BIN="${NGINX_BIN:-}"
+DELEGATED_NGINX_BIN=""
 
 # Colors for output
 RED='\033[0;31m'
@@ -72,11 +79,42 @@ cleanup() {
     
     # Remove test files
     rm -f "$NGINX_CONF" "$NGINX_PID" "$NGINX_ERROR_LOG" "$NGINX_ACCESS_LOG"
+    rm -rf "$STATIC_ROOT"
     return 0
 }
 
 # Set trap to cleanup on exit
 trap cleanup EXIT INT TERM
+
+resolve_nginx_bin() {
+    if [[ -n "$NGINX_BIN" ]]; then
+        if [[ ! -x "$NGINX_BIN" ]]; then
+            echo "ERROR: NGINX_BIN is not executable: $NGINX_BIN" >&2
+            return 1
+        fi
+        return 0
+    fi
+
+    if command -v nginx &> /dev/null; then
+        NGINX_BIN="$(command -v nginx)"
+        return 0
+    fi
+
+    echo "ERROR: nginx not found in PATH and NGINX_BIN is not set" >&2
+    return 1
+}
+
+resolve_delegated_nginx_bin() {
+    if markdown_can_reuse_nginx_bin "$NGINX_BIN"; then
+        DELEGATED_NGINX_BIN="$NGINX_BIN"
+        log_info "Delegated runtime checks will reuse $DELEGATED_NGINX_BIN"
+    else
+        DELEGATED_NGINX_BIN=""
+        log_info "Delegated runtime checks will self-build NGINX because $NGINX_BIN does not expose reusable runtime assets"
+    fi
+
+    return 0
+}
 
 # Helper functions
 log_test() {
@@ -110,10 +148,44 @@ log_info() {
     return 0
 }
 
+run_external_check() {
+    local test_id="$1"
+    local test_name="$2"
+    shift 2
+
+    log_test "$test_id" "$test_name"
+
+    if [[ -n "$DELEGATED_NGINX_BIN" ]]; then
+        if env NGINX_BIN="$DELEGATED_NGINX_BIN" "$@"; then
+            log_pass "$test_name"
+            TESTS_PASSED=$((TESTS_PASSED + 1))
+            return 0
+        fi
+    elif env -u NGINX_BIN "$@"; then
+        log_pass "$test_name"
+        TESTS_PASSED=$((TESTS_PASSED + 1))
+        return 0
+    fi
+
+    log_fail "$test_name"
+    return 1
+}
+
+write_static_html() {
+    local path="$1"
+    local content="$2"
+
+    mkdir -p "$STATIC_ROOT"
+    printf '%s\n' "$content" > "$path"
+    return 0
+}
+
 # Start NGINX with given configuration
 start_nginx() {
     local config="$1"
     local pid
+
+    mkdir -p /tmp/logs
     
     # Write configuration
     cat > "$NGINX_CONF" << EOF
@@ -122,7 +194,7 @@ EOF
     
     # Start NGINX
     echo "Starting NGINX..."
-    if ! nginx -c "$NGINX_CONF" -p /tmp 2>&1 | tee /tmp/nginx-start.log; then
+    if ! "$NGINX_BIN" -c "$NGINX_CONF" -p /tmp 2>&1 | tee /tmp/nginx-start.log; then
         echo "Failed to start NGINX" >&2
         cat /tmp/nginx-start.log >&2
         return 1
@@ -166,11 +238,11 @@ make_request() {
     local method="$1"
     local path="$2"
     local accept="$3"
-    local extra_headers="$4"
+    shift 3
     
     curl -s -i -X "$method" \
         -H "Accept: $accept" \
-        $extra_headers \
+        "$@" \
         "http://localhost:$TEST_PORT$path"
     return 0
 }
@@ -203,6 +275,9 @@ get_body() {
 #
 test_basic_conversion() {
     log_test 1 "Basic Conversion with Accept: text/markdown"
+
+    write_static_html "${STATIC_ROOT}/basic.html" \
+        '<html><body><h1>Test Heading</h1><p>Test paragraph.</p></body></html>'
     
     local config='
 worker_processes 1;
@@ -213,9 +288,9 @@ http {
     access_log '"$NGINX_ACCESS_LOG"';
     server {
         listen '"$TEST_PORT"';
-        location /test {
+        location = /test {
+            alias '"${STATIC_ROOT}"'/basic.html;
             markdown_filter on;
-            return 200 '"'"'<html><body><h1>Test Heading</h1><p>Test paragraph.</p></body></html>'"'"';
             default_type text/html;
         }
     }
@@ -225,7 +300,7 @@ http {
     start_nginx "$config" || { log_fail "$NGINX_START_FAILURE_MSG"; return 1; }
     
     # Make request
-    local response=$(make_request "GET" "/test" "$MEDIA_TYPE_MARKDOWN" "")
+    local response=$(make_request "GET" "/test" "$MEDIA_TYPE_MARKDOWN")
     local status=$(get_status "$response")
     local content_type=$(get_header "$response" "$HEADER_CONTENT_TYPE")
     local vary=$(get_header "$response" "Vary")
@@ -267,6 +342,9 @@ http {
 #
 test_passthrough() {
     log_test 2 "Passthrough with Accept: text/html"
+
+    write_static_html "${STATIC_ROOT}/passthrough.html" \
+        '<html><body><h1>Test</h1></body></html>'
     
     local config='
 worker_processes 1;
@@ -277,9 +355,9 @@ http {
     access_log '"$NGINX_ACCESS_LOG"';
     server {
         listen '"$TEST_PORT"';
-        location /test {
+        location = /test {
+            alias '"${STATIC_ROOT}"'/passthrough.html;
             markdown_filter on;
-            return 200 '"'"'<html><body><h1>Test</h1></body></html>'"'"';
             default_type text/html;
         }
     }
@@ -289,7 +367,7 @@ http {
     start_nginx "$config" || { log_fail "$NGINX_START_FAILURE_MSG"; return 1; }
     
     # Make request
-    local response=$(make_request "GET" "/test" "text/html" "")
+    local response=$(make_request "GET" "/test" "text/html")
     local status=$(get_status "$response")
     local content_type=$(get_header "$response" "$HEADER_CONTENT_TYPE")
     local body=$(get_body "$response")
@@ -323,6 +401,11 @@ http {
 #
 test_configuration_inheritance() {
     log_test 3 "Configuration Inheritance"
+
+    write_static_html "${STATIC_ROOT}/enabled.html" \
+        '<html><body><h1>Enabled</h1></body></html>'
+    write_static_html "${STATIC_ROOT}/disabled.html" \
+        '<html><body><h1>Disabled</h1></body></html>'
     
     local config='
 worker_processes 1;
@@ -337,14 +420,14 @@ http {
     server {
         listen '"$TEST_PORT"';
         
-        location /enabled {
-            return 200 '"'"'<html><body><h1>Enabled</h1></body></html>'"'"';
+        location = /enabled {
+            alias '"${STATIC_ROOT}"'/enabled.html;
             default_type text/html;
         }
         
-        location /disabled {
+        location = /disabled {
             markdown_filter off;
-            return 200 '"'"'<html><body><h1>Disabled</h1></body></html>'"'"';
+            alias '"${STATIC_ROOT}"'/disabled.html;
             default_type text/html;
         }
     }
@@ -354,7 +437,7 @@ http {
     start_nginx "$config" || { log_fail "$NGINX_START_FAILURE_MSG"; return 1; }
     
     # Test /enabled - should convert
-    local response=$(make_request "GET" "/enabled" "$MEDIA_TYPE_MARKDOWN" "")
+    local response=$(make_request "GET" "/enabled" "$MEDIA_TYPE_MARKDOWN")
     local content_type=$(get_header "$response" "$HEADER_CONTENT_TYPE")
     
     if echo "$content_type" | grep -q "$MEDIA_TYPE_MARKDOWN"; then
@@ -364,7 +447,7 @@ http {
     fi
     
     # Test /disabled - should NOT convert
-    response=$(make_request "GET" "/disabled" "$MEDIA_TYPE_MARKDOWN" "")
+    response=$(make_request "GET" "/disabled" "$MEDIA_TYPE_MARKDOWN")
     content_type=$(get_header "$response" "$HEADER_CONTENT_TYPE")
     
     if echo "$content_type" | grep -q "text/html"; then
@@ -385,6 +468,8 @@ test_authenticated_content() {
     log_test 4 "Authenticated Content Handling"
     local config
 
+    write_static_html "${STATIC_ROOT}/auth.html" "${AUTH_PRIVATE_HTML}"
+
     config="$(cat <<EOF
 worker_processes 1;
 ${CONFIG_ERROR_LOG_LINE}
@@ -394,10 +479,11 @@ http {
     access_log ${NGINX_ACCESS_LOG};
     server {
         listen ${TEST_PORT};
-        location /test {
+        location = /test {
+            alias ${STATIC_ROOT}/auth.html;
             markdown_filter on;
             markdown_auth_policy allow;
-            return 200 '${AUTH_PRIVATE_HTML}';
+            add_header Cache-Control private always;
             default_type text/html;
         }
     }
@@ -408,7 +494,7 @@ EOF
     start_nginx "$config" || { log_fail "$NGINX_START_FAILURE_MSG"; return 1; }
     
     # Make request with Authorization header
-    local response=$(make_request "GET" "/test" "$MEDIA_TYPE_MARKDOWN" "-H 'Authorization: Bearer token123'")
+    local response=$(make_request "GET" "/test" "$MEDIA_TYPE_MARKDOWN" -H "Authorization: Bearer token123")
     local status=$(get_status "$response")
     local content_type=$(get_header "$response" "$HEADER_CONTENT_TYPE")
     local cache_control=$(get_header "$response" "Cache-Control")
@@ -444,6 +530,7 @@ test_variable_driven_markdown_filter() {
     log_test 5 "Variable-driven markdown_filter resolution"
 
     local config
+    write_static_html "${STATIC_ROOT}/variable.html" "${VAR_TOGGLE_HTML}"
     config="$(cat <<EOF
 worker_processes 1;
 ${CONFIG_ERROR_LOG_LINE}
@@ -461,9 +548,9 @@ http {
 
     server {
         listen ${TEST_PORT};
-        location /test {
+        location = /test {
+            alias ${STATIC_ROOT}/variable.html;
             markdown_filter \$markdown_enabled;
-            return 200 '${VAR_TOGGLE_HTML}';
             default_type text/html;
         }
     }
@@ -476,7 +563,7 @@ EOF
     local response
     local content_type
 
-    response=$(make_request "GET" "/test?md=1" "$MEDIA_TYPE_MARKDOWN" "")
+    response=$(make_request "GET" "/test?md=1" "$MEDIA_TYPE_MARKDOWN")
     content_type=$(get_header "$response" "$HEADER_CONTENT_TYPE")
     if echo "$content_type" | grep -q "$MEDIA_TYPE_MARKDOWN"; then
         log_pass "md=1 enables conversion (trimmed \" on \" value)"
@@ -484,7 +571,7 @@ EOF
         log_fail "md=1 should convert, got $content_type"
     fi
 
-    response=$(make_request "GET" "/test?md=0" "$MEDIA_TYPE_MARKDOWN" "")
+    response=$(make_request "GET" "/test?md=0" "$MEDIA_TYPE_MARKDOWN")
     content_type=$(get_header "$response" "$HEADER_CONTENT_TYPE")
     if echo "$content_type" | grep -q "text/html"; then
         log_pass "md=0 disables conversion"
@@ -492,7 +579,7 @@ EOF
         log_fail "md=0 should not convert, got $content_type"
     fi
 
-    response=$(make_request "GET" "/test?md=true" "$MEDIA_TYPE_MARKDOWN" "")
+    response=$(make_request "GET" "/test?md=true" "$MEDIA_TYPE_MARKDOWN")
     content_type=$(get_header "$response" "$HEADER_CONTENT_TYPE")
     if echo "$content_type" | grep -q "$MEDIA_TYPE_MARKDOWN"; then
         log_pass "md=true enables conversion (yes/true mapping)"
@@ -500,12 +587,155 @@ EOF
         log_fail "md=true should convert, got $content_type"
     fi
 
-    response=$(make_request "GET" "/test?md=bad" "$MEDIA_TYPE_MARKDOWN" "")
+    response=$(make_request "GET" "/test?md=bad" "$MEDIA_TYPE_MARKDOWN")
     content_type=$(get_header "$response" "$HEADER_CONTENT_TYPE")
     if echo "$content_type" | grep -q "text/html"; then
         log_pass "Invalid variable value safely disables conversion"
     else
         log_fail "Invalid value should not convert, got $content_type"
+    fi
+
+    stop_nginx
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+    return 0
+}
+
+#
+# Test 6: Real NGINX Range bypass
+#
+test_range_bypass() {
+    log_test 6 "Range request bypass with real NGINX file serving"
+
+    mkdir -p "$STATIC_ROOT"
+    cat > "$RANGE_HTML_PATH" <<EOF
+<html><body><h1>Range Content</h1><p>This body should stay HTML when Range is used.</p></body></html>
+EOF
+
+    local config
+    config="$(cat <<EOF
+worker_processes 1;
+${CONFIG_ERROR_LOG_LINE}
+${CONFIG_PID_LINE}
+events { worker_connections 1024; }
+http {
+    access_log ${NGINX_ACCESS_LOG};
+    server {
+        listen ${TEST_PORT};
+        location /range.html {
+            root ${STATIC_ROOT};
+            markdown_filter on;
+            default_type text/html;
+        }
+    }
+}
+EOF
+)"
+
+    start_nginx "$config" || { log_fail "$NGINX_START_FAILURE_MSG"; return 1; }
+
+    local response
+    local status
+    local content_type
+    local body
+
+    response=$(make_request "GET" "/range.html" "$MEDIA_TYPE_MARKDOWN" -H "Range: bytes=0-31")
+    status=$(get_status "$response")
+    content_type=$(get_header "$response" "$HEADER_CONTENT_TYPE")
+    body=$(get_body "$response")
+
+    if [[ "$status" == "206" ]]; then
+        log_pass "Status code: 206 Partial Content"
+    else
+        log_fail "Status code: Expected 206, got $status"
+    fi
+
+    if echo "$content_type" | grep -q "text/html"; then
+        log_pass "Content-Type remains text/html for Range bypass"
+    else
+        log_fail "Content-Type: Expected text/html, got $content_type"
+    fi
+
+    if echo "$body" | grep -q "<html><body><h1>Range"; then
+        log_pass "Body remains original HTML"
+    else
+        log_fail "Body should remain HTML for Range bypass"
+        log_info "Body: $body"
+    fi
+
+    stop_nginx
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+    return 0
+}
+
+#
+# Test 7: Shared metrics aggregation across workers
+#
+test_metrics_shared_aggregation() {
+    log_test 7 "Shared metrics aggregation across workers"
+
+    local config
+    local total_requests=40
+    local response
+    local metrics
+    local attempted
+    local completed
+
+    write_static_html "${STATIC_ROOT}/metrics.html" \
+        '<html><body><h1>Shared Metrics</h1><p>Aggregation path.</p></body></html>'
+
+    config="$(cat <<EOF
+worker_processes 2;
+${CONFIG_ERROR_LOG_LINE}
+${CONFIG_PID_LINE}
+events {
+    worker_connections 1024;
+    accept_mutex off;
+}
+http {
+    access_log ${NGINX_ACCESS_LOG};
+    server {
+        listen ${TEST_PORT};
+        location = /test {
+            alias ${STATIC_ROOT}/metrics.html;
+            markdown_filter on;
+            default_type text/html;
+        }
+        location /markdown-metrics {
+            markdown_metrics;
+        }
+    }
+}
+EOF
+)"
+
+    start_nginx "$config" || { log_fail "$NGINX_START_FAILURE_MSG"; return 1; }
+
+    seq "$total_requests" | xargs -I{} -P 8 sh -c \
+        "curl -s -H 'Accept: ${MEDIA_TYPE_MARKDOWN}' 'http://localhost:${TEST_PORT}/test?req={}' > /dev/null"
+
+    metrics=$(curl -s -H "Accept: application/json" "http://localhost:${TEST_PORT}/markdown-metrics")
+    attempted=$(printf "%s" "$metrics" | tr -d '\n' | sed -E 's/.*"conversions_attempted":[[:space:]]*([0-9]+).*/\1/')
+    completed=$(printf "%s" "$metrics" | tr -d '\n' | sed -E 's/.*"conversion_completed":[[:space:]]*([0-9]+).*/\1/')
+
+    if [[ "$attempted" == "$total_requests" ]]; then
+        log_pass "Shared metrics aggregate all worker attempts (${attempted})"
+    else
+        log_fail "Expected conversions_attempted=${total_requests}, got ${attempted}"
+        log_info "Metrics: $metrics"
+    fi
+
+    if [[ "$completed" == "$total_requests" ]]; then
+        log_pass "Shared metrics report completed conversions (${completed})"
+    else
+        log_fail "Expected conversion_completed=${total_requests}, got ${completed}"
+        log_info "Metrics: $metrics"
+    fi
+
+    if echo "$metrics" | grep -q '"conversion_latency_buckets"'; then
+        log_pass "Metrics JSON exposes latency buckets"
+    else
+        log_fail "Metrics JSON missing conversion_latency_buckets"
+        log_info "Metrics: $metrics"
     fi
 
     stop_nginx
@@ -525,10 +755,10 @@ main() {
     # Check prerequisites
     log_info "Checking prerequisites..."
     
-    if ! command -v nginx &> /dev/null; then
-        echo "ERROR: nginx not found in PATH" >&2
+    if ! resolve_nginx_bin; then
         return 1
     fi
+    resolve_delegated_nginx_bin
     
     if ! command -v curl &> /dev/null; then
         echo "ERROR: curl not found in PATH" >&2
@@ -543,6 +773,14 @@ main() {
     test_configuration_inheritance
     test_authenticated_content
     test_variable_driven_markdown_filter
+    test_range_bypass
+    test_metrics_shared_aggregation
+    run_external_check 8 "Delegated If-Modified-Since runtime validation" \
+        "${REPO_ROOT}/tools/ci/verify_real_nginx_ims.sh"
+    run_external_check 9 "Chunked streaming native smoke validation" \
+        "${REPO_ROOT}/tools/e2e/verify_chunked_streaming_native_e2e.sh" --profile smoke
+    run_external_check 10 "Large response native validation" \
+        "${REPO_ROOT}/tools/e2e/verify_large_markdown_response_e2e.sh"
     
     # Summary
     echo ""
