@@ -12,7 +12,7 @@ on:
       - "Makefile"
       - "README.md"
       - "README_zh-CN.md"
-      - ".github/workflows/ci.yml"
+      - ".github/workflows/**"
   push:
     branches: [main, master]
     paths:
@@ -23,7 +23,7 @@ on:
       - "Makefile"
       - "README.md"
       - "README_zh-CN.md"
-      - ".github/workflows/ci.yml"
+      - ".github/workflows/**"
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -112,7 +112,7 @@ jobs:
           components: rustfmt,clippy
 
       - name: Cache Rust build artifacts
-        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
           workspaces: |
             components/rust-converter -> target
@@ -199,10 +199,10 @@ jobs:
 
   runtime-regressions:
     name: Runtime Regressions (IMS + Chunked + Large)
-    needs: [changes, rust-quality, nginx-c-tests]
+    needs: [changes, rust-quality]
     if: needs.changes.outputs.e2e == 'true' || needs.changes.outputs.workflows == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 75
+    timeout-minutes: 45
     permissions:
       contents: read
     steps:
@@ -225,7 +225,7 @@ jobs:
         uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
 
       - name: Cache Rust build artifacts
-        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
           workspaces: |
             components/rust-converter -> target
@@ -281,7 +281,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.workflows == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 30
     continue-on-error: true
     permissions:
       contents: read
@@ -293,7 +293,7 @@ jobs:
         uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
 
       - name: Cache Rust build artifacts
-        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
           workspaces: |
             components/rust-converter -> target
