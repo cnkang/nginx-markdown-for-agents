@@ -50,6 +50,8 @@ require_flag_value() {
     usage >&2
     exit 2
   fi
+
+  return 0
 }
 
 while [[ $# -gt 0 ]]; do
