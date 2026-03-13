@@ -43,8 +43,8 @@ markdown_detect_rust_target() {
   fi
 
   case "${host_os}:${host_arch}:${libc_variant}" in
-    Darwin:arm64) echo "aarch64-apple-darwin" ;;
-    Darwin:x86_64) echo "x86_64-apple-darwin" ;;
+    Darwin:arm64:*) echo "aarch64-apple-darwin" ;;
+    Darwin:x86_64:*) echo "x86_64-apple-darwin" ;;
     Linux:x86_64:gnu) echo "x86_64-unknown-linux-gnu" ;;
     Linux:aarch64:gnu) echo "aarch64-unknown-linux-gnu" ;;
     Linux:x86_64:musl) echo "x86_64-unknown-linux-musl" ;;
