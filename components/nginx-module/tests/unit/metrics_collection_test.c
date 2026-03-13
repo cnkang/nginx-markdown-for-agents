@@ -22,7 +22,27 @@ typedef struct {
     unsigned long conversion_time_sum_ms;
     unsigned long input_bytes;
     unsigned long output_bytes;
+    unsigned long conversion_latency_le_10ms;
+    unsigned long conversion_latency_le_100ms;
+    unsigned long conversion_latency_le_1000ms;
+    unsigned long conversion_latency_gt_1000ms;
 } metrics_t;
+
+static void
+record_latency(metrics_t *m, unsigned long elapsed_ms)
+{
+    m->conversion_time_sum_ms += elapsed_ms;
+
+    if (elapsed_ms <= 10) {
+        m->conversion_latency_le_10ms++;
+    } else if (elapsed_ms <= 100) {
+        m->conversion_latency_le_100ms++;
+    } else if (elapsed_ms <= 1000) {
+        m->conversion_latency_le_1000ms++;
+    } else {
+        m->conversion_latency_gt_1000ms++;
+    }
+}
 
 static void
 record_success(metrics_t *m, size_t input, size_t output, unsigned long elapsed_ms)
@@ -31,14 +51,15 @@ record_success(metrics_t *m, size_t input, size_t output, unsigned long elapsed_
     m->conversions_succeeded++;
     m->input_bytes += input;
     m->output_bytes += output;
-    m->conversion_time_sum_ms += elapsed_ms;
+    record_latency(m, elapsed_ms);
 }
 
 static void
-record_failure(metrics_t *m, error_category_t category)
+record_failure(metrics_t *m, error_category_t category, unsigned long elapsed_ms)
 {
     m->conversions_attempted++;
     m->conversions_failed++;
+    record_latency(m, elapsed_ms);
     switch (category) {
         case CAT_CONVERSION: m->failures_conversion++; break;
         case CAT_RESOURCE_LIMIT: m->failures_resource_limit++; break;
@@ -61,9 +82,9 @@ test_metrics_accounting(void)
 
     memset(&m, 0, sizeof(m));
     record_success(&m, 1000, 300, 12);
-    record_failure(&m, CAT_CONVERSION);
-    record_failure(&m, CAT_RESOURCE_LIMIT);
-    record_failure(&m, CAT_SYSTEM);
+    record_failure(&m, CAT_CONVERSION, 80);
+    record_failure(&m, CAT_RESOURCE_LIMIT, 800);
+    record_failure(&m, CAT_SYSTEM, 1600);
     record_bypass(&m);
 
     TEST_ASSERT(m.conversions_attempted == 4, "attempted should include success+failures");
@@ -75,7 +96,11 @@ test_metrics_accounting(void)
     TEST_ASSERT(m.failures_system == 1, "system failures should be classified");
     TEST_ASSERT(m.input_bytes == 1000, "input bytes should accumulate");
     TEST_ASSERT(m.output_bytes == 300, "output bytes should accumulate");
-    TEST_ASSERT(m.conversion_time_sum_ms == 12, "elapsed time should accumulate");
+    TEST_ASSERT(m.conversion_time_sum_ms == 2492, "elapsed time should accumulate for completed conversions");
+    TEST_ASSERT(m.conversion_latency_le_10ms == 0, "sub-10ms bucket should remain empty");
+    TEST_ASSERT(m.conversion_latency_le_100ms == 2, "up to 100ms bucket should include success and fast failure");
+    TEST_ASSERT(m.conversion_latency_le_1000ms == 1, "up to 1000ms bucket should include medium failure");
+    TEST_ASSERT(m.conversion_latency_gt_1000ms == 1, "greater than 1000ms bucket should include slow failure");
     TEST_PASS("Metrics accounting works");
 }
 
