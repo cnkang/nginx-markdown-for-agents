@@ -296,7 +296,7 @@ See `examples/docker/` for Docker build examples.
 
 ## Summary
 
-**NGINX Markdown for Agents** is at version 0.2.0. The project provides HTML-to-Markdown conversion through NGINX content negotiation.
+**NGINX Markdown for Agents** is at version 0.2.1. The project provides HTML-to-Markdown conversion through NGINX content negotiation.
 
 ### Key Components
 - Core feature implementation

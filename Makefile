@@ -6,7 +6,8 @@ UNAME_M := $(shell uname -m)
 LINUX_LIBC := $(shell if command -v ldd >/dev/null 2>&1 && ldd --version 2>&1 | grep -qi musl; then echo musl; elif command -v ldd >/dev/null 2>&1 && ldd /bin/sh 2>&1 | grep -qi musl; then echo musl; else echo gnu; fi)
 
 ifeq ($(UNAME_S),Darwin)
-  MACOSX_DEPLOYMENT_TARGET ?= $(shell sw_vers -productVersion 2>/dev/null | awk -F. '{print $$1 ".0"}')
+  MACOS_MIN_VERSION ?= 11.0
+  MACOSX_DEPLOYMENT_TARGET ?= $(MACOS_MIN_VERSION)
   export MACOSX_DEPLOYMENT_TARGET
 endif
 

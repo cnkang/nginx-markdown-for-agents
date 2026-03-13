@@ -1,6 +1,10 @@
 /*
  * Directive-handler helpers.
  *
+ * WARNING: This header is an implementation detail of the main translation unit
+ * (ngx_http_markdown_filter_module.c). It must NOT be included from any other
+ * .c file or used as a standalone compilation unit.
+ *
  * This unit keeps custom directive parsing and validation separate from
  * configuration object lifecycle and the directive registry table.
  */
@@ -90,9 +94,9 @@ ngx_http_markdown_on_error(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         return "is duplicate";
     }
 
-    if (ngx_strcmp(value[1].data, "pass") == 0) {
+    if (ngx_strcasecmp(value[1].data, (u_char *) "pass") == 0) {
         mcf->on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
-    } else if (ngx_strcmp(value[1].data, "reject") == 0) {
+    } else if (ngx_strcasecmp(value[1].data, (u_char *) "reject") == 0) {
         mcf->on_error = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
     } else {
         ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
@@ -117,9 +121,9 @@ ngx_http_markdown_flavor(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         return "is duplicate";
     }
 
-    if (ngx_strcmp(value[1].data, "commonmark") == 0) {
+    if (ngx_strcasecmp(value[1].data, (u_char *) "commonmark") == 0) {
         mcf->flavor = NGX_HTTP_MARKDOWN_FLAVOR_COMMONMARK;
-    } else if (ngx_strcmp(value[1].data, "gfm") == 0) {
+    } else if (ngx_strcasecmp(value[1].data, (u_char *) "gfm") == 0) {
         mcf->flavor = NGX_HTTP_MARKDOWN_FLAVOR_GFM;
     } else {
         ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
@@ -144,9 +148,9 @@ ngx_http_markdown_auth_policy(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         return "is duplicate";
     }
 
-    if (ngx_strcmp(value[1].data, "allow") == 0) {
+    if (ngx_strcasecmp(value[1].data, (u_char *) "allow") == 0) {
         mcf->auth_policy = NGX_HTTP_MARKDOWN_AUTH_POLICY_ALLOW;
-    } else if (ngx_strcmp(value[1].data, "deny") == 0) {
+    } else if (ngx_strcasecmp(value[1].data, (u_char *) "deny") == 0) {
         mcf->auth_policy = NGX_HTTP_MARKDOWN_AUTH_POLICY_DENY;
     } else {
         ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
@@ -213,11 +217,11 @@ ngx_http_markdown_conditional_requests(ngx_conf_t *cf, ngx_command_t *cmd, void 
         return "is duplicate";
     }
 
-    if (ngx_strcmp(value[1].data, "full_support") == 0) {
+    if (ngx_strcasecmp(value[1].data, (u_char *) "full_support") == 0) {
         mcf->conditional_requests = NGX_HTTP_MARKDOWN_CONDITIONAL_FULL_SUPPORT;
-    } else if (ngx_strcmp(value[1].data, "if_modified_since_only") == 0) {
+    } else if (ngx_strcasecmp(value[1].data, (u_char *) "if_modified_since_only") == 0) {
         mcf->conditional_requests = NGX_HTTP_MARKDOWN_CONDITIONAL_IF_MODIFIED_SINCE;
-    } else if (ngx_strcmp(value[1].data, "disabled") == 0) {
+    } else if (ngx_strcasecmp(value[1].data, (u_char *) "disabled") == 0) {
         mcf->conditional_requests = NGX_HTTP_MARKDOWN_CONDITIONAL_DISABLED;
     } else {
         ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
@@ -242,13 +246,13 @@ ngx_http_markdown_log_verbosity(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         return "is duplicate";
     }
 
-    if (ngx_strcmp(value[1].data, "error") == 0) {
+    if (ngx_strcasecmp(value[1].data, (u_char *) "error") == 0) {
         mcf->log_verbosity = NGX_HTTP_MARKDOWN_LOG_ERROR;
-    } else if (ngx_strcmp(value[1].data, "warn") == 0) {
+    } else if (ngx_strcasecmp(value[1].data, (u_char *) "warn") == 0) {
         mcf->log_verbosity = NGX_HTTP_MARKDOWN_LOG_WARN;
-    } else if (ngx_strcmp(value[1].data, "info") == 0) {
+    } else if (ngx_strcasecmp(value[1].data, (u_char *) "info") == 0) {
         mcf->log_verbosity = NGX_HTTP_MARKDOWN_LOG_INFO;
-    } else if (ngx_strcmp(value[1].data, "debug") == 0) {
+    } else if (ngx_strcasecmp(value[1].data, (u_char *) "debug") == 0) {
         mcf->log_verbosity = NGX_HTTP_MARKDOWN_LOG_DEBUG;
     } else {
         ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,

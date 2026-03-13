@@ -1,6 +1,10 @@
 /*
  * Configuration implementation wiring.
  *
+ * WARNING: This header is an implementation detail of the main translation unit
+ * (ngx_http_markdown_filter_module.c). It must NOT be included from any other
+ * .c file or used as a standalone compilation unit.
+ *
  * Kept as a small aggregator so the main module file can include one config
  * entrypoint while directive registry, directive handlers, and config core
  * helpers evolve independently.

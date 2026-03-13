@@ -17,7 +17,9 @@ BUILDROOT=""
 RUNTIME=""
 RUST_TARGET=""
 NGINX_EXECUTABLE=""
+LOAD_MODULE_LINE=""
 ORIG_ARGS=("$@")
+# shellcheck source=tools/lib/nginx_markdown_native_build.sh
 source "${NATIVE_BUILD_HELPER}"
 
 usage() {
@@ -113,7 +115,7 @@ mkdir -p "${RAW_DIR}"
 echo "==> Host architecture: $(uname -m)"
 if [[ -n "${NGINX_BIN}" ]]; then
   echo "==> Reusing existing NGINX binary (${NGINX_BIN})"
-  markdown_copy_runtime_conf_from_nginx_bin "${NGINX_BIN}" "${RUNTIME}"
+  LOAD_MODULE_LINE="$(markdown_prepare_runtime_reuse "${NGINX_BIN}" "${RUNTIME}")"
   NGINX_EXECUTABLE="${NGINX_BIN}"
 else
   echo "==> Building Rust converter (${RUST_TARGET})"
@@ -140,7 +142,7 @@ truncate -s 104857600 "${RUNTIME}/html/full/huge-100m.html"
 truncate -s 1073741824 "${RUNTIME}/html/full/huge-1g.html"
 
 cat > "${RUNTIME}/conf/nginx.conf" <<EOF
-worker_processes 1;
+${LOAD_MODULE_LINE}worker_processes 1;
 error_log logs/error.log warn;
 pid logs/nginx.pid;
 

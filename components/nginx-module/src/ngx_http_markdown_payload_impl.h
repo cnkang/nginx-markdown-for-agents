@@ -1,6 +1,10 @@
 /*
  * Payload-path helpers.
  *
+ * WARNING: This header is an implementation detail of the main translation unit
+ * (ngx_http_markdown_filter_module.c). It must NOT be included from any other
+ * .c file or used as a standalone compilation unit.
+ *
  * Kept separate from the request entry/exit state machine so buffering,
  * decompression coordination, header forwarding, and fail-open replay can
  * evolve without expanding the header/body filter flow itself.
@@ -165,6 +169,8 @@ static void
 ngx_http_markdown_record_decompression_success(ngx_http_request_t *r,
                                                ngx_http_markdown_ctx_t *ctx)
 {
+    float ratio;
+
     NGX_HTTP_MARKDOWN_METRIC_INC(decompressions_succeeded);
     switch (ctx->compression_type) {
         case NGX_HTTP_MARKDOWN_COMPRESSION_GZIP:
@@ -180,11 +186,15 @@ ngx_http_markdown_record_decompression_success(ngx_http_request_t *r,
             break;
     }
 
+    ratio = (ctx->compressed_size != 0)
+        ? (float) ctx->decompressed_size / (float) ctx->compressed_size
+        : 0.0f;
+
     ngx_log_error(NGX_LOG_INFO, r->connection->log, 0,
                  "markdown filter: decompression succeeded, "
                  "compression=%d, compressed=%uz bytes, decompressed=%uz bytes, ratio=%.1fx",
                  ctx->compression_type, ctx->compressed_size, ctx->decompressed_size,
-                 (float) ctx->decompressed_size / ctx->compressed_size);
+                 ratio);
 
     ngx_http_markdown_remove_content_encoding(r);
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
