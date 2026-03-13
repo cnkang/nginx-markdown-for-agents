@@ -1,6 +1,7 @@
 use super::*;
 
 impl MarkdownConverter {
+    /// Emit one list item while preserving multi-line/nested-item indentation.
     fn format_list_item_lines(
         &self,
         output: &mut String,
@@ -57,6 +58,7 @@ impl MarkdownConverter {
         }
     }
 
+    /// Return the longest contiguous run of backticks in `content`.
     pub(super) fn longest_backtick_run(&self, content: &str) -> usize {
         let mut longest = 0;
         let mut current = 0;
@@ -73,6 +75,10 @@ impl MarkdownConverter {
         longest
     }
 
+    /// Choose a fenced-code delimiter that cannot collide with the payload.
+    ///
+    /// Markdown requires the outer fence to be longer than any backtick run
+    /// contained inside the code block.
     pub(super) fn choose_code_fence(&self, content: &str) -> String {
         let longest_backticks = self.longest_backtick_run(content);
         if longest_backticks == 0 {

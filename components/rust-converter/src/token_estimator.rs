@@ -38,6 +38,7 @@ impl TokenEstimator {
 }
 
 impl Default for TokenEstimator {
+    /// Return the default estimator tuned for English-like text (4 chars/token).
     fn default() -> Self {
         Self::new()
     }

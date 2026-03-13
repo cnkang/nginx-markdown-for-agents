@@ -2,6 +2,7 @@ use std::ptr;
 
 use super::abi::{ConversionOutput, ERROR_SUCCESS, MarkdownResult};
 
+/// Reset an output struct to a clean success-initialized state.
 pub(crate) fn reset_result(result: &mut MarkdownResult) {
     result.markdown = ptr::null_mut();
     result.markdown_len = 0;
@@ -13,6 +14,7 @@ pub(crate) fn reset_result(result: &mut MarkdownResult) {
     result.error_len = 0;
 }
 
+/// Populate a result struct with an owned error payload.
 pub(crate) fn set_error_result(
     result: &mut MarkdownResult,
     error_code: u32,
@@ -24,6 +26,7 @@ pub(crate) fn set_error_result(
     result.error_message = Box::into_raw(error_bytes) as *mut u8;
 }
 
+/// Populate a result struct with successful conversion output buffers.
 pub(crate) fn set_success_result(result: &mut MarkdownResult, output: ConversionOutput) {
     result.markdown_len = output.markdown.len();
     result.markdown = Box::into_raw(output.markdown) as *mut u8;
@@ -41,6 +44,7 @@ pub(crate) fn set_success_result(result: &mut MarkdownResult, output: Conversion
     }
 }
 
+/// Free one heap buffer previously exported through the C ABI.
 pub(crate) fn free_buffer(ptr_field: &mut *mut u8, len_field: &mut usize) {
     if (*ptr_field).is_null() {
         return;

@@ -50,6 +50,7 @@ pub struct MarkdownConverterHandle {
 }
 
 impl MarkdownConverterHandle {
+    /// Build a reusable converter handle for repeated FFI calls.
     pub(crate) fn new() -> Self {
         Self {
             etag_generator: ETagGenerator::new(),

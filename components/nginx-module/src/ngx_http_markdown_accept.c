@@ -112,6 +112,7 @@ ngx_http_markdown_parse_accept(ngx_http_request_t *r, ngx_str_t *accept,
 static void
 ngx_http_markdown_skip_accept_spaces(u_char **p, u_char *end)
 {
+    /* RFC 9110 allows optional whitespace around separators and parameters. */
     while (*p < end && (**p == ' ' || **p == '\t')) {
         (*p)++;
     }
@@ -120,11 +121,18 @@ ngx_http_markdown_skip_accept_spaces(u_char **p, u_char *end)
 static void
 ngx_http_markdown_skip_accept_comma(u_char **p, u_char *end)
 {
+    /* Caller already consumed one segment; skip a trailing comma if present. */
     if (*p < end && **p == ',') {
         (*p)++;
     }
 }
 
+/*
+ * Parse one comma-delimited media-range segment.
+ *
+ * Invalid segments are dropped (with warning) instead of failing the entire
+ * header parse so we keep best-effort behavior for partially malformed input.
+ */
 static ngx_int_t
 ngx_http_markdown_parse_accept_segment(ngx_http_request_t *r,
     u_char *start, u_char *end, ngx_array_t *entries, ngx_uint_t *order)
@@ -568,6 +576,12 @@ ngx_http_markdown_get_accept_header(ngx_http_request_t *r)
     return ngx_http_markdown_find_request_header(r, "Accept", sizeof("Accept") - 1);
 }
 
+/*
+ * Find a request header in nginx's linked-list header storage.
+ *
+ * Complexity is O(n) over all request headers, which is acceptable because
+ * request header counts are typically small and this runs once per decision.
+ */
 static ngx_table_elt_t *
 ngx_http_markdown_find_request_header(ngx_http_request_t *r, const char *name,
     size_t name_len)

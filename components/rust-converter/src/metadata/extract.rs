@@ -7,6 +7,10 @@ use crate::error::ConversionError;
 use super::{MetadataExtractor, PageMetadata};
 
 impl MetadataExtractor {
+    /// Extract page metadata from a parsed DOM tree.
+    ///
+    /// Extraction order is deterministic so repeated conversions over identical
+    /// input yield stable front-matter output.
     pub fn extract(&self, dom: &RcDom) -> Result<PageMetadata, ConversionError> {
         let mut metadata = PageMetadata::new();
 
@@ -22,14 +26,17 @@ impl MetadataExtractor {
         Ok(metadata)
     }
 
+    /// Resolve document title from the first `<title>` element.
     fn find_title(&self, dom: &RcDom) -> Option<String> {
         self.find_element_text(dom, "title")
     }
 
+    /// Resolve canonical URL from `<link rel="canonical">`.
     fn find_canonical(&self, dom: &RcDom) -> Option<String> {
         self.find_link_href(dom, "canonical")
     }
 
+    /// Traverse the DOM and collect metadata from `<meta ...>` tags.
     fn extract_meta_tags(
         &self,
         dom: &RcDom,
@@ -38,6 +45,7 @@ impl MetadataExtractor {
         self.traverse_for_meta(&dom.document, metadata)
     }
 
+    /// Depth-first traversal that processes metadata-relevant nodes.
     fn traverse_for_meta(
         &self,
         node: &Handle,
@@ -68,6 +76,7 @@ impl MetadataExtractor {
         Ok(())
     }
 
+    /// Merge one meta tag into the accumulated metadata structure.
     fn process_meta_tag(
         &self,
         attrs: &Ref<Vec<html5ever::Attribute>>,
@@ -118,6 +127,7 @@ impl MetadataExtractor {
         Ok(())
     }
 
+    /// Return a tag attribute value by name when present.
     fn get_attr(&self, attrs: &Ref<Vec<html5ever::Attribute>>, name: &str) -> Option<String> {
         attrs
             .iter()
@@ -125,10 +135,12 @@ impl MetadataExtractor {
             .map(|attr| attr.value.to_string())
     }
 
+    /// Locate the first matching element and return its text content.
     fn find_element_text(&self, dom: &RcDom, element_name: &str) -> Option<String> {
         self.find_element_text_recursive(&dom.document, element_name)
     }
 
+    /// Recursive helper for `find_element_text`.
     fn find_element_text_recursive(&self, node: &Handle, element_name: &str) -> Option<String> {
         match node.data {
             NodeData::Element { ref name, .. } => {
@@ -157,10 +169,12 @@ impl MetadataExtractor {
         None
     }
 
+    /// Locate a `<link>` tag by `rel` and return its `href` value.
     fn find_link_href(&self, dom: &RcDom, rel: &str) -> Option<String> {
         self.find_link_href_recursive(&dom.document, rel)
     }
 
+    /// Recursive helper for `find_link_href`.
     fn find_link_href_recursive(&self, node: &Handle, rel: &str) -> Option<String> {
         match node.data {
             NodeData::Element {
@@ -198,6 +212,7 @@ impl MetadataExtractor {
         None
     }
 
+    /// Append all descendant text nodes into `output` in DOM order.
     fn extract_text_content(&self, node: &Handle, output: &mut String) {
         match node.data {
             NodeData::Text { ref contents } => {

@@ -1,6 +1,7 @@
 use super::*;
 
 impl MarkdownConverter {
+    /// Optionally prepend YAML front matter extracted from DOM metadata.
     pub(super) fn maybe_write_front_matter_from_dom(
         &self,
         dom: &markup5ever_rcdom::RcDom,

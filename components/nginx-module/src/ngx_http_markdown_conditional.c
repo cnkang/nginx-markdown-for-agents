@@ -15,6 +15,12 @@ static u_char ngx_http_markdown_if_none_match_header[] = "If-None-Match";
 static u_char ngx_http_markdown_etag_wildcard[] = "*";
 static u_char ngx_http_markdown_empty_string[] = "";
 
+/*
+ * Find a request header by name in nginx's generic linked-list container.
+ *
+ * This helper is used for conditional request processing so the parser can
+ * inspect `If-None-Match` even when convenience header pointers are absent.
+ */
 static ngx_table_elt_t *
 ngx_http_markdown_find_request_header(ngx_http_request_t *r, u_char *name, size_t name_len)
 {

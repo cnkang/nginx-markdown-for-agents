@@ -139,6 +139,12 @@ ngx_http_markdown_buffer_append(ngx_http_markdown_buffer_t *buf,
     return NGX_OK;
 }
 
+/*
+ * Reserve capacity for anticipated response size.
+ *
+ * This is a hint-only optimization: it may reduce realloc/copy churn when
+ * callers can estimate body size, but it never raises the configured max_size.
+ */
 ngx_int_t
 ngx_http_markdown_buffer_reserve(ngx_http_markdown_buffer_t *buf, size_t capacity_hint)
 {
@@ -157,6 +163,12 @@ ngx_http_markdown_buffer_reserve(ngx_http_markdown_buffer_t *buf, size_t capacit
     return ngx_http_markdown_buffer_ensure_capacity(buf, capacity_hint);
 }
 
+/*
+ * Ensure the backing store can hold `required` bytes.
+ *
+ * Growth policy doubles capacity up to `max_size`, which amortizes append
+ * complexity to O(1) while maintaining a strict upper bound for safety.
+ */
 static ngx_int_t
 ngx_http_markdown_buffer_ensure_capacity(ngx_http_markdown_buffer_t *buf, size_t required)
 {
@@ -185,6 +197,7 @@ ngx_http_markdown_buffer_ensure_capacity(ngx_http_markdown_buffer_t *buf, size_t
         }
     } else {
         new_capacity = buf->capacity;
+        // Geometric growth minimizes total reallocations for large bodies.
         while (new_capacity < required) {
             if (new_capacity >= buf->max_size) {
                 new_capacity = buf->max_size;

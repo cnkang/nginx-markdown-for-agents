@@ -118,6 +118,7 @@ impl MarkdownConverter {
         Ok(())
     }
 
+    /// Extract header cells from a `<thead>` section.
     pub(super) fn extract_table_header(
         &self,
         thead: &Handle,
@@ -138,6 +139,10 @@ impl MarkdownConverter {
         Ok(())
     }
 
+    /// Treat one `<tr>` as the table header row.
+    ///
+    /// This path is used for explicit `<thead>` rows and for fallback when a
+    /// table omits `<thead>` but starts with header-like cells.
     pub(super) fn extract_table_row_as_header(
         &self,
         tr: &Handle,
@@ -175,6 +180,7 @@ impl MarkdownConverter {
         Ok(())
     }
 
+    /// Extract all body rows from a `<tbody>` section.
     pub(super) fn extract_table_rows(
         &self,
         tbody: &Handle,
@@ -195,6 +201,7 @@ impl MarkdownConverter {
         Ok(())
     }
 
+    /// Extract normalized text cells from a `<tr>` element.
     pub(super) fn extract_table_row(
         &self,
         tr: &Handle,
@@ -223,6 +230,10 @@ impl MarkdownConverter {
         Ok(())
     }
 
+    /// Resolve column alignment from HTML attributes.
+    ///
+    /// Priority is `align="..."` first, then CSS `text-align` from `style`.
+    /// Unknown values fall back to left alignment.
     pub(super) fn extract_alignment(&self, attrs: &Ref<Vec<Attribute>>) -> TableAlignment {
         for attr in attrs.iter() {
             if attr.name.local.as_ref() == "align" {
@@ -267,6 +278,7 @@ impl MarkdownConverter {
         TableAlignment::Left
     }
 
+    /// Escape row/cell content for safe GFM table rendering.
     fn escape_gfm_table_cell(&self, cell: &str) -> String {
         cell.replace("\r\n", "\n")
             .replace('\r', "\n")
@@ -274,6 +286,10 @@ impl MarkdownConverter {
             .replace('|', "\\|")
     }
 
+    /// Render a normalized GitHub-Flavored Markdown table.
+    ///
+    /// Column count is widened to the maximum width across headers and rows so
+    /// ragged HTML input still produces a rectangular Markdown table.
     pub(super) fn write_gfm_table(
         &self,
         output: &mut String,

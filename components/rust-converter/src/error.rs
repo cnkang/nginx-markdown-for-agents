@@ -34,6 +34,7 @@ impl ConversionError {
 }
 
 impl fmt::Display for ConversionError {
+    /// Render a human-readable error message for logs and FFI surfaces.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             ConversionError::ParseError(msg) => write!(f, "Parse error: {}", msg),
