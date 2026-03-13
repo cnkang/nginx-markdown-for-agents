@@ -42,7 +42,7 @@ AI Agent     -> Accept: text/markdown  -> Markdown
 |--------------|----------------------|
 | 让现有站点更适合 Agent 消费 | 从当前 HTML 响应协商出 Markdown 变体 |
 | 尽量少动应用层 | 在 NGINX 侧按路径、按站点启用 |
-| 可控上线 | 失败透传、大小限制、超时限制和指标 |
+| 可控上线 | 失败透传、大小限制、超时限制和跨 worker 聚合指标 |
 | 更符合 HTTP 语义的缓存行为 | 变体 `ETag`、`Vary: Accept` 与条件请求支持 |
 | 灵活的配置 | 变量驱动的按请求控制与认证策略 |
 
@@ -200,6 +200,11 @@ make test-rust
 
 # 完整 NGINX 模块单元测试
 make test-nginx-unit
+
+# 运行时集成、canonical E2E 与 fuzz 冒烟
+make test-nginx-integration
+make test-e2e
+make test-rust-fuzz-smoke
 ```
 
 更完整的集成测试、E2E 与性能基线说明见 [docs/testing/README.md](docs/testing/README.md)。
@@ -261,25 +266,25 @@ Makefile               顶层构建与测试入口
 
 ## 路线方向
 
-当前版本 (0.2.0)：
+当前版本 (0.2.1)：
 
 - 变量驱动的配置支持
 - 增强的安装工具
-- 全面的文档更新
+- 共享指标聚合与运行时回归覆盖
 - 强化的 CI/CD 流水线
 
 近期重点：
 
-- 生产规模的性能基准测试与性能分析
+- 通过 CI 制品持续记录性能基线
 - 多样化环境下的部署验证
 - 社区反馈整合
-- 性能优化机会
+- 解析路径的性能优化机会
 
 未来探索：
 
 - 大文档的流式转换方案
 - 更多 Markdown 风格与输出格式
-- 增强的指标与可观测性功能
+- 基于内置共享指标的更丰富可观测性集成
 
 ## 许可证
 

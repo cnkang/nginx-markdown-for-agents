@@ -42,7 +42,7 @@ AI agent     -> Accept: text/markdown  -> Markdown
 |----------------|---------------------------|
 | Agent-friendly content from an existing site | Markdown negotiated from your current HTML responses |
 | Minimal application change | NGINX-side enablement with per-path control |
-| Safe rollout | Fail-open mode, size limits, timeouts, and metrics |
+| Safe rollout | Fail-open mode, size limits, timeouts, and shared aggregate metrics |
 | Cache-aware behavior | Variant `ETag`, `Vary: Accept`, and conditional-request support |
 | Flexible configuration | Variable-driven per-request control and authentication policies |
 
@@ -201,6 +201,11 @@ make test-rust
 
 # Full NGINX module unit suite
 make test-nginx-unit
+
+# Runtime integration and canonical E2E checks
+make test-nginx-integration
+make test-e2e
+make test-rust-fuzz-smoke
 ```
 
 See [docs/testing/README.md](docs/testing/README.md) for integration, E2E, and performance-oriented test references.
@@ -262,25 +267,25 @@ Makefile               Top-level build and test entrypoints
 
 ## Roadmap
 
-Current release (0.2.0):
+Current release (0.2.1):
 
 - Variable-driven configuration support
 - Enhanced installation tooling
-- Comprehensive documentation refresh
+- Shared metrics aggregation and runtime-regression coverage
 - Hardened CI/CD pipeline
 
 Near-term focus:
 
-- Production-scale benchmarking and performance profiling
+- Performance regression tracking with CI artifact capture
 - Deployment validation across diverse environments
 - Community feedback integration
-- Performance optimization opportunities
+- Parser-path optimization opportunities
 
 Future exploration:
 
 - Streaming-oriented conversion approaches for large documents
 - Additional Markdown flavors and output formats
-- Enhanced metrics and observability features
+- Expanded observability integrations beyond the built-in shared metrics endpoint
 
 ## License
 

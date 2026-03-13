@@ -392,6 +392,8 @@ markdown_stream_types text/event-stream application/x-ndjson;
 
 Enables a metrics endpoint at this location. The endpoint returns either a human-readable plain-text report or a JSON object, depending on the request `Accept` header.
 
+The endpoint reads shared-memory counters, so values are aggregated across workers rather than scoped to the worker that handled the metrics request.
+
 **Security:** The module handler enforces localhost-only access (`127.0.0.1`, `::1`). NGINX `allow`/`deny` rules can further restrict access, but they do not broaden access beyond localhost.
 
 **Example:**
@@ -415,12 +417,17 @@ location /markdown-metrics {
 - `conversions_succeeded`: Successful conversions
 - `conversions_failed`: Failed conversions
 - `conversions_bypassed`: Requests bypassed (ineligible/passthrough)
+- `conversion_completed`: Completed conversions (`conversions_succeeded + conversions_failed`)
 - `failures_conversion`: Conversion failures
 - `failures_resource_limit`: Resource-limit failures (size/timeout)
 - `failures_system`: System failures
 - `conversion_time_sum_ms`: Total conversion time (sum)
+- `conversion_time_avg_ms`: Average conversion time across completed conversions
 - `input_bytes`: Total input bytes processed
+- `input_bytes_avg`: Average input bytes across successful conversions
 - `output_bytes`: Total output bytes generated
+- `output_bytes_avg`: Average output bytes across successful conversions
+- `conversion_latency_buckets`: Bucketed counts for `<=10ms`, `<=100ms`, `<=1000ms`, and `>1000ms`
 - `decompressions_attempted`: Responses that required decompression before conversion
 - `decompressions_succeeded`: Successful decompressions
 - `decompressions_failed`: Failed decompressions

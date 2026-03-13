@@ -82,7 +82,20 @@ Recommended operator practices:
 - keep resource limits and timeouts enabled
 - review authenticated-request and cache settings carefully
 - expose the metrics endpoint only to trusted networks
+- treat metrics as instance-wide shared counters when setting alerts or dashboards
 - apply normal least-privilege controls to NGINX workers and deployment environments
+
+## Continuous Security Validation
+
+The repository includes `cargo-fuzz` targets for parser, FFI, and security-validator paths under `components/rust-converter/fuzz/`.
+
+Local smoke example:
+
+```bash
+make test-rust-fuzz-smoke
+```
+
+Nightly GitHub Actions coverage is defined in `.github/workflows/nightly-fuzz.yml`.
 
 ## Related Documentation
 

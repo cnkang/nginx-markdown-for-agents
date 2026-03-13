@@ -214,12 +214,18 @@ cargo test --test security_tests
 
 ### Fuzzing
 
-For continuous security testing, use cargo-fuzz:
+For continuous security testing, use the `cargo-fuzz` targets in `components/rust-converter/fuzz/`:
 
 ```bash
-cargo install cargo-fuzz
-cargo fuzz run fuzz_converter
+cargo +nightly install cargo-fuzz --locked
+
+cd components/rust-converter
+cargo +nightly fuzz run parser_html
+cargo +nightly fuzz run ffi_convert
+cargo +nightly fuzz run security_validator
 ```
+
+The repository also includes `.github/workflows/nightly-fuzz.yml`, which runs these targets on a nightly schedule and uploads fuzz artifacts/corpora for inspection.
 
 ## Security Best Practices
 
