@@ -32,7 +32,12 @@ impl MarkdownConverter {
         for child in node.children.borrow().iter() {
             if let NodeData::Element { ref name, .. } = child.data {
                 match name.local.as_ref() {
-                    "thead" => self.extract_table_header(child, ctx.as_deref_mut(), &mut headers, &mut alignments)?,
+                    "thead" => self.extract_table_header(
+                        child,
+                        ctx.as_deref_mut(),
+                        &mut headers,
+                        &mut alignments,
+                    )?,
                     "tbody" => {
                         if headers.is_empty() {
                             let children = child.children.borrow();
@@ -62,7 +67,11 @@ impl MarkdownConverter {
                                         }
 
                                         let mut row_cells = Vec::new();
-                                        self.extract_table_row(tbody_child, ctx.as_deref_mut(), &mut row_cells)?;
+                                        self.extract_table_row(
+                                            tbody_child,
+                                            ctx.as_deref_mut(),
+                                            &mut row_cells,
+                                        )?;
                                         rows.push(row_cells);
                                     }
                                 }
@@ -75,7 +84,12 @@ impl MarkdownConverter {
                     }
                     "tr" => {
                         if headers.is_empty() {
-                            self.extract_table_row_as_header(child, ctx.as_deref_mut(), &mut headers, &mut alignments)?;
+                            self.extract_table_row_as_header(
+                                child,
+                                ctx.as_deref_mut(),
+                                &mut headers,
+                                &mut alignments,
+                            )?;
                         } else {
                             let mut row_cells = Vec::new();
                             self.extract_table_row(child, ctx.as_deref_mut(), &mut row_cells)?;
@@ -143,7 +157,12 @@ impl MarkdownConverter {
                 if tag == "th" || tag == "td" {
                     let mut cell_output = String::new();
                     for cell_child in child.children.borrow().iter() {
-                        self.traverse_node_optional(cell_child, &mut cell_output, 0, ctx.as_deref_mut())?;
+                        self.traverse_node_optional(
+                            cell_child,
+                            &mut cell_output,
+                            0,
+                            ctx.as_deref_mut(),
+                        )?;
                     }
 
                     headers.push(cell_output.trim().to_string());
@@ -189,7 +208,12 @@ impl MarkdownConverter {
                 if tag == "td" || tag == "th" {
                     let mut cell_output = String::new();
                     for cell_child in child.children.borrow().iter() {
-                        self.traverse_node_optional(cell_child, &mut cell_output, 0, ctx.as_deref_mut())?;
+                        self.traverse_node_optional(
+                            cell_child,
+                            &mut cell_output,
+                            0,
+                            ctx.as_deref_mut(),
+                        )?;
                     }
                     cells.push(cell_output.trim().to_string());
                 }
