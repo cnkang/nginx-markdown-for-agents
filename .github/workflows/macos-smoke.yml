@@ -8,10 +8,7 @@ on:
       - "components/**"
       - "tools/**"
       - "tests/**"
-      - "docs/**"
       - "Makefile"
-      - "README.md"
-      - "README_zh-CN.md"
       - ".github/workflows/macos-smoke.yml"
   push:
     branches: [main, master]
@@ -19,10 +16,7 @@ on:
       - "components/**"
       - "tools/**"
       - "tests/**"
-      - "docs/**"
       - "Makefile"
-      - "README.md"
-      - "README_zh-CN.md"
       - ".github/workflows/macos-smoke.yml"
 
 concurrency:
@@ -47,10 +41,16 @@ jobs:
         uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
 
       - name: Cache Rust build artifacts
-        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
           workspaces: |
             components/rust-converter -> target
+
+      - name: Install cbindgen
+        run: |
+          if ! command -v cbindgen >/dev/null 2>&1; then
+            cargo install cbindgen --locked
+          fi
 
       - name: Build Rust converter
         run: make build
