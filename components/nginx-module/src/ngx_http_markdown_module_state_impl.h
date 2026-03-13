@@ -46,23 +46,36 @@ static u_char ngx_http_markdown_empty_string[] = "";
 #define NGX_HTTP_MARKDOWN_METRIC_INC(field)                                         \
     NGX_HTTP_MARKDOWN_METRIC_ADD(field, 1)
 
-/* Forward declarations */
+/*
+ * Lifecycle hooks registered with nginx module callbacks.
+ *
+ * - filter_init wires this module into header/body filter chains.
+ * - init_worker prepares per-worker converter + metrics pointers.
+ * - exit_worker releases per-worker converter resources.
+ */
 static ngx_int_t ngx_http_markdown_filter_init(ngx_conf_t *cf);
 static ngx_int_t ngx_http_markdown_init_worker(ngx_cycle_t *cycle);
 static void ngx_http_markdown_exit_worker(ngx_cycle_t *cycle);
 
-/* Filter entrypoint declarations */
+/*
+ * Filter entrypoints.
+ *
+ * Header filter decides eligibility and initializes request context;
+ * body filter buffers payload, optionally decompresses, converts, and emits
+ * final downstream output.
+ */
 static ngx_int_t ngx_http_markdown_header_filter(ngx_http_request_t *r);
 static ngx_int_t ngx_http_markdown_body_filter(ngx_http_request_t *r, ngx_chain_t *in);
 
-/* Metrics endpoint handler */
+/* Expose runtime counters as the module metrics endpoint response. */
 static ngx_int_t ngx_http_markdown_metrics_handler(ngx_http_request_t *r);
 #if !(NGX_HTTP_HEADERS)
+/* Fallback request-header lookup when nginx does not expose typed header fields. */
 static ngx_table_elt_t *ngx_http_markdown_find_request_header(ngx_http_request_t *r,
     const ngx_str_t *name);
 #endif
 
-/* Next filter pointers for filter chain */
+/* Next filter pointers preserved so this module can delegate in chain order. */
 static ngx_http_output_header_filter_pt ngx_http_next_header_filter;
 static ngx_http_output_body_filter_pt ngx_http_next_body_filter;
 

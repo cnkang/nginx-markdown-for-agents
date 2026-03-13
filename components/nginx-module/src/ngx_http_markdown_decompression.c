@@ -151,6 +151,17 @@ ngx_http_markdown_chain_to_buffer(ngx_chain_t *in, u_char *dest, size_t size)
     return NGX_OK;
 }
 
+/*
+ * Estimate a safe decompression output buffer size.
+ *
+ * Strategy:
+ *   - Start with a heuristic expansion factor (input * 10)
+ *   - Cap at configured markdown_max_size
+ *   - Clamp to UINT_MAX for decoder APIs that use unsigned-int counters
+ *
+ * This keeps allocation bounded while still allowing common compressed
+ * HTML payloads to inflate in a single pass.
+ */
 static ngx_int_t
 ngx_http_markdown_calc_output_size(ngx_http_request_t *r, size_t input_size,
                                    size_t max_size, size_t *output_size)
@@ -163,6 +174,7 @@ ngx_http_markdown_calc_output_size(ngx_http_request_t *r, size_t input_size,
         return NGX_ERROR;
     }
 
+    /* Guard multiplication overflow before applying 10x heuristic. */
     if (input_size > ((size_t) -1) / 10) {
         estimated = max_size;
     } else {

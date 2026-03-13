@@ -39,6 +39,12 @@ typedef struct {
  */
 #define NGX_HTTP_MARKDOWN_METRICS_BUF_SIZE  4096
 
+/*
+ * Copy shared atomic counters into a local snapshot struct.
+ *
+ * This minimizes repeated global reads while formatting the endpoint response
+ * and keeps all JSON fields derived from one best-effort capture pass.
+ */
 static void
 ngx_http_markdown_collect_metrics_snapshot(ngx_http_markdown_metrics_snapshot_t *snapshot)
 {

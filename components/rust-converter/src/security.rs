@@ -332,6 +332,7 @@ impl SecurityValidator {
 }
 
 impl Default for SecurityValidator {
+    /// Build a validator with secure default limits and policy.
     fn default() -> Self {
         Self::new()
     }

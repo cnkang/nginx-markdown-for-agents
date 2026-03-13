@@ -1,6 +1,11 @@
 use super::*;
 
 impl MarkdownConverter {
+    /// Normalize and append a text node while preserving meaningful spacing.
+    ///
+    /// HTML parsing can split adjacent text and whitespace into multiple nodes.
+    /// This helper normalizes node-local content and then reconstructs inter-node
+    /// spacing so Markdown tokens are not accidentally concatenated.
     pub(super) fn write_normalized_text_node(&self, text: &str, output: &mut String) {
         let normalized = self.normalize_text(text);
         if normalized.is_empty() {
@@ -27,6 +32,7 @@ impl MarkdownConverter {
         }
     }
 
+    /// Traverse all child nodes in source order.
     pub(super) fn traverse_children(
         &self,
         node: &Handle,
@@ -34,6 +40,8 @@ impl MarkdownConverter {
         depth: usize,
         ctx: Option<&mut ConversionContext>,
     ) -> Result<(), ConversionError> {
+        // Reborrow `ctx` per iteration so each recursive call can consume an
+        // independent mutable reference without moving the original Option.
         let mut ctx = ctx;
         for child in node.children.borrow().iter() {
             self.traverse_node_optional(child, output, depth, ctx.as_deref_mut())?;
@@ -42,6 +50,7 @@ impl MarkdownConverter {
         Ok(())
     }
 
+    /// Traverse through the timeout-aware path when a conversion context exists.
     pub(super) fn traverse_node_optional(
         &self,
         node: &Handle,
@@ -49,12 +58,15 @@ impl MarkdownConverter {
         depth: usize,
         ctx: Option<&mut ConversionContext>,
     ) -> Result<(), ConversionError> {
+        // Dispatch traversal through the timeout-aware path only when context
+        // is present, keeping the no-timeout path allocation-free.
         match ctx {
             Some(ctx) => self.traverse_node_with_context(node, output, depth, ctx),
             None => self.traverse_node(node, output, depth),
         }
     }
 
+    /// Internal element dispatcher shared by context and non-context entry points.
     pub(super) fn handle_element_internal(
         &self,
         node: &Handle,
@@ -74,6 +86,8 @@ impl MarkdownConverter {
             .validate_depth(depth)
             .map_err(ConversionError::InvalidInput)?;
 
+        // All branches share one mutable timeout context, so we reborrow it for
+        // each handler call to satisfy the borrow checker and keep call sites tidy.
         let mut ctx = ctx;
         match tag_name {
             "h1" => self.handle_heading_with_context(node, 1, output, depth, ctx.as_deref_mut())?,

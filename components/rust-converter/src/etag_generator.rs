@@ -101,6 +101,7 @@ impl ETagGenerator {
 }
 
 impl Default for ETagGenerator {
+    /// Return a generator with default hashing strategy.
     fn default() -> Self {
         Self::new()
     }

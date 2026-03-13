@@ -30,6 +30,7 @@ static u_char ngx_http_markdown_hdr_token_count[] = "X-Markdown-Tokens";
 static u_char ngx_http_markdown_content_type[] = "text/markdown; charset=utf-8";
 static u_char ngx_http_markdown_vary_suffix[] = ", Accept";
 
+/* ASCII-only lowercase helper used for case-insensitive HTTP token matching. */
 static ngx_uint_t
 ngx_http_markdown_tolower_ascii(ngx_uint_t c)
 {

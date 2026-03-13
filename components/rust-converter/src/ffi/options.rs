@@ -14,6 +14,7 @@ pub(crate) struct DecodedOptions<'a> {
     pub(crate) conversion: ConversionOptions,
 }
 
+/// Convert a required raw pointer from C into a Rust reference.
 pub(crate) fn required_ref<'a, T>(ptr: *const T, name: &str) -> Result<&'a T, ConversionError> {
     if ptr.is_null() {
         return Err(ConversionError::InvalidInput(format!(
@@ -26,6 +27,7 @@ pub(crate) fn required_ref<'a, T>(ptr: *const T, name: &str) -> Result<&'a T, Co
     Ok(unsafe { &*ptr })
 }
 
+/// Convert a required pointer/length byte pair into a borrowed slice.
 pub(crate) fn required_bytes<'a>(
     ptr: *const u8,
     len: usize,
@@ -46,6 +48,7 @@ pub(crate) fn required_bytes<'a>(
     Ok(unsafe { slice::from_raw_parts(ptr, len) })
 }
 
+/// Decode an optional pointer/length UTF-8 field from ABI options.
 fn optional_utf8<'a>(
     ptr: *const u8,
     len: usize,
@@ -67,6 +70,7 @@ fn optional_utf8<'a>(
     Ok(std::str::from_utf8(bytes).ok())
 }
 
+/// Decode C ABI option fields into strongly-typed Rust conversion settings.
 pub(crate) fn decode_options(
     options: &MarkdownOptions,
 ) -> Result<DecodedOptions<'_>, ConversionError> {

@@ -14,6 +14,12 @@
 static void ngx_http_markdown_log_merged_conf(ngx_conf_t *cf,
     ngx_http_markdown_conf_t *conf);
 
+/*
+ * Shared-memory initializer for cross-worker metrics storage.
+ *
+ * On reload, nginx may pass previous zone data (`data != NULL`), which is
+ * reattached instead of allocating a fresh counter block.
+ */
 static ngx_int_t
 ngx_http_markdown_init_metrics_zone(ngx_shm_zone_t *shm_zone, void *data)
 {
@@ -363,9 +369,11 @@ static u_char ngx_http_markdown_flag_no[] = "no";
 static u_char ngx_http_markdown_flag_true[] = "true";
 static u_char ngx_http_markdown_flag_false[] = "false";
 
+/* Parse markdown_filter boolean-like token into enabled on/off flag. */
 static ngx_int_t
 ngx_http_markdown_parse_filter_flag(ngx_str_t *value, ngx_flag_t *enabled)
 {
+    /* Normalize surrounding ASCII whitespace before token matching. */
     ngx_str_t  normalized;
     u_char    *start;
     u_char    *end;

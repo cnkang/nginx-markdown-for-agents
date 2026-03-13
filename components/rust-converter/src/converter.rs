@@ -153,6 +153,7 @@ pub struct ConversionOptions {
 }
 
 impl Default for ConversionOptions {
+    /// Return conservative conversion defaults used by the top-level converter.
     fn default() -> Self {
         Self {
             flavor: MarkdownFlavor::CommonMark,
@@ -533,6 +534,7 @@ impl MarkdownConverter {
 }
 
 impl Default for MarkdownConverter {
+    /// Construct a converter with default `ConversionOptions`.
     fn default() -> Self {
         Self::new()
     }
@@ -544,6 +546,7 @@ mod tests {
     use crate::parser::parse_html;
     use proptest::prelude::*;
 
+    /// Parse HTML and convert it with default converter settings.
     fn convert_html_for_test(html: &str) -> String {
         let dom = parse_html(html.as_bytes()).expect("Parse failed");
         MarkdownConverter::new()
@@ -551,10 +554,12 @@ mod tests {
             .expect("Conversion failed")
     }
 
+    /// Normalize whitespace for robust text-only expectations.
     fn normalize_expected_text(text: &str) -> String {
         text.split_whitespace().collect::<Vec<_>>().join(" ")
     }
 
+    /// Escape characters that would otherwise be interpreted as HTML markup.
     fn escape_html_text(value: &str) -> String {
         value
             .replace('&', "&amp;")
@@ -562,6 +567,7 @@ mod tests {
             .replace('>', "&gt;")
     }
 
+    /// Encode one character using a deterministic mix of named/decimal/hex entities.
     fn encode_entity_char(ch: char, selector: u8) -> String {
         match ch {
             '&' => match selector % 3 {

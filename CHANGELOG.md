@@ -20,6 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Split the Rust converter internals into dedicated `converter/`, `ffi/`, and `metadata/` submodules without changing the exported ABI
 - Reworked `make test-e2e` to delegate to the canonical native E2E suite instead of maintaining a second inline runner
 - Updated Linux CI runtime regressions to retain and reuse a validated IMS runtime across delegated native checks
+- Expanded C and Rust inline documentation around Accept-header parsing and DOM traversal paths, including complexity and borrow-context rationale for high-branching logic
+- Continued documentation pass across decompression/buffering and Rust FFI/parser hot paths, clarifying allocation bounds, amortized complexity, timeout checkpoints, and zero-copy charset decoding behavior
+- Completed a broader doc pass: filled missing Rust function docstrings across converter/metadata/FFI modules and expanded C header comments for config/lifecycle entrypoints and filter-chain responsibilities
+- Performed a consistency audit to align comments with implementation: filled remaining Rust function docs and tightened C helper/header comments so interface intent, complexity notes, and behavior descriptions stay accurate
 
 ### Fixed
 - Hardened native E2E/runtime scripts so reusable `NGINX_BIN` paths are only reused when the runtime layout and module support are actually compatible
