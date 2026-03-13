@@ -1,18 +1,16 @@
 use super::*;
 
 impl MarkdownConverter {
-    /// Handle table elements (GFM only).
-    pub(super) fn handle_table(
+    /// Handle table elements (GFM only) with optional timeout context.
+    pub(super) fn handle_table_with_context(
         &self,
         node: &Handle,
         output: &mut String,
         depth: usize,
+        ctx: Option<&mut ConversionContext>,
     ) -> Result<(), ConversionError> {
         if !matches!(self.options.flavor, MarkdownFlavor::GitHubFlavoredMarkdown) {
-            for child in node.children.borrow().iter() {
-                self.traverse_node(child, output, depth + 1)?;
-            }
-            return Ok(());
+            return self.traverse_children(node, output, depth + 1, ctx);
         }
 
         if !output.is_empty() && !output.ends_with("\n\n") {
@@ -27,6 +25,9 @@ impl MarkdownConverter {
         let mut alignments: Vec<TableAlignment> = Vec::new();
         let mut rows: Vec<Vec<String>> = Vec::new();
 
+        // Table cell extraction uses traverse_node (no timeout) because
+        // individual cells are small; timeout is checked at the table level
+        // via the caller's context.
         for child in node.children.borrow().iter() {
             if let NodeData::Element { ref name, .. } = child.data {
                 match name.local.as_ref() {

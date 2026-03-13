@@ -1,6 +1,10 @@
 /*
  * Internal module-state declarations shared by implementation includes.
  *
+ * WARNING: This header is an implementation detail of the main translation unit
+ * (ngx_http_markdown_filter_module.c). It must NOT be included from any other
+ * .c file or used as a standalone compilation unit.
+ *
  * This header is intentionally included only from the main translation unit so
  * helper implementation headers can rely on a stable set of shared globals,
  * filter-chain pointers, metric macros, and forward declarations while keeping

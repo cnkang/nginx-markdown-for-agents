@@ -45,24 +45,7 @@ markdown_detect_rust_target() {
 }
 
 markdown_default_macos_deployment_target() {
-  local product_version major
-
-  product_version="$(sw_vers -productVersion 2>/dev/null || true)"
-  if [[ -z "${product_version}" ]]; then
-    product_version="$(xcrun --show-sdk-version 2>/dev/null || true)"
-  fi
-  if [[ -z "${product_version}" ]]; then
-    echo "Failed to resolve a macOS deployment target" >&2
-    return 1
-  fi
-
-  major="${product_version%%.*}"
-  if [[ -z "${major}" ]]; then
-    echo "Failed to parse macOS deployment target from: ${product_version}" >&2
-    return 1
-  fi
-
-  printf '%s.0\n' "${major}"
+  printf '%s\n' "${MACOS_MIN_VERSION:-11.0}"
   return 0
 }
 
@@ -157,6 +140,66 @@ markdown_copy_runtime_conf_from_nginx_bin() {
   return 0
 }
 
+markdown_nginx_modules_dir() {
+  local nginx_bin="$1"
+  local source_root source_modules modules_path
+
+  markdown_validate_nginx_bin "${nginx_bin}" || return 1
+
+  source_root="$(cd "$(dirname "${nginx_bin}")/.." && pwd)"
+  source_modules="${source_root}/modules"
+  if [[ -d "${source_modules}" ]]; then
+    printf '%s\n' "${source_modules}"
+    return 0
+  fi
+
+  modules_path="$("${nginx_bin}" -V 2>&1 | tr ' ' '\n' | sed -n 's/^--modules-path=//p' | tail -n1)"
+  if [[ -n "${modules_path}" && -d "${modules_path}" ]]; then
+    printf '%s\n' "${modules_path}"
+    return 0
+  fi
+
+  return 1
+}
+
+markdown_find_dynamic_markdown_module() {
+  local nginx_bin="$1"
+  local modules_dir module_path
+
+  modules_dir="$(markdown_nginx_modules_dir "${nginx_bin}")" || return 1
+  module_path="$(
+    find "${modules_dir}" -maxdepth 1 -type f \( \
+      -name 'ngx_http_markdown*.so' -o \
+      -name '*markdown*.so' \
+    \) | sort | head -n1
+  )"
+
+  if [[ -z "${module_path}" ]]; then
+    return 1
+  fi
+
+  printf '%s\n' "${module_path}"
+  return 0
+}
+
+markdown_prepare_runtime_reuse() {
+  local nginx_bin="$1"
+  local runtime_dir="$2"
+  local module_path
+
+  markdown_copy_runtime_conf_from_nginx_bin "${nginx_bin}" "${runtime_dir}" || return 1
+
+  module_path="$(markdown_find_dynamic_markdown_module "${nginx_bin}" || true)"
+  if [[ -z "${module_path}" ]]; then
+    return 0
+  fi
+
+  mkdir -p "${runtime_dir}/modules"
+  cp "${module_path}" "${runtime_dir}/modules/"
+  printf 'load_module modules/%s;\n' "$(basename "${module_path}")"
+  return 0
+}
+
 markdown_version_gt() {
   local lhs="$1"
   local rhs="$2"
@@ -220,7 +263,10 @@ markdown_prepare_rust_converter_release() {
   markdown_export_native_build_env || return 1
 
   (
-    cd "${workspace_root}/components/rust-converter"
+    cd "${workspace_root}/components/rust-converter" || {
+      echo "Failed to enter Rust converter directory under ${workspace_root}" >&2
+      exit 1
+    }
     cargo build --target "${rust_target}" --release "$@"
 
     if [[ "$(uname -s)" == "Darwin" ]]; then

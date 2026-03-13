@@ -1,6 +1,10 @@
 /*
  * Metrics endpoint implementation.
  *
+ * WARNING: This header is an implementation detail of the main translation unit
+ * (ngx_http_markdown_filter_module.c). It must NOT be included from any other
+ * .c file or used as a standalone compilation unit.
+ *
  * Isolated here so metrics formatting and access-control behavior can evolve
  * without adding more branching inside the core filter orchestration file.
  */
@@ -28,11 +32,25 @@ typedef struct {
     ngx_atomic_uint_t decompressions_brotli;
 } ngx_http_markdown_metrics_snapshot_t;
 
+/*
+ * Response buffer size for the metrics endpoint.  The current JSON/text
+ * output is well under 1 KiB, but we leave headroom for future fields.
+ * Increase this constant if new metrics push the output beyond the limit.
+ */
+#define NGX_HTTP_MARKDOWN_METRICS_BUF_SIZE  4096
+
 static void
 ngx_http_markdown_collect_metrics_snapshot(ngx_http_markdown_metrics_snapshot_t *snapshot)
 {
     ngx_http_markdown_metrics_t *metrics;
 
+    /*
+     * NOTE: This is a best-effort snapshot, not a consistent point-in-time
+     * view.  Individual atomic reads are sequentially consistent, but two
+     * fields may reflect different moments if another worker updates the
+     * shared counters between reads.  This is acceptable for monitoring
+     * and diagnostics purposes.
+     */
     ngx_memzero(snapshot, sizeof(ngx_http_markdown_metrics_snapshot_t));
 
     metrics = ngx_http_markdown_metrics;
@@ -147,7 +165,7 @@ ngx_http_markdown_metrics_handler(ngx_http_request_t *r)
         ? (snapshot.output_bytes / snapshot.conversions_succeeded)
         : 0;
 
-    b = ngx_create_temp_buf(r->pool, 4096);
+    b = ngx_create_temp_buf(r->pool, NGX_HTTP_MARKDOWN_METRICS_BUF_SIZE);
     if (b == NULL) {
         ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0,
                      "markdown_metrics: failed to allocate response buffer");

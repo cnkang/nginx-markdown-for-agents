@@ -1,6 +1,10 @@
 /*
  * Directive registry table.
  *
+ * WARNING: This header is an implementation detail of the main translation unit
+ * (ngx_http_markdown_filter_module.c). It must NOT be included from any other
+ * .c file or used as a standalone compilation unit.
+ *
  * This unit is intentionally data-heavy: it maps public directives to their
  * handlers, value setters, and inline usage notes.
  */
