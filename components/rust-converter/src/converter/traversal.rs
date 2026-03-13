@@ -4,6 +4,12 @@ impl MarkdownConverter {
     pub(super) fn write_normalized_text_node(&self, text: &str, output: &mut String) {
         let normalized = self.normalize_text(text);
         if normalized.is_empty() {
+            if text.chars().all(char::is_whitespace)
+                && self.has_body_content(output)
+                && !output.ends_with(' ')
+            {
+                output.push(' ');
+            }
             return;
         }
 
@@ -86,7 +92,7 @@ impl MarkdownConverter {
             "pre" => {
                 self.handle_code_block_with_context(node, output, depth, ctx.as_deref_mut())?
             }
-            "code" => self.handle_inline_code(node, output, depth)?,
+            "code" => self.handle_inline_code(node, output, depth, ctx.as_deref_mut())?,
             "strong" | "b" => {
                 self.handle_bold_with_context(node, output, depth, ctx.as_deref_mut())?
             }

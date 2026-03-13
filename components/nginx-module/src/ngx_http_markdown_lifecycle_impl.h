@@ -61,8 +61,8 @@ static void
 ngx_http_markdown_exit_worker(ngx_cycle_t *cycle)
 {
     if (ngx_http_markdown_converter == NULL) {
-        ngx_log_error(NGX_LOG_DEBUG, cycle->log, 0,
-                      "markdown filter: no converter to clean up in worker process");
+        ngx_log_debug0(NGX_LOG_DEBUG_HTTP, cycle->log, 0,
+                       "markdown filter: no converter to clean up in worker process");
         return;
     }
 

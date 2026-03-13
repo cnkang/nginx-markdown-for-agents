@@ -25,7 +25,12 @@ impl MarkdownConverter {
                 output.push_str(&base_indent);
                 output.push_str(marker);
             } else if !line.is_empty() {
-                output.push_str(&continuation_indent);
+                let already_indented = (!base_indent.is_empty() && line.starts_with(&base_indent))
+                    || line.starts_with(' ')
+                    || line.starts_with('\t');
+                if !already_indented {
+                    output.push_str(&continuation_indent);
+                }
             }
 
             output.push_str(line);
@@ -33,7 +38,7 @@ impl MarkdownConverter {
         }
     }
 
-    fn longest_backtick_run(&self, content: &str) -> usize {
+    pub(super) fn longest_backtick_run(&self, content: &str) -> usize {
         let mut longest = 0;
         let mut current = 0;
 
@@ -49,7 +54,7 @@ impl MarkdownConverter {
         longest
     }
 
-    fn choose_code_fence(&self, content: &str) -> String {
+    pub(super) fn choose_code_fence(&self, content: &str) -> String {
         let longest_backticks = self.longest_backtick_run(content);
         if longest_backticks == 0 {
             "```".to_string()
@@ -282,7 +287,7 @@ impl MarkdownConverter {
         }
 
         let mut code_content = String::new();
-        self.extract_code_content(node, &mut code_content)?;
+        self.extract_code_content(node, &mut code_content, 0, None)?;
         let fence = self.choose_code_fence(&code_content);
 
         output.push_str(&fence);

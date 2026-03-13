@@ -271,6 +271,8 @@ ngx_http_markdown_stream_types(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     ngx_http_markdown_conf_t *mcf = conf;
     ngx_str_t                *value;
     ngx_str_t                *type;
+    u_char                   *slash;
+    u_char                   *next_slash;
     ngx_uint_t                i;
 
     value = cf->args->elts;
@@ -292,7 +294,18 @@ ngx_http_markdown_stream_types(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
             return NGX_CONF_ERROR;
         }
 
-        if (ngx_strchr(value[i].data, '/') == NULL) {
+        slash = ngx_strchr(value[i].data, '/');
+        next_slash = NULL;
+
+        if (slash != NULL && (size_t) (slash - value[i].data + 1) < value[i].len) {
+            next_slash = ngx_strchr(slash + 1, '/');
+        }
+
+        if (slash == NULL
+            || slash == value[i].data
+            || (size_t) (slash - value[i].data) == value[i].len - 1
+            || next_slash != NULL)
+        {
             ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
                                "invalid content type \"%V\" in \"%V\" directive, "
                                "must be in format \"type/subtype\"",

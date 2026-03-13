@@ -121,6 +121,50 @@ header_value() {
   return $?
 }
 
+absolute_path_for_compare() {
+  local path="$1"
+
+  if [[ -z "${path}" ]]; then
+    return 1
+  fi
+
+  if [[ "${path}" == /* ]]; then
+    printf '%s\n' "${path}"
+  else
+    printf '%s\n' "$(pwd)/${path}"
+  fi
+  return 0
+}
+
+path_is_within_dir() {
+  local path="$1"
+  local dir="$2"
+  local abs_path
+  local abs_dir
+
+  abs_path="$(absolute_path_for_compare "${path}")" || return 1
+  abs_dir="$(cd "${dir}" && pwd)" || return 1
+
+  case "${abs_path}" in
+    "${abs_dir}"|"${abs_dir}"/*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+can_remove_buildroot() {
+  if [[ -z "${BUILDROOT}" || ! -d "${BUILDROOT}" ]]; then
+    return 1
+  fi
+
+  if path_is_within_dir "${BUILDROOT_OUTPUT_FILE}" "${BUILDROOT}" \
+    || path_is_within_dir "${NGINX_BIN_OUTPUT_FILE}" "${BUILDROOT}"
+  then
+    return 1
+  fi
+
+  return 0
+}
+
 cleanup() {
   local rc=$?
 
@@ -133,13 +177,15 @@ cleanup() {
     "${NGINX_EXECUTABLE}" -p "${RUNTIME}" -c conf/nginx.conf -s stop >/dev/null 2>&1 || true
   fi
 
-  if [[ $rc -eq 0 && "${KEEP_ARTIFACTS}" -eq 0 && -n "${BUILDROOT}" && -d "${BUILDROOT}" ]]; then
+  if [[ $rc -eq 0 && "${KEEP_ARTIFACTS}" -eq 0 ]] && can_remove_buildroot; then
     rm -rf "${BUILDROOT}" || true
   fi
 
   if [[ $rc -ne 0 && -n "${BUILDROOT}" && -d "${BUILDROOT}" ]]; then
     echo "Proxy TLS backend E2E validation failed. Artifacts kept at: ${BUILDROOT}" >&2
-  elif [[ "${KEEP_ARTIFACTS}" -eq 1 && -n "${BUILDROOT}" ]]; then
+  elif [[ -n "${BUILDROOT}" && -d "${BUILDROOT}" ]] \
+    && ([[ "${KEEP_ARTIFACTS}" -eq 1 ]] || ! can_remove_buildroot)
+  then
     echo "Proxy TLS backend E2E validation succeeded. Artifacts kept at: ${BUILDROOT}"
   fi
   return 0

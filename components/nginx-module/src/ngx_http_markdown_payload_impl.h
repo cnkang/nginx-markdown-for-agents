@@ -497,9 +497,15 @@ ngx_http_markdown_fail_open_with_buffered_prefix(ngx_http_request_t *r,
         return NGX_ERROR;
     }
 
-    b->pos = ctx->buffer.data;
-    b->last = ctx->buffer.data + ctx->buffer.size;
-    b->memory = 1;
+    if (r->method == NGX_HTTP_HEAD || ctx->buffer.size == 0) {
+        b->pos = NULL;
+        b->last = NULL;
+        b->memory = 0;
+    } else {
+        b->pos = ctx->buffer.data;
+        b->last = ctx->buffer.data + ctx->buffer.size;
+        b->memory = 1;
+    }
     b->last_buf = 0;
     b->last_in_chain = 0;
 
