@@ -6,7 +6,7 @@ This project is a production-oriented NGINX filter module backed by a Rust HTML-
 
 ## Current Assessment
 
-As of **March 13, 2026**, the project is at **version 0.2.1** with additional maintainability and validation work reflected in the current codebase. Core features are implemented and tested. The codebase includes unit, integration, E2E, and fuzz-oriented validation entrypoints, along with documentation covering installation, configuration, operations, and architecture.
+As of **version 0.2.1**, the project includes additional maintainability and validation work reflected in the current codebase. Core features are implemented and tested. The codebase includes unit, integration, E2E, and fuzz-oriented validation entrypoints, along with documentation covering installation, configuration, operations, and architecture.
 
 This assessment is based on:
 
