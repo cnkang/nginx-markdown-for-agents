@@ -1,0 +1,559 @@
+/*
+ * Conversion-path helpers.
+ *
+ * These helpers prepare conversion inputs, execute the Rust FFI call, shape
+ * the Markdown response, and construct base_url when available.
+ */
+
+/*
+ * Construct base URL for resolving relative URLs
+ *
+ * This function constructs the base URL using the following priority order:
+ * 1. X-Forwarded-Proto + X-Forwarded-Host (reverse proxy scenario)
+ * 2. r->schema + r->headers_in.server (direct connection)
+ * 3. server_name from configuration (fallback)
+ *
+ * The base_url is used by the Rust conversion engine to resolve relative URLs
+ * in HTML to absolute URLs in the Markdown output.
+ *
+ * Format: scheme://host/uri
+ * Example: https://example.com/docs/page.html
+ *
+ * @param r     The request structure
+ * @param pool  Memory pool for allocation
+ * @param base_url  Output parameter for constructed base URL
+ * @return      NGX_OK on success, NGX_ERROR on failure
+ *
+ * Requirements: Design - URL Resolution, NGINX Integration
+ * Task: 14.8 Implement base_url construction with X-Forwarded headers priority
+ */
+static u_char ngx_http_markdown_hdr_x_forwarded_proto[] = "X-Forwarded-Proto";
+static u_char ngx_http_markdown_hdr_x_forwarded_host[] = "X-Forwarded-Host";
+static u_char ngx_http_markdown_scheme_http[] = "http";
+static u_char ngx_http_markdown_scheme_https[] = "https";
+
+static ngx_str_t *
+ngx_http_markdown_find_request_header_value(ngx_http_request_t *r,
+                                            u_char *name,
+                                            size_t name_len)
+{
+    ngx_list_part_t  *part;
+
+    if (r->headers_in.headers.part.nelts == 0) {
+        return NULL;
+    }
+
+    for (part = &r->headers_in.headers.part; part != NULL; part = part->next) {
+        ngx_table_elt_t  *headers;
+        ngx_uint_t        i;
+
+        headers = part->elts;
+        for (i = 0; i < part->nelts; i++) {
+            if (headers[i].key.len == name_len
+                && ngx_strncasecmp(headers[i].key.data, name, name_len) == 0)
+            {
+                return &headers[i].value;
+            }
+        }
+    }
+
+    return NULL;
+}
+
+static ngx_flag_t
+ngx_http_markdown_scheme_is_http_family(const ngx_str_t *scheme)
+{
+    return (scheme->len == sizeof(ngx_http_markdown_scheme_http) - 1
+            && ngx_strncasecmp(scheme->data,
+                               ngx_http_markdown_scheme_http,
+                               sizeof(ngx_http_markdown_scheme_http) - 1) == 0)
+        || (scheme->len == sizeof(ngx_http_markdown_scheme_https) - 1
+            && ngx_strncasecmp(scheme->data,
+                               ngx_http_markdown_scheme_https,
+                               sizeof(ngx_http_markdown_scheme_https) - 1) == 0);
+}
+
+static ngx_int_t
+ngx_http_markdown_select_base_url_parts(ngx_http_request_t *r,
+                                        ngx_str_t *scheme,
+                                        ngx_str_t *host)
+{
+    ngx_str_t                 *x_forwarded_proto;
+    ngx_str_t                 *x_forwarded_host;
+    ngx_http_core_srv_conf_t *cscf;
+
+    x_forwarded_proto = ngx_http_markdown_find_request_header_value(
+        r,
+        ngx_http_markdown_hdr_x_forwarded_proto,
+        sizeof(ngx_http_markdown_hdr_x_forwarded_proto) - 1);
+    x_forwarded_host = ngx_http_markdown_find_request_header_value(
+        r,
+        ngx_http_markdown_hdr_x_forwarded_host,
+        sizeof(ngx_http_markdown_hdr_x_forwarded_host) - 1);
+
+    if (x_forwarded_proto != NULL
+        && x_forwarded_host != NULL
+        && x_forwarded_proto->len > 0
+        && x_forwarded_host->len > 0
+        && ngx_http_markdown_scheme_is_http_family(x_forwarded_proto))
+    {
+        *scheme = *x_forwarded_proto;
+        *host = *x_forwarded_host;
+        return NGX_OK;
+    }
+
+    if (r->schema.len > 0 && r->headers_in.server.len > 0) {
+        *scheme = r->schema;
+        *host = r->headers_in.server;
+        return NGX_OK;
+    }
+
+    cscf = ngx_http_get_module_srv_conf(r, ngx_http_core_module);
+    if (cscf != NULL && cscf->server_name.len > 0) {
+        if (r->schema.len > 0) {
+            *scheme = r->schema;
+        } else {
+            scheme->data = ngx_http_markdown_scheme_http;
+            scheme->len = sizeof(ngx_http_markdown_scheme_http) - 1;
+        }
+        *host = cscf->server_name;
+        return NGX_OK;
+    }
+
+    ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
+                 "markdown filter: unable to construct base_url, "
+                 "no valid scheme/host available");
+    return NGX_ERROR;
+}
+
+static ngx_int_t
+ngx_http_markdown_base_url_add_len(ngx_http_request_t *r,
+                                   size_t *total,
+                                   size_t delta,
+                                   const char *segment)
+{
+    if (*total > ((size_t) -1) - delta) {
+        ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
+                     "markdown filter: base_url length overflow (%s)",
+                     segment);
+        return NGX_ERROR;
+    }
+    *total += delta;
+    return NGX_OK;
+}
+
+static ngx_int_t
+ngx_http_markdown_construct_base_url(ngx_http_request_t *r, ngx_pool_t *pool,
+    ngx_str_t *base_url)
+{
+    ngx_str_t  scheme;
+    ngx_str_t  host;
+    u_char    *p;
+    size_t     len;
+
+    /* Initialize output */
+    base_url->data = NULL;
+    base_url->len = 0;
+
+    if (ngx_http_markdown_select_base_url_parts(r, &scheme, &host) != NGX_OK) {
+        return NGX_ERROR;
+    }
+
+    len = 0;
+    if (ngx_http_markdown_base_url_add_len(r, &len, scheme.len, "scheme") != NGX_OK) {
+        return NGX_ERROR;
+    }
+    if (ngx_http_markdown_base_url_add_len(r, &len, sizeof("://") - 1, "delimiter") != NGX_OK) {
+        return NGX_ERROR;
+    }
+    if (ngx_http_markdown_base_url_add_len(r, &len, host.len, "host") != NGX_OK) {
+        return NGX_ERROR;
+    }
+    if (ngx_http_markdown_base_url_add_len(r, &len, r->uri.len, "uri") != NGX_OK) {
+        return NGX_ERROR;
+    }
+    
+    p = ngx_pnalloc(pool, len);
+    if (p == NULL) {
+        /*
+         * Memory allocation failed for base_url - critical system error.
+         * 
+         * Log level: NGX_LOG_CRIT (critical system failure)
+         * Requirements: FR-09.5, FR-09.6, FR-09.7
+         */
+        ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0,
+                     "markdown filter: failed to allocate memory for base_url, category=system");
+        return NGX_ERROR;
+    }
+
+    base_url->data = p;
+    
+    /* Copy scheme */
+    p = ngx_cpymem(p, scheme.data, scheme.len);
+    
+    /* Add :// */
+    *p++ = ':';
+    *p++ = '/';
+    *p++ = '/';
+    
+    /* Copy host */
+    p = ngx_cpymem(p, host.data, host.len);
+    
+    /* Copy URI */
+    p = ngx_cpymem(p, r->uri.data, r->uri.len);
+    
+    base_url->len = p - base_url->data;
+
+    ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                  "markdown filter: constructed base_url: \"%V\"", base_url);
+
+    return NGX_OK;
+}
+
+static void
+ngx_http_markdown_record_conversion_latency(ngx_msec_t elapsed_ms)
+{
+    NGX_HTTP_MARKDOWN_METRIC_ADD(conversion_time_sum_ms, elapsed_ms);
+
+    if (elapsed_ms <= 10) {
+        NGX_HTTP_MARKDOWN_METRIC_INC(conversion_latency_le_10ms);
+        return;
+    }
+
+    if (elapsed_ms <= 100) {
+        NGX_HTTP_MARKDOWN_METRIC_INC(conversion_latency_le_100ms);
+        return;
+    }
+
+    if (elapsed_ms <= 1000) {
+        NGX_HTTP_MARKDOWN_METRIC_INC(conversion_latency_le_1000ms);
+        return;
+    }
+
+    NGX_HTTP_MARKDOWN_METRIC_INC(conversion_latency_gt_1000ms);
+}
+
+static ngx_int_t
+ngx_http_markdown_resolve_conditional_result(ngx_http_request_t *r,
+                                             ngx_http_markdown_ctx_t *ctx,
+                                             ngx_http_markdown_conf_t *conf,
+                                             struct MarkdownResult *result,
+                                             ngx_msec_t *elapsed_ms,
+                                             ngx_flag_t *has_result)
+{
+    struct MarkdownResult *conditional_result;
+    ngx_int_t              rc;
+
+    conditional_result = NULL;
+    *has_result = 0;
+
+    rc = ngx_http_markdown_handle_if_none_match(
+        r, conf, ctx, ngx_http_markdown_converter, &conditional_result);
+
+    if (rc == NGX_HTTP_NOT_MODIFIED) {
+        ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                      "markdown filter: If-None-Match matched, sending 304 Not Modified");
+
+        rc = ngx_http_markdown_send_304(r, conditional_result);
+        if (conditional_result != NULL) {
+            markdown_result_free(conditional_result);
+        }
+
+        r->buffered &= ~NGX_HTTP_MARKDOWN_BUFFERED;
+        return NGX_DONE;
+    }
+
+    if (rc == NGX_ERROR) {
+        ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
+                     "markdown filter: error during If-None-Match processing");
+
+        if (conditional_result != NULL) {
+            markdown_result_free(conditional_result);
+        }
+
+        return ngx_http_markdown_reject_or_fail_open_buffered_response(
+            r, ctx, conf,
+            "markdown filter: fail-open strategy - returning original HTML");
+    }
+
+    if (rc == NGX_DECLINED && conditional_result != NULL) {
+        ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                      "markdown filter: If-None-Match did not match, using existing conversion");
+
+        ngx_memcpy(result, conditional_result, sizeof(struct MarkdownResult));
+        ngx_pfree(r->pool, conditional_result);
+
+        *elapsed_ms = 0;
+        *has_result = 1;
+    }
+
+    return NGX_OK;
+}
+
+static ngx_int_t
+ngx_http_markdown_prepare_conversion_options(ngx_http_request_t *r,
+                                             ngx_http_markdown_conf_t *conf,
+                                             struct MarkdownOptions *options)
+{
+    ngx_str_t base_url;
+
+    ngx_memzero(options, sizeof(struct MarkdownOptions));
+    options->flavor = conf->flavor;
+    options->timeout_ms = conf->timeout;
+    options->generate_etag = conf->generate_etag;
+    options->estimate_tokens = conf->token_estimate;
+    options->front_matter = conf->front_matter;
+    options->content_type = NULL;
+    options->content_type_len = 0;
+    options->base_url = NULL;
+    options->base_url_len = 0;
+
+    if (r->headers_out.content_type.len > 0) {
+        options->content_type = r->headers_out.content_type.data;
+        options->content_type_len = r->headers_out.content_type.len;
+    }
+
+    if (ngx_http_markdown_construct_base_url(r, r->pool, &base_url) == NGX_OK) {
+        options->base_url = base_url.data;
+        options->base_url_len = base_url.len;
+    } else {
+        ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                      "markdown filter: continuing conversion without base_url");
+    }
+
+    return NGX_OK;
+}
+
+static ngx_int_t
+ngx_http_markdown_handle_conversion_failure(ngx_http_request_t *r,
+                                            ngx_http_markdown_ctx_t *ctx,
+                                            ngx_http_markdown_conf_t *conf,
+                                            struct MarkdownResult *result,
+                                            ngx_msec_t elapsed_ms)
+{
+    ngx_http_markdown_error_category_t error_category;
+    const ngx_str_t                  *category_str;
+
+    error_category = ngx_http_markdown_classify_error(result->error_code);
+    category_str = ngx_http_markdown_error_category_string(error_category);
+    ngx_http_markdown_record_conversion_latency(elapsed_ms);
+    NGX_HTTP_MARKDOWN_METRIC_INC(conversions_failed);
+
+    switch (error_category) {
+        case NGX_HTTP_MARKDOWN_ERROR_CONVERSION:
+            NGX_HTTP_MARKDOWN_METRIC_INC(failures_conversion);
+            break;
+        case NGX_HTTP_MARKDOWN_ERROR_RESOURCE_LIMIT:
+            NGX_HTTP_MARKDOWN_METRIC_INC(failures_resource_limit);
+            break;
+        case NGX_HTTP_MARKDOWN_ERROR_SYSTEM:
+            NGX_HTTP_MARKDOWN_METRIC_INC(failures_system);
+            break;
+    }
+
+    ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
+                 "markdown filter: conversion failed, "
+                 "error_code=%ud, category=%V, message=\"%*s\", elapsed_ms=%M",
+                 result->error_code,
+                 category_str,
+                 (result->error_message != NULL) ? (ngx_int_t) result->error_len : 0,
+                 (result->error_message != NULL) ? result->error_message : ngx_http_markdown_empty_string,
+                 elapsed_ms);
+
+    markdown_result_free(result);
+    return ngx_http_markdown_reject_or_fail_open_buffered_response(
+        r, ctx, conf,
+        "markdown filter: fail-open strategy - returning original HTML");
+}
+
+static ngx_int_t
+ngx_http_markdown_validate_conversion_result(ngx_http_request_t *r,
+                                             ngx_http_markdown_ctx_t *ctx,
+                                             ngx_http_markdown_conf_t *conf,
+                                             struct MarkdownResult *result)
+{
+    if ((result->markdown == NULL && result->markdown_len > 0)
+        || (result->error_message == NULL && result->error_len > 0)
+        || (result->etag == NULL && result->etag_len > 0))
+    {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                     "markdown filter: invalid FFI result invariants: "
+                     "markdown=%p markdown_len=%uz etag=%p etag_len=%uz "
+                     "error_message=%p error_len=%uz",
+                     result->markdown, result->markdown_len,
+                     result->etag, result->etag_len,
+                     result->error_message, result->error_len);
+        markdown_result_free(result);
+        return ngx_http_markdown_reject_or_fail_open_buffered_response(
+            r, ctx, conf, NULL);
+    }
+
+    return NGX_OK;
+}
+
+static void
+ngx_http_markdown_record_conversion_success(ngx_http_markdown_ctx_t *ctx,
+                                            struct MarkdownResult *result,
+                                            ngx_msec_t elapsed_ms)
+{
+    ctx->conversion_succeeded = 1;
+    ngx_http_markdown_record_conversion_latency(elapsed_ms);
+    NGX_HTTP_MARKDOWN_METRIC_INC(conversions_succeeded);
+    NGX_HTTP_MARKDOWN_METRIC_ADD(input_bytes, ctx->buffer.size);
+    NGX_HTTP_MARKDOWN_METRIC_ADD(output_bytes, result->markdown_len);
+}
+
+static ngx_int_t
+ngx_http_markdown_execute_conversion(ngx_http_request_t *r,
+                                     ngx_http_markdown_ctx_t *ctx,
+                                     ngx_http_markdown_conf_t *conf,
+                                     struct MarkdownResult *result,
+                                     ngx_msec_t *elapsed_ms)
+{
+    struct MarkdownOptions  options;
+    ngx_time_t             *tp;
+    ngx_msec_t              start_time;
+    ngx_msec_t              end_time;
+    ngx_int_t               rc;
+
+    if (ngx_http_markdown_converter == NULL) {
+        ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0,
+                     "markdown filter: converter not initialized, category=system");
+        return ngx_http_markdown_reject_or_fail_open_buffered_response(
+            r, ctx, conf,
+            "markdown filter: fail-open strategy - returning original HTML");
+    }
+
+    ngx_http_markdown_prepare_conversion_options(r, conf, &options);
+
+    tp = ngx_timeofday();
+    start_time = (ngx_msec_t) (tp->sec * 1000 + tp->msec);
+
+    ngx_memzero(result, sizeof(struct MarkdownResult));
+    markdown_convert(ngx_http_markdown_converter,
+                    ctx->buffer.data,
+                    ctx->buffer.size,
+                    &options,
+                    result);
+
+    tp = ngx_timeofday();
+    end_time = (ngx_msec_t) (tp->sec * 1000 + tp->msec);
+    *elapsed_ms = end_time - start_time;
+
+    if (result->error_code != ERROR_SUCCESS) {
+        return ngx_http_markdown_handle_conversion_failure(
+            r, ctx, conf, result, *elapsed_ms);
+    }
+
+    rc = ngx_http_markdown_validate_conversion_result(r, ctx, conf, result);
+    if (rc != NGX_OK) {
+        return rc;
+    }
+
+    ngx_http_markdown_record_conversion_success(ctx, result, *elapsed_ms);
+    return NGX_OK;
+}
+
+static void
+ngx_http_markdown_prepare_head_output_buffer(ngx_http_request_t *r,
+                                             ngx_buf_t *b,
+                                             struct MarkdownResult *result)
+{
+    ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                  "markdown filter: HEAD request - omitting response body");
+
+    b->pos = NULL;
+    b->last = NULL;
+    b->memory = 0;
+    b->last_buf = (r == r->main) ? 1 : 0;
+    b->last_in_chain = 1;
+    markdown_result_free(result);
+}
+
+static ngx_int_t
+ngx_http_markdown_prepare_body_output_buffer(ngx_http_request_t *r,
+                                             ngx_buf_t *b,
+                                             struct MarkdownResult *result)
+{
+    if (result->markdown_len > 0) {
+        b->pos = ngx_pnalloc(r->pool, result->markdown_len);
+        if (b->pos == NULL) {
+            ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0,
+                         "markdown filter: failed to allocate output memory, category=system");
+            markdown_result_free(result);
+            return NGX_ERROR;
+        }
+
+        ngx_memcpy(b->pos, result->markdown, result->markdown_len);
+        b->last = b->pos + result->markdown_len;
+        b->memory = 1;
+    } else {
+        b->pos = NULL;
+        b->last = NULL;
+        b->memory = 0;
+    }
+
+    b->last_buf = (r == r->main) ? 1 : 0;
+    b->last_in_chain = 1;
+    markdown_result_free(result);
+    return NGX_OK;
+}
+
+static ngx_int_t
+ngx_http_markdown_send_conversion_output(ngx_http_request_t *r,
+                                         ngx_http_markdown_ctx_t *ctx,
+                                         ngx_http_markdown_conf_t *conf,
+                                         struct MarkdownResult *result,
+                                         ngx_msec_t elapsed_ms)
+{
+    ngx_int_t   rc;
+    ngx_chain_t *out;
+    ngx_buf_t   *b;
+
+    ngx_log_debug3(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                  "markdown filter: conversion succeeded, "
+                  "input: %uz bytes, output: %uz bytes, elapsed: %M ms",
+                  ctx->buffer.size, result->markdown_len, elapsed_ms);
+
+    rc = ngx_http_markdown_update_headers(r, result, conf);
+    if (rc != NGX_OK) {
+        ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0,
+                     "markdown filter: failed to update response headers, category=system");
+        markdown_result_free(result);
+        return NGX_ERROR;
+    }
+
+    rc = ngx_http_markdown_forward_headers(r, ctx);
+    if (rc != NGX_OK) {
+        markdown_result_free(result);
+        return rc;
+    }
+
+    b = ngx_pcalloc(r->pool, sizeof(ngx_buf_t));
+    if (b == NULL) {
+        ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0,
+                     "markdown filter: failed to allocate output buffer, category=system");
+        markdown_result_free(result);
+        return NGX_ERROR;
+    }
+
+    if (r->method == NGX_HTTP_HEAD) {
+        ngx_http_markdown_prepare_head_output_buffer(r, b, result);
+    } else {
+        rc = ngx_http_markdown_prepare_body_output_buffer(r, b, result);
+        if (rc != NGX_OK) {
+            return rc;
+        }
+    }
+
+    out = ngx_alloc_chain_link(r->pool);
+    if (out == NULL) {
+        ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0,
+                     "markdown filter: failed to allocate output chain, category=system");
+        return NGX_ERROR;
+    }
+    out->buf = b;
+    out->next = NULL;
+
+    return ngx_http_next_body_filter(r, out);
+}
