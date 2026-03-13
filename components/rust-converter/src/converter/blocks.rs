@@ -31,10 +31,10 @@ impl MarkdownConverter {
                 {
                     output.push('\n');
                     if !line.is_empty() {
-                        let already_indented =
-                            (!base_indent.is_empty() && line.starts_with(&base_indent))
-                                || line.starts_with(' ')
-                                || line.starts_with('\t');
+                        let already_indented = (!base_indent.is_empty()
+                            && line.starts_with(&base_indent))
+                            || line.starts_with(' ')
+                            || line.starts_with('\t');
                         if !already_indented {
                             output.push_str(&continuation_indent);
                         }
