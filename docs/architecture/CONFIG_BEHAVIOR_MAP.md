@@ -27,7 +27,7 @@ Each directive is described in four dimensions:
 |--------|--------|
 | Behavior | Enables or disables Markdown conversion for the current context; can be static or variable-driven |
 | Lifecycle impact | Header filter entry decision; cached per request before body processing begins |
-| Implementation areas | `components/nginx-module/src/ngx_http_markdown_filter_module.c`, `components/nginx-module/src/ngx_http_markdown_eligibility.c` |
+| Implementation areas | `components/nginx-module/src/ngx_http_markdown_request_impl.h`, `components/nginx-module/src/ngx_http_markdown_eligibility.c` |
 | Practical note | This is the top-level switch. If it resolves to off in header phase, the body filter will not revisit that decision. |
 
 ### `markdown_on_wildcard`
@@ -36,7 +36,7 @@ Each directive is described in four dimensions:
 |--------|--------|
 | Behavior | Extends content negotiation so wildcard `Accept` values can trigger Markdown conversion |
 | Lifecycle impact | Header-phase negotiation decision before eligibility checks |
-| Implementation areas | `components/nginx-module/src/ngx_http_markdown_accept.c`, `components/nginx-module/src/ngx_http_markdown_filter_module.c` |
+| Implementation areas | `components/nginx-module/src/ngx_http_markdown_accept.c`, `components/nginx-module/src/ngx_http_markdown_request_impl.h` |
 | Practical note | Use this only when wildcard clients should really receive Markdown; it broadens the set of requests entering the conversion path. |
 
 ## Resource and Failure Controls
@@ -47,7 +47,7 @@ Each directive is described in four dimensions:
 |--------|--------|
 | Behavior | Caps the size of responses the module will buffer and attempt to convert |
 | Lifecycle impact | Body-phase buffering and fail-open/fail-closed branch |
-| Implementation areas | `components/nginx-module/src/ngx_http_markdown_buffer.c`, `components/nginx-module/src/ngx_http_markdown_filter_module.c` |
+| Implementation areas | `components/nginx-module/src/ngx_http_markdown_buffer.c`, `components/nginx-module/src/ngx_http_markdown_payload_impl.h` |
 | Practical note | This is one of the main guards around the full-buffering architecture. Large documents often hit this branch first. |
 
 ### `markdown_timeout`
@@ -56,7 +56,7 @@ Each directive is described in four dimensions:
 |--------|--------|
 | Behavior | Limits how long conversion may run in the Rust engine |
 | Lifecycle impact | FFI conversion call and conversion failure classification |
-| Implementation areas | `components/nginx-module/src/ngx_http_markdown_filter_module.c`, `components/rust-converter/src/ffi.rs`, `components/rust-converter/src/converter.rs` |
+| Implementation areas | `components/nginx-module/src/ngx_http_markdown_conversion_impl.h`, `components/rust-converter/src/ffi.rs`, `components/rust-converter/src/converter.rs` |
 | Practical note | A timeout is not a header-phase decision. It takes effect only after the request has already entered the conversion path. |
 
 ### `markdown_on_error`
@@ -65,7 +65,7 @@ Each directive is described in four dimensions:
 |--------|--------|
 | Behavior | Chooses fail-open (`pass`) or fail-closed (`reject`) behavior when conversion or related processing fails |
 | Lifecycle impact | Buffering failure, decompression failure, conditional-processing failure, and conversion failure branches |
-| Implementation areas | `components/nginx-module/src/ngx_http_markdown_filter_module.c`, `components/nginx-module/src/ngx_http_markdown_error.c` |
+| Implementation areas | `components/nginx-module/src/ngx_http_markdown_payload_impl.h`, `components/nginx-module/src/ngx_http_markdown_conversion_impl.h`, `components/nginx-module/src/ngx_http_markdown_error.c` |
 | Practical note | This directive shapes the operational posture of the system more than the conversion result itself. |
 
 ## Output Shape and Metadata
@@ -76,7 +76,7 @@ Each directive is described in four dimensions:
 |--------|--------|
 | Behavior | Selects the Markdown flavor emitted by the Rust converter |
 | Lifecycle impact | Rust conversion options preparation before FFI call |
-| Implementation areas | `components/nginx-module/src/ngx_http_markdown_filter_module.c`, `components/rust-converter/src/converter.rs` |
+| Implementation areas | `components/nginx-module/src/ngx_http_markdown_conversion_impl.h`, `components/rust-converter/src/converter.rs` |
 | Practical note | This changes output semantics, not request eligibility. |
 
 ### `markdown_token_estimate`
@@ -85,7 +85,7 @@ Each directive is described in four dimensions:
 |--------|--------|
 | Behavior | Enables token estimation and the related response metadata |
 | Lifecycle impact | Rust conversion options and successful-response header update |
-| Implementation areas | `components/nginx-module/src/ngx_http_markdown_filter_module.c`, `components/nginx-module/src/ngx_http_markdown_headers.c`, `components/rust-converter/src/token_estimator.rs` |
+| Implementation areas | `components/nginx-module/src/ngx_http_markdown_conversion_impl.h`, `components/nginx-module/src/ngx_http_markdown_headers.c`, `components/rust-converter/src/token_estimator.rs` |
 | Practical note | Useful for agent-facing consumers, but it adds work to the successful conversion path. |
 
 ### `markdown_front_matter`
@@ -94,7 +94,7 @@ Each directive is described in four dimensions:
 |--------|--------|
 | Behavior | Prepends YAML front matter to the generated Markdown |
 | Lifecycle impact | Rust conversion options and output rendering path |
-| Implementation areas | `components/nginx-module/src/ngx_http_markdown_filter_module.c`, `components/rust-converter/src/metadata.rs`, `components/rust-converter/src/converter.rs` |
+| Implementation areas | `components/nginx-module/src/ngx_http_markdown_conversion_impl.h`, `components/rust-converter/src/metadata.rs`, `components/rust-converter/src/converter.rs` |
 | Practical note | This changes output shape for downstream consumers and may affect caches or clients that expect plain Markdown only. |
 
 ## Authentication and Cache Policy
@@ -125,7 +125,7 @@ Each directive is described in four dimensions:
 |--------|--------|
 | Behavior | Enables or disables Markdown-variant ETag generation |
 | Lifecycle impact | Rust conversion options and success-path header updates |
-| Implementation areas | `components/nginx-module/src/ngx_http_markdown_filter_module.c`, `components/nginx-module/src/ngx_http_markdown_headers.c`, `components/rust-converter/src/etag_generator.rs` |
+| Implementation areas | `components/nginx-module/src/ngx_http_markdown_conversion_impl.h`, `components/nginx-module/src/ngx_http_markdown_headers.c`, `components/rust-converter/src/etag_generator.rs` |
 | Practical note | This affects downstream cache behavior, not whether conversion is attempted. |
 
 ### `markdown_conditional_requests`
@@ -134,7 +134,7 @@ Each directive is described in four dimensions:
 |--------|--------|
 | Behavior | Controls how aggressively the module handles Markdown-variant conditional requests |
 | Lifecycle impact | Conditional resolution branch after buffering and before full conversion |
-| Implementation areas | `components/nginx-module/src/ngx_http_markdown_filter_module.c`, `components/nginx-module/src/ngx_http_markdown_conditional.c` |
+| Implementation areas | `components/nginx-module/src/ngx_http_markdown_conversion_impl.h`, `components/nginx-module/src/ngx_http_markdown_conditional.c` |
 | Practical note | This directive changes the branch between “send 304”, “reuse a conditional result”, and “continue to full conversion”. |
 
 ## Logging and Observability
@@ -145,7 +145,7 @@ Each directive is described in four dimensions:
 |--------|--------|
 | Behavior | Sets the module-local threshold for emitted module logs |
 | Lifecycle impact | Logging across header filter, body filter, decompression, conditional handling, conversion, and metrics paths |
-| Implementation areas | `components/nginx-module/src/ngx_http_markdown_filter_module.c` |
+| Implementation areas | `components/nginx-module/src/ngx_http_markdown_config_handlers_impl.h`, `components/nginx-module/src/ngx_http_markdown_config_core_impl.h`, `components/nginx-module/src/ngx_http_markdown_request_impl.h`, `components/nginx-module/src/ngx_http_markdown_payload_impl.h`, `components/nginx-module/src/ngx_http_markdown_conversion_impl.h`, `components/nginx-module/src/ngx_http_markdown_metrics_impl.h` |
 | Practical note | This does not change runtime behavior directly, but it changes how visible each branch becomes during debugging. |
 
 ### `markdown_metrics`
@@ -154,7 +154,7 @@ Each directive is described in four dimensions:
 |--------|--------|
 | Behavior | Enables a dedicated metrics endpoint at a location |
 | Lifecycle impact | Separate location-handler path, not the normal conversion filter chain |
-| Implementation areas | `components/nginx-module/src/ngx_http_markdown_filter_module.c` |
+| Implementation areas | `components/nginx-module/src/ngx_http_markdown_config_handlers_impl.h`, `components/nginx-module/src/ngx_http_markdown_config_directives_impl.h`, `components/nginx-module/src/ngx_http_markdown_metrics_impl.h` |
 | Practical note | When debugging this directive, think “handler mode”, not “header/body filter mode”. |
 
 ## Transfer and Streaming-Oriented Controls
@@ -165,7 +165,7 @@ Each directive is described in four dimensions:
 |--------|--------|
 | Behavior | Controls whether chunked transfer responses may be buffered and converted |
 | Lifecycle impact | Eligibility and body-buffering path for chunked upstream responses |
-| Implementation areas | `components/nginx-module/src/ngx_http_markdown_eligibility.c`, `components/nginx-module/src/ngx_http_markdown_filter_module.c` |
+| Implementation areas | `components/nginx-module/src/ngx_http_markdown_eligibility.c`, `components/nginx-module/src/ngx_http_markdown_request_impl.h`, `components/nginx-module/src/ngx_http_markdown_payload_impl.h` |
 | Practical note | This directive does not provide streaming conversion; it only controls whether chunked responses may still enter the full-buffering path. |
 
 ### `markdown_stream_types`
@@ -174,7 +174,7 @@ Each directive is described in four dimensions:
 |--------|--------|
 | Behavior | Excludes configured content types from conversion, typically for streaming-style responses |
 | Lifecycle impact | Header-phase eligibility branch |
-| Implementation areas | `components/nginx-module/src/ngx_http_markdown_filter_module.c`, `components/nginx-module/src/ngx_http_markdown_eligibility.c` |
+| Implementation areas | `components/nginx-module/src/ngx_http_markdown_request_impl.h`, `components/nginx-module/src/ngx_http_markdown_eligibility.c` |
 | Practical note | Treat this as an explicit bypass list for response shapes that do not fit the buffering model well. |
 
 ## Cross-Cutting Behavior Not Controlled by a Public Directive

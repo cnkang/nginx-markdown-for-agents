@@ -7,6 +7,8 @@
 
 This file replaces the previous placeholder template with real local baseline data.
 
+CI now also records non-blocking performance artifacts from the same `perf_baseline` example. The workflow stores the full benchmark output plus `/usr/bin/time -v` captures for the medium, medium-with-front-matter, and large single-sample runs. Those artifacts are for regression comparison and trend review; they are not merge-blocking thresholds yet.
+
 Key findings from this run:
 
 - FFI end-to-end conversion is very fast for small/medium HTML and scales roughly linearly to ~1MB input.
@@ -53,6 +55,7 @@ Sample definitions in the benchmark example:
 
 - `small`: `tests/corpus/simple/basic.html` (379 bytes)
 - `medium (~10KB)`: generated in-memory by repeating `tests/corpus/complex/blog-post.html`
+- `medium-front-matter (~10KB + metadata/front matter)`: generated from the same complex seed with front matter enabled and a base URL supplied for URL resolution
 - `large (~1MB)`: generated in-memory by repeating the same complex seed
 
 ### Conditional request microbench (real Rust FFI)
@@ -125,7 +128,7 @@ Commands used (one per sample):
 
 ```bash
 cd components/rust-converter
-/usr/bin/time -l cargo run --release --example perf_baseline -- --single <small|medium|large>
+/usr/bin/time -l cargo run --release --example perf_baseline -- --single <small|medium|medium-front-matter|large>
 ```
 
 Measured `maximum resident set size` (converted to MiB):
@@ -158,6 +161,19 @@ make -C components/nginx-module/tests unit-conditional_requests
 cd ..
 make check-headers
 ```
+
+## CI Artifact Capture
+
+The `Perf Baseline Artifact` job in `.github/workflows/ci.yml` records:
+
+- full `cargo run --release --example perf_baseline` output
+- `--single medium` output plus `/usr/bin/time -v`
+- `--single medium-front-matter` output plus `/usr/bin/time -v`
+- `--single large` output plus `/usr/bin/time -v`
+
+This keeps performance references attached to PRs and workflow runs without turning the current baseline into a hard pass/fail gate.
+
+The historical latency tables below were captured before the extra front-matter sample was added to the harness. Treat the new sample as a regression-comparison artifact until a fresh full baseline snapshot is recorded.
 
 ## Next Actions (Data-Driven)
 

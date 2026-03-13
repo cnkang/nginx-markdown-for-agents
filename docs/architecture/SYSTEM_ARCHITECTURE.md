@@ -76,6 +76,17 @@ The C module is responsible for:
 - selecting fail-open or fail-closed behavior on conversion failure
 - exposing runtime metrics
 
+Internally, the module now keeps these concerns in separate implementation units:
+
+- config wiring plus a dedicated directive registry table
+- config object lifecycle, markdown_filter resolution, merged-config logging, and shared-metrics bootstrap
+- custom directive parsing and validation
+- request-path state transitions in the header/body filter entrypoints
+- request-body buffering, decompression coordination, and fail-open replay
+- conversion input preparation, FFI execution, and Markdown-output shaping
+- worker lifecycle setup/teardown
+- dedicated metrics-handler formatting and access control
+
 ### Rust converter responsibilities
 
 The Rust converter is responsible for:
@@ -85,6 +96,8 @@ The Rust converter is responsible for:
 - generating deterministic Markdown output
 - producing optional metadata such as token estimates and front matter
 - returning structured results through a stable C-compatible interface
+
+Inside the converter crate, the Markdown renderer is split into traversal, block handling, inline handling, table rendering, front-matter emission, and normalization helpers. The FFI boundary is also split into ABI, option-decoding, conversion, memory-management, and export units, while metadata extraction and URL resolution now live in separate helper modules. That reduces the amount of logic concentrated in a single source file without changing the public API or the C ABI.
 
 ## Why the FFI Boundary Is Small
 
@@ -107,7 +120,7 @@ For an eligible Markdown request, the runtime flow is:
 3. If needed, the module buffers the upstream body and decompresses supported encodings.
 4. The buffered payload is passed to the Rust converter through FFI.
 5. The converter returns Markdown output and optional metadata.
-6. The module updates headers such as `Content-Type`, `Vary`, and variant `ETag`, then sends the Markdown response.
+6. The module updates headers such as `Content-Type`, `Vary`, and variant `ETag`, records shared metrics, then sends the Markdown response.
 
 For non-eligible requests, the module stays out of the way and the original response continues through NGINX unchanged.
 
@@ -122,6 +135,10 @@ The current architecture buffers the full eligible response before conversion. T
 - very large or streaming-style content should usually be bypassed
 
 This tradeoff is documented in [ADR-0002](ADR/0002-full-buffering-approach.md).
+
+### Shared observability state
+
+Runtime metrics are aggregated in shared memory so the metrics endpoint reports cross-worker totals instead of whichever worker handled the metrics request. This keeps alerting and capacity signals aligned with the whole NGINX instance rather than a single worker view.
 
 ### Inline conversion instead of offline publishing
 

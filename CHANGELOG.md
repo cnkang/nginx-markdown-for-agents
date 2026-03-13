@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- Canonical native E2E entrypoints under `tools/e2e/`, including a focused proxy/TLS backend validation script and a thin orchestration wrapper for `make test-e2e`
+- Shared native-build helper logic for runtime verification scripts under `tools/lib/nginx_markdown_native_build.sh`
+- `cargo-fuzz` targets for parser, FFI, and security-validator paths, plus a nightly GitHub Actions workflow
+- Non-blocking Darwin/macOS smoke workflow covering native Rust build, real-nginx IMS validation, and chunked runtime smoke
+- Additional performance artifact sampling for the medium front-matter path in the Rust benchmark harness
+
+### Changed
+- Split the NGINX module implementation into focused config, request-state, payload, conversion, lifecycle, and metrics helper units while keeping directive behavior stable
+- Moved shared metrics collection to a cross-worker shared-memory model and expanded metrics validation coverage
+- Split the Rust converter internals into dedicated `converter/`, `ffi/`, and `metadata/` submodules without changing the exported ABI
+- Reworked `make test-e2e` to delegate to the canonical native E2E suite instead of maintaining a second inline runner
+- Updated Linux CI runtime regressions to retain and reuse a validated IMS runtime across delegated native checks
+
+### Fixed
+- Hardened native E2E/runtime scripts so reusable `NGINX_BIN` paths are only reused when the runtime layout and module support are actually compatible
+- Aligned Darwin native builds around a consistent `MACOSX_DEPLOYMENT_TARGET` to avoid mismatched static-library link warnings in verification flows
+- Synchronized architecture, testing, operations, security, status, and top-level README documentation with the refactored implementation and validation surface
+
 ## [0.2.1] - 2026-03-11
 
 ### Added

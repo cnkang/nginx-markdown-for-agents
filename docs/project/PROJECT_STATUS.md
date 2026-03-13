@@ -6,7 +6,7 @@ This project is a production-oriented NGINX filter module backed by a Rust HTML-
 
 ## Current Assessment
 
-As of **March 11, 2026**, the project is at **version 0.2.1**. Core features are implemented and tested. The codebase includes unit, integration, and E2E tests, along with documentation covering installation, configuration, and operations.
+As of **March 13, 2026**, the project is at **version 0.2.1** with additional maintainability and validation work reflected in the current codebase. Core features are implemented and tested. The codebase includes unit, integration, E2E, and fuzz-oriented validation entrypoints, along with documentation covering installation, configuration, operations, and architecture.
 
 This assessment is based on:
 
@@ -14,6 +14,15 @@ This assessment is based on:
 - Test coverage across unit, integration, E2E, and property-based tests
 - Documentation suite covering installation, configuration, operations, and architecture
 - CI/CD pipeline with automated builds and security scanning
+- Shared-memory metrics aggregation across workers in the module implementation
+- Further decomposition of the NGINX module into focused config wiring/core/handlers, request-state, payload buffering/replay, conversion/output, lifecycle, and metrics helper units
+- Shared native-build helper logic for Rust/NGINX verification scripts, including aligned macOS deployment-target handling
+- Delegated runtime validations now reuse an exported module-enabled `NGINX_BIN` only when it has a reusable runtime layout; otherwise they fall back to self-building their own native NGINX runtime
+- The GitHub Actions `runtime-regressions` job now retains the validated IMS runtime and reuses its `NGINX_BIN` for chunked and large-response checks instead of rebuilding native NGINX three times
+- Canonical E2E coverage now lives under `tools/e2e/`, with `make test-e2e` delegating to a focused proxy/TLS, chunked, and large-response suite instead of maintaining a second full inline runner
+- The Rust converter now keeps the public `ffi.rs` and `metadata.rs` entrypoints while pushing ABI decoding, memory handling, export wiring, metadata traversal, and URL resolution into focused submodules
+- `cargo-fuzz` targets and nightly fuzz workflow for parser, FFI, and security-validator paths
+- A separate non-blocking Darwin/macOS smoke workflow validates native Rust build plus real-nginx runtime checks on GitHub-hosted macOS
 - Release artifacts and installation tooling
 
 ## Release 0.2.1 Highlights
@@ -49,8 +58,10 @@ The latest release (0.2.1, March 11, 2026) includes:
 
 ### Improvements
 - Refactored NGINX module internals for better maintainability
+- Split Rust converter internals into focused renderer submodules
+- Split NGINX module config wiring/core/handlers, request-state, payload buffering/replay, conversion/output, lifecycle, and metrics endpoint logic into focused helper units
 - Tightened authenticated-request cache-control handling
-- Hardened E2E validation with TLS backend support
+- Hardened canonical E2E validation with TLS backend support
 - Enhanced CI/CD workflows and release automation
 - Refreshed documentation across all guides and references
 
@@ -74,6 +85,8 @@ The latest release (0.2.1, March 11, 2026) includes:
 - Security-oriented input sanitization (XSS, XXE, SSRF prevention)
 - Property-based tests for correctness and resilience
 - Cooperative timeout mechanism
+- `cargo-fuzz` targets for parser, FFI, and security-validator paths
+- Internal FFI and metadata helper modules for a smaller public surface per file
 
 ### NGINX Module (`components/nginx-module/`)
 
@@ -87,6 +100,7 @@ The latest release (0.2.1, March 11, 2026) includes:
 - Fail-open / fail-closed strategy handling
 - Error classification and logging
 - Metrics collection and endpoint
+- Shared-memory metrics aggregation across workers
 - Automatic upstream decompression (gzip, brotli, deflate)
 - Authentication-aware caching (Cache-Control: private)
 - Variable-driven configuration support
@@ -114,6 +128,7 @@ Run with: `cargo test --all` or `make test-rust`
 - Configuration parsing and merge tests
 - Header manipulation and cache-control tests
 - Metrics collection and endpoint tests
+- Shared metrics aggregation and latency-bucket formatting coverage
 
 Run with: `make test-nginx-unit` or `make -C components/nginx-module/tests unit`
 
@@ -124,6 +139,8 @@ Run with: `make test-nginx-unit` or `make -C components/nginx-module/tests unit`
 - Content negotiation and variant handling
 - Compression and decompression flows
 - Authentication and caching behavior
+- Range-request bypass and shared metrics aggregation in the runtime integration script
+- Delegated `If-Modified-Since`, chunked native smoke, and large-response native regression checks
 
 Run with: `make test-nginx-integration` and `make test-e2e`
 
@@ -145,6 +162,7 @@ The project includes:
 - ETag generation, conditional requests, and Vary header support
 - Input sanitization and XSS/XXE/SSRF prevention
 - Metrics endpoint, structured logging, and error classification
+- Cross-worker shared metrics aggregation with averages and latency buckets
 - Installation script, Docker examples, and configuration templates
 - Documentation for installation, configuration, and operations
 
@@ -171,15 +189,15 @@ See [DEPLOYMENT_EXAMPLES.md](../guides/DEPLOYMENT_EXAMPLES.md) for configuration
 - Improved testing documentation
 
 ### Near-Term
-- Production-scale benchmarking and performance profiling
+- Performance regression tracking with CI artifact capture
 - Deployment validation across diverse environments
 - Community feedback integration
-- Performance optimization opportunities
+- Parser-path optimization opportunities
 
 ### Future Exploration
 - Streaming-oriented conversion approaches for large documents
 - Additional Markdown flavors and output formats
-- Enhanced metrics and observability features
+- Expanded observability integrations beyond the built-in shared metrics endpoint
 - Performance improvements for high-throughput scenarios
 
 ## Known Limitations
@@ -247,7 +265,8 @@ make test
 make test-rust              # Rust converter tests
 make test-nginx-unit        # NGINX module unit tests
 make test-nginx-integration # Integration tests (requires nginx)
-make test-e2e                # End-to-end tests (requires nginx)
+make test-e2e               # End-to-end tests (requires nginx)
+make test-rust-fuzz-smoke   # Short fuzz smoke checks (requires nightly + cargo-fuzz)
 ```
 
 ### Continuous Integration

@@ -35,6 +35,7 @@ This operational guide provides procedures for monitoring, troubleshooting, tuni
 - This guide includes example commands, sample metrics, and suggested thresholds. Validate them in staging before production use.
 - Metric field names in this guide should match the current metrics endpoint implementation in `components/nginx-module/src/ngx_http_markdown_filter_module.c`.
 - The built-in metrics endpoint returns a human-readable plain-text report or a JSON object (selected by `Accept` header); it is not a native Prometheus exposition endpoint.
+- Metrics are aggregated in shared memory across workers; a single endpoint response reflects the whole NGINX instance, not just the worker that served `/markdown-metrics`.
 - For “why this request took a specific branch,” use [../architecture/REQUEST_LIFECYCLE.md](../architecture/REQUEST_LIFECYCLE.md) and [../architecture/CONFIG_BEHAVIOR_MAP.md](../architecture/CONFIG_BEHAVIOR_MAP.md) alongside this runbook.
 
 ### Terminology and Command Conventions
@@ -68,8 +69,13 @@ The module exposes metrics via the `markdown_metrics` endpoint. Configure monito
 | Metric | Description | Type | Alert Threshold |
 |--------|-------------|------|-----------------|
 | `conversion_time_sum_ms` | Total conversion time (sum) | Cumulative counter field | N/A (derive average) |
+| `conversion_completed` | Completed conversions (`success + failure`) | Derived cumulative field | N/A (informational) |
+| `conversion_time_avg_ms` | Average conversion time across completed conversions | Derived field exposed by endpoint | > 200ms sustained |
 | `input_bytes` | Total input bytes processed | Cumulative counter field | N/A (informational) |
+| `input_bytes_avg` | Average successful input size | Derived field exposed by endpoint | N/A (informational) |
 | `output_bytes` | Total output bytes generated | Cumulative counter field | N/A (informational) |
+| `output_bytes_avg` | Average successful output size | Derived field exposed by endpoint | N/A (informational) |
+| `conversion_latency_buckets.*` | Completed conversions by latency band | Cumulative counter field | Watch for drift toward slower buckets |
 
 #### Decompression Metrics
 
@@ -91,7 +97,7 @@ Calculate these metrics from the raw counters:
 failure_rate = (conversions_failed / conversions_attempted) * 100
 
 # Average conversion time
-avg_conversion_time = conversion_time_sum_ms / conversions_succeeded
+avg_conversion_time = conversion_time_sum_ms / conversion_completed
 
 # Size reduction (proxy for token reduction trend)
 size_reduction = ((input_bytes - output_bytes) / input_bytes) * 100
@@ -120,13 +126,14 @@ curl -H "Accept: application/json" "$METRICS_URL"
 ```
 
 **Example Output (Plain Text):**
-```
+``` 
 Markdown Filter Metrics
 -----------------------
 Conversions Attempted: 1250
 Conversions Succeeded: 1180
 Conversions Failed: 70
 Conversions Bypassed: 20
+Conversions Completed: 1250
 
 Failure Breakdown:
 - Conversion Errors: 25
@@ -135,8 +142,15 @@ Failure Breakdown:
 
 Performance:
 - Total Conversion Time: 45000 ms
+- Average Conversion Time: 36 ms
 - Total Input Bytes: 52428800
+- Average Input Bytes: 44431
 - Total Output Bytes: 15728640
+- Average Output Bytes: 13329
+- Latency <= 10ms: 140
+- Latency <= 100ms: 1030
+- Latency <= 1000ms: 80
+- Latency > 1000ms: 0
 ```
 
 **Example Output (JSON):**
@@ -146,12 +160,22 @@ Performance:
   "conversions_succeeded": 1180,
   "conversions_failed": 70,
   "conversions_bypassed": 20,
+  "conversion_completed": 1250,
   "failures_conversion": 25,
   "failures_resource_limit": 40,
   "failures_system": 5,
   "conversion_time_sum_ms": 45000,
+  "conversion_time_avg_ms": 36,
   "input_bytes": 52428800,
+  "input_bytes_avg": 44431,
   "output_bytes": 15728640,
+  "output_bytes_avg": 13329,
+  "conversion_latency_buckets": {
+    "le_10ms": 140,
+    "le_100ms": 1030,
+    "le_1000ms": 80,
+    "gt_1000ms": 0
+  },
   "decompressions_attempted": 210,
   "decompressions_succeeded": 205,
   "decompressions_failed": 5,
@@ -183,7 +207,7 @@ scrape_configs:
 rate(conversions_failed[5m]) / rate(conversions_attempted[5m]) * 100
 
 # Average conversion time
-rate(conversion_time_sum_ms[5m]) / rate(conversions_succeeded[5m])
+rate(conversion_time_sum_ms[5m]) / rate(conversion_completed[5m])
 
 # Throughput (conversions per second)
 rate(conversions_succeeded[1m])
@@ -306,6 +330,8 @@ fi
 ---
 
 ## Troubleshooting
+
+The repository CI now includes a non-blocking Darwin/macOS smoke workflow that exercises the shared native-build helper, real-nginx IMS validation, and chunked native smoke. If a runtime issue reproduces only on macOS, start by comparing its workflow logs with the primary Linux `runtime-regressions` job.
 
 ### Common Issues and Solutions
 

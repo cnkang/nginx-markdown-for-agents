@@ -20,8 +20,17 @@ In practice, this is the layer that decides whether a request should stay as HTM
 
 ```text
 src/
-  ngx_http_markdown_filter_module.c   main module entrypoint and configuration
+  ngx_http_markdown_filter_module.c   main module entrypoint, shared globals, and internal wiring
   ngx_http_markdown_filter_module.h   module types and function declarations
+  ngx_http_markdown_config_impl.h     small config wiring include that aggregates the focused config helper units
+  ngx_http_markdown_config_core_impl.h configuration lifecycle, markdown_filter resolution, and metrics-zone setup helpers
+  ngx_http_markdown_config_handlers_impl.h custom directive parsing and validation helpers
+  ngx_http_markdown_config_directives_impl.h directive registry table and inline usage notes
+  ngx_http_markdown_request_impl.h    header/body flow and request-phase state machine helpers
+  ngx_http_markdown_payload_impl.h    request-body buffering, decompression, and fail-open replay helpers
+  ngx_http_markdown_conversion_impl.h base_url construction, FFI conversion, and output shaping helpers
+  ngx_http_markdown_lifecycle_impl.h  worker lifecycle and filter registration helpers
+  ngx_http_markdown_metrics_impl.h    metrics endpoint implementation helpers
   ngx_http_markdown_accept.c          Accept header parsing
   ngx_http_markdown_auth.c            authentication and cache policy handling
   ngx_http_markdown_buffer.c          response buffering
@@ -40,17 +49,22 @@ src/
 # Run full module unit suite
 make -C tests unit
 
-# Run integration coverage
+# Run standalone integration harness
 make -C tests integration-c
+
+# Run runtime integration suite (or set NGINX_BIN=/absolute/path/to/nginx)
 make -C tests integration-nginx
 
-# Run end-to-end validation
+# Run canonical end-to-end validation
 make -C tests e2e
 ```
+
+`make -C tests e2e` delegates to the maintained suite under `tools/e2e/`, which owns the real proxy-chain, chunked, and large-response runtime checks.
 
 For full build and installation steps, use [../../docs/guides/BUILD_INSTRUCTIONS.md](../../docs/guides/BUILD_INSTRUCTIONS.md) and [../../docs/guides/INSTALLATION.md](../../docs/guides/INSTALLATION.md).
 
 For directive semantics and operator-facing behavior, prefer [../../docs/guides/CONFIGURATION.md](../../docs/guides/CONFIGURATION.md) over repeating those details here.
+For canonical architecture and repository-layout notes, prefer [../../docs/architecture/SYSTEM_ARCHITECTURE.md](../../docs/architecture/SYSTEM_ARCHITECTURE.md) and [../../docs/architecture/REPOSITORY_STRUCTURE.md](../../docs/architecture/REPOSITORY_STRUCTURE.md).
 
 ## Development Notes
 
