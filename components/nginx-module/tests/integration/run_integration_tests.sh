@@ -321,7 +321,8 @@ http {
     start_nginx "$config" || { log_fail "$NGINX_START_FAILURE_MSG"; return 1; }
     
     # Make request
-    local response=$(make_request "GET" "/test" "$MEDIA_TYPE_MARKDOWN")
+    local response
+    response=$(make_request "GET" "/test" "$MEDIA_TYPE_MARKDOWN")
     local status=$(get_status "$response")
     local content_type=$(get_header "$response" "$HEADER_CONTENT_TYPE")
     local vary=$(get_header "$response" "Vary")

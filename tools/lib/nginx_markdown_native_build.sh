@@ -36,10 +36,8 @@ markdown_detect_rust_target() {
   host_arch="$(uname -m)"
   libc_variant="gnu"
 
-  if [[ "${host_os}" == "Linux" ]]; then
-    if ldd --version 2>&1 | grep -qi musl || compgen -G '/lib/ld-musl*' >/dev/null; then
-      libc_variant="musl"
-    fi
+  if [[ "${host_os}" == "Linux" ]] && { ldd --version 2>&1 | grep -qi musl || compgen -G '/lib/ld-musl*' >/dev/null; }; then
+    libc_variant="musl"
   fi
 
   case "${host_os}:${host_arch}:${libc_variant}" in
