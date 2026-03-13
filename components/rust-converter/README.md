@@ -25,6 +25,9 @@ cargo build --release
 # Run all tests
 cargo test --all
 
+# Run short fuzz smoke checks (requires nightly + cargo-fuzz)
+make test-rust-fuzz-smoke
+
 # Generate the C header
 cbindgen --config cbindgen.toml --crate nginx-markdown-converter --output include/markdown_converter.h
 ```
@@ -34,19 +37,27 @@ cbindgen --config cbindgen.toml --crate nginx-markdown-converter --output includ
 ```text
 src/
   lib.rs                public API
-  ffi.rs                C FFI interface
+  ffi.rs                C FFI entrypoint and public re-exports
+  ffi/                  ABI structs, option decoding, memory helpers, and exported FFI functions
   parser.rs             HTML parsing
-  converter.rs          Markdown generation
+  converter.rs          Markdown converter entrypoint and shared test module
+  converter/            renderer internals (traversal, blocks, inline, tables, normalization)
   security.rs           sanitization and safety checks
-  metadata.rs           metadata extraction
+  metadata.rs           metadata extraction entrypoint and public types
+  metadata/             metadata extraction, URL resolution, and metadata tests
   token_estimator.rs    token estimation
   etag_generator.rs     ETag generation
   charset.rs            charset detection and encoding
   error.rs              error types
+fuzz/
+  fuzz_targets/         parser, FFI, and security-validator fuzz targets
 ```
 
 ## Where to Read More
 
+- Canonical architecture and repository layout live in:
+  - [../../docs/architecture/SYSTEM_ARCHITECTURE.md](../../docs/architecture/SYSTEM_ARCHITECTURE.md)
+  - [../../docs/architecture/REPOSITORY_STRUCTURE.md](../../docs/architecture/REPOSITORY_STRUCTURE.md)
 - [../../docs/features/security.md](../../docs/features/security.md)
 - [../../docs/features/deterministic-output.md](../../docs/features/deterministic-output.md)
 - [../../docs/features/TOKEN_ESTIMATOR.md](../../docs/features/TOKEN_ESTIMATOR.md)
