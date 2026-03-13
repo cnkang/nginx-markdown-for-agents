@@ -10,6 +10,12 @@ docs/archive/
 # Rust artifacts
 components/rust-converter/target/
 
+# Rust fuzzing local state and generated outputs
+components/rust-converter/fuzz/artifacts/
+components/rust-converter/fuzz/corpus/
+components/rust-converter/fuzz/coverage/
+components/rust-converter/fuzz/target/
+
 # Generated C header mirror (copy from Rust include)
 components/nginx-module/src/markdown_converter.h
 

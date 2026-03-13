@@ -26,6 +26,8 @@ struct Sample {
     name: &'static str,
     html: Vec<u8>,
     target_label: &'static str,
+    front_matter: bool,
+    base_url: Option<&'static str>,
 }
 
 #[derive(Default, Clone)]
@@ -134,32 +136,46 @@ fn build_samples() -> Vec<Sample> {
             name: "small",
             html: small,
             target_label: "~0.4KB",
+            front_matter: false,
+            base_url: None,
         },
         Sample {
             name: "medium",
-            html: medium,
+            html: medium.clone(),
             target_label: "~10KB",
+            front_matter: false,
+            base_url: None,
+        },
+        Sample {
+            name: "medium-front-matter",
+            html: medium,
+            target_label: "~10KB + front matter",
+            front_matter: true,
+            base_url: Some("https://example.com/articles/bench.html"),
         },
         Sample {
             name: "large",
             html: large,
             target_label: "~1MB",
+            front_matter: false,
+            base_url: None,
         },
     ]
 }
 
 fn run_ffi_baseline(sample: &Sample, cfg: RunConfig) -> FfiSummary {
     let content_type = b"text/html; charset=UTF-8";
+    let base_url = sample.base_url.map(str::as_bytes);
     let options = MarkdownOptions {
         flavor: 0,
         timeout_ms: 5000,
         generate_etag: 1,
         estimate_tokens: 1,
-        front_matter: 0,
+        front_matter: u8::from(sample.front_matter),
         content_type: content_type.as_ptr(),
         content_type_len: content_type.len(),
-        base_url: ptr::null(),
-        base_url_len: 0,
+        base_url: base_url.map_or(ptr::null(), |value| value.as_ptr()),
+        base_url_len: base_url.map_or(0, |value| value.len()),
     };
 
     let handle: *mut MarkdownConverterHandle = markdown_converter_new();
@@ -349,6 +365,10 @@ fn run_single_mode(name: &str) {
             warmup: 50,
             iterations: 1000,
         },
+        "medium-front-matter" => RunConfig {
+            warmup: 50,
+            iterations: 1000,
+        },
         "large" => RunConfig {
             warmup: 5,
             iterations: 40,
@@ -383,6 +403,10 @@ fn main() {
                 iterations: 3000,
             },
             "medium" => RunConfig {
+                warmup: 50,
+                iterations: 1000,
+            },
+            "medium-front-matter" => RunConfig {
                 warmup: 50,
                 iterations: 1000,
             },
