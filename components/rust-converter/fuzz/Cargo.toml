@@ -1,0 +1,37 @@
+[package]
+name = "nginx-markdown-converter-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+markup5ever_rcdom = "0.38"
+nginx-markdown-converter = { path = ".." }
+
+[[bin]]
+name = "parser_html"
+path = "fuzz_targets/parser_html.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "ffi_convert"
+path = "fuzz_targets/ffi_convert.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "security_validator"
+path = "fuzz_targets/security_validator.rs"
+test = false
+doc = false
+bench = false
+
+[workspace]
+members = ["."]
