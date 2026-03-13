@@ -6,6 +6,10 @@
  * helpers evolve independently.
  */
 
+#include "ngx_http_markdown_config_core_impl.h"
+#include "ngx_http_markdown_config_handlers_impl.h"
+#include "ngx_http_markdown_config_directives_impl.h"
+
 /* Configuration-unit forward declarations. */
 static void *ngx_http_markdown_create_main_conf(ngx_conf_t *cf);
 static void *ngx_http_markdown_create_conf(ngx_conf_t *cf);
@@ -35,9 +39,3 @@ ngx_flag_t ngx_http_markdown_is_enabled(ngx_http_request_t *r,
     ngx_http_markdown_conf_t *conf);
 static void ngx_http_markdown_log_merged_conf(ngx_conf_t *cf,
     ngx_http_markdown_conf_t *conf);
-
-#include "ngx_http_markdown_config_core_impl.h"
-
-#include "ngx_http_markdown_config_handlers_impl.h"
-
-#include "ngx_http_markdown_config_directives_impl.h"
