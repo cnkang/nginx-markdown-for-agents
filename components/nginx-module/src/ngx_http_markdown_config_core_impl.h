@@ -1,6 +1,10 @@
 /*
  * Configuration-core helpers.
  *
+ * WARNING: This header is an implementation detail of the main translation unit
+ * (ngx_http_markdown_filter_module.c). It must NOT be included from any other
+ * .c file or used as a standalone compilation unit.
+ *
  * This unit owns configuration object lifecycle, shared-metrics-zone
  * bootstrap, runtime markdown_filter resolution, and config logging/name
  * helpers used outside directive parsing.
@@ -285,6 +289,7 @@ ngx_http_markdown_log_verbosity_name(ngx_uint_t value)
 static const ngx_str_t *
 ngx_http_markdown_compression_name(ngx_http_markdown_compression_type_e compression_type)
 {
+    static ngx_str_t none = ngx_string("none");
     static ngx_str_t gzip = ngx_string("gzip");
     static ngx_str_t deflate = ngx_string("deflate");
     static ngx_str_t brotli = ngx_string("brotli");
@@ -292,6 +297,8 @@ ngx_http_markdown_compression_name(ngx_http_markdown_compression_type_e compress
     static ngx_str_t invalid = ngx_string("invalid");
 
     switch (compression_type) {
+        case NGX_HTTP_MARKDOWN_COMPRESSION_NONE:
+            return &none;
         case NGX_HTTP_MARKDOWN_COMPRESSION_GZIP:
             return &gzip;
         case NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE:

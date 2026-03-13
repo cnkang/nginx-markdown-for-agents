@@ -109,17 +109,11 @@ use markup5ever_rcdom::{Handle, NodeData, RcDom};
 use std::cell::Ref;
 use std::time::{Duration, Instant};
 
-#[path = "converter/blocks.rs"]
 mod blocks;
-#[path = "converter/front_matter.rs"]
 mod front_matter;
-#[path = "converter/inline.rs"]
 mod inline;
-#[path = "converter/normalize.rs"]
 mod normalize;
-#[path = "converter/tables.rs"]
 mod tables;
-#[path = "converter/traversal.rs"]
 mod traversal;
 
 /// Markdown flavor selection
@@ -1593,6 +1587,28 @@ mod tests {
         assert!(result.contains("- Item 1"));
         assert!(result.contains("- Item 2"));
         assert!(result.contains("- Item 3"));
+    }
+
+    #[test]
+    fn test_top_level_list_inside_container_keeps_top_level_indentation() {
+        let html = b"<div><ul><li>Item 1</li><li>Item 2</li></ul></div>";
+        let dom = parse_html(html).expect("Parse failed");
+        let converter = MarkdownConverter::new();
+        let result = converter.convert(&dom).expect("Conversion failed");
+
+        assert!(result.starts_with("- Item 1\n- Item 2"));
+        assert!(!result.contains("  - Item 1"));
+    }
+
+    #[test]
+    fn test_top_level_ordered_list_inside_container_keeps_top_level_indentation() {
+        let html = b"<section><ol><li>First</li><li>Second</li></ol></section>";
+        let dom = parse_html(html).expect("Parse failed");
+        let converter = MarkdownConverter::new();
+        let result = converter.convert(&dom).expect("Conversion failed");
+
+        assert!(result.starts_with("1. First\n1. Second"));
+        assert!(!result.contains("  1. First"));
     }
 
     #[test]

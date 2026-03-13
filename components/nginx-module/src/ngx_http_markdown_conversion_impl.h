@@ -1,6 +1,10 @@
 /*
  * Conversion-path helpers.
  *
+ * WARNING: This header is an implementation detail of the main translation unit
+ * (ngx_http_markdown_filter_module.c). It must NOT be included from any other
+ * .c file or used as a standalone compilation unit.
+ *
  * These helpers prepare conversion inputs, execute the Rust FFI call, shape
  * the Markdown response, and construct base_url when available.
  */
@@ -438,7 +442,11 @@ ngx_http_markdown_execute_conversion(ngx_http_request_t *r,
 
     tp = ngx_timeofday();
     end_time = (ngx_msec_t) (tp->sec * 1000 + tp->msec);
-    *elapsed_ms = end_time - start_time;
+    if (end_time >= start_time) {
+        *elapsed_ms = end_time - start_time;
+    } else {
+        *elapsed_ms = 0;
+    }
 
     if (result->error_code != ERROR_SUCCESS) {
         return ngx_http_markdown_handle_conversion_failure(

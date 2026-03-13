@@ -126,7 +126,7 @@ curl -H "Accept: application/json" "$METRICS_URL"
 ```
 
 **Example Output (Plain Text):**
-``` 
+```text
 Markdown Filter Metrics
 -----------------------
 Conversions Attempted: 1250

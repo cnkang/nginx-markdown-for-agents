@@ -1,6 +1,10 @@
 /*
  * Module lifecycle helpers for filter registration and worker setup/teardown.
  *
+ * WARNING: This header is an implementation detail of the main translation unit
+ * (ngx_http_markdown_filter_module.c). It must NOT be included from any other
+ * .c file or used as a standalone compilation unit.
+ *
  * Kept in a dedicated implementation include so the main module file can focus
  * on request-path orchestration.
  */

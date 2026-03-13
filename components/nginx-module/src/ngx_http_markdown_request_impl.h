@@ -1,6 +1,10 @@
 /*
  * Request-path orchestration helpers.
  *
+ * WARNING: This header is an implementation detail of the main translation unit
+ * (ngx_http_markdown_filter_module.c). It must NOT be included from any other
+ * .c file or used as a standalone compilation unit.
+ *
  * Kept in a dedicated implementation include so the main module file can
  * stay focused on module wiring while header/body filter state transitions
  * evolve separately from payload buffering, decompression, and output shaping.

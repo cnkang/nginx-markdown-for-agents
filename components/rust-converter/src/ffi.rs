@@ -57,15 +57,10 @@
 //! - Concurrent calls to `markdown_convert()` on the same handle are unsafe
 //! - Multiple converter instances can be used concurrently
 
-#[path = "ffi/abi.rs"]
 mod abi;
-#[path = "ffi/convert.rs"]
 mod convert;
-#[path = "ffi/exports.rs"]
 mod exports;
-#[path = "ffi/memory.rs"]
 mod memory;
-#[path = "ffi/options.rs"]
 mod options;
 
 pub use abi::{

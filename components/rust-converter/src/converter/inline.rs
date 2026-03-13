@@ -1,6 +1,19 @@
 use super::*;
 
 impl MarkdownConverter {
+    /// Handle anchor (link) elements with optional timeout context.
+    pub(super) fn handle_link_with_context(
+        &self,
+        node: &Handle,
+        output: &mut String,
+        depth: usize,
+        _ctx: Option<&mut ConversionContext>,
+    ) -> Result<(), ConversionError> {
+        // Links use extract_text (not traverse_node) for child content,
+        // so timeout propagation through children is not needed here.
+        self.handle_link(node, output, depth)
+    }
+
     /// Handle anchor (link) elements.
     pub(super) fn handle_link(
         &self,
@@ -94,32 +107,30 @@ impl MarkdownConverter {
         Ok(())
     }
 
-    /// Handle bold/strong elements.
-    pub(super) fn handle_bold(
+    /// Handle bold/strong elements with optional timeout context.
+    pub(super) fn handle_bold_with_context(
         &self,
         node: &Handle,
         output: &mut String,
         depth: usize,
+        ctx: Option<&mut ConversionContext>,
     ) -> Result<(), ConversionError> {
         output.push_str("**");
-        for child in node.children.borrow().iter() {
-            self.traverse_node(child, output, depth + 1)?;
-        }
+        self.traverse_children(node, output, depth + 1, ctx)?;
         output.push_str("**");
         Ok(())
     }
 
-    /// Handle italic/emphasis elements.
-    pub(super) fn handle_italic(
+    /// Handle italic/emphasis elements with optional timeout context.
+    pub(super) fn handle_italic_with_context(
         &self,
         node: &Handle,
         output: &mut String,
         depth: usize,
+        ctx: Option<&mut ConversionContext>,
     ) -> Result<(), ConversionError> {
         output.push('*');
-        for child in node.children.borrow().iter() {
-            self.traverse_node(child, output, depth + 1)?;
-        }
+        self.traverse_children(node, output, depth + 1, ctx)?;
         output.push('*');
         Ok(())
     }

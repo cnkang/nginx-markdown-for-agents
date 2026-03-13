@@ -181,6 +181,21 @@ write_static_html() {
     return 0
 }
 
+extract_json_number_field() {
+    local json="$1"
+    local field="$2"
+    local compact match
+
+    compact=$(printf "%s" "$json" | tr -d '\n')
+    match=$(printf "%s" "$compact" | grep -oE "\"${field}\"[[:space:]]*:[[:space:]]*[0-9]+" | head -n1 || true)
+    if [[ -z "$match" ]]; then
+        return 1
+    fi
+
+    printf '%s\n' "$match" | sed -E 's/.*:[[:space:]]*//'
+    return 0
+}
+
 # Start NGINX with given configuration
 start_nginx() {
     local config="$1"
@@ -676,7 +691,6 @@ test_metrics_shared_aggregation() {
 
     local config
     local total_requests=40
-    local response
     local metrics
     local attempted
     local completed
@@ -715,8 +729,18 @@ EOF
         "curl -s -H 'Accept: ${MEDIA_TYPE_MARKDOWN}' 'http://localhost:${TEST_PORT}/test?req={}' > /dev/null"
 
     metrics=$(curl -s -H "Accept: application/json" "http://localhost:${TEST_PORT}/markdown-metrics")
-    attempted=$(printf "%s" "$metrics" | tr -d '\n' | sed -E 's/.*"conversions_attempted":[[:space:]]*([0-9]+).*/\1/')
-    completed=$(printf "%s" "$metrics" | tr -d '\n' | sed -E 's/.*"conversion_completed":[[:space:]]*([0-9]+).*/\1/')
+    if ! attempted=$(extract_json_number_field "$metrics" "conversions_attempted"); then
+        log_fail "Failed to parse conversions_attempted from metrics JSON"
+        log_info "Metrics: $metrics"
+        stop_nginx
+        return 1
+    fi
+    if ! completed=$(extract_json_number_field "$metrics" "conversion_completed"); then
+        log_fail "Failed to parse conversion_completed from metrics JSON"
+        log_info "Metrics: $metrics"
+        stop_nginx
+        return 1
+    fi
 
     if [[ "$attempted" == "$total_requests" ]]; then
         log_pass "Shared metrics aggregate all worker attempts (${attempted})"

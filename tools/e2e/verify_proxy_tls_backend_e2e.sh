@@ -13,6 +13,7 @@ BUILDROOT=""
 RUNTIME=""
 RUST_TARGET=""
 NGINX_EXECUTABLE=""
+LOAD_MODULE_LINE=""
 BACKEND_PID=""
 NGINX_BIN_OUTPUT_FILE=""
 BUILDROOT_OUTPUT_FILE=""
@@ -41,6 +42,16 @@ nginx_supports_ssl_upstream() {
   return $?
 }
 
+require_flag_value() {
+  local flag_name="$1"
+
+  if [[ $# -lt 2 || -z "${2:-}" ]]; then
+    echo "Missing value for ${flag_name}" >&2
+    usage >&2
+    exit 2
+  fi
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --keep-artifacts)
@@ -48,22 +59,27 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --nginx-version)
+      require_flag_value "$1" "${2:-}"
       NGINX_VERSION="$2"
       shift 2
       ;;
     --port)
+      require_flag_value "$1" "${2:-}"
       PORT="$2"
       shift 2
       ;;
     --backend-port)
+      require_flag_value "$1" "${2:-}"
       BACKEND_PORT="$2"
       shift 2
       ;;
     --nginx-bin-output)
+      require_flag_value "$1" "${2:-}"
       NGINX_BIN_OUTPUT_FILE="$2"
       shift 2
       ;;
     --buildroot-output)
+      require_flag_value "$1" "${2:-}"
       BUILDROOT_OUTPUT_FILE="$2"
       shift 2
       ;;
@@ -79,6 +95,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# shellcheck disable=SC1090
 source "${NATIVE_BUILD_HELPER}"
 
 if (( ${#ORIG_ARGS[@]} )); then
@@ -157,7 +174,7 @@ mkdir -p "${RUNTIME}/conf" "${RUNTIME}/logs" "${RAW_DIR}" "${TLS_DIR}"
 echo "==> Host architecture: $(uname -m)"
 if [[ -n "${NGINX_BIN}" ]]; then
   echo "==> Reusing existing NGINX binary (${NGINX_BIN})"
-  markdown_copy_runtime_conf_from_nginx_bin "${NGINX_BIN}" "${RUNTIME}"
+  LOAD_MODULE_LINE="$(markdown_prepare_runtime_reuse "${NGINX_BIN}" "${RUNTIME}")"
   NGINX_EXECUTABLE="${NGINX_BIN}"
 else
   echo "==> Building Rust converter (${RUST_TARGET})"
@@ -216,7 +233,7 @@ done
 curl -sk "https://127.0.0.1:${BACKEND_PORT}/health" >/dev/null
 
 cat > "${RUNTIME}/conf/nginx.conf" <<EOF
-worker_processes 1;
+${LOAD_MODULE_LINE}worker_processes 1;
 error_log logs/error.log info;
 pid logs/nginx.pid;
 

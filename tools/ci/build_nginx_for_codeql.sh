@@ -7,6 +7,7 @@ WORKSPACE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 NATIVE_BUILD_HELPER="${WORKSPACE_ROOT}/tools/lib/nginx_markdown_native_build.sh"
 BUILDROOT=""
 RUST_TARGET=""
+# shellcheck disable=SC1090
 source "${NATIVE_BUILD_HELPER}"
 
 resolve_nginx_version() {

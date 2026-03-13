@@ -8,36 +8,48 @@ use nginx_markdown_converter::ffi::{
     markdown_converter_free, markdown_converter_new, markdown_result_free,
 };
 
+/// Derive a deterministic option bit from the input data.
+///
+/// Uses a hash-like combination of all input bytes so that even very short
+/// inputs produce varied option combinations instead of falling back to
+/// defaults.  This significantly improves option-space coverage compared
+/// to indexing individual bytes.
+fn option_bits(data: &[u8]) -> u8 {
+    data.iter().fold(0u8, |acc, &b| acc.wrapping_add(b) ^ b.rotate_left(3))
+}
+
 fuzz_target!(|data: &[u8]| {
     let handle: *mut MarkdownConverterHandle = markdown_converter_new();
     if handle.is_null() {
         return;
     }
 
+    let bits = option_bits(data);
+
     let content_type = b"text/html; charset=UTF-8";
     let base_url = b"https://example.com/fuzz";
     let options = MarkdownOptions {
-        flavor: u32::from(data.first().copied().unwrap_or_default() & 1),
-        timeout_ms: u32::from(data.get(1).copied().unwrap_or(1)) + 1,
-        generate_etag: data.get(2).copied().unwrap_or_default() & 1,
-        estimate_tokens: data.get(3).copied().unwrap_or_default() & 1,
-        front_matter: data.get(4).copied().unwrap_or_default() & 1,
-        content_type: if data.get(5).copied().unwrap_or_default() & 1 == 0 {
+        flavor: u32::from(bits & 1),
+        timeout_ms: u32::from(bits.wrapping_shr(1) & 0x0F) + 1,
+        generate_etag: (bits >> 5) & 1,
+        estimate_tokens: (bits >> 6) & 1,
+        front_matter: (bits >> 7) & 1,
+        content_type: if bits & 0x04 == 0 {
             content_type.as_ptr()
         } else {
             ptr::null()
         },
-        content_type_len: if data.get(5).copied().unwrap_or_default() & 1 == 0 {
+        content_type_len: if bits & 0x04 == 0 {
             content_type.len()
         } else {
             0
         },
-        base_url: if data.get(6).copied().unwrap_or_default() & 1 == 0 {
+        base_url: if bits & 0x08 == 0 {
             base_url.as_ptr()
         } else {
             ptr::null()
         },
-        base_url_len: if data.get(6).copied().unwrap_or_default() & 1 == 0 {
+        base_url_len: if bits & 0x08 == 0 {
             base_url.len()
         } else {
             0

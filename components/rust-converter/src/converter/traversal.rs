@@ -28,20 +28,25 @@ impl MarkdownConverter {
         depth: usize,
         ctx: Option<&mut ConversionContext>,
     ) -> Result<(), ConversionError> {
-        match ctx {
-            Some(ctx) => {
-                for child in node.children.borrow().iter() {
-                    self.traverse_node_with_context(child, output, depth, ctx)?;
-                }
-            }
-            None => {
-                for child in node.children.borrow().iter() {
-                    self.traverse_node(child, output, depth)?;
-                }
-            }
+        let mut ctx = ctx;
+        for child in node.children.borrow().iter() {
+            self.traverse_node_optional(child, output, depth, ctx.as_deref_mut())?;
         }
 
         Ok(())
+    }
+
+    pub(super) fn traverse_node_optional(
+        &self,
+        node: &Handle,
+        output: &mut String,
+        depth: usize,
+        ctx: Option<&mut ConversionContext>,
+    ) -> Result<(), ConversionError> {
+        match ctx {
+            Some(ctx) => self.traverse_node_with_context(node, output, depth, ctx),
+            None => self.traverse_node(node, output, depth),
+        }
     }
 
     pub(super) fn handle_element_internal(
@@ -63,24 +68,32 @@ impl MarkdownConverter {
             .validate_depth(depth)
             .map_err(ConversionError::InvalidInput)?;
 
+        let mut ctx = ctx;
         match tag_name {
-            "h1" => self.handle_heading(node, 1, output, depth)?,
-            "h2" => self.handle_heading(node, 2, output, depth)?,
-            "h3" => self.handle_heading(node, 3, output, depth)?,
-            "h4" => self.handle_heading(node, 4, output, depth)?,
-            "h5" => self.handle_heading(node, 5, output, depth)?,
-            "h6" => self.handle_heading(node, 6, output, depth)?,
-            "p" => self.handle_paragraph(node, output, depth)?,
-            "a" => self.handle_link(node, output, depth)?,
+            "h1" => self.handle_heading_with_context(node, 1, output, depth, ctx.as_deref_mut())?,
+            "h2" => self.handle_heading_with_context(node, 2, output, depth, ctx.as_deref_mut())?,
+            "h3" => self.handle_heading_with_context(node, 3, output, depth, ctx.as_deref_mut())?,
+            "h4" => self.handle_heading_with_context(node, 4, output, depth, ctx.as_deref_mut())?,
+            "h5" => self.handle_heading_with_context(node, 5, output, depth, ctx.as_deref_mut())?,
+            "h6" => self.handle_heading_with_context(node, 6, output, depth, ctx.as_deref_mut())?,
+            "p" => self.handle_paragraph_with_context(node, output, depth, ctx.as_deref_mut())?,
+            "a" => self.handle_link_with_context(node, output, depth, ctx.as_deref_mut())?,
             "img" => self.handle_image(node, output, depth)?,
-            "ul" => self.handle_list(node, output, 0, false)?,
-            "ol" => self.handle_list(node, output, 0, true)?,
-            "li" => self.handle_list_item(node, output, 0)?,
-            "pre" => self.handle_code_block(node, output, depth)?,
+            // List indentation must track list nesting, not arbitrary DOM depth.
+            "ul" => self.handle_list_with_context(node, output, 0, false, ctx.as_deref_mut())?,
+            "ol" => self.handle_list_with_context(node, output, 0, true, ctx.as_deref_mut())?,
+            "li" => self.handle_list_item_with_context(node, output, 0, ctx.as_deref_mut())?,
+            "pre" => {
+                self.handle_code_block_with_context(node, output, depth, ctx.as_deref_mut())?
+            }
             "code" => self.handle_inline_code(node, output, depth)?,
-            "strong" | "b" => self.handle_bold(node, output, depth)?,
-            "em" | "i" => self.handle_italic(node, output, depth)?,
-            "table" => self.handle_table(node, output, depth)?,
+            "strong" | "b" => {
+                self.handle_bold_with_context(node, output, depth, ctx.as_deref_mut())?
+            }
+            "em" | "i" => {
+                self.handle_italic_with_context(node, output, depth, ctx.as_deref_mut())?
+            }
+            "table" => self.handle_table_with_context(node, output, depth, ctx.as_deref_mut())?,
             "script" | "style" | "noscript" => {}
             _ => self.traverse_children(node, output, depth + 1, ctx)?,
         }

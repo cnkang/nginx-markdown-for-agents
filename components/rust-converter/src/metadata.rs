@@ -8,12 +8,9 @@
 //! - URL, image, author, and published date extraction
 //! - URL resolution for relative links and images
 
-#[path = "metadata/extract.rs"]
 mod extract;
-#[path = "metadata/resolve.rs"]
 mod resolve;
 #[cfg(test)]
-#[path = "metadata/tests.rs"]
 mod tests;
 
 /// Page metadata extracted from HTML.
