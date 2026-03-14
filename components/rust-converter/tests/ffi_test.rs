@@ -161,7 +161,10 @@ fn test_reuse_result_releases_previous_buffers() {
     );
 
     assert_eq!(result.error_code, 0, "First conversion should succeed");
-    assert!(!result.markdown.is_null(), "First conversion should allocate markdown");
+    assert!(
+        !result.markdown.is_null(),
+        "First conversion should allocate markdown"
+    );
 
     let first_markdown_ptr = result.markdown;
     let first_markdown_len = result.markdown_len;
@@ -175,8 +178,14 @@ fn test_reuse_result_releases_previous_buffers() {
     );
 
     assert_eq!(result.error_code, 0, "Second conversion should succeed");
-    assert!(!result.markdown.is_null(), "Second conversion should allocate markdown");
-    assert!(result.markdown_len > 0, "Second conversion should return markdown");
+    assert!(
+        !result.markdown.is_null(),
+        "Second conversion should allocate markdown"
+    );
+    assert!(
+        result.markdown_len > 0,
+        "Second conversion should return markdown"
+    );
     assert!(
         result.markdown != first_markdown_ptr || result.markdown_len != first_markdown_len,
         "Reused result should be refreshed with the latest output"
@@ -188,7 +197,10 @@ fn test_reuse_result_releases_previous_buffers() {
             .expect("markdown must be valid utf-8")
             .to_string()
     };
-    assert!(markdown.contains("## Second"), "Second conversion output should be present");
+    assert!(
+        markdown.contains("## Second"),
+        "Second conversion output should be present"
+    );
 
     ffi_markdown_result_free(&mut result);
     ffi_markdown_converter_free(converter);
