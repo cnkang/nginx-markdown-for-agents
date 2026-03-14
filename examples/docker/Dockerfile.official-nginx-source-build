@@ -59,22 +59,20 @@ RUN --mount=type=cache,target=/opt/rust/rustup,sharing=locked \
     if ! command -v rustup >/dev/null 2>&1; then \
       curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable; \
     fi; \
-    rust_target="$$( \
-      arch="$$(uname -m)"; \
-      if command -v apk >/dev/null 2>&1; then \
-        libc=musl; \
-      else \
-        libc=gnu; \
-      fi; \
-      case "$${arch}:$${libc}" in \
-        x86_64:musl) printf '%s' x86_64-unknown-linux-musl ;; \
-        aarch64:musl) printf '%s' aarch64-unknown-linux-musl ;; \
-        x86_64:gnu) printf '%s' x86_64-unknown-linux-gnu ;; \
-        aarch64:gnu) printf '%s' aarch64-unknown-linux-gnu ;; \
-        *) echo "Unsupported Rust target for $${arch}:$${libc}" >&2; exit 1 ;; \
-      esac \
-    )"; \
-    rustup target add "$${rust_target}"; \
+    arch="$(uname -m)"; \
+    if command -v apk >/dev/null 2>&1; then \
+      libc=musl; \
+    else \
+      libc=gnu; \
+    fi; \
+    case "${arch}:${libc}" in \
+      x86_64:musl) rust_target=x86_64-unknown-linux-musl ;; \
+      aarch64:musl) rust_target=aarch64-unknown-linux-musl ;; \
+      x86_64:gnu) rust_target=x86_64-unknown-linux-gnu ;; \
+      aarch64:gnu) rust_target=aarch64-unknown-linux-gnu ;; \
+      *) echo "Unsupported Rust target for ${arch}:${libc}" >&2; exit 1 ;; \
+    esac; \
+    rustup target add "${rust_target}"; \
     if ! command -v cbindgen >/dev/null 2>&1; then \
       cargo install --locked cbindgen; \
     fi
