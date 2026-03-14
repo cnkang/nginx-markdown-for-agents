@@ -3,10 +3,58 @@
 
 ngx_addon_name=ngx_http_markdown_filter_module
 
-# Resolve Rust converter static library path.
-# Prefer legacy target/release path, but also support target-specific paths
-# used by the repository Makefile (e.g. target/aarch64-apple-darwin/release).
-ngx_markdown_rust_lib="$ngx_addon_dir/../rust-converter/target/release/libnginx_markdown_converter.a"
+# Resolve Rust converter static library path. Prefer an explicit or inferred
+# target triple so we do not accidentally link a cached artifact for the wrong
+# libc/architecture (for example musl builds picking a GNU archive).
+ngx_markdown_rust_lib=
+
+if [ -n "$RUST_TARGET" ]; then
+    ngx_markdown_rust_lib="$ngx_addon_dir/../rust-converter/target/$RUST_TARGET/release/libnginx_markdown_converter.a"
+fi
+
+if [ -z "$ngx_markdown_rust_lib" ] || [ ! -f "$ngx_markdown_rust_lib" ]; then
+    ngx_markdown_uname_s=$(uname -s 2>/dev/null || echo unknown)
+    ngx_markdown_uname_m=$(uname -m 2>/dev/null || echo unknown)
+    ngx_markdown_libc=gnu
+
+    if [ "$ngx_markdown_uname_s" = "Linux" ]; then
+        if command -v ldd >/dev/null 2>&1; then
+            if ldd --version 2>&1 | grep -qi musl || ldd /bin/sh 2>&1 | grep -qi musl; then
+                ngx_markdown_libc=musl
+            fi
+        fi
+
+        case "$ngx_markdown_uname_m:$ngx_markdown_libc" in
+            aarch64:musl)
+                ngx_markdown_target=aarch64-unknown-linux-musl
+                ;;
+            aarch64:gnu)
+                ngx_markdown_target=aarch64-unknown-linux-gnu
+                ;;
+            x86_64:musl)
+                ngx_markdown_target=x86_64-unknown-linux-musl
+                ;;
+            x86_64:gnu)
+                ngx_markdown_target=x86_64-unknown-linux-gnu
+                ;;
+        esac
+    elif [ "$ngx_markdown_uname_s" = "Darwin" ]; then
+        case "$ngx_markdown_uname_m" in
+            arm64)
+                ngx_markdown_target=aarch64-apple-darwin
+                ;;
+            x86_64)
+                ngx_markdown_target=x86_64-apple-darwin
+                ;;
+        esac
+    fi
+
+    if [ -n "$ngx_markdown_target" ]; then
+        ngx_markdown_rust_lib="$ngx_addon_dir/../rust-converter/target/$ngx_markdown_target/release/libnginx_markdown_converter.a"
+    else
+        ngx_markdown_rust_lib="$ngx_addon_dir/../rust-converter/target/release/libnginx_markdown_converter.a"
+    fi
+fi
 
 if [ ! -f "$ngx_markdown_rust_lib" ]; then
     for candidate in "$ngx_addon_dir"/../rust-converter/target/*/release/libnginx_markdown_converter.a; do
