@@ -87,37 +87,12 @@ ngx_http_markdown_collect_metrics_snapshot(ngx_http_markdown_metrics_snapshot_t 
 }
 
 /*
- * HTTP handler for the /markdown_metrics endpoint.
- *
- * - Only responds to GET and HEAD requests; other methods are rejected with
- *   NGX_HTTP_NOT_ALLOWED.
- * - Access is restricted to localhost: IPv4 and (when enabled) IPv6 source
- *   addresses are checked and non-local clients receive NGX_HTTP_FORBIDDEN.
- * - Collects a best-effort snapshot of the shared markdown metrics counters
- *   via ngx_http_markdown_collect_metrics_snapshot() and derives aggregate
- *   values (such as averages) from that snapshot.
- * - Serializes the resulting metrics into an in-memory buffer in either a
- *   plain-text or JSON format, depending on the request, and sends the data
- *   as the response body.
- *
- * The function is intentionally self-contained so that metrics formatting and
- * access-control policy can evolve without impacting the main filter logic.
+ * Enforce the endpoint's narrow access policy before doing any formatting or
+ * shared-state reads. Only local GET/HEAD requests are allowed.
  */
 static ngx_int_t
-ngx_http_markdown_metrics_handler(ngx_http_request_t *r)
+ngx_http_markdown_metrics_validate_request(ngx_http_request_t *r)
 {
-    ngx_int_t                             rc;
-    ngx_buf_t                            *b;
-    ngx_chain_t                           out;
-    u_char                               *p;
-    size_t                                len;
-    ngx_flag_t                            json_format;
-    ngx_http_markdown_metrics_snapshot_t  snapshot;
-    ngx_atomic_uint_t                     conversions_completed;
-    ngx_atomic_uint_t                     conversion_time_avg_ms;
-    ngx_atomic_uint_t                     input_bytes_avg;
-    ngx_atomic_uint_t                     output_bytes_avg;
-
     if (!(r->method & (NGX_HTTP_GET|NGX_HTTP_HEAD))) {
         return NGX_HTTP_NOT_ALLOWED;
     }
@@ -152,24 +127,234 @@ ngx_http_markdown_metrics_handler(ngx_http_request_t *r)
         return NGX_HTTP_INTERNAL_SERVER_ERROR;
     }
 
-    json_format = 0;
-    {
-        ngx_table_elt_t *accept_header = NULL;
+    return NGX_OK;
+}
+
+/*
+ * Content negotiation is intentionally simple: if the client advertises
+ * application/json anywhere in Accept, emit the JSON form; otherwise use the
+ * plain-text operator-friendly view.
+ */
+static ngx_flag_t
+ngx_http_markdown_metrics_prefers_json(ngx_http_request_t *r)
+{
+    ngx_table_elt_t *accept_header;
+
+    accept_header = NULL;
 
 #if (NGX_HTTP_HEADERS)
-        accept_header = r->headers_in.accept;
+    accept_header = r->headers_in.accept;
 #else
-        static ngx_str_t accept_name = ngx_string("Accept");
+    static ngx_str_t accept_name = ngx_string("Accept");
 
-        accept_header = ngx_http_markdown_find_request_header(r, &accept_name);
+    accept_header = ngx_http_markdown_find_request_header(r, &accept_name);
 #endif
 
-        if (accept_header != NULL
-            && ngx_strstr(accept_header->value.data, "application/json") != NULL)
-        {
-            json_format = 1;
-        }
+    if (accept_header != NULL
+        && ngx_strstr(accept_header->value.data, "application/json") != NULL)
+    {
+        return 1;
     }
+
+    return 0;
+}
+
+/*
+ * Derive averages from the raw counters after taking the best-effort snapshot.
+ * Division only occurs when the relevant denominator is non-zero.
+ */
+static void
+ngx_http_markdown_metrics_derive_values(
+    ngx_http_markdown_metrics_snapshot_t *snapshot,
+    ngx_atomic_uint_t *conversions_completed,
+    ngx_atomic_uint_t *conversion_time_avg_ms,
+    ngx_atomic_uint_t *input_bytes_avg,
+    ngx_atomic_uint_t *output_bytes_avg)
+{
+    *conversions_completed = snapshot->conversions_succeeded + snapshot->conversions_failed;
+    *conversion_time_avg_ms = (*conversions_completed > 0)
+        ? (snapshot->conversion_time_sum_ms / *conversions_completed)
+        : 0;
+    *input_bytes_avg = (snapshot->conversions_succeeded > 0)
+        ? (snapshot->input_bytes / snapshot->conversions_succeeded)
+        : 0;
+    *output_bytes_avg = (snapshot->conversions_succeeded > 0)
+        ? (snapshot->output_bytes / snapshot->conversions_succeeded)
+        : 0;
+}
+
+static u_char *
+ngx_http_markdown_metrics_write_json(
+    u_char *p,
+    u_char *end,
+    ngx_http_markdown_metrics_snapshot_t *snapshot,
+    ngx_atomic_uint_t conversions_completed,
+    ngx_atomic_uint_t conversion_time_avg_ms,
+    ngx_atomic_uint_t input_bytes_avg,
+    ngx_atomic_uint_t output_bytes_avg)
+{
+    return ngx_slprintf(p, end,
+        "{\n"
+        "  \"conversions_attempted\": %uA,\n"
+        "  \"conversions_succeeded\": %uA,\n"
+        "  \"conversions_failed\": %uA,\n"
+        "  \"conversions_bypassed\": %uA,\n"
+        "  \"failures_conversion\": %uA,\n"
+        "  \"failures_resource_limit\": %uA,\n"
+        "  \"failures_system\": %uA,\n"
+        "  \"conversion_time_sum_ms\": %uA,\n"
+        "  \"conversion_completed\": %uA,\n"
+        "  \"conversion_time_avg_ms\": %uA,\n"
+        "  \"input_bytes\": %uA,\n"
+        "  \"input_bytes_avg\": %uA,\n"
+        "  \"output_bytes\": %uA,\n"
+        "  \"output_bytes_avg\": %uA,\n"
+        "  \"conversion_latency_buckets\": {\n"
+        "    \"le_10ms\": %uA,\n"
+        "    \"le_100ms\": %uA,\n"
+        "    \"le_1000ms\": %uA,\n"
+        "    \"gt_1000ms\": %uA\n"
+        "  },\n"
+        "  \"decompressions_attempted\": %uA,\n"
+        "  \"decompressions_succeeded\": %uA,\n"
+        "  \"decompressions_failed\": %uA,\n"
+        "  \"decompressions_gzip\": %uA,\n"
+        "  \"decompressions_deflate\": %uA,\n"
+        "  \"decompressions_brotli\": %uA\n"
+        "}",
+        snapshot->conversions_attempted,
+        snapshot->conversions_succeeded,
+        snapshot->conversions_failed,
+        snapshot->conversions_bypassed,
+        snapshot->failures_conversion,
+        snapshot->failures_resource_limit,
+        snapshot->failures_system,
+        snapshot->conversion_time_sum_ms,
+        conversions_completed,
+        conversion_time_avg_ms,
+        snapshot->input_bytes,
+        input_bytes_avg,
+        snapshot->output_bytes,
+        output_bytes_avg,
+        snapshot->conversion_latency_le_10ms,
+        snapshot->conversion_latency_le_100ms,
+        snapshot->conversion_latency_le_1000ms,
+        snapshot->conversion_latency_gt_1000ms,
+        snapshot->decompressions_attempted,
+        snapshot->decompressions_succeeded,
+        snapshot->decompressions_failed,
+        snapshot->decompressions_gzip,
+        snapshot->decompressions_deflate,
+        snapshot->decompressions_brotli);
+}
+
+static u_char *
+ngx_http_markdown_metrics_write_text(
+    u_char *p,
+    u_char *end,
+    ngx_http_markdown_metrics_snapshot_t *snapshot,
+    ngx_atomic_uint_t conversions_completed,
+    ngx_atomic_uint_t conversion_time_avg_ms,
+    ngx_atomic_uint_t input_bytes_avg,
+    ngx_atomic_uint_t output_bytes_avg)
+{
+    return ngx_slprintf(p, end,
+        "Markdown Filter Metrics\n"
+        "=======================\n"
+        "Conversions Attempted: %uA\n"
+        "Conversions Succeeded: %uA\n"
+        "Conversions Failed: %uA\n"
+        "Conversions Bypassed: %uA\n"
+        "Conversions Completed: %uA\n"
+        "\n"
+        "Failure Breakdown:\n"
+        "- Conversion Errors: %uA\n"
+        "- Resource Limit Exceeded: %uA\n"
+        "- System Errors: %uA\n"
+        "\n"
+        "Performance:\n"
+        "- Total Conversion Time: %uA ms\n"
+        "- Average Conversion Time: %uA ms\n"
+        "- Total Input Bytes: %uA\n"
+        "- Average Input Bytes: %uA\n"
+        "- Total Output Bytes: %uA\n"
+        "- Average Output Bytes: %uA\n"
+        "- Latency <= 10ms: %uA\n"
+        "- Latency <= 100ms: %uA\n"
+        "- Latency <= 1000ms: %uA\n"
+        "- Latency > 1000ms: %uA\n"
+        "\n"
+        "Decompression Statistics:\n"
+        "- Decompressions Attempted: %uA\n"
+        "- Decompressions Succeeded: %uA\n"
+        "- Decompressions Failed: %uA\n"
+        "- Gzip Decompressions: %uA\n"
+        "- Deflate Decompressions: %uA\n"
+        "- Brotli Decompressions: %uA\n",
+        snapshot->conversions_attempted,
+        snapshot->conversions_succeeded,
+        snapshot->conversions_failed,
+        snapshot->conversions_bypassed,
+        conversions_completed,
+        snapshot->failures_conversion,
+        snapshot->failures_resource_limit,
+        snapshot->failures_system,
+        snapshot->conversion_time_sum_ms,
+        conversion_time_avg_ms,
+        snapshot->input_bytes,
+        input_bytes_avg,
+        snapshot->output_bytes,
+        output_bytes_avg,
+        snapshot->conversion_latency_le_10ms,
+        snapshot->conversion_latency_le_100ms,
+        snapshot->conversion_latency_le_1000ms,
+        snapshot->conversion_latency_gt_1000ms,
+        snapshot->decompressions_attempted,
+        snapshot->decompressions_succeeded,
+        snapshot->decompressions_failed,
+        snapshot->decompressions_gzip,
+        snapshot->decompressions_deflate,
+        snapshot->decompressions_brotli);
+}
+
+/*
+ * HTTP handler for the /markdown_metrics endpoint.
+ *
+ * - Only responds to GET and HEAD requests; other methods are rejected with
+ *   NGX_HTTP_NOT_ALLOWED.
+ * - Access is restricted to localhost: IPv4 and (when enabled) IPv6 source
+ *   addresses are checked and non-local clients receive NGX_HTTP_FORBIDDEN.
+ * - Collects a best-effort snapshot of the shared markdown metrics counters
+ *   via ngx_http_markdown_collect_metrics_snapshot() and derives aggregate
+ *   values (such as averages) from that snapshot.
+ * - Serializes the resulting metrics into an in-memory buffer in either a
+ *   plain-text or JSON format, depending on the request, and sends the data
+ *   as the response body.
+ *
+ * The function is intentionally self-contained so that metrics formatting and
+ * access-control policy can evolve without impacting the main filter logic.
+ */
+static ngx_int_t
+ngx_http_markdown_metrics_handler(ngx_http_request_t *r)
+{
+    ngx_int_t                             rc;
+    ngx_buf_t                            *b;
+    ngx_chain_t                           out;
+    u_char                               *p;
+    size_t                                len;
+    ngx_flag_t                            json_format;
+    ngx_http_markdown_metrics_snapshot_t  snapshot;
+    ngx_atomic_uint_t                     conversions_completed;
+    ngx_atomic_uint_t                     conversion_time_avg_ms;
+    ngx_atomic_uint_t                     input_bytes_avg;
+    ngx_atomic_uint_t                     output_bytes_avg;
+
+    rc = ngx_http_markdown_metrics_validate_request(r);
+    if (rc != NGX_OK) {
+        return rc;
+    }
+
+    json_format = ngx_http_markdown_metrics_prefers_json(r);
 
     rc = ngx_http_discard_request_body(r);
     if (rc != NGX_OK) {
@@ -177,16 +362,11 @@ ngx_http_markdown_metrics_handler(ngx_http_request_t *r)
     }
 
     ngx_http_markdown_collect_metrics_snapshot(&snapshot);
-    conversions_completed = snapshot.conversions_succeeded + snapshot.conversions_failed;
-    conversion_time_avg_ms = (conversions_completed > 0)
-        ? (snapshot.conversion_time_sum_ms / conversions_completed)
-        : 0;
-    input_bytes_avg = (snapshot.conversions_succeeded > 0)
-        ? (snapshot.input_bytes / snapshot.conversions_succeeded)
-        : 0;
-    output_bytes_avg = (snapshot.conversions_succeeded > 0)
-        ? (snapshot.output_bytes / snapshot.conversions_succeeded)
-        : 0;
+    ngx_http_markdown_metrics_derive_values(&snapshot,
+                                            &conversions_completed,
+                                            &conversion_time_avg_ms,
+                                            &input_bytes_avg,
+                                            &output_bytes_avg);
 
     b = ngx_create_temp_buf(r->pool, NGX_HTTP_MARKDOWN_METRICS_BUF_SIZE);
     if (b == NULL) {
@@ -197,117 +377,19 @@ ngx_http_markdown_metrics_handler(ngx_http_request_t *r)
 
     p = b->pos;
     if (json_format) {
-        p = ngx_slprintf(p, b->end,
-            "{\n"
-            "  \"conversions_attempted\": %uA,\n"
-            "  \"conversions_succeeded\": %uA,\n"
-            "  \"conversions_failed\": %uA,\n"
-            "  \"conversions_bypassed\": %uA,\n"
-            "  \"failures_conversion\": %uA,\n"
-            "  \"failures_resource_limit\": %uA,\n"
-            "  \"failures_system\": %uA,\n"
-            "  \"conversion_time_sum_ms\": %uA,\n"
-            "  \"conversion_completed\": %uA,\n"
-            "  \"conversion_time_avg_ms\": %uA,\n"
-            "  \"input_bytes\": %uA,\n"
-            "  \"input_bytes_avg\": %uA,\n"
-            "  \"output_bytes\": %uA,\n"
-            "  \"output_bytes_avg\": %uA,\n"
-            "  \"conversion_latency_buckets\": {\n"
-            "    \"le_10ms\": %uA,\n"
-            "    \"le_100ms\": %uA,\n"
-            "    \"le_1000ms\": %uA,\n"
-            "    \"gt_1000ms\": %uA\n"
-            "  },\n"
-            "  \"decompressions_attempted\": %uA,\n"
-            "  \"decompressions_succeeded\": %uA,\n"
-            "  \"decompressions_failed\": %uA,\n"
-            "  \"decompressions_gzip\": %uA,\n"
-            "  \"decompressions_deflate\": %uA,\n"
-            "  \"decompressions_brotli\": %uA\n"
-            "}",
-            snapshot.conversions_attempted,
-            snapshot.conversions_succeeded,
-            snapshot.conversions_failed,
-            snapshot.conversions_bypassed,
-            snapshot.failures_conversion,
-            snapshot.failures_resource_limit,
-            snapshot.failures_system,
-            snapshot.conversion_time_sum_ms,
-            conversions_completed,
-            conversion_time_avg_ms,
-            snapshot.input_bytes,
-            input_bytes_avg,
-            snapshot.output_bytes,
-            output_bytes_avg,
-            snapshot.conversion_latency_le_10ms,
-            snapshot.conversion_latency_le_100ms,
-            snapshot.conversion_latency_le_1000ms,
-            snapshot.conversion_latency_gt_1000ms,
-            snapshot.decompressions_attempted,
-            snapshot.decompressions_succeeded,
-            snapshot.decompressions_failed,
-            snapshot.decompressions_gzip,
-            snapshot.decompressions_deflate,
-            snapshot.decompressions_brotli);
+        p = ngx_http_markdown_metrics_write_json(p, b->end,
+                                                 &snapshot,
+                                                 conversions_completed,
+                                                 conversion_time_avg_ms,
+                                                 input_bytes_avg,
+                                                 output_bytes_avg);
     } else {
-        p = ngx_slprintf(p, b->end,
-            "Markdown Filter Metrics\n"
-            "=======================\n"
-            "Conversions Attempted: %uA\n"
-            "Conversions Succeeded: %uA\n"
-            "Conversions Failed: %uA\n"
-            "Conversions Bypassed: %uA\n"
-            "Conversions Completed: %uA\n"
-            "\n"
-            "Failure Breakdown:\n"
-            "- Conversion Errors: %uA\n"
-            "- Resource Limit Exceeded: %uA\n"
-            "- System Errors: %uA\n"
-            "\n"
-            "Performance:\n"
-            "- Total Conversion Time: %uA ms\n"
-            "- Average Conversion Time: %uA ms\n"
-            "- Total Input Bytes: %uA\n"
-            "- Average Input Bytes: %uA\n"
-            "- Total Output Bytes: %uA\n"
-            "- Average Output Bytes: %uA\n"
-            "- Latency <= 10ms: %uA\n"
-            "- Latency <= 100ms: %uA\n"
-            "- Latency <= 1000ms: %uA\n"
-            "- Latency > 1000ms: %uA\n"
-            "\n"
-            "Decompression Statistics:\n"
-            "- Decompressions Attempted: %uA\n"
-            "- Decompressions Succeeded: %uA\n"
-            "- Decompressions Failed: %uA\n"
-            "- Gzip Decompressions: %uA\n"
-            "- Deflate Decompressions: %uA\n"
-            "- Brotli Decompressions: %uA\n",
-            snapshot.conversions_attempted,
-            snapshot.conversions_succeeded,
-            snapshot.conversions_failed,
-            snapshot.conversions_bypassed,
-            conversions_completed,
-            snapshot.failures_conversion,
-            snapshot.failures_resource_limit,
-            snapshot.failures_system,
-            snapshot.conversion_time_sum_ms,
-            conversion_time_avg_ms,
-            snapshot.input_bytes,
-            input_bytes_avg,
-            snapshot.output_bytes,
-            output_bytes_avg,
-            snapshot.conversion_latency_le_10ms,
-            snapshot.conversion_latency_le_100ms,
-            snapshot.conversion_latency_le_1000ms,
-            snapshot.conversion_latency_gt_1000ms,
-            snapshot.decompressions_attempted,
-            snapshot.decompressions_succeeded,
-            snapshot.decompressions_failed,
-            snapshot.decompressions_gzip,
-            snapshot.decompressions_deflate,
-            snapshot.decompressions_brotli);
+        p = ngx_http_markdown_metrics_write_text(p, b->end,
+                                                 &snapshot,
+                                                 conversions_completed,
+                                                 conversion_time_avg_ms,
+                                                 input_bytes_avg,
+                                                 output_bytes_avg);
     }
 
     len = p - b->pos;
