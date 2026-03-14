@@ -141,6 +141,59 @@ fn test_basic_conversion() {
     ffi_markdown_converter_free(converter);
 }
 
+#[test]
+fn test_reuse_result_releases_previous_buffers() {
+    let converter = markdown_converter_new();
+    assert!(!converter.is_null(), "Converter should not be NULL");
+
+    let options = ffi_test_default_options();
+    let first_html = b"<h1>First</h1><p>Pass</p>";
+    let second_html = b"<h2>Second</h2><p>Pass</p>";
+
+    let mut result = ffi_test_empty_result();
+
+    ffi_markdown_convert(
+        converter,
+        first_html.as_ptr(),
+        first_html.len(),
+        &options,
+        &mut result,
+    );
+
+    assert_eq!(result.error_code, 0, "First conversion should succeed");
+    assert!(!result.markdown.is_null(), "First conversion should allocate markdown");
+
+    let first_markdown_ptr = result.markdown;
+    let first_markdown_len = result.markdown_len;
+
+    ffi_markdown_convert(
+        converter,
+        second_html.as_ptr(),
+        second_html.len(),
+        &options,
+        &mut result,
+    );
+
+    assert_eq!(result.error_code, 0, "Second conversion should succeed");
+    assert!(!result.markdown.is_null(), "Second conversion should allocate markdown");
+    assert!(result.markdown_len > 0, "Second conversion should return markdown");
+    assert!(
+        result.markdown != first_markdown_ptr || result.markdown_len != first_markdown_len,
+        "Reused result should be refreshed with the latest output"
+    );
+
+    let markdown = unsafe {
+        let bytes = slice::from_raw_parts(result.markdown, result.markdown_len);
+        std::str::from_utf8(bytes)
+            .expect("markdown must be valid utf-8")
+            .to_string()
+    };
+    assert!(markdown.contains("## Second"), "Second conversion output should be present");
+
+    ffi_markdown_result_free(&mut result);
+    ffi_markdown_converter_free(converter);
+}
+
 proptest! {
     /// Property 25: Token Estimate Header (FFI token_estimate field source)
     /// Validates: FR-15.1, FR-15.2

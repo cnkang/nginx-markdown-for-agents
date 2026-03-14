@@ -13,7 +13,14 @@ use super::options::{required_bytes, required_ref};
 /// # Safety
 ///
 /// Returns a raw pointer that must eventually be freed with
-/// `markdown_converter_free()`. Returns NULL if allocation panics.
+/// `markdown_converter_free()`.
+///
+/// # Returns
+///
+/// Returns a non-NULL handle on success. Returns NULL only when
+/// `MarkdownConverterHandle::new()` panics and that panic is caught by
+/// `catch_unwind()`. On stable Rust, allocator out-of-memory aborts the process
+/// instead of unwinding, so OOM is not caught here and does not produce NULL.
 #[unsafe(no_mangle)]
 pub extern "C" fn markdown_converter_new() -> *mut MarkdownConverterHandle {
     let result = panic::catch_unwind(|| Box::into_raw(Box::new(MarkdownConverterHandle::new())));
@@ -30,7 +37,8 @@ pub extern "C" fn markdown_converter_new() -> *mut MarkdownConverterHandle {
 /// The caller must ensure that:
 /// - `handle` points to a live converter created by `markdown_converter_new()`
 /// - `options` points to a valid `MarkdownOptions`
-/// - `result` points to writable storage for a `MarkdownResult`
+/// - `result` points to writable storage for a `MarkdownResult` whose owned
+///   buffers are either NULL/zero-length or were previously returned by this API
 /// - `html` either points to `html_len` readable bytes or is NULL when `html_len == 0`
 /// - `result` is not concurrently mutated while this function is executing
 #[unsafe(no_mangle)]
@@ -47,6 +55,9 @@ pub unsafe extern "C" fn markdown_convert(
 
     // SAFETY: `result` was validated as non-NULL above.
     let result_ref = unsafe { &mut *result };
+    free_buffer(&mut result_ref.markdown, &mut result_ref.markdown_len);
+    free_buffer(&mut result_ref.etag, &mut result_ref.etag_len);
+    free_buffer(&mut result_ref.error_message, &mut result_ref.error_len);
     reset_result(result_ref);
 
     let panic_result = panic::catch_unwind(|| -> Result<_, ConversionError> {

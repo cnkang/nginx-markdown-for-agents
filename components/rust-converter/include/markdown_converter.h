@@ -82,16 +82,62 @@ typedef struct MarkdownResult {
   uintptr_t error_len;
 } MarkdownResult;
 
+/**
+ * Allocate a new converter handle for use across multiple FFI calls.
+ *
+ * # Safety
+ *
+ * Returns a raw pointer that must eventually be freed with
+ * `markdown_converter_free()`.
+ *
+ * # Returns
+ *
+ * Returns a non-NULL handle on success. Returns NULL only when
+ * `MarkdownConverterHandle::new()` panics and that panic is caught by
+ * `catch_unwind()`. On stable Rust, allocator out-of-memory aborts the process
+ * instead of unwinding, so OOM is not caught here and does not produce NULL.
+ */
 struct MarkdownConverterHandle *markdown_converter_new(void);
 
+/**
+ * Convert an HTML byte buffer into Markdown using the provided converter handle.
+ *
+ * # Safety
+ *
+ * The caller must ensure that:
+ * - `handle` points to a live converter created by `markdown_converter_new()`
+ * - `options` points to a valid `MarkdownOptions`
+ * - `result` points to writable storage for a `MarkdownResult` whose owned
+ *   buffers are either NULL/zero-length or were previously returned by this API
+ * - `html` either points to `html_len` readable bytes or is NULL when `html_len == 0`
+ * - `result` is not concurrently mutated while this function is executing
+ */
 void markdown_convert(struct MarkdownConverterHandle *handle,
                       const uint8_t *html,
                       uintptr_t html_len,
                       const struct MarkdownOptions *options,
                       struct MarkdownResult *result);
 
+/**
+ * Release buffers owned by a `MarkdownResult` and reset it to the empty state.
+ *
+ * # Safety
+ *
+ * The caller must ensure that `result` either is NULL or points to a valid
+ * `MarkdownResult` previously initialized by `markdown_convert()`. Passing the
+ * same result twice is allowed because the function resets pointers to NULL.
+ */
 void markdown_result_free(struct MarkdownResult *result);
 
+/**
+ * Destroy a converter handle previously returned by `markdown_converter_new()`.
+ *
+ * # Safety
+ *
+ * The caller must ensure that `handle` either is NULL or was returned by
+ * `markdown_converter_new()` and has not already been freed. The handle must
+ * not be used after this call returns.
+ */
 void markdown_converter_free(struct MarkdownConverterHandle *handle);
 
 #endif  /* NGINX_MARKDOWN_CONVERTER_H */

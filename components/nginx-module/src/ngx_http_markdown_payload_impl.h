@@ -242,12 +242,9 @@ ngx_http_markdown_handle_buffer_append_failure(ngx_http_request_t *r,
 {
     size_t attempted_size;
 
-    attempted_size = ctx->buffer.max_size;
-    if (ctx->buffer.size <= ctx->buffer.max_size
-        && chunk_size <= (ctx->buffer.max_size - ctx->buffer.size))
-    {
-        attempted_size = ctx->buffer.size + chunk_size;
-    }
+    attempted_size = (((size_t) -1) - ctx->buffer.size < chunk_size)
+        ? (size_t) -1
+        : ctx->buffer.size + chunk_size;
 
     ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
                  "markdown filter: response size exceeds limit, "
@@ -512,7 +509,7 @@ ngx_http_markdown_fail_open_with_buffered_prefix(ngx_http_request_t *r,
         return NGX_ERROR;
     }
 
-    if (r->method == NGX_HTTP_HEAD || ctx->buffer.size == 0) {
+    if (r->method == NGX_HTTP_HEAD) {
         b->pos = NULL;
         b->last = NULL;
         b->memory = 0;

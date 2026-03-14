@@ -27,6 +27,8 @@
  * - Cross-user information leakage
  */
 
+#include <limits.h>
+
 #include "ngx_http_markdown_filter_module.h"
 
 static u_char ngx_http_markdown_hdr_cache_control[] = "Cache-Control";
@@ -236,7 +238,8 @@ ngx_http_markdown_get_auth_patterns(const ngx_http_markdown_conf_t *conf,
     }
 
     *patterns = default_patterns;
-    *pattern_count = 4;
+    *pattern_count = (ngx_uint_t) ((sizeof(default_patterns)
+                                    / sizeof(default_patterns[0])) - 1);
 }
 
 /* Advance cursor past optional whitespace in a Cookie header value. */
@@ -327,14 +330,27 @@ ngx_http_markdown_cookie_matches_any_pattern(ngx_str_t *cookie_name,
 static ngx_int_t
 ngx_http_markdown_has_authorization_header(ngx_http_request_t *r)
 {
+    u_char *scheme_end;
+    size_t  scheme_len;
+    int     scheme_len_for_log;
+
     if (r == NULL || r->headers_in.authorization == NULL) {
         return 0;
     }
 
     /* Authorization header is present */
-    ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                  "markdown filter: detected Authorization header: \"%V\"",
-                  &r->headers_in.authorization->value);
+    scheme_end = ngx_strlchr(
+        r->headers_in.authorization->value.data,
+        r->headers_in.authorization->value.data + r->headers_in.authorization->value.len,
+        ' ');
+    scheme_len = (scheme_end != NULL)
+        ? (size_t) (scheme_end - r->headers_in.authorization->value.data)
+        : r->headers_in.authorization->value.len;
+    scheme_len_for_log = (scheme_len > (size_t) INT_MAX) ? INT_MAX : (int) scheme_len;
+
+    ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                  "markdown filter: detected Authorization header, scheme=\"%*s\"",
+                  scheme_len_for_log, r->headers_in.authorization->value.data);
 
     return 1;
 }

@@ -75,7 +75,7 @@ The module exposes metrics via the `markdown_metrics` endpoint. Configure monito
 | `input_bytes_avg` | Average successful input size | Derived field exposed by endpoint | N/A (informational) |
 | `output_bytes` | Total output bytes generated | Cumulative counter field | N/A (informational) |
 | `output_bytes_avg` | Average successful output size | Derived field exposed by endpoint | N/A (informational) |
-| `conversion_latency_buckets.*` | Completed conversions by latency band | Cumulative counter field | Watch for drift toward slower buckets |
+| `conversion_latency_buckets.*` | Completed conversions by discrete latency band (each conversion increments exactly one time-range bucket) | Cumulative counter field | Watch for drift toward slower buckets |
 
 #### Decompression Metrics
 

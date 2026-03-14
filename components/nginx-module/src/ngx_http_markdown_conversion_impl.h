@@ -9,6 +9,8 @@
  * the Markdown response, and construct base_url when available.
  */
 
+#include <limits.h>
+
 /*
  * Construct base URL for resolving relative URLs
  *
@@ -222,7 +224,7 @@ ngx_http_markdown_construct_base_url(ngx_http_request_t *r, ngx_pool_t *pool,
     return NGX_OK;
 }
 
-/* Record elapsed conversion time into the appropriate latency histogram bucket. */
+/* Record elapsed conversion time into exactly one discrete latency bucket band. */
 static void
 ngx_http_markdown_record_conversion_latency(ngx_msec_t elapsed_ms)
 {
@@ -298,6 +300,14 @@ ngx_http_markdown_resolve_conditional_result(ngx_http_request_t *r,
         ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                       "markdown filter: If-None-Match did not match, using existing conversion");
 
+        /*
+         * Transfer ownership of the Rust-allocated buffers from
+         * `conditional_result` to `result` with a shallow `ngx_memcpy()`.
+         * `conditional_result` itself was allocated from `r->pool`, so only the
+         * wrapper struct is released with `ngx_pfree()`. Callers must later use
+         * `markdown_result_free(result)` to release the copied `markdown`,
+         * `etag`, and `error_message` buffers.
+         */
         ngx_memcpy(result, conditional_result, sizeof(struct MarkdownResult));
         ngx_pfree(r->pool, conditional_result);
 
@@ -353,6 +363,7 @@ ngx_http_markdown_handle_conversion_failure(ngx_http_request_t *r,
 {
     ngx_http_markdown_error_category_t error_category;
     const ngx_str_t                  *category_str;
+    int                               err_len;
 
     error_category = ngx_http_markdown_classify_error(result->error_code);
     category_str = ngx_http_markdown_error_category_string(error_category);
@@ -371,12 +382,19 @@ ngx_http_markdown_handle_conversion_failure(ngx_http_request_t *r,
             break;
     }
 
+    err_len = 0;
+    if (result->error_message != NULL) {
+        err_len = (result->error_len > (size_t) INT_MAX)
+            ? INT_MAX
+            : (int) result->error_len;
+    }
+
     ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
                  "markdown filter: conversion failed, "
                  "error_code=%ud, category=%V, message=\"%*s\", elapsed_ms=%M",
                  result->error_code,
                  category_str,
-                 (result->error_message != NULL) ? (ngx_int_t) result->error_len : 0,
+                 err_len,
                  (result->error_message != NULL) ? result->error_message : ngx_http_markdown_empty_string,
                  elapsed_ms);
 
