@@ -9,6 +9,7 @@ Checks:
 from __future__ import annotations
 
 import re
+import shlex
 import sys
 from pathlib import Path
 
@@ -42,7 +43,24 @@ def scan_c_sources() -> list[str]:
 def check_module_link_libs() -> list[str]:
     violations: list[str] = []
     cfg = MODULE_CONFIG.read_text(encoding="utf-8", errors="ignore")
-    libs = sorted(set(re.findall(r"-l([A-Za-z0-9_+.-]+)", cfg)))
+    libs: set[str] = set()
+
+    for raw_line in cfg.splitlines():
+        line = raw_line.strip()
+        if not line.startswith("ngx_module_libs="):
+            continue
+
+        _, value = line.split("=", 1)
+        try:
+            tokens = shlex.split(value)
+        except ValueError as exc:
+            violations.append(f"{MODULE_CONFIG}: could not parse ngx_module_libs value: {exc}")
+            continue
+
+        for token in tokens:
+            if token.startswith("-l") and len(token) > 2:
+                libs.add(token[2:])
+
     unexpected = [lib for lib in libs if lib not in ALLOWED_LINK_LIBS]
     for lib in unexpected:
         violations.append(
