@@ -82,6 +82,7 @@ ngx_http_markdown_filter(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     return NGX_CONF_OK;
 }
 
+/* Configuration directive handler: markdown_on_error (pass | reject). */
 static char *
 ngx_http_markdown_on_error(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
@@ -109,6 +110,7 @@ ngx_http_markdown_on_error(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     return NGX_CONF_OK;
 }
 
+/* Configuration directive handler: markdown_flavor (commonmark | gfm). */
 static char *
 ngx_http_markdown_flavor(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
@@ -136,6 +138,7 @@ ngx_http_markdown_flavor(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     return NGX_CONF_OK;
 }
 
+/* Configuration directive handler: markdown_auth_policy (allow | deny). */
 static char *
 ngx_http_markdown_auth_policy(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
@@ -163,6 +166,7 @@ ngx_http_markdown_auth_policy(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     return NGX_CONF_OK;
 }
 
+/* Configuration directive handler: markdown_auth_cookies <pattern ...>. */
 static char *
 ngx_http_markdown_auth_cookies(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
@@ -205,6 +209,7 @@ ngx_http_markdown_auth_cookies(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     return NGX_CONF_OK;
 }
 
+/* Configuration directive handler: markdown_conditional_requests. */
 static char *
 ngx_http_markdown_conditional_requests(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
@@ -234,6 +239,7 @@ ngx_http_markdown_conditional_requests(ngx_conf_t *cf, ngx_command_t *cmd, void 
     return NGX_CONF_OK;
 }
 
+/* Configuration directive handler: markdown_log_verbosity. */
 static char *
 ngx_http_markdown_log_verbosity(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
@@ -265,6 +271,7 @@ ngx_http_markdown_log_verbosity(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     return NGX_CONF_OK;
 }
 
+/* Configuration directive handler: markdown_stream_types <type/subtype ...>. */
 static char *
 ngx_http_markdown_stream_types(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
@@ -330,6 +337,7 @@ ngx_http_markdown_stream_types(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     return NGX_CONF_OK;
 }
 
+/* Configuration directive handler: markdown_metrics (register content handler). */
 static char *
 ngx_http_markdown_metrics_directive(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
