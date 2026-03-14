@@ -9,6 +9,7 @@
  * on request-path orchestration.
  */
 
+/* Wire this module into the header and body filter chains. */
 static ngx_int_t
 ngx_http_markdown_filter_init(ngx_conf_t *cf)
 {
@@ -21,6 +22,7 @@ ngx_http_markdown_filter_init(ngx_conf_t *cf)
     return NGX_OK;
 }
 
+/* Allocate per-worker converter handle and attach shared metrics zone. */
 static ngx_int_t
 ngx_http_markdown_init_worker(ngx_cycle_t *cycle)
 {
@@ -57,6 +59,7 @@ ngx_http_markdown_init_worker(ngx_cycle_t *cycle)
     return NGX_OK;
 }
 
+/* Release the per-worker converter handle on graceful shutdown. */
 static void
 ngx_http_markdown_exit_worker(ngx_cycle_t *cycle)
 {

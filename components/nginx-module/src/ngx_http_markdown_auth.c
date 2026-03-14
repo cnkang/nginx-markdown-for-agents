@@ -38,6 +38,7 @@ static u_char ngx_http_markdown_cc_suffix_private[] = ", private";
 static ngx_int_t ngx_http_markdown_cookie_matches_pattern(ngx_str_t *cookie_name,
                                                           ngx_str_t *pattern);
 
+/* Find a response header by name in the outgoing headers list. */
 static ngx_table_elt_t *
 ngx_http_markdown_find_response_header(ngx_http_request_t *r,
                                        u_char *name,
@@ -66,6 +67,7 @@ ngx_http_markdown_find_response_header(ngx_http_request_t *r,
     return NULL;
 }
 
+/* Insert a new "Cache-Control: private" header when none exists. */
 static ngx_int_t
 ngx_http_markdown_add_private_cache_control_header(ngx_http_request_t *r)
 {
@@ -88,6 +90,7 @@ ngx_http_markdown_add_private_cache_control_header(ngx_http_request_t *r)
     return NGX_OK;
 }
 
+/* Append ", private" to an existing Cache-Control value. */
 static ngx_int_t
 ngx_http_markdown_append_private_directive(ngx_http_request_t *r,
                                            ngx_table_elt_t *cache_control)
@@ -120,6 +123,7 @@ ngx_http_markdown_append_private_directive(ngx_http_request_t *r,
     return NGX_OK;
 }
 
+/* Remove "public" token from Cache-Control and append "private". */
 static ngx_int_t
 ngx_http_markdown_strip_public_and_append_private(ngx_http_request_t *r,
                                                   ngx_table_elt_t *cache_control)
@@ -211,6 +215,7 @@ ngx_http_markdown_strip_public_and_append_private(ngx_http_request_t *r,
     return NGX_OK;
 }
 
+/* Return configured auth-cookie patterns, falling back to built-in defaults. */
 static void
 ngx_http_markdown_get_auth_patterns(const ngx_http_markdown_conf_t *conf,
                                     ngx_str_t **patterns,
@@ -234,6 +239,7 @@ ngx_http_markdown_get_auth_patterns(const ngx_http_markdown_conf_t *conf,
     *pattern_count = 4;
 }
 
+/* Advance cursor past optional whitespace in a Cookie header value. */
 static void
 ngx_http_markdown_skip_cookie_whitespace(u_char **cursor, u_char *end)
 {
@@ -242,6 +248,7 @@ ngx_http_markdown_skip_cookie_whitespace(u_char **cursor, u_char *end)
     }
 }
 
+/* Skip past the cookie value and its trailing semicolon delimiter. */
 static void
 ngx_http_markdown_skip_cookie_value(u_char **cursor, u_char *end)
 {
@@ -253,6 +260,7 @@ ngx_http_markdown_skip_cookie_value(u_char **cursor, u_char *end)
     }
 }
 
+/* Extract the next cookie name from the cursor position, trimming whitespace. */
 static ngx_int_t
 ngx_http_markdown_read_cookie_name(u_char **cursor, u_char *end, ngx_str_t *cookie_name)
 {
@@ -284,6 +292,7 @@ ngx_http_markdown_read_cookie_name(u_char **cursor, u_char *end, ngx_str_t *cook
     return NGX_OK;
 }
 
+/* Test a cookie name against all configured auth patterns, returning the first match. */
 static ngx_int_t
 ngx_http_markdown_cookie_matches_any_pattern(ngx_str_t *cookie_name,
                                              ngx_str_t *patterns,

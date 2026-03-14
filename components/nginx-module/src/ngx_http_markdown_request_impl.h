@@ -180,6 +180,7 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
     return NGX_OK;
 }
 
+/* Orchestrate conditional-request check, conversion, and output emission. */
 static ngx_int_t
 ngx_http_markdown_body_filter_convert_and_output(ngx_http_request_t *r,
                                                  ngx_http_markdown_ctx_t *ctx,

@@ -17,6 +17,7 @@ static ngx_int_t ngx_http_markdown_send_buffered_original_response(
 static ngx_int_t ngx_http_markdown_fail_open_with_buffered_prefix(
     ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx, ngx_chain_t *remaining);
 
+/* Return original HTML when conversion fails or is ineligible (fail-open). */
 static ngx_int_t
 ngx_http_markdown_fail_open_buffered_response(ngx_http_request_t *r,
                                               ngx_http_markdown_ctx_t *ctx,
@@ -36,6 +37,7 @@ ngx_http_markdown_fail_open_buffered_response(ngx_http_request_t *r,
     return ngx_http_markdown_send_buffered_original_response(r, ctx);
 }
 
+/* Apply error strategy: reject (return error) or fail-open (return original). */
 static ngx_int_t
 ngx_http_markdown_reject_or_fail_open_buffered_response(
     ngx_http_request_t *r,
@@ -50,6 +52,7 @@ ngx_http_markdown_reject_or_fail_open_buffered_response(
     return ngx_http_markdown_fail_open_buffered_response(r, ctx, debug_message);
 }
 
+/* Wrap the buffered compressed payload into a chain for the decompressor. */
 static ngx_int_t
 ngx_http_markdown_prepare_compressed_chain(ngx_http_request_t *r,
                                            ngx_http_markdown_ctx_t *ctx,
@@ -97,6 +100,7 @@ ngx_http_markdown_prepare_compressed_chain(ngx_http_request_t *r,
     return NGX_OK;
 }
 
+/* Replace the module buffer contents with the decompressed payload. */
 static ngx_int_t
 ngx_http_markdown_apply_decompressed_payload(ngx_http_request_t *r,
                                              ngx_http_markdown_ctx_t *ctx,
@@ -165,6 +169,7 @@ ngx_http_markdown_apply_decompressed_payload(ngx_http_request_t *r,
     return NGX_OK;
 }
 
+/* Log decompression metrics and strip Content-Encoding after success. */
 static void
 ngx_http_markdown_record_decompression_success(ngx_http_request_t *r,
                                                ngx_http_markdown_ctx_t *ctx)
@@ -202,6 +207,7 @@ ngx_http_markdown_record_decompression_success(ngx_http_request_t *r,
 }
 
 
+/* Handle buffer initialization failure with configured error strategy. */
 static ngx_int_t
 ngx_http_markdown_handle_buffer_init_failure(ngx_http_request_t *r,
                                              ngx_http_markdown_ctx_t *ctx,
@@ -226,6 +232,7 @@ ngx_http_markdown_handle_buffer_init_failure(ngx_http_request_t *r,
     return ngx_http_next_body_filter(r, in);
 }
 
+/* Handle buffer append failure (size limit exceeded) with error strategy. */
 static ngx_int_t
 ngx_http_markdown_handle_buffer_append_failure(ngx_http_request_t *r,
                                                ngx_http_markdown_ctx_t *ctx,
@@ -262,6 +269,7 @@ ngx_http_markdown_handle_buffer_append_failure(ngx_http_request_t *r,
     return ngx_http_markdown_fail_open_with_buffered_prefix(r, ctx, cl);
 }
 
+/* Append one chain link's buffer data into the module accumulation buffer. */
 static ngx_int_t
 ngx_http_markdown_append_buffered_chunk(ngx_http_request_t *r,
                                         ngx_http_markdown_ctx_t *ctx,
@@ -290,6 +298,11 @@ ngx_http_markdown_append_buffered_chunk(ngx_http_request_t *r,
     return NGX_OK;
 }
 
+/*
+ * Buffer incoming body chunks until the last_buf flag is seen.
+ *
+ * Returns NGX_AGAIN while buffering, NGX_OK when complete.
+ */
 static ngx_int_t
 ngx_http_markdown_body_filter_buffer_input(ngx_http_request_t *r,
                                            ngx_chain_t *in,
@@ -348,6 +361,7 @@ ngx_http_markdown_body_filter_buffer_input(ngx_http_request_t *r,
     return NGX_OK;
 }
 
+/* Decompress the buffered payload if compression was detected. */
 static ngx_int_t
 ngx_http_markdown_body_filter_decompress_if_needed(ngx_http_request_t *r,
                                                    ngx_http_markdown_ctx_t *ctx,
@@ -410,6 +424,7 @@ ngx_http_markdown_body_filter_decompress_if_needed(ngx_http_request_t *r,
     return NGX_OK;
 }
 
+/* Forward deferred response headers to the next filter in the chain. */
 static ngx_int_t
 ngx_http_markdown_forward_headers(ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx)
 {

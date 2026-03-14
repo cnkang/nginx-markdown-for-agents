@@ -59,6 +59,7 @@ impl MarkdownConverterHandle {
     }
 }
 
+/// Internal conversion result before it is projected into the C ABI struct.
 pub(crate) struct ConversionOutput {
     pub(crate) markdown: Box<[u8]>,
     pub(crate) etag: Option<Box<[u8]>>,
