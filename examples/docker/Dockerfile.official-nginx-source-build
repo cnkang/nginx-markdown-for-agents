@@ -35,6 +35,8 @@ RUN set -eux; \
         bash \
         build-base \
         ca-certificates \
+        cargo \
+        cbindgen \
         curl \
         git \
         linux-headers \
@@ -43,6 +45,7 @@ RUN set -eux; \
         pcre2-dev \
         pkgconf \
         python3 \
+        rust \
         zlib-dev; \
     else \
       echo "Unsupported package manager in base image"; \
