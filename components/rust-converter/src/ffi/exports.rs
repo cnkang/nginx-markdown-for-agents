@@ -8,6 +8,12 @@ use super::convert::convert_inner;
 use super::memory::{free_buffer, reset_result, set_error_result, set_success_result};
 use super::options::{required_bytes, required_ref};
 
+/// Allocate a new converter handle for use across multiple FFI calls.
+///
+/// # Safety
+///
+/// Returns a raw pointer that must eventually be freed with
+/// `markdown_converter_free()`. Returns NULL if allocation panics.
 #[unsafe(no_mangle)]
 pub extern "C" fn markdown_converter_new() -> *mut MarkdownConverterHandle {
     let result = panic::catch_unwind(|| Box::into_raw(Box::new(MarkdownConverterHandle::new())));

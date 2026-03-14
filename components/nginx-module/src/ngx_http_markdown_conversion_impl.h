@@ -36,6 +36,7 @@ static u_char ngx_http_markdown_hdr_x_forwarded_host[] = "X-Forwarded-Host";
 static u_char ngx_http_markdown_scheme_http[] = "http";
 static u_char ngx_http_markdown_scheme_https[] = "https";
 
+/* Find a request header value by name in the generic linked-list storage. */
 static ngx_str_t *
 ngx_http_markdown_find_request_header_value(ngx_http_request_t *r,
                                             u_char *name,
@@ -64,6 +65,7 @@ ngx_http_markdown_find_request_header_value(ngx_http_request_t *r,
     return NULL;
 }
 
+/* Return true if the scheme is "http" or "https" (case-insensitive). */
 static ngx_flag_t
 ngx_http_markdown_scheme_is_http_family(const ngx_str_t *scheme)
 {
@@ -77,6 +79,11 @@ ngx_http_markdown_scheme_is_http_family(const ngx_str_t *scheme)
                                sizeof(ngx_http_markdown_scheme_https) - 1) == 0);
 }
 
+/*
+ * Select scheme and host for base URL construction.
+ *
+ * Priority: X-Forwarded-Proto/Host > request schema/server > server_name.
+ */
 static ngx_int_t
 ngx_http_markdown_select_base_url_parts(ngx_http_request_t *r,
                                         ngx_str_t *scheme,
@@ -130,6 +137,7 @@ ngx_http_markdown_select_base_url_parts(ngx_http_request_t *r,
     return NGX_ERROR;
 }
 
+/* Overflow-safe addition helper for base URL length accumulation. */
 static ngx_int_t
 ngx_http_markdown_base_url_add_len(ngx_http_request_t *r,
                                    size_t *total,
@@ -214,6 +222,7 @@ ngx_http_markdown_construct_base_url(ngx_http_request_t *r, ngx_pool_t *pool,
     return NGX_OK;
 }
 
+/* Record elapsed conversion time into the appropriate latency histogram bucket. */
 static void
 ngx_http_markdown_record_conversion_latency(ngx_msec_t elapsed_ms)
 {
@@ -237,6 +246,11 @@ ngx_http_markdown_record_conversion_latency(ngx_msec_t elapsed_ms)
     NGX_HTTP_MARKDOWN_METRIC_INC(conversion_latency_gt_1000ms);
 }
 
+/*
+ * Attempt conditional-request shortcut (If-None-Match / 304).
+ *
+ * On match returns NGX_DONE; on mismatch populates `result` for reuse.
+ */
 static ngx_int_t
 ngx_http_markdown_resolve_conditional_result(ngx_http_request_t *r,
                                              ngx_http_markdown_ctx_t *ctx,
@@ -294,6 +308,7 @@ ngx_http_markdown_resolve_conditional_result(ngx_http_request_t *r,
     return NGX_OK;
 }
 
+/* Populate MarkdownOptions from location config and request context. */
 static ngx_int_t
 ngx_http_markdown_prepare_conversion_options(ngx_http_request_t *r,
                                              ngx_http_markdown_conf_t *conf,
@@ -328,6 +343,7 @@ ngx_http_markdown_prepare_conversion_options(ngx_http_request_t *r,
     return NGX_OK;
 }
 
+/* Classify, log, and count a conversion failure, then apply error strategy. */
 static ngx_int_t
 ngx_http_markdown_handle_conversion_failure(ngx_http_request_t *r,
                                             ngx_http_markdown_ctx_t *ctx,
@@ -370,6 +386,7 @@ ngx_http_markdown_handle_conversion_failure(ngx_http_request_t *r,
         "markdown filter: fail-open strategy - returning original HTML");
 }
 
+/* Validate FFI result pointer/length invariants before consuming output. */
 static ngx_int_t
 ngx_http_markdown_validate_conversion_result(ngx_http_request_t *r,
                                              ngx_http_markdown_ctx_t *ctx,
@@ -395,6 +412,7 @@ ngx_http_markdown_validate_conversion_result(ngx_http_request_t *r,
     return NGX_OK;
 }
 
+/* Update metrics counters after a successful conversion. */
 static void
 ngx_http_markdown_record_conversion_success(ngx_http_markdown_ctx_t *ctx,
                                             struct MarkdownResult *result,
@@ -407,6 +425,7 @@ ngx_http_markdown_record_conversion_success(ngx_http_markdown_ctx_t *ctx,
     NGX_HTTP_MARKDOWN_METRIC_ADD(output_bytes, result->markdown_len);
 }
 
+/* Run the Rust FFI conversion and handle success/failure outcomes. */
 static ngx_int_t
 ngx_http_markdown_execute_conversion(ngx_http_request_t *r,
                                      ngx_http_markdown_ctx_t *ctx,
@@ -462,6 +481,7 @@ ngx_http_markdown_execute_conversion(ngx_http_request_t *r,
     return NGX_OK;
 }
 
+/* Prepare an empty output buffer for HEAD requests (body omitted). */
 static void
 ngx_http_markdown_prepare_head_output_buffer(ngx_http_request_t *r,
                                              ngx_buf_t *b,
@@ -478,6 +498,7 @@ ngx_http_markdown_prepare_head_output_buffer(ngx_http_request_t *r,
     markdown_result_free(result);
 }
 
+/* Copy converted Markdown into a pool-allocated output buffer. */
 static ngx_int_t
 ngx_http_markdown_prepare_body_output_buffer(ngx_http_request_t *r,
                                              ngx_buf_t *b,
@@ -507,6 +528,7 @@ ngx_http_markdown_prepare_body_output_buffer(ngx_http_request_t *r,
     return NGX_OK;
 }
 
+/* Update response headers and emit the converted Markdown downstream. */
 static ngx_int_t
 ngx_http_markdown_send_conversion_output(ngx_http_request_t *r,
                                          ngx_http_markdown_ctx_t *ctx,
