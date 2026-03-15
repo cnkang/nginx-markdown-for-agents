@@ -1,0 +1,725 @@
+name: Multi-Environment Install Verification
+
+on:
+  schedule:
+    # Weekly: every Sunday at 03:00 UTC
+    - cron: "0 3 * * 0"
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git ref to test against (branch, tag, or SHA)"
+        required: false
+        default: ""
+      version:
+        description: "Specific module version to install (e.g. v1.0.0)"
+        required: false
+        default: ""
+
+permissions: {}
+
+jobs:
+  resolve-matrix:
+    name: Resolve representative install targets
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      targets: ${{ steps.resolve.outputs.targets }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event.inputs.ref || github.ref }}
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+        with:
+          python-version: '3.14.3'
+
+      - name: Select representative matrix entries
+        id: resolve
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+
+          with open("tools/release-matrix.json", "r") as f:
+              data = json.load(f)
+
+          full_entries = [
+              e for e in data.get("matrix", [])
+              if e.get("support_tier") == "full"
+          ]
+
+          def version_tuple(version: str) -> tuple[int, ...]:
+              return tuple(int(part) for part in version.split("."))
+
+          def classify_version(version: str) -> str:
+              minor = int(version.split(".")[1])
+              return "stable" if minor % 2 == 0 else "mainline"
+
+          # Pick representative nginx versions per (os_type, arch):
+          # - lower bound: minimum supported version
+          # - stable upper bound: latest stable version for distro-backed glibc
+          # - mainline upper bound: latest version in the prebuilt matrix
+          #   (validated via official nginx images for glibc/musl)
+          by_platform = {}
+          for e in full_entries:
+              key = (e["os_type"], e["arch"])
+              by_platform.setdefault(key, []).append(e["nginx"])
+
+          selected = []
+          for (os_type, arch), versions in by_platform.items():
+              sorted_v = sorted(set(versions), key=version_tuple)
+              stable_versions = [v for v in sorted_v if classify_version(v) == "stable"]
+              mainline_versions = [v for v in sorted_v if classify_version(v) == "mainline"]
+              selected.append({
+                  "nginx": sorted_v[0],
+                  "os_type": os_type,
+                  "arch": arch,
+                  "variant": "lower-bound",
+                  "expected_install_success": True,
+              })
+
+              if os_type == "glibc":
+                  if stable_versions:
+                      selected.append({
+                          "nginx": stable_versions[-1],
+                          "os_type": os_type,
+                          "arch": arch,
+                          "variant": "stable-upper",
+                          "expected_install_success": True,
+                      })
+                  if mainline_versions:
+                      selected.append({
+                          "nginx": mainline_versions[-1],
+                          "os_type": os_type,
+                          "arch": arch,
+                          "variant": "mainline-upper",
+                          "expected_install_success": True,
+                      })
+              else:
+                  selected.append({
+                      "nginx": sorted_v[-1],
+                      "os_type": os_type,
+                      "arch": arch,
+                      "variant": "upper-bound",
+                      "expected_install_success": True,
+                  })
+
+          # Spec-required distro environments: Ubuntu 22.04, Ubuntu 24.04,
+          # and Debian 12 aarch64 remain the explicit glibc validation targets
+          # for lower-bound and latest stable coverage.  Dedicated official
+          # nginx image paths cover glibc mainline and musl upper-bound checks.
+          distro_environment_map = {
+              ("glibc", "x86_64"): [
+                  {
+                      "runner": "ubuntu-22.04",
+                      "container": "",
+                      "pkg_manager": "apt",
+                      "label": "Ubuntu 22.04 (glibc x86_64)",
+                      "env_slug": "ubuntu-22.04-glibc-x86_64",
+                  },
+                  {
+                      "runner": "ubuntu-24.04",
+                      "container": "",
+                      "pkg_manager": "apt",
+                      "label": "Ubuntu 24.04 (glibc x86_64)",
+                      "env_slug": "ubuntu-24.04-glibc-x86_64",
+                  },
+              ],
+              ("glibc", "aarch64"): [
+                  {
+                      "runner": "ubuntu-24.04-arm",
+                      "container": "debian:12",
+                      "pkg_manager": "apt",
+                      "label": "Debian 12 (glibc aarch64)",
+                      "env_slug": "debian-12-glibc-aarch64",
+                  },
+              ],
+          }
+
+          image_environment_map = {
+              ("glibc", "x86_64"): [
+                  {
+                      "runner": "ubuntu-latest",
+                      "container_template": "nginx:{nginx}",
+                      "pkg_manager": "apt",
+                      "label": "Official NGINX image (glibc x86_64)",
+                      "nginx_install_method": "preinstalled",
+                      "env_slug": "official-nginx-glibc-x86_64",
+                  },
+              ],
+              ("glibc", "aarch64"): [
+                  {
+                      "runner": "ubuntu-24.04-arm",
+                      "container_template": "nginx:{nginx}",
+                      "pkg_manager": "apt",
+                      "label": "Official NGINX image (glibc aarch64)",
+                      "nginx_install_method": "preinstalled",
+                      "env_slug": "official-nginx-glibc-aarch64",
+                  },
+              ],
+              ("musl", "x86_64"): [
+                  {
+                      "runner": "ubuntu-latest",
+                      "container_template": "nginx:{nginx}-alpine",
+                      "pkg_manager": "apk",
+                      "label": "Official NGINX Alpine image (musl x86_64)",
+                      "nginx_install_method": "preinstalled",
+                      "env_slug": "official-nginx-musl-x86_64",
+                  },
+              ],
+              ("musl", "aarch64"): [
+                  {
+                      "runner": "ubuntu-24.04-arm",
+                      "container_template": "nginx:{nginx}-alpine",
+                      "pkg_manager": "apk",
+                      "label": "Official NGINX Alpine image (musl aarch64)",
+                      "nginx_install_method": "preinstalled",
+                      "env_slug": "official-nginx-musl-aarch64",
+                  },
+              ],
+          }
+
+          targets = []
+          selected.sort(key=lambda item: (
+              version_tuple(item["nginx"]),
+              item["os_type"],
+              item["arch"],
+              item["variant"],
+          ))
+
+          for item in selected:
+              nginx = item["nginx"]
+              os_type = item["os_type"]
+              arch = item["arch"]
+              if os_type == "glibc" and item["variant"] == "mainline-upper":
+                  envs = image_environment_map.get((os_type, arch), [])
+              elif os_type == "glibc":
+                  envs = distro_environment_map.get((os_type, arch), [])
+              else:
+                  envs = image_environment_map.get((os_type, arch), [])
+              if not envs:
+                  continue
+              for env in envs:
+                  suffix = {
+                      "lower-bound": "lower bound",
+                      "stable-upper": "latest stable",
+                      "mainline-upper": "latest mainline",
+                      "upper-bound": "upper bound",
+                  }[item["variant"]]
+                  targets.append({
+                      "nginx": nginx,
+                      "os_type": os_type,
+                      "arch": arch,
+                      "name": f"{env['label']} — nginx {nginx} ({suffix})",
+                      "runner": env["runner"],
+                      "container": env.get("container_template", env.get("container", "")).format(nginx=nginx),
+                      "pkg_manager": env["pkg_manager"],
+                      "nginx_install_method": env.get("nginx_install_method", "repo"),
+                      "environment_slug": env["env_slug"],
+                      "artifact_name": f"install-verify-{env['env_slug']}-{item['variant']}-{nginx}",
+                      "variant": item["variant"],
+                      "expected_install_success": item["expected_install_success"],
+                  })
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+              out.write(f"targets={json.dumps(targets)}\n")
+
+          print(f"Selected {len(targets)} install targets:")
+          for t in targets:
+              print(f"  {t['name']}")
+          PY
+
+  install-verify:
+    name: Verify Install — ${{ matrix.target.name }}
+    needs: resolve-matrix
+    runs-on: ${{ matrix.target.runner }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{ fromJson(needs.resolve-matrix.outputs.targets) }}
+    container: ${{ matrix.target.container || null }}
+
+    steps:
+      - name: Install prerequisites (Alpine)
+        if: matrix.target.pkg_manager == 'apk'
+        run: |
+          apk update
+          apk add --no-cache bash curl python3 tar coreutils
+
+      - name: Install prerequisites (apt — container)
+        if: matrix.target.pkg_manager == 'apt' && matrix.target.container != ''
+        run: |
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update -qq
+          apt-get install -y -qq curl gnupg2 python3 ca-certificates > /dev/null 2>&1
+
+      - name: Install prerequisites (apt — bare runner)
+        if: matrix.target.pkg_manager == 'apt' && matrix.target.container == ''
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq curl gnupg2 ca-certificates > /dev/null 2>&1
+
+      # Pin Python 3.14.3 on bare runners (no container).
+      # Container jobs (Debian 12, official nginx, Alpine) use their
+      # distro python3 because setup-python cannot run inside containers.
+      # This is an accepted limitation: container steps only use python3
+      # for trivial JSON parsing (json.load), no 3.14-specific features.
+      - name: Set up Python
+        if: matrix.target.container == ''
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+        with:
+          python-version: '3.14.3'
+
+      - name: Install target nginx version from nginx.org repo (apt)
+        if: matrix.target.pkg_manager == 'apt' && matrix.target.nginx_install_method == 'repo'
+        env:
+          TARGET_NGINX: ${{ matrix.target.nginx }}
+          IS_CONTAINER: ${{ matrix.target.container != '' && 'true' || 'false' }}
+        run: |
+          export DEBIAN_FRONTEND=noninteractive
+          # Bare runners need sudo; containers already run as root.
+          SUDO=""
+          if [ "${IS_CONTAINER}" = "false" ]; then
+            SUDO="sudo"
+          fi
+
+          # Add nginx.org official signing key and repository
+          curl -fsSL https://nginx.org/keys/nginx_signing.key | ${SUDO} gpg --dearmor -o /usr/share/keyrings/nginx-archive-keyring.gpg
+          CODENAME=$(. /etc/os-release && echo "$VERSION_CODENAME")
+          # Detect distro: nginx.org uses packages/debian/ for Debian,
+          # packages/ubuntu/ for Ubuntu.  ID is "debian" or "ubuntu".
+          DISTRO_ID=$(. /etc/os-release && echo "$ID")
+          case "${DISTRO_ID}" in
+            debian) REPO_DISTRO="debian" ;;
+            *)      REPO_DISTRO="ubuntu" ;;
+          esac
+          echo "deb [signed-by=/usr/share/keyrings/nginx-archive-keyring.gpg] http://nginx.org/packages/${REPO_DISTRO}/ ${CODENAME} nginx" \
+            | ${SUDO} tee /etc/apt/sources.list.d/nginx.list > /dev/null
+          # Pin nginx.org packages above distro packages
+          printf 'Package: nginx*\nPin: origin nginx.org\nPin-Priority: 900\n' \
+            | ${SUDO} tee /etc/apt/preferences.d/99-nginx > /dev/null
+          ${SUDO} apt-get update -qq
+
+          # Install the exact target version if available, otherwise closest match
+          TARGET_PKG="nginx=${TARGET_NGINX}-*"
+          if apt-cache show "$TARGET_PKG" > /dev/null 2>&1; then
+            ${SUDO} apt-get install -y -qq "$TARGET_PKG" > /dev/null 2>&1
+          else
+            echo "::warning::Exact package ${TARGET_PKG} not found, installing latest nginx from nginx.org"
+            ${SUDO} apt-get install -y -qq nginx > /dev/null 2>&1
+          fi
+
+      - name: Verify preinstalled nginx in official image
+        if: matrix.target.nginx_install_method == 'preinstalled'
+        env:
+          TARGET_NGINX: ${{ matrix.target.nginx }}
+        run: |
+          INSTALLED=$(nginx -v 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
+          echo "Preinstalled nginx: ${INSTALLED}"
+          echo "Expected image nginx: ${TARGET_NGINX}"
+          if [ "${INSTALLED}" != "${TARGET_NGINX}" ]; then
+            echo "::error::Official image nginx ${INSTALLED} does not match expected ${TARGET_NGINX}"
+            exit 1
+          fi
+
+      - name: Assert installed nginx version matches target
+        env:
+          TARGET_NGINX: ${{ matrix.target.nginx }}
+          IS_CONTAINER: ${{ matrix.target.container != '' && 'true' || 'false' }}
+        run: |
+          SUDO=""
+          if [ "${IS_CONTAINER}" = "false" ]; then SUDO="sudo"; fi
+          INSTALLED=$(${SUDO} nginx -v 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
+          echo "Installed nginx: ${INSTALLED}"
+          echo "Target nginx:    ${TARGET_NGINX}"
+          if [ "${INSTALLED}" != "${TARGET_NGINX}" ]; then
+            echo "::error::Installed nginx ${INSTALLED} does not match target ${TARGET_NGINX}. The installer requires an exact patch match."
+            exit 1
+          fi
+
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event.inputs.ref || github.ref }}
+
+      - name: Prepare results directory
+        run: |
+          mkdir -p "${{ runner.temp }}/install-verify"
+
+      - name: Capture environment snapshot
+        run: |
+          RESULTS_DIR="${{ runner.temp }}/install-verify"
+          {
+            echo "=== Environment Snapshot ==="
+            echo "Date: $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+            echo "Hostname: $(hostname)"
+            echo "Target: ${{ matrix.target.name }}"
+            echo ""
+            echo "--- uname -a ---"
+            uname -a
+            echo ""
+            echo "--- Architecture ---"
+            uname -m
+            echo ""
+            echo "--- OS Release ---"
+            cat /etc/os-release 2>/dev/null || echo "N/A"
+            echo ""
+            echo "--- libc version ---"
+            if command -v ldd >/dev/null 2>&1; then
+              ldd --version 2>&1 | head -n1 || true
+            fi
+            if [ -f /etc/alpine-release ]; then
+              echo "Alpine: $(cat /etc/alpine-release)"
+              apk info musl 2>/dev/null | head -n1 || true
+            fi
+            echo ""
+            echo "--- nginx -V ---"
+            nginx -V 2>&1
+            echo ""
+          } > "${RESULTS_DIR}/env-snapshot.txt" 2>&1
+
+      - name: Run install script
+        id: install
+        env:
+          VERSION: ${{ github.event.inputs.version || '' }}
+          IS_CONTAINER: ${{ matrix.target.container != '' && 'true' || 'false' }}
+        run: |
+          RESULTS_DIR="${{ runner.temp }}/install-verify"
+          # The installer writes to root-owned paths (/usr/lib/nginx/modules,
+          # /etc/nginx).  Bare runners need sudo; containers are already root.
+          SUDO=""
+          if [ "${IS_CONTAINER}" = "false" ]; then SUDO="sudo"; fi
+
+          set +e
+
+          ${SUDO} env SKIP_ROOT_CHECK=1 VERSION="${VERSION}" bash tools/install.sh --json \
+            2> "${RESULTS_DIR}/install-stderr.log" \
+            | tee "${RESULTS_DIR}/install-stdout.json"
+          INSTALL_EXIT=${PIPESTATUS[0]}
+
+          set -e
+
+          echo "install_exit=${INSTALL_EXIT}" >> "$GITHUB_OUTPUT"
+
+          echo "--- Install script exit code: ${INSTALL_EXIT} ---"
+          echo "--- stderr output ---"
+          cat "${RESULTS_DIR}/install-stderr.log"
+
+          if [ "${INSTALL_EXIT}" -ne 0 ]; then
+            echo "::error::Install script failed with exit code ${INSTALL_EXIT}"
+          fi
+
+      - name: Validate install outcome against target expectation
+        id: validate_outcome
+        env:
+          EXPECTED_INSTALL_SUCCESS: ${{ matrix.target.expected_install_success && 'true' || 'false' }}
+          TARGET_NGINX: ${{ matrix.target.nginx }}
+          TARGET_VARIANT: ${{ matrix.target.variant }}
+        run: |
+          RESULTS_DIR="${{ runner.temp }}/install-verify"
+          INSTALL_EXIT="${{ steps.install.outputs.install_exit }}"
+          JSON_PATH="${RESULTS_DIR}/install-stdout.json"
+
+          SUCCESS=""
+          ERROR_CATEGORY=""
+          if [ -s "${JSON_PATH}" ]; then
+            SUCCESS=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("success",""))' "${JSON_PATH}" 2>/dev/null || true)
+            ERROR_CATEGORY=$(python3 -c 'import json,sys; print((json.load(open(sys.argv[1])).get("error") or {}).get("category",""))' "${JSON_PATH}" 2>/dev/null || true)
+          fi
+
+          echo "expected_install_success=${EXPECTED_INSTALL_SUCCESS}" >> "$GITHUB_OUTPUT"
+          echo "reported_success=${SUCCESS}" >> "$GITHUB_OUTPUT"
+          echo "error_category=${ERROR_CATEGORY}" >> "$GITHUB_OUTPUT"
+
+          if [ "${EXPECTED_INSTALL_SUCCESS}" = "true" ]; then
+            if [ "${INSTALL_EXIT}" != "0" ] || [ "${SUCCESS}" != "True" ] && [ "${SUCCESS}" != "true" ]; then
+              echo "::error::Expected install success for ${TARGET_VARIANT} (${TARGET_NGINX}), but install did not succeed."
+              exit 1
+            fi
+            echo "Install succeeded as expected."
+          else
+            if [ "${INSTALL_EXIT}" = "0" ]; then
+              echo "::error::Expected install failure for ${TARGET_VARIANT} (${TARGET_NGINX}), but install succeeded."
+              exit 1
+            fi
+            if [ "${ERROR_CATEGORY}" != "version_mismatch" ]; then
+              echo "::error::Expected version_mismatch for ${TARGET_VARIANT} (${TARGET_NGINX}), got '${ERROR_CATEGORY:-<empty>}' instead."
+              exit 1
+            fi
+            echo "Install failed with version_mismatch as expected."
+          fi
+
+      - name: Verify installed asset matches target
+        if: matrix.target.expected_install_success && steps.install.outputs.install_exit == '0'
+        env:
+          TARGET_NGINX: ${{ matrix.target.nginx }}
+          TARGET_OS_TYPE: ${{ matrix.target.os_type }}
+          TARGET_ARCH: ${{ matrix.target.arch }}
+        run: |
+          RESULTS_DIR="${{ runner.temp }}/install-verify"
+          # Parse the JSON output for the installed nginx version
+          JSON_LINE=$(cat "${RESULTS_DIR}/install-stdout.json")
+          INSTALLED_VERSION=$(echo "$JSON_LINE" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('nginx_version',''))" 2>/dev/null || true)
+          INSTALLED_OS=$(echo "$JSON_LINE" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('os_type',''))" 2>/dev/null || true)
+          INSTALLED_ARCH=$(echo "$JSON_LINE" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('arch',''))" 2>/dev/null || true)
+
+          echo "Installed: nginx=${INSTALLED_VERSION} os_type=${INSTALLED_OS} arch=${INSTALLED_ARCH}"
+          echo "Target:    nginx=${TARGET_NGINX} os_type=${TARGET_OS_TYPE} arch=${TARGET_ARCH}"
+
+          MISMATCH=0
+          if [ -n "${INSTALLED_VERSION}" ] && [ "${INSTALLED_VERSION}" != "${TARGET_NGINX}" ]; then
+            echo "::error::Nginx version mismatch: installed=${INSTALLED_VERSION}, target=${TARGET_NGINX}"
+            MISMATCH=1
+          fi
+          if [ -n "${INSTALLED_OS}" ] && [ "${INSTALLED_OS}" != "${TARGET_OS_TYPE}" ]; then
+            echo "::error::OS type mismatch: installed=${INSTALLED_OS}, target=${TARGET_OS_TYPE}"
+            MISMATCH=1
+          fi
+          if [ -n "${INSTALLED_ARCH}" ] && [ "${INSTALLED_ARCH}" != "${TARGET_ARCH}" ]; then
+            echo "::error::Arch mismatch: installed=${INSTALLED_ARCH}, target=${TARGET_ARCH}"
+            MISMATCH=1
+          fi
+          if [ "${MISMATCH}" -ne 0 ]; then
+            exit 1
+          fi
+
+      - name: Verify nginx -t
+        id: nginx_test
+        if: matrix.target.expected_install_success && steps.install.outputs.install_exit == '0'
+        env:
+          IS_CONTAINER: ${{ matrix.target.container != '' && 'true' || 'false' }}
+        run: |
+          RESULTS_DIR="${{ runner.temp }}/install-verify"
+          SUDO=""
+          if [ "${IS_CONTAINER}" = "false" ]; then SUDO="sudo"; fi
+          set +e
+          ${SUDO} nginx -t > "${RESULTS_DIR}/nginx-test.log" 2>&1
+          NGINX_TEST_EXIT=$?
+          set -e
+
+          echo "nginx_test_exit=${NGINX_TEST_EXIT}" >> "$GITHUB_OUTPUT"
+          cat "${RESULTS_DIR}/nginx-test.log"
+
+          if [ "${NGINX_TEST_EXIT}" -ne 0 ]; then
+            echo "::error::nginx -t failed with exit code ${NGINX_TEST_EXIT}"
+          fi
+
+      - name: Verify module .so exists
+        id: module_check
+        if: matrix.target.expected_install_success && steps.install.outputs.install_exit == '0'
+        run: |
+          RESULTS_DIR="${{ runner.temp }}/install-verify"
+          MODULE_SO="ngx_http_markdown_filter_module.so"
+
+          MODULES_PATH=$(nginx -V 2>&1 | sed -n 's/.*--modules-path=\([^ ]*\).*/\1/p' | head -n1)
+          if [ -z "${MODULES_PATH}" ]; then
+            for dir in /etc/nginx/modules /usr/lib/nginx/modules /usr/share/nginx/modules /usr/local/nginx/modules; do
+              if [ -f "${dir}/${MODULE_SO}" ]; then
+                MODULES_PATH="${dir}"
+                break
+              fi
+            done
+          fi
+
+          echo "Modules path: ${MODULES_PATH}"
+
+          if [ -n "${MODULES_PATH}" ] && [ -f "${MODULES_PATH}/${MODULE_SO}" ]; then
+            echo "module_found=true" >> "$GITHUB_OUTPUT"
+            echo "Module found: ${MODULES_PATH}/${MODULE_SO}"
+            ls -la "${MODULES_PATH}/${MODULE_SO}" | tee -a "${RESULTS_DIR}/module-check.log"
+          else
+            echo "module_found=false" >> "$GITHUB_OUTPUT"
+            echo "::error::Module .so not found in ${MODULES_PATH:-<unknown>}"
+            echo "Module NOT found" > "${RESULTS_DIR}/module-check.log"
+          fi
+
+      - name: Smoke test — markdown conversion
+        id: smoke_test
+        if: matrix.target.expected_install_success && steps.install.outputs.install_exit == '0'
+        env:
+          IS_CONTAINER: ${{ matrix.target.container != '' && 'true' || 'false' }}
+        run: |
+          RESULTS_DIR="${{ runner.temp }}/install-verify"
+          SMOKE_LOG="${RESULTS_DIR}/smoke-test.log"
+          SUDO=""
+          if [ "${IS_CONTAINER}" = "false" ]; then SUDO="sudo"; fi
+
+          # Determine the modules path so we can load_module in our
+          # standalone config without touching /etc/nginx.
+          MODULES_PATH=$(nginx -V 2>&1 | sed -n 's/.*--modules-path=\([^ ]*\).*/\1/p' | head -n1)
+          MODULES_PATH="${MODULES_PATH:-/usr/lib/nginx/modules}"
+
+          # Serve an HTML file so the module has real HTML to convert.
+          # markdown_filter converts HTML→Markdown when the client sends
+          # Accept: text/markdown.
+          mkdir -p /tmp/md-test-site /tmp/md-test-nginx
+          cat > /tmp/md-test-site/index.html <<'HTMLEOF'
+          <html><body><h1>Hello World</h1><p>This is a <strong>test</strong> paragraph.</p></body></html>
+          HTMLEOF
+
+          # Self-contained nginx config in /tmp — no writes to /etc/nginx
+          # required, so this works on both bare runners and containers.
+          cat > /tmp/md-test-nginx/nginx.conf <<SRVEOF
+          worker_processes 1;
+          pid /tmp/md-test-nginx/nginx.pid;
+          error_log /tmp/md-test-nginx/error.log;
+          load_module ${MODULES_PATH}/ngx_http_markdown_filter_module.so;
+          events { worker_connections 64; }
+          http {
+              access_log /tmp/md-test-nginx/access.log;
+              client_body_temp_path /tmp/md-test-nginx/client_body;
+              proxy_temp_path       /tmp/md-test-nginx/proxy;
+              fastcgi_temp_path     /tmp/md-test-nginx/fastcgi;
+              uwsgi_temp_path       /tmp/md-test-nginx/uwsgi;
+              scgi_temp_path        /tmp/md-test-nginx/scgi;
+              server {
+                  listen 8787;
+                  root /tmp/md-test-site;
+                  location / {
+                      markdown_filter on;
+                  }
+              }
+          }
+          SRVEOF
+
+          set +e
+
+          ${SUDO} nginx -t -c /tmp/md-test-nginx/nginx.conf > "${RESULTS_DIR}/nginx-smoke-config.log" 2>&1
+          CONFIG_OK=$?
+          if [ "${CONFIG_OK}" -ne 0 ]; then
+            echo "::error::nginx -t failed for smoke test config"
+            cat "${RESULTS_DIR}/nginx-smoke-config.log"
+            echo "smoke_test_pass=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          ${SUDO} nginx -c /tmp/md-test-nginx/nginx.conf 2>"${RESULTS_DIR}/nginx-start-stderr.log"
+          sleep 2
+
+          # Request the HTML page with Accept: text/markdown to trigger
+          # the module's HTML→Markdown conversion.
+          RESPONSE=$(curl -s --max-time 10 \
+            -H "Accept: text/markdown" \
+            http://localhost:8787/index.html 2>"${RESULTS_DIR}/smoke-curl-stderr.log")
+          CURL_EXIT=$?
+
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+            --max-time 10 \
+            -H "Accept: text/markdown" \
+            http://localhost:8787/index.html 2>/dev/null)
+
+          {
+            echo "=== Smoke Test Results ==="
+            echo "curl exit code: ${CURL_EXIT}"
+            echo "HTTP status code: ${HTTP_CODE}"
+            echo ""
+            echo "--- Response body ---"
+            echo "${RESPONSE}"
+          } > "${SMOKE_LOG}" 2>&1
+
+          cat "${SMOKE_LOG}"
+
+          set -e
+
+          # The module converts HTML→Markdown.  The source HTML contains
+          # <h1>Hello World</h1> and <strong>test</strong>.  After
+          # conversion the response must contain markdown syntax that
+          # could NOT appear in the raw HTML source:
+          #   "# "  — ATX heading prefix from <h1>
+          #   "**"  — strong emphasis from <strong>
+          PASS=false
+          if [ "${CURL_EXIT}" -eq 0 ] && [ "${HTTP_CODE}" = "200" ]; then
+            HAS_HEADING=$(echo "${RESPONSE}" | grep -c '^# ' || true)
+            HAS_STRONG=$(echo "${RESPONSE}" | grep -c '\*\*' || true)
+            if [ "${HAS_HEADING}" -gt 0 ] && [ "${HAS_STRONG}" -gt 0 ]; then
+              PASS=true
+            else
+              echo "::error::Response does not contain expected markdown syntax (heading='# ', strong='**'). Module may not have converted the HTML."
+            fi
+          fi
+
+          if [ "${PASS}" = "true" ]; then
+            echo "smoke_test_pass=true" >> "$GITHUB_OUTPUT"
+            echo "Smoke test passed: HTTP ${HTTP_CODE}, markdown conversion verified"
+          else
+            echo "smoke_test_pass=false" >> "$GITHUB_OUTPUT"
+            echo "::error::Smoke test failed: curl exit=${CURL_EXIT}, HTTP code=${HTTP_CODE}"
+          fi
+
+          ${SUDO} nginx -s stop -c /tmp/md-test-nginx/nginx.conf 2>/dev/null || true
+
+      - name: Generate verification summary
+        if: always()
+        env:
+          TARGET_NGINX: ${{ matrix.target.nginx }}
+          TARGET_OS_TYPE: ${{ matrix.target.os_type }}
+          TARGET_ARCH: ${{ matrix.target.arch }}
+          TARGET_VARIANT: ${{ matrix.target.variant }}
+          EXPECTED_INSTALL_SUCCESS: ${{ matrix.target.expected_install_success && 'true' || 'false' }}
+        run: |
+          RESULTS_DIR="${{ runner.temp }}/install-verify"
+          INSTALL_EXIT="${{ steps.install.outputs.install_exit }}"
+          VALIDATE_OUTCOME="${{ steps.validate_outcome.conclusion }}"
+          NGINX_TEST_EXIT="${{ steps.nginx_test.outputs.nginx_test_exit }}"
+          MODULE_FOUND="${{ steps.module_check.outputs.module_found }}"
+          SMOKE_PASS="${{ steps.smoke_test.outputs.smoke_test_pass }}"
+
+          {
+            echo "========================================"
+            echo " Install Verification Summary"
+            echo "========================================"
+            echo "Environment:        ${{ matrix.target.name }}"
+            echo "Variant:            ${TARGET_VARIANT}"
+            echo "Target nginx:       ${TARGET_NGINX}"
+            echo "Target os_type:     ${TARGET_OS_TYPE}"
+            echo "Target arch:        ${TARGET_ARCH}"
+            echo "Runner:             ${{ matrix.target.runner }}"
+            echo "Container:          ${{ matrix.target.container || 'none' }}"
+            echo "Ref:                ${{ github.event.inputs.ref || github.ref }}"
+            echo "Module version:     ${{ github.event.inputs.version || 'latest' }}"
+            echo "Date:               $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+            echo "----------------------------------------"
+            echo "Expected success:         ${EXPECTED_INSTALL_SUCCESS}"
+            echo "Install script exit code: ${INSTALL_EXIT:-N/A}"
+            echo "Outcome validation:       ${VALIDATE_OUTCOME:-N/A}"
+            echo "nginx -t exit code:       ${NGINX_TEST_EXIT:-N/A}"
+            echo "Module .so found:         ${MODULE_FOUND:-N/A}"
+            echo "Smoke test passed:        ${SMOKE_PASS:-N/A}"
+            echo "----------------------------------------"
+
+            OVERALL="PASS"
+            if [ "${VALIDATE_OUTCOME}" != "success" ]; then
+              OVERALL="FAIL"
+            elif [ "${EXPECTED_INSTALL_SUCCESS}" = "true" ]; then
+              if [ "${INSTALL_EXIT}" != "0" ] || \
+                 [ "${NGINX_TEST_EXIT}" != "0" ] || \
+                 [ "${MODULE_FOUND}" != "true" ] || \
+                 [ "${SMOKE_PASS}" != "true" ]; then
+                OVERALL="FAIL"
+              fi
+            fi
+            echo "Overall result: ${OVERALL}"
+            echo "========================================"
+          } > "${RESULTS_DIR}/summary.txt"
+
+          cat "${RESULTS_DIR}/summary.txt"
+
+          if grep -q "Overall result: FAIL" "${RESULTS_DIR}/summary.txt"; then
+            echo "::error::Verification failed for ${{ matrix.target.name }}. See artifacts for details."
+            exit 1
+          fi
+
+      - name: Upload verification artifacts
+        if: always()
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
+        with:
+          name: ${{ matrix.target.artifact_name }}
+          path: ${{ runner.temp }}/install-verify/
+          if-no-files-found: ignore
+          retention-days: 30

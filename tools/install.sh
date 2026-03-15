@@ -13,6 +13,120 @@ RELEASE_VERSION="${VERSION:-}"
 DOWNLOAD_URL_OVERRIDE="${DOWNLOAD_URL_OVERRIDE:-}"
 DOWNLOAD_SHA256="${DOWNLOAD_SHA256:-}"
 MIN_SUPPORTED_NGINX_VERSION="1.24.0"
+SOURCE_BUILD_URL="https://github.com/cnkang/nginx-markdown-for-agents/tree/main/docs/guides/INSTALLATION.md#building-from-source"
+SUPPORTED_ARCHITECTURES="x86_64, aarch64"
+
+# --json flag: when set, output structured JSON to stdout at exit
+JSON_OUTPUT=0
+for arg in "$@"; do
+  if [[ "$arg" == "--json" ]]; then
+    JSON_OUTPUT=1
+  fi
+done
+
+# Collected state for JSON output
+_json_nginx_version=""
+_json_os_type=""
+_json_arch=""
+_json_error_category=""
+_json_error_message=""
+_json_available_versions=""
+_json_suggestions=()
+
+# --- Structured error helpers ---
+
+# emit_error <category> <message>
+# Prints [ERROR] category: message to stderr
+emit_error() {
+  local category="$1"
+  local message="$2"
+  echo "[ERROR] ${category}: ${message}" >&2
+  _json_error_category="$category"
+  _json_error_message="$message"
+}
+
+# emit_suggest <suggestion>
+# Prints [SUGGEST] suggestion to stderr and collects for JSON
+emit_suggest() {
+  local suggestion="$1"
+  echo "[SUGGEST] ${suggestion}" >&2
+  _json_suggestions+=("$suggestion")
+}
+
+# json_output <success>
+# If --json is set, prints structured JSON to stdout
+json_output() {
+  local success="$1"
+  if [[ "$JSON_OUTPUT" -ne 1 ]]; then
+    return 0
+  fi
+
+  local json_success="$success"
+  local json_nginx_version="${_json_nginx_version}"
+  local json_os_type="${_json_os_type}"
+  local json_arch="${_json_arch}"
+
+  # Build suggestions JSON array
+  local suggestions_json="[]"
+  if [[ "${#_json_suggestions[@]}" -gt 0 ]]; then
+    suggestions_json="["
+    local first=1
+    for s in "${_json_suggestions[@]}"; do
+      if [[ "$first" -eq 1 ]]; then
+        first=0
+      else
+        suggestions_json+=","
+      fi
+      # Escape double quotes and backslashes in suggestion text
+      local escaped="${s//\\/\\\\}"
+      escaped="${escaped//\"/\\\"}"
+      suggestions_json+="\"${escaped}\""
+    done
+    suggestions_json+="]"
+  fi
+
+  # Build available_versions JSON array
+  local versions_json="[]"
+  if [[ -n "$_json_available_versions" ]]; then
+    versions_json="["
+    local first=1
+    for v in $_json_available_versions; do
+      if [[ "$first" -eq 1 ]]; then
+        first=0
+      else
+        versions_json+=","
+      fi
+      versions_json+="\"${v}\""
+    done
+    versions_json+="]"
+  fi
+
+  # Build error object or null
+  local error_json="null"
+  if [[ -n "$_json_error_category" ]]; then
+    local escaped_msg="${_json_error_message//\\/\\\\}"
+    escaped_msg="${escaped_msg//\"/\\\"}"
+    error_json="{\"category\":\"${_json_error_category}\",\"message\":\"${escaped_msg}\"}"
+  fi
+
+  printf '{"success":%s,"nginx_version":"%s","os_type":"%s","arch":"%s","error":%s,"available_versions":%s,"suggestions":%s}\n' \
+    "$json_success" "$json_nginx_version" "$json_os_type" "$json_arch" \
+    "$error_json" "$versions_json" "$suggestions_json" >&3
+}
+
+# die_with_error <category> <message> <suggestion1> [suggestion2] ...
+# Emits structured error + suggestions, outputs JSON if needed, then exits 1
+die_with_error() {
+  local category="$1"
+  local message="$2"
+  shift 2
+  emit_error "$category" "$message"
+  for suggestion in "$@"; do
+    emit_suggest "$suggestion"
+  done
+  json_output false
+  exit 1
+}
 
 semver_lt() {
   local lhs="$1"
@@ -100,7 +214,9 @@ resolve_download_info() {
   fi
 
   if ! command -v python3 >/dev/null 2>&1; then
-    echo "Error: python3 is required by the installer."
+    emit_error "config" "python3 is required by the installer but was not found."
+    emit_suggest "Install python3: apt-get install python3 / apk add python3"
+    json_output false
     exit 1
   fi
 
@@ -355,28 +471,40 @@ insert_markdown_filter_into_http_block() {
   return 0
 }
 
+# When --json is set, save original stdout to fd 3 for the JSON payload,
+# then redirect stdout to stderr so all informational output goes to stderr.
+# When --json is not set, fd 3 is just stdout (no-op).
+if [[ "$JSON_OUTPUT" -eq 1 ]]; then
+  exec 3>&1 1>&2
+else
+  exec 3>&1
+fi
+
 echo "=================================================================================="
 echo " NGINX Markdown for Agents - Binary Module Installer"
 echo "=================================================================================="
 
 if [ "${SKIP_ROOT_CHECK:-0}" != "1" ] && [ "$EUID" -ne 0 ]; then
-  echo "Please run as root (or with sudo)."
-  exit 1
+  die_with_error "config" "This script must be run as root." \
+    "Re-run with: sudo bash install.sh" \
+    "Or set SKIP_ROOT_CHECK=1 if running inside a container."
 fi
 
 # Detect Nginx runtime/build metadata
 if ! command -v nginx > /dev/null 2>&1; then
-  echo "Error: nginx is not installed or not in PATH."
-  echo "Please install NGINX first before running this script."
-  exit 1
+  die_with_error "config" "nginx is not installed or not in PATH." \
+    "Install NGINX first: https://nginx.org/en/linux_packages.html" \
+    "Ensure the nginx binary is in your PATH."
 fi
 
 NGINX_V_OUTPUT="$(nginx -V 2>&1)"
 NGINX_VERSION="$(printf '%s\n' "$NGINX_V_OUTPUT" | grep -oE 'nginx/[0-9]+\.[0-9]+\.[0-9]+' | cut -d/ -f2)"
 if [ -z "$NGINX_VERSION" ]; then
-  echo "Error: Could not determine NGINX version."
-  exit 1
+  die_with_error "config" "Could not determine NGINX version from 'nginx -V' output." \
+    "Verify NGINX is installed correctly: nginx -V" \
+    "Ensure the nginx binary is the expected version."
 fi
+_json_nginx_version="$NGINX_VERSION"
 echo "[+] Detected NGINX version: $NGINX_VERSION"
 
 NGINX_PREFIX_RAW="$(extract_configure_arg "prefix" "$NGINX_V_OUTPUT")"
@@ -398,11 +526,10 @@ if [ -n "$NGINX_MODULES_PATH_RAW" ]; then
 fi
 
 if semver_lt "$NGINX_VERSION" "$MIN_SUPPORTED_NGINX_VERSION"; then
-  echo "Error: NGINX $NGINX_VERSION is not supported."
-  echo "Minimum supported NGINX version is $MIN_SUPPORTED_NGINX_VERSION."
-  echo "Support baseline was raised to simplify compatibility and release coverage."
-  echo "Please upgrade NGINX, or build and maintain your own custom module for older versions."
-  exit 1
+  die_with_error "version_mismatch" \
+    "NGINX ${NGINX_VERSION} is below the supported baseline (${MIN_SUPPORTED_NGINX_VERSION}+). Versions older than ${MIN_SUPPORTED_NGINX_VERSION} are unsupported; source builds are not guaranteed compatible." \
+    "Upgrade NGINX to ${MIN_SUPPORTED_NGINX_VERSION} or newer." \
+    "See supported versions: ${SOURCE_BUILD_URL}"
 fi
 
 # Detect OS type (glibc vs musl)
@@ -413,6 +540,7 @@ elif [ -f /etc/alpine-release ]; then
   OS_TYPE="musl"
 fi
 echo "[+] Detected OS family: $OS_TYPE"
+_json_os_type="$OS_TYPE"
 
 # Detect Architecture
 ARCH="$(uname -m)"
@@ -421,9 +549,12 @@ if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then
 elif [ "$ARCH" = "x86_64" ] || [ "$ARCH" = "amd64" ]; then
   ARCH="x86_64"
 else
-  echo "Error: Unsupported architecture $ARCH"
-  exit 1
+  die_with_error "arch_unsupported" \
+    "Unsupported architecture: ${ARCH}. Supported architectures: ${SUPPORTED_ARCHITECTURES}." \
+    "Use a supported architecture (${SUPPORTED_ARCHITECTURES})." \
+    "Or build the module from source: ${SOURCE_BUILD_URL}"
 fi
+_json_arch="$ARCH"
 echo "[+] Detected Architecture: $ARCH"
 
 release_api_hint="latest"
@@ -459,17 +590,19 @@ EXPECTED_SHA256="${RELEASE_INFO[1]:-}"
 AVAILABLE_VERSIONS="${RELEASE_INFO[2]:-}"
 
 if [ -z "$DOWNLOAD_URL" ]; then
-  echo "Error: Could not find pre-built module for NGINX $NGINX_VERSION ($OS_TYPE $ARCH)."
-  echo "NGINX dynamic modules require an exact NGINX version match."
+  _json_available_versions="$AVAILABLE_VERSIONS"
+  _version_suggestions=("NGINX dynamic modules require an exact version match.")
   if [ -n "$AVAILABLE_VERSIONS" ]; then
-    echo "Available pre-built versions for ${OS_TYPE}/${ARCH} (grouped by major.minor):"
-    format_versions_by_series "$AVAILABLE_VERSIONS"
+    echo "Available pre-built versions for ${OS_TYPE}/${ARCH} (grouped by major.minor):" >&2
+    format_versions_by_series "$AVAILABLE_VERSIONS" >&2
+    _version_suggestions+=("Switch NGINX to one of the available versions listed above.")
   else
-    echo "No pre-built binaries are currently available for ${OS_TYPE}/${ARCH} in ref ${source_ref}."
+    echo "No pre-built binaries are currently available for ${OS_TYPE}/${ARCH} in ref ${source_ref}." >&2
   fi
-  echo "Use the exact patch version shown above, or compile the module from source for your current NGINX version."
-  echo "See https://github.com/${REPO}/tree/main/docs/guides/INSTALLATION.md"
-  exit 1
+  die_with_error "version_mismatch" \
+    "No pre-built module found for NGINX ${NGINX_VERSION} (${OS_TYPE} ${ARCH}). Version is >= ${MIN_SUPPORTED_NGINX_VERSION} but not in the release matrix; a source build is supported." \
+    "${_version_suggestions[@]}" \
+    "Or build the module from source: ${SOURCE_BUILD_URL}"
 fi
 
 echo "[+] Downloading $DOWNLOAD_URL ..."
@@ -477,24 +610,25 @@ TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
 if ! curl -fsSL -o "$TMP_DIR/$ASSET_NAME" "$DOWNLOAD_URL"; then
-  echo "Error: Failed to download $ASSET_NAME from:"
-  echo "       $DOWNLOAD_URL"
-  echo "This usually means the exact NGINX version binary does not exist for your platform."
+  _json_available_versions="$AVAILABLE_VERSIONS"
   if [ -n "$AVAILABLE_VERSIONS" ]; then
-    echo "Available pre-built versions for ${OS_TYPE}/${ARCH} (grouped by major.minor):"
-    format_versions_by_series "$AVAILABLE_VERSIONS"
+    echo "Available pre-built versions for ${OS_TYPE}/${ARCH} (grouped by major.minor):" >&2
+    format_versions_by_series "$AVAILABLE_VERSIONS" >&2
   fi
-  echo "See https://github.com/${REPO}/tree/main/docs/guides/INSTALLATION.md"
-  exit 1
+  die_with_error "network" \
+    "Failed to download ${ASSET_NAME} from ${DOWNLOAD_URL}." \
+    "Check your network connection and try again." \
+    "Verify the URL is accessible: curl -fsSL -I '${DOWNLOAD_URL}'" \
+    "See ${SOURCE_BUILD_URL}"
 fi
 
 if [ -n "$EXPECTED_SHA256" ]; then
   ACTUAL_SHA256="$(sha256_file "$TMP_DIR/$ASSET_NAME")"
   if [ "$ACTUAL_SHA256" != "$EXPECTED_SHA256" ]; then
-    echo "Error: Checksum verification failed for $ASSET_NAME"
-    echo "Expected: $EXPECTED_SHA256"
-    echo "Actual:   $ACTUAL_SHA256"
-    exit 1
+    die_with_error "checksum" \
+      "Checksum verification failed for ${ASSET_NAME}. Expected: ${EXPECTED_SHA256}, Actual: ${ACTUAL_SHA256}." \
+      "Re-download the file and try again." \
+      "If the problem persists, the release artifact may be corrupted. Report at https://github.com/${REPO}/issues"
   fi
   echo "[+] SHA256 checksum verified"
 else
@@ -502,12 +636,19 @@ else
 fi
 
 cd "$TMP_DIR"
-tar -xzf "$ASSET_NAME"
+if ! tar -xzf "$ASSET_NAME"; then
+  die_with_error "extraction" \
+    "Failed to extract ${ASSET_NAME}." \
+    "The archive may be corrupted. Re-download and try again." \
+    "Report at https://github.com/${REPO}/issues if the problem persists."
+fi
 
 MODULE_SO="ngx_http_markdown_filter_module.so"
 if [ ! -f "$MODULE_SO" ]; then
-  echo "Error: Extraction failed, $MODULE_SO not found."
-  exit 1
+  die_with_error "config" \
+    "Extraction failed: ${MODULE_SO} not found in the downloaded archive." \
+    "The archive may be corrupted. Re-download and try again." \
+    "Report at https://github.com/${REPO}/issues if the problem persists."
 fi
 
 # Determine NGINX modules directory
@@ -526,11 +667,23 @@ elif [ -d "/usr/local/nginx/modules" ]; then
 else
   MODULES_DIR="/etc/nginx/modules"
 fi
-mkdir -p "$MODULES_DIR"
+if ! mkdir -p "$MODULES_DIR"; then
+  die_with_error "filesystem" \
+    "Failed to create modules directory: ${MODULES_DIR}" \
+    "Check filesystem permissions and disk space."
+fi
 
 echo "[+] Installing module to $MODULES_DIR/"
-cp "$MODULE_SO" "$MODULES_DIR/"
-chmod 644 "$MODULES_DIR/$MODULE_SO"
+if ! cp "$MODULE_SO" "$MODULES_DIR/"; then
+  die_with_error "filesystem" \
+    "Failed to copy ${MODULE_SO} to ${MODULES_DIR}/" \
+    "Check filesystem permissions and disk space."
+fi
+if ! chmod 644 "$MODULES_DIR/$MODULE_SO"; then
+  die_with_error "filesystem" \
+    "Failed to set permissions on ${MODULES_DIR}/${MODULE_SO}" \
+    "Check filesystem permissions."
+fi
 
 MODULE_LOAD_PATH="${MODULES_DIR%/}/${MODULE_SO}"
 if [ -n "$NGINX_MODULES_PATH_RAW" ]; then
@@ -661,3 +814,6 @@ echo "You can continue fine-tuning later (recommended):"
 echo "- Scope rollout with server/location-level markdown_filter on/off"
 echo "- Adjust markdown_max_size / markdown_on_error by workload"
 echo "=================================================================================="
+
+# Emit JSON success output if --json was requested
+json_output true
