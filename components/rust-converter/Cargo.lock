@@ -500,9 +500,11 @@ dependencies = [
  "encoding_rs",
  "hex",
  "html5ever",
+ "libc",
  "markup5ever_rcdom",
  "proptest",
  "regex",
+ "serde_json",
 ]
 
 [[package]]

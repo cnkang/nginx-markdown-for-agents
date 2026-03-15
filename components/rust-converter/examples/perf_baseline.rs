@@ -1,6 +1,7 @@
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::ptr;
 use std::time::Instant;
 
@@ -46,6 +47,7 @@ struct FfiSummary {
     html_bytes: usize,
     markdown_bytes_avg: usize,
     token_estimate_avg: u32,
+    peak_memory_bytes: u64,
 }
 
 #[derive(Default, Clone)]
@@ -55,6 +57,52 @@ struct BreakdownSummary {
     etag_ms: f64,
     token_ms: f64,
     total_ms: f64,
+}
+
+/// Parsed command-line arguments.
+struct CliArgs {
+    /// Run only a single sample tier by name.
+    single: Option<String>,
+    /// Path to write the Measurement Report JSON.
+    json_output: Option<PathBuf>,
+    /// Override the platform identifier (defaults to auto-detected).
+    platform_override: Option<String>,
+}
+
+fn parse_args() -> CliArgs {
+    let args: Vec<String> = env::args().collect();
+    let mut single = None;
+    let mut json_output = None;
+    let mut platform_override = None;
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--single" => {
+                i += 1;
+                single = Some(args.get(i).expect("--single requires a value").clone());
+            }
+            "--json-output" => {
+                i += 1;
+                json_output = Some(PathBuf::from(
+                    args.get(i).expect("--json-output requires a path"),
+                ));
+            }
+            "--platform" => {
+                i += 1;
+                platform_override =
+                    Some(args.get(i).expect("--platform requires a value").clone());
+            }
+            other => {
+                eprintln!("warning: unknown argument: {other}");
+            }
+        }
+        i += 1;
+    }
+    CliArgs {
+        single,
+        json_output,
+        platform_override,
+    }
 }
 
 fn percentile_ms(sorted: &[f64], p: f64) -> f64 {
@@ -165,6 +213,57 @@ fn build_samples() -> Vec<Sample> {
     ]
 }
 
+/// Returns the current process peak RSS in bytes.
+///
+/// Uses platform-specific APIs: `getrusage` on Unix, `GetProcessMemoryInfo`
+/// on Windows. Returns 0 when the platform is unsupported.
+fn peak_rss_bytes() -> u64 {
+    #[cfg(unix)]
+    {
+        let mut usage: libc::rusage = unsafe { std::mem::zeroed() };
+        let ret = unsafe { libc::getrusage(libc::RUSAGE_SELF, &mut usage) };
+        if ret == 0 {
+            // macOS reports in bytes, Linux in kilobytes.
+            let raw = usage.ru_maxrss as u64;
+            if cfg!(target_os = "macos") {
+                raw
+            } else {
+                raw * 1024
+            }
+        } else {
+            0
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        0
+    }
+}
+
+/// Maps the internal sample name to the canonical JSON tier key.
+///
+/// The `large` sample is mapped to `large-1m` to match the metrics schema.
+/// All other names pass through unchanged.
+fn tier_key(sample_name: &str) -> &str {
+    match sample_name {
+        "large" => "large-1m",
+        other => other,
+    }
+}
+
+/// Resolves the `--single` CLI value to the internal sample name.
+///
+/// Accepts `large` as a compatibility alias for the `large` sample (whose
+/// JSON tier key is `large-1m`).
+fn resolve_single_name(cli_value: &str) -> &str {
+    match cli_value {
+        // Canonical tier name → internal sample name.
+        "large-1m" => "large",
+        // Everything else (including the legacy `large` alias) passes through.
+        other => other,
+    }
+}
+
 fn run_ffi_baseline(sample: &Sample, cfg: RunConfig) -> FfiSummary {
     let content_type = b"text/html; charset=UTF-8";
     let base_url = sample.base_url.map(str::as_bytes);
@@ -229,24 +328,26 @@ fn run_ffi_baseline(sample: &Sample, cfg: RunConfig) -> FfiSummary {
 
     unsafe { markdown_converter_free(handle) };
 
+    let peak_mem = peak_rss_bytes();
     let stats = summarize(&durations, sample.html.len());
     FfiSummary {
         stats,
         html_bytes: sample.html.len(),
         markdown_bytes_avg: markdown_len_sum / cfg.iterations.max(1),
         token_estimate_avg: (token_sum / cfg.iterations.max(1) as u64) as u32,
+        peak_memory_bytes: peak_mem,
     }
 }
 
 fn run_breakdown(sample: &Sample, iterations: usize) -> BreakdownSummary {
     let converter = MarkdownConverter::with_options(ConversionOptions {
         flavor: MarkdownFlavor::CommonMark,
-        include_front_matter: false,
+        include_front_matter: sample.front_matter,
         extract_metadata: false,
         simplify_navigation: true,
         preserve_tables: true,
-        base_url: None,
-        resolve_relative_urls: false,
+        base_url: sample.base_url.map(|s| s.to_string()),
+        resolve_relative_urls: sample.base_url.is_some(),
     });
     let etag = ETagGenerator::new();
     let token = TokenEstimator::new();
@@ -352,22 +453,169 @@ fn print_breakdown(sample: &Sample, b: &BreakdownSummary, ffi_avg_ms: f64) {
     println!();
 }
 
-fn run_single_mode(name: &str) {
-    let samples = build_samples();
-    let sample = samples
-        .into_iter()
-        .find(|s| s.name == name)
-        .unwrap_or_else(|| panic!("unknown sample: {name}"));
-    let cfg = match sample.name {
+/// Returns the current git commit short hash, or `"unknown"` on failure.
+fn git_commit_hash() -> String {
+    Command::new("git")
+        .args(["rev-parse", "--short", "HEAD"])
+        .output()
+        .ok()
+        .and_then(|o| {
+            if o.status.success() {
+                String::from_utf8(o.stdout)
+                    .ok()
+                    .map(|s| s.trim().to_string())
+            } else {
+                None
+            }
+        })
+        .unwrap_or_else(|| "unknown".to_string())
+}
+
+/// Returns a platform identifier string (e.g. `"Darwin-arm64"`, `"Linux-x86_64"`).
+fn detect_platform() -> String {
+    // Use uname-style naming to match the shell scripts and CI workflows.
+    // Rust's env::consts::OS returns "macos" but uname gives "darwin";
+    // env::consts::ARCH returns "aarch64" but uname gives "arm64".
+    let os = match env::consts::OS {
+        "macos" => "darwin",
+        other => other,
+    };
+    let arch = match env::consts::ARCH {
+        "aarch64" => "arm64",
+        other => other,
+    };
+    format!("{os}-{arch}")
+}
+
+/// Returns the current UTC timestamp in ISO 8601 format.
+///
+/// Uses a simple approach based on `UNIX_EPOCH` to avoid pulling in a
+/// heavyweight datetime crate.
+fn iso8601_now() -> String {
+    use std::time::SystemTime;
+    let dur = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default();
+    let secs = dur.as_secs();
+
+    // Convert epoch seconds to date-time components.
+    let days = secs / 86400;
+    let time_of_day = secs % 86400;
+    let hours = time_of_day / 3600;
+    let minutes = (time_of_day % 3600) / 60;
+    let seconds = time_of_day % 60;
+
+    // Compute year/month/day from days since epoch (1970-01-01).
+    let (year, month, day) = epoch_days_to_ymd(days);
+
+    format!(
+        "{year:04}-{month:02}-{day:02}T{hours:02}:{minutes:02}:{seconds:02}Z"
+    )
+}
+
+/// Converts days since Unix epoch to (year, month, day).
+fn epoch_days_to_ymd(days: u64) -> (u64, u64, u64) {
+    // Algorithm from Howard Hinnant's `chrono`-compatible date library.
+    let z = days + 719468;
+    let era = z / 146097;
+    let doe = z - era * 146097;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if m <= 2 { y + 1 } else { y };
+    (y, m, d)
+}
+
+/// Builds a Measurement Report JSON value from collected results.
+///
+/// The report conforms to the schema defined in `perf/metrics-schema.json`
+/// and the Measurement Report structure in the design document.
+fn build_measurement_report(
+    results: &[(Sample, FfiSummary, RunConfig)],
+    breakdowns: &[(&str, BreakdownSummary)],
+    platform: &str,
+) -> serde_json::Value {
+    let mut tiers = serde_json::Map::new();
+
+    for (sample, ffi, cfg) in results {
+        let key = tier_key(sample.name);
+
+        // Look up the stage breakdown for this sample, if available.
+        let breakdown_opt = breakdowns.iter().find(|(name, _)| *name == sample.name);
+
+        let stage_breakdown = if let Some((_, bd)) = breakdown_opt {
+            let total = bd.total_ms;
+            serde_json::json!({
+                "parse_pct": if total > 0.0 { bd.parse_ms / total * 100.0 } else { 0.0 },
+                "convert_pct": if total > 0.0 { bd.convert_ms / total * 100.0 } else { 0.0 },
+                "etag_pct": if total > 0.0 { bd.etag_ms / total * 100.0 } else { 0.0 },
+                "token_pct": if total > 0.0 { bd.token_ms / total * 100.0 } else { 0.0 },
+            })
+        } else {
+            serde_json::json!({
+                "parse_pct": 0.0,
+                "convert_pct": 0.0,
+                "etag_pct": 0.0,
+                "token_pct": 0.0,
+            })
+        };
+
+        let tier_value = serde_json::json!({
+            "html_bytes": ffi.html_bytes,
+            "markdown_bytes_avg": ffi.markdown_bytes_avg,
+            "token_estimate_avg": ffi.token_estimate_avg,
+            "p50_ms": ffi.stats.p50_ms,
+            "p95_ms": ffi.stats.p95_ms,
+            "p99_ms": ffi.stats.p99_ms,
+            "peak_memory_bytes": ffi.peak_memory_bytes,
+            "req_per_s": ffi.stats.req_per_s,
+            "input_mb_per_s": ffi.stats.input_mb_per_s,
+            "stage_breakdown": stage_breakdown,
+            "iterations": cfg.iterations,
+            "warmup": cfg.warmup,
+        });
+
+        tiers.insert(key.to_string(), tier_value);
+    }
+
+    serde_json::json!({
+        "schema_version": "1.0.0",
+        "report_type": "measurement",
+        "timestamp": iso8601_now(),
+        "git_commit": git_commit_hash(),
+        "platform": platform,
+        "tiers": tiers,
+    })
+}
+
+/// Writes the Measurement Report JSON to the given path.
+fn write_json_report(path: &Path, report: &serde_json::Value) {
+    let json_str =
+        serde_json::to_string_pretty(report).expect("failed to serialize measurement report");
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).unwrap_or_else(|e| {
+            panic!(
+                "failed to create directory {}: {e}",
+                parent.display()
+            )
+        });
+    }
+    fs::write(path, json_str)
+        .unwrap_or_else(|e| panic!("failed to write {}: {e}", path.display()));
+    eprintln!("Measurement report written to {}", path.display());
+}
+
+/// Returns the `RunConfig` for a given sample name.
+fn config_for_sample(name: &str) -> RunConfig {
+    match name {
         "small" => RunConfig {
             warmup: 100,
             iterations: 3000,
         },
-        "medium" => RunConfig {
-            warmup: 50,
-            iterations: 1000,
-        },
-        "medium-front-matter" => RunConfig {
+        "medium" | "medium-front-matter" => RunConfig {
             warmup: 50,
             iterations: 1000,
         },
@@ -375,9 +623,21 @@ fn run_single_mode(name: &str) {
             warmup: 5,
             iterations: 40,
         },
-        _ => unreachable!(),
-    };
+        _ => panic!("unknown sample: {name}"),
+    }
+}
+
+fn run_single_mode(name: &str, json_output: Option<&Path>, platform: &str) {
+    let resolved = resolve_single_name(name);
+    let samples = build_samples();
+    let sample = samples
+        .into_iter()
+        .find(|s| s.name == resolved)
+        .unwrap_or_else(|| panic!("unknown sample: {resolved}"));
+    let cfg = config_for_sample(sample.name);
     let result = run_ffi_baseline(&sample, cfg);
+
+    // Existing text output (backward compatible).
     println!(
         "single_sample={} html_bytes={} avg_ms={:.3} p95_ms={:.3} req_per_s={:.1}",
         sample.name,
@@ -386,43 +646,43 @@ fn run_single_mode(name: &str) {
         result.stats.p95_ms,
         result.stats.req_per_s
     );
+
+    if let Some(path) = json_output {
+        let report = build_measurement_report(
+            &[(sample, result, cfg)],
+            &[], // No breakdown for single mode.
+            platform,
+        );
+        write_json_report(path, &report);
+    }
 }
 
 fn main() {
-    let args: Vec<String> = env::args().collect();
-    if args.len() == 3 && args[1] == "--single" {
-        run_single_mode(&args[2]);
+    let cli = parse_args();
+    let platform = cli
+        .platform_override
+        .unwrap_or_else(|| detect_platform());
+
+    if let Some(ref single_name) = cli.single {
+        run_single_mode(single_name, cli.json_output.as_deref(), &platform);
         return;
     }
 
     let samples = build_samples();
-    let mut results = Vec::new();
+    let mut results: Vec<(Sample, FfiSummary, RunConfig)> = Vec::new();
 
     for sample in &samples {
-        let cfg = match sample.name {
-            "small" => RunConfig {
-                warmup: 100,
-                iterations: 3000,
-            },
-            "medium" => RunConfig {
-                warmup: 50,
-                iterations: 1000,
-            },
-            "medium-front-matter" => RunConfig {
-                warmup: 50,
-                iterations: 1000,
-            },
-            "large" => RunConfig {
-                warmup: 5,
-                iterations: 40,
-            },
-            _ => unreachable!(),
-        };
+        let cfg = config_for_sample(sample.name);
         let summary = run_ffi_baseline(sample, cfg);
-        results.push((sample.clone(), summary));
+        results.push((sample.clone(), summary, cfg));
     }
 
-    print_ffi_table(&results);
+    // Existing text output (backward compatible).
+    let table_results: Vec<(Sample, FfiSummary)> = results
+        .iter()
+        .map(|(s, f, _)| (s.clone(), f.clone()))
+        .collect();
+    print_ffi_table(&table_results);
 
     let medium = samples
         .iter()
@@ -431,8 +691,25 @@ fn main() {
     let breakdown = run_breakdown(medium, 200);
     let medium_ffi_avg = results
         .iter()
-        .find(|(s, _)| s.name == "medium")
-        .map(|(_, r)| r.stats.avg_ms)
+        .find(|(s, _, _)| s.name == "medium")
+        .map(|(_, r, _)| r.stats.avg_ms)
         .expect("medium ffi result");
     print_breakdown(medium, &breakdown, medium_ffi_avg);
+
+    if let Some(ref path) = cli.json_output {
+        // Run breakdowns for all tiers to populate stage_breakdown in JSON.
+        let mut breakdowns: Vec<(&str, BreakdownSummary)> = Vec::new();
+        for sample in &samples {
+            let bd_iters = match sample.name {
+                "small" => 500,
+                "medium" | "medium-front-matter" => 200,
+                "large" => 10,
+                _ => 100,
+            };
+            let bd = run_breakdown(sample, bd_iters);
+            breakdowns.push((sample.name, bd));
+        }
+        let report = build_measurement_report(&results, &breakdowns, &platform);
+        write_json_report(path, &report);
+    }
 }

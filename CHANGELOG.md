@@ -8,6 +8,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Performance baseline gating system (`perf/`, `tools/perf/`) with dual-threshold regression detection (warning / blocking) for PR and nightly CI
+- Threshold engine (`tools/perf/threshold_engine.py`) comparing current measurements against stored baselines with per-platform, per-tier, per-metric configurable thresholds
+- Measurement Report and Verdict Report JSON formats conforming to `perf/metrics-schema.json`
+- Local runner script (`tools/perf/run_perf_baseline.sh`) for one-command benchmark, comparison, and baseline update
+- Nightly performance workflow (`.github/workflows/nightly-perf.yml`) running all tiers × 3 repeats with median aggregation
+- PR smoke performance gate (`perf-smoke` job in `ci.yml`) for small + medium tiers on every Rust/perf change
+- Platform-layered threshold configuration (`perf/thresholds.json`) with explicit `linux-x86_64` entry and `default` fallback
+- `--platform` CLI flag on `perf_baseline` binary for deterministic platform identification in Rosetta and cross-compilation environments
+- `--update-baseline` / `--tier` mutual exclusion guard in the local runner
+- `PERF_GATE_SKIP=1` environment variable bypass for all performance checks
+- Property-based tests for threshold classification, deviation formula, median aggregation, report roundtrip, and schema conformance
+- Integration test exercising the real `perf_baseline` binary's full-run and per-tier JSON output for report completeness (Requirement 1.6)
+- Shell integration test (`test_local_runner_output_paths.sh`) for local runner output path matrix
+- Performance documentation: `PERFORMANCE_METRICS.md`, `PERFORMANCE_THRESHOLDS.md`, `PERFORMANCE_GATE.md`
+- Baselines directory (`perf/baselines/`) with bootstrap flow documentation
+
+### Changed
+- Extended `perf_baseline.rs` with JSON Measurement Report generation, `--single` / `--json-output` / `--platform` CLI arguments, `large-1m` canonical tier naming, and per-sample stage breakdown
+- Added `serde` and `serde_json` dependencies to `components/rust-converter`
+- Added `.hypothesis/` to `.gitignore`
+
+## [0.2.2] - 2026-03-15
+
+### Added
 - Canonical native E2E entrypoints under `tools/e2e/`, including a focused proxy/TLS backend validation script and a thin orchestration wrapper for `make test-e2e`
 - Shared native-build helper logic for runtime verification scripts under `tools/lib/nginx_markdown_native_build.sh`
 - `cargo-fuzz` targets for parser, FFI, and security-validator paths, plus a nightly GitHub Actions workflow
