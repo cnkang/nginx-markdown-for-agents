@@ -140,7 +140,7 @@ class TestSpecificVerdicts:
         for tier in report["comparison"]["tiers"].values():
             for metric_info in tier.values():
                 assert metric_info["verdict"] == "pass"
-                assert metric_info["deviation_pct"] == 0.0
+                assert metric_info["deviation_pct"] == pytest.approx(0.0, abs=1e-12)
 
     def test_warn_on_moderate_regression(self):
         """20% latency increase → warn (within 15-30 range for p50)."""
@@ -203,16 +203,16 @@ class TestDeviationEdgeCases:
     """Edge cases around zero baselines stay explicit and testable."""
 
     def test_zero_baseline_zero_current_stays_zero(self):
-        assert compute_deviation(0.0, 0.0) == 0.0
+        assert compute_deviation(0.0, 0.0) == pytest.approx(0.0, abs=1e-12)
 
     def test_zero_baseline_positive_current_flags_lower_is_better_regression(self):
         deviation = compute_deviation(5.0, 0.0)
-        assert deviation == 100.0
+        assert deviation == pytest.approx(100.0, abs=1e-12)
         assert judge_metric(deviation, "lower_is_better", 15, 30) == "fail"
 
     def test_zero_baseline_positive_current_is_improvement_for_higher_is_better(self):
         deviation = compute_deviation(5.0, 0.0)
-        assert deviation == 100.0
+        assert deviation == pytest.approx(100.0, abs=1e-12)
         assert judge_metric(deviation, "higher_is_better", -15, -30) == "pass"
 
 

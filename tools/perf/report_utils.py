@@ -109,6 +109,59 @@ def build_baseline_report(measurement_report: dict, platform: str | None = None)
     return baseline
 
 
+def _load_tier_reports(runs_root: Path, tier: str) -> tuple[dict | None, list[dict]]:
+    """Load all run reports for *tier* and return ``(base_report, tier_reports)``."""
+    base_report = None
+    tier_reports = []
+
+    for run_path in sorted(runs_root.glob(f"{tier}-run*.json")):
+        report = load_json(run_path)
+        if base_report is None:
+            base_report = copy.deepcopy(report)
+        tier_data = report.get("tiers", {}).get(tier)
+        if tier_data is not None:
+            tier_reports.append(tier_data)
+
+    return base_report, tier_reports
+
+
+def _median_for_keys(tier_reports: list[dict], keys: list[str]) -> dict:
+    """Return medians for the numeric *keys* present in *tier_reports*."""
+    medians = {}
+    for key in keys:
+        values = [tier_report[key] for tier_report in tier_reports if key in tier_report]
+        if values:
+            medians[key] = median_value(values)
+    return medians
+
+
+def _median_stage_breakdown(tier_reports: list[dict]) -> dict:
+    """Return median stage breakdown values for *tier_reports*."""
+    stage_breakdown = {}
+    for stage_key in STAGE_KEYS:
+        values = [
+            tier_report.get("stage_breakdown", {}).get(stage_key)
+            for tier_report in tier_reports
+        ]
+        values = [value for value in values if value is not None]
+        if values:
+            stage_breakdown[stage_key] = median_value(values)
+    return stage_breakdown
+
+
+def _build_aggregated_tier(tier_reports: list[dict]) -> dict:
+    """Build the aggregated tier payload for repeated *tier_reports*."""
+    median_tier = _median_for_keys(tier_reports, NUMERIC_TIER_KEYS)
+    stage_breakdown = _median_stage_breakdown(tier_reports)
+    if stage_breakdown:
+        median_tier["stage_breakdown"] = stage_breakdown
+
+    first_report = tier_reports[0]
+    median_tier["iterations"] = first_report.get("iterations", 0)
+    median_tier["warmup"] = first_report.get("warmup", 0)
+    return median_tier
+
+
 def aggregate_measurement_runs(input_dir: str | Path, tiers: list[str], platform: str) -> dict | None:
     """Aggregate repeated per-tier runs into a median Measurement Report."""
     runs_root = Path(input_dir)
@@ -116,39 +169,13 @@ def aggregate_measurement_runs(input_dir: str | Path, tiers: list[str], platform
     base_report = None
 
     for tier in tiers:
-        tier_reports = []
-        for run_path in sorted(runs_root.glob(f"{tier}-run*.json")):
-            report = load_json(run_path)
-            if base_report is None:
-                base_report = copy.deepcopy(report)
-            tier_data = report.get("tiers", {}).get(tier)
-            if tier_data is not None:
-                tier_reports.append(tier_data)
-
+        tier_base_report, tier_reports = _load_tier_reports(runs_root, tier)
+        if base_report is None and tier_base_report is not None:
+            base_report = tier_base_report
         if not tier_reports:
             continue
 
-        median_tier = {}
-        for key in NUMERIC_TIER_KEYS:
-            values = [tier_report[key] for tier_report in tier_reports if key in tier_report]
-            if values:
-                median_tier[key] = median_value(values)
-
-        stage_breakdown = {}
-        for stage_key in STAGE_KEYS:
-            values = [
-                tier_report.get("stage_breakdown", {}).get(stage_key)
-                for tier_report in tier_reports
-            ]
-            values = [value for value in values if value is not None]
-            if values:
-                stage_breakdown[stage_key] = median_value(values)
-        if stage_breakdown:
-            median_tier["stage_breakdown"] = stage_breakdown
-
-        median_tier["iterations"] = tier_reports[0].get("iterations", 0)
-        median_tier["warmup"] = tier_reports[0].get("warmup", 0)
-        merged_tiers[tier] = median_tier
+        merged_tiers[tier] = _build_aggregated_tier(tier_reports)
 
     if base_report is None:
         return None

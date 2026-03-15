@@ -143,6 +143,74 @@ def build_skipped_verdict(reason, platform, output_path):
     return report
 
 
+def _metric_comparison(cur_tier, base_tier, metric, direction_map, thresholds_cfg, platform, tier_name):
+    """Return the comparison payload and verdict for one metric, or ``None``."""
+    direction = direction_map.get(metric, "lower_is_better")
+    if direction == "informational":
+        return None
+
+    cur_val = cur_tier.get(metric)
+    base_val = base_tier.get(metric)
+    if cur_val is None or base_val is None:
+        return None
+
+    deviation = compute_deviation(cur_val, base_val)
+    thresh = get_threshold(thresholds_cfg, platform, tier_name, metric)
+    verdict = judge_metric(
+        deviation,
+        direction,
+        thresh.get("warning_pct", 15),
+        thresh.get("blocking_pct", 30),
+    )
+    return {
+        "name": metric,
+        "payload": {
+            "baseline": base_val,
+            "current": cur_val,
+            "deviation_pct": round(deviation, 4),
+            "verdict": verdict,
+        },
+        "verdict": verdict,
+    }
+
+
+def _compare_tier_metrics(base_tier, cur_tier, direction_map, thresholds_cfg, platform, tier_name):
+    """Return ``(tier_comparison, has_warning, has_failure)`` for one tier."""
+    tier_comparison = {}
+    has_warning = False
+    has_failure = False
+
+    for metric in COMPARABLE_METRICS:
+        comparison = _metric_comparison(
+            cur_tier,
+            base_tier,
+            metric,
+            direction_map,
+            thresholds_cfg,
+            platform,
+            tier_name,
+        )
+        if comparison is None:
+            continue
+
+        tier_comparison[comparison["name"]] = comparison["payload"]
+        if comparison["verdict"] == "fail":
+            has_failure = True
+        elif comparison["verdict"] == "warn":
+            has_warning = True
+
+    return tier_comparison, has_warning, has_failure
+
+
+def _overall_verdict(has_warning, has_failure):
+    """Return the report-level verdict label."""
+    if has_failure:
+        return "fail"
+    if has_warning:
+        return "warn"
+    return "pass"
+
+
 def build_verdict_report(baseline, current, thresholds_cfg, direction_map, platform, output_path):
     """Compare *current* against *baseline* and produce a Verdict Report.
 
@@ -160,47 +228,21 @@ def build_verdict_report(baseline, current, thresholds_cfg, direction_map, platf
         if base_tier is None:
             continue
 
-        tier_comparison = {}
-        for metric in COMPARABLE_METRICS:
-            direction = direction_map.get(metric, "lower_is_better")
-            if direction == "informational":
-                continue
-
-            cur_val = cur_tier.get(metric)
-            base_val = base_tier.get(metric)
-            if cur_val is None or base_val is None:
-                continue
-
-            deviation = compute_deviation(cur_val, base_val)
-            thresh = get_threshold(thresholds_cfg, platform, tier_name, metric)
-            verdict = judge_metric(
-                deviation,
-                direction,
-                thresh.get("warning_pct", 15),
-                thresh.get("blocking_pct", 30),
-            )
-
-            tier_comparison[metric] = {
-                "baseline": base_val,
-                "current": cur_val,
-                "deviation_pct": round(deviation, 4),
-                "verdict": verdict,
-            }
-
-            if verdict == "fail":
-                has_failure = True
-            elif verdict == "warn":
-                has_warning = True
+        tier_comparison, tier_has_warning, tier_has_failure = _compare_tier_metrics(
+            base_tier,
+            cur_tier,
+            direction_map,
+            thresholds_cfg,
+            platform,
+            tier_name,
+        )
+        has_warning = has_warning or tier_has_warning
+        has_failure = has_failure or tier_has_failure
 
         if tier_comparison:
             comparison_tiers[tier_name] = tier_comparison
 
-    if has_failure:
-        overall = "fail"
-    elif has_warning:
-        overall = "warn"
-    else:
-        overall = "pass"
+    overall = _overall_verdict(has_warning, has_failure)
 
     report = {
         "schema_version": "1.0.0",

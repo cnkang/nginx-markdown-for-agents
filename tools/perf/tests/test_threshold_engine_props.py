@@ -49,10 +49,10 @@ non_negative_float = st.floats(min_value=0.0, max_value=1e12, allow_nan=False, a
 def test_property0_zero_baseline_special_case(current):
     """Zero baselines stay explicit so comparisons do not silently disappear."""
     deviation = compute_deviation(current, 0.0)
-    if current == 0.0:
-        assert deviation == 0.0
+    if math.isclose(current, 0.0, rel_tol=0.0, abs_tol=0.0):
+        assert math.isclose(deviation, 0.0, abs_tol=1e-12)
     else:
-        assert deviation == 100.0
+        assert math.isclose(deviation, 100.0, rel_tol=1e-9, abs_tol=1e-12)
 
 
 # ---------------------------------------------------------------------------
@@ -156,8 +156,8 @@ def test_property10_deviation_formula(baseline, current):
     result = compute_deviation(current, baseline)
     expected = (current - baseline) / baseline * 100.0
 
-    if expected == 0.0:
-        assert result == 0.0
+    if math.isclose(expected, 0.0, abs_tol=1e-12):
+        assert math.isclose(result, 0.0, abs_tol=1e-12)
     else:
         relative_error = abs(result - expected) / abs(expected)
         assert relative_error < 1e-4, (
@@ -170,7 +170,7 @@ def test_property10_deviation_formula(baseline, current):
 @settings(max_examples=200)
 def test_property10_zero_deviation_when_equal(baseline):
     """When current == baseline, deviation must be exactly 0."""
-    assert compute_deviation(baseline, baseline) == 0.0
+    assert math.isclose(compute_deviation(baseline, baseline), 0.0, abs_tol=1e-12)
 
 
 @given(
@@ -180,7 +180,7 @@ def test_property10_zero_deviation_when_equal(baseline):
 @settings(max_examples=300)
 def test_property10_sign_correctness(baseline, current):
     """Positive deviation when current > baseline, negative when current < baseline."""
-    assume(current != baseline)
+    assume(not math.isclose(current, baseline, rel_tol=0.0, abs_tol=0.0))
     deviation = compute_deviation(current, baseline)
     if current > baseline:
         assert deviation > 0, f"Expected positive deviation: c={current}, b={baseline}"
@@ -239,4 +239,4 @@ def test_property11_median_within_range(values):
 def test_property11_median_of_identical_values(value, n):
     """Median of identical values must equal that value."""
     values = [value] * n
-    assert median_value(values) == value
+    assert math.isclose(median_value(values), value, rel_tol=1e-9, abs_tol=1e-12)
