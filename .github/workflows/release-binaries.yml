@@ -9,30 +9,96 @@ on:
         description: 'Git ref to build (e.g. v1.0.0, main, or commit SHA)'
         required: false
         default: ''
+      matrix_freshness:
+        description: 'Matrix freshness check: off (skip), warn (log only), required (block on stale)'
+        required: false
+        default: 'off'
+        type: choice
+        options:
+          - 'off'
+          - 'warn'
+          - 'required'
 
 permissions: {}
 
 jobs:
   prepare:
-    name: Resolve Default NGINX Versions
+    name: Resolve Build Matrix from release-matrix.json
     runs-on: ubuntu-latest
     permissions:
       contents: read
     outputs:
-      nginx_versions: ${{ steps.resolve.outputs.nginx_versions }}
+      matrix_entries: ${{ steps.resolve.outputs.matrix_entries }}
       checkout_ref: ${{ steps.checkout_ref.outputs.checkout_ref }}
     steps:
-      - name: Resolve default NGINX versions
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event.inputs.version || github.ref }}
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+        with:
+          python-version: '3.14.3'
+
+      - name: Check matrix freshness
+        if: inputs.matrix_freshness != 'off'
+        env:
+          FRESHNESS_MODE: ${{ inputs.matrix_freshness }}
+        run: |
+          set +e
+          python3 tools/release/update_matrix.py --check-only
+          exit_code=$?
+          set -e
+
+          if [ "$exit_code" -eq 0 ]; then
+            echo "Matrix is up to date."
+          elif [ "$exit_code" -eq 1 ]; then
+            echo "::warning::Matrix freshness check encountered a scraping/parsing error. Continuing anyway."
+          elif [ "$exit_code" -eq 2 ]; then
+            if [ "$FRESHNESS_MODE" = "required" ]; then
+              echo "::error::Matrix is stale. Run the update-matrix workflow to refresh it."
+              exit 1
+            else
+              echo "::warning::Matrix is stale. Consider running the update-matrix workflow."
+            fi
+          fi
+
+      - name: Extract build matrix from release-matrix.json
         id: resolve
         run: |
-          # Build set = nginx.org stable/mainline + common distro package versions (>= 1.24):
-          # - deb: Ubuntu 24.04/25.10/26.04(dev), Debian 13
-          # - rpm: Fedora current stable
-          # - apk: Alpine 3.22/3.23
-          page="$(curl -fsSL https://nginx.org/en/download.html)"
-          versions="$(NGINX_DOWNLOAD_HTML="${page}" python3 -c 'import json, os, re, sys; html=os.environ.get("NGINX_DOWNLOAD_HTML", ""); stable=re.search(r"Stable version.*?nginx-([0-9]+\.[0-9]+\.[0-9]+)\.tar\.gz", html, flags=re.IGNORECASE | re.DOTALL); mainline=re.search(r"Mainline version.*?nginx-([0-9]+\.[0-9]+\.[0-9]+)\.tar\.gz", html, flags=re.IGNORECASE | re.DOTALL); sys.exit("Failed to resolve stable/mainline versions from nginx.org") if (not stable or not mainline) else None; min_v=(1,24,0); distro_versions=["1.24.0","1.26.3","1.28.0","1.28.2"]; all_versions={stable.group(1), mainline.group(1), *distro_versions}; out=sorted([v for v in all_versions if tuple(int(p) for p in v.split(".")) >= min_v], key=lambda v: tuple(int(p) for p in v.split("."))); print(json.dumps(out))')"
+          # Read full-support entries from the release matrix and output
+          # them as a complete entry list for matrix.include consumption.
+          python3 - <<'PY'
+          import json, os
 
-          echo "nginx_versions=${versions}" >> "$GITHUB_OUTPUT"
+          with open("tools/release-matrix.json", "r") as f:
+              data = json.load(f)
+
+          # Only build entries with support_tier == "full"
+          full_entries = [
+              {
+                  "nginx": e["nginx"],
+                  "os_type": e["os_type"],
+                  "arch": e["arch"],
+                  "support_tier": e["support_tier"],
+              }
+              for e in data.get("matrix", [])
+              if e.get("support_tier") == "full"
+          ]
+
+          # Sort for deterministic ordering
+          full_entries.sort(key=lambda e: (
+              tuple(int(p) for p in e["nginx"].split(".")),
+              e["os_type"],
+              e["arch"],
+          ))
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+              out.write(f"matrix_entries={json.dumps(full_entries)}\n")
+
+          print(f"Resolved {len(full_entries)} build entries from release-matrix.json")
+          PY
 
       - id: checkout_ref
         env:
@@ -53,9 +119,7 @@ jobs:
       contents: read
     strategy:
       matrix:
-        nginx: ${{ fromJson(needs.prepare.outputs.nginx_versions) }}
-        os_type: ['glibc', 'musl']
-        arch: ['x86_64', 'aarch64']
+        include: ${{ fromJson(needs.prepare.outputs.matrix_entries) }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -75,9 +139,43 @@ jobs:
           name: ngx_http_markdown_filter_module-${{ matrix.nginx }}-${{ matrix.os_type }}-${{ matrix.arch }}
           path: dist/${{ matrix.nginx }}-${{ matrix.os_type }}-${{ matrix.arch }}/*.tar.gz
 
+  completeness-check:
+    name: Verify Artifact Completeness
+    needs: build-binaries
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+        with:
+          python-version: '3.14.3'
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3 # v8
+        with:
+          path: artifacts
+
+      - name: Collect artifact filenames for completeness check
+        run: |
+          # download-artifact creates subdirectories per artifact name;
+          # flatten all .tar.gz filenames into a list for the checker.
+          find artifacts -name '*.tar.gz' -printf '%f\n' | sort > artifact-list.txt
+          echo "Collected artifacts:"
+          cat artifact-list.txt
+
+      - name: Run completeness check
+        run: |
+          python3 tools/release/completeness_check.py \
+            --matrix tools/release-matrix.json \
+            --artifacts artifact-list.txt
+
   publish-release:
     name: Publish Binaries to Release
-    needs: build-binaries
+    needs: completeness-check
     runs-on: ubuntu-latest
     if: github.event_name == 'release'
     permissions:
@@ -87,6 +185,11 @@ jobs:
         uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3 # v8
         with:
           path: artifacts
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+        with:
+          python-version: '3.14.3'
 
       - name: Generate Grouped Version Manifest
         run: |
