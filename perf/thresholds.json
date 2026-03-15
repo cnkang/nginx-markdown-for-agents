@@ -1,0 +1,266 @@
+{
+  "schema_version": "1.0.0",
+  "description": "Dual-threshold configuration for performance gating. Warning thresholds produce alerts but do not block PR merges. Blocking thresholds prevent PR merges when exceeded. For higher_is_better metrics, negative percentages indicate a regression (decrease). Platform-specific entries take precedence; the 'default' entry is the fallback for platforms without an explicit section.",
+  "platforms": {
+    "linux-x86_64": {
+      "small": {
+        "p50_ms": {
+          "warning_pct": 15,
+          "blocking_pct": 30,
+          "rationale": "P50 latency is the primary comparison metric; 15% warns early, 30% blocks significant regressions"
+        },
+        "p95_ms": {
+          "warning_pct": 20,
+          "blocking_pct": 40,
+          "rationale": "P95 tail latency has higher natural variance than P50; wider thresholds reduce false positives"
+        },
+        "p99_ms": {
+          "warning_pct": 20,
+          "blocking_pct": 40,
+          "rationale": "P99 tail latency has the highest variance; matches P95 tolerance to avoid noise-driven blocks"
+        },
+        "peak_memory_bytes": {
+          "warning_pct": 10,
+          "blocking_pct": 25,
+          "rationale": "Memory regressions are harder to reverse and compound over time; tighter thresholds catch them early"
+        },
+        "req_per_s": {
+          "warning_pct": -15,
+          "blocking_pct": -30,
+          "rationale": "Throughput drop mirrors latency regression; negative values flag decreases as regressions"
+        },
+        "input_mb_per_s": {
+          "warning_pct": -15,
+          "blocking_pct": -30,
+          "rationale": "Input throughput drop indicates processing efficiency regression; mirrors req_per_s thresholds"
+        }
+      },
+      "medium": {
+        "p50_ms": {
+          "warning_pct": 15,
+          "blocking_pct": 30,
+          "rationale": "Medium tier P50 latency; same tolerance as small since P50 is stable across tiers"
+        },
+        "p95_ms": {
+          "warning_pct": 20,
+          "blocking_pct": 40,
+          "rationale": "Medium tier P95 tail latency; wider tolerance for natural variance"
+        },
+        "p99_ms": {
+          "warning_pct": 20,
+          "blocking_pct": 40,
+          "rationale": "Medium tier P99 tail latency; wider tolerance for natural variance"
+        },
+        "peak_memory_bytes": {
+          "warning_pct": 10,
+          "blocking_pct": 25,
+          "rationale": "Memory regressions are harder to reverse; tighter thresholds than latency"
+        },
+        "req_per_s": {
+          "warning_pct": -15,
+          "blocking_pct": -30,
+          "rationale": "Throughput drop mirrors latency regression"
+        },
+        "input_mb_per_s": {
+          "warning_pct": -15,
+          "blocking_pct": -30,
+          "rationale": "Input throughput drop indicates processing efficiency regression"
+        }
+      },
+      "medium-front-matter": {
+        "p50_ms": {
+          "warning_pct": 15,
+          "blocking_pct": 30,
+          "rationale": "Front-matter variant P50; same tolerance as medium since input size is comparable"
+        },
+        "p95_ms": {
+          "warning_pct": 20,
+          "blocking_pct": 40,
+          "rationale": "Front-matter variant P95 tail latency; wider tolerance for natural variance"
+        },
+        "p99_ms": {
+          "warning_pct": 20,
+          "blocking_pct": 40,
+          "rationale": "Front-matter variant P99 tail latency; wider tolerance for natural variance"
+        },
+        "peak_memory_bytes": {
+          "warning_pct": 10,
+          "blocking_pct": 25,
+          "rationale": "Memory regressions are harder to reverse; tighter thresholds than latency"
+        },
+        "req_per_s": {
+          "warning_pct": -15,
+          "blocking_pct": -30,
+          "rationale": "Throughput drop mirrors latency regression"
+        },
+        "input_mb_per_s": {
+          "warning_pct": -15,
+          "blocking_pct": -30,
+          "rationale": "Input throughput drop indicates processing efficiency regression"
+        }
+      },
+      "large-1m": {
+        "p50_ms": {
+          "warning_pct": 15,
+          "blocking_pct": 30,
+          "rationale": "Large tier P50 latency; same relative tolerance since comparison is percentage-based"
+        },
+        "p95_ms": {
+          "warning_pct": 20,
+          "blocking_pct": 40,
+          "rationale": "Large tier P95 tail latency; wider tolerance for natural variance"
+        },
+        "p99_ms": {
+          "warning_pct": 20,
+          "blocking_pct": 40,
+          "rationale": "Large tier P99 tail latency; wider tolerance for natural variance"
+        },
+        "peak_memory_bytes": {
+          "warning_pct": 10,
+          "blocking_pct": 25,
+          "rationale": "Memory regressions are harder to reverse; especially important for large inputs where memory usage is significant"
+        },
+        "req_per_s": {
+          "warning_pct": -15,
+          "blocking_pct": -30,
+          "rationale": "Throughput drop mirrors latency regression"
+        },
+        "input_mb_per_s": {
+          "warning_pct": -15,
+          "blocking_pct": -30,
+          "rationale": "Input throughput drop indicates processing efficiency regression"
+        }
+      }
+    },
+    "default": {
+      "small": {
+        "p50_ms": {
+          "warning_pct": 15,
+          "blocking_pct": 30,
+          "rationale": "P50 latency is the primary comparison metric; 15% warns early, 30% blocks significant regressions"
+        },
+        "p95_ms": {
+          "warning_pct": 20,
+          "blocking_pct": 40,
+          "rationale": "P95 tail latency has higher natural variance than P50; wider thresholds reduce false positives"
+        },
+        "p99_ms": {
+          "warning_pct": 20,
+          "blocking_pct": 40,
+          "rationale": "P99 tail latency has the highest variance; matches P95 tolerance to avoid noise-driven blocks"
+        },
+        "peak_memory_bytes": {
+          "warning_pct": 10,
+          "blocking_pct": 25,
+          "rationale": "Memory regressions are harder to reverse and compound over time; tighter thresholds catch them early"
+        },
+        "req_per_s": {
+          "warning_pct": -15,
+          "blocking_pct": -30,
+          "rationale": "Throughput drop mirrors latency regression; negative values flag decreases as regressions"
+        },
+        "input_mb_per_s": {
+          "warning_pct": -15,
+          "blocking_pct": -30,
+          "rationale": "Input throughput drop indicates processing efficiency regression; mirrors req_per_s thresholds"
+        }
+      },
+      "medium": {
+        "p50_ms": {
+          "warning_pct": 15,
+          "blocking_pct": 30,
+          "rationale": "Medium tier P50 latency; same tolerance as small since P50 is stable across tiers"
+        },
+        "p95_ms": {
+          "warning_pct": 20,
+          "blocking_pct": 40,
+          "rationale": "Medium tier P95 tail latency; wider tolerance for natural variance"
+        },
+        "p99_ms": {
+          "warning_pct": 20,
+          "blocking_pct": 40,
+          "rationale": "Medium tier P99 tail latency; wider tolerance for natural variance"
+        },
+        "peak_memory_bytes": {
+          "warning_pct": 10,
+          "blocking_pct": 25,
+          "rationale": "Memory regressions are harder to reverse; tighter thresholds than latency"
+        },
+        "req_per_s": {
+          "warning_pct": -15,
+          "blocking_pct": -30,
+          "rationale": "Throughput drop mirrors latency regression"
+        },
+        "input_mb_per_s": {
+          "warning_pct": -15,
+          "blocking_pct": -30,
+          "rationale": "Input throughput drop indicates processing efficiency regression"
+        }
+      },
+      "medium-front-matter": {
+        "p50_ms": {
+          "warning_pct": 15,
+          "blocking_pct": 30,
+          "rationale": "Front-matter variant P50; same tolerance as medium since input size is comparable"
+        },
+        "p95_ms": {
+          "warning_pct": 20,
+          "blocking_pct": 40,
+          "rationale": "Front-matter variant P95 tail latency; wider tolerance for natural variance"
+        },
+        "p99_ms": {
+          "warning_pct": 20,
+          "blocking_pct": 40,
+          "rationale": "Front-matter variant P99 tail latency; wider tolerance for natural variance"
+        },
+        "peak_memory_bytes": {
+          "warning_pct": 10,
+          "blocking_pct": 25,
+          "rationale": "Memory regressions are harder to reverse; tighter thresholds than latency"
+        },
+        "req_per_s": {
+          "warning_pct": -15,
+          "blocking_pct": -30,
+          "rationale": "Throughput drop mirrors latency regression"
+        },
+        "input_mb_per_s": {
+          "warning_pct": -15,
+          "blocking_pct": -30,
+          "rationale": "Input throughput drop indicates processing efficiency regression"
+        }
+      },
+      "large-1m": {
+        "p50_ms": {
+          "warning_pct": 15,
+          "blocking_pct": 30,
+          "rationale": "Large tier P50 latency; same relative tolerance since comparison is percentage-based"
+        },
+        "p95_ms": {
+          "warning_pct": 20,
+          "blocking_pct": 40,
+          "rationale": "Large tier P95 tail latency; wider tolerance for natural variance"
+        },
+        "p99_ms": {
+          "warning_pct": 20,
+          "blocking_pct": 40,
+          "rationale": "Large tier P99 tail latency; wider tolerance for natural variance"
+        },
+        "peak_memory_bytes": {
+          "warning_pct": 10,
+          "blocking_pct": 25,
+          "rationale": "Memory regressions are harder to reverse; especially important for large inputs where memory usage is significant"
+        },
+        "req_per_s": {
+          "warning_pct": -15,
+          "blocking_pct": -30,
+          "rationale": "Throughput drop mirrors latency regression"
+        },
+        "input_mb_per_s": {
+          "warning_pct": -15,
+          "blocking_pct": -30,
+          "rationale": "Input throughput drop indicates processing efficiency regression"
+        }
+      }
+    }
+  }
+}

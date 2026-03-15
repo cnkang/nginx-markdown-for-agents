@@ -85,6 +85,7 @@ test: build
 	@$(MAKE) -C $(NGINX_TEST_DIR) unit-smoke
 
 test-rust:
+	cd $(RUST_DIR) && cargo build --release --example perf_baseline
 	cd $(RUST_DIR) && cargo test --all
 
 test-rust-fuzz-smoke:

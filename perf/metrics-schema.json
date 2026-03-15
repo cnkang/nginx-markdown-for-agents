@@ -1,0 +1,111 @@
+{
+  "schema_version": "1.0.0",
+  "metrics": [
+    {
+      "name": "p50_ms",
+      "unit": "milliseconds",
+      "collection": "percentile",
+      "aggregation": "median",
+      "direction": "lower_is_better",
+      "description": "P50 latency"
+    },
+    {
+      "name": "p95_ms",
+      "unit": "milliseconds",
+      "collection": "percentile",
+      "aggregation": "direct",
+      "direction": "lower_is_better",
+      "description": "P95 latency"
+    },
+    {
+      "name": "p99_ms",
+      "unit": "milliseconds",
+      "collection": "percentile",
+      "aggregation": "direct",
+      "direction": "lower_is_better",
+      "description": "P99 latency"
+    },
+    {
+      "name": "peak_memory_bytes",
+      "unit": "bytes",
+      "collection": "process_rss",
+      "aggregation": "max",
+      "direction": "lower_is_better",
+      "description": "Peak RSS memory"
+    },
+    {
+      "name": "req_per_s",
+      "unit": "requests/second",
+      "collection": "derived",
+      "aggregation": "median",
+      "direction": "higher_is_better",
+      "description": "Throughput"
+    },
+    {
+      "name": "input_mb_per_s",
+      "unit": "MB/second",
+      "collection": "derived",
+      "aggregation": "median",
+      "direction": "higher_is_better",
+      "description": "Input throughput"
+    },
+    {
+      "name": "stage_parse_pct",
+      "unit": "percent",
+      "collection": "stage_timing",
+      "aggregation": "mean",
+      "direction": "informational",
+      "description": "Parse stage percentage"
+    },
+    {
+      "name": "stage_convert_pct",
+      "unit": "percent",
+      "collection": "stage_timing",
+      "aggregation": "mean",
+      "direction": "informational",
+      "description": "Convert stage percentage"
+    },
+    {
+      "name": "stage_etag_pct",
+      "unit": "percent",
+      "collection": "stage_timing",
+      "aggregation": "mean",
+      "direction": "informational",
+      "description": "ETag stage percentage"
+    },
+    {
+      "name": "stage_token_pct",
+      "unit": "percent",
+      "collection": "stage_timing",
+      "aggregation": "mean",
+      "direction": "informational",
+      "description": "Token stage percentage"
+    }
+  ],
+  "sample_tiers": [
+    {
+      "name": "small",
+      "target_size": "~0.4KB",
+      "source": "tests/corpus/simple/basic.html",
+      "generation": "direct"
+    },
+    {
+      "name": "medium",
+      "target_size": "~10KB",
+      "source": "tests/corpus/complex/blog-post.html",
+      "generation": "repeat_to_size(10240)"
+    },
+    {
+      "name": "medium-front-matter",
+      "target_size": "~10KB",
+      "source": "tests/corpus/complex/blog-post.html",
+      "generation": "repeat_to_size(10240) + front_matter=true"
+    },
+    {
+      "name": "large-1m",
+      "target_size": "~1MB",
+      "source": "tests/corpus/complex/blog-post.html",
+      "generation": "repeat_to_size(1048576)"
+    }
+  ]
+}

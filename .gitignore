@@ -27,6 +27,9 @@ components/nginx-module/tests/**/*.log
 components/nginx-module/tests/**/*.tmp
 components/nginx-module/tests/**/*.pid
 
+# Performance test temporary reports (baselines are version-controlled)
+perf/reports/
+
 # Generic build output
 build/
 dist/
@@ -41,6 +44,7 @@ tests/**/tmp/
 **/__pycache__/
 *.py[cod]
 .pytest_cache/
+.hypothesis/
 .mypy_cache/
 .ruff_cache/
 .nox/

@@ -1,0 +1,123 @@
+name: Nightly Performance
+
+on:
+  schedule:
+    - cron: '0 3 * * *'  # 03:00 UTC daily
+  workflow_dispatch:
+    inputs:
+      bootstrap_baseline:
+        description: "Generate and upload a baseline artifact instead of running threshold comparison"
+        required: false
+        default: false
+        type: boolean
+
+permissions: {}
+
+jobs:
+  nightly-perf:
+    name: Nightly Full Performance
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+        with:
+          python-version: '3.11'
+
+      - name: Install Python test dependencies
+        run: pip install hypothesis pytest
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          workspaces: |
+            components/rust-converter -> target
+
+      - name: Build release binary
+        working-directory: components/rust-converter
+        run: cargo build --release --example perf_baseline
+
+      - name: Detect platform
+        id: platform
+        run: |
+          echo "name=$(python3 tools/perf/report_utils.py detect-platform)" >> "$GITHUB_OUTPUT"
+
+      - name: Run all tiers (3 repeats each)
+        env:
+          PERF_GATE_SKIP: "1"
+        run: |
+          mkdir -p perf/reports/runs
+          TIERS="small medium medium-front-matter large-1m"
+          for tier in $TIERS; do
+            for run in 1 2 3; do
+              tools/perf/run_perf_baseline.sh \
+                --tier "$tier" \
+                --json-output "perf/reports/runs/${tier}-run${run}.json"
+            done
+          done
+
+      - name: Compute median and merge reports
+        env:
+          PLATFORM: ${{ steps.platform.outputs.name }}
+        run: |
+          python3 tools/perf/report_utils.py aggregate-runs \
+            --input-dir perf/reports/runs \
+            --output perf/reports/perf-measurement-${PLATFORM}.json \
+            --platform "${PLATFORM}" \
+            --tiers small medium medium-front-matter large-1m
+
+      - name: Run perf gate Python tests
+        run: python3 -m pytest tools/perf/tests/ -v
+
+      - name: Run local runner output path tests
+        run: bash tools/perf/tests/test_local_runner_output_paths.sh
+
+      - name: Generate baseline artifact
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.bootstrap_baseline == 'true' }}
+        env:
+          PLATFORM: ${{ steps.platform.outputs.name }}
+        run: |
+          python3 tools/perf/report_utils.py extract-baseline \
+            --measurement perf/reports/perf-measurement-${PLATFORM}.json \
+            --output perf/baselines/${PLATFORM}.json \
+            --platform "${PLATFORM}"
+
+      - name: Run threshold engine
+        if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.bootstrap_baseline == 'true') }}
+        run: |
+          python3 tools/perf/threshold_engine.py \
+            --baseline perf/baselines/${{ steps.platform.outputs.name }}.json \
+            --current perf/reports/perf-measurement-${{ steps.platform.outputs.name }}.json \
+            --thresholds perf/thresholds.json \
+            --metrics-schema perf/metrics-schema.json \
+            --output-json perf/reports/perf-verdict-${{ steps.platform.outputs.name }}.json \
+            --platform ${{ steps.platform.outputs.name }}
+
+      - name: Upload measurement report
+        if: always()
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: perf-measurement-${{ steps.platform.outputs.name }}.json
+          path: perf/reports/perf-measurement-${{ steps.platform.outputs.name }}.json
+
+      - name: Upload verdict report
+        if: ${{ always() && !(github.event_name == 'workflow_dispatch' && github.event.inputs.bootstrap_baseline == 'true') }}
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: perf-verdict-${{ steps.platform.outputs.name }}.json
+          path: perf/reports/perf-verdict-${{ steps.platform.outputs.name }}.json
+
+      - name: Upload baseline artifact
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.bootstrap_baseline == 'true' }}
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: perf-baseline-${{ steps.platform.outputs.name }}.json
+          path: perf/baselines/${{ steps.platform.outputs.name }}.json
