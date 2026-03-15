@@ -363,9 +363,7 @@ jobs:
       - name: Detect platform
         id: platform
         run: |
-          OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
-          ARCH="$(uname -m)"
-          echo "name=${OS}-${ARCH}" >> "$GITHUB_OUTPUT"
+          echo "name=$(python3 tools/perf/report_utils.py detect-platform)" >> "$GITHUB_OUTPUT"
 
       - name: Run perf baseline (small + medium)
         env:
@@ -377,20 +375,9 @@ jobs:
 
       - name: Merge measurement reports
         run: |
-          python3 -c "
-          import json, glob
-          merged = None
-          for f in sorted(glob.glob('perf/reports/perf-measurement-*.json')):
-              with open(f) as fh:
-                  data = json.load(fh)
-              if merged is None:
-                  merged = data
-              else:
-                  merged['tiers'].update(data['tiers'])
-          if merged:
-              with open('perf/reports/perf-measurement-${{ steps.platform.outputs.name }}.json', 'w') as fh:
-                  json.dump(merged, fh, indent=2)
-          "
+          python3 tools/perf/report_utils.py merge-measurements \
+            --glob-pattern 'perf/reports/perf-measurement-*.json' \
+            --output perf/reports/perf-measurement-${{ steps.platform.outputs.name }}.json
 
       - name: Run perf gate Python tests
         run: python3 -m pytest tools/perf/tests/ -v

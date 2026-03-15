@@ -24,6 +24,9 @@ use serde_json::Value;
 /// Canonical sample-tier CLI names accepted by the binary.
 const TIER_CLI_NAMES: &[&str] = &["small", "medium", "medium-front-matter", "large-1m"];
 
+/// Legacy `--single` alias that should still map to the canonical `large-1m` tier.
+const LEGACY_SINGLE_ALIAS_LARGE: &str = "large";
+
 /// Expected JSON tier keys (tier_key mapping: "large-1m" CLI → "large-1m" key,
 /// others are identity).
 const EXPECTED_TIER_KEYS: &[&str] = &["small", "medium", "medium-front-matter", "large-1m"];
@@ -276,4 +279,35 @@ fn full_run_report_contains_all_tiers() {
         tiers_obj.len(),
         tiers_obj.keys().collect::<Vec<_>>()
     );
+}
+
+#[test]
+fn legacy_single_large_alias_maps_to_large_1m_tier() {
+    let report = run_binary_for_tier(LEGACY_SINGLE_ALIAS_LARGE);
+    let tiers_obj = report["tiers"]
+        .as_object()
+        .expect("[legacy-large] tiers is not a JSON object");
+
+    assert!(
+        tiers_obj.contains_key("large-1m"),
+        "[legacy-large] Missing canonical tier key 'large-1m'. Found: {:?}",
+        tiers_obj.keys().collect::<Vec<_>>()
+    );
+    assert!(
+        !tiers_obj.contains_key(LEGACY_SINGLE_ALIAS_LARGE),
+        "[legacy-large] Report should not expose the legacy tier key 'large'"
+    );
+
+    let large_tier = &tiers_obj["large-1m"];
+    for &metric in CORE_METRICS {
+        let value = large_tier.get(metric);
+        assert!(
+            value.is_some(),
+            "[legacy-large] Tier 'large-1m' missing metric: {metric}"
+        );
+        assert!(
+            value.unwrap().is_number(),
+            "[legacy-large] Tier 'large-1m' metric '{metric}' is not a number"
+        );
+    }
 }

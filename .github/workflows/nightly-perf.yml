@@ -48,9 +48,7 @@ jobs:
       - name: Detect platform
         id: platform
         run: |
-          OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
-          ARCH="$(uname -m)"
-          echo "name=${OS}-${ARCH}" >> "$GITHUB_OUTPUT"
+          echo "name=$(python3 tools/perf/report_utils.py detect-platform)" >> "$GITHUB_OUTPUT"
 
       - name: Run all tiers (3 repeats each)
         env:
@@ -70,60 +68,11 @@ jobs:
         env:
           PLATFORM: ${{ steps.platform.outputs.name }}
         run: |
-          python3 -c "
-          import json, glob, statistics, os
-
-          TIERS = ['small', 'medium', 'medium-front-matter', 'large-1m']
-          NUMERIC_KEYS = [
-              'p50_ms', 'p95_ms', 'p99_ms', 'peak_memory_bytes',
-              'req_per_s', 'input_mb_per_s',
-              'html_bytes', 'markdown_bytes_avg', 'token_estimate_avg',
-          ]
-          STAGE_KEYS = ['parse_pct', 'convert_pct', 'etag_pct', 'token_pct']
-
-          merged_tiers = {}
-          base_report = None
-
-          for tier in TIERS:
-              runs = sorted(glob.glob(f'perf/reports/runs/{tier}-run*.json'))
-              tier_runs = []
-              for r in runs:
-                  with open(r) as fh:
-                      data = json.load(fh)
-                  if base_report is None:
-                      base_report = data
-                  tier_data = data['tiers'].get(tier)
-                  if tier_data:
-                      tier_runs.append(tier_data)
-
-              if not tier_runs:
-                  continue
-
-              median_tier = {}
-              for key in NUMERIC_KEYS:
-                  vals = [t[key] for t in tier_runs if key in t]
-                  if vals:
-                      median_tier[key] = statistics.median(vals)
-
-              stage_vals = {}
-              for sk in STAGE_KEYS:
-                  vals = [t.get('stage_breakdown', {}).get(sk) for t in tier_runs]
-                  vals = [v for v in vals if v is not None]
-                  if vals:
-                      stage_vals[sk] = statistics.median(vals)
-              if stage_vals:
-                  median_tier['stage_breakdown'] = stage_vals
-
-              median_tier['iterations'] = tier_runs[0].get('iterations', 0)
-              median_tier['warmup'] = tier_runs[0].get('warmup', 0)
-              merged_tiers[tier] = median_tier
-
-          platform = os.environ['PLATFORM']
-          if base_report:
-              base_report['tiers'] = merged_tiers
-              with open(f'perf/reports/perf-measurement-{platform}.json', 'w') as fh:
-                  json.dump(base_report, fh, indent=2)
-          "
+          python3 tools/perf/report_utils.py aggregate-runs \
+            --input-dir perf/reports/runs \
+            --output perf/reports/perf-measurement-${PLATFORM}.json \
+            --platform "${PLATFORM}" \
+            --tiers small medium medium-front-matter large-1m
 
       - name: Run perf gate Python tests
         run: python3 -m pytest tools/perf/tests/ -v
@@ -136,40 +85,10 @@ jobs:
         env:
           PLATFORM: ${{ steps.platform.outputs.name }}
         run: |
-          python3 -c "
-          import json, os
-
-          platform = os.environ['PLATFORM']
-          measurement_path = f'perf/reports/perf-measurement-{platform}.json'
-          baseline_path = f'perf/baselines/{platform}.json'
-          core_metrics = [
-              'p50_ms', 'p95_ms', 'p99_ms',
-              'peak_memory_bytes', 'req_per_s', 'input_mb_per_s',
-          ]
-
-          with open(measurement_path) as fh:
-              report = json.load(fh)
-
-          baseline = {
-              'schema_version': '1.0.0',
-              'timestamp': report.get('timestamp', ''),
-              'git_commit': report.get('git_commit', ''),
-              'platform': report.get('platform', platform),
-              'tiers': {},
-          }
-
-          for tier_name, tier_data in report.get('tiers', {}).items():
-              baseline['tiers'][tier_name] = {
-                  metric: tier_data[metric]
-                  for metric in core_metrics
-                  if metric in tier_data
-              }
-
-          os.makedirs('perf/baselines', exist_ok=True)
-          with open(baseline_path, 'w') as fh:
-              json.dump(baseline, fh, indent=2)
-              fh.write('\n')
-          "
+          python3 tools/perf/report_utils.py extract-baseline \
+            --measurement perf/reports/perf-measurement-${PLATFORM}.json \
+            --output perf/baselines/${PLATFORM}.json \
+            --platform "${PLATFORM}"
 
       - name: Run threshold engine
         if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.bootstrap_baseline == 'true') }}

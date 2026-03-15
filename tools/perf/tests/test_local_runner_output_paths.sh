@@ -11,6 +11,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 RUNNER="$REPO_ROOT/tools/perf/run_perf_baseline.sh"
+REPORT_UTILS="$REPO_ROOT/tools/perf/report_utils.py"
 
 TMPDIR_BASE="$(mktemp -d)"
 trap 'rm -rf "$TMPDIR_BASE"' EXIT
@@ -35,9 +36,7 @@ assert_json() {
   PASS=$((PASS + 1))
 }
 
-OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
-ARCH="$(uname -m)"
-PLATFORM="${OS}-${ARCH}"
+PLATFORM="$(python3 "$REPORT_UTILS" detect-platform)"
 
 ###############################################################################
 # Scenario 1: Only --json-output

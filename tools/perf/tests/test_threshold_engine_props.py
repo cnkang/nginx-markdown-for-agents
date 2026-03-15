@@ -1,16 +1,16 @@
 """Property-based tests for the threshold engine.
 
 Properties tested:
+  - Property 0:  Zero-baseline deviation handling
   - Property 1:  Threshold classification correctness
   - Property 10: Relative deviation calculation correctness
-  - Property 11: Nightly median aggregation correctness
+  - Property 11: Shared nightly aggregation median helper correctness
 
 Run:
     cd tools/perf && python3 -m pytest tests/test_threshold_engine_props.py -v
 """
 
 import math
-import statistics
 import sys
 from pathlib import Path
 
@@ -22,6 +22,7 @@ from hypothesis import strategies as st
 # ---------------------------------------------------------------------------
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from report_utils import median_value
 from threshold_engine import compute_deviation, judge_metric
 
 
@@ -32,10 +33,26 @@ from threshold_engine import compute_deviation, judge_metric
 # Positive floats suitable for metric values (avoid extremes that cause
 # floating-point issues).
 positive_float = st.floats(min_value=1e-6, max_value=1e12, allow_nan=False, allow_infinity=False)
+non_negative_float = st.floats(min_value=0.0, max_value=1e12, allow_nan=False, allow_infinity=False)
 
 # Threshold percentages – warning is always closer to zero than blocking.
 # For lower_is_better: 0 < warning < blocking
 # For higher_is_better: blocking < warning < 0
+
+
+# ---------------------------------------------------------------------------
+# Property 0: Zero-baseline deviation handling
+# ---------------------------------------------------------------------------
+
+@given(current=non_negative_float)
+@settings(max_examples=200)
+def test_property0_zero_baseline_special_case(current):
+    """Zero baselines stay explicit so comparisons do not silently disappear."""
+    deviation = compute_deviation(current, 0.0)
+    if current == 0.0:
+        assert deviation == 0.0
+    else:
+        assert deviation == 100.0
 
 
 # ---------------------------------------------------------------------------
@@ -172,12 +189,8 @@ def test_property10_sign_correctness(baseline, current):
 
 
 # ---------------------------------------------------------------------------
-# Property 11: Nightly median aggregation correctness
+# Property 11: Shared nightly aggregation median helper correctness
 # ---------------------------------------------------------------------------
-
-def compute_median(values):
-    """Reference median implementation matching Python's statistics.median."""
-    return statistics.median(values)
 
 
 @given(
@@ -190,7 +203,7 @@ def compute_median(values):
 @settings(max_examples=500)
 def test_property11_median_matches_sorted_middle(values):
     """Median of n>=3 values must equal the sorted middle element(s)."""
-    result = compute_median(values)
+    result = median_value(values)
     sorted_vals = sorted(values)
     n = len(sorted_vals)
     if n % 2 == 1:
@@ -212,7 +225,7 @@ def test_property11_median_matches_sorted_middle(values):
 @settings(max_examples=300)
 def test_property11_median_within_range(values):
     """Median must be between min and max of the input values."""
-    result = compute_median(values)
+    result = median_value(values)
     assert min(values) <= result <= max(values), (
         f"Median {result} outside range [{min(values)}, {max(values)}]"
     )
@@ -226,4 +239,4 @@ def test_property11_median_within_range(values):
 def test_property11_median_of_identical_values(value, n):
     """Median of identical values must equal that value."""
     values = [value] * n
-    assert compute_median(values) == value
+    assert median_value(values) == value

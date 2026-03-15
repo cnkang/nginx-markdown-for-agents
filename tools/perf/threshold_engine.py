@@ -76,9 +76,20 @@ def get_threshold(thresholds_cfg, platform, tier, metric):
 
 
 def compute_deviation(current, baseline):
-    """Return the relative percentage deviation: ``(current - baseline) / baseline * 100``."""
+    """Return a percentage deviation suitable for threshold comparisons.
+
+    The standard formula is ``(current - baseline) / baseline * 100``.
+    When the baseline is zero we use explicit sentinels instead of infinity so
+    the verdict report stays valid JSON:
+
+    - baseline == 0 and current == 0 -> 0.0
+    - baseline == 0 and current > 0 -> 100.0
+    - baseline == 0 and current < 0 -> -100.0
+    """
     if baseline == 0:
-        return 0.0
+        if current == 0:
+            return 0.0
+        return 100.0 if current > 0 else -100.0
     return (current - baseline) / baseline * 100.0
 
 

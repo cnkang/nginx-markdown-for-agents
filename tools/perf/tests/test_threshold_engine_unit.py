@@ -11,7 +11,6 @@ Run:
 """
 
 import json
-import os
 import sys
 import tempfile
 from pathlib import Path
@@ -21,14 +20,13 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from threshold_engine import (
-    compute_deviation,
-    judge_metric,
-    build_skipped_verdict,
-    build_verdict_report,
     build_direction_map,
-    get_threshold,
-    main,
+    build_verdict_report,
+    compute_deviation,
     DEFAULT_THRESHOLDS,
+    get_threshold,
+    judge_metric,
+    main,
 )
 
 # ---------------------------------------------------------------------------
@@ -57,6 +55,14 @@ def _write_tmp_json(data, suffix=".json"):
     json.dump(data, f)
     f.close()
     return f.name
+
+
+def _temp_output_path(suffix=".json"):
+    """Reserve a temp output path without using insecure mktemp."""
+    f = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
+    path = f.name
+    f.close()
+    return path
 
 
 def _make_baseline(tiers=None):
@@ -124,11 +130,10 @@ class TestSpecificVerdicts:
 
     def test_all_pass_when_identical(self):
         """Identical baseline and current → all pass."""
-        out = tempfile.NamedTemporaryFile(suffix=".json", delete=False)
-        out.close()
+        out_path = _temp_output_path()
         report, has_failure = build_verdict_report(
             _make_baseline(), _make_current(), THRESHOLDS_CFG,
-            DIRECTION_MAP, "ubuntu-latest", out.name,
+            DIRECTION_MAP, "ubuntu-latest", out_path,
         )
         assert report["overall_verdict"] == "pass"
         assert not has_failure
@@ -145,17 +150,16 @@ class TestSpecificVerdicts:
             "peak_memory_bytes": 1000000,
             "req_per_s": 1000.0, "input_mb_per_s": 50.0,
         }})
-        out = tempfile.NamedTemporaryFile(suffix=".json", delete=False)
-        out.close()
+        out_path = _temp_output_path()
         report, has_failure = build_verdict_report(
             _make_baseline(), current, THRESHOLDS_CFG,
-            DIRECTION_MAP, "ubuntu-latest", out.name,
+            DIRECTION_MAP, "ubuntu-latest", out_path,
         )
         assert report["overall_verdict"] == "warn"
         assert not has_failure
         p50 = report["comparison"]["tiers"]["small"]["p50_ms"]
         assert p50["verdict"] == "warn"
-        assert abs(p50["deviation_pct"] - 20.0) < 0.01
+        assert p50["deviation_pct"] == pytest.approx(20.0, abs=0.01)
 
     def test_fail_on_severe_regression(self):
         """50% latency increase → fail (exceeds 30% blocking)."""
@@ -165,11 +169,10 @@ class TestSpecificVerdicts:
             "peak_memory_bytes": 1000000,
             "req_per_s": 1000.0, "input_mb_per_s": 50.0,
         }})
-        out = tempfile.NamedTemporaryFile(suffix=".json", delete=False)
-        out.close()
+        out_path = _temp_output_path()
         report, has_failure = build_verdict_report(
             _make_baseline(), current, THRESHOLDS_CFG,
-            DIRECTION_MAP, "ubuntu-latest", out.name,
+            DIRECTION_MAP, "ubuntu-latest", out_path,
         )
         assert report["overall_verdict"] == "fail"
         assert has_failure
@@ -183,14 +186,34 @@ class TestSpecificVerdicts:
             "req_per_s": 600.0,  # -40% → fail
             "input_mb_per_s": 50.0,
         }})
-        out = tempfile.NamedTemporaryFile(suffix=".json", delete=False)
-        out.close()
+        out_path = _temp_output_path()
         report, has_failure = build_verdict_report(
             _make_baseline(), current, THRESHOLDS_CFG,
-            DIRECTION_MAP, "ubuntu-latest", out.name,
+            DIRECTION_MAP, "ubuntu-latest", out_path,
         )
         assert has_failure
         assert report["comparison"]["tiers"]["small"]["req_per_s"]["verdict"] == "fail"
+
+
+# ---------------------------------------------------------------------------
+# Deviation edge cases
+# ---------------------------------------------------------------------------
+
+class TestDeviationEdgeCases:
+    """Edge cases around zero baselines stay explicit and testable."""
+
+    def test_zero_baseline_zero_current_stays_zero(self):
+        assert compute_deviation(0.0, 0.0) == 0.0
+
+    def test_zero_baseline_positive_current_flags_lower_is_better_regression(self):
+        deviation = compute_deviation(5.0, 0.0)
+        assert deviation == 100.0
+        assert judge_metric(deviation, "lower_is_better", 15, 30) == "fail"
+
+    def test_zero_baseline_positive_current_is_improvement_for_higher_is_better(self):
+        deviation = compute_deviation(5.0, 0.0)
+        assert deviation == 100.0
+        assert judge_metric(deviation, "higher_is_better", -15, -30) == "pass"
 
 
 # ---------------------------------------------------------------------------
@@ -204,7 +227,7 @@ class TestMissingBaseline:
         current_path = _write_tmp_json(_make_current())
         thresholds_path = _write_tmp_json(THRESHOLDS_CFG)
         schema_path = _write_tmp_json(METRICS_SCHEMA)
-        out_path = tempfile.mktemp(suffix=".json")
+        out_path = _temp_output_path()
 
         exit_code = main([
             "--baseline", "/nonexistent/baseline.json",
@@ -220,7 +243,7 @@ class TestMissingBaseline:
         current_path = _write_tmp_json(_make_current())
         thresholds_path = _write_tmp_json(THRESHOLDS_CFG)
         schema_path = _write_tmp_json(METRICS_SCHEMA)
-        out_path = tempfile.mktemp(suffix=".json")
+        out_path = _temp_output_path()
 
         main([
             "--baseline", "/nonexistent/baseline.json",
@@ -238,6 +261,84 @@ class TestMissingBaseline:
 
 
 # ---------------------------------------------------------------------------
+# Error handling
+# ---------------------------------------------------------------------------
+
+class TestErrorHandling:
+    """Corrupt inputs and schema drift should fail loudly."""
+
+    def test_malformed_baseline_json_returns_nonzero(self, tmp_path, capsys):
+        baseline_path = tmp_path / "baseline.json"
+        baseline_path.write_text('{"schema_version": "1.0.0", "tiers": [}', encoding="utf-8")
+
+        current_path = _write_tmp_json(_make_current())
+        thresholds_path = _write_tmp_json(THRESHOLDS_CFG)
+        schema_path = _write_tmp_json(METRICS_SCHEMA)
+        out_path = _temp_output_path()
+
+        exit_code = main([
+            "--baseline", str(baseline_path),
+            "--current", current_path,
+            "--thresholds", thresholds_path,
+            "--metrics-schema", schema_path,
+            "--output-json", out_path,
+            "--platform", "ubuntu-latest",
+        ])
+
+        captured = capsys.readouterr()
+        assert exit_code == 1
+        assert "baseline" in captured.err.lower()
+        assert "json" in captured.err.lower()
+
+    def test_malformed_thresholds_json_returns_nonzero(self, tmp_path, capsys):
+        thresholds_path = tmp_path / "thresholds.json"
+        thresholds_path.write_text(
+            '{"schema_version": "1.0.0", "platforms": {"ubuntu-latest": {"small": {"p50_ms": }}',
+            encoding="utf-8",
+        )
+
+        baseline_path = _write_tmp_json(_make_baseline())
+        current_path = _write_tmp_json(_make_current())
+        schema_path = _write_tmp_json(METRICS_SCHEMA)
+        out_path = _temp_output_path()
+
+        exit_code = main([
+            "--baseline", baseline_path,
+            "--current", current_path,
+            "--thresholds", str(thresholds_path),
+            "--metrics-schema", schema_path,
+            "--output-json", out_path,
+            "--platform", "ubuntu-latest",
+        ])
+
+        captured = capsys.readouterr()
+        assert exit_code == 1
+        assert "thresholds" in captured.err.lower()
+        assert "expecting value" in captured.err.lower()
+
+    def test_schema_version_mismatch_returns_nonzero(self):
+        baseline_path = _write_tmp_json({
+            **_make_baseline(),
+            "schema_version": "2.0.0",
+        })
+        current_path = _write_tmp_json(_make_current())
+        thresholds_path = _write_tmp_json(THRESHOLDS_CFG)
+        schema_path = _write_tmp_json(METRICS_SCHEMA)
+        out_path = _temp_output_path()
+
+        exit_code = main([
+            "--baseline", baseline_path,
+            "--current", current_path,
+            "--thresholds", thresholds_path,
+            "--metrics-schema", schema_path,
+            "--output-json", out_path,
+            "--platform", "ubuntu-latest",
+        ])
+
+        assert exit_code == 1
+
+
+# ---------------------------------------------------------------------------
 # Missing thresholds config → use defaults
 # ---------------------------------------------------------------------------
 
@@ -248,7 +349,7 @@ class TestMissingThresholds:
         baseline_path = _write_tmp_json(_make_baseline())
         current_path = _write_tmp_json(_make_current())
         schema_path = _write_tmp_json(METRICS_SCHEMA)
-        out_path = tempfile.mktemp(suffix=".json")
+        out_path = _temp_output_path()
 
         exit_code = main([
             "--baseline", baseline_path,
@@ -282,7 +383,7 @@ class TestPerfGateSkip:
         current_path = _write_tmp_json(_make_current())
         thresholds_path = _write_tmp_json(THRESHOLDS_CFG)
         schema_path = _write_tmp_json(METRICS_SCHEMA)
-        out_path = tempfile.mktemp(suffix=".json")
+        out_path = _temp_output_path()
 
         exit_code = main([
             "--baseline", "/nonexistent/baseline.json",
@@ -299,7 +400,7 @@ class TestPerfGateSkip:
         current_path = _write_tmp_json(_make_current())
         thresholds_path = _write_tmp_json(THRESHOLDS_CFG)
         schema_path = _write_tmp_json(METRICS_SCHEMA)
-        out_path = tempfile.mktemp(suffix=".json")
+        out_path = _temp_output_path()
 
         main([
             "--baseline", "/nonexistent/baseline.json",
@@ -320,7 +421,7 @@ class TestPerfGateSkip:
         current_path = _write_tmp_json(_make_current())
         thresholds_path = _write_tmp_json(THRESHOLDS_CFG)
         schema_path = _write_tmp_json(METRICS_SCHEMA)
-        out_path = tempfile.mktemp(suffix=".json")
+        out_path = _temp_output_path()
 
         exit_code = main([
             "--baseline", baseline_path,

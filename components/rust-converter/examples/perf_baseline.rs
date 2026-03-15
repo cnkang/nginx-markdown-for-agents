@@ -215,8 +215,8 @@ fn build_samples() -> Vec<Sample> {
 
 /// Returns the current process peak RSS in bytes.
 ///
-/// Uses platform-specific APIs: `getrusage` on Unix, `GetProcessMemoryInfo`
-/// on Windows. Returns 0 when the platform is unsupported.
+/// Uses `getrusage` on Unix platforms. Other platforms currently return 0
+/// until a native implementation is added.
 fn peak_rss_bytes() -> u64 {
     #[cfg(unix)]
     {
@@ -471,9 +471,9 @@ fn git_commit_hash() -> String {
         .unwrap_or_else(|| "unknown".to_string())
 }
 
-/// Returns a platform identifier string (e.g. `"Darwin-arm64"`, `"Linux-x86_64"`).
+/// Returns a platform identifier string (for example `"darwin-arm64"`).
 fn detect_platform() -> String {
-    // Use uname-style naming to match the shell scripts and CI workflows.
+    // Use the shared uname-style naming convention from tools/perf/report_utils.py.
     // Rust's env::consts::OS returns "macos" but uname gives "darwin";
     // env::consts::ARCH returns "aarch64" but uname gives "arm64".
     let os = match env::consts::OS {

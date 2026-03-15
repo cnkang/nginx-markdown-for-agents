@@ -23,13 +23,18 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+REPORT_UTILS="$REPO_ROOT/tools/perf/report_utils.py"
 
 PERF_BINARY="components/rust-converter/target/release/examples/perf_baseline"
 
 # Detect platform: lowercase os-arch (e.g. linux-x86_64, darwin-arm64)
-OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
-ARCH="$(uname -m)"
-PLATFORM="${OS}-${ARCH}"
+if command -v python3 &>/dev/null; then
+  PLATFORM="$(python3 "$REPORT_UTILS" detect-platform)"
+else
+  OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
+  ARCH="$(uname -m)"
+  PLATFORM="${OS}-${ARCH}"
+fi
 
 DEFAULT_REPORTS_DIR="perf/reports"
 DEFAULT_JSON_OUTPUT="${DEFAULT_REPORTS_DIR}/latest-measurement-${PLATFORM}.json"
@@ -244,38 +249,10 @@ if [[ "$UPDATE_BASELINE" == true ]]; then
     exit 1
   fi
 
-  python3 - "$JSON_OUTPUT" "$BASELINE_UPDATE_FILE" <<'PYEOF'
-import json, sys
-
-CORE_METRICS = ['p50_ms', 'p95_ms', 'p99_ms', 'peak_memory_bytes', 'req_per_s', 'input_mb_per_s']
-
-json_output = sys.argv[1]
-baseline_file = sys.argv[2]
-
-with open(json_output) as f:
-    report = json.load(f)
-
-baseline = {
-    'schema_version': '1.0.0',
-    'timestamp': report.get('timestamp', ''),
-    'git_commit': report.get('git_commit', ''),
-    'platform': report.get('platform', ''),
-    'tiers': {}
-}
-
-for tier_name, tier_data in report.get('tiers', {}).items():
-    baseline['tiers'][tier_name] = {
-        metric: tier_data[metric]
-        for metric in CORE_METRICS
-        if metric in tier_data
-    }
-
-with open(baseline_file, 'w') as f:
-    json.dump(baseline, f, indent=2)
-    f.write('\n')
-
-print(f'Baseline written to {baseline_file}', file=sys.stderr)
-PYEOF
+  python3 "$REPORT_UTILS" extract-baseline \
+    --measurement "$JSON_OUTPUT" \
+    --output "$BASELINE_UPDATE_FILE" \
+    --platform "$PLATFORM"
 
   log "=== Baseline updated ==="
 fi
