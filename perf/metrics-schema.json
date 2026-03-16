@@ -106,6 +106,30 @@
       "target_size": "~1MB",
       "source": "tests/corpus/complex/blog-post.html",
       "generation": "repeat_to_size(1048576)"
+    },
+    {
+      "name": "large-100k",
+      "target_size": "~100KB",
+      "source": "tools/corpus/generate_large_samples.sh",
+      "generation": "script(generate_large_samples.sh --tier large-100k)",
+      "variants": [
+        "plain-html",
+        "front-matter",
+        "token-estimation",
+        "nested-tables-code"
+      ]
+    },
+    {
+      "name": "large-5m",
+      "target_size": "~5MB",
+      "source": "tools/corpus/generate_large_samples.sh",
+      "generation": "script(generate_large_samples.sh --tier large-5m)",
+      "variants": [
+        "plain-html",
+        "front-matter",
+        "token-estimation",
+        "nested-tables-code"
+      ]
     }
   ]
 }
