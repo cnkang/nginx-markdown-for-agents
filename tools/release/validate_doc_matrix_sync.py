@@ -41,6 +41,11 @@ def load_matrix_entries(path: Path) -> list[tuple[str, str, str, str]]:
     return sorted(entries)
 
 
+def _is_table_header_or_separator(nginx: str) -> bool:
+    """Return True if *nginx* cell value indicates a header or separator row."""
+    return nginx.lower() == "nginx version" or set(nginx.replace("-", "")) == set() or nginx.startswith("-")
+
+
 def parse_doc_matrix(path: Path) -> list[tuple[str, str, str, str]]:
     """Parse the Platform Compatibility Matrix table from INSTALLATION.md.
 
@@ -80,12 +85,7 @@ def parse_doc_matrix(path: Path) -> list[tuple[str, str, str, str]]:
 
         nginx, os_type, arch, tier = (g.strip() for g in match.groups())
 
-        # Skip header row
-        if nginx.lower() == "nginx version":
-            continue
-
-        # Skip separator lines (e.g., |---|---|---|---|)
-        if set(nginx.replace("-", "")) == set() or nginx.startswith("-"):
+        if _is_table_header_or_separator(nginx):
             continue
 
         entries.append((nginx, os_type, arch, tier.lower()))
@@ -99,9 +99,6 @@ def compare_matrices(
 ) -> list[str]:
     """Compare JSON and doc matrix entries. Returns a list of difference descriptions."""
     diffs: list[str] = []
-
-    json_set = set(json_entries)
-    doc_set = set(doc_entries)
 
     # Build lookup dicts keyed by (nginx, os_type, arch) for tier mismatch detection
     json_by_key = {(n, o, a): t for n, o, a, t in json_entries}

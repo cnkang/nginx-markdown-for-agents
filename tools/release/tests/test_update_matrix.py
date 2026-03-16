@@ -233,7 +233,7 @@ def test_load_matrix_auto_explicit(tmp_path):
     p = tmp_path / "release-matrix.json"
     p.write_text(json.dumps(matrix_data))
 
-    data, auto_entries, manual_entries = load_matrix(p)
+    _data, auto_entries, manual_entries = load_matrix(p)
 
     assert len(auto_entries) == 1
     assert len(manual_entries) == 0
@@ -250,7 +250,7 @@ def test_load_matrix_no_managed_by(tmp_path):
     p = tmp_path / "release-matrix.json"
     p.write_text(json.dumps(matrix_data))
 
-    data, auto_entries, manual_entries = load_matrix(p)
+    _data, auto_entries, manual_entries = load_matrix(p)
 
     assert len(auto_entries) == 1
     assert len(manual_entries) == 0
@@ -1252,7 +1252,7 @@ def test_cli_dry_run_no_file_writes(tmp_path, monkeypatch, capsys):
 def test_cli_check_only_fresh_exit_0(tmp_path, monkeypatch):
     """--check-only returns 0 when matrix matches nginx.org (fresh)."""
     versions = ["1.24.0", "1.26.3"]
-    matrix_path, doc_path, diff_path = _setup_cli_env(
+    _setup_cli_env(
         tmp_path, versions, monkeypatch, html_versions=versions,
     )
 
@@ -1265,7 +1265,7 @@ def test_cli_check_only_stale_exit_2(tmp_path, monkeypatch):
     existing = ["1.24.0"]
     from_nginx = ["1.24.0", "1.26.3"]  # 1.26.3 missing from matrix
 
-    matrix_path, doc_path, diff_path = _setup_cli_env(
+    _setup_cli_env(
         tmp_path, existing, monkeypatch, html_versions=from_nginx,
     )
 
@@ -1276,7 +1276,7 @@ def test_cli_check_only_stale_exit_2(tmp_path, monkeypatch):
 def test_cli_check_only_error_exit_1(tmp_path, monkeypatch):
     """--check-only returns 1 on scraping/parsing error."""
     versions = ["1.24.0"]
-    matrix_path, doc_path, diff_path = _setup_cli_env(
+    _setup_cli_env(
         tmp_path, versions, monkeypatch,
     )
 
@@ -1298,7 +1298,7 @@ def test_cli_diff_json_structure(tmp_path, monkeypatch):
     existing = ["1.24.0"]
     from_nginx = ["1.24.0", "1.26.3"]  # 1.26.3 is new
 
-    matrix_path, doc_path, diff_path = _setup_cli_env(
+    _, doc_path, diff_path = _setup_cli_env(
         tmp_path, existing, monkeypatch, html_versions=from_nginx,
     )
 
@@ -1318,7 +1318,7 @@ def test_cli_diff_json_removed_versions(tmp_path, monkeypatch):
     existing = ["1.24.0", "1.26.3"]
     from_nginx = ["1.26.3"]  # 1.24.0 dropped from nginx.org
 
-    matrix_path, doc_path, diff_path = _setup_cli_env(
+    _, _, diff_path = _setup_cli_env(
         tmp_path, existing, monkeypatch, html_versions=from_nginx,
     )
 
@@ -1344,7 +1344,7 @@ def test_cli_rollback_on_doc_write_failure(tmp_path, monkeypatch):
     existing = ["1.24.0"]
     from_nginx = ["1.24.0", "1.26.3"]
 
-    matrix_path, doc_path, diff_path = _setup_cli_env(
+    matrix_path, _, _ = _setup_cli_env(
         tmp_path, existing, monkeypatch, html_versions=from_nginx,
     )
 
@@ -1413,7 +1413,7 @@ def test_cli_version_logging(tmp_path, monkeypatch, capsys):
     existing = ["1.24.0", "1.26.3"]
     from_nginx = ["1.26.3", "1.28.0"]  # add 1.28.0, remove 1.24.0
 
-    matrix_path, doc_path, diff_path = _setup_cli_env(
+    _setup_cli_env(
         tmp_path, existing, monkeypatch, html_versions=from_nginx,
     )
 

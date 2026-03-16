@@ -20,6 +20,9 @@ PASS_COUNT=0
 FAIL_COUNT=0
 SKIP_COUNT=0
 
+# Repeated separator line
+SEPARATOR_LINE="========================================================================"
+
 # Colors (if terminal supports them)
 if [[ -t 1 ]]; then
   GREEN='\033[0;32m'
@@ -34,21 +37,28 @@ else
 fi
 
 pass() {
+  local msg="$1"
   PASS_COUNT=$((PASS_COUNT + 1))
-  echo -e "  ${GREEN}PASS${NC}: $1"
+  echo -e "  ${GREEN}PASS${NC}: ${msg}"
+  return 0
 }
 
 fail() {
+  local msg="$1"
+  local detail="${2:-}"
   FAIL_COUNT=$((FAIL_COUNT + 1))
-  echo -e "  ${RED}FAIL${NC}: $1"
-  if [[ -n "${2:-}" ]]; then
-    echo "        Detail: $2"
+  echo -e "  ${RED}FAIL${NC}: ${msg}" >&2
+  if [[ -n "${detail}" ]]; then
+    echo "        Detail: ${detail}" >&2
   fi
+  return 0
 }
 
 skip() {
+  local msg="$1"
   SKIP_COUNT=$((SKIP_COUNT + 1))
-  echo -e "  ${YELLOW}SKIP${NC}: $1"
+  echo -e "  ${YELLOW}SKIP${NC}: ${msg}"
+  return 0
 }
 
 # Verify stderr contains at least one [ERROR] <category>: <message> line.
@@ -56,6 +66,7 @@ skip() {
 assert_has_error_format() {
   local stderr_output="$1"
   echo "$stderr_output" | grep -qE '^\[ERROR\] [a-z_]+: .+'
+  return $?
 }
 
 # Verify stderr contains at least one [SUGGEST] <suggestion> line.
@@ -63,6 +74,7 @@ assert_has_error_format() {
 assert_has_suggest_format() {
   local stderr_output="$1"
   echo "$stderr_output" | grep -qE '^\[SUGGEST\] .+'
+  return $?
 }
 
 # Build a PATH that contains all current PATH directories but hides a
@@ -80,8 +92,8 @@ build_path_hiding() {
   # real PATH for everything except the hidden binary.
   # We simply remove directories containing the target binary.
   local new_path=""
-  local IFS=':'
-  for dir in $PATH; do
+  local dir
+  while IFS= read -r -d ':' dir || [[ -n "$dir" ]]; do
     if [[ -x "$dir/$binary_name" ]]; then
       # Skip this directory only if it contains the binary to hide
       # But we need the other binaries from this dir, so symlink them
@@ -101,12 +113,13 @@ build_path_hiding() {
         new_path="$dir"
       fi
     fi
-  done
+  done <<< "$PATH"
 
   # Put shim dir first so its symlinks take priority
   echo "${shim_dir}:${new_path}"
   # Caller is responsible for cleaning up shim_dir
   echo "$shim_dir" >&2
+  return 0
 }
 
 # Run install.sh with a modified environment that hides nginx from PATH.
@@ -161,12 +174,13 @@ run_hiding_nginx() {
   # Return stdout via a global variable for callers that need it
   _LAST_STDOUT="$stdout_content"
   _LAST_STDERR="$stderr_content"
+  return 0
 }
 
-echo "========================================================================"
+echo "$SEPARATOR_LINE"
 echo " Integration Tests: install.sh error message format (Property 9)"
 echo " Validates: Requirements 12.4"
-echo "========================================================================"
+echo "$SEPARATOR_LINE"
 echo ""
 
 # -----------------------------------------------------------------------
@@ -413,9 +427,9 @@ echo ""
 # -----------------------------------------------------------------------
 # Summary
 # -----------------------------------------------------------------------
-echo "========================================================================"
+echo "$SEPARATOR_LINE"
 echo " Results: $PASS_COUNT passed, $FAIL_COUNT failed, $SKIP_COUNT skipped"
-echo "========================================================================"
+echo "$SEPARATOR_LINE"
 
 if [[ "$FAIL_COUNT" -gt 0 ]]; then
   exit 1

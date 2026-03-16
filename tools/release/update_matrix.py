@@ -181,6 +181,40 @@ def parse_nginx_versions(html: str) -> list[str]:
 # Matrix loading
 # ---------------------------------------------------------------------------
 
+def _validate_manual_entries(manual_entries: list[dict], path: Path) -> None:
+    """Validate manual entries have required keys and no duplicate keys.
+
+    Calls ``sys.exit(1)`` on any validation error.
+    """
+    seen_keys: dict[tuple[str, str, str], int] = {}
+    duplicates: list[tuple[str, str, str]] = []
+    for entry in manual_entries:
+        missing_keys = _missing_required_keys(entry, REQUIRED_MATRIX_ENTRY_KEYS)
+        if missing_keys:
+            print(
+                (
+                    f"Manual entry missing required keys in {path}: "
+                    f"{', '.join(missing_keys)}"
+                ),
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
+        key = (entry["nginx"], entry["os_type"], entry["arch"])
+        if key in seen_keys:
+            duplicates.append(key)
+        else:
+            seen_keys[key] = 1
+
+    if duplicates:
+        dup_strs = [f"({n}, {o}, {a})" for n, o, a in duplicates]
+        print(
+            f"Duplicate manual entry keys in {path}: {', '.join(dup_strs)}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+
 def load_matrix(path: Path) -> tuple[dict, list[dict], list[dict]]:
     """Load and validate ``release-matrix.json``, separating auto vs manual entries.
 
@@ -226,37 +260,9 @@ def load_matrix(path: Path) -> tuple[dict, list[dict], list[dict]]:
         if managed_by == "manual":
             manual_entries.append(entry)
         else:
-            # No managed_by or managed_by: "auto" → auto-managed
             auto_entries.append(entry)
 
-    # Validate no duplicate (nginx, os_type, arch) keys among manual entries
-    seen_keys: dict[tuple[str, str, str], int] = {}
-    duplicates: list[tuple[str, str, str]] = []
-    for entry in manual_entries:
-        missing_keys = _missing_required_keys(entry, REQUIRED_MATRIX_ENTRY_KEYS)
-        if missing_keys:
-            print(
-                (
-                    f"Manual entry missing required keys in {path}: "
-                    f"{', '.join(missing_keys)}"
-                ),
-                file=sys.stderr,
-            )
-            sys.exit(1)
-
-        key = (entry["nginx"], entry["os_type"], entry["arch"])
-        if key in seen_keys:
-            duplicates.append(key)
-        else:
-            seen_keys[key] = 1
-
-    if duplicates:
-        dup_strs = [f"({n}, {o}, {a})" for n, o, a in duplicates]
-        print(
-            f"Duplicate manual entry keys in {path}: {', '.join(dup_strs)}",
-            file=sys.stderr,
-        )
-        sys.exit(1)
+    _validate_manual_entries(manual_entries, path)
 
     return data, auto_entries, manual_entries
 
@@ -526,6 +532,116 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 # ---------------------------------------------------------------------------
 
 
+def _log_diff_summary(diff: MatrixDiff) -> None:
+    """Log version additions and removals to stdout."""
+    for v in diff.added_versions:
+        print(f"  + adding version {v}")
+    for v in diff.removed_versions:
+        print(f"  - removing version {v}")
+    if diff.has_changes and not diff.added_versions and not diff.removed_versions:
+        print("  ~ entry-level changes detected (no version additions/removals)")
+
+
+def _handle_check_only(diff: MatrixDiff) -> int:
+    """Handle ``--check-only`` mode: report discrepancies to stderr, return 2."""
+    if diff.added_versions:
+        print(
+            f"Stale matrix: versions to add: {', '.join(diff.added_versions)}",
+            file=sys.stderr,
+        )
+    if diff.removed_versions:
+        print(
+            f"Stale matrix: versions to remove: {', '.join(diff.removed_versions)}",
+            file=sys.stderr,
+        )
+    return 2
+
+
+def _handle_dry_run(diff: MatrixDiff) -> int:
+    """Handle ``--dry-run`` mode: print changes to stdout, return 0."""
+    print("Dry-run mode — the following changes would be applied:")
+    for v in diff.added_versions:
+        print(f"  ADD {v} ({len(OS_TYPES) * len(ARCHS)} entries)")
+    for v in diff.removed_versions:
+        print(f"  REMOVE {v}")
+    if not diff.added_versions and not diff.removed_versions:
+        print("  Entry-level changes detected (no version additions/removals)")
+    return 0
+
+
+def _run_write_mode(
+    data: dict,
+    merged: list[dict],
+    diff: MatrixDiff,
+) -> int:
+    """Execute the normal write-mode pipeline: update matrix, doc, and diff files.
+
+    Returns 0 on success, 1 on error (with rollback of partial writes).
+    """
+    # Back up original matrix contents in memory for rollback
+    try:
+        matrix_backup = MATRIX_PATH.read_text()
+    except OSError:
+        matrix_backup = None
+
+    # Update updated_at timestamp
+    data["updated_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    # Update matrix entries
+    data["matrix"] = merged
+
+    # Write matrix via crash-safe temp+rename
+    try:
+        write_matrix(MATRIX_PATH, data)
+    except Exception as exc:
+        print(f"Error writing {MATRIX_PATH}: {exc}", file=sys.stderr)
+        return 1
+
+    # Generate new doc content and write via crash-safe temp+rename
+    try:
+        new_doc_content = update_doc_table(DOC_PATH, merged)
+    except SystemExit:
+        # update_doc_table calls sys.exit(1) on missing markers — restore matrix
+        if matrix_backup is not None:
+            try:
+                _write_repo_text(MATRIX_PATH, matrix_backup)
+            except OSError:
+                pass
+        raise
+
+    doc_tmp = DOC_PATH.with_suffix(DOC_PATH.suffix + ".tmp")
+    try:
+        safe_doc_path = _resolve_repo_write_path(DOC_PATH)
+        safe_doc_tmp = _resolve_repo_write_path(doc_tmp)
+        _write_repo_text(safe_doc_tmp, new_doc_content)
+        os.replace(safe_doc_tmp, safe_doc_path)
+    except Exception as exc:
+        print(f"Error writing {DOC_PATH}: {exc}", file=sys.stderr)
+        # Clean up temp file
+        try:
+            _resolve_repo_write_path(doc_tmp).unlink(missing_ok=True)
+        except OSError:
+            pass
+        except ValueError:
+            pass
+        # Restore matrix from backup
+        if matrix_backup is not None:
+            try:
+                _write_repo_text(MATRIX_PATH, matrix_backup)
+            except OSError:
+                pass
+        return 1
+
+    # Write matrix-diff.json
+    try:
+        write_diff_file(diff, DIFF_PATH)
+    except Exception as exc:
+        print(f"Warning: failed to write {DIFF_PATH}: {exc}", file=sys.stderr)
+        # Non-fatal — the matrix and doc are already updated
+
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     """Run the matrix updater end-to-end.
 
@@ -585,111 +701,21 @@ def main(argv: list[str] | None = None) -> int:
     diff = diff_matrix(current_auto, desired_auto)
 
     # --- Log additions / removals to stdout ----------------------------------
-    for v in diff.added_versions:
-        print(f"  + adding version {v}")
-    for v in diff.removed_versions:
-        print(f"  - removing version {v}")
-    if diff.has_changes and not diff.added_versions and not diff.removed_versions:
-        print("  ~ entry-level changes detected (no version additions/removals)")
+    _log_diff_summary(diff)
 
     # --- Handle based on mode ------------------------------------------------
     if not diff.has_changes:
         print("Matrix is up to date — no changes needed.")
         return 0
 
-    # --check-only: report discrepancies to stderr, exit 2
     if args.check_only:
-        if diff.added_versions:
-            print(
-                f"Stale matrix: versions to add: {', '.join(diff.added_versions)}",
-                file=sys.stderr,
-            )
-        if diff.removed_versions:
-            print(
-                f"Stale matrix: versions to remove: {', '.join(diff.removed_versions)}",
-                file=sys.stderr,
-            )
-        return 2
+        return _handle_check_only(diff)
 
-    # --dry-run: print changes to stdout, exit 0
     if args.dry_run:
-        print("Dry-run mode — the following changes would be applied:")
-        for v in diff.added_versions:
-            print(f"  ADD {v} ({len(OS_TYPES) * len(ARCHS)} entries)")
-        for v in diff.removed_versions:
-            print(f"  REMOVE {v}")
-        if not diff.added_versions and not diff.removed_versions:
-            print("  Entry-level changes detected (no version additions/removals)")
-        return 0
+        return _handle_dry_run(diff)
 
     # --- Normal write mode ---------------------------------------------------
-    # Back up original file contents in memory for rollback
-    try:
-        matrix_backup = MATRIX_PATH.read_text()
-    except OSError:
-        matrix_backup = None
-
-    try:
-        doc_backup = DOC_PATH.read_text()
-    except OSError:
-        doc_backup = None
-
-    # Update updated_at timestamp
-    data["updated_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-    # Update matrix entries
-    data["matrix"] = merged
-
-    # Write matrix via crash-safe temp+rename
-    try:
-        write_matrix(MATRIX_PATH, data)
-    except Exception as exc:
-        print(f"Error writing {MATRIX_PATH}: {exc}", file=sys.stderr)
-        return 1
-
-    # Generate new doc content and write via crash-safe temp+rename
-    try:
-        new_doc_content = update_doc_table(DOC_PATH, merged)
-    except SystemExit:
-        # update_doc_table calls sys.exit(1) on missing markers — restore matrix
-        if matrix_backup is not None:
-            try:
-                _write_repo_text(MATRIX_PATH, matrix_backup)
-            except OSError:
-                pass
-        return 1
-
-    doc_tmp = DOC_PATH.with_suffix(DOC_PATH.suffix + ".tmp")
-    try:
-        safe_doc_path = _resolve_repo_write_path(DOC_PATH)
-        safe_doc_tmp = _resolve_repo_write_path(doc_tmp)
-        _write_repo_text(safe_doc_tmp, new_doc_content)
-        os.replace(safe_doc_tmp, safe_doc_path)
-    except Exception as exc:
-        print(f"Error writing {DOC_PATH}: {exc}", file=sys.stderr)
-        # Clean up temp file
-        try:
-            _resolve_repo_write_path(doc_tmp).unlink(missing_ok=True)
-        except OSError:
-            pass
-        except ValueError:
-            pass
-        # Restore matrix from backup
-        if matrix_backup is not None:
-            try:
-                _write_repo_text(MATRIX_PATH, matrix_backup)
-            except OSError:
-                pass
-        return 1
-
-    # Write matrix-diff.json
-    try:
-        write_diff_file(diff, DIFF_PATH)
-    except Exception as exc:
-        print(f"Warning: failed to write {DIFF_PATH}: {exc}", file=sys.stderr)
-        # Non-fatal — the matrix and doc are already updated
-
-    return 0
+    return _run_write_mode(data, merged, diff)
 
 
 if __name__ == "__main__":
