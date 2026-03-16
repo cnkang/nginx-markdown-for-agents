@@ -183,10 +183,8 @@ else
       VmRSS_LINE="$(grep '^VmRSS:' "$PROC_STATUS" 2>/dev/null || true)"
       if [[ -n "$VmRSS_LINE" ]]; then
         CURRENT_RSS_KB="$(echo "$VmRSS_LINE" | awk '{print $2}')"
-        if [[ -n "$CURRENT_RSS_KB" ]] && [[ "$CURRENT_RSS_KB" =~ ^[0-9]+$ ]]; then
-          if [[ "$CURRENT_RSS_KB" -gt "$SAMPLED_MAX_RSS_KB" ]]; then
-            SAMPLED_MAX_RSS_KB="$CURRENT_RSS_KB"
-          fi
+        if [[ -n "$CURRENT_RSS_KB" ]] && [[ "$CURRENT_RSS_KB" =~ ^[0-9]+$ ]] && [[ "$CURRENT_RSS_KB" -gt "$SAMPLED_MAX_RSS_KB" ]]; then
+          SAMPLED_MAX_RSS_KB="$CURRENT_RSS_KB"
         fi
       fi
     fi
