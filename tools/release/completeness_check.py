@@ -181,6 +181,14 @@ def main(argv: List[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     matrix_entries = load_matrix(args.matrix)
+    if not matrix_entries:
+        print(
+            "ERROR: No installable (support_tier=full) entries found in matrix. "
+            "The matrix may be empty or malformed.",
+            file=sys.stderr,
+        )
+        return 1
+
     actual_artifacts = collect_artifacts(args.artifacts)
     missing = check_completeness(matrix_entries, actual_artifacts)
 
