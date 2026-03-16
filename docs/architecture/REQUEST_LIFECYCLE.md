@@ -10,6 +10,7 @@ It focuses on control flow, decision points, and the major branches that affect 
 - conditional requests
 - fail-open and fail-closed behavior
 - the dedicated metrics endpoint
+- the incremental processing path for large responses (feature-gated, default off)
 
 ## Two Runtime Modes
 
@@ -33,9 +34,11 @@ flowchart TD
     E["Create request context"]
     F["Optional compression detection"]
     G["Body filter buffers response"]
+    TR{"Threshold Router<br/>(if enabled)"}
     H["Optional decompression"]
     I["Conditional request resolution"]
-    J["Rust conversion"]
+    J["Rust conversion (full-buffer)"]
+    JI["Rust conversion (incremental)"]
     K["Update headers and send Markdown"]
     L["Passthrough original response"]
     M["Fail-open original HTML"]
@@ -51,17 +54,22 @@ flowchart TD
     E --> F
     F --> G
     G -->|body incomplete| G
-    G --> H
+    G --> TR
+    TR -->|threshold off, or<br/>size < threshold,<br/>or HEAD/304/fail-open| H
+    TR -->|size >= threshold| JI
     H --> I
     I -->|304 via If-None-Match| K
     I -->|need conversion| J
     J -->|success| K
+    JI -->|success| K
     H -->|fail-open branch| M
     I -->|error + pass| M
     J -->|error + pass| M
+    JI -->|error + pass| M
     H -->|error + reject| N
     I -->|error + reject| N
     J -->|error + reject| N
+    JI -->|error + reject| N
 ```
 
 ## Phase 1: Header Filter
@@ -223,6 +231,55 @@ It then records the relevant counters and applies `markdown_on_error`:
 - `pass`: send original HTML
 - `reject`: fail the request
 
+## Incremental Processing Path (Feature-Gated)
+
+The module supports an optional incremental processing path for large responses. This path is disabled by default at both the NGINX configuration level and the Rust compilation level. When disabled, the runtime behavior is identical to a build without this feature.
+
+### Threshold Router
+
+After the body filter has buffered the response, a threshold router decides which conversion path to use. The decision is controlled by the `markdown_large_body_threshold` configuration directive:
+
+```nginx
+# Default: incremental path disabled, all requests use full-buffer path
+markdown_large_body_threshold off;
+
+# Enable: route responses >= 512KB to incremental path
+markdown_large_body_threshold 512k;
+```
+
+The router evaluates in this order:
+
+1. If `markdown_large_body_threshold` is `off`: all requests use the full-buffer path. No further evaluation happens.
+2. If the request is HEAD, 304, or a fail-open replay: always use the full-buffer path. These special paths are never routed to the incremental path.
+3. If `Content-Length` is present and meets or exceeds the threshold: use the incremental path.
+4. If `Content-Length` is absent: buffer the response first. Once the buffered size exceeds the threshold, switch to the incremental path. Otherwise, continue on the full-buffer path.
+
+The selected path is recorded in the request context (`processing_path` field) and tracked through path-hit metrics counters exposed on the `markdown_metrics` endpoint.
+
+### Incremental Conversion
+
+When the threshold router selects the incremental path, the module feeds response data to the Rust `IncrementalConverter` through FFI instead of calling the single-shot `markdown_convert()` function:
+
+1. Create a converter instance with the current conversion options
+2. Feed input data in chunks as they arrive
+3. Finalize the conversion and obtain the result
+
+The incremental API is compiled only when the `incremental` Rust feature flag is enabled. If the feature is not compiled but a threshold is configured, the module logs a warning and falls back to the full-buffer path.
+
+Error handling on the incremental path follows the same `markdown_on_error` policy as the full-buffer path: fail-open returns original HTML, fail-closed returns an error to the client.
+
+### Deferred Path Selection for Chunked Responses
+
+When the upstream response does not include a `Content-Length` header (for example, chunked transfer encoding), the module cannot determine the response size upfront. In this case, it begins buffering as usual. Once the accumulated buffer size crosses the configured threshold, the module switches to the incremental path for the remainder of the response. If the full response arrives without exceeding the threshold, it proceeds through the normal full-buffer conversion.
+
+This deferred decision keeps the common case (small responses without `Content-Length`) on the existing fast path while still routing genuinely large chunked responses to the incremental path.
+
+### Relationship to Existing Phases
+
+The incremental path does not replace the existing phases described above. It provides an alternative conversion strategy that the threshold router selects after buffering (Phase 2). When the full-buffer path is selected, the request continues through decompression (Phase 3), conditional resolution (Phase 4), and full-buffer Rust conversion (Phase 5) exactly as before.
+
+For the full architecture of the incremental processing path, including the Rust API, FFI interface, state machine, data model extensions, and rollback procedures, see [LARGE_RESPONSE_DESIGN.md](LARGE_RESPONSE_DESIGN.md).
+
 ## Header Updates on Successful Conversion
 
 When conversion succeeds, the module updates the response so it is a correct Markdown variant rather than a mutated HTML response.
@@ -275,6 +332,7 @@ If you are debugging a behavior, the best mental model is:
 
 - header filter decides intent
 - body filter executes the expensive path
+- the threshold router selects full-buffer or incremental conversion based on response size (when enabled)
 - helper functions handle branching details for decompression, conditionals, and failure policy
 - the Rust converter is called only after the module has enough buffered state to do so safely
 
@@ -284,4 +342,5 @@ If you are debugging a behavior, the best mental model is:
 - Code layout: [REPOSITORY_STRUCTURE.md](REPOSITORY_STRUCTURE.md)
 - Why Rust: [ADR/0001-use-rust-for-conversion.md](ADR/0001-use-rust-for-conversion.md)
 - Why full buffering: [ADR/0002-full-buffering-approach.md](ADR/0002-full-buffering-approach.md)
+- Large response optimization: [LARGE_RESPONSE_DESIGN.md](LARGE_RESPONSE_DESIGN.md)
 - Operator-facing behavior: [../guides/CONFIGURATION.md](../guides/CONFIGURATION.md)
