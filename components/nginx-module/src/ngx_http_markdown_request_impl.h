@@ -182,6 +182,7 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
         && r->method != NGX_HTTP_HEAD
         && r->headers_out.status != NGX_HTTP_NOT_MODIFIED)
     {
+#ifdef MARKDOWN_INCREMENTAL_ENABLED
         if (r->headers_out.content_length_n >= 0
             && (size_t) r->headers_out.content_length_n
                 >= conf->large_body_threshold)
@@ -190,6 +191,7 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
                 NGX_HTTP_MARKDOWN_PATH_INCREMENTAL;
         }
         /* else: no CL — deferred to body filter */
+#endif
     }
 
     /* Record path hit metric */
@@ -243,6 +245,7 @@ ngx_http_markdown_body_filter_convert_and_output(ngx_http_request_t *r,
      *
      * Requirements: 16.7
      */
+#ifdef MARKDOWN_INCREMENTAL_ENABLED
     if (conf->large_body_threshold > 0
         && ctx->processing_path
             == NGX_HTTP_MARKDOWN_PATH_FULLBUFFER
@@ -273,6 +276,7 @@ ngx_http_markdown_body_filter_convert_and_output(ngx_http_request_t *r,
         NGX_HTTP_MARKDOWN_METRIC_INC(
             incremental_path_hits);
     }
+#endif
 
     ctx->conversion_attempted = 1;
     NGX_HTTP_MARKDOWN_METRIC_INC(conversions_attempted);

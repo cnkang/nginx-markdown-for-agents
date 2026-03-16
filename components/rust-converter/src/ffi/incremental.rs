@@ -79,8 +79,10 @@ pub unsafe extern "C" fn markdown_incremental_new(
         let decoded = decode_options(opts_ref).map_err(|e| {
             eprintln!("markdown_incremental_new: failed to decode options: {e}");
         })?;
-        let converter =
+        let mut converter =
             IncrementalConverter::with_max_buffer_size(decoded.conversion, decoded.max_buffer_size);
+        converter.set_content_type(decoded.content_type.map(ToOwned::to_owned));
+        converter.set_timeout(decoded.timeout);
         Ok(Box::into_raw(Box::new(IncrementalConverterHandle {
             inner: converter,
             generate_etag: decoded.generate_etag,

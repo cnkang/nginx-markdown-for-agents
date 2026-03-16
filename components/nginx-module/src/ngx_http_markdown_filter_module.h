@@ -256,10 +256,6 @@ typedef struct {
     ngx_atomic_t  conversion_latency_le_100ms;   /* Completed conversions <= 100ms */
     ngx_atomic_t  conversion_latency_le_1000ms;  /* Completed conversions <= 1000ms */
     ngx_atomic_t  conversion_latency_gt_1000ms;  /* Completed conversions > 1000ms */
-    
-    /* Path hit metrics (threshold router) */
-    ngx_atomic_t  fullbuffer_path_hits;      /* Requests routed to full-buffer path */
-    ngx_atomic_t  incremental_path_hits;     /* Requests routed to incremental path */
 
     /* Decompression metrics */
     ngx_atomic_t  decompressions_attempted;  /* Total decompression attempts */
@@ -268,6 +264,16 @@ typedef struct {
     ngx_atomic_t  decompressions_gzip;       /* Gzip decompressions */
     ngx_atomic_t  decompressions_deflate;    /* Deflate decompressions */
     ngx_atomic_t  decompressions_brotli;     /* Brotli decompressions */
+
+    /*
+     * Path hit metrics (threshold router).
+     *
+     * Placed at the end of the struct so that adding them does not shift
+     * the offsets of pre-existing fields.  This preserves shared-memory
+     * layout compatibility across hot reloads from older module builds.
+     */
+    ngx_atomic_t  fullbuffer_path_hits;      /* Requests routed to full-buffer path */
+    ngx_atomic_t  incremental_path_hits;     /* Requests routed to incremental path */
 } ngx_http_markdown_metrics_t;
 
 /* Module declaration */

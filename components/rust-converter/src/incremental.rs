@@ -24,9 +24,11 @@
 //! assert!(markdown.contains("# Hello"));
 //! ```
 
-use crate::converter::{ConversionOptions, MarkdownConverter};
+use std::time::Duration;
+
+use crate::converter::{ConversionContext, ConversionOptions, MarkdownConverter};
 use crate::error::ConversionError;
-use crate::parser::parse_html;
+use crate::parser::parse_html_with_charset;
 
 /// Stateful incremental converter that accepts input in chunks.
 ///
@@ -50,6 +52,8 @@ pub struct IncrementalConverter {
     options: ConversionOptions,
     buffer: Vec<u8>,
     max_buffer_size: usize,
+    content_type: Option<String>,
+    timeout: Duration,
 }
 
 /// Default maximum buffer size for the incremental converter (64 MiB).
@@ -69,6 +73,8 @@ impl IncrementalConverter {
             options,
             buffer: Vec::new(),
             max_buffer_size: INCREMENTAL_MAX_BUFFER_SIZE,
+            content_type: None,
+            timeout: Duration::ZERO,
         }
     }
 
@@ -86,7 +92,27 @@ impl IncrementalConverter {
             options,
             buffer: Vec::new(),
             max_buffer_size: effective,
+            content_type: None,
+            timeout: Duration::ZERO,
         }
+    }
+
+    /// Sets the `Content-Type` header value used for charset detection
+    /// during [`finalize`](Self::finalize).
+    ///
+    /// When set, the parser will honour the charset specified in the
+    /// content-type (e.g. `text/html; charset=iso-8859-1`) and transcode
+    /// to UTF-8 before conversion, matching the full-buffer path behaviour.
+    pub fn set_content_type(&mut self, content_type: Option<String>) {
+        self.content_type = content_type;
+    }
+
+    /// Sets the cooperative timeout enforced during conversion in
+    /// [`finalize`](Self::finalize).
+    ///
+    /// A zero duration disables timeout checking (the default).
+    pub fn set_timeout(&mut self, timeout: Duration) {
+        self.timeout = timeout;
     }
 
     /// Feeds a chunk of input data into the converter buffer.
@@ -127,16 +153,21 @@ impl IncrementalConverter {
             return Ok(String::new());
         }
 
-        let dom = parse_html(&self.buffer)?;
+        let ct_ref = self.content_type.as_deref();
+        let dom = parse_html_with_charset(&self.buffer, ct_ref)?;
+
+        let mut ctx = ConversionContext::new(self.timeout);
+        ctx.check_timeout()?;
+
         let converter = MarkdownConverter::with_options(self.options);
-        converter.convert(&dom)
+        converter.convert_with_context(&dom, &mut ctx)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
+    use crate::parser::parse_html;
     #[test]
     fn test_new_creates_empty_buffer() {
         let conv = IncrementalConverter::new(ConversionOptions::default());

@@ -481,16 +481,15 @@ ngx_http_markdown_execute_conversion(ngx_http_request_t *r,
 
         inc_handle = markdown_incremental_new(&options);
         if (inc_handle == NULL) {
-            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                         "markdown filter: failed to create incremental converter");
-
             tp = ngx_timeofday();
             end_time = (ngx_msec_t) (tp->sec * 1000 + tp->msec);
             *elapsed_ms = (end_time >= start_time) ? end_time - start_time : 0;
 
-            return ngx_http_markdown_reject_or_fail_open_buffered_response(
-                r, ctx, conf,
-                "markdown filter: fail-open strategy - returning original HTML");
+            result->error_code = ERROR_INTERNAL;
+            result->error_message = NULL;
+            result->error_len = 0;
+            return ngx_http_markdown_handle_conversion_failure(
+                r, ctx, conf, result, *elapsed_ms);
         }
 
         feed_rc = markdown_incremental_feed(
@@ -502,12 +501,11 @@ ngx_http_markdown_execute_conversion(ngx_http_request_t *r,
             end_time = (ngx_msec_t) (tp->sec * 1000 + tp->msec);
             *elapsed_ms = (end_time >= start_time) ? end_time - start_time : 0;
 
-            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                         "markdown filter: incremental feed failed, error_code=%ud",
-                         feed_rc);
-            return ngx_http_markdown_reject_or_fail_open_buffered_response(
-                r, ctx, conf,
-                "markdown filter: fail-open strategy - returning original HTML");
+            result->error_code = feed_rc;
+            result->error_message = NULL;
+            result->error_len = 0;
+            return ngx_http_markdown_handle_conversion_failure(
+                r, ctx, conf, result, *elapsed_ms);
         }
 
         /* finalize consumes the handle — do NOT call free after this */
