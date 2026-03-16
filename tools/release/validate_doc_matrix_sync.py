@@ -11,7 +11,6 @@ Usage:
 """
 
 import json
-import re
 import sys
 from pathlib import Path
 
@@ -46,6 +45,19 @@ def _is_table_header_or_separator(nginx: str) -> bool:
     return nginx.lower() == "nginx version" or set(nginx.replace("-", "")) == set() or nginx.startswith("-")
 
 
+def _parse_table_row(line: str) -> tuple[str, str, str, str] | None:
+    """Parse a markdown table row without regex backtracking risk."""
+    stripped = line.strip()
+    if not stripped.startswith("|") or not stripped.endswith("|"):
+        return None
+
+    cells = [cell.strip() for cell in stripped[1:-1].split("|")]
+    if len(cells) != 4 or any(cell == "" for cell in cells):
+        return None
+
+    return tuple(cells)  # type: ignore[return-value]
+
+
 def parse_doc_matrix(path: Path) -> list[tuple[str, str, str, str]]:
     """Parse the Platform Compatibility Matrix table from INSTALLATION.md.
 
@@ -55,13 +67,6 @@ def parse_doc_matrix(path: Path) -> list[tuple[str, str, str, str]]:
     Returns sorted list of (nginx, os_type, arch, tier) tuples with tier lowercased.
     """
     content = path.read_text(encoding="utf-8")
-
-    # Match table rows: | value | value | value | value |
-    # Skip header and separator lines (containing dashes only in cells)
-    # Uses greedy [^|]+ to avoid backtracking between lazy quantifier and \s*
-    row_pattern = re.compile(
-        r"^\|\s*([^|]+)\|\s*([^|]+)\|\s*([^|]+)\|\s*([^|]+)\|$"
-    )
 
     entries = []
     in_matrix_section = False
@@ -79,11 +84,11 @@ def parse_doc_matrix(path: Path) -> list[tuple[str, str, str, str]]:
         if not in_matrix_section:
             continue
 
-        match = row_pattern.match(line.strip())
-        if not match:
+        row = _parse_table_row(line)
+        if row is None:
             continue
 
-        nginx, os_type, arch, tier = (g.strip() for g in match.groups())
+        nginx, os_type, arch, tier = row
 
         if _is_table_header_or_separator(nginx):
             continue
