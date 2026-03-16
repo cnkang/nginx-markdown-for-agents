@@ -825,5 +825,9 @@ echo "- Scope rollout with server/location-level markdown_filter on/off"
 echo "- Adjust markdown_max_size / markdown_on_error by workload"
 echo "=================================================================================="
 
-# Emit JSON success output if --json was requested
-json_output true
+# Emit JSON output if --json was requested
+if [ "$NGINX_TEST_RESULT" = "failed" ]; then
+  json_output false
+else
+  json_output true
+fi
