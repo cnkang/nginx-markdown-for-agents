@@ -337,6 +337,54 @@ ngx_http_markdown_stream_types(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     return NGX_CONF_OK;
 }
 
+/*
+ * Configuration directive handler: markdown_large_body_threshold
+ *
+ * Supported values:
+ * - off           (disable threshold routing, default)
+ * - <size>        (byte size with optional k/m suffix)
+ */
+static char *
+ngx_http_markdown_large_body_threshold(ngx_conf_t *cf,
+    ngx_command_t *cmd, void *conf)
+{
+    ngx_http_markdown_conf_t *mcf = conf;
+    ngx_str_t                *value;
+
+    (void) cmd;
+
+    value = cf->args->elts;
+
+    if (mcf->large_body_threshold != NGX_CONF_UNSET_SIZE) {
+        return "is duplicate";
+    }
+
+    if (value[1].len == 3
+        && ngx_strcasecmp(value[1].data, (u_char *) "off") == 0)
+    {
+        mcf->large_body_threshold = 0;
+        return NGX_CONF_OK;
+    }
+
+    mcf->large_body_threshold = ngx_parse_size(&value[1]);
+    if (mcf->large_body_threshold == (size_t) NGX_ERROR) {
+        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+            "invalid value \"%V\" in "
+            "\"markdown_large_body_threshold\" "
+            "directive, it must be \"off\" "
+            "or a size (e.g., 512k, 1m)",
+            &value[1]);
+        return NGX_CONF_ERROR;
+    }
+
+    if (mcf->large_body_threshold == 0) {
+        /* Explicit "0" is treated as off */
+        return NGX_CONF_OK;
+    }
+
+    return NGX_CONF_OK;
+}
+
 /* Configuration directive handler: markdown_metrics (register content handler). */
 static char *
 ngx_http_markdown_metrics_directive(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)

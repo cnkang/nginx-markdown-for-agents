@@ -96,6 +96,7 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
     ctx->conversion_attempted = 0;
     ctx->conversion_succeeded = 0;
     ctx->bypass_counted = 0;
+    ctx->processing_path = NGX_HTTP_MARKDOWN_PATH_FULLBUFFER;
     
     /* Initialize decompression state (Task 2.4 - Fast path initialization)
      * 
@@ -158,6 +159,49 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
     }
 
     /*
+     * Threshold router: select processing path.
+     *
+     * HEAD requests and 304 responses always use the
+     * full-buffer path regardless of the configured
+     * threshold.  When the threshold is off (== 0), all
+     * requests also use the full-buffer path.
+     *
+     * When Content-Length is known and >= threshold, select
+     * the incremental path.  When Content-Length is absent,
+     * the decision is deferred to the body filter (buffer
+     * first, then decide once buffered size is known).
+     *
+     * Fail-open replay (returning buffered original HTML
+     * after conversion failure) always uses the full-buffer
+     * path; that is enforced at body-filter time since the
+     * replay decision happens after conversion attempt.
+     *
+     * Requirements: 16.1, 16.3, 16.4, 16.6, 16.7
+     */
+    if (conf->large_body_threshold > 0
+        && r->method != NGX_HTTP_HEAD
+        && r->headers_out.status != NGX_HTTP_NOT_MODIFIED)
+    {
+        if (r->headers_out.content_length_n >= 0
+            && (size_t) r->headers_out.content_length_n
+                >= conf->large_body_threshold)
+        {
+            ctx->processing_path =
+                NGX_HTTP_MARKDOWN_PATH_INCREMENTAL;
+        }
+        /* else: no CL — deferred to body filter */
+    }
+
+    /* Record path hit metric */
+    if (ctx->processing_path
+        == NGX_HTTP_MARKDOWN_PATH_INCREMENTAL)
+    {
+        NGX_HTTP_MARKDOWN_METRIC_INC(incremental_path_hits);
+    } else {
+        NGX_HTTP_MARKDOWN_METRIC_INC(fullbuffer_path_hits);
+    }
+
+    /*
      * Request in-memory buffers from upstream filters/modules.
      *
      * Static file responses may otherwise arrive as file-backed buffers
@@ -190,6 +234,45 @@ ngx_http_markdown_body_filter_convert_and_output(ngx_http_request_t *r,
     ngx_msec_t            elapsed_ms;
     ngx_flag_t            has_result;
     struct MarkdownResult result;
+
+    /*
+     * Deferred path selection for chunked/unknown-length
+     * responses.  If Content-Length was absent in the
+     * header phase, the threshold decision was deferred
+     * until the full body is buffered.
+     *
+     * Requirements: 16.7
+     */
+    if (conf->large_body_threshold > 0
+        && ctx->processing_path
+            == NGX_HTTP_MARKDOWN_PATH_FULLBUFFER
+        && r->method != NGX_HTTP_HEAD
+        && r->headers_out.status != NGX_HTTP_NOT_MODIFIED
+        && ctx->buffer.size >= conf->large_body_threshold)
+    {
+        ctx->processing_path =
+            NGX_HTTP_MARKDOWN_PATH_INCREMENTAL;
+
+        /*
+         * Correct the path hit counters: header filter
+         * already incremented fullbuffer_path_hits, so
+         * undo that and count incremental instead.
+         *
+         * Guard against underflow: only decrement if the
+         * counter is positive.  In theory the header filter
+         * always increments first, but a metrics zone reset
+         * (e.g. worker restart) could leave the counter at
+         * zero.
+         */
+        if (ngx_http_markdown_metrics != NULL
+            && ngx_http_markdown_metrics->fullbuffer_path_hits > 0)
+        {
+            NGX_HTTP_MARKDOWN_METRIC_ADD(
+                fullbuffer_path_hits, -1);
+        }
+        NGX_HTTP_MARKDOWN_METRIC_INC(
+            incremental_path_hits);
+    }
 
     ctx->conversion_attempted = 1;
     NGX_HTTP_MARKDOWN_METRIC_INC(conversions_attempted);

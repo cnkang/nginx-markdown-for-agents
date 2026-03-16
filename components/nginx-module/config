@@ -69,6 +69,13 @@ fi
 # Use ngx_module_libs so dynamic-module builds link them into the module .so.
 ngx_module_libs="$ngx_markdown_rust_lib -lpthread -ldl -lm"
 
+# Detect whether the Rust library was built with the `incremental` feature.
+# If the symbol is present, define MARKDOWN_INCREMENTAL_ENABLED so the C
+# header exposes the incremental API declarations.
+if nm "$ngx_markdown_rust_lib" 2>/dev/null | grep -q 'markdown_incremental_new'; then
+    CFLAGS="$CFLAGS -DMARKDOWN_INCREMENTAL_ENABLED"
+fi
+
 # Check if module is configured as dynamic
 if test -n "$ngx_module_link"; then
     # Dynamic module

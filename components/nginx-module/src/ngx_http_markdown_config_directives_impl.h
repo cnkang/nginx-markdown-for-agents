@@ -322,6 +322,28 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
     },
 
     /*
+     * markdown_large_body_threshold off|<size>
+     *
+     * Threshold for routing responses to the incremental
+     * processing path. Responses with Content-Length at or
+     * above this value use the incremental path.
+     * Default: off (all responses use full-buffer path)
+     * Context: http, server, location
+     *
+     * Example:
+     *   markdown_large_body_threshold 512k;
+     */
+    {
+        ngx_string("markdown_large_body_threshold"),
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF
+            |NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+        ngx_http_markdown_large_body_threshold,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        0,
+        NULL
+    },
+
+    /*
      * markdown_metrics_shm_size <size>
      *
      * Size of the shared-memory zone used to aggregate metrics across workers.

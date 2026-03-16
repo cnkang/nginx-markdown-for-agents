@@ -30,14 +30,19 @@ typedef struct {
     ngx_atomic_uint_t decompressions_gzip;
     ngx_atomic_uint_t decompressions_deflate;
     ngx_atomic_uint_t decompressions_brotli;
+    ngx_atomic_uint_t fullbuffer_path_hits;
+    ngx_atomic_uint_t incremental_path_hits;
 } ngx_http_markdown_metrics_snapshot_t;
 
 /*
  * Response buffer size for the metrics endpoint.  The current JSON/text
- * output is well under 1 KiB, but we leave headroom for future fields.
+ * output is well under 2 KiB, but we leave headroom for future fields.
  * Increase this constant if new metrics push the output beyond the limit.
+ *
+ * Estimated current output: ~1.5 KiB (JSON), ~1.2 KiB (text).
+ * Last updated when fullbuffer_path_hits / incremental_path_hits were added.
  */
-#define NGX_HTTP_MARKDOWN_METRICS_BUF_SIZE  4096
+#define NGX_HTTP_MARKDOWN_METRICS_BUF_SIZE  5120
 
 /*
  * Copy shared atomic counters into a local snapshot struct.
@@ -84,6 +89,8 @@ ngx_http_markdown_collect_metrics_snapshot(ngx_http_markdown_metrics_snapshot_t 
     snapshot->decompressions_gzip = metrics->decompressions_gzip;
     snapshot->decompressions_deflate = metrics->decompressions_deflate;
     snapshot->decompressions_brotli = metrics->decompressions_brotli;
+    snapshot->fullbuffer_path_hits = metrics->fullbuffer_path_hits;
+    snapshot->incremental_path_hits = metrics->incremental_path_hits;
 }
 
 /*
@@ -220,7 +227,9 @@ ngx_http_markdown_metrics_write_json(
         "  \"decompressions_failed\": %uA,\n"
         "  \"decompressions_gzip\": %uA,\n"
         "  \"decompressions_deflate\": %uA,\n"
-        "  \"decompressions_brotli\": %uA\n"
+        "  \"decompressions_brotli\": %uA,\n"
+        "  \"fullbuffer_path_hits\": %uA,\n"
+        "  \"incremental_path_hits\": %uA\n"
         "}",
         snapshot->conversions_attempted,
         snapshot->conversions_succeeded,
@@ -245,7 +254,9 @@ ngx_http_markdown_metrics_write_json(
         snapshot->decompressions_failed,
         snapshot->decompressions_gzip,
         snapshot->decompressions_deflate,
-        snapshot->decompressions_brotli);
+        snapshot->decompressions_brotli,
+        snapshot->fullbuffer_path_hits,
+        snapshot->incremental_path_hits);
 }
 
 static u_char *
@@ -290,7 +301,11 @@ ngx_http_markdown_metrics_write_text(
         "- Decompressions Failed: %uA\n"
         "- Gzip Decompressions: %uA\n"
         "- Deflate Decompressions: %uA\n"
-        "- Brotli Decompressions: %uA\n",
+        "- Brotli Decompressions: %uA\n"
+        "\n"
+        "Path Routing:\n"
+        "- Full-Buffer Path Hits: %uA\n"
+        "- Incremental Path Hits: %uA\n",
         snapshot->conversions_attempted,
         snapshot->conversions_succeeded,
         snapshot->conversions_failed,
@@ -314,7 +329,9 @@ ngx_http_markdown_metrics_write_text(
         snapshot->decompressions_failed,
         snapshot->decompressions_gzip,
         snapshot->decompressions_deflate,
-        snapshot->decompressions_brotli);
+        snapshot->decompressions_brotli,
+        snapshot->fullbuffer_path_hits,
+        snapshot->incremental_path_hits);
 }
 
 /*

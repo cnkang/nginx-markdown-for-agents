@@ -133,6 +133,7 @@ ngx_http_markdown_create_conf(ngx_conf_t *cf)
     conf->buffer_chunked = NGX_CONF_UNSET;
     conf->stream_types = NGX_CONF_UNSET_PTR;
     conf->auto_decompress = NGX_CONF_UNSET;
+    conf->large_body_threshold = NGX_CONF_UNSET_SIZE;
 
     return conf;
 }
@@ -190,6 +191,9 @@ ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
                               NGX_HTTP_MARKDOWN_LOG_INFO);
     ngx_conf_merge_value(conf->buffer_chunked, prev->buffer_chunked, 1);
     ngx_conf_merge_value(conf->auto_decompress, prev->auto_decompress, 1);
+    ngx_conf_merge_size_value(conf->large_body_threshold,
+                              prev->large_body_threshold,
+                              NGX_HTTP_MARKDOWN_THRESHOLD_OFF);
 
     ngx_conf_merge_ptr_value(conf->auth_cookies, prev->auth_cookies, NULL);
     ngx_conf_merge_ptr_value(conf->stream_types, prev->stream_types, NULL);
@@ -511,11 +515,16 @@ ngx_http_markdown_log_merged_conf(ngx_conf_t *cf, ngx_http_markdown_conf_t *conf
     log_level = ngx_http_markdown_log_verbosity_to_ngx_level(conf->log_verbosity);
 
     ngx_conf_log_error(log_level, cf, 0,
-                       "markdown filter config: enabled=%ui enabled_source=%V max_size=%uz timeout_ms=%M "
-                       "on_error=%V flavor=%V token_estimate=%ui front_matter=%ui "
-                       "on_wildcard=%ui auth_policy=%V auth_cookie_patterns=%ui "
-                       "etag=%ui conditional_requests=%V log_verbosity=%V "
-                       "buffer_chunked=%ui stream_types=%ui",
+                       "markdown filter config: enabled=%ui "
+                       "enabled_source=%V max_size=%uz "
+                       "timeout_ms=%M on_error=%V flavor=%V "
+                       "token_estimate=%ui front_matter=%ui "
+                       "on_wildcard=%ui auth_policy=%V "
+                       "auth_cookie_patterns=%ui etag=%ui "
+                       "conditional_requests=%V "
+                       "log_verbosity=%V buffer_chunked=%ui "
+                       "stream_types=%ui "
+                       "large_body_threshold=%uz",
                        (ngx_uint_t) conf->enabled,
                        ngx_http_markdown_enabled_source_name(conf->enabled_source),
                        conf->max_size,
@@ -531,5 +540,6 @@ ngx_http_markdown_log_merged_conf(ngx_conf_t *cf, ngx_http_markdown_conf_t *conf
                        ngx_http_markdown_conditional_requests_name(conf->conditional_requests),
                        ngx_http_markdown_log_verbosity_name(conf->log_verbosity),
                        (ngx_uint_t) conf->buffer_chunked,
-                       stream_type_count);
+                       stream_type_count,
+                       conf->large_body_threshold);
 }

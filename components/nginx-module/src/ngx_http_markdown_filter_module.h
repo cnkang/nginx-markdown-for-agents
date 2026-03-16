@@ -13,6 +13,17 @@
 #include <ngx_http.h>
 
 /*
+ * Processing path constants for threshold router
+ */
+#define NGX_HTTP_MARKDOWN_PATH_FULLBUFFER   0  /* Full-buffer path */
+#define NGX_HTTP_MARKDOWN_PATH_INCREMENTAL  1  /* Incremental path */
+
+/*
+ * Threshold off sentinel — used in merge and path selection logic.
+ */
+#define NGX_HTTP_MARKDOWN_THRESHOLD_OFF     0
+
+/*
  * Configuration constants for on_error directive
  */
 #define NGX_HTTP_MARKDOWN_ON_ERROR_PASS    0  /* fail-open: return original HTML */
@@ -114,6 +125,7 @@ typedef struct {
     ngx_flag_t   buffer_chunked;       /* markdown_buffer_chunked on|off (default: on) */
     ngx_array_t *stream_types;         /* markdown_stream_types exclusion list (default: NULL) */
     ngx_flag_t   auto_decompress;      /* markdown_auto_decompress on|off (default: on) */
+    size_t       large_body_threshold; /* markdown_large_body_threshold (NGX_HTTP_MARKDOWN_THRESHOLD_OFF = off) */
 } ngx_http_markdown_conf_t;
 
 /*
@@ -159,6 +171,9 @@ typedef struct {
     ngx_flag_t                   conversion_succeeded;
     ngx_flag_t                   bypass_counted; /* Whether conversions_bypassed was incremented */
     
+    /* Threshold router path selection (NGX_HTTP_MARKDOWN_PATH_FULLBUFFER or NGX_HTTP_MARKDOWN_PATH_INCREMENTAL) */
+    ngx_uint_t                   processing_path;
+
     /* Decompression state */
     ngx_http_markdown_compression_type_e  compression_type;    /* Detected compression type */
     ngx_flag_t                            decompression_needed; /* Whether decompression is needed */
@@ -242,6 +257,10 @@ typedef struct {
     ngx_atomic_t  conversion_latency_le_1000ms;  /* Completed conversions <= 1000ms */
     ngx_atomic_t  conversion_latency_gt_1000ms;  /* Completed conversions > 1000ms */
     
+    /* Path hit metrics (threshold router) */
+    ngx_atomic_t  fullbuffer_path_hits;      /* Requests routed to full-buffer path */
+    ngx_atomic_t  incremental_path_hits;     /* Requests routed to incremental path */
+
     /* Decompression metrics */
     ngx_atomic_t  decompressions_attempted;  /* Total decompression attempts */
     ngx_atomic_t  decompressions_succeeded;  /* Successful decompressions */
