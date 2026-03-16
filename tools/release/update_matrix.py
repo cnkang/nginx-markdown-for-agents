@@ -767,11 +767,7 @@ def _run_write_mode(
         return 1
 
     # Generate new doc content (restores matrix on SystemExit)
-    try:
-        new_doc_content = _write_doc_with_rollback(merged, matrix_backup)
-    except SystemExit as exc:
-        code = exc.code
-        return code if isinstance(code, int) else 1
+    new_doc_content = _write_doc_with_rollback(merged, matrix_backup)
 
     # Write doc atomically (restores matrix on failure)
     result = _atomic_doc_write(new_doc_content, matrix_backup)
