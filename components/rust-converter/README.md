@@ -45,7 +45,7 @@ cargo build --features incremental
 cargo test --features incremental
 ```
 
-When the feature is disabled, the crate's public API and ABI are unchanged except that `MarkdownOptions` now unconditionally includes the `max_buffer_size` field. External callers must regenerate headers/bindings and initialize `max_buffer_size` to `0` (which selects the built-in default) even when the incremental feature is not enabled.
+Whether or not the `incremental` feature is enabled, the `MarkdownOptions` struct now unconditionally includes a `max_buffer_size` field. This changes the C ABI for all builds, so external callers must regenerate their headers/bindings (e.g. via `cbindgen`) and set `max_buffer_size` to `0` (which selects the built-in 64 MiB default) when the incremental feature is not in use. FFI tests likewise initialize the field to `0` to stay in sync with the updated struct layout.
 
 ### Rust API
 
