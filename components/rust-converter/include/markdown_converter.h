@@ -49,6 +49,17 @@
 #define ERROR_INTERNAL 99
 
 /**
+ * Opaque handle wrapping an [`IncrementalConverter`] for the C ABI.
+ *
+ * Only available when the Rust crate is compiled with the `incremental`
+ * feature.  Define `MARKDOWN_INCREMENTAL_ENABLED` before including this
+ * header to expose the incremental API declarations.
+ */
+#ifdef MARKDOWN_INCREMENTAL_ENABLED
+typedef struct IncrementalConverterHandle IncrementalConverterHandle;
+#endif
+
+/**
  * Opaque handle to Rust converter state shared across conversions.
  */
 typedef struct MarkdownConverterHandle MarkdownConverterHandle;
@@ -139,5 +150,101 @@ void markdown_result_free(struct MarkdownResult *result);
  * not be used after this call returns.
  */
 void markdown_converter_free(struct MarkdownConverterHandle *handle);
+
+/*
+ * Incremental processing API (feature-gated).
+ *
+ * These declarations are only available when MARKDOWN_INCREMENTAL_ENABLED
+ * is defined.  The Rust crate exports the corresponding symbols only when
+ * built with `--features incremental`.  If the C code includes these
+ * declarations but links against a library built without the feature, the
+ * linker will report unresolved symbols — catching the mismatch at build
+ * time rather than at runtime.
+ */
+#ifdef MARKDOWN_INCREMENTAL_ENABLED
+
+/**
+ * Creates a new incremental converter and returns an opaque handle.
+ *
+ * The returned handle must be freed by passing it to
+ * [`markdown_incremental_finalize`] or [`markdown_incremental_free`].
+ *
+ * # Safety
+ *
+ * * `options` must point to a valid, properly aligned [`MarkdownOptions`]
+ *   that remains readable for the duration of this call.
+ * * The returned pointer is heap-allocated; the caller owns it and must
+ *   not dereference it except through the `markdown_incremental_*` family
+ *   of functions.
+ *
+ * # Returns
+ *
+ * A non-NULL handle on success, or NULL if `options` is NULL or an
+ * internal panic is caught.
+ */
+struct IncrementalConverterHandle *markdown_incremental_new(const struct MarkdownOptions *options);
+
+/**
+ * Feeds a chunk of input data into the incremental converter.
+ *
+ * Chunks are buffered internally and concatenated during
+ * [`markdown_incremental_finalize`].  An empty chunk (`data_len == 0`)
+ * is accepted as a no-op.
+ *
+ * # Safety
+ *
+ * * `handle` must be a live pointer returned by [`markdown_incremental_new`].
+ * * `data` must point to at least `data_len` readable bytes, or be NULL
+ *   when `data_len` is 0.
+ *
+ * # Returns
+ *
+ * `ERROR_SUCCESS` (0) on success, or a non-zero error code on failure.
+ */
+uint32_t markdown_incremental_feed(struct IncrementalConverterHandle *handle,
+                                   const uint8_t *data,
+                                   uintptr_t data_len);
+
+/**
+ * Finalizes the incremental conversion and writes the result.
+ *
+ * This function **consumes** the handle — the caller must not use it
+ * after this call returns.  On success the Markdown output is written
+ * into `result`; on failure `result` carries an error code and message.
+ *
+ * # Safety
+ *
+ * * `handle` must be a live pointer returned by [`markdown_incremental_new`]
+ *   that has not already been finalized or freed.
+ * * `result` must point to a writable [`MarkdownResult`] whose owned
+ *   buffers are either NULL/zero-length or were previously returned by
+ *   this API.
+ *
+ * # Returns
+ *
+ * `ERROR_SUCCESS` (0) on success, or a non-zero error code on failure.
+ * In both cases `result` is populated accordingly.
+ */
+uint32_t markdown_incremental_finalize(struct IncrementalConverterHandle *handle,
+                                       struct MarkdownResult *result);
+
+/**
+ * Frees an incremental converter handle without finalizing.
+ *
+ * Use this function to release resources when the conversion is being
+ * abandoned (e.g. on error or cancellation).  If the handle has already
+ * been consumed by [`markdown_incremental_finalize`], do **not** call
+ * this function.
+ *
+ * Passing NULL is a safe no-op.
+ *
+ * # Safety
+ *
+ * * `handle` must be NULL or a live pointer returned by
+ *   [`markdown_incremental_new`] that has not been finalized or freed.
+ */
+void markdown_incremental_free(struct IncrementalConverterHandle *handle);
+
+#endif  /* MARKDOWN_INCREMENTAL_ENABLED */
 
 #endif  /* NGINX_MARKDOWN_CONVERTER_H */

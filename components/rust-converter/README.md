@@ -32,6 +32,62 @@ make test-rust-fuzz-smoke
 cbindgen --config cbindgen.toml --crate nginx-markdown-converter --output include/markdown_converter.h
 ```
 
+## Incremental Processing API
+
+The crate includes an optional incremental processing API behind a feature gate.
+
+### Enabling
+
+The `incremental` feature is off by default. Enable it at build time:
+
+```bash
+cargo build --features incremental
+cargo test --features incremental
+```
+
+When the feature is disabled, the crate's public API and ABI remain identical to the pre-incremental baseline.
+
+### Rust API
+
+`IncrementalConverter` in `src/incremental.rs` provides a chunk-oriented interface:
+
+```rust
+use nginx_markdown_converter::converter::ConversionOptions;
+use nginx_markdown_converter::incremental::IncrementalConverter;
+
+let mut conv = IncrementalConverter::new(ConversionOptions::default());
+conv.feed_chunk(b"<h1>Hello</h1>").unwrap();
+conv.feed_chunk(b"<p>world</p>").unwrap();
+let markdown = conv.finalize().unwrap();
+```
+
+| Method | Description |
+|--------|-------------|
+| `new(options)` | Create a converter with the given `ConversionOptions` |
+| `feed_chunk(data)` | Append a byte slice to the internal buffer |
+| `finalize(self)` | Parse the accumulated buffer and return Markdown |
+
+### FFI Functions
+
+Four C-callable functions are exported when the feature is enabled:
+
+| Function | Purpose |
+|----------|---------|
+| `markdown_incremental_new` | Create an opaque converter handle |
+| `markdown_incremental_feed` | Feed a chunk of input data |
+| `markdown_incremental_finalize` | Finalize conversion and write the result |
+| `markdown_incremental_free` | Free the handle without finalizing |
+
+Existing FFI function signatures are not modified.
+
+### Limitations
+
+This is a first-iteration prototype. The converter buffers all fed data internally and performs a single full parse-and-convert pass during `finalize`. True streaming conversion may be introduced in a future iteration.
+
+### Equivalence Guarantee
+
+A single `feed_chunk` containing the complete input followed by `finalize` produces byte-identical output to the standard `markdown_convert` full-buffer path.
+
 ## Source Layout
 
 ```text
