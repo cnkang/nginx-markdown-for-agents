@@ -128,6 +128,7 @@ _capture_process_fingerprint() {
     # macOS: lstart gives e.g. "Mon Mar 16 10:05:00 2026"
     ps -o lstart= -p "$pid" 2>/dev/null | xargs || echo ""
   fi
+  return 0
 }
 
 # Check whether the target process is still alive AND is the same process
@@ -173,6 +174,14 @@ fi
 PROCESS_FINGERPRINT="$(_capture_process_fingerprint "$PID")"
 if [[ -z "$PROCESS_FINGERPRINT" ]]; then
   log "warning: could not capture process fingerprint for pid $PID; PID-reuse detection disabled"
+fi
+
+# Re-validate: the target could have exited (and the PID reused) between
+# the pre-flight kill -0 and the fingerprint capture above.  A second
+# process_alive() call now compares the fingerprint, closing the TOCTOU gap.
+if ! process_alive; then
+  echo >&2 "error: process $PID exited before monitoring could start (possible PID reuse)"
+  exit 1
 fi
 
 SLEEP_SEC="$(interval_to_sleep "$INTERVAL_MS")"

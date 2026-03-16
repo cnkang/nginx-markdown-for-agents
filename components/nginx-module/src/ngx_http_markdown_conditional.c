@@ -423,12 +423,45 @@ ngx_http_markdown_handle_if_none_match(ngx_http_request_t *r,
         return NGX_ERROR;
     }
 
-    /* Perform conversion */
-    markdown_convert(converter,
-                    ctx->buffer.data,
-                    ctx->buffer.size,
-                    &options,
-                    conv_result);
+    /* Perform conversion — honour the incremental path when enabled. */
+#ifdef MARKDOWN_INCREMENTAL_ENABLED
+    if (ctx->processing_path == NGX_HTTP_MARKDOWN_PATH_INCREMENTAL) {
+        struct IncrementalConverterHandle *inc_handle;
+        uint32_t                          feed_rc;
+        uint32_t                          fin_rc;
+
+        inc_handle = markdown_incremental_new(&options);
+        if (inc_handle == NULL) {
+            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                         "markdown filter: incremental converter init failed "
+                         "during If-None-Match check");
+            ngx_pfree(r->pool, conv_result);
+            return NGX_ERROR;
+        }
+
+        feed_rc = markdown_incremental_feed(
+            inc_handle, ctx->buffer.data, ctx->buffer.size);
+        if (feed_rc != 0) {
+            markdown_incremental_free(inc_handle);
+            ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
+                         "markdown filter: incremental feed failed during "
+                         "If-None-Match check, error_code=%ud", feed_rc);
+            ngx_pfree(r->pool, conv_result);
+            return NGX_ERROR;
+        }
+
+        /* finalize consumes the handle — do NOT call free after this */
+        fin_rc = markdown_incremental_finalize(inc_handle, conv_result);
+        (void) fin_rc;  /* error_code is checked via conv_result below */
+    } else
+#endif
+    {
+        markdown_convert(converter,
+                        ctx->buffer.data,
+                        ctx->buffer.size,
+                        &options,
+                        conv_result);
+    }
 
     /* Check conversion result */
     if (conv_result->error_code != 0) {
