@@ -20,6 +20,15 @@ PASS_COUNT=0
 FAIL_COUNT=0
 SKIP_COUNT=0
 
+# Track temporary shim directories for cleanup on interruption
+_SHIM_DIRS=()
+_cleanup_shim_dirs() {
+  for d in "${_SHIM_DIRS[@]+"${_SHIM_DIRS[@]}"}"; do
+    rm -rf "$d" 2>/dev/null || true
+  done
+}
+trap _cleanup_shim_dirs EXIT INT TERM
+
 # Repeated separator line
 SEPARATOR_LINE="========================================================================"
 
@@ -90,6 +99,7 @@ build_path_hiding() {
   local binary_name="$1"
   local shim_dir
   shim_dir="$(mktemp -d)"
+  _SHIM_DIRS+=("$shim_dir")
 
   # Create shim scripts for common utilities so they remain accessible,
   # but do NOT create one for the binary we want to hide.
@@ -411,11 +421,11 @@ else
   ALL_OK=1
   while IFS= read -r eline; do
     [[ -z "$eline" ]] && continue
-    LINENO_NUM="$(echo "$eline" | cut -d: -f1)"
+    EXIT_LINE_NUM="$(echo "$eline" | cut -d: -f1)"
     # Check 10 lines before for emit_error or die_with_error
-    START=$((LINENO_NUM - 10))
+    START=$((EXIT_LINE_NUM - 10))
     [[ "$START" -lt 1 ]] && START=1
-    CONTEXT="$(sed -n "${START},${LINENO_NUM}p" "$INSTALL_SCRIPT")"
+    CONTEXT="$(sed -n "${START},${EXIT_LINE_NUM}p" "$INSTALL_SCRIPT")"
     if echo "$CONTEXT" | grep -qE '(emit_error|die_with_error)'; then
       continue
     fi
@@ -423,7 +433,7 @@ else
     if echo "$CONTEXT" | grep -qE "(awk |die_with_error\s*\(\)|emit_error\s*\(\)|semver_lt\s*\(\)|sha256_file\s*\(\))"; then
       continue
     fi
-    fail "static analysis — line $LINENO_NUM: exit 1 without structured error"
+    fail "static analysis — line $EXIT_LINE_NUM: exit 1 without structured error"
     ALL_OK=0
   done <<< "$EXIT_LINES"
 

@@ -17,7 +17,11 @@ Usage:
     python3 tools/release/update_matrix.py [--dry-run] [--check-only]
 """
 
+
+
 import argparse
+import contextlib
+import itertools
 import json
 import os
 import re
@@ -55,10 +59,6 @@ DOC_MARKER_BEGIN = "<!-- BEGIN AUTO-GENERATED MATRIX -->"
 DOC_MARKER_END = "<!-- END AUTO-GENERATED MATRIX -->"
 REQUIRED_MATRIX_ENTRY_KEYS = ("nginx", "os_type", "arch")
 
-
-# ---------------------------------------------------------------------------
-# Data models
-# ---------------------------------------------------------------------------
 
 @dataclass
 class MatrixDiff:
@@ -188,12 +188,12 @@ def read_min_version(install_script_path: Path) -> str:
     	RuntimeError: If `MIN_SUPPORTED_NGINX_VERSION` cannot be found in the file.
     """
     text = install_script_path.read_text(encoding="utf-8")
-    match = re.search(r'MIN_SUPPORTED_NGINX_VERSION="([^"]+)"', text)
-    if not match:
+    if match := re.search(r'MIN_SUPPORTED_NGINX_VERSION="([^"]+)"', text):
+        return match[1]
+    else:
         raise RuntimeError(
             f"Could not find MIN_SUPPORTED_NGINX_VERSION in {install_script_path}"
         )
-    return match.group(1)
 
 
 def filter_versions(versions: list[str], min_version: str) -> list[str]:
@@ -324,8 +324,9 @@ def load_matrix(path: Path) -> tuple[dict, list[dict], list[dict]]:
                 file=sys.stderr,
             )
             sys.exit(1)
-        missing = _missing_required_keys(entry, REQUIRED_MATRIX_ENTRY_KEYS)
-        if missing:
+        if missing := _missing_required_keys(
+            entry, REQUIRED_MATRIX_ENTRY_KEYS
+        ):
             print(
                 f"Matrix entry at index {i} in {path} missing required keys: {', '.join(missing)}",
                 file=sys.stderr,
@@ -334,8 +335,14 @@ def load_matrix(path: Path) -> tuple[dict, list[dict], list[dict]]:
         managed_by = entry.get("managed_by")
         if managed_by == "manual":
             manual_entries.append(entry)
-        else:
+        elif managed_by is None or managed_by == "auto":
             auto_entries.append(entry)
+        else:
+            print(
+                f"Matrix entry at index {i} in {path} has unknown managed_by value: {managed_by!r}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
 
     _validate_manual_entries(manual_entries, path)
 
@@ -372,15 +379,16 @@ def compute_matrix(
         list[dict]: A list of matrix entry dictionaries for every combination of the provided `versions`, `os_types`, and `archs`.
     """
     entries: list[dict] = []
-    for v in versions:
-        for os_type in os_types:
-            for arch in archs:
-                entries.append({
-                    "nginx": v,
-                    "os_type": os_type,
-                    "arch": arch,
-                    "support_tier": SUPPORT_TIER,
-                })
+    for v, os_type in itertools.product(versions, os_types):
+        entries.extend(
+            {
+                "nginx": v,
+                "os_type": os_type,
+                "arch": arch,
+                "support_tier": SUPPORT_TIER,
+            }
+            for arch in archs
+        )
     entries.sort(key=_entry_sort_key)
     return entries
 
@@ -480,7 +488,7 @@ def write_matrix(path: Path, data: dict) -> None:
     
     The caller is responsible for updating `updated_at` (or any other fields) on `data` before calling this function.
     """
-    tmp_path = path.with_suffix(path.suffix + ".tmp")
+    tmp_path = path.with_suffix(f"{path.suffix}.tmp")
     try:
         safe_path = _resolve_repo_write_path(path)
         safe_tmp_path = _resolve_repo_write_path(tmp_path)
@@ -488,12 +496,8 @@ def write_matrix(path: Path, data: dict) -> None:
         os.replace(safe_tmp_path, safe_path)
     except Exception:
         # Clean up the temp file on any failure
-        try:
+        with contextlib.suppress(OSError, ValueError):
             _resolve_repo_write_path(tmp_path).unlink(missing_ok=True)
-        except OSError:
-            pass
-        except ValueError:
-            pass
         raise
 
 
@@ -545,13 +549,9 @@ def update_doc_table(doc_path: Path, matrix_entries: list[dict]) -> str:
         )
     lines.append(DOC_MARKER_END)
 
-    table_block = "\n".join(lines)
-
     # Replace from BEGIN marker through END marker (inclusive)
     end_marker_end = end_idx + len(DOC_MARKER_END)
-    new_content = content[:begin_idx] + table_block + content[end_marker_end:]
-
-    return new_content
+    return content[:begin_idx] + "\n".join(lines) + content[end_marker_end:]
 
 
 # ---------------------------------------------------------------------------
@@ -678,10 +678,8 @@ def _restore_matrix_backup(matrix_backup: str | None) -> None:
         matrix_backup (str | None): The text content to restore to MATRIX_PATH, or `None` to skip restoration.
     """
     if matrix_backup is not None:
-        try:
+        with contextlib.suppress(OSError):
             _write_repo_text(MATRIX_PATH, matrix_backup)
-        except OSError:
-            pass
 
 
 def _write_doc_with_rollback(
@@ -689,7 +687,7 @@ def _write_doc_with_rollback(
     matrix_backup: str | None,
 ) -> str:
     """
-    Build the updated INSTALLATION.md content from merged matrix entries, restoring the previous matrix if marker parsing fails.
+    Build the updated INSTALLATION.md content from merged matrix entries, restoring the previous matrix if doc generation fails.
     
     Parameters:
         merged (list[dict]): Matrix entries to insert into the auto-generated documentation block.
@@ -699,11 +697,12 @@ def _write_doc_with_rollback(
         new_doc_content (str): Complete document text with the auto-generated matrix block replaced.
     
     Raises:
-        SystemExit: If the documentation markers are missing or invalid; the provided matrix_backup is written back before the exception is re-raised.
+        SystemExit: Re-raised after restoring the matrix backup when markers are missing.
+        Exception: Re-raised after restoring the matrix backup on any other failure (OSError, KeyError, etc.).
     """
     try:
         return update_doc_table(DOC_PATH, merged)
-    except SystemExit:
+    except BaseException:
         _restore_matrix_backup(matrix_backup)
         raise
 
@@ -719,7 +718,7 @@ def _atomic_doc_write(new_doc_content: str, matrix_backup: str | None) -> int:
     Returns:
         int: `0` on successful write, `1` if an error occurred and restoration (if provided) was attempted.
     """
-    doc_tmp = DOC_PATH.with_suffix(DOC_PATH.suffix + ".tmp")
+    doc_tmp = DOC_PATH.with_suffix(f"{DOC_PATH.suffix}.tmp")
     try:
         safe_doc_path = _resolve_repo_write_path(DOC_PATH)
         safe_doc_tmp = _resolve_repo_write_path(doc_tmp)
@@ -727,10 +726,8 @@ def _atomic_doc_write(new_doc_content: str, matrix_backup: str | None) -> int:
         os.replace(safe_doc_tmp, safe_doc_path)
     except Exception as exc:
         print(f"Error writing {DOC_PATH}: {exc}", file=sys.stderr)
-        try:
+        with contextlib.suppress(OSError, ValueError):
             _resolve_repo_write_path(doc_tmp).unlink(missing_ok=True)
-        except (OSError, ValueError):
-            pass
         _restore_matrix_backup(matrix_backup)
         return 1
     return 0
@@ -807,11 +804,8 @@ def main(argv: list[str] | None = None) -> int:
     # In normal write mode, remove any pre-existing matrix-diff.json so that
     # a stale file from a previous run cannot falsely signal changes.
     if not args.dry_run and not args.check_only:
-        try:
+        with contextlib.suppress(OSError):
             DIFF_PATH.unlink(missing_ok=True)
-        except OSError:
-            pass
-
     # --- Fetch and parse nginx.org -------------------------------------------
     try:
         html = fetch_download_page(NGINX_DOWNLOAD_URL)

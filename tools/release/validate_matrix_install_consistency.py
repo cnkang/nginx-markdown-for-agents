@@ -38,14 +38,40 @@ def load_matrix(path: Path) -> list[dict]:
     """
     Load the release matrix from the given JSON file and return its entries.
     
-    If the file contains a top-level "matrix" key, return its value; otherwise return an empty list.
+    Validates that the parsed JSON is a dict with a "matrix" key whose value
+    is a list of dicts.  Raises ValueError with a descriptive message on any
+    structural violation.
     
     Returns:
-        list[dict]: The list of matrix entries (each entry is a dict), or an empty list if no "matrix" key is present.
+        list[dict]: The list of matrix entries.
     """
     with open(path, "r", encoding="utf-8") as f:
         data = json.load(f)
-    return data.get("matrix", [])
+
+    if not isinstance(data, dict):
+        raise ValueError(
+            f"Invalid matrix file {path}: expected a JSON object, "
+            f"got {type(data).__name__}"
+        )
+
+    if "matrix" not in data:
+        raise ValueError(f"Invalid matrix file {path}: missing 'matrix' key")
+
+    matrix = data["matrix"]
+    if not isinstance(matrix, list):
+        raise ValueError(
+            f"Invalid matrix file {path}: 'matrix' must be a list, "
+            f"got {type(matrix).__name__}"
+        )
+
+    for i, entry in enumerate(matrix):
+        if not isinstance(entry, dict):
+            raise ValueError(
+                f"Invalid matrix entry at index {i} in {path}: "
+                f"expected dict, got {type(entry).__name__}"
+            )
+
+    return matrix
 
 
 def extract_matrix_values(matrix: list[dict]) -> tuple[set[str], set[str]]:
@@ -84,7 +110,7 @@ def parse_install_script(path: Path) -> dict:
     )
     supported_archs: set[str] = set()
     if supported_archs_match:
-        raw = supported_archs_match.group(1)
+        raw = supported_archs_match[1]
         supported_archs = {a.strip() for a in raw.split(",") if a.strip()}
 
     # Extract the ASSET_NAME pattern
@@ -94,7 +120,7 @@ def parse_install_script(path: Path) -> dict:
     )
     asset_name_template = ""
     if asset_name_match:
-        raw_template = asset_name_match.group(1)
+        raw_template = asset_name_match[1]
         # Normalize shell variables to Python format placeholders
         asset_name_template = raw_template.replace(
             "${NGINX_VERSION}", "{nginx}"
@@ -152,9 +178,7 @@ def validate(
             f"{sorted(unknown_os)}"
         )
 
-    # Check 2: All matrix arch values are detectable by install.sh
-    unknown_arch = matrix_archs - install_info["detectable_archs"]
-    if unknown_arch:
+    if unknown_arch := matrix_archs - install_info["detectable_archs"]:
         errors.append(
             f"Matrix contains arch values not detectable by install.sh: "
             f"{sorted(unknown_arch)}"
@@ -162,22 +186,7 @@ def validate(
 
     # Check 3: SUPPORTED_ARCHITECTURES in install.sh matches matrix arch values
     if install_info["supported_architectures"] != matrix_archs:
-        only_in_script = install_info["supported_architectures"] - matrix_archs
-        only_in_matrix = matrix_archs - install_info["supported_architectures"]
-        parts = []
-        if only_in_script:
-            parts.append(
-                f"in install.sh but not in matrix: {sorted(only_in_script)}"
-            )
-        if only_in_matrix:
-            parts.append(
-                f"in matrix but not in install.sh SUPPORTED_ARCHITECTURES: "
-                f"{sorted(only_in_matrix)}"
-            )
-        errors.append(
-            f"SUPPORTED_ARCHITECTURES mismatch: {'; '.join(parts)}"
-        )
-
+        _extracted_from_validate_33(install_info, matrix_archs, errors)
     # Check 4: Asset naming convention matches
     if install_info["asset_name_template"] != EXPECTED_ASSET_TEMPLATE:
         errors.append(
@@ -202,6 +211,25 @@ def validate(
     return errors
 
 
+# TODO Rename this here and in `validate`
+def _extracted_from_validate_33(install_info, matrix_archs, errors):
+    only_in_script = install_info["supported_architectures"] - matrix_archs
+    only_in_matrix = matrix_archs - install_info["supported_architectures"]
+    parts = []
+    if only_in_script:
+        parts.append(
+            f"in install.sh but not in matrix: {sorted(only_in_script)}"
+        )
+    if only_in_matrix:
+        parts.append(
+            f"in matrix but not in install.sh SUPPORTED_ARCHITECTURES: "
+            f"{sorted(only_in_matrix)}"
+        )
+    errors.append(
+        f"SUPPORTED_ARCHITECTURES mismatch: {'; '.join(parts)}"
+    )
+
+
 def main() -> int:
     """
     Run consistency checks between release-matrix.json and install.sh and report the result.
@@ -224,12 +252,14 @@ def main() -> int:
         )
         return 1
 
-    matrix = load_matrix(MATRIX_PATH)
+    try:
+        matrix = load_matrix(MATRIX_PATH)
+    except (ValueError, json.JSONDecodeError) as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
     install_info = parse_install_script(INSTALL_SCRIPT_PATH)
 
-    errors = validate(matrix, install_info)
-
-    if errors:
+    if errors := validate(matrix, install_info):
         print(
             "Consistency check FAILED — found inconsistencies between "
             "release-matrix.json and install.sh:",
