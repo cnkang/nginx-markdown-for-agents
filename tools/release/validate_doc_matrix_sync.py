@@ -53,8 +53,9 @@ def parse_doc_matrix(path: Path) -> list[tuple[str, str, str, str]]:
 
     # Match table rows: | value | value | value | value |
     # Skip header and separator lines (containing dashes only in cells)
+    # Uses greedy [^|]+ to avoid backtracking between lazy quantifier and \s*
     row_pattern = re.compile(
-        r"^\|\s*([^|]+?)\s*\|\s*([^|]+?)\s*\|\s*([^|]+?)\s*\|\s*([^|]+?)\s*\|$"
+        r"^\|\s*([^|]+)\|\s*([^|]+)\|\s*([^|]+)\|\s*([^|]+)\|$"
     )
 
     entries = []
