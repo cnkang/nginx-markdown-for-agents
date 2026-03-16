@@ -114,10 +114,37 @@ now_ms() {
   return 0
 }
 
-# Check whether the target process is still alive.
+# Capture a stable identity fingerprint for the target process so we can
+# detect PID reuse.  On Linux we use the start-time field (field 22) from
+# /proc/<pid>/stat which is measured in clock ticks since boot — unique for
+# the lifetime of a PID slot.  On macOS we use `ps -o lstart=` which gives
+# the full launch timestamp.
+_capture_process_fingerprint() {
+  local pid="$1"
+  if [[ "$OS" == "Linux" ]]; then
+    # Field 22 of /proc/<pid>/stat is starttime (clock ticks since boot).
+    awk '{print $22}' "/proc/$pid/stat" 2>/dev/null || echo ""
+  else
+    # macOS: lstart gives e.g. "Mon Mar 16 10:05:00 2026"
+    ps -o lstart= -p "$pid" 2>/dev/null | xargs || echo ""
+  fi
+}
+
+# Check whether the target process is still alive AND is the same process
+# we started monitoring (guards against PID reuse).
 process_alive() {
-  kill -0 "$PID" 2>/dev/null
-  return $?
+  kill -0 "$PID" 2>/dev/null || return 1
+  # Verify identity — if the fingerprint changed, a different process now
+  # owns this PID.
+  if [[ -n "$PROCESS_FINGERPRINT" ]]; then
+    local current
+    current="$(_capture_process_fingerprint "$PID")"
+    if [[ "$current" != "$PROCESS_FINGERPRINT" ]]; then
+      log "warning: PID $PID was reused by a different process (fingerprint mismatch)"
+      return 1
+    fi
+  fi
+  return 0
 }
 
 # Convert interval from milliseconds to a fractional-second sleep argument.
@@ -132,9 +159,20 @@ interval_to_sleep() {
 # Pre-flight checks
 ###############################################################################
 
+# Initialize to empty — the pre-flight process_alive call will skip the
+# fingerprint comparison when this is blank.
+PROCESS_FINGERPRINT=""
+
 if ! process_alive; then
   echo >&2 "error: process $PID not found or not accessible"
   exit 1
+fi
+
+# Now that we know the process exists, capture its identity fingerprint so
+# subsequent process_alive() calls can detect PID reuse.
+PROCESS_FINGERPRINT="$(_capture_process_fingerprint "$PID")"
+if [[ -z "$PROCESS_FINGERPRINT" ]]; then
+  log "warning: could not capture process fingerprint for pid $PID; PID-reuse detection disabled"
 fi
 
 SLEEP_SEC="$(interval_to_sleep "$INTERVAL_MS")"
