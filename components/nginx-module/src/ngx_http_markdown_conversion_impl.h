@@ -485,7 +485,19 @@ ngx_http_markdown_execute_conversion(ngx_http_request_t *r,
             end_time = (ngx_msec_t) (tp->sec * 1000 + tp->msec);
             *elapsed_ms = (end_time >= start_time) ? end_time - start_time : 0;
 
-            result->error_code = ERROR_INTERNAL;
+            /*
+             * markdown_incremental_new() returns NULL on option-decoding
+             * failures or internal panics.  The Rust FFI does not expose
+             * a separate error channel from this function, so we cannot
+             * retrieve the library's error message.  Use
+             * ERROR_INVALID_INPUT as the most likely cause (bad options);
+             * the Rust layer logs the real reason to stderr.
+             */
+            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                         "markdown filter: markdown_incremental_new() "
+                         "returned NULL (option decoding or internal error)");
+
+            result->error_code = ERROR_INVALID_INPUT;
             result->error_message = NULL;
             result->error_len = 0;
             return ngx_http_markdown_handle_conversion_failure(
