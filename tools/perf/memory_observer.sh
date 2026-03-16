@@ -35,6 +35,7 @@ OUTPUT=""
 usage() {
   echo >&2 "usage: $0 --pid <pid> --interval <ms> --output <path>"
   exit 1
+  return 1
 }
 
 while [[ $# -gt 0 ]]; do
@@ -99,6 +100,7 @@ esac
 
 log() {
   echo >&2 "$@"
+  return 0
 }
 
 # Return current time in milliseconds (portable).
@@ -109,11 +111,13 @@ now_ms() {
   else
     echo $(( $(date +%s%N) / 1000000 ))
   fi
+  return 0
 }
 
 # Check whether the target process is still alive.
 process_alive() {
   kill -0 "$PID" 2>/dev/null
+  return $?
 }
 
 # Convert interval from milliseconds to a fractional-second sleep argument.
@@ -121,6 +125,7 @@ interval_to_sleep() {
   local ms="$1"
   # Use awk for portable floating-point division.
   awk "BEGIN { printf \"%.3f\", $ms / 1000 }"
+  return 0
 }
 
 ###############################################################################
@@ -202,14 +207,12 @@ else
 
   # If we could not read VmHWM (process already reaped), fall back to the
   # maximum sampled VmRSS observed during the polling loop.
-  if [[ "$MAX_RSS_KB" -eq 0 ]]; then
-    if [[ "$SAMPLED_MAX_RSS_KB" -gt 0 ]]; then
-      MAX_RSS_KB="$SAMPLED_MAX_RSS_KB"
-      MEMORY_PEAK_METHOD="sampled_peak"
-      log "warning: VmHWM unavailable for pid $PID, falling back to sampled VmRSS peak"
-    else
-      log "warning: could not read VmHWM or VmRSS for pid $PID (process already exited)"
-    fi
+  if [[ "$MAX_RSS_KB" -eq 0 ]] && [[ "$SAMPLED_MAX_RSS_KB" -gt 0 ]]; then
+    MAX_RSS_KB="$SAMPLED_MAX_RSS_KB"
+    MEMORY_PEAK_METHOD="sampled_peak"
+    log "warning: VmHWM unavailable for pid $PID, falling back to sampled VmRSS peak"
+  elif [[ "$MAX_RSS_KB" -eq 0 ]]; then
+    log "warning: could not read VmHWM or VmRSS for pid $PID (process already exited)"
   fi
 fi
 

@@ -74,14 +74,12 @@ select_processing_path(const conf_t *conf, const request_t *r,
 
     if (conf->large_body_threshold > 0
         && r->method != METHOD_HEAD
-        && r->status != STATUS_NOT_MODIFIED)
+        && r->status != STATUS_NOT_MODIFIED
+        && r->content_length >= 0
+        && (size_t) r->content_length
+            >= conf->large_body_threshold)
     {
-        if (r->content_length >= 0
-            && (size_t) r->content_length
-                >= conf->large_body_threshold)
-        {
-            ctx->processing_path = PATH_INCREMENTAL;
-        }
+        ctx->processing_path = PATH_INCREMENTAL;
     }
 
     if (ctx->processing_path == PATH_INCREMENTAL) {
@@ -560,11 +558,10 @@ test_metrics_fullbuffer_increments(void)
     request_t  r = make_request(METHOD_GET, STATUS_OK, 1024);
     ctx_t      ctx;
     metrics_t  m = fresh_metrics();
-    int        i;
 
     TEST_SUBSECTION("Metrics: fullbuffer counter increments");
 
-    for (i = 0; i < 5; i++) {
+    for (int i = 0; i < 5; i++) {
         ctx = fresh_ctx();
         select_processing_path(&c, &r, &ctx, &m);
     }
@@ -583,11 +580,10 @@ test_metrics_incremental_increments(void)
     request_t  r = make_request(METHOD_GET, STATUS_OK, 1024);
     ctx_t      ctx;
     metrics_t  m = fresh_metrics();
-    int        i;
 
     TEST_SUBSECTION("Metrics: incremental counter increments");
 
-    for (i = 0; i < 3; i++) {
+    for (int i = 0; i < 3; i++) {
         ctx = fresh_ctx();
         select_processing_path(&c, &r, &ctx, &m);
     }

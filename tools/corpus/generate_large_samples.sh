@@ -81,6 +81,7 @@ emit_header() {
 </head>
 <body>
 EOF
+    return 0
 }
 
 # Emit the HTML document footer.
@@ -89,6 +90,7 @@ emit_footer() {
 </body>
 </html>
 EOF
+    return 0
 }
 
 # Emit YAML front matter block (for front-matter variant).
@@ -105,6 +107,7 @@ tags:
 description: "Auto-generated large HTML document for performance benchmarking."
 ---
 EOF
+    return 0
 }
 
 # Emit token estimation markers (for token-estimation variant).
@@ -113,12 +116,14 @@ emit_token_markers() {
 <!-- token-estimate: start -->
 <!-- token-budget: 50000 -->
 EOF
+    return 0
 }
 
 emit_token_markers_end() {
     cat <<'EOF'
 <!-- token-estimate: end -->
 EOF
+    return 0
 }
 
 # Emit a plain prose section (~300 bytes each).
@@ -131,6 +136,7 @@ emit_prose_section() {
         <p>Paragraph ${idx} adds realistic prose to reach the target file size for benchmarking purposes.</p>
     </section>
 EOF
+    return 0
 }
 
 # Emit a nested-table + code-block section (~600 bytes each).
@@ -166,6 +172,7 @@ emit_table_code_section() {
 }</code></pre>
     </section>
 EOF
+    return 0
 }
 
 # ---------------------------------------------------------------------------
@@ -196,6 +203,7 @@ _build_block() {
         idx=$((idx + 1))
     done
     printf '%s' "$block"
+    return 0
 }
 
 # Generate a file by repeating content blocks until the target size is met.
@@ -223,7 +231,6 @@ generate_file() {
     # --- body: write ~10 KB blocks until we reach the target ---
     local block
     block="$(_build_block "$variant")"
-    local block_len=${#block}
 
     # Reserve space for footer + closing markers (~100 bytes is generous)
     local body_target=$((target_bytes - 100))
@@ -246,6 +253,7 @@ generate_file() {
 
     mv "$tmpfile" "$outfile"
     trap - RETURN
+    return 0
 }
 
 # ---------------------------------------------------------------------------
@@ -255,9 +263,11 @@ generate_file() {
 VARIANTS=("plain-html" "front-matter" "token-estimation" "nested-tables-code")
 TIERS=("large-100k:${TIER_100K}" "large-5m:${TIER_5M}")
 
-echo "========================================"
+SEPARATOR="========================================"
+
+echo "$SEPARATOR"
 echo "Large Sample Generator"
-echo "========================================"
+echo "$SEPARATOR"
 echo "Output directory: ${OUTPUT_DIR}"
 echo ""
 
@@ -278,6 +288,6 @@ for tier_entry in "${TIERS[@]}"; do
 done
 
 echo ""
-echo "========================================"
+echo "$SEPARATOR"
 echo "Generated ${FILE_COUNT} sample files in ${OUTPUT_DIR}"
-echo "========================================"
+echo "$SEPARATOR"
