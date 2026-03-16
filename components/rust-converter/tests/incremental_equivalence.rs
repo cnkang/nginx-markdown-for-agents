@@ -28,9 +28,6 @@ use proptest::prelude::*;
 
 /// Convert HTML bytes via the full (batch) path.
 fn convert_full(html: &[u8]) -> String {
-    if html.is_empty() {
-        return String::new();
-    }
     let dom = parse_html(html).expect("full-path: parse_html failed");
     MarkdownConverter::with_options(ConversionOptions::default())
         .convert(&dom)
@@ -171,9 +168,20 @@ proptest! {
 
 #[test]
 fn test_equivalence_empty_input() {
-    let full = convert_full(b"");
-    let incr = convert_incremental(b"");
-    assert_eq!(full, incr, "Empty input must produce identical output");
+    // Both paths should reject empty input with an error.
+    let full_result = parse_html(b"");
+    assert!(full_result.is_err(), "full path should reject empty input");
+    let full_err = full_result.err().unwrap();
+
+    let mut conv = IncrementalConverter::new(ConversionOptions::default());
+    conv.feed_chunk(b"").unwrap(); // empty feed is a no-op
+    let incr_err = conv.finalize().unwrap_err();
+
+    assert_eq!(
+        full_err.code(),
+        incr_err.code(),
+        "Empty input must produce the same error code from both paths"
+    );
 }
 
 #[test]

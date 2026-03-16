@@ -150,7 +150,9 @@ impl IncrementalConverter {
     /// Returns [`ConversionError`] if parsing or conversion fails.
     pub fn finalize(self) -> Result<String, ConversionError> {
         if self.buffer.is_empty() {
-            return Ok(String::new());
+            return Err(ConversionError::InvalidInput(
+                "HTML input is empty".to_string(),
+            ));
         }
 
         let ct_ref = self.content_type.as_deref();
@@ -192,10 +194,13 @@ mod tests {
     }
 
     #[test]
-    fn test_finalize_empty_returns_empty_string() {
+    fn test_finalize_empty_returns_invalid_input_error() {
         let conv = IncrementalConverter::new(ConversionOptions::default());
-        let result = conv.finalize().unwrap();
-        assert_eq!(result, "");
+        let err = conv.finalize().unwrap_err();
+        assert!(
+            matches!(err, ConversionError::InvalidInput(_)),
+            "Expected InvalidInput error for empty buffer, got: {err:?}"
+        );
     }
 
     #[test]
