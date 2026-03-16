@@ -120,7 +120,21 @@ def _write_repo_text(path: Path, content: str) -> None:
     """
     safe_path = _resolve_repo_write_path(path)
     safe_path.parent.mkdir(parents=True, exist_ok=True)
-    safe_path.write_text(content, encoding="utf-8")
+
+    # Anchor the final open to a trusted parent directory instead of passing
+    # an arbitrary path string into a convenience helper.
+    parent_fd = os.open(safe_path.parent, os.O_RDONLY)
+    try:
+        file_fd = os.open(
+            safe_path.name,
+            os.O_WRONLY | os.O_CREAT | os.O_TRUNC,
+            0o644,
+            dir_fd=parent_fd,
+        )
+        with os.fdopen(file_fd, "w", encoding="utf-8") as handle:
+            handle.write(content)
+    finally:
+        os.close(parent_fd)
 
 
 def read_min_version(install_script_path: Path) -> str:
