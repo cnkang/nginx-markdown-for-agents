@@ -38,6 +38,11 @@ def test_parse_doc_matrix_extracts_rows_from_matrix_section(tmp_path):
 
 
 def test_parse_doc_matrix_ignores_malformed_rows(tmp_path):
+    """
+    Ensures parse_doc_matrix ignores malformed Markdown table rows and returns only well-formed entries.
+    
+    Writes an INSTALLATION.md containing a "Platform Compatibility Matrix" table with malformed rows (extra columns and missing columns) and asserts that parse_doc_matrix yields a single normalized entry for the valid row.
+    """
     doc_path = tmp_path / "INSTALLATION.md"
     doc_path.write_text(
         "\n".join(

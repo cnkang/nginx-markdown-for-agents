@@ -22,9 +22,14 @@ DOC_PATH = REPO_ROOT / "docs" / "guides" / "INSTALLATION.md"
 
 
 def load_matrix_entries(path: Path) -> list[tuple[str, str, str, str]]:
-    """Load release-matrix.json and return sorted list of (nginx, os_type, arch, tier) tuples.
-
-    The support_tier value is normalized to lowercase for comparison.
+    """
+    Load and normalize matrix entries from a release-matrix JSON file.
+    
+    Parameters:
+        path (Path): Path to the release-matrix.json file.
+    
+    Returns:
+        entries (list[tuple[str, str, str, str]]): Sorted list of (nginx, os_type, arch, tier) tuples with `tier` lowercased.
     """
     with open(path, "r", encoding="utf-8") as f:
         data = json.load(f)
@@ -41,12 +46,22 @@ def load_matrix_entries(path: Path) -> list[tuple[str, str, str, str]]:
 
 
 def _is_table_header_or_separator(nginx: str) -> bool:
-    """Return True if *nginx* cell value indicates a header or separator row."""
+    """
+    Determine whether a markdown table's nginx cell represents a header or a separator row.
+    
+    Returns:
+        `true` if the cell equals "nginx version" (case-insensitive), consists only of dashes or is empty after removing dashes, or starts with "-", `false` otherwise.
+    """
     return nginx.lower() == "nginx version" or set(nginx.replace("-", "")) == set() or nginx.startswith("-")
 
 
 def _parse_table_row(line: str) -> tuple[str, str, str, str] | None:
-    """Parse a markdown table row without regex backtracking risk."""
+    """
+    Parse a markdown table row into its four cell values.
+    
+    Returns:
+        tuple[str, str, str, str] | None: A 4-tuple `(nginx, os_type, arch, tier)` containing the trimmed cell strings if `line` is a valid markdown table row with exactly four non-empty cells (starts and ends with `|`); `None` if the line is not a valid row.
+    """
     stripped = line.strip()
     if not stripped.startswith("|") or not stripped.endswith("|"):
         return None
@@ -59,12 +74,16 @@ def _parse_table_row(line: str) -> tuple[str, str, str, str] | None:
 
 
 def parse_doc_matrix(path: Path) -> list[tuple[str, str, str, str]]:
-    """Parse the Platform Compatibility Matrix table from INSTALLATION.md.
-
-    Looks for lines matching: | <version> | <os_type> | <arch> | <tier> |
-    Skips the header row and separator lines.
-
-    Returns sorted list of (nginx, os_type, arch, tier) tuples with tier lowercased.
+    """
+    Extract entries from the "Platform Compatibility Matrix" section of INSTALLATION.md.
+    
+    Parses the markdown table under the "Platform Compatibility Matrix" heading, ignores header and separator rows, and normalizes the tier field to lowercase.
+    
+    Parameters:
+        path (Path): Path to the INSTALLATION.md file to parse.
+    
+    Returns:
+        list[tuple[str, str, str, str]]: Sorted list of (nginx, os_type, arch, tier) tuples with `tier` lowercased.
     """
     content = path.read_text(encoding="utf-8")
 
@@ -102,7 +121,19 @@ def compare_matrices(
     json_entries: list[tuple[str, str, str, str]],
     doc_entries: list[tuple[str, str, str, str]],
 ) -> list[str]:
-    """Compare JSON and doc matrix entries. Returns a list of difference descriptions."""
+    """
+    Compare release matrix entries from the canonical JSON and the documentation and report any discrepancies.
+    
+    Parameters:
+        json_entries (list[tuple[str, str, str, str]]): Entries loaded from release-matrix.json as (nginx, os_type, arch, tier).
+        doc_entries (list[tuple[str, str, str, str]]): Entries parsed from the documentation as (nginx, os_type, arch, tier).
+    
+    Returns:
+        diffs (list[str]): A list of human-readable difference messages. Each message describes either an entry present only in JSON, an entry present only in the docs, or a tier mismatch for an entry present in both (formats include:
+          - "In JSON but missing from doc: nginx=... os_type=... arch=... tier=..."
+          - "In doc but missing from JSON: nginx=... os_type=... arch=... tier=..."
+          - "Tier mismatch for nginx=... os_type=... arch=...: JSON=..., doc=...").
+    """
     diffs: list[str] = []
 
     # Build lookup dicts keyed by (nginx, os_type, arch) for tier mismatch detection
@@ -147,7 +178,14 @@ def compare_matrices(
 
 
 def main() -> int:
-    """Entry point. Returns 0 if in sync, 1 if out of sync."""
+    """
+    Validate that INSTALLATION.md's "Platform Compatibility Matrix" matches release-matrix.json.
+    
+    Reads the canonical matrix and the documentation matrix, prints errors or a list of differences to stderr when mismatches or file/parse problems occur, and prints a success summary when they match.
+    
+    Returns:
+        int: `0` if the matrices are in sync, `1` if they are out of sync or a required file/parse error occurred.
+    """
     if not MATRIX_PATH.exists():
         print(f"ERROR: Matrix file not found: {MATRIX_PATH}", file=sys.stderr)
         return 1

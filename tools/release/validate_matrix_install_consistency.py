@@ -35,27 +35,46 @@ EXPECTED_ASSET_TEMPLATE = (
 
 
 def load_matrix(path: Path) -> list[dict]:
-    """Load the release matrix and return all entries."""
+    """
+    Load the release matrix from the given JSON file and return its entries.
+    
+    If the file contains a top-level "matrix" key, return its value; otherwise return an empty list.
+    
+    Returns:
+        list[dict]: The list of matrix entries (each entry is a dict), or an empty list if no "matrix" key is present.
+    """
     with open(path, "r", encoding="utf-8") as f:
         data = json.load(f)
     return data.get("matrix", [])
 
 
 def extract_matrix_values(matrix: list[dict]) -> tuple[set[str], set[str]]:
-    """Extract unique os_type and arch values from the matrix."""
+    """
+    Collects unique `os_type` and `arch` values from the release matrix.
+    
+    Parameters:
+        matrix (list[dict]): Iterable of matrix entries where each entry may contain
+            `"os_type"` and `"arch"` keys.
+    
+    Returns:
+        tuple[set[str], set[str]]: A tuple with two sets: the first is the set of unique
+        `os_type` strings found, the second is the set of unique `arch` strings found.
+    """
     os_types = {entry["os_type"] for entry in matrix if "os_type" in entry}
     archs = {entry["arch"] for entry in matrix if "arch" in entry}
     return os_types, archs
 
 
 def parse_install_script(path: Path) -> dict:
-    """Parse install.sh to extract platform detection values.
-
-    Returns a dict with:
-      - supported_architectures: set of arch strings from SUPPORTED_ARCHITECTURES
-      - asset_name_template: the ASSET_NAME pattern from the script
-      - detectable_os_types: set of os_type values the script can produce
-      - detectable_archs: set of arch values the script can produce
+    """
+    Extract detection and naming information from an install.sh script.
+    
+    Returns:
+        dict: A mapping with the following keys:
+            - supported_architectures (set[str]): Architecture identifiers listed in SUPPORTED_ARCHITECTURES.
+            - asset_name_template (str): ASSET_NAME pattern normalized to Python-style placeholders (`{nginx}`, `{os_type}`, `{arch}`).
+            - detectable_os_types (set[str]): OS type values the script can produce (e.g., `"glibc"`, `"musl"`).
+            - detectable_archs (set[str]): Architecture values the script can produce (e.g., `"x86_64"`, `"aarch64"`).
     """
     content = path.read_text(encoding="utf-8")
 
@@ -112,7 +131,14 @@ def parse_install_script(path: Path) -> dict:
 def validate(
     matrix: list[dict], install_info: dict
 ) -> list[str]:
-    """Run all consistency checks. Returns a list of error messages."""
+    """
+    Validate consistency between the release matrix and the install script and collect any mismatch messages.
+    
+    Performs these checks: detectable os_type values, detectable arch values, SUPPORTED_ARCHITECTURES alignment, asset naming template match, and per-entry validity for entries with support_tier == "full".
+    
+    Returns:
+        list[str]: Error messages for each inconsistency found; empty if no inconsistencies.
+    """
     errors: list[str] = []
 
     matrix_os_types, matrix_archs = extract_matrix_values(matrix)
@@ -178,7 +204,16 @@ def validate(
 
 
 def main() -> int:
-    """Entry point. Returns 0 if consistent, 1 if inconsistencies found."""
+    """
+    Run consistency checks between release-matrix.json and install.sh and report the result.
+    
+    Performs file existence checks, loads the release matrix and install script information,
+    runs validations, prints a failure report when inconsistencies are found, and prints a
+    brief summary on success.
+    
+    Returns:
+        int: 0 if no inconsistencies were found; 1 if files are missing or inconsistencies were detected.
+    """
     if not MATRIX_PATH.exists():
         print(f"ERROR: Matrix file not found: {MATRIX_PATH}", file=sys.stderr)
         return 1

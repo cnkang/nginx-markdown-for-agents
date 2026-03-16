@@ -24,7 +24,17 @@ SAMPLE_FILENAME = "ngx_http_markdown_filter_module-1.24.0-glibc-x86_64.tar.gz"
 
 
 def _write_matrix(tmp: Path, entries: list[dict], *, schema_version: str = "1.0.0") -> Path:
-    """Write a minimal release-matrix.json and return its path."""
+    """
+    Create a minimal release-matrix.json in the given directory and return its path.
+    
+    Parameters:
+    	tmp (Path): Directory where release-matrix.json will be written.
+    	entries (list[dict]): List of matrix entry objects to include under the "matrix" key.
+    	schema_version (str): Schema version to write into the file (defaults to "1.0.0").
+    
+    Returns:
+    	Path: Path to the written release-matrix.json file.
+    """
     p = tmp / "release-matrix.json"
     p.write_text(json.dumps({
         "schema_version": schema_version,

@@ -36,7 +36,7 @@ _json_suggestions=()
 # --- Structured error helpers ---
 
 # emit_error <category> <message>
-# Prints [ERROR] category: message to stderr
+# emit_error prints an error message prefixed with "[ERROR] <category>: " to stderr and records `category` and `message` in the script's JSON state variables `_json_error_category` and `_json_error_message`.
 emit_error() {
   local category="$1"
   local message="$2"
@@ -46,7 +46,7 @@ emit_error() {
 }
 
 # emit_suggest <suggestion>
-# Prints [SUGGEST] suggestion to stderr and collects for JSON
+# emit_suggest writes a suggestion to stderr prefixed with "[SUGGEST]" and appends the suggestion to the internal JSON suggestions array (_json_suggestions).
 emit_suggest() {
   local suggestion="$1"
   echo "[SUGGEST] ${suggestion}" >&2
@@ -54,7 +54,8 @@ emit_suggest() {
 }
 
 # json_output <success>
-# If --json is set, prints structured JSON to stdout
+# json_output prints a structured JSON object to fd 3 when --json is enabled, containing success, nginx_version, os_type, arch, error, available_versions, and suggestions.
+# The single argument is the overall success value (`true`/`false`) to include in the JSON; the function is a no-op when JSON_OUTPUT is not set.
 json_output() {
   local success="$1"
   if [[ "$JSON_OUTPUT" -ne 1 ]]; then
@@ -115,7 +116,8 @@ json_output() {
 }
 
 # die_with_error <category> <message> <suggestion1> [suggestion2] ...
-# Emits structured error + suggestions, outputs JSON if needed, then exits 1
+# die_with_error emits a structured error and suggestions, writes a JSON payload when --json is enabled, then exits with status 1.
+# Arguments: category (error category), message (human-readable message), followed by zero or more suggestion strings.
 die_with_error() {
   local category="$1"
   local message="$2"
@@ -128,6 +130,7 @@ die_with_error() {
   exit 1
 }
 
+# semver_lt compares two semantic version strings (MAJOR.MINOR.PATCH) and exits with status 0 if the first is less than the second, non-zero otherwise.
 semver_lt() {
   local lhs="$1"
   local rhs="$2"
@@ -198,6 +201,11 @@ fetch_dist_index_json() {
   curl -fsSL -H 'Accept: application/vnd.github+json' "$dist_api" 2>/dev/null
 }
 
+# resolve_download_info determines the download URL, SHA-256 digest, and available prebuilt nginx versions for a requested asset and prints them as three newline-separated lines.
+# It accepts: asset_name, os_type, arch, nginx_version, ref_name, and optional release_json and dist_index_json (raw JSON strings).
+# Output: line 1 = download URL (empty if not found), line 2 = sha256 digest without any prefix (empty if not present), line 3 = space-separated sorted list of available versions.
+# If DOWNLOAD_URL_OVERRIDE is set, that URL and DOWNLOAD_SHA256 are printed immediately.
+# If python3 is not available the function emits a structured error/suggestion, calls json_output false, and exits the script.
 resolve_download_info() {
   local asset_name="$1"
   local os_type="$2"
@@ -440,6 +448,8 @@ ensure_main_include_directive() {
   rm -f "$tmp_file"
 }
 
+# insert_markdown_filter_into_http_block inserts `markdown_filter on;` as the first line inside the top-level `http { ... }` block of the specified nginx configuration file.
+# It creates a backup via `backup_file_once` before overwriting the file. Returns 0 on success; returns 1 and leaves the original file unchanged if no `http` block is found or the insertion fails.
 insert_markdown_filter_into_http_block() {
   local conf_file="$1"
 

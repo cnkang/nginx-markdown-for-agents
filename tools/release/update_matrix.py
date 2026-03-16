@@ -74,14 +74,30 @@ class MatrixDiff:
 # ---------------------------------------------------------------------------
 
 def version_tuple(v: str) -> tuple[int, ...]:
-    """Convert a version string like ``"X.Y.Z"`` to a tuple of ints."""
+    """
+    Convert a dot-separated version string into a tuple of integer components.
+    
+    Parameters:
+        v (str): Version string like "X.Y.Z" (e.g., "1.22.0").
+    
+    Returns:
+        tuple[int, ...]: Integer components of the version suitable for numeric sorting/comparison.
+    """
     return tuple(int(p) for p in v.split("."))
 
 
 def classify_version(version: str) -> str:
-    """Classify an nginx version as ``"stable"`` or ``"mainline"``.
-
-    Even minor → stable/legacy, odd minor → mainline.
+    """
+    Determine the release track for an NGINX version.
+    
+    Parameters:
+    	version (str): NGINX version string in dotted form (e.g. "1.22.1").
+    
+    Returns:
+    	`"stable"` for versions whose minor component is even, `"mainline"` for versions whose minor component is odd.
+    
+    Raises:
+    	ValueError: If `version` does not contain a numeric minor component in the expected dotted format.
     """
     parts = version.split(".")
     if len(parts) < 2:
@@ -96,15 +112,28 @@ def classify_version(version: str) -> str:
 
 
 def _missing_required_keys(entry: dict, required_keys: tuple[str, ...]) -> list[str]:
-    """Return missing required keys for *entry* in declaration order."""
+    """
+    Return the keys from `required_keys` that are not present in `entry`, preserving the order of `required_keys`.
+    
+    Parameters:
+        entry (dict): Mapping to check for required keys.
+        required_keys (tuple[str, ...]): Sequence of keys to verify, in declaration order.
+    
+    Returns:
+        list[str]: Missing keys from `required_keys` in declaration order.
+    """
     return [key for key in required_keys if key not in entry]
 
 
 def _resolve_repo_write_path(path: Path) -> Path:
-    """Resolve *path* and ensure it stays within the repository root.
-
-    Uses ``str.startswith`` on the resolved canonical path to guard against
-    path traversal.  Raises ``ValueError`` if the target escapes the repo.
+    """
+    Resolve a filesystem path to its canonical absolute Path and ensure it is inside the repository root.
+    
+    Returns:
+        Path: The resolved absolute path guaranteed to reside within the repository root.
+    
+    Raises:
+        ValueError: If the resolved path would be outside the repository root.
     """
     resolved_path = os.path.realpath(path)
     repo_root = os.path.realpath(REPO_ROOT)
@@ -114,9 +143,17 @@ def _resolve_repo_write_path(path: Path) -> Path:
 
 
 def _write_repo_text(path: Path, content: str) -> None:
-    """Write *content* to a repository-owned path using UTF-8 encoding.
-
-    The path is validated against the repository root before any I/O.
+    """
+    Write `content` to `path` within the repository using UTF-8 encoding.
+    
+    The target `path` is first validated to ensure it lies under the repository root; parent directories will be created if missing and the file will be written with mode 0o644.
+    
+    Parameters:
+        path (Path): Destination path inside the repository.
+        content (str): UTF-8 text to write to the file.
+    
+    Raises:
+        ValueError: If `path` resolves outside the repository root.
     """
     safe_path = _resolve_repo_write_path(path)
     safe_path.parent.mkdir(parents=True, exist_ok=True)
@@ -138,11 +175,17 @@ def _write_repo_text(path: Path, content: str) -> None:
 
 
 def read_min_version(install_script_path: Path) -> str:
-    """Parse ``MIN_SUPPORTED_NGINX_VERSION`` from *install_script_path*.
-
-    Looks for a line matching ``MIN_SUPPORTED_NGINX_VERSION="X.Y.Z"`` and
-    returns the version string.  Raises ``RuntimeError`` if the variable
-    cannot be found.
+    """
+    Extract the MIN_SUPPORTED_NGINX_VERSION value from an install script.
+    
+    Parameters:
+    	install_script_path (Path): Path to the install.sh file to read.
+    
+    Returns:
+    	min_version (str): The version string found (e.g. "1.22.1").
+    
+    Raises:
+    	RuntimeError: If `MIN_SUPPORTED_NGINX_VERSION` cannot be found in the file.
     """
     text = install_script_path.read_text(encoding="utf-8")
     match = re.search(r'MIN_SUPPORTED_NGINX_VERSION="([^"]+)"', text)
@@ -154,10 +197,15 @@ def read_min_version(install_script_path: Path) -> str:
 
 
 def filter_versions(versions: list[str], min_version: str) -> list[str]:
-    """Keep all nginx versions >= *min_version*.
-
-    The release matrix now covers both stable/legacy and mainline releases.
-    Returns a new list sorted by :func:`version_tuple` ascending.
+    """
+    Filter a list of nginx version strings to those greater than or equal to the provided minimum version.
+    
+    Parameters:
+        versions (list[str]): Version strings (e.g., "1.22.1").
+        min_version (str): Minimum allowed version string (inclusive).
+    
+    Returns:
+        list[str]: Versions >= min_version, sorted in ascending order.
     """
     min_t = version_tuple(min_version)
     return sorted(
@@ -181,10 +229,15 @@ def fetch_download_page(url: str) -> str:
 
 
 def parse_nginx_versions(html: str) -> list[str]:
-    """Extract nginx version numbers from download page HTML.
-
-    Scans for download links matching ``/download/nginx-X.Y.Z.tar.gz`` and
-    returns a deduplicated list of version strings.
+    """
+    Extract nginx version numbers from the provided download-page HTML.
+    
+    Parameters:
+        html (str): HTML content of the nginx download page to scan.
+    
+    Returns:
+        list[str]: Deduplicated list of version strings (format "X.Y.Z") found in download links,
+        preserving the order of first appearance.
     """
     pattern = re.compile(r"/download/nginx-(\d+\.\d+\.\d+)\.tar\.gz")
     versions = pattern.findall(html)
@@ -196,9 +249,15 @@ def parse_nginx_versions(html: str) -> list[str]:
 # ---------------------------------------------------------------------------
 
 def _validate_manual_entries(manual_entries: list[dict], path: Path) -> None:
-    """Validate manual entries have required keys and no duplicate keys.
-
-    Calls ``sys.exit(1)`` on any validation error.
+    """
+    Validate that each manual matrix entry contains the required keys and that there are no duplicate (nginx, os_type, arch) entries.
+    
+    Parameters:
+        manual_entries (list[dict]): Manual matrix entries to validate.
+        path (Path): Path to the source matrix file (used in error messages).
+    
+    Behavior:
+        Prints an error to stderr and exits the process with status code 1 if any entry is missing required keys or if duplicate keys are found.
     """
     seen_keys: dict[tuple[str, str, str], int] = {}
     duplicates: list[tuple[str, str, str]] = []
@@ -287,18 +346,28 @@ def load_matrix(path: Path) -> tuple[dict, list[dict], list[dict]]:
 
 
 def _entry_sort_key(entry: dict) -> tuple[tuple[int, ...], str, str]:
-    """Return a sort key for a matrix entry: ``(version_tuple, os_type, arch)``."""
+    """
+    Produce a sort key for a release matrix entry.
+    
+    Parameters:
+        entry (dict): Matrix entry with keys "nginx" (version string), "os_type", and "arch".
+    
+    Returns:
+        tuple: A three-element tuple (version_tuple, os_type, arch) where `version_tuple` is the numeric version tuple derived from `entry["nginx"]`, used to sort versions naturally, and `os_type` and `arch` are the entry's OS type and architecture strings.
+    """
     return (version_tuple(entry["nginx"]), entry["os_type"], entry["arch"])
 
 
 def compute_matrix(
     versions: list[str], os_types: list[str], archs: list[str]
 ) -> list[dict]:
-    """Generate full cross-product auto entries with ``support_tier = "full"``.
-
-    Produces one entry per ``(version, os_type, arch)`` combination, sorted
-    by version (ascending by :func:`version_tuple`), then *os_type*
-    (alphabetical), then *arch* (alphabetical).
+    """
+    Generate the full cross-product of auto-managed matrix entries with support_tier set to "full".
+    
+    Each returned entry is a dict containing the keys "nginx", "os_type", "arch", and "support_tier". The list is sorted by version (ascending), then by os_type (alphabetical), then by arch (alphabetical).
+    
+    Returns:
+        list[dict]: A list of matrix entry dictionaries for every combination of the provided `versions`, `os_types`, and `archs`.
     """
     entries: list[dict] = []
     for v in versions:
@@ -317,12 +386,13 @@ def compute_matrix(
 def merge_matrix(
     auto_entries: list[dict], manual_entries: list[dict]
 ) -> list[dict]:
-    """Combine auto entries with preserved manual Pin_Entries.
-
-    On ``(nginx, os_type, arch)`` key collision, the manual entry takes
-    precedence and the conflicting auto entry is dropped.  The result is
-    sorted by :func:`version_tuple` of the nginx version, then *os_type*,
-    then *arch*.
+    """
+    Merge auto-generated matrix entries with manual Pin_Entries, giving manual entries precedence on key collisions.
+    
+    On a collision of the (nginx, os_type, arch) key, the manual entry is kept and the conflicting auto entry is dropped. The returned list is sorted by nginx version (ascending), then by os_type, then by arch.
+    
+    Returns:
+        list[dict]: Merged matrix entries sorted as described.
     """
     manual_keys: set[tuple[str, str, str]] = {
         (e["nginx"], e["os_type"], e["arch"]) for e in manual_entries
@@ -341,23 +411,25 @@ def merge_matrix(
 def diff_matrix(
     current_auto: list[dict], desired_auto: list[dict]
 ) -> MatrixDiff:
-    """Compute added/removed version sets between current and desired auto entries.
-
-    Performs entry-level comparison: any difference in the full set of
-    auto-managed entries (not just version strings) triggers ``has_changes``.
-    The ``added_versions`` and ``removed_versions`` fields report the
-    version-level summary for PR titles and human consumption, but the
-    ``has_changes`` flag is authoritative and may be ``True`` even when
-    both version lists are empty (e.g., when ``os_type``/``arch``/``support_tier``
-    changed for an existing version).
-
-    Both ``added_versions`` and ``removed_versions`` are sorted by
-    :func:`version_tuple`.
-
-    Returns a :class:`MatrixDiff` with the results.
+    """
+    Compute version-level additions and removals and indicate whether the set of auto-managed entries changed.
+    
+    The `added_versions` and `removed_versions` lists provide a version-level summary (sorted by `version_tuple`) suitable for human consumption and PR titles. The `has_changes` flag is true when any auto-managed entry differs between `current_auto` and `desired_auto` at the entry level (including changes to `os_type`, `arch`, or `support_tier`), even if both version lists are empty.
+    
+    Returns:
+        MatrixDiff: `added_versions` (list[str]) are versions present in `desired_auto` but not `current_auto`, `removed_versions` (list[str]) are versions present in `current_auto` but not `desired_auto`, and `has_changes` (bool) indicates whether any entry-level difference exists.
     """
 
     def _entry_key(e: dict) -> tuple[str, str, str, str]:
+        """
+        Compute a stable sort key for a matrix entry.
+        
+        Parameters:
+            e (dict): Matrix entry containing "nginx", "os_type", "arch", and optionally "support_tier".
+        
+        Returns:
+            tuple: (nginx, os_type, arch, support_tier) where `support_tier` is an empty string if not present.
+        """
         return (e["nginx"], e["os_type"], e["arch"], e.get("support_tier", ""))
 
     current_set = {_entry_key(e) for e in current_auto}
@@ -399,18 +471,12 @@ def write_diff_file(diff: MatrixDiff, path: Path) -> None:
 
 
 def write_matrix(path: Path, data: dict) -> None:
-    """Write *data* to *path* as formatted JSON using crash-safe temp+rename.
-
-    Serializes the full *data* dict (preserving ``schema_version``,
-    ``updated_at``, and all other top-level fields) as JSON with 2-space
-    indentation and a trailing newline.
-
-    The write uses a temporary file (``{path}.tmp``) in the same directory,
-    followed by :func:`os.replace` to atomically move it into place.  If
-    the write or rename fails, the temporary file is cleaned up.
-
-    The caller is responsible for updating ``updated_at`` (or any other
-    field) before calling this function.
+    """
+    Atomically write the provided matrix data as formatted JSON to the given repository path.
+    
+    Serializes the entire `data` mapping with 2-space indentation and a trailing newline, preserving all top-level fields (for example `schema_version` and `updated_at`). The write is performed atomically by writing to a temporary file in the same directory and renaming it into place; the temporary file is removed on failure. The target `path` is validated to remain inside the repository.
+    
+    The caller is responsible for updating `updated_at` (or any other fields) on `data` before calling this function.
     """
     tmp_path = path.with_suffix(path.suffix + ".tmp")
     try:
@@ -430,22 +496,20 @@ def write_matrix(path: Path, data: dict) -> None:
 
 
 def update_doc_table(doc_path: Path, matrix_entries: list[dict]) -> str:
-    """Return updated document content with the matrix table replaced.
-
-    Reads the document at *doc_path*, locates the ``<!-- BEGIN AUTO-GENERATED
-    MATRIX -->`` and ``<!-- END AUTO-GENERATED MATRIX -->`` markers, and
-    replaces everything between them (inclusive, re-emitting the markers)
-    with a freshly generated Markdown table built from *matrix_entries*.
-
-    Table rows are sorted consistently with the matrix (version ascending,
-    os_type, arch) using :func:`_entry_sort_key`.  The ``support_tier``
-    value is title-cased for display (e.g., ``"full"`` → ``"Full"``,
-    ``"source_only"`` → ``"Source Only"``).
-
-    Returns the full document content as a string.  The caller is
-    responsible for writing it to disk.
-
-    Calls ``sys.exit(1)`` if either marker is not found in the document.
+    """
+    Replace the auto-generated matrix section in a documentation file with a Markdown table built from `matrix_entries`.
+    
+    Reads the file at `doc_path`, finds the `DOC_MARKER_BEGIN` and `DOC_MARKER_END` markers, and replaces the inclusive block between them with a generated Markdown table. Rows are sorted by version (ascending), then `os_type`, then `arch` using the module's entry sort key. The `support_tier` value is title-cased (underscores become spaces) for display.
+    
+    Parameters:
+        doc_path (Path): Path to the documentation file that contains the BEGIN/END markers.
+        matrix_entries (list[dict]): List of matrix entry mappings. Each entry is expected to include the keys `nginx`, `os_type`, `arch`, and `support_tier`.
+    
+    Returns:
+        str: The full document content with the auto-generated matrix block replaced.
+    
+    Raises:
+        SystemExit: Exits with status 1 if either the begin or end marker is missing from the document.
     """
     content = doc_path.read_text(encoding="utf-8")
 
@@ -547,7 +611,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def _log_diff_summary(diff: MatrixDiff) -> None:
-    """Log version additions and removals to stdout."""
+    """
+    Print a concise summary of matrix version additions, removals, and entry-level changes to stdout.
+    
+    The output lists added versions prefixed with "  +", removed versions prefixed with "  -", and, if there are changes to entries without any version-level additions or removals, a single line indicating entry-level changes.
+    """
     for v in diff.added_versions:
         print(f"  + adding version {v}")
     for v in diff.removed_versions:
@@ -557,7 +625,15 @@ def _log_diff_summary(diff: MatrixDiff) -> None:
 
 
 def _handle_check_only(diff: MatrixDiff) -> int:
-    """Handle ``--check-only`` mode: report discrepancies to stderr, return 2."""
+    """
+    Report matrix discrepancies to stderr for the `--check-only` mode.
+    
+    Parameters:
+        diff (MatrixDiff): Diff summary comparing current and desired auto-managed entries.
+    
+    Returns:
+        int: Exit code `2` indicating the matrix is stale (differences were found).
+    """
     if diff.added_versions:
         print(
             f"Stale matrix: versions to add: {', '.join(diff.added_versions)}",
@@ -572,7 +648,14 @@ def _handle_check_only(diff: MatrixDiff) -> int:
 
 
 def _handle_dry_run(diff: MatrixDiff) -> int:
-    """Handle ``--dry-run`` mode: print changes to stdout, return 0."""
+    """
+    Print a summary of matrix changes that would be applied in dry-run mode.
+    
+    Prints added versions with the number of auto-generated entries per version and removed versions. If no version-level additions or removals are present, notes that entry-level changes were detected.
+    
+    Returns:
+        int: 0 on success.
+    """
     print("Dry-run mode — the following changes would be applied:")
     for v in diff.added_versions:
         print(f"  ADD {v} ({len(OS_TYPES) * len(ARCHS)} entries)")
@@ -584,7 +667,14 @@ def _handle_dry_run(diff: MatrixDiff) -> int:
 
 
 def _restore_matrix_backup(matrix_backup: str | None) -> None:
-    """Restore matrix file from backup if available."""
+    """
+    Restore the repository matrix file from the provided backup content.
+    
+    If `matrix_backup` is a string, overwrite MATRIX_PATH with that content; if `matrix_backup` is `None`, do nothing. I/O errors encountered while writing the backup are suppressed.
+     
+    Parameters:
+        matrix_backup (str | None): The text content to restore to MATRIX_PATH, or `None` to skip restoration.
+    """
     if matrix_backup is not None:
         try:
             _write_repo_text(MATRIX_PATH, matrix_backup)
@@ -596,10 +686,18 @@ def _write_doc_with_rollback(
     merged: list[dict],
     matrix_backup: str | None,
 ) -> str:
-    """Generate and return new doc content, restoring matrix on failure.
-
-    Raises ``SystemExit`` (reraised from ``update_doc_table``) if markers
-    are missing — the matrix is restored before propagation.
+    """
+    Build the updated INSTALLATION.md content from merged matrix entries, restoring the previous matrix if marker parsing fails.
+    
+    Parameters:
+        merged (list[dict]): Matrix entries to insert into the auto-generated documentation block.
+        matrix_backup (str | None): Contents of the previous matrix file to restore on failure, or None if no backup is available.
+    
+    Returns:
+        new_doc_content (str): Complete document text with the auto-generated matrix block replaced.
+    
+    Raises:
+        SystemExit: If the documentation markers are missing or invalid; the provided matrix_backup is written back before the exception is re-raised.
     """
     try:
         return update_doc_table(DOC_PATH, merged)
@@ -609,9 +707,15 @@ def _write_doc_with_rollback(
 
 
 def _atomic_doc_write(new_doc_content: str, matrix_backup: str | None) -> int:
-    """Write doc content atomically, rolling back matrix on failure.
-
-    Returns 0 on success, 1 on error.
+    """
+    Atomically replace the installation guide content and restore the previous matrix on failure.
+    
+    Parameters:
+        new_doc_content (str): Full text to write into the installation guide document.
+        matrix_backup (str | None): Serialized backup of the matrix to restore if the write fails; pass `None` to skip restoration.
+    
+    Returns:
+        int: `0` on successful write, `1` if an error occurred and restoration (if provided) was attempted.
     """
     doc_tmp = DOC_PATH.with_suffix(DOC_PATH.suffix + ".tmp")
     try:
@@ -635,9 +739,13 @@ def _run_write_mode(
     merged: list[dict],
     diff: MatrixDiff,
 ) -> int:
-    """Execute the normal write-mode pipeline: update matrix, doc, and diff files.
-
-    Returns 0 on success, 1 on error (with rollback of partial writes).
+    """
+    Perform the write-mode workflow: atomically update the release matrix file, replace the generated documentation table, and write a machine-readable matrix-diff.
+    
+    Attempts to restore the previous matrix content on failure of any step.
+    
+    Returns:
+        int: 0 on success, 1 on error.
     """
     # Back up original matrix contents in memory for rollback
     try:

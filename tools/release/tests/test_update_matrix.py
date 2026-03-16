@@ -82,10 +82,12 @@ import pytest
 )
 @settings(max_examples=200)
 def test_version_filtering_completeness(versions, min_version):
-    """Every version in filtered output is >= min_version,
-    and no qualifying version is excluded.
-
-    **Validates: Requirements 1.3, 1.4**
+    """
+    Asserts that filter_versions returns only versions greater than or equal to min_version and that every input version meeting that threshold appears in the output.
+    
+    Parameters:
+        versions (list[str]): Candidate version strings to filter.
+        min_version (str): Minimum version string; versions less than this value must be excluded.
     """
     filtered = filter_versions(versions, min_version)
     min_tuple = version_tuple(min_version)
@@ -327,7 +329,12 @@ def test_resolve_repo_write_path_rejects_paths_outside_repo(tmp_path, monkeypatc
 
 
 def _allow_repo_writes(monkeypatch, repo_root: Path) -> None:
-    """Configure update_matrix write guards for a temporary test repository."""
+    """
+    Configure update_matrix to use a temporary repository root for test writes.
+    
+    Parameters:
+        repo_root (Path): Path to the temporary repository root that tests should use for file writes.
+    """
     repo_root.mkdir(parents=True, exist_ok=True)
 
     import tools.release.update_matrix as um
@@ -356,7 +363,12 @@ def test_load_matrix_preserves_full_data(tmp_path):
 
 
 def test_load_matrix_file_not_found(tmp_path):
-    """Missing file causes sys.exit(1)."""
+    """
+    Asserts that calling load_matrix on a nonexistent path causes the process to exit with status code 1.
+    
+    Raises:
+        SystemExit: with exit code 1 when the target file is not found.
+    """
     p = tmp_path / "nonexistent.json"
 
     with pytest.raises(SystemExit) as exc_info:
@@ -739,6 +751,19 @@ def test_write_matrix_cleans_up_temp_on_failure(tmp_path, monkeypatch):
 
     # Make os.replace raise an OSError to simulate a rename failure
     def failing_replace(src, dst):
+        """
+        Simulate a file rename failure by always raising an OSError.
+        
+        This test helper unconditionally raises an OSError to emulate a failing os.replace/rename
+        operation when attempting to move a file from `src` to `dst`.
+        
+        Parameters:
+            src (str | Path): Path to the source file attempted to be moved.
+            dst (str | Path): Path to the destination location.
+        
+        Raises:
+            OSError: Always raised to indicate a simulated rename failure.
+        """
         raise OSError("simulated rename failure")
 
     monkeypatch.setattr("os.replace", failing_replace)
@@ -759,6 +784,16 @@ def test_write_matrix_cleans_up_temp_on_failure(tmp_path, monkeypatch):
 
 
 def _make_doc_with_markers(before: str, after: str) -> str:
+    """
+    Builds a document string containing the documentation markers and a placeholder table between provided surrounding content.
+    
+    Parameters:
+        before (str): Text to place before the doc markers.
+        after (str): Text to place after the doc markers.
+    
+    Returns:
+        str: The composed document with DOC_MARKER_BEGIN, the literal "old table content", and DOC_MARKER_END inserted between `before` and `after`, separated by newlines.
+    """
     return f"{before}\n{DOC_MARKER_BEGIN}\nold table content\n{DOC_MARKER_END}\n{after}"
 
 
@@ -974,7 +1009,15 @@ _MOCK_HTML_TEMPLATE = (
 
 
 def _build_mock_html(versions: list[str]) -> str:
-    """Build a minimal HTML string with download links for *versions*."""
+    """
+    Generate a minimal HTML document containing download links for the provided nginx versions.
+    
+    Parameters:
+        versions (list[str]): Version strings to include; each version produces an anchor linking to "/download/nginx-<version>.tar.gz". Order of `versions` is preserved.
+    
+    Returns:
+        html (str): A small HTML document with an <h4> header and one <a> link per version.
+    """
     links = "".join(
         f'<a href="/download/nginx-{v}.tar.gz">nginx-{v}</a>' for v in versions
     )
@@ -1139,19 +1182,26 @@ from tools.release.update_matrix import write_diff_file, MatrixDiff
 
 
 def _setup_cli_env(tmp_path, versions_in_matrix, monkeypatch, *, html_versions=None):
-    """Set up a full test environment for CLI / main() tests.
-
-    Creates:
-      - release-matrix.json with auto entries for *versions_in_matrix*
-      - INSTALLATION.md with markers and a matching table
-      - install.sh with MIN_SUPPORTED_NGINX_VERSION="1.24.0"
-      - matrix-diff.json (absent by default)
-
-    Monkeypatches all module-level path constants and ``fetch_download_page``
-    to return HTML for *html_versions* (defaults to *versions_in_matrix*
-    if not provided).
-
-    Returns ``(matrix_path, doc_path, diff_path)`` for assertions.
+    """
+    Create a complete temporary CLI test environment and monkeypatch module-level paths and download behavior for main()/CLI tests.
+    
+    Creates these files under tmp_path:
+    - release-matrix.json populated with auto-managed matrix entries for each version in versions_in_matrix (glibc/musl × x86_64/aarch64).
+    - INSTALLATION.md containing document markers and a table that matches the matrix entries.
+    - install.sh containing MIN_SUPPORTED_NGINX_VERSION="1.24.0".
+    - matrix-diff.json is not created by default (path is returned for tests that expect it).
+    
+    Monkeypatches the update_matrix module's path constants (MATRIX_PATH, DOC_PATH, DIFF_PATH, INSTALL_SCRIPT_PATH, REPO_ROOT) to point into tmp_path and replaces fetch_download_page to return HTML built from html_versions.
+    
+    Parameters:
+        tmp_path: Temporary filesystem path object where test files will be created.
+        versions_in_matrix: Iterable of nginx version strings to include in the generated release-matrix.json.
+        monkeypatch: pytest monkeypatch fixture used to set attributes on the update_matrix module.
+        html_versions (optional): Iterable of nginx version strings to include in the mocked HTML returned by fetch_download_page.
+            If omitted, html_versions defaults to versions_in_matrix.
+    
+    Returns:
+        tuple: (matrix_path, doc_path, diff_path) Path objects for the created matrix file, documentation file, and diff file path respectively.
     """
     if html_versions is None:
         html_versions = versions_in_matrix
@@ -1261,7 +1311,9 @@ def test_cli_check_only_fresh_exit_0(tmp_path, monkeypatch):
 
 
 def test_cli_check_only_stale_exit_2(tmp_path, monkeypatch):
-    """--check-only returns 2 when matrix is stale (version drift)."""
+    """
+    Verify the CLI exits with status code 2 when the local release matrix is stale because newer versions exist upstream.
+    """
     existing = ["1.24.0"]
     from_nginx = ["1.24.0", "1.26.3"]  # 1.26.3 missing from matrix
 
@@ -1283,6 +1335,15 @@ def test_cli_check_only_error_exit_1(tmp_path, monkeypatch):
     # Make fetch raise a URLError to simulate network failure
     from urllib.error import URLError
     def raise_url_error(_url):
+        """
+        Always raises a URLError indicating the network is down.
+        
+        Parameters:
+            _url: Ignored.
+        
+        Raises:
+            URLError: Always raised with the message "network down".
+        """
         raise URLError("network down")
     monkeypatch.setattr(um, "fetch_download_page", raise_url_error)
 
@@ -1360,6 +1421,22 @@ def test_cli_rollback_on_doc_write_failure(tmp_path, monkeypatch):
     call_count = [0]
 
     def selective_replace(src, dst):
+        """
+        A replacement function that forwards a file-replace operation and simulates a failure on its second invocation.
+        
+        Parameters:
+            src (str | pathlib.Path): Source path to replace.
+            dst (str | pathlib.Path): Destination path to be replaced.
+        
+        Returns:
+            The result of the underlying replace operation (typically `None`).
+        
+        Raises:
+            OSError: Simulated failure raised on the second call to emulate a rename error.
+        
+        Notes:
+            Increments the shared counter `call_count[0]` on each invocation as a side effect.
+        """
         call_count[0] += 1
         if call_count[0] == 2:
             raise OSError("simulated doc rename failure")

@@ -36,6 +36,7 @@ else
   NC=''
 fi
 
+# pass increments PASS_COUNT and prints a green "PASS" line with the provided message.
 pass() {
   local msg="$1"
   PASS_COUNT=$((PASS_COUNT + 1))
@@ -43,6 +44,7 @@ pass() {
   return 0
 }
 
+# fail increments FAIL_COUNT and prints a red "FAIL" line with the provided message to stderr; if a detail is supplied it prints an indented "Detail: <detail>" line.
 fail() {
   local msg="$1"
   local detail="${2:-}"
@@ -54,6 +56,7 @@ fail() {
   return 0
 }
 
+# skip increments SKIP_COUNT, prints a yellow "SKIP" line with the provided message, and returns 0.
 skip() {
   local msg="$1"
   SKIP_COUNT=$((SKIP_COUNT + 1))
@@ -62,7 +65,8 @@ skip() {
 }
 
 # Verify stderr contains at least one [ERROR] <category>: <message> line.
-# Returns 0 if found, 1 otherwise.
+# assert_has_error_format checks stderr for a line matching "[ERROR] <category>: <message>" and returns 0 if such a line is present, 1 otherwise.
+# The single argument is the stderr text to scan.
 assert_has_error_format() {
   local stderr_output="$1"
   echo "$stderr_output" | grep -qE '^\[ERROR\] [a-z_]+: .+'
@@ -70,7 +74,8 @@ assert_has_error_format() {
 }
 
 # Verify stderr contains at least one [SUGGEST] <suggestion> line.
-# Returns 0 if found, 1 otherwise.
+# assert_has_suggest_format checks whether the given stderr output contains a line beginning with "[SUGGEST] ".
+# stderr_output is the stderr text to search; the function returns 0 if a matching line is found, 1 otherwise.
 assert_has_suggest_format() {
   local stderr_output="$1"
   echo "$stderr_output" | grep -qE '^\[SUGGEST\] .+'
@@ -80,7 +85,7 @@ assert_has_suggest_format() {
 # Build a PATH that contains all current PATH directories but hides a
 # specific binary by placing a shim directory first.
 # Usage: build_path_hiding <binary_name>
-# Prints the new PATH value to stdout.
+# build_path_hiding creates a temporary shim directory that hides the specified binary from PATH, echoes the modified PATH (with the shim dir first) to stdout, and prints the shim directory path to stderr.
 build_path_hiding() {
   local binary_name="$1"
   local shim_dir
@@ -124,7 +129,11 @@ build_path_hiding() {
 
 # Run install.sh with a modified environment that hides nginx from PATH.
 # Captures stderr and validates [ERROR]/[SUGGEST] format.
+# run_hiding_nginx runs the install.sh script with `nginx` hidden from PATH and validates that stderr contains the required `[ERROR] <category>: <message>` and `[SUGGEST] <suggestion>` formats.
 # Usage: run_hiding_nginx <test_name> [extra_args...]
+# 
+# This function captures stdout and stderr from install.sh (with SKIP_ROOT_CHECK=1 and a PATH that hides `nginx`), verifies stderr is non-empty and contains both the `[ERROR]` and `[SUGGEST]` formats, and reports results using the pass/fail helpers.
+# On success returns 0; on failure returns non-zero. It exports the captured outputs to the globals `_LAST_STDOUT` and `_LAST_STDERR`. Temporary files and the shim directory used to hide `nginx` are cleaned up before returning.
 run_hiding_nginx() {
   local test_name="$1"
   shift
