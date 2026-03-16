@@ -7,10 +7,11 @@
 # markers, and HTML + nested tables + code blocks.
 #
 # Usage:
-#   tools/corpus/generate_large_samples.sh [--output-dir <dir>]
+#   tools/corpus/generate_large_samples.sh [--output-dir <dir>] [--tier <name>]
 #
 # Options:
 #   --output-dir <dir>  Output directory (default: tools/corpus/samples/)
+#   --tier <name>       Generate only the specified tier (e.g. large-100k, large-5m)
 #
 # The script is idempotent — running it again overwrites previous output.
 
@@ -22,6 +23,21 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # Defaults
 # ---------------------------------------------------------------------------
 OUTPUT_DIR="${ROOT}/tools/corpus/samples"
+TIER=""
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+# Validate that an option's value argument is present and not another flag.
+require_optval() {
+    local flag="$1"
+    local val="${2:-}"
+    if [[ -z "$val" || "$val" == -* ]]; then
+        echo "error: $flag requires a value" >&2
+        exit 1
+    fi
+}
 
 # ---------------------------------------------------------------------------
 # Argument parsing
@@ -29,14 +45,21 @@ OUTPUT_DIR="${ROOT}/tools/corpus/samples"
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --output-dir)
+            require_optval "$1" "${2:-}"
             OUTPUT_DIR="$2"
             shift 2
             ;;
+        --tier)
+            require_optval "$1" "${2:-}"
+            TIER="$2"
+            shift 2
+            ;;
         -h|--help)
-            echo "Usage: $0 [--output-dir <dir>]"
+            echo "Usage: $0 [--output-dir <dir>] [--tier <name>]"
             echo ""
             echo "Options:"
             echo "  --output-dir <dir>  Output directory (default: tools/corpus/samples/)"
+            echo "  --tier <name>       Generate only the specified tier (e.g. large-100k, large-5m)"
             exit 0
             ;;
         *)
@@ -263,12 +286,30 @@ generate_file() {
 VARIANTS=("plain-html" "front-matter" "token-estimation" "nested-tables-code")
 TIERS=("large-100k:${TIER_100K}" "large-5m:${TIER_5M}")
 
+# Validate --tier value if provided.
+if [[ -n "$TIER" ]]; then
+    TIER_VALID=false
+    for tier_entry in "${TIERS[@]}"; do
+        if [[ "${tier_entry%%:*}" == "$TIER" ]]; then
+            TIER_VALID=true
+            break
+        fi
+    done
+    if [[ "$TIER_VALID" == false ]]; then
+        echo "error: unknown tier '$TIER'. Available tiers: $(printf '%s ' "${TIERS[@]%%:*}")" >&2
+        exit 1
+    fi
+fi
+
 SEPARATOR="========================================"
 
 echo "$SEPARATOR"
 echo "Large Sample Generator"
 echo "$SEPARATOR"
 echo "Output directory: ${OUTPUT_DIR}"
+if [[ -n "$TIER" ]]; then
+    echo "Tier filter:      ${TIER}"
+fi
 echo ""
 
 FILE_COUNT=0
@@ -276,6 +317,11 @@ FILE_COUNT=0
 for tier_entry in "${TIERS[@]}"; do
     tier_name="${tier_entry%%:*}"
     tier_bytes="${tier_entry##*:}"
+
+    # Skip tiers that don't match the filter.
+    if [[ -n "$TIER" && "$tier_name" != "$TIER" ]]; then
+        continue
+    fi
 
     for variant in "${VARIANTS[@]}"; do
         outfile="${OUTPUT_DIR}/${tier_name}_${variant}.html"
