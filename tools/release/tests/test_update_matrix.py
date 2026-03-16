@@ -308,7 +308,7 @@ def test_load_matrix_manual_entry_missing_required_keys(tmp_path, capsys):
 
     assert exc_info.value.code == 1
     captured = capsys.readouterr()
-    assert "Manual entry missing required keys" in captured.err
+    assert "missing required keys" in captured.err
     assert "os_type" in captured.err
 
 
@@ -1085,7 +1085,7 @@ def test_property9_read_only_modes_do_not_modify_files(tmp_path, versions, monke
         "Some intro text.\n"
         f"{DOC_MARKER_BEGIN}\n"
         "| NGINX Version | OS Type | Architecture | Support Tier |\n"
-        "|---------------|---------|--------------||--------------|\n"
+        "|---------------|---------|--------------|--------------|\n"
         "| 1.24.0 | glibc | x86_64 | Full |\n"
         f"{DOC_MARKER_END}\n"
         "Footer content.\n"
@@ -1240,7 +1240,7 @@ def _setup_cli_env(tmp_path, versions_in_matrix, monkeypatch, *, html_versions=N
         "Some intro text.\n"
         f"{DOC_MARKER_BEGIN}\n"
         "| NGINX Version | OS Type | Architecture | Support Tier |\n"
-        "|---------------|---------|--------------||--------------|\n"
+        "|---------------|---------|--------------|--------------|\n"
         + "\n".join(table_rows) + "\n"
         f"{DOC_MARKER_END}\n"
         "Footer content.\n"

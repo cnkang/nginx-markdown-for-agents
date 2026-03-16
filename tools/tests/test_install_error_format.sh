@@ -251,7 +251,7 @@ if [[ -n "$JSON_LINE" ]]; then
     if echo "$JSON_LINE" | python3 -c "
 import json, sys
 data = json.load(sys.stdin)
-assert data.get('success') == False, 'success should be false'
+assert data.get('success') is False, 'success should be false'
 assert 'error' in data, 'error field missing'
 assert data['error'] is not None, 'error should not be null'
 assert 'category' in data['error'], 'error.category missing'

@@ -6,7 +6,7 @@ Property 8: Release matrix completeness check correctness — generate random
 matrices and artifact lists, verify that missing-detection is precise.
 """
 
-from hypothesis import given, settings, assume
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
 import sys

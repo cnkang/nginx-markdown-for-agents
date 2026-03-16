@@ -69,7 +69,7 @@ def test_compare_matrices_reports_missing_and_tier_mismatches():
         ("1.26.3", "musl", "aarch64", "source_only"),
     ]
     doc_entries = [
-        ("1.26.3", "glibc", "x86_64", "source only"),
+        ("1.26.3", "glibc", "x86_64", "source_only"),
         ("1.28.0", "glibc", "x86_64", "full"),
     ]
 

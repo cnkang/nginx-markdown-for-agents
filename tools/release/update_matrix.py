@@ -224,7 +224,7 @@ def fetch_download_page(url: str) -> str:
     Raises :class:`~urllib.error.URLError` on network errors or non-200
     responses.  The caller is responsible for handling the exception.
     """
-    with urlopen(url) as resp:
+    with urlopen(url, timeout=30) as resp:
         return resp.read().decode("utf-8")
 
 
@@ -250,29 +250,18 @@ def parse_nginx_versions(html: str) -> list[str]:
 
 def _validate_manual_entries(manual_entries: list[dict], path: Path) -> None:
     """
-    Validate that each manual matrix entry contains the required keys and that there are no duplicate (nginx, os_type, arch) entries.
+    Validate that there are no duplicate (nginx, os_type, arch) entries among manual matrix entries.
     
     Parameters:
-        manual_entries (list[dict]): Manual matrix entries to validate.
+        manual_entries (list[dict]): Manual matrix entries to validate (already verified to contain required keys).
         path (Path): Path to the source matrix file (used in error messages).
     
     Behavior:
-        Prints an error to stderr and exits the process with status code 1 if any entry is missing required keys or if duplicate keys are found.
+        Prints an error to stderr and exits the process with status code 1 if duplicate keys are found.
     """
     seen_keys: dict[tuple[str, str, str], int] = {}
     duplicates: list[tuple[str, str, str]] = []
     for entry in manual_entries:
-        missing_keys = _missing_required_keys(entry, REQUIRED_MATRIX_ENTRY_KEYS)
-        if missing_keys:
-            print(
-                (
-                    f"Manual entry missing required keys in {path}: "
-                    f"{', '.join(missing_keys)}"
-                ),
-                file=sys.stderr,
-            )
-            sys.exit(1)
-
         key = (entry["nginx"], entry["os_type"], entry["arch"])
         if key in seen_keys:
             duplicates.append(key)
@@ -328,7 +317,20 @@ def load_matrix(path: Path) -> tuple[dict, list[dict], list[dict]]:
     auto_entries: list[dict] = []
     manual_entries: list[dict] = []
 
-    for entry in data["matrix"]:
+    for i, entry in enumerate(data["matrix"]):
+        if not isinstance(entry, dict):
+            print(
+                f"Invalid matrix entry at index {i} in {path}: expected dict, got {type(entry).__name__}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        missing = _missing_required_keys(entry, REQUIRED_MATRIX_ENTRY_KEYS)
+        if missing:
+            print(
+                f"Matrix entry at index {i} in {path} missing required keys: {', '.join(missing)}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
         managed_by = entry.get("managed_by")
         if managed_by == "manual":
             manual_entries.append(entry)
@@ -765,7 +767,11 @@ def _run_write_mode(
         return 1
 
     # Generate new doc content (restores matrix on SystemExit)
-    new_doc_content = _write_doc_with_rollback(merged, matrix_backup)
+    try:
+        new_doc_content = _write_doc_with_rollback(merged, matrix_backup)
+    except SystemExit as exc:
+        code = exc.code
+        return code if isinstance(code, int) else 1
 
     # Write doc atomically (restores matrix on failure)
     result = _atomic_doc_write(new_doc_content, matrix_backup)

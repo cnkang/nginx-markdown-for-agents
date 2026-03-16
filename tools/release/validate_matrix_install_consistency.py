@@ -187,16 +187,14 @@ def validate(
         )
 
     # Check 5: Verify every matrix combination produces a valid asset name
-    for entry in matrix:
-        if entry.get("support_tier") != "full":
-            continue
+    for entry in installable:
         os_type = entry.get("os_type", "")
         arch = entry.get("arch", "")
-        if os_type not in INSTALL_DETECTABLE_OS_TYPES:
+        if os_type not in install_info.get("detectable_os_types", set()):
             errors.append(
                 f"Matrix entry has unrecognized os_type '{os_type}': {entry}"
             )
-        if arch not in INSTALL_DETECTABLE_ARCHS:
+        if arch not in install_info.get("detectable_archs", set()):
             errors.append(
                 f"Matrix entry has unrecognized arch '{arch}': {entry}"
             )

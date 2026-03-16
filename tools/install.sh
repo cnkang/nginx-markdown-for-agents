@@ -67,6 +67,38 @@ json_output() {
   local json_os_type="${_json_os_type}"
   local json_arch="${_json_arch}"
 
+  # Prefer jq for correct escaping and structure when available
+  if command -v jq >/dev/null 2>&1; then
+    local jq_error="null"
+    if [[ -n "$_json_error_category" ]]; then
+      jq_error="$(jq -cn --arg cat "$_json_error_category" --arg msg "$_json_error_message" \
+        '{category: $cat, message: $msg}')"
+    fi
+
+    local jq_suggestions="[]"
+    if [[ "${#_json_suggestions[@]}" -gt 0 ]]; then
+      jq_suggestions="$(printf '%s\0' "${_json_suggestions[@]}" | jq -Rsc 'split("\u0000") | .[:-1]')"
+    fi
+
+    local jq_versions="[]"
+    if [[ -n "$_json_available_versions" ]]; then
+      jq_versions="$(printf '%s\n' $_json_available_versions | jq -R . | jq -sc .)"
+    fi
+
+    jq -cn \
+      --argjson success "$json_success" \
+      --arg nginx_version "$json_nginx_version" \
+      --arg os_type "$json_os_type" \
+      --arg arch "$json_arch" \
+      --argjson error "$jq_error" \
+      --argjson available_versions "$jq_versions" \
+      --argjson suggestions "$jq_suggestions" \
+      '{success: $success, nginx_version: $nginx_version, os_type: $os_type, arch: $arch, error: $error, available_versions: $available_versions, suggestions: $suggestions}' >&3
+    return 0
+  fi
+
+  # Fallback: manual JSON construction when jq is not installed
+
   # Build suggestions JSON array
   local suggestions_json="[]"
   if [[ "${#_json_suggestions[@]}" -gt 0 ]]; then
@@ -78,9 +110,12 @@ json_output() {
       else
         suggestions_json+=","
       fi
-      # Escape double quotes and backslashes in suggestion text
+      # Escape backslashes, double quotes, and control characters in suggestion text
       local escaped="${s//\\/\\\\}"
       escaped="${escaped//\"/\\\"}"
+      escaped="${escaped//$'\n'/\\n}"
+      escaped="${escaped//$'\r'/\\r}"
+      escaped="${escaped//$'\t'/\\t}"
       suggestions_json+="\"${escaped}\""
     done
     suggestions_json+="]"
@@ -107,6 +142,9 @@ json_output() {
   if [[ -n "$_json_error_category" ]]; then
     local escaped_msg="${_json_error_message//\\/\\\\}"
     escaped_msg="${escaped_msg//\"/\\\"}"
+    escaped_msg="${escaped_msg//$'\n'/\\n}"
+    escaped_msg="${escaped_msg//$'\r'/\\r}"
+    escaped_msg="${escaped_msg//$'\t'/\\t}"
     error_json="{\"category\":\"${_json_error_category}\",\"message\":\"${escaped_msg}\"}"
   fi
 
