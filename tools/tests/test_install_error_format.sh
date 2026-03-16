@@ -177,10 +177,10 @@ run_hiding_nginx() {
   return 0
 }
 
-echo "$SEPARATOR_LINE"
-echo " Integration Tests: install.sh error message format (Property 9)"
-echo " Validates: Requirements 12.4"
-echo "$SEPARATOR_LINE"
+echo "$SEPARATOR_LINE" >&2
+echo " Integration Tests: install.sh error message format (Property 9)" >&2
+echo " Validates: Requirements 12.4" >&2
+echo "$SEPARATOR_LINE" >&2
 echo ""
 
 # -----------------------------------------------------------------------
@@ -223,7 +223,7 @@ echo ""
 # -----------------------------------------------------------------------
 # Test 3: --json flag produces valid JSON on error (nginx not found)
 # -----------------------------------------------------------------------
-echo "Test 3: --json flag produces valid JSON on error"
+echo "Test 3: --json flag produces valid JSON on error" >&2
 run_hiding_nginx "--json error" --json
 
 JSON_OUT="$_LAST_STDOUT"
@@ -271,7 +271,7 @@ echo ""
 # -----------------------------------------------------------------------
 # Test 4: Static analysis — every exit 1 preceded by emit_error/die_with_error
 # -----------------------------------------------------------------------
-echo "Test 4: Static analysis — exit 1 paths use structured error helpers"
+echo "Test 4: Static analysis — exit 1 paths use structured error helpers" >&2
 
 # Strategy: find all lines with 'exit 1' in install.sh, excluding:
 #   - Lines inside awk/sed/python heredocs (between <<'...' and the delimiter)

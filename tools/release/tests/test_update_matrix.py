@@ -1282,7 +1282,9 @@ def test_cli_check_only_error_exit_1(tmp_path, monkeypatch):
 
     # Make fetch raise a URLError to simulate network failure
     from urllib.error import URLError
-    monkeypatch.setattr(um, "fetch_download_page", lambda _url: (_ for _ in ()).throw(URLError("network down")))
+    def raise_url_error(_url):
+        raise URLError("network down")
+    monkeypatch.setattr(um, "fetch_download_page", raise_url_error)
 
     exit_code = main(["--check-only"])
     assert exit_code == 1
@@ -1298,7 +1300,7 @@ def test_cli_diff_json_structure(tmp_path, monkeypatch):
     existing = ["1.24.0"]
     from_nginx = ["1.24.0", "1.26.3"]  # 1.26.3 is new
 
-    _, doc_path, diff_path = _setup_cli_env(
+    _, _, diff_path = _setup_cli_env(
         tmp_path, existing, monkeypatch, html_versions=from_nginx,
     )
 

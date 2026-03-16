@@ -569,6 +569,53 @@ def _handle_dry_run(diff: MatrixDiff) -> int:
     return 0
 
 
+def _restore_matrix_backup(matrix_backup: str | None) -> None:
+    """Restore matrix file from backup if available."""
+    if matrix_backup is not None:
+        try:
+            _write_repo_text(MATRIX_PATH, matrix_backup)
+        except OSError:
+            pass
+
+
+def _write_doc_with_rollback(
+    merged: list[dict],
+    matrix_backup: str | None,
+) -> str:
+    """Generate and return new doc content, restoring matrix on failure.
+
+    Raises ``SystemExit`` (reraised from ``update_doc_table``) if markers
+    are missing — the matrix is restored before propagation.
+    """
+    try:
+        return update_doc_table(DOC_PATH, merged)
+    except SystemExit:
+        _restore_matrix_backup(matrix_backup)
+        raise
+
+
+def _atomic_doc_write(new_doc_content: str, matrix_backup: str | None) -> int:
+    """Write doc content atomically, rolling back matrix on failure.
+
+    Returns 0 on success, 1 on error.
+    """
+    doc_tmp = DOC_PATH.with_suffix(DOC_PATH.suffix + ".tmp")
+    try:
+        safe_doc_path = _resolve_repo_write_path(DOC_PATH)
+        safe_doc_tmp = _resolve_repo_write_path(doc_tmp)
+        _write_repo_text(safe_doc_tmp, new_doc_content)
+        os.replace(safe_doc_tmp, safe_doc_path)
+    except Exception as exc:
+        print(f"Error writing {DOC_PATH}: {exc}", file=sys.stderr)
+        try:
+            _resolve_repo_write_path(doc_tmp).unlink(missing_ok=True)
+        except (OSError, ValueError):
+            pass
+        _restore_matrix_backup(matrix_backup)
+        return 1
+    return 0
+
+
 def _run_write_mode(
     data: dict,
     merged: list[dict],
@@ -586,8 +633,6 @@ def _run_write_mode(
 
     # Update updated_at timestamp
     data["updated_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-    # Update matrix entries
     data["matrix"] = merged
 
     # Write matrix via crash-safe temp+rename
@@ -597,47 +642,19 @@ def _run_write_mode(
         print(f"Error writing {MATRIX_PATH}: {exc}", file=sys.stderr)
         return 1
 
-    # Generate new doc content and write via crash-safe temp+rename
-    try:
-        new_doc_content = update_doc_table(DOC_PATH, merged)
-    except SystemExit:
-        # update_doc_table calls sys.exit(1) on missing markers — restore matrix
-        if matrix_backup is not None:
-            try:
-                _write_repo_text(MATRIX_PATH, matrix_backup)
-            except OSError:
-                pass
-        raise
+    # Generate new doc content (restores matrix on SystemExit)
+    new_doc_content = _write_doc_with_rollback(merged, matrix_backup)
 
-    doc_tmp = DOC_PATH.with_suffix(DOC_PATH.suffix + ".tmp")
-    try:
-        safe_doc_path = _resolve_repo_write_path(DOC_PATH)
-        safe_doc_tmp = _resolve_repo_write_path(doc_tmp)
-        _write_repo_text(safe_doc_tmp, new_doc_content)
-        os.replace(safe_doc_tmp, safe_doc_path)
-    except Exception as exc:
-        print(f"Error writing {DOC_PATH}: {exc}", file=sys.stderr)
-        # Clean up temp file
-        try:
-            _resolve_repo_write_path(doc_tmp).unlink(missing_ok=True)
-        except OSError:
-            pass
-        except ValueError:
-            pass
-        # Restore matrix from backup
-        if matrix_backup is not None:
-            try:
-                _write_repo_text(MATRIX_PATH, matrix_backup)
-            except OSError:
-                pass
-        return 1
+    # Write doc atomically (restores matrix on failure)
+    result = _atomic_doc_write(new_doc_content, matrix_backup)
+    if result != 0:
+        return result
 
-    # Write matrix-diff.json
+    # Write matrix-diff.json (non-fatal)
     try:
         write_diff_file(diff, DIFF_PATH)
     except Exception as exc:
         print(f"Warning: failed to write {DIFF_PATH}: {exc}", file=sys.stderr)
-        # Non-fatal — the matrix and doc are already updated
 
     return 0
 
