@@ -28,6 +28,9 @@ pub struct MarkdownOptions {
     pub content_type_len: usize,
     pub base_url: *const u8,
     pub base_url_len: usize,
+    /// Maximum buffer size in bytes for the incremental converter.
+    /// When 0, the Rust layer uses its built-in default (64 MiB).
+    pub max_buffer_size: usize,
 }
 
 /// Conversion result returned from Rust to C.

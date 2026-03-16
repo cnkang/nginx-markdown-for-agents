@@ -49,6 +49,7 @@ use crate::parser::parse_html;
 pub struct IncrementalConverter {
     options: ConversionOptions,
     buffer: Vec<u8>,
+    max_buffer_size: usize,
 }
 
 /// Default maximum buffer size for the incremental converter (64 MiB).
@@ -67,6 +68,24 @@ impl IncrementalConverter {
         Self {
             options,
             buffer: Vec::new(),
+            max_buffer_size: INCREMENTAL_MAX_BUFFER_SIZE,
+        }
+    }
+
+    /// Creates a new incremental converter with a custom buffer size limit.
+    ///
+    /// If `max_buffer_size` is 0, the default limit
+    /// ([`MAX_BUFFER_SIZE`](Self::MAX_BUFFER_SIZE)) is used.
+    pub fn with_max_buffer_size(options: ConversionOptions, max_buffer_size: usize) -> Self {
+        let effective = if max_buffer_size == 0 {
+            INCREMENTAL_MAX_BUFFER_SIZE
+        } else {
+            max_buffer_size
+        };
+        Self {
+            options,
+            buffer: Vec::new(),
+            max_buffer_size: effective,
         }
     }
 
@@ -82,12 +101,12 @@ impl IncrementalConverter {
     /// exceed [`MAX_BUFFER_SIZE`](Self::MAX_BUFFER_SIZE).
     pub fn feed_chunk(&mut self, data: &[u8]) -> Result<(), ConversionError> {
         let new_len = self.buffer.len().saturating_add(data.len());
-        if new_len > Self::MAX_BUFFER_SIZE {
+        if new_len > self.max_buffer_size {
             return Err(ConversionError::MemoryLimit(format!(
                 "incremental buffer would exceed limit: {} + {} > {} bytes",
                 self.buffer.len(),
                 data.len(),
-                Self::MAX_BUFFER_SIZE,
+                self.max_buffer_size,
             )));
         }
         self.buffer.extend_from_slice(data);

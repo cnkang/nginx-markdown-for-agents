@@ -77,6 +77,11 @@ typedef struct MarkdownOptions {
   uintptr_t content_type_len;
   const uint8_t *base_url;
   uintptr_t base_url_len;
+  /**
+   * Maximum buffer size in bytes for the incremental converter.
+   * When 0, the Rust layer uses its built-in default (64 MiB).
+   */
+  uintptr_t max_buffer_size;
 } MarkdownOptions;
 
 /**

@@ -11,6 +11,7 @@ pub(crate) struct DecodedOptions<'a> {
     pub(crate) timeout: Duration,
     pub(crate) generate_etag: bool,
     pub(crate) estimate_tokens: bool,
+    pub(crate) max_buffer_size: usize,
     pub(crate) conversion: ConversionOptions,
 }
 
@@ -100,6 +101,7 @@ pub(crate) fn decode_options(
         timeout,
         generate_etag: options.generate_etag != 0,
         estimate_tokens: options.estimate_tokens != 0,
+        max_buffer_size: options.max_buffer_size,
         conversion: ConversionOptions {
             flavor,
             include_front_matter,

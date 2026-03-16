@@ -76,8 +76,11 @@ pub unsafe extern "C" fn markdown_incremental_new(
         }
         // SAFETY: caller guarantees `options` is valid and aligned.
         let opts_ref = unsafe { &*options };
-        let decoded = decode_options(opts_ref).map_err(|_| ())?;
-        let converter = IncrementalConverter::new(decoded.conversion);
+        let decoded = decode_options(opts_ref).map_err(|e| {
+            eprintln!("markdown_incremental_new: failed to decode options: {e}");
+        })?;
+        let converter =
+            IncrementalConverter::with_max_buffer_size(decoded.conversion, decoded.max_buffer_size);
         Ok(Box::into_raw(Box::new(IncrementalConverterHandle {
             inner: converter,
             generate_etag: decoded.generate_etag,

@@ -277,6 +277,7 @@ fn run_ffi_baseline(sample: &Sample, cfg: RunConfig) -> FfiSummary {
         content_type_len: content_type.len(),
         base_url: base_url.map_or(ptr::null(), |value| value.as_ptr()),
         base_url_len: base_url.map_or(0, |value| value.len()),
+        max_buffer_size: 0,
     };
 
     let handle: *mut MarkdownConverterHandle = markdown_converter_new();

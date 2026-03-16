@@ -413,6 +413,7 @@ ngx_http_markdown_handle_if_none_match(ngx_http_request_t *r,
     options.generate_etag = 1;  /* Must generate ETag for comparison */
     options.estimate_tokens = conf->token_estimate;
     options.front_matter = conf->front_matter;
+    options.max_buffer_size = conf->max_size;
 
     /* Allocate result structure */
     conv_result = ngx_pcalloc(r->pool, sizeof(struct MarkdownResult));
