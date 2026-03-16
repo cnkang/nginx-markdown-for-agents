@@ -79,3 +79,6 @@ tests/**/tmp/
 # Vim swap
 *.swp
 *.swo
+
+.hypothesis
+components/rust-converter/fuzz/*
