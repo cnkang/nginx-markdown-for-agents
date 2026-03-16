@@ -62,6 +62,9 @@ jobs:
             else
               echo "::warning::Matrix is stale. Consider running the update-matrix workflow."
             fi
+          else
+            echo "::error::Matrix freshness check returned unexpected exit code: ${exit_code}"
+            exit 1
           fi
 
       - name: Extract build matrix from release-matrix.json
@@ -141,13 +144,15 @@ jobs:
 
   completeness-check:
     name: Verify Artifact Completeness
-    needs: build-binaries
+    needs: [prepare, build-binaries]
     runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ needs.prepare.outputs.checkout_ref }}
 
       - name: Set up Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
