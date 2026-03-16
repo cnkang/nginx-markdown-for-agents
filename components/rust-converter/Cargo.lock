@@ -372,22 +372,11 @@ checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 
 [[package]]
 name = "html5ever"
-version = "0.38.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1054432bae2f14e0061e33d23402fbaa67a921d319d56adc6bcf887ddad1cbc2"
-dependencies = [
- "log",
- "markup5ever 0.38.0",
-]
-
-[[package]]
-name = "html5ever"
 version = "0.39.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "46a1761807faccc9a19e86944bbf40610014066306f96edcdedc2fb714bcb7b8"
+source = "git+https://github.com/servo/html5ever?rev=ce64836c685025a5fef0860fa2e9c80b2683e8d0#ce64836c685025a5fef0860fa2e9c80b2683e8d0"
 dependencies = [
  "log",
- "markup5ever 0.39.0",
+ "markup5ever",
 ]
 
 [[package]]
@@ -468,20 +457,8 @@ checksum = "5e5032e24019045c762d3c0f28f5b6b8bbf38563a65908389bf7978758920897"
 
 [[package]]
 name = "markup5ever"
-version = "0.38.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8983d30f2915feeaaab2d6babdd6bc7e9ed1a00b66b5e6d74df19aa9c0e91862"
-dependencies = [
- "log",
- "tendril",
- "web_atoms",
-]
-
-[[package]]
-name = "markup5ever"
 version = "0.39.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7122d987ec5f704ee56f6e5b41a7d93722e9aae27ae07cafa4036c4d3f9757de"
+source = "git+https://github.com/servo/html5ever?rev=ce64836c685025a5fef0860fa2e9c80b2683e8d0#ce64836c685025a5fef0860fa2e9c80b2683e8d0"
 dependencies = [
  "log",
  "tendril",
@@ -490,12 +467,11 @@ dependencies = [
 
 [[package]]
 name = "markup5ever_rcdom"
-version = "0.38.0+unofficial"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "333171ccdf66e915257740d44e38ea5b1b19ce7b45d33cc35cb6f118fbd981ff"
+version = "0.39.0"
+source = "git+https://github.com/servo/html5ever?rev=ce64836c685025a5fef0860fa2e9c80b2683e8d0#ce64836c685025a5fef0860fa2e9c80b2683e8d0"
 dependencies = [
- "html5ever 0.38.0",
- "markup5ever 0.38.0",
+ "html5ever",
+ "markup5ever",
  "tendril",
  "xml5ever",
 ]
@@ -520,7 +496,7 @@ dependencies = [
  "criterion",
  "encoding_rs",
  "hex",
- "html5ever 0.39.0",
+ "html5ever",
  "markup5ever_rcdom",
  "proptest",
  "regex",
@@ -982,11 +958,9 @@ dependencies = [
 [[package]]
 name = "tendril"
 version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c4790fc369d5a530f4b544b094e31388b9b3a37c0f4652ade4505945f5660d24"
+source = "git+https://github.com/servo/html5ever?rev=ce64836c685025a5fef0860fa2e9c80b2683e8d0#ce64836c685025a5fef0860fa2e9c80b2683e8d0"
 dependencies = [
  "new_debug_unreachable",
- "utf-8",
 ]
 
 [[package]]
@@ -1016,12 +990,6 @@ name = "unicode-xid"
 version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ebc1c04c71510c7f702b52b7c350734c9ff1295c464a03335b00bb84fc54f853"
-
-[[package]]
-name = "utf-8"
-version = "0.7.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "09cc8ee72d2a9becf2f2febe0205bbed8fc6615b7cb429ad062dc7b7ddd036a9"
 
 [[package]]
 name = "wait-timeout"
@@ -1152,8 +1120,7 @@ dependencies = [
 [[package]]
 name = "web_atoms"
 version = "0.2.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "57a9779e9f04d2ac1ce317aee707aa2f6b773afba7b931222bff6983843b1576"
+source = "git+https://github.com/servo/html5ever?rev=ce64836c685025a5fef0860fa2e9c80b2683e8d0#ce64836c685025a5fef0860fa2e9c80b2683e8d0"
 dependencies = [
  "phf",
  "phf_codegen",
@@ -1297,12 +1264,11 @@ dependencies = [
 
 [[package]]
 name = "xml5ever"
-version = "0.38.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d3dc9559429edf0cd3f327cc0afd9d6b36fa8cec6d93107b7fbe64f806b5f2d9"
+version = "0.39.0"
+source = "git+https://github.com/servo/html5ever?rev=ce64836c685025a5fef0860fa2e9c80b2683e8d0#ce64836c685025a5fef0860fa2e9c80b2683e8d0"
 dependencies = [
  "log",
- "markup5ever 0.38.0",
+ "markup5ever",
 ]
 
 [[package]]
