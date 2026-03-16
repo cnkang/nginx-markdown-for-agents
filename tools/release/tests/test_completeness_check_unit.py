@@ -47,6 +47,11 @@ def test_expected_artifact_name_musl_aarch64():
     )
 
 
+def test_expected_artifact_name_missing_required_keys():
+    with pytest.raises(KeyError, match="missing required keys: os_type"):
+        expected_artifact_name({"nginx": "1.28.0", "arch": "aarch64"})
+
+
 # -- load_matrix --------------------------------------------------------------
 
 def test_load_matrix_filters_full_tier(tmp_path):

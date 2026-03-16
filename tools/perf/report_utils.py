@@ -151,6 +151,9 @@ def _median_stage_breakdown(tier_reports: list[dict]) -> dict:
 
 def _build_aggregated_tier(tier_reports: list[dict]) -> dict:
     """Build the aggregated tier payload for repeated *tier_reports*."""
+    if not tier_reports:
+        raise ValueError("tier_reports cannot be empty")
+
     median_tier = _median_for_keys(tier_reports, NUMERIC_TIER_KEYS)
     stage_breakdown = _median_stage_breakdown(tier_reports)
     if stage_breakdown:

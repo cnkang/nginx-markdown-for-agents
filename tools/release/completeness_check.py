@@ -23,6 +23,14 @@ from typing import List, Set, Tuple
 ARTIFACT_TEMPLATE = (
     "ngx_http_markdown_filter_module-{nginx}-{os_type}-{arch}.tar.gz"
 )
+REQUIRED_ENTRY_KEYS = ("nginx", "os_type", "arch")
+
+
+def _require_entry_keys(entry: dict, *, context: str) -> None:
+    """Raise ``KeyError`` when *entry* omits required matrix keys."""
+    missing_keys = [key for key in REQUIRED_ENTRY_KEYS if key not in entry]
+    if missing_keys:
+        raise KeyError(f"{context} missing required keys: {', '.join(missing_keys)}")
 
 
 def load_matrix(matrix_path: str) -> List[dict]:
@@ -38,6 +46,7 @@ def load_matrix(matrix_path: str) -> List[dict]:
 
 def expected_artifact_name(entry: dict) -> str:
     """Build the expected artifact filename from a matrix entry."""
+    _require_entry_keys(entry, context="Entry")
     return ARTIFACT_TEMPLATE.format(
         nginx=entry["nginx"],
         os_type=entry["os_type"],

@@ -5,10 +5,12 @@ import tempfile
 from pathlib import Path
 
 import sys
+import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from report_utils import (
+    _build_aggregated_tier,
     build_baseline_report,
     detect_platform,
     merge_measurement_reports,
@@ -83,3 +85,8 @@ def test_merge_measurement_reports_combines_tiers():
         "small": {"p50_ms": 1.0},
         "medium": {"p50_ms": 2.0},
     }
+
+
+def test_build_aggregated_tier_rejects_empty_reports():
+    with pytest.raises(ValueError, match="tier_reports cannot be empty"):
+        _build_aggregated_tier([])

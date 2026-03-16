@@ -53,6 +53,7 @@ SUPPORT_TIER = "full"
 # ---------------------------------------------------------------------------
 DOC_MARKER_BEGIN = "<!-- BEGIN AUTO-GENERATED MATRIX -->"
 DOC_MARKER_END = "<!-- END AUTO-GENERATED MATRIX -->"
+REQUIRED_MATRIX_ENTRY_KEYS = ("nginx", "os_type", "arch")
 
 
 # ---------------------------------------------------------------------------
@@ -82,8 +83,39 @@ def classify_version(version: str) -> str:
 
     Even minor → stable/legacy, odd minor → mainline.
     """
-    minor = int(version.split(".")[1])
+    parts = version.split(".")
+    if len(parts) < 2:
+        raise ValueError(f"Invalid nginx version format: {version}")
+
+    try:
+        minor = int(parts[1])
+    except ValueError as exc:
+        raise ValueError(f"Invalid nginx version format: {version}") from exc
+
     return "stable" if minor % 2 == 0 else "mainline"
+
+
+def _missing_required_keys(entry: dict, required_keys: tuple[str, ...]) -> list[str]:
+    """Return missing required keys for *entry* in declaration order."""
+    return [key for key in required_keys if key not in entry]
+
+
+def _resolve_repo_write_path(path: Path) -> Path:
+    """Resolve *path* and ensure it stays within the repository root."""
+    resolved_path = path.resolve(strict=False)
+    repo_root = REPO_ROOT.resolve()
+    try:
+        resolved_path.relative_to(repo_root)
+    except ValueError as exc:
+        raise ValueError(f"Refusing to write outside repository root: {path}") from exc
+    return resolved_path
+
+
+def _write_repo_text(path: Path, content: str) -> None:
+    """Write *content* to a repository-owned path using UTF-8 encoding."""
+    safe_path = _resolve_repo_write_path(path)
+    safe_path.parent.mkdir(parents=True, exist_ok=True)
+    safe_path.write_text(content, encoding="utf-8")
 
 
 def read_min_version(install_script_path: Path) -> str:
@@ -93,7 +125,7 @@ def read_min_version(install_script_path: Path) -> str:
     returns the version string.  Raises ``RuntimeError`` if the variable
     cannot be found.
     """
-    text = install_script_path.read_text()
+    text = install_script_path.read_text(encoding="utf-8")
     match = re.search(r'MIN_SUPPORTED_NGINX_VERSION="([^"]+)"', text)
     if not match:
         raise RuntimeError(
@@ -196,6 +228,17 @@ def load_matrix(path: Path) -> tuple[dict, list[dict], list[dict]]:
     seen_keys: dict[tuple[str, str, str], int] = {}
     duplicates: list[tuple[str, str, str]] = []
     for entry in manual_entries:
+        missing_keys = _missing_required_keys(entry, REQUIRED_MATRIX_ENTRY_KEYS)
+        if missing_keys:
+            print(
+                (
+                    f"Manual entry missing required keys in {path}: "
+                    f"{', '.join(missing_keys)}"
+                ),
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
         key = (entry["nginx"], entry["os_type"], entry["arch"])
         if key in seen_keys:
             duplicates.append(key)
@@ -327,7 +370,7 @@ def write_diff_file(diff: MatrixDiff, path: Path) -> None:
         "added_versions": diff.added_versions,
         "removed_versions": diff.removed_versions,
     }
-    path.write_text(json.dumps(payload, indent=2) + "\n")
+    _write_repo_text(path, json.dumps(payload, indent=2) + "\n")
 
 
 def write_matrix(path: Path, data: dict) -> None:
@@ -346,13 +389,17 @@ def write_matrix(path: Path, data: dict) -> None:
     """
     tmp_path = path.with_suffix(path.suffix + ".tmp")
     try:
-        tmp_path.write_text(json.dumps(data, indent=2) + "\n")
-        os.replace(tmp_path, path)
+        safe_path = _resolve_repo_write_path(path)
+        safe_tmp_path = _resolve_repo_write_path(tmp_path)
+        _write_repo_text(safe_tmp_path, json.dumps(data, indent=2) + "\n")
+        os.replace(safe_tmp_path, safe_path)
     except Exception:
         # Clean up the temp file on any failure
         try:
-            tmp_path.unlink(missing_ok=True)
+            _resolve_repo_write_path(tmp_path).unlink(missing_ok=True)
         except OSError:
+            pass
+        except ValueError:
             pass
         raise
 
@@ -375,7 +422,7 @@ def update_doc_table(doc_path: Path, matrix_entries: list[dict]) -> str:
 
     Calls ``sys.exit(1)`` if either marker is not found in the document.
     """
-    content = doc_path.read_text()
+    content = doc_path.read_text(encoding="utf-8")
 
     begin_idx = content.find(DOC_MARKER_BEGIN)
     end_idx = content.find(DOC_MARKER_END)
@@ -602,26 +649,30 @@ def main(argv: list[str] | None = None) -> int:
         # update_doc_table calls sys.exit(1) on missing markers — restore matrix
         if matrix_backup is not None:
             try:
-                MATRIX_PATH.write_text(matrix_backup)
+                _write_repo_text(MATRIX_PATH, matrix_backup)
             except OSError:
                 pass
         return 1
 
     doc_tmp = DOC_PATH.with_suffix(DOC_PATH.suffix + ".tmp")
     try:
-        doc_tmp.write_text(new_doc_content)
-        os.replace(doc_tmp, DOC_PATH)
+        safe_doc_path = _resolve_repo_write_path(DOC_PATH)
+        safe_doc_tmp = _resolve_repo_write_path(doc_tmp)
+        _write_repo_text(safe_doc_tmp, new_doc_content)
+        os.replace(safe_doc_tmp, safe_doc_path)
     except Exception as exc:
         print(f"Error writing {DOC_PATH}: {exc}", file=sys.stderr)
         # Clean up temp file
         try:
-            doc_tmp.unlink(missing_ok=True)
+            _resolve_repo_write_path(doc_tmp).unlink(missing_ok=True)
         except OSError:
+            pass
+        except ValueError:
             pass
         # Restore matrix from backup
         if matrix_backup is not None:
             try:
-                MATRIX_PATH.write_text(matrix_backup)
+                _write_repo_text(MATRIX_PATH, matrix_backup)
             except OSError:
                 pass
         return 1

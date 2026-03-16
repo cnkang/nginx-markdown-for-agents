@@ -29,6 +29,7 @@ from tools.release.update_matrix import (
     DOC_MARKER_BEGIN,
     DOC_MARKER_END,
     _entry_sort_key,
+    _resolve_repo_write_path,
 )
 
 try:
@@ -180,6 +181,13 @@ def test_parse_deduplication():
     assert versions == ["1.26.3", "1.24.0"]
 
 
+@pytest.mark.parametrize("version", ["1", "1x26x3", "mainline"])
+def test_classify_version_rejects_malformed_strings(version):
+    """Malformed versions raise ValueError instead of crashing with IndexError."""
+    with pytest.raises(ValueError):
+        classify_version(version)
+
+
 # ---------------------------------------------------------------------------
 # Import load_matrix for unit tests
 # ---------------------------------------------------------------------------
@@ -283,6 +291,48 @@ def test_load_matrix_duplicate_manual_keys(tmp_path):
     with pytest.raises(SystemExit) as exc_info:
         load_matrix(p)
     assert exc_info.value.code == 1
+
+
+def test_load_matrix_manual_entry_missing_required_keys(tmp_path, capsys):
+    """Manual entries without nginx/os_type/arch fail validation cleanly."""
+    matrix_data = {
+        "schema_version": "1.0.0",
+        "matrix": [
+            {"nginx": "1.22.1", "arch": "x86_64", "support_tier": "full", "managed_by": "manual"},
+        ],
+    }
+    p = tmp_path / "release-matrix.json"
+    p.write_text(json.dumps(matrix_data))
+
+    with pytest.raises(SystemExit) as exc_info:
+        load_matrix(p)
+
+    assert exc_info.value.code == 1
+    captured = capsys.readouterr()
+    assert "Manual entry missing required keys" in captured.err
+    assert "os_type" in captured.err
+
+
+def test_resolve_repo_write_path_rejects_paths_outside_repo(tmp_path, monkeypatch):
+    """Write helpers reject paths that escape the repository root."""
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+
+    import tools.release.update_matrix as um
+
+    monkeypatch.setattr(um, "REPO_ROOT", repo_root)
+
+    with pytest.raises(ValueError, match="outside repository root"):
+        _resolve_repo_write_path(tmp_path / "outside.json")
+
+
+def _allow_repo_writes(monkeypatch, repo_root: Path) -> None:
+    """Configure update_matrix write guards for a temporary test repository."""
+    repo_root.mkdir(parents=True, exist_ok=True)
+
+    import tools.release.update_matrix as um
+
+    monkeypatch.setattr(um, "REPO_ROOT", repo_root)
 
 
 def test_load_matrix_preserves_full_data(tmp_path):
@@ -614,8 +664,9 @@ def test_diff_matrix_missing_platform_entry():
 # ---------------------------------------------------------------------------
 
 
-def test_write_matrix_basic(tmp_path):
+def test_write_matrix_basic(tmp_path, monkeypatch):
     """write_matrix writes formatted JSON with 2-space indent and trailing newline."""
+    _allow_repo_writes(monkeypatch, tmp_path)
     target = tmp_path / "release-matrix.json"
     data = {
         "schema_version": "1.0.0",
@@ -634,8 +685,9 @@ def test_write_matrix_basic(tmp_path):
     assert '  "schema_version"' in content
 
 
-def test_write_matrix_preserves_all_fields(tmp_path):
+def test_write_matrix_preserves_all_fields(tmp_path, monkeypatch):
     """write_matrix preserves schema_version, updated_at, support_tiers, and matrix."""
+    _allow_repo_writes(monkeypatch, tmp_path)
     target = tmp_path / "release-matrix.json"
     data = {
         "schema_version": "2.0.0",
@@ -652,8 +704,9 @@ def test_write_matrix_preserves_all_fields(tmp_path):
     assert parsed["matrix"] == []
 
 
-def test_write_matrix_overwrites_existing(tmp_path):
+def test_write_matrix_overwrites_existing(tmp_path, monkeypatch):
     """write_matrix replaces an existing file atomically."""
+    _allow_repo_writes(monkeypatch, tmp_path)
     target = tmp_path / "release-matrix.json"
     target.write_text('{"old": true}\n')
 
@@ -665,8 +718,9 @@ def test_write_matrix_overwrites_existing(tmp_path):
     assert parsed["schema_version"] == "1.0.0"
 
 
-def test_write_matrix_no_temp_file_on_success(tmp_path):
+def test_write_matrix_no_temp_file_on_success(tmp_path, monkeypatch):
     """After a successful write, no .tmp file should remain."""
+    _allow_repo_writes(monkeypatch, tmp_path)
     target = tmp_path / "release-matrix.json"
     data = {"schema_version": "1.0.0", "matrix": []}
     write_matrix(target, data)
@@ -679,6 +733,7 @@ def test_write_matrix_cleans_up_temp_on_failure(tmp_path, monkeypatch):
     """On write failure, the temp file is cleaned up."""
     import os as _os
 
+    _allow_repo_writes(monkeypatch, tmp_path)
     target = tmp_path / "release-matrix.json"
     tmp_file = target.with_suffix(target.suffix + ".tmp")
 
@@ -728,7 +783,7 @@ _surrounding_text = st.text(min_size=0, max_size=200).filter(
     entries=st.lists(_matrix_entry_with_managed_by, min_size=0, max_size=5),
 )
 @settings(max_examples=200, suppress_health_check=[HealthCheck.function_scoped_fixture])
-def test_property5_schema_version_preservation(tmp_path, schema_ver, entries):
+def test_property5_schema_version_preservation(tmp_path, monkeypatch, schema_ver, entries):
     """For any valid release-matrix.json with a schema_version field,
     after running write_matrix, the output schema_version shall equal
     the input schema_version.
@@ -740,6 +795,7 @@ def test_property5_schema_version_preservation(tmp_path, schema_ver, entries):
         "updated_at": "2025-07-14T00:00:00Z",
         "matrix": entries,
     }
+    _allow_repo_writes(monkeypatch, tmp_path)
     target = tmp_path / "release-matrix.json"
     write_matrix(target, data)
 
@@ -1149,6 +1205,7 @@ def _setup_cli_env(tmp_path, versions_in_matrix, monkeypatch, *, html_versions=N
     monkeypatch.setattr(um, "DOC_PATH", doc_path)
     monkeypatch.setattr(um, "DIFF_PATH", diff_path)
     monkeypatch.setattr(um, "INSTALL_SCRIPT_PATH", install_path)
+    monkeypatch.setattr(um, "REPO_ROOT", tmp_path)
 
     mock_html = _build_mock_html(html_versions)
     monkeypatch.setattr(um, "fetch_download_page", lambda _url: mock_html)
