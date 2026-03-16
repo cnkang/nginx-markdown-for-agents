@@ -186,7 +186,7 @@ def validate(
 
     # Check 3: SUPPORTED_ARCHITECTURES in install.sh matches matrix arch values
     if install_info["supported_architectures"] != matrix_archs:
-        _extracted_from_validate_33(install_info, matrix_archs, errors)
+        _collect_architecture_mismatch_errors(install_info, matrix_archs, errors)
     # Check 4: Asset naming convention matches
     if install_info["asset_name_template"] != EXPECTED_ASSET_TEMPLATE:
         errors.append(
@@ -211,8 +211,7 @@ def validate(
     return errors
 
 
-# TODO Rename this here and in `validate`
-def _extracted_from_validate_33(install_info, matrix_archs, errors):
+def _collect_architecture_mismatch_errors(install_info, matrix_archs, errors):
     only_in_script = install_info["supported_architectures"] - matrix_archs
     only_in_matrix = matrix_archs - install_info["supported_architectures"]
     parts = []
@@ -254,7 +253,7 @@ def main() -> int:
 
     try:
         matrix = load_matrix(MATRIX_PATH)
-    except (ValueError, json.JSONDecodeError) as exc:
+    except ValueError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
     install_info = parse_install_script(INSTALL_SCRIPT_PATH)

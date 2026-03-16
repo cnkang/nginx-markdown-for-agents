@@ -26,6 +26,7 @@ _cleanup_shim_dirs() {
   for d in "${_SHIM_DIRS[@]+"${_SHIM_DIRS[@]}"}"; do
     rm -rf "$d" 2>/dev/null || true
   done
+  return 0
 }
 trap _cleanup_shim_dirs EXIT INT TERM
 
