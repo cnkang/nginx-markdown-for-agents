@@ -101,18 +101,23 @@ def _missing_required_keys(entry: dict, required_keys: tuple[str, ...]) -> list[
 
 
 def _resolve_repo_write_path(path: Path) -> Path:
-    """Resolve *path* and ensure it stays within the repository root."""
-    resolved_path = path.resolve(strict=False)
-    repo_root = REPO_ROOT.resolve()
-    try:
-        resolved_path.relative_to(repo_root)
-    except ValueError as exc:
-        raise ValueError(f"Refusing to write outside repository root: {path}") from exc
-    return resolved_path
+    """Resolve *path* and ensure it stays within the repository root.
+
+    Uses ``str.startswith`` on the resolved canonical path to guard against
+    path traversal.  Raises ``ValueError`` if the target escapes the repo.
+    """
+    resolved_path = os.path.realpath(path)
+    repo_root = os.path.realpath(REPO_ROOT)
+    if not resolved_path.startswith(repo_root + os.sep) and resolved_path != repo_root:
+        raise ValueError(f"Refusing to write outside repository root: {path}")
+    return Path(resolved_path)
 
 
 def _write_repo_text(path: Path, content: str) -> None:
-    """Write *content* to a repository-owned path using UTF-8 encoding."""
+    """Write *content* to a repository-owned path using UTF-8 encoding.
+
+    The path is validated against the repository root before any I/O.
+    """
     safe_path = _resolve_repo_write_path(path)
     safe_path.parent.mkdir(parents=True, exist_ok=True)
     safe_path.write_text(content, encoding="utf-8")
