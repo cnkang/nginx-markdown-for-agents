@@ -471,11 +471,56 @@ ngx_http_markdown_execute_conversion(ngx_http_request_t *r,
     start_time = (ngx_msec_t) (tp->sec * 1000 + tp->msec);
 
     ngx_memzero(result, sizeof(struct MarkdownResult));
-    markdown_convert(ngx_http_markdown_converter,
-                    ctx->buffer.data,
-                    ctx->buffer.size,
-                    &options,
-                    result);
+
+#ifdef MARKDOWN_INCREMENTAL_ENABLED
+    if (ctx->processing_path == NGX_HTTP_MARKDOWN_PATH_INCREMENTAL) {
+        struct IncrementalConverterHandle *inc_handle;
+        uint32_t                          feed_rc;
+        uint32_t                          fin_rc;
+
+        inc_handle = markdown_incremental_new(&options);
+        if (inc_handle == NULL) {
+            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                         "markdown filter: failed to create incremental converter");
+
+            tp = ngx_timeofday();
+            end_time = (ngx_msec_t) (tp->sec * 1000 + tp->msec);
+            *elapsed_ms = (end_time >= start_time) ? end_time - start_time : 0;
+
+            return ngx_http_markdown_reject_or_fail_open_buffered_response(
+                r, ctx, conf,
+                "markdown filter: fail-open strategy - returning original HTML");
+        }
+
+        feed_rc = markdown_incremental_feed(
+            inc_handle, ctx->buffer.data, ctx->buffer.size);
+        if (feed_rc != ERROR_SUCCESS) {
+            markdown_incremental_free(inc_handle);
+
+            tp = ngx_timeofday();
+            end_time = (ngx_msec_t) (tp->sec * 1000 + tp->msec);
+            *elapsed_ms = (end_time >= start_time) ? end_time - start_time : 0;
+
+            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                         "markdown filter: incremental feed failed, error_code=%ud",
+                         feed_rc);
+            return ngx_http_markdown_reject_or_fail_open_buffered_response(
+                r, ctx, conf,
+                "markdown filter: fail-open strategy - returning original HTML");
+        }
+
+        /* finalize consumes the handle — do NOT call free after this */
+        fin_rc = markdown_incremental_finalize(inc_handle, result);
+        (void) fin_rc;  /* error_code is checked via result->error_code below */
+    } else
+#endif
+    {
+        markdown_convert(ngx_http_markdown_converter,
+                        ctx->buffer.data,
+                        ctx->buffer.size,
+                        &options,
+                        result);
+    }
 
     tp = ngx_timeofday();
     end_time = (ngx_msec_t) (tp->sec * 1000 + tp->msec);

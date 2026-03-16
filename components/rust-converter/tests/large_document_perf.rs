@@ -36,6 +36,7 @@
 //! accurate per-scenario deltas.
 
 #![cfg(feature = "incremental")]
+#![cfg(unix)]
 
 use nginx_markdown_converter::converter::{ConversionOptions, MarkdownConverter};
 use nginx_markdown_converter::incremental::IncrementalConverter;

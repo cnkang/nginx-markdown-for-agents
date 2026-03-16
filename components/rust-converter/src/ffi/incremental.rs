@@ -21,11 +21,20 @@
 //! [`markdown_incremental_finalize`] (which consumes it) **or**
 //! [`markdown_incremental_free`] (which drops it without producing output).
 //! Passing the same handle to both is undefined behavior.
+//!
+//! **Important:** [`markdown_incremental_finalize`] always consumes the
+//! handle, regardless of whether it returns success or failure.  After
+//! `finalize` returns, the handle is invalid and must not be passed to
+//! [`markdown_incremental_free`] or any other function.  Violating this
+//! rule causes a double-free (CWE-415).
 
 use std::panic;
 use std::ptr;
 
+use crate::error::ConversionError;
+use crate::etag_generator::ETagGenerator;
 use crate::incremental::IncrementalConverter;
+use crate::token_estimator::TokenEstimator;
 
 use super::abi::{
     ERROR_INTERNAL, ERROR_INVALID_INPUT, ERROR_SUCCESS, MarkdownOptions, MarkdownResult,
@@ -36,6 +45,8 @@ use super::options::decode_options;
 /// Opaque handle wrapping an [`IncrementalConverter`] for the C ABI.
 pub struct IncrementalConverterHandle {
     inner: IncrementalConverter,
+    generate_etag: bool,
+    estimate_tokens: bool,
 }
 
 /// Creates a new incremental converter and returns an opaque handle.
@@ -53,8 +64,8 @@ pub struct IncrementalConverterHandle {
 ///
 /// # Returns
 ///
-/// A non-NULL handle on success, or NULL if `options` is NULL or an
-/// internal panic is caught.
+/// A non-NULL handle on success, or NULL if `options` is NULL, if
+/// [`MarkdownOptions`] cannot be decoded, or if an internal panic is caught.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn markdown_incremental_new(
     options: *const MarkdownOptions,
@@ -69,6 +80,8 @@ pub unsafe extern "C" fn markdown_incremental_new(
         let converter = IncrementalConverter::new(decoded.conversion);
         Ok(Box::into_raw(Box::new(IncrementalConverterHandle {
             inner: converter,
+            generate_etag: decoded.generate_etag,
+            estimate_tokens: decoded.estimate_tokens,
         })))
     });
 
@@ -127,8 +140,18 @@ pub unsafe extern "C" fn markdown_incremental_feed(
 /// Finalizes the incremental conversion and writes the result.
 ///
 /// This function **consumes** the handle — the caller must not use it
-/// after this call returns.  On success the Markdown output is written
-/// into `result`; on failure `result` carries an error code and message.
+/// after this call returns (regardless of success or failure).  On success
+/// the Markdown output is written into `result`; on failure `result`
+/// carries an error code and message.
+///
+/// # Handle ownership
+///
+/// The handle is **always consumed** by this call.  After
+/// `markdown_incremental_finalize` returns — whether with success, an
+/// error code, or after an internal panic — the handle is invalid.
+/// Callers **must not** pass it to [`markdown_incremental_free`] or any
+/// other `markdown_incremental_*` function.  Doing so is undefined
+/// behavior (double-free).
 ///
 /// # Safety
 ///
@@ -167,18 +190,39 @@ pub unsafe extern "C" fn markdown_incremental_finalize(
         return ERROR_INVALID_INPUT;
     }
 
-    let panic_result = panic::catch_unwind(|| {
+    let panic_result = panic::catch_unwind(|| -> Result<(String, bool, bool), ConversionError> {
         // SAFETY: caller guarantees `handle` is a live, unconsumed pointer.
         // `Box::from_raw` takes ownership here — if the closure panics after
         // this point, the Box is dropped during unwinding, so the handle is
-        // always freed regardless of success or panic.
+        // always freed regardless of success or panic.  The C caller must NOT
+        // call `markdown_incremental_free` after this function returns.
         let boxed = unsafe { Box::from_raw(handle) };
-        boxed.inner.finalize()
+        let generate_etag = boxed.generate_etag;
+        let estimate_tokens = boxed.estimate_tokens;
+        let markdown = boxed.inner.finalize()?;
+        Ok((markdown, generate_etag, estimate_tokens))
     });
 
     match panic_result {
-        Ok(Ok(markdown)) => {
+        Ok(Ok((markdown, generate_etag, estimate_tokens))) => {
+            let token_estimate = if estimate_tokens {
+                TokenEstimator::new().estimate(&markdown)
+            } else {
+                0
+            };
+
             let md_bytes = markdown.into_bytes().into_boxed_slice();
+
+            if generate_etag {
+                let etag = ETagGenerator::new()
+                    .generate(md_bytes.as_ref())
+                    .into_bytes()
+                    .into_boxed_slice();
+                result_ref.etag_len = etag.len();
+                result_ref.etag = Box::into_raw(etag) as *mut u8;
+            }
+
+            result_ref.token_estimate = token_estimate;
             result_ref.markdown_len = md_bytes.len();
             result_ref.markdown = Box::into_raw(md_bytes) as *mut u8;
             result_ref.error_code = ERROR_SUCCESS;
@@ -205,7 +249,8 @@ pub unsafe extern "C" fn markdown_incremental_finalize(
 /// Use this function to release resources when the conversion is being
 /// abandoned (e.g. on error or cancellation).  If the handle has already
 /// been consumed by [`markdown_incremental_finalize`], do **not** call
-/// this function.
+/// this function — `finalize` always consumes the handle regardless of
+/// its return code, and calling `free` afterwards is a double-free.
 ///
 /// Passing NULL is a safe no-op.
 ///

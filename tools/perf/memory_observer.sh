@@ -165,11 +165,27 @@ if [[ "$OS" == "Darwin" ]]; then
     sleep "$SLEEP_SEC"
   done
 else
-  # Linux: poll to keep the loop alive, then read VmHWM at the end.
-  # We still sample periodically so we can report samples_count and detect
-  # process exit, but the final peak comes from the kernel.
+  # Linux: poll VmRSS during the loop so we have a fallback if VmHWM is
+  # unavailable after the process exits.  The final peak comes from VmHWM
+  # when possible (kernel-tracked high-water mark).
+  SAMPLED_MAX_RSS_KB=0
   while process_alive && [[ "$INTERRUPTED" == false ]]; do
     SAMPLES=$((SAMPLES + 1))
+
+    # Sample VmRSS from /proc as a fallback for VmHWM.
+    PROC_STATUS="/proc/$PID/status"
+    if [[ -r "$PROC_STATUS" ]]; then
+      VmRSS_LINE="$(grep '^VmRSS:' "$PROC_STATUS" 2>/dev/null || true)"
+      if [[ -n "$VmRSS_LINE" ]]; then
+        CURRENT_RSS_KB="$(echo "$VmRSS_LINE" | awk '{print $2}')"
+        if [[ -n "$CURRENT_RSS_KB" ]] && [[ "$CURRENT_RSS_KB" =~ ^[0-9]+$ ]]; then
+          if [[ "$CURRENT_RSS_KB" -gt "$SAMPLED_MAX_RSS_KB" ]]; then
+            SAMPLED_MAX_RSS_KB="$CURRENT_RSS_KB"
+          fi
+        fi
+      fi
+    fi
+
     sleep "$SLEEP_SEC"
   done
 
@@ -185,10 +201,15 @@ else
   fi
 
   # If we could not read VmHWM (process already reaped), fall back to the
-  # last sampled value via /proc/<pid>/status VmRSS during the loop — but
-  # since we did not track that, report 0 and note it in the log.
+  # maximum sampled VmRSS observed during the polling loop.
   if [[ "$MAX_RSS_KB" -eq 0 ]]; then
-    log "warning: could not read VmHWM for pid $PID (process already exited)"
+    if [[ "$SAMPLED_MAX_RSS_KB" -gt 0 ]]; then
+      MAX_RSS_KB="$SAMPLED_MAX_RSS_KB"
+      MEMORY_PEAK_METHOD="sampled_peak"
+      log "warning: VmHWM unavailable for pid $PID, falling back to sampled VmRSS peak"
+    else
+      log "warning: could not read VmHWM or VmRSS for pid $PID (process already exited)"
+    fi
   fi
 fi
 

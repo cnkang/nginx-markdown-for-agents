@@ -179,8 +179,8 @@ void markdown_converter_free(struct MarkdownConverterHandle *handle);
  *
  * # Returns
  *
- * A non-NULL handle on success, or NULL if `options` is NULL or an
- * internal panic is caught.
+ * A non-NULL handle on success, or NULL if `options` is NULL, if
+ * [`MarkdownOptions`] cannot be decoded, or if an internal panic is caught.
  */
 struct IncrementalConverterHandle *markdown_incremental_new(const struct MarkdownOptions *options);
 
@@ -209,8 +209,18 @@ uint32_t markdown_incremental_feed(struct IncrementalConverterHandle *handle,
  * Finalizes the incremental conversion and writes the result.
  *
  * This function **consumes** the handle — the caller must not use it
- * after this call returns.  On success the Markdown output is written
- * into `result`; on failure `result` carries an error code and message.
+ * after this call returns (regardless of success or failure).  On success
+ * the Markdown output is written into `result`; on failure `result`
+ * carries an error code and message.
+ *
+ * # Handle ownership
+ *
+ * The handle is always consumed by this call.  After
+ * `markdown_incremental_finalize` returns — whether with success, an
+ * error code, or after an internal panic — the handle is invalid.
+ * Callers must NOT pass it to `markdown_incremental_free` or any other
+ * `markdown_incremental_*` function.  Doing so is undefined behavior
+ * (double-free / CWE-415).
  *
  * # Safety
  *
@@ -233,8 +243,9 @@ uint32_t markdown_incremental_finalize(struct IncrementalConverterHandle *handle
  *
  * Use this function to release resources when the conversion is being
  * abandoned (e.g. on error or cancellation).  If the handle has already
- * been consumed by [`markdown_incremental_finalize`], do **not** call
- * this function.
+ * been consumed by `markdown_incremental_finalize`, do NOT call this
+ * function — `finalize` always consumes the handle regardless of its
+ * return code, and calling `free` afterwards is a double-free.
  *
  * Passing NULL is a safe no-op.
  *
