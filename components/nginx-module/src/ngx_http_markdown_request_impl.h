@@ -194,13 +194,15 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
 #endif
     }
 
-    /* Record path hit metric */
-    if (ctx->processing_path
-        == NGX_HTTP_MARKDOWN_PATH_INCREMENTAL)
-    {
-        NGX_HTTP_MARKDOWN_METRIC_INC(incremental_path_hits);
-    } else {
-        NGX_HTTP_MARKDOWN_METRIC_INC(fullbuffer_path_hits);
+    /* Record path hit metric (only for eligible requests) */
+    if (ctx->eligible) {
+        if (ctx->processing_path
+            == NGX_HTTP_MARKDOWN_PATH_INCREMENTAL)
+        {
+            NGX_HTTP_MARKDOWN_METRIC_INC(incremental_path_hits);
+        } else {
+            NGX_HTTP_MARKDOWN_METRIC_INC(fullbuffer_path_hits);
+        }
     }
 
     /*
