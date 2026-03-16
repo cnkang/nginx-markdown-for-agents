@@ -141,7 +141,8 @@ def validate(
     """
     errors: list[str] = []
 
-    matrix_os_types, matrix_archs = extract_matrix_values(matrix)
+    installable = [e for e in matrix if e.get("support_tier") == "full"]
+    matrix_os_types, matrix_archs = extract_matrix_values(installable)
 
     # Check 1: All matrix os_type values are detectable by install.sh
     unknown_os = matrix_os_types - install_info["detectable_os_types"]
