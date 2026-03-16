@@ -9,7 +9,7 @@ _repo_root = Path(__file__).resolve().parents[3]
 if str(_repo_root) not in sys.path:
     sys.path.insert(0, str(_repo_root))
 
-from tools.release.validate_doc_matrix_sync import compare_matrices, parse_doc_matrix
+from tools.release.validate_doc_matrix_sync import compare_matrices, parse_doc_matrix, load_matrix_entries
 
 
 def test_parse_doc_matrix_extracts_rows_from_matrix_section(tmp_path):
@@ -33,7 +33,7 @@ def test_parse_doc_matrix_extracts_rows_from_matrix_section(tmp_path):
 
     assert parse_doc_matrix(doc_path) == [
         ("1.26.3", "glibc", "x86_64", "full"),
-        ("1.26.3", "musl", "aarch64", "source only"),
+        ("1.26.3", "musl", "aarch64", "source_only"),
     ]
 
 
@@ -78,3 +78,25 @@ def test_compare_matrices_reports_missing_and_tier_mismatches():
     assert any("In JSON but missing from doc" in diff for diff in diffs)
     assert any("In doc but missing from JSON" in diff for diff in diffs)
     assert any("Tier mismatch" in diff for diff in diffs)
+
+
+def test_tier_normalization_source_only_variants(tmp_path):
+    """Regression: 'Source Only' (docs) and 'source_only' (JSON) must be treated as equal."""
+    matrix_path = tmp_path / "release-matrix.json"
+    matrix_path.write_text(
+        json.dumps(
+            {
+                "matrix": [
+                    {"nginx": "1.26.3", "os_type": "musl", "arch": "aarch64", "support_tier": "source_only"},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    json_entries = load_matrix_entries(matrix_path)
+
+    doc_entries = [("1.26.3", "musl", "aarch64", "source_only")]
+
+    diffs = compare_matrices(json_entries, doc_entries)
+    assert not diffs, f"Expected no differences but got: {diffs}"

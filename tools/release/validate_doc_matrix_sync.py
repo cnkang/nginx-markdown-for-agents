@@ -21,6 +21,11 @@ MATRIX_PATH = REPO_ROOT / "tools" / "release-matrix.json"
 DOC_PATH = REPO_ROOT / "docs" / "guides" / "INSTALLATION.md"
 
 
+def _normalize_tier(tier: str) -> str:
+    """Normalize a support tier string to a canonical form (lowercase, underscores)."""
+    return tier.strip().lower().replace(" ", "_").replace("-", "_")
+
+
 def load_matrix_entries(path: Path) -> list[tuple[str, str, str, str]]:
     """
     Load and normalize matrix entries from a release-matrix JSON file.
@@ -29,7 +34,7 @@ def load_matrix_entries(path: Path) -> list[tuple[str, str, str, str]]:
         path (Path): Path to the release-matrix.json file.
     
     Returns:
-        entries (list[tuple[str, str, str, str]]): Sorted list of (nginx, os_type, arch, tier) tuples with `tier` lowercased.
+        entries (list[tuple[str, str, str, str]]): Sorted list of (nginx, os_type, arch, tier) tuples with `tier` normalized.
     """
     with open(path, "r", encoding="utf-8") as f:
         data = json.load(f)
@@ -40,7 +45,7 @@ def load_matrix_entries(path: Path) -> list[tuple[str, str, str, str]]:
             item["nginx"],
             item["os_type"],
             item["arch"],
-            item["support_tier"].lower(),
+            _normalize_tier(item["support_tier"]),
         ))
     return sorted(entries)
 
@@ -112,7 +117,7 @@ def parse_doc_matrix(path: Path) -> list[tuple[str, str, str, str]]:
         if _is_table_header_or_separator(nginx):
             continue
 
-        entries.append((nginx, os_type, arch, tier.lower()))
+        entries.append((nginx, os_type, arch, _normalize_tier(tier)))
 
     return sorted(entries)
 
