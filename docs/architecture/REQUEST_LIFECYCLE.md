@@ -34,8 +34,8 @@ flowchart TD
     E["Create request context"]
     F["Optional compression detection"]
     G["Body filter buffers response"]
-    TR{"Threshold Router<br/>(if enabled)"}
     H["Optional decompression"]
+    TR{"Threshold Router<br/>(deferred re-evaluation<br/>if enabled)"}
     I["Conditional request resolution"]
     J["Rust conversion (full-buffer)"]
     JI["Rust conversion (incremental)"]
@@ -54,19 +54,18 @@ flowchart TD
     E --> F
     F --> G
     G -->|body incomplete| G
-    G --> TR
-    TR -->|threshold off, or<br/>size < threshold,<br/>or HEAD/304/fail-open| H
-    TR -->|size >= threshold| JI
-    H --> I
+    G --> H
+    H --> TR
+    TR -->|threshold off, or<br/>size < threshold,<br/>or HEAD/304/fail-open| I
+    TR -->|size >= threshold| I
     I -->|304 via If-None-Match| K
-    I -->|need conversion| J
+    I -->|need conversion,<br/>incremental path| JI
+    I -->|need conversion,<br/>full-buffer path| J
     J -->|success| K
     JI -->|success| K
-    H -->|fail-open branch| M
     I -->|error + pass| M
     J -->|error + pass| M
     JI -->|error + pass| M
-    H -->|error + reject| N
     I -->|error + reject| N
     J -->|error + reject| N
     JI -->|error + reject| N

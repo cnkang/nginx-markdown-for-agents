@@ -51,12 +51,14 @@ No changes. The module buffers the complete response body, optionally decompress
 
 ### Incremental Path (New, Feature-Gated)
 
-When the threshold router selects the incremental path, the module feeds response chunks to the Rust `IncrementalConverter` via FFI:
+When the threshold router selects the incremental path, the NGINX module still buffers the complete response body (and decompresses it if needed), then hands the full buffer to the Rust `IncrementalConverter` via FFI in a single call sequence:
 
 1. `markdown_incremental_new()` — create a converter instance with the current `ConversionOptions`
-2. `markdown_incremental_feed()` — called once per body chunk as data arrives
+2. `markdown_incremental_feed()` — called once with the complete buffered body (`ctx->buffer.data`)
 3. `markdown_incremental_finalize()` — produce the final `MarkdownResult`
-4. `markdown_incremental_free()` — release the converter
+4. `markdown_incremental_free()` — release the converter (only on error paths; `finalize` consumes the handle on success)
+
+True per-upstream-chunk feeding from NGINX (calling `feed` as each body chunk arrives from upstream) is not implemented yet and remains a future change. The current implementation buffers first, then delegates to the incremental Rust API.
 
 The incremental API is compiled only when the `incremental` Rust feature flag is enabled. When the feature is not compiled but a threshold is configured, the module logs a warning and falls back to the full-buffer path.
 

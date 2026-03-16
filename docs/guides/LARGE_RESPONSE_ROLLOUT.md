@@ -39,9 +39,23 @@ Before starting the rollout, verify:
 1. **Rust `incremental` feature is compiled in.** The NGINX module binary must be built with the Rust converter's `incremental` feature enabled. If the feature is not compiled but a threshold is configured, the module logs a warning and falls back to the full-buffer path — the incremental path will not activate.
 
    ```bash
-   # Build with incremental support
+   # Build the Rust converter with incremental support
    cd components/rust-converter
    cargo build --release --features incremental
+
+   # Rebuild the NGINX module so it links the updated Rust library.
+   # The module's config script auto-detects the incremental feature via
+   # symbol inspection (nm) and defines MARKDOWN_INCREMENTAL_ENABLED.
+   cd /path/to/nginx-source
+   ./configure --add-module=/path/to/components/nginx-module
+   make && make install
+   ```
+
+   After building, verify the incremental symbols are present in the module:
+
+   ```bash
+   nm /path/to/nginx | grep markdown_incremental_new
+   # Should show a symbol — if empty, the feature was not linked in.
    ```
 
 2. **Metrics endpoint is accessible.** The `markdown_metrics` location must be configured and reachable from your monitoring system.
@@ -98,6 +112,17 @@ nginx -t && nginx -s reload
 | Conversion error rate stable | See [Monitoring](#monitoring-during-rollout) | Error rate delta < 0.1% vs baseline |
 | No new errors in log | `tail -200 /var/log/nginx/error.log \| grep markdown` | No new `conversion failed` entries |
 | P95 latency stable | See [Monitoring](#monitoring-during-rollout) | No significant increase vs baseline |
+
+If `incremental_path_hits` remains at 0 after the monitoring window, no responses large enough to exceed the threshold may have arrived. To deterministically validate the path, send a synthetic request with a response body at or above the configured threshold:
+
+```bash
+# Send a request that returns a large response through the target location
+curl -s -H "Accept: text/markdown" http://localhost/docs/internal/large-page > /dev/null
+# Then re-check metrics
+curl -s http://localhost/markdown-metrics | grep incremental_path_hits
+```
+
+Alternatively, temporarily lower the threshold for validation (e.g., `markdown_large_body_threshold 1k;`), reload, send a request, verify `incremental_path_hits > 0`, then restore the production threshold and reload again.
 
 **Proceed to Phase 2 only after all checks pass.**
 

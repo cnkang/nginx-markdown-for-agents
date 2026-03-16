@@ -86,7 +86,7 @@ location /docs {
 ```
 
 **Notes:**
-- The incremental path requires the Rust converter to be built with the `incremental` feature (`cargo build --features incremental`). If the feature is not compiled but a threshold is configured, the module logs a warning and falls back to the full-buffer path.
+- The incremental path requires the Rust converter to be built with the `incremental` feature (`cargo build --release --features incremental`). If the feature is not compiled but a threshold is configured, the module logs a warning and falls back to the full-buffer path.
 - HEAD requests, 304 responses, and fail-open replays always use the full-buffer path regardless of the threshold setting.
 - Path selection is based on `Content-Length` when available; for chunked responses without `Content-Length`, the module buffers first and evaluates the threshold against the buffered size.
 - Path hit counters (`fullbuffer_path_hits`, `incremental_path_hits`) are exposed through the `markdown_metrics` endpoint.
