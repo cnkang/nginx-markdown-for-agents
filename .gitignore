@@ -30,6 +30,9 @@ components/nginx-module/tests/**/*.pid
 # Performance test temporary reports (baselines are version-controlled)
 perf/reports/
 
+# Generated large sample corpus (regenerated via tools/corpus/generate_large_samples.sh)
+tools/corpus/samples/
+
 # Generic build output
 build/
 dist/
