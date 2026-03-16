@@ -52,6 +52,9 @@ tests/**/tmp/
 .sonar/
 .sonarcloud.properties
 
+# Matrix updater transient artifact
+matrix-diff.json
+
 # Compiler / profiler artifacts
 *.profraw
 *.profdata

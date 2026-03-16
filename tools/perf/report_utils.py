@@ -150,7 +150,23 @@ def _median_stage_breakdown(tier_reports: list[dict]) -> dict:
 
 
 def _build_aggregated_tier(tier_reports: list[dict]) -> dict:
-    """Build the aggregated tier payload for repeated *tier_reports*."""
+    """
+    Constructs an aggregated tier dictionary using median values computed from repeated tier reports.
+    
+    Parameters:
+        tier_reports (list[dict]): List of per-run tier dictionaries to aggregate; must contain at least one report.
+    
+    Returns:
+        dict: Aggregated tier dictionary containing median numeric metrics (for NUMERIC_TIER_KEYS), an optional
+        "stage_breakdown" with median stage percentages if present, and "iterations" and "warmup" copied from the
+        first report.
+    
+    Raises:
+        ValueError: If `tier_reports` is empty.
+    """
+    if not tier_reports:
+        raise ValueError("tier_reports cannot be empty")
+
     median_tier = _median_for_keys(tier_reports, NUMERIC_TIER_KEYS)
     stage_breakdown = _median_stage_breakdown(tier_reports)
     if stage_breakdown:
