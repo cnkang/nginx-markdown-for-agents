@@ -37,6 +37,7 @@ require_optval() {
         echo "error: $flag requires a value" >&2
         exit 1
     fi
+    return 0
 }
 
 # ---------------------------------------------------------------------------
