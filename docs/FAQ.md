@@ -286,7 +286,7 @@ See [Configuration Guide](guides/CONFIGURATION.md) for the canonical directive s
 
 ### How do I secure the metrics endpoint?
 
-The handler already enforces localhost-only access. In practice, you should still keep explicit NGINX `allow`/`deny` rules on the metrics location:
+The handler already enforces localhost-only access. In practice, you should still keep explicit NGINX `allow`/`deny` rules on the metrics location to further restrict it and to make the intended policy obvious in configuration:
 
 ```nginx
 location /markdown-metrics {
