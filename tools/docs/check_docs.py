@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Repository documentation checks.
 
-Runs lightweight checks for maintained Markdown docs (excluding docs/archive):
+Runs lightweight checks for maintained Markdown docs (excluding docs/archive and
+gitignored paths/files). The scan includes tracked Markdown files plus
+untracked non-ignored Markdown files.
 - local link validity
 - heading hierarchy consistency (ignoring code fences)
 - non-English Han characters (enforces English docs policy for canonical docs)
@@ -20,11 +22,30 @@ from urllib.parse import urlsplit
 ROOT = Path(__file__).resolve().parents[2]
 ARCHIVE_SEGMENT = "docs/archive/"
 LINK_RE = re.compile(r"(!?\[[^\]]+\]\(([^)]+)\))")
+HAN_RE = re.compile(r"[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF]")
 
 
 def iter_markdown_files() -> list[Path]:
+    try:
+        proc = subprocess.run(
+            ["git", "ls-files", "--cached", "--others", "--exclude-standard", "--", "*.md"],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+        )
+        if proc.returncode == 0:
+            candidates = {
+                (ROOT / rel.strip())
+                for rel in proc.stdout.splitlines()
+                if rel.strip()
+            }
+        else:
+            candidates = set(ROOT.rglob("*.md"))
+    except FileNotFoundError:
+        candidates = set(ROOT.rglob("*.md"))
+
     return sorted(
-        p for p in ROOT.rglob("*.md") if ARCHIVE_SEGMENT not in p.as_posix()
+        p for p in candidates if ARCHIVE_SEGMENT not in p.relative_to(ROOT).as_posix()
     )
 
 
@@ -83,36 +104,16 @@ def check_heading_hierarchy(files: list[Path]) -> list[str]:
     return errors
 
 
-def check_english_policy() -> list[str]:
-    # Detect CJK Han ideographs only (avoid false positives from punctuation such as middle dots).
-    try:
-        proc = subprocess.run(
-            [
-                "rg",
-                "-n",
-                "--pcre2",
-                r"[\x{3400}-\x{4DBF}\x{4E00}-\x{9FFF}\x{F900}-\x{FAFF}]",
-                "--glob",
-                "!docs/archive/**",
-                "--glob",
-                "*.md",
-                "--glob",
-                "!README_zh-CN.md",
-                ".",
-            ],
-            cwd=ROOT,
-            text=True,
-            capture_output=True,
-        )
-    except FileNotFoundError:
-        # Fallback: no check if rg is unavailable; caller can still rely on other checks.
-        return []
-
-    if proc.returncode == 0:
-        return [line for line in proc.stdout.splitlines() if line.strip()]
-    if proc.returncode == 1:
-        return []
-    return [f"english-scan: rg failed ({proc.returncode}): {proc.stderr.strip()}"]
+def check_english_policy(files: list[Path]) -> list[str]:
+    errors: list[str] = []
+    for f in files:
+        if f.name == "README_zh-CN.md":
+            continue
+        text = f.read_text(encoding="utf-8", errors="ignore")
+        for line_no, line in enumerate(text.splitlines(), 1):
+            if HAN_RE.search(line):
+                errors.append(f"{f}:{line_no}:{line.strip()}")
+    return errors
 
 
 def check_duplicate_sync() -> list[str]:
@@ -135,7 +136,7 @@ def main() -> int:
 
     failures.extend(check_links(files))
     failures.extend(check_heading_hierarchy(files))
-    failures.extend(check_english_policy())
+    failures.extend(check_english_policy(files))
     failures.extend(check_duplicate_sync())
 
     if failures:
@@ -145,7 +146,7 @@ def main() -> int:
         return 1
 
     print("Documentation checks passed:")
-    print(f"- Markdown files checked (excluding docs/archive): {len(files)}")
+    print(f"- Markdown files checked (excluding docs/archive and gitignored paths): {len(files)}")
     print("- Local links: OK")
     print("- Heading hierarchy: OK")
     print("- English docs policy (Han-character scan): OK")

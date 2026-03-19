@@ -9,7 +9,8 @@
 5. [Building the NGINX Module](#building-the-nginx-module)
 6. [Installation](#installation)
 7. [Verification](#verification)
-8. [Troubleshooting](#troubleshooting)
+8. [Compatibility Matrix and Install Troubleshooting](#compatibility-matrix-and-install-troubleshooting)
+9. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -601,6 +602,228 @@ curl -H "Accept: application/json" http://localhost/markdown-metrics
 # conversions_failed: 1
 # conversions_bypassed: 2
 ```
+
+---
+
+## Compatibility Matrix and Install Troubleshooting
+
+This section covers pre-built binary compatibility and common install-script failure scenarios. For source-build issues, see [Troubleshooting](#troubleshooting) below.
+
+> **Authoritative source:** The canonical platform support matrix is maintained in [`tools/release-matrix.json`](../../tools/release-matrix.json). The table below is a human-readable snapshot; always consult the JSON file for automation and CI.
+
+> **Supported baseline:** Pre-built binary support starts at NGINX `1.24.0`. Older versions are intentionally out of scope due to implementation differences in the dynamic module ABI. Versions `>= 1.24.0` that are not listed in the matrix can be built from source.
+
+### Platform Compatibility Matrix
+
+<!-- BEGIN AUTO-GENERATED MATRIX -->
+| NGINX Version | OS Type | Architecture | Support Tier |
+|---------------|---------|--------------|--------------|
+| 1.24.0 | glibc | aarch64 | Full |
+| 1.24.0 | glibc | x86_64 | Full |
+| 1.24.0 | musl | aarch64 | Full |
+| 1.24.0 | musl | x86_64 | Full |
+| 1.26.3 | glibc | aarch64 | Full |
+| 1.26.3 | glibc | x86_64 | Full |
+| 1.26.3 | musl | aarch64 | Full |
+| 1.26.3 | musl | x86_64 | Full |
+| 1.28.2 | glibc | aarch64 | Full |
+| 1.28.2 | glibc | x86_64 | Full |
+| 1.28.2 | musl | aarch64 | Full |
+| 1.28.2 | musl | x86_64 | Full |
+| 1.29.6 | glibc | aarch64 | Full |
+| 1.29.6 | glibc | x86_64 | Full |
+| 1.29.6 | musl | aarch64 | Full |
+| 1.29.6 | musl | x86_64 | Full |
+<!-- END AUTO-GENERATED MATRIX -->
+
+**Support Tiers:**
+
+- **Full** — Pre-built binary available, install script supported, CI-verified.
+- **Source Only** — No pre-built binary; build from source using the instructions in this guide.
+
+### Standard Operating Procedures (SOPs) for Install Failures
+
+The following SOPs cover the most common failure scenarios when using the install script (`tools/install.sh`) to install pre-built binaries.
+
+---
+
+#### SOP 1: Version Mismatch
+
+**Symptom:**
+
+```
+[ERROR] version_mismatch: No pre-built module found for NGINX X.Y.Z
+```
+
+**Root Cause:**
+
+NGINX dynamic modules are compiled against a specific NGINX version and are not binary-compatible across versions. The install script requires an exact patch-version match (e.g., `1.26.3`, not just `1.26.x`).
+
+**Resolution Steps:**
+
+1. Check your installed NGINX version:
+   ```bash
+   nginx -v
+   ```
+2. Compare against the [Platform Compatibility Matrix](#platform-compatibility-matrix) above (or `tools/release-matrix.json`).
+3. If a pre-built binary exists for a different patch version, upgrade or downgrade NGINX to a supported version:
+   ```bash
+   # Example: install a specific NGINX version on Ubuntu
+   sudo apt-get install nginx=1.26.3-1~jammy
+   ```
+4. If no pre-built binary is available for your version, build from source:
+   ```bash
+   # See "Installation from Source" section in this guide
+   ```
+5. Re-run the install script after switching versions:
+   ```bash
+   curl -sSL https://raw.githubusercontent.com/cnkang/nginx-markdown-for-agents/main/tools/install.sh | sudo bash
+   ```
+
+---
+
+#### SOP 2: Architecture Not Supported
+
+**Symptom:**
+
+```
+[ERROR] arch_unsupported: Unsupported architecture: <arch>
+```
+
+**Root Cause:**
+
+Pre-built binaries are only available for `x86_64` (amd64) and `aarch64` (arm64). Other architectures (e.g., `armv7l`, `s390x`, `ppc64le`) are not supported with pre-built binaries.
+
+**Resolution Steps:**
+
+1. Verify your system architecture:
+   ```bash
+   uname -m
+   ```
+2. If the output is not `x86_64` or `aarch64`, you must build from source. Follow the [Installation from Source](#installation-from-source) section.
+3. If you are running inside a container or VM, ensure the architecture matches the host or that QEMU user-mode emulation is configured.
+
+---
+
+#### SOP 3: libc Incompatibility
+
+**Symptom:**
+
+The module appears to install, but NGINX fails to start or `nginx -t` reports symbol errors such as:
+
+```
+nginx: [emerg] dlopen() ... failed (... undefined symbol: ...)
+```
+
+Or the module loads but crashes at runtime with segmentation faults.
+
+**Root Cause:**
+
+A binary built against glibc was installed on a musl-based system (e.g., Alpine Linux), or vice versa. glibc and musl binaries are not interchangeable.
+
+**Resolution Steps:**
+
+1. Determine your system's libc type:
+   ```bash
+   # Check if the system uses musl
+   ldd --version 2>&1 | head -1
+   # musl systems typically show "musl libc" in the output
+
+   # Alternative: inspect the dynamic linker
+   file /bin/sh
+   # Look for "dynamically linked" and the interpreter path
+   # musl: /lib/ld-musl-*.so.1
+   # glibc: /lib64/ld-linux-*.so.2 or /lib/x86_64-linux-gnu/ld-linux-*.so.2
+   ```
+2. Verify the installed module matches your libc:
+   ```bash
+   # Check what the module is linked against
+   ldd /usr/lib/nginx/modules/ngx_http_markdown_filter_module.so
+   ```
+3. If there is a mismatch, re-run the install script — it auto-detects the OS type. If auto-detection failed, report the issue and build from source as a workaround.
+4. On Alpine Linux (musl), ensure you are using the `musl` variant of the pre-built binary. On Debian/Ubuntu/RHEL (glibc), ensure you are using the `glibc` variant.
+
+---
+
+#### SOP 4: Network Download Failure
+
+**Symptom:**
+
+```
+[ERROR] network: Failed to download <url>
+```
+
+**Root Cause:**
+
+The install script downloads pre-built binaries from GitHub Releases. Failures can be caused by:
+- No internet connectivity or DNS resolution failure
+- Corporate firewall or proxy blocking GitHub
+- GitHub API rate limiting (60 requests/hour for unauthenticated requests)
+- Temporary GitHub outage
+
+**Resolution Steps:**
+
+1. Verify network connectivity to GitHub:
+   ```bash
+   curl -I https://api.github.com/
+   ```
+2. If behind a proxy, configure the environment:
+   ```bash
+   export https_proxy=http://your-proxy:port
+   ```
+3. If rate-limited, wait or authenticate:
+   ```bash
+   # Check remaining rate limit
+   curl -s https://api.github.com/rate_limit | grep -A 2 '"core"'
+   ```
+4. As a workaround, manually download the binary from the [GitHub Releases page](https://github.com/cnkang/nginx-markdown-for-agents/releases) and place it in the NGINX modules directory:
+   ```bash
+   # Example: manual download and install
+   wget https://github.com/cnkang/nginx-markdown-for-agents/releases/download/<tag>/<asset-name>.so \
+     -O /usr/lib/nginx/modules/ngx_http_markdown_filter_module.so
+   ```
+5. Re-run the install script after connectivity is restored:
+   ```bash
+   curl -sSL https://raw.githubusercontent.com/cnkang/nginx-markdown-for-agents/main/tools/install.sh | sudo bash
+   ```
+
+---
+
+#### SOP 5: Checksum Verification Failure
+
+**Symptom:**
+
+```
+[ERROR] checksum: Checksum verification failed
+```
+
+**Root Cause:**
+
+The SHA-256 checksum of the downloaded binary does not match the expected value published in the release. Possible causes:
+- Corrupted download (partial transfer, network interruption)
+- Man-in-the-middle (MITM) attack or content tampering
+- Wrong file downloaded (e.g., mismatched version or platform)
+
+**Resolution Steps:**
+
+1. Re-download the binary — transient network issues are the most common cause:
+   ```bash
+   curl -sSL https://raw.githubusercontent.com/cnkang/nginx-markdown-for-agents/main/tools/install.sh | sudo bash
+   ```
+2. If the failure persists, manually verify the checksum:
+   ```bash
+   # Download the binary and checksum file
+   wget https://github.com/cnkang/nginx-markdown-for-agents/releases/download/<tag>/<asset-name>.so
+   wget https://github.com/cnkang/nginx-markdown-for-agents/releases/download/<tag>/checksums.txt
+
+   # Verify
+   sha256sum -c checksums.txt
+   ```
+3. Compare the expected checksum from the release page with the actual checksum of your downloaded file:
+   ```bash
+   sha256sum <downloaded-file>.so
+   ```
+4. If checksums consistently do not match, this may indicate a security issue. Do not install the binary. Report the issue to the project maintainers.
 
 ---
 
