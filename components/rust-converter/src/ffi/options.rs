@@ -71,6 +71,30 @@ fn optional_utf8<'a>(
 }
 
 /// Decode C ABI option fields into strongly-typed Rust conversion settings.
+///
+/// Returns an error when pointer/length ABI fields are invalid (produces `ConversionError::InvalidInput`).
+///
+/// # Examples
+///
+/// ```ignore
+/// use std::ptr;
+///
+/// // Construct a minimal `MarkdownOptions` matching the C ABI layout.
+/// let opts = MarkdownOptions {
+///     content_type: ptr::null(),
+///     content_type_len: 0,
+///     base_url: ptr::null(),
+///     base_url_len: 0,
+///     flavor: 0,
+///     front_matter: 0,
+///     timeout_ms: 0,
+///     generate_etag: 0,
+///     estimate_tokens: 0,
+/// };
+///
+/// let decoded = decode_options(&opts).unwrap();
+/// assert!(decoded.generate_etag);
+/// ```
 pub(crate) fn decode_options(
     options: &MarkdownOptions,
 ) -> Result<DecodedOptions<'_>, ConversionError> {

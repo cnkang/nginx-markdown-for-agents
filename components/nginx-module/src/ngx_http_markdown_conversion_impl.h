@@ -1,3 +1,6 @@
+#ifndef NGX_HTTP_MARKDOWN_CONVERSION_IMPL_H
+#define NGX_HTTP_MARKDOWN_CONVERSION_IMPL_H
+
 /*
  * Conversion-path helpers.
  *
@@ -94,25 +97,36 @@ ngx_http_markdown_select_base_url_parts(ngx_http_request_t *r,
     ngx_str_t                 *x_forwarded_proto;
     ngx_str_t                 *x_forwarded_host;
     ngx_http_core_srv_conf_t *cscf;
+    ngx_http_markdown_conf_t *conf;
 
-    x_forwarded_proto = ngx_http_markdown_find_request_header_value(
-        r,
-        ngx_http_markdown_hdr_x_forwarded_proto,
-        sizeof(ngx_http_markdown_hdr_x_forwarded_proto) - 1);
-    x_forwarded_host = ngx_http_markdown_find_request_header_value(
-        r,
-        ngx_http_markdown_hdr_x_forwarded_host,
-        sizeof(ngx_http_markdown_hdr_x_forwarded_host) - 1);
+    conf = ngx_http_get_module_loc_conf(r, ngx_http_markdown_filter_module);
 
-    if (x_forwarded_proto != NULL
-        && x_forwarded_host != NULL
-        && x_forwarded_proto->len > 0
-        && x_forwarded_host->len > 0
-        && ngx_http_markdown_scheme_is_http_family(x_forwarded_proto))
-    {
-        *scheme = *x_forwarded_proto;
-        *host = *x_forwarded_host;
-        return NGX_OK;
+    /*
+     * Security: Only trust X-Forwarded-* headers when explicitly enabled.
+     * Without this guard, a direct client can inject X-Forwarded-Host to
+     * redirect all relative URLs in the Markdown output to an attacker-
+     * controlled domain (C-01: link poisoning).
+     */
+    if (conf != NULL && conf->trust_forwarded_headers) {
+        x_forwarded_proto = ngx_http_markdown_find_request_header_value(
+            r,
+            ngx_http_markdown_hdr_x_forwarded_proto,
+            sizeof(ngx_http_markdown_hdr_x_forwarded_proto) - 1);
+        x_forwarded_host = ngx_http_markdown_find_request_header_value(
+            r,
+            ngx_http_markdown_hdr_x_forwarded_host,
+            sizeof(ngx_http_markdown_hdr_x_forwarded_host) - 1);
+
+        if (x_forwarded_proto != NULL
+            && x_forwarded_host != NULL
+            && x_forwarded_proto->len > 0
+            && x_forwarded_host->len > 0
+            && ngx_http_markdown_scheme_is_http_family(x_forwarded_proto))
+        {
+            *scheme = *x_forwarded_proto;
+            *host = *x_forwarded_host;
+            return NGX_OK;
+        }
     }
 
     if (r->schema.len > 0 && r->headers_in.server.len > 0) {
@@ -156,7 +170,7 @@ ngx_http_markdown_base_url_add_len(ngx_http_request_t *r,
     return NGX_OK;
 }
 
-static ngx_int_t
+ngx_int_t
 ngx_http_markdown_construct_base_url(ngx_http_request_t *r, ngx_pool_t *pool,
     ngx_str_t *base_url)
 {
@@ -318,8 +332,21 @@ ngx_http_markdown_resolve_conditional_result(ngx_http_request_t *r,
     return NGX_OK;
 }
 
-/* Populate MarkdownOptions from location config and request context. */
-static ngx_int_t
+/**
+ * Fill a MarkdownOptions structure from the location configuration and the HTTP request.
+ *
+ * Populates option fields (flavor, timeout_ms, generate_etag,
+ * estimate_tokens, front_matter) from the provided location config, copies the
+ * response Content-Type if present, and attempts to construct and attach a
+ * base_url using the request; if base_url construction fails the function
+ * continues without it. The options structure is zeroed before population.
+ *
+ * @param r The current ngx HTTP request used to read response headers and URI.
+ * @param conf The location configuration providing default option values.
+ * @param options Pointer to a MarkdownOptions struct that will be initialized and populated.
+ * @returns NGX_OK on completion (options populated, possibly without a base_url).
+ */
+ngx_int_t
 ngx_http_markdown_prepare_conversion_options(ngx_http_request_t *r,
                                              ngx_http_markdown_conf_t *conf,
                                              struct MarkdownOptions *options)
@@ -443,7 +470,26 @@ ngx_http_markdown_record_conversion_success(ngx_http_markdown_ctx_t *ctx,
     NGX_HTTP_MARKDOWN_METRIC_ADD(output_bytes, result->markdown_len);
 }
 
-/* Run the Rust FFI conversion and handle success/failure outcomes. */
+/**
+ * Execute the Markdown conversion via the Rust FFI and handle success or failure outcomes.
+ *
+ * Performs the configured conversion (incremental if enabled and selected), measures elapsed
+ * time, validates the returned MarkdownResult, records success metrics on success, and routes
+ * failures through the module's failure handling which may emit a response or apply the
+ * fail-open strategy.
+ *
+ * @param r      Current ngx HTTP request (used for logging and response handling).
+ * @param ctx    Module request context (input buffer and processing path selection).
+ * @param conf   Module location configuration (conversion options and limits).
+ * @param result Pointer to a MarkdownResult struct that will be populated by the FFI call;
+ *               on error the struct's error_code and optional error message fields are set.
+ * @param elapsed_ms Pointer to a millisecond value that will be set to the measured conversion
+ *                   duration (>= 0).
+ *
+ * @returns NGX_OK on successful conversion and metrics recording.
+ *          NGX_DONE or NGX_ERROR when the conversion produced an error or when response
+ *          handling has already been performed by the failure path.
+ */
 static ngx_int_t
 ngx_http_markdown_execute_conversion(ngx_http_request_t *r,
                                      ngx_http_markdown_ctx_t *ctx,
@@ -471,11 +517,66 @@ ngx_http_markdown_execute_conversion(ngx_http_request_t *r,
     start_time = (ngx_msec_t) (tp->sec * 1000 + tp->msec);
 
     ngx_memzero(result, sizeof(struct MarkdownResult));
-    markdown_convert(ngx_http_markdown_converter,
-                    ctx->buffer.data,
-                    ctx->buffer.size,
-                    &options,
-                    result);
+
+#ifdef MARKDOWN_INCREMENTAL_ENABLED
+    if (ctx->processing_path == NGX_HTTP_MARKDOWN_PATH_INCREMENTAL) {
+        struct IncrementalConverterHandle *inc_handle;
+        uint32_t                          feed_rc;
+        uint32_t                          fin_rc;
+
+        inc_handle = markdown_incremental_new(&options);
+        if (inc_handle == NULL) {
+            tp = ngx_timeofday();
+            end_time = (ngx_msec_t) (tp->sec * 1000 + tp->msec);
+            *elapsed_ms = (end_time >= start_time) ? end_time - start_time : 0;
+
+            /*
+             * markdown_incremental_new() returns NULL on option-decoding
+             * failures or internal panics.  The Rust FFI does not expose
+             * a separate error channel from this function, so we cannot
+             * retrieve the library's error message.  Use
+             * ERROR_INVALID_INPUT as the most likely cause (bad options);
+             * the Rust layer logs the real reason to stderr.
+             */
+            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                         "markdown filter: markdown_incremental_new() "
+                         "returned NULL (option decoding or internal error)");
+
+            result->error_code = ERROR_INVALID_INPUT;
+            result->error_message = NULL;
+            result->error_len = 0;
+            return ngx_http_markdown_handle_conversion_failure(
+                r, ctx, conf, result, *elapsed_ms);
+        }
+
+        feed_rc = markdown_incremental_feed(
+            inc_handle, ctx->buffer.data, ctx->buffer.size);
+        if (feed_rc != ERROR_SUCCESS) {
+            markdown_incremental_free(inc_handle);
+
+            tp = ngx_timeofday();
+            end_time = (ngx_msec_t) (tp->sec * 1000 + tp->msec);
+            *elapsed_ms = (end_time >= start_time) ? end_time - start_time : 0;
+
+            result->error_code = feed_rc;
+            result->error_message = NULL;
+            result->error_len = 0;
+            return ngx_http_markdown_handle_conversion_failure(
+                r, ctx, conf, result, *elapsed_ms);
+        }
+
+        /* finalize consumes the handle — do NOT call free after this */
+        fin_rc = markdown_incremental_finalize(inc_handle, result);
+        (void) fin_rc;  /* error_code is checked via result->error_code below */
+    } else
+#endif
+    {
+        markdown_convert(ngx_http_markdown_converter,
+                        ctx->buffer.data,
+                        ctx->buffer.size,
+                        &options,
+                        result);
+    }
 
     tp = ngx_timeofday();
     end_time = (ngx_msec_t) (tp->sec * 1000 + tp->msec);
@@ -605,3 +706,5 @@ ngx_http_markdown_send_conversion_output(ngx_http_request_t *r,
 
     return ngx_http_next_body_filter(r, out);
 }
+
+#endif /* NGX_HTTP_MARKDOWN_CONVERSION_IMPL_H */

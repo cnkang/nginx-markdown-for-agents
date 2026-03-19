@@ -1,3 +1,6 @@
+#ifndef NGX_HTTP_MARKDOWN_CONFIG_CORE_IMPL_H
+#define NGX_HTTP_MARKDOWN_CONFIG_CORE_IMPL_H
+
 /*
  * Configuration-core helpers.
  *
@@ -98,11 +101,13 @@ ngx_http_markdown_init_main_conf(ngx_conf_t *cf, void *conf)
     return NGX_CONF_OK;
 }
 
-/*
- * Create location configuration
+/**
+ * Create and initialize a per-location Markdown filter configuration structure.
  *
- * Allocates and initializes configuration structure with default values.
- * All values are set to NGX_CONF_UNSET* to enable proper inheritance.
+ * Allocates a ngx_http_markdown_conf_t and initializes its fields to NGX_CONF_UNSET* or NULL
+ * so merge logic can distinguish unspecified values from explicit settings.
+ * @param cf configuration context providing the memory pool for allocation.
+ * @returns Pointer to the initialized ngx_http_markdown_conf_t, or NULL if allocation fails.
  */
 static void *
 ngx_http_markdown_create_conf(ngx_conf_t *cf)
@@ -133,16 +138,23 @@ ngx_http_markdown_create_conf(ngx_conf_t *cf)
     conf->buffer_chunked = NGX_CONF_UNSET;
     conf->stream_types = NGX_CONF_UNSET_PTR;
     conf->auto_decompress = NGX_CONF_UNSET;
+    conf->large_body_threshold = NGX_CONF_UNSET_SIZE;
+    conf->trust_forwarded_headers = NGX_CONF_UNSET;
 
     return conf;
 }
 
-/*
- * Merge location configuration
+/**
+ * Merge per-location markdown filter configuration with inheritance from parent.
  *
- * Implements configuration inheritance: location > server > http.
- * Child configuration values override parent values if set.
- * Unset child values inherit from parent.
+ * Performs inheritance and defaults for a child location configuration by
+ * applying parent values where the child is unset and enforcing sensible
+ * defaults for all configuration fields.
+ *
+ * @param cf Configuration parsing context used for logging and error reporting.
+ * @param parent Pointer to the parent (server/http) ngx_http_markdown_conf_t.
+ * @param child Pointer to the child (location) ngx_http_markdown_conf_t to merge into.
+ * @return NGX_CONF_OK when merge completes successfully, NGX_CONF_ERROR on failure.
  */
 static char *
 ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
@@ -190,6 +202,10 @@ ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
                               NGX_HTTP_MARKDOWN_LOG_INFO);
     ngx_conf_merge_value(conf->buffer_chunked, prev->buffer_chunked, 1);
     ngx_conf_merge_value(conf->auto_decompress, prev->auto_decompress, 1);
+    ngx_conf_merge_value(conf->trust_forwarded_headers, prev->trust_forwarded_headers, 0);
+    ngx_conf_merge_size_value(conf->large_body_threshold,
+                              prev->large_body_threshold,
+                              NGX_HTTP_MARKDOWN_THRESHOLD_OFF);
 
     ngx_conf_merge_ptr_value(conf->auth_cookies, prev->auth_cookies, NULL);
     ngx_conf_merge_ptr_value(conf->stream_types, prev->stream_types, NULL);
@@ -497,6 +513,16 @@ ngx_http_markdown_is_enabled(ngx_http_request_t *r, ngx_http_markdown_conf_t *co
     return enabled;
 }
 
+/**
+ * Log the merged markdown filter configuration for a configuration context.
+ *
+ * Emits a single formatted entry describing the merged `conf` fields to the
+ * nginx error log using the log level derived from `conf->log_verbosity`.
+ * If `cf` is NULL, the function returns without logging.
+ *
+ * @param cf   Configuration context used for emitting the log entry.
+ * @param conf Merged per-location markdown filter configuration to describe.
+ */
 static void
 ngx_http_markdown_log_merged_conf(ngx_conf_t *cf, ngx_http_markdown_conf_t *conf)
 {
@@ -511,11 +537,17 @@ ngx_http_markdown_log_merged_conf(ngx_conf_t *cf, ngx_http_markdown_conf_t *conf
     log_level = ngx_http_markdown_log_verbosity_to_ngx_level(conf->log_verbosity);
 
     ngx_conf_log_error(log_level, cf, 0,
-                       "markdown filter config: enabled=%ui enabled_source=%V max_size=%uz timeout_ms=%M "
-                       "on_error=%V flavor=%V token_estimate=%ui front_matter=%ui "
-                       "on_wildcard=%ui auth_policy=%V auth_cookie_patterns=%ui "
-                       "etag=%ui conditional_requests=%V log_verbosity=%V "
-                       "buffer_chunked=%ui stream_types=%ui",
+                       "markdown filter config: enabled=%ui "
+                       "enabled_source=%V max_size=%uz "
+                       "timeout_ms=%M on_error=%V flavor=%V "
+                       "token_estimate=%ui front_matter=%ui "
+                       "on_wildcard=%ui auth_policy=%V "
+                       "auth_cookie_patterns=%ui etag=%ui "
+                       "conditional_requests=%V "
+                       "log_verbosity=%V buffer_chunked=%ui "
+                       "stream_types=%ui "
+                       "large_body_threshold=%uz "
+                       "trust_forwarded_headers=%ui",
                        (ngx_uint_t) conf->enabled,
                        ngx_http_markdown_enabled_source_name(conf->enabled_source),
                        conf->max_size,
@@ -531,5 +563,9 @@ ngx_http_markdown_log_merged_conf(ngx_conf_t *cf, ngx_http_markdown_conf_t *conf
                        ngx_http_markdown_conditional_requests_name(conf->conditional_requests),
                        ngx_http_markdown_log_verbosity_name(conf->log_verbosity),
                        (ngx_uint_t) conf->buffer_chunked,
-                       stream_type_count);
+                       stream_type_count,
+                       conf->large_body_threshold,
+                       (ngx_uint_t) conf->trust_forwarded_headers);
 }
+
+#endif /* NGX_HTTP_MARKDOWN_CONFIG_CORE_IMPL_H */

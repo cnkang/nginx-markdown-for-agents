@@ -1,6 +1,6 @@
 [package]
 name = "nginx-markdown-converter"
-version = "0.1.0"
+version = "0.3.0"
 edition = "2024"
 authors = ["NGINX Markdown for Agents Contributors"]
 description = "Rust-based HTML to Markdown conversion engine for NGINX"
@@ -30,6 +30,14 @@ encoding_rs = "0.8"
 proptest = "1.4"
 # Additional testing utilities
 criterion = "0.8"
+# JSON serialization for perf_baseline example and tests
+serde_json = "1.0"
+# Platform-specific APIs (getrusage for peak RSS measurement)
+libc = "0.2"
+
+[features]
+default = []
+incremental = []
 
 [profile.release]
 # Optimize for performance

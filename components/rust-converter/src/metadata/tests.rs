@@ -47,10 +47,7 @@ fn test_extract_og_description() {
     let extractor = MetadataExtractor::new(None, false);
     let metadata = extractor.extract(&dom).unwrap();
 
-    assert_eq!(
-        metadata.description,
-        Some("Regular description".to_string())
-    );
+    assert_eq!(metadata.description, Some("OG description".to_string()));
 }
 
 #[test]
@@ -231,6 +228,8 @@ fn test_comprehensive_metadata_extraction() {
 fn test_twitter_card_metadata() {
     let html = b"<html><head>
         <meta name=\"twitter:title\" content=\"Twitter Title\" />
+        <meta name=\"description\" content=\"Fallback description\" />
+        <meta name=\"twitter:description\" content=\"Twitter Description\" />
         <meta name=\"twitter:image\" content=\"https://cdn.example.com/image.jpg\" />
     </head></html>";
 
@@ -239,6 +238,10 @@ fn test_twitter_card_metadata() {
     let metadata = extractor.extract(&dom).unwrap();
 
     assert_eq!(metadata.title, Some("Twitter Title".to_string()));
+    assert_eq!(
+        metadata.description,
+        Some("Twitter Description".to_string())
+    );
     assert_eq!(
         metadata.image,
         Some("https://cdn.example.com/image.jpg".to_string())

@@ -69,10 +69,17 @@ fi
 # Use ngx_module_libs so dynamic-module builds link them into the module .so.
 ngx_module_libs="$ngx_markdown_rust_lib -lpthread -ldl -lm"
 
+# Detect whether the Rust library was built with the `incremental` feature.
+# If the symbol is present, define MARKDOWN_INCREMENTAL_ENABLED so the C
+# header exposes the incremental API declarations.
+if nm "$ngx_markdown_rust_lib" 2>/dev/null | grep -q 'markdown_incremental_new'; then
+    CFLAGS="$CFLAGS -DMARKDOWN_INCREMENTAL_ENABLED"
+fi
+
 # Check if module is configured as dynamic
 if test -n "$ngx_module_link"; then
     # Dynamic module
-    ngx_module_type=HTTP_FILTER
+    ngx_module_type=HTTP_AUX_FILTER
     ngx_module_name=$ngx_addon_name
     ngx_module_srcs="$ngx_addon_dir/src/ngx_http_markdown_filter_module.c \
                      $ngx_addon_dir/src/ngx_http_markdown_accept.c \
@@ -88,7 +95,7 @@ if test -n "$ngx_module_link"; then
     . auto/module
 else
     # Static module
-    HTTP_FILTER_MODULES="$HTTP_FILTER_MODULES $ngx_addon_name"
+    HTTP_AUX_FILTER_MODULES="$HTTP_AUX_FILTER_MODULES $ngx_addon_name"
     NGX_ADDON_SRCS="$NGX_ADDON_SRCS \
                     $ngx_addon_dir/src/ngx_http_markdown_filter_module.c \
                     $ngx_addon_dir/src/ngx_http_markdown_accept.c \

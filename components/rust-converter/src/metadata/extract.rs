@@ -88,15 +88,20 @@ impl MetadataExtractor {
             return Ok(());
         };
 
-        // Priority: og:title / twitter:title override <title> tag because
-        // Open Graph metadata is typically more curated for sharing contexts.
-        // Other fields (description, image, etc.) use first-wins semantics to
-        // prefer the earliest source encountered during DOM traversal.
+        /*
+         * Open Graph / Twitter sharing metadata should override generic
+         * document metadata when both are present, because it is typically
+         * more curated for external consumption. Fallback fields still use
+         * first-wins semantics to preserve the earliest generic source.
+         */
         match property.or(name).as_deref() {
             Some("og:title") | Some("twitter:title") => {
                 metadata.title = Some(content);
             }
-            Some("og:description") | Some("description") => {
+            Some("og:description") | Some("twitter:description") => {
+                metadata.description = Some(content);
+            }
+            Some("description") => {
                 if metadata.description.is_none() {
                     metadata.description = Some(content);
                 }
