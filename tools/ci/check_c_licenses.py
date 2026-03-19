@@ -62,10 +62,10 @@ def check_module_link_libs() -> list[str]:
                 libs.add(token[2:])
 
     unexpected = [lib for lib in libs if lib not in ALLOWED_LINK_LIBS]
-    for lib in unexpected:
-        violations.append(
-            f"{MODULE_CONFIG}: unexpected linker library '-l{lib}' (allowed: {sorted(ALLOWED_LINK_LIBS)})"
-        )
+    violations.extend(
+        f"{MODULE_CONFIG}: unexpected linker library '-l{lib}' (allowed: {sorted(ALLOWED_LINK_LIBS)})"
+        for lib in unexpected
+    )
     return violations
 
 
@@ -75,16 +75,20 @@ def main() -> int:
     violations.extend(check_module_link_libs())
 
     if violations:
-        print("C license policy check failed:")
-        for item in violations:
-            print(f"  - {item}")
-        print("")
-        print("Policy: production C code must not include GPL/AGPL/LGPL/SSPL license markers,")
-        print("and explicit module linker libraries must stay within the reviewed allowlist.")
-        return 1
-
+        return report_violations_and_fail(violations)
     print("C license policy check passed.")
     return 0
+
+
+def report_violations_and_fail(violations: list[str]) -> int:
+    """Print policy violations and return a non-zero exit code."""
+    print("C license policy check failed:")
+    for item in violations:
+        print(f"  - {item}")
+    print("")
+    print("Policy: production C code must not include GPL/AGPL/LGPL/SSPL license markers,")
+    print("and explicit module linker libraries must stay within the reviewed allowlist.")
+    return 1
 
 
 if __name__ == "__main__":

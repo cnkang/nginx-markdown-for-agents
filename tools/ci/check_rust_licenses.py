@@ -83,9 +83,7 @@ class Parser:
         self.idx = 0
 
     def peek(self) -> Token | None:
-        if self.idx >= len(self.tokens):
-            return None
-        return self.tokens[self.idx]
+        return None if self.idx >= len(self.tokens) else self.tokens[self.idx]
 
     def consume(self, kind: str) -> Token:
         tok = self.peek()
@@ -151,46 +149,30 @@ def requires_strong_copyleft(expr: str) -> bool:
 
 
 def run_metadata(locked: bool) -> dict:
+    cmd = [
+        "cargo",
+        "metadata",
+        "--format-version",
+        "1",
+        "--all-features",
+        "--manifest-path",
+        RUST_MANIFEST_REL,
+    ]
     if locked:
-        completed = subprocess.run(
-            [
-                "cargo",
-                "metadata",
-                "--format-version",
-                "1",
-                "--all-features",
-                "--manifest-path",
-                RUST_MANIFEST_REL,
-                "--locked",
-            ],
-            cwd=REPO_ROOT,
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-    else:
-        completed = subprocess.run(
-            [
-                "cargo",
-                "metadata",
-                "--format-version",
-                "1",
-                "--all-features",
-                "--manifest-path",
-                RUST_MANIFEST_REL,
-            ],
-            cwd=REPO_ROOT,
-            check=True,
-            capture_output=True,
-            text=True,
-        )
+        cmd.append("--locked")
+    completed = subprocess.run(
+        cmd,
+        cwd=REPO_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
     return json.loads(completed.stdout)
 
 
 def parse_locked_flag(argv: list[str]) -> bool:
     valid = {"--locked"}
-    unknown = [arg for arg in argv if arg not in valid]
-    if unknown:
+    if unknown := [arg for arg in argv if arg not in valid]:
         print(f"Unknown arguments: {' '.join(unknown)}", file=sys.stderr)
         print("Usage: check_rust_licenses.py [--locked]", file=sys.stderr)
         raise SystemExit(2)
@@ -227,16 +209,20 @@ def main() -> int:
             violations.append(f"{name} {version}: unparsable license expression '{license_expr}' ({exc})")
 
     if violations:
-        print("Rust license policy check failed. Found blocked dependencies:")
-        for v in violations:
-            print(f"  - {v}")
-        print("")
-        print("Policy: dependencies must not require GPL/AGPL/LGPL/SSPL terms.")
-        print("Dual-licensed crates with a permissive option remain allowed.")
-        return 1
-
+        return report_violations_and_fail(violations)
     print("Rust license policy check passed: no dependency requires strong copyleft terms.")
     return 0
+
+
+def report_violations_and_fail(violations: list[str]) -> int:
+    """Print policy violations and return a non-zero exit code."""
+    print("Rust license policy check failed. Found blocked dependencies:")
+    for v in violations:
+        print(f"  - {v}")
+    print("")
+    print("Policy: dependencies must not require GPL/AGPL/LGPL/SSPL terms.")
+    print("Dual-licensed crates with a permissive option remain allowed.")
+    return 1
 
 
 if __name__ == "__main__":
