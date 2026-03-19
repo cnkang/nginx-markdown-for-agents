@@ -56,6 +56,7 @@ What other options were considered and why were they not chosen?
 |-----|-------|--------|------|
 | [0001](0001-use-rust-for-conversion.md) | Use Rust for HTML-to-Markdown Conversion | Accepted | 2026-02-27 |
 | [0002](0002-full-buffering-approach.md) | Full Buffering Approach for v1 | Accepted | 2026-02-27 |
+| [0003](0003-inline-origin-near-conversion.md) | Inline Origin-Near Conversion | Accepted | 2026-03-18 |
 
 ## Creating a New ADR
 

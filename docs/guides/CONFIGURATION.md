@@ -69,6 +69,37 @@ location /docs {
 }
 ```
 
+**Bot-Targeted Example:**
+
+To enable Markdown conversion only for specific AI bots, combine a variable-driven `markdown_filter` with an Accept header override so the module's content negotiation sees `text/markdown`:
+
+```nginx
+map $http_user_agent $is_ai_bot {
+    default         0;
+    "~*ClaudeBot"   1;
+    "~*GPTBot"      1;
+}
+
+map $http_user_agent $bot_accept_override {
+    default         "";
+    "~*ClaudeBot"   "text/markdown, text/html;q=0.9";
+    "~*GPTBot"      "text/markdown, text/html;q=0.9";
+}
+
+map $bot_accept_override $final_accept {
+    ""      $http_accept;
+    default $bot_accept_override;
+}
+
+location /docs {
+    markdown_filter $is_ai_bot;
+    proxy_set_header Accept $final_accept;
+    proxy_pass http://backend;
+}
+```
+
+See [DEPLOYMENT_EXAMPLES.md](DEPLOYMENT_EXAMPLES.md#bot-targeted-conversion-user-agent-based) for a complete walkthrough.
+
 **Best Practices for Variable-Driven `markdown_filter`:**
 - Prefer regex matching for `Accept` header maps because real clients often send comma-separated values and q-factors.
 - Prefer `$uri` (normalized path without query string) over `$request_uri` when matching file extensions.
@@ -382,6 +413,66 @@ markdown_stream_types text/event-stream application/x-ndjson;
 
 ---
 
+### Security Directives
+
+#### markdown_trust_forwarded_headers
+
+**Syntax:** `markdown_trust_forwarded_headers on | off;`  
+**Default:** `off`  
+**Context:** http, server, location
+
+Controls whether `X-Forwarded-Proto` and `X-Forwarded-Host` request headers are used for base URL construction in the Markdown output.
+
+When `off` (the default), only the NGINX request schema and server header are used. This prevents client-supplied header injection that could redirect all relative URLs in the Markdown output to an attacker-controlled domain.
+
+**Example:**
+```nginx
+# Only enable behind a trusted reverse proxy that sets/overwrites
+# X-Forwarded-Proto and X-Forwarded-Host from untrusted clients
+markdown_trust_forwarded_headers on;
+```
+
+**Security Note:** Enable this directive only when NGINX sits behind a trusted reverse proxy. The proxy must strip or overwrite `X-Forwarded-*` headers from untrusted clients. Without this protection, a direct client can send `X-Forwarded-Host: evil.com` to poison all relative links in the Markdown output.
+
+---
+
+### Large Response Processing
+
+#### markdown_large_body_threshold
+
+**Syntax:** `markdown_large_body_threshold off | <size>;`  
+**Default:** `off`  
+**Context:** http, server, location
+
+Routes responses whose body size is at or above the configured threshold to the incremental processing path. When set to `off` (the default), all responses use the existing full-buffer path and behavior is identical to a build without this feature.
+
+**Valid Units:** `k` (kilobytes), `m` (megabytes)
+
+**Example:**
+```nginx
+# Route responses >= 512KB to incremental path
+markdown_large_body_threshold 512k;
+
+# Disable incremental path (default)
+markdown_large_body_threshold off;
+```
+
+**Behavior:**
+- `off` (default): All responses use the full-buffer conversion path
+- `<size>`: Responses at or above the threshold use the incremental conversion path
+
+**Notes:**
+- The incremental path requires the Rust converter to be built with the `incremental` feature (`cargo build --release --features incremental`). If the feature is not compiled but a threshold is configured, the module logs a warning and falls back to the full-buffer path.
+- HEAD requests, 304 responses, and fail-open replays always use the full-buffer path regardless of the threshold setting.
+- Path selection is based on `Content-Length` when available; for chunked responses without `Content-Length`, the module buffers first and evaluates the threshold against the buffered size.
+- Path hit counters (`fullbuffer_path_hits`, `incremental_path_hits`) are exposed through the `markdown_metrics` endpoint.
+- **Hard Limit**: The Rust incremental converter enforces a strict 64 MiB (`64 * 1024 * 1024` bytes) maximum buffer limit. Responses exceeding this size will trigger a `MemoryLimit` error, resulting in the `markdown_on_error` policy being applied.
+
+
+For the design rationale and rollout guidance, see [LARGE_RESPONSE_DESIGN.md](../architecture/LARGE_RESPONSE_DESIGN.md) and [LARGE_RESPONSE_ROLLOUT.md](LARGE_RESPONSE_ROLLOUT.md).
+
+---
+
 ### Metrics and Monitoring
 
 #### markdown_metrics
@@ -434,6 +525,8 @@ location /markdown-metrics {
 - `decompressions_gzip`: Successful gzip decompressions
 - `decompressions_deflate`: Successful deflate decompressions
 - `decompressions_brotli`: Successful brotli decompressions
+- `fullbuffer_path_hits`: Requests routed to the full-buffer conversion path
+- `incremental_path_hits`: Requests routed to the incremental conversion path
 
 ---
 

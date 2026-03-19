@@ -9,6 +9,7 @@ This directory contains ready-to-use NGINX configuration templates for common de
 3. **03-global-with-exceptions.conf** - Global enablement with path-based exceptions
 4. **04-production-full.conf** - Production-ready configuration with all features
 5. **05-high-performance.conf** - Optimized for maximum throughput
+6. **06-bot-targeted-conversion.conf** - Serve Markdown to specific AI bots by User-Agent
 
 ## How to Use
 
@@ -30,6 +31,7 @@ This directory contains ready-to-use NGINX configuration templates for common de
 | Multi-path site | 03-global-with-exceptions.conf | Global on, selective off |
 | Production deployment | 04-production-full.conf | Security, caching, monitoring |
 | High-traffic site | 05-high-performance.conf | Aggressive optimization |
+| AI bot targeting | 06-bot-targeted-conversion.conf | User-Agent based Markdown for bots |
 
 ## Configuration Checklist
 

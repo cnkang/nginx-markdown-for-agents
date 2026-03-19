@@ -144,10 +144,21 @@ Runtime metrics are aggregated in shared memory so the metrics endpoint reports 
 
 The project chooses inline conversion because it keeps representation negotiation close to the request and avoids duplicating content pipelines. The tradeoff is that conversion now sits inside the request path, so limits, failure policy, and observability become first-class concerns.
 
+### Origin-near positioning
+
+Conversion runs at the reverse-proxy layer closest to the application, not at the CDN edge. This means the module converts the direct output of the application or CMS, before any downstream infrastructure has modified the page. It also means the operator controls the module configuration, failure policy, and rollout scope within their own infrastructure.
+
+This positioning aligns with the HTTP content negotiation model: the origin (or its reverse proxy) selects the best representation of a resource based on the client's Accept header. Cache semantics are simpler because the CDN layer caches the already-converted variant like any other response.
+
+The tradeoff is that conversion cost falls on the origin or reverse-proxy server rather than being distributed across edge nodes, and the operator must be able to install and configure the module. Edge-layer conversion (as Cloudflare's Markdown for Agents demonstrates) serves a different operational model — zero-touch enablement without origin changes. The two approaches can coexist.
+
+This decision is documented in [ADR-0003](ADR/0003-inline-origin-near-conversion.md).
+
 ## Where to Go Next
 
 - Runtime decision rationale: [ADR/README.md](ADR/README.md)
 - Rust-selection decision: [ADR/0001-use-rust-for-conversion.md](ADR/0001-use-rust-for-conversion.md)
 - Buffering decision: [ADR/0002-full-buffering-approach.md](ADR/0002-full-buffering-approach.md)
+- Origin-near positioning decision: [ADR/0003-inline-origin-near-conversion.md](ADR/0003-inline-origin-near-conversion.md)
 - Repository layout: [REPOSITORY_STRUCTURE.md](REPOSITORY_STRUCTURE.md)
 - Operator-facing behavior: [../guides/CONFIGURATION.md](../guides/CONFIGURATION.md)
