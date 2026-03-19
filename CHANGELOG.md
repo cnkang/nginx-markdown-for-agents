@@ -7,6 +7,93 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-03-19
+
+This release introduces incremental processing for large responses, a matrix-driven release automation pipeline, third-party notice coverage checks, a performance baseline gating system, and improved HTML element handling for AI agent content preservation.
+
+### Added
+
+#### Incremental Processing & Large Response Handling
+- `markdown_large_body_threshold` configuration directive (`off|<size>`) for routing large responses to the incremental processing path
+- Threshold router in header and body filters with deferred path selection for chunked/unknown-length responses
+- `IncrementalConverter` Rust API behind the `incremental` feature gate, with FFI functions: `markdown_incremental_new`, `feed`, `finalize`, `free`
+- Equivalence guarantee: single `feed` + `finalize` produces identical output to the full-buffer path
+- `max_buffer_size` field in `MarkdownOptions` C ABI struct, wired through from the NGINX `markdown_max_size` directive to control the incremental converter's memory ceiling
+- Path hit metrics (`fullbuffer_path_hits`, `incremental_path_hits`) exposed via the metrics endpoint
+- Large response design document (`LARGE_RESPONSE_DESIGN.md`) and rollout guide (`LARGE_RESPONSE_ROLLOUT.md`)
+- `large-100k` and `large-5m` performance tiers in `metrics-schema.json`
+- `generate_large_samples.sh` for creating large response test corpus with `--tier` filter and option validation
+- `memory_observer.sh` for cross-platform memory peak sampling with process fingerprinting to prevent PID reuse corruption
+
+#### Release Automation
+- Matrix-driven release automation pipeline (`tools/release/`)
+- `update_matrix.py` for managing the release matrix JSON with doc synchronization and rollback support
+- `validate_doc_matrix_sync.py` for verifying documentation tables match the release matrix
+- `validate_matrix_install_consistency.py` for checking install consistency across matrix entries
+- `completeness_check.py` for verifying release artifact completeness
+- Release binaries workflow (`.github/workflows/release-binaries.yml`) with matrix freshness and completeness checks
+- Matrix update workflow (`.github/workflows/update-matrix.yml`)
+- Install verification workflow (`.github/workflows/install-verify.yml`)
+- `release-matrix.json` as the single source of truth for supported platform/version combinations
+
+#### License & Compliance
+- `THIRD-PARTY-NOTICES` file covering the distributed third-party dependencies used by the module and Rust converter
+- `check_third_party_notices.py` plus tightened C/Rust license validation scripts to verify notice coverage during CI
+
+#### Performance Baseline Gating
+- Performance baseline gating system (`perf/`, `tools/perf/`) with dual-threshold regression detection (warning / blocking) for PR and nightly CI
+- Threshold engine (`tools/perf/threshold_engine.py`) comparing current measurements against stored baselines with per-platform, per-tier, per-metric configurable thresholds
+- Measurement Report and Verdict Report JSON formats conforming to `perf/metrics-schema.json`
+- Local runner script (`tools/perf/run_perf_baseline.sh`) for one-command benchmark, comparison, and baseline update
+- Nightly performance workflow (`.github/workflows/nightly-perf.yml`) running all tiers × 3 repeats with median aggregation
+- PR smoke performance gate (`perf-smoke` job in `ci.yml`) for small + medium tiers on every Rust/perf change
+- Platform-layered threshold configuration (`perf/thresholds.json`) with explicit `linux-x86_64` entry and `default` fallback
+- `--platform` CLI flag on `perf_baseline` binary for deterministic platform identification in Rosetta and cross-compilation environments
+- `--update-baseline` / `--tier` mutual exclusion guard in the local runner
+- `PERF_GATE_SKIP=1` environment variable bypass for all performance checks
+- Property-based tests for threshold classification, deviation formula, median aggregation, report roundtrip, and schema conformance
+- Integration test exercising the real `perf_baseline` binary's full-run and per-tier JSON output for report completeness
+- Shell integration test (`test_local_runner_output_paths.sh`) for local runner output path matrix
+- Performance documentation: `PERFORMANCE_METRICS.md`, `PERFORMANCE_THRESHOLDS.md`, `PERFORMANCE_GATE.md`
+- Baselines directory (`perf/baselines/`) with bootstrap flow documentation
+
+### Changed
+- Event handler attribute sanitization in `security.rs` now uses `on*` prefix matching instead of a static allowlist, following the OWASP/DOMPurify convention. This is future-proof against new event handler attributes added to the HTML spec and closes the gap where newer handlers (`onpointerdown`, `ontouchstart`, etc.) could bypass the previous static list.
+- Form-related elements (`form`, `button`, `select`, `textarea`, `fieldset`, `label`, `option`, etc.) now use a strip-tag-keep-content approach instead of full removal. HTML tags are stripped but child text is preserved in Markdown output so AI agents retain meaningful content (labels, button captions, option lists). Void form controls (`input`) have descriptive text extracted from `aria-label`, `placeholder`, or `value` attributes; hidden inputs are suppressed.
+- Embedded content elements (`iframe`, `object`, `embed`) now use strip-tag-keep-content instead of full removal. The `src`/`data` URL is extracted as a Markdown link (with `title` as label when available), and fallback child text is preserved. Dangerous URL schemes (`javascript:`, `data:`, etc.) are still suppressed.
+- Image conversion now preserves the `title` attribute in Markdown syntax (`![alt](src "title")`). When the image URL is missing or blocked by URL sanitization, the `alt` text is emitted as plain text so AI agents do not lose the description.
+- Media elements (`video`, `audio`) now have their `src` URL extracted as a Markdown link before traversing fallback children. Video `poster` thumbnails are extracted as Markdown images. Child `<source>` elements have their `src` extracted with `type` as label; `<track>` elements have their `src` extracted with `label` as link text.
+- Image map `<area>` elements now have their `href` extracted as Markdown links with `alt` (or `title`) as link text.
+- X-Forwarded-Host/Proto headers are no longer trusted by default for base URL construction. Added `markdown_trust_forwarded_headers on|off` directive (default: off) to prevent client-supplied header injection that could poison relative URLs in Markdown output. Enable only behind a trusted reverse proxy.
+- Decompression buffer estimation now logs a warning when the estimated output exceeds 50 MB, improving operator visibility into large allocation events.
+- Metrics endpoint access-control comment now documents the container/proxy limitation and provides an `allow`/`deny` configuration example for non-localhost environments.
+- Synchronized `Cargo.toml` version from `0.1.0` to `0.3.0` to align with project release tags; from this release onward, `Cargo.toml` version strictly tracks the release tag
+- `MarkdownOptions` C ABI now unconditionally includes `max_buffer_size` in all builds (ABI-breaking change requiring header/binding regeneration); external callers must set the field to 0 when the incremental feature is not in use
+- `IncrementalConverter` carries `content_type` and `timeout` fields, using `parse_html_with_charset` and `ConversionContext` in `finalize()` to match full-buffer path behavior
+- Incremental routing guarded with `#ifdef MARKDOWN_INCREMENTAL_ENABLED` in both header and body filters so metrics stay accurate when the feature is not linked
+- `fullbuffer_path_hits` and `incremental_path_hits` moved to end of `ngx_http_markdown_metrics_t` to preserve shared-memory layout compatibility across hot reloads
+- Path metrics guarded behind eligibility check so only eligible requests are counted
+- Incremental `new`/`feed` failures routed through `ngx_http_markdown_handle_conversion_failure` for proper `conversions_failed` and failure category counter updates
+- `markdown_incremental_new()` NULL return now uses `ERROR_INVALID_INPUT` instead of `ERROR_INTERNAL` with explicit `ngx_log_error` at the call site
+- Extended `perf_baseline.rs` with JSON Measurement Report generation, `--single` / `--json-output` / `--platform` CLI arguments, `large-1m` canonical tier naming, and per-sample stage breakdown
+- Added `serde` and `serde_json` dependencies to `components/rust-converter`
+- Added `.hypothesis/` to `.gitignore`
+- Hardened installer verification and JSON output (`tools/install.sh`): proper JSON escaping, jq-based construction with fallback, correct status based on nginx test result
+- Hardened release tooling: path injection prevention, ReDoS-safe regex, empty matrix detection, support tier normalization, input validation, and error handling
+
+### Fixed
+- Double-free risk in incremental API: `finalize` always consumes handle regardless of success/failure (CWE-415)
+- `IncrementalConverter::finalize()` now rejects empty buffer with `InvalidInput`, matching the full-buffer path's `parse_html_with_charset()` behavior
+- Conditional-request conversions (`If-None-Match` handler) now respect `ctx->processing_path` instead of always using full-buffer conversion
+- Memory observer PID reuse corruption: process fingerprinting via `/proc/<pid>/stat` starttime (Linux) or `ps -o lstart=` (macOS) with TOCTOU window closure
+
+### Dependencies
+- Bump `actions/download-artifact` from 8.0.0 to 8.0.1
+- Bump `dorny/paths-filter` from 4.0.0 to 4.0.1
+- Bump `softprops/action-gh-release` from 2.5.0 to 2.6.1
+
+## [0.2.2] - 2026-03-15
+
 ### Added
 - Canonical native E2E entrypoints under `tools/e2e/`, including a focused proxy/TLS backend validation script and a thin orchestration wrapper for `make test-e2e`
 - Shared native-build helper logic for runtime verification scripts under `tools/lib/nginx_markdown_native_build.sh`
@@ -169,6 +256,13 @@ This project uses Semantic Versioning:
 - PATCH version for backwards-compatible bug fixes
 
 ### Upgrade Notes
+
+#### Upgrading to 0.3.0
+
+- `MarkdownOptions` C ABI has changed: `max_buffer_size` is now unconditionally present. External callers must regenerate bindings and set the field to 0 when the incremental feature is not in use.
+- `fullbuffer_path_hits` and `incremental_path_hits` have been moved to the end of `ngx_http_markdown_metrics_t`. If you use shared-memory metrics, a graceful reload is sufficient; no data migration is needed.
+- The `incremental` feature is off by default. Enable it with `--features incremental` when building the Rust converter to use the new `markdown_large_body_threshold` directive.
+- `X-Forwarded-Host` and `X-Forwarded-Proto` headers are no longer trusted by default for base URL construction. If NGINX sits behind a trusted reverse proxy that sets these headers, add `markdown_trust_forwarded_headers on;` to restore the previous behavior. Without this directive, only the NGINX request schema and server header are used.
 
 #### Upgrading to 0.2.0
 
