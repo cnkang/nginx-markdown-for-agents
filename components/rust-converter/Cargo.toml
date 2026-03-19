@@ -13,9 +13,9 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 [dependencies]
 # HTML5 parser - handles malformed markup gracefully
-html5ever = "0.38"
+html5ever = { git = "https://github.com/servo/html5ever", rev = "ce64836c685025a5fef0860fa2e9c80b2683e8d0", package = "html5ever" }
 # DOM tree representation
-markup5ever_rcdom = "0.38"
+markup5ever_rcdom = { git = "https://github.com/servo/html5ever", rev = "ce64836c685025a5fef0860fa2e9c80b2683e8d0", package = "markup5ever_rcdom" }
 # Fast hashing for ETags (using version compatible with older Rust)
 blake3 = "1.2"
 # Hex encoding for ETag generation

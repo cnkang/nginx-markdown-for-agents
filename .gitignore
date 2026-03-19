@@ -90,3 +90,6 @@ matrix-diff.json
 # Vim swap
 *.swp
 *.swo
+
+.hypothesis
+components/rust-converter/fuzz/*
