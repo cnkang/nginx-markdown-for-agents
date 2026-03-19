@@ -63,10 +63,19 @@ mod exports;
 mod memory;
 mod options;
 
+#[cfg(feature = "incremental")]
+mod incremental;
+
 pub use abi::{
     ERROR_ENCODING, ERROR_INTERNAL, ERROR_INVALID_INPUT, ERROR_MEMORY_LIMIT, ERROR_PARSE,
     ERROR_SUCCESS, ERROR_TIMEOUT, MarkdownConverterHandle, MarkdownOptions, MarkdownResult,
 };
 pub use exports::{
     markdown_convert, markdown_converter_free, markdown_converter_new, markdown_result_free,
+};
+
+#[cfg(feature = "incremental")]
+pub use incremental::{
+    IncrementalConverterHandle, markdown_incremental_feed, markdown_incremental_finalize,
+    markdown_incremental_free, markdown_incremental_new,
 };

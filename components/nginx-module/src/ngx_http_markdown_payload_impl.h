@@ -1,3 +1,6 @@
+#ifndef NGX_HTTP_MARKDOWN_PAYLOAD_IMPL_H
+#define NGX_HTTP_MARKDOWN_PAYLOAD_IMPL_H
+
 /*
  * Payload-path helpers.
  *
@@ -16,6 +19,26 @@ static ngx_int_t ngx_http_markdown_send_buffered_original_response(
     ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx);
 static ngx_int_t ngx_http_markdown_fail_open_with_buffered_prefix(
     ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx, ngx_chain_t *remaining);
+static void ngx_http_markdown_reclassify_fail_open_path(
+    ngx_http_markdown_ctx_t *ctx);
+
+static void
+ngx_http_markdown_reclassify_fail_open_path(ngx_http_markdown_ctx_t *ctx)
+{
+    if (ctx == NULL
+        || ctx->processing_path != NGX_HTTP_MARKDOWN_PATH_INCREMENTAL)
+    {
+        return;
+    }
+
+    if (ngx_http_markdown_metrics != NULL
+        && ngx_http_markdown_metrics->incremental_path_hits > 0)
+    {
+        NGX_HTTP_MARKDOWN_METRIC_ADD(incremental_path_hits, -1);
+    }
+    NGX_HTTP_MARKDOWN_METRIC_INC(fullbuffer_path_hits);
+    ctx->processing_path = NGX_HTTP_MARKDOWN_PATH_FULLBUFFER;
+}
 
 /* Return original HTML when conversion fails or is ineligible (fail-open). */
 static ngx_int_t
@@ -27,6 +50,7 @@ ngx_http_markdown_fail_open_buffered_response(ngx_http_request_t *r,
         ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0, debug_message);
     }
 
+    ngx_http_markdown_reclassify_fail_open_path(ctx);
     ctx->eligible = 0;
     r->buffered &= ~NGX_HTTP_MARKDOWN_BUFFERED;
 
@@ -121,7 +145,7 @@ ngx_http_markdown_apply_decompressed_payload(ngx_http_request_t *r,
                      "compression=%V, category=system",
                      compression_name);
 
-        NGX_HTTP_MARKDOWN_METRIC_INC(decompressions_failed);
+        NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.failed);
         return ngx_http_markdown_reject_or_fail_open_buffered_response(
             r, ctx, conf, NULL);
     }
@@ -143,7 +167,7 @@ ngx_http_markdown_apply_decompressed_payload(ngx_http_request_t *r,
                          "compression=%V, size=%uz, category=system",
                          compression_name, ctx->decompressed_size);
 
-            NGX_HTTP_MARKDOWN_METRIC_INC(decompressions_failed);
+            NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.failed);
             return ngx_http_markdown_reject_or_fail_open_buffered_response(
                 r, ctx, conf, NULL);
         }
@@ -176,16 +200,16 @@ ngx_http_markdown_record_decompression_success(ngx_http_request_t *r,
 {
     float ratio;
 
-    NGX_HTTP_MARKDOWN_METRIC_INC(decompressions_succeeded);
+    NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.succeeded);
     switch (ctx->compression_type) {
         case NGX_HTTP_MARKDOWN_COMPRESSION_GZIP:
-            NGX_HTTP_MARKDOWN_METRIC_INC(decompressions_gzip);
+            NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.gzip);
             break;
         case NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE:
-            NGX_HTTP_MARKDOWN_METRIC_INC(decompressions_deflate);
+            NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.deflate);
             break;
         case NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI:
-            NGX_HTTP_MARKDOWN_METRIC_INC(decompressions_brotli);
+            NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.brotli);
             break;
         default:
             break;
@@ -223,6 +247,7 @@ ngx_http_markdown_handle_buffer_init_failure(ngx_http_request_t *r,
 
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                   "markdown filter: fail-open strategy - returning original HTML");
+    ngx_http_markdown_reclassify_fail_open_path(ctx);
     ctx->eligible = 0;
     r->buffered &= ~NGX_HTTP_MARKDOWN_BUFFERED;
     if (ngx_http_markdown_forward_headers(r, ctx) != NGX_OK) {
@@ -374,7 +399,7 @@ ngx_http_markdown_body_filter_decompress_if_needed(ngx_http_request_t *r,
                       "markdown filter: starting decompression, type=%d, size=%uz bytes",
                       ctx->compression_type, ctx->buffer.size);
 
-        NGX_HTTP_MARKDOWN_METRIC_INC(decompressions_attempted);
+        NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.attempted);
         ctx->compressed_size = ctx->buffer.size;
         rc = ngx_http_markdown_prepare_compressed_chain(r, ctx, conf, &compressed_chain);
         if (rc != NGX_OK) {
@@ -404,7 +429,7 @@ ngx_http_markdown_body_filter_decompress_if_needed(ngx_http_request_t *r,
                          "error=\"decompression error\", category=conversion",
                          compression_name);
 
-            NGX_HTTP_MARKDOWN_METRIC_INC(decompressions_failed);
+            NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.failed);
             return ngx_http_markdown_reject_or_fail_open_buffered_response(
                 r, ctx, conf,
                 "markdown filter: fail-open strategy - returning original content");
@@ -530,3 +555,5 @@ ngx_http_markdown_fail_open_with_buffered_prefix(ngx_http_request_t *r,
 
     return ngx_http_next_body_filter(r, out);
 }
+
+#endif /* NGX_HTTP_MARKDOWN_PAYLOAD_IMPL_H */

@@ -1,3 +1,6 @@
+#ifndef NGX_HTTP_MARKDOWN_CONFIG_HANDLERS_IMPL_H
+#define NGX_HTTP_MARKDOWN_CONFIG_HANDLERS_IMPL_H
+
 /*
  * Directive-handler helpers.
  *
@@ -271,7 +274,23 @@ ngx_http_markdown_log_verbosity(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     return NGX_CONF_OK;
 }
 
-/* Configuration directive handler: markdown_stream_types <type/subtype ...>. */
+/**
+ * Handle the "markdown_stream_types" configuration directive by validating
+ * and storing one or more MIME type strings in the form "type/subtype".
+ *
+ * Validates each argument is non-empty, contains exactly one '/' separator,
+ * and has non-empty type and subtype segments. On success the provided values
+ * are appended to the module's `stream_types` array in the configuration.
+ *
+ * @param cf Configuration parsing context.
+ * @param cmd Directive metadata.
+ * @param conf Pointer to the module configuration (ngx_http_markdown_conf_t).
+ *
+ * @return NGX_CONF_OK on success.
+ * @return NGX_CONF_ERROR if an allocation fails or any argument is empty or
+ *         malformed.
+ * @return "is duplicate" if the directive has already been specified.
+ */
 static char *
 ngx_http_markdown_stream_types(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
@@ -337,7 +356,70 @@ ngx_http_markdown_stream_types(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     return NGX_CONF_OK;
 }
 
-/* Configuration directive handler: markdown_metrics (register content handler). */
+/**
+ * Parse and set the markdown_large_body_threshold directive.
+ *
+ * Processes a single argument which must be either "off" or a byte size
+ * optionally suffixed with "k" or "m". Sets the module configuration's
+ * large_body_threshold to 0 for "off" (or an explicit "0"), or to the parsed
+ * byte size for valid nonzero sizes.
+ *
+ * @param cf Configuration parsing context.
+ * @param cmd Directive definition.
+ * @param conf Pointer to the module location configuration (ngx_http_markdown_conf_t *).
+ * @returns NGX_CONF_OK on success;
+ *          NGX_CONF_ERROR if the argument is not "off" and cannot be parsed as a size (error logged);
+ *          the string "is duplicate" if the directive was already set.
+ */
+static char *
+ngx_http_markdown_large_body_threshold(ngx_conf_t *cf,
+    ngx_command_t *cmd, void *conf)
+{
+    ngx_http_markdown_conf_t *mcf = conf;
+    ngx_str_t                *value;
+
+    (void) cmd;
+
+    value = cf->args->elts;
+
+    if (mcf->large_body_threshold != NGX_CONF_UNSET_SIZE) {
+        return "is duplicate";
+    }
+
+    if (value[1].len == 3
+        && ngx_strcasecmp(value[1].data, (u_char *) "off") == 0)
+    {
+        mcf->large_body_threshold = 0;
+        return NGX_CONF_OK;
+    }
+
+    mcf->large_body_threshold = ngx_parse_size(&value[1]);
+    if (mcf->large_body_threshold == (size_t) NGX_ERROR) {
+        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+            "invalid value \"%V\" in "
+            "\"markdown_large_body_threshold\" "
+            "directive, it must be \"off\" "
+            "or a size (e.g., 512k, 1m)",
+            &value[1]);
+        return NGX_CONF_ERROR;
+    }
+
+    if (mcf->large_body_threshold == 0) {
+        /* Explicit "0" is treated as off */
+        return NGX_CONF_OK;
+    }
+
+    return NGX_CONF_OK;
+}
+
+/**
+ * Register the markdown_metrics content handler for the current location.
+ *
+ * @param cf The configuration parsing context.
+ * @param cmd The directive being processed.
+ * @param conf Module configuration pointer (unused).
+ * @returns `NGX_CONF_OK` on success, `NGX_CONF_ERROR` if the core location configuration cannot be obtained.
+ */
 static char *
 ngx_http_markdown_metrics_directive(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
@@ -353,6 +435,14 @@ ngx_http_markdown_metrics_directive(ngx_conf_t *cf, ngx_command_t *cmd, void *co
         return NGX_CONF_ERROR;
     }
 
+    if (clcf->handler != NULL) {
+        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+                           "\"%V\" cannot be combined with another content handler "
+                           "in the same location",
+                           &cmd->name);
+        return NGX_CONF_ERROR;
+    }
+
     clcf->handler = ngx_http_markdown_metrics_handler;
 
     ngx_conf_log_error(NGX_LOG_INFO, cf, 0,
@@ -360,3 +450,5 @@ ngx_http_markdown_metrics_directive(ngx_conf_t *cf, ngx_command_t *cmd, void *co
 
     return NGX_CONF_OK;
 }
+
+#endif /* NGX_HTTP_MARKDOWN_CONFIG_HANDLERS_IMPL_H */

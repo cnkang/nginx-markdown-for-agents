@@ -1,3 +1,6 @@
+#ifndef NGX_HTTP_MARKDOWN_CONFIG_IMPL_H
+#define NGX_HTTP_MARKDOWN_CONFIG_IMPL_H
+
 /*
  * Configuration implementation wiring.
  *
@@ -47,6 +50,8 @@ static char *ngx_http_markdown_conditional_requests(ngx_conf_t *cf, ngx_command_
 static char *ngx_http_markdown_log_verbosity(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 /* Parse streaming content types excluded from buffering/conversion. */
 static char *ngx_http_markdown_stream_types(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
+/* Parse large body threshold for incremental path routing. */
+static char *ngx_http_markdown_large_body_threshold(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 /* Parse metrics endpoint enablement and URI settings. */
 static char *ngx_http_markdown_metrics_directive(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 /* Map module verbosity enum to nginx native log level constants. */
@@ -70,3 +75,5 @@ ngx_flag_t ngx_http_markdown_is_enabled(ngx_http_request_t *r,
 /* Emit merged-config summary for observability and debugging. */
 static void ngx_http_markdown_log_merged_conf(ngx_conf_t *cf,
     ngx_http_markdown_conf_t *conf);
+
+#endif /* NGX_HTTP_MARKDOWN_CONFIG_IMPL_H */

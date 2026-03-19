@@ -32,6 +32,10 @@ pub mod parser;
 pub mod security;
 pub mod token_estimator;
 
+// Incremental processing API (feature-gated, off by default)
+#[cfg(feature = "incremental")]
+pub mod incremental;
+
 // Re-export main types for convenience
 pub use converter::MarkdownConverter;
 pub use error::ConversionError;

@@ -197,7 +197,7 @@ ngx_http_markdown_buffer_ensure_capacity(ngx_http_markdown_buffer_t *buf, size_t
         }
     } else {
         new_capacity = buf->capacity;
-        // Geometric growth minimizes total reallocations for large bodies.
+        /* Geometric growth minimizes total reallocations for large bodies. */
         while (new_capacity < required) {
             if (new_capacity >= buf->max_size) {
                 new_capacity = buf->max_size;

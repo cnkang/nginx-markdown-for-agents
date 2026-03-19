@@ -290,32 +290,23 @@ ngx_http_markdown_compare_etag(const u_char *etag, size_t etag_len,
     return NGX_DECLINED;
 }
 
-/*
- * Handle If-None-Match conditional request
+/**
+ * Evaluate and handle an If-None-Match conditional request for a Markdown response.
  *
- * This function implements If-None-Match handling with configurable behavior
- * based on the conditional_requests configuration mode.
+ * Parses the request's If-None-Match header (when conditional request support is enabled),
+ * generates an ETag for the current Markdown variant, compares it against the client's
+ * ETags, and decides whether the response is not modified. When a conversion is
+ * performed, a MarkdownResult is allocated and stored in `*result` for later use
+ * (headers/body handling).
  *
- * Configuration modes:
- * - full_support: Perform conversion to generate ETag, compare, return 304 if match
- * - if_modified_since_only: Skip If-None-Match processing (performance optimization)
- * - disabled: No conditional request support for Markdown variants
- *
- * Performance implications:
- * - full_support mode requires conversion to generate ETag for comparison
- * - This has a performance cost: HTML parsing, Markdown generation, ETag hashing
- * - if_modified_since_only mode avoids this cost by only supporting time-based caching
- * - disabled mode provides no conditional request support (always returns 200)
- *
- * Requirements: FR-06.1, FR-06.2, FR-06.3, FR-06.6
- *
- * @param r         The request structure
- * @param conf      Module configuration
- * @param ctx       Request context
- * @param converter Worker-scoped Rust converter handle (required for FFI conversion)
- * @param result    Conversion result (output parameter, allocated if conversion performed)
- * @return          NGX_HTTP_NOT_MODIFIED (304) if match, NGX_DECLINED if no match,
- *                  NGX_ERROR on failure
+ * @param r        The request structure.
+ * @param conf     Module configuration controlling conditional request behavior and ETag generation.
+ * @param ctx      Request context containing the prepared input buffer and processing path.
+ * @param converter Worker-scoped converter handle required for FFI conversion (must not be NULL when conversion is needed).
+ * @param result   Output pointer; on successful conversion this will be set to a newly allocated MarkdownResult.
+ * @returns        NGX_HTTP_NOT_MODIFIED (304) if the generated ETag matches the client's If-None-Match,
+ *                 NGX_DECLINED if no match or processing is skipped,
+ *                 NGX_ERROR on failure (parsing, allocation, conversion, or internal errors).
  */
 ngx_int_t
 ngx_http_markdown_handle_if_none_match(ngx_http_request_t *r,
@@ -406,13 +397,13 @@ ngx_http_markdown_handle_if_none_match(ngx_http_request_t *r,
         return NGX_ERROR;
     }
 
-    /* Prepare conversion options */
-    ngx_memzero(&options, sizeof(struct MarkdownOptions));
-    options.flavor = conf->flavor;
-    options.timeout_ms = conf->timeout;
-    options.generate_etag = 1;  /* Must generate ETag for comparison */
-    options.estimate_tokens = conf->token_estimate;
-    options.front_matter = conf->front_matter;
+    if (ngx_http_markdown_prepare_conversion_options(r, conf, &options)
+        != NGX_OK)
+    {
+        return NGX_ERROR;
+    }
+
+    options.generate_etag = 1;
 
     /* Allocate result structure */
     conv_result = ngx_pcalloc(r->pool, sizeof(struct MarkdownResult));
@@ -422,12 +413,42 @@ ngx_http_markdown_handle_if_none_match(ngx_http_request_t *r,
         return NGX_ERROR;
     }
 
-    /* Perform conversion */
-    markdown_convert(converter,
-                    ctx->buffer.data,
-                    ctx->buffer.size,
-                    &options,
-                    conv_result);
+    /* Perform conversion — honour the incremental path when enabled. */
+#ifdef MARKDOWN_INCREMENTAL_ENABLED
+    if (ctx->processing_path == NGX_HTTP_MARKDOWN_PATH_INCREMENTAL) {
+        struct IncrementalConverterHandle *inc_handle;
+        uint32_t                          feed_rc;
+        uint32_t                          fin_rc;
+
+        inc_handle = markdown_incremental_new(&options);
+        if (inc_handle == NULL) {
+            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                         "markdown filter: incremental converter init failed "
+                         "during If-None-Match check");
+            ngx_pfree(r->pool, conv_result);
+            return NGX_ERROR;
+        }
+
+        feed_rc = markdown_incremental_feed(
+            inc_handle, ctx->buffer.data, ctx->buffer.size);
+        if (feed_rc != 0) {
+            markdown_incremental_free(inc_handle);
+            ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
+                         "markdown filter: incremental feed failed during "
+                         "If-None-Match check, error_code=%ud", feed_rc);
+            ngx_pfree(r->pool, conv_result);
+            return NGX_ERROR;
+        }
+
+        /* finalize consumes the handle — do NOT call free after this */
+        fin_rc = markdown_incremental_finalize(inc_handle, conv_result);
+        (void) fin_rc;  /* error_code is checked via conv_result below */
+    } else
+#endif
+    {
+        markdown_convert(converter, ctx->buffer.data, ctx->buffer.size,
+                         &options, conv_result);
+    }
 
     /* Check conversion result */
     if (conv_result->error_code != 0) {
