@@ -1,0 +1,110 @@
+name: Update Release Matrix
+
+on:
+  schedule:
+    - cron: '0 6 * * 1'  # Weekly on Monday at 06:00 UTC
+  workflow_dispatch: {}
+
+permissions: {}
+
+concurrency:
+  group: matrix-auto-update
+  cancel-in-progress: false
+
+jobs:
+  update-matrix:
+    name: Update nginx release matrix
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+        with:
+          python-version: '3.14.3'
+
+      - name: Run matrix updater
+        run: python3 tools/release/update_matrix.py
+
+      - name: Check for changes
+        id: changes
+        run: |
+          if [ -f tools/matrix-diff.json ]; then
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run validation scripts
+        if: steps.changes.outputs.has_changes == 'true'
+        run: |
+          python3 tools/release/validate_doc_matrix_sync.py
+          python3 tools/release/validate_matrix_install_consistency.py
+
+      - name: Build PR title and body from diff
+        if: steps.changes.outputs.has_changes == 'true'
+        id: pr_meta
+        run: |
+          python3 - <<'PY'
+          import json, os
+
+          with open("tools/matrix-diff.json", "r") as f:
+              diff = json.load(f)
+
+          added = diff.get("added_versions", [])
+          removed = diff.get("removed_versions", [])
+
+          parts = []
+          if added:
+              parts.append("add " + ", ".join(added))
+          if removed:
+              parts.append("remove " + ", ".join(removed))
+          if not parts:
+              parts.append("update matrix entries")
+          title = "chore: update nginx release matrix (" + "; ".join(parts) + ")"
+
+          body_lines = [
+              "Automated update of the nginx release matrix.",
+              "",
+              "Source: https://nginx.org/en/download.html",
+              "",
+          ]
+          if added:
+              body_lines.append("### Added versions")
+              for v in added:
+                  body_lines.append(f"- `{v}`")
+              body_lines.append("")
+          if removed:
+              body_lines.append("### Removed versions")
+              for v in removed:
+                  body_lines.append(f"- `{v}`")
+              body_lines.append("")
+          if not added and not removed:
+              body_lines.append("Entry-level changes detected (platform or tier adjustments, no version additions/removals).")
+              body_lines.append("")
+
+          body = "\n".join(body_lines)
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+              # Use delimiter for multiline body
+              out.write(f"title={title}\n")
+              out.write("body<<EOF_PR_BODY\n")
+              out.write(body + "\n")
+              out.write("EOF_PR_BODY\n")
+          PY
+
+      - name: Create or update Pull Request
+        if: steps.changes.outputs.has_changes == 'true'
+        uses: peter-evans/create-pull-request@c0f553fe549906ede9cf27b5156039d195d2ece0 # v8.1.0
+        with:
+          branch: auto/update-matrix
+          title: ${{ steps.pr_meta.outputs.title }}
+          body: ${{ steps.pr_meta.outputs.body }}
+          labels: |
+            automated
+            release-matrix
+          commit-message: ${{ steps.pr_meta.outputs.title }}
