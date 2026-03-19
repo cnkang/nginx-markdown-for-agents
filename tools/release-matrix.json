@@ -1,0 +1,106 @@
+{
+  "schema_version": "1.0.0",
+  "updated_at": "2026-03-15T13:35:30Z",
+  "support_tiers": {
+    "full": "Prebuilt binary + install script + CI verification",
+    "source_only": "Build from source required"
+  },
+  "matrix": [
+    {
+      "nginx": "1.24.0",
+      "os_type": "glibc",
+      "arch": "aarch64",
+      "support_tier": "full"
+    },
+    {
+      "nginx": "1.24.0",
+      "os_type": "glibc",
+      "arch": "x86_64",
+      "support_tier": "full"
+    },
+    {
+      "nginx": "1.24.0",
+      "os_type": "musl",
+      "arch": "aarch64",
+      "support_tier": "full"
+    },
+    {
+      "nginx": "1.24.0",
+      "os_type": "musl",
+      "arch": "x86_64",
+      "support_tier": "full"
+    },
+    {
+      "nginx": "1.26.3",
+      "os_type": "glibc",
+      "arch": "aarch64",
+      "support_tier": "full"
+    },
+    {
+      "nginx": "1.26.3",
+      "os_type": "glibc",
+      "arch": "x86_64",
+      "support_tier": "full"
+    },
+    {
+      "nginx": "1.26.3",
+      "os_type": "musl",
+      "arch": "aarch64",
+      "support_tier": "full"
+    },
+    {
+      "nginx": "1.26.3",
+      "os_type": "musl",
+      "arch": "x86_64",
+      "support_tier": "full"
+    },
+    {
+      "nginx": "1.28.2",
+      "os_type": "glibc",
+      "arch": "aarch64",
+      "support_tier": "full"
+    },
+    {
+      "nginx": "1.28.2",
+      "os_type": "glibc",
+      "arch": "x86_64",
+      "support_tier": "full"
+    },
+    {
+      "nginx": "1.28.2",
+      "os_type": "musl",
+      "arch": "aarch64",
+      "support_tier": "full"
+    },
+    {
+      "nginx": "1.28.2",
+      "os_type": "musl",
+      "arch": "x86_64",
+      "support_tier": "full"
+    },
+    {
+      "nginx": "1.29.6",
+      "os_type": "glibc",
+      "arch": "aarch64",
+      "support_tier": "full"
+    },
+    {
+      "nginx": "1.29.6",
+      "os_type": "glibc",
+      "arch": "x86_64",
+      "support_tier": "full"
+    },
+    {
+      "nginx": "1.29.6",
+      "os_type": "musl",
+      "arch": "aarch64",
+      "support_tier": "full"
+    },
+    {
+      "nginx": "1.29.6",
+      "os_type": "musl",
+      "arch": "x86_64",
+      "support_tier": "full"
+    }
+  ]
+}
