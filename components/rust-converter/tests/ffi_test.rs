@@ -28,6 +28,35 @@ fn ffi_markdown_converter_free(handle: *mut MarkdownConverterHandle) {
     unsafe { nginx_markdown_converter::ffi::markdown_converter_free(handle) }
 }
 
+#[cfg(feature = "incremental")]
+fn ffi_markdown_incremental_new(
+    options: *const MarkdownOptions,
+) -> *mut IncrementalConverterHandle {
+    unsafe { nginx_markdown_converter::ffi::markdown_incremental_new(options) }
+}
+
+#[cfg(feature = "incremental")]
+fn ffi_markdown_incremental_feed(
+    handle: *mut IncrementalConverterHandle,
+    data: *const u8,
+    data_len: usize,
+) -> u32 {
+    unsafe { nginx_markdown_converter::ffi::markdown_incremental_feed(handle, data, data_len) }
+}
+
+#[cfg(feature = "incremental")]
+fn ffi_markdown_incremental_finalize(
+    handle: *mut IncrementalConverterHandle,
+    result: *mut MarkdownResult,
+) -> u32 {
+    unsafe { nginx_markdown_converter::ffi::markdown_incremental_finalize(handle, result) }
+}
+
+#[cfg(feature = "incremental")]
+fn ffi_markdown_incremental_free(handle: *mut IncrementalConverterHandle) {
+    unsafe { nginx_markdown_converter::ffi::markdown_incremental_free(handle) }
+}
+
 fn ffi_test_default_options() -> MarkdownOptions {
     MarkdownOptions {
         flavor: 0,
@@ -204,6 +233,106 @@ fn test_reuse_result_releases_previous_buffers() {
 
     ffi_markdown_result_free(&mut result);
     ffi_markdown_converter_free(converter);
+}
+
+#[cfg(feature = "incremental")]
+#[test]
+fn test_incremental_conversion_matches_full_buffer_output() {
+    let converter = markdown_converter_new();
+    assert!(!converter.is_null(), "Converter should not be NULL");
+
+    let html = b"<h1>Hello World</h1><p>This is a test.</p>";
+    let options = ffi_test_default_options();
+
+    let incremental = ffi_markdown_incremental_new(&options);
+    assert!(
+        !incremental.is_null(),
+        "Incremental converter should be created"
+    );
+
+    let feed_rc = ffi_markdown_incremental_feed(incremental, html.as_ptr(), html.len());
+    assert_eq!(
+        feed_rc, ERROR_SUCCESS,
+        "Feeding buffered HTML should succeed"
+    );
+
+    let mut incremental_result = ffi_test_empty_result();
+    let finalize_rc = ffi_markdown_incremental_finalize(incremental, &mut incremental_result);
+    assert_eq!(finalize_rc, ERROR_SUCCESS, "Finalize should succeed");
+    assert_eq!(
+        incremental_result.error_code, ERROR_SUCCESS,
+        "Incremental result should report success"
+    );
+
+    let mut full_result = ffi_test_empty_result();
+    ffi_markdown_convert(
+        converter,
+        html.as_ptr(),
+        html.len(),
+        &options,
+        &mut full_result,
+    );
+    assert_eq!(
+        full_result.error_code, ERROR_SUCCESS,
+        "Full-buffer conversion should succeed"
+    );
+
+    let incremental_markdown = unsafe {
+        slice::from_raw_parts(incremental_result.markdown, incremental_result.markdown_len)
+    };
+    let full_markdown =
+        unsafe { slice::from_raw_parts(full_result.markdown, full_result.markdown_len) };
+
+    assert_eq!(
+        incremental_markdown, full_markdown,
+        "Incremental finalize output should match full-buffer output"
+    );
+
+    ffi_markdown_result_free(&mut incremental_result);
+    ffi_markdown_result_free(&mut full_result);
+    ffi_markdown_converter_free(converter);
+}
+
+#[cfg(feature = "incremental")]
+#[test]
+fn test_incremental_feed_rejects_null_data_with_nonzero_length() {
+    let options = ffi_test_default_options();
+    let incremental = ffi_markdown_incremental_new(&options);
+    assert!(
+        !incremental.is_null(),
+        "Incremental converter should be created"
+    );
+
+    let feed_rc = ffi_markdown_incremental_feed(incremental, ptr::null(), 1);
+    assert_eq!(
+        feed_rc, ERROR_INVALID_INPUT,
+        "NULL chunk pointer with non-zero length should be rejected"
+    );
+
+    ffi_markdown_incremental_free(incremental);
+}
+
+#[cfg(feature = "incremental")]
+#[test]
+fn test_incremental_finalize_reports_null_handle() {
+    let mut result = ffi_test_empty_result();
+
+    let finalize_rc = ffi_markdown_incremental_finalize(ptr::null_mut(), &mut result);
+
+    assert_eq!(
+        finalize_rc, ERROR_INVALID_INPUT,
+        "NULL incremental handle should be rejected"
+    );
+    assert_eq!(
+        result.error_code, ERROR_INVALID_INPUT,
+        "Result should record the invalid-input error"
+    );
+    assert!(
+        !result.error_message.is_null(),
+        "Error message should be populated for NULL handle"
+    );
+
+    ffi_markdown_result_free(&mut result);
 }
 
 proptest! {
