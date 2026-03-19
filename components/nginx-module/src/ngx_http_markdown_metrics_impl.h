@@ -1,3 +1,6 @@
+#ifndef NGX_HTTP_MARKDOWN_METRICS_IMPL_H
+#define NGX_HTTP_MARKDOWN_METRICS_IMPL_H
+
 /*
  * Metrics endpoint implementation.
  *
@@ -9,41 +12,76 @@
  * without adding more branching inside the core filter orchestration file.
  */
 
+/*
+ * Non-atomic snapshot of the shared metrics counters.
+ *
+ * Mirrors the layout of ngx_http_markdown_metrics_t but uses plain
+ * ngx_atomic_uint_t values instead of ngx_atomic_t, since the snapshot
+ * is only read from a single thread after collection.
+ *
+ * The decompression counters are grouped into an anonymous sub-struct
+ * to keep the top-level field count within SonarCloud's 20-field limit
+ * while preserving a flat JSON output format.
+ */
 typedef struct {
+    /* Conversion attempt tracking */
     ngx_atomic_uint_t conversions_attempted;
     ngx_atomic_uint_t conversions_succeeded;
     ngx_atomic_uint_t conversions_failed;
     ngx_atomic_uint_t conversions_bypassed;
+
+    /* Failure classification */
     ngx_atomic_uint_t failures_conversion;
     ngx_atomic_uint_t failures_resource_limit;
     ngx_atomic_uint_t failures_system;
+
+    /* Performance metrics */
     ngx_atomic_uint_t conversion_time_sum_ms;
     ngx_atomic_uint_t input_bytes;
     ngx_atomic_uint_t output_bytes;
+
+    /* Latency histogram buckets */
     ngx_atomic_uint_t conversion_latency_le_10ms;
     ngx_atomic_uint_t conversion_latency_le_100ms;
     ngx_atomic_uint_t conversion_latency_le_1000ms;
     ngx_atomic_uint_t conversion_latency_gt_1000ms;
-    ngx_atomic_uint_t decompressions_attempted;
-    ngx_atomic_uint_t decompressions_succeeded;
-    ngx_atomic_uint_t decompressions_failed;
-    ngx_atomic_uint_t decompressions_gzip;
-    ngx_atomic_uint_t decompressions_deflate;
-    ngx_atomic_uint_t decompressions_brotli;
+
+    /* Decompression metrics (grouped to keep top-level field count <= 20) */
+    struct {
+        ngx_atomic_uint_t attempted;
+        ngx_atomic_uint_t succeeded;
+        ngx_atomic_uint_t failed;
+        ngx_atomic_uint_t gzip;
+        ngx_atomic_uint_t deflate;
+        ngx_atomic_uint_t brotli;
+    } decompressions;
+
+    /* Path hit metrics (threshold router) */
+    ngx_atomic_uint_t fullbuffer_path_hits;
+    ngx_atomic_uint_t incremental_path_hits;
 } ngx_http_markdown_metrics_snapshot_t;
 
 /*
  * Response buffer size for the metrics endpoint.  The current JSON/text
- * output is well under 1 KiB, but we leave headroom for future fields.
+ * output is well under 2 KiB, but we leave headroom for future fields.
  * Increase this constant if new metrics push the output beyond the limit.
- */
-#define NGX_HTTP_MARKDOWN_METRICS_BUF_SIZE  4096
-
-/*
- * Copy shared atomic counters into a local snapshot struct.
  *
- * This minimizes repeated global reads while formatting the endpoint response
- * and keeps all JSON fields derived from one best-effort capture pass.
+ * Estimated current output: ~1.5 KiB (JSON), ~1.2 KiB (text).
+ * Last updated when fullbuffer_path_hits / incremental_path_hits were added.
+ */
+#define NGX_HTTP_MARKDOWN_METRICS_BUF_SIZE  5120
+
+/**
+ * Capture a best-effort snapshot of the global metrics counters into the
+ * provided snapshot structure.
+ *
+ * The function zeroes the target snapshot and, if the global metrics instance
+ * is available, copies the current values of all atomic counters into it.
+ * The snapshot is not guaranteed to be a consistent point-in-time view.
+ *
+ * @param snapshot Pointer to an ngx_http_markdown_metrics_snapshot_t that will
+ *                 be populated with the copied counters (may be left zeroed if
+ *                 the global metrics instance is unavailable).
  */
 static void
 ngx_http_markdown_collect_metrics_snapshot(ngx_http_markdown_metrics_snapshot_t *snapshot)
@@ -78,17 +116,27 @@ ngx_http_markdown_collect_metrics_snapshot(ngx_http_markdown_metrics_snapshot_t 
     snapshot->conversion_latency_le_100ms = metrics->conversion_latency_le_100ms;
     snapshot->conversion_latency_le_1000ms = metrics->conversion_latency_le_1000ms;
     snapshot->conversion_latency_gt_1000ms = metrics->conversion_latency_gt_1000ms;
-    snapshot->decompressions_attempted = metrics->decompressions_attempted;
-    snapshot->decompressions_succeeded = metrics->decompressions_succeeded;
-    snapshot->decompressions_failed = metrics->decompressions_failed;
-    snapshot->decompressions_gzip = metrics->decompressions_gzip;
-    snapshot->decompressions_deflate = metrics->decompressions_deflate;
-    snapshot->decompressions_brotli = metrics->decompressions_brotli;
+    snapshot->decompressions.attempted = metrics->decompressions.attempted;
+    snapshot->decompressions.succeeded = metrics->decompressions.succeeded;
+    snapshot->decompressions.failed = metrics->decompressions.failed;
+    snapshot->decompressions.gzip = metrics->decompressions.gzip;
+    snapshot->decompressions.deflate = metrics->decompressions.deflate;
+    snapshot->decompressions.brotli = metrics->decompressions.brotli;
+    snapshot->fullbuffer_path_hits = metrics->fullbuffer_path_hits;
+    snapshot->incremental_path_hits = metrics->incremental_path_hits;
 }
 
+static ngx_flag_t ngx_http_markdown_metrics_value_contains(
+    ngx_str_t *value, u_char *needle, size_t needle_len);
+
+static u_char  ngx_http_markdown_metrics_accept_json[] = "application/json";
+
 /*
- * Enforce the endpoint's narrow access policy before doing any formatting or
- * shared-state reads. Only local GET/HEAD requests are allowed.
+ * Validate method and shared-state availability for the metrics handler.
+ *
+ * Access control remains intentionally strict: the content handler itself
+ * only serves loopback clients. NGINX `allow`/`deny` rules can further
+ * restrict that location, but they cannot broaden access beyond localhost.
  */
 static ngx_int_t
 ngx_http_markdown_metrics_validate_request(ngx_http_request_t *r)
@@ -151,9 +199,36 @@ ngx_http_markdown_metrics_prefers_json(ngx_http_request_t *r)
 #endif
 
     if (accept_header != NULL
-        && ngx_strstr(accept_header->value.data, "application/json") != NULL)
+        && ngx_http_markdown_metrics_value_contains(
+            &accept_header->value,
+            ngx_http_markdown_metrics_accept_json,
+            sizeof(ngx_http_markdown_metrics_accept_json) - 1))
     {
         return 1;
+    }
+
+    return 0;
+}
+
+static ngx_flag_t
+ngx_http_markdown_metrics_value_contains(ngx_str_t *value,
+    u_char *needle,
+    size_t needle_len)
+{
+    size_t  i;
+
+    if (value == NULL || needle == NULL || needle_len == 0
+        || value->len < needle_len)
+    {
+        return 0;
+    }
+
+    for (i = 0; i + needle_len <= value->len; i++) {
+        if (ngx_strncasecmp(value->data + i, needle, needle_len)
+            == 0)
+        {
+            return 1;
+        }
     }
 
     return 0;
@@ -183,6 +258,22 @@ ngx_http_markdown_metrics_derive_values(
         : 0;
 }
 
+/**
+ * Render the collected metrics snapshot as a JSON object into the provided buffer.
+ *
+ * Formats all metric counters, derived aggregates (conversion counts, average times,
+ * average I/O), conversion latency buckets, decompression stats, and path-routing hits
+ * as a single JSON object written starting at `p` and not past `end`.
+ *
+ * @param p Pointer to the start position in the buffer where JSON will be written.
+ * @param end Pointer to one past the end of the buffer; writing will not exceed this.
+ * @param snapshot Pointer to the metrics snapshot containing raw counters to emit.
+ * @param conversions_completed Derived total of completed conversions (succeeded + failed).
+ * @param conversion_time_avg_ms Derived average conversion time in milliseconds.
+ * @param input_bytes_avg Derived average input bytes per successful conversion.
+ * @param output_bytes_avg Derived average output bytes per successful conversion.
+ * @returns Pointer to the buffer position immediately after the last byte written.
+ */
 static u_char *
 ngx_http_markdown_metrics_write_json(
     u_char *p,
@@ -220,7 +311,9 @@ ngx_http_markdown_metrics_write_json(
         "  \"decompressions_failed\": %uA,\n"
         "  \"decompressions_gzip\": %uA,\n"
         "  \"decompressions_deflate\": %uA,\n"
-        "  \"decompressions_brotli\": %uA\n"
+        "  \"decompressions_brotli\": %uA,\n"
+        "  \"fullbuffer_path_hits\": %uA,\n"
+        "  \"incremental_path_hits\": %uA\n"
         "}",
         snapshot->conversions_attempted,
         snapshot->conversions_succeeded,
@@ -240,14 +333,28 @@ ngx_http_markdown_metrics_write_json(
         snapshot->conversion_latency_le_100ms,
         snapshot->conversion_latency_le_1000ms,
         snapshot->conversion_latency_gt_1000ms,
-        snapshot->decompressions_attempted,
-        snapshot->decompressions_succeeded,
-        snapshot->decompressions_failed,
-        snapshot->decompressions_gzip,
-        snapshot->decompressions_deflate,
-        snapshot->decompressions_brotli);
+        snapshot->decompressions.attempted,
+        snapshot->decompressions.succeeded,
+        snapshot->decompressions.failed,
+        snapshot->decompressions.gzip,
+        snapshot->decompressions.deflate,
+        snapshot->decompressions.brotli,
+        snapshot->fullbuffer_path_hits,
+        snapshot->incremental_path_hits);
 }
 
+/**
+ * Format a metrics snapshot as a human-readable plain-text report into the provided buffer.
+ *
+ * @param p Pointer to the current write position in the buffer.
+ * @param end Pointer to the end of the buffer (one past the last writable byte).
+ * @param snapshot Snapshot of atomic metrics to render.
+ * @param conversions_completed Total conversions completed (succeeded + failed).
+ * @param conversion_time_avg_ms Average conversion time in milliseconds.
+ * @param input_bytes_avg Average input size in bytes per successful conversion.
+ * @param output_bytes_avg Average output size in bytes per successful conversion.
+ * @returns Pointer to the buffer position immediately after the written data; if the buffer was too small the pointer will be equal to `end`.
+ */
 static u_char *
 ngx_http_markdown_metrics_write_text(
     u_char *p,
@@ -290,7 +397,11 @@ ngx_http_markdown_metrics_write_text(
         "- Decompressions Failed: %uA\n"
         "- Gzip Decompressions: %uA\n"
         "- Deflate Decompressions: %uA\n"
-        "- Brotli Decompressions: %uA\n",
+        "- Brotli Decompressions: %uA\n"
+        "\n"
+        "Path Routing:\n"
+        "- Full-Buffer Path Hits: %uA\n"
+        "- Incremental Path Hits: %uA\n",
         snapshot->conversions_attempted,
         snapshot->conversions_succeeded,
         snapshot->conversions_failed,
@@ -309,12 +420,14 @@ ngx_http_markdown_metrics_write_text(
         snapshot->conversion_latency_le_100ms,
         snapshot->conversion_latency_le_1000ms,
         snapshot->conversion_latency_gt_1000ms,
-        snapshot->decompressions_attempted,
-        snapshot->decompressions_succeeded,
-        snapshot->decompressions_failed,
-        snapshot->decompressions_gzip,
-        snapshot->decompressions_deflate,
-        snapshot->decompressions_brotli);
+        snapshot->decompressions.attempted,
+        snapshot->decompressions.succeeded,
+        snapshot->decompressions.failed,
+        snapshot->decompressions.gzip,
+        snapshot->decompressions.deflate,
+        snapshot->decompressions.brotli,
+        snapshot->fullbuffer_path_hits,
+        snapshot->incremental_path_hits);
 }
 
 /*
@@ -417,3 +530,5 @@ ngx_http_markdown_metrics_handler(ngx_http_request_t *r)
     out.next = NULL;
     return ngx_http_output_filter(r, &out);
 }
+
+#endif /* NGX_HTTP_MARKDOWN_METRICS_IMPL_H */

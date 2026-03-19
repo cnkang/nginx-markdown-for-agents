@@ -4,7 +4,7 @@
 //! - XSS (Cross-Site Scripting) attacks
 //! - XXE (XML External Entity) attacks
 //! - SSRF (Server-Side Request Forgery) attacks
-//! - Code injection through event handlers
+//! - Code injection through event handlers (prefix-based `on*` detection per OWASP/DOMPurify)
 //!
 //! # Threat Model
 //!
@@ -20,8 +20,8 @@
 //! # Defense Layers
 //!
 //! 1. **Input Validation**: Validate HTML structure and size before processing
-//! 2. **Element Sanitization**: Remove dangerous elements (script, iframe, object, embed)
-//! 3. **Attribute Sanitization**: Remove event handlers and dangerous attributes
+//! 2. **Element Sanitization**: Remove dangerous elements (script, embed, etc.); strip tags but preserve content for form and embedded content elements (iframe, object)
+//! 3. **Attribute Sanitization**: Remove event handlers (`on*` prefix match) and dangerous attributes
 //! 4. **URL Sanitization**: Block javascript:, data:, and external URLs
 //! 5. **Entity Safety**: html5ever prevents XXE by default (no external entity resolution)
 //!
@@ -40,17 +40,43 @@ const MAX_NESTING_DEPTH: usize = 1000;
 const DANGEROUS_ELEMENTS: &[&str] = &[
     "script",   // JavaScript execution
     "style",    // CSS injection (can contain expressions)
-    "noscript", // Alternative content, not needed for Markdown
-    "iframe",   // Can load external content
-    "object",   // Can execute plugins
-    "embed",    // Can execute plugins
-    "applet",   // Legacy Java applets
+    "noscript", // Alternative content, usually redundant with main content
+    "applet",   // Legacy Java applets — extinct, no modern usage
     "link",     // Can load external stylesheets with expressions
     "base",     // Can change base URL for all relative URLs
 ];
 
-/// Event handler attributes that should be removed
-/// These allow JavaScript execution when events occur
+/// Embedded content elements whose tags are stripped but whose fallback child
+/// content is preserved. The `src` / `data` attribute is extracted as a
+/// Markdown link so AI agents know what was embedded.
+const EMBEDDED_CONTENT_ELEMENTS: &[&str] = &[
+    "iframe", // Fallback text between tags can be meaningful
+    "object", // Fallback content (e.g. download links, descriptions) is often useful
+    "embed",  // Void element — no children, but src URL is valuable context
+];
+
+/// Form-related elements whose tags are stripped but whose child content is
+/// preserved for Markdown conversion. These elements may carry meaningful text
+/// (labels, button captions, option lists) that AI agents benefit from seeing,
+/// but the raw HTML tags must not leak into the Markdown output.
+const FORM_ELEMENTS: &[&str] = &[
+    "form",     // Container — children often hold descriptive text
+    "button",   // Caption text is useful context
+    "select",   // Contains <option> text
+    "textarea", // May contain default/placeholder text
+    "fieldset", // Groups related controls with a <legend>
+    "legend",   // Label for a <fieldset>
+    "label",    // Descriptive text for a control
+    "option",   // Individual choice text inside <select>
+    "optgroup", // Group label for options
+    "datalist", // Suggestion list
+    "output",   // Calculation result text
+];
+
+/// Known event handler attributes (reference list for documentation/auditing).
+/// Detection uses prefix matching (`on*`) instead of this list — see
+/// `SecurityValidator::is_event_handler()`.
+#[allow(dead_code)]
 const EVENT_HANDLER_ATTRIBUTES: &[&str] = &[
     "onclick",
     "ondblclick",
@@ -111,6 +137,10 @@ pub enum SanitizeAction {
     Allow,
     /// Remove the element and all its children
     Remove,
+    /// Strip the element tag but keep child content for text extraction.
+    /// Used for form-related elements whose text is meaningful but whose
+    /// HTML structure must not leak into Markdown output.
+    StripElement,
     /// Strip dangerous attributes but keep the element
     StripAttributes,
     /// Strip dangerous URL from href/src attribute
@@ -160,9 +190,28 @@ impl SecurityValidator {
     pub fn check_element(&self, tag_name: &str) -> SanitizeAction {
         if DANGEROUS_ELEMENTS.contains(&tag_name) {
             SanitizeAction::Remove
+        } else if FORM_ELEMENTS.contains(&tag_name) || EMBEDDED_CONTENT_ELEMENTS.contains(&tag_name)
+        {
+            SanitizeAction::StripElement
         } else {
             SanitizeAction::Allow
         }
+    }
+
+    /// Check if an element is a void form control whose descriptive text
+    /// lives in attributes rather than child nodes (e.g., `<input>`).
+    ///
+    /// Returns `true` for elements where `extract_form_control_text()` should
+    /// be called instead of traversing children.
+    pub fn is_void_form_control(&self, tag_name: &str) -> bool {
+        tag_name == "input"
+    }
+
+    /// Check if an element is an embedded content element (`<iframe>`, `<object>`)
+    /// whose `src`/`data` attribute should be extracted as a Markdown link
+    /// alongside any fallback child text.
+    pub fn is_embedded_content(&self, tag_name: &str) -> bool {
+        EMBEDDED_CONTENT_ELEMENTS.contains(&tag_name)
     }
 
     /// Check if an attribute is a dangerous event handler
@@ -186,7 +235,11 @@ impl SecurityValidator {
     /// assert!(!validator.is_event_handler("href"));
     /// ```
     pub fn is_event_handler(&self, attr_name: &str) -> bool {
-        EVENT_HANDLER_ATTRIBUTES.contains(&attr_name)
+        // Prefix-based detection following OWASP / DOMPurify conventions.
+        // The HTML spec reserves the "on*" attribute namespace exclusively
+        // for event handlers — no legitimate attribute starts with "on"
+        // without being an event handler.
+        attr_name.starts_with("on") && attr_name.len() > 2
     }
 
     /// Check if a URL uses a dangerous scheme
@@ -374,10 +427,59 @@ mod tests {
 
         // Dangerous elements should be removed
         assert_eq!(validator.check_element("script"), SanitizeAction::Remove);
-        assert_eq!(validator.check_element("iframe"), SanitizeAction::Remove);
-        assert_eq!(validator.check_element("object"), SanitizeAction::Remove);
-        assert_eq!(validator.check_element("embed"), SanitizeAction::Remove);
         assert_eq!(validator.check_element("style"), SanitizeAction::Remove);
+
+        // Embedded content elements: tags stripped, fallback text + src link preserved
+        assert_eq!(
+            validator.check_element("iframe"),
+            SanitizeAction::StripElement
+        );
+        assert_eq!(
+            validator.check_element("object"),
+            SanitizeAction::StripElement
+        );
+        assert_eq!(
+            validator.check_element("embed"),
+            SanitizeAction::StripElement
+        );
+        assert!(validator.is_embedded_content("iframe"));
+        assert!(validator.is_embedded_content("object"));
+        assert!(validator.is_embedded_content("embed"));
+        assert!(!validator.is_embedded_content("div"));
+
+        // Form elements should be stripped (tag removed, children kept)
+        assert_eq!(
+            validator.check_element("form"),
+            SanitizeAction::StripElement
+        );
+        assert_eq!(
+            validator.check_element("button"),
+            SanitizeAction::StripElement
+        );
+        assert_eq!(
+            validator.check_element("select"),
+            SanitizeAction::StripElement
+        );
+        assert_eq!(
+            validator.check_element("textarea"),
+            SanitizeAction::StripElement
+        );
+        assert_eq!(
+            validator.check_element("fieldset"),
+            SanitizeAction::StripElement
+        );
+        assert_eq!(
+            validator.check_element("label"),
+            SanitizeAction::StripElement
+        );
+        assert_eq!(
+            validator.check_element("option"),
+            SanitizeAction::StripElement
+        );
+
+        // Void form controls are detected separately
+        assert!(validator.is_void_form_control("input"));
+        assert!(!validator.is_void_form_control("button"));
 
         // Safe elements should be allowed
         assert_eq!(validator.check_element("div"), SanitizeAction::Allow);
@@ -389,16 +491,34 @@ mod tests {
     fn test_event_handlers() {
         let validator = SecurityValidator::new();
 
-        // Event handlers should be detected
+        // Classic event handlers should be detected
         assert!(validator.is_event_handler("onclick"));
         assert!(validator.is_event_handler("onload"));
         assert!(validator.is_event_handler("onerror"));
         assert!(validator.is_event_handler("onmouseover"));
 
+        // Previously-missed handlers now caught by prefix matching
+        assert!(validator.is_event_handler("onpointerdown"));
+        assert!(validator.is_event_handler("onpointerup"));
+        assert!(validator.is_event_handler("ontouchstart"));
+        assert!(validator.is_event_handler("ontouchend"));
+        assert!(validator.is_event_handler("ongotpointercapture"));
+        assert!(validator.is_event_handler("onlostpointercapture"));
+        assert!(validator.is_event_handler("onbeforeinput"));
+        assert!(validator.is_event_handler("onformdata"));
+        assert!(validator.is_event_handler("onsecuritypolicyviolation"));
+        assert!(validator.is_event_handler("onslotchange"));
+
+        // Future/unknown event handlers are also caught
+        assert!(validator.is_event_handler("onfutureevent"));
+
         // Normal attributes should not be detected as event handlers
         assert!(!validator.is_event_handler("href"));
         assert!(!validator.is_event_handler("src"));
         assert!(!validator.is_event_handler("class"));
+
+        // Edge case: bare "on" is not an event handler
+        assert!(!validator.is_event_handler("on"));
     }
 
     #[test]

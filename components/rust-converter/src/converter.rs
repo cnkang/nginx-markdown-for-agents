@@ -802,6 +802,347 @@ mod tests {
         assert!(lines.len() >= 5); // At least 3 paragraphs + 2 blank lines
     }
 
+    /// Test that iframe fallback text is preserved and src is extracted as a link.
+    #[test]
+    fn test_iframe_fallback_and_src_extraction() {
+        let html = br#"<div>
+            <p>Before</p>
+            <iframe src="https://example.com/embed" title="Demo video">
+                <p>Your browser does not support iframes. Visit the content directly.</p>
+            </iframe>
+            <p>After</p>
+        </div>"#;
+        let dom = parse_html(html).expect("Parse failed");
+        let converter = MarkdownConverter::new();
+        let result = converter.convert(&dom).expect("Conversion failed");
+
+        // src should be extracted as a Markdown link with title as label
+        assert!(
+            result.contains("[Demo video](https://example.com/embed)"),
+            "iframe src should be extracted as a Markdown link with title: {}",
+            result
+        );
+        // Fallback text should be preserved
+        assert!(
+            result.contains("Your browser does not support iframes"),
+            "Fallback text should be preserved: {}",
+            result
+        );
+        // No raw HTML
+        assert!(
+            !result.contains("<iframe"),
+            "iframe tag must not leak into Markdown"
+        );
+        // Surrounding content preserved
+        assert!(result.contains("Before"), "Content before iframe preserved");
+        assert!(result.contains("After"), "Content after iframe preserved");
+    }
+
+    /// Test that object fallback content is preserved and data URL extracted.
+    #[test]
+    fn test_object_fallback_and_data_extraction() {
+        let html = br#"<div>
+            <object data="https://example.com/doc.pdf" title="User Guide">
+                <p>Cannot display PDF. Download it here.</p>
+            </object>
+        </div>"#;
+        let dom = parse_html(html).expect("Parse failed");
+        let converter = MarkdownConverter::new();
+        let result = converter.convert(&dom).expect("Conversion failed");
+
+        // data attr should be extracted as a Markdown link
+        assert!(
+            result.contains("[User Guide](https://example.com/doc.pdf)"),
+            "object data should be extracted as a Markdown link: {}",
+            result
+        );
+        // Fallback text preserved
+        assert!(
+            result.contains("Cannot display PDF"),
+            "Fallback text should be preserved: {}",
+            result
+        );
+        assert!(!result.contains("<object"), "object tag must not leak");
+    }
+
+    /// Test that iframe/object with dangerous URLs have the URL suppressed.
+    #[test]
+    fn test_embedded_content_dangerous_url_suppressed() {
+        let html = br#"<iframe src="javascript:alert(1)"><p>Fallback</p></iframe>"#;
+        let dom = parse_html(html).expect("Parse failed");
+        let converter = MarkdownConverter::new();
+        let result = converter.convert(&dom).expect("Conversion failed");
+
+        // javascript: URL must not appear
+        assert!(
+            !result.contains("javascript:"),
+            "Dangerous URL must be suppressed"
+        );
+        // Fallback text still preserved
+        assert!(
+            result.contains("Fallback"),
+            "Fallback text should still be preserved"
+        );
+    }
+
+    /// Test iframe without src or title — just fallback text.
+    #[test]
+    fn test_iframe_no_src_fallback_only() {
+        let html = br#"<iframe><p>Embedded content unavailable</p></iframe>"#;
+        let dom = parse_html(html).expect("Parse failed");
+        let converter = MarkdownConverter::new();
+        let result = converter.convert(&dom).expect("Conversion failed");
+
+        assert!(
+            result.contains("Embedded content unavailable"),
+            "Fallback text should be preserved even without src"
+        );
+        assert!(!result.contains("<iframe"), "No raw HTML");
+    }
+
+    /// Test that embed src is extracted as a Markdown link.
+    #[test]
+    fn test_embed_src_extraction() {
+        let html =
+            br#"<div><p>Before</p><embed src="https://example.com/doc.pdf"><p>After</p></div>"#;
+        let dom = parse_html(html).expect("Parse failed");
+        let converter = MarkdownConverter::new();
+        let result = converter.convert(&dom).expect("Conversion failed");
+
+        assert!(
+            result.contains("[https://example.com/doc.pdf](https://example.com/doc.pdf)"),
+            "embed src should be extracted as link: {}",
+            result
+        );
+        assert!(!result.contains("<embed"), "No raw HTML");
+        assert!(result.contains("Before"));
+        assert!(result.contains("After"));
+    }
+
+    /// Test video element: src and poster extracted, fallback text preserved.
+    #[test]
+    fn test_video_url_extraction() {
+        let html = br#"<video src="https://example.com/video.mp4" poster="https://example.com/thumb.jpg" title="Demo video">
+            <p>Your browser does not support video.</p>
+        </video>"#;
+        let dom = parse_html(html).expect("Parse failed");
+        let converter = MarkdownConverter::new();
+        let result = converter.convert(&dom).expect("Conversion failed");
+
+        assert!(
+            result.contains("[Demo video](https://example.com/video.mp4)"),
+            "video src should be extracted with title as label: {}",
+            result
+        );
+        assert!(
+            result.contains("![](https://example.com/thumb.jpg)"),
+            "poster should be extracted as image: {}",
+            result
+        );
+        assert!(
+            result.contains("Your browser does not support video"),
+            "Fallback text should be preserved: {}",
+            result
+        );
+        assert!(!result.contains("<video"), "No raw HTML");
+    }
+
+    /// Test audio element: src extracted, fallback text preserved.
+    #[test]
+    fn test_audio_url_extraction() {
+        let html = br#"<audio src="https://example.com/podcast.mp3" title="Episode 1">
+            <p>Your browser does not support audio.</p>
+        </audio>"#;
+        let dom = parse_html(html).expect("Parse failed");
+        let converter = MarkdownConverter::new();
+        let result = converter.convert(&dom).expect("Conversion failed");
+
+        assert!(
+            result.contains("[Episode 1](https://example.com/podcast.mp3)"),
+            "audio src should be extracted with title: {}",
+            result
+        );
+        assert!(
+            result.contains("Your browser does not support audio"),
+            "Fallback text preserved: {}",
+            result
+        );
+    }
+
+    /// Test source element inside video: src extracted with type as label.
+    #[test]
+    fn test_source_url_extraction() {
+        let html = br#"<video>
+            <source src="https://example.com/video.webm" type="video/webm">
+            <source src="https://example.com/video.mp4" type="video/mp4">
+            <p>Fallback text</p>
+        </video>"#;
+        let dom = parse_html(html).expect("Parse failed");
+        let converter = MarkdownConverter::new();
+        let result = converter.convert(&dom).expect("Conversion failed");
+
+        assert!(
+            result.contains("[video/webm](https://example.com/video.webm)"),
+            "source src with type label: {}",
+            result
+        );
+        assert!(
+            result.contains("[video/mp4](https://example.com/video.mp4)"),
+            "source src with type label: {}",
+            result
+        );
+        assert!(
+            result.contains("Fallback text"),
+            "Fallback preserved: {}",
+            result
+        );
+    }
+
+    /// Test track element: src extracted with label text.
+    #[test]
+    fn test_track_url_extraction() {
+        let html = r#"<video src="video.mp4">
+            <track src="subs_en.vtt" kind="subtitles" label="English">
+            <track src="subs_zh.vtt" kind="subtitles" label="中文">
+        </video>"#;
+        let dom = parse_html(html.as_bytes()).expect("Parse failed");
+        let converter = MarkdownConverter::new();
+        let result = converter.convert(&dom).expect("Conversion failed");
+
+        assert!(
+            result.contains("[English](subs_en.vtt)"),
+            "track label should be link text: {}",
+            result
+        );
+        assert!(
+            result.contains("[中文](subs_zh.vtt)"),
+            "track label with CJK: {}",
+            result
+        );
+    }
+
+    /// Test area element: href extracted with alt text.
+    #[test]
+    fn test_area_link_extraction() {
+        let html = br#"<map name="infographic">
+            <area href="https://example.com/page1" alt="Section 1" title="First section">
+            <area href="https://example.com/page2" alt="Section 2">
+            <area href="https://example.com/page3" title="Third section">
+        </map>"#;
+        let dom = parse_html(html).expect("Parse failed");
+        let converter = MarkdownConverter::new();
+        let result = converter.convert(&dom).expect("Conversion failed");
+
+        assert!(
+            result.contains("[Section 1](https://example.com/page1)"),
+            "area alt should be link text: {}",
+            result
+        );
+        assert!(
+            result.contains("[Section 2](https://example.com/page2)"),
+            "area alt as link text: {}",
+            result
+        );
+        assert!(
+            result.contains("[Third section](https://example.com/page3)"),
+            "area title as fallback label: {}",
+            result
+        );
+    }
+
+    /// Test that form elements are stripped but their text content is preserved.
+    /// AI agents benefit from seeing labels, button text, and option lists.
+    /// Validates: I-02 security fix — no raw HTML form tags in output.
+    #[test]
+    fn test_form_content_extraction() {
+        let html = br#"<form action="/search">
+            <label>Search query</label>
+            <input type="text" placeholder="Enter keywords">
+            <select><option>Option A</option><option>Option B</option></select>
+            <textarea>Default text</textarea>
+            <button>Submit</button>
+        </form>"#;
+        let dom = parse_html(html).expect("Parse failed");
+        let converter = MarkdownConverter::new();
+        let result = converter.convert(&dom).expect("Conversion failed");
+
+        // Text content from form elements should be preserved
+        assert!(
+            result.contains("Search query"),
+            "Label text should be preserved"
+        );
+        assert!(
+            result.contains("Enter keywords"),
+            "Input placeholder should be extracted"
+        );
+        assert!(
+            result.contains("Option A"),
+            "Option text should be preserved"
+        );
+        assert!(
+            result.contains("Option B"),
+            "Option text should be preserved"
+        );
+        assert!(
+            result.contains("Default text"),
+            "Textarea content should be preserved"
+        );
+        assert!(result.contains("Submit"), "Button text should be preserved");
+
+        // Raw HTML tags must not appear in output
+        assert!(
+            !result.contains("<form"),
+            "Form tag must not leak into Markdown"
+        );
+        assert!(
+            !result.contains("<input"),
+            "Input tag must not leak into Markdown"
+        );
+        assert!(
+            !result.contains("<select"),
+            "Select tag must not leak into Markdown"
+        );
+        assert!(
+            !result.contains("<button"),
+            "Button tag must not leak into Markdown"
+        );
+        assert!(
+            !result.contains("<label"),
+            "Label tag must not leak into Markdown"
+        );
+        assert!(!result.contains("action="), "Form attributes must not leak");
+    }
+
+    /// Test that hidden inputs are suppressed but submit/reset values are kept.
+    #[test]
+    fn test_input_type_handling() {
+        let html = br#"<div>
+            <input type="hidden" name="csrf" value="token123">
+            <input type="submit" value="Send">
+            <input type="reset" value="Clear">
+            <input type="text" aria-label="Username field" placeholder="user" value="john">
+        </div>"#;
+        let dom = parse_html(html).expect("Parse failed");
+        let converter = MarkdownConverter::new();
+        let result = converter.convert(&dom).expect("Conversion failed");
+
+        // Hidden input content should not appear
+        assert!(
+            !result.contains("token123"),
+            "Hidden input value must be suppressed"
+        );
+
+        // Submit/reset button text should appear
+        assert!(result.contains("Send"), "Submit value should be preserved");
+        assert!(result.contains("Clear"), "Reset value should be preserved");
+
+        // aria-label takes priority over placeholder and value
+        assert!(
+            result.contains("Username field"),
+            "aria-label should be preferred"
+        );
+    }
+
     #[test]
     fn test_nested_structure() {
         let html = b"<div><h1>Title</h1><p>Content</p></div>";
@@ -1565,8 +1906,12 @@ mod tests {
         let converter = MarkdownConverter::new();
         let result = converter.convert(&dom).expect("Conversion failed");
 
-        // Image without src should not be rendered
-        assert!(!result.contains("!["));
+        // Image without src: alt text is preserved for AI agents
+        assert!(
+            !result.contains("!["),
+            "No Markdown image syntax without URL"
+        );
+        assert!(result.contains("No source"), "Alt text should be preserved");
         assert!(result.contains("Text"));
         assert!(result.contains("more text"));
     }
@@ -1580,6 +1925,53 @@ mod tests {
 
         assert!(result.contains("![A](a.png)"));
         assert!(result.contains("![B](b.png)"));
+    }
+
+    #[test]
+    fn test_image_with_title() {
+        let html =
+            b"<img src=\"photo.jpg\" alt=\"Sunset\" title=\"A beautiful sunset over the ocean\">";
+        let dom = parse_html(html).expect("Parse failed");
+        let converter = MarkdownConverter::new();
+        let result = converter.convert(&dom).expect("Conversion failed");
+
+        assert!(
+            result.contains("![Sunset](photo.jpg \"A beautiful sunset over the ocean\")"),
+            "Title should be included in Markdown image syntax: {}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_image_with_quoted_title() {
+        let html = b"<img src=\"photo.jpg\" alt=\"Sunset\" title='A \"quoted\" title'>";
+        let dom = parse_html(html).expect("Parse failed");
+        let converter = MarkdownConverter::new();
+        let result = converter.convert(&dom).expect("Conversion failed");
+
+        assert!(
+            result.contains("![Sunset](photo.jpg \"A \\\"quoted\\\" title\")"),
+            "Quotes inside image titles should be escaped: {}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_image_dangerous_url_preserves_alt() {
+        let html = b"<p><img src=\"javascript:alert(1)\" alt=\"Important diagram\"></p>";
+        let dom = parse_html(html).expect("Parse failed");
+        let converter = MarkdownConverter::new();
+        let result = converter.convert(&dom).expect("Conversion failed");
+
+        assert!(
+            !result.contains("javascript:"),
+            "Dangerous URL must be suppressed"
+        );
+        assert!(
+            result.contains("Important diagram"),
+            "Alt text should be preserved even when URL is blocked: {}",
+            result
+        );
     }
 
     // Tests for unordered list handling
