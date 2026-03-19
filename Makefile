@@ -50,9 +50,9 @@ RUST_HEADER := $(RUST_DIR)/include/markdown_converter.h
 NGINX_HEADER := $(NGINX_MODULE_DIR)/src/markdown_converter.h
 
 .PHONY: all build rust-lib rust-lib-debug copy-headers check-headers \
-        test test-rust test-nginx-unit test-nginx-unit-clang-smoke test-nginx-unit-sanitize-smoke \
+        test test-rust test-rust-doc test-nginx-unit test-nginx-unit-clang-smoke test-nginx-unit-sanitize-smoke \
         test-nginx-integration test-e2e test-all test-rust-fuzz-smoke \
-        docs-check verify-large-e2e verify-huge-native-e2e verify-huge-allowed-native-e2e \
+        docs-check license-check verify-large-e2e verify-huge-native-e2e verify-huge-allowed-native-e2e \
         verify-chunked-native-e2e verify-chunked-native-e2e-smoke verify-chunked-native-e2e-stress \
         clean help
 
@@ -85,7 +85,13 @@ test: build
 	@$(MAKE) -C $(NGINX_TEST_DIR) unit-smoke
 
 test-rust:
+	cd $(RUST_DIR) && cargo build --release --example perf_baseline
 	cd $(RUST_DIR) && cargo test --all
+	cd $(RUST_DIR) && cargo test --doc --all-features
+
+test-rust-doc:
+	@echo "Running Rust doctests (all features)..."
+	cd $(RUST_DIR) && cargo test --doc --all-features
 
 test-rust-fuzz-smoke:
 	cd $(RUST_DIR) && cargo +nightly fuzz run parser_html -- -max_total_time=5
@@ -112,6 +118,11 @@ test-all: build test-rust test-nginx-unit
 
 docs-check:
 	python3 tools/docs/check_docs.py
+
+license-check:
+	python3 tools/ci/check_c_licenses.py
+	python3 tools/ci/check_rust_licenses.py
+	python3 tools/ci/check_third_party_notices.py
 
 verify-large-e2e:
 	./tools/e2e/verify_large_markdown_response_e2e.sh
@@ -142,7 +153,8 @@ help:
 	@echo "Targets:"
 	@echo "  build                    - Build Rust library + sync header"
 	@echo "  test                     - Fast smoke tests"
-	@echo "  test-rust                - Run Rust test suite"
+	@echo "  test-rust                - Run Rust test suite (unit + doctests)"
+	@echo "  test-rust-doc            - Run Rust doctests only (all features)"
 	@echo "  test-rust-fuzz-smoke     - Run short cargo-fuzz smoke checks"
 	@echo "  test-nginx-unit          - Run nginx C unit tests"
 	@echo "  test-nginx-unit-clang-smoke - Run nginx C smoke tests with clang"
@@ -151,4 +163,5 @@ help:
 	@echo "  test-e2e                 - Run end-to-end tests"
 	@echo "  test-all                 - Run build + rust + unit tests"
 	@echo "  docs-check               - Validate documentation links/style"
+	@echo "  license-check            - Verify license policy and THIRD-PARTY-NOTICES coverage"
 	@echo "  clean                    - Clean build artifacts"

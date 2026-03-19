@@ -1,0 +1,8 @@
+[package]
+name = "test-corpus-conversion"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+nginx-markdown-converter = { path = "../../../components/rust-converter" }

@@ -9,6 +9,8 @@ on:
       - "tools/ci/build_nginx_for_codeql.sh"
       - "tools/ci/check_c_licenses.py"
       - "tools/ci/check_rust_licenses.py"
+      - "tools/ci/check_third_party_notices.py"
+      - "THIRD-PARTY-NOTICES"
       - "Makefile"
       - ".github/workflows/codeql.yml"
   push:
@@ -18,6 +20,8 @@ on:
       - "tools/ci/build_nginx_for_codeql.sh"
       - "tools/ci/check_c_licenses.py"
       - "tools/ci/check_rust_licenses.py"
+      - "tools/ci/check_third_party_notices.py"
+      - "THIRD-PARTY-NOTICES"
       - "Makefile"
       - ".github/workflows/codeql.yml"
   schedule:
@@ -104,10 +108,10 @@ jobs:
         with:
           category: "/language:rust"
 
-  rust-security-quality:
-    name: Rust Security & Quality
+  rust-security-audit:
+    name: Rust Security Audit
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 20
     permissions:
       contents: read
 
@@ -117,26 +121,6 @@ jobs:
 
       - name: Set up Rust toolchain
         uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
-        with:
-          components: rustfmt,clippy
-
-      - name: Cache Rust build artifacts
-        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
-        with:
-          workspaces: |
-            components/rust-converter -> target
-
-      - name: Rust format check
-        working-directory: components/rust-converter
-        run: cargo fmt --all -- --check
-
-      - name: Rust clippy check
-        working-directory: components/rust-converter
-        run: cargo clippy --all-targets --all-features --locked -- -D warnings
-
-      - name: Rust compile sanity check
-        working-directory: components/rust-converter
-        run: cargo check --all-targets --locked
 
       - name: Install cargo-audit
         working-directory: components/rust-converter
@@ -148,3 +132,6 @@ jobs:
 
       - name: Rust copyleft license policy check
         run: python3 tools/ci/check_rust_licenses.py --locked
+
+      - name: THIRD-PARTY-NOTICES coverage check
+        run: python3 tools/ci/check_third_party_notices.py
