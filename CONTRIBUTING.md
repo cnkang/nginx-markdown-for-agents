@@ -9,6 +9,7 @@ Thank you for your interest in contributing to this project! This document provi
 - [Development Workflow](#development-workflow)
 - [Coding Standards](#coding-standards)
 - [Testing Requirements](#testing-requirements)
+- [Continuous Integration](#continuous-integration)
 - [Documentation](#documentation)
 - [Submitting Changes](#submitting-changes)
 
@@ -251,6 +252,58 @@ make -C components/nginx-module/tests unit-eligibility
 - Aim for >80% code coverage for new code
 - Critical paths should have >95% coverage
 - Include edge cases and error conditions
+
+## Continuous Integration
+
+The project uses several GitHub Actions workflows to maintain quality. Understanding these helps you anticipate what checks your PR will face.
+
+### PR CI (`ci.yml`)
+
+Every pull request triggers path-filtered jobs:
+
+- **Rust Quality Gate** — formatting (`cargo fmt`), linting (`cargo clippy -D warnings`), and `make test-rust`.
+- **NGINX C Tests** — unit tests, integration harness, Clang smoke, and sanitizer (ASan/UBSan) smoke.
+- **Runtime Regressions** — end-to-end validation of If-Modified-Since, chunked streaming, and large-response handling against a real NGINX build.
+- **Docs Check** — duplicate and consistency checks on documentation files.
+- **Perf Smoke Gate** — runs the `small` and `medium` performance tiers, then executes the threshold engine against committed baselines. Triggered when Rust source, `perf/`, or `tools/perf/` files change.
+
+### Performance Gating (`nightly-perf.yml` / `perf-smoke` in `ci.yml`)
+
+Performance is guarded at two levels:
+
+1. **PR smoke gate** (`perf-smoke` job in `ci.yml`) — runs the `small` and `medium` benchmark tiers on every PR that touches Rust or perf-related files. The threshold engine compares measurements against platform baselines in `perf/baselines/` using thresholds defined in `perf/thresholds.json`. A regression beyond the configured threshold fails the check.
+
+2. **Nightly full suite** (`nightly-perf.yml`) — runs daily at 03:00 UTC. Executes all tiers (`small`, `medium`, `medium-front-matter`, `large-1m`) with 3 repeats each, computes medians, and runs the threshold engine. Supports a manual `bootstrap_baseline` mode to generate fresh baseline artifacts for a new platform. Measurement and verdict reports are uploaded as workflow artifacts.
+
+Key files:
+- `perf/baselines/<platform>.json` — committed baseline measurements per platform.
+- `perf/thresholds.json` — per-metric regression thresholds.
+- `perf/metrics-schema.json` — metric definitions.
+- `tools/perf/threshold_engine.py` — compares current vs. baseline and emits a verdict.
+- `tools/perf/run_perf_baseline.sh` — benchmark runner script.
+
+### Install Verification (`install-verify.yml`)
+
+Validates that the built NGINX module installs and works correctly across supported platforms. Runs weekly (Sunday 03:00 UTC) and on manual dispatch.
+
+The workflow:
+1. Reads `tools/release-matrix.json` to select representative install targets (lower-bound, latest-stable, latest-mainline, and upper-bound NGINX versions) across glibc and musl on x86_64 and aarch64.
+2. For each target, installs the exact NGINX version (from nginx.org repos or official Docker images), runs `tools/install.sh`, and validates:
+   - Install script exit code and JSON output match expectations.
+   - `nginx -t` passes with the module loaded.
+   - The `.so` module file exists in the modules directory.
+   - A smoke test serves HTML through the module and verifies Markdown conversion output.
+3. Uploads per-target verification summaries as artifacts.
+
+### Release Binaries (`release-binaries.yml`)
+
+Builds pre-compiled module binaries for every full-support entry in `tools/release-matrix.json`. Runs on GitHub Release publish events and manual dispatch.
+
+The workflow:
+1. Resolves the build matrix from `tools/release-matrix.json` (full-support entries only).
+2. Builds each NGINX version × OS type × architecture combination via `tools/build_release.sh`.
+3. Runs a completeness check (`tools/release/completeness_check.py`) to verify that every expected matrix entry produced an artifact.
+4. On release events, publishes all `.tar.gz` artifacts and a grouped version manifest to the GitHub Release.
 
 ## Documentation
 

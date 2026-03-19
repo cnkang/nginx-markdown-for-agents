@@ -1121,19 +1121,25 @@ curl -H "Accept: text/markdown" http://localhost/test
 
 | Module Version | NGINX Version | Status |
 |----------------|---------------|--------|
-| 0.2.x | 1.24.0+ | Supported |
-| 0.2.x | < 1.24.0 | Not supported |
+| 0.3.x | 1.24.0+ | Supported |
+| 0.3.x | < 1.24.0 | Not supported |
 
 #### Rust Version Compatibility
 
 | Module Version | Rust Version | Status |
 |----------------|--------------|--------|
-| 0.2.x | 1.85.0+ | Supported (edition 2024) |
-| 0.2.x | < 1.85.0 | Not supported |
+| 0.3.x | 1.85.0+ | Supported (edition 2024) |
+| 0.3.x | < 1.85.0 | Not supported |
 
 ---
 
 ### Migration Notes
+
+#### Upgrading to 0.3.x
+
+- `fullbuffer_path_hits` and `incremental_path_hits` have been moved to the end of `ngx_http_markdown_metrics_t`. If you use shared-memory metrics, a graceful reload is sufficient; no data migration is needed.
+- The `incremental` feature is off by default. Enable it with `--features incremental` when building the Rust converter to use the new `markdown_large_body_threshold` directive.
+- `X-Forwarded-Host` and `X-Forwarded-Proto` headers are no longer trusted by default for base URL construction. If NGINX sits behind a trusted reverse proxy that sets these headers, add `markdown_trust_forwarded_headers on;` to restore the previous behavior.
 
 #### Upgrading to 0.2.x
 

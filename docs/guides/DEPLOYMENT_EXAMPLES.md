@@ -217,6 +217,63 @@ http {
 
 If you are using a reverse proxy upstream instead of PHP-FPM, `proxy_set_header Accept-Encoding "";` is still a useful first-step simplification, but it is optional. The module can automatically decompress upstream `gzip`, `br`, and `deflate` responses when you keep compression enabled end to end.
 
+### Bot-Targeted Conversion (User-Agent Based)
+
+AI crawlers and agent bots typically do not send `Accept: text/markdown`. They use standard browser-like Accept headers when fetching pages. If you want specific bots to receive Markdown automatically, you can rewrite the Accept header at the NGINX layer based on User-Agent matching.
+
+This is a practical pattern because it requires no application or module code changes — the module's existing content negotiation handles the conversion once it sees `text/markdown` in the Accept header. Operators can manage the bot list entirely through NGINX configuration.
+
+```nginx
+load_module modules/ngx_http_markdown_filter_module.so;
+
+http {
+    # Rewrite Accept header for known AI bots
+    map $http_user_agent $bot_accept_override {
+        default         "";
+        "~*ClaudeBot"   "text/markdown, text/html;q=0.9";
+        "~*GPTBot"      "text/markdown, text/html;q=0.9";
+        "~*Googlebot"   "text/markdown, text/html;q=0.9";
+    }
+
+    # Use the override when present, otherwise keep the original Accept
+    map $bot_accept_override $final_accept {
+        ""      $http_accept;
+        default $bot_accept_override;
+    }
+
+    server {
+        listen 8080;
+
+        location / {
+            markdown_filter on;
+            markdown_on_error pass;
+            proxy_set_header Accept $final_accept;
+            proxy_pass http://backend;
+        }
+
+        # API and static paths still excluded
+        location /api/ { markdown_filter off; proxy_pass http://backend; }
+        location /assets/ { markdown_filter off; proxy_pass http://backend; }
+    }
+}
+```
+
+Verification:
+
+```bash
+# Simulate ClaudeBot — should return Markdown
+curl -sD - -o /dev/null -A "ClaudeBot/1.0" http://localhost:8080/
+# Expected: Content-Type: text/markdown; charset=utf-8
+
+# Normal browser request — should return HTML
+curl -sD - -o /dev/null -H "Accept: text/html" http://localhost:8080/
+# Expected: Content-Type: text/html
+```
+
+For a ready-to-use template, see [examples/nginx-configs/06-bot-targeted-conversion.conf](../../examples/nginx-configs/06-bot-targeted-conversion.conf).
+
+For the content negotiation details behind this pattern, see [Content Negotiation: Bot-Targeted Conversion](../features/CONTENT_NEGOTIATION.md#bot-targeted-conversion-user-agent-based).
+
 ### Ready-to-Use Configuration Templates
 
 See [examples/nginx-configs/](../../examples/nginx-configs/) for copy-paste-ready templates:

@@ -129,8 +129,20 @@ End
 The current implementation focuses on the three core non-content elements. Future versions may consider:
 
 1. **Navigation elements**: `<nav>`, `<header>`, `<footer>` (optional for v1, mentioned in design)
-2. **Other non-content elements**: `<iframe>`, `<svg>`, `<canvas>` (if needed)
-3. **Inline event handlers**: Removal of `onclick`, `onload`, etc. attributes (separate concern)
+2. **Other non-content elements**: `<svg>`, `<canvas>` (if needed)
+3. **Inline event handlers**: Removal of all `on*` attributes via prefix matching (handled by `security.rs`)
+
+## Related: Form Element Content Preservation
+
+Form-related elements (`<form>`, `<button>`, `<select>`, `<textarea>`, `<fieldset>`, `<label>`, `<option>`, etc.) are handled separately from non-content elements. Instead of being removed entirely, their HTML tags are stripped while child text content is preserved in the Markdown output. This ensures AI agents retain meaningful information such as labels, button captions, and option lists. See `docs/features/security.md` Layer 2 for details.
+
+## Related: Embedded Content Element Handling
+
+Embedded content elements (`<iframe>`, `<object>`, `<embed>`) are also handled with a strip-tag-keep-content approach. The `src`/`data` URL is extracted as a Markdown link (using the `title` attribute as label when available), and any fallback child text is preserved. Dangerous URL schemes (`javascript:`, `data:`, etc.) are suppressed. See `docs/features/security.md` Layer 2 for details.
+
+## Related: Media Element URL Extraction
+
+Media elements (`<video>`, `<audio>`) have their `src` URL extracted as a Markdown link before traversing fallback children. Video `poster` thumbnails are extracted as Markdown images. Child `<source>` elements have their `src` extracted with `type` as label; `<track>` elements use `label` as link text. Image map `<area>` elements have their `href` extracted as links with `alt`/`title` as text. This ensures AI agents see all referenced resource URLs without losing information.
 
 ## Verification
 

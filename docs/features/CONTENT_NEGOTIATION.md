@@ -212,6 +212,66 @@ curl -H "Accept: */*" http://localhost/page.html
 
 ## Common Patterns
 
+### Bot-Targeted Conversion (User-Agent Based)
+
+Some AI crawlers and agent bots do not send `Accept: text/markdown` in their requests. If you want these bots to receive Markdown automatically when they fetch `text/html` pages, you can use NGINX's `map` directive to rewrite the `Accept` header for matching User-Agent strings before the request reaches the upstream.
+
+This approach is useful because:
+
+- Many AI crawlers (ClaudeBot, GPTBot, etc.) request pages with a standard browser-like `Accept` header and have no built-in mechanism to ask for Markdown.
+- Injecting `Accept: text/markdown` at the NGINX layer lets the module's existing content negotiation logic handle the rest, without any code changes.
+- Operators retain full control over which bots receive Markdown and can add or remove User-Agent patterns through configuration alone.
+
+```nginx
+# Rewrite Accept header for known AI bots so the module sees text/markdown
+map $http_user_agent $bot_accept_override {
+    default         "";
+    "~*ClaudeBot"   "text/markdown, text/html;q=0.9";
+    "~*GPTBot"      "text/markdown, text/html;q=0.9";
+    "~*Googlebot"   "text/markdown, text/html;q=0.9";
+}
+
+# Use the override when present, otherwise keep the original Accept header
+map $bot_accept_override $final_accept {
+    ""      $http_accept;
+    default $bot_accept_override;
+}
+
+server {
+    listen 80;
+
+    location / {
+        markdown_filter on;
+        proxy_set_header Accept $final_accept;
+        proxy_pass http://backend;
+    }
+}
+```
+
+With this configuration:
+
+- Requests from ClaudeBot, GPTBot, or Googlebot have their Accept header replaced with `text/markdown, text/html;q=0.9`, which causes the module to convert eligible `text/html` responses to Markdown.
+- Requests from all other clients keep their original Accept header. Browsers and normal tools continue to receive HTML as before.
+- The module's standard eligibility checks (status code, content type, size limits, etc.) still apply. Only responses that pass all checks are converted.
+
+Note: If you also want to control the on/off switch per bot (rather than just the Accept header), you can combine this with a variable-driven `markdown_filter`:
+
+```nginx
+map $http_user_agent $is_ai_bot {
+    default         0;
+    "~*ClaudeBot"   1;
+    "~*GPTBot"      1;
+}
+
+location / {
+    markdown_filter $is_ai_bot;
+    proxy_set_header Accept $final_accept;
+    proxy_pass http://backend;
+}
+```
+
+This enables the module only for matching bots, so non-bot requests skip the filter entirely.
+
 ### API Gateway Pattern
 
 Serve Markdown to agents, HTML to browsers:

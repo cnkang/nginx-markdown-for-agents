@@ -56,24 +56,40 @@ pub fn validate_depth(&self, depth: usize) -> Result<(), String> {
 
 ### Layer 2: Element Sanitization
 
-**Location**: `src/security.rs` - `DANGEROUS_ELEMENTS`
+**Location**: `src/security.rs` - `DANGEROUS_ELEMENTS`, `FORM_ELEMENTS`
 
-**Dangerous Elements Removed**:
+The converter classifies elements into three categories using `SanitizeAction`:
+
+**Dangerous Elements — Fully Removed** (`SanitizeAction::Remove`):
 - `<script>` - JavaScript execution
 - `<style>` - CSS injection (can contain expressions)
-- `<iframe>` - Can load external content
-- `<object>` - Can execute plugins
-- `<embed>` - Can execute plugins
 - `<applet>` - Legacy Java applets
 - `<link>` - Can load external stylesheets with expressions
 - `<base>` - Can change base URL for all relative URLs
-- `<noscript>` - Alternative content, not needed
+- `<noscript>` - Alternative content, usually redundant with main content
+
+**Form Elements — Tags Stripped, Content Preserved** (`SanitizeAction::StripElement`):
+- `<form>`, `<button>`, `<select>`, `<textarea>`, `<fieldset>`, `<legend>`, `<label>`, `<option>`, `<optgroup>`, `<datalist>`, `<output>` - Tags are removed but child text content is preserved in the Markdown output. This ensures AI agents see meaningful content (labels, button captions, option lists) without raw HTML leaking into the output.
+- `<input>` (void form control) - Descriptive text is extracted from attributes in priority order: `aria-label` > `placeholder` > `value`. Hidden inputs (`type="hidden"`) are suppressed entirely.
+
+**Embedded Content Elements — Tags Stripped, URL Extracted, Fallback Preserved** (`SanitizeAction::StripElement`):
+- `<iframe>`, `<object>`, `<embed>` - Tags are removed. The `src` (iframe/embed) or `data` (object) URL is extracted as a Markdown link, using the `title` attribute as the link label when available. Fallback child text between the tags is preserved. Dangerous URL schemes (`javascript:`, `data:`, etc.) are suppressed — only safe URLs appear in the output.
+
+**Media Elements — URL Extracted, Fallback Preserved** (handled in traversal):
+- `<video>`, `<audio>` - The `src` URL is extracted as a Markdown link (with `title` as label). Video `poster` thumbnails are extracted as Markdown images. Fallback child text is preserved via normal child traversal.
+- `<source>` - The `src` URL is extracted as a Markdown link with `type` as label (e.g., `[video/mp4](url)`).
+- `<track>` - The `src` URL is extracted as a Markdown link with `label` as link text (e.g., `[English](subs.vtt)`).
+- `<area>` - The `href` is extracted as a Markdown link with `alt` or `title` as link text.
 
 **Implementation**:
 ```rust
 pub fn check_element(&self, tag_name: &str) -> SanitizeAction {
     if DANGEROUS_ELEMENTS.contains(&tag_name) {
         SanitizeAction::Remove
+    } else if FORM_ELEMENTS.contains(&tag_name)
+        || EMBEDDED_CONTENT_ELEMENTS.contains(&tag_name)
+    {
+        SanitizeAction::StripElement
     } else {
         SanitizeAction::Allow
     }
@@ -82,21 +98,21 @@ pub fn check_element(&self, tag_name: &str) -> SanitizeAction {
 
 ### Layer 3: Attribute Sanitization
 
-**Location**: `src/security.rs` - `EVENT_HANDLER_ATTRIBUTES`
+**Location**: `src/security.rs` - `SecurityValidator::is_event_handler()`
 
 **Event Handlers Removed**:
-All `on*` attributes are removed, including:
+All attributes starting with `on` (with length > 2) are removed via prefix matching, following the OWASP/DOMPurify convention. This covers all current and future event handlers, including:
 - `onclick`, `ondblclick`, `onmousedown`, `onmouseup`
 - `onmouseover`, `onmousemove`, `onmouseout`
 - `onkeydown`, `onkeypress`, `onkeyup`
 - `onload`, `onunload`, `onerror`
 - `onfocus`, `onblur`, `onchange`, `onsubmit`
-- And 20+ more event handlers
+- `onpointerdown`, `ontouchstart`, `onbeforeinput`, and any future `on*` handlers
 
 **Implementation**:
 ```rust
 pub fn is_event_handler(&self, attr_name: &str) -> bool {
-    EVENT_HANDLER_ATTRIBUTES.contains(&attr_name)
+    attr_name.starts_with("on") && attr_name.len() > 2
 }
 ```
 
@@ -129,7 +145,7 @@ pub fn is_dangerous_url(&self, url: &str) -> bool {
 
 **Applied to**:
 - `<a href="...">` - Links
-- `<img src="...">` - Images
+- `<img src="...">` - Images (when URL is blocked, `alt` text is preserved as plain text; `title` attribute is included in Markdown image syntax)
 
 ### Layer 5: XXE Prevention
 
@@ -183,11 +199,12 @@ All `unsafe` blocks in the codebase are:
    - Data URL blocking
    - VBScript URL blocking
 
-2. **SSRF Prevention** (4 tests):
-   - iframe removal
-   - object removal
-   - embed removal
+2. **SSRF Prevention** (5 tests):
+   - iframe tag stripping with URL extraction and dangerous scheme suppression
+   - object tag stripping with URL extraction and dangerous scheme suppression
+   - embed tag stripping with URL extraction
    - file: URL blocking
+   - Dangerous URL scheme suppression in embedded content
 
 3. **XXE Prevention** (2 tests):
    - DOCTYPE entity handling

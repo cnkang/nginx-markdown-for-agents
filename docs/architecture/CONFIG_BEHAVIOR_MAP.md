@@ -28,7 +28,7 @@ Each directive is described in four dimensions:
 | Behavior | Enables or disables Markdown conversion for the current context; can be static or variable-driven |
 | Lifecycle impact | Header filter entry decision; cached per request before body processing begins |
 | Implementation areas | `components/nginx-module/src/ngx_http_markdown_request_impl.h`, `components/nginx-module/src/ngx_http_markdown_eligibility.c` |
-| Practical note | This is the top-level switch. If it resolves to off in header phase, the body filter will not revisit that decision. |
+| Practical note | This is the top-level switch. If it resolves to off in header phase, the body filter will not revisit that decision. Because `markdown_filter` accepts NGINX variables, operators can combine it with `map` directives to implement User-Agent-based bot targeting — for example, rewriting the Accept header for known AI crawlers so they receive Markdown automatically. See the bot-targeted conversion examples in [../guides/DEPLOYMENT_EXAMPLES.md](../guides/DEPLOYMENT_EXAMPLES.md#bot-targeted-conversion-user-agent-based). |
 
 ### `markdown_on_wildcard`
 

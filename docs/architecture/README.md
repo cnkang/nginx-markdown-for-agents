@@ -14,6 +14,7 @@ Use it when you need more than deployment guidance but less than source-level im
 | The repository layout and where code lives | [REPOSITORY_STRUCTURE.md](REPOSITORY_STRUCTURE.md) |
 | Why conversion lives in Rust | [ADR/0001-use-rust-for-conversion.md](ADR/0001-use-rust-for-conversion.md) |
 | Why v1 uses full buffering | [ADR/0002-full-buffering-approach.md](ADR/0002-full-buffering-approach.md) |
+| Why conversion runs at the origin-near layer | [ADR/0003-inline-origin-near-conversion.md](ADR/0003-inline-origin-near-conversion.md) |
 | The full ADR index | [ADR/README.md](ADR/README.md) |
 
 ## Scope

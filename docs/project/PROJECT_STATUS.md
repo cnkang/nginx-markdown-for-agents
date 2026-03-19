@@ -6,7 +6,7 @@ This project is a production-oriented NGINX filter module backed by a Rust HTML-
 
 ## Current Assessment
 
-As of **version 0.2.1**, the project includes additional maintainability and validation work reflected in the current codebase. Core features are implemented and tested. The codebase includes unit, integration, E2E, and fuzz-oriented validation entrypoints, along with documentation covering installation, configuration, operations, and architecture.
+As of **version 0.3.0**, the project includes additional maintainability and validation work reflected in the current codebase. Core features are implemented and tested. The codebase includes unit, integration, E2E, and fuzz-oriented validation entrypoints, along with documentation covering installation, configuration, operations, and architecture.
 
 This assessment is based on:
 
@@ -25,37 +25,63 @@ This assessment is based on:
 - A separate non-blocking Darwin/macOS smoke workflow validates native Rust build plus real-nginx runtime checks on GitHub-hosted macOS
 - Release artifacts and installation tooling
 
-## Release 0.2.1 Highlights
+## Release 0.3.0 Highlights
 
-The latest release (0.2.1, March 11, 2026) includes:
+The 0.3.0 release includes:
 
 ### Added
-- CI jobs for clang compiler and AddressSanitizer/UndefinedBehaviorSanitizer smoke tests
-- SonarCloud Quality Gate Status badge in both English and Chinese READMEs
+- Incremental processing for large responses with `markdown_large_body_threshold` directive
+- `IncrementalConverter` Rust API behind the `incremental` feature gate
+- Matrix-driven release automation pipeline (`tools/release/`)
+- Third-party notices coverage checks and generated `THIRD-PARTY-NOTICES`
+- Performance baseline gating system with `nightly-perf.yml` workflow
+- Path hit metrics (`fullbuffer_path_hits`, `incremental_path_hits`) via metrics endpoint
+- Large response design document and rollout guide
+- `Cargo.toml` version now strictly tracks the release tag (synchronized from 0.1.0 to 0.3.0)
 
 ### Changed
+- Event handler attribute sanitization now uses `on*` prefix matching instead of a static allowlist, following the OWASP/DOMPurify convention
+- Form-related elements now use strip-tag-keep-content instead of full removal, preserving child text for AI agents
+- Embedded content elements (`iframe`, `object`, `embed`) now use strip-tag-keep-content instead of full removal
+- Image conversion now preserves the `title` attribute in Markdown syntax; missing/blocked image URLs emit `alt` text as plain text
+- Media elements (`video`, `audio`) now have their `src` URL extracted as a Markdown link; video `poster` thumbnails extracted as Markdown images
+- Image map `<area>` elements now have their `href` extracted as Markdown links
+- X-Forwarded-Host/Proto headers are no longer trusted by default; added `markdown_trust_forwarded_headers on|off` directive (default: off)
+- Decompression buffer estimation now logs a warning when the estimated output exceeds 50 MB
+- CI jobs for clang compiler and AddressSanitizer/UndefinedBehaviorSanitizer smoke tests
+- SonarCloud Quality Gate Status badge in both English and Chinese READMEs
 - Updated documentation to reflect correct Rust minimum version (1.85.0+ for edition 2024)
 - Corrected NGINX minimum version references across all documentation (1.24.0+)
-- Added missing feature documentation references (CONTENT_NEGOTIATION.md, CACHE_AWARE_RESPONSES.md) to feature index
-- Updated component README source layouts to match current file structure
-- Removed placeholder migration notes for non-existent future versions from Operations guide
-- Corrected make target references throughout documentation
-- Added clang and sanitizer smoke test targets to testing documentation
 
 ### Fixed
 - Rust minimum version requirement in all documentation (was 1.70.0+, now 1.85.0+)
 - NGINX minimum version in CONTRIBUTING.md (was 1.18.0, now 1.24.0)
 
-## Unreleased / Current Work
+## Previous Release: 0.2.2 (March 15, 2026)
 
-- Further decomposition of the NGINX module into focused config wiring/core/handlers, request-state, payload buffering/replay, conversion/output, lifecycle, and metrics helper units
-- Split Rust converter internals into focused renderer submodules
-- Tightened authenticated-request cache-control handling
-- Hardened canonical E2E validation with TLS backend support
-- Enhanced CI/CD workflows and release automation
-- Refreshed documentation across guides and references
+### Added
+- Canonical native E2E entrypoints under `tools/e2e/`
+- Shared native-build helper logic for runtime verification scripts
+- `cargo-fuzz` targets for parser, FFI, and security-validator paths, plus a nightly GitHub Actions workflow
+- Non-blocking Darwin/macOS smoke workflow
+- Additional performance artifact sampling for the medium front-matter path
 
-## Previous Release: 0.2.0 (March 6, 2026)
+### Changed
+- Split the NGINX module implementation into focused config, request-state, payload, conversion, lifecycle, and metrics helper units
+- Moved shared metrics collection to a cross-worker shared-memory model
+- Split the Rust converter internals into dedicated submodules
+- Reworked `make test-e2e` to delegate to the canonical native E2E suite
+- Expanded C and Rust inline documentation
+- Completed broader doc pass across decompression/buffering and Rust FFI/parser hot paths
+
+### Fixed
+- Hardened native E2E/runtime scripts for reusable `NGINX_BIN` paths
+- Aligned Darwin native builds around a consistent `MACOSX_DEPLOYMENT_TARGET`
+- Restored Darwin Rust target detection in the shared native-build helper
+- Fixed `markdown_stream_types` content-type validation for stricter `-Werror` builds
+- Synchronized documentation with the refactored implementation
+
+## Previous Release: 0.2.1 (March 11, 2026)
 
 ### New Features
 - Variable-driven `markdown_filter` support using NGINX variables and complex values
@@ -83,10 +109,12 @@ The latest release (0.2.1, March 11, 2026) includes:
 - ETag generation for cache-aware responses
 - FFI boundary with panic safety and memory management
 - Security-oriented input sanitization (XSS, XXE, SSRF prevention)
+- Enhanced element handling: form elements, embedded content, media elements, and image maps preserve meaningful content for AI agents
 - Property-based tests for correctness and resilience
 - Cooperative timeout mechanism
 - `cargo-fuzz` targets for parser, FFI, and security-validator paths
 - Internal FFI and metadata helper modules for a smaller public surface per file
+- Incremental processing API (`IncrementalConverter`) behind the `incremental` feature gate
 
 ### NGINX Module (`components/nginx-module/`)
 
@@ -104,6 +132,8 @@ The latest release (0.2.1, March 11, 2026) includes:
 - Automatic upstream decompression (gzip, brotli, deflate)
 - Authentication-aware caching (Cache-Control: private)
 - Variable-driven configuration support
+- Large response routing with `markdown_large_body_threshold` directive
+- Forwarded header trust control with `markdown_trust_forwarded_headers` directive
 
 ## Test Coverage
 
@@ -147,7 +177,7 @@ Run with: `make test-nginx-integration` and `make test-e2e`
 ### CI/CD Pipeline
 
 - Automated builds for multiple platforms (macOS, Linux)
-- Security scanning with CodeQL and Snyk
+- Security scanning with CodeQL plus fuzz-oriented validation coverage
 - Release artifact generation and validation
 - Docker image builds and testing
 
@@ -181,12 +211,15 @@ See [DEPLOYMENT_EXAMPLES.md](../guides/DEPLOYMENT_EXAMPLES.md) for configuration
 
 ## Current Focus and Roadmap
 
-### Current Release (0.2.1)
+### Current Release (0.3.0)
+- Incremental processing for large responses
+- Matrix-driven release automation pipeline
+- Performance baseline gating system
+- Variable-driven configuration support
+- Enhanced installation tooling
+- Shared metrics aggregation and runtime-regression coverage
+- Hardened CI/CD pipeline
 - Documentation accuracy improvements
-- Corrected version requirements (Rust 1.85.0+, NGINX 1.24.0+)
-- Enhanced CI with clang and sanitizer smoke tests
-- Updated feature documentation index
-- Improved testing documentation
 
 ### Near-Term
 - Performance regression tracking with CI artifact capture
@@ -274,7 +307,7 @@ make test-rust-fuzz-smoke   # Short fuzz smoke checks (requires nightly + cargo-
 The project uses GitHub Actions for automated testing:
 
 - **CI Workflow**: Builds and tests on multiple platforms
-- **Security Scanning**: CodeQL and Snyk vulnerability scanning
+- **Security Scanning**: CodeQL and nightly fuzz validation coverage
 - **Release Automation**: Automated artifact generation and publishing
 
 View the latest CI status: [GitHub Actions](https://github.com/cnkang/nginx-markdown-for-agents/actions)
@@ -296,7 +329,7 @@ See `examples/docker/` for Docker build examples.
 
 ## Summary
 
-**NGINX Markdown for Agents** is at version 0.2.1. The project provides HTML-to-Markdown conversion through NGINX content negotiation, with runtime validation reuse, fuzzing workflows, and shared metrics aggregation for observability.
+**NGINX Markdown for Agents** is at version 0.3.0. The project provides HTML-to-Markdown conversion through NGINX content negotiation, with incremental processing for large responses, release automation, performance baseline gating, runtime validation reuse, fuzzing workflows, and shared metrics aggregation for observability.
 
 ### Key Components
 - Core feature implementation
