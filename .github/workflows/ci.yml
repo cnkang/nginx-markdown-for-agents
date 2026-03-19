@@ -9,6 +9,7 @@ on:
       - "tools/**"
       - "tests/**"
       - "docs/**"
+      - "perf/**"
       - "Makefile"
       - "README.md"
       - "README_zh-CN.md"
@@ -20,6 +21,7 @@ on:
       - "tools/**"
       - "tests/**"
       - "docs/**"
+      - "perf/**"
       - "Makefile"
       - "README.md"
       - "README_zh-CN.md"
@@ -42,6 +44,7 @@ jobs:
       rust: ${{ steps.filter.outputs.rust }}
       nginx: ${{ steps.filter.outputs.nginx }}
       e2e: ${{ steps.filter.outputs.e2e }}
+      perf: ${{ steps.filter.outputs.perf }}
       workflows: ${{ steps.filter.outputs.workflows }}
     steps:
       - name: Checkout repository
@@ -69,6 +72,10 @@ jobs:
               - 'tests/corpus/**'
               - 'tools/e2e/**'
               - 'Makefile'
+            perf:
+              - 'components/rust-converter/**'
+              - 'perf/**'
+              - 'tools/perf/**'
             workflows:
               - '.github/workflows/**'
 
@@ -87,7 +94,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
         with:
-          python-version: '3.11'
+          python-version: '3.14.3'
 
       - name: Validate docs
         run: |
@@ -125,8 +132,18 @@ jobs:
         working-directory: components/rust-converter
         run: cargo clippy --all-targets --all-features -- -D warnings
 
-      - name: Run Rust tests
+      - name: Check corpus tool formatting
+        run: cargo fmt --manifest-path tools/corpus/test-corpus-conversion/Cargo.toml --all -- --check
+
+      - name: Clippy corpus tool
+        run: cargo clippy --manifest-path tools/corpus/test-corpus-conversion/Cargo.toml --all-targets -- -D warnings
+
+      - name: Run Rust unit tests
         run: make test-rust
+
+      - name: Run Rust doctests
+        working-directory: components/rust-converter
+        run: cargo test --doc --all-features
 
   nginx-c-tests:
     name: NGINX C Tests (Unit + Integration-C)
@@ -279,7 +296,7 @@ jobs:
   perf-artifacts:
     name: Perf Baseline Artifact
     needs: changes
-    if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.workflows == 'true'
+    if: needs.changes.outputs.perf == 'true' || needs.changes.outputs.rust == 'true' || needs.changes.outputs.workflows == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     continue-on-error: true
@@ -319,3 +336,85 @@ jobs:
         with:
           name: perf-baseline-artifacts
           path: artifacts/perf
+
+  perf-smoke:
+    name: Perf Smoke Gate
+    needs: changes
+    if: needs.changes.outputs.perf == 'true' || needs.changes.outputs.rust == 'true' || needs.changes.outputs.workflows == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+        with:
+          python-version: '3.14.3'
+
+      - name: Install Python test dependencies
+        run: pip install hypothesis pytest
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          workspaces: |
+            components/rust-converter -> target
+
+      - name: Build release binary
+        working-directory: components/rust-converter
+        run: cargo build --release --example perf_baseline
+
+      - name: Detect platform
+        id: platform
+        run: |
+          echo "name=$(python3 tools/perf/report_utils.py detect-platform)" >> "$GITHUB_OUTPUT"
+
+      - name: Run perf baseline (small + medium)
+        env:
+          PERF_GATE_SKIP: "1"
+        run: |
+          mkdir -p perf/reports
+          tools/perf/run_perf_baseline.sh --tier small --json-output perf/reports/perf-measurement-small.json
+          tools/perf/run_perf_baseline.sh --tier medium --json-output perf/reports/perf-measurement-medium.json
+
+      - name: Merge measurement reports
+        run: |
+          python3 tools/perf/report_utils.py merge-measurements \
+            --glob-pattern 'perf/reports/perf-measurement-*.json' \
+            --output perf/reports/perf-measurement-${{ steps.platform.outputs.name }}.json
+
+      - name: Run perf gate Python tests
+        run: python3 -m pytest tools/perf/tests/ -v
+
+      - name: Run local runner output path tests
+        run: tools/perf/tests/test_local_runner_output_paths.sh
+
+      - name: Run threshold engine
+        run: |
+          python3 tools/perf/threshold_engine.py \
+            --baseline perf/baselines/${{ steps.platform.outputs.name }}.json \
+            --current perf/reports/perf-measurement-${{ steps.platform.outputs.name }}.json \
+            --thresholds perf/thresholds.json \
+            --metrics-schema perf/metrics-schema.json \
+            --output-json perf/reports/perf-verdict-${{ steps.platform.outputs.name }}.json \
+            --platform ${{ steps.platform.outputs.name }}
+
+      - name: Upload measurement report
+        if: always()
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: perf-measurement-${{ steps.platform.outputs.name }}.json
+          path: perf/reports/perf-measurement-${{ steps.platform.outputs.name }}.json
+
+      - name: Upload verdict report
+        if: always()
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: perf-verdict-${{ steps.platform.outputs.name }}.json
+          path: perf/reports/perf-verdict-${{ steps.platform.outputs.name }}.json

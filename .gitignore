@@ -32,6 +32,7 @@ perf/reports/
 
 # Generated large sample corpus (regenerated via tools/corpus/generate_large_samples.sh)
 tools/corpus/samples/
+tools/corpus/test-corpus-conversion/target/
 
 # Generic build output
 build/
