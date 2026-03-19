@@ -216,18 +216,23 @@ fn test_ssrf_iframe_removal() {
     let converter = MarkdownConverter::new();
     let markdown = converter.convert(&dom).expect("Failed to convert");
 
-    // iframe should be completely removed
+    // Raw HTML tags must not appear
     assert!(!markdown.contains("<iframe"));
     assert!(!markdown.contains("</iframe"));
-    assert!(!markdown.contains("evil.com"));
-    assert!(!markdown.contains("malicious"));
+
+    // The https: URL is extracted as a Markdown link (not a dangerous scheme)
+    assert!(
+        markdown.contains("[https://evil.com/malicious](https://evil.com/malicious)"),
+        "iframe src should be extracted as a Markdown link: {}",
+        markdown
+    );
 
     // Normal content should be preserved
     assert!(markdown.contains("Before dangerous element"));
     assert!(markdown.contains("After dangerous element"));
 }
 
-/// Test that object elements are removed
+/// Test that object elements have tags stripped, URL extracted, fallback preserved
 ///
 /// **Validates: Requirements NFR-03.4 (SSRF Prevention)**
 #[test]
@@ -241,8 +246,16 @@ fn test_ssrf_object_removal() {
     let converter = MarkdownConverter::new();
     let markdown = converter.convert(&dom).expect("Failed to convert");
 
-    assert!(!markdown.contains("object"));
-    assert!(!markdown.contains("evil.com"));
+    // Raw HTML tags must not appear
+    assert!(!markdown.contains("<object"));
+    assert!(!markdown.contains("</object"));
+
+    // The https: URL is extracted as a Markdown link
+    assert!(
+        markdown.contains("[https://evil.com/malicious.swf](https://evil.com/malicious.swf)"),
+        "object data should be extracted as a Markdown link: {}",
+        markdown
+    );
     assert!(markdown.contains("Content"));
 }
 
@@ -260,9 +273,48 @@ fn test_ssrf_embed_removal() {
     let converter = MarkdownConverter::new();
     let markdown = converter.convert(&dom).expect("Failed to convert");
 
-    assert!(!markdown.contains("embed"));
-    assert!(!markdown.contains("evil.com"));
+    // Raw HTML tags must not appear
+    assert!(!markdown.contains("<embed"));
+
+    // The https: URL is extracted as a Markdown link
+    assert!(
+        markdown.contains("[https://evil.com/malicious.swf](https://evil.com/malicious.swf)"),
+        "embed src should be extracted as a Markdown link: {}",
+        markdown
+    );
     assert!(markdown.contains("Content"));
+}
+
+/// Test that iframe/object with dangerous URL schemes have the URL suppressed
+///
+/// **Validates: Requirements NFR-03.4 (SSRF Prevention)**
+#[test]
+fn test_ssrf_iframe_dangerous_scheme_suppressed() {
+    let html = r#"<html><body>
+        <iframe src="javascript:alert(1)"><p>Fallback text</p></iframe>
+        <object data="data:text/html,<script>alert(1)</script>"><p>Object fallback</p></object>
+    </body></html>"#;
+
+    let dom = parse_html(html.as_bytes()).expect("Failed to parse HTML");
+    let converter = MarkdownConverter::new();
+    let markdown = converter.convert(&dom).expect("Failed to convert");
+
+    // Dangerous URLs must not appear in output
+    assert!(
+        !markdown.contains("javascript:"),
+        "javascript: URL must be suppressed"
+    );
+    assert!(!markdown.contains("data:"), "data: URL must be suppressed");
+
+    // Fallback text is still preserved
+    assert!(
+        markdown.contains("Fallback text"),
+        "iframe fallback text preserved"
+    );
+    assert!(
+        markdown.contains("Object fallback"),
+        "object fallback text preserved"
+    );
 }
 
 /// Test that file: URLs are blocked (SSRF prevention)

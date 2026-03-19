@@ -209,7 +209,7 @@ checksum = "650eef8c711430f1a879fdd01d4745a7deea475becfb90269c06775983bbf086"
 
 [[package]]
 name = "nginx-markdown-converter"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "blake3",
  "encoding_rs",
