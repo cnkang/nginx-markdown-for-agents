@@ -493,16 +493,18 @@ checksum = "650eef8c711430f1a879fdd01d4745a7deea475becfb90269c06775983bbf086"
 
 [[package]]
 name = "nginx-markdown-converter"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "blake3",
  "criterion",
  "encoding_rs",
  "hex",
  "html5ever",
+ "libc",
  "markup5ever_rcdom",
  "proptest",
  "regex",
+ "serde_json",
 ]
 
 [[package]]

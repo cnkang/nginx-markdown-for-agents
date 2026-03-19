@@ -12,6 +12,19 @@
 #include <ngx_core.h>
 #include <ngx_http.h>
 
+struct MarkdownOptions;
+
+/*
+ * Processing path constants for threshold router
+ */
+#define NGX_HTTP_MARKDOWN_PATH_FULLBUFFER   0  /* Full-buffer path */
+#define NGX_HTTP_MARKDOWN_PATH_INCREMENTAL  1  /* Incremental path */
+
+/*
+ * Threshold off sentinel — used in merge and path selection logic.
+ */
+#define NGX_HTTP_MARKDOWN_THRESHOLD_OFF     0
+
 /*
  * Configuration constants for on_error directive
  */
@@ -114,6 +127,8 @@ typedef struct {
     ngx_flag_t   buffer_chunked;       /* markdown_buffer_chunked on|off (default: on) */
     ngx_array_t *stream_types;         /* markdown_stream_types exclusion list (default: NULL) */
     ngx_flag_t   auto_decompress;      /* markdown_auto_decompress on|off (default: on) */
+    size_t       large_body_threshold; /* markdown_large_body_threshold (NGX_HTTP_MARKDOWN_THRESHOLD_OFF = off) */
+    ngx_flag_t   trust_forwarded_headers; /* markdown_trust_forwarded_headers on|off (default: off) */
 } ngx_http_markdown_conf_t;
 
 /*
@@ -159,6 +174,9 @@ typedef struct {
     ngx_flag_t                   conversion_succeeded;
     ngx_flag_t                   bypass_counted; /* Whether conversions_bypassed was incremented */
     
+    /* Threshold router path selection (NGX_HTTP_MARKDOWN_PATH_FULLBUFFER or NGX_HTTP_MARKDOWN_PATH_INCREMENTAL) */
+    ngx_uint_t                   processing_path;
+
     /* Decompression state */
     ngx_http_markdown_compression_type_e  compression_type;    /* Detected compression type */
     ngx_flag_t                            decompression_needed; /* Whether decompression is needed */
@@ -241,14 +259,34 @@ typedef struct {
     ngx_atomic_t  conversion_latency_le_100ms;   /* Completed conversions <= 100ms */
     ngx_atomic_t  conversion_latency_le_1000ms;  /* Completed conversions <= 1000ms */
     ngx_atomic_t  conversion_latency_gt_1000ms;  /* Completed conversions > 1000ms */
-    
-    /* Decompression metrics */
-    ngx_atomic_t  decompressions_attempted;  /* Total decompression attempts */
-    ngx_atomic_t  decompressions_succeeded;  /* Successful decompressions */
-    ngx_atomic_t  decompressions_failed;     /* Failed decompressions */
-    ngx_atomic_t  decompressions_gzip;       /* Gzip decompressions */
-    ngx_atomic_t  decompressions_deflate;    /* Deflate decompressions */
-    ngx_atomic_t  decompressions_brotli;     /* Brotli decompressions */
+
+    /*
+     * Decompression metrics.
+     *
+     * Grouped into an anonymous sub-struct so that the parent
+     * ngx_http_markdown_metrics_t stays within the 20-field limit
+     * enforced by static analysis (SonarCloud rule c:S1820).
+     * The JSON/text output format is unaffected — keys are still
+     * emitted as flat "decompressions_*" names.
+     */
+    struct {
+        ngx_atomic_t  attempted;   /* Total decompression attempts */
+        ngx_atomic_t  succeeded;   /* Successful decompressions */
+        ngx_atomic_t  failed;      /* Failed decompressions */
+        ngx_atomic_t  gzip;        /* Gzip decompressions */
+        ngx_atomic_t  deflate;     /* Deflate decompressions */
+        ngx_atomic_t  brotli;      /* Brotli decompressions */
+    } decompressions;
+
+    /*
+     * Path hit metrics (threshold router).
+     *
+     * Placed at the end of the struct so that adding them does not shift
+     * the offsets of pre-existing fields.  This preserves shared-memory
+     * layout compatibility across hot reloads from older module builds.
+     */
+    ngx_atomic_t  fullbuffer_path_hits;      /* Requests routed to full-buffer path */
+    ngx_atomic_t  incremental_path_hits;     /* Requests routed to incremental path */
 } ngx_http_markdown_metrics_t;
 
 /* Module declaration */
@@ -372,6 +410,17 @@ ngx_int_t ngx_http_markdown_is_authenticated(ngx_http_request_t *r,
 
 /* Modify Cache-Control header for authenticated content */
 ngx_int_t ngx_http_markdown_modify_cache_control_for_auth(ngx_http_request_t *r);
+
+/*
+ * Shared conversion-option helpers
+ *
+ * These helpers populate Rust FFI options consistently for both the normal
+ * conversion path and conditional-request revalidation.
+ */
+ngx_int_t ngx_http_markdown_construct_base_url(ngx_http_request_t *r,
+    ngx_pool_t *pool, ngx_str_t *base_url);
+ngx_int_t ngx_http_markdown_prepare_conversion_options(ngx_http_request_t *r,
+    ngx_http_markdown_conf_t *conf, struct MarkdownOptions *options);
 
 /*
  * Conditional request handling functions

@@ -1,3 +1,6 @@
+#ifndef NGX_HTTP_MARKDOWN_CONFIG_DIRECTIVES_IMPL_H
+#define NGX_HTTP_MARKDOWN_CONFIG_DIRECTIVES_IMPL_H
+
 /*
  * Directive registry table.
  *
@@ -322,6 +325,58 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
     },
 
     /*
+     * markdown_trust_forwarded_headers on|off
+     *
+     * Controls whether X-Forwarded-Proto and X-Forwarded-Host headers
+     * are used for base URL construction in Markdown output.
+     *
+     * Security: When off (default), only the NGINX request schema and
+     * server header are used, preventing client-supplied header injection
+     * that could poison relative URLs in the Markdown output.
+     *
+     * Enable this only when NGINX sits behind a trusted reverse proxy
+     * that sets and overwrites these headers. The proxy must strip
+     * X-Forwarded-* headers from untrusted clients.
+     *
+     * Default: off
+     * Context: http, server, location
+     *
+     * Example:
+     *   # Only enable behind a trusted reverse proxy
+     *   markdown_trust_forwarded_headers on;
+     */
+    {
+        ngx_string("markdown_trust_forwarded_headers"),
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_FLAG,
+        ngx_conf_set_flag_slot,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        offsetof(ngx_http_markdown_conf_t, trust_forwarded_headers),
+        NULL
+    },
+
+    /*
+     * markdown_large_body_threshold off|<size>
+     *
+     * Threshold for routing responses to the incremental
+     * processing path. Responses with Content-Length at or
+     * above this value use the incremental path.
+     * Default: off (all responses use full-buffer path)
+     * Context: http, server, location
+     *
+     * Example:
+     *   markdown_large_body_threshold 512k;
+     */
+    {
+        ngx_string("markdown_large_body_threshold"),
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF
+            |NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+        ngx_http_markdown_large_body_threshold,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        0,
+        NULL
+    },
+
+    /*
      * markdown_metrics_shm_size <size>
      *
      * Size of the shared-memory zone used to aggregate metrics across workers.
@@ -359,7 +414,8 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      * - JSON: Accept: application/json
      *
      * Security: Only accessible from localhost by default.
-     * Use allow/deny directives to customize access control.
+     * NGINX allow/deny directives can further restrict access, but they do
+     * not broaden access beyond localhost.
      */
     {
         ngx_string("markdown_metrics"),
@@ -372,3 +428,5 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
 
     ngx_null_command
 };
+
+#endif /* NGX_HTTP_MARKDOWN_CONFIG_DIRECTIVES_IMPL_H */

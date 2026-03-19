@@ -48,6 +48,20 @@
  */
 #define ERROR_INTERNAL 99
 
+#if defined(MARKDOWN_INCREMENTAL_ENABLED)
+/**
+ * Maximum accumulated buffer size in bytes (64 MiB).
+ */
+#define IncrementalConverter_MAX_BUFFER_SIZE ((64 * 1024) * 1024)
+#endif
+
+#if defined(MARKDOWN_INCREMENTAL_ENABLED)
+/**
+ * Opaque handle wrapping an [`IncrementalConverter`] for the C ABI.
+ */
+typedef struct IncrementalConverterHandle IncrementalConverterHandle;
+#endif
+
 /**
  * Opaque handle to Rust converter state shared across conversions.
  */
@@ -139,5 +153,132 @@ void markdown_result_free(struct MarkdownResult *result);
  * not be used after this call returns.
  */
 void markdown_converter_free(struct MarkdownConverterHandle *handle);
+
+#if defined(MARKDOWN_INCREMENTAL_ENABLED)
+/**
+ * Create a new incremental converter handle for incremental Markdown processing.
+ *
+ * The returned handle is an opaque pointer owned by the caller and must be
+ * either finalized with `markdown_incremental_finalize` or freed with
+ * `markdown_incremental_free`.
+ *
+ * # Safety
+ *
+ * - `options` must point to a valid, properly aligned `MarkdownOptions` that
+ *   remains readable for the duration of this call.
+ * - The returned pointer is heap-allocated; the caller owns it and must not
+ *   dereference it except via the `markdown_incremental_*` family of functions.
+ *
+ * # Returns
+ *
+ * A non-NULL handle on success, or NULL if `options` is NULL, if `MarkdownOptions`
+ * cannot be decoded, or if an internal panic is caught.
+ *
+ * # Examples
+ *
+ * ```ignore
+ * # use std::ptr;
+ * use nginx_markdown_converter::ffi::{MarkdownOptions, markdown_incremental_new, markdown_incremental_free};
+ * // Construct options appropriate for your environment.
+ * let opts = MarkdownOptions::default();
+ * let handle = unsafe { markdown_incremental_new(&opts) };
+ * assert!(!handle.is_null());
+ * // Either finalize to produce output or free when done without producing output.
+ * unsafe { markdown_incremental_free(handle) };
+ * ```ignore
+ */
+struct IncrementalConverterHandle *markdown_incremental_new(const struct MarkdownOptions *options);
+#endif
+
+#if defined(MARKDOWN_INCREMENTAL_ENABLED)
+/**
+ * Buffers a provided input chunk for later conversion.
+ *
+ * Accepts an empty chunk (`data_len == 0`) as a no-op.
+ *
+ * # Safety
+ *
+ * * `handle` must be a live pointer returned by [`markdown_incremental_new`].
+ * * `data` must point to at least `data_len` readable bytes, or be NULL when `data_len` is 0`.
+ *
+ * # Returns
+ *
+ * `ERROR_SUCCESS` (0) on success, or a non-zero error code on failure.
+ *
+ * # Examples
+ *
+ * ```ignore
+ * use std::ptr;
+ * use nginx_markdown_converter::ffi::{markdown_incremental_new, markdown_incremental_feed, markdown_incremental_free};
+ * unsafe {
+ *     let options = ptr::null(); // populate as needed
+ *     let handle = markdown_incremental_new(options);
+ *     if !handle.is_null() {
+ *         // feed a chunk
+ *         let _ = markdown_incremental_feed(handle, b"hello".as_ptr(), 5);
+ *         // finalize or free the handle as appropriate
+ *         markdown_incremental_free(handle);
+ *     }
+ * }
+ * ```
+ */
+uint32_t markdown_incremental_feed(struct IncrementalConverterHandle *handle,
+                                   const uint8_t *data,
+                                   uintptr_t data_len);
+#endif
+
+#if defined(MARKDOWN_INCREMENTAL_ENABLED)
+/**
+ * Finalize an incremental converter, consume its handle, and write the conversion output or error into `result`.
+ *
+ * The call always consumes the provided `handle`; after this function returns (whether success, failure,
+ * or internal panic) the handle is invalid and must not be used again or freed by the caller.
+ *
+ * # Safety
+ *
+ * - `handle` must be a live pointer returned by `markdown_incremental_new` that has not already been
+ *   finalized or freed. This function takes ownership of the handle and will free it during execution.
+ * - `result` must be a valid, writable pointer to a `MarkdownResult`. Any buffers previously owned by
+ *   `result` must either be NULL/zero-length or must have been previously returned by this API.
+ *
+ * # Returns
+ *
+ * `ERROR_SUCCESS` (0) on success, or a non-zero error code on failure. In all cases `result` is populated
+ * with either the produced markdown (and optional ETag/token estimate) or an error code and message.
+ *
+ * # Examples
+ *
+ * ```ignore
+ * use std::ptr::null_mut;
+ * use nginx_markdown_converter::ffi::{markdown_incremental_finalize, ERROR_INVALID_INPUT};
+ *
+ * // Passing NULL result pointer is invalid and returns ERROR_INVALID_INPUT.
+ * let code = unsafe { markdown_incremental_finalize(null_mut(), null_mut()) };
+ * assert_eq!(code, ERROR_INVALID_INPUT);
+ * ```
+ */
+uint32_t markdown_incremental_finalize(struct IncrementalConverterHandle *handle,
+                                       struct MarkdownResult *result);
+#endif
+
+#if defined(MARKDOWN_INCREMENTAL_ENABLED)
+/**
+ * Frees an incremental converter handle without finalizing.
+ *
+ * Use this function to release resources when the conversion is being
+ * abandoned (e.g. on error or cancellation).  If the handle has already
+ * been consumed by [`markdown_incremental_finalize`], do **not** call
+ * this function — `finalize` always consumes the handle regardless of
+ * its return code, and calling `free` afterwards is a double-free.
+ *
+ * Passing NULL is a safe no-op.
+ *
+ * # Safety
+ *
+ * * `handle` must be NULL or a live pointer returned by
+ *   [`markdown_incremental_new`] that has not been finalized or freed.
+ */
+void markdown_incremental_free(struct IncrementalConverterHandle *handle);
+#endif
 
 #endif  /* NGINX_MARKDOWN_CONVERTER_H */

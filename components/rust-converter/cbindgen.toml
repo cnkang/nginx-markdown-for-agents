@@ -37,10 +37,13 @@ rename_variants = "None"
 allow_static_const = true
 
 [defines]
-# Preprocessor defines
+# Preprocessor defines for conditional compilation
 "target_os = windows" = "WINDOWS"
 "target_os = linux" = "LINUX"
 "target_os = macos" = "MACOS"
+# Map the 'incremental' Cargo feature to the C preprocessor symbol used in
+# ngx_http_markdown_conversion_impl.h to guard the incremental FFI API.
+"feature = incremental" = "MARKDOWN_INCREMENTAL_ENABLED"
 
 [parse]
 # Parse configuration
@@ -51,8 +54,10 @@ clean = false
 extra_bindings = []
 
 [parse.expand]
-# Macro expansion
+# Expand macros with the incremental feature enabled so cbindgen can see all
+# cfg-gated items and emit the correct #if defined(MARKDOWN_INCREMENTAL_ENABLED)
+# guards in the generated header.
 crates = []
 all_features = false
 default_features = true
-features = []
+features = ["incremental"]

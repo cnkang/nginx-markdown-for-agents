@@ -1,6 +1,10 @@
 use super::*;
 
 impl MarkdownConverter {
+    fn escape_markdown_title(title: &str) -> String {
+        title.replace('\\', "\\\\").replace('"', "\\\"")
+    }
+
     /// Handle anchor (link) elements with optional timeout context.
     pub(super) fn handle_link_with_context(
         &self,
@@ -57,13 +61,17 @@ impl MarkdownConverter {
     }
 
     /// Handle image elements.
+    ///
+    /// Outputs standard Markdown image syntax `![alt](src "title")`.
+    /// When the URL is missing or blocked by URL sanitization, the `alt`
+    /// text is still emitted so AI agents do not lose the description.
     pub(super) fn handle_image(
         &self,
         node: &Handle,
         output: &mut String,
         _depth: usize,
     ) -> Result<(), ConversionError> {
-        let (src, alt) = if let NodeData::Element { ref attrs, .. } = node.data {
+        let (src, alt, title) = if let NodeData::Element { ref attrs, .. } = node.data {
             let attrs_borrowed = attrs.borrow();
             let src = attrs_borrowed
                 .iter()
@@ -74,19 +82,36 @@ impl MarkdownConverter {
                 .find(|attr| attr.name.local.as_ref() == "alt")
                 .map(|attr| attr.value.to_string())
                 .unwrap_or_default();
-            (src, alt)
+            let title = attrs_borrowed
+                .iter()
+                .find(|attr| attr.name.local.as_ref() == "title")
+                .map(|attr| attr.value.to_string());
+            (src, alt, title)
         } else {
-            (None, String::new())
+            (None, String::new(), None)
         };
 
-        if let Some(url) = src
-            && let Some(safe_url) = self.security_validator.sanitize_url(&url)
-        {
+        let safe_url = src
+            .as_deref()
+            .and_then(|u| self.security_validator.sanitize_url(u));
+
+        if let Some(url) = safe_url {
             output.push_str("![");
             output.push_str(&alt);
             output.push_str("](");
-            output.push_str(safe_url);
+            output.push_str(url);
+            if let Some(ref t) = title {
+                let trimmed = t.trim();
+                if !trimmed.is_empty() {
+                    output.push_str(" \"");
+                    output.push_str(&Self::escape_markdown_title(trimmed));
+                    output.push('"');
+                }
+            }
             output.push(')');
+        } else if !alt.trim().is_empty() {
+            // URL missing or dangerous — preserve alt text for AI agents
+            output.push_str(alt.trim());
         }
 
         Ok(())

@@ -188,9 +188,25 @@ ngx_http_markdown_calc_output_size(ngx_http_request_t *r, size_t input_size,
     /*
      * zlib/brotli decoder output counters use unsigned int/size_t combinations.
      * Clamp to UINT_MAX to avoid truncation when assigning `avail_out`.
+     *
+     * NOTE (I-03): The decompression output buffer is bounded by both the 10x
+     * heuristic and `markdown_max_size`. If operators set a very large max_size
+     * (e.g., 1GB), a large compressed input could trigger a proportionally large
+     * allocation. Consider using a separate `markdown_decompress_max_size`
+     * directive if finer control is needed.
      */
     if (estimated > (size_t) UINT_MAX) {
         estimated = (size_t) UINT_MAX;
+    }
+
+    /* Warn when the estimated decompression buffer is unusually large. */
+    if (estimated > 50 * 1024 * 1024) {
+        ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
+                     "markdown filter: large decompression buffer estimated=%uz "
+                     "from input_size=%uz (ratio=%uz:1), capped by max_size=%uz",
+                     estimated, input_size,
+                     (input_size > 0) ? estimated / input_size : 0,
+                     max_size);
     }
 
     if (estimated == 0) {

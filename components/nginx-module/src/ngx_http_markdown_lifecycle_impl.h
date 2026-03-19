@@ -1,3 +1,6 @@
+#ifndef NGX_HTTP_MARKDOWN_LIFECYCLE_IMPL_H
+#define NGX_HTTP_MARKDOWN_LIFECYCLE_IMPL_H
+
 /*
  * Module lifecycle helpers for filter registration and worker setup/teardown.
  *
@@ -77,3 +80,5 @@ ngx_http_markdown_exit_worker(ngx_cycle_t *cycle)
                   "markdown filter: converter cleaned up in worker process (pid: %P)",
                   ngx_pid);
 }
+
+#endif /* NGX_HTTP_MARKDOWN_LIFECYCLE_IMPL_H */
