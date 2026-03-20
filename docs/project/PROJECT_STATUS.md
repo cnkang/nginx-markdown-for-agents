@@ -8,6 +8,15 @@ This project is a production-oriented NGINX filter module backed by a Rust HTML-
 
 As of **version 0.3.0**, the project includes additional maintainability and validation work reflected in the current codebase. Core features are implemented and tested. The codebase includes unit, integration, E2E, and fuzz-oriented validation entrypoints, along with documentation covering installation, configuration, operations, and architecture.
 
+### In-Progress (Unreleased Branch Updates)
+
+- 0.4.0 release-gate validation and tests have been refined based on automated code-review feedback:
+  - Metric naming validation now supports histogram `_seconds_bucket/_sum/_count` series while keeping stricter rejection of ambiguous suffixes.
+  - Checklist verifiability checks now include checked items and ignore fenced code examples.
+  - Release-gate constants are centralized in a shared module to reduce drift between tooling, tests, and governance docs.
+  - File read and directory listing paths in release-gate checks are hardened for graceful failure reporting.
+- Release checklist wording now explicitly requires both Rust proptest and Python Hypothesis property-based test suites.
+
 This assessment is based on:
 
 - Implementation of core features and runtime configurability

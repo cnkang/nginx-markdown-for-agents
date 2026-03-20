@@ -9,27 +9,19 @@ Validates: Requirements 13.2
 import hypothesis.strategies as st
 from hypothesis import given, settings
 
+from pathlib import Path
+from typing import List, Optional
 
-# The 0.4.0 non-goals list — proposals matching these must be rejected.
-# Source: docs/project/release-gates/scope-evaluation-process.md
-NON_GOALS = [
-    "True streaming HTML-to-Markdown conversion",
-    "New output format negotiation (JSON, text/plain, MDX)",
-    "OpenTelemetry tracing",
-    "High-cardinality metrics",
-    "GUI, console, or dashboard",
-    "Cross-web-server ecosystem support (Apache, Caddy, Envoy, Traefik)",
-    "Enterprise control plane or policy center",
-    "AI post-processing capabilities (summarization, rewriting, extraction)",
-    "Complex shadow streaming replacement",
-    "Positioning 0.4.0 as a \"1.0.0 pre-release\"",
-]
+from tools.release.release_constants import NON_GOALS
 
 # Lowercase versions for case-insensitive matching
 _NON_GOALS_LOWER = [ng.lower() for ng in NON_GOALS]
 
 
-def evaluate_scope(proposal_name: str, non_goals: list[str] | None = None) -> str:
+def evaluate_scope(
+    proposal_name: str,
+    non_goals: Optional[List[str]] = None,
+) -> str:
     """Evaluate whether a proposal is in-scope or should be rejected.
 
     A proposal is rejected if its name matches (case-insensitive substring)
@@ -40,20 +32,45 @@ def evaluate_scope(proposal_name: str, non_goals: list[str] | None = None) -> st
         "evaluate" — proposal does not match any non-goal (needs further review)
     """
     if non_goals is None:
-        non_goals = NON_GOALS
+        non_goals = list(NON_GOALS)
     proposal_lower = proposal_name.lower()
     return next(
         (
             "reject"
             for non_goal in non_goals
             if non_goal.lower() in proposal_lower
-            or proposal_lower in non_goal.lower()
         ),
         "evaluate",
     )
 
 
+def _extract_non_goals_from_scope_doc() -> tuple[str, ...]:
+    """Extract bullet items from the Non-Goals section of the scope doc."""
+    repo_root = Path(__file__).resolve().parents[3]
+    doc_path = repo_root / "docs/project/release-gates/scope-evaluation-process.md"
+    lines = doc_path.read_text(encoding="utf-8").splitlines()
+
+    in_section = False
+    collected = []
+    for line in lines:
+        stripped = line.strip()
+        if stripped == "## 0.4.0 Non-Goals List":
+            in_section = True
+            continue
+        if in_section and stripped.startswith("## "):
+            break
+        if in_section and stripped.startswith("- "):
+            collected.append(stripped[2:].strip())
+
+    return tuple(collected)
+
+
 # --- Property tests ---
+
+
+def test_non_goals_constants_match_scope_evaluation_doc():
+    """Keep code constants aligned with the authoritative documentation list."""
+    assert NON_GOALS == _extract_non_goals_from_scope_doc()
 
 
 @given(non_goal=st.sampled_from(NON_GOALS))
@@ -112,7 +129,7 @@ def test_case_insensitive_non_goal_matching(non_goal, case_flip):
         ),
         min_size=1,
         max_size=60,
-    ).filter(lambda s: all(ng not in s.lower() for ng in _NON_GOALS_LOWER) and all(s.lower() not in ng for ng in _NON_GOALS_LOWER)))
+    ).filter(lambda s: all(ng not in s.lower() for ng in _NON_GOALS_LOWER)))
 @settings(max_examples=100)
 def test_proposals_not_matching_non_goals_are_not_rejected(name):
     """Proposals that don't match any non-goal should not be rejected."""
@@ -136,3 +153,8 @@ def test_scope_evaluation_deterministic(data):
         f"Non-deterministic result for '{proposal}': "
         f"first={result1}, second={result2}"
     )
+
+
+def test_short_proposal_not_rejected_for_non_goal_superstring():
+    """A short token should not be rejected only because it appears in a non-goal text."""
+    assert evaluate_scope("GUI") == "evaluate"
