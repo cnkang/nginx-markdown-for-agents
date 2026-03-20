@@ -75,7 +75,6 @@ _VERIFIABLE_INDICATORS = [
     r"NGINX\s+\d",          # version reference
 ]
 
-_CHECKLIST_ITEM_PATTERN = re.compile(r"^- \[[^\]]\]\s*(.*)$")
 _FENCE_PATTERN = re.compile(r"^\s*(`{3,}|~{3,})")
 
 
@@ -112,10 +111,13 @@ def _dod_checkpoints_for_content(content_lower: str) -> Tuple[bool, List[str]]:
 def _extract_checklist_item(line: str) -> str:
     """Return checklist item text for markdown checkboxes."""
     stripped = line.strip()
-    match = _CHECKLIST_ITEM_PATTERN.match(stripped)
-    if match is None:
+    # Parse checklist markers without regex backtracking:
+    # accepted forms are "- [ ] ...", "- [x] ...", "- [X] ...", etc.
+    if len(stripped) < 5:
         return ""
-    return match.group(1).strip()
+    if not stripped.startswith("- ["):
+        return ""
+    return "" if stripped[4] != "]" else stripped[5:].lstrip()
 
 
 def _parse_fence(line: str) -> Optional[Tuple[str, int]]:
@@ -133,6 +135,70 @@ def _has_verifiable_indicator(text: str) -> bool:
         re.search(indicator, text, re.IGNORECASE)
         for indicator in _VERIFIABLE_INDICATORS
     )
+
+
+def _advance_fence_state(
+    active_fence: Optional[Tuple[str, int]],
+    line: str,
+) -> Tuple[Optional[Tuple[str, int]], bool]:
+    """Return updated fence state and whether to skip this line."""
+    fence = _parse_fence(line)
+    if active_fence is None:
+        if fence is None:
+            return None, False
+        return fence, True
+
+    if fence is None:
+        return active_fence, True
+
+    fence_char, fence_len = fence
+    active_char, active_len = active_fence
+    if fence_char == active_char and fence_len >= active_len:
+        return None, True
+    return active_fence, True
+
+
+def _checklist_stats(lines: List[str]) -> Tuple[int, List[str]]:
+    """Return checklist item count and list of unverifiable checklist items."""
+    item_count = 0
+    unverifiable: List[str] = []
+    active_fence: Optional[Tuple[str, int]] = None
+
+    for line in lines:
+        # Ignore checklist-like examples embedded inside fenced code blocks.
+        active_fence, should_skip = _advance_fence_state(active_fence, line)
+        if should_skip:
+            continue
+
+        item_text = _extract_checklist_item(line)
+        if not item_text:
+            continue
+
+        item_count += 1
+        if not _has_verifiable_indicator(item_text):
+            unverifiable.append(item_text)
+
+    return item_count, unverifiable
+
+
+def _evaluate_dod_table_result(
+    name: str,
+    fname: str,
+    content_lower: str,
+) -> Tuple[bool, bool, Optional[str]]:
+    """Return DoD presence, validity and report message for one markdown file."""
+    has_dod_evaluation, missing = _dod_checkpoints_for_content(content_lower)
+    if not has_dod_evaluation:
+        return False, True, None
+
+    if missing:
+        return (
+            True,
+            False,
+            f"  FAIL  {name}/{fname} DoD table missing checkpoints: "
+            + ", ".join(missing),
+        )
+    return True, True, f"  PASS  {name}/{fname} DoD table has all checkpoints"
 
 
 def _find_subspecs_dirs(specs_dir: str) -> List[str]:
@@ -207,11 +273,11 @@ def check_requirements_completeness(specs_dir: str) -> Tuple[bool, List[str]]:
         content = content.lower()
 
         missing = []
-        for pattern, label in _REQUIRED_SECTIONS:
-            # Look for a heading line containing the keyword
-            if not re.search(r"^#{1,4}\s+.*" + pattern, content, re.MULTILINE):
-                missing.append(label)
-
+        missing.extend(
+            label
+            for pattern, label in _REQUIRED_SECTIONS
+            if not re.search(r"^#{1,4}\s+.*" + pattern, content, re.MULTILINE)
+        )
         if missing:
             all_complete = False
             messages.append(
@@ -258,10 +324,11 @@ def check_boundary_descriptions(specs_dir: str) -> Tuple[bool, List[str]]:
 
         # Check for all five required fields
         missing_fields = []
-        for field in _BOUNDARY_FIELDS:
-            if field.lower() not in content_lower:
-                missing_fields.append(field)
-
+        missing_fields.extend(
+            field
+            for field in _BOUNDARY_FIELDS
+            if field.lower() not in content_lower
+        )
         if missing_fields:
             all_present = False
             messages.append(
@@ -298,21 +365,18 @@ def check_dod_evaluation_tables(specs_dir: str) -> Tuple[bool, List[str]]:
                 continue
             assert content is not None
 
-            content_lower = content.lower()
-            has_dod_evaluation, missing = _dod_checkpoints_for_content(content_lower)
+            has_dod_evaluation, file_valid, message = _evaluate_dod_table_result(
+                name=name,
+                fname=fname,
+                content_lower=content.lower(),
+            )
             if not has_dod_evaluation:
                 continue
             found_any = True
-            if missing:
+            if not file_valid:
                 valid = False
-                messages.append(
-                    f"  FAIL  {name}/{fname} DoD table missing checkpoints: "
-                    + ", ".join(missing)
-                )
-            else:
-                messages.append(
-                    f"  PASS  {name}/{fname} DoD table has all checkpoints"
-                )
+            assert message is not None
+            messages.append(message)
 
     if not found_any:
         messages.append(
@@ -339,36 +403,8 @@ def check_checklist_verifiability(
         messages.append(f"  FAIL  {checklist_path} read error: {read_error}")
         return False, messages
     assert content is not None
-    lines = content.splitlines()
-
-    all_verifiable = True
-    item_count = 0
-    unverifiable: List[str] = []
-    active_fence: Optional[Tuple[str, int]] = None
-
-    for line in lines:
-        # Ignore checklist-like examples embedded inside fenced code blocks.
-        fence = _parse_fence(line)
-        if active_fence is None:
-            if fence is not None:
-                active_fence = fence
-                continue
-        else:
-            if fence is not None:
-                fence_char, fence_len = fence
-                active_char, active_len = active_fence
-                if fence_char == active_char and fence_len >= active_len:
-                    active_fence = None
-            continue
-
-        item_text = _extract_checklist_item(line)
-        if not item_text:
-            continue
-
-        item_count += 1
-        if not _has_verifiable_indicator(item_text):
-            all_verifiable = False
-            unverifiable.append(item_text)
+    item_count, unverifiable = _checklist_stats(content.splitlines())
+    all_verifiable = not unverifiable
 
     if item_count == 0:
         messages.append("  WARN  No checklist items found in release-checklist.md")
@@ -377,8 +413,9 @@ def check_checklist_verifiability(
     messages.append(f"  INFO  Found {item_count} checklist items")
 
     if unverifiable:
-        for item in unverifiable:
-            messages.append(f"  FAIL  Non-verifiable item: {item}")
+        messages.extend(
+            f"  FAIL  Non-verifiable item: {item}" for item in unverifiable
+        )
     else:
         messages.append("  PASS  All checklist items have verifiable references")
 
