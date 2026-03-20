@@ -15,7 +15,7 @@ Every 0.4.0 sub-spec must satisfy this six-checkpoint DoD before declaring compl
 
 ## DoD Evaluation Recording Format
 
-Each sub-spec records its evaluation as a markdown table in its completion artifact. Copy the table below and fill in the Status and Evidence columns.
+Each sub-spec records its evaluation as a Markdown table in its completion artifact. Copy the table below and fill in the Status and Evidence columns.
 
 ```markdown
 ## DoD Evaluation

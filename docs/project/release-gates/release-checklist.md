@@ -31,7 +31,7 @@ Requirements references: 10.1, 10.2, 10.3, 10.4, 10.5.
 - [ ] Metrics endpoint has integration test coverage
 - [ ] Rollout strategies tested for primary enablement paths (path-based, host-based, header-based)
 - [ ] Parser optimization (if included): diff coverage and regression tests pass
-- [ ] Property-based tests pass (`cargo test` with proptest)
+- [ ] Property-based tests pass (Rust proptest via `cargo test` and Python Hypothesis tests matching `test_*_pbt.py`)
 
 ## Compatibility Gates
 

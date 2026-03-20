@@ -11,7 +11,7 @@ Requirements: 3.1, 3.2, 3.3, 3.4, 10.3
 import argparse
 import os
 import sys
-from typing import List, Tuple
+from typing import Callable, List, Tuple
 
 # Allow running as `python3 tools/release/validate_release_gates.py` from
 # the project root by ensuring the project root is on sys.path.
@@ -35,25 +35,43 @@ def _run_checks(
     """Run all validation checks and collect results."""
     results: List[Tuple[str, bool, List[str]]] = []
 
-    # Property 2: Document existence
-    passed, msgs = check_document_existence(specs_dir)
-    results.append(("Document Existence (Property 2)", passed, msgs))
+    def run_check(
+        check_name: str,
+        check_fn: Callable[[str], Tuple[bool, List[str]]],
+        target_dir: str,
+    ) -> None:
+        """Run one check and normalize exceptions into a failed result entry."""
+        try:
+            passed, msgs = check_fn(target_dir)
+        except Exception as exc:
+            passed, msgs = False, [f"Exception: {exc}"]
+        results.append((check_name, passed, msgs))
 
-    # Property 1: Requirements completeness
-    passed, msgs = check_requirements_completeness(specs_dir)
-    results.append(("Requirements Completeness (Property 1)", passed, msgs))
-
-    # Property 3: Boundary descriptions
-    passed, msgs = check_boundary_descriptions(specs_dir)
-    results.append(("Boundary Descriptions (Property 3)", passed, msgs))
-
-    # Property 5: DoD evaluation tables
-    passed, msgs = check_dod_evaluation_tables(specs_dir)
-    results.append(("DoD Evaluation Tables (Property 5)", passed, msgs))
-
-    # Property 11: Checklist verifiability
-    passed, msgs = check_checklist_verifiability(release_gates_dir)
-    results.append(("Checklist Verifiability (Property 11)", passed, msgs))
+    run_check(
+        "Document Existence (Property 2)",
+        check_document_existence,
+        specs_dir,
+    )
+    run_check(
+        "Requirements Completeness (Property 1)",
+        check_requirements_completeness,
+        specs_dir,
+    )
+    run_check(
+        "Boundary Descriptions (Property 3)",
+        check_boundary_descriptions,
+        specs_dir,
+    )
+    run_check(
+        "DoD Evaluation Tables (Property 5)",
+        check_dod_evaluation_tables,
+        specs_dir,
+    )
+    run_check(
+        "Checklist Verifiability (Property 11)",
+        check_checklist_verifiability,
+        release_gates_dir,
+    )
 
     return results
 
@@ -77,7 +95,7 @@ def _print_results(results: List[Tuple[str, bool, List[str]]]) -> bool:
     if all_passed:
         print("RESULT: All release gate checks passed.")
     else:
-        failed = [name for name, passed, _ in results if not passed]
+        failed = [name for name, gate_passed, _ in results if not gate_passed]
         print(f"RESULT: {len(failed)} check(s) failed:")
         for name in failed:
             print(f"  - {name}")
