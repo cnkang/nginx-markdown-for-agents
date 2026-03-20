@@ -52,7 +52,7 @@ NGINX_HEADER := $(NGINX_MODULE_DIR)/src/markdown_converter.h
 .PHONY: all build rust-lib rust-lib-debug copy-headers check-headers \
         test test-rust test-rust-doc test-nginx-unit test-nginx-unit-clang-smoke test-nginx-unit-sanitize-smoke \
         test-nginx-integration test-e2e test-all test-rust-fuzz-smoke \
-        docs-check license-check verify-large-e2e verify-huge-native-e2e verify-huge-allowed-native-e2e \
+        docs-check license-check release-gates-check verify-large-e2e verify-huge-native-e2e verify-huge-allowed-native-e2e \
         verify-chunked-native-e2e verify-chunked-native-e2e-smoke verify-chunked-native-e2e-stress \
         clean help
 
@@ -124,6 +124,9 @@ license-check:
 	python3 tools/ci/check_rust_licenses.py
 	python3 tools/ci/check_third_party_notices.py
 
+release-gates-check:
+	python3 tools/release/validate_release_gates.py
+
 verify-large-e2e:
 	./tools/e2e/verify_large_markdown_response_e2e.sh
 
@@ -164,4 +167,5 @@ help:
 	@echo "  test-all                 - Run build + rust + unit tests"
 	@echo "  docs-check               - Validate documentation links/style"
 	@echo "  license-check            - Verify license policy and THIRD-PARTY-NOTICES coverage"
+	@echo "  release-gates-check      - Validate 0.4.0 release gate documents and conventions"
 	@echo "  clean                    - Clean build artifacts"
