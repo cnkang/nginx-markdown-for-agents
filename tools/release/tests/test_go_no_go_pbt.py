@@ -9,16 +9,7 @@ Validates: Requirements 7.5
 import hypothesis.strategies as st
 from hypothesis import given, settings
 
-
-# The P0 sub-specs that must all pass for a Go decision
-P0_SUBSPECS = [
-    "packaging-and-first-run",
-    "benchmark-corpus-and-evidence",
-    "rollout-safety-controlled-enablement",
-    "prometheus-module-metrics",
-]
-
-P1_SUBSPEC = "parser-path-optimization"
+from tools.release.release_constants import P0_SUBSPECS
 
 
 def go_no_go_decision(p0_statuses: dict[str, bool], p1_status: bool) -> str:
@@ -60,7 +51,7 @@ def test_p1_exclusion_does_not_block_release(p0_statuses, p1_status):
 @settings(max_examples=100)
 def test_all_p0_pass_always_go_regardless_of_p1(p1_status):
     """When all P0 pass, decision is always Go regardless of P1."""
-    p0_statuses = {name: True for name in P0_SUBSPECS}
+    p0_statuses = dict.fromkeys(P0_SUBSPECS, True)
     decision = go_no_go_decision(p0_statuses, p1_status)
     assert decision == "Go"
 
@@ -72,7 +63,7 @@ def test_all_p0_pass_always_go_regardless_of_p1(p1_status):
 @settings(max_examples=100)
 def test_any_p0_fail_always_no_go(failing_spec, p1_status):
     """When any P0 fails, decision is always No-Go."""
-    p0_statuses = {name: True for name in P0_SUBSPECS}
+    p0_statuses = dict.fromkeys(P0_SUBSPECS, True)
     p0_statuses[failing_spec] = False
     decision = go_no_go_decision(p0_statuses, p1_status)
     assert decision == "No-Go"

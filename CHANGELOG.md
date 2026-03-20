@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Shared 0.4.0 release-gate constants module (`tools/release/release_constants.py`) to centralize sub-spec discovery keywords, P0 release-decision sub-specs, and scope-evaluation non-goals used by validation/tests.
+- Focused release-gate edge-case tests for checklist parsing and file read failures (`tools/release/tests/test_release_gate_checks.py`).
+- Scope-evaluation regression coverage to ensure short proposal tokens are not rejected solely because they appear inside a longer non-goal phrase.
+
+### Changed
+- Release-gate naming convention validation now explicitly accepts Prometheus histogram series ending in `_seconds_bucket`, `_seconds_sum`, and `_seconds_count` while rejecting ambiguous non-histogram `_bucket|_sum|_count` suffixes.
+- `check_checklist_verifiability` now validates both unchecked and checked checklist entries and ignores checklist-like lines inside fenced code blocks to avoid false failures from examples.
+- Release checklist documentation now explicitly requires both Rust proptest and Python Hypothesis property-based test suites.
+- Scope-evaluation test logic now rejects proposals only when the proposal contains a non-goal phrase (unidirectional substring matching).
+- Validation helpers now use regex `fullmatch` for explicit whole-string conformance checks.
+
+### Fixed
+- Hardened release-gate file scanning and read paths to handle unreadable directories/files gracefully instead of aborting validation.
+- `_run_checks` in `validate_release_gates.py` now isolates per-check exceptions so one failing check does not suppress results from subsequent checks.
+- Updated release-gate docs wording and regex references to align with current validation behavior (including Markdown capitalization consistency and histogram suffix guidance).
+
 ## [0.3.0] - 2026-03-19
 
 This release introduces incremental processing for large responses, a matrix-driven release automation pipeline, third-party notice coverage checks, a performance baseline gating system, and improved HTML element handling for AI agent content preservation.

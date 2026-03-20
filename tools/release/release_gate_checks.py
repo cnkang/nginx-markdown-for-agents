@@ -5,17 +5,9 @@ Each function returns a tuple of (passed: bool, messages: list[str]).
 
 import os
 import re
-from typing import Tuple, List
+from typing import Iterator, Optional, Tuple, List
 
-# Known 0.4.0 sub-spec directory keyword fragments
-_SUBSPECS_KEYWORDS = [
-    "overall-scope",
-    "packaging",
-    "benchmark",
-    "rollout",
-    "prometheus",
-    "parser",
-]
+from tools.release.release_constants import SUBSPECS_KEYWORDS
 
 # Required sections in requirements documents (Property 1)
 _REQUIRED_SECTIONS = [
@@ -57,7 +49,7 @@ _VERIFIABLE_INDICATORS = [
     r"tools/",              # file path reference
     r"components/",         # file path reference
     r"\.kiro/",             # file path reference
-    r"\.\w+",               # file extension reference
+    r"\.(md|py|ya?ml|json|toml|sh|c|h|rs|txt)\b",  # file extension reference
     r"\bpasses\b",          # action verb
     r"\bverified\b",        # action verb
     r"\bcomplete\b",        # action verb
@@ -83,18 +75,83 @@ _VERIFIABLE_INDICATORS = [
     r"NGINX\s+\d",          # version reference
 ]
 
+_CHECKLIST_ITEM_PATTERN = re.compile(r"^- \[[^\]]\]\s*(.*)$")
+_FENCE_PATTERN = re.compile(r"^\s*(`{3,}|~{3,})")
+
+
+def _find_missing_terms(content_lower: str, required_terms: List[str]) -> List[str]:
+    """Return missing required lowercase terms from the content."""
+    return [term for term in required_terms if term not in content_lower]
+
+
+def _read_utf8_file(path: str) -> Tuple[Optional[str], Optional[str]]:
+    """Read UTF-8 text file and return (content, error_message)."""
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return f.read(), None
+    except (OSError, UnicodeDecodeError) as exc:
+        return None, str(exc)
+
+
+def _iter_markdown_filenames(directory: str) -> Iterator[str]:
+    """Yield markdown filenames in sorted order for deterministic output."""
+    for fname in sorted(os.listdir(directory)):
+        if not fname.endswith(".md"):
+            continue
+        yield fname
+
+
+def _dod_checkpoints_for_content(content_lower: str) -> Tuple[bool, List[str]]:
+    """Return whether a DoD table exists and which checkpoints are missing."""
+    has_dod_evaluation = "dod evaluation" in content_lower
+    if not has_dod_evaluation:
+        return False, []
+    return True, _find_missing_terms(content_lower, _DOD_CHECKPOINTS)
+
+
+def _extract_checklist_item(line: str) -> str:
+    """Return checklist item text for markdown checkboxes."""
+    stripped = line.strip()
+    match = _CHECKLIST_ITEM_PATTERN.match(stripped)
+    if match is None:
+        return ""
+    return match.group(1).strip()
+
+
+def _parse_fence(line: str) -> Optional[Tuple[str, int]]:
+    """Return (fence_char, fence_len) if the line starts a fenced block token."""
+    match = _FENCE_PATTERN.match(line)
+    if match is None:
+        return None
+    token = match.group(1)
+    return token[0], len(token)
+
+
+def _has_verifiable_indicator(text: str) -> bool:
+    """Return True if text contains any verifiable action indicator."""
+    return any(
+        re.search(indicator, text, re.IGNORECASE)
+        for indicator in _VERIFIABLE_INDICATORS
+    )
+
 
 def _find_subspecs_dirs(specs_dir: str) -> List[str]:
     """Return sub-spec directories matching known 0.4.0 keywords."""
     if not os.path.isdir(specs_dir):
         return []
+
+    try:
+        entries = sorted(os.listdir(specs_dir))
+    except OSError:
+        return []
+
     dirs = []
-    for entry in sorted(os.listdir(specs_dir)):
+    for entry in entries:
         full = os.path.join(specs_dir, entry)
         if not os.path.isdir(full):
             continue
         lower = entry.lower()
-        for kw in _SUBSPECS_KEYWORDS:
+        for kw in SUBSPECS_KEYWORDS:
             if kw in lower:
                 dirs.append(full)
                 break
@@ -141,8 +198,13 @@ def check_requirements_completeness(specs_dir: str) -> Tuple[bool, List[str]]:
             messages.append(f"  SKIP  {name}/requirements.md not found")
             continue
 
-        with open(req_path, "r", encoding="utf-8") as f:
-            content = f.read().lower()
+        content, read_error = _read_utf8_file(req_path)
+        if read_error is not None:
+            all_complete = False
+            messages.append(f"  FAIL  {name}/requirements.md read error: {read_error}")
+            continue
+        assert content is not None
+        content = content.lower()
 
         missing = []
         for pattern, label in _REQUIRED_SECTIONS:
@@ -179,8 +241,12 @@ def check_boundary_descriptions(specs_dir: str) -> Tuple[bool, List[str]]:
             messages.append(f"  SKIP  {name}/design.md not found")
             continue
 
-        with open(design_path, "r", encoding="utf-8") as f:
-            content = f.read()
+        content, read_error = _read_utf8_file(design_path)
+        if read_error is not None:
+            all_present = False
+            messages.append(f"  FAIL  {name}/design.md read error: {read_error}")
+            continue
+        assert content is not None
 
         content_lower = content.lower()
 
@@ -224,24 +290,19 @@ def check_dod_evaluation_tables(specs_dir: str) -> Tuple[bool, List[str]]:
 
     for d in subspecs:
         name = os.path.basename(d)
-        # Look for any markdown file that might contain a DoD evaluation
-        for fname in sorted(os.listdir(d)):
-            if not fname.endswith(".md"):
-                continue
+        for fname in _iter_markdown_filenames(d):
             fpath = os.path.join(d, fname)
-            with open(fpath, "r", encoding="utf-8") as f:
-                content = f.read()
+            content, read_error = _read_utf8_file(fpath)
+            if read_error is not None:
+                messages.append(f"  WARN  {name}/{fname} read error: {read_error}")
+                continue
+            assert content is not None
 
             content_lower = content.lower()
-            if "dod evaluation" not in content_lower:
+            has_dod_evaluation, missing = _dod_checkpoints_for_content(content_lower)
+            if not has_dod_evaluation:
                 continue
-
             found_any = True
-            missing = []
-            for checkpoint in _DOD_CHECKPOINTS:
-                if checkpoint not in content_lower:
-                    missing.append(checkpoint)
-
             if missing:
                 valid = False
                 messages.append(
@@ -273,29 +334,39 @@ def check_checklist_verifiability(
         messages.append(f"  FAIL  {checklist_path} not found")
         return False, messages
 
-    with open(checklist_path, "r", encoding="utf-8") as f:
-        lines = f.readlines()
+    content, read_error = _read_utf8_file(checklist_path)
+    if read_error is not None:
+        messages.append(f"  FAIL  {checklist_path} read error: {read_error}")
+        return False, messages
+    assert content is not None
+    lines = content.splitlines()
 
     all_verifiable = True
     item_count = 0
     unverifiable: List[str] = []
+    active_fence: Optional[Tuple[str, int]] = None
 
     for line in lines:
-        stripped = line.strip()
-        if not stripped.startswith("- [ ]"):
+        # Ignore checklist-like examples embedded inside fenced code blocks.
+        fence = _parse_fence(line)
+        if active_fence is None:
+            if fence is not None:
+                active_fence = fence
+                continue
+        else:
+            if fence is not None:
+                fence_char, fence_len = fence
+                active_char, active_len = active_fence
+                if fence_char == active_char and fence_len >= active_len:
+                    active_fence = None
+            continue
+
+        item_text = _extract_checklist_item(line)
+        if not item_text:
             continue
 
         item_count += 1
-        item_text = stripped[len("- [ ]"):].strip()
-
-        # Check if the item contains at least one verifiable indicator
-        found = False
-        for indicator in _VERIFIABLE_INDICATORS:
-            if re.search(indicator, item_text, re.IGNORECASE):
-                found = True
-                break
-
-        if not found:
+        if not _has_verifiable_indicator(item_text):
             all_verifiable = False
             unverifiable.append(item_text)
 
