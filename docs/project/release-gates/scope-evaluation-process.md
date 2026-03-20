@@ -30,6 +30,7 @@ This document defines the process for evaluating new proposals that arise during
 ## 0.4.0 Non-Goals List
 
 The following are explicitly out of scope for 0.4.0. Any proposal matching these items is rejected and recorded as a 0.5.x candidate:
+This list is mirrored in `tools/release/release_constants.py::NON_GOALS` and must stay in sync.
 
 - True streaming HTML-to-Markdown conversion
 - New output format negotiation (JSON, text/plain, MDX)

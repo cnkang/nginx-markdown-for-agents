@@ -39,6 +39,9 @@ class TestMetricNames:
             "nginx_markdown_conversions_total",
             "nginx_markdown_input_bytes",
             "nginx_markdown_duration_seconds",
+            "nginx_markdown_duration_seconds_bucket",
+            "nginx_markdown_duration_seconds_sum",
+            "nginx_markdown_duration_seconds_count",
             "nginx_markdown_build_info",
             "nginx_markdown_failures_total",
         ]
@@ -49,6 +52,9 @@ class TestMetricNames:
         invalid = [
             "markdown_conversions_total", "nginx_markdown_",
             "NGINX_MARKDOWN_TOTAL", "nginx_markdown_Conversions_total",
+            "nginx_markdown_duration_bucket",
+            "nginx_markdown_duration_count",
+            "nginx_markdown_duration_sum",
         ]
         for name in invalid:
             assert not is_valid_metric_name(name), f"{name} should be invalid"

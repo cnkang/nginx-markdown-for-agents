@@ -9,7 +9,7 @@ All 0.4.0 sub-specs must follow these conventions for any new operator-facing su
 | Surface                  | Prefix                    | Format                    | Regex                                                                  |
 |--------------------------|---------------------------|---------------------------|------------------------------------------------------------------------|
 | NGINX directives         | `markdown_`               | lowercase + underscores   | `^markdown_[a-z][a-z0-9_]*$`                                          |
-| Prometheus metrics       | `nginx_markdown_`         | snake_case                | `^nginx_markdown_[a-z][a-z0-9_]*(_total\|_bytes\|_seconds\|_info)?$`  |
+| Prometheus metrics       | `nginx_markdown_`         | snake_case                | `^nginx_markdown_([a-z][a-z0-9_]*_seconds_(bucket\|sum\|count)\|(?!.*_(bucket\|sum\|count)$)[a-z][a-z0-9_]*(_total\|_bytes\|_seconds\|_info)?)$`  |
 | Decision reason codes    | —                         | uppercase snake_case      | `^[A-Z][A-Z0-9_]*$`                                                   |
 | Benchmark report fields  | —                         | lowercase kebab-case JSON | `^[a-z][a-z0-9-]*$`                                                   |
 | C macro constants        | `NGX_HTTP_MARKDOWN_`      | uppercase + underscores   | `^NGX_HTTP_MARKDOWN_[A-Z][A-Z0-9_]*$`                                 |
@@ -55,9 +55,10 @@ New directives introduced in 0.4.0 must follow the same `markdown_` prefix and l
 
 - **Prefix:** `nginx_markdown_`
 - **Format:** snake_case
-- **Regex:** `^nginx_markdown_[a-z][a-z0-9_]*(_total|_bytes|_seconds|_info)?$`
+- **Regex:** `^nginx_markdown_([a-z][a-z0-9_]*_seconds_(bucket|sum|count)|(?!.*_(bucket|sum|count)$)[a-z][a-z0-9_]*(_total|_bytes|_seconds|_info)?)$`
 - **Structure:** `<namespace>_<subsystem>_<name>_<unit>` per Prometheus naming best practices.
 - Counters end with `_total`. Use `_bytes`, `_seconds`, `_info` suffixes as appropriate.
+- Histograms with `_seconds` base metrics may expose `_seconds_bucket`, `_seconds_sum`, and `_seconds_count`.
 
 ### Defined metrics
 
