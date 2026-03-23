@@ -48,7 +48,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - name: Initialize CodeQL for C/C++
-        uses: github/codeql-action/init@0d579ffd059c29b07949a3cce3983f0780820c98 # v4
+        uses: github/codeql-action/init@38697555549f1db7851b81482ff19f1fa5c4fedc # v4
         with:
           languages: c-cpp
           build-mode: manual
@@ -79,7 +79,7 @@ jobs:
         run: ./tools/ci/build_nginx_for_codeql.sh
 
       - name: Run CodeQL analysis for C/C++
-        uses: github/codeql-action/analyze@0d579ffd059c29b07949a3cce3983f0780820c98 # v4
+        uses: github/codeql-action/analyze@38697555549f1db7851b81482ff19f1fa5c4fedc # v4
         with:
           category: "/language:c-cpp"
 
@@ -97,14 +97,14 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - name: Initialize CodeQL for Rust
-        uses: github/codeql-action/init@0d579ffd059c29b07949a3cce3983f0780820c98 # v4
+        uses: github/codeql-action/init@38697555549f1db7851b81482ff19f1fa5c4fedc # v4
         with:
           languages: rust
           build-mode: none
           queries: security-extended,security-and-quality
 
       - name: Run CodeQL analysis for Rust
-        uses: github/codeql-action/analyze@0d579ffd059c29b07949a3cce3983f0780820c98 # v4
+        uses: github/codeql-action/analyze@38697555549f1db7851b81482ff19f1fa5c4fedc # v4
         with:
           category: "/language:rust"
 
