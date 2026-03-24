@@ -546,10 +546,116 @@ EOF
 }
 
 #
-# Test 5: Variable-Driven markdown_filter
+# Test 5: Authenticated Content Denied by Auth Policy
+#
+test_authenticated_content_denied() {
+    log_test 5 "Authenticated Content Denied by Auth Policy"
+    local config
+
+    write_static_html "${STATIC_ROOT}/auth-deny.html" "${AUTH_PRIVATE_HTML}"
+
+    config="$(cat <<EOF
+worker_processes 1;
+${CONFIG_ERROR_LOG_LINE}
+${CONFIG_PID_LINE}
+events { worker_connections 1024; }
+http {
+    access_log ${NGINX_ACCESS_LOG};
+    server {
+        listen ${TEST_PORT};
+        location = /test {
+            alias ${STATIC_ROOT}/auth-deny.html;
+            markdown_filter on;
+            markdown_auth_policy deny;
+            markdown_auth_cookies session* auth*;
+            add_header Cache-Control private always;
+            default_type ${MEDIA_TYPE_HTML};
+        }
+    }
+}
+EOF
+)"
+
+    start_nginx "$config" || { log_fail "$NGINX_START_FAILURE_MSG"; return 1; }
+    : > "$NGINX_ERROR_LOG"
+
+    local response
+    local status
+    local content_type
+    local body
+
+    response=$(make_request "GET" "/test" "$MEDIA_TYPE_MARKDOWN" -H "Authorization: Bearer token123")
+    status=$(get_status "$response")
+    content_type=$(get_header "$response" "$HEADER_CONTENT_TYPE")
+    body=$(get_body "$response")
+
+    if [[ "$status" == "200" ]]; then
+        log_pass "$STATUS_CODE_OK_MESSAGE"
+    else
+        log_fail "Status code: Expected 200, got $status"
+    fi
+
+    if echo "$content_type" | grep -q "$MEDIA_TYPE_HTML"; then
+        log_pass "Content-Type: text/html (auth policy denied conversion)"
+    else
+        log_fail "Content-Type: Expected text/html, got $content_type"
+    fi
+
+    if echo "$body" | grep -q "<h1>Private</h1>"; then
+        log_pass "Body remains original HTML"
+    else
+        log_fail "Body: Expected original HTML body, got $body"
+    fi
+
+    if grep -q "markdown decision: reason=SKIP_AUTH" "$NGINX_ERROR_LOG"; then
+        log_pass "Decision log records SKIP_AUTH"
+    else
+        log_fail "Decision log missing reason=SKIP_AUTH"
+        log_info "Error log: $(tail -n 20 "$NGINX_ERROR_LOG" 2>/dev/null || true)"
+    fi
+
+    : > "$NGINX_ERROR_LOG"
+
+    response=$(make_request "GET" "/test" "$MEDIA_TYPE_MARKDOWN" -H "Cookie: session_id=abc123; other=1")
+    status=$(get_status "$response")
+    content_type=$(get_header "$response" "$HEADER_CONTENT_TYPE")
+    body=$(get_body "$response")
+
+    if [[ "$status" == "200" ]]; then
+        log_pass "$STATUS_CODE_OK_MESSAGE"
+    else
+        log_fail "Status code: Expected 200, got $status"
+    fi
+
+    if echo "$content_type" | grep -q "$MEDIA_TYPE_HTML"; then
+        log_pass "Content-Type: text/html (auth cookie denied conversion)"
+    else
+        log_fail "Content-Type: Expected text/html, got $content_type"
+    fi
+
+    if echo "$body" | grep -q "<h1>Private</h1>"; then
+        log_pass "Body remains original HTML"
+    else
+        log_fail "Body: Expected original HTML body, got $body"
+    fi
+
+    if grep -q "markdown decision: reason=SKIP_AUTH" "$NGINX_ERROR_LOG"; then
+        log_pass "Decision log records SKIP_AUTH (cookie)"
+    else
+        log_fail "Decision log missing reason=SKIP_AUTH (cookie)"
+        log_info "Error log: $(tail -n 20 "$NGINX_ERROR_LOG" 2>/dev/null || true)"
+    fi
+
+    stop_nginx
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+    return 0
+}
+
+#
+# Test 6: Variable-Driven markdown_filter
 #
 test_variable_driven_markdown_filter() {
-    log_test 5 "Variable-driven markdown_filter resolution"
+    log_test 6 "Variable-driven markdown_filter resolution"
 
     local config
     write_static_html "${STATIC_ROOT}/variable.html" "${VAR_TOGGLE_HTML}"
@@ -623,10 +729,10 @@ EOF
 }
 
 #
-# Test 6: Real NGINX Range bypass
+# Test 7: Real NGINX Range bypass
 #
 test_range_bypass() {
-    log_test 6 "Range request bypass with real NGINX file serving"
+    log_test 7 "Range request bypass with real NGINX file serving"
 
     write_static_html "$RANGE_HTML_PATH" \
         '<html><body><h1>Range Content</h1><p>This body should stay HTML when Range is used.</p></body></html>'
@@ -688,10 +794,10 @@ EOF
 }
 
 #
-# Test 7: Shared metrics aggregation across workers
+# Test 8: Shared metrics aggregation across workers
 #
 test_metrics_shared_aggregation() {
-    log_test 7 "Shared metrics aggregation across workers"
+    log_test 8 "Shared metrics aggregation across workers"
 
     local config
     local total_requests=40
@@ -801,6 +907,7 @@ main() {
     test_passthrough
     test_configuration_inheritance
     test_authenticated_content
+    test_authenticated_content_denied
     test_variable_driven_markdown_filter
     test_range_bypass
     test_metrics_shared_aggregation
