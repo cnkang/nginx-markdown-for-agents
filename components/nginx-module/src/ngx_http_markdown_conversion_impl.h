@@ -265,7 +265,8 @@ ngx_http_markdown_record_conversion_latency(ngx_msec_t elapsed_ms)
 /*
  * Attempt conditional-request shortcut (If-None-Match / 304).
  *
- * On match returns NGX_DONE; on mismatch populates `result` for reuse.
+ * On match returns NGX_HTTP_NOT_MODIFIED; on mismatch populates `result`
+ * for reuse.
  */
 static ngx_int_t
 ngx_http_markdown_resolve_conditional_result(ngx_http_request_t *r,
@@ -288,13 +289,26 @@ ngx_http_markdown_resolve_conditional_result(ngx_http_request_t *r,
         ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                       "markdown filter: If-None-Match matched, sending 304 Not Modified");
 
+        if (ctx != NULL && ctx->has_last_modified_time) {
+            r->headers_out.last_modified_time = ctx->source_last_modified_time;
+        }
+
         rc = ngx_http_markdown_send_304(r, conditional_result);
         if (conditional_result != NULL) {
             markdown_result_free(conditional_result);
         }
 
         r->buffered &= ~NGX_HTTP_MARKDOWN_BUFFERED;
-        return NGX_DONE;
+        if (rc != NGX_OK) {
+            ctx->last_error_category =
+                NGX_HTTP_MARKDOWN_ERROR_SYSTEM;
+            ctx->has_error_category = 1;
+            NGX_HTTP_MARKDOWN_METRIC_INC(conversions_failed);
+            NGX_HTTP_MARKDOWN_METRIC_INC(failures_system);
+            return rc;
+        }
+
+        return NGX_HTTP_NOT_MODIFIED;
     }
 
     if (rc == NGX_ERROR) {
@@ -304,6 +318,12 @@ ngx_http_markdown_resolve_conditional_result(ngx_http_request_t *r,
         if (conditional_result != NULL) {
             markdown_result_free(conditional_result);
         }
+
+        ctx->last_error_category =
+            NGX_HTTP_MARKDOWN_ERROR_SYSTEM;
+        ctx->has_error_category = 1;
+        NGX_HTTP_MARKDOWN_METRIC_INC(conversions_failed);
+        NGX_HTTP_MARKDOWN_METRIC_INC(failures_system);
 
         return ngx_http_markdown_reject_or_fail_open_buffered_response(
             r, ctx, conf,
@@ -394,6 +414,11 @@ ngx_http_markdown_handle_conversion_failure(ngx_http_request_t *r,
 
     error_category = ngx_http_markdown_classify_error(result->error_code);
     category_str = ngx_http_markdown_error_category_string(error_category);
+
+    /* Store error category in context for decision log emission */
+    ctx->last_error_category = error_category;
+    ctx->has_error_category = 1;
+
     ngx_http_markdown_record_conversion_latency(elapsed_ms);
     NGX_HTTP_MARKDOWN_METRIC_INC(conversions_failed);
 
@@ -449,6 +474,11 @@ ngx_http_markdown_validate_conversion_result(ngx_http_request_t *r,
                      result->markdown, result->markdown_len,
                      result->etag, result->etag_len,
                      result->error_message, result->error_len);
+        ctx->last_error_category =
+            NGX_HTTP_MARKDOWN_ERROR_SYSTEM;
+        ctx->has_error_category = 1;
+        NGX_HTTP_MARKDOWN_METRIC_INC(conversions_failed);
+        NGX_HTTP_MARKDOWN_METRIC_INC(failures_system);
         markdown_result_free(result);
         return ngx_http_markdown_reject_or_fail_open_buffered_response(
             r, ctx, conf, NULL);
@@ -506,6 +536,11 @@ ngx_http_markdown_execute_conversion(ngx_http_request_t *r,
     if (ngx_http_markdown_converter == NULL) {
         ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0,
                      "markdown filter: converter not initialized, category=system");
+        ctx->last_error_category =
+            NGX_HTTP_MARKDOWN_ERROR_SYSTEM;
+        ctx->has_error_category = 1;
+        NGX_HTTP_MARKDOWN_METRIC_INC(conversions_failed);
+        NGX_HTTP_MARKDOWN_METRIC_INC(failures_system);
         return ngx_http_markdown_reject_or_fail_open_buffered_response(
             r, ctx, conf,
             "markdown filter: fail-open strategy - returning original HTML");
