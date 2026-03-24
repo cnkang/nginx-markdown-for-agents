@@ -23,6 +23,7 @@ if _PROJECT_ROOT not in sys.path:
 from tools.release.release_gate_checks import (  # noqa: E402
     check_document_existence,
     check_requirements_completeness,
+    check_design_completeness,
     check_boundary_descriptions,
     check_dod_evaluation_tables,
     check_checklist_verifiability,
@@ -55,6 +56,11 @@ def _run_checks(
     run_check(
         "Requirements Completeness (Property 1)",
         check_requirements_completeness,
+        specs_dir,
+    )
+    run_check(
+        "Design Completeness (Property 1 — R3.4)",
+        check_design_completeness,
         specs_dir,
     )
     run_check(
