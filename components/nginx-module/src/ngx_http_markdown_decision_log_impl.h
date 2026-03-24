@@ -1,0 +1,249 @@
+#ifndef NGX_HTTP_MARKDOWN_DECISION_LOG_IMPL_H
+#define NGX_HTTP_MARKDOWN_DECISION_LOG_IMPL_H
+
+/*
+ * Decision log emission helper.
+ *
+ * WARNING: This header is an implementation detail of the main translation
+ * unit (ngx_http_markdown_filter_module.c).  It must NOT be included from
+ * any other .c file or used as a standalone compilation unit.
+ *
+ * Emits a structured "markdown decision:" log entry once per request,
+ * gated by the configured markdown_log_verbosity level.
+ *
+ * Requirements: FR-03.1, FR-03.2, FR-03.3, FR-03.4, FR-03.5, FR-03.6
+ */
+
+
+/* Forward declarations — defined below */
+static void ngx_http_markdown_log_decision(ngx_http_request_t *r,
+    ngx_http_markdown_conf_t *conf, const ngx_str_t *reason_code);
+static void ngx_http_markdown_log_decision_with_category(
+    ngx_http_request_t *r, ngx_http_markdown_conf_t *conf,
+    const ngx_str_t *reason_code,
+    const ngx_str_t *error_category);
+
+
+/*
+ * Determine whether a reason code represents a failure outcome.
+ *
+ * Failure outcomes are reason codes starting with "ELIGIBLE_FAILED"
+ * or "FAIL_".  All other codes (SKIP_* and ELIGIBLE_CONVERTED) are
+ * non-failure outcomes.
+ *
+ * Parameters:
+ *   reason_code - pointer to the reason code ngx_str_t
+ *
+ * Returns:
+ *   1 if the reason code is a failure outcome
+ *   0 otherwise
+ */
+static ngx_int_t
+ngx_http_markdown_is_failure_outcome(const ngx_str_t *reason_code)
+{
+    if (reason_code == NULL || reason_code->len == 0) {
+        return 0;
+    }
+
+    /* Check for "ELIGIBLE_FAILED" prefix (15 chars) */
+    if (reason_code->len >= 15
+        && ngx_strncmp(reason_code->data,
+                       (u_char *) "ELIGIBLE_FAILED", 15) == 0)
+    {
+        return 1;
+    }
+
+    /* Check for "FAIL_" prefix (5 chars) */
+    if (reason_code->len >= 5
+        && ngx_strncmp(reason_code->data,
+                       (u_char *) "FAIL_", 5) == 0)
+    {
+        return 1;
+    }
+
+    return 0;
+}
+
+
+/*
+ * Emit a structured decision log entry for the current request.
+ *
+ * Format (info level):
+ *   markdown decision: reason=<CODE> method=<METHOD>
+ *       uri=<URI> content_type=<TYPE>
+ *
+ * Format with error category (failure outcomes):
+ *   markdown decision: reason=<CODE> category=<FAIL_*>
+ *       method=<METHOD> uri=<URI> content_type=<TYPE>
+ *
+ * Extended format (debug verbosity adds):
+ *   ... filter_value=<VALUE> accept=<ACCEPT> status=<STATUS>
+ *
+ * Verbosity gating:
+ *   info / debug  — emit for all outcomes
+ *   warn / error  — emit only for failure outcomes
+ *
+ * NGINX log level:
+ *   NGX_LOG_INFO  for non-failure outcomes (SKIP_*, ELIGIBLE_CONVERTED)
+ *   NGX_LOG_WARN  for failure outcomes (ELIGIBLE_FAILED_*, FAIL_*)
+ *
+ * Parameters:
+ *   r              - NGINX request structure
+ *   conf           - module location configuration
+ *   reason_code    - the reason code string for this decision
+ *   error_category - optional FAIL_* sub-classification (NULL if none)
+ */
+static void
+ngx_http_markdown_log_decision_with_category(ngx_http_request_t *r,
+    ngx_http_markdown_conf_t *conf, const ngx_str_t *reason_code,
+    const ngx_str_t *error_category)
+{
+    ngx_uint_t       log_level;
+    ngx_int_t        is_failure;
+    ngx_str_t        method_name;
+    ngx_str_t        content_type;
+    ngx_str_t        accept_value;
+    ngx_str_t        filter_value;
+    ngx_str_t        empty = ngx_string("-");
+
+    if (r == NULL || conf == NULL || reason_code == NULL) {
+        return;
+    }
+
+    is_failure = ngx_http_markdown_is_failure_outcome(reason_code);
+
+    /*
+     * Verbosity gating (FR-03.4):
+     *   info / debug  — all outcomes
+     *   warn / error  — failure outcomes only
+     */
+    if (conf->log_verbosity <= NGX_HTTP_MARKDOWN_LOG_WARN
+        && !is_failure)
+    {
+        return;
+    }
+
+    /* Select NGINX log level based on outcome type (FR-03.5) */
+    log_level = is_failure ? NGX_LOG_WARN : NGX_LOG_INFO;
+
+    /* Resolve request method name */
+    if (r->method_name.len > 0) {
+        method_name = r->method_name;
+    } else {
+        method_name = empty;
+    }
+
+    /* Resolve upstream content-type (FR-03.2) */
+    if (r->headers_out.content_type.len > 0) {
+        content_type = r->headers_out.content_type;
+    } else {
+        content_type = empty;
+    }
+
+    /*
+     * Debug extended format (FR-03.3):
+     *   Adds filter_value, accept, and status fields.
+     */
+    if (conf->log_verbosity == NGX_HTTP_MARKDOWN_LOG_DEBUG) {
+
+        /* Resolve filter_value from config */
+        if (conf->enabled_source
+            == NGX_HTTP_MARKDOWN_ENABLED_COMPLEX
+            && conf->enabled_complex != NULL)
+        {
+            if (ngx_http_complex_value(r,
+                    conf->enabled_complex,
+                    &filter_value) != NGX_OK)
+            {
+                ngx_str_set(&filter_value,
+                            "$variable(error)");
+            }
+        } else if (conf->enabled) {
+            ngx_str_set(&filter_value, "on");
+        } else {
+            ngx_str_set(&filter_value, "off");
+        }
+
+        /* Resolve Accept header value */
+        accept_value = empty;
+
+#if (NGX_HTTP_HEADERS)
+        if (r->headers_in.accept != NULL
+            && r->headers_in.accept->value.len > 0)
+        {
+            accept_value = r->headers_in.accept->value;
+        }
+#else
+        {
+            ngx_str_t        accept_name = ngx_string("Accept");
+            ngx_table_elt_t *accept_hdr;
+
+            accept_hdr =
+                ngx_http_markdown_find_request_header(
+                    r, &accept_name);
+            if (accept_hdr != NULL
+                && accept_hdr->value.len > 0)
+            {
+                accept_value = accept_hdr->value;
+            }
+        }
+#endif
+
+        if (error_category != NULL
+            && error_category->len > 0)
+        {
+            ngx_log_error(log_level, r->connection->log, 0,
+                "markdown decision: reason=%V "
+                "category=%V "
+                "method=%V uri=%V content_type=%V "
+                "filter_value=%V accept=%V status=%ui",
+                reason_code, error_category,
+                &method_name, &r->uri,
+                &content_type, &filter_value,
+                &accept_value,
+                r->headers_out.status);
+        } else {
+            ngx_log_error(log_level, r->connection->log, 0,
+                "markdown decision: reason=%V "
+                "method=%V uri=%V content_type=%V "
+                "filter_value=%V accept=%V status=%ui",
+                reason_code, &method_name, &r->uri,
+                &content_type, &filter_value,
+                &accept_value,
+                r->headers_out.status);
+        }
+
+        return;
+    }
+
+    /* Base format (FR-03.2, FR-03.6) */
+    if (error_category != NULL && error_category->len > 0) {
+        ngx_log_error(log_level, r->connection->log, 0,
+            "markdown decision: reason=%V "
+            "category=%V "
+            "method=%V uri=%V content_type=%V",
+            reason_code, error_category,
+            &method_name, &r->uri,
+            &content_type);
+    } else {
+        ngx_log_error(log_level, r->connection->log, 0,
+            "markdown decision: reason=%V "
+            "method=%V uri=%V content_type=%V",
+            reason_code, &method_name, &r->uri,
+            &content_type);
+    }
+}
+
+
+/*
+ * Convenience wrapper: emit decision log without error category.
+ */
+static void
+ngx_http_markdown_log_decision(ngx_http_request_t *r,
+    ngx_http_markdown_conf_t *conf, const ngx_str_t *reason_code)
+{
+    ngx_http_markdown_log_decision_with_category(
+        r, conf, reason_code, NULL);
+}
+
+#endif /* NGX_HTTP_MARKDOWN_DECISION_LOG_IMPL_H */
