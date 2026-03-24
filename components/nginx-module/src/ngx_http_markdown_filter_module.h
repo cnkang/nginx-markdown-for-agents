@@ -157,6 +157,43 @@ typedef struct {
 } ngx_http_markdown_buffer_t;
 
 /*
+ * Error classification
+ *
+ * These enums and functions classify conversion failures into categories
+ * for logging and metrics (FR-09.5, FR-09.6, FR-09.7).
+ *
+ * Defined before ngx_http_markdown_ctx_t because the context struct
+ * contains a last_error_category field of this type.
+ */
+
+/* Error category enum */
+typedef enum {
+    NGX_HTTP_MARKDOWN_ERROR_CONVERSION,      /* HTML parsing errors, invalid input, conversion logic failures */
+    NGX_HTTP_MARKDOWN_ERROR_RESOURCE_LIMIT,  /* Size limits exceeded, timeout exceeded */
+    NGX_HTTP_MARKDOWN_ERROR_SYSTEM           /* Memory allocation failures, converter not initialized */
+} ngx_http_markdown_error_category_t;
+
+/*
+ * Response eligibility validation
+ *
+ * Defined before ngx_http_markdown_ctx_t because function prototypes
+ * referencing this type appear before the context struct definition.
+ */
+
+/* Eligibility result enum */
+typedef enum {
+    NGX_HTTP_MARKDOWN_ELIGIBLE,                /* Response is eligible for conversion */
+    NGX_HTTP_MARKDOWN_INELIGIBLE_METHOD,       /* Not GET/HEAD */
+    NGX_HTTP_MARKDOWN_INELIGIBLE_STATUS,       /* Not 200 or 206 Partial Content */
+    NGX_HTTP_MARKDOWN_INELIGIBLE_CONTENT_TYPE, /* Not text/html */
+    NGX_HTTP_MARKDOWN_INELIGIBLE_SIZE,         /* Exceeds max_size */
+    NGX_HTTP_MARKDOWN_INELIGIBLE_STREAMING,    /* Unbounded streaming (SSE, etc.) */
+    NGX_HTTP_MARKDOWN_INELIGIBLE_AUTH,         /* Auth policy denies */
+    NGX_HTTP_MARKDOWN_INELIGIBLE_RANGE,        /* Range request (partial content) */
+    NGX_HTTP_MARKDOWN_INELIGIBLE_CONFIG        /* Disabled by config */
+} ngx_http_markdown_eligibility_t;
+
+/*
  * Request context structure
  *
  * This structure maintains per-request state for the Markdown filter.
@@ -170,6 +207,8 @@ typedef struct {
     ngx_flag_t                   buffer_initialized;
     ngx_flag_t                   eligible;     /* Eligible for conversion */
     ngx_flag_t                   headers_forwarded; /* Whether downstream headers were sent */
+    time_t                       source_last_modified_time; /* Preserved upstream Last-Modified */
+    ngx_flag_t                   has_last_modified_time;     /* Whether Last-Modified was present */
     ngx_flag_t                   conversion_attempted;
     ngx_flag_t                   conversion_succeeded;
     ngx_flag_t                   bypass_counted; /* Whether conversions_bypassed was incremented */
@@ -183,6 +222,10 @@ typedef struct {
     ngx_flag_t                            decompression_done;   /* Whether decompression completed */
     size_t                                compressed_size;      /* Size before decompression */
     size_t                                decompressed_size;    /* Size after decompression */
+
+    /* Last error category from conversion failure (for decision log) */
+    ngx_http_markdown_error_category_t    last_error_category;
+    ngx_flag_t                            has_error_category;
 } ngx_http_markdown_ctx_t;
 
 /*
@@ -336,18 +379,11 @@ ngx_int_t ngx_http_markdown_buffer_append(ngx_http_markdown_buffer_t *buf,
     u_char *data, size_t len);
 
 /*
- * Error classification
+ * Error classification functions
  *
- * These enums and functions classify conversion failures into categories
- * for logging and metrics (FR-09.5, FR-09.6, FR-09.7).
+ * (Enum ngx_http_markdown_error_category_t is defined above,
+ * before ngx_http_markdown_ctx_t.)
  */
-
-/* Error category enum */
-typedef enum {
-    NGX_HTTP_MARKDOWN_ERROR_CONVERSION,      /* HTML parsing errors, invalid input, conversion logic failures */
-    NGX_HTTP_MARKDOWN_ERROR_RESOURCE_LIMIT,  /* Size limits exceeded, timeout exceeded */
-    NGX_HTTP_MARKDOWN_ERROR_SYSTEM           /* Memory allocation failures, converter not initialized */
-} ngx_http_markdown_error_category_t;
 
 /* Map Rust error code to error category */
 ngx_http_markdown_error_category_t ngx_http_markdown_classify_error(uint32_t error_code);
@@ -357,23 +393,11 @@ const ngx_str_t *ngx_http_markdown_error_category_string(
     ngx_http_markdown_error_category_t category);
 
 /*
- * Response eligibility validation
+ * Response eligibility validation functions
  *
- * These functions determine if a response should be converted to Markdown.
+ * (Enum ngx_http_markdown_eligibility_t is defined above,
+ * before ngx_http_markdown_ctx_t.)
  */
-
-/* Eligibility result enum */
-typedef enum {
-    NGX_HTTP_MARKDOWN_ELIGIBLE,                /* Response is eligible for conversion */
-    NGX_HTTP_MARKDOWN_INELIGIBLE_METHOD,       /* Not GET/HEAD */
-    NGX_HTTP_MARKDOWN_INELIGIBLE_STATUS,       /* Not 200 or 206 Partial Content */
-    NGX_HTTP_MARKDOWN_INELIGIBLE_CONTENT_TYPE, /* Not text/html */
-    NGX_HTTP_MARKDOWN_INELIGIBLE_SIZE,         /* Exceeds max_size */
-    NGX_HTTP_MARKDOWN_INELIGIBLE_STREAMING,    /* Unbounded streaming (SSE, etc.) */
-    NGX_HTTP_MARKDOWN_INELIGIBLE_AUTH,         /* Auth policy denies */
-    NGX_HTTP_MARKDOWN_INELIGIBLE_RANGE,        /* Range request (partial content) */
-    NGX_HTTP_MARKDOWN_INELIGIBLE_CONFIG        /* Disabled by config */
-} ngx_http_markdown_eligibility_t;
 
 /* Check if response is eligible for conversion */
 ngx_http_markdown_eligibility_t ngx_http_markdown_check_eligibility(
@@ -383,6 +407,36 @@ ngx_http_markdown_eligibility_t ngx_http_markdown_check_eligibility(
 /* Get human-readable string for eligibility result */
 const ngx_str_t *ngx_http_markdown_eligibility_string(
     ngx_http_markdown_eligibility_t eligibility);
+
+/*
+ * Reason code lookup functions
+ *
+ * These functions map existing eligibility enum values and error categories
+ * to stable uppercase snake_case reason code strings.  The returned strings
+ * are shared between decision log entries and Prometheus metrics labels so
+ * that operators can correlate logs with metric counters without translating
+ * between different vocabularies.
+ */
+
+/* Map eligibility enum to reason code string */
+const ngx_str_t *ngx_http_markdown_reason_from_eligibility(
+    ngx_http_markdown_eligibility_t eligibility, ngx_log_t *log);
+
+/* Map error category enum to failure reason code string */
+const ngx_str_t *ngx_http_markdown_reason_from_error_category(
+    ngx_http_markdown_error_category_t category, ngx_log_t *log);
+
+/* Return the ELIGIBLE_CONVERTED reason code */
+const ngx_str_t *ngx_http_markdown_reason_converted(void);
+
+/* Return the ELIGIBLE_FAILED_OPEN reason code */
+const ngx_str_t *ngx_http_markdown_reason_failed_open(void);
+
+/* Return the ELIGIBLE_FAILED_CLOSED reason code */
+const ngx_str_t *ngx_http_markdown_reason_failed_closed(void);
+
+/* Return the SKIP_ACCEPT reason code (not in eligibility enum) */
+const ngx_str_t *ngx_http_markdown_reason_skip_accept(void);
 
 /*
  * Header management functions
