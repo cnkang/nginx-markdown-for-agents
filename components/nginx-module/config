@@ -89,7 +89,8 @@ if test -n "$ngx_module_link"; then
                      $ngx_addon_dir/src/ngx_http_markdown_error.c \
                      $ngx_addon_dir/src/ngx_http_markdown_headers.c \
                      $ngx_addon_dir/src/ngx_http_markdown_conditional.c \
-                     $ngx_addon_dir/src/ngx_http_markdown_decompression.c"
+                     $ngx_addon_dir/src/ngx_http_markdown_decompression.c \
+                     $ngx_addon_dir/src/ngx_http_markdown_reason.c"
     ngx_module_deps="$ngx_addon_dir/src/ngx_http_markdown_filter_module.h"
     
     . auto/module
@@ -105,7 +106,8 @@ else
                     $ngx_addon_dir/src/ngx_http_markdown_error.c \
                     $ngx_addon_dir/src/ngx_http_markdown_headers.c \
                     $ngx_addon_dir/src/ngx_http_markdown_conditional.c \
-                    $ngx_addon_dir/src/ngx_http_markdown_decompression.c"
+                    $ngx_addon_dir/src/ngx_http_markdown_decompression.c \
+                    $ngx_addon_dir/src/ngx_http_markdown_reason.c"
     NGX_ADDON_DEPS="$NGX_ADDON_DEPS $ngx_addon_dir/src/ngx_http_markdown_filter_module.h"
 fi
 
