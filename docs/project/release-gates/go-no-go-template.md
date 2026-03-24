@@ -16,6 +16,7 @@ All P0 sub-specs must pass their DoD evaluation before a Go decision can be made
 
 | Sub-Spec | DoD Status | Notes |
 |----------|-----------|-------|
+| overall-scope-release-gates | ✅/❌ | |
 | packaging-and-first-run | ✅/❌ | |
 | benchmark-corpus-and-evidence | ✅/❌ | |
 | rollout-safety-controlled-enablement | ✅/❌ | |

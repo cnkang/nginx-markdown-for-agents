@@ -33,6 +33,7 @@ The following are explicitly out of scope for 0.4.0. Any proposal matching these
 This list is mirrored in `tools/release/release_constants.py::NON_GOALS` and must stay in sync.
 
 - True streaming HTML-to-Markdown conversion
+- Streaming-aware or chunk-driven FFI contract evolution
 - New output format negotiation (JSON, text/plain, MDX)
 - OpenTelemetry tracing
 - High-cardinality metrics

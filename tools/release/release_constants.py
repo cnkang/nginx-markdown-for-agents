@@ -19,6 +19,7 @@ SUBSPECS_KEYWORDS: Tuple[str, ...] = (
 
 # Priority split used by go/no-go property checks.
 P0_SUBSPECS: Tuple[str, ...] = (
+    "overall-scope-release-gates",
     "packaging-and-first-run",
     "benchmark-corpus-and-evidence",
     "rollout-safety-controlled-enablement",
@@ -30,6 +31,7 @@ P1_SUBSPEC = "parser-path-optimization"
 # Source of truth: docs/project/release-gates/scope-evaluation-process.md
 NON_GOALS: Tuple[str, ...] = (
     "True streaming HTML-to-Markdown conversion",
+    "Streaming-aware or chunk-driven FFI contract evolution",
     "New output format negotiation (JSON, text/plain, MDX)",
     "OpenTelemetry tracing",
     "High-cardinality metrics",
