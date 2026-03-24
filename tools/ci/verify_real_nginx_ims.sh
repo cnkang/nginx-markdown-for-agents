@@ -169,6 +169,10 @@ RUST_TARGET="$(markdown_detect_rust_target)"
 BUILDROOT="$(mktemp -d /tmp/nginx-ims-verify.XXXXXX)"
 RUNTIME="${BUILDROOT}/runtime"
 
+# NGINX workers may run as an unprivileged user, so the temporary build root
+# must be traversable by that user for static-file reads during validation.
+chmod 755 "${BUILDROOT}"
+
 mkdir -p "${RUNTIME}/conf" "${RUNTIME}/html" "${RUNTIME}/logs"
 
 if [[ -n "${NGINX_BIN}" ]]; then
