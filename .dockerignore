@@ -16,7 +16,7 @@
 *~
 .DS_Store
 
-# Kiro and Serena
+# Local collaboration / editor state
 .kiro/
 .serena/
 
