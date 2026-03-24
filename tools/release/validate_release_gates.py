@@ -116,8 +116,8 @@ def main() -> int:
     )
     parser.add_argument(
         "--specs-dir",
-        default=".kiro/specs/",
-        help="Path to the specs directory (default: .kiro/specs/)",
+        default="specs/",
+        help="Path to the specs directory (default: specs/)",
     )
     parser.add_argument(
         "--release-gates-dir",

@@ -81,7 +81,7 @@ _VERIFIABLE_INDICATORS = [
     r"docs/",               # file path reference
     r"tools/",              # file path reference
     r"components/",         # file path reference
-    r"\.kiro/",             # file path reference
+    r"specs/",              # file path reference
     r"\.(md|py|ya?ml|json|toml|sh|c|h|rs|txt)\b",  # file extension reference
     # ── specific artifact verbs (objective, not subjective) ──
     r"\bgenerated\b",       # artifact was generated
@@ -219,13 +219,7 @@ def _dod_checkpoints_for_content(
     placeholder: List[str] = []
 
     for checkpoint in _DOD_CHECKPOINTS:
-        # Find a table row containing this checkpoint term.
-        matched_row = None
-        for row in table_rows:
-            if checkpoint in row:
-                matched_row = row
-                break
-
+        matched_row = next((row for row in table_rows if checkpoint in row), None)
         if matched_row is None:
             missing.append(checkpoint)
             continue
@@ -278,10 +272,7 @@ def _advance_fence_state(
     """Return updated fence state and whether to skip this line."""
     fence = _parse_fence(line)
     if active_fence is None:
-        if fence is None:
-            return None, False
-        return fence, True
-
+        return (None, False) if fence is None else (fence, True)
     if fence is None:
         return active_fence, True
 
