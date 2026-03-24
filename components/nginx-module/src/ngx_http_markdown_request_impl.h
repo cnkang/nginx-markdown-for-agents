@@ -59,6 +59,47 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
     filter_enabled = ngx_http_markdown_is_enabled(r, conf);
     if (!filter_enabled) {
         /* Module disabled, pass through */
+        ngx_http_markdown_log_decision(r, conf,
+            ngx_http_markdown_reason_from_eligibility(
+                NGX_HTTP_MARKDOWN_INELIGIBLE_CONFIG,
+                r->connection->log));
+        return ngx_http_next_header_filter(r);
+    }
+
+    /*
+     * Check eligibility before Accept negotiation.
+     *
+     * The decision chain order (Requirement 2.1) is:
+     * scope -> method -> status -> range -> streaming ->
+     * content-type -> size -> auth -> Accept.
+     * Accept must be last before conversion attempt.
+     */
+    eligibility = ngx_http_markdown_check_eligibility(
+        r, conf, filter_enabled);
+    if (eligibility != NGX_HTTP_MARKDOWN_ELIGIBLE) {
+        /* Not eligible, pass through */
+        ngx_log_debug1(NGX_LOG_DEBUG_HTTP,
+                      r->connection->log, 0,
+                      "markdown filter: response not eligible: %V",
+                      ngx_http_markdown_eligibility_string(
+                          eligibility));
+        ngx_http_markdown_log_decision(r, conf,
+            ngx_http_markdown_reason_from_eligibility(
+                eligibility, r->connection->log));
+        return ngx_http_next_header_filter(r);
+    }
+
+    /*
+     * Auth policy check happens after the core eligibility checks and before
+     * Accept negotiation, matching the documented decision chain order.
+     */
+    if (conf->auth_policy == NGX_HTTP_MARKDOWN_AUTH_POLICY_DENY
+        && ngx_http_markdown_is_authenticated(r, conf))
+    {
+        ngx_http_markdown_log_decision(r, conf,
+            ngx_http_markdown_reason_from_eligibility(
+                NGX_HTTP_MARKDOWN_INELIGIBLE_AUTH,
+                r->connection->log));
         return ngx_http_next_header_filter(r);
     }
 
@@ -66,16 +107,8 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
     should_convert = ngx_http_markdown_should_convert(r, conf);
     if (!should_convert) {
         /* Client doesn't want Markdown, pass through */
-        return ngx_http_next_header_filter(r);
-    }
-
-    /* Check if response is eligible for conversion */
-    eligibility = ngx_http_markdown_check_eligibility(r, conf, filter_enabled);
-    if (eligibility != NGX_HTTP_MARKDOWN_ELIGIBLE) {
-        /* Not eligible, pass through */
-        ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                      "markdown filter: response not eligible: %V",
-                      ngx_http_markdown_eligibility_string(eligibility));
+        ngx_http_markdown_log_decision(r, conf,
+            ngx_http_markdown_reason_skip_accept());
         return ngx_http_next_header_filter(r);
     }
 
@@ -100,10 +133,15 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
     ctx->eligible = 1;
     ctx->buffer_initialized = 0;
     ctx->headers_forwarded = 0;
+    ctx->source_last_modified_time = r->headers_out.last_modified_time;
+    ctx->has_last_modified_time =
+        (r->headers_out.last_modified_time != (time_t) -1);
     ctx->conversion_attempted = 0;
     ctx->conversion_succeeded = 0;
     ctx->bypass_counted = 0;
     ctx->processing_path = NGX_HTTP_MARKDOWN_PATH_FULLBUFFER;
+    ctx->last_error_category = NGX_HTTP_MARKDOWN_ERROR_SYSTEM;
+    ctx->has_error_category = 0;
     
     /* Initialize decompression state (Task 2.4 - Fast path initialization)
      * 
@@ -145,15 +183,54 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
              * 
              * Requirements: 1.6, 11.5
              */
-            ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-                         "markdown filter: unsupported compression format detected, "
-                         "returning original content (fail-open)");
-            
-            /* Set eligible = 0 to trigger fail-open (return original content) */
             ctx->eligible = 0;
+
+            /* Record error category for decision log */
+            ctx->last_error_category =
+                NGX_HTTP_MARKDOWN_ERROR_CONVERSION;
+            ctx->has_error_category = 1;
+
+            if (conf->on_error
+                == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT)
+            {
+                ngx_log_error(NGX_LOG_WARN,
+                    r->connection->log, 0,
+                    "markdown filter: unsupported "
+                    "compression format, "
+                    "rejecting (fail-closed)");
+                NGX_HTTP_MARKDOWN_METRIC_INC(
+                    conversions_attempted);
+                NGX_HTTP_MARKDOWN_METRIC_INC(
+                    conversions_failed);
+                NGX_HTTP_MARKDOWN_METRIC_INC(
+                    failures_conversion);
+                ngx_http_markdown_log_decision_with_category(
+                    r, conf,
+                    ngx_http_markdown_reason_failed_closed(),
+                    ngx_http_markdown_reason_from_error_category(
+                        ctx->last_error_category,
+                        r->connection->log));
+                return NGX_HTTP_BAD_GATEWAY;
+            }
+
+            ngx_log_error(NGX_LOG_WARN,
+                r->connection->log, 0,
+                "markdown filter: unsupported "
+                "compression format, "
+                "returning original content "
+                "(fail-open)");
+            NGX_HTTP_MARKDOWN_METRIC_INC(
+                conversions_attempted);
+            NGX_HTTP_MARKDOWN_METRIC_INC(conversions_failed);
+            NGX_HTTP_MARKDOWN_METRIC_INC(failures_conversion);
+            ngx_http_markdown_log_decision_with_category(
+                r, conf,
+                ngx_http_markdown_reason_failed_open(),
+                ngx_http_markdown_reason_from_error_category(
+                    ctx->last_error_category,
+                    r->connection->log));
             
             /* Don't set decompression_needed - we're not attempting decompression */
-            /* Don't increment failure counter - this is expected degradation */
             
         } else if (ctx->compression_type != NGX_HTTP_MARKDOWN_COMPRESSION_NONE) {
             /* Supported compression format - set flag for decompression */
@@ -254,6 +331,8 @@ ngx_http_markdown_body_filter_convert_and_output(ngx_http_request_t *r,
                                                  ngx_http_markdown_ctx_t *ctx,
                                                  ngx_http_markdown_conf_t *conf)
 {
+    const ngx_str_t      *reason;
+    const ngx_str_t      *fail_category;
     ngx_int_t             rc;
     ngx_msec_t            elapsed_ms;
     ngx_flag_t            has_result;
@@ -300,8 +379,10 @@ ngx_http_markdown_body_filter_convert_and_output(ngx_http_request_t *r,
     }
 #endif
 
-    ctx->conversion_attempted = 1;
-    NGX_HTTP_MARKDOWN_METRIC_INC(conversions_attempted);
+    /*
+     * conversion_attempted and conversions_attempted metric are
+     * already set by the body filter before decompression.
+     */
     elapsed_ms = 0;
 
     ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
@@ -310,21 +391,60 @@ ngx_http_markdown_body_filter_convert_and_output(ngx_http_request_t *r,
 
     rc = ngx_http_markdown_resolve_conditional_result(
         r, ctx, conf, &result, &elapsed_ms, &has_result);
-    if (rc == NGX_DONE) {
+    if (rc == NGX_HTTP_NOT_MODIFIED) {
+        /* 304 Not Modified — conversion matched, log as converted */
+        ngx_http_markdown_log_decision(r, conf,
+            ngx_http_markdown_reason_converted());
         return NGX_OK;
     }
     if (rc != NGX_OK) {
+        /* Conditional processing failed — log failure outcome */
+        reason = (conf->on_error
+                  == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT)
+            ? ngx_http_markdown_reason_failed_closed()
+            : ngx_http_markdown_reason_failed_open();
+        fail_category = ctx->has_error_category
+            ? ngx_http_markdown_reason_from_error_category(
+                  ctx->last_error_category,
+                  r->connection->log)
+            : NULL;
+        ngx_http_markdown_log_decision_with_category(
+            r, conf, reason, fail_category);
         return rc;
     }
 
     if (!has_result) {
         rc = ngx_http_markdown_execute_conversion(r, ctx, conf, &result, &elapsed_ms);
         if (rc != NGX_OK) {
+            /* Conversion failed — log failure outcome */
+            reason = (conf->on_error
+                      == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT)
+                ? ngx_http_markdown_reason_failed_closed()
+                : ngx_http_markdown_reason_failed_open();
+            fail_category = ctx->has_error_category
+                ? ngx_http_markdown_reason_from_error_category(
+                      ctx->last_error_category,
+                      r->connection->log)
+                : NULL;
+            ngx_http_markdown_log_decision_with_category(
+                r, conf, reason, fail_category);
             return rc;
         }
     }
 
-    return ngx_http_markdown_send_conversion_output(r, ctx, conf, &result, elapsed_ms);
+    rc = ngx_http_markdown_send_conversion_output(
+        r, ctx, conf, &result, elapsed_ms);
+    if (rc == NGX_OK || rc == NGX_AGAIN) {
+        /*
+         * Some downstream filters return NGX_AGAIN after successfully
+         * accepting the converted body chain. That is still a converted
+         * request, so record the decision before propagating the status.
+         */
+        ngx_http_markdown_log_decision(r, conf,
+            ngx_http_markdown_reason_converted());
+    }
+
+    return rc;
 }
 
 /*
@@ -383,8 +503,13 @@ ngx_http_markdown_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
     /* If not eligible for conversion, pass through */
     if (!ctx->eligible) {
         r->buffered &= ~NGX_HTTP_MARKDOWN_BUFFERED;
-        if (!ctx->bypass_counted) {
-            /* Track bypassed request once even if the body arrives in chunks. */
+        if (!ctx->bypass_counted && !ctx->has_error_category) {
+            /*
+             * Track bypassed request once even if the body
+             * arrives in chunks.  Do not count requests that
+             * already recorded a failure (has_error_category)
+             * — those are accounted for by conversions_failed.
+             */
             NGX_HTTP_MARKDOWN_METRIC_INC(conversions_bypassed);
             ctx->bypass_counted = 1;
         }
@@ -407,6 +532,15 @@ ngx_http_markdown_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
     if (rc != NGX_OK) {
         return rc;
     }
+
+    /*
+     * Mark conversion as attempted before decompression so that any
+     * failure path that increments conversions_failed is always
+     * preceded by a conversions_attempted increment.  This keeps
+     * the two counters consistent (attempted >= failed).
+     */
+    ctx->conversion_attempted = 1;
+    NGX_HTTP_MARKDOWN_METRIC_INC(conversions_attempted);
 
     rc = ngx_http_markdown_body_filter_decompress_if_needed(r, ctx, conf);
     if (rc != NGX_OK) {
