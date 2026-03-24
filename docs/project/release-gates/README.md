@@ -34,4 +34,4 @@ All five P0 sub-specs must ship in 0.4.0. The P1 sub-spec ships if ready; otherw
 
 Each sub-spec consumes these artifacts during development and completion. Sub-spec owners use the templates to record DoD evaluations, risk registers, boundary descriptions, and test matrix coverage. The release checklist and Go/No-Go template are used at release time to verify all gates pass before shipping 0.4.0.
 
-For the full requirements and design, see `.kiro/specs/5-overall-scope-release-gates/`.
+For the full requirements and design, see the `specs/5-overall-scope-release-gates/` directory.
