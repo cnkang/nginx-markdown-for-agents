@@ -1132,7 +1132,7 @@ The module exposes metrics at the `/markdown-metrics` endpoint in JSON (when `Ac
 |---------------|----------------|------|-------------------|
 | `conversions_succeeded` | N/A | Counter | Successful HTML-to-Markdown conversions |
 | `conversions_failed` | N/A | Counter | Conversion attempts that failed |
-| `conversions_bypassed` | N/A | Counter | Requests where conversion was bypassed (fail-open or ineligible after context creation) |
+| `conversions_bypassed` | N/A | Counter | Requests that intentionally bypassed conversion (ineligible or explicit skip after context creation); does not include fail-open errors, which are recorded under `conversions_failed` |
 | `failures_conversion` | N/A | Counter | HTML parse or conversion errors |
 | `failures_resource_limit` | N/A | Counter | Timeout or memory limit failures |
 | `failures_system` | N/A | Counter | Internal or system errors |
@@ -1295,8 +1295,8 @@ m = json.load(sys.stdin)
 b = m.get('conversion_latency_buckets', {})
 total = sum(b.values()) if b else 0
 if total > 0:
-    for k, v in sorted(b.items(), key=lambda x: float(x[0])):
-        print(f'  <= {k}s: {v} ({v*100//total}%)')
+    for k, v in sorted(b.items(), key=lambda x: int(''.join(c for c in x[0] if c.isdigit()) or '9999')):
+        print(f'  {k}: {v} ({v*100//total}%)')
     print(f'  total: {total}')
 else:
     print('  No conversions recorded yet')
