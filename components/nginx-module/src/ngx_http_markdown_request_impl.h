@@ -83,6 +83,7 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
                       "markdown filter: response not eligible: %V",
                       ngx_http_markdown_eligibility_string(
                           eligibility));
+        NGX_HTTP_MARKDOWN_METRIC_INC(conversions_bypassed);
         ngx_http_markdown_log_decision(r, conf,
             ngx_http_markdown_reason_from_eligibility(
                 eligibility, r->connection->log));
@@ -96,6 +97,7 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
     if (conf->auth_policy == NGX_HTTP_MARKDOWN_AUTH_POLICY_DENY
         && ngx_http_markdown_is_authenticated(r, conf))
     {
+        NGX_HTTP_MARKDOWN_METRIC_INC(conversions_bypassed);
         ngx_http_markdown_log_decision(r, conf,
             ngx_http_markdown_reason_from_eligibility(
                 NGX_HTTP_MARKDOWN_INELIGIBLE_AUTH,
@@ -107,6 +109,7 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
     should_convert = ngx_http_markdown_should_convert(r, conf);
     if (!should_convert) {
         /* Client doesn't want Markdown, pass through */
+        NGX_HTTP_MARKDOWN_METRIC_INC(conversions_bypassed);
         ngx_http_markdown_log_decision(r, conf,
             ngx_http_markdown_reason_skip_accept());
         return ngx_http_next_header_filter(r);
@@ -124,6 +127,33 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
          */
         ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0,
                      "markdown filter: failed to allocate context, category=system");
+                     
+        NGX_HTTP_MARKDOWN_METRIC_INC(conversions_attempted);
+        NGX_HTTP_MARKDOWN_METRIC_INC(conversions_failed);
+        NGX_HTTP_MARKDOWN_METRIC_INC(failures_system);
+
+        if (conf->on_error == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT) {
+            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                         "markdown filter: context allocation failed, "
+                         "rejecting (fail-closed)");
+            ngx_http_markdown_log_decision_with_category(
+                r, conf,
+                ngx_http_markdown_reason_failed_closed(),
+                ngx_http_markdown_reason_from_error_category(
+                    NGX_HTTP_MARKDOWN_ERROR_SYSTEM,
+                    r->connection->log));
+            return NGX_HTTP_INTERNAL_SERVER_ERROR;
+        }
+
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                     "markdown filter: context allocation failed, "
+                     "returning original content (fail-open)");
+        ngx_http_markdown_log_decision_with_category(
+            r, conf,
+            ngx_http_markdown_reason_failed_open(),
+            ngx_http_markdown_reason_from_error_category(
+                NGX_HTTP_MARKDOWN_ERROR_SYSTEM,
+                r->connection->log));
         return ngx_http_next_header_filter(r);
     }
 

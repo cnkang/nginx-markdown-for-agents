@@ -105,6 +105,7 @@ ngx_http_markdown_prepare_compressed_chain(ngx_http_request_t *r,
                      "category=system");
         ctx->last_error_category = NGX_HTTP_MARKDOWN_ERROR_SYSTEM;
         ctx->has_error_category = 1;
+        NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.failed);
         NGX_HTTP_MARKDOWN_METRIC_INC(conversions_failed);
         NGX_HTTP_MARKDOWN_METRIC_INC(failures_system);
         {
@@ -134,6 +135,7 @@ ngx_http_markdown_prepare_compressed_chain(ngx_http_request_t *r,
             ctx->last_error_category =
                 NGX_HTTP_MARKDOWN_ERROR_SYSTEM;
             ctx->has_error_category = 1;
+            NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.failed);
             NGX_HTTP_MARKDOWN_METRIC_INC(conversions_failed);
             NGX_HTTP_MARKDOWN_METRIC_INC(failures_system);
             {
@@ -165,6 +167,7 @@ ngx_http_markdown_prepare_compressed_chain(ngx_http_request_t *r,
                      "category=system");
         ctx->last_error_category = NGX_HTTP_MARKDOWN_ERROR_SYSTEM;
         ctx->has_error_category = 1;
+        NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.failed);
         NGX_HTTP_MARKDOWN_METRIC_INC(conversions_failed);
         NGX_HTTP_MARKDOWN_METRIC_INC(failures_system);
         {
@@ -567,6 +570,7 @@ ngx_http_markdown_body_filter_decompress_if_needed(ngx_http_request_t *r,
             ctx->last_error_category =
                 NGX_HTTP_MARKDOWN_ERROR_CONVERSION;
             ctx->has_error_category = 1;
+            NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.failed);
             NGX_HTTP_MARKDOWN_METRIC_INC(conversions_failed);
             NGX_HTTP_MARKDOWN_METRIC_INC(failures_conversion);
 
