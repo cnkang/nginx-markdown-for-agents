@@ -911,15 +911,15 @@ main() {
     test_variable_driven_markdown_filter
     test_range_bypass
     test_metrics_shared_aggregation
-    if ! run_external_check 8 "Delegated If-Modified-Since runtime validation" \
+    if ! run_external_check 9 "Delegated If-Modified-Since runtime validation" \
         "${REPO_ROOT}/tools/ci/verify_real_nginx_ims.sh"; then
         :
     fi
-    if ! run_external_check 9 "Chunked streaming native smoke validation" \
+    if ! run_external_check 10 "Chunked streaming native smoke validation" \
         "${REPO_ROOT}/tools/e2e/verify_chunked_streaming_native_e2e.sh" --profile smoke; then
         :
     fi
-    if ! run_external_check 10 "Large response native validation" \
+    if ! run_external_check 11 "Large response native validation" \
         "${REPO_ROOT}/tools/e2e/verify_large_markdown_response_e2e.sh"; then
         :
     fi
