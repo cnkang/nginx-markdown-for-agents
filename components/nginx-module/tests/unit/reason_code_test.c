@@ -15,197 +15,8 @@
 #include "test_common.h"
 #include <ctype.h>
 
-/*
- * Minimal ngx_str_t definition matching NGINX's { len, data } layout.
- * The test mirrors the reason code lookup logic from
- * components/nginx-module/src/ngx_http_markdown_reason.c so that it
- * can run standalone without linking against the full module.
- */
-
-typedef unsigned char u_char;
-
-typedef struct {
-    size_t     len;
-    u_char    *data;
-} ngx_str_t;
-
-#define ngx_string(str) { sizeof(str) - 1, (u_char *) str }
-
-/*
- * Eligibility enum — mirrors ngx_http_markdown_eligibility_t
- */
-typedef enum {
-    NGX_HTTP_MARKDOWN_ELIGIBLE = 0,
-    NGX_HTTP_MARKDOWN_INELIGIBLE_METHOD,
-    NGX_HTTP_MARKDOWN_INELIGIBLE_STATUS,
-    NGX_HTTP_MARKDOWN_INELIGIBLE_CONTENT_TYPE,
-    NGX_HTTP_MARKDOWN_INELIGIBLE_SIZE,
-    NGX_HTTP_MARKDOWN_INELIGIBLE_STREAMING,
-    NGX_HTTP_MARKDOWN_INELIGIBLE_AUTH,
-    NGX_HTTP_MARKDOWN_INELIGIBLE_RANGE,
-    NGX_HTTP_MARKDOWN_INELIGIBLE_CONFIG
-} eligibility_t;
-
-/*
- * Error category enum — mirrors ngx_http_markdown_error_category_t
- */
-typedef enum {
-    NGX_HTTP_MARKDOWN_ERROR_CONVERSION = 0,
-    NGX_HTTP_MARKDOWN_ERROR_RESOURCE_LIMIT,
-    NGX_HTTP_MARKDOWN_ERROR_SYSTEM
-} error_category_t;
-
-
-/* Skip reason code strings */
-
-static ngx_str_t reason_skip_config_str =
-    ngx_string("SKIP_CONFIG");
-static ngx_str_t reason_skip_method_str =
-    ngx_string("SKIP_METHOD");
-static ngx_str_t reason_skip_status_str =
-    ngx_string("SKIP_STATUS");
-static ngx_str_t reason_skip_content_type_str =
-    ngx_string("SKIP_CONTENT_TYPE");
-static ngx_str_t reason_skip_size_str =
-    ngx_string("SKIP_SIZE");
-static ngx_str_t reason_skip_streaming_str =
-    ngx_string("SKIP_STREAMING");
-static ngx_str_t reason_skip_auth_str =
-    ngx_string("SKIP_AUTH");
-static ngx_str_t reason_skip_range_str =
-    ngx_string("SKIP_RANGE");
-static ngx_str_t reason_skip_accept_str =
-    ngx_string("SKIP_ACCEPT");
-
-/* Eligible outcome reason code strings */
-
-static ngx_str_t reason_converted_str =
-    ngx_string("ELIGIBLE_CONVERTED");
-static ngx_str_t reason_failed_open_str =
-    ngx_string("ELIGIBLE_FAILED_OPEN");
-static ngx_str_t reason_failed_closed_str =
-    ngx_string("ELIGIBLE_FAILED_CLOSED");
-
-/* Failure sub-classification reason code strings */
-
-static ngx_str_t reason_fail_conversion_str =
-    ngx_string("FAIL_CONVERSION");
-static ngx_str_t reason_fail_resource_limit_str =
-    ngx_string("FAIL_RESOURCE_LIMIT");
-static ngx_str_t reason_fail_system_str =
-    ngx_string("FAIL_SYSTEM");
-
-
-/* Function prototypes */
-
-static const ngx_str_t *reason_from_eligibility(eligibility_t e);
-static const ngx_str_t *reason_from_error_category(error_category_t c);
-static const ngx_str_t *reason_converted(void);
-static const ngx_str_t *reason_failed_open(void);
-static const ngx_str_t *reason_failed_closed(void);
-static const ngx_str_t *reason_skip_accept(void);
-static int matches_snake_case(const ngx_str_t *s);
-static int ngx_str_eq(const ngx_str_t *a, const char *expected);
-static void test_eligibility_reason_codes(void);
-static void test_error_category_reason_codes(void);
-static void test_eligible_outcome_codes(void);
-static void test_skip_accept_code(void);
-static void test_snake_case_format(void);
-
-
-/*
- * Map eligibility enum to reason code string.
- * Mirrors ngx_http_markdown_reason_from_eligibility().
- */
-static const ngx_str_t *
-reason_from_eligibility(eligibility_t e)
-{
-    switch (e) {
-
-    case NGX_HTTP_MARKDOWN_INELIGIBLE_CONFIG:
-        return &reason_skip_config_str;
-
-    case NGX_HTTP_MARKDOWN_INELIGIBLE_METHOD:
-        return &reason_skip_method_str;
-
-    case NGX_HTTP_MARKDOWN_INELIGIBLE_STATUS:
-        return &reason_skip_status_str;
-
-    case NGX_HTTP_MARKDOWN_INELIGIBLE_CONTENT_TYPE:
-        return &reason_skip_content_type_str;
-
-    case NGX_HTTP_MARKDOWN_INELIGIBLE_SIZE:
-        return &reason_skip_size_str;
-
-    case NGX_HTTP_MARKDOWN_INELIGIBLE_STREAMING:
-        return &reason_skip_streaming_str;
-
-    case NGX_HTTP_MARKDOWN_INELIGIBLE_AUTH:
-        return &reason_skip_auth_str;
-
-    case NGX_HTTP_MARKDOWN_INELIGIBLE_RANGE:
-        return &reason_skip_range_str;
-
-    case NGX_HTTP_MARKDOWN_ELIGIBLE:
-        return &reason_converted_str;
-
-    default:
-        return &reason_fail_system_str;
-    }
-}
-
-
-/*
- * Map error category enum to failure reason code string.
- * Mirrors ngx_http_markdown_reason_from_error_category().
- */
-static const ngx_str_t *
-reason_from_error_category(error_category_t c)
-{
-    switch (c) {
-
-    case NGX_HTTP_MARKDOWN_ERROR_CONVERSION:
-        return &reason_fail_conversion_str;
-
-    case NGX_HTTP_MARKDOWN_ERROR_RESOURCE_LIMIT:
-        return &reason_fail_resource_limit_str;
-
-    case NGX_HTTP_MARKDOWN_ERROR_SYSTEM:
-        return &reason_fail_system_str;
-
-    default:
-        return &reason_fail_system_str;
-    }
-}
-
-
-static const ngx_str_t *
-reason_converted(void)
-{
-    return &reason_converted_str;
-}
-
-
-static const ngx_str_t *
-reason_failed_open(void)
-{
-    return &reason_failed_open_str;
-}
-
-
-static const ngx_str_t *
-reason_failed_closed(void)
-{
-    return &reason_failed_closed_str;
-}
-
-
-static const ngx_str_t *
-reason_skip_accept(void)
-{
-    return &reason_skip_accept_str;
-}
-
+#include <ngx_http_markdown_filter_module.h>
+#include "../src/ngx_http_markdown_reason.c"
 
 /*
  * Check if an ngx_str_t matches uppercase snake_case: ^[A-Z][A-Z0-9_]*$
@@ -275,44 +86,44 @@ test_eligibility_reason_codes(void)
 
     TEST_SUBSECTION("Eligibility enum to reason code mapping");
 
-    rc = reason_from_eligibility(NGX_HTTP_MARKDOWN_INELIGIBLE_CONFIG);
+    rc = ngx_http_markdown_reason_from_eligibility(NGX_HTTP_MARKDOWN_INELIGIBLE_CONFIG, NULL);
     TEST_ASSERT(ngx_str_eq(rc, "SKIP_CONFIG"),
                 "INELIGIBLE_CONFIG -> SKIP_CONFIG");
 
-    rc = reason_from_eligibility(NGX_HTTP_MARKDOWN_INELIGIBLE_METHOD);
+    rc = ngx_http_markdown_reason_from_eligibility(NGX_HTTP_MARKDOWN_INELIGIBLE_METHOD, NULL);
     TEST_ASSERT(ngx_str_eq(rc, "SKIP_METHOD"),
                 "INELIGIBLE_METHOD -> SKIP_METHOD");
 
-    rc = reason_from_eligibility(NGX_HTTP_MARKDOWN_INELIGIBLE_STATUS);
+    rc = ngx_http_markdown_reason_from_eligibility(NGX_HTTP_MARKDOWN_INELIGIBLE_STATUS, NULL);
     TEST_ASSERT(ngx_str_eq(rc, "SKIP_STATUS"),
                 "INELIGIBLE_STATUS -> SKIP_STATUS");
 
-    rc = reason_from_eligibility(NGX_HTTP_MARKDOWN_INELIGIBLE_CONTENT_TYPE);
+    rc = ngx_http_markdown_reason_from_eligibility(NGX_HTTP_MARKDOWN_INELIGIBLE_CONTENT_TYPE, NULL);
     TEST_ASSERT(ngx_str_eq(rc, "SKIP_CONTENT_TYPE"),
                 "INELIGIBLE_CONTENT_TYPE -> SKIP_CONTENT_TYPE");
 
-    rc = reason_from_eligibility(NGX_HTTP_MARKDOWN_INELIGIBLE_SIZE);
+    rc = ngx_http_markdown_reason_from_eligibility(NGX_HTTP_MARKDOWN_INELIGIBLE_SIZE, NULL);
     TEST_ASSERT(ngx_str_eq(rc, "SKIP_SIZE"),
                 "INELIGIBLE_SIZE -> SKIP_SIZE");
 
-    rc = reason_from_eligibility(NGX_HTTP_MARKDOWN_INELIGIBLE_STREAMING);
+    rc = ngx_http_markdown_reason_from_eligibility(NGX_HTTP_MARKDOWN_INELIGIBLE_STREAMING, NULL);
     TEST_ASSERT(ngx_str_eq(rc, "SKIP_STREAMING"),
                 "INELIGIBLE_STREAMING -> SKIP_STREAMING");
 
-    rc = reason_from_eligibility(NGX_HTTP_MARKDOWN_INELIGIBLE_AUTH);
+    rc = ngx_http_markdown_reason_from_eligibility(NGX_HTTP_MARKDOWN_INELIGIBLE_AUTH, NULL);
     TEST_ASSERT(ngx_str_eq(rc, "SKIP_AUTH"),
                 "INELIGIBLE_AUTH -> SKIP_AUTH");
 
-    rc = reason_from_eligibility(NGX_HTTP_MARKDOWN_INELIGIBLE_RANGE);
+    rc = ngx_http_markdown_reason_from_eligibility(NGX_HTTP_MARKDOWN_INELIGIBLE_RANGE, NULL);
     TEST_ASSERT(ngx_str_eq(rc, "SKIP_RANGE"),
                 "INELIGIBLE_RANGE -> SKIP_RANGE");
 
-    rc = reason_from_eligibility(NGX_HTTP_MARKDOWN_ELIGIBLE);
-    TEST_ASSERT(ngx_str_eq(rc, "ELIGIBLE_CONVERTED"),
-                "ELIGIBLE -> ELIGIBLE_CONVERTED (fallback)");
+    rc = ngx_http_markdown_reason_from_eligibility(NGX_HTTP_MARKDOWN_ELIGIBLE, NULL);
+    TEST_ASSERT(ngx_str_eq(rc, "FAIL_SYSTEM"),
+                "ELIGIBLE -> FAIL_SYSTEM (log warning, returns fallback)");
 
     /* Unknown value falls back to FAIL_SYSTEM */
-    rc = reason_from_eligibility((eligibility_t) 999);
+    rc = ngx_http_markdown_reason_from_eligibility((ngx_http_markdown_eligibility_t) 999, NULL);
     TEST_ASSERT(ngx_str_eq(rc, "FAIL_SYSTEM"),
                 "Unknown eligibility -> FAIL_SYSTEM");
 
@@ -330,20 +141,20 @@ test_error_category_reason_codes(void)
 
     TEST_SUBSECTION("Error category to failure reason code mapping");
 
-    rc = reason_from_error_category(NGX_HTTP_MARKDOWN_ERROR_CONVERSION);
+    rc = ngx_http_markdown_reason_from_error_category(NGX_HTTP_MARKDOWN_ERROR_CONVERSION, NULL);
     TEST_ASSERT(ngx_str_eq(rc, "FAIL_CONVERSION"),
                 "ERROR_CONVERSION -> FAIL_CONVERSION");
 
-    rc = reason_from_error_category(NGX_HTTP_MARKDOWN_ERROR_RESOURCE_LIMIT);
+    rc = ngx_http_markdown_reason_from_error_category(NGX_HTTP_MARKDOWN_ERROR_RESOURCE_LIMIT, NULL);
     TEST_ASSERT(ngx_str_eq(rc, "FAIL_RESOURCE_LIMIT"),
                 "ERROR_RESOURCE_LIMIT -> FAIL_RESOURCE_LIMIT");
 
-    rc = reason_from_error_category(NGX_HTTP_MARKDOWN_ERROR_SYSTEM);
+    rc = ngx_http_markdown_reason_from_error_category(NGX_HTTP_MARKDOWN_ERROR_SYSTEM, NULL);
     TEST_ASSERT(ngx_str_eq(rc, "FAIL_SYSTEM"),
                 "ERROR_SYSTEM -> FAIL_SYSTEM");
 
     /* Unknown value falls back to FAIL_SYSTEM */
-    rc = reason_from_error_category((error_category_t) 999);
+    rc = ngx_http_markdown_reason_from_error_category((ngx_http_markdown_error_category_t) 999, NULL);
     TEST_ASSERT(ngx_str_eq(rc, "FAIL_SYSTEM"),
                 "Unknown error category -> FAIL_SYSTEM");
 
@@ -361,17 +172,17 @@ test_eligible_outcome_codes(void)
 
     TEST_SUBSECTION("Eligible outcome reason codes");
 
-    rc = reason_converted();
+    rc = ngx_http_markdown_reason_converted();
     TEST_ASSERT(ngx_str_eq(rc, "ELIGIBLE_CONVERTED"),
-                "reason_converted() -> ELIGIBLE_CONVERTED");
+                "ngx_http_markdown_reason_converted() -> ELIGIBLE_CONVERTED");
 
-    rc = reason_failed_open();
+    rc = ngx_http_markdown_reason_failed_open();
     TEST_ASSERT(ngx_str_eq(rc, "ELIGIBLE_FAILED_OPEN"),
-                "reason_failed_open() -> ELIGIBLE_FAILED_OPEN");
+                "ngx_http_markdown_reason_failed_open() -> ELIGIBLE_FAILED_OPEN");
 
-    rc = reason_failed_closed();
+    rc = ngx_http_markdown_reason_failed_closed();
     TEST_ASSERT(ngx_str_eq(rc, "ELIGIBLE_FAILED_CLOSED"),
-                "reason_failed_closed() -> ELIGIBLE_FAILED_CLOSED");
+                "ngx_http_markdown_reason_failed_closed() -> ELIGIBLE_FAILED_CLOSED");
 
     TEST_PASS("All eligible outcome codes correct");
 }
@@ -387,9 +198,9 @@ test_skip_accept_code(void)
 
     TEST_SUBSECTION("Accept skip reason code");
 
-    rc = reason_skip_accept();
+    rc = ngx_http_markdown_reason_skip_accept();
     TEST_ASSERT(ngx_str_eq(rc, "SKIP_ACCEPT"),
-                "reason_skip_accept() -> SKIP_ACCEPT");
+                "ngx_http_markdown_reason_skip_accept() -> SKIP_ACCEPT");
 
     TEST_PASS("SKIP_ACCEPT code correct");
 }
@@ -406,25 +217,25 @@ test_snake_case_format(void)
     TEST_SUBSECTION("All reason codes match uppercase snake_case format");
 
     /* Collect all 15 reason codes */
-    codes[0]  = reason_from_eligibility(NGX_HTTP_MARKDOWN_INELIGIBLE_CONFIG);
-    codes[1]  = reason_from_eligibility(NGX_HTTP_MARKDOWN_INELIGIBLE_METHOD);
-    codes[2]  = reason_from_eligibility(NGX_HTTP_MARKDOWN_INELIGIBLE_STATUS);
-    codes[3]  = reason_from_eligibility(
-                    NGX_HTTP_MARKDOWN_INELIGIBLE_CONTENT_TYPE);
-    codes[4]  = reason_from_eligibility(NGX_HTTP_MARKDOWN_INELIGIBLE_SIZE);
-    codes[5]  = reason_from_eligibility(
-                    NGX_HTTP_MARKDOWN_INELIGIBLE_STREAMING);
-    codes[6]  = reason_from_eligibility(NGX_HTTP_MARKDOWN_INELIGIBLE_AUTH);
-    codes[7]  = reason_from_eligibility(NGX_HTTP_MARKDOWN_INELIGIBLE_RANGE);
-    codes[8]  = reason_skip_accept();
-    codes[9]  = reason_converted();
-    codes[10] = reason_failed_open();
-    codes[11] = reason_failed_closed();
-    codes[12] = reason_from_error_category(
-                    NGX_HTTP_MARKDOWN_ERROR_CONVERSION);
-    codes[13] = reason_from_error_category(
-                    NGX_HTTP_MARKDOWN_ERROR_RESOURCE_LIMIT);
-    codes[14] = reason_from_error_category(NGX_HTTP_MARKDOWN_ERROR_SYSTEM);
+    codes[0]  = ngx_http_markdown_reason_from_eligibility(NGX_HTTP_MARKDOWN_INELIGIBLE_CONFIG, NULL);
+    codes[1]  = ngx_http_markdown_reason_from_eligibility(NGX_HTTP_MARKDOWN_INELIGIBLE_METHOD, NULL);
+    codes[2]  = ngx_http_markdown_reason_from_eligibility(NGX_HTTP_MARKDOWN_INELIGIBLE_STATUS, NULL);
+    codes[3]  = ngx_http_markdown_reason_from_eligibility(
+                    NGX_HTTP_MARKDOWN_INELIGIBLE_CONTENT_TYPE, NULL);
+    codes[4]  = ngx_http_markdown_reason_from_eligibility(NGX_HTTP_MARKDOWN_INELIGIBLE_SIZE, NULL);
+    codes[5]  = ngx_http_markdown_reason_from_eligibility(
+                    NGX_HTTP_MARKDOWN_INELIGIBLE_STREAMING, NULL);
+    codes[6]  = ngx_http_markdown_reason_from_eligibility(NGX_HTTP_MARKDOWN_INELIGIBLE_AUTH, NULL);
+    codes[7]  = ngx_http_markdown_reason_from_eligibility(NGX_HTTP_MARKDOWN_INELIGIBLE_RANGE, NULL);
+    codes[8]  = ngx_http_markdown_reason_skip_accept();
+    codes[9]  = ngx_http_markdown_reason_converted();
+    codes[10] = ngx_http_markdown_reason_failed_open();
+    codes[11] = ngx_http_markdown_reason_failed_closed();
+    codes[12] = ngx_http_markdown_reason_from_error_category(
+                    NGX_HTTP_MARKDOWN_ERROR_CONVERSION, NULL);
+    codes[13] = ngx_http_markdown_reason_from_error_category(
+                    NGX_HTTP_MARKDOWN_ERROR_RESOURCE_LIMIT, NULL);
+    codes[14] = ngx_http_markdown_reason_from_error_category(NGX_HTTP_MARKDOWN_ERROR_SYSTEM, NULL);
 
     for (size_t i = 0; i < ARRAY_SIZE(codes); i++) {
         TEST_ASSERT(codes[i] != NULL,
