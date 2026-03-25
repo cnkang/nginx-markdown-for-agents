@@ -254,7 +254,6 @@ test_log_level_selection(void)
 static void
 test_verbosity_gating_info(void)
 {
-    size_t            i;
     const ngx_str_t  *all_codes[] = {
         &rc_skip_config, &rc_skip_method, &rc_skip_status,
         &rc_skip_content_type, &rc_skip_size,
@@ -265,7 +264,7 @@ test_verbosity_gating_info(void)
     };
     TEST_SUBSECTION("Verbosity gating: info emits all");
 
-    for (i = 0; i < ARRAY_SIZE(all_codes); i++) {
+    for (size_t i = 0; i < ARRAY_SIZE(all_codes); i++) {
         TEST_ASSERT(
             should_emit(NGX_HTTP_MARKDOWN_LOG_INFO,
                         all_codes[i]) == 1,
@@ -282,7 +281,6 @@ test_verbosity_gating_info(void)
 static void
 test_verbosity_gating_debug(void)
 {
-    size_t            i;
     const ngx_str_t  *all_codes[] = {
         &rc_skip_config, &rc_skip_method, &rc_skip_status,
         &rc_skip_content_type, &rc_skip_size,
@@ -293,7 +291,7 @@ test_verbosity_gating_debug(void)
     };
     TEST_SUBSECTION("Verbosity gating: debug emits all");
 
-    for (i = 0; i < ARRAY_SIZE(all_codes); i++) {
+    for (size_t i = 0; i < ARRAY_SIZE(all_codes); i++) {
         TEST_ASSERT(
             should_emit(NGX_HTTP_MARKDOWN_LOG_DEBUG,
                         all_codes[i]) == 1,
