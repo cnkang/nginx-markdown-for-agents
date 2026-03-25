@@ -28,6 +28,8 @@
 static int
 matches_snake_case(const ngx_str_t *s)
 {
+    size_t i;
+
     if (s == NULL || s->data == NULL || s->len == 0) {
         return 0;
     }
@@ -38,7 +40,7 @@ matches_snake_case(const ngx_str_t *s)
     }
 
     /* Remaining characters must be uppercase letter, digit, or underscore */
-    for (size_t i = 1; i < s->len; i++) {
+    for (i = 1; i < s->len; i++) {
         unsigned char ch = s->data[i];
         if (!isupper(ch) && !isdigit(ch) && ch != '_') {
             return 0;
@@ -212,6 +214,7 @@ test_skip_accept_code(void)
 static void
 test_snake_case_format(void)
 {
+    size_t i;
     const ngx_str_t *codes[15];
 
     TEST_SUBSECTION("All reason codes match uppercase snake_case format");
@@ -237,7 +240,7 @@ test_snake_case_format(void)
                     NGX_HTTP_MARKDOWN_ERROR_RESOURCE_LIMIT, NULL);
     codes[14] = ngx_http_markdown_reason_from_error_category(NGX_HTTP_MARKDOWN_ERROR_SYSTEM, NULL);
 
-    for (size_t i = 0; i < ARRAY_SIZE(codes); i++) {
+    for (i = 0; i < ARRAY_SIZE(codes); i++) {
         TEST_ASSERT(codes[i] != NULL,
                     "Reason code pointer should not be NULL");
         TEST_ASSERT(codes[i]->len > 0,

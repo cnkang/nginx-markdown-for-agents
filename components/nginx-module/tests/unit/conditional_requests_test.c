@@ -176,6 +176,7 @@ token_matches_generated(const char *token, const char *generated_raw, const char
 static int
 etag_matches(const char *if_none_match, const char *generated_etag)
 {
+    size_t i;
     char tokens[16][128];
     size_t count;
     char normalized[128];
@@ -186,7 +187,7 @@ etag_matches(const char *if_none_match, const char *generated_etag)
         return RC_DECLINED;
     }
 
-    for (size_t i = 0; i < count; i++) {
+    for (i = 0; i < count; i++) {
         if (is_wildcard_token(tokens[i])) {
             return RC_MATCH;
         }

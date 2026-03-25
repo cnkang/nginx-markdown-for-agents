@@ -193,6 +193,7 @@ should_convert(const char *accept_header, int on_wildcard)
 {
     accept_entry_t entries[32];
     int n;
+    int i;
     int best = -1;
     int explicit_reject_markdown = 0;
 
@@ -201,7 +202,7 @@ should_convert(const char *accept_header, int on_wildcard)
         return 0;
     }
 
-    for (int i = 0; i < n; i++) {
+    for (i = 0; i < n; i++) {
         if (str_case_eq(entries[i].type, "text") &&
             str_case_eq(entries[i].subtype, "markdown") &&
             entries[i].q == 0.0f)

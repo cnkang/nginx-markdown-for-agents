@@ -19,19 +19,24 @@ cookie_matches_pattern(const char *cookie_name, const char *pattern)
     size_t name_len;
     size_t pat_len;
 
-    if (cookie_name == NULL || pattern == NULL || *cookie_name == '\0' || *pattern == '\0') {
+    if (cookie_name == NULL || pattern == NULL
+        || *cookie_name == '\0' || *pattern == '\0')
+    {
         return 0;
     }
 
     name_len = test_cstrnlen(cookie_name, TEST_COOKIE_NAME_MAX);
     pat_len = test_cstrnlen(pattern, TEST_COOKIE_PATTERN_MAX);
-    if (name_len == TEST_COOKIE_NAME_MAX || pat_len == TEST_COOKIE_PATTERN_MAX) {
+    if (name_len == TEST_COOKIE_NAME_MAX
+        || pat_len == TEST_COOKIE_PATTERN_MAX)
+    {
         return 0;
     }
 
     if (pattern[pat_len - 1] == '*') {
         size_t prefix_len = pat_len - 1;
-        return name_len >= prefix_len && strncmp(cookie_name, pattern, prefix_len) == 0;
+        return name_len >= prefix_len
+               && strncmp(cookie_name, pattern, prefix_len) == 0;
     }
     if (pattern[0] == '*') {
         size_t suffix_len = pat_len - 1;
@@ -84,7 +89,8 @@ append_cache_control_directive(char *rewritten,
 }
 
 static const char *
-finalize_private_cache_control(char *rewritten, size_t rewritten_size, int wrote)
+finalize_private_cache_control(char *rewritten, size_t rewritten_size,
+    int wrote)
 {
     if (wrote != 0) {
         if (!append_with_bound(rewritten, rewritten_size, ", private")) {
@@ -140,7 +146,8 @@ next_delimited_token(char **cursor, char delimiter)
 }
 
 static int
-has_auth_cookie(const char *cookie_header, const char **patterns, size_t pattern_count)
+has_auth_cookie(const char *cookie_header, const char **patterns,
+    size_t pattern_count)
 {
     char buf[512];
     const char *cursor;
@@ -160,6 +167,8 @@ has_auth_cookie(const char *cookie_header, const char **patterns, size_t pattern
         size_t name_len;
         char name_buf[128];
 
+        size_t i;
+
         eq = strchr(cursor, '=');
         if (eq == NULL) {
             cursor = next_delimited_token(&cookie_cursor, ';');
@@ -171,7 +180,9 @@ has_auth_cookie(const char *cookie_header, const char **patterns, size_t pattern
             name++;
         }
         name_len = (size_t) (eq - name);
-        while (name_len > 0 && (name[name_len - 1] == ' ' || name[name_len - 1] == '\t')) {
+        while (name_len > 0
+               && (name[name_len - 1] == ' ' || name[name_len - 1] == '\t'))
+        {
             name_len--;
         }
         if (name_len == 0 || name_len >= sizeof(name_buf)) {
@@ -182,7 +193,7 @@ has_auth_cookie(const char *cookie_header, const char **patterns, size_t pattern
         memcpy(name_buf, name, name_len);
         name_buf[name_len] = '\0';
 
-        for (size_t i = 0; i < pattern_count; i++) {
+        for (i = 0; i < pattern_count; i++) {
             if (cookie_matches_pattern(name_buf, patterns[i])) {
                 return 1;
             }
@@ -194,7 +205,8 @@ has_auth_cookie(const char *cookie_header, const char **patterns, size_t pattern
 }
 
 static int
-is_authenticated(const request_t *r, const char **patterns, size_t pattern_count)
+is_authenticated(const request_t *r, const char **patterns,
+    size_t pattern_count)
 {
     if (r->authorization != NULL && *r->authorization != '\0') {
         return 1;

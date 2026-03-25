@@ -169,9 +169,13 @@ void ngx_http_markdown_log_debug1(int level, void *log, int err, const char *fmt
 int
 ngx_strncasecmp(const u_char *s1, const u_char *s2, size_t n)
 {
-    for (size_t i = 0; i < n; i++) {
-        int c1 = tolower(s1[i]);
-        int c2 = tolower(s2[i]);
+    size_t i;
+    int c1;
+    int c2;
+
+    for (i = 0; i < n; i++) {
+        c1 = tolower(s1[i]);
+        c2 = tolower(s2[i]);
         if (c1 != c2) {
             return c1 - c2;
         }
@@ -261,11 +265,12 @@ push_header(ngx_http_request_t *r, const char *key, const char *value)
 static ngx_table_elt_t *
 find_header(ngx_http_request_t *r, const char *key)
 {
+    ngx_uint_t i;
     ngx_table_elt_t *elts = (ngx_table_elt_t *) r->headers_out.headers.part.elts;
     size_t key_len = test_cstrnlen(key, 256);
     const u_char *key_u = (const u_char *) key;
 
-    for (ngx_uint_t i = 0; i < r->headers_out.headers.part.nelts; i++) {
+    for (i = 0; i < r->headers_out.headers.part.nelts; i++) {
         if (elts[i].hash != 0 &&
             elts[i].key.len == key_len &&
             ngx_strncasecmp(elts[i].key.data, key_u, elts[i].key.len) == 0)
@@ -279,12 +284,13 @@ find_header(ngx_http_request_t *r, const char *key)
 static ngx_uint_t
 count_active_headers(const ngx_http_request_t *r, const char *key)
 {
+    ngx_uint_t i;
     const ngx_table_elt_t *elts = (const ngx_table_elt_t *) r->headers_out.headers.part.elts;
     ngx_uint_t count = 0;
     size_t key_len = test_cstrnlen(key, 256);
     const u_char *key_u = (const u_char *) key;
 
-    for (ngx_uint_t i = 0; i < r->headers_out.headers.part.nelts; i++) {
+    for (i = 0; i < r->headers_out.headers.part.nelts; i++) {
         if (elts[i].hash != 0 &&
             elts[i].key.len == key_len &&
             ngx_strncasecmp(elts[i].key.data, key_u, elts[i].key.len) == 0)
