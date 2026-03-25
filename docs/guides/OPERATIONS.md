@@ -1726,7 +1726,7 @@ Every decision log entry uses a consistent, parseable structure with space-separ
 
 #### Base Format (info verbosity)
 
-```
+```text
 markdown decision: reason=<REASON_CODE> method=<METHOD> uri=<URI> content_type=<TYPE>
 ```
 
@@ -1743,7 +1743,7 @@ Fields:
 
 When `markdown_log_verbosity` is set to `debug`, three additional fields are appended:
 
-```
+```text
 markdown decision: reason=<REASON_CODE> method=<METHOD> uri=<URI> content_type=<TYPE> filter_value=<VALUE> accept=<ACCEPT> status=<STATUS>
 ```
 
@@ -1761,25 +1761,25 @@ These examples show what operators will see in `/var/log/nginx/error.log`. The N
 
 #### Successful conversion (info verbosity)
 
-```
+```text
 2025/01/15 14:30:25 [info] 1234#0: *567 markdown decision: reason=ELIGIBLE_CONVERTED method=GET uri=/docs/api content_type=text/html while sending to client, client: 10.0.0.5, server: example.com, request: "GET /docs/api HTTP/1.1", upstream: "http://127.0.0.1:8080/docs/api", host: "example.com"
 ```
 
 #### Skipped — Accept header does not request Markdown (info verbosity)
 
-```
+```text
 2025/01/15 14:30:26 [info] 1234#0: *568 markdown decision: reason=SKIP_ACCEPT method=GET uri=/docs/api content_type=text/html while sending to client, client: 10.0.0.5, server: example.com, request: "GET /docs/api HTTP/1.1", host: "example.com"
 ```
 
 #### Conversion failed open (warn verbosity or higher)
 
-```
+```text
 2025/01/15 14:30:27 [warn] 1234#0: *569 markdown decision: reason=ELIGIBLE_FAILED_OPEN method=GET uri=/blog/post-1 content_type=text/html while sending to client, client: 10.0.0.5, server: example.com, request: "GET /blog/post-1 HTTP/1.1", upstream: "http://127.0.0.1:8080/blog/post-1", host: "example.com"
 ```
 
 #### Debug extended format
 
-```
+```text
 2025/01/15 14:30:28 [info] 1234#0: *570 markdown decision: reason=SKIP_METHOD method=POST uri=/api/submit content_type=text/html filter_value=on accept=text/markdown status=200 while sending to client, client: 10.0.0.5, server: example.com, request: "POST /api/submit HTTP/1.1", host: "example.com"
 ```
 
