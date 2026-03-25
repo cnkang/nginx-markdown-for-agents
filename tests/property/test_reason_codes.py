@@ -136,13 +136,21 @@ all_reason_codes_strategy = st.sampled_from(ALL_REASON_CODES)
 # ---------------------------------------------------------------------------
 
 def reason_from_eligibility(eligibility: Eligibility) -> str:
-    """Return the reason code for an eligibility enum value."""
-    return ELIGIBILITY_TO_REASON[eligibility]
+    """Return the reason code for an eligibility enum value.
+
+    Returns ``FAIL_SYSTEM`` for unmapped inputs instead of raising
+    ``KeyError``.
+    """
+    return ELIGIBILITY_TO_REASON.get(eligibility, "FAIL_SYSTEM")
 
 
 def reason_from_error_category(category: ErrorCategory) -> str:
-    """Return the reason code for an error category enum value."""
-    return ERROR_CATEGORY_TO_REASON[category]
+    """Return the reason code for an error category enum value.
+
+    Returns ``FAIL_SYSTEM`` for unmapped inputs instead of raising
+    ``KeyError``.
+    """
+    return ERROR_CATEGORY_TO_REASON.get(category, "FAIL_SYSTEM")
 
 
 # ---------------------------------------------------------------------------
@@ -603,7 +611,7 @@ def test_property6_failure_uses_warn_level(reason_code):
 # implementation in ngx_http_markdown_check_eligibility():
 #   1. CONFIG  (markdown_filter enabled?)
 #   2. METHOD  (GET/HEAD?)
-#   3. STATUS  (200 OK?)
+#   3. STATUS  (200 OK / 206 Partial Content?)
 #   4. RANGE   (Range request?)
 #   5. STREAMING (unbounded streaming?)
 #   6. CONTENT_TYPE (text/html?)

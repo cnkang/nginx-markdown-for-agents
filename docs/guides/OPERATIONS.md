@@ -1595,7 +1595,7 @@ The table below maps each reason code to its internal enum, error category, requ
 |---|---|---|---|---|---|
 | `SKIP_CONFIG` | `NGX_HTTP_MARKDOWN_INELIGIBLE_CONFIG` | — | NOT_ENABLED | Module disabled by configuration for this scope | Expected for scopes where you have not enabled conversion. If unexpected, check `markdown_filter` in the relevant `location`/`server` block. |
 | `SKIP_METHOD` | `NGX_HTTP_MARKDOWN_INELIGIBLE_METHOD` | — | SKIPPED | Request method is not GET or HEAD | Expected for POST/PUT/DELETE requests. No action needed. |
-| `SKIP_STATUS` | `NGX_HTTP_MARKDOWN_INELIGIBLE_STATUS` | — | SKIPPED | Upstream response status is not 200 OK | Check upstream health if you see many non-200 responses for pages you expect to convert. |
+| `SKIP_STATUS` | `NGX_HTTP_MARKDOWN_INELIGIBLE_STATUS` | — | SKIPPED | Upstream response status is not 200 OK or 206 Partial Content | Check upstream health if you see many non-200/206 responses for pages you expect to convert. |
 | `SKIP_RANGE` | `NGX_HTTP_MARKDOWN_INELIGIBLE_RANGE` | — | SKIPPED | Client sent a Range request header | Expected behavior — partial content cannot be converted. No action needed. |
 | `SKIP_STREAMING` | `NGX_HTTP_MARKDOWN_INELIGIBLE_STREAMING` | — | SKIPPED | Response matches `markdown_stream_types` (unbounded streaming) | Expected for SSE/streaming endpoints. If a static page triggers this, check your `markdown_stream_types` configuration. |
 | `SKIP_CONTENT_TYPE` | `NGX_HTTP_MARKDOWN_INELIGIBLE_CONTENT_TYPE` | — | SKIPPED | Upstream Content-Type is not `text/html` | Expected for JSON, XML, image, and other non-HTML responses. If an HTML page triggers this, check the upstream `Content-Type` header. |
