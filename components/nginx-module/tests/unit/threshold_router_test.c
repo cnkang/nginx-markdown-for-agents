@@ -555,7 +555,6 @@ test_merge_both_unset_defaults_off(void)
 static void
 test_metrics_fullbuffer_increments(void)
 {
-    int i;
     conf_t     c = make_conf(0);
     request_t  r = make_request(METHOD_GET, STATUS_OK, 1024);
     ctx_t      ctx;
@@ -563,7 +562,7 @@ test_metrics_fullbuffer_increments(void)
 
     TEST_SUBSECTION("Metrics: fullbuffer counter increments");
 
-    for (i = 0; i < 5; i++) {
+    for (int i = 0; i < 5; i++) {
         ctx = fresh_ctx();
         select_processing_path(&c, &r, &ctx, &m);
     }
@@ -578,7 +577,6 @@ test_metrics_fullbuffer_increments(void)
 static void
 test_metrics_incremental_increments(void)
 {
-    int i;
     conf_t     c = make_conf(512);
     request_t  r = make_request(METHOD_GET, STATUS_OK, 1024);
     ctx_t      ctx;
@@ -586,7 +584,7 @@ test_metrics_incremental_increments(void)
 
     TEST_SUBSECTION("Metrics: incremental counter increments");
 
-    for (i = 0; i < 3; i++) {
+    for (int i = 0; i < 3; i++) {
         ctx = fresh_ctx();
         select_processing_path(&c, &r, &ctx, &m);
     }

@@ -167,8 +167,6 @@ has_auth_cookie(const char *cookie_header, const char **patterns,
         size_t name_len;
         char name_buf[128];
 
-        size_t i;
-
         eq = strchr(cursor, '=');
         if (eq == NULL) {
             cursor = next_delimited_token(&cookie_cursor, ';');
@@ -193,7 +191,7 @@ has_auth_cookie(const char *cookie_header, const char **patterns,
         memcpy(name_buf, name, name_len);
         name_buf[name_len] = '\0';
 
-        for (i = 0; i < pattern_count; i++) {
+        for (size_t i = 0; i < pattern_count; i++) {
             if (cookie_matches_pattern(name_buf, patterns[i])) {
                 return 1;
             }
