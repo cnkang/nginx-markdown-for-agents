@@ -14,7 +14,7 @@ flowchart TD
     B -->|No| C["SKIP_CONFIG<br/>(NOT_ENABLED)"]
     B -->|Yes| D{"Method<br/>GET/HEAD?"}
     D -->|No| E["SKIP_METHOD<br/>(SKIPPED)"]
-    D -->|Yes| F{"Status<br/>200 OK?"}
+    D -->|Yes| F{"Status<br/>200 or 206?"}
     F -->|No| G["SKIP_STATUS<br/>(SKIPPED)"]
     F -->|Yes| H{"Range<br/>request?"}
     H -->|Yes| I["SKIP_RANGE<br/>(SKIPPED)"]
@@ -43,7 +43,7 @@ The decision chain evaluates checks in a fixed order. The first check that fails
 |-------|-------|--------------------|------------------------|
 | 1 | Scope enablement | Is `markdown_filter` enabled (`on`, `1`, `true`, `yes`, or a variable that resolves to a truthy value) for this request's location/server/http context? | `SKIP_CONFIG` |
 | 2 | HTTP method | Is the request method `GET` or `HEAD`? Other methods (POST, PUT, DELETE, etc.) are not eligible. | `SKIP_METHOD` |
-| 3 | Response status | Is the upstream response status `200 OK`? Non-200 responses (redirects, errors, etc.) are not eligible. | `SKIP_STATUS` |
+| 3 | Response status | Is the upstream response status `200 OK` or `206 Partial Content`? Non-200/206 responses (redirects, errors, etc.) are not eligible. | `SKIP_STATUS` |
 | 4 | Range request | Is this a range request (`Range` header present)? Range requests are not eligible because partial content cannot be converted. | `SKIP_RANGE` |
 | 5 | Streaming content | Is the response a streaming content type (matching `markdown_stream_types`)? Streaming responses are not eligible. | `SKIP_STREAMING` |
 | 6 | Content-Type | Is the upstream `Content-Type` header `text/html` (with any charset parameter)? Non-HTML content types are not eligible. | `SKIP_CONTENT_TYPE` |
@@ -117,7 +117,7 @@ The complete mapping from reason codes to eligibility enums, error categories, r
 |---|---|---|---|---|
 | `SKIP_CONFIG` | `NGX_HTTP_MARKDOWN_INELIGIBLE_CONFIG` | — | NOT_ENABLED | Module disabled by configuration |
 | `SKIP_METHOD` | `NGX_HTTP_MARKDOWN_INELIGIBLE_METHOD` | — | SKIPPED | Request method not GET/HEAD |
-| `SKIP_STATUS` | `NGX_HTTP_MARKDOWN_INELIGIBLE_STATUS` | — | SKIPPED | Response status not 200 |
+| `SKIP_STATUS` | `NGX_HTTP_MARKDOWN_INELIGIBLE_STATUS` | — | SKIPPED | Response status not 200 or 206 |
 | `SKIP_RANGE` | `NGX_HTTP_MARKDOWN_INELIGIBLE_RANGE` | — | SKIPPED | Range request |
 | `SKIP_STREAMING` | `NGX_HTTP_MARKDOWN_INELIGIBLE_STREAMING` | — | SKIPPED | Unbounded streaming response |
 | `SKIP_CONTENT_TYPE` | `NGX_HTTP_MARKDOWN_INELIGIBLE_CONTENT_TYPE` | — | SKIPPED | Content-Type not text/html |
