@@ -448,9 +448,12 @@ verbosity_levels_strategy = st.sampled_from(ALL_VERBOSITY_LEVELS)
 # ---------------------------------------------------------------------------
 # **Validates: Requirements 3.1, 3.4**
 
-FAILURE_REASON_CODES = [
+FAILURE_PRIMARY_REASON_CODES = [
     rc for rc in ALL_REASON_CODES 
     if is_failure_outcome(rc) and not rc.startswith("FAIL_")
+]
+ALL_FAILURE_REASON_CODES = [
+    rc for rc in ALL_REASON_CODES if is_failure_outcome(rc)
 ]
 NON_FAILURE_REASON_CODES = [
     rc for rc in ALL_REASON_CODES if not is_failure_outcome(rc)
@@ -509,7 +512,7 @@ def test_property4_non_failure_suppressed_at_warn_and_error(
 
 
 @given(
-    reason_code=st.sampled_from(FAILURE_REASON_CODES),
+    reason_code=st.sampled_from(ALL_FAILURE_REASON_CODES),
     verbosity=verbosity_levels_strategy,
 )
 @settings(max_examples=100)
@@ -590,7 +593,7 @@ def test_property6_non_failure_uses_info_level(reason_code):
 
 
 @given(
-    reason_code=st.sampled_from(FAILURE_REASON_CODES),
+    reason_code=st.sampled_from(ALL_FAILURE_REASON_CODES),
 )
 @settings(max_examples=100)
 def test_property6_failure_uses_warn_level(reason_code):
