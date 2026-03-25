@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `markdown_metrics_format` configuration directive (`auto|prometheus`) for opt-in Prometheus text exposition format on the existing `markdown_metrics` endpoint
+- Prometheus text exposition format (`text/plain; version=0.0.4; charset=utf-8`) output on the `markdown_metrics` endpoint, selected via Accept header content negotiation when enabled
+- New shared-memory counters: `requests_entered`, skip-reason breakdown (`skips.config`, `skips.method`, `skips.status`, `skips.content_type`, `skips.size`, `skips.streaming`, `skips.auth`, `skips.range`, `skips.accept`), `failopen_count`, `estimated_token_savings`
+- Content negotiation for metrics endpoint: JSON, plain text, or Prometheus format based on Accept header and `markdown_metrics_format` configuration
+- Prometheus metrics guide (`docs/guides/prometheus-metrics.md`) covering metric catalog, scrape configuration, rollout judgment advice, and metric stability policy
+- Property-based tests for Prometheus output format correctness (7 properties, Python Hypothesis)
+- C unit tests for Prometheus renderer, content negotiation, skip-reason mapping, and snapshot collection
 - Shared 0.4.0 release-gate constants module (`tools/release/release_constants.py`) to centralize sub-spec discovery keywords, P0 release-decision sub-specs, and scope-evaluation non-goals used by validation/tests.
 - Focused release-gate edge-case tests for checklist parsing and file read failures (`tools/release/tests/test_release_gate_checks.py`).
 - Scope-evaluation regression coverage to ensure short proposal tokens are not rejected solely because they appear inside a longer non-goal phrase.

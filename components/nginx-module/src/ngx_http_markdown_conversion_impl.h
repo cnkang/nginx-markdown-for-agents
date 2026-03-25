@@ -443,6 +443,13 @@ ngx_http_markdown_handle_conversion_failure(ngx_http_request_t *r,
                  elapsed_ms);
 
     markdown_result_free(result);
+
+    if (conf->on_error
+        == NGX_HTTP_MARKDOWN_ON_ERROR_PASS)
+    {
+        NGX_HTTP_MARKDOWN_METRIC_INC(failopen_count);
+    }
+
     return ngx_http_markdown_reject_or_fail_open_buffered_response(
         r, ctx, conf,
         "markdown filter: fail-open strategy - returning original HTML");
@@ -532,6 +539,13 @@ ngx_http_markdown_handle_converter_not_initialized(
                  "markdown filter: converter not "
                  "initialized, category=system");
     ngx_http_markdown_record_system_failure(ctx);
+
+    if (conf->on_error
+        == NGX_HTTP_MARKDOWN_ON_ERROR_PASS)
+    {
+        NGX_HTTP_MARKDOWN_METRIC_INC(failopen_count);
+    }
+
     return ngx_http_markdown_reject_or_fail_open_buffered_response(
         r, ctx, conf,
         "markdown filter: fail-open strategy "
@@ -662,6 +676,36 @@ ngx_http_markdown_execute_conversion(ngx_http_request_t *r,
     }
 
     ngx_http_markdown_record_conversion_success(ctx, result, *elapsed_ms);
+
+    /*
+     * Estimate token savings when markdown_token_estimate
+     * is enabled and the Rust FFI returned a non-zero
+     * token estimate for the Markdown output.
+     *
+     * HTML token estimate uses a rough 4-bytes-per-token
+     * heuristic.  Savings = max(0, html_tokens - md_tokens).
+     */
+    if (conf->token_estimate
+        && result->token_estimate > 0
+        && ctx->buffer.size > 0)
+    {
+        ngx_atomic_uint_t  html_tokens;
+        ngx_atomic_uint_t  savings;
+
+        html_tokens = ctx->buffer.size / 4;
+        if (html_tokens > result->token_estimate) {
+            savings = html_tokens
+                - (ngx_atomic_uint_t) result->token_estimate;
+        } else {
+            savings = 0;
+        }
+
+        if (savings > 0) {
+            NGX_HTTP_MARKDOWN_METRIC_ADD(
+                estimated_token_savings, savings);
+        }
+    }
+
     return NGX_OK;
 }
 

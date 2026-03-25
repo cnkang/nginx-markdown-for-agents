@@ -93,6 +93,8 @@ ngx_http_markdown_handle_unsupported_compression(
         return NGX_HTTP_BAD_GATEWAY;
     }
 
+    NGX_HTTP_MARKDOWN_METRIC_INC(failopen_count);
+
     ngx_log_error(NGX_LOG_WARN,
         r->connection->log, 0,
         "markdown filter: unsupported "
@@ -147,6 +149,8 @@ ngx_http_markdown_handle_ctx_alloc_failure(ngx_http_request_t *r,
                 r->connection->log));
         return NGX_HTTP_INTERNAL_SERVER_ERROR;
     }
+
+    NGX_HTTP_MARKDOWN_METRIC_INC(failopen_count);
 
     ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                  "markdown filter: context allocation "
@@ -261,6 +265,12 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
     }
 
     /*
+     * Decision chain entry point — increment requests_entered
+     * after scope enablement check passes.
+     */
+    NGX_HTTP_MARKDOWN_METRIC_INC(requests_entered);
+
+    /*
      * Check eligibility before Accept negotiation.
      *
      * The decision chain order (Requirement 2.1) is:
@@ -277,6 +287,7 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
                       "markdown filter: response not eligible: %V",
                       ngx_http_markdown_eligibility_string(
                           eligibility));
+        ngx_http_markdown_metric_inc_skip(eligibility);
         NGX_HTTP_MARKDOWN_METRIC_INC(conversions_bypassed);
         ngx_http_markdown_log_decision(r, conf,
             ngx_http_markdown_reason_from_eligibility(
@@ -291,6 +302,8 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
     if (conf->auth_policy == NGX_HTTP_MARKDOWN_AUTH_POLICY_DENY
         && ngx_http_markdown_is_authenticated(r, conf))
     {
+        ngx_http_markdown_metric_inc_skip(
+            NGX_HTTP_MARKDOWN_INELIGIBLE_AUTH);
         NGX_HTTP_MARKDOWN_METRIC_INC(conversions_bypassed);
         ngx_http_markdown_log_decision(r, conf,
             ngx_http_markdown_reason_from_eligibility(
@@ -303,6 +316,7 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
     should_convert = ngx_http_markdown_should_convert(r, conf);
     if (!should_convert) {
         /* Client doesn't want Markdown, pass through */
+        NGX_HTTP_MARKDOWN_METRIC_INC(skips.accept);
         NGX_HTTP_MARKDOWN_METRIC_INC(conversions_bypassed);
         ngx_http_markdown_log_decision(r, conf,
             ngx_http_markdown_reason_skip_accept());

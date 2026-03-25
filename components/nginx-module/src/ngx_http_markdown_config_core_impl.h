@@ -140,6 +140,7 @@ ngx_http_markdown_create_conf(ngx_conf_t *cf)
     conf->auto_decompress = NGX_CONF_UNSET;
     conf->large_body_threshold = NGX_CONF_UNSET_SIZE;
     conf->trust_forwarded_headers = NGX_CONF_UNSET;
+    conf->metrics_format = NGX_CONF_UNSET_UINT;
 
     return conf;
 }
@@ -203,6 +204,8 @@ ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
     ngx_conf_merge_value(conf->buffer_chunked, prev->buffer_chunked, 1);
     ngx_conf_merge_value(conf->auto_decompress, prev->auto_decompress, 1);
     ngx_conf_merge_value(conf->trust_forwarded_headers, prev->trust_forwarded_headers, 0);
+    ngx_conf_merge_uint_value(conf->metrics_format, prev->metrics_format,
+                              NGX_HTTP_MARKDOWN_METRICS_FORMAT_AUTO);
     ngx_conf_merge_size_value(conf->large_body_threshold,
                               prev->large_body_threshold,
                               NGX_HTTP_MARKDOWN_THRESHOLD_OFF);

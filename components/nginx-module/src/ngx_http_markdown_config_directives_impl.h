@@ -396,6 +396,28 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
     },
 
     /*
+     * markdown_metrics_format auto|prometheus
+     *
+     * Controls the output format of the markdown_metrics endpoint.
+     * - auto: JSON or plain-text based on Accept header (default)
+     * - prometheus: Prometheus text exposition format for non-JSON
+     * Default: auto
+     * Context: http, server, location
+     *
+     * Example:
+     *   markdown_metrics_format prometheus;
+     */
+    {
+        ngx_string("markdown_metrics_format"),
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF
+            |NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+        ngx_http_markdown_metrics_format,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        0,
+        NULL
+    },
+
+    /*
      * markdown_metrics
      *
      * Enables metrics exposure endpoint at this location.
