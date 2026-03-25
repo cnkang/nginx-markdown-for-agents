@@ -123,11 +123,9 @@ expected_log_level(const ngx_str_t *reason_code)
 static int
 should_emit(ngx_uint_t verbosity, const ngx_str_t *reason_code)
 {
-    ngx_int_t failure;
-
-    failure = is_failure_outcome(reason_code);
-
-    if (verbosity <= NGX_HTTP_MARKDOWN_LOG_WARN && !failure) {
+    if (verbosity <= NGX_HTTP_MARKDOWN_LOG_WARN
+        && !is_failure_outcome(reason_code))
+    {
         return 0;
     }
 
@@ -263,11 +261,9 @@ test_verbosity_gating_info(void)
         &rc_failed_closed, &rc_fail_conversion,
         &rc_fail_resource, &rc_fail_system
     };
-    size_t i;
-
     TEST_SUBSECTION("Verbosity gating: info emits all");
 
-    for (i = 0; i < ARRAY_SIZE(all_codes); i++) {
+    for (size_t i = 0; i < ARRAY_SIZE(all_codes); i++) {
         TEST_ASSERT(
             should_emit(NGX_HTTP_MARKDOWN_LOG_INFO,
                         all_codes[i]) == 1,
@@ -292,11 +288,9 @@ test_verbosity_gating_debug(void)
         &rc_failed_closed, &rc_fail_conversion,
         &rc_fail_resource, &rc_fail_system
     };
-    size_t i;
-
     TEST_SUBSECTION("Verbosity gating: debug emits all");
 
-    for (i = 0; i < ARRAY_SIZE(all_codes); i++) {
+    for (size_t i = 0; i < ARRAY_SIZE(all_codes); i++) {
         TEST_ASSERT(
             should_emit(NGX_HTTP_MARKDOWN_LOG_DEBUG,
                         all_codes[i]) == 1,
