@@ -551,7 +551,7 @@ def test_property6_nginx_log_level_matches_outcome_type(reason_code):
     **Validates: Requirements 3.5**
     """
     level = expected_nginx_log_level(reason_code)
-    if failure := is_failure_outcome(reason_code):
+    if is_failure_outcome(reason_code):
         assert level == NGX_LOG_WARN, (
             f"Failure outcome '{reason_code}' should use NGX_LOG_WARN (5), "
             f"got {level}"
