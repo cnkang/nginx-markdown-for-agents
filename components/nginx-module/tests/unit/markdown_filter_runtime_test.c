@@ -54,6 +54,8 @@ eq_nocase_lit(const char *start, size_t len, const char *lit)
 {
     size_t lit_len;
 
+    size_t i;
+
     if (start == NULL || lit == NULL) {
         return 0;
     }
@@ -66,7 +68,7 @@ eq_nocase_lit(const char *start, size_t len, const char *lit)
         return 0;
     }
 
-    for (size_t i = 0; i < len; i++) {
+    for (i = 0; i < len; i++) {
         if (ascii_lower(start[i]) != lit[i]) {
             return 0;
         }
@@ -148,7 +150,9 @@ is_enabled_runtime(const request_t *r, const conf_t *conf)
         return 0;
     }
 
-    if (conf->enabled_source != ENABLED_COMPLEX || conf->enabled_complex == NULL) {
+    if (conf->enabled_source != ENABLED_COMPLEX
+        || conf->enabled_complex == NULL)
+    {
         return conf->enabled;
     }
 

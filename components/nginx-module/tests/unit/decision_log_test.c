@@ -27,6 +27,7 @@ typedef struct {
 } ngx_str_t;
 
 #define ngx_string(str) { sizeof(str) - 1, (u_char *) str }
+#define ngx_null_string { 0, NULL }
 #define ngx_strncmp(s1, s2, n) strncmp((const char *) (s1), \
     (const char *) (s2), n)
 
@@ -52,7 +53,7 @@ typedef unsigned int ngx_uint_t;
 
 static ngx_int_t is_failure_outcome(const ngx_str_t *reason_code);
 static ngx_uint_t expected_log_level(const ngx_str_t *reason_code);
-static int should_emit(ngx_uint_t verbosity,
+static ngx_int_t should_emit(ngx_uint_t verbosity,
     const ngx_str_t *reason_code);
 static void test_failure_outcome_classification(void);
 static void test_non_failure_outcome_classification(void);
@@ -120,7 +121,7 @@ expected_log_level(const ngx_str_t *reason_code)
  *   1 if a decision log entry should be emitted
  *   0 if suppressed by verbosity
  */
-static int
+static ngx_int_t
 should_emit(ngx_uint_t verbosity, const ngx_str_t *reason_code)
 {
     if (verbosity <= NGX_HTTP_MARKDOWN_LOG_WARN
@@ -253,7 +254,8 @@ test_log_level_selection(void)
 static void
 test_verbosity_gating_info(void)
 {
-    const ngx_str_t *all_codes[] = {
+    size_t            i;
+    const ngx_str_t  *all_codes[] = {
         &rc_skip_config, &rc_skip_method, &rc_skip_status,
         &rc_skip_content_type, &rc_skip_size,
         &rc_skip_streaming, &rc_skip_auth, &rc_skip_range,
@@ -263,7 +265,7 @@ test_verbosity_gating_info(void)
     };
     TEST_SUBSECTION("Verbosity gating: info emits all");
 
-    for (size_t i = 0; i < ARRAY_SIZE(all_codes); i++) {
+    for (i = 0; i < ARRAY_SIZE(all_codes); i++) {
         TEST_ASSERT(
             should_emit(NGX_HTTP_MARKDOWN_LOG_INFO,
                         all_codes[i]) == 1,
@@ -280,7 +282,8 @@ test_verbosity_gating_info(void)
 static void
 test_verbosity_gating_debug(void)
 {
-    const ngx_str_t *all_codes[] = {
+    size_t            i;
+    const ngx_str_t  *all_codes[] = {
         &rc_skip_config, &rc_skip_method, &rc_skip_status,
         &rc_skip_content_type, &rc_skip_size,
         &rc_skip_streaming, &rc_skip_auth, &rc_skip_range,
@@ -290,7 +293,7 @@ test_verbosity_gating_debug(void)
     };
     TEST_SUBSECTION("Verbosity gating: debug emits all");
 
-    for (size_t i = 0; i < ARRAY_SIZE(all_codes); i++) {
+    for (i = 0; i < ARRAY_SIZE(all_codes); i++) {
         TEST_ASSERT(
             should_emit(NGX_HTTP_MARKDOWN_LOG_DEBUG,
                         all_codes[i]) == 1,
@@ -391,7 +394,7 @@ test_verbosity_gating_error(void)
 static void
 test_null_inputs(void)
 {
-    ngx_str_t empty = { 0, NULL };
+    ngx_str_t empty = ngx_null_string;
 
     TEST_SUBSECTION("NULL and empty input handling");
 
