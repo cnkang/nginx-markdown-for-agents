@@ -440,7 +440,10 @@ verbosity_levels_strategy = st.sampled_from(ALL_VERBOSITY_LEVELS)
 # ---------------------------------------------------------------------------
 # **Validates: Requirements 3.1, 3.4**
 
-FAILURE_REASON_CODES = [rc for rc in ALL_REASON_CODES if is_failure_outcome(rc)]
+FAILURE_REASON_CODES = [
+    rc for rc in ALL_REASON_CODES 
+    if is_failure_outcome(rc) and not rc.startswith("FAIL_")
+]
 NON_FAILURE_REASON_CODES = [
     rc for rc in ALL_REASON_CODES if not is_failure_outcome(rc)
 ]

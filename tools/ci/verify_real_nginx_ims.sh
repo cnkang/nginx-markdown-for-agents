@@ -171,6 +171,7 @@ RUNTIME="${BUILDROOT}/runtime"
 
 # NGINX workers may run as an unprivileged user, so the temporary build root
 # must be traversable by that user for static-file reads during validation.
+umask 022
 chmod 755 "${BUILDROOT}"
 
 mkdir -p "${RUNTIME}/conf" "${RUNTIME}/html" "${RUNTIME}/logs"
