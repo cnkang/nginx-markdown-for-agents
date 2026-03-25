@@ -104,7 +104,10 @@ ngx_http_markdown_reason_from_eligibility(
         return &ngx_http_markdown_reason_skip_range_str;
 
     case NGX_HTTP_MARKDOWN_ELIGIBLE:
-        return &ngx_http_markdown_reason_converted_str;
+        ngx_log_error(NGX_LOG_ERR, log, 0,
+                      "markdown reason: NGX_HTTP_MARKDOWN_ELIGIBLE passed to mapper, "
+                      "callers must pick explicit outcome reason (converted/failed)");
+        return &ngx_http_markdown_reason_fail_system_str;
 
     default:
         ngx_log_error(NGX_LOG_WARN, log, 0,
