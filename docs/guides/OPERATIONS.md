@@ -1789,12 +1789,12 @@ The `markdown_log_verbosity` directive controls which decision outcomes produce 
 
 | Verbosity Level | Outcomes Logged | Format | Use Case |
 |---|---|---|---|
-| `error` | `ELIGIBLE_FAILED_OPEN`, `ELIGIBLE_FAILED_CLOSED` only | Base | Production with minimal log volume — only conversion failures appear |
-| `warn` | All failure outcomes: `ELIGIBLE_FAILED_*` and `FAIL_*` | Base | Production monitoring — see all failures including sub-classifications |
-| `info` (default) | All outcomes: `SKIP_*`, `ELIGIBLE_CONVERTED`, `ELIGIBLE_FAILED_*` | Base | Recommended for rollout — full visibility into every decision |
+| `error` | Failure outcomes (`ELIGIBLE_FAILED_OPEN`, `ELIGIBLE_FAILED_CLOSED`) only | Base | Production with minimal log volume |
+| `warn` | Failure outcomes (`ELIGIBLE_FAILED_OPEN`, `ELIGIBLE_FAILED_CLOSED`) only | Base | Production monitoring |
+| `info` (default) | All outcomes | Base | Recommended for rollout — full visibility into every decision |
 | `debug` | All outcomes | Extended (adds `filter_value`, `accept`, `status`) | Troubleshooting — maximum detail for diagnosing specific requests |
 
-At `error` and `warn` levels, non-failure outcomes (`SKIP_*` and `ELIGIBLE_CONVERTED`) are silently suppressed. This keeps log volume low in production while still surfacing problems.
+At `error` and `warn` levels, non-failure outcomes (`SKIP_*` and `ELIGIBLE_CONVERTED`) are silently suppressed. Both levels only emit failure outcomes. At `info` and `debug` levels, they include full outcomes. When failures are logged at any level, failure subclassifications (like `FAIL_CONVERSION`, `FAIL_RESOURCE_LIMIT`, `FAIL_SYSTEM`) are emitted in the `category=` field per `ngx_http_markdown_log_decision_with_category()`, not as standalone `FAIL_*` codes in the `reason=` field.
 
 #### Configuration examples
 
