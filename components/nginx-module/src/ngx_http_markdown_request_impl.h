@@ -101,6 +101,7 @@ ngx_http_markdown_handle_unsupported_compression(
         "(fail-open)");
     ngx_http_markdown_log_failure_decision(
         r, ctx, conf);
+    ctx->headers_forwarded = 1;
     return ngx_http_next_header_filter(r);
 }
 
@@ -538,6 +539,14 @@ ngx_http_markdown_body_filter_convert_and_output(ngx_http_request_t *r,
          */
         ngx_http_markdown_log_decision(r, conf,
             ngx_http_markdown_reason_converted());
+    } else {
+        /*
+         * Output emission failed after conversion succeeded.
+         * Record the terminal failure decision so the request
+         * does not rely solely on the earlier success recording
+         * in ngx_http_markdown_execute_conversion().
+         */
+        ngx_http_markdown_log_failure_decision(r, ctx, conf);
     }
 
     return rc;

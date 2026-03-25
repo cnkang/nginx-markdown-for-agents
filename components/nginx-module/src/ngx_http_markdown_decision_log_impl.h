@@ -91,12 +91,30 @@ ngx_http_markdown_log_decision_debug(ngx_http_request_t *r,
     const ngx_str_t *error_category, ngx_uint_t log_level,
     ngx_str_t *method_name, ngx_str_t *content_type)
 {
-    ngx_str_t        accept_value;
-    ngx_str_t        filter_value;
-    ngx_str_t        empty = ngx_string("-");
+    ngx_str_t                     accept_value;
+    ngx_str_t                     filter_value;
+    ngx_str_t                     empty = ngx_string("-");
+    ngx_http_markdown_ctx_t      *ctx;
 
-    /* Resolve filter_value from config */
-    if (conf->enabled_source
+    /*
+     * Resolve filter_value from the cached header-phase decision
+     * stored in ctx->filter_enabled.  This avoids re-evaluating
+     * ngx_http_complex_value() which could drift from the
+     * header-phase result for dynamic variables.
+     *
+     * Fall back to evaluating conf->enabled_complex only when no
+     * cached decision exists (ctx is NULL).
+     */
+    ctx = ngx_http_get_module_ctx(r,
+        ngx_http_markdown_filter_module);
+
+    if (ctx != NULL) {
+        if (ctx->filter_enabled) {
+            ngx_str_set(&filter_value, "on");
+        } else {
+            ngx_str_set(&filter_value, "off");
+        }
+    } else if (conf->enabled_source
         == NGX_HTTP_MARKDOWN_ENABLED_COMPLEX
         && conf->enabled_complex != NULL)
     {
