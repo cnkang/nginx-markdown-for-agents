@@ -4,7 +4,7 @@
 
 Every request that reaches the Markdown filter module passes through an ordered sequence of checks called the decision chain. The first failing check determines the outcome and assigns a reason code. If all checks pass, conversion is attempted and the outcome depends on whether conversion succeeds or fails.
 
-This document describes the check order, explains what each check evaluates, and defines how the final outcome is determined. For the complete reason code reference table, see [Reason Code Reference](#reason-code-reference) below. For rollout procedures and observation guidance, see the [Rollout Cookbook](../guides/ROLLOUT_COOKBOOK.md). For rollback procedures, see the [Rollback Guide](../guides/ROLLBACK_GUIDE.md).
+This document describes the check order, explains what each check evaluates, and defines how the outcome is determined. See the [Reason Code Reference](#reason-code-reference) below for the complete reason code table. Rollout procedures and observation guidance are in the [Rollout Cookbook](../guides/ROLLOUT_COOKBOOK.md). Rollback procedures are documented in the [Rollback Guide](../guides/ROLLBACK_GUIDE.md).
 
 ## Decision Chain Flowchart
 
