@@ -92,16 +92,6 @@ def render_prometheus(snap: MetricsSnapshot) -> str:
     """
     lines = []
 
-    def emit(name, typ, help_text, value, labels=None):
-        """Emit a single metric value line."""
-        if labels:
-            lbl = ",".join(
-                f'{k}="{v}"' for k, v in labels.items()
-            )
-            lines.append(f"{name}{{{lbl}}} {value}")
-        else:
-            lines.append(f"{name} {value}")
-
     def emit_family(name, typ, help_text, entries):
         """Emit HELP, TYPE, and all value lines for a family."""
         lines.append(f"# HELP {name} {help_text}")
