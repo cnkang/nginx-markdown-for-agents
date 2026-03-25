@@ -300,11 +300,7 @@ ngx_http_markdown_resolve_conditional_result(ngx_http_request_t *r,
 
         r->buffered &= ~NGX_HTTP_MARKDOWN_BUFFERED;
         if (rc != NGX_OK) {
-            ctx->last_error_category =
-                NGX_HTTP_MARKDOWN_ERROR_SYSTEM;
-            ctx->has_error_category = 1;
-            NGX_HTTP_MARKDOWN_METRIC_INC(conversions_failed);
-            NGX_HTTP_MARKDOWN_METRIC_INC(failures_system);
+            ngx_http_markdown_record_system_failure(ctx);
             return rc;
         }
 
@@ -319,11 +315,7 @@ ngx_http_markdown_resolve_conditional_result(ngx_http_request_t *r,
             markdown_result_free(conditional_result);
         }
 
-        ctx->last_error_category =
-            NGX_HTTP_MARKDOWN_ERROR_SYSTEM;
-        ctx->has_error_category = 1;
-        NGX_HTTP_MARKDOWN_METRIC_INC(conversions_failed);
-        NGX_HTTP_MARKDOWN_METRIC_INC(failures_system);
+        ngx_http_markdown_record_system_failure(ctx);
 
         return ngx_http_markdown_reject_or_fail_open_buffered_response(
             r, ctx, conf,
@@ -456,6 +448,26 @@ ngx_http_markdown_handle_conversion_failure(ngx_http_request_t *r,
         "markdown filter: fail-open strategy - returning original HTML");
 }
 
+/*
+ * Record a system-level failure in context and metrics.
+ *
+ * Centralizes the repeated pattern of setting error category,
+ * incrementing conversions_failed and failures_system.
+ *
+ * Parameters:
+ *   ctx - per-request module context
+ */
+static void
+ngx_http_markdown_record_system_failure(
+    ngx_http_markdown_ctx_t *ctx)
+{
+    ctx->last_error_category =
+        NGX_HTTP_MARKDOWN_ERROR_SYSTEM;
+    ctx->has_error_category = 1;
+    NGX_HTTP_MARKDOWN_METRIC_INC(conversions_failed);
+    NGX_HTTP_MARKDOWN_METRIC_INC(failures_system);
+}
+
 /* Validate FFI result pointer/length invariants before consuming output. */
 static ngx_int_t
 ngx_http_markdown_validate_conversion_result(ngx_http_request_t *r,
@@ -468,17 +480,15 @@ ngx_http_markdown_validate_conversion_result(ngx_http_request_t *r,
         || (result->etag == NULL && result->etag_len > 0))
     {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                     "markdown filter: invalid FFI result invariants: "
-                     "markdown=%p markdown_len=%uz etag=%p etag_len=%uz "
+                     "markdown filter: invalid FFI result "
+                     "invariants: "
+                     "markdown=%p markdown_len=%uz "
+                     "etag=%p etag_len=%uz "
                      "error_message=%p error_len=%uz",
                      result->markdown, result->markdown_len,
                      result->etag, result->etag_len,
                      result->error_message, result->error_len);
-        ctx->last_error_category =
-            NGX_HTTP_MARKDOWN_ERROR_SYSTEM;
-        ctx->has_error_category = 1;
-        NGX_HTTP_MARKDOWN_METRIC_INC(conversions_failed);
-        NGX_HTTP_MARKDOWN_METRIC_INC(failures_system);
+        ngx_http_markdown_record_system_failure(ctx);
         markdown_result_free(result);
         return ngx_http_markdown_reject_or_fail_open_buffered_response(
             r, ctx, conf, NULL);
@@ -498,6 +508,34 @@ ngx_http_markdown_record_conversion_success(ngx_http_markdown_ctx_t *ctx,
     NGX_HTTP_MARKDOWN_METRIC_INC(conversions_succeeded);
     NGX_HTTP_MARKDOWN_METRIC_ADD(input_bytes, ctx->buffer.size);
     NGX_HTTP_MARKDOWN_METRIC_ADD(output_bytes, result->markdown_len);
+}
+
+/*
+ * Record a system-level conversion failure when the converter
+ * handle is not initialized.
+ *
+ * Parameters:
+ *   r    - NGINX request structure
+ *   ctx  - per-request module context
+ *   conf - module location configuration
+ *
+ * Returns:
+ *   Result of reject_or_fail_open_buffered_response
+ */
+static ngx_int_t
+ngx_http_markdown_handle_converter_not_initialized(
+    ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx,
+    ngx_http_markdown_conf_t *conf)
+{
+    ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0,
+                 "markdown filter: converter not "
+                 "initialized, category=system");
+    ngx_http_markdown_record_system_failure(ctx);
+    return ngx_http_markdown_reject_or_fail_open_buffered_response(
+        r, ctx, conf,
+        "markdown filter: fail-open strategy "
+        "- returning original HTML");
 }
 
 /**
@@ -534,16 +572,8 @@ ngx_http_markdown_execute_conversion(ngx_http_request_t *r,
     ngx_int_t               rc;
 
     if (ngx_http_markdown_converter == NULL) {
-        ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0,
-                     "markdown filter: converter not initialized, category=system");
-        ctx->last_error_category =
-            NGX_HTTP_MARKDOWN_ERROR_SYSTEM;
-        ctx->has_error_category = 1;
-        NGX_HTTP_MARKDOWN_METRIC_INC(conversions_failed);
-        NGX_HTTP_MARKDOWN_METRIC_INC(failures_system);
-        return ngx_http_markdown_reject_or_fail_open_buffered_response(
-            r, ctx, conf,
-            "markdown filter: fail-open strategy - returning original HTML");
+        return ngx_http_markdown_handle_converter_not_initialized(
+            r, ctx, conf);
     }
 
     ngx_http_markdown_prepare_conversion_options(r, conf, &options);
