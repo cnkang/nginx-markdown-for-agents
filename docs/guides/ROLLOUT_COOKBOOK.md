@@ -1145,7 +1145,7 @@ The module exposes metrics at the `/markdown-metrics` endpoint in JSON (when `Ac
 
 The key ratio to track is the conversion success rate:
 
-```
+```text
 success_rate = conversions_succeeded /
                (conversions_succeeded + conversions_failed)
 ```
