@@ -62,6 +62,12 @@ struct MarkdownOptions;
 #define NGX_HTTP_MARKDOWN_LOG_DEBUG  3  /* Debug and above */
 
 /*
+ * Configuration constants for metrics_format directive
+ */
+#define NGX_HTTP_MARKDOWN_METRICS_FORMAT_AUTO        0  /* JSON or plain-text (default) */
+#define NGX_HTTP_MARKDOWN_METRICS_FORMAT_PROMETHEUS   1  /* Prometheus text exposition */
+
+/*
  * Configuration source for markdown_filter directive
  */
 #define NGX_HTTP_MARKDOWN_ENABLED_UNSET    0  /* Not configured in this scope */
@@ -129,6 +135,7 @@ typedef struct {
     ngx_flag_t   auto_decompress;      /* markdown_auto_decompress on|off (default: on) */
     size_t       large_body_threshold; /* markdown_large_body_threshold (NGX_HTTP_MARKDOWN_THRESHOLD_OFF = off) */
     ngx_flag_t   trust_forwarded_headers; /* markdown_trust_forwarded_headers on|off (default: off) */
+    ngx_uint_t   metrics_format;       /* markdown_metrics_format auto|prometheus (default: auto) */
 } ngx_http_markdown_conf_t;
 
 /*
@@ -330,6 +337,49 @@ typedef struct {
      */
     ngx_atomic_t  fullbuffer_path_hits;      /* Requests routed to full-buffer path */
     ngx_atomic_t  incremental_path_hits;     /* Requests routed to incremental path */
+
+    /*
+     * Total requests that entered the decision chain.
+     *
+     * Incremented in the header filter after scope enablement
+     * check passes.  This is the denominator for conversion
+     * rate calculations.
+     */
+    ngx_atomic_t  requests_entered;
+
+    /*
+     * Skip counters by reason code.
+     *
+     * Each field corresponds to a specific eligibility check
+     * failure.  Grouped into a sub-struct so that the parent
+     * ngx_http_markdown_metrics_t stays within the 20-field
+     * limit enforced by static analysis (SonarCloud rule
+     * c:S1820).
+     */
+    struct {
+        ngx_atomic_t  config;        /* SKIP_CONFIG */
+        ngx_atomic_t  method;        /* SKIP_METHOD */
+        ngx_atomic_t  status;        /* SKIP_STATUS */
+        ngx_atomic_t  content_type;  /* SKIP_CONTENT_TYPE */
+        ngx_atomic_t  size;          /* SKIP_SIZE */
+        ngx_atomic_t  streaming;     /* SKIP_STREAMING */
+        ngx_atomic_t  auth;          /* SKIP_AUTH */
+        ngx_atomic_t  range;         /* SKIP_RANGE */
+        ngx_atomic_t  accept;        /* SKIP_ACCEPT */
+    } skips;
+
+    /*
+     * Fail-open counter: conversion failed but original HTML
+     * served due to markdown_on_error pass.
+     */
+    ngx_atomic_t  failopen_count;
+
+    /*
+     * Estimated cumulative token savings across all successful
+     * conversions.  Only non-zero when markdown_token_estimate
+     * is enabled.  Value is an approximation.
+     */
+    ngx_atomic_t  estimated_token_savings;
 } ngx_http_markdown_metrics_t;
 
 /* Module declaration */

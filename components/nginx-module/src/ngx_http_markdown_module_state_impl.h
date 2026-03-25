@@ -47,6 +47,71 @@ static u_char ngx_http_markdown_empty_string[] = "";
     NGX_HTTP_MARKDOWN_METRIC_ADD(field, 1)
 
 /*
+ * Increment the skip counter for the given eligibility result.
+ *
+ * Maps ngx_http_markdown_eligibility_t enum values to the
+ * corresponding skips.* atomic counter in shared memory.
+ * Unknown values fall back to skips.config with a warning.
+ *
+ * NGX_HTTP_MARKDOWN_ELIGIBLE is a no-op (should not be
+ * called for eligible requests).
+ *
+ * Parameters:
+ *   eligibility - the eligibility check result
+ */
+static void
+ngx_http_markdown_metric_inc_skip(
+    ngx_http_markdown_eligibility_t eligibility)
+{
+    switch (eligibility) {
+
+    case NGX_HTTP_MARKDOWN_ELIGIBLE:
+        /* No-op: eligible requests are not skips */
+        return;
+
+    case NGX_HTTP_MARKDOWN_INELIGIBLE_CONFIG:
+        NGX_HTTP_MARKDOWN_METRIC_INC(skips.config);
+        return;
+
+    case NGX_HTTP_MARKDOWN_INELIGIBLE_METHOD:
+        NGX_HTTP_MARKDOWN_METRIC_INC(skips.method);
+        return;
+
+    case NGX_HTTP_MARKDOWN_INELIGIBLE_STATUS:
+        NGX_HTTP_MARKDOWN_METRIC_INC(skips.status);
+        return;
+
+    case NGX_HTTP_MARKDOWN_INELIGIBLE_CONTENT_TYPE:
+        NGX_HTTP_MARKDOWN_METRIC_INC(skips.content_type);
+        return;
+
+    case NGX_HTTP_MARKDOWN_INELIGIBLE_SIZE:
+        NGX_HTTP_MARKDOWN_METRIC_INC(skips.size);
+        return;
+
+    case NGX_HTTP_MARKDOWN_INELIGIBLE_STREAMING:
+        NGX_HTTP_MARKDOWN_METRIC_INC(skips.streaming);
+        return;
+
+    case NGX_HTTP_MARKDOWN_INELIGIBLE_AUTH:
+        NGX_HTTP_MARKDOWN_METRIC_INC(skips.auth);
+        return;
+
+    case NGX_HTTP_MARKDOWN_INELIGIBLE_RANGE:
+        NGX_HTTP_MARKDOWN_METRIC_INC(skips.range);
+        return;
+
+    default:
+        /*
+         * Unknown eligibility value — count under
+         * skips.config as a safe fallback.
+         */
+        NGX_HTTP_MARKDOWN_METRIC_INC(skips.config);
+        return;
+    }
+}
+
+/*
  * Lifecycle hooks registered with nginx module callbacks.
  *
  * - filter_init wires this module into header/body filter chains.

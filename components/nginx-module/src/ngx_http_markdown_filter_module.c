@@ -15,6 +15,7 @@
 #include "ngx_http_markdown_lifecycle_impl.h"
 #include "ngx_http_markdown_decision_log_impl.h"
 #include "ngx_http_markdown_request_impl.h"
+#include "ngx_http_markdown_prometheus_impl.h"
 #include "ngx_http_markdown_metrics_impl.h"
 
 /*
