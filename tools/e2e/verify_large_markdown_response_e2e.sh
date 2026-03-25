@@ -117,6 +117,7 @@ RAW_DIR="${BUILDROOT}/raw"
 
 # NGINX workers may run unprivileged, so the temporary build root must be
 # traversable during request handling in this validation.
+umask 022
 chmod 755 "${BUILDROOT}"
 
 mkdir -p "${RAW_DIR}"
