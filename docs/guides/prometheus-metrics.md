@@ -154,14 +154,13 @@ All metrics use the `nginx_markdown_` prefix. Counter metrics use the `_total` s
 
 ### Total Time Series
 
-The endpoint produces exactly 32 unique time series:
+The endpoint produces exactly 28 unique time series:
 
-- 9 unlabeled counters
+- 9 unlabeled counters (requests, conversions, passthrough, failopen, large response path, input bytes, output bytes, token savings, decompression failures)
 - 9 skip reason labels
 - 3 failure stage labels
 - 3 decompression format labels
 - 4 latency bucket labels
-- 4 additional metric lines (decompression failures, failopen, large response path, token savings are counted in the 9 unlabeled above)
 
 This count is deterministic and bounded. No request-specific or high-cardinality labels are used.
 
