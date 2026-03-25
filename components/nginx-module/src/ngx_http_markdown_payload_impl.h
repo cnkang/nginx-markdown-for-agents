@@ -21,6 +21,18 @@ static ngx_int_t ngx_http_markdown_fail_open_with_buffered_prefix(
     ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx, ngx_chain_t *remaining);
 static void ngx_http_markdown_reclassify_fail_open_path(
     ngx_http_markdown_ctx_t *ctx);
+static ngx_int_t ngx_http_markdown_handle_decompression_alloc_error(
+    ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx,
+    ngx_http_markdown_conf_t *conf,
+    ngx_http_markdown_error_category_t category,
+    const char *debug_message);
+static ngx_int_t ngx_http_markdown_handle_decompression_conversion_error(
+    ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx,
+    ngx_http_markdown_conf_t *conf,
+    const char *debug_message);
+static void ngx_http_markdown_emit_failure_decision(
+    ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx,
+    ngx_http_markdown_conf_t *conf);
 
 static void
 ngx_http_markdown_reclassify_fail_open_path(ngx_http_markdown_ctx_t *ctx)
@@ -89,6 +101,71 @@ ngx_http_markdown_reject_or_fail_open_buffered_response(
     return NGX_DONE;
 }
 
+/*
+ * Handle a decompression-phase allocation or system error.
+ *
+ * Centralizes the repeated pattern of:
+ *   1. recording error category in context
+ *   2. incrementing decompressions.failed + conversions_failed + category metric
+ *   3. emitting a decision log entry with the failure reason
+ *   4. applying the configured error strategy (reject or fail-open)
+ *
+ * Parameters:
+ *   r              - NGINX request structure
+ *   ctx            - per-request module context
+ *   conf           - module location configuration
+ *   category       - error classification for metrics
+ *   debug_message  - optional debug log message (NULL to skip)
+ *
+ * Returns:
+ *   Result of reject_or_fail_open_buffered_response
+ */
+static ngx_int_t
+ngx_http_markdown_handle_decompression_alloc_error(
+    ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx,
+    ngx_http_markdown_conf_t *conf,
+    ngx_http_markdown_error_category_t category,
+    const char *debug_message)
+{
+    const ngx_str_t *reason;
+
+    ctx->last_error_category = category;
+    ctx->has_error_category = 1;
+
+    NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.failed);
+    NGX_HTTP_MARKDOWN_METRIC_INC(conversions_failed);
+
+    switch (category) {
+
+    case NGX_HTTP_MARKDOWN_ERROR_CONVERSION:
+        NGX_HTTP_MARKDOWN_METRIC_INC(failures_conversion);
+        break;
+
+    case NGX_HTTP_MARKDOWN_ERROR_RESOURCE_LIMIT:
+        NGX_HTTP_MARKDOWN_METRIC_INC(failures_resource_limit);
+        break;
+
+    case NGX_HTTP_MARKDOWN_ERROR_SYSTEM:
+        NGX_HTTP_MARKDOWN_METRIC_INC(failures_system);
+        break;
+    }
+
+    reason = (conf->on_error
+              == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT)
+        ? ngx_http_markdown_reason_failed_closed()
+        : ngx_http_markdown_reason_failed_open();
+
+    ngx_http_markdown_log_decision_with_category(
+        r, conf, reason,
+        ngx_http_markdown_reason_from_error_category(
+            category, r->connection->log));
+
+    return ngx_http_markdown_reject_or_fail_open_buffered_response(
+        r, ctx, conf, debug_message);
+}
+
+
 /* Wrap the buffered compressed payload into a chain for the decompressor. */
 static ngx_int_t
 ngx_http_markdown_prepare_compressed_chain(ngx_http_request_t *r,
@@ -101,58 +178,24 @@ ngx_http_markdown_prepare_compressed_chain(ngx_http_request_t *r,
     compressed_buf = ngx_create_temp_buf(r->pool, ctx->buffer.size);
     if (compressed_buf == NULL) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                     "markdown filter: failed to create compressed buffer, "
-                     "category=system");
-        ctx->last_error_category = NGX_HTTP_MARKDOWN_ERROR_SYSTEM;
-        ctx->has_error_category = 1;
-        NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.failed);
-        NGX_HTTP_MARKDOWN_METRIC_INC(conversions_failed);
-        NGX_HTTP_MARKDOWN_METRIC_INC(failures_system);
-        {
-            const ngx_str_t *reason;
-
-            reason = (conf->on_error
-                      == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT)
-                ? ngx_http_markdown_reason_failed_closed()
-                : ngx_http_markdown_reason_failed_open();
-            ngx_http_markdown_log_decision_with_category(
-                r, conf, reason,
-                ngx_http_markdown_reason_from_error_category(
-                    ctx->last_error_category,
-                    r->connection->log));
-        }
-        return ngx_http_markdown_reject_or_fail_open_buffered_response(
-            r, ctx, conf,
-            "markdown filter: fail-open strategy - returning original content");
+                     "markdown filter: failed to create "
+                     "compressed buffer, category=system");
+        return ngx_http_markdown_handle_decompression_alloc_error(
+            r, ctx, conf, NGX_HTTP_MARKDOWN_ERROR_SYSTEM,
+            "markdown filter: fail-open strategy "
+            "- returning original content");
     }
 
     if (ctx->buffer.size > 0) {
         if (ctx->buffer.data == NULL) {
             ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                         "markdown filter: buffered payload pointer is NULL with non-zero size, "
-                         "size=%uz, category=system",
+                         "markdown filter: buffered payload "
+                         "pointer is NULL with non-zero "
+                         "size, size=%uz, category=system",
                          ctx->buffer.size);
-            ctx->last_error_category =
-                NGX_HTTP_MARKDOWN_ERROR_SYSTEM;
-            ctx->has_error_category = 1;
-            NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.failed);
-            NGX_HTTP_MARKDOWN_METRIC_INC(conversions_failed);
-            NGX_HTTP_MARKDOWN_METRIC_INC(failures_system);
-            {
-                const ngx_str_t *reason;
-
-                reason = (conf->on_error
-                          == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT)
-                    ? ngx_http_markdown_reason_failed_closed()
-                    : ngx_http_markdown_reason_failed_open();
-                ngx_http_markdown_log_decision_with_category(
-                    r, conf, reason,
-                    ngx_http_markdown_reason_from_error_category(
-                        ctx->last_error_category,
-                        r->connection->log));
-            }
-            return ngx_http_markdown_reject_or_fail_open_buffered_response(
-                r, ctx, conf, NULL);
+            return ngx_http_markdown_handle_decompression_alloc_error(
+                r, ctx, conf,
+                NGX_HTTP_MARKDOWN_ERROR_SYSTEM, NULL);
         }
 
         ngx_memcpy(compressed_buf->pos, ctx->buffer.data, ctx->buffer.size);
@@ -163,28 +206,11 @@ ngx_http_markdown_prepare_compressed_chain(ngx_http_request_t *r,
     *compressed_chain = ngx_alloc_chain_link(r->pool);
     if (*compressed_chain == NULL) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                     "markdown filter: failed to allocate chain link, "
-                     "category=system");
-        ctx->last_error_category = NGX_HTTP_MARKDOWN_ERROR_SYSTEM;
-        ctx->has_error_category = 1;
-        NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.failed);
-        NGX_HTTP_MARKDOWN_METRIC_INC(conversions_failed);
-        NGX_HTTP_MARKDOWN_METRIC_INC(failures_system);
-        {
-            const ngx_str_t *reason;
-
-            reason = (conf->on_error
-                      == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT)
-                ? ngx_http_markdown_reason_failed_closed()
-                : ngx_http_markdown_reason_failed_open();
-            ngx_http_markdown_log_decision_with_category(
-                r, conf, reason,
-                ngx_http_markdown_reason_from_error_category(
-                    ctx->last_error_category,
-                    r->connection->log));
-        }
-        return ngx_http_markdown_reject_or_fail_open_buffered_response(
-            r, ctx, conf, NULL);
+                     "markdown filter: failed to allocate "
+                     "chain link, category=system");
+        return ngx_http_markdown_handle_decompression_alloc_error(
+            r, ctx, conf,
+            NGX_HTTP_MARKDOWN_ERROR_SYSTEM, NULL);
     }
 
     (*compressed_chain)->buf = compressed_buf;
@@ -209,31 +235,14 @@ ngx_http_markdown_apply_decompressed_payload(ngx_http_request_t *r,
             ctx->compression_type);
 
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                     "markdown filter: decompression returned NULL chain, "
+                     "markdown filter: decompression "
+                     "returned NULL chain, "
                      "compression=%V, category=system",
                      compression_name);
 
-        NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.failed);
-        ctx->last_error_category =
-            NGX_HTTP_MARKDOWN_ERROR_SYSTEM;
-        ctx->has_error_category = 1;
-        NGX_HTTP_MARKDOWN_METRIC_INC(conversions_failed);
-        NGX_HTTP_MARKDOWN_METRIC_INC(failures_system);
-        {
-            const ngx_str_t *reason;
-
-            reason = (conf->on_error
-                      == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT)
-                ? ngx_http_markdown_reason_failed_closed()
-                : ngx_http_markdown_reason_failed_open();
-            ngx_http_markdown_log_decision_with_category(
-                r, conf, reason,
-                ngx_http_markdown_reason_from_error_category(
-                    ctx->last_error_category,
-                    r->connection->log));
-        }
-        return ngx_http_markdown_reject_or_fail_open_buffered_response(
-            r, ctx, conf, NULL);
+        return ngx_http_markdown_handle_decompression_alloc_error(
+            r, ctx, conf,
+            NGX_HTTP_MARKDOWN_ERROR_SYSTEM, NULL);
     }
 
     ctx->decompressed_size = decompressed_chain->buf->last - decompressed_chain->buf->pos;
@@ -249,31 +258,16 @@ ngx_http_markdown_apply_decompressed_payload(ngx_http_request_t *r,
                 ctx->compression_type);
 
             ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                         "markdown filter: failed to allocate decompressed buffer, "
-                         "compression=%V, size=%uz, category=system",
-                         compression_name, ctx->decompressed_size);
+                         "markdown filter: failed to "
+                         "allocate decompressed buffer, "
+                         "compression=%V, size=%uz, "
+                         "category=system",
+                         compression_name,
+                         ctx->decompressed_size);
 
-            NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.failed);
-            ctx->last_error_category =
-                NGX_HTTP_MARKDOWN_ERROR_SYSTEM;
-            ctx->has_error_category = 1;
-            NGX_HTTP_MARKDOWN_METRIC_INC(conversions_failed);
-            NGX_HTTP_MARKDOWN_METRIC_INC(failures_system);
-            {
-                const ngx_str_t *reason;
-
-                reason = (conf->on_error
-                          == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT)
-                    ? ngx_http_markdown_reason_failed_closed()
-                    : ngx_http_markdown_reason_failed_open();
-                ngx_http_markdown_log_decision_with_category(
-                    r, conf, reason,
-                    ngx_http_markdown_reason_from_error_category(
-                        ctx->last_error_category,
-                        r->connection->log));
-            }
-            return ngx_http_markdown_reject_or_fail_open_buffered_response(
-                r, ctx, conf, NULL);
+            return ngx_http_markdown_handle_decompression_alloc_error(
+                r, ctx, conf,
+                NGX_HTTP_MARKDOWN_ERROR_SYSTEM, NULL);
         }
 
         target_data = new_data;
@@ -335,6 +329,43 @@ ngx_http_markdown_record_decompression_success(ngx_http_request_t *r,
 }
 
 
+/*
+ * Emit a decision log entry for a failure with the appropriate
+ * reason code (ELIGIBLE_FAILED_OPEN or ELIGIBLE_FAILED_CLOSED)
+ * based on the configured error strategy.
+ *
+ * If the context has an error category set, it is included in the
+ * log entry as a sub-classification.
+ *
+ * Parameters:
+ *   r    - NGINX request structure
+ *   ctx  - per-request module context (for error category)
+ *   conf - module location configuration (for on_error policy)
+ */
+static void
+ngx_http_markdown_emit_failure_decision(ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx,
+    ngx_http_markdown_conf_t *conf)
+{
+    const ngx_str_t  *reason;
+    const ngx_str_t  *fail_category;
+
+    reason = (conf->on_error
+              == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT)
+        ? ngx_http_markdown_reason_failed_closed()
+        : ngx_http_markdown_reason_failed_open();
+
+    fail_category = ctx->has_error_category
+        ? ngx_http_markdown_reason_from_error_category(
+              ctx->last_error_category,
+              r->connection->log)
+        : NULL;
+
+    ngx_http_markdown_log_decision_with_category(
+        r, conf, reason, fail_category);
+}
+
+
 /* Handle buffer initialization failure with configured error strategy. */
 static ngx_int_t
 ngx_http_markdown_handle_buffer_init_failure(ngx_http_request_t *r,
@@ -342,26 +373,16 @@ ngx_http_markdown_handle_buffer_init_failure(ngx_http_request_t *r,
                                              ngx_http_markdown_conf_t *conf,
                                              ngx_chain_t *in)
 {
-    const ngx_str_t *reason;
     ngx_int_t  rc;
 
     ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0,
-                 "markdown filter: failed to initialize buffer, category=system");
+                 "markdown filter: failed to initialize "
+                 "buffer, category=system");
 
-    ctx->last_error_category = NGX_HTTP_MARKDOWN_ERROR_SYSTEM;
-    ctx->has_error_category = 1;
+    ngx_http_markdown_record_system_failure(ctx);
     NGX_HTTP_MARKDOWN_METRIC_INC(conversions_attempted);
-    NGX_HTTP_MARKDOWN_METRIC_INC(conversions_failed);
-    NGX_HTTP_MARKDOWN_METRIC_INC(failures_system);
 
-    reason = (conf->on_error == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT)
-        ? ngx_http_markdown_reason_failed_closed()
-        : ngx_http_markdown_reason_failed_open();
-    ngx_http_markdown_log_decision_with_category(
-        r, conf, reason,
-        ngx_http_markdown_reason_from_error_category(
-            ctx->last_error_category,
-            r->connection->log));
+    ngx_http_markdown_emit_failure_decision(r, ctx, conf);
 
     if (conf->on_error == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT) {
         return NGX_ERROR;
@@ -392,9 +413,8 @@ ngx_http_markdown_handle_buffer_append_failure(ngx_http_request_t *r,
                                                ngx_chain_t *cl,
                                                size_t chunk_size)
 {
-    const ngx_str_t *reason;
     ngx_int_t  rc;
-    size_t attempted_size;
+    size_t     attempted_size;
 
     attempted_size = (((size_t) -1) - ctx->buffer.size < chunk_size)
         ? (size_t) -1
@@ -411,14 +431,7 @@ ngx_http_markdown_handle_buffer_append_failure(ngx_http_request_t *r,
     NGX_HTTP_MARKDOWN_METRIC_INC(conversions_failed);
     NGX_HTTP_MARKDOWN_METRIC_INC(failures_resource_limit);
 
-    reason = (conf->on_error == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT)
-        ? ngx_http_markdown_reason_failed_closed()
-        : ngx_http_markdown_reason_failed_open();
-    ngx_http_markdown_log_decision_with_category(
-        r, conf, reason,
-        ngx_http_markdown_reason_from_error_category(
-            ctx->last_error_category,
-            r->connection->log));
+    ngx_http_markdown_emit_failure_decision(r, ctx, conf);
 
     if (conf->on_error == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT) {
         return NGX_ERROR;
@@ -532,111 +545,105 @@ ngx_http_markdown_body_filter_buffer_input(ngx_http_request_t *r,
     return NGX_OK;
 }
 
+/*
+ * Handle a decompression-phase conversion error (DECLINED or ERROR).
+ *
+ * Centralizes the repeated pattern for decompression failures that
+ * are classified as conversion errors (unsupported format, decode
+ * failure).
+ *
+ * Parameters:
+ *   r              - NGINX request structure
+ *   ctx            - per-request module context
+ *   conf           - module location configuration
+ *   debug_message  - fail-open debug log message
+ *
+ * Returns:
+ *   Result of reject_or_fail_open_buffered_response
+ */
+static ngx_int_t
+ngx_http_markdown_handle_decompression_conversion_error(
+    ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx,
+    ngx_http_markdown_conf_t *conf,
+    const char *debug_message)
+{
+    return ngx_http_markdown_handle_decompression_alloc_error(
+        r, ctx, conf,
+        NGX_HTTP_MARKDOWN_ERROR_CONVERSION,
+        debug_message);
+}
+
 /* Decompress the buffered payload if compression was detected. */
 static ngx_int_t
 ngx_http_markdown_body_filter_decompress_if_needed(ngx_http_request_t *r,
                                                    ngx_http_markdown_ctx_t *ctx,
                                                    ngx_http_markdown_conf_t *conf)
 {
-    if (ctx->decompression_needed && !ctx->decompression_done) {
-        ngx_chain_t  *compressed_chain;
-        ngx_chain_t  *decompressed_chain;
-        ngx_int_t     decompress_rc;
-        ngx_int_t     rc;
+    ngx_chain_t  *compressed_chain;
+    ngx_chain_t  *decompressed_chain;
+    ngx_int_t     decompress_rc;
+    ngx_int_t     rc;
 
-        ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                      "markdown filter: starting decompression, type=%d, size=%uz bytes",
-                      ctx->compression_type, ctx->buffer.size);
-
-        NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.attempted);
-        ctx->compressed_size = ctx->buffer.size;
-        rc = ngx_http_markdown_prepare_compressed_chain(r, ctx, conf, &compressed_chain);
-        if (rc != NGX_OK) {
-            return rc;
-        }
-
-        decompress_rc = ngx_http_markdown_decompress(r, ctx->compression_type,
-                                                      compressed_chain,
-                                                      &decompressed_chain);
-
-        if (decompress_rc == NGX_DECLINED) {
-            const ngx_str_t *reason;
-
-            ngx_log_debug0(NGX_LOG_DEBUG_HTTP,
-                          r->connection->log, 0,
-                          "markdown filter: decompression not "
-                          "supported");
-
-            ctx->last_error_category =
-                NGX_HTTP_MARKDOWN_ERROR_CONVERSION;
-            ctx->has_error_category = 1;
-            NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.failed);
-            NGX_HTTP_MARKDOWN_METRIC_INC(conversions_failed);
-            NGX_HTTP_MARKDOWN_METRIC_INC(failures_conversion);
-
-            reason = (conf->on_error
-                      == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT)
-                ? ngx_http_markdown_reason_failed_closed()
-                : ngx_http_markdown_reason_failed_open();
-            ngx_http_markdown_log_decision_with_category(
-                r, conf, reason,
-                ngx_http_markdown_reason_from_error_category(
-                    ctx->last_error_category,
-                    r->connection->log));
-
-            return ngx_http_markdown_reject_or_fail_open_buffered_response(
-                r, ctx, conf,
-                "markdown filter: returning original "
-                "content after unsupported decompression");
-        }
-
-        if (decompress_rc != NGX_OK) {
-            const ngx_str_t *compression_name;
-            const ngx_str_t *reason;
-
-            compression_name =
-                ngx_http_markdown_compression_name(
-                    ctx->compression_type);
-
-            ngx_log_error(NGX_LOG_ERR,
-                         r->connection->log, 0,
-                         "markdown filter: decompression "
-                         "failed, compression=%V, "
-                         "error=\"decompression error\", "
-                         "category=conversion",
-                         compression_name);
-
-            ctx->last_error_category =
-                NGX_HTTP_MARKDOWN_ERROR_CONVERSION;
-            ctx->has_error_category = 1;
-
-            reason = (conf->on_error
-                      == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT)
-                ? ngx_http_markdown_reason_failed_closed()
-                : ngx_http_markdown_reason_failed_open();
-            ngx_http_markdown_log_decision_with_category(
-                r, conf, reason,
-                ngx_http_markdown_reason_from_error_category(
-                    ctx->last_error_category,
-                    r->connection->log));
-
-            NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.failed);
-            NGX_HTTP_MARKDOWN_METRIC_INC(conversions_failed);
-            NGX_HTTP_MARKDOWN_METRIC_INC(failures_conversion);
-            return ngx_http_markdown_reject_or_fail_open_buffered_response(
-                r, ctx, conf,
-                "markdown filter: fail-open strategy "
-                "- returning original content");
-        }
-
-        rc = ngx_http_markdown_apply_decompressed_payload(r, ctx, conf, decompressed_chain);
-        if (rc != NGX_OK) {
-            return rc;
-        }
-
-        ngx_http_markdown_record_decompression_success(r, ctx);
+    if (!ctx->decompression_needed || ctx->decompression_done) {
+        return NGX_OK;
     }
 
+    ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                  "markdown filter: starting decompression, "
+                  "type=%d, size=%uz bytes",
+                  ctx->compression_type, ctx->buffer.size);
+
+    NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.attempted);
+    ctx->compressed_size = ctx->buffer.size;
+
+    rc = ngx_http_markdown_prepare_compressed_chain(
+        r, ctx, conf, &compressed_chain);
+    if (rc != NGX_OK) {
+        return rc;
+    }
+
+    decompress_rc = ngx_http_markdown_decompress(
+        r, ctx->compression_type,
+        compressed_chain, &decompressed_chain);
+
+    if (decompress_rc == NGX_DECLINED) {
+        ngx_log_debug0(NGX_LOG_DEBUG_HTTP,
+                      r->connection->log, 0,
+                      "markdown filter: decompression "
+                      "not supported");
+        return ngx_http_markdown_handle_decompression_conversion_error(
+            r, ctx, conf,
+            "markdown filter: returning original "
+            "content after unsupported decompression");
+    }
+
+    if (decompress_rc != NGX_OK) {
+        const ngx_str_t *compression_name;
+
+        compression_name =
+            ngx_http_markdown_compression_name(
+                ctx->compression_type);
+        ngx_log_error(NGX_LOG_ERR,
+                     r->connection->log, 0,
+                     "markdown filter: decompression "
+                     "failed, compression=%V, "
+                     "error=\"decompression error\", "
+                     "category=conversion",
+                     compression_name);
+        return ngx_http_markdown_handle_decompression_conversion_error(
+            r, ctx, conf,
+            "markdown filter: fail-open strategy "
+            "- returning original content");
+    }
+
+    rc = ngx_http_markdown_apply_decompressed_payload(
+        r, ctx, conf, decompressed_chain);
+    if (rc != NGX_OK) {
+        return rc;
+    }
+
+    ngx_http_markdown_record_decompression_success(r, ctx);
     return NGX_OK;
 }
 

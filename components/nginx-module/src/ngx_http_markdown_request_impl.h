@@ -16,6 +16,199 @@
 #include "ngx_http_markdown_payload_impl.h"
 #include "ngx_http_markdown_conversion_impl.h"
 
+/* Forward declarations for helpers defined in this file */
+static ngx_int_t ngx_http_markdown_handle_ctx_alloc_failure(
+    ngx_http_request_t *r, ngx_http_markdown_conf_t *conf);
+static void ngx_http_markdown_init_ctx(ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx, ngx_http_markdown_conf_t *conf,
+    ngx_flag_t filter_enabled);
+static void ngx_http_markdown_log_failure_decision(
+    ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx,
+    ngx_http_markdown_conf_t *conf);
+static ngx_int_t ngx_http_markdown_handle_unsupported_compression(
+    ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx,
+    ngx_http_markdown_conf_t *conf);
+
+/*
+ * Log a failure decision with the appropriate reason code and optional
+ * error category from the request context.
+ *
+ * Delegates to ngx_http_markdown_emit_failure_decision() defined in
+ * payload_impl.h.
+ *
+ * Parameters:
+ *   r    - NGINX request structure
+ *   ctx  - per-request module context (for error category)
+ *   conf - module location configuration (for on_error policy)
+ */
+static void
+ngx_http_markdown_log_failure_decision(ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx,
+    ngx_http_markdown_conf_t *conf)
+{
+    ngx_http_markdown_emit_failure_decision(r, ctx, conf);
+}
+
+
+/*
+ * Handle unsupported compression format detected during header phase.
+ *
+ * Marks the request as ineligible, records error metrics, emits a
+ * decision log entry, and applies the configured error strategy.
+ *
+ * Parameters:
+ *   r    - NGINX request structure
+ *   ctx  - per-request module context
+ *   conf - module location configuration
+ *
+ * Returns:
+ *   NGX_HTTP_BAD_GATEWAY on fail-closed
+ *   Result of ngx_http_next_header_filter on fail-open
+ */
+static ngx_int_t
+ngx_http_markdown_handle_unsupported_compression(
+    ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx,
+    ngx_http_markdown_conf_t *conf)
+{
+    ctx->eligible = 0;
+    ctx->last_error_category =
+        NGX_HTTP_MARKDOWN_ERROR_CONVERSION;
+    ctx->has_error_category = 1;
+
+    NGX_HTTP_MARKDOWN_METRIC_INC(conversions_attempted);
+    NGX_HTTP_MARKDOWN_METRIC_INC(conversions_failed);
+    NGX_HTTP_MARKDOWN_METRIC_INC(failures_conversion);
+
+    if (conf->on_error
+        == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT)
+    {
+        ngx_log_error(NGX_LOG_WARN,
+            r->connection->log, 0,
+            "markdown filter: unsupported "
+            "compression format, "
+            "rejecting (fail-closed)");
+        ngx_http_markdown_log_failure_decision(
+            r, ctx, conf);
+        return NGX_HTTP_BAD_GATEWAY;
+    }
+
+    ngx_log_error(NGX_LOG_WARN,
+        r->connection->log, 0,
+        "markdown filter: unsupported "
+        "compression format, "
+        "returning original content "
+        "(fail-open)");
+    ngx_http_markdown_log_failure_decision(
+        r, ctx, conf);
+    return ngx_http_next_header_filter(r);
+}
+
+
+/*
+ * Handle context allocation failure in header filter.
+ *
+ * Records metrics, emits decision log, and applies the configured
+ * error strategy (fail-closed returns 500, fail-open passes through).
+ *
+ * Parameters:
+ *   r    - NGINX request structure
+ *   conf - module location configuration
+ *
+ * Returns:
+ *   NGX_HTTP_INTERNAL_SERVER_ERROR on fail-closed
+ *   Result of ngx_http_next_header_filter on fail-open
+ */
+static ngx_int_t
+ngx_http_markdown_handle_ctx_alloc_failure(ngx_http_request_t *r,
+    ngx_http_markdown_conf_t *conf)
+{
+    ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0,
+                 "markdown filter: failed to allocate "
+                 "context, category=system");
+
+    NGX_HTTP_MARKDOWN_METRIC_INC(conversions_attempted);
+    NGX_HTTP_MARKDOWN_METRIC_INC(conversions_failed);
+    NGX_HTTP_MARKDOWN_METRIC_INC(failures_system);
+
+    if (conf->on_error
+        == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT)
+    {
+        ngx_log_error(NGX_LOG_ERR,
+            r->connection->log, 0,
+            "markdown filter: context allocation "
+            "failed, rejecting (fail-closed)");
+        ngx_http_markdown_log_decision_with_category(
+            r, conf,
+            ngx_http_markdown_reason_failed_closed(),
+            ngx_http_markdown_reason_from_error_category(
+                NGX_HTTP_MARKDOWN_ERROR_SYSTEM,
+                r->connection->log));
+        return NGX_HTTP_INTERNAL_SERVER_ERROR;
+    }
+
+    ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                 "markdown filter: context allocation "
+                 "failed, returning original content "
+                 "(fail-open)");
+    ngx_http_markdown_log_decision_with_category(
+        r, conf,
+        ngx_http_markdown_reason_failed_open(),
+        ngx_http_markdown_reason_from_error_category(
+            NGX_HTTP_MARKDOWN_ERROR_SYSTEM,
+            r->connection->log));
+    return ngx_http_next_header_filter(r);
+}
+
+
+/*
+ * Initialize per-request context fields.
+ *
+ * Parameters:
+ *   r    - NGINX request structure
+ *   ctx  - freshly allocated context (zeroed by ngx_pcalloc)
+ *   conf - module location configuration
+ *   filter_enabled - cached header-phase filter decision
+ */
+static void
+ngx_http_markdown_init_ctx(ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx,
+    ngx_http_markdown_conf_t *conf,
+    ngx_flag_t filter_enabled)
+{
+    ctx->request = r;
+    ctx->filter_enabled = filter_enabled;
+    ctx->eligible = 1;
+    ctx->buffer_initialized = 0;
+    ctx->headers_forwarded = 0;
+    ctx->source_last_modified_time =
+        r->headers_out.last_modified_time;
+    ctx->has_last_modified_time =
+        (r->headers_out.last_modified_time != (time_t) -1);
+    ctx->conversion_attempted = 0;
+    ctx->conversion_succeeded = 0;
+    ctx->bypass_counted = 0;
+    ctx->processing_path =
+        NGX_HTTP_MARKDOWN_PATH_FULLBUFFER;
+    ctx->last_error_category =
+        NGX_HTTP_MARKDOWN_ERROR_SYSTEM;
+    ctx->has_error_category = 0;
+
+    /*
+     * Initialize decompression state.
+     * For uncompressed content, decompression_needed
+     * remains 0, ensuring zero overhead in the body
+     * filter.
+     */
+    ctx->compression_type =
+        NGX_HTTP_MARKDOWN_COMPRESSION_NONE;
+    ctx->decompression_needed = 0;
+    ctx->decompression_done = 0;
+    ctx->compressed_size = 0;
+    ctx->decompressed_size = 0;
+}
+
+
 /**
  * Determine whether the response should be converted and, if eligible,
  * initialize a per-request Markdown conversion context for body buffering.
@@ -118,73 +311,12 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
     /* Create request context for buffering */
     ctx = ngx_pcalloc(r->pool, sizeof(ngx_http_markdown_ctx_t));
     if (ctx == NULL) {
-        /*
-         * Context allocation failed - critical system error.
-         * This means we're out of memory.
-         * 
-         * Log level: NGX_LOG_CRIT (critical system failure)
-         * Requirements: FR-09.5, FR-09.6, FR-09.7
-         */
-        ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0,
-                     "markdown filter: failed to allocate context, category=system");
-                     
-        NGX_HTTP_MARKDOWN_METRIC_INC(conversions_attempted);
-        NGX_HTTP_MARKDOWN_METRIC_INC(conversions_failed);
-        NGX_HTTP_MARKDOWN_METRIC_INC(failures_system);
-
-        if (conf->on_error == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT) {
-            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                         "markdown filter: context allocation failed, "
-                         "rejecting (fail-closed)");
-            ngx_http_markdown_log_decision_with_category(
-                r, conf,
-                ngx_http_markdown_reason_failed_closed(),
-                ngx_http_markdown_reason_from_error_category(
-                    NGX_HTTP_MARKDOWN_ERROR_SYSTEM,
-                    r->connection->log));
-            return NGX_HTTP_INTERNAL_SERVER_ERROR;
-        }
-
-        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                     "markdown filter: context allocation failed, "
-                     "returning original content (fail-open)");
-        ngx_http_markdown_log_decision_with_category(
-            r, conf,
-            ngx_http_markdown_reason_failed_open(),
-            ngx_http_markdown_reason_from_error_category(
-                NGX_HTTP_MARKDOWN_ERROR_SYSTEM,
-                r->connection->log));
-        return ngx_http_next_header_filter(r);
+        return ngx_http_markdown_handle_ctx_alloc_failure(
+            r, conf);
     }
 
     /* Initialize context */
-    ctx->request = r;
-    ctx->filter_enabled = filter_enabled;
-    ctx->eligible = 1;
-    ctx->buffer_initialized = 0;
-    ctx->headers_forwarded = 0;
-    ctx->source_last_modified_time = r->headers_out.last_modified_time;
-    ctx->has_last_modified_time =
-        (r->headers_out.last_modified_time != (time_t) -1);
-    ctx->conversion_attempted = 0;
-    ctx->conversion_succeeded = 0;
-    ctx->bypass_counted = 0;
-    ctx->processing_path = NGX_HTTP_MARKDOWN_PATH_FULLBUFFER;
-    ctx->last_error_category = NGX_HTTP_MARKDOWN_ERROR_SYSTEM;
-    ctx->has_error_category = 0;
-    
-    /* Initialize decompression state (Task 2.4 - Fast path initialization)
-     * 
-     * For uncompressed content, decompression_needed remains 0, ensuring
-     * zero overhead in the body filter (no decompression functions called).
-     * 
-     * Requirements: 4.2, 10.3
-     */
-    ctx->compression_type = NGX_HTTP_MARKDOWN_COMPRESSION_NONE;
-    ctx->decompression_needed = 0;
-    ctx->decompression_done = 0;
-    ctx->compressed_size = 0;
-    ctx->decompressed_size = 0;
+    ngx_http_markdown_init_ctx(r, ctx, conf, filter_enabled);
 
     /* Set context for this request */
     ngx_http_set_ctx(r, ctx, ngx_http_markdown_filter_module);
@@ -204,64 +336,20 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
         if (ctx->compression_type == NGX_HTTP_MARKDOWN_COMPRESSION_UNKNOWN) {
             /*
              * Unsupported compression format detected (Task 4.2)
-             * 
-             * This is an expected degradation scenario, not a failure.
-             * We gracefully degrade by returning the original content.
-             * 
+             *
+             * This is an expected degradation scenario, not a
+             * failure.  We gracefully degrade by returning the
+             * original content.
+             *
              * Note: The warning log has already been emitted by
-             * ngx_http_markdown_detect_compression() with the format name.
-             * 
+             * ngx_http_markdown_detect_compression() with the
+             * format name.
+             *
              * Requirements: 1.6, 11.5
              */
-            ctx->eligible = 0;
+            return ngx_http_markdown_handle_unsupported_compression(
+                r, ctx, conf);
 
-            /* Record error category for decision log */
-            ctx->last_error_category =
-                NGX_HTTP_MARKDOWN_ERROR_CONVERSION;
-            ctx->has_error_category = 1;
-
-            if (conf->on_error
-                == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT)
-            {
-                ngx_log_error(NGX_LOG_WARN,
-                    r->connection->log, 0,
-                    "markdown filter: unsupported "
-                    "compression format, "
-                    "rejecting (fail-closed)");
-                NGX_HTTP_MARKDOWN_METRIC_INC(
-                    conversions_attempted);
-                NGX_HTTP_MARKDOWN_METRIC_INC(
-                    conversions_failed);
-                NGX_HTTP_MARKDOWN_METRIC_INC(
-                    failures_conversion);
-                ngx_http_markdown_log_decision_with_category(
-                    r, conf,
-                    ngx_http_markdown_reason_failed_closed(),
-                    ngx_http_markdown_reason_from_error_category(
-                        ctx->last_error_category,
-                        r->connection->log));
-                return NGX_HTTP_BAD_GATEWAY;
-            }
-
-            ngx_log_error(NGX_LOG_WARN,
-                r->connection->log, 0,
-                "markdown filter: unsupported "
-                "compression format, "
-                "returning original content "
-                "(fail-open)");
-            NGX_HTTP_MARKDOWN_METRIC_INC(
-                conversions_attempted);
-            NGX_HTTP_MARKDOWN_METRIC_INC(conversions_failed);
-            NGX_HTTP_MARKDOWN_METRIC_INC(failures_conversion);
-            ngx_http_markdown_log_decision_with_category(
-                r, conf,
-                ngx_http_markdown_reason_failed_open(),
-                ngx_http_markdown_reason_from_error_category(
-                    ctx->last_error_category,
-                    r->connection->log));
-            
-            /* Don't set decompression_needed - we're not attempting decompression */
-            
         } else if (ctx->compression_type != NGX_HTTP_MARKDOWN_COMPRESSION_NONE) {
             /* Supported compression format - set flag for decompression */
             ctx->decompression_needed = 1;
@@ -361,8 +449,6 @@ ngx_http_markdown_body_filter_convert_and_output(ngx_http_request_t *r,
                                                  ngx_http_markdown_ctx_t *ctx,
                                                  ngx_http_markdown_conf_t *conf)
 {
-    const ngx_str_t      *reason;
-    const ngx_str_t      *fail_category;
     ngx_int_t             rc;
     ngx_msec_t            elapsed_ms;
     ngx_flag_t            has_result;
@@ -429,17 +515,7 @@ ngx_http_markdown_body_filter_convert_and_output(ngx_http_request_t *r,
     }
     if (rc != NGX_OK) {
         /* Conditional processing failed — log failure outcome */
-        reason = (conf->on_error
-                  == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT)
-            ? ngx_http_markdown_reason_failed_closed()
-            : ngx_http_markdown_reason_failed_open();
-        fail_category = ctx->has_error_category
-            ? ngx_http_markdown_reason_from_error_category(
-                  ctx->last_error_category,
-                  r->connection->log)
-            : NULL;
-        ngx_http_markdown_log_decision_with_category(
-            r, conf, reason, fail_category);
+        ngx_http_markdown_log_failure_decision(r, ctx, conf);
         return rc;
     }
 
@@ -447,17 +523,7 @@ ngx_http_markdown_body_filter_convert_and_output(ngx_http_request_t *r,
         rc = ngx_http_markdown_execute_conversion(r, ctx, conf, &result, &elapsed_ms);
         if (rc != NGX_OK) {
             /* Conversion failed — log failure outcome */
-            reason = (conf->on_error
-                      == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT)
-                ? ngx_http_markdown_reason_failed_closed()
-                : ngx_http_markdown_reason_failed_open();
-            fail_category = ctx->has_error_category
-                ? ngx_http_markdown_reason_from_error_category(
-                      ctx->last_error_category,
-                      r->connection->log)
-                : NULL;
-            ngx_http_markdown_log_decision_with_category(
-                r, conf, reason, fail_category);
+            ngx_http_markdown_log_failure_decision(r, ctx, conf);
             return rc;
         }
     }
