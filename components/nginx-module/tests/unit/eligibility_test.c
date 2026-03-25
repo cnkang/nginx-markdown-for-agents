@@ -39,9 +39,7 @@ typedef struct {
 static int
 strncasecmp_ascii(const char *a, const char *b, size_t n)
 {
-    size_t i;
-
-    for (i = 0; i < n; i++) {
+    for (size_t i = 0; i < n; i++) {
         unsigned char ca = (unsigned char) a[i];
         unsigned char cb = (unsigned char) b[i];
         if (tolower(ca) != tolower(cb)) {
@@ -89,8 +87,6 @@ is_html_content_type(const char *content_type)
 static int
 is_streaming_type(const char *content_type, const conf_t *conf)
 {
-    size_t i;
-
     if (content_type == NULL) {
         return 0;
     }
@@ -99,7 +95,7 @@ is_streaming_type(const char *content_type, const conf_t *conf)
         return 1;
     }
 
-    for (i = 0; i < conf->stream_type_count; i++) {
+    for (size_t i = 0; i < conf->stream_type_count; i++) {
         if (starts_with_ci(content_type, conf->stream_types[i])) {
             return 1;
         }

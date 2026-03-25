@@ -18,6 +18,12 @@
 #include <ngx_http_markdown_filter_module.h>
 #include "../src/ngx_http_markdown_reason.c"
 
+
+/* Function prototypes */
+
+static void test_snake_case_format(void);
+
+
 /*
  * Check if an ngx_str_t matches uppercase snake_case: ^[A-Z][A-Z0-9_]*$
  *
@@ -28,19 +34,7 @@
 static int
 matches_snake_case(const ngx_str_t *s)
 {
-    size_t i;
-
-    if (s == NULL || s->data == NULL || s->len == 0) {
-        return 0;
-    }
-
-    /* First character must be uppercase letter */
-    if (!isupper((unsigned char) s->data[0])) {
-        return 0;
-    }
-
-    /* Remaining characters must be uppercase letter, digit, or underscore */
-    for (i = 1; i < s->len; i++) {
+    for (size_t i = 1; i < s->len; i++) {
         unsigned char ch = s->data[i];
         if (!isupper(ch) && !isdigit(ch) && ch != '_') {
             return 0;
@@ -208,39 +202,34 @@ test_skip_accept_code(void)
 }
 
 
+/* All 15 reason code string pointers for format validation */
+
+static const ngx_str_t *codes[] = {
+    &ngx_http_markdown_reason_skip_config_str,
+    &ngx_http_markdown_reason_skip_method_str,
+    &ngx_http_markdown_reason_skip_status_str,
+    &ngx_http_markdown_reason_skip_content_type_str,
+    &ngx_http_markdown_reason_skip_size_str,
+    &ngx_http_markdown_reason_skip_streaming_str,
+    &ngx_http_markdown_reason_skip_auth_str,
+    &ngx_http_markdown_reason_skip_range_str,
+    &ngx_http_markdown_reason_skip_accept_str,
+    &ngx_http_markdown_reason_converted_str,
+    &ngx_http_markdown_reason_failed_open_str,
+    &ngx_http_markdown_reason_failed_closed_str,
+    &ngx_http_markdown_reason_fail_conversion_str,
+    &ngx_http_markdown_reason_fail_resource_limit_str,
+    &ngx_http_markdown_reason_fail_system_str
+};
+
+
 /*
  * Test: all reason code strings match uppercase snake_case ^[A-Z][A-Z0-9_]*$
  */
 static void
 test_snake_case_format(void)
 {
-    size_t i;
-    const ngx_str_t *codes[15];
-
-    TEST_SUBSECTION("All reason codes match uppercase snake_case format");
-
-    /* Collect all 15 reason codes */
-    codes[0]  = ngx_http_markdown_reason_from_eligibility(NGX_HTTP_MARKDOWN_INELIGIBLE_CONFIG, NULL);
-    codes[1]  = ngx_http_markdown_reason_from_eligibility(NGX_HTTP_MARKDOWN_INELIGIBLE_METHOD, NULL);
-    codes[2]  = ngx_http_markdown_reason_from_eligibility(NGX_HTTP_MARKDOWN_INELIGIBLE_STATUS, NULL);
-    codes[3]  = ngx_http_markdown_reason_from_eligibility(
-                    NGX_HTTP_MARKDOWN_INELIGIBLE_CONTENT_TYPE, NULL);
-    codes[4]  = ngx_http_markdown_reason_from_eligibility(NGX_HTTP_MARKDOWN_INELIGIBLE_SIZE, NULL);
-    codes[5]  = ngx_http_markdown_reason_from_eligibility(
-                    NGX_HTTP_MARKDOWN_INELIGIBLE_STREAMING, NULL);
-    codes[6]  = ngx_http_markdown_reason_from_eligibility(NGX_HTTP_MARKDOWN_INELIGIBLE_AUTH, NULL);
-    codes[7]  = ngx_http_markdown_reason_from_eligibility(NGX_HTTP_MARKDOWN_INELIGIBLE_RANGE, NULL);
-    codes[8]  = ngx_http_markdown_reason_skip_accept();
-    codes[9]  = ngx_http_markdown_reason_converted();
-    codes[10] = ngx_http_markdown_reason_failed_open();
-    codes[11] = ngx_http_markdown_reason_failed_closed();
-    codes[12] = ngx_http_markdown_reason_from_error_category(
-                    NGX_HTTP_MARKDOWN_ERROR_CONVERSION, NULL);
-    codes[13] = ngx_http_markdown_reason_from_error_category(
-                    NGX_HTTP_MARKDOWN_ERROR_RESOURCE_LIMIT, NULL);
-    codes[14] = ngx_http_markdown_reason_from_error_category(NGX_HTTP_MARKDOWN_ERROR_SYSTEM, NULL);
-
-    for (i = 0; i < ARRAY_SIZE(codes); i++) {
+    for (size_t i = 0; i < ARRAY_SIZE(codes); i++) {
         TEST_ASSERT(codes[i] != NULL,
                     "Reason code pointer should not be NULL");
         TEST_ASSERT(codes[i]->len > 0,

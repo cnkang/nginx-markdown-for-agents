@@ -159,13 +159,11 @@
 static inline size_t
 test_cstrnlen(const char *s, size_t max_len)
 {
-    size_t n;
-
     if (s == NULL) {
         return 0;
     }
 
-    for (n = 0; n < max_len; n++) {
+    for (size_t n = 0; n < max_len; n++) {
         if (s[n] == '\0') {
             return n;
         }

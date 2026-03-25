@@ -106,7 +106,6 @@ normalize_etag_token(const char *input, char *out, size_t out_len)
 {
     const char *start = input;
     size_t len;
-    size_t i;
 
     if (out_len == 0) {
         return;
@@ -125,6 +124,7 @@ normalize_etag_token(const char *input, char *out, size_t out_len)
 
     if (len >= 2 && start[0] == '"' && start[len - 1] == '"') {
         len -= 2;
+        size_t i;
         for (i = 0; i < len && i + 1 < out_len; i++) {
             out[i] = start[i + 1];
         }
@@ -132,10 +132,10 @@ normalize_etag_token(const char *input, char *out, size_t out_len)
         return;
     }
 
-    for (i = 0; i < len && i + 1 < out_len; i++) {
+    for (size_t i = 0; i < len && i + 1 < out_len; i++) {
         out[i] = start[i];
     }
-    out[i] = '\0';
+    out[len < out_len ? len : out_len - 1] = '\0';
 }
 
 static void
@@ -176,7 +176,6 @@ token_matches_generated(const char *token, const char *generated_raw, const char
 static int
 etag_matches(const char *if_none_match, const char *generated_etag)
 {
-    size_t i;
     char tokens[16][128];
     size_t count;
     char normalized[128];
@@ -187,7 +186,7 @@ etag_matches(const char *if_none_match, const char *generated_etag)
         return RC_DECLINED;
     }
 
-    for (i = 0; i < count; i++) {
+    for (size_t i = 0; i < count; i++) {
         if (is_wildcard_token(tokens[i])) {
             return RC_MATCH;
         }

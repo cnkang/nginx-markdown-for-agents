@@ -33,6 +33,8 @@ static ngx_int_t ngx_http_markdown_handle_decompression_conversion_error(
 static void ngx_http_markdown_emit_failure_decision(
     ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx,
     ngx_http_markdown_conf_t *conf);
+static void ngx_http_markdown_record_system_failure(
+    ngx_http_markdown_ctx_t *ctx);
 
 static void
 ngx_http_markdown_reclassify_fail_open_path(ngx_http_markdown_ctx_t *ctx)
