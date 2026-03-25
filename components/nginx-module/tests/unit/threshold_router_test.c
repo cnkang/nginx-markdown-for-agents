@@ -105,7 +105,8 @@ deferred_path_upgrade(const conf_t *conf, const request_t *r,
         && buffered_size >= conf->large_body_threshold)
     {
         ctx->processing_path = PATH_INCREMENTAL;
-        /* Correct counters: undo header-phase fullbuffer hit (guard against underflow) */
+        /* Correct counters: undo header-phase fullbuffer hit
+         * (guard against underflow) */
         if (m->fullbuffer_path_hits > 0) {
             m->fullbuffer_path_hits--;
         }
@@ -554,6 +555,7 @@ test_merge_both_unset_defaults_off(void)
 static void
 test_metrics_fullbuffer_increments(void)
 {
+    int i;
     conf_t     c = make_conf(0);
     request_t  r = make_request(METHOD_GET, STATUS_OK, 1024);
     ctx_t      ctx;
@@ -561,7 +563,7 @@ test_metrics_fullbuffer_increments(void)
 
     TEST_SUBSECTION("Metrics: fullbuffer counter increments");
 
-    for (int i = 0; i < 5; i++) {
+    for (i = 0; i < 5; i++) {
         ctx = fresh_ctx();
         select_processing_path(&c, &r, &ctx, &m);
     }
@@ -576,6 +578,7 @@ test_metrics_fullbuffer_increments(void)
 static void
 test_metrics_incremental_increments(void)
 {
+    int i;
     conf_t     c = make_conf(512);
     request_t  r = make_request(METHOD_GET, STATUS_OK, 1024);
     ctx_t      ctx;
@@ -583,7 +586,7 @@ test_metrics_incremental_increments(void)
 
     TEST_SUBSECTION("Metrics: incremental counter increments");
 
-    for (int i = 0; i < 3; i++) {
+    for (i = 0; i < 3; i++) {
         ctx = fresh_ctx();
         select_processing_path(&c, &r, &ctx, &m);
     }

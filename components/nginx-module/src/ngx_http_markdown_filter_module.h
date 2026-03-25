@@ -420,11 +420,11 @@ const ngx_str_t *ngx_http_markdown_eligibility_string(
 
 /* Map eligibility enum to reason code string */
 const ngx_str_t *ngx_http_markdown_reason_from_eligibility(
-    ngx_http_markdown_eligibility_t eligibility, ngx_log_t *log);
+    ngx_http_markdown_eligibility_t eligibility, const ngx_log_t *log);
 
 /* Map error category enum to failure reason code string */
 const ngx_str_t *ngx_http_markdown_reason_from_error_category(
-    ngx_http_markdown_error_category_t category, ngx_log_t *log);
+    ngx_http_markdown_error_category_t category, const ngx_log_t *log);
 
 /* Return the ELIGIBLE_CONVERTED reason code */
 const ngx_str_t *ngx_http_markdown_reason_converted(void);
