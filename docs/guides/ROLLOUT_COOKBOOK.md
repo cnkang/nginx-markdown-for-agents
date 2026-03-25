@@ -902,7 +902,7 @@ Not all pages are good candidates for Markdown conversion. Some page types produ
 |-----------|---------------------|----------------|
 | Single-Page Applications (SPAs) | SPAs render content via JavaScript after the initial HTML load. The upstream HTML is typically a minimal shell (`<div id="root"></div>`) with no meaningful content to convert. The resulting Markdown is empty or useless. | — (conversion produces poor output) |
 | Pages with heavy interactive elements | Forms, dynamic widgets, and JavaScript-driven UI components do not have Markdown equivalents. Conversion strips interactivity and produces a degraded representation that may confuse consuming agents. | — (conversion produces poor output) |
-| Authenticated / personalized pages | Pages behind authentication or with per-user content may vary per request, making caching and observation unreliable during rollout. The module detects authentication credentials and adjusts cache-control headers accordingly, but does not currently block eligibility based on authentication status. Exclude these pages from conversion scope using `location` blocks or `map` directives. | — (exclude via configuration) |
+| Authenticated / personalized pages | Pages behind authentication or with per-user content may vary per request, making caching and observation unreliable during rollout. The module detects authentication credentials and adjusts cache-control headers accordingly. When `markdown_auth_policy deny` is configured, the module will short-circuit authenticated requests to `SKIP_AUTH`. The default authentication policy is "allow". Exclude these pages from conversion scope using `location` blocks or `map` directives. | `SKIP_AUTH` — Auth policy denies conversion for authenticated requests (or exclude via configuration) |
 | Non-text content pages | Pages serving images, video, downloads, or other binary content return a `Content-Type` other than `text/html`. The module skips these automatically. Enabling conversion scope for paths that serve mixed content types adds noise to your decision logs without producing conversions. | `SKIP_CONTENT_TYPE` — Content-Type not text/html |
 | API endpoints (JSON / XML) | API endpoints return `application/json`, `application/xml`, or other non-HTML content types. The module skips these via the content-type eligibility check. Including API paths in your conversion scope produces `SKIP_CONTENT_TYPE` log entries with no benefit. | `SKIP_CONTENT_TYPE` — Content-Type not text/html |
 | SSE / streaming endpoints | Server-Sent Events and streaming responses have no `Content-Length` or use chunked transfer with unbounded duration. The module detects these as streaming content and skips them. Attempting conversion on unbounded streams would block resources indefinitely. | `SKIP_STREAMING` — unbounded streaming response |
@@ -1128,18 +1128,18 @@ The module exposes metrics at the `/markdown-metrics` endpoint in JSON (when `Ac
 
 > **Note on metric names:** The metrics endpoint uses flat counter names (e.g., `conversions_succeeded`). The table below shows the actual endpoint field names.
 
-| Endpoint Field | Type | What It Tells You |
-|---------------|------|-------------------|
-| `conversions_succeeded` | Counter | Successful HTML-to-Markdown conversions |
-| `conversions_failed` | Counter | Conversion attempts that failed |
-| `conversions_bypassed` | Counter | Requests where conversion was bypassed (fail-open or ineligible after context creation) |
-| `failures_conversion` | Counter | HTML parse or conversion errors |
-| `failures_resource_limit` | Counter | Timeout or memory limit failures |
-| `failures_system` | Counter | Internal or system errors |
-| Latency ≤ 10ms | `conversion_latency_le_10ms` | Counter | Conversions completing in ≤ 10ms |
-| Latency ≤ 100ms | `conversion_latency_le_100ms` | Counter | Conversions completing in 10–100ms |
-| Latency ≤ 1000ms | `conversion_latency_le_1000ms` | Counter | Conversions completing in 100–1000ms |
-| Latency > 1000ms | `conversion_latency_gt_1000ms` | Counter | Conversions completing in > 1000ms |
+| Endpoint Field | Latency bucket | Type | What It Tells You |
+|---------------|----------------|------|-------------------|
+| `conversions_succeeded` | N/A | Counter | Successful HTML-to-Markdown conversions |
+| `conversions_failed` | N/A | Counter | Conversion attempts that failed |
+| `conversions_bypassed` | N/A | Counter | Requests where conversion was bypassed (fail-open or ineligible after context creation) |
+| `failures_conversion` | N/A | Counter | HTML parse or conversion errors |
+| `failures_resource_limit` | N/A | Counter | Timeout or memory limit failures |
+| `failures_system` | N/A | Counter | Internal or system errors |
+| `conversion_latency_le_10ms` | ≤ 10ms | Counter | Conversions completing in ≤ 10ms |
+| `conversion_latency_le_100ms` | 10–100ms | Counter | Conversions completing in 10–100ms |
+| `conversion_latency_le_1000ms` | 100–1000ms | Counter | Conversions completing in 100–1000ms |
+| `conversion_latency_gt_1000ms` | > 1000ms | Counter | Conversions completing in > 1000ms |
 
 > **Skip reason codes** (`SKIP_METHOD`, `SKIP_STATUS`, etc.) are not currently exposed as individual metric counters. Use decision log entries (`grep "reason=SKIP_*"`) to determine skip reason distribution. Failure sub-classification is available via the `failures_conversion`, `failures_resource_limit`, and `failures_system` counters.
 
