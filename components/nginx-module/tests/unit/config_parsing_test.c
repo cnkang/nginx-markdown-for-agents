@@ -14,6 +14,8 @@
 #define COND_FULL_SUPPORT 0
 #define COND_IF_MODIFIED_SINCE_ONLY 1
 #define COND_DISABLED 2
+#define METRICS_FORMAT_AUTO 0
+#define METRICS_FORMAT_PROMETHEUS 1
 
 typedef struct {
     int markdown_filter;
@@ -29,6 +31,7 @@ typedef struct {
     int markdown_conditional_requests;
     int markdown_buffer_chunked;
     int markdown_auto_decompress;
+    int markdown_metrics_format;
 } default_conf_t;
 
 static int valid_on_error(const char *v) { return STR_EQ(v, "pass") || STR_EQ(v, "reject"); }
@@ -71,6 +74,19 @@ static int valid_conditional(const char *v) {
 }
 static int valid_cookie_pattern(const char *v) { return v != NULL && *v != '\0'; }
 static int valid_content_type_token(const char *v) { return v != NULL && strchr(v, '/') != NULL; }
+static int valid_metrics_format(const char *v) { return STR_EQ(v, "auto") || STR_EQ(v, "prometheus"); }
+
+static int
+parse_metrics_format(const char *v)
+{
+    if (STR_EQ(v, "auto")) {
+        return METRICS_FORMAT_AUTO;
+    }
+    if (STR_EQ(v, "prometheus")) {
+        return METRICS_FORMAT_PROMETHEUS;
+    }
+    return -1;
+}
 
 static default_conf_t
 module_defaults(void)
@@ -89,6 +105,7 @@ module_defaults(void)
     c.markdown_conditional_requests = COND_FULL_SUPPORT;
     c.markdown_buffer_chunked = 1;
     c.markdown_auto_decompress = 1;
+    c.markdown_metrics_format = METRICS_FORMAT_AUTO;
     return c;
 }
 
@@ -122,6 +139,11 @@ test_value_validation(void)
     TEST_ASSERT(!valid_content_type_token("texteventstream"), "stream type without slash is invalid");
     TEST_ASSERT(valid_cookie_pattern("session*"), "cookie pattern should accept non-empty");
     TEST_ASSERT(!valid_cookie_pattern(""), "cookie pattern should reject empty");
+    TEST_ASSERT(valid_metrics_format("auto"), "metrics_format should accept auto");
+    TEST_ASSERT(valid_metrics_format("prometheus"), "metrics_format should accept prometheus");
+    TEST_ASSERT(!valid_metrics_format("json"), "metrics_format should reject json");
+    TEST_ASSERT(!valid_metrics_format("text"), "metrics_format should reject text");
+    TEST_ASSERT(!valid_metrics_format(""), "metrics_format should reject empty");
     TEST_PASS("Directive validation passed");
 }
 
@@ -140,7 +162,52 @@ test_default_values(void)
     TEST_ASSERT(c.markdown_conditional_requests == COND_FULL_SUPPORT, "conditional default full_support");
     TEST_ASSERT(c.markdown_buffer_chunked == 1, "buffer_chunked default on");
     TEST_ASSERT(c.markdown_auto_decompress == 1, "auto_decompress default on");
+    TEST_ASSERT(c.markdown_metrics_format == METRICS_FORMAT_AUTO, "metrics_format default auto");
     TEST_PASS("Default values verified");
+}
+
+static void
+test_metrics_format_parsing(void)
+{
+    int result;
+
+    TEST_SUBSECTION("markdown_metrics_format directive parsing");
+
+    /* "auto" maps to METRICS_FORMAT_AUTO (0) */
+    result = parse_metrics_format("auto");
+    TEST_ASSERT(result == METRICS_FORMAT_AUTO,
+                "auto should parse to METRICS_FORMAT_AUTO");
+    TEST_PASS("auto -> METRICS_FORMAT_AUTO");
+
+    /* "prometheus" maps to METRICS_FORMAT_PROMETHEUS (1) */
+    result = parse_metrics_format("prometheus");
+    TEST_ASSERT(result == METRICS_FORMAT_PROMETHEUS,
+                "prometheus should parse to METRICS_FORMAT_PROMETHEUS");
+    TEST_PASS("prometheus -> METRICS_FORMAT_PROMETHEUS");
+
+    /* Invalid values are rejected */
+    result = parse_metrics_format("json");
+    TEST_ASSERT(result == -1, "json should be rejected");
+    TEST_PASS("json rejected");
+
+    result = parse_metrics_format("text");
+    TEST_ASSERT(result == -1, "text should be rejected");
+    TEST_PASS("text rejected");
+
+    result = parse_metrics_format("openmetrics");
+    TEST_ASSERT(result == -1, "openmetrics should be rejected");
+    TEST_PASS("openmetrics rejected");
+
+    result = parse_metrics_format("");
+    TEST_ASSERT(result == -1, "empty string should be rejected");
+    TEST_PASS("empty string rejected");
+
+    /* Verify constant values match design */
+    TEST_ASSERT(METRICS_FORMAT_AUTO == 0,
+                "METRICS_FORMAT_AUTO must be 0");
+    TEST_ASSERT(METRICS_FORMAT_PROMETHEUS == 1,
+                "METRICS_FORMAT_PROMETHEUS must be 1");
+    TEST_PASS("Constant values match design");
 }
 
 int
@@ -152,6 +219,7 @@ main(void)
 
     test_value_validation();
     test_default_values();
+    test_metrics_format_parsing();
 
     printf("\n========================================\n");
     printf("All tests passed!\n");

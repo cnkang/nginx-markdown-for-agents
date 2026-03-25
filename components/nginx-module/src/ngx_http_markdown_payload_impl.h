@@ -163,6 +163,12 @@ ngx_http_markdown_handle_decompression_alloc_error(
         ngx_http_markdown_reason_from_error_category(
             category, r->connection->log));
 
+    if (conf->on_error
+        == NGX_HTTP_MARKDOWN_ON_ERROR_PASS)
+    {
+        NGX_HTTP_MARKDOWN_METRIC_INC(failopen_count);
+    }
+
     return ngx_http_markdown_reject_or_fail_open_buffered_response(
         r, ctx, conf, debug_message);
 }
@@ -390,6 +396,8 @@ ngx_http_markdown_handle_buffer_init_failure(ngx_http_request_t *r,
         return NGX_ERROR;
     }
 
+    NGX_HTTP_MARKDOWN_METRIC_INC(failopen_count);
+
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                   "markdown filter: fail-open strategy - returning original HTML");
     ngx_http_markdown_reclassify_fail_open_path(ctx);
@@ -438,6 +446,8 @@ ngx_http_markdown_handle_buffer_append_failure(ngx_http_request_t *r,
     if (conf->on_error == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT) {
         return NGX_ERROR;
     }
+
+    NGX_HTTP_MARKDOWN_METRIC_INC(failopen_count);
 
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                   "markdown filter: fail-open strategy - returning original HTML");

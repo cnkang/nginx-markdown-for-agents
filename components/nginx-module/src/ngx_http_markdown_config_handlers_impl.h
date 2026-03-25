@@ -412,6 +412,40 @@ ngx_http_markdown_large_body_threshold(ngx_conf_t *cf,
     return NGX_CONF_OK;
 }
 
+/* Configuration directive handler: markdown_metrics_format (auto | prometheus). */
+static char *
+ngx_http_markdown_metrics_format(ngx_conf_t *cf,
+    ngx_command_t *cmd, void *conf)
+{
+    ngx_http_markdown_conf_t *mcf = conf;
+    ngx_str_t                *value;
+
+    value = cf->args->elts;
+
+    if (mcf->metrics_format != NGX_CONF_UNSET_UINT) {
+        return "is duplicate";
+    }
+
+    if (ngx_strcasecmp(value[1].data, (u_char *) "auto") == 0) {
+        mcf->metrics_format =
+            NGX_HTTP_MARKDOWN_METRICS_FORMAT_AUTO;
+    } else if (ngx_strcasecmp(value[1].data,
+                              (u_char *) "prometheus") == 0)
+    {
+        mcf->metrics_format =
+            NGX_HTTP_MARKDOWN_METRICS_FORMAT_PROMETHEUS;
+    } else {
+        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+            "invalid value \"%V\" in \"%V\" "
+            "directive, it must be "
+            "\"auto\" or \"prometheus\"",
+            &value[1], &cmd->name);
+        return NGX_CONF_ERROR;
+    }
+
+    return NGX_CONF_OK;
+}
+
 /**
  * Register the markdown_metrics content handler for the current location.
  *
