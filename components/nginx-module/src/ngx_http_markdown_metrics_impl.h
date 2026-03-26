@@ -84,12 +84,16 @@ typedef struct {
 } ngx_http_markdown_metrics_snapshot_t;
 
 /*
- * Response buffer size for the metrics endpoint.  The current JSON/text
- * output is well under 2 KiB, but we leave headroom for future fields.
- * Increase this constant if new metrics push the output beyond the limit.
+ * Response buffer size for the metrics endpoint.
  *
- * Estimated current output: ~1.5 KiB (JSON), ~1.2 KiB (text).
- * Last updated when fullbuffer_path_hits / incremental_path_hits were added.
+ * Estimated current output per format:
+ *   JSON:       ~2.0 KiB
+ *   Plain text: ~1.5 KiB
+ *   Prometheus: ~3.2 KiB (most verbose due to HELP/TYPE lines)
+ *
+ * The 5 KiB buffer provides ~1.8 KiB headroom above the largest
+ * format.  Increase this constant if new metrics push the
+ * Prometheus output beyond the limit.
  */
 #define NGX_HTTP_MARKDOWN_METRICS_BUF_SIZE  5120
 
@@ -164,6 +168,12 @@ static ngx_flag_t ngx_http_markdown_metrics_value_contains(
     ngx_str_t *value, u_char *needle, size_t needle_len);
 
 static u_char  ngx_http_markdown_metrics_accept_json[] = "application/json";
+static u_char  ngx_http_markdown_metrics_accept_openmetrics[] =
+    "application/openmetrics-text";
+static u_char  ngx_http_markdown_metrics_accept_prom_ver[] =
+    "version=0.0.4";
+static u_char  ngx_http_markdown_metrics_accept_text_plain[] =
+    "text/plain";
 
 /*
  * Validate method and shared-state availability for the metrics handler.
@@ -244,6 +254,70 @@ ngx_http_markdown_metrics_prefers_json(ngx_http_request_t *r)
     return 0;
 }
 
+/*
+ * Check whether the Accept header explicitly requests
+ * Prometheus exposition format.
+ *
+ * Matches:
+ *   application/openmetrics-text
+ *   text/plain; version=0.0.4  (both "text/plain" AND
+ *       "version=0.0.4" must be present)
+ *
+ * Does NOT match:
+ *   text/plain  (without version — legacy plain text)
+ *   application/xml; version=0.0.4  (wrong media type)
+ *   version=0.0.4  (no media type at all)
+ */
+static ngx_flag_t
+ngx_http_markdown_metrics_prefers_prometheus(
+    ngx_http_request_t *r)
+{
+    ngx_table_elt_t  *accept_header;
+
+    accept_header = NULL;
+
+#if (NGX_HTTP_HEADERS)
+    accept_header = r->headers_in.accept;
+#else
+    static ngx_str_t accept_name = ngx_string("Accept");
+
+    accept_header =
+        ngx_http_markdown_find_request_header(
+            r, &accept_name);
+#endif
+
+    if (accept_header == NULL) {
+        return 0;
+    }
+
+    if (ngx_http_markdown_metrics_value_contains(
+            &accept_header->value,
+            ngx_http_markdown_metrics_accept_openmetrics,
+            sizeof(ngx_http_markdown_metrics_accept_openmetrics) - 1))
+    {
+        return 1;
+    }
+
+    /*
+     * Match "text/plain; version=0.0.4" — both substrings
+     * must be present to avoid false positives from
+     * unrelated media types carrying version=0.0.4.
+     */
+    if (ngx_http_markdown_metrics_value_contains(
+            &accept_header->value,
+            ngx_http_markdown_metrics_accept_text_plain,
+            sizeof(ngx_http_markdown_metrics_accept_text_plain) - 1)
+        && ngx_http_markdown_metrics_value_contains(
+            &accept_header->value,
+            ngx_http_markdown_metrics_accept_prom_ver,
+            sizeof(ngx_http_markdown_metrics_accept_prom_ver) - 1))
+    {
+        return 1;
+    }
+
+    return 0;
+}
+
 static ngx_flag_t
 ngx_http_markdown_metrics_value_contains(ngx_str_t *value,
     u_char *needle,
@@ -284,14 +358,19 @@ ngx_http_markdown_metrics_value_contains(ngx_str_t *value,
  *
  * Content negotiation state machine:
  *
- *   auto       + Accept: application/json  -> JSON
- *   auto       + Accept: text/plain        -> plain text
- *   auto       + (any other / none)        -> plain text
- *   prometheus + Accept: application/json  -> JSON
- *   prometheus + Accept: text/plain        -> Prometheus
- *   prometheus + Accept: text/plain; v=0.0.4 -> Prometheus
- *   prometheus + Accept: openmetrics-text  -> Prometheus
- *   prometheus + (any other / none)        -> Prometheus
+ *   auto       + Accept: application/json     -> JSON
+ *   auto       + (any other / none)           -> plain text
+ *   prometheus + Accept: application/json     -> JSON
+ *   prometheus + Accept: openmetrics-text     -> Prometheus
+ *   prometheus + Accept: text/plain; v=0.0.4  -> Prometheus
+ *   prometheus + (any other / none)           -> plain text
+ *
+ * When metrics_format is prometheus, Prometheus format is
+ * served only for explicit Prometheus-aware Accept values.
+ * Plain "text/plain" without version=0.0.4 falls back to
+ * the legacy human-readable text format, preserving
+ * backward compatibility for operators who curl without
+ * a specific Accept header.
  *
  * Returns one of the NGX_HTTP_MARKDOWN_METRICS_OUTPUT_*
  * constants.
@@ -311,7 +390,8 @@ ngx_http_markdown_metrics_select_format(
 
     if (conf != NULL
         && conf->metrics_format
-           == NGX_HTTP_MARKDOWN_METRICS_FORMAT_PROMETHEUS)
+           == NGX_HTTP_MARKDOWN_METRICS_FORMAT_PROMETHEUS
+        && ngx_http_markdown_metrics_prefers_prometheus(r))
     {
         return NGX_HTTP_MARKDOWN_METRICS_OUTPUT_PROMETHEUS;
     }
