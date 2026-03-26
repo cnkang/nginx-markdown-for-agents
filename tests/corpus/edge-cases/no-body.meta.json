@@ -1,0 +1,8 @@
+{
+  "fixture-id": "edge-cases/no-body",
+  "page-type": "complex-common",
+  "expected-conversion-result": "converted",
+  "input-size-bytes": 504,
+  "source-description": "HTML without a body element to test missing body handling",
+  "failure-corpus": true
+}

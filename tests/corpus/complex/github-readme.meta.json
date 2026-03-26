@@ -1,0 +1,8 @@
+{
+  "fixture-id": "complex/github-readme",
+  "page-type": "documentation",
+  "expected-conversion-result": "converted",
+  "input-size-bytes": 3654,
+  "source-description": "GitHub-style README with badges, code blocks, and structured sections",
+  "failure-corpus": false
+}

@@ -1,0 +1,8 @@
+{
+  "fixture-id": "malformed/mixed-case-tags",
+  "page-type": "complex-common",
+  "expected-conversion-result": "converted",
+  "input-size-bytes": 1417,
+  "source-description": "HTML with mixed-case tag names to test case-insensitive parsing",
+  "failure-corpus": true
+}
