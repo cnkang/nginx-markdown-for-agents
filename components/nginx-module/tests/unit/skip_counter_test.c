@@ -61,10 +61,6 @@ metric_inc_skip(eligibility_t eligibility)
     case ELIGIBLE:
         return;
 
-    case INELIGIBLE_CONFIG:
-        g_metrics->skips.config++;
-        return;
-
     case INELIGIBLE_METHOD:
         g_metrics->skips.method++;
         return;
@@ -93,6 +89,7 @@ metric_inc_skip(eligibility_t eligibility)
         g_metrics->skips.range++;
         return;
 
+    case INELIGIBLE_CONFIG:
     default:
         g_metrics->skips.config++;
         return;
