@@ -233,6 +233,16 @@ ngx_http_markdown_metrics_write_prometheus(
             + snapshot->conversion_latency_le_1000ms
             + snapshot->conversion_latency_gt_1000ms);
 
+    /*
+     * Detect buffer exhaustion.  ngx_slprintf stops at end
+     * without signaling an error, so p == end means the
+     * output was silently truncated.  Return NULL to let
+     * the caller distinguish truncation from success.
+     */
+    if (p == end) {
+        return NULL;
+    }
+
     return p;
 }
 
