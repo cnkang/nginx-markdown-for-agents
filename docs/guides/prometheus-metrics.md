@@ -74,10 +74,10 @@ When `markdown_metrics_format prometheus` is configured:
 | Accept Header | Output Format |
 |---|---|
 | `application/json` | JSON |
-| `text/plain` | Prometheus |
 | `text/plain; version=0.0.4` | Prometheus |
 | `application/openmetrics-text` | Prometheus |
-| (any other / none) | Prometheus |
+| `text/plain` | Plain text (backward compatible) |
+| (any other / none) | Plain text (backward compatible) |
 
 When `markdown_metrics_format auto` (default):
 
@@ -87,7 +87,7 @@ When `markdown_metrics_format auto` (default):
 | `text/plain` | Plain text (existing human-readable format) |
 | (any other / none) | Plain text (existing human-readable format) |
 
-No external dependencies, sidecars, or agents are required. The module renders Prometheus format directly.
+Prometheus format is served only when the client explicitly requests it via `Accept: text/plain; version=0.0.4` or `Accept: application/openmetrics-text`. Plain `text/plain` without the version parameter falls back to the legacy human-readable format, preserving backward compatibility for operators who curl without a specific Accept header. No external dependencies, sidecars, or agents are required.
 
 ---
 
@@ -102,8 +102,8 @@ scrape_configs:
     metrics_path: '/markdown-metrics'
     static_configs:
       - targets: ['localhost:80']
-    # No special Accept header needed — Prometheus format is the default
-    # when markdown_metrics_format is set to prometheus.
+    # Prometheus sends Accept: application/openmetrics-text by default,
+    # which the module recognizes when markdown_metrics_format is prometheus.
 ```
 
 If NGINX listens on a non-standard port or the metrics location uses a different path, adjust `targets` and `metrics_path` accordingly.
@@ -130,7 +130,7 @@ All metrics use the `nginx_markdown_` prefix. Counter metrics use the `_total` s
 |---|---|---|
 | `nginx_markdown_requests_total` | counter | Total requests entering the module decision chain. This is the denominator for conversion rate calculations. |
 | `nginx_markdown_conversions_total` | counter | Successful HTML-to-Markdown conversions. |
-| `nginx_markdown_passthrough_total` | counter | Requests not converted (skipped or failed-open). |
+| `nginx_markdown_passthrough_total` | counter | Requests not converted (skipped or failed-open). Derived as the sum of all skip-reason counters plus fail-open count. |
 | `nginx_markdown_failopen_total` | counter | Conversions failed with original HTML served (`markdown_on_error pass`). |
 | `nginx_markdown_large_response_path_total` | counter | Requests routed to the incremental processing path. |
 | `nginx_markdown_input_bytes_total` | counter | Cumulative HTML input bytes from successful conversions. |
@@ -173,8 +173,8 @@ Use `curl` to verify the endpoint is producing valid Prometheus output.
 ### Basic Scrape
 
 ```bash
-# Scrape Prometheus format (default when markdown_metrics_format is prometheus)
-curl http://localhost/markdown-metrics
+# Scrape Prometheus format (requires explicit Accept header)
+curl -H "Accept: text/plain; version=0.0.4" http://localhost/markdown-metrics
 ```
 
 ### Explicit Accept Header
@@ -216,7 +216,6 @@ nginx_markdown_passthrough_total 70
 
 # HELP nginx_markdown_skips_total Requests skipped by reason.
 # TYPE nginx_markdown_skips_total counter
-nginx_markdown_skips_total{reason="SKIP_CONFIG"} 5
 nginx_markdown_skips_total{reason="SKIP_METHOD"} 10
 nginx_markdown_skips_total{reason="SKIP_STATUS"} 3
 nginx_markdown_skips_total{reason="SKIP_CONTENT_TYPE"} 20
@@ -225,6 +224,7 @@ nginx_markdown_skips_total{reason="SKIP_STREAMING"} 0
 nginx_markdown_skips_total{reason="SKIP_AUTH"} 8
 nginx_markdown_skips_total{reason="SKIP_RANGE"} 0
 nginx_markdown_skips_total{reason="SKIP_ACCEPT"} 15
+nginx_markdown_skips_total{reason="SKIP_CONFIG"} 5
 
 # HELP nginx_markdown_failures_total Conversion failures by stage.
 # TYPE nginx_markdown_failures_total counter
