@@ -112,6 +112,31 @@ ngx_http_markdown_metric_inc_skip(
 }
 
 /*
+ * Increment the fail-open counter when the configured error
+ * strategy is "pass" (fail-open).
+ *
+ * Centralizes the repeated guard so every fail-open path uses
+ * the same check and future fail-open paths cannot drift.
+ *
+ * Parameters:
+ *   conf - module location configuration
+ */
+static void
+ngx_http_markdown_metric_inc_failopen(
+    const ngx_http_markdown_conf_t *conf)
+{
+    if (conf == NULL) {
+        return;
+    }
+
+    if (conf->on_error
+        == NGX_HTTP_MARKDOWN_ON_ERROR_PASS)
+    {
+        NGX_HTTP_MARKDOWN_METRIC_INC(failopen_count);
+    }
+}
+
+/*
  * Lifecycle hooks registered with nginx module callbacks.
  *
  * - filter_init wires this module into header/body filter chains.

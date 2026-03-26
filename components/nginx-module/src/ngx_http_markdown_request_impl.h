@@ -93,7 +93,7 @@ ngx_http_markdown_handle_unsupported_compression(
         return NGX_HTTP_BAD_GATEWAY;
     }
 
-    NGX_HTTP_MARKDOWN_METRIC_INC(failopen_count);
+    ngx_http_markdown_metric_inc_failopen(conf);
 
     ngx_log_error(NGX_LOG_WARN,
         r->connection->log, 0,
@@ -150,7 +150,7 @@ ngx_http_markdown_handle_ctx_alloc_failure(ngx_http_request_t *r,
         return NGX_HTTP_INTERNAL_SERVER_ERROR;
     }
 
-    NGX_HTTP_MARKDOWN_METRIC_INC(failopen_count);
+    ngx_http_markdown_metric_inc_failopen(conf);
 
     ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                  "markdown filter: context allocation "
