@@ -54,14 +54,17 @@ ngx_http_markdown_metrics_write_prometheus(
         "\n",
         snapshot->conversions_succeeded);
 
-    /* passthrough_total */
+    /* passthrough_total (derived: skips + fail-open) */
     p = ngx_slprintf(p, end,
         "# HELP nginx_markdown_passthrough_total "
-        "Requests not converted (skipped or failed-open).\n"
-        "# TYPE nginx_markdown_passthrough_total counter\n"
+        "Requests not converted "
+        "(skipped or failed-open).\n"
+        "# TYPE nginx_markdown_passthrough_total "
+        "counter\n"
         "nginx_markdown_passthrough_total %uA\n"
         "\n",
-        snapshot->conversions_bypassed);
+        snapshot->conversions_bypassed
+            + snapshot->failopen_count);
 
     /* skips_total{reason=...} */
     p = ngx_slprintf(p, end,
@@ -196,7 +199,13 @@ ngx_http_markdown_metrics_write_prometheus(
         "\n",
         snapshot->decompressions.failed);
 
-    /* conversion_duration_seconds{le=...} */
+    /*
+     * conversion_duration_seconds{le=...}
+     *
+     * Emitted as cumulative buckets: each le value includes
+     * all observations at or below that threshold.
+     * le="+Inf" equals the sum of all four discrete counters.
+     */
     p = ngx_slprintf(p, end,
         "# HELP "
         "nginx_markdown_conversion_duration_seconds "
@@ -214,9 +223,15 @@ ngx_http_markdown_metrics_write_prometheus(
         "nginx_markdown_conversion_duration_seconds"
         "{le=\"+Inf\"} %uA\n",
         snapshot->conversion_latency_le_10ms,
-        snapshot->conversion_latency_le_100ms,
-        snapshot->conversion_latency_le_1000ms,
-        snapshot->conversion_latency_gt_1000ms);
+        snapshot->conversion_latency_le_10ms
+            + snapshot->conversion_latency_le_100ms,
+        snapshot->conversion_latency_le_10ms
+            + snapshot->conversion_latency_le_100ms
+            + snapshot->conversion_latency_le_1000ms,
+        snapshot->conversion_latency_le_10ms
+            + snapshot->conversion_latency_le_100ms
+            + snapshot->conversion_latency_le_1000ms
+            + snapshot->conversion_latency_gt_1000ms);
 
     return p;
 }

@@ -93,15 +93,16 @@ format_prometheus(const snapshot_t *s, char *buf, size_t buf_len)
         "\n",
         s->conversions_succeeded);
 
-    /* passthrough_total */
+    /* passthrough_total (derived: skips + fail-open) */
     PROM_WRITE(
         "# HELP nginx_markdown_passthrough_total "
         "Requests not converted "
         "(skipped or failed-open).\n"
-        "# TYPE nginx_markdown_passthrough_total counter\n"
+        "# TYPE nginx_markdown_passthrough_total "
+        "counter\n"
         "nginx_markdown_passthrough_total %lu\n"
         "\n",
-        s->conversions_bypassed);
+        s->conversions_bypassed + s->failopen_count);
 
     /* skips_total{reason=...} */
     PROM_WRITE(
@@ -238,7 +239,7 @@ format_prometheus(const snapshot_t *s, char *buf, size_t buf_len)
         "\n",
         s->decompressions.failed);
 
-    /* conversion_duration_seconds{le=...} */
+    /* conversion_duration_seconds{le=...} (cumulative) */
     PROM_WRITE(
         "# HELP "
         "nginx_markdown_conversion_duration_seconds "
@@ -256,9 +257,15 @@ format_prometheus(const snapshot_t *s, char *buf, size_t buf_len)
         "nginx_markdown_conversion_duration_seconds"
         "{le=\"+Inf\"} %lu\n",
         s->conversion_latency_le_10ms,
-        s->conversion_latency_le_100ms,
-        s->conversion_latency_le_1000ms,
-        s->conversion_latency_gt_1000ms);
+        s->conversion_latency_le_10ms
+            + s->conversion_latency_le_100ms,
+        s->conversion_latency_le_10ms
+            + s->conversion_latency_le_100ms
+            + s->conversion_latency_le_1000ms,
+        s->conversion_latency_le_10ms
+            + s->conversion_latency_le_100ms
+            + s->conversion_latency_le_1000ms
+            + s->conversion_latency_gt_1000ms);
 
 #undef PROM_WRITE
 
@@ -404,6 +411,10 @@ test_known_values(void)
         "conversions_total should be 80");
     TEST_ASSERT(
         contains(buf,
+            "nginx_markdown_passthrough_total 18"),
+        "passthrough_total should be 15+3=18");
+    TEST_ASSERT(
+        contains(buf,
             "nginx_markdown_skips_total"
             "{reason=\"SKIP_METHOD\"} 3"),
         "skips method should be 3");
@@ -433,8 +444,8 @@ test_known_values(void)
     TEST_ASSERT(
         contains(buf,
             "nginx_markdown_conversion_duration_seconds"
-            "{le=\"+Inf\"} 2"),
-        "latency le +Inf should be 2");
+            "{le=\"+Inf\"} 80"),
+        "latency le +Inf should be 40+30+8+2=80");
 
     TEST_PASS("Known-value snapshot matches expected text");
 }

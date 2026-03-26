@@ -121,7 +121,8 @@ def render_prometheus(snap: MetricsSnapshot) -> str:
     emit_family(
         "nginx_markdown_passthrough_total", "counter",
         "Requests not converted (skipped or failed-open).",
-        [(snap.conversions_bypassed, None)],
+        [(snap.conversions_bypassed + snap.failopen_count,
+          None)],
     )
 
     emit_family(
@@ -217,19 +218,20 @@ def render_prometheus(snap: MetricsSnapshot) -> str:
         [(snap.decompressions.failed, None)],
     )
 
+    le_10 = snap.conversion_latency_le_10ms
+    le_100 = le_10 + snap.conversion_latency_le_100ms
+    le_1000 = le_100 + snap.conversion_latency_le_1000ms
+    le_inf = le_1000 + snap.conversion_latency_gt_1000ms
+
     emit_family(
         "nginx_markdown_conversion_duration_seconds", "gauge",
         "Cumulative conversion count per latency bucket "
         "(not a native Prometheus histogram; no _sum/_count).",
         [
-            (snap.conversion_latency_le_10ms,
-             {"le": "0.01"}),
-            (snap.conversion_latency_le_100ms,
-             {"le": "0.1"}),
-            (snap.conversion_latency_le_1000ms,
-             {"le": "1.0"}),
-            (snap.conversion_latency_gt_1000ms,
-             {"le": "+Inf"}),
+            (le_10, {"le": "0.01"}),
+            (le_100, {"le": "0.1"}),
+            (le_1000, {"le": "1.0"}),
+            (le_inf, {"le": "+Inf"}),
         ],
     )
 
@@ -390,7 +392,7 @@ def test_property1_round_trip(snap):
     check("nginx_markdown_conversions_total",
           snap.conversions_succeeded)
     check("nginx_markdown_passthrough_total",
-          snap.conversions_bypassed)
+          snap.conversions_bypassed + snap.failopen_count)
 
     for reason, val in [
         ("SKIP_METHOD", snap.skips.method),
@@ -437,11 +439,16 @@ def test_property1_round_trip(snap):
     check("nginx_markdown_decompression_failures_total",
           snap.decompressions.failed)
 
+    le_10 = snap.conversion_latency_le_10ms
+    le_100 = le_10 + snap.conversion_latency_le_100ms
+    le_1000 = le_100 + snap.conversion_latency_le_1000ms
+    le_inf = le_1000 + snap.conversion_latency_gt_1000ms
+
     for le_val, val in [
-        ("0.01", snap.conversion_latency_le_10ms),
-        ("0.1", snap.conversion_latency_le_100ms),
-        ("1.0", snap.conversion_latency_le_1000ms),
-        ("+Inf", snap.conversion_latency_gt_1000ms),
+        ("0.01", le_10),
+        ("0.1", le_100),
+        ("1.0", le_1000),
+        ("+Inf", le_inf),
     ]:
         check("nginx_markdown_conversion_duration_seconds",
               val, {"le": le_val})
@@ -622,6 +629,24 @@ METRICS_FORMAT_AUTO = 0
 METRICS_FORMAT_PROMETHEUS = 1
 
 
+def _prefers_prometheus(accept: str | None) -> bool:
+    """Check if Accept explicitly requests Prometheus format.
+
+    Matches application/openmetrics-text, or text/plain with
+    version=0.0.4.  Bare version=0.0.4 without text/plain
+    does not match (avoids false positives from unrelated
+    media types).
+    """
+    if accept is None:
+        return False
+    lower = accept.lower()
+    if "application/openmetrics-text" in lower:
+        return True
+    if "text/plain" in lower and "version=0.0.4" in lower:
+        return True
+    return False
+
+
 def select_format(metrics_format: int, accept: str | None) -> int:
     """Python reference model of the content negotiation state
     machine from the design document.
@@ -631,7 +656,8 @@ def select_format(metrics_format: int, accept: str | None) -> int:
     if accept is not None and "application/json" in accept.lower():
         return OUTPUT_JSON
 
-    if metrics_format == METRICS_FORMAT_PROMETHEUS:
+    if (metrics_format == METRICS_FORMAT_PROMETHEUS
+            and _prefers_prometheus(accept)):
         return OUTPUT_PROMETHEUS
 
     return OUTPUT_TEXT
@@ -646,6 +672,8 @@ accept_header_strategy = st.one_of(
     st.just("application/openmetrics-text"),
     st.just("*/*"),
     st.just("text/html"),
+    st.just("application/xml; version=0.0.4"),
+    st.just("version=0.0.4"),
     st.text(
         alphabet=st.characters(
             whitelist_categories=("L", "N", "P", "Z"),
@@ -686,19 +714,22 @@ def test_property5_content_negotiation(metrics_format, accept):
         and "application/json" in accept.lower()
     )
 
+    is_prom_accept = _prefers_prometheus(accept)
+
     if has_json:
         assert result == OUTPUT_JSON, (
             f"Expected JSON for Accept={accept!r}, "
             f"got {result}"
         )
-    elif metrics_format == METRICS_FORMAT_PROMETHEUS:
+    elif (metrics_format == METRICS_FORMAT_PROMETHEUS
+          and is_prom_accept):
         assert result == OUTPUT_PROMETHEUS, (
             f"Expected PROMETHEUS for format=prometheus, "
             f"Accept={accept!r}, got {result}"
         )
     else:
         assert result == OUTPUT_TEXT, (
-            f"Expected TEXT for format=auto, "
+            f"Expected TEXT for format={metrics_format}, "
             f"Accept={accept!r}, got {result}"
         )
 
@@ -740,7 +771,15 @@ def constrained_snapshot_strategy(draw):
 
     failopen_count = draw(cv)
 
-    # passthrough = sum(skips) + failopen
+    #
+    # passthrough_total is derived in the renderer as
+    # conversions_bypassed + failopen_count.
+    # conversions_bypassed tracks only skip-path requests
+    # at runtime; the renderer adds failopen to produce
+    # the spec-compliant passthrough value.
+    #
+    # passthrough = total_skips + failopen
+    #
     passthrough = total_skips + failopen_count
 
     conversions_succeeded = draw(cv)
@@ -773,7 +812,7 @@ def constrained_snapshot_strategy(draw):
         conversions_attempted=draw(cv),
         conversions_succeeded=conversions_succeeded,
         conversions_failed=total_failures,
-        conversions_bypassed=passthrough,
+        conversions_bypassed=total_skips,
         failures_conversion=fail_conv,
         failures_resource_limit=fail_res,
         failures_system=fail_sys,
