@@ -444,11 +444,7 @@ ngx_http_markdown_handle_conversion_failure(ngx_http_request_t *r,
 
     markdown_result_free(result);
 
-    if (conf->on_error
-        == NGX_HTTP_MARKDOWN_ON_ERROR_PASS)
-    {
-        NGX_HTTP_MARKDOWN_METRIC_INC(failopen_count);
-    }
+    ngx_http_markdown_metric_inc_failopen(conf);
 
     return ngx_http_markdown_reject_or_fail_open_buffered_response(
         r, ctx, conf,
@@ -540,11 +536,7 @@ ngx_http_markdown_handle_converter_not_initialized(
                  "initialized, category=system");
     ngx_http_markdown_record_system_failure(ctx);
 
-    if (conf->on_error
-        == NGX_HTTP_MARKDOWN_ON_ERROR_PASS)
-    {
-        NGX_HTTP_MARKDOWN_METRIC_INC(failopen_count);
-    }
+    ngx_http_markdown_metric_inc_failopen(conf);
 
     return ngx_http_markdown_reject_or_fail_open_buffered_response(
         r, ctx, conf,
