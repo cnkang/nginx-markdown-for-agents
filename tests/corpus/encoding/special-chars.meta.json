@@ -1,0 +1,8 @@
+{
+  "fixture-id": "encoding/special-chars",
+  "page-type": "clean-article",
+  "expected-conversion-result": "converted",
+  "input-size-bytes": 2662,
+  "source-description": "HTML with special Unicode characters, symbols, and emoji",
+  "failure-corpus": false
+}

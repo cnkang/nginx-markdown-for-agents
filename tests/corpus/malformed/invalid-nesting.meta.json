@@ -1,0 +1,8 @@
+{
+  "fixture-id": "malformed/invalid-nesting",
+  "page-type": "complex-common",
+  "expected-conversion-result": "converted",
+  "input-size-bytes": 1522,
+  "source-description": "HTML with invalid element nesting to test parser error recovery",
+  "failure-corpus": true
+}

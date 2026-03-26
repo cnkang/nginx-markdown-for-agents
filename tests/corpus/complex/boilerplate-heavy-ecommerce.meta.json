@@ -1,0 +1,8 @@
+{
+  "fixture-id": "complex/boilerplate-heavy-ecommerce",
+  "page-type": "boilerplate-heavy",
+  "expected-conversion-result": "converted",
+  "input-size-bytes": 3969,
+  "source-description": "E-commerce product page with multiple navigation bars, recommendations, and footer boilerplate",
+  "failure-corpus": false
+}

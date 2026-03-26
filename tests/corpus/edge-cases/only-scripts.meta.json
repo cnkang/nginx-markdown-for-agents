@@ -1,0 +1,8 @@
+{
+  "fixture-id": "edge-cases/only-scripts",
+  "page-type": "complex-common",
+  "expected-conversion-result": "converted",
+  "input-size-bytes": 1407,
+  "source-description": "HTML containing only script elements with no visible content",
+  "failure-corpus": true
+}

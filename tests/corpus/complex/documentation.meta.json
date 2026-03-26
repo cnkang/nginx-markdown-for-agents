@@ -1,0 +1,8 @@
+{
+  "fixture-id": "complex/documentation",
+  "page-type": "documentation",
+  "expected-conversion-result": "converted",
+  "input-size-bytes": 5390,
+  "source-description": "Technical documentation page with code examples, tables, and structured sections",
+  "failure-corpus": false
+}

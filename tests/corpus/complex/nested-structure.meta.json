@@ -1,0 +1,8 @@
+{
+  "fixture-id": "complex/nested-structure",
+  "page-type": "nav-heavy",
+  "expected-conversion-result": "converted",
+  "input-size-bytes": 2769,
+  "source-description": "Deeply nested HTML structure with navigation menus and nested containers",
+  "failure-corpus": false
+}
