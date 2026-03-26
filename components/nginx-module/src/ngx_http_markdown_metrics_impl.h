@@ -737,6 +737,13 @@ ngx_http_markdown_metrics_handler(ngx_http_request_t *r)
     case NGX_HTTP_MARKDOWN_METRICS_OUTPUT_PROMETHEUS:
         p = ngx_http_markdown_metrics_write_prometheus(
                 p, b->end, &snapshot);
+        if (p == NULL) {
+            ngx_log_error(NGX_LOG_ERR,
+                r->connection->log, 0,
+                "markdown_metrics: Prometheus output "
+                "truncated, buffer too small");
+            return NGX_HTTP_INTERNAL_SERVER_ERROR;
+        }
         ngx_str_set(&r->headers_out.content_type,
                      "text/plain; version=0.0.4; "
                      "charset=utf-8");
