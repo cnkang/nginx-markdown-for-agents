@@ -417,8 +417,10 @@ static char *
 ngx_http_markdown_metrics_format(ngx_conf_t *cf,
     ngx_command_t *cmd, void *conf)
 {
-    ngx_http_markdown_conf_t *mcf = conf;
-    ngx_str_t                *value;
+    static u_char              auto_str[] = "auto";
+    static u_char              prom_str[] = "prometheus";
+    ngx_http_markdown_conf_t  *mcf = conf;
+    ngx_str_t                 *value;
 
     value = cf->args->elts;
 
@@ -426,11 +428,11 @@ ngx_http_markdown_metrics_format(ngx_conf_t *cf,
         return "is duplicate";
     }
 
-    if (ngx_strcasecmp(value[1].data, (u_char *) "auto") == 0) {
+    if (ngx_strcasecmp(value[1].data, auto_str) == 0) {
         mcf->metrics_format =
             NGX_HTTP_MARKDOWN_METRICS_FORMAT_AUTO;
     } else if (ngx_strcasecmp(value[1].data,
-                              (u_char *) "prometheus") == 0)
+                              prom_str) == 0)
     {
         mcf->metrics_format =
             NGX_HTTP_MARKDOWN_METRICS_FORMAT_PROMETHEUS;

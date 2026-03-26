@@ -97,6 +97,17 @@ typedef struct {
  */
 #define NGX_HTTP_MARKDOWN_METRICS_BUF_SIZE  5120
 
+/*
+ * Forward declaration: the Prometheus renderer is defined in
+ * ngx_http_markdown_prometheus_impl.h but called from the
+ * metrics handler below.  Declared here so the call site
+ * compiles before the definition is included.
+ */
+static u_char *
+ngx_http_markdown_metrics_write_prometheus(
+    u_char *p, u_char *end,
+    ngx_http_markdown_metrics_snapshot_t *snapshot);
+
 /**
  * Capture a best-effort snapshot of the global metrics counters into the
  * provided snapshot structure.
