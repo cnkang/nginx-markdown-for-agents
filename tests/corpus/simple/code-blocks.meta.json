@@ -1,0 +1,8 @@
+{
+  "fixture-id": "simple/code-blocks",
+  "page-type": "clean-article",
+  "expected-conversion-result": "converted",
+  "input-size-bytes": 1261,
+  "source-description": "HTML with inline code and fenced code blocks for code conversion testing",
+  "failure-corpus": false
+}

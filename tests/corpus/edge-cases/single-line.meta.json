@@ -1,0 +1,8 @@
+{
+  "fixture-id": "edge-cases/single-line",
+  "page-type": "clean-article",
+  "expected-conversion-result": "converted",
+  "input-size-bytes": 618,
+  "source-description": "Entire HTML document on a single line to test whitespace-independent parsing",
+  "failure-corpus": false
+}

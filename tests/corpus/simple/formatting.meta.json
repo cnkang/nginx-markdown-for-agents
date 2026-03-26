@@ -1,0 +1,8 @@
+{
+  "fixture-id": "simple/formatting",
+  "page-type": "clean-article",
+  "expected-conversion-result": "converted",
+  "input-size-bytes": 1136,
+  "source-description": "HTML with bold, italic, strikethrough, and other inline formatting",
+  "failure-corpus": false
+}

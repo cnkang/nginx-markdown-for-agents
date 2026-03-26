@@ -1,0 +1,8 @@
+{
+  "fixture-id": "simple/lists",
+  "page-type": "clean-article",
+  "expected-conversion-result": "converted",
+  "input-size-bytes": 1092,
+  "source-description": "HTML with ordered, unordered, and nested lists for list conversion testing",
+  "failure-corpus": false
+}
