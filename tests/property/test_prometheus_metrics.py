@@ -642,9 +642,7 @@ def _prefers_prometheus(accept: str | None) -> bool:
     lower = accept.lower()
     if "application/openmetrics-text" in lower:
         return True
-    if "text/plain" in lower and "version=0.0.4" in lower:
-        return True
-    return False
+    return "text/plain" in lower and "version=0.0.4" in lower
 
 
 def select_format(metrics_format: int, accept: str | None) -> int:

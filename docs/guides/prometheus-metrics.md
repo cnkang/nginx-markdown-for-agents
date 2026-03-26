@@ -196,12 +196,14 @@ curl -H "Accept: application/json" http://localhost/markdown-metrics
 If you have the Prometheus `promtool` CLI installed, validate the output:
 
 ```bash
-curl -s http://localhost/markdown-metrics | promtool check metrics
+curl -s -H "Accept: text/plain; version=0.0.4" http://localhost/markdown-metrics | promtool check metrics
 ```
+
+Note: The explicit `Accept` header is required so the endpoint returns Prometheus text exposition format. Without it, the endpoint returns the legacy plain-text format, which `promtool` cannot parse. Alternatively, if `markdown_metrics_format prometheus` is configured and you prefer to omit the header, plain `text/plain` requests still return the legacy format — only `text/plain; version=0.0.4` or `application/openmetrics-text` triggers Prometheus output.
 
 ### Example Output
 
-```
+```text
 # HELP nginx_markdown_requests_total Total requests entering the module decision chain.
 # TYPE nginx_markdown_requests_total counter
 nginx_markdown_requests_total 1250
