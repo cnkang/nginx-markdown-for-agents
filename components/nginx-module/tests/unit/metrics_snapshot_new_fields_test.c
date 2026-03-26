@@ -21,10 +21,12 @@ typedef struct {
     unsigned long conversion_time_sum_ms;
     unsigned long input_bytes;
     unsigned long output_bytes;
-    unsigned long conversion_latency_le_10ms;
-    unsigned long conversion_latency_le_100ms;
-    unsigned long conversion_latency_le_1000ms;
-    unsigned long conversion_latency_gt_1000ms;
+    struct {
+        unsigned long le_10ms;
+        unsigned long le_100ms;
+        unsigned long le_1000ms;
+        unsigned long gt_1000ms;
+    } conversion_latency;
     struct {
         unsigned long attempted;
         unsigned long succeeded;
@@ -67,10 +69,12 @@ typedef struct {
     unsigned long conversion_time_sum_ms;
     unsigned long input_bytes;
     unsigned long output_bytes;
-    unsigned long conversion_latency_le_10ms;
-    unsigned long conversion_latency_le_100ms;
-    unsigned long conversion_latency_le_1000ms;
-    unsigned long conversion_latency_gt_1000ms;
+    struct {
+        unsigned long le_10ms;
+        unsigned long le_100ms;
+        unsigned long le_1000ms;
+        unsigned long gt_1000ms;
+    } conversion_latency;
     struct {
         unsigned long attempted;
         unsigned long succeeded;
@@ -105,7 +109,7 @@ static metrics_t *g_metrics = NULL;
 static void
 collect_snapshot(snapshot_t *snap)
 {
-    metrics_t *m;
+    const metrics_t *m;
 
     memset(snap, 0, sizeof(snapshot_t));
 
@@ -124,10 +128,10 @@ collect_snapshot(snapshot_t *snap)
     snap->conversion_time_sum_ms = m->conversion_time_sum_ms;
     snap->input_bytes = m->input_bytes;
     snap->output_bytes = m->output_bytes;
-    snap->conversion_latency_le_10ms = m->conversion_latency_le_10ms;
-    snap->conversion_latency_le_100ms = m->conversion_latency_le_100ms;
-    snap->conversion_latency_le_1000ms = m->conversion_latency_le_1000ms;
-    snap->conversion_latency_gt_1000ms = m->conversion_latency_gt_1000ms;
+    snap->conversion_latency.le_10ms = m->conversion_latency.le_10ms;
+    snap->conversion_latency.le_100ms = m->conversion_latency.le_100ms;
+    snap->conversion_latency.le_1000ms = m->conversion_latency.le_1000ms;
+    snap->conversion_latency.gt_1000ms = m->conversion_latency.gt_1000ms;
     snap->decompressions.attempted = m->decompressions.attempted;
     snap->decompressions.succeeded = m->decompressions.succeeded;
     snap->decompressions.failed = m->decompressions.failed;

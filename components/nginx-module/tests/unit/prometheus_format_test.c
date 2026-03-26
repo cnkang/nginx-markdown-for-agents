@@ -23,10 +23,12 @@ typedef struct {
     unsigned long conversion_time_sum_ms;
     unsigned long input_bytes;
     unsigned long output_bytes;
-    unsigned long conversion_latency_le_10ms;
-    unsigned long conversion_latency_le_100ms;
-    unsigned long conversion_latency_le_1000ms;
-    unsigned long conversion_latency_gt_1000ms;
+    struct {
+        unsigned long le_10ms;
+        unsigned long le_100ms;
+        unsigned long le_1000ms;
+        unsigned long gt_1000ms;
+    } conversion_latency;
     struct {
         unsigned long attempted;
         unsigned long succeeded;
@@ -256,16 +258,16 @@ format_prometheus(const snapshot_t *s, char *buf, size_t buf_len)
         "{le=\"1.0\"} %lu\n"
         "nginx_markdown_conversion_duration_seconds"
         "{le=\"+Inf\"} %lu\n",
-        s->conversion_latency_le_10ms,
-        s->conversion_latency_le_10ms
-            + s->conversion_latency_le_100ms,
-        s->conversion_latency_le_10ms
-            + s->conversion_latency_le_100ms
-            + s->conversion_latency_le_1000ms,
-        s->conversion_latency_le_10ms
-            + s->conversion_latency_le_100ms
-            + s->conversion_latency_le_1000ms
-            + s->conversion_latency_gt_1000ms);
+        s->conversion_latency.le_10ms,
+        s->conversion_latency.le_10ms
+            + s->conversion_latency.le_100ms,
+        s->conversion_latency.le_10ms
+            + s->conversion_latency.le_100ms
+            + s->conversion_latency.le_1000ms,
+        s->conversion_latency.le_10ms
+            + s->conversion_latency.le_100ms
+            + s->conversion_latency.le_1000ms
+            + s->conversion_latency.gt_1000ms);
 
 #undef PROM_WRITE
 
@@ -395,10 +397,10 @@ test_known_values(void)
     s.decompressions.deflate = 5;
     s.decompressions.brotli = 3;
     s.decompressions.failed = 1;
-    s.conversion_latency_le_10ms = 40;
-    s.conversion_latency_le_100ms = 30;
-    s.conversion_latency_le_1000ms = 8;
-    s.conversion_latency_gt_1000ms = 2;
+    s.conversion_latency.le_10ms = 40;
+    s.conversion_latency.le_100ms = 30;
+    s.conversion_latency.le_1000ms = 8;
+    s.conversion_latency.gt_1000ms = 2;
 
     format_prometheus(&s, buf, sizeof(buf));
 
@@ -461,7 +463,6 @@ test_help_and_type_lines(void)
     char help_prefix[128];
     char type_prefix[128];
     snapshot_t s;
-    size_t i;
 
     TEST_SUBSECTION("Every metric family has HELP and "
                     "TYPE lines");
@@ -469,7 +470,7 @@ test_help_and_type_lines(void)
     memset(&s, 0, sizeof(s));
     format_prometheus(&s, buf, sizeof(buf));
 
-    for (i = 0; i < NUM_FAMILIES; i++) {
+    for (size_t i = 0; i < NUM_FAMILIES; i++) {
         snprintf(help_prefix, sizeof(help_prefix),
                  "# HELP %s ", metric_families[i]);
         snprintf(type_prefix, sizeof(type_prefix),
@@ -495,18 +496,20 @@ test_counter_suffix(void)
     char buf[8192];
     char type_line[128];
     snapshot_t s;
-    size_t i;
 
     TEST_SUBSECTION("Counter metrics end with _total");
 
     memset(&s, 0, sizeof(s));
     format_prometheus(&s, buf, sizeof(buf));
 
-    for (i = 0; i < NUM_FAMILIES; i++) {
+    for (size_t i = 0; i < NUM_FAMILIES; i++) {
         snprintf(type_line, sizeof(type_line),
                  "# TYPE %s counter", metric_families[i]);
         if (contains(buf, type_line)) {
-            /* This is a counter — name must end with _total */
+            /*
+             * Safe: metric_families[] entries are
+             * compile-time string literals.
+             */
             size_t name_len = strlen(metric_families[i]);
             TEST_ASSERT(
                 name_len >= 6
@@ -529,7 +532,6 @@ test_label_values(void)
     char buf[8192];
     char label_str[128];
     snapshot_t s;
-    size_t i;
 
     TEST_SUBSECTION("Label values match defined sets");
 
@@ -537,7 +539,7 @@ test_label_values(void)
     format_prometheus(&s, buf, sizeof(buf));
 
     /* Check all reason labels present */
-    for (i = 0; i < NUM_REASONS; i++) {
+    for (size_t i = 0; i < NUM_REASONS; i++) {
         snprintf(label_str, sizeof(label_str),
                  "reason=\"%s\"", reason_values[i]);
         TEST_ASSERT(contains(buf, label_str),
@@ -545,7 +547,7 @@ test_label_values(void)
     }
 
     /* Check all stage labels present */
-    for (i = 0; i < NUM_STAGES; i++) {
+    for (size_t i = 0; i < NUM_STAGES; i++) {
         snprintf(label_str, sizeof(label_str),
                  "stage=\"%s\"", stage_values[i]);
         TEST_ASSERT(contains(buf, label_str),
@@ -553,7 +555,7 @@ test_label_values(void)
     }
 
     /* Check all format labels present */
-    for (i = 0; i < NUM_FORMATS; i++) {
+    for (size_t i = 0; i < NUM_FORMATS; i++) {
         snprintf(label_str, sizeof(label_str),
                  "format=\"%s\"", format_values[i]);
         TEST_ASSERT(contains(buf, label_str),
@@ -571,7 +573,7 @@ static void
 test_token_savings_help_text(void)
 {
     char buf[8192];
-    char *help_start;
+    const char *help_start;
     char *help_end;
     snapshot_t s;
 
@@ -588,8 +590,12 @@ test_token_savings_help_text(void)
                 "HELP line for estimated_token_savings_total "
                 "must exist");
 
-    /* Find end of this HELP line */
-    help_end = strchr(help_start, '\n');
+    /*
+     * Find end of this HELP line.  Derive the mutable pointer
+     * from buf so the temporary null-termination below is safe.
+     */
+    help_end = buf + (help_start - buf);
+    help_end = strchr(help_end, '\n');
     TEST_ASSERT(help_end != NULL,
                 "HELP line must end with newline");
 

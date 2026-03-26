@@ -33,12 +33,16 @@ accept_contains(const char *accept, const char *needle)
 {
     size_t  accept_len;
     size_t  needle_len;
-    size_t  i, j;
+    size_t  j;
 
     if (accept == NULL || needle == NULL) {
         return 0;
     }
 
+    /*
+     * Safe: both pointers are validated non-NULL above;
+     * all callers pass null-terminated string literals.
+     */
     accept_len = strlen(accept);
     needle_len = strlen(needle);
 
@@ -46,7 +50,7 @@ accept_contains(const char *accept, const char *needle)
         return 0;
     }
 
-    for (i = 0; i + needle_len <= accept_len; i++) {
+    for (size_t i = 0; i + needle_len <= accept_len; i++) {
         for (j = 0; j < needle_len; j++) {
             char a = accept[i + j];
             char n = needle[j];
