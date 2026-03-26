@@ -4,104 +4,16 @@
  */
 
 #include "test_common.h"
+#include "test_metrics_snapshot.h"
 
 /*
- * Mirror of the shared-memory metrics struct with the new fields.
- * Uses unsigned long in place of ngx_atomic_t for standalone testing.
+ * In the real module the metrics struct and the snapshot struct
+ * have the same layout.  Reuse the shared type for both so the
+ * test verifies field-by-field copy without duplicating the
+ * struct definition.
  */
-typedef struct {
-    /* Existing fields */
-    unsigned long conversions_attempted;
-    unsigned long conversions_succeeded;
-    unsigned long conversions_failed;
-    unsigned long conversions_bypassed;
-    unsigned long failures_conversion;
-    unsigned long failures_resource_limit;
-    unsigned long failures_system;
-    unsigned long conversion_time_sum_ms;
-    unsigned long input_bytes;
-    unsigned long output_bytes;
-    struct {
-        unsigned long le_10ms;
-        unsigned long le_100ms;
-        unsigned long le_1000ms;
-        unsigned long gt_1000ms;
-    } conversion_latency;
-    struct {
-        unsigned long attempted;
-        unsigned long succeeded;
-        unsigned long failed;
-        unsigned long gzip;
-        unsigned long deflate;
-        unsigned long brotli;
-    } decompressions;
-    unsigned long fullbuffer_path_hits;
-    unsigned long incremental_path_hits;
-
-    /* New fields */
-    unsigned long requests_entered;
-    struct {
-        unsigned long config;
-        unsigned long method;
-        unsigned long status;
-        unsigned long content_type;
-        unsigned long size;
-        unsigned long streaming;
-        unsigned long auth;
-        unsigned long range;
-        unsigned long accept;
-    } skips;
-    unsigned long failopen_count;
-    unsigned long estimated_token_savings;
-} metrics_t;
-
-/*
- * Snapshot struct mirroring ngx_http_markdown_metrics_snapshot_t.
- */
-typedef struct {
-    unsigned long conversions_attempted;
-    unsigned long conversions_succeeded;
-    unsigned long conversions_failed;
-    unsigned long conversions_bypassed;
-    unsigned long failures_conversion;
-    unsigned long failures_resource_limit;
-    unsigned long failures_system;
-    unsigned long conversion_time_sum_ms;
-    unsigned long input_bytes;
-    unsigned long output_bytes;
-    struct {
-        unsigned long le_10ms;
-        unsigned long le_100ms;
-        unsigned long le_1000ms;
-        unsigned long gt_1000ms;
-    } conversion_latency;
-    struct {
-        unsigned long attempted;
-        unsigned long succeeded;
-        unsigned long failed;
-        unsigned long gzip;
-        unsigned long deflate;
-        unsigned long brotli;
-    } decompressions;
-    unsigned long fullbuffer_path_hits;
-    unsigned long incremental_path_hits;
-
-    /* New fields */
-    unsigned long requests_entered;
-    struct {
-        unsigned long config;
-        unsigned long method;
-        unsigned long status;
-        unsigned long content_type;
-        unsigned long size;
-        unsigned long streaming;
-        unsigned long auth;
-        unsigned long range;
-        unsigned long accept;
-    } skips;
-    unsigned long failopen_count;
-    unsigned long estimated_token_savings;
-} snapshot_t;
+typedef test_metrics_snapshot_t  metrics_t;
+typedef test_metrics_snapshot_t  snapshot_t;
 
 /* Global pointer simulating ngx_http_markdown_metrics */
 static metrics_t *g_metrics = NULL;
