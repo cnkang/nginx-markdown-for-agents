@@ -779,6 +779,7 @@ The `load_module` directive is missing from `nginx.conf`, or the path to the `.s
        ls -lh "${MODULES_PATH}/ngx_http_markdown_filter_module.so"
    fi
    ```
+   If `MODULES_PATH` is empty, resolve the path first (see the error message above) before continuing with the steps below.
 2. If the file is missing, re-run the install script:
    ```bash
    curl -sSL https://raw.githubusercontent.com/cnkang/nginx-markdown-for-agents/main/tools/install.sh | sudo bash
@@ -906,6 +907,7 @@ A glibc-linked binary was installed on a musl-based system (e.g., Alpine Linux) 
        ldd "${MODULES_PATH}/ngx_http_markdown_filter_module.so"
    fi
    ```
+   If `MODULES_PATH` is empty, resolve the path first (see the error message above) before continuing with the steps below.
    - **glibc**: output references `libc.so.6` and `/lib/x86_64-linux-gnu/` (or similar)
    - **musl**: output references `ld-musl-*.so.1` or shows "statically linked"
 4. Re-run the install script — it auto-detects the libc type from `nginx -V` metadata:
