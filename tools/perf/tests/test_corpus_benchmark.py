@@ -439,6 +439,60 @@ def test_property8_fixture_change_detection():
     assert change["change-type"] == "regression"
 
 
+def test_property8_removed_fixture_detected():
+    """Fixtures present in baseline but missing from current are flagged as removed."""
+    baseline_fixtures = [
+        {
+            "fixture-id": "simple/basic",
+            "page-type": "clean-article",
+            "conversion-result": "converted",
+            "input-bytes": 400,
+            "output-bytes": 150,
+            "latency-ms": 1.0,
+            "token-reduction-percent": 62.0,
+            "failure-corpus": False,
+        }
+    ]
+    current_fixtures = []
+
+    baseline = _make_report(_make_summary(), baseline_fixtures)
+    current = _make_report(_make_summary(), current_fixtures)
+
+    verdict = compare_reports(baseline, current, QUALITY_THRESHOLDS)
+    assert len(verdict["fixture-changes"]) == 1
+    change = verdict["fixture-changes"][0]
+    assert change["fixture-id"] == "simple/basic"
+    assert change["change-type"] == "removed"
+    assert change["current-result"] is None
+
+
+def test_property8_added_fixture_detected():
+    """Fixtures present in current but missing from baseline are flagged as added."""
+    baseline_fixtures = []
+    current_fixtures = [
+        {
+            "fixture-id": "simple/new",
+            "page-type": "clean-article",
+            "conversion-result": "converted",
+            "input-bytes": 500,
+            "output-bytes": 200,
+            "latency-ms": 1.5,
+            "token-reduction-percent": 60.0,
+            "failure-corpus": False,
+        }
+    ]
+
+    baseline = _make_report(_make_summary(), baseline_fixtures)
+    current = _make_report(_make_summary(), current_fixtures)
+
+    verdict = compare_reports(baseline, current, QUALITY_THRESHOLDS)
+    assert len(verdict["fixture-changes"]) == 1
+    change = verdict["fixture-changes"][0]
+    assert change["fixture-id"] == "simple/new"
+    assert change["change-type"] == "added"
+    assert change["baseline-result"] is None
+
+
 # ---------------------------------------------------------------------------
 # Feature: benchmark-corpus-evidence, Property 9: Exit code mapping
 # ---------------------------------------------------------------------------

@@ -128,7 +128,12 @@ def compare_metric(
 def compare_fixtures(
     baseline_fixtures: list[dict], current_fixtures: list[dict]
 ) -> list[dict]:
-    """Compare per-fixture conversion results between baseline and current."""
+    """Compare per-fixture conversion results between baseline and current.
+
+    Fixtures present in only one report are flagged as 'added' or 'removed'.
+    Removed fixtures are treated as regressions to prevent silent corpus
+    shrinkage from masking quality degradation.
+    """
     baseline_map = {f["fixture-id"]: f for f in baseline_fixtures}
     current_map = {f["fixture-id"]: f for f in current_fixtures}
 
@@ -139,7 +144,26 @@ def compare_fixtures(
         b = baseline_map.get(fid)
         c = current_map.get(fid)
 
-        if b is None or c is None:
+        if b is None:
+            changes.append(
+                {
+                    "fixture-id": fid,
+                    "baseline-result": None,
+                    "current-result": c["conversion-result"],
+                    "change-type": "added",
+                }
+            )
+            continue
+
+        if c is None:
+            changes.append(
+                {
+                    "fixture-id": fid,
+                    "baseline-result": b["conversion-result"],
+                    "current-result": None,
+                    "change-type": "removed",
+                }
+            )
             continue
 
         b_result = b["conversion-result"]
