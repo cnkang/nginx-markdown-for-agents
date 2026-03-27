@@ -201,6 +201,12 @@ The corpus benchmark runs in CI alongside the existing latency/throughput pipeli
 
 Both contribute independently to the CI pass/fail decision.
 
+### CI Trigger Coverage
+
+The `Corpus Benchmark Gate` in `.github/workflows/ci.yml` is wired to run when any of the following changed-path outputs are true: `perf`, `rust`, `e2e`, `corpus_tools`, or `workflows`.
+
+- `corpus_tools` maps to `tools/corpus/**`, ensuring changes to benchmark helper scripts (for example `tools/corpus/validate_corpus.sh` and `tools/corpus/test-corpus-conversion/**`) cannot bypass corpus benchmark validation in PR CI.
+
 ### Quality-Only Gate in CI
 
 The committed corpus baseline (`perf/baselines/corpus-baseline.json`) uses `platform: "reference"` to be platform-agnostic. When the comparison script detects a platform mismatch between baseline and current report, it automatically skips latency metric comparisons (p50/p95/p99) and only evaluates quality metrics (fallback rate, token reduction). This is by design:
