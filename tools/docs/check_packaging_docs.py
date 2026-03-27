@@ -47,14 +47,14 @@ def _section_text(full_text: str, heading_pattern: str) -> str:
     """Return the text of a ## section whose heading matches *heading_pattern*."""
     pattern = rf"(^## {heading_pattern}.*?)(?=^## |\Z)"
     m = re.search(pattern, full_text, re.MULTILINE | re.DOTALL)
-    return m.group(1) if m else ""
+    return m[1] if m else ""
 
 
 def _sop_section_text(full_text: str, sop_heading: str) -> str:
     """Return the text of a #### SOP section."""
     pattern = rf"(^#### {re.escape(sop_heading)}.*?)(?=^#### |\n---\n|\Z)"
     m = re.search(pattern, full_text, re.MULTILINE | re.DOTALL)
-    return m.group(1) if m else ""
+    return m[1] if m else ""
 
 
 def _count_shell_commands(section: str) -> int:
@@ -168,10 +168,9 @@ def check_tier_labels(text: str) -> list[str]:
                 f"Section '## {pattern}' missing tier label "
                 f"(expected '**Tier: {expected_tier}**')"
             )
-        elif m.group(1).lower() != expected_tier.lower():
+        elif m[1].lower() != expected_tier.lower():
             errors.append(
-                f"Section '## {pattern}' has tier label '{m.group(1)}' "
-                f"but expected '{expected_tier}'"
+                f"Section '## {pattern}' has tier label '{m[1]}' but expected '{expected_tier}'"
             )
     return errors
 
@@ -329,6 +328,29 @@ DEMO_DIRECTIVES_REQUIRING_COMMENTS = [
 ]
 
 
+def _check_directive_comments(lines: list[str], directive: str) -> list[str]:
+    """Verify *directive* appears in *lines* with an inline or preceding comment."""
+    errors: list[str] = []
+    found = False
+    for idx, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("#") or not stripped:
+            continue
+        if not re.search(rf"\b{re.escape(directive)}\b", stripped):
+            continue
+        found = True
+        has_inline = "#" in stripped.split(directive, 1)[-1]
+        has_preceding = idx > 0 and lines[idx - 1].strip().startswith("#")
+        if not has_inline and not has_preceding:
+            errors.append(
+                f"Demo config directive '{directive}' has no inline or "
+                f"preceding comment"
+            )
+    if not found:
+        errors.append(f"Demo config missing directive '{directive}'")
+    return errors
+
+
 def check_demo_config_content() -> list[str]:
     """Check 15: Demo config has inline comments for key directives and no proxy_pass."""
     if not DEMO_CONFIG.exists():
@@ -339,28 +361,9 @@ def check_demo_config_content() -> list[str]:
         errors.append("Demo config has no inline comments")
     if "proxy_pass" in content:
         errors.append("Demo config contains a 'proxy_pass' directive (should not)")
-    # Verify each key directive line has an inline comment or a comment on
-    # the immediately preceding line.
     lines = content.splitlines()
     for directive in DEMO_DIRECTIVES_REQUIRING_COMMENTS:
-        found_directive = False
-        for idx, line in enumerate(lines):
-            stripped = line.strip()
-            # Skip pure comment lines and blank lines
-            if stripped.startswith("#") or not stripped:
-                continue
-            if not re.search(rf"\b{re.escape(directive)}\b", stripped):
-                continue
-            found_directive = True
-            has_inline = "#" in stripped.split(directive, 1)[-1]
-            has_preceding = idx > 0 and lines[idx - 1].strip().startswith("#")
-            if not has_inline and not has_preceding:
-                errors.append(
-                    f"Demo config directive '{directive}' has no inline or "
-                    f"preceding comment"
-                )
-        if not found_directive:
-            errors.append(f"Demo config missing directive '{directive}'")
+        errors.extend(_check_directive_comments(lines, directive))
     return errors
 
 
