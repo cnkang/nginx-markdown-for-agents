@@ -227,6 +227,10 @@ def compare_reports(
     fixture_changes = compare_fixtures(
         baseline.get("fixtures", []), current.get("fixtures", [])
     )
+    has_fixture_regression = any(
+        fc["change-type"] in {"regression", "removed"}
+        for fc in fixture_changes
+    )
 
     verdicts = [mc["verdict"] for mc in metric_comparisons.values()]
     if "fail" in verdicts:
@@ -235,6 +239,9 @@ def compare_reports(
         overall = "warn"
     else:
         overall = "pass"
+
+    if has_fixture_regression:
+        overall = "fail"
 
     return {
         "schema-version": "1.0.0",
