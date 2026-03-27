@@ -40,7 +40,7 @@ SOP_HEADINGS: list[str] = [
     "SOP 9: Compression / Decompression Issues",
 ]
 
-# SOPs 1–6 must declare a Category matching the install script's error
+# SOPs 1-6 must declare a Category matching the install script's error
 # categories (Requirement 6.3).
 SOP_EXPECTED_CATEGORIES: dict[str, str] = {
     "SOP 1: Module Not Loaded": "config",
