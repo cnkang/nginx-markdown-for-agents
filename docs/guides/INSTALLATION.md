@@ -857,11 +857,12 @@ A glibc-linked binary was installed on a musl-based system (e.g., Alpine Linux) 
    ```bash
    apk info musl 2>/dev/null && echo "musl" || echo "not musl"
    ```
-3. Verify the installed module matches your libc. The artifact name includes `glibc` or `musl`:
+3. Verify the installed module matches your libc by inspecting its dynamic dependencies:
    ```bash
-   # Check what was downloaded
-   ls /usr/lib/nginx/modules/ngx_http_markdown_filter_module.so
+   ldd /usr/lib/nginx/modules/ngx_http_markdown_filter_module.so
    ```
+   - **glibc**: output references `libc.so.6` and `/lib/x86_64-linux-gnu/` (or similar)
+   - **musl**: output references `ld-musl-*.so.1` or shows "statically linked"
 4. Re-run the install script — it auto-detects the libc type from `nginx -V` metadata:
    ```bash
    curl -sSL https://raw.githubusercontent.com/cnkang/nginx-markdown-for-agents/main/tools/install.sh | sudo bash

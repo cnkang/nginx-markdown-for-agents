@@ -127,22 +127,51 @@ SOP_HEADINGS = [
     "SOP 9: Compression / Decompression Issues",
 ]
 
+# SOPs 1–6 must declare a Category matching the install script's error
+# categories (Requirement 6.3).
+SOP_EXPECTED_CATEGORIES: dict[str, str] = {
+    "SOP 1: Module Not Loaded": "config",
+    "SOP 2: NGINX Version / ABI Mismatch": "version_mismatch",
+    "SOP 3: Architecture Not Supported": "arch_unsupported",
+    "SOP 4: libc Incompatibility": "config",
+    "SOP 5: Network Download Failure": "network",
+    "SOP 6: Checksum Verification Failure": "checksum",
+}
+
+
+def _validate_single_sop(heading: str, sop: str) -> list[str]:
+    """Validate structure and category of a single SOP section."""
+    errors: list[str] = []
+    sop_lower = sop.lower()
+    if "**symptom" not in sop_lower and "symptom:" not in sop_lower:
+        errors.append(f"'{heading}' missing Symptom subsection")
+    if "**root cause" not in sop_lower and "root cause:" not in sop_lower:
+        errors.append(f"'{heading}' missing Root Cause subsection")
+    if "**resolution" not in sop_lower and "resolution" not in sop_lower:
+        errors.append(f"'{heading}' missing Resolution subsection")
+    if heading in SOP_EXPECTED_CATEGORIES:
+        expected_cat = SOP_EXPECTED_CATEGORIES[heading]
+        cat_match = re.search(r"\*\*Category:\*\*\s*`(\w+)`", sop)
+        if not cat_match:
+            errors.append(f"'{heading}' missing Category field")
+        elif cat_match[1] != expected_cat:
+            errors.append(
+                f"'{heading}' has category '{cat_match[1]}' "
+                f"but expected '{expected_cat}'"
+            )
+    return errors
+
 
 def check_troubleshooting_sops(text: str) -> list[str]:
-    """Check 3: All 9 SOPs present with symptom/root-cause/resolution."""
+    """Check 3: All 9 SOPs present with symptom/root-cause/resolution and
+    correct category labels for SOPs 1–6."""
     errors: list[str] = []
     for heading in SOP_HEADINGS:
         sop = _sop_section_text(text, heading)
         if not sop:
             errors.append(f"Missing troubleshooting '{heading}'")
             continue
-        sop_lower = sop.lower()
-        if "**symptom" not in sop_lower and "symptom:" not in sop_lower:
-            errors.append(f"'{heading}' missing Symptom subsection")
-        if "**root cause" not in sop_lower and "root cause:" not in sop_lower:
-            errors.append(f"'{heading}' missing Root Cause subsection")
-        if "**resolution" not in sop_lower and "resolution" not in sop_lower:
-            errors.append(f"'{heading}' missing Resolution subsection")
+        errors.extend(_validate_single_sop(heading, sop))
     return errors
 
 

@@ -207,6 +207,23 @@ def check_artifact_names() -> list[str]:
 # Check 5 — release matrix "full" entries in compatibility table
 # ---------------------------------------------------------------------------
 
+def _parse_matrix_table(table_text: str) -> list[tuple[str, str, str, str]]:
+    """Parse a markdown compatibility matrix table into (nginx, os, arch, tier) tuples."""
+    rows: list[tuple[str, str, str, str]] = []
+    for line in table_text.splitlines():
+        line = line.strip()
+        if not line.startswith("|"):
+            continue
+        cells = [c.strip() for c in line.split("|")]
+        cells = [c for c in cells if c]
+        if len(cells) < 4:
+            continue
+        if cells[0] == "NGINX Version" or cells[0].startswith("---"):
+            continue
+        rows.append((cells[0], cells[1], cells[2], cells[3]))
+    return rows
+
+
 def check_matrix_consistency() -> list[str]:
     """Every ``"full"`` tier entry in release-matrix.json must have a matching
     row in the installation guide compatibility matrix table."""
@@ -214,7 +231,6 @@ def check_matrix_consistency() -> list[str]:
     matrix_data = json.loads(_read(RELEASE_MATRIX))
     install_text = _read(INSTALL_GUIDE)
 
-    # Extract the auto-generated matrix table
     m = re.search(
         r"<!-- BEGIN AUTO-GENERATED MATRIX -->(.*?)<!-- END AUTO-GENERATED MATRIX -->",
         install_text,
@@ -223,39 +239,26 @@ def check_matrix_consistency() -> list[str]:
     if not m:
         return ["Cannot locate auto-generated matrix markers in installation guide"]
 
-    table_text = m[1]
+    table_rows = _parse_matrix_table(m[1])
 
-    # Parse table rows (skip header and separator)
-    table_rows: list[tuple[str, str, str]] = []
-    for line in table_text.splitlines():
-        line = line.strip()
-        if not line.startswith("|"):
-            continue
-        cells = [c.strip() for c in line.split("|")]
-        # cells[0] and cells[-1] are empty from leading/trailing pipes
-        cells = [c for c in cells if c]
-        if len(cells) < 3:
-            continue
-        # Skip header / separator rows
-        if cells[0] == "NGINX Version" or cells[0].startswith("---"):
-            continue
-        table_rows.append((cells[0], cells[1], cells[2]))
-
-    # Check each "full" entry
     for entry in matrix_data.get("matrix", []):
         if entry.get("support_tier") != "full":
             continue
-        nginx = entry["nginx"]
-        os_type = entry["os_type"]
-        arch = entry["arch"]
-        found = any(
-            r[0] == nginx and r[1] == os_type and r[2] == arch
-            for r in table_rows
-        )
-        if not found:
+        nginx, os_type, arch = entry["nginx"], entry["os_type"], entry["arch"]
+        matching = [
+            r for r in table_rows
+            if r[0] == nginx and r[1] == os_type and r[2] == arch
+        ]
+        if not matching:
             errors.append(
                 f"Full-tier entry missing from compatibility table: "
                 f"nginx={nginx} os_type={os_type} arch={arch}"
+            )
+        elif matching[0][3].lower() != "full":
+            errors.append(
+                f"Compatibility table tier mismatch: "
+                f"nginx={nginx} os_type={os_type} arch={arch} "
+                f"expected 'Full' but found '{matching[0][3]}'"
             )
     return errors
 
@@ -323,29 +326,44 @@ def _extract_curl_hosts(text: str) -> set[str]:
     return hosts
 
 
+def _extract_install_shortest_path(text: str) -> str:
+    """Return the Shortest Success Path section from the installation guide."""
+    lines = text.splitlines(True)
+    collecting = False
+    parts: list[str] = []
+    for line in lines:
+        if re.match(r"^## 2\.\s+Shortest Success Path", line):
+            collecting = True
+        elif collecting and line.startswith("## "):
+            break
+        if collecting:
+            parts.append(line)
+    return "".join(parts)
+
+
 def check_curl_host_consistency() -> list[str]:
-    """Verification curls in README Quick Start and installation guide must
-    use the same host (e.g. both ``localhost``, not one ``127.0.0.1``)."""
+    """Verification curls in README Quick Start and installation guide
+    Shortest Success Path must use the same host set."""
     readme_text = _read(README)
     install_text = _read(INSTALL_GUIDE)
 
     quick_start = _extract_quick_start(readme_text)
-    if not quick_start:
+    shortest_path = _extract_install_shortest_path(install_text)
+    if not quick_start or not shortest_path:
         return []
 
     readme_hosts = _extract_curl_hosts(quick_start)
-    install_hosts = _extract_curl_hosts(install_text)
+    install_hosts = _extract_curl_hosts(shortest_path)
 
     if not readme_hosts or not install_hosts:
         return []
 
-    extra = readme_hosts - install_hosts
-    errors: list[str] = [
-        f"README Quick Start uses host '{host}' not found in installation "
-        f"guide verification curls (install guide uses: {sorted(install_hosts)})"
-        for host in sorted(extra)
-    ]
-    return errors
+    if readme_hosts != install_hosts:
+        return [
+            f"README Quick Start hosts {sorted(readme_hosts)} differ from "
+            f"installation guide Shortest Success Path hosts {sorted(install_hosts)}"
+        ]
+    return []
 
 
 # ---------------------------------------------------------------------------
