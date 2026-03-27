@@ -79,15 +79,6 @@ def _extract_verification_curls(text: str) -> list[str]:
     return curls
 
 
-def _normalise_curl_for_comparison(cmd: str) -> str:
-    """Return the command as-is for strict comparison.
-
-    No URL normalization — README and installation guide verification
-    commands must be fully identical (scheme, host, path, flags, headers).
-    """
-    return cmd
-
-
 def _extract_nginx_code_blocks(text: str) -> str:
     """Return the concatenated content of all ```nginx fenced code blocks."""
     blocks: list[str] = []
@@ -111,7 +102,11 @@ def _extract_nginx_code_blocks(text: str) -> str:
 
 def check_curl_consistency() -> list[str]:
     """README Quick Start and installation guide Shortest Success Path must
-    contain the same verification curls in the same order (Requirement 8.1)."""
+    contain the same verification curls in the same order (Requirement 8.1).
+
+    Commands are compared as-is (no URL normalization) — scheme, host,
+    path, flags, and headers must all match exactly.
+    """
     readme_text = _read(README)
     install_text = _read(INSTALL_GUIDE)
 
@@ -129,29 +124,25 @@ def check_curl_consistency() -> list[str]:
     if not readme_curls:
         return ["No verification curls found in README Quick Start"]
 
-    readme_normalised = [_normalise_curl_for_comparison(c) for c in readme_curls]
-    install_normalised = [_normalise_curl_for_comparison(c) for c in install_curls]
-
-    if readme_normalised == install_normalised:
+    if readme_curls == install_curls:
         return []
 
     errors: list[str] = []
-    # Check for missing commands in either direction
-    readme_set = set(readme_normalised)
-    install_set = set(install_normalised)
+    readme_set = set(readme_curls)
+    install_set = set(install_curls)
     errors.extend(
         f"README Quick Start curl not in Shortest Success Path: {cmd}"
         for cmd in readme_curls
-        if _normalise_curl_for_comparison(cmd) not in install_set
+        if cmd not in install_set
     )
     errors.extend(
         f"Shortest Success Path curl not in README Quick Start: {cmd}"
         for cmd in install_curls
-        if _normalise_curl_for_comparison(cmd) not in readme_set
+        if cmd not in readme_set
     )
     # If sets match but order differs, report with first divergence
     if not errors:
-        for i, (r, s) in enumerate(zip(readme_normalised, install_normalised)):
+        for i, (r, s) in enumerate(zip(readme_curls, install_curls)):
             if r != s:
                 errors.append(
                     f"README Quick Start and Shortest Success Path have the same "
@@ -305,11 +296,16 @@ def check_matrix_consistency() -> list[str]:
 # ---------------------------------------------------------------------------
 
 def _extract_curl_paths(text: str) -> set[str]:
-    """Extract URL paths from verification curl commands in *text*."""
+    """Extract URL paths from verification curl commands in *text*.
+
+    Strips query strings and fragments so paths compare cleanly against
+    nginx ``location`` directives.
+    """
     paths: set[str] = set()
     for cmd in _extract_verification_curls(text):
         m = re.search(r"https?://[^/\s]+(\/\S*)", cmd)
-        paths.add(m[1] if m else "/")
+        raw = m[1] if m else "/"
+        paths.add(raw.split("?")[0].split("#")[0])
     return paths
 
 
