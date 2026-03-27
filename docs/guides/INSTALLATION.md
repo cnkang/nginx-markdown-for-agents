@@ -31,7 +31,7 @@ This guide covers every supported installation method — from a single-command 
 
 ## 2. Shortest Success Path
 
-For a system with NGINX already installed (official build), three commands get you to a verified conversion:
+For a system with NGINX already installed (official build), four commands get you to a verified conversion:
 
 ```bash
 # Step 1: Install the module (auto-detects version, downloads binary, wires config)
