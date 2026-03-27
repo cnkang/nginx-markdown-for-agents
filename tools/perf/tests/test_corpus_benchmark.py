@@ -823,6 +823,24 @@ class TestErrorHandling:
         """Percentile of empty list returns 0."""
         assert compute_percentile([], 50) == pytest.approx(0.0)
 
+    def test_percentile_two_values_linear_interpolation(self):
+        """Percentiles over two values use linear interpolation between endpoints."""
+        values = [0.0, 10.0]
+        assert compute_percentile(values, 0) == pytest.approx(0.0)
+        assert compute_percentile(values, 25) == pytest.approx(2.5)
+        assert compute_percentile(values, 50) == pytest.approx(5.0)
+        assert compute_percentile(values, 75) == pytest.approx(7.5)
+        assert compute_percentile(values, 100) == pytest.approx(10.0)
+
+    def test_percentile_even_number_of_values_interpolation(self):
+        """Percentiles over an even-length list interpolate between middle values."""
+        values = [1.0, 2.0, 3.0, 4.0]
+        assert compute_percentile(values, 0) == pytest.approx(1.0)
+        assert compute_percentile(values, 25) == pytest.approx(1.75)
+        assert compute_percentile(values, 50) == pytest.approx(2.5)
+        assert compute_percentile(values, 75) == pytest.approx(3.25)
+        assert compute_percentile(values, 100) == pytest.approx(4.0)
+
     def test_exit_code_pass(self):
         assert verdict_to_exit_code("pass") == 0
 
