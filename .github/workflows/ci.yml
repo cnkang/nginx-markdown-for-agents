@@ -418,3 +418,83 @@ jobs:
         with:
           name: perf-verdict-${{ steps.platform.outputs.name }}.json
           path: perf/reports/perf-verdict-${{ steps.platform.outputs.name }}.json
+
+  corpus-benchmark:
+    name: Corpus Benchmark Gate
+    needs: changes
+    if: needs.changes.outputs.perf == 'true' || needs.changes.outputs.rust == 'true' || needs.changes.outputs.e2e == 'true' || needs.changes.outputs.workflows == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+        with:
+          python-version: '3.14.3'
+
+      - name: Install Python test dependencies
+        run: pip install hypothesis pytest
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          workspaces: |
+            components/rust-converter -> target
+            tools/corpus/test-corpus-conversion -> target
+
+      - name: Validate corpus metadata
+        run: bash tools/corpus/validate_corpus.sh
+
+      - name: Run corpus benchmark
+        run: make test-benchmark
+
+      - name: Detect platform
+        id: platform
+        run: |
+          echo "name=$(python3 tools/perf/report_utils.py detect-platform)" >> "$GITHUB_OUTPUT"
+
+      - name: Run corpus benchmark comparison
+        run: |
+          BASELINE="perf/baselines/corpus-baseline.json"
+          if [ ! -f "$BASELINE" ]; then
+            echo "ERROR: corpus baseline not found at $BASELINE"
+            echo "Run 'make test-benchmark' locally and commit the baseline:"
+            echo "  cp perf/reports/corpus-report.json perf/baselines/corpus-baseline.json"
+            exit 1
+          fi
+          python3 tools/perf/compare_reports.py \
+            --baseline "$BASELINE" \
+            --current perf/reports/corpus-report.json \
+            --thresholds perf/quality-thresholds.json \
+            --output perf/reports/corpus-verdict-${{ steps.platform.outputs.name }}.json
+
+      - name: Generate PR benchmark summary
+        run: make test-benchmark-summary
+
+      - name: Upload corpus report
+        if: always()
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: corpus-report-${{ steps.platform.outputs.name }}.json
+          path: perf/reports/corpus-report.json
+
+      - name: Upload corpus verdict
+        if: always()
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: corpus-verdict-${{ steps.platform.outputs.name }}.json
+          path: perf/reports/corpus-verdict-${{ steps.platform.outputs.name }}.json
+
+      - name: Upload before/after examples
+        if: always()
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: corpus-examples
+          path: perf/reports/examples/
