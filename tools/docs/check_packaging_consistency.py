@@ -69,8 +69,11 @@ def _extract_verification_curls(text: str) -> list[str]:
 def _normalise_curl_for_comparison(cmd: str) -> str:
     """Normalise a curl command for structural comparison.
 
-    Replaces the URL (``http://...``) with a placeholder so that commands
-    differing only in host/path still match.
+    Replaces the full URL with a placeholder.  The spec requirement (8.1)
+    is that the README and installation guide use the *same curl pattern*
+    (flags, headers, output redirection) — not that they hit the same
+    endpoint, because the README demonstrates a proxy setup (``/docs/``)
+    while the installation guide uses the default welcome page (``/``).
     """
     return re.sub(r"https?://\S+", "URL", cmd)
 
@@ -99,7 +102,6 @@ def _extract_nginx_code_blocks(text: str) -> str:
 def check_curl_consistency() -> list[str]:
     """Every verification curl in README Quick Start must appear in the
     installation guide."""
-    errors: list[str] = []
     readme_text = _read(README)
     install_text = _read(INSTALL_GUIDE)
 
@@ -114,11 +116,11 @@ def check_curl_consistency() -> list[str]:
         return ["No verification curls found in README Quick Start"]
 
     install_set = set(_normalise_curl_for_comparison(c) for c in install_curls)
-    for cmd in readme_curls:
-        if _normalise_curl_for_comparison(cmd) not in install_set:
-            errors.append(
-                f"README Quick Start curl not found in installation guide: {cmd}"
-            )
+    errors: list[str] = [
+        f"README Quick Start curl not found in installation guide: {cmd}"
+        for cmd in readme_curls
+        if _normalise_curl_for_comparison(cmd) not in install_set
+    ]
     return errors
 
 
@@ -129,7 +131,6 @@ def check_curl_consistency() -> list[str]:
 def check_directive_consistency() -> list[str]:
     """All ``markdown_*`` directives in the installation guide code blocks
     must be known directives from the reference config."""
-    errors: list[str] = []
     config_text = _read(REFERENCE_CONFIG)
     install_text = _read(INSTALL_GUIDE)
 
@@ -142,12 +143,11 @@ def check_directive_consistency() -> list[str]:
     nginx_content = _extract_nginx_code_blocks(install_text)
     used = set(re.findall(r"\b(markdown_\w+)\b", nginx_content))
 
-    for directive in sorted(used):
-        if directive not in known:
-            errors.append(
-                f"Installation guide uses unknown directive '{directive}' "
-                f"(not in reference config; known: {sorted(known)})"
-            )
+    errors: list[str] = [
+        f"Installation guide uses unknown directive '{directive}' (not in reference config; known: {sorted(known)})"
+        for directive in sorted(used)
+        if directive not in known
+    ]
     return errors
 
 
@@ -158,15 +158,14 @@ def check_directive_consistency() -> list[str]:
 def check_curl_pattern() -> list[str]:
     """All verification curls in the installation guide must use the
     ``-sD - -o /dev/null`` pattern."""
-    errors: list[str] = []
     install_text = _read(INSTALL_GUIDE)
     curls = _extract_verification_curls(install_text)
 
-    for cmd in curls:
-        if "-sD - -o /dev/null" not in cmd:
-            errors.append(
-                f"Verification curl missing '-sD - -o /dev/null' pattern: {cmd}"
-            )
+    errors: list[str] = [
+        f"Verification curl missing '-sD - -o /dev/null' pattern: {cmd}"
+        for cmd in curls
+        if "-sD - -o /dev/null" not in cmd
+    ]
     return errors
 
 
@@ -179,11 +178,9 @@ ARTIFACT_RE = re.compile(
     r"\d+\.\d+\.\d+-(glibc|musl)-(x86_64|aarch64)\.tar\.gz"
 )
 
-
 def check_artifact_names() -> list[str]:
     """All artifact name references in the installation guide must match the
     canonical naming pattern."""
-    errors: list[str] = []
     install_text = _read(INSTALL_GUIDE)
 
     # Find all strings that look like artifact references (tar.gz only)
@@ -192,11 +189,11 @@ def check_artifact_names() -> list[str]:
         install_text,
     )
 
-    for candidate in candidates:
-        if not ARTIFACT_RE.fullmatch(candidate):
-            errors.append(
-                f"Artifact name does not match expected pattern: {candidate}"
-            )
+    errors: list[str] = [
+        f"Artifact name does not match expected pattern: {candidate}"
+        for candidate in candidates
+        if not ARTIFACT_RE.fullmatch(candidate)
+    ]
     return errors
 
 
@@ -263,9 +260,11 @@ def check_matrix_consistency() -> list[str]:
 
 def main() -> int:
     missing: list[str] = []
-    for path in (README, INSTALL_GUIDE, RELEASE_MATRIX, REFERENCE_CONFIG):
-        if not path.exists():
-            missing.append(str(path.relative_to(ROOT)))
+    missing.extend(
+        str(path.relative_to(ROOT))
+        for path in (README, INSTALL_GUIDE, RELEASE_MATRIX, REFERENCE_CONFIG)
+        if not path.exists()
+    )
     if missing:
         print(f"ERROR: Required files not found: {', '.join(missing)}")
         return 1
