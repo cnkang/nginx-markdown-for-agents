@@ -68,10 +68,9 @@ curl -sSL https://raw.githubusercontent.com/cnkang/nginx-markdown-for-agents/mai
 sudo nginx -t && sudo nginx -s reload
 ```
 
-The installer detects the local NGINX version, downloads the matching module artifact, and wires up the basic `load_module` integration for common official NGINX builds.
+The install script auto-detects the local NGINX version, downloads the matching module artifact, and wires up `load_module` and `markdown_filter on` — no manual configuration editing required.
 
-Building from source or using a custom NGINX build? Start with the [Installation Guide](docs/guides/INSTALLATION.md).
-For official NGINX Docker image source builds, see `examples/docker/Dockerfile.official-nginx-source-build` and the Docker section in [docs/guides/INSTALLATION.md](docs/guides/INSTALLATION.md).
+For alternative installation methods (source builds, Docker, custom NGINX builds), troubleshooting, and detailed instructions, see the [Installation Guide](docs/guides/INSTALLATION.md).
 
 ### 2. Enable Markdown on one route
 
@@ -111,6 +110,8 @@ Expected result:
 
 - `Accept: text/markdown` returns `Content-Type: text/markdown; charset=utf-8`
 - `Accept: text/html` still returns the original HTML response
+
+If something doesn't work as expected, see the [Troubleshooting](docs/guides/INSTALLATION.md#10-troubleshooting) section in the installation guide.
 
 If you want a practical production-oriented configuration next, go straight to [docs/guides/DEPLOYMENT_EXAMPLES.md](docs/guides/DEPLOYMENT_EXAMPLES.md).
 
