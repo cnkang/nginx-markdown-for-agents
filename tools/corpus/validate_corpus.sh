@@ -33,17 +33,21 @@ PT_BOILERPLATE_HEAVY=0
 PT_COMPLEX_COMMON=0
 
 increment_page_type_count() {
-    case "$1" in
+    local page_type="$1"
+    case "$page_type" in
         clean-article) PT_CLEAN_ARTICLE=$((PT_CLEAN_ARTICLE + 1)) ;;
         documentation) PT_DOCUMENTATION=$((PT_DOCUMENTATION + 1)) ;;
         nav-heavy) PT_NAV_HEAVY=$((PT_NAV_HEAVY + 1)) ;;
         boilerplate-heavy) PT_BOILERPLATE_HEAVY=$((PT_BOILERPLATE_HEAVY + 1)) ;;
         complex-common) PT_COMPLEX_COMMON=$((PT_COMPLEX_COMMON + 1)) ;;
+        *) ;;
     esac
+    return 0
 }
 
 get_page_type_count() {
-    case "$1" in
+    local page_type="$1"
+    case "$page_type" in
         clean-article) echo "$PT_CLEAN_ARTICLE" ;;
         documentation) echo "$PT_DOCUMENTATION" ;;
         nav-heavy) echo "$PT_NAV_HEAVY" ;;
@@ -51,6 +55,7 @@ get_page_type_count() {
         complex-common) echo "$PT_COMPLEX_COMMON" ;;
         *) echo "0" ;;
     esac
+    return 0
 }
 
 echo "$SEPARATOR_LINE"
