@@ -666,6 +666,126 @@ class TestComparisonLogic:
 
 
 # ---------------------------------------------------------------------------
+# 12.4: PR summary formatter
+# ---------------------------------------------------------------------------
+
+
+class TestPRSummaryFormatter:
+    """Unit tests for PR summary formatter."""
+
+    SAMPLE_FIXTURES = [
+        {
+            "fixture-id": "simple/basic",
+            "page-type": "clean-article",
+            "conversion-result": "converted",
+            "input-bytes": 412,
+            "output-bytes": 156,
+            "latency-ms": 0.8,
+            "token-reduction-percent": 62.1,
+            "failure-corpus": False,
+        },
+        {
+            "fixture-id": "complex/documentation",
+            "page-type": "documentation",
+            "conversion-result": "converted",
+            "input-bytes": 8500,
+            "output-bytes": 3200,
+            "latency-ms": 2.5,
+            "token-reduction-percent": 62.4,
+            "failure-corpus": False,
+        },
+        {
+            "fixture-id": "malformed/unclosed-tags",
+            "page-type": "complex-common",
+            "conversion-result": "failed-open",
+            "input-bytes": 1200,
+            "output-bytes": 0,
+            "latency-ms": 1.1,
+            "token-reduction-percent": 0.0,
+            "failure-corpus": True,
+        },
+    ]
+
+    def _sample_report(self):
+        return _make_report(
+            _make_summary(
+                fallback_rate=10.0,
+                token_reduction=62.5,
+                p50=1.2,
+                p95=3.8,
+                p99=7.1,
+            ),
+            self.SAMPLE_FIXTURES,
+        )
+
+    def test_contains_corpus_version(self):
+        """Summary contains the corpus version."""
+        md = format_summary(self._sample_report())
+        assert "v1.0.0" in md
+
+    def test_contains_git_commit(self):
+        """Summary contains the git commit."""
+        md = format_summary(self._sample_report())
+        assert "abc1234" in md
+
+    def test_contains_platform(self):
+        """Summary contains the platform."""
+        md = format_summary(self._sample_report())
+        assert "linux-x86_64" in md
+
+    def test_contains_fallback_rate(self):
+        """Summary contains the fallback rate metric."""
+        md = format_summary(self._sample_report())
+        assert "10.0%" in md
+
+    def test_contains_token_reduction(self):
+        """Summary contains the token reduction metric."""
+        md = format_summary(self._sample_report())
+        assert "62.5%" in md
+
+    def test_contains_latency_percentiles(self):
+        """Summary contains p50, p95, and p99 latency values."""
+        md = format_summary(self._sample_report())
+        assert "1.2" in md
+        assert "3.8" in md
+        assert "7.1" in md
+
+    def test_contains_disclaimer(self):
+        """Summary contains the token reduction disclaimer text."""
+        md = format_summary(self._sample_report())
+        assert TOKEN_DISCLAIMER in md
+
+    def test_contains_collapsible_details_section(self):
+        """Summary contains a collapsible <details> section."""
+        md = format_summary(self._sample_report())
+        assert "<details>" in md
+        assert "</details>" in md
+        assert "<summary>" in md
+
+    def test_per_fixture_rows_in_details(self):
+        """Per-fixture rows appear inside the collapsible section."""
+        md = format_summary(self._sample_report())
+        details_start = md.index("<details>")
+        details_end = md.index("</details>")
+        details_section = md[details_start:details_end]
+
+        assert "simple/basic" in details_section
+        assert "complex/documentation" in details_section
+        assert "malformed/unclosed-tags" in details_section
+
+    def test_per_fixture_details_contain_type_and_result(self):
+        """Per-fixture rows include page type and conversion result."""
+        md = format_summary(self._sample_report())
+        details_start = md.index("<details>")
+        details_end = md.index("</details>")
+        details_section = md[details_start:details_end]
+
+        assert "clean-article" in details_section
+        assert "documentation" in details_section
+        assert "failed-open" in details_section
+
+
+# ---------------------------------------------------------------------------
 # 12.5: Error handling paths
 # ---------------------------------------------------------------------------
 
