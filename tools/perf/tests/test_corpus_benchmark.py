@@ -179,9 +179,9 @@ def test_property4_aggregate_computation_correctness(fixtures, factor):
     summary = build_summary(fixtures, factor)
 
     total = len(fixtures)
-    converted = sum(1 for f in fixtures if f["conversion-result"] == "converted")
-    skipped = sum(1 for f in fixtures if f["conversion-result"] == "skipped")
-    failed_open = sum(1 for f in fixtures if f["conversion-result"] == "failed-open")
+    converted = sum(f["conversion-result"] == "converted" for f in fixtures)
+    skipped = sum(f["conversion-result"] == "skipped" for f in fixtures)
+    failed_open = sum(f["conversion-result"] == "failed-open" for f in fixtures)
 
     assert summary["total-fixtures"] == total
     assert summary["converted-count"] == converted

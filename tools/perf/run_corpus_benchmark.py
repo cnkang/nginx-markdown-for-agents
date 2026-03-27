@@ -132,10 +132,10 @@ def run_converter(converter_bin: str, html_path: str) -> tuple[str, int, float]:
         elapsed_ms = (time.perf_counter() - start) * 1000.0
         return result.stdout, result.returncode, elapsed_ms
     except subprocess.TimeoutExpired:
-        elapsed_ms = (time.perf_counter() - start) * 1000.0
+        elapsed_ms = time.perf_counter() - start * 1000.0
         return "", 1, elapsed_ms
     except Exception:
-        elapsed_ms = (time.perf_counter() - start) * 1000.0
+        elapsed_ms = time.perf_counter() - start * 1000.0
         return "", 1, elapsed_ms
 
 
@@ -325,7 +325,7 @@ def _sanitize_path_component(name: str) -> str:
     name = name.replace("..", "_")
     # Strip leading/trailing dots and whitespace
     name = name.strip(". \t")
-    return name if name else "unknown"
+    return name or "unknown"
 
 
 def write_examples(

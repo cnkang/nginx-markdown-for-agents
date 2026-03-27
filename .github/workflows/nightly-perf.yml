@@ -126,6 +126,7 @@ jobs:
         run: make test-benchmark
 
       - name: Run corpus benchmark comparison
+        if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.bootstrap_baseline == 'true') }}
         run: |
           BASELINE="perf/baselines/corpus-baseline.json"
           if [ ! -f "$BASELINE" ]; then
@@ -141,6 +142,7 @@ jobs:
             --output perf/reports/corpus-verdict-${{ steps.platform.outputs.name }}.json
 
       - name: Generate PR benchmark summary
+        if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.bootstrap_baseline == 'true') }}
         run: make test-benchmark-summary
 
       - name: Upload corpus report
