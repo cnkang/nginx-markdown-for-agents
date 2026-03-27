@@ -305,6 +305,21 @@ def select_examples(
     return examples
 
 
+def _sanitize_path_component(name: str) -> str:
+    """Sanitize a string for safe use as a path component.
+
+    Strips directory separators and path traversal sequences to prevent
+    path-traversal attacks when constructing file paths from metadata.
+    """
+    # Remove any directory separators and path traversal components
+    name = name.replace("/", "-").replace("\\", "-")
+    # Collapse any ".." sequences
+    name = name.replace("..", "_")
+    # Strip leading/trailing dots and whitespace
+    name = name.strip(". \t")
+    return name if name else "unknown"
+
+
 def write_examples(
     examples: list[dict],
     fixtures_meta: list[dict],
@@ -314,6 +329,7 @@ def write_examples(
     """Write before/after example pairs to the examples directory."""
     meta_lookup = {m["fixture-id"]: m for m in fixtures_meta}
     examples_dir.mkdir(parents=True, exist_ok=True)
+    resolved_examples_dir = examples_dir.resolve()
 
     for ex in examples:
         fid = ex["fixture-id"]
@@ -321,21 +337,29 @@ def write_examples(
         pt = ex.get("page-type", "unknown")
         is_failure = meta.get("failure-corpus", False)
 
-        prefix = "failure" if is_failure else pt
-        safe_id = fid.replace("/", "-")
+        prefix = "failure" if is_failure else _sanitize_path_component(pt)
+        safe_id = _sanitize_path_component(fid)
         base_name = f"{prefix}--{safe_id}"
 
         html_path = meta.get("_html_path", "")
         if not html_path or not Path(html_path).exists():
             continue
 
+        # Validate output paths stay within examples_dir
+        html_dest = (examples_dir / f"{base_name}.html").resolve()
+        md_dest = (examples_dir / f"{base_name}.md").resolve()
+        if not (
+            str(html_dest).startswith(str(resolved_examples_dir))
+            and str(md_dest).startswith(str(resolved_examples_dir))
+        ):
+            continue
+
         # Copy HTML input
-        shutil.copy2(html_path, examples_dir / f"{base_name}.html")
+        shutil.copy2(html_path, html_dest)
 
         # Run converter for the .md output
         output, _, _ = run_converter(converter_bin, html_path)
-        md_path = examples_dir / f"{base_name}.md"
-        with open(md_path, "w", encoding="utf-8") as f:
+        with open(md_dest, "w", encoding="utf-8") as f:
             f.write(output)
 
 
