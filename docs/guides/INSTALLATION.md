@@ -768,7 +768,12 @@ The `load_module` directive is missing from `nginx.conf`, or the path to the `.s
            [ -d "$p" ] && MODULES_PATH="$p" && break
        done
    fi
-   echo "Modules directory: ${MODULES_PATH:-(not found)}"
+   if [ -z "$MODULES_PATH" ]; then
+       echo "ERROR: Could not determine modules directory."
+       echo "Run 'nginx -V' and look for --modules-path= in the output."
+       exit 1
+   fi
+   echo "Modules directory: $MODULES_PATH"
 
    # Check the module file exists in that directory
    ls -lh "${MODULES_PATH}/ngx_http_markdown_filter_module.so"
@@ -888,6 +893,11 @@ A glibc-linked binary was installed on a musl-based system (e.g., Alpine Linux) 
        for p in /usr/lib/nginx/modules /etc/nginx/modules /usr/local/nginx/modules; do
            [ -d "$p" ] && MODULES_PATH="$p" && break
        done
+   fi
+   if [ -z "$MODULES_PATH" ]; then
+       echo "ERROR: Could not determine modules directory."
+       echo "Run 'nginx -V' and look for --modules-path= in the output."
+       exit 1
    fi
    ldd "${MODULES_PATH}/ngx_http_markdown_filter_module.so"
    ```
