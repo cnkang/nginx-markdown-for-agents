@@ -33,7 +33,7 @@ from check_packaging_consistency import (
 
 class TestExtractQuickStart:
     def test_extracts_section(self):
-        result = self._extracted_from_test_stops_at_next_h2_2(
+        result = self._assert_quick_start_contains(
             "## Quick Start\nContent\n## Next Section\nOther\n", "Content"
         )
         assert "Other" not in result
@@ -42,7 +42,7 @@ class TestExtractQuickStart:
         assert _extract_quick_start("## Other\nStuff\n") == ""
 
     def test_captures_to_eof_if_last_section(self):
-        result = self._extracted_from_test_stops_at_next_h2_2(
+        self._assert_quick_start_contains(
             "## Quick Start\nContent\nMore content\n", "More content"
         )
 
@@ -51,17 +51,15 @@ class TestExtractQuickStart:
         assert _extract_quick_start(text) == ""
 
     def test_stops_at_next_h2(self):
-        result = self._extracted_from_test_stops_at_next_h2_2(
+        result = self._assert_quick_start_contains(
             "## Quick Start\nA\n### Sub\nB\n## Next\nC\n", "A"
         )
         assert "B" in result
         assert "C" not in result
 
-    # TODO Rename this here and in `test_extracts_section`, `test_captures_to_eof_if_last_section` and `test_stops_at_next_h2`
-    def _extracted_from_test_stops_at_next_h2_2(self, arg0, arg1):
-        text = arg0
+    def _assert_quick_start_contains(self, text, expected):
         result = _extract_quick_start(text)
-        assert arg1 in result
+        assert expected in result
         return result
 
 
@@ -71,15 +69,15 @@ class TestExtractQuickStart:
 
 class TestExtractVerificationCurls:
     def test_extracts_markdown_curl(self):
-        text = 'curl -sD - -o /dev/null -H "Accept: text/markdown" http://localhost/\n'
-        result = _extract_verification_curls(text)
-        assert len(result) == 1
+        result = self._assert_single_curl(
+            'curl -sD - -o /dev/null -H "Accept: text/markdown" http://localhost/\n'
+        )
         assert "text/markdown" in result[0]
 
     def test_extracts_html_curl(self):
-        text = 'curl -sD - -o /dev/null -H "Accept: text/html" http://localhost/\n'
-        result = _extract_verification_curls(text)
-        assert len(result) == 1
+        self._assert_single_curl(
+            'curl -sD - -o /dev/null -H "Accept: text/html" http://localhost/\n'
+        )
 
     def test_ignores_download_curl(self):
         text = "curl -sSL https://raw.githubusercontent.com/.../install.sh | sudo bash\n"
@@ -90,10 +88,15 @@ class TestExtractVerificationCurls:
         assert _extract_verification_curls(text) == []
 
     def test_normalises_whitespace(self):
-        text = '  curl   -sD -   -o /dev/null   -H "Accept: text/markdown"   http://localhost/  \n'
+        result = self._assert_single_curl(
+            '  curl   -sD -   -o /dev/null   -H "Accept: text/markdown"   http://localhost/  \n'
+        )
+        assert "  " not in result[0]  # no double spaces
+
+    def _assert_single_curl(self, text):
         result = _extract_verification_curls(text)
         assert len(result) == 1
-        assert "  " not in result[0]  # no double spaces
+        return result
 
     def test_multiple_curls(self):
         text = (
@@ -205,7 +208,7 @@ class TestExtractNginxLocationPaths:
 
 class TestParseMatrixTable:
     def test_parses_valid_table(self):
-        rows = self._extracted_from_test_skips_short_rows_2(
+        rows = self._assert_table_row_count(
             "| NGINX Version | OS Type | Architecture | Support Tier |\n"
             "|---|---|---|---|\n"
             "| 1.24.0 | glibc | x86_64 | Full |\n"
@@ -216,7 +219,7 @@ class TestParseMatrixTable:
         assert rows[1] == ("1.26.3", "musl", "aarch64", "Full")
 
     def test_skips_header_and_separator(self):
-        rows = self._extracted_from_test_skips_short_rows_2(
+        self._assert_table_row_count(
             "| NGINX Version | OS Type | Architecture | Support Tier |\n"
             "|---|---|---|---|\n"
             "| 1.24.0 | glibc | x86_64 | Full |\n",
@@ -224,20 +227,18 @@ class TestParseMatrixTable:
         )
 
     def test_skips_non_pipe_lines(self):
-        rows = self._extracted_from_test_skips_short_rows_2(
+        self._assert_table_row_count(
             "Some text\n| 1.24.0 | glibc | x86_64 | Full |\nMore text\n", 1
         )
 
     def test_skips_short_rows(self):
-        rows = self._extracted_from_test_skips_short_rows_2(
+        self._assert_table_row_count(
             "| only | two |\n| 1.24.0 | glibc | x86_64 | Full |\n", 1
         )
 
-    # TODO Rename this here and in `test_parses_valid_table`, `test_skips_header_and_separator`, `test_skips_non_pipe_lines` and `test_skips_short_rows`
-    def _extracted_from_test_skips_short_rows_2(self, arg0, arg1):
-        table = arg0
+    def _assert_table_row_count(self, table, expected_count):
         result = _parse_matrix_table(table)
-        assert len(result) == arg1
+        assert len(result) == expected_count
         return result
 
     def test_empty_input(self):
