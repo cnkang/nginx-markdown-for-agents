@@ -317,7 +317,7 @@ def check_no_hardcoded_release_tags(text: str) -> list[str]:
     errors.extend(
         f"Line {line_no}: hardcoded release tag in download URL (use <release_tag> placeholder instead): {line.strip()}"
         for line_no, line in enumerate(text.splitlines(), 1)
-        if re.search(r"releases/download/v\d+\.\d+\.\d+[^/]*/", line)
+        if re.search(r"releases/download/v\d+\.\d+\.\d+", line)
     )
     return errors
 
