@@ -75,13 +75,12 @@ def _extract_verification_curls(text: str) -> list[str]:
 
 
 def _normalise_curl_for_comparison(cmd: str) -> str:
-    """Normalise a curl command for structural comparison.
+    """Return the command as-is for strict comparison.
 
-    Replaces only the host[:port] portion of URLs, preserving both the
-    scheme (http/https) and path.  This catches scheme drift (http→https)
-    in addition to path drift.
+    No URL normalization — README and installation guide verification
+    commands must be fully identical (scheme, host, path, flags, headers).
     """
-    return re.sub(r"(https?://)[^/\s]+", r"\1HOST", cmd)
+    return cmd
 
 
 def _extract_nginx_code_blocks(text: str) -> str:
