@@ -69,8 +69,11 @@ cd "$ROOT/components/rust-converter"
 cargo build --release --quiet 2>&1 | grep -v "warning:" || true
 cd "$ROOT"
 
+# Shared find command for HTML corpus files (used for both counting and processing)
+HTML_FIND_CMD=(find "$ROOT/tests/corpus" -name "*.html" -type f ! -name "generate-*")
+
 # Count HTML files safely using null-delimited find
-HTML_COUNT=$(find "$ROOT/tests/corpus" -name "*.html" -type f ! -name "generate-*" -print0 | tr -dc '\0' | wc -c | tr -d ' ')
+HTML_COUNT=$("${HTML_FIND_CMD[@]}" -print0 | tr -dc '\0' | wc -c | tr -d ' ')
 
 echo "Found ${HTML_COUNT} HTML test files"
 echo ""
@@ -216,7 +219,7 @@ except Exception as e:
         META_ERRORS=$((META_ERRORS + 1))
         FAILED=$((FAILED + 1))
     fi
-done < <(find "$ROOT/tests/corpus" -name "*.html" -type f ! -name "generate-*" -print0 | sort -z)
+done < <("${HTML_FIND_CMD[@]}" -print0 | sort -z)
 
 echo ""
 
