@@ -96,9 +96,11 @@ REQUIRED_SECTIONS = [
 def check_required_sections(text: str) -> list[str]:
     """Check 1: All 11 required sections present."""
     errors: list[str] = []
-    for pattern in REQUIRED_SECTIONS:
-        if not re.search(rf"^## {pattern}", text, re.MULTILINE):
-            errors.append(f"Missing required section matching '## {pattern}'")
+    errors.extend(
+        f"Missing required section matching '## {pattern}'"
+        for pattern in REQUIRED_SECTIONS
+        if not re.search(rf"^## {pattern}", text, re.MULTILINE)
+    )
     return errors
 
 
@@ -152,7 +154,7 @@ TIER_SECTIONS = [
 
 
 def check_tier_labels(text: str) -> list[str]:
-    """Check 4: Each installation method section contains a tier label."""
+    """Check 4: Each installation method section contains the correct tier label."""
     errors: list[str] = []
     for pattern, expected_tier in TIER_SECTIONS:
         section = _section_text(text, pattern)
@@ -160,10 +162,16 @@ def check_tier_labels(text: str) -> list[str]:
             errors.append(f"Cannot locate section matching '## {pattern}'")
             continue
         tier_re = re.compile(r"\*\*Tier:\s*(Primary|Secondary|Convenience)\*\*", re.IGNORECASE)
-        if not tier_re.search(section):
+        m = tier_re.search(section)
+        if not m:
             errors.append(
                 f"Section '## {pattern}' missing tier label "
                 f"(expected '**Tier: {expected_tier}**')"
+            )
+        elif m.group(1).lower() != expected_tier.lower():
+            errors.append(
+                f"Section '## {pattern}' has tier label '{m.group(1)}' "
+                f"but expected '{expected_tier}'"
             )
     return errors
 
@@ -181,13 +189,12 @@ def check_operator_verification(text: str) -> list[str]:
     section = _section_text(text, r"9\.\s+Operator Verification")
     if not section:
         return ["Cannot locate '## 9. Operator Verification' section"]
-    errors: list[str] = []
     section_lower = section.lower()
-    for state in MODULE_STATES:
-        if state.lower() not in section_lower:
-            errors.append(
-                f"Operator Verification missing module state: '{state}'"
-            )
+    errors: list[str] = [
+        f"Operator Verification missing module state: '{state}'"
+        for state in MODULE_STATES
+        if state.lower() not in section_lower
+    ]
     return errors
 
 
@@ -241,13 +248,12 @@ def check_environment_notes(text: str) -> list[str]:
     section = _section_text(text, r"11\.\s+Environment-Specific Notes")
     if not section:
         return ["Cannot locate '## 11. Environment-Specific Notes' section"]
-    errors: list[str] = []
     section_lower = section.lower()
-    for label, keyword in ENVIRONMENTS:
-        if label not in section_lower and keyword not in section_lower:
-            errors.append(
-                f"Environment-Specific Notes missing coverage for '{label}'"
-            )
+    errors: list[str] = [
+        f"Environment-Specific Notes missing coverage for '{label}'"
+        for label, keyword in ENVIRONMENTS
+        if label not in section_lower and keyword not in section_lower
+    ]
     return errors
 
 
@@ -277,15 +283,19 @@ def check_fail_open_reference(text: str) -> list[str]:
 
 def check_compression_sop(text: str) -> list[str]:
     """Check 12: Compression SOP references proxy_set_header Accept-Encoding."""
-    sop = _sop_section_text(text, "SOP 9: Compression / Decompression Issues")
-    if not sop:
+    if sop := _sop_section_text(
+        text, "SOP 9: Compression / Decompression Issues"
+    ):
+        return (
+            [
+                "Compression SOP does not reference "
+                "'proxy_set_header Accept-Encoding \"\"'"
+            ]
+            if 'proxy_set_header Accept-Encoding ""' not in sop
+            else []
+        )
+    else:
         return ["Cannot locate SOP 9 (Compression / Decompression Issues)"]
-    if 'proxy_set_header Accept-Encoding ""' not in sop:
-        return [
-            "Compression SOP does not reference "
-            "'proxy_set_header Accept-Encoding \"\"'"
-        ]
-    return []
 
 
 def check_content_negotiation_sop(text: str) -> list[str]:
@@ -311,8 +321,16 @@ def check_demo_config_exists() -> list[str]:
     return []
 
 
+DEMO_DIRECTIVES_REQUIRING_COMMENTS = [
+    "markdown_filter",
+    "markdown_max_size",
+    "markdown_timeout",
+    "markdown_on_error",
+]
+
+
 def check_demo_config_content() -> list[str]:
-    """Check 15: Demo config has inline comments and no proxy_pass."""
+    """Check 15: Demo config has inline comments for key directives and no proxy_pass."""
     if not DEMO_CONFIG.exists():
         return ["Cannot check demo config content — file does not exist"]
     content = _read_text(DEMO_CONFIG)
@@ -321,6 +339,28 @@ def check_demo_config_content() -> list[str]:
         errors.append("Demo config has no inline comments")
     if "proxy_pass" in content:
         errors.append("Demo config contains a 'proxy_pass' directive (should not)")
+    # Verify each key directive line has an inline comment or a comment on
+    # the immediately preceding line.
+    lines = content.splitlines()
+    for directive in DEMO_DIRECTIVES_REQUIRING_COMMENTS:
+        found_directive = False
+        for idx, line in enumerate(lines):
+            stripped = line.strip()
+            # Skip pure comment lines and blank lines
+            if stripped.startswith("#") or not stripped:
+                continue
+            if not re.search(rf"\b{re.escape(directive)}\b", stripped):
+                continue
+            found_directive = True
+            has_inline = "#" in stripped.split(directive, 1)[-1]
+            has_preceding = idx > 0 and lines[idx - 1].strip().startswith("#")
+            if not has_inline and not has_preceding:
+                errors.append(
+                    f"Demo config directive '{directive}' has no inline or "
+                    f"preceding comment"
+                )
+        if not found_directive:
+            errors.append(f"Demo config missing directive '{directive}'")
     return errors
 
 
