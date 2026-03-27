@@ -196,10 +196,19 @@ python3 tools/perf/report_schema.py perf/reports/corpus-report.json
 
 The corpus benchmark runs in CI alongside the existing latency/throughput pipeline:
 
-- **Existing pipeline** (`run_perf_baseline.sh`): Gates on latency and throughput regressions.
+- **Existing pipeline** (`run_perf_baseline.sh`): Gates on latency and throughput regressions using platform-matched baselines.
 - **Corpus benchmark** (`run_corpus_benchmark.py`): Gates on fallback rate, token reduction, and conversion outcome regressions.
 
 Both contribute independently to the CI pass/fail decision.
+
+### Quality-Only Gate in CI
+
+The committed corpus baseline (`perf/baselines/corpus-baseline.json`) uses `platform: "reference"` to be platform-agnostic. When the comparison script detects a platform mismatch between baseline and current report, it automatically skips latency metric comparisons (p50/p95/p99) and only evaluates quality metrics (fallback rate, token reduction). This is by design:
+
+- **Quality metrics** (fallback rate, token reduction, conversion outcomes) are platform-independent and reliably comparable across environments.
+- **Latency regression detection** is handled by the existing perf pipeline (`run_perf_baseline.sh` + `threshold_engine.py`), which uses platform-matched baselines stored per-platform in `perf/baselines/`.
+
+This separation avoids cross-platform latency noise in the corpus benchmark verdict while ensuring quality regressions are always caught.
 
 ### Quality Thresholds
 
