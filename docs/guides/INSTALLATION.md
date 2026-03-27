@@ -720,7 +720,331 @@ The default configuration uses `markdown_on_error pass` (fail-open). This means:
 
 ## 10. Troubleshooting
 
-See below for structured troubleshooting SOPs.
+This section contains structured Standard Operating Procedures (SOPs) for common installation and runtime failures. SOPs 1–6 use the same error categories as the install script's structured output. SOPs 7–9 cover runtime and configuration issues.
+
+### Standard Operating Procedures
+
+#### SOP 1: Module Not Loaded
+
+**Category:** `config`
+
+**Symptom:**
+NGINX fails to start or the module has no effect. The error log shows:
+
+```
+unknown directive "markdown_filter"
+```
+
+or:
+
+```
+dlopen() "/usr/lib/nginx/modules/ngx_http_markdown_filter_module.so" failed
+```
+
+**Root Cause:**
+The `load_module` directive is missing from `nginx.conf`, or the path to the `.so` file is incorrect. This can happen when the install script's auto-wiring was incomplete or the module file was moved after installation.
+
+**Resolution Steps:**
+
+1. Verify the module file exists:
+   ```bash
+   ls -lh /usr/lib/nginx/modules/ngx_http_markdown_filter_module.so
+   ```
+2. If the file is missing, re-run the install script:
+   ```bash
+   curl -sSL https://raw.githubusercontent.com/cnkang/nginx-markdown-for-agents/main/tools/install.sh | sudo bash
+   ```
+3. If the file exists, confirm the `load_module` directive is present at the top of `nginx.conf` (before the `http {}` block):
+   ```bash
+   grep -n 'load_module' /etc/nginx/nginx.conf
+   ```
+4. If missing, add it manually:
+   ```nginx
+   load_module modules/ngx_http_markdown_filter_module.so;
+   ```
+5. Test and reload:
+   ```bash
+   sudo nginx -t && sudo nginx -s reload
+   ```
+
+---
+
+#### SOP 2: NGINX Version / ABI Mismatch
+
+**Category:** `version_mismatch`
+
+**Symptom:**
+The install script exits with an error such as:
+
+```
+ERROR: NGINX version 1.25.4 is not in the supported matrix
+```
+
+or NGINX refuses to load the module with:
+
+```
+module is not binary compatible
+```
+
+**Root Cause:**
+NGINX dynamic modules require an exact version match. A module built for NGINX 1.26.2 will not load on NGINX 1.26.3. The pre-built binary does not exist for your exact NGINX version.
+
+**Resolution Steps:**
+
+1. Check your exact NGINX version:
+   ```bash
+   nginx -v 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+'
+   ```
+2. Compare against the [Compatibility Matrix](#7-compatibility-matrix) or the canonical source:
+   ```bash
+   curl -sL https://raw.githubusercontent.com/cnkang/nginx-markdown-for-agents/main/tools/release-matrix.json | python3 -m json.tool
+   ```
+3. If your version is not in the matrix but is >= 1.24.0, build from source using the [Manual Source Build](#6-secondary-manual-source-build) instructions.
+4. If your version is below 1.24.0, upgrade NGINX to a supported version.
+
+---
+
+#### SOP 3: Architecture Not Supported
+
+**Category:** `arch_unsupported`
+
+**Symptom:**
+The install script exits with an error such as:
+
+```
+ERROR: Architecture "s390x" is not supported. Supported: x86_64, aarch64
+```
+
+**Root Cause:**
+Pre-built binaries are only available for `x86_64` and `aarch64` architectures. Other architectures (e.g., `s390x`, `ppc64le`, `armv7l`) are not in the release matrix.
+
+**Resolution Steps:**
+
+1. Confirm your architecture:
+   ```bash
+   uname -m
+   ```
+2. If the output is not `x86_64` or `aarch64`, pre-built binaries are not available.
+3. Build from source using the [Manual Source Build](#6-secondary-manual-source-build) instructions. The Rust compiler and NGINX source build support a wide range of architectures.
+
+---
+
+#### SOP 4: libc Incompatibility
+
+**Category:** `config`
+
+**Symptom:**
+NGINX fails to load the module with errors such as:
+
+```
+dlopen() ... failed (Error relocating ... symbol not found)
+```
+
+or the install script reports a libc detection mismatch.
+
+**Root Cause:**
+A glibc-linked binary was installed on a musl-based system (e.g., Alpine Linux) or vice versa. The two C standard library implementations are not ABI-compatible.
+
+**Resolution Steps:**
+
+1. Determine your system's libc type:
+   ```bash
+   ldd --version 2>&1 | head -1
+   ```
+   - **glibc**: output contains "GNU libc" or "GLIBC"
+   - **musl**: output contains "musl libc"
+2. On Alpine or other musl-based systems, an alternative check:
+   ```bash
+   apk info musl 2>/dev/null && echo "musl" || echo "not musl"
+   ```
+3. Verify the installed module matches your libc. The artifact name includes `glibc` or `musl`:
+   ```bash
+   # Check what was downloaded
+   ls /usr/lib/nginx/modules/ngx_http_markdown_filter_module.so
+   ```
+4. Re-run the install script — it auto-detects the libc type from `nginx -V` metadata:
+   ```bash
+   curl -sSL https://raw.githubusercontent.com/cnkang/nginx-markdown-for-agents/main/tools/install.sh | sudo bash
+   ```
+5. If the auto-detection fails, build from source using the [Manual Source Build](#6-secondary-manual-source-build) instructions to ensure native libc linkage.
+
+---
+
+#### SOP 5: Network Download Failure
+
+**Category:** `network`
+
+**Symptom:**
+The install script fails with errors such as:
+
+```
+ERROR: Failed to download module binary from GitHub
+```
+
+or:
+
+```
+curl: (6) Could not resolve host: github.com
+```
+
+**Root Cause:**
+The system cannot reach GitHub to download the pre-built binary or checksum file. This is typically caused by network restrictions, proxy configuration, DNS resolution failures, or air-gapped environments.
+
+**Resolution Steps:**
+
+1. Test connectivity to GitHub:
+   ```bash
+   curl -sI https://github.com
+   ```
+2. If behind a proxy, configure the proxy environment variables:
+   ```bash
+   export https_proxy=http://your-proxy:port
+   export http_proxy=http://your-proxy:port
+   ```
+3. Test DNS resolution:
+   ```bash
+   nslookup github.com
+   ```
+4. If the system is air-gapped, manually download the binary and checksum on a connected machine:
+   ```bash
+   # On a connected machine — substitute your version, os_type, and arch
+   wget https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v0.3.0/ngx_http_markdown_filter_module-1.26.3-glibc-x86_64.tar.gz
+   wget https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v0.3.0/ngx_http_markdown_filter_module-1.26.3-glibc-x86_64.tar.gz.sha256
+   ```
+5. Transfer the files to the target system and install manually, or use the [Manual Source Build](#6-secondary-manual-source-build) instructions.
+
+---
+
+#### SOP 6: Checksum Verification Failure
+
+**Category:** `checksum`
+
+**Symptom:**
+The install script fails with an error such as:
+
+```
+ERROR: SHA-256 checksum verification failed
+```
+
+**Root Cause:**
+The SHA-256 hash of the downloaded binary does not match the expected checksum from the release. This can be caused by a corrupted download, an incomplete transfer, a network intermediary modifying the file, or a tampered artifact.
+
+**Resolution Steps:**
+
+1. Remove the cached download and retry:
+   ```bash
+   curl -sSL https://raw.githubusercontent.com/cnkang/nginx-markdown-for-agents/main/tools/install.sh | sudo bash
+   ```
+2. If the failure persists, manually verify the checksum:
+   ```bash
+   # Download the binary and checksum file (substitute your version/os/arch)
+   wget https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v0.3.0/ngx_http_markdown_filter_module-1.26.3-glibc-x86_64.tar.gz
+   wget https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v0.3.0/ngx_http_markdown_filter_module-1.26.3-glibc-x86_64.tar.gz.sha256
+
+   # Verify
+   sha256sum -c ngx_http_markdown_filter_module-1.26.3-glibc-x86_64.tar.gz.sha256
+   ```
+3. If the checksum still fails, try downloading from a different network or machine to rule out a network intermediary.
+4. If the issue persists, report it on the project's GitHub issue tracker — the release artifact may need to be re-published.
+
+---
+
+#### SOP 7: Content Negotiation Not Triggering
+
+**Symptom:**
+Requests that should return Markdown are returning HTML instead. The response has `Content-Type: text/html` even though the client sends `Accept: text/markdown`.
+
+**Root Cause:**
+The module only converts a response when all eligibility requirements are met. If any requirement is not satisfied, the original response is passed through unchanged.
+
+The eligibility requirements are:
+
+1. **HTTP status 200** — the upstream response must have status code `200 OK`. Redirects (3xx), client errors (4xx), and server errors (5xx) are not eligible.
+2. **Upstream `Content-Type: text/html`** — the upstream response must have `Content-Type: text/html` (with any charset parameter). Other content types (e.g., `application/json`, `text/plain`) are not eligible.
+3. **Request `Accept` includes `text/markdown`** — the client request must include `text/markdown` in the `Accept` header. Without this, the module does not activate.
+4. **Response size within `markdown_max_size`** — the upstream response body must not exceed the configured `markdown_max_size` limit (default: `10m`). Responses larger than this limit are passed through unchanged.
+
+**Resolution Steps:**
+
+1. Confirm the module is enabled:
+   ```bash
+   grep -r 'markdown_filter' /etc/nginx/
+   ```
+   Ensure `markdown_filter on;` is set in the relevant context.
+2. Verify the request includes the correct `Accept` header:
+   ```bash
+   curl -sD - -o /dev/null -H "Accept: text/markdown" http://localhost/
+   ```
+3. Check the upstream response status and Content-Type:
+   ```bash
+   curl -sD - -o /dev/null http://localhost/
+   ```
+   Confirm the status is `200` and `Content-Type` is `text/html`.
+4. Check the response size against `markdown_max_size`:
+   ```bash
+   curl -sI http://localhost/ | grep -i content-length
+   ```
+5. Inspect the NGINX error log for eligibility skip reasons:
+   ```bash
+   tail -50 /var/log/nginx/error.log | grep "markdown"
+   ```
+
+---
+
+#### SOP 8: Upstream Response Not Eligible
+
+**Symptom:**
+The module is loaded and `markdown_filter on` is set, but specific pages are not being converted. Other pages may convert correctly.
+
+**Root Cause:**
+The upstream response for those pages does not meet the eligibility criteria. Common reasons:
+
+- **Status code is not 200** — the upstream returns a redirect (301, 302), a client error (403, 404), or a server error (500, 502). Only `200 OK` responses are eligible.
+- **Content-Type is not `text/html`** — the upstream returns `application/json`, `text/plain`, `application/xml`, or another non-HTML content type.
+
+**Resolution Steps:**
+
+1. Check the upstream response headers for the affected page:
+   ```bash
+   curl -sD - -o /dev/null http://localhost/path/to/page
+   ```
+2. Verify the status code is `200 OK`. If the upstream returns a redirect, the final response after following redirects may have a different status.
+3. Verify the `Content-Type` header is `text/html`:
+   ```bash
+   curl -sI http://localhost/path/to/page | grep -i content-type
+   ```
+4. If the upstream returns a different content type, the module correctly skips conversion. Conversion only applies to HTML content.
+5. If the upstream returns a non-200 status, resolve the upstream issue first (e.g., fix the redirect chain, resolve the 404).
+
+---
+
+#### SOP 9: Compression / Decompression Issues
+
+**Symptom:**
+The module fails to convert responses that are compressed by the upstream. The error log may show conversion failures, or the response is passed through as HTML despite meeting all other eligibility requirements.
+
+**Root Cause:**
+The upstream server sends a compressed response (gzip, brotli, or deflate), and the module cannot decompress it before conversion. This can happen when the module's built-in decompression is not handling the encoding, or when NGINX's own compression interacts with the module's pipeline.
+
+**Resolution Steps:**
+
+1. Check if the upstream is sending compressed responses:
+   ```bash
+   curl -sD - -o /dev/null -H "Accept-Encoding: gzip" http://localhost/path/to/page | grep -i content-encoding
+   ```
+2. As a workaround, disable upstream compression by stripping the `Accept-Encoding` header in the NGINX proxy configuration:
+   ```nginx
+   location / {
+       proxy_set_header Accept-Encoding "";
+       proxy_pass http://upstream;
+   }
+   ```
+   This forces the upstream to send uncompressed responses, which the module can convert directly.
+3. Reload NGINX after the configuration change:
+   ```bash
+   sudo nginx -t && sudo nginx -s reload
+   ```
+4. For details on the module's built-in automatic decompression support (gzip, brotli, deflate), see [`docs/features/AUTOMATIC_DECOMPRESSION.md`](../features/AUTOMATIC_DECOMPRESSION.md).
 
 ---
 
