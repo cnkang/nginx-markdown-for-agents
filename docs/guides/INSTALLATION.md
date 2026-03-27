@@ -757,6 +757,8 @@ The `load_module` directive is missing from `nginx.conf`, or the path to the `.s
 
 **Resolution Steps:**
 
+> If your NGINX uses a custom `--conf-path` or `--modules-path`, replace the default paths below with the values from `nginx -V`.
+
 1. Determine your modules directory from `nginx -V` and verify the module file exists:
    ```bash
    # Find the modules path (varies by platform)
@@ -874,6 +876,8 @@ or the install script reports a libc detection mismatch.
 A glibc-linked binary was installed on a musl-based system (e.g., Alpine Linux) or vice versa. The two C standard library implementations are not ABI-compatible.
 
 **Resolution Steps:**
+
+> If your NGINX uses a custom `--conf-path` or `--modules-path`, replace the default paths below with the values from `nginx -V`.
 
 1. Determine your system's libc type:
    ```bash
