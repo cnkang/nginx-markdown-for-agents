@@ -587,7 +587,7 @@ If your NGINX version is >= 1.24.0 but not listed in the matrix below, use the [
 
 Pre-built binaries follow this naming convention:
 
-```
+```text
 ngx_http_markdown_filter_module-<nginx_version>-<os_type>-<arch>.tar.gz
 ```
 
@@ -624,7 +624,7 @@ ldd --version 2>&1 | head -1
 
 For example, if `nginx -v` reports `1.26.3`, `uname -m` reports `x86_64`, and `ldd --version` shows GNU libc, the correct artifact is:
 
-```
+```text
 ngx_http_markdown_filter_module-1.26.3-glibc-x86_64.tar.gz
 ```
 
@@ -655,7 +655,7 @@ sudo nginx -t
 
 Expected output:
 
-```
+```text
 nginx: the configuration file /etc/nginx/nginx.conf syntax is ok
 nginx: configuration file /etc/nginx/nginx.conf test is successful
 ```
@@ -670,7 +670,7 @@ curl -sD - -o /dev/null -H "Accept: text/markdown" http://localhost/
 
 Expected response headers:
 
-```
+```text
 HTTP/1.1 200 OK
 Content-Type: text/markdown; charset=utf-8
 Vary: Accept
@@ -686,7 +686,7 @@ curl -sD - -o /dev/null -H "Accept: text/html" http://localhost/
 
 Expected response headers:
 
-```
+```text
 HTTP/1.1 200 OK
 Content-Type: text/html
 ```
@@ -701,7 +701,7 @@ tail /var/log/nginx/error.log | grep "markdown filter"
 
 Look for initialization messages such as:
 
-```
+```text
 [info] markdown filter: converter initialized in worker process (pid: ...)
 ```
 
@@ -742,13 +742,13 @@ This section contains structured Standard Operating Procedures (SOPs) for common
 **Symptom:**
 NGINX fails to start or the module has no effect. The error log shows:
 
-```
+```text
 unknown directive "markdown_filter"
 ```
 
 or:
 
-```
+```text
 dlopen() "/usr/lib/nginx/modules/ngx_http_markdown_filter_module.so" failed
 ```
 
@@ -807,13 +807,13 @@ The `load_module` directive is missing from `nginx.conf`, or the path to the `.s
 **Symptom:**
 The install script exits with an error such as:
 
-```
+```text
 ERROR: NGINX version 1.25.4 is not in the supported matrix
 ```
 
 or NGINX refuses to load the module with:
 
-```
+```text
 module is not binary compatible
 ```
 
@@ -842,7 +842,7 @@ NGINX dynamic modules require an exact version match. A module built for NGINX 1
 **Symptom:**
 The install script exits with an error such as:
 
-```
+```text
 ERROR: Architecture "s390x" is not supported. Supported: x86_64, aarch64
 ```
 
@@ -867,7 +867,7 @@ Pre-built binaries are only available for `x86_64` and `aarch64` architectures. 
 **Symptom:**
 NGINX fails to load the module with errors such as:
 
-```
+```text
 dlopen() ... failed (Error relocating ... symbol not found)
 ```
 
@@ -925,13 +925,13 @@ A glibc-linked binary was installed on a musl-based system (e.g., Alpine Linux) 
 **Symptom:**
 The install script fails with errors such as:
 
-```
+```text
 ERROR: Failed to download module binary from GitHub
 ```
 
 or:
 
-```
+```text
 curl: (6) Could not resolve host: github.com
 ```
 
@@ -972,7 +972,7 @@ The system cannot reach GitHub to download the pre-built binary or checksum file
 **Symptom:**
 The install script fails with an error such as:
 
-```
+```text
 ERROR: SHA-256 checksum verification failed
 ```
 

@@ -142,7 +142,7 @@ def check_curl_consistency() -> list[str]:
     )
     # If sets match but order differs, report with first divergence
     if not errors:
-        for i, (r, s) in enumerate(zip(readme_curls, install_curls)):
+        for i, (r, s) in enumerate(zip(readme_curls, install_curls, strict=True)):
             if r != s:
                 errors.append(
                     f"README Quick Start and Shortest Success Path have the same "
@@ -270,7 +270,7 @@ def check_matrix_consistency() -> list[str]:
     table_rows = _parse_matrix_table(m[1])
 
     for entry in matrix_data.get("matrix", []):
-        if entry.get("support_tier") != "full":
+        if entry.get("support_tier", "").lower() != "full":
             continue
         nginx, os_type, arch = entry["nginx"], entry["os_type"], entry["arch"]
         matching = [
