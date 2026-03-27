@@ -87,6 +87,20 @@ def validate_required_fields(
     return [f"missing {context} field: {f}" for f in sorted(missing)]
 
 
+def _validate_fixture(fixture: object, index: int) -> list[str]:
+    """Validate a single fixture entry and return error messages."""
+    if not isinstance(fixture, dict):
+        return [f"fixtures[{index}] must be a dict"]
+    errors = validate_required_fields(fixture, REQUIRED_FIXTURE, f"fixtures[{index}]")
+    pt = fixture.get("page-type")
+    if pt and pt not in VALID_PAGE_TYPES:
+        errors.append(f"fixtures[{index}] invalid page-type: {pt}")
+    cr = fixture.get("conversion-result")
+    if cr and cr not in VALID_CONVERSION_RESULTS:
+        errors.append(f"fixtures[{index}] invalid conversion-result: {cr}")
+    return errors
+
+
 def validate_report(report: dict) -> list[str]:
     """Validate a Unified Report and return a list of error messages."""
     errors = []
@@ -113,18 +127,7 @@ def validate_report(report: dict) -> list[str]:
         errors.append("fixtures must be a list")
     else:
         for i, fixture in enumerate(fixtures):
-            if not isinstance(fixture, dict):
-                errors.append(f"fixtures[{i}] must be a dict")
-                continue
-            errors.extend(
-                validate_required_fields(fixture, REQUIRED_FIXTURE, f"fixtures[{i}]")
-            )
-            pt = fixture.get("page-type")
-            if pt and pt not in VALID_PAGE_TYPES:
-                errors.append(f"fixtures[{i}] invalid page-type: {pt}")
-            cr = fixture.get("conversion-result")
-            if cr and cr not in VALID_CONVERSION_RESULTS:
-                errors.append(f"fixtures[{i}] invalid conversion-result: {cr}")
+            errors.extend(_validate_fixture(fixture, i))
 
     return errors
 

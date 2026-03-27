@@ -277,7 +277,7 @@ def test_property5_aggregate_token_reduction(fixtures, factor):
 def test_property5_non_converted_zero_reduction(fixtures, factor):
     """Non-converted fixtures must have zero aggregate token reduction."""
     result = compute_aggregate_token_reduction(fixtures, factor)
-    assert result == 0.0
+    assert result == pytest.approx(0.0)
 
 
 # ---------------------------------------------------------------------------
@@ -812,16 +812,16 @@ class TestErrorHandling:
 
     def test_token_reduction_zero_input(self):
         """Zero input bytes returns 0 token reduction."""
-        assert compute_token_reduction(0, 0, 1.0) == 0.0
+        assert compute_token_reduction(0, 0, 1.0) == pytest.approx(0.0)
 
     def test_percentile_single_value(self):
         """Percentile of single value returns that value."""
-        assert compute_percentile([5.0], 50) == 5.0
-        assert compute_percentile([5.0], 99) == 5.0
+        assert compute_percentile([5.0], 50) == pytest.approx(5.0)
+        assert compute_percentile([5.0], 99) == pytest.approx(5.0)
 
     def test_percentile_empty(self):
         """Percentile of empty list returns 0."""
-        assert compute_percentile([], 50) == 0.0
+        assert compute_percentile([], 50) == pytest.approx(0.0)
 
     def test_exit_code_pass(self):
         assert verdict_to_exit_code("pass") == 0
