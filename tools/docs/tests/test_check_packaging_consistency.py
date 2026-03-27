@@ -155,23 +155,21 @@ class TestExtractCurlPaths:
         assert "/" in _extract_curl_paths(text)
 
     def test_strips_query_string(self):
-        self._extracted_from_test_strips_fragment_2(
+        self._assert_base_path_extracted(
             'curl -sD - -o /dev/null -H "Accept: text/markdown" http://localhost/foo?bar=baz\n',
             "/foo?bar=baz",
         )
 
     def test_strips_fragment(self):
-        self._extracted_from_test_strips_fragment_2(
+        self._assert_base_path_extracted(
             'curl -sD - -o /dev/null -H "Accept: text/markdown" http://localhost/foo#section\n',
             "/foo#section",
         )
 
-    # TODO Rename this here and in `test_strips_query_string` and `test_strips_fragment`
-    def _extracted_from_test_strips_fragment_2(self, arg0, arg1):
-        text = arg0
+    def _assert_base_path_extracted(self, text, raw_path):
         paths = _extract_curl_paths(text)
         assert "/foo" in paths
-        assert arg1 not in paths
+        assert raw_path not in paths
 
 
 # ---------------------------------------------------------------------------
