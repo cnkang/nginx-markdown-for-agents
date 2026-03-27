@@ -123,7 +123,12 @@ def run_converter(converter_bin: str, html_path: str) -> tuple[str, int, float]:
 
     start = time.perf_counter()
     try:
-        result = subprocess.run(
+        # Security: list-form invocation (shell=False) passes args directly to
+        # execvp — no shell expansion, no injection vector.  Both paths are
+        # validated with os.path.isfile() above.  shlex.escape() is NOT
+        # appropriate here; it is designed for shell=True string concatenation
+        # and would corrupt paths containing spaces or special characters.
+        result = subprocess.run(  # sourcery skip: avoid-subprocess-run
             [converter_bin, html_path],  # noqa: S603 — args are validated paths
             capture_output=True,
             text=True,
