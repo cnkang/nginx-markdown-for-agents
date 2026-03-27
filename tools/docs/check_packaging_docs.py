@@ -259,33 +259,45 @@ def check_fail_open_reference(text: str) -> list[str]:
 
 
 def check_compression_sop(text: str) -> list[str]:
-    """Check 12: Compression SOP references proxy_set_header Accept-Encoding."""
-    if sop := _sop_section_text(
-        text, "SOP 9: Compression / Decompression Issues"
-    ):
-        return (
-            [
-                "Compression SOP does not reference "
-                "'proxy_set_header Accept-Encoding \"\"'"
-            ]
-            if 'proxy_set_header Accept-Encoding ""' not in sop
-            else []
-        )
-    else:
+    """Check 12: Compression SOP references workaround and decompression docs."""
+    sop = _sop_section_text(text, "SOP 9: Compression / Decompression Issues")
+    if not sop:
         return ["Cannot locate SOP 9 (Compression / Decompression Issues)"]
+    errors: list[str] = []
+    if 'proxy_set_header Accept-Encoding ""' not in sop:
+        errors.append(
+            "Compression SOP does not reference "
+            "'proxy_set_header Accept-Encoding \"\"'"
+        )
+    if "automatic_decompression" not in sop.lower() and \
+       "AUTOMATIC_DECOMPRESSION" not in sop:
+        errors.append(
+            "Compression SOP does not reference the built-in "
+            "decompression documentation (AUTOMATIC_DECOMPRESSION.md)"
+        )
+    return errors
+
+
+_SOP7_REQUIRED_KEYWORDS: list[tuple[str, str]] = [
+    ("200", "HTTP status 200"),
+    ("text/html", "upstream Content-Type text/html"),
+    ("text/markdown", "Accept header includes text/markdown"),
+    ("markdown_max_size", "response size within markdown_max_size"),
+]
 
 
 def check_content_negotiation_sop(text: str) -> list[str]:
-    """Check 13: Content negotiation SOP explains eligibility requirements."""
+    """Check 13: Content negotiation SOP explains all four eligibility requirements."""
     sop = _sop_section_text(text, "SOP 7: Content Negotiation Not Triggering")
     if not sop:
         return ["Cannot locate SOP 7 (Content Negotiation Not Triggering)"]
     sop_lower = sop.lower()
-    if "eligib" not in sop_lower:
-        return [
-            "Content Negotiation SOP does not explain eligibility requirements"
-        ]
-    return []
+    errors: list[str] = [
+        f"Content Negotiation SOP missing eligibility condition: {desc}"
+        for keyword, desc in _SOP7_REQUIRED_KEYWORDS
+        if keyword.lower() not in sop_lower
+    ]
+    return errors
 
 
 def check_no_hardcoded_release_tags(text: str) -> list[str]:
@@ -344,8 +356,14 @@ def check_demo_config_content() -> list[str]:
     errors: list[str] = []
     if not re.search(r"^\s*#", content, re.MULTILINE):
         errors.append("Demo config has no inline comments")
-    if "proxy_pass" in content:
-        errors.append("Demo config contains a 'proxy_pass' directive (should not)")
+    # Check for proxy_pass on active (non-comment) lines only
+    for line in content.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("#") or not stripped:
+            continue
+        if re.search(r"^\s*proxy_pass\b", line):
+            errors.append("Demo config contains a 'proxy_pass' directive (should not)")
+            break
     lines = content.splitlines()
     for directive in DEMO_DIRECTIVES_REQUIRING_COMMENTS:
         errors.extend(_check_directive_comments(lines, directive))
