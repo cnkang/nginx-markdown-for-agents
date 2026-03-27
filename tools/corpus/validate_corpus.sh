@@ -25,6 +25,34 @@ SEPARATOR_LINE="========================================="
 # Valid enum values
 VALID_PAGE_TYPES="clean-article documentation nav-heavy boilerplate-heavy complex-common"
 
+# Bash 3-compatible counters (macOS default /bin/bash lacks associative arrays).
+PT_CLEAN_ARTICLE=0
+PT_DOCUMENTATION=0
+PT_NAV_HEAVY=0
+PT_BOILERPLATE_HEAVY=0
+PT_COMPLEX_COMMON=0
+
+increment_page_type_count() {
+    case "$1" in
+        clean-article) PT_CLEAN_ARTICLE=$((PT_CLEAN_ARTICLE + 1)) ;;
+        documentation) PT_DOCUMENTATION=$((PT_DOCUMENTATION + 1)) ;;
+        nav-heavy) PT_NAV_HEAVY=$((PT_NAV_HEAVY + 1)) ;;
+        boilerplate-heavy) PT_BOILERPLATE_HEAVY=$((PT_BOILERPLATE_HEAVY + 1)) ;;
+        complex-common) PT_COMPLEX_COMMON=$((PT_COMPLEX_COMMON + 1)) ;;
+    esac
+}
+
+get_page_type_count() {
+    case "$1" in
+        clean-article) echo "$PT_CLEAN_ARTICLE" ;;
+        documentation) echo "$PT_DOCUMENTATION" ;;
+        nav-heavy) echo "$PT_NAV_HEAVY" ;;
+        boilerplate-heavy) echo "$PT_BOILERPLATE_HEAVY" ;;
+        complex-common) echo "$PT_COMPLEX_COMMON" ;;
+        *) echo "0" ;;
+    esac
+}
+
 echo "$SEPARATOR_LINE"
 echo "Comprehensive Corpus Validation"
 echo "$SEPARATOR_LINE"
@@ -91,11 +119,7 @@ echo ""
 # ---------------------------------------------------------------------------
 echo "--- HTML Files and Metadata ---"
 
-# Track page types and failure corpus count
-declare -A PAGE_TYPE_COUNT
-for pt in $VALID_PAGE_TYPES; do
-    PAGE_TYPE_COUNT[$pt]=0
-done
+# Track failure corpus count
 FAILURE_CORPUS_COUNT=0
 
 # Use null-delimited find + while-read to handle filenames safely
@@ -174,9 +198,7 @@ except Exception as e:
         page_type=$(echo "$META_RESULT" | cut -d'|' -f1)
         is_failure=$(echo "$META_RESULT" | cut -d'|' -f2)
 
-        if [[ -n "${PAGE_TYPE_COUNT[$page_type]+x}" ]]; then
-            PAGE_TYPE_COUNT[$page_type]=$((${PAGE_TYPE_COUNT[$page_type]} + 1))
-        fi
+        increment_page_type_count "$page_type"
 
         if [[ "$is_failure" == "True" ]]; then
             FAILURE_CORPUS_COUNT=$((FAILURE_CORPUS_COUNT + 1))
@@ -200,7 +222,7 @@ echo "--- Coverage Checks ---"
 
 # Check at least 2 fixtures per page type
 for pt in $VALID_PAGE_TYPES; do
-    count=${PAGE_TYPE_COUNT[$pt]}
+    count=$(get_page_type_count "$pt")
     if [[ $count -lt 2 ]]; then
         echo -e "${RED}✗${NC} page-type '$pt': $count fixtures (minimum 2 required)"
         META_ERRORS=$((META_ERRORS + 1))
