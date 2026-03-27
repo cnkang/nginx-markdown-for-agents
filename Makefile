@@ -148,6 +148,8 @@ test-benchmark-summary:
 
 docs-check:
 	python3 tools/docs/check_docs.py
+	python3 tools/docs/check_packaging_docs.py
+	python3 tools/docs/check_packaging_consistency.py
 
 license-check:
 	python3 tools/ci/check_c_licenses.py
