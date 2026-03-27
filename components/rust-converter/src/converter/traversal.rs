@@ -77,6 +77,16 @@ impl MarkdownConverter {
     ) -> Result<(), ConversionError> {
         use crate::security::SanitizeAction;
 
+        // Early pruning: skip subtrees that produce no meaningful Markdown output.
+        // This check runs before SecurityValidator to avoid unnecessary work for
+        // elements that are always pruned (script/style/noscript) or optionally
+        // pruned noise regions (nav/footer/aside when feature-enabled).
+        match super::pruning::should_prune(tag_name) {
+            super::pruning::PruneDecision::SkipChildren
+            | super::pruning::PruneDecision::SkipSubtree => return Ok(()),
+            super::pruning::PruneDecision::Traverse => {}
+        }
+
         let sanitize_action = self.security_validator.check_element(tag_name);
         if matches!(sanitize_action, SanitizeAction::Remove) {
             return Ok(());
