@@ -194,9 +194,15 @@ def check_compatibility_matrix(text: str) -> list[str]:
             "Compatibility Matrix section does not reference "
             "'tools/release-matrix.json'"
         )
-    # Check that a markdown table exists (header row with pipes)
-    # Use negated character classes to avoid polynomial backtracking (S5852)
-    if not re.search(r"\|[^|]*NGINX[^|]*\|[^|]*OS[^|]*\|", section, re.IGNORECASE):
+    # Check that a markdown table header row exists with NGINX and OS columns.
+    # Use substring checks instead of regex to avoid backtracking concerns (S5852).
+    has_table = False
+    for line in section.splitlines():
+        line_lower = line.lower()
+        if "|" in line and "nginx" in line_lower and "os" in line_lower:
+            has_table = True
+            break
+    if not has_table:
         errors.append("Compatibility Matrix section missing the platform table")
     return errors
 
