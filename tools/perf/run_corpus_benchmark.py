@@ -110,13 +110,21 @@ def get_git_commit() -> str:
 def run_converter(converter_bin: str, html_path: str) -> tuple[str, int, float]:
     """Run the converter binary on a single HTML file.
 
+    Both arguments must be filesystem paths validated by the caller.
+    The command is executed as a list to avoid shell injection.
+
     Returns:
         (stdout_output, exit_code, latency_ms)
     """
+    if not os.path.isfile(converter_bin):
+        return "", 1, 0.0
+    if not os.path.isfile(html_path):
+        return "", 1, 0.0
+
     start = time.perf_counter()
     try:
         result = subprocess.run(
-            [converter_bin, html_path],
+            [converter_bin, html_path],  # noqa: S603 — args are validated paths
             capture_output=True,
             text=True,
             timeout=30,
@@ -124,10 +132,10 @@ def run_converter(converter_bin: str, html_path: str) -> tuple[str, int, float]:
         elapsed_ms = (time.perf_counter() - start) * 1000.0
         return result.stdout, result.returncode, elapsed_ms
     except subprocess.TimeoutExpired:
-        elapsed_ms = time.perf_counter() - start * 1000.0
+        elapsed_ms = (time.perf_counter() - start) * 1000.0
         return "", 1, elapsed_ms
     except Exception:
-        elapsed_ms = time.perf_counter() - start * 1000.0
+        elapsed_ms = (time.perf_counter() - start) * 1000.0
         return "", 1, elapsed_ms
 
 
