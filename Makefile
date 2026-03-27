@@ -120,7 +120,7 @@ test-all: build test-rust test-nginx-unit
 # Corpus benchmark targets
 CORPUS_CONVERTER_BIN := tools/corpus/test-corpus-conversion/target/release/test-corpus-conversion
 CORPUS_REPORT := perf/reports/corpus-report.json
-CORPUS_BASELINE := perf/reports/corpus-baseline.json
+CORPUS_BASELINE := perf/baselines/corpus-baseline.json
 CORPUS_VERDICT := perf/reports/corpus-verdict.json
 
 test-benchmark:
