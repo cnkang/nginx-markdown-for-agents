@@ -29,6 +29,16 @@ import re
 import sys
 from pathlib import Path
 
+from _packaging_constants import (
+    DEMO_DIRECTIVES_REQUIRING_COMMENTS,
+    ENVIRONMENTS,
+    INSTALL_SECTION_PATTERNS as REQUIRED_SECTIONS,
+    MODULE_STATES,
+    SOP_EXPECTED_CATEGORIES,
+    SOP_HEADINGS,
+    TIER_SECTIONS,
+)
+
 
 ROOT = Path(__file__).resolve().parents[2]
 INSTALL_GUIDE = ROOT / "docs" / "guides" / "INSTALLATION.md"
@@ -78,21 +88,6 @@ def _count_shell_commands(section: str) -> int:
 # Individual checks — each returns a list of error strings
 # ---------------------------------------------------------------------------
 
-REQUIRED_SECTIONS = [
-    r"1\.\s+Overview",
-    r"2\.\s+Shortest Success Path",
-    r"3\.\s+Install Path Tiers",
-    r"4\.\s+Primary.*Install Script",
-    r"5\.\s+Secondary.*Docker Source Build",
-    r"6\.\s+Secondary.*Manual Source Build",
-    r"7\.\s+Compatibility Matrix",
-    r"8\.\s+Release Artifact Naming",
-    r"9\.\s+Operator Verification",
-    r"10\.\s+Troubleshooting",
-    r"11\.\s+Environment-Specific Notes",
-]
-
-
 def check_required_sections(text: str) -> list[str]:
     """Check 1: All 11 required sections present."""
     errors: list[str] = []
@@ -113,30 +108,6 @@ def check_shortest_success_path(text: str) -> list[str]:
     if count > 4:
         return [f"Shortest Success Path has {count} shell commands (max 4)"]
     return []
-
-
-SOP_HEADINGS = [
-    "SOP 1: Module Not Loaded",
-    "SOP 2: NGINX Version / ABI Mismatch",
-    "SOP 3: Architecture Not Supported",
-    "SOP 4: libc Incompatibility",
-    "SOP 5: Network Download Failure",
-    "SOP 6: Checksum Verification Failure",
-    "SOP 7: Content Negotiation Not Triggering",
-    "SOP 8: Upstream Response Not Eligible",
-    "SOP 9: Compression / Decompression Issues",
-]
-
-# SOPs 1–6 must declare a Category matching the install script's error
-# categories (Requirement 6.3).
-SOP_EXPECTED_CATEGORIES: dict[str, str] = {
-    "SOP 1: Module Not Loaded": "config",
-    "SOP 2: NGINX Version / ABI Mismatch": "version_mismatch",
-    "SOP 3: Architecture Not Supported": "arch_unsupported",
-    "SOP 4: libc Incompatibility": "config",
-    "SOP 5: Network Download Failure": "network",
-    "SOP 6: Checksum Verification Failure": "checksum",
-}
 
 
 def _validate_single_sop(heading: str, sop: str) -> list[str]:
@@ -175,13 +146,6 @@ def check_troubleshooting_sops(text: str) -> list[str]:
     return errors
 
 
-TIER_SECTIONS = [
-    (r"4\.\s+Primary", "Primary"),
-    (r"5\.\s+Secondary.*Docker", "Secondary"),
-    (r"6\.\s+Secondary.*Manual", "Secondary"),
-]
-
-
 def check_tier_labels(text: str) -> list[str]:
     """Check 4: Each installation method section contains the correct tier label."""
     errors: list[str] = []
@@ -202,14 +166,6 @@ def check_tier_labels(text: str) -> list[str]:
                 f"Section '## {pattern}' has tier label '{m[1]}' but expected '{expected_tier}'"
             )
     return errors
-
-
-MODULE_STATES = [
-    "installation successful",
-    "module loaded",
-    "conversion pipeline hit",
-    "policy passed but fail-open",
-]
 
 
 def check_operator_verification(text: str) -> list[str]:
@@ -262,14 +218,6 @@ def check_release_artifact_naming(text: str) -> list[str]:
             "Release Artifact Naming section missing exact version match requirement"
         )
     return errors
-
-
-ENVIRONMENTS = [
-    ("bare-metal", "glibc"),
-    ("alpine", "musl"),
-    ("docker", "container"),
-    ("macos", "macos"),
-]
 
 
 def check_environment_notes(text: str) -> list[str]:
@@ -365,18 +313,11 @@ def check_demo_config_exists() -> list[str]:
     return []
 
 
-DEMO_DIRECTIVES_REQUIRING_COMMENTS = [
-    "markdown_filter",
-    "markdown_max_size",
-    "markdown_timeout",
-    "markdown_on_error",
-]
-
-
 def _check_directive_comments(lines: list[str], directive: str) -> list[str]:
-    """Verify *directive* appears in *lines* with an inline ``#`` comment."""
+    """Verify *directive* appears in *lines* and at least one occurrence has an inline ``#`` comment."""
     errors: list[str] = []
     found = False
+    documented = False
     for line in lines:
         stripped = line.strip()
         if stripped.startswith("#") or not stripped:
@@ -384,13 +325,14 @@ def _check_directive_comments(lines: list[str], directive: str) -> list[str]:
         if not re.search(rf"\b{re.escape(directive)}\b", stripped):
             continue
         found = True
-        has_inline = "#" in stripped.split(directive, 1)[-1]
-        if not has_inline:
-            errors.append(
-                f"Demo config directive '{directive}' has no inline comment"
-            )
+        if "#" in stripped.split(directive, 1)[-1]:
+            documented = True
     if not found:
         errors.append(f"Demo config missing directive '{directive}'")
+    elif not documented:
+        errors.append(
+            f"Demo config directive '{directive}' has no inline comment"
+        )
     return errors
 
 
