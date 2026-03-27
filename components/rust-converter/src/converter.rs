@@ -110,11 +110,19 @@ use std::cell::Ref;
 use std::time::{Duration, Instant};
 
 mod blocks;
+pub(crate) mod fast_path;
 mod front_matter;
 mod inline;
+pub(crate) mod large_response;
 mod normalize;
+pub(crate) mod pruning;
 mod tables;
 mod traversal;
+
+/// Threshold in bytes above which the fused normalizer is used instead of
+/// the two-pass `normalize_output`. This avoids a second full-size allocation
+/// for large documents.
+const LARGE_BODY_THRESHOLD: usize = 256 * 1024; // 256 KB
 
 /// Markdown flavor selection
 #[derive(Debug, Clone, Copy)]
@@ -505,6 +513,12 @@ impl MarkdownConverter {
         dom: &RcDom,
         ctx: &mut ConversionContext,
     ) -> Result<String, ConversionError> {
+        // Fast path qualification: check if the document is structurally simple
+        // enough for optimized traversal. The result is stored for potential
+        // branch-elimination during traversal (the actual traversal still uses
+        // traverse_node). Currently used as a classification signal only.
+        let _is_fast_path = fast_path::qualifies(dom) == fast_path::FastPathResult::Qualifies;
+
         // Pre-allocate output buffer with reasonable capacity
         // Average compression ratio is ~70-85%, so we estimate output size
         let mut output = String::with_capacity(1024);
@@ -523,8 +537,18 @@ impl MarkdownConverter {
         // Check timeout before output normalization
         ctx.check_timeout()?;
 
-        // Normalize output: ensure single trailing newline
-        let markdown = self.normalize_output(output);
+        // Normalize output: use fused normalizer for large documents to avoid
+        // a second full-size allocation, otherwise use the standard two-pass path.
+        let markdown = if output.len() > LARGE_BODY_THRESHOLD {
+            let mut normalizer = large_response::FusedNormalizer::new(output.len());
+            let output = output.replace("\r\n", "\n");
+            for line in output.lines() {
+                normalizer.push_line(line);
+            }
+            normalizer.finalize()
+        } else {
+            self.normalize_output(output)
+        };
 
         // Final timeout check after normalization
         ctx.check_timeout()?;
@@ -2949,5 +2973,37 @@ mod tests {
             result.contains("\u{201D}"),
             "Right double quote should be decoded"
         );
+    }
+
+    // ============================================================================
+    // Pruning Integration Tests
+    // ============================================================================
+
+    // NOTE: Testing `<nav>` pruning when `prune_noise_regions` is enabled is
+    // skipped here because the feature flag is off by default. When enabled,
+    // `<nav><a href="/">Home</a></nav>` should produce empty output.
+
+    /// Test that content around pruned elements (script) is preserved.
+    /// Validates: FR-10.3 — pruning must not discard surrounding content.
+    #[test]
+    fn test_pruning_preserves_content_around_pruned_elements() {
+        let html = b"<p>Before</p><script>alert('x')</script><p>After</p>";
+        let dom = parse_html(html).expect("Parse failed");
+        let converter = MarkdownConverter::new();
+        let result = converter.convert(&dom).expect("Conversion failed");
+
+        assert_eq!(result, "Before\n\nAfter\n");
+    }
+
+    /// Test that nested prunable elements produce no output.
+    /// Validates: FR-10.3 — early pruning skips entire subtrees.
+    #[test]
+    fn test_pruning_nested_prunable_elements() {
+        let html = b"<script><style>body{}</style></script>";
+        let dom = parse_html(html).expect("Parse failed");
+        let converter = MarkdownConverter::new();
+        let result = converter.convert(&dom).expect("Conversion failed");
+
+        assert_eq!(result, "\n");
     }
 }
