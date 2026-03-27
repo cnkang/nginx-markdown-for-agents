@@ -124,6 +124,8 @@ CORPUS_BASELINE := perf/baselines/corpus-baseline.json
 CORPUS_VERDICT := perf/reports/corpus-verdict.json
 
 test-benchmark:
+	@echo "Validating corpus metadata..."
+	tools/corpus/validate_corpus.sh
 	@echo "Building test-corpus-conversion binary..."
 	cd tools/corpus/test-corpus-conversion && cargo build --release --quiet
 	@echo "Running corpus benchmark..."
