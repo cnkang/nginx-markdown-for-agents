@@ -35,7 +35,7 @@ from check_packaging_docs import (
 
 class TestSectionText:
     def test_extracts_section_between_headings(self):
-        result = self._extracted_from_test_handles_extra_whitespace_in_heading_2(
+        result = self._assert_section_contains(
             "## 1. Overview\nHello\n## 2. Next\nWorld\n",
             r"1\.\s+Overview",
             "Hello",
@@ -43,7 +43,7 @@ class TestSectionText:
         assert "World" not in result
 
     def test_extracts_last_section_at_eof(self):
-        result = self._extracted_from_test_handles_extra_whitespace_in_heading_2(
+        self._assert_section_contains(
             "## 1. Foo\nA\n## 2. Bar\nB\n", r"2\.\s+Bar", "B"
         )
 
@@ -52,17 +52,15 @@ class TestSectionText:
         assert _section_text(text, r"99\.\s+Missing") == ""
 
     def test_handles_extra_whitespace_in_heading(self):
-        result = self._extracted_from_test_handles_extra_whitespace_in_heading_2(
+        self._assert_section_contains(
             "## 4.  Primary: Install Script\nContent\n## 5. Next\n",
             r"4\.\s+Primary.*Install Script",
             "Content",
         )
 
-    # TODO Rename this here and in `test_extracts_section_between_headings`, `test_extracts_last_section_at_eof` and `test_handles_extra_whitespace_in_heading`
-    def _extracted_from_test_handles_extra_whitespace_in_heading_2(self, arg0, arg1, arg2):
-        text = arg0
-        result = _section_text(text, arg1)
-        assert arg2 in result
+    def _assert_section_contains(self, text, pattern, expected):
+        result = _section_text(text, pattern)
+        assert expected in result
         return result
 
     def test_does_not_match_h3_headings(self):
@@ -76,7 +74,7 @@ class TestSectionText:
 
 class TestSopSectionText:
     def test_extracts_sop_between_headings(self):
-        result = self._extracted_from_test_escapes_special_chars_in_heading_2(
+        result = self._assert_sop_contains(
             "#### SOP 1: Module Not Loaded\nContent1\n"
             "#### SOP 2: Version Mismatch\nContent2\n",
             "SOP 1: Module Not Loaded",
@@ -85,14 +83,14 @@ class TestSopSectionText:
         assert "Content2" not in result
 
     def test_extracts_last_sop_at_eof(self):
-        result = self._extracted_from_test_escapes_special_chars_in_heading_2(
+        self._assert_sop_contains(
             "#### SOP 9: Compression / Decompression Issues\nLast SOP\n",
             "SOP 9: Compression / Decompression Issues",
             "Last SOP",
         )
 
     def test_stops_at_horizontal_rule(self):
-        result = self._extracted_from_test_escapes_special_chars_in_heading_2(
+        result = self._assert_sop_contains(
             "#### SOP 1: Module Not Loaded\nContent\n\n---\n\nOther stuff\n",
             "SOP 1: Module Not Loaded",
             "Content",
@@ -104,17 +102,15 @@ class TestSopSectionText:
         assert _sop_section_text(text, "SOP 99: Nonexistent") == ""
 
     def test_escapes_special_chars_in_heading(self):
-        result = self._extracted_from_test_escapes_special_chars_in_heading_2(
+        self._assert_sop_contains(
             "#### SOP 9: Compression / Decompression Issues\nBody\n",
             "SOP 9: Compression / Decompression Issues",
             "Body",
         )
 
-    # TODO Rename this here and in `test_extracts_sop_between_headings`, `test_extracts_last_sop_at_eof`, `test_stops_at_horizontal_rule` and `test_escapes_special_chars_in_heading`
-    def _extracted_from_test_escapes_special_chars_in_heading_2(self, arg0, arg1, arg2):
-        text = arg0
-        result = _sop_section_text(text, arg1)
-        assert arg2 in result
+    def _assert_sop_contains(self, text, heading, expected):
+        result = _sop_section_text(text, heading)
+        assert expected in result
         return result
 
 
@@ -162,41 +158,39 @@ class TestValidateSingleSop:
         assert _validate_single_sop("SOP 1: Module Not Loaded", sop) == []
 
     def test_missing_symptom(self):
-        self._extracted_from_test_missing_category_field_2(
+        self._assert_sop_error(
             "**Root Cause:** X\n**Resolution Steps:** Y\n**Category:** `config`\n",
             "Symptom",
         )
 
     def test_missing_root_cause(self):
-        self._extracted_from_test_missing_category_field_2(
+        self._assert_sop_error(
             "**Symptom:** X\n**Resolution Steps:** Y\n**Category:** `config`\n",
             "Root Cause",
         )
 
     def test_missing_resolution(self):
-        self._extracted_from_test_missing_category_field_2(
+        self._assert_sop_error(
             "**Symptom:** X\n**Root Cause:** Y\n**Category:** `config`\n",
             "Resolution",
         )
 
     def test_wrong_category(self):
-        self._extracted_from_test_missing_category_field_2(
+        self._assert_sop_error(
             "**Category:** `network`\n"
             "**Symptom:** X\n**Root Cause:** Y\n**Resolution Steps:** Z\n",
             "expected 'config'",
         )
 
     def test_missing_category_field(self):
-        self._extracted_from_test_missing_category_field_2(
+        self._assert_sop_error(
             "**Symptom:** X\n**Root Cause:** Y\n**Resolution Steps:** Z\n",
             "missing Category",
         )
 
-    # TODO Rename this here and in `test_missing_symptom`, `test_missing_root_cause`, `test_missing_resolution`, `test_wrong_category` and `test_missing_category_field`
-    def _extracted_from_test_missing_category_field_2(self, arg0, arg1):
-        sop = arg0
+    def _assert_sop_error(self, sop, expected_fragment):
         errors = _validate_single_sop("SOP 1: Module Not Loaded", sop)
-        assert any(arg1 in e for e in errors)
+        assert any(expected_fragment in e for e in errors)
 
     def test_no_category_check_for_sop7(self):
         sop = "**Symptom:** X\n**Root Cause:** Y\n**Resolution Steps:** Z\n"
@@ -219,7 +213,7 @@ class TestCheckTierLabels:
         assert check_tier_labels(text) == []
 
     def test_wrong_tier_fails(self):
-        self._extracted_from_test_missing_tier_label_fails_2(
+        self._assert_tier_error(
             "## 4. Primary: Install Script\n**Tier: Convenience**\n"
             "## 5. Secondary: Docker Source Build\n**Tier: Secondary**\n"
             "## 6. Secondary: Manual Source Build\n**Tier: Secondary**\n"
@@ -228,7 +222,7 @@ class TestCheckTierLabels:
         )
 
     def test_missing_tier_label_fails(self):
-        self._extracted_from_test_missing_tier_label_fails_2(
+        self._assert_tier_error(
             "## 4. Primary: Install Script\nNo tier here\n"
             "## 5. Secondary: Docker Source Build\n**Tier: Secondary**\n"
             "## 6. Secondary: Manual Source Build\n**Tier: Secondary**\n"
@@ -236,11 +230,9 @@ class TestCheckTierLabels:
             "missing tier label",
         )
 
-    # TODO Rename this here and in `test_wrong_tier_fails` and `test_missing_tier_label_fails`
-    def _extracted_from_test_missing_tier_label_fails_2(self, arg0, arg1):
-        text = arg0
+    def _assert_tier_error(self, text, expected_fragment):
         errors = check_tier_labels(text)
-        assert any(arg1 in e for e in errors)
+        assert any(expected_fragment in e for e in errors)
 
 
 # ---------------------------------------------------------------------------
@@ -306,20 +298,18 @@ class TestCheckDirectiveComments:
         assert _check_directive_comments(lines, "markdown_filter") == []
 
     def test_directive_without_comment_fails(self):
-        self._extracted_from_test_missing_directive_fails_2(
+        self._assert_directive_error(
             "    markdown_filter on;", "no inline comment"
         )
 
     def test_missing_directive_fails(self):
-        self._extracted_from_test_missing_directive_fails_2(
+        self._assert_directive_error(
             "    other_directive on;", "missing directive"
         )
 
-    # TODO Rename this here and in `test_directive_without_comment_fails` and `test_missing_directive_fails`
-    def _extracted_from_test_missing_directive_fails_2(self, arg0, arg1):
-        lines = [arg0]
-        errors = _check_directive_comments(lines, "markdown_filter")
-        assert any(arg1 in e for e in errors)
+    def _assert_directive_error(self, line, expected_fragment):
+        errors = _check_directive_comments([line], "markdown_filter")
+        assert any(expected_fragment in e for e in errors)
 
     def test_comment_line_is_skipped(self):
         lines = ["    # markdown_filter is great", "    markdown_filter on;  # yes"]
@@ -354,7 +344,7 @@ class TestCheckCompatibilityMatrix:
         assert check_compatibility_matrix(text) == []
 
     def test_missing_matrix_reference(self):
-        self._extracted_from_test_missing_table_2(
+        self._assert_matrix_error(
             "## 7. Compatibility Matrix\n"
             "| NGINX Version | OS Type | Arch |\n"
             "## 8. Next\n",
@@ -362,16 +352,14 @@ class TestCheckCompatibilityMatrix:
         )
 
     def test_missing_table(self):
-        self._extracted_from_test_missing_table_2(
+        self._assert_matrix_error(
             "## 7. Compatibility Matrix\nrelease-matrix.json\nNo table\n## 8. Next\n",
             "missing the platform table",
         )
 
-    # TODO Rename this here and in `test_missing_matrix_reference` and `test_missing_table`
-    def _extracted_from_test_missing_table_2(self, arg0, arg1):
-        text = arg0
+    def _assert_matrix_error(self, text, expected_fragment):
         errors = check_compatibility_matrix(text)
-        assert any(arg1 in e for e in errors)
+        assert any(expected_fragment in e for e in errors)
 
     def test_missing_section(self):
         errors = check_compatibility_matrix("## 1. Overview\nStuff\n")
