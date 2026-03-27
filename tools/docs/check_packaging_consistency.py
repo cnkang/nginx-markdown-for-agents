@@ -21,6 +21,11 @@ import re
 import sys
 from pathlib import Path
 
+from _packaging_constants import (
+    INSTALL_SHORTEST_PATH_PATTERN,
+    README_QUICK_START_HEADING,
+)
+
 
 ROOT = Path(__file__).resolve().parents[2]
 README = ROOT / "README.md"
@@ -43,7 +48,7 @@ def _extract_quick_start(text: str) -> str:
     collecting = False
     parts: list[str] = []
     for line in lines:
-        if line.startswith("## Quick Start"):
+        if line.startswith(README_QUICK_START_HEADING):
             collecting = True
         elif collecting and line.startswith("## "):
             break
@@ -343,7 +348,7 @@ def _extract_install_shortest_path(text: str) -> str:
     collecting = False
     parts: list[str] = []
     for line in lines:
-        if re.match(r"^## 2\.\s+Shortest Success Path", line):
+        if re.match(INSTALL_SHORTEST_PATH_PATTERN, line):
             collecting = True
         elif collecting and line.startswith("## "):
             break
