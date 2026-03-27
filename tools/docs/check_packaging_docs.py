@@ -45,14 +45,14 @@ def _read_text(path: Path) -> str:
 
 def _section_text(full_text: str, heading_pattern: str) -> str:
     """Return the text of a ## section whose heading matches *heading_pattern*."""
-    pattern = rf"(^## {heading_pattern}.*?)(?=^## |\Z)"
+    pattern = rf"(^## {heading_pattern}.*?)(?=(?:^## )|\Z)"
     m = re.search(pattern, full_text, re.MULTILINE | re.DOTALL)
     return m[1] if m else ""
 
 
 def _sop_section_text(full_text: str, sop_heading: str) -> str:
     """Return the text of a #### SOP section."""
-    pattern = rf"(^#### {re.escape(sop_heading)}.*?)(?=^#### |\n---\n|\Z)"
+    pattern = rf"(^#### {re.escape(sop_heading)}.*?)(?=(?:^#### )|(?:\n---\n)|\Z)"
     m = re.search(pattern, full_text, re.MULTILINE | re.DOTALL)
     return m[1] if m else ""
 
