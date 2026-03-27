@@ -719,6 +719,64 @@ class TestComparisonLogic:
         p50_verdict = verdict["metric-comparisons"]["p50-latency-ms"]["verdict"]
         assert p50_verdict in ("warn", "fail")
 
+    def test_fixture_regression_forces_fail(self):
+        """Fixture-level regression must fail overall verdict."""
+        baseline = _make_report(
+            _make_summary(),
+            [
+                {
+                    "fixture-id": "simple/basic",
+                    "page-type": "clean-article",
+                    "conversion-result": "converted",
+                    "input-bytes": 100,
+                    "output-bytes": 60,
+                    "latency-ms": 1.0,
+                    "token-reduction-percent": 40.0,
+                    "failure-corpus": False,
+                }
+            ],
+        )
+        current = _make_report(
+            _make_summary(),
+            [
+                {
+                    "fixture-id": "simple/basic",
+                    "page-type": "clean-article",
+                    "conversion-result": "failed-open",
+                    "input-bytes": 100,
+                    "output-bytes": 0,
+                    "latency-ms": 1.0,
+                    "token-reduction-percent": 0.0,
+                    "failure-corpus": False,
+                }
+            ],
+        )
+
+        verdict = compare_reports(baseline, current, QUALITY_THRESHOLDS)
+        assert verdict["overall-verdict"] == "fail"
+
+    def test_removed_fixture_forces_fail(self):
+        """Removed fixtures must fail overall verdict."""
+        baseline = _make_report(
+            _make_summary(),
+            [
+                {
+                    "fixture-id": "simple/basic",
+                    "page-type": "clean-article",
+                    "conversion-result": "converted",
+                    "input-bytes": 100,
+                    "output-bytes": 60,
+                    "latency-ms": 1.0,
+                    "token-reduction-percent": 40.0,
+                    "failure-corpus": False,
+                }
+            ],
+        )
+        current = _make_report(_make_summary(), [])
+
+        verdict = compare_reports(baseline, current, QUALITY_THRESHOLDS)
+        assert verdict["overall-verdict"] == "fail"
+
 
 # ---------------------------------------------------------------------------
 # 12.4: PR summary formatter
