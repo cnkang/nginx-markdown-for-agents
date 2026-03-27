@@ -106,8 +106,8 @@ def _extract_nginx_code_blocks(text: str) -> str:
 # ---------------------------------------------------------------------------
 
 def check_curl_consistency() -> list[str]:
-    """Every verification curl in README Quick Start must appear identically
-    in the installation guide (Requirement 8.1)."""
+    """README Quick Start and installation guide Shortest Success Path must
+    contain the same set of verification curls (Requirement 8.1)."""
     readme_text = _read(README)
     install_text = _read(INSTALL_GUIDE)
 
@@ -115,18 +115,30 @@ def check_curl_consistency() -> list[str]:
     if not quick_start:
         return ["Cannot locate '## Quick Start' section in README"]
 
+    shortest_path = _extract_install_shortest_path(install_text)
+    if not shortest_path:
+        return ["Cannot locate '## 2. Shortest Success Path' in installation guide"]
+
     readme_curls = _extract_verification_curls(quick_start)
-    install_curls = _extract_verification_curls(install_text)
+    install_curls = _extract_verification_curls(shortest_path)
 
     if not readme_curls:
         return ["No verification curls found in README Quick Start"]
 
+    readme_set = {_normalise_curl_for_comparison(c) for c in readme_curls}
     install_set = {_normalise_curl_for_comparison(c) for c in install_curls}
-    errors: list[str] = [
-        f"README Quick Start curl not found in installation guide: {cmd}"
+
+    errors: list[str] = []
+    errors.extend(
+        f"README Quick Start curl not in Shortest Success Path: {cmd}"
         for cmd in readme_curls
         if _normalise_curl_for_comparison(cmd) not in install_set
-    ]
+    )
+    errors.extend(
+        f"Shortest Success Path curl not in README Quick Start: {cmd}"
+        for cmd in install_curls
+        if _normalise_curl_for_comparison(cmd) not in readme_set
+    )
     return errors
 
 
