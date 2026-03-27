@@ -318,8 +318,7 @@ def _extract_curl_hosts(text: str) -> set[str]:
     """Extract host[:port] from verification curl URLs in *text*."""
     hosts: set[str] = set()
     for cmd in _extract_verification_curls(text):
-        m = re.search(r"https?://([^/\s]+)", cmd)
-        if m:
+        if m := re.search(r"https?://([^/\s]+)", cmd):
             hosts.add(m[1])
     return hosts
 
