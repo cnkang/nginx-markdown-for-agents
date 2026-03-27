@@ -242,17 +242,18 @@ def test_property5_token_reduction_per_fixture(input_bytes, output_bytes, factor
 def test_property5_aggregate_token_reduction(fixtures, factor):
     """Aggregate token reduction must be the input-bytes-weighted average."""
     # Ensure output < input for valid reduction
-    for f in fixtures:
-        if f["output-bytes"] >= f["input-bytes"]:
-            f["output-bytes"] = f["input-bytes"] // 2
+    normalized = [
+        {**f, "output-bytes": min(f["output-bytes"], f["input-bytes"] // 2)}
+        for f in fixtures
+    ]
 
-    result = compute_aggregate_token_reduction(fixtures, factor)
+    result = compute_aggregate_token_reduction(normalized, factor)
 
-    total_input = sum(f["input-bytes"] for f in fixtures)
+    total_input = sum(f["input-bytes"] for f in normalized)
     weighted_sum = sum(
         compute_token_reduction(f["input-bytes"], f["output-bytes"], factor)
         * f["input-bytes"]
-        for f in fixtures
+        for f in normalized
     )
     expected = weighted_sum / total_input if total_input > 0 else 0.0
 

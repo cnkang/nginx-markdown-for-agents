@@ -186,7 +186,7 @@ def compute_aggregate_token_reduction(
 
 
 def compute_percentile(values: list[float], pct: float) -> float:
-    """Compute a percentile from a sorted list using nearest-rank method."""
+    """Compute a percentile from a sorted list using linear interpolation."""
     if not values:
         return 0.0
     sorted_vals = sorted(values)
