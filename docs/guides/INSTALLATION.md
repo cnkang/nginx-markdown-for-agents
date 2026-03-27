@@ -783,6 +783,7 @@ The `load_module` directive is missing from `nginx.conf`, or the path to the `.s
    ```
 3. If the file exists, confirm the `load_module` directive is present at the top of `nginx.conf` (before the `http {}` block):
    ```bash
+   # If your NGINX uses a custom --conf-path, replace /etc/nginx/nginx.conf accordingly
    grep -n 'load_module' /etc/nginx/nginx.conf
    ```
 4. If missing, add it manually:
