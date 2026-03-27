@@ -759,12 +759,19 @@ The `load_module` directive is missing from `nginx.conf`, or the path to the `.s
 
 1. Determine your modules directory from `nginx -V` and verify the module file exists:
    ```bash
-   # Find the modules path (varies by platform: /usr/lib/nginx/modules, /etc/nginx/modules, etc.)
+   # Find the modules path (varies by platform)
    MODULES_PATH=$(nginx -V 2>&1 | sed -n 's/.*--modules-path=\([^ ]*\).*/\1/p')
-   echo "${MODULES_PATH:-/usr/lib/nginx/modules}"
+
+   # If extraction fails, probe common locations
+   if [ -z "$MODULES_PATH" ]; then
+       for p in /usr/lib/nginx/modules /etc/nginx/modules /usr/local/nginx/modules; do
+           [ -d "$p" ] && MODULES_PATH="$p" && break
+       done
+   fi
+   echo "Modules directory: ${MODULES_PATH:-(not found)}"
 
    # Check the module file exists in that directory
-   ls -lh "${MODULES_PATH:-/usr/lib/nginx/modules}/ngx_http_markdown_filter_module.so"
+   ls -lh "${MODULES_PATH}/ngx_http_markdown_filter_module.so"
    ```
 2. If the file is missing, re-run the install script:
    ```bash
@@ -875,9 +882,14 @@ A glibc-linked binary was installed on a musl-based system (e.g., Alpine Linux) 
    ```
 3. Verify the installed module matches your libc by inspecting its dynamic dependencies:
    ```bash
-   # Use the modules path from nginx -V (see SOP 1 step 1); falls back to common default
+   # Use the modules path from nginx -V (see SOP 1 step 1 for multi-path probe)
    MODULES_PATH=$(nginx -V 2>&1 | sed -n 's/.*--modules-path=\([^ ]*\).*/\1/p')
-   ldd "${MODULES_PATH:-/usr/lib/nginx/modules}/ngx_http_markdown_filter_module.so"
+   if [ -z "$MODULES_PATH" ]; then
+       for p in /usr/lib/nginx/modules /etc/nginx/modules /usr/local/nginx/modules; do
+           [ -d "$p" ] && MODULES_PATH="$p" && break
+       done
+   fi
+   ldd "${MODULES_PATH}/ngx_http_markdown_filter_module.so"
    ```
    - **glibc**: output references `libc.so.6` and `/lib/x86_64-linux-gnu/` (or similar)
    - **musl**: output references `ld-musl-*.so.1` or shows "statically linked"
