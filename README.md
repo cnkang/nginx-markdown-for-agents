@@ -55,11 +55,10 @@ AI bot (by User-Agent)                 -> Markdown (via NGINX config)
 
 ## Quick Start
 
-Three steps are enough for a first trial:
+Two steps are enough for a first trial:
 
 1. Install the module.
-2. Enable it on one location.
-3. Verify that Markdown and HTML variants both behave as expected.
+2. Verify that Markdown and HTML variants both behave as expected.
 
 ### 1. Install the module
 
@@ -72,31 +71,11 @@ The install script auto-detects the local NGINX version, downloads the matching 
 
 For alternative installation methods (source builds, Docker, custom NGINX builds), troubleshooting, and detailed instructions, see the [Installation Guide](docs/guides/INSTALLATION.md).
 
-### 2. Enable Markdown on one route
+### 2. Verify behavior
 
-```nginx
-load_module modules/ngx_http_markdown_filter_module.so;
+The install script already enables `markdown_filter on` and wires `load_module`, so the default NGINX welcome page is ready for conversion. No additional configuration is needed for a first trial.
 
-http {
-    upstream backend {
-        server 127.0.0.1:8080;
-    }
-
-    server {
-        listen 80;
-
-        location /docs/ {
-            markdown_filter on;
-            proxy_set_header Accept-Encoding "";
-            proxy_pass http://backend;
-        }
-    }
-}
-```
-
-`proxy_set_header Accept-Encoding "";` is the simplest starting point when your upstream may compress responses. Once the basic path works, you can move to the module's built-in compressed-response handling described in [Automatic Decompression](docs/features/AUTOMATIC_DECOMPRESSION.md).
-
-### 3. Verify behavior
+If you want to enable conversion on a specific route with a backend instead, see the [Deployment Examples](docs/guides/DEPLOYMENT_EXAMPLES.md).
 
 ```bash
 # Markdown variant

@@ -261,8 +261,58 @@ def check_matrix_consistency() -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# Main
+# Check 6 — README Quick Start internal consistency (config ↔ curl paths)
 # ---------------------------------------------------------------------------
+
+def _extract_curl_paths(text: str) -> set[str]:
+    """Extract URL paths from verification curl commands in *text*."""
+    paths: set[str] = set()
+    for cmd in _extract_verification_curls(text):
+        m = re.search(r"https?://[^/\s]+(\/\S*)", cmd)
+        paths.add(m[1] if m else "/")
+    return paths
+
+
+def _extract_nginx_location_paths(text: str) -> set[str]:
+    """Extract ``location`` paths from nginx code blocks in *text*."""
+    nginx_content = _extract_nginx_code_blocks(text)
+    return set(re.findall(r"\blocation\s+(\S+)\s*\{", nginx_content))
+
+
+def check_readme_internal_consistency() -> list[str]:
+    """Curl verification URLs in README Quick Start must target paths that
+    are configured in the nginx blocks within the same section, or ``/``
+    when no nginx config block is present (install-script auto-wired)."""
+    readme_text = _read(README)
+    quick_start = _extract_quick_start(readme_text)
+    if not quick_start:
+        return ["Cannot locate '## Quick Start' section in README"]
+
+    curl_paths = _extract_curl_paths(quick_start)
+    if not curl_paths:
+        return []
+
+    location_paths = _extract_nginx_location_paths(quick_start)
+
+    # If no nginx config block in Quick Start, the install script auto-wires
+    # markdown_filter on the whole server — only "/" is valid.
+    if not location_paths:
+        location_paths = {"/"}
+
+    errors: list[str] = []
+    for path in sorted(curl_paths):
+        # Normalise trailing slash for comparison
+        normalised = path.rstrip("/") or "/"
+        matched = any(
+            (loc.rstrip("/") or "/") == normalised
+            for loc in location_paths
+        )
+        if not matched:
+            errors.append(
+                f"README Quick Start curl targets '{path}' but no matching "
+                f"location is configured (found: {sorted(location_paths)})"
+            )
+    return errors
 
 def main() -> int:
     missing: list[str] = []
@@ -283,6 +333,7 @@ def main() -> int:
         ("Verification curl pattern (-sD - -o /dev/null)", check_curl_pattern()),
         ("Artifact name pattern compliance", check_artifact_names()),
         ("Matrix consistency (release-matrix.json ↔ install guide)", check_matrix_consistency()),
+        ("README Quick Start internal consistency (config ↔ curl paths)", check_readme_internal_consistency()),
     ]
 
     for _label, errs in checks:
