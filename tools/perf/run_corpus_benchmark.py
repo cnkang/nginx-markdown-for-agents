@@ -41,9 +41,12 @@ from report_schema import validate_report  # noqa: E402
 from report_utils import detect_platform, write_json  # noqa: E402
 
 # Exit code used by the converter to signal "skipped" (ineligible input).
-# The test-corpus-conversion binary exits with code 2 when the input is
-# detected as ineligible for conversion (e.g. no HTML tags found).
-# The benchmark script maps exit code 2 to the "skipped" classification.
+# The test-corpus-conversion binary currently only exits with 0 (success)
+# or 1 (error).  Exit code 2 is reserved for a future converter version
+# that can signal "input is ineligible for conversion".  The benchmark
+# script, report schema, and comparison logic handle all three
+# Conversion_Result values (converted, skipped, failed-open) so the
+# pipeline is ready when the converter gains eligibility detection.
 CONVERTER_SKIP_EXIT_CODE = 2
 
 # ---------------------------------------------------------------------------
@@ -121,10 +124,10 @@ def run_converter(converter_bin: str, html_path: str) -> tuple[str, int, float]:
         elapsed_ms = (time.perf_counter() - start) * 1000.0
         return result.stdout, result.returncode, elapsed_ms
     except subprocess.TimeoutExpired:
-        elapsed_ms = (time.perf_counter() - start) * 1000.0
+        elapsed_ms = time.perf_counter() - start * 1000.0
         return "", 1, elapsed_ms
     except Exception:
-        elapsed_ms = (time.perf_counter() - start) * 1000.0
+        elapsed_ms = time.perf_counter() - start * 1000.0
         return "", 1, elapsed_ms
 
 
@@ -330,7 +333,7 @@ def write_examples(
         shutil.copy2(html_path, examples_dir / f"{base_name}.html")
 
         # Run converter for the .md output
-        output, exit_code, _ = run_converter(converter_bin, html_path)
+        output, _, _ = run_converter(converter_bin, html_path)
         md_path = examples_dir / f"{base_name}.md"
         with open(md_path, "w", encoding="utf-8") as f:
             f.write(output)
