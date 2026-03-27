@@ -78,21 +78,10 @@ def _normalise_curl_for_comparison(cmd: str) -> str:
     """Normalise a curl command for structural comparison.
 
     Replaces only the scheme + host[:port] portion of URLs, preserving the
-    path.  This lets the consistency check detect unintended endpoint drift
-    while still allowing the known difference between the README (proxy
-    example at ``/docs/``) and the installation guide (default welcome page
-    at ``/``).
+    path.  README and installation guide verification commands must use the
+    same URL path per Requirement 8.1.
     """
     return re.sub(r"https?://[^/\s]+", "HOST", cmd)
-
-
-# Allowed URL-path mappings between README Quick Start and installation guide.
-# Key = normalised README curl, Value = set of normalised install-guide curls
-# that are considered equivalent.  Only the path portion differs; flags,
-# headers, and output redirection must be identical.
-_ALLOWED_PATH_MAPPINGS: dict[str, str] = {
-    "HOST/docs/": "HOST/",
-}
 
 
 def _extract_nginx_code_blocks(text: str) -> str:
@@ -117,8 +106,8 @@ def _extract_nginx_code_blocks(text: str) -> str:
 # ---------------------------------------------------------------------------
 
 def check_curl_consistency() -> list[str]:
-    """Every verification curl in README Quick Start must appear in the
-    installation guide (or match via the allowed path mapping)."""
+    """Every verification curl in README Quick Start must appear identically
+    in the installation guide (Requirement 8.1)."""
     readme_text = _read(README)
     install_text = _read(INSTALL_GUIDE)
 
@@ -133,21 +122,11 @@ def check_curl_consistency() -> list[str]:
         return ["No verification curls found in README Quick Start"]
 
     install_set = {_normalise_curl_for_comparison(c) for c in install_curls}
-
-    errors: list[str] = []
-    for cmd in readme_curls:
-        normalised = _normalise_curl_for_comparison(cmd)
-        if normalised in install_set:
-            continue
-        # Check allowed path mappings
-        mapped = normalised
-        for src_path, dst_path in _ALLOWED_PATH_MAPPINGS.items():
-            mapped = mapped.replace(src_path, dst_path)
-        if mapped in install_set:
-            continue
-        errors.append(
-            f"README Quick Start curl not found in installation guide: {cmd}"
-        )
+    errors: list[str] = [
+        f"README Quick Start curl not found in installation guide: {cmd}"
+        for cmd in readme_curls
+        if _normalise_curl_for_comparison(cmd) not in install_set
+    ]
     return errors
 
 

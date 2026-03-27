@@ -100,10 +100,10 @@ http {
 
 ```bash
 # Markdown variant
-curl -sD - -o /dev/null -H "Accept: text/markdown" http://localhost/docs/
+curl -sD - -o /dev/null -H "Accept: text/markdown" http://localhost/
 
 # Original HTML remains available
-curl -sD - -o /dev/null -H "Accept: text/html" http://localhost/docs/
+curl -sD - -o /dev/null -H "Accept: text/html" http://localhost/
 ```
 
 Expected result:
