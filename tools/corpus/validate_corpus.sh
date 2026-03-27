@@ -24,8 +24,6 @@ SEPARATOR_LINE="========================================="
 
 # Valid enum values
 VALID_PAGE_TYPES="clean-article documentation nav-heavy boilerplate-heavy complex-common"
-VALID_CONVERSION_RESULTS="converted skipped failed-open"
-REQUIRED_META_FIELDS="fixture-id page-type expected-conversion-result input-size-bytes source-description failure-corpus"
 
 echo "$SEPARATOR_LINE"
 echo "Comprehensive Corpus Validation"
@@ -38,10 +36,10 @@ cd "$ROOT/components/rust-converter"
 cargo build --release --quiet 2>&1 | grep -v "warning:" || true
 cd "$ROOT"
 
-# Find all HTML files (exclude generated huge files)
-HTML_FILES=$(find "$ROOT/tests/corpus" -name "*.html" -type f ! -name "generate-*" | sort)
+# Count HTML files safely using null-delimited find
+HTML_COUNT=$(find "$ROOT/tests/corpus" -name "*.html" -type f ! -name "generate-*" -print0 | tr -dc '\0' | wc -c | tr -d ' ')
 
-echo "Found $(echo "$HTML_FILES" | wc -l | tr -d ' ') HTML test files"
+echo "Found ${HTML_COUNT} HTML test files"
 echo ""
 
 # Smoke-check converter runtime once (avoids repeated cargo startup per file).
@@ -62,19 +60,23 @@ if [[ ! -f "$CORPUS_VERSION_FILE" ]]; then
     echo -e "${RED}✗${NC} corpus-version.json not found"
     META_ERRORS=$((META_ERRORS + 1))
 else
-    VERSION=$(python3 -c "
-import json, sys, re
+    # Pass path via env var to avoid shell injection; use single-quoted
+    # Python string so the regex dollar sign is not interpreted by bash.
+    VERSION=$(VALIDATE_PATH="$CORPUS_VERSION_FILE" python3 -c '
+import json, sys, re, os
 try:
-    data = json.load(open('$CORPUS_VERSION_FILE'))
-    v = data.get('version', '')
-    if not re.match(r'^\d+\.\d+\.\d+$', v):
-        print('INVALID', file=sys.stderr)
+    path = os.environ["VALIDATE_PATH"]
+    with open(path) as f:
+        data = json.load(f)
+    v = data.get("version", "")
+    if not re.match(r"^\d+\.\d+\.\d+$", v):
+        print("INVALID", file=sys.stderr)
         sys.exit(1)
     print(v)
 except Exception as e:
-    print(f'ERROR: {e}', file=sys.stderr)
+    print(f"ERROR: {e}", file=sys.stderr)
     sys.exit(1)
-" 2>&1)
+' 2>&1)
     if [[ $? -eq 0 ]]; then
         echo -e "${GREEN}✓${NC} corpus-version.json: v${VERSION}"
     else
@@ -96,10 +98,10 @@ for pt in $VALID_PAGE_TYPES; do
 done
 FAILURE_CORPUS_COUNT=0
 
-for html_file in $HTML_FILES; do
+# Use null-delimited find + while-read to handle filenames safely
+while IFS= read -r -d '' html_file; do
     TOTAL=$((TOTAL + 1))
-    rel_path="${html_file#$ROOT/}"
-    filename=$(basename "$html_file")
+    rel_path="${html_file#"$ROOT"/}"
 
     if [[ ! -f "$html_file" ]] || [[ ! -s "$html_file" ]]; then
         echo -e "${RED}✗${NC} $rel_path (empty or missing)"
@@ -121,45 +123,52 @@ for html_file in $HTML_FILES; do
         continue
     fi
 
-    # Validate metadata sidecar content
-    META_RESULT=$(python3 -c "
-import json, sys
+    # Validate metadata sidecar content — pass path via env to avoid injection.
+    # Use single-quoted Python block so no shell interpolation occurs.
+    # Access dict keys via .get() to avoid backslash-quote issues.
+    META_RESULT=$(META_FILE="$meta_file" python3 -c '
+import json, sys, os
 
-valid_page_types = {'clean-article', 'documentation', 'nav-heavy', 'boilerplate-heavy', 'complex-common'}
-valid_results = {'converted', 'skipped', 'failed-open'}
-required_fields = ['fixture-id', 'page-type', 'expected-conversion-result', 'input-size-bytes', 'source-description', 'failure-corpus']
+valid_page_types = {"clean-article", "documentation", "nav-heavy", "boilerplate-heavy", "complex-common"}
+valid_results = {"converted", "skipped", "failed-open"}
+required_fields = ["fixture-id", "page-type", "expected-conversion-result", "input-size-bytes", "source-description", "failure-corpus"]
 
 try:
-    with open('$meta_file') as f:
+    path = os.environ["META_FILE"]
+    with open(path) as f:
         data = json.load(f)
 
     errors = []
     for field in required_fields:
         if field not in data:
-            errors.append(f'missing field: {field}')
+            errors.append("missing field: " + field)
 
-    if 'page-type' in data and data['page-type'] not in valid_page_types:
-        errors.append(f'invalid page-type: {data[\"page-type\"]}')
+    pt = data.get("page-type")
+    if pt is not None and pt not in valid_page_types:
+        errors.append("invalid page-type: " + str(pt))
 
-    if 'expected-conversion-result' in data and data['expected-conversion-result'] not in valid_results:
-        errors.append(f'invalid expected-conversion-result: {data[\"expected-conversion-result\"]}')
+    cr = data.get("expected-conversion-result")
+    if cr is not None and cr not in valid_results:
+        errors.append("invalid expected-conversion-result: " + str(cr))
 
-    if 'input-size-bytes' in data and not isinstance(data['input-size-bytes'], int):
-        errors.append(f'input-size-bytes must be integer')
+    isb = data.get("input-size-bytes")
+    if isb is not None and not isinstance(isb, int):
+        errors.append("input-size-bytes must be integer")
 
-    if 'failure-corpus' in data and not isinstance(data['failure-corpus'], bool):
-        errors.append(f'failure-corpus must be boolean')
+    fc = data.get("failure-corpus")
+    if fc is not None and not isinstance(fc, bool):
+        errors.append("failure-corpus must be boolean")
 
     if errors:
-        print('ERRORS:' + ';'.join(errors))
+        print("ERRORS:" + ";".join(errors))
         sys.exit(1)
 
     # Output page-type and failure-corpus for counting
-    print(f'{data[\"page-type\"]}|{data[\"failure-corpus\"]}')
+    print(str(pt) + "|" + str(fc))
 except Exception as e:
-    print(f'PARSE_ERROR:{e}')
+    print("PARSE_ERROR:" + str(e))
     sys.exit(1)
-" 2>&1)
+' 2>&1)
 
     if [[ $? -eq 0 ]]; then
         page_type=$(echo "$META_RESULT" | cut -d'|' -f1)
@@ -180,7 +189,7 @@ except Exception as e:
         META_ERRORS=$((META_ERRORS + 1))
         FAILED=$((FAILED + 1))
     fi
-done
+done < <(find "$ROOT/tests/corpus" -name "*.html" -type f ! -name "generate-*" -print0 | sort -z)
 
 echo ""
 
