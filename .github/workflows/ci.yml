@@ -61,6 +61,8 @@ jobs:
               - 'README.md'
               - 'README_zh-CN.md'
               - 'tools/docs/**'
+              - 'tools/release-matrix.json'
+              - 'examples/nginx-configs/**'
             rust:
               - 'components/rust-converter/**'
               - 'Makefile'
