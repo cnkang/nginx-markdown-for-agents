@@ -278,3 +278,69 @@ class TestArtifactRegex:
     ])
     def test_invalid_names_rejected(self, name):
         assert not ARTIFACT_RE.fullmatch(name)
+
+
+# ---------------------------------------------------------------------------
+# Integration tests for higher-level check functions
+# ---------------------------------------------------------------------------
+
+import check_packaging_consistency as cpc
+from check_packaging_consistency import check_artifact_names, check_curl_pattern
+
+
+class TestCheckArtifactNames:
+    """Integration tests for check_artifact_names with synthetic docs."""
+
+    def test_valid_artifacts_pass(self, tmp_path, monkeypatch):
+        doc = tmp_path / "INSTALL.md"
+        doc.write_text(
+            "Download: ngx_http_markdown_filter_module-1.26.3-glibc-x86_64.tar.gz\n"
+        )
+        monkeypatch.setattr(cpc, "INSTALL_GUIDE", doc)
+        assert check_artifact_names() == []
+
+    def test_invalid_artifact_flagged(self, tmp_path, monkeypatch):
+        doc = tmp_path / "INSTALL.md"
+        doc.write_text(
+            "Download: ngx_http_markdown_filter_module-1.26.3-uclibc-arm.tar.gz\n"
+        )
+        monkeypatch.setattr(cpc, "INSTALL_GUIDE", doc)
+        errors = check_artifact_names()
+        assert len(errors) == 1
+        assert "uclibc" in errors[0]
+
+    def test_no_artifacts_passes(self, tmp_path, monkeypatch):
+        doc = tmp_path / "INSTALL.md"
+        doc.write_text("No artifact references here.\n")
+        monkeypatch.setattr(cpc, "INSTALL_GUIDE", doc)
+        assert check_artifact_names() == []
+
+
+class TestCheckCurlPattern:
+    """Integration tests for check_curl_pattern with synthetic docs."""
+
+    def test_correct_pattern_passes(self, tmp_path, monkeypatch):
+        doc = tmp_path / "INSTALL.md"
+        doc.write_text(
+            'curl -sD - -o /dev/null -H "Accept: text/markdown" http://localhost/\n'
+        )
+        monkeypatch.setattr(cpc, "INSTALL_GUIDE", doc)
+        assert check_curl_pattern() == []
+
+    def test_missing_pattern_flagged(self, tmp_path, monkeypatch):
+        doc = tmp_path / "INSTALL.md"
+        doc.write_text(
+            'curl -H "Accept: text/markdown" http://localhost/\n'
+        )
+        monkeypatch.setattr(cpc, "INSTALL_GUIDE", doc)
+        errors = check_curl_pattern()
+        assert len(errors) == 1
+        assert "-sD - -o /dev/null" in errors[0]
+
+    def test_non_verification_curls_ignored(self, tmp_path, monkeypatch):
+        doc = tmp_path / "INSTALL.md"
+        doc.write_text(
+            "curl -sSL https://example.com/install.sh | sudo bash\n"
+        )
+        monkeypatch.setattr(cpc, "INSTALL_GUIDE", doc)
+        assert check_curl_pattern() == []
