@@ -907,9 +907,10 @@ The system cannot reach GitHub to download the pre-built binary or checksum file
    ```
 4. If the system is air-gapped, manually download the binary and checksum on a connected machine:
    ```bash
-   # On a connected machine — substitute your version, os_type, and arch
-   wget https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v0.3.0/ngx_http_markdown_filter_module-1.26.3-glibc-x86_64.tar.gz
-   wget https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v0.3.0/ngx_http_markdown_filter_module-1.26.3-glibc-x86_64.tar.gz.sha256
+   # On a connected machine — substitute <release_tag>, <nginx_version>, <os_type>, and <arch>
+   # <release_tag> must match the current release (e.g. v0.4.0)
+   wget https://github.com/cnkang/nginx-markdown-for-agents/releases/download/<release_tag>/ngx_http_markdown_filter_module-<nginx_version>-<os_type>-<arch>.tar.gz
+   wget https://github.com/cnkang/nginx-markdown-for-agents/releases/download/<release_tag>/ngx_http_markdown_filter_module-<nginx_version>-<os_type>-<arch>.tar.gz.sha256
    ```
 5. Transfer the files to the target system and install manually, or use the [Manual Source Build](#6-secondary-manual-source-build) instructions.
 
@@ -937,12 +938,13 @@ The SHA-256 hash of the downloaded binary does not match the expected checksum f
    ```
 2. If the failure persists, manually verify the checksum:
    ```bash
-   # Download the binary and checksum file (substitute your version/os/arch)
-   wget https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v0.3.0/ngx_http_markdown_filter_module-1.26.3-glibc-x86_64.tar.gz
-   wget https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v0.3.0/ngx_http_markdown_filter_module-1.26.3-glibc-x86_64.tar.gz.sha256
+   # Download the binary and checksum file — substitute <release_tag>, <nginx_version>, <os_type>, <arch>
+   # <release_tag> must match the current release (e.g. v0.4.0)
+   wget https://github.com/cnkang/nginx-markdown-for-agents/releases/download/<release_tag>/ngx_http_markdown_filter_module-<nginx_version>-<os_type>-<arch>.tar.gz
+   wget https://github.com/cnkang/nginx-markdown-for-agents/releases/download/<release_tag>/ngx_http_markdown_filter_module-<nginx_version>-<os_type>-<arch>.tar.gz.sha256
 
    # Verify
-   sha256sum -c ngx_http_markdown_filter_module-1.26.3-glibc-x86_64.tar.gz.sha256
+   sha256sum -c ngx_http_markdown_filter_module-<nginx_version>-<os_type>-<arch>.tar.gz.sha256
    ```
 3. If the checksum still fails, try downloading from a different network or machine to rule out a network intermediary.
 4. If the issue persists, report it on the project's GitHub issue tracker — the release artifact may need to be re-published.
