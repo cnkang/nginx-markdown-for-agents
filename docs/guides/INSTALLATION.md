@@ -905,7 +905,8 @@ The system cannot reach GitHub to download the pre-built binary or checksum file
    ```bash
    nslookup github.com
    ```
-4. If the system is air-gapped, manually download the binary and checksum on a connected machine:
+4. If the system is air-gapped, manually download the binary and checksum on a connected machine.
+   Manual download is intended only for air-gapped or troubleshooting scenarios — prefer the [install script](#4-primary-install-script) for normal installations.
    ```bash
    # On a connected machine — substitute <release_tag>, <nginx_version>, <os_type>, and <arch>
    # <release_tag> must match the current release (e.g. v0.4.0)
@@ -936,7 +937,8 @@ The SHA-256 hash of the downloaded binary does not match the expected checksum f
    ```bash
    curl -sSL https://raw.githubusercontent.com/cnkang/nginx-markdown-for-agents/main/tools/install.sh | sudo bash
    ```
-2. If the failure persists, manually verify the checksum:
+2. If the failure persists, manually verify the checksum.
+   Manual download is intended only for troubleshooting — prefer the [install script](#4-primary-install-script) for normal installations.
    ```bash
    # Download the binary and checksum file — substitute <release_tag>, <nginx_version>, <os_type>, <arch>
    # <release_tag> must match the current release (e.g. v0.4.0)
