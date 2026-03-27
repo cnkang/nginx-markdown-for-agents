@@ -37,7 +37,11 @@ from statistics import median
 # ---------------------------------------------------------------------------
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from report_schema import validate_report  # noqa: E402
+from report_schema import (  # noqa: E402
+    VALID_CONVERSION_RESULTS,
+    VALID_PAGE_TYPES,
+    validate_report,
+)
 from report_utils import detect_platform, write_json  # noqa: E402
 
 # Exit code used by the converter to signal "skipped" (ineligible input).
@@ -52,16 +56,6 @@ CONVERTER_SKIP_EXIT_CODE = 2
 # ---------------------------------------------------------------------------
 # Corpus discovery
 # ---------------------------------------------------------------------------
-
-VALID_PAGE_TYPES = {
-    "clean-article",
-    "documentation",
-    "nav-heavy",
-    "boilerplate-heavy",
-    "complex-common",
-}
-
-VALID_CONVERSION_RESULTS = {"converted", "skipped", "failed-open"}
 
 
 def discover_fixtures(corpus_dir: Path) -> list[dict]:
@@ -118,18 +112,21 @@ def run_converter(converter_bin: str, html_path: str) -> tuple[str, int, float]:
     """
     if not os.path.isfile(converter_bin):
         return "", 1, 0.0
+    if not os.access(converter_bin, os.X_OK):
+        return "", 1, 0.0
     if not os.path.isfile(html_path):
         return "", 1, 0.0
 
     start = time.perf_counter()
     try:
-        # Security: list-form invocation (shell=False) passes args directly to
-        # execvp — no shell expansion, no injection vector.  Both paths are
-        # validated with os.path.isfile() above.  shlex.escape() is NOT
-        # appropriate here; it is designed for shell=True string concatenation
-        # and would corrupt paths containing spaces or special characters.
-        result = subprocess.run(  # sourcery skip: avoid-subprocess-run
-            [converter_bin, html_path],  # noqa: S603 — args are validated paths
+        # Security audit (S603): list-form invocation (shell=False, the default)
+        # passes args directly to execvp — no shell expansion, no injection
+        # vector.  Both paths are validated above with os.path.isfile() and
+        # os.access().  shlex.escape() is NOT appropriate here; it is designed
+        # for shell=True string concatenation and would corrupt paths
+        # containing spaces or special characters.
+        result = subprocess.run(  # noqa: S603
+            [converter_bin, html_path],
             capture_output=True,
             text=True,
             timeout=30,
@@ -191,7 +188,10 @@ def compute_aggregate_token_reduction(
 
 
 def compute_percentile(values: list[float], pct: float) -> float:
-    """Compute a percentile from a sorted list using linear interpolation."""
+    """Compute a percentile using linear interpolation.
+
+    The input list does not need to be pre-sorted; it is sorted internally.
+    """
     if not values:
         return 0.0
     sorted_vals = sorted(values)
