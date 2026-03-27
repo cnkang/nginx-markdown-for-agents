@@ -248,7 +248,7 @@ cargo install cbindgen
 
 # Download NGINX source (example for 1.24.0)
 cd /tmp
-wget http://nginx.org/download/nginx-1.24.0.tar.gz
+wget https://nginx.org/download/nginx-1.24.0.tar.gz
 tar -xzf nginx-1.24.0.tar.gz
 ```
 
@@ -270,7 +270,7 @@ cargo install cbindgen
 
 # Download NGINX source (example for 1.24.0)
 cd /tmp
-wget http://nginx.org/download/nginx-1.24.0.tar.gz
+wget https://nginx.org/download/nginx-1.24.0.tar.gz
 tar -xzf nginx-1.24.0.tar.gz
 ```
 
@@ -298,7 +298,7 @@ cargo install cbindgen
 
 # Download NGINX source (example for 1.24.0)
 cd /tmp
-curl -O http://nginx.org/download/nginx-1.24.0.tar.gz
+curl -O https://nginx.org/download/nginx-1.24.0.tar.gz
 tar -xzf nginx-1.24.0.tar.gz
 ```
 
