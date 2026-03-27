@@ -238,7 +238,8 @@ def check_compatibility_matrix(text: str) -> list[str]:
             "'tools/release-matrix.json'"
         )
     # Check that a markdown table exists (header row with pipes)
-    if not re.search(r"\|.*NGINX.*\|.*OS.*\|", section, re.IGNORECASE):
+    # Use negated character classes to avoid polynomial backtracking (S5852)
+    if not re.search(r"\|[^|]*NGINX[^|]*\|[^|]*OS[^|]*\|", section, re.IGNORECASE):
         errors.append("Compatibility Matrix section missing the platform table")
     return errors
 
