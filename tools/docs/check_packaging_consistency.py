@@ -111,7 +111,7 @@ def _extract_nginx_code_blocks(text: str) -> str:
 
 def check_curl_consistency() -> list[str]:
     """README Quick Start and installation guide Shortest Success Path must
-    contain the same set of verification curls (Requirement 8.1)."""
+    contain the same verification curls in the same order (Requirement 8.1)."""
     readme_text = _read(README)
     install_text = _read(INSTALL_GUIDE)
 
@@ -129,10 +129,16 @@ def check_curl_consistency() -> list[str]:
     if not readme_curls:
         return ["No verification curls found in README Quick Start"]
 
-    readme_set = {_normalise_curl_for_comparison(c) for c in readme_curls}
-    install_set = {_normalise_curl_for_comparison(c) for c in install_curls}
+    readme_normalised = [_normalise_curl_for_comparison(c) for c in readme_curls]
+    install_normalised = [_normalise_curl_for_comparison(c) for c in install_curls]
+
+    if readme_normalised == install_normalised:
+        return []
 
     errors: list[str] = []
+    # Check for missing commands in either direction
+    readme_set = set(readme_normalised)
+    install_set = set(install_normalised)
     errors.extend(
         f"README Quick Start curl not in Shortest Success Path: {cmd}"
         for cmd in readme_curls
@@ -143,6 +149,12 @@ def check_curl_consistency() -> list[str]:
         for cmd in install_curls
         if _normalise_curl_for_comparison(cmd) not in readme_set
     )
+    # If sets match but order differs, report that
+    if not errors:
+        errors.append(
+            "README Quick Start and Shortest Success Path have the same "
+            "verification curls but in different order"
+        )
     return errors
 
 
