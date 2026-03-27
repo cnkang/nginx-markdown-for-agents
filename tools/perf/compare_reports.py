@@ -16,12 +16,14 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import math
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from report_schema import validate_report  # noqa: E402
 from report_utils import load_json, write_json  # noqa: E402
 
 
@@ -37,8 +39,8 @@ def compute_delta_absolute(current: float, baseline: float) -> float:
 
 def compute_delta_percent(current: float, baseline: float) -> float:
     """Compute percentage change: (current - baseline) / baseline * 100."""
-    if baseline == 0.0:
-        return 100.0 if current != 0.0 else 0.0
+    if math.isclose(baseline, 0.0):
+        return 0.0 if math.isclose(current, 0.0) else 100.0
     return (current - baseline) / baseline * 100.0
 
 
@@ -55,13 +57,13 @@ def judge_metric_absolute(
             return "fail"
         if delta >= warning_delta:
             return "warn"
-        return "pass"
     else:  # higher-is-better
         if delta <= blocking_delta:
             return "fail"
         if delta <= warning_delta:
             return "warn"
-        return "pass"
+
+    return "pass"
 
 
 def judge_metric_percent(
@@ -76,13 +78,13 @@ def judge_metric_percent(
             return "fail"
         if pct_change >= warning_pct:
             return "warn"
-        return "pass"
     else:  # higher-is-better
         if pct_change <= -blocking_pct:
             return "fail"
         if pct_change <= -warning_pct:
             return "warn"
-        return "pass"
+
+    return "pass"
 
 
 # ---------------------------------------------------------------------------
@@ -91,7 +93,6 @@ def judge_metric_percent(
 
 
 def compare_metric(
-    metric_name: str,
     baseline_val: float,
     current_val: float,
     threshold_cfg: dict,
@@ -170,20 +171,33 @@ def _is_regression(baseline_result: str, current_result: str) -> bool:
     return rank.get(current_result, 2) > rank.get(baseline_result, 2)
 
 
+LATENCY_METRICS = {"p50-latency-ms", "p95-latency-ms", "p99-latency-ms"}
+
+
 def compare_reports(
-    baseline: dict, current: dict, thresholds: dict
+    baseline: dict,
+    current: dict,
+    thresholds: dict,
+    skip_metrics: set[str] | None = None,
 ) -> dict:
-    """Compare two Unified Reports and produce a verdict."""
+    """Compare two Unified Reports and produce a verdict.
+
+    When skip_metrics is provided, those metrics are excluded from comparison
+    and verdict computation (useful for skipping latency when platforms differ).
+    """
     b_summary = baseline["summary"]
     c_summary = current["summary"]
     threshold_defs = thresholds.get("thresholds", {})
+    skip = skip_metrics or set()
 
     metric_comparisons = {}
     for metric_name, threshold_cfg in threshold_defs.items():
+        if metric_name in skip:
+            continue
         b_val = b_summary.get(metric_name, 0.0)
         c_val = c_summary.get(metric_name, 0.0)
         metric_comparisons[metric_name] = compare_metric(
-            metric_name, b_val, c_val, threshold_cfg
+            b_val, c_val, threshold_cfg
         )
 
     fixture_changes = compare_fixtures(
@@ -258,6 +272,20 @@ def main(argv: list[str] | None = None) -> int:
         print(f"ERROR: failed to load input files: {e}", file=sys.stderr)
         return 1
 
+    # Validate both reports against schema
+    for label, report, path in [
+        ("baseline", baseline, args.baseline),
+        ("current", current, args.current),
+    ]:
+        if schema_errors := validate_report(report):
+            print(
+                f"ERROR: {label} report ({path}) fails schema validation:",
+                file=sys.stderr,
+            )
+            for err in schema_errors:
+                print(f"  - {err}", file=sys.stderr)
+            return 1
+
     # Warn on corpus version mismatch
     b_cv = baseline.get("metadata", {}).get("corpus-version", "")
     c_cv = current.get("metadata", {}).get("corpus-version", "")
@@ -267,7 +295,21 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
 
-    verdict_report = compare_reports(baseline, current, thresholds)
+    # Warn on platform mismatch (latency comparisons may be noisy)
+    b_plat = baseline.get("metadata", {}).get("platform", "")
+    c_plat = current.get("metadata", {}).get("platform", "")
+    skip_metrics: set[str] = set()
+    if b_plat and c_plat and b_plat != c_plat:
+        print(
+            f"WARNING: platform mismatch: baseline={b_plat}, current={c_plat}"
+            " — skipping latency comparisons",
+            file=sys.stderr,
+        )
+        skip_metrics = LATENCY_METRICS
+
+    verdict_report = compare_reports(
+        baseline, current, thresholds, skip_metrics=skip_metrics
+    )
     write_json(verdict_report, args.output)
 
     overall = verdict_report["overall-verdict"]
