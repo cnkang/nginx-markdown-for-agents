@@ -317,12 +317,11 @@ def check_no_hardcoded_release_tags(text: str) -> list[str]:
     pinning to a specific version that will go stale.
     """
     errors: list[str] = []
-    for line_no, line in enumerate(text.splitlines(), 1):
-        if re.search(r"releases/download/v\d+\.\d+\.\d+/", line):
-            errors.append(
-                f"Line {line_no}: hardcoded release tag in download URL "
-                f"(use <release_tag> placeholder instead): {line.strip()}"
-            )
+    errors.extend(
+        f"Line {line_no}: hardcoded release tag in download URL (use <release_tag> placeholder instead): {line.strip()}"
+        for line_no, line in enumerate(text.splitlines(), 1)
+        if re.search(r"releases/download/v\d+\.\d+\.\d+/", line)
+    )
     return errors
 
 
