@@ -140,7 +140,16 @@ def check_curl_consistency() -> list[str]:
         for cmd in install_curls
         if cmd not in readme_set
     )
-    # If sets match but order differs, report with first divergence
+    # If sets match but counts differ, one side has duplicates
+    if not errors and len(readme_curls) != len(install_curls):
+        errors.append(
+            f"README Quick Start and Shortest Success Path have the same "
+            f"unique verification curls but different counts "
+            f"(README has {len(readme_curls)}, "
+            f"install guide has {len(install_curls)})"
+        )
+
+    # If sets match and counts match but order differs, report first divergence
     if not errors:
         for i, (r, s) in enumerate(zip(readme_curls, install_curls, strict=True)):
             if r != s:
