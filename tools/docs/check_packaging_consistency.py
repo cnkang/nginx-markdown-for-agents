@@ -292,12 +292,7 @@ def check_readme_internal_consistency() -> list[str]:
     if not curl_paths:
         return []
 
-    location_paths = _extract_nginx_location_paths(quick_start)
-
-    # If no nginx config block in Quick Start, the install script auto-wires
-    # markdown_filter on the whole server — only "/" is valid.
-    if not location_paths:
-        location_paths = {"/"}
+    location_paths = _extract_nginx_location_paths(quick_start) or {"/"}
 
     errors: list[str] = []
     for path in sorted(curl_paths):
@@ -313,6 +308,50 @@ def check_readme_internal_consistency() -> list[str]:
                 f"location is configured (found: {sorted(location_paths)})"
             )
     return errors
+
+
+# ---------------------------------------------------------------------------
+# Check 7 — README/INSTALL verification curl host consistency
+# ---------------------------------------------------------------------------
+
+def _extract_curl_hosts(text: str) -> set[str]:
+    """Extract host[:port] from verification curl URLs in *text*."""
+    hosts: set[str] = set()
+    for cmd in _extract_verification_curls(text):
+        m = re.search(r"https?://([^/\s]+)", cmd)
+        if m:
+            hosts.add(m[1])
+    return hosts
+
+
+def check_curl_host_consistency() -> list[str]:
+    """Verification curls in README Quick Start and installation guide must
+    use the same host (e.g. both ``localhost``, not one ``127.0.0.1``)."""
+    readme_text = _read(README)
+    install_text = _read(INSTALL_GUIDE)
+
+    quick_start = _extract_quick_start(readme_text)
+    if not quick_start:
+        return []
+
+    readme_hosts = _extract_curl_hosts(quick_start)
+    install_hosts = _extract_curl_hosts(install_text)
+
+    if not readme_hosts or not install_hosts:
+        return []
+
+    extra = readme_hosts - install_hosts
+    errors: list[str] = [
+        f"README Quick Start uses host '{host}' not found in installation "
+        f"guide verification curls (install guide uses: {sorted(install_hosts)})"
+        for host in sorted(extra)
+    ]
+    return errors
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
 
 def main() -> int:
     missing: list[str] = []
@@ -334,6 +373,7 @@ def main() -> int:
         ("Artifact name pattern compliance", check_artifact_names()),
         ("Matrix consistency (release-matrix.json ↔ install guide)", check_matrix_consistency()),
         ("README Quick Start internal consistency (config ↔ curl paths)", check_readme_internal_consistency()),
+        ("Curl host consistency (README ↔ install guide)", check_curl_host_consistency()),
     ]
 
     for _label, errs in checks:
