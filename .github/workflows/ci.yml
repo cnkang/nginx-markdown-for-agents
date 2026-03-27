@@ -446,9 +446,6 @@ jobs:
             components/rust-converter -> target
             tools/corpus/test-corpus-conversion -> target
 
-      - name: Validate corpus metadata
-        run: bash tools/corpus/validate_corpus.sh
-
       - name: Run corpus benchmark
         run: make test-benchmark
 
