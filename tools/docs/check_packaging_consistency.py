@@ -39,9 +39,17 @@ def _read(path: Path) -> str:
 
 def _extract_quick_start(text: str) -> str:
     """Return the text between ``## Quick Start`` and the next ``## ``."""
-    pattern = r"(^## Quick Start.*?)(?=^## |\Z)"
-    m = re.search(pattern, text, re.MULTILINE | re.DOTALL)
-    return m.group(1) if m else ""
+    lines = text.splitlines(True)
+    collecting = False
+    parts: list[str] = []
+    for line in lines:
+        if line.startswith("## Quick Start"):
+            collecting = True
+        elif collecting and line.startswith("## "):
+            break
+        if collecting:
+            parts.append(line)
+    return "".join(parts)
 
 
 def _extract_verification_curls(text: str) -> list[str]:
@@ -115,7 +123,7 @@ def check_curl_consistency() -> list[str]:
     if not readme_curls:
         return ["No verification curls found in README Quick Start"]
 
-    install_set = set(_normalise_curl_for_comparison(c) for c in install_curls)
+    install_set = {_normalise_curl_for_comparison(c) for c in install_curls}
     errors: list[str] = [
         f"README Quick Start curl not found in installation guide: {cmd}"
         for cmd in readme_curls
@@ -217,7 +225,7 @@ def check_matrix_consistency() -> list[str]:
     if not m:
         return ["Cannot locate auto-generated matrix markers in installation guide"]
 
-    table_text = m.group(1)
+    table_text = m[1]
 
     # Parse table rows (skip header and separator)
     table_rows: list[tuple[str, str, str]] = []
