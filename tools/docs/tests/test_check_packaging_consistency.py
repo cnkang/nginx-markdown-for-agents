@@ -22,7 +22,6 @@ from check_packaging_consistency import (
     _extract_nginx_location_paths,
     _extract_quick_start,
     _extract_verification_curls,
-    _normalise_curl_for_comparison,
     _parse_matrix_table,
 )
 
@@ -111,16 +110,6 @@ class TestExtractVerificationCurls:
 
 
 # ---------------------------------------------------------------------------
-# _normalise_curl_for_comparison
-# ---------------------------------------------------------------------------
-
-class TestNormaliseCurl:
-    def test_identity(self):
-        cmd = 'curl -sD - -o /dev/null -H "Accept: text/markdown" http://localhost/'
-        assert _normalise_curl_for_comparison(cmd) == cmd
-
-
-# ---------------------------------------------------------------------------
 # _extract_nginx_code_blocks
 # ---------------------------------------------------------------------------
 
@@ -164,6 +153,25 @@ class TestExtractCurlPaths:
         # URL with no trailing path component
         text = 'curl -sD - -o /dev/null -H "Accept: text/markdown" http://localhost\n'
         assert "/" in _extract_curl_paths(text)
+
+    def test_strips_query_string(self):
+        self._extracted_from_test_strips_fragment_2(
+            'curl -sD - -o /dev/null -H "Accept: text/markdown" http://localhost/foo?bar=baz\n',
+            "/foo?bar=baz",
+        )
+
+    def test_strips_fragment(self):
+        self._extracted_from_test_strips_fragment_2(
+            'curl -sD - -o /dev/null -H "Accept: text/markdown" http://localhost/foo#section\n',
+            "/foo#section",
+        )
+
+    # TODO Rename this here and in `test_strips_query_string` and `test_strips_fragment`
+    def _extracted_from_test_strips_fragment_2(self, arg0, arg1):
+        text = arg0
+        paths = _extract_curl_paths(text)
+        assert "/foo" in paths
+        assert arg1 not in paths
 
 
 # ---------------------------------------------------------------------------
