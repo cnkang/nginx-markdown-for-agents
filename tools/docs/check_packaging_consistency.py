@@ -1,0 +1,299 @@
+#!/usr/bin/env python3
+"""Cross-document consistency validator for packaging documentation.
+
+Validates that the README, installation guide, release matrix, and example
+configs are consistent with each other.  Checks performed:
+
+  1.  Every verification curl in README Quick Start appears in the installation guide
+  2.  All markdown_* directives used in the installation guide are known from
+      the reference config (examples/nginx-configs/01-minimal-reverse-proxy.conf)
+  3.  All verification curls in the installation guide use the
+      ``-sD - -o /dev/null`` pattern
+  4.  All release artifact name references match the canonical naming pattern
+  5.  Every "full" tier entry in tools/release-matrix.json has a matching row
+      in the installation guide compatibility matrix table
+"""
+
+from __future__ import annotations
+
+import json
+import re
+import sys
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[2]
+README = ROOT / "README.md"
+INSTALL_GUIDE = ROOT / "docs" / "guides" / "INSTALLATION.md"
+RELEASE_MATRIX = ROOT / "tools" / "release-matrix.json"
+REFERENCE_CONFIG = ROOT / "examples" / "nginx-configs" / "01-minimal-reverse-proxy.conf"
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _read(path: Path) -> str:
+    return path.read_text(encoding="utf-8", errors="ignore")
+
+
+def _extract_quick_start(text: str) -> str:
+    """Return the text between ``## Quick Start`` and the next ``## ``."""
+    pattern = r"(^## Quick Start.*?)(?=^## |\Z)"
+    m = re.search(pattern, text, re.MULTILINE | re.DOTALL)
+    return m.group(1) if m else ""
+
+
+def _extract_verification_curls(text: str) -> list[str]:
+    """Return normalised verification curl commands from *text*.
+
+    A verification curl is any line containing ``curl`` **and** an
+    ``-H "Accept: text/markdown"`` or ``-H "Accept: text/html"`` header
+    (i.e. the content-negotiation verification commands, not download curls
+    or metrics endpoint requests).
+    """
+    curls: list[str] = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if "curl" not in stripped:
+            continue
+        if '-H "Accept: text/markdown"' not in stripped and \
+           '-H "Accept: text/html"' not in stripped:
+            continue
+        # Normalise whitespace for comparison
+        normalised = " ".join(stripped.split())
+        curls.append(normalised)
+    return curls
+
+
+def _normalise_curl_for_comparison(cmd: str) -> str:
+    """Normalise a curl command for structural comparison.
+
+    Replaces the URL (``http://...``) with a placeholder so that commands
+    differing only in host/path still match.
+    """
+    return re.sub(r"https?://\S+", "URL", cmd)
+
+
+def _extract_nginx_code_blocks(text: str) -> str:
+    """Return the concatenated content of all ```nginx fenced code blocks."""
+    blocks: list[str] = []
+    in_block = False
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("```nginx") and not in_block:
+            in_block = True
+            continue
+        if stripped.startswith("```") and in_block:
+            in_block = False
+            continue
+        if in_block:
+            blocks.append(line)
+    return "\n".join(blocks)
+
+
+# ---------------------------------------------------------------------------
+# Check 1 — README Quick Start curls appear in installation guide
+# ---------------------------------------------------------------------------
+
+def check_curl_consistency() -> list[str]:
+    """Every verification curl in README Quick Start must appear in the
+    installation guide."""
+    errors: list[str] = []
+    readme_text = _read(README)
+    install_text = _read(INSTALL_GUIDE)
+
+    quick_start = _extract_quick_start(readme_text)
+    if not quick_start:
+        return ["Cannot locate '## Quick Start' section in README"]
+
+    readme_curls = _extract_verification_curls(quick_start)
+    install_curls = _extract_verification_curls(install_text)
+
+    if not readme_curls:
+        return ["No verification curls found in README Quick Start"]
+
+    install_set = set(_normalise_curl_for_comparison(c) for c in install_curls)
+    for cmd in readme_curls:
+        if _normalise_curl_for_comparison(cmd) not in install_set:
+            errors.append(
+                f"README Quick Start curl not found in installation guide: {cmd}"
+            )
+    return errors
+
+
+# ---------------------------------------------------------------------------
+# Check 2 — directive consistency with reference config
+# ---------------------------------------------------------------------------
+
+def check_directive_consistency() -> list[str]:
+    """All ``markdown_*`` directives in the installation guide code blocks
+    must be known directives from the reference config."""
+    errors: list[str] = []
+    config_text = _read(REFERENCE_CONFIG)
+    install_text = _read(INSTALL_GUIDE)
+
+    # Extract known directives from reference config
+    known = set(re.findall(r"\b(markdown_\w+)\b", config_text))
+    if not known:
+        return ["No markdown_* directives found in reference config"]
+
+    # Scan installation guide nginx code blocks for markdown_* directives
+    nginx_content = _extract_nginx_code_blocks(install_text)
+    used = set(re.findall(r"\b(markdown_\w+)\b", nginx_content))
+
+    for directive in sorted(used):
+        if directive not in known:
+            errors.append(
+                f"Installation guide uses unknown directive '{directive}' "
+                f"(not in reference config; known: {sorted(known)})"
+            )
+    return errors
+
+
+# ---------------------------------------------------------------------------
+# Check 3 — verification curls use -sD - -o /dev/null pattern
+# ---------------------------------------------------------------------------
+
+def check_curl_pattern() -> list[str]:
+    """All verification curls in the installation guide must use the
+    ``-sD - -o /dev/null`` pattern."""
+    errors: list[str] = []
+    install_text = _read(INSTALL_GUIDE)
+    curls = _extract_verification_curls(install_text)
+
+    for cmd in curls:
+        if "-sD - -o /dev/null" not in cmd:
+            errors.append(
+                f"Verification curl missing '-sD - -o /dev/null' pattern: {cmd}"
+            )
+    return errors
+
+
+# ---------------------------------------------------------------------------
+# Check 4 — artifact name pattern
+# ---------------------------------------------------------------------------
+
+ARTIFACT_RE = re.compile(
+    r"ngx_http_markdown_filter_module-"
+    r"\d+\.\d+\.\d+-(glibc|musl)-(x86_64|aarch64)\.tar\.gz"
+)
+
+
+def check_artifact_names() -> list[str]:
+    """All artifact name references in the installation guide must match the
+    canonical naming pattern."""
+    errors: list[str] = []
+    install_text = _read(INSTALL_GUIDE)
+
+    # Find all strings that look like artifact references (tar.gz only)
+    candidates = re.findall(
+        r"ngx_http_markdown_filter_module-[^\s\"'`<>)]+\.tar\.gz(?!\.)",
+        install_text,
+    )
+
+    for candidate in candidates:
+        if not ARTIFACT_RE.fullmatch(candidate):
+            errors.append(
+                f"Artifact name does not match expected pattern: {candidate}"
+            )
+    return errors
+
+
+# ---------------------------------------------------------------------------
+# Check 5 — release matrix "full" entries in compatibility table
+# ---------------------------------------------------------------------------
+
+def check_matrix_consistency() -> list[str]:
+    """Every ``"full"`` tier entry in release-matrix.json must have a matching
+    row in the installation guide compatibility matrix table."""
+    errors: list[str] = []
+    matrix_data = json.loads(_read(RELEASE_MATRIX))
+    install_text = _read(INSTALL_GUIDE)
+
+    # Extract the auto-generated matrix table
+    m = re.search(
+        r"<!-- BEGIN AUTO-GENERATED MATRIX -->(.*?)<!-- END AUTO-GENERATED MATRIX -->",
+        install_text,
+        re.DOTALL,
+    )
+    if not m:
+        return ["Cannot locate auto-generated matrix markers in installation guide"]
+
+    table_text = m.group(1)
+
+    # Parse table rows (skip header and separator)
+    table_rows: list[tuple[str, str, str]] = []
+    for line in table_text.splitlines():
+        line = line.strip()
+        if not line.startswith("|"):
+            continue
+        cells = [c.strip() for c in line.split("|")]
+        # cells[0] and cells[-1] are empty from leading/trailing pipes
+        cells = [c for c in cells if c]
+        if len(cells) < 3:
+            continue
+        # Skip header / separator rows
+        if cells[0] == "NGINX Version" or cells[0].startswith("---"):
+            continue
+        table_rows.append((cells[0], cells[1], cells[2]))
+
+    # Check each "full" entry
+    for entry in matrix_data.get("matrix", []):
+        if entry.get("support_tier") != "full":
+            continue
+        nginx = entry["nginx"]
+        os_type = entry["os_type"]
+        arch = entry["arch"]
+        found = any(
+            r[0] == nginx and r[1] == os_type and r[2] == arch
+            for r in table_rows
+        )
+        if not found:
+            errors.append(
+                f"Full-tier entry missing from compatibility table: "
+                f"nginx={nginx} os_type={os_type} arch={arch}"
+            )
+    return errors
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
+def main() -> int:
+    missing: list[str] = []
+    for path in (README, INSTALL_GUIDE, RELEASE_MATRIX, REFERENCE_CONFIG):
+        if not path.exists():
+            missing.append(str(path.relative_to(ROOT)))
+    if missing:
+        print(f"ERROR: Required files not found: {', '.join(missing)}")
+        return 1
+
+    errors: list[str] = []
+
+    checks = [
+        ("Curl command consistency (README ↔ install guide)", check_curl_consistency()),
+        ("Directive consistency (install guide ↔ reference config)", check_directive_consistency()),
+        ("Verification curl pattern (-sD - -o /dev/null)", check_curl_pattern()),
+        ("Artifact name pattern compliance", check_artifact_names()),
+        ("Matrix consistency (release-matrix.json ↔ install guide)", check_matrix_consistency()),
+    ]
+
+    for _label, errs in checks:
+        errors.extend(errs)
+
+    if errors:
+        print("Cross-document consistency checks FAILED:")
+        for err in errors:
+            print(f"  - {err}")
+        return 1
+
+    print("Cross-document consistency checks passed:")
+    for label, _ in checks:
+        print(f"  - {label}: OK")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
