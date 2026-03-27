@@ -153,7 +153,7 @@ jobs:
           path: perf/reports/corpus-report.json
 
       - name: Upload corpus verdict
-        if: always()
+        if: ${{ always() && !(github.event_name == 'workflow_dispatch' && github.event.inputs.bootstrap_baseline == 'true') }}
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
           name: corpus-verdict-${{ steps.platform.outputs.name }}.json
