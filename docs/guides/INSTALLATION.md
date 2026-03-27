@@ -49,7 +49,7 @@ curl -sD - -o /dev/null -H "Accept: text/html" http://localhost/
 
 Expected output for Step 3:
 
-```
+```http
 HTTP/1.1 200 OK
 Content-Type: text/markdown; charset=utf-8
 Vary: Accept
@@ -58,7 +58,7 @@ Vary: Accept
 
 Expected output for Step 4:
 
-```
+```http
 HTTP/1.1 200 OK
 Content-Type: text/html
 ...

@@ -21,6 +21,7 @@ Checks performed:
   13. Content negotiation SOP explains eligibility requirements
   14. Minimal demo config exists
   15. Demo config has inline comments and no proxy_pass directive
+  16. No hardcoded release tags in download URLs
 """
 
 from __future__ import annotations
@@ -135,7 +136,7 @@ def _validate_single_sop(heading: str, sop: str) -> list[str]:
 
 def check_troubleshooting_sops(text: str) -> list[str]:
     """Check 3: All 9 SOPs present with symptom/root-cause/resolution and
-    correct category labels for SOPs 1–6."""
+    correct category labels for SOPs 1-6."""
     errors: list[str] = []
     for heading in SOP_HEADINGS:
         sop = _sop_section_text(text, heading)
