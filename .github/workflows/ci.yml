@@ -45,6 +45,7 @@ jobs:
       nginx: ${{ steps.filter.outputs.nginx }}
       e2e: ${{ steps.filter.outputs.e2e }}
       perf: ${{ steps.filter.outputs.perf }}
+      corpus_tools: ${{ steps.filter.outputs.corpus_tools }}
       workflows: ${{ steps.filter.outputs.workflows }}
     steps:
       - name: Checkout repository
@@ -76,6 +77,8 @@ jobs:
               - 'components/rust-converter/**'
               - 'perf/**'
               - 'tools/perf/**'
+            corpus_tools:
+              - 'tools/corpus/**'
             workflows:
               - '.github/workflows/**'
 
@@ -422,7 +425,7 @@ jobs:
   corpus-benchmark:
     name: Corpus Benchmark Gate
     needs: changes
-    if: needs.changes.outputs.perf == 'true' || needs.changes.outputs.rust == 'true' || needs.changes.outputs.e2e == 'true' || needs.changes.outputs.workflows == 'true'
+    if: needs.changes.outputs.perf == 'true' || needs.changes.outputs.rust == 'true' || needs.changes.outputs.e2e == 'true' || needs.changes.outputs.corpus_tools == 'true' || needs.changes.outputs.workflows == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
