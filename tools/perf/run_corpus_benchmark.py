@@ -37,9 +37,13 @@ from statistics import median
 # ---------------------------------------------------------------------------
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from report_schema import validate_report  # noqa: E402
 from report_utils import detect_platform, write_json  # noqa: E402
 
 # Exit code used by the converter to signal "skipped" (ineligible input).
+# The test-corpus-conversion binary exits with code 2 when the input is
+# detected as ineligible for conversion (e.g. no HTML tags found).
+# The benchmark script maps exit code 2 to the "skipped" classification.
 CONVERTER_SKIP_EXIT_CODE = 2
 
 # ---------------------------------------------------------------------------
@@ -128,9 +132,7 @@ def classify_result(exit_code: int, output: str) -> str:
     """Classify conversion result based on runtime execution."""
     if exit_code == CONVERTER_SKIP_EXIT_CODE:
         return "skipped"
-    if exit_code == 0 and output.strip():
-        return "converted"
-    return "failed-open"
+    return "converted" if exit_code == 0 and output.strip() else "failed-open"
 
 
 # ---------------------------------------------------------------------------
@@ -164,9 +166,7 @@ def compute_aggregate_token_reduction(
             )
             weighted_sum += reduction * fr["input-bytes"]
             total_input += fr["input-bytes"]
-    if total_input == 0:
-        return 0.0
-    return weighted_sum / total_input
+    return 0.0 if total_input == 0 else weighted_sum / total_input
 
 
 # ---------------------------------------------------------------------------
@@ -193,10 +193,10 @@ def compute_percentile(values: list[float], pct: float) -> float:
 def build_summary(fixture_results: list[dict], factor: float) -> dict:
     """Build the summary section of the Unified Report."""
     total = len(fixture_results)
-    converted = sum(1 for f in fixture_results if f["conversion-result"] == "converted")
-    skipped = sum(1 for f in fixture_results if f["conversion-result"] == "skipped")
+    converted = sum(f["conversion-result"] == "converted" for f in fixture_results)
+    skipped = sum(f["conversion-result"] == "skipped" for f in fixture_results)
     failed_open = sum(
-        1 for f in fixture_results if f["conversion-result"] == "failed-open"
+        f["conversion-result"] == "failed-open" for f in fixture_results
     )
 
     fallback_rate = (failed_open / total * 100.0) if total > 0 else 0.0
@@ -451,6 +451,12 @@ def main(argv: list[str] | None = None) -> int:
         args.converter_version,
         factor,
     )
+    if schema_errors := validate_report(report):
+        print("ERROR: generated report fails schema validation:", file=sys.stderr)
+        for err in schema_errors:
+            print(f"  - {err}", file=sys.stderr)
+        return 1
+
     write_json(report, output_path)
     print(f"Unified Report written to {output_path}")
 
