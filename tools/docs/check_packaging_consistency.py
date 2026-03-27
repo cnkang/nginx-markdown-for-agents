@@ -262,7 +262,10 @@ def check_matrix_consistency() -> list[str]:
     """Every ``"full"`` tier entry in release-matrix.json must have a matching
     row in the installation guide compatibility matrix table."""
     errors: list[str] = []
-    matrix_data = json.loads(_read(RELEASE_MATRIX))
+    try:
+        matrix_data = json.loads(_read(RELEASE_MATRIX))
+    except json.JSONDecodeError:
+        return [f"{RELEASE_MATRIX.relative_to(ROOT)} is invalid JSON"]
     install_text = _read(INSTALL_GUIDE)
 
     m = re.search(

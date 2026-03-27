@@ -236,7 +236,7 @@ def check_environment_notes(text: str) -> list[str]:
     errors: list[str] = [
         f"Environment-Specific Notes missing coverage for '{label}'"
         for label, keyword in ENVIRONMENTS
-        if label not in section_lower and keyword not in section_lower
+        if label.lower() not in section_lower and keyword.lower() not in section_lower
     ]
     return errors
 
@@ -317,7 +317,7 @@ def check_no_hardcoded_release_tags(text: str) -> list[str]:
     errors.extend(
         f"Line {line_no}: hardcoded release tag in download URL (use <release_tag> placeholder instead): {line.strip()}"
         for line_no, line in enumerate(text.splitlines(), 1)
-        if re.search(r"releases/download/v\d+\.\d+\.\d+/", line)
+        if re.search(r"releases/download/v\d+\.\d+\.\d+[^/]*/", line)
     )
     return errors
 
@@ -356,9 +356,14 @@ def _check_directive_comments(lines: list[str], directive: str) -> list[str]:
 
 
 def check_demo_config_content() -> list[str]:
-    """Check 15: Demo config has inline comments for key directives and no proxy_pass."""
+    """Check 15: Demo config has inline comments for key directives and no proxy_pass.
+
+    Note: if the demo config file does not exist, this function assumes
+    that ``check_demo_config_exists()`` will report the problem and
+    therefore returns an empty list.
+    """
     if not DEMO_CONFIG.exists():
-        return ["Cannot check demo config content — file does not exist"]
+        return []
     content = _read_text(DEMO_CONFIG)
     errors: list[str] = []
     if not re.search(r"^\s*#", content, re.MULTILINE):
