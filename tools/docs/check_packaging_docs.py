@@ -329,10 +329,10 @@ DEMO_DIRECTIVES_REQUIRING_COMMENTS = [
 
 
 def _check_directive_comments(lines: list[str], directive: str) -> list[str]:
-    """Verify *directive* appears in *lines* with an inline or preceding comment."""
+    """Verify *directive* appears in *lines* with an inline ``#`` comment."""
     errors: list[str] = []
     found = False
-    for idx, line in enumerate(lines):
+    for line in lines:
         stripped = line.strip()
         if stripped.startswith("#") or not stripped:
             continue
@@ -340,11 +340,9 @@ def _check_directive_comments(lines: list[str], directive: str) -> list[str]:
             continue
         found = True
         has_inline = "#" in stripped.split(directive, 1)[-1]
-        has_preceding = idx > 0 and lines[idx - 1].strip().startswith("#")
-        if not has_inline and not has_preceding:
+        if not has_inline:
             errors.append(
-                f"Demo config directive '{directive}' has no inline or "
-                f"preceding comment"
+                f"Demo config directive '{directive}' has no inline comment"
             )
     if not found:
         errors.append(f"Demo config missing directive '{directive}'")
