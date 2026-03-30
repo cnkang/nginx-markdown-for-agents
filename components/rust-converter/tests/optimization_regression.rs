@@ -272,9 +272,7 @@ fn boilerplate_heavy_fixtures_preserve_nav_footer_aside() {
             // navigation link text (e.g. "Shop" from the ecommerce nav).
             if html_str.contains("<nav") {
                 assert!(
-                    output.contains("Shop")
-                        || output.contains("Home")
-                        || output.contains("nav"),
+                    output.contains("Shop") || output.contains("Home") || output.contains("nav"),
                     "{}: nav content should be present in output (prune_noise_regions is off)",
                     name
                 );
