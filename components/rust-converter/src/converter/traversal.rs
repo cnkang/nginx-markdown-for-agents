@@ -92,10 +92,17 @@ impl MarkdownConverter {
             return Ok(());
         }
 
+        // Fast-path branch elimination: when the document qualified for the
+        // fast path, form controls, embedded content, and strip-element
+        // handling are unreachable (the qualification scan already confirmed
+        // only fast-path-compatible elements are present). Skip the per-node
+        // method calls and attribute inspection for these branches.
+        let is_fast_path = ctx.as_ref().is_some_and(|c| c.is_fast_path);
+
         // Void form controls (<input>): extract descriptive text from attributes
         // (placeholder, value, aria-label) so AI agents see the semantic content
         // without raw HTML leaking into the Markdown output.
-        if self.security_validator.is_void_form_control(tag_name) {
+        if !is_fast_path && self.security_validator.is_void_form_control(tag_name) {
             if let NodeData::Element { ref attrs, .. } = node.data {
                 let attrs_borrowed = attrs.borrow();
                 let input_type = attrs_borrowed
@@ -152,7 +159,7 @@ impl MarkdownConverter {
 
         // Form container elements: strip the tag but traverse children so
         // their text content is preserved in the Markdown output.
-        if matches!(sanitize_action, SanitizeAction::StripElement) {
+        if !is_fast_path && matches!(sanitize_action, SanitizeAction::StripElement) {
             self.security_validator
                 .validate_depth(depth)
                 .map_err(ConversionError::InvalidInput)?;
