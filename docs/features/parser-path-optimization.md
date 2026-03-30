@@ -24,6 +24,23 @@ The three optimization groups are:
 All optimizations are evidence-gated: each group must demonstrate measurable
 benefit in the benchmark corpus and pass a corpus diff before merging.
 
+## Evidence Status
+
+Evidence collection for the 0.4.0 optimizations is pending. Before this
+feature ships as a release claim, the following evidence must be gathered and
+recorded here:
+
+- **Benchmark results**: Latency measurements (p50, p95, p99) and output byte
+  counts for each optimization group, compared against the pre-optimization
+  baseline on the same corpus version and platform.
+- **Corpus diff summary**: Full-corpus diff confirming output equivalence for
+  well-formed content (no unexplainable differences).
+- **Peak memory comparison**: Before/after peak RSS for representative large
+  documents to confirm no memory regression.
+
+Until this evidence is collected and reviewed, the optimizations are considered
+internal implementation improvements, not a release-level performance claim.
+
 ## Architecture
 
 All 0.4.0 optimizations operate within the existing buffer-based conversion
