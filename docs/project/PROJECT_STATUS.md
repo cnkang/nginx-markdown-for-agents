@@ -220,7 +220,14 @@ See [DEPLOYMENT_EXAMPLES.md](../guides/DEPLOYMENT_EXAMPLES.md) for configuration
 
 ## Current Focus and Roadmap
 
-### Current Release (0.3.0)
+### Current Release (0.4.0)
+- Prometheus-compatible metrics endpoint for operational monitoring
+- Unified decision reason codes for conversion transparency
+- Rollout cookbook with selective enablement and canary patterns
+- Rollback guide with trigger conditions and executable procedures
+- Benchmark corpus with reproducible evidence and regression detection
+- Parser path optimizations: noise region pruning, simple structure fast path
+- Restructured installation guide with shortest success path
 - Incremental processing for large responses
 - Matrix-driven release automation pipeline
 - Performance baseline gating system
@@ -228,13 +235,11 @@ See [DEPLOYMENT_EXAMPLES.md](../guides/DEPLOYMENT_EXAMPLES.md) for configuration
 - Enhanced installation tooling
 - Shared metrics aggregation and runtime-regression coverage
 - Hardened CI/CD pipeline
-- Documentation accuracy improvements
 
 ### Near-Term
 - Performance regression tracking with CI artifact capture
 - Deployment validation across diverse environments
 - Community feedback integration
-- Parser-path optimization opportunities
 
 ### Future Exploration
 - Streaming-oriented conversion approaches for large documents
@@ -338,7 +343,7 @@ See `examples/docker/` for Docker build examples.
 
 ## Summary
 
-**NGINX Markdown for Agents** is at version 0.3.0. The project provides HTML-to-Markdown conversion through NGINX content negotiation, with incremental processing for large responses, release automation, performance baseline gating, runtime validation reuse, fuzzing workflows, and shared metrics aggregation for observability.
+**NGINX Markdown for Agents** is at version 0.4.0. The project provides HTML-to-Markdown conversion through NGINX content negotiation, with Prometheus-compatible metrics, unified decision reason codes, rollout and rollback operational guides, a benchmark corpus with evidence-based regression detection, parser path optimizations, incremental processing for large responses, release automation, performance baseline gating, runtime validation reuse, fuzzing workflows, and shared metrics aggregation for observability.
 
 ### Key Components
 - Core feature implementation

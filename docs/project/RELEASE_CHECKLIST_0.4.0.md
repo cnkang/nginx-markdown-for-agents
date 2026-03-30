@@ -1,8 +1,8 @@
-# 0.4.0 Release Checklist — Completed
+# 0.4.0 Release Checklist — In Progress
 
 Executed on: 2026-03-30
 Branch: `feat/11-release-0-4-0`
-Release candidate commit: (to be recorded after final commit)
+Release candidate commit: (pending — will be recorded after CI verification completes)
 
 ---
 
@@ -32,11 +32,11 @@ Release candidate commit: (to be recorded after final commit)
 - [x] `make test-all` passes on macOS
   - Evidence: `make test-all` → all Rust tests passed (197 passed, 0 failed), all C unit tests passed, all doctests passed (25 passed)
 - [ ] `make test-all` passes on Ubuntu
-  - Evidence: Pending CI verification on `release/0.4.0` branch (requires GitHub Actions `ci.yml` run)
+  - Evidence: Pending — requires GitHub Actions `ci.yml` run on release branch
 - [ ] CI passes on NGINX 1.24.x, 1.26.x, 1.27.x
-  - Evidence: Pending CI verification (requires `release-binaries.yml` matrix run)
+  - Evidence: Pending — requires `release-binaries.yml` matrix run on release branch
 - [x] Benchmark corpus runs reproducibly (`make test-benchmark` or equivalent)
-  - Evidence: Benchmark corpus infrastructure exists in `tools/perf/run_corpus_benchmark.py` with property-based tests for fixture count invariant, aggregate computation, and token reduction
+  - Evidence: Benchmark corpus infrastructure in `tools/perf/run_corpus_benchmark.py` with property-based tests for fixture count invariant, aggregate computation, and token reduction
 - [x] Evidence pack generated and archived
   - Evidence: Benchmark evidence in `docs/evidence/`, corpus metadata in `tests/corpus/corpus-version.json`
 - [x] Metrics endpoint has unit test coverage (`metrics_test.c`)
@@ -78,6 +78,13 @@ Release candidate commit: (to be recorded after final commit)
 
 ---
 
-## Exceptions
+## Blocking Items
 
-- Ubuntu `make test-all` and multi-NGINX-version CI verification are pending GitHub Actions runs on the release branch. These will be verified as part of CI verification (Task 8).
+The following items must be resolved before the Go/No-Go decision can be finalized:
+
+1. **Ubuntu `make test-all`** — requires GitHub Actions `ci.yml` run on the release branch
+2. **Multi-NGINX-version CI matrix** — requires `release-binaries.yml` workflow dispatch on the release branch
+3. **`nightly-perf.yml`** — requires workflow dispatch on the release branch
+4. **`install-verify.yml`** — requires workflow dispatch on the release branch
+
+These items require CI runs against the release candidate commit. Run IDs and commit SHAs must be recorded in this checklist before the Go/No-Go review can proceed.
