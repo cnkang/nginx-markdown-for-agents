@@ -330,8 +330,15 @@ Makefile               Top-level build and test entrypoints
 
 ## Roadmap
 
-Current release (0.3.0):
+Current release (0.4.0):
 
+- Prometheus-compatible metrics endpoint for operational monitoring
+- Unified decision reason codes for conversion transparency
+- Rollout cookbook with selective enablement and canary patterns
+- Rollback guide with trigger conditions and executable procedures
+- Benchmark corpus with reproducible evidence and regression detection
+- Parser path optimizations: noise region pruning, simple structure fast path
+- Restructured installation guide with shortest success path
 - Incremental processing for large responses
 - Matrix-driven release automation pipeline
 - Performance baseline gating system
@@ -345,7 +352,6 @@ Near-term focus:
 - Performance regression tracking with CI artifact capture
 - Deployment validation across diverse environments
 - Community feedback integration
-- Parser-path optimization opportunities
 
 Future exploration:
 
