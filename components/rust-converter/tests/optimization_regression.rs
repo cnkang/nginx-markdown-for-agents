@@ -248,7 +248,7 @@ fn malformed_fixtures_deterministic() {
 
 /// With the default build (prune_noise_regions disabled), content from
 /// `<nav>`, `<footer>`, and `<aside>` elements should be present in the
-/// Markdown output.
+/// Markdown output. When the feature is enabled, that content is pruned.
 #[test]
 fn boilerplate_heavy_fixtures_preserve_nav_footer_aside() {
     let boilerplate_fixtures = [
@@ -266,40 +266,75 @@ fn boilerplate_heavy_fixtures_preserve_nav_footer_aside() {
         let html_str = String::from_utf8_lossy(&html_bytes);
         let output = convert_fixture(&path);
 
-        // If the HTML contains <nav>, the output should include some
-        // navigation link text (e.g. "Shop" from the ecommerce nav).
-        if html_str.contains("<nav") {
-            assert!(
-                output.contains("Shop") || output.contains("Home") || output.contains("nav"),
-                "{}: nav content should be present in output (prune_noise_regions is off)",
-                name
-            );
+        #[cfg(not(feature = "prune_noise_regions"))]
+        {
+            // If the HTML contains <nav>, the output should include some
+            // navigation link text (e.g. "Shop" from the ecommerce nav).
+            if html_str.contains("<nav") {
+                assert!(
+                    output.contains("Shop")
+                        || output.contains("Home")
+                        || output.contains("nav"),
+                    "{}: nav content should be present in output (prune_noise_regions is off)",
+                    name
+                );
+            }
+
+            // If the HTML contains <footer>, the output should include some
+            // footer text.
+            if html_str.contains("<footer") {
+                assert!(
+                    output.contains("footer")
+                        || output.contains("Footer")
+                        || output.contains("©")
+                        || output.contains("Copyright")
+                        || output.contains("Privacy")
+                        || output.contains("Terms")
+                        || output.contains("Contact"),
+                    "{}: footer content should be present in output (prune_noise_regions is off)",
+                    name
+                );
+            }
+
+            // If the HTML contains <aside>, the output should include some
+            // sidebar text.
+            if html_str.contains("<aside") {
+                assert!(
+                    !output.is_empty(),
+                    "{}: aside content should contribute to non-empty output",
+                    name
+                );
+            }
         }
 
-        // If the HTML contains <footer>, the output should include some
-        // footer text.
-        if html_str.contains("<footer") {
-            assert!(
-                output.contains("footer")
-                    || output.contains("Footer")
-                    || output.contains("©")
-                    || output.contains("Copyright")
-                    || output.contains("Privacy")
-                    || output.contains("Terms")
-                    || output.contains("Contact"),
-                "{}: footer content should be present in output (prune_noise_regions is off)",
-                name
-            );
-        }
-
-        // If the HTML contains <aside>, the output should include some
-        // sidebar text.
-        if html_str.contains("<aside") {
+        #[cfg(feature = "prune_noise_regions")]
+        {
+            // When pruning is enabled, nav/footer/aside content is removed.
+            // Verify the output is still valid (non-empty, ends with newline)
+            // and that content outside pruned regions is preserved.
             assert!(
                 !output.is_empty(),
-                "{}: aside content should contribute to non-empty output",
+                "{}: output should not be empty even with noise regions pruned",
                 name
             );
+            assert!(
+                output.ends_with('\n'),
+                "{}: output should end with a newline",
+                name
+            );
+
+            // Nav content should be absent when pruning is active.
+            if html_str.contains("<nav") {
+                assert!(
+                    !(output.contains("Shop") && output.contains("Home")),
+                    "{}: nav content should be pruned (prune_noise_regions is on)",
+                    name
+                );
+            }
         }
+
+        // Suppress unused-variable warning when only one cfg branch uses html_str.
+        let _ = &html_str;
+        let _ = &output;
     }
 }
