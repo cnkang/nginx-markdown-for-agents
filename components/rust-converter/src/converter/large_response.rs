@@ -75,6 +75,10 @@ impl FusedNormalizer {
     /// - Normalizes inline whitespace for non-code-block lines (collapses
     ///   multiple spaces while preserving leading indentation and inline code).
     pub(crate) fn push_line(&mut self, line: &str) {
+        /* Strip a trailing \r so that CRLF input is handled without a
+         * separate full-string replace() allocation. */
+        let line = line.strip_suffix('\r').unwrap_or(line);
+
         let trimmed_start = line.trim_start();
         if trimmed_start.starts_with("```") {
             self.in_code_block = !self.in_code_block;
@@ -103,7 +107,7 @@ impl FusedNormalizer {
     ///
     /// Used for content that has already been normalized or should be
     /// preserved verbatim.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(crate) fn push_raw(&mut self, content: &str) {
         self.output.push_str(content);
     }
@@ -217,10 +221,11 @@ mod tests {
     // ---------------------------------------------------------------
 
     /// Helper: run input through FusedNormalizer line-by-line and return result.
+    /// Uses split('\n') to match the production code path in convert_with_context,
+    /// relying on push_line's internal \r stripping for CRLF handling.
     fn normalize_via_fused(input: &str) -> String {
-        let input = input.replace("\r\n", "\n");
         let mut normalizer = FusedNormalizer::new(input.len());
-        for line in input.lines() {
+        for line in input.split('\n') {
             normalizer.push_line(line);
         }
         normalizer.finalize()
@@ -359,6 +364,20 @@ mod tests {
     fn fused_crlf_handling() {
         let input = "Hello\r\nWorld\r\n";
         assert_eq!(normalize_via_fused(input), normalize_reference(input));
+    }
+
+    #[test]
+    fn fused_crlf_stripped_inline_without_replace() {
+        /* Verify that push_line handles \r directly, so the caller does not
+         * need to pre-process the input with replace("\r\n", "\n"). */
+        let input = "Line one\r\n\r\nLine two\r\n";
+        let mut normalizer = FusedNormalizer::new(input.len());
+        for line in input.split('\n') {
+            normalizer.push_line(line);
+        }
+        let result = normalizer.finalize();
+        assert_eq!(result, normalize_reference(input));
+        assert!(!result.contains('\r'));
     }
 
     #[test]
