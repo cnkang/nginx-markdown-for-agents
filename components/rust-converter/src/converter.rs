@@ -122,6 +122,10 @@ mod traversal;
 /// Threshold in bytes above which the fused normalizer is used instead of
 /// the two-pass `normalize_output`. This avoids a second full-size allocation
 /// for large documents.
+///
+/// This value is aligned with the default `markdown_large_body_threshold`
+/// NGINX directive (256 KB). If the directive default changes, this constant
+/// should be updated to match.
 const LARGE_BODY_THRESHOLD: usize = 256 * 1024; // 256 KB
 
 /// Markdown flavor selection
@@ -225,6 +229,14 @@ pub struct ConversionContext {
     timeout: Duration,
     /// Number of nodes processed (for checkpoint frequency)
     node_count: u32,
+    /// Whether the document qualified for the fast path.
+    ///
+    /// When `true`, the traversal can skip branches that are unreachable for
+    /// fast-path documents (e.g., form control extraction, embedded content
+    /// handling, table/media element processing). This avoids per-node
+    /// method calls and attribute inspection for code paths that the
+    /// qualification scan has already proven unreachable.
+    pub(crate) is_fast_path: bool,
 }
 
 impl ConversionContext {
@@ -251,6 +263,7 @@ impl ConversionContext {
             start_time: Instant::now(),
             timeout,
             node_count: 0,
+            is_fast_path: false,
         }
     }
 
@@ -514,10 +527,11 @@ impl MarkdownConverter {
         ctx: &mut ConversionContext,
     ) -> Result<String, ConversionError> {
         // Fast path qualification: check if the document is structurally simple
-        // enough for optimized traversal. The result is stored for potential
-        // branch-elimination during traversal (the actual traversal still uses
-        // traverse_node). Currently used as a classification signal only.
-        let _is_fast_path = fast_path::qualifies(dom) == fast_path::FastPathResult::Qualifies;
+        // enough for optimized traversal. When the document qualifies, the
+        // traversal skips unreachable branches (form controls, embedded content,
+        // table/media handling) reducing per-node overhead.
+        ctx.is_fast_path =
+            fast_path::qualifies(dom) == fast_path::FastPathResult::Qualifies;
 
         // Pre-allocate output buffer with reasonable capacity
         // Average compression ratio is ~70-85%, so we estimate output size
@@ -540,7 +554,8 @@ impl MarkdownConverter {
         // Normalize output: use fused normalizer for large documents to avoid
         // a second full-size allocation, otherwise use the standard two-pass path.
         let markdown = if output.len() > LARGE_BODY_THRESHOLD {
-            let mut normalizer = large_response::FusedNormalizer::new(output.len());
+            let capacity = large_response::estimate_output_capacity(output.len());
+            let mut normalizer = large_response::FusedNormalizer::new(capacity);
             let output = output.replace("\r\n", "\n");
             for line in output.lines() {
                 normalizer.push_line(line);
