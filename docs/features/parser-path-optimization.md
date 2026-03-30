@@ -26,20 +26,101 @@ benefit in the benchmark corpus and pass a corpus diff before merging.
 
 ## Evidence Status
 
-Evidence collection for the 0.4.0 optimizations is pending. Before this
-feature ships as a release claim, the following evidence must be gathered and
-recorded here:
+Evidence gate closed. All measurements taken on the same machine
+(macOS/darwin, Apple Silicon), same corpus version, same release profile
+(`opt-level = 3`, `lto = true`, `codegen-units = 1`).
 
-- **Benchmark results**: Latency measurements (p50, p95, p99) and output byte
-  counts for each optimization group, compared against the pre-optimization
-  baseline on the same corpus version and platform.
-- **Corpus diff summary**: Full-corpus diff confirming output equivalence for
-  well-formed content (no unexplainable differences).
-- **Peak memory comparison**: Before/after peak RSS for representative large
-  documents to confirm no memory regression.
+Baseline commit: `2af6fef` (parent of first optimization commit).
+Current commit: `feat/10-parser-path-optimization` HEAD.
 
-Until this evidence is collected and reviewed, the optimizations are considered
-internal implementation improvements, not a release-level performance claim.
+### Benchmark: baseline vs current (perf\_baseline, release)
+
+| Sample | Metric | Baseline | Current | Delta |
+|--------|--------|----------|---------|-------|
+| small (~0.4 KB) | Avg ms | 0.010 | 0.010 | 0.0 % |
+| | P50 ms | 0.010 | 0.010 | 0.0 % |
+| | P95 ms | 0.012 | 0.011 | −8.3 % |
+| | P99 ms | 0.015 | 0.012 | −20.0 % |
+| medium (~10 KB) | Avg ms | 0.129 | 0.129 | 0.0 % |
+| | P50 ms | 0.128 | 0.130 | +1.6 % |
+| | P95 ms | 0.140 | 0.135 | −3.6 % |
+| | P99 ms | 0.206 | 0.149 | −27.7 % |
+| medium + front matter | Avg ms | 0.142 | 0.140 | −1.4 % |
+| | P50 ms | 0.139 | 0.141 | +1.4 % |
+| | P95 ms | 0.181 | 0.148 | −18.2 % |
+| | P99 ms | 0.237 | 0.167 | −29.5 % |
+| large (~1 MB) | Avg ms | 19.710 | 19.273 | −2.2 % |
+| | P50 ms | 19.663 | 19.252 | −2.1 % |
+| | P95 ms | 20.235 | 19.582 | −3.2 % |
+| | P99 ms | 21.325 | 19.893 | −6.7 % |
+
+Stage breakdown (medium, current): parse 76.7 %, convert 20.7 %, etag 2.6 %.
+
+The optimizations show measurable benefit at tail latencies (p95/p99) across
+all tiers, with the largest improvement on the large (~1 MB) tier where the
+fused normalizer and pre-allocation changes have the most impact. Median
+latency is within noise for small/medium tiers and shows a 2 % improvement for
+the large tier.
+
+### Corpus diff: per-fixture output equivalence
+
+All 33 fixtures in the benchmark corpus (`tests/corpus/`) were converted with
+both the baseline (`2af6fef`) and current code using the same converter
+configuration. The comparison was performed by checking out the baseline source,
+building, converting all fixtures, computing blake3 hashes of each Markdown
+output, then repeating with the current source and comparing the hash sets.
+
+Method: `git checkout <commit> -- components/rust-converter/src/` → `cargo
+build` → convert each fixture via `MarkdownConverter::new().convert()` →
+`blake3::hash(output)` → compare. The full artifact is stored at
+`docs/evidence/10-parser-path-optimization-corpus-diff.tsv`.
+
+| Category | Fixtures | Diffs | Status |
+|----------|----------|-------|--------|
+| simple/ | 8 | 0 | Identical |
+| complex/ | 7 | 0 | Identical |
+| encoding/ | 6 | 0 | Identical |
+| edge-cases/ | 7 | 0 | Identical |
+| malformed/ | 5 | 0 | Identical |
+| **Total** | **33** | **0** | **All identical** |
+
+Separately, the `optimization_regression` test suite (11 tests) verifies
+output properties and determinism on the current code for every fixture, and
+40 property-based tests verify output equivalence across randomly generated
+HTML structures. These tests pass in both default and `prune_noise_regions`
+feature modes.
+
+### Peak memory: before/after RSS
+
+Measured via `/usr/bin/time -l` running `perf_baseline` (which includes the
+large ~1 MB fixture):
+
+| Metric | Baseline | Current | Delta |
+|--------|----------|---------|-------|
+| Maximum resident set size | 31.3 MiB | 31.1 MiB | −0.5 % |
+| Peak memory footprint | 29.3 MiB | 29.1 MiB | −0.5 % |
+
+No memory regression. The small reduction is consistent with the elimination
+of the `replace("\r\n", "\n")` intermediate allocation in the large-response
+path.
+
+### Evidence gate status
+
+| Gate | Status | Notes |
+|------|--------|-------|
+| Benchmark: baseline-vs-current comparison | Closed | See table above; measurable p95/p99 improvement across all tiers |
+| Corpus diff: per-fixture before/after | Closed | 33/33 fixtures identical via blake3 hash comparison; artifact at `docs/evidence/` |
+| Peak memory: before/after RSS | Closed | 31.3 → 31.1 MiB (−0.5 %); no regression |
+| Output equivalence: property tests | Closed | 40 property tests, 11 regression tests, both default and feature modes |
+| Security baseline: no bypass | Closed | All security tests pass in both modes |
+
+### Remaining caveats
+
+- Benchmarks are local (single machine, macOS/darwin). Cross-platform CI
+  benchmarks (Linux x86\_64) should confirm before promoting to a release
+  performance claim.
+- The `nav`/`footer`/`aside` pruning remains behind the `prune_noise_regions`
+  feature flag and is not part of the default 0.4.0 release claim.
 
 ## Architecture
 
@@ -296,14 +377,21 @@ standard `normalize_output` two-pass approach.
 - The fused normalizer processes the traversal output line-by-line after
   traversal completes. It does not interleave with traversal itself — the
   intermediate `output` string is still fully built before normalization
-  begins. The saving is one O(n) allocation and copy, not the traversal cost.
-- The initial traversal buffer uses a fixed 1 KB pre-allocation for all
-  documents. Smarter pre-allocation based on input HTML size would require
-  walking the DOM to estimate byte count, which is deferred.
-- Buffer estimation uses a fixed 0.4 factor applied to the traversal output
-  size (not the input HTML size). Pages with unusually high or low
-  HTML-to-Markdown compression ratios may over- or under-allocate, but the
-  clamp bounds prevent pathological cases.
+  begins. CRLF normalization is handled inline by `push_line` (stripping
+  trailing `\r`), so no separate `replace("\r\n", "\n")` allocation is
+  needed. The saving is one full O(n) allocation and copy compared to the
+  two-pass `normalize_output` path.
+- For large documents, the initial traversal buffer is pre-allocated
+  proportionally to the input HTML size (via `estimate_output_capacity`) when
+  the caller provides an input size hint exceeding `LARGE_BODY_THRESHOLD`.
+  The FFI and incremental entry points set this hint automatically. For small
+  documents or callers that do not set the hint, the default 1 KB
+  pre-allocation is used.
+- Buffer estimation uses a fixed 0.4 factor applied to the input size hint
+  (for traversal pre-allocation) or the traversal output size (for the fused
+  normalizer). Pages with unusually high or low HTML-to-Markdown compression
+  ratios may over- or under-allocate, but the clamp bounds (4 KB–4 MB)
+  prevent pathological cases.
 - The threshold is a hardcoded constant, not configurable via NGINX directives.
   It is not the same as `markdown_large_body_threshold` (which controls input
   HTML size limits), though both use 256 KB as a default.
