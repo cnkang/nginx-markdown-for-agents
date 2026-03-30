@@ -240,6 +240,13 @@ pub struct ConversionContext {
     /// method calls and attribute inspection for code paths that the
     /// qualification scan has already proven unreachable.
     pub(crate) is_fast_path: bool,
+    /// Optional hint about the input HTML size in bytes.
+    ///
+    /// When set (non-zero), the converter uses this to pre-allocate the
+    /// traversal output buffer proportionally for large documents, reducing
+    /// reallocations during DOM traversal. Callers that know the input size
+    /// (e.g., the FFI layer) should set this via [`set_input_size_hint`].
+    input_size_hint: usize,
 }
 
 impl ConversionContext {
@@ -267,7 +274,22 @@ impl ConversionContext {
             timeout,
             node_count: 0,
             is_fast_path: false,
+            input_size_hint: 0,
         }
+    }
+
+    /// Set a hint about the input HTML size in bytes.
+    ///
+    /// When the hint exceeds `LARGE_BODY_THRESHOLD`, the converter
+    /// pre-allocates the traversal output buffer proportionally (via
+    /// `estimate_output_capacity`) instead of using the default 1 KB.
+    /// This reduces reallocations during DOM traversal for large documents.
+    ///
+    /// # Arguments
+    ///
+    /// * `size` - Input HTML size in bytes (0 means unknown)
+    pub(crate) fn set_input_size_hint(&mut self, size: usize) {
+        self.input_size_hint = size;
     }
 
     /// Check if timeout has been exceeded
@@ -535,9 +557,16 @@ impl MarkdownConverter {
         // table/media handling) reducing per-node overhead.
         ctx.is_fast_path = fast_path::qualifies(dom) == fast_path::FastPathResult::Qualifies;
 
-        // Pre-allocate output buffer with reasonable capacity
-        // Average compression ratio is ~70-85%, so we estimate output size
-        let mut output = String::with_capacity(1024);
+        // Pre-allocate output buffer. For large documents (input size hint
+        // exceeds LARGE_BODY_THRESHOLD), use estimate_output_capacity to
+        // scale the buffer proportionally, reducing reallocations during
+        // DOM traversal. For small or unknown-size documents, use 1 KB.
+        let initial_capacity = if ctx.input_size_hint > LARGE_BODY_THRESHOLD {
+            large_response::estimate_output_capacity(ctx.input_size_hint)
+        } else {
+            1024
+        };
+        let mut output = String::with_capacity(initial_capacity);
 
         // Extract metadata and add YAML front matter if enabled
         if self.options.include_front_matter && self.options.extract_metadata {
@@ -557,11 +586,12 @@ impl MarkdownConverter {
         // exceeds LARGE_BODY_THRESHOLD to avoid allocating a second full-size
         // string via normalize_output. The threshold is checked against the
         // traversal output length (not the input HTML size).
+        // CRLF normalization is handled inside FusedNormalizer::push_line,
+        // so no separate replace("\r\n", "\n") allocation is needed.
         let markdown = if output.len() > LARGE_BODY_THRESHOLD {
             let capacity = large_response::estimate_output_capacity(output.len());
             let mut normalizer = large_response::FusedNormalizer::new(capacity);
-            let output = output.replace("\r\n", "\n");
-            for line in output.lines() {
+            for line in output.split('\n') {
                 normalizer.push_line(line);
             }
             normalizer.finalize()
