@@ -5,8 +5,8 @@ Requirements references: 7.1, 7.2, 7.3, 7.4, 7.5, 7.6
 ## Decision Record
 
 - Date: 2026-03-30
-- Decision: Go
-- Rationale: All P0 sub-specs have completed their implementation tasks and pass their DoD evaluations. The P1 sub-spec (parser-path-optimization) is included with all tasks complete. All release gates are satisfied. `make test-all`, `make docs-check`, and `make release-gates-check` pass on the release candidate. No blocking exceptions.
+- Decision: Conditional Go
+- Rationale: All P0 and P1 sub-specs have completed their implementation tasks. Local verification passes (`make test-all` on macOS, `make docs-check`, `make release-gates-check`). CI verification on Ubuntu and multi-NGINX-version matrix is pending — the Go decision is conditional on those CI runs passing against the release candidate commit. The tag must not be created until CI evidence is recorded.
 
 ## P0 Sub-Spec Status
 
@@ -29,16 +29,28 @@ Requirements references: 7.1, 7.2, 7.3, 7.4, 7.5, 7.6
 | Gate Category | Status | Exceptions |
 |--------------|--------|------------|
 | Documentation | ✅ | None — All 6 sub-specs have requirements and design documents. All new directives documented. `make docs-check` passes. CHANGELOG updated with 0.4.0 entries including deferred items. |
-| Testing | ✅ | None — `make test-all` passes on macOS. Rust proptest and Python Hypothesis property-based tests pass. C unit tests pass. CI verification on Ubuntu and multi-NGINX-version matrix pending push to release branch. |
+| Testing | ⏳ | CI verification pending — `make test-all` passes on macOS; Ubuntu and multi-NGINX-version matrix require GitHub Actions runs on the release branch. See Blocking Items below. |
 | Compatibility | ✅ | None — `markdown_metrics_format` defaults to `auto`, preserving 0.3.0 behavior. No existing directive behavior changed. `make release-gates-check` passes. |
 | Operations | ✅ | None — Installation guide restructured. Rollout cookbook and rollback guide exist. Metrics endpoint supports JSON, plain-text, and Prometheus formats. Decision logging with reason codes documented. |
+
+## Blocking Items (CI Verification)
+
+The following CI workflows must pass against the release candidate commit before the Conditional Go becomes a final Go:
+
+| Workflow | Status | Run ID | Commit SHA |
+|----------|--------|--------|------------|
+| `ci.yml` (`make test-all` on Ubuntu) | Pending | — | — |
+| `nightly-perf.yml` | Pending | — | — |
+| `release-binaries.yml` | Pending | — | — |
+| `install-verify.yml` | Pending | — | — |
+
+Once all four workflows pass, update this table with run IDs and commit SHAs, change the Decision to "Go", and proceed with tag creation.
 
 ## Exceptions
 
 | # | Gate Item | Exception Rationale | Risk Assessment | Mitigation |
 |---|----------|-------------------|-----------------|------------|
-| 1 | Ubuntu `make test-all` | Local verification on macOS only; Ubuntu verification requires CI | Low — codebase is cross-platform tested in CI on every PR | CI `ci.yml` run on release branch will verify before tag creation |
-| 2 | Multi-NGINX CI matrix | Requires `release-binaries.yml` workflow dispatch | Low — matrix builds are tested on every PR | Workflow dispatch on release branch before tag creation |
+| — | No unresolved exceptions | — | — | — |
 
 ## DoD Evaluation Summary
 
@@ -53,6 +65,8 @@ Requirements references: 7.1, 7.2, 7.3, 7.4, 7.5, 7.6
 | Auditable | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Compatible | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 
+Note: Formal DoD evaluation tables have not been recorded as separate artifacts in each sub-spec's completion file. The checkpoint coverage above is assessed based on task completion status, test results, and artifact review. The `make release-gates-check` DoD validation reports "no DoD evaluation tables found — passing vacuously" because the sub-specs did not produce standalone DoD table artifacts.
+
 ### Evidence References
 
 - Spec 5: Governance artifacts in `docs/project/release-gates/`; validation script `tools/release/validate_release_gates.py`
@@ -64,4 +78,20 @@ Requirements references: 7.1, 7.2, 7.3, 7.4, 7.5, 7.6
 
 ## Risk Register Review
 
-No High-likelihood or High-impact risks found across any sub-spec risk registers. All risks are Low or Medium with documented mitigations.
+The following High-likelihood or High-impact risks were identified across sub-spec risk registers. All have documented, actionable mitigations.
+
+### Spec 8 (benchmark-corpus-and-evidence)
+
+| Risk | Likelihood | Impact | Mitigation | Status |
+|------|-----------|--------|------------|--------|
+| R2: Token reduction estimates misinterpreted as precise billing data | Medium | High | Label all estimates clearly in reports and documentation, include explicit disclaimers | Mitigated — reports and docs include disclaimers |
+| R3: Benchmark latency measurements are noisy across CI environments | High | Medium | Use percentile-based metrics (P50/P95/P99), integrate with existing threshold engine, document expected variance | Mitigated — threshold engine supports configurable tolerance |
+| R4: Report schema changes break comparison across versions | Low | High | Version the schema, require major version bump for breaking changes, validate reports against schema | Mitigated — schema is versioned |
+
+### Spec 10 (parser-path-optimization)
+
+| Risk | Likelihood | Impact | Mitigation | Status |
+|------|-----------|--------|------------|--------|
+| R1: Early pruning of nav/footer/aside causes false kills on pages with primary content in these elements | Medium | High | Tag-name-only matching (no heuristics), validate against benchmark corpus, tricky-case fixtures, fallback to Normal_Path | Mitigated — property tests and corpus validation pass |
+| R3: Fast path qualification criteria too broad, causing incorrect output | Low | High | Property-based tests verify output equivalence, fast path falls back to Normal_Path, corpus diff catches regressions | Mitigated — property tests pass |
+| R4: Optimization work consumes too much time and threatens 0.4.0 release | Medium | High | P1 spec — defer entirely if it risks the release; P0 specs take priority | Resolved — all P1 tasks complete without impacting P0 timeline |
