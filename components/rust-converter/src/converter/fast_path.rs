@@ -27,12 +27,23 @@ pub(crate) const FAST_PATH_MAX_DEPTH: usize = 15;
 /// `script`/`style`/`noscript`) qualify for the fast path. Tags not in this
 /// list — such as `table`, `form`, `video`, `iframe` — disqualify the document.
 ///
+/// Semantic layout tags (`nav`, `footer`, `aside`) are included here even
+/// though they are also listed in `pruning.rs` as noise-region elements.
+/// When the `prune_noise_regions` feature is enabled, `should_prune` returns
+/// `SkipSubtree` for these tags and `check_node` accepts them before reaching
+/// the allow-list check. When the feature is disabled (the default),
+/// `should_prune` returns `Traverse`, so they must be present in this list to
+/// avoid unnecessarily disqualifying documents that contain them. In the
+/// traversal layer they fall through to `traverse_children`, just like `div`
+/// or `section`.
+///
 /// **Cross-reference**: When adding a new element handler to
 /// `handle_element_internal` in `traversal.rs`, check whether the element
 /// should also be added here. Conversely, every tag in this list must have a
 /// corresponding handler (or fall through to `traverse_children`) in the
-/// traversal match arm. The pruning list in `pruning.rs` is checked
-/// separately and does not need to be duplicated here.
+/// traversal match arm. The always-pruned list (`script`/`style`/`noscript`)
+/// in `pruning.rs` does not need to be duplicated here because `should_prune`
+/// returns a non-`Traverse` decision for them regardless of feature flags.
 const FAST_PATH_ELEMENTS: &[&str] = &[
     "html",
     "head",
@@ -64,6 +75,9 @@ const FAST_PATH_ELEMENTS: &[&str] = &[
     "article",
     "main",
     "header",
+    "nav",
+    "footer",
+    "aside",
 ];
 
 /// Result of fast-path qualification scan.
@@ -220,6 +234,22 @@ mod tests {
     fn text_only_document_qualifies() {
         // html5ever wraps bare text in <html><head></head><body>…</body></html>
         let dom = parse("Just some text");
+        assert_eq!(qualifies(&dom), FastPathResult::Qualifies);
+    }
+
+    #[test]
+    fn semantic_layout_tags_qualify() {
+        // nav, footer, and aside are semantic layout tags that fall through to
+        // traverse_children — they should qualify regardless of whether the
+        // prune_noise_regions feature is enabled.
+        let dom = parse(
+            "<html><body>\
+             <nav><a href=\"/\">Home</a></nav>\
+             <main><p>Content</p></main>\
+             <aside><p>Sidebar</p></aside>\
+             <footer><p>Copyright</p></footer>\
+             </body></html>",
+        );
         assert_eq!(qualifies(&dom), FastPathResult::Qualifies);
     }
 }
