@@ -29,7 +29,7 @@ Requirements references: 7.1, 7.2, 7.3, 7.4, 7.5, 7.6
 | Gate Category | Status | Exceptions |
 |--------------|--------|------------|
 | Documentation | ✅ | None — All 6 sub-specs have requirements and design documents. All new directives documented. `make docs-check` passes. CHANGELOG updated with 0.4.0 entries including deferred items. |
-| Testing | ✅ | None — `make test-all` passes on macOS. Rust proptest and Python Hypothesis property-based tests pass. C unit tests pass. |
+| Testing | ✅ | E1 — Rollout strategy e2e coverage is indirect (via documentation review and existing integration tests). Dedicated path/host/header rollout e2e tests pending. See Exceptions table. Metrics Prometheus negotiation covered by `test_metrics_prometheus_content_negotiation` (Test 9, `run_integration_tests.sh`): openmetrics-text, `text/plain; version=0.0.4`, JSON override, bare text/plain negative case, and compact-form boundary rejection (Sub-test E). Content-Type assertions enforce canonical header formatting (`"; "` separator); see `assert_prometheus_content_type` for rationale. |
 | Compatibility | ✅ | None — `markdown_metrics_format` defaults to `auto`, preserving 0.3.0 behavior. No existing directive behavior changed. `make release-gates-check` passes. |
 | Operations | ✅ | None — Installation guide restructured. Rollout cookbook and rollback guide exist. Metrics endpoint supports JSON, plain-text, and Prometheus formats. Decision logging with reason codes documented. |
 
@@ -37,7 +37,7 @@ Requirements references: 7.1, 7.2, 7.3, 7.4, 7.5, 7.6
 
 | # | Gate Item | Exception Rationale | Risk Assessment | Mitigation |
 |---|----------|-------------------|-----------------|------------|
-| — | No unresolved exceptions | — | — | — |
+| E1 | Rollout strategies e2e coverage | Dedicated e2e tests for path/host/header rollout enablement paths not yet implemented. Existing coverage is indirect via documentation review and integration tests for underlying module behavior. | Low — underlying mechanisms (content negotiation, directive parsing) are well-tested; risk is limited to rollout-specific configuration combinations. | Document gap in release checklist. Prioritize dedicated rollout e2e tests for 0.4.1 or 0.5.0. |
 
 ## DoD Evaluation Summary
 

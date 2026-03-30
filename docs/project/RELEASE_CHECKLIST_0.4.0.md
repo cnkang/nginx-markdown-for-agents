@@ -38,12 +38,12 @@ Branch: `feat/11-release-0-4-0`
   - Evidence: Benchmark corpus infrastructure in `tools/perf/run_corpus_benchmark.py` with property-based tests for fixture count invariant, aggregate computation, and token reduction
 - [x] Evidence pack generated and archived
   - Evidence: Benchmark evidence in `docs/evidence/`, corpus metadata in `tests/corpus/corpus-version.json`
-- [x] Metrics endpoint has unit test coverage (`metrics_test.c`)
+- [x] Metrics endpoint has unit test coverage (`metrics_endpoint_test.c`, `metrics_format_select_test.c`, `prometheus_format_test.c`, `metrics_collection_test.c`)
   - Evidence: C unit tests for Prometheus renderer, content negotiation, skip-reason mapping, and snapshot collection all pass
 - [x] Metrics endpoint has integration test coverage
-  - Evidence: Integration tests cover metrics endpoint content negotiation and format selection
-- [x] Rollout strategies have e2e coverage for primary enablement paths (path-based, host-based, header-based)
-  - Evidence: No dedicated e2e test suite for rollout strategies. Coverage is via documentation review: `docs/guides/ROLLOUT_COOKBOOK.md` documents path-based, host-based, header-based, UA-based, and canary patterns. The underlying module behavior (content negotiation, directive parsing, metrics) is covered by existing e2e and integration tests in `tools/e2e/`.
+  - Evidence: `test_metrics_shared_aggregation` (Test 8) and `test_metrics_prometheus_content_negotiation` (Test 9) in `components/nginx-module/tests/integration/run_integration_tests.sh`. Test 9 covers `application/openmetrics-text`, `text/plain; version=0.0.4`, `application/json` override, bare `text/plain` negative case, and compact-form boundary rejection (Sub-test E). Content-Type assertions use canonical header formatting (`"; "` separator required); see `assert_prometheus_content_type` comment for rationale. Run: `make test-nginx-integration` or `./components/nginx-module/tests/integration/run_integration_tests.sh`. Prerequisite: NGINX binary compiled with the markdown filter module (set `NGINX_BIN` or ensure `nginx` is in `PATH`).
+- [ ] Rollout strategies have e2e coverage for primary enablement paths (path-based, host-based, header-based)
+  - Evidence: No dedicated e2e test suite for rollout strategies. Coverage is via documentation review: `docs/guides/ROLLOUT_COOKBOOK.md` documents path-based, host-based, header-based, UA-based, and canary patterns. The underlying module behavior (content negotiation, directive parsing, metrics) is covered by existing e2e and integration tests in `tools/e2e/`. Pending dedicated e2e tests for rollout enablement paths.
 - [x] Parser optimization (if included): diff coverage and regression tests pass
   - Evidence: Spec 10 all tasks complete; property tests for pruning invariance, output equivalence, fast path correctness, and security baseline all pass
 - [x] Property-based tests pass (Rust proptest via `cargo test` and Python Hypothesis tests matching `test_*_pbt.py`)
