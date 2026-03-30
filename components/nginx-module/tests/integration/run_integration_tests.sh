@@ -61,6 +61,7 @@ CONFIG_ERROR_LOG_LINE="error_log ${NGINX_ERROR_LOG} debug;"
 CONFIG_PID_LINE="pid ${NGINX_PID};"
 VAR_TOGGLE_HTML="<html><body><h1>Var Toggle</h1></body></html>"
 AUTH_PRIVATE_HTML="<html><body><h1>Private</h1></body></html>"
+METRICS_ENDPOINT="/markdown-metrics"
 
 # Cleanup function
 cleanup() {
@@ -825,7 +826,7 @@ http {
             markdown_filter on;
             default_type ${MEDIA_TYPE_HTML};
         }
-        location /markdown-metrics {
+        location ${METRICS_ENDPOINT} {
             markdown_metrics;
         }
     }
@@ -838,7 +839,7 @@ EOF
     seq "$total_requests" | xargs -I{} -P 8 sh -c \
         "curl -s -H 'Accept: ${MEDIA_TYPE_MARKDOWN}' 'http://localhost:${TEST_PORT}/test?req={}' > /dev/null" || true
 
-    metrics=$(curl -s -H "Accept: application/json" "http://localhost:${TEST_PORT}/markdown-metrics")
+    metrics=$(curl -s -H "Accept: application/json" "http://localhost:${TEST_PORT}${METRICS_ENDPOINT}")
     if ! attempted=$(extract_json_number_field "$metrics" "conversions_attempted"); then
         log_fail "Failed to parse conversions_attempted from metrics JSON"
         log_info "Metrics: $metrics"
@@ -953,7 +954,7 @@ http {
             markdown_filter on;
             default_type ${MEDIA_TYPE_HTML};
         }
-        location /markdown-metrics {
+        location ${METRICS_ENDPOINT} {
             markdown_metrics;
             markdown_metrics_format prometheus;
         }
@@ -972,7 +973,7 @@ EOF
     # Sub-test A: application/openmetrics-text should return
     # Prometheus exposition format.
     #
-    response=$(make_request "GET" "/markdown-metrics" \
+    response=$(make_request "GET" "${METRICS_ENDPOINT}" \
         "application/openmetrics-text")
     status=$(get_status "$response")
     content_type=$(get_header "$response" "$HEADER_CONTENT_TYPE")
@@ -997,7 +998,7 @@ EOF
     # Sub-test B: text/plain; version=0.0.4 should also return
     # Prometheus exposition format.
     #
-    response=$(make_request "GET" "/markdown-metrics" \
+    response=$(make_request "GET" "${METRICS_ENDPOINT}" \
         "text/plain; version=0.0.4")
     status=$(get_status "$response")
     content_type=$(get_header "$response" "$HEADER_CONTENT_TYPE")
@@ -1022,7 +1023,7 @@ EOF
     # Sub-test C: application/json should still return JSON even
     # when markdown_metrics_format is prometheus.
     #
-    response=$(make_request "GET" "/markdown-metrics" "application/json")
+    response=$(make_request "GET" "${METRICS_ENDPOINT}" "application/json")
     status=$(get_status "$response")
     content_type=$(get_header "$response" "$HEADER_CONTENT_TYPE")
     body=$(get_body "$response")
@@ -1052,7 +1053,7 @@ EOF
     # This is the negative case that guards against negotiation
     # regression — bare text/plain must not trigger Prometheus.
     #
-    response=$(make_request "GET" "/markdown-metrics" "text/plain")
+    response=$(make_request "GET" "${METRICS_ENDPOINT}" "text/plain")
     status=$(get_status "$response")
     content_type=$(get_header "$response" "$HEADER_CONTENT_TYPE")
     body=$(get_body "$response")

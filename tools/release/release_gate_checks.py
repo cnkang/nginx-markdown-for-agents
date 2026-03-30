@@ -67,6 +67,10 @@ _DOD_CHECKPOINTS = [
     "compatible",
 ]
 
+# Canonical filenames for sub-spec documents (avoids literal duplication)
+_REQUIREMENTS_DOC = "requirements.md"
+_DESIGN_DOC = "design.md"
+
 
 # Verifiable action indicators for checklist items (Property 11)
 # Each item must reference a specific artifact, command, or review action (R10.3).
@@ -151,23 +155,11 @@ def _strip_fenced_blocks(content: str) -> str:
     active_fence: Optional[Tuple[str, int]] = None
 
     for line in lines:
-        fence = _parse_fence(line)
-
-        if active_fence is None:
-            if fence is not None:
-                # Opening a new fenced block — blank out the fence line.
-                active_fence = fence
-                result.append("")
-            else:
-                result.append(line)
-        else:
-            # Inside a fenced block — always blank out the line.
-            if fence is not None:
-                fence_char, fence_len = fence
-                active_char, active_len = active_fence
-                if fence_char == active_char and fence_len >= active_len:
-                    active_fence = None  # closing fence
+        active_fence, should_skip = _advance_fence_state(active_fence, line)
+        if should_skip:
             result.append("")
+        else:
+            result.append(line)
 
     return "\n".join(result)
 
@@ -189,6 +181,35 @@ def _extract_dod_section(content_lower: str) -> Optional[str]:
     return content_lower[start:end_match.start()] if end_match else content_lower[start:]
 
 
+def _collect_dod_table_rows(section: str) -> List[str]:
+    """Collect non-header, non-separator table rows from a DoD section."""
+    rows: List[str] = []
+    for line in section.splitlines():
+        if not _TABLE_ROW_RE.match(line):
+            continue
+        if _TABLE_SEPARATOR_RE.match(line):
+            continue
+        lower_line = line.lower()
+        if "checkpoint" in lower_line and "status" in lower_line:
+            continue
+        rows.append(line)
+    return rows
+
+
+def _classify_checkpoint(
+    checkpoint: str, table_rows: List[str],
+) -> Optional[str]:
+    """Return 'missing', 'placeholder', or None (valid) for a checkpoint."""
+    matched_row = next((row for row in table_rows if checkpoint in row), None)
+    if matched_row is None:
+        return "missing"
+    if _PLACEHOLDER_STATUS_RE.search(matched_row):
+        return "placeholder"
+    if not _VALID_STATUS_RE.search(matched_row):
+        return "placeholder"
+    return None
+
+
 def _dod_checkpoints_for_content(
     content_lower: str,
 ) -> Tuple[bool, List[str], List[str]]:
@@ -202,35 +223,16 @@ def _dod_checkpoints_for_content(
     if section is None:
         return False, [], []
 
-    # Collect table rows (skip separator rows like |---|---|).
-    table_rows: List[str] = []
-    for line in section.splitlines():
-        if not _TABLE_ROW_RE.match(line):
-            continue
-        if _TABLE_SEPARATOR_RE.match(line):
-            continue
-        # Skip header rows that look like column labels.
-        lower_line = line.lower()
-        if "checkpoint" in lower_line and "status" in lower_line:
-            continue
-        table_rows.append(line)
+    table_rows = _collect_dod_table_rows(section)
 
     missing: List[str] = []
     placeholder: List[str] = []
 
     for checkpoint in _DOD_CHECKPOINTS:
-        matched_row = next((row for row in table_rows if checkpoint in row), None)
-        if matched_row is None:
+        status = _classify_checkpoint(checkpoint, table_rows)
+        if status == "missing":
             missing.append(checkpoint)
-            continue
-
-        # Reject rows where the status is a template placeholder ("✅/❌").
-        if _PLACEHOLDER_STATUS_RE.search(matched_row):
-            placeholder.append(checkpoint)
-            continue
-
-        # Require a concrete status indicator in the row.
-        if not _VALID_STATUS_RE.search(matched_row):
+        elif status == "placeholder":
             placeholder.append(checkpoint)
 
     return True, missing, placeholder
@@ -370,7 +372,7 @@ def check_document_existence(specs_dir: str) -> Tuple[bool, List[str]]:
     all_found = True
     for d in subspecs:
         name = os.path.basename(d)
-        for doc in ("requirements.md", "design.md"):
+        for doc in (_REQUIREMENTS_DOC, _DESIGN_DOC):
             path = os.path.join(d, doc)
             if os.path.isfile(path):
                 messages.append(f"  PASS  {name}/{doc} exists")
@@ -393,15 +395,15 @@ def check_requirements_completeness(specs_dir: str) -> Tuple[bool, List[str]]:
     all_complete = True
     for d in subspecs:
         name = os.path.basename(d)
-        req_path = os.path.join(d, "requirements.md")
+        req_path = os.path.join(d, _REQUIREMENTS_DOC)
         if not os.path.isfile(req_path):
-            messages.append(f"  SKIP  {name}/requirements.md not found")
+            messages.append(f"  SKIP  {name}/{_REQUIREMENTS_DOC} not found")
             continue
 
         content, read_error = _read_utf8_file(req_path)
         if read_error is not None:
             all_complete = False
-            messages.append(f"  FAIL  {name}/requirements.md read error: {read_error}")
+            messages.append(f"  FAIL  {name}/{_REQUIREMENTS_DOC} read error: {read_error}")
             continue
         assert content is not None
         content = content.lower()
@@ -415,11 +417,11 @@ def check_requirements_completeness(specs_dir: str) -> Tuple[bool, List[str]]:
         if missing:
             all_complete = False
             messages.append(
-                f"  FAIL  {name}/requirements.md missing sections: "
+                f"  FAIL  {name}/{_REQUIREMENTS_DOC} missing sections: "
                 + ", ".join(missing)
             )
         else:
-            messages.append(f"  PASS  {name}/requirements.md has all required sections")
+            messages.append(f"  PASS  {name}/{_REQUIREMENTS_DOC} has all required sections")
 
     return all_complete, messages
 
@@ -436,15 +438,15 @@ def check_design_completeness(specs_dir: str) -> Tuple[bool, List[str]]:
     all_complete = True
     for d in subspecs:
         name = os.path.basename(d)
-        design_path = os.path.join(d, "design.md")
+        design_path = os.path.join(d, _DESIGN_DOC)
         if not os.path.isfile(design_path):
-            messages.append(f"  SKIP  {name}/design.md not found")
+            messages.append(f"  SKIP  {name}/{_DESIGN_DOC} not found")
             continue
 
         content, read_error = _read_utf8_file(design_path)
         if read_error is not None:
             all_complete = False
-            messages.append(f"  FAIL  {name}/design.md read error: {read_error}")
+            messages.append(f"  FAIL  {name}/{_DESIGN_DOC} read error: {read_error}")
             continue
         assert content is not None
         content = content.lower()
@@ -458,12 +460,12 @@ def check_design_completeness(specs_dir: str) -> Tuple[bool, List[str]]:
         if missing:
             all_complete = False
             messages.append(
-                f"  FAIL  {name}/design.md missing required fields: "
+                f"  FAIL  {name}/{_DESIGN_DOC} missing required fields: "
                 + ", ".join(missing)
             )
         else:
             messages.append(
-                f"  PASS  {name}/design.md has all required answer fields"
+                f"  PASS  {name}/{_DESIGN_DOC} has all required answer fields"
             )
 
     return all_complete, messages
@@ -481,15 +483,15 @@ def check_boundary_descriptions(specs_dir: str) -> Tuple[bool, List[str]]:
     all_present = True
     for d in subspecs:
         name = os.path.basename(d)
-        design_path = os.path.join(d, "design.md")
+        design_path = os.path.join(d, _DESIGN_DOC)
         if not os.path.isfile(design_path):
-            messages.append(f"  SKIP  {name}/design.md not found")
+            messages.append(f"  SKIP  {name}/{_DESIGN_DOC} not found")
             continue
 
         content, read_error = _read_utf8_file(design_path)
         if read_error is not None:
             all_present = False
-            messages.append(f"  FAIL  {name}/design.md read error: {read_error}")
+            messages.append(f"  FAIL  {name}/{_DESIGN_DOC} read error: {read_error}")
             continue
         assert content is not None
 
@@ -509,8 +511,8 @@ def check_boundary_descriptions(specs_dir: str) -> Tuple[bool, List[str]]:
         if not has_boundary:
             all_present = False
             messages.append(
-                f"  FAIL  {name}/design.md has no boundary description "
-                f"or scope anchors section"
+                f"  FAIL  {name}/{_DESIGN_DOC} has no boundary description "
+                + "or scope anchors section"
             )
             continue
 
@@ -524,19 +526,19 @@ def check_boundary_descriptions(specs_dir: str) -> Tuple[bool, List[str]]:
             (r"0\.4\.0\s+scope|0\.4\.0|existing\s+\w+",
              "0.4.0 scope"),
             (r"0\.5\.x\s+scope|0\.5|deferred|long.?term"
-             r"|no.*runtime|not.*streaming|tooling\s+only"
-             r"|documentation.only|no.*change.*to\s+default"
-             r"|out\s+of\s+scope|interface\s+frozen"
-             r"|no\s+new\s+config|no\s+new\s+directive|unchanged",
+             + r"|no.*runtime|not.*streaming|tooling\s+only"
+             + r"|documentation.only|no.*change.*to\s+default"
+             + r"|out\s+of\s+scope|interface\s+frozen"
+             + r"|no\s+new\s+config|no\s+new\s+directive|unchanged",
              "0.5.x scope"),
             (r"rationale|because|why\s+the\s+boundary"
-             r"|single\s+source\s+of\s+truth|to\s+set\s+clear"
-             r"|this\s+avoid|this\s+keep|not\s+a\s+new",
+             + r"|single\s+source\s+of\s+truth|to\s+set\s+clear"
+             + r"|this\s+avoid|this\s+keep|not\s+a\s+new",
              "rationale"),
             (r"prerequisit|before.*deferred|require.*before"
-             r"|must\s+integrate|stop\s+line|existing.*infra"
-             r"|frozen|out\s+of\s+scope|minimum\s+supported"
-             r"|all\s+code\s+follow|follow.*steering",
+             + r"|must\s+integrate|stop\s+line|existing.*infra"
+             + r"|frozen|out\s+of\s+scope|minimum\s+supported"
+             + r"|all\s+code\s+follow|follow.*steering",
              "prerequisites"),
         ]
         missing_fields = []
@@ -548,13 +550,13 @@ def check_boundary_descriptions(specs_dir: str) -> Tuple[bool, List[str]]:
         if missing_fields:
             all_present = False
             messages.append(
-                f"  FAIL  {name}/design.md boundary/scope-anchor section "
-                f"missing fields: " + ", ".join(missing_fields)
+                f"  FAIL  {name}/{_DESIGN_DOC} boundary/scope-anchor section "
+                + "missing fields: " + ", ".join(missing_fields)
             )
         else:
             messages.append(
-                f"  PASS  {name}/design.md has boundary description "
-                f"or scope anchors with all fields"
+                f"  PASS  {name}/{_DESIGN_DOC} has boundary description "
+                + "or scope anchors with all fields"
             )
 
     return all_present, messages
