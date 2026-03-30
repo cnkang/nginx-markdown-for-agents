@@ -257,6 +257,8 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
     filter_enabled = ngx_http_markdown_is_enabled(r, conf);
     if (!filter_enabled) {
         /* Module disabled, pass through */
+        ngx_http_markdown_metric_inc_skip(
+            NGX_HTTP_MARKDOWN_INELIGIBLE_CONFIG);
         ngx_http_markdown_log_decision(r, conf,
             ngx_http_markdown_reason_from_eligibility(
                 NGX_HTTP_MARKDOWN_INELIGIBLE_CONFIG,

@@ -404,11 +404,18 @@ ngx_http_markdown_handle_buffer_init_failure(ngx_http_request_t *r,
     }
 
     rc = ngx_http_next_body_filter(r, in);
-    if (rc != NGX_OK) {
-        return rc;
-    }
 
-    return NGX_DONE;
+    /*
+     * Return the downstream result directly (typically NGX_OK).
+     *
+     * Returning NGX_DONE here would signal NGINX that request
+     * processing is complete, which prevents subsequent body
+     * chunks from reaching the filter chain and truncates the
+     * response.  Since ctx->eligible is already cleared, any
+     * later body filter invocations will take the pass-through
+     * path and forward chunks unchanged.
+     */
+    return rc;
 }
 
 /* Handle buffer append failure (size limit exceeded) with error strategy. */
