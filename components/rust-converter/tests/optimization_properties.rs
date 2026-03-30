@@ -536,10 +536,23 @@ proptest! {
         let output = converter.convert(&dom).expect("convert");
 
         // With feature disabled, noise region text should also appear in output
+        #[cfg(not(feature = "prune_noise_regions"))]
         for (_, noise_text) in &noise_elements {
             prop_assert!(
                 output.contains(noise_text.as_str()),
                 "Noise region content should be present (feature disabled) but is missing.\n\
+                 noise_text={:?}\noutput={:?}\nhtml={}",
+                noise_text, output, html,
+            );
+        }
+
+        // With feature enabled, noise region text should be absent from output
+        // (pruned subtrees are skipped during traversal).
+        #[cfg(feature = "prune_noise_regions")]
+        for (_, noise_text) in &noise_elements {
+            prop_assert!(
+                !output.contains(noise_text.as_str()),
+                "Noise region content should be absent (feature enabled) but is present.\n\
                  noise_text={:?}\noutput={:?}\nhtml={}",
                 noise_text, output, html,
             );
