@@ -103,6 +103,7 @@ impl FusedNormalizer {
     ///
     /// Used for content that has already been normalized or should be
     /// preserved verbatim.
+    #[allow(dead_code)]
     pub(crate) fn push_raw(&mut self, content: &str) {
         self.output.push_str(content);
     }
