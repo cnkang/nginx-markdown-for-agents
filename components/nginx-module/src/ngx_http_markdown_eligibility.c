@@ -121,16 +121,14 @@ ngx_http_markdown_check_content_type(ngx_http_request_t *r)
     
     /* Check for text/html (case-insensitive) */
     /* Accept "text/html" or "text/html; charset=..." */
-    if (content_type->len >= 9 &&
-        ngx_strncasecmp(content_type->data, (u_char *) "text/html", 9) == 0)
+    if (content_type->len >= 9
+        && ngx_strncasecmp(content_type->data,
+                           (u_char *) "text/html", 9) == 0
+        && (content_type->len == 9
+            || content_type->data[9] == ';'
+            || content_type->data[9] == ' '))
     {
-        /* Valid if exactly "text/html" or followed by semicolon/space */
-        if (content_type->len == 9 ||
-            content_type->data[9] == ';' ||
-            content_type->data[9] == ' ')
-        {
-            return 1;
-        }
+        return 1;
     }
     
     return 0;
@@ -204,16 +202,14 @@ ngx_http_markdown_is_streaming(ngx_http_request_t *r,
     content_type = &r->headers_out.content_type;
     
     /* Check for text/event-stream (Server-Sent Events) */
-    if (content_type->len >= 17 &&
-        ngx_strncasecmp(content_type->data, (u_char *) "text/event-stream", 17) == 0)
+    if (content_type->len >= 17
+        && ngx_strncasecmp(content_type->data,
+                           (u_char *) "text/event-stream", 17) == 0
+        && (content_type->len == 17
+            || content_type->data[17] == ';'
+            || content_type->data[17] == ' '))
     {
-        /* Valid if exactly "text/event-stream" or followed by semicolon/space */
-        if (content_type->len == 17 ||
-            content_type->data[17] == ';' ||
-            content_type->data[17] == ' ')
-        {
-            return 1;
-        }
+        return 1;
     }
     
     /* Check configured stream_types exclusion list */
