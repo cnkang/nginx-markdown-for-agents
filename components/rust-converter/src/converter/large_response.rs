@@ -20,11 +20,21 @@ const MIN_CAPACITY: usize = 4096;
 /// Maximum pre-allocation size in bytes (4 MB).
 const MAX_CAPACITY: usize = 4 * 1024 * 1024;
 
-/// Estimate output buffer capacity for a large document.
+/// Estimate output buffer capacity based on a byte-size hint.
+///
+/// Used in two contexts:
+/// - **Traversal pre-allocation**: called with the input HTML size to size the
+///   traversal output buffer before DOM walking begins.
+/// - **Fused normalizer pre-allocation**: called with the traversal output
+///   length to size the normalizer's buffer before the single-pass
+///   normalization step.
+///
+/// In both cases the 0.4 factor and \[4 KB, 4 MB\] clamp apply identically.
 ///
 /// # Arguments
 ///
-/// * `input_size_bytes` - Size of the input HTML in bytes.
+/// * `input_size_bytes` - Size hint in bytes (input HTML size or intermediate
+///   output size, depending on the call site).
 ///
 /// # Returns
 ///
@@ -95,7 +105,7 @@ impl FusedNormalizer {
             if self.in_code_block {
                 self.output.push_str(trimmed);
             } else {
-                let normalized = normalize_line_whitespace(trimmed);
+                let normalized = super::normalize::normalize_line_whitespace(trimmed);
                 self.output.push_str(&normalized);
             }
             self.output.push('\n');
@@ -127,44 +137,9 @@ impl FusedNormalizer {
     }
 }
 
-/// Normalize whitespace within a single line.
-///
-/// Collapses runs of multiple spaces into a single space, while preserving:
-/// - Leading indentation (spaces at the start of the line).
-/// - Content inside inline code spans (backtick-delimited).
-///
-/// This is a standalone version of `MarkdownConverter::normalize_line_whitespace`.
-fn normalize_line_whitespace(line: &str) -> String {
-    let mut result = String::with_capacity(line.len());
-    let mut prev_space = false;
-    let mut at_start = true;
-    let mut in_inline_code = false;
-
-    for ch in line.chars() {
-        if ch == '`' {
-            in_inline_code = !in_inline_code;
-            result.push(ch);
-            prev_space = false;
-            at_start = false;
-        } else if ch == ' ' {
-            if in_inline_code || at_start {
-                result.push(ch);
-            } else if !prev_space {
-                result.push(ch);
-                prev_space = true;
-            }
-        } else {
-            result.push(ch);
-            prev_space = false;
-            at_start = false;
-        }
-    }
-
-    result
-}
-
 #[cfg(test)]
 mod tests {
+    use super::super::normalize::normalize_line_whitespace;
     use super::*;
 
     // ---------------------------------------------------------------
