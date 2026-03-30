@@ -8,9 +8,9 @@ This project is a production-oriented NGINX filter module backed by a Rust HTML-
 
 As of **version 0.4.0**, the project includes Prometheus-compatible metrics, unified decision reason codes, rollout and rollback operational guides, a benchmark corpus with evidence-based regression detection, restructured installation and first-run documentation, and parser path optimizations. Core features are implemented and tested. The codebase includes unit, integration, E2E, and fuzz-oriented validation entrypoints, along with documentation covering installation, configuration, operations, and architecture.
 
-### In-Progress (Unreleased Branch Updates)
+### Release 0.4.0 Updates
 
-- 0.4.0 release-gate validation and tests have been refined based on automated code-review feedback:
+- 0.4.0 release-gate validation and tests refined based on automated code-review feedback:
   - Metric naming validation now supports histogram `_seconds_bucket/_sum/_count` series while keeping stricter rejection of ambiguous suffixes.
   - Checklist verifiability checks now include checked items and ignore fenced code examples.
   - Release-gate constants are centralized in a shared module to reduce drift between tooling, tests, and governance docs.

@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.4.0] - 2026-03-30
 
-This release adds Prometheus-compatible metrics, unified decision reason codes with structured logging, operational rollout and rollback guides, a benchmark corpus with evidence-based regression detection, restructured installation and first-run documentation, and parser path optimizations for noise region pruning and simple structure fast paths.
+This release focuses on operational visibility, rollout safety, and conversion performance. Key themes: Prometheus metrics endpoint, unified decision reason codes, rollout and rollback operational guides, benchmark corpus for regression detection, and parser path optimizations.
 
 ### Added
 - Prometheus-compatible metrics endpoint via `markdown_metrics_format prometheus` directive with text exposition format output
