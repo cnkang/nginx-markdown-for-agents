@@ -97,20 +97,43 @@ mod tests {
     // With the `prune_noise_regions` feature disabled (the default), noise
     // region elements are traversed normally.
 
+    #[cfg(not(feature = "prune_noise_regions"))]
     #[test]
     fn nav_returns_traverse_when_feature_disabled() {
-        // Feature is disabled by default in test builds.
         assert_eq!(should_prune("nav"), PruneDecision::Traverse);
     }
 
+    #[cfg(not(feature = "prune_noise_regions"))]
     #[test]
     fn footer_returns_traverse_when_feature_disabled() {
         assert_eq!(should_prune("footer"), PruneDecision::Traverse);
     }
 
+    #[cfg(not(feature = "prune_noise_regions"))]
     #[test]
     fn aside_returns_traverse_when_feature_disabled() {
         assert_eq!(should_prune("aside"), PruneDecision::Traverse);
+    }
+
+    // With the `prune_noise_regions` feature enabled, noise region elements
+    // are pruned (entire subtree skipped).
+
+    #[cfg(feature = "prune_noise_regions")]
+    #[test]
+    fn nav_returns_skip_subtree_when_feature_enabled() {
+        assert_eq!(should_prune("nav"), PruneDecision::SkipSubtree);
+    }
+
+    #[cfg(feature = "prune_noise_regions")]
+    #[test]
+    fn footer_returns_skip_subtree_when_feature_enabled() {
+        assert_eq!(should_prune("footer"), PruneDecision::SkipSubtree);
+    }
+
+    #[cfg(feature = "prune_noise_regions")]
+    #[test]
+    fn aside_returns_skip_subtree_when_feature_enabled() {
+        assert_eq!(should_prune("aside"), PruneDecision::SkipSubtree);
     }
 
     // Non-prunable elements always traverse.
