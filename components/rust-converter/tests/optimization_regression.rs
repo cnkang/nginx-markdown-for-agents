@@ -322,9 +322,12 @@ fn boilerplate_heavy_fixtures_preserve_nav_footer_aside() {
             );
 
             // Nav content should be absent when pruning is active.
+            // We check for "Shop" and "Deals" which appear exclusively inside
+            // <nav> elements in the ecommerce fixture. "Home" is not checked
+            // because it also appears in the breadcrumb <div> outside <nav>.
             if html_str.contains("<nav") {
                 assert!(
-                    !(output.contains("Shop") && output.contains("Home")),
+                    !output.contains("Shop") && !output.contains("Deals"),
                     "{}: nav content should be pruned (prune_noise_regions is on)",
                     name
                 );
