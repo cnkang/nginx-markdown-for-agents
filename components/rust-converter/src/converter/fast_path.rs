@@ -26,6 +26,13 @@ pub(crate) const FAST_PATH_MAX_DEPTH: usize = 15;
 /// Only documents composed entirely of these tags (plus prunable elements like
 /// `script`/`style`/`noscript`) qualify for the fast path. Tags not in this
 /// list — such as `table`, `form`, `video`, `iframe` — disqualify the document.
+///
+/// **Cross-reference**: When adding a new element handler to
+/// `handle_element_internal` in `traversal.rs`, check whether the element
+/// should also be added here. Conversely, every tag in this list must have a
+/// corresponding handler (or fall through to `traverse_children`) in the
+/// traversal match arm. The pruning list in `pruning.rs` is checked
+/// separately and does not need to be duplicated here.
 const FAST_PATH_ELEMENTS: &[&str] = &[
     "html",
     "head",
