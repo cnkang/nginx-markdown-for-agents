@@ -235,26 +235,32 @@ Depth is counted from the document root node (depth 0). A text node inside
 
 ### What it does
 
-For documents exceeding the large-body threshold, this optimization reduces
-memory allocation overhead in two ways:
+When the traversal output exceeds a size threshold, this optimization replaces
+the two-pass normalize-then-copy pattern with a single-pass fused normalizer.
+This eliminates one O(n) allocation and copy for the normalization result.
 
-1. **Buffer estimation** — Pre-allocates the output `String` based on input
-   size, avoiding repeated reallocations during traversal.
-2. **Fused normalizer** — Normalizes output incrementally as lines are
-   appended, eliminating the separate full-pass `normalize_output` step that
-   would otherwise allocate a second full-size string.
+The optimization targets the normalization phase (after traversal), not the
+traversal itself. The initial traversal buffer uses a fixed 1 KB pre-allocation
+for all documents; smarter pre-allocation based on input HTML size is deferred
+because the `RcDom` does not expose the original byte count without an
+additional tree walk.
 
-### Buffer estimation
+### Buffer estimation for the fused normalizer
 
-The output buffer is pre-allocated at 40% of the input HTML size
-(`OUTPUT_SIZE_ESTIMATE_FACTOR = 0.4`), reflecting the typical 60–85% size
-reduction from HTML to Markdown. The estimate is clamped to a reasonable range:
+When the fused normalizer is activated, its output buffer is pre-allocated
+using `estimate_output_capacity`, which estimates the normalized output at 40%
+of the traversal output size (`OUTPUT_SIZE_ESTIMATE_FACTOR = 0.4`), clamped to
+\[4 KB, 4 MB\]:
 
-| Input Size | Pre-allocated Capacity |
-|------------|----------------------|
+| Traversal Output Size | Normalizer Buffer Capacity |
+|-----------------------|---------------------------|
 | < ~10 KB | 4 KB (minimum) |
-| ~10 KB – ~10 MB | `input_size × 0.4` |
+| ~10 KB – ~10 MB | `output_size × 0.4` |
 | > ~10 MB | 4 MB (maximum) |
+
+Note: the estimate is based on the traversal output size (intermediate
+Markdown), not the input HTML size. This is a pragmatic choice — the input
+byte count is not available from the `RcDom` without a separate walk.
 
 ### Fused normalizer
 
@@ -274,9 +280,16 @@ verified by property-based tests.
 
 ### Threshold
 
-The fused normalizer is used for documents exceeding `markdown_large_body_threshold`
-(the existing NGINX directive threshold for large-body handling). Documents
-below this threshold use the standard `normalize_output` two-pass approach.
+The fused normalizer activates when the traversal output (intermediate
+Markdown) exceeds `LARGE_BODY_THRESHOLD` (256 KB, a hardcoded constant in
+`converter.rs`). This threshold is checked against the traversal output length
+after `traverse_node_with_context` completes — not against the input HTML size.
+
+The 256 KB value is chosen to match the order of magnitude of the
+`markdown_large_body_threshold` NGINX directive default, though the two values
+measure different things (the directive controls input HTML size; the constant
+controls intermediate output size). Documents below the threshold use the
+standard `normalize_output` two-pass approach.
 
 ### Known limitations
 
@@ -284,9 +297,16 @@ below this threshold use the standard `normalize_output` two-pass approach.
   traversal completes. It does not interleave with traversal itself — the
   intermediate `output` string is still fully built before normalization
   begins. The saving is one O(n) allocation and copy, not the traversal cost.
-- Buffer estimation uses a fixed 0.4 factor. Pages with unusually high or low
+- The initial traversal buffer uses a fixed 1 KB pre-allocation for all
+  documents. Smarter pre-allocation based on input HTML size would require
+  walking the DOM to estimate byte count, which is deferred.
+- Buffer estimation uses a fixed 0.4 factor applied to the traversal output
+  size (not the input HTML size). Pages with unusually high or low
   HTML-to-Markdown compression ratios may over- or under-allocate, but the
   clamp bounds prevent pathological cases.
+- The threshold is a hardcoded constant, not configurable via NGINX directives.
+  It is not the same as `markdown_large_body_threshold` (which controls input
+  HTML size limits), though both use 256 KB as a default.
 - `ConversionContext` timeout checks remain active throughout the large-response
   path. The fused normalizer does not bypass timeout enforcement.
 

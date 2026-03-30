@@ -119,13 +119,16 @@ pub(crate) mod pruning;
 mod tables;
 mod traversal;
 
-/// Threshold in bytes above which the fused normalizer is used instead of
-/// the two-pass `normalize_output`. This avoids a second full-size allocation
-/// for large documents.
+/// Traversal output size (in bytes) above which the fused normalizer is used
+/// instead of the two-pass `normalize_output`. This avoids allocating a second
+/// full-size string for the normalization result.
 ///
-/// This value is aligned with the default `markdown_large_body_threshold`
-/// NGINX directive (256 KB). If the directive default changes, this constant
-/// should be updated to match.
+/// The threshold is checked against the traversal output length *after*
+/// `traverse_node_with_context` completes — not against the input HTML size,
+/// which is unavailable without an additional DOM walk. 256 KB is chosen to
+/// match the order of magnitude of the `markdown_large_body_threshold` NGINX
+/// directive default, though the two values measure different things (input
+/// HTML vs. intermediate Markdown output).
 const LARGE_BODY_THRESHOLD: usize = 256 * 1024; // 256 KB
 
 /// Markdown flavor selection
@@ -530,8 +533,7 @@ impl MarkdownConverter {
         // enough for optimized traversal. When the document qualifies, the
         // traversal skips unreachable branches (form controls, embedded content,
         // table/media handling) reducing per-node overhead.
-        ctx.is_fast_path =
-            fast_path::qualifies(dom) == fast_path::FastPathResult::Qualifies;
+        ctx.is_fast_path = fast_path::qualifies(dom) == fast_path::FastPathResult::Qualifies;
 
         // Pre-allocate output buffer with reasonable capacity
         // Average compression ratio is ~70-85%, so we estimate output size
@@ -551,8 +553,10 @@ impl MarkdownConverter {
         // Check timeout before output normalization
         ctx.check_timeout()?;
 
-        // Normalize output: use fused normalizer for large documents to avoid
-        // a second full-size allocation, otherwise use the standard two-pass path.
+        // Normalize output: use fused normalizer when the traversal output
+        // exceeds LARGE_BODY_THRESHOLD to avoid allocating a second full-size
+        // string via normalize_output. The threshold is checked against the
+        // traversal output length (not the input HTML size).
         let markdown = if output.len() > LARGE_BODY_THRESHOLD {
             let capacity = large_response::estimate_output_capacity(output.len());
             let mut normalizer = large_response::FusedNormalizer::new(capacity);
