@@ -107,7 +107,7 @@ ngx_http_markdown_select_base_url_parts(ngx_http_request_t *r,
      * redirect all relative URLs in the Markdown output to an attacker-
      * controlled domain (C-01: link poisoning).
      */
-    if (conf != NULL && conf->trust_forwarded_headers) {
+    if (conf != NULL && conf->ops.trust_forwarded_headers) {
         x_forwarded_proto = ngx_http_markdown_find_request_header_value(
             r,
             ngx_http_markdown_hdr_x_forwarded_proto,

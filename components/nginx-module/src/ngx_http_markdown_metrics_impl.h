@@ -400,7 +400,7 @@ ngx_http_markdown_metrics_select_format(
     }
 
     if (conf != NULL
-        && conf->metrics_format
+        && conf->ops.metrics_format
            == NGX_HTTP_MARKDOWN_METRICS_FORMAT_PROMETHEUS
         && ngx_http_markdown_metrics_prefers_prometheus(r))
     {

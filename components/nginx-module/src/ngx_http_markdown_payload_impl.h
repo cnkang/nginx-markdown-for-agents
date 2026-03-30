@@ -236,7 +236,7 @@ ngx_http_markdown_apply_decompressed_payload(ngx_http_request_t *r,
         const ngx_str_t *compression_name;
 
         compression_name = ngx_http_markdown_compression_name(
-            ctx->compression_type);
+            ctx->decompression.type);
 
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                      "markdown filter: decompression "
@@ -249,17 +249,17 @@ ngx_http_markdown_apply_decompressed_payload(ngx_http_request_t *r,
             NGX_HTTP_MARKDOWN_ERROR_SYSTEM, NULL);
     }
 
-    ctx->decompressed_size = decompressed_chain->buf->last - decompressed_chain->buf->pos;
+    ctx->decompression.decompressed_size = decompressed_chain->buf->last - decompressed_chain->buf->pos;
     decompressed_data = decompressed_chain->buf->pos;
     target_data = ctx->buffer.data;
 
-    if (ctx->decompressed_size > ctx->buffer.capacity) {
-        u_char *new_data = ngx_alloc(ctx->decompressed_size, r->connection->log);
+    if (ctx->decompression.decompressed_size > ctx->buffer.capacity) {
+        u_char *new_data = ngx_alloc(ctx->decompression.decompressed_size, r->connection->log);
         if (new_data == NULL) {
             const ngx_str_t *compression_name;
 
             compression_name = ngx_http_markdown_compression_name(
-                ctx->compression_type);
+                ctx->decompression.type);
 
             ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                          "markdown filter: failed to "
@@ -267,7 +267,7 @@ ngx_http_markdown_apply_decompressed_payload(ngx_http_request_t *r,
                          "compression=%V, size=%uz, "
                          "category=system",
                          compression_name,
-                         ctx->decompressed_size);
+                         ctx->decompression.decompressed_size);
 
             return ngx_http_markdown_handle_decompression_alloc_error(
                 r, ctx, conf,
@@ -277,8 +277,8 @@ ngx_http_markdown_apply_decompressed_payload(ngx_http_request_t *r,
         target_data = new_data;
     }
 
-    if (ctx->decompressed_size > 0 && target_data != decompressed_data) {
-        ngx_memcpy(target_data, decompressed_data, ctx->decompressed_size);
+    if (ctx->decompression.decompressed_size > 0 && target_data != decompressed_data) {
+        ngx_memcpy(target_data, decompressed_data, ctx->decompression.decompressed_size);
     }
 
     if (target_data != ctx->buffer.data) {
@@ -287,11 +287,11 @@ ngx_http_markdown_apply_decompressed_payload(ngx_http_request_t *r,
         }
 
         ctx->buffer.data = target_data;
-        ctx->buffer.capacity = ctx->decompressed_size;
+        ctx->buffer.capacity = ctx->decompression.decompressed_size;
     }
 
-    ctx->buffer.size = ctx->decompressed_size;
-    ctx->decompression_done = 1;
+    ctx->buffer.size = ctx->decompression.decompressed_size;
+    ctx->decompression.done = 1;
     return NGX_OK;
 }
 
@@ -303,7 +303,7 @@ ngx_http_markdown_record_decompression_success(ngx_http_request_t *r,
     float ratio;
 
     NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.succeeded);
-    switch (ctx->compression_type) {
+    switch (ctx->decompression.type) {
         case NGX_HTTP_MARKDOWN_COMPRESSION_GZIP:
             NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.gzip);
             break;
@@ -317,14 +317,15 @@ ngx_http_markdown_record_decompression_success(ngx_http_request_t *r,
             break;
     }
 
-    ratio = (ctx->compressed_size != 0)
-        ? (float) ctx->decompressed_size / (float) ctx->compressed_size
+    ratio = (ctx->decompression.compressed_size != 0)
+        ? (float) ctx->decompression.decompressed_size / (float) ctx->decompression.compressed_size
         : 0.0f;
 
     ngx_log_error(NGX_LOG_INFO, r->connection->log, 0,
                  "markdown filter: decompression succeeded, "
                  "compression=%d, compressed=%uz bytes, decompressed=%uz bytes, ratio=%.1fx",
-                 ctx->compression_type, ctx->compressed_size, ctx->decompressed_size,
+                 ctx->decompression.type, ctx->decompression.compressed_size,
+                 ctx->decompression.decompressed_size,
                  ratio);
 
     ngx_http_markdown_remove_content_encoding(r);
@@ -600,17 +601,17 @@ ngx_http_markdown_body_filter_decompress_if_needed(ngx_http_request_t *r,
     ngx_int_t     decompress_rc;
     ngx_int_t     rc;
 
-    if (!ctx->decompression_needed || ctx->decompression_done) {
+    if (!ctx->decompression.needed || ctx->decompression.done) {
         return NGX_OK;
     }
 
     ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                   "markdown filter: starting decompression, "
                   "type=%d, size=%uz bytes",
-                  ctx->compression_type, ctx->buffer.size);
+                  ctx->decompression.type, ctx->buffer.size);
 
     NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.attempted);
-    ctx->compressed_size = ctx->buffer.size;
+    ctx->decompression.compressed_size = ctx->buffer.size;
 
     rc = ngx_http_markdown_prepare_compressed_chain(
         r, ctx, conf, &compressed_chain);
@@ -619,7 +620,7 @@ ngx_http_markdown_body_filter_decompress_if_needed(ngx_http_request_t *r,
     }
 
     decompress_rc = ngx_http_markdown_decompress(
-        r, ctx->compression_type,
+        r, ctx->decompression.type,
         compressed_chain, &decompressed_chain);
 
     if (decompress_rc == NGX_DECLINED) {
@@ -638,7 +639,7 @@ ngx_http_markdown_body_filter_decompress_if_needed(ngx_http_request_t *r,
 
         compression_name =
             ngx_http_markdown_compression_name(
-                ctx->compression_type);
+                ctx->decompression.type);
         ngx_log_error(NGX_LOG_ERR,
                      r->connection->log, 0,
                      "markdown filter: decompression "

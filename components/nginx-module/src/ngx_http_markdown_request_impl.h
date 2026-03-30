@@ -205,12 +205,12 @@ ngx_http_markdown_init_ctx(ngx_http_request_t *r,
      * remains 0, ensuring zero overhead in the body
      * filter.
      */
-    ctx->compression_type =
+    ctx->decompression.type =
         NGX_HTTP_MARKDOWN_COMPRESSION_NONE;
-    ctx->decompression_needed = 0;
-    ctx->decompression_done = 0;
-    ctx->compressed_size = 0;
-    ctx->decompressed_size = 0;
+    ctx->decompression.needed = 0;
+    ctx->decompression.done = 0;
+    ctx->decompression.compressed_size = 0;
+    ctx->decompression.decompressed_size = 0;
 }
 
 
@@ -348,9 +348,9 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
      * Requirements: 1.1, 1.6, 4.2, 8.1, 10.3, 11.1, 11.5
      */
     if (conf->auto_decompress) {
-        ctx->compression_type = ngx_http_markdown_detect_compression(r);
+        ctx->decompression.type = ngx_http_markdown_detect_compression(r);
         
-        if (ctx->compression_type == NGX_HTTP_MARKDOWN_COMPRESSION_UNKNOWN) {
+        if (ctx->decompression.type == NGX_HTTP_MARKDOWN_COMPRESSION_UNKNOWN) {
             /*
              * Unsupported compression format detected (Task 4.2)
              *
@@ -367,13 +367,13 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
             return ngx_http_markdown_handle_unsupported_compression(
                 r, ctx, conf);
 
-        } else if (ctx->compression_type != NGX_HTTP_MARKDOWN_COMPRESSION_NONE) {
+        } else if (ctx->decompression.type != NGX_HTTP_MARKDOWN_COMPRESSION_NONE) {
             /* Supported compression format - set flag for decompression */
-            ctx->decompression_needed = 1;
+            ctx->decompression.needed = 1;
             
             ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                           "markdown filter: decompression detected compression type: %d",
-                          ctx->compression_type);
+                          ctx->decompression.type);
         }
     }
 

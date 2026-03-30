@@ -134,8 +134,18 @@ typedef struct {
     ngx_array_t *stream_types;         /* markdown_stream_types exclusion list (default: NULL) */
     ngx_flag_t   auto_decompress;      /* markdown_auto_decompress on|off (default: on) */
     size_t       large_body_threshold; /* markdown_large_body_threshold (NGX_HTTP_MARKDOWN_THRESHOLD_OFF = off) */
-    ngx_flag_t   trust_forwarded_headers; /* markdown_trust_forwarded_headers on|off (default: off) */
-    ngx_uint_t   metrics_format;       /* markdown_metrics_format auto|prometheus (default: auto) */
+
+    /*
+     * Operational settings.
+     *
+     * Grouped into a sub-struct so that the parent
+     * ngx_http_markdown_conf_t stays within the 20-field limit
+     * enforced by static analysis (SonarCloud rule c:S1820).
+     */
+    struct {
+        ngx_flag_t   trust_forwarded_headers; /* markdown_trust_forwarded_headers on|off (default: off) */
+        ngx_uint_t   metrics_format;       /* markdown_metrics_format auto|prometheus (default: auto) */
+    } ops;
 } ngx_http_markdown_conf_t;
 
 /*
@@ -223,12 +233,20 @@ typedef struct {
     /* Threshold router path selection (NGX_HTTP_MARKDOWN_PATH_FULLBUFFER or NGX_HTTP_MARKDOWN_PATH_INCREMENTAL) */
     ngx_uint_t                   processing_path;
 
-    /* Decompression state */
-    ngx_http_markdown_compression_type_e  compression_type;    /* Detected compression type */
-    ngx_flag_t                            decompression_needed; /* Whether decompression is needed */
-    ngx_flag_t                            decompression_done;   /* Whether decompression completed */
-    size_t                                compressed_size;      /* Size before decompression */
-    size_t                                decompressed_size;    /* Size after decompression */
+    /*
+     * Decompression state.
+     *
+     * Grouped into a sub-struct so that the parent
+     * ngx_http_markdown_ctx_t stays within the 20-field limit
+     * enforced by static analysis (SonarCloud rule c:S1820).
+     */
+    struct {
+        ngx_http_markdown_compression_type_e  type;      /* Detected compression type */
+        ngx_flag_t                            needed;    /* Whether decompression is needed */
+        ngx_flag_t                            done;      /* Whether decompression completed */
+        size_t                                compressed_size;   /* Size before decompression */
+        size_t                                decompressed_size; /* Size after decompression */
+    } decompression;
 
     /* Last error category from conversion failure (for decision log) */
     ngx_http_markdown_error_category_t    last_error_category;

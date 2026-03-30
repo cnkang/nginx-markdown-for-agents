@@ -459,17 +459,17 @@ ngx_http_markdown_metrics_format(ngx_conf_t *cf,
 
     value = cf->args->elts;
 
-    if (mcf->metrics_format != NGX_CONF_UNSET_UINT) {
+    if (mcf->ops.metrics_format != NGX_CONF_UNSET_UINT) {
         return "is duplicate";
     }
 
     if (ngx_strcasecmp(value[1].data, auto_str) == 0) {
-        mcf->metrics_format =
+        mcf->ops.metrics_format =
             NGX_HTTP_MARKDOWN_METRICS_FORMAT_AUTO;
     } else if (ngx_strcasecmp(value[1].data,
                               prom_str) == 0)
     {
-        mcf->metrics_format =
+        mcf->ops.metrics_format =
             NGX_HTTP_MARKDOWN_METRICS_FORMAT_PROMETHEUS;
     } else {
         ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
