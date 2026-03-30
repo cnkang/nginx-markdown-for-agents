@@ -14,7 +14,7 @@ Requirements references: 10.1, 10.2, 10.3, 10.4, 10.5.
 - [ ] All 6 sub-specs have design documents — verified by `make release-gates-check`
 - [ ] All new configuration directives are documented in `docs/guides/`
 - [ ] Installation guide in `docs/guides/` covers 0.4.0 changes — verified by `make docs-check`
-- [ ] Rollout cookbook exists in `docs/guides/rollout-cookbook.md`
+- [ ] Rollout cookbook exists in `docs/guides/ROLLOUT_COOKBOOK.md`
 - [ ] Metrics documentation in `docs/features/` covers metric names, labels, meanings, and scrape config
 - [ ] 0.4.0 non-goals listed in CHANGELOG.md release notes section
 - [ ] CHANGELOG.md updated with 0.4.0 entries
@@ -44,7 +44,7 @@ Requirements references: 10.1, 10.2, 10.3, 10.4, 10.5.
 ## Operations Gates
 
 - [ ] Operator can complete minimal first-run — verified by e2e test against `docs/guides/` install steps
-- [ ] Operator can execute small-scope rollout — verified by e2e test against `docs/guides/rollout-cookbook.md`
+- [ ] Operator can execute small-scope rollout — verified by e2e test against `docs/guides/ROLLOUT_COOKBOOK.md`
 - [ ] Operator can observe module behavior — verified by `curl` against metrics endpoint in e2e test
 - [ ] Operator can observe decision reasons — verified by log inspection in e2e test
 - [ ] Operator can perform rollback — verified by e2e test against `docs/guides/` rollback procedure

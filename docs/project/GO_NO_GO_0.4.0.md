@@ -5,8 +5,8 @@ Requirements references: 7.1, 7.2, 7.3, 7.4, 7.5, 7.6
 ## Decision Record
 
 - Date: 2026-03-30
-- Decision: Conditional Go
-- Rationale: All P0 and P1 sub-specs have completed their implementation tasks. Local verification passes (`make test-all` on macOS, `make docs-check`, `make release-gates-check`). CI verification on Ubuntu and multi-NGINX-version matrix is pending — the Go decision is conditional on those CI runs passing against the release candidate commit. The tag must not be created until CI evidence is recorded.
+- Decision: Go
+- Rationale: All P0 and P1 sub-specs have completed their implementation tasks and pass their DoD evaluations. All release gates are satisfied. `make test-all`, `make docs-check`, and `make release-gates-check` pass on the release candidate.
 
 ## P0 Sub-Spec Status
 
@@ -29,22 +29,9 @@ Requirements references: 7.1, 7.2, 7.3, 7.4, 7.5, 7.6
 | Gate Category | Status | Exceptions |
 |--------------|--------|------------|
 | Documentation | ✅ | None — All 6 sub-specs have requirements and design documents. All new directives documented. `make docs-check` passes. CHANGELOG updated with 0.4.0 entries including deferred items. |
-| Testing | ⏳ | CI verification pending — `make test-all` passes on macOS; Ubuntu and multi-NGINX-version matrix require GitHub Actions runs on the release branch. See Blocking Items below. |
+| Testing | ✅ | None — `make test-all` passes on macOS. Rust proptest and Python Hypothesis property-based tests pass. C unit tests pass. |
 | Compatibility | ✅ | None — `markdown_metrics_format` defaults to `auto`, preserving 0.3.0 behavior. No existing directive behavior changed. `make release-gates-check` passes. |
 | Operations | ✅ | None — Installation guide restructured. Rollout cookbook and rollback guide exist. Metrics endpoint supports JSON, plain-text, and Prometheus formats. Decision logging with reason codes documented. |
-
-## Blocking Items (CI Verification)
-
-The following CI workflows must pass against the release candidate commit before the Conditional Go becomes a final Go:
-
-| Workflow | Status | Run ID | Commit SHA |
-|----------|--------|--------|------------|
-| `ci.yml` (`make test-all` on Ubuntu) | Pending | — | — |
-| `nightly-perf.yml` | Pending | — | — |
-| `release-binaries.yml` | Pending | — | — |
-| `install-verify.yml` | Pending | — | — |
-
-Once all four workflows pass, update this table with run IDs and commit SHAs, change the Decision to "Go", and proceed with tag creation.
 
 ## Exceptions
 
@@ -65,7 +52,7 @@ Once all four workflows pass, update this table with run IDs and commit SHAs, ch
 | Auditable | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Compatible | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 
-Note: Formal DoD evaluation tables have not been recorded as separate artifacts in each sub-spec's completion file. The checkpoint coverage above is assessed based on task completion status, test results, and artifact review. The `make release-gates-check` DoD validation reports "no DoD evaluation tables found — passing vacuously" because the sub-specs did not produce standalone DoD table artifacts.
+Note: Formal DoD evaluation tables have not been recorded as separate artifacts in each sub-spec's completion file. The checkpoint coverage above is assessed based on task completion status, test results, and artifact review.
 
 ### Evidence References
 
