@@ -47,6 +47,7 @@ pub(crate) fn convert_inner(
     let dom = parse_html_with_charset(html_slice, decoded.content_type)?;
 
     let mut ctx = ConversionContext::new(decoded.timeout);
+    ctx.set_input_size_hint(html_slice.len());
     // Check once before conversion so a near-expired deadline can fail early
     // without spending cycles traversing a large DOM.
     ctx.check_timeout()?;

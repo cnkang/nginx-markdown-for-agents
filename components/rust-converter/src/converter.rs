@@ -110,11 +110,26 @@ use std::cell::Ref;
 use std::time::{Duration, Instant};
 
 mod blocks;
+pub(crate) mod fast_path;
 mod front_matter;
 mod inline;
+pub(crate) mod large_response;
 mod normalize;
+pub(crate) mod pruning;
 mod tables;
 mod traversal;
+
+/// Traversal output size (in bytes) above which the fused normalizer is used
+/// instead of the two-pass `normalize_output`. This avoids allocating a second
+/// full-size string for the normalization result.
+///
+/// The threshold is checked against the traversal output length *after*
+/// `traverse_node_with_context` completes — not against the input HTML size,
+/// which is unavailable without an additional DOM walk. 256 KB is chosen to
+/// match the order of magnitude of the `markdown_large_body_threshold` NGINX
+/// directive default, though the two values measure different things (input
+/// HTML vs. intermediate Markdown output).
+const LARGE_BODY_THRESHOLD: usize = 256 * 1024; // 256 KB
 
 /// Markdown flavor selection
 #[derive(Debug, Clone, Copy)]
@@ -217,6 +232,21 @@ pub struct ConversionContext {
     timeout: Duration,
     /// Number of nodes processed (for checkpoint frequency)
     node_count: u32,
+    /// Whether the document qualified for the fast path.
+    ///
+    /// When `true`, the traversal can skip branches that are unreachable for
+    /// fast-path documents (e.g., form control extraction, embedded content
+    /// handling, table/media element processing). This avoids per-node
+    /// method calls and attribute inspection for code paths that the
+    /// qualification scan has already proven unreachable.
+    pub(crate) is_fast_path: bool,
+    /// Optional hint about the input HTML size in bytes.
+    ///
+    /// When set (non-zero), the converter uses this to pre-allocate the
+    /// traversal output buffer proportionally for large documents, reducing
+    /// reallocations during DOM traversal. Callers that know the input size
+    /// (e.g., the FFI layer) should set this via [`set_input_size_hint`].
+    input_size_hint: usize,
 }
 
 impl ConversionContext {
@@ -243,7 +273,23 @@ impl ConversionContext {
             start_time: Instant::now(),
             timeout,
             node_count: 0,
+            is_fast_path: false,
+            input_size_hint: 0,
         }
+    }
+
+    /// Set a hint about the input HTML size in bytes.
+    ///
+    /// When the hint exceeds `LARGE_BODY_THRESHOLD`, the converter
+    /// pre-allocates the traversal output buffer proportionally (via
+    /// `estimate_output_capacity`) instead of using the default 1 KB.
+    /// This reduces reallocations during DOM traversal for large documents.
+    ///
+    /// # Arguments
+    ///
+    /// * `size` - Input HTML size in bytes (0 means unknown)
+    pub(crate) fn set_input_size_hint(&mut self, size: usize) {
+        self.input_size_hint = size;
     }
 
     /// Check if timeout has been exceeded
@@ -505,9 +551,22 @@ impl MarkdownConverter {
         dom: &RcDom,
         ctx: &mut ConversionContext,
     ) -> Result<String, ConversionError> {
-        // Pre-allocate output buffer with reasonable capacity
-        // Average compression ratio is ~70-85%, so we estimate output size
-        let mut output = String::with_capacity(1024);
+        // Fast path qualification: check if the document is structurally simple
+        // enough for optimized traversal. When the document qualifies, the
+        // traversal skips unreachable branches (form controls, embedded content,
+        // table/media handling) reducing per-node overhead.
+        ctx.is_fast_path = fast_path::qualifies(dom) == fast_path::FastPathResult::Qualifies;
+
+        // Pre-allocate output buffer. For large documents (input size hint
+        // exceeds LARGE_BODY_THRESHOLD), use estimate_output_capacity to
+        // scale the buffer proportionally, reducing reallocations during
+        // DOM traversal. For small or unknown-size documents, use 1 KB.
+        let initial_capacity = if ctx.input_size_hint > LARGE_BODY_THRESHOLD {
+            large_response::estimate_output_capacity(ctx.input_size_hint)
+        } else {
+            1024
+        };
+        let mut output = String::with_capacity(initial_capacity);
 
         // Extract metadata and add YAML front matter if enabled
         if self.options.include_front_matter && self.options.extract_metadata {
@@ -523,8 +582,22 @@ impl MarkdownConverter {
         // Check timeout before output normalization
         ctx.check_timeout()?;
 
-        // Normalize output: ensure single trailing newline
-        let markdown = self.normalize_output(output);
+        // Normalize output: use fused normalizer when the traversal output
+        // exceeds LARGE_BODY_THRESHOLD to avoid allocating a second full-size
+        // string via normalize_output. The threshold is checked against the
+        // traversal output length (not the input HTML size).
+        // CRLF normalization is handled inside FusedNormalizer::push_line,
+        // so no separate replace("\r\n", "\n") allocation is needed.
+        let markdown = if output.len() > LARGE_BODY_THRESHOLD {
+            let capacity = large_response::estimate_output_capacity(output.len());
+            let mut normalizer = large_response::FusedNormalizer::new(capacity);
+            for line in output.split('\n') {
+                normalizer.push_line(line);
+            }
+            normalizer.finalize()
+        } else {
+            self.normalize_output(output)
+        };
 
         // Final timeout check after normalization
         ctx.check_timeout()?;
@@ -2949,5 +3022,37 @@ mod tests {
             result.contains("\u{201D}"),
             "Right double quote should be decoded"
         );
+    }
+
+    // ============================================================================
+    // Pruning Integration Tests
+    // ============================================================================
+
+    // NOTE: Testing `<nav>` pruning when `prune_noise_regions` is enabled is
+    // skipped here because the feature flag is off by default. When enabled,
+    // `<nav><a href="/">Home</a></nav>` should produce empty output.
+
+    /// Test that content around pruned elements (script) is preserved.
+    /// Validates: FR-10.3 — pruning must not discard surrounding content.
+    #[test]
+    fn test_pruning_preserves_content_around_pruned_elements() {
+        let html = b"<p>Before</p><script>alert('x')</script><p>After</p>";
+        let dom = parse_html(html).expect("Parse failed");
+        let converter = MarkdownConverter::new();
+        let result = converter.convert(&dom).expect("Conversion failed");
+
+        assert_eq!(result, "Before\n\nAfter\n");
+    }
+
+    /// Test that nested prunable elements produce no output.
+    /// Validates: FR-10.3 — early pruning skips entire subtrees.
+    #[test]
+    fn test_pruning_nested_prunable_elements() {
+        let html = b"<script><style>body{}</style></script>";
+        let dom = parse_html(html).expect("Parse failed");
+        let converter = MarkdownConverter::new();
+        let result = converter.convert(&dom).expect("Conversion failed");
+
+        assert_eq!(result, "\n");
     }
 }

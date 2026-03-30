@@ -29,6 +29,8 @@ components/nginx-module/tests/**/*.pid
 
 # Performance test temporary reports (baselines are version-controlled)
 perf/reports/
+# Local ad-hoc perf completeness reports (temporary diagnostics)
+perf_completeness_*.json
 
 # Generated large sample corpus (regenerated via tools/corpus/generate_large_samples.sh)
 tools/corpus/samples/
@@ -90,3 +92,4 @@ matrix-diff.json
 # Vim swap
 *.swp
 *.swo
+KIRO.md

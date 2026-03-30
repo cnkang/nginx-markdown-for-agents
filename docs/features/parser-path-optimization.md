@@ -1,0 +1,462 @@
+# Parser Path Optimization
+
+## Overview
+
+The 0.4.0 release introduces three groups of internal optimizations to the Rust
+HTML-to-Markdown converter. These optimizations reduce unnecessary work during
+DOM traversal and output normalization without changing the converter's public
+API, FFI surface, or operator-facing behavior.
+
+The three optimization groups are:
+
+1. **Noise Region Early Pruning** — Skips child-node traversal for elements
+   that produce no meaningful Markdown output (`<script>`, `<style>`,
+   `<noscript>`), with experimental support for semantic noise regions
+   (`<nav>`, `<footer>`, `<aside>`) behind a compile-time feature flag.
+2. **Simple Structure Fast Path** — Pre-scans the DOM to detect structurally
+   simple documents and enables branch elimination during traversal for
+   qualifying pages.
+3. **Large Response Path Optimization** — Pre-allocates the output buffer based
+   on input size and replaces the two-pass normalize-then-copy with a
+   single-pass fused normalizer for documents exceeding the large-body
+   threshold.
+
+All optimizations are evidence-gated: each group must demonstrate measurable
+benefit in the benchmark corpus and pass a corpus diff before merging.
+
+## Evidence Status
+
+Evidence gate closed. All measurements taken on the same machine
+(macOS/darwin, Apple Silicon), same corpus version, same release profile
+(`opt-level = 3`, `lto = true`, `codegen-units = 1`).
+
+Baseline commit: `2af6fef` (parent of first optimization commit).
+Current commit: `feat/10-parser-path-optimization` HEAD.
+
+### Benchmark: baseline vs current (perf\_baseline, release)
+
+| Sample | Metric | Baseline | Current | Delta |
+|--------|--------|----------|---------|-------|
+| small (~0.4 KB) | Avg ms | 0.010 | 0.010 | 0.0 % |
+| | P50 ms | 0.010 | 0.010 | 0.0 % |
+| | P95 ms | 0.012 | 0.011 | −8.3 % |
+| | P99 ms | 0.015 | 0.012 | −20.0 % |
+| medium (~10 KB) | Avg ms | 0.129 | 0.129 | 0.0 % |
+| | P50 ms | 0.128 | 0.130 | +1.6 % |
+| | P95 ms | 0.140 | 0.135 | −3.6 % |
+| | P99 ms | 0.206 | 0.149 | −27.7 % |
+| medium + front matter | Avg ms | 0.142 | 0.140 | −1.4 % |
+| | P50 ms | 0.139 | 0.141 | +1.4 % |
+| | P95 ms | 0.181 | 0.148 | −18.2 % |
+| | P99 ms | 0.237 | 0.167 | −29.5 % |
+| large (~1 MB) | Avg ms | 19.710 | 19.273 | −2.2 % |
+| | P50 ms | 19.663 | 19.252 | −2.1 % |
+| | P95 ms | 20.235 | 19.582 | −3.2 % |
+| | P99 ms | 21.325 | 19.893 | −6.7 % |
+
+Stage breakdown (medium, current): parse 76.7 %, convert 20.7 %, etag 2.6 %.
+
+The optimizations show measurable benefit at tail latencies (p95/p99) across
+all tiers, with the largest improvement on the large (~1 MB) tier where the
+fused normalizer and pre-allocation changes have the most impact. Median
+latency is within noise for small/medium tiers and shows a 2 % improvement for
+the large tier.
+
+### Corpus diff: per-fixture output equivalence
+
+All 33 fixtures in the benchmark corpus (`tests/corpus/`) were converted with
+both the baseline (`2af6fef`) and current code using the same converter
+configuration. The comparison was performed by checking out the baseline source,
+building, converting all fixtures, computing blake3 hashes of each Markdown
+output, then repeating with the current source and comparing the hash sets.
+
+Method: `git checkout <commit> -- components/rust-converter/src/` → `cargo
+build` → convert each fixture via `MarkdownConverter::new().convert()` →
+`blake3::hash(output)` → compare. The full artifact is stored at
+`docs/evidence/10-parser-path-optimization-corpus-diff.tsv`.
+
+| Category | Fixtures | Diffs | Status |
+|----------|----------|-------|--------|
+| simple/ | 8 | 0 | Identical |
+| complex/ | 7 | 0 | Identical |
+| encoding/ | 6 | 0 | Identical |
+| edge-cases/ | 7 | 0 | Identical |
+| malformed/ | 5 | 0 | Identical |
+| **Total** | **33** | **0** | **All identical** |
+
+Separately, the `optimization_regression` test suite (11 tests) verifies
+output properties and determinism on the current code for every fixture, and
+40 property-based tests verify output equivalence across randomly generated
+HTML structures. These tests pass in both default and `prune_noise_regions`
+feature modes.
+
+### Peak memory: before/after RSS
+
+Measured via `/usr/bin/time -l` running `perf_baseline` (which includes the
+large ~1 MB fixture):
+
+| Metric | Baseline | Current | Delta |
+|--------|----------|---------|-------|
+| Maximum resident set size | 31.3 MiB | 31.1 MiB | −0.5 % |
+| Peak memory footprint | 29.3 MiB | 29.1 MiB | −0.5 % |
+
+No memory regression. The small reduction is consistent with the elimination
+of the `replace("\r\n", "\n")` intermediate allocation in the large-response
+path.
+
+### Evidence gate status
+
+| Gate | Status | Notes |
+|------|--------|-------|
+| Benchmark: baseline-vs-current comparison | Closed | See table above; measurable p95/p99 improvement across all tiers |
+| Corpus diff: per-fixture before/after | Closed | 33/33 fixtures identical via blake3 hash comparison; artifact at `docs/evidence/` |
+| Peak memory: before/after RSS | Closed | 31.3 → 31.1 MiB (−0.5 %); no regression |
+| Output equivalence: property tests | Closed | 40 property tests, 11 regression tests, both default and feature modes |
+| Security baseline: no bypass | Closed | All security tests pass in both modes |
+
+### Remaining caveats
+
+- Benchmarks are local (single machine, macOS/darwin). Cross-platform CI
+  benchmarks (Linux x86\_64) should confirm before promoting to a release
+  performance claim.
+- The `nav`/`footer`/`aside` pruning remains behind the `prune_noise_regions`
+  feature flag and is not part of the default 0.4.0 release claim.
+
+## Architecture
+
+All 0.4.0 optimizations operate within the existing buffer-based conversion
+pipeline. They do not introduce streaming, chunk-driven parsing, or parser
+replacement. The html5ever parsing phase (step 1) is untouched.
+
+### Current pipeline
+
+```
+HTML bytes → parse_html() (html5ever) → RcDom
+           → SecurityValidator checks
+           → MarkdownConverter::convert() → traverse_node() / handle_element_internal()
+           → normalize_output()
+           → final Markdown string
+```
+
+### Integration points
+
+| Optimization Group | Integration Point | What Changes |
+|--------------------|-------------------|--------------|
+| Noise Region Early Pruning | `handle_element_internal` in `converter/traversal.rs` | Early-return before `traverse_children` for prunable elements |
+| Simple Structure Fast Path | `convert_with_context` in `converter.rs` | Pre-scan qualification gate before traversal begins |
+| Large Response Path | `convert_with_context` in `converter.rs` | Buffer pre-allocation and fused normalization after traversal |
+
+### Module layout
+
+All optimization code lives within the `converter` module hierarchy:
+
+```
+components/rust-converter/src/
+  converter.rs                    # convert(), convert_with_context()
+  converter/
+    pruning.rs                    # Noise region pruning logic
+    fast_path.rs                  # Fast path qualification
+    large_response.rs             # Buffer estimation and fused normalizer
+    traversal.rs                  # traverse_node, handle_element_internal (modified)
+```
+
+
+## Optimization Group 1: Noise Region Early Pruning
+
+### What it does
+
+During DOM traversal, the converter checks each element's tag name against a
+pruning list before visiting its children. Elements on the list are skipped
+immediately, avoiding the cost of recursing into their subtrees.
+
+For `<script>`, `<style>`, and `<noscript>`, the `SecurityValidator` already
+removes these elements (they are in `DANGEROUS_ELEMENTS`). The pruning
+optimization makes this explicit at the traversal layer and avoids visiting
+child text nodes that would produce no output regardless.
+
+For `<nav>`, `<footer>`, and `<aside>`, pruning skips the entire subtree
+(element and all descendants). This is disabled by default in 0.4.0.
+
+### Elements targeted
+
+| Element | Decision | Behavior | Default in 0.4.0 |
+|---------|----------|----------|-------------------|
+| `<script>` | `SkipChildren` | Skip child nodes; element itself already removed by `SecurityValidator` | Active |
+| `<style>` | `SkipChildren` | Skip child nodes; CSS content never produces Markdown | Active |
+| `<noscript>` | `SkipChildren` | Skip child nodes; fallback content is redundant | Active |
+| `<nav>` | `SkipSubtree` | Skip element and all descendants | Disabled (feature flag) |
+| `<footer>` | `SkipSubtree` | Skip element and all descendants | Disabled (feature flag) |
+| `<aside>` | `SkipSubtree` | Skip element and all descendants | Disabled (feature flag) |
+
+All other elements return `Traverse` and are handled normally.
+
+### Pruning rules
+
+- Pruning decisions are based on tag name only. No attribute inspection, no
+  content heuristics, no `role` attribute matching.
+- The `RcDom` tree is never mutated. Pruning operates at the traversal layer
+  by returning early from `handle_element_internal`.
+- For `SkipChildren`: the element node itself is processed (though
+  `SecurityValidator` removes it), but its children are never visited.
+- For `SkipSubtree`: the element and its entire subtree are skipped.
+- For elements not in the pruning list, the decision is deterministic:
+  `Traverse`. There is no ambiguity state.
+
+### Feature flag: `prune_noise_regions`
+
+Semantic noise region pruning (`<nav>`, `<footer>`, `<aside>`) is gated behind
+the `prune_noise_regions` Cargo feature flag. In 0.4.0 release builds, this
+feature is disabled by default. It can be enabled at compile time for
+benchmarking and corpus diff collection:
+
+```bash
+cargo test --features prune_noise_regions
+```
+
+Promotion to default-on requires benchmark evidence demonstrating clear benefit
+with acceptable false-kill risk, reviewed during a future release cycle.
+
+### Known limitations
+
+- `<div role="navigation">` and similar attribute-based semantic regions are
+  not detected. Only the six tag names listed above are recognized.
+- When `prune_noise_regions` is enabled, pages that place primary content
+  inside `<nav>`, `<footer>`, or `<aside>` elements will lose that content
+  (false kill). This is a known trade-off and the reason the feature is
+  disabled by default.
+- Pruning runs before `SecurityValidator::check_element` for prunable
+  elements. This is safe because `script`/`style`/`noscript` are already in
+  `DANGEROUS_ELEMENTS`, and `nav`/`footer`/`aside` are not dangerous.
+
+### Source files
+
+- `components/rust-converter/src/converter/pruning.rs` — `PruneDecision` enum
+  and `should_prune` function
+- `components/rust-converter/src/converter/traversal.rs` — integration in
+  `handle_element_internal`
+
+## Optimization Group 2: Simple Structure Fast Path
+
+### What it does
+
+Before traversal begins, the converter performs a lightweight pre-scan of the
+DOM tree. If every element node uses a tag in the allowed set and the maximum
+nesting depth stays below the threshold, the document qualifies for the fast
+path.
+
+The fast path is a qualification gate, not a separate converter. Qualifying
+documents use the same `traverse_node` code path, but the converter can
+eliminate unreachable branches during traversal (e.g., table handling, form
+control handling, embedded content handling are unreachable for fast-path
+documents). `SecurityValidator` remains fully active.
+
+If any unsupported node is found during the pre-scan, the entire document falls
+back to the normal path. There is no partial fast path.
+
+### Qualification criteria
+
+A document qualifies when both conditions are met:
+
+1. Every element node uses a tag in the `FAST_PATH_ELEMENTS` set, or is a
+   prunable element (handled by `should_prune` returning non-`Traverse`).
+2. The maximum DOM nesting depth does not exceed `FAST_PATH_MAX_DEPTH` (15).
+
+Non-element nodes (text, comments, doctypes, processing instructions) are
+always allowed.
+
+### Allowed elements
+
+| Category | Elements |
+|----------|----------|
+| Document structure | `html`, `head`, `body` |
+| Headings | `h1`, `h2`, `h3`, `h4`, `h5`, `h6` |
+| Block content | `p`, `br`, `hr`, `blockquote`, `pre` |
+| Lists | `ul`, `ol`, `li` |
+| Inline formatting | `strong`, `b`, `em`, `i`, `code` |
+| Links and images | `a`, `img` |
+| Containers | `div`, `span`, `section`, `article`, `main`, `header` |
+
+### Disqualifying elements (examples)
+
+Tables (`table`, `thead`, `tbody`, `tr`, `td`, `th`), forms (`form`, `input`,
+`select`, `textarea`, `button`), embedded content (`iframe`, `object`,
+`embed`), and media (`video`, `audio`, `source`, `track`, `area`, `map`) all
+disqualify a document from the fast path.
+
+### Depth threshold
+
+The maximum nesting depth is 15 (`FAST_PATH_MAX_DEPTH`). This covers typical
+article structures. Deeply nested documents likely have complex structures that
+benefit from the full conversion path.
+
+Depth is counted from the document root node (depth 0). A text node inside
+`<html><body><div><p>text</p></div></body></html>` sits at depth 5.
+
+### Known limitations
+
+- The pre-scan walks the entire DOM tree, adding O(n) overhead. For documents
+  that do not qualify, this is wasted work. In practice, the scan is
+  lightweight (tag-name comparison only) and terminates early on the first
+  disqualifying node.
+- The allowed element set is intentionally conservative. Some elements that
+  could be handled by the fast path (e.g., `<dl>`, `<dt>`, `<dd>`) are
+  excluded to keep the qualification logic simple.
+- The fast path does not skip `SecurityValidator` checks. It reduces branch
+  overhead in the traversal, not security validation.
+
+### Source files
+
+- `components/rust-converter/src/converter/fast_path.rs` — `FastPathResult`
+  enum, `qualifies` function, `FAST_PATH_ELEMENTS` list, `FAST_PATH_MAX_DEPTH`
+  constant
+- `components/rust-converter/src/converter.rs` — integration in
+  `convert_with_context`
+
+## Optimization Group 3: Large Response Path Optimization
+
+### What it does
+
+When the traversal output exceeds a size threshold, this optimization replaces
+the two-pass normalize-then-copy pattern with a single-pass fused normalizer.
+This eliminates one O(n) allocation and copy for the normalization result.
+
+The optimization targets the normalization phase (after traversal), not the
+traversal itself. The initial traversal buffer uses a fixed 1 KB pre-allocation
+for all documents; smarter pre-allocation based on input HTML size is deferred
+because the `RcDom` does not expose the original byte count without an
+additional tree walk.
+
+### Buffer estimation for the fused normalizer
+
+When the fused normalizer is activated, its output buffer is pre-allocated
+using `estimate_output_capacity`, which estimates the normalized output at 40%
+of the traversal output size (`OUTPUT_SIZE_ESTIMATE_FACTOR = 0.4`), clamped to
+\[4 KB, 4 MB\]:
+
+| Traversal Output Size | Normalizer Buffer Capacity |
+|-----------------------|---------------------------|
+| < ~10 KB | 4 KB (minimum) |
+| ~10 KB – ~10 MB | `output_size × 0.4` |
+| > ~10 MB | 4 MB (maximum) |
+
+Note: the estimate is based on the traversal output size (intermediate
+Markdown), not the input HTML size. This is a pragmatic choice — the input
+byte count is not available from the `RcDom` without a separate walk.
+
+### Fused normalizer
+
+The `FusedNormalizer` struct replaces the two-pass normalize-then-copy pattern
+for large documents. It applies normalization rules incrementally as each line
+is appended:
+
+- Tracks fenced code block state (`` ``` `` delimiters).
+- Collapses consecutive blank lines to a single blank line.
+- Trims trailing whitespace from each line.
+- Normalizes inline whitespace (collapses multiple spaces) outside code blocks,
+  while preserving leading indentation and content inside backtick spans.
+
+The output produced by `FusedNormalizer` is identical to the output of
+`MarkdownConverter::normalize_output` for the same input. This equivalence is
+verified by property-based tests.
+
+### Threshold
+
+The fused normalizer activates when the traversal output (intermediate
+Markdown) exceeds `LARGE_BODY_THRESHOLD` (256 KB, a hardcoded constant in
+`converter.rs`). This threshold is checked against the traversal output length
+after `traverse_node_with_context` completes — not against the input HTML size.
+
+The 256 KB value is chosen to match the order of magnitude of the
+`markdown_large_body_threshold` NGINX directive default, though the two values
+measure different things (the directive controls input HTML size; the constant
+controls intermediate output size). Documents below the threshold use the
+standard `normalize_output` two-pass approach.
+
+### Known limitations
+
+- The fused normalizer processes the traversal output line-by-line after
+  traversal completes. It does not interleave with traversal itself — the
+  intermediate `output` string is still fully built before normalization
+  begins. CRLF normalization is handled inline by `push_line` (stripping
+  trailing `\r`), so no separate `replace("\r\n", "\n")` allocation is
+  needed. The saving is one full O(n) allocation and copy compared to the
+  two-pass `normalize_output` path.
+- For large documents, the initial traversal buffer is pre-allocated
+  proportionally to the input HTML size (via `estimate_output_capacity`) when
+  the caller provides an input size hint exceeding `LARGE_BODY_THRESHOLD`.
+  The FFI and incremental entry points set this hint automatically. For small
+  documents or callers that do not set the hint, the default 1 KB
+  pre-allocation is used.
+- Buffer estimation uses a fixed 0.4 factor applied to the input size hint
+  (for traversal pre-allocation) or the traversal output size (for the fused
+  normalizer). Pages with unusually high or low HTML-to-Markdown compression
+  ratios may over- or under-allocate, but the clamp bounds (4 KB–4 MB)
+  prevent pathological cases.
+- The threshold is a hardcoded constant, not configurable via NGINX directives.
+  It is not the same as `markdown_large_body_threshold` (which controls input
+  HTML size limits), though both use 256 KB as a default.
+- `ConversionContext` timeout checks remain active throughout the large-response
+  path. The fused normalizer does not bypass timeout enforcement.
+
+### Source files
+
+- `components/rust-converter/src/converter/large_response.rs` —
+  `estimate_output_capacity` function, `FusedNormalizer` struct
+- `components/rust-converter/src/converter.rs` — integration in
+  `convert_with_context`
+
+## Security Baseline
+
+All `SecurityValidator` checks remain active regardless of which optimization
+path is taken:
+
+- Dangerous element removal (`script`, `style`, `noscript`, and others in
+  `DANGEROUS_ELEMENTS`)
+- Event handler attribute stripping (`on*` prefix)
+- Dangerous URL detection (`javascript:`, `data:`, etc.)
+- DOM depth validation
+
+Pruning `<script>`, `<style>`, and `<noscript>` earlier is security-positive —
+it avoids visiting their children, which the security validator would remove
+anyway. Pruning `<nav>`, `<footer>`, `<aside>` is a content decision, not a
+security decision; these elements are not in `DANGEROUS_ELEMENTS`.
+
+No new `unsafe` code is introduced by any optimization in this spec.
+
+## Stop Line
+
+Optimization work stops and remaining ideas defer to 0.5.x when any of the
+following conditions are met:
+
+- The optimization requires changes to the FFI boundary
+- The optimization alters the `MarkdownConverter` public API
+- The optimization restructures the DOM traversal model
+- The optimization introduces conditional compilation paths that fragment the
+  conversion logic
+- The optimization work threatens the 0.4.0 release timeline
+- The optimization depends on unfinished benchmark tooling
+- The optimization creates ambiguity about output stability
+
+P0 specs always take priority. If this P1 spec risks the release, it defers
+entirely rather than shipping a partial optimization set.
+
+## Deferred to 0.5.x
+
+The following items are explicitly out of scope for 0.4.0:
+
+- **Streaming/chunk-driven conversion** — Requires fundamental architecture
+  changes to the buffer-based pipeline.
+- **Parser replacement** — Replacing html5ever or markup5ever_rcdom with a
+  different parser/DOM library.
+- **Content-aware heuristic pruning** — Readability-style algorithms that
+  analyze content to decide what to prune.
+- **Configurable pruning rules** — Operator-facing directives to control which
+  elements are pruned.
+- **Optimization of the html5ever parsing phase** — Step 1 of the pipeline is
+  untouched.
+- **Promotion of semantic pruning to default-on** — `<nav>`, `<footer>`,
+  `<aside>` pruning remains behind a feature flag until evidence and rollout
+  posture support promotion.
+- **New NGINX configuration directives** for optimization control.
+- **Optimization-specific metrics or logging** — No new reason codes or
+  decision logging for optimization paths.
