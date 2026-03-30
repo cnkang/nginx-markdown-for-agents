@@ -21,6 +21,14 @@ use super::pruning::{PruneDecision, should_prune};
 /// well-structured pages nest far below 15 levels.
 pub(crate) const FAST_PATH_MAX_DEPTH: usize = 15;
 
+/// Maximum number of nodes the qualification scan will visit before
+/// falling back to the normal path.
+///
+/// This prevents the pre-scan from consuming significant time on very
+/// large DOMs before the conversion context's timeout checks take effect.
+/// 10 000 nodes covers typical web pages while bounding scan cost.
+const FAST_PATH_MAX_NODES: usize = 10_000;
+
 /// Element tags supported by the fast path.
 ///
 /// Only documents composed entirely of these tags (plus prunable elements like
@@ -106,7 +114,8 @@ pub(crate) enum FastPathResult {
 /// [`FastPathResult::Qualifies`] if the document can use the fast path,
 /// [`FastPathResult::Normal`] otherwise.
 pub(crate) fn qualifies(dom: &RcDom) -> FastPathResult {
-    if check_node(&dom.document, 0) {
+    let mut visited: usize = 0;
+    if check_node(&dom.document, 0, &mut visited) {
         FastPathResult::Qualifies
     } else {
         FastPathResult::Normal
@@ -116,8 +125,15 @@ pub(crate) fn qualifies(dom: &RcDom) -> FastPathResult {
 /// Recursively check whether a single node and all its descendants qualify.
 ///
 /// Returns `true` when the subtree rooted at `node` is fast-path compatible,
-/// `false` otherwise.
-fn check_node(node: &Handle, depth: usize) -> bool {
+/// `false` otherwise. The `visited` counter is incremented for each node and
+/// the scan bails out to the normal path when [`FAST_PATH_MAX_NODES`] is
+/// exceeded, bounding pre-scan cost on very large DOMs.
+fn check_node(node: &Handle, depth: usize, visited: &mut usize) -> bool {
+    *visited += 1;
+    if *visited > FAST_PATH_MAX_NODES {
+        return false;
+    }
+
     if depth > FAST_PATH_MAX_DEPTH {
         return false;
     }
@@ -148,7 +164,7 @@ fn check_node(node: &Handle, depth: usize) -> bool {
 
     // Recursively check all children.
     for child in node.children.borrow().iter() {
-        if !check_node(child, depth + 1) {
+        if !check_node(child, depth + 1, visited) {
             return false;
         }
     }
@@ -251,5 +267,17 @@ mod tests {
              </body></html>",
         );
         assert_eq!(qualifies(&dom), FastPathResult::Qualifies);
+    }
+
+    #[test]
+    fn exceeding_max_nodes_falls_back_to_normal() {
+        // Build a document with more than FAST_PATH_MAX_NODES nodes.
+        // Each <p>x</p> contributes 2 nodes (element + text), plus
+        // html5ever's implicit html/head/body wrapper (~4 nodes).
+        let paragraphs = FAST_PATH_MAX_NODES / 2 + 1;
+        let body: String = "<p>x</p>".repeat(paragraphs);
+        let html = format!("<html><body>{body}</body></html>");
+        let dom = parse(&html);
+        assert_eq!(qualifies(&dom), FastPathResult::Normal);
     }
 }
