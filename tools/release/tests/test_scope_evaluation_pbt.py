@@ -26,12 +26,14 @@ def _split_compound_non_goal(non_goal: str) -> list[str]:
     Splits on ", " and " or " delimiters, trims each part,
     and returns only components that are at least 3 characters long.
     """
-    # Split on ", or ", ", ", and " or " delimiters using regex, then trim.
+    # Two-pass split avoids overlapping \s+ quantifiers (S5852).
+    # First split on comma, then split each fragment on " or ".
     parts = []
-    for component in re.split(r",\s+(?:or\s+)?|\s+or\s+", non_goal):
-        stripped = component.strip()
-        if len(stripped) >= 3:
-            parts.append(stripped)
+    for fragment in non_goal.split(","):
+        for component in fragment.split(" or "):
+            stripped = component.strip()
+            if len(stripped) >= 3:
+                parts.append(stripped)
     return parts
 
 
