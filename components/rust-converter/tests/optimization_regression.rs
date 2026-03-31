@@ -258,9 +258,11 @@ fn boilerplate_heavy_fixtures_preserve_nav_footer_aside() {
 
     for name in &boilerplate_fixtures {
         let path = corpus_dir().join("complex").join(name);
-        if !path.exists() {
-            continue;
-        }
+        assert!(
+            path.exists(),
+            "Expected fixture {:?} is missing — test corpus may be incomplete",
+            path
+        );
 
         let html_bytes = fs::read(&path).unwrap_or_else(|e| panic!("read {:?}: {}", path, e));
         let html_str = String::from_utf8_lossy(&html_bytes);

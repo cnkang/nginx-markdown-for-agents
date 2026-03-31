@@ -589,7 +589,7 @@ impl MarkdownConverter {
         // CRLF normalization is handled inside FusedNormalizer::push_line,
         // so no separate replace("\r\n", "\n") allocation is needed.
         let markdown = if output.len() > LARGE_BODY_THRESHOLD {
-            let capacity = large_response::estimate_output_capacity(output.len());
+            let capacity = output.len();
             let mut normalizer = large_response::FusedNormalizer::new(capacity);
             for line in output.split('\n') {
                 normalizer.push_line(line);
