@@ -52,7 +52,8 @@ NGINX_HEADER := $(NGINX_MODULE_DIR)/src/markdown_converter.h
 .PHONY: all build rust-lib rust-lib-debug copy-headers check-headers \
         test test-rust test-rust-doc test-nginx-unit test-nginx-unit-clang-smoke test-nginx-unit-sanitize-smoke \
         test-nginx-integration test-e2e test-all test-rust-fuzz-smoke \
-        docs-check license-check verify-large-e2e verify-huge-native-e2e verify-huge-allowed-native-e2e \
+        test-benchmark test-benchmark-compare test-benchmark-summary \
+        docs-check license-check release-gates-check verify-large-e2e verify-huge-native-e2e verify-huge-allowed-native-e2e \
         verify-chunked-native-e2e verify-chunked-native-e2e-smoke verify-chunked-native-e2e-stress \
         clean help
 
@@ -116,13 +117,47 @@ test-e2e:
 
 test-all: build test-rust test-nginx-unit
 
+# Corpus benchmark targets
+CORPUS_CONVERTER_BIN := tools/corpus/test-corpus-conversion/target/release/test-corpus-conversion
+CORPUS_REPORT := perf/reports/corpus-report.json
+CORPUS_BASELINE := perf/baselines/corpus-baseline.json
+CORPUS_VERDICT := perf/reports/corpus-verdict.json
+
+test-benchmark:
+	@echo "Validating corpus metadata..."
+	tools/corpus/validate_corpus.sh
+	@echo "Building test-corpus-conversion binary..."
+	cd tools/corpus/test-corpus-conversion && cargo build --release --quiet
+	@echo "Running corpus benchmark..."
+	python3 tools/perf/run_corpus_benchmark.py \
+		--corpus-dir $(CORPUS_DIR) \
+		--converter-bin $(CORPUS_CONVERTER_BIN) \
+		--output $(CORPUS_REPORT) \
+		--examples-dir perf/reports/examples
+
+test-benchmark-compare:
+	python3 tools/perf/compare_reports.py \
+		--baseline $(CORPUS_BASELINE) \
+		--current $(CORPUS_REPORT) \
+		--thresholds perf/quality-thresholds.json \
+		--output $(CORPUS_VERDICT)
+
+test-benchmark-summary:
+	python3 tools/perf/format_pr_summary.py \
+		--report $(CORPUS_REPORT)
+
 docs-check:
 	python3 tools/docs/check_docs.py
+	python3 tools/docs/check_packaging_docs.py
+	python3 tools/docs/check_packaging_consistency.py
 
 license-check:
 	python3 tools/ci/check_c_licenses.py
 	python3 tools/ci/check_rust_licenses.py
 	python3 tools/ci/check_third_party_notices.py
+
+release-gates-check:
+	python3 tools/release/validate_release_gates.py
 
 verify-large-e2e:
 	./tools/e2e/verify_large_markdown_response_e2e.sh
@@ -162,6 +197,10 @@ help:
 	@echo "  test-nginx-integration   - Run integration tests"
 	@echo "  test-e2e                 - Run end-to-end tests"
 	@echo "  test-all                 - Run build + rust + unit tests"
+	@echo "  test-benchmark           - Run corpus benchmark and produce Unified Report"
+	@echo "  test-benchmark-compare   - Compare corpus reports (baseline vs current)"
+	@echo "  test-benchmark-summary   - Generate PR benchmark summary from latest report"
 	@echo "  docs-check               - Validate documentation links/style"
 	@echo "  license-check            - Verify license policy and THIRD-PARTY-NOTICES coverage"
+	@echo "  release-gates-check      - Validate 0.4.0 release gate documents and conventions"
 	@echo "  clean                    - Clean build artifacts"
