@@ -49,11 +49,12 @@ ngx_http_markdown_check_method(ngx_http_request_t *r)
 /*
  * Check if response status is eligible for conversion
  *
- * Only 200 OK status is eligible per FR-02.2.
- * Other status codes (1xx, 206, 3xx, 4xx, 5xx) are not converted.
+ * Only 200 OK is eligible per FR-02.2.
+ * Other status codes (1xx, 2xx except 200, 3xx, 4xx, 5xx) are not converted.
  *
- * Note: 206 Partial Content is explicitly ineligible per FR-07.1.
- * Converting partial HTML would produce invalid Markdown.
+ * 206 Partial Content is handled separately in check_eligibility() where
+ * it returns INELIGIBLE_RANGE, ensuring the correct reason code regardless
+ * of whether the client sent a Range header.
  *
  * Parameters:
  *   r - NGINX request structure
@@ -108,7 +109,8 @@ ngx_http_markdown_has_range_header(ngx_http_request_t *r)
 static ngx_int_t
 ngx_http_markdown_check_content_type(ngx_http_request_t *r)
 {
-    ngx_str_t *content_type;
+    static u_char  text_html[] = "text/html";
+    ngx_str_t           *content_type;
     
     /* Get Content-Type header */
     if (r->headers_out.content_type.len == 0) {
@@ -119,16 +121,14 @@ ngx_http_markdown_check_content_type(ngx_http_request_t *r)
     
     /* Check for text/html (case-insensitive) */
     /* Accept "text/html" or "text/html; charset=..." */
-    if (content_type->len >= 9 &&
-        ngx_strncasecmp(content_type->data, (u_char *) "text/html", 9) == 0)
+    if (content_type->len >= 9
+        && ngx_strncasecmp(content_type->data,
+                           text_html, 9) == 0
+        && (content_type->len == 9
+            || content_type->data[9] == ';'
+            || content_type->data[9] == ' '))
     {
-        /* Valid if exactly "text/html" or followed by semicolon/space */
-        if (content_type->len == 9 ||
-            content_type->data[9] == ';' ||
-            content_type->data[9] == ' ')
-        {
-            return 1;
-        }
+        return 1;
     }
     
     return 0;
@@ -190,9 +190,10 @@ static ngx_int_t
 ngx_http_markdown_is_streaming(ngx_http_request_t *r,
                                 ngx_http_markdown_conf_t *conf)
 {
-    ngx_str_t *content_type;
-    ngx_str_t *stream_type;
-    ngx_uint_t i;
+    static u_char  text_event_stream[] = "text/event-stream";
+    ngx_str_t           *content_type;
+    ngx_str_t           *stream_type;
+    ngx_uint_t           i;
     
     /* Get Content-Type header */
     if (r->headers_out.content_type.len == 0) {
@@ -202,16 +203,14 @@ ngx_http_markdown_is_streaming(ngx_http_request_t *r,
     content_type = &r->headers_out.content_type;
     
     /* Check for text/event-stream (Server-Sent Events) */
-    if (content_type->len >= 17 &&
-        ngx_strncasecmp(content_type->data, (u_char *) "text/event-stream", 17) == 0)
+    if (content_type->len >= 17
+        && ngx_strncasecmp(content_type->data,
+                           text_event_stream, 17) == 0
+        && (content_type->len == 17
+            || content_type->data[17] == ';'
+            || content_type->data[17] == ' '))
     {
-        /* Valid if exactly "text/event-stream" or followed by semicolon/space */
-        if (content_type->len == 17 ||
-            content_type->data[17] == ';' ||
-            content_type->data[17] == ' ')
-        {
-            return 1;
-        }
+        return 1;
     }
     
     /* Check configured stream_types exclusion list */
@@ -253,8 +252,8 @@ ngx_http_markdown_is_streaming(ngx_http_request_t *r,
  * Range Requests: Per FR-07.1 and FR-07.2, range requests are not converted
  * because converting partial HTML content would produce invalid or incomplete
  * Markdown. This is detected by:
- * - 206 Partial Content status (caught by status check)
- * - Range header in request (explicit check)
+ * - 206 Partial Content status (explicit check returns INELIGIBLE_RANGE)
+ * - Range header in request (explicit check returns INELIGIBLE_RANGE)
  *
  * Parameters:
  *   r    - NGINX request structure
@@ -282,9 +281,18 @@ ngx_http_markdown_check_eligibility(ngx_http_request_t *r,
         return NGX_HTTP_MARKDOWN_INELIGIBLE_METHOD;
     }
     
-    /* Check response status (FR-02.2, FR-07.1) */
-    /* This catches 206 Partial Content responses */
+    /* Check response status (FR-02.2) */
     if (!ngx_http_markdown_check_status(r)) {
+        /*
+         * 206 Partial Content is routed to INELIGIBLE_RANGE
+         * rather than INELIGIBLE_STATUS so the reason code
+         * accurately reflects why the response was skipped.
+         * This covers bare 206 responses (no Range header)
+         * as well as normal range responses.
+         */
+        if (r->headers_out.status == NGX_HTTP_PARTIAL_CONTENT) {
+            return NGX_HTTP_MARKDOWN_INELIGIBLE_RANGE;
+        }
         return NGX_HTTP_MARKDOWN_INELIGIBLE_STATUS;
     }
     

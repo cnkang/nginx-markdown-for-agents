@@ -1,0 +1,8 @@
+{
+  "fixture-id": "complex/wikipedia-article",
+  "page-type": "nav-heavy",
+  "expected-conversion-result": "converted",
+  "input-size-bytes": 3522,
+  "source-description": "Wikipedia-style article with table of contents, infoboxes, and navigation",
+  "failure-corpus": false
+}

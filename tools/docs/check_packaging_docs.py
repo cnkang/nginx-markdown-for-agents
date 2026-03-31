@@ -1,0 +1,432 @@
+#!/usr/bin/env python3
+"""Packaging documentation structure and content validator.
+
+Validates that the installation guide (docs/guides/INSTALLATION.md) and
+supporting files meet the required structure and content expectations for
+the packaging-first-run documentation spec.
+
+Checks performed:
+  1.  All 11 required sections present by heading
+  2.  Shortest Success Path has <= 4 shell commands
+  3.  All 9 troubleshooting SOPs with symptom/root-cause/resolution
+  4.  Installation method sections contain tier labels
+  5.  Operator Verification describes four module states
+  6.  Compatibility matrix references tools/release-matrix.json
+  7.  Release artifact naming convention and exact version match
+  8.  Environment-specific notes cover four environments
+  9.  Installation guide references install-verify.yml CI workflow
+  10. Installation guide documents SKIP_ROOT_CHECK=1
+  11. Fail-open explanation references markdown_on_error pass
+  12. Compression SOP references proxy_set_header Accept-Encoding ""
+  13. Content negotiation SOP explains eligibility requirements
+  14. Minimal demo config exists
+  15. Demo config has inline comments and no proxy_pass directive
+  16. No hardcoded release tags in download URLs
+"""
+
+from __future__ import annotations
+
+import re
+import sys
+from pathlib import Path
+
+from _packaging_constants import (
+    DEMO_DIRECTIVES_REQUIRING_COMMENTS,
+    ENVIRONMENTS,
+    INSTALL_SECTION_PATTERNS as REQUIRED_SECTIONS,
+    MODULE_STATES,
+    SOP_EXPECTED_CATEGORIES,
+    SOP_HEADINGS,
+    TIER_SECTIONS,
+)
+
+
+ROOT = Path(__file__).resolve().parents[2]
+INSTALL_GUIDE = ROOT / "docs" / "guides" / "INSTALLATION.md"
+DEMO_CONFIG = ROOT / "examples" / "nginx-configs" / "00-minimal-demo.conf"
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _read_text(path: Path) -> str:
+    return path.read_text(encoding="utf-8", errors="ignore")
+
+
+def _section_text(full_text: str, heading_pattern: str) -> str:
+    """Return the text of a ## section whose heading matches *heading_pattern*."""
+    pattern = rf"(^## {heading_pattern}.*?)(?=(?:^## )|\Z)"
+    m = re.search(pattern, full_text, re.MULTILINE | re.DOTALL)
+    return m[1] if m else ""
+
+
+def _sop_section_text(full_text: str, sop_heading: str) -> str:
+    """Return the text of a #### SOP section."""
+    pattern = rf"(^#### {re.escape(sop_heading)}.*?)(?=(?:^#### )|(?:\n---\n)|\Z)"
+    m = re.search(pattern, full_text, re.MULTILINE | re.DOTALL)
+    return m[1] if m else ""
+
+
+def _count_shell_commands(section: str) -> int:
+    """Count non-comment, non-empty lines inside ```bash fenced blocks."""
+    count = 0
+    in_bash = False
+    for line in section.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("```bash"):
+            in_bash = True
+            continue
+        if stripped.startswith("```") and in_bash:
+            in_bash = False
+            continue
+        if in_bash and stripped and not stripped.startswith("#"):
+            count += 1
+    return count
+
+
+# ---------------------------------------------------------------------------
+# Individual checks — each returns a list of error strings
+# ---------------------------------------------------------------------------
+
+def check_required_sections(text: str) -> list[str]:
+    """Check 1: All 11 required sections present."""
+    errors: list[str] = []
+    errors.extend(
+        f"Missing required section matching '## {pattern}'"
+        for pattern in REQUIRED_SECTIONS
+        if not re.search(rf"^## {pattern}", text, re.MULTILINE)
+    )
+    return errors
+
+
+def check_shortest_success_path(text: str) -> list[str]:
+    """Check 2: Shortest Success Path has <= 4 shell commands."""
+    section = _section_text(text, r"2\.")
+    if not section:
+        return ["Cannot locate '## 2. Shortest Success Path' section"]
+    count = _count_shell_commands(section)
+    if count > 4:
+        return [f"Shortest Success Path has {count} shell commands (max 4)"]
+    return []
+
+
+def _validate_single_sop(heading: str, sop: str) -> list[str]:
+    """Validate structure and category of a single SOP section."""
+    errors: list[str] = []
+    sop_lower = sop.lower()
+    if "**symptom" not in sop_lower and "symptom:" not in sop_lower:
+        errors.append(f"'{heading}' missing Symptom subsection")
+    if "**root cause" not in sop_lower and "root cause:" not in sop_lower:
+        errors.append(f"'{heading}' missing Root Cause subsection")
+    if "**resolution" not in sop_lower and "resolution" not in sop_lower:
+        errors.append(f"'{heading}' missing Resolution subsection")
+    if heading in SOP_EXPECTED_CATEGORIES:
+        expected_cat = SOP_EXPECTED_CATEGORIES[heading]
+        cat_match = re.search(r"\*\*Category:\*\*\s*`(\w+)`", sop)
+        if not cat_match:
+            errors.append(f"'{heading}' missing Category field")
+        elif cat_match[1] != expected_cat:
+            errors.append(
+                f"'{heading}' has category '{cat_match[1]}' "
+                f"but expected '{expected_cat}'"
+            )
+    return errors
+
+
+def check_troubleshooting_sops(text: str) -> list[str]:
+    """Check 3: All 9 SOPs present with symptom/root-cause/resolution and
+    correct category labels for SOPs 1-6."""
+    errors: list[str] = []
+    for heading in SOP_HEADINGS:
+        sop = _sop_section_text(text, heading)
+        if not sop:
+            errors.append(f"Missing troubleshooting '{heading}'")
+            continue
+        errors.extend(_validate_single_sop(heading, sop))
+    return errors
+
+
+def check_tier_labels(text: str) -> list[str]:
+    """Check 4: Each installation method section contains the correct tier label."""
+    errors: list[str] = []
+    for pattern, expected_tier in TIER_SECTIONS:
+        section = _section_text(text, pattern)
+        if not section:
+            errors.append(f"Cannot locate section matching '## {pattern}'")
+            continue
+        tier_re = re.compile(r"\*\*Tier:\s*(Primary|Secondary|Convenience)\*\*", re.IGNORECASE)
+        m = tier_re.search(section)
+        if not m:
+            errors.append(
+                f"Section '## {pattern}' missing tier label "
+                f"(expected '**Tier: {expected_tier}**')"
+            )
+        elif m[1].lower() != expected_tier.lower():
+            errors.append(
+                f"Section '## {pattern}' has tier label '{m[1]}' but expected '{expected_tier}'"
+            )
+    return errors
+
+
+def check_operator_verification(text: str) -> list[str]:
+    """Check 5: Operator Verification describes all four module states."""
+    section = _section_text(text, r"9\.\s+Operator Verification")
+    if not section:
+        return ["Cannot locate '## 9. Operator Verification' section"]
+    section_lower = section.lower()
+    errors: list[str] = [
+        f"Operator Verification missing module state: '{state}'"
+        for state in MODULE_STATES
+        if state.lower() not in section_lower
+    ]
+    return errors
+
+
+def check_compatibility_matrix(text: str) -> list[str]:
+    """Check 6: Compatibility matrix exists and references release-matrix.json."""
+    section = _section_text(text, r"7\.\s+Compatibility Matrix")
+    if not section:
+        return ["Cannot locate '## 7. Compatibility Matrix' section"]
+    errors: list[str] = []
+    if "release-matrix.json" not in section:
+        errors.append(
+            "Compatibility Matrix section does not reference "
+            "'tools/release-matrix.json'"
+        )
+    # Check that a markdown table header row exists with NGINX and OS columns.
+    # Use substring checks instead of regex to avoid backtracking concerns (S5852).
+    has_table = False
+    for line in section.splitlines():
+        line_lower = line.lower()
+        if "|" in line and "nginx" in line_lower and "os" in line_lower:
+            has_table = True
+            break
+    if not has_table:
+        errors.append("Compatibility Matrix section missing the platform table")
+    return errors
+
+
+def check_release_artifact_naming(text: str) -> list[str]:
+    """Check 7: Release artifact naming convention and exact version match."""
+    section = _section_text(text, r"8\.\s+Release Artifact Naming")
+    if not section:
+        return ["Cannot locate '## 8. Release Artifact Naming' section"]
+    errors: list[str] = []
+    # Naming convention pattern
+    if "ngx_http_markdown_filter_module-" not in section:
+        errors.append(
+            "Release Artifact Naming section missing naming convention pattern"
+        )
+    # Exact version match requirement
+    section_lower = section.lower()
+    if "exact version match" not in section_lower:
+        errors.append(
+            "Release Artifact Naming section missing exact version match requirement"
+        )
+    return errors
+
+
+def check_environment_notes(text: str) -> list[str]:
+    """Check 8: Environment-specific notes cover all four environments."""
+    section = _section_text(text, r"11\.\s+Environment-Specific Notes")
+    if not section:
+        return ["Cannot locate '## 11. Environment-Specific Notes' section"]
+    section_lower = section.lower()
+    errors: list[str] = [
+        f"Environment-Specific Notes missing coverage for '{label}'"
+        for label, keyword in ENVIRONMENTS
+        if label.lower() not in section_lower and keyword.lower() not in section_lower
+    ]
+    return errors
+
+
+def check_ci_workflow_reference(text: str) -> list[str]:
+    """Check 9: Installation guide references install-verify.yml."""
+    if "install-verify.yml" not in text:
+        return ["Installation guide does not reference 'install-verify.yml' CI workflow"]
+    return []
+
+
+def check_skip_root_check(text: str) -> list[str]:
+    """Check 10: Installation guide documents SKIP_ROOT_CHECK=1."""
+    if "SKIP_ROOT_CHECK=1" not in text:
+        return ["Installation guide does not document 'SKIP_ROOT_CHECK=1'"]
+    return []
+
+
+def check_fail_open_reference(text: str) -> list[str]:
+    """Check 11: Fail-open explanation references markdown_on_error pass."""
+    if "markdown_on_error pass" not in text:
+        return [
+            "Installation guide does not reference 'markdown_on_error pass' "
+            "in fail-open explanation"
+        ]
+    return []
+
+
+def check_compression_sop(text: str) -> list[str]:
+    """Check 12: Compression SOP references workaround and decompression docs."""
+    sop = _sop_section_text(text, "SOP 9: Compression / Decompression Issues")
+    if not sop:
+        return ["Cannot locate SOP 9 (Compression / Decompression Issues)"]
+    errors: list[str] = []
+    if 'proxy_set_header Accept-Encoding ""' not in sop:
+        errors.append(
+            "Compression SOP does not reference "
+            "'proxy_set_header Accept-Encoding \"\"'"
+        )
+    if "automatic_decompression" not in sop.lower() and \
+       "AUTOMATIC_DECOMPRESSION" not in sop:
+        errors.append(
+            "Compression SOP does not reference the built-in "
+            "decompression documentation (AUTOMATIC_DECOMPRESSION.md)"
+        )
+    return errors
+
+
+_SOP7_REQUIRED_KEYWORDS: list[tuple[str, str]] = [
+    ("200", "HTTP status 200"),
+    ("text/html", "upstream Content-Type text/html"),
+    ("text/markdown", "Accept header includes text/markdown"),
+    ("markdown_max_size", "response size within markdown_max_size"),
+]
+
+
+def check_content_negotiation_sop(text: str) -> list[str]:
+    """Check 13: Content negotiation SOP explains all four eligibility requirements."""
+    sop = _sop_section_text(text, "SOP 7: Content Negotiation Not Triggering")
+    if not sop:
+        return ["Cannot locate SOP 7 (Content Negotiation Not Triggering)"]
+    sop_lower = sop.lower()
+    errors: list[str] = [
+        f"Content Negotiation SOP missing eligibility condition: {desc}"
+        for keyword, desc in _SOP7_REQUIRED_KEYWORDS
+        if keyword.lower() not in sop_lower
+    ]
+    return errors
+
+
+def check_no_hardcoded_release_tags(text: str) -> list[str]:
+    """Check 16: No hardcoded old release tags in download URLs.
+
+    Download URLs should use placeholders (``<release_tag>``) rather than
+    pinning to a specific version that will go stale.
+    """
+    errors: list[str] = []
+    errors.extend(
+        f"Line {line_no}: hardcoded release tag in download URL (use <release_tag> placeholder instead): {line.strip()}"
+        for line_no, line in enumerate(text.splitlines(), 1)
+        if re.search(r"releases/download/v\d+\.\d+\.\d+", line)
+    )
+    return errors
+
+
+def check_demo_config_exists() -> list[str]:
+    """Check 14: Minimal demo config exists."""
+    if not DEMO_CONFIG.exists():
+        return [
+            f"Minimal demo config not found at "
+            f"'{DEMO_CONFIG.relative_to(ROOT)}'"
+        ]
+    return []
+
+
+def _check_directive_comments(lines: list[str], directive: str) -> list[str]:
+    """Verify *directive* appears in *lines* and at least one occurrence has an inline ``#`` comment."""
+    errors: list[str] = []
+    found = False
+    documented = False
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("#") or not stripped:
+            continue
+        if not re.search(rf"\b{re.escape(directive)}\b", stripped):
+            continue
+        found = True
+        if "#" in stripped.split(directive, 1)[-1]:
+            documented = True
+    if not found:
+        errors.append(f"Demo config missing directive '{directive}'")
+    elif not documented:
+        errors.append(
+            f"Demo config directive '{directive}' has no inline comment"
+        )
+    return errors
+
+
+def check_demo_config_content() -> list[str]:
+    """Check 15: Demo config has inline comments for key directives and no proxy_pass.
+
+    Note: if the demo config file does not exist, this function assumes
+    that ``check_demo_config_exists()`` will report the problem and
+    therefore returns an empty list.
+    """
+    if not DEMO_CONFIG.exists():
+        return []
+    content = _read_text(DEMO_CONFIG)
+    errors: list[str] = []
+    if not re.search(r"^\s*#", content, re.MULTILINE):
+        errors.append("Demo config has no inline comments")
+    # Check for proxy_pass on active (non-comment) lines only
+    for line in content.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("#") or not stripped:
+            continue
+        if re.search(r"^\s*proxy_pass\b", line):
+            errors.append("Demo config contains a 'proxy_pass' directive (should not)")
+            break
+    lines = content.splitlines()
+    for directive in DEMO_DIRECTIVES_REQUIRING_COMMENTS:
+        errors.extend(_check_directive_comments(lines, directive))
+    return errors
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
+def main() -> int:
+    if not INSTALL_GUIDE.exists():
+        print(f"ERROR: Installation guide not found at {INSTALL_GUIDE}")
+        return 1
+
+    text = _read_text(INSTALL_GUIDE)
+    errors: list[str] = []
+
+    checks = [
+        ("Required sections (11)", check_required_sections(text)),
+        ("Shortest Success Path command count", check_shortest_success_path(text)),
+        ("Troubleshooting SOPs (9)", check_troubleshooting_sops(text)),
+        ("Tier labels on install methods", check_tier_labels(text)),
+        ("Operator Verification module states", check_operator_verification(text)),
+        ("Compatibility matrix", check_compatibility_matrix(text)),
+        ("Release artifact naming", check_release_artifact_naming(text)),
+        ("Environment-specific notes", check_environment_notes(text)),
+        ("CI workflow reference", check_ci_workflow_reference(text)),
+        ("SKIP_ROOT_CHECK=1 documented", check_skip_root_check(text)),
+        ("Fail-open reference", check_fail_open_reference(text)),
+        ("Compression SOP reference", check_compression_sop(text)),
+        ("Content negotiation SOP", check_content_negotiation_sop(text)),
+        ("Demo config exists", check_demo_config_exists()),
+        ("Demo config content", check_demo_config_content()),
+        ("No hardcoded release tags", check_no_hardcoded_release_tags(text)),
+    ]
+
+    for _label, errs in checks:
+        errors.extend(errs)
+
+    if errors:
+        print("Packaging documentation checks FAILED:")
+        for err in errors:
+            print(f"  - {err}")
+        return 1
+
+    print("Packaging documentation checks passed:")
+    for label, _ in checks:
+        print(f"  - {label}: OK")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

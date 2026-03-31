@@ -1,0 +1,8 @@
+{
+  "fixture-id": "edge-cases/deeply-nested",
+  "page-type": "complex-common",
+  "expected-conversion-result": "converted",
+  "input-size-bytes": 1517,
+  "source-description": "Deeply nested HTML structure to stress converter recursion depth",
+  "failure-corpus": true
+}

@@ -126,8 +126,10 @@ size_t      large_body_threshold;  /* 0 = off (default) */
 Metrics (`ngx_http_markdown_metrics_t`):
 
 ```c
-ngx_atomic_t  fullbuffer_path_hits;
-ngx_atomic_t  incremental_path_hits;
+struct {
+    ngx_atomic_t  fullbuffer;      /* Requests routed to full-buffer path */
+    ngx_atomic_t  incremental;     /* Requests routed to incremental path */
+} path_hits;
 ```
 
 Path hit counters are exposed through the existing `markdown_metrics` endpoint.

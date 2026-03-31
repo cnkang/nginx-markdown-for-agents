@@ -31,6 +31,10 @@ If you need rollout steps, operator checklists, or directive syntax, go back to:
 - [CONTENT_NEGOTIATION.md](CONTENT_NEGOTIATION.md)
 - [CACHE_AWARE_RESPONSES.md](CACHE_AWARE_RESPONSES.md)
 
+### Decision chain and rollout safety
+
+- [DECISION_CHAIN.md](DECISION_CHAIN.md)
+
 ### Metadata and enrichment
 
 - [TOKEN_ESTIMATOR.md](TOKEN_ESTIMATOR.md)

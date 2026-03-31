@@ -56,20 +56,59 @@ typedef struct {
         ngx_atomic_uint_t brotli;
     } decompressions;
 
-    /* Path hit metrics (threshold router) */
-    ngx_atomic_uint_t fullbuffer_path_hits;
-    ngx_atomic_uint_t incremental_path_hits;
+    /* Path hit metrics (threshold router, grouped to keep field count <= 20) */
+    struct {
+        ngx_atomic_uint_t fullbuffer;
+        ngx_atomic_uint_t incremental;
+    } path_hits;
+
+    /* Requests entering the decision chain */
+    ngx_atomic_uint_t requests_entered;
+
+    /* Skip counters by reason code */
+    struct {
+        ngx_atomic_uint_t config;
+        ngx_atomic_uint_t method;
+        ngx_atomic_uint_t status;
+        ngx_atomic_uint_t content_type;
+        ngx_atomic_uint_t size;
+        ngx_atomic_uint_t streaming;
+        ngx_atomic_uint_t auth;
+        ngx_atomic_uint_t range;
+        ngx_atomic_uint_t accept;
+    } skips;
+
+    /* Fail-open counter */
+    ngx_atomic_uint_t failopen_count;
+
+    /* Estimated cumulative token savings */
+    ngx_atomic_uint_t estimated_token_savings;
 } ngx_http_markdown_metrics_snapshot_t;
 
 /*
- * Response buffer size for the metrics endpoint.  The current JSON/text
- * output is well under 2 KiB, but we leave headroom for future fields.
- * Increase this constant if new metrics push the output beyond the limit.
+ * Response buffer size for the metrics endpoint.
  *
- * Estimated current output: ~1.5 KiB (JSON), ~1.2 KiB (text).
- * Last updated when fullbuffer_path_hits / incremental_path_hits were added.
+ * Estimated current output per format:
+ *   JSON:       ~2.0 KiB
+ *   Plain text: ~1.5 KiB
+ *   Prometheus: ~3.2 KiB (most verbose due to HELP/TYPE lines)
+ *
+ * The 5 KiB buffer provides ~1.8 KiB headroom above the largest
+ * format.  Increase this constant if new metrics push the
+ * Prometheus output beyond the limit.
  */
 #define NGX_HTTP_MARKDOWN_METRICS_BUF_SIZE  5120
+
+/*
+ * Forward declaration: the Prometheus renderer is defined in
+ * ngx_http_markdown_prometheus_impl.h but called from the
+ * metrics handler below.  Declared here so the call site
+ * compiles before the definition is included.
+ */
+static u_char *
+ngx_http_markdown_metrics_write_prometheus(
+    u_char *p, u_char *end,
+    ngx_http_markdown_metrics_snapshot_t *snapshot);
 
 /**
  * Capture a best-effort snapshot of the global metrics counters into the
@@ -122,14 +161,32 @@ ngx_http_markdown_collect_metrics_snapshot(ngx_http_markdown_metrics_snapshot_t 
     snapshot->decompressions.gzip = metrics->decompressions.gzip;
     snapshot->decompressions.deflate = metrics->decompressions.deflate;
     snapshot->decompressions.brotli = metrics->decompressions.brotli;
-    snapshot->fullbuffer_path_hits = metrics->fullbuffer_path_hits;
-    snapshot->incremental_path_hits = metrics->incremental_path_hits;
+    snapshot->path_hits.fullbuffer = metrics->path_hits.fullbuffer;
+    snapshot->path_hits.incremental = metrics->path_hits.incremental;
+    snapshot->requests_entered = metrics->requests_entered;
+    snapshot->skips.config = metrics->skips.config;
+    snapshot->skips.method = metrics->skips.method;
+    snapshot->skips.status = metrics->skips.status;
+    snapshot->skips.content_type = metrics->skips.content_type;
+    snapshot->skips.size = metrics->skips.size;
+    snapshot->skips.streaming = metrics->skips.streaming;
+    snapshot->skips.auth = metrics->skips.auth;
+    snapshot->skips.range = metrics->skips.range;
+    snapshot->skips.accept = metrics->skips.accept;
+    snapshot->failopen_count = metrics->failopen_count;
+    snapshot->estimated_token_savings = metrics->estimated_token_savings;
 }
 
 static ngx_flag_t ngx_http_markdown_metrics_value_contains(
     ngx_str_t *value, u_char *needle, size_t needle_len);
 
 static u_char  ngx_http_markdown_metrics_accept_json[] = "application/json";
+static u_char  ngx_http_markdown_metrics_accept_openmetrics[] =
+    "application/openmetrics-text";
+static u_char  ngx_http_markdown_metrics_accept_prom_ver[] =
+    "version=0.0.4";
+static u_char  ngx_http_markdown_metrics_accept_text_plain[] =
+    "text/plain";
 
 /*
  * Validate method and shared-state availability for the metrics handler.
@@ -210,20 +267,82 @@ ngx_http_markdown_metrics_prefers_json(ngx_http_request_t *r)
     return 0;
 }
 
+/*
+ * Check whether the Accept header explicitly requests
+ * Prometheus exposition format.
+ *
+ * Matches:
+ *   application/openmetrics-text
+ *   text/plain; version=0.0.4  (both "text/plain" AND
+ *       "version=0.0.4" must be present)
+ *
+ * Does NOT match:
+ *   text/plain  (without version — legacy plain text)
+ *   application/xml; version=0.0.4  (wrong media type)
+ *   version=0.0.4  (no media type at all)
+ */
+static ngx_flag_t
+ngx_http_markdown_metrics_prefers_prometheus(
+    ngx_http_request_t *r)
+{
+    ngx_table_elt_t  *accept_header;
+
+    accept_header = NULL;
+
+#if (NGX_HTTP_HEADERS)
+    accept_header = r->headers_in.accept;
+#else
+    static ngx_str_t accept_name = ngx_string("Accept");
+
+    accept_header =
+        ngx_http_markdown_find_request_header(
+            r, &accept_name);
+#endif
+
+    if (accept_header == NULL) {
+        return 0;
+    }
+
+    if (ngx_http_markdown_metrics_value_contains(
+            &accept_header->value,
+            ngx_http_markdown_metrics_accept_openmetrics,
+            sizeof(ngx_http_markdown_metrics_accept_openmetrics) - 1))
+    {
+        return 1;
+    }
+
+    /*
+     * Match "text/plain; version=0.0.4" — both substrings
+     * must be present to avoid false positives from
+     * unrelated media types carrying version=0.0.4.
+     */
+    if (ngx_http_markdown_metrics_value_contains(
+            &accept_header->value,
+            ngx_http_markdown_metrics_accept_text_plain,
+            sizeof(ngx_http_markdown_metrics_accept_text_plain) - 1)
+        && ngx_http_markdown_metrics_value_contains(
+            &accept_header->value,
+            ngx_http_markdown_metrics_accept_prom_ver,
+            sizeof(ngx_http_markdown_metrics_accept_prom_ver) - 1))
+    {
+        return 1;
+    }
+
+    return 0;
+}
+
 static ngx_flag_t
 ngx_http_markdown_metrics_value_contains(ngx_str_t *value,
     u_char *needle,
     size_t needle_len)
 {
-    size_t  i;
-
     if (value == NULL || needle == NULL || needle_len == 0
         || value->len < needle_len)
     {
         return 0;
     }
 
-    for (i = 0; i + needle_len <= value->len; i++) {
+    for (size_t i = 0; i + needle_len <= value->len; i++) {
         if (ngx_strncasecmp(value->data + i, needle, needle_len)
             == 0)
         {
@@ -232,6 +351,63 @@ ngx_http_markdown_metrics_value_contains(ngx_str_t *value,
     }
 
     return 0;
+}
+
+/*
+ * Output format constants for the metrics handler.
+ *
+ * Used by ngx_http_markdown_metrics_select_format() and the
+ * three-way dispatch switch in the handler.
+ */
+#define NGX_HTTP_MARKDOWN_METRICS_OUTPUT_TEXT        0
+#define NGX_HTTP_MARKDOWN_METRICS_OUTPUT_JSON        1
+#define NGX_HTTP_MARKDOWN_METRICS_OUTPUT_PROMETHEUS  2
+
+/*
+ * Select metrics output format based on Accept header and
+ * markdown_metrics_format configuration.
+ *
+ * Content negotiation state machine:
+ *
+ *   auto       + Accept: application/json     -> JSON
+ *   auto       + (any other / none)           -> plain text
+ *   prometheus + Accept: application/json     -> JSON
+ *   prometheus + Accept: openmetrics-text     -> Prometheus
+ *   prometheus + Accept: text/plain; v=0.0.4  -> Prometheus
+ *   prometheus + (any other / none)           -> plain text
+ *
+ * When metrics_format is prometheus, Prometheus format is
+ * served only for explicit Prometheus-aware Accept values.
+ * Plain "text/plain" without version=0.0.4 falls back to
+ * the legacy human-readable text format, preserving
+ * backward compatibility for operators who curl without
+ * a specific Accept header.
+ *
+ * Returns one of the NGX_HTTP_MARKDOWN_METRICS_OUTPUT_*
+ * constants.
+ */
+static ngx_uint_t
+ngx_http_markdown_metrics_select_format(
+    ngx_http_request_t *r)
+{
+    ngx_http_markdown_conf_t  *conf;
+
+    conf = ngx_http_get_module_loc_conf(
+        r, ngx_http_markdown_filter_module);
+
+    if (ngx_http_markdown_metrics_prefers_json(r)) {
+        return NGX_HTTP_MARKDOWN_METRICS_OUTPUT_JSON;
+    }
+
+    if (conf != NULL
+        && conf->ops.metrics_format
+           == NGX_HTTP_MARKDOWN_METRICS_FORMAT_PROMETHEUS
+        && ngx_http_markdown_metrics_prefers_prometheus(r))
+    {
+        return NGX_HTTP_MARKDOWN_METRICS_OUTPUT_PROMETHEUS;
+    }
+
+    return NGX_HTTP_MARKDOWN_METRICS_OUTPUT_TEXT;
 }
 
 /*
@@ -313,7 +489,21 @@ ngx_http_markdown_metrics_write_json(
         "  \"decompressions_deflate\": %uA,\n"
         "  \"decompressions_brotli\": %uA,\n"
         "  \"fullbuffer_path_hits\": %uA,\n"
-        "  \"incremental_path_hits\": %uA\n"
+        "  \"incremental_path_hits\": %uA,\n"
+        "  \"requests_entered\": %uA,\n"
+        "  \"skips\": {\n"
+        "    \"config\": %uA,\n"
+        "    \"method\": %uA,\n"
+        "    \"status\": %uA,\n"
+        "    \"content_type\": %uA,\n"
+        "    \"size\": %uA,\n"
+        "    \"streaming\": %uA,\n"
+        "    \"auth\": %uA,\n"
+        "    \"range\": %uA,\n"
+        "    \"accept\": %uA\n"
+        "  },\n"
+        "  \"failopen_count\": %uA,\n"
+        "  \"estimated_token_savings\": %uA\n"
         "}",
         snapshot->conversions_attempted,
         snapshot->conversions_succeeded,
@@ -339,8 +529,20 @@ ngx_http_markdown_metrics_write_json(
         snapshot->decompressions.gzip,
         snapshot->decompressions.deflate,
         snapshot->decompressions.brotli,
-        snapshot->fullbuffer_path_hits,
-        snapshot->incremental_path_hits);
+        snapshot->path_hits.fullbuffer,
+        snapshot->path_hits.incremental,
+        snapshot->requests_entered,
+        snapshot->skips.config,
+        snapshot->skips.method,
+        snapshot->skips.status,
+        snapshot->skips.content_type,
+        snapshot->skips.size,
+        snapshot->skips.streaming,
+        snapshot->skips.auth,
+        snapshot->skips.range,
+        snapshot->skips.accept,
+        snapshot->failopen_count,
+        snapshot->estimated_token_savings);
 }
 
 /**
@@ -401,7 +603,21 @@ ngx_http_markdown_metrics_write_text(
         "\n"
         "Path Routing:\n"
         "- Full-Buffer Path Hits: %uA\n"
-        "- Incremental Path Hits: %uA\n",
+        "- Incremental Path Hits: %uA\n"
+        "\n"
+        "Decision Chain:\n"
+        "- Requests Entered: %uA\n"
+        "- Skips (Config): %uA\n"
+        "- Skips (Method): %uA\n"
+        "- Skips (Status): %uA\n"
+        "- Skips (Content-Type): %uA\n"
+        "- Skips (Size): %uA\n"
+        "- Skips (Streaming): %uA\n"
+        "- Skips (Auth): %uA\n"
+        "- Skips (Range): %uA\n"
+        "- Skips (Accept): %uA\n"
+        "- Fail-Open Count: %uA\n"
+        "- Estimated Token Savings: %uA\n",
         snapshot->conversions_attempted,
         snapshot->conversions_succeeded,
         snapshot->conversions_failed,
@@ -426,8 +642,20 @@ ngx_http_markdown_metrics_write_text(
         snapshot->decompressions.gzip,
         snapshot->decompressions.deflate,
         snapshot->decompressions.brotli,
-        snapshot->fullbuffer_path_hits,
-        snapshot->incremental_path_hits);
+        snapshot->path_hits.fullbuffer,
+        snapshot->path_hits.incremental,
+        snapshot->requests_entered,
+        snapshot->skips.config,
+        snapshot->skips.method,
+        snapshot->skips.status,
+        snapshot->skips.content_type,
+        snapshot->skips.size,
+        snapshot->skips.streaming,
+        snapshot->skips.auth,
+        snapshot->skips.range,
+        snapshot->skips.accept,
+        snapshot->failopen_count,
+        snapshot->estimated_token_savings);
 }
 
 /*
@@ -455,7 +683,7 @@ ngx_http_markdown_metrics_handler(ngx_http_request_t *r)
     ngx_chain_t                           out;
     u_char                               *p;
     size_t                                len;
-    ngx_flag_t                            json_format;
+    ngx_uint_t                            format;
     ngx_http_markdown_metrics_snapshot_t  snapshot;
     ngx_atomic_uint_t                     conversions_completed;
     ngx_atomic_uint_t                     conversion_time_avg_ms;
@@ -467,7 +695,7 @@ ngx_http_markdown_metrics_handler(ngx_http_request_t *r)
         return rc;
     }
 
-    json_format = ngx_http_markdown_metrics_prefers_json(r);
+    format = ngx_http_markdown_metrics_select_format(r);
 
     rc = ngx_http_discard_request_body(r);
     if (rc != NGX_OK) {
@@ -475,34 +703,62 @@ ngx_http_markdown_metrics_handler(ngx_http_request_t *r)
     }
 
     ngx_http_markdown_collect_metrics_snapshot(&snapshot);
-    ngx_http_markdown_metrics_derive_values(&snapshot,
-                                            &conversions_completed,
-                                            &conversion_time_avg_ms,
-                                            &input_bytes_avg,
-                                            &output_bytes_avg);
+    ngx_http_markdown_metrics_derive_values(
+        &snapshot,
+        &conversions_completed,
+        &conversion_time_avg_ms,
+        &input_bytes_avg,
+        &output_bytes_avg);
 
-    b = ngx_create_temp_buf(r->pool, NGX_HTTP_MARKDOWN_METRICS_BUF_SIZE);
+    b = ngx_create_temp_buf(r->pool,
+            NGX_HTTP_MARKDOWN_METRICS_BUF_SIZE);
     if (b == NULL) {
         ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0,
-                     "markdown_metrics: failed to allocate response buffer");
+            "markdown_metrics: failed to allocate "
+            "response buffer");
         return NGX_HTTP_INTERNAL_SERVER_ERROR;
     }
 
     p = b->pos;
-    if (json_format) {
-        p = ngx_http_markdown_metrics_write_json(p, b->end,
-                                                 &snapshot,
-                                                 conversions_completed,
-                                                 conversion_time_avg_ms,
-                                                 input_bytes_avg,
-                                                 output_bytes_avg);
-    } else {
-        p = ngx_http_markdown_metrics_write_text(p, b->end,
-                                                 &snapshot,
-                                                 conversions_completed,
-                                                 conversion_time_avg_ms,
-                                                 input_bytes_avg,
-                                                 output_bytes_avg);
+
+    switch (format) {
+
+    case NGX_HTTP_MARKDOWN_METRICS_OUTPUT_JSON:
+        p = ngx_http_markdown_metrics_write_json(
+                p, b->end, &snapshot,
+                conversions_completed,
+                conversion_time_avg_ms,
+                input_bytes_avg,
+                output_bytes_avg);
+        ngx_str_set(&r->headers_out.content_type,
+                     "application/json");
+        break;
+
+    case NGX_HTTP_MARKDOWN_METRICS_OUTPUT_PROMETHEUS:
+        p = ngx_http_markdown_metrics_write_prometheus(
+                p, b->end, &snapshot);
+        if (p == NULL) {
+            ngx_log_error(NGX_LOG_ERR,
+                r->connection->log, 0,
+                "markdown_metrics: Prometheus output "
+                "truncated, buffer too small");
+            return NGX_HTTP_INTERNAL_SERVER_ERROR;
+        }
+        ngx_str_set(&r->headers_out.content_type,
+                     "text/plain; version=0.0.4; "
+                     "charset=utf-8");
+        break;
+
+    default:
+        p = ngx_http_markdown_metrics_write_text(
+                p, b->end, &snapshot,
+                conversions_completed,
+                conversion_time_avg_ms,
+                input_bytes_avg,
+                output_bytes_avg);
+        ngx_str_set(&r->headers_out.content_type,
+                     "text/plain");
+        break;
     }
 
     len = p - b->pos;
@@ -510,13 +766,8 @@ ngx_http_markdown_metrics_handler(ngx_http_request_t *r)
 
     r->headers_out.status = NGX_HTTP_OK;
     r->headers_out.content_length_n = len;
-
-    if (json_format) {
-        ngx_str_set(&r->headers_out.content_type, "application/json");
-    } else {
-        ngx_str_set(&r->headers_out.content_type, "text/plain");
-    }
-    r->headers_out.content_type_len = r->headers_out.content_type.len;
+    r->headers_out.content_type_len =
+        r->headers_out.content_type.len;
 
     b->last_buf = (r == r->main) ? 1 : 0;
     b->last_in_chain = 1;

@@ -61,6 +61,7 @@ CONFIG_ERROR_LOG_LINE="error_log ${NGINX_ERROR_LOG} debug;"
 CONFIG_PID_LINE="pid ${NGINX_PID};"
 VAR_TOGGLE_HTML="<html><body><h1>Var Toggle</h1></body></html>"
 AUTH_PRIVATE_HTML="<html><body><h1>Private</h1></body></html>"
+METRICS_ENDPOINT="/markdown-metrics"
 
 # Cleanup function
 cleanup() {
@@ -546,10 +547,116 @@ EOF
 }
 
 #
-# Test 5: Variable-Driven markdown_filter
+# Test 5: Authenticated Content Denied by Auth Policy
+#
+test_authenticated_content_denied() {
+    log_test 5 "Authenticated Content Denied by Auth Policy"
+    local config
+
+    write_static_html "${STATIC_ROOT}/auth-deny.html" "${AUTH_PRIVATE_HTML}"
+
+    config="$(cat <<EOF
+worker_processes 1;
+${CONFIG_ERROR_LOG_LINE}
+${CONFIG_PID_LINE}
+events { worker_connections 1024; }
+http {
+    access_log ${NGINX_ACCESS_LOG};
+    server {
+        listen ${TEST_PORT};
+        location = /test {
+            alias ${STATIC_ROOT}/auth-deny.html;
+            markdown_filter on;
+            markdown_auth_policy deny;
+            markdown_auth_cookies session* auth*;
+            add_header Cache-Control private always;
+            default_type ${MEDIA_TYPE_HTML};
+        }
+    }
+}
+EOF
+)"
+
+    start_nginx "$config" || { log_fail "$NGINX_START_FAILURE_MSG"; return 1; }
+    : > "$NGINX_ERROR_LOG"
+
+    local response
+    local status
+    local content_type
+    local body
+
+    response=$(make_request "GET" "/test" "$MEDIA_TYPE_MARKDOWN" -H "Authorization: Bearer token123")
+    status=$(get_status "$response")
+    content_type=$(get_header "$response" "$HEADER_CONTENT_TYPE")
+    body=$(get_body "$response")
+
+    if [[ "$status" == "200" ]]; then
+        log_pass "$STATUS_CODE_OK_MESSAGE"
+    else
+        log_fail "Status code: Expected 200, got $status"
+    fi
+
+    if echo "$content_type" | grep -q "$MEDIA_TYPE_HTML"; then
+        log_pass "Content-Type: text/html (auth policy denied conversion)"
+    else
+        log_fail "Content-Type: Expected text/html, got $content_type"
+    fi
+
+    if echo "$body" | grep -q "<h1>Private</h1>"; then
+        log_pass "Body remains original HTML"
+    else
+        log_fail "Body: Expected original HTML body, got $body"
+    fi
+
+    if grep -q "markdown decision: reason=SKIP_AUTH" "$NGINX_ERROR_LOG"; then
+        log_pass "Decision log records SKIP_AUTH"
+    else
+        log_fail "Decision log missing reason=SKIP_AUTH"
+        log_info "Error log: $(tail -n 20 "$NGINX_ERROR_LOG" 2>/dev/null || true)"
+    fi
+
+    : > "$NGINX_ERROR_LOG"
+
+    response=$(make_request "GET" "/test" "$MEDIA_TYPE_MARKDOWN" -H "Cookie: session_id=abc123; other=1")
+    status=$(get_status "$response")
+    content_type=$(get_header "$response" "$HEADER_CONTENT_TYPE")
+    body=$(get_body "$response")
+
+    if [[ "$status" == "200" ]]; then
+        log_pass "$STATUS_CODE_OK_MESSAGE"
+    else
+        log_fail "Status code: Expected 200, got $status"
+    fi
+
+    if echo "$content_type" | grep -q "$MEDIA_TYPE_HTML"; then
+        log_pass "Content-Type: text/html (auth cookie denied conversion)"
+    else
+        log_fail "Content-Type: Expected text/html, got $content_type"
+    fi
+
+    if echo "$body" | grep -q "<h1>Private</h1>"; then
+        log_pass "Body remains original HTML"
+    else
+        log_fail "Body: Expected original HTML body, got $body"
+    fi
+
+    if grep -q "markdown decision: reason=SKIP_AUTH" "$NGINX_ERROR_LOG"; then
+        log_pass "Decision log records SKIP_AUTH (cookie)"
+    else
+        log_fail "Decision log missing reason=SKIP_AUTH (cookie)"
+        log_info "Error log: $(tail -n 20 "$NGINX_ERROR_LOG" 2>/dev/null || true)"
+    fi
+
+    stop_nginx
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+    return 0
+}
+
+#
+# Test 6: Variable-Driven markdown_filter
 #
 test_variable_driven_markdown_filter() {
-    log_test 5 "Variable-driven markdown_filter resolution"
+    log_test 6 "Variable-driven markdown_filter resolution"
 
     local config
     write_static_html "${STATIC_ROOT}/variable.html" "${VAR_TOGGLE_HTML}"
@@ -623,10 +730,10 @@ EOF
 }
 
 #
-# Test 6: Real NGINX Range bypass
+# Test 7: Real NGINX Range bypass
 #
 test_range_bypass() {
-    log_test 6 "Range request bypass with real NGINX file serving"
+    log_test 7 "Range request bypass with real NGINX file serving"
 
     write_static_html "$RANGE_HTML_PATH" \
         '<html><body><h1>Range Content</h1><p>This body should stay HTML when Range is used.</p></body></html>'
@@ -688,10 +795,10 @@ EOF
 }
 
 #
-# Test 7: Shared metrics aggregation across workers
+# Test 8: Shared metrics aggregation across workers
 #
 test_metrics_shared_aggregation() {
-    log_test 7 "Shared metrics aggregation across workers"
+    log_test 8 "Shared metrics aggregation across workers"
 
     local config
     local total_requests=40
@@ -719,7 +826,7 @@ http {
             markdown_filter on;
             default_type ${MEDIA_TYPE_HTML};
         }
-        location /markdown-metrics {
+        location ${METRICS_ENDPOINT} {
             markdown_metrics;
         }
     }
@@ -732,7 +839,7 @@ EOF
     seq "$total_requests" | xargs -I{} -P 8 sh -c \
         "curl -s -H 'Accept: ${MEDIA_TYPE_MARKDOWN}' 'http://localhost:${TEST_PORT}/test?req={}' > /dev/null" || true
 
-    metrics=$(curl -s -H "Accept: application/json" "http://localhost:${TEST_PORT}/markdown-metrics")
+    metrics=$(curl -s -H "Accept: application/json" "http://localhost:${TEST_PORT}${METRICS_ENDPOINT}")
     if ! attempted=$(extract_json_number_field "$metrics" "conversions_attempted"); then
         log_fail "Failed to parse conversions_attempted from metrics JSON"
         log_info "Metrics: $metrics"
@@ -773,6 +880,235 @@ EOF
 }
 
 #
+# Test: Metrics endpoint Prometheus content negotiation
+#
+
+#
+# Validate Prometheus Content-Type by checking the main media type
+# and each expected parameter independently.  This is resilient to
+# future parameter reordering (e.g. charset before version).
+#
+# Expected value today:
+#   text/plain; version=0.0.4; charset=utf-8
+#
+# IMPORTANT — format constraint, not protocol tolerance:
+#   This helper intentionally requires "; " (semicolon + space)
+#   between parameters.  The module emits a compile-time literal
+#   via ngx_str_set (see ngx_http_markdown_metrics_impl.h:748),
+#   so the output format is fully under our control and will
+#   never omit the space.  Accepting the compact form
+#   (";version=…") would weaken the assertion without covering
+#   any real production path.  If the canonical form ever changes,
+#   update the module constant and this helper together.
+#
+# All grep patterns are simple ERE with no nested quantifiers
+# — ReDoS-safe.
+#
+# Usage: assert_prometheus_content_type "$content_type" "$label"
+#   Returns 0 (pass) or 1 (fail, with log_fail emitted).
+#
+assert_prometheus_content_type() {
+    local ct="$1"
+    local label="$2"
+
+    if ! echo "$ct" | grep -qE '^text/plain;'; then
+        log_fail "$label: main type is not text/plain, got $ct"
+        return 1
+    fi
+    if ! echo "$ct" | grep -qE '(^|; )version=0\.0\.4(;|$)'; then
+        log_fail "$label: missing exact version=0.0.4 parameter, got $ct"
+        return 1
+    fi
+    if ! echo "$ct" | grep -qE '(^|; )charset=utf-8(;|$)'; then
+        log_fail "$label: missing exact charset=utf-8 parameter, got $ct"
+        return 1
+    fi
+
+    log_pass "$label: Content-Type matches Prometheus format"
+    return 0
+}
+
+test_metrics_prometheus_content_negotiation() {
+    log_test 9 "Metrics endpoint Prometheus content negotiation"
+
+    local config
+    local response
+    local status
+    local content_type
+    local body
+
+    write_static_html "${STATIC_ROOT}/prom.html" \
+        '<html><body><h1>Prom</h1></body></html>'
+
+    config="$(cat <<EOF
+worker_processes 1;
+${CONFIG_ERROR_LOG_LINE}
+${CONFIG_PID_LINE}
+events { worker_connections 1024; }
+http {
+    access_log ${NGINX_ACCESS_LOG};
+    server {
+        listen ${TEST_PORT};
+        location = /test {
+            alias ${STATIC_ROOT}/prom.html;
+            markdown_filter on;
+            default_type ${MEDIA_TYPE_HTML};
+        }
+        location ${METRICS_ENDPOINT} {
+            markdown_metrics;
+            markdown_metrics_format prometheus;
+        }
+    }
+}
+EOF
+)"
+
+    start_nginx "$config" || { log_fail "$NGINX_START_FAILURE_MSG"; return 1; }
+
+    # Seed one conversion so metrics are non-trivial
+    curl -s -H "Accept: ${MEDIA_TYPE_MARKDOWN}" \
+        "http://localhost:${TEST_PORT}/test" > /dev/null || true
+
+    #
+    # Sub-test A: application/openmetrics-text should return
+    # Prometheus exposition format.
+    #
+    response=$(make_request "GET" "${METRICS_ENDPOINT}" \
+        "application/openmetrics-text")
+    status=$(get_status "$response")
+    content_type=$(get_header "$response" "$HEADER_CONTENT_TYPE")
+    body=$(get_body "$response")
+
+    if [[ "$status" == "200" ]]; then
+        log_pass "openmetrics-text: $STATUS_CODE_OK_MESSAGE"
+    else
+        log_fail "openmetrics-text: Expected 200, got $status"
+    fi
+
+    assert_prometheus_content_type "$content_type" "openmetrics-text"
+
+    if echo "$body" | grep -q "^# HELP"; then
+        log_pass "openmetrics-text: Body contains Prometheus HELP lines"
+    else
+        log_fail "openmetrics-text: Body missing Prometheus HELP lines"
+        log_info "Body (first 200 chars): $(echo "$body" | head -c 200)"
+    fi
+
+    #
+    # Sub-test B: text/plain; version=0.0.4 should also return
+    # Prometheus exposition format.
+    #
+    response=$(make_request "GET" "${METRICS_ENDPOINT}" \
+        "text/plain; version=0.0.4")
+    status=$(get_status "$response")
+    content_type=$(get_header "$response" "$HEADER_CONTENT_TYPE")
+    body=$(get_body "$response")
+
+    if [[ "$status" == "200" ]]; then
+        log_pass "text/plain;version=0.0.4: $STATUS_CODE_OK_MESSAGE"
+    else
+        log_fail "text/plain;version=0.0.4: Expected 200, got $status"
+    fi
+
+    assert_prometheus_content_type "$content_type" "text/plain;version=0.0.4"
+
+    if echo "$body" | grep -q "^# TYPE"; then
+        log_pass "text/plain;version=0.0.4: Body contains Prometheus TYPE lines"
+    else
+        log_fail "text/plain;version=0.0.4: Body missing Prometheus TYPE lines"
+        log_info "Body (first 200 chars): $(echo "$body" | head -c 200)"
+    fi
+
+    #
+    # Sub-test C: application/json should still return JSON even
+    # when markdown_metrics_format is prometheus.
+    #
+    response=$(make_request "GET" "${METRICS_ENDPOINT}" "application/json")
+    status=$(get_status "$response")
+    content_type=$(get_header "$response" "$HEADER_CONTENT_TYPE")
+    body=$(get_body "$response")
+
+    if [[ "$status" == "200" ]]; then
+        log_pass "application/json override: $STATUS_CODE_OK_MESSAGE"
+    else
+        log_fail "application/json override: Expected 200, got $status"
+    fi
+
+    if echo "$content_type" | grep -qE '^application/json$'; then
+        log_pass "application/json override: Content-Type is application/json"
+    else
+        log_fail "application/json override: Expected application/json, got $content_type"
+    fi
+
+    if echo "$body" | grep -q '"conversions_attempted"'; then
+        log_pass "application/json override: Body is JSON"
+    else
+        log_fail "application/json override: Body is not JSON"
+        log_info "Body (first 200 chars): $(echo "$body" | head -c 200)"
+    fi
+
+    #
+    # Sub-test D: Accept: text/plain (without version=0.0.4)
+    # should return legacy plain-text format, NOT Prometheus.
+    # This is the negative case that guards against negotiation
+    # regression — bare text/plain must not trigger Prometheus.
+    #
+    response=$(make_request "GET" "${METRICS_ENDPOINT}" "text/plain")
+    status=$(get_status "$response")
+    content_type=$(get_header "$response" "$HEADER_CONTENT_TYPE")
+    body=$(get_body "$response")
+
+    if [[ "$status" == "200" ]]; then
+        log_pass "text/plain (no version): $STATUS_CODE_OK_MESSAGE"
+    else
+        log_fail "text/plain (no version): Expected 200, got $status"
+    fi
+
+    if echo "$content_type" | grep -qE '^text/plain$'; then
+        log_pass "text/plain (no version): Content-Type is bare text/plain (legacy)"
+    else
+        log_fail "text/plain (no version): Expected text/plain, got $content_type"
+    fi
+
+    if echo "$body" | grep -q "^Markdown Filter Metrics"; then
+        log_pass "text/plain (no version): Body is legacy text format"
+    else
+        log_fail "text/plain (no version): Body is not legacy text format"
+        log_info "Body (first 200 chars): $(echo "$body" | head -c 200)"
+    fi
+
+    if echo "$body" | grep -q "^# HELP\|^# TYPE"; then
+        log_fail "text/plain (no version): Body unexpectedly contains Prometheus markers"
+    else
+        log_pass "text/plain (no version): Body does not contain Prometheus markers"
+    fi
+
+    #
+    # Sub-test E: Verify that the compact no-space form
+    # (";version=…;charset=…") would NOT pass the boundary
+    # ERE used by assert_prometheus_content_type.  The module
+    # never emits this form, so accepting it would be a test
+    # gap.  This is a direct regex check — it does not call
+    # the helper, avoiding TESTS_FAILED side-effects.
+    #
+    local compact_ct="text/plain;version=0.0.4;charset=utf-8"
+    if echo "$compact_ct" | grep -qE '(^|; )version=0\.0\.4(;|$)'; then
+        log_fail "compact form (version): boundary ERE should reject no-space parameters"
+    else
+        log_pass "compact form (version): boundary ERE correctly rejects no-space parameters"
+    fi
+    if echo "$compact_ct" | grep -qE '(^|; )charset=utf-8(;|$)'; then
+        log_fail "compact form (charset): boundary ERE should reject no-space parameters"
+    else
+        log_pass "compact form (charset): boundary ERE correctly rejects no-space parameters"
+    fi
+
+    stop_nginx
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+    return 0
+}
+
+#
 # Main test execution
 #
 main() {
@@ -787,6 +1123,12 @@ main() {
     if ! resolve_nginx_bin; then
         return 1
     fi
+
+    log_info "Using NGINX binary: $NGINX_BIN"
+    local nginx_version
+    nginx_version=$("$NGINX_BIN" -v 2>&1 || true)
+    log_info "NGINX version: $nginx_version"
+
     resolve_delegated_nginx_bin
     
     if ! command -v curl &> /dev/null; then
@@ -801,18 +1143,20 @@ main() {
     test_passthrough
     test_configuration_inheritance
     test_authenticated_content
+    test_authenticated_content_denied
     test_variable_driven_markdown_filter
     test_range_bypass
     test_metrics_shared_aggregation
-    if ! run_external_check 8 "Delegated If-Modified-Since runtime validation" \
+    test_metrics_prometheus_content_negotiation
+    if ! run_external_check 10 "Delegated If-Modified-Since runtime validation" \
         "${REPO_ROOT}/tools/ci/verify_real_nginx_ims.sh"; then
         :
     fi
-    if ! run_external_check 9 "Chunked streaming native smoke validation" \
+    if ! run_external_check 11 "Chunked streaming native smoke validation" \
         "${REPO_ROOT}/tools/e2e/verify_chunked_streaming_native_e2e.sh" --profile smoke; then
         :
     fi
-    if ! run_external_check 10 "Large response native validation" \
+    if ! run_external_check 12 "Large response native validation" \
         "${REPO_ROOT}/tools/e2e/verify_large_markdown_response_e2e.sh"; then
         :
     fi

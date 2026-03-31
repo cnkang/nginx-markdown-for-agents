@@ -1,0 +1,8 @@
+{
+  "fixture-id": "encoding/rtl-text",
+  "page-type": "clean-article",
+  "expected-conversion-result": "converted",
+  "input-size-bytes": 3036,
+  "source-description": "HTML with right-to-left text and bidirectional content",
+  "failure-corpus": false
+}

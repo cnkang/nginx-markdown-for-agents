@@ -1,0 +1,8 @@
+{
+  "fixture-id": "encoding/mixed-entities",
+  "page-type": "clean-article",
+  "expected-conversion-result": "converted",
+  "input-size-bytes": 2041,
+  "source-description": "HTML with mixed named and numeric character entities",
+  "failure-corpus": false
+}

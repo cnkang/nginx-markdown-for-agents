@@ -1,0 +1,8 @@
+{
+  "fixture-id": "simple/headings",
+  "page-type": "clean-article",
+  "expected-conversion-result": "converted",
+  "input-size-bytes": 575,
+  "source-description": "HTML with h1-h6 heading levels for heading conversion testing",
+  "failure-corpus": false
+}

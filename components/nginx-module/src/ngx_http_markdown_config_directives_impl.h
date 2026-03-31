@@ -350,7 +350,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
         NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_FLAG,
         ngx_conf_set_flag_slot,
         NGX_HTTP_LOC_CONF_OFFSET,
-        offsetof(ngx_http_markdown_conf_t, trust_forwarded_headers),
+        offsetof(ngx_http_markdown_conf_t, ops.trust_forwarded_headers),
         NULL
     },
 
@@ -392,6 +392,28 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
         ngx_conf_set_size_slot,
         NGX_HTTP_MAIN_CONF_OFFSET,
         offsetof(ngx_http_markdown_main_conf_t, metrics_shm_size),
+        NULL
+    },
+
+    /*
+     * markdown_metrics_format auto|prometheus
+     *
+     * Controls the output format of the markdown_metrics endpoint.
+     * - auto: JSON or plain-text based on Accept header (default)
+     * - prometheus: Prometheus text exposition format for non-JSON
+     * Default: auto
+     * Context: http, server, location
+     *
+     * Example:
+     *   markdown_metrics_format prometheus;
+     */
+    {
+        ngx_string("markdown_metrics_format"),
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF
+            |NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+        ngx_http_markdown_metrics_format,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        0,
         NULL
     },
 

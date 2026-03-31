@@ -1,0 +1,8 @@
+{
+  "fixture-id": "simple/basic",
+  "page-type": "clean-article",
+  "expected-conversion-result": "converted",
+  "input-size-bytes": 379,
+  "source-description": "Minimal HTML with title and paragraph for baseline testing",
+  "failure-corpus": false
+}

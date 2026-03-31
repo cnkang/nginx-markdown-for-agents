@@ -1,0 +1,8 @@
+{
+  "fixture-id": "complex/boilerplate-heavy-landing",
+  "page-type": "boilerplate-heavy",
+  "expected-conversion-result": "converted",
+  "input-size-bytes": 4219,
+  "source-description": "Product landing page with extensive navigation, sidebar widgets, and multi-column footer",
+  "failure-corpus": false
+}
