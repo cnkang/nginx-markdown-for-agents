@@ -6,7 +6,16 @@ This project is a production-oriented NGINX filter module backed by a Rust HTML-
 
 ## Current Assessment
 
-As of **version 0.3.0**, the project includes additional maintainability and validation work reflected in the current codebase. Core features are implemented and tested. The codebase includes unit, integration, E2E, and fuzz-oriented validation entrypoints, along with documentation covering installation, configuration, operations, and architecture.
+As of **version 0.4.0**, the project includes Prometheus-compatible metrics, unified decision reason codes, rollout and rollback operational guides, a benchmark corpus with evidence-based regression detection, restructured installation and first-run documentation, and parser path optimizations. Core features are implemented and tested. The codebase includes unit, integration, E2E, and fuzz-oriented validation entrypoints, along with documentation covering installation, configuration, operations, and architecture.
+
+### Release 0.4.0 Updates
+
+- 0.4.0 release-gate validation and tests refined based on automated code-review feedback:
+  - Metric naming validation now supports histogram `_seconds_bucket/_sum/_count` series while keeping stricter rejection of ambiguous suffixes.
+  - Checklist verifiability checks now include checked items and ignore fenced code examples.
+  - Release-gate constants are centralized in a shared module to reduce drift between tooling, tests, and governance docs.
+  - File read and directory listing paths in release-gate checks are hardened for graceful failure reporting.
+- Release checklist wording now explicitly requires both Rust proptest and Python Hypothesis property-based test suites.
 
 This assessment is based on:
 
@@ -211,7 +220,14 @@ See [DEPLOYMENT_EXAMPLES.md](../guides/DEPLOYMENT_EXAMPLES.md) for configuration
 
 ## Current Focus and Roadmap
 
-### Current Release (0.3.0)
+### Current Release (0.4.0)
+- Prometheus-compatible metrics endpoint for operational monitoring
+- Unified decision reason codes for conversion transparency
+- Rollout cookbook with selective enablement and canary patterns
+- Rollback guide with trigger conditions and executable procedures
+- Benchmark corpus with reproducible evidence and regression detection
+- Parser path optimizations: noise region pruning, simple structure fast path
+- Restructured installation guide with shortest success path
 - Incremental processing for large responses
 - Matrix-driven release automation pipeline
 - Performance baseline gating system
@@ -219,13 +235,11 @@ See [DEPLOYMENT_EXAMPLES.md](../guides/DEPLOYMENT_EXAMPLES.md) for configuration
 - Enhanced installation tooling
 - Shared metrics aggregation and runtime-regression coverage
 - Hardened CI/CD pipeline
-- Documentation accuracy improvements
 
 ### Near-Term
 - Performance regression tracking with CI artifact capture
 - Deployment validation across diverse environments
 - Community feedback integration
-- Parser-path optimization opportunities
 
 ### Future Exploration
 - Streaming-oriented conversion approaches for large documents
@@ -329,7 +343,7 @@ See `examples/docker/` for Docker build examples.
 
 ## Summary
 
-**NGINX Markdown for Agents** is at version 0.3.0. The project provides HTML-to-Markdown conversion through NGINX content negotiation, with incremental processing for large responses, release automation, performance baseline gating, runtime validation reuse, fuzzing workflows, and shared metrics aggregation for observability.
+**NGINX Markdown for Agents** is at version 0.4.0. The project provides HTML-to-Markdown conversion through NGINX content negotiation, with Prometheus-compatible metrics, unified decision reason codes, rollout and rollback operational guides, a benchmark corpus with evidence-based regression detection, parser path optimizations, incremental processing for large responses, release automation, performance baseline gating, runtime validation reuse, fuzzing workflows, and shared metrics aggregation for observability.
 
 ### Key Components
 - Core feature implementation
