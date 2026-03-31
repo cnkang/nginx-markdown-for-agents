@@ -257,8 +257,10 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
     filter_enabled = ngx_http_markdown_is_enabled(r, conf);
     if (!filter_enabled) {
         /* Module disabled, pass through */
+        NGX_HTTP_MARKDOWN_METRIC_INC(requests_entered);
         ngx_http_markdown_metric_inc_skip(
             NGX_HTTP_MARKDOWN_INELIGIBLE_CONFIG);
+        NGX_HTTP_MARKDOWN_METRIC_INC(conversions_bypassed);
         ngx_http_markdown_log_decision(r, conf,
             ngx_http_markdown_reason_from_eligibility(
                 NGX_HTTP_MARKDOWN_INELIGIBLE_CONFIG,
@@ -267,8 +269,11 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
     }
 
     /*
-     * Decision chain entry point — increment requests_entered
-     * after scope enablement check passes.
+     * Decision chain entry point — requests_entered is now
+     * incremented above for config-disabled requests too,
+     * keeping the accounting invariant:
+     *   requests_entered >= conversions + passthrough
+     *   passthrough == sum(skips) + failopen
      */
     NGX_HTTP_MARKDOWN_METRIC_INC(requests_entered);
 
