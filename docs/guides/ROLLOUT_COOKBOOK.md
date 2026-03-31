@@ -351,7 +351,7 @@ Wait at least 24 hours to cover a full traffic cycle, then verify:
 ```bash
 # Check production conversion metrics
 curl -s http://localhost/markdown-metrics | \
-  grep -E "conversions_(attempted|succeeded|failed)"
+  grep -E "conversions_(succeeded|failed|bypassed)"
 
 # Check for failure reason codes in the last 24 hours
 grep "markdown decision:" /var/log/nginx/error.log | \
@@ -724,6 +724,7 @@ http {
 
         location / {
             markdown_filter $is_ai_bot;
+            markdown_on_wildcard on;
             proxy_set_header Accept $final_accept;
             proxy_pass http://backend;
         }
@@ -737,6 +738,8 @@ http {
 ```
 
 UA-based targeting depends on clients sending accurate User-Agent strings. It is not a security boundary — any client can spoof a User-Agent. Use this pattern for convenience, not access control.
+
+Note: `proxy_set_header Accept` only modifies the header sent upstream to the backend — it does not change the incoming request header that the module evaluates. The `markdown_on_wildcard on` directive is required here so that bots whose original `Accept` header does not include `text/markdown` are still eligible for conversion when the filter is enabled by `$is_ai_bot`.
 
 #### Verification
 

@@ -284,7 +284,7 @@ Prometheus metric label values use the same reason code strings as the module's 
 |---|---|---|
 | `SKIP_CONFIG` | `SKIP_CONFIG` | Module disabled by configuration (`markdown_filter off`) |
 | `SKIP_METHOD` | `SKIP_METHOD` | Request method is not GET or HEAD |
-| `SKIP_STATUS` | `SKIP_STATUS` | Response status is not 200 |
+| `SKIP_STATUS` | `SKIP_STATUS` | Response status is not 200 or 206 |
 | `SKIP_CONTENT_TYPE` | `SKIP_CONTENT_TYPE` | Response Content-Type is not `text/html` |
 | `SKIP_SIZE` | `SKIP_SIZE` | Response exceeds `markdown_max_size` |
 | `SKIP_STREAMING` | `SKIP_STREAMING` | Content-Type matches `markdown_stream_types` |
