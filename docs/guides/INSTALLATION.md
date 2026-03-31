@@ -571,14 +571,14 @@ If your NGINX version is >= 1.24.0 but not listed in the matrix below, use the [
 | 1.26.3 | glibc | x86_64 | Full |
 | 1.26.3 | musl | aarch64 | Full |
 | 1.26.3 | musl | x86_64 | Full |
-| 1.28.2 | glibc | aarch64 | Full |
-| 1.28.2 | glibc | x86_64 | Full |
-| 1.28.2 | musl | aarch64 | Full |
-| 1.28.2 | musl | x86_64 | Full |
-| 1.29.6 | glibc | aarch64 | Full |
-| 1.29.6 | glibc | x86_64 | Full |
-| 1.29.6 | musl | aarch64 | Full |
-| 1.29.6 | musl | x86_64 | Full |
+| 1.28.3 | glibc | aarch64 | Full |
+| 1.28.3 | glibc | x86_64 | Full |
+| 1.28.3 | musl | aarch64 | Full |
+| 1.28.3 | musl | x86_64 | Full |
+| 1.29.7 | glibc | aarch64 | Full |
+| 1.29.7 | glibc | x86_64 | Full |
+| 1.29.7 | musl | aarch64 | Full |
+| 1.29.7 | musl | x86_64 | Full |
 <!-- END AUTO-GENERATED MATRIX -->
 
 ---

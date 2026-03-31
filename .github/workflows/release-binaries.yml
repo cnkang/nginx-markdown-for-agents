@@ -42,7 +42,7 @@ jobs:
           python-version: '3.14.3'
 
       - name: Check matrix freshness
-        if: inputs.matrix_freshness != 'off'
+        if: github.event_name == 'workflow_dispatch' && inputs.matrix_freshness != 'off'
         env:
           FRESHNESS_MODE: ${{ inputs.matrix_freshness }}
         run: |
