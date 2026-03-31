@@ -1,0 +1,8 @@
+{
+  "fixture-id": "encoding/latin1",
+  "page-type": "clean-article",
+  "expected-conversion-result": "converted",
+  "input-size-bytes": 1084,
+  "source-description": "HTML encoded in Latin-1 (ISO-8859-1) to test charset transcoding",
+  "failure-corpus": false
+}
