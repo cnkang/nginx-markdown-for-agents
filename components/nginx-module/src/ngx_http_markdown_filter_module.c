@@ -13,8 +13,10 @@
 #include "ngx_http_markdown_module_state_impl.h"
 #include "ngx_http_markdown_config_impl.h"
 #include "ngx_http_markdown_lifecycle_impl.h"
+#include "ngx_http_markdown_decision_log_impl.h"
 #include "ngx_http_markdown_request_impl.h"
 #include "ngx_http_markdown_metrics_impl.h"
+#include "ngx_http_markdown_prometheus_impl.h"
 
 /*
  * Module context
@@ -62,7 +64,8 @@ ngx_module_t ngx_http_markdown_filter_module = {
  * `ngx_http_headers_in_t`.
  */
 static ngx_table_elt_t *
-ngx_http_markdown_find_request_header(ngx_http_request_t *r, const ngx_str_t *name)
+ngx_http_markdown_find_request_header(ngx_http_request_t *r,
+    const ngx_str_t *name)
 {
     ngx_list_part_t *part;
     ngx_table_elt_t *headers;
@@ -78,7 +81,8 @@ ngx_http_markdown_find_request_header(ngx_http_request_t *r, const ngx_str_t *na
     for ( ;; ) {
         for (i = 0; i < part->nelts; i++) {
             if (headers[i].key.len == name->len
-                && ngx_strncasecmp(headers[i].key.data, name->data, name->len) == 0)
+                && ngx_strncasecmp(headers[i].key.data,
+                                   name->data, name->len) == 0)
             {
                 return &headers[i];
             }

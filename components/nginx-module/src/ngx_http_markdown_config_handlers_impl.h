@@ -23,6 +23,8 @@
 static char *
 ngx_http_markdown_filter(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
+    static u_char                      on_str[]  = "on";
+    static u_char                      off_str[] = "off";
     ngx_http_markdown_conf_t          *mcf = conf;
     ngx_http_compile_complex_value_t   ccv;
     ngx_http_complex_value_t          *complex_value;
@@ -38,7 +40,7 @@ ngx_http_markdown_filter(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     value = cf->args->elts;
 
     if (value[1].len == 2
-        && ngx_strcasecmp(value[1].data, (u_char *) "on") == 0)
+        && ngx_strcasecmp(value[1].data, on_str) == 0)
     {
         mcf->enabled = 1;
         mcf->enabled_source = NGX_HTTP_MARKDOWN_ENABLED_STATIC;
@@ -47,7 +49,7 @@ ngx_http_markdown_filter(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     }
 
     if (value[1].len == 3
-        && ngx_strcasecmp(value[1].data, (u_char *) "off") == 0)
+        && ngx_strcasecmp(value[1].data, off_str) == 0)
     {
         mcf->enabled = 0;
         mcf->enabled_source = NGX_HTTP_MARKDOWN_ENABLED_STATIC;
@@ -89,6 +91,8 @@ ngx_http_markdown_filter(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 static char *
 ngx_http_markdown_on_error(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
+    static u_char             pass_str[]   = "pass";
+    static u_char             reject_str[] = "reject";
     ngx_http_markdown_conf_t *mcf = conf;
     ngx_str_t                *value;
 
@@ -98,9 +102,11 @@ ngx_http_markdown_on_error(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         return "is duplicate";
     }
 
-    if (ngx_strcasecmp(value[1].data, (u_char *) "pass") == 0) {
+    if (ngx_strcasecmp(value[1].data, pass_str) == 0) {
         mcf->on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
-    } else if (ngx_strcasecmp(value[1].data, (u_char *) "reject") == 0) {
+    } else if (ngx_strcasecmp(value[1].data,
+                              reject_str) == 0)
+    {
         mcf->on_error = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
     } else {
         ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
@@ -117,6 +123,8 @@ ngx_http_markdown_on_error(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 static char *
 ngx_http_markdown_flavor(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
+    static u_char             cm_str[]  = "commonmark";
+    static u_char             gfm_str[] = "gfm";
     ngx_http_markdown_conf_t *mcf = conf;
     ngx_str_t                *value;
 
@@ -126,9 +134,11 @@ ngx_http_markdown_flavor(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         return "is duplicate";
     }
 
-    if (ngx_strcasecmp(value[1].data, (u_char *) "commonmark") == 0) {
+    if (ngx_strcasecmp(value[1].data, cm_str) == 0) {
         mcf->flavor = NGX_HTTP_MARKDOWN_FLAVOR_COMMONMARK;
-    } else if (ngx_strcasecmp(value[1].data, (u_char *) "gfm") == 0) {
+    } else if (ngx_strcasecmp(value[1].data,
+                              gfm_str) == 0)
+    {
         mcf->flavor = NGX_HTTP_MARKDOWN_FLAVOR_GFM;
     } else {
         ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
@@ -145,6 +155,8 @@ ngx_http_markdown_flavor(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 static char *
 ngx_http_markdown_auth_policy(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
+    static u_char             allow_str[] = "allow";
+    static u_char             deny_str[]  = "deny";
     ngx_http_markdown_conf_t *mcf = conf;
     ngx_str_t                *value;
 
@@ -154,9 +166,11 @@ ngx_http_markdown_auth_policy(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         return "is duplicate";
     }
 
-    if (ngx_strcasecmp(value[1].data, (u_char *) "allow") == 0) {
+    if (ngx_strcasecmp(value[1].data, allow_str) == 0) {
         mcf->auth_policy = NGX_HTTP_MARKDOWN_AUTH_POLICY_ALLOW;
-    } else if (ngx_strcasecmp(value[1].data, (u_char *) "deny") == 0) {
+    } else if (ngx_strcasecmp(value[1].data,
+                              deny_str) == 0)
+    {
         mcf->auth_policy = NGX_HTTP_MARKDOWN_AUTH_POLICY_DENY;
     } else {
         ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
@@ -216,6 +230,10 @@ ngx_http_markdown_auth_cookies(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 static char *
 ngx_http_markdown_conditional_requests(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
+    static u_char             full_str[] = "full_support";
+    static u_char             ims_str[]  =
+        "if_modified_since_only";
+    static u_char             dis_str[]  = "disabled";
     ngx_http_markdown_conf_t *mcf = conf;
     ngx_str_t                *value;
 
@@ -225,11 +243,17 @@ ngx_http_markdown_conditional_requests(ngx_conf_t *cf, ngx_command_t *cmd, void 
         return "is duplicate";
     }
 
-    if (ngx_strcasecmp(value[1].data, (u_char *) "full_support") == 0) {
-        mcf->conditional_requests = NGX_HTTP_MARKDOWN_CONDITIONAL_FULL_SUPPORT;
-    } else if (ngx_strcasecmp(value[1].data, (u_char *) "if_modified_since_only") == 0) {
-        mcf->conditional_requests = NGX_HTTP_MARKDOWN_CONDITIONAL_IF_MODIFIED_SINCE;
-    } else if (ngx_strcasecmp(value[1].data, (u_char *) "disabled") == 0) {
+    if (ngx_strcasecmp(value[1].data, full_str) == 0) {
+        mcf->conditional_requests =
+            NGX_HTTP_MARKDOWN_CONDITIONAL_FULL_SUPPORT;
+    } else if (ngx_strcasecmp(value[1].data,
+                              ims_str) == 0)
+    {
+        mcf->conditional_requests =
+            NGX_HTTP_MARKDOWN_CONDITIONAL_IF_MODIFIED_SINCE;
+    } else if (ngx_strcasecmp(value[1].data,
+                              dis_str) == 0)
+    {
         mcf->conditional_requests = NGX_HTTP_MARKDOWN_CONDITIONAL_DISABLED;
     } else {
         ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
@@ -246,6 +270,10 @@ ngx_http_markdown_conditional_requests(ngx_conf_t *cf, ngx_command_t *cmd, void 
 static char *
 ngx_http_markdown_log_verbosity(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
+    static u_char             err_str[]   = "error";
+    static u_char             warn_str[]  = "warn";
+    static u_char             info_str[]  = "info";
+    static u_char             debug_str[] = "debug";
     ngx_http_markdown_conf_t *mcf = conf;
     ngx_str_t                *value;
 
@@ -255,13 +283,19 @@ ngx_http_markdown_log_verbosity(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         return "is duplicate";
     }
 
-    if (ngx_strcasecmp(value[1].data, (u_char *) "error") == 0) {
+    if (ngx_strcasecmp(value[1].data, err_str) == 0) {
         mcf->log_verbosity = NGX_HTTP_MARKDOWN_LOG_ERROR;
-    } else if (ngx_strcasecmp(value[1].data, (u_char *) "warn") == 0) {
+    } else if (ngx_strcasecmp(value[1].data,
+                              warn_str) == 0)
+    {
         mcf->log_verbosity = NGX_HTTP_MARKDOWN_LOG_WARN;
-    } else if (ngx_strcasecmp(value[1].data, (u_char *) "info") == 0) {
+    } else if (ngx_strcasecmp(value[1].data,
+                              info_str) == 0)
+    {
         mcf->log_verbosity = NGX_HTTP_MARKDOWN_LOG_INFO;
-    } else if (ngx_strcasecmp(value[1].data, (u_char *) "debug") == 0) {
+    } else if (ngx_strcasecmp(value[1].data,
+                              debug_str) == 0)
+    {
         mcf->log_verbosity = NGX_HTTP_MARKDOWN_LOG_DEBUG;
     } else {
         ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
@@ -375,6 +409,7 @@ static char *
 ngx_http_markdown_large_body_threshold(ngx_conf_t *cf,
     ngx_command_t *cmd, void *conf)
 {
+    static u_char             off_str[] = "off";
     ngx_http_markdown_conf_t *mcf = conf;
     ngx_str_t                *value;
 
@@ -387,7 +422,7 @@ ngx_http_markdown_large_body_threshold(ngx_conf_t *cf,
     }
 
     if (value[1].len == 3
-        && ngx_strcasecmp(value[1].data, (u_char *) "off") == 0)
+        && ngx_strcasecmp(value[1].data, off_str) == 0)
     {
         mcf->large_body_threshold = 0;
         return NGX_CONF_OK;
@@ -407,6 +442,42 @@ ngx_http_markdown_large_body_threshold(ngx_conf_t *cf,
     if (mcf->large_body_threshold == 0) {
         /* Explicit "0" is treated as off */
         return NGX_CONF_OK;
+    }
+
+    return NGX_CONF_OK;
+}
+
+/* Configuration directive handler: markdown_metrics_format (auto | prometheus). */
+static char *
+ngx_http_markdown_metrics_format(ngx_conf_t *cf,
+    ngx_command_t *cmd, void *conf)
+{
+    static u_char              auto_str[] = "auto";
+    static u_char              prom_str[] = "prometheus";
+    ngx_http_markdown_conf_t  *mcf = conf;
+    ngx_str_t                 *value;
+
+    value = cf->args->elts;
+
+    if (mcf->ops.metrics_format != NGX_CONF_UNSET_UINT) {
+        return "is duplicate";
+    }
+
+    if (ngx_strcasecmp(value[1].data, auto_str) == 0) {
+        mcf->ops.metrics_format =
+            NGX_HTTP_MARKDOWN_METRICS_FORMAT_AUTO;
+    } else if (ngx_strcasecmp(value[1].data,
+                              prom_str) == 0)
+    {
+        mcf->ops.metrics_format =
+            NGX_HTTP_MARKDOWN_METRICS_FORMAT_PROMETHEUS;
+    } else {
+        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+            "invalid value \"%V\" in \"%V\" "
+            "directive, it must be "
+            "\"auto\" or \"prometheus\"",
+            &value[1], &cmd->name);
+        return NGX_CONF_ERROR;
     }
 
     return NGX_CONF_OK;
