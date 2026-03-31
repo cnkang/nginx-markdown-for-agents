@@ -110,7 +110,7 @@ ngx_http_markdown_has_range_header(ngx_http_request_t *r)
 static ngx_int_t
 ngx_http_markdown_check_content_type(ngx_http_request_t *r)
 {
-    static const u_char  text_html[] = "text/html";
+    static u_char  text_html[] = "text/html";
     ngx_str_t           *content_type;
     
     /* Get Content-Type header */
@@ -124,7 +124,7 @@ ngx_http_markdown_check_content_type(ngx_http_request_t *r)
     /* Accept "text/html" or "text/html; charset=..." */
     if (content_type->len >= 9
         && ngx_strncasecmp(content_type->data,
-                           (u_char *) text_html, 9) == 0
+                           text_html, 9) == 0
         && (content_type->len == 9
             || content_type->data[9] == ';'
             || content_type->data[9] == ' '))
@@ -191,7 +191,7 @@ static ngx_int_t
 ngx_http_markdown_is_streaming(ngx_http_request_t *r,
                                 ngx_http_markdown_conf_t *conf)
 {
-    static const u_char  text_event_stream[] = "text/event-stream";
+    static u_char  text_event_stream[] = "text/event-stream";
     ngx_str_t           *content_type;
     ngx_str_t           *stream_type;
     ngx_uint_t           i;
@@ -206,7 +206,7 @@ ngx_http_markdown_is_streaming(ngx_http_request_t *r,
     /* Check for text/event-stream (Server-Sent Events) */
     if (content_type->len >= 17
         && ngx_strncasecmp(content_type->data,
-                           (u_char *) text_event_stream, 17) == 0
+                           text_event_stream, 17) == 0
         && (content_type->len == 17
             || content_type->data[17] == ';'
             || content_type->data[17] == ' '))
