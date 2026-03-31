@@ -321,10 +321,14 @@ the two-pass normalize-then-copy pattern with a single-pass fused normalizer.
 This eliminates one O(n) allocation and copy for the normalization result.
 
 The optimization targets the normalization phase (after traversal), not the
-traversal itself. The initial traversal buffer uses a fixed 1 KB pre-allocation
-for all documents; smarter pre-allocation based on input HTML size is deferred
-because the `RcDom` does not expose the original byte count without an
-additional tree walk.
+traversal itself. The default initial traversal buffer uses a 1 KB
+pre-allocation, but when the caller provides an input size hint exceeding
+`LARGE_BODY_THRESHOLD`, the buffer is pre-allocated proportionally to the
+input HTML size via `estimate_output_capacity`. The FFI and incremental entry
+points set this hint automatically. For small documents or callers that do not
+set the hint, the default 1 KB pre-allocation is used. The `RcDom` does not
+expose the original byte count without an additional tree walk, which is why
+the hint must be provided externally.
 
 ### Buffer estimation for the fused normalizer
 
@@ -386,7 +390,10 @@ standard `normalize_output` two-pass approach.
   the caller provides an input size hint exceeding `LARGE_BODY_THRESHOLD`.
   The FFI and incremental entry points set this hint automatically. For small
   documents or callers that do not set the hint, the default 1 KB
-  pre-allocation is used.
+  pre-allocation is used. When the fused normalizer activates (after
+  traversal), it receives the actual traversal output length as its capacity,
+  avoiding the underestimate that would result from applying the 0.4 factor
+  to already-converted Markdown text.
 - Buffer estimation uses a fixed 0.4 factor applied to the input size hint
   (for traversal pre-allocation) or the traversal output size (for the fused
   normalizer). Pages with unusually high or low HTML-to-Markdown compression

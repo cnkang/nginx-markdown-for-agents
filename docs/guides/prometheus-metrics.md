@@ -349,24 +349,28 @@ These patterns indicate issues that may require action:
 ### PromQL Examples for Dashboards
 
 ```promql
-# Conversion success rate (percentage)
-nginx_markdown_conversions_total / clamp_min(nginx_markdown_requests_total, 1) * 100
+# Conversion success rate (percentage, 5m window)
+rate(nginx_markdown_conversions_total[5m])
+/ clamp_min(rate(nginx_markdown_requests_total[5m]), 1e-10) * 100
 
-# Failure rate (percentage)
-sum(nginx_markdown_failures_total) / clamp_min(nginx_markdown_requests_total, 1) * 100
+# Failure rate (percentage, 5m window)
+sum(rate(nginx_markdown_failures_total[5m]))
+/ clamp_min(rate(nginx_markdown_requests_total[5m]), 1e-10) * 100
 
-# Fail-open rate (percentage)
-nginx_markdown_failopen_total / clamp_min(nginx_markdown_requests_total, 1) * 100
+# Fail-open rate (percentage, 5m window)
+rate(nginx_markdown_failopen_total[5m])
+/ clamp_min(rate(nginx_markdown_requests_total[5m]), 1e-10) * 100
 
-# Byte reduction ratio (percentage)
+# Byte reduction ratio (percentage, lifetime)
 (1 - nginx_markdown_output_bytes_total / clamp_min(nginx_markdown_input_bytes_total, 1)) * 100
 
 # Skip breakdown by reason
 nginx_markdown_skips_total
 
-# Slow conversion ratio (>1s bucket as percentage of total conversions)
-nginx_markdown_conversion_duration_seconds{le="+Inf"} - nginx_markdown_conversion_duration_seconds{le="1.0"}
-/ clamp_min(nginx_markdown_conversion_duration_seconds{le="+Inf"}, 1) * 100
+# Slow conversion ratio (>1s bucket as percentage of total conversions, 5m window)
+(rate(nginx_markdown_conversion_duration_seconds{le="+Inf"}[5m])
+  - rate(nginx_markdown_conversion_duration_seconds{le="1.0"}[5m]))
+/ clamp_min(rate(nginx_markdown_conversion_duration_seconds{le="+Inf"}[5m]), 1e-10) * 100
 ```
 
 ---

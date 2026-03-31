@@ -1,4 +1,4 @@
-# 0.4.0 Release Checklist — Completed
+# 0.4.0 Release Checklist — Pending E2E Gate
 
 Executed on: 2026-03-30
 Branch: `feat/11-release-0-4-0`
