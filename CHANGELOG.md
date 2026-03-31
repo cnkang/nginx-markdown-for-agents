@@ -7,6 +7,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-03-31
+
+This release focuses on operational visibility, rollout safety, and conversion performance. Key themes: Prometheus metrics endpoint, unified decision reason codes, rollout and rollback operational guides, benchmark corpus for regression detection, and parser path optimizations.
+
+### Added
+- Prometheus-compatible metrics endpoint via `markdown_metrics_format prometheus` directive with text exposition format output
+- `markdown_metrics_format` configuration directive (`auto|prometheus`) for opt-in Prometheus text exposition format on the existing `markdown_metrics` endpoint
+- Prometheus text exposition format (`text/plain; version=0.0.4; charset=utf-8`) output on the `markdown_metrics` endpoint, selected via Accept header content negotiation when enabled
+- New shared-memory counters: `requests_entered`, skip-reason breakdown (`skips.config`, `skips.method`, `skips.status`, `skips.content_type`, `skips.size`, `skips.streaming`, `skips.auth`, `skips.range`, `skips.accept`), `failopen_count`, `estimated_token_savings`
+- Content negotiation for metrics endpoint: JSON, plain text, or Prometheus format based on Accept header and `markdown_metrics_format` configuration
+- Prometheus metrics guide (`docs/guides/prometheus-metrics.md`) covering metric catalog, scrape configuration, rollout judgment advice, and metric stability policy
+- Unified decision reason codes for logs and metrics (ELIGIBLE_CONVERTED, SKIP_METHOD, SKIP_STATUS, SKIP_CONTENT_TYPE, SKIP_SIZE, SKIP_STREAMING, SKIP_AUTH, SKIP_RANGE, SKIP_ACCEPT, SKIP_CONFIG, FAIL_OPEN, FAIL_CLOSED)
+- Structured decision logging with reason codes at configurable verbosity
+- Rollout cookbook (`docs/guides/ROLLOUT_COOKBOOK.md`) with selective enablement patterns (path, host, header, UA, canary)
+- Rollback guide (`docs/guides/ROLLBACK_GUIDE.md`) with trigger conditions and executable procedures
+- Benchmark corpus with page-type classification and unified report format
+- Evidence-based comparison tooling for regression detection
+- Before/after conversion examples generated from benchmark corpus
+- Installation guide restructure with shortest success path and troubleshooting SOPs
+- Minimal demo configuration (`examples/nginx-configs/00-minimal-demo.conf`)
+- Parser path optimizations: noise region early pruning, simple structure fast path, large-response path optimization
+- Property-based tests for Prometheus output format correctness (7 properties, Python Hypothesis)
+- C unit tests for Prometheus renderer, content negotiation, skip-reason mapping, and snapshot collection
+- Shared 0.4.0 release-gate constants module (`tools/release/release_constants.py`) to centralize sub-spec discovery keywords, P0 release-decision sub-specs, and scope-evaluation non-goals used by validation/tests
+- Focused release-gate edge-case tests for checklist parsing and file read failures (`tools/release/tests/test_release_gate_checks.py`)
+- Scope-evaluation regression coverage to ensure short proposal tokens are not rejected solely because they appear inside a longer non-goal phrase
+
+### Changed
+- Metrics endpoint now supports Prometheus text exposition format via content negotiation
+- Decision logging uses structured format with reason codes
+- Installation guide reorganized with tiered install path classification
+- Release-gate naming convention validation now explicitly accepts Prometheus histogram series ending in `_seconds_bucket`, `_seconds_sum`, and `_seconds_count` while rejecting ambiguous non-histogram `_bucket|_sum|_count` suffixes
+- `check_checklist_verifiability` now validates both unchecked and checked checklist entries and ignores checklist-like lines inside fenced code blocks to avoid false failures from examples
+- Release checklist documentation now explicitly requires both Rust proptest and Python Hypothesis property-based test suites
+- Scope-evaluation test logic now rejects proposals only when the proposal contains a non-goal phrase (unidirectional substring matching)
+- Validation helpers now use regex `fullmatch` for explicit whole-string conformance checks
+
+### Fixed
+- Hardened release-gate file scanning and read paths to handle unreadable directories/files gracefully instead of aborting validation
+- `_run_checks` in `validate_release_gates.py` now isolates per-check exceptions so one failing check does not suppress results from subsequent checks
+- Updated release-gate docs wording and regex references to align with current validation behavior (including Markdown capitalization consistency and histogram suffix guidance)
+
+### Deferred to 0.5.x or Later
+- True streaming HTML-to-Markdown conversion
+- OpenTelemetry tracing
+- High-cardinality metrics
+- Package manager distribution (apt, yum, brew)
+- Kubernetes Ingress / Helm chart packaging
+- Parser replacement or alternative DOM libraries
+- Content-aware heuristic pruning
+
 ## [0.3.0] - 2026-03-19
 
 This release introduces incremental processing for large responses, a matrix-driven release automation pipeline, third-party notice coverage checks, a performance baseline gating system, and improved HTML element handling for AI agent content preservation.
@@ -256,6 +307,13 @@ This project uses Semantic Versioning:
 - PATCH version for backwards-compatible bug fixes
 
 ### Upgrade Notes
+
+#### Upgrading to 0.4.0
+
+- New `markdown_metrics_format` directive defaults to `auto` (JSON), preserving 0.3.0 behavior. Set to `prometheus` to enable Prometheus text exposition format.
+- All new configuration directives have safe defaults that preserve 0.3.0 behavior. No configuration changes are required for upgrading.
+- Parser path optimizations are transparent — output is equivalent to 0.3.0 for all inputs.
+- Decision reason codes are now included in logs at `info` verbosity and above. Adjust `markdown_log_verbosity` if needed.
 
 #### Upgrading to 0.3.0
 
