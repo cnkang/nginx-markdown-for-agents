@@ -1,0 +1,8 @@
+{
+  "fixture-id": "malformed/unescaped-entities",
+  "page-type": "complex-common",
+  "expected-conversion-result": "converted",
+  "input-size-bytes": 1500,
+  "source-description": "HTML with unescaped entities and special characters to test entity handling",
+  "failure-corpus": true
+}

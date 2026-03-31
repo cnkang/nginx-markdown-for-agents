@@ -1,0 +1,8 @@
+{
+  "fixture-id": "malformed/unclosed-tags",
+  "page-type": "complex-common",
+  "expected-conversion-result": "converted",
+  "input-size-bytes": 719,
+  "source-description": "HTML with unclosed tags to test parser error recovery and auto-closing",
+  "failure-corpus": true
+}

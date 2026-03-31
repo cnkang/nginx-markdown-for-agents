@@ -1,0 +1,8 @@
+{
+  "fixture-id": "edge-cases/empty",
+  "page-type": "clean-article",
+  "expected-conversion-result": "converted",
+  "input-size-bytes": 203,
+  "source-description": "Minimal empty HTML document to test empty input handling",
+  "failure-corpus": false
+}

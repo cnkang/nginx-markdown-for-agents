@@ -1,0 +1,8 @@
+{
+  "fixture-id": "complex/blog-post",
+  "page-type": "complex-common",
+  "expected-conversion-result": "converted",
+  "input-size-bytes": 6613,
+  "source-description": "Blog post with mixed content, sidebars, and navigation elements",
+  "failure-corpus": false
+}

@@ -1,0 +1,356 @@
+{
+  "schema-version": "1.0.0",
+  "metadata": {
+    "corpus-version": "1.0.0",
+    "git-commit": "b9d251f",
+    "platform": "reference",
+    "timestamp": "2026-03-27T01:08:08Z",
+    "converter-version": "0.4.0",
+    "token-approx-factor": 1.0
+  },
+  "summary": {
+    "total-fixtures": 33,
+    "converted-count": 33,
+    "skipped-count": 0,
+    "failed-open-count": 0,
+    "fallback-rate": 0.0,
+    "token-reduction-percent": 57.86,
+    "input-bytes-total": 63499,
+    "output-bytes-total": 26759,
+    "p50-latency-ms": 9.26,
+    "p95-latency-ms": 11.82,
+    "p99-latency-ms": 374.41
+  },
+  "fixtures": [
+    {
+      "fixture-id": "complex/blog-post",
+      "page-type": "complex-common",
+      "conversion-result": "converted",
+      "input-bytes": 6613,
+      "output-bytes": 2650,
+      "latency-ms": 544.01,
+      "token-reduction-percent": 59.93,
+      "failure-corpus": false
+    },
+    {
+      "fixture-id": "complex/boilerplate-heavy-ecommerce",
+      "page-type": "boilerplate-heavy",
+      "conversion-result": "converted",
+      "input-bytes": 3969,
+      "output-bytes": 1458,
+      "latency-ms": 14.01,
+      "token-reduction-percent": 63.27,
+      "failure-corpus": false
+    },
+    {
+      "fixture-id": "complex/boilerplate-heavy-landing",
+      "page-type": "boilerplate-heavy",
+      "conversion-result": "converted",
+      "input-bytes": 4219,
+      "output-bytes": 1546,
+      "latency-ms": 9.83,
+      "token-reduction-percent": 63.36,
+      "failure-corpus": false
+    },
+    {
+      "fixture-id": "complex/documentation",
+      "page-type": "documentation",
+      "conversion-result": "converted",
+      "input-bytes": 5390,
+      "output-bytes": 2630,
+      "latency-ms": 9.68,
+      "token-reduction-percent": 51.21,
+      "failure-corpus": false
+    },
+    {
+      "fixture-id": "complex/github-readme",
+      "page-type": "documentation",
+      "conversion-result": "converted",
+      "input-bytes": 3654,
+      "output-bytes": 1469,
+      "latency-ms": 9.34,
+      "token-reduction-percent": 59.8,
+      "failure-corpus": false
+    },
+    {
+      "fixture-id": "complex/nested-structure",
+      "page-type": "nav-heavy",
+      "conversion-result": "converted",
+      "input-bytes": 2769,
+      "output-bytes": 267,
+      "latency-ms": 9.37,
+      "token-reduction-percent": 90.36,
+      "failure-corpus": false
+    },
+    {
+      "fixture-id": "complex/wikipedia-article",
+      "page-type": "nav-heavy",
+      "conversion-result": "converted",
+      "input-bytes": 3522,
+      "output-bytes": 1690,
+      "latency-ms": 8.64,
+      "token-reduction-percent": 52.02,
+      "failure-corpus": false
+    },
+    {
+      "fixture-id": "edge-cases/deeply-nested",
+      "page-type": "complex-common",
+      "conversion-result": "converted",
+      "input-bytes": 1517,
+      "output-bytes": 89,
+      "latency-ms": 9.53,
+      "token-reduction-percent": 94.13,
+      "failure-corpus": true
+    },
+    {
+      "fixture-id": "edge-cases/empty",
+      "page-type": "clean-article",
+      "conversion-result": "converted",
+      "input-bytes": 203,
+      "output-bytes": 21,
+      "latency-ms": 8.74,
+      "token-reduction-percent": 89.66,
+      "failure-corpus": false
+    },
+    {
+      "fixture-id": "edge-cases/multiple-bodies",
+      "page-type": "complex-common",
+      "conversion-result": "converted",
+      "input-bytes": 588,
+      "output-bytes": 206,
+      "latency-ms": 9.65,
+      "token-reduction-percent": 64.97,
+      "failure-corpus": true
+    },
+    {
+      "fixture-id": "edge-cases/no-body",
+      "page-type": "complex-common",
+      "conversion-result": "converted",
+      "input-bytes": 504,
+      "output-bytes": 14,
+      "latency-ms": 9.99,
+      "token-reduction-percent": 97.22,
+      "failure-corpus": true
+    },
+    {
+      "fixture-id": "edge-cases/only-scripts",
+      "page-type": "complex-common",
+      "conversion-result": "converted",
+      "input-bytes": 1407,
+      "output-bytes": 19,
+      "latency-ms": 9.76,
+      "token-reduction-percent": 98.65,
+      "failure-corpus": true
+    },
+    {
+      "fixture-id": "edge-cases/single-line",
+      "page-type": "clean-article",
+      "conversion-result": "converted",
+      "input-bytes": 618,
+      "output-bytes": 356,
+      "latency-ms": 9.7,
+      "token-reduction-percent": 42.39,
+      "failure-corpus": false
+    },
+    {
+      "fixture-id": "edge-cases/whitespace-heavy",
+      "page-type": "clean-article",
+      "conversion-result": "converted",
+      "input-bytes": 1179,
+      "output-bytes": 428,
+      "latency-ms": 9.1,
+      "token-reduction-percent": 63.7,
+      "failure-corpus": false
+    },
+    {
+      "fixture-id": "encoding/latin1",
+      "page-type": "clean-article",
+      "conversion-result": "converted",
+      "input-bytes": 1084,
+      "output-bytes": 863,
+      "latency-ms": 10.13,
+      "token-reduction-percent": 20.39,
+      "failure-corpus": false
+    },
+    {
+      "fixture-id": "encoding/mixed-entities",
+      "page-type": "clean-article",
+      "conversion-result": "converted",
+      "input-bytes": 2041,
+      "output-bytes": 993,
+      "latency-ms": 9.16,
+      "token-reduction-percent": 51.35,
+      "failure-corpus": false
+    },
+    {
+      "fixture-id": "encoding/rtl-text",
+      "page-type": "clean-article",
+      "conversion-result": "converted",
+      "input-bytes": 3036,
+      "output-bytes": 2008,
+      "latency-ms": 9.19,
+      "token-reduction-percent": 33.86,
+      "failure-corpus": false
+    },
+    {
+      "fixture-id": "encoding/special-chars",
+      "page-type": "clean-article",
+      "conversion-result": "converted",
+      "input-bytes": 2662,
+      "output-bytes": 1773,
+      "latency-ms": 9.1,
+      "token-reduction-percent": 33.4,
+      "failure-corpus": false
+    },
+    {
+      "fixture-id": "encoding/utf8-bom",
+      "page-type": "clean-article",
+      "conversion-result": "converted",
+      "input-bytes": 604,
+      "output-bytes": 263,
+      "latency-ms": 8.87,
+      "token-reduction-percent": 56.46,
+      "failure-corpus": false
+    },
+    {
+      "fixture-id": "encoding/utf8",
+      "page-type": "clean-article",
+      "conversion-result": "converted",
+      "input-bytes": 2565,
+      "output-bytes": 1896,
+      "latency-ms": 9.14,
+      "token-reduction-percent": 26.08,
+      "failure-corpus": false
+    },
+    {
+      "fixture-id": "malformed/broken-attributes",
+      "page-type": "complex-common",
+      "conversion-result": "converted",
+      "input-bytes": 1493,
+      "output-bytes": 325,
+      "latency-ms": 8.8,
+      "token-reduction-percent": 78.23,
+      "failure-corpus": true
+    },
+    {
+      "fixture-id": "malformed/invalid-nesting",
+      "page-type": "complex-common",
+      "conversion-result": "converted",
+      "input-bytes": 1522,
+      "output-bytes": 326,
+      "latency-ms": 10.06,
+      "token-reduction-percent": 78.58,
+      "failure-corpus": true
+    },
+    {
+      "fixture-id": "malformed/mixed-case-tags",
+      "page-type": "complex-common",
+      "conversion-result": "converted",
+      "input-bytes": 1417,
+      "output-bytes": 576,
+      "latency-ms": 8.72,
+      "token-reduction-percent": 59.35,
+      "failure-corpus": true
+    },
+    {
+      "fixture-id": "malformed/unclosed-tags",
+      "page-type": "complex-common",
+      "conversion-result": "converted",
+      "input-bytes": 719,
+      "output-bytes": 509,
+      "latency-ms": 9.74,
+      "token-reduction-percent": 29.21,
+      "failure-corpus": true
+    },
+    {
+      "fixture-id": "malformed/unescaped-entities",
+      "page-type": "complex-common",
+      "conversion-result": "converted",
+      "input-bytes": 1500,
+      "output-bytes": 758,
+      "latency-ms": 8.78,
+      "token-reduction-percent": 49.47,
+      "failure-corpus": true
+    },
+    {
+      "fixture-id": "simple/basic",
+      "page-type": "clean-article",
+      "conversion-result": "converted",
+      "input-bytes": 379,
+      "output-bytes": 150,
+      "latency-ms": 9.26,
+      "token-reduction-percent": 60.42,
+      "failure-corpus": false
+    },
+    {
+      "fixture-id": "simple/code-blocks",
+      "page-type": "clean-article",
+      "conversion-result": "converted",
+      "input-bytes": 1261,
+      "output-bytes": 734,
+      "latency-ms": 8.88,
+      "token-reduction-percent": 41.79,
+      "failure-corpus": false
+    },
+    {
+      "fixture-id": "simple/formatting",
+      "page-type": "clean-article",
+      "conversion-result": "converted",
+      "input-bytes": 1136,
+      "output-bytes": 608,
+      "latency-ms": 8.65,
+      "token-reduction-percent": 46.48,
+      "failure-corpus": false
+    },
+    {
+      "fixture-id": "simple/headings",
+      "page-type": "clean-article",
+      "conversion-result": "converted",
+      "input-bytes": 575,
+      "output-bytes": 252,
+      "latency-ms": 8.84,
+      "token-reduction-percent": 56.17,
+      "failure-corpus": false
+    },
+    {
+      "fixture-id": "simple/images",
+      "page-type": "clean-article",
+      "conversion-result": "converted",
+      "input-bytes": 1024,
+      "output-bytes": 498,
+      "latency-ms": 8.34,
+      "token-reduction-percent": 51.37,
+      "failure-corpus": false
+    },
+    {
+      "fixture-id": "simple/links",
+      "page-type": "clean-article",
+      "conversion-result": "converted",
+      "input-bytes": 1073,
+      "output-bytes": 565,
+      "latency-ms": 8.26,
+      "token-reduction-percent": 47.34,
+      "failure-corpus": false
+    },
+    {
+      "fixture-id": "simple/lists",
+      "page-type": "clean-article",
+      "conversion-result": "converted",
+      "input-bytes": 1092,
+      "output-bytes": 401,
+      "latency-ms": 10.28,
+      "token-reduction-percent": 63.28,
+      "failure-corpus": false
+    },
+    {
+      "fixture-id": "simple/tables",
+      "page-type": "clean-article",
+      "conversion-result": "converted",
+      "input-bytes": 2164,
+      "output-bytes": 418,
+      "latency-ms": 10.36,
+      "token-reduction-percent": 80.68,
+      "failure-corpus": false
+    }
+  ]
+}

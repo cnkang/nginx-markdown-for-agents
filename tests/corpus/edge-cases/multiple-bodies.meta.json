@@ -1,0 +1,8 @@
+{
+  "fixture-id": "edge-cases/multiple-bodies",
+  "page-type": "complex-common",
+  "expected-conversion-result": "converted",
+  "input-size-bytes": 588,
+  "source-description": "HTML with multiple body elements to test parser recovery",
+  "failure-corpus": true
+}

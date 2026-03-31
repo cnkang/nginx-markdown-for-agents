@@ -1,0 +1,33 @@
+{
+  "schema-version": "1.0.0",
+  "description": "Quality regression thresholds for corpus benchmark comparison.",
+  "thresholds": {
+    "fallback-rate": {
+      "warning-delta": 5.0,
+      "blocking-delta": 10.0,
+      "direction": "lower-is-better",
+      "unit": "percentage-points"
+    },
+    "token-reduction-percent": {
+      "warning-delta": -5.0,
+      "blocking-delta": -10.0,
+      "direction": "higher-is-better",
+      "unit": "percentage-points"
+    },
+    "p50-latency-ms": {
+      "warning-pct": 15,
+      "blocking-pct": 30,
+      "direction": "lower-is-better"
+    },
+    "p95-latency-ms": {
+      "warning-pct": 20,
+      "blocking-pct": 40,
+      "direction": "lower-is-better"
+    },
+    "p99-latency-ms": {
+      "warning-pct": 20,
+      "blocking-pct": 40,
+      "direction": "lower-is-better"
+    }
+  }
+}

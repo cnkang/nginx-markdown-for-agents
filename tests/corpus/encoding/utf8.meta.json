@@ -1,0 +1,8 @@
+{
+  "fixture-id": "encoding/utf8",
+  "page-type": "clean-article",
+  "expected-conversion-result": "converted",
+  "input-size-bytes": 2565,
+  "source-description": "UTF-8 encoded HTML with multilingual content",
+  "failure-corpus": false
+}

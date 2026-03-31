@@ -1,0 +1,8 @@
+{
+  "fixture-id": "edge-cases/whitespace-heavy",
+  "page-type": "clean-article",
+  "expected-conversion-result": "converted",
+  "input-size-bytes": 1179,
+  "source-description": "HTML with excessive whitespace to test whitespace normalization",
+  "failure-corpus": false
+}
