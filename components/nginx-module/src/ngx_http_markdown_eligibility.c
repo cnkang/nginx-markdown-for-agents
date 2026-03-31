@@ -13,7 +13,7 @@ static ngx_str_t ngx_http_markdown_eligible_str = ngx_string("eligible");
 static ngx_str_t ngx_http_markdown_ineligible_method_str =
     ngx_string("ineligible: method not GET/HEAD");
 static ngx_str_t ngx_http_markdown_ineligible_status_str =
-    ngx_string("ineligible: status not 200 or 206");
+    ngx_string("ineligible: status not 200");
 static ngx_str_t ngx_http_markdown_ineligible_content_type_str =
     ngx_string("ineligible: content-type not text/html");
 static ngx_str_t ngx_http_markdown_ineligible_size_str =
@@ -49,25 +49,24 @@ ngx_http_markdown_check_method(ngx_http_request_t *r)
 /*
  * Check if response status is eligible for conversion
  *
- * Only 200 OK and 206 Partial Content statuses are eligible per FR-02.2.
- * Other status codes (1xx, 3xx, 4xx, 5xx) are not converted.
+ * Only 200 OK is eligible per FR-02.2.
+ * Other status codes (1xx, 2xx except 200, 3xx, 4xx, 5xx) are not converted.
  *
- * Note: 206 Partial Content will later be caught by the explicit Range header
- * check (FR-07.2), which will assign the SKIP_RANGE reason code. Setting 206
- * as eligible here ensures that range requests are routed to SKIP_RANGE rather
- * than SKIP_STATUS.
+ * 206 Partial Content is handled separately in check_eligibility() where
+ * it returns INELIGIBLE_RANGE, ensuring the correct reason code regardless
+ * of whether the client sent a Range header.
  *
  * Parameters:
  *   r - NGINX request structure
  *
  * Returns:
- *   1 if status is 200 or 206
+ *   1 if status is 200
  *   0 otherwise
  */
 static ngx_int_t
 ngx_http_markdown_check_status(ngx_http_request_t *r)
 {
-    return (r->headers_out.status == NGX_HTTP_OK || r->headers_out.status == NGX_HTTP_PARTIAL_CONTENT);
+    return (r->headers_out.status == NGX_HTTP_OK);
 }
 
 /*
@@ -253,8 +252,8 @@ ngx_http_markdown_is_streaming(ngx_http_request_t *r,
  * Range Requests: Per FR-07.1 and FR-07.2, range requests are not converted
  * because converting partial HTML content would produce invalid or incomplete
  * Markdown. This is detected by:
- * - 206 Partial Content status (caught by status check)
- * - Range header in request (explicit check)
+ * - 206 Partial Content status (explicit check returns INELIGIBLE_RANGE)
+ * - Range header in request (explicit check returns INELIGIBLE_RANGE)
  *
  * Parameters:
  *   r    - NGINX request structure
@@ -282,9 +281,18 @@ ngx_http_markdown_check_eligibility(ngx_http_request_t *r,
         return NGX_HTTP_MARKDOWN_INELIGIBLE_METHOD;
     }
     
-    /* Check response status (FR-02.2, FR-07.1) */
-    /* This catches 206 Partial Content responses */
+    /* Check response status (FR-02.2) */
     if (!ngx_http_markdown_check_status(r)) {
+        /*
+         * 206 Partial Content is routed to INELIGIBLE_RANGE
+         * rather than INELIGIBLE_STATUS so the reason code
+         * accurately reflects why the response was skipped.
+         * This covers bare 206 responses (no Range header)
+         * as well as normal range responses.
+         */
+        if (r->headers_out.status == NGX_HTTP_PARTIAL_CONTENT) {
+            return NGX_HTTP_MARKDOWN_INELIGIBLE_RANGE;
+        }
         return NGX_HTTP_MARKDOWN_INELIGIBLE_STATUS;
     }
     

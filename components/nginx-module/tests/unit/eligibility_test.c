@@ -113,6 +113,9 @@ check_eligibility(const request_t *r, const conf_t *conf)
         return INELIGIBLE_METHOD;
     }
     if (r->status != 200) {
+        if (r->status == 206) {
+            return INELIGIBLE_RANGE;
+        }
         return INELIGIBLE_STATUS;
     }
     if (r->has_range_header) {
@@ -185,7 +188,7 @@ test_ineligible_reasons(void)
     r.method = METHOD_GET;
 
     r.status = 206;
-    TEST_ASSERT(check_eligibility(&r, &c) == INELIGIBLE_STATUS, "206 should be ineligible");
+    TEST_ASSERT(check_eligibility(&r, &c) == INELIGIBLE_RANGE, "206 should be ineligible (range)");
     r.status = 200;
 
     r.has_range_header = 1;
