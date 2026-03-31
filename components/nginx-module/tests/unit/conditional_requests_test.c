@@ -106,7 +106,6 @@ normalize_etag_token(const char *input, char *out, size_t out_len)
 {
     const char *start = input;
     size_t len;
-    size_t i;
 
     if (out_len == 0) {
         return;
@@ -125,6 +124,7 @@ normalize_etag_token(const char *input, char *out, size_t out_len)
 
     if (len >= 2 && start[0] == '"' && start[len - 1] == '"') {
         len -= 2;
+        size_t i;
         for (i = 0; i < len && i + 1 < out_len; i++) {
             out[i] = start[i + 1];
         }
@@ -132,10 +132,10 @@ normalize_etag_token(const char *input, char *out, size_t out_len)
         return;
     }
 
-    for (i = 0; i < len && i + 1 < out_len; i++) {
+    for (size_t i = 0; i < len && i + 1 < out_len; i++) {
         out[i] = start[i];
     }
-    out[i] = '\0';
+    out[len < out_len ? len : out_len - 1] = '\0';
 }
 
 static void

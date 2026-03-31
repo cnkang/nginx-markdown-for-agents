@@ -62,6 +62,12 @@ struct MarkdownOptions;
 #define NGX_HTTP_MARKDOWN_LOG_DEBUG  3  /* Debug and above */
 
 /*
+ * Configuration constants for metrics_format directive
+ */
+#define NGX_HTTP_MARKDOWN_METRICS_FORMAT_AUTO        0  /* JSON or plain-text (default) */
+#define NGX_HTTP_MARKDOWN_METRICS_FORMAT_PROMETHEUS   1  /* Prometheus text exposition */
+
+/*
  * Configuration source for markdown_filter directive
  */
 #define NGX_HTTP_MARKDOWN_ENABLED_UNSET    0  /* Not configured in this scope */
@@ -128,7 +134,18 @@ typedef struct {
     ngx_array_t *stream_types;         /* markdown_stream_types exclusion list (default: NULL) */
     ngx_flag_t   auto_decompress;      /* markdown_auto_decompress on|off (default: on) */
     size_t       large_body_threshold; /* markdown_large_body_threshold (NGX_HTTP_MARKDOWN_THRESHOLD_OFF = off) */
-    ngx_flag_t   trust_forwarded_headers; /* markdown_trust_forwarded_headers on|off (default: off) */
+
+    /*
+     * Operational settings.
+     *
+     * Grouped into a sub-struct so that the parent
+     * ngx_http_markdown_conf_t stays within the 20-field limit
+     * enforced by static analysis (SonarCloud rule c:S1820).
+     */
+    struct {
+        ngx_flag_t   trust_forwarded_headers; /* markdown_trust_forwarded_headers on|off (default: off) */
+        ngx_uint_t   metrics_format;       /* markdown_metrics_format auto|prometheus (default: auto) */
+    } ops;
 } ngx_http_markdown_conf_t;
 
 /*
@@ -157,6 +174,43 @@ typedef struct {
 } ngx_http_markdown_buffer_t;
 
 /*
+ * Error classification
+ *
+ * These enums and functions classify conversion failures into categories
+ * for logging and metrics (FR-09.5, FR-09.6, FR-09.7).
+ *
+ * Defined before ngx_http_markdown_ctx_t because the context struct
+ * contains a last_error_category field of this type.
+ */
+
+/* Error category enum */
+typedef enum {
+    NGX_HTTP_MARKDOWN_ERROR_CONVERSION,      /* HTML parsing errors, invalid input, conversion logic failures */
+    NGX_HTTP_MARKDOWN_ERROR_RESOURCE_LIMIT,  /* Size limits exceeded, timeout exceeded */
+    NGX_HTTP_MARKDOWN_ERROR_SYSTEM           /* Memory allocation failures, converter not initialized */
+} ngx_http_markdown_error_category_t;
+
+/*
+ * Response eligibility validation
+ *
+ * Defined before ngx_http_markdown_ctx_t because function prototypes
+ * referencing this type appear before the context struct definition.
+ */
+
+/* Eligibility result enum */
+typedef enum {
+    NGX_HTTP_MARKDOWN_ELIGIBLE,                /* Response is eligible for conversion */
+    NGX_HTTP_MARKDOWN_INELIGIBLE_METHOD,       /* Not GET/HEAD */
+    NGX_HTTP_MARKDOWN_INELIGIBLE_STATUS,       /* Not 200 or 206 Partial Content */
+    NGX_HTTP_MARKDOWN_INELIGIBLE_CONTENT_TYPE, /* Not text/html */
+    NGX_HTTP_MARKDOWN_INELIGIBLE_SIZE,         /* Exceeds max_size */
+    NGX_HTTP_MARKDOWN_INELIGIBLE_STREAMING,    /* Unbounded streaming (SSE, etc.) */
+    NGX_HTTP_MARKDOWN_INELIGIBLE_AUTH,         /* Auth policy denies */
+    NGX_HTTP_MARKDOWN_INELIGIBLE_RANGE,        /* Range request (partial content) */
+    NGX_HTTP_MARKDOWN_INELIGIBLE_CONFIG        /* Disabled by config */
+} ngx_http_markdown_eligibility_t;
+
+/*
  * Request context structure
  *
  * This structure maintains per-request state for the Markdown filter.
@@ -170,6 +224,8 @@ typedef struct {
     ngx_flag_t                   buffer_initialized;
     ngx_flag_t                   eligible;     /* Eligible for conversion */
     ngx_flag_t                   headers_forwarded; /* Whether downstream headers were sent */
+    time_t                       source_last_modified_time; /* Preserved upstream Last-Modified */
+    ngx_flag_t                   has_last_modified_time;     /* Whether Last-Modified was present */
     ngx_flag_t                   conversion_attempted;
     ngx_flag_t                   conversion_succeeded;
     ngx_flag_t                   bypass_counted; /* Whether conversions_bypassed was incremented */
@@ -177,12 +233,24 @@ typedef struct {
     /* Threshold router path selection (NGX_HTTP_MARKDOWN_PATH_FULLBUFFER or NGX_HTTP_MARKDOWN_PATH_INCREMENTAL) */
     ngx_uint_t                   processing_path;
 
-    /* Decompression state */
-    ngx_http_markdown_compression_type_e  compression_type;    /* Detected compression type */
-    ngx_flag_t                            decompression_needed; /* Whether decompression is needed */
-    ngx_flag_t                            decompression_done;   /* Whether decompression completed */
-    size_t                                compressed_size;      /* Size before decompression */
-    size_t                                decompressed_size;    /* Size after decompression */
+    /*
+     * Decompression state.
+     *
+     * Grouped into a sub-struct so that the parent
+     * ngx_http_markdown_ctx_t stays within the 20-field limit
+     * enforced by static analysis (SonarCloud rule c:S1820).
+     */
+    struct {
+        ngx_http_markdown_compression_type_e  type;      /* Detected compression type */
+        ngx_flag_t                            needed;    /* Whether decompression is needed */
+        ngx_flag_t                            done;      /* Whether decompression completed */
+        size_t                                compressed_size;   /* Size before decompression */
+        size_t                                decompressed_size; /* Size after decompression */
+    } decompression;
+
+    /* Last error category from conversion failure (for decision log) */
+    ngx_http_markdown_error_category_t    last_error_category;
+    ngx_flag_t                            has_error_category;
 } ngx_http_markdown_ctx_t;
 
 /*
@@ -281,12 +349,57 @@ typedef struct {
     /*
      * Path hit metrics (threshold router).
      *
-     * Placed at the end of the struct so that adding them does not shift
-     * the offsets of pre-existing fields.  This preserves shared-memory
-     * layout compatibility across hot reloads from older module builds.
+     * Grouped into a sub-struct so that the parent
+     * ngx_http_markdown_metrics_t stays within the 20-field limit
+     * enforced by static analysis (SonarCloud rule c:S1820).
      */
-    ngx_atomic_t  fullbuffer_path_hits;      /* Requests routed to full-buffer path */
-    ngx_atomic_t  incremental_path_hits;     /* Requests routed to incremental path */
+    struct {
+        ngx_atomic_t  fullbuffer;      /* Requests routed to full-buffer path */
+        ngx_atomic_t  incremental;     /* Requests routed to incremental path */
+    } path_hits;
+
+    /*
+     * Total requests that entered the decision chain.
+     *
+     * Incremented in the header filter after scope enablement
+     * check passes.  This is the denominator for conversion
+     * rate calculations.
+     */
+    ngx_atomic_t  requests_entered;
+
+    /*
+     * Skip counters by reason code.
+     *
+     * Each field corresponds to a specific eligibility check
+     * failure.  Grouped into a sub-struct so that the parent
+     * ngx_http_markdown_metrics_t stays within the 20-field
+     * limit enforced by static analysis (SonarCloud rule
+     * c:S1820).
+     */
+    struct {
+        ngx_atomic_t  config;        /* SKIP_CONFIG */
+        ngx_atomic_t  method;        /* SKIP_METHOD */
+        ngx_atomic_t  status;        /* SKIP_STATUS */
+        ngx_atomic_t  content_type;  /* SKIP_CONTENT_TYPE */
+        ngx_atomic_t  size;          /* SKIP_SIZE */
+        ngx_atomic_t  streaming;     /* SKIP_STREAMING */
+        ngx_atomic_t  auth;          /* SKIP_AUTH */
+        ngx_atomic_t  range;         /* SKIP_RANGE */
+        ngx_atomic_t  accept;        /* SKIP_ACCEPT */
+    } skips;
+
+    /*
+     * Fail-open counter: conversion failed but original HTML
+     * served due to markdown_on_error pass.
+     */
+    ngx_atomic_t  failopen_count;
+
+    /*
+     * Estimated cumulative token savings across all successful
+     * conversions.  Only non-zero when markdown_token_estimate
+     * is enabled.  Value is an approximation.
+     */
+    ngx_atomic_t  estimated_token_savings;
 } ngx_http_markdown_metrics_t;
 
 /* Module declaration */
@@ -336,18 +449,11 @@ ngx_int_t ngx_http_markdown_buffer_append(ngx_http_markdown_buffer_t *buf,
     u_char *data, size_t len);
 
 /*
- * Error classification
+ * Error classification functions
  *
- * These enums and functions classify conversion failures into categories
- * for logging and metrics (FR-09.5, FR-09.6, FR-09.7).
+ * (Enum ngx_http_markdown_error_category_t is defined above,
+ * before ngx_http_markdown_ctx_t.)
  */
-
-/* Error category enum */
-typedef enum {
-    NGX_HTTP_MARKDOWN_ERROR_CONVERSION,      /* HTML parsing errors, invalid input, conversion logic failures */
-    NGX_HTTP_MARKDOWN_ERROR_RESOURCE_LIMIT,  /* Size limits exceeded, timeout exceeded */
-    NGX_HTTP_MARKDOWN_ERROR_SYSTEM           /* Memory allocation failures, converter not initialized */
-} ngx_http_markdown_error_category_t;
 
 /* Map Rust error code to error category */
 ngx_http_markdown_error_category_t ngx_http_markdown_classify_error(uint32_t error_code);
@@ -357,23 +463,11 @@ const ngx_str_t *ngx_http_markdown_error_category_string(
     ngx_http_markdown_error_category_t category);
 
 /*
- * Response eligibility validation
+ * Response eligibility validation functions
  *
- * These functions determine if a response should be converted to Markdown.
+ * (Enum ngx_http_markdown_eligibility_t is defined above,
+ * before ngx_http_markdown_ctx_t.)
  */
-
-/* Eligibility result enum */
-typedef enum {
-    NGX_HTTP_MARKDOWN_ELIGIBLE,                /* Response is eligible for conversion */
-    NGX_HTTP_MARKDOWN_INELIGIBLE_METHOD,       /* Not GET/HEAD */
-    NGX_HTTP_MARKDOWN_INELIGIBLE_STATUS,       /* Not 200 or 206 Partial Content */
-    NGX_HTTP_MARKDOWN_INELIGIBLE_CONTENT_TYPE, /* Not text/html */
-    NGX_HTTP_MARKDOWN_INELIGIBLE_SIZE,         /* Exceeds max_size */
-    NGX_HTTP_MARKDOWN_INELIGIBLE_STREAMING,    /* Unbounded streaming (SSE, etc.) */
-    NGX_HTTP_MARKDOWN_INELIGIBLE_AUTH,         /* Auth policy denies */
-    NGX_HTTP_MARKDOWN_INELIGIBLE_RANGE,        /* Range request (partial content) */
-    NGX_HTTP_MARKDOWN_INELIGIBLE_CONFIG        /* Disabled by config */
-} ngx_http_markdown_eligibility_t;
 
 /* Check if response is eligible for conversion */
 ngx_http_markdown_eligibility_t ngx_http_markdown_check_eligibility(
@@ -383,6 +477,36 @@ ngx_http_markdown_eligibility_t ngx_http_markdown_check_eligibility(
 /* Get human-readable string for eligibility result */
 const ngx_str_t *ngx_http_markdown_eligibility_string(
     ngx_http_markdown_eligibility_t eligibility);
+
+/*
+ * Reason code lookup functions
+ *
+ * These functions map existing eligibility enum values and error categories
+ * to stable uppercase snake_case reason code strings.  The returned strings
+ * are shared between decision log entries and Prometheus metrics labels so
+ * that operators can correlate logs with metric counters without translating
+ * between different vocabularies.
+ */
+
+/* Map eligibility enum to reason code string */
+const ngx_str_t *ngx_http_markdown_reason_from_eligibility(
+    ngx_http_markdown_eligibility_t eligibility, const ngx_log_t *log);
+
+/* Map error category enum to failure reason code string */
+const ngx_str_t *ngx_http_markdown_reason_from_error_category(
+    ngx_http_markdown_error_category_t category, const ngx_log_t *log);
+
+/* Return the ELIGIBLE_CONVERTED reason code */
+const ngx_str_t *ngx_http_markdown_reason_converted(void);
+
+/* Return the ELIGIBLE_FAILED_OPEN reason code */
+const ngx_str_t *ngx_http_markdown_reason_failed_open(void);
+
+/* Return the ELIGIBLE_FAILED_CLOSED reason code */
+const ngx_str_t *ngx_http_markdown_reason_failed_closed(void);
+
+/* Return the SKIP_ACCEPT reason code (not in eligibility enum) */
+const ngx_str_t *ngx_http_markdown_reason_skip_accept(void);
 
 /*
  * Header management functions

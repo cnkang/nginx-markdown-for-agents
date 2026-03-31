@@ -139,7 +139,8 @@ ngx_http_markdown_create_conf(ngx_conf_t *cf)
     conf->stream_types = NGX_CONF_UNSET_PTR;
     conf->auto_decompress = NGX_CONF_UNSET;
     conf->large_body_threshold = NGX_CONF_UNSET_SIZE;
-    conf->trust_forwarded_headers = NGX_CONF_UNSET;
+    conf->ops.trust_forwarded_headers = NGX_CONF_UNSET;
+    conf->ops.metrics_format = NGX_CONF_UNSET_UINT;
 
     return conf;
 }
@@ -202,7 +203,9 @@ ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
                               NGX_HTTP_MARKDOWN_LOG_INFO);
     ngx_conf_merge_value(conf->buffer_chunked, prev->buffer_chunked, 1);
     ngx_conf_merge_value(conf->auto_decompress, prev->auto_decompress, 1);
-    ngx_conf_merge_value(conf->trust_forwarded_headers, prev->trust_forwarded_headers, 0);
+    ngx_conf_merge_value(conf->ops.trust_forwarded_headers, prev->ops.trust_forwarded_headers, 0);
+    ngx_conf_merge_uint_value(conf->ops.metrics_format, prev->ops.metrics_format,
+                              NGX_HTTP_MARKDOWN_METRICS_FORMAT_AUTO);
     ngx_conf_merge_size_value(conf->large_body_threshold,
                               prev->large_body_threshold,
                               NGX_HTTP_MARKDOWN_THRESHOLD_OFF);
@@ -322,6 +325,23 @@ ngx_http_markdown_log_verbosity_name(ngx_uint_t value)
             return &debug;
         default:
             return &unknown;
+    }
+}
+
+static const ngx_str_t *
+ngx_http_markdown_metrics_format_name(ngx_uint_t value)
+{
+    static ngx_str_t auto_fmt = ngx_string("auto");
+    static ngx_str_t prometheus = ngx_string("prometheus");
+    static ngx_str_t unknown = ngx_string("unknown");
+
+    switch (value) {
+    case NGX_HTTP_MARKDOWN_METRICS_FORMAT_AUTO:
+        return &auto_fmt;
+    case NGX_HTTP_MARKDOWN_METRICS_FORMAT_PROMETHEUS:
+        return &prometheus;
+    default:
+        return &unknown;
     }
 }
 
@@ -547,7 +567,8 @@ ngx_http_markdown_log_merged_conf(ngx_conf_t *cf, ngx_http_markdown_conf_t *conf
                        "log_verbosity=%V buffer_chunked=%ui "
                        "stream_types=%ui "
                        "large_body_threshold=%uz "
-                       "trust_forwarded_headers=%ui",
+                       "trust_forwarded_headers=%ui "
+                       "metrics_format=%V",
                        (ngx_uint_t) conf->enabled,
                        ngx_http_markdown_enabled_source_name(conf->enabled_source),
                        conf->max_size,
@@ -565,7 +586,9 @@ ngx_http_markdown_log_merged_conf(ngx_conf_t *cf, ngx_http_markdown_conf_t *conf
                        (ngx_uint_t) conf->buffer_chunked,
                        stream_type_count,
                        conf->large_body_threshold,
-                       (ngx_uint_t) conf->trust_forwarded_headers);
+                       (ngx_uint_t) conf->ops.trust_forwarded_headers,
+                       ngx_http_markdown_metrics_format_name(
+                           conf->ops.metrics_format));
 }
 
 #endif /* NGX_HTTP_MARKDOWN_CONFIG_CORE_IMPL_H */
