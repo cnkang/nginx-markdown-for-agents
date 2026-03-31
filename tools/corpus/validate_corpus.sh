@@ -1,7 +1,8 @@
 #!/bin/bash
 #
 # Comprehensive Corpus Validation Script
-# Validates all HTML files in tests/corpus and verifies converter runtime.
+# Validates all HTML files in tests/corpus, verifies converter runtime,
+# and checks fixture metadata sidecars.
 #
 
 set -e
@@ -18,7 +19,44 @@ NC='\033[0m'
 TOTAL=0
 PASSED=0
 FAILED=0
+META_ERRORS=0
 SEPARATOR_LINE="========================================="
+
+# Valid enum values
+VALID_PAGE_TYPES="clean-article documentation nav-heavy boilerplate-heavy complex-common"
+
+# Bash 3-compatible counters (macOS default /bin/bash lacks associative arrays).
+PT_CLEAN_ARTICLE=0
+PT_DOCUMENTATION=0
+PT_NAV_HEAVY=0
+PT_BOILERPLATE_HEAVY=0
+PT_COMPLEX_COMMON=0
+
+increment_page_type_count() {
+    local page_type="$1"
+    case "$page_type" in
+        clean-article) PT_CLEAN_ARTICLE=$((PT_CLEAN_ARTICLE + 1)) ;;
+        documentation) PT_DOCUMENTATION=$((PT_DOCUMENTATION + 1)) ;;
+        nav-heavy) PT_NAV_HEAVY=$((PT_NAV_HEAVY + 1)) ;;
+        boilerplate-heavy) PT_BOILERPLATE_HEAVY=$((PT_BOILERPLATE_HEAVY + 1)) ;;
+        complex-common) PT_COMPLEX_COMMON=$((PT_COMPLEX_COMMON + 1)) ;;
+        *) ;;
+    esac
+    return 0
+}
+
+get_page_type_count() {
+    local page_type="$1"
+    case "$page_type" in
+        clean-article) echo "$PT_CLEAN_ARTICLE" ;;
+        documentation) echo "$PT_DOCUMENTATION" ;;
+        nav-heavy) echo "$PT_NAV_HEAVY" ;;
+        boilerplate-heavy) echo "$PT_BOILERPLATE_HEAVY" ;;
+        complex-common) echo "$PT_COMPLEX_COMMON" ;;
+        *) echo "0" ;;
+    esac
+    return 0
+}
 
 echo "$SEPARATOR_LINE"
 echo "Comprehensive Corpus Validation"
@@ -31,10 +69,13 @@ cd "$ROOT/components/rust-converter"
 cargo build --release --quiet 2>&1 | grep -v "warning:" || true
 cd "$ROOT"
 
-# Find all HTML files
-HTML_FILES=$(find "$ROOT/tests/corpus" -name "*.html" -type f | sort)
+# Shared find command for HTML corpus files (used for both counting and processing)
+HTML_FIND_CMD=(find "$ROOT/tests/corpus" -name "*.html" -type f ! -name "generate-*")
 
-echo "Found $(echo "$HTML_FILES" | wc -l | tr -d ' ') HTML test files"
+# Count HTML files safely using null-delimited find
+HTML_COUNT=$("${HTML_FIND_CMD[@]}" -print0 | tr -dc '\0' | wc -c | tr -d ' ')
+
+echo "Found ${HTML_COUNT} HTML test files"
 echo ""
 
 # Smoke-check converter runtime once (avoids repeated cargo startup per file).
@@ -46,38 +87,187 @@ fi
 echo -e "${GREEN}✓${NC} converter runtime smoke check passed"
 echo ""
 
-# Validate corpus files
-for html_file in $HTML_FILES; do
+# ---------------------------------------------------------------------------
+# Phase 1: Validate corpus-version.json
+# ---------------------------------------------------------------------------
+echo "--- Corpus Version ---"
+CORPUS_VERSION_FILE="$ROOT/tests/corpus/corpus-version.json"
+if [[ ! -f "$CORPUS_VERSION_FILE" ]]; then
+    echo -e "${RED}✗${NC} corpus-version.json not found"
+    META_ERRORS=$((META_ERRORS + 1))
+else
+    # Pass path via env var to avoid shell injection; use single-quoted
+    # Python string so the regex dollar sign is not interpreted by bash.
+    VERSION=$(VALIDATE_PATH="$CORPUS_VERSION_FILE" python3 -c '
+import json, sys, re, os
+try:
+    path = os.environ["VALIDATE_PATH"]
+    with open(path) as f:
+        data = json.load(f)
+    v = data.get("version", "")
+    if not re.match(r"^\d+\.\d+\.\d+$", v):
+        print("INVALID", file=sys.stderr)
+        sys.exit(1)
+    print(v)
+except Exception as e:
+    print(f"ERROR: {e}", file=sys.stderr)
+    sys.exit(1)
+' 2>&1)
+    if [[ $? -eq 0 ]]; then
+        echo -e "${GREEN}✓${NC} corpus-version.json: v${VERSION}"
+    else
+        echo -e "${RED}✗${NC} corpus-version.json: invalid semver"
+        META_ERRORS=$((META_ERRORS + 1))
+    fi
+fi
+echo ""
+
+# ---------------------------------------------------------------------------
+# Phase 2: Validate HTML files and metadata sidecars
+# ---------------------------------------------------------------------------
+echo "--- HTML Files and Metadata ---"
+
+# Track failure corpus count
+FAILURE_CORPUS_COUNT=0
+
+# Use null-delimited find + while-read to handle filenames safely
+while IFS= read -r -d '' html_file; do
     TOTAL=$((TOTAL + 1))
-    filename=$(basename "$html_file")
+    rel_path="${html_file#"$ROOT"/}"
 
     if [[ ! -f "$html_file" ]] || [[ ! -s "$html_file" ]]; then
-        echo -e "${RED}✗${NC} $filename (empty or missing)"
+        echo -e "${RED}✗${NC} $rel_path (empty or missing)"
         FAILED=$((FAILED + 1))
         continue
     fi
 
     # Basic structure guardrail to catch obvious corpus corruption.
-    if ! grep -qi "<html\\|<body\\|<h1\\|<p\\|<div\\|<script\\|<style" "$html_file"; then
-        echo -e "${YELLOW}⚠${NC} $filename (no common HTML tags detected)"
+    if ! grep -qi "<html\|<body\|<h1\|<p\|<div\|<script\|<style" "$html_file"; then
+        echo -e "${YELLOW}⚠${NC} $rel_path (no common HTML tags detected)"
     fi
 
-    echo -e "${GREEN}✓${NC} $filename"
-    PASSED=$((PASSED + 1))
-done
+    # Check for corresponding .meta.json sidecar
+    meta_file="${html_file%.html}.meta.json"
+    if [[ ! -f "$meta_file" ]]; then
+        echo -e "${RED}✗${NC} $rel_path (missing .meta.json sidecar)"
+        META_ERRORS=$((META_ERRORS + 1))
+        FAILED=$((FAILED + 1))
+        continue
+    fi
+
+    # Validate metadata sidecar content — pass path via env to avoid injection.
+    # Use single-quoted Python block so no shell interpolation occurs.
+    # Access dict keys via .get() to avoid backslash-quote issues.
+    META_RESULT=$(META_FILE="$meta_file" python3 -c '
+import json, sys, os
+
+valid_page_types = {"clean-article", "documentation", "nav-heavy", "boilerplate-heavy", "complex-common"}
+valid_results = {"converted", "skipped", "failed-open"}
+required_fields = ["fixture-id", "page-type", "expected-conversion-result", "input-size-bytes", "source-description", "failure-corpus"]
+
+try:
+    path = os.environ["META_FILE"]
+    with open(path) as f:
+        data = json.load(f)
+
+    errors = []
+    for field in required_fields:
+        if field not in data:
+            errors.append("missing field: " + field)
+
+    pt = data.get("page-type")
+    if pt is not None and pt not in valid_page_types:
+        errors.append("invalid page-type: " + str(pt))
+
+    cr = data.get("expected-conversion-result")
+    if cr is not None and cr not in valid_results:
+        errors.append("invalid expected-conversion-result: " + str(cr))
+
+    isb = data.get("input-size-bytes")
+    if isb is not None and not isinstance(isb, int):
+        errors.append("input-size-bytes must be integer")
+
+    fc = data.get("failure-corpus")
+    if fc is not None and not isinstance(fc, bool):
+        errors.append("failure-corpus must be boolean")
+
+    if errors:
+        print("ERRORS:" + ";".join(errors))
+        sys.exit(1)
+
+    # Output page-type and failure-corpus for counting
+    print(str(pt) + "|" + str(fc))
+except Exception as e:
+    print("PARSE_ERROR:" + str(e))
+    sys.exit(1)
+' 2>&1)
+
+    if [[ $? -eq 0 ]]; then
+        page_type=$(echo "$META_RESULT" | cut -d'|' -f1)
+        is_failure=$(echo "$META_RESULT" | cut -d'|' -f2)
+
+        increment_page_type_count "$page_type"
+
+        if [[ "$is_failure" == "True" ]]; then
+            FAILURE_CORPUS_COUNT=$((FAILURE_CORPUS_COUNT + 1))
+        fi
+
+        echo -e "${GREEN}✓${NC} $rel_path [${page_type}]"
+        PASSED=$((PASSED + 1))
+    else
+        echo -e "${RED}✗${NC} $rel_path metadata: $META_RESULT"
+        META_ERRORS=$((META_ERRORS + 1))
+        FAILED=$((FAILED + 1))
+    fi
+done < <("${HTML_FIND_CMD[@]}" -print0 | sort -z)
 
 echo ""
+
+# ---------------------------------------------------------------------------
+# Phase 3: Coverage checks
+# ---------------------------------------------------------------------------
+echo "--- Coverage Checks ---"
+
+# Check at least 2 fixtures per page type
+for pt in $VALID_PAGE_TYPES; do
+    count=$(get_page_type_count "$pt")
+    if [[ $count -lt 2 ]]; then
+        echo -e "${RED}✗${NC} page-type '$pt': $count fixtures (minimum 2 required)"
+        META_ERRORS=$((META_ERRORS + 1))
+    else
+        echo -e "${GREEN}✓${NC} page-type '$pt': $count fixtures"
+    fi
+done
+
+# Check at least 3 failure corpus fixtures
+if [[ $FAILURE_CORPUS_COUNT -lt 3 ]]; then
+    echo -e "${RED}✗${NC} failure-corpus: $FAILURE_CORPUS_COUNT fixtures (minimum 3 required)"
+    META_ERRORS=$((META_ERRORS + 1))
+else
+    echo -e "${GREEN}✓${NC} failure-corpus: $FAILURE_CORPUS_COUNT fixtures"
+fi
+
+echo ""
+
+# ---------------------------------------------------------------------------
+# Summary
+# ---------------------------------------------------------------------------
 echo "$SEPARATOR_LINE"
 echo "Results:"
-echo "  Total:  $TOTAL"
+echo "  Total HTML files:  $TOTAL"
 echo -e "  ${GREEN}Passed: $PASSED${NC}"
 if [[ $FAILED -gt 0 ]]; then
     echo -e "  ${RED}Failed: $FAILED${NC}"
 else
     echo -e "  ${GREEN}Failed: $FAILED${NC}"
 fi
+if [[ $META_ERRORS -gt 0 ]]; then
+    echo -e "  ${RED}Metadata errors: $META_ERRORS${NC}"
+else
+    echo -e "  ${GREEN}Metadata errors: $META_ERRORS${NC}"
+fi
 echo "$SEPARATOR_LINE"
 
-if [[ $FAILED -gt 0 ]]; then
+if [[ $FAILED -gt 0 ]] || [[ $META_ERRORS -gt 0 ]]; then
     exit 1
 fi

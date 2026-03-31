@@ -55,11 +55,10 @@ AI bot (by User-Agent)                 -> Markdown (via NGINX config)
 
 ## Quick Start
 
-Three steps are enough for a first trial:
+Two steps are enough for a first trial:
 
 1. Install the module.
-2. Enable it on one location.
-3. Verify that Markdown and HTML variants both behave as expected.
+2. Verify that Markdown and HTML variants both behave as expected.
 
 ### 1. Install the module
 
@@ -68,49 +67,30 @@ curl -sSL https://raw.githubusercontent.com/cnkang/nginx-markdown-for-agents/mai
 sudo nginx -t && sudo nginx -s reload
 ```
 
-The installer detects the local NGINX version, downloads the matching module artifact, and wires up the basic `load_module` integration for common official NGINX builds.
+The install script auto-detects the local NGINX version, downloads the matching module artifact, and wires up `load_module` and `markdown_filter on` — no manual configuration editing required.
 
-Building from source or using a custom NGINX build? Start with the [Installation Guide](docs/guides/INSTALLATION.md).
-For official NGINX Docker image source builds, see `examples/docker/Dockerfile.official-nginx-source-build` and the Docker section in [docs/guides/INSTALLATION.md](docs/guides/INSTALLATION.md).
+For alternative installation methods (source builds, Docker, custom NGINX builds), troubleshooting, and detailed instructions, see the [Installation Guide](docs/guides/INSTALLATION.md).
 
-### 2. Enable Markdown on one route
+### 2. Verify behavior
 
-```nginx
-load_module modules/ngx_http_markdown_filter_module.so;
+The install script already enables `markdown_filter on` and wires `load_module`, so the default NGINX welcome page is ready for conversion. No additional configuration is needed for a first trial.
 
-http {
-    upstream backend {
-        server 127.0.0.1:8080;
-    }
-
-    server {
-        listen 80;
-
-        location /docs/ {
-            markdown_filter on;
-            proxy_set_header Accept-Encoding "";
-            proxy_pass http://backend;
-        }
-    }
-}
-```
-
-`proxy_set_header Accept-Encoding "";` is the simplest starting point when your upstream may compress responses. Once the basic path works, you can move to the module's built-in compressed-response handling described in [Automatic Decompression](docs/features/AUTOMATIC_DECOMPRESSION.md).
-
-### 3. Verify behavior
+If you want to enable conversion on a specific route with a backend instead, see the [Deployment Examples](docs/guides/DEPLOYMENT_EXAMPLES.md).
 
 ```bash
 # Markdown variant
-curl -sD - -o /dev/null -H "Accept: text/markdown" http://localhost/docs/
+curl -sD - -o /dev/null -H "Accept: text/markdown" http://localhost/
 
 # Original HTML remains available
-curl -sD - -o /dev/null -H "Accept: text/html" http://localhost/docs/
+curl -sD - -o /dev/null -H "Accept: text/html" http://localhost/
 ```
 
 Expected result:
 
 - `Accept: text/markdown` returns `Content-Type: text/markdown; charset=utf-8`
 - `Accept: text/html` still returns the original HTML response
+
+If something doesn't work as expected, see the [Troubleshooting](docs/guides/INSTALLATION.md#10-troubleshooting) section in the installation guide.
 
 If you want a practical production-oriented configuration next, go straight to [docs/guides/DEPLOYMENT_EXAMPLES.md](docs/guides/DEPLOYMENT_EXAMPLES.md).
 
@@ -350,8 +330,15 @@ Makefile               Top-level build and test entrypoints
 
 ## Roadmap
 
-Current release (0.3.0):
+Current release (0.4.0):
 
+- Prometheus-compatible metrics endpoint for operational monitoring
+- Unified decision reason codes for conversion transparency
+- Rollout cookbook with selective enablement and canary patterns
+- Rollback guide with trigger conditions and executable procedures
+- Benchmark corpus with reproducible evidence and regression detection
+- Parser path optimizations: noise region pruning, simple structure fast path
+- Restructured installation guide with shortest success path
 - Incremental processing for large responses
 - Matrix-driven release automation pipeline
 - Performance baseline gating system
@@ -365,7 +352,6 @@ Near-term focus:
 - Performance regression tracking with CI artifact capture
 - Deployment validation across diverse environments
 - Community feedback integration
-- Parser-path optimization opportunities
 
 Future exploration:
 

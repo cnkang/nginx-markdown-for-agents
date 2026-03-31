@@ -148,7 +148,9 @@ is_enabled_runtime(const request_t *r, const conf_t *conf)
         return 0;
     }
 
-    if (conf->enabled_source != ENABLED_COMPLEX || conf->enabled_complex == NULL) {
+    if (conf->enabled_source != ENABLED_COMPLEX
+        || conf->enabled_complex == NULL)
+    {
         return conf->enabled;
     }
 

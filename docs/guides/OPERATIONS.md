@@ -9,6 +9,8 @@
 5. [Upgrade Procedures](#upgrade-procedures)
 6. [Operational Checklists](#operational-checklists)
 7. [Runbooks](#runbooks)
+8. [Reason Code Reference for Operators](#reason-code-reference-for-operators)
+9. [Decision Logging](#decision-logging)
 
 ---
 
@@ -1579,6 +1581,333 @@ curl -sD - -o /dev/null -H "Accept: text/markdown" http://localhost/test
 
 ---
 
+## Reason Code Reference for Operators
+
+Every request that enters the module's decision chain receives a reason code that explains the outcome. These reason codes appear in decision log entries and Prometheus metrics labels using the same strings, so you can correlate a log entry directly with a metric counter without translation.
+
+For the full decision chain model (check order, flowchart, and outcome determination logic), see [Decision Chain Model](../features/DECISION_CHAIN.md).
+
+### Reason Code Table
+
+The table below maps each reason code to its internal enum, error category, request state, description, and the action you should take when you see it.
+
+| Reason Code | Eligibility Enum | Error Category | Request State | Description | Suggested Operator Action |
+|---|---|---|---|---|---|
+| `SKIP_CONFIG` | `NGX_HTTP_MARKDOWN_INELIGIBLE_CONFIG` | — | NOT_ENABLED | Module disabled by configuration for this scope | Expected for scopes where you have not enabled conversion. If unexpected, check `markdown_filter` in the relevant `location`/`server` block. |
+| `SKIP_METHOD` | `NGX_HTTP_MARKDOWN_INELIGIBLE_METHOD` | — | SKIPPED | Request method is not GET or HEAD | Expected for POST/PUT/DELETE requests. No action needed. |
+| `SKIP_STATUS` | `NGX_HTTP_MARKDOWN_INELIGIBLE_STATUS` | — | SKIPPED | Upstream response status is not 200 OK or 206 Partial Content | Check upstream health if you see many non-200/206 responses for pages you expect to convert. |
+| `SKIP_RANGE` | `NGX_HTTP_MARKDOWN_INELIGIBLE_RANGE` | — | SKIPPED | Client sent a Range request header | Expected behavior — partial content cannot be converted. No action needed. |
+| `SKIP_STREAMING` | `NGX_HTTP_MARKDOWN_INELIGIBLE_STREAMING` | — | SKIPPED | Response matches `markdown_stream_types` (unbounded streaming) | Expected for SSE/streaming endpoints. If a static page triggers this, check your `markdown_stream_types` configuration. |
+| `SKIP_CONTENT_TYPE` | `NGX_HTTP_MARKDOWN_INELIGIBLE_CONTENT_TYPE` | — | SKIPPED | Upstream Content-Type is not `text/html` | Expected for JSON, XML, image, and other non-HTML responses. If an HTML page triggers this, check the upstream `Content-Type` header. |
+| `SKIP_SIZE` | `NGX_HTTP_MARKDOWN_INELIGIBLE_SIZE` | — | SKIPPED | Response body exceeds `markdown_max_size` | Increase `markdown_max_size` if the page should be converted, or exclude oversized pages from conversion scope. |
+| `SKIP_AUTH` | `NGX_HTTP_MARKDOWN_INELIGIBLE_AUTH` | — | SKIPPED | Auth policy denies conversion for authenticated requests | Expected when `markdown_auth_policy deny` is configured. If you see it unexpectedly, check whether the request is authenticated and whether the location/server block should allow conversion. |
+| `SKIP_ACCEPT` | _(Accept negotiation)_ | — | SKIPPED | Accept header does not include `text/markdown` | Expected for normal browser traffic. If an AI agent triggers this, verify the client sends `Accept: text/markdown`. Check `markdown_on_wildcard` if using `*/*`. |
+| `ELIGIBLE_CONVERTED` | `NGX_HTTP_MARKDOWN_ELIGIBLE` | — | CONVERTED | All checks passed, conversion succeeded | No action needed — this is the success path. |
+| `ELIGIBLE_FAILED_OPEN` | `NGX_HTTP_MARKDOWN_ELIGIBLE` | _(any)_ | FAILED | Conversion attempted but failed; original HTML served (`markdown_on_error pass`) | Investigate the failure sub-classification (see below). The client received HTML, so no user impact. Review failure rate trends. |
+| `ELIGIBLE_FAILED_CLOSED` | `NGX_HTTP_MARKDOWN_ELIGIBLE` | _(any)_ | FAILED | Conversion attempted but failed; 502 returned (`markdown_on_error reject`) | Urgent — clients are receiving errors. Switch to `markdown_on_error pass` or disable conversion for the affected scope. Investigate root cause. |
+
+#### Failure Sub-Classification Codes
+
+When conversion fails (`ELIGIBLE_FAILED_OPEN` or `ELIGIBLE_FAILED_CLOSED`), the decision log also records a failure sub-classification that provides more detail:
+
+| Failure Code | Error Category Enum | Description | Suggested Operator Action |
+|---|---|---|---|
+| `FAIL_CONVERSION` | `NGX_HTTP_MARKDOWN_ERROR_CONVERSION` | HTML parse or conversion error | Inspect the failing HTML with `curl`. Check if the upstream changed its HTML structure. Report a bug if the HTML is valid. |
+| `FAIL_RESOURCE_LIMIT` | `NGX_HTTP_MARKDOWN_ERROR_RESOURCE_LIMIT` | Timeout (`markdown_timeout` exceeded) or memory limit reached | Increase `markdown_timeout` or `markdown_max_size`, or exclude large/complex pages from conversion scope. |
+| `FAIL_SYSTEM` | `NGX_HTTP_MARKDOWN_ERROR_SYSTEM` | Internal or system error | This should not occur in normal operation. Check system resources (`free -h`, `dmesg`). If persistent, report a bug with logs. |
+
+### Request States
+
+Every request ends in one of four mutually exclusive states, derived from its reason code:
+
+| Request State | Reason Codes | Meaning |
+|---|---|---|
+| NOT_ENABLED | `SKIP_CONFIG` | Module is disabled for this scope. The request was never evaluated. |
+| SKIPPED | `SKIP_METHOD`, `SKIP_STATUS`, `SKIP_RANGE`, `SKIP_STREAMING`, `SKIP_CONTENT_TYPE`, `SKIP_SIZE`, `SKIP_AUTH`, `SKIP_ACCEPT` | Module is enabled but the request did not pass an eligibility check. |
+| CONVERTED | `ELIGIBLE_CONVERTED` | All checks passed and conversion succeeded. |
+| FAILED | `ELIGIBLE_FAILED_OPEN`, `ELIGIBLE_FAILED_CLOSED` | All checks passed, conversion was attempted, but it did not succeed. |
+
+#### Deriving Request State Counts from Metrics
+
+You can determine the count of requests in each state using the metrics endpoint and decision log entries.
+
+**From the metrics endpoint** (`curl -s http://localhost/markdown-metrics`):
+
+```text
+CONVERTED   = conversions_succeeded
+
+FAILED      = conversions_failed
+              (breakdown: failures_conversion + failures_resource_limit + failures_system)
+```
+
+> **Note:** `conversions_failed` counts all requests that entered the FAILED state, including conversion errors, decompression failures, and system errors. The breakdown counters (`failures_conversion`, `failures_resource_limit`, `failures_system`) provide the sub-classification.
+
+**From decision log entries** (skip reason distribution is not in the metrics endpoint — use log grep):
+
+```text
+NOT_ENABLED = count of "reason=SKIP_CONFIG" in decision log entries
+
+SKIPPED     = count of "reason=SKIP_*" (excluding SKIP_CONFIG) in decision log entries
+              (i.e., SKIP_METHOD + SKIP_STATUS + SKIP_RANGE + SKIP_STREAMING
+               + SKIP_CONTENT_TYPE + SKIP_SIZE + SKIP_AUTH + SKIP_ACCEPT)
+```
+
+> **Note:** Per-skip-reason counters are not currently in the metrics endpoint; use decision log grep patterns to derive skip reason distribution.
+
+Example commands to check each state:
+
+```bash
+# Check metrics endpoint
+curl -s http://localhost/markdown-metrics
+
+# Count NOT_ENABLED from logs
+grep "markdown decision:" /var/log/nginx/error.log | grep -c "reason=SKIP_CONFIG"
+
+# Count SKIPPED from logs (all SKIP_* except SKIP_CONFIG)
+grep "markdown decision:" /var/log/nginx/error.log | \
+  grep "reason=SKIP_" | grep -vc "reason=SKIP_CONFIG"
+
+# Count CONVERTED from logs
+grep "markdown decision:" /var/log/nginx/error.log | grep -c "reason=ELIGIBLE_CONVERTED"
+
+# Count FAILED from logs
+grep "markdown decision:" /var/log/nginx/error.log | grep -c "reason=ELIGIBLE_FAILED"
+```
+
+### Reason Code and Metrics Label Alignment
+
+Reason codes use the same uppercase snake_case strings in both decision log entries and Prometheus metrics labels. This means you can go from a metric spike to the corresponding log entries without any translation.
+
+The alignment works as follows:
+
+| Reason Code Category | Metrics Endpoint Field | Log Correlation | Example |
+|---|---|---|---|
+| Skip codes (`SKIP_*`) | _(not in metrics endpoint — use log grep)_ | `reason` field in decision log | `grep "reason=SKIP_METHOD" error.log` |
+| Failure codes (`FAIL_*`) | `failures_conversion`, `failures_resource_limit`, `failures_system` | `category` field in decision log | `grep "category=FAIL_CONVERSION" error.log` |
+| `ELIGIBLE_CONVERTED` | `conversions_succeeded` | `reason` field in decision log | `grep "reason=ELIGIBLE_CONVERTED" error.log` |
+| `ELIGIBLE_FAILED_OPEN` | `conversions_failed` (aggregate) | `reason` field in decision log | `grep "reason=ELIGIBLE_FAILED_OPEN" error.log` |
+| `ELIGIBLE_FAILED_CLOSED` | `conversions_failed` (aggregate) | `reason` field in decision log | `grep "reason=ELIGIBLE_FAILED_CLOSED" error.log` |
+
+#### Correlating a Metric Spike with Logs
+
+When you see a spike in a metric, use the same reason code string to find the corresponding log entries:
+
+```bash
+# Example: you see failures_conversion increasing in the metrics endpoint
+# Find the matching log entries:
+grep "markdown decision:" /var/log/nginx/error.log | grep "category=FAIL_CONVERSION"
+
+# Example: you see conversions_failed increasing
+# Find the matching log entries:
+grep "markdown decision:" /var/log/nginx/error.log | grep "reason=ELIGIBLE_FAILED"
+
+# See the full reason code distribution:
+grep "markdown decision:" /var/log/nginx/error.log | \
+  grep -oP 'reason=\K[A-Z_]+' | sort | uniq -c | sort -rn
+```
+
+### Related Documentation
+
+- [Decision Chain Model](../features/DECISION_CHAIN.md) — full check order, flowchart, outcome determination, and implementation details
+- [Rollout Cookbook](ROLLOUT_COOKBOOK.md) — staged rollout procedures with observation checkpoints
+- [Rollback Guide](ROLLBACK_GUIDE.md) — how to disable or narrow conversion scope
+
+---
+
+## Decision Logging
+
+The module emits structured decision log entries to the NGINX error log for every request that enters the [decision chain](../features/DECISION_CHAIN.md). Each entry records the reason code and request context, giving operators a per-request view of why the module converted, skipped, or failed a request.
+
+Decision logging is controlled by the `markdown_log_verbosity` directive. No separate directive is needed — the existing verbosity knob gates which outcomes produce log entries and how much detail they contain.
+
+### Log Entry Format
+
+Every decision log entry uses a consistent, parseable structure with space-separated `key=value` pairs. The prefix `markdown decision:` identifies these entries in the NGINX error log.
+
+#### Base Format (info verbosity)
+
+```text
+markdown decision: reason=<REASON_CODE> method=<METHOD> uri=<URI> content_type=<TYPE>
+```
+
+Fields:
+
+| Field | Description | Example Values |
+|---|---|---|
+| `reason` | The [reason code](#reason-code-table) for this request's outcome | `ELIGIBLE_CONVERTED`, `SKIP_ACCEPT`, `ELIGIBLE_FAILED_OPEN` |
+| `method` | HTTP request method | `GET`, `HEAD`, `POST` |
+| `uri` | Request URI (path only, no query string) | `/docs/api`, `/help/getting-started` |
+| `content_type` | Upstream response Content-Type, or `-` if absent | `text/html`, `application/json`, `-` |
+
+#### Extended Format (debug verbosity)
+
+When `markdown_log_verbosity` is set to `debug`, three additional fields are appended:
+
+```text
+markdown decision: reason=<REASON_CODE> method=<METHOD> uri=<URI> content_type=<TYPE> filter_value=<VALUE> accept=<ACCEPT> status=<STATUS>
+```
+
+Additional fields:
+
+| Field | Description | Example Values |
+|---|---|---|
+| `filter_value` | Resolved value of the `markdown_filter` directive | `on`, `off`, `$variable` |
+| `accept` | Client's Accept header value, or `-` if absent | `text/markdown`, `text/html, text/markdown;q=0.9`, `-` |
+| `status` | Upstream response HTTP status code | `200`, `404`, `500` |
+
+### Concrete Log Line Examples
+
+These examples show what operators will see in `/var/log/nginx/error.log`. The NGINX timestamp, log level, PID, and connection fields are included for realism.
+
+#### Successful conversion (info verbosity)
+
+```text
+2025/01/15 14:30:25 [info] 1234#0: *567 markdown decision: reason=ELIGIBLE_CONVERTED method=GET uri=/docs/api content_type=text/html while sending to client, client: 10.0.0.5, server: example.com, request: "GET /docs/api HTTP/1.1", upstream: "http://127.0.0.1:8080/docs/api", host: "example.com"
+```
+
+#### Skipped — Accept header does not request Markdown (info verbosity)
+
+```text
+2025/01/15 14:30:26 [info] 1234#0: *568 markdown decision: reason=SKIP_ACCEPT method=GET uri=/docs/api content_type=text/html while sending to client, client: 10.0.0.5, server: example.com, request: "GET /docs/api HTTP/1.1", host: "example.com"
+```
+
+#### Conversion failed open (warn verbosity or higher)
+
+```text
+2025/01/15 14:30:27 [warn] 1234#0: *569 markdown decision: reason=ELIGIBLE_FAILED_OPEN method=GET uri=/blog/post-1 content_type=text/html while sending to client, client: 10.0.0.5, server: example.com, request: "GET /blog/post-1 HTTP/1.1", upstream: "http://127.0.0.1:8080/blog/post-1", host: "example.com"
+```
+
+#### Debug extended format
+
+```text
+2025/01/15 14:30:28 [info] 1234#0: *570 markdown decision: reason=SKIP_METHOD method=POST uri=/api/submit content_type=text/html filter_value=on accept=text/markdown status=200 while sending to client, client: 10.0.0.5, server: example.com, request: "POST /api/submit HTTP/1.1", host: "example.com"
+```
+
+### Verbosity Gating
+
+The `markdown_log_verbosity` directive controls which decision outcomes produce log entries and how much detail they contain. The default is `info`.
+
+| Verbosity Level | Outcomes Logged | Format | Use Case |
+|---|---|---|---|
+| `error` | Failure outcomes (`ELIGIBLE_FAILED_OPEN`, `ELIGIBLE_FAILED_CLOSED`) only | Base | Production with minimal log volume |
+| `warn` | Failure outcomes (`ELIGIBLE_FAILED_OPEN`, `ELIGIBLE_FAILED_CLOSED`) only | Base | Production monitoring |
+| `info` (default) | All outcomes | Base | Recommended for rollout — full visibility into every decision |
+| `debug` | All outcomes | Extended (adds `filter_value`, `accept`, `status`) | Troubleshooting — maximum detail for diagnosing specific requests |
+
+At `error` and `warn` levels, non-failure outcomes (`SKIP_*` and `ELIGIBLE_CONVERTED`) are silently suppressed. Both levels only emit failure outcomes. At `info` and `debug` levels, they include full outcomes. When failures are logged at any level, failure subclassifications (like `FAIL_CONVERSION`, `FAIL_RESOURCE_LIMIT`, `FAIL_SYSTEM`) are emitted in the `category=` field per `ngx_http_markdown_log_decision_with_category()`, not as standalone `FAIL_*` codes in the `reason=` field.
+
+#### Configuration examples
+
+```nginx
+# Default — log all outcomes (recommended during rollout)
+markdown_log_verbosity info;
+
+# Production steady-state — log only failures
+markdown_log_verbosity warn;
+
+# Minimal — log only conversion failures (ELIGIBLE_FAILED_*)
+markdown_log_verbosity error;
+
+# Troubleshooting — log everything with extended fields
+markdown_log_verbosity debug;
+```
+
+### NGINX Log Level Mapping
+
+The module maps decision outcomes to NGINX log levels so that NGINX's own `error_log` level acts as an outer filter:
+
+| Outcome Type | NGINX Log Level | Reason Codes |
+|---|---|---|
+| Non-failure | `NGX_LOG_INFO` | All `SKIP_*` codes, `ELIGIBLE_CONVERTED` |
+| Failure | `NGX_LOG_WARN` | `ELIGIBLE_FAILED_OPEN`, `ELIGIBLE_FAILED_CLOSED` |
+
+This means:
+- If your NGINX `error_log` level is set to `warn`, you will only see failure decision entries regardless of `markdown_log_verbosity`.
+- If your NGINX `error_log` level is set to `info` or `debug`, the `markdown_log_verbosity` directive controls which entries appear.
+- For full decision logging visibility, ensure `error_log` is at `info` level or lower.
+
+### Parsing Decision Log Entries
+
+Decision log entries use a consistent `key=value` format designed for easy parsing with standard Unix tools.
+
+#### Find all decision log entries
+
+```bash
+grep "markdown decision:" /var/log/nginx/error.log
+```
+
+#### Count entries by reason code
+
+```bash
+grep "markdown decision:" /var/log/nginx/error.log | \
+  grep -oP 'reason=\K[A-Z_]+' | sort | uniq -c | sort -rn
+```
+
+Example output:
+
+```text
+   4521 SKIP_ACCEPT
+   1203 ELIGIBLE_CONVERTED
+    342 SKIP_CONFIG
+     18 SKIP_CONTENT_TYPE
+      3 ELIGIBLE_FAILED_OPEN
+      1 SKIP_METHOD
+```
+
+#### Find all failures
+
+```bash
+grep "markdown decision:" /var/log/nginx/error.log | \
+  grep "reason=ELIGIBLE_FAILED"
+```
+
+#### Extract URIs that failed conversion
+
+```bash
+grep "markdown decision:" /var/log/nginx/error.log | \
+  grep "reason=ELIGIBLE_FAILED" | \
+  grep -oP 'uri=\K[^ ]+' | sort | uniq -c | sort -rn
+```
+
+#### Show reason code distribution per hour
+
+```bash
+grep "markdown decision:" /var/log/nginx/error.log | \
+  awk '{print substr($1,1,13), $0}' | \
+  grep -oP '^\S+ .*reason=\K[A-Z_]+' | sort | uniq -c
+```
+
+#### Extract full decision fields with awk
+
+```bash
+grep "markdown decision:" /var/log/nginx/error.log | \
+  awk -F'markdown decision: ' '{print $2}' | \
+  awk -F' (while|,) ' '{print $1}'
+```
+
+This extracts just the `key=value` portion, stripping the NGINX boilerplate. Example output:
+
+```text
+reason=ELIGIBLE_CONVERTED method=GET uri=/docs/api content_type=text/html
+reason=SKIP_ACCEPT method=GET uri=/index.html content_type=text/html
+reason=ELIGIBLE_FAILED_OPEN method=GET uri=/blog/post-1 content_type=text/html
+```
+
+#### Monitor decisions in real time
+
+```bash
+tail -f /var/log/nginx/error.log | grep "markdown decision:"
+```
+
+### Related Documentation
+
+- [Decision Chain Model](../features/DECISION_CHAIN.md) — check order, reason code definitions, and outcome determination
+- [Reason Code Reference](#reason-code-reference-for-operators) — complete reason code table with operator actions
+- [Rollout Cookbook](ROLLOUT_COOKBOOK.md) — observation checkpoints that use decision log patterns
+- [Rollback Guide](ROLLBACK_GUIDE.md) — verification steps that check decision log entries after rollback
+
+---
+
 ## References
 
 - **Configuration Guide:** [CONFIGURATION.md](CONFIGURATION.md)
@@ -1592,6 +1921,7 @@ curl -sD - -o /dev/null -H "Accept: text/markdown" http://localhost/test
 - **Architecture Index:** [../architecture/README.md](../architecture/README.md)
 - **Request Lifecycle:** [../architecture/REQUEST_LIFECYCLE.md](../architecture/REQUEST_LIFECYCLE.md)
 - **Configuration to Behavior Map:** [../architecture/CONFIG_BEHAVIOR_MAP.md](../architecture/CONFIG_BEHAVIOR_MAP.md)
+- **Decision Chain Model:** [../features/DECISION_CHAIN.md](../features/DECISION_CHAIN.md)
 
 ---
 
