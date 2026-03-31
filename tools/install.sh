@@ -13,7 +13,7 @@ RELEASE_VERSION="${VERSION:-}"
 DOWNLOAD_URL_OVERRIDE="${DOWNLOAD_URL_OVERRIDE:-}"
 DOWNLOAD_SHA256="${DOWNLOAD_SHA256:-}"
 MIN_SUPPORTED_NGINX_VERSION="1.24.0"
-SOURCE_BUILD_URL="https://github.com/cnkang/nginx-markdown-for-agents/tree/main/docs/guides/INSTALLATION.md#building-from-source"
+SOURCE_BUILD_URL="https://github.com/cnkang/nginx-markdown-for-agents/tree/main/docs/guides/INSTALLATION.md#6-secondary-manual-source-build"
 SUPPORTED_ARCHITECTURES="x86_64, aarch64"
 
 # --json flag: when set, output structured JSON to stdout at exit
