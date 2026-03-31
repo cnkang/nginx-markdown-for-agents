@@ -4,12 +4,11 @@
  *
  * Validates: Requirements 1.1, 1.2, 1.3, 1.4, 1.5, 13.2
  *
- * NOTE: This test redefines its own copies of the module enums and
- * lookup functions rather than including the real header.  This means
- * it cannot catch issues like typedef ordering or enum value drift.
- * For compile-time verification that the real header types are
- * consistent, see header_compile_test.c.  For full integration
- * coverage, use the e2e and integration test suites.
+ * NOTE: This test includes the real module header and reason
+ * implementation (ngx_http_markdown_reason.c) so it verifies the
+ * actual production enum values and lookup functions.  It does not
+ * cover NGINX runtime integration (pool allocation, logging) —
+ * for that, see the e2e and integration test suites.
  */
 
 #include "test_common.h"
@@ -34,6 +33,14 @@ static void test_snake_case_format(void);
 static int
 matches_snake_case(const ngx_str_t *s)
 {
+    if (s == NULL || s->data == NULL || s->len == 0) {
+        return 0;
+    }
+
+    if (!isupper((unsigned char) s->data[0])) {
+        return 0;
+    }
+
     for (size_t i = 1; i < s->len; i++) {
         unsigned char ch = s->data[i];
         if (!isupper(ch) && !isdigit(ch) && ch != '_') {
