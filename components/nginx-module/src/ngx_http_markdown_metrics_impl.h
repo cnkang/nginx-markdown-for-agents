@@ -109,6 +109,21 @@ static u_char *
 ngx_http_markdown_metrics_write_prometheus(
     u_char *p, u_char *end,
     ngx_http_markdown_metrics_snapshot_t *snapshot);
+static u_char *
+ngx_http_markdown_metrics_render_response_body(
+    ngx_http_request_t *r,
+    ngx_buf_t *b,
+    ngx_uint_t format,
+    ngx_http_markdown_metrics_snapshot_t *snapshot,
+    ngx_atomic_uint_t conversions_completed,
+    ngx_atomic_uint_t conversion_time_avg_ms,
+    ngx_atomic_uint_t input_bytes_avg,
+    ngx_atomic_uint_t output_bytes_avg);
+static ngx_int_t
+ngx_http_markdown_metrics_send_response(
+    ngx_http_request_t *r,
+    ngx_buf_t *b,
+    u_char *response_end);
 
 /**
  * Capture a best-effort snapshot of the global metrics counters into the
@@ -659,6 +674,111 @@ ngx_http_markdown_metrics_write_text(
 }
 
 /*
+ * Render the metrics response body for the negotiated format and set the
+ * matching Content-Type header on the request.
+ *
+ * Returns the end pointer for the rendered body on success.
+ * When Prometheus rendering exhausts the fixed-size buffer, NULL is
+ * returned so the caller can fail the request with
+ * NGX_HTTP_INTERNAL_SERVER_ERROR.
+ */
+static u_char *
+ngx_http_markdown_metrics_render_response_body(
+    ngx_http_request_t *r,
+    ngx_buf_t *b,
+    ngx_uint_t format,
+    ngx_http_markdown_metrics_snapshot_t *snapshot,
+    ngx_atomic_uint_t conversions_completed,
+    ngx_atomic_uint_t conversion_time_avg_ms,
+    ngx_atomic_uint_t input_bytes_avg,
+    ngx_atomic_uint_t output_bytes_avg)
+{
+    u_char  *p;
+
+    p = b->pos;
+
+    switch (format) {
+
+    case NGX_HTTP_MARKDOWN_METRICS_OUTPUT_JSON:
+        /* JSON and plain text share the precomputed aggregate values. */
+        p = ngx_http_markdown_metrics_write_json(
+                p, b->end, snapshot,
+                conversions_completed,
+                conversion_time_avg_ms,
+                input_bytes_avg,
+                output_bytes_avg);
+        ngx_str_set(&r->headers_out.content_type,
+                     "application/json");
+        return p;
+
+    case NGX_HTTP_MARKDOWN_METRICS_OUTPUT_PROMETHEUS:
+        /* Prometheus writer reports truncation explicitly via NULL. */
+        p = ngx_http_markdown_metrics_write_prometheus(
+                p, b->end, snapshot);
+        if (p == NULL) {
+            ngx_log_error(NGX_LOG_ERR,
+                r->connection->log, 0,
+                "markdown_metrics: Prometheus output "
+                "truncated, buffer too small");
+            return NULL;
+        }
+
+        ngx_str_set(&r->headers_out.content_type,
+                     "text/plain; version=0.0.4; "
+                     "charset=utf-8");
+        return p;
+
+    default:
+        p = ngx_http_markdown_metrics_write_text(
+                p, b->end, snapshot,
+                conversions_completed,
+                conversion_time_avg_ms,
+                input_bytes_avg,
+                output_bytes_avg);
+        ngx_str_set(&r->headers_out.content_type,
+                     "text/plain");
+        return p;
+    }
+}
+
+/*
+ * Populate response metadata and stream the prepared metrics buffer
+ * back to the client.
+ */
+static ngx_int_t
+ngx_http_markdown_metrics_send_response(
+    ngx_http_request_t *r,
+    ngx_buf_t *b,
+    u_char *response_end)
+{
+    ngx_int_t    rc;
+    ngx_chain_t  out;
+    size_t       len;
+
+    len = response_end - b->pos;
+    b->last = response_end;
+
+    /* Finalize headers only after the body length is known. */
+    r->headers_out.status = NGX_HTTP_OK;
+    r->headers_out.content_length_n = len;
+    r->headers_out.content_type_len =
+        r->headers_out.content_type.len;
+
+    b->last_buf = (r == r->main) ? 1 : 0;
+    b->last_in_chain = 1;
+
+    rc = ngx_http_send_header(r);
+    if (rc == NGX_ERROR || rc > NGX_OK || r->header_only) {
+        return rc;
+    }
+
+    out.buf = b;
+    out.next = NULL;
+
+    return ngx_http_output_filter(r, &out);
+}
+
+/*
  * HTTP handler for the /markdown_metrics endpoint.
  *
  * - Only responds to GET and HEAD requests; other methods are rejected with
@@ -680,9 +800,7 @@ ngx_http_markdown_metrics_handler(ngx_http_request_t *r)
 {
     ngx_int_t                             rc;
     ngx_buf_t                            *b;
-    ngx_chain_t                           out;
-    u_char                               *p;
-    size_t                                len;
+    u_char                               *response_end;
     ngx_uint_t                            format;
     ngx_http_markdown_metrics_snapshot_t  snapshot;
     ngx_atomic_uint_t                     conversions_completed;
@@ -695,6 +813,7 @@ ngx_http_markdown_metrics_handler(ngx_http_request_t *r)
         return rc;
     }
 
+    /* Negotiate the response format before discarding any request body. */
     format = ngx_http_markdown_metrics_select_format(r);
 
     rc = ngx_http_discard_request_body(r);
@@ -702,6 +821,7 @@ ngx_http_markdown_metrics_handler(ngx_http_request_t *r)
         return rc;
     }
 
+    /* Take one best-effort snapshot and derive all aggregate values from it. */
     ngx_http_markdown_collect_metrics_snapshot(&snapshot);
     ngx_http_markdown_metrics_derive_values(
         &snapshot,
@@ -710,6 +830,7 @@ ngx_http_markdown_metrics_handler(ngx_http_request_t *r)
         &input_bytes_avg,
         &output_bytes_avg);
 
+    /* Render into a fixed-size temporary buffer before sending headers. */
     b = ngx_create_temp_buf(r->pool,
             NGX_HTTP_MARKDOWN_METRICS_BUF_SIZE);
     if (b == NULL) {
@@ -719,67 +840,18 @@ ngx_http_markdown_metrics_handler(ngx_http_request_t *r)
         return NGX_HTTP_INTERNAL_SERVER_ERROR;
     }
 
-    p = b->pos;
-
-    switch (format) {
-
-    case NGX_HTTP_MARKDOWN_METRICS_OUTPUT_JSON:
-        p = ngx_http_markdown_metrics_write_json(
-                p, b->end, &snapshot,
-                conversions_completed,
-                conversion_time_avg_ms,
-                input_bytes_avg,
-                output_bytes_avg);
-        ngx_str_set(&r->headers_out.content_type,
-                     "application/json");
-        break;
-
-    case NGX_HTTP_MARKDOWN_METRICS_OUTPUT_PROMETHEUS:
-        p = ngx_http_markdown_metrics_write_prometheus(
-                p, b->end, &snapshot);
-        if (p == NULL) {
-            ngx_log_error(NGX_LOG_ERR,
-                r->connection->log, 0,
-                "markdown_metrics: Prometheus output "
-                "truncated, buffer too small");
-            return NGX_HTTP_INTERNAL_SERVER_ERROR;
-        }
-        ngx_str_set(&r->headers_out.content_type,
-                     "text/plain; version=0.0.4; "
-                     "charset=utf-8");
-        break;
-
-    default:
-        p = ngx_http_markdown_metrics_write_text(
-                p, b->end, &snapshot,
-                conversions_completed,
-                conversion_time_avg_ms,
-                input_bytes_avg,
-                output_bytes_avg);
-        ngx_str_set(&r->headers_out.content_type,
-                     "text/plain");
-        break;
+    response_end = ngx_http_markdown_metrics_render_response_body(
+        r, b, format, &snapshot,
+        conversions_completed,
+        conversion_time_avg_ms,
+        input_bytes_avg,
+        output_bytes_avg);
+    if (response_end == NULL) {
+        return NGX_HTTP_INTERNAL_SERVER_ERROR;
     }
 
-    len = p - b->pos;
-    b->last = p;
-
-    r->headers_out.status = NGX_HTTP_OK;
-    r->headers_out.content_length_n = len;
-    r->headers_out.content_type_len =
-        r->headers_out.content_type.len;
-
-    b->last_buf = (r == r->main) ? 1 : 0;
-    b->last_in_chain = 1;
-
-    rc = ngx_http_send_header(r);
-    if (rc == NGX_ERROR || rc > NGX_OK || r->header_only) {
-        return rc;
-    }
-
-    out.buf = b;
-    out.next = NULL;
-    return ngx_http_output_filter(r, &out);
+    return ngx_http_markdown_metrics_send_response(
+        r, b, response_end);
 }
 
 #endif /* NGX_HTTP_MARKDOWN_METRICS_IMPL_H */
