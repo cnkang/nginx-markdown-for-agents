@@ -62,7 +62,7 @@ static ngx_str_t ngx_http_markdown_reason_fail_system_str =
  *
  * For NGX_HTTP_MARKDOWN_ELIGIBLE the caller should use one of the
  * outcome-specific helpers (converted, failed_open, failed_closed)
- * instead; this function returns ELIGIBLE_CONVERTED as a fallback.
+ * instead; this function returns FAIL_SYSTEM as a fallback.
  *
  * Unknown enum values return FAIL_SYSTEM and log a warning.
  *

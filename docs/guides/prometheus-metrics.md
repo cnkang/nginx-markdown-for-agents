@@ -65,7 +65,7 @@ location /markdown-metrics {
 | `markdown_metrics_format` | `auto` \| `prometheus` | `auto` | http, server, location |
 
 - `auto` — Existing behavior. JSON for `Accept: application/json`, plain text otherwise. Backward compatible with 0.3.0.
-- `prometheus` — Prometheus text exposition format for non-JSON requests. `Accept: application/json` still returns JSON.
+- `prometheus` — Prometheus text exposition format when the client explicitly negotiates it (e.g., `Accept: text/plain; version=0.0.4` or `Accept: application/openmetrics-text`). Plain `text/plain` without the version parameter and requests with no `Accept` header still return the legacy plain text format. `Accept: application/json` still returns JSON.
 
 ### Content Negotiation Behavior
 
@@ -110,7 +110,7 @@ If NGINX listens on a non-standard port or the metrics location uses a different
 
 ### Access Control
 
-The metrics endpoint enforces localhost-only access by default. Prometheus must scrape from the same host (or via a local proxy).
+The metrics endpoint does not enforce any access restrictions by itself. The example above uses NGINX `allow`/`deny` directives to restrict access to localhost. Operators must configure their own access control to prevent exposing `/markdown-metrics` on the public internet.
 
 **Security recommendations:**
 

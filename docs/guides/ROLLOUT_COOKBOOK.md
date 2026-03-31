@@ -162,7 +162,7 @@ Wait at least 30 minutes, then verify:
 ```bash
 # Check for conversion activity
 curl -s http://localhost/markdown-metrics | \
-  grep -E "conversions_(attempted|succeeded|failed)"
+  grep -E "conversions_(succeeded|failed|bypassed)"
 
 # Check decision log entries
 grep "markdown decision:" /var/log/nginx/error.log | tail -10

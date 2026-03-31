@@ -57,11 +57,11 @@ Note: Formal DoD evaluation tables have not been recorded as separate artifacts 
 ### Evidence References
 
 - Spec 5: Governance artifacts in `docs/project/release-gates/`; validation script `tools/release/validate_release_gates.py`
-- Spec 6: Reason codes in `ngx_http_markdown_reason.c`; rollout cookbook in `docs/guides/ROLLOUT_COOKBOOK.md`; rollback guide in `docs/guides/ROLLBACK_GUIDE.md`; decision chain docs in `docs/features/DECISION_CHAIN.md`
-- Spec 7: Prometheus renderer in `ngx_http_markdown_prometheus_impl.h`; metrics guide in `docs/guides/prometheus-metrics.md`; 7 Hypothesis property tests
+- Spec 6: Reason codes in `components/nginx-module/src/ngx_http_markdown_reason.c`; rollout cookbook in `docs/guides/ROLLOUT_COOKBOOK.md`; rollback guide in `docs/guides/ROLLBACK_GUIDE.md`; decision chain docs in `docs/features/DECISION_CHAIN.md`
+- Spec 7: Prometheus renderer in `components/nginx-module/src/ngx_http_markdown_prometheus_impl.h`; metrics guide in `docs/guides/prometheus-metrics.md`; 7 Hypothesis property tests
 - Spec 8: Corpus metadata in `tests/corpus/`; benchmark script in `tools/perf/run_corpus_benchmark.py`; evidence in `docs/evidence/`
 - Spec 9: Demo config in `examples/nginx-configs/00-minimal-demo.conf`; installation guide in `docs/guides/INSTALLATION.md`; validation scripts in `tools/docs/`
-- Spec 10: Pruning module in `converter/pruning.rs`; fast path in `converter/fast_path.rs`; large response in `converter/large_response.rs`; feature docs in `docs/features/parser-path-optimization.md`
+- Spec 10: Pruning module in `components/rust-converter/src/converter/pruning.rs`; fast path in `components/rust-converter/src/converter/fast_path.rs`; large response in `components/rust-converter/src/converter/large_response.rs`; feature docs in `docs/features/parser-path-optimization.md`
 
 ## Risk Register Review
 

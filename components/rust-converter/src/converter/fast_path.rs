@@ -55,6 +55,10 @@ const FAST_PATH_MAX_NODES: usize = 10_000;
 const FAST_PATH_ELEMENTS: &[&str] = &[
     "html",
     "head",
+    "title",
+    "meta",
+    "link",
+    "base",
     "body",
     "h1",
     "h2",
