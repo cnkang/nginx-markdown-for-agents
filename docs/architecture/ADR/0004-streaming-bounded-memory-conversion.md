@@ -11,7 +11,7 @@ The project currently uses full buffering as the primary runtime model (ADR-0002
 Today, that incremental path is still not true streaming:
 
 1. NGINX side still buffers the full response body before conversion.
-2. Rust side `IncrementalConverter` still accumulates all input internally and converts on `finalize`.
+2. Rust-side `IncrementalConverter` still accumulates all input internally and converts on `finalize`.
 3. The parser relies on a full-document DOM model (`html5ever` + `RcDom`), which creates document-size-proportional memory growth.
 
 As a result:

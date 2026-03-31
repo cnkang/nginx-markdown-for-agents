@@ -1845,7 +1845,7 @@ grep "markdown decision:" /var/log/nginx/error.log | \
 
 Example output:
 
-```
+```text
    4521 SKIP_ACCEPT
    1203 ELIGIBLE_CONVERTED
     342 SKIP_CONFIG
@@ -1887,7 +1887,7 @@ grep "markdown decision:" /var/log/nginx/error.log | \
 
 This extracts just the `key=value` portion, stripping the NGINX boilerplate. Example output:
 
-```
+```text
 reason=ELIGIBLE_CONVERTED method=GET uri=/docs/api content_type=text/html
 reason=SKIP_ACCEPT method=GET uri=/index.html content_type=text/html
 reason=ELIGIBLE_FAILED_OPEN method=GET uri=/blog/post-1 content_type=text/html
