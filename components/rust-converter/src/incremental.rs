@@ -227,6 +227,7 @@ impl IncrementalConverter {
         let ct_ref = self.content_type.as_deref();
 
         let mut ctx = ConversionContext::new(self.timeout);
+        ctx.set_input_size_hint(self.buffer.len());
 
         let dom = parse_html_with_charset(&self.buffer, ct_ref)?;
         ctx.check_timeout()?;
