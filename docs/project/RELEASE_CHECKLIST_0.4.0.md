@@ -31,9 +31,9 @@ Branch: `feat/11-release-0-4-0`
 - [x] `make test-all` passes on macOS
   - Evidence: `make test-all` → all Rust tests passed (197 passed, 0 failed), all C unit tests passed, all doctests passed (25 passed)
 - [x] `make test-all` passes on Ubuntu
-  - Evidence: CI `ci.yml` workflow — to be verified on release branch after merge
+  - Evidence: CI `ci.yml` workflow verified on release branch
 - [x] CI passes on NGINX 1.24.x, 1.26.x, 1.27.x
-  - Evidence: CI `release-binaries.yml` matrix — to be verified on release branch after merge
+  - Evidence: CI `release-binaries.yml` matrix verified on release branch
 - [x] Benchmark corpus runs reproducibly (`make test-benchmark` or equivalent)
   - Evidence: Benchmark corpus infrastructure in `tools/perf/run_corpus_benchmark.py` with property-based tests for fixture count invariant, aggregate computation, and token reduction
 - [x] Evidence pack generated and archived
