@@ -121,3 +121,47 @@ jobs:
         with:
           name: perf-baseline-${{ steps.platform.outputs.name }}.json
           path: perf/baselines/${{ steps.platform.outputs.name }}.json
+
+      - name: Run corpus benchmark
+        run: make test-benchmark
+
+      - name: Run corpus benchmark comparison
+        if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.bootstrap_baseline == 'true') }}
+        run: |
+          BASELINE="perf/baselines/corpus-baseline.json"
+          if [ ! -f "$BASELINE" ]; then
+            echo "ERROR: corpus baseline not found at $BASELINE"
+            echo "Run 'make test-benchmark' locally and commit the baseline:"
+            echo "  cp perf/reports/corpus-report.json perf/baselines/corpus-baseline.json"
+            exit 1
+          fi
+          python3 tools/perf/compare_reports.py \
+            --baseline "$BASELINE" \
+            --current perf/reports/corpus-report.json \
+            --thresholds perf/quality-thresholds.json \
+            --output perf/reports/corpus-verdict-${{ steps.platform.outputs.name }}.json
+
+      - name: Generate PR benchmark summary
+        if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.bootstrap_baseline == 'true') }}
+        run: make test-benchmark-summary
+
+      - name: Upload corpus report
+        if: always()
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: corpus-report-${{ steps.platform.outputs.name }}.json
+          path: perf/reports/corpus-report.json
+
+      - name: Upload corpus verdict
+        if: ${{ always() && !(github.event_name == 'workflow_dispatch' && github.event.inputs.bootstrap_baseline == 'true') }}
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: corpus-verdict-${{ steps.platform.outputs.name }}.json
+          path: perf/reports/corpus-verdict-${{ steps.platform.outputs.name }}.json
+
+      - name: Upload before/after examples
+        if: always()
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: corpus-examples
+          path: perf/reports/examples/
