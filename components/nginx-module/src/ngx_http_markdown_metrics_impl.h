@@ -56,9 +56,11 @@ typedef struct {
         ngx_atomic_uint_t brotli;
     } decompressions;
 
-    /* Path hit metrics (threshold router) */
-    ngx_atomic_uint_t fullbuffer_path_hits;
-    ngx_atomic_uint_t incremental_path_hits;
+    /* Path hit metrics (threshold router, grouped to keep field count <= 20) */
+    struct {
+        ngx_atomic_uint_t fullbuffer;
+        ngx_atomic_uint_t incremental;
+    } path_hits;
 
     /* Requests entering the decision chain */
     ngx_atomic_uint_t requests_entered;
@@ -159,8 +161,8 @@ ngx_http_markdown_collect_metrics_snapshot(ngx_http_markdown_metrics_snapshot_t 
     snapshot->decompressions.gzip = metrics->decompressions.gzip;
     snapshot->decompressions.deflate = metrics->decompressions.deflate;
     snapshot->decompressions.brotli = metrics->decompressions.brotli;
-    snapshot->fullbuffer_path_hits = metrics->fullbuffer_path_hits;
-    snapshot->incremental_path_hits = metrics->incremental_path_hits;
+    snapshot->path_hits.fullbuffer = metrics->path_hits.fullbuffer;
+    snapshot->path_hits.incremental = metrics->path_hits.incremental;
     snapshot->requests_entered = metrics->requests_entered;
     snapshot->skips.config = metrics->skips.config;
     snapshot->skips.method = metrics->skips.method;
@@ -334,15 +336,13 @@ ngx_http_markdown_metrics_value_contains(ngx_str_t *value,
     u_char *needle,
     size_t needle_len)
 {
-    size_t  i;
-
     if (value == NULL || needle == NULL || needle_len == 0
         || value->len < needle_len)
     {
         return 0;
     }
 
-    for (i = 0; i + needle_len <= value->len; i++) {
+    for (size_t i = 0; i + needle_len <= value->len; i++) {
         if (ngx_strncasecmp(value->data + i, needle, needle_len)
             == 0)
         {
@@ -529,8 +529,8 @@ ngx_http_markdown_metrics_write_json(
         snapshot->decompressions.gzip,
         snapshot->decompressions.deflate,
         snapshot->decompressions.brotli,
-        snapshot->fullbuffer_path_hits,
-        snapshot->incremental_path_hits,
+        snapshot->path_hits.fullbuffer,
+        snapshot->path_hits.incremental,
         snapshot->requests_entered,
         snapshot->skips.config,
         snapshot->skips.method,
@@ -642,8 +642,8 @@ ngx_http_markdown_metrics_write_text(
         snapshot->decompressions.gzip,
         snapshot->decompressions.deflate,
         snapshot->decompressions.brotli,
-        snapshot->fullbuffer_path_hits,
-        snapshot->incremental_path_hits,
+        snapshot->path_hits.fullbuffer,
+        snapshot->path_hits.incremental,
         snapshot->requests_entered,
         snapshot->skips.config,
         snapshot->skips.method,

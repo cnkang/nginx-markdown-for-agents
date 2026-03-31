@@ -37,8 +37,10 @@ typedef struct {
         unsigned long deflate;
         unsigned long brotli;
     } decompressions;
-    unsigned long fullbuffer_path_hits;
-    unsigned long incremental_path_hits;
+    struct {
+        unsigned long fullbuffer;
+        unsigned long incremental;
+    } path_hits;
     unsigned long requests_entered;
     struct {
         unsigned long config;

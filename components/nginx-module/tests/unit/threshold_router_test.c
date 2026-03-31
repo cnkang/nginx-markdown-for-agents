@@ -47,8 +47,10 @@ typedef struct {
 } ctx_t;
 
 typedef struct {
-    unsigned long  fullbuffer_path_hits;
-    unsigned long  incremental_path_hits;
+    struct {
+        unsigned long  fullbuffer;
+        unsigned long  incremental;
+    } path_hits;
 } metrics_t;
 
 /* --- Threshold router logic (mirrors ngx_http_markdown_header_filter) --- */
@@ -83,9 +85,9 @@ select_processing_path(const conf_t *conf, const request_t *r,
     }
 
     if (ctx->processing_path == PATH_INCREMENTAL) {
-        m->incremental_path_hits++;
+        m->path_hits.incremental++;
     } else {
-        m->fullbuffer_path_hits++;
+        m->path_hits.fullbuffer++;
     }
 }
 
@@ -107,10 +109,10 @@ deferred_path_upgrade(const conf_t *conf, const request_t *r,
         ctx->processing_path = PATH_INCREMENTAL;
         /* Correct counters: undo header-phase fullbuffer hit
          * (guard against underflow) */
-        if (m->fullbuffer_path_hits > 0) {
-            m->fullbuffer_path_hits--;
+        if (m->path_hits.fullbuffer > 0) {
+            m->path_hits.fullbuffer--;
         }
-        m->incremental_path_hits++;
+        m->path_hits.incremental++;
     }
 }
 
@@ -208,8 +210,8 @@ static metrics_t
 fresh_metrics(void)
 {
     metrics_t m;
-    m.fullbuffer_path_hits = 0;
-    m.incremental_path_hits = 0;
+    m.path_hits.fullbuffer = 0;
+    m.path_hits.incremental = 0;
     return m;
 }
 
@@ -231,9 +233,9 @@ test_threshold_off_always_fullbuffer(void)
     select_processing_path(&c, &r, &ctx, &m);
     TEST_ASSERT(ctx.processing_path == PATH_FULLBUFFER,
         "threshold=off should select full-buffer even for large CL");
-    TEST_ASSERT(m.fullbuffer_path_hits == 1,
+    TEST_ASSERT(m.path_hits.fullbuffer == 1,
         "fullbuffer counter should increment");
-    TEST_ASSERT(m.incremental_path_hits == 0,
+    TEST_ASSERT(m.path_hits.incremental == 0,
         "incremental counter should stay zero");
     TEST_PASS("threshold=off always selects full-buffer");
 }
@@ -251,9 +253,9 @@ test_cl_below_threshold_fullbuffer(void)
     select_processing_path(&c, &r, &ctx, &m);
     TEST_ASSERT(ctx.processing_path == PATH_FULLBUFFER,
         "CL below threshold should select full-buffer");
-    TEST_ASSERT(m.fullbuffer_path_hits == 1,
+    TEST_ASSERT(m.path_hits.fullbuffer == 1,
         "fullbuffer counter should increment");
-    TEST_ASSERT(m.incremental_path_hits == 0,
+    TEST_ASSERT(m.path_hits.incremental == 0,
         "incremental counter should stay zero");
     TEST_PASS("CL < threshold selects full-buffer");
 }
@@ -271,9 +273,9 @@ test_cl_equal_threshold_incremental(void)
     select_processing_path(&c, &r, &ctx, &m);
     TEST_ASSERT(ctx.processing_path == PATH_INCREMENTAL,
         "CL equal to threshold should select incremental");
-    TEST_ASSERT(m.incremental_path_hits == 1,
+    TEST_ASSERT(m.path_hits.incremental == 1,
         "incremental counter should increment");
-    TEST_ASSERT(m.fullbuffer_path_hits == 0,
+    TEST_ASSERT(m.path_hits.fullbuffer == 0,
         "fullbuffer counter should stay zero");
     TEST_PASS("CL == threshold selects incremental");
 }
@@ -291,7 +293,7 @@ test_cl_above_threshold_incremental(void)
     select_processing_path(&c, &r, &ctx, &m);
     TEST_ASSERT(ctx.processing_path == PATH_INCREMENTAL,
         "CL above threshold should select incremental");
-    TEST_ASSERT(m.incremental_path_hits == 1,
+    TEST_ASSERT(m.path_hits.incremental == 1,
         "incremental counter should increment");
     TEST_PASS("CL > threshold selects incremental");
 }
@@ -309,7 +311,7 @@ test_unknown_cl_defers_to_fullbuffer(void)
     select_processing_path(&c, &r, &ctx, &m);
     TEST_ASSERT(ctx.processing_path == PATH_FULLBUFFER,
         "Unknown CL should defer to full-buffer in header phase");
-    TEST_ASSERT(m.fullbuffer_path_hits == 1,
+    TEST_ASSERT(m.path_hits.fullbuffer == 1,
         "fullbuffer counter should increment for deferred case");
     TEST_PASS("Unknown CL defers to full-buffer");
 }
@@ -328,16 +330,16 @@ test_deferred_upgrade_when_buffered_exceeds(void)
     select_processing_path(&c, &r, &ctx, &m);
     TEST_ASSERT(ctx.processing_path == PATH_FULLBUFFER,
         "Header phase should select full-buffer");
-    TEST_ASSERT(m.fullbuffer_path_hits == 1,
+    TEST_ASSERT(m.path_hits.fullbuffer == 1,
         "fullbuffer should be 1 after header phase");
 
     /* Body filter: buffered size exceeds threshold → upgrade */
     deferred_path_upgrade(&c, &r, &ctx, 2048, &m);
     TEST_ASSERT(ctx.processing_path == PATH_INCREMENTAL,
         "Deferred upgrade should switch to incremental");
-    TEST_ASSERT(m.fullbuffer_path_hits == 0,
+    TEST_ASSERT(m.path_hits.fullbuffer == 0,
         "fullbuffer counter should be corrected to 0");
-    TEST_ASSERT(m.incremental_path_hits == 1,
+    TEST_ASSERT(m.path_hits.incremental == 1,
         "incremental counter should be 1 after upgrade");
     TEST_PASS("Deferred upgrade works correctly");
 }
@@ -356,9 +358,9 @@ test_deferred_no_upgrade_when_below(void)
     deferred_path_upgrade(&c, &r, &ctx, 512, &m);
     TEST_ASSERT(ctx.processing_path == PATH_FULLBUFFER,
         "Should remain full-buffer when buffered < threshold");
-    TEST_ASSERT(m.fullbuffer_path_hits == 1,
+    TEST_ASSERT(m.path_hits.fullbuffer == 1,
         "fullbuffer counter should stay at 1");
-    TEST_ASSERT(m.incremental_path_hits == 0,
+    TEST_ASSERT(m.path_hits.incremental == 0,
         "incremental counter should stay at 0");
     TEST_PASS("No spurious deferred upgrade");
 }
@@ -381,9 +383,9 @@ test_head_always_fullbuffer(void)
     select_processing_path(&c, &r, &ctx, &m);
     TEST_ASSERT(ctx.processing_path == PATH_FULLBUFFER,
         "HEAD should always select full-buffer");
-    TEST_ASSERT(m.fullbuffer_path_hits == 1,
+    TEST_ASSERT(m.path_hits.fullbuffer == 1,
         "fullbuffer counter should increment for HEAD");
-    TEST_ASSERT(m.incremental_path_hits == 0,
+    TEST_ASSERT(m.path_hits.incremental == 0,
         "incremental counter should stay zero for HEAD");
     TEST_PASS("HEAD always uses full-buffer");
 }
@@ -419,9 +421,9 @@ test_304_always_fullbuffer(void)
     select_processing_path(&c, &r, &ctx, &m);
     TEST_ASSERT(ctx.processing_path == PATH_FULLBUFFER,
         "304 should always select full-buffer");
-    TEST_ASSERT(m.fullbuffer_path_hits == 1,
+    TEST_ASSERT(m.path_hits.fullbuffer == 1,
         "fullbuffer counter should increment for 304");
-    TEST_ASSERT(m.incremental_path_hits == 0,
+    TEST_ASSERT(m.path_hits.incremental == 0,
         "incremental counter should stay zero for 304");
     TEST_PASS("304 always uses full-buffer");
 }
@@ -567,9 +569,9 @@ test_metrics_fullbuffer_increments(void)
         select_processing_path(&c, &r, &ctx, &m);
     }
 
-    TEST_ASSERT(m.fullbuffer_path_hits == 5,
+    TEST_ASSERT(m.path_hits.fullbuffer == 5,
         "fullbuffer counter should be 5 after 5 requests");
-    TEST_ASSERT(m.incremental_path_hits == 0,
+    TEST_ASSERT(m.path_hits.incremental == 0,
         "incremental counter should remain 0");
     TEST_PASS("Fullbuffer counter accumulates correctly");
 }
@@ -589,9 +591,9 @@ test_metrics_incremental_increments(void)
         select_processing_path(&c, &r, &ctx, &m);
     }
 
-    TEST_ASSERT(m.incremental_path_hits == 3,
+    TEST_ASSERT(m.path_hits.incremental == 3,
         "incremental counter should be 3 after 3 requests");
-    TEST_ASSERT(m.fullbuffer_path_hits == 0,
+    TEST_ASSERT(m.path_hits.fullbuffer == 0,
         "fullbuffer counter should remain 0");
     TEST_PASS("Incremental counter accumulates correctly");
 }
@@ -620,9 +622,9 @@ test_metrics_mixed_paths(void)
     ctx = fresh_ctx();
     select_processing_path(&c, &r_head, &ctx, &m);
 
-    TEST_ASSERT(m.fullbuffer_path_hits == 3,
+    TEST_ASSERT(m.path_hits.fullbuffer == 3,
         "fullbuffer should be 3 (2 small + 1 HEAD)");
-    TEST_ASSERT(m.incremental_path_hits == 2,
+    TEST_ASSERT(m.path_hits.incremental == 2,
         "incremental should be 2 (2 large)");
     TEST_PASS("Mixed path counters are correct");
 }

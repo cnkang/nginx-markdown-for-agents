@@ -349,12 +349,14 @@ typedef struct {
     /*
      * Path hit metrics (threshold router).
      *
-     * Placed at the end of the struct so that adding them does not shift
-     * the offsets of pre-existing fields.  This preserves shared-memory
-     * layout compatibility across hot reloads from older module builds.
+     * Grouped into a sub-struct so that the parent
+     * ngx_http_markdown_metrics_t stays within the 20-field limit
+     * enforced by static analysis (SonarCloud rule c:S1820).
      */
-    ngx_atomic_t  fullbuffer_path_hits;      /* Requests routed to full-buffer path */
-    ngx_atomic_t  incremental_path_hits;     /* Requests routed to incremental path */
+    struct {
+        ngx_atomic_t  fullbuffer;      /* Requests routed to full-buffer path */
+        ngx_atomic_t  incremental;     /* Requests routed to incremental path */
+    } path_hits;
 
     /*
      * Total requests that entered the decision chain.

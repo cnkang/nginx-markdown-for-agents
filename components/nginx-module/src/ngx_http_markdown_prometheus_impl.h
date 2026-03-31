@@ -134,7 +134,7 @@ ngx_http_markdown_metrics_write_prometheus(
         "counter\n"
         "nginx_markdown_large_response_path_total %uA\n"
         "\n",
-        snapshot->incremental_path_hits);
+        snapshot->path_hits.incremental);
 
     /* input_bytes_total */
     p = ngx_slprintf(p, end,

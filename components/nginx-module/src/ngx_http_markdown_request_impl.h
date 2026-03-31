@@ -423,9 +423,9 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
         if (ctx->processing_path
             == NGX_HTTP_MARKDOWN_PATH_INCREMENTAL)
         {
-            NGX_HTTP_MARKDOWN_METRIC_INC(incremental_path_hits);
+            NGX_HTTP_MARKDOWN_METRIC_INC(path_hits.incremental);
         } else {
-            NGX_HTTP_MARKDOWN_METRIC_INC(fullbuffer_path_hits);
+            NGX_HTTP_MARKDOWN_METRIC_INC(path_hits.fullbuffer);
         }
     }
 
@@ -492,7 +492,7 @@ ngx_http_markdown_body_filter_convert_and_output(ngx_http_request_t *r,
 
         /*
          * Correct the path hit counters: header filter
-         * already incremented fullbuffer_path_hits, so
+         * already incremented path_hits.fullbuffer, so
          * undo that and count incremental instead.
          *
          * Guard against underflow: only decrement if the
@@ -502,13 +502,13 @@ ngx_http_markdown_body_filter_convert_and_output(ngx_http_request_t *r,
          * zero.
          */
         if (ngx_http_markdown_metrics != NULL
-            && ngx_http_markdown_metrics->fullbuffer_path_hits > 0)
+            && ngx_http_markdown_metrics->path_hits.fullbuffer > 0)
         {
             NGX_HTTP_MARKDOWN_METRIC_ADD(
-                fullbuffer_path_hits, -1);
+                path_hits.fullbuffer, -1);
         }
         NGX_HTTP_MARKDOWN_METRIC_INC(
-            incremental_path_hits);
+            path_hits.incremental);
     }
 #endif
 

@@ -50,8 +50,8 @@ collect_snapshot(snapshot_t *snap)
     snap->decompressions.gzip = m->decompressions.gzip;
     snap->decompressions.deflate = m->decompressions.deflate;
     snap->decompressions.brotli = m->decompressions.brotli;
-    snap->fullbuffer_path_hits = m->fullbuffer_path_hits;
-    snap->incremental_path_hits = m->incremental_path_hits;
+    snap->path_hits.fullbuffer = m->path_hits.fullbuffer;
+    snap->path_hits.incremental = m->path_hits.incremental;
     snap->requests_entered = m->requests_entered;
     snap->skips.config = m->skips.config;
     snap->skips.method = m->skips.method;

@@ -46,11 +46,11 @@ ngx_http_markdown_reclassify_fail_open_path(ngx_http_markdown_ctx_t *ctx)
     }
 
     if (ngx_http_markdown_metrics != NULL
-        && ngx_http_markdown_metrics->incremental_path_hits > 0)
+        && ngx_http_markdown_metrics->path_hits.incremental > 0)
     {
-        NGX_HTTP_MARKDOWN_METRIC_ADD(incremental_path_hits, -1);
+        NGX_HTTP_MARKDOWN_METRIC_ADD(path_hits.incremental, -1);
     }
-    NGX_HTTP_MARKDOWN_METRIC_INC(fullbuffer_path_hits);
+    NGX_HTTP_MARKDOWN_METRIC_INC(path_hits.fullbuffer);
     ctx->processing_path = NGX_HTTP_MARKDOWN_PATH_FULLBUFFER;
 }
 

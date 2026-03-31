@@ -53,6 +53,13 @@ class SkipsSnapshot:
 
 
 @dataclass
+class PathHitsSnapshot:
+    """Path hit metrics (threshold router)."""
+    fullbuffer: int = 0
+    incremental: int = 0
+
+
+@dataclass
 class MetricsSnapshot:
     """Mirrors ngx_http_markdown_metrics_snapshot_t."""
     conversions_attempted: int = 0
@@ -72,8 +79,9 @@ class MetricsSnapshot:
     decompressions: DecompressionSnapshot = field(
         default_factory=DecompressionSnapshot
     )
-    fullbuffer_path_hits: int = 0
-    incremental_path_hits: int = 0
+    path_hits: PathHitsSnapshot = field(
+        default_factory=PathHitsSnapshot
+    )
     requests_entered: int = 0
     skips: SkipsSnapshot = field(default_factory=SkipsSnapshot)
     failopen_count: int = 0
@@ -173,7 +181,7 @@ def render_prometheus(snap: MetricsSnapshot) -> str:
     emit_family(
         "nginx_markdown_large_response_path_total", "counter",
         "Requests routed to incremental processing path.",
-        [(snap.incremental_path_hits, None)],
+        [(snap.path_hits.incremental, None)],
     )
 
     emit_family(
@@ -271,8 +279,10 @@ def snapshot_strategy(draw):
             deflate=draw(counter_value),
             brotli=draw(counter_value),
         ),
-        fullbuffer_path_hits=draw(counter_value),
-        incremental_path_hits=draw(counter_value),
+        path_hits=PathHitsSnapshot(
+            fullbuffer=draw(counter_value),
+            incremental=draw(counter_value),
+        ),
         requests_entered=draw(counter_value),
         skips=SkipsSnapshot(
             config=draw(counter_value),
@@ -420,7 +430,7 @@ def test_property1_round_trip(snap):
     check("nginx_markdown_failopen_total",
           snap.failopen_count)
     check("nginx_markdown_large_response_path_total",
-          snap.incremental_path_hits)
+          snap.path_hits.incremental)
     check("nginx_markdown_input_bytes_total",
           snap.input_bytes)
     check("nginx_markdown_output_bytes_total",
@@ -829,8 +839,10 @@ def constrained_snapshot_strategy(draw):
             deflate=draw(cv),
             brotli=draw(cv),
         ),
-        fullbuffer_path_hits=draw(cv),
-        incremental_path_hits=draw(cv),
+        path_hits=PathHitsSnapshot(
+            fullbuffer=draw(cv),
+            incremental=draw(cv),
+        ),
         requests_entered=requests_entered,
         skips=SkipsSnapshot(
             config=skip_config,

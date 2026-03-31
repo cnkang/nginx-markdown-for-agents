@@ -132,7 +132,7 @@ format_prometheus(const snapshot_t *s, char *buf, size_t buf_len)
         "nginx_markdown_large_response_path_total counter\n"
         "nginx_markdown_large_response_path_total %lu\n"
         "\n",
-        s->incremental_path_hits);
+        s->path_hits.incremental);
 
     /* input_bytes_total */
     PROM_WRITE(
@@ -346,7 +346,7 @@ test_known_values(void)
     s.failures_conversion = 4;
     s.failures_resource_limit = 1;
     s.failopen_count = 3;
-    s.incremental_path_hits = 7;
+    s.path_hits.incremental = 7;
     s.input_bytes = 500000;
     s.output_bytes = 250000;
     s.estimated_token_savings = 12000;
