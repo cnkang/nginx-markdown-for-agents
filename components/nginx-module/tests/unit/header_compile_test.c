@@ -78,20 +78,20 @@ test_ctx_uses_compression_type(void)
 {
     ngx_http_markdown_ctx_t ctx;
 
-    TEST_SUBSECTION("ctx_t uses compression_type_e field");
+    TEST_SUBSECTION("ctx_t uses decompression.type field");
 
     memset(&ctx, 0, sizeof(ctx));
-    ctx.compression_type = NGX_HTTP_MARKDOWN_COMPRESSION_GZIP;
+    ctx.decompression.type = NGX_HTTP_MARKDOWN_COMPRESSION_GZIP;
 
-    TEST_ASSERT(ctx.compression_type == NGX_HTTP_MARKDOWN_COMPRESSION_GZIP,
+    TEST_ASSERT(ctx.decompression.type == NGX_HTTP_MARKDOWN_COMPRESSION_GZIP,
                 "compression type field stores GZIP");
 
-    ctx.compression_type = NGX_HTTP_MARKDOWN_COMPRESSION_UNKNOWN;
-    TEST_ASSERT(ctx.compression_type
+    ctx.decompression.type = NGX_HTTP_MARKDOWN_COMPRESSION_UNKNOWN;
+    TEST_ASSERT(ctx.decompression.type
                 == NGX_HTTP_MARKDOWN_COMPRESSION_UNKNOWN,
                 "compression type field stores UNKNOWN");
 
-    TEST_PASS("ctx_t compression_type field compiles and works");
+    TEST_PASS("ctx_t decompression.type field compiles and works");
 }
 
 
