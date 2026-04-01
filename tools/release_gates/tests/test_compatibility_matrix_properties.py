@@ -9,12 +9,22 @@ Each property runs at least 100 iterations.
 Validates: Requirements 9.1, 9.2
 """
 
+import sys
+from pathlib import Path
+
 from hypothesis import given, settings, assume
 from hypothesis import strategies as st
 
-# The three allowed states
-VALID_STATES = frozenset(
-    {"streaming-supported", "full-buffer-only", "pre-commit-fallback-only"}
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+
+from release_gates.validate_release_gates import (
+    ValidationResult,
+    VALID_STATES,
+    extract_table_under_heading,
+    check_compat_capabilities,
+    check_compat_states,
+    check_compat_row_validity,
+    CANONICAL_CAPABILITIES,
 )
 
 
@@ -61,20 +71,6 @@ def test_random_hyphenated_strings(state):
 # ---------------------------------------------------------------------------
 # Structural tests for the Markdown table parser and matrix validation
 # ---------------------------------------------------------------------------
-
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
-
-from release_gates.validate_release_gates import (
-    ValidationResult,
-    extract_table_under_heading,
-    check_compat_capabilities,
-    check_compat_states,
-    check_compat_row_validity,
-    CANONICAL_CAPABILITIES,
-)
 
 
 def _make_matrix(cap_rows: list[tuple[str, int]]) -> str:
