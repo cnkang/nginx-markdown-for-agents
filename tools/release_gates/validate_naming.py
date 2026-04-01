@@ -26,6 +26,11 @@ FORBIDDEN_LABELS = frozenset(
     {"url", "host", "ua", "query", "referer", "remote_addr", "path"}
 )
 
+# Low-cardinality labels that are explicitly allowed
+ALLOWED_LABELS = frozenset(
+    {"reason", "stage", "phase", "engine", "format", "le"}
+)
+
 
 def is_valid_nginx_directive(name: str) -> bool:
     """Return True if *name* matches the NGINX directive naming convention."""
@@ -63,28 +68,23 @@ def validate_names(
     errors: dict[str, list[str]] = {}
 
     if directives:
-        bad = [n for n in directives if not is_valid_nginx_directive(n)]
-        if bad:
+        if bad := [n for n in directives if not is_valid_nginx_directive(n)]:
             errors["nginx_directives"] = bad
 
     if metrics:
-        bad = [n for n in metrics if not is_valid_prometheus_metric(n)]
-        if bad:
+        if bad := [n for n in metrics if not is_valid_prometheus_metric(n)]:
             errors["prometheus_metrics"] = bad
 
     if reason_codes:
-        bad = [c for c in reason_codes if not is_valid_reason_code(c)]
-        if bad:
+        if bad := [c for c in reason_codes if not is_valid_reason_code(c)]:
             errors["reason_codes"] = bad
 
     if c_macros:
-        bad = [n for n in c_macros if not is_valid_c_macro(n)]
-        if bad:
+        if bad := [n for n in c_macros if not is_valid_c_macro(n)]:
             errors["c_macros"] = bad
 
     if labels:
-        bad = [l for l in labels if is_forbidden_label(l)]
-        if bad:
+        if bad := [label for label in labels if is_forbidden_label(label)]:
             errors["forbidden_labels"] = bad
 
     return errors
@@ -115,13 +115,11 @@ def main() -> int:
         "STREAMING_BUDGET_EXCEEDED",
     ]
 
-    errors = validate_names(
+    if errors := validate_names(
         directives=known_directives,
         metrics=known_metrics,
         reason_codes=known_reason_codes,
-    )
-
-    if errors:
+    ):
         print("FAIL: naming convention violations found:")
         for category, names in errors.items():
             for name in names:

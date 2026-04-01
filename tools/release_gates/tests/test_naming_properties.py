@@ -25,6 +25,7 @@ from release_gates.validate_naming import (
     is_valid_c_macro,
     is_forbidden_label,
     FORBIDDEN_LABELS,
+    ALLOWED_LABELS,
 )
 
 
@@ -139,7 +140,7 @@ def test_forbidden_labels_detected(label):
 
 
 @settings(max_examples=100)
-@given(label=st.sampled_from(["reason", "stage", "phase", "engine", "format", "le"]))
+@given(label=st.sampled_from(sorted(ALLOWED_LABELS)))
 def test_allowed_labels_not_forbidden(label):
     """Allowed labels must not be flagged as forbidden."""
     assert not is_forbidden_label(label), f"should allow: {label}"
