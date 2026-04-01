@@ -87,7 +87,7 @@ def test_all_pass_means_go(p0, evidence):
 def test_p0_failure_means_nogo(evidence):
     """When any P0 fails → No-Go regardless of evidence."""
     # Force one P0 to fail
-    p0 = {name: True for name in P0_SUBSPECS}
+    p0 = dict.fromkeys(P0_SUBSPECS, True)
     p0[P0_SUBSPECS[0]] = False
 
     status = _make_status(p0, evidence)
@@ -102,8 +102,8 @@ def test_p0_failure_means_nogo(evidence):
 def test_evidence_failure_means_nogo(p0):
     """When any evidence is insufficient → No-Go regardless of P0."""
     # Force all P0 to pass but one evidence to fail
-    p0_all_pass = {name: True for name in P0_SUBSPECS}
-    evidence = {item: True for item in STREAMING_EVIDENCE_ITEMS}
+    p0_all_pass = dict.fromkeys(P0_SUBSPECS, True)
+    evidence = dict.fromkeys(STREAMING_EVIDENCE_ITEMS, True)
     evidence[STREAMING_EVIDENCE_ITEMS[0]] = False
 
     status = _make_status(p0_all_pass, evidence)
@@ -119,8 +119,8 @@ def test_evidence_failure_means_nogo(p0):
 @given(p1=p1_strategy)
 def test_p1_does_not_affect_go(p1):
     """Go/No-Go must be Go when all P0 pass and evidence sufficient, regardless of P1."""
-    p0_all_pass = {name: True for name in P0_SUBSPECS}
-    evidence_all_pass = {item: True for item in STREAMING_EVIDENCE_ITEMS}
+    p0_all_pass = dict.fromkeys(P0_SUBSPECS, True)
+    evidence_all_pass = dict.fromkeys(STREAMING_EVIDENCE_ITEMS, True)
 
     status = _make_status(p0_all_pass, evidence_all_pass, p1)
     decision = evaluate_go_nogo(status)
@@ -134,12 +134,12 @@ def test_p1_does_not_affect_go(p1):
 @given(p1=p1_strategy)
 def test_p1_does_not_rescue_nogo(p1):
     """P1 passing cannot rescue a No-Go caused by P0 failure."""
-    p0 = {name: True for name in P0_SUBSPECS}
+    p0 = dict.fromkeys(P0_SUBSPECS, True)
     p0[P0_SUBSPECS[2]] = False  # Force one P0 failure
-    evidence_all_pass = {item: True for item in STREAMING_EVIDENCE_ITEMS}
+    evidence_all_pass = dict.fromkeys(STREAMING_EVIDENCE_ITEMS, True)
 
     # Even if all P1 pass, decision must be No-Go
-    p1_all_pass = {k: True for k in p1}
+    p1_all_pass = dict.fromkeys(p1, True)
     status = _make_status(p0, evidence_all_pass, p1_all_pass)
     decision = evaluate_go_nogo(status)
     assert decision.decision == "No-Go", (
