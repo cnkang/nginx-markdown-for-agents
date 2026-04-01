@@ -391,7 +391,7 @@ def check_risk_register(
 # ---------------------------------------------------------------------------
 
 
-def _find_heading_index(lines: list[str], heading: str) -> int:
+def find_heading_index(lines: list[str], heading: str) -> int:
     """Find the index of the first Markdown heading matching the given heading text.
 
     Args:
@@ -409,7 +409,7 @@ def _find_heading_index(lines: list[str], heading: str) -> int:
     return -1
 
 
-def _extract_table_under_heading(content: str, heading: str) -> list[list[str]]:
+def extract_table_under_heading(content: str, heading: str) -> list[list[str]]:
     """Extract parsed rows from the first Markdown table under *heading*.
 
     This function locates the first Markdown heading matching the given heading text,
@@ -425,7 +425,7 @@ def _extract_table_under_heading(content: str, heading: str) -> list[list[str]]:
         Returns an empty list if the heading or table is not found.
     """
     lines = content.split("\n")
-    start = _find_heading_index(lines, heading)
+    start = find_heading_index(lines, heading)
     if start < 0:
         return []
 
@@ -456,7 +456,7 @@ CHECK_GATE_CHECKLIST = "gate-failures:checklist"
 _VALID_STATES_LOWER = {s.lower() for s in VALID_STATES}
 
 
-def _check_compat_capabilities(
+def check_compat_capabilities(
     result: ValidationResult, rows: list[list[str]]
 ) -> None:
     """Sub-check: all canonical capabilities must appear as table rows.
@@ -493,7 +493,7 @@ def _check_compat_capabilities(
         result.passed(CHECK_COMPAT_CAPS)
 
 
-def _check_compat_states(result: ValidationResult, header: list[str]) -> list[int]:
+def check_compat_states(result: ValidationResult, header: list[str]) -> list[int]:
     """Sub-check: header must have exactly the valid state columns.
 
     This function verifies that the compatibility matrix header contains
@@ -529,7 +529,7 @@ def _check_compat_states(result: ValidationResult, header: list[str]) -> list[in
     return [i for i, h in enumerate(header) if h.strip() and h.lower() in _VALID_STATES_LOWER]
 
 
-def _check_compat_row_validity(
+def check_compat_row_validity(
     result: ValidationResult, data_rows: list[list[str]], state_indices: list[int]
 ) -> None:
     """Sub-check: each data row must mark exactly one state.
@@ -546,8 +546,10 @@ def _check_compat_row_validity(
     invalid_rows = []
     for row in data_rows:
         # Count how many states are marked in this row
-        marked = sum(bool(idx < len(row) and row[idx].strip())
-                 for idx in state_indices)
+        marked = sum(
+            bool(idx < len(row) and row[idx].strip())
+            for idx in state_indices
+        )
         if marked != 1:
             cap_name = row[0].strip() if row else "<empty>"
             invalid_rows.append(f"{cap_name} (marked {marked} states)")
@@ -579,17 +581,17 @@ def check_compatibility_matrix(result: ValidationResult) -> None:
         return
 
     # Extract the classification matrix table
-    rows = _extract_table_under_heading(content, "Capability Classification Matrix")
+    rows = extract_table_under_heading(content, "Capability Classification Matrix")
     if not rows:
         result.failed("compat-matrix:table", "classification table not found")
         return
 
     # Check that all canonical capabilities are present
-    _check_compat_capabilities(result, rows)
+    check_compat_capabilities(result, rows)
 
     # Check that the header has the correct state columns and validate rows
-    if state_indices := _check_compat_states(result, rows[0]):
-        _check_compat_row_validity(result, rows[1:], state_indices)
+    if state_indices := check_compat_states(result, rows[0]):
+        check_compat_row_validity(result, rows[1:], state_indices)
 
 
 _CHECKLIST_RE_PREFIX = "- ["
@@ -663,7 +665,7 @@ def check_test_matrix(result: ValidationResult) -> None:
         result.failed("test-matrix", "test-matrix-0-5-0.md not found")
         return
 
-    rows = _extract_table_under_heading(content, "Dimension Definitions")
+    rows = extract_table_under_heading(content, "Dimension Definitions")
     if not rows:
         result.failed("test-matrix:table", "Dimension Definitions table not found")
         return
