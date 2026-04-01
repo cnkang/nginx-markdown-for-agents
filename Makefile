@@ -53,7 +53,8 @@ NGINX_HEADER := $(NGINX_MODULE_DIR)/src/markdown_converter.h
         test test-rust test-rust-doc test-nginx-unit test-nginx-unit-clang-smoke test-nginx-unit-sanitize-smoke \
         test-nginx-integration test-e2e test-all test-rust-fuzz-smoke \
         test-benchmark test-benchmark-compare test-benchmark-summary \
-        docs-check license-check release-gates-check verify-large-e2e verify-huge-native-e2e verify-huge-allowed-native-e2e \
+        docs-check license-check release-gates-check release-gates-check-legacy release-gates-check-strict \
+        verify-large-e2e verify-huge-native-e2e verify-huge-allowed-native-e2e \
         verify-chunked-native-e2e verify-chunked-native-e2e-smoke verify-chunked-native-e2e-stress \
         clean help
 
@@ -157,7 +158,15 @@ license-check:
 	python3 tools/ci/check_third_party_notices.py
 
 release-gates-check:
+	python3 tools/release_gates/validate_release_gates.py
+	python3 tools/release_gates/validate_naming.py
+
+release-gates-check-legacy:
 	python3 tools/release/validate_release_gates.py
+
+release-gates-check-strict:
+	python3 tools/release_gates/validate_release_gates.py --mode strict
+	python3 tools/release_gates/validate_naming.py
 
 verify-large-e2e:
 	./tools/e2e/verify_large_markdown_response_e2e.sh
@@ -202,5 +211,7 @@ help:
 	@echo "  test-benchmark-summary   - Generate PR benchmark summary from latest report"
 	@echo "  docs-check               - Validate documentation links/style"
 	@echo "  license-check            - Verify license policy and THIRD-PARTY-NOTICES coverage"
-	@echo "  release-gates-check      - Validate 0.4.0 release gate documents and conventions"
+	@echo "  release-gates-check      - Validate 0.5.0 release gate framework (spec #12 deliverables)"
+	@echo "  release-gates-check-legacy - Validate 0.4.0 release gate documents"
+	@echo "  release-gates-check-strict - Validate all sub-specs #12-#18 for full compliance"
 	@echo "  clean                    - Clean build artifacts"
