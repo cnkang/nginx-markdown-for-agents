@@ -16,7 +16,7 @@ Two validation modes:
 - framework (default): validates only spec #12's own governance documents
   (templates, matrix, checklist, naming doc). This mode passes when the
   framework itself is correctly delivered.
-- strict: validates all sub-specs (#12–#18) for section completeness,
+- strict: validates all sub-specs (#12-#18) for section completeness,
   boundary descriptions, DoD, and risk registers. Use this mode when all
   sub-specs are expected to be fully compliant.
 
@@ -38,7 +38,7 @@ PROJECT_ROOT = SCRIPT_DIR.parent.parent
 # Default sub-spec directories under .kiro/specs/
 DEFAULT_SPECS_DIR = PROJECT_ROOT / ".kiro" / "specs"
 
-# 0.5.0 sub-spec directory names (12–18)
+# 0.5.0 sub-spec directory names (12-18)
 SUBSPECS_050 = [
     "12-overall-scope-release-gates-0-5-0",
     "13-rust-streaming-engine-core",
@@ -201,7 +201,7 @@ def check_subspecs_docs_exist(
     for name in subspecs:
         spec_dir = specs_dir / name
         if not spec_dir.is_dir():
-            result.skipped(f"docs-exist:{name}", "directory not found")
+            result.failed(f"docs-exist:{name}", "sub-spec directory not found")
             continue
         for doc in ("requirements.md", DESIGN_MD):
             path = spec_dir / doc
@@ -327,39 +327,57 @@ def _high_severity_missing_mitigation(line: str, cells: list[str]) -> bool:
     return not mitigation or mitigation in ("-", "—")
 
 
+def _is_risk_table_header(line: str) -> bool:
+    """Return True if *line* is a risk table header row."""
+    return ("风险" in line or "Risk" in line) and "|" in line and "#" in line
+
+
+def _is_skippable_row(line: str, cells: list[str]) -> bool:
+    """Return True if the table row should be skipped during risk scanning."""
+    if _is_table_separator(cells):
+        return True
+    if non_empty := [c for c in cells if c]:
+        return (
+            True
+            if _is_template_placeholder(non_empty)
+            else "高" not in line and "High" not in line
+        )
+    else:
+        return True
+
+
+def _row_missing_mitigation(cells: list[str], mitigation_idx: int) -> bool:
+    """Return True if the row lacks a mitigation value at *mitigation_idx*."""
+    mitigation = ""
+    if 0 <= mitigation_idx < len(cells):
+        mitigation = cells[mitigation_idx].strip()
+    return not mitigation or mitigation in ("-", "—")
+
+
 def _scan_risk_table(content: str) -> bool:
     """Return True if the risk table contains a high-severity row without mitigation.
-    
-    This function parses Markdown risk tables and identifies high-severity risks
-    that lack mitigation strategies. It handles table structure, separators, and
-    template placeholders.
-    
-    Args:
-        content: The content of the design.md file
-        
-    Returns:
-        True if any high-severity risk lacks mitigation, False otherwise
+
+    Uses positional cell parsing to reliably locate the mitigation column
+    (index 4 in a 5-column risk table: #, description, likelihood, impact,
+    mitigation).
     """
     in_risk_table = False
+    mitigation_idx = -1
     for line in content.split("\n"):
-        # Detect start of risk table (header row with # and |)
-        if "风险" in line and "|" in line and "#" in line:
+        if _is_risk_table_header(line):
             in_risk_table = True
+            header_cells = _parse_table_cells_positional(line)
+            mitigation_idx = len(header_cells) - 1 if header_cells else -1
             continue
-        # Skip if not in a risk table
         if not in_risk_table:
             continue
-        # Detect end of risk table (line without |)
         if "|" not in line:
             in_risk_table = False
             continue
-        # Parse table cells
-        cells = _parse_table_cells(line)
-        # Skip separators and template placeholders
-        if _is_table_separator(cells) or _is_template_placeholder(cells):
+        cells = _parse_table_cells_positional(line)
+        if _is_skippable_row(line, cells):
             continue
-        # Check for high-severity risk without mitigation
-        if _high_severity_missing_mitigation(line, cells):
+        if _row_missing_mitigation(cells, mitigation_idx):
             return True
     return False
 
@@ -642,7 +660,7 @@ def check_checklist_verification(result: ValidationResult) -> None:
     items_without_verification.extend(
         line.strip()[:80]
         for line in content.split("\n")
-        if _is_checklist_item(line) and "Verify" not in line
+        if _is_checklist_item(line) and "verify" not in line.lower()
     )
     if items_without_verification:
         result.failed(
@@ -830,8 +848,8 @@ def main() -> int:
     - framework (default): only validates spec #12's own governance documents.
       This is what ``make release-gates-check`` runs. It passes when the
       framework itself is correctly delivered, independent of whether
-      sub-specs #13–#18 are fully compliant yet.
-    - strict: validates all sub-specs (#12–#18) for section completeness,
+      sub-specs #13-#18 are fully compliant yet.
+    - strict: validates all sub-specs (#12-#18) for section completeness,
       boundary descriptions, DoD, and risk registers. Use this when all
       sub-specs are expected to be fully compliant (e.g., pre-release).
     """
@@ -850,7 +868,7 @@ def main() -> int:
         default="framework",
         help=(
             "framework: validate only spec #12 governance documents (default). "
-            "strict: validate all sub-specs #12–#18."
+            "strict: validate all sub-specs #12-#18."
         ),
     )
     parser.add_argument(
