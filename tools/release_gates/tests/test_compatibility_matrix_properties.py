@@ -69,10 +69,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from release_gates.validate_release_gates import (
     ValidationResult,
-    _extract_table_under_heading,
-    _check_compat_capabilities,
-    _check_compat_states,
-    _check_compat_row_validity,
+    extract_table_under_heading,
+    check_compat_capabilities,
+    check_compat_states,
+    check_compat_row_validity,
     CANONICAL_CAPABILITIES,
 )
 
@@ -142,11 +142,11 @@ def _all_caps_matrix() -> str:
 def test_full_matrix_passes():
     """A complete matrix with all capabilities should pass all checks."""
     content = _all_caps_matrix()
-    rows = _extract_table_under_heading(content, "Capability Classification Matrix")
+    rows = extract_table_under_heading(content, "Capability Classification Matrix")
     assert len(rows) > 1
 
     result = ValidationResult()
-    _check_compat_capabilities(result, rows)
+    check_compat_capabilities(result, rows)
     assert not result.has_failures, [r for r in result.results if r[0] == "FAIL"]
 
 
@@ -157,12 +157,12 @@ def test_missing_capability_row_fails():
         if cap != "automatic decompression"
     ]
     content = _make_matrix(rows_data)
-    rows = _extract_table_under_heading(content, "Capability Classification Matrix")
+    rows = extract_table_under_heading(content, "Capability Classification Matrix")
 
     result = ValidationResult()
-    _check_compat_capabilities(result, rows)
+    check_compat_capabilities(result, rows)
     assert result.has_failures
-    fail_detail = [d for s, _, d in result.results if s == "FAIL"][0]
+    fail_detail = next(d for s, _, d in result.results if s == "FAIL")
     assert "automatic decompression" in fail_detail
 
 
@@ -175,7 +175,7 @@ def test_multiple_states_marked_fails():
         "|------------|:---:|:---:|:---:|-------|",
         "| automatic decompression | ✓ | ✓ | | bad row |",
     ])
-    rows = _extract_table_under_heading(content, "Capability Classification Matrix")
+    rows = extract_table_under_heading(content, "Capability Classification Matrix")
     header = rows[0]
     state_indices = [
         i for i, h in enumerate(header)
@@ -183,9 +183,9 @@ def test_multiple_states_marked_fails():
     ]
 
     result = ValidationResult()
-    _check_compat_row_validity(result, rows[1:], state_indices)
+    check_compat_row_validity(result, rows[1:], state_indices)
     assert result.has_failures
-    fail_detail = [d for s, _, d in result.results if s == "FAIL"][0]
+    fail_detail = next(d for s, _, d in result.results if s == "FAIL")
     assert "marked 2 states" in fail_detail
 
 
@@ -198,12 +198,12 @@ def test_extra_state_column_fails():
         "|------------|:---:|:---:|:---:|:---:|-------|",
         "| automatic decompression | ✓ | | | | note |",
     ])
-    rows = _extract_table_under_heading(content, "Capability Classification Matrix")
+    rows = extract_table_under_heading(content, "Capability Classification Matrix")
 
     result = ValidationResult()
-    _check_compat_states(result, rows[0])
+    check_compat_states(result, rows[0])
     assert result.has_failures
-    fail_detail = [d for s, _, d in result.results if s == "FAIL"][0]
+    fail_detail = next(d for s, _, d in result.results if s == "FAIL")
     assert "unexpected columns" in fail_detail
 
 
@@ -217,10 +217,10 @@ def test_capability_mentioned_outside_table_not_counted():
     ]
     table = _make_matrix(rows_data)
     content = "We discuss security sanitization elsewhere.\n\n" + table
-    rows = _extract_table_under_heading(content, "Capability Classification Matrix")
+    rows = extract_table_under_heading(content, "Capability Classification Matrix")
 
     result = ValidationResult()
-    _check_compat_capabilities(result, rows)
+    check_compat_capabilities(result, rows)
     assert result.has_failures
-    fail_detail = [d for s, _, d in result.results if s == "FAIL"][0]
+    fail_detail = next(d for s, _, d in result.results if s == "FAIL")
     assert "security sanitization" in fail_detail

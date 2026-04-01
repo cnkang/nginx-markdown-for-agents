@@ -26,7 +26,8 @@ This checklist aggregates all release gate verification steps, organized by the 
 - [ ] Failure-path test coverage — Verify: test report covers decompressor failure, budget overflow, parser invalid state, downstream backpressure
 - [ ] Streaming path bounded-memory evidence generated — Verify: memory analysis report in Evidence Pack
 - [ ] Evidence Pack generated and archived — Verify: Evidence Pack artifact exists
-- [ ] Property-based tests pass — Verify: `cargo test` with proptest exit code 0
+- [ ] Rust property-based tests pass — Verify: `cargo test` with proptest exit code 0
+- [ ] Python property-based tests pass — Verify: `pytest tools/release_gates/tests/` exit code 0
 
 ## Compatibility Gates
 

@@ -82,7 +82,7 @@ Release gates are organized into five categories, each containing verifiable gat
 - Failure-path test coverage (decompressor failure, budget overflow, parser invalid state, downstream backpressure)
 - Streaming path bounded-memory evidence generated
 - Evidence Pack generated and archived
-- Property-based tests pass (`cargo test` with proptest)
+- Property-based tests pass (`cargo test` with proptest for Rust, `pytest tools/release_gates/tests/` for Python/Hypothesis governance checks)
 
 ### Compatibility Gates
 

@@ -97,11 +97,8 @@ def test_p0_failure_means_nogo(evidence):
     )
 
 
-@settings(max_examples=100)
-@given(p0=p0_strategy)
-def test_evidence_failure_means_nogo(p0):
+def test_evidence_failure_means_nogo():
     """When any evidence is insufficient → No-Go regardless of P0."""
-    # Force all P0 to pass but one evidence to fail
     p0_all_pass = dict.fromkeys(P0_SUBSPECS, True)
     evidence = dict.fromkeys(STREAMING_EVIDENCE_ITEMS, True)
     evidence[STREAMING_EVIDENCE_ITEMS[0]] = False
