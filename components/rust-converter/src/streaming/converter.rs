@@ -904,31 +904,18 @@ impl StreamingConverter {
     }
 
     /// Access the converter's extracted page metadata.
-    
     ///
-    
     /// Metadata is populated from `<head>` region events observed during calls to
-    
     /// `feed_chunk`. This returns the current metadata collected so far without
-    
     /// consuming the converter.
-    
     ///
-    
     /// # Examples
-    
     ///
-    
     /// ```
-    
     /// // Given a `StreamingConverter` instance `conv`, borrow its metadata:
-    
     /// // let conv = StreamingConverter::new(options, budget);
-    
     /// // let meta = conv.metadata();
-    
     /// // assert!(meta.title.is_none() || meta.title.is_some());
-    
     /// ```
     pub fn metadata(&self) -> &PageMetadata {
         &self.metadata
