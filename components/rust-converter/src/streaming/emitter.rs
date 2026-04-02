@@ -202,12 +202,12 @@ impl IncrementalEmitter {
         // Close any open code block
         if self.in_code_block {
             if !self.code_fence_emitted {
-                self.write_raw(b"```\n");
+                self.write_raw(b"```\n")?;
             }
             if !self.last_was_newline {
-                self.write_raw(b"\n");
+                self.write_raw(b"\n")?;
             }
-            self.write_raw(b"```\n");
+            self.write_raw(b"```\n")?;
             self.in_code_block = false;
         }
         // Move pending buffer to flushed (checked — bounded-memory contract
@@ -668,23 +668,12 @@ impl IncrementalEmitter {
         Ok(())
     }
 
-    /// Appends the given bytes to the pending output buffer exactly as provided and updates
-    /// `last_was_newline` to reflect whether the final byte is a newline.
-    ///
-    /// The bytes are written without any normalization (no CRLF-to-LF conversion, no
-    /// blank-line compression, and no trailing-whitespace trimming), making this suitable for
-    /// emitting fenced-code markers and other raw sequences.
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// // Append a closing code fence verbatim
-    /// let mut emitter = IncrementalEmitter::new(&some_budget);
-    /// emitter.write_raw(b"```\n");
-    /// ```
-    fn write_raw(&mut self, bytes: &[u8]) {
+    /// Write raw bytes without normalization (used for code block fences).
+    fn write_raw(&mut self, bytes: &[u8]) -> Result<(), ConversionError> {
+        self.check_buffer_budget(bytes.len())?;
         self.buffer.extend_from_slice(bytes);
         self.last_was_newline = bytes.last().copied() == Some(b'\n');
+        Ok(())
     }
 
     /// Check that adding `additional` bytes won't exceed the buffer budget.
