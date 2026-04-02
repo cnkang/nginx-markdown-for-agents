@@ -49,15 +49,20 @@ pub enum ConversionError {
 }
 
 impl ConversionError {
-    /// Map a `ConversionError` variant to its numeric FFI error code.
+    /// Map a `ConversionError` to its numeric FFI error code.
     ///
-    /// The mapping is:
-    /// - `ParseError(_)` -> 1
-    /// - `EncodingError(_)` -> 2
-    /// - `Timeout` -> 3
-    /// - `MemoryLimit(_)` -> 4
-    /// - `InvalidInput(_)` -> 5
-    /// - `InternalError(_)` -> 99
+    /// The returned code identifies the error for FFI boundaries:
+    /// - `ParseError(_)` -> `1`
+    /// - `EncodingError(_)` -> `2`
+    /// - `Timeout` -> `3`
+    /// - `MemoryLimit(_)` -> `4`
+    /// - `InvalidInput(_)` -> `5`
+    /// - `InternalError(_)` -> `99`
+    ///
+    /// When compiled with the `streaming` feature enabled, the following additional mappings apply:
+    /// - `BudgetExceeded { .. }` -> `6`
+    /// - `StreamingFallback { .. }` -> `7`
+    /// - `PostCommitError { .. }` -> `8`
     ///
     /// # Examples
     ///
@@ -86,12 +91,13 @@ impl ConversionError {
 }
 
 impl fmt::Display for ConversionError {
-    /// Formats a human-readable message for the error suitable for logs and FFI boundaries.
+    /// Format a human-readable message describing the conversion error for logs and FFI boundaries.
     ///
     /// # Examples
     ///
     /// ```
     /// use nginx_markdown_converter::error::ConversionError;
+    ///
     /// let err = ConversionError::ParseError("unexpected tag".into());
     /// assert_eq!(format!("{}", err), "Parse error: unexpected tag");
     /// ```

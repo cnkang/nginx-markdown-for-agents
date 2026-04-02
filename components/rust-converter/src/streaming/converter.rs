@@ -98,16 +98,28 @@ pub struct StreamingConverter {
 }
 
 impl StreamingConverter {
-    /// Create a new streaming converter.
+    /// Constructs a StreamingConverter configured for incremental HTML→Markdown conversion.
     ///
     /// # Arguments
     ///
-    /// * `options` - Conversion options (reuses existing `ConversionOptions`).
-    /// * `budget` - Memory budget configuration for bounded-memory operation.
+    /// * `options` - ConversionOptions that control features such as metadata extraction, URL resolution, and other conversion behavior.
+    /// * `budget` - MemoryBudget that bounds working-set usage of pipeline components during streaming processing.
     ///
     /// # Returns
     ///
-    /// A new `StreamingConverter` ready to accept input via [`feed_chunk`](Self::feed_chunk).
+    /// A new `StreamingConverter` initialized to accept input via `feed_chunk` and to be finalized with `finalize`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let options = ConversionOptions::default();
+    /// let budget = MemoryBudget::default();
+    /// let mut conv = StreamingConverter::new(options, budget);
+    /// // send some bytes
+    /// let _ = conv.feed_chunk(b"<p>Hello</p>").unwrap();
+    /// let result = conv.finalize().unwrap();
+    /// assert!(result.final_markdown.contains("Hello"));
+    /// ```
     pub fn new(options: ConversionOptions, budget: MemoryBudget) -> Self {
         let etag_hasher = if options.extract_metadata {
             Some(blake3::Hasher::new())
@@ -138,29 +150,42 @@ impl StreamingConverter {
         }
     }
 
-    /// Set the Content-Type header value for charset detection.
+    /// Provide an optional Content-Type header to the charset detector.
     ///
-    /// Must be called before the first [`feed_chunk`](Self::feed_chunk) call.
-    /// If the header contains a charset parameter, it takes priority over
-    /// HTML meta charset detection.
+    /// Must be called before the first `feed_chunk` invocation. If the header
+    /// includes a `charset` parameter, that charset takes precedence over any
+    /// charset discovered via HTML meta tags.
     ///
     /// # Arguments
     ///
-    /// * `content_type` - Optional Content-Type header value
-    ///   (e.g. `"text/html; charset=UTF-8"`).
+    /// * `content_type` - Optional Content-Type header value (for example
+    ///   `"text/html; charset=UTF-8"`).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut conv = StreamingConverter::new(Default::default(), Default::default());
+    /// conv.set_content_type(Some("text/html; charset=UTF-8".to_string()));
+    /// ```
     pub fn set_content_type(&mut self, content_type: Option<String>) {
         self.charset_state.set_content_type(content_type.as_deref());
     }
 
-    /// Set a cooperative timeout for the conversion.
+    /// Set a cooperative deadline for the conversion.
     ///
-    /// The deadline is checked at the start of each [`feed_chunk`](Self::feed_chunk)
-    /// and [`finalize`](Self::finalize) call. If the deadline has passed, the
-    /// call returns a timeout error.
+    /// The converter checks this deadline at the start of `feed_chunk` and `finalize`; if the
+    /// deadline has passed those calls will return a timeout error. If adding `timeout` to the
+    /// current instant would overflow, the deadline is left unset (treated as no deadline).
     ///
-    /// # Arguments
+    /// # Examples
     ///
-    /// * `timeout` - Maximum duration for the entire conversion.
+    /// ```no_run
+    /// use std::time::Duration;
+    /// // Assume `StreamingConverter::new` is available in scope.
+    /// let mut conv = StreamingConverter::new(/* options */, /* budget */);
+    /// // Limit the whole conversion to 2 seconds.
+    /// conv.set_timeout(Duration::from_secs(2));
+    /// ```
     pub fn set_timeout(&mut self, timeout: Duration) {
         // If Instant::now() + timeout overflows, treat as "no deadline"
         // (effectively infinite timeout) rather than setting an
@@ -168,27 +193,32 @@ impl StreamingConverter {
         self.deadline = Instant::now().checked_add(timeout);
     }
 
-    /// Feed a chunk of HTML bytes and return any ready Markdown output.
+    /// Process an incoming chunk of HTML bytes and return any ready Markdown output.
     ///
-    /// The pipeline processes the chunk through charset detection, tokenization,
-    /// sanitization, structural analysis, and Markdown emission. Output is
-    /// flushed at block-level element boundaries.
+    /// This incrementally feeds the pipeline (charset detection/transcoding, tokenization,
+    /// sanitization, structural analysis, and emission) and flushes complete block-level
+    /// Markdown that became available as a result of this chunk.
     ///
     /// # Arguments
     ///
-    /// * `data` - Raw HTML bytes (any encoding; charset detection handles transcoding).
+    /// * `data` - Raw HTML bytes in any text encoding; charset detection/transcoding is applied.
     ///
     /// # Returns
     ///
-    /// * `Ok(ChunkOutput)` — Contains ready Markdown bytes and flush count.
-    /// * `Err(ConversionError::StreamingFallback { .. })` — Pre-commit fallback signal.
-    /// * `Err(ConversionError::BudgetExceeded { .. })` — Memory budget exceeded.
-    /// * `Err(ConversionError::Timeout)` — Cooperative timeout exceeded (pre-commit).
-    /// * `Err(ConversionError::PostCommitError { .. })` — Error after partial output delivery.
+    /// `Ok(ChunkOutput)` containing the emitted Markdown bytes and the number of block-level
+    /// flushes produced; or an appropriate `ConversionError` such as streaming fallback,
+    /// budget/memory limits, timeout (pre-commit), or a post-commit error that includes
+    /// bytes already emitted.
     ///
-    /// # Errors
+    /// # Examples
     ///
-    /// See return types above. All errors are explicit; no silent degradation.
+    /// ```
+    /// let options = ConversionOptions::default();
+    /// let budget = MemoryBudget::default();
+    /// let mut conv = StreamingConverter::new(options, budget);
+    /// let out = conv.feed_chunk(b"<p>Hello</p>").unwrap();
+    /// assert!(!out.markdown.is_empty());
+    /// ```
     pub fn feed_chunk(&mut self, data: &[u8]) -> Result<ChunkOutput, ConversionError> {
         // 1. Check cooperative timeout
         self.check_timeout()?;
@@ -256,23 +286,39 @@ impl StreamingConverter {
         })
     }
 
-    /// Finalize the conversion and return the complete result.
+    /// Finalize the streaming conversion and produce the final converted result.
     ///
-    /// Flushes all pending state, auto-closes unclosed HTML contexts,
-    /// computes the final ETag and token estimate, and returns the
-    /// [`StreamingResult`].
-    ///
-    /// This method consumes the converter — it cannot be used again.
+    /// This method consumes the converter, flushes any pending pipeline state, auto-closes
+    /// unclosed HTML contexts, finalizes metadata resolution, computes the final ETag and
+    /// token estimate, and returns the accumulated conversion output and statistics.
     ///
     /// # Returns
     ///
-    /// * `Ok(StreamingResult)` — Final Markdown fragment, ETag, token estimate, and stats.
-    /// * `Err(ConversionError)` — Any error during finalization.
+    /// `StreamingResult` containing:
+    /// - `final_markdown`: the remaining emitted Markdown bytes,
+    /// - `token_estimate`: a token-count estimate computed from total emitted characters,
+    /// - `etag`: optional final ETag (hex-encoded, first 16 bytes) when metadata extraction was enabled,
+    /// - `stats`: accumulated streaming statistics.
     ///
     /// # Errors
     ///
-    /// Returns timeout, budget, or post-commit errors if they occur during
-    /// the finalization flush.
+    /// Returns `ConversionError` for timeout, budget/memory limits, fallback, or post-commit errors
+    /// that occur during finalization.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use components::streaming::StreamingConverter;
+    ///
+    /// // Create converter with appropriate options and budget (omitted).
+    /// let options = Default::default();
+    /// let budget = Default::default();
+    /// let converter = StreamingConverter::new(options, budget);
+    ///
+    /// // Finalize and obtain the final result (consumes `converter`).
+    /// let result = converter.finalize().expect("finalize conversion");
+    /// println!("Final markdown size: {}", result.final_markdown.len());
+    /// ```
     pub fn finalize(mut self) -> Result<StreamingResult, ConversionError> {
         // Check timeout
         self.check_timeout()?;
@@ -353,10 +399,28 @@ impl StreamingConverter {
 
     // ── Internal helpers ────────────────────────────────────────────
 
-    /// Process a single stream event through sanitizer → state machine → emitter.
+    /// Processes a single `StreamEvent` through the sanitizer, state machine, and emitter.
     ///
-    /// Does NOT drain the emitter's flushed buffer — that is the caller's
-    /// responsibility (in `feed_chunk` or `finalize`).
+    /// This advances internal streaming state (including token counts, optional head-region
+    /// metadata extraction, and peak-memory accounting) but does not drain the emitter's
+    /// flushed output buffer — the caller is responsible for reading flushed bytes.
+    ///
+    /// # Errors
+    ///
+    /// Returns a `ConversionError` when processing cannot continue:
+    /// - `StreamingFallback { reason: FrontMatterOverflow }` if head-region lookahead exceeds the budget during pre-commit metadata extraction.
+    /// - `StreamingFallback { reason: TableDetected }` if a table requires fallback during pre-commit.
+    /// - `PostCommitError` if a table or other error is detected after commit; the error includes `bytes_emitted`.
+    /// - `MemoryLimit` when sanitization reports nesting depth exceeded.
+    /// - Other `ConversionError` variants produced by the state machine or emitter; in post-commit these are wrapped as `PostCommitError`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// // Assume `conv` is a mutable StreamingConverter and `ev` is a StreamEvent.
+    /// // The example demonstrates the callsite pattern; concrete construction is omitted.
+    /// let _ = conv.process_single_event(ev)?;
+    /// ```
     fn process_single_event(&mut self, event: StreamEvent) -> Result<(), ConversionError> {
         self.stats.tokens_processed = self.stats.tokens_processed.saturating_add(1);
 
@@ -418,7 +482,20 @@ impl StreamingConverter {
         Ok(())
     }
 
-    /// Check cooperative timeout.
+    /// Checks whether the converter's cooperative timeout has been exceeded.
+    ///
+    /// If a deadline is set and the current time is at or after that deadline,
+    /// returns a timeout error. If the converter is already in `PostCommit` state
+    /// the error is returned as `ConversionError::PostCommitError` and includes the
+    /// number of bytes already emitted.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// // Call from a StreamingConverter instance to validate its deadline.
+    /// // let conv: StreamingConverter = /* ... */ ;
+    /// // conv.check_timeout()?;
+    /// ```
     fn check_timeout(&self) -> Result<(), ConversionError> {
         if let Some(deadline) = self.deadline
             && Instant::now() >= deadline
@@ -452,7 +529,17 @@ impl StreamingConverter {
         }
     }
 
-    /// Update incremental ETag hasher and character count with flushed bytes.
+    /// Update streaming statistics with newly flushed Markdown bytes.
+    ///
+    /// This updates the converter's cumulative counters and optional ETag state:
+    /// - increments `bytes_emitted` by the flushed byte length (saturating),
+    /// - updates the incremental ETag hasher (if enabled) with `flushed`,
+    /// - increments `total_markdown_chars` by the number of Unicode scalar values in `flushed` (decoded with `String::from_utf8_lossy`, saturating),
+    /// - and refreshes `stats.flush_count` from the emitter.
+    ///
+    /// # Parameters
+    ///
+    /// - `flushed`: the slice of UTF-8 (or potentially ill-formed UTF-8) bytes that were emitted since the last update.
     fn update_incremental_stats(&mut self, flushed: &[u8]) {
         if flushed.is_empty() {
             return;
@@ -476,7 +563,24 @@ impl StreamingConverter {
         self.stats.flush_count = self.emitter.flush_count();
     }
 
-    /// Estimate the current in-memory working set and update peak.
+    /// Update the recorded peak memory estimate using the current working-set estimate.
+    ///
+    /// The working set includes:
+    /// - emitter pending buffer (not yet flushed)
+    /// - emitter flushed buffer (awaiting drain)
+    /// - structural state machine stack estimate
+    /// - metadata string allocations extracted from `<head>`
+    /// - the temporary `html_title_buf`
+    ///
+    /// Note: `head_bytes_seen` is intentionally excluded because it is a cumulative lookahead counter, not resident memory.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// // Assume `conv` is an initialized `StreamingConverter`.
+    /// let mut conv = /* StreamingConverter::new(...) */ unimplemented!();
+    /// conv.update_peak_memory();
+    /// ```
     fn update_peak_memory(&mut self) {
         // Only count state that is actually resident in memory right now:
         // - emitter pending buffer (not yet flushed)
@@ -592,14 +696,29 @@ impl StreamingConverter {
         false // within budget
     }
 
-    /// Extract metadata from a `<meta>` tag's attributes.
+    /// Update page metadata from a `<meta>` tag's attributes.
     ///
-    /// Follows the same priority rules as `MetadataExtractor::process_meta_tag`:
-    /// - `property` attribute takes precedence over `name` when both are present
-    ///   (matching the `property.or(name)` semantics of the full-buffer path).
-    /// - OG/Twitter tags override generic metadata (they are curated for
-    ///   external consumption).
-    /// - Generic tags (`description`, `author`, etc.) use first-wins semantics.
+    /// Selects a metadata key by preferring the `property` attribute over `name`,
+    /// reads the `content` attribute, and applies site-specific priority rules:
+    /// - `og:*` and `twitter:*` keys override or set curated metadata (e.g., titles,
+    ///   descriptions). Social titles set `social_title_set`.
+    /// - Generic keys (e.g., `description`, `author`, `article:published_time`)
+    ///   use first-win semantics where documented.
+    /// - Image URLs are resolved via the converter's URL resolution when set.
+    ///
+    /// # Parameters
+    ///
+    /// - `attrs`: a slice of `(attribute_name, attribute_value)` pairs representing
+    ///   the attributes of the `<meta>` tag; matching is done by exact name
+    ///   (e.g., `"property"`, `"name"`, `"content"`).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// // Example usage within the converter implementation:
+    /// // let mut conv = StreamingConverter::new(options, budget);
+    /// // conv.extract_meta_tag(&[("property".into(), "og:title".into()), ("content".into(), "Example".into())]);
+    /// ```
     fn extract_meta_tag(&mut self, attrs: &[(String, String)]) {
         // Prefer `property` over `name`, matching MetadataExtractor's
         // `property.or(name)` lookup order.
@@ -662,8 +781,28 @@ impl StreamingConverter {
         }
     }
 
-    /// Resolve a URL using the configured base_url, matching
-    /// `MetadataExtractor::resolve_url` behaviour.
+    /// Resolve a possibly-relative URL against the converter's configured base URL.
+    ///
+    /// If relative resolution is disabled, the input is empty, the input is already absolute
+    /// (`http://`, `https://`, or `//`), the converter has no `base_url`, or the `base_url`
+    /// does not start with `http://` or `https://`, the original `url` is returned unchanged.
+    /// If `url` starts with `/`, it is resolved against the origin (scheme + authority) of
+    /// `base_url`. Otherwise `url` is resolved relative to the directory portion of `base_url`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use components::rust_converter::streaming::converter::{StreamingConverter, ConversionOptions, MemoryBudget};
+    /// // (pseudo-constructors shown for clarity; actual test harness constructs a converter)
+    /// let mut opts = ConversionOptions::default();
+    /// opts.resolve_relative_urls = true;
+    /// opts.base_url = Some("https://example.com/path/to/page.html".to_string());
+    /// let conv = StreamingConverter::new(opts, MemoryBudget::default());
+    ///
+    /// assert_eq!(conv.resolve_url("/img.png"), "https://example.com/img.png");
+    /// assert_eq!(conv.resolve_url("icons/logo.svg"), "https://example.com/path/to/icons/logo.svg");
+    /// assert_eq!(conv.resolve_url("https://other.test/x"), "https://other.test/x");
+    /// ```
     fn resolve_url(&self, url: &str) -> String {
         if !self.options.resolve_relative_urls || url.is_empty() {
             return url.to_string();
@@ -704,16 +843,25 @@ impl StreamingConverter {
         format!("{}/{}", base_dir, url)
     }
 
-    /// Determine the final metadata URL after all head processing.
+    /// Selects the final metadata URL, preferring a discovered canonical over the base URL.
     ///
-    /// Matches `MetadataExtractor::extract` semantics:
-    /// - If a canonical URL was found (`canonical_found`), it was already
-    ///   written to `current_url` during head processing — use it.
-    /// - Otherwise, fall back to `base_url` (which may be `None`,
-    ///   clearing any prior `og:url`).
+    /// If `canonical_found` is `true`, returns `current_url.clone()` (the canonical URL previously
+    /// recorded during head processing). If `canonical_found` is `false`, returns `base_url.clone()`,
+    /// which may be `None` to clear any previously observed `og:url`.
     ///
-    /// This is extracted as a pure function so it can be unit-tested
-    /// independently of the full converter pipeline.
+    /// # Examples
+    ///
+    /// ```
+    /// let canonical = Some("https://example.com/canonical".to_string());
+    /// let base = Some("https://example.com/".to_string());
+    /// assert_eq!(resolve_final_url(true, &canonical, &base), canonical);
+    ///
+    /// let og = Some("https://example.com/og".to_string());
+    /// assert_eq!(resolve_final_url(false, &og, &base), base);
+    ///
+    /// // base_url `None` clears prior og:url when no canonical was found
+    /// assert_eq!(resolve_final_url(false, &og, &None), None);
+    /// ```
     fn resolve_final_url(
         canonical_found: bool,
         current_url: &Option<String>,
@@ -726,28 +874,78 @@ impl StreamingConverter {
         }
     }
 
-    /// Get a reference to the extracted page metadata.
+    /// Access the converter's extracted page metadata.
+    
     ///
-    /// Metadata is populated from `<head>` region events during
-    /// [`feed_chunk`](Self::feed_chunk) calls.
+    
+    /// Metadata is populated from `<head>` region events observed during calls to
+    
+    /// `feed_chunk`. This returns the current metadata collected so far without
+    
+    /// consuming the converter.
+    
+    ///
+    
+    /// # Examples
+    
+    ///
+    
+    /// ```
+    
+    /// // Given a `StreamingConverter` instance `conv`, borrow its metadata:
+    
+    /// // let conv = StreamingConverter::new(options, budget);
+    
+    /// // let meta = conv.metadata();
+    
+    /// // assert!(meta.title.is_none() || meta.title.is_some());
+    
+    /// ```
     pub fn metadata(&self) -> &PageMetadata {
         &self.metadata
     }
 
-    /// Get the current commit state.
+    /// Retrieve the converter's current commit state.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use components::streaming::converter::StreamingConverter;
+    /// # use components::streaming::converter::CommitState;
+    /// // Constructing with default placeholders for illustration; real callers
+    /// // should provide valid `ConversionOptions` and `MemoryBudget`.
+    /// let conv = StreamingConverter::new(Default::default(), Default::default());
+    /// let state = conv.commit_state();
+    /// // `state` is a `CommitState` value such as `CommitState::PreCommit`.
+    /// let _ = state;
+    /// ```
     pub fn commit_state(&self) -> CommitState {
         self.commit_state
     }
 
-    /// Get a reference to the conversion options.
+    /// Access the converter's conversion options.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// // given a `StreamingConverter` named `converter`
+    /// let opts = converter.options();
+    /// // inspect an option, e.g. opts.extract_metadata
+    /// ```
     pub fn options(&self) -> &ConversionOptions {
         &self.options
     }
 
-    /// Preview the final metadata URL that `finalize` would produce.
+    /// Preview the final metadata URL that `finalize` would produce without consuming the converter.
     ///
-    /// Applies the same canonical/base_url convergence logic as `finalize`
-    /// without consuming the converter. Useful for testing and observability.
+    /// If metadata extraction is disabled, returns `None`. Otherwise returns the resolved URL after applying canonical-vs-base_url convergence rules used by `finalize`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// // Inspect the URL `finalize` would produce without finalizing the converter.
+    /// let url = converter.peek_final_url();
+    /// ```
     pub fn peek_final_url(&self) -> Option<String> {
         if !self.options.extract_metadata {
             return None;
@@ -771,7 +969,33 @@ impl StreamingConverter {
 mod tests {
     use super::*;
 
-    /// Helper: create a default converter with UTF-8 charset pre-resolved.
+    /// Create a `StreamingConverter` with UTF-8 content type preconfigured.
+    
+    ///
+    
+    /// This helper initializes a converter with default options and budget and
+    
+    /// pre-resolves the charset to `UTF-8` so that small inputs are processed
+    
+    /// immediately instead of waiting for the charset sniff buffer to fill.
+    
+    ///
+    
+    /// # Examples
+    
+    ///
+    
+    /// ```
+    
+    /// let mut conv = make_converter();
+    
+    /// // ready to feed small UTF-8 HTML chunks without charset sniffing delay
+    
+    /// let out = conv.feed_chunk(b"<p>hi</p>").unwrap();
+    
+    /// assert!(out.markdown.len() > 0);
+    
+    /// ```
     fn make_converter() -> StreamingConverter {
         let mut conv =
             StreamingConverter::new(ConversionOptions::default(), MemoryBudget::default());
@@ -836,7 +1060,15 @@ mod tests {
         assert_eq!(result, None);
     }
 
-    /// Helper: create a converter with metadata extraction enabled.
+    /// Creates a `StreamingConverter` configured to extract page metadata and initialized with a
+    /// text/html UTF-8 content type.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut conv = make_converter_with_metadata();
+    /// assert!(conv.options().extract_metadata);
+    /// ```
     fn make_converter_with_metadata() -> StreamingConverter {
         let opts = ConversionOptions {
             extract_metadata: true,
@@ -1722,11 +1954,31 @@ mod tests {
 
     // ── Regression tests for review round 9 ─────────────────────────
 
-    /// First canonical has no href → skipped, second canonical with href
-    /// is used. Matches full-buffer `find_link_href_recursive` which only
-    /// returns `Some` when `href` is present, so it continues searching
-    /// past canonicals without `href`.
-    #[test]
+    /// Verifies that a `<link rel="canonical">` without an `href` is ignored and a later canonical with an `href` is selected.
+    ///
+    /// This test constructs a converter with metadata extraction enabled and a base URL, feeds an HTML head containing two
+    /// canonical link tags (the first without `href`, the second with `href`), and asserts that the converter records the
+    /// second link's URL as the canonical.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// // Equivalent test flow:
+    /// let opts = ConversionOptions {
+    ///     extract_metadata: true,
+    ///     base_url: Some("https://base.example.com".to_string()),
+    ///     ..ConversionOptions::default()
+    /// };
+    /// let mut conv = StreamingConverter::new(opts, MemoryBudget::default());
+    /// conv.set_content_type(Some("text/html; charset=UTF-8".to_string()));
+    /// conv.feed_chunk(b"<html><head>\
+    ///                 <link rel=\"canonical\">\
+    ///                 <link rel=\"canonical\" href=\"https://second.example.com\">\
+    ///                 <title>T</title>\
+    ///                 </head><body><p>x</p></body></html>").unwrap();
+    /// assert!(conv.canonical_found);
+    /// assert_eq!(conv.metadata().url.as_deref(), Some("https://second.example.com"));
+    /// ```
     fn test_first_canonical_no_href_skipped_second_used() {
         let opts = ConversionOptions {
             extract_metadata: true,

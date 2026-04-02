@@ -35,6 +35,25 @@ pub struct MemoryBudget {
 }
 
 impl Default for MemoryBudget {
+    /// Creates a `MemoryBudget` populated with sensible default byte limits for streaming.
+    ///
+    /// Defaults:
+    /// - `total = 2 * 1024 * 1024` (2 MiB)
+    /// - `state_stack = 64 * 1024` (64 KiB)
+    /// - `output_buffer = 256 * 1024` (256 KiB)
+    /// - `charset_sniff = 1024` (1 KiB)
+    /// - `lookahead = 64 * 1024` (64 KiB)
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let b = MemoryBudget::default();
+    /// assert_eq!(b.total, 2 * 1024 * 1024);
+    /// assert_eq!(b.state_stack, 64 * 1024);
+    /// assert_eq!(b.output_buffer, 256 * 1024);
+    /// assert_eq!(b.charset_sniff, 1024);
+    /// assert_eq!(b.lookahead, 64 * 1024);
+    /// ```
     fn default() -> Self {
         Self {
             total: 2 * 1024 * 1024,    // 2 MiB
@@ -47,19 +66,21 @@ impl Default for MemoryBudget {
 }
 
 impl MemoryBudget {
-    /// Check whether an allocation of `additional` bytes is within the limit
-    /// for the given pipeline stage.
-    ///
-    /// # Arguments
-    ///
-    /// * `stage` - Human-readable pipeline stage name (e.g. "state_stack")
-    /// * `current` - Current usage in bytes for this stage
-    /// * `additional` - Additional bytes requested
-    /// * `limit` - The budget limit for this stage
+    /// Validate that allocating `additional` bytes does not exceed the budget for a pipeline stage.
     ///
     /// # Errors
     ///
-    /// Returns [`ConversionError::BudgetExceeded`] if `current + additional > limit`.
+    /// Returns `ConversionError::BudgetExceeded` if adding `additional` to `current` would overflow
+    /// or if the resulting total exceeds `limit`. On integer overflow the error's `stage` will be
+    /// formatted as `"{stage} (integer overflow)"` and `used` will be `usize::MAX`; when the limit is
+    /// exceeded `stage` will be the provided stage name and `used` will be `current + additional`.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// # use components::rust_converter::streaming::budget::check_allocation;
+    /// let _ = check_allocation("state_stack", 0, 100, 1024).unwrap();
+    /// ```
     #[cfg(feature = "streaming")]
     pub fn check_allocation(
         stage: &str,
@@ -85,12 +106,18 @@ impl MemoryBudget {
         Ok(())
     }
 
-    /// Check the state stack budget.
+    /// Validate that adding `additional` bytes to the state stack does not exceed the configured budget.
     ///
     /// # Errors
     ///
-    /// Returns [`ConversionError::BudgetExceeded`] if the state stack limit
-    /// would be exceeded.
+    /// Returns `ConversionError::BudgetExceeded` if `current + additional` would exceed the `state_stack` limit or if the addition overflows.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let b = MemoryBudget::default();
+    /// assert!(b.check_state_stack(0, 100).is_ok());
+    /// ```
     #[cfg(feature = "streaming")]
     pub fn check_state_stack(
         &self,
@@ -100,12 +127,19 @@ impl MemoryBudget {
         Self::check_allocation("state_stack", current, additional, self.state_stack)
     }
 
-    /// Check the output buffer budget.
+    /// Validate that allocating `additional` bytes on top of `current` will not exceed the output buffer budget.
     ///
     /// # Errors
     ///
-    /// Returns [`ConversionError::BudgetExceeded`] if the output buffer limit
-    /// would be exceeded.
+    /// Returns `ConversionError::BudgetExceeded` if `current + additional` would be greater than the configured output buffer limit
+    /// or if the addition overflows.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let b = MemoryBudget::default();
+    /// assert!(b.check_output_buffer(0, 1024).is_ok());
+    /// ```
     #[cfg(feature = "streaming")]
     pub fn check_output_buffer(
         &self,
@@ -115,12 +149,20 @@ impl MemoryBudget {
         Self::check_allocation("output_buffer", current, additional, self.output_buffer)
     }
 
-    /// Check the lookahead buffer budget.
+    /// Validate that adding `additional` bytes to `current` bytes does not exceed the lookahead budget.
+    ///
+    /// Returns `Ok(())` when the resulting used bytes are within the configured lookahead limit.
     ///
     /// # Errors
     ///
-    /// Returns [`ConversionError::BudgetExceeded`] if the lookahead limit
-    /// would be exceeded.
+    /// Returns `ConversionError::BudgetExceeded` when `current + additional` would be greater than the configured lookahead limit or when an integer overflow occurs while computing the sum.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let budget = MemoryBudget::default();
+    /// assert!(budget.check_lookahead(0, 1024).is_ok());
+    /// ```
     #[cfg(feature = "streaming")]
     pub fn check_lookahead(
         &self,
@@ -130,12 +172,29 @@ impl MemoryBudget {
         Self::check_allocation("lookahead", current, additional, self.lookahead)
     }
 
-    /// Check the total budget across all stages.
+    /// Validate a proposed increase against the overall memory budget.
+    ///
+    /// Returns `Ok(())` when `current_total + additional` does not exceed the configured
+    /// total budget.
     ///
     /// # Errors
     ///
-    /// Returns [`ConversionError::BudgetExceeded`] if the total budget limit
-    /// would be exceeded.
+    /// Returns `ConversionError::BudgetExceeded` when the addition would exceed the total
+    /// budget or when the addition overflows (reported with a stage message that includes
+    /// `"integer overflow"`).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use components::rust_converter::streaming::budget::MemoryBudget;
+    /// # use components::rust_converter::streaming::budget::ConversionError;
+    /// let budget = MemoryBudget::default();
+    /// // within limit
+    /// assert!(budget.check_total(0, 1024).is_ok());
+    /// // exceeding limit returns a BudgetExceeded error
+    /// let err = budget.check_total(budget.total, 1).unwrap_err();
+    /// assert_eq!(err.code(), 6);
+    /// ```
     #[cfg(feature = "streaming")]
     pub fn check_total(
         &self,

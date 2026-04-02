@@ -18,14 +18,34 @@ use proptest::prelude::*;
 // Helpers
 // ════════════════════════════════════════════════════════════════════
 
-/// Create a converter with UTF-8 charset pre-resolved.
+/// Create a StreamingConverter configured with default options and the
+/// content type set to "text/html; charset=UTF-8".
+///
+/// # Examples
+///
+/// ```
+/// let conv = make_converter();
+/// // ready to feed HTML bytes into `conv`
+/// ```
 fn make_converter() -> StreamingConverter {
     let mut conv = StreamingConverter::new(ConversionOptions::default(), MemoryBudget::default());
     conv.set_content_type(Some("text/html; charset=UTF-8".to_string()));
     conv
 }
 
-/// Run streaming conversion on complete HTML input (single chunk).
+/// Convert an entire HTML byte slice using the streaming converter and return the concatenated Markdown bytes.
+///
+/// On success, returns the combined markdown bytes produced by feeding the input as a single chunk and finalizing the converter.
+/// On error, propagates the converter's `ConversionError`.
+///
+/// # Examples
+///
+/// ```
+/// let html = b"<html><body><p>Hello</p></body></html>";
+/// let md = streaming_convert(html).unwrap();
+/// let s = String::from_utf8_lossy(&md);
+/// assert!(s.contains("Hello"));
+/// ```
 fn streaming_convert(html: &[u8]) -> Result<Vec<u8>, ConversionError> {
     let mut conv = make_converter();
     let output = conv.feed_chunk(html)?;
@@ -35,7 +55,30 @@ fn streaming_convert(html: &[u8]) -> Result<Vec<u8>, ConversionError> {
     Ok(full)
 }
 
-/// Run streaming conversion with specific chunk split points.
+/// Perform a streaming conversion of `html` by feeding it to the converter in chunks
+/// determined by `split_points`.
+///
+/// `split_points` is a sequence of byte offsets (measured from the start of `html`)
+/// that are clamped to `html.len()`. The function feeds the converter the slices
+/// between successive positions (starting at 0), then finalizes the converter and
+/// returns the concatenated markdown produced across all chunks and finalization.
+///
+/// # Examples
+///
+/// ```
+/// let html = b"<html><body><p>Hello</p><p>World</p></body></html>";
+/// // Split roughly between the two paragraphs
+/// let out = streaming_convert_chunked(html, &[20]).unwrap();
+/// let md = String::from_utf8_lossy(&out);
+/// assert!(md.contains("Hello"));
+/// assert!(md.contains("World"));
+/// ```
+///
+/// # Returns
+///
+/// A `Vec<u8>` containing the concatenated markdown produced from each chunk and
+/// the converter's final markdown, or a `ConversionError` if any feed or finalize
+/// step fails.
 fn streaming_convert_chunked(
     html: &[u8],
     split_points: &[usize],
@@ -60,7 +103,19 @@ fn streaming_convert_chunked(
     Ok(full)
 }
 
-/// Convert HTML via the full-buffer path (parse_html + MarkdownConverter).
+/// Converts an HTML byte slice to Markdown using the full-buffer DOM-based converter.
+///
+/// Parses the input bytes into a DOM and converts the DOM to a Markdown string with default
+/// conversion options.
+///
+/// # Examples
+///
+/// ```
+/// let html = b"<html><body><h1>Hello</h1><p>World</p></body></html>";
+/// let md = fullbuffer_convert(html).expect("conversion should succeed");
+/// assert!(md.contains("Hello"));
+/// assert!(md.contains("World"));
+/// ```
 fn fullbuffer_convert(html: &[u8]) -> Result<String, ConversionError> {
     let dom = parse_html(html)?;
     MarkdownConverter::with_options(ConversionOptions::default()).convert(&dom)
@@ -70,7 +125,23 @@ fn fullbuffer_convert(html: &[u8]) -> Result<String, ConversionError> {
 // Generators
 // ════════════════════════════════════════════════════════════════════
 
-/// Generate random HTML using only streaming-supported elements.
+/// Produates randomized HTML composed of fragments that are supported by the streaming converter.
+///
+/// The strategy yields a full HTML document string of the form `<html><body>...</body></html>` where the body
+/// contains between 1 and 7 randomly selected fragments (headings, paragraphs, lists, links, code blocks,
+/// blockquotes, and simple inline formatting).
+///
+/// # Examples
+///
+/// ```
+/// use proptest::prelude::*;
+///
+/// proptest!(|(html in arb_streaming_html())| {
+///     // Each generated value is a complete HTML document with a body.
+///     assert!(html.starts_with("<html><body>"));
+///     assert!(html.ends_with("</body></html>"));
+/// });
+/// ```
 fn arb_streaming_html() -> impl Strategy<Value = String> {
     prop::collection::vec(
         prop::sample::select(vec![
@@ -95,8 +166,24 @@ fn arb_streaming_html() -> impl Strategy<Value = String> {
     .prop_map(|fragments| format!("<html><body>{}</body></html>", fragments.join("")))
 }
 
-/// Generate HTML that includes fragments likely to be split at interesting
-/// boundaries (mid-tag, mid-attribute, mid-entity).
+/// Generates random HTML intended to exercise chunk-boundary splitting during streaming conversion.
+///
+/// The produced HTML is a full document wrapped in `<html><body>...</body></html>` and contains
+/// between 1 and 5 concatenated fragments chosen from elements that commonly expose interesting
+/// split points: attributes, entity encodings, inline formatting, code blocks, and nested structures.
+///
+/// # Examples
+///
+/// ```
+/// use proptest::prelude::*;
+///
+/// // Create the strategy and produce one example string.
+/// let mut runner = proptest::test_runner::TestRunner::default();
+/// let tree = crate::arb_cross_boundary_html().new_tree(&mut runner).unwrap();
+/// let sample = tree.current();
+/// assert!(sample.starts_with("<html><body>"));
+/// assert!(sample.ends_with("</body></html>"));
+/// ```
 fn arb_cross_boundary_html() -> impl Strategy<Value = String> {
     prop::collection::vec(
         prop::sample::select(vec![
@@ -491,7 +578,41 @@ proptest! {
 // Deterministic cross-boundary tests
 // ════════════════════════════════════════════════════════════════════
 
-/// Split HTML at a specific byte offset and verify output matches single-chunk.
+/// Assert that converting the given HTML yields identical Markdown when fed as a single chunk
+
+/// or when split into two chunks at the specified byte offset.
+
+///
+
+/// This function panics if either conversion fails or if the resulting Markdown bytes differ;
+
+/// the panic message includes the split position and lossy UTF-8 representations of both outputs.
+
+///
+
+/// # Parameters
+
+///
+
+/// - `html`: HTML input bytes to convert.
+
+/// - `split_at`: Byte offset within `html` where the single split is applied (must be <= `html.len()`).
+
+///
+
+/// # Examples
+
+///
+
+/// ```
+
+/// let html = b"<html><body><p>Hello</p></body></html>";
+
+/// // split inside the paragraph text
+
+/// assert_split_invariant(html, 20);
+
+/// ```
 fn assert_split_invariant(html: &[u8], split_at: usize) {
     let single = streaming_convert(html).expect("single-chunk conversion");
     let split_points = vec![split_at];
@@ -524,7 +645,11 @@ fn test_cross_boundary_attribute_value_split() {
     assert_split_invariant(html, offset + 3); // split inside "example"
 }
 
-/// Entity split: `&am` | `p;`
+/// Verifies that splitting an input inside an HTML entity (the `&amp;` in this case)
+/// does not change the streaming converter's output.
+///
+/// The test splits the document between the `&a` and `mp;` parts of `&amp;` and
+/// asserts byte-for-byte equivalence between the single-chunk and split-chunk conversions.
 #[test]
 fn test_cross_boundary_entity_split() {
     let html = b"<html><body><p>A &amp; B</p></body></html>";
@@ -533,7 +658,15 @@ fn test_cross_boundary_entity_split() {
     assert_split_invariant(html, offset + 2); // split between '&a' and 'mp;'
 }
 
-/// Numeric entity split: `&#1` | `69;`
+/// Verifies streaming conversion is invariant when a chunk boundary splits a numeric character entity (e.g., `&#169;`).
+///
+/// # Examples
+///
+/// ```
+/// let html = b"<html><body><p>Copyright &#169; symbol</p></body></html>";
+/// let offset = html.windows(4).position(|w| w == b"&#16").unwrap();
+/// assert_split_invariant(html, offset + 2);
+/// ```
 #[test]
 fn test_cross_boundary_numeric_entity_split() {
     let html = b"<html><body><p>Copyright &#169; symbol</p></body></html>";
@@ -549,7 +682,15 @@ fn test_cross_boundary_closing_tag_split() {
     assert_split_invariant(html, offset + 4); // split inside "</strong>"
 }
 
-/// Code block language attribute split: `class="language-` | `rust"`
+/// Verifies that splitting inside a code block's `class="language-..."` attribute does not change the streaming conversion output.
+///
+/// # Examples
+///
+/// ```
+/// let html = b"<html><body><pre><code class=\"language-rust\">fn main() {}</code></pre></body></html>";
+/// let offset = html.windows(9).position(|w| w == b"language-").unwrap();
+/// assert_split_invariant(html, offset + 5);
+/// ```
 #[test]
 fn test_cross_boundary_code_language_split() {
     let html =
@@ -574,7 +715,26 @@ fn test_exhaustive_byte_split_small_document() {
 // Metadata equivalence property test
 // ════════════════════════════════════════════════════════════════════
 
-/// Extract metadata via the streaming path (with extract_metadata enabled).
+/// Extracts page metadata using the streaming conversion path with metadata extraction enabled.
+///
+/// This returns the streaming converter's metadata snapshot taken before finalization; fields such as
+/// `title`, `description`, `image`, `author`, and `published` are populated when available. The
+/// returned metadata does not include URL convergence applied during `finalize()`.
+///
+/// # Returns
+///
+/// `Some(PageMetadata)` containing extracted metadata if feeding the input and finalization succeed, `None` otherwise.
+///
+/// # Examples
+///
+/// ```
+/// let html = b"<html><head><title>Hi</title><meta name=\"description\" content=\"Desc\"></head><body/></html>";
+/// let meta = streaming_extract_metadata(html);
+/// assert!(meta.is_some());
+/// let meta = meta.unwrap();
+/// assert_eq!(meta.title.as_deref(), Some("Hi"));
+/// assert_eq!(meta.description.as_deref(), Some("Desc"));
+/// ```
 fn streaming_extract_metadata(html: &[u8]) -> Option<PageMetadata> {
     let opts = ConversionOptions {
         extract_metadata: true,
@@ -603,14 +763,50 @@ fn streaming_extract_metadata(html: &[u8]) -> Option<PageMetadata> {
     }
 }
 
-/// Extract metadata via the full-buffer path.
+/// Extracts page metadata from an HTML document using the full-buffer DOM-based extractor.
+///
+/// Parses the provided HTML bytes into a DOM and runs the metadata extraction pass. This
+/// returns a snapshot of the extracted `PageMetadata` only if both parsing and extraction
+/// succeed.
+///
+/// # Parameters
+///
+/// - `html`: Byte slice containing the full HTML document to analyze.
+///
+/// # Returns
+///
+/// `Some(PageMetadata)` if parsing and metadata extraction succeed, `None` otherwise.
+///
+/// # Examples
+///
+/// ```
+/// let html = br#"<html><head><title>Example</title></head><body></body></html>"#;
+/// let meta = fullbuffer_extract_metadata(html);
+/// assert!(meta.is_some());
+/// ```
 fn fullbuffer_extract_metadata(html: &[u8]) -> Option<PageMetadata> {
     let dom = parse_html(html).ok()?;
     let extractor = MetadataExtractor::new(None, false);
     extractor.extract(&dom).ok()
 }
 
-/// Generate random HTML with `<head>` metadata for equivalence testing.
+/// Generates HTML strings containing a `<head>` section with optional metadata fields
+/// (title, Open Graph title, description, author, image, published time) for use in property tests.
+///
+/// The returned strategy yields complete HTML documents of the form `<html><head>...metadata...</head><body><p>Content</p></body></html>`,
+/// where each metadata element may be present or omitted according to the strategy.
+///
+/// # Examples
+///
+/// ```
+/// use proptest::test_runner::TestRunner;
+/// // Build the strategy and produce one example value.
+/// let strat = crate::arb_head_html();
+/// let mut runner = TestRunner::default();
+/// let tree = strat.new_tree(&mut runner).unwrap();
+/// let html = tree.current();
+/// assert!(html.starts_with("<html><head>"));
+/// ```
 fn arb_head_html() -> impl Strategy<Value = String> {
     let title = prop::sample::select(vec![
         "<title>Page Title</title>".to_string(),
@@ -715,8 +911,24 @@ proptest! {
 // URL convergence equivalence property test
 // ════════════════════════════════════════════════════════════════════
 
-/// Generate random HTML with varying URL-related head elements:
-/// canonical (with/without href), og:url, and base_url config.
+/// Produces randomized HTML documents with variations of canonical link(s), `og:url` meta, and an optional base URL for URL-convergence testing.
+///
+/// The generated `html` is a complete document (`<html><head>…</head><body><p>x</p></body></html>`) whose `<head>` may contain zero or more canonical `<link>` elements (including malformed/empty variants) and optionally an `og:url` meta. The strategy also yields an `Option<String>` representing a configurable base URL to be supplied to metadata extraction routines.
+///
+/// # Examples
+///
+/// ```
+/// use proptest::prelude::*;
+///
+/// proptest!(|(html, base) in crate::arb_url_scenario()| {
+///     // `html` contains the randomized head elements; `base` is an optional base URL.
+///     assert!(html.starts_with("<html><head>"));
+/// });
+/// ```
+///
+/// # Returns
+///
+/// A tuple `(html, base_url)` where `html` is the generated HTML document string and `base_url` is an optional base URL string to be used when resolving relative URLs.
 fn arb_url_scenario() -> impl Strategy<Value = (String, Option<String>)> {
     let canonical = prop::sample::select(vec![
         "".to_string(),

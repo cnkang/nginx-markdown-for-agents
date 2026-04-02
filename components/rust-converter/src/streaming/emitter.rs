@@ -71,11 +71,23 @@ pub struct IncrementalEmitter {
 }
 
 impl IncrementalEmitter {
-    /// Create a new emitter with buffer size derived from the budget.
+    /// Create an IncrementalEmitter configured from the provided memory budget.
+    ///
+    /// The emitter's pending buffer limit is set from `budget.output_buffer`. Other
+    /// formatting and tracking state are initialized to their empty/default values.
     ///
     /// # Arguments
     ///
-    /// * `budget` - Memory budget; `output_buffer` sets the pending buffer limit.
+    /// * `budget` - Memory budget whose `output_buffer` value bounds the emitter's pending buffer.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let budget = MemoryBudget { output_buffer: 1024 };
+    /// let mut emitter = IncrementalEmitter::new(&budget);
+    /// assert_eq!(emitter.pending_bytes(), 0);
+    /// assert_eq!(emitter.flushed_bytes(), 0);
+    /// ```
     pub fn new(budget: &MemoryBudget) -> Self {
         Self {
             buffer: Vec::new(),
@@ -95,17 +107,27 @@ impl IncrementalEmitter {
         }
     }
 
-    /// Process a state machine action and emit corresponding Markdown.
+    /// Dispatches a `StateMachineAction` to the corresponding handler and emits the resulting Markdown fragments.
     ///
-    /// # Arguments
-    ///
-    /// * `action` - The action produced by the structural state machine.
-    /// * `sm` - Reference to the state machine for context queries.
+    /// This forwards `Enter`, `Exit`, and `Text` actions to `handle_enter`, `handle_exit`, and `handle_text` respectively; `FallbackRequired` and `None` are ignored.
     ///
     /// # Errors
     ///
-    /// Returns [`ConversionError::BudgetExceeded`] if the pending buffer
-    /// would exceed its bounded size.
+    /// Returns `ConversionError::BudgetExceeded` if writing the emitted bytes would exceed the emitter's configured output buffer budget.
+    ///
+    /// # Parameters
+    ///
+    /// - `action`: action produced by the structural state machine to process.
+    /// - `sm`: mutable reference to the structural state machine used for contextual queries during emission.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// // Process a no-op action; requires a `StructuralStateMachine` instance for context.
+    /// let mut emitter = IncrementalEmitter::new(&MemoryBudget::default());
+    /// let mut sm = super::state_machine::StructuralStateMachine::default();
+    /// emitter.process_action(&StateMachineAction::None, &mut sm).unwrap();
+    /// ```
     pub fn process_action(
         &mut self,
         action: &StateMachineAction,
@@ -119,13 +141,29 @@ impl IncrementalEmitter {
         }
     }
 
-    /// Take all flushed (ready) output bytes, leaving the internal
-    /// flushed buffer empty.
+    /// Take and return the emitter's ready (flushed) output buffer, leaving it empty.
+    ///
+    /// # Returns
+    ///
+    /// `Vec<u8>` containing all bytes that were in the emitter's flushed buffer; the emitter's
+    /// internal flushed buffer is cleared.
     pub fn take_flushed(&mut self) -> Vec<u8> {
         std::mem::take(&mut self.flushed)
     }
 
-    /// Number of flush points produced so far.
+    /// Current count of emitted flush points.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// // Construct an emitter (replace with your actual constructor as needed)
+    /// let mut emitter = IncrementalEmitter::new(&MemoryBudget::default());
+    /// assert_eq!(emitter.flush_count(), 0);
+    /// ```
+    ///
+    /// # Returns
+    ///
+    /// The number of flush points emitted so far.
     pub fn flush_count(&self) -> u32 {
         self.flush_count
     }
@@ -140,14 +178,26 @@ impl IncrementalEmitter {
         self.flushed.len()
     }
 
-    /// Finalize the emitter: flush all remaining pending bytes.
+    /// Finalizes the emitter and returns the fully normalized output.
     ///
-    /// Ensures the output ends with exactly one newline.
+    /// Closes any open code block if present, moves pending bytes to the ready buffer, removes extra trailing newlines so at most one final `\n` remains, and returns the complete output bytes.
     ///
     /// # Errors
     ///
-    /// Returns [`ConversionError::BudgetExceeded`] if the final flush
-    /// would exceed the ready-buffer budget.
+    /// Returns `ConversionError::BudgetExceeded` if flushing pending bytes to the ready buffer would exceed the configured output buffer limit.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// // Construct a budget and emitter, write or process actions, then finalize:
+    /// let mut emitter = IncrementalEmitter::new(&budget);
+    /// // ... emit content ...
+    /// let output = emitter.finalize().unwrap();
+    /// assert!(!output.is_empty() || output.is_empty()); // trivial usage example
+    /// if !output.is_empty() {
+    ///     assert!(output.ends_with(b"\n"));
+    /// }
+    /// ```
     pub fn finalize(&mut self) -> Result<Vec<u8>, ConversionError> {
         // Close any open code block
         if self.in_code_block {
@@ -176,6 +226,27 @@ impl IncrementalEmitter {
 
     // ── Enter handlers ──────────────────────────────────────────────
 
+    /// Emit the opening Markdown syntax for `ctx` and update the emitter's internal formatting state.
+    ///
+    /// This method writes the appropriate opening tokens (heading hashes, list prefixes, backticks,
+    /// image syntax, emphasis markers, etc.), starts or records block contexts (paragraphs, lists,
+    /// blockquotes), and sets up deferred behaviors (for example, deferring the emission of a code
+    /// fence until code text arrives for `CodeBlock`). It may modify the provided `StructuralStateMachine`
+    ///-related fields such as list and blockquote depth.
+    ///
+    /// # Errors
+    ///
+    /// Returns `ConversionError::BudgetExceeded` if emitting the required bytes would exceed the emitter's
+    /// configured output buffer budget.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// let mut emitter = IncrementalEmitter::new(&budget);
+    /// let mut sm = StructuralStateMachine::new();
+    /// // Emit a level-2 heading start ("## ")
+    /// emitter.handle_enter(&StructuralContext::Heading(2), &mut sm).unwrap();
+    /// ```
     fn handle_enter(
         &mut self,
         ctx: &StructuralContext,
@@ -242,6 +313,24 @@ impl IncrementalEmitter {
 
     // ── Exit handlers ───────────────────────────────────────────────
 
+    /// Handle closing a structural context by emitting the appropriate Markdown closing
+    /// syntax, updating internal formatting state, and triggering flushes at block
+    /// boundaries when required.
+    ///
+    /// This writes any necessary trailing characters (newlines, closing fences or
+    /// delimiters), updates flags like `last_was_newline`, `needs_block_separator`,
+    /// and buffer/list/blockquote depths, and may invoke a flush which can return
+    /// `ConversionError::BudgetExceeded` if output buffers would exceed the memory
+    /// budget.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// // Typical use (types and construction omitted for brevity):
+    /// // let mut emitter = IncrementalEmitter::new(&budget);
+    /// // let mut sm = StructuralStateMachine::new();
+    /// // emitter.handle_exit(&StructuralContext::Paragraph, &mut sm).unwrap();
+    /// ```
     fn handle_exit(
         &mut self,
         ctx: &StructuralContext,
@@ -317,6 +406,35 @@ impl IncrementalEmitter {
 
     // ── Text handler ────────────────────────────────────────────────
 
+    /// Process a text event from the structural state machine and emit the corresponding Markdown fragment.
+    ///
+    /// If a link is being built, appends `text` to the internal link buffer and emits nothing. If inside a code block,
+    /// ensures the deferred opening fence is emitted, writes `text` verbatim (preserving whitespace), and updates
+    /// newline tracking. Otherwise, normalizes whitespace in `text` (collapsing runs and preserving leading/trailing
+    /// single-space semantics), emits the normalized string if non-empty, and updates newline tracking.
+    ///
+    /// # Errors
+    ///
+    /// Returns `ConversionError::BudgetExceeded` if emitting the text (or emitting a deferred code fence) would exceed
+    /// the configured output buffer budget.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use components::streaming::emitter::IncrementalEmitter;
+    /// use components::streaming::state_machine::StructuralStateMachine;
+    /// use components::MemoryBudget;
+    ///
+    /// let mut emitter = IncrementalEmitter::new(&MemoryBudget::default());
+    /// let mut sm = StructuralStateMachine::new();
+    ///
+    /// // Normalized emission (multiple spaces collapsed)
+    /// emitter.handle_text("Hello   world", &mut sm).unwrap();
+    ///
+    /// // Inside a code block, whitespace is preserved
+    /// // (assume earlier Enter(CodeBlock) was processed)
+    /// emitter.handle_text("  code line\n", &mut sm).unwrap();
+    /// ```
     fn handle_text(
         &mut self,
         text: &str,
@@ -349,9 +467,32 @@ impl IncrementalEmitter {
 
     // ── Internal helpers ────────────────────────────────────────────
 
-    /// Emit the deferred opening code fence, reading the current language
-    /// from the state machine (which may have been updated by a nested
-    /// `<code class="language-*">` tag).
+    /// Emit the deferred opening fenced code block using the current language from the state machine.
+    ///
+    /// This writes an opening triple-backtick fence (` ``` `) to the pending buffer, including the
+    /// language identifier if available from the current `StructuralContext` or the emitter's stored
+    /// `code_fence_lang`, and marks the fence as emitted. If the fence was already emitted this is a
+    /// no-op.
+    ///
+    /// Returns an error if writing the fence would exceed the configured output buffer budget.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// // Construct a state machine and emitter (helpers shown for clarity; actual constructors
+    /// // in tests create appropriate MemoryBudget and StructuralStateMachine instances).
+    /// let mut sm = super::state_machine::StructuralStateMachine::new();
+    /// let budget = super::MemoryBudget::default();
+    /// let mut emitter = super::IncrementalEmitter::new(&budget);
+    ///
+    /// // Simulate entering a code block with language "rust".
+    /// sm.push_context(super::state_machine::StructuralContext::CodeBlock(Some("rust".into())));
+    /// emitter.code_fence_lang = None; // no stored fallback
+    ///
+    /// emitter.emit_code_fence_if_needed(&sm).unwrap();
+    /// let out = String::from_utf8(emitter.take_flushed()).unwrap();
+    /// assert_eq!(out, "```rust\n");
+    /// ```
     fn emit_code_fence_if_needed(
         &mut self,
         sm: &super::state_machine::StructuralStateMachine,
@@ -380,7 +521,31 @@ impl IncrementalEmitter {
         Ok(())
     }
 
-    /// Emit a block separator (blank line) if needed.
+    /// Emit a single blank line when a block-level separator is required, then clear the separator flag.
+    ///
+    /// This writes a newline into the pending output buffer only if `needs_block_separator` is set,
+    /// resets `consecutive_blank_lines` to zero when a newline is written, and always clears
+    /// `needs_block_separator`.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` on success; `ConversionError::BudgetExceeded` if writing the separator would exceed the
+    /// configured output buffer budget.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// // Illustrative example: ensure a block separator is emitted when requested.
+    /// # use components::streaming::emitter::{IncrementalEmitter, MemoryBudget};
+    /// # use components::streaming::emitter::ConversionError;
+    /// let budget = MemoryBudget { output_buffer: 1024 };
+    /// let mut emitter = IncrementalEmitter::new(&budget);
+    /// emitter.needs_block_separator = true;
+    /// emitter.emit_block_separator().expect("should emit separator");
+    /// let out = emitter.take_flushed();
+    /// // A single newline should be present in flushed output (after flush).
+    /// assert!(out.contains(&b'\n'));
+    /// ```
     fn emit_block_separator(&mut self) -> Result<(), ConversionError> {
         if self.needs_block_separator {
             // Write a blank line to separate blocks. The write_str
@@ -392,7 +557,43 @@ impl IncrementalEmitter {
         Ok(())
     }
 
-    /// Emit the list item prefix with correct indentation.
+    /// Write the Markdown list item prefix for the current list context, including
+    /// indentation and the appropriate marker (numbered or `-`).
+    ///
+    /// The method uses `sm.list_depth` to compute indentation (two spaces per level
+    /// beyond the first) and `sm.nearest_list_context()` to choose between an
+    /// ordered marker (`{n}. `) or an unordered marker (`- `). The prefix is
+    /// emitted to the emitter's pending buffer and subject to the emitter's
+    /// budget checks.
+    ///
+    /// # Parameters
+    ///
+    /// - `sm`: the structural state machine whose `list_depth`, nearest list
+    ///   context, and ordered-item numbering determine the prefix contents.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` on success, `Err(ConversionError::BudgetExceeded)` if emitting the
+    /// prefix would exceed the configured output buffer budget.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use components::rust_converter::streaming::{emitter::IncrementalEmitter, state_machine::StructuralStateMachine};
+    /// # use components::rust_converter::streaming::ConversionError;
+    /// # use components::rust_converter::MemoryBudget;
+    /// // Create emitter and state machine (constructors elided for brevity).
+    /// let budget = MemoryBudget { output_buffer: 1024 };
+    /// let mut emitter = IncrementalEmitter::new(&budget);
+    /// let mut sm = StructuralStateMachine::new();
+    ///
+    /// // Simulate an unordered list item at depth 1
+    /// sm.list_depth = 1;
+    /// // nearest_list_context returns None or UnorderedList -> prefix will be "- "
+    /// emitter.emit_list_prefix(&mut sm).unwrap();
+    /// let flushed = emitter.take_flushed();
+    /// assert!(std::str::from_utf8(&flushed).unwrap().starts_with("- "));
+    /// ```
     fn emit_list_prefix(
         &mut self,
         sm: &mut super::state_machine::StructuralStateMachine,
@@ -422,7 +623,22 @@ impl IncrementalEmitter {
         Ok(())
     }
 
-    /// Write normalized bytes to the pending buffer.
+    /// Writes a string into the pending output buffer while applying output normalization.
+    ///
+    /// This function converts CRLF (`\r\n`) to LF, compresses consecutive blank lines so that
+    /// at most one blank line is emitted in a run, and updates internal newline/blank-line
+    /// state (`last_was_newline`, `consecutive_blank_lines`). It checks the pending-buffer
+    /// budget before writing and returns `ConversionError::BudgetExceeded` if the write would
+    /// exceed the configured output buffer limit.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,ignore
+    /// // Assuming `emitter` is a mutable IncrementalEmitter:
+    /// // - "\r\n" is normalized to "\n"
+    /// // - multiple consecutive "\n\n\n" are compressed to at most one blank line
+    /// emitter.write_str("line1\r\n\r\n\r\nline2\n")?;
+    /// ```
     fn write_str(&mut self, s: &str) -> Result<(), ConversionError> {
         let bytes = s.as_bytes();
         self.check_buffer_budget(bytes.len())?;
@@ -452,7 +668,20 @@ impl IncrementalEmitter {
         Ok(())
     }
 
-    /// Write raw bytes without normalization (used for code block fences).
+    /// Appends the given bytes to the pending output buffer exactly as provided and updates
+    /// `last_was_newline` to reflect whether the final byte is a newline.
+    ///
+    /// The bytes are written without any normalization (no CRLF-to-LF conversion, no
+    /// blank-line compression, and no trailing-whitespace trimming), making this suitable for
+    /// emitting fenced-code markers and other raw sequences.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// // Append a closing code fence verbatim
+    /// let mut emitter = IncrementalEmitter::new(&some_budget);
+    /// emitter.write_raw(b"```\n");
+    /// ```
     fn write_raw(&mut self, bytes: &[u8]) {
         self.buffer.extend_from_slice(bytes);
         self.last_was_newline = bytes.last().copied() == Some(b'\n');
@@ -471,19 +700,44 @@ impl IncrementalEmitter {
         Ok(())
     }
 
-    /// Move pending buffer contents to the flushed output.
+    /// Flushes pending output into the ready/flushed buffer and records a flush point.
+    ///
+    /// Attempts to move any pending bytes into the ready buffer while respecting the configured
+    /// output budget; on success increments the emitter's flush counter.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` on success, `Err(ConversionError::BudgetExceeded)` if moving pending bytes would
+    /// exceed the output buffer budget.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// let mut emitter = IncrementalEmitter::new(&budget);
+    /// // after writing content into the emitter's pending buffer:
+    /// emitter.trigger_flush().unwrap();
+    /// assert_eq!(emitter.flush_count(), 1);
+    /// ```
     fn trigger_flush(&mut self) -> Result<(), ConversionError> {
         self.flush_to_ready()?;
         self.flush_count = self.flush_count.saturating_add(1);
         Ok(())
     }
 
-    /// Transfer pending buffer to flushed, applying trailing whitespace removal.
+    /// Moves pending bytes into the ready (flushed) buffer after applying trailing-whitespace removal to each pending line.
     ///
-    /// Both `buffer` (pending) and `flushed` (ready) are bounded by
-    /// `max_buffer_size` to enforce the bounded-memory contract. If a
-    /// single `feed_chunk` call triggers many flush points, the ready
-    /// buffer is checked before each append.
+    /// This performs a budget check for the ready buffer and appends the normalized bytes to `flushed`. If the append would cause the ready buffer to exceed the configured `max_buffer_size`, no bytes are moved and an error is returned.
+    ///
+    /// # Errors
+    ///
+    /// Returns `ConversionError::BudgetExceeded` if the resulting flushed buffer size would exceed the output buffer budget.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// // given a mutable `emitter: IncrementalEmitter` with pending data
+    /// emitter.flush_to_ready().unwrap();
+    /// ```
     fn flush_to_ready(&mut self) -> Result<(), ConversionError> {
         if self.buffer.is_empty() {
             return Ok(());
@@ -503,8 +757,28 @@ impl IncrementalEmitter {
     }
 }
 
-/// Normalize text content: collapse whitespace runs into single spaces,
-/// trim leading/trailing whitespace.
+/// Collapse internal whitespace runs to single spaces while preserving whether the
+/// chunk begins or ends with whitespace.
+///
+/// This function is intended for normalizing streaming text chunks so that joining
+/// adjacent chunks preserves spacing at chunk boundaries:
+/// - An empty input returns an empty `String`.
+/// - An input that is entirely whitespace returns a single space `" "`.
+/// - Internal runs of one or more whitespace characters are replaced by a single space.
+/// - If the original text starts with any whitespace, the result begins with a single space.
+/// - If the original text ends with any whitespace, the result ends with a single space.
+///
+/// # Examples
+///
+/// ```
+/// assert_eq!(normalize_text(""), "");
+/// // internal collapse, preserve trailing space
+/// assert_eq!(normalize_text("a   b "), "a b ");
+/// // preserve leading and trailing single-space markers
+/// assert_eq!(normalize_text("  a\tb\n"), " a b ");
+/// // all-whitespace becomes a single space
+/// assert_eq!(normalize_text("   \t\n"), " ");
+/// ```
 fn normalize_text(text: &str) -> String {
     // Preserve leading/trailing whitespace to maintain correctness when
     // text is split across chunk boundaries (Property 2: chunk split
@@ -531,7 +805,26 @@ fn normalize_text(text: &str) -> String {
     result
 }
 
-/// Normalize pending buffer bytes: remove trailing whitespace from each line.
+/// Remove trailing whitespace from each line in the pending buffer and preserve line breaks.
+///
+/// Decodes `bytes` lossily to UTF-8, trims trailing ASCII whitespace from every line segment, and
+/// returns a new `Vec<u8>` containing the normalized bytes. Line separators are preserved: internal
+/// newlines remain, and a final trailing newline is preserved if and only if the original `bytes`
+/// ended with `\n`.
+///
+/// # Examples
+///
+/// ```
+/// let input = b"line1  \r\nline2\t\nlast   ";
+/// let out = normalize_pending(input);
+/// // CR (`\r`) may have been converted during earlier writes; this function preserves `\n`
+/// // structure and trims trailing spaces and tabs on each line.
+/// assert_eq!(out, b"line1\nline2\nlast");
+///
+/// let input2 = b"keep\n";
+/// let out2 = normalize_pending(input2);
+/// assert_eq!(out2, b"keep\n");
+/// ```
 fn normalize_pending(bytes: &[u8]) -> Vec<u8> {
     let text = String::from_utf8_lossy(bytes);
     let mut result = Vec::with_capacity(bytes.len());
@@ -554,7 +847,20 @@ fn normalize_pending(bytes: &[u8]) -> Vec<u8> {
     result
 }
 
-/// Check if a tag name is a block-level flush trigger.
+/// Determines whether an HTML tag should trigger a flush boundary.
+///
+/// The function checks if `tag` is in the emitter's allowlist of block-level tags
+/// whose closing should cause the incremental emitter to flush pending output.
+///
+/// # Examples
+///
+/// ```
+/// assert!(is_flush_tag("p"));    // paragraph
+/// assert!(is_flush_tag("h1"));   // heading
+/// assert!(!is_flush_tag("span")); // inline element
+/// ```
+///
+/// `true` if `tag` is a block-level flush trigger, `false` otherwise.
 pub fn is_flush_tag(tag: &str) -> bool {
     FLUSH_TAGS.contains(&tag)
 }
@@ -566,7 +872,15 @@ mod tests {
     use crate::streaming::state_machine::{StateMachineAction, StructuralStateMachine};
     use crate::streaming::types::StreamEvent;
 
-    /// Helper: create a default emitter and state machine pair.
+    /// Create a default `IncrementalEmitter` and `StructuralStateMachine` pair.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let (mut emitter, mut sm) = make_pair();
+    /// // emitter and sm are ready for use in tests or examples, e.g.:
+    /// // emitter.process_action(&StateMachineAction::None, &mut sm).unwrap();
+    /// ```
     fn make_pair() -> (IncrementalEmitter, StructuralStateMachine) {
         let budget = MemoryBudget::default();
         (
@@ -575,9 +889,19 @@ mod tests {
         )
     }
 
-    /// Helper: feed a sequence of StreamEvents through the state machine
-    /// and emitter, returning the concatenated flushed + finalized output
-    /// as a UTF-8 string.
+    /// Emit a sequence of `StreamEvent` through the state machine and incremental emitter to produce the final Markdown output.
+    ///
+    /// Feeds each event into the `StructuralStateMachine` and the `IncrementalEmitter`, collects any already-flushed fragments, finalizes the emitter, and concatenates both buffers into a single UTF-8 `String`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// // Construct a sequence of `StreamEvent` for a simple document, then emit:
+    /// // let events: Vec<StreamEvent> = vec![ /* events */ ];
+    /// // let output = emit_html(&events);
+    /// // assert!(output.ends_with('\n'));
+    /// ```
+    fn emit_html(events: &[StreamEvent]) -> String {
     fn emit_html(events: &[StreamEvent]) -> String {
         let (mut emitter, mut sm) = make_pair();
         for ev in events {
@@ -591,6 +915,21 @@ mod tests {
         String::from_utf8(output).expect("valid utf8")
     }
 
+    /// Create a `StartTag` `StreamEvent` for the given tag name with no attributes and not self-closing.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let ev = start_tag("p");
+    /// match ev {
+    ///     StreamEvent::StartTag { name, attrs, self_closing } => {
+    ///         assert_eq!(name, "p");
+    ///         assert!(attrs.is_empty());
+    ///         assert!(!self_closing);
+    ///     }
+    ///     _ => panic!("expected StartTag"),
+    /// }
+    /// ```
     fn start_tag(name: &str) -> StreamEvent {
         StreamEvent::StartTag {
             name: name.to_string(),
@@ -599,6 +938,41 @@ mod tests {
         }
     }
 
+    /// Creates a non-self-closing `StreamEvent::StartTag` with the provided element name and attributes.
+    
+    ///
+    
+    /// The attribute pairs are converted to owned `String`s for the event payload.
+    
+    ///
+    
+    /// # Examples
+    
+    ///
+    
+    /// ```
+    
+    /// let ev = start_tag_with_attrs("div", vec![("class", "note"), ("id", "n1")]);
+    
+    /// match ev {
+    
+    ///     StreamEvent::StartTag { name, attrs, self_closing } => {
+    
+    ///         assert_eq!(name, "div");
+    
+    ///         assert_eq!(self_closing, false);
+    
+    ///         assert_eq!(attrs.get("class").map(|s| s.as_str()), Some("note"));
+    
+    ///         assert_eq!(attrs.get("id").map(|s| s.as_str()), Some("n1"));
+    
+    ///     }
+    
+    ///     _ => panic!("unexpected event variant"),
+    
+    /// }
+    
+    /// ```
     fn start_tag_with_attrs(name: &str, attrs: Vec<(&str, &str)>) -> StreamEvent {
         StreamEvent::StartTag {
             name: name.to_string(),
@@ -610,6 +984,24 @@ mod tests {
         }
     }
 
+    /// Constructs a self-closing `StartTag` `StreamEvent` with the given tag name and attributes.
+    ///
+    /// The attribute pairs are converted to owned `String`s and attached to the event; the event's
+    /// `self_closing` flag is set to `true`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let ev = self_closing_tag("br", vec![("class", "x")]);
+    /// match ev {
+    ///     StreamEvent::StartTag { name, attrs, self_closing } => {
+    ///         assert_eq!(name, "br");
+    ///         assert!(self_closing);
+    ///         assert_eq!(attrs.get("class").map(|s| s.as_str()), Some("x"));
+    ///     }
+    ///     _ => panic!("expected StartTag"),
+    /// }
+    /// ```
     fn self_closing_tag(name: &str, attrs: Vec<(&str, &str)>) -> StreamEvent {
         StreamEvent::StartTag {
             name: name.to_string(),
@@ -621,12 +1013,35 @@ mod tests {
         }
     }
 
+    /// Constructs a `StreamEvent::EndTag` for the given tag name.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let ev = end_tag("p");
+    /// match ev {
+    ///     StreamEvent::EndTag { name } => assert_eq!(name, "p"),
+    ///     _ => panic!("expected EndTag"),
+    /// }
+    /// ```
     fn end_tag(name: &str) -> StreamEvent {
         StreamEvent::EndTag {
             name: name.to_string(),
         }
     }
 
+    /// Creates a `StreamEvent::Text` containing the given string.
+    ///
+    /// # Returns
+    ///
+    /// A `StreamEvent::Text` whose payload is `s` converted to a `String`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let ev = text("hello");
+    /// assert_eq!(ev, StreamEvent::Text("hello".to_string()));
+    /// ```
     fn text(s: &str) -> StreamEvent {
         StreamEvent::Text(s.to_string())
     }
@@ -639,6 +1054,14 @@ mod tests {
         assert_eq!(output, "# Hello\n");
     }
 
+    /// Verifies that an `h2` HTML element is converted to a level-2 Markdown heading.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let output = emit_html(&[start_tag("h2"), text("World"), end_tag("h2")]);
+    /// assert_eq!(output, "## World\n");
+    /// ```
     #[test]
     fn test_heading_h2() {
         let output = emit_html(&[start_tag("h2"), text("World"), end_tag("h2")]);
@@ -802,6 +1225,18 @@ mod tests {
 
     // ── Image tests ─────────────────────────────────────────────────
 
+    /// Verifies that an HTML `<img>` inside a paragraph is emitted as Markdown image syntax.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let output = emit_html(&[
+    ///     start_tag("p"),
+    ///     self_closing_tag("img", vec![("src", "pic.png"), ("alt", "A picture")]),
+    ///     end_tag("p"),
+    /// ]);
+    /// assert!(output.contains("![A picture](pic.png)"));
+    /// ```
     #[test]
     fn test_image() {
         let output = emit_html(&[
@@ -925,6 +1360,23 @@ mod tests {
         assert!(emitter.flush_count() >= 1);
     }
 
+    /// Verifies the emitter produces a flush when a paragraph is closed.
+    ///
+    /// Feeds a paragraph start, text, and paragraph end through the state machine and
+    /// asserts that the emitter's flushed buffer is non-empty after processing the closing tag.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let (mut emitter, mut sm) = make_pair();
+    /// let events = vec![start_tag("p"), text("Text"), end_tag("p")];
+    /// for ev in &events {
+    ///     let action = sm.process_event(ev).unwrap();
+    ///     emitter.process_action(&action, &mut sm).unwrap();
+    /// }
+    /// let flushed = emitter.take_flushed();
+    /// assert!(!flushed.is_empty());
+    /// ```
     #[test]
     fn test_flush_at_paragraph_end() {
         let (mut emitter, mut sm) = make_pair();

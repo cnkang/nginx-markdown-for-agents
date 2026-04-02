@@ -293,6 +293,9 @@ fn test_bytes_estimate_long_string() {
     assert_eq!(m.bytes_estimate(), 10_000);
 }
 
+/// Verifies that `bytes_estimate()` counts UTF-8 bytes for Unicode strings correctly.
+///
+/// Asserts that a `PageMetadata` with title `"café"` produces an estimate equal to `"café".len()` (5).
 #[test]
 fn test_bytes_estimate_unicode() {
     // "café" is 5 bytes in UTF-8 (4 ASCII + 2-byte é)

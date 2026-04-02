@@ -26,13 +26,31 @@ struct TokenSinkAdapter {
 }
 
 impl TokenSinkAdapter {
+    /// Constructs a `TokenSinkAdapter` with an empty internal event buffer.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let adapter = TokenSinkAdapter::new();
+    /// assert!(adapter.drain().is_empty());
+    /// ```
     fn new() -> Self {
         Self {
             events: RefCell::new(Vec::new()),
         }
     }
 
-    /// Drain all accumulated events.
+    /// Remove and return all events currently buffered by the sink.
+    ///
+    /// Empties the internal event buffer and yields the collected `StreamEvent` values.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let adapter = TokenSinkAdapter::new();
+    /// let events = adapter.drain();
+    /// assert!(events.is_empty());
+    /// ```
     fn drain(&self) -> Vec<StreamEvent> {
         self.events.borrow_mut().drain(..).collect()
     }
@@ -41,6 +59,28 @@ impl TokenSinkAdapter {
 impl TokenSink for TokenSinkAdapter {
     type Handle = ();
 
+    /// Converts an html5ever `Token` into a `StreamEvent` and appends it to the adapter's internal buffer.
+    ///
+    /// The EOF token is ignored and does not produce an event. Other token variants are mapped as:
+    /// - `TagToken` → converted via `tag_to_event` (start/end tag with attributes),
+    /// - `CharacterTokens` → `StreamEvent::Text` (stringified),
+    /// - `CommentToken` → `StreamEvent::Comment` (stringified),
+    /// - `DoctypeToken` → `StreamEvent::Doctype`,
+    /// - `NullCharacterToken` → `StreamEvent::Text("\u{FFFD}")`,
+    /// - `ParseError` → `StreamEvent::ParseError` (stringified).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use html5ever::tokenizer::Token;
+    /// use tendril::StrTendril;
+    /// use crate::{TokenSinkAdapter, StreamEvent};
+    ///
+    /// let adapter = TokenSinkAdapter::new();
+    /// adapter.process_token(Token::CharacterTokens(StrTendril::from("hello")), 0);
+    /// let events = adapter.drain();
+    /// assert_eq!(events, vec![StreamEvent::Text("hello".to_string())]);
+    /// ```
     fn process_token(&self, token: Token, _line_number: u64) -> TokenSinkResult<Self::Handle> {
         let event = match token {
             Token::TagToken(tag) => tag_to_event(tag),
@@ -56,7 +96,31 @@ impl TokenSink for TokenSinkAdapter {
     }
 }
 
-/// Convert an html5ever [`Tag`] into a [`StreamEvent`].
+/// Convert an html5ever `Tag` into a `StreamEvent`.
+///
+/// The returned event is either a `StartTag` with the tag name, a vector of
+/// attribute (name, value) pairs, and the `self_closing` flag, or an `EndTag`
+/// containing the tag name.
+///
+/// # Examples
+///
+/// ```
+/// use html5ever::tokenizer::{Tag, TagKind};
+///
+/// let tag = Tag {
+///     name: "h1".into(),
+///     attrs: vec![],
+///     self_closing: false,
+///     kind: TagKind::StartTag,
+/// };
+///
+/// let ev = tag_to_event(tag);
+/// if let StreamEvent::StartTag { name, .. } = ev {
+///     assert_eq!(name, "h1");
+/// } else {
+///     panic!("expected StartTag");
+/// }
+/// ```
 fn tag_to_event(tag: Tag) -> StreamEvent {
     let name = tag.name.to_string();
     let attrs: Vec<(String, String)> = tag
@@ -95,13 +159,26 @@ pub struct StreamingTokenizer {
 }
 
 impl Default for StreamingTokenizer {
+    /// Creates a new streaming HTML tokenizer with default tokenizer options.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let _ = StreamingTokenizer::default();
+    /// ```
     fn default() -> Self {
         Self::new()
     }
 }
 
 impl StreamingTokenizer {
-    /// Create a new streaming tokenizer.
+    /// Constructs a new StreamingTokenizer with a fresh html5ever tokenizer and an empty internal sink.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let _tokenizer = StreamingTokenizer::new();
+    /// ```
     pub fn new() -> Self {
         let sink = TokenSinkAdapter::new();
         let opts = TokenizerOpts {
@@ -113,20 +190,23 @@ impl StreamingTokenizer {
         }
     }
 
-    /// Feed a chunk of UTF-8 HTML text and return any complete events.
+    /// Feed a chunk of UTF-8 HTML and return any complete stream events.
     ///
-    /// # Arguments
-    ///
-    /// * `data` - UTF-8 encoded HTML fragment
-    ///
-    /// # Returns
-    ///
-    /// A vector of [`StreamEvent`] values produced from the input chunk.
+    /// Takes an HTML fragment, feeds it to the internal html5ever tokenizer, and
+    /// returns any `StreamEvent` values produced from that chunk.
     ///
     /// # Errors
     ///
-    /// Returns [`ConversionError::InternalError`] if html5ever panics or
-    /// if the tokenizer has already been consumed by [`finish`](Self::finish).
+    /// Returns `ConversionError::InternalError` if the tokenizer has already been
+    /// consumed by `finish()` or if html5ever panics while processing the input.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut tok = StreamingTokenizer::new();
+    /// let events = tok.feed("<h1>Hello</h1>").unwrap();
+    /// assert!(matches!(events.as_slice(), [StreamEvent::StartTag{..}, StreamEvent::Text(_), StreamEvent::EndTag{..}]));
+    /// ```
     pub fn feed(&mut self, data: &str) -> Result<Vec<StreamEvent>, ConversionError> {
         let tokenizer = self.tokenizer.as_mut().ok_or_else(|| {
             ConversionError::InternalError("tokenizer already consumed by finish()".into())
@@ -155,19 +235,24 @@ impl StreamingTokenizer {
         }
     }
 
-    /// Signal end-of-input and return any remaining events.
+    /// Signals end-of-input to the tokenizer and returns any remaining stream events.
     ///
-    /// After calling this method the tokenizer is consumed and cannot be
-    /// used again.
-    ///
-    /// # Returns
-    ///
-    /// A vector of any remaining [`StreamEvent`] values.
+    /// After calling this method the tokenizer is consumed and cannot be used again.
     ///
     /// # Errors
     ///
-    /// Returns [`ConversionError::InternalError`] if html5ever panics or
-    /// if the tokenizer has already been consumed.
+    /// Returns `ConversionError::InternalError` if the tokenizer has already been consumed
+    /// or if html5ever panics while finishing tokenization.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut t = StreamingTokenizer::new();
+    /// let events = t.feed("<h1>Hi</h1>").unwrap();
+    /// // process `events`...
+    /// let remaining = t.finish().unwrap();
+    /// // `t` cannot be used after `finish()`
+    /// ```
     pub fn finish(&mut self) -> Result<Vec<StreamEvent>, ConversionError> {
         let tokenizer = self.tokenizer.take().ok_or_else(|| {
             ConversionError::InternalError("tokenizer already consumed by finish()".into())
@@ -187,7 +272,21 @@ impl StreamingTokenizer {
     }
 }
 
-/// Extract a human-readable message from a panic payload.
+/// Format a panic payload into a human-readable message with a given prefix.
+///
+/// The function attempts to downcast the panic payload to `&str` or `String` and
+/// returns `"{prefix}: {message}"` when successful; otherwise returns
+/// `"{prefix}: unknown"`.
+///
+/// # Examples
+///
+/// ```
+/// use std::any::Any;
+///
+/// let payload: Box<dyn Any + Send> = Box::new("something went wrong");
+/// let msg = panic_payload_to_message(&payload, "panic occurred");
+/// assert_eq!(msg, "panic occurred: something went wrong");
+/// ```
 fn panic_payload_to_message(payload: &Box<dyn std::any::Any + Send>, prefix: &str) -> String {
     if let Some(s) = payload.downcast_ref::<&str>() {
         format!("{}: {}", prefix, s)
