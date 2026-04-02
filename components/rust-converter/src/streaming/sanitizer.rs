@@ -68,7 +68,16 @@ pub struct StreamingSanitizer {
 }
 
 impl StreamingSanitizer {
-    /// Create a new sanitizer with default settings.
+    /// Creates a new StreamingSanitizer configured with the default maximum nesting depth and empty state.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let s = StreamingSanitizer::new();
+    /// assert_eq!(s.nesting_depth(), 0);
+    /// assert!(!s.is_skipping());
+    /// assert!(!s.is_stripping());
+    /// ```
     pub fn new() -> Self {
         Self {
             skip_depth: 0,
@@ -78,7 +87,29 @@ impl StreamingSanitizer {
         }
     }
 
-    /// Create a sanitizer with a custom maximum nesting depth.
+    /// Creates a `StreamingSanitizer` configured with a custom maximum nesting depth.
+    
+    ///
+    
+    /// The sanitizer is initialized with default state (no skipping or stripping in progress)
+    
+    /// and `max_nesting_depth` set to `max_depth`.
+    
+    ///
+    
+    /// # Examples
+    
+    ///
+    
+    /// ```
+    
+    /// let s = StreamingSanitizer::with_max_depth(10);
+    
+    /// assert_eq!(s.nesting_depth(), 0);
+    
+    /// assert!(!s.is_skipping());
+    
+    /// ```
     pub fn with_max_depth(max_depth: usize) -> Self {
         Self {
             max_nesting_depth: max_depth,
@@ -86,15 +117,30 @@ impl StreamingSanitizer {
         }
     }
 
-    /// Process a single stream event and return the sanitization decision.
+    /// Process a `StreamEvent` and produce the sanitizer's decision for that token.
     ///
-    /// # Arguments
-    ///
-    /// * `event` - The stream event to process
+    /// The method updates internal sanitizer state (skip depth, strip stack, and
+    /// nesting depth) as it classifies the event and returns a `SanitizeDecision`
+    /// indicating whether the event should be emitted unchanged, emitted with
+    /// modifications, suppressed, or rejected due to excessive nesting depth.
     ///
     /// # Returns
     ///
-    /// A [`SanitizeDecision`] indicating how the event should be handled.
+    /// A `SanitizeDecision` describing how the caller should handle the provided
+    /// `StreamEvent`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use components::rust_converter::streaming::sanitizer::{StreamingSanitizer, StreamEvent, SanitizeDecision};
+    ///
+    /// let mut s = StreamingSanitizer::new();
+    /// let evt = StreamEvent::Text("hello".into());
+    /// match s.process_event(evt) {
+    ///     SanitizeDecision::Pass(e) => assert!(matches!(e, StreamEvent::Text(_))),
+    ///     _ => panic!("unexpected decision"),
+    /// }
+    /// ```
     pub fn process_event(&mut self, event: StreamEvent) -> SanitizeDecision {
         match &event {
             StreamEvent::StartTag {
@@ -224,29 +270,100 @@ impl StreamingSanitizer {
         }
     }
 
-    /// Whether the sanitizer is currently inside a dangerous element.
+    /// Indicates whether the sanitizer is currently inside a dangerous element.
+    ///
+    /// When `true`, the sanitizer is suppressing events because at least one
+    /// dangerous element has been opened and not yet closed.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut s = StreamingSanitizer::new();
+    /// assert!(!s.is_skipping());
+    /// ```
     pub fn is_skipping(&self) -> bool {
         self.skip_depth > 0
     }
 
-    /// Whether the sanitizer is currently stripping tags.
+    /// Indicates whether the sanitizer is currently in strip mode (element tags are being suppressed while their children continue to be processed).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let s = StreamingSanitizer::new();
+    /// assert!(!s.is_stripping());
+    /// ```
     pub fn is_stripping(&self) -> bool {
         !self.strip_stack.is_empty()
     }
 
-    /// Current nesting depth.
+    /// Report the current element nesting depth tracked by the sanitizer.
+    
+    ///
+    
+    /// The value represents the number of open (non-self-closing) elements that
+    
+    /// are currently being counted toward the configured nesting limit.
+    
+    ///
+    
+    /// # Returns
+    
+    ///
+    
+    /// `usize` — the current nesting depth.
+    
+    ///
+    
+    /// # Examples
+    
+    ///
+    
+    /// ```
+    
+    /// let mut s = StreamingSanitizer::new();
+    
+    /// assert_eq!(s.nesting_depth(), 0);
+    
+    /// ```
     pub fn nesting_depth(&self) -> usize {
         self.nesting_depth
     }
 }
 
 impl Default for StreamingSanitizer {
+    /// Creates a `StreamingSanitizer` configured with the module's default settings.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut s = StreamingSanitizer::default();
+    /// assert!(!s.is_skipping());
+    /// assert!(!s.is_stripping());
+    /// assert_eq!(s.nesting_depth(), 0);
+    /// ```
     fn default() -> Self {
         Self::new()
     }
 }
 
-/// Check if a URL uses a dangerous scheme.
+/// Checks whether a URL starts with a blocked dangerous scheme (after trimming and lowercasing).
+///
+/// The input is trimmed and converted to lowercase before comparison against the predefined
+/// dangerous scheme prefixes.
+///
+/// # Examples
+///
+/// ```
+/// let safe = is_dangerous_url("https://example.com");
+/// let dangerous = is_dangerous_url("   javascript:alert(1)");
+/// assert_eq!(safe, false);
+/// assert_eq!(dangerous, true);
+/// ```
+///
+/// # Returns
+///
+/// `true` if the trimmed, lowercased URL begins with any dangerous scheme prefix, `false` otherwise.
 fn is_dangerous_url(url: &str) -> bool {
     let lower = url.trim().to_lowercase();
     DANGEROUS_URL_SCHEMES
@@ -254,7 +371,29 @@ fn is_dangerous_url(url: &str) -> bool {
         .any(|scheme| lower.starts_with(scheme))
 }
 
-/// Remove event handler attributes and dangerous URLs from an attribute list.
+/// Filters an attribute list, removing event-handler attributes (names starting with `on`
+/// except the exact name `"on"`) and `href`/`src` attributes whose values use a
+/// dangerous URL scheme.
+///
+/// Returns a new `Vec<(String, String)>` containing only the allowed attributes.
+///
+/// # Examples
+///
+/// ```
+/// let attrs = vec![
+///     ("onclick".to_string(), "alert(1)".to_string()),
+///     ("on".to_string(), "not-an-event".to_string()),
+///     ("href".to_string(), "javascript:alert(1)".to_string()),
+///     ("href".to_string(), "https://example.com".to_string()),
+///     ("title".to_string(), "Example".to_string()),
+/// ];
+/// let clean = sanitize_attributes(&attrs);
+/// assert_eq!(clean, vec![
+///     ("on".to_string(), "not-an-event".to_string()),
+///     ("href".to_string(), "https://example.com".to_string()),
+///     ("title".to_string(), "Example".to_string()),
+/// ]);
+/// ```
 fn sanitize_attributes(attrs: &[(String, String)]) -> Vec<(String, String)> {
     attrs
         .iter()
@@ -278,6 +417,24 @@ mod tests {
     use super::*;
     use proptest::prelude::*;
 
+    /// Create a non-self-closing `StreamEvent::StartTag` from a tag name and attribute pairs.
+    ///
+    /// The provided attribute pairs (`(&str, &str)`) are converted into owned `String` name/value pairs
+    /// in the resulting event.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let ev = start_tag("a", vec![("href", "https://example.com"), ("rel", "noopener")]);
+    /// match ev {
+    ///     StreamEvent::StartTag { name, attrs, self_closing } => {
+    ///         assert_eq!(name, "a");
+    ///         assert_eq!(self_closing, false);
+    ///         assert!(attrs.contains(&(String::from("href"), String::from("https://example.com"))));
+    ///     }
+    ///     _ => panic!("expected StartTag"),
+    /// }
+    /// ```
     fn start_tag(name: &str, attrs: Vec<(&str, &str)>) -> StreamEvent {
         StreamEvent::StartTag {
             name: name.to_string(),
@@ -289,12 +446,34 @@ mod tests {
         }
     }
 
+    /// Creates a `StreamEvent::EndTag` for the given element name.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let ev = end_tag("div");
+    /// match ev {
+    ///     StreamEvent::EndTag { name } => assert_eq!(name, "div"),
+    ///     _ => panic!("expected EndTag"),
+    /// }
+    /// ```
     fn end_tag(name: &str) -> StreamEvent {
         StreamEvent::EndTag {
             name: name.to_string(),
         }
     }
 
+    /// Create a `StreamEvent::Text` containing the given string slice.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let ev = text("hello");
+    /// match ev {
+    ///     StreamEvent::Text(t) => assert_eq!(t, "hello"),
+    ///     _ => panic!("expected Text event"),
+    /// }
+    /// ```
     fn text(s: &str) -> StreamEvent {
         StreamEvent::Text(s.to_string())
     }
@@ -635,6 +814,19 @@ mod tests {
     // --- Property-based tests ---
     // Feature: rust-streaming-engine-core, Property 4: Streaming Sanitizer Security Equivalence
 
+    /// Produces a proptest strategy that generates HTML element names treated as dangerous by the sanitizer.
+    ///
+    /// The strategy yields one of: "script", "style", "noscript", "applet", "link", "base".
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use proptest::prelude::*;
+    /// let strat = arb_dangerous_element();
+    /// proptest!(|(tag in strat)| {
+    ///     assert!(["script","style","noscript","applet","link","base"].contains(&tag.as_str()));
+    /// });
+    /// ```
     fn arb_dangerous_element() -> impl Strategy<Value = String> {
         prop::sample::select(vec![
             "script".to_string(),
@@ -646,6 +838,18 @@ mod tests {
         ])
     }
 
+    /// Produces a proptest strategy that generates common safe HTML element tag names.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use proptest::prelude::*;
+    /// // Create the strategy and draw a single example value.
+    /// let strat = arb_safe_element();
+    /// let mut runner = proptest::test_runner::TestRunner::default();
+    /// let value = strat.new_tree(&mut runner).unwrap().current();
+    /// assert!(["div","p","span","h1","a","ul"].contains(&value.as_str()));
+    /// ```
     fn arb_safe_element() -> impl Strategy<Value = String> {
         prop::sample::select(vec![
             "div".to_string(),

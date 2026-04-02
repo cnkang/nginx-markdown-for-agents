@@ -48,6 +48,36 @@ pub enum CharsetState {
 }
 
 impl std::fmt::Debug for CharsetState {
+    /// Custom `Debug` formatting for `CharsetState`.
+    ///
+    /// Displays a compact, human-readable representation for each variant:
+    /// - `Pending` shows `header_charset` and the length of the sniff buffer as `sniff_buffer_len`.
+    /// - `Resolved` shows a boolean `has_decoder` indicating whether a decoder is present (`false` for UTF-8 zero-copy).
+    /// - `Failed` shows the failure reason as a tuple-like value.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::fmt::Debug;
+    ///
+    /// // Pending
+    /// let pending = crate::streaming::charset::CharsetState::Pending {
+    ///     header_charset: Some("ISO-8859-1".to_string()),
+    ///     sniff_buffer: vec![0u8; 10],
+    /// };
+    /// let s = format!("{:?}", pending);
+    /// assert!(s.contains("Pending"));
+    /// assert!(s.contains("header_charset"));
+    /// assert!(s.contains("sniff_buffer_len"));
+    ///
+    /// // Resolved (UTF-8 zero-copy)
+    /// let resolved_utf8 = crate::streaming::charset::CharsetState::Resolved { decoder: None };
+    /// assert!(format!("{:?}", resolved_utf8).contains("has_decoder = false"));
+    ///
+    /// // Failed
+    /// let failed = crate::streaming::charset::CharsetState::Failed("bad".into());
+    /// assert_eq!(format!("{:?}", failed), r#"Failed("bad")"#);
+    /// ```
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             CharsetState::Pending {
@@ -68,11 +98,13 @@ impl std::fmt::Debug for CharsetState {
 }
 
 impl CharsetState {
-    /// Create a new `CharsetState` in the `Pending` state.
+    /// Creates a new `CharsetState` in the `Pending` state with no header charset and an empty sniff buffer.
+    ///
+    /// The returned state will accumulate bytes (up to SNIFF_BUFFER_LIMIT) while awaiting charset resolution.
     ///
     /// # Examples
     ///
-    /// ```ignore
+    /// ```
     /// let mut state = CharsetState::new();
     /// state.set_content_type(Some("text/html; charset=UTF-8"));
     /// ```
@@ -83,14 +115,23 @@ impl CharsetState {
         }
     }
 
-    /// Set the Content-Type header value for charset detection (priority 1).
+    /// Sets the Content-Type header value used for charset detection, giving its
+    /// charset parameter priority over HTML <meta> detection.
     ///
-    /// Must be called before any data is fed. If the header contains a charset
-    /// parameter, it takes priority over HTML meta detection.
+    /// This should be called before any data is fed; if the header contains a
+    /// `charset` parameter, that charset will be used when resolving the stream's
+    /// encoding.
     ///
     /// # Arguments
     ///
-    /// * `content_type` - Optional Content-Type header value
+    /// * `content_type` - Optional Content-Type header value (e.g. "text/html; charset=ISO-8859-1")
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut state = CharsetState::new();
+    /// state.set_content_type(Some("text/html; charset=ISO-8859-1"));
+    /// ```
     pub fn set_content_type(&mut self, content_type: Option<&str>) {
         if let CharsetState::Pending { header_charset, .. } = self
             && let Some(ct) = content_type
@@ -102,27 +143,32 @@ impl CharsetState {
         }
     }
 
-    /// Feed data into the charset detector / transcoder.
+    /// Process an input chunk, performing charset detection while pending and transcoding bytes to UTF-8.
     ///
-    /// In the `Pending` state, data is accumulated in the sniff buffer. Once
-    /// the charset is resolved (via header, meta tag, or 1024-byte limit),
-    /// the buffered data and any new data are transcoded.
-    ///
-    /// In the `Resolved` state, data is transcoded directly.
-    ///
-    /// # Arguments
-    ///
-    /// * `data` - Input bytes to process
+    /// While the state is `Pending`, incoming bytes are buffered (up to 1024 bytes) until a charset is
+    /// determined from the Content-Type header, an HTML `<meta charset=...>` within the sniff buffer,
+    /// or the sniff buffer limit is reached. When the charset is resolved the buffered bytes and the
+    /// new input are transcoded and the state transitions to `Resolved`. When the state is `Resolved`,
+    /// incoming bytes are transcoded directly.
     ///
     /// # Returns
     ///
-    /// Transcoded UTF-8 bytes as `Cow<[u8]>`. Returns `Cow::Borrowed` for
-    /// UTF-8 zero-copy path when no buffered data needs flushing.
+    /// `Ok(Cow::Borrowed(data))` when the resolved charset is UTF-8 and the transcoded output exactly
+    /// matches the input (zero-copy path); `Ok(Cow::Owned(vec))` with transcoded UTF-8 bytes otherwise.
+    /// Returns `Err(ConversionError::EncodingError(...))` if the charset is unsupported or transcoding fails.
     ///
-    /// # Errors
+    /// # Examples
     ///
-    /// Returns `ConversionError::EncodingError` if the charset is unsupported
-    /// or transcoding fails.
+    /// ```
+    /// let mut st = CharsetState::new();
+    /// // feed some bytes (keeps buffering while pending)
+    /// let out = st.feed(b"<!doctype html><meta charset=\"utf-8\">Hello").unwrap();
+    /// // after resolution the returned bytes are UTF-8
+    /// assert!(std::str::from_utf8(&out).is_ok());
+    /// // flush any remaining buffered bytes
+    /// let tail = st.flush().unwrap();
+    /// assert!(std::str::from_utf8(&tail).is_ok());
+    /// ```
     pub fn feed<'a>(&mut self, data: &'a [u8]) -> Result<Cow<'a, [u8]>, ConversionError> {
         // Replace self with a temporary to allow state transitions.
         // On error, we restore a meaningful Failed state (not "transitioning").
@@ -202,19 +248,28 @@ impl CharsetState {
         }
     }
 
-    /// Flush any remaining buffered data.
+    /// Finalize processing and return any remaining transcoded bytes.
     ///
-    /// Must be called after all data has been fed to ensure any data still
-    /// in the sniff buffer is processed. If the charset was never resolved
-    /// (less than 1024 bytes total), it defaults to UTF-8.
+    /// Call this after all input has been fed to process any bytes still held in the sniff buffer.
+    /// If the charset was not resolved (total buffered bytes remained below the sniff limit), the
+    /// function resolves to UTF-8. On success the state transitions to `Resolved` (or remains
+    /// `Failed` on error).
     ///
     /// # Returns
     ///
-    /// Any remaining transcoded bytes.
+    /// The remaining bytes produced by transcoding the buffered input.
     ///
     /// # Errors
     ///
-    /// Returns `ConversionError::EncodingError` if transcoding fails.
+    /// Returns `ConversionError::EncodingError` if charset resolution or transcoding fails.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut state = CharsetState::new();
+    /// // feed data...
+    /// let remaining = state.flush().expect("flush should succeed");
+    /// ```
     pub fn flush(&mut self) -> Result<Vec<u8>, ConversionError> {
         let current = std::mem::replace(self, CharsetState::Failed("transitioning".into()));
 
@@ -255,26 +310,84 @@ impl CharsetState {
         }
     }
 
-    /// Returns `true` if the charset has been resolved.
+    /// Indicates whether the charset state is resolved.
+    ///
+    /// # Returns
+    ///
+    /// `true` if the state is `Resolved`, `false` otherwise.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let s = CharsetState::new();
+    /// assert!(!s.is_resolved());
+    /// ```
     pub fn is_resolved(&self) -> bool {
         matches!(self, CharsetState::Resolved { .. })
     }
 
-    /// Returns `true` if the state machine is still pending detection.
+    /// Indicates whether the charset detection state machine is awaiting resolution.
+    ///
+    /// Returns `true` if the state machine is in the `Pending` state, `false` otherwise.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let s = CharsetState::new();
+    /// assert!(s.is_pending());
+    /// ```
     pub fn is_pending(&self) -> bool {
         matches!(self, CharsetState::Pending { .. })
     }
 }
 
 impl Default for CharsetState {
+    /// Creates a new `CharsetState` in its initial pending state.
+    ///
+    /// This is equivalent to `CharsetState::new()` and produces a `Pending` state
+    /// with no header charset and an empty sniff buffer.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut state = CharsetState::default();
+    /// assert!(state.is_pending());
+    /// ```
     fn default() -> Self {
         Self::new()
     }
 }
 
-/// Resolve a charset name into a `CharsetState::Resolved` with an appropriate decoder.
+/// Resolve a charset label into a `CharsetState::Resolved` state and indicate if it is UTF-8 zero-copy.
 ///
-/// Returns `(CharsetState, is_utf8)` where `is_utf8` indicates the zero-copy path.
+/// Normalizes the input label and returns a resolved state containing `decoder: None` for UTF-8
+/// (zero-copy mode) or `decoder: Some(...)` for other supported encodings. If the label is not
+/// recognized, returns `ConversionError::EncodingError`.
+///
+/// # Returns
+///
+/// A tuple `(resolved_state, is_utf8)` where `resolved_state` is `CharsetState::Resolved { decoder: ... }`
+/// and `is_utf8` is `true` when the resolved encoding is UTF-8 (i.e., `decoder` is `None`), `false` otherwise.
+///
+/// # Examples
+///
+/// ```
+/// // UTF-8 resolves to decoder == None and is_utf8 == true
+/// let (state, is_utf8) = resolve_charset("utf-8").unwrap();
+/// match state {
+///     CharsetState::Resolved { decoder } => assert!(decoder.is_none()),
+///     _ => panic!("expected Resolved"),
+/// }
+/// assert!(is_utf8);
+///
+/// // Non-UTF-8 (example) yields a decoder and is_utf8 == false
+/// let (state, is_utf8) = resolve_charset("iso-8859-1").unwrap();
+/// match state {
+///     CharsetState::Resolved { decoder } => assert!(decoder.is_some()),
+///     _ => panic!("expected Resolved"),
+/// }
+/// assert!(!is_utf8);
+/// ```
 fn resolve_charset(charset: &str) -> Result<(CharsetState, bool), ConversionError> {
     let normalized = charset.to_uppercase();
     if normalized == "UTF-8" {
@@ -299,10 +412,22 @@ fn resolve_charset(charset: &str) -> Result<(CharsetState, bool), ConversionErro
     ))
 }
 
-/// Transcode data using the decoder in a `CharsetState::Resolved`.
+/// Transcodes a byte slice according to the charset resolved in `state`.
 ///
-/// For UTF-8 (decoder is None), validates the bytes and returns them as-is.
-/// For other encodings, uses `encoding_rs::Decoder` for incremental transcoding.
+/// Returns a UTF-8 byte vector produced by decoding `data` using the `Resolved` state's decoder.
+/// - If `state` is `Resolved { decoder: None }`, the input bytes are treated as UTF-8 and returned as-is (copied).
+/// - If `state` is `Resolved { decoder: Some(dec) }`, the decoder is used to convert `data` to UTF-8; decoding errors produce `ConversionError::EncodingError`.
+/// - If `data` is empty, an empty `Vec<u8>` is returned.
+/// - If `state` is not `Resolved`, an `EncodingError` is returned.
+///
+/// # Examples
+///
+/// ```
+/// // UTF-8 path: decoder == None
+/// let mut state = CharsetState::Resolved { decoder: None };
+/// let out = transcode_data(&mut state, b"hello").unwrap();
+/// assert_eq!(out, b"hello");
+/// ```
 fn transcode_data(state: &mut CharsetState, data: &[u8]) -> Result<Vec<u8>, ConversionError> {
     if data.is_empty() {
         return Ok(Vec::new());
@@ -685,7 +810,21 @@ mod tests {
     // Task 8.3: Property test for Charset Detection equivalence (Property 9)
     // ========================================================================
 
-    /// Generate a random encoding label from encoding_rs supported encodings.
+    /// Produces a proptest strategy that yields a random encoding label supported by encoding_rs.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use proptest::prelude::*;
+    ///
+    /// proptest! {
+    ///     #[test]
+    ///     fn pick_label(label in crate::arb_encoding_label()) {
+    ///         // strategy yields one of the known encoding labels (including "UTF-8")
+    ///         assert!(label == "UTF-8" || label.starts_with("ISO-8859-") || label.starts_with("windows-") || label.starts_with("KOI8-"));
+    ///     }
+    /// }
+    /// ```
     fn arb_encoding_label() -> impl Strategy<Value = &'static str> {
         prop::sample::select(vec![
             "ISO-8859-1",
@@ -716,7 +855,21 @@ mod tests {
         ])
     }
 
-    /// Generate random ASCII-safe HTML body text.
+    /// Produces a proptest strategy that generates ASCII-safe HTML body strings.
+    ///
+    /// The generated strings are 1 to 9 words (random length in 1..10), each chosen from
+    /// a small ASCII-only word list and joined with single spaces.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use proptest::strategy::Strategy;
+    ///
+    /// let mut runner = proptest::test_runner::TestRunner::default();
+    /// let strategy = crate::arb_ascii_body();
+    /// let value = strategy.new_tree(&mut runner).unwrap().current();
+    /// assert!(!value.is_empty());
+    /// ```
     fn arb_ascii_body() -> impl Strategy<Value = String> {
         prop::collection::vec(
             prop::sample::select(vec![
