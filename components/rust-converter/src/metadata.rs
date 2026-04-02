@@ -25,15 +25,33 @@ pub struct PageMetadata {
 }
 
 impl PageMetadata {
-    /// Create an empty metadata container.
+    /// Constructs an empty PageMetadata with all fields unset.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let meta = PageMetadata::new();
+    /// assert_eq!(meta, PageMetadata::default());
+    /// assert!(meta.title.is_none() && meta.description.is_none());
+    /// ```
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Estimate the in-memory byte size of populated metadata fields.
+    /// Estimate the total byte length of all populated metadata fields.
     ///
-    /// Used by the streaming converter to track the working set
-    /// contribution of extracted head metadata.
+    /// Counts the UTF-8 byte length of each `Some(String)` field and returns their saturating sum.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let meta = PageMetadata {
+    ///     title: Some("a".into()),
+    ///     description: Some("bc".into()),
+    ///     ..Default::default()
+    /// };
+    /// assert_eq!(meta.bytes_estimate(), 3);
+    /// ```
     pub fn bytes_estimate(&self) -> usize {
         let mut total = 0usize;
         if let Some(ref s) = self.title {

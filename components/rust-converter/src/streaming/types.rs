@@ -44,6 +44,18 @@ pub enum FallbackReason {
 }
 
 impl std::fmt::Display for FallbackReason {
+    /// Format a `FallbackReason` into a concise, human-readable message.
+    ///
+    /// This implementation converts each `FallbackReason` variant into a short
+    /// descriptive string (for example, `TableDetected` → `"table element detected"`).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use components::rust_converter::streaming::types::FallbackReason;
+    /// let r = FallbackReason::UnsupportedStructure("nested table".into());
+    /// assert_eq!(format!("{}", r), "unsupported structure: nested table");
+    /// ```
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::TableDetected => write!(f, "table element detected"),

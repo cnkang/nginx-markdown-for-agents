@@ -85,12 +85,20 @@ pub struct StructuralStateMachine {
 }
 
 impl StructuralStateMachine {
-    /// Create a new state machine with stack depth derived from the budget.
+    /// Create a StructuralStateMachine with a maximum stack depth derived from `budget`.
     ///
-    /// # Arguments
+    /// The `state_stack` byte allowance from `MemoryBudget` is divided by an estimated
+    /// 64 bytes per `StructuralContext` to compute the maximum number of stack entries,
+    /// with a minimum of 16 levels enforced.
     ///
-    /// * `budget` - Memory budget; `state_stack` bytes are divided by an
-    ///   estimated 64 bytes per context entry to derive the max depth.
+    /// # Examples
+    ///
+    /// ```
+    /// let budget = MemoryBudget { state_stack: 1024 };
+    /// let sm = StructuralStateMachine::new(&budget);
+    /// // new machine starts with an empty stack
+    /// assert_eq!(sm.depth(), 0);
+    /// ```
     pub fn new(budget: &MemoryBudget) -> Self {
         // Each StructuralContext is roughly 64 bytes.
         let max_depth = budget.state_stack / 64;
@@ -106,20 +114,32 @@ impl StructuralStateMachine {
         }
     }
 
-    /// Process a stream event and return the action for the emitter.
+    /// Update the state machine with a stream event and produce the corresponding emitter action.
     ///
-    /// # Arguments
-    ///
-    /// * `event` - The sanitized stream event to process.
+    /// Processes a sanitized `StreamEvent`, updating internal structural state (stack, nesting counters,
+    /// and flags) as needed and returning a `StateMachineAction` that directs the emitter.
     ///
     /// # Returns
     ///
-    /// A [`StateMachineAction`] telling the emitter what to do.
+    /// `StateMachineAction` indicating how the emitter should proceed (`Enter`, `Exit`, `Text`,
+    /// `FallbackRequired`, or `None`).
     ///
     /// # Errors
     ///
-    /// Returns [`ConversionError::BudgetExceeded`] if the state stack
-    /// would exceed its bounded depth.
+    /// Returns `ConversionError::BudgetExceeded` if pushing a new context would exceed the configured
+    /// state stack budget.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use components::rust_converter::streaming::state_machine::{StructuralStateMachine, StreamEvent, StateMachineAction};
+    /// use components::rust_converter::memory::MemoryBudget;
+    ///
+    /// let budget = MemoryBudget { state_stack: 1024 }; // example budget
+    /// let mut sm = StructuralStateMachine::new(&budget);
+    /// let action = sm.process_event(&StreamEvent::Text("hello".into())).unwrap();
+    /// assert_eq!(action, StateMachineAction::Text("hello".into()));
+    /// ```
     pub fn process_event(
         &mut self,
         event: &StreamEvent,
@@ -138,6 +158,27 @@ impl StructuralStateMachine {
         }
     }
 
+    /// Handle an HTML start tag by updating the structural state machine and producing an action for the emitter.
+    ///
+    /// Recognizes common structural and inline tags, updates nesting trackers (lists, blockquotes, preformatted/head), extracts
+    /// attributes for links/images/ordered lists/code languages, and either pushes a corresponding `StructuralContext` or
+    /// returns an immediate action. Table-related start tags produce `StateMachineAction::FallbackRequired`. Some tags
+    /// (structural wrappers, unknown tags, and `head`) are ignored and produce `StateMachineAction::None`. A self-closing
+    /// `img` produces an `Enter(Image { .. })` without pushing an additional inline context.
+    ///
+    /// # Errors
+    /// Returns `ConversionError::BudgetExceeded` if pushing a new context would exceed the configured stack budget.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use components::rust_converter::streaming::state_machine::*;
+    ///
+    /// let budget = MemoryBudget::default();
+    /// let mut sm = StructuralStateMachine::new(&budget);
+    /// let action = sm.handle_start_tag("p", &[], false).unwrap();
+    /// assert!(matches!(action, StateMachineAction::Enter(_)));
+    /// ```
     fn handle_start_tag(
         &mut self,
         name: &str,
@@ -245,6 +286,32 @@ impl StructuralStateMachine {
         Ok(StateMachineAction::Enter(ctx))
     }
 
+    /// Process an HTML end tag, pop the corresponding structural context if present, and update
+    /// internal nesting/tracking state accordingly.
+    ///
+    /// For matching contexts (e.g., headings, paragraphs, list items, pre/code, blockquotes,
+    /// links, emphasis), this removes the nearest matching context from the stack, adjusts
+    /// list or blockquote depths or the preformatted flag as appropriate, sets
+    /// `needs_block_separator` for block-level elements, and returns `StateMachineAction::Exit`
+    /// with the popped context. Special-case behavior:
+    /// - `ol` and `ul`: decrement `list_depth`; `ol` also pops the ordered-list counter.
+    /// - `head`: sets `in_head` to `false` and does not modify the stack.
+    /// - Unknown or unmatched end tags produce `StateMachineAction::None`.
+    ///
+    /// # Returns
+    ///
+    /// `StateMachineAction::Exit(ctx)` when a matching context `ctx` was popped, `StateMachineAction::None` otherwise.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// // Illustrative usage; actual construction of `StructuralStateMachine` and pushing of
+    /// // contexts is required for a non-None result.
+    /// let mut sm = StructuralStateMachine::new(&MemoryBudget::default());
+    /// let action = sm.handle_end_tag("p").unwrap();
+    /// // If no matching `Paragraph` context was on the stack, this yields `StateMachineAction::None`.
+    /// assert!(matches!(action, StateMachineAction::None));
+    /// ```
     fn handle_end_tag(&mut self, name: &str) -> Result<StateMachineAction, ConversionError> {
         match name {
             "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "p" | "li" | "pre" | "blockquote" | "a"
@@ -299,6 +366,19 @@ impl StructuralStateMachine {
         }
     }
 
+    /// Pushes a `StructuralContext` onto the state's context stack while enforcing the configured maximum depth.
+    ///
+    /// If the stack has already reached `max_stack_depth`, this returns
+    /// `ConversionError::BudgetExceeded` with `stage` set to `"state_stack"` and
+    /// `used`/`limit` reporting the estimated bytes consumed and allowed (each
+    /// stack slot is accounted as 64 bytes).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// // assuming `machine` is a `StructuralStateMachine` created elsewhere:
+    /// let _ = machine.push_context(StructuralContext::Paragraph);
+    /// ```
     fn push_context(&mut self, ctx: StructuralContext) -> Result<(), ConversionError> {
         if self.stack.len() >= self.max_stack_depth {
             return Err(ConversionError::BudgetExceeded {
@@ -311,6 +391,13 @@ impl StructuralStateMachine {
         Ok(())
     }
 
+    /// Removes and returns the nearest (innermost) stacked `StructuralContext` that corresponds to the given HTML tag name.
+    ///
+    /// The search scans the stack from top to bottom and, if a matching context is found, removes it from the stack and returns it. If no matching context exists, returns `None`.
+    ///
+    /// # Returns
+    ///
+    /// The removed `StructuralContext` if a match was found, `None` otherwise.
     fn pop_matching_context(&mut self, tag_name: &str) -> Option<StructuralContext> {
         // Find the matching context from the top of the stack
         let pos = self
@@ -324,12 +411,42 @@ impl StructuralStateMachine {
         }
     }
 
-    /// Get the current (top) context.
+    /// Retrieve the current top structural context, if any.
+    ///
+    /// # Returns
+    ///
+    /// `Some(&StructuralContext)` with the innermost (top) context when the state stack is non-empty, `None` otherwise.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # // Setup hidden helpers so the example focuses on `current_context`.
+    /// # use components::rust_converter::streaming::state_machine::{StructuralStateMachine, StructuralContext};
+    /// # #[allow(dead_code)]
+    /// # struct MemoryBudget { pub state_stack: usize }
+    /// # impl MemoryBudget { fn new(bytes: usize) -> Self { MemoryBudget { state_stack: bytes } } }
+    /// let sm = StructuralStateMachine::new(&MemoryBudget::new(1024));
+    /// assert!(sm.current_context().is_none());
+    /// ```
     pub fn current_context(&self) -> Option<&StructuralContext> {
         self.stack.last()
     }
 
-    /// Get the current ordered list item number and increment it.
+    /// Get the next item number for the current ordered list and advance its counter.
+    ///
+    /// # Returns
+    ///
+    /// The current item number for the innermost ordered list; returns `1` if not inside any ordered list.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut sm = StructuralStateMachine::new(&MemoryBudget::default());
+    /// // simulate an ordered list that starts at 3
+    /// sm.ordered_list_counters.push(3);
+    /// assert_eq!(sm.next_ordered_item_number(), 3);
+    /// assert_eq!(sm.next_ordered_item_number(), 4);
+    /// ```
     pub fn next_ordered_item_number(&mut self) -> u32 {
         if let Some(counter) = self.ordered_list_counters.last_mut() {
             let num = *counter;
@@ -340,7 +457,27 @@ impl StructuralStateMachine {
         }
     }
 
-    /// Check if we are inside a specific context type.
+    /// Determine whether any active structural context satisfies a predicate.
+    ///
+    /// The provided `check` predicate is applied to each context on the internal stack;
+    /// the method returns `true` if at least one context makes the predicate evaluate to `true`.
+    ///
+    /// # Parameters
+    ///
+    /// - `check`: A predicate tested against each active `StructuralContext`.
+    ///
+    /// # Returns
+    ///
+    /// `true` if any stacked context satisfies `check`, `false` otherwise.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// // Check whether the state machine is currently inside a blockquote.
+    /// let mut sm = StructuralStateMachine::new(&MemoryBudget::default());
+    /// // ... events that may push Blockquote ...
+    /// let inside_blockquote = sm.is_inside(&|ctx| matches!(ctx, StructuralContext::Blockquote));
+    /// ```
     pub fn is_inside(&self, check: &dyn Fn(&StructuralContext) -> bool) -> bool {
         self.stack.iter().any(check)
     }
@@ -358,10 +495,25 @@ impl StructuralStateMachine {
         })
     }
 
-    /// Finalize: auto-close all unclosed contexts.
+    /// Auto-close all open structural contexts and return them.
     ///
-    /// Returns the list of contexts that were auto-closed, in the order
-    /// they were popped (innermost first).
+    /// This will pop every context from the machine's stack, update internal
+    /// nesting trackers (list and blockquote depths, `in_preformatted`) as each
+    /// context is closed, clear any ordered-list counters, and collect the closed
+    /// contexts in pop order.
+    ///
+    /// Returns the list of contexts that were auto-closed, in the order they were
+    /// popped (innermost first).
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// // Given a state machine with some open contexts:
+    /// // let mut sm = StructuralStateMachine::new(&memory_budget);
+    /// // ... (push some contexts)
+    /// let closed = sm.finalize();
+    /// // `closed` contains the contexts that were closed, inner-most first.
+    /// ```
     pub fn finalize(&mut self) -> Vec<StructuralContext> {
         let mut closed = Vec::new();
         while let Some(ctx) = self.stack.pop() {
@@ -383,7 +535,16 @@ impl StructuralStateMachine {
         closed
     }
 
-    /// Current stack depth.
+    /// Number of contexts currently on the state stack.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// // Create a machine with a sufficiently large memory budget (example only).
+    /// let budget = crate::MemoryBudget { state_stack: 1024 };
+    /// let sm = crate::streaming::state_machine::StructuralStateMachine::new(&budget);
+    /// assert_eq!(sm.depth(), 0);
+    /// ```
     pub fn depth(&self) -> usize {
         self.stack.len()
     }
@@ -395,7 +556,19 @@ impl StructuralStateMachine {
     }
 }
 
-/// Check if a tag name corresponds to a block-level element.
+/// Determines whether an HTML tag name represents a block-level element.
+///
+/// # Returns
+///
+/// `true` if `tag` is a block-level element (`h1`–`h6`, `p`, `pre`, `blockquote`, `li`, `ol`, or `ul`), `false` otherwise.
+///
+/// # Examples
+///
+/// ```
+/// assert!(is_block_level("p"));
+/// assert!(is_block_level("h3"));
+/// assert!(!is_block_level("span"));
+/// ```
 fn is_block_level(tag: &str) -> bool {
     matches!(
         tag,
@@ -403,7 +576,33 @@ fn is_block_level(tag: &str) -> bool {
     )
 }
 
-/// Check if a [`StructuralContext`] matches a closing tag name.
+/// Determine whether a `StructuralContext` corresponds to the given HTML closing tag name.
+///
+/// The comparison is name-based (e.g., `Heading(1)` ↔ `"h1"`, `Paragraph` ↔ `"p"`, `OrderedList(_)` ↔ `"ol"`, etc.).
+///
+/// # Parameters
+///
+/// - `ctx`: the structural context to compare.
+/// - `tag`: the lowercase HTML tag name to match against.
+///
+/// # Returns
+///
+/// `true` if the context corresponds to the provided tag name, `false` otherwise.
+///
+/// # Examples
+///
+/// ```
+/// let ctx = StructuralContext::Paragraph;
+/// assert!(context_matches_tag(&ctx, "p"));
+///
+/// let h3 = StructuralContext::Heading(3);
+/// assert!(context_matches_tag(&h3, "h3"));
+///
+/// let ol = StructuralContext::OrderedList(1);
+/// assert!(context_matches_tag(&ol, "ol"));
+///
+/// assert!(!context_matches_tag(&h3, "h2"));
+/// ```
 fn context_matches_tag(ctx: &StructuralContext, tag: &str) -> bool {
     matches!(
         (ctx, tag),
@@ -430,10 +629,33 @@ fn context_matches_tag(ctx: &StructuralContext, tag: &str) -> bool {
 mod tests {
     use super::*;
 
+    /// Create a `StructuralStateMachine` initialized with the default memory budget.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let sm = default_sm();
+    /// assert_eq!(sm.depth(), 0);
+    /// ```
     fn default_sm() -> StructuralStateMachine {
         StructuralStateMachine::new(&MemoryBudget::default())
     }
 
+    /// Create a `StreamEvent::StartTag` with the given tag name, no attributes, and `self_closing` set to `false`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let ev = start_tag("p");
+    /// match ev {
+    ///     StreamEvent::StartTag { name, attrs, self_closing } => {
+    ///         assert_eq!(name, "p");
+    ///         assert!(attrs.is_empty());
+    ///         assert!(!self_closing);
+    ///     }
+    ///     _ => panic!("expected StartTag"),
+    /// }
+    /// ```
     fn start_tag(name: &str) -> StreamEvent {
         StreamEvent::StartTag {
             name: name.to_string(),
@@ -442,6 +664,23 @@ mod tests {
         }
     }
 
+    /// Create a `StreamEvent::StartTag` for `name` with the provided attributes.
+    ///
+    /// `attrs` is a list of `(key, value)` attribute pairs which will be converted into owned `String`s.
+    /// The returned event has `self_closing` set to `false`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let ev = start_tag_with_attrs("a", vec![("href", "https://example.com")]);
+    /// if let StreamEvent::StartTag { name, attrs, self_closing } = ev {
+    ///     assert_eq!(name, "a");
+    ///     assert_eq!(attrs, vec![("href".to_string(), "https://example.com".to_string())]);
+    ///     assert!(!self_closing);
+    /// } else {
+    ///     panic!("expected StartTag");
+    /// }
+    /// ```
     fn start_tag_with_attrs(name: &str, attrs: Vec<(&str, &str)>) -> StreamEvent {
         StreamEvent::StartTag {
             name: name.to_string(),
@@ -453,16 +692,47 @@ mod tests {
         }
     }
 
+    /// Create a `StreamEvent::EndTag` for the given tag name.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let ev = end_tag("p");
+    /// match ev {
+    ///     StreamEvent::EndTag { name } => assert_eq!(name, "p"),
+    ///     _ => panic!("unexpected event"),
+    /// }
+    /// ```
     fn end_tag(name: &str) -> StreamEvent {
         StreamEvent::EndTag {
             name: name.to_string(),
         }
     }
 
+    /// Create a `StreamEvent::Text` containing the given string.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let ev = text("hello");
+    /// assert_eq!(ev, StreamEvent::Text("hello".to_string()));
+    /// ```
     fn text(s: &str) -> StreamEvent {
         StreamEvent::Text(s.to_string())
     }
 
+    /// Verifies that an `h1` start tag enters a `Heading(1)` context and that the corresponding end tag exits it and requests a block separator.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut sm = default_sm();
+    /// let action = sm.process_event(&start_tag("h1")).unwrap();
+    /// assert_eq!(action, StateMachineAction::Enter(StructuralContext::Heading(1)));
+    /// let action = sm.process_event(&end_tag("h1")).unwrap();
+    /// assert_eq!(action, StateMachineAction::Exit(StructuralContext::Heading(1)));
+    /// assert!(sm.needs_block_separator);
+    /// ```
     #[test]
     fn test_heading_context() {
         let mut sm = default_sm();
@@ -505,6 +775,24 @@ mod tests {
         assert_eq!(sm.blockquote_depth, 1);
     }
 
+    /// Verifies that a `pre` element containing a `code` element with a `language-*` class
+    /// records the language on the `CodeBlock` context and marks the state machine as preformatted.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut sm = default_sm();
+    /// sm.process_event(&start_tag("pre")).unwrap();
+    /// sm.process_event(&start_tag_with_attrs(
+    ///     "code",
+    ///     vec![("class", "language-rust")],
+    /// )).unwrap();
+    /// assert!(sm.in_preformatted);
+    /// assert_eq!(
+    ///     sm.current_context(),
+    ///     Some(&StructuralContext::CodeBlock(Some("rust".to_string())))
+    /// );
+    /// ```
     #[test]
     fn test_code_block_with_language() {
         let mut sm = default_sm();
@@ -584,6 +872,16 @@ mod tests {
         assert_eq!(sm.next_ordered_item_number(), 3);
     }
 
+    /// Verifies that an `ol` element with a `start` attribute initializes the ordered-list counter.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut sm = default_sm();
+    /// sm.process_event(&start_tag_with_attrs("ol", vec![("start", "5")])).unwrap();
+    /// assert_eq!(sm.next_ordered_item_number(), 5);
+    /// assert_eq!(sm.next_ordered_item_number(), 6);
+    /// ```
     #[test]
     fn test_ordered_list_custom_start() {
         let mut sm = default_sm();
