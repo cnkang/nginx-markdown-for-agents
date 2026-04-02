@@ -12,10 +12,12 @@ fuzz_target!(|data: &[u8]| {
     );
     conv.set_content_type(Some("text/html; charset=UTF-8".to_string()));
 
-    // Feed in 64-byte chunks to exercise cross-boundary token handling
+    // Feed in 64-byte chunks to exercise cross-boundary token handling.
+    // Continue on error so finalize() always runs, exercising teardown
+    // and error-path behaviour.
     for chunk in data.chunks(64) {
         if conv.feed_chunk(chunk).is_err() {
-            return;
+            break;
         }
     }
     let _ = conv.finalize();
