@@ -95,6 +95,10 @@ pub struct StreamingConverter {
     /// When this exceeds `budget.lookahead`, front matter extraction triggers
     /// an Explicit_Fallback per Requirement 10.2.
     head_bytes_seen: usize,
+    /// Trailing bytes from the previous chunk that form an incomplete UTF-8
+    /// sequence. Prepended to the next chunk before `String::from_utf8_lossy`
+    /// so multibyte characters split across chunk boundaries are preserved.
+    utf8_tail: Vec<u8>,
 }
 
 impl StreamingConverter {
@@ -147,6 +151,7 @@ impl StreamingConverter {
             html_title_set: false,
             canonical_found: false,
             head_bytes_seen: 0,
+            utf8_tail: Vec::new(),
         }
     }
 
@@ -247,14 +252,37 @@ impl StreamingConverter {
         }
 
         // 4. Tokenization: feed UTF-8 to html5ever.
-        // Use lossy conversion so partial invalid sequences (which should
-        // not occur after encoding_rs transcoding) are replaced with U+FFFD
-        // rather than silently dropping the entire chunk.
-        let utf8_cow = String::from_utf8_lossy(&transcoded);
+        //
+        // Prepend any trailing bytes from the previous chunk that formed
+        // an incomplete UTF-8 sequence, then split off any new incomplete
+        // tail so multibyte characters spanning chunk boundaries are
+        // preserved instead of being replaced with U+FFFD.
+        let effective = if self.utf8_tail.is_empty() {
+            std::borrow::Cow::Borrowed(transcoded.as_ref())
+        } else {
+            let mut combined = std::mem::take(&mut self.utf8_tail);
+            combined.extend_from_slice(&transcoded);
+            std::borrow::Cow::Owned(combined)
+        };
+
+        // Find the last valid UTF-8 boundary. Any trailing bytes that
+        // start a multibyte sequence but don't complete it are stashed
+        // in utf8_tail for the next chunk.
+        let (valid, tail) = split_utf8_tail(&effective);
+        if !tail.is_empty() {
+            self.utf8_tail = tail.to_vec();
+        }
+
+        let utf8_str = match std::str::from_utf8(valid) {
+            Ok(s) => std::borrow::Cow::Borrowed(s),
+            // Interior invalid bytes that aren't a trailing split —
+            // fall back to lossy so the tokenizer still gets input.
+            Err(_) => String::from_utf8_lossy(valid),
+        };
 
         let events = self
             .tokenizer
-            .feed(&utf8_cow)
+            .feed(&utf8_str)
             .map_err(|e| self.wrap_error(e))?;
 
         // 5. Process each token: sanitize → state machine → emitter
@@ -326,9 +354,13 @@ impl StreamingConverter {
         // 1. Flush charset state (any remaining buffered data)
         let remaining_charset = self.charset_state.flush().map_err(|e| self.wrap_error(e))?;
 
-        // 2. If there is remaining charset data, tokenize it
-        if !remaining_charset.is_empty() {
-            let utf8_cow = String::from_utf8_lossy(&remaining_charset);
+        // 2. If there is remaining charset data or a stashed UTF-8 tail,
+        //    combine them and feed to the tokenizer. At end-of-input we use
+        //    lossy conversion for any truly invalid trailing bytes.
+        let mut final_bytes = std::mem::take(&mut self.utf8_tail);
+        final_bytes.extend_from_slice(&remaining_charset);
+        if !final_bytes.is_empty() {
+            let utf8_cow = String::from_utf8_lossy(&final_bytes);
             let events = self
                 .tokenizer
                 .feed(&utf8_cow)
@@ -466,6 +498,7 @@ impl StreamingConverter {
                 return Err(ConversionError::PostCommitError {
                     reason: "table detected after commit".to_string(),
                     bytes_emitted: self.bytes_emitted,
+                    original_code: 99, /* internal: no pre-existing error */
                 });
             }
         }
@@ -477,7 +510,7 @@ impl StreamingConverter {
 
         // Track peak working set after emitter processes the event,
         // when the pending buffer is at its largest.
-        self.update_peak_memory();
+        self.update_peak_memory().map_err(|e| self.wrap_error(e))?;
 
         Ok(())
     }
@@ -504,6 +537,7 @@ impl StreamingConverter {
                 return Err(ConversionError::PostCommitError {
                     reason: "timeout exceeded".to_string(),
                     bytes_emitted: self.bytes_emitted,
+                    original_code: ConversionError::Timeout.code(),
                 });
             }
             return Err(ConversionError::Timeout);
@@ -521,6 +555,7 @@ impl StreamingConverter {
     fn wrap_error(&self, err: ConversionError) -> ConversionError {
         if matches!(self.commit_state, CommitState::PostCommit) {
             ConversionError::PostCommitError {
+                original_code: err.code(),
                 reason: err.to_string(),
                 bytes_emitted: self.bytes_emitted,
             }
@@ -563,25 +598,8 @@ impl StreamingConverter {
         self.stats.flush_count = self.emitter.flush_count();
     }
 
-    /// Update the recorded peak memory estimate using the current working-set estimate.
-    ///
-    /// The working set includes:
-    /// - emitter pending buffer (not yet flushed)
-    /// - emitter flushed buffer (awaiting drain)
-    /// - structural state machine stack estimate
-    /// - metadata string allocations extracted from `<head>`
-    /// - the temporary `html_title_buf`
-    ///
-    /// Note: `head_bytes_seen` is intentionally excluded because it is a cumulative lookahead counter, not resident memory.
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// // Assume `conv` is an initialized `StreamingConverter`.
-    /// let mut conv = /* StreamingConverter::new(...) */ unimplemented!();
-    /// conv.update_peak_memory();
-    /// ```
-    fn update_peak_memory(&mut self) {
+    /// Estimate the current in-memory working set and update peak.
+    fn update_peak_memory(&mut self) -> Result<(), ConversionError> {
         // Only count state that is actually resident in memory right now:
         // - emitter pending buffer (not yet flushed)
         // - emitter flushed buffer (awaiting take_flushed by caller)
@@ -598,6 +616,17 @@ impl StreamingConverter {
             + self.metadata.bytes_estimate()
             + self.html_title_buf.len();
         self.stats.peak_memory_estimate = self.stats.peak_memory_estimate.max(working_set);
+
+        // Enforce budget.total: the working set must not exceed the
+        // declared total-memory cap.
+        if working_set > self.budget.total {
+            return Err(ConversionError::BudgetExceeded {
+                stage: "total".to_string(),
+                used: working_set,
+                limit: self.budget.total,
+            });
+        }
+        Ok(())
     }
 
     /// Extract metadata from events occurring in the `<head>` region.
@@ -963,6 +992,53 @@ impl StreamingConverter {
     // the existing `fast_path::qualifies()` logic. If fast-path evaluation
     // requires data beyond the lookahead budget, it should be skipped and
     // the standard streaming pipeline used instead.
+}
+
+/// Split a byte slice at the last valid UTF-8 boundary.
+///
+/// Returns `(valid, tail)` where `valid` is guaranteed to be well-formed
+/// UTF-8 and `tail` contains 0–3 trailing bytes that start an incomplete
+/// multibyte sequence. At end-of-input the caller should feed `tail`
+/// through lossy conversion.
+fn split_utf8_tail(bytes: &[u8]) -> (&[u8], &[u8]) {
+    // Fast path: if the entire slice is valid UTF-8, no split needed.
+    if std::str::from_utf8(bytes).is_ok() {
+        return (bytes, &[]);
+    }
+
+    // Walk backwards (at most 3 bytes) to find the start of an incomplete
+    // multibyte sequence at the end.
+    let len = bytes.len();
+    let check_from = len.saturating_sub(3);
+    for i in (check_from..len).rev() {
+        let b = bytes[i];
+        // Leading byte of a multibyte sequence?
+        if b >= 0xC0 {
+            let expected_len = if b < 0xE0 {
+                2
+            } else if b < 0xF0 {
+                3
+            } else {
+                4
+            };
+            let available = len - i;
+            if available < expected_len {
+                // Incomplete sequence — split here
+                return (&bytes[..i], &bytes[i..]);
+            }
+            // Sequence is complete; check if it's valid
+            if std::str::from_utf8(&bytes[i..i + expected_len]).is_ok() {
+                // The incomplete part must be after this sequence
+                break;
+            }
+            // Invalid sequence — treat as split point
+            return (&bytes[..i], &bytes[i..]);
+        }
+    }
+
+    // Fallback: couldn't isolate a clean tail; return everything as valid
+    // (lossy conversion will handle any interior invalid bytes).
+    (bytes, &[])
 }
 
 #[cfg(test)]

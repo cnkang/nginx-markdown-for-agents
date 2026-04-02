@@ -45,6 +45,10 @@ pub enum ConversionError {
         reason: String,
         /// Number of Markdown bytes already emitted before the error.
         bytes_emitted: usize,
+        /// Error code of the original error before post-commit wrapping.
+        /// Preserves the classification (e.g. timeout=3, budget=6) so
+        /// downstream consumers can categorise the failure correctly.
+        original_code: u32,
     },
 }
 
@@ -125,11 +129,12 @@ impl fmt::Display for ConversionError {
             ConversionError::PostCommitError {
                 reason,
                 bytes_emitted,
+                original_code,
             } => {
                 write!(
                     f,
-                    "Post-commit error after {} bytes emitted: {}",
-                    bytes_emitted, reason
+                    "Post-commit error (original_code={}) after {} bytes emitted: {}",
+                    original_code, bytes_emitted, reason
                 )
             }
         }
