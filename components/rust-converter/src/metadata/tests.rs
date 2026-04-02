@@ -298,7 +298,7 @@ fn test_bytes_estimate_long_string() {
 /// Asserts that a `PageMetadata` with title `"café"` produces an estimate equal to `"café".len()` (5).
 #[test]
 fn test_bytes_estimate_unicode() {
-    // "café" is 5 bytes in UTF-8 (4 ASCII + 2-byte é)
+    // "café" is 5 bytes in UTF-8 (3 ASCII + 2-byte é)
     let m = PageMetadata {
         title: Some("café".to_string()),
         ..Default::default()

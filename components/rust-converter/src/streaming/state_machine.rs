@@ -274,6 +274,13 @@ impl StructuralStateMachine {
             | "footer" | "nav" | "aside" | "figure" | "figcaption" | "details" | "summary"
             | "mark" | "time" | "abbr" | "cite" | "dfn" | "sub" | "sup" | "small" | "del"
             | "ins" | "s" | "br" | "hr" | "wbr" => {
+                // Implicit </head>: html5ever's tokenizer (not tree builder)
+                // does not emit an EndTag("head") when <body> appears, so we
+                // must clear in_head here to stop metadata extraction from
+                // running on body content.
+                if name == "body" {
+                    self.in_head = false;
+                }
                 return Ok(StateMachineAction::None);
             }
             // Unknown elements — pass through
