@@ -17,6 +17,35 @@ pub enum ConversionError {
     InvalidInput(String),
     /// Internal error
     InternalError(String),
+
+    /// Memory budget exceeded during streaming conversion.
+    #[cfg(feature = "streaming")]
+    BudgetExceeded {
+        /// Pipeline stage that exceeded its budget.
+        stage: String,
+        /// Bytes used when the breach was detected.
+        used: usize,
+        /// Budget limit in bytes.
+        limit: usize,
+    },
+
+    /// Streaming engine requests fallback to full-buffer conversion.
+    /// Only produced during the pre-commit phase.
+    #[cfg(feature = "streaming")]
+    StreamingFallback {
+        /// Reason for the fallback.
+        reason: crate::streaming::types::FallbackReason,
+    },
+
+    /// Error after the streaming engine has already emitted partial output.
+    /// The caller must handle this according to its stream failure policy.
+    #[cfg(feature = "streaming")]
+    PostCommitError {
+        /// Description of the error.
+        reason: String,
+        /// Number of Markdown bytes already emitted before the error.
+        bytes_emitted: usize,
+    },
 }
 
 impl ConversionError {
@@ -45,6 +74,12 @@ impl ConversionError {
             ConversionError::Timeout => 3,
             ConversionError::MemoryLimit(_) => 4,
             ConversionError::InvalidInput(_) => 5,
+            #[cfg(feature = "streaming")]
+            ConversionError::BudgetExceeded { .. } => 6,
+            #[cfg(feature = "streaming")]
+            ConversionError::StreamingFallback { .. } => 7,
+            #[cfg(feature = "streaming")]
+            ConversionError::PostCommitError { .. } => 8,
             ConversionError::InternalError(_) => 99,
         }
     }
@@ -68,6 +103,29 @@ impl fmt::Display for ConversionError {
             ConversionError::MemoryLimit(msg) => write!(f, "Memory limit exceeded: {}", msg),
             ConversionError::InvalidInput(msg) => write!(f, "Invalid input: {}", msg),
             ConversionError::InternalError(msg) => write!(f, "Internal error: {}", msg),
+            #[cfg(feature = "streaming")]
+            ConversionError::BudgetExceeded { stage, used, limit } => {
+                write!(
+                    f,
+                    "Budget exceeded in {}: used {} bytes, limit {} bytes",
+                    stage, used, limit
+                )
+            }
+            #[cfg(feature = "streaming")]
+            ConversionError::StreamingFallback { reason } => {
+                write!(f, "Streaming fallback: {}", reason)
+            }
+            #[cfg(feature = "streaming")]
+            ConversionError::PostCommitError {
+                reason,
+                bytes_emitted,
+            } => {
+                write!(
+                    f,
+                    "Post-commit error after {} bytes emitted: {}",
+                    bytes_emitted, reason
+                )
+            }
         }
     }
 }
