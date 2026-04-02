@@ -200,8 +200,14 @@ impl CharsetState {
                     return Ok(Cow::Owned(result));
                 }
 
-                // Accumulate data in sniff buffer
-                sniff_buffer.extend_from_slice(data);
+                // Accumulate data in sniff buffer, capped at SNIFF_BUFFER_LIMIT.
+                // Only retain enough bytes for charset detection; any excess
+                // from a large chunk is kept aside and transcoded after
+                // resolution, avoiding unbounded sniff buffer growth.
+                let remaining_capacity =
+                    SNIFF_BUFFER_LIMIT.saturating_sub(sniff_buffer.len());
+                let sniff_bytes = data.len().min(remaining_capacity);
+                sniff_buffer.extend_from_slice(&data[..sniff_bytes]);
 
                 if sniff_buffer.len() >= SNIFF_BUFFER_LIMIT {
                     // Enough data to detect charset from HTML meta or default
@@ -210,10 +216,21 @@ impl CharsetState {
                         *self = CharsetState::Failed(format!("{}", e));
                         e
                     })?;
-                    let result = transcode_data(&mut new_state, &sniff_buffer).map_err(|e| {
-                        *self = CharsetState::Failed(format!("{}", e));
-                        e
-                    })?;
+                    // Build full input for transcoding: sniff buffer + any
+                    // excess bytes from this chunk that were not added to
+                    // the sniff buffer.
+                    let full_input = if sniff_bytes < data.len() {
+                        let mut combined = sniff_buffer;
+                        combined.extend_from_slice(&data[sniff_bytes..]);
+                        combined
+                    } else {
+                        sniff_buffer
+                    };
+                    let result =
+                        transcode_data(&mut new_state, &full_input).map_err(|e| {
+                            *self = CharsetState::Failed(format!("{}", e));
+                            e
+                        })?;
                     *self = new_state;
                     Ok(Cow::Owned(result))
                 } else {
@@ -300,8 +317,32 @@ impl CharsetState {
                 Ok(result)
             }
             CharsetState::Resolved { decoder } => {
-                *self = CharsetState::Resolved { decoder };
-                Ok(Vec::new())
+                // Flush the decoder's internal state at end-of-stream.
+                // For non-UTF-8 decoders, calling decode_to_utf8 with
+                // last=true emits any trailing bytes buffered internally
+                // (e.g. incomplete multibyte sequences).
+                if let Some(mut dec) = decoder {
+                    let max_len = dec
+                        .max_utf8_buffer_length(0)
+                        .unwrap_or(64);
+                    let mut output = vec![0u8; max_len];
+                    let (_result, _read, written, had_errors) =
+                        dec.decode_to_utf8(&[], &mut output, true);
+                    if had_errors {
+                        *self = CharsetState::Failed(
+                            "Invalid trailing bytes during decoder flush".to_string(),
+                        );
+                        return Err(ConversionError::EncodingError(
+                            "Invalid trailing bytes during decoder flush".to_string(),
+                        ));
+                    }
+                    output.truncate(written);
+                    *self = CharsetState::Resolved { decoder: None };
+                    Ok(output)
+                } else {
+                    *self = CharsetState::Resolved { decoder: None };
+                    Ok(Vec::new())
+                }
             }
             CharsetState::Failed(reason) => {
                 *self = CharsetState::Failed(reason.clone());
