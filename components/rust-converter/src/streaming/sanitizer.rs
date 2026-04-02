@@ -54,9 +54,14 @@ pub enum SanitizeDecision {
 /// Processes [`StreamEvent`] tokens and filters out dangerous content,
 /// maintaining state to track skip/strip regions across multiple events.
 pub struct StreamingSanitizer {
-    /// Nesting depth of dangerous elements being skipped.
+    /// Nesting depth of elements inside a dangerous element being skipped.
     /// When > 0, all events are suppressed.
     skip_depth: usize,
+    /// Name of the outermost dangerous element that entered skip mode.
+    /// Used to ensure only the matching end tag can exit skip mode,
+    /// preventing mismatched end tags (e.g. `</div>` inside `<noscript>`)
+    /// from prematurely re-enabling content.
+    skip_element: Option<String>,
     /// Stack of element names that entered strip mode (tags removed, content kept).
     /// Using a stack instead of a simple counter ensures mismatched end tags
     /// (e.g., `<iframe>...</form>`) don't corrupt the strip state.
@@ -81,6 +86,7 @@ impl StreamingSanitizer {
     pub fn new() -> Self {
         Self {
             skip_depth: 0,
+            skip_element: None,
             strip_stack: Vec::new(),
             nesting_depth: 0,
             max_nesting_depth: MAX_NESTING_DEPTH,
@@ -88,27 +94,16 @@ impl StreamingSanitizer {
     }
 
     /// Creates a `StreamingSanitizer` configured with a custom maximum nesting depth.
-    
     ///
-    
     /// The sanitizer is initialized with default state (no skipping or stripping in progress)
-    
     /// and `max_nesting_depth` set to `max_depth`.
-    
     ///
-    
     /// # Examples
-    
     ///
-    
     /// ```
-    
     /// let s = StreamingSanitizer::with_max_depth(10);
-    
     /// assert_eq!(s.nesting_depth(), 0);
-    
     /// assert!(!s.is_skipping());
-    
     /// ```
     pub fn with_max_depth(max_depth: usize) -> Self {
         Self {
@@ -180,6 +175,7 @@ impl StreamingSanitizer {
                 if DANGEROUS_ELEMENTS.contains(&tag) {
                     if !self_closing {
                         self.skip_depth = 1;
+                        self.skip_element = Some(tag.to_string());
                     }
                     return SanitizeDecision::Skip;
                 }
@@ -236,10 +232,25 @@ impl StreamingSanitizer {
                 // end tag is reached (skip_depth drops to 0), we also
                 // decrement nesting_depth by 1 to account for the dangerous
                 // element itself (which was counted when it was opened).
+                //
+                // Name-aware exit: only exit skip mode when the end tag
+                // matches the outermost dangerous element. This prevents
+                // mismatched end tags (e.g. `</div>` inside `<noscript>`)
+                // from prematurely re-enabling content — important because
+                // html5ever's tokenizer emits nested tags normally for
+                // `<noscript>` and `<applet>` (unlike `<script>`/`<style>`
+                // which use the raw-text state).
                 if self.skip_depth > 0 {
-                    self.skip_depth = self.skip_depth.saturating_sub(1);
-                    if self.skip_depth == 0 {
-                        self.nesting_depth = self.nesting_depth.saturating_sub(1);
+                    if self.skip_depth == 1 {
+                        // Only the matching dangerous element can close the
+                        // skip region.
+                        if self.skip_element.as_deref() == Some(tag) {
+                            self.skip_depth = 0;
+                            self.skip_element = None;
+                            self.nesting_depth = self.nesting_depth.saturating_sub(1);
+                        }
+                    } else {
+                        self.skip_depth = self.skip_depth.saturating_sub(1);
                     }
                     return SanitizeDecision::Skip;
                 }
@@ -298,33 +309,19 @@ impl StreamingSanitizer {
     }
 
     /// Report the current element nesting depth tracked by the sanitizer.
-    
     ///
-    
     /// The value represents the number of open (non-self-closing) elements that
-    
     /// are currently being counted toward the configured nesting limit.
-    
     ///
-    
     /// # Returns
-    
     ///
-    
     /// `usize` — the current nesting depth.
-    
     ///
-    
     /// # Examples
-    
     ///
-    
     /// ```
-    
     /// let mut s = StreamingSanitizer::new();
-    
     /// assert_eq!(s.nesting_depth(), 0);
-    
     /// ```
     pub fn nesting_depth(&self) -> usize {
         self.nesting_depth
@@ -809,6 +806,52 @@ mod tests {
             !san.is_stripping(),
             "matching </iframe> should exit strip mode"
         );
+    }
+
+    /// Regression: a mismatched end tag inside a dangerous element must not
+    /// prematurely exit skip mode. html5ever's tokenizer emits nested tags
+    /// normally for `<noscript>` and `<applet>` (unlike `<script>`/`<style>`
+    /// which use the raw-text state), so the sanitizer must be name-aware.
+    #[test]
+    fn test_mismatched_end_tag_does_not_exit_skip_mode() {
+        let mut san = StreamingSanitizer::new();
+
+        // Enter skip mode via <noscript>
+        assert_eq!(
+            san.process_event(start_tag("noscript", vec![])),
+            SanitizeDecision::Skip
+        );
+        assert!(san.is_skipping());
+
+        // Mismatched </div> must NOT exit skip mode
+        assert_eq!(san.process_event(end_tag("div")), SanitizeDecision::Skip);
+        assert!(
+            san.is_skipping(),
+            "mismatched </div> must not exit noscript skip mode"
+        );
+
+        // Content after the mismatched end tag must still be skipped
+        assert_eq!(
+            san.process_event(text("should be skipped")),
+            SanitizeDecision::Skip,
+            "text after mismatched end tag must remain skipped"
+        );
+
+        // Only the matching </noscript> should exit skip mode
+        assert_eq!(
+            san.process_event(end_tag("noscript")),
+            SanitizeDecision::Skip
+        );
+        assert!(
+            !san.is_skipping(),
+            "matching </noscript> should exit skip mode"
+        );
+
+        // Content after the matching end tag should pass through
+        assert!(matches!(
+            san.process_event(text("visible")),
+            SanitizeDecision::Pass(_)
+        ));
     }
 
     // --- Property-based tests ---
