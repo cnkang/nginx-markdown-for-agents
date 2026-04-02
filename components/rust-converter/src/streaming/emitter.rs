@@ -902,7 +902,6 @@ mod tests {
     /// // assert!(output.ends_with('\n'));
     /// ```
     fn emit_html(events: &[StreamEvent]) -> String {
-    fn emit_html(events: &[StreamEvent]) -> String {
         let (mut emitter, mut sm) = make_pair();
         for ev in events {
             let action = sm.process_event(ev).expect("sm process_event");
