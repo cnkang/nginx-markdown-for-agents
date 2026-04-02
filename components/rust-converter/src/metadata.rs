@@ -29,6 +29,33 @@ impl PageMetadata {
     pub fn new() -> Self {
         Self::default()
     }
+
+    /// Estimate the in-memory byte size of populated metadata fields.
+    ///
+    /// Used by the streaming converter to track the working set
+    /// contribution of extracted head metadata.
+    pub fn bytes_estimate(&self) -> usize {
+        let mut total = 0usize;
+        if let Some(ref s) = self.title {
+            total = total.saturating_add(s.len());
+        }
+        if let Some(ref s) = self.description {
+            total = total.saturating_add(s.len());
+        }
+        if let Some(ref s) = self.url {
+            total = total.saturating_add(s.len());
+        }
+        if let Some(ref s) = self.image {
+            total = total.saturating_add(s.len());
+        }
+        if let Some(ref s) = self.author {
+            total = total.saturating_add(s.len());
+        }
+        if let Some(ref s) = self.published {
+            total = total.saturating_add(s.len());
+        }
+        total
+    }
 }
 
 /// Metadata extractor with optional URL resolution.

@@ -38,6 +38,7 @@ libc = "0.2"
 [features]
 default = []
 incremental = []
+streaming = []
 prune_noise_regions = []
 
 [profile.release]

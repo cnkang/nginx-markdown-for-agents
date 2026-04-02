@@ -252,3 +252,53 @@ fn test_twitter_card_metadata() {
 fn test_page_metadata_default() {
     assert_eq!(PageMetadata::new(), PageMetadata::default());
 }
+
+// ── bytes_estimate tests ────────────────────────────────────────
+
+#[test]
+fn test_bytes_estimate_empty_metadata() {
+    let m = PageMetadata::new();
+    assert_eq!(m.bytes_estimate(), 0);
+}
+
+#[test]
+fn test_bytes_estimate_single_field() {
+    let m = PageMetadata {
+        title: Some("Hello".to_string()),
+        ..Default::default()
+    };
+    assert_eq!(m.bytes_estimate(), 5);
+}
+
+#[test]
+fn test_bytes_estimate_all_fields() {
+    let m = PageMetadata {
+        title: Some("T".to_string()),          // 1
+        description: Some("DD".to_string()),   // 2
+        url: Some("UUU".to_string()),          // 3
+        image: Some("IIII".to_string()),       // 4
+        author: Some("AAAAA".to_string()),     // 5
+        published: Some("PPPPPP".to_string()), // 6
+    };
+    assert_eq!(m.bytes_estimate(), 1 + 2 + 3 + 4 + 5 + 6);
+}
+
+#[test]
+fn test_bytes_estimate_long_string() {
+    let long = "x".repeat(10_000);
+    let m = PageMetadata {
+        description: Some(long.clone()),
+        ..Default::default()
+    };
+    assert_eq!(m.bytes_estimate(), 10_000);
+}
+
+#[test]
+fn test_bytes_estimate_unicode() {
+    // "café" is 5 bytes in UTF-8 (4 ASCII + 2-byte é)
+    let m = PageMetadata {
+        title: Some("café".to_string()),
+        ..Default::default()
+    };
+    assert_eq!(m.bytes_estimate(), "café".len()); // 5
+}
