@@ -160,6 +160,8 @@ fn arb_streaming_html() -> impl Strategy<Value = String> {
             "<p><em>Italic text</em></p>".to_string(),
             "<p><code>inline code</code></p>".to_string(),
             "<p>Text with <strong>bold</strong> and <em>italic</em>.</p>".to_string(),
+            // Non-ASCII UTF-8 to exercise cross-chunk multibyte splits
+            "<p>café résumé naïve</p>".to_string(),
         ]),
         1..8,
     )
@@ -203,6 +205,8 @@ fn arb_cross_boundary_html() -> impl Strategy<Value = String> {
             // Nested structures
             "<ul><li>Item <strong>one</strong></li><li>Item two</li></ul>".to_string(),
             "<blockquote><p>Quoted <em>text</em></p></blockquote>".to_string(),
+            // Non-ASCII UTF-8 bytes (not entities) to exercise multibyte splits
+            "<p>café résumé naïve</p>".to_string(),
         ]),
         1..6,
     )
