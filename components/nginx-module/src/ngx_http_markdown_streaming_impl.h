@@ -1279,6 +1279,60 @@ ngx_http_markdown_streaming_handle_chunk_result(
 
 
 /*
+ * Check for client abort and clean up streaming state.
+ *
+ * Returns:
+ *   0         - no abort, continue processing
+ *   NGX_ERROR - client aborted, handle released
+ */
+static ngx_inline ngx_int_t
+ngx_http_markdown_streaming_check_client_abort(
+    ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx)
+{
+    if (!r->connection->error) {
+        return 0;
+    }
+
+    ngx_log_debug0(NGX_LOG_DEBUG_HTTP,
+        r->connection->log, 0,
+        "markdown streaming: client abort "
+        "detected");
+
+    if (ctx->streaming.handle != NULL) {
+        markdown_streaming_abort(
+            ctx->streaming.handle);
+        ctx->streaming.handle = NULL;
+    }
+
+    return NGX_ERROR;
+}
+
+
+/*
+ * Forward headers and pass chain through when streaming
+ * is not active (aborted or not eligible).
+ */
+static ngx_int_t
+ngx_http_markdown_streaming_passthrough(
+    ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx,
+    ngx_chain_t *in)
+{
+    ngx_int_t  rc;
+
+    if (!ctx->headers_forwarded) {
+        rc = ngx_http_markdown_forward_headers(
+            r, ctx);
+        if (rc != NGX_OK) {
+            return NGX_ERROR;
+        }
+    }
+    return ngx_http_next_body_filter(r, in);
+}
+
+
+/*
  * Streaming body filter main entry point.
  *
  * Called when processing_path == PATH_STREAMING.
@@ -1308,18 +1362,9 @@ ngx_http_markdown_streaming_body_filter(
     }
 
     /* Check for client abort */
-    if (r->connection->error) {
-        ngx_log_debug0(NGX_LOG_DEBUG_HTTP,
-            r->connection->log, 0,
-            "markdown streaming: client abort "
-            "detected");
-
-        if (ctx->streaming.handle != NULL) {
-            markdown_streaming_abort(
-                ctx->streaming.handle);
-            ctx->streaming.handle = NULL;
-        }
-
+    rc = ngx_http_markdown_streaming_check_client_abort(
+        r, ctx);
+    if (rc != 0) {
         return NGX_ERROR;
     }
 
@@ -1344,15 +1389,8 @@ ngx_http_markdown_streaming_body_filter(
     }
 
     if (!ctx->eligible || ctx->streaming.handle == NULL) {
-        /* Streaming was aborted or not eligible */
-        if (!ctx->headers_forwarded) {
-            rc = ngx_http_markdown_forward_headers(
-                r, ctx);
-            if (rc != NGX_OK) {
-                return NGX_ERROR;
-            }
-        }
-        return ngx_http_next_body_filter(r, in);
+        return ngx_http_markdown_streaming_passthrough(
+            r, ctx, in);
     }
 
     /* Process each chunk in the input chain */
