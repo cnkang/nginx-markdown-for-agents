@@ -62,6 +62,10 @@ pub struct IncrementalEmitter {
     link_text: String,
     /// Whether we are currently collecting link text.
     in_link: bool,
+    /// Whether link_text has been truncated due to exceeding the budget.
+    /// When set, further appends are skipped but the link is still closed
+    /// properly on Exit(Link).
+    link_text_overflow: bool,
     /// Number of flush points produced.
     flush_count: u32,
     /// Language for the current code block (may be updated after enter).
@@ -101,6 +105,7 @@ impl IncrementalEmitter {
             needs_block_separator: false,
             link_text: String::new(),
             in_link: false,
+            link_text_overflow: false,
             flush_count: 0,
             code_fence_lang: None,
             code_fence_emitted: false,
@@ -288,7 +293,7 @@ impl IncrementalEmitter {
             }
             StructuralContext::InlineCode => {
                 if self.in_link {
-                    self.link_text.push('`');
+                    self.append_link_text("`");
                 } else {
                     self.write_str("`")?;
                 }
@@ -300,20 +305,21 @@ impl IncrementalEmitter {
             StructuralContext::Link(_) => {
                 self.in_link = true;
                 self.link_text.clear();
+                self.link_text_overflow = false;
             }
             StructuralContext::Image { src, alt } => {
                 self.write_str(&format!("![{}]({})", alt, src))?;
             }
             StructuralContext::Bold => {
                 if self.in_link {
-                    self.link_text.push_str("**");
+                    self.append_link_text("**");
                 } else {
                     self.write_str("**")?;
                 }
             }
             StructuralContext::Italic => {
                 if self.in_link {
-                    self.link_text.push('*');
+                    self.append_link_text("*");
                 } else {
                     self.write_str("*")?;
                 }
@@ -391,7 +397,7 @@ impl IncrementalEmitter {
             }
             StructuralContext::InlineCode => {
                 if self.in_link {
-                    self.link_text.push('`');
+                    self.append_link_text("`");
                 } else {
                     self.write_str("`")?;
                 }
@@ -411,14 +417,14 @@ impl IncrementalEmitter {
             }
             StructuralContext::Bold => {
                 if self.in_link {
-                    self.link_text.push_str("**");
+                    self.append_link_text("**");
                 } else {
                     self.write_str("**")?;
                 }
             }
             StructuralContext::Italic => {
                 if self.in_link {
-                    self.link_text.push('*');
+                    self.append_link_text("*");
                 } else {
                     self.write_str("*")?;
                 }
@@ -465,7 +471,7 @@ impl IncrementalEmitter {
         sm: &mut super::state_machine::StructuralStateMachine,
     ) -> Result<(), ConversionError> {
         if self.in_link {
-            self.link_text.push_str(text);
+            self.append_link_text(text);
             return Ok(());
         }
 
@@ -645,6 +651,23 @@ impl IncrementalEmitter {
 
         self.write_str(&prefix)?;
         Ok(())
+    }
+
+    /// Append text to `link_text`, respecting the output buffer budget.
+    ///
+    /// When the accumulated link text would exceed `max_buffer_size`,
+    /// the overflow flag is set and further appends are silently dropped.
+    /// The link is still closed properly on `Exit(Link)` — the text is
+    /// simply truncated.
+    fn append_link_text(&mut self, s: &str) {
+        if self.link_text_overflow {
+            return;
+        }
+        if self.link_text.len().saturating_add(s.len()) > self.max_buffer_size {
+            self.link_text_overflow = true;
+            return;
+        }
+        self.link_text.push_str(s);
     }
 
     /// Writes a string into the pending output buffer while applying output normalization.
