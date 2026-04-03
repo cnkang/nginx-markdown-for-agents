@@ -407,8 +407,12 @@ proptest! {
     fn prop_precommit_fallback_on_table(
         _prefix in arb_streaming_html(),
     ) {
-        // Inject a table as the first element so we are still in PreCommit
-        let html = "<html><body><table><tr><td>Cell</td></tr></table></body></html>";
+        // Inject a table after the generated prefix so the property
+        // varies with the generated input while still triggering fallback.
+        let html = format!(
+            "{}<table><tr><td>Cell</td></tr></table>",
+            _prefix
+        );
 
         let mut conv = make_converter();
         let result = conv.feed_chunk(html.as_bytes());
@@ -583,39 +587,22 @@ proptest! {
 // ════════════════════════════════════════════════════════════════════
 
 /// Assert that converting the given HTML yields identical Markdown when fed as a single chunk
-
 /// or when split into two chunks at the specified byte offset.
-
 ///
-
 /// This function panics if either conversion fails or if the resulting Markdown bytes differ;
-
 /// the panic message includes the split position and lossy UTF-8 representations of both outputs.
-
 ///
-
 /// # Parameters
-
 ///
-
 /// - `html`: HTML input bytes to convert.
-
 /// - `split_at`: Byte offset within `html` where the single split is applied (must be <= `html.len()`).
-
 ///
-
 /// # Examples
-
 ///
-
 /// ```
-
 /// let html = b"<html><body><p>Hello</p></body></html>";
-
 /// // split inside the paragraph text
-
 /// assert_split_invariant(html, 20);
-
 /// ```
 fn assert_split_invariant(html: &[u8], split_at: usize) {
     let single = streaming_convert(html).expect("single-chunk conversion");

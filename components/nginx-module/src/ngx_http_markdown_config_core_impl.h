@@ -582,7 +582,12 @@ ngx_http_markdown_log_merged_conf(ngx_conf_t *cf, ngx_http_markdown_conf_t *conf
                        "stream_types=%ui "
                        "large_body_threshold=%uz "
                        "trust_forwarded_headers=%ui "
-                       "metrics_format=%V",
+                       "metrics_format=%V"
+#ifdef MARKDOWN_STREAMING_ENABLED
+                       " streaming_engine=%s"
+                       " streaming_budget=%uz"
+#endif
+                       ,
                        (ngx_uint_t) conf->enabled,
                        ngx_http_markdown_enabled_source_name(conf->enabled_source),
                        conf->max_size,
@@ -602,7 +607,13 @@ ngx_http_markdown_log_merged_conf(ngx_conf_t *cf, ngx_http_markdown_conf_t *conf
                        conf->large_body_threshold,
                        (ngx_uint_t) conf->ops.trust_forwarded_headers,
                        ngx_http_markdown_metrics_format_name(
-                           conf->ops.metrics_format));
+                           conf->ops.metrics_format)
+#ifdef MARKDOWN_STREAMING_ENABLED
+                       , conf->streaming_engine != NULL
+                           ? "configured" : "NULL"
+                       , conf->streaming_budget
+#endif
+                       );
 }
 
 #endif /* NGX_HTTP_MARKDOWN_CONFIG_CORE_IMPL_H */
