@@ -301,6 +301,7 @@ impl IncrementalEmitter {
             StructuralContext::Blockquote => {
                 self.emit_block_separator()?;
                 self.blockquote_depth = sm.blockquote_depth;
+                self.write_blockquote_prefix()?;
             }
             StructuralContext::Link(_) => {
                 self.in_link = true;
@@ -478,8 +479,9 @@ impl IncrementalEmitter {
         if self.in_code_block {
             // Emit deferred code fence if not yet emitted
             self.emit_code_fence_if_needed(sm)?;
-            // Preserve whitespace inside code blocks
-            self.write_str(text)?;
+            // Preserve content inside code blocks verbatim (no
+            // blank-line collapsing or whitespace normalization).
+            self.write_raw(text.as_bytes())?;
             self.last_was_newline = text.ends_with('\n');
             return Ok(());
         }
@@ -584,6 +586,14 @@ impl IncrementalEmitter {
             self.consecutive_blank_lines = 0;
         }
         self.needs_block_separator = false;
+        Ok(())
+    }
+
+    /// Write blockquote `> ` prefix markers for the current depth.
+    fn write_blockquote_prefix(&mut self) -> Result<(), ConversionError> {
+        for _ in 0..self.blockquote_depth {
+            self.write_raw(b"> ")?;
+        }
         Ok(())
     }
 
@@ -705,6 +715,12 @@ impl IncrementalEmitter {
                         self.consecutive_blank_lines = 0;
                     }
                     self.last_was_newline = true;
+                    // Prepend blockquote markers on the new line
+                    if self.blockquote_depth > 0 {
+                        for _ in 0..self.blockquote_depth {
+                            self.buffer.extend_from_slice(b"> ");
+                        }
+                    }
                 }
             } else {
                 self.buffer.push(b);
@@ -778,8 +794,13 @@ impl IncrementalEmitter {
         if self.buffer.is_empty() {
             return Ok(());
         }
-        let normalized = normalize_pending(&self.buffer);
-        let new_flushed_size = self.flushed.len().saturating_add(normalized.len());
+        let output = if self.in_code_block {
+            /* Skip trailing-whitespace normalization inside code blocks */
+            self.buffer.clone()
+        } else {
+            normalize_pending(&self.buffer)
+        };
+        let new_flushed_size = self.flushed.len().saturating_add(output.len());
         if new_flushed_size > self.max_buffer_size {
             return Err(ConversionError::BudgetExceeded {
                 stage: "output_buffer (ready)".to_string(),
@@ -787,7 +808,7 @@ impl IncrementalEmitter {
                 limit: self.max_buffer_size,
             });
         }
-        self.flushed.extend_from_slice(&normalized);
+        self.flushed.extend_from_slice(&output);
         self.buffer.clear();
         Ok(())
     }
