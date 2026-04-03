@@ -39,6 +39,12 @@ typedef struct ngx_http_markdown_streaming_decomp_s {
 #endif
     } state;
 
+#ifdef NGX_HTTP_BROTLI
+    /* Brotli input cursor (mirrors zlib's next_in/avail_in) */
+    const u_char                         *brotli_next_in;
+    size_t                                brotli_avail_in;
+#endif
+
     ngx_flag_t                            initialized;
     ngx_flag_t                            finished;
 } ngx_http_markdown_streaming_decomp_t;
@@ -448,8 +454,6 @@ ngx_http_markdown_streaming_decomp_inflate_loop(
 static int
 ngx_http_markdown_streaming_decomp_brotli_step(
     ngx_http_markdown_streaming_decomp_t *decomp,
-    size_t *avail_in_ptr,
-    const uint8_t **next_in_ptr,
     size_t *avail_out_ptr,
     uint8_t **next_out_ptr,
     u_char **buf_ptr,
@@ -460,11 +464,19 @@ ngx_http_markdown_streaming_decomp_brotli_step(
     ngx_log_t *log)
 {
     BrotliDecoderResult  brc;
+    size_t               avail_in;
+    const uint8_t       *next_in;
+
+    avail_in = decomp->brotli_avail_in;
+    next_in = (const uint8_t *) decomp->brotli_next_in;
 
     brc = BrotliDecoderDecompressStream(
         decomp->state.brotli,
-        avail_in_ptr, next_in_ptr,
+        &avail_in, &next_in,
         avail_out_ptr, next_out_ptr, NULL);
+
+    decomp->brotli_avail_in = avail_in;
+    decomp->brotli_next_in = (const u_char *) next_in;
 
     if (brc == BROTLI_DECODER_RESULT_ERROR) {
         ngx_log_error(NGX_LOG_ERR, log, 0,
@@ -510,7 +522,7 @@ ngx_http_markdown_streaming_decomp_brotli_step(
         return 0;
     }
 
-    if (*avail_in_ptr == 0) {
+    if (decomp->brotli_avail_in == 0) {
         return 1;
     }
 
@@ -521,24 +533,18 @@ ngx_http_markdown_streaming_decomp_brotli_step(
 static ngx_int_t
 ngx_http_markdown_streaming_decomp_brotli_loop(
     ngx_http_markdown_streaming_decomp_t *decomp,
-    const u_char *in_data,
-    size_t in_len,
     u_char **buf_ptr,
     size_t *buf_size_ptr,
     size_t *out_produced,
     ngx_pool_t *pool,
     ngx_log_t *log)
 {
-    size_t               avail_in;
     size_t               avail_out;
-    const uint8_t       *next_in;
     uint8_t             *next_out;
     u_char              *heap_buf;
     int                  using_heap;
     int                  step_rc;
 
-    avail_in = in_len;
-    next_in = in_data;
     avail_out = *buf_size_ptr;
     next_out = *buf_ptr;
     heap_buf = NULL;
@@ -548,7 +554,6 @@ ngx_http_markdown_streaming_decomp_brotli_loop(
         step_rc =
             ngx_http_markdown_streaming_decomp_brotli_step(
                 decomp,
-                &avail_in, &next_in,
                 &avail_out, &next_out,
                 buf_ptr, buf_size_ptr,
                 out_produced, &heap_buf,
@@ -674,9 +679,12 @@ ngx_http_markdown_streaming_decomp_feed(
     {
         ngx_int_t  brotli_rc;
 
+        decomp->brotli_next_in = in_data;
+        decomp->brotli_avail_in = in_len;
+
         brotli_rc =
             ngx_http_markdown_streaming_decomp_brotli_loop(
-                decomp, in_data, in_len,
+                decomp,
                 &buf, &buf_size, &produced,
                 pool, log);
         if (brotli_rc != NGX_OK) {
