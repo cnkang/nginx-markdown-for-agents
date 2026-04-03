@@ -136,6 +136,37 @@ ngx_http_markdown_metrics_write_prometheus(
         "\n",
         snapshot->path_hits.incremental);
 
+#ifdef MARKDOWN_STREAMING_ENABLED
+    /* streaming_path_total */
+    p = ngx_slprintf(p, end,
+        "# HELP nginx_markdown_streaming_path_total "
+        "Requests routed to streaming path.\n"
+        "# TYPE nginx_markdown_streaming_path_total "
+        "counter\n"
+        "nginx_markdown_streaming_path_total %uA\n"
+        "\n",
+        snapshot->path_hits.streaming);
+
+    /* streaming_total{result=...} */
+    p = ngx_slprintf(p, end,
+        "# HELP nginx_markdown_streaming_total "
+        "Streaming conversion outcomes.\n"
+        "# TYPE nginx_markdown_streaming_total counter\n"
+        "nginx_markdown_streaming_total"
+        "{result=\"success\"} %uA\n"
+        "nginx_markdown_streaming_total"
+        "{result=\"failed\"} %uA\n"
+        "nginx_markdown_streaming_total"
+        "{result=\"fallback\"} %uA\n"
+        "nginx_markdown_streaming_total"
+        "{result=\"postcommit_error\"} %uA\n"
+        "\n",
+        snapshot->streaming.succeeded_total,
+        snapshot->streaming.failed_total,
+        snapshot->streaming.fallback_total,
+        snapshot->streaming.postcommit_error_total);
+#endif
+
     /* input_bytes_total */
     p = ngx_slprintf(p, end,
         "# HELP nginx_markdown_input_bytes_total "

@@ -448,6 +448,51 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
         NULL
     },
 
+#ifdef MARKDOWN_STREAMING_ENABLED
+    /*
+     * markdown_streaming_engine off|on|auto|$variable
+     *
+     * Streaming engine selection mode.
+     * Supports per-request variable-driven rollout.
+     * Default: off (all requests use full-buffer path)
+     * Context: http, server, location
+     *
+     * Example:
+     *   markdown_streaming_engine auto;
+     *   markdown_streaming_engine $streaming_flag;
+     */
+    {
+        ngx_string("markdown_streaming_engine"),
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF
+            |NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+        ngx_http_markdown_streaming_engine,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        0,
+        NULL
+    },
+
+    /*
+     * markdown_streaming_budget <size>
+     *
+     * Memory budget for streaming conversion (passed to Rust).
+     * Default: 2m (2 megabytes)
+     * Context: http, server, location
+     *
+     * Example:
+     *   markdown_streaming_budget 4m;
+     */
+    {
+        ngx_string("markdown_streaming_budget"),
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF
+            |NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+        ngx_conf_set_size_slot,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        offsetof(ngx_http_markdown_conf_t,
+                 streaming_budget),
+        NULL
+    },
+#endif /* MARKDOWN_STREAMING_ENABLED */
+
     ngx_null_command
 };
 
