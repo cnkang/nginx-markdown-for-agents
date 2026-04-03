@@ -23,6 +23,7 @@ Options:
   --skip-rust-build                        Skip Rust library rebuild step
   --help                                   Show this help
 USAGE
+  return 0
 }
 
 resolve_nginx_version() {
@@ -67,6 +68,7 @@ PY
       printf '%s\n' "${requested}"
       ;;
   esac
+  return 0
 }
 
 NGINX_VERSION="stable"
