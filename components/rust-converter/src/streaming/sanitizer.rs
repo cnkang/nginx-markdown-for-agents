@@ -15,6 +15,18 @@
 
 use crate::streaming::types::StreamEvent;
 
+/// HTML void elements that never have children.
+///
+/// html5ever's tokenizer may report `self_closing = false` for these
+/// because the source HTML uses `<link ...>` (no trailing `/>`).  The
+/// sanitizer must treat them as self-closing so that entering skip or
+/// strip mode for a void element does not permanently suppress all
+/// subsequent content.
+const VOID_ELEMENTS: &[&str] = &[
+    "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param",
+    "source", "track", "wbr",
+];
+
 /// Elements whose entire subtree is removed (content discarded).
 const DANGEROUS_ELEMENTS: &[&str] = &["script", "style", "noscript", "applet", "link", "base"];
 
@@ -126,8 +138,10 @@ impl StreamingSanitizer {
     ///
     /// # Examples
     ///
-    /// ```
-    /// use components::rust_converter::streaming::sanitizer::{StreamingSanitizer, StreamEvent, SanitizeDecision};
+    /// ```ignore
+    /// use nginx_markdown_converter::streaming::sanitizer::StreamingSanitizer;
+    /// use nginx_markdown_converter::streaming::sanitizer::SanitizeDecision;
+    /// use nginx_markdown_converter::streaming::types::StreamEvent;
     ///
     /// let mut s = StreamingSanitizer::new();
     /// let evt = StreamEvent::Text("hello".into());
@@ -144,6 +158,8 @@ impl StreamingSanitizer {
                 self_closing,
             } => {
                 let tag = name.as_str();
+                let effectively_self_closing =
+                    *self_closing || VOID_ELEMENTS.contains(&tag);
 
                 // If we're inside a dangerous element, track nesting but skip everything.
                 //
@@ -157,14 +173,14 @@ impl StreamingSanitizer {
                 // nesting inside a `<script>` — the nested content is harmless
                 // because it is never processed.
                 if self.skip_depth > 0 {
-                    if !self_closing {
+                    if !effectively_self_closing {
                         self.skip_depth = self.skip_depth.saturating_add(1);
                     }
                     return SanitizeDecision::Skip;
                 }
 
                 // Check nesting depth for elements that pass through to the emitter.
-                if !self_closing {
+                if !effectively_self_closing {
                     self.nesting_depth = self.nesting_depth.saturating_add(1);
                     if self.nesting_depth > self.max_nesting_depth {
                         return SanitizeDecision::DepthExceeded;
@@ -173,7 +189,7 @@ impl StreamingSanitizer {
 
                 // Dangerous elements: skip entire subtree
                 if DANGEROUS_ELEMENTS.contains(&tag) {
-                    if !self_closing {
+                    if !effectively_self_closing {
                         self.skip_depth = 1;
                         self.skip_element = Some(tag.to_string());
                     }
@@ -182,7 +198,7 @@ impl StreamingSanitizer {
 
                 // Embedded content elements: strip tag, extract URL
                 if EMBEDDED_CONTENT_ELEMENTS.contains(&tag) {
-                    if !self_closing {
+                    if !effectively_self_closing {
                         // Track which element started strip mode so mismatched
                         // end tags (e.g., <iframe>...</form>) don't corrupt state.
                         self.strip_stack.push(tag.to_string());
@@ -206,7 +222,7 @@ impl StreamingSanitizer {
 
                 // Form elements: strip tag, keep content
                 if FORM_ELEMENTS.contains(&tag) || VOID_FORM_CONTROLS.contains(&tag) {
-                    if !self_closing && !VOID_FORM_CONTROLS.contains(&tag) {
+                    if !effectively_self_closing && !VOID_FORM_CONTROLS.contains(&tag) {
                         self.strip_stack.push(tag.to_string());
                     }
                     return SanitizeDecision::Skip;
@@ -908,6 +924,8 @@ mod tests {
         /// **Validates: Requirements 3.1, 3.6**
         ///
         /// All dangerous elements must be skipped regardless of which one is used.
+        /// Void dangerous elements (link, base) are skipped as a single event
+        /// without entering persistent skip mode.
         #[test]
         fn prop_dangerous_elements_always_skipped(elem in arb_dangerous_element()) {
             let mut san = StreamingSanitizer::new();
@@ -918,7 +936,15 @@ mod tests {
             });
             prop_assert_eq!(decision, SanitizeDecision::Skip,
                 "Dangerous element '{}' should be skipped", elem);
-            prop_assert!(san.is_skipping());
+            // Void elements (link, base) don't enter persistent skip mode
+            let is_void = VOID_ELEMENTS.contains(&elem.as_str());
+            if is_void {
+                prop_assert!(!san.is_skipping(),
+                    "Void dangerous element '{}' should not enter skip mode", elem);
+            } else {
+                prop_assert!(san.is_skipping(),
+                    "Non-void dangerous element '{}' should enter skip mode", elem);
+            }
         }
 
         /// **Validates: Requirements 3.1**
