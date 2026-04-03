@@ -395,6 +395,10 @@ ngx_http_markdown_streaming_send_output(
         ctx->streaming.flushes_sent++;
     }
 
+    if (rc == NGX_AGAIN) {
+        ctx->streaming.pending_output = out;
+    }
+
     return rc;
 }
 
@@ -568,8 +572,12 @@ ngx_http_markdown_streaming_handle_postcommit_error(
  * Pre-Commit error handler: abort handle and apply on_error policy.
  *
  * Returns:
- *   NGX_ERROR if on_error == reject
- *   NGX_OK    if on_error == pass (fail-open, sets eligible=0)
+ *   NGX_ERROR    if on_error == reject
+ *   NGX_DECLINED if on_error == pass (fail-open, sets eligible=0)
+ *
+ * The caller must NOT advance the buffer position when NGX_DECLINED
+ * is returned so that the body filter can forward the unconsumed
+ * chain via ngx_http_next_body_filter.
  */
 static ngx_int_t
 ngx_http_markdown_streaming_precommit_error(
@@ -594,7 +602,7 @@ ngx_http_markdown_streaming_precommit_error(
     if (inc_failopen) {
         ngx_http_markdown_metric_inc_failopen(conf);
     }
-    return NGX_OK;
+    return NGX_DECLINED;
 }
 
 
