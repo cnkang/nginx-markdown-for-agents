@@ -211,9 +211,15 @@ ngx_http_markdown_streaming_decomp_inflate_loop(
     int      zrc;
     u_char  *new_buf;
     size_t   new_size;
+    u_char  *heap_buf;
+    size_t   heap_size;
+    int      using_heap;
 
     buf = *buf_ptr;
     buf_size = *buf_size_ptr;
+    heap_buf = NULL;
+    heap_size = 0;
+    using_heap = 0;
 
     for ( ;; ) {
         zrc = inflate(&decomp->state.zlib, Z_SYNC_FLUSH);
@@ -224,6 +230,9 @@ ngx_http_markdown_streaming_decomp_inflate_loop(
             ngx_log_error(NGX_LOG_ERR, log, 0,
                 "markdown streaming decomp: "
                 "inflate error %d", zrc);
+            if (heap_buf != NULL) {
+                ngx_free(heap_buf);
+            }
             return NGX_ERROR;
         }
 
@@ -240,6 +249,9 @@ ngx_http_markdown_streaming_decomp_inflate_loop(
                 "limit %uz",
                 decomp->total_decompressed + *out_produced,
                 decomp->max_decompressed_size);
+            if (heap_buf != NULL) {
+                ngx_free(heap_buf);
+            }
             return NGX_ERROR;
         }
 
@@ -255,12 +267,26 @@ ngx_http_markdown_streaming_decomp_inflate_loop(
         if (decomp->state.zlib.avail_out == 0) {
             new_size = buf_size * 2;
 
-            new_buf = ngx_palloc(pool, new_size);
+            new_buf = ngx_alloc(new_size, log);
             if (new_buf == NULL) {
+                if (heap_buf != NULL) {
+                    ngx_free(heap_buf);
+                }
                 return NGX_ERROR;
             }
 
             ngx_memcpy(new_buf, buf, buf_size);
+
+            /* Free the previous heap buffer (first
+             * expansion replaces the pool buffer which
+             * is freed at request teardown) */
+            if (heap_buf != NULL) {
+                ngx_free(heap_buf);
+            }
+
+            heap_buf = new_buf;
+            heap_size = new_size;
+            using_heap = 1;
 
             decomp->state.zlib.next_out =
                 new_buf + buf_size;
@@ -270,6 +296,27 @@ ngx_http_markdown_streaming_decomp_inflate_loop(
             buf = new_buf;
             buf_size = new_size;
         }
+    }
+
+    /*
+     * If we expanded into heap memory, copy the final
+     * result back to a pool allocation and free the
+     * heap buffer so the caller gets pool-owned memory.
+     */
+    if (using_heap) {
+        u_char  *pool_buf;
+
+        pool_buf = ngx_palloc(pool, *out_produced);
+        if (pool_buf == NULL) {
+            ngx_free(heap_buf);
+            return NGX_ERROR;
+        }
+
+        ngx_memcpy(pool_buf, heap_buf, *out_produced);
+        ngx_free(heap_buf);
+
+        buf = pool_buf;
+        buf_size = *out_produced;
     }
 
     *buf_ptr = buf;
@@ -309,6 +356,8 @@ ngx_http_markdown_streaming_decomp_brotli_loop(
     size_t               avail_out;
     const uint8_t       *next_in;
     uint8_t             *next_out;
+    u_char              *heap_buf;
+    int                  using_heap;
 
     buf = *buf_ptr;
     buf_size = *buf_size_ptr;
@@ -316,6 +365,8 @@ ngx_http_markdown_streaming_decomp_brotli_loop(
     next_in = in_data;
     avail_out = buf_size;
     next_out = buf;
+    heap_buf = NULL;
+    using_heap = 0;
 
     for ( ;; ) {
         brc = BrotliDecoderDecompressStream(
@@ -327,6 +378,9 @@ ngx_http_markdown_streaming_decomp_brotli_loop(
             ngx_log_error(NGX_LOG_ERR, log, 0,
                 "markdown streaming decomp: "
                 "brotli decode error");
+            if (heap_buf != NULL) {
+                ngx_free(heap_buf);
+            }
             return NGX_ERROR;
         }
 
@@ -342,6 +396,9 @@ ngx_http_markdown_streaming_decomp_brotli_loop(
                 "limit %uz",
                 decomp->total_decompressed + *out_produced,
                 decomp->max_decompressed_size);
+            if (heap_buf != NULL) {
+                ngx_free(heap_buf);
+            }
             return NGX_ERROR;
         }
 
@@ -355,12 +412,22 @@ ngx_http_markdown_streaming_decomp_brotli_loop(
         {
             new_size = buf_size * 2;
 
-            new_buf = ngx_palloc(pool, new_size);
+            new_buf = ngx_alloc(new_size, log);
             if (new_buf == NULL) {
+                if (heap_buf != NULL) {
+                    ngx_free(heap_buf);
+                }
                 return NGX_ERROR;
             }
 
             ngx_memcpy(new_buf, buf, buf_size);
+
+            if (heap_buf != NULL) {
+                ngx_free(heap_buf);
+            }
+
+            heap_buf = new_buf;
+            using_heap = 1;
 
             next_out = new_buf + buf_size;
             avail_out = new_size - buf_size;
@@ -373,6 +440,22 @@ ngx_http_markdown_streaming_decomp_brotli_loop(
         if (avail_in == 0) {
             break;
         }
+    }
+
+    if (using_heap) {
+        u_char  *pool_buf;
+
+        pool_buf = ngx_palloc(pool, *out_produced);
+        if (pool_buf == NULL) {
+            ngx_free(heap_buf);
+            return NGX_ERROR;
+        }
+
+        ngx_memcpy(pool_buf, heap_buf, *out_produced);
+        ngx_free(heap_buf);
+
+        buf = pool_buf;
+        buf_size = *out_produced;
     }
 
     *buf_ptr = buf;
