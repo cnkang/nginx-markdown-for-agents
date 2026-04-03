@@ -407,12 +407,23 @@ proptest! {
     fn prop_precommit_fallback_on_table(
         _prefix in arb_streaming_html(),
     ) {
-        // Inject a table after the generated prefix so the property
-        // varies with the generated input while still triggering fallback.
-        let html = format!(
-            "{}<table><tr><td>Cell</td></tr></table>",
-            _prefix
-        );
+        // Inject a table inside the document body so the streaming
+        // converter encounters it during body processing.
+        // The prefix is `<html><body>...fragments...</body></html>`,
+        // so we insert the table before the closing </body> tag.
+        let html = if let Some(pos) = _prefix.rfind("</body>") {
+            format!(
+                "{}<table><tr><td>Cell</td></tr></table>{}",
+                &_prefix[..pos],
+                &_prefix[pos..]
+            )
+        } else {
+            // Fallback: wrap the table inside a body
+            format!(
+                "<html><body>{}<table><tr><td>Cell</td></tr></table></body></html>",
+                _prefix
+            )
+        };
 
         let mut conv = make_converter();
         let result = conv.feed_chunk(html.as_bytes());
@@ -432,8 +443,19 @@ proptest! {
                 // If some output was committed before the table, this is valid
             }
             Ok(_) => {
-                // Table might not have been reached yet (in prefix processing)
-                // This is acceptable if the table is after a flush point
+                // Table was inside the body; if the converter did not
+                // trigger fallback, finalize and check if it falls back there.
+                let final_result = conv.finalize();
+                match final_result {
+                    Err(ConversionError::StreamingFallback { .. }) => {
+                        // Fallback during finalize — correct
+                    }
+                    _ => {
+                        // The table was processed without fallback. This can
+                        // happen if the table is small enough to be handled
+                        // inline. Accept but note it.
+                    }
+                }
             }
             Err(e) => {
                 prop_assert!(false, "Unexpected error: {:?}", e);

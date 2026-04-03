@@ -138,7 +138,7 @@ impl StreamingSanitizer {
     ///
     /// # Examples
     ///
-    /// ```ignore
+    /// ```no_run
     /// use nginx_markdown_converter::streaming::sanitizer::StreamingSanitizer;
     /// use nginx_markdown_converter::streaming::sanitizer::SanitizeDecision;
     /// use nginx_markdown_converter::streaming::types::StreamEvent;
