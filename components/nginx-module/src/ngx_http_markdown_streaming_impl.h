@@ -900,6 +900,83 @@ ngx_http_markdown_streaming_process_chunk(
 
 
 /*
+ * Finish decompression and feed any tail data to the
+ * streaming engine.
+ *
+ * Returns:
+ *   NGX_OK    - success (or no decompression needed)
+ *   other     - error propagated from decomp or feed
+ */
+static ngx_int_t
+ngx_http_markdown_streaming_finalize_decomp(
+    ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx,
+    ngx_http_markdown_conf_t *conf)
+{
+    u_char    *decomp_data;
+    size_t     decomp_len;
+    ngx_int_t  rc;
+
+    if (!ctx->decompression.needed
+        || ctx->streaming.decompressor == NULL)
+    {
+        return NGX_OK;
+    }
+
+    rc = ngx_http_markdown_streaming_decomp_finish(
+        (ngx_http_markdown_streaming_decomp_t *)
+            ctx->streaming.decompressor,
+        &decomp_data, &decomp_len,
+        r->pool, r->connection->log);
+
+    if (rc != NGX_OK) {
+        ngx_log_error(NGX_LOG_ERR,
+            r->connection->log, 0,
+            "markdown streaming: decomp_finish "
+            "failed in finalize");
+
+        if (ctx->streaming.commit_state
+            == NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST)
+        {
+            return
+                ngx_http_markdown_streaming_handle_postcommit_error(
+                    r, ctx, conf,
+                    ERROR_POST_COMMIT);
+        }
+
+        return ngx_http_markdown_streaming_precommit_error(
+            r, ctx, conf, /* inc_failopen */ 1);
+    }
+
+    if (decomp_data != NULL && decomp_len > 0) {
+        u_char    *out_data;
+        size_t     out_len;
+        uint32_t   feed_rc;
+        ngx_int_t  feed_result;
+
+        out_data = NULL;
+        out_len = 0;
+
+        feed_rc = markdown_streaming_feed(
+            ctx->streaming.handle,
+            decomp_data, decomp_len,
+            &out_data, &out_len);
+
+        feed_result =
+            ngx_http_markdown_streaming_handle_feed_result(
+                r, ctx, conf, feed_rc,
+                out_data, out_len);
+
+        if (feed_result != NGX_OK) {
+            return feed_result;
+        }
+    }
+
+    return NGX_OK;
+}
+
+
+/*
  * Finalize the streaming conversion on last_buf.
  *
  * Calls markdown_streaming_finalize() to get the final
@@ -917,66 +994,15 @@ ngx_http_markdown_streaming_finalize_request(
     ngx_int_t              rc;
 
     if (ctx->streaming.handle == NULL) {
-        /* Handle already consumed */
         return ngx_http_markdown_streaming_send_output(
             r, ctx, NULL, 0, /* last_buf */ 1);
     }
 
-    /* Finish decompression if needed */
-    if (ctx->decompression.needed
-        && ctx->streaming.decompressor != NULL)
-    {
-        u_char  *decomp_data;
-        size_t   decomp_len;
-
-        rc = ngx_http_markdown_streaming_decomp_finish(
-            (ngx_http_markdown_streaming_decomp_t *)
-                ctx->streaming.decompressor,
-            &decomp_data, &decomp_len,
-            r->pool, r->connection->log);
-
-        if (rc != NGX_OK) {
-            ngx_log_error(NGX_LOG_ERR,
-                r->connection->log, 0,
-                "markdown streaming: decomp_finish "
-                "failed in finalize");
-
-            if (ctx->streaming.commit_state
-                == NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST)
-            {
-                return
-                    ngx_http_markdown_streaming_handle_postcommit_error(
-                        r, ctx, conf,
-                        ERROR_POST_COMMIT);
-            }
-
-            return ngx_http_markdown_streaming_precommit_error(
-                r, ctx, conf, /* inc_failopen */ 1);
-        }
-
-        if (decomp_data != NULL && decomp_len > 0) {
-            u_char    *out_data;
-            size_t     out_len;
-            uint32_t   feed_rc;
-            ngx_int_t  feed_result;
-
-            out_data = NULL;
-            out_len = 0;
-
-            feed_rc = markdown_streaming_feed(
-                ctx->streaming.handle,
-                decomp_data, decomp_len,
-                &out_data, &out_len);
-
-            feed_result =
-                ngx_http_markdown_streaming_handle_feed_result(
-                    r, ctx, conf, feed_rc,
-                    out_data, out_len);
-
-            if (feed_result != NGX_OK) {
-                return feed_result;
-            }
-        }
+    /* Finish decompression and feed tail data if any */
+    rc = ngx_http_markdown_streaming_finalize_decomp(
+        r, ctx, conf);
+    if (rc != NGX_OK) {
+        return rc;
     }
 
     /* Finalize the streaming converter */
@@ -1200,6 +1226,59 @@ ngx_http_markdown_streaming_init_handle(
 
 
 /*
+ * Handle the result of process_chunk within the body filter loop.
+ *
+ * Dispatches fallback, fail-open, and error paths. Returns the
+ * value the body filter should return, or NGX_OK to continue
+ * processing the next buffer in the chain.
+ *
+ * Returns:
+ *   NGX_OK       - continue processing next buffer
+ *   NGX_AGAIN    - backpressure, return immediately
+ *   NGX_ERROR    - fatal error
+ *   other        - return value to propagate
+ */
+static ngx_int_t
+ngx_http_markdown_streaming_handle_chunk_result(
+    ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx,
+    ngx_chain_t *in,
+    ngx_int_t rc)
+{
+    if (rc == NGX_AGAIN) {
+        return NGX_AGAIN;
+    }
+
+    if (rc == NGX_OK) {
+        return NGX_OK;
+    }
+
+    /*
+     * If fallback occurred, the processing path
+     * was switched. Let the caller re-enter the
+     * body filter with the remaining chain.
+     */
+    if (ctx->processing_path
+        != NGX_HTTP_MARKDOWN_PATH_STREAMING)
+    {
+        return NGX_DONE;
+    }
+
+    if (!ctx->eligible) {
+        /* Fail-open: forward remaining */
+        if (!ctx->headers_forwarded) {
+            ngx_http_markdown_forward_headers(
+                r, ctx);
+        }
+        return ngx_http_next_body_filter(
+            r, in);
+    }
+
+    return rc;
+}
+
+
+/*
  * Streaming body filter main entry point.
  *
  * Called when processing_path == PATH_STREAMING.
@@ -1292,33 +1371,15 @@ ngx_http_markdown_streaming_body_filter(
         rc = ngx_http_markdown_streaming_process_chunk(
             r, ctx, conf, cl->buf);
 
-        if (rc == NGX_AGAIN) {
-            /* Backpressure */
-            return NGX_AGAIN;
+        rc = ngx_http_markdown_streaming_handle_chunk_result(
+            r, ctx, in, rc);
+
+        if (rc == NGX_DONE) {
+            /* Fallback: path switched, re-enter filter */
+            return NGX_OK;
         }
 
         if (rc != NGX_OK) {
-            /*
-             * If fallback occurred, the processing path
-             * was switched. Let the caller re-enter the
-             * body filter with the remaining chain.
-             */
-            if (ctx->processing_path
-                != NGX_HTTP_MARKDOWN_PATH_STREAMING)
-            {
-                return NGX_OK;
-            }
-
-            if (!ctx->eligible) {
-                /* Fail-open: forward remaining */
-                if (!ctx->headers_forwarded) {
-                    ngx_http_markdown_forward_headers(
-                        r, ctx);
-                }
-                return ngx_http_next_body_filter(
-                    r, in);
-            }
-
             return rc;
         }
 
