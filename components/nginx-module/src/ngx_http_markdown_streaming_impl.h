@@ -436,6 +436,18 @@ ngx_http_markdown_streaming_resume_pending(
     out = ctx->streaming.pending_output;
     if (out == NULL) {
         r->buffered &= ~NGX_HTTP_MARKDOWN_BUFFERED;
+
+        /*
+         * If finalize deferred the terminal last_buf due to
+         * backpressure, send it now that the pending output
+         * has been drained.
+         */
+        if (ctx->streaming.finalize_pending_lastbuf) {
+            ctx->streaming.finalize_pending_lastbuf = 0;
+            return ngx_http_markdown_streaming_send_output(
+                r, ctx, NULL, 0, /* last_buf */ 1);
+        }
+
         return NGX_OK;
     }
 
@@ -448,6 +460,17 @@ ngx_http_markdown_streaming_resume_pending(
     }
 
     r->buffered &= ~NGX_HTTP_MARKDOWN_BUFFERED;
+
+    /*
+     * Pending output drained. If finalize deferred the
+     * terminal last_buf, send it now.
+     */
+    if (ctx->streaming.finalize_pending_lastbuf) {
+        ctx->streaming.finalize_pending_lastbuf = 0;
+        return ngx_http_markdown_streaming_send_output(
+            r, ctx, NULL, 0, /* last_buf */ 1);
+    }
+
     return rc;
 }
 
@@ -477,6 +500,16 @@ ngx_http_markdown_streaming_fallback_to_fullbuffer(
     /* Switch to full-buffer path */
     ctx->processing_path =
         NGX_HTTP_MARKDOWN_PATH_FULLBUFFER;
+
+    /*
+     * Clear conversion_attempted so the full-buffer body
+     * filter path will actually perform the conversion on
+     * the prebuffered data. Without this reset the main
+     * body filter sees conversion_attempted == 1 and
+     * short-circuits to ngx_http_next_body_filter,
+     * forwarding unconverted HTML.
+     */
+    ctx->conversion_attempted = 0;
 
     /* Correct path hit metrics */
     if (ngx_http_markdown_metrics != NULL
@@ -992,6 +1025,7 @@ ngx_http_markdown_streaming_finalize_request(
     struct MarkdownResult  result;
     uint32_t               rc_ffi;
     ngx_int_t              rc;
+    ngx_int_t              final_send_rc;
 
     if (ctx->streaming.handle == NULL) {
         return ngx_http_markdown_streaming_send_output(
@@ -1070,6 +1104,10 @@ ngx_http_markdown_streaming_finalize_request(
             markdown_result_free(&result);
             return rc;
         }
+
+        final_send_rc = rc;
+    } else {
+        final_send_rc = NGX_OK;
     }
 
     /* Log ETag if available */
@@ -1102,7 +1140,22 @@ ngx_http_markdown_streaming_finalize_request(
     ngx_http_markdown_log_decision(r, conf,
         &ngx_http_markdown_reason_streaming_convert);
 
-    /* Send final empty last_buf */
+    /*
+     * Send final empty last_buf to terminate the response.
+     *
+     * If the final markdown send returned NGX_AGAIN (backpressure),
+     * defer the terminal last_buf — sending it now would overwrite
+     * the pending markdown chain in send_output, causing data loss.
+     * Return NGX_AGAIN so the resume mechanism drains the pending
+     * output first; the caller will re-enter finalize on the next
+     * write event.
+     */
+    if (final_send_rc == NGX_AGAIN) {
+        ctx->streaming.finalize_pending_lastbuf = 1;
+        return ngx_http_markdown_streaming_handle_backpressure(
+            r, ctx);
+    }
+
     return ngx_http_markdown_streaming_send_output(
         r, ctx, NULL, 0, /* last_buf */ 1);
 }
@@ -1384,6 +1437,20 @@ ngx_http_markdown_streaming_body_filter(
             return NGX_ERROR;
         }
         if (rc == NGX_DECLINED) {
+            /*
+             * Fail-open: headers were deferred in the header
+             * filter, so forward them before passing the body
+             * chain downstream.
+             */
+            if (!ctx->headers_forwarded) {
+                ngx_int_t  hrc;
+
+                hrc = ngx_http_markdown_forward_headers(
+                    r, ctx);
+                if (hrc != NGX_OK) {
+                    return NGX_ERROR;
+                }
+            }
             return ngx_http_next_body_filter(r, in);
         }
     }
