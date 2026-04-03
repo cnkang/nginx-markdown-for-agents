@@ -309,6 +309,9 @@ typedef struct {
         ngx_http_markdown_buffer_t        prebuffer;
         size_t                            prebuffer_limit;
         ngx_flag_t                        prebuffer_initialized;
+
+        /* Deferred terminal last_buf (backpressure during finalize) */
+        ngx_flag_t                        finalize_pending_lastbuf;
     } streaming;
 #endif
 } ngx_http_markdown_ctx_t;
