@@ -194,7 +194,7 @@ ngx_http_markdown_streaming_decomp_create(
  */
 static ngx_inline int
 ngx_http_markdown_streaming_decomp_check_limit(
-    ngx_http_markdown_streaming_decomp_t *decomp,
+    const ngx_http_markdown_streaming_decomp_t *decomp,
     size_t produced,
     ngx_log_t *log)
 {
@@ -352,11 +352,11 @@ ngx_http_markdown_streaming_decomp_inflate_loop(
 
         if (zrc == Z_STREAM_END) {
             decomp->finished = 1;
-            break;
+            goto done;
         }
 
         if (decomp->state.zlib.avail_in == 0) {
-            break;
+            goto done;
         }
 
         if (decomp->state.zlib.avail_out == 0) {
@@ -375,6 +375,8 @@ ngx_http_markdown_streaming_decomp_inflate_loop(
                 (uInt) (buf_size / 2);
         }
     }
+
+done:
 
     if (using_heap) {
         if (ngx_http_markdown_streaming_decomp_finalize_buf(
@@ -462,7 +464,7 @@ ngx_http_markdown_streaming_decomp_brotli_loop(
 
         if (brc == BROTLI_DECODER_RESULT_SUCCESS) {
             decomp->finished = 1;
-            break;
+            goto done;
         }
 
         if (brc
@@ -486,9 +488,11 @@ ngx_http_markdown_streaming_decomp_brotli_loop(
         }
 
         if (avail_in == 0) {
-            break;
+            goto done;
         }
     }
+
+done:
 
     if (using_heap) {
         if (ngx_http_markdown_streaming_decomp_finalize_buf(
