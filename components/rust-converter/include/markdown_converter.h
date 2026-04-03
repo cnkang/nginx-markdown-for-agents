@@ -108,6 +108,14 @@ typedef struct MarkdownOptions {
   uintptr_t content_type_len;
   const uint8_t *base_url;
   uintptr_t base_url_len;
+  /**
+   * Streaming memory budget in bytes (0 = use default).
+   *
+   * When non-zero, the streaming converter uses this value as the
+   * total memory budget instead of the compiled-in default (2 MiB).
+   * Populated from the `markdown_streaming_budget` NGINX directive.
+   */
+  uint64_t streaming_budget;
 } MarkdownOptions;
 
 /**
@@ -423,6 +431,9 @@ void markdown_streaming_abort(struct StreamingConverterHandle *handle);
  * `abort`, do **not** call this function — that would be a double-free.
  *
  * Passing NULL is a safe no-op.
+ *
+ * This delegates to [`markdown_streaming_abort`] which has identical
+ * semantics (both consume the handle by dropping it).
  *
  * # Safety
  *

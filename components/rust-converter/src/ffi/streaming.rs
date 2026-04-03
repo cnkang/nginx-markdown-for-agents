@@ -82,7 +82,17 @@ pub unsafe extern "C" fn markdown_streaming_new(
             eprintln!("markdown_streaming_new: failed to decode options: {e}");
         })?;
 
-        let mut converter = StreamingConverter::new(decoded.conversion, MemoryBudget::default());
+        let budget = if decoded.streaming_budget > 0 {
+            let total = decoded.streaming_budget as usize;
+            MemoryBudget {
+                total,
+                ..MemoryBudget::default()
+            }
+        } else {
+            MemoryBudget::default()
+        };
+
+        let mut converter = StreamingConverter::new(decoded.conversion, budget);
         converter.set_content_type(decoded.content_type.map(ToOwned::to_owned));
         if !decoded.timeout.is_zero() {
             converter.set_timeout(decoded.timeout);
@@ -379,6 +389,7 @@ mod tests {
             content_type_len: 0,
             base_url: ptr::null(),
             base_url_len: 0,
+            streaming_budget: 0,
         }
     }
 

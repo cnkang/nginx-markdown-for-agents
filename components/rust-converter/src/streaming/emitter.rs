@@ -481,7 +481,13 @@ impl IncrementalEmitter {
             self.emit_code_fence_if_needed(sm)?;
             // Preserve content inside code blocks verbatim (no
             // blank-line collapsing or whitespace normalization).
-            self.write_raw(text.as_bytes())?;
+            // When inside a blockquote, prepend "> " prefix to each
+            // line so the code block renders correctly in Markdown.
+            if self.blockquote_depth > 0 {
+                self.write_raw_with_blockquote_prefix(text.as_bytes())?;
+            } else {
+                self.write_raw(text.as_bytes())?;
+            }
             self.last_was_newline = text.ends_with('\n');
             return Ok(());
         }
@@ -751,6 +757,28 @@ impl IncrementalEmitter {
         Ok(())
     }
 
+    /// Write raw bytes with blockquote `> ` prefix on each new line.
+    ///
+    /// Used for code block content inside blockquotes so each line
+    /// gets the correct `> ` prefix per nesting depth.
+    fn write_raw_with_blockquote_prefix(&mut self, bytes: &[u8]) -> Result<(), ConversionError> {
+        let prefix_per_line = 2 * self.blockquote_depth;
+        /* Worst case: every byte is a newline, each needing a prefix */
+        let max_extra = bytes.iter().filter(|&&b| b == b'\n').count() * prefix_per_line;
+        self.check_buffer_budget(bytes.len() + max_extra)?;
+
+        for &b in bytes {
+            self.buffer.push(b);
+            if b == b'\n' {
+                for _ in 0..self.blockquote_depth {
+                    self.buffer.extend_from_slice(b"> ");
+                }
+            }
+        }
+        self.last_was_newline = bytes.last().copied() == Some(b'\n');
+        Ok(())
+    }
+
     /// Check that adding `additional` bytes won't exceed the buffer budget.
     fn check_buffer_budget(&self, additional: usize) -> Result<(), ConversionError> {
         let new_size = self.buffer.len().saturating_add(additional);
@@ -808,9 +836,11 @@ impl IncrementalEmitter {
         }
         let output = if self.in_code_block {
             /* Skip trailing-whitespace normalization inside code blocks */
-            self.buffer.clone()
+            std::mem::take(&mut self.buffer)
         } else {
-            normalize_pending(&self.buffer)
+            let normalized = normalize_pending(&self.buffer);
+            self.buffer.clear();
+            normalized
         };
         let new_flushed_size = self.flushed.len().saturating_add(output.len());
         if new_flushed_size > self.max_buffer_size {
@@ -821,7 +851,6 @@ impl IncrementalEmitter {
             });
         }
         self.flushed.extend_from_slice(&output);
-        self.buffer.clear();
         Ok(())
     }
 }
