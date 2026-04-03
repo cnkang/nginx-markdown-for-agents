@@ -85,6 +85,12 @@ ngx_http_markdown_streaming_update_headers(
     ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx,
     ngx_http_markdown_conf_t *conf);
+static ngx_int_t
+ngx_http_markdown_streaming_ensure_handle(
+    ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx,
+    ngx_http_markdown_conf_t *conf,
+    ngx_chain_t *in);
 
 
 /*
@@ -1386,6 +1392,61 @@ ngx_http_markdown_streaming_passthrough(
 
 
 /*
+ * Ensure the streaming handle is initialized.
+ *
+ * On first body-filter invocation, creates the streaming handle,
+ * decompressor, and prebuffer. If init fails with NGX_DECLINED
+ * (fail-open), forwards deferred headers and passes the body
+ * chain downstream.
+ *
+ * Returns:
+ *   NGX_OK       - handle ready, continue processing
+ *   NGX_DONE     - fail-open handled, caller should return NGX_OK
+ *   NGX_ERROR    - fatal error
+ */
+static ngx_int_t
+ngx_http_markdown_streaming_ensure_handle(
+    ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx,
+    ngx_http_markdown_conf_t *conf,
+    ngx_chain_t *in)
+{
+    ngx_int_t  rc;
+
+    if (ctx->streaming.handle != NULL || !ctx->eligible) {
+        return NGX_OK;
+    }
+
+    rc = ngx_http_markdown_streaming_init_handle(
+        r, ctx, conf);
+
+    if (rc == NGX_ERROR) {
+        return NGX_ERROR;
+    }
+
+    if (rc == NGX_DECLINED) {
+        /*
+         * Fail-open: headers were deferred in the header
+         * filter, so forward them before passing the body
+         * chain downstream.
+         */
+        if (!ctx->headers_forwarded) {
+            rc = ngx_http_markdown_forward_headers(
+                r, ctx);
+            if (rc != NGX_OK) {
+                return NGX_ERROR;
+            }
+        }
+
+        (void) ngx_http_next_body_filter(r, in);
+        return NGX_DONE;
+    }
+
+    return NGX_OK;
+}
+
+
+/*
  * Streaming body filter main entry point.
  *
  * Called when processing_path == PATH_STREAMING.
@@ -1428,31 +1489,13 @@ ngx_http_markdown_streaming_body_filter(
     }
 
     /* Initialize streaming handle on first call */
-    if (ctx->streaming.handle == NULL
-        && ctx->eligible)
-    {
-        rc = ngx_http_markdown_streaming_init_handle(
-            r, ctx, conf);
-        if (rc == NGX_ERROR) {
-            return NGX_ERROR;
-        }
-        if (rc == NGX_DECLINED) {
-            /*
-             * Fail-open: headers were deferred in the header
-             * filter, so forward them before passing the body
-             * chain downstream.
-             */
-            if (!ctx->headers_forwarded) {
-                ngx_int_t  hrc;
-
-                hrc = ngx_http_markdown_forward_headers(
-                    r, ctx);
-                if (hrc != NGX_OK) {
-                    return NGX_ERROR;
-                }
-            }
-            return ngx_http_next_body_filter(r, in);
-        }
+    rc = ngx_http_markdown_streaming_ensure_handle(
+        r, ctx, conf, in);
+    if (rc == NGX_ERROR) {
+        return NGX_ERROR;
+    }
+    if (rc == NGX_DONE) {
+        return NGX_OK;
     }
 
     if (!ctx->eligible || ctx->streaming.handle == NULL) {
