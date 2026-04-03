@@ -356,7 +356,7 @@ struct StreamingConverterHandle *markdown_streaming_new(const struct MarkdownOpt
  *
  * - `ERROR_SUCCESS` (0) on success
  * - `ERROR_STREAMING_FALLBACK` (7) for pre-commit fallback signal
- * - `ERROR_MEMORY_LIMIT` (4) for memory budget exceeded
+ * - `ERROR_BUDGET_EXCEEDED` (6) for memory budget exceeded
  * - `ERROR_POST_COMMIT` (8) for post-commit error
  * - `ERROR_TIMEOUT` (3) for timeout
  * - `ERROR_INVALID_INPUT` (5) for NULL handle or output pointers

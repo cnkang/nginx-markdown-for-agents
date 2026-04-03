@@ -1033,31 +1033,18 @@ mod tests {
     use super::*;
 
     /// Create a `StreamingConverter` with UTF-8 content type preconfigured.
-    
     ///
-    
     /// This helper initializes a converter with default options and budget and
-    
     /// pre-resolves the charset to `UTF-8` so that small inputs are processed
-    
     /// immediately instead of waiting for the charset sniff buffer to fill.
-    
     ///
-    
     /// # Examples
-    
     ///
-    
     /// ```
-    
     /// let mut conv = make_converter();
-    
     /// // ready to feed small UTF-8 HTML chunks without charset sniffing delay
-    
     /// let out = conv.feed_chunk(b"<p>hi</p>").unwrap();
-    
     /// assert!(out.markdown.len() > 0);
-    
     /// ```
     fn make_converter() -> StreamingConverter {
         let mut conv =
@@ -2042,6 +2029,7 @@ mod tests {
     /// assert!(conv.canonical_found);
     /// assert_eq!(conv.metadata().url.as_deref(), Some("https://second.example.com"));
     /// ```
+    #[test]
     fn test_first_canonical_no_href_skipped_second_used() {
         let opts = ConversionOptions {
             extract_metadata: true,
