@@ -301,6 +301,7 @@ impl IncrementalEmitter {
             StructuralContext::Blockquote => {
                 self.emit_block_separator()?;
                 self.blockquote_depth = sm.blockquote_depth;
+                self.write_blockquote_prefix()?;
             }
             StructuralContext::Link(_) => {
                 self.in_link = true;
@@ -478,8 +479,15 @@ impl IncrementalEmitter {
         if self.in_code_block {
             // Emit deferred code fence if not yet emitted
             self.emit_code_fence_if_needed(sm)?;
-            // Preserve whitespace inside code blocks
-            self.write_str(text)?;
+            // Preserve content inside code blocks verbatim (no
+            // blank-line collapsing or whitespace normalization).
+            // When inside a blockquote, prepend "> " prefix to each
+            // line so the code block renders correctly in Markdown.
+            if self.blockquote_depth > 0 {
+                self.write_raw_with_blockquote_prefix(text.as_bytes())?;
+            } else {
+                self.write_raw(text.as_bytes())?;
+            }
             self.last_was_newline = text.ends_with('\n');
             return Ok(());
         }
@@ -584,6 +592,16 @@ impl IncrementalEmitter {
             self.consecutive_blank_lines = 0;
         }
         self.needs_block_separator = false;
+        Ok(())
+    }
+
+    /// Write blockquote `> ` prefix markers for the current depth.
+    fn write_blockquote_prefix(&mut self) -> Result<(), ConversionError> {
+        let prefix_size = 2 * self.blockquote_depth;
+        self.check_buffer_budget(prefix_size)?;
+        for _ in 0..self.blockquote_depth {
+            self.buffer.extend_from_slice(b"> ");
+        }
         Ok(())
     }
 
@@ -705,6 +723,22 @@ impl IncrementalEmitter {
                         self.consecutive_blank_lines = 0;
                     }
                     self.last_was_newline = true;
+                    // Prepend blockquote markers on the new line
+                    if self.blockquote_depth > 0 {
+                        let prefix_size = 2 * self.blockquote_depth;
+                        if self.buffer.len().saturating_add(prefix_size)
+                            > self.max_buffer_size
+                        {
+                            return Err(ConversionError::BudgetExceeded {
+                                stage: "output_buffer".to_string(),
+                                used: self.buffer.len() + prefix_size,
+                                limit: self.max_buffer_size,
+                            });
+                        }
+                        for _ in 0..self.blockquote_depth {
+                            self.buffer.extend_from_slice(b"> ");
+                        }
+                    }
                 }
             } else {
                 self.buffer.push(b);
@@ -719,6 +753,28 @@ impl IncrementalEmitter {
     fn write_raw(&mut self, bytes: &[u8]) -> Result<(), ConversionError> {
         self.check_buffer_budget(bytes.len())?;
         self.buffer.extend_from_slice(bytes);
+        self.last_was_newline = bytes.last().copied() == Some(b'\n');
+        Ok(())
+    }
+
+    /// Write raw bytes with blockquote `> ` prefix on each new line.
+    ///
+    /// Used for code block content inside blockquotes so each line
+    /// gets the correct `> ` prefix per nesting depth.
+    fn write_raw_with_blockquote_prefix(&mut self, bytes: &[u8]) -> Result<(), ConversionError> {
+        let prefix_per_line = 2 * self.blockquote_depth;
+        /* Worst case: every byte is a newline, each needing a prefix */
+        let max_extra = bytes.iter().filter(|&&b| b == b'\n').count() * prefix_per_line;
+        self.check_buffer_budget(bytes.len() + max_extra)?;
+
+        for &b in bytes {
+            self.buffer.push(b);
+            if b == b'\n' {
+                for _ in 0..self.blockquote_depth {
+                    self.buffer.extend_from_slice(b"> ");
+                }
+            }
+        }
         self.last_was_newline = bytes.last().copied() == Some(b'\n');
         Ok(())
     }
@@ -778,8 +834,15 @@ impl IncrementalEmitter {
         if self.buffer.is_empty() {
             return Ok(());
         }
-        let normalized = normalize_pending(&self.buffer);
-        let new_flushed_size = self.flushed.len().saturating_add(normalized.len());
+        let output = if self.in_code_block {
+            /* Skip trailing-whitespace normalization inside code blocks */
+            std::mem::take(&mut self.buffer)
+        } else {
+            let normalized = normalize_pending(&self.buffer);
+            self.buffer.clear();
+            normalized
+        };
+        let new_flushed_size = self.flushed.len().saturating_add(output.len());
         if new_flushed_size > self.max_buffer_size {
             return Err(ConversionError::BudgetExceeded {
                 stage: "output_buffer (ready)".to_string(),
@@ -787,8 +850,7 @@ impl IncrementalEmitter {
                 limit: self.max_buffer_size,
             });
         }
-        self.flushed.extend_from_slice(&normalized);
-        self.buffer.clear();
+        self.flushed.extend_from_slice(&output);
         Ok(())
     }
 }
@@ -1338,6 +1400,12 @@ mod tests {
             end_tag("blockquote"),
         ]);
         assert!(output.contains("Quoted text"), "got: {}", output);
+        /* Verify blockquote marker is present */
+        assert!(
+            output.lines().any(|line| line.starts_with("> ")),
+            "Expected blockquote prefix '> ' in output, got: {}",
+            output
+        );
     }
 
     // ── Bold / Italic tests ─────────────────────────────────────────

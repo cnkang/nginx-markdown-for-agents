@@ -13,6 +13,15 @@ pub const ERROR_TIMEOUT: u32 = 3;
 pub const ERROR_MEMORY_LIMIT: u32 = 4;
 /// Invalid input data (NULL pointers, invalid parameters).
 pub const ERROR_INVALID_INPUT: u32 = 5;
+/// Memory budget exceeded during streaming conversion.
+#[cfg(feature = "streaming")]
+pub const ERROR_BUDGET_EXCEEDED: u32 = 6;
+/// Streaming engine requests fallback to full-buffer conversion (Pre-Commit only).
+#[cfg(feature = "streaming")]
+pub const ERROR_STREAMING_FALLBACK: u32 = 7;
+/// Error after the streaming engine has already emitted partial output (Post-Commit).
+#[cfg(feature = "streaming")]
+pub const ERROR_POST_COMMIT: u32 = 8;
 /// Internal error (unexpected condition, panic caught).
 pub const ERROR_INTERNAL: u32 = 99;
 
@@ -28,6 +37,12 @@ pub struct MarkdownOptions {
     pub content_type_len: usize,
     pub base_url: *const u8,
     pub base_url_len: usize,
+    /// Streaming memory budget in bytes (0 = use default).
+    ///
+    /// When non-zero, the streaming converter uses this value as the
+    /// total memory budget instead of the compiled-in default (2 MiB).
+    /// Populated from the `markdown_streaming_budget` NGINX directive.
+    pub streaming_budget: u64,
 }
 
 /// Conversion result returned from Rust to C.

@@ -542,19 +542,16 @@ ngx_http_markdown_cache_control_has_directive(const ngx_str_t *value,
             break;
         }
 
-        /* Check if this token matches the directive */
-        if ((size_t)(end - p) >= directive_len &&
-            ngx_strncasecmp(p, directive->data, directive_len) == 0)
+        /* Check if this token matches the directive as a complete token */
+        if ((size_t)(end - p) >= directive_len
+            && ngx_strncasecmp(p, directive->data, directive_len) == 0
+            && (p + directive_len == end
+                || p[directive_len] == ' '
+                || p[directive_len] == '\t'
+                || p[directive_len] == ','
+                || p[directive_len] == '='))
         {
-            /* Verify it's a complete token (not part of another word) */
-            if (p + directive_len == end ||
-                p[directive_len] == ' ' ||
-                p[directive_len] == '\t' ||
-                p[directive_len] == ',' ||
-                p[directive_len] == '=')
-            {
-                return 1;
-            }
+            return 1;
         }
 
         /* Skip to next token */

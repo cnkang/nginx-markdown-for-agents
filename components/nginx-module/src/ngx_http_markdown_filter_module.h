@@ -19,6 +19,28 @@ struct MarkdownOptions;
  */
 #define NGX_HTTP_MARKDOWN_PATH_FULLBUFFER   0  /* Full-buffer path */
 #define NGX_HTTP_MARKDOWN_PATH_INCREMENTAL  1  /* Incremental path */
+#define NGX_HTTP_MARKDOWN_PATH_STREAMING    2  /* Streaming path */
+
+#ifdef MARKDOWN_STREAMING_ENABLED
+/*
+ * Streaming engine mode constants
+ */
+#define NGX_HTTP_MARKDOWN_STREAMING_ENGINE_OFF   0
+#define NGX_HTTP_MARKDOWN_STREAMING_ENGINE_ON    1
+#define NGX_HTTP_MARKDOWN_STREAMING_ENGINE_AUTO  2
+
+/*
+ * Streaming commit state constants
+ */
+#define NGX_HTTP_MARKDOWN_STREAMING_COMMIT_PRE   0
+#define NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST  1
+
+/*
+ * Default streaming budget: 2 MiB
+ */
+#define NGX_HTTP_MARKDOWN_STREAMING_BUDGET_DEFAULT \
+    (2 * 1024 * 1024)
+#endif /* MARKDOWN_STREAMING_ENABLED */
 
 /*
  * Threshold off sentinel — used in merge and path selection logic.
@@ -146,6 +168,11 @@ typedef struct {
         ngx_flag_t   trust_forwarded_headers; /* markdown_trust_forwarded_headers on|off (default: off) */
         ngx_uint_t   metrics_format;       /* markdown_metrics_format auto|prometheus (default: auto) */
     } ops;
+
+#ifdef MARKDOWN_STREAMING_ENABLED
+    ngx_http_complex_value_t  *streaming_engine;  /* markdown_streaming_engine (complex value) */
+    size_t                     streaming_budget;   /* markdown_streaming_budget (default: 2m) */
+#endif
 } ngx_http_markdown_conf_t;
 
 /*
@@ -251,6 +278,42 @@ typedef struct {
     /* Last error category from conversion failure (for decision log) */
     ngx_http_markdown_error_category_t    last_error_category;
     ngx_flag_t                            has_error_category;
+
+#ifdef MARKDOWN_STREAMING_ENABLED
+    /*
+     * Streaming state sub-struct.
+     *
+     * Grouped to comply with SonarCloud c:S1820
+     * 20-field limit.
+     */
+    struct {
+        /* Streaming converter handle (Rust opaque pointer) */
+        struct StreamingConverterHandle  *handle;
+
+        /* Commit state: PRE or POST */
+        ngx_uint_t                        commit_state;
+
+        /* Pending output chain for backpressure */
+        ngx_chain_t                      *pending_output;
+
+        /* Incremental decompressor state */
+        void                             *decompressor;
+
+        /* Per-request statistics */
+        ngx_uint_t                        chunks_processed;
+        ngx_uint_t                        flushes_sent;
+        size_t                            total_input_bytes;
+        size_t                            total_output_bytes;
+
+        /* Pre-Commit prebuffer for fallback */
+        ngx_http_markdown_buffer_t        prebuffer;
+        size_t                            prebuffer_limit;
+        ngx_flag_t                        prebuffer_initialized;
+
+        /* Deferred terminal last_buf (backpressure during finalize) */
+        ngx_flag_t                        finalize_pending_lastbuf;
+    } streaming;
+#endif
 } ngx_http_markdown_ctx_t;
 
 /*
@@ -356,6 +419,9 @@ typedef struct {
     struct {
         ngx_atomic_t  fullbuffer;      /* Requests routed to full-buffer path */
         ngx_atomic_t  incremental;     /* Requests routed to incremental path */
+#ifdef MARKDOWN_STREAMING_ENABLED
+        ngx_atomic_t  streaming;       /* Requests routed to streaming path */
+#endif
     } path_hits;
 
     /*
@@ -366,6 +432,22 @@ typedef struct {
      * rate calculations.
      */
     ngx_atomic_t  requests_entered;
+
+#ifdef MARKDOWN_STREAMING_ENABLED
+    /*
+     * Streaming metrics sub-struct.
+     *
+     * Grouped to comply with SonarCloud c:S1820
+     * 20-field limit.
+     */
+    struct {
+        ngx_atomic_t  requests_total;          /* Entered streaming path */
+        ngx_atomic_t  fallback_total;          /* Pre-Commit fallbacks */
+        ngx_atomic_t  succeeded_total;         /* Streaming successes */
+        ngx_atomic_t  failed_total;            /* Streaming failures */
+        ngx_atomic_t  postcommit_error_total;  /* Post-Commit errors */
+    } streaming;
+#endif
 
     /*
      * Skip counters by reason code.

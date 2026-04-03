@@ -60,6 +60,9 @@ typedef struct {
     struct {
         ngx_atomic_uint_t fullbuffer;
         ngx_atomic_uint_t incremental;
+#ifdef MARKDOWN_STREAMING_ENABLED
+        ngx_atomic_uint_t streaming;
+#endif
     } path_hits;
 
     /* Requests entering the decision chain */
@@ -81,6 +84,17 @@ typedef struct {
     /* Fail-open counter */
     ngx_atomic_uint_t failopen_count;
 
+#ifdef MARKDOWN_STREAMING_ENABLED
+    /* Streaming metrics */
+    struct {
+        ngx_atomic_uint_t requests_total;
+        ngx_atomic_uint_t fallback_total;
+        ngx_atomic_uint_t succeeded_total;
+        ngx_atomic_uint_t failed_total;
+        ngx_atomic_uint_t postcommit_error_total;
+    } streaming;
+#endif
+
     /* Estimated cumulative token savings */
     ngx_atomic_uint_t estimated_token_savings;
 } ngx_http_markdown_metrics_snapshot_t;
@@ -91,13 +105,13 @@ typedef struct {
  * Estimated current output per format:
  *   JSON:       ~2.0 KiB
  *   Plain text: ~1.5 KiB
- *   Prometheus: ~3.2 KiB (most verbose due to HELP/TYPE lines)
+ *   Prometheus: ~3.8 KiB (most verbose due to HELP/TYPE lines)
  *
- * The 5 KiB buffer provides ~1.8 KiB headroom above the largest
+ * The 6 KiB buffer provides ~2.2 KiB headroom above the largest
  * format.  Increase this constant if new metrics push the
  * Prometheus output beyond the limit.
  */
-#define NGX_HTTP_MARKDOWN_METRICS_BUF_SIZE  5120
+#define NGX_HTTP_MARKDOWN_METRICS_BUF_SIZE  6144
 
 /*
  * Forward declaration: the Prometheus renderer is defined in
@@ -178,6 +192,9 @@ ngx_http_markdown_collect_metrics_snapshot(ngx_http_markdown_metrics_snapshot_t 
     snapshot->decompressions.brotli = metrics->decompressions.brotli;
     snapshot->path_hits.fullbuffer = metrics->path_hits.fullbuffer;
     snapshot->path_hits.incremental = metrics->path_hits.incremental;
+#ifdef MARKDOWN_STREAMING_ENABLED
+    snapshot->path_hits.streaming = metrics->path_hits.streaming;
+#endif
     snapshot->requests_entered = metrics->requests_entered;
     snapshot->skips.config = metrics->skips.config;
     snapshot->skips.method = metrics->skips.method;
@@ -189,6 +206,18 @@ ngx_http_markdown_collect_metrics_snapshot(ngx_http_markdown_metrics_snapshot_t 
     snapshot->skips.range = metrics->skips.range;
     snapshot->skips.accept = metrics->skips.accept;
     snapshot->failopen_count = metrics->failopen_count;
+#ifdef MARKDOWN_STREAMING_ENABLED
+    snapshot->streaming.requests_total =
+        metrics->streaming.requests_total;
+    snapshot->streaming.fallback_total =
+        metrics->streaming.fallback_total;
+    snapshot->streaming.succeeded_total =
+        metrics->streaming.succeeded_total;
+    snapshot->streaming.failed_total =
+        metrics->streaming.failed_total;
+    snapshot->streaming.postcommit_error_total =
+        metrics->streaming.postcommit_error_total;
+#endif
     snapshot->estimated_token_savings = metrics->estimated_token_savings;
 }
 
@@ -505,6 +534,16 @@ ngx_http_markdown_metrics_write_json(
         "  \"decompressions_brotli\": %uA,\n"
         "  \"fullbuffer_path_hits\": %uA,\n"
         "  \"incremental_path_hits\": %uA,\n"
+#ifdef MARKDOWN_STREAMING_ENABLED
+        "  \"streaming_path_hits\": %uA,\n"
+        "  \"streaming\": {\n"
+        "    \"requests_total\": %uA,\n"
+        "    \"fallback_total\": %uA,\n"
+        "    \"succeeded_total\": %uA,\n"
+        "    \"failed_total\": %uA,\n"
+        "    \"postcommit_error_total\": %uA\n"
+        "  },\n"
+#endif
         "  \"requests_entered\": %uA,\n"
         "  \"skips\": {\n"
         "    \"config\": %uA,\n"
@@ -546,6 +585,14 @@ ngx_http_markdown_metrics_write_json(
         snapshot->decompressions.brotli,
         snapshot->path_hits.fullbuffer,
         snapshot->path_hits.incremental,
+#ifdef MARKDOWN_STREAMING_ENABLED
+        snapshot->path_hits.streaming,
+        snapshot->streaming.requests_total,
+        snapshot->streaming.fallback_total,
+        snapshot->streaming.succeeded_total,
+        snapshot->streaming.failed_total,
+        snapshot->streaming.postcommit_error_total,
+#endif
         snapshot->requests_entered,
         snapshot->skips.config,
         snapshot->skips.method,
@@ -619,6 +666,16 @@ ngx_http_markdown_metrics_write_text(
         "Path Routing:\n"
         "- Full-Buffer Path Hits: %uA\n"
         "- Incremental Path Hits: %uA\n"
+#ifdef MARKDOWN_STREAMING_ENABLED
+        "- Streaming Path Hits: %uA\n"
+        "\n"
+        "Streaming:\n"
+        "- Streaming Requests Total: %uA\n"
+        "- Streaming Fallback Total: %uA\n"
+        "- Streaming Succeeded Total: %uA\n"
+        "- Streaming Failed Total: %uA\n"
+        "- Streaming Post-Commit Errors: %uA\n"
+#endif
         "\n"
         "Decision Chain:\n"
         "- Requests Entered: %uA\n"
@@ -659,6 +716,14 @@ ngx_http_markdown_metrics_write_text(
         snapshot->decompressions.brotli,
         snapshot->path_hits.fullbuffer,
         snapshot->path_hits.incremental,
+#ifdef MARKDOWN_STREAMING_ENABLED
+        snapshot->path_hits.streaming,
+        snapshot->streaming.requests_total,
+        snapshot->streaming.fallback_total,
+        snapshot->streaming.succeeded_total,
+        snapshot->streaming.failed_total,
+        snapshot->streaming.postcommit_error_total,
+#endif
         snapshot->requests_entered,
         snapshot->skips.config,
         snapshot->skips.method,

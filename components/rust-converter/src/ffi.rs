@@ -66,10 +66,16 @@ mod options;
 #[cfg(feature = "incremental")]
 mod incremental;
 
+#[cfg(feature = "streaming")]
+mod streaming;
+
 pub use abi::{
     ERROR_ENCODING, ERROR_INTERNAL, ERROR_INVALID_INPUT, ERROR_MEMORY_LIMIT, ERROR_PARSE,
     ERROR_SUCCESS, ERROR_TIMEOUT, MarkdownConverterHandle, MarkdownOptions, MarkdownResult,
 };
+
+#[cfg(feature = "streaming")]
+pub use abi::{ERROR_BUDGET_EXCEEDED, ERROR_POST_COMMIT, ERROR_STREAMING_FALLBACK};
 pub use exports::{
     markdown_convert, markdown_converter_free, markdown_converter_new, markdown_result_free,
 };
@@ -78,4 +84,11 @@ pub use exports::{
 pub use incremental::{
     IncrementalConverterHandle, markdown_incremental_feed, markdown_incremental_finalize,
     markdown_incremental_free, markdown_incremental_new,
+};
+
+#[cfg(feature = "streaming")]
+pub use streaming::{
+    StreamingConverterHandle, markdown_streaming_abort, markdown_streaming_feed,
+    markdown_streaming_finalize, markdown_streaming_free, markdown_streaming_new,
+    markdown_streaming_output_free,
 };

@@ -119,6 +119,7 @@ fn convert_with_feature_toggles(
             ptr::null()
         },
         base_url_len: if front_matter { base_url.len() } else { 0 },
+            streaming_budget: 0,
     };
 
     let mut result = empty_result();
@@ -183,6 +184,7 @@ fn test_both_features_enabled() {
         content_type_len: 0,
         base_url: base_url.as_ptr(),
         base_url_len: base_url.len(),
+            streaming_budget: 0,
     };
 
     let mut result = MarkdownResult {
@@ -260,6 +262,7 @@ fn test_token_estimation_only() {
         content_type_len: 0,
         base_url: ptr::null(),
         base_url_len: 0,
+            streaming_budget: 0,
     };
 
     let mut result = MarkdownResult {
@@ -334,6 +337,7 @@ fn test_front_matter_only() {
         content_type_len: 0,
         base_url: base_url.as_ptr(),
         base_url_len: base_url.len(),
+            streaming_budget: 0,
     };
 
     let mut result = MarkdownResult {
@@ -408,6 +412,7 @@ fn test_both_features_disabled() {
         content_type_len: 0,
         base_url: ptr::null(),
         base_url_len: 0,
+            streaming_budget: 0,
     };
 
     let mut result = MarkdownResult {
@@ -497,6 +502,7 @@ fn test_feature_independence_comprehensive() {
             } else {
                 0
             },
+            streaming_budget: 0,
         };
 
         let mut result = MarkdownResult {
@@ -594,6 +600,7 @@ fn test_no_hidden_dependencies() {
         content_type_len: 0,
         base_url: ptr::null(),
         base_url_len: 0,
+            streaming_budget: 0,
     };
 
     let mut result1 = MarkdownResult {
@@ -639,6 +646,7 @@ fn test_no_hidden_dependencies() {
         content_type_len: 0,
         base_url: base_url.as_ptr(),
         base_url_len: base_url.len(),
+            streaming_budget: 0,
     };
 
     let mut result2 = MarkdownResult {

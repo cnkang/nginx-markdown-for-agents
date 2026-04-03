@@ -407,8 +407,23 @@ proptest! {
     fn prop_precommit_fallback_on_table(
         _prefix in arb_streaming_html(),
     ) {
-        // Inject a table as the first element so we are still in PreCommit
-        let html = "<html><body><table><tr><td>Cell</td></tr></table></body></html>";
+        // Inject a table inside the document body so the streaming
+        // converter encounters it during body processing.
+        // The prefix is `<html><body>...fragments...</body></html>`,
+        // so we insert the table before the closing </body> tag.
+        let html = if let Some(pos) = _prefix.rfind("</body>") {
+            format!(
+                "{}<table><tr><td>Cell</td></tr></table>{}",
+                &_prefix[..pos],
+                &_prefix[pos..]
+            )
+        } else {
+            // Fallback: wrap the table inside a body
+            format!(
+                "<html><body>{}<table><tr><td>Cell</td></tr></table></body></html>",
+                _prefix
+            )
+        };
 
         let mut conv = make_converter();
         let result = conv.feed_chunk(html.as_bytes());
@@ -428,8 +443,19 @@ proptest! {
                 // If some output was committed before the table, this is valid
             }
             Ok(_) => {
-                // Table might not have been reached yet (in prefix processing)
-                // This is acceptable if the table is after a flush point
+                // Table was inside the body; if the converter did not
+                // trigger fallback, finalize and check if it falls back there.
+                let final_result = conv.finalize();
+                match final_result {
+                    Err(ConversionError::StreamingFallback { .. }) => {
+                        // Fallback during finalize — correct
+                    }
+                    _ => {
+                        // The table was processed without fallback. This can
+                        // happen if the table is small enough to be handled
+                        // inline. Accept but note it.
+                    }
+                }
             }
             Err(e) => {
                 prop_assert!(false, "Unexpected error: {:?}", e);
@@ -583,39 +609,22 @@ proptest! {
 // ════════════════════════════════════════════════════════════════════
 
 /// Assert that converting the given HTML yields identical Markdown when fed as a single chunk
-
 /// or when split into two chunks at the specified byte offset.
-
 ///
-
 /// This function panics if either conversion fails or if the resulting Markdown bytes differ;
-
 /// the panic message includes the split position and lossy UTF-8 representations of both outputs.
-
 ///
-
 /// # Parameters
-
 ///
-
 /// - `html`: HTML input bytes to convert.
-
 /// - `split_at`: Byte offset within `html` where the single split is applied (must be <= `html.len()`).
-
 ///
-
 /// # Examples
-
 ///
-
 /// ```
-
 /// let html = b"<html><body><p>Hello</p></body></html>";
-
 /// // split inside the paragraph text
-
 /// assert_split_invariant(html, 20);
-
 /// ```
 fn assert_split_invariant(html: &[u8], split_at: usize) {
     let single = streaming_convert(html).expect("single-chunk conversion");

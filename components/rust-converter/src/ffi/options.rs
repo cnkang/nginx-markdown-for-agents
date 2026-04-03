@@ -12,6 +12,7 @@ pub(crate) struct DecodedOptions<'a> {
     pub(crate) generate_etag: bool,
     pub(crate) estimate_tokens: bool,
     pub(crate) conversion: ConversionOptions,
+    pub(crate) streaming_budget: u64,
 }
 
 /// Convert a required raw pointer from C into a Rust reference.
@@ -90,6 +91,7 @@ fn optional_utf8<'a>(
 ///     timeout_ms: 0,
 ///     generate_etag: 0,
 ///     estimate_tokens: 0,
+///     streaming_budget: 0,
 /// };
 ///
 /// let decoded = decode_options(&opts).unwrap();
@@ -124,6 +126,7 @@ pub(crate) fn decode_options(
         timeout,
         generate_etag: options.generate_etag != 0,
         estimate_tokens: options.estimate_tokens != 0,
+        streaming_budget: options.streaming_budget,
         conversion: ConversionOptions {
             flavor,
             include_front_matter,

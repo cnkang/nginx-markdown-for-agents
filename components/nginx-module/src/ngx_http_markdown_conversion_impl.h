@@ -375,6 +375,11 @@ ngx_http_markdown_prepare_conversion_options(ngx_http_request_t *r,
     options->content_type_len = 0;
     options->base_url = NULL;
     options->base_url_len = 0;
+#ifdef MARKDOWN_STREAMING_ENABLED
+    options->streaming_budget = conf->streaming_budget;
+#else
+    options->streaming_budget = 0;
+#endif
 
     if (r->headers_out.content_type.len > 0) {
         options->content_type = r->headers_out.content_type.data;

@@ -142,6 +142,11 @@ ngx_http_markdown_create_conf(ngx_conf_t *cf)
     conf->ops.trust_forwarded_headers = NGX_CONF_UNSET;
     conf->ops.metrics_format = NGX_CONF_UNSET_UINT;
 
+#ifdef MARKDOWN_STREAMING_ENABLED
+    conf->streaming_engine = NULL;
+    conf->streaming_budget = NGX_CONF_UNSET_SIZE;
+#endif
+
     return conf;
 }
 
@@ -212,6 +217,15 @@ ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
 
     ngx_conf_merge_ptr_value(conf->auth_cookies, prev->auth_cookies, NULL);
     ngx_conf_merge_ptr_value(conf->stream_types, prev->stream_types, NULL);
+
+#ifdef MARKDOWN_STREAMING_ENABLED
+    if (conf->streaming_engine == NULL) {
+        conf->streaming_engine = prev->streaming_engine;
+    }
+    ngx_conf_merge_size_value(conf->streaming_budget,
+                              prev->streaming_budget,
+                              NGX_HTTP_MARKDOWN_STREAMING_BUDGET_DEFAULT);
+#endif
 
     ngx_http_markdown_log_merged_conf(cf, conf);
 
@@ -568,7 +582,12 @@ ngx_http_markdown_log_merged_conf(ngx_conf_t *cf, ngx_http_markdown_conf_t *conf
                        "stream_types=%ui "
                        "large_body_threshold=%uz "
                        "trust_forwarded_headers=%ui "
-                       "metrics_format=%V",
+                       "metrics_format=%V"
+#ifdef MARKDOWN_STREAMING_ENABLED
+                       " streaming_engine=%s"
+                       " streaming_budget=%uz"
+#endif
+                       ,
                        (ngx_uint_t) conf->enabled,
                        ngx_http_markdown_enabled_source_name(conf->enabled_source),
                        conf->max_size,
@@ -588,7 +607,13 @@ ngx_http_markdown_log_merged_conf(ngx_conf_t *cf, ngx_http_markdown_conf_t *conf
                        conf->large_body_threshold,
                        (ngx_uint_t) conf->ops.trust_forwarded_headers,
                        ngx_http_markdown_metrics_format_name(
-                           conf->ops.metrics_format));
+                           conf->ops.metrics_format)
+#ifdef MARKDOWN_STREAMING_ENABLED
+                       , conf->streaming_engine != NULL
+                           ? "configured" : "NULL"
+                       , conf->streaming_budget
+#endif
+                       );
 }
 
 #endif /* NGX_HTTP_MARKDOWN_CONFIG_CORE_IMPL_H */
