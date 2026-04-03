@@ -16,7 +16,7 @@ components/rust-converter/fuzz/corpus/
 components/rust-converter/fuzz/coverage/
 components/rust-converter/fuzz/target/
 
-# Proptest regression files (auto-generated, not version-controlled)
+# Proptest old-style regression files (superseded by proptest-regressions/ dirs)
 **/*.proptest-regressions
 
 # Generated C header mirror (copy from Rust include)
