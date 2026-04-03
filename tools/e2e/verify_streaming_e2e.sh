@@ -18,11 +18,9 @@ set -euo pipefail
 # It requires a streaming-enabled NGINX build to execute.
 # When NGINX_BIN is not set, it prints the test plan and exits.
 
-WORKSPACE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 NGINX_BIN="${NGINX_BIN:-}"
 PORT="${PORT:-18095}"
 UPSTREAM_PORT="${UPSTREAM_PORT:-19095}"
-ACCEPT_MARKDOWN_HEADER='Accept: text/markdown'
 
 SEPARATOR='========================================='
 
@@ -51,14 +49,26 @@ EOF
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --nginx-bin)
+            if [[ -z "${2:-}" ]] || [[ "$2" == -* ]]; then
+                echo "Error: --nginx-bin requires a value" >&2
+                exit 2
+            fi
             NGINX_BIN="$2"
             shift 2
             ;;
         --port)
+            if [[ -z "${2:-}" ]] || [[ "$2" == -* ]]; then
+                echo "Error: --port requires a value" >&2
+                exit 2
+            fi
             PORT="$2"
             shift 2
             ;;
         --upstream-port)
+            if [[ -z "${2:-}" ]] || [[ "$2" == -* ]]; then
+                echo "Error: --upstream-port requires a value" >&2
+                exit 2
+            fi
             UPSTREAM_PORT="$2"
             shift 2
             ;;

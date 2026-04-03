@@ -105,9 +105,9 @@ typedef struct {
  * Estimated current output per format:
  *   JSON:       ~2.0 KiB
  *   Plain text: ~1.5 KiB
- *   Prometheus: ~3.2 KiB (most verbose due to HELP/TYPE lines)
+ *   Prometheus: ~3.8 KiB (most verbose due to HELP/TYPE lines)
  *
- * The 5 KiB buffer provides ~1.8 KiB headroom above the largest
+ * The 6 KiB buffer provides ~2.2 KiB headroom above the largest
  * format.  Increase this constant if new metrics push the
  * Prometheus output beyond the limit.
  */
