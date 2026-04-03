@@ -37,6 +37,12 @@ pub struct MarkdownOptions {
     pub content_type_len: usize,
     pub base_url: *const u8,
     pub base_url_len: usize,
+    /// Streaming memory budget in bytes (0 = use default).
+    ///
+    /// When non-zero, the streaming converter uses this value as the
+    /// total memory budget instead of the compiled-in default (2 MiB).
+    /// Populated from the `markdown_streaming_budget` NGINX directive.
+    pub streaming_budget: u64,
 }
 
 /// Conversion result returned from Rust to C.

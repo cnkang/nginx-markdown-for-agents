@@ -35,6 +35,12 @@ Streaming E2E validation. Requires a streaming-enabled NGINX build.
 Set NGINX_BIN to a module-enabled nginx binary, or the script prints
 the test plan and exits with code 0.
 
+Options:
+  --nginx-bin PATH         Path to streaming-enabled nginx binary
+  --port PORT              (reserved, not yet implemented)
+  --upstream-port PORT     (reserved, not yet implemented)
+  -h, --help               Show this help
+
 Test cases:
   16.1 Streaming conversion success (small/medium/large)
   16.2 Streaming + gzip decompression
@@ -64,7 +70,7 @@ while [[ $# -gt 0 ]]; do
                 echo "Error: --port requires a value" >&2
                 exit 2
             fi
-            PORT="$2"
+            echo "Warning: --port is reserved for future use and currently has no effect" >&2
             shift 2
             ;;
         --upstream-port)
@@ -72,7 +78,7 @@ while [[ $# -gt 0 ]]; do
                 echo "Error: --upstream-port requires a value" >&2
                 exit 2
             fi
-            UPSTREAM_PORT="$2"
+            echo "Warning: --upstream-port is reserved for future use and currently has no effect" >&2
             shift 2
             ;;
         -h|--help)

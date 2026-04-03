@@ -140,24 +140,24 @@ else
   echo "==> Skipping Rust converter build (--skip-rust-build)"
 fi
 
-if [[ ! -d "${BUILDROOT}" ]]; then
-  echo "==> Downloading NGINX ${REAL_NGINX_VERSION}"
-  curl -fsSL "https://nginx.org/download/nginx-${REAL_NGINX_VERSION}.tar.gz" -o "${TARBALL}"
-  mkdir -p "${BUILDROOT}"
-  tar -xzf "${TARBALL}" -C "${BUILDROOT}" --strip-components=1
-else
-  # Reset build root to ensure a clean tree for compile command capture
+# Ensure a clean build root for deterministic compile command capture
+if [[ -d "${BUILDROOT}" ]]; then
   echo "==> Resetting existing NGINX build root for clean capture"
   rm -rf "${BUILDROOT}"
-  mkdir -p "${BUILDROOT}"
-  if [[ ! -f "${TARBALL}" ]]; then
-    echo "==> Downloading NGINX ${REAL_NGINX_VERSION}"
-    curl -fsSL "https://nginx.org/download/nginx-${REAL_NGINX_VERSION}.tar.gz" -o "${TARBALL}"
-  fi
-  tar -xzf "${TARBALL}" -C "${BUILDROOT}" --strip-components=1
+fi
+mkdir -p "${BUILDROOT}"
+
+if [[ ! -f "${TARBALL}" ]]; then
+  echo "==> Downloading NGINX ${REAL_NGINX_VERSION}"
+  curl -fsSL "https://nginx.org/download/nginx-${REAL_NGINX_VERSION}.tar.gz" -o "${TARBALL}"
 fi
 
+tar -xzf "${TARBALL}" -C "${BUILDROOT}" --strip-components=1
+
 : > "${CAPTURE_FILE}"
+
+CONFIGURE_LOG="${SONAR_ROOT}/configure.log"
+MAKE_LOG="${SONAR_ROOT}/make.log"
 
 echo "==> Configuring NGINX with markdown module"
 (
@@ -169,7 +169,7 @@ echo "==> Configuring NGINX with markdown module"
     --with-compat \
     --without-http_rewrite_module \
     --add-dynamic-module="${WORKSPACE_ROOT}/components/nginx-module" \
-    >/dev/null
+    >"${CONFIGURE_LOG}" 2>&1
 )
 
 echo "==> Building NGINX module and capturing compile commands"
@@ -178,7 +178,7 @@ echo "==> Building NGINX module and capturing compile commands"
   SONAR_REAL_CC="$(command -v cc)" \
   SONAR_CC_CAPTURE_FILE="${CAPTURE_FILE}" \
   CC="${WRAPPER_SCRIPT}" \
-  make -j1 modules >/dev/null
+  make -j1 modules >"${MAKE_LOG}" 2>&1
 )
 
 echo "==> Writing filtered compilation database"

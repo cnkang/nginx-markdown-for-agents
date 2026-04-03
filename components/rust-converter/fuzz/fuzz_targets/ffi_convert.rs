@@ -54,6 +54,7 @@ fuzz_target!(|data: &[u8]| {
         } else {
             0
         },
+        streaming_budget: 0,
     };
 
     let mut result = MarkdownResult {

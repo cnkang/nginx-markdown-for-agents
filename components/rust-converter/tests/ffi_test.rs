@@ -68,6 +68,7 @@ fn ffi_test_default_options() -> MarkdownOptions {
         content_type_len: 0,
         base_url: ptr::null(),
         base_url_len: 0,
+            streaming_budget: 0,
     }
 }
 
@@ -114,6 +115,7 @@ fn test_basic_conversion() {
         content_type_len: 0,
         base_url: ptr::null(),
         base_url_len: 0,
+            streaming_budget: 0,
     };
 
     // Perform conversion
@@ -404,6 +406,7 @@ fn test_null_pointer_handling() {
         content_type_len: 0,
         base_url: ptr::null(),
         base_url_len: 0,
+            streaming_budget: 0,
     };
 
     let mut result = MarkdownResult {
@@ -497,6 +500,7 @@ fn test_multiple_conversions() {
         content_type_len: 0,
         base_url: ptr::null(),
         base_url_len: 0,
+            streaming_budget: 0,
     };
 
     // Perform multiple conversions
@@ -555,6 +559,7 @@ fn test_idempotent_free() {
         content_type_len: 0,
         base_url: ptr::null(),
         base_url_len: 0,
+            streaming_budget: 0,
     };
 
     let mut result = MarkdownResult {
@@ -600,6 +605,7 @@ fn test_content_type_charset_detection() {
         content_type_len: content_type.len(),
         base_url: ptr::null(),
         base_url_len: 0,
+            streaming_budget: 0,
     };
 
     let mut result = MarkdownResult {
@@ -646,6 +652,7 @@ fn test_gfm_flavor() {
         content_type_len: 0,
         base_url: ptr::null(),
         base_url_len: 0,
+            streaming_budget: 0,
     };
 
     let mut result = MarkdownResult {
@@ -704,6 +711,7 @@ fn test_null_result_pointer() {
         content_type_len: 0,
         base_url: ptr::null(),
         base_url_len: 0,
+            streaming_budget: 0,
     };
 
     // Call with NULL result pointer - should not crash
@@ -774,6 +782,7 @@ fn test_memory_cleanup_with_all_fields() {
         content_type_len: 0,
         base_url: ptr::null(),
         base_url_len: 0,
+            streaming_budget: 0,
     };
 
     let mut result = MarkdownResult {
@@ -828,6 +837,7 @@ fn test_memory_cleanup_error_case() {
         content_type_len: 0,
         base_url: ptr::null(),
         base_url_len: 0,
+            streaming_budget: 0,
     };
 
     let mut result = MarkdownResult {
@@ -883,6 +893,7 @@ fn test_panic_catching_invalid_utf8() {
         content_type_len: 0,
         base_url: ptr::null(),
         base_url_len: 0,
+            streaming_budget: 0,
     };
 
     let mut result = MarkdownResult {
@@ -941,6 +952,7 @@ fn test_zero_length_html() {
         content_type_len: 0,
         base_url: ptr::null(),
         base_url_len: 0,
+            streaming_budget: 0,
     };
 
     let mut result = MarkdownResult {
@@ -982,6 +994,7 @@ fn test_zero_length_html_with_null_pointer() {
         content_type_len: 0,
         base_url: ptr::null(),
         base_url_len: 0,
+            streaming_budget: 0,
     };
 
     let mut result = ffi_test_empty_result();
@@ -1018,6 +1031,7 @@ fn test_null_content_type_with_zero_length() {
         content_type_len: 0,       // Zero length
         base_url: ptr::null(),
         base_url_len: 0,
+            streaming_budget: 0,
     };
 
     let mut result = MarkdownResult {
@@ -1066,6 +1080,7 @@ fn test_error_state_consistency() {
         content_type_len: 0,
         base_url: ptr::null(),
         base_url_len: 0,
+            streaming_budget: 0,
     };
 
     let mut result = MarkdownResult {
