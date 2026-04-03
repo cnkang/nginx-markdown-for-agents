@@ -316,6 +316,9 @@ pub unsafe extern "C" fn markdown_streaming_abort(handle: *mut StreamingConverte
 ///
 /// Passing NULL is a safe no-op.
 ///
+/// This delegates to [`markdown_streaming_abort`] which has identical
+/// semantics (both consume the handle by dropping it).
+///
 /// # Safety
 ///
 /// - `handle` must be NULL or a live pointer returned by
@@ -323,13 +326,8 @@ pub unsafe extern "C" fn markdown_streaming_abort(handle: *mut StreamingConverte
 ///   or freed.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn markdown_streaming_free(handle: *mut StreamingConverterHandle) {
-    if handle.is_null() {
-        return;
-    }
-    let _ = panic::catch_unwind(AssertUnwindSafe(|| {
-        // SAFETY: caller guarantees `handle` is a live, unconsumed pointer.
-        unsafe { drop(Box::from_raw(handle)) };
-    }));
+    // Identical semantics to abort — delegate to avoid duplication.
+    unsafe { markdown_streaming_abort(handle) };
 }
 
 /// Free a Markdown output buffer returned by [`markdown_streaming_feed`].
@@ -365,6 +363,7 @@ mod tests {
     use super::*;
     use crate::ffi::abi::{
         ERROR_INTERNAL, ERROR_INVALID_INPUT, ERROR_SUCCESS, MarkdownOptions, MarkdownResult,
+        ERROR_STREAMING_FALLBACK, ERROR_BUDGET_EXCEEDED, ERROR_POST_COMMIT, ERROR_TIMEOUT,
     };
     use crate::ffi::exports::markdown_result_free;
 
@@ -500,7 +499,7 @@ mod tests {
         let mut out_data: *mut u8 = ptr::null_mut();
         let mut out_len: usize = 0;
 
-        let rc = unsafe {
+        let _rc = unsafe {
             markdown_streaming_feed(
                 handle,
                 html_with_table.as_ptr(),
@@ -519,16 +518,12 @@ mod tests {
          * streaming engine's internal state. If it does, rc == 7.
          * If not (e.g. table is buffered), we still verify the
          * handle can be properly cleaned up.
+         *
+         * feed() may return ERROR_STREAMING_FALLBACK (7); regardless,
+         * the FFI contract requires freeing any out_data and then
+         * calling markdown_streaming_abort(handle) to clean up.
          */
-        if rc == 7 {
-            /* Handle was consumed by the fallback error path internally,
-             * but the FFI contract says the handle is still valid after
-             * feed() returns an error. We must free it. */
-            unsafe { markdown_streaming_abort(handle) };
-        } else {
-            /* Normal path: finalize or abort */
-            unsafe { markdown_streaming_abort(handle) };
-        }
+        unsafe { markdown_streaming_abort(handle) };
     }
 
     // ================================================================
@@ -563,8 +558,15 @@ mod tests {
 
         /* Any error code is acceptable; no panic is the requirement */
         assert!(
-            rc == ERROR_SUCCESS || rc != 0,
-            "feed() should return a valid error code"
+            rc == ERROR_SUCCESS
+                || rc == ERROR_INVALID_INPUT
+                || rc == ERROR_INTERNAL
+                || rc == ERROR_STREAMING_FALLBACK
+                || rc == ERROR_BUDGET_EXCEEDED
+                || rc == ERROR_POST_COMMIT
+                || rc == ERROR_TIMEOUT,
+            "feed() should return a known error code, got: {}",
+            rc
         );
 
         unsafe { markdown_streaming_abort(handle) };

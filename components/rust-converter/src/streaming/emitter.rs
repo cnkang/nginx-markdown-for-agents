@@ -591,8 +591,10 @@ impl IncrementalEmitter {
 
     /// Write blockquote `> ` prefix markers for the current depth.
     fn write_blockquote_prefix(&mut self) -> Result<(), ConversionError> {
+        let prefix_size = 2 * self.blockquote_depth;
+        self.check_buffer_budget(prefix_size)?;
         for _ in 0..self.blockquote_depth {
-            self.write_raw(b"> ")?;
+            self.buffer.extend_from_slice(b"> ");
         }
         Ok(())
     }
@@ -717,6 +719,16 @@ impl IncrementalEmitter {
                     self.last_was_newline = true;
                     // Prepend blockquote markers on the new line
                     if self.blockquote_depth > 0 {
+                        let prefix_size = 2 * self.blockquote_depth;
+                        if self.buffer.len().saturating_add(prefix_size)
+                            > self.max_buffer_size
+                        {
+                            return Err(ConversionError::BudgetExceeded {
+                                stage: "output_buffer".to_string(),
+                                used: self.buffer.len() + prefix_size,
+                                limit: self.max_buffer_size,
+                            });
+                        }
                         for _ in 0..self.blockquote_depth {
                             self.buffer.extend_from_slice(b"> ");
                         }
@@ -1359,6 +1371,12 @@ mod tests {
             end_tag("blockquote"),
         ]);
         assert!(output.contains("Quoted text"), "got: {}", output);
+        /* Verify blockquote marker is present */
+        assert!(
+            output.lines().any(|line| line.starts_with("> ")),
+            "Expected blockquote prefix '> ' in output, got: {}",
+            output
+        );
     }
 
     // ── Bold / Italic tests ─────────────────────────────────────────

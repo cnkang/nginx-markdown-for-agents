@@ -78,10 +78,20 @@ SKIP_RUST_BUILD=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --nginx-version)
+      if [[ $# -lt 2 ]] || [[ -z "${2:-}" ]]; then
+        echo "Error: --nginx-version requires a value" >&2
+        usage >&2
+        exit 1
+      fi
       NGINX_VERSION="$2"
       shift 2
       ;;
     --output)
+      if [[ $# -lt 2 ]] || [[ -z "${2:-}" ]]; then
+        echo "Error: --output requires a value" >&2
+        usage >&2
+        exit 1
+      fi
       OUTPUT_FILE="$2"
       shift 2
       ;;
@@ -134,6 +144,16 @@ if [[ ! -d "${BUILDROOT}" ]]; then
   echo "==> Downloading NGINX ${REAL_NGINX_VERSION}"
   curl -fsSL "https://nginx.org/download/nginx-${REAL_NGINX_VERSION}.tar.gz" -o "${TARBALL}"
   mkdir -p "${BUILDROOT}"
+  tar -xzf "${TARBALL}" -C "${BUILDROOT}" --strip-components=1
+else
+  # Reset build root to ensure a clean tree for compile command capture
+  echo "==> Resetting existing NGINX build root for clean capture"
+  rm -rf "${BUILDROOT}"
+  mkdir -p "${BUILDROOT}"
+  if [[ ! -f "${TARBALL}" ]]; then
+    echo "==> Downloading NGINX ${REAL_NGINX_VERSION}"
+    curl -fsSL "https://nginx.org/download/nginx-${REAL_NGINX_VERSION}.tar.gz" -o "${TARBALL}"
+  fi
   tar -xzf "${TARBALL}" -C "${BUILDROOT}" --strip-components=1
 fi
 

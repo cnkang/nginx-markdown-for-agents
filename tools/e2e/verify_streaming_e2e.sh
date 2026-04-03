@@ -19,8 +19,11 @@ set -euo pipefail
 # When NGINX_BIN is not set, it prints the test plan and exits.
 
 NGINX_BIN="${NGINX_BIN:-}"
-PORT="${PORT:-18095}"
-UPSTREAM_PORT="${UPSTREAM_PORT:-19095}"
+
+# PORT and UPSTREAM_PORT are reserved for future runtime E2E tests
+# that start an NGINX instance and upstream server.
+# PORT="${PORT:-18095}"
+# UPSTREAM_PORT="${UPSTREAM_PORT:-19095}"
 
 SEPARATOR='========================================='
 
@@ -162,8 +165,16 @@ if [[ ! -x "${NGINX_BIN}" ]]; then
     exit 1
 fi
 
-# Check if the binary has streaming support by looking for the symbol
+# Check if the binary has streaming support by looking for the symbol.
+# Try nm first; fall back to objdump -T for stripped binaries.
+streaming_detected=0
 if nm "${NGINX_BIN}" 2>/dev/null | grep -q 'markdown_streaming_new'; then
+    streaming_detected=1
+elif objdump -T "${NGINX_BIN}" 2>/dev/null | grep -q 'markdown_streaming_new'; then
+    streaming_detected=1
+fi
+
+if [[ ${streaming_detected} -eq 1 ]]; then
     echo "Streaming support detected in NGINX binary."
 else
     echo "Warning: streaming support not detected in NGINX binary." >&2

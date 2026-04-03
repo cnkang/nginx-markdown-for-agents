@@ -13,6 +13,8 @@
 
 #include "test_common.h"
 
+/* SIZE_MAX is provided by <stdint.h> via test_common.h */
+
 #ifndef MARKDOWN_STREAMING_ENABLED
 /*
  * When the streaming feature is not enabled, compile a
@@ -644,6 +646,7 @@ static size_t
 parse_streaming_budget(const char *value)
 {
     size_t       result = 0;
+    size_t       digit;
     const char  *p;
 
     if (value == NULL) {
@@ -652,7 +655,12 @@ parse_streaming_budget(const char *value)
 
     p = value;
     while (*p >= '0' && *p <= '9') {
-        result = result * 10 + (size_t)(*p - '0');
+        digit = (size_t)(*p - '0');
+        /* Overflow check: result * 10 + digit must fit in size_t */
+        if (result > (SIZE_MAX - digit) / 10) {
+            return 0;
+        }
+        result = result * 10 + digit;
         p++;
     }
 
@@ -661,8 +669,14 @@ parse_streaming_budget(const char *value)
     }
 
     if (*p == 'k' || *p == 'K') {
+        if (result > SIZE_MAX / 1024) {
+            return 0;
+        }
         result *= 1024;
     } else if (*p == 'm' || *p == 'M') {
+        if (result > SIZE_MAX / (1024 * 1024)) {
+            return 0;
+        }
         result *= 1024 * 1024;
     }
 
