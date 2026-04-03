@@ -585,7 +585,6 @@ test_precommit_fallback(void)
     TEST_SUBSECTION("Pre-Commit fallback: state transitions");
 
     commit_state = COMMIT_PRE;
-    handle_alive = 1;
 
     /* Simulate FALLBACK signal in Pre-Commit */
     TEST_ASSERT(commit_state == COMMIT_PRE,
@@ -615,7 +614,6 @@ test_postcommit_error(void)
     TEST_SUBSECTION("Post-Commit error: abort + empty last_buf");
 
     commit_state = COMMIT_POST;
-    empty_last_buf_sent = 0;
     postcommit_errors = 0;
     failed_total = 0;
 
@@ -1336,10 +1334,10 @@ test_preserve_bug2_small_data_complete(void)
 static void
 test_preserve_bug2_empty_input_ok(void)
 {
-    size_t     in_len;
-    u_char    *out_data;
-    size_t     out_len;
-    ngx_int_t  rc;
+    size_t           in_len;
+    const u_char    *out_data;
+    size_t           out_len;
+    ngx_int_t        rc;
 
     TEST_SUBSECTION(
         "Preserve Bug 2: empty input returns NGX_OK");
@@ -1479,11 +1477,10 @@ test_preserve_bug3_tail_feed_success(void)
 static void
 test_preserve_bug3_no_tail_data(void)
 {
-    ngx_int_t  decomp_finish_rc;
-    u_char    *decomp_data;
-    size_t     decomp_len;
-    int        tail_feed_called;
-    int        finalize_called;
+    ngx_int_t        decomp_finish_rc;
+    const u_char    *decomp_data;
+    size_t           decomp_len;
+    int              tail_feed_called;
 
     TEST_SUBSECTION(
         "Preserve Bug 3: no tail data -> direct finalize");
@@ -1495,7 +1492,6 @@ test_preserve_bug3_no_tail_data(void)
     decomp_data = NULL;
     decomp_len = 0;
     tail_feed_called = 0;
-    finalize_called = 0;
 
     /*
      * Mirror the real logic:
@@ -1509,13 +1505,8 @@ test_preserve_bug3_no_tail_data(void)
         tail_feed_called = 1;
     }
 
-    /* Finalize is always called after the decomp block */
-    finalize_called = 1;
-
     TEST_ASSERT(tail_feed_called == 0,
         "No tail data should skip tail feed");
-    TEST_ASSERT(finalize_called == 1,
-        "Finalize should be called directly");
     TEST_PASS(
         "No tail data -> direct finalize preserved");
 }
@@ -1536,7 +1527,6 @@ test_preserve_bug3_no_decompression(void)
 {
     int  decompression_needed;
     int  decomp_finish_called;
-    int  finalize_called;
 
     TEST_SUBSECTION(
         "Preserve Bug 3: no decompression -> skip decomp");
@@ -1546,7 +1536,6 @@ test_preserve_bug3_no_decompression(void)
      */
     decompression_needed = 0;
     decomp_finish_called = 0;
-    finalize_called = 0;
 
     /*
      * Mirror the real logic:
@@ -1558,12 +1547,8 @@ test_preserve_bug3_no_decompression(void)
         decomp_finish_called = 1;
     }
 
-    finalize_called = 1;
-
     TEST_ASSERT(decomp_finish_called == 0,
         "decomp_finish should not be called");
-    TEST_ASSERT(finalize_called == 1,
-        "Finalize should proceed without decomp");
     TEST_PASS(
         "No decompression -> skip decomp preserved");
 }
@@ -1587,14 +1572,13 @@ test_preserve_bug4_valid_static_values(void)
         "Off", "On", "Auto"
     };
     size_t       num_values;
-    size_t       i;
 
     TEST_SUBSECTION(
         "Preserve Bug 4: valid static values accepted");
 
     num_values = ARRAY_SIZE(valid_values);
 
-    for (i = 0; i < num_values; i++) {
+    for (size_t i = 0; i < num_values; i++) {
         const char  *val;
         int          is_valid;
 
@@ -1636,14 +1620,13 @@ test_preserve_bug4_variable_expression(void)
         "$arg_engine"
     };
     size_t       num_values;
-    size_t       i;
 
     TEST_SUBSECTION(
         "Preserve Bug 4: variable expressions compile");
 
     num_values = ARRAY_SIZE(var_values);
 
-    for (i = 0; i < num_values; i++) {
+    for (size_t i = 0; i < num_values; i++) {
         const char  *val;
         int          has_dollar;
 

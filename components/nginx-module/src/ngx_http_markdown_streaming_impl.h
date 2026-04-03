@@ -178,19 +178,19 @@ ngx_http_markdown_select_processing_path(
 
     /* Parse the evaluated string */
     {
-        static const u_char  str_off[]  = "off";
-        static const u_char  str_on[]   = "on";
-        static const u_char  str_auto[] = "auto";
+        static u_char  str_off[]  = "off";
+        static u_char  str_on[]   = "on";
+        static u_char  str_auto[] = "auto";
 
         if (val.len == 3
-            && ngx_strncasecmp(val.data, (u_char *) str_off,
+            && ngx_strncasecmp(val.data, str_off,
                                3) == 0)
         {
             return NGX_HTTP_MARKDOWN_PATH_FULLBUFFER;
         }
 
         if (val.len == 2
-            && ngx_strncasecmp(val.data, (u_char *) str_on,
+            && ngx_strncasecmp(val.data, str_on,
                                2) == 0)
         {
             engine_mode =
@@ -198,7 +198,7 @@ ngx_http_markdown_select_processing_path(
 
         } else if (val.len == 4
                    && ngx_strncasecmp(val.data,
-                                      (u_char *) str_auto,
+                                      str_auto,
                                       4) == 0)
         {
             engine_mode =
@@ -1083,6 +1083,123 @@ ngx_http_markdown_streaming_finalize_request(
 
 
 /*
+ * Initialize the streaming handle, decompressor, and prebuffer.
+ *
+ * Called on the first body filter invocation when the handle
+ * is NULL and the request is eligible.
+ *
+ * Returns:
+ *   NGX_OK       - handle created successfully
+ *   NGX_ERROR    - fatal error (reject policy)
+ *   NGX_DECLINED - non-fatal init failure (eligible cleared)
+ */
+static ngx_int_t
+ngx_http_markdown_streaming_init_handle(
+    ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx,
+    ngx_http_markdown_conf_t *conf)
+{
+    struct MarkdownOptions  options;
+    ngx_pool_cleanup_t     *cln;
+    ngx_int_t               rc;
+
+    ngx_memzero(&options, sizeof(struct MarkdownOptions));
+
+    rc = ngx_http_markdown_prepare_conversion_options(
+        r, conf, &options);
+    if (rc != NGX_OK) {
+        ngx_log_error(NGX_LOG_ERR,
+            r->connection->log, 0,
+            "markdown streaming: failed to "
+            "prepare conversion options");
+        ctx->eligible = 0;
+        return NGX_DECLINED;
+    }
+
+    ctx->streaming.handle =
+        markdown_streaming_new(&options);
+    if (ctx->streaming.handle == NULL) {
+        ngx_log_error(NGX_LOG_ERR,
+            r->connection->log, 0,
+            "markdown streaming: failed to "
+            "create streaming handle");
+
+        NGX_HTTP_MARKDOWN_METRIC_INC(
+            streaming.failed_total);
+
+        if (conf->on_error
+            == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT)
+        {
+            return NGX_ERROR;
+        }
+
+        ctx->eligible = 0;
+        ngx_http_markdown_metric_inc_failopen(conf);
+        return NGX_DECLINED;
+    }
+
+    /* Register cleanup handler */
+    cln = ngx_pool_cleanup_add(r->pool, 0);
+    if (cln == NULL) {
+        markdown_streaming_abort(
+            ctx->streaming.handle);
+        ctx->streaming.handle = NULL;
+        return NGX_ERROR;
+    }
+    cln->handler =
+        ngx_http_markdown_streaming_cleanup;
+    cln->data = ctx;
+
+    /* Initialize decompressor if needed */
+    if (ctx->decompression.needed) {
+        ctx->streaming.decompressor =
+            ngx_http_markdown_streaming_decomp_create(
+                r->pool,
+                ctx->decompression.type,
+                conf->max_size);
+        if (ctx->streaming.decompressor == NULL) {
+            ngx_log_error(NGX_LOG_ERR,
+                r->connection->log, 0,
+                "markdown streaming: failed to "
+                "create decompressor");
+            markdown_streaming_abort(
+                ctx->streaming.handle);
+            ctx->streaming.handle = NULL;
+            ctx->eligible = 0;
+            return NGX_DECLINED;
+        }
+    }
+
+    /* Initialize prebuffer for fallback */
+    ctx->streaming.prebuffer_limit =
+        conf->streaming_budget;
+    rc = ngx_http_markdown_buffer_init(
+        &ctx->streaming.prebuffer,
+        ctx->streaming.prebuffer_limit,
+        r->pool);
+    if (rc == NGX_OK) {
+        ctx->streaming.prebuffer_initialized = 1;
+    }
+
+    ctx->streaming.commit_state =
+        NGX_HTTP_MARKDOWN_STREAMING_COMMIT_PRE;
+
+    ctx->conversion_attempted = 1;
+    NGX_HTTP_MARKDOWN_METRIC_INC(
+        conversions_attempted);
+    NGX_HTTP_MARKDOWN_METRIC_INC(
+        streaming.requests_total);
+
+    ngx_log_debug0(NGX_LOG_DEBUG_HTTP,
+        r->connection->log, 0,
+        "markdown streaming: handle created, "
+        "entering Pre-Commit phase");
+
+    return NGX_OK;
+}
+
+
+/*
  * Streaming body filter main entry point.
  *
  * Called when processing_path == PATH_STREAMING.
@@ -1137,103 +1254,14 @@ ngx_http_markdown_streaming_body_filter(
     if (ctx->streaming.handle == NULL
         && ctx->eligible)
     {
-        struct MarkdownOptions  options;
-        ngx_pool_cleanup_t     *cln;
-
-        ngx_memzero(&options,
-                    sizeof(struct MarkdownOptions));
-
-        rc = ngx_http_markdown_prepare_conversion_options(
-            r, conf, &options);
-        if (rc != NGX_OK) {
-            ngx_log_error(NGX_LOG_ERR,
-                r->connection->log, 0,
-                "markdown streaming: failed to "
-                "prepare conversion options");
-            ctx->eligible = 0;
-            return ngx_http_next_body_filter(r, in);
-        }
-
-        ctx->streaming.handle =
-            markdown_streaming_new(&options);
-        if (ctx->streaming.handle == NULL) {
-            ngx_log_error(NGX_LOG_ERR,
-                r->connection->log, 0,
-                "markdown streaming: failed to "
-                "create streaming handle");
-
-            NGX_HTTP_MARKDOWN_METRIC_INC(
-                streaming.failed_total);
-
-            if (conf->on_error
-                == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT)
-            {
-                return NGX_ERROR;
-            }
-
-            /* Fail-open: pass through */
-            ctx->eligible = 0;
-            ngx_http_markdown_metric_inc_failopen(conf);
-            return ngx_http_next_body_filter(r, in);
-        }
-
-        /* Register cleanup handler */
-        cln = ngx_pool_cleanup_add(r->pool, 0);
-        if (cln == NULL) {
-            markdown_streaming_abort(
-                ctx->streaming.handle);
-            ctx->streaming.handle = NULL;
+        rc = ngx_http_markdown_streaming_init_handle(
+            r, ctx, conf);
+        if (rc == NGX_ERROR) {
             return NGX_ERROR;
         }
-        cln->handler =
-            ngx_http_markdown_streaming_cleanup;
-        cln->data = ctx;
-
-        /* Initialize decompressor if needed */
-        if (ctx->decompression.needed) {
-            ctx->streaming.decompressor =
-                ngx_http_markdown_streaming_decomp_create(
-                    r->pool,
-                    ctx->decompression.type,
-                    conf->max_size);
-            if (ctx->streaming.decompressor == NULL) {
-                ngx_log_error(NGX_LOG_ERR,
-                    r->connection->log, 0,
-                    "markdown streaming: failed to "
-                    "create decompressor");
-                markdown_streaming_abort(
-                    ctx->streaming.handle);
-                ctx->streaming.handle = NULL;
-                ctx->eligible = 0;
-                return ngx_http_next_body_filter(
-                    r, in);
-            }
+        if (rc == NGX_DECLINED) {
+            return ngx_http_next_body_filter(r, in);
         }
-
-        /* Initialize prebuffer for fallback */
-        ctx->streaming.prebuffer_limit =
-            conf->streaming_budget;
-        rc = ngx_http_markdown_buffer_init(
-            &ctx->streaming.prebuffer,
-            ctx->streaming.prebuffer_limit,
-            r->pool);
-        if (rc == NGX_OK) {
-            ctx->streaming.prebuffer_initialized = 1;
-        }
-
-        ctx->streaming.commit_state =
-            NGX_HTTP_MARKDOWN_STREAMING_COMMIT_PRE;
-
-        ctx->conversion_attempted = 1;
-        NGX_HTTP_MARKDOWN_METRIC_INC(
-            conversions_attempted);
-        NGX_HTTP_MARKDOWN_METRIC_INC(
-            streaming.requests_total);
-
-        ngx_log_debug0(NGX_LOG_DEBUG_HTTP,
-            r->connection->log, 0,
-            "markdown streaming: handle created, "
-            "entering Pre-Commit phase");
     }
 
     if (!ctx->eligible || ctx->streaming.handle == NULL) {
