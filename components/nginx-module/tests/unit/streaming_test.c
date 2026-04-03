@@ -480,8 +480,8 @@ test_decomp_empty_input(void)
      * An empty chunk (len=0) should produce no output
      * and return success.
      */
-    u_char *out_data = NULL;
-    size_t  out_len = 0;
+    const u_char *out_data = NULL;
+    size_t        out_len = 0;
 
     /* Simulate: empty input produces empty output */
     TEST_ASSERT(out_data == NULL && out_len == 0,
@@ -580,13 +580,11 @@ static void
 test_precommit_fallback(void)
 {
     ngx_uint_t  commit_state;
-    ngx_uint_t  processing_path;
     int         handle_alive;
 
     TEST_SUBSECTION("Pre-Commit fallback: state transitions");
 
     commit_state = COMMIT_PRE;
-    processing_path = PATH_STREAMING;
     handle_alive = 1;
 
     /* Simulate FALLBACK signal in Pre-Commit */
@@ -595,12 +593,9 @@ test_precommit_fallback(void)
 
     /* Fallback: release handle, switch path */
     handle_alive = 0;
-    processing_path = PATH_FULLBUFFER;
 
     TEST_ASSERT(handle_alive == 0,
         "Handle should be released after fallback");
-    TEST_ASSERT(processing_path == PATH_FULLBUFFER,
-        "Path should switch to full-buffer");
     TEST_PASS("Pre-Commit fallback transitions correct");
 }
 
@@ -613,7 +608,6 @@ static void
 test_postcommit_error(void)
 {
     ngx_uint_t  commit_state;
-    int         handle_alive;
     int         empty_last_buf_sent;
     unsigned    postcommit_errors;
     unsigned    failed_total;
@@ -621,7 +615,6 @@ test_postcommit_error(void)
     TEST_SUBSECTION("Post-Commit error: abort + empty last_buf");
 
     commit_state = COMMIT_POST;
-    handle_alive = 1;
     empty_last_buf_sent = 0;
     postcommit_errors = 0;
     failed_total = 0;
@@ -631,13 +624,10 @@ test_postcommit_error(void)
         "Should be in Post-Commit state");
 
     /* Error handling: abort handle, send empty last_buf */
-    handle_alive = 0;
     empty_last_buf_sent = 1;
     postcommit_errors++;
     failed_total++;
 
-    TEST_ASSERT(handle_alive == 0,
-        "Handle should be aborted");
     TEST_ASSERT(empty_last_buf_sent == 1,
         "Empty last_buf should be sent");
     TEST_ASSERT(postcommit_errors == 1,
@@ -995,18 +985,14 @@ test_bug2_decomp_incomplete_inflate(void)
      *   is expanded (2x) and inflate continues
      * - Loop exits when avail_in == 0 or Z_STREAM_END
      * - All input is consumed, output is complete
+     *
+     * Whether initial buffer is smaller or larger than
+     * expected output, the loop produces complete output.
      */
-    if (initial_buf_size < expected_decompressed_len) {
-        /*
-         * Fixed code: loop expands buffer and continues
-         * inflating until all input is consumed.
-         */
-        actual_output_len = expected_decompressed_len;
-        avail_in_after = 0;
-    } else {
-        actual_output_len = expected_decompressed_len;
-        avail_in_after = 0;
-    }
+    actual_output_len = expected_decompressed_len;
+    avail_in_after = 0;
+
+    UNUSED(initial_buf_size);
 
     TEST_ASSERT(avail_in_after == 0,
         "avail_in should be 0 after inflate loop "
@@ -1113,7 +1099,6 @@ test_bug4_config_invalid_static_value(void)
         "atuo", "oof", "yes", "true", "enabled", ""
     };
     size_t       num_values;
-    size_t       i;
     int          all_rejected;
 
     TEST_SUBSECTION(
@@ -1122,7 +1107,7 @@ test_bug4_config_invalid_static_value(void)
     num_values = ARRAY_SIZE(test_values);
     all_rejected = 1;
 
-    for (i = 0; i < num_values; i++) {
+    for (size_t i = 0; i < num_values; i++) {
         const char  *val;
         int          has_dollar;
         int          is_valid_static;
@@ -1138,13 +1123,12 @@ test_bug4_config_invalid_static_value(void)
          * (case-insensitive: off, on, auto)
          */
         is_valid_static = 0;
-        if (!has_dollar) {
-            if (strcasecmp(val, "off") == 0
+        if (!has_dollar
+            && (strcasecmp(val, "off") == 0
                 || strcasecmp(val, "on") == 0
-                || strcasecmp(val, "auto") == 0)
-            {
-                is_valid_static = 1;
-            }
+                || strcasecmp(val, "auto") == 0))
+        {
+            is_valid_static = 1;
         }
 
         /*
@@ -1162,10 +1146,10 @@ test_bug4_config_invalid_static_value(void)
          * Bug condition: static value that is not
          * off/on/auto and has no '$'
          */
-        if (!has_dollar && !is_valid_static) {
-            if (would_reject == 0) {
-                all_rejected = 0;
-            }
+        if (!has_dollar && !is_valid_static
+            && would_reject == 0)
+        {
+            all_rejected = 0;
         }
     }
 
@@ -1446,10 +1430,10 @@ test_preserve_bug2_exceeds_max_size(void)
 static void
 test_preserve_bug3_tail_feed_success(void)
 {
-    uint32_t  tail_feed_rc;
-    u_char   *out_data;
-    size_t    out_len;
-    int       output_sent;
+    uint32_t        tail_feed_rc;
+    const u_char   *out_data;
+    size_t          out_len;
+    int             output_sent;
 
     TEST_SUBSECTION(
         "Preserve Bug 3: tail feed SUCCESS sends output");
@@ -1459,7 +1443,7 @@ test_preserve_bug3_tail_feed_success(void)
      * produces tail data and feed returns SUCCESS.
      */
     tail_feed_rc = ERROR_SUCCESS;
-    out_data = (u_char *) "tail output";
+    out_data = (const u_char *) "tail output";
     out_len = 11;
     output_sent = 0;
 

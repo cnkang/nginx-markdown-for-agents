@@ -21,6 +21,8 @@ if [[ -n "${CAPTURE_FILE}" ]]; then
       *.c)
         c_file="${arg}"
         ;;
+      *)
+        ;;
     esac
   done
 
