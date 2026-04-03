@@ -46,6 +46,9 @@ out/
 coverage/
 test-output/
 test-results/
+compile_commands.json
+compile_commands.*.json
+.sonarlint/
 
 # Tool caches
 tools/**/.cache/
