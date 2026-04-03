@@ -402,6 +402,32 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
      *
      * Requirements: 16.1, 16.3, 16.4, 16.6, 16.7
      */
+
+#ifdef MARKDOWN_STREAMING_ENABLED
+    /*
+     * Engine selector: evaluate markdown_streaming_engine
+     * once and cache the result. If streaming is selected,
+     * skip the threshold router entirely.
+     */
+    ctx->processing_path =
+        ngx_http_markdown_select_processing_path(
+            r, conf);
+
+    if (ctx->processing_path
+        == NGX_HTTP_MARKDOWN_PATH_STREAMING)
+    {
+        ngx_log_debug0(NGX_LOG_DEBUG_HTTP,
+            r->connection->log, 0,
+            "markdown filter: streaming path "
+            "selected by engine selector");
+
+        ngx_http_markdown_log_decision(r, conf,
+            &ngx_http_markdown_reason_engine_streaming);
+
+        goto path_selected;
+    }
+#endif /* MARKDOWN_STREAMING_ENABLED */
+
     if (conf->large_body_threshold > 0
         && r->method != NGX_HTTP_HEAD
         && r->headers_out.status != NGX_HTTP_NOT_MODIFIED)
@@ -424,7 +450,18 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
     }
 
     /* Record path hit metric (only for eligible requests) */
+#ifdef MARKDOWN_STREAMING_ENABLED
+path_selected:
+#endif
     if (ctx->eligible) {
+#ifdef MARKDOWN_STREAMING_ENABLED
+        if (ctx->processing_path
+            == NGX_HTTP_MARKDOWN_PATH_STREAMING)
+        {
+            NGX_HTTP_MARKDOWN_METRIC_INC(
+                path_hits.streaming);
+        } else
+#endif
         if (ctx->processing_path
             == NGX_HTTP_MARKDOWN_PATH_INCREMENTAL)
         {
@@ -644,6 +681,16 @@ ngx_http_markdown_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
         }
         return ngx_http_next_body_filter(r, in);
     }
+
+#ifdef MARKDOWN_STREAMING_ENABLED
+    /* Streaming path: delegate to streaming body filter */
+    if (ctx->processing_path
+        == NGX_HTTP_MARKDOWN_PATH_STREAMING)
+    {
+        return ngx_http_markdown_streaming_body_filter(
+            r, in);
+    }
+#endif
 
     /* If conversion already attempted, pass through */
     if (ctx->conversion_attempted) {

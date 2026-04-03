@@ -522,4 +522,77 @@ ngx_http_markdown_metrics_directive(ngx_conf_t *cf, ngx_command_t *cmd, void *co
     return NGX_CONF_OK;
 }
 
+#ifdef MARKDOWN_STREAMING_ENABLED
+/*
+ * Configuration directive handler: markdown_streaming_engine
+ *
+ * Supported values:
+ * - off | on | auto   (static configuration)
+ * - $variable          (dynamic per-request switch)
+ *
+ * Uses ngx_http_set_complex_value_slot pattern: static
+ * values are compiled as constant complex values so the
+ * engine selector can evaluate them uniformly at runtime.
+ */
+static char *
+ngx_http_markdown_streaming_engine(ngx_conf_t *cf,
+    ngx_command_t *cmd, void *conf)
+{
+    static u_char                      on_str[]   = "on";
+    static u_char                      off_str[]  = "off";
+    static u_char                      auto_str[] = "auto";
+    ngx_http_markdown_conf_t          *mcf = conf;
+    ngx_http_compile_complex_value_t   ccv;
+    ngx_http_complex_value_t          *cv;
+    ngx_str_t                         *value;
+    u_char                            *var_marker;
+
+    if (mcf->streaming_engine != NULL) {
+        return "is duplicate";
+    }
+
+    value = cf->args->elts;
+
+    /* Check for variable marker '$' in the value */
+    var_marker = ngx_strlchr(value[1].data,
+                             value[1].data + value[1].len,
+                             '$');
+
+    if (var_marker == NULL) {
+        /* Static value: must be "off", "on", or "auto" */
+        if (ngx_strcasecmp(value[1].data, off_str) != 0
+            && ngx_strcasecmp(value[1].data, on_str) != 0
+            && ngx_strcasecmp(value[1].data, auto_str) != 0)
+        {
+            ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+                "invalid value \"%V\" in \"%V\" "
+                "directive, it must be \"off\", "
+                "\"on\", \"auto\", or contain "
+                "a variable",
+                &value[1], &cmd->name);
+            return NGX_CONF_ERROR;
+        }
+    }
+
+    cv = ngx_palloc(cf->pool,
+                    sizeof(ngx_http_complex_value_t));
+    if (cv == NULL) {
+        return NGX_CONF_ERROR;
+    }
+
+    ngx_memzero(&ccv,
+                sizeof(ngx_http_compile_complex_value_t));
+    ccv.cf = cf;
+    ccv.value = &value[1];
+    ccv.complex_value = cv;
+
+    if (ngx_http_compile_complex_value(&ccv) != NGX_OK) {
+        return NGX_CONF_ERROR;
+    }
+
+    mcf->streaming_engine = cv;
+    return NGX_CONF_OK;
+}
+#endif /* MARKDOWN_STREAMING_ENABLED */
+
 #endif /* NGX_HTTP_MARKDOWN_CONFIG_HANDLERS_IMPL_H */
