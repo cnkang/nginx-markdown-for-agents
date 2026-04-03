@@ -24,6 +24,8 @@ PORT="${PORT:-18095}"
 UPSTREAM_PORT="${UPSTREAM_PORT:-19095}"
 ACCEPT_MARKDOWN_HEADER='Accept: text/markdown'
 
+SEPARATOR='========================================='
+
 usage() {
     cat <<EOF
 Usage: $(basename "$0") [--nginx-bin PATH] [--port PORT] [--upstream-port PORT]
@@ -72,9 +74,9 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-echo "========================================="
+echo "${SEPARATOR}"
 echo "Streaming E2E Test Plan"
-echo "========================================="
+echo "${SEPARATOR}"
 echo ""
 echo "16.1 Streaming conversion success (small/medium/large)"
 echo "  - Small (<10KB): simple HTML -> Markdown, verify Content-Type: text/markdown"
@@ -154,8 +156,8 @@ fi
 if nm "${NGINX_BIN}" 2>/dev/null | grep -q 'markdown_streaming_new'; then
     echo "Streaming support detected in NGINX binary."
 else
-    echo "Warning: streaming support not detected in NGINX binary."
-    echo "Tests may fail if the module was not built with streaming feature."
+    echo "Warning: streaming support not detected in NGINX binary." >&2
+    echo "Tests may fail if the module was not built with streaming feature." >&2
 fi
 
 echo ""
@@ -163,6 +165,6 @@ echo "Streaming E2E tests require a running NGINX instance."
 echo "This script validates the test specification."
 echo "For full runtime E2E, use: make test-e2e"
 echo ""
-echo "========================================="
+echo "${SEPARATOR}"
 echo "Streaming E2E test plan validated."
-echo "========================================="
+echo "${SEPARATOR}"

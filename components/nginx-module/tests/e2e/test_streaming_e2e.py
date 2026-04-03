@@ -220,7 +220,7 @@ def main():
         print("  cargo build --features streaming --release")
         print("  # Rebuild NGINX module")
         print("  NGINX_BIN=/path/to/nginx python3 test_streaming_e2e.py")
-        return 0
+        return 1
 
     return 0
 
