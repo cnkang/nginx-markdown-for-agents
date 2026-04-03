@@ -287,7 +287,11 @@ impl IncrementalEmitter {
                 self.code_fence_emitted = false;
             }
             StructuralContext::InlineCode => {
-                self.write_str("`")?;
+                if self.in_link {
+                    self.link_text.push('`');
+                } else {
+                    self.write_str("`")?;
+                }
             }
             StructuralContext::Blockquote => {
                 self.emit_block_separator()?;
@@ -301,10 +305,18 @@ impl IncrementalEmitter {
                 self.write_str(&format!("![{}]({})", alt, src))?;
             }
             StructuralContext::Bold => {
-                self.write_str("**")?;
+                if self.in_link {
+                    self.link_text.push_str("**");
+                } else {
+                    self.write_str("**")?;
+                }
             }
             StructuralContext::Italic => {
-                self.write_str("*")?;
+                if self.in_link {
+                    self.link_text.push('*');
+                } else {
+                    self.write_str("*")?;
+                }
             }
             _ => {}
         }
@@ -378,7 +390,11 @@ impl IncrementalEmitter {
                 self.trigger_flush()?;
             }
             StructuralContext::InlineCode => {
-                self.write_str("`")?;
+                if self.in_link {
+                    self.link_text.push('`');
+                } else {
+                    self.write_str("`")?;
+                }
             }
             StructuralContext::Blockquote => {
                 self.blockquote_depth = sm.blockquote_depth;
@@ -394,10 +410,18 @@ impl IncrementalEmitter {
                 // Image is fully emitted on Enter (self-closing style)
             }
             StructuralContext::Bold => {
-                self.write_str("**")?;
+                if self.in_link {
+                    self.link_text.push_str("**");
+                } else {
+                    self.write_str("**")?;
+                }
             }
             StructuralContext::Italic => {
-                self.write_str("*")?;
+                if self.in_link {
+                    self.link_text.push('*');
+                } else {
+                    self.write_str("*")?;
+                }
             }
             _ => {}
         }
