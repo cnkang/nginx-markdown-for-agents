@@ -27,6 +27,7 @@ build/unit/%: unit/%_test.c include/test_common.h include/test_metrics_snapshot.
 	  headers) extra_srcs="helpers/headers_standalone.c" ;; \
 	  header_compile|reason_code) extra_cflags="-I../src -Iinclude/nginx_stubs" ;; \
 	  gzip_deflate_decompression) extra_ldflags="-lz" ;; \
+	  streaming) extra_cflags="-DMARKDOWN_STREAMING_ENABLED" ;; \
 	esac; \
 	$(CC) $(CFLAGS_COMMON) $(LDFLAGS_COMMON) $$extra_cflags -o "$@" "$<" $$extra_srcs $$extra_ldflags
 
