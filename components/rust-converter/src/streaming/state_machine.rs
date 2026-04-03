@@ -183,7 +183,7 @@ impl StructuralStateMachine {
         &mut self,
         name: &str,
         attrs: &[(String, String)],
-        self_closing: bool,
+        _self_closing: bool,
     ) -> Result<StateMachineAction, ConversionError> {
         let ctx = match name {
             "h1" => StructuralContext::Heading(1),
@@ -255,10 +255,12 @@ impl StructuralStateMachine {
                     .map(|(_, v)| v.clone())
                     .unwrap_or_default();
                 let ctx = StructuralContext::Image { src, alt };
-                if self_closing {
-                    return Ok(StateMachineAction::Enter(ctx));
-                }
-                ctx
+                // <img> is a void element — always emit Enter without
+                // pushing to the stack, regardless of whether the HTML
+                // uses XHTML-style self-closing (`<img />`). html5ever's
+                // tokenizer sets self_closing only for the slash form,
+                // but <img> never has a matching end tag either way.
+                return Ok(StateMachineAction::Enter(ctx));
             }
             "strong" | "b" => StructuralContext::Bold,
             "em" | "i" => StructuralContext::Italic,
