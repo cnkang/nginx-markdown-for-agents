@@ -188,6 +188,201 @@ ngx_http_markdown_streaming_decomp_create(
 
 
 /*
+ * Inflate loop for zlib (gzip/deflate) decompression.
+ *
+ * Calls inflate() in a loop, expanding the output buffer
+ * as needed until all input is consumed or Z_STREAM_END.
+ *
+ * Returns:
+ *   NGX_OK    - success (produced written to *out_produced)
+ *   NGX_ERROR - inflate error or size limit exceeded
+ */
+static ngx_int_t
+ngx_http_markdown_streaming_decomp_inflate_loop(
+    ngx_http_markdown_streaming_decomp_t *decomp,
+    u_char **buf_ptr,
+    size_t *buf_size_ptr,
+    size_t *out_produced,
+    ngx_pool_t *pool,
+    ngx_log_t *log)
+{
+    u_char  *buf;
+    size_t   buf_size;
+    int      zrc;
+    u_char  *new_buf;
+    size_t   new_size;
+
+    buf = *buf_ptr;
+    buf_size = *buf_size_ptr;
+
+    for ( ;; ) {
+        zrc = inflate(&decomp->state.zlib, Z_SYNC_FLUSH);
+
+        if (zrc != Z_OK && zrc != Z_STREAM_END
+            && zrc != Z_BUF_ERROR)
+        {
+            ngx_log_error(NGX_LOG_ERR, log, 0,
+                "markdown streaming decomp: "
+                "inflate error %d", zrc);
+            return NGX_ERROR;
+        }
+
+        *out_produced = buf_size
+                        - decomp->state.zlib.avail_out;
+
+        if (decomp->max_decompressed_size > 0
+            && (decomp->total_decompressed + *out_produced)
+               > decomp->max_decompressed_size)
+        {
+            ngx_log_error(NGX_LOG_WARN, log, 0,
+                "markdown streaming decomp: "
+                "decompressed size %uz exceeds "
+                "limit %uz",
+                decomp->total_decompressed + *out_produced,
+                decomp->max_decompressed_size);
+            return NGX_ERROR;
+        }
+
+        if (zrc == Z_STREAM_END) {
+            decomp->finished = 1;
+            break;
+        }
+
+        if (decomp->state.zlib.avail_in == 0) {
+            break;
+        }
+
+        if (decomp->state.zlib.avail_out == 0) {
+            new_size = buf_size * 2;
+
+            new_buf = ngx_palloc(pool, new_size);
+            if (new_buf == NULL) {
+                return NGX_ERROR;
+            }
+
+            ngx_memcpy(new_buf, buf, buf_size);
+
+            decomp->state.zlib.next_out =
+                new_buf + buf_size;
+            decomp->state.zlib.avail_out =
+                (uInt) (new_size - buf_size);
+
+            buf = new_buf;
+            buf_size = new_size;
+        }
+    }
+
+    *buf_ptr = buf;
+    *buf_size_ptr = buf_size;
+    return NGX_OK;
+}
+
+
+#ifdef NGX_HTTP_BROTLI
+/*
+ * Brotli decompression loop.
+ *
+ * Calls BrotliDecoderDecompressStream in a loop, expanding
+ * the output buffer as needed.
+ *
+ * Returns:
+ *   NGX_OK    - success (produced written to *out_produced)
+ *   NGX_ERROR - decode error or size limit exceeded
+ */
+static ngx_int_t
+ngx_http_markdown_streaming_decomp_brotli_loop(
+    ngx_http_markdown_streaming_decomp_t *decomp,
+    const u_char *in_data,
+    size_t in_len,
+    u_char **buf_ptr,
+    size_t *buf_size_ptr,
+    size_t *out_produced,
+    ngx_pool_t *pool,
+    ngx_log_t *log)
+{
+    BrotliDecoderResult  brc;
+    u_char              *buf;
+    size_t               buf_size;
+    u_char              *new_buf;
+    size_t               new_size;
+    size_t               avail_in;
+    size_t               avail_out;
+    const uint8_t       *next_in;
+    uint8_t             *next_out;
+
+    buf = *buf_ptr;
+    buf_size = *buf_size_ptr;
+    avail_in = in_len;
+    next_in = in_data;
+    avail_out = buf_size;
+    next_out = buf;
+
+    for ( ;; ) {
+        brc = BrotliDecoderDecompressStream(
+            decomp->state.brotli,
+            &avail_in, &next_in,
+            &avail_out, &next_out, NULL);
+
+        if (brc == BROTLI_DECODER_RESULT_ERROR) {
+            ngx_log_error(NGX_LOG_ERR, log, 0,
+                "markdown streaming decomp: "
+                "brotli decode error");
+            return NGX_ERROR;
+        }
+
+        *out_produced = buf_size - avail_out;
+
+        if (decomp->max_decompressed_size > 0
+            && (decomp->total_decompressed + *out_produced)
+               > decomp->max_decompressed_size)
+        {
+            ngx_log_error(NGX_LOG_WARN, log, 0,
+                "markdown streaming decomp: "
+                "decompressed size %uz exceeds "
+                "limit %uz",
+                decomp->total_decompressed + *out_produced,
+                decomp->max_decompressed_size);
+            return NGX_ERROR;
+        }
+
+        if (brc == BROTLI_DECODER_RESULT_SUCCESS) {
+            decomp->finished = 1;
+            break;
+        }
+
+        if (brc
+            == BROTLI_DECODER_RESULT_NEEDS_MORE_OUTPUT)
+        {
+            new_size = buf_size * 2;
+
+            new_buf = ngx_palloc(pool, new_size);
+            if (new_buf == NULL) {
+                return NGX_ERROR;
+            }
+
+            ngx_memcpy(new_buf, buf, buf_size);
+
+            next_out = new_buf + buf_size;
+            avail_out = new_size - buf_size;
+
+            buf = new_buf;
+            buf_size = new_size;
+            continue;
+        }
+
+        if (avail_in == 0) {
+            break;
+        }
+    }
+
+    *buf_ptr = buf;
+    *buf_size_ptr = buf_size;
+    return NGX_OK;
+}
+#endif
+
+
+/*
  * Feed a compressed chunk to the streaming decompressor.
  *
  * Decompresses incrementally and writes output to a pool-
@@ -260,74 +455,19 @@ ngx_http_markdown_streaming_decomp_feed(
     case NGX_HTTP_MARKDOWN_COMPRESSION_GZIP:
     case NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE:
     {
-        int      zrc;
-        u_char  *new_buf;
-        size_t   new_size;
+        ngx_int_t  inflate_rc;
 
-        decomp->state.zlib.next_in = (Bytef *) in_data;
+        decomp->state.zlib.next_in = (z_const Bytef *) in_data;
         decomp->state.zlib.avail_in = (uInt) in_len;
-        decomp->state.zlib.next_out = (Bytef *) buf;
+        decomp->state.zlib.next_out = buf;
         decomp->state.zlib.avail_out = (uInt) buf_size;
 
-        for ( ;; ) {
-            zrc = inflate(&decomp->state.zlib,
-                          Z_SYNC_FLUSH);
-
-            if (zrc != Z_OK && zrc != Z_STREAM_END
-                && zrc != Z_BUF_ERROR)
-            {
-                ngx_log_error(NGX_LOG_ERR, log, 0,
-                    "markdown streaming decomp: "
-                    "inflate error %d", zrc);
-                return NGX_ERROR;
-            }
-
-            produced = buf_size
-                       - decomp->state.zlib.avail_out;
-
-            /* Check size limit after each iteration */
-            if (decomp->max_decompressed_size > 0
-                && (decomp->total_decompressed + produced)
-                   > decomp->max_decompressed_size)
-            {
-                ngx_log_error(NGX_LOG_WARN, log, 0,
-                    "markdown streaming decomp: "
-                    "decompressed size %uz exceeds "
-                    "limit %uz",
-                    decomp->total_decompressed + produced,
-                    decomp->max_decompressed_size);
-                return NGX_ERROR;
-            }
-
-            if (zrc == Z_STREAM_END) {
-                decomp->finished = 1;
-                break;
-            }
-
-            if (decomp->state.zlib.avail_in == 0) {
-                break;
-            }
-
-            /* Output buffer full, input remaining:
-             * expand buffer to 2x and continue */
-            if (decomp->state.zlib.avail_out == 0) {
-                new_size = buf_size * 2;
-
-                new_buf = ngx_palloc(pool, new_size);
-                if (new_buf == NULL) {
-                    return NGX_ERROR;
-                }
-
-                ngx_memcpy(new_buf, buf, buf_size);
-
-                decomp->state.zlib.next_out =
-                    (Bytef *) (new_buf + buf_size);
-                decomp->state.zlib.avail_out =
-                    (uInt) (new_size - buf_size);
-
-                buf = new_buf;
-                buf_size = new_size;
-            }
+        inflate_rc =
+            ngx_http_markdown_streaming_decomp_inflate_loop(
+                decomp, &buf, &buf_size, &produced,
+                pool, log);
+        if (inflate_rc != NGX_OK) {
+            return inflate_rc;
         }
 
         break;
@@ -336,80 +476,15 @@ ngx_http_markdown_streaming_decomp_feed(
 #ifdef NGX_HTTP_BROTLI
     case NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI:
     {
-        BrotliDecoderResult  brc;
-        u_char              *new_buf;
-        size_t               new_size;
-        size_t               avail_in;
-        size_t               avail_out;
-        const uint8_t       *next_in;
-        uint8_t             *next_out;
+        ngx_int_t  brotli_rc;
 
-        avail_in = in_len;
-        next_in = (const uint8_t *) in_data;
-        avail_out = buf_size;
-        next_out = (uint8_t *) buf;
-
-        for ( ;; ) {
-            brc = BrotliDecoderDecompressStream(
-                decomp->state.brotli,
-                &avail_in, &next_in,
-                &avail_out, &next_out, NULL);
-
-            if (brc == BROTLI_DECODER_RESULT_ERROR) {
-                ngx_log_error(NGX_LOG_ERR, log, 0,
-                    "markdown streaming decomp: "
-                    "brotli decode error");
-                return NGX_ERROR;
-            }
-
-            produced = buf_size - avail_out;
-
-            /* Check size limit after each iteration */
-            if (decomp->max_decompressed_size > 0
-                && (decomp->total_decompressed + produced)
-                   > decomp->max_decompressed_size)
-            {
-                ngx_log_error(NGX_LOG_WARN, log, 0,
-                    "markdown streaming decomp: "
-                    "decompressed size %uz exceeds "
-                    "limit %uz",
-                    decomp->total_decompressed + produced,
-                    decomp->max_decompressed_size);
-                return NGX_ERROR;
-            }
-
-            if (brc == BROTLI_DECODER_RESULT_SUCCESS) {
-                decomp->finished = 1;
-                break;
-            }
-
-            /* Output buffer full: expand before checking
-             * avail_in — Brotli may have internal output
-             * pending even when all input is consumed */
-            if (brc
-                == BROTLI_DECODER_RESULT_NEEDS_MORE_OUTPUT)
-            {
-                new_size = buf_size * 2;
-
-                new_buf = ngx_palloc(pool, new_size);
-                if (new_buf == NULL) {
-                    return NGX_ERROR;
-                }
-
-                ngx_memcpy(new_buf, buf, buf_size);
-
-                next_out =
-                    (uint8_t *) (new_buf + buf_size);
-                avail_out = new_size - buf_size;
-
-                buf = new_buf;
-                buf_size = new_size;
-                continue;
-            }
-
-            if (avail_in == 0) {
-                break;
-            }
+        brotli_rc =
+            ngx_http_markdown_streaming_decomp_brotli_loop(
+                decomp, in_data, in_len,
+                &buf, &buf_size, &produced,
+                pool, log);
+        if (brotli_rc != NGX_OK) {
+            return brotli_rc;
         }
 
         break;
@@ -492,7 +567,7 @@ ngx_http_markdown_streaming_decomp_finish(
 
         decomp->state.zlib.next_in = Z_NULL;
         decomp->state.zlib.avail_in = 0;
-        decomp->state.zlib.next_out = (Bytef *) buf;
+        decomp->state.zlib.next_out = buf;
         decomp->state.zlib.avail_out = (uInt) buf_size;
 
         zrc = inflate(&decomp->state.zlib, Z_FINISH);

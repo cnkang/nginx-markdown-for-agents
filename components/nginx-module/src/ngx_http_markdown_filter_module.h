@@ -290,7 +290,7 @@ typedef struct {
         /* Streaming converter handle (Rust opaque pointer) */
         struct StreamingConverterHandle  *handle;
 
-        /* Commit state: PRE_COMMIT(0) / POST_COMMIT(1) */
+        /* Commit state: PRE or POST */
         ngx_uint_t                        commit_state;
 
         /* Pending output chain for backpressure */
