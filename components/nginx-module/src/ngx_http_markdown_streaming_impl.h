@@ -1400,9 +1400,8 @@ ngx_http_markdown_streaming_passthrough(
  * chain downstream.
  *
  * Returns:
- *   NGX_OK       - handle ready, continue processing
- *   NGX_DONE     - fail-open handled, caller should return NGX_OK
- *   NGX_ERROR    - fatal error
+ *   NGX_OK    - handle ready, continue processing
+ *   otherwise - status propagated from passthrough/error path
  */
 static ngx_int_t
 ngx_http_markdown_streaming_ensure_handle(
@@ -1438,8 +1437,7 @@ ngx_http_markdown_streaming_ensure_handle(
             }
         }
 
-        (void) ngx_http_next_body_filter(r, in);
-        return NGX_DONE;
+        return ngx_http_next_body_filter(r, in);
     }
 
     return NGX_OK;
@@ -1491,11 +1489,8 @@ ngx_http_markdown_streaming_body_filter(
     /* Initialize streaming handle on first call */
     rc = ngx_http_markdown_streaming_ensure_handle(
         r, ctx, conf, in);
-    if (rc == NGX_ERROR) {
-        return NGX_ERROR;
-    }
-    if (rc == NGX_DONE) {
-        return NGX_OK;
+    if (rc != NGX_OK) {
+        return rc;
     }
 
     if (!ctx->eligible || ctx->streaming.handle == NULL) {
@@ -1523,8 +1518,13 @@ ngx_http_markdown_streaming_body_filter(
             r, ctx, in, rc);
 
         if (rc == NGX_DONE) {
-            /* Fallback: path switched, re-enter filter */
-            return NGX_OK;
+            /*
+             * Fallback switched processing_path to full-buffer.
+             * Re-enter the main body filter with the current
+             * unconsumed chain node so remaining buffers are
+             * not dropped in this invocation.
+             */
+            return ngx_http_markdown_body_filter(r, cl);
         }
 
         if (rc != NGX_OK) {
