@@ -407,6 +407,11 @@ ngx_http_markdown_streaming_send_output(
     }
 
     if (rc == NGX_AGAIN) {
+        /*
+         * Keep exactly one outstanding pending chain owned by this
+         * request context. The retry path (resume_pending) will submit
+         * this same chain again once downstream write readiness returns.
+         */
         ctx->streaming.pending_output = out;
     }
 
@@ -463,6 +468,10 @@ ngx_http_markdown_streaming_resume_pending(
     }
 
     ctx->streaming.pending_output = NULL;
+    /*
+     * Retry the exact buffered chain first; only after it drains do we
+     * allow finalize() to emit a terminal empty last_buf.
+     */
     rc = ngx_http_next_body_filter(r, out);
 
     if (rc == NGX_AGAIN) {
@@ -1043,9 +1052,15 @@ ngx_http_markdown_streaming_finalize_request(
             r, ctx, NULL, 0, /* last_buf */ 1);
     }
 
+    ctx->streaming.finalize_after_pending = 0;
+
     /* Finish decompression and feed tail data if any */
     rc = ngx_http_markdown_streaming_finalize_decomp(
         r, ctx, conf);
+    if (rc == NGX_AGAIN) {
+        ctx->streaming.finalize_after_pending = 1;
+        return NGX_AGAIN;
+    }
     if (rc != NGX_OK) {
         return rc;
     }
@@ -1080,10 +1095,9 @@ ngx_http_markdown_streaming_finalize_request(
                 r, ctx, NULL, 0, /* last_buf */ 1);
         }
 
-        /* Pre-Commit finalize error */
-        NGX_HTTP_MARKDOWN_METRIC_INC(
-            streaming.failed_total);
-        return NGX_ERROR;
+        /* Pre-Commit finalize error follows configured policy */
+        return ngx_http_markdown_streaming_precommit_error(
+            r, ctx, conf, /* inc_failopen */ 1);
     }
 
     /* Send final Markdown output if any */
@@ -1303,11 +1317,44 @@ ngx_http_markdown_streaming_init_handle(
  *   other        - return value to propagate
  */
 static ngx_int_t
+ngx_http_markdown_streaming_failopen_passthrough(
+    ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx,
+    ngx_chain_t *in,
+    ngx_buf_t **consumed_bufs,
+    u_char **consumed_pos,
+    ngx_uint_t consumed_n)
+{
+    ngx_uint_t  i;
+
+    /*
+     * Fail-open must preserve the original upstream bytes. If earlier chunks in
+     * this chain were already marked consumed, restore their positions before
+     * forwarding the chain downstream.
+     */
+    for (i = 0; i < consumed_n; i++) {
+        consumed_bufs[i]->pos = consumed_pos[i];
+    }
+
+    if (!ctx->headers_forwarded) {
+        if (ngx_http_markdown_forward_headers(r, ctx) != NGX_OK) {
+            return NGX_ERROR;
+        }
+    }
+
+    return ngx_http_next_body_filter(r, in);
+}
+
+
+static ngx_int_t
 ngx_http_markdown_streaming_handle_chunk_result(
     ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx,
     ngx_chain_t *in,
-    ngx_int_t rc)
+    ngx_int_t rc,
+    ngx_buf_t **consumed_bufs,
+    u_char **consumed_pos,
+    ngx_uint_t consumed_n)
 {
     if (rc == NGX_AGAIN) {
         return NGX_AGAIN;
@@ -1329,13 +1376,9 @@ ngx_http_markdown_streaming_handle_chunk_result(
     }
 
     if (!ctx->eligible) {
-        /* Fail-open: forward remaining */
-        if (!ctx->headers_forwarded) {
-            ngx_http_markdown_forward_headers(
-                r, ctx);
-        }
-        return ngx_http_next_body_filter(
-            r, in);
+        return ngx_http_markdown_streaming_failopen_passthrough(
+            r, ctx, in,
+            consumed_bufs, consumed_pos, consumed_n);
     }
 
     return rc;
@@ -1505,8 +1548,12 @@ ngx_http_markdown_streaming_body_filter(
     ngx_http_markdown_ctx_t   *ctx;
     ngx_http_markdown_conf_t  *conf;
     ngx_chain_t               *cl;
+    ngx_buf_t               **consumed_bufs;
+    u_char                  **consumed_pos;
     ngx_int_t                  rc;
     ngx_flag_t                 last_buf;
+    ngx_uint_t                 chain_bufs;
+    ngx_uint_t                 consumed_n;
 
     ctx = ngx_http_get_module_ctx(r,
         ngx_http_markdown_filter_module);
@@ -1529,8 +1576,19 @@ ngx_http_markdown_streaming_body_filter(
 
     /* Resume pending output (backpressure recovery) */
     if (in == NULL) {
-        return ngx_http_markdown_streaming_resume_pending(
+        rc = ngx_http_markdown_streaming_resume_pending(
             r, ctx);
+        if (rc != NGX_OK) {
+            return rc;
+        }
+
+        if (ctx->streaming.finalize_after_pending) {
+            ctx->streaming.finalize_after_pending = 0;
+            return ngx_http_markdown_streaming_finalize_request(
+                r, ctx, conf);
+        }
+
+        return NGX_OK;
     }
 
     /* Initialize streaming handle on first call */
@@ -1543,6 +1601,26 @@ ngx_http_markdown_streaming_body_filter(
     if (!ctx->eligible || ctx->streaming.handle == NULL) {
         return ngx_http_markdown_streaming_passthrough(
             r, ctx, in);
+    }
+
+    chain_bufs = 0;
+    for (cl = in; cl != NULL; cl = cl->next) {
+        if (cl->buf != NULL) {
+            chain_bufs++;
+        }
+    }
+
+    consumed_bufs = NULL;
+    consumed_pos = NULL;
+    consumed_n = 0;
+    if (chain_bufs > 0) {
+        consumed_bufs = ngx_pnalloc(r->pool,
+            chain_bufs * sizeof(ngx_buf_t *));
+        consumed_pos = ngx_pnalloc(r->pool,
+            chain_bufs * sizeof(u_char *));
+        if (consumed_bufs == NULL || consumed_pos == NULL) {
+            return NGX_ERROR;
+        }
     }
 
     /* Process each chunk in the input chain */
@@ -1562,7 +1640,8 @@ ngx_http_markdown_streaming_body_filter(
             r, ctx, conf, cl->buf);
 
         rc = ngx_http_markdown_streaming_handle_chunk_result(
-            r, ctx, in, rc);
+            r, ctx, in, rc,
+            consumed_bufs, consumed_pos, consumed_n);
 
         if (rc == NGX_DONE) {
             return
@@ -1574,15 +1653,26 @@ ngx_http_markdown_streaming_body_filter(
             return rc;
         }
 
+        consumed_bufs[consumed_n] = cl->buf;
+        consumed_pos[consumed_n] = cl->buf->pos;
+        consumed_n++;
+
         /* Mark buffer as consumed */
         cl->buf->pos = cl->buf->last;
     }
 
     /* Handle last_buf: finalize */
     if (last_buf) {
-        return
-            ngx_http_markdown_streaming_finalize_request(
-                r, ctx, conf);
+        rc = ngx_http_markdown_streaming_finalize_request(
+            r, ctx, conf);
+
+        if (rc == NGX_DECLINED && !ctx->eligible) {
+            return ngx_http_markdown_streaming_failopen_passthrough(
+                r, ctx, in,
+                consumed_bufs, consumed_pos, consumed_n);
+        }
+
+        return rc;
     }
 
     return NGX_OK;
