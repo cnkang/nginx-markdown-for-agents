@@ -1518,13 +1518,41 @@ ngx_http_markdown_streaming_body_filter(
             r, ctx, in, rc);
 
         if (rc == NGX_DONE) {
+            ngx_chain_t  *reentry_in;
+
             /*
              * Fallback switched processing_path to full-buffer.
-             * Re-enter the main body filter with the current
-             * unconsumed chain node so remaining buffers are
-             * not dropped in this invocation.
+             * The current node has already been consumed into
+             * the streaming prebuffer, so re-enter from cl->next
+             * to avoid duplicating that chunk in full-buffer mode.
+             *
+             * If this node carried the terminal flag and there is no
+             * following node, synthesize an empty terminal chain so the
+             * full-buffer path can observe end-of-stream immediately.
              */
-            return ngx_http_markdown_body_filter(r, cl);
+            reentry_in = cl->next;
+            if (reentry_in == NULL && last_buf) {
+                ngx_buf_t    *term_buf;
+                ngx_chain_t  *term_cl;
+
+                term_buf = ngx_calloc_buf(r->pool);
+                if (term_buf == NULL) {
+                    return NGX_ERROR;
+                }
+
+                term_buf->last_buf = (r == r->main) ? 1 : 0;
+                term_buf->last_in_chain = (r != r->main) ? 1 : 0;
+
+                term_cl = ngx_alloc_chain_link(r->pool);
+                if (term_cl == NULL) {
+                    return NGX_ERROR;
+                }
+                term_cl->buf = term_buf;
+                term_cl->next = NULL;
+                reentry_in = term_cl;
+            }
+
+            return ngx_http_markdown_body_filter(r, reentry_in);
         }
 
         if (rc != NGX_OK) {
