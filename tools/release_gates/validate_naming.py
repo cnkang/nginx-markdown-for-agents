@@ -54,7 +54,7 @@ def is_valid_c_macro(name: str) -> bool:
 
 def is_forbidden_label(label: str) -> bool:
     """Return True if *label* is in the forbidden high-cardinality set."""
-    return label in FORBIDDEN_LABELS
+    return label.casefold() in FORBIDDEN_LABELS
 
 
 def validate_names(
