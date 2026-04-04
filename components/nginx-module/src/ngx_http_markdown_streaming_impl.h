@@ -1321,8 +1321,6 @@ ngx_http_markdown_streaming_failopen_passthrough(
     ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx,
     ngx_chain_t *in,
-    ngx_buf_t **consumed_bufs,
-    u_char **consumed_pos,
     ngx_uint_t consumed_n)
 {
     ngx_uint_t  i;
@@ -1333,7 +1331,8 @@ ngx_http_markdown_streaming_failopen_passthrough(
      * forwarding the chain downstream.
      */
     for (i = 0; i < consumed_n; i++) {
-        consumed_bufs[i]->pos = consumed_pos[i];
+        ctx->streaming.failopen_consumed_bufs[i]->pos =
+            ctx->streaming.failopen_consumed_pos[i];
     }
 
     if (!ctx->headers_forwarded) {
@@ -1352,8 +1351,6 @@ ngx_http_markdown_streaming_handle_chunk_result(
     ngx_http_markdown_ctx_t *ctx,
     ngx_chain_t *in,
     ngx_int_t rc,
-    ngx_buf_t **consumed_bufs,
-    u_char **consumed_pos,
     ngx_uint_t consumed_n)
 {
     if (rc == NGX_AGAIN) {
@@ -1377,8 +1374,7 @@ ngx_http_markdown_streaming_handle_chunk_result(
 
     if (!ctx->eligible) {
         return ngx_http_markdown_streaming_failopen_passthrough(
-            r, ctx, in,
-            consumed_bufs, consumed_pos, consumed_n);
+            r, ctx, in, consumed_n);
     }
 
     return rc;
@@ -1534,6 +1530,138 @@ ngx_http_markdown_streaming_reenter_fullbuffer_after_fallback(
 }
 
 
+static ngx_int_t
+ngx_http_markdown_streaming_handle_null_input(
+    ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx,
+    ngx_http_markdown_conf_t *conf)
+{
+    ngx_int_t  rc;
+
+    rc = ngx_http_markdown_streaming_resume_pending(
+        r, ctx);
+    if (rc != NGX_OK) {
+        return rc;
+    }
+
+    if (ctx->streaming.finalize_after_pending) {
+        ctx->streaming.finalize_after_pending = 0;
+        return ngx_http_markdown_streaming_finalize_request(
+            r, ctx, conf);
+    }
+
+    return NGX_OK;
+}
+
+
+static ngx_uint_t
+ngx_http_markdown_streaming_count_chain_bufs(
+    ngx_chain_t *in)
+{
+    ngx_chain_t *cl;
+    ngx_uint_t   chain_bufs;
+
+    chain_bufs = 0;
+    for (cl = in; cl != NULL; cl = cl->next) {
+        if (cl->buf != NULL) {
+            chain_bufs++;
+        }
+    }
+
+    return chain_bufs;
+}
+
+
+static ngx_int_t
+ngx_http_markdown_streaming_prepare_failopen_tracking(
+    ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx,
+    ngx_chain_t *in)
+{
+    ngx_uint_t  chain_bufs;
+
+    chain_bufs = ngx_http_markdown_streaming_count_chain_bufs(
+        in);
+
+    if (chain_bufs == 0
+        || chain_bufs <= ctx->streaming.failopen_consumed_capacity)
+    {
+        return NGX_OK;
+    }
+
+    ctx->streaming.failopen_consumed_bufs =
+        ngx_pnalloc(r->pool,
+            chain_bufs * sizeof(ngx_buf_t *));
+    ctx->streaming.failopen_consumed_pos =
+        ngx_pnalloc(r->pool,
+            chain_bufs * sizeof(u_char *));
+
+    if (ctx->streaming.failopen_consumed_bufs == NULL
+        || ctx->streaming.failopen_consumed_pos == NULL)
+    {
+        return NGX_ERROR;
+    }
+
+    ctx->streaming.failopen_consumed_capacity = chain_bufs;
+    return NGX_OK;
+}
+
+
+static ngx_int_t
+ngx_http_markdown_streaming_process_chain(
+    ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx,
+    ngx_http_markdown_conf_t *conf,
+    ngx_chain_t *in,
+    ngx_flag_t *last_buf,
+    ngx_uint_t *consumed_n,
+    ngx_chain_t **fallback_cl)
+{
+    ngx_chain_t  *cl;
+    ngx_int_t     rc;
+
+    *last_buf = 0;
+    *consumed_n = 0;
+    *fallback_cl = NULL;
+
+    for (cl = in; cl != NULL; cl = cl->next) {
+        if (cl->buf == NULL) {
+            continue;
+        }
+
+        if (cl->buf->last_buf
+            || (r != r->main && cl->buf->last_in_chain))
+        {
+            *last_buf = 1;
+        }
+
+        rc = ngx_http_markdown_streaming_process_chunk(
+            r, ctx, conf, cl->buf);
+
+        rc = ngx_http_markdown_streaming_handle_chunk_result(
+            r, ctx, in, rc, *consumed_n);
+
+        if (rc != NGX_OK) {
+            if (rc == NGX_DONE) {
+                *fallback_cl = cl;
+            }
+            return rc;
+        }
+
+        ctx->streaming.failopen_consumed_bufs[*consumed_n] =
+            cl->buf;
+        ctx->streaming.failopen_consumed_pos[*consumed_n] =
+            cl->buf->pos;
+        (*consumed_n)++;
+
+        /* Mark buffer as consumed */
+        cl->buf->pos = cl->buf->last;
+    }
+
+    return NGX_OK;
+}
+
+
 /*
  * Streaming body filter main entry point.
  *
@@ -1547,12 +1675,9 @@ ngx_http_markdown_streaming_body_filter(
 {
     ngx_http_markdown_ctx_t   *ctx;
     ngx_http_markdown_conf_t  *conf;
-    ngx_chain_t               *cl;
-    ngx_buf_t               **consumed_bufs;
-    u_char                  **consumed_pos;
+    ngx_chain_t               *fallback_cl;
     ngx_int_t                  rc;
     ngx_flag_t                 last_buf;
-    ngx_uint_t                 chain_bufs;
     ngx_uint_t                 consumed_n;
 
     ctx = ngx_http_get_module_ctx(r,
@@ -1576,19 +1701,8 @@ ngx_http_markdown_streaming_body_filter(
 
     /* Resume pending output (backpressure recovery) */
     if (in == NULL) {
-        rc = ngx_http_markdown_streaming_resume_pending(
-            r, ctx);
-        if (rc != NGX_OK) {
-            return rc;
-        }
-
-        if (ctx->streaming.finalize_after_pending) {
-            ctx->streaming.finalize_after_pending = 0;
-            return ngx_http_markdown_streaming_finalize_request(
-                r, ctx, conf);
-        }
-
-        return NGX_OK;
+        return ngx_http_markdown_streaming_handle_null_input(
+            r, ctx, conf);
     }
 
     /* Initialize streaming handle on first call */
@@ -1603,62 +1717,21 @@ ngx_http_markdown_streaming_body_filter(
             r, ctx, in);
     }
 
-    chain_bufs = 0;
-    for (cl = in; cl != NULL; cl = cl->next) {
-        if (cl->buf != NULL) {
-            chain_bufs++;
-        }
+    rc = ngx_http_markdown_streaming_prepare_failopen_tracking(
+        r, ctx, in);
+    if (rc != NGX_OK) {
+        return rc;
     }
 
-    consumed_bufs = NULL;
-    consumed_pos = NULL;
-    consumed_n = 0;
-    if (chain_bufs > 0) {
-        consumed_bufs = ngx_pnalloc(r->pool,
-            chain_bufs * sizeof(ngx_buf_t *));
-        consumed_pos = ngx_pnalloc(r->pool,
-            chain_bufs * sizeof(u_char *));
-        if (consumed_bufs == NULL || consumed_pos == NULL) {
-            return NGX_ERROR;
-        }
+    rc = ngx_http_markdown_streaming_process_chain(
+        r, ctx, conf, in, &last_buf, &consumed_n,
+        &fallback_cl);
+    if (rc == NGX_DONE) {
+        return ngx_http_markdown_streaming_reenter_fullbuffer_after_fallback(
+            r, fallback_cl, last_buf);
     }
-
-    /* Process each chunk in the input chain */
-    last_buf = 0;
-    for (cl = in; cl != NULL; cl = cl->next) {
-        if (cl->buf == NULL) {
-            continue;
-        }
-
-        if (cl->buf->last_buf
-            || (r != r->main && cl->buf->last_in_chain))
-        {
-            last_buf = 1;
-        }
-
-        rc = ngx_http_markdown_streaming_process_chunk(
-            r, ctx, conf, cl->buf);
-
-        rc = ngx_http_markdown_streaming_handle_chunk_result(
-            r, ctx, in, rc,
-            consumed_bufs, consumed_pos, consumed_n);
-
-        if (rc == NGX_DONE) {
-            return
-                ngx_http_markdown_streaming_reenter_fullbuffer_after_fallback(
-                    r, cl, last_buf);
-        }
-
-        if (rc != NGX_OK) {
-            return rc;
-        }
-
-        consumed_bufs[consumed_n] = cl->buf;
-        consumed_pos[consumed_n] = cl->buf->pos;
-        consumed_n++;
-
-        /* Mark buffer as consumed */
-        cl->buf->pos = cl->buf->last;
+    if (rc != NGX_OK) {
+        return rc;
     }
 
     /* Handle last_buf: finalize */
@@ -1668,8 +1741,7 @@ ngx_http_markdown_streaming_body_filter(
 
         if (rc == NGX_DECLINED && !ctx->eligible) {
             return ngx_http_markdown_streaming_failopen_passthrough(
-                r, ctx, in,
-                consumed_bufs, consumed_pos, consumed_n);
+                r, ctx, in, consumed_n);
         }
 
         return rc;
