@@ -126,22 +126,32 @@ class ValidationResult:
     """Collects pass/fail/skip results for structured output."""
 
     def __init__(self) -> None:
+        """Initialize an empty result list.
+
+        Each entry is stored as ``(status, check_name, detail)`` where status
+        is one of ``PASS``, ``FAIL``, or ``SKIP``.
+        """
         self.results: list[tuple[str, str, str]] = []
 
     def passed(self, check: str, detail: str = "") -> None:
+        """Record a successful check result."""
         self.results.append(("PASS", check, detail))
 
     def failed(self, check: str, detail: str = "") -> None:
+        """Record a failed check result."""
         self.results.append(("FAIL", check, detail))
 
     def skipped(self, check: str, detail: str = "") -> None:
+        """Record a skipped check result."""
         self.results.append(("SKIP", check, detail))
 
     @property
     def has_failures(self) -> bool:
+        """Return ``True`` when at least one recorded result is ``FAIL``."""
         return any(s == "FAIL" for s, _, _ in self.results)
 
     def print_report(self) -> None:
+        """Print one human-readable line per recorded validation result."""
         for status, check, detail in self.results:
             suffix = f" — {detail}" if detail else ""
             print(f"  [{status}] {check}{suffix}")
@@ -725,9 +735,12 @@ def check_non_goals(result: ValidationResult) -> None:
         result.failed("non-goals", "release-gates-0-5-0.md not found")
         return
 
-    # Key non-goal keywords that should be present
+    # Key non-goal keywords that should be present (case-insensitive)
+    content_folded = content.casefold()
     non_goal_keywords = ["JSON", "OpenTelemetry", "GUI", "Helm", "tokenizer"]
-    if missing := [kw for kw in non_goal_keywords if kw not in content]:
+    if missing := [
+        kw for kw in non_goal_keywords if kw.casefold() not in content_folded
+    ]:
         result.failed("non-goals", f"missing non-goal keywords: {', '.join(missing)}")
     else:
         result.passed("non-goals")
