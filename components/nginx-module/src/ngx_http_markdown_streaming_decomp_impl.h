@@ -735,6 +735,126 @@ ngx_http_markdown_streaming_decomp_feed(
 }
 
 
+static void
+ngx_http_markdown_streaming_decomp_finish_free_heap(
+    u_char **heap_buf_ptr)
+{
+    if (*heap_buf_ptr != NULL) {
+        ngx_free(*heap_buf_ptr);
+        *heap_buf_ptr = NULL;
+    }
+}
+
+
+static ngx_int_t
+ngx_http_markdown_streaming_decomp_finish_zlib(
+    ngx_http_markdown_streaming_decomp_t *decomp,
+    u_char **buf_ptr,
+    size_t *buf_size_ptr,
+    size_t *produced_ptr,
+    ngx_pool_t *pool,
+    ngx_log_t *log)
+{
+    u_char      *heap_buf;
+    ngx_flag_t   using_heap;
+    int          zrc;
+
+    heap_buf = NULL;
+    using_heap = 0;
+
+    decomp->state.zlib.next_in = Z_NULL;
+    decomp->state.zlib.avail_in = 0;
+    decomp->state.zlib.next_out = *buf_ptr;
+    decomp->state.zlib.avail_out = (uInt) *buf_size_ptr;
+
+    for ( ;; ) {
+        zrc = inflate(&decomp->state.zlib, Z_FINISH);
+
+        if (zrc != Z_STREAM_END && zrc != Z_OK
+            && zrc != Z_BUF_ERROR)
+        {
+            ngx_log_error(NGX_LOG_ERR, log, 0,
+                "markdown streaming decomp: "
+                "finish inflate error %d", zrc);
+            ngx_http_markdown_streaming_decomp_finish_free_heap(
+                &heap_buf);
+            return NGX_ERROR;
+        }
+
+        *produced_ptr = *buf_size_ptr
+                        - decomp->state.zlib.avail_out;
+
+        if (ngx_http_markdown_streaming_decomp_check_limit(
+                decomp, *produced_ptr))
+        {
+            ngx_log_error(NGX_LOG_WARN, log, 0,
+                "markdown streaming decomp: "
+                "decompressed size %uz exceeds limit %uz",
+                decomp->total_decompressed + *produced_ptr,
+                decomp->max_decompressed_size);
+            ngx_http_markdown_streaming_decomp_finish_free_heap(
+                &heap_buf);
+            return NGX_ERROR;
+        }
+
+        if (zrc == Z_STREAM_END) {
+            decomp->finished = 1;
+            break;
+        }
+
+        if (zrc == Z_BUF_ERROR
+            && decomp->state.zlib.avail_out != 0)
+        {
+            ngx_log_error(NGX_LOG_ERR, log, 0,
+                "markdown streaming decomp: "
+                "finish inflate incomplete stream");
+            ngx_http_markdown_streaming_decomp_finish_free_heap(
+                &heap_buf);
+            return NGX_ERROR;
+        }
+
+        if (decomp->state.zlib.avail_out != 0) {
+            continue;
+        }
+
+        {
+            size_t  old_size;
+
+            old_size = *buf_size_ptr;
+            /*
+             * expand_buf() frees any previous heap buffer if expansion fails,
+             * so we can safely return directly on NGX_ERROR here.
+             */
+            if (ngx_http_markdown_streaming_decomp_expand_buf(
+                    &heap_buf, buf_ptr, buf_size_ptr, log)
+                != NGX_OK)
+            {
+                return NGX_ERROR;
+            }
+
+            using_heap = 1;
+            decomp->state.zlib.next_out = *buf_ptr + old_size;
+            decomp->state.zlib.avail_out =
+                (uInt) (*buf_size_ptr - old_size);
+        }
+    }
+
+    if (!using_heap) {
+        return NGX_OK;
+    }
+
+    if (ngx_http_markdown_streaming_decomp_finalize_buf(
+            heap_buf, buf_ptr, buf_size_ptr,
+            *produced_ptr, pool)
+        != NGX_OK)
+    {
+        return NGX_ERROR;
+    }
+
+    return NGX_OK;
+}
+
+
 /*
  * Finish decompression (handle last_buf).
  *
@@ -782,97 +902,14 @@ ngx_http_markdown_streaming_decomp_finish(
 
     case NGX_HTTP_MARKDOWN_COMPRESSION_GZIP:
     case NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE:
-    {
-        u_char  *heap_buf;
-        int      using_heap;
-        int  zrc;
-
-        heap_buf = NULL;
-        using_heap = 0;
-
-        decomp->state.zlib.next_in = Z_NULL;
-        decomp->state.zlib.avail_in = 0;
-        decomp->state.zlib.next_out = buf;
-        decomp->state.zlib.avail_out = (uInt) buf_size;
-
-        for ( ;; ) {
-            zrc = inflate(&decomp->state.zlib, Z_FINISH);
-
-            if (zrc != Z_STREAM_END && zrc != Z_OK
-                && zrc != Z_BUF_ERROR)
-            {
-                ngx_log_error(NGX_LOG_ERR, log, 0,
-                    "markdown streaming decomp: "
-                    "finish inflate error %d", zrc);
-                if (heap_buf != NULL) {
-                    ngx_free(heap_buf);
-                }
-                return NGX_ERROR;
-            }
-
-            produced = buf_size
-                       - decomp->state.zlib.avail_out;
-
-            if (ngx_http_markdown_streaming_decomp_check_limit(
-                    decomp, produced))
-            {
-                ngx_log_error(NGX_LOG_WARN, log, 0,
-                    "markdown streaming decomp: "
-                    "decompressed size %uz exceeds limit %uz",
-                    decomp->total_decompressed + produced,
-                    decomp->max_decompressed_size);
-                if (heap_buf != NULL) {
-                    ngx_free(heap_buf);
-                }
-                return NGX_ERROR;
-            }
-
-            if (zrc == Z_STREAM_END) {
-                decomp->finished = 1;
-                break;
-            }
-
-            if (decomp->state.zlib.avail_out == 0) {
-                size_t  old_size;
-
-                old_size = buf_size;
-                if (ngx_http_markdown_streaming_decomp_expand_buf(
-                        &heap_buf, &buf, &buf_size, log)
-                    != NGX_OK)
-                {
-                    return NGX_ERROR;
-                }
-
-                using_heap = 1;
-                decomp->state.zlib.next_out = buf + old_size;
-                decomp->state.zlib.avail_out =
-                    (uInt) (buf_size - old_size);
-                continue;
-            }
-
-            if (zrc == Z_BUF_ERROR) {
-                ngx_log_error(NGX_LOG_ERR, log, 0,
-                    "markdown streaming decomp: "
-                    "finish inflate incomplete stream");
-                if (heap_buf != NULL) {
-                    ngx_free(heap_buf);
-                }
-                return NGX_ERROR;
-            }
+        if (ngx_http_markdown_streaming_decomp_finish_zlib(
+                decomp, &buf, &buf_size,
+                &produced, pool, log)
+            != NGX_OK)
+        {
+            return NGX_ERROR;
         }
-
-        if (using_heap) {
-            if (ngx_http_markdown_streaming_decomp_finalize_buf(
-                    heap_buf, &buf, &buf_size,
-                    produced, pool)
-                != NGX_OK)
-            {
-                return NGX_ERROR;
-            }
-        }
-
         break;
-    }
 
 #ifdef NGX_HTTP_BROTLI
     case NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI:
