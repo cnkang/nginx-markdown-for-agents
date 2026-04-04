@@ -312,6 +312,9 @@ typedef struct {
 
         /* Deferred terminal last_buf (backpressure during finalize) */
         ngx_flag_t                        finalize_pending_lastbuf;
+
+        /* Continue finalize() after tail-output backpressure drains */
+        ngx_flag_t                        finalize_after_pending;
     } streaming;
 #endif
 } ngx_http_markdown_ctx_t;

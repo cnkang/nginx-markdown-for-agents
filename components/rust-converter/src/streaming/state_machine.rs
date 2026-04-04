@@ -349,9 +349,9 @@ impl StructuralStateMachine {
                 }
             }
             "ol" => {
-                self.list_depth = self.list_depth.saturating_sub(1);
-                self.ordered_list_counters.pop();
                 if let Some(ctx) = self.pop_matching_context(name) {
+                    self.list_depth = self.list_depth.saturating_sub(1);
+                    self.ordered_list_counters.pop();
                     self.needs_block_separator = true;
                     Ok(StateMachineAction::Exit(ctx))
                 } else {
@@ -359,8 +359,8 @@ impl StructuralStateMachine {
                 }
             }
             "ul" => {
-                self.list_depth = self.list_depth.saturating_sub(1);
                 if let Some(ctx) = self.pop_matching_context(name) {
+                    self.list_depth = self.list_depth.saturating_sub(1);
                     self.needs_block_separator = true;
                     Ok(StateMachineAction::Exit(ctx))
                 } else {
@@ -771,6 +771,20 @@ mod tests {
         sm.process_event(&end_tag("li")).unwrap();
         sm.process_event(&end_tag("ul")).unwrap();
         assert_eq!(sm.list_depth, 0);
+    }
+
+    #[test]
+    fn test_unmatched_list_end_tag_does_not_mutate_state() {
+        let mut sm = default_sm();
+
+        sm.process_event(&start_tag("ol")).unwrap();
+        assert_eq!(sm.list_depth, 1);
+        assert_eq!(sm.next_ordered_item_number(), 1);
+
+        let action = sm.process_event(&end_tag("ul")).unwrap();
+        assert_eq!(action, StateMachineAction::None);
+        assert_eq!(sm.list_depth, 1);
+        assert_eq!(sm.next_ordered_item_number(), 2);
     }
 
     #[test]
