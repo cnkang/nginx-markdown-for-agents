@@ -91,6 +91,11 @@ ngx_http_markdown_streaming_ensure_handle(
     ngx_http_markdown_ctx_t *ctx,
     ngx_http_markdown_conf_t *conf,
     ngx_chain_t *in);
+static ngx_int_t
+ngx_http_markdown_streaming_reenter_fullbuffer_after_fallback(
+    ngx_http_request_t *r,
+    ngx_chain_t *cl,
+    ngx_flag_t last_buf);
 
 
 /*
@@ -1443,6 +1448,48 @@ ngx_http_markdown_streaming_ensure_handle(
     return NGX_OK;
 }
 
+/*
+ * Re-enter full-buffer body filter after streaming fallback.
+ *
+ * The current chain node was already consumed into prebuffer by
+ * the streaming path, so re-entry starts at cl->next. If this was
+ * the terminal node and there is no next link, synthesize an empty
+ * terminal chain node to preserve end-of-stream signaling.
+ */
+static ngx_int_t
+ngx_http_markdown_streaming_reenter_fullbuffer_after_fallback(
+    ngx_http_request_t *r,
+    ngx_chain_t *cl,
+    ngx_flag_t last_buf)
+{
+    ngx_chain_t  *reentry_in;
+
+    reentry_in = cl->next;
+    if (reentry_in == NULL && last_buf) {
+        ngx_buf_t    *term_buf;
+        ngx_chain_t  *term_cl;
+
+        term_buf = ngx_calloc_buf(r->pool);
+        if (term_buf == NULL) {
+            return NGX_ERROR;
+        }
+
+        term_buf->last_buf = (r == r->main) ? 1 : 0;
+        term_buf->last_in_chain = (r != r->main) ? 1 : 0;
+
+        term_cl = ngx_alloc_chain_link(r->pool);
+        if (term_cl == NULL) {
+            return NGX_ERROR;
+        }
+
+        term_cl->buf = term_buf;
+        term_cl->next = NULL;
+        reentry_in = term_cl;
+    }
+
+    return ngx_http_markdown_body_filter(r, reentry_in);
+}
+
 
 /*
  * Streaming body filter main entry point.
@@ -1518,41 +1565,9 @@ ngx_http_markdown_streaming_body_filter(
             r, ctx, in, rc);
 
         if (rc == NGX_DONE) {
-            ngx_chain_t  *reentry_in;
-
-            /*
-             * Fallback switched processing_path to full-buffer.
-             * The current node has already been consumed into
-             * the streaming prebuffer, so re-enter from cl->next
-             * to avoid duplicating that chunk in full-buffer mode.
-             *
-             * If this node carried the terminal flag and there is no
-             * following node, synthesize an empty terminal chain so the
-             * full-buffer path can observe end-of-stream immediately.
-             */
-            reentry_in = cl->next;
-            if (reentry_in == NULL && last_buf) {
-                ngx_buf_t    *term_buf;
-                ngx_chain_t  *term_cl;
-
-                term_buf = ngx_calloc_buf(r->pool);
-                if (term_buf == NULL) {
-                    return NGX_ERROR;
-                }
-
-                term_buf->last_buf = (r == r->main) ? 1 : 0;
-                term_buf->last_in_chain = (r != r->main) ? 1 : 0;
-
-                term_cl = ngx_alloc_chain_link(r->pool);
-                if (term_cl == NULL) {
-                    return NGX_ERROR;
-                }
-                term_cl->buf = term_buf;
-                term_cl->next = NULL;
-                reentry_in = term_cl;
-            }
-
-            return ngx_http_markdown_body_filter(r, reentry_in);
+            return
+                ngx_http_markdown_streaming_reenter_fullbuffer_after_fallback(
+                    r, cl, last_buf);
         }
 
         if (rc != NGX_OK) {
