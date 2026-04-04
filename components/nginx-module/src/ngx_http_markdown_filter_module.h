@@ -310,6 +310,11 @@ typedef struct {
         size_t                            prebuffer_limit;
         ngx_flag_t                        prebuffer_initialized;
 
+        /* Reused fail-open restoration slots (avoid per-call allocations) */
+        ngx_buf_t                       **failopen_consumed_bufs;
+        u_char                          **failopen_consumed_pos;
+        ngx_uint_t                        failopen_consumed_capacity;
+
         /* Deferred terminal last_buf (backpressure during finalize) */
         ngx_flag_t                        finalize_pending_lastbuf;
 
