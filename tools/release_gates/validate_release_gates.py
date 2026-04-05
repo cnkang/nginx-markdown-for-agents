@@ -28,6 +28,7 @@ validation (path traversal prevention).
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from pathlib import Path
 
@@ -735,11 +736,17 @@ def check_non_goals(result: ValidationResult) -> None:
         result.failed("non-goals", "release-gates-0-5-0.md not found")
         return
 
-    # Key non-goal keywords that should be present (case-insensitive)
-    content_folded = content.casefold()
+    # Key non-goal keywords that should be present (case-insensitive, whole word)
     non_goal_keywords = ["JSON", "OpenTelemetry", "GUI", "Helm", "tokenizer"]
     if missing := [
-        kw for kw in non_goal_keywords if kw.casefold() not in content_folded
+        kw
+        for kw in non_goal_keywords
+        if re.search(
+            rf"(?<![0-9A-Za-z_]){re.escape(kw)}(?![0-9A-Za-z_])",
+            content,
+            flags=re.IGNORECASE,
+        )
+        is None
     ]:
         result.failed("non-goals", f"missing non-goal keywords: {', '.join(missing)}")
     else:

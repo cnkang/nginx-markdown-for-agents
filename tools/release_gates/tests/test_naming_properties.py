@@ -9,7 +9,7 @@ Each property runs at least 100 iterations.
 Validates: Requirements 18.1, 18.2, 18.3, 18.4
 """
 
-from hypothesis import given, settings, assume
+from hypothesis import given, settings, assume, example
 from hypothesis import strategies as st
 
 import sys
@@ -137,6 +137,36 @@ def test_invalid_c_macro_no_prefix(name):
 def test_forbidden_labels_detected(label):
     """All forbidden labels must be detected."""
     assert is_forbidden_label(label), f"should detect forbidden: {label}"
+
+
+def _alternating_case(label: str) -> str:
+    """Return a deterministic mixed-case variant of *label*."""
+    return "".join(
+        ch.upper() if i % 2 == 0 else ch.lower()
+        for i, ch in enumerate(label)
+    )
+
+
+@settings(max_examples=100)
+@example(label="url", casing="upper")
+@example(label="host", casing="capitalized")
+@example(label="referer", casing="alternating")
+@given(
+    label=st.sampled_from(sorted(FORBIDDEN_LABELS)),
+    casing=st.sampled_from(["upper", "capitalized", "alternating"]),
+)
+def test_forbidden_labels_detected_case_insensitive(label, casing):
+    """Forbidden labels must still be detected under case variants."""
+    if casing == "upper":
+        candidate = label.upper()
+    elif casing == "capitalized":
+        candidate = label.capitalize()
+    else:
+        candidate = _alternating_case(label)
+
+    assert is_forbidden_label(candidate), (
+        f"should detect forbidden case variant: {candidate}"
+    )
 
 
 @settings(max_examples=100)
