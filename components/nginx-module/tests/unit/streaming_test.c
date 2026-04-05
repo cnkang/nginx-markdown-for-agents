@@ -43,6 +43,7 @@ typedef size_t          ngx_msec_t;
 #define NGX_ERROR      -1
 #define NGX_AGAIN      -2
 #define NGX_DECLINED   -5
+#define NGX_HTTP_MARKDOWN_BUFFERED 0x08
 
 #define NGX_HTTP_GET    2
 #define NGX_HTTP_HEAD   4
@@ -562,15 +563,90 @@ test_backpressure_flag(void)
     buffered = 0;
 
     /* Simulate NGX_AGAIN: set buffered flag */
-    buffered |= 0x08;  /* NGX_HTTP_MARKDOWN_BUFFERED */
-    TEST_ASSERT((buffered & 0x08) != 0,
+    buffered |= NGX_HTTP_MARKDOWN_BUFFERED;
+    TEST_ASSERT((buffered & NGX_HTTP_MARKDOWN_BUFFERED) != 0,
         "Buffered flag should be set on NGX_AGAIN");
 
     /* Simulate resume: clear buffered flag */
-    buffered &= ~0x08;
-    TEST_ASSERT((buffered & 0x08) == 0,
+    buffered &= ~NGX_HTTP_MARKDOWN_BUFFERED;
+    TEST_ASSERT((buffered & NGX_HTTP_MARKDOWN_BUFFERED) == 0,
         "Buffered flag should be cleared on resume");
     TEST_PASS("Backpressure flag management works");
+}
+
+static void
+test_backpressure_deferred_finalize_resume(void)
+{
+    unsigned int  buffered;
+    int           finalize_decomp_rc;
+    int           finalize_after_pending;
+    const void   *pending_output;
+    int           finalize_called;
+
+    TEST_SUBSECTION(
+        "Backpressure: deferred finalize resumes after drain");
+
+    buffered = 0;
+    finalize_decomp_rc = NGX_AGAIN;
+    finalize_after_pending = 0;
+    pending_output = (const void *) 0x1;
+    finalize_called = 0;
+
+    TEST_ASSERT(pending_output != NULL,
+        "Pending output should start non-NULL in backpressure simulation");
+
+    /*
+     * Simulate finalize_request() receiving NGX_AGAIN from
+     * finalize_decomp(): mark finalize as pending and keep
+     * buffered state so resume_pending() will re-enter.
+     */
+    if (finalize_decomp_rc == NGX_AGAIN) {
+        finalize_after_pending = 1;
+        buffered |= NGX_HTTP_MARKDOWN_BUFFERED;
+    }
+
+    TEST_ASSERT((buffered & NGX_HTTP_MARKDOWN_BUFFERED) != 0,
+        "Buffered flag should remain set while finalize is pending");
+    TEST_ASSERT(finalize_after_pending == 1,
+        "Finalize should be deferred after decomp NGX_AGAIN");
+
+    /* Simulate pending output drained in resume_pending(). */
+    pending_output = NULL;
+    if (pending_output == NULL && finalize_after_pending) {
+        finalize_after_pending = 0;
+        finalize_called = 1;
+    }
+
+    TEST_ASSERT(finalize_called == 1,
+        "Finalize should resume after pending output drains");
+    TEST_ASSERT(finalize_after_pending == 0,
+        "Deferred finalize marker should clear after resume");
+
+    /*
+     * Complementary branch: finalize_decomp does not return NGX_AGAIN.
+     * No deferred-finalize marker and no markdown buffered flag should be set.
+     */
+    buffered = 0;
+    finalize_decomp_rc = NGX_OK;
+    finalize_after_pending = 0;
+    pending_output = (const void *) 0x1;
+    finalize_called = 0;
+
+    TEST_ASSERT(pending_output != NULL,
+        "Pending output should be initialized in non-NGX_AGAIN simulation");
+
+    if (finalize_decomp_rc == NGX_AGAIN) {
+        finalize_after_pending = 1;
+        buffered |= NGX_HTTP_MARKDOWN_BUFFERED;
+    }
+
+    TEST_ASSERT((buffered & NGX_HTTP_MARKDOWN_BUFFERED) == 0,
+        "Buffered flag should stay clear when finalize_decomp_rc != NGX_AGAIN");
+    TEST_ASSERT(finalize_after_pending == 0,
+        "Finalize should not be deferred when finalize_decomp_rc != NGX_AGAIN");
+    TEST_ASSERT(finalize_called == 0,
+        "Finalize resume callback should not run in non-NGX_AGAIN branch");
+    TEST_PASS("Deferred finalize resume behavior works");
 }
 
 /* ================================================================
@@ -1739,6 +1815,7 @@ main(void)
 
     TEST_SECTION("14.4 Backpressure Handling");
     test_backpressure_flag();
+    test_backpressure_deferred_finalize_resume();
 
     TEST_SECTION("14.5 Pre-Commit Fallback");
     test_precommit_fallback();

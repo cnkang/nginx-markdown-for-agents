@@ -413,6 +413,7 @@ ngx_http_markdown_streaming_send_output(
          * this same chain again once downstream write readiness returns.
          */
         ctx->streaming.pending_output = out;
+        r->buffered |= NGX_HTTP_MARKDOWN_BUFFERED;
     }
 
     return rc;
@@ -495,6 +496,7 @@ ngx_http_markdown_streaming_resume_pending(
 
     if (rc == NGX_AGAIN) {
         ctx->streaming.pending_output = out;
+        r->buffered |= NGX_HTTP_MARKDOWN_BUFFERED;
         return NGX_AGAIN;
     }
 
