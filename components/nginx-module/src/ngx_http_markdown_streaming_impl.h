@@ -450,7 +450,6 @@ ngx_http_markdown_streaming_send_deferred_lastbuf(
         r, ctx, NULL, 0, /* last_buf */ 1);
 
     if (rc == NGX_AGAIN) {
-        ctx->streaming.finalize_pending_lastbuf = 1;
         return ngx_http_markdown_streaming_handle_backpressure(
             r, ctx);
     }
@@ -1631,6 +1630,12 @@ ngx_http_markdown_streaming_prepare_failopen_tracking(
     ngx_uint_t   chain_bufs;
     ngx_uint_t   required;
 
+    if (ctx->streaming.commit_state
+        == NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST)
+    {
+        return NGX_OK;
+    }
+
     chain_bufs = ngx_http_markdown_streaming_count_chain_bufs(
         in);
     required = ctx->streaming.failopen_consumed_count
@@ -1680,7 +1685,6 @@ ngx_http_markdown_streaming_process_chain(
     ngx_uint_t invocation_start,
     ngx_chain_t **fallback_cl)
 {
-    ngx_uint_t   idx;
     ngx_chain_t  *cl;
     ngx_int_t     rc;
 
@@ -1711,10 +1715,16 @@ ngx_http_markdown_streaming_process_chain(
             return rc;
         }
 
-        idx = ctx->streaming.failopen_consumed_count;
-        ctx->streaming.failopen_consumed_bufs[idx] = cl->buf;
-        ctx->streaming.failopen_consumed_pos[idx] = cl->buf->pos;
-        ctx->streaming.failopen_consumed_count++;
+        if (ctx->streaming.commit_state
+            == NGX_HTTP_MARKDOWN_STREAMING_COMMIT_PRE)
+        {
+            ngx_uint_t idx;
+
+            idx = ctx->streaming.failopen_consumed_count;
+            ctx->streaming.failopen_consumed_bufs[idx] = cl->buf;
+            ctx->streaming.failopen_consumed_pos[idx] = cl->buf->pos;
+            ctx->streaming.failopen_consumed_count++;
+        }
 
         /* Mark buffer as consumed */
         cl->buf->pos = cl->buf->last;
