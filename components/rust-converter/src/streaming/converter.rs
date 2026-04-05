@@ -228,6 +228,15 @@ impl StreamingConverter {
         // 1. Check cooperative timeout
         self.check_timeout()?;
 
+        // 0.5.0 spec: when noise-region pruning feature is compiled in,
+        // streaming path is `pre-commit-fallback-only`.
+        #[cfg(feature = "prune_noise_regions")]
+        if matches!(self.commit_state, CommitState::PreCommit) {
+            return Err(ConversionError::StreamingFallback {
+                reason: FallbackReason::UnsupportedStructure("prune_noise_regions".to_string()),
+            });
+        }
+
         // 2. Charset detection / transcoding
         let transcoded = self
             .charset_state
