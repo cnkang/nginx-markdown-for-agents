@@ -438,6 +438,27 @@ ngx_http_markdown_streaming_handle_backpressure(
 }
 
 
+static ngx_int_t
+ngx_http_markdown_streaming_send_deferred_lastbuf(
+    ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx)
+{
+    ngx_int_t  rc;
+
+    ctx->streaming.finalize_pending_lastbuf = 0;
+    rc = ngx_http_markdown_streaming_send_output(
+        r, ctx, NULL, 0, /* last_buf */ 1);
+
+    if (rc == NGX_AGAIN) {
+        ctx->streaming.finalize_pending_lastbuf = 1;
+        return ngx_http_markdown_streaming_handle_backpressure(
+            r, ctx);
+    }
+
+    return rc;
+}
+
+
 /*
  * Resume sending pending output after backpressure clears.
  */
@@ -459,9 +480,8 @@ ngx_http_markdown_streaming_resume_pending(
          * has been drained.
          */
         if (ctx->streaming.finalize_pending_lastbuf) {
-            ctx->streaming.finalize_pending_lastbuf = 0;
-            return ngx_http_markdown_streaming_send_output(
-                r, ctx, NULL, 0, /* last_buf */ 1);
+            return ngx_http_markdown_streaming_send_deferred_lastbuf(
+                r, ctx);
         }
 
         return NGX_OK;
@@ -486,9 +506,8 @@ ngx_http_markdown_streaming_resume_pending(
      * terminal last_buf, send it now.
      */
     if (ctx->streaming.finalize_pending_lastbuf) {
-        ctx->streaming.finalize_pending_lastbuf = 0;
-        return ngx_http_markdown_streaming_send_output(
-            r, ctx, NULL, 0, /* last_buf */ 1);
+        return ngx_http_markdown_streaming_send_deferred_lastbuf(
+            r, ctx);
     }
 
     return rc;
@@ -520,6 +539,7 @@ ngx_http_markdown_streaming_fallback_to_fullbuffer(
     /* Switch to full-buffer path */
     ctx->processing_path =
         NGX_HTTP_MARKDOWN_PATH_FULLBUFFER;
+    ctx->streaming.failopen_consumed_count = 0;
 
     /*
      * Clear conversion_attempted so the full-buffer body
@@ -690,6 +710,7 @@ ngx_http_markdown_streaming_commit(
 
     ctx->streaming.commit_state =
         NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
+    ctx->streaming.failopen_consumed_count = 0;
     ctx->headers_forwarded = 1;
 
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP,
@@ -1287,6 +1308,7 @@ ngx_http_markdown_streaming_init_handle(
 
     ctx->streaming.commit_state =
         NGX_HTTP_MARKDOWN_STREAMING_COMMIT_PRE;
+    ctx->streaming.failopen_consumed_count = 0;
 
     ctx->conversion_attempted = 1;
     NGX_HTTP_MARKDOWN_METRIC_INC(
@@ -1321,8 +1343,11 @@ ngx_http_markdown_streaming_failopen_passthrough(
     ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx,
     ngx_chain_t *in,
-    ngx_uint_t consumed_n)
+    ngx_uint_t invocation_start)
 {
+    ngx_chain_t *head;
+    ngx_chain_t **tail;
+    ngx_chain_t *cl;
     ngx_uint_t  i;
 
     /*
@@ -1330,7 +1355,7 @@ ngx_http_markdown_streaming_failopen_passthrough(
      * this chain were already marked consumed, restore their positions before
      * forwarding the chain downstream.
      */
-    for (i = 0; i < consumed_n; i++) {
+    for (i = 0; i < ctx->streaming.failopen_consumed_count; i++) {
         ctx->streaming.failopen_consumed_bufs[i]->pos =
             ctx->streaming.failopen_consumed_pos[i];
     }
@@ -1341,7 +1366,30 @@ ngx_http_markdown_streaming_failopen_passthrough(
         }
     }
 
-    return ngx_http_next_body_filter(r, in);
+    if (invocation_start == 0) {
+        return ngx_http_next_body_filter(r, in);
+    }
+
+    /*
+     * Previous invocations may already have consumed pre-commit buffers that are
+     * not part of the current `in` chain. Rebuild a prefix chain from durable
+     * per-request bookkeeping so fail-open can forward the full original body.
+     */
+    head = NULL;
+    tail = &head;
+    for (i = 0; i < invocation_start; i++) {
+        cl = ngx_alloc_chain_link(r->pool);
+        if (cl == NULL) {
+            return NGX_ERROR;
+        }
+        cl->buf = ctx->streaming.failopen_consumed_bufs[i];
+        cl->next = NULL;
+        *tail = cl;
+        tail = &cl->next;
+    }
+    *tail = in;
+
+    return ngx_http_next_body_filter(r, head);
 }
 
 
@@ -1351,7 +1399,7 @@ ngx_http_markdown_streaming_handle_chunk_result(
     ngx_http_markdown_ctx_t *ctx,
     ngx_chain_t *in,
     ngx_int_t rc,
-    ngx_uint_t consumed_n)
+    ngx_uint_t invocation_start)
 {
     if (rc == NGX_AGAIN) {
         return NGX_AGAIN;
@@ -1374,7 +1422,7 @@ ngx_http_markdown_streaming_handle_chunk_result(
 
     if (!ctx->eligible) {
         return ngx_http_markdown_streaming_failopen_passthrough(
-            r, ctx, in, consumed_n);
+            r, ctx, in, invocation_start);
     }
 
     return rc;
@@ -1578,31 +1626,46 @@ ngx_http_markdown_streaming_prepare_failopen_tracking(
     ngx_http_markdown_ctx_t *ctx,
     ngx_chain_t *in)
 {
-    ngx_uint_t  chain_bufs;
+    ngx_buf_t  **new_bufs;
+    u_char     **new_pos;
+    ngx_uint_t   chain_bufs;
+    ngx_uint_t   required;
 
     chain_bufs = ngx_http_markdown_streaming_count_chain_bufs(
         in);
+    required = ctx->streaming.failopen_consumed_count
+               + chain_bufs;
 
-    if (chain_bufs == 0
-        || chain_bufs <= ctx->streaming.failopen_consumed_capacity)
+    if (required == 0
+        || required <= ctx->streaming.failopen_consumed_capacity)
     {
         return NGX_OK;
     }
 
-    ctx->streaming.failopen_consumed_bufs =
-        ngx_pnalloc(r->pool,
-            chain_bufs * sizeof(ngx_buf_t *));
-    ctx->streaming.failopen_consumed_pos =
-        ngx_pnalloc(r->pool,
-            chain_bufs * sizeof(u_char *));
+    new_bufs = ngx_pnalloc(r->pool,
+        required * sizeof(ngx_buf_t *));
+    new_pos = ngx_pnalloc(r->pool,
+        required * sizeof(u_char *));
 
-    if (ctx->streaming.failopen_consumed_bufs == NULL
-        || ctx->streaming.failopen_consumed_pos == NULL)
+    if (new_bufs == NULL || new_pos == NULL)
     {
         return NGX_ERROR;
     }
 
-    ctx->streaming.failopen_consumed_capacity = chain_bufs;
+    if (ctx->streaming.failopen_consumed_count > 0) {
+        ngx_memcpy(new_bufs,
+            ctx->streaming.failopen_consumed_bufs,
+            ctx->streaming.failopen_consumed_count
+                * sizeof(ngx_buf_t *));
+        ngx_memcpy(new_pos,
+            ctx->streaming.failopen_consumed_pos,
+            ctx->streaming.failopen_consumed_count
+                * sizeof(u_char *));
+    }
+
+    ctx->streaming.failopen_consumed_bufs = new_bufs;
+    ctx->streaming.failopen_consumed_pos = new_pos;
+    ctx->streaming.failopen_consumed_capacity = required;
     return NGX_OK;
 }
 
@@ -1614,14 +1677,14 @@ ngx_http_markdown_streaming_process_chain(
     ngx_http_markdown_conf_t *conf,
     ngx_chain_t *in,
     ngx_flag_t *last_buf,
-    ngx_uint_t *consumed_n,
+    ngx_uint_t invocation_start,
     ngx_chain_t **fallback_cl)
 {
+    ngx_uint_t   idx;
     ngx_chain_t  *cl;
     ngx_int_t     rc;
 
     *last_buf = 0;
-    *consumed_n = 0;
     *fallback_cl = NULL;
 
     for (cl = in; cl != NULL; cl = cl->next) {
@@ -1639,7 +1702,7 @@ ngx_http_markdown_streaming_process_chain(
             r, ctx, conf, cl->buf);
 
         rc = ngx_http_markdown_streaming_handle_chunk_result(
-            r, ctx, in, rc, *consumed_n);
+            r, ctx, in, rc, invocation_start);
 
         if (rc != NGX_OK) {
             if (rc == NGX_DONE) {
@@ -1648,11 +1711,10 @@ ngx_http_markdown_streaming_process_chain(
             return rc;
         }
 
-        ctx->streaming.failopen_consumed_bufs[*consumed_n] =
-            cl->buf;
-        ctx->streaming.failopen_consumed_pos[*consumed_n] =
-            cl->buf->pos;
-        (*consumed_n)++;
+        idx = ctx->streaming.failopen_consumed_count;
+        ctx->streaming.failopen_consumed_bufs[idx] = cl->buf;
+        ctx->streaming.failopen_consumed_pos[idx] = cl->buf->pos;
+        ctx->streaming.failopen_consumed_count++;
 
         /* Mark buffer as consumed */
         cl->buf->pos = cl->buf->last;
@@ -1678,7 +1740,7 @@ ngx_http_markdown_streaming_body_filter(
     ngx_chain_t               *fallback_cl;
     ngx_int_t                  rc;
     ngx_flag_t                 last_buf;
-    ngx_uint_t                 consumed_n;
+    ngx_uint_t                 invocation_start;
 
     ctx = ngx_http_get_module_ctx(r,
         ngx_http_markdown_filter_module);
@@ -1717,6 +1779,8 @@ ngx_http_markdown_streaming_body_filter(
             r, ctx, in);
     }
 
+    invocation_start = ctx->streaming.failopen_consumed_count;
+
     rc = ngx_http_markdown_streaming_prepare_failopen_tracking(
         r, ctx, in);
     if (rc != NGX_OK) {
@@ -1724,7 +1788,7 @@ ngx_http_markdown_streaming_body_filter(
     }
 
     rc = ngx_http_markdown_streaming_process_chain(
-        r, ctx, conf, in, &last_buf, &consumed_n,
+        r, ctx, conf, in, &last_buf, invocation_start,
         &fallback_cl);
     if (rc == NGX_DONE) {
         return ngx_http_markdown_streaming_reenter_fullbuffer_after_fallback(
@@ -1741,7 +1805,7 @@ ngx_http_markdown_streaming_body_filter(
 
         if (rc == NGX_DECLINED && !ctx->eligible) {
             return ngx_http_markdown_streaming_failopen_passthrough(
-                r, ctx, in, consumed_n);
+                r, ctx, in, invocation_start);
         }
 
         return rc;
