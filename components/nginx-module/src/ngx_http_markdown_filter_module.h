@@ -314,6 +314,7 @@ typedef struct {
         ngx_buf_t                       **failopen_consumed_bufs;
         u_char                          **failopen_consumed_pos;
         ngx_uint_t                        failopen_consumed_capacity;
+        ngx_uint_t                        failopen_consumed_count;
 
         /* Deferred terminal last_buf (backpressure during finalize) */
         ngx_flag_t                        finalize_pending_lastbuf;
