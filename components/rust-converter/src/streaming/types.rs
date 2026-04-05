@@ -39,7 +39,7 @@ pub enum FallbackReason {
     LookaheadExceeded,
     /// Front matter extraction requires data beyond the lookahead budget.
     FrontMatterOverflow,
-    /// An unsupported HTML structure was encountered.
+    /// An unsupported HTML structure/capability was encountered.
     UnsupportedStructure(String),
 }
 
