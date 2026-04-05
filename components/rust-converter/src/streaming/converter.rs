@@ -228,15 +228,7 @@ impl StreamingConverter {
         // 1. Check cooperative timeout
         self.check_timeout()?;
 
-        // 2. Check prune_noise_regions feature → fallback if enabled and PreCommit
-        #[cfg(feature = "prune_noise_regions")]
-        if matches!(self.commit_state, CommitState::PreCommit) {
-            return Err(ConversionError::StreamingFallback {
-                reason: FallbackReason::UnsupportedStructure("prune_noise_regions".to_string()),
-            });
-        }
-
-        // 3. Charset detection / transcoding
+        // 2. Charset detection / transcoding
         let transcoded = self
             .charset_state
             .feed(data)
@@ -251,7 +243,7 @@ impl StreamingConverter {
             });
         }
 
-        // 4. Tokenization: feed UTF-8 to html5ever.
+        // 3. Tokenization: feed UTF-8 to html5ever.
         //
         // Prepend any trailing bytes from the previous chunk that formed
         // an incomplete UTF-8 sequence, then split off any new incomplete
