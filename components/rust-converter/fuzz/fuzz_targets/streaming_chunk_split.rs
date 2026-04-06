@@ -25,6 +25,37 @@ fn normalize_ascii_whitespace(bytes: &[u8]) -> Vec<u8> {
     normalized
 }
 
+fn split_sizes_from_seed(seed: &[u8], html_len: usize) -> Vec<usize> {
+    if html_len == 0 {
+        return vec![1];
+    }
+
+    let mut splits = Vec::with_capacity(seed.len().min(64) + 1);
+    let mut consumed = 0usize;
+
+    for (idx, &byte) in seed.iter().take(64).enumerate() {
+        let remaining = html_len.saturating_sub(consumed);
+        if remaining == 0 {
+            break;
+        }
+
+        let raw = if idx % 8 == 0 {
+            usize::from(byte).saturating_mul(8).max(1)
+        } else {
+            usize::from(byte % 32).max(1)
+        };
+        let size = raw.min(remaining);
+        splits.push(size);
+        consumed += size;
+    }
+
+    if consumed < html_len {
+        splits.push(html_len - consumed);
+    }
+
+    splits
+}
+
 fn convert(html: &[u8], splits: &[usize]) -> Option<Vec<u8>> {
     let mut conv = StreamingConverter::new(ConversionOptions::default(), MemoryBudget::default());
     conv.set_content_type(Some("text/html; charset=UTF-8".to_string()));
@@ -57,16 +88,15 @@ fuzz_target!(|data: &[u8]| {
         return;
     }
 
-    let split_ratio = usize::from(data[0]);
     let html = &data[1..];
-    let split_point = (html.len() * split_ratio) / 256;
+    let split_sizes = split_sizes_from_seed(data, html.len());
 
     let single = match convert(html, &[html.len().max(1)]) {
         Some(single) => single,
         None => return,
     };
 
-    let split = match convert(html, &[split_point.max(1), html.len()]) {
+    let split = match convert(html, &split_sizes) {
         Some(split) => split,
         None => return,
     };
