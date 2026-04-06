@@ -39,9 +39,7 @@ _SKIP_REASON = (
 def check_prerequisites():
     """Check if streaming failure/cache E2E tests can run."""
     nginx_bin = os.environ.get("NGINX_BIN", "")
-    if not nginx_bin or not os.path.isfile(nginx_bin):
-        return False
-    return True
+    return bool(nginx_bin and os.path.isfile(nginx_bin))
 
 
 @pytest.mark.skip(reason=_SKIP_REASON)
@@ -259,9 +257,11 @@ def test_10_9_on_error_directive_independence():
 def main():
     """Run streaming failure/cache E2E test specifications."""
     print()
-    print("=========================================")
-    print("Streaming Failure/Cache E2E Test Specs")
-    print("=========================================")
+    _print_args(
+        "=========================================",
+        "Streaming Failure/Cache E2E Test Specs",
+        "=========================================",
+    )
     print()
     print("All 9 streaming failure/cache E2E tests are marked as")
     print("skipped (spec only). To run the native E2E harness:")
@@ -270,13 +270,21 @@ def main():
     print()
 
     if not check_prerequisites():
-        print("NGINX_BIN not set or not found.")
-        print("  Build with streaming support first:")
-        print("  cargo build --features streaming --release")
+        _print_args(
+            "NGINX_BIN not set or not found.",
+            "  Build with streaming support first:",
+            "  cargo build --features streaming --release",
+        )
         print("  NGINX_BIN=/path/to/nginx pytest test_streaming_failure_cache_e2e.py")
         return 1
 
     return 0
+
+def _print_args(arg0, arg1, arg2):
+    print(arg0)
+    print(arg1)
+    print(arg2)
+
 
 
 if __name__ == "__main__":
