@@ -260,18 +260,14 @@ pub unsafe extern "C" fn markdown_streaming_finalize(
             result_ref.markdown = Box::into_raw(md_bytes) as *mut u8;
 
             // Set ETag if generation was requested and available.
-            if generate_etag
-                && let Some(etag_str) = streaming_result.etag
-            {
+            if generate_etag && let Some(etag_str) = streaming_result.etag {
                 let etag_bytes = etag_str.into_bytes().into_boxed_slice();
                 result_ref.etag_len = etag_bytes.len();
                 result_ref.etag = Box::into_raw(etag_bytes) as *mut u8;
             }
 
             // Set token estimate if requested and available.
-            if estimate_tokens
-                && let Some(estimate) = streaming_result.token_estimate
-            {
+            if estimate_tokens && let Some(estimate) = streaming_result.token_estimate {
                 result_ref.token_estimate = estimate;
             }
 
@@ -366,14 +362,13 @@ pub unsafe extern "C" fn markdown_streaming_output_free(data: *mut u8, len: usiz
     }));
 }
 
-
 #[cfg(test)]
 #[cfg(feature = "streaming")]
 mod tests {
     use super::*;
     use crate::ffi::abi::{
-        ERROR_INTERNAL, ERROR_INVALID_INPUT, ERROR_SUCCESS, MarkdownOptions, MarkdownResult,
-        ERROR_STREAMING_FALLBACK, ERROR_BUDGET_EXCEEDED, ERROR_POST_COMMIT, ERROR_TIMEOUT,
+        ERROR_BUDGET_EXCEEDED, ERROR_INTERNAL, ERROR_INVALID_INPUT, ERROR_POST_COMMIT,
+        ERROR_STREAMING_FALLBACK, ERROR_SUCCESS, ERROR_TIMEOUT, MarkdownOptions, MarkdownResult,
     };
     use crate::ffi::exports::markdown_result_free;
 
@@ -441,7 +436,10 @@ mod tests {
         let mut result = zeroed_result();
         let rc = unsafe { markdown_streaming_finalize(handle, &mut result) };
         assert_eq!(rc, ERROR_SUCCESS, "finalize() should return SUCCESS");
-        assert!(!result.markdown.is_null(), "finalize should produce markdown");
+        assert!(
+            !result.markdown.is_null(),
+            "finalize should produce markdown"
+        );
         assert!(result.markdown_len > 0, "markdown should be non-empty");
 
         /* Verify output contains expected content */
@@ -595,13 +593,7 @@ mod tests {
             let mut out_len: usize = 0;
 
             let rc = unsafe {
-                markdown_streaming_feed(
-                    handle,
-                    ptr::null(),
-                    0,
-                    &mut out_data,
-                    &mut out_len,
-                )
+                markdown_streaming_feed(handle, ptr::null(), 0, &mut out_data, &mut out_len)
             };
             assert_eq!(rc, ERROR_SUCCESS, "Empty feed should succeed");
 
@@ -676,7 +668,10 @@ mod tests {
                 &mut out_len,
             )
         };
-        assert_eq!(rc, ERROR_INVALID_INPUT, "NULL handle should return INVALID_INPUT");
+        assert_eq!(
+            rc, ERROR_INVALID_INPUT,
+            "NULL handle should return INVALID_INPUT"
+        );
     }
 
     #[test]
@@ -686,7 +681,13 @@ mod tests {
         assert!(!handle.is_null());
 
         let rc = unsafe {
-            markdown_streaming_feed(handle, b"data".as_ptr(), 4, ptr::null_mut(), ptr::null_mut())
+            markdown_streaming_feed(
+                handle,
+                b"data".as_ptr(),
+                4,
+                ptr::null_mut(),
+                ptr::null_mut(),
+            )
         };
         assert_eq!(
             rc, ERROR_INVALID_INPUT,
@@ -734,9 +735,7 @@ mod tests {
 
     #[test]
     fn test_streaming_error_code_constants() {
-        use crate::ffi::abi::{
-            ERROR_BUDGET_EXCEEDED, ERROR_POST_COMMIT, ERROR_STREAMING_FALLBACK,
-        };
+        use crate::ffi::abi::{ERROR_BUDGET_EXCEEDED, ERROR_POST_COMMIT, ERROR_STREAMING_FALLBACK};
 
         assert_eq!(ERROR_SUCCESS, 0);
         assert_eq!(ERROR_INVALID_INPUT, 5);
