@@ -39,6 +39,10 @@ perf_completeness_*.json
 tools/corpus/samples/
 tools/corpus/test-corpus-conversion/target/
 
+# Generated large test fixtures (regenerated via tests/corpus/large/generate-large-fixtures.sh)
+tests/corpus/large/*.html
+tests/corpus/large/*.meta.json
+
 # Generic build output
 build/
 dist/
@@ -62,7 +66,6 @@ tests/**/tmp/
 .nox/
 .tox/
 .sonar/
-.sonarcloud.properties
 
 # Matrix updater transient artifact
 matrix-diff.json
