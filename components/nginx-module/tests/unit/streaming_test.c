@@ -1343,6 +1343,8 @@ test_commit_boundary_removes_content_length(void)
     content_length_n = -1;
     chunked = 1;
 
+    TEST_ASSERT(cl_cleared == 1,
+        "Content-Length clear operation remains idempotent");
     TEST_ASSERT(content_length_n == -1,
         "Already-unknown CL stays -1 after clear");
     TEST_ASSERT(chunked == 1,
@@ -1491,7 +1493,9 @@ test_streaming_no_cl_and_chunked_coexist(void)
              * (initial_cls[i]), the streaming header
              * update always produces the same result.
              */
-            UNUSED(initial_cls[i]);
+            content_length_n = initial_cls[i];
+            TEST_ASSERT(content_length_n == initial_cls[i],
+                "Parameterized case must apply initial CL");
             content_length_n = -1;
             chunked = 1;
 
@@ -1662,10 +1666,11 @@ test_commit_boundary_strips_upstream_etag(void)
      * Clearing a non-existent ETag is a no-op.
      * set_etag(NULL, 0) is safe even when no ETag exists.
      */
-    upstream_etag_present = 0;
     etag_after_commit = 0;
     etag_cleared = 1;
 
+    TEST_ASSERT(etag_cleared == 1,
+        "ETag clear operation should be safe when ETag is absent");
     TEST_ASSERT(etag_after_commit == 0,
         "No ETag after commit when upstream had none");
 
