@@ -77,10 +77,15 @@ pub fn read_fixture(path: &Path) -> Vec<u8> {
 }
 
 pub fn read_fixture_meta(path: &Path) -> FixtureMeta {
-    let meta_path = PathBuf::from(format!("{}.meta.json", path.with_extension("").display()));
-    if !meta_path.exists() {
+    let legacy_meta = PathBuf::from(format!("{}.meta.json", path.with_extension("").display()));
+    let direct_meta = PathBuf::from(format!("{}.meta.json", path.display()));
+    let meta_path = if legacy_meta.exists() {
+        legacy_meta
+    } else if direct_meta.exists() {
+        direct_meta
+    } else {
         return FixtureMeta::default();
-    }
+    };
 
     let value: serde_json::Value = serde_json::from_slice(
         &fs::read(&meta_path).unwrap_or_else(|err| panic!("read {}: {err}", meta_path.display())),
@@ -125,6 +130,37 @@ pub fn read_fixture_meta(path: &Path) -> FixtureMeta {
         known_diff_ids,
         high_risk_structures,
     }
+}
+
+pub fn normalize_whitespace_tokens(input: &str) -> String {
+    input.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+pub fn diff_summary(lhs: &str, rhs: &str) -> String {
+    if lhs == rhs {
+        return "<identical>".to_string();
+    }
+
+    let left_lines: Vec<&str> = lhs.lines().collect();
+    let right_lines: Vec<&str> = rhs.lines().collect();
+    let shared = left_lines.len().min(right_lines.len());
+
+    for idx in 0..shared {
+        if left_lines[idx] != right_lines[idx] {
+            return format!(
+                "line {} differs\n- {}\n+ {}",
+                idx + 1,
+                left_lines[idx],
+                right_lines[idx]
+            );
+        }
+    }
+
+    format!(
+        "line count differs (lhs={}, rhs={})",
+        left_lines.len(),
+        right_lines.len()
+    )
 }
 
 pub fn convert_full_buffer(
