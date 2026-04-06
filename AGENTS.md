@@ -206,6 +206,17 @@ Required:
 - For repeated assertions in multi-case e2e scripts, centralize checks in helper
   functions (for example HTTP status/header/body assertions) to keep failure
   semantics consistent and reduce copy/paste drift.
+- Checks documented as required assertions must fail the case/run when missing;
+  do not leave them as INFO-only log lines.
+
+### 19. Python e2e/tooling harness guardrails
+
+Required:
+- Binary prerequisites must validate executability, not only path existence
+  (for example `os.path.isfile(...)` plus `os.access(..., os.X_OK)`, or
+  `shutil.which(...)`).
+- Harness checks that represent required behavior must affect pass/fail status
+  (or exit non-zero), not only print informational diagnostics.
 
 ## Required Agent Workflow
 
@@ -214,6 +225,10 @@ Required:
 - Identify invariants likely to break (header ordering, backpressure, reason codes, buffer bounds).
 - Identify boundary surfaces up front when the change crosses layers (NGINX C, Rust core, FFI/header, docs, scripts, CI).
 - Identify minimum verification commands before writing code.
+- When remediating SonarCloud findings for a PR, fetch findings from
+  `api/issues/search` with explicit `componentKeys`, `pullRequest`,
+  and `statuses=OPEN,CONFIRMED`; do not rely solely on dashboard
+  "top issues" summaries, which may include already-closed items.
 
 ### Before writing or modifying any code (mandatory pre-output checklist)
 
@@ -251,6 +266,13 @@ For each code change you are about to produce, mentally (or explicitly in a thin
 4. String literals used 4+ times extracted into `readonly` constants. (Rule 18)
 5. macOS bash 3.2 compatible — no GNU-only flags, no `grep -P`. (Rule 11)
 6. No unsanitized path interpolation or inline code injection. (Rule 12)
+7. Required checks must fail the case/run when missing (not INFO-only). (Rule 18)
+
+#### Python test/tooling scripts (`tests/e2e/`, `tools/`)
+1. Binary prerequisites validate executability (`os.access(..., os.X_OK)` or
+   `shutil.which`), not just file existence. (Rule 19)
+2. Required harness checks affect pass/fail status (or exit non-zero), not
+   INFO-only output. (Rule 19)
 
 #### Documentation and tooling
 1. Canonical docs in `docs/` updated; no mirrored copies created. (Rule 9)
@@ -264,6 +286,8 @@ For each code change you are about to produce, mentally (or explicitly in a thin
 - Preserve NGINX event-driven semantics; no hidden blocking calls.
 - Add/adjust tests in the same change set for each fixed behavior.
 - Keep docs and validators synced when user-facing or SOP behavior changes.
+- For Sonar-driven fixes, map each change to an open issue key and
+  file/line from the current API response, and skip already-closed items.
 
 ### Before declaring completion
 Follow evidence-first verification (no completion claim without fresh command output):
