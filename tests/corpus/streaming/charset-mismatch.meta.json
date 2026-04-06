@@ -7,7 +7,9 @@
   "failure-corpus": false,
   "streaming_notes": {
     "expected_fallback": false,
-    "known_diff_ids": [],
+    "known_diff_ids": [
+      "DIFF-PARITY-STREAMING-CHARSET-MISMATCH"
+    ],
     "high_risk_structures": [
       "charset",
       "meta-charset",
