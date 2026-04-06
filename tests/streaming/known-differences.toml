@@ -108,7 +108,7 @@ fixture_contains = "complex/blog-post.html"
 
 [[difference]]
 id = "DIFF-PARITY-MALFORMED-UNCLOSED"
-description = "Malformed unclosed-tags fixture differs due recovery strategy differences"
+description = "Malformed unclosed-tags fixture differs due to recovery strategy differences"
 trigger = "Unclosed Tags Example"
 reason = "Streaming tokenizer/state-machine recovery differs from full-buffer parser recovery on severely unclosed markup"
 acceptable = true
