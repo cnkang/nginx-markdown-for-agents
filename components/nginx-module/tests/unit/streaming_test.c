@@ -135,6 +135,7 @@ static void test_output_chain_flush(void);
 static void test_size_limit_precommit(void);
 static void test_size_limit_postcommit(void);
 static void test_timeout_precommit(void);
+static int test_precommit_route(uint32_t error_code, ngx_uint_t on_error);
 
 /* Bug condition exploration test prototypes */
 static void test_bug1_fallback_return_value(void);
@@ -828,8 +829,6 @@ test_postcommit_error_ignores_on_error_policy(void)
      */
     on_error = ON_ERROR_PASS;
     commit_state = COMMIT_POST;
-    abort_called = 0;
-    empty_last_buf_sent = 0;
     postcommit_errors = 0;
     failed_total = 0;
 
@@ -860,8 +859,6 @@ test_postcommit_error_ignores_on_error_policy(void)
      * Post-commit must still fail-closed (same behavior).
      */
     on_error = ON_ERROR_REJECT;
-    abort_called = 0;
-    empty_last_buf_sent = 0;
     postcommit_errors = 0;
     failed_total = 0;
 
@@ -946,11 +943,43 @@ test_postcommit_error_debug_log_details(void)
 
     TEST_ASSERT(bytes_sent == 10 * 1024 * 1024,
         "Large bytes_sent representable");
+    TEST_ASSERT((ngx_uint_t) error_code == ERROR_MEMORY_LIMIT,
+        "error_code memory limit cast correct");
     TEST_ASSERT(chunks == 1000,
         "Large chunk count representable");
 
     TEST_PASS(
         "Post-Commit debug log fields validated");
+}
+
+/*
+ * Simulate ngx_http_markdown_streaming_handle_postcommit_error() behavior
+ * for a specific streaming error code.
+ *
+ * Returns NGX_OK when the error code is one of the expected post-commit
+ * failure codes in this suite. The behavior is fail-closed for all supported
+ * codes: abort + metric increments + terminal empty last_buf.
+ */
+static ngx_int_t
+test_simulate_postcommit_handler(uint32_t error_code,
+    int *abort_called,
+    int *empty_last_buf_sent,
+    unsigned *postcommit_errors,
+    unsigned *failed_total)
+{
+    switch (error_code) {
+    case ERROR_TIMEOUT:
+    case ERROR_MEMORY_LIMIT:
+    case ERROR_POST_COMMIT:
+    case ERROR_INTERNAL:
+        *abort_called = 1;
+        *empty_last_buf_sent = 1;
+        *postcommit_errors = 1;
+        *failed_total = 1;
+        return NGX_OK;
+    default:
+        return NGX_ERROR;
+    }
 }
 
 
@@ -970,9 +999,9 @@ test_postcommit_error_various_error_codes(void)
         ERROR_INTERNAL
     };
     size_t      num_codes;
-    size_t      i;
     int         abort_called;
     int         empty_last_buf_sent;
+    ngx_int_t   rc;
     unsigned    postcommit_errors;
     unsigned    failed_total;
 
@@ -981,21 +1010,21 @@ test_postcommit_error_various_error_codes(void)
 
     num_codes = ARRAY_SIZE(error_codes);
 
-    for (i = 0; i < num_codes; i++) {
+    for (size_t i = 0; i < num_codes; i++) {
         abort_called = 0;
         empty_last_buf_sent = 0;
         postcommit_errors = 0;
         failed_total = 0;
 
-        /*
-         * Simulate handle_postcommit_error for each
-         * error code: always abort + metrics + last_buf.
-         */
-        abort_called = 1;
-        postcommit_errors++;
-        failed_total++;
-        empty_last_buf_sent = 1;
+        rc = test_simulate_postcommit_handler(
+            error_codes[i],
+            &abort_called,
+            &empty_last_buf_sent,
+            &postcommit_errors,
+            &failed_total);
 
+        TEST_ASSERT(rc == NGX_OK,
+            "Post-Commit handler should accept known error codes");
         TEST_ASSERT(abort_called == 1,
             "Handle aborted for all error codes");
         TEST_ASSERT(empty_last_buf_sent == 1,
@@ -1290,12 +1319,11 @@ test_commit_boundary_removes_content_length(void)
      * 1. Clear Content-Length header
      * 2. Set content_length_n = -1
      * 3. Enable chunked transfer
+     *
+     * Initial upstream state: content_length_n=50000,
+     * cl_cleared=0, chunked=0.
+     * After commit boundary:
      */
-    content_length_n = 50000;
-    cl_cleared = 0;
-    chunked = 0;
-
-    /* Simulate commit boundary header update */
     cl_cleared = 1;
     content_length_n = -1;
     chunked = 1;
@@ -1307,10 +1335,10 @@ test_commit_boundary_removes_content_length(void)
     TEST_ASSERT(chunked == 1,
         "chunked flag should be enabled");
 
-    /* Edge case: Content-Length was already -1 (unknown) */
-    content_length_n = -1;
-    cl_cleared = 0;
-
+    /*
+     * Edge case: Content-Length was already -1 (unknown).
+     * Commit boundary still applies the same sequence.
+     */
     cl_cleared = 1;
     content_length_n = -1;
     chunked = 1;
@@ -1428,9 +1456,10 @@ test_streaming_no_cl_and_chunked_coexist(void)
      * 1. ngx_http_clear_content_length(r)
      * 2. r->headers_out.content_length_n = -1
      * 3. r->chunked = 1
+     *
+     * Initial upstream state: content_length_n=50000,
+     * chunked=0.  After streaming header update:
      */
-    content_length_n = 50000;
-    chunked = 0;
 
     /* Step 1-2: clear Content-Length */
     content_length_n = -1;
@@ -1455,13 +1484,14 @@ test_streaming_no_cl_and_chunked_coexist(void)
      */
     {
         long  initial_cls[] = {0, 1, 1024, 999999, -1};
-        size_t  i;
 
-        for (i = 0; i < ARRAY_SIZE(initial_cls); i++) {
-            content_length_n = initial_cls[i];
-            chunked = 0;
-
-            /* Apply streaming header update sequence */
+        for (size_t i = 0; i < ARRAY_SIZE(initial_cls); i++) {
+            /*
+             * Regardless of initial CL value
+             * (initial_cls[i]), the streaming header
+             * update always produces the same result.
+             */
+            UNUSED(initial_cls[i]);
             content_length_n = -1;
             chunked = 1;
 
@@ -1544,9 +1574,7 @@ test_precommit_no_header_modification(void)
      * with empty output, headers remain unchanged.
      */
     {
-        int  feed_count;
-
-        for (feed_count = 0; feed_count < 5;
+        for (int feed_count = 0; feed_count < 5;
              feed_count++)
         {
             /* Simulate feed() returning empty output */
@@ -1601,7 +1629,7 @@ static void
 test_commit_boundary_strips_upstream_etag(void)
 {
     int  upstream_etag_present;
-    int  etag_cleared;
+    int  etag_cleared = 0;
     int  etag_after_commit;
 
     TEST_SUBSECTION(
@@ -1615,7 +1643,6 @@ test_commit_boundary_strips_upstream_etag(void)
      * the upstream ETag from response headers.
      */
     upstream_etag_present = 1;
-    etag_cleared = 0;
     etag_after_commit = 1;
 
     /* Simulate commit boundary ETag clearing */
@@ -1633,12 +1660,10 @@ test_commit_boundary_strips_upstream_etag(void)
     /*
      * Edge case: upstream had no ETag.
      * Clearing a non-existent ETag is a no-op.
+     * set_etag(NULL, 0) is safe even when no ETag exists.
      */
     upstream_etag_present = 0;
-    etag_cleared = 0;
     etag_after_commit = 0;
-
-    /* set_etag(NULL, 0) is safe even when no ETag exists */
     etag_cleared = 1;
 
     TEST_ASSERT(etag_after_commit == 0,
@@ -1720,7 +1745,8 @@ test_init_failure_respects_streaming_on_error(void)
 {
     ngx_uint_t  streaming_on_error;
     ngx_uint_t  on_error;
-    int         result;
+    int         route;
+    ngx_int_t   result;
 
     TEST_SUBSECTION(
         "Init-time failure respects "
@@ -1736,8 +1762,9 @@ test_init_failure_respects_streaming_on_error(void)
 
     UNUSED(on_error);
 
-    /* Simulate precommit_error routing */
-    if (streaming_on_error == ON_ERROR_REJECT) {
+    route = test_precommit_route(ERROR_INTERNAL,
+        streaming_on_error);
+    if (route == 2) {
         result = NGX_ERROR;
     } else {
         result = NGX_DECLINED;
@@ -1757,7 +1784,9 @@ test_init_failure_respects_streaming_on_error(void)
 
     UNUSED(on_error);
 
-    if (streaming_on_error == ON_ERROR_REJECT) {
+    route = test_precommit_route(ERROR_INTERNAL,
+        streaming_on_error);
+    if (route == 2) {
         result = NGX_ERROR;
     } else {
         result = NGX_DECLINED;
@@ -1915,9 +1944,10 @@ test_config_on_error_legal_values(void)
             { "pass",   ON_ERROR_PASS },
             { "reject", ON_ERROR_REJECT }
         };
-        size_t  i;
 
-        for (i = 0; i < ARRAY_SIZE(enum_table); i++) {
+        for (size_t i = 0; i < ARRAY_SIZE(enum_table);
+             i++)
+        {
             TEST_ASSERT(
                 enum_table[i].name != NULL,
                 "Enum entry name should not be NULL");
@@ -2062,14 +2092,13 @@ test_config_on_error_invalid_values(void)
         "true", "false", "yes", "no", ""
     };
     size_t       num_values;
-    size_t       i;
 
     TEST_SUBSECTION(
         "Config: streaming_on_error invalid values");
 
     num_values = ARRAY_SIZE(invalid_values);
 
-    for (i = 0; i < num_values; i++) {
+    for (size_t i = 0; i < num_values; i++) {
         const char  *val;
         int          is_valid;
 

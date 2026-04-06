@@ -280,10 +280,9 @@ def main():
 
     return 0
 
-def _print_args(arg0, arg1, arg2):
-    print(arg0)
-    print(arg1)
-    print(arg2)
+def _print_args(*args):
+    for arg in args:
+        print(arg)
 
 
 
