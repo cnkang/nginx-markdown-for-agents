@@ -1,0 +1,36 @@
+{
+  "strictness": 2,
+  "commentTypes": ["logic", "syntax"],
+  "triggerOnUpdates": true,
+  "triggerOnDrafts": true,
+  "updateExistingSummaryComment": true,
+  "ignorePatterns": "**/*.min.*\n**/*.generated.*\n**/*.pyc\n**/__pycache__/**\n**/.pytest_cache/**\ndist/**\ncoverage/**\nnode_modules/**\ntarget/**\nperf/results/**\ndocs/archive/**\n**/*.snap\n**/fixtures/**/expected/**",
+  "instructions": "Treat AGENTS.md and .kiro/nginx-development-guide.md as primary review constraints. Prioritize regressions in streaming semantics, fail-open correctness, memory bounds, UTF-8 chunk boundaries, metrics schema consistency, and docs/tooling sync.",
+  "rules": [
+    {
+      "id": "public-behavior-compat",
+      "rule": "Do not introduce breaking changes to documented public behavior unless the PR explicitly describes compatibility impact, rollout implications, and migration guidance.",
+      "severity": "high"
+    },
+    {
+      "id": "tests-for-behavior-change",
+      "rule": "Behavior changes to negotiation, caching, streaming or buffering, fallback, parser, sanitizer, metrics, or tooling validation must include targeted regression tests (or a concrete rationale for why tests are not needed).",
+      "severity": "high"
+    },
+    {
+      "id": "docs-for-user-visible-change",
+      "rule": "Changes affecting installation, configuration, runtime behavior, operator-visible semantics, or release/rollout guidance should update the relevant docs and validators in the same PR.",
+      "severity": "high"
+    },
+    {
+      "id": "cross-boundary-sync",
+      "rule": "When C/Rust FFI interfaces, option defaults, or error mappings change, keep Rust code, C headers/callers, tests, and operator-facing docs synchronized in one change set.",
+      "severity": "high"
+    },
+    {
+      "id": "no-regex-redos-fragile-parser",
+      "rule": "For tooling validators/parsers, avoid regex constructs with overlapping quantifiers and prefer deterministic parsing for structured docs/tables.",
+      "severity": "medium"
+    }
+  ]
+}
