@@ -33,6 +33,12 @@ static ngx_str_t
 static ngx_str_t
     ngx_http_markdown_reason_streaming_skip =
         ngx_string("STREAMING_SKIP_UNSUPPORTED");
+static ngx_str_t
+    ngx_http_markdown_reason_streaming_precommit_failopen =
+        ngx_string("STREAMING_PRECOMMIT_FAILOPEN");
+static ngx_str_t
+    ngx_http_markdown_reason_streaming_precommit_reject =
+        ngx_string("STREAMING_PRECOMMIT_REJECT");
 
 /* Forward declarations */
 static ngx_int_t
@@ -62,6 +68,12 @@ ngx_http_markdown_streaming_fallback_to_fullbuffer(
     ngx_http_markdown_conf_t *conf);
 static ngx_int_t
 ngx_http_markdown_streaming_handle_postcommit_error(
+    ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx,
+    ngx_http_markdown_conf_t *conf,
+    uint32_t error_code);
+static ngx_int_t
+ngx_http_markdown_streaming_precommit_error(
     ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx,
     ngx_http_markdown_conf_t *conf,
@@ -250,8 +262,31 @@ ngx_http_markdown_select_processing_path(
         ngx_log_debug0(NGX_LOG_DEBUG_HTTP,
             r->connection->log, 0,
             "markdown filter: streaming skip: "
-            "conditional_requests full_support");
+            "conditional_requests full_support "
+            "requires full ETag before headers");
         return NGX_HTTP_MARKDOWN_PATH_FULLBUFFER;
+    }
+
+    /*
+     * Rule 5b: if_modified_since_only and disabled
+     * allow streaming — log the decision for
+     * observability.
+     */
+    if (conf->conditional_requests
+        == NGX_HTTP_MARKDOWN_CONDITIONAL_IF_MODIFIED_SINCE)
+    {
+        ngx_log_debug0(NGX_LOG_DEBUG_HTTP,
+            r->connection->log, 0,
+            "markdown filter: streaming allowed: "
+            "conditional_requests "
+            "if_modified_since_only");
+    } else if (conf->conditional_requests
+               == NGX_HTTP_MARKDOWN_CONDITIONAL_DISABLED)
+    {
+        ngx_log_debug0(NGX_LOG_DEBUG_HTTP,
+            r->connection->log, 0,
+            "markdown filter: streaming allowed: "
+            "conditional_requests disabled");
     }
 
     /* Rule 6: text/event-stream */
@@ -343,6 +378,21 @@ ngx_http_markdown_streaming_update_headers(
     /* Remove Content-Encoding if decompressing */
     if (ctx->decompression.needed) {
         ngx_http_markdown_remove_content_encoding(r);
+    }
+
+    /*
+     * Remove any upstream ETag header.
+     *
+     * In streaming mode the Markdown ETag is computed
+     * incrementally via BLAKE3 and is only available
+     * after finalize().  An upstream HTML ETag would be
+     * stale and semantically wrong for the transformed
+     * Markdown body.  Clear it unconditionally so the
+     * response never carries a mismatched ETag.
+     */
+    rc = ngx_http_markdown_set_etag(r, NULL, 0);
+    if (rc != NGX_OK) {
+        return NGX_ERROR;
     }
 
     /* Enable chunked transfer encoding */
@@ -636,6 +686,19 @@ ngx_http_markdown_streaming_handle_postcommit_error(
     ngx_http_markdown_log_decision(r, conf,
         &ngx_http_markdown_reason_streaming_fail_postcommit);
 
+    /*
+     * Debug log: bytes already sent, error type, chunks
+     * processed. Always emitted regardless of
+     * streaming_on_error (post-commit is unconditional).
+     */
+    ngx_log_debug3(NGX_LOG_DEBUG_HTTP,
+        r->connection->log, 0,
+        "markdown streaming: post-commit error, "
+        "bytes_sent=%uz, error_code=%ui, chunks=%ui",
+        ctx->streaming.total_output_bytes,
+        (ngx_uint_t) error_code,
+        ctx->streaming.chunks_processed);
+
     /* Send empty last_buf to terminate the response */
     return ngx_http_markdown_streaming_send_output(
         r, ctx, NULL, 0, /* last_buf */ 1);
@@ -643,11 +706,27 @@ ngx_http_markdown_streaming_handle_postcommit_error(
 
 
 /*
- * Pre-Commit error handler: abort handle and apply on_error policy.
+ * Pre-Commit error handler: apply streaming_on_error policy.
+ *
+ * Single entry point for all pre-commit streaming failures.
+ * Routes based on error_code and the markdown_streaming_on_error
+ * directive (not the full-buffer markdown_on_error).
+ *
+ *   error_code == ERROR_STREAMING_FALLBACK:
+ *     Capability fallback to full-buffer path, regardless of
+ *     streaming_on_error setting.
+ *
+ *   error_code == 0 (or any non-FALLBACK value):
+ *     streaming_on_error == pass  -> fail-open (original HTML)
+ *     streaming_on_error == reject -> fail-closed (error)
+ *
+ * Every non-FALLBACK call unconditionally records the appropriate
+ * reason code and increments the corresponding metrics counter so
+ * that all pre-commit failures are observable by operators.
  *
  * Returns:
- *   NGX_ERROR    if on_error == reject
- *   NGX_DECLINED if on_error == pass (fail-open, sets eligible=0)
+ *   NGX_DECLINED - fallback to full-buffer or fail-open
+ *   NGX_ERROR    - fail-closed (reject)
  *
  * The caller must NOT advance the buffer position when NGX_DECLINED
  * is returned so that the body filter can forward the unconsumed
@@ -658,24 +737,42 @@ ngx_http_markdown_streaming_precommit_error(
     ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx,
     ngx_http_markdown_conf_t *conf,
-    ngx_flag_t inc_failopen)
+    uint32_t error_code)
 {
     if (ctx->streaming.handle != NULL) {
         markdown_streaming_abort(ctx->streaming.handle);
         ctx->streaming.handle = NULL;
     }
 
+    if (error_code == ERROR_STREAMING_FALLBACK) {
+        /*
+         * Capability fallback: always fall back to full-buffer
+         * regardless of streaming_on_error setting.
+         */
+        return ngx_http_markdown_streaming_fallback_to_fullbuffer(
+            r, ctx, conf);
+    }
+
     NGX_HTTP_MARKDOWN_METRIC_INC(streaming.failed_total);
 
-    if (conf->on_error == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT) {
+    if (conf->streaming_on_error
+        == NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_REJECT)
+    {
+        /* Fail-closed: record reject metrics and reason */
+        NGX_HTTP_MARKDOWN_METRIC_INC(
+            streaming.precommit_reject_total);
+        ngx_http_markdown_log_decision(r, conf,
+            &ngx_http_markdown_reason_streaming_precommit_reject);
         return NGX_ERROR;
     }
 
     /* Fail-open: pass original content */
     ctx->eligible = 0;
-    if (inc_failopen) {
-        ngx_http_markdown_metric_inc_failopen(conf);
-    }
+    NGX_HTTP_MARKDOWN_METRIC_INC(
+        streaming.precommit_failopen_total);
+    NGX_HTTP_MARKDOWN_METRIC_INC(failopen_count);
+    ngx_http_markdown_log_decision(r, conf,
+        &ngx_http_markdown_reason_streaming_precommit_failopen);
     return NGX_DECLINED;
 }
 
@@ -775,7 +872,7 @@ ngx_http_markdown_streaming_handle_feed_result(
             (ngx_uint_t) rc_ffi);
 
         return ngx_http_markdown_streaming_precommit_error(
-            r, ctx, conf, /* inc_failopen */ 1);
+            r, ctx, conf, rc_ffi);
     }
 
     /* Success: handle output */
@@ -882,7 +979,7 @@ ngx_http_markdown_streaming_process_chunk(
             }
 
             return ngx_http_markdown_streaming_precommit_error(
-                r, ctx, conf, /* inc_failopen */ 0);
+                r, ctx, conf, 0);
         }
 
         if (decomp_data == NULL || decomp_len == 0) {
@@ -911,7 +1008,7 @@ ngx_http_markdown_streaming_process_chunk(
         }
 
         return ngx_http_markdown_streaming_precommit_error(
-            r, ctx, conf, /* inc_failopen */ 0);
+            r, ctx, conf, 0);
     }
 
     ctx->streaming.total_input_bytes += feed_len;
@@ -935,7 +1032,7 @@ ngx_http_markdown_streaming_process_chunk(
         }
 
         return ngx_http_markdown_streaming_precommit_error(
-            r, ctx, conf, /* inc_failopen */ 0);
+            r, ctx, conf, 0);
     }
 
     /* Step 3: Save to prebuffer (Pre-Commit only) */
@@ -953,7 +1050,7 @@ ngx_http_markdown_streaming_process_chunk(
                 "limit exceeded");
 
             return ngx_http_markdown_streaming_precommit_error(
-                r, ctx, conf, /* inc_failopen */ 0);
+                r, ctx, conf, 0);
         }
     }
 
@@ -1020,7 +1117,7 @@ ngx_http_markdown_streaming_finalize_decomp(
         }
 
         return ngx_http_markdown_streaming_precommit_error(
-            r, ctx, conf, /* inc_failopen */ 1);
+            r, ctx, conf, 0);
     }
 
     if (decomp_data != NULL && decomp_len > 0) {
@@ -1119,7 +1216,7 @@ ngx_http_markdown_streaming_finalize_request(
 
         /* Pre-Commit finalize error follows configured policy */
         return ngx_http_markdown_streaming_precommit_error(
-            r, ctx, conf, /* inc_failopen */ 1);
+            r, ctx, conf, 0);
     }
 
     /* Send final Markdown output if any */
@@ -1157,13 +1254,31 @@ ngx_http_markdown_streaming_finalize_request(
         final_send_rc = NGX_OK;
     }
 
-    /* Log ETag if available */
+    /* Log ETag if available (debug observability) */
     if (result.etag != NULL && result.etag_len > 0) {
-        ngx_log_debug2(NGX_LOG_DEBUG_HTTP,
+        ngx_log_debug3(NGX_LOG_DEBUG_HTTP,
             r->connection->log, 0,
             "markdown streaming: finalize ETag "
-            "len=%uz, tokens=%ui",
-            result.etag_len,
+            "value=\"%*s\", len=%uz",
+            result.etag_len, result.etag,
+            result.etag_len);
+
+        /*
+         * Record ETag in the decision/metrics log.
+         *
+         * In streaming mode the ETag cannot appear in
+         * response headers (sent at Commit_Boundary),
+         * so we log it here for operator observability,
+         * debug correlation, and future cache-layer use.
+         */
+        ngx_log_error(NGX_LOG_INFO,
+            r->connection->log, 0,
+            "markdown streaming: etag=%*s "
+            "uri=%V "
+            "out_bytes=%uz tokens=%ui",
+            result.etag_len, result.etag,
+            &r->uri,
+            ctx->streaming.total_output_bytes,
             (ngx_uint_t) result.token_estimate);
     }
 
@@ -1238,8 +1353,8 @@ ngx_http_markdown_streaming_init_handle(
             r->connection->log, 0,
             "markdown streaming: failed to "
             "prepare conversion options");
-        ctx->eligible = 0;
-        return NGX_DECLINED;
+        return ngx_http_markdown_streaming_precommit_error(
+            r, ctx, conf, 0);
     }
 
     ctx->streaming.handle =
@@ -1249,19 +1364,8 @@ ngx_http_markdown_streaming_init_handle(
             r->connection->log, 0,
             "markdown streaming: failed to "
             "create streaming handle");
-
-        NGX_HTTP_MARKDOWN_METRIC_INC(
-            streaming.failed_total);
-
-        if (conf->on_error
-            == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT)
-        {
-            return NGX_ERROR;
-        }
-
-        ctx->eligible = 0;
-        ngx_http_markdown_metric_inc_failopen(conf);
-        return NGX_DECLINED;
+        return ngx_http_markdown_streaming_precommit_error(
+            r, ctx, conf, 0);
     }
 
     /* Register cleanup handler */
@@ -1291,8 +1395,8 @@ ngx_http_markdown_streaming_init_handle(
             markdown_streaming_abort(
                 ctx->streaming.handle);
             ctx->streaming.handle = NULL;
-            ctx->eligible = 0;
-            return NGX_DECLINED;
+            return ngx_http_markdown_streaming_precommit_error(
+                r, ctx, conf, 0);
         }
     }
 

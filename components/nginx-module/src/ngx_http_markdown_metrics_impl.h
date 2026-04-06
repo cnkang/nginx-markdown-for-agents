@@ -92,6 +92,8 @@ typedef struct {
         ngx_atomic_uint_t succeeded_total;
         ngx_atomic_uint_t failed_total;
         ngx_atomic_uint_t postcommit_error_total;
+        ngx_atomic_uint_t precommit_failopen_total;
+        ngx_atomic_uint_t precommit_reject_total;
     } streaming;
 #endif
 
@@ -217,6 +219,10 @@ ngx_http_markdown_collect_metrics_snapshot(ngx_http_markdown_metrics_snapshot_t 
         metrics->streaming.failed_total;
     snapshot->streaming.postcommit_error_total =
         metrics->streaming.postcommit_error_total;
+    snapshot->streaming.precommit_failopen_total =
+        metrics->streaming.precommit_failopen_total;
+    snapshot->streaming.precommit_reject_total =
+        metrics->streaming.precommit_reject_total;
 #endif
     snapshot->estimated_token_savings = metrics->estimated_token_savings;
 }
@@ -541,7 +547,9 @@ ngx_http_markdown_metrics_write_json(
         "    \"fallback_total\": %uA,\n"
         "    \"succeeded_total\": %uA,\n"
         "    \"failed_total\": %uA,\n"
-        "    \"postcommit_error_total\": %uA\n"
+        "    \"postcommit_error_total\": %uA,\n"
+        "    \"precommit_failopen_total\": %uA,\n"
+        "    \"precommit_reject_total\": %uA\n"
         "  },\n"
 #endif
         "  \"requests_entered\": %uA,\n"
@@ -592,6 +600,8 @@ ngx_http_markdown_metrics_write_json(
         snapshot->streaming.succeeded_total,
         snapshot->streaming.failed_total,
         snapshot->streaming.postcommit_error_total,
+        snapshot->streaming.precommit_failopen_total,
+        snapshot->streaming.precommit_reject_total,
 #endif
         snapshot->requests_entered,
         snapshot->skips.config,
@@ -675,6 +685,8 @@ ngx_http_markdown_metrics_write_text(
         "- Streaming Succeeded Total: %uA\n"
         "- Streaming Failed Total: %uA\n"
         "- Streaming Post-Commit Errors: %uA\n"
+        "- Streaming Pre-Commit Fail-Open: %uA\n"
+        "- Streaming Pre-Commit Reject: %uA\n"
 #endif
         "\n"
         "Decision Chain:\n"
@@ -723,6 +735,8 @@ ngx_http_markdown_metrics_write_text(
         snapshot->streaming.succeeded_total,
         snapshot->streaming.failed_total,
         snapshot->streaming.postcommit_error_total,
+        snapshot->streaming.precommit_failopen_total,
+        snapshot->streaming.precommit_reject_total,
 #endif
         snapshot->requests_entered,
         snapshot->skips.config,
