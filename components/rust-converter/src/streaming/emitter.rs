@@ -726,9 +726,7 @@ impl IncrementalEmitter {
                     // Prepend blockquote markers on the new line
                     if self.blockquote_depth > 0 {
                         let prefix_size = 2 * self.blockquote_depth;
-                        if self.buffer.len().saturating_add(prefix_size)
-                            > self.max_buffer_size
-                        {
+                        if self.buffer.len().saturating_add(prefix_size) > self.max_buffer_size {
                             return Err(ConversionError::BudgetExceeded {
                                 stage: "output_buffer".to_string(),
                                 used: self.buffer.len() + prefix_size,
@@ -1036,39 +1034,22 @@ mod tests {
     }
 
     /// Creates a non-self-closing `StreamEvent::StartTag` with the provided element name and attributes.
-    
     ///
-    
     /// The attribute pairs are converted to owned `String`s for the event payload.
-    
     ///
-    
     /// # Examples
-    
     ///
-    
     /// ```
-    
     /// let ev = start_tag_with_attrs("div", vec![("class", "note"), ("id", "n1")]);
-    
     /// match ev {
-    
     ///     StreamEvent::StartTag { name, attrs, self_closing } => {
-    
     ///         assert_eq!(name, "div");
-    
     ///         assert_eq!(self_closing, false);
-    
     ///         assert_eq!(attrs.get("class").map(|s| s.as_str()), Some("note"));
-    
     ///         assert_eq!(attrs.get("id").map(|s| s.as_str()), Some("n1"));
-    
     ///     }
-    
     ///     _ => panic!("unexpected event variant"),
-    
     /// }
-    
     /// ```
     fn start_tag_with_attrs(name: &str, attrs: Vec<(&str, &str)>) -> StreamEvent {
         StreamEvent::StartTag {

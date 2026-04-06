@@ -224,6 +224,61 @@ Required:
 - Harness checks that represent required behavior must affect pass/fail status
   (or exit non-zero), not only print informational diagnostics.
 
+### 20. Spec task-completion and evidence-drift guardrails
+
+Required:
+- Do not mark a spec task as complete based only on file/code presence; run the
+  corresponding verification path at least once in the current session.
+- For any newly added `#[ignore]` tests (for example large-fixture or evidence
+  pack tests), execute them explicitly with `-- --ignored` before closing the
+  spec item that introduced them.
+- If a task requires generated artifacts (for example large fixtures or JSON
+  evidence packs), generate them once and verify both existence and required
+  shape (schema/required fields), not just file creation.
+- For bounded-memory/perf evidence tests, ensure fixture construction does not
+  trivially force output-size-linear memory growth; inputs used to validate
+  working-set bounds should separate input volume from emitted Markdown volume.
+- Run at least one broad umbrella target for the touched area early (for
+  example `make test-rust-streaming`) to expose non-local blockers; if it
+  fails, report it as an open finding and do not present the spec as fully
+  complete.
+
+### 21. Warning triage and command reproducibility guardrails
+
+Required:
+- Treat compiler/test warnings as triage items, not automatic cleanup work:
+  classify each warning as either a real defect signal or expected test-harness
+  structure before deciding whether to change code.
+- When a warning is reported from one test target, run at least one broader
+  compile-only sweep for the touched area (for example `cargo test --tests
+  --no-run`) to detect the full warning surface before applying fixes.
+- Prefer fixing real unused-code warnings by removing stale fields/assignments
+  or consuming values in assertions; use blanket `allow` only for deliberate
+  shared test-support modules and keep the scope minimal.
+- In multi-crate repositories, reproduce user-provided commands in the correct
+  crate directory if repository root has no `Cargo.toml`; explicitly record the
+  effective working directory used for verification.
+
+### 22. Rust test infrastructure and feature-gated code hygiene
+
+Required:
+- Shared test utility modules included via `#[path = "..."]` in multiple
+  integration test binaries must carry `#![allow(dead_code)]` at the module
+  level, because each binary only uses a subset of the shared API and the
+  remaining functions produce noisy warnings.
+- Never remove or modify a `#[cfg(feature = "...")]`-gated import without
+  scanning the entire file for `#[cfg(feature = "...")]`-gated usages of that
+  import. Feature-gated items may appear far from their import and are invisible
+  under the default feature set; removing the import silently breaks compilation
+  under that feature flag.
+- Doc comments (`///`) must not contain blank lines between comment lines;
+  use `///` on every line (including blank doc-comment lines as `///` with no
+  trailing text). Blank lines between `///` lines trigger
+  `clippy::empty_line_after_doc_comments`.
+- Avoid `1 * N` identity multiplications in size-constant arrays; use `N`
+  directly or underscore-separated literals (`1_024`) to satisfy
+  `clippy::identity_op`.
+
 ## Required Agent Workflow
 
 ### Before coding
@@ -264,6 +319,10 @@ For each code change you are about to produce, mentally (or explicitly in a thin
 1. `cargo fmt` and `cargo clippy` clean. (Baseline)
 2. Sanitizer/HTML semantics: void elements self-closing, skip-mode name-aware, nesting-depth saturation-safe. (Rule 5)
 3. Emitter correctness: in-link markers accumulated, code-block raw content preserved, blockquote markers consistent. (Rule 6)
+4. Shared test modules included via `#[path]` must have `#![allow(dead_code)]`. (Rule 22)
+5. Never remove a `#[cfg(feature)]`-gated import without checking all `#[cfg(feature)]`-gated code in the same file. (Rule 22)
+6. Doc comments must not have blank lines between `///` lines. (Rule 22)
+7. No identity multiplications (`1 * N`) in size constants — use literals or underscored forms. (Rule 22)
 
 #### Shell scripts (`tools/`, e2e harnesses)
 1. Every `case` has a `*)` default clause. (Rule 18)
@@ -305,6 +364,10 @@ Follow evidence-first verification (no completion claim without fresh command ou
 - Streaming parser/sanitizer/error-path changes: `make test-rust-fuzz-smoke`
 - NGINX C module changes: `make test-nginx-unit`
 - Streaming runtime/e2e changes: `make verify-chunked-native-e2e-smoke` (or stronger profile when required)
+- New `#[ignore]` tests introduced in this change: run targeted
+  `cargo test ... -- --ignored` at least once and report result.
+- If warnings were part of the task or findings, include the exact warning
+  sweep command(s) and whether residual warnings remain.
 
 If full suite is too heavy for current scope, run the narrowest relevant target set and explicitly report what was not run.
 

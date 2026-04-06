@@ -30,6 +30,8 @@ impl PageMetadata {
     /// # Examples
     ///
     /// ```
+    /// use nginx_markdown_converter::metadata::PageMetadata;
+    ///
     /// let meta = PageMetadata::new();
     /// assert_eq!(meta, PageMetadata::default());
     /// assert!(meta.title.is_none() && meta.description.is_none());
@@ -45,6 +47,8 @@ impl PageMetadata {
     /// # Examples
     ///
     /// ```
+    /// use nginx_markdown_converter::metadata::PageMetadata;
+    ///
     /// let meta = PageMetadata {
     ///     title: Some("a".into()),
     ///     description: Some("bc".into()),

@@ -204,8 +204,7 @@ impl CharsetState {
                 // Only retain enough bytes for charset detection; any excess
                 // from a large chunk is kept aside and transcoded after
                 // resolution, avoiding unbounded sniff buffer growth.
-                let remaining_capacity =
-                    SNIFF_BUFFER_LIMIT.saturating_sub(sniff_buffer.len());
+                let remaining_capacity = SNIFF_BUFFER_LIMIT.saturating_sub(sniff_buffer.len());
                 let sniff_bytes = data.len().min(remaining_capacity);
                 sniff_buffer.extend_from_slice(&data[..sniff_bytes]);
 
@@ -226,11 +225,10 @@ impl CharsetState {
                     } else {
                         sniff_buffer
                     };
-                    let result =
-                        transcode_data(&mut new_state, &full_input).map_err(|e| {
-                            *self = CharsetState::Failed(format!("{}", e));
-                            e
-                        })?;
+                    let result = transcode_data(&mut new_state, &full_input).map_err(|e| {
+                        *self = CharsetState::Failed(format!("{}", e));
+                        e
+                    })?;
                     *self = new_state;
                     Ok(Cow::Owned(result))
                 } else {
@@ -322,9 +320,7 @@ impl CharsetState {
                 // last=true emits any trailing bytes buffered internally
                 // (e.g. incomplete multibyte sequences).
                 if let Some(mut dec) = decoder {
-                    let max_len = dec
-                        .max_utf8_buffer_length(0)
-                        .unwrap_or(64);
+                    let max_len = dec.max_utf8_buffer_length(0).unwrap_or(64);
                     let mut output = vec![0u8; max_len];
                     let (_result, _read, written, had_errors) =
                         dec.decode_to_utf8(&[], &mut output, true);

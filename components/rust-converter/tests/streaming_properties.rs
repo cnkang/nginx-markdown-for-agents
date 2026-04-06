@@ -954,10 +954,7 @@ fn arb_url_scenario() -> impl Strategy<Value = (String, Option<String>)> {
         "".to_string(),
         "<meta property=\"og:url\" content=\"https://og.example.com\">".to_string(),
     ]);
-    let base_url = prop::sample::select(vec![
-        None,
-        Some("https://base.example.com".to_string()),
-    ]);
+    let base_url = prop::sample::select(vec![None, Some("https://base.example.com".to_string())]);
 
     (canonical, og_url, base_url).prop_map(|(can, og, base)| {
         let html = format!(

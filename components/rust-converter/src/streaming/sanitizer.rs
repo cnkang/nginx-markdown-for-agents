@@ -23,8 +23,8 @@ use crate::streaming::types::StreamEvent;
 /// strip mode for a void element does not permanently suppress all
 /// subsequent content.
 const VOID_ELEMENTS: &[&str] = &[
-    "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param",
-    "source", "track", "wbr",
+    "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source",
+    "track", "wbr",
 ];
 
 /// Elements whose entire subtree is removed (content discarded).
@@ -158,8 +158,7 @@ impl StreamingSanitizer {
                 self_closing,
             } => {
                 let tag = name.as_str();
-                let effectively_self_closing =
-                    *self_closing || VOID_ELEMENTS.contains(&tag);
+                let effectively_self_closing = *self_closing || VOID_ELEMENTS.contains(&tag);
 
                 // If we're inside a dangerous element, track nesting but skip everything.
                 //
