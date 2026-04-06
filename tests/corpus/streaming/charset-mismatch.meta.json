@@ -1,0 +1,17 @@
+{
+  "fixture-id": "streaming/charset-mismatch",
+  "page-type": "clean-article",
+  "expected-conversion-result": "converted",
+  "input-size-bytes": 296,
+  "source-description": "Content-Type and meta charset mismatch handling",
+  "failure-corpus": false,
+  "streaming_notes": {
+    "expected_fallback": false,
+    "known_diff_ids": [],
+    "high_risk_structures": [
+      "charset",
+      "meta-charset",
+      "header-vs-meta"
+    ]
+  }
+}

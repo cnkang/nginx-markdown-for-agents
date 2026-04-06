@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Inline Spacing Fixture</title>
+</head>
+<body>
+    <!--
+        Streaming parity test fixture: inline element spacing and whitespace.
+
+        Tests consecutive whitespace collapse, <br> / <br/> handling,
+        mixed bold+italic+code in a single paragraph, and spacing around
+        links and inline spans. Streaming must normalize whitespace
+        identically to the full-buffer path.
+    -->
+    <h1>Inline and Spacing Cases</h1>
+
+    <p>Multiple      spaces should collapse in normal text flow.</p>
+    <p>Line one<br>Line two<br/>Line three</p>
+    <p><strong>Bold</strong> <em>italic</em> <code>code</code> mixed in one sentence.</p>
+    <p>Spacing around <a href="https://example.com">links</a> and <span>inline spans</span> should stay deterministic.</p>
+</body>
+</html>
