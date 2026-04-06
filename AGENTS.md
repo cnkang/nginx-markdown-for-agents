@@ -104,6 +104,13 @@ Required:
 - Detect and fail on response rendering truncation; never silently emit partial metrics payloads.
 - Set response metadata (status/content-length/content-type) only after final body length is known.
 - Keep metrics struct/schema evolution synchronized across C code, tests, docs, and snapshots.
+- When SHM-backed metrics struct layout changes, enforce a hot-reload compatibility strategy:
+  add/validate a stable layout version (or magic) in
+  `ngx_http_markdown_init_metrics_zone()` OR bump the SHM zone name so old slab
+  allocations are not reattached to a new layout.
+- Keep Prometheus metric families semantically non-overlapping: aggregate outcome
+  series must be mutually exclusive, and detailed breakdown counters must live in
+  a separate metric family/label space to avoid double-counting.
 
 ### 9. Docs/tooling drift (README vs INSTALLATION vs validators)
 Historical issues: `726865e`, `2b0bd5d`, `83eca29`, `18dfb8c`, `4b2b761`, `09f5d1d`.
@@ -113,6 +120,8 @@ Required:
 - Validation scripts must compare the same scope/section intended by spec (for example Shortest Success Path).
 - Handle duplicates/order mismatches explicitly with actionable diagnostics.
 - Avoid false positives by preserving meaningful URL path semantics in curl checks.
+- Metric names documented in tables/examples must match emitted JSON keys and
+  Prometheus series names exactly (no synthetic prefixes or renamed aliases).
 
 ### 10. Regex ReDoS and parser fragility in tooling
 Historical issues: `19875fe`, `10ea6ac`, `163f3e2`, `ea982d7`, `2103658`.
@@ -155,6 +164,10 @@ Required:
 - For streaming/parser/sanitizer fixes, include cross-boundary and malformed-input cases.
 - For streaming text-path fixes, include non-ASCII multibyte split cases (UTF-8 boundary tests).
 - Keep unit/property/fuzz/integration coverage coherent; do not rely on a single test layer.
+- Parameterized tests must actually consume per-case inputs to drive the code
+  path under test (no loops that ignore the case value and only mutate counters).
+- Prefer exercising shared routing/helpers used by production semantics over
+  duplicated inline test logic, so behavior drift is caught by tests.
 
 ### 15. Cross-language interface and FFI synchronization
 Historical issues: `dbb5722`, `dfeffc4`, `ceeaf38`, `5970807`.
@@ -164,6 +177,36 @@ Required:
 - Treat FFI comments and header docs as part of the interface contract; stale interface docs are a bug, not a cleanup item.
 - Add at least one boundary-level test when introducing or changing an FFI option/error path (for example header-level, feature-independence, or end-to-end verification).
 
+### 16. Dead stores and unused assignments in C test code
+SonarCloud rules: `c:S1854`, `c:S5955`.
+
+Required:
+- Do not assign a value to a variable that is immediately overwritten before being read. In simulation-style tests, set the final (post-action) value directly and document the initial state in a comment instead.
+- Declare loop variables (`i`, `feed_count`, etc.) inside the `for` statement when they are not used after the loop. The test code already uses C99 features, so `for (size_t i = 0; ...)` is preferred over declaring `i` at function scope.
+- When a test assigns a variable to verify a cast or representation, ensure the variable is actually read by a `TEST_ASSERT` before the function ends.
+- Initialize variables at declaration when the compiler cannot prove they are always assigned before use (for example variables set only inside conditional branches).
+
+### 17. Cognitive complexity in C functions
+SonarCloud rule: `c:S3776`.
+
+Required:
+- Keep function cognitive complexity at or below the configured threshold (currently 25).
+- Extract helper functions for self-contained sub-decisions (for example content-type exclusion checks, observability logging) to flatten the main function's control flow.
+- Prefer early-return guard clauses over nested `if`/`else` chains.
+- When adding new rules or conditions to an existing decision function, check whether the addition pushes complexity over the limit and proactively extract before merging.
+
+### 18. Shell script hygiene in e2e/tooling scripts
+SonarCloud rules: `shelldre:S131`, `shelldre:S7677`, `shelldre:S1066`, `shelldre:S1192`.
+
+Required:
+- Every `case` statement must include a default `*)` clause, even if it only logs an error to stderr.
+- Diagnostic and informational messages (INFO, WARN, DEBUG) must be redirected to stderr (`>&2`) so they do not pollute stdout when scripts are piped or their output is captured.
+- Merge nested `if` statements that have no `else` branch into a single compound condition (`if [[ cond1 ]] && cmd; then`).
+- Extract string literals used 4+ times into `readonly` constants defined near the top of the script. Grep patterns, expected header values, and expected body tokens are common candidates.
+- For repeated assertions in multi-case e2e scripts, centralize checks in helper
+  functions (for example HTTP status/header/body assertions) to keep failure
+  semantics consistent and reduce copy/paste drift.
+
 ## Required Agent Workflow
 
 ### Before coding
@@ -171,6 +214,51 @@ Required:
 - Identify invariants likely to break (header ordering, backpressure, reason codes, buffer bounds).
 - Identify boundary surfaces up front when the change crosses layers (NGINX C, Rust core, FFI/header, docs, scripts, CI).
 - Identify minimum verification commands before writing code.
+
+### Before writing or modifying any code (mandatory pre-output checklist)
+
+**Do NOT write code first and fix later. Validate BEFORE every file write/edit.**
+
+For each code change you are about to produce, mentally (or explicitly in a thinking step) walk through the applicable rules from the "Frequent Error Patterns" list above and confirm the output will not violate them. The checklist is organized by file type:
+
+#### C module code (`components/nginx-module/src/`)
+1. No dead stores — every assignment is read before the next write to the same variable. (Rule 16)
+2. No cognitive-complexity blowup — if adding branches/loops to an existing function, estimate whether the addition stays within the threshold; extract a helper proactively if it would exceed. (Rule 17)
+3. No blocking calls, no raw malloc/free, no global mutable state. (Baseline)
+4. Return codes (`NGX_OK`, `NGX_AGAIN`, `NGX_DECLINED`, `NGX_ERROR`, `NGX_DONE`) used with correct semantics. (Baseline, Rule 2)
+5. Backpressure: if the change touches body-filter output, confirm pending-chain and `last_buf` ordering are preserved. (Rule 1)
+6. Memory budgets enforced on every allocation path; auxiliary buffers freed on all exits. (Rule 3)
+7. UTF-8 chunk-boundary safety if touching streaming text paths. (Rule 4)
+8. FFI surface: if Rust structs/options/error codes change, all C headers, call sites, tests, and docs updated in the same change set. (Rule 15)
+
+#### C test code (`components/nginx-module/tests/unit/`)
+1. No dead stores — simulation-style tests set the final value directly; initial state documented in comments only. (Rule 16)
+2. Loop variables declared inside `for` when not used after the loop. (Rule 16)
+3. Every assigned variable is consumed by a `TEST_ASSERT` before function end. (Rule 16)
+4. Variables initialized at declaration when the compiler cannot prove definite assignment. (Rule 16)
+5. Parameterized loops must consume the parameter value in the exercised path; avoid no-op parameterization. (Rule 14)
+6. Where available, call shared test helpers that mirror production routing semantics instead of duplicating inline branch logic. (Rule 14)
+
+#### Rust code (`components/rust-converter/`)
+1. `cargo fmt` and `cargo clippy` clean. (Baseline)
+2. Sanitizer/HTML semantics: void elements self-closing, skip-mode name-aware, nesting-depth saturation-safe. (Rule 5)
+3. Emitter correctness: in-link markers accumulated, code-block raw content preserved, blockquote markers consistent. (Rule 6)
+
+#### Shell scripts (`tools/`, e2e harnesses)
+1. Every `case` has a `*)` default clause. (Rule 18)
+2. Diagnostic/error messages go to stderr (`>&2`). (Rule 18)
+3. No nested `if` without `else` that could be merged into a compound condition. (Rule 18)
+4. String literals used 4+ times extracted into `readonly` constants. (Rule 18)
+5. macOS bash 3.2 compatible — no GNU-only flags, no `grep -P`. (Rule 11)
+6. No unsanitized path interpolation or inline code injection. (Rule 12)
+
+#### Documentation and tooling
+1. Canonical docs in `docs/` updated; no mirrored copies created. (Rule 9)
+2. Validators/scripts consistent with the docs they check. (Rule 9)
+3. No regex with overlapping quantifiers / backtracking hotspots. (Rule 10)
+4. Metrics docs use exact emitted key/series names (JSON/Prometheus) with no naming drift. (Rules 8, 9)
+
+**If any item would be violated, redesign the change before writing it.** Do not emit code that you know will need a follow-up fix — that wastes time, wastes tokens and review cycles.
 
 ### During coding
 - Preserve NGINX event-driven semantics; no hidden blocking calls.
@@ -189,6 +277,7 @@ Follow evidence-first verification (no completion claim without fresh command ou
 If full suite is too heavy for current scope, run the narrowest relevant target set and explicitly report what was not run.
 
 ## Definition of Done for Agent Changes
+- Pre-output checklist was applied to every file written or modified (no write-first-fix-later).
 - Behavior is correct for nominal and edge-case paths.
 - Added/updated regression tests cover the fixed failure mode.
 - Related docs/validators/CI triggers stay consistent.
