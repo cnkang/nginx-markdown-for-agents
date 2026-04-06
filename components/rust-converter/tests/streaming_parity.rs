@@ -15,8 +15,8 @@ use nginx_markdown_converter::error::ConversionError;
 use streaming_test_support::{
     convert_full_buffer, convert_streaming_chunked, convert_streaming_single,
     default_streaming_budget, default_streaming_options, discover_html_fixtures,
-    evidence_output_path, fixture_relative_name, known_differences_path, read_fixture,
-    read_fixture_meta,
+    evidence_output_path, fixture_relative_name, known_differences_path,
+    normalize_whitespace_tokens, read_fixture, read_fixture_meta,
 };
 
 #[derive(Debug)]
@@ -107,6 +107,8 @@ fn compare_outputs(
 }
 
 fn unified_diff_summary(expected: &str, actual: &str) -> String {
+    const MAX_DIFF_LINES: usize = 3;
+
     if expected == actual {
         return "<identical>".to_string();
     }
@@ -114,11 +116,24 @@ fn unified_diff_summary(expected: &str, actual: &str) -> String {
     let lhs: Vec<&str> = expected.lines().collect();
     let rhs: Vec<&str> = actual.lines().collect();
     let shared = lhs.len().min(rhs.len());
+    let mut diffs = Vec::new();
 
     for idx in 0..shared {
         if lhs[idx] != rhs[idx] {
-            return format!("line {} differs\n- {}\n+ {}", idx + 1, lhs[idx], rhs[idx]);
+            diffs.push(format!(
+                "line {} differs\n- {}\n+ {}",
+                idx + 1,
+                lhs[idx],
+                rhs[idx]
+            ));
+            if diffs.len() == MAX_DIFF_LINES {
+                break;
+            }
         }
+    }
+
+    if !diffs.is_empty() {
+        return diffs.join("\n");
     }
 
     if lhs.len() != rhs.len() {
@@ -130,10 +145,6 @@ fn unified_diff_summary(expected: &str, actual: &str) -> String {
     }
 
     "outputs differ but first mismatch not localized".to_string()
-}
-
-fn normalize_whitespace_tokens(input: &str) -> String {
-    input.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 fn is_known_runtime_difference(
@@ -385,6 +396,9 @@ fn make_html_of_size(target_bytes: usize) -> Vec<u8> {
 #[test]
 #[ignore = "evidence pack generation is expensive"]
 fn bounded_memory_and_ttfb_evidence_pack() {
+    // Keep a measurable safety margin between peak-memory and input growth.
+    const PEAK_VS_INPUT_THRESHOLD: f64 = 0.9;
+
     let sizes = [
         1_024,
         10 * 1024,
@@ -462,7 +476,7 @@ fn bounded_memory_and_ttfb_evidence_pack() {
     let peak_growth = (last_peak / first_peak).max(1.0);
 
     assert!(
-        peak_growth < (input_growth * 0.9),
+        peak_growth < (input_growth * PEAK_VS_INPUT_THRESHOLD),
         "peak memory growth is too close to linear input growth: peak_growth={} input_growth={}",
         peak_growth,
         input_growth
