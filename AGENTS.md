@@ -163,6 +163,9 @@ Required:
 - Every bug fix must be accompanied by at least one targeted regression test.
 - For streaming/parser/sanitizer fixes, include cross-boundary and malformed-input cases.
 - For streaming text-path fixes, include non-ASCII multibyte split cases (UTF-8 boundary tests).
+- Streaming chunk-split fuzz targets must exercise multi-boundary patterns (for
+  example many small chunks plus skewed large chunks), not only a single
+  two-chunk split.
 - Keep unit/property/fuzz/integration coverage coherent; do not rely on a single test layer.
 - Parameterized tests must actually consume per-case inputs to drive the code
   path under test (no loops that ignore the case value and only mutate counters).

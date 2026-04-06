@@ -6,10 +6,7 @@ use nginx_markdown_converter::streaming::converter::StreamingConverter;
 
 /// Feed random bytes as multiple small chunks to stress cross-boundary handling.
 fuzz_target!(|data: &[u8]| {
-    let mut conv = StreamingConverter::new(
-        ConversionOptions::default(),
-        MemoryBudget::default(),
-    );
+    let mut conv = StreamingConverter::new(ConversionOptions::default(), MemoryBudget::default());
     conv.set_content_type(Some("text/html; charset=UTF-8".to_string()));
 
     // Feed in 64-byte chunks to exercise cross-boundary token handling.
