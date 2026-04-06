@@ -39,7 +39,11 @@ _SKIP_REASON = (
 def check_prerequisites():
     """Check if streaming failure/cache E2E tests can run."""
     nginx_bin = os.environ.get("NGINX_BIN", "")
-    return bool(nginx_bin and os.path.isfile(nginx_bin))
+    return bool(
+        nginx_bin
+        and os.path.isfile(nginx_bin)
+        and os.access(nginx_bin, os.X_OK)
+    )
 
 
 @pytest.mark.skip(reason=_SKIP_REASON)

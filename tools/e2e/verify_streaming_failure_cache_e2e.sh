@@ -49,6 +49,9 @@ readonly PATTERN_TRANSFER_CHUNKED='^Transfer-Encoding:.*chunked'
 readonly PATTERN_VARY_ACCEPT='^Vary:.*Accept'
 readonly PATTERN_MARKDOWN_HEADING='^# '
 readonly EXPECTED_HEADING='# Simple Test Page'
+readonly MSG_EXPECTED_HTTP_200='expected HTTP 200'
+readonly MSG_EXPECTED_CT_MARKDOWN='expected Content-Type text/markdown'
+readonly MSG_MISSING_CONVERTED_HEADING='missing converted heading in body'
 
 # shellcheck source=tools/lib/nginx_markdown_native_build.sh
 source "${NATIVE_BUILD_HELPER}"
@@ -823,17 +826,20 @@ curl -sS -D "${RAW_DIR}/t01.hdr" -o "${RAW_DIR}/t01.body" \
 t01_pass=1
 
 assert_http_200 "${RAW_DIR}/t01.hdr" "10.1" t01_pass \
-    "expected HTTP 200"
+    "${MSG_EXPECTED_HTTP_200}"
 assert_content_type_markdown "${RAW_DIR}/t01.hdr" "10.1" t01_pass \
-    "expected Content-Type text/markdown"
+    "${MSG_EXPECTED_CT_MARKDOWN}"
 assert_no_header "${RAW_DIR}/t01.hdr" "${PATTERN_ETAG}" "10.1" t01_pass \
     "ETag should NOT be in streaming response headers"
 assert_body_contains "${RAW_DIR}/t01.body" "${EXPECTED_HEADING}" "10.1" \
-    t01_pass "missing converted heading in body"
+    t01_pass "${MSG_MISSING_CONVERTED_HEADING}"
 
 # Verify ETag in NGINX debug log
 if grep -q 'etag' "${RUNTIME}/logs/error.log"; then
-    echo "  10.1 INFO: ETag reference found in log"
+    echo "  10.1 INFO: ETag reference found in log" >&2
+else
+    echo "  10.1 FAIL: expected etag reference in error log" >&2
+    exit 1
 fi
 
 if [[ ${t01_pass} -eq 1 ]]; then
@@ -853,13 +859,13 @@ curl -sS -D "${RAW_DIR}/t01b.hdr" -o "${RAW_DIR}/t01b.body" \
 t01b_pass=1
 
 assert_http_200 "${RAW_DIR}/t01b.hdr" "10.1b" t01b_pass \
-    "expected HTTP 200"
+    "${MSG_EXPECTED_HTTP_200}"
 assert_content_type_markdown "${RAW_DIR}/t01b.hdr" "10.1b" t01b_pass \
-    "expected Content-Type text/markdown"
+    "${MSG_EXPECTED_CT_MARKDOWN}"
 assert_no_header "${RAW_DIR}/t01b.hdr" "${PATTERN_ETAG}" "10.1b" t01b_pass \
     "upstream ETag leaked through streaming path"
 assert_body_contains "${RAW_DIR}/t01b.body" "${EXPECTED_HEADING}" "10.1b" \
-    t01b_pass "missing converted heading in body"
+    t01b_pass "${MSG_MISSING_CONVERTED_HEADING}"
 
 if [[ ${t01b_pass} -eq 1 ]]; then
     report_case "10.1b" "PASS" "Upstream ETag stripped in streaming"
@@ -947,8 +953,7 @@ fi
 if [[ "${t04_code}" == "200" || "${t04_code}" == "000" ]]; then
     report_case "10.4" "PASS" "Post-commit failure (truncated or conn error)"
 else
-    # Even non-200 is acceptable if headers were already committed
-    report_case "10.4" "PASS" "Post-commit failure (status: ${t04_code})"
+    report_case "10.4" "FAIL" "Post-commit failure (status: ${t04_code})"
 fi
 
 # ---------------------------------------------------------------------------
@@ -962,15 +967,15 @@ curl -sS -D "${RAW_DIR}/t05.hdr" -o "${RAW_DIR}/t05.body" \
 t05_pass=1
 
 assert_http_200 "${RAW_DIR}/t05.hdr" "10.5" t05_pass \
-    "expected HTTP 200"
+    "${MSG_EXPECTED_HTTP_200}"
 assert_content_type_markdown "${RAW_DIR}/t05.hdr" "10.5" t05_pass \
-    "expected Content-Type text/markdown"
+    "${MSG_EXPECTED_CT_MARKDOWN}"
 assert_has_header "${RAW_DIR}/t05.hdr" "${PATTERN_ETAG}" "10.5" t05_pass \
     "ETag missing (full-buffer path should produce ETag)"
 assert_has_header "${RAW_DIR}/t05.hdr" "${PATTERN_CL}" "10.5" t05_pass \
     "Content-Length missing (full-buffer path should set it)"
 assert_body_contains "${RAW_DIR}/t05.body" "${EXPECTED_HEADING}" "10.5" \
-    t05_pass "missing converted heading"
+    t05_pass "${MSG_MISSING_CONVERTED_HEADING}"
 
 if [[ ${t05_pass} -eq 1 ]]; then
     report_case "10.5" "PASS" "full_support forces full-buffer path"
@@ -989,15 +994,15 @@ curl -sS -D "${RAW_DIR}/t06.hdr" -o "${RAW_DIR}/t06.body" \
 t06_pass=1
 
 assert_http_200 "${RAW_DIR}/t06.hdr" "10.6" t06_pass \
-    "expected HTTP 200"
+    "${MSG_EXPECTED_HTTP_200}"
 assert_content_type_markdown "${RAW_DIR}/t06.hdr" "10.6" t06_pass \
-    "expected Content-Type text/markdown"
+    "${MSG_EXPECTED_CT_MARKDOWN}"
 assert_no_header "${RAW_DIR}/t06.hdr" "${PATTERN_CL}" "10.6" t06_pass \
     "Content-Length present (should be streaming, not full-buffer)"
 assert_no_header "${RAW_DIR}/t06.hdr" "${PATTERN_ETAG}" "10.6" t06_pass \
     "ETag present (streaming path must not include ETag)"
 assert_body_contains "${RAW_DIR}/t06.body" "${EXPECTED_HEADING}" "10.6" \
-    t06_pass "missing converted heading"
+    t06_pass "${MSG_MISSING_CONVERTED_HEADING}"
 
 if [[ ${t06_pass} -eq 1 ]]; then
     report_case "10.6" "PASS" "if_modified_since_only allows streaming"
@@ -1017,9 +1022,9 @@ curl -sS -D "${RAW_DIR}/t07.hdr" -o "${RAW_DIR}/t07.body" \
 t07_pass=1
 
 assert_http_200 "${RAW_DIR}/t07.hdr" "10.7" t07_pass \
-    "expected HTTP 200"
+    "${MSG_EXPECTED_HTTP_200}"
 assert_content_type_markdown "${RAW_DIR}/t07.hdr" "10.7" t07_pass \
-    "expected Content-Type text/markdown"
+    "${MSG_EXPECTED_CT_MARKDOWN}"
 assert_no_header "${RAW_DIR}/t07.hdr" "${PATTERN_CL}" "10.7" t07_pass \
     "Content-Length present in streaming response"
 assert_has_header "${RAW_DIR}/t07.hdr" "${PATTERN_TRANSFER_CHUNKED}" "10.7" \
@@ -1027,7 +1032,7 @@ assert_has_header "${RAW_DIR}/t07.hdr" "${PATTERN_TRANSFER_CHUNKED}" "10.7" \
 assert_has_header "${RAW_DIR}/t07.hdr" "${PATTERN_VARY_ACCEPT}" "10.7" \
     t07_pass "missing Vary: Accept header"
 assert_body_contains "${RAW_DIR}/t07.body" "${EXPECTED_HEADING}" "10.7" \
-    t07_pass "missing converted heading"
+    t07_pass "${MSG_MISSING_CONVERTED_HEADING}"
 
 if [[ ${t07_pass} -eq 1 ]]; then
     report_case "10.7" "PASS" "Streaming response headers correct"
@@ -1046,15 +1051,15 @@ curl -sS -D "${RAW_DIR}/t08.hdr" -o "${RAW_DIR}/t08.body" \
 t08_pass=1
 
 assert_http_200 "${RAW_DIR}/t08.hdr" "10.8" t08_pass \
-    "expected HTTP 200"
+    "${MSG_EXPECTED_HTTP_200}"
 assert_content_type_markdown "${RAW_DIR}/t08.hdr" "10.8" t08_pass \
-    "expected Content-Type text/markdown"
+    "${MSG_EXPECTED_CT_MARKDOWN}"
 assert_has_header "${RAW_DIR}/t08.hdr" "${PATTERN_CL}" "10.8" t08_pass \
     "Content-Length missing (full-buffer path should set it)"
 assert_has_header "${RAW_DIR}/t08.hdr" "${PATTERN_ETAG}" "10.8" t08_pass \
     "ETag missing (full-buffer path with etag on should set it)"
 assert_body_contains "${RAW_DIR}/t08.body" "${EXPECTED_HEADING}" "10.8" \
-    t08_pass "missing converted heading"
+    t08_pass "${MSG_MISSING_CONVERTED_HEADING}"
 
 if [[ ${t08_pass} -eq 1 ]]; then
     report_case "10.8" "PASS" "streaming_engine off: 0.4.0 behavior"
