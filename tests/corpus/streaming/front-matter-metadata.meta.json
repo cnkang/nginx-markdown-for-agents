@@ -1,0 +1,17 @@
+{
+  "fixture-id": "streaming/front-matter-metadata",
+  "page-type": "documentation",
+  "expected-conversion-result": "converted",
+  "input-size-bytes": 667,
+  "source-description": "Head metadata extraction coverage for front matter paths",
+  "failure-corpus": false,
+  "streaming_notes": {
+    "expected_fallback": false,
+    "known_diff_ids": [],
+    "high_risk_structures": [
+      "front-matter",
+      "head-meta",
+      "title-priority"
+    ]
+  }
+}
