@@ -171,6 +171,10 @@ Required:
   path under test (no loops that ignore the case value and only mutate counters).
 - Prefer exercising shared routing/helpers used by production semantics over
   duplicated inline test logic, so behavior drift is caught by tests.
+- For fixture-scoped known differences, keep
+  `tests/corpus/**/.meta.json -> streaming_notes.known_diff_ids` synchronized
+  with `tests/streaming/known-differences.toml` IDs to avoid silent metadata
+  drift.
 
 ### 15. Cross-language interface and FFI synchronization
 Historical issues: `dbb5722`, `dfeffc4`, `ceeaf38`, `5970807`.
