@@ -1,0 +1,17 @@
+{
+  "fixture-id": "streaming/nested-lists-deep",
+  "page-type": "complex-common",
+  "expected-conversion-result": "converted",
+  "input-size-bytes": 1127,
+  "source-description": "Three-level mixed ordered and unordered nested list structures",
+  "failure-corpus": false,
+  "streaming_notes": {
+    "expected_fallback": false,
+    "known_diff_ids": [],
+    "high_risk_structures": [
+      "nested-list",
+      "mixed-list",
+      "code-block"
+    ]
+  }
+}

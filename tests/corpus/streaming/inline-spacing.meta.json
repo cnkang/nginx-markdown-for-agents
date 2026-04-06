@@ -1,0 +1,17 @@
+{
+  "fixture-id": "streaming/inline-spacing",
+  "page-type": "clean-article",
+  "expected-conversion-result": "converted",
+  "input-size-bytes": 508,
+  "source-description": "Inline spacing and BR handling with mixed formatting",
+  "failure-corpus": false,
+  "streaming_notes": {
+    "expected_fallback": false,
+    "known_diff_ids": [],
+    "high_risk_structures": [
+      "inline-spacing",
+      "line-break",
+      "mixed-inline-format"
+    ]
+  }
+}

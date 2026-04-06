@@ -1,0 +1,17 @@
+{
+  "fixture-id": "streaming/code-blocks-mixed",
+  "page-type": "clean-article",
+  "expected-conversion-result": "converted",
+  "input-size-bytes": 636,
+  "source-description": "Code block and inline code coverage including language tags and entities",
+  "failure-corpus": false,
+  "streaming_notes": {
+    "expected_fallback": false,
+    "known_diff_ids": [],
+    "high_risk_structures": [
+      "code-block",
+      "inline-code",
+      "entity-decoding"
+    ]
+  }
+}
