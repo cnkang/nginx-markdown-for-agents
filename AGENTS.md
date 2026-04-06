@@ -208,6 +208,12 @@ Required:
   semantics consistent and reduce copy/paste drift.
 - Checks documented as required assertions must fail the case/run when missing;
   do not leave them as INFO-only log lines.
+- `--plan`/dry-run style modes must short-circuit unconditionally before
+  runtime prerequisites (for example `NGINX_BIN` checks), regardless of other
+  option values.
+- Script usage/help text must stay synchronized with parsed flags and defaults
+  (for example every parsed `--flag` appears in `usage()` with the same default
+  variable shown to users).
 
 ### 19. Python e2e/tooling harness guardrails
 
@@ -223,7 +229,7 @@ Required:
 ### Before coding
 - Read relevant sections in `.kiro/nginx-development-guide.md` for touched area (HTTP/filter/memory/style).
 - Identify invariants likely to break (header ordering, backpressure, reason codes, buffer bounds).
-- Identify boundary surfaces up front when the change crosses layers (NGINX C, Rust core, FFI/header, docs, scripts, CI).
+- List boundary surfaces up front when the change crosses layers (NGINX C, Rust core, FFI/header, docs, scripts, CI).
 - Identify minimum verification commands before writing code.
 - When remediating SonarCloud findings for a PR, fetch findings from
   `api/issues/search` with explicit `componentKeys`, `pullRequest`,
@@ -267,6 +273,8 @@ For each code change you are about to produce, mentally (or explicitly in a thin
 5. macOS bash 3.2 compatible — no GNU-only flags, no `grep -P`. (Rule 11)
 6. No unsanitized path interpolation or inline code injection. (Rule 12)
 7. Required checks must fail the case/run when missing (not INFO-only). (Rule 18)
+8. `--plan`/dry-run modes short-circuit before runtime prerequisites. (Rule 18)
+9. `usage()` text matches parsed flags/defaults exactly. (Rule 18)
 
 #### Python test/tooling scripts (`tests/e2e/`, `tools/`)
 1. Binary prerequisites validate executability (`os.access(..., os.X_OK)` or
