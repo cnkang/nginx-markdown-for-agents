@@ -40,6 +40,15 @@ struct MarkdownOptions;
  */
 #define NGX_HTTP_MARKDOWN_STREAMING_BUDGET_DEFAULT \
     (2 * 1024 * 1024)
+
+/*
+ * Streaming on_error policy constants
+ *
+ * Controls Pre_Commit_Phase failure behavior for the
+ * markdown_streaming_on_error directive.
+ */
+#define NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_PASS    0
+#define NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_REJECT  1
 #endif /* MARKDOWN_STREAMING_ENABLED */
 
 /*
@@ -172,6 +181,7 @@ typedef struct {
 #ifdef MARKDOWN_STREAMING_ENABLED
     ngx_http_complex_value_t  *streaming_engine;  /* markdown_streaming_engine (complex value) */
     size_t                     streaming_budget;   /* markdown_streaming_budget (default: 2m) */
+    ngx_uint_t                 streaming_on_error; /* markdown_streaming_on_error pass|reject */
 #endif
 } ngx_http_markdown_conf_t;
 
@@ -455,6 +465,8 @@ typedef struct {
         ngx_atomic_t  succeeded_total;         /* Streaming successes */
         ngx_atomic_t  failed_total;            /* Streaming failures */
         ngx_atomic_t  postcommit_error_total;  /* Post-Commit errors */
+        ngx_atomic_t  precommit_failopen_total;  /* Pre-Commit fail-open */
+        ngx_atomic_t  precommit_reject_total;    /* Pre-Commit fail-closed */
     } streaming;
 #endif
 
