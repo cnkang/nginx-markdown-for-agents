@@ -56,6 +56,8 @@ NGINX_HEADER := $(NGINX_MODULE_DIR)/src/markdown_converter.h
         docs-check license-check release-gates-check release-gates-check-legacy release-gates-check-strict \
         verify-large-e2e verify-huge-native-e2e verify-huge-allowed-native-e2e \
         verify-chunked-native-e2e verify-chunked-native-e2e-smoke verify-chunked-native-e2e-stress \
+        verify-streaming-failure-cache-e2e \
+        verify-streaming-failure-cache-e2e-plan \
         test-rust-streaming \
         clean help
 
@@ -196,6 +198,12 @@ verify-chunked-native-e2e-smoke:
 verify-chunked-native-e2e-stress:
 	./tools/e2e/verify_chunked_streaming_native_e2e.sh --profile stress
 
+verify-streaming-failure-cache-e2e:
+	./tools/e2e/verify_streaming_failure_cache_e2e.sh $(E2E_ARGS)
+
+verify-streaming-failure-cache-e2e-plan:
+	./tools/e2e/verify_streaming_failure_cache_e2e.sh --plan
+
 clean:
 	cd $(RUST_DIR) && cargo clean
 	$(MAKE) -C $(NGINX_TEST_DIR) clean || true
@@ -217,6 +225,8 @@ help:
 	@echo "  test-nginx-unit-sanitize-smoke - Run nginx C smoke tests with ASan/UBSan"
 	@echo "  test-nginx-integration   - Run integration tests"
 	@echo "  test-e2e                 - Run end-to-end tests"
+	@echo "  verify-streaming-failure-cache-e2e - Run streaming failure/cache e2e tests"
+	@echo "  verify-streaming-failure-cache-e2e-plan - Print test plan only (no NGINX_BIN required)"
 	@echo "  test-all                 - Run build + rust + unit tests"
 	@echo "  sonar-compile-db         - Generate compile_commands.json for SonarQube for VS Code C/C++ analysis"
 	@echo "  test-benchmark           - Run corpus benchmark and produce Unified Report"

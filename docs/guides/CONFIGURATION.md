@@ -436,6 +436,135 @@ markdown_trust_forwarded_headers on;
 
 ---
 
+### Streaming Directives (0.5.0+)
+
+These directives control the streaming conversion path introduced in 0.5.0. They
+are only effective when `markdown_streaming_engine` is enabled. When
+`markdown_streaming_engine off` (the default), all streaming directives are ignored
+and behavior is identical to 0.4.0.
+
+#### markdown_streaming_on_error
+
+**Syntax:** `markdown_streaming_on_error pass | reject;`
+**Default:** `pass`
+**Context:** http, server, location
+
+Controls the failure behavior during the streaming Pre-Commit Phase — the window
+between when streaming conversion starts and when the first Markdown chunk is sent
+to the client.
+
+- `pass`: Fail-open. Abort the streaming conversion and serve the original HTML
+  response to the client. The client is unaware that streaming was attempted.
+- `reject`: Fail-closed. Abort the streaming conversion and return an HTTP error
+  to the client.
+
+This directive has no effect on Post-Commit Phase failures. Once the first Markdown
+chunk has been sent to the client (the Commit Boundary has been crossed), failures
+always result in fail-closed behavior: the response is truncated by sending an empty
+`last_buf`. This is not configurable because the response headers (including
+`Content-Type: text/markdown`) have already been sent and cannot be changed.
+
+**Example:**
+```nginx
+# Fail-open (default, recommended for production)
+markdown_streaming_on_error pass;
+
+# Fail-closed (strict mode)
+markdown_streaming_on_error reject;
+```
+
+#### Relationship Between `markdown_on_error` and `markdown_streaming_on_error`
+
+These two directives have completely independent scopes. Changing one never affects
+the behavior of the other.
+
+| Directive | Scope | Controls |
+|-----------|-------|----------|
+| `markdown_on_error` | Full-buffer path and incremental path | Failure behavior when full-buffer conversion fails |
+| `markdown_streaming_on_error` | Streaming path, Pre-Commit Phase only | Failure behavior when streaming pre-commit conversion fails |
+| *(not configurable)* | Streaming path, Post-Commit Phase | Always fail-closed (response truncated) |
+
+Key points for operators:
+
+- You can set `markdown_on_error reject` and `markdown_streaming_on_error pass`
+  (or any other combination) without conflict.
+- When `markdown_streaming_engine off` (the default), `markdown_streaming_on_error`
+  is ignored entirely. All failure handling follows `markdown_on_error`.
+- Neither directive controls the `ERROR_STREAMING_FALLBACK` signal. When the Rust
+  engine determines that a capability requires full-buffer processing (e.g., table
+  conversion), the fallback to full-buffer always executes regardless of either
+  directive's value.
+
+**Configuration Examples:**
+
+```nginx
+# Example 1: Production — fail-open everywhere
+# Both full-buffer and streaming failures serve original HTML
+markdown_on_error pass;
+markdown_streaming_on_error pass;
+```
+
+```nginx
+# Example 2: Strict mode — fail-closed everywhere
+# Both full-buffer and streaming failures return errors
+markdown_on_error reject;
+markdown_streaming_on_error reject;
+```
+
+```nginx
+# Example 3: Mixed — strict full-buffer, lenient streaming
+# Full-buffer failures return errors; streaming pre-commit failures
+# serve original HTML (streaming is newer, so be more lenient)
+markdown_on_error reject;
+markdown_streaming_on_error pass;
+```
+
+```nginx
+# Example 4: Full streaming setup with independent error policies
+http {
+    markdown_filter on;
+    markdown_streaming_engine on;
+    markdown_on_error pass;
+    markdown_streaming_on_error pass;
+
+    server {
+        listen 80;
+        server_name docs.example.com;
+
+        location /api-docs {
+            # Strict mode for API documentation
+            markdown_on_error reject;
+            markdown_streaming_on_error reject;
+            proxy_pass http://backend;
+        }
+
+        location /blog {
+            # Lenient mode for blog content
+            markdown_on_error pass;
+            markdown_streaming_on_error pass;
+            proxy_pass http://backend;
+        }
+    }
+}
+```
+
+**Monitoring streaming failures:**
+
+Use the metrics endpoint to monitor streaming-specific failure counters:
+
+| Metric | Meaning |
+|--------|---------|
+| `streaming_precommit_failopen_total` | Pre-commit failures handled by `pass` (fail-open) |
+| `streaming_precommit_reject_total` | Pre-commit failures handled by `reject` (fail-closed) |
+| `streaming_postcommit_error_total` | Post-commit failures (always fail-closed) |
+| `streaming_fallback_total` | Capability fallbacks to full-buffer (always executes) |
+
+If `streaming_precommit_failopen_total` or `streaming_precommit_reject_total` is
+growing, investigate the NGINX error log for the specific error types triggering
+the failures.
+
+---
+
 ### Large Response Processing
 
 #### markdown_large_body_threshold
@@ -1635,4 +1764,5 @@ tail -f /var/log/nginx/error.log | grep "conversion time"
 - **Requirements Traceability:** [../project/PROJECT_STATUS.md](../project/PROJECT_STATUS.md)
 - **Architecture Index:** [../architecture/README.md](../architecture/README.md)
 - **Configuration to Behavior Map:** [../architecture/CONFIG_BEHAVIOR_MAP.md](../architecture/CONFIG_BEHAVIOR_MAP.md)
+- **Streaming Compatibility Matrix:** [../project/compatibility-matrix-0-5-0.md](../project/compatibility-matrix-0-5-0.md)
 - **NGINX Documentation:** https://nginx.org/en/docs/
