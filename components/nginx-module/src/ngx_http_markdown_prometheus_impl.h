@@ -160,15 +160,22 @@ ngx_http_markdown_metrics_write_prometheus(
         "{result=\"fallback\"} %uA\n"
         "nginx_markdown_streaming_total"
         "{result=\"postcommit_error\"} %uA\n"
-        "nginx_markdown_streaming_total"
-        "{result=\"precommit_failopen\"} %uA\n"
-        "nginx_markdown_streaming_total"
-        "{result=\"precommit_reject\"} %uA\n"
         "\n",
         snapshot->streaming.succeeded_total,
         snapshot->streaming.failed_total,
         snapshot->streaming.fallback_total,
-        snapshot->streaming.postcommit_error_total,
+        snapshot->streaming.postcommit_error_total);
+
+    /* streaming_failures_total{stage=...} */
+    p = ngx_slprintf(p, end,
+        "# HELP nginx_markdown_streaming_failures_total "
+        "Detailed streaming pre-commit failures by stage.\n"
+        "# TYPE nginx_markdown_streaming_failures_total counter\n"
+        "nginx_markdown_streaming_failures_total"
+        "{stage=\"precommit_failopen\"} %uA\n"
+        "nginx_markdown_streaming_failures_total"
+        "{stage=\"precommit_reject\"} %uA\n"
+        "\n",
         snapshot->streaming.precommit_failopen_total,
         snapshot->streaming.precommit_reject_total);
 #endif
