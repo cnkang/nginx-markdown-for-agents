@@ -58,7 +58,8 @@ source "${NATIVE_BUILD_HELPER}"
 
 usage() {
     cat <<EOF
-Usage: $(basename "$0") [--keep-artifacts] [--nginx-bin PATH] [--port PORT]
+Usage: $(basename "$0") [--keep-artifacts] [--nginx-bin PATH]
+                          [--nginx-version VERSION] [--port PORT]
                           [--upstream-port PORT] [--markdown-max-size SIZE]
                           [--plan]
 
@@ -69,6 +70,7 @@ When NGINX_BIN is not set, exits with code 1 unless --plan is specified.
 Options:
   --keep-artifacts         Keep build artifacts after test
   --nginx-bin PATH         Path to streaming-enabled nginx binary
+  --nginx-version VERSION  NGINX version to use (default: ${NGINX_VERSION})
   --plan                   Print test plan and exit 0 (no NGINX_BIN required)
   --port PORT              NGINX listen port (default: ${PORT})
   --upstream-port PORT     Upstream server port (default: ${UPSTREAM_PORT})
@@ -341,11 +343,12 @@ echo "  - Cross-config: on_error reject + streaming_on_error pass"
 echo "  - Verify: each directive controls only its own path"
 echo ""
 
+if [[ "${PLAN_ONLY}" -eq 1 ]]; then
+    echo "Plan-only mode. All test cases documented. Exiting."
+    exit 0
+fi
+
 if [[ -z "${NGINX_BIN}" ]]; then
-    if [[ "${PLAN_ONLY}" -eq 1 ]]; then
-        echo "Plan-only mode. All test cases documented. Exiting."
-        exit 0
-    fi
     echo "NGINX_BIN not set. Cannot run E2E tests."
     echo "To run tests, set NGINX_BIN to a streaming-enabled nginx binary."
     echo ""
@@ -835,11 +838,10 @@ assert_body_contains "${RAW_DIR}/t01.body" "${EXPECTED_HEADING}" "10.1" \
     t01_pass "${MSG_MISSING_CONVERTED_HEADING}"
 
 # Verify ETag in NGINX debug log
-if grep -q 'etag' "${RUNTIME}/logs/error.log"; then
+if grep -qi 'etag' "${RUNTIME}/logs/error.log"; then
     echo "  10.1 INFO: ETag reference found in log" >&2
 else
-    echo "  10.1 FAIL: expected etag reference in error log" >&2
-    exit 1
+    mark_case_fail "10.1" "expected etag reference in error log" t01_pass
 fi
 
 if [[ ${t01_pass} -eq 1 ]]; then
@@ -1001,6 +1003,8 @@ assert_no_header "${RAW_DIR}/t06.hdr" "${PATTERN_CL}" "10.6" t06_pass \
     "Content-Length present (should be streaming, not full-buffer)"
 assert_no_header "${RAW_DIR}/t06.hdr" "${PATTERN_ETAG}" "10.6" t06_pass \
     "ETag present (streaming path must not include ETag)"
+assert_has_header "${RAW_DIR}/t06.hdr" "${PATTERN_TRANSFER_CHUNKED}" "10.6" \
+    t06_pass "Transfer-Encoding chunked missing"
 assert_body_contains "${RAW_DIR}/t06.body" "${EXPECTED_HEADING}" "10.6" \
     t06_pass "${MSG_MISSING_CONVERTED_HEADING}"
 
