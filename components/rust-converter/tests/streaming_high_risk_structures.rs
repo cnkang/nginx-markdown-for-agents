@@ -2,11 +2,14 @@
 
 #[path = "known_differences.rs"]
 mod known_differences;
+#[path = "streaming_compare_support.rs"]
+mod streaming_compare_support;
 #[path = "streaming_test_support.rs"]
 mod streaming_test_support;
 
-use known_differences::{KnownDifferences, OutputDifference};
+use known_differences::KnownDifferences;
 use nginx_markdown_converter::error::ConversionError;
+use streaming_compare_support::compare_or_known;
 use streaming_test_support::{
     convert_full_buffer, convert_streaming_chunked, convert_streaming_single,
     default_streaming_budget, default_streaming_options, known_differences_path, read_fixture,
@@ -16,53 +19,6 @@ use streaming_test_support::{
 fn fixture_path(name: &str) -> std::path::PathBuf {
     std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join(format!("../../tests/corpus/streaming/{name}.html"))
-}
-
-fn compare_or_known(
-    fixture_name: &str,
-    full: &str,
-    streaming: &str,
-    known: &KnownDifferences,
-) -> Result<(), String> {
-    if full == streaming {
-        return Ok(());
-    }
-
-    let mut diff = format!(
-        "full_len={} streaming_len={} first_mismatch={:?}",
-        full.len(),
-        streaming.len(),
-        full.chars()
-            .zip(streaming.chars())
-            .position(|(a, b)| a != b)
-    );
-    if normalize_whitespace_tokens(full) == normalize_whitespace_tokens(streaming) {
-        diff = format!("whitespace-only-parity-drift\n{diff}");
-    }
-
-    let out = OutputDifference {
-        full_buffer: full,
-        streaming,
-        diff: &diff,
-    };
-
-    if let Some(entry) = known.matches(fixture_name, &out) {
-        if !entry.acceptable {
-            return Err(format!(
-                "{fixture_name}: matched known difference {} but acceptable=false",
-                entry.id
-            ));
-        }
-        return Ok(());
-    }
-
-    Err(format!(
-        "{fixture_name}: differential mismatch\n{diff}\n--- full ---\n{full}\n--- streaming ---\n{streaming}"
-    ))
-}
-
-fn normalize_whitespace_tokens(input: &str) -> String {
-    input.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 fn assert_fixture(name: &str) {
@@ -103,7 +59,9 @@ fn assert_fixture(name: &str) {
     compare_or_known(&fixture_name, &full, &single.markdown, &known)
         .unwrap_or_else(|err| panic!("{err}"));
 
-    let chunks = vec![html.len().max(1) / 2, html.len().max(1) / 2];
+    let first = html.len().max(1) / 2;
+    let second = html.len().max(1).saturating_sub(first);
+    let chunks = vec![first, second];
     let chunked = convert_streaming_chunked(
         &html,
         &chunks,

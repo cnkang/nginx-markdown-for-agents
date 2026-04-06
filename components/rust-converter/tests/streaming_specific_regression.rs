@@ -2,6 +2,8 @@
 
 #[path = "known_differences.rs"]
 mod known_differences;
+#[path = "streaming_compare_support.rs"]
+mod streaming_compare_support;
 #[path = "streaming_test_support.rs"]
 mod streaming_test_support;
 
@@ -10,10 +12,11 @@ use std::io::{Read, Write};
 use flate2::Compression;
 use flate2::read::{GzDecoder, ZlibDecoder};
 use flate2::write::{GzEncoder, ZlibEncoder};
-use known_differences::{KnownDifferences, OutputDifference};
+use known_differences::KnownDifferences;
 use nginx_markdown_converter::converter::ConversionOptions;
 use nginx_markdown_converter::error::ConversionError;
 use nginx_markdown_converter::streaming::{MemoryBudget, StreamingConverter};
+use streaming_compare_support::compare_or_known;
 use streaming_test_support::{
     convert_full_buffer, convert_streaming_chunked, convert_streaming_single,
     default_streaming_budget, default_streaming_options, discover_html_fixtures,
@@ -146,6 +149,7 @@ fn convert_streaming_from_decoder(decoder: &mut dyn Read) -> Result<String, Conv
     conv.set_content_type(Some("text/html; charset=UTF-8".to_string()));
 
     let mut output = Vec::new();
+    // Intentionally odd-sized buffer to exercise boundary crossings in feed_chunk.
     let mut buf = [0u8; 257];
 
     loop {
@@ -163,53 +167,6 @@ fn convert_streaming_from_decoder(decoder: &mut dyn Read) -> Result<String, Conv
     let final_result = conv.finalize()?;
     output.extend_from_slice(&final_result.final_markdown);
     Ok(String::from_utf8_lossy(&output).into_owned())
-}
-
-fn normalize_whitespace_tokens(input: &str) -> String {
-    input.split_whitespace().collect::<Vec<_>>().join(" ")
-}
-
-fn compare_or_known(
-    fixture_name: &str,
-    full: &str,
-    streaming: &str,
-    known: &KnownDifferences,
-) -> Result<(), String> {
-    if full == streaming {
-        return Ok(());
-    }
-
-    let mut diff = format!(
-        "full_len={} streaming_len={} first_mismatch={:?}",
-        full.len(),
-        streaming.len(),
-        full.chars()
-            .zip(streaming.chars())
-            .position(|(a, b)| a != b),
-    );
-    if normalize_whitespace_tokens(full) == normalize_whitespace_tokens(streaming) {
-        diff = format!("whitespace-only-parity-drift\n{diff}");
-    }
-
-    let output = OutputDifference {
-        full_buffer: full,
-        streaming,
-        diff: &diff,
-    };
-
-    if let Some(entry) = known.matches(fixture_name, &output) {
-        if entry.acceptable {
-            return Ok(());
-        }
-        return Err(format!(
-            "{fixture_name}: matched known difference {} but acceptable=false",
-            entry.id
-        ));
-    }
-
-    Err(format!(
-        "{fixture_name}: differential mismatch\n{diff}\n--- full ---\n{full}\n--- streaming ---\n{streaming}"
-    ))
 }
 
 #[test]

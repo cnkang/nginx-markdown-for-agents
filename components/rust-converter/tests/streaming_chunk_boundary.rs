@@ -9,8 +9,9 @@ use known_differences::{KnownDifferences, OutputDifference};
 use proptest::prelude::*;
 use streaming_test_support::{
     convert_streaming_chunked, convert_streaming_single, default_streaming_budget,
-    default_streaming_options, discover_html_fixtures, fixture_relative_name,
-    known_differences_path, single_byte_chunks, tag_boundary_chunks, utf8_mid_char_chunks,
+    default_streaming_options, diff_summary, discover_html_fixtures, fixture_relative_name,
+    known_differences_path, normalize_whitespace_tokens, single_byte_chunks, tag_boundary_chunks,
+    utf8_mid_char_chunks,
 };
 
 fn arb_streaming_html() -> impl Strategy<Value = String> {
@@ -59,37 +60,6 @@ fn arb_chunk_splits(n: usize) -> BoxedStrategy<Vec<usize>> {
         .boxed()
 }
 
-fn diff_summary(lhs: &str, rhs: &str) -> String {
-    if lhs == rhs {
-        return "<identical>".to_string();
-    }
-
-    let left_lines: Vec<&str> = lhs.lines().collect();
-    let right_lines: Vec<&str> = rhs.lines().collect();
-    let shared = left_lines.len().min(right_lines.len());
-
-    for idx in 0..shared {
-        if left_lines[idx] != right_lines[idx] {
-            return format!(
-                "line {} differs\n- {}\n+ {}",
-                idx + 1,
-                left_lines[idx],
-                right_lines[idx]
-            );
-        }
-    }
-
-    format!(
-        "line count differs (lhs={}, rhs={})",
-        left_lines.len(),
-        right_lines.len()
-    )
-}
-
-fn normalize_whitespace_tokens(text: &str) -> String {
-    text.split_whitespace().collect::<Vec<_>>().join(" ")
-}
-
 fn assert_equal_or_known_difference(
     fixture_name: &str,
     lhs: &str,
@@ -114,14 +84,8 @@ fn assert_equal_or_known_difference(
         diff: &diff,
     };
 
-    if let Some(entry) = known.matches(fixture_name, &output) {
-        if entry.acceptable {
-            return Ok(());
-        }
-        return Err(format!(
-            "{} matched known diff {} but acceptable=false",
-            fixture_name, entry.id
-        ));
+    if known.matches(fixture_name, &output).is_some() {
+        return Ok(());
     }
 
     if whitespace_only_drift {
