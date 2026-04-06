@@ -554,12 +554,12 @@ Use the metrics endpoint to monitor streaming-specific failure counters:
 
 | Metric | Meaning |
 |--------|---------|
-| `streaming_precommit_failopen_total` | Pre-commit failures handled by `pass` (fail-open) |
-| `streaming_precommit_reject_total` | Pre-commit failures handled by `reject` (fail-closed) |
-| `streaming_postcommit_error_total` | Post-commit failures (always fail-closed) |
-| `streaming_fallback_total` | Capability fallbacks to full-buffer (always executes) |
+| `precommit_failopen_total` | Pre-commit failures handled by `pass` (fail-open) |
+| `precommit_reject_total` | Pre-commit failures handled by `reject` (fail-closed) |
+| `postcommit_error_total` | Post-commit failures (always fail-closed) |
+| `fallback_total` | Capability fallbacks to full-buffer (always executes) |
 
-If `streaming_precommit_failopen_total` or `streaming_precommit_reject_total` is
+If `precommit_failopen_total` or `precommit_reject_total` is
 growing, investigate the NGINX error log for the specific error types triggering
 the failures.
 

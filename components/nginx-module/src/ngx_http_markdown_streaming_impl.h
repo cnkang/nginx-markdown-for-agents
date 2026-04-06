@@ -158,6 +158,72 @@ ngx_http_markdown_streaming_cleanup(void *data)
 
 
 /*
+ * Check whether the content type matches any stream_types
+ * exclusion entry.
+ *
+ * Returns:
+ *   1 if the content type matches an exclusion entry
+ *   0 otherwise
+ */
+static ngx_int_t
+ngx_http_markdown_is_excluded_stream_type(
+    ngx_http_request_t *r,
+    ngx_http_markdown_conf_t *conf)
+{
+    ngx_str_t   *types;
+    ngx_uint_t   i;
+
+    if (conf->stream_types == NULL) {
+        return 0;
+    }
+
+    types = conf->stream_types->elts;
+    for (i = 0; i < conf->stream_types->nelts; i++) {
+        if (r->headers_out.content_type.len
+                >= types[i].len
+            && ngx_strncasecmp(
+                   r->headers_out.content_type.data,
+                   types[i].data,
+                   types[i].len) == 0)
+        {
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
+
+/*
+ * Log conditional_requests streaming decision for
+ * observability.  Called only for modes that allow
+ * streaming (if_modified_since_only and disabled).
+ */
+static void
+ngx_http_markdown_log_conditional_streaming(
+    ngx_http_request_t *r,
+    ngx_http_markdown_conf_t *conf)
+{
+    if (conf->conditional_requests
+        == NGX_HTTP_MARKDOWN_CONDITIONAL_IF_MODIFIED_SINCE)
+    {
+        ngx_log_debug0(NGX_LOG_DEBUG_HTTP,
+            r->connection->log, 0,
+            "markdown filter: streaming allowed: "
+            "conditional_requests "
+            "if_modified_since_only");
+    } else if (conf->conditional_requests
+               == NGX_HTTP_MARKDOWN_CONDITIONAL_DISABLED)
+    {
+        ngx_log_debug0(NGX_LOG_DEBUG_HTTP,
+            r->connection->log, 0,
+            "markdown filter: streaming allowed: "
+            "conditional_requests disabled");
+    }
+}
+
+
+/*
  * Engine selector: determine the processing path for a request.
  *
  * Evaluates the markdown_streaming_engine complex value once
@@ -267,27 +333,8 @@ ngx_http_markdown_select_processing_path(
         return NGX_HTTP_MARKDOWN_PATH_FULLBUFFER;
     }
 
-    /*
-     * Rule 5b: if_modified_since_only and disabled
-     * allow streaming — log the decision for
-     * observability.
-     */
-    if (conf->conditional_requests
-        == NGX_HTTP_MARKDOWN_CONDITIONAL_IF_MODIFIED_SINCE)
-    {
-        ngx_log_debug0(NGX_LOG_DEBUG_HTTP,
-            r->connection->log, 0,
-            "markdown filter: streaming allowed: "
-            "conditional_requests "
-            "if_modified_since_only");
-    } else if (conf->conditional_requests
-               == NGX_HTTP_MARKDOWN_CONDITIONAL_DISABLED)
-    {
-        ngx_log_debug0(NGX_LOG_DEBUG_HTTP,
-            r->connection->log, 0,
-            "markdown filter: streaming allowed: "
-            "conditional_requests disabled");
-    }
+    /* Rule 5b: log streaming-allowed decision */
+    ngx_http_markdown_log_conditional_streaming(r, conf);
 
     /* Rule 6: text/event-stream */
     if (r->headers_out.content_type.len >= 17
@@ -300,23 +347,10 @@ ngx_http_markdown_select_processing_path(
     }
 
     /* Rule 7: stream_types exclusion list */
-    if (conf->stream_types != NULL) {
-        ngx_str_t   *types;
-        ngx_uint_t   i;
-
-        types = conf->stream_types->elts;
-        for (i = 0; i < conf->stream_types->nelts; i++)
-        {
-            if (r->headers_out.content_type.len
-                    >= types[i].len
-                && ngx_strncasecmp(
-                       r->headers_out.content_type.data,
-                       types[i].data,
-                       types[i].len) == 0)
-            {
-                return NGX_HTTP_MARKDOWN_PATH_FULLBUFFER;
-            }
-        }
+    if (ngx_http_markdown_is_excluded_stream_type(
+            r, conf))
+    {
+        return NGX_HTTP_MARKDOWN_PATH_FULLBUFFER;
     }
 
     /* Rule 8: engine == on */

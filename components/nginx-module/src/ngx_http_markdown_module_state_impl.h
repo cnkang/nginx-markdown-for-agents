@@ -32,7 +32,16 @@ static struct MarkdownConverterHandle *ngx_http_markdown_converter = NULL;
 /* Global pointer to shared metrics state, resolved during worker init. */
 static ngx_http_markdown_metrics_t *ngx_http_markdown_metrics = NULL;
 static ngx_shm_zone_t *ngx_http_markdown_metrics_shm_zone = NULL;
-static ngx_str_t ngx_http_markdown_metrics_shm_name = ngx_string("nginx_markdown_metrics");
+/*
+ * Keep the metrics SHM zone name layout-versioned.
+ *
+ * ngx_http_markdown_init_metrics_zone() currently reattaches existing slab
+ * data directly from shpool->data. When ngx_http_markdown_metrics_t layout
+ * changes (for example fields appended at the tail), this version suffix
+ * prevents attaching an incompatible old allocation after hot reload.
+ */
+static ngx_str_t ngx_http_markdown_metrics_shm_name =
+    ngx_string("nginx_markdown_metrics_v2");
 static u_char ngx_http_markdown_empty_string[] = "";
 
 #define NGX_HTTP_MARKDOWN_METRIC_ADD(field, value)                                  \

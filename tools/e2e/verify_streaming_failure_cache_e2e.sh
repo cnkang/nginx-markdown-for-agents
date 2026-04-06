@@ -39,6 +39,17 @@ FAIL_COUNT=0
 SKIP_COUNT=0
 PLAN_ONLY=0
 
+# Reusable grep patterns (avoid duplicated string literals)
+readonly PATTERN_CT_MARKDOWN='^Content-Type: text/markdown'
+readonly PATTERN_CT_HTML='^Content-Type: text/html'
+readonly PATTERN_CL='^Content-Length:'
+readonly PATTERN_ETAG='^ETag:'
+readonly PATTERN_HTTP_200='HTTP/1.1 200'
+readonly PATTERN_TRANSFER_CHUNKED='^Transfer-Encoding:.*chunked'
+readonly PATTERN_VARY_ACCEPT='^Vary:.*Accept'
+readonly PATTERN_MARKDOWN_HEADING='^# '
+readonly EXPECTED_HEADING='# Simple Test Page'
+
 # shellcheck source=tools/lib/nginx_markdown_native_build.sh
 source "${NATIVE_BUILD_HELPER}"
 
@@ -104,7 +115,98 @@ report_case() {
             SKIP_COUNT=$((SKIP_COUNT + 1))
             echo "  [SKIP] ${case_id} ${desc}"
             ;;
+        *)
+            FAIL_COUNT=$((FAIL_COUNT + 1))
+            echo "  [ERROR] ${case_id} unknown status '${status}': ${desc}" >&2
+            return 1
+            ;;
     esac
+    return 0
+}
+
+mark_case_fail() {
+    local case_id="$1"
+    local message="$2"
+    local pass_var="$3"
+
+    echo "  ${case_id} FAIL: ${message}" >&2
+    printf -v "${pass_var}" '%s' 0
+    return 0
+}
+
+assert_http_200() {
+    local hdr_file="$1"
+    local case_id="$2"
+    local pass_var="$3"
+    local message="$4"
+
+    if ! grep -q "${PATTERN_HTTP_200}" "${hdr_file}"; then
+        mark_case_fail "${case_id}" "${message}" "${pass_var}"
+    fi
+    return 0
+}
+
+assert_content_type_markdown() {
+    local hdr_file="$1"
+    local case_id="$2"
+    local pass_var="$3"
+    local message="$4"
+
+    if ! grep -qi "${PATTERN_CT_MARKDOWN}" "${hdr_file}"; then
+        mark_case_fail "${case_id}" "${message}" "${pass_var}"
+    fi
+    return 0
+}
+
+assert_has_header() {
+    local hdr_file="$1"
+    local pattern="$2"
+    local case_id="$3"
+    local pass_var="$4"
+    local message="$5"
+
+    if ! grep -qi "${pattern}" "${hdr_file}"; then
+        mark_case_fail "${case_id}" "${message}" "${pass_var}"
+    fi
+    return 0
+}
+
+assert_no_header() {
+    local hdr_file="$1"
+    local pattern="$2"
+    local case_id="$3"
+    local pass_var="$4"
+    local message="$5"
+
+    if grep -qi "${pattern}" "${hdr_file}"; then
+        mark_case_fail "${case_id}" "${message}" "${pass_var}"
+    fi
+    return 0
+}
+
+assert_body_contains() {
+    local body_file="$1"
+    local pattern="$2"
+    local case_id="$3"
+    local pass_var="$4"
+    local message="$5"
+
+    if ! grep -q "${pattern}" "${body_file}"; then
+        mark_case_fail "${case_id}" "${message}" "${pass_var}"
+    fi
+    return 0
+}
+
+assert_body_not_contains() {
+    local body_file="$1"
+    local pattern="$2"
+    local case_id="$3"
+    local pass_var="$4"
+    local message="$5"
+
+    if grep -q "${pattern}" "${body_file}" 2>/dev/null; then
+        mark_case_fail "${case_id}" "${message}" "${pass_var}"
+    fi
     return 0
 }
 
@@ -193,7 +295,7 @@ echo "${SEPARATOR}"
 echo ""
 echo "10.1 Streaming success + ETag on"
 echo "  - streaming_engine on, etag on"
-echo "  - Verify: no ETag in response headers, ETag in error log"
+echo "  - Verify: no ETag in response headers, ETag in debug log"
 echo ""
 echo "10.1b Streaming strips upstream ETag"
 echo "  - streaming_engine on, etag on, upstream sends ETag header"
@@ -201,13 +303,13 @@ echo "  - Verify: upstream ETag stripped from response headers"
 echo ""
 echo "10.2 Streaming pre-commit failure + streaming_on_error pass"
 echo "  - streaming_engine on, streaming_on_error pass"
-echo "  - Trigger pre-commit error (oversize input)"
+echo "  - Trigger pre-commit failure (oversize input)"
 echo "  - Verify: HTTP 200, Content-Type text/html, complete original HTML"
 echo ""
 echo "10.3 Streaming pre-commit failure + streaming_on_error reject"
 echo "  - streaming_engine on, streaming_on_error reject"
-echo "  - Trigger pre-commit error (oversize input)"
-echo "  - Verify: HTTP error response, no partial Markdown"
+echo "  - Trigger pre-commit failure (oversize input)"
+echo "  - Verify: HTTP non-success response, no partial Markdown"
 echo ""
 echo "10.4 Streaming post-commit failure"
 echo "  - streaming_engine on"
@@ -720,29 +822,14 @@ curl -sS -D "${RAW_DIR}/t01.hdr" -o "${RAW_DIR}/t01.body" \
 
 t01_pass=1
 
-# Verify HTTP 200
-if ! grep -q 'HTTP/1.1 200' "${RAW_DIR}/t01.hdr"; then
-    echo "  10.1 FAIL: expected HTTP 200" >&2
-    t01_pass=0
-fi
-
-# Verify Content-Type is text/markdown
-if ! grep -qi '^Content-Type: text/markdown' "${RAW_DIR}/t01.hdr"; then
-    echo "  10.1 FAIL: expected Content-Type text/markdown" >&2
-    t01_pass=0
-fi
-
-# Verify NO ETag in response headers (streaming path)
-if grep -qi '^ETag:' "${RAW_DIR}/t01.hdr"; then
-    echo "  10.1 FAIL: ETag should NOT be in streaming response headers" >&2
-    t01_pass=0
-fi
-
-# Verify Markdown conversion happened (heading marker)
-if ! grep -q '# Simple Test Page' "${RAW_DIR}/t01.body"; then
-    echo "  10.1 FAIL: missing converted heading in body" >&2
-    t01_pass=0
-fi
+assert_http_200 "${RAW_DIR}/t01.hdr" "10.1" t01_pass \
+    "expected HTTP 200"
+assert_content_type_markdown "${RAW_DIR}/t01.hdr" "10.1" t01_pass \
+    "expected Content-Type text/markdown"
+assert_no_header "${RAW_DIR}/t01.hdr" "${PATTERN_ETAG}" "10.1" t01_pass \
+    "ETag should NOT be in streaming response headers"
+assert_body_contains "${RAW_DIR}/t01.body" "${EXPECTED_HEADING}" "10.1" \
+    t01_pass "missing converted heading in body"
 
 # Verify ETag in NGINX debug log
 if grep -q 'etag' "${RUNTIME}/logs/error.log"; then
@@ -765,29 +852,14 @@ curl -sS -D "${RAW_DIR}/t01b.hdr" -o "${RAW_DIR}/t01b.body" \
 
 t01b_pass=1
 
-# Verify HTTP 200
-if ! grep -q 'HTTP/1.1 200' "${RAW_DIR}/t01b.hdr"; then
-    echo "  10.1b FAIL: expected HTTP 200" >&2
-    t01b_pass=0
-fi
-
-# Verify Content-Type is text/markdown
-if ! grep -qi '^Content-Type: text/markdown' "${RAW_DIR}/t01b.hdr"; then
-    echo "  10.1b FAIL: expected Content-Type text/markdown" >&2
-    t01b_pass=0
-fi
-
-# Upstream sent ETag "upstream-etag-v1" — streaming MUST strip it
-if grep -qi '^ETag:' "${RAW_DIR}/t01b.hdr"; then
-    echo "  10.1b FAIL: upstream ETag leaked through streaming path" >&2
-    t01b_pass=0
-fi
-
-# Verify Markdown conversion happened
-if ! grep -q '# Simple Test Page' "${RAW_DIR}/t01b.body"; then
-    echo "  10.1b FAIL: missing converted heading in body" >&2
-    t01b_pass=0
-fi
+assert_http_200 "${RAW_DIR}/t01b.hdr" "10.1b" t01b_pass \
+    "expected HTTP 200"
+assert_content_type_markdown "${RAW_DIR}/t01b.hdr" "10.1b" t01b_pass \
+    "expected Content-Type text/markdown"
+assert_no_header "${RAW_DIR}/t01b.hdr" "${PATTERN_ETAG}" "10.1b" t01b_pass \
+    "upstream ETag leaked through streaming path"
+assert_body_contains "${RAW_DIR}/t01b.body" "${EXPECTED_HEADING}" "10.1b" \
+    t01b_pass "missing converted heading in body"
 
 if [[ ${t01b_pass} -eq 1 ]]; then
     report_case "10.1b" "PASS" "Upstream ETag stripped in streaming"
@@ -805,23 +877,12 @@ curl -sS -D "${RAW_DIR}/t02.hdr" -o "${RAW_DIR}/t02.body" \
 
 t02_pass=1
 
-# Verify HTTP 200 (fail-open returns original HTML)
-if ! grep -q 'HTTP/1.1 200' "${RAW_DIR}/t02.hdr"; then
-    echo "  10.2 FAIL: expected HTTP 200 for fail-open" >&2
-    t02_pass=0
-fi
-
-# Verify Content-Type is text/html (original HTML passed through)
-if ! grep -qi '^Content-Type: text/html' "${RAW_DIR}/t02.hdr"; then
-    echo "  10.2 FAIL: expected Content-Type text/html for fail-open" >&2
-    t02_pass=0
-fi
-
-# Verify body contains the end token (complete, not truncated)
-if ! grep -q "${OVERSIZE_END_TOKEN}" "${RAW_DIR}/t02.body"; then
-    echo "  10.2 FAIL: missing end token (possible truncation)" >&2
-    t02_pass=0
-fi
+assert_http_200 "${RAW_DIR}/t02.hdr" "10.2" t02_pass \
+    "expected HTTP 200 for fail-open"
+assert_has_header "${RAW_DIR}/t02.hdr" "${PATTERN_CT_HTML}" "10.2" t02_pass \
+    "expected Content-Type text/html for fail-open"
+assert_body_contains "${RAW_DIR}/t02.body" "${OVERSIZE_END_TOKEN}" "10.2" \
+    t02_pass "missing end token (possible truncation)"
 
 if [[ ${t02_pass} -eq 1 ]]; then
     report_case "10.2" "PASS" "Pre-commit fail-open returns complete HTML"
@@ -846,11 +907,8 @@ if [[ "${t03_code}" -lt 400 ]]; then
     t03_pass=0
 fi
 
-# Verify no Markdown heading in body (no partial conversion)
-if grep -q '^# ' "${RAW_DIR}/t03.body" 2>/dev/null; then
-    echo "  10.3 FAIL: unexpected Markdown content in reject response" >&2
-    t03_pass=0
-fi
+assert_body_not_contains "${RAW_DIR}/t03.body" "${PATTERN_MARKDOWN_HEADING}" \
+    "10.3" t03_pass "unexpected Markdown content in reject response"
 
 if [[ ${t03_pass} -eq 1 ]]; then
     report_case "10.3" "PASS" "Pre-commit reject returns error"
@@ -873,15 +931,14 @@ t04_code="$(curl -sS -D "${RAW_DIR}/t04.hdr" -o "${RAW_DIR}/t04.body" \
 # Post-commit failure: headers were already sent as text/markdown
 # The response may be truncated. We check that if we got a response,
 # it started as markdown (headers committed before failure).
-if [[ -s "${RAW_DIR}/t04.hdr" ]]; then
-    if grep -qi '^Content-Type: text/markdown' "${RAW_DIR}/t04.hdr"; then
-        echo "  10.4 INFO: Content-Type text/markdown confirmed (post-commit)"
-    fi
+if [[ -s "${RAW_DIR}/t04.hdr" ]] \
+    && grep -qi "${PATTERN_CT_MARKDOWN}" "${RAW_DIR}/t04.hdr"; then
+    echo "  10.4 INFO: Content-Type text/markdown confirmed (post-commit)" >&2
 fi
 
 # Check NGINX log for post-commit error indicators
 if grep -qi 'post.commit' "${RUNTIME}/logs/error.log" 2>/dev/null; then
-    echo "  10.4 INFO: post-commit error reference found in log"
+    echo "  10.4 INFO: post-commit error reference found in log" >&2
 fi
 
 # Post-commit tests are inherently harder to validate in e2e because
@@ -904,35 +961,16 @@ curl -sS -D "${RAW_DIR}/t05.hdr" -o "${RAW_DIR}/t05.body" \
 
 t05_pass=1
 
-# Verify HTTP 200
-if ! grep -q 'HTTP/1.1 200' "${RAW_DIR}/t05.hdr"; then
-    echo "  10.5 FAIL: expected HTTP 200" >&2
-    t05_pass=0
-fi
-
-# Verify Content-Type is text/markdown
-if ! grep -qi '^Content-Type: text/markdown' "${RAW_DIR}/t05.hdr"; then
-    echo "  10.5 FAIL: expected Content-Type text/markdown" >&2
-    t05_pass=0
-fi
-
-# full_support forces full-buffer, so ETag SHOULD be present
-if ! grep -qi '^ETag:' "${RAW_DIR}/t05.hdr"; then
-    echo "  10.5 FAIL: ETag missing (full-buffer path should produce ETag)" >&2
-    t05_pass=0
-fi
-
-# full-buffer path should have Content-Length
-if ! grep -qi '^Content-Length:' "${RAW_DIR}/t05.hdr"; then
-    echo "  10.5 FAIL: Content-Length missing (full-buffer path should set it)" >&2
-    t05_pass=0
-fi
-
-# Verify conversion happened
-if ! grep -q '# Simple Test Page' "${RAW_DIR}/t05.body"; then
-    echo "  10.5 FAIL: missing converted heading" >&2
-    t05_pass=0
-fi
+assert_http_200 "${RAW_DIR}/t05.hdr" "10.5" t05_pass \
+    "expected HTTP 200"
+assert_content_type_markdown "${RAW_DIR}/t05.hdr" "10.5" t05_pass \
+    "expected Content-Type text/markdown"
+assert_has_header "${RAW_DIR}/t05.hdr" "${PATTERN_ETAG}" "10.5" t05_pass \
+    "ETag missing (full-buffer path should produce ETag)"
+assert_has_header "${RAW_DIR}/t05.hdr" "${PATTERN_CL}" "10.5" t05_pass \
+    "Content-Length missing (full-buffer path should set it)"
+assert_body_contains "${RAW_DIR}/t05.body" "${EXPECTED_HEADING}" "10.5" \
+    t05_pass "missing converted heading"
 
 if [[ ${t05_pass} -eq 1 ]]; then
     report_case "10.5" "PASS" "full_support forces full-buffer path"
@@ -950,35 +988,16 @@ curl -sS -D "${RAW_DIR}/t06.hdr" -o "${RAW_DIR}/t06.body" \
 
 t06_pass=1
 
-# Verify HTTP 200
-if ! grep -q 'HTTP/1.1 200' "${RAW_DIR}/t06.hdr"; then
-    echo "  10.6 FAIL: expected HTTP 200" >&2
-    t06_pass=0
-fi
-
-# Verify Content-Type is text/markdown
-if ! grep -qi '^Content-Type: text/markdown' "${RAW_DIR}/t06.hdr"; then
-    echo "  10.6 FAIL: expected Content-Type text/markdown" >&2
-    t06_pass=0
-fi
-
-# Streaming path: no Content-Length expected
-if grep -qi '^Content-Length:' "${RAW_DIR}/t06.hdr"; then
-    echo "  10.6 FAIL: Content-Length present (should be streaming, not full-buffer)" >&2
-    t06_pass=0
-fi
-
-# Streaming path: no ETag in response headers
-if grep -qi '^ETag:' "${RAW_DIR}/t06.hdr"; then
-    echo "  10.6 FAIL: ETag present (streaming path must not include ETag)" >&2
-    t06_pass=0
-fi
-
-# Verify conversion happened
-if ! grep -q '# Simple Test Page' "${RAW_DIR}/t06.body"; then
-    echo "  10.6 FAIL: missing converted heading" >&2
-    t06_pass=0
-fi
+assert_http_200 "${RAW_DIR}/t06.hdr" "10.6" t06_pass \
+    "expected HTTP 200"
+assert_content_type_markdown "${RAW_DIR}/t06.hdr" "10.6" t06_pass \
+    "expected Content-Type text/markdown"
+assert_no_header "${RAW_DIR}/t06.hdr" "${PATTERN_CL}" "10.6" t06_pass \
+    "Content-Length present (should be streaming, not full-buffer)"
+assert_no_header "${RAW_DIR}/t06.hdr" "${PATTERN_ETAG}" "10.6" t06_pass \
+    "ETag present (streaming path must not include ETag)"
+assert_body_contains "${RAW_DIR}/t06.body" "${EXPECTED_HEADING}" "10.6" \
+    t06_pass "missing converted heading"
 
 if [[ ${t06_pass} -eq 1 ]]; then
     report_case "10.6" "PASS" "if_modified_since_only allows streaming"
@@ -997,41 +1016,18 @@ curl -sS -D "${RAW_DIR}/t07.hdr" -o "${RAW_DIR}/t07.body" \
 
 t07_pass=1
 
-# Verify HTTP 200
-if ! grep -q 'HTTP/1.1 200' "${RAW_DIR}/t07.hdr"; then
-    echo "  10.7 FAIL: expected HTTP 200" >&2
-    t07_pass=0
-fi
-
-# Verify Content-Type is text/markdown
-if ! grep -qi '^Content-Type: text/markdown' "${RAW_DIR}/t07.hdr"; then
-    echo "  10.7 FAIL: expected Content-Type text/markdown" >&2
-    t07_pass=0
-fi
-
-# Streaming: no Content-Length
-if grep -qi '^Content-Length:' "${RAW_DIR}/t07.hdr"; then
-    echo "  10.7 FAIL: Content-Length present in streaming response" >&2
-    t07_pass=0
-fi
-
-# Streaming: Transfer-Encoding chunked
-if ! grep -qi '^Transfer-Encoding:.*chunked' "${RAW_DIR}/t07.hdr"; then
-    echo "  10.7 FAIL: Transfer-Encoding chunked missing" >&2
-    t07_pass=0
-fi
-
-# Verify Vary: Accept header
-if ! grep -qi '^Vary:.*Accept' "${RAW_DIR}/t07.hdr"; then
-    echo "  10.7 FAIL: missing Vary: Accept header" >&2
-    t07_pass=0
-fi
-
-# Verify conversion happened
-if ! grep -q '# Simple Test Page' "${RAW_DIR}/t07.body"; then
-    echo "  10.7 FAIL: missing converted heading" >&2
-    t07_pass=0
-fi
+assert_http_200 "${RAW_DIR}/t07.hdr" "10.7" t07_pass \
+    "expected HTTP 200"
+assert_content_type_markdown "${RAW_DIR}/t07.hdr" "10.7" t07_pass \
+    "expected Content-Type text/markdown"
+assert_no_header "${RAW_DIR}/t07.hdr" "${PATTERN_CL}" "10.7" t07_pass \
+    "Content-Length present in streaming response"
+assert_has_header "${RAW_DIR}/t07.hdr" "${PATTERN_TRANSFER_CHUNKED}" "10.7" \
+    t07_pass "Transfer-Encoding chunked missing"
+assert_has_header "${RAW_DIR}/t07.hdr" "${PATTERN_VARY_ACCEPT}" "10.7" \
+    t07_pass "missing Vary: Accept header"
+assert_body_contains "${RAW_DIR}/t07.body" "${EXPECTED_HEADING}" "10.7" \
+    t07_pass "missing converted heading"
 
 if [[ ${t07_pass} -eq 1 ]]; then
     report_case "10.7" "PASS" "Streaming response headers correct"
@@ -1049,35 +1045,16 @@ curl -sS -D "${RAW_DIR}/t08.hdr" -o "${RAW_DIR}/t08.body" \
 
 t08_pass=1
 
-# Verify HTTP 200
-if ! grep -q 'HTTP/1.1 200' "${RAW_DIR}/t08.hdr"; then
-    echo "  10.8 FAIL: expected HTTP 200" >&2
-    t08_pass=0
-fi
-
-# Verify Content-Type is text/markdown (full-buffer conversion)
-if ! grep -qi '^Content-Type: text/markdown' "${RAW_DIR}/t08.hdr"; then
-    echo "  10.8 FAIL: expected Content-Type text/markdown" >&2
-    t08_pass=0
-fi
-
-# Full-buffer path: Content-Length SHOULD be present
-if ! grep -qi '^Content-Length:' "${RAW_DIR}/t08.hdr"; then
-    echo "  10.8 FAIL: Content-Length missing (full-buffer path should set it)" >&2
-    t08_pass=0
-fi
-
-# Full-buffer path with etag on: ETag SHOULD be present
-if ! grep -qi '^ETag:' "${RAW_DIR}/t08.hdr"; then
-    echo "  10.8 FAIL: ETag missing (full-buffer path with etag on should set it)" >&2
-    t08_pass=0
-fi
-
-# Verify conversion happened
-if ! grep -q '# Simple Test Page' "${RAW_DIR}/t08.body"; then
-    echo "  10.8 FAIL: missing converted heading" >&2
-    t08_pass=0
-fi
+assert_http_200 "${RAW_DIR}/t08.hdr" "10.8" t08_pass \
+    "expected HTTP 200"
+assert_content_type_markdown "${RAW_DIR}/t08.hdr" "10.8" t08_pass \
+    "expected Content-Type text/markdown"
+assert_has_header "${RAW_DIR}/t08.hdr" "${PATTERN_CL}" "10.8" t08_pass \
+    "Content-Length missing (full-buffer path should set it)"
+assert_has_header "${RAW_DIR}/t08.hdr" "${PATTERN_ETAG}" "10.8" t08_pass \
+    "ETag missing (full-buffer path with etag on should set it)"
+assert_body_contains "${RAW_DIR}/t08.body" "${EXPECTED_HEADING}" "10.8" \
+    t08_pass "missing converted heading"
 
 if [[ ${t08_pass} -eq 1 ]]; then
     report_case "10.8" "PASS" "streaming_engine off: 0.4.0 behavior"
@@ -1111,24 +1088,16 @@ if [[ "${t09a_code}" -lt 400 ]]; then
          "got ${t09a_code}" >&2
     t09_pass=0
 else
-    echo "  10.9a INFO: streaming_on_error=reject returned ${t09a_code}"
+    echo "  10.9a INFO: streaming_on_error=reject returned ${t09a_code}" >&2
 fi
 
 # 10.9b: streaming_on_error=pass should produce HTML pass-through
-if ! grep -q 'HTTP/1.1 200' "${RAW_DIR}/t09b.hdr"; then
-    echo "  10.9b FAIL: expected HTTP 200 for streaming_on_error=pass" >&2
-    t09_pass=0
-fi
-
-if ! grep -qi '^Content-Type: text/html' "${RAW_DIR}/t09b.hdr"; then
-    echo "  10.9b FAIL: expected text/html for streaming_on_error=pass" >&2
-    t09_pass=0
-fi
-
-if ! grep -q "${OVERSIZE_END_TOKEN}" "${RAW_DIR}/t09b.body"; then
-    echo "  10.9b FAIL: missing end token (possible truncation)" >&2
-    t09_pass=0
-fi
+assert_http_200 "${RAW_DIR}/t09b.hdr" "10.9b" t09_pass \
+    "expected HTTP 200 for streaming_on_error=pass"
+assert_has_header "${RAW_DIR}/t09b.hdr" "${PATTERN_CT_HTML}" "10.9b" t09_pass \
+    "expected text/html for streaming_on_error=pass"
+assert_body_contains "${RAW_DIR}/t09b.body" "${OVERSIZE_END_TOKEN}" "10.9b" \
+    t09_pass "missing end token (possible truncation)"
 
 if [[ ${t09_pass} -eq 1 ]]; then
     report_case "10.9" "PASS" "Directive independence verified"
