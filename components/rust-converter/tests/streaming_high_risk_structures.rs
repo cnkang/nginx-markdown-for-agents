@@ -2,7 +2,7 @@
 
 #[path = "known_differences.rs"]
 mod known_differences;
-#[path = "streaming_compare_support.rs"]
+#[path = "support/streaming_compare_support.rs"]
 mod streaming_compare_support;
 #[path = "streaming_test_support.rs"]
 mod streaming_test_support;
