@@ -147,7 +147,10 @@ Required:
   flat metric names that do not exist in any output format.
 - When docs reference derived rates (for example `shadow_diff_rate`), include
   the computation formula using real metric names so operators can reproduce
-  the calculation (for example `shadow_diff_total / shadow_total`).
+  the calculation (for example `shadow_diff_total / shadow_total`).  Verify
+  that the denominator is scoped to the same population as the numerator —
+  using a global request count as denominator for a streaming-only failure
+  count will dilute the rate during partial rollout and mask real problems.
 - Verification commands in operator docs (curl + grep/jq/python) must specify
   an explicit `Accept` header matching the output format they parse.  The
   default plain-text format uses human-readable labels that differ from JSON
@@ -228,6 +231,12 @@ Required:
   test breaks when the production logic changes.  This principle applies to
   any test that claims to verify a side-effect: the test must go through the
   code path that produces the side-effect.
+- Test assertions must align with the production semantics they claim to
+  verify.  If production code only increments a counter on success, the test
+  for the failure path must assert the counter is zero, not manually
+  increment it and assert one.  A test that encodes the opposite of the
+  production behavior will pass today but block correct future changes and
+  confuse reviewers about the intended contract.
 
 ### 15. Cross-language interface and FFI synchronization
 Historical issues: `dbb5722`, `dfeffc4`, `ceeaf38`, `5970807`.
