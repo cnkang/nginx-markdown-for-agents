@@ -12,19 +12,18 @@ fuzz_target!(|data: &[u8]| {
     let html = &data[1..];
     let split_sizes = split_sizes_from_seed(data, html.len());
 
-    // Single-chunk conversion
-    let single = match convert(html, &[html.len().max(1)]) {
-        Ok(single) => single,
-        Err(_) => return,
-    };
+    let single_res = convert(html, &[html.len().max(1)]);
+    let chunked_res = convert(html, &split_sizes);
 
-    // Chunked conversion
-    let chunked = match convert(html, &split_sizes) {
-        Ok(chunked) => chunked,
-        Err(_) => return,
-    };
+    assert_eq!(
+        single_res.is_err(),
+        chunked_res.is_err(),
+        "Chunk split changed success/error parity: split_sizes={split_sizes:?}, html={html:?}"
+    );
 
-    if single != chunked {
+    if let (Ok(single), Ok(chunked)) = (single_res, chunked_res)
+        && single != chunked
+    {
         assert_eq!(
             normalize_ascii_whitespace(&single),
             normalize_ascii_whitespace(&chunked),
