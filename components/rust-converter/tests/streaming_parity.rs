@@ -389,7 +389,7 @@ fn make_html_of_size(target_bytes: usize) -> Vec<u8> {
     html.push_str("<!DOCTYPE html><html><body>\n");
     html.push_str("<p>bounded-memory-sentinel</p>\n");
     while html.len() < target_bytes {
-        html.push_str("<!-- streaming-bounded-memory-padding -->\n");
+        html.push_str("<p>streaming-bounded-memory-padding</p>\n");
     }
     html.push_str("</body></html>\n");
     html.into_bytes()

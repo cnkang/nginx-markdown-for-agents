@@ -149,6 +149,17 @@ trigger = "streaming-fallback"
 reason = "Legacy corpus metadata does not yet mark all table-driven fallback fixtures"
 acceptable = true
 fix_version = "0.6.0"
+fixture_contains = "complex/"
+diff_contains = "streaming-fallback"
+
+[[difference]]
+id = "DIFF-PARITY-EXPECTED-FALLBACK-SIMPLE-TABLES"
+description = "simple/tables.html may fallback in streaming mode while legacy metadata is not updated"
+trigger = "streaming-fallback"
+reason = "Legacy corpus metadata does not yet mark table-driven fallback for simple/tables.html"
+acceptable = true
+fix_version = "0.6.0"
+fixture_contains = "simple/tables.html"
 diff_contains = "streaming-fallback"
 
 [[difference]]

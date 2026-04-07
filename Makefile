@@ -105,8 +105,8 @@ test-rust-fuzz-smoke:
 	cd $(RUST_DIR) && cargo +nightly fuzz run parser_html -- -max_total_time=5
 	cd $(RUST_DIR) && cargo +nightly fuzz run ffi_convert -- -max_total_time=5
 	cd $(RUST_DIR) && cargo +nightly fuzz run security_validator -- -max_total_time=5
-	cd $(RUST_DIR) && cargo +nightly fuzz run streaming_no_panic -- -max_total_time=5
-	cd $(RUST_DIR) && cargo +nightly fuzz run streaming_chunk_split -- -max_total_time=5
+	cd $(RUST_DIR) && cargo +nightly fuzz run fuzz_streaming_no_panic -- -max_total_time=5
+	cd $(RUST_DIR) && cargo +nightly fuzz run fuzz_streaming_chunk_split -- -max_total_time=5
 
 test-nginx-unit:
 	$(MAKE) -C $(NGINX_TEST_DIR) unit
