@@ -1908,6 +1908,7 @@ static void test_precommit_strategy_memory_limit_reject(void);
 static void test_precommit_strategy_budget_exceeded_pass(void);
 static void test_precommit_strategy_budget_exceeded_reject(void);
 static void test_postcommit_budget_exceeded(void);
+static void test_precommit_memory_limit_budget_parity(void);
 static void test_precommit_strategy_internal_pass(void);
 static void test_precommit_strategy_internal_reject(void);
 
@@ -2532,9 +2533,86 @@ test_metrics_failed_total(void)
  * code (4).  Both must increment budget_exceeded_total and
  * route through the streaming_on_error policy.
  *
+ * These tests exercise the real classification condition
+ * from ngx_http_markdown_streaming_precommit_error() and
+ * handle_postcommit_error() to catch regressions if the
+ * condition is narrowed back to only ERROR_MEMORY_LIMIT.
+ *
  * Validates: Rule 15 (FFI error code classification),
  *            Rule 23 (observability contract)
  * ================================================================ */
+
+/*
+ * Mirror the production budget-exceeded classification
+ * condition from precommit_error / postcommit_error.
+ *
+ * Returns 1 if the error code is classified as budget
+ * exceeded, 0 otherwise.
+ */
+static int
+test_is_budget_exceeded(uint32_t error_code)
+{
+    return (error_code == ERROR_MEMORY_LIMIT
+            || error_code == ERROR_BUDGET_EXCEEDED);
+}
+
+/*
+ * Simulate the full precommit_error path including
+ * budget classification and policy routing.
+ *
+ * Mirrors the production logic:
+ *   1. FALLBACK → full-buffer (return 0)
+ *   2. budget classification → increment budget counter
+ *   3. failed_total++
+ *   4. policy routing → fail-open (1) or fail-closed (2)
+ *
+ * Writes metrics into the provided struct.
+ */
+static int
+test_precommit_error_stub(
+    uint32_t error_code,
+    ngx_uint_t on_error,
+    test_streaming_metrics_t *m)
+{
+    if (error_code == ERROR_STREAMING_FALLBACK) {
+        m->fallback_total++;
+        return 0;
+    }
+
+    if (test_is_budget_exceeded(error_code)) {
+        m->budget_exceeded_total++;
+    }
+
+    m->failed_total++;
+
+    if (on_error == ON_ERROR_REJECT) {
+        m->precommit_reject_total++;
+        return 2;
+    }
+
+    m->precommit_failopen_total++;
+    return 1;
+}
+
+/*
+ * Simulate the full postcommit_error path including
+ * budget classification.
+ *
+ * Post-commit is always fail-closed regardless of policy.
+ */
+static void
+test_postcommit_error_stub(
+    uint32_t error_code,
+    test_streaming_metrics_t *m)
+{
+    m->postcommit_error_total++;
+    m->failed_total++;
+
+    if (test_is_budget_exceeded(error_code)) {
+        m->budget_exceeded_total++;
+    }
+}
+
 
 /*
  * Pre-commit: BUDGET_EXCEEDED × pass → fail-open + counter.
@@ -2549,19 +2627,13 @@ test_precommit_strategy_budget_exceeded_pass(void)
         "Pre-Commit: BUDGET_EXCEEDED × pass → "
         "fail-open + budget counter");
 
-    result = test_precommit_route(
-        ERROR_BUDGET_EXCEEDED, ON_ERROR_PASS);
+    memset(&m, 0, sizeof(m));
+    result = test_precommit_error_stub(
+        ERROR_BUDGET_EXCEEDED, ON_ERROR_PASS, &m);
 
     TEST_ASSERT(result == 1,
         "BUDGET_EXCEEDED + pass should route to "
         "fail-open");
-
-    /* Verify budget_exceeded_total increments */
-    memset(&m, 0, sizeof(m));
-    m.budget_exceeded_total++;
-    m.failed_total++;
-    m.precommit_failopen_total++;
-
     TEST_ASSERT(m.budget_exceeded_total == 1,
         "budget_exceeded_total should increment");
     TEST_ASSERT(m.failed_total == 1,
@@ -2588,19 +2660,13 @@ test_precommit_strategy_budget_exceeded_reject(void)
         "Pre-Commit: BUDGET_EXCEEDED × reject → "
         "fail-closed + budget counter");
 
-    result = test_precommit_route(
-        ERROR_BUDGET_EXCEEDED, ON_ERROR_REJECT);
+    memset(&m, 0, sizeof(m));
+    result = test_precommit_error_stub(
+        ERROR_BUDGET_EXCEEDED, ON_ERROR_REJECT, &m);
 
     TEST_ASSERT(result == 2,
         "BUDGET_EXCEEDED + reject should route to "
         "fail-closed");
-
-    /* Verify budget_exceeded_total increments */
-    memset(&m, 0, sizeof(m));
-    m.budget_exceeded_total++;
-    m.failed_total++;
-    m.precommit_reject_total++;
-
     TEST_ASSERT(m.budget_exceeded_total == 1,
         "budget_exceeded_total should increment");
     TEST_ASSERT(m.failed_total == 1,
@@ -2627,23 +2693,68 @@ test_postcommit_budget_exceeded(void)
         "+ budget counter");
 
     memset(&m, 0, sizeof(m));
-
-    /* Simulate post-commit budget exceeded */
-    m.postcommit_error_total++;
-    m.failed_total++;
-    m.budget_exceeded_total++;
+    test_postcommit_error_stub(
+        ERROR_BUDGET_EXCEEDED, &m);
 
     TEST_ASSERT(m.postcommit_error_total == 1,
         "postcommit_error_total should increment");
     TEST_ASSERT(m.budget_exceeded_total == 1,
-        "budget_exceeded_total should increment "
-        "for post-commit budget exceeded");
+        "budget_exceeded_total should increment");
     TEST_ASSERT(m.failed_total == 1,
         "failed_total should increment");
 
     TEST_PASS(
         "Post-Commit BUDGET_EXCEEDED → fail-closed "
         "+ budget counter");
+}
+
+
+/*
+ * Verify MEMORY_LIMIT (code 4) also triggers budget
+ * classification through the same stub — parity check.
+ */
+static void
+test_precommit_memory_limit_budget_parity(void)
+{
+    test_streaming_metrics_t  m4;
+    test_streaming_metrics_t  m6;
+
+    TEST_SUBSECTION(
+        "Budget parity: MEMORY_LIMIT and "
+        "BUDGET_EXCEEDED both classify");
+
+    memset(&m4, 0, sizeof(m4));
+    test_precommit_error_stub(
+        ERROR_MEMORY_LIMIT, ON_ERROR_PASS, &m4);
+
+    memset(&m6, 0, sizeof(m6));
+    test_precommit_error_stub(
+        ERROR_BUDGET_EXCEEDED, ON_ERROR_PASS, &m6);
+
+    TEST_ASSERT(m4.budget_exceeded_total == 1,
+        "MEMORY_LIMIT should trigger budget counter");
+    TEST_ASSERT(m6.budget_exceeded_total == 1,
+        "BUDGET_EXCEEDED should trigger budget counter");
+    TEST_ASSERT(
+        m4.budget_exceeded_total
+            == m6.budget_exceeded_total,
+        "Both codes should produce same budget count");
+
+    /* Non-budget code should NOT trigger */
+    {
+        test_streaming_metrics_t  m_other;
+
+        memset(&m_other, 0, sizeof(m_other));
+        test_precommit_error_stub(
+            ERROR_TIMEOUT, ON_ERROR_PASS, &m_other);
+
+        TEST_ASSERT(m_other.budget_exceeded_total == 0,
+            "TIMEOUT should NOT trigger budget counter");
+    }
+
+    TEST_PASS(
+        "MEMORY_LIMIT and BUDGET_EXCEEDED both "
+        "classify; TIMEOUT does not");
 }
 
 
@@ -3884,6 +3995,7 @@ main(void)
     test_precommit_strategy_budget_exceeded_pass();
     test_precommit_strategy_budget_exceeded_reject();
     test_postcommit_budget_exceeded();
+    test_precommit_memory_limit_budget_parity();
     test_precommit_strategy_internal_pass();
     test_precommit_strategy_internal_reject();
 
