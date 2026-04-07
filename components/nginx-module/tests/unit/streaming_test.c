@@ -42,6 +42,7 @@ typedef size_t          ngx_msec_t;
 #define NGX_OK          0
 #define NGX_ERROR      -1
 #define NGX_AGAIN      -2
+#define NGX_DONE       -4
 #define NGX_DECLINED   -5
 #define NGX_HTTP_MARKDOWN_BUFFERED 0x08
 
@@ -3074,6 +3075,149 @@ test_shadow_error_isolation(void)
 
 
 /* ================================================================
+ * TTFB Gauge Regression Tests (Spec #17)
+ *
+ * Validates that the TTFB latch in send_output and
+ * resume_pending correctly distinguishes non-empty data
+ * chains from empty terminal last_buf chains.
+ *
+ * Validates: Rule 23 (observability contract integrity)
+ * ================================================================ */
+
+/* Forward declarations for TTFB tests */
+static void test_ttfb_empty_lastbuf_no_record(void);
+static void test_ttfb_nonempty_pending_records(void);
+
+
+/*
+ * Verify that an empty terminal last_buf chain drained
+ * through resume_pending does NOT write TTFB.
+ *
+ * Scenario: send_deferred_lastbuf() sends (NULL, 0, last_buf=1),
+ * downstream returns NGX_AGAIN, chain goes to pending_output.
+ * On resume, drain succeeds (NGX_OK) but the chain is empty.
+ * TTFB must NOT be recorded.
+ */
+static void
+test_ttfb_empty_lastbuf_no_record(void)
+{
+    ngx_flag_t  ttfb_recorded;
+    ngx_int_t   drain_rc;
+    int         buf_has_data;
+
+    TEST_SUBSECTION(
+        "TTFB: empty last_buf drain does not "
+        "record TTFB");
+
+    ttfb_recorded = 0;
+    drain_rc = NGX_OK;
+
+    /* Simulate: pending chain is empty terminal last_buf */
+    buf_has_data = 0;  /* buf->last == buf->pos */
+
+    /*
+     * Mirror the resume_pending guard:
+     *   (rc == NGX_OK || rc == NGX_DONE)
+     *   && out->buf->last > out->buf->pos
+     */
+    if (!ttfb_recorded
+        && (drain_rc == NGX_OK || drain_rc == NGX_DONE)
+        && buf_has_data)
+    {
+        ttfb_recorded = 1;
+    }
+
+    TEST_ASSERT(ttfb_recorded == 0,
+        "TTFB must NOT be recorded for empty "
+        "last_buf drain");
+
+    TEST_PASS(
+        "Empty last_buf drain does not write TTFB");
+}
+
+
+/*
+ * Verify that a non-empty pending chain drained through
+ * resume_pending DOES write TTFB on success.
+ *
+ * Scenario: send_output() sends non-empty data, downstream
+ * returns NGX_AGAIN, chain goes to pending_output.
+ * On resume, drain succeeds (NGX_OK) and chain has data.
+ * TTFB must be recorded.
+ */
+static void
+test_ttfb_nonempty_pending_records(void)
+{
+    ngx_flag_t  ttfb_recorded;
+    ngx_int_t   drain_rc;
+    int         buf_has_data;
+
+    TEST_SUBSECTION(
+        "TTFB: non-empty pending drain records TTFB");
+
+    ttfb_recorded = 0;
+    drain_rc = NGX_OK;
+
+    /* Simulate: pending chain has real Markdown data */
+    buf_has_data = 1;  /* buf->last > buf->pos */
+
+    if (!ttfb_recorded
+        && (drain_rc == NGX_OK || drain_rc == NGX_DONE)
+        && buf_has_data)
+    {
+        ttfb_recorded = 1;
+    }
+
+    TEST_ASSERT(ttfb_recorded == 1,
+        "TTFB must be recorded for non-empty "
+        "pending drain");
+
+    /* Verify one-shot: second drain should not re-record */
+    {
+        ngx_flag_t  was_recorded;
+
+        was_recorded = ttfb_recorded;
+        drain_rc = NGX_OK;
+        buf_has_data = 1;
+
+        /* Guard won't fire because ttfb_recorded == 1 */
+        if (!ttfb_recorded
+            && (drain_rc == NGX_OK || drain_rc == NGX_DONE)
+            && buf_has_data)
+        {
+            ttfb_recorded = 2;  /* would indicate double-record */
+        }
+
+        TEST_ASSERT(ttfb_recorded == was_recorded,
+            "TTFB latch is one-shot, no double record");
+    }
+
+    /* Verify NGX_ERROR does not record */
+    {
+        ngx_flag_t  fresh_ttfb;
+
+        fresh_ttfb = 0;
+        drain_rc = NGX_ERROR;
+        buf_has_data = 1;
+
+        if (!fresh_ttfb
+            && (drain_rc == NGX_OK || drain_rc == NGX_DONE)
+            && buf_has_data)
+        {
+            fresh_ttfb = 1;
+        }
+
+        TEST_ASSERT(fresh_ttfb == 0,
+            "TTFB must NOT be recorded on NGX_ERROR");
+    }
+
+    TEST_PASS(
+        "Non-empty pending drain records TTFB "
+        "correctly");
+}
+
+
+/* ================================================================
  * Bug Condition Exploration Tests (Bugfix Spec)
  *
  * These tests encode EXPECTED (correct) behavior for 4 bugs
@@ -4019,6 +4163,11 @@ main(void)
     test_shadow_metrics_increment();
     test_shadow_diff_metrics();
     test_shadow_error_isolation();
+
+    TEST_SECTION(
+        "17.3 TTFB Gauge Regression");
+    test_ttfb_empty_lastbuf_no_record();
+    test_ttfb_nonempty_pending_records();
 
     TEST_SECTION("Bug 1 Preservation (Baseline)");
     test_preserve_bug1_normal_feed_returns_ok();

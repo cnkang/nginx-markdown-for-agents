@@ -74,15 +74,19 @@ curl -s -H 'Accept: text/plain; version=0.0.4' \
 
 | Metric | Continue | Rollback |
 |--------|----------|----------|
-| `shadow_diff_rate` (compute: `shadow_diff_total / shadow_total`) | ≤ 0.1% | > 1% |
+| `shadow_diff_rate` (compute: `streaming.shadow_diff_total / streaming.shadow_total`) | ≤ 0.1% | > 1% |
+| `shadow_engine_error_rate` (compute: count `"markdown shadow:.*error"` in debug log / `streaming.shadow_total`) | ≤ 0.1% | > 1% |
 
-Shadow latency values in debug logs are for diagnostic
-reference only — they are not gating criteria.
+Shadow latency values in debug logs (`shadow_streaming_latency_ms`,
+`shadow_fullbuffer_latency_ms`) are for diagnostic reference only —
+they are not gating criteria.
 
 ### Proceed to Phase 1 when
 
 - `shadow_diff_rate` ≤ 0.1% over at least 1 hour of traffic
-- No unexpected streaming errors in debug logs
+- `shadow_engine_error_rate` ≤ 0.1% over the same window
+  (count shadow init/feed/finalize error lines in debug log,
+  divide by `streaming.shadow_total`)
 
 ## Phase 1: Single Location
 
