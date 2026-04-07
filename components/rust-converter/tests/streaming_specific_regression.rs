@@ -179,10 +179,12 @@ fn charset_regression_corpus_and_mismatch_fixture() {
         let html = std::fs::read(&fixture)
             .unwrap_or_else(|err| panic!("read fixture {}: {err}", fixture.display()));
 
-        let full =
-            convert_full_buffer(&html, None, default_streaming_options()).unwrap_or_else(|err| {
-                panic!("full conversion failed for {}: {err}", fixture.display())
-            });
+        let full = convert_full_buffer(
+            &html,
+            Some("text/html; charset=UTF-8"),
+            default_streaming_options(),
+        )
+        .unwrap_or_else(|err| panic!("full conversion failed for {}: {err}", fixture.display()));
 
         let streaming = convert_streaming_single(
             &html,
