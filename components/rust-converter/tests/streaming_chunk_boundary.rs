@@ -2,16 +2,18 @@
 
 #[path = "known_differences.rs"]
 mod known_differences;
+#[path = "support/streaming_compare_support.rs"]
+mod streaming_compare_support;
 #[path = "streaming_test_support.rs"]
 mod streaming_test_support;
 
-use known_differences::{KnownDifferences, OutputDifference};
+use known_differences::KnownDifferences;
 use proptest::prelude::*;
+use streaming_compare_support::compare_or_known;
 use streaming_test_support::{
     convert_streaming_chunked, convert_streaming_single, default_streaming_budget,
-    default_streaming_options, diff_summary, discover_html_fixtures, fixture_relative_name,
-    known_differences_path, normalize_whitespace_tokens, single_byte_chunks, tag_boundary_chunks,
-    utf8_mid_char_chunks,
+    default_streaming_options, discover_html_fixtures, fixture_relative_name,
+    known_differences_path, single_byte_chunks, tag_boundary_chunks, utf8_mid_char_chunks,
 };
 
 fn arb_streaming_html() -> impl Strategy<Value = String> {
@@ -58,47 +60,6 @@ fn arb_chunk_splits(n: usize) -> BoxedStrategy<Vec<usize>> {
             out
         })
         .boxed()
-}
-
-fn assert_equal_or_known_difference(
-    fixture_name: &str,
-    lhs: &str,
-    rhs: &str,
-    known: &KnownDifferences,
-) -> Result<(), String> {
-    if lhs == rhs {
-        return Ok(());
-    }
-
-    let whitespace_only_drift =
-        normalize_whitespace_tokens(lhs) == normalize_whitespace_tokens(rhs);
-    let diff = if whitespace_only_drift {
-        format!("whitespace-only-parity-drift\n{}", diff_summary(lhs, rhs))
-    } else {
-        diff_summary(lhs, rhs)
-    };
-
-    let output = OutputDifference {
-        full_buffer: lhs,
-        streaming: rhs,
-        diff: &diff,
-    };
-
-    if known.matches(fixture_name, &output).is_some() {
-        return Ok(());
-    }
-
-    if whitespace_only_drift {
-        return Err(format!(
-            "whitespace-only chunk drift for {} is not registered\n{}\n--- lhs ---\n{}\n--- rhs ---\n{}",
-            fixture_name, diff, lhs, rhs
-        ));
-    }
-
-    Err(format!(
-        "streaming chunk split mismatch for {}\n{}\n--- lhs ---\n{}\n--- rhs ---\n{}",
-        fixture_name, diff, lhs, rhs
-    ))
 }
 
 proptest! {
@@ -201,12 +162,9 @@ fn corpus_single_byte_chunk_invariance() {
 
             match (single, byte_by_byte) {
                 (Ok(a), Ok(b)) => {
-                    if let Err(err) = assert_equal_or_known_difference(
-                        &fixture_name,
-                        &a.markdown,
-                        &b.markdown,
-                        &known,
-                    ) {
+                    if let Err(err) =
+                        compare_or_known(&fixture_name, &a.markdown, &b.markdown, &known)
+                    {
                         failures.push(err);
                     }
                 }
@@ -266,7 +224,7 @@ fn utf8_mid_character_split_invariance() {
 
         match (single, chunked) {
             (Ok(a), Ok(b)) => {
-                if let Err(err) = assert_equal_or_known_difference(
+                if let Err(err) = compare_or_known(
                     &fixture_relative_name(&fixture),
                     &a.markdown,
                     &b.markdown,
@@ -275,7 +233,12 @@ fn utf8_mid_character_split_invariance() {
                     failures.push(err);
                 }
             }
-            (Err(_), Err(_)) => {}
+            (Err(err_single), Err(err_chunked)) => {
+                failures.push(format!(
+                    "{}: single and UTF-8 split paths both failed\nsingle={err_single:?}\nchunked={err_chunked:?}",
+                    fixture.display()
+                ));
+            }
             (Ok(_), Err(err)) => panic!(
                 "single chunk succeeded but UTF-8 split failed for {}: {err}",
                 fixture.display()
@@ -326,7 +289,7 @@ fn html_tag_boundary_split_invariance() {
 
         match (single, chunked) {
             (Ok(a), Ok(b)) => {
-                if let Err(err) = assert_equal_or_known_difference(
+                if let Err(err) = compare_or_known(
                     &fixture_relative_name(&fixture),
                     &a.markdown,
                     &b.markdown,
