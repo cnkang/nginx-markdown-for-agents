@@ -148,6 +148,11 @@ Required:
 - When docs reference derived rates (for example `shadow_diff_rate`), include
   the computation formula using real metric names so operators can reproduce
   the calculation (for example `shadow_diff_total / shadow_total`).
+- Verification commands in operator docs (curl + grep/jq/python) must specify
+  an explicit `Accept` header matching the output format they parse.  The
+  default plain-text format uses human-readable labels that differ from JSON
+  keys and Prometheus series names; omitting `Accept` causes false negatives
+  when grepping for snake_case keys.
 
 ### 10. Regex ReDoS and parser fragility in tooling
 Historical issues: `19875fe`, `10ea6ac`, `163f3e2`, `ea982d7`, `2103658`.
@@ -214,6 +219,13 @@ Required:
   `tests/corpus/**/.meta.json -> streaming_notes.known_diff_ids` synchronized
   with `tests/streaming/known-differences.toml` IDs to avoid silent metadata
   drift.
+- Regression tests for error-code classification or metrics routing must
+  exercise a stub that mirrors the production branching logic, not manually
+  increment a local struct and assert the hand-written values.  A test that
+  does `m.counter++; assert(m.counter == 1)` proves nothing about whether
+  production code actually increments that counter for the given error code.
+  Use a routing/classification stub that replicates the real `if/switch`
+  conditions so the test fails when the production condition changes.
 
 ### 15. Cross-language interface and FFI synchronization
 Historical issues: `dbb5722`, `dfeffc4`, `ceeaf38`, `5970807`.
@@ -385,7 +397,9 @@ Required:
   for observability purposes.  Only `NGX_OK` and `NGX_DONE` confirm that
   data was accepted downstream.  When `NGX_AGAIN` occurs on the first
   output, defer the TTFB/first-byte gauge write to the resume path where
-  the pending chain drains successfully.
+  the pending chain drains successfully.  The deferred path must apply the
+  same success condition (`rc == NGX_OK || rc == NGX_DONE`) — do not
+  weaken the guard in the resume path relative to the primary path.
 - When a bug fix extends an error-code classification branch to cover
   additional FFI codes (for example adding `ERROR_BUDGET_EXCEEDED` alongside
   `ERROR_MEMORY_LIMIT`), add regression tests that exercise each newly
@@ -429,6 +443,7 @@ For each code change you are about to produce, mentally (or explicitly in a thin
 4. Variables initialized at declaration when the compiler cannot prove definite assignment. (Rule 16)
 5. Parameterized loops must consume the parameter value in the exercised path; avoid no-op parameterization. (Rule 14)
 6. Where available, call shared test helpers that mirror production routing semantics instead of duplicating inline branch logic. (Rule 14)
+7. Regression tests for error-code classification must exercise a routing stub mirroring production logic, not manually increment and assert local counters. (Rule 14)
 
 #### Rust code (`components/rust-converter/`)
 1. `cargo fmt` and `cargo clippy` clean. (Baseline)
@@ -461,7 +476,7 @@ For each code change you are about to produce, mentally (or explicitly in a thin
 2. Validators/scripts consistent with the docs they check. (Rule 9)
 3. No regex with overlapping quantifiers / backtracking hotspots. (Rule 10)
 4. Metrics docs use exact emitted key/series names (JSON/Prometheus) with no naming drift. (Rules 8, 9)
-5. Operator docs referencing metrics use real JSON key paths or Prometheus series names, not invented flat names. Derived rates include computation formulas. (Rules 9, 23)
+5. Operator docs referencing metrics use real JSON key paths or Prometheus series names, not invented flat names. Derived rates include computation formulas. Verification commands include explicit `Accept` headers matching the parsed format. (Rules 9, 23)
 
 **If any item would be violated, redesign the change before writing it.** Do not emit code that you know will need a follow-up fix — that wastes time, wastes tokens and review cycles.
 
