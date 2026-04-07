@@ -513,6 +513,11 @@ If full suite is too heavy for current scope, run the narrowest relevant target 
 - Check that existing rules and checklist items are consistent with the fix —
   if a rule said "do X" but the fix required "do X and also Y in the resume
   path", update the rule to cover Y.
+- Review existing rules touched by the fix for over-specificity: if a rule
+  only names one concrete scenario but the fix reveals the principle applies
+  more broadly, rewrite the rule to cover the general class.  A rule that
+  prevents one specific bug but allows the same mistake in analogous code
+  is incomplete.
 
 ## Definition of Done for Agent Changes
 - Pre-output checklist was applied to every file written or modified (no write-first-fix-later).
@@ -535,19 +540,29 @@ review cycle, the agent must evaluate whether `AGENTS.md` needs updating:
    classifying values into semantic categories across language boundaries,
    cover all source-defined values that map to the category, not just the
    locally-familiar ones."
-3. **Recurring pattern escalation**: If the same class of mistake appears in
+3. **Over-specificity review**: When adding or updating a rule, re-read it and
+   ask: "Would this rule prevent the same class of mistake if it occurred in
+   a different file, a different subsystem, or with different variable names?"
+   If not, the rule is too narrow.  Rewrite it to capture the structural
+   pattern (for example "all write paths for the same metric must apply the
+   same success guard") rather than the surface detail (for example "the
+   `resume_pending` TTFB latch must check `rc == NGX_OK`").  A rule that
+   only prevents re-introducing the exact same bug in the exact same
+   function is nearly worthless — the value is in preventing the analogous
+   mistake elsewhere.
+4. **Recurring pattern escalation**: If the same class of mistake appears in
    two or more review rounds (even in different forms), treat it as a
    systemic gap.  Strengthen the existing rule or add a new one — do not
    rely on the agent "remembering" the previous fix.
-4. **Consistency audit**: When adding a guard condition in one code path (for
+5. **Consistency audit**: When adding a guard condition in one code path (for
    example a success check before writing a metric), scan all other paths
    that perform the same write and apply the same guard.  A rule that says
    "do X in path A" implicitly requires "do X in every path that does the
    same thing."
-5. **Checklist sync**: If a new rule is added or an existing rule is
+6. **Checklist sync**: If a new rule is added or an existing rule is
    strengthened, update the corresponding pre-output checklist item(s) so
    the rule is enforced at write time, not discovered at review time.
-6. **Scope**: Only add rules that are actionable and verifiable before code
+7. **Scope**: Only add rules that are actionable and verifiable before code
    is written.  Avoid vague aspirational statements.  Every rule should
    answer: "What specific check does the agent perform, and what does
    failure look like?"
