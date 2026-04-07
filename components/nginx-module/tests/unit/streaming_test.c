@@ -3052,17 +3052,19 @@ test_shadow_error_isolation(void)
      * Simulate: full-buffer succeeds (client_rc = NGX_OK),
      * then shadow streaming init fails.
      * Client response must not be affected.
+     * shadow_total must NOT increment (only successful
+     * comparisons count, per Rule 23).
      */
     client_rc = NGX_OK;
 
-    /* Shadow init failure — just increment shadow_total */
-    m.shadow_total++;
+    /* Shadow init failure — no counter increment */
     /* streaming error logged but ignored */
 
     TEST_ASSERT(client_rc == NGX_OK,
         "Client response unaffected by shadow error");
-    TEST_ASSERT(m.shadow_total == 1,
-        "shadow_total still increments on error");
+    TEST_ASSERT(m.shadow_total == 0,
+        "shadow_total should NOT increment on "
+        "shadow init failure");
     TEST_ASSERT(m.shadow_diff_total == 0,
         "shadow_diff_total not incremented on error");
 

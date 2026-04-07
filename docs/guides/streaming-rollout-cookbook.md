@@ -221,13 +221,13 @@ map $http_user_agent $markdown_streaming_engine {
 
 | Condition | Action |
 |-----------|--------|
-| Success rate ≥ 99.9% (`streaming.succeeded_total / (succeeded + failed)`) | Continue to next phase |
+| Success rate ≥ 99.9% (`streaming.succeeded_total / streaming.requests_total`) | Continue to next phase |
 | TTFB improvement measurable (large responses) | Continue |
-| Failure rate > 0.5% (`streaming.failed_total / requests_total`) | Pause, investigate |
-| Post-commit error rate > 0.01% (`streaming.postcommit_error_total / succeeded_total`) | Pause, investigate |
+| Failure rate > 0.5% (`streaming.failed_total / streaming.requests_total`) | Pause, investigate |
+| Post-commit error rate > 0.01% (`streaming.postcommit_error_total / streaming.requests_total`) | Pause, investigate |
 | Failure rate > 1% | Rollback |
 | Post-commit error rate > 0.1% | Rollback |
-| Shadow diff rate > 1% (`streaming.shadow_diff_total / shadow_total`) | Rollback (Phase 0) |
+| Shadow diff rate > 1% (`streaming.shadow_diff_total / streaming.shadow_total`) | Rollback (Phase 0) |
 
 ## Safety Guarantees
 

@@ -561,14 +561,16 @@ ngx_http_markdown_handle_converter_not_initialized(
  *   r      - NGINX request structure
  *   ctx    - per-request module context (contains decompressed HTML)
  *   conf   - module location configuration
- *   fb_result - full-buffer conversion result for comparison
+ *   fb_result     - full-buffer conversion result for comparison
+ *   fb_elapsed_ms - full-buffer conversion elapsed time in milliseconds
  */
 static void
 ngx_http_markdown_shadow_compare(
     ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx,
     ngx_http_markdown_conf_t *conf,
-    struct MarkdownResult *fb_result)
+    struct MarkdownResult *fb_result,
+    ngx_msec_t fb_elapsed_ms)
 {
     struct StreamingConverterHandle  *handle;
     struct MarkdownOptions            options;
@@ -635,10 +637,12 @@ ngx_http_markdown_shadow_compare(
         shadow_elapsed = 0;
     }
 
-    ngx_log_debug1(NGX_LOG_DEBUG_HTTP,
+    ngx_log_debug2(NGX_LOG_DEBUG_HTTP,
         r->connection->log, 0,
-        "markdown shadow: streaming latency "
-        "%M ms", shadow_elapsed);
+        "markdown shadow: "
+        "shadow_streaming_latency_ms=%M "
+        "shadow_fullbuffer_latency_ms=%M",
+        shadow_elapsed, fb_elapsed_ms);
 
     if (rc != ERROR_SUCCESS) {
         ngx_log_debug1(NGX_LOG_DEBUG_HTTP,
@@ -814,7 +818,7 @@ ngx_http_markdown_execute_conversion(ngx_http_request_t *r,
      */
     if (conf->streaming_shadow) {
         ngx_http_markdown_shadow_compare(
-            r, ctx, conf, result);
+            r, ctx, conf, result, *elapsed_ms);
     }
 #endif
 
