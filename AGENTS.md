@@ -177,6 +177,13 @@ Required:
 - Full-buffer vs streaming parity tests must keep conversion configuration
   aligned (for example content-type/charset/options) unless the mismatch is the
   explicit subject of the test and documented in-place.
+- Known-difference suppressors for runtime fallback/error paths must be
+  fixture-scoped (`fixture_contains` or equivalent) unless a global suppressor
+  is explicitly justified and reviewed, to avoid silently masking new
+  regressions in unrelated fixtures.
+- Keep fuzz target inventory de-duplicated: do not register parallel binaries
+  with equivalent logic/coverage under different names; smoke targets must
+  invoke the canonical binary names only.
 - For fixture-scoped known differences, keep
   `tests/corpus/**/.meta.json -> streaming_notes.known_diff_ids` synchronized
   with `tests/streaming/known-differences.toml` IDs to avoid silent metadata
@@ -251,6 +258,9 @@ Required:
 - For bounded-memory/perf evidence tests, ensure fixture construction does not
   trivially force output-size-linear memory growth; inputs used to validate
   working-set bounds should separate input volume from emitted Markdown volume.
+- For bounded-memory/perf evidence fixtures, use parser-visible/pipeline-visible
+  padding (for example regular elements/text), not parser-discarded constructs
+  such as HTML comments, so measured memory reflects real conversion work.
 - Run at least one broad umbrella target for the touched area early (for
   example `make test-rust-streaming`) to expose non-local blockers; if it
   fails, report it as an open finding and do not present the spec as fully
