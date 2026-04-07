@@ -490,15 +490,21 @@ ngx_http_markdown_streaming_send_output(
     out->buf = b;
     out->next = NULL;
 
+    rc = ngx_http_next_body_filter(r, out);
+
     /*
-     * Record TTFB on first non-empty output.
-     * One-shot latch: only the first send with data > 0
-     * records the metric.
+     * Record TTFB on first successful non-empty output send.
+     * One-shot latch: only fires once, and only when the
+     * downstream filter accepted the data (NGX_OK or NGX_DONE).
+     * NGX_AGAIN is also acceptable — data was buffered and will
+     * be sent; the first-byte timestamp is still valid.
+     * NGX_ERROR means the send failed — do not record TTFB.
      */
     if (data != NULL && len > 0
         && !ctx->streaming.ttfb_recorded
         && ctx->streaming.feed_start_ms > 0
-        && ngx_http_markdown_metrics != NULL)
+        && ngx_http_markdown_metrics != NULL
+        && rc != NGX_ERROR)
     {
         ngx_time_t  *tp_ttfb;
         ngx_msec_t   now_ms;
@@ -514,8 +520,6 @@ ngx_http_markdown_streaming_send_output(
             (ngx_atomic_t) (elapsed_ms * 1000);
         ctx->streaming.ttfb_recorded = 1;
     }
-
-    rc = ngx_http_next_body_filter(r, out);
 
     if (rc == NGX_OK || rc == NGX_DONE) {
         ctx->streaming.flushes_sent++;
@@ -748,7 +752,9 @@ ngx_http_markdown_streaming_handle_postcommit_error(
     NGX_HTTP_MARKDOWN_METRIC_INC(streaming.failed_total);
 
     /* Track budget exceeded as auxiliary classification */
-    if (error_code == ERROR_MEMORY_LIMIT) {
+    if (error_code == ERROR_MEMORY_LIMIT
+        || error_code == ERROR_BUDGET_EXCEEDED)
+    {
         NGX_HTTP_MARKDOWN_METRIC_INC(
             streaming.budget_exceeded_total);
         ngx_http_markdown_log_decision(r, conf,
@@ -828,18 +834,24 @@ ngx_http_markdown_streaming_precommit_error(
 
     /*
      * Track budget exceeded as auxiliary classification.
+     * Covers both Rust FFI budget exceeded (ERROR_BUDGET_EXCEEDED = 6,
+     * from markdown_streaming_feed/finalize) and C-side size-limit
+     * overflow (ERROR_MEMORY_LIMIT = 4, from cumulative input checks).
      * The terminal state is determined by streaming_on_error
      * policy below.
      */
-    if (error_code == ERROR_MEMORY_LIMIT) {
+    if (error_code == ERROR_MEMORY_LIMIT
+        || error_code == ERROR_BUDGET_EXCEEDED)
+    {
         NGX_HTTP_MARKDOWN_METRIC_INC(
             streaming.budget_exceeded_total);
         ngx_http_markdown_log_decision(r, conf,
             &ngx_http_markdown_reason_streaming_budget);
-        ngx_log_debug0(NGX_LOG_DEBUG_HTTP,
+        ngx_log_debug1(NGX_LOG_DEBUG_HTTP,
             r->connection->log, 0,
             "markdown streaming: budget exceeded "
-            "(auxiliary classification)");
+            "(auxiliary classification, code=%ui)",
+            (ngx_uint_t) error_code);
     }
 
     NGX_HTTP_MARKDOWN_METRIC_INC(streaming.failed_total);
