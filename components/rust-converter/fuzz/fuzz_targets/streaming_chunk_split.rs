@@ -14,13 +14,13 @@ fuzz_target!(|data: &[u8]| {
     let split_sizes = split_sizes_from_seed(data, html.len());
 
     let single = match convert(html, &[html.len().max(1)]) {
-        Some(single) => single,
-        None => return,
+        Ok(single) => single,
+        Err(_) => return,
     };
 
     let split = match convert(html, &split_sizes) {
-        Some(split) => split,
-        None => return,
+        Ok(split) => split,
+        Err(_) => return,
     };
 
     if single != split {

@@ -38,7 +38,11 @@ fn discover_fixtures(corpus_dir: &Path) -> Vec<std::path::PathBuf> {
 }
 
 fn convert_full_buffer_entry(html: &[u8]) -> Result<String, ConversionError> {
-    convert_full_buffer(html, None, default_streaming_options())
+    convert_full_buffer(
+        html,
+        Some("text/html; charset=UTF-8"),
+        default_streaming_options(),
+    )
 }
 
 fn convert_streaming_single_entry(
@@ -269,9 +273,7 @@ fn assert_fixture_parity(path: &Path, known_diffs: &KnownDifferences) -> Result<
                 diff_id,
                 description,
             } => {
-                if !meta.known_diff_ids.is_empty()
-                    && !meta.known_diff_ids.iter().any(|id| id == &diff_id)
-                {
+                if !meta.known_diff_ids.iter().any(|id| id == &diff_id) {
                     return Err(format!(
                         "{fixture_name}: matched known diff {diff_id} ({description}) but fixture metadata does not list it"
                     ));
@@ -426,10 +428,17 @@ fn bounded_memory_and_ttfb_evidence_pack() {
             charset_sniff: 64 * 1024,
             lookahead: 4 * 1024 * 1024,
         };
+        let mut chunk_sizes = Vec::new();
+        let mut remaining = html.len();
+        while remaining > 0 {
+            let take = remaining.min(4 * 1024);
+            chunk_sizes.push(take);
+            remaining -= take;
+        }
 
         let run = convert_streaming_chunked(
             &html,
-            &[16 * 1024],
+            &chunk_sizes,
             Some("text/html; charset=UTF-8"),
             default_streaming_options(),
             budget.clone(),

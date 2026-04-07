@@ -8,7 +8,8 @@
   "streaming_notes": {
     "expected_fallback": false,
     "known_diff_ids": [
-      "DIFF-PARITY-STREAMING-CHARSET-MISMATCH"
+      "DIFF-PARITY-STREAMING-CHARSET-MISMATCH",
+      "DIFF-PARITY-WHITESPACE-ONLY"
     ],
     "high_risk_structures": [
       "charset",

@@ -1,4 +1,5 @@
 use nginx_markdown_converter::converter::ConversionOptions;
+use nginx_markdown_converter::error::ConversionError;
 use nginx_markdown_converter::streaming::budget::MemoryBudget;
 use nginx_markdown_converter::streaming::converter::StreamingConverter;
 
@@ -53,7 +54,7 @@ pub fn split_sizes_from_seed(seed: &[u8], html_len: usize) -> Vec<usize> {
     splits
 }
 
-pub fn convert(html: &[u8], splits: &[usize]) -> Option<Vec<u8>> {
+pub fn convert(html: &[u8], splits: &[usize]) -> Result<Vec<u8>, ConversionError> {
     let mut conv = StreamingConverter::new(ConversionOptions::default(), MemoryBudget::default());
     conv.set_content_type(Some("text/html; charset=UTF-8".to_string()));
 
@@ -65,17 +66,17 @@ pub fn convert(html: &[u8], splits: &[usize]) -> Option<Vec<u8>> {
             break;
         }
         let end = cursor.saturating_add(split.max(1)).min(html.len());
-        let chunk = conv.feed_chunk(&html[cursor..end]).ok()?;
+        let chunk = conv.feed_chunk(&html[cursor..end])?;
         out.extend_from_slice(&chunk.markdown);
         cursor = end;
     }
 
     if cursor < html.len() {
-        let chunk = conv.feed_chunk(&html[cursor..]).ok()?;
+        let chunk = conv.feed_chunk(&html[cursor..])?;
         out.extend_from_slice(&chunk.markdown);
     }
 
-    let result = conv.finalize().ok()?;
+    let result = conv.finalize()?;
     out.extend_from_slice(&result.final_markdown);
-    Some(out)
+    Ok(out)
 }
