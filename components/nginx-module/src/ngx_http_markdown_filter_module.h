@@ -182,6 +182,7 @@ typedef struct {
     ngx_http_complex_value_t  *streaming_engine;  /* markdown_streaming_engine (complex value) */
     size_t                     streaming_budget;   /* markdown_streaming_budget (default: 2m) */
     ngx_uint_t                 streaming_on_error; /* markdown_streaming_on_error pass|reject */
+    ngx_flag_t                 streaming_shadow;   /* markdown_streaming_shadow on|off */
 #endif
 } ngx_http_markdown_conf_t;
 
@@ -314,6 +315,10 @@ typedef struct {
         ngx_uint_t                        flushes_sent;
         size_t                            total_input_bytes;
         size_t                            total_output_bytes;
+
+        /* TTFB tracking (microseconds from first feed to first output) */
+        ngx_msec_t                        feed_start_ms;
+        ngx_flag_t                        first_output_sent;
 
         /* Pre-Commit prebuffer for fallback */
         ngx_http_markdown_buffer_t        prebuffer;
@@ -467,6 +472,11 @@ typedef struct {
         ngx_atomic_t  postcommit_error_total;  /* Post-Commit errors */
         ngx_atomic_t  precommit_failopen_total;  /* Pre-Commit fail-open */
         ngx_atomic_t  precommit_reject_total;    /* Pre-Commit fail-closed */
+        ngx_atomic_t  budget_exceeded_total;     /* Memory budget exceeded */
+        ngx_atomic_t  shadow_total;              /* Shadow mode runs */
+        ngx_atomic_t  shadow_diff_total;         /* Shadow output diffs */
+        ngx_atomic_t  last_ttfb_us;              /* Last streaming TTFB (microseconds) */
+        ngx_atomic_t  last_peak_memory_bytes;    /* Last streaming peak memory */
     } streaming;
 #endif
 
@@ -610,6 +620,19 @@ const ngx_str_t *ngx_http_markdown_reason_failed_closed(void);
 
 /* Return the SKIP_ACCEPT reason code (not in eligibility enum) */
 const ngx_str_t *ngx_http_markdown_reason_skip_accept(void);
+
+#ifdef MARKDOWN_STREAMING_ENABLED
+/* Streaming reason code accessors */
+const ngx_str_t *ngx_http_markdown_reason_engine_streaming(void);
+const ngx_str_t *ngx_http_markdown_reason_streaming_convert(void);
+const ngx_str_t *ngx_http_markdown_reason_streaming_fallback(void);
+const ngx_str_t *ngx_http_markdown_reason_streaming_fail_postcommit(void);
+const ngx_str_t *ngx_http_markdown_reason_streaming_skip_unsupported(void);
+const ngx_str_t *ngx_http_markdown_reason_streaming_budget_exceeded(void);
+const ngx_str_t *ngx_http_markdown_reason_streaming_precommit_failopen(void);
+const ngx_str_t *ngx_http_markdown_reason_streaming_precommit_reject(void);
+const ngx_str_t *ngx_http_markdown_reason_streaming_shadow(void);
+#endif /* MARKDOWN_STREAMING_ENABLED */
 
 /*
  * Header management functions
