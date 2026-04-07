@@ -582,12 +582,6 @@ ngx_http_markdown_shadow_compare(
 
     UNUSED(conf);
 
-    NGX_HTTP_MARKDOWN_METRIC_INC(streaming.shadow_total);
-
-    /* Record shadow mode decision */
-    ngx_http_markdown_log_decision(r, conf,
-        ngx_http_markdown_reason_streaming_shadow());
-
     ngx_http_markdown_prepare_conversion_options(r, conf, &options);
 
     tp = ngx_timeofday();
@@ -654,6 +648,16 @@ ngx_http_markdown_shadow_compare(
         markdown_result_free(&st_result);
         return;
     }
+
+    /*
+     * Shadow comparison completed successfully.
+     * Record shadow_total and STREAMING_SHADOW only after
+     * both engines produced comparable results, so the
+     * counter reflects actual comparisons, not attempts.
+     */
+    NGX_HTTP_MARKDOWN_METRIC_INC(streaming.shadow_total);
+    ngx_http_markdown_log_decision(r, conf,
+        ngx_http_markdown_reason_streaming_shadow());
 
     /* Compare outputs */
     if (st_result.markdown_len != fb_result->markdown_len
