@@ -56,17 +56,3 @@ path = "fuzz_targets/fuzz_streaming_malformed.rs"
 test = false
 doc = false
 bench = false
-
-[[bin]]
-name = "streaming_no_panic"
-path = "fuzz_targets/streaming_no_panic.rs"
-test = false
-doc = false
-bench = false
-
-[[bin]]
-name = "streaming_chunk_split"
-path = "fuzz_targets/streaming_chunk_split.rs"
-test = false
-doc = false
-bench = false

@@ -29,8 +29,12 @@ fn assert_fixture(name: &str) {
     let known = KnownDifferences::from_file(&known_differences_path())
         .unwrap_or_else(|err| panic!("load known differences: {err}"));
 
-    let full = convert_full_buffer(&html, None, default_streaming_options())
-        .unwrap_or_else(|err| panic!("full-buffer conversion failed for {fixture_name}: {err}"));
+    let full = convert_full_buffer(
+        &html,
+        Some("text/html; charset=UTF-8"),
+        default_streaming_options(),
+    )
+    .unwrap_or_else(|err| panic!("full-buffer conversion failed for {fixture_name}: {err}"));
 
     let single = convert_streaming_single(
         &html,
