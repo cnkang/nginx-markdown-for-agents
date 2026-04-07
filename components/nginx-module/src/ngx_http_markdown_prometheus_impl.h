@@ -178,6 +178,69 @@ ngx_http_markdown_metrics_write_prometheus(
         "\n",
         snapshot->streaming.precommit_failopen_total,
         snapshot->streaming.precommit_reject_total);
+
+    /* streaming_budget_exceeded_total */
+    p = ngx_slprintf(p, end,
+        "# HELP "
+        "nginx_markdown_streaming_budget_exceeded_total "
+        "Streaming memory budget exceeded count.\n"
+        "# TYPE "
+        "nginx_markdown_streaming_budget_exceeded_total "
+        "counter\n"
+        "nginx_markdown_streaming_budget_exceeded_total"
+        " %uA\n"
+        "\n",
+        snapshot->streaming.budget_exceeded_total);
+
+    /* streaming_shadow_total */
+    p = ngx_slprintf(p, end,
+        "# HELP "
+        "nginx_markdown_streaming_shadow_total "
+        "Shadow mode comparison runs.\n"
+        "# TYPE "
+        "nginx_markdown_streaming_shadow_total counter\n"
+        "nginx_markdown_streaming_shadow_total %uA\n"
+        "\n",
+        snapshot->streaming.shadow_total);
+
+    /* streaming_shadow_diff_total */
+    p = ngx_slprintf(p, end,
+        "# HELP "
+        "nginx_markdown_streaming_shadow_diff_total "
+        "Shadow mode output differences detected.\n"
+        "# TYPE "
+        "nginx_markdown_streaming_shadow_diff_total "
+        "counter\n"
+        "nginx_markdown_streaming_shadow_diff_total"
+        " %uA\n"
+        "\n",
+        snapshot->streaming.shadow_diff_total);
+
+    /* streaming_ttfb_seconds (gauge) */
+    p = ngx_slprintf(p, end,
+        "# HELP "
+        "nginx_markdown_streaming_ttfb_seconds "
+        "Last streaming request time-to-first-byte.\n"
+        "# TYPE "
+        "nginx_markdown_streaming_ttfb_seconds gauge\n"
+        "nginx_markdown_streaming_ttfb_seconds "
+        "%uA.%06uA\n"
+        "\n",
+        snapshot->streaming.last_ttfb_us / 1000000,
+        snapshot->streaming.last_ttfb_us % 1000000);
+
+    /* streaming_peak_memory_bytes (gauge) */
+    p = ngx_slprintf(p, end,
+        "# HELP "
+        "nginx_markdown_streaming_peak_memory_bytes "
+        "Last streaming request peak memory estimate.\n"
+        "# TYPE "
+        "nginx_markdown_streaming_peak_memory_bytes "
+        "gauge\n"
+        "nginx_markdown_streaming_peak_memory_bytes"
+        " %uA\n"
+        "\n",
+        snapshot->streaming.last_peak_memory_bytes);
 #endif
 
     /* input_bytes_total */

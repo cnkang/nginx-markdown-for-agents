@@ -549,6 +549,133 @@ ngx_http_markdown_handle_converter_not_initialized(
         "- returning original HTML");
 }
 
+
+#ifdef MARKDOWN_STREAMING_ENABLED
+/*
+ * Shadow mode: run the streaming engine on the same input that
+ * was just converted by the full-buffer engine, compare outputs,
+ * and record metrics/logs.  Any streaming error is isolated and
+ * does not affect the client response.
+ *
+ * Parameters:
+ *   r      - NGINX request structure
+ *   ctx    - per-request module context (contains decompressed HTML)
+ *   conf   - module location configuration
+ *   fb_result - full-buffer conversion result for comparison
+ */
+static void
+ngx_http_markdown_shadow_compare(
+    ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx,
+    ngx_http_markdown_conf_t *conf,
+    struct MarkdownResult *fb_result)
+{
+    struct StreamingConverterHandle  *handle;
+    struct MarkdownOptions            options;
+    struct MarkdownResult             st_result;
+    uint8_t                          *out_data;
+    uintptr_t                         out_len;
+    uint32_t                          rc;
+    ngx_time_t                       *tp;
+    ngx_msec_t                        shadow_start;
+    ngx_msec_t                        shadow_elapsed;
+
+    UNUSED(conf);
+
+    NGX_HTTP_MARKDOWN_METRIC_INC(streaming.shadow_total);
+
+    /* Record shadow mode decision */
+    ngx_http_markdown_log_decision(r, conf,
+        ngx_http_markdown_reason_streaming_shadow());
+
+    ngx_http_markdown_prepare_conversion_options(r, conf, &options);
+
+    tp = ngx_timeofday();
+    shadow_start = (ngx_msec_t) (tp->sec * 1000 + tp->msec);
+
+    handle = markdown_streaming_new(&options);
+    if (handle == NULL) {
+        ngx_log_debug0(NGX_LOG_DEBUG_HTTP,
+            r->connection->log, 0,
+            "markdown shadow: streaming engine "
+            "init failed");
+        return;
+    }
+
+    out_data = NULL;
+    out_len = 0;
+
+    rc = markdown_streaming_feed(handle,
+        ctx->buffer.data, ctx->buffer.size,
+        &out_data, &out_len);
+
+    if (rc != ERROR_SUCCESS) {
+        ngx_log_debug1(NGX_LOG_DEBUG_HTTP,
+            r->connection->log, 0,
+            "markdown shadow: streaming feed "
+            "error %ui", (ngx_uint_t) rc);
+        markdown_streaming_abort(handle);
+        if (out_data != NULL) {
+            markdown_streaming_output_free(
+                out_data, out_len);
+        }
+        return;
+    }
+
+    /* Free intermediate output before finalize */
+    if (out_data != NULL) {
+        markdown_streaming_output_free(
+            out_data, out_len);
+        out_data = NULL;
+        out_len = 0;
+    }
+
+    ngx_memzero(&st_result, sizeof(struct MarkdownResult));
+    rc = markdown_streaming_finalize(handle, &st_result);
+
+    tp = ngx_timeofday();
+    shadow_elapsed = (ngx_msec_t) (tp->sec * 1000 + tp->msec);
+    if (shadow_elapsed >= shadow_start) {
+        shadow_elapsed = shadow_elapsed - shadow_start;
+    } else {
+        shadow_elapsed = 0;
+    }
+
+    ngx_log_debug1(NGX_LOG_DEBUG_HTTP,
+        r->connection->log, 0,
+        "markdown shadow: streaming latency "
+        "%M ms", shadow_elapsed);
+
+    if (rc != ERROR_SUCCESS) {
+        ngx_log_debug1(NGX_LOG_DEBUG_HTTP,
+            r->connection->log, 0,
+            "markdown shadow: streaming finalize "
+            "error %ui", (ngx_uint_t) rc);
+        markdown_result_free(&st_result);
+        return;
+    }
+
+    /* Compare outputs */
+    if (st_result.markdown_len != fb_result->markdown_len
+        || ngx_memcmp(st_result.markdown,
+                       fb_result->markdown,
+                       fb_result->markdown_len) != 0)
+    {
+        NGX_HTTP_MARKDOWN_METRIC_INC(
+            streaming.shadow_diff_total);
+        ngx_log_debug2(NGX_LOG_DEBUG_HTTP,
+            r->connection->log, 0,
+            "markdown shadow: output diff detected, "
+            "fullbuffer_len=%uz streaming_len=%uz",
+            (size_t) fb_result->markdown_len,
+            (size_t) st_result.markdown_len);
+    }
+
+    markdown_result_free(&st_result);
+}
+#endif /* MARKDOWN_STREAMING_ENABLED */
+
+
 /**
  * Execute the Markdown conversion via the Rust FFI and handle success or failure outcomes.
  *
@@ -673,6 +800,19 @@ ngx_http_markdown_execute_conversion(ngx_http_request_t *r,
     }
 
     ngx_http_markdown_record_conversion_success(ctx, result, *elapsed_ms);
+
+#ifdef MARKDOWN_STREAMING_ENABLED
+    /*
+     * Shadow mode: after full-buffer conversion succeeds,
+     * run the streaming engine on the same input and compare
+     * outputs.  Any streaming error is isolated — it does not
+     * affect the client response.
+     */
+    if (conf->streaming_shadow) {
+        ngx_http_markdown_shadow_compare(
+            r, ctx, conf, result);
+    }
+#endif
 
     /*
      * Estimate token savings when markdown_token_estimate
