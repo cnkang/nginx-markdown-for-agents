@@ -447,6 +447,13 @@ fn bounded_memory_and_ttfb_evidence_pack() {
         .unwrap_or_else(|err| panic!("streaming conversion failed for {input_size}: {err}"));
 
         assert!(
+            run.stats.peak_memory_estimate > 0,
+            "peak memory metric is zero/unpopulated for input size {} (budget {})",
+            input_size,
+            budget.total
+        );
+
+        assert!(
             run.stats.peak_memory_estimate <= budget.total,
             "peak memory {} exceeds budget {} for input size {}",
             run.stats.peak_memory_estimate,

@@ -261,6 +261,10 @@ Required:
 - For bounded-memory/perf evidence fixtures, use parser-visible/pipeline-visible
   padding (for example regular elements/text), not parser-discarded constructs
   such as HTML comments, so measured memory reflects real conversion work.
+- For bounded-memory/perf evidence assertions, first verify the measured metric
+  was actually populated (for example `peak_memory_estimate > 0`) before
+  comparing against budget/threshold bounds, so unpopulated metrics cannot pass
+  checks spuriously.
 - Run at least one broad umbrella target for the touched area early (for
   example `make test-rust-streaming`) to expose non-local blockers; if it
   fails, report it as an open finding and do not present the spec as fully
