@@ -14,14 +14,14 @@ fuzz_target!(|data: &[u8]| {
 
     // Single-chunk conversion
     let single = match convert(html, &[html.len().max(1)]) {
-        Some(single) => single,
-        None => return,
+        Ok(single) => single,
+        Err(_) => return,
     };
 
     // Chunked conversion
     let chunked = match convert(html, &split_sizes) {
-        Some(chunked) => chunked,
-        None => return,
+        Ok(chunked) => chunked,
+        Err(_) => return,
     };
 
     if single != chunked {
