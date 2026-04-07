@@ -222,6 +222,14 @@ Required:
 - When Rust FFI structs, options, defaults, or error codes change, update all affected boundaries in the same change set: Rust ABI/options code, public C headers, NGINX call sites, tests, and operator-facing scripts.
 - Treat FFI comments and header docs as part of the interface contract; stale interface docs are a bug, not a cleanup item.
 - Add at least one boundary-level test when introducing or changing an FFI option/error path (for example header-level, feature-independence, or end-to-end verification).
+- When C code classifies FFI error codes into semantic categories (for example
+  "budget exceeded"), the classification branch must cover **all** FFI-defined
+  error codes that map to that category.  Do not assume a 1:1 mapping between
+  C-local error codes and Rust FFI error codes — the Rust side may define a
+  distinct code (for example `ERROR_BUDGET_EXCEEDED = 6`) alongside the C-side
+  code (for example `ERROR_MEMORY_LIMIT = 4`) for the same semantic.  Grep the
+  FFI header (`markdown_converter.h`) for all `#define ERROR_*` codes and
+  confirm each classification branch covers the full set.
 
 ### 16. Dead stores and unused assignments in C test code
 SonarCloud rules: `c:S1854`, `c:S5955`.
@@ -365,6 +373,13 @@ Required:
   actual output of each format (JSON key paths, Prometheus series names).
   Do not invent metric names that do not appear in any renderer.  For
   derived rates, always include the formula using real metric names.
+- Observability side-effects (counter increments, reason code logging, gauge
+  writes) must be recorded **after** the event they describe succeeds, not
+  before the attempt.  A counter named "shadow comparisons completed" must
+  fire after the comparison completes, not at function entry.  A TTFB gauge
+  must be written after confirming the downstream filter accepted the data
+  (at least `rc != NGX_ERROR`), not before the send call.  If both "attempt"
+  and "completion" semantics are needed, use separate counters.
 
 ## Required Agent Workflow
 
@@ -393,7 +408,8 @@ For each code change you are about to produce, mentally (or explicitly in a thin
 6. Memory budgets enforced on every allocation path; auxiliary buffers freed on all exits. (Rule 3)
 7. UTF-8 chunk-boundary safety if touching streaming text paths. (Rule 4)
 8. FFI surface: if Rust structs/options/error codes change, all C headers, call sites, tests, and docs updated in the same change set. (Rule 15)
-9. New metrics: every field added to the metrics struct has a runtime write site (not just snapshot copy). New reason codes have `log_decision()` callsites. Gauge names match the actual measurement event. (Rules 8, 23)
+9. New metrics: every field added to the metrics struct has a runtime write site (not just snapshot copy). New reason codes have `log_decision()` callsites. Gauge names match the actual measurement event. Observability writes fire after the event succeeds, not before the attempt. (Rules 8, 23)
+10. FFI error code classification: when branching on error codes, cover all FFI-defined codes for the semantic category — grep `markdown_converter.h` for `ERROR_*` to confirm completeness. (Rule 15)
 
 #### C test code (`components/nginx-module/tests/unit/`)
 1. No dead stores — simulation-style tests set the final value directly; initial state documented in comments only. (Rule 16)
