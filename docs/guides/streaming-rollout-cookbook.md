@@ -50,11 +50,24 @@ http {
 ### Verification
 
 ```bash
-# Check shadow runs are happening
-curl -s http://localhost/markdown-metrics | grep shadow_total
+# Check shadow runs are happening (JSON format)
+curl -s -H 'Accept: application/json' \
+  http://localhost/markdown-metrics | \
+  python3 -c "import sys,json; d=json.load(sys.stdin)['streaming']; \
+  print(f\"shadow_total={d['shadow_total']}\")"
 
-# Check diff rate
-curl -s http://localhost/markdown-metrics | grep shadow_diff_total
+# Check diff rate (JSON format)
+curl -s -H 'Accept: application/json' \
+  http://localhost/markdown-metrics | \
+  python3 -c "import sys,json; d=json.load(sys.stdin)['streaming']; \
+  t=d['shadow_total']; df=d['shadow_diff_total']; \
+  rate=(df/t*100 if t>0 else 0); \
+  print(f\"shadow_diff_total={df} shadow_total={t} diff_rate={rate:.2f}%\")"
+
+# Or use Prometheus format
+curl -s -H 'Accept: text/plain; version=0.0.4' \
+  http://localhost/markdown-metrics | \
+  grep nginx_markdown_streaming_shadow
 ```
 
 ### Thresholds
@@ -196,8 +209,11 @@ map $http_user_agent $markdown_streaming_engine {
 2. Reload NGINX: `nginx -s reload`
 3. Verify streaming metrics stop incrementing:
    ```bash
-   # Wait 30 seconds, then check
-   curl -s http://localhost/markdown-metrics | grep streaming
+   # Wait 30 seconds, then check (JSON format)
+   curl -s -H 'Accept: application/json' \
+     http://localhost/markdown-metrics | \
+     python3 -c "import sys,json; d=json.load(sys.stdin)['streaming']; \
+     print(json.dumps(d, indent=2))"
    ```
 4. Confirm all streaming counters are stable (no new increments)
 
