@@ -490,6 +490,31 @@ ngx_http_markdown_streaming_send_output(
     out->buf = b;
     out->next = NULL;
 
+    /*
+     * Record TTFB on first non-empty output.
+     * One-shot latch: only the first send with data > 0
+     * records the metric.
+     */
+    if (data != NULL && len > 0
+        && !ctx->streaming.ttfb_recorded
+        && ctx->streaming.feed_start_ms > 0
+        && ngx_http_markdown_metrics != NULL)
+    {
+        ngx_time_t  *tp_ttfb;
+        ngx_msec_t   now_ms;
+        ngx_msec_t   elapsed_ms;
+
+        tp_ttfb = ngx_timeofday();
+        now_ms = (ngx_msec_t) (tp_ttfb->sec * 1000
+            + tp_ttfb->msec);
+        elapsed_ms = (now_ms >= ctx->streaming.feed_start_ms)
+            ? (now_ms - ctx->streaming.feed_start_ms) : 0;
+
+        ngx_http_markdown_metrics->streaming.last_ttfb_us =
+            (ngx_atomic_t) (elapsed_ms * 1000);
+        ctx->streaming.ttfb_recorded = 1;
+    }
+
     rc = ngx_http_next_body_filter(r, out);
 
     if (rc == NGX_OK || rc == NGX_DONE) {
@@ -726,6 +751,8 @@ ngx_http_markdown_streaming_handle_postcommit_error(
     if (error_code == ERROR_MEMORY_LIMIT) {
         NGX_HTTP_MARKDOWN_METRIC_INC(
             streaming.budget_exceeded_total);
+        ngx_http_markdown_log_decision(r, conf,
+            &ngx_http_markdown_reason_streaming_budget);
     }
 
     /* Record decision log */
@@ -807,6 +834,8 @@ ngx_http_markdown_streaming_precommit_error(
     if (error_code == ERROR_MEMORY_LIMIT) {
         NGX_HTTP_MARKDOWN_METRIC_INC(
             streaming.budget_exceeded_total);
+        ngx_http_markdown_log_decision(r, conf,
+            &ngx_http_markdown_reason_streaming_budget);
         ngx_log_debug0(NGX_LOG_DEBUG_HTTP,
             r->connection->log, 0,
             "markdown streaming: budget exceeded "
@@ -1358,27 +1387,6 @@ ngx_http_markdown_streaming_finalize_request(
     /* Record success metrics */
     NGX_HTTP_MARKDOWN_METRIC_INC(streaming.succeeded_total);
     NGX_HTTP_MARKDOWN_METRIC_INC(conversions_succeeded);
-
-    /*
-     * Update streaming gauge metrics.
-     * TTFB is approximated as the time from first feed to
-     * finalize completion (stored in milliseconds, converted
-     * to microseconds for the gauge).
-     */
-    if (ctx->streaming.feed_start_ms > 0) {
-        ngx_time_t  *tp_now;
-        ngx_msec_t   now_ms;
-        ngx_msec_t   elapsed_ms;
-
-        tp_now = ngx_timeofday();
-        now_ms = (ngx_msec_t) (tp_now->sec * 1000
-            + tp_now->msec);
-        elapsed_ms = (now_ms >= ctx->streaming.feed_start_ms)
-            ? (now_ms - ctx->streaming.feed_start_ms) : 0;
-
-        ngx_http_markdown_metrics->streaming.last_ttfb_us =
-            (ngx_atomic_t) (elapsed_ms * 1000);
-    }
 
     ngx_http_markdown_log_decision(r, conf,
         &ngx_http_markdown_reason_streaming_convert);

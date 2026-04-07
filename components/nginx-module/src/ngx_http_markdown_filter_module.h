@@ -316,9 +316,9 @@ typedef struct {
         size_t                            total_input_bytes;
         size_t                            total_output_bytes;
 
-        /* TTFB tracking (microseconds from first feed to first output) */
+        /* TTFB tracking (from first feed to first non-empty output) */
         ngx_msec_t                        feed_start_ms;
-        ngx_flag_t                        first_output_sent;
+        ngx_flag_t                        ttfb_recorded;
 
         /* Pre-Commit prebuffer for fallback */
         ngx_http_markdown_buffer_t        prebuffer;
@@ -476,7 +476,6 @@ typedef struct {
         ngx_atomic_t  shadow_total;              /* Shadow mode runs */
         ngx_atomic_t  shadow_diff_total;         /* Shadow output diffs */
         ngx_atomic_t  last_ttfb_us;              /* Last streaming TTFB (microseconds) */
-        ngx_atomic_t  last_peak_memory_bytes;    /* Last streaming peak memory */
     } streaming;
 #endif
 

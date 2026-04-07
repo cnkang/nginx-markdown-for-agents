@@ -61,16 +61,15 @@ curl -s http://localhost/markdown-metrics | grep shadow_diff_total
 
 | Metric | Continue | Rollback |
 |--------|----------|----------|
-| `shadow_diff_rate` | ≤ 0.1% | > 1% |
-| `shadow_engine_error_rate` | ≤ 0.1% | > 1% |
+| `shadow_diff_rate` (compute: `shadow_diff_total / shadow_total`) | ≤ 0.1% | > 1% |
 
-Shadow latency and memory values in debug logs are for diagnostic
+Shadow latency values in debug logs are for diagnostic
 reference only — they are not gating criteria.
 
 ### Proceed to Phase 1 when
 
 - `shadow_diff_rate` ≤ 0.1% over at least 1 hour of traffic
-- `shadow_engine_error_rate` ≤ 0.1%
+- No unexpected streaming errors in debug logs
 
 ## Phase 1: Single Location
 
@@ -91,23 +90,37 @@ location / {
 ### Verification
 
 ```bash
-# Streaming success rate
-curl -s http://localhost/markdown-metrics | grep streaming
+# Streaming success rate (JSON format)
+curl -s -H 'Accept: application/json' \
+  http://localhost/markdown-metrics | \
+  python3 -c "import sys,json; d=json.load(sys.stdin)['streaming']; \
+  print(f\"succeeded={d['succeeded_total']} failed={d['failed_total']}\")"
 
-# Check for fallbacks
-curl -s http://localhost/markdown-metrics | grep fallback_total
+# Check for fallbacks (JSON streaming object)
+curl -s -H 'Accept: application/json' \
+  http://localhost/markdown-metrics | \
+  python3 -c "import sys,json; d=json.load(sys.stdin)['streaming']; \
+  print(f\"fallback={d['fallback_total']}\")"
 
-# Check for post-commit errors
-curl -s http://localhost/markdown-metrics | grep postcommit_error_total
+# Check for post-commit errors (JSON streaming object)
+curl -s -H 'Accept: application/json' \
+  http://localhost/markdown-metrics | \
+  python3 -c "import sys,json; d=json.load(sys.stdin)['streaming']; \
+  print(f\"postcommit_error={d['postcommit_error_total']}\")"
+
+# Or use Prometheus format
+curl -s -H 'Accept: text/plain; version=0.0.4' \
+  http://localhost/markdown-metrics | \
+  grep nginx_markdown_streaming_total
 ```
 
 ### Thresholds
 
 | Metric | Continue | Pause | Rollback |
 |--------|----------|-------|----------|
-| Streaming success rate | ≥ 99.9% | < 99.5% | < 99% |
-| `fallback_rate` | acceptable | — | — |
-| `postcommit_error_rate` | ≤ 0.01% | > 0.01% | > 0.1% |
+| Success rate (`succeeded_total / (succeeded_total + failed_total)`) | ≥ 99.9% | < 99.5% | < 99% |
+| `fallback_total` growth rate | acceptable | — | — |
+| Post-commit error rate (`postcommit_error_total / succeeded_total`) | ≤ 0.01% | > 0.01% | > 0.1% |
 
 ## Phase 2: 10% Traffic (split_clients)
 
@@ -192,13 +205,13 @@ map $http_user_agent $markdown_streaming_engine {
 
 | Condition | Action |
 |-----------|--------|
-| Streaming success rate ≥ 99.9% | Continue to next phase |
+| Success rate ≥ 99.9% (`streaming.succeeded_total / (succeeded + failed)`) | Continue to next phase |
 | TTFB improvement measurable (large responses) | Continue |
-| Streaming failure rate > 0.5% | Pause, investigate |
-| `postcommit_error_rate` > 0.01% | Pause, investigate |
-| Streaming failure rate > 1% | Rollback |
-| `postcommit_error_rate` > 0.1% | Rollback |
-| `shadow_diff_rate` > 1% | Rollback (Phase 0) |
+| Failure rate > 0.5% (`streaming.failed_total / requests_total`) | Pause, investigate |
+| Post-commit error rate > 0.01% (`streaming.postcommit_error_total / succeeded_total`) | Pause, investigate |
+| Failure rate > 1% | Rollback |
+| Post-commit error rate > 0.1% | Rollback |
+| Shadow diff rate > 1% (`streaming.shadow_diff_total / shadow_total`) | Rollback (Phase 0) |
 
 ## Safety Guarantees
 
@@ -206,9 +219,12 @@ map $http_user_agent $markdown_streaming_engine {
   recorded in the decision log and metrics.
 - **No silent truncation**: Every post-commit error is recorded with
   `STREAMING_FAIL_POSTCOMMIT` reason code and
-  `streaming_postcommit_error_total` counter.
+  `streaming.postcommit_error_total` counter (JSON path:
+  `streaming.postcommit_error_total`; Prometheus:
+  `nginx_markdown_streaming_total{result="postcommit_error"}`).
 - **No silent semantic drift**: Shadow mode detects output differences
-  between engines and records them in `streaming_shadow_diff_total`.
+  between engines and records them in `streaming.shadow_diff_total`
+  (Prometheus: `nginx_markdown_streaming_shadow_diff_total`).
 
 ## Reason Code Quick Reference
 
