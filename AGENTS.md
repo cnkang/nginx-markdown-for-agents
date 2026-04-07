@@ -377,9 +377,20 @@ Required:
   writes) must be recorded **after** the event they describe succeeds, not
   before the attempt.  A counter named "shadow comparisons completed" must
   fire after the comparison completes, not at function entry.  A TTFB gauge
-  must be written after confirming the downstream filter accepted the data
-  (at least `rc != NGX_ERROR`), not before the send call.  If both "attempt"
-  and "completion" semantics are needed, use separate counters.
+  must be written after confirming the downstream filter accepted the data,
+  not before the send call.  If both "attempt" and "completion" semantics
+  are needed, use separate counters.
+- In NGINX filter context, `NGX_AGAIN` means "suspended / backpressure —
+  bytes not yet delivered".  Do not treat `NGX_AGAIN` as a successful send
+  for observability purposes.  Only `NGX_OK` and `NGX_DONE` confirm that
+  data was accepted downstream.  When `NGX_AGAIN` occurs on the first
+  output, defer the TTFB/first-byte gauge write to the resume path where
+  the pending chain drains successfully.
+- When a bug fix extends an error-code classification branch to cover
+  additional FFI codes (for example adding `ERROR_BUDGET_EXCEEDED` alongside
+  `ERROR_MEMORY_LIMIT`), add regression tests that exercise each newly
+  covered code individually.  Without per-code test coverage, the fix can
+  silently regress.
 
 ## Required Agent Workflow
 
@@ -408,7 +419,7 @@ For each code change you are about to produce, mentally (or explicitly in a thin
 6. Memory budgets enforced on every allocation path; auxiliary buffers freed on all exits. (Rule 3)
 7. UTF-8 chunk-boundary safety if touching streaming text paths. (Rule 4)
 8. FFI surface: if Rust structs/options/error codes change, all C headers, call sites, tests, and docs updated in the same change set. (Rule 15)
-9. New metrics: every field added to the metrics struct has a runtime write site (not just snapshot copy). New reason codes have `log_decision()` callsites. Gauge names match the actual measurement event. Observability writes fire after the event succeeds, not before the attempt. (Rules 8, 23)
+9. New metrics: every field added to the metrics struct has a runtime write site (not just snapshot copy). New reason codes have `log_decision()` callsites. Gauge names match the actual measurement event. Observability writes fire after the event succeeds, not before the attempt. `NGX_AGAIN` is not success — defer gauge writes to the resume/drain path. (Rules 8, 23)
 10. FFI error code classification: when branching on error codes, cover all FFI-defined codes for the semantic category — grep `markdown_converter.h` for `ERROR_*` to confirm completeness. (Rule 15)
 
 #### C test code (`components/nginx-module/tests/unit/`)
