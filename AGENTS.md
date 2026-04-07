@@ -219,13 +219,15 @@ Required:
   `tests/corpus/**/.meta.json -> streaming_notes.known_diff_ids` synchronized
   with `tests/streaming/known-differences.toml` IDs to avoid silent metadata
   drift.
-- Regression tests for error-code classification or metrics routing must
-  exercise a stub that mirrors the production branching logic, not manually
-  increment a local struct and assert the hand-written values.  A test that
-  does `m.counter++; assert(m.counter == 1)` proves nothing about whether
-  production code actually increments that counter for the given error code.
-  Use a routing/classification stub that replicates the real `if/switch`
-  conditions so the test fails when the production condition changes.
+- Regression tests for classification logic, routing decisions, or metrics
+  increments must exercise code that mirrors the production branching — not
+  manually set expected values in a local struct and assert them.  A test
+  that writes `m.counter = 1; assert(m.counter == 1)` proves nothing about
+  whether production code increments that counter under the tested condition.
+  Use a stub/helper that replicates the real `if`/`switch` conditions so the
+  test breaks when the production logic changes.  This principle applies to
+  any test that claims to verify a side-effect: the test must go through the
+  code path that produces the side-effect.
 
 ### 15. Cross-language interface and FFI synchronization
 Historical issues: `dbb5722`, `dfeffc4`, `ceeaf38`, `5970807`.
@@ -234,14 +236,15 @@ Required:
 - When Rust FFI structs, options, defaults, or error codes change, update all affected boundaries in the same change set: Rust ABI/options code, public C headers, NGINX call sites, tests, and operator-facing scripts.
 - Treat FFI comments and header docs as part of the interface contract; stale interface docs are a bug, not a cleanup item.
 - Add at least one boundary-level test when introducing or changing an FFI option/error path (for example header-level, feature-independence, or end-to-end verification).
-- When C code classifies FFI error codes into semantic categories (for example
-  "budget exceeded"), the classification branch must cover **all** FFI-defined
-  error codes that map to that category.  Do not assume a 1:1 mapping between
-  C-local error codes and Rust FFI error codes — the Rust side may define a
-  distinct code (for example `ERROR_BUDGET_EXCEEDED = 6`) alongside the C-side
-  code (for example `ERROR_MEMORY_LIMIT = 4`) for the same semantic.  Grep the
-  FFI header (`markdown_converter.h`) for all `#define ERROR_*` codes and
-  confirm each classification branch covers the full set.
+- When C code classifies FFI error codes into semantic categories, the
+  classification branch must cover **all** codes defined in the FFI header
+  that map to that category.  Do not assume a 1:1 mapping between C-local
+  codes and FFI codes — the other language may define multiple distinct
+  codes for the same semantic (for example both a general memory-limit code
+  and a streaming-specific budget code).  Before writing a classification
+  branch, grep the FFI header for all related `#define` constants and
+  confirm the branch covers the full set.  This applies equally to error
+  codes, feature flags, and enum values that cross the FFI boundary.
 
 ### 16. Dead stores and unused assignments in C test code
 SonarCloud rules: `c:S1854`, `c:S5955`.
@@ -376,35 +379,35 @@ Required:
   later event (for example finalize).  Use a one-shot latch flag in the
   per-request context to ensure the gauge is written exactly once at the
   correct moment.
-- When a metric depends on data from an FFI boundary (for example Rust
-  `StreamingStats.peak_memory_estimate`), verify the FFI struct actually
-  exposes the field before adding the C-side metric.  If the FFI field does
-  not exist, do not add the metric — defer it to the release that adds the
-  FFI field.
+- When a metric depends on data from a cross-boundary source (FFI struct,
+  external API response, upstream header), verify the source actually
+  provides the data before adding the consumer-side metric.  If the source
+  field does not exist yet, defer the metric to the release that adds it.
+  Shipping a metric with no data source creates a permanently-zero gauge
+  that misleads operators.
 - Operator-facing docs that reference metrics must be validated against the
   actual output of each format (JSON key paths, Prometheus series names).
   Do not invent metric names that do not appear in any renderer.  For
   derived rates, always include the formula using real metric names.
 - Observability side-effects (counter increments, reason code logging, gauge
   writes) must be recorded **after** the event they describe succeeds, not
-  before the attempt.  A counter named "shadow comparisons completed" must
-  fire after the comparison completes, not at function entry.  A TTFB gauge
-  must be written after confirming the downstream filter accepted the data,
-  not before the send call.  If both "attempt" and "completion" semantics
-  are needed, use separate counters.
-- In NGINX filter context, `NGX_AGAIN` means "suspended / backpressure —
-  bytes not yet delivered".  Do not treat `NGX_AGAIN` as a successful send
-  for observability purposes.  Only `NGX_OK` and `NGX_DONE` confirm that
-  data was accepted downstream.  When `NGX_AGAIN` occurs on the first
-  output, defer the TTFB/first-byte gauge write to the resume path where
-  the pending chain drains successfully.  The deferred path must apply the
-  same success condition (`rc == NGX_OK || rc == NGX_DONE`) — do not
-  weaken the guard in the resume path relative to the primary path.
-- When a bug fix extends an error-code classification branch to cover
-  additional FFI codes (for example adding `ERROR_BUDGET_EXCEEDED` alongside
-  `ERROR_MEMORY_LIMIT`), add regression tests that exercise each newly
-  covered code individually.  Without per-code test coverage, the fix can
-  silently regress.
+  before the attempt.  If both "attempt" and "completion" semantics are
+  needed, use separate counters with unambiguous names.
+- When the same metric can be written from multiple code paths (primary path,
+  retry/resume path, fallback path), all paths must apply the **same** success
+  condition.  Do not weaken the guard in a secondary path — if the primary
+  path requires `rc == OK`, the resume path must also require `rc == OK`, not
+  merely `rc != ERROR`.
+- In NGINX filter context specifically, `NGX_AGAIN` means "suspended /
+  backpressure — bytes not yet delivered" and must not be treated as a
+  successful send for observability.  Only `NGX_OK` and `NGX_DONE` confirm
+  downstream acceptance.  When `NGX_AGAIN` occurs, defer the gauge write to
+  the resume path where the pending chain drains with a confirmed success code.
+- When a bug fix extends a classification branch to cover additional values
+  (error codes, enum variants, content types), add regression tests that
+  exercise each newly covered value individually.  Without per-value test
+  coverage, the fix can silently regress when the branch condition is later
+  modified.
 
 ## Required Agent Workflow
 
@@ -502,9 +505,49 @@ Follow evidence-first verification (no completion claim without fresh command ou
 
 If full suite is too heavy for current scope, run the narrowest relevant target set and explicitly report what was not run.
 
+### After fixing bugs or addressing review findings
+- Evaluate whether the fix reveals a generalizable pattern that should be
+  captured in `AGENTS.md` (see "Rule Maintenance" section below).
+- If the same class of mistake appeared in multiple review rounds, treat it
+  as a systemic gap and add or strengthen a rule immediately.
+- Check that existing rules and checklist items are consistent with the fix —
+  if a rule said "do X" but the fix required "do X and also Y in the resume
+  path", update the rule to cover Y.
+
 ## Definition of Done for Agent Changes
 - Pre-output checklist was applied to every file written or modified (no write-first-fix-later).
 - Behavior is correct for nominal and edge-case paths.
 - Added/updated regression tests cover the fixed failure mode.
 - Related docs/validators/CI triggers stay consistent.
 - Verification commands were run in the current session and results were checked.
+
+## Rule Maintenance (Meta-Rule)
+
+After completing any bug fix, review finding remediation, or multi-round code
+review cycle, the agent must evaluate whether `AGENTS.md` needs updating:
+
+1. **Pattern extraction**: For each fix, ask: "Is this a one-off typo, or does
+   it represent a class of mistakes that could recur in different code?"  If
+   the latter, extract a generalizable rule.
+2. **Generalize, don't enumerate**: Rules should describe the *principle* that
+   was violated, not just the specific instance.  Bad: "check
+   `ERROR_BUDGET_EXCEEDED` alongside `ERROR_MEMORY_LIMIT`."  Good: "when
+   classifying values into semantic categories across language boundaries,
+   cover all source-defined values that map to the category, not just the
+   locally-familiar ones."
+3. **Recurring pattern escalation**: If the same class of mistake appears in
+   two or more review rounds (even in different forms), treat it as a
+   systemic gap.  Strengthen the existing rule or add a new one — do not
+   rely on the agent "remembering" the previous fix.
+4. **Consistency audit**: When adding a guard condition in one code path (for
+   example a success check before writing a metric), scan all other paths
+   that perform the same write and apply the same guard.  A rule that says
+   "do X in path A" implicitly requires "do X in every path that does the
+   same thing."
+5. **Checklist sync**: If a new rule is added or an existing rule is
+   strengthened, update the corresponding pre-output checklist item(s) so
+   the rule is enforced at write time, not discovered at review time.
+6. **Scope**: Only add rules that are actionable and verifiable before code
+   is written.  Avoid vague aspirational statements.  Every rule should
+   answer: "What specific check does the agent perform, and what does
+   failure look like?"
