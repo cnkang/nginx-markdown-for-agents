@@ -171,6 +171,12 @@ Required:
   path under test (no loops that ignore the case value and only mutate counters).
 - Prefer exercising shared routing/helpers used by production semantics over
   duplicated inline test logic, so behavior drift is caught by tests.
+- Fuzz/invariance checks that compare conversion paths must evaluate both sides
+  as `Result` values and assert success/error parity before comparing outputs;
+  do not early-return on the first `Err` and silently skip asymmetry.
+- Full-buffer vs streaming parity tests must keep conversion configuration
+  aligned (for example content-type/charset/options) unless the mismatch is the
+  explicit subject of the test and documented in-place.
 - For fixture-scoped known differences, keep
   `tests/corpus/**/.meta.json -> streaming_notes.known_diff_ids` synchronized
   with `tests/streaming/known-differences.toml` IDs to avoid silent metadata
