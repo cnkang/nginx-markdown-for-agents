@@ -273,6 +273,11 @@ Required:
   integration test binaries must carry `#![allow(dead_code)]` at the module
   level, because each binary only uses a subset of the shared API and the
   remaining functions produce noisy warnings.
+- Fuzz/test helper wrappers around streaming conversion must preserve
+  `ConversionError` detail and variant identity by returning
+  `Result<..., ConversionError>` (or equivalent) and propagating with `?`;
+  avoid `Option` wrappers and `.ok()?` conversions that erase error semantics
+  needed for parity/regression assertions.
 - Never remove or modify a `#[cfg(feature = "...")]`-gated import without
   scanning the entire file for `#[cfg(feature = "...")]`-gated usages of that
   import. Feature-gated items may appear far from their import and are invisible
