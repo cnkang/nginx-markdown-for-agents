@@ -625,18 +625,18 @@ ngx_http_markdown_streaming_resume_pending(
     /*
      * Pending output drained successfully.  If TTFB was not
      * yet recorded (send_output returned NGX_AGAIN on the
-     * first non-empty output), record it now — but only when
-     * the retry actually succeeded (NGX_OK or NGX_DONE).
-     * NGX_ERROR means the drain failed; do not record TTFB.
-     *
-     * The pending chain always contains non-empty data (empty
-     * buffers are never persisted in pending_output), so no
-     * additional data-length check is needed here.
+     * first non-empty output), record it now — but only when:
+     *   1. The retry actually succeeded (NGX_OK or NGX_DONE)
+     *   2. The drained chain contained non-empty data (not a
+     *      terminal empty last_buf from send_deferred_lastbuf)
      */
     if (!ctx->streaming.ttfb_recorded
         && ctx->streaming.feed_start_ms > 0
         && ngx_http_markdown_metrics != NULL
-        && (rc == NGX_OK || rc == NGX_DONE))
+        && (rc == NGX_OK || rc == NGX_DONE)
+        && out != NULL
+        && out->buf != NULL
+        && out->buf->last > out->buf->pos)
     {
         ngx_time_t  *tp_ttfb;
         ngx_msec_t   now_ms;
