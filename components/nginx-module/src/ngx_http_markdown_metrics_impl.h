@@ -94,6 +94,11 @@ typedef struct {
         ngx_atomic_uint_t postcommit_error_total;
         ngx_atomic_uint_t precommit_failopen_total;
         ngx_atomic_uint_t precommit_reject_total;
+        ngx_atomic_uint_t budget_exceeded_total;
+        ngx_atomic_uint_t shadow_total;
+        ngx_atomic_uint_t shadow_diff_total;
+        ngx_atomic_uint_t last_ttfb_us;
+        ngx_atomic_uint_t last_peak_memory_bytes;
     } streaming;
 #endif
 
@@ -109,11 +114,11 @@ typedef struct {
  *   Plain text: ~1.5 KiB
  *   Prometheus: ~3.8 KiB (most verbose due to HELP/TYPE lines)
  *
- * The 6 KiB buffer provides ~2.2 KiB headroom above the largest
+ * The 8 KiB buffer provides headroom above the largest
  * format.  Increase this constant if new metrics push the
  * Prometheus output beyond the limit.
  */
-#define NGX_HTTP_MARKDOWN_METRICS_BUF_SIZE  6144
+#define NGX_HTTP_MARKDOWN_METRICS_BUF_SIZE  8192
 
 /*
  * Forward declaration: the Prometheus renderer is defined in
@@ -223,6 +228,16 @@ ngx_http_markdown_collect_metrics_snapshot(ngx_http_markdown_metrics_snapshot_t 
         metrics->streaming.precommit_failopen_total;
     snapshot->streaming.precommit_reject_total =
         metrics->streaming.precommit_reject_total;
+    snapshot->streaming.budget_exceeded_total =
+        metrics->streaming.budget_exceeded_total;
+    snapshot->streaming.shadow_total =
+        metrics->streaming.shadow_total;
+    snapshot->streaming.shadow_diff_total =
+        metrics->streaming.shadow_diff_total;
+    snapshot->streaming.last_ttfb_us =
+        metrics->streaming.last_ttfb_us;
+    snapshot->streaming.last_peak_memory_bytes =
+        metrics->streaming.last_peak_memory_bytes;
 #endif
     snapshot->estimated_token_savings = metrics->estimated_token_savings;
 }
@@ -549,7 +564,12 @@ ngx_http_markdown_metrics_write_json(
         "    \"failed_total\": %uA,\n"
         "    \"postcommit_error_total\": %uA,\n"
         "    \"precommit_failopen_total\": %uA,\n"
-        "    \"precommit_reject_total\": %uA\n"
+        "    \"precommit_reject_total\": %uA,\n"
+        "    \"budget_exceeded_total\": %uA,\n"
+        "    \"shadow_total\": %uA,\n"
+        "    \"shadow_diff_total\": %uA,\n"
+        "    \"last_ttfb_us\": %uA,\n"
+        "    \"last_peak_memory_bytes\": %uA\n"
         "  },\n"
 #endif
         "  \"requests_entered\": %uA,\n"
@@ -602,6 +622,11 @@ ngx_http_markdown_metrics_write_json(
         snapshot->streaming.postcommit_error_total,
         snapshot->streaming.precommit_failopen_total,
         snapshot->streaming.precommit_reject_total,
+        snapshot->streaming.budget_exceeded_total,
+        snapshot->streaming.shadow_total,
+        snapshot->streaming.shadow_diff_total,
+        snapshot->streaming.last_ttfb_us,
+        snapshot->streaming.last_peak_memory_bytes,
 #endif
         snapshot->requests_entered,
         snapshot->skips.config,
@@ -687,6 +712,11 @@ ngx_http_markdown_metrics_write_text(
         "- Streaming Post-Commit Errors: %uA\n"
         "- Streaming Pre-Commit Fail-Open: %uA\n"
         "- Streaming Pre-Commit Reject: %uA\n"
+        "- Streaming Budget Exceeded: %uA\n"
+        "- Streaming Shadow Total: %uA\n"
+        "- Streaming Shadow Diff Total: %uA\n"
+        "- Streaming Last TTFB (us): %uA\n"
+        "- Streaming Last Peak Memory (bytes): %uA\n"
 #endif
         "\n"
         "Decision Chain:\n"
@@ -737,6 +767,11 @@ ngx_http_markdown_metrics_write_text(
         snapshot->streaming.postcommit_error_total,
         snapshot->streaming.precommit_failopen_total,
         snapshot->streaming.precommit_reject_total,
+        snapshot->streaming.budget_exceeded_total,
+        snapshot->streaming.shadow_total,
+        snapshot->streaming.shadow_diff_total,
+        snapshot->streaming.last_ttfb_us,
+        snapshot->streaming.last_peak_memory_bytes,
 #endif
         snapshot->requests_entered,
         snapshot->skips.config,

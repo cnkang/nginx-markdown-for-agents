@@ -146,6 +146,7 @@ ngx_http_markdown_create_conf(ngx_conf_t *cf)
     conf->streaming_engine = NULL;
     conf->streaming_budget = NGX_CONF_UNSET_SIZE;
     conf->streaming_on_error = NGX_CONF_UNSET_UINT;
+    conf->streaming_shadow = NGX_CONF_UNSET;
 #endif
 
     return conf;
@@ -229,6 +230,8 @@ ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
     ngx_conf_merge_uint_value(conf->streaming_on_error,
                               prev->streaming_on_error,
                               NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_PASS);
+    ngx_conf_merge_value(conf->streaming_shadow,
+                         prev->streaming_shadow, 0);
 #endif
 
     ngx_http_markdown_log_merged_conf(cf, conf);
@@ -591,6 +594,7 @@ ngx_http_markdown_log_merged_conf(ngx_conf_t *cf, ngx_http_markdown_conf_t *conf
                        " streaming_engine=%s"
                        " streaming_budget=%uz"
                        " streaming_on_error=%V"
+                       " streaming_shadow=%i"
 #endif
                        ,
                        (ngx_uint_t) conf->enabled,
@@ -619,6 +623,7 @@ ngx_http_markdown_log_merged_conf(ngx_conf_t *cf, ngx_http_markdown_conf_t *conf
                        , conf->streaming_budget
                        , ngx_http_markdown_on_error_name(
                              conf->streaming_on_error)
+                       , (ngx_int_t) conf->streaming_shadow
 #endif
                        );
 }

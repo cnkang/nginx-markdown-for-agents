@@ -538,6 +538,30 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
                  streaming_on_error),
         &ngx_http_markdown_streaming_on_error_enum
     },
+
+    /*
+     * markdown_streaming_shadow on|off
+     *
+     * Enable shadow mode: run both full-buffer and streaming
+     * engines, return full-buffer result to client, compare
+     * outputs and record differences in debug log and metrics.
+     *
+     * Default: off
+     * Context: http, server, location
+     *
+     * Example:
+     *   markdown_streaming_shadow on;
+     */
+    {
+        ngx_string("markdown_streaming_shadow"),
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF
+            |NGX_HTTP_LOC_CONF|NGX_CONF_FLAG,
+        ngx_conf_set_flag_slot,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        offsetof(ngx_http_markdown_conf_t,
+                 streaming_shadow),
+        NULL
+    },
 #endif /* MARKDOWN_STREAMING_ENABLED */
 
     ngx_null_command
