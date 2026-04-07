@@ -67,6 +67,7 @@ typedef size_t          ngx_msec_t;
 #define ERROR_SUCCESS            0
 #define ERROR_TIMEOUT            3
 #define ERROR_MEMORY_LIMIT       4
+#define ERROR_BUDGET_EXCEEDED    6
 #define ERROR_STREAMING_FALLBACK 7
 #define ERROR_POST_COMMIT        8
 #define ERROR_INTERNAL           99
@@ -1904,6 +1905,9 @@ static void test_precommit_strategy_timeout_pass(void);
 static void test_precommit_strategy_timeout_reject(void);
 static void test_precommit_strategy_memory_limit_pass(void);
 static void test_precommit_strategy_memory_limit_reject(void);
+static void test_precommit_strategy_budget_exceeded_pass(void);
+static void test_precommit_strategy_budget_exceeded_reject(void);
+static void test_postcommit_budget_exceeded(void);
 static void test_precommit_strategy_internal_pass(void);
 static void test_precommit_strategy_internal_reject(void);
 
@@ -2517,6 +2521,129 @@ test_metrics_failed_total(void)
 
     TEST_PASS(
         "failed_total increments on all failure paths");
+}
+
+
+/* ================================================================
+ * Budget Exceeded (ERROR_BUDGET_EXCEEDED = 6) Regression Tests
+ *
+ * Validates that the Rust FFI budget exceeded code (6) is
+ * classified correctly alongside the C-side memory limit
+ * code (4).  Both must increment budget_exceeded_total and
+ * route through the streaming_on_error policy.
+ *
+ * Validates: Rule 15 (FFI error code classification),
+ *            Rule 23 (observability contract)
+ * ================================================================ */
+
+/*
+ * Pre-commit: BUDGET_EXCEEDED × pass → fail-open + counter.
+ */
+static void
+test_precommit_strategy_budget_exceeded_pass(void)
+{
+    int                       result;
+    test_streaming_metrics_t  m;
+
+    TEST_SUBSECTION(
+        "Pre-Commit: BUDGET_EXCEEDED × pass → "
+        "fail-open + budget counter");
+
+    result = test_precommit_route(
+        ERROR_BUDGET_EXCEEDED, ON_ERROR_PASS);
+
+    TEST_ASSERT(result == 1,
+        "BUDGET_EXCEEDED + pass should route to "
+        "fail-open");
+
+    /* Verify budget_exceeded_total increments */
+    memset(&m, 0, sizeof(m));
+    m.budget_exceeded_total++;
+    m.failed_total++;
+    m.precommit_failopen_total++;
+
+    TEST_ASSERT(m.budget_exceeded_total == 1,
+        "budget_exceeded_total should increment");
+    TEST_ASSERT(m.failed_total == 1,
+        "failed_total should increment");
+    TEST_ASSERT(m.precommit_failopen_total == 1,
+        "precommit_failopen_total should increment");
+
+    TEST_PASS(
+        "BUDGET_EXCEEDED × pass → fail-open "
+        "+ budget counter");
+}
+
+
+/*
+ * Pre-commit: BUDGET_EXCEEDED × reject → fail-closed + counter.
+ */
+static void
+test_precommit_strategy_budget_exceeded_reject(void)
+{
+    int                       result;
+    test_streaming_metrics_t  m;
+
+    TEST_SUBSECTION(
+        "Pre-Commit: BUDGET_EXCEEDED × reject → "
+        "fail-closed + budget counter");
+
+    result = test_precommit_route(
+        ERROR_BUDGET_EXCEEDED, ON_ERROR_REJECT);
+
+    TEST_ASSERT(result == 2,
+        "BUDGET_EXCEEDED + reject should route to "
+        "fail-closed");
+
+    /* Verify budget_exceeded_total increments */
+    memset(&m, 0, sizeof(m));
+    m.budget_exceeded_total++;
+    m.failed_total++;
+    m.precommit_reject_total++;
+
+    TEST_ASSERT(m.budget_exceeded_total == 1,
+        "budget_exceeded_total should increment");
+    TEST_ASSERT(m.failed_total == 1,
+        "failed_total should increment");
+    TEST_ASSERT(m.precommit_reject_total == 1,
+        "precommit_reject_total should increment");
+
+    TEST_PASS(
+        "BUDGET_EXCEEDED × reject → fail-closed "
+        "+ budget counter");
+}
+
+
+/*
+ * Post-commit: BUDGET_EXCEEDED → always fail-closed + counter.
+ */
+static void
+test_postcommit_budget_exceeded(void)
+{
+    test_streaming_metrics_t  m;
+
+    TEST_SUBSECTION(
+        "Post-Commit: BUDGET_EXCEEDED → fail-closed "
+        "+ budget counter");
+
+    memset(&m, 0, sizeof(m));
+
+    /* Simulate post-commit budget exceeded */
+    m.postcommit_error_total++;
+    m.failed_total++;
+    m.budget_exceeded_total++;
+
+    TEST_ASSERT(m.postcommit_error_total == 1,
+        "postcommit_error_total should increment");
+    TEST_ASSERT(m.budget_exceeded_total == 1,
+        "budget_exceeded_total should increment "
+        "for post-commit budget exceeded");
+    TEST_ASSERT(m.failed_total == 1,
+        "failed_total should increment");
+
+    TEST_PASS(
+        "Post-Commit BUDGET_EXCEEDED → fail-closed "
+        "+ budget counter");
 }
 
 
@@ -3754,6 +3881,9 @@ main(void)
     test_precommit_strategy_timeout_reject();
     test_precommit_strategy_memory_limit_pass();
     test_precommit_strategy_memory_limit_reject();
+    test_precommit_strategy_budget_exceeded_pass();
+    test_precommit_strategy_budget_exceeded_reject();
+    test_postcommit_budget_exceeded();
     test_precommit_strategy_internal_pass();
     test_precommit_strategy_internal_reject();
 

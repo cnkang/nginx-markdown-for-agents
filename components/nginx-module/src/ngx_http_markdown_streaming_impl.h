@@ -495,16 +495,17 @@ ngx_http_markdown_streaming_send_output(
     /*
      * Record TTFB on first successful non-empty output send.
      * One-shot latch: only fires once, and only when the
-     * downstream filter accepted the data (NGX_OK or NGX_DONE).
-     * NGX_AGAIN is also acceptable — data was buffered and will
-     * be sent; the first-byte timestamp is still valid.
-     * NGX_ERROR means the send failed — do not record TTFB.
+     * downstream filter confirmed delivery (NGX_OK or NGX_DONE).
+     *
+     * NGX_AGAIN means backpressure — bytes are not yet sent.
+     * TTFB will be recorded later in resume_pending() when
+     * the pending chain drains successfully.
      */
     if (data != NULL && len > 0
         && !ctx->streaming.ttfb_recorded
         && ctx->streaming.feed_start_ms > 0
         && ngx_http_markdown_metrics != NULL
-        && rc != NGX_ERROR)
+        && (rc == NGX_OK || rc == NGX_DONE))
     {
         ngx_time_t  *tp_ttfb;
         ngx_msec_t   now_ms;
@@ -620,6 +621,30 @@ ngx_http_markdown_streaming_resume_pending(
     }
 
     r->buffered &= ~NGX_HTTP_MARKDOWN_BUFFERED;
+
+    /*
+     * Pending output drained successfully.  If TTFB was not
+     * yet recorded (send_output returned NGX_AGAIN on the
+     * first non-empty output), record it now.
+     */
+    if (!ctx->streaming.ttfb_recorded
+        && ctx->streaming.feed_start_ms > 0
+        && ngx_http_markdown_metrics != NULL)
+    {
+        ngx_time_t  *tp_ttfb;
+        ngx_msec_t   now_ms;
+        ngx_msec_t   elapsed_ms;
+
+        tp_ttfb = ngx_timeofday();
+        now_ms = (ngx_msec_t) (tp_ttfb->sec * 1000
+            + tp_ttfb->msec);
+        elapsed_ms = (now_ms >= ctx->streaming.feed_start_ms)
+            ? (now_ms - ctx->streaming.feed_start_ms) : 0;
+
+        ngx_http_markdown_metrics->streaming.last_ttfb_us =
+            (ngx_atomic_t) (elapsed_ms * 1000);
+        ctx->streaming.ttfb_recorded = 1;
+    }
 
     /*
      * Pending output drained. If finalize deferred the
