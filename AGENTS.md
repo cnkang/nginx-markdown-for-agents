@@ -96,6 +96,11 @@ Required:
 - Encode skip-reason mapping explicitly; do not rely on indirect checks that can misclassify edge cases.
 - Keep reason-code behavior and tests aligned when eligibility logic changes.
 - For protocol edge statuses (for example 206), map to the intended reason consistently even in malformed upstream scenarios.
+- When adding a new reason code string definition and accessor function, the
+  corresponding `ngx_http_markdown_log_decision()` callsite(s) must be added in
+  the same changeset.  A reason code that is defined but never emitted at
+  runtime is a contract violation — operators and docs will reference a code
+  that never appears in logs.
 
 ### 8. Metrics endpoint correctness and observability gaps
 Historical issues: `478db96`, `b905fee`, `461908f`, `9f3885e`.
@@ -111,6 +116,18 @@ Required:
 - Keep Prometheus metric families semantically non-overlapping: aggregate outcome
   series must be mutually exclusive, and detailed breakdown counters must live in
   a separate metric family/label space to avoid double-counting.
+- Every metric field exposed in the metrics struct, snapshot, and output
+  renderers (JSON/text/Prometheus) must have at least one runtime write path
+  that populates it with a real value.  Do not expose a gauge or counter that
+  is never assigned — a permanently-zero metric misleads operators and masks
+  real risk.  If the data source (for example an FFI struct field) does not
+  exist yet, defer the metric to a future release instead of shipping a dead
+  field.
+- Metric names and HELP text must accurately describe what is actually
+  measured.  If a metric is named `ttfb_seconds` (time-to-first-byte), the
+  write site must fire at the first-byte event, not at finalize or request
+  completion.  Semantic mismatch between name and measurement is a bug, not a
+  documentation issue.
 
 ### 9. Docs/tooling drift (README vs INSTALLATION vs validators)
 Historical issues: `726865e`, `2b0bd5d`, `83eca29`, `18dfb8c`, `4b2b761`, `09f5d1d`.
@@ -122,6 +139,15 @@ Required:
 - Avoid false positives by preserving meaningful URL path semantics in curl checks.
 - Metric names documented in tables/examples must match emitted JSON keys and
   Prometheus series names exactly (no synthetic prefixes or renamed aliases).
+- Operator-facing docs (cookbooks, rollout guides) that reference metrics must
+  use the exact retrievable key path or series name.  For JSON, use the nested
+  object path (for example `streaming.postcommit_error_total`).  For
+  Prometheus, use the full series name with labels (for example
+  `nginx_markdown_streaming_total{result="postcommit_error"}`).  Do not invent
+  flat metric names that do not exist in any output format.
+- When docs reference derived rates (for example `shadow_diff_rate`), include
+  the computation formula using real metric names so operators can reproduce
+  the calculation (for example `shadow_diff_total / shadow_total`).
 
 ### 10. Regex ReDoS and parser fragility in tooling
 Historical issues: `19875fe`, `10ea6ac`, `163f3e2`, `ea982d7`, `2103658`.
@@ -311,6 +337,35 @@ Required:
   directly or underscore-separated literals (`1_024`) to satisfy
   `clippy::identity_op`.
 
+### 23. Observability contract integrity (metrics, reason codes, docs)
+
+Required:
+- Every new metric field must have a complete lifecycle in the same changeset:
+  struct field → snapshot copy → output renderer(s) → runtime write site.
+  If any link is missing (especially the runtime write site), the metric is
+  dead and must not be shipped.  Verify by grep: every field added to
+  `ngx_http_markdown_metrics_t` must appear in at least one
+  `NGX_HTTP_MARKDOWN_METRIC_INC` / `METRIC_ADD` or direct assignment outside
+  of snapshot collection.
+- Every new reason code must have a complete lifecycle in the same changeset:
+  static string definition → accessor function → `ngx_http_markdown_log_decision()`
+  callsite at the corresponding runtime branch.  A reason code that is defined
+  and documented but never emitted is a contract violation.
+- Gauge metrics that claim to measure a specific event (for example
+  "time-to-first-byte") must write their value at that event, not at a
+  later event (for example finalize).  Use a one-shot latch flag in the
+  per-request context to ensure the gauge is written exactly once at the
+  correct moment.
+- When a metric depends on data from an FFI boundary (for example Rust
+  `StreamingStats.peak_memory_estimate`), verify the FFI struct actually
+  exposes the field before adding the C-side metric.  If the FFI field does
+  not exist, do not add the metric — defer it to the release that adds the
+  FFI field.
+- Operator-facing docs that reference metrics must be validated against the
+  actual output of each format (JSON key paths, Prometheus series names).
+  Do not invent metric names that do not appear in any renderer.  For
+  derived rates, always include the formula using real metric names.
+
 ## Required Agent Workflow
 
 ### Before coding
@@ -338,6 +393,7 @@ For each code change you are about to produce, mentally (or explicitly in a thin
 6. Memory budgets enforced on every allocation path; auxiliary buffers freed on all exits. (Rule 3)
 7. UTF-8 chunk-boundary safety if touching streaming text paths. (Rule 4)
 8. FFI surface: if Rust structs/options/error codes change, all C headers, call sites, tests, and docs updated in the same change set. (Rule 15)
+9. New metrics: every field added to the metrics struct has a runtime write site (not just snapshot copy). New reason codes have `log_decision()` callsites. Gauge names match the actual measurement event. (Rules 8, 23)
 
 #### C test code (`components/nginx-module/tests/unit/`)
 1. No dead stores — simulation-style tests set the final value directly; initial state documented in comments only. (Rule 16)
@@ -378,6 +434,7 @@ For each code change you are about to produce, mentally (or explicitly in a thin
 2. Validators/scripts consistent with the docs they check. (Rule 9)
 3. No regex with overlapping quantifiers / backtracking hotspots. (Rule 10)
 4. Metrics docs use exact emitted key/series names (JSON/Prometheus) with no naming drift. (Rules 8, 9)
+5. Operator docs referencing metrics use real JSON key paths or Prometheus series names, not invented flat names. Derived rates include computation formulas. (Rules 9, 23)
 
 **If any item would be violated, redesign the change before writing it.** Do not emit code that you know will need a follow-up fix — that wastes time, wastes tokens and review cycles.
 
