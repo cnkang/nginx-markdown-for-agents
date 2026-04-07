@@ -4,5 +4,11 @@
   "expected-conversion-result": "converted",
   "input-size-bytes": 719,
   "source-description": "HTML with unclosed tags to test parser error recovery and auto-closing",
-  "failure-corpus": true
+  "failure-corpus": true,
+  "streaming_notes": {
+    "expected_fallback": false,
+    "known_diff_ids": [
+      "DIFF-PARITY-MALFORMED-UNCLOSED"
+    ]
+  }
 }

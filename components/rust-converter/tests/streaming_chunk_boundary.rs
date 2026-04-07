@@ -73,7 +73,7 @@ fn assert_equal_or_known_difference(
     let whitespace_only_drift =
         normalize_whitespace_tokens(lhs) == normalize_whitespace_tokens(rhs);
     let diff = if whitespace_only_drift {
-        format!("whitespace-only-chunk-drift\n{}", diff_summary(lhs, rhs))
+        format!("whitespace-only-parity-drift\n{}", diff_summary(lhs, rhs))
     } else {
         diff_summary(lhs, rhs)
     };
@@ -140,7 +140,18 @@ proptest! {
                     html,
                 );
             }
-            (Err(_), Err(_)) => {}
+            (Err(err_a), Err(err_b)) => {
+                prop_assert_eq!(
+                    std::mem::discriminant(&err_a),
+                    std::mem::discriminant(&err_b),
+                    "chunk split produced different error variants\nsplit_a={:?}\nsplit_b={:?}\nhtml={}\nerr_a={:?}\nerr_b={:?}",
+                    split_a,
+                    split_b,
+                    html,
+                    err_a,
+                    err_b,
+                );
+            }
             (Ok(_), Err(err)) => {
                 prop_assert!(false, "split_a succeeded but split_b failed: {err}");
             }

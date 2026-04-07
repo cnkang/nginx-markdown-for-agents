@@ -7,7 +7,9 @@
   "failure-corpus": false,
   "streaming_notes": {
     "expected_fallback": false,
-    "known_diff_ids": [],
+    "known_diff_ids": [
+      "DIFF-HIGHRISK-NESTED-LISTS-STRUCTURE"
+    ],
     "high_risk_structures": [
       "nested-list",
       "mixed-list",

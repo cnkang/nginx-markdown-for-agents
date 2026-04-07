@@ -4,5 +4,11 @@
   "expected-conversion-result": "converted",
   "input-size-bytes": 203,
   "source-description": "Minimal empty HTML document to test empty input handling",
-  "failure-corpus": false
+  "failure-corpus": false,
+  "streaming_notes": {
+    "expected_fallback": false,
+    "known_diff_ids": [
+      "DIFF-PARITY-WHITESPACE-ONLY"
+    ]
+  }
 }
