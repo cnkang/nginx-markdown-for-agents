@@ -228,19 +228,6 @@ ngx_http_markdown_metrics_write_prometheus(
         "\n",
         snapshot->streaming.last_ttfb_us / 1000000,
         snapshot->streaming.last_ttfb_us % 1000000);
-
-    /* streaming_peak_memory_bytes (gauge) */
-    p = ngx_slprintf(p, end,
-        "# HELP "
-        "nginx_markdown_streaming_peak_memory_bytes "
-        "Last streaming request peak memory estimate.\n"
-        "# TYPE "
-        "nginx_markdown_streaming_peak_memory_bytes "
-        "gauge\n"
-        "nginx_markdown_streaming_peak_memory_bytes"
-        " %uA\n"
-        "\n",
-        snapshot->streaming.last_peak_memory_bytes);
 #endif
 
     /* input_bytes_total */
