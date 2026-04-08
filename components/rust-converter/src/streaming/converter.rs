@@ -29,7 +29,7 @@ use crate::streaming::types::{
 ///
 /// # Examples
 ///
-    /// ```no_run
+/// ```no_run
 /// use nginx_markdown_converter::converter::ConversionOptions;
 /// use nginx_markdown_converter::streaming::budget::MemoryBudget;
 /// use nginx_markdown_converter::streaming::converter::StreamingConverter;
