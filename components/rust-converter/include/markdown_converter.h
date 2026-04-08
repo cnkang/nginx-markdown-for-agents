@@ -130,6 +130,15 @@ typedef struct MarkdownResult {
   uint32_t error_code;
   uint8_t *error_message;
   uintptr_t error_len;
+  /**
+   * Peak memory estimate during streaming conversion (bytes).
+   *
+   * Populated by `markdown_streaming_finalize()` from
+   * `StreamingStats.peak_memory_estimate`. Valid only when
+   * `error_code == 0` (ERROR_SUCCESS). Must be read before
+   * calling `markdown_result_free()`.
+   */
+  uintptr_t peak_memory_estimate;
 } MarkdownResult;
 
 /**

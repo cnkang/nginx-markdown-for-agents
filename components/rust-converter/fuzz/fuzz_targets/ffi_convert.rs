@@ -63,6 +63,7 @@ fuzz_target!(|data: &[u8]| {
         error_code: 0,
         error_message: ptr::null_mut(),
         error_len: 0,
+        peak_memory_estimate: 0,
     };
 
     unsafe {
