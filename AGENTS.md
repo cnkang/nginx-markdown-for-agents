@@ -533,6 +533,12 @@ Required:
   When changing a parameter from non-const to const (or vice versa), update
   all call sites, forward declarations, and header prototypes in the same
   change set.
+- Forward declarations must not shadow or redeclare NGINX macro identifiers
+  (for example `ngx_log_error`, `ngx_memzero`, `ngx_str_set`). Before adding a
+  declaration in impl headers, confirm the symbol is not a macro in NGINX
+  headers. If a callable API is needed, declare the underlying function symbol
+  (for example `ngx_log_error_core`) and keep signature parity with the
+  canonical declaration in the owning header, including `const` qualifiers.
 - Treat static-analysis findings that imply undefined behavior, data truncation,
   or invalid memory access risk as correctness/security issues and fix them in
   code; do not defer as cosmetic cleanup.
@@ -574,6 +580,7 @@ For each code change you are about to produce, mentally (or explicitly in a thin
 14. Forward declarations must match definitions: when changing a function's signature (parameters, return type), update both the forward declaration and the definition in the same change set. Mismatches cause silent type errors in C.
 15. C99 safety baseline: no implicit declarations, no unchecked narrowing conversions. Any required narrowing cast must have a preceding bounds check and explicit overflow failure path. (Rule 24)
 16. Const-correctness: pointer parameters that are only read through must be `const`-qualified. No const-dropping casts in read-only paths. When changing a parameter's const qualification, update forward declarations and header prototypes in the same change set. (Rule 24)
+17. No macro-shadow declarations: do not declare functions/variables with names that are NGINX macros (`ngx_log_error`, `ngx_memzero`, `ngx_str_set`, etc.). Validate against canonical headers and preserve exact signature parity (including `const`) when adding forward declarations. (Rule 24)
 
 #### C test code (`components/nginx-module/tests/unit/`)
 1. No dead stores — simulation-style tests set the final value directly; initial state documented in comments only. (Rule 16)
