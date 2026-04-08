@@ -41,7 +41,7 @@ static ngx_str_t ngx_http_markdown_eligibility_unknown_str = ngx_string("unknown
  *   0 otherwise
  */
 static ngx_int_t
-ngx_http_markdown_check_method(ngx_http_request_t *r)
+ngx_http_markdown_check_method(const ngx_http_request_t *r)
 {
     return (r->method == NGX_HTTP_GET || r->method == NGX_HTTP_HEAD);
 }
@@ -64,7 +64,7 @@ ngx_http_markdown_check_method(ngx_http_request_t *r)
  *   0 otherwise
  */
 static ngx_int_t
-ngx_http_markdown_check_status(ngx_http_request_t *r)
+ngx_http_markdown_check_status(const ngx_http_request_t *r)
 {
     return (r->headers_out.status == NGX_HTTP_OK);
 }
@@ -84,9 +84,9 @@ ngx_http_markdown_check_status(ngx_http_request_t *r)
  *   0 if Range header is not present
  */
 static ngx_int_t
-ngx_http_markdown_has_range_header(ngx_http_request_t *r)
+ngx_http_markdown_has_range_header(const ngx_http_request_t *r)
 {
-    ngx_table_elt_t *range_header;
+    const ngx_table_elt_t *range_header;
     
     /* Look for Range header in request headers */
     range_header = r->headers_in.range;
@@ -150,8 +150,8 @@ ngx_http_markdown_check_content_type(ngx_http_request_t *r)
  *   0 if size exceeds limit
  */
 static ngx_int_t
-ngx_http_markdown_check_size_limit(ngx_http_request_t *r,
-                                   ngx_http_markdown_conf_t *conf)
+ngx_http_markdown_check_size_limit(const ngx_http_request_t *r,
+                                   const ngx_http_markdown_conf_t *conf)
 {
     off_t content_length;
     
@@ -187,13 +187,12 @@ ngx_http_markdown_check_size_limit(ngx_http_request_t *r,
  *   0 if response is not streaming (eligible)
  */
 static ngx_int_t
-ngx_http_markdown_is_streaming(ngx_http_request_t *r,
-                                ngx_http_markdown_conf_t *conf)
+ngx_http_markdown_is_streaming(const ngx_http_request_t *r,
+                               const ngx_http_markdown_conf_t *conf)
 {
     static u_char  text_event_stream[] = "text/event-stream";
     ngx_str_t           *content_type;
-    ngx_str_t           *stream_type;
-    ngx_uint_t           i;
+    const ngx_str_t     *stream_type;
     
     /* Get Content-Type header */
     if (r->headers_out.content_type.len == 0) {
@@ -217,7 +216,7 @@ ngx_http_markdown_is_streaming(ngx_http_request_t *r,
     if (conf->stream_types != NULL) {
         stream_type = conf->stream_types->elts;
         
-        for (i = 0; i < conf->stream_types->nelts; i++) {
+        for (ngx_uint_t i = 0; i < conf->stream_types->nelts; i++) {
             /* Check if Content-Type starts with configured stream type */
             if (content_type->len >= stream_type[i].len &&
                 ngx_strncasecmp(content_type->data, stream_type[i].data,

@@ -19,6 +19,10 @@
 #include <string.h>   /* For memset, memcpy, strcmp */
 #include <stdint.h>   /* For uint8_t, uint32_t, etc. */
 
+#ifndef ngx_inline
+#define ngx_inline inline
+#endif
+
 /*
  * Macro to suppress unused parameter warnings
  * 
@@ -156,7 +160,7 @@
  *
  * Computes length up to max_len and never reads past max_len bytes.
  */
-static inline size_t
+static ngx_inline size_t
 test_cstrnlen(const char *s, size_t max_len)
 {
     if (s == NULL) {

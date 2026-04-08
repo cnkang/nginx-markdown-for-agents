@@ -15,6 +15,20 @@
 #include <limits.h>
 
 /*
+ * Forward declarations for helpers referenced before their definitions
+ * are visible through implementation-header include order.
+ */
+ngx_int_t ngx_strncasecmp(u_char *s1, u_char *s2, size_t n);
+void markdown_result_free(struct MarkdownResult *result);
+static void ngx_http_markdown_record_system_failure(
+    ngx_http_markdown_ctx_t *ctx);
+static void ngx_http_markdown_metric_inc_failopen(
+    const ngx_http_markdown_conf_t *conf);
+static ngx_int_t ngx_http_markdown_reject_or_fail_open_buffered_response(
+    ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx,
+    ngx_http_markdown_conf_t *conf, const char *debug_message);
+
+/*
  * Construct base URL for resolving relative URLs
  *
  * This function constructs the base URL using the following priority order:

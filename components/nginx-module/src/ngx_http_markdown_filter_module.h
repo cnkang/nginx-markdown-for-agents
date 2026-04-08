@@ -567,7 +567,7 @@ ngx_int_t ngx_http_markdown_buffer_reserve(ngx_http_markdown_buffer_t *buf,
 
 /* Append data to buffer with size limit checking */
 ngx_int_t ngx_http_markdown_buffer_append(ngx_http_markdown_buffer_t *buf,
-    u_char *data, size_t len);
+    const u_char *data, size_t len);
 
 /*
  * Error classification functions
@@ -694,13 +694,13 @@ ngx_int_t ngx_http_markdown_prepare_conversion_options(ngx_http_request_t *r,
  * generate a Markdown-variant ETag for comparison.
  */
 ngx_int_t ngx_http_markdown_handle_if_none_match(ngx_http_request_t *r,
-    ngx_http_markdown_conf_t *conf, ngx_http_markdown_ctx_t *ctx,
+    ngx_http_markdown_conf_t *conf, const ngx_http_markdown_ctx_t *ctx,
     struct MarkdownConverterHandle *converter,
     struct MarkdownResult **result);
 
 /* Send 304 Not Modified response */
 ngx_int_t ngx_http_markdown_send_304(ngx_http_request_t *r,
-    struct MarkdownResult *result);
+    const struct MarkdownResult *result);
 
 /*
  * Decompression functions
