@@ -522,6 +522,18 @@ ngx_http_markdown_streaming_send_output(
         elapsed_ms = (now_ms >= ctx->streaming.feed_start_ms)
             ? (now_ms - ctx->streaming.feed_start_ms) : 0;
 
+        /*
+         * Gauge store: latest-value-wins semantics.
+         *
+         * Direct assignment to ngx_atomic_t is not formally
+         * atomic per C11 §7.1.4¶1, but ngx_atomic_t is
+         * intptr_t-sized and naturally aligned on all NGINX
+         * platforms (x86_64, ARM64, x86), making the store
+         * word-atomic in practice.  A torn read by the
+         * metrics snapshot collector would produce a stale
+         * or slightly wrong microsecond value — acceptable
+         * for a diagnostic gauge.
+         */
         ngx_http_markdown_metrics->streaming.last_ttfb_us =
             (ngx_atomic_t) (elapsed_ms * 1000);
         ctx->streaming.ttfb_recorded = 1;
@@ -695,6 +707,7 @@ ngx_http_markdown_streaming_resume_pending(
         elapsed_ms = (now_ms >= ctx->streaming.feed_start_ms)
             ? (now_ms - ctx->streaming.feed_start_ms) : 0;
 
+        /* Gauge store: see send_output TTFB comment for rationale. */
         ngx_http_markdown_metrics->streaming.last_ttfb_us =
             (ngx_atomic_t) (elapsed_ms * 1000);
         ctx->streaming.ttfb_recorded = 1;
@@ -1554,6 +1567,13 @@ ngx_http_markdown_streaming_finalize_request(
      * Always update unconditionally so the gauge reflects the
      * most recent request, even if peak_memory_bytes is 0 (for
      * example empty response or extremely small input).
+     *
+     * Gauge store: latest-value-wins semantics.  Direct assignment
+     * to ngx_atomic_t is not formally atomic per C11 §7.1.4¶1,
+     * but ngx_atomic_t is intptr_t-sized and naturally aligned on
+     * all NGINX platforms (x86_64, ARM64, x86), making the store
+     * word-atomic in practice.  A torn read would produce a stale
+     * byte count — acceptable for a diagnostic gauge.
      */
     if (ngx_http_markdown_metrics != NULL) {
         ngx_http_markdown_metrics->streaming.last_peak_memory_bytes =
