@@ -14,6 +14,19 @@
  * Requirements: FR-03.1, FR-03.2, FR-03.3, FR-03.4, FR-03.5, FR-03.6
  */
 
+#ifndef ngx_str_set
+#define ngx_str_set(str, text)                                                    \
+    do {                                                                          \
+        (str)->len = sizeof(text) - 1;                                            \
+        (str)->data = (u_char *) text;                                            \
+    } while (0)
+#endif
+
+/* C99 declaration visibility for standalone static analysis of this impl header. */
+ngx_int_t ngx_http_complex_value(ngx_http_request_t *r,
+    ngx_http_complex_value_t *val, ngx_str_t *value);
+void ngx_log_error(ngx_uint_t level, ngx_log_t *log, ngx_err_t err,
+    const char *fmt, ...);
 
 /* Forward declarations — defined below */
 static void ngx_http_markdown_log_decision(ngx_http_request_t *r,

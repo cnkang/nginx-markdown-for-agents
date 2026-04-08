@@ -2655,7 +2655,7 @@ test_metrics_deferred_lastbuf_failure(void)
      * ngx_http_markdown_streaming_send_deferred_lastbuf():
      *
      * if (rc == NGX_OK || rc == NGX_DONE) {
-     *     // success path
+     *     success path
      * } else {
      *     m.postcommit_error_total++;
      *     m.failed_total++;

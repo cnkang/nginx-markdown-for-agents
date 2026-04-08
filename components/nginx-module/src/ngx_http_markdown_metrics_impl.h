@@ -106,6 +106,27 @@ typedef struct {
     ngx_atomic_uint_t estimated_token_savings;
 } ngx_http_markdown_metrics_snapshot_t;
 
+typedef struct {
+    ngx_atomic_uint_t conversions_completed;
+    ngx_atomic_uint_t conversion_time_avg_ms;
+    ngx_atomic_uint_t input_bytes_avg;
+    ngx_atomic_uint_t output_bytes_avg;
+} ngx_http_markdown_metrics_derived_t;
+
+#ifndef ngx_str_set
+#define ngx_str_set(str, text)                                                    \
+    do {                                                                          \
+        (str)->len = sizeof(text) - 1;                                            \
+        (str)->data = (u_char *) text;                                            \
+    } while (0)
+#endif
+
+/* C99 declaration visibility for standalone static analysis of this impl header. */
+void ngx_memzero(void *buf, size_t n);
+u_char *ngx_slprintf(u_char *buf, u_char *last, const char *fmt, ...);
+ngx_int_t ngx_http_output_filter(ngx_http_request_t *r, ngx_chain_t *out);
+ngx_int_t ngx_strncasecmp(u_char *s1, u_char *s2, size_t n);
+
 /*
  * Response buffer size for the metrics endpoint.
  *
@@ -136,10 +157,7 @@ ngx_http_markdown_metrics_render_response_body(
     ngx_buf_t *b,
     ngx_uint_t format,
     ngx_http_markdown_metrics_snapshot_t *snapshot,
-    ngx_atomic_uint_t conversions_completed,
-    ngx_atomic_uint_t conversion_time_avg_ms,
-    ngx_atomic_uint_t input_bytes_avg,
-    ngx_atomic_uint_t output_bytes_avg);
+    const ngx_http_markdown_metrics_derived_t *derived);
 static ngx_int_t
 ngx_http_markdown_metrics_send_response(
     ngx_http_request_t *r,
@@ -482,19 +500,17 @@ ngx_http_markdown_metrics_select_format(
 static void
 ngx_http_markdown_metrics_derive_values(
     ngx_http_markdown_metrics_snapshot_t *snapshot,
-    ngx_atomic_uint_t *conversions_completed,
-    ngx_atomic_uint_t *conversion_time_avg_ms,
-    ngx_atomic_uint_t *input_bytes_avg,
-    ngx_atomic_uint_t *output_bytes_avg)
+    ngx_http_markdown_metrics_derived_t *derived)
 {
-    *conversions_completed = snapshot->conversions_succeeded + snapshot->conversions_failed;
-    *conversion_time_avg_ms = (*conversions_completed > 0)
-        ? (snapshot->conversion_time_sum_ms / *conversions_completed)
+    derived->conversions_completed =
+        snapshot->conversions_succeeded + snapshot->conversions_failed;
+    derived->conversion_time_avg_ms = (derived->conversions_completed > 0)
+        ? (snapshot->conversion_time_sum_ms / derived->conversions_completed)
         : 0;
-    *input_bytes_avg = (snapshot->conversions_succeeded > 0)
+    derived->input_bytes_avg = (snapshot->conversions_succeeded > 0)
         ? (snapshot->input_bytes / snapshot->conversions_succeeded)
         : 0;
-    *output_bytes_avg = (snapshot->conversions_succeeded > 0)
+    derived->output_bytes_avg = (snapshot->conversions_succeeded > 0)
         ? (snapshot->output_bytes / snapshot->conversions_succeeded)
         : 0;
 }
@@ -802,10 +818,7 @@ ngx_http_markdown_metrics_render_response_body(
     ngx_buf_t *b,
     ngx_uint_t format,
     ngx_http_markdown_metrics_snapshot_t *snapshot,
-    ngx_atomic_uint_t conversions_completed,
-    ngx_atomic_uint_t conversion_time_avg_ms,
-    ngx_atomic_uint_t input_bytes_avg,
-    ngx_atomic_uint_t output_bytes_avg)
+    const ngx_http_markdown_metrics_derived_t *derived)
 {
     u_char  *p;
 
@@ -817,10 +830,10 @@ ngx_http_markdown_metrics_render_response_body(
         /* JSON and plain text share the precomputed aggregate values. */
         p = ngx_http_markdown_metrics_write_json(
                 p, b->end, snapshot,
-                conversions_completed,
-                conversion_time_avg_ms,
-                input_bytes_avg,
-                output_bytes_avg);
+                derived->conversions_completed,
+                derived->conversion_time_avg_ms,
+                derived->input_bytes_avg,
+                derived->output_bytes_avg);
         /*
          * Detect truncation: ngx_slprintf returns end when
          * the buffer is exhausted.  Emit a hard failure
@@ -857,10 +870,10 @@ ngx_http_markdown_metrics_render_response_body(
     default:
         p = ngx_http_markdown_metrics_write_text(
                 p, b->end, snapshot,
-                conversions_completed,
-                conversion_time_avg_ms,
-                input_bytes_avg,
-                output_bytes_avg);
+                derived->conversions_completed,
+                derived->conversion_time_avg_ms,
+                derived->input_bytes_avg,
+                derived->output_bytes_avg);
         /*
          * Detect truncation: ngx_slprintf returns end when
          * the buffer is exhausted.  Emit a hard failure
@@ -941,10 +954,7 @@ ngx_http_markdown_metrics_handler(ngx_http_request_t *r)
     u_char                               *response_end;
     ngx_uint_t                            format;
     ngx_http_markdown_metrics_snapshot_t  snapshot;
-    ngx_atomic_uint_t                     conversions_completed;
-    ngx_atomic_uint_t                     conversion_time_avg_ms;
-    ngx_atomic_uint_t                     input_bytes_avg;
-    ngx_atomic_uint_t                     output_bytes_avg;
+    ngx_http_markdown_metrics_derived_t   derived;
 
     rc = ngx_http_markdown_metrics_validate_request(r);
     if (rc != NGX_OK) {
@@ -961,12 +971,7 @@ ngx_http_markdown_metrics_handler(ngx_http_request_t *r)
 
     /* Take one best-effort snapshot and derive all aggregate values from it. */
     ngx_http_markdown_collect_metrics_snapshot(&snapshot);
-    ngx_http_markdown_metrics_derive_values(
-        &snapshot,
-        &conversions_completed,
-        &conversion_time_avg_ms,
-        &input_bytes_avg,
-        &output_bytes_avg);
+    ngx_http_markdown_metrics_derive_values(&snapshot, &derived);
 
     /* Render into a fixed-size temporary buffer before sending headers. */
     b = ngx_create_temp_buf(r->pool,
@@ -979,11 +984,7 @@ ngx_http_markdown_metrics_handler(ngx_http_request_t *r)
     }
 
     response_end = ngx_http_markdown_metrics_render_response_body(
-        r, b, format, &snapshot,
-        conversions_completed,
-        conversion_time_avg_ms,
-        input_bytes_avg,
-        output_bytes_avg);
+        r, b, format, &snapshot, &derived);
     if (response_end == NULL) {
         return NGX_HTTP_INTERNAL_SERVER_ERROR;
     }
