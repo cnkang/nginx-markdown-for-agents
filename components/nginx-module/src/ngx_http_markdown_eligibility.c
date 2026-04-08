@@ -107,7 +107,7 @@ ngx_http_markdown_has_range_header(const ngx_http_request_t *r)
  *   0 otherwise
  */
 static ngx_int_t
-ngx_http_markdown_check_content_type(ngx_http_request_t *r)
+ngx_http_markdown_check_content_type(const ngx_http_request_t *r)
 {
     static u_char  text_html[] = "text/html";
     const ngx_str_t     *content_type;
@@ -263,8 +263,8 @@ ngx_http_markdown_is_streaming(const ngx_http_request_t *r,
  *   Eligibility enum indicating result and reason
  */
 ngx_http_markdown_eligibility_t
-ngx_http_markdown_check_eligibility(ngx_http_request_t *r,
-                                    ngx_http_markdown_conf_t *conf,
+ngx_http_markdown_check_eligibility(const ngx_http_request_t *r,
+                                    const ngx_http_markdown_conf_t *conf,
                                     ngx_flag_t filter_enabled)
 {
     /*

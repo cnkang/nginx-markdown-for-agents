@@ -122,6 +122,9 @@ typedef struct {
 #endif
 
 /* C99 declaration visibility for standalone static analysis of this impl header. */
+#ifndef ngx_memzero
+void ngx_memzero(void *buf, size_t n);
+#endif
 u_char *ngx_slprintf(u_char *buf, u_char *last, const char *fmt, ...);
 ngx_int_t ngx_http_output_filter(ngx_http_request_t *r, ngx_chain_t *out);
 ngx_int_t ngx_strncasecmp(u_char *s1, u_char *s2, size_t n);
