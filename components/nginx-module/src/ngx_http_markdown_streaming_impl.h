@@ -350,6 +350,8 @@ ngx_http_markdown_select_processing_path(
                (u_char *) "text/event-stream",
                17) == 0)
     {
+        ngx_http_markdown_log_decision(r, conf,
+            ngx_http_markdown_reason_streaming_skip_unsupported());
         return NGX_HTTP_MARKDOWN_PATH_FULLBUFFER;
     }
 
@@ -357,6 +359,8 @@ ngx_http_markdown_select_processing_path(
     if (ngx_http_markdown_is_excluded_stream_type(
             r, conf))
     {
+        ngx_http_markdown_log_decision(r, conf,
+            ngx_http_markdown_reason_streaming_skip_unsupported());
         return NGX_HTTP_MARKDOWN_PATH_FULLBUFFER;
     }
 
@@ -1193,7 +1197,7 @@ ngx_http_markdown_streaming_process_chunk(
             }
 
             return ngx_http_markdown_streaming_precommit_error(
-                r, ctx, conf, 0);
+                r, ctx, conf, ERROR_INTERNAL);
         }
 
         if (decomp_data == NULL || decomp_len == 0) {
@@ -1222,7 +1226,7 @@ ngx_http_markdown_streaming_process_chunk(
         }
 
         return ngx_http_markdown_streaming_precommit_error(
-            r, ctx, conf, 0);
+            r, ctx, conf, ERROR_MEMORY_LIMIT);
     }
 
     ctx->streaming.total_input_bytes += feed_len;
@@ -1246,7 +1250,7 @@ ngx_http_markdown_streaming_process_chunk(
         }
 
         return ngx_http_markdown_streaming_precommit_error(
-            r, ctx, conf, 0);
+            r, ctx, conf, ERROR_MEMORY_LIMIT);
     }
 
     /* Step 3: Save to prebuffer (Pre-Commit only) */
@@ -1264,13 +1268,28 @@ ngx_http_markdown_streaming_process_chunk(
                 "limit exceeded");
 
             return ngx_http_markdown_streaming_precommit_error(
-                r, ctx, conf, 0);
+                r, ctx, conf, ERROR_BUDGET_EXCEEDED);
         }
     }
 
     /* Step 4: Feed to Rust streaming engine */
     out_data = NULL;
     out_len = 0;
+
+    /*
+     * Record feed_start_ms on the first non-empty feed call
+     * (one-shot latch).  This ensures TTFB measures actual
+     * processing time, not idle time between handle creation
+     * and the first upstream chunk.
+     */
+    if (ctx->streaming.feed_start_ms == 0) {
+        ngx_time_t  *tp_feed;
+
+        tp_feed = ngx_timeofday();
+        ctx->streaming.feed_start_ms =
+            (ngx_msec_t) (tp_feed->sec * 1000
+                + tp_feed->msec);
+    }
 
     rc_ffi = markdown_streaming_feed(
         ctx->streaming.handle,
@@ -1331,7 +1350,7 @@ ngx_http_markdown_streaming_finalize_decomp(
         }
 
         return ngx_http_markdown_streaming_precommit_error(
-            r, ctx, conf, 0);
+            r, ctx, conf, ERROR_INTERNAL);
     }
 
     if (decomp_data != NULL && decomp_len > 0) {
@@ -1430,7 +1449,7 @@ ngx_http_markdown_streaming_finalize_request(
 
         /* Pre-Commit finalize error follows configured policy */
         return ngx_http_markdown_streaming_precommit_error(
-            r, ctx, conf, 0);
+            r, ctx, conf, rc_ffi);
     }
 
     /* Send final Markdown output if any */
@@ -1648,14 +1667,14 @@ ngx_http_markdown_streaming_init_handle(
             r, ctx, conf, 0);
     }
 
-    /* Record feed start time for TTFB gauge */
-    {
-        ngx_time_t  *tp;
-
-        tp = ngx_timeofday();
-        ctx->streaming.feed_start_ms =
-            (ngx_msec_t) (tp->sec * 1000 + tp->msec);
-    }
+    /*
+     * Do NOT record feed_start_ms here — it would include
+     * idle time between handle creation and the first feed.
+     * Instead, feed_start_ms is set on the first non-empty
+     * markdown_streaming_feed() call via a one-shot guard
+     * in process_chunk.  Initialize to 0 so the guard fires.
+     */
+    ctx->streaming.feed_start_ms = 0;
 
     /* Register cleanup handler */
     cln = ngx_pool_cleanup_add(r->pool, 0);

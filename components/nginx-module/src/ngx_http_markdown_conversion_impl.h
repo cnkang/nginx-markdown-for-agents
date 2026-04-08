@@ -582,8 +582,6 @@ ngx_http_markdown_shadow_compare(
     ngx_msec_t                        shadow_start;
     ngx_msec_t                        shadow_elapsed;
 
-    UNUSED(conf);
-
     ngx_http_markdown_prepare_conversion_options(r, conf, &options);
 
     tp = ngx_timeofday();
@@ -618,13 +616,12 @@ ngx_http_markdown_shadow_compare(
         return;
     }
 
-    /* Free intermediate output before finalize */
-    if (out_data != NULL) {
-        markdown_streaming_output_free(
-            out_data, out_len);
-        out_data = NULL;
-        out_len = 0;
-    }
+    /*
+     * Retain feed output for combined comparison.
+     * Do NOT free out_data here — it is concatenated with
+     * finalize output below to form the complete streaming
+     * result for shadow comparison.
+     */
 
     ngx_memzero(&st_result, sizeof(struct MarkdownResult));
     rc = markdown_streaming_finalize(handle, &st_result);
@@ -649,6 +646,10 @@ ngx_http_markdown_shadow_compare(
             r->connection->log, 0,
             "markdown shadow: streaming finalize "
             "error %ui", (ngx_uint_t) rc);
+        if (out_data != NULL) {
+            markdown_streaming_output_free(
+                out_data, out_len);
+        }
         markdown_result_free(&st_result);
         return;
     }
@@ -663,22 +664,81 @@ ngx_http_markdown_shadow_compare(
     ngx_http_markdown_log_decision(r, conf,
         ngx_http_markdown_reason_streaming_shadow());
 
-    /* Compare outputs */
-    if (st_result.markdown_len != fb_result->markdown_len
-        || ngx_memcmp(st_result.markdown,
-                       fb_result->markdown,
-                       fb_result->markdown_len) != 0)
+    /*
+     * Build combined streaming output: feed output (out_data/out_len)
+     * concatenated with finalize output (st_result.markdown/markdown_len).
+     * Compare the combined buffer against the full-buffer result.
+     */
     {
-        NGX_HTTP_MARKDOWN_METRIC_INC(
-            streaming.shadow_diff_total);
-        ngx_log_debug2(NGX_LOG_DEBUG_HTTP,
-            r->connection->log, 0,
-            "markdown shadow: output diff detected, "
-            "fullbuffer_len=%uz streaming_len=%uz",
-            (size_t) fb_result->markdown_len,
-            (size_t) st_result.markdown_len);
+        size_t   total_len;
+        u_char  *combined;
+        u_char  *p_comb;
+
+        total_len = (size_t) out_len
+            + (size_t) st_result.markdown_len;
+
+        if (total_len != fb_result->markdown_len) {
+            NGX_HTTP_MARKDOWN_METRIC_INC(
+                streaming.shadow_diff_total);
+            ngx_log_debug3(NGX_LOG_DEBUG_HTTP,
+                r->connection->log, 0,
+                "markdown shadow: output diff "
+                "detected, fullbuffer_len=%uz "
+                "streaming_len=%uz (feed=%uz + "
+                "finalize)",
+                (size_t) fb_result->markdown_len,
+                total_len, (size_t) out_len);
+        } else if (total_len == 0) {
+            /* Both empty: no diff */
+        } else {
+            /*
+             * Lengths match — compare byte content.
+             * Build a temporary combined buffer on the
+             * pool to avoid a second allocation path.
+             */
+            combined = ngx_pnalloc(r->pool, total_len);
+            if (combined == NULL) {
+                ngx_log_debug0(NGX_LOG_DEBUG_HTTP,
+                    r->connection->log, 0,
+                    "markdown shadow: alloc failed "
+                    "for combined buffer");
+            } else {
+                p_comb = combined;
+                if (out_data != NULL && out_len > 0) {
+                    ngx_memcpy(p_comb, out_data,
+                        out_len);
+                    p_comb += out_len;
+                }
+                if (st_result.markdown != NULL
+                    && st_result.markdown_len > 0)
+                {
+                    ngx_memcpy(p_comb,
+                        st_result.markdown,
+                        st_result.markdown_len);
+                }
+
+                if (ngx_memcmp(combined,
+                               fb_result->markdown,
+                               total_len) != 0)
+                {
+                    NGX_HTTP_MARKDOWN_METRIC_INC(
+                        streaming.shadow_diff_total);
+                    ngx_log_debug2(NGX_LOG_DEBUG_HTTP,
+                        r->connection->log, 0,
+                        "markdown shadow: output diff "
+                        "detected, fullbuffer_len=%uz "
+                        "streaming_len=%uz",
+                        (size_t) fb_result->markdown_len,
+                        total_len);
+                }
+            }
+        }
     }
 
+    if (out_data != NULL) {
+        markdown_streaming_output_free(
+            out_data, out_len);
+    }
     markdown_result_free(&st_result);
 }
 #endif /* MARKDOWN_STREAMING_ENABLED */
@@ -815,8 +875,14 @@ ngx_http_markdown_execute_conversion(ngx_http_request_t *r,
      * run the streaming engine on the same input and compare
      * outputs.  Any streaming error is isolated — it does not
      * affect the client response.
+     *
+     * Only run for the full-buffer path — incremental
+     * conversions use a different pipeline and should not
+     * be compared against the streaming engine.
      */
-    if (conf->streaming_shadow) {
+    if (conf->streaming_shadow
+        && ctx->processing_path != NGX_HTTP_MARKDOWN_PATH_INCREMENTAL)
+    {
         ngx_http_markdown_shadow_compare(
             r, ctx, conf, result, *elapsed_ms);
     }
