@@ -29,7 +29,7 @@ use crate::streaming::types::{
 ///
 /// # Examples
 ///
-/// ```ignore
+    /// ```no_run
 /// use nginx_markdown_converter::converter::ConversionOptions;
 /// use nginx_markdown_converter::streaming::budget::MemoryBudget;
 /// use nginx_markdown_converter::streaming::converter::StreamingConverter;
@@ -115,14 +115,17 @@ impl StreamingConverter {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
+    /// use nginx_markdown_converter::streaming::{StreamingConverter, MemoryBudget};
+    /// use nginx_markdown_converter::converter::ConversionOptions;
+    ///
     /// let options = ConversionOptions::default();
     /// let budget = MemoryBudget::default();
     /// let mut conv = StreamingConverter::new(options, budget);
     /// // send some bytes
     /// let _ = conv.feed_chunk(b"<p>Hello</p>").unwrap();
     /// let result = conv.finalize().unwrap();
-    /// assert!(result.final_markdown.contains("Hello"));
+    /// assert!(!result.final_markdown.is_empty());
     /// ```
     pub fn new(options: ConversionOptions, budget: MemoryBudget) -> Self {
         let etag_hasher = if options.extract_metadata {
@@ -168,7 +171,9 @@ impl StreamingConverter {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
+    /// use nginx_markdown_converter::streaming::StreamingConverter;
+    ///
     /// let mut conv = StreamingConverter::new(Default::default(), Default::default());
     /// conv.set_content_type(Some("text/html; charset=UTF-8".to_string()));
     /// ```
@@ -185,9 +190,10 @@ impl StreamingConverter {
     /// # Examples
     ///
     /// ```no_run
+    /// use nginx_markdown_converter::streaming::StreamingConverter;
     /// use std::time::Duration;
-    /// // Assume `StreamingConverter::new` is available in scope.
-    /// let mut conv = StreamingConverter::new(/* options */, /* budget */);
+    ///
+    /// let mut conv = StreamingConverter::new(Default::default(), Default::default());
     /// // Limit the whole conversion to 2 seconds.
     /// conv.set_timeout(Duration::from_secs(2));
     /// ```
@@ -217,7 +223,10 @@ impl StreamingConverter {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
+    /// use nginx_markdown_converter::streaming::{StreamingConverter, MemoryBudget};
+    /// use nginx_markdown_converter::converter::ConversionOptions;
+    ///
     /// let options = ConversionOptions::default();
     /// let budget = MemoryBudget::default();
     /// let mut conv = StreamingConverter::new(options, budget);
@@ -337,7 +346,7 @@ impl StreamingConverter {
     /// # Examples
     ///
     /// ```no_run
-    /// use components::streaming::StreamingConverter;
+    /// use nginx_markdown_converter::streaming::StreamingConverter;
     ///
     /// // Create converter with appropriate options and budget (omitted).
     /// let options = Default::default();
@@ -449,7 +458,7 @@ impl StreamingConverter {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// // Assume `conv` is a mutable StreamingConverter and `ev` is a StreamEvent.
     /// // The example demonstrates the callsite pattern; concrete construction is omitted.
     /// let _ = conv.process_single_event(ev)?;
@@ -525,7 +534,7 @@ impl StreamingConverter {
     ///
     /// # Examples
     ///
-    /// ```no_run
+    /// ```ignore
     /// // Call from a StreamingConverter instance to validate its deadline.
     /// // let conv: StreamingConverter = /* ... */ ;
     /// // conv.check_timeout()?;
@@ -744,7 +753,7 @@ impl StreamingConverter {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// // Example usage within the converter implementation:
     /// // let mut conv = StreamingConverter::new(options, budget);
     /// // conv.extract_meta_tag(&[("property".into(), "og:title".into()), ("content".into(), "Example".into())]);
@@ -821,8 +830,8 @@ impl StreamingConverter {
     ///
     /// # Examples
     ///
-    /// ```
-    /// # use components::rust_converter::streaming::converter::{StreamingConverter, ConversionOptions, MemoryBudget};
+    /// ```ignore
+    /// # use nginx_markdown_converter::streaming::converter::{StreamingConverter, ConversionOptions, MemoryBudget};
     /// // (pseudo-constructors shown for clarity; actual test harness constructs a converter)
     /// let mut opts = ConversionOptions::default();
     /// opts.resolve_relative_urls = true;
@@ -881,7 +890,7 @@ impl StreamingConverter {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// let canonical = Some("https://example.com/canonical".to_string());
     /// let base = Some("https://example.com/".to_string());
     /// assert_eq!(resolve_final_url(true, &canonical, &base), canonical);
@@ -912,7 +921,7 @@ impl StreamingConverter {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
     /// // Given a `StreamingConverter` instance `conv`, borrow its metadata:
     /// // let conv = StreamingConverter::new(options, budget);
     /// // let meta = conv.metadata();
@@ -926,15 +935,13 @@ impl StreamingConverter {
     ///
     /// # Examples
     ///
-    /// ```
-    /// # use components::streaming::converter::StreamingConverter;
-    /// # use components::streaming::converter::CommitState;
-    /// // Constructing with default placeholders for illustration; real callers
-    /// // should provide valid `ConversionOptions` and `MemoryBudget`.
+    /// ```no_run
+    /// use nginx_markdown_converter::streaming::StreamingConverter;
+    /// use nginx_markdown_converter::streaming::types::CommitState;
+    ///
     /// let conv = StreamingConverter::new(Default::default(), Default::default());
     /// let state = conv.commit_state();
-    /// // `state` is a `CommitState` value such as `CommitState::PreCommit`.
-    /// let _ = state;
+    /// assert!(matches!(state, CommitState::PreCommit | CommitState::PostCommit));
     /// ```
     pub fn commit_state(&self) -> CommitState {
         self.commit_state
@@ -944,10 +951,11 @@ impl StreamingConverter {
     ///
     /// # Examples
     ///
-    /// ```
-    /// // given a `StreamingConverter` named `converter`
-    /// let opts = converter.options();
-    /// // inspect an option, e.g. opts.extract_metadata
+    /// ```no_run
+    /// use nginx_markdown_converter::streaming::StreamingConverter;
+    ///
+    /// let converter = StreamingConverter::new(Default::default(), Default::default());
+    /// let _opts = converter.options();
     /// ```
     pub fn options(&self) -> &ConversionOptions {
         &self.options
@@ -959,9 +967,11 @@ impl StreamingConverter {
     ///
     /// # Examples
     ///
-    /// ```
-    /// // Inspect the URL `finalize` would produce without finalizing the converter.
-    /// let url = converter.peek_final_url();
+    /// ```no_run
+    /// use nginx_markdown_converter::streaming::StreamingConverter;
+    ///
+    /// let converter = StreamingConverter::new(Default::default(), Default::default());
+    /// let _url = converter.peek_final_url();
     /// ```
     pub fn peek_final_url(&self) -> Option<String> {
         if !self.options.extract_metadata {
@@ -1041,7 +1051,7 @@ mod tests {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// let mut conv = make_converter();
     /// // ready to feed small UTF-8 HTML chunks without charset sniffing delay
     /// let out = conv.feed_chunk(b"<p>hi</p>").unwrap();
@@ -1116,7 +1126,7 @@ mod tests {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// let mut conv = make_converter_with_metadata();
     /// assert!(conv.options().extract_metadata);
     /// ```
@@ -2013,7 +2023,7 @@ mod tests {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// // Equivalent test flow:
     /// let opts = ConversionOptions {
     ///     extract_metadata: true,

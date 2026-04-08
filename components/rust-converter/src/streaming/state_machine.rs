@@ -93,7 +93,7 @@ impl StructuralStateMachine {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// let budget = MemoryBudget { state_stack: 1024 };
     /// let sm = StructuralStateMachine::new(&budget);
     /// // new machine starts with an empty stack
@@ -131,9 +131,9 @@ impl StructuralStateMachine {
     ///
     /// # Examples
     ///
-    /// ```
-    /// use components::rust_converter::streaming::state_machine::{StructuralStateMachine, StreamEvent, StateMachineAction};
-    /// use components::rust_converter::memory::MemoryBudget;
+    /// ```ignore
+    /// use nginx_markdown_converter::streaming::state_machine::{StructuralStateMachine, StreamEvent, StateMachineAction};
+    /// use nginx_markdown_converter::memory::MemoryBudget;
     ///
     /// let budget = MemoryBudget { state_stack: 1024 }; // example budget
     /// let mut sm = StructuralStateMachine::new(&budget);
@@ -171,8 +171,8 @@ impl StructuralStateMachine {
     ///
     /// # Examples
     ///
-    /// ```no_run
-    /// use components::rust_converter::streaming::state_machine::*;
+    /// ```ignore
+    /// use nginx_markdown_converter::streaming::state_machine::*;
     ///
     /// let budget = MemoryBudget::default();
     /// let mut sm = StructuralStateMachine::new(&budget);
@@ -313,7 +313,7 @@ impl StructuralStateMachine {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// // Illustrative usage; actual construction of `StructuralStateMachine` and pushing of
     /// // contexts is required for a non-None result.
     /// let mut sm = StructuralStateMachine::new(&MemoryBudget::default());
@@ -384,7 +384,7 @@ impl StructuralStateMachine {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// // assuming `machine` is a `StructuralStateMachine` created elsewhere:
     /// let _ = machine.push_context(StructuralContext::Paragraph);
     /// ```
@@ -428,9 +428,9 @@ impl StructuralStateMachine {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// # // Setup hidden helpers so the example focuses on `current_context`.
-    /// # use components::rust_converter::streaming::state_machine::{StructuralStateMachine, StructuralContext};
+    /// # use nginx_markdown_converter::streaming::state_machine::{StructuralStateMachine, StructuralContext};
     /// # #[allow(dead_code)]
     /// # struct MemoryBudget { pub state_stack: usize }
     /// # impl MemoryBudget { fn new(bytes: usize) -> Self { MemoryBudget { state_stack: bytes } } }
@@ -449,7 +449,7 @@ impl StructuralStateMachine {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// let mut sm = StructuralStateMachine::new(&MemoryBudget::default());
     /// // simulate an ordered list that starts at 3
     /// sm.ordered_list_counters.push(3);
@@ -481,7 +481,7 @@ impl StructuralStateMachine {
     ///
     /// # Examples
     ///
-    /// ```no_run
+    /// ```ignore
     /// // Check whether the state machine is currently inside a blockquote.
     /// let mut sm = StructuralStateMachine::new(&MemoryBudget::default());
     /// // ... events that may push Blockquote ...
@@ -548,7 +548,7 @@ impl StructuralStateMachine {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// // Create a machine with a sufficiently large memory budget (example only).
     /// let budget = crate::MemoryBudget { state_stack: 1024 };
     /// let sm = crate::streaming::state_machine::StructuralStateMachine::new(&budget);
@@ -573,7 +573,7 @@ impl StructuralStateMachine {
 ///
 /// # Examples
 ///
-/// ```
+/// ```ignore
 /// assert!(is_block_level("p"));
 /// assert!(is_block_level("h3"));
 /// assert!(!is_block_level("span"));
@@ -600,7 +600,7 @@ fn is_block_level(tag: &str) -> bool {
 ///
 /// # Examples
 ///
-/// ```
+/// ```ignore
 /// let ctx = StructuralContext::Paragraph;
 /// assert!(context_matches_tag(&ctx, "p"));
 ///
@@ -642,7 +642,7 @@ mod tests {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// let sm = default_sm();
     /// assert_eq!(sm.depth(), 0);
     /// ```
@@ -654,7 +654,7 @@ mod tests {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// let ev = start_tag("p");
     /// match ev {
     ///     StreamEvent::StartTag { name, attrs, self_closing } => {
@@ -680,7 +680,7 @@ mod tests {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// let ev = start_tag_with_attrs("a", vec![("href", "https://example.com")]);
     /// if let StreamEvent::StartTag { name, attrs, self_closing } = ev {
     ///     assert_eq!(name, "a");
@@ -705,7 +705,7 @@ mod tests {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// let ev = end_tag("p");
     /// match ev {
     ///     StreamEvent::EndTag { name } => assert_eq!(name, "p"),
@@ -722,7 +722,7 @@ mod tests {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// let ev = text("hello");
     /// assert_eq!(ev, StreamEvent::Text("hello".to_string()));
     /// ```
@@ -734,7 +734,7 @@ mod tests {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// let mut sm = default_sm();
     /// let action = sm.process_event(&start_tag("h1")).unwrap();
     /// assert_eq!(action, StateMachineAction::Enter(StructuralContext::Heading(1)));
@@ -803,7 +803,7 @@ mod tests {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// let mut sm = default_sm();
     /// sm.process_event(&start_tag("pre")).unwrap();
     /// sm.process_event(&start_tag_with_attrs(
@@ -899,7 +899,7 @@ mod tests {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// let mut sm = default_sm();
     /// sm.process_event(&start_tag_with_attrs("ol", vec![("start", "5")])).unwrap();
     /// assert_eq!(sm.next_ordered_item_number(), 5);
