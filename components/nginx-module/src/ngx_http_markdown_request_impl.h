@@ -40,7 +40,7 @@ static ngx_http_output_body_filter_pt ngx_http_next_body_filter;
 const ngx_str_t *ngx_http_markdown_reason_failed_closed(void);
 const ngx_str_t *ngx_http_markdown_reason_failed_open(void);
 const ngx_str_t *ngx_http_markdown_reason_from_error_category(
-    ngx_http_markdown_error_category_t category, ngx_log_t *log);
+    ngx_http_markdown_error_category_t category, const ngx_log_t *log);
 const ngx_str_t *ngx_http_markdown_reason_converted(void);
 const ngx_str_t *ngx_http_markdown_eligibility_string(
     ngx_http_markdown_eligibility_t eligibility);

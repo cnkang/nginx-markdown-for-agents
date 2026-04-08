@@ -38,7 +38,7 @@ static void ngx_http_markdown_record_system_failure(
 const ngx_str_t *ngx_http_markdown_reason_failed_closed(void);
 const ngx_str_t *ngx_http_markdown_reason_failed_open(void);
 const ngx_str_t *ngx_http_markdown_reason_from_error_category(
-    ngx_http_markdown_error_category_t category, ngx_log_t *log);
+    ngx_http_markdown_error_category_t category, const ngx_log_t *log);
 ngx_int_t ngx_http_markdown_decompress(ngx_http_request_t *r,
     ngx_http_markdown_compression_type_e type, ngx_chain_t *in,
     ngx_chain_t **out);
