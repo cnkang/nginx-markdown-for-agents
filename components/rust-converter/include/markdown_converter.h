@@ -224,11 +224,11 @@ void markdown_converter_free(struct MarkdownConverterHandle *handle);
  * ```ignore
  * # use std::ptr;
  * use nginx_markdown_converter::ffi::{MarkdownOptions, markdown_incremental_new, markdown_incremental_free};
- * // Construct options appropriate for your environment.
+ * /* Construct options appropriate for your environment. */
  * let opts = MarkdownOptions::default();
  * let handle = unsafe { markdown_incremental_new(&opts) };
  * assert!(!handle.is_null());
- * // Either finalize to produce output or free when done without producing output.
+ * /* Either finalize to produce output or free when done without producing output. */
  * unsafe { markdown_incremental_free(handle) };
  * ```ignore
  */
@@ -256,12 +256,13 @@ struct IncrementalConverterHandle *markdown_incremental_new(const struct Markdow
  * use std::ptr;
  * use nginx_markdown_converter::ffi::{markdown_incremental_new, markdown_incremental_feed, markdown_incremental_free};
  * unsafe {
- *     let options = ptr::null(); // populate as needed
+ *     /* Populate as needed for your environment. */
+ *     let options = ptr::null();
  *     let handle = markdown_incremental_new(options);
  *     if !handle.is_null() {
- *         // feed a chunk
+ *         /* Feed a chunk. */
  *         let _ = markdown_incremental_feed(handle, b"hello".as_ptr(), 5);
- *         // finalize or free the handle as appropriate
+ *         /* Finalize or free the handle as appropriate. */
  *         markdown_incremental_free(handle);
  *     }
  * }
@@ -297,7 +298,7 @@ uint32_t markdown_incremental_feed(struct IncrementalConverterHandle *handle,
  * use std::ptr::null_mut;
  * use nginx_markdown_converter::ffi::{markdown_incremental_finalize, ERROR_INVALID_INPUT};
  *
- * // Passing NULL result pointer is invalid and returns ERROR_INVALID_INPUT.
+ * /* Passing NULL result pointer is invalid and returns ERROR_INVALID_INPUT. */
  * let code = unsafe { markdown_incremental_finalize(null_mut(), null_mut()) };
  * assert_eq!(code, ERROR_INVALID_INPUT);
  * ```

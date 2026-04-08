@@ -15,6 +15,10 @@
  * escaping is needed.
  */
 
+/* C99 declaration visibility for standalone static analysis of this impl header. */
+u_char *ngx_slprintf(u_char *buf, u_char *last,
+    const char *fmt, ...);
+
 /*
  * Render a metrics snapshot as Prometheus text exposition format.
  *

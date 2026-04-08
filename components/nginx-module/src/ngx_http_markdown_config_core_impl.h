@@ -13,6 +13,13 @@
  * helpers used outside directive parsing.
  */
 
+/* C99 declaration visibility for standalone static analysis of this impl header. */
+ngx_int_t ngx_strncasecmp(u_char *s1, u_char *s2, size_t n);
+ngx_int_t ngx_http_complex_value(ngx_http_request_t *r,
+    ngx_http_complex_value_t *val, ngx_str_t *value);
+void ngx_conf_log_error(ngx_uint_t level, ngx_conf_t *cf,
+    ngx_err_t err, const char *fmt, ...);
+
 /* Helper declared early because merge logic uses it before its definition. */
 static void ngx_http_markdown_log_merged_conf(ngx_conf_t *cf,
     ngx_http_markdown_conf_t *conf);
