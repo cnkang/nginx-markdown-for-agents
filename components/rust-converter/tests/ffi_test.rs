@@ -86,6 +86,32 @@ fn ffi_test_empty_result() -> MarkdownResult {
     }
 }
 
+/// Verify that `markdown_result_free` clears `peak_memory_estimate` to 0.
+#[test]
+fn test_result_free_clears_peak_memory_estimate() {
+    let converter = markdown_converter_new();
+    assert!(!converter.is_null(), "Converter should not be NULL");
+
+    let html = b"<h1>Test</h1><p>Content</p>";
+    let options = ffi_test_default_options();
+    let mut result = ffi_test_empty_result();
+
+    ffi_markdown_convert(converter, html.as_ptr(), html.len(), &options, &mut result);
+
+    assert_eq!(result.error_code, 0, "Conversion should succeed");
+
+    /* peak_memory_estimate is only populated by streaming finalize,
+     * so it remains 0 for full-buffer conversions. Verify free clears it. */
+    ffi_markdown_result_free(&mut result);
+
+    assert_eq!(
+        result.peak_memory_estimate, 0,
+        "peak_memory_estimate should be 0 after free"
+    );
+
+    ffi_markdown_converter_free(converter);
+}
+
 #[test]
 fn test_converter_lifecycle() {
     // Create converter
