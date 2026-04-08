@@ -320,6 +320,9 @@ typedef struct {
         ngx_msec_t                        feed_start_ms;
         ngx_flag_t                        ttfb_recorded;
 
+        /* Pending output chain has non-empty data (for TTFB resume path) */
+        ngx_flag_t                        pending_has_data;
+
         /* Pre-Commit prebuffer for fallback */
         ngx_http_markdown_buffer_t        prebuffer;
         size_t                            prebuffer_limit;
@@ -333,6 +336,11 @@ typedef struct {
 
         /* Deferred terminal last_buf (backpressure during finalize) */
         ngx_flag_t                        finalize_pending_lastbuf;
+
+        /* Metrics deferred for terminal last_buf (backpressure on
+         * terminal send — set when send_output(last_buf=1) returns
+         * NGX_AGAIN, cleared when resume drain succeeds). */
+        ngx_flag_t                        pending_terminal_metrics;
 
         /* Continue finalize() after tail-output backpressure drains */
         ngx_flag_t                        finalize_after_pending;
@@ -476,6 +484,7 @@ typedef struct {
         ngx_atomic_t  shadow_total;              /* Shadow mode runs */
         ngx_atomic_t  shadow_diff_total;         /* Shadow output diffs */
         ngx_atomic_t  last_ttfb_us;              /* Last streaming TTFB (microseconds) */
+        ngx_atomic_t  last_peak_memory_bytes;    /* Last streaming peak memory estimate (bytes) */
     } streaming;
 #endif
 
