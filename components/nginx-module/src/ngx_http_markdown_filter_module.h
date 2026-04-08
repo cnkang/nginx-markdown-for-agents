@@ -339,7 +339,7 @@ typedef struct {
 
         /* Metrics deferred for terminal last_buf (backpressure on
          * terminal send — set when send_output(last_buf=1) returns
-         * NGX_AGAIN, cleared when resume drain succeeds). */
+         * NGX_AGAIN, cleared when resume drain succeeds or fails). */
         ngx_flag_t                        pending_terminal_metrics;
 
         /* Continue finalize() after tail-output backpressure drains */
