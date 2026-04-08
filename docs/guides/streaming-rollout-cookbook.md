@@ -135,9 +135,9 @@ curl -s -H 'Accept: text/plain; version=0.0.4' \
 
 | Metric | Continue | Pause | Rollback |
 |--------|----------|-------|----------|
-| Success rate (`succeeded_total / (succeeded_total + failed_total)`) | ≥ 99.9% | < 99.5% | < 99% |
-| `fallback_total` growth rate | acceptable | — | — |
-| Post-commit error rate (`postcommit_error_total / succeeded_total`) | ≤ 0.01% | > 0.01% | > 0.1% |
+| Success rate (`streaming.succeeded_total / (streaming.succeeded_total + streaming.failed_total)`) | ≥ 99.9% | < 99.5% | < 99% |
+| `streaming.fallback_total` growth rate | acceptable | — | — |
+| Post-commit error rate (`streaming.postcommit_error_total / (streaming.succeeded_total + streaming.failed_total)`) | ≤ 0.01% | > 0.01% | > 0.1% |
 
 ## Phase 2: 10% Traffic (split_clients)
 
@@ -225,10 +225,10 @@ map $http_user_agent $markdown_streaming_engine {
 
 | Condition | Action |
 |-----------|--------|
-| Success rate ≥ 99.9% (`streaming.succeeded_total / streaming.requests_total`) | Continue to next phase |
+| Success rate ≥ 99.9% (`streaming.succeeded_total / (streaming.succeeded_total + streaming.failed_total)`) | Continue to next phase |
 | TTFB improvement measurable (large responses) | Continue |
-| Failure rate > 0.5% (`streaming.failed_total / streaming.requests_total`) | Pause, investigate |
-| Post-commit error rate > 0.01% (`streaming.postcommit_error_total / streaming.requests_total`) | Pause, investigate |
+| Failure rate > 0.5% (`streaming.failed_total / (streaming.succeeded_total + streaming.failed_total)`) | Pause, investigate |
+| Post-commit error rate > 0.01% (`streaming.postcommit_error_total / (streaming.succeeded_total + streaming.failed_total)`) | Pause, investigate |
 | Failure rate > 1% | Rollback |
 | Post-commit error rate > 0.1% | Rollback |
 | Shadow diff rate > 1% (`streaming.shadow_diff_total / streaming.shadow_total`) | Rollback (Phase 0) |
