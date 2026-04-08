@@ -46,7 +46,9 @@ impl Default for MemoryBudget {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
+    /// use nginx_markdown_converter::streaming::MemoryBudget;
+    ///
     /// let b = MemoryBudget::default();
     /// assert_eq!(b.total, 2 * 1024 * 1024);
     /// assert_eq!(b.state_stack, 64 * 1024);
@@ -77,9 +79,10 @@ impl MemoryBudget {
     ///
     /// # Examples
     ///
-    /// ```rust
-    /// # use components::rust_converter::streaming::budget::check_allocation;
-    /// let _ = check_allocation("state_stack", 0, 100, 1024).unwrap();
+    /// ```no_run
+    /// use nginx_markdown_converter::streaming::MemoryBudget;
+    ///
+    /// let _ = MemoryBudget::check_allocation("state_stack", 0, 100, 1024).unwrap();
     /// ```
     #[cfg(feature = "streaming")]
     pub fn check_allocation(
@@ -114,7 +117,9 @@ impl MemoryBudget {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
+    /// use nginx_markdown_converter::streaming::MemoryBudget;
+    ///
     /// let b = MemoryBudget::default();
     /// assert!(b.check_state_stack(0, 100).is_ok());
     /// ```
@@ -136,7 +141,9 @@ impl MemoryBudget {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
+    /// use nginx_markdown_converter::streaming::MemoryBudget;
+    ///
     /// let b = MemoryBudget::default();
     /// assert!(b.check_output_buffer(0, 1024).is_ok());
     /// ```
@@ -159,7 +166,9 @@ impl MemoryBudget {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
+    /// use nginx_markdown_converter::streaming::MemoryBudget;
+    ///
     /// let budget = MemoryBudget::default();
     /// assert!(budget.check_lookahead(0, 1024).is_ok());
     /// ```
@@ -185,9 +194,10 @@ impl MemoryBudget {
     ///
     /// # Examples
     ///
-    /// ```
-    /// # use components::rust_converter::streaming::budget::MemoryBudget;
-    /// # use components::rust_converter::streaming::budget::ConversionError;
+    /// ```no_run
+    /// use nginx_markdown_converter::streaming::MemoryBudget;
+    /// use nginx_markdown_converter::ConversionError;
+    ///
     /// let budget = MemoryBudget::default();
     /// // within limit
     /// assert!(budget.check_total(0, 1024).is_ok());

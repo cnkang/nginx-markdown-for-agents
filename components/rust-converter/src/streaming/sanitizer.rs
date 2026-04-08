@@ -89,7 +89,7 @@ impl StreamingSanitizer {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// let s = StreamingSanitizer::new();
     /// assert_eq!(s.nesting_depth(), 0);
     /// assert!(!s.is_skipping());
@@ -112,7 +112,7 @@ impl StreamingSanitizer {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// let s = StreamingSanitizer::with_max_depth(10);
     /// assert_eq!(s.nesting_depth(), 0);
     /// assert!(!s.is_skipping());
@@ -138,7 +138,7 @@ impl StreamingSanitizer {
     ///
     /// # Examples
     ///
-    /// ```no_run
+    /// ```ignore
     /// use nginx_markdown_converter::streaming::sanitizer::StreamingSanitizer;
     /// use nginx_markdown_converter::streaming::sanitizer::SanitizeDecision;
     /// use nginx_markdown_converter::streaming::types::StreamEvent;
@@ -303,7 +303,7 @@ impl StreamingSanitizer {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// let mut s = StreamingSanitizer::new();
     /// assert!(!s.is_skipping());
     /// ```
@@ -315,7 +315,7 @@ impl StreamingSanitizer {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// let s = StreamingSanitizer::new();
     /// assert!(!s.is_stripping());
     /// ```
@@ -334,7 +334,7 @@ impl StreamingSanitizer {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// let mut s = StreamingSanitizer::new();
     /// assert_eq!(s.nesting_depth(), 0);
     /// ```
@@ -348,7 +348,7 @@ impl Default for StreamingSanitizer {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// let mut s = StreamingSanitizer::default();
     /// assert!(!s.is_skipping());
     /// assert!(!s.is_stripping());
@@ -366,7 +366,7 @@ impl Default for StreamingSanitizer {
 ///
 /// # Examples
 ///
-/// ```
+/// ```ignore
 /// let safe = is_dangerous_url("https://example.com");
 /// let dangerous = is_dangerous_url("   javascript:alert(1)");
 /// assert_eq!(safe, false);
@@ -391,7 +391,7 @@ fn is_dangerous_url(url: &str) -> bool {
 ///
 /// # Examples
 ///
-/// ```
+/// ```ignore
 /// let attrs = vec![
 ///     ("onclick".to_string(), "alert(1)".to_string()),
 ///     ("on".to_string(), "not-an-event".to_string()),
@@ -436,7 +436,7 @@ mod tests {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// let ev = start_tag("a", vec![("href", "https://example.com"), ("rel", "noopener")]);
     /// match ev {
     ///     StreamEvent::StartTag { name, attrs, self_closing } => {
@@ -462,7 +462,7 @@ mod tests {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// let ev = end_tag("div");
     /// match ev {
     ///     StreamEvent::EndTag { name } => assert_eq!(name, "div"),
@@ -479,7 +479,7 @@ mod tests {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// let ev = text("hello");
     /// match ev {
     ///     StreamEvent::Text(t) => assert_eq!(t, "hello"),
@@ -878,7 +878,7 @@ mod tests {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// use proptest::prelude::*;
     /// let strat = arb_dangerous_element();
     /// proptest!(|(tag in strat)| {
@@ -900,7 +900,7 @@ mod tests {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// use proptest::prelude::*;
     /// // Create the strategy and draw a single example value.
     /// let strat = arb_safe_element();

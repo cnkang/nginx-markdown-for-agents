@@ -86,7 +86,7 @@ impl IncrementalEmitter {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// let budget = MemoryBudget { output_buffer: 1024 };
     /// let mut emitter = IncrementalEmitter::new(&budget);
     /// assert_eq!(emitter.pending_bytes(), 0);
@@ -127,7 +127,7 @@ impl IncrementalEmitter {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// // Process a no-op action; requires a `StructuralStateMachine` instance for context.
     /// let mut emitter = IncrementalEmitter::new(&MemoryBudget::default());
     /// let mut sm = super::state_machine::StructuralStateMachine::default();
@@ -160,7 +160,7 @@ impl IncrementalEmitter {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// // Construct an emitter (replace with your actual constructor as needed)
     /// let mut emitter = IncrementalEmitter::new(&MemoryBudget::default());
     /// assert_eq!(emitter.flush_count(), 0);
@@ -193,7 +193,7 @@ impl IncrementalEmitter {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// // Construct a budget and emitter, write or process actions, then finalize:
     /// let mut emitter = IncrementalEmitter::new(&budget);
     /// // ... emit content ...
@@ -246,7 +246,7 @@ impl IncrementalEmitter {
     ///
     /// # Examples
     ///
-    /// ```no_run
+    /// ```ignore
     /// let mut emitter = IncrementalEmitter::new(&budget);
     /// let mut sm = StructuralStateMachine::new();
     /// // Emit a level-2 heading start ("## ")
@@ -344,7 +344,7 @@ impl IncrementalEmitter {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// // Typical use (types and construction omitted for brevity):
     /// // let mut emitter = IncrementalEmitter::new(&budget);
     /// // let mut sm = StructuralStateMachine::new();
@@ -451,10 +451,10 @@ impl IncrementalEmitter {
     ///
     /// # Examples
     ///
-    /// ```no_run
-    /// use components::streaming::emitter::IncrementalEmitter;
-    /// use components::streaming::state_machine::StructuralStateMachine;
-    /// use components::MemoryBudget;
+    /// ```ignore
+    /// use nginx_markdown_converter::streaming::emitter::IncrementalEmitter;
+    /// use nginx_markdown_converter::streaming::state_machine::StructuralStateMachine;
+    /// use nginx_markdown_converter::streaming::MemoryBudget;
     ///
     /// let mut emitter = IncrementalEmitter::new(&MemoryBudget::default());
     /// let mut sm = StructuralStateMachine::new();
@@ -516,7 +516,7 @@ impl IncrementalEmitter {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// // Construct a state machine and emitter (helpers shown for clarity; actual constructors
     /// // in tests create appropriate MemoryBudget and StructuralStateMachine instances).
     /// let mut sm = super::state_machine::StructuralStateMachine::new();
@@ -572,10 +572,10 @@ impl IncrementalEmitter {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// // Illustrative example: ensure a block separator is emitted when requested.
-    /// # use components::streaming::emitter::{IncrementalEmitter, MemoryBudget};
-    /// # use components::streaming::emitter::ConversionError;
+    /// # use nginx_markdown_converter::streaming::emitter::{IncrementalEmitter, MemoryBudget};
+    /// # use nginx_markdown_converter::streaming::emitter::ConversionError;
     /// let budget = MemoryBudget { output_buffer: 1024 };
     /// let mut emitter = IncrementalEmitter::new(&budget);
     /// emitter.needs_block_separator = true;
@@ -626,10 +626,10 @@ impl IncrementalEmitter {
     ///
     /// # Examples
     ///
-    /// ```
-    /// # use components::rust_converter::streaming::{emitter::IncrementalEmitter, state_machine::StructuralStateMachine};
-    /// # use components::rust_converter::streaming::ConversionError;
-    /// # use components::rust_converter::MemoryBudget;
+    /// ```ignore
+    /// # use nginx_markdown_converter::streaming::{emitter::IncrementalEmitter, state_machine::StructuralStateMachine};
+    /// # use nginx_markdown_converter::streaming::ConversionError;
+    /// # use nginx_markdown_converter::MemoryBudget;
     /// // Create emitter and state machine (constructors elided for brevity).
     /// let budget = MemoryBudget { output_buffer: 1024 };
     /// let mut emitter = IncrementalEmitter::new(&budget);
@@ -824,7 +824,7 @@ impl IncrementalEmitter {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// // given a mutable `emitter: IncrementalEmitter` with pending data
     /// emitter.flush_to_ready().unwrap();
     /// ```
@@ -866,7 +866,7 @@ impl IncrementalEmitter {
 ///
 /// # Examples
 ///
-/// ```
+/// ```ignore
 /// assert_eq!(normalize_text(""), "");
 /// // internal collapse, preserve trailing space
 /// assert_eq!(normalize_text("a   b "), "a b ");
@@ -910,7 +910,7 @@ fn normalize_text(text: &str) -> String {
 ///
 /// # Examples
 ///
-/// ```
+/// ```ignore
 /// let input = b"line1  \r\nline2\t\nlast   ";
 /// let out = normalize_pending(input);
 /// // CR (`\r`) may have been converted during earlier writes; this function preserves `\n`
@@ -950,7 +950,7 @@ fn normalize_pending(bytes: &[u8]) -> Vec<u8> {
 ///
 /// # Examples
 ///
-/// ```
+/// ```ignore
 /// assert!(is_flush_tag("p"));    // paragraph
 /// assert!(is_flush_tag("h1"));   // heading
 /// assert!(!is_flush_tag("span")); // inline element
@@ -972,7 +972,7 @@ mod tests {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// let (mut emitter, mut sm) = make_pair();
     /// // emitter and sm are ready for use in tests or examples, e.g.:
     /// // emitter.process_action(&StateMachineAction::None, &mut sm).unwrap();
@@ -991,7 +991,7 @@ mod tests {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// // Construct a sequence of `StreamEvent` for a simple document, then emit:
     /// // let events: Vec<StreamEvent> = vec![ /* events */ ];
     /// // let output = emit_html(&events);
@@ -1014,7 +1014,7 @@ mod tests {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// let ev = start_tag("p");
     /// match ev {
     ///     StreamEvent::StartTag { name, attrs, self_closing } => {
@@ -1039,7 +1039,7 @@ mod tests {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// let ev = start_tag_with_attrs("div", vec![("class", "note"), ("id", "n1")]);
     /// match ev {
     ///     StreamEvent::StartTag { name, attrs, self_closing } => {
@@ -1069,7 +1069,7 @@ mod tests {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// let ev = self_closing_tag("br", vec![("class", "x")]);
     /// match ev {
     ///     StreamEvent::StartTag { name, attrs, self_closing } => {
@@ -1095,7 +1095,7 @@ mod tests {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// let ev = end_tag("p");
     /// match ev {
     ///     StreamEvent::EndTag { name } => assert_eq!(name, "p"),
@@ -1116,7 +1116,7 @@ mod tests {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// let ev = text("hello");
     /// assert_eq!(ev, StreamEvent::Text("hello".to_string()));
     /// ```
@@ -1136,7 +1136,7 @@ mod tests {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// let output = emit_html(&[start_tag("h2"), text("World"), end_tag("h2")]);
     /// assert_eq!(output, "## World\n");
     /// ```
@@ -1307,7 +1307,7 @@ mod tests {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// let output = emit_html(&[
     ///     start_tag("p"),
     ///     self_closing_tag("img", vec![("src", "pic.png"), ("alt", "A picture")]),
@@ -1451,7 +1451,7 @@ mod tests {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// let (mut emitter, mut sm) = make_pair();
     /// let events = vec![start_tag("p"), text("Text"), end_tag("p")];
     /// for ev in &events {

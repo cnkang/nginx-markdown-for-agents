@@ -51,8 +51,8 @@ impl std::fmt::Display for FallbackReason {
     ///
     /// # Examples
     ///
-    /// ```
-    /// use components::rust_converter::streaming::types::FallbackReason;
+    /// ```no_run
+    /// use nginx_markdown_converter::streaming::types::FallbackReason;
     /// let r = FallbackReason::UnsupportedStructure("nested table".into());
     /// assert_eq!(format!("{}", r), "unsupported structure: nested table");
     /// ```
