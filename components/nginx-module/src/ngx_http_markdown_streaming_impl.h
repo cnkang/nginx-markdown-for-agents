@@ -1362,6 +1362,20 @@ ngx_http_markdown_streaming_finalize_decomp(
         out_data = NULL;
         out_len = 0;
 
+        /*
+         * Record feed_start_ms if this is the first feed
+         * (EOF-only decompressor path where process_chunk
+         * was never called with non-empty data).
+         */
+        if (ctx->streaming.feed_start_ms == 0) {
+            ngx_time_t  *tp_feed;
+
+            tp_feed = ngx_timeofday();
+            ctx->streaming.feed_start_ms =
+                (ngx_msec_t) (tp_feed->sec * 1000
+                    + tp_feed->msec);
+        }
+
         feed_rc = markdown_streaming_feed(
             ctx->streaming.handle,
             decomp_data, decomp_len,
@@ -1437,14 +1451,9 @@ ngx_http_markdown_streaming_finalize_request(
         if (ctx->streaming.commit_state
             == NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST)
         {
-            NGX_HTTP_MARKDOWN_METRIC_INC(
-                streaming.postcommit_error_total);
-            NGX_HTTP_MARKDOWN_METRIC_INC(
-                streaming.failed_total);
-            ngx_http_markdown_log_decision(r, conf,
-                &ngx_http_markdown_reason_streaming_fail_postcommit);
-            return ngx_http_markdown_streaming_send_output(
-                r, ctx, NULL, 0, /* last_buf */ 1);
+            return
+                ngx_http_markdown_streaming_handle_postcommit_error(
+                    r, ctx, conf, rc_ffi);
         }
 
         /* Pre-Commit finalize error follows configured policy */

@@ -176,7 +176,7 @@ These metrics are only emitted when the module is compiled with `MARKDOWN_STREAM
 
 | Metric Name | Type | Description |
 |---|---|---|
-| `nginx_markdown_streaming_ttfb_seconds` | gauge | Last streaming request time-to-first-byte (seconds). Updated on each successful streaming conversion. |
+| `nginx_markdown_streaming_ttfb_seconds` | gauge | Last streaming time-to-first-byte (seconds). Recorded on the first successful non-empty downstream send; may be updated even if the request later fails post-commit. |
 | `nginx_markdown_streaming_peak_memory_bytes` | gauge | Last streaming conversion peak memory estimate (bytes). Updated on each successful streaming conversion. |
 
 ### Total Time Series
