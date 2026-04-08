@@ -110,7 +110,7 @@ static ngx_int_t
 ngx_http_markdown_check_content_type(ngx_http_request_t *r)
 {
     static u_char  text_html[] = "text/html";
-    ngx_str_t           *content_type;
+    const ngx_str_t     *content_type;
     
     /* Get Content-Type header */
     if (r->headers_out.content_type.len == 0) {
@@ -191,7 +191,7 @@ ngx_http_markdown_is_streaming(const ngx_http_request_t *r,
                                const ngx_http_markdown_conf_t *conf)
 {
     static u_char  text_event_stream[] = "text/event-stream";
-    ngx_str_t           *content_type;
+    const ngx_str_t     *content_type;
     const ngx_str_t     *stream_type;
     
     /* Get Content-Type header */
