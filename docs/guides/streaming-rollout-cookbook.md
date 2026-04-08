@@ -81,9 +81,19 @@ Shadow latency values in debug logs (`shadow_streaming_latency_ms`,
 `shadow_fullbuffer_latency_ms`) are for diagnostic reference only —
 they are not gating criteria.
 
+> **Edge case:** `streaming.shadow_total` only increments when both
+> engines produce comparable results. If the streaming engine
+> consistently fails during shadow runs, `streaming.shadow_total`
+> stays at 0 and the rate formulas above are undefined. When
+> `streaming.shadow_total` is 0 after sustained traffic, investigate
+> the debug log for `"markdown shadow:.*error"` lines — the
+> streaming engine is failing before a comparison can be made.
+
 ### Proceed to Phase 1 when
 
 - `shadow_diff_rate` ≤ 0.1% over at least 1 hour of traffic
+  (when `streaming.shadow_total` is 0, the rate is undefined —
+  investigate shadow engine errors before proceeding)
 - `shadow_engine_error_rate` ≤ 0.1% over the same window
   (count shadow init/feed/finalize error lines in debug log,
   divide by `streaming.shadow_total`)
