@@ -821,6 +821,18 @@ ngx_http_markdown_metrics_render_response_body(
                 conversion_time_avg_ms,
                 input_bytes_avg,
                 output_bytes_avg);
+        /*
+         * Detect truncation: ngx_slprintf returns end when
+         * the buffer is exhausted.  Emit a hard failure
+         * instead of a partial JSON payload.
+         */
+        if (p >= b->end) {
+            ngx_log_error(NGX_LOG_ERR,
+                r->connection->log, 0,
+                "markdown_metrics: JSON output "
+                "truncated, buffer too small");
+            return NULL;
+        }
         ngx_str_set(&r->headers_out.content_type,
                      "application/json");
         return p;
@@ -849,6 +861,18 @@ ngx_http_markdown_metrics_render_response_body(
                 conversion_time_avg_ms,
                 input_bytes_avg,
                 output_bytes_avg);
+        /*
+         * Detect truncation: ngx_slprintf returns end when
+         * the buffer is exhausted.  Emit a hard failure
+         * instead of a partial plain-text payload.
+         */
+        if (p >= b->end) {
+            ngx_log_error(NGX_LOG_ERR,
+                r->connection->log, 0,
+                "markdown_metrics: plain-text output "
+                "truncated, buffer too small");
+            return NULL;
+        }
         ngx_str_set(&r->headers_out.content_type,
                      "text/plain");
         return p;

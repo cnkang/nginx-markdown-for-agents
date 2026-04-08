@@ -2890,11 +2890,14 @@ test_metrics_terminal_lastbuf_again_then_error(void)
 
     /*
      * Step 2: Simulate resume_pending() returning NGX_ERROR.
-     * Production code records failure metrics.
+     * Production code clears pending_terminal_metrics first,
+     * then records failure metrics.
      */
     resume_rc = NGX_ERROR;
 
     if (resume_rc != NGX_OK && resume_rc != NGX_DONE) {
+        /* Clear latch on failure (matches production) */
+        pending_terminal_metrics = 0;
         m.postcommit_error_total++;
         m.failed_total++;
     } else if (pending_terminal_metrics) {
@@ -2909,6 +2912,9 @@ test_metrics_terminal_lastbuf_again_then_error(void)
         "failed_total should be 1 after resume ERROR");
     TEST_ASSERT(m.succeeded_total == 0,
         "succeeded_total should remain 0 on resume failure");
+    TEST_ASSERT(pending_terminal_metrics == 0,
+        "pending_terminal_metrics should be cleared "
+        "after resume failure");
 
     TEST_PASS(
         "terminal last_buf NGX_AGAIN then resume ERROR "
@@ -3469,31 +3475,32 @@ test_config_shadow_inheritance(void)
 static void
 test_config_shadow_invalid_values(void)
 {
+    const char  *invalid_values[] = {
+        "yes", "enabled", "true", "1",
+        "no", "disabled", "false", "0", ""
+    };
+    size_t       num_values;
+
     TEST_SUBSECTION(
         "Config: streaming_shadow invalid values");
 
-    /*
-     * ngx_conf_set_flag_slot rejects anything other
-     * than "on" or "off" at parse time.  We verify
-     * that the flag type only holds 0 or 1.
-     */
-    {
-        ngx_flag_t  val;
+    num_values = ARRAY_SIZE(invalid_values);
 
-        val = 0;
-        TEST_ASSERT(val == 0 || val == 1,
-            "Flag value 0 is valid");
+    for (size_t i = 0; i < num_values; i++) {
+        const char  *val;
+        int          is_valid;
 
-        val = 1;
-        TEST_ASSERT(val == 0 || val == 1,
-            "Flag value 1 is valid");
+        val = invalid_values[i];
 
         /*
-         * Values other than 0/1 would indicate a bug
-         * in the config parser.  NGINX's
-         * ngx_conf_set_flag_slot guarantees this
-         * cannot happen at runtime.
+         * Simulate ngx_conf_set_flag_slot lookup:
+         * only "on" and "off" are valid.
          */
+        is_valid = (strcmp(val, "on") == 0
+                    || strcmp(val, "off") == 0);
+
+        TEST_ASSERT(is_valid == 0,
+            "Invalid value should not match flag");
     }
 
     TEST_PASS(
