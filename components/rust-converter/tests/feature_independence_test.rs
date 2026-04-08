@@ -93,6 +93,7 @@ fn empty_result() -> MarkdownResult {
         error_code: 0,
         error_message: ptr::null_mut(),
         error_len: 0,
+        peak_memory_estimate: 0,
     }
 }
 
@@ -196,6 +197,7 @@ fn test_both_features_enabled() {
         error_code: 0,
         error_message: ptr::null_mut(),
         error_len: 0,
+        peak_memory_estimate: 0,
     };
 
     unsafe {
@@ -274,6 +276,7 @@ fn test_token_estimation_only() {
         error_code: 0,
         error_message: ptr::null_mut(),
         error_len: 0,
+        peak_memory_estimate: 0,
     };
 
     unsafe {
@@ -349,6 +352,7 @@ fn test_front_matter_only() {
         error_code: 0,
         error_message: ptr::null_mut(),
         error_len: 0,
+        peak_memory_estimate: 0,
     };
 
     unsafe {
@@ -424,6 +428,7 @@ fn test_both_features_disabled() {
         error_code: 0,
         error_message: ptr::null_mut(),
         error_len: 0,
+        peak_memory_estimate: 0,
     };
 
     unsafe {
@@ -505,16 +510,7 @@ fn test_feature_independence_comprehensive() {
             streaming_budget: 0,
         };
 
-        let mut result = MarkdownResult {
-            markdown: ptr::null_mut(),
-            markdown_len: 0,
-            etag: ptr::null_mut(),
-            etag_len: 0,
-            token_estimate: 0,
-            error_code: 0,
-            error_message: ptr::null_mut(),
-            error_len: 0,
-        };
+        let mut result = empty_result();
 
         unsafe {
             ffi_markdown_convert(converter, html.as_ptr(), html.len(), &options, &mut result);
@@ -603,16 +599,7 @@ fn test_no_hidden_dependencies() {
         streaming_budget: 0,
     };
 
-    let mut result1 = MarkdownResult {
-        markdown: ptr::null_mut(),
-        markdown_len: 0,
-        etag: ptr::null_mut(),
-        etag_len: 0,
-        token_estimate: 0,
-        error_code: 0,
-        error_message: ptr::null_mut(),
-        error_len: 0,
-    };
+    let mut result1 = empty_result();
 
     unsafe {
         ffi_markdown_convert(
@@ -649,16 +636,7 @@ fn test_no_hidden_dependencies() {
         streaming_budget: 0,
     };
 
-    let mut result2 = MarkdownResult {
-        markdown: ptr::null_mut(),
-        markdown_len: 0,
-        etag: ptr::null_mut(),
-        etag_len: 0,
-        token_estimate: 0,
-        error_code: 0,
-        error_message: ptr::null_mut(),
-        error_len: 0,
-    };
+    let mut result2 = empty_result();
 
     unsafe {
         ffi_markdown_convert(

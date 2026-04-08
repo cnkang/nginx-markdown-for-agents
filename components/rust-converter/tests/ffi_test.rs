@@ -82,6 +82,7 @@ fn ffi_test_empty_result() -> MarkdownResult {
         error_code: 0,
         error_message: ptr::null_mut(),
         error_len: 0,
+        peak_memory_estimate: 0,
     }
 }
 
@@ -128,6 +129,7 @@ fn test_basic_conversion() {
         error_code: 0,
         error_message: ptr::null_mut(),
         error_len: 0,
+        peak_memory_estimate: 0,
     };
 
     ffi_markdown_convert(converter, html.as_ptr(), html.len(), &options, &mut result);
@@ -418,6 +420,7 @@ fn test_null_pointer_handling() {
         error_code: 0,
         error_message: ptr::null_mut(),
         error_len: 0,
+        peak_memory_estimate: 0,
     };
 
     // Test NULL converter handle
@@ -442,6 +445,7 @@ fn test_null_pointer_handling() {
         error_code: 0,
         error_message: ptr::null_mut(),
         error_len: 0,
+        peak_memory_estimate: 0,
     };
 
     // Test NULL HTML pointer with zero length (allowed, treated as empty input)
@@ -466,6 +470,7 @@ fn test_null_pointer_handling() {
         error_code: 0,
         error_message: ptr::null_mut(),
         error_len: 0,
+        peak_memory_estimate: 0,
     };
 
     // Test NULL options pointer
@@ -508,16 +513,7 @@ fn test_multiple_conversions() {
         let html = format!("<h1>Test {}</h1><p>Content {}</p>", i, i);
         let html_bytes = html.as_bytes();
 
-        let mut result = MarkdownResult {
-            markdown: ptr::null_mut(),
-            markdown_len: 0,
-            etag: ptr::null_mut(),
-            etag_len: 0,
-            token_estimate: 0,
-            error_code: 0,
-            error_message: ptr::null_mut(),
-            error_len: 0,
-        };
+        let mut result = ffi_test_empty_result();
 
         ffi_markdown_convert(
             converter,
@@ -571,6 +567,7 @@ fn test_idempotent_free() {
         error_code: 0,
         error_message: ptr::null_mut(),
         error_len: 0,
+        peak_memory_estimate: 0,
     };
 
     ffi_markdown_convert(converter, html.as_ptr(), html.len(), &options, &mut result);
@@ -617,6 +614,7 @@ fn test_content_type_charset_detection() {
         error_code: 0,
         error_message: ptr::null_mut(),
         error_len: 0,
+        peak_memory_estimate: 0,
     };
 
     ffi_markdown_convert(converter, html.as_ptr(), html.len(), &options, &mut result);
@@ -664,6 +662,7 @@ fn test_gfm_flavor() {
         error_code: 0,
         error_message: ptr::null_mut(),
         error_len: 0,
+        peak_memory_estimate: 0,
     };
 
     ffi_markdown_convert(converter, html.as_ptr(), html.len(), &options, &mut result);
@@ -753,6 +752,7 @@ fn test_free_empty_result() {
         error_code: 0,
         error_message: ptr::null_mut(),
         error_len: 0,
+        peak_memory_estimate: 0,
     };
 
     // Should handle empty result gracefully
@@ -794,6 +794,7 @@ fn test_memory_cleanup_with_all_fields() {
         error_code: 0,
         error_message: ptr::null_mut(),
         error_len: 0,
+        peak_memory_estimate: 0,
     };
 
     ffi_markdown_convert(converter, html.as_ptr(), html.len(), &options, &mut result);
@@ -849,6 +850,7 @@ fn test_memory_cleanup_error_case() {
         error_code: 0,
         error_message: ptr::null_mut(),
         error_len: 0,
+        peak_memory_estimate: 0,
     };
 
     // Trigger error with NULL HTML pointer and non-zero length.
@@ -905,6 +907,7 @@ fn test_panic_catching_invalid_utf8() {
         error_code: 0,
         error_message: ptr::null_mut(),
         error_len: 0,
+        peak_memory_estimate: 0,
     };
 
     ffi_markdown_convert(
@@ -964,6 +967,7 @@ fn test_zero_length_html() {
         error_code: 0,
         error_message: ptr::null_mut(),
         error_len: 0,
+        peak_memory_estimate: 0,
     };
 
     ffi_markdown_convert(converter, html.as_ptr(), html.len(), &options, &mut result);
@@ -1043,6 +1047,7 @@ fn test_null_content_type_with_zero_length() {
         error_code: 0,
         error_message: ptr::null_mut(),
         error_len: 0,
+        peak_memory_estimate: 0,
     };
 
     ffi_markdown_convert(
@@ -1092,6 +1097,7 @@ fn test_error_state_consistency() {
         error_code: 0,
         error_message: ptr::null_mut(),
         error_len: 0,
+        peak_memory_estimate: 0,
     };
 
     // Trigger error with NULL converter

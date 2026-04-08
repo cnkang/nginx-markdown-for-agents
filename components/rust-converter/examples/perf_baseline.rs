@@ -399,6 +399,7 @@ fn run_ffi_baseline(sample: &Sample, cfg: RunConfig) -> FfiSummary {
             error_code: 0,
             error_message: ptr::null_mut(),
             error_len: 0,
+            peak_memory_estimate: 0,
         };
 
         let start = Instant::now();
