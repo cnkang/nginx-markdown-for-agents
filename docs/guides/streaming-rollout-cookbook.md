@@ -96,7 +96,9 @@ they are not gating criteria.
   investigate shadow engine errors before proceeding)
 - `shadow_engine_error_rate` ≤ 0.1% over the same window
   (count shadow init/feed/finalize error lines in debug log,
-  divide by `streaming.shadow_total`)
+  divide by `streaming.shadow_total`;
+  when `streaming.shadow_total` is 0, the rate is undefined —
+  investigate shadow engine errors before proceeding)
 
 ## Phase 1: Single Location
 
