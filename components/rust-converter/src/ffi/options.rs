@@ -12,6 +12,9 @@ pub(crate) struct DecodedOptions<'a> {
     pub(crate) generate_etag: bool,
     pub(crate) estimate_tokens: bool,
     pub(crate) conversion: ConversionOptions,
+    // Read in streaming.rs:85-86 to configure MemoryBudget. Only consumed by
+    // the streaming FFI path; may appear unused when streaming feature is off.
+    #[allow(dead_code)]
     pub(crate) streaming_budget: u64,
 }
 

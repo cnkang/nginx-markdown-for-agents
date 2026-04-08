@@ -271,6 +271,9 @@ pub unsafe extern "C" fn markdown_streaming_finalize(
                 result_ref.token_estimate = estimate;
             }
 
+            // Set peak memory estimate from streaming stats.
+            result_ref.peak_memory_estimate = streaming_result.stats.peak_memory_estimate;
+
             result_ref.error_code = ERROR_SUCCESS;
             ERROR_SUCCESS
         }
@@ -399,6 +402,7 @@ mod tests {
             error_code: 0,
             error_message: ptr::null_mut(),
             error_len: 0,
+            peak_memory_estimate: 0,
         }
     }
 

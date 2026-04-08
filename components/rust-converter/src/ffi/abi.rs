@@ -56,6 +56,9 @@ pub struct MarkdownResult {
     pub error_code: u32,
     pub error_message: *mut u8,
     pub error_len: usize,
+    /// Peak memory estimate during streaming conversion (bytes).
+    /// Populated by `markdown_streaming_finalize` from `StreamingStats.peak_memory_estimate`.
+    pub peak_memory_estimate: usize,
 }
 
 /// Opaque handle to Rust converter state shared across conversions.
