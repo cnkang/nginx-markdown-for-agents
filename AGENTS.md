@@ -650,7 +650,7 @@ review cycle, the agent must evaluate whether `AGENTS.md` needs updating:
    pattern (for example "all write paths for the same metric must apply the
    same success guard") rather than the surface detail (for example "the
    `resume_pending` TTFB latch must check `rc == NGX_OK`").  A rule that
-   only prevents re-introducing the exact same bug in the exact same
+   only prevents re-introducing the same bug in the same
    function is nearly worthless — the value is in preventing the analogous
    mistake elsewhere.
 4. **Recurring pattern escalation**: If the same class of mistake appears in
