@@ -91,7 +91,8 @@ ngx_http_markdown_streaming_handle_backpressure(
 static ngx_int_t
 ngx_http_markdown_streaming_resume_pending(
     ngx_http_request_t *r,
-    ngx_http_markdown_ctx_t *ctx);
+    ngx_http_markdown_ctx_t *ctx,
+    ngx_http_markdown_conf_t *conf);
 static void
 ngx_http_markdown_streaming_cleanup(void *data);
 static ngx_uint_t
@@ -533,6 +534,13 @@ ngx_http_markdown_streaming_send_output(
          * this same chain again once downstream write readiness returns.
          */
         ctx->streaming.pending_output = out;
+        /*
+         * Record whether the pending chain carries actual data
+         * (non-empty buffer) so the resume path can decide TTFB
+         * sampling without dereferencing pos/last pointers.
+         */
+        ctx->streaming.pending_has_data =
+            (data != NULL && len > 0) ? 1 : 0;
         r->buffered |= NGX_HTTP_MARKDOWN_BUFFERED;
     }
 
@@ -562,7 +570,8 @@ ngx_http_markdown_streaming_handle_backpressure(
 static ngx_int_t
 ngx_http_markdown_streaming_send_deferred_lastbuf(
     ngx_http_request_t *r,
-    ngx_http_markdown_ctx_t *ctx)
+    ngx_http_markdown_ctx_t *ctx,
+    ngx_http_markdown_conf_t *conf)
 {
     ngx_int_t  rc;
 
@@ -571,8 +580,40 @@ ngx_http_markdown_streaming_send_deferred_lastbuf(
         r, ctx, NULL, 0, /* last_buf */ 1);
 
     if (rc == NGX_AGAIN) {
+        /*
+         * Deferred last_buf send hit backpressure. Set the
+         * same metrics latch used by finalize() so that
+         * resume_pending() will record success metrics after
+         * the drain succeeds.
+         */
+        ctx->streaming.pending_terminal_metrics = 1;
         return ngx_http_markdown_streaming_handle_backpressure(
             r, ctx);
+    }
+
+    /*
+     * Deferred last_buf send completed. Record success or
+     * failure metrics based on the actual result to maintain
+     * consistent observability semantics across all post-commit
+     * send paths.
+     */
+    if (rc == NGX_OK || rc == NGX_DONE) {
+        NGX_HTTP_MARKDOWN_METRIC_INC(streaming.succeeded_total);
+        NGX_HTTP_MARKDOWN_METRIC_INC(conversions_succeeded);
+
+        ngx_http_markdown_log_decision(r, conf,
+            &ngx_http_markdown_reason_streaming_convert);
+    } else {
+        /*
+         * Deferred last_buf send failed with a definitive
+         * error. Record failure metrics to match the policy
+         * used in resume_pending() and finalize().
+         */
+        NGX_HTTP_MARKDOWN_METRIC_INC(streaming.postcommit_error_total);
+        NGX_HTTP_MARKDOWN_METRIC_INC(streaming.failed_total);
+
+        ngx_http_markdown_log_decision(r, conf,
+            &ngx_http_markdown_reason_streaming_fail_postcommit);
     }
 
     return rc;
@@ -585,7 +626,8 @@ ngx_http_markdown_streaming_send_deferred_lastbuf(
 static ngx_int_t
 ngx_http_markdown_streaming_resume_pending(
     ngx_http_request_t *r,
-    ngx_http_markdown_ctx_t *ctx)
+    ngx_http_markdown_ctx_t *ctx,
+    ngx_http_markdown_conf_t *conf)
 {
     ngx_chain_t  *out;
     ngx_int_t     rc;
@@ -601,7 +643,7 @@ ngx_http_markdown_streaming_resume_pending(
          */
         if (ctx->streaming.finalize_pending_lastbuf) {
             return ngx_http_markdown_streaming_send_deferred_lastbuf(
-                r, ctx);
+                r, ctx, conf);
         }
 
         return NGX_OK;
@@ -627,16 +669,17 @@ ngx_http_markdown_streaming_resume_pending(
      * yet recorded (send_output returned NGX_AGAIN on the
      * first non-empty output), record it now — but only when:
      *   1. The retry actually succeeded (NGX_OK or NGX_DONE)
-     *   2. The drained chain contained non-empty data (not a
-     *      terminal empty last_buf from send_deferred_lastbuf)
+     *   2. The drained chain contained non-empty data
+     *      (recorded via pending_has_data flag in send_output)
+     *
+     * Using the explicit flag avoids undefined pointer comparison
+     * (out->buf->last > out->buf->pos) when pos/last may be NULL.
      */
     if (!ctx->streaming.ttfb_recorded
         && ctx->streaming.feed_start_ms > 0
         && ngx_http_markdown_metrics != NULL
         && (rc == NGX_OK || rc == NGX_DONE)
-        && out != NULL
-        && out->buf != NULL
-        && out->buf->last > out->buf->pos)
+        && ctx->streaming.pending_has_data)
     {
         ngx_time_t  *tp_ttfb;
         ngx_msec_t   now_ms;
@@ -654,12 +697,50 @@ ngx_http_markdown_streaming_resume_pending(
     }
 
     /*
-     * Pending output drained. If finalize deferred the
-     * terminal last_buf, send it now.
+     * Pending output drained. Check if resume failed before
+     * proceeding to deferred lastbuf, to avoid the failure
+     * branch being short-circuited.
+     */
+    if (rc != NGX_OK && rc != NGX_DONE) {
+        /*
+         * Resume failed after draining pending output.
+         * Clear any pending terminal metrics latch to avoid
+         * stale state on re-entry, then record failure metrics.
+         */
+        ctx->streaming.pending_terminal_metrics = 0;
+
+        NGX_HTTP_MARKDOWN_METRIC_INC(streaming.postcommit_error_total);
+        NGX_HTTP_MARKDOWN_METRIC_INC(streaming.failed_total);
+
+        ngx_http_markdown_log_decision(r, conf,
+            &ngx_http_markdown_reason_streaming_fail_postcommit);
+
+        return rc;
+    }
+
+    /*
+     * Pending output drained successfully. If the terminal
+     * last_buf send was deferred due to backpressure during
+     * finalize(), record the success metrics now that the
+     * drain has confirmed delivery.
+     */
+    if (ctx->streaming.pending_terminal_metrics) {
+        NGX_HTTP_MARKDOWN_METRIC_INC(streaming.succeeded_total);
+        NGX_HTTP_MARKDOWN_METRIC_INC(conversions_succeeded);
+
+        ngx_http_markdown_log_decision(r, conf,
+            &ngx_http_markdown_reason_streaming_convert);
+
+        ctx->streaming.pending_terminal_metrics = 0;
+    }
+
+    /*
+     * Pending output drained successfully. If finalize deferred
+     * the terminal last_buf, send it now.
      */
     if (ctx->streaming.finalize_pending_lastbuf) {
         return ngx_http_markdown_streaming_send_deferred_lastbuf(
-            r, ctx);
+            r, ctx, conf);
     }
 
     return rc;
@@ -1415,6 +1496,15 @@ ngx_http_markdown_streaming_finalize_request(
             (ngx_uint_t) result.token_estimate);
     }
 
+    /*
+     * Capture peak_memory_estimate BEFORE freeing the result.
+     *
+     * The Rust FFI populates this field in MarkdownResult, but
+     * markdown_result_free() may zero or invalidate the struct.
+     * Save it to a local variable first to ensure metric stability.
+     */
+    size_t  peak_memory_bytes = result.peak_memory_estimate;
+
     markdown_result_free(&result);
 
     /* Log streaming conversion statistics */
@@ -1428,12 +1518,19 @@ ngx_http_markdown_streaming_finalize_request(
         ctx->streaming.total_input_bytes,
         ctx->streaming.total_output_bytes);
 
-    /* Record success metrics */
-    NGX_HTTP_MARKDOWN_METRIC_INC(streaming.succeeded_total);
-    NGX_HTTP_MARKDOWN_METRIC_INC(conversions_succeeded);
-
-    ngx_http_markdown_log_decision(r, conf,
-        &ngx_http_markdown_reason_streaming_convert);
+    /*
+     * Record peak memory estimate from Rust streaming stats.
+     * This is a gauge metric (per-request sample) updated on each
+     * successful streaming conversion.
+     *
+     * Always update unconditionally so the gauge reflects the
+     * most recent request, even if peak_memory_bytes is 0 (for
+     * example empty response or extremely small input).
+     */
+    if (ngx_http_markdown_metrics != NULL) {
+        ngx_http_markdown_metrics->streaming.last_peak_memory_bytes =
+            (ngx_atomic_t) peak_memory_bytes;
+    }
 
     /*
      * Send final empty last_buf to terminate the response.
@@ -1444,6 +1541,17 @@ ngx_http_markdown_streaming_finalize_request(
      * Return NGX_AGAIN so the resume mechanism drains the pending
      * output first; the caller will re-enter finalize on the next
      * write event.
+     *
+     * IMPORTANT: Success metrics (succeeded_total, reason code)
+     * are NOT recorded here when final_send_rc == NGX_AGAIN.
+     * They are recorded only after the deferred last_buf is
+     * confirmed sent with NGX_OK/NGX_DONE in
+     * ngx_http_markdown_streaming_send_deferred_lastbuf(),
+     * to avoid observability drift when NGX_AGAIN is followed
+     * by a downstream send failure.
+     *
+     * When final_send_rc is NGX_OK or NGX_DONE, the send
+     * completed immediately so we record metrics here.
      */
     if (final_send_rc == NGX_AGAIN) {
         ctx->streaming.finalize_pending_lastbuf = 1;
@@ -1451,8 +1559,47 @@ ngx_http_markdown_streaming_finalize_request(
             r, ctx);
     }
 
-    return ngx_http_markdown_streaming_send_output(
+    /*
+     * Send the terminal last_buf and record success/failure
+     * metrics based on the actual send result.
+     *
+     * This ensures consistent observability semantics:
+     * - NGX_OK/NGX_DONE: record success metrics immediately
+     * - NGX_AGAIN: defer metrics to resume_pending() via
+     *   pending_terminal_metrics latch
+     * - Other errors: record failure metrics immediately
+     */
+    rc = ngx_http_markdown_streaming_send_output(
         r, ctx, NULL, 0, /* last_buf */ 1);
+
+    if (rc == NGX_OK || rc == NGX_DONE) {
+        NGX_HTTP_MARKDOWN_METRIC_INC(streaming.succeeded_total);
+        NGX_HTTP_MARKDOWN_METRIC_INC(conversions_succeeded);
+
+        ngx_http_markdown_log_decision(r, conf,
+            &ngx_http_markdown_reason_streaming_convert);
+    } else if (rc == NGX_AGAIN) {
+        /*
+         * Terminal last_buf send hit backpressure. Set a latch
+         * so that resume_pending() knows to record metrics
+         * after the drain succeeds.
+         */
+        ctx->streaming.pending_terminal_metrics = 1;
+    } else {
+        /*
+         * Terminal last_buf send failed with a definitive
+         * error (not backpressure). Record failure metrics
+         * to match the post-commit error policy used in
+         * resume_pending() and send_deferred_lastbuf().
+         */
+        NGX_HTTP_MARKDOWN_METRIC_INC(streaming.postcommit_error_total);
+        NGX_HTTP_MARKDOWN_METRIC_INC(streaming.failed_total);
+
+        ngx_http_markdown_log_decision(r, conf,
+            &ngx_http_markdown_reason_streaming_fail_postcommit);
+    }
+
+    return rc;
 }
 
 
@@ -1834,7 +1981,7 @@ ngx_http_markdown_streaming_handle_null_input(
     ngx_int_t  rc;
 
     rc = ngx_http_markdown_streaming_resume_pending(
-        r, ctx);
+        r, ctx, conf);
     if (rc != NGX_OK) {
         return rc;
     }
