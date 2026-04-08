@@ -563,6 +563,53 @@ If `precommit_failopen_total` or `precommit_reject_total` is
 growing, investigate the NGINX error log for the specific error types triggering
 the failures.
 
+#### markdown_streaming_shadow
+
+**Syntax:** `markdown_streaming_shadow on | off;`
+**Default:** `off`
+**Context:** http, server, location
+
+Enables shadow mode for the streaming conversion engine. When enabled, the module
+runs both the full-buffer and streaming engines on the same decompressed HTML input
+after a successful full-buffer conversion, compares their outputs, and records
+differences in metrics and the debug log. The full-buffer result is always used for
+the client response — shadow mode never affects what the client receives.
+
+Shadow mode is intended for Phase 0 of a streaming rollout to verify engine output
+parity before enabling streaming for live traffic. See the
+[Streaming Rollout Cookbook](streaming-rollout-cookbook.md) for phased deployment
+guidance.
+
+**Metrics produced:**
+
+| Metric (JSON path) | Prometheus series | Description |
+|---------------------|-------------------|-------------|
+| `streaming.shadow_total` | `nginx_markdown_streaming_shadow_total` | Successful shadow comparison runs |
+| `streaming.shadow_diff_total` | `nginx_markdown_streaming_shadow_diff_total` | Comparisons where outputs differed |
+
+**Important caveats:**
+
+- Shadow mode verifies engine output parity on already-decompressed HTML. It does
+  **not** exercise chunk boundaries, streaming decompression, backpressure, or
+  commit boundaries — those runtime behaviors are covered by integration tests and
+  chunk-boundary fuzzing.
+- `streaming.shadow_total` only increments when both engines produce comparable
+  results. If the streaming engine consistently fails, `shadow_total` stays at 0.
+- Shadow mode adds latency to every converted request (the streaming engine runs
+  in addition to the full-buffer engine). Disable it once Phase 0 verification is
+  complete.
+
+**Example:**
+```nginx
+# Phase 0: shadow mode verification
+markdown_filter on;
+markdown_streaming_engine off;
+markdown_streaming_shadow on;
+
+# Phase 1+: disable shadow after verification
+markdown_streaming_shadow off;
+```
+
 ---
 
 ### Large Response Processing
