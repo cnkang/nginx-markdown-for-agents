@@ -17,7 +17,7 @@
 //!
 //! # Usage
 //!
-//! ```ignore
+//! ```no_run
 //! use nginx_markdown_converter::converter::ConversionOptions;
 //! use nginx_markdown_converter::streaming::{StreamingConverter, MemoryBudget};
 //!
@@ -27,8 +27,8 @@
 //! );
 //! conv.set_content_type(Some("text/html; charset=UTF-8".to_string()));
 //!
-//! let output = conv.feed_chunk(b"<h1>Hello</h1><p>World</p>")?;
-//! let result = conv.finalize()?;
+//! let _output = conv.feed_chunk(b"<h1>Hello</h1><p>World</p>").unwrap();
+//! let _result = conv.finalize().unwrap();
 //! ```
 //!
 //! # Feature Gate

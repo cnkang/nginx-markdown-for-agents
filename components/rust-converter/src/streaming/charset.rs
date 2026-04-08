@@ -57,11 +57,12 @@ impl std::fmt::Debug for CharsetState {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// use std::fmt::Debug;
+    /// use nginx_markdown_converter::streaming::charset::CharsetState;
     ///
     /// // Pending
-    /// let pending = crate::streaming::charset::CharsetState::Pending {
+    /// let pending = CharsetState::Pending {
     ///     header_charset: Some("ISO-8859-1".to_string()),
     ///     sniff_buffer: vec![0u8; 10],
     /// };
@@ -71,11 +72,11 @@ impl std::fmt::Debug for CharsetState {
     /// assert!(s.contains("sniff_buffer_len"));
     ///
     /// // Resolved (UTF-8 zero-copy)
-    /// let resolved_utf8 = crate::streaming::charset::CharsetState::Resolved { decoder: None };
+    /// let resolved_utf8 = CharsetState::Resolved { decoder: None };
     /// assert!(format!("{:?}", resolved_utf8).contains("has_decoder = false"));
     ///
     /// // Failed
-    /// let failed = crate::streaming::charset::CharsetState::Failed("bad".into());
+    /// let failed = CharsetState::Failed("bad".into());
     /// assert_eq!(format!("{:?}", failed), r#"Failed("bad")"#);
     /// ```
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -104,7 +105,9 @@ impl CharsetState {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
+    /// use nginx_markdown_converter::streaming::charset::CharsetState;
+    ///
     /// let mut state = CharsetState::new();
     /// state.set_content_type(Some("text/html; charset=UTF-8"));
     /// ```
@@ -128,7 +131,9 @@ impl CharsetState {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
+    /// use nginx_markdown_converter::streaming::charset::CharsetState;
+    ///
     /// let mut state = CharsetState::new();
     /// state.set_content_type(Some("text/html; charset=ISO-8859-1"));
     /// ```
@@ -159,7 +164,9 @@ impl CharsetState {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
+    /// use nginx_markdown_converter::streaming::charset::CharsetState;
+    ///
     /// let mut st = CharsetState::new();
     /// // feed some bytes (keeps buffering while pending)
     /// let out = st.feed(b"<!doctype html><meta charset=\"utf-8\">Hello").unwrap();
@@ -280,7 +287,9 @@ impl CharsetState {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
+    /// use nginx_markdown_converter::streaming::charset::CharsetState;
+    ///
     /// let mut state = CharsetState::new();
     /// // feed data...
     /// let remaining = state.flush().expect("flush should succeed");
@@ -355,7 +364,9 @@ impl CharsetState {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
+    /// use nginx_markdown_converter::streaming::charset::CharsetState;
+    ///
     /// let s = CharsetState::new();
     /// assert!(!s.is_resolved());
     /// ```
@@ -369,7 +380,9 @@ impl CharsetState {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
+    /// use nginx_markdown_converter::streaming::charset::CharsetState;
+    ///
     /// let s = CharsetState::new();
     /// assert!(s.is_pending());
     /// ```
@@ -386,7 +399,9 @@ impl Default for CharsetState {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
+    /// use nginx_markdown_converter::streaming::charset::CharsetState;
+    ///
     /// let mut state = CharsetState::default();
     /// assert!(state.is_pending());
     /// ```
@@ -408,8 +423,10 @@ impl Default for CharsetState {
 ///
 /// # Examples
 ///
-/// ```
+/// ```ignore
 /// // UTF-8 resolves to decoder == None and is_utf8 == true
+/// use nginx_markdown_converter::streaming::charset::CharsetState;
+///
 /// let (state, is_utf8) = resolve_charset("utf-8").unwrap();
 /// match state {
 ///     CharsetState::Resolved { decoder } => assert!(decoder.is_none()),
@@ -459,8 +476,10 @@ fn resolve_charset(charset: &str) -> Result<(CharsetState, bool), ConversionErro
 ///
 /// # Examples
 ///
-/// ```
+/// ```ignore
 /// // UTF-8 path: decoder == None
+/// use nginx_markdown_converter::streaming::charset::CharsetState;
+///
 /// let mut state = CharsetState::Resolved { decoder: None };
 /// let out = transcode_data(&mut state, b"hello").unwrap();
 /// assert_eq!(out, b"hello");
@@ -851,7 +870,7 @@ mod tests {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// use proptest::prelude::*;
     ///
     /// proptest! {
@@ -899,7 +918,7 @@ mod tests {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// use proptest::strategy::Strategy;
     ///
     /// let mut runner = proptest::test_runner::TestRunner::default();

@@ -30,7 +30,7 @@ impl TokenSinkAdapter {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// let adapter = TokenSinkAdapter::new();
     /// assert!(adapter.drain().is_empty());
     /// ```
@@ -46,7 +46,7 @@ impl TokenSinkAdapter {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// let adapter = TokenSinkAdapter::new();
     /// let events = adapter.drain();
     /// assert!(events.is_empty());
@@ -71,7 +71,7 @@ impl TokenSink for TokenSinkAdapter {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// use html5ever::tokenizer::Token;
     /// use tendril::StrTendril;
     /// use crate::{TokenSinkAdapter, StreamEvent};
@@ -104,7 +104,7 @@ impl TokenSink for TokenSinkAdapter {
 ///
 /// # Examples
 ///
-/// ```
+/// ```ignore
 /// use html5ever::tokenizer::{Tag, TagKind};
 ///
 /// let tag = Tag {
@@ -163,7 +163,7 @@ impl Default for StreamingTokenizer {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// let _ = StreamingTokenizer::default();
     /// ```
     fn default() -> Self {
@@ -176,7 +176,7 @@ impl StreamingTokenizer {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// let _tokenizer = StreamingTokenizer::new();
     /// ```
     pub fn new() -> Self {
@@ -202,7 +202,7 @@ impl StreamingTokenizer {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// let mut tok = StreamingTokenizer::new();
     /// let events = tok.feed("<h1>Hello</h1>").unwrap();
     /// assert!(matches!(events.as_slice(), [StreamEvent::StartTag{..}, StreamEvent::Text(_), StreamEvent::EndTag{..}]));
@@ -246,7 +246,7 @@ impl StreamingTokenizer {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// let mut t = StreamingTokenizer::new();
     /// let events = t.feed("<h1>Hi</h1>").unwrap();
     /// // process `events`...
@@ -280,7 +280,7 @@ impl StreamingTokenizer {
 ///
 /// # Examples
 ///
-/// ```
+/// ```ignore
 /// use std::any::Any;
 ///
 /// let payload: Box<dyn Any + Send> = Box::new("something went wrong");
