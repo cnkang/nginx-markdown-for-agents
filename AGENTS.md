@@ -32,6 +32,10 @@ If two rules conflict, follow the higher-priority source.
 
 ### C style and conventions
 - Follow NGINX style: 4-space indent, <=80 cols where practical, no `//` comments, `_t` suffix for types.
+- Keep NGINX style as the primary style contract, but require C99-or-new as
+  the minimum language baseline for all C code and C snippets in docs/steering.
+  Pre-C99 forms are forbidden (for example K&R function definitions, implicit
+  `int`, and declarations without proper prototypes).
 - Use `u_char *`, `ngx_str_t`, and NGINX helpers (`ngx_snprintf`, `ngx_memcpy`, etc.) consistently.
 - Use `NULL` pointer comparisons (not `0`).
 - **Never dereference or perform relational operations on values that may be uninitialized, NULL, or invalid without an explicit guard.** This includes: pointer comparisons (`p > q`, `p < q`), pointer arithmetic, field access through pointers, array indexing with unvalidated bounds. When the validity of a value depends on runtime state (for example `pos/last` may both be NULL in empty buffers), use an explicit boolean flag set at the production site rather than inferring state from value relationships.
@@ -501,6 +505,40 @@ Required:
   coverage, the fix can silently regress when the branch condition is later
   modified.
 
+### 24. C99 declaration/type safety and integer conversion hardening
+Historical issues: Sonar `c:S819`, `c:S5276`, `c:S859`, `c:S995`, `c:S5350`.
+
+Required:
+- No implicit declarations anywhere in C paths. Every called symbol must have
+  a visible prototype at the call site in the same translation unit (including
+  implementation headers analyzed standalone). If include order cannot
+  guarantee visibility, add explicit forward declarations in the impl header.
+- Do not silence declaration warnings by relying on compiler extensions.
+  Implicit-int/implicit-function behavior is forbidden; C99-or-newer strict
+  semantics are the baseline.
+- Any narrowing conversion (`size_t/off_t/ngx_int_t` to narrower integer types
+  such as `uInt`, `int`, `uint32_t`) requires:
+  1) explicit upper-bound check against destination max,
+  2) explicit cast after the check,
+  3) error handling/logging on overflow path.
+- For decoder/API structs that use narrower counters (for example zlib
+  `avail_in/avail_out`), validate bounds before assignment and fail safely
+  rather than truncating.
+- Const-correctness is required for read-only data paths (parameters and local
+  pointers). When writing or modifying a function, qualify pointer parameters
+  as `const` when the function does not modify the pointed-to data — this
+  applies to struct pointers, array pointers, and string pointers alike.
+  Do not drop `const` qualifiers via cast unless the callee contract
+  explicitly requires mutable memory and the data is truly mutable.
+  When changing a parameter from non-const to const (or vice versa), update
+  all call sites, forward declarations, and header prototypes in the same
+  change set.
+- Treat static-analysis findings that imply undefined behavior, data truncation,
+  or invalid memory access risk as correctness/security issues and fix them in
+  code; do not defer as cosmetic cleanup.
+- When fixing declaration/type-safety findings, run at least one compile+unit
+  target for the touched C area and report residual warnings explicitly.
+
 ## Required Agent Workflow
 
 ### Before coding
@@ -534,6 +572,8 @@ For each code change you are about to produce, mentally (or explicitly in a thin
 12. Multi-path observability symmetry: when adding or modifying a function with multiple exit paths (for example immediate success, backpressure-defer, resume-failure), confirm that every exit path applies symmetric success/failure metrics and reason codes. Classify return codes consistently (`NGX_OK/NGX_DONE` → success, `NGX_AGAIN` → defer, else → failure) on every path. Gauge updates are unconditional on successful samples. (Rule 23)
 13. Deferred-state latch completeness: when adding a latch/flag to handle `NGX_AGAIN` deferral, grep for ALL functions that perform the same send/output operation and confirm each one sets the latch on `NGX_AGAIN`, not just the initial caller. Clear the latch on both success AND failure resume paths. (Rule 23)
 14. Forward declarations must match definitions: when changing a function's signature (parameters, return type), update both the forward declaration and the definition in the same change set. Mismatches cause silent type errors in C.
+15. C99 safety baseline: no implicit declarations, no unchecked narrowing conversions. Any required narrowing cast must have a preceding bounds check and explicit overflow failure path. (Rule 24)
+16. Const-correctness: pointer parameters that are only read through must be `const`-qualified. No const-dropping casts in read-only paths. When changing a parameter's const qualification, update forward declarations and header prototypes in the same change set. (Rule 24)
 
 #### C test code (`components/nginx-module/tests/unit/`)
 1. No dead stores — simulation-style tests set the final value directly; initial state documented in comments only. (Rule 16)
@@ -583,6 +623,8 @@ For each code change you are about to produce, mentally (or explicitly in a thin
 3. No regex with overlapping quantifiers / backtracking hotspots. (Rule 10)
 4. Metrics docs use exact emitted key/series names (JSON/Prometheus) with no naming drift. (Rules 8, 9)
 5. Operator docs referencing metrics use real JSON key paths or Prometheus series names, not invented flat names. Derived rates include computation formulas. Verification commands include explicit `Accept` headers matching the parsed format. (Rules 9, 23)
+6. All C code examples and C-style guidance in docs/README/steering must use
+   C99-or-newer forms and must not introduce pre-C99 syntax.
 
 **If any item would be violated, redesign the change before writing it.** Do not emit code that you know will need a follow-up fix — that wastes time, wastes tokens and review cycles.
 
