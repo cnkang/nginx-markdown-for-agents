@@ -34,6 +34,7 @@ If two rules conflict, follow the higher-priority source.
 - Follow NGINX style: 4-space indent, <=80 cols where practical, no `//` comments, `_t` suffix for types.
 - Use `u_char *`, `ngx_str_t`, and NGINX helpers (`ngx_snprintf`, `ngx_memcpy`, etc.) consistently.
 - Use `NULL` pointer comparisons (not `0`).
+- **Never dereference or perform relational operations on values that may be uninitialized, NULL, or invalid without an explicit guard.** This includes: pointer comparisons (`p > q`, `p < q`), pointer arithmetic, field access through pointers, array indexing with unvalidated bounds. When the validity of a value depends on runtime state (for example `pos/last` may both be NULL in empty buffers), use an explicit boolean flag set at the production site rather than inferring state from value relationships.
 
 ## Frequent Error Patterns and Required Prevention
 
@@ -227,9 +228,11 @@ Required:
   manually set expected values in a local struct and assert them.  A test
   that writes `m.counter = 1; assert(m.counter == 1)` proves nothing about
   whether production code increments that counter under the tested condition.
-  Use a stub/helper that replicates the real `if`/`switch` conditions so the
-  test breaks when the production logic changes.  This principle applies to
-  any test that claims to verify a side-effect: the test must go through the
+  Similarly, `m.counter++; assert(m.counter == 1)` is equally vacuous — it
+  only verifies that C increment works, not that the production branch was
+  taken.  Use a stub/helper that replicates the real `if`/`switch` conditions
+  so the test breaks when the production logic changes.  This principle applies
+  to any test that claims to verify a side-effect: the test must go through the
   code path that produces the side-effect.
 - Test assertions must align with the production semantics they claim to
   verify.  If production code only increments a counter on success, the test
@@ -245,6 +248,14 @@ Required:
 - When Rust FFI structs, options, defaults, or error codes change, update all affected boundaries in the same change set: Rust ABI/options code, public C headers, NGINX call sites, tests, and operator-facing scripts.
 - Treat FFI comments and header docs as part of the interface contract; stale interface docs are a bug, not a cleanup item.
 - Add at least one boundary-level test when introducing or changing an FFI option/error path (for example header-level, feature-independence, or end-to-end verification).
+- **When adding a field to any FFI struct (for example `MarkdownResult`, `MarkdownOptions`, `StreamingStats`), apply this complete-sync checklist:**
+  1. **Rust side**: the field is added to the `#[repr(C)]` struct with correct type and documentation.
+  2. **Public C headers**: both `components/rust-converter/include/` and `components/nginx-module/src/` copies of `markdown_converter.h` are updated with the field and contract comments (semantics, lifecycle, when valid).
+  3. **All initialization sites**: grep for `StructName {` across all test files (`tests/`), examples (`examples/`), and production code. Every struct literal must include the new field. **Do not rely on `..Default::default()` or partial initialization** — FFI structs crossing language boundaries must be explicitly fully initialized.
+  4. **Cleanup/reset functions**: if the struct has associated `reset_*()`, `free_*()`, or cleanup helpers, they must zero/reset the new field to maintain API symmetry.
+  5. **Test helper constructors**: any `empty_result()`, `zeroed_result()`, or similar test helper must include the new field.
+- **Prefer helper functions over literal initialization for FFI structs**: When writing test code that needs a zeroed/empty FFI struct, **always use existing helper functions** (for example `empty_result()`, `zeroed_result()`, `ffi_test_empty_result()`) rather than writing `StructName { field: value, ... }` literals. This reduces future maintenance cost when the struct gains new fields — only the helper needs updating, not every call site. If no helper exists for a struct, create one before writing multiple literal initializations.
+- **Lifecycle ordering rule: read data from foreign-owned structs BEFORE calling their associated free/release function.** Do not access fields after `markdown_result_free()`, `markdown_converter_free()`, or similar cleanup calls — the memory may be invalidated, zeroed, or returned to the allocator. Capture values to local variables first, then free.
 - When C code classifies FFI error codes into semantic categories, the
   classification branch must cover **all** codes defined in the FFI header
   that map to that category.  Do not assume a 1:1 mapping between C-local
@@ -347,6 +358,11 @@ Required:
 ### 22. Rust test infrastructure and feature-gated code hygiene
 
 Required:
+- Do not add helper functions that are not consumed in the same change set.
+  Speculative "this might be useful later" functions produce dead_code warnings
+  that dilute real regression signals. If you add a helper, ensure at least one
+  call site uses it before merging. The only exception is shared test-support
+  modules (see next rule).
 - Shared test utility modules included via `#[path = "..."]` in multiple
   integration test binaries must carry `#![allow(dead_code)]` at the module
   level, because each binary only uses a subset of the shared API and the
@@ -365,6 +381,18 @@ Required:
   use `///` on every line (including blank doc-comment lines as `///` with no
   trailing text). Blank lines between `///` lines trigger
   `clippy::empty_line_after_doc_comments`.
+- **Doctest strategy must follow API visibility layering:**
+  - **Public API entry points** (for example `StreamingConverter`, `MemoryBudget`, `StreamingResult`):
+    use `no_run` or runnable doctests with full `nginx_markdown_converter::...` imports to maintain
+    compile-time regression protection.
+  - **Internal implementation details** (for example `CharsetState`, `IncrementalEmitter`,
+    `StructuralStateMachine`, `StreamingTokenizer`, helper methods): use `ignore` mode to keep
+    documentation illustrative without causing compilation failures. These should have their
+    behavior verified through unit/integration tests instead.
+  - **Error contract examples** (compile_fail): preserve `compile_fail` for public API misuse
+    patterns that must fail at compile time.
+  - **Doctest end markers must be plain ```** (not ` ```ignore` or ` ```no_run`) to maintain
+    Markdown compatibility with external renderers and editors.
 - Avoid `1 * N` identity multiplications in size-constant arrays; use `N`
   directly or underscore-separated literals (`1_024`) to satisfy
   `clippy::identity_op`.
@@ -388,12 +416,39 @@ Required:
   later event (for example finalize).  Use a one-shot latch flag in the
   per-request context to ensure the gauge is written exactly once at the
   correct moment.
-- When a metric depends on data from a cross-boundary source (FFI struct,
-  external API response, upstream header), verify the source actually
-  provides the data before adding the consumer-side metric.  If the source
-  field does not exist yet, defer the metric to the release that adds it.
-  Shipping a metric with no data source creates a permanently-zero gauge
-  that misleads operators.
+- **When a metric depends on data from any cross-boundary source (FFI struct
+  field, Rust stats, external API response, upstream header, submodule
+  state), verify the complete producer→consumer chain exists in the same
+  change set.** Apply this checklist:
+  1. **Producer side**: the source struct/type has the field, and it is
+     populated at the correct lifecycle point (for example Rust
+     `StreamingStats.peak_memory_estimate` updated during conversion,
+     FFI return struct includes the field).
+  2. **Boundary crossing**: the FFI/interface layer exposes the field
+     with correct type and ABI semantics (for example `#[repr(C)]`
+     struct includes the new field, C header declares it).
+  3. **Consumer side**: the NGINX C code reads the field after the
+     producer has finalized it, and assigns to the metrics struct.
+  4. **All output formats**: JSON, plain-text, and Prometheus renderers
+     emit the metric with consistent naming.
+  
+  If any link is missing, **defer the metric** to the release that
+  completes the chain. Shipping a metric with an incomplete data source
+  creates a permanently-zero gauge that misleads operators and violates
+  spec contracts.
+- **General cross-boundary interface rule (applies beyond metrics)**:
+  When modifying any struct, enum, or interface that crosses a language
+  or module boundary (Rust↔C, C↔tests, core↔submodule), update **all
+  consumers and producers** in the same change set. This includes:
+  - FFI structs (`MarkdownResult`, `StreamingStats`, converter options)
+  - Test helper type definitions that mirror production structs
+  - Documentation and spec files that describe the interface contract
+  
+  Before merging, grep for all references to the modified type across
+  the language boundary and confirm each one compiles and is
+  semantically consistent. Do not assume "the other side will be
+  updated later" — boundary drift causes silent ABI mismatches that
+  are expensive to debug.
 - Operator-facing docs that reference metrics must be validated against the
   actual output of each format (JSON key paths, Prometheus series names).
   Do not invent metric names that do not appear in any renderer.  For
@@ -412,6 +467,34 @@ Required:
   successful send for observability.  Only `NGX_OK` and `NGX_DONE` confirm
   downstream acceptance.  When `NGX_AGAIN` occurs, defer the gauge write to
   the resume path where the pending chain drains with a confirmed success code.
+- **All exit paths from a multi-path operation must apply symmetric
+  observability semantics.** If one post-commit send-failure path records
+  `postcommit_error_total + failed_total + reason_code`, every other
+  post-commit send-failure path must do the same.  The rule is: classify
+  return codes consistently (`NGX_OK/NGX_DONE` → success, `NGX_AGAIN` →
+  defer, everything else → failure), then apply the matching side-effects
+  on every path.  Asymmetric metric treatment causes "observed success but
+  actual failure" drift that is expensive to debug in production.
+- **When a deferred-state latch (flag, buffer, or pending marker) is used
+  to bridge `NGX_AGAIN` across calls, every function that can encounter
+  `NGX_AGAIN` for the same logical operation must set that latch.** Do not
+  assume "only the first caller can hit backpressure" — any function that
+  performs downstream send can receive `NGX_AGAIN` and must participate in
+  the deferral protocol.  Grep for all call sites that perform the same
+  send/output operation and confirm each one sets the latch on `NGX_AGAIN`.
+- **Deferred-state latches must be cleared on both success AND failure
+  resume paths.** Leaving a latch set after a failure can cause stale
+  state on re-entry (for example double-counting success on a subsequent
+  unrelated drain). The cleanup should be the first action in the failure
+  branch, before recording failure metrics.
+- **Gauge metrics should be updated unconditionally on every successful
+  sample**, not guarded by value-range conditions (for example `> 0`).
+  A gauge represents "the most recent sample" — skipping the update
+  because the value is zero or empty causes the gauge to retain a stale
+  value from a previous request, which misleads operators and dashboards.
+  If distinguishing "no sample" from "sample is zero" is required, add
+  a separate validity flag or sentinel metric rather than skipping the
+  write.
 - When a bug fix extends a classification branch to cover additional values
   (error codes, enum variants, content types), add regression tests that
   exercise each newly covered value individually.  Without per-value test
@@ -444,9 +527,13 @@ For each code change you are about to produce, mentally (or explicitly in a thin
 5. Backpressure: if the change touches body-filter output, confirm pending-chain and `last_buf` ordering are preserved. (Rule 1)
 6. Memory budgets enforced on every allocation path; auxiliary buffers freed on all exits. (Rule 3)
 7. UTF-8 chunk-boundary safety if touching streaming text paths. (Rule 4)
-8. FFI surface: if Rust structs/options/error codes change, all C headers, call sites, tests, and docs updated in the same change set. (Rule 15)
-9. New metrics: every field added to the metrics struct has a runtime write site (not just snapshot copy). New reason codes have `log_decision()` callsites. Gauge names match the actual measurement event. Observability writes fire after the event succeeds, not before the attempt. `NGX_AGAIN` is not success — defer gauge writes to the resume/drain path. (Rules 8, 23)
-10. FFI error code classification: when branching on error codes, cover all FFI-defined codes for the semantic category — grep `markdown_converter.h` for `ERROR_*` to confirm completeness. (Rule 15)
+8. **No unguarded operations on values that may be NULL/uninitialized/invalid** — this includes dereference, relational comparison (`>`, `<`), arithmetic, or field access through pointers. Use explicit guards or boolean flags set at the production site. (Baseline C style)
+9. FFI surface: if Rust structs/options/error codes change, all C headers, call sites, tests, and docs updated in the same change set. When a new field is added to an FFI struct (for example `MarkdownResult`), verify: (a) both public C header copies include the field, (b) the field is read into a local variable **before** any `*_free()` call, (c) the field is used in the correct lifecycle window (before the struct is released). (Rule 15)
+10. New metrics: every field added to the metrics struct has a runtime write site (not just snapshot copy). New reason codes have `log_decision()` callsites. Gauge names match the actual measurement event. Observability writes fire after the event succeeds, not before the attempt. `NGX_AGAIN` is not success — defer gauge writes to the resume/drain path. Cross-boundary metrics: verify the complete producer→consumer chain (producer populates → FFI exposes → C consumes → all renderers emit). (Rules 8, 23)
+11. FFI error code classification: when branching on error codes, cover all FFI-defined codes for the semantic category — grep `markdown_converter.h` for `ERROR_*` to confirm completeness. (Rule 15)
+12. Multi-path observability symmetry: when adding or modifying a function with multiple exit paths (for example immediate success, backpressure-defer, resume-failure), confirm that every exit path applies symmetric success/failure metrics and reason codes. Classify return codes consistently (`NGX_OK/NGX_DONE` → success, `NGX_AGAIN` → defer, else → failure) on every path. Gauge updates are unconditional on successful samples. (Rule 23)
+13. Deferred-state latch completeness: when adding a latch/flag to handle `NGX_AGAIN` deferral, grep for ALL functions that perform the same send/output operation and confirm each one sets the latch on `NGX_AGAIN`, not just the initial caller. Clear the latch on both success AND failure resume paths. (Rule 23)
+14. Forward declarations must match definitions: when changing a function's signature (parameters, return type), update both the forward declaration and the definition in the same change set. Mismatches cause silent type errors in C.
 
 #### C test code (`components/nginx-module/tests/unit/`)
 1. No dead stores — simulation-style tests set the final value directly; initial state documented in comments only. (Rule 16)
@@ -456,15 +543,22 @@ For each code change you are about to produce, mentally (or explicitly in a thin
 5. Parameterized loops must consume the parameter value in the exercised path; avoid no-op parameterization. (Rule 14)
 6. Where available, call shared test helpers that mirror production routing semantics instead of duplicating inline branch logic. (Rule 14)
 7. Regression tests for error-code classification must exercise a routing stub mirroring production logic, not manually increment and assert local counters. (Rule 14)
+8. Tests that verify side-effects (counter increments, reason codes, state transitions) must drive the outcome through an `rc` value or flag that flows through the same `if`/`switch` condition as production. Direct mutation (`m.counter++`) then assert proves nothing about production branching. (Rule 14)
+9. Tests for deferred-state latch mechanisms (backpressure `NGX_AGAIN` → resume) must cover the full multi-step lifecycle: set phase (latch = 1), drain-success phase (metrics recorded, latch cleared), and drain-failure phase (latch cleared, failure metrics recorded). Single-step assertions on one phase cannot catch latch lifecycle bugs. (Rule 14)
 
 #### Rust code (`components/rust-converter/`)
 1. `cargo fmt` and `cargo clippy` clean. (Baseline)
 2. Sanitizer/HTML semantics: void elements self-closing, skip-mode name-aware, nesting-depth saturation-safe. (Rule 5)
 3. Emitter correctness: in-link markers accumulated, code-block raw content preserved, blockquote markers consistent. (Rule 6)
-4. Shared test modules included via `#[path]` must have `#![allow(dead_code)]`. (Rule 22)
-5. Never remove a `#[cfg(feature)]`-gated import without checking all `#[cfg(feature)]`-gated code in the same file. (Rule 22)
-6. Doc comments must not have blank lines between `///` lines. (Rule 22)
-7. No identity multiplications (`1 * N`) in size constants — use literals or underscored forms. (Rule 22)
+4. No speculative unused helpers — every new function must have at least one caller in the same change set, except shared test modules with `#![allow(dead_code)]`. (Rule 22)
+5. Shared test modules included via `#[path]` must have `#![allow(dead_code)]`. (Rule 22)
+6. Never remove a `#[cfg(feature)]`-gated import without checking all `#[cfg(feature)]`-gated code in the same file. (Rule 22)
+7. Doc comments must not have blank lines between `///` lines. (Rule 22)
+8. Doctests follow visibility layering: public API uses `no_run` with full `nginx_markdown_converter::...` imports; internal types use `ignore`; end markers are plain ```. (Rule 22)
+9. No identity multiplications (`1 * N`) in size constants — use literals or underscored forms. (Rule 22)
+10. **FFI struct initialization**: when creating a zeroed/empty FFI struct (for example `MarkdownResult`), **prefer existing helper functions** (`empty_result()`, `zeroed_result()`, etc.) over writing literal `StructName { ... }` initializations. Only use literal initialization when the struct needs non-zero/default values, and in that case ensure all fields are present. (Rule 15)
+11. **FFI struct field additions**: when adding a field to any `#[repr(C)]` FFI struct (for example `MarkdownResult`), update (a) the Rust struct definition, (b) both public C header copies, (c) **all** struct literal initialization sites across `tests/` and `examples/` (grep for `StructName {`), (d) associated `reset_*()`/`free_*()` cleanup functions to zero the new field, and (e) any test helper constructors (`empty_result()`, `zeroed_result()`). (Rule 15)
+12. **Lifecycle ordering**: when reading data from a foreign-owned struct (FFI result, allocator-owned buffer), capture fields to local variables **before** calling the associated free/release function. Do not access struct fields after `*_free()` — the memory may be invalidated or zeroed. (Rule 15)
 
 #### Shell scripts (`tools/`, e2e harnesses)
 1. Every `case` has a `*)` default clause. (Rule 18)
