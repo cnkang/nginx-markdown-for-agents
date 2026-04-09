@@ -443,7 +443,7 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
             "selected by engine selector");
 
         ngx_http_markdown_log_decision(r, conf,
-            &ngx_http_markdown_reason_engine_streaming);
+            ngx_http_markdown_reason_engine_streaming());
 
         goto path_selected;
     }
