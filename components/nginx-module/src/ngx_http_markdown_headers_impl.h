@@ -16,11 +16,7 @@
     ngx_log_debug1((level), (log), (err), (fmt), (arg))
 #endif
 
-/* C99 declaration visibility for standalone static analysis of this impl header. */
-ngx_int_t ngx_http_markdown_is_authenticated(ngx_http_request_t *r,
-    const ngx_http_markdown_conf_t *conf);
-ngx_int_t ngx_http_markdown_modify_cache_control_for_auth(
-    ngx_http_request_t *r);
+#include "ngx_http_markdown_exports.h"
 
 #ifndef NGX_HTTP_MARKDOWN_SPRINTF_TOKEN
 #define NGX_HTTP_MARKDOWN_SPRINTF_TOKEN(buf, token_count) \

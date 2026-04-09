@@ -342,6 +342,9 @@ typedef struct {
          * NGX_AGAIN, cleared when resume drain succeeds or fails). */
         ngx_flag_t                        pending_terminal_metrics;
 
+        /* Post-commit failure metrics have been recorded for this request. */
+        ngx_flag_t                        failure_recorded;
+
         /* Continue finalize() after tail-output backpressure drains */
         ngx_flag_t                        finalize_after_pending;
     } streaming;
@@ -662,12 +665,7 @@ void ngx_http_markdown_remove_content_encoding(ngx_http_request_t *r);
  * to ensure secure caching behavior.
  */
 
-/* Check if request is authenticated (Authorization header or auth cookies) */
-ngx_int_t ngx_http_markdown_is_authenticated(ngx_http_request_t *r,
-    const ngx_http_markdown_conf_t *conf);
-
-/* Modify Cache-Control header for authenticated content */
-ngx_int_t ngx_http_markdown_modify_cache_control_for_auth(ngx_http_request_t *r);
+#include "ngx_http_markdown_exports.h"
 
 /*
  * Shared conversion-option helpers
