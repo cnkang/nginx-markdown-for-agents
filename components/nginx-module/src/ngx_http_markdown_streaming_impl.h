@@ -17,35 +17,6 @@
 
 #include "ngx_http_markdown_streaming_decomp_impl.h"
 
-/* Streaming reason code string constants */
-static ngx_str_t
-    ngx_http_markdown_reason_engine_streaming =
-        ngx_string("ENGINE_STREAMING");
-static ngx_str_t
-    ngx_http_markdown_reason_streaming_convert =
-        ngx_string("STREAMING_CONVERT");
-static ngx_str_t
-    ngx_http_markdown_reason_streaming_fallback =
-        ngx_string("STREAMING_FALLBACK_PREBUFFER");
-static ngx_str_t
-    ngx_http_markdown_reason_streaming_fail_postcommit =
-        ngx_string("STREAMING_FAIL_POSTCOMMIT");
-static ngx_str_t
-    ngx_http_markdown_reason_streaming_skip =
-        ngx_string("STREAMING_SKIP_UNSUPPORTED");
-static ngx_str_t
-    ngx_http_markdown_reason_streaming_precommit_failopen =
-        ngx_string("STREAMING_PRECOMMIT_FAILOPEN");
-static ngx_str_t
-    ngx_http_markdown_reason_streaming_precommit_reject =
-        ngx_string("STREAMING_PRECOMMIT_REJECT");
-static ngx_str_t
-    ngx_http_markdown_reason_streaming_budget =
-        ngx_string("STREAMING_BUDGET_EXCEEDED");
-static ngx_str_t
-    ngx_http_markdown_reason_streaming_shadow =
-        ngx_string("STREAMING_SHADOW");
-
 /* Forward declarations */
 static ngx_int_t
 ngx_http_markdown_streaming_body_filter(
@@ -601,7 +572,7 @@ ngx_http_markdown_streaming_record_postcommit_failure(
     }
 
     ngx_http_markdown_log_decision(r, conf,
-        &ngx_http_markdown_reason_streaming_fail_postcommit);
+        ngx_http_markdown_reason_streaming_fail_postcommit());
 }
 
 
@@ -640,7 +611,7 @@ ngx_http_markdown_streaming_send_deferred_lastbuf(
         NGX_HTTP_MARKDOWN_METRIC_INC(conversions_succeeded);
 
         ngx_http_markdown_log_decision(r, conf,
-            &ngx_http_markdown_reason_streaming_convert);
+            ngx_http_markdown_reason_streaming_convert());
     } else {
         /*
          * Deferred last_buf send failed with a definitive
@@ -761,7 +732,7 @@ ngx_http_markdown_streaming_resume_pending(
         NGX_HTTP_MARKDOWN_METRIC_INC(conversions_succeeded);
 
         ngx_http_markdown_log_decision(r, conf,
-            &ngx_http_markdown_reason_streaming_convert);
+            ngx_http_markdown_reason_streaming_convert());
 
         ctx->streaming.pending_terminal_metrics = 0;
     }
@@ -828,7 +799,7 @@ ngx_http_markdown_streaming_fallback_to_fullbuffer(
     NGX_HTTP_MARKDOWN_METRIC_INC(streaming.fallback_total);
 
     ngx_http_markdown_log_decision(r, conf,
-        &ngx_http_markdown_reason_streaming_fallback);
+        ngx_http_markdown_reason_streaming_fallback());
 
     /*
      * Transfer prebuffer data to the main buffer for
@@ -900,7 +871,7 @@ ngx_http_markdown_streaming_handle_postcommit_error(
         NGX_HTTP_MARKDOWN_METRIC_INC(
             streaming.budget_exceeded_total);
         ngx_http_markdown_log_decision(r, conf,
-            &ngx_http_markdown_reason_streaming_budget);
+            ngx_http_markdown_reason_streaming_budget_exceeded());
     }
 
     ngx_http_markdown_streaming_record_postcommit_failure(
@@ -987,7 +958,7 @@ ngx_http_markdown_streaming_precommit_error(
         NGX_HTTP_MARKDOWN_METRIC_INC(
             streaming.budget_exceeded_total);
         ngx_http_markdown_log_decision(r, conf,
-            &ngx_http_markdown_reason_streaming_budget);
+            ngx_http_markdown_reason_streaming_budget_exceeded());
         ngx_log_debug1(NGX_LOG_DEBUG_HTTP,
             r->connection->log, 0,
             "markdown streaming: budget exceeded "
@@ -1004,7 +975,7 @@ ngx_http_markdown_streaming_precommit_error(
         NGX_HTTP_MARKDOWN_METRIC_INC(
             streaming.precommit_reject_total);
         ngx_http_markdown_log_decision(r, conf,
-            &ngx_http_markdown_reason_streaming_precommit_reject);
+            ngx_http_markdown_reason_streaming_precommit_reject());
         return NGX_ERROR;
     }
 
@@ -1014,7 +985,7 @@ ngx_http_markdown_streaming_precommit_error(
         streaming.precommit_failopen_total);
     NGX_HTTP_MARKDOWN_METRIC_INC(failopen_count);
     ngx_http_markdown_log_decision(r, conf,
-        &ngx_http_markdown_reason_streaming_precommit_failopen);
+        ngx_http_markdown_reason_streaming_precommit_failopen());
     return NGX_DECLINED;
 }
 
@@ -1648,7 +1619,7 @@ ngx_http_markdown_streaming_finalize_request(
         NGX_HTTP_MARKDOWN_METRIC_INC(conversions_succeeded);
 
         ngx_http_markdown_log_decision(r, conf,
-            &ngx_http_markdown_reason_streaming_convert);
+            ngx_http_markdown_reason_streaming_convert());
     } else if (rc == NGX_AGAIN) {
         /*
          * Terminal last_buf send hit backpressure. Set a latch
