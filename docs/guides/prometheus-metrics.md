@@ -162,7 +162,7 @@ These metrics are only emitted when the module is compiled with `MARKDOWN_STREAM
 |---|---|---|
 | `nginx_markdown_streaming_path_total` | counter | Requests routed to the streaming processing path. |
 | `nginx_markdown_streaming_budget_exceeded_total` | counter | Streaming memory budget exceeded count (auxiliary classification; terminal state depends on `markdown_streaming_on_error`). |
-| `nginx_markdown_streaming_shadow_total` | counter | Shadow mode comparison runs (only incremented when both engines produce comparable results). |
+| `nginx_markdown_streaming_shadow_total` | counter | Shadow mode comparison attempts (incremented unconditionally at entry, including init/feed/finalize failures). |
 | `nginx_markdown_streaming_shadow_diff_total` | counter | Shadow mode comparisons where outputs differed. |
 
 #### Streaming Counter Metrics (with labels)
@@ -176,8 +176,8 @@ These metrics are only emitted when the module is compiled with `MARKDOWN_STREAM
 
 | Metric Name | Type | Description |
 |---|---|---|
-| `nginx_markdown_streaming_ttfb_seconds` | gauge | Last streaming time-to-first-byte (seconds). Recorded on the first successful non-empty downstream send; may be updated even if the request later fails post-commit. |
-| `nginx_markdown_streaming_peak_memory_bytes` | gauge | Last streaming conversion peak memory estimate (bytes). Updated on each successful streaming conversion. |
+| `nginx_markdown_streaming_ttfb_seconds` | gauge | Last streaming time-to-first-byte in seconds (millisecond resolution). Recorded on the first successful non-empty downstream send; may be updated even if the request later fails post-commit. |
+| `nginx_markdown_streaming_peak_memory_bytes` | gauge | Last streaming conversion peak memory estimate (bytes). Updated on each successful streaming conversion (primary path or shadow mode). |
 
 ### Total Time Series
 

@@ -106,6 +106,16 @@ Required:
   the same changeset.  A reason code that is defined but never emitted at
   runtime is a contract violation — operators and docs will reference a code
   that never appears in logs.
+- When adding a new family of reason codes (for example a `STREAMING_*`
+  namespace alongside the existing `ELIGIBLE_*` / `FAIL_*` families), update
+  **every classification function** that categorizes reason codes by string
+  pattern (prefix match, substring match, regex).  Prefix-based classifiers
+  are inherently fragile: a new namespace whose failure codes do not share the
+  existing failure prefix will silently escape the classification.  Before
+  merging, grep for all call sites that branch on reason-code string content
+  and confirm each one handles the new namespace.  Prefer exhaustive
+  enumeration or a registry-based approach over open-ended prefix matching
+  when the set of classifiable values grows across subsystem boundaries.
 
 ### 8. Metrics endpoint correctness and observability gaps
 Historical issues: `478db96`, `b905fee`, `461908f`, `9f3885e`.
@@ -133,6 +143,13 @@ Required:
   write site must fire at the first-byte event, not at finalize or request
   completion.  Semantic mismatch between name and measurement is a bug, not a
   documentation issue.
+- Metric names that encode a unit of measurement (for example `_us` for
+  microseconds, `_ms` for milliseconds, `_bytes`) must use a time source or
+  data source whose resolution matches the claimed unit.  If the underlying
+  time source provides only millisecond granularity, the metric name must
+  reflect that (for example `_ms`, not `_us`).  Multiplying a coarse value
+  to fill a finer unit creates false precision — operators and dashboards
+  will interpret the metric as having resolution it does not possess.
 
 ### 9. Docs/tooling drift (README vs INSTALLATION vs validators)
 Historical issues: `726865e`, `2b0bd5d`, `83eca29`, `18dfb8c`, `4b2b761`, `09f5d1d`.
@@ -461,6 +478,14 @@ Required:
   writes) must be recorded **after** the event they describe succeeds, not
   before the attempt.  If both "attempt" and "completion" semantics are
   needed, use separate counters with unambiguous names.
+- **When a secondary code path (shadow mode, fallback, retry, diagnostic)
+  invokes the same FFI call or receives the same result struct as the
+  primary path, it must consume all spec-required fields from that result,
+  not only the fields needed for its immediate purpose.**  Before merging a
+  new code path that calls an FFI function, compare the fields it reads
+  against the fields the primary path reads and confirm every spec-required
+  field is either consumed (logged, recorded to metrics, or used in logic)
+  or explicitly documented as intentionally skipped with rationale.
 - When the same metric can be written from multiple code paths (primary path,
   retry/resume path, fallback path), all paths must apply the **same** success
   condition.  Do not weaken the guard in a secondary path — if the primary
@@ -573,7 +598,7 @@ For each code change you are about to produce, mentally (or explicitly in a thin
 7. UTF-8 chunk-boundary safety if touching streaming text paths. (Rule 4)
 8. **No unguarded operations on values that may be NULL/uninitialized/invalid** — this includes dereference, relational comparison (`>`, `<`), arithmetic, or field access through pointers. Use explicit guards or boolean flags set at the production site. (Baseline C style)
 9. FFI surface: if Rust structs/options/error codes change, all C headers, call sites, tests, and docs updated in the same change set. When a new field is added to an FFI struct (for example `MarkdownResult`), verify: (a) both public C header copies include the field, (b) the field is read into a local variable **before** any `*_free()` call, (c) the field is used in the correct lifecycle window (before the struct is released). (Rule 15)
-10. New metrics: every field added to the metrics struct has a runtime write site (not just snapshot copy). New reason codes have `log_decision()` callsites. Gauge names match the actual measurement event. Observability writes fire after the event succeeds, not before the attempt. `NGX_AGAIN` is not success — defer gauge writes to the resume/drain path. Cross-boundary metrics: verify the complete producer→consumer chain (producer populates → FFI exposes → C consumes → all renderers emit). (Rules 8, 23)
+10. New metrics: every field added to the metrics struct has a runtime write site (not just snapshot copy). New reason codes have `log_decision()` callsites. Gauge names match the actual measurement event. Observability writes fire after the event succeeds, not before the attempt. `NGX_AGAIN` is not success — defer gauge writes to the resume/drain path. Cross-boundary metrics: verify the complete producer→consumer chain (producer populates → FFI exposes → C consumes → all renderers emit). When adding fields to the SHM-backed metrics struct, bump the SHM zone version name to prevent hot-reload layout mismatch. Metric unit suffixes (`_ms`, `_us`, `_bytes`) must match the actual resolution of the data source. (Rules 8, 23)
 11. FFI error code classification: when branching on error codes, cover all FFI-defined codes for the semantic category — grep `markdown_converter.h` for `ERROR_*` to confirm completeness. (Rule 15)
 12. Multi-path observability symmetry: when adding or modifying a function with multiple exit paths (for example immediate success, backpressure-defer, resume-failure), confirm that every exit path applies symmetric success/failure metrics and reason codes. Classify return codes consistently (`NGX_OK/NGX_DONE` → success, `NGX_AGAIN` → defer, else → failure) on every path. Gauge updates are unconditional on successful samples. (Rule 23)
 13. Deferred-state latch completeness: when adding a latch/flag to handle `NGX_AGAIN` deferral, grep for ALL functions that perform the same send/output operation and confirm each one sets the latch on `NGX_AGAIN`, not just the initial caller. Clear the latch on both success AND failure resume paths. (Rule 23)
@@ -581,6 +606,7 @@ For each code change you are about to produce, mentally (or explicitly in a thin
 15. C99 safety baseline: no implicit declarations, no unchecked narrowing conversions. Any required narrowing cast must have a preceding bounds check and explicit overflow failure path. (Rule 24)
 16. Const-correctness: pointer parameters that are only read through must be `const`-qualified. No const-dropping casts in read-only paths. When changing a parameter's const qualification, update forward declarations and header prototypes in the same change set. (Rule 24)
 17. No macro-shadow declarations: do not declare functions/variables with names that are NGINX macros (`ngx_log_error`, `ngx_memzero`, `ngx_str_set`, etc.). Validate against canonical headers and preserve exact signature parity (including `const`) when adding forward declarations. (Rule 24)
+18. Reason-code classification coverage: when adding a new family of reason codes (for example `STREAMING_*` alongside `ELIGIBLE_*`/`FAIL_*`), update every function that classifies reason codes by string pattern (prefix match, substring). Prefix-based classifiers silently miss new namespaces whose failure codes do not share the existing prefix. Grep for all reason-code classification call sites and confirm each handles the new namespace. (Rule 7)
 
 #### C test code (`components/nginx-module/tests/unit/`)
 1. No dead stores — simulation-style tests set the final value directly; initial state documented in comments only. (Rule 16)

@@ -37,8 +37,10 @@ Examples:
 | `nginx_markdown_streaming_precommit_failopen_total` | counter | Total pre-commit fail-open events |
 | `nginx_markdown_streaming_postcommit_error_total` | counter | Total post-commit errors |
 | `nginx_markdown_streaming_budget_exceeded_total` | counter | Total memory budget exceeded events |
+| `nginx_markdown_streaming_shadow_total` | counter | Total shadow mode comparison attempts |
+| `nginx_markdown_streaming_shadow_diff_total` | counter | Total shadow mode output differences |
 | `nginx_markdown_streaming_peak_memory_bytes` | gauge | Peak memory estimate for most recent request |
-| `nginx_markdown_streaming_ttfb_seconds` | gauge | Time to first byte for most recent request |
+| `nginx_markdown_streaming_ttfb_seconds` | gauge | Time to first byte for most recent request (millisecond resolution) |
 
 ### Label Constraints
 
@@ -57,8 +59,11 @@ Forbidden labels (high cardinality): `url`, `host`, `ua`, `query`, `referer`, `r
 | Category | Code | Meaning |
 |----------|------|---------|
 | Streaming success | `STREAMING_CONVERT` | Streaming path successful conversion |
+| Streaming shadow | `STREAMING_SHADOW` | Shadow mode comparison attempt |
 | Streaming fallback | `STREAMING_FALLBACK_PREBUFFER` | Pre-commit phase fallback to full-buffer |
 | Streaming failure | `STREAMING_FAIL_POSTCOMMIT` | Post-commit phase failure (fail-closed) |
+| Streaming pre-commit | `STREAMING_PRECOMMIT_FAILOPEN` | Pre-commit fail-open (original HTML served) |
+| Streaming pre-commit | `STREAMING_PRECOMMIT_REJECT` | Pre-commit fail-closed (error returned) |
 | Streaming skip | `STREAMING_SKIP_UNSUPPORTED` | Capability unsupported for streaming, using full-buffer |
 | Engine selection | `ENGINE_FULLBUFFER` | Full-buffer engine selected |
 | Engine selection | `ENGINE_STREAMING` | Streaming engine selected |
