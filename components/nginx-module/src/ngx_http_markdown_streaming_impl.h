@@ -507,11 +507,11 @@ ngx_http_markdown_streaming_send_output(
          * platforms (x86_64, ARM64, x86), making the store
          * word-atomic in practice.  A torn read by the
          * metrics snapshot collector would produce a stale
-         * or slightly wrong microsecond value — acceptable
+         * or slightly wrong millisecond value — acceptable
          * for a diagnostic gauge.
          */
-        ngx_http_markdown_metrics->streaming.last_ttfb_us =
-            (ngx_atomic_t) (elapsed_ms * 1000);
+        ngx_http_markdown_metrics->streaming.last_ttfb_ms =
+            (ngx_atomic_t) elapsed_ms;
         ctx->streaming.ttfb_recorded = 1;
     }
 
@@ -698,8 +698,8 @@ ngx_http_markdown_streaming_resume_pending(
             ? (now_ms - ctx->streaming.feed_start_ms) : 0;
 
         /* Gauge store: see send_output TTFB comment for rationale. */
-        ngx_http_markdown_metrics->streaming.last_ttfb_us =
-            (ngx_atomic_t) (elapsed_ms * 1000);
+        ngx_http_markdown_metrics->streaming.last_ttfb_ms =
+            (ngx_atomic_t) elapsed_ms;
         ctx->streaming.ttfb_recorded = 1;
     }
 

@@ -598,6 +598,17 @@ ngx_http_markdown_shadow_compare(
 
     ngx_http_markdown_prepare_conversion_options(r, conf, &options);
 
+    /*
+     * Record shadow attempt unconditionally at entry so
+     * shadow_total reflects attempts, not only successful
+     * comparisons.  This keeps the shadow_diff_rate formula
+     * (shadow_diff_total / shadow_total) well-defined even
+     * when the streaming engine fails to initialize.
+     */
+    NGX_HTTP_MARKDOWN_METRIC_INC(streaming.shadow_total);
+    ngx_http_markdown_log_decision(r, conf,
+        ngx_http_markdown_reason_streaming_shadow());
+
     tp = ngx_timeofday();
     shadow_start = (ngx_msec_t) (tp->sec * 1000 + tp->msec);
 
@@ -669,6 +680,34 @@ ngx_http_markdown_shadow_compare(
     }
 
     /*
+     * Log and record peak memory estimate from the streaming
+     * engine before freeing the result (lifecycle ordering:
+     * read FFI struct fields before calling the free function).
+     *
+     * Requirement 2.8: record streaming engine peak memory
+     * estimate in shadow mode when available.
+     *
+     * Requirement 3.7: update the last_peak_memory_bytes gauge
+     * unconditionally so the gauge reflects the most recent
+     * streaming conversion, whether from the primary streaming
+     * path or shadow mode.  Skipping the write when the value
+     * is zero would leave a stale value from a previous request
+     * (Rule 23: gauge metrics should be updated unconditionally
+     * on every successful sample).
+     */
+    if (ngx_http_markdown_metrics != NULL) {
+        ngx_http_markdown_metrics->streaming.last_peak_memory_bytes =
+            (ngx_atomic_t) st_result.peak_memory_estimate;
+    }
+
+    if (st_result.peak_memory_estimate > 0) {
+        ngx_log_debug1(NGX_LOG_DEBUG_HTTP,
+            r->connection->log, 0,
+            "markdown shadow: peak_memory_bytes=%uz",
+            (size_t) st_result.peak_memory_estimate);
+    }
+
+    /*
      * Compare streaming output (feed + finalize) against
      * full-buffer result.  Compare in-place without building
      * a combined buffer to avoid allocation failure skewing
@@ -723,15 +762,6 @@ ngx_http_markdown_shadow_compare(
             }
         }
         /* else: total_len == 0 and fb_len == 0 → no diff */
-
-        /*
-         * Record shadow_total and STREAMING_SHADOW only after
-         * a successful comparison, so the counter reflects
-         * actual comparisons, not attempts.
-         */
-        NGX_HTTP_MARKDOWN_METRIC_INC(streaming.shadow_total);
-        ngx_http_markdown_log_decision(r, conf,
-            ngx_http_markdown_reason_streaming_shadow());
 
         if (diff_detected) {
             NGX_HTTP_MARKDOWN_METRIC_INC(

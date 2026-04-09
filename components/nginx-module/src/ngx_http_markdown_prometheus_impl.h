@@ -224,14 +224,15 @@ ngx_http_markdown_metrics_write_prometheus(
     p = ngx_slprintf(p, end,
         "# HELP "
         "nginx_markdown_streaming_ttfb_seconds "
-        "Last streaming request time-to-first-byte.\n"
+        "Last streaming request time-to-first-byte "
+        "in seconds (millisecond resolution).\n"
         "# TYPE "
         "nginx_markdown_streaming_ttfb_seconds gauge\n"
         "nginx_markdown_streaming_ttfb_seconds "
-        "%uA.%06uA\n"
+        "%uA.%03uA\n"
         "\n",
-        snapshot->streaming.last_ttfb_us / 1000000,
-        snapshot->streaming.last_ttfb_us % 1000000);
+        snapshot->streaming.last_ttfb_ms / 1000,
+        snapshot->streaming.last_ttfb_ms % 1000);
 
     /* streaming_peak_memory_bytes (gauge) */
     p = ngx_slprintf(p, end,

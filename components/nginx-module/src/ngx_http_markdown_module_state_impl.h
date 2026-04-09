@@ -41,7 +41,7 @@ static ngx_shm_zone_t *ngx_http_markdown_metrics_shm_zone = NULL;
  * prevents attaching an incompatible old allocation after hot reload.
  */
 static ngx_str_t ngx_http_markdown_metrics_shm_name =
-    ngx_string("nginx_markdown_metrics_v2");
+    ngx_string("nginx_markdown_metrics_v3");
 static u_char ngx_http_markdown_empty_string[] = "";
 
 #define NGX_HTTP_MARKDOWN_METRIC_ADD(field, value)                                  \
