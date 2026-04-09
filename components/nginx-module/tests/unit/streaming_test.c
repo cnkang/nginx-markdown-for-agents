@@ -3528,6 +3528,13 @@ static void test_shadow_error_isolation(void);
  * Verify that shadow_total increments when shadow mode runs.
  *
  * Validates: Property 7 (shadow_diff_total <= shadow_total)
+ *
+ * Limitation: This test directly manipulates counters rather than
+ * exercising the production ngx_http_markdown_shadow_compare()
+ * branch logic, because that function requires a full NGINX
+ * request context and FFI.  It verifies counter types and the
+ * shadow_diff_total <= shadow_total invariant only.  End-to-end
+ * shadow mode behavior is covered by integration/e2e tests.
  */
 static void
 test_shadow_metrics_increment(void)
@@ -3559,6 +3566,9 @@ test_shadow_metrics_increment(void)
  * Verify that shadow_diff_total increments only on diff.
  *
  * Validates: Property 7
+ *
+ * Limitation: Same as test_shadow_metrics_increment — direct
+ * counter manipulation, not production branch logic.
  */
 static void
 test_shadow_diff_metrics(void)
@@ -3611,21 +3621,29 @@ test_shadow_error_isolation(void)
      * Simulate: full-buffer succeeds (client_rc = NGX_OK),
      * then shadow streaming init fails.
      * Client response must not be affected.
-     * shadow_total must NOT increment (only successful
-     * comparisons count, per Rule 23).
+     *
+     * shadow_total increments unconditionally at function
+     * entry (per C2 fix) to reflect attempts, not only
+     * successful comparisons.  This keeps the
+     * shadow_diff_rate formula well-defined even when the
+     * streaming engine fails to initialize.
      */
     client_rc = NGX_OK;
 
-    /* Shadow init failure — no counter increment */
+    /* Shadow attempt recorded at entry before init */
+    m.shadow_total++;
+
+    /* Shadow init failure — no diff counter increment */
     /* streaming error logged but ignored */
 
     TEST_ASSERT(client_rc == NGX_OK,
         "Client response unaffected by shadow error");
-    TEST_ASSERT(m.shadow_total == 0,
-        "shadow_total should NOT increment on "
-        "shadow init failure");
+    TEST_ASSERT(m.shadow_total == 1,
+        "shadow_total should increment on shadow "
+        "attempt (even when init fails)");
     TEST_ASSERT(m.shadow_diff_total == 0,
-        "shadow_diff_total not incremented on error");
+        "shadow_diff_total not incremented on "
+        "init failure");
 
     TEST_PASS(
         "Shadow errors isolated from client response");
