@@ -94,6 +94,11 @@ ngx_http_markdown_streaming_resume_pending(
     ngx_http_markdown_ctx_t *ctx,
     ngx_http_markdown_conf_t *conf);
 static void
+ngx_http_markdown_streaming_record_postcommit_failure(
+    ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx,
+    ngx_http_markdown_conf_t *conf);
+static void
 ngx_http_markdown_streaming_cleanup(void *data);
 static ngx_uint_t
 ngx_http_markdown_select_processing_path(
@@ -583,6 +588,23 @@ ngx_http_markdown_streaming_handle_backpressure(
 }
 
 
+static void
+ngx_http_markdown_streaming_record_postcommit_failure(
+    ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx,
+    ngx_http_markdown_conf_t *conf)
+{
+    if (!ctx->streaming.failure_recorded) {
+        NGX_HTTP_MARKDOWN_METRIC_INC(streaming.postcommit_error_total);
+        NGX_HTTP_MARKDOWN_METRIC_INC(streaming.failed_total);
+        ctx->streaming.failure_recorded = 1;
+    }
+
+    ngx_http_markdown_log_decision(r, conf,
+        &ngx_http_markdown_reason_streaming_fail_postcommit);
+}
+
+
 static ngx_int_t
 ngx_http_markdown_streaming_send_deferred_lastbuf(
     ngx_http_request_t *r,
@@ -625,11 +647,8 @@ ngx_http_markdown_streaming_send_deferred_lastbuf(
          * error. Record failure metrics to match the policy
          * used in resume_pending() and finalize().
          */
-        NGX_HTTP_MARKDOWN_METRIC_INC(streaming.postcommit_error_total);
-        NGX_HTTP_MARKDOWN_METRIC_INC(streaming.failed_total);
-
-        ngx_http_markdown_log_decision(r, conf,
-            &ngx_http_markdown_reason_streaming_fail_postcommit);
+        ngx_http_markdown_streaming_record_postcommit_failure(
+            r, ctx, conf);
     }
 
     return rc;
@@ -725,12 +744,8 @@ ngx_http_markdown_streaming_resume_pending(
          * stale state on re-entry, then record failure metrics.
          */
         ctx->streaming.pending_terminal_metrics = 0;
-
-        NGX_HTTP_MARKDOWN_METRIC_INC(streaming.postcommit_error_total);
-        NGX_HTTP_MARKDOWN_METRIC_INC(streaming.failed_total);
-
-        ngx_http_markdown_log_decision(r, conf,
-            &ngx_http_markdown_reason_streaming_fail_postcommit);
+        ngx_http_markdown_streaming_record_postcommit_failure(
+            r, ctx, conf);
 
         return rc;
     }
@@ -876,14 +891,11 @@ ngx_http_markdown_streaming_handle_postcommit_error(
         ctx->streaming.handle = NULL;
     }
 
-    /* Record metrics */
-    NGX_HTTP_MARKDOWN_METRIC_INC(
-        streaming.postcommit_error_total);
-    NGX_HTTP_MARKDOWN_METRIC_INC(streaming.failed_total);
-
     /* Track budget exceeded as auxiliary classification */
-    if (error_code == ERROR_MEMORY_LIMIT
+    if (!ctx->streaming.failure_recorded
+        && (error_code == ERROR_MEMORY_LIMIT
         || error_code == ERROR_BUDGET_EXCEEDED)
+    )
     {
         NGX_HTTP_MARKDOWN_METRIC_INC(
             streaming.budget_exceeded_total);
@@ -891,9 +903,8 @@ ngx_http_markdown_streaming_handle_postcommit_error(
             &ngx_http_markdown_reason_streaming_budget);
     }
 
-    /* Record decision log */
-    ngx_http_markdown_log_decision(r, conf,
-        &ngx_http_markdown_reason_streaming_fail_postcommit);
+    ngx_http_markdown_streaming_record_postcommit_failure(
+        r, ctx, conf);
 
     /*
      * Debug log: bytes already sent, error type, chunks
@@ -1174,8 +1185,15 @@ ngx_http_markdown_streaming_process_chunk(
         return NGX_OK;
     }
 
+    if (buf->pos == NULL
+        || buf->last == NULL
+        || buf->last < buf->pos)
+    {
+        return NGX_OK;
+    }
+
     feed_data = buf->pos;
-    feed_len = buf->last - buf->pos;
+    feed_len = (size_t) (buf->last - buf->pos);
 
     if (feed_len == 0) {
         return NGX_OK;
@@ -1499,8 +1517,13 @@ ngx_http_markdown_streaming_finalize_request(
             result.markdown_len,
             /* last_buf */ 0);
 
-        if (rc != NGX_OK && rc != NGX_AGAIN) {
+        if (rc != NGX_OK
+            && rc != NGX_DONE
+            && rc != NGX_AGAIN)
+        {
             markdown_result_free(&result);
+            ngx_http_markdown_streaming_record_postcommit_failure(
+                r, ctx, conf);
             return rc;
         }
 
@@ -1640,11 +1663,8 @@ ngx_http_markdown_streaming_finalize_request(
          * to match the post-commit error policy used in
          * resume_pending() and send_deferred_lastbuf().
          */
-        NGX_HTTP_MARKDOWN_METRIC_INC(streaming.postcommit_error_total);
-        NGX_HTTP_MARKDOWN_METRIC_INC(streaming.failed_total);
-
-        ngx_http_markdown_log_decision(r, conf,
-            &ngx_http_markdown_reason_streaming_fail_postcommit);
+        ngx_http_markdown_streaming_record_postcommit_failure(
+            r, ctx, conf);
     }
 
     return rc;
@@ -1704,6 +1724,7 @@ ngx_http_markdown_streaming_init_handle(
      * in process_chunk.  Initialize to 0 so the guard fires.
      */
     ctx->streaming.feed_start_ms = 0;
+    ctx->streaming.failure_recorded = 0;
 
     /* Register cleanup handler */
     cln = ngx_pool_cleanup_add(r->pool, 0);

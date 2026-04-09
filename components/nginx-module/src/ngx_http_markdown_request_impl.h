@@ -15,6 +15,7 @@
 
 #include "ngx_http_markdown_payload_impl.h"
 #include "ngx_http_markdown_conversion_impl.h"
+#include "ngx_http_markdown_exports.h"
 
 /* Forward declarations for helpers defined in this file */
 static ngx_int_t ngx_http_markdown_handle_ctx_alloc_failure(
@@ -44,8 +45,6 @@ const ngx_str_t *ngx_http_markdown_reason_from_error_category(
 const ngx_str_t *ngx_http_markdown_reason_converted(void);
 const ngx_str_t *ngx_http_markdown_eligibility_string(
     ngx_http_markdown_eligibility_t eligibility);
-ngx_int_t ngx_http_markdown_is_authenticated(ngx_http_request_t *r,
-    const ngx_http_markdown_conf_t *conf);
 
 /*
  * Log a failure decision with the appropriate reason code and optional
@@ -229,6 +228,10 @@ ngx_http_markdown_init_ctx(ngx_http_request_t *r,
     ctx->decompression.done = 0;
     ctx->decompression.compressed_size = 0;
     ctx->decompression.decompressed_size = 0;
+
+#ifdef MARKDOWN_STREAMING_ENABLED
+    ctx->streaming.failure_recorded = 0;
+#endif
 }
 
 
