@@ -47,9 +47,16 @@ static void ngx_http_markdown_log_decision_debug(
 /*
  * Determine whether a reason code represents a failure outcome.
  *
- * Failure outcomes are reason codes starting with "ELIGIBLE_FAILED"
- * or "FAIL_".  All other codes (SKIP_* and ELIGIBLE_CONVERTED) are
- * non-failure outcomes.
+ * Failure outcomes are reason codes matching any of:
+ *   - "ELIGIBLE_FAILED" prefix (full-buffer conversion failures)
+ *   - "FAIL_" prefix (legacy failure codes)
+ *   - "STREAMING_FAIL_" substring (streaming post-commit failures)
+ *   - "STREAMING_PRECOMMIT_" prefix (streaming pre-commit failures)
+ *   - "STREAMING_BUDGET_" prefix (streaming budget exceeded)
+ *
+ * All other codes (SKIP_*, ELIGIBLE_CONVERTED, ENGINE_*,
+ * STREAMING_CONVERT, STREAMING_SHADOW, STREAMING_FALLBACK_*,
+ * STREAMING_SKIP_*) are non-failure outcomes.
  *
  * Parameters:
  *   reason_code - pointer to the reason code ngx_str_t
@@ -80,6 +87,55 @@ ngx_http_markdown_is_failure_outcome(const ngx_str_t *reason_code)
                        (const u_char *) "FAIL_", 5) == 0)
     {
         return 1;
+    }
+
+    /*
+     * Streaming failure codes use the "STREAMING_" prefix
+     * but not all STREAMING_* codes are failures.
+     *
+     * Failures:
+     *   STREAMING_FAIL_POSTCOMMIT
+     *   STREAMING_PRECOMMIT_FAILOPEN
+     *   STREAMING_PRECOMMIT_REJECT
+     *   STREAMING_BUDGET_EXCEEDED
+     *
+     * Non-failures (informational):
+     *   STREAMING_CONVERT
+     *   STREAMING_SHADOW
+     *   STREAMING_FALLBACK_PREBUFFER
+     *   STREAMING_SKIP_UNSUPPORTED
+     */
+    if (reason_code->len >= 10
+        && ngx_strncmp(reason_code->data,
+                       (const u_char *) "STREAMING_",
+                       10) == 0)
+    {
+        /* "STREAMING_FAIL_" (15 chars) */
+        if (reason_code->len >= 15
+            && ngx_strncmp(reason_code->data,
+                           (const u_char *) "STREAMING_FAIL_",
+                           15) == 0)
+        {
+            return 1;
+        }
+
+        /* "STREAMING_PRECOMMIT_" (20 chars) */
+        if (reason_code->len >= 20
+            && ngx_strncmp(reason_code->data,
+                           (const u_char *) "STREAMING_PRECOMMIT_",
+                           20) == 0)
+        {
+            return 1;
+        }
+
+        /* "STREAMING_BUDGET_" (17 chars) */
+        if (reason_code->len >= 17
+            && ngx_strncmp(reason_code->data,
+                           (const u_char *) "STREAMING_BUDGET_",
+                           17) == 0)
+        {
+            return 1;
+        }
     }
 
     return 0;
@@ -216,8 +272,11 @@ ngx_http_markdown_log_decision_debug(ngx_http_request_t *r,
  *   warn / error  — emit only for failure outcomes
  *
  * NGINX log level:
- *   NGX_LOG_INFO  for non-failure outcomes (SKIP_*, ELIGIBLE_CONVERTED)
- *   NGX_LOG_WARN  for failure outcomes (ELIGIBLE_FAILED_*, FAIL_*)
+ *   NGX_LOG_INFO  for non-failure outcomes (SKIP_*, ELIGIBLE_CONVERTED,
+ *                 STREAMING_CONVERT, STREAMING_SHADOW, etc.)
+ *   NGX_LOG_WARN  for failure outcomes (ELIGIBLE_FAILED_*, FAIL_*,
+ *                 STREAMING_FAIL_*, STREAMING_PRECOMMIT_*,
+ *                 STREAMING_BUDGET_*)
  *
  * Parameters:
  *   r              - NGINX request structure

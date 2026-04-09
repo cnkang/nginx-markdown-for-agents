@@ -97,7 +97,7 @@ typedef struct {
         ngx_atomic_uint_t budget_exceeded_total;
         ngx_atomic_uint_t shadow_total;
         ngx_atomic_uint_t shadow_diff_total;
-        ngx_atomic_uint_t last_ttfb_us;
+        ngx_atomic_uint_t last_ttfb_ms;
         ngx_atomic_uint_t last_peak_memory_bytes;
     } streaming;
 #endif
@@ -254,8 +254,8 @@ ngx_http_markdown_collect_metrics_snapshot(ngx_http_markdown_metrics_snapshot_t 
         metrics->streaming.shadow_total;
     snapshot->streaming.shadow_diff_total =
         metrics->streaming.shadow_diff_total;
-    snapshot->streaming.last_ttfb_us =
-        metrics->streaming.last_ttfb_us;
+    snapshot->streaming.last_ttfb_ms =
+        metrics->streaming.last_ttfb_ms;
     snapshot->streaming.last_peak_memory_bytes =
         metrics->streaming.last_peak_memory_bytes;
 #endif
@@ -586,7 +586,7 @@ ngx_http_markdown_metrics_write_json(
         "    \"budget_exceeded_total\": %uA,\n"
         "    \"shadow_total\": %uA,\n"
         "    \"shadow_diff_total\": %uA,\n"
-        "    \"last_ttfb_us\": %uA,\n"
+        "    \"last_ttfb_ms\": %uA,\n"
         "    \"last_peak_memory_bytes\": %uA\n"
         "  },\n"
 #endif
@@ -643,7 +643,7 @@ ngx_http_markdown_metrics_write_json(
         snapshot->streaming.budget_exceeded_total,
         snapshot->streaming.shadow_total,
         snapshot->streaming.shadow_diff_total,
-        snapshot->streaming.last_ttfb_us,
+        snapshot->streaming.last_ttfb_ms,
         snapshot->streaming.last_peak_memory_bytes,
 #endif
         snapshot->requests_entered,
@@ -733,7 +733,7 @@ ngx_http_markdown_metrics_write_text(
         "- Streaming Budget Exceeded: %uA\n"
         "- Streaming Shadow Total: %uA\n"
         "- Streaming Shadow Diff Total: %uA\n"
-        "- Streaming Last TTFB (us): %uA\n"
+        "- Streaming Last TTFB (ms): %uA\n"
         "- Streaming Peak Memory (bytes): %uA\n"
 #endif
         "\n"
@@ -788,7 +788,7 @@ ngx_http_markdown_metrics_write_text(
         snapshot->streaming.budget_exceeded_total,
         snapshot->streaming.shadow_total,
         snapshot->streaming.shadow_diff_total,
-        snapshot->streaming.last_ttfb_us,
+        snapshot->streaming.last_ttfb_ms,
         snapshot->streaming.last_peak_memory_bytes,
 #endif
         snapshot->requests_entered,

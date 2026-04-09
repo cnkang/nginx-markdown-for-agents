@@ -486,7 +486,7 @@ typedef struct {
         ngx_atomic_t  budget_exceeded_total;     /* Memory budget exceeded */
         ngx_atomic_t  shadow_total;              /* Shadow mode runs */
         ngx_atomic_t  shadow_diff_total;         /* Shadow output diffs */
-        ngx_atomic_t  last_ttfb_us;              /* Last streaming TTFB (microseconds) */
+        ngx_atomic_t  last_ttfb_ms;              /* Last streaming TTFB (milliseconds) */
         ngx_atomic_t  last_peak_memory_bytes;    /* Last streaming peak memory estimate (bytes) */
     } streaming;
 #endif
