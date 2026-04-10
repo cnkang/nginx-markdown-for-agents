@@ -80,6 +80,46 @@
       "aggregation": "mean",
       "direction": "informational",
       "description": "Token stage percentage"
+    },
+    {
+      "name": "ttfb_ms",
+      "unit": "milliseconds",
+      "collection": "streaming_timer",
+      "aggregation": "median",
+      "direction": "lower_is_better",
+      "description": "Time to first Markdown byte (streaming only)"
+    },
+    {
+      "name": "ttlb_ms",
+      "unit": "milliseconds",
+      "collection": "streaming_timer",
+      "aggregation": "median",
+      "direction": "lower_is_better",
+      "description": "Time to last Markdown byte (streaming only)"
+    },
+    {
+      "name": "cpu_time_ms",
+      "unit": "milliseconds",
+      "collection": "process_cpu",
+      "aggregation": "median",
+      "direction": "lower_is_better",
+      "description": "CPU time consumed during conversion"
+    },
+    {
+      "name": "flush_count",
+      "unit": "count",
+      "collection": "streaming_counter",
+      "aggregation": "median",
+      "direction": "informational",
+      "description": "Number of flush points during streaming conversion"
+    },
+    {
+      "name": "fallback_rate",
+      "unit": "ratio",
+      "collection": "streaming_counter",
+      "aggregation": "mean",
+      "direction": "lower_is_better",
+      "description": "Rate of pre-commit fallback to full-buffer"
     }
   ],
   "sample_tiers": [
@@ -130,6 +170,78 @@
         "token-estimation",
         "nested-tables-code"
       ]
+    },
+    {
+      "name": "large-10m",
+      "target_size": "~10MB",
+      "source": "tools/corpus/generate_large_samples.sh",
+      "generation": "script(generate_large_samples.sh --tier large-10m)",
+      "streaming_focus": true
+    },
+    {
+      "name": "extra-large-64m",
+      "target_size": "~64MB",
+      "source": "tools/corpus/generate_large_samples.sh",
+      "generation": "script(generate_large_samples.sh --tier extra-large-64m)",
+      "streaming_focus": true,
+      "description": "Bounded-memory critical validation point"
+    },
+    {
+      "name": "streaming-chunked",
+      "target_size": "~1MB",
+      "source": "tests/corpus/streaming-perf/chunked-mixed.html",
+      "generation": "fixed fixture",
+      "streaming_focus": true
+    },
+    {
+      "name": "streaming-tables-heavy",
+      "target_size": "~100KB",
+      "source": "tests/corpus/streaming-perf/tables-heavy.html",
+      "generation": "fixed fixture",
+      "streaming_focus": true,
+      "description": "Table-heavy HTML expected to trigger pre-commit fallback"
+    },
+    {
+      "name": "streaming-code-heavy",
+      "target_size": "~100KB",
+      "source": "tests/corpus/streaming-perf/code-heavy.html",
+      "generation": "fixed fixture",
+      "streaming_focus": true
+    },
+    {
+      "name": "streaming-malformed",
+      "target_size": "~1MB",
+      "source": "tests/corpus/streaming-perf/malformed-large.html",
+      "generation": "fixed fixture",
+      "streaming_focus": true
+    },
+    {
+      "name": "streaming-mixed-charset",
+      "target_size": "~100KB",
+      "source": "tests/corpus/streaming-perf/mixed-charset.html",
+      "generation": "fixed fixture",
+      "streaming_focus": true
+    },
+    {
+      "name": "streaming-compressed-gzip",
+      "target_size": "~1MB",
+      "source": "tools/corpus/generate_large_samples.sh",
+      "generation": "script(generate_large_samples.sh --tier streaming-compressed-gzip)",
+      "streaming_focus": true
+    },
+    {
+      "name": "streaming-compressed-deflate",
+      "target_size": "~1MB",
+      "source": "tools/corpus/generate_large_samples.sh",
+      "generation": "script(generate_large_samples.sh --tier streaming-compressed-deflate)",
+      "streaming_focus": true
+    },
+    {
+      "name": "streaming-compressed-brotli",
+      "target_size": "~1MB",
+      "source": "tools/corpus/generate_large_samples.sh",
+      "generation": "script(generate_large_samples.sh --tier streaming-compressed-brotli)",
+      "streaming_focus": true
     }
   ]
 }

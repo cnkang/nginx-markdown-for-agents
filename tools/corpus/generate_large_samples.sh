@@ -60,7 +60,7 @@ while [[ $# -gt 0 ]]; do
             echo ""
             echo "Options:"
             echo "  --output-dir <dir>  Output directory (default: tools/corpus/samples/)"
-            echo "  --tier <name>       Generate only the specified tier (e.g. large-100k, large-5m)"
+            echo "  --tier <name>       Generate only the specified tier (e.g. large-100k, large-5m, large-10m, extra-large-64m)"
             exit 0
             ;;
         *)
@@ -88,6 +88,8 @@ fi
 # ---------------------------------------------------------------------------
 TIER_100K=102400    # ~100 KB
 TIER_5M=5242880     # ~5 MB
+TIER_10M=10485760   # ~10 MB — streaming bounded-memory validation
+TIER_64M=67108864   # ~64 MB — critical bounded-memory validation point
 
 # ---------------------------------------------------------------------------
 # Content building blocks
@@ -286,7 +288,12 @@ generate_file() {
 # ---------------------------------------------------------------------------
 
 VARIANTS=("plain-html" "front-matter" "token-estimation" "nested-tables-code")
-TIERS=("large-100k:${TIER_100K}" "large-5m:${TIER_5M}")
+TIERS=(
+  "large-100k:${TIER_100K}"
+  "large-5m:${TIER_5M}"
+  "large-10m:${TIER_10M}"
+  "extra-large-64m:${TIER_64M}"
+)
 
 # Validate --tier value if provided.
 if [[ -n "$TIER" ]]; then

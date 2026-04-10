@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Malformed HTML - Streaming Test</title>
+</head>
+<body>
+<h1>Malformed HTML Test</h1>
+
+<p>This paragraph has <strong>unclosed strong tag
+
+<p>Another paragraph without closing previous</p>
+
+<div>
+<p>Unclosed div</p>
+<!-- <p>Commented paragraph -->
+
+<p>Paragraph with <em>nested <strong>tags</em></strong> that close in wrong order</p>
+
+<table>
+<tr>
+<td>Cell without proper table structure
+</table>
+
+<a href="https://example.com">Link without closing quote
+
+<img src="image.jpg" alt="Image without closing bracket
+
+<script>
+var x = 42;
+// Unterminated script
+</body>
+</html>
