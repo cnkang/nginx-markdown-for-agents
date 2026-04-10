@@ -461,6 +461,42 @@ def _load_json(path: str | Path | None) -> dict | None:
         return json.load(f)
 
 
+def _build_streaming_report_subset(streaming_report: dict) -> dict:
+    """Build the streaming_report subset for the evidence pack.
+
+    Backfills tier-level fields from streaming_metrics when the tier
+    itself does not contain them (as happens with --engine both mode
+    where streaming data lives in the streaming_metrics sub-object).
+    """
+    sm = streaming_report.get("streaming_metrics", {})
+    tiers_subset: dict[str, dict[str, Any]] = {}
+    for tier_name, tier_data in streaming_report.get("tiers", {}).items():
+        sm_tier = sm.get(tier_name, {})
+        tiers_subset[tier_name] = {
+            "p50_ms": tier_data.get("p50_ms") or sm_tier.get("p50_ms"),
+            "p95_ms": tier_data.get("p95_ms") or sm_tier.get("p95_ms"),
+            "p99_ms": tier_data.get("p99_ms") or sm_tier.get("p99_ms"),
+            "ttfb_ms": tier_data.get("ttfb_ms") or sm_tier.get("ttfb_ms"),
+            "input_bytes": (
+                tier_data.get("html_bytes")
+                or tier_data.get("input_bytes")
+                or sm_tier.get("html_bytes")
+                or sm_tier.get("input_bytes")
+            ),
+            "peak_memory_bytes": (
+                tier_data.get("peak_memory_bytes")
+                or sm_tier.get("peak_memory_bytes")
+            ),
+        }
+    return {
+        "schema_version": streaming_report.get("schema_version", ""),
+        "timestamp": streaming_report.get("timestamp", ""),
+        "git_commit": streaming_report.get("git_commit", ""),
+        "platform": streaming_report.get("platform", ""),
+        "tiers": tiers_subset,
+    }
+
+
 def generate_evidence_pack(
     fullbuffer_report: dict,
     streaming_report: dict,
@@ -596,25 +632,7 @@ def generate_evidence_pack(
                 for tier_name, tier_data in fullbuffer_report.get("tiers", {}).items()
             },
         },
-        "streaming_report": {
-            "schema_version": streaming_report.get("schema_version", ""),
-            "timestamp": streaming_report.get("timestamp", ""),
-            "git_commit": streaming_report.get("git_commit", ""),
-            "platform": streaming_report.get("platform", ""),
-            "tiers": {
-                tier_name: {
-                    "p50_ms": tier_data.get("p50_ms"),
-                    "p95_ms": tier_data.get("p95_ms"),
-                    "p99_ms": tier_data.get("p99_ms"),
-                    "ttfb_ms": tier_data.get("ttfb_ms"),
-                    # Rust emits 'html_bytes'; accept both for compatibility.
-                    "input_bytes": tier_data.get("html_bytes") or tier_data.get("input_bytes"),
-                    # Peak memory is in streaming_metrics for streaming runs.
-                    "peak_memory_bytes": tier_data.get("peak_memory_bytes"),
-                }
-                for tier_name, tier_data in streaming_report.get("tiers", {}).items()
-            },
-        },
+        "streaming_report": _build_streaming_report_subset(streaming_report),
         "parity": None,
         "evidence_targets": evidence_target_results,
         "release_gates": release_gates,
