@@ -472,20 +472,34 @@ def _build_streaming_report_subset(streaming_report: dict) -> dict:
     tiers_subset: dict[str, dict[str, Any]] = {}
     for tier_name, tier_data in streaming_report.get("tiers", {}).items():
         sm_tier = sm.get(tier_name, {})
+
+        # Use 'is not None' guards instead of 'or' to preserve legitimate
+        # zero values (e.g. peak_memory_bytes=0 on non-Unix platforms,
+        # p50_ms=0.0 for trivially fast conversions).
+        def _first_not_none(*values: Any) -> Any:
+            for v in values:
+                if v is not None:
+                    return v
+            return None
+
         tiers_subset[tier_name] = {
-            "p50_ms": tier_data.get("p50_ms") or sm_tier.get("p50_ms"),
-            "p95_ms": tier_data.get("p95_ms") or sm_tier.get("p95_ms"),
-            "p99_ms": tier_data.get("p99_ms") or sm_tier.get("p99_ms"),
-            "ttfb_ms": tier_data.get("ttfb_ms") or sm_tier.get("ttfb_ms"),
-            "input_bytes": (
-                tier_data.get("html_bytes")
-                or tier_data.get("input_bytes")
-                or sm_tier.get("html_bytes")
-                or sm_tier.get("input_bytes")
+            "p50_ms": _first_not_none(
+                tier_data.get("p50_ms"), sm_tier.get("p50_ms")),
+            "p95_ms": _first_not_none(
+                tier_data.get("p95_ms"), sm_tier.get("p95_ms")),
+            "p99_ms": _first_not_none(
+                tier_data.get("p99_ms"), sm_tier.get("p99_ms")),
+            "ttfb_ms": _first_not_none(
+                tier_data.get("ttfb_ms"), sm_tier.get("ttfb_ms")),
+            "input_bytes": _first_not_none(
+                tier_data.get("html_bytes"),
+                tier_data.get("input_bytes"),
+                sm_tier.get("html_bytes"),
+                sm_tier.get("input_bytes"),
             ),
-            "peak_memory_bytes": (
-                tier_data.get("peak_memory_bytes")
-                or sm_tier.get("peak_memory_bytes")
+            "peak_memory_bytes": _first_not_none(
+                tier_data.get("peak_memory_bytes"),
+                sm_tier.get("peak_memory_bytes"),
             ),
         }
     return {
@@ -591,8 +605,8 @@ def generate_evidence_pack(
             )
             else "FAIL"
         ),
-        "diff_testing_complete": evidence_targets.get("diff_testing_complete", "PASS"),
-        "rollout_docs_complete": evidence_targets.get("rollout_docs_complete", "PASS"),
+        "diff_testing_complete": evidence_targets.get("diff_testing_complete", "FAIL"),
+        "rollout_docs_complete": evidence_targets.get("rollout_docs_complete", "FAIL"),
     }
 
     # Normalize gate statuses: INSUFFICIENT_DATA and UNKNOWN become FAIL for gates
