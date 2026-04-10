@@ -299,20 +299,19 @@ if [[ "$GENERATE_EVIDENCE_PACK" == true ]]; then
   EVIDENCE_EXIT=0
   python3 "${EVIDENCE_ARGS[@]}" || EVIDENCE_EXIT=$?
 
-  if [[ $EVIDENCE_EXIT -ne 0 ]]; then
+  # Exit code 0 = GO verdict, 1 = NO_GO verdict (valid outcome),
+  # exit code >= 2 = generator error (missing file, JSON parse, etc.).
+  if [[ $EVIDENCE_EXIT -ge 2 ]]; then
     log "[error] evidence pack generator failed (exit code: $EVIDENCE_EXIT)"
     exit $EVIDENCE_EXIT
   fi
 
+  if [[ $EVIDENCE_EXIT -eq 1 ]]; then
+    log "[warn] streaming evidence verdict is NO_GO; continuing to threshold engine"
+  fi
+
   log "=== Evidence Pack generated ==="
   log "  output: $EVIDENCE_OUTPUT"
-
-  # Print human-readable summary
-  python3 "$EVIDENCE_GENERATOR" \
-    --fullbuffer-report "$JSON_OUTPUT" \
-    --streaming-report "$JSON_OUTPUT" \
-    --evidence-targets "$REPO_ROOT/$EVIDENCE_TARGETS" \
-    --summary-only
 fi
 
 ###############################################################################

@@ -29,6 +29,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from evidence_pack_generator import (  # noqa: E402
+    _PARITY_EPSILON,
     evaluate_bounded_memory,
     evaluate_no_regression,
     evaluate_parity_dual_threshold,
@@ -373,6 +374,39 @@ class TestEvaluateBoundedMemory:
         result = evaluate_bounded_memory(streaming, max_slope=1.0, min_data_points=1)
         assert result["data_point_count"] == 1
 
+    def test_peak_memory_only_in_streaming_metrics(self):
+        """Peak memory present only in streaming_metrics is still evaluated correctly.
+
+        This mirrors the layout produced by the Rust streaming binary /
+        build_measurement_report: peak_memory_bytes lives under
+        streaming_report["streaming_metrics"][tier], and tiers[tier] does
+        not contain peak_memory_bytes.
+        """
+        tier = "large-1m"
+        peak_memory_bytes = 58_720_256
+
+        streaming_report = {
+            "tiers": {
+                tier: {
+                    "input_bytes": 1_048_576,
+                    # peak_memory_bytes intentionally absent
+                },
+            },
+            "streaming_metrics": {
+                tier: {
+                    "peak_memory_bytes": peak_memory_bytes,
+                    "ttfb_ms": 2.5,
+                },
+            },
+        }
+
+        result = evaluate_bounded_memory(
+            streaming_report, max_slope=1.0, min_data_points=1
+        )
+        assert result["data_point_count"] == 1
+        assert result["data_points"][0]["input_bytes"] == 1_048_576
+        assert result["data_points"][0]["peak_rss_bytes"] == peak_memory_bytes
+
 
 # ---------------------------------------------------------------------------
 # TTFB improvement evaluation tests
@@ -507,6 +541,27 @@ class TestEvaluateParityDualThreshold:
         result = evaluate_parity_dual_threshold(None)
         assert result["streaming_supported_parity"]["status"] == "UNKNOWN"
         assert result["fallback_expected_correctness"]["status"] == "UNKNOWN"
+
+    def test_epsilon_tolerant_pass_rate_treated_as_one(self):
+        """pass_rate within _PARITY_EPSILON of 1.0 should still pass.
+
+        Floating-point division may yield 0.9999999999999998 instead of
+        exactly 1.0 for perfect parity (e.g. 180/180). The epsilon
+        tolerance prevents false negatives from such imprecision.
+        """
+        near_one = 1.0 - (_PARITY_EPSILON / 2)
+        parity = _make_parity_report(pass_rate=near_one, correctness_rate=1.0)
+        result = evaluate_parity_dual_threshold(parity)
+        assert result["streaming_supported_parity"]["status"] == "PASS"
+        assert result["fallback_expected_correctness"]["status"] == "PASS"
+
+    def test_epsilon_tolerant_correctness_rate_treated_as_one(self):
+        """correctness_rate within _PARITY_EPSILON of 1.0 should still pass."""
+        near_one = 1.0 - (_PARITY_EPSILON / 2)
+        parity = _make_parity_report(pass_rate=1.0, correctness_rate=near_one)
+        result = evaluate_parity_dual_threshold(parity)
+        assert result["streaming_supported_parity"]["status"] == "PASS"
+        assert result["fallback_expected_correctness"]["status"] == "PASS"
 
 
 # ---------------------------------------------------------------------------
@@ -806,7 +861,7 @@ class TestCLI:
         assert pack["type"] == "evidence-pack"
 
     def test_main_fails_with_missing_fullbuffer(self, capsys):
-        """CLI should fail when full-buffer report is missing."""
+        """CLI should return exit code 2 when full-buffer report is missing."""
         streaming_path = _write_tmp_json(_make_streaming_report())
         targets_path = _write_tmp_json(_make_evidence_targets())
         output_path = tempfile.mktemp(suffix=".json")
@@ -817,10 +872,10 @@ class TestCLI:
             "--evidence-targets", targets_path,
             "--output", output_path,
         ])
-        assert exit_code == 1
+        assert exit_code == 2
 
     def test_main_fails_with_missing_streaming(self, capsys):
-        """CLI should fail when streaming report is missing."""
+        """CLI should return exit code 2 when streaming report is missing."""
         fullbuffer_path = _write_tmp_json(_make_fullbuffer_report())
         targets_path = _write_tmp_json(_make_evidence_targets())
         output_path = tempfile.mktemp(suffix=".json")
@@ -831,10 +886,10 @@ class TestCLI:
             "--evidence-targets", targets_path,
             "--output", output_path,
         ])
-        assert exit_code == 1
+        assert exit_code == 2
 
     def test_main_fails_with_missing_targets(self, capsys):
-        """CLI should fail when evidence targets are missing."""
+        """CLI should return exit code 2 when evidence targets are missing."""
         fullbuffer_path = _write_tmp_json(_make_fullbuffer_report())
         streaming_path = _write_tmp_json(_make_streaming_report())
         output_path = tempfile.mktemp(suffix=".json")
@@ -845,10 +900,10 @@ class TestCLI:
             "--evidence-targets", "/nonexistent/targets.json",
             "--output", output_path,
         ])
-        assert exit_code == 1
+        assert exit_code == 2
 
     def test_main_handles_malformed_json(self, tmp_path, capsys):
-        """CLI should fail gracefully with malformed JSON."""
+        """CLI should return exit code 2 with malformed JSON."""
         bad_json = tmp_path / "bad.json"
         bad_json.write_text('{"invalid": json}', encoding="utf-8")
 
@@ -862,7 +917,7 @@ class TestCLI:
             "--evidence-targets", targets_path,
             "--output", output_path,
         ])
-        assert exit_code == 1
+        assert exit_code == 2
 
     def test_summary_only_mode(self, capsys):
         """--summary-only should print summary but not write JSON."""
@@ -881,3 +936,33 @@ class TestCLI:
         assert exit_code in (0, 1)
         # Output file should not exist
         assert not Path(output_path).exists()
+
+    def test_summary_only_without_output(self, tmp_path, capsys):
+        """--summary-only without --output should succeed and not write JSON."""
+        fullbuffer_path = tmp_path / "fullbuffer.json"
+        streaming_path = tmp_path / "streaming.json"
+        targets_path = tmp_path / "targets.json"
+
+        fullbuffer_path.write_text(json.dumps(_make_fullbuffer_report()))
+        streaming_path.write_text(json.dumps(_make_streaming_report()))
+        targets_path.write_text(json.dumps(_make_evidence_targets()))
+
+        # Track JSON files before running
+        before_json_files = {p.name for p in tmp_path.glob("*.json")}
+
+        exit_code = main([
+            "--fullbuffer-report", str(fullbuffer_path),
+            "--streaming-report", str(streaming_path),
+            "--evidence-targets", str(targets_path),
+            "--summary-only",
+        ])
+
+        # Should succeed (exit 0 for GO, 1 for NO_GO — both are valid outcomes)
+        assert exit_code in (0, 1)
+
+        # Summary should have been printed to stderr
+        captured = capsys.readouterr()
+
+        # No new JSON files should have been created
+        after_json_files = {p.name for p in tmp_path.glob("*.json")}
+        assert after_json_files == before_json_files

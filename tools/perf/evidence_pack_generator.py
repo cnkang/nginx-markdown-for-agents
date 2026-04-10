@@ -498,8 +498,12 @@ def generate_evidence_pack(
             - "p1_status": P1 status fields (do NOT affect verdict)
     """
     # --- Evaluate evidence goals ---
+    # Evidence targets JSON may have a nested "targets" key (as in
+    # perf/streaming-evidence-targets.json) or be flat (for test fixtures).
+    targets = evidence_targets.get("targets", evidence_targets)
+
     # Bounded memory: JSON uses 'max_slope_bytes_per_input_byte', code accepts both.
-    bounded_memory_config = evidence_targets.get("bounded_memory", {})
+    bounded_memory_config = targets.get("bounded_memory", {})
     if "max_slope_bytes_per_input_byte" in bounded_memory_config:
         max_slope = bounded_memory_config["max_slope_bytes_per_input_byte"]
     elif "max_slope" in bounded_memory_config:
@@ -509,13 +513,13 @@ def generate_evidence_pack(
     min_data_points = bounded_memory_config.get("min_data_points", 4)
 
     # TTFB improvement
-    ttfb_config = evidence_targets.get("ttfb_improvement", {})
+    ttfb_config = targets.get("ttfb_improvement", {})
     ttfb_max_ratio = ttfb_config.get("max_ratio", 0.5)
 
     # No regression: JSON uses 'no_regression_small_medium', code accepts both
-    no_regression_config = evidence_targets.get(
+    no_regression_config = targets.get(
         "no_regression_small_medium"
-    ) or evidence_targets.get("no_regression", {})
+    ) or targets.get("no_regression", {})
     no_regression_max_ratio = no_regression_config.get("max_ratio", 1.3)
 
     bounded_memory_result = evaluate_bounded_memory(
@@ -825,11 +829,16 @@ def main(argv: list[str] | None = None) -> int:
     Loads JSON input files, calls generate_evidence_pack(), writes the
     output JSON, and prints a human-readable summary to stderr.
 
+    Exit codes:
+        0 — success (GO verdict)
+        1 — success (NO_GO verdict; evidence pack was generated correctly)
+        2 — error (missing file, JSON parse failure, invalid arguments)
+
     Parameters:
         argv: Optional list of CLI arguments (defaults to sys.argv[1:]).
 
     Returns:
-        int: Exit code 0 on success, 1 on error.
+        int: Exit code (0 = GO, 1 = NO_GO, 2 = error).
     """
     args = build_parser().parse_args(argv)
 
@@ -841,7 +850,7 @@ def main(argv: list[str] | None = None) -> int:
                 f"ERROR: failed to load full-buffer report: {args.fullbuffer_report}",
                 file=sys.stderr,
             )
-            return 1
+            return 2
 
         streaming_report = _load_json(args.streaming_report)
         if streaming_report is None:
@@ -849,7 +858,7 @@ def main(argv: list[str] | None = None) -> int:
                 f"ERROR: failed to load streaming report: {args.streaming_report}",
                 file=sys.stderr,
             )
-            return 1
+            return 2
 
         evidence_targets = _load_json(args.evidence_targets)
         if evidence_targets is None:
@@ -857,16 +866,16 @@ def main(argv: list[str] | None = None) -> int:
                 f"ERROR: failed to load evidence targets: {args.evidence_targets}",
                 file=sys.stderr,
             )
-            return 1
+            return 2
 
         parity_report = _load_json(args.parity_report)
         # parity_report being None is acceptable — handled gracefully
     except json.JSONDecodeError as exc:
         print(f"ERROR: JSON parse error: {exc}", file=sys.stderr)
-        return 1
+        return 2
     except OSError as exc:
         print(f"ERROR: file I/O error: {exc}", file=sys.stderr)
-        return 1
+        return 2
 
     # Validate output path requirement
     if not args.summary_only and not args.output:
@@ -874,7 +883,7 @@ def main(argv: list[str] | None = None) -> int:
             "ERROR: --output is required unless --summary-only is set.",
             file=sys.stderr,
         )
-        return 1
+        return 2
 
     # Generate evidence pack
     evidence_pack = generate_evidence_pack(
