@@ -622,20 +622,60 @@ class TestGenerateEvidencePack:
 
     def test_verdict_is_go_when_all_pass(self):
         """All gates PASS -> verdict should be GO."""
+        # Build a streaming report with 4 large tiers so bounded_memory
+        # has enough data points (min_data_points=4 by default).
+        streaming_tiers = {
+            "small": {
+                "p50_ms": 2.2, "p95_ms": 3.5, "p99_ms": 5.5,
+                "ttfb_ms": 0.5, "input_bytes": 10000,
+                "peak_memory_bytes": 500000,
+            },
+            "medium": {
+                "p50_ms": 5.5, "p95_ms": 9.0, "p99_ms": 13.0,
+                "ttfb_ms": 1.0, "input_bytes": 100000,
+                "peak_memory_bytes": 800000,
+            },
+            "large-100k": {
+                "p50_ms": 11.0, "p95_ms": 16.0, "p99_ms": 22.0,
+                "ttfb_ms": 2.0, "input_bytes": 500000,
+                "peak_memory_bytes": 1200000,
+            },
+            "large-1m": {
+                "p50_ms": 55.0, "p95_ms": 85.0, "p99_ms": 130.0,
+                "ttfb_ms": 10.0, "input_bytes": 1000000,
+                "peak_memory_bytes": 2000000,
+            },
+            "large-5m": {
+                "p50_ms": 200.0, "p95_ms": 300.0, "p99_ms": 400.0,
+                "ttfb_ms": 20.0, "input_bytes": 5000000,
+                "peak_memory_bytes": 3000000,
+            },
+            "extra-large-10m": {
+                "p50_ms": 400.0, "p95_ms": 600.0, "p99_ms": 800.0,
+                "ttfb_ms": 40.0, "input_bytes": 10000000,
+                "peak_memory_bytes": 4000000,
+            },
+        }
+        fullbuffer_tiers = {
+            "small": {"p50_ms": 2.0, "p95_ms": 3.0, "p99_ms": 5.0, "input_bytes": 10000},
+            "medium": {"p50_ms": 5.0, "p95_ms": 8.0, "p99_ms": 12.0, "input_bytes": 100000},
+            "large-100k": {"p50_ms": 10.0, "p95_ms": 15.0, "p99_ms": 20.0, "input_bytes": 500000},
+            "large-1m": {"p50_ms": 50.0, "p95_ms": 80.0, "p99_ms": 120.0, "input_bytes": 1000000},
+            "large-5m": {"p50_ms": 200.0, "p95_ms": 300.0, "p99_ms": 400.0, "input_bytes": 5000000},
+            "extra-large-10m": {"p50_ms": 400.0, "p95_ms": 600.0, "p99_ms": 800.0, "input_bytes": 10000000},
+        }
         targets = _make_evidence_targets({
             "diff_testing_complete": "PASS",
             "rollout_docs_complete": "PASS",
         })
         pack = generate_evidence_pack(
-            _make_fullbuffer_report(),
-            _make_streaming_report(),
+            _make_fullbuffer_report(tiers=fullbuffer_tiers),
+            _make_streaming_report(tiers=streaming_tiers),
             targets,
             parity_report=_make_parity_report(),
         )
-        # Check bounded_memory has enough data points (we have 2 large tiers)
-        bounded = pack["evidence_targets"]["bounded_memory"]
-        if bounded["status"] == "PASS":
-            assert pack["streaming_evidence_verdict"] == "GO"
+        assert pack["evidence_targets"]["bounded_memory"]["status"] == "PASS"
+        assert pack["streaming_evidence_verdict"] == "GO"
 
     def test_verdict_is_no_go_when_any_fail(self):
         """Any gate FAIL -> verdict should be NO_GO."""
