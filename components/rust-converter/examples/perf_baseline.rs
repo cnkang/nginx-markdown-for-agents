@@ -697,13 +697,13 @@ fn run_streaming_benchmark_chunked(
         ttlb_ms_sum += ttlb_ms;
 
         iter_flush_count += result.stats.flush_count;
-        flush_count_sum += iter_flush_count;
         total_attempts += iter_total_attempts;
 
         if iter_idx >= cfg.warmup && !iter_fallback {
             // Only include non-warmup, non-fallback iterations in measured stats.
             durations.push(elapsed);
             markdown_len_sum += iter_markdown_len + result.final_markdown.len();
+            flush_count_sum += iter_flush_count;
             if let Some(tokens) = result.token_estimate {
                 token_sum += u64::from(tokens);
             }
@@ -1113,7 +1113,7 @@ fn build_measurement_report(
 ) -> serde_json::Value {
     let mut tiers = serde_json::Map::new();
 
-    // Build FFI tier data.
+    // Build FFI tier data (full-buffer results).
     for (sample, ffi, cfg) in ffi_results {
         let key = tier_key(sample.name);
 
@@ -1190,6 +1190,31 @@ fn build_measurement_report(
     } else {
         None
     };
+
+    // When running --engine streaming (no FFI results), populate tiers from
+    // streaming data so downstream consumers (threshold engine, evidence pack)
+    // have tier-level metrics to compare against.
+    if tiers.is_empty() {
+        if let Some(ref streaming_results) = streaming_results {
+            for (sample, streaming, cfg) in streaming_results {
+                let key = tier_key(sample.name);
+                let tier_value = serde_json::json!({
+                    "html_bytes": streaming.html_bytes,
+                    "markdown_bytes_avg": streaming.markdown_bytes_avg,
+                    "token_estimate_avg": streaming.token_estimate_avg,
+                    "p50_ms": streaming.stats.p50_ms,
+                    "p95_ms": streaming.stats.p95_ms,
+                    "p99_ms": streaming.stats.p99_ms,
+                    "peak_memory_bytes": streaming.peak_memory_bytes,
+                    "req_per_s": streaming.stats.req_per_s,
+                    "input_mb_per_s": streaming.stats.input_mb_per_s,
+                    "iterations": cfg.iterations,
+                    "warmup": cfg.warmup,
+                });
+                tiers.insert(key.to_string(), tier_value);
+            }
+        }
+    }
 
     let mut report = serde_json::json!({
         "schema_version": "1.0.0",

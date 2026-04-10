@@ -536,23 +536,26 @@ def _build_streaming_report_subset(streaming_report: dict) -> dict:
         sm_tier = sm.get(tier_name, {})
 
         tiers_subset[tier_name] = {
+            # For latency metrics, prefer streaming_metrics (which holds actual
+            # streaming values in --engine both mode) over tier_data (which holds
+            # full-buffer values in that mode).
             "p50_ms": _first_not_none(
-                tier_data.get("p50_ms"), sm_tier.get("p50_ms")),
+                sm_tier.get("p50_ms"), tier_data.get("p50_ms")),
             "p95_ms": _first_not_none(
-                tier_data.get("p95_ms"), sm_tier.get("p95_ms")),
+                sm_tier.get("p95_ms"), tier_data.get("p95_ms")),
             "p99_ms": _first_not_none(
-                tier_data.get("p99_ms"), sm_tier.get("p99_ms")),
+                sm_tier.get("p99_ms"), tier_data.get("p99_ms")),
             "ttfb_ms": _first_not_none(
-                tier_data.get("ttfb_ms"), sm_tier.get("ttfb_ms")),
+                sm_tier.get("ttfb_ms"), tier_data.get("ttfb_ms")),
             "input_bytes": _first_not_none(
-                tier_data.get("html_bytes"),
-                tier_data.get("input_bytes"),
                 sm_tier.get("html_bytes"),
                 sm_tier.get("input_bytes"),
+                tier_data.get("html_bytes"),
+                tier_data.get("input_bytes"),
             ),
             "peak_memory_bytes": _first_not_none(
-                tier_data.get("peak_memory_bytes"),
                 sm_tier.get("peak_memory_bytes"),
+                tier_data.get("peak_memory_bytes"),
             ),
         }
     return {
