@@ -83,7 +83,11 @@ pub unsafe extern "C" fn markdown_streaming_new(
         })?;
 
         let budget = if decoded.streaming_budget > 0 {
-            let total = decoded.streaming_budget as usize;
+            let total = if decoded.streaming_budget > usize::MAX as u64 {
+                usize::MAX
+            } else {
+                decoded.streaming_budget as usize
+            };
             MemoryBudget {
                 total,
                 ..MemoryBudget::default()

@@ -1102,7 +1102,13 @@ ngx_http_markdown_streaming_handle_feed_result(
             }
         }
 
-        ctx->streaming.total_output_bytes += out_len;
+        if (out_len > (size_t) -1
+                     - ctx->streaming.total_output_bytes)
+        {
+            ctx->streaming.total_output_bytes = (size_t) -1;
+        } else {
+            ctx->streaming.total_output_bytes += out_len;
+        }
 
         rc = ngx_http_markdown_streaming_send_output(
             r, ctx, out_data, out_len, /* last_buf */ 0);
@@ -1467,8 +1473,14 @@ ngx_http_markdown_streaming_finalize_request(
     if (result.markdown != NULL
         && result.markdown_len > 0)
     {
-        ctx->streaming.total_output_bytes +=
-            result.markdown_len;
+        if (result.markdown_len > (size_t) -1
+                - ctx->streaming.total_output_bytes)
+        {
+            ctx->streaming.total_output_bytes = (size_t) -1;
+        } else {
+            ctx->streaming.total_output_bytes +=
+                result.markdown_len;
+        }
 
         /* If still Pre-Commit, send headers first */
         if (ctx->streaming.commit_state
@@ -2156,6 +2168,20 @@ ngx_http_markdown_streaming_process_chain(
             ngx_uint_t idx;
 
             idx = ctx->streaming.failopen_consumed_count;
+
+            /* Defensive: verify capacity was pre-allocated */
+            if (idx >= ctx->streaming.failopen_consumed_capacity)
+            {
+                ngx_log_error(NGX_LOG_ERR,
+                    r->connection->log, 0,
+                    "markdown streaming: failopen "
+                    "consumed_bufs capacity exceeded "
+                    "idx=%ui cap=%ui",
+                    idx,
+                    ctx->streaming.failopen_consumed_capacity);
+                return NGX_ERROR;
+            }
+
             ctx->streaming.failopen_consumed_bufs[idx] = cl->buf;
             ctx->streaming.failopen_consumed_pos[idx] = cl->buf->pos;
             ctx->streaming.failopen_consumed_count++;
