@@ -456,7 +456,7 @@ class TestEvaluateTTFBImprovement:
         fullbuffer = _make_fullbuffer_report()
         streaming = _make_streaming_report()
         result = evaluate_ttfb_improvement(streaming, fullbuffer, max_ratio=0.5)
-        for tier_name, detail in result["details"].items():
+        for _tier_name, detail in result["details"].items():
             assert "streaming_ttfb_ms" in detail
             assert "fullbuffer_p50_ms" in detail
             assert "ratio" in detail
@@ -878,12 +878,12 @@ class TestPrintHumanSummary:
 class TestCLI:
     """Tests for the CLI entry point."""
 
-    def test_main_succeeds_with_valid_inputs(self, capsys):
+    def test_main_succeeds_with_valid_inputs(self, tmp_path, capsys):
         """CLI should succeed with valid input files."""
         fullbuffer_path = _write_tmp_json(_make_fullbuffer_report())
         streaming_path = _write_tmp_json(_make_streaming_report())
         targets_path = _write_tmp_json(_make_evidence_targets())
-        output_path = tempfile.mktemp(suffix=".json")
+        output_path = str(tmp_path / "output.json")
 
         exit_code = main([
             "--fullbuffer-report", fullbuffer_path,
@@ -900,11 +900,11 @@ class TestCLI:
         assert pack["schema_version"] == "1.0.0"
         assert pack["type"] == "evidence-pack"
 
-    def test_main_fails_with_missing_fullbuffer(self, capsys):
+    def test_main_fails_with_missing_fullbuffer(self, tmp_path, capsys):
         """CLI should return exit code 2 when full-buffer report is missing."""
         streaming_path = _write_tmp_json(_make_streaming_report())
         targets_path = _write_tmp_json(_make_evidence_targets())
-        output_path = tempfile.mktemp(suffix=".json")
+        output_path = str(tmp_path / "output.json")
 
         exit_code = main([
             "--fullbuffer-report", "/nonexistent/fullbuffer.json",
@@ -914,11 +914,11 @@ class TestCLI:
         ])
         assert exit_code == 2
 
-    def test_main_fails_with_missing_streaming(self, capsys):
+    def test_main_fails_with_missing_streaming(self, tmp_path, capsys):
         """CLI should return exit code 2 when streaming report is missing."""
         fullbuffer_path = _write_tmp_json(_make_fullbuffer_report())
         targets_path = _write_tmp_json(_make_evidence_targets())
-        output_path = tempfile.mktemp(suffix=".json")
+        output_path = str(tmp_path / "output.json")
 
         exit_code = main([
             "--fullbuffer-report", fullbuffer_path,
@@ -928,11 +928,11 @@ class TestCLI:
         ])
         assert exit_code == 2
 
-    def test_main_fails_with_missing_targets(self, capsys):
+    def test_main_fails_with_missing_targets(self, tmp_path, capsys):
         """CLI should return exit code 2 when evidence targets are missing."""
         fullbuffer_path = _write_tmp_json(_make_fullbuffer_report())
         streaming_path = _write_tmp_json(_make_streaming_report())
-        output_path = tempfile.mktemp(suffix=".json")
+        output_path = str(tmp_path / "output.json")
 
         exit_code = main([
             "--fullbuffer-report", fullbuffer_path,
@@ -949,7 +949,7 @@ class TestCLI:
 
         streaming_path = _write_tmp_json(_make_streaming_report())
         targets_path = _write_tmp_json(_make_evidence_targets())
-        output_path = tempfile.mktemp(suffix=".json")
+        output_path = str(tmp_path / "output.json")
 
         exit_code = main([
             "--fullbuffer-report", str(bad_json),
@@ -959,12 +959,12 @@ class TestCLI:
         ])
         assert exit_code == 2
 
-    def test_summary_only_mode(self, capsys):
+    def test_summary_only_mode(self, tmp_path, capsys):
         """--summary-only should print summary but not write JSON."""
         fullbuffer_path = _write_tmp_json(_make_fullbuffer_report())
         streaming_path = _write_tmp_json(_make_streaming_report())
         targets_path = _write_tmp_json(_make_evidence_targets())
-        output_path = tempfile.mktemp(suffix=".json")
+        output_path = str(tmp_path / "output.json")
 
         exit_code = main([
             "--fullbuffer-report", fullbuffer_path,

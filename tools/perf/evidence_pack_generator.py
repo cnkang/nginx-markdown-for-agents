@@ -99,7 +99,7 @@ def linear_regression_slope(x: list[float], y: list[float]) -> float:
     n = float(len(x))
     sum_x = sum(x)
     sum_y = sum(y)
-    sum_xy = sum(xi * yi for xi, yi in zip(x, y))
+    sum_xy = sum(xi * yi for xi, yi in zip(x, y, strict=True))
     sum_x2 = sum(xi * xi for xi in x)
 
     denominator = n * sum_x2 - sum_x * sum_x
@@ -404,13 +404,13 @@ def evaluate_parity_dual_threshold(
 
     # Also check for per-tier breakdown if available
     tiers = parity_report.get("tiers", {})
-    tier_details: dict[str, dict[str, Any]] = {}
-    for tier_name, tier_data in sorted(tiers.items()):
-        tier_details[tier_name] = {
+    tier_details: dict[str, dict[str, Any]] = {
+        tier_name: {
             "pass_rate": tier_data.get("pass_rate"),
             "correctness_rate": tier_data.get("correctness_rate"),
         }
-
+        for tier_name, tier_data in sorted(tiers.items())
+    }
     # Use epsilon comparison to tolerate floating-point imprecision
     # (e.g. 180/180 may yield 0.9999999999999998 instead of exactly 1.0).
     streaming_parity_pass = pass_rate is not None and pass_rate >= (1.0 - _PARITY_EPSILON)
@@ -427,7 +427,7 @@ def evaluate_parity_dual_threshold(
             "correctness_rate": correctness_rate,
             "threshold": 1.0,
         },
-        "tier_details": tier_details if tier_details else None,
+        "tier_details": tier_details or None,
     }
 
 
@@ -726,20 +726,16 @@ def print_human_summary(evidence_pack: dict, file: Any = sys.stderr) -> None:
     p1_status = evidence_pack.get("p1_status", {})
 
     print("", file=file)
-    print("=" * 60, file=file)
-    print("  Streaming Performance Evidence Summary", file=file)
-    print("=" * 60, file=file)
+    _extracted_from_print_human_summary_args(
+        "=", file, "  Streaming Performance Evidence Summary"
+    )
     print("", file=file)
     print(f"  Timestamp:    {metadata.get('timestamp', 'N/A')}", file=file)
     print(f"  Git Commit:   {metadata.get('git_commit', 'N/A')}", file=file)
     print(f"  Platform:     {metadata.get('platform', 'N/A')}", file=file)
     print("", file=file)
 
-    # Evidence goals
-    print("-" * 60, file=file)
-    print("  Evidence Goals", file=file)
-    print("-" * 60, file=file)
-
+    _extracted_from_print_human_summary_args("-", file, "  Evidence Goals")
     for goal_name, result in evidence_targets.items():
         status = result.get("status", "UNKNOWN")
         status_marker = f"[{status}]"
@@ -754,7 +750,7 @@ def print_human_summary(evidence_pack: dict, file: Any = sys.stderr) -> None:
                 f"    slope={slope:.6f}, data_points={data_points}, max_slope={max_slope}",
                 file=file,
             )
-        elif goal_name == "ttfb_improvement":
+        elif goal_name in ["ttfb_improvement", "no_regression_small_medium"]:
             max_ratio = result.get("max_ratio", "N/A")
             details = result.get("details", {})
             print(f"    max_ratio={max_ratio}, tiers_evaluated={len(details)}", file=file)
@@ -763,16 +759,10 @@ def print_human_summary(evidence_pack: dict, file: Any = sys.stderr) -> None:
                 ratio_str = f"{ratio:.4f}" if ratio is not None else "N/A"
                 tier_pass = "PASS" if tier_detail.get("pass") else "FAIL"
                 print(f"      {tier_name}: ratio={ratio_str} [{tier_pass}]", file=file)
-        elif goal_name == "no_regression_small_medium":
-            max_ratio = result.get("max_ratio", "N/A")
-            details = result.get("details", {})
-            print(f"    max_ratio={max_ratio}, tiers_evaluated={len(details)}", file=file)
-            for tier_name, tier_detail in details.items():
-                ratio = tier_detail.get("ratio")
-                ratio_str = f"{ratio:.4f}" if ratio is not None else "N/A"
-                tier_pass = "PASS" if tier_detail.get("pass") else "FAIL"
-                print(f"      {tier_name}: ratio={ratio_str} [{tier_pass}]", file=file)
-        elif goal_name in ("streaming_supported_parity", "fallback_expected_correctness"):
+        elif goal_name in (
+            "streaming_supported_parity",
+            "fallback_expected_correctness",
+        ):
             rate_key = (
                 "pass_rate" if goal_name == "streaming_supported_parity" else "correctness_rate"
             )
@@ -782,11 +772,7 @@ def print_human_summary(evidence_pack: dict, file: Any = sys.stderr) -> None:
 
     print("", file=file)
 
-    # Release gates
-    print("-" * 60, file=file)
-    print("  Release Gates", file=file)
-    print("-" * 60, file=file)
-
+    _extracted_from_print_human_summary_args("-", file, "  Release Gates")
     for gate_name, gate_status in release_gates.items():
         status_marker = f"[{gate_status}]"
         print(f"  {gate_name}: {status_marker}", file=file)
@@ -795,9 +781,9 @@ def print_human_summary(evidence_pack: dict, file: Any = sys.stderr) -> None:
 
     # P1 status (informational, does not affect verdict)
     if p1_status:
-        print("-" * 60, file=file)
-        print("  P1 Status (informational, does not affect verdict)", file=file)
-        print("-" * 60, file=file)
+        _extracted_from_print_human_summary_args(
+            "-", file, "  P1 Status (informational, does not affect verdict)"
+        )
         for p1_name, p1_value in p1_status.items():
             print(f"  {p1_name}: {p1_value}", file=file)
         print("", file=file)
@@ -808,6 +794,17 @@ def print_human_summary(evidence_pack: dict, file: Any = sys.stderr) -> None:
     print(f"  Streaming Evidence Verdict: {verdict_marker}", file=file)
     print("=" * 60, file=file)
     print("", file=file)
+
+
+def _extracted_from_print_human_summary_args(arg0, file, arg2):
+    """Print a framed heading line with a repeated character border.
+
+    Writes a three-line block consisting of a repeated `arg0` border,
+    the `arg2` heading text, and the same border again to the given file.
+    """
+    print(arg0 * 60, file=file)
+    print(arg2, file=file)
+    print(arg0 * 60, file=file)
 
 
 # ---------------------------------------------------------------------------

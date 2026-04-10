@@ -107,14 +107,8 @@ enum BenchmarkEngine {
 impl std::fmt::Display for BenchmarkEngine {
     /// Formats a `BenchmarkEngine` as its canonical identifier string.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use std::fmt::Write;
-    /// let mut s = String::new();
-    /// write!(&mut s, "{}", crate::BenchmarkEngine::FullBuffer).unwrap();
-    /// assert_eq!(s, "full-buffer");
-    /// ```
+    /// Mapping: `FullBuffer` → `"full-buffer"`, `Streaming` → `"streaming"`,
+    /// `Both` → `"both"`.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             BenchmarkEngine::FullBuffer => write!(f, "full-buffer"),
@@ -737,7 +731,7 @@ fn run_streaming_benchmark_chunked(
         // dependencies. This is a placeholder — real CPU time will be ≤ TTLB.
         cpu_time_ms: ttlb_ms_sum / total_iters.max(1) as f64,
         flush_count: if measured_iters > 0 {
-            flush_count_sum / measured_iters as u32
+            flush_count_sum / u32::try_from(measured_iters).unwrap_or(u32::MAX)
         } else {
             0
         },
