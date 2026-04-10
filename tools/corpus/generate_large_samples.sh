@@ -312,14 +312,14 @@ fi
 
 SEPARATOR="========================================"
 
-echo "$SEPARATOR"
-echo "Large Sample Generator"
-echo "$SEPARATOR"
-echo "Output directory: ${OUTPUT_DIR}"
+echo "$SEPARATOR" >&2
+echo "Large Sample Generator" >&2
+echo "$SEPARATOR" >&2
+echo "Output directory: ${OUTPUT_DIR}" >&2
 if [[ -n "$TIER" ]]; then
-    echo "Tier filter:      ${TIER}"
+    echo "Tier filter:      ${TIER}" >&2
 fi
-echo ""
+echo "" >&2
 
 FILE_COUNT=0
 
@@ -334,15 +334,15 @@ for tier_entry in "${TIERS[@]}"; do
 
     for variant in "${VARIANTS[@]}"; do
         outfile="${OUTPUT_DIR}/${tier_name}_${variant}.html"
-        printf "  Generating %-45s " "${tier_name}_${variant}.html ..."
+        printf "  Generating %-45s " "${tier_name}_${variant}.html ..." >&2
         generate_file "$outfile" "$tier_bytes" "$variant"
         actual_size=$(wc -c < "$outfile")
-        printf "${GREEN}done${NC} (%s bytes)\n" "$actual_size"
+        printf "${GREEN}done${NC} (%s bytes)\n" "$actual_size" >&2
         FILE_COUNT=$((FILE_COUNT + 1))
     done
 done
 
-echo ""
-echo "$SEPARATOR"
-echo "Generated ${FILE_COUNT} sample files in ${OUTPUT_DIR}"
-echo "$SEPARATOR"
+echo "" >&2
+echo "$SEPARATOR" >&2
+echo "Generated ${FILE_COUNT} sample files in ${OUTPUT_DIR}" >&2
+echo "$SEPARATOR" >&2

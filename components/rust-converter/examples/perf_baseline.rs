@@ -75,7 +75,9 @@ struct StreamingSummary {
     ttfb_ms: f64,
     /// Time to last byte: finalize completion.
     ttlb_ms: f64,
-    /// CPU time measured by the conversion process.
+    /// Wall-clock time for the conversion (approximates CPU time; equal to TTLB
+    /// since Rust stdlib lacks cross-platform per-process CPU time without extra
+    /// dependencies).
     cpu_time_ms: f64,
     /// Total flush points emitted across all chunks.
     flush_count: u32,
@@ -629,7 +631,6 @@ fn run_streaming_benchmark_chunked(
     let mut total_attempts = 0u32;
     let mut ttfb_ms_sum = 0.0;
     let mut ttlb_ms_sum = 0.0;
-    let mut cpu_time_ms_sum = 0.0;
     // Track whether we recorded TTFB in any iteration (for averaging).
     let mut ttfb_recorded_count = 0usize;
 
@@ -645,6 +646,7 @@ fn run_streaming_benchmark_chunked(
         let mut iter_flush_count = 0u32;
         let mut iter_fallback = false;
         let mut iter_total_attempts = 0u32;
+        let mut iter_markdown_len = 0usize;
 
         // Feed chunks in chunks of `chunk_size`.
         for chunk in sample.html.chunks(chunk_size) {
@@ -656,7 +658,7 @@ fn run_streaming_benchmark_chunked(
                         ttfb_recorded = true;
                     }
                     iter_flush_count += output.flush_count;
-                    markdown_len_sum += output.markdown.len();
+                    iter_markdown_len += output.markdown.len();
                 }
                 Err(ConversionError::StreamingFallback { .. }) => {
                     // Expected for some inputs during pre-commit phase.
@@ -700,20 +702,17 @@ fn run_streaming_benchmark_chunked(
         let ttlb_ms = elapsed * 1000.0;
         ttlb_ms_sum += ttlb_ms;
 
-        // CPU time approximated by wall-clock time for the conversion.
-        cpu_time_ms_sum += ttlb_ms;
-
-        // Add final_markdown to the sum.
-        markdown_len_sum += result.final_markdown.len();
-        if let Some(tokens) = result.token_estimate {
-            token_sum += u64::from(tokens);
-        }
         iter_flush_count += result.stats.flush_count;
         flush_count_sum += iter_flush_count;
         total_attempts += iter_total_attempts;
 
         if iter_idx >= cfg.warmup && !iter_fallback {
+            // Only include non-warmup, non-fallback iterations in measured stats.
             durations.push(elapsed);
+            markdown_len_sum += iter_markdown_len + result.final_markdown.len();
+            if let Some(tokens) = result.token_estimate {
+                token_sum += u64::from(tokens);
+            }
         }
     }
 
@@ -724,8 +723,8 @@ fn run_streaming_benchmark_chunked(
     StreamingSummary {
         stats,
         html_bytes: sample.html.len(),
-        markdown_bytes_avg: markdown_len_sum / total_iters.max(1),
-        token_estimate_avg: (token_sum / total_iters.max(1) as u64) as u32,
+        markdown_bytes_avg: markdown_len_sum / measured_iters,
+        token_estimate_avg: (token_sum / measured_iters as u64) as u32,
         peak_memory_bytes: peak_mem,
         ttfb_ms: if ttfb_recorded_count > 0 {
             ttfb_ms_sum / ttfb_recorded_count as f64
@@ -733,7 +732,10 @@ fn run_streaming_benchmark_chunked(
             0.0
         },
         ttlb_ms: ttlb_ms_sum / total_iters.max(1) as f64,
-        cpu_time_ms: cpu_time_ms_sum / total_iters.max(1) as f64,
+        // cpu_time_ms is approximated by wall-clock TTLB since Rust stdlib
+        // doesn't provide cross-platform per-process CPU time without extra
+        // dependencies. This is a placeholder — real CPU time will be ≤ TTLB.
+        cpu_time_ms: ttlb_ms_sum / total_iters.max(1) as f64,
         flush_count: if measured_iters > 0 {
             flush_count_sum / measured_iters as u32
         } else {
