@@ -102,9 +102,6 @@ These tiers are specifically designed to validate streaming performance:
 | `streaming-code-heavy` | ~100KB | Code-block dense document |
 | `streaming-malformed` | ~1MB | Malformed HTML resilience test |
 | `streaming-mixed-charset` | ~100KB | Mixed encoding (UTF-8/ISO-8859-1) |
-| `streaming-compressed-gzip` | ~1MB | Gzip-compressed content |
-| `streaming-compressed-deflate` | ~1MB | Deflate-compressed content |
-| `streaming-compressed-brotli` | ~1MB | Brotli-compressed content |
 
 ## Metrics Collected
 

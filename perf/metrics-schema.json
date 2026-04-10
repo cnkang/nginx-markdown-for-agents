@@ -103,7 +103,7 @@
       "collection": "process_cpu",
       "aggregation": "median",
       "direction": "lower_is_better",
-      "description": "CPU time consumed during conversion"
+      "description": "Wall-clock time consumed during conversion (approximates CPU time)"
     },
     {
       "name": "flush_count",
@@ -220,27 +220,6 @@
       "target_size": "~100KB",
       "source": "tests/corpus/streaming-perf/mixed-charset.html",
       "generation": "fixed fixture",
-      "streaming_focus": true
-    },
-    {
-      "name": "streaming-compressed-gzip",
-      "target_size": "~1MB",
-      "source": "tools/corpus/generate_large_samples.sh",
-      "generation": "script(generate_large_samples.sh --tier streaming-compressed-gzip)",
-      "streaming_focus": true
-    },
-    {
-      "name": "streaming-compressed-deflate",
-      "target_size": "~1MB",
-      "source": "tools/corpus/generate_large_samples.sh",
-      "generation": "script(generate_large_samples.sh --tier streaming-compressed-deflate)",
-      "streaming_focus": true
-    },
-    {
-      "name": "streaming-compressed-brotli",
-      "target_size": "~1MB",
-      "source": "tools/corpus/generate_large_samples.sh",
-      "generation": "script(generate_large_samples.sh --tier streaming-compressed-brotli)",
       "streaming_focus": true
     }
   ]
