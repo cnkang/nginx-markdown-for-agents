@@ -291,7 +291,7 @@ def evaluate_bounded_memory(
         peak_memory = _resolve_streaming_metric(
             tier_name, "peak_memory_bytes", tier_data, streaming_metrics,
         )
-        if input_bytes is not None and peak_memory is not None:
+        if input_bytes is not None and peak_memory is not None and peak_memory > 0:
             data_points.append({
                 "input_bytes": input_bytes,
                 "peak_rss_bytes": peak_memory,
