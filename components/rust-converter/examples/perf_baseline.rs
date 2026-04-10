@@ -620,7 +620,7 @@ fn run_streaming_benchmark_chunked(
     let mut durations = Vec::with_capacity(cfg.iterations);
     let mut markdown_len_sum = 0usize;
     let mut token_sum = 0u64;
-    let mut flush_count_sum = 0u32;
+    let mut flush_count_sum = 0u64;
     let mut fallback_count = 0u32;
     let mut total_attempts = 0u32;
     let mut ttfb_ms_sum = 0.0;
@@ -694,7 +694,6 @@ fn run_streaming_benchmark_chunked(
             ttfb_recorded_count += 1;
         }
         let ttlb_ms = elapsed * 1000.0;
-        ttlb_ms_sum += ttlb_ms;
 
         iter_flush_count += result.stats.flush_count;
         total_attempts += iter_total_attempts;
@@ -702,8 +701,9 @@ fn run_streaming_benchmark_chunked(
         if iter_idx >= cfg.warmup && !iter_fallback {
             // Only include non-warmup, non-fallback iterations in measured stats.
             durations.push(elapsed);
+            ttlb_ms_sum += ttlb_ms;
             markdown_len_sum += iter_markdown_len + result.final_markdown.len();
-            flush_count_sum += iter_flush_count;
+            flush_count_sum += iter_flush_count as u64;
             if let Some(tokens) = result.token_estimate {
                 token_sum += u64::from(tokens);
             }
@@ -725,13 +725,14 @@ fn run_streaming_benchmark_chunked(
         } else {
             0.0
         },
-        ttlb_ms: ttlb_ms_sum / total_iters.max(1) as f64,
+        ttlb_ms: ttlb_ms_sum / measured_iters as f64,
         // cpu_time_ms is approximated by wall-clock TTLB since Rust stdlib
         // doesn't provide cross-platform per-process CPU time without extra
         // dependencies. This is a placeholder — real CPU time will be ≤ TTLB.
-        cpu_time_ms: ttlb_ms_sum / total_iters.max(1) as f64,
+        cpu_time_ms: ttlb_ms_sum / measured_iters as f64,
         flush_count: if measured_iters > 0 {
-            flush_count_sum / u32::try_from(measured_iters).unwrap_or(u32::MAX)
+            let avg = flush_count_sum / measured_iters as u64;
+            u32::try_from(avg).unwrap_or(u32::MAX)
         } else {
             0
         },

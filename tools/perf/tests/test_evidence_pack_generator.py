@@ -407,6 +407,37 @@ class TestEvaluateBoundedMemory:
         assert result["data_points"][0]["input_bytes"] == 1_048_576
         assert result["data_points"][0]["peak_rss_bytes"] == peak_memory_bytes
 
+    def test_peak_memory_zero_excluded_from_regression(self):
+        """peak_memory_bytes=0 (unpopulated on non-Unix) should be excluded.
+
+        On platforms where peak_rss_bytes() returns 0, including the
+        data point would poison the regression and could cause a false
+        PASS on the bounded-memory gate.
+        """
+        tiers = {
+            "large-100k": {
+                "input_bytes": 500000,
+                "peak_memory_bytes": 0,  # unpopulated — should be excluded
+            },
+            "large-1m": {
+                "input_bytes": 1000000,
+                "peak_memory_bytes": 2000000,
+            },
+            "large-5m": {
+                "input_bytes": 5000000,
+                "peak_memory_bytes": 3000000,
+            },
+            "extra-large-10m": {
+                "input_bytes": 10000000,
+                "peak_memory_bytes": 4000000,
+            },
+        }
+        streaming = _make_streaming_report(tiers=tiers)
+        result = evaluate_bounded_memory(
+            streaming, max_slope=1.0, min_data_points=3,
+        )
+        assert result["data_point_count"] == 3  # large-100k excluded
+
 
 # ---------------------------------------------------------------------------
 # TTFB improvement evaluation tests
