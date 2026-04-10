@@ -103,10 +103,141 @@ def linear_regression_slope(x: list[float], y: list[float]) -> float:
     sum_x2 = sum(xi * xi for xi in x)
 
     denominator = n * sum_x2 - sum_x * sum_x
-    if denominator == 0.0:
+    if abs(denominator) < 1e-15:
         return 0.0
 
     return (n * sum_xy - sum_x * sum_y) / denominator
+
+
+# ---------------------------------------------------------------------------
+# Evidence evaluation helpers
+# ---------------------------------------------------------------------------
+
+
+def _resolve_streaming_metric(
+    tier_name: str,
+    key: str,
+    tier_data: dict,
+    streaming_metrics: dict,
+) -> Any:
+    """Resolve a metric value from streaming_metrics first, then tier_data.
+
+    The Rust binary places streaming-specific metrics (ttfb_ms, p50_ms,
+    peak_memory_bytes) in the ``streaming_metrics`` sub-object when
+    ``--engine both`` is used.  Standalone streaming runs put them
+    directly in ``tiers``.  This helper checks both locations.
+
+    Parameters:
+        tier_name: Name of the tier to look up.
+        key: Metric key (e.g. ``"ttfb_ms"``, ``"p50_ms"``).
+        tier_data: The tier dict from ``report["tiers"][tier_name]``.
+        streaming_metrics: The ``report.get("streaming_metrics", {})`` dict.
+
+    Returns:
+        The metric value, or ``None`` if not found in either location.
+    """
+    sm = streaming_metrics.get(tier_name, {})
+    if isinstance(sm, dict):
+        val = sm.get(key)
+        if val is not None:
+            return val
+    return tier_data.get(key)
+
+
+def _resolve_input_bytes(tier_data: dict) -> int | None:
+    """Resolve input size from a tier dict, accepting both key names.
+
+    The Rust binary emits ``html_bytes``; the schema/docs use
+    ``input_bytes``.  Prefer ``html_bytes`` (production key).
+
+    Returns:
+        Input size in bytes, or ``None`` if neither key is present.
+    """
+    return tier_data.get("html_bytes") or tier_data.get("input_bytes")
+
+
+def _safe_ratio(numerator: float, denominator: float) -> float:
+    """Compute *numerator / denominator* with a near-zero guard.
+
+    Returns ``inf`` when the denominator is effectively zero and the
+    numerator is positive, ``0.0`` when both are near zero.
+
+    Parameters:
+        numerator: Dividend (e.g. streaming TTFB or P50).
+        denominator: Divisor (e.g. full-buffer P50).
+
+    Returns:
+        The ratio as a float.
+    """
+    if abs(denominator) < 1e-15:
+        return float("inf") if numerator > 0 else 0.0
+    return numerator / denominator
+
+
+def _build_insufficient_data_result(
+    data_points: list[dict[str, int]],
+    min_data_points: int,
+) -> dict[str, Any]:
+    """Build a standard INSUFFICIENT_DATA result for bounded-memory evaluation.
+
+    Parameters:
+        data_points: The (possibly empty) list of collected data points.
+        min_data_points: The minimum required count.
+
+    Returns:
+        dict with ``status="INSUFFICIENT_DATA"`` and associated metadata.
+    """
+    return {
+        "status": "INSUFFICIENT_DATA",
+        "slope": 0.0,
+        "data_points": data_points,
+        "data_point_count": len(data_points),
+        "required_data_points": min_data_points,
+    }
+
+
+def _evaluate_tier_ratio(
+    streaming_value: float | None,
+    fullbuffer_value: float | None,
+    max_ratio: float,
+    streaming_key: str,
+    fullbuffer_key: str,
+) -> tuple[dict[str, Any], bool]:
+    """Evaluate a single tier's streaming-vs-fullbuffer ratio.
+
+    Shared logic used by both TTFB-improvement and no-regression
+    evaluators.  Returns the per-tier detail dict and whether the
+    tier passed.
+
+    Parameters:
+        streaming_value: Streaming metric (e.g. TTFB or P50), or ``None``.
+        fullbuffer_value: Full-buffer metric (e.g. P50), or ``None``.
+        max_ratio: Threshold; the tier passes when ``ratio <= max_ratio``.
+        streaming_key: Key name for the streaming value in the output dict.
+        fullbuffer_key: Key name for the full-buffer value in the output dict.
+
+    Returns:
+        A ``(detail_dict, passed)`` tuple.
+    """
+    if streaming_value is None or fullbuffer_value is None:
+        detail = {
+            streaming_key: streaming_value,
+            fullbuffer_key: fullbuffer_value,
+            "ratio": None,
+            "pass": False,
+            "reason": "missing_data",
+        }
+        return detail, False
+
+    ratio = _safe_ratio(streaming_value, fullbuffer_value)
+    passed = ratio <= max_ratio
+    detail = {
+        streaming_key: streaming_value,
+        fullbuffer_key: fullbuffer_value,
+        "ratio": round(ratio, 4),
+        "pass": passed,
+    }
+    return detail, passed
 
 
 # ---------------------------------------------------------------------------
@@ -119,54 +250,42 @@ def evaluate_bounded_memory(
     max_slope: float,
     min_data_points: int = 4,
 ) -> dict[str, Any]:
-    """
-    Evaluate whether peak RSS grows within a bounded slope relative to input size for large tiers.
-    
+    """Evaluate whether peak RSS grows within a bounded slope for large tiers.
+
+    Collects ``(input_bytes, peak_memory_bytes)`` pairs from large tiers,
+    runs least-squares linear regression, and checks the slope against
+    *max_slope*.
+
     Parameters:
-        streaming_report (dict): Streaming measurement report containing "tiers" and optional "streaming_metrics".
-        max_slope (float): Threshold for allowed bytes-of-RSS growth per input byte; slope below this is considered passing.
-        min_data_points (int): Minimum number of (input_bytes, peak_rss_bytes) pairs required to perform regression.
-    
+        streaming_report: Streaming measurement report containing ``"tiers"``
+            and optional ``"streaming_metrics"``.
+        max_slope: Maximum allowed bytes-of-RSS growth per input byte.
+        min_data_points: Minimum data-point count required for regression.
+
     Returns:
-        dict: Result with keys:
-            - "status": "PASS", "FAIL", or "INSUFFICIENT_DATA"
-            - "slope": Computed regression slope (float; 0.0 when insufficient data)
-            - "data_points": List of {"input_bytes": int, "peak_rss_bytes": int} used for regression
-            - "data_point_count": Number of data points considered
-            - "max_slope": Provided max_slope (present when regression ran) or
-            - "required_data_points": min_data_points (present when status is "INSUFFICIENT_DATA")
+        dict with ``"status"`` (``"PASS"``/``"FAIL"``/``"INSUFFICIENT_DATA"``),
+        ``"slope"``, ``"data_points"``, ``"data_point_count"``, and either
+        ``"max_slope"`` or ``"required_data_points"``.
     """
     tiers = streaming_report.get("tiers", {})
     streaming_metrics = streaming_report.get("streaming_metrics", {})
     data_points: list[dict[str, int]] = []
 
     for tier_name, tier_data in sorted(tiers.items()):
-        if _is_large_tier(tier_name):
-            # Rust binary emits 'html_bytes' but docs/schema use 'input_bytes'.
-            # Accept both for compatibility, preferring 'html_bytes' (production key).
-            input_bytes = tier_data.get("html_bytes") or tier_data.get("input_bytes")
-            # Peak memory is in streaming_metrics sub-object for streaming runs,
-            # but may also be in tiers for full-buffer or backward compatibility.
-            peak_memory = None
-            sm = streaming_metrics.get(tier_name, {})
-            if isinstance(sm, dict):
-                peak_memory = sm.get("peak_memory_bytes")
-            if peak_memory is None:
-                peak_memory = tier_data.get("peak_memory_bytes")
-            if input_bytes is not None and peak_memory is not None:
-                data_points.append({
-                    "input_bytes": input_bytes,
-                    "peak_rss_bytes": peak_memory,
-                })
+        if not _is_large_tier(tier_name):
+            continue
+        input_bytes = _resolve_input_bytes(tier_data)
+        peak_memory = _resolve_streaming_metric(
+            tier_name, "peak_memory_bytes", tier_data, streaming_metrics,
+        )
+        if input_bytes is not None and peak_memory is not None:
+            data_points.append({
+                "input_bytes": input_bytes,
+                "peak_rss_bytes": peak_memory,
+            })
 
     if len(data_points) < min_data_points:
-        return {
-            "status": "INSUFFICIENT_DATA",
-            "slope": 0.0,
-            "data_points": data_points,
-            "data_point_count": len(data_points),
-            "required_data_points": min_data_points,
-        }
+        return _build_insufficient_data_result(data_points, min_data_points)
 
     x = [float(dp["input_bytes"]) for dp in data_points]
     y = [float(dp["peak_rss_bytes"]) for dp in data_points]
@@ -174,17 +293,10 @@ def evaluate_bounded_memory(
     try:
         slope = linear_regression_slope(x, y)
     except ValueError:
-        return {
-            "status": "INSUFFICIENT_DATA",
-            "slope": 0.0,
-            "data_points": data_points,
-            "data_point_count": len(data_points),
-            "required_data_points": min_data_points,
-        }
+        return _build_insufficient_data_result(data_points, min_data_points)
 
-    status = "PASS" if slope < max_slope else "FAIL"
     return {
-        "status": status,
+        "status": "PASS" if slope < max_slope else "FAIL",
         "slope": slope,
         "data_points": data_points,
         "data_point_count": len(data_points),
@@ -200,24 +312,15 @@ def evaluate_ttfb_improvement(
     """Evaluate TTFB improvement evidence for large tiers.
 
     For each large tier, checks whether streaming TTFB is at most
-    full-buffer P50 latency multiplied by max_ratio.
+    *max_ratio* times the full-buffer P50 latency.
 
     Parameters:
-        streaming_report: Streaming measurement report with a "tiers" mapping.
-            Each tier should have a "ttfb_ms" key (time-to-first-byte).
-        fullbuffer_report: Full-buffer measurement report with a "tiers" mapping.
-            Each tier should have a "p50_ms" key.
-        max_ratio: Maximum allowed ratio of streaming_ttfb / fullbuffer_p50.
-            A value of 0.5 means streaming TTFB must be at most 50% of full-buffer P50.
+        streaming_report: Streaming measurement report with ``"tiers"`` mapping.
+        fullbuffer_report: Full-buffer measurement report with ``"tiers"`` mapping.
+        max_ratio: Maximum allowed ``streaming_ttfb / fullbuffer_p50``.
 
     Returns:
-        dict: Evaluation result with keys:
-            - "status": "PASS" or "FAIL"
-            - "details": Per-tier detail dict mapping tier name to:
-                - "streaming_ttfb_ms": Streaming TTFB value
-                - "fullbuffer_p50_ms": Full-buffer P50 value
-                - "ratio": Computed ratio (streaming_ttfb / fullbuffer_p50)
-                - "pass": Whether this tier passes the threshold
+        dict with ``"status"``, ``"details"`` (per-tier), and ``"max_ratio"``.
     """
     streaming_tiers = streaming_report.get("tiers", {})
     fullbuffer_tiers = fullbuffer_report.get("tiers", {})
@@ -230,42 +333,18 @@ def evaluate_ttfb_improvement(
         if not _is_large_tier(tier_name):
             continue
 
-        # TTFB is in streaming_metrics, not tiers
-        streaming_ttfb = None
-        if tier_name in streaming_metrics:
-            streaming_ttfb = streaming_metrics[tier_name].get("ttfb_ms")
-        # Fallback: check tiers for backward compatibility
-        if streaming_ttfb is None:
-            streaming_ttfb = streaming_tiers[tier_name].get("ttfb_ms")
-
+        streaming_ttfb = _resolve_streaming_metric(
+            tier_name, "ttfb_ms", streaming_tiers[tier_name], streaming_metrics,
+        )
         fullbuffer_p50 = fullbuffer_tiers.get(tier_name, {}).get("p50_ms")
 
-        if streaming_ttfb is None or fullbuffer_p50 is None:
-            details[tier_name] = {
-                "streaming_ttfb_ms": streaming_ttfb,
-                "fullbuffer_p50_ms": fullbuffer_p50,
-                "ratio": None,
-                "pass": False,
-                "reason": "missing_data",
-            }
+        detail, passed = _evaluate_tier_ratio(
+            streaming_ttfb, fullbuffer_p50, max_ratio,
+            "streaming_ttfb_ms", "fullbuffer_p50_ms",
+        )
+        if not passed:
             all_pass = False
-            continue
-
-        if fullbuffer_p50 == 0.0:
-            ratio = float("inf") if streaming_ttfb > 0 else 0.0
-        else:
-            ratio = streaming_ttfb / fullbuffer_p50
-
-        tier_pass = ratio <= max_ratio
-        if not tier_pass:
-            all_pass = False
-
-        details[tier_name] = {
-            "streaming_ttfb_ms": streaming_ttfb,
-            "fullbuffer_p50_ms": fullbuffer_p50,
-            "ratio": round(ratio, 4),
-            "pass": tier_pass,
-        }
+        details[tier_name] = detail
 
     if not details:
         all_pass = False
@@ -282,24 +361,18 @@ def evaluate_no_regression(
     fullbuffer_report: dict,
     max_ratio: float = 1.3,
 ) -> dict[str, Any]:
-    """
-    Determines whether streaming P50 latencies for small and medium tiers stay within a configurable ratio of full-buffer P50 latencies.
-    
+    """Check that streaming P50 does not regress vs full-buffer for small/medium tiers.
+
+    For each small or medium tier, verifies that
+    ``streaming_p50 / fullbuffer_p50 <= max_ratio``.
+
     Parameters:
-        streaming_report (dict): Streaming measurement report containing "tiers" and optionally "streaming_metrics".
-        fullbuffer_report (dict): Full-buffer measurement report containing "tiers".
-        max_ratio (float): Maximum allowed value of (streaming_p50_ms / fullbuffer_p50_ms). For example, 1.3 allows streaming P50 up to 130% of full-buffer P50.
-    
+        streaming_report: Streaming measurement report with ``"tiers"`` mapping.
+        fullbuffer_report: Full-buffer measurement report with ``"tiers"`` mapping.
+        max_ratio: Maximum allowed ``streaming_p50 / fullbuffer_p50``.
+
     Returns:
-        dict: Evaluation result with keys:
-            - "status": `"PASS"` if all evaluated small/medium tiers meet the threshold, `"FAIL"` otherwise.
-            - "details": Mapping from tier name to a dict with:
-                - "streaming_p50_ms": Observed streaming P50 (or `None` if missing).
-                - "fullbuffer_p50_ms": Observed full-buffer P50 (or `None` if missing).
-                - "ratio": Computed ratio rounded to 4 decimals (or `None` if missing data).
-                - "pass": `true` if the tier's ratio <= `max_ratio`, `false` otherwise.
-                - "reason": Present when data is missing (value `"missing_data"`).
-            - "max_ratio": The `max_ratio` value used for evaluation.
+        dict with ``"status"``, ``"details"`` (per-tier), and ``"max_ratio"``.
     """
     streaming_tiers = streaming_report.get("tiers", {})
     fullbuffer_tiers = fullbuffer_report.get("tiers", {})
@@ -312,42 +385,18 @@ def evaluate_no_regression(
         if not _is_small_medium_tier(tier_name):
             continue
 
-        # Streaming p50 is in streaming_metrics for --engine both runs,
-        # but may be in tiers for standalone streaming runs.
-        streaming_p50 = None
-        if tier_name in streaming_metrics:
-            streaming_p50 = streaming_metrics[tier_name].get("p50_ms")
-        if streaming_p50 is None:
-            streaming_p50 = streaming_tiers[tier_name].get("p50_ms")
-
+        streaming_p50 = _resolve_streaming_metric(
+            tier_name, "p50_ms", streaming_tiers[tier_name], streaming_metrics,
+        )
         fullbuffer_p50 = fullbuffer_tiers.get(tier_name, {}).get("p50_ms")
 
-        if streaming_p50 is None or fullbuffer_p50 is None:
-            details[tier_name] = {
-                "streaming_p50_ms": streaming_p50,
-                "fullbuffer_p50_ms": fullbuffer_p50,
-                "ratio": None,
-                "pass": False,
-                "reason": "missing_data",
-            }
+        detail, passed = _evaluate_tier_ratio(
+            streaming_p50, fullbuffer_p50, max_ratio,
+            "streaming_p50_ms", "fullbuffer_p50_ms",
+        )
+        if not passed:
             all_pass = False
-            continue
-
-        if fullbuffer_p50 == 0.0:
-            ratio = float("inf") if streaming_p50 > 0 else 0.0
-        else:
-            ratio = streaming_p50 / fullbuffer_p50
-
-        tier_pass = ratio <= max_ratio
-        if not tier_pass:
-            all_pass = False
-
-        details[tier_name] = {
-            "streaming_p50_ms": streaming_p50,
-            "fullbuffer_p50_ms": fullbuffer_p50,
-            "ratio": round(ratio, 4),
-            "pass": tier_pass,
-        }
+        details[tier_name] = detail
 
     if not details:
         all_pass = False
@@ -709,6 +758,65 @@ def evaluate_release_gates(evidence_pack: dict) -> dict:
 # ---------------------------------------------------------------------------
 
 
+def _print_section_heading(char: str, title: str, file: Any) -> None:
+    """Print a bordered section heading.
+
+    Writes a three-line block: a 60-char border of *char*, the *title*
+    line, and the same border again.
+
+    Parameters:
+        char: Single character repeated to form the border (e.g. ``"="`` or ``"-"``).
+        title: Heading text to display between the borders.
+        file: Output file object.
+    """
+    print(char * 60, file=file)
+    print(title, file=file)
+    print(char * 60, file=file)
+
+
+def _format_bounded_memory_detail(result: dict, file: Any) -> None:
+    """Print detail line for a bounded-memory evidence goal."""
+    slope = result.get("slope", 0.0)
+    count = result.get("data_point_count", 0)
+    max_slope = result.get("max_slope", "N/A")
+    print(
+        f"    slope={slope:.6f}, data_points={count}, max_slope={max_slope}",
+        file=file,
+    )
+
+
+def _format_ratio_detail(result: dict, file: Any) -> None:
+    """Print per-tier ratio details for TTFB or no-regression goals."""
+    max_ratio = result.get("max_ratio", "N/A")
+    details = result.get("details", {})
+    print(f"    max_ratio={max_ratio}, tiers_evaluated={len(details)}", file=file)
+    for tier_name, tier_detail in details.items():
+        ratio = tier_detail.get("ratio")
+        ratio_str = f"{ratio:.4f}" if ratio is not None else "N/A"
+        tier_pass = "PASS" if tier_detail.get("pass") else "FAIL"
+        print(f"      {tier_name}: ratio={ratio_str} [{tier_pass}]", file=file)
+
+
+def _format_parity_detail(goal_name: str, result: dict, file: Any) -> None:
+    """Print detail line for a parity or fallback-correctness goal."""
+    rate_key = (
+        "pass_rate" if goal_name == "streaming_supported_parity" else "correctness_rate"
+    )
+    rate = result.get(rate_key)
+    rate_str = f"{rate:.4f}" if rate is not None else "N/A"
+    print(f"    {rate_key}={rate_str}", file=file)
+
+
+# Dispatch table: goal name → detail formatter.
+_GOAL_DETAIL_FORMATTERS: dict[str, Any] = {
+    "bounded_memory": lambda result, file, _name: _format_bounded_memory_detail(result, file),
+    "ttfb_improvement": lambda result, file, _name: _format_ratio_detail(result, file),
+    "no_regression_small_medium": lambda result, file, _name: _format_ratio_detail(result, file),
+    "streaming_supported_parity": lambda result, file, name: _format_parity_detail(name, result, file),
+    "fallback_expected_correctness": lambda result, file, name: _format_parity_detail(name, result, file),
+}
+
+
 def print_human_summary(evidence_pack: dict, file: Any = sys.stderr) -> None:
     """Output a human-readable evidence summary.
 
@@ -717,7 +825,7 @@ def print_human_summary(evidence_pack: dict, file: Any = sys.stderr) -> None:
 
     Parameters:
         evidence_pack: Evidence Pack dict to summarize.
-        file: Output file object (defaults to sys.stderr).
+        file: Output file object (defaults to ``sys.stderr``).
     """
     metadata = evidence_pack.get("metadata", {})
     evidence_targets = evidence_pack.get("evidence_targets", {})
@@ -726,85 +834,41 @@ def print_human_summary(evidence_pack: dict, file: Any = sys.stderr) -> None:
     p1_status = evidence_pack.get("p1_status", {})
 
     print("", file=file)
-    _extracted_from_print_human_summary_args(
-        "=", file, "  Streaming Performance Evidence Summary"
-    )
+    _print_section_heading("=", "  Streaming Performance Evidence Summary", file)
     print("", file=file)
     print(f"  Timestamp:    {metadata.get('timestamp', 'N/A')}", file=file)
     print(f"  Git Commit:   {metadata.get('git_commit', 'N/A')}", file=file)
     print(f"  Platform:     {metadata.get('platform', 'N/A')}", file=file)
     print("", file=file)
 
-    _extracted_from_print_human_summary_args("-", file, "  Evidence Goals")
+    _print_section_heading("-", "  Evidence Goals", file)
     for goal_name, result in evidence_targets.items():
         status = result.get("status", "UNKNOWN")
-        status_marker = f"[{status}]"
-        print(f"  {goal_name}: {status_marker}", file=file)
-
-        # Print key details per goal type
-        if goal_name == "bounded_memory":
-            slope = result.get("slope", 0.0)
-            data_points = result.get("data_point_count", 0)
-            max_slope = result.get("max_slope", "N/A")
-            print(
-                f"    slope={slope:.6f}, data_points={data_points}, max_slope={max_slope}",
-                file=file,
-            )
-        elif goal_name in ["ttfb_improvement", "no_regression_small_medium"]:
-            max_ratio = result.get("max_ratio", "N/A")
-            details = result.get("details", {})
-            print(f"    max_ratio={max_ratio}, tiers_evaluated={len(details)}", file=file)
-            for tier_name, tier_detail in details.items():
-                ratio = tier_detail.get("ratio")
-                ratio_str = f"{ratio:.4f}" if ratio is not None else "N/A"
-                tier_pass = "PASS" if tier_detail.get("pass") else "FAIL"
-                print(f"      {tier_name}: ratio={ratio_str} [{tier_pass}]", file=file)
-        elif goal_name in (
-            "streaming_supported_parity",
-            "fallback_expected_correctness",
-        ):
-            rate_key = (
-                "pass_rate" if goal_name == "streaming_supported_parity" else "correctness_rate"
-            )
-            rate = result.get(rate_key)
-            rate_str = f"{rate:.4f}" if rate is not None else "N/A"
-            print(f"    {rate_key}={rate_str}", file=file)
+        print(f"  {goal_name}: [{status}]", file=file)
+        formatter = _GOAL_DETAIL_FORMATTERS.get(goal_name)
+        if formatter is not None:
+            formatter(result, file, goal_name)
 
     print("", file=file)
 
-    _extracted_from_print_human_summary_args("-", file, "  Release Gates")
+    _print_section_heading("-", "  Release Gates", file)
     for gate_name, gate_status in release_gates.items():
-        status_marker = f"[{gate_status}]"
-        print(f"  {gate_name}: {status_marker}", file=file)
+        print(f"  {gate_name}: [{gate_status}]", file=file)
 
     print("", file=file)
 
-    # P1 status (informational, does not affect verdict)
     if p1_status:
-        _extracted_from_print_human_summary_args(
-            "-", file, "  P1 Status (informational, does not affect verdict)"
+        _print_section_heading(
+            "-", "  P1 Status (informational, does not affect verdict)", file,
         )
         for p1_name, p1_value in p1_status.items():
             print(f"  {p1_name}: {p1_value}", file=file)
         print("", file=file)
 
-    # Final verdict
     print("=" * 60, file=file)
-    verdict_marker = f"[{verdict}]"
-    print(f"  Streaming Evidence Verdict: {verdict_marker}", file=file)
+    print(f"  Streaming Evidence Verdict: [{verdict}]", file=file)
     print("=" * 60, file=file)
     print("", file=file)
-
-
-def _extracted_from_print_human_summary_args(arg0, file, arg2):
-    """Print a framed heading line with a repeated character border.
-
-    Writes a three-line block consisting of a repeated `arg0` border,
-    the `arg2` heading text, and the same border again to the given file.
-    """
-    print(arg0 * 60, file=file)
-    print(arg2, file=file)
-    print(arg0 * 60, file=file)
 
 
 # ---------------------------------------------------------------------------

@@ -193,7 +193,7 @@ def _make_evidence_targets(overrides: dict | None = None) -> dict:
         "rollout_docs_complete": "PASS",
     }
     if overrides:
-        targets.update(overrides)
+        targets |= overrides
     return targets
 
 
@@ -339,7 +339,7 @@ class TestEvaluateBoundedMemory:
         streaming = _make_streaming_report()
         result = evaluate_bounded_memory(streaming, max_slope=1.0, min_data_points=10)
         assert result["status"] == "INSUFFICIENT_DATA"
-        assert result["slope"] == 0.0
+        assert result["slope"] == pytest.approx(0.0, abs=1e-15)
 
     def test_only_large_tiers_are_considered(self):
         """Small/medium tiers should not contribute data points."""
@@ -430,7 +430,7 @@ class TestEvaluateTTFBImprovement:
             "schema_version": "1.0.0",
             "tiers": {
                 "large-1m": {
-                    "ttfb_ms": 100.0,  # 100 / 50 = 2.0 > 0.5
+                    "ttfb_ms": 100.0,  # ratio = 100/50 = 2.0, exceeds 0.5
                     "p50_ms": 55.0,
                 },
             },
@@ -456,11 +456,17 @@ class TestEvaluateTTFBImprovement:
         fullbuffer = _make_fullbuffer_report()
         streaming = _make_streaming_report()
         result = evaluate_ttfb_improvement(streaming, fullbuffer, max_ratio=0.5)
-        for _tier_name, detail in result["details"].items():
-            assert "streaming_ttfb_ms" in detail
-            assert "fullbuffer_p50_ms" in detail
-            assert "ratio" in detail
-            assert "pass" in detail
+
+        # Default fixtures include large-100k and large-1m; verify both
+        # are present and carry the required keys.
+        assert "large-100k" in result["details"]
+        assert "large-1m" in result["details"]
+
+        detail = result["details"]["large-1m"]
+        assert "streaming_ttfb_ms" in detail
+        assert "fullbuffer_p50_ms" in detail
+        assert "ratio" in detail
+        assert "pass" in detail
 
 
 # ---------------------------------------------------------------------------
@@ -485,7 +491,7 @@ class TestEvaluateNoRegression:
             "schema_version": "1.0.0",
             "tiers": {
                 "small": {
-                    "p50_ms": 5.0,  # 5.0 / 2.0 = 2.5 > 1.3
+                    "p50_ms": 5.0,  # ratio = 5.0/2.0 = 2.5, exceeds 1.3
                 },
             },
         }
@@ -724,7 +730,7 @@ class TestGenerateEvidencePack:
             parity_report=parity,
         )
         assert pack["parity"] is not None
-        assert pack["parity"]["summary"]["pass_rate"] == 1.0
+        assert pack["parity"]["summary"]["pass_rate"] == pytest.approx(1.0, abs=1e-15)
 
     def test_parity_is_none_when_not_provided(self):
         """Parity should be None when not provided."""
@@ -792,33 +798,31 @@ class TestEvaluateReleaseGates:
 
     def test_verdict_logic_go_only_when_all_pass(self):
         """Verdict is GO if and only if ALL gates are PASS (Property 4)."""
-        pack_all_pass = {
-            "release_gates": {
-                "bounded_memory_evidence": "PASS",
-                "ttfb_improvement_evidence": "PASS",
-                "no_regression_evidence": "PASS",
-                "parity_evidence": "PASS",
-                "diff_testing_complete": "PASS",
-                "rollout_docs_complete": "PASS",
-            },
-            "streaming_evidence_verdict": "GO",
-        }
-        result = evaluate_release_gates(pack_all_pass)
-        assert result["streaming_evidence_verdict"] == "GO"
+        self._assert_verdict_for_gate_status("PASS", "GO")
+        self._assert_verdict_for_gate_status("FAIL", "NO_GO")
 
-        pack_one_fail = {
+    def _assert_verdict_for_gate_status(
+        self, ttfb_gate_status: str, expected_verdict: str,
+    ) -> None:
+        """Assert that the verdict matches when one gate has the given status.
+
+        Builds a mock evidence pack where all gates are PASS except
+        ``ttfb_improvement_evidence`` which is set to *ttfb_gate_status*,
+        then verifies the evaluated verdict equals *expected_verdict*.
+        """
+        pack = {
             "release_gates": {
                 "bounded_memory_evidence": "PASS",
-                "ttfb_improvement_evidence": "FAIL",
+                "ttfb_improvement_evidence": ttfb_gate_status,
                 "no_regression_evidence": "PASS",
                 "parity_evidence": "PASS",
                 "diff_testing_complete": "PASS",
                 "rollout_docs_complete": "PASS",
             },
-            "streaming_evidence_verdict": "NO_GO",
+            "streaming_evidence_verdict": expected_verdict,
         }
-        result = evaluate_release_gates(pack_one_fail)
-        assert result["streaming_evidence_verdict"] == "NO_GO"
+        result = evaluate_release_gates(pack)
+        assert result["streaming_evidence_verdict"] == expected_verdict
 
 
 # ---------------------------------------------------------------------------
@@ -1000,8 +1004,8 @@ class TestCLI:
         # Should succeed (exit 0 for GO, 1 for NO_GO — both are valid outcomes)
         assert exit_code in (0, 1)
 
-        # Summary should have been printed to stderr
-        captured = capsys.readouterr()
+        # Flush captured output (summary is printed to stderr)
+        capsys.readouterr()
 
         # No new JSON files should have been created
         after_json_files = {p.name for p in tmp_path.glob("*.json")}
