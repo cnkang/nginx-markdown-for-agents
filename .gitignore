@@ -1,4 +1,6 @@
 # Local editor / IDE state
+.arts/
+.codeartsdoer/
 .kiro/
 .serena/
 .vscode/
