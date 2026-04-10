@@ -1196,7 +1196,7 @@ fn build_measurement_report(
     // streaming data so downstream consumers (threshold engine, evidence pack)
     // have tier-level metrics to compare against.
     if tiers.is_empty() {
-        if let Some(ref streaming_results) = streaming_results {
+        if let Some(streaming_results) = streaming_results {
             for (sample, streaming, cfg) in streaming_results {
                 let key = tier_key(sample.name);
                 let tier_value = serde_json::json!({
