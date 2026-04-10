@@ -22,6 +22,23 @@
 #endif
 
 /*
+ * Safe narrowing from size_t to zlib's uInt.
+ *
+ * Returns 1 if the value exceeds UINT_MAX (overflow), 0 otherwise.
+ * On success, *out is set to the narrowed value.
+ */
+static ngx_inline int
+ngx_http_markdown_streaming_decomp_size_to_uint(
+    size_t val, uInt *out)
+{
+    if (val > (size_t) UINT_MAX) {
+        return 1;
+    }
+    *out = (uInt) val;
+    return 0;
+}
+
+/*
  * Streaming decompressor state.
  *
  * Maintains per-request decompression context for incremental
@@ -198,6 +215,10 @@ ngx_http_markdown_streaming_decomp_create(
 /*
  * Check whether the decompressed output exceeds the size limit.
  *
+ * Uses subtraction form to avoid size_t addition overflow:
+ * instead of (total + produced > max) which can wrap around,
+ * checks (produced > max - total) after verifying total <= max.
+ *
  * Returns 1 if the limit is exceeded, 0 otherwise.
  * The caller is responsible for logging when the limit is hit.
  */
@@ -206,11 +227,18 @@ ngx_http_markdown_streaming_decomp_check_limit(
     const ngx_http_markdown_streaming_decomp_t *decomp,
     size_t produced)
 {
-    if (decomp->max_decompressed_size > 0
-        && (decomp->total_decompressed + produced)
-           > decomp->max_decompressed_size)
-    {
-        return 1;
+    if (decomp->max_decompressed_size > 0) {
+        if (decomp->total_decompressed
+            > decomp->max_decompressed_size)
+        {
+            /* Already exceeded (should not happen, defensive) */
+            return 1;
+        }
+        if (produced > decomp->max_decompressed_size
+                       - decomp->total_decompressed)
+        {
+            return 1;
+        }
     }
     return 0;
 }
@@ -239,6 +267,20 @@ ngx_http_markdown_streaming_decomp_expand_buf(
     size_t   new_size;
 
     old_size = *buf_size_ptr;
+
+    /* Guard against size_t overflow: old_size * 2 */
+    if (old_size > (size_t) -1 / 2) {
+        ngx_log_error(NGX_LOG_ERR, log, 0,
+            "markdown streaming decomp: "
+            "expand_buf size overflow, old_size=%uz",
+            old_size);
+        if (*heap_buf_ptr != NULL) {
+            ngx_free(*heap_buf_ptr);
+            *heap_buf_ptr = NULL;
+        }
+        return NGX_ERROR;
+    }
+
     new_size = old_size * 2;
 
     new_buf = ngx_alloc(new_size, log);
@@ -374,7 +416,9 @@ ngx_http_markdown_streaming_decomp_inflate_step(
         decomp->state.zlib.next_out =
             *buf_ptr + (*buf_size_ptr / 2);
         decomp->state.zlib.avail_out =
-            (uInt) (*buf_size_ptr / 2);
+            (*buf_size_ptr / 2 > (size_t) UINT_MAX)
+            ? UINT_MAX
+            : (uInt) (*buf_size_ptr / 2);
     }
 
     return 0;
@@ -644,7 +688,11 @@ ngx_http_markdown_streaming_decomp_feed(
     }
 
     /* Estimate output buffer: 4x input or 4KB minimum */
-    buf_size = in_len * 4;
+    if (in_len > (size_t) -1 / 4) {
+        buf_size = (size_t) -1;  /* saturate to max */
+    } else {
+        buf_size = in_len * 4;
+    }
     if (buf_size < 4096) {
         buf_size = 4096;
     }
@@ -652,6 +700,13 @@ ngx_http_markdown_streaming_decomp_feed(
     /* Clamp to remaining size budget */
     if (decomp->max_decompressed_size > 0) {
         size_t remaining;
+
+        if (decomp->total_decompressed
+            >= decomp->max_decompressed_size)
+        {
+            /* Budget already exhausted */
+            return NGX_ERROR;
+        }
 
         remaining = decomp->max_decompressed_size
                     - decomp->total_decompressed;
@@ -675,9 +730,13 @@ ngx_http_markdown_streaming_decomp_feed(
         ngx_int_t  inflate_rc;
 
         decomp->state.zlib.next_in = in_data;
-        decomp->state.zlib.avail_in = (uInt) in_len;
+        decomp->state.zlib.avail_in =
+            (in_len > (size_t) UINT_MAX)
+            ? UINT_MAX : (uInt) in_len;
         decomp->state.zlib.next_out = buf;
-        decomp->state.zlib.avail_out = (uInt) buf_size;
+        decomp->state.zlib.avail_out =
+            (buf_size > (size_t) UINT_MAX)
+            ? UINT_MAX : (uInt) buf_size;
 
         inflate_rc =
             ngx_http_markdown_streaming_decomp_inflate_loop(
@@ -765,7 +824,9 @@ ngx_http_markdown_streaming_decomp_finish_zlib(
     decomp->state.zlib.next_in = Z_NULL;
     decomp->state.zlib.avail_in = 0;
     decomp->state.zlib.next_out = *buf_ptr;
-    decomp->state.zlib.avail_out = (uInt) *buf_size_ptr;
+    decomp->state.zlib.avail_out =
+        (*buf_size_ptr > (size_t) UINT_MAX)
+        ? UINT_MAX : (uInt) *buf_size_ptr;
 
     for ( ;; ) {
         zrc = inflate(&decomp->state.zlib, Z_FINISH);
@@ -835,7 +896,9 @@ ngx_http_markdown_streaming_decomp_finish_zlib(
             using_heap = 1;
             decomp->state.zlib.next_out = *buf_ptr + old_size;
             decomp->state.zlib.avail_out =
-                (uInt) (*buf_size_ptr - old_size);
+                (*buf_size_ptr - old_size > (size_t) UINT_MAX)
+                ? UINT_MAX
+                : (uInt) (*buf_size_ptr - old_size);
         }
     }
 
