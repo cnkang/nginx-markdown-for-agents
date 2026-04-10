@@ -151,7 +151,7 @@ P1 status fields do NOT affect the verdict.
 
 ## File Structure
 
-```
+```text
 perf/baselines/
 ├── README.md                  # This file
 ├── darwin-arm64.json          # macOS Apple Silicon baseline
