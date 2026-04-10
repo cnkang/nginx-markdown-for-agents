@@ -100,7 +100,7 @@
     {
       "name": "cpu_time_ms",
       "unit": "milliseconds",
-      "collection": "process_cpu",
+      "collection": "wall_clock_approx",
       "aggregation": "median",
       "direction": "lower_is_better",
       "description": "Wall-clock time consumed during conversion (approximates CPU time)"
