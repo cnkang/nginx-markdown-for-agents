@@ -53,12 +53,22 @@ _SMALL_MEDIUM_TIER_PREFIXES = ("small", "medium")
 
 
 def _is_large_tier(tier_name: str) -> bool:
-    """Return True if the tier name belongs to the large/extra-large category."""
+    """
+    Determine whether a tier name is classified as large (includes prefixes "large", "extra-large", or "xlarge").
+    
+    Returns:
+        `True` if `tier_name` starts with one of the large-tier prefixes, `False` otherwise.
+    """
     return any(tier_name.startswith(prefix) for prefix in _LARGE_TIER_PREFIXES)
 
 
 def _is_small_medium_tier(tier_name: str) -> bool:
-    """Return True if the tier name belongs to the small/medium category."""
+    """
+    Determine whether a tier is classified as small or medium.
+    
+    Returns:
+        `True` if the `tier_name` starts with "small" or "medium", `False` otherwise.
+    """
     return any(tier_name.startswith(prefix) for prefix in _SMALL_MEDIUM_TIER_PREFIXES)
 
 
@@ -68,21 +78,18 @@ def _is_small_medium_tier(tier_name: str) -> bool:
 
 
 def linear_regression_slope(x: list[float], y: list[float]) -> float:
-    """Compute the slope of the least-squares linear regression line.
-
-    Uses the standard formula:
-        slope = (n * sum(xi*yi) - sum(xi)*sum(yi)) / (n * sum(xi^2) - (sum(xi))^2)
-
+    """
+    Compute the least-squares slope of y with respect to x.
+    
     Parameters:
-        x: Independent variable values (must have at least 2 elements).
-        y: Dependent variable values (same length as x).
-
+        x (list[float]): Independent variable values; must contain at least 2 elements.
+        y (list[float]): Dependent variable values; must be the same length as `x`.
+    
     Returns:
-        float: The regression slope. Returns 0.0 if the denominator is zero
-            (all x values are identical).
-
+        float: Slope of the best-fit line. Returns 0.0 when all `x` values are identical.
+    
     Raises:
-        ValueError: If x and y have different lengths or fewer than 2 data points.
+        ValueError: If `x` and `y` have different lengths or contain fewer than 2 points.
     """
     if len(x) != len(y):
         raise ValueError(f"x and y must have the same length, got {len(x)} and {len(y)}")
@@ -112,26 +119,22 @@ def evaluate_bounded_memory(
     max_slope: float,
     min_data_points: int = 4,
 ) -> dict[str, Any]:
-    """Evaluate bounded-memory evidence via linear regression on peak RSS.
-
-    Extracts (input_bytes, peak_rss_bytes) pairs from large and extra-large tiers,
-    performs least-squares linear regression, and checks whether the slope is
-    below the configured maximum.
-
+    """
+    Evaluate whether peak RSS grows within a bounded slope relative to input size for large tiers.
+    
     Parameters:
-        streaming_report: Full streaming measurement report. Contains both
-            "tiers" (shared metrics) and "streaming_metrics" (streaming-specific
-            metrics including peak_memory_bytes).
-        max_slope: Maximum allowed slope (bytes of RSS growth per byte of input).
-            Values below this threshold indicate sub-linear memory growth.
-        min_data_points: Minimum number of data points required for a valid regression.
-
+        streaming_report (dict): Streaming measurement report containing "tiers" and optional "streaming_metrics".
+        max_slope (float): Threshold for allowed bytes-of-RSS growth per input byte; slope below this is considered passing.
+        min_data_points (int): Minimum number of (input_bytes, peak_rss_bytes) pairs required to perform regression.
+    
     Returns:
-        dict: Evaluation result with keys:
+        dict: Result with keys:
             - "status": "PASS", "FAIL", or "INSUFFICIENT_DATA"
-            - "slope": The computed regression slope (0.0 if insufficient data)
-            - "data_points": List of {"input_bytes": ..., "peak_memory_bytes": ...} dicts
-            - "data_point_count": Number of data points used
+            - "slope": Computed regression slope (float; 0.0 when insufficient data)
+            - "data_points": List of {"input_bytes": int, "peak_rss_bytes": int} used for regression
+            - "data_point_count": Number of data points considered
+            - "max_slope": Provided max_slope (present when regression ran) or
+            - "required_data_points": min_data_points (present when status is "INSUFFICIENT_DATA")
     """
     tiers = streaming_report.get("tiers", {})
     streaming_metrics = streaming_report.get("streaming_metrics", {})
@@ -279,25 +282,24 @@ def evaluate_no_regression(
     fullbuffer_report: dict,
     max_ratio: float = 1.3,
 ) -> dict[str, Any]:
-    """Evaluate no-regression evidence for small and medium tiers.
-
-    For each small/medium tier, checks whether streaming P50 latency is at most
-    full-buffer P50 latency multiplied by max_ratio.
-
+    """
+    Determines whether streaming P50 latencies for small and medium tiers stay within a configurable ratio of full-buffer P50 latencies.
+    
     Parameters:
-        streaming_report: Streaming measurement report with a "tiers" mapping.
-        fullbuffer_report: Full-buffer measurement report with a "tiers" mapping.
-        max_ratio: Maximum allowed ratio of streaming_p50 / fullbuffer_p50.
-            A value of 1.3 means streaming P50 can be at most 130% of full-buffer P50.
-
+        streaming_report (dict): Streaming measurement report containing "tiers" and optionally "streaming_metrics".
+        fullbuffer_report (dict): Full-buffer measurement report containing "tiers".
+        max_ratio (float): Maximum allowed value of (streaming_p50_ms / fullbuffer_p50_ms). For example, 1.3 allows streaming P50 up to 130% of full-buffer P50.
+    
     Returns:
         dict: Evaluation result with keys:
-            - "status": "PASS" or "FAIL"
-            - "details": Per-tier detail dict mapping tier name to:
-                - "streaming_p50_ms": Streaming P50 value
-                - "fullbuffer_p50_ms": Full-buffer P50 value
-                - "ratio": Computed ratio
-                - "pass": Whether this tier passes the threshold
+            - "status": `"PASS"` if all evaluated small/medium tiers meet the threshold, `"FAIL"` otherwise.
+            - "details": Mapping from tier name to a dict with:
+                - "streaming_p50_ms": Observed streaming P50 (or `None` if missing).
+                - "fullbuffer_p50_ms": Observed full-buffer P50 (or `None` if missing).
+                - "ratio": Computed ratio rounded to 4 decimals (or `None` if missing data).
+                - "pass": `true` if the tier's ratio <= `max_ratio`, `false` otherwise.
+                - "reason": Present when data is missing (value `"missing_data"`).
+            - "max_ratio": The `max_ratio` value used for evaluation.
     """
     streaming_tiers = streaming_report.get("tiers", {})
     fullbuffer_tiers = fullbuffer_report.get("tiers", {})
