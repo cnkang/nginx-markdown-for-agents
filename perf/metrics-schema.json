@@ -188,14 +188,14 @@
     },
     {
       "name": "streaming-chunked",
-      "target_size": "~1MB",
+      "target_size": "~1KB (seed fixture, expand via repeat for perf testing)",
       "source": "tests/corpus/streaming-perf/chunked-mixed.html",
       "generation": "fixed fixture",
       "streaming_focus": true
     },
     {
       "name": "streaming-tables-heavy",
-      "target_size": "~100KB",
+      "target_size": "~1KB (seed fixture, expand via repeat for perf testing)",
       "source": "tests/corpus/streaming-perf/tables-heavy.html",
       "generation": "fixed fixture",
       "streaming_focus": true,
@@ -203,21 +203,21 @@
     },
     {
       "name": "streaming-code-heavy",
-      "target_size": "~100KB",
+      "target_size": "~2KB (seed fixture, expand via repeat for perf testing)",
       "source": "tests/corpus/streaming-perf/code-heavy.html",
       "generation": "fixed fixture",
       "streaming_focus": true
     },
     {
       "name": "streaming-malformed",
-      "target_size": "~1MB",
+      "target_size": "~1KB (seed fixture, expand via repeat for perf testing)",
       "source": "tests/corpus/streaming-perf/malformed-large.html",
       "generation": "fixed fixture",
       "streaming_focus": true
     },
     {
       "name": "streaming-mixed-charset",
-      "target_size": "~100KB",
+      "target_size": "~1KB (seed fixture, expand via repeat for perf testing)",
       "source": "tests/corpus/streaming-perf/mixed-charset.html",
       "generation": "fixed fixture",
       "streaming_focus": true
