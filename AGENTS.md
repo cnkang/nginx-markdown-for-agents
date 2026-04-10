@@ -475,6 +475,15 @@ Required:
 - Avoid `1 * N` identity multiplications in size-constant arrays; use `N`
   directly or underscore-separated literals (`1_024`) to satisfy
   `clippy::identity_op`.
+- **Rust 2024 edition binding modes**: do not use explicit `ref` or `ref mut`
+  in patterns that match on a reference type (`&T`, `&Option<T>`, `&mut T`).
+  Rust 2024 edition treats this as a hard error because the reference already
+  implies borrowing.  Use `ref` only when matching on an owned value where
+  you need to borrow without moving.  Before writing `if let Some(ref x) = y`,
+  check whether `y` is a reference — if so, drop the `ref`.  This applies to
+  all pattern contexts: `if let`, `match`, `while let`, and function arguments.
+  CI compiles with the project's declared edition, so a local build with an
+  older edition may not catch this.
 
 ### 23. Observability contract integrity (metrics, reason codes, docs)
 
@@ -692,6 +701,7 @@ For each code change you are about to produce, mentally (or explicitly in a thin
 12. **Lifecycle ordering**: when reading data from a foreign-owned struct (FFI result, allocator-owned buffer), capture fields to local variables **before** calling the associated free/release function. Do not access struct fields after `*_free()` — the memory may be invalidated or zeroed. (Rule 15)
 13. **Benchmark averaging consistency**: all per-iteration averages (latency, throughput, markdown size, token estimates) must use the same denominator — the count of measured iterations (non-warmup, non-error, non-fallback). Do not mix `total_iters` for some metrics and `measured_iters` for others. Use per-iteration accumulators (for example `iter_markdown_len`) and add to global sums only inside the measured iteration guard. (Rule 8c)
 14. **Metric naming accuracy**: when a metric field name implies specific semantics (for example `cpu_time_ms`), the implementation must actually measure that quantity. If approximating with a different measurement (for example wall-clock TTLB), add a comment documenting the approximation or rename the field. (Rule 8)
+15. **Rust 2024 edition pattern binding**: do not use explicit `ref` or `ref mut` binding modifiers when matching on a reference type (`&T`, `&Option<T>`, `&Vec<T>`, etc.). Rust 2024 edition treats this as an error because the reference already implies borrowing. Use `ref` only when matching on an owned value where you need to borrow without moving. Before writing `if let Some(ref x) = expr`, check whether `expr` is a reference — if so, drop the `ref`.
 
 #### Shell scripts (`tools/`, e2e harnesses)
 1. Every `case` has a `*)` default clause. (Rule 18)
@@ -744,6 +754,9 @@ Follow evidence-first verification (no completion claim without fresh command ou
 - Docs/tools changes: `make docs-check`
 - Release-gate tooling: `make release-gates-check`
 - Rust converter/streaming changes: `make test-rust`
+- Rust example/benchmark changes: `cargo check --all-targets` in the crate
+  directory to catch edition-specific errors (examples are only compiled
+  with `--all-targets`, not the default `cargo check`).
 - Streaming parser/sanitizer/error-path changes: `make test-rust-fuzz-smoke`
 - NGINX C module changes: `make test-nginx-unit`
 - Streaming runtime/e2e changes: `make verify-chunked-native-e2e-smoke` (or stronger profile when required)
