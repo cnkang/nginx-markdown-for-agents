@@ -46,7 +46,16 @@ from evidence_pack_generator import (  # noqa: E402
 
 
 def _write_tmp_json(data: dict, suffix: str = ".json") -> str:
-    """Write JSON data to a temp file and return the path."""
+    """
+    Write a dictionary as JSON to a temporary file and return the file path.
+    
+    Parameters:
+        data (dict): JSON-serializable mapping to write to the temporary file.
+        suffix (str): Filename suffix for the temporary file (defaults to ".json").
+    
+    Returns:
+        path (str): Filesystem path to the created temporary file.
+    """
     f = tempfile.NamedTemporaryFile(mode="w", suffix=suffix, delete=False)
     json.dump(data, f)
     f.close()
@@ -54,7 +63,15 @@ def _write_tmp_json(data: dict, suffix: str = ".json") -> str:
 
 
 def _make_fullbuffer_report(tiers: dict | None = None) -> dict:
-    """Create a minimal full-buffer measurement report."""
+    """
+    Create a minimal full-buffer measurement report, optionally overriding the default tiers.
+    
+    Parameters:
+    	tiers (dict | None): Optional mapping of tier names to metric dicts; when provided, this value is used as the report's `tiers` field. If `None`, a default set of small/medium/large tiers with example latency and input sizes is returned.
+    
+    Returns:
+    	report (dict): A report containing `schema_version`, `timestamp`, `git_commit`, `platform`, and `tiers`.
+    """
     return {
         "schema_version": "1.0.0",
         "timestamp": "2026-04-01T10:00:00Z",
@@ -91,7 +108,17 @@ def _make_fullbuffer_report(tiers: dict | None = None) -> dict:
 
 
 def _make_streaming_report(tiers: dict | None = None) -> dict:
-    """Create a minimal streaming measurement report."""
+    """
+    Create a minimal streaming measurement report for tests.
+    
+    Parameters:
+        tiers (dict | None): Optional dictionary of tier measurements to include; if omitted, a default set of tiers
+            ("small", "medium", "large-100k", "large-1m") with representative latency, TTFB, input size, and peak memory
+            values is used.
+    
+    Returns:
+        dict: A report dictionary containing `schema_version`, `timestamp`, `git_commit`, `platform`, and `tiers`.
+    """
     return {
         "schema_version": "1.0.0",
         "timestamp": "2026-04-01T11:00:00Z",
@@ -136,7 +163,20 @@ def _make_streaming_report(tiers: dict | None = None) -> dict:
 
 
 def _make_evidence_targets(overrides: dict | None = None) -> dict:
-    """Create evidence targets config with sensible defaults."""
+    """
+    Create a default evidence targets configuration, optionally merged with user overrides.
+    
+    Parameters:
+        overrides (dict | None): Optional mapping whose keys will replace or extend the default targets.
+    
+    Returns:
+        dict: Evidence targets including:
+            - "bounded_memory": {"max_slope": float, "min_data_points": int}
+            - "ttfb_improvement": {"max_ratio": float}
+            - "no_regression": {"max_ratio": float}
+            - "diff_testing_complete": "PASS" or other status string
+            - "rollout_docs_complete": "PASS" or other status string
+    """
     targets = {
         "bounded_memory": {
             "max_slope": 1.0,
@@ -159,7 +199,17 @@ def _make_evidence_targets(overrides: dict | None = None) -> dict:
 def _make_parity_report(
     pass_rate: float = 1.0, correctness_rate: float = 1.0
 ) -> dict:
-    """Create a parity report with the given rates."""
+    """
+    Constructs a minimal parity report dictionary with the specified pass and correctness rates.
+    
+    Parameters:
+        pass_rate (float): Pass rate in the range 0.0–1.0 (default 1.0).
+        correctness_rate (float): Correctness rate in the range 0.0–1.0 (default 1.0).
+    
+    Returns:
+        dict: Parity report containing `schema_version`, `timestamp`, a `summary` with
+        `pass_rate` and `correctness_rate`, and an empty `tiers` mapping.
+    """
     return {
         "schema_version": "1.0.0",
         "timestamp": "2026-04-01T12:00:00Z",
@@ -409,7 +459,9 @@ class TestEvaluateNoRegression:
         assert result["status"] == "FAIL"
 
     def test_fail_when_no_small_medium_tiers(self):
-        """No small/medium tiers -> FAIL (nothing to evaluate)."""
+        """
+        Verify that evaluate_no_regression reports FAIL when the streaming report contains no small or medium tiers to evaluate.
+        """
         fullbuffer = _make_fullbuffer_report()
         streaming = {
             "schema_version": "1.0.0",

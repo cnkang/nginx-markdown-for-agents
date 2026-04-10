@@ -103,6 +103,16 @@ enum BenchmarkEngine {
 }
 
 impl std::fmt::Display for BenchmarkEngine {
+    /// Formats a `BenchmarkEngine` as its canonical identifier string.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::fmt::Write;
+    /// let mut s = String::new();
+    /// write!(&mut s, "{}", crate::BenchmarkEngine::FullBuffer).unwrap();
+    /// assert_eq!(s, "full-buffer");
+    /// ```
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             BenchmarkEngine::FullBuffer => write!(f, "full-buffer"),
@@ -411,16 +421,15 @@ fn resolve_single_name(cli_value: &str) -> &str {
     }
 }
 
-/// Runs the FFI-based Markdown conversion for a sample and returns measured results.
+/// Run the FFI-based Markdown converter on a sample and collect performance and size metrics.
 ///
-/// The function executes the converter for `cfg.warmup + cfg.iterations` rounds, ignores
-/// the initial `cfg.warmup` runs when aggregating measurements, and computes averaged
-/// statistics and resource usage for the remaining iterations.
+/// The converter is executed for `cfg.warmup + cfg.iterations` rounds; the first `cfg.warmup`
+/// iterations are used only for warmup and are excluded from the reported aggregates.
 ///
-/// # Notes
-/// - `cfg.warmup` iterations are used only to warm up the converter and are excluded from reported metrics.
-/// - The returned `FfiSummary` contains timing statistics, average generated markdown size,
-///   average token estimate, and the process peak RSS observed immediately after the run.
+/// # Returns
+///
+/// `FfiSummary` containing aggregated latency statistics, average generated markdown size,
+/// average token estimate, and the process peak RSS sampled after the run.
 ///
 /// # Examples
 ///
@@ -513,6 +522,28 @@ fn run_ffi_baseline(sample: &Sample, cfg: RunConfig) -> FfiSummary {
     }
 }
 
+/// Construct streaming `ConversionOptions` tailored for a given `Sample`.
+///
+/// The returned options enable CommonMark parsing, metadata extraction, simplified navigation,
+/// and table preservation. If `sample.front_matter` is true, front-matter handling is enabled;
+/// if `sample.base_url` is present it is copied into `base_url` and `resolve_relative_urls` is enabled.
+///
+/// # Examples
+///
+/// ```
+/// # #[cfg(feature = "streaming")] fn _example() {
+/// let sample = Sample {
+///     name: "example".to_string(),
+///     html: vec![],
+///     target_label: "small".to_string(),
+///     front_matter: true,
+///     base_url: Some("https://example.com".to_string()),
+/// };
+/// let opts = build_streaming_options(&sample);
+/// assert!(opts.include_front_matter);
+/// assert_eq!(opts.base_url.as_deref(), Some("https://example.com"));
+/// # }
+/// ```
 #[cfg(feature = "streaming")]
 fn build_streaming_options(sample: &Sample) -> ConversionOptions {
     ConversionOptions {
@@ -526,17 +557,15 @@ fn build_streaming_options(sample: &Sample) -> ConversionOptions {
     }
 }
 
-/// Runs streaming conversion for a sample and returns measured results.
+/// Benchmarks a sample using the streaming converter and returns aggregated streaming metrics.
 ///
-/// Feeds the entire HTML sample in a single chunk (simulating non-chunked streaming),
-/// measures TTFB (time to first non-empty ChunkOutput.markdown), TTLB (time to
-/// finalize completion), and accumulates flush counts. StreamingFallback errors
-/// are caught and counted, not treated as benchmark failures.
+/// Performs the configured warmup and measured iterations and collects latency percentiles,
+/// average throughput, average generated markdown size, token estimates, and streaming-specific
+/// metrics such as TTFB (time to first non-empty chunk), TTLB (time to finalize), flush counts,
+/// and fallback counts.
 ///
-/// # Notes
-/// - This function is a benchmark harness entry point that calls `run_streaming_benchmark_chunked` internally.
-/// - The returned `StreamingSummary` contains timing statistics, average generated markdown size,
-///   and streaming-specific metrics (TTFB, TTLB, flush count, fallback count).
+/// Returns a `StreamingSummary` containing latency/throughput `Stats`, average sizes/token
+/// estimates, peak RSS, and the streaming metrics described above.
 ///
 /// # Examples
 ///
@@ -789,6 +818,24 @@ fn run_breakdown(sample: &Sample, iterations: usize) -> BreakdownSummary {
     }
 }
 
+/// Prints a Markdown table summarizing FFI benchmark results.
+///
+/// Each row corresponds to a sample and shows HTML bytes, average Markdown bytes,
+/// average token estimate, latency statistics (avg, p50, p95, p99), requests per second,
+/// and input throughput in MB/s.
+///
+/// # Parameters
+///
+/// - `results`: slice of `(Sample, FfiSummary)` pairs where each pair contains the
+///   sample metadata and its measured FFI summary.
+///
+/// # Examples
+///
+/// ```
+/// // Print an empty table (no rows)
+/// let results: Vec<(Sample, FfiSummary)> = Vec::new();
+/// print_ffi_table(&results);
+/// ```
 fn print_ffi_table(results: &[(Sample, FfiSummary)]) {
     println!("# FFI Baseline (local, release build)");
     println!();
@@ -817,6 +864,18 @@ fn print_ffi_table(results: &[(Sample, FfiSummary)]) {
     println!();
 }
 
+/// Prints a markdown-formatted table summarizing streaming benchmark results.
+///
+/// The table includes per-sample sizes, averaged markdown and token counts,
+/// latency percentiles (avg/p50/p95/p99), streaming-specific metrics (TTFB, TTLB),
+/// flush and fallback counts, and throughput (requests/sec and MB/sec).
+///
+/// # Examples
+///
+/// ```no_run
+/// // Assuming `results` is a `Vec<(Sample, StreamingSummary)>` produced by the benchmark:
+/// // print_streaming_table(&results);
+/// ```
 #[cfg(feature = "streaming")]
 fn print_streaming_table(results: &[(Sample, StreamingSummary)]) {
     println!("# Streaming Engine (local, release build)");
@@ -1033,19 +1092,20 @@ fn epoch_days_to_ymd(days: u64) -> (u64, u64, u64) {
     (y, m, d)
 }
 
-/// Build a Measurement Report JSON object from collected sample results and optional breakdowns.
+/// Assembles a JSON measurement report from FFI results, optional streaming results, and optional per-tier stage breakdowns.
 ///
-/// The returned `serde_json::Value` conforms to the measurement report schema (perf/metrics-schema.json)
-/// and includes metadata (schema_version, report_type, timestamp, git_commit, platform) plus a `tiers`
-/// object mapping tier keys to per-tier metrics. When streaming results are provided, a `streaming_metrics`
-/// section is added with streaming-specific fields (TTFB, TTLB, CPU time, flush count, fallback rate).
+/// The returned `serde_json::Value` follows the measurement report schema and includes top-level metadata
+/// (`schema_version`, `report_type`, `timestamp`, `git_commit`, `platform`, `engine`) and a `tiers` object
+/// that maps tier keys to per-tier metrics (size, latency percentiles, throughput, peak memory, and run counts).
+/// When streaming results are provided, a `streaming_metrics` object is also included with streaming-specific
+/// fields such as `ttfb_ms`, `ttlb_ms`, `cpu_time_ms`, `flush_count`, `fallback_count`, and `fallback_rate`.
 ///
 /// # Examples
 ///
 /// ```ignore
-/// // `ffi_results` and `streaming_results` would be prepared earlier in the test setup.
-/// let report = build_measurement_report(&ffi_results, &[], &None, "linux-x86_64", BenchmarkEngine::FullBuffer);
-/// assert!(report.get("schema_version").is_some());
+/// // Prepare or reuse collected results in tests; this example demonstrates the call site.
+/// let report = build_measurement_report(&[], &None, &[], "linux-x86_64", BenchmarkEngine::FullBuffer);
+/// assert_eq!(report["schema_version"], "1.0.0");
 /// assert!(report.get("tiers").and_then(|t| t.as_object()).is_some());
 /// ```
 fn build_measurement_report(
@@ -1214,29 +1274,23 @@ fn config_for_sample(name: &str) -> RunConfig {
     }
 }
 
-/// Run a single benchmark sample by name, print a short summary, and optionally write a JSON measurement report.
+/// Run a single benchmark sample by name, print a concise summary line, and optionally write a measurement-report JSON.
 ///
-/// The function resolves the provided sample name (accepting aliases), executes the FFI baseline for the matching
-/// sample using the configured warmup and iteration counts, and prints a compact single-line summary to stdout:
-/// `single_sample=<name> html_bytes=<bytes> avg_ms=<avg> p95_ms=<p95> req_per_s=<rps>`.
-/// If `json_output` is `Some(path)`, a Measurement Report JSON is built (with no stage breakdown) and written to `path`
-/// using the supplied `platform` identifier.
-///
-/// # Parameters
-///
-/// - `name`: CLI-provided sample identifier or alias (for example `large-1m` or `large`).
-/// - `json_output`: optional filesystem path to write a Measurement Report JSON; if `None`, no JSON is written.
-/// - `platform`: platform identifier to embed in the report (e.g., `"darwin-arm64"`).
-/// - `engine`: which engine to benchmark.
+/// The provided `name` may be an alias (e.g., `large-1m`) and will be resolved to an internal sample. The function executes the selected engine (`FullBuffer`, `Streaming`, or `Both`), prints a compact one-line summary to stdout for the measured engine(s), and, when `json_output` is `Some(path)`, writes a Measurement Report JSON to `path` containing the measured tier(s) and metadata that include the supplied `platform`.
 ///
 /// # Examples
 ///
-/// ```ignore
-/// // Run the "small" sample and print results only.
+/// ```
+/// // Print results for the "small" sample using the full-buffer engine only.
 /// run_single_mode("small", None, "linux-x86_64", BenchmarkEngine::FullBuffer);
 ///
-/// // Run the "large-1m" alias, writing a JSON report to /tmp/report.json.
-/// run_single_mode("large-1m", Some(std::path::Path::new("/tmp/report.json")), "darwin-arm64", BenchmarkEngine::Both);
+/// // Run the "large-1m" alias with both engines and write a JSON report.
+/// run_single_mode(
+///     "large-1m",
+///     Some(std::path::Path::new("/tmp/report.json")),
+///     "darwin-arm64",
+///     BenchmarkEngine::Both,
+/// );
 /// ```
 fn run_single_mode(
     name: &str,
@@ -1364,12 +1418,14 @@ fn run_single_mode(
     }
 }
 
-/// Program entry point that runs the Markdown conversion benchmarks and emits results.
+/// Entry point that runs the configured Markdown conversion benchmarks, prints summaries, and optionally writes a JSON measurement report.
 ///
-/// Without arguments, runs all samples, prints a summary table, runs a stage breakdown for the
-/// "medium" sample, and prints the breakdown. If `--single <name>` is passed, runs only that
-/// sample and exits. When `--json-output <path>` is provided, additionally computes stage
-/// breakdowns for all tiers and writes a structured measurement report to the given path.
+/// The program behavior is controlled by command-line flags:
+/// - `--single <name>` runs only the specified sample and exits.
+/// - `--engine <full-buffer|streaming|both>` selects which benchmark engine(s) to run.
+/// - `--json-output <path>` writes a structured measurement report to the given path when provided.
+///
+/// When run without `--single`, the harness runs all samples, prints result tables, and performs a stage breakdown for the `medium` sample. When `--json-output` is specified, stage breakdowns for all tiers are computed and included in the output file.
 ///
 /// # Examples
 ///

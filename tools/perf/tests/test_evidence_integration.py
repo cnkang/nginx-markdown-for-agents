@@ -269,7 +269,11 @@ class TestRealisticRustOutputCompatibility:
         assert result["details"]["medium"]["ratio"] == pytest.approx(1.6, abs=0.01)
 
     def test_generate_evidence_pack_with_realistic_schema(self):
-        """Full evidence pack generation should succeed with realistic data."""
+        """
+        Verify evidence-pack generation using realistic full-buffer and streaming reports.
+        
+        Asserts the returned pack contains required top-level keys, that the TTFB and no-regression gates report `PASS`, that bounded-memory reports `INSUFFICIENT_DATA` when insufficient tiers are present, that streaming parity is `UNKNOWN` when no parity report is provided, and that the overall `streaming_evidence_verdict` is `NO_GO`.
+        """
         evidence_pack = generate_evidence_pack(
             fullbuffer_report=REALISTIC_FULLBUFFER_REPORT,
             streaming_report=REALISTIC_STREAMING_REPORT,
