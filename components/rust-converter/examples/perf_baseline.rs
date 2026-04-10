@@ -16,6 +16,19 @@ use nginx_markdown_converter::ffi::{
 use nginx_markdown_converter::parser::parse_html_with_charset;
 use nginx_markdown_converter::token_estimator::TokenEstimator;
 
+#[cfg(feature = "streaming")]
+use nginx_markdown_converter::error::ConversionError;
+#[cfg(feature = "streaming")]
+use nginx_markdown_converter::streaming::budget::MemoryBudget;
+#[cfg(feature = "streaming")]
+use nginx_markdown_converter::streaming::converter::StreamingConverter;
+#[cfg(feature = "streaming")]
+use nginx_markdown_converter::streaming::types::{StreamingResult, StreamingStats};
+
+/// Chunk size for streaming simulation (~16KB).
+#[cfg(feature = "streaming")]
+const CHUNK_SIZE: usize = 16 * 1024;
+
 #[derive(Clone, Copy)]
 struct RunConfig {
     warmup: usize,
@@ -50,6 +63,28 @@ struct FfiSummary {
     peak_memory_bytes: u64,
 }
 
+/// Streaming benchmark result with streaming-specific metrics.
+#[derive(Default, Clone)]
+struct StreamingSummary {
+    stats: Stats,
+    html_bytes: usize,
+    markdown_bytes_avg: usize,
+    token_estimate_avg: u32,
+    peak_memory_bytes: u64,
+    /// Time to first byte: first non-empty ChunkOutput.markdown.
+    ttfb_ms: f64,
+    /// Time to last byte: finalize completion.
+    ttlb_ms: f64,
+    /// CPU time measured by the conversion process.
+    cpu_time_ms: f64,
+    /// Total flush points emitted across all chunks.
+    flush_count: u32,
+    /// Number of StreamingFallback events encountered.
+    fallback_count: u32,
+    /// Total feed_chunk attempts (including fallbacks).
+    total_attempts: u32,
+}
+
 #[derive(Default, Clone)]
 struct BreakdownSummary {
     parse_ms: f64,
@@ -57,6 +92,24 @@ struct BreakdownSummary {
     etag_ms: f64,
     token_ms: f64,
     total_ms: f64,
+}
+
+/// Engine selection for benchmark comparison.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum BenchmarkEngine {
+    FullBuffer,
+    Streaming,
+    Both,
+}
+
+impl std::fmt::Display for BenchmarkEngine {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BenchmarkEngine::FullBuffer => write!(f, "full-buffer"),
+            BenchmarkEngine::Streaming => write!(f, "streaming"),
+            BenchmarkEngine::Both => write!(f, "both"),
+        }
+    }
 }
 
 /// Parsed command-line arguments.
@@ -67,6 +120,8 @@ struct CliArgs {
     json_output: Option<PathBuf>,
     /// Override the platform identifier (defaults to auto-detected).
     platform_override: Option<String>,
+    /// Which engine to benchmark: full-buffer, streaming, or both.
+    engine: BenchmarkEngine,
 }
 
 /// Parse command-line options for the benchmark runner.
@@ -75,6 +130,7 @@ struct CliArgs {
 /// - `--single <name>`: run a single sample by name
 /// - `--json-output <path>`: write a measurement report to the given file path
 /// - `--platform <id>`: override the detected platform identifier
+/// - `--engine <mode>`: select benchmark engine (`full-buffer`, `streaming`, or `both`; default: `full-buffer`)
 ///
 /// Unknown arguments are ignored with a warning printed to stderr.
 ///
@@ -89,12 +145,13 @@ struct CliArgs {
 ///
 /// # Returns
 ///
-/// A `CliArgs` struct with `single`, `json_output`, and `platform_override` set according to the parsed flags; fields are `None` when the corresponding flag was not provided.
+/// A `CliArgs` struct with `single`, `json_output`, `platform_override`, and `engine` set according to the parsed flags; fields are `None` when the corresponding flag was not provided.
 fn parse_args() -> CliArgs {
     let args: Vec<String> = env::args().collect();
     let mut single = None;
     let mut json_output = None;
     let mut platform_override = None;
+    let mut engine = BenchmarkEngine::FullBuffer;
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
@@ -112,6 +169,19 @@ fn parse_args() -> CliArgs {
                 i += 1;
                 platform_override = Some(args.get(i).expect("--platform requires a value").clone());
             }
+            "--engine" => {
+                i += 1;
+                let val = args.get(i).expect("--engine requires a value").clone();
+                engine = match val.as_str() {
+                    "full-buffer" => BenchmarkEngine::FullBuffer,
+                    "streaming" => BenchmarkEngine::Streaming,
+                    "both" => BenchmarkEngine::Both,
+                    other => {
+                        eprintln!("warning: unknown engine mode: {other}, using full-buffer");
+                        BenchmarkEngine::FullBuffer
+                    }
+                };
+            }
             other => {
                 eprintln!("warning: unknown argument: {other}");
             }
@@ -122,6 +192,7 @@ fn parse_args() -> CliArgs {
         single,
         json_output,
         platform_override,
+        engine,
     }
 }
 
@@ -321,7 +392,7 @@ fn tier_key(sample_name: &str) -> &str {
 
 /// Map a CLI `--single` value to the internal sample name.
 ///
-/// Specifically, translate the JSON tier key `"large-1m"` to the internal sample
+/// Specifically, translating the JSON tier key `"large-1m"` to the internal sample
 /// name `"large"`. All other input values are returned unchanged.
 ///
 /// # Examples
@@ -442,6 +513,208 @@ fn run_ffi_baseline(sample: &Sample, cfg: RunConfig) -> FfiSummary {
     }
 }
 
+#[cfg(feature = "streaming")]
+fn build_streaming_options(sample: &Sample) -> ConversionOptions {
+    ConversionOptions {
+        flavor: MarkdownFlavor::CommonMark,
+        include_front_matter: sample.front_matter,
+        extract_metadata: true,
+        simplify_navigation: true,
+        preserve_tables: true,
+        base_url: sample.base_url.map(|s| s.to_string()),
+        resolve_relative_urls: sample.base_url.is_some(),
+    }
+}
+
+/// Runs streaming conversion for a sample and returns measured results.
+///
+/// Feeds the entire HTML sample in a single chunk (simulating non-chunked streaming),
+/// measures TTFB (time to first non-empty ChunkOutput.markdown), TTLB (time to
+/// finalize completion), and accumulates flush counts. StreamingFallback errors
+/// are caught and counted, not treated as benchmark failures.
+///
+/// # Notes
+/// - This function is a benchmark harness entry point that calls `run_streaming_benchmark_chunked` internally.
+/// - The returned `StreamingSummary` contains timing statistics, average generated markdown size,
+///   and streaming-specific metrics (TTFB, TTLB, flush count, fallback count).
+///
+/// # Examples
+///
+/// ```no_run
+/// let sample = Sample {
+///     name: "small".into(),
+///     html: b"<p>Hello</p>".to_vec(),
+///     target_label: "small".into(),
+///     front_matter: false,
+///     base_url: None,
+/// };
+/// let cfg = RunConfig { warmup: 1, iterations: 3 };
+/// let summary = run_streaming_benchmark(&sample, cfg);
+/// eprintln!("avg_ms = {}, ttfb_ms = {}", summary.stats.avg_ms, summary.ttfb_ms);
+/// ```
+#[cfg(feature = "streaming")]
+fn run_streaming_benchmark(sample: &Sample, cfg: RunConfig) -> StreamingSummary {
+    run_streaming_benchmark_chunked(sample, cfg, CHUNK_SIZE)
+}
+
+/// Runs streaming conversion with chunked input simulation.
+///
+/// Splits the HTML sample into chunks of the specified size, feeds each chunk to
+/// `StreamingConverter::feed_chunk()`, and calls `finalize()` at the end. Measures
+/// TTFB (time to first non-empty ChunkOutput.markdown), TTLB (time to finalize
+/// completion), and accumulates flush counts.
+///
+/// # Notes
+/// - StreamingFallback errors are caught, counted, and do not panic the benchmark.
+/// - Other errors panic with a clear message.
+/// - Peak RSS is sampled after all iterations complete.
+///
+/// # Examples
+///
+/// ```no_run
+/// let sample = Sample {
+///     name: "small".into(),
+///     html: b"<p>Hello</p>".to_vec(),
+///     target_label: "small".into(),
+///     front_matter: false,
+///     base_url: None,
+/// };
+/// let cfg = RunConfig { warmup: 1, iterations: 3 };
+/// let summary = run_streaming_benchmark_chunked(&sample, cfg, 1024);
+/// eprintln!("avg_ms = {}, chunks_processed = {}", summary.stats.avg_ms, summary.flush_count);
+/// ```
+#[cfg(feature = "streaming")]
+fn run_streaming_benchmark_chunked(
+    sample: &Sample,
+    cfg: RunConfig,
+    chunk_size: usize,
+) -> StreamingSummary {
+    let options = build_streaming_options(sample);
+    let budget = MemoryBudget::default();
+
+    let mut durations = Vec::with_capacity(cfg.iterations);
+    let mut markdown_len_sum = 0usize;
+    let mut token_sum = 0u64;
+    let mut flush_count_sum = 0u32;
+    let mut fallback_count = 0u32;
+    let mut total_attempts = 0u32;
+    let mut ttfb_ms_sum = 0.0;
+    let mut ttlb_ms_sum = 0.0;
+    let mut cpu_time_ms_sum = 0.0;
+    // Track whether we recorded TTFB in any iteration (for averaging).
+    let mut ttfb_recorded_count = 0usize;
+
+    let total_iters = cfg.warmup + cfg.iterations;
+    for iter_idx in 0..total_iters {
+        let mut conv = StreamingConverter::new(options.clone(), budget.clone());
+        conv.set_content_type(Some("text/html; charset=UTF-8".to_string()));
+
+        let iter_start = Instant::now();
+        let ttfb_start = Instant::now();
+        let mut ttfb_recorded = false;
+        let mut ttfb_ms = 0.0;
+        let mut iter_flush_count = 0u32;
+        let mut iter_fallback = false;
+        let mut iter_total_attempts = 0u32;
+
+        // Feed chunks in chunks of `chunk_size`.
+        for chunk in sample.html.chunks(chunk_size) {
+            iter_total_attempts += 1;
+            match conv.feed_chunk(chunk) {
+                Ok(output) => {
+                    if !ttfb_recorded && !output.markdown.is_empty() {
+                        ttfb_ms = ttfb_start.elapsed().as_secs_f64() * 1000.0;
+                        ttfb_recorded = true;
+                    }
+                    iter_flush_count += output.flush_count;
+                    markdown_len_sum += output.markdown.len();
+                }
+                Err(ConversionError::StreamingFallback { .. }) => {
+                    // Expected for some inputs during pre-commit phase.
+                    fallback_count += 1;
+                    iter_fallback = true;
+                    // Continue feeding — the converter may still produce output later.
+                }
+                Err(e) => panic!(
+                    "unexpected streaming error for {} on iteration {}: {:?}",
+                    sample.name, iter_idx, e
+                ),
+            }
+        }
+
+        // Finalize to get remaining output and stats.
+        let result = match conv.finalize() {
+            Ok(r) => r,
+            Err(ConversionError::StreamingFallback { .. }) => {
+                // Fallback at finalize is unusual but not a benchmark failure.
+                fallback_count += 1;
+                iter_fallback = true;
+                StreamingResult {
+                    final_markdown: Vec::new(),
+                    token_estimate: None,
+                    etag: None,
+                    stats: StreamingStats::default(),
+                }
+            }
+            Err(e) => panic!(
+                "unexpected streaming error at finalize for {} on iteration {}: {:?}",
+                sample.name, iter_idx, e
+            ),
+        };
+
+        let elapsed = iter_start.elapsed().as_secs_f64();
+
+        if ttfb_recorded {
+            ttfb_ms_sum += ttfb_ms;
+            ttfb_recorded_count += 1;
+        }
+        let ttlb_ms = elapsed * 1000.0;
+        ttlb_ms_sum += ttlb_ms;
+
+        // CPU time approximated by wall-clock time for the conversion.
+        cpu_time_ms_sum += ttlb_ms;
+
+        // Add final_markdown to the sum.
+        markdown_len_sum += result.final_markdown.len();
+        if let Some(tokens) = result.token_estimate {
+            token_sum += u64::from(tokens);
+        }
+        iter_flush_count += result.stats.flush_count;
+        flush_count_sum += iter_flush_count;
+        total_attempts += iter_total_attempts;
+
+        if iter_idx >= cfg.warmup && !iter_fallback {
+            durations.push(elapsed);
+        }
+    }
+
+    let peak_mem = peak_rss_bytes();
+    let measured_iters = durations.len().max(1);
+    let stats = summarize(&durations, sample.html.len());
+
+    StreamingSummary {
+        stats,
+        html_bytes: sample.html.len(),
+        markdown_bytes_avg: markdown_len_sum / total_iters.max(1),
+        token_estimate_avg: (token_sum / total_iters.max(1) as u64) as u32,
+        peak_memory_bytes: peak_mem,
+        ttfb_ms: if ttfb_recorded_count > 0 {
+            ttfb_ms_sum / ttfb_recorded_count as f64
+        } else {
+            0.0
+        },
+        ttlb_ms: ttlb_ms_sum / total_iters.max(1) as f64,
+        cpu_time_ms: cpu_time_ms_sum / total_iters.max(1) as f64,
+        flush_count: if measured_iters > 0 {
+            flush_count_sum / measured_iters as u32
+        } else {
+            0
+        },
+        fallback_count,
+        total_attempts,
+    }
+}
+
 /// Measures average per-stage timings for converting the sample's HTML to Markdown.
 ///
 /// The returned BreakdownSummary contains average durations per iteration (in milliseconds)
@@ -537,6 +810,39 @@ fn print_ffi_table(results: &[(Sample, FfiSummary)]) {
             r.stats.p50_ms,
             r.stats.p95_ms,
             r.stats.p99_ms,
+            r.stats.req_per_s,
+            r.stats.input_mb_per_s
+        );
+    }
+    println!();
+}
+
+#[cfg(feature = "streaming")]
+fn print_streaming_table(results: &[(Sample, StreamingSummary)]) {
+    println!("# Streaming Engine (local, release build)");
+    println!();
+    println!(
+        "| Sample | HTML bytes | Markdown bytes (avg) | Tokens (avg) | Avg ms | P50 ms | P95 ms | P99 ms | TTFB ms | TTLB ms | Flushes | Fallbacks | Req/s | Input MB/s |"
+    );
+    println!(
+        "|--------|------------|----------------------|--------------|--------|--------|--------|--------|---------|---------|---------|-----------|-------|------------|"
+    );
+    for (s, r) in results {
+        println!(
+            "| {} ({}) | {} | {} | {} | {:.3} | {:.3} | {:.3} | {:.3} | {:.3} | {:.3} | {} | {} | {:.1} | {:.2} |",
+            s.name,
+            s.target_label,
+            r.html_bytes,
+            r.markdown_bytes_avg,
+            r.token_estimate_avg,
+            r.stats.avg_ms,
+            r.stats.p50_ms,
+            r.stats.p95_ms,
+            r.stats.p99_ms,
+            r.ttfb_ms,
+            r.ttlb_ms,
+            r.flush_count,
+            r.fallback_count,
             r.stats.req_per_s,
             r.stats.input_mb_per_s
         );
@@ -731,25 +1037,28 @@ fn epoch_days_to_ymd(days: u64) -> (u64, u64, u64) {
 ///
 /// The returned `serde_json::Value` conforms to the measurement report schema (perf/metrics-schema.json)
 /// and includes metadata (schema_version, report_type, timestamp, git_commit, platform) plus a `tiers`
-/// object mapping tier keys to per-tier metrics (html_bytes, markdown_bytes_avg, token_estimate_avg,
-/// p50_ms, p95_ms, p99_ms, peak_memory_bytes, req_per_s, input_mb_per_s, stage_breakdown, iterations, warmup).
+/// object mapping tier keys to per-tier metrics. When streaming results are provided, a `streaming_metrics`
+/// section is added with streaming-specific fields (TTFB, TTLB, CPU time, flush count, fallback rate).
 ///
 /// # Examples
 ///
 /// ```ignore
-/// // `results` and `breakdowns` would be prepared earlier in the test setup.
-/// let report = build_measurement_report(&results, &breakdowns, "linux-x86_64");
+/// // `ffi_results` and `streaming_results` would be prepared earlier in the test setup.
+/// let report = build_measurement_report(&ffi_results, &[], &None, "linux-x86_64", BenchmarkEngine::FullBuffer);
 /// assert!(report.get("schema_version").is_some());
 /// assert!(report.get("tiers").and_then(|t| t.as_object()).is_some());
 /// ```
 fn build_measurement_report(
-    results: &[(Sample, FfiSummary, RunConfig)],
+    ffi_results: &[(Sample, FfiSummary, RunConfig)],
+    streaming_results: &Option<Vec<(Sample, StreamingSummary, RunConfig)>>,
     breakdowns: &[(&str, BreakdownSummary)],
     platform: &str,
+    engine: BenchmarkEngine,
 ) -> serde_json::Value {
     let mut tiers = serde_json::Map::new();
 
-    for (sample, ffi, cfg) in results {
+    // Build FFI tier data.
+    for (sample, ffi, cfg) in ffi_results {
         let key = tier_key(sample.name);
 
         // Look up the stage breakdown for this sample, if available.
@@ -790,14 +1099,58 @@ fn build_measurement_report(
         tiers.insert(key.to_string(), tier_value);
     }
 
-    serde_json::json!({
+    // Build streaming tier data if available.
+    let streaming_metrics = if let Some(streaming_results) = streaming_results {
+        let mut metrics_map = serde_json::Map::new();
+        for (sample, streaming, cfg) in streaming_results {
+            let key = tier_key(sample.name);
+            let fallback_rate = if streaming.total_attempts > 0 {
+                streaming.fallback_count as f64 / streaming.total_attempts as f64
+            } else {
+                0.0
+            };
+            let tier_value = serde_json::json!({
+                "html_bytes": streaming.html_bytes,
+                "markdown_bytes_avg": streaming.markdown_bytes_avg,
+                "token_estimate_avg": streaming.token_estimate_avg,
+                "p50_ms": streaming.stats.p50_ms,
+                "p95_ms": streaming.stats.p95_ms,
+                "p99_ms": streaming.stats.p99_ms,
+                "peak_memory_bytes": streaming.peak_memory_bytes,
+                "ttfb_ms": streaming.ttfb_ms,
+                "ttlb_ms": streaming.ttlb_ms,
+                "cpu_time_ms": streaming.cpu_time_ms,
+                "flush_count": streaming.flush_count,
+                "fallback_count": streaming.fallback_count,
+                "fallback_rate": fallback_rate,
+                "req_per_s": streaming.stats.req_per_s,
+                "input_mb_per_s": streaming.stats.input_mb_per_s,
+                "iterations": cfg.iterations,
+                "warmup": cfg.warmup,
+            });
+            metrics_map.insert(key.to_string(), tier_value);
+        }
+        Some(serde_json::Value::Object(metrics_map))
+    } else {
+        None
+    };
+
+    let mut report = serde_json::json!({
         "schema_version": "1.0.0",
         "report_type": "measurement",
         "timestamp": iso8601_now(),
         "git_commit": git_commit_hash(),
         "platform": platform,
+        "engine": engine.to_string(),
         "tiers": tiers,
-    })
+    });
+
+    // Add streaming metrics if available.
+    if let Some(metrics) = streaming_metrics {
+        report["streaming_metrics"] = metrics;
+    }
+
+    report
 }
 
 /// Write a measurement report as pretty-printed JSON to the specified file path.
@@ -874,17 +1227,23 @@ fn config_for_sample(name: &str) -> RunConfig {
 /// - `name`: CLI-provided sample identifier or alias (for example `large-1m` or `large`).
 /// - `json_output`: optional filesystem path to write a Measurement Report JSON; if `None`, no JSON is written.
 /// - `platform`: platform identifier to embed in the report (e.g., `"darwin-arm64"`).
+/// - `engine`: which engine to benchmark.
 ///
 /// # Examples
 ///
 /// ```ignore
 /// // Run the "small" sample and print results only.
-/// run_single_mode("small", None, "linux-x86_64");
+/// run_single_mode("small", None, "linux-x86_64", BenchmarkEngine::FullBuffer);
 ///
 /// // Run the "large-1m" alias, writing a JSON report to /tmp/report.json.
-/// run_single_mode("large-1m", Some(std::path::Path::new("/tmp/report.json")), "darwin-arm64");
+/// run_single_mode("large-1m", Some(std::path::Path::new("/tmp/report.json")), "darwin-arm64", BenchmarkEngine::Both);
 /// ```
-fn run_single_mode(name: &str, json_output: Option<&Path>, platform: &str) {
+fn run_single_mode(
+    name: &str,
+    json_output: Option<&Path>,
+    platform: &str,
+    engine: BenchmarkEngine,
+) {
     let resolved = resolve_single_name(name);
     let samples = build_samples();
     let sample = samples
@@ -892,25 +1251,116 @@ fn run_single_mode(name: &str, json_output: Option<&Path>, platform: &str) {
         .find(|s| s.name == resolved)
         .unwrap_or_else(|| panic!("unknown sample: {resolved}"));
     let cfg = config_for_sample(sample.name);
-    let result = run_ffi_baseline(&sample, cfg);
 
-    // Existing text output (backward compatible).
-    println!(
-        "single_sample={} html_bytes={} avg_ms={:.3} p95_ms={:.3} req_per_s={:.1}",
-        sample.name,
-        result.html_bytes,
-        result.stats.avg_ms,
-        result.stats.p95_ms,
-        result.stats.req_per_s
-    );
+    match engine {
+        BenchmarkEngine::FullBuffer => {
+            let result = run_ffi_baseline(&sample, cfg);
+            println!(
+                "single_sample={} html_bytes={} avg_ms={:.3} p95_ms={:.3} req_per_s={:.1}",
+                sample.name,
+                result.html_bytes,
+                result.stats.avg_ms,
+                result.stats.p95_ms,
+                result.stats.req_per_s
+            );
 
-    if let Some(path) = json_output {
-        let report = build_measurement_report(
-            &[(sample, result, cfg)],
-            &[], // No breakdown for single mode.
-            platform,
-        );
-        write_json_report(path, &report);
+            if let Some(path) = json_output {
+                let report = build_measurement_report(
+                    &[(sample, result, cfg)],
+                    &None,
+                    &[],
+                    platform,
+                    engine,
+                );
+                write_json_report(path, &report);
+            }
+        }
+        BenchmarkEngine::Streaming => {
+            #[cfg(feature = "streaming")]
+            {
+                let result = run_streaming_benchmark(&sample, cfg);
+                println!(
+                    "single_sample={} html_bytes={} avg_ms={:.3} p95_ms={:.3} ttfb_ms={:.3} ttlb_ms={:.3} req_per_s={:.1}",
+                    sample.name,
+                    result.html_bytes,
+                    result.stats.avg_ms,
+                    result.stats.p95_ms,
+                    result.ttfb_ms,
+                    result.ttlb_ms,
+                    result.stats.req_per_s
+                );
+
+                if let Some(path) = json_output {
+                    let report = build_measurement_report(
+                        &[],
+                        &Some(vec![(sample, result, cfg)]),
+                        &[],
+                        platform,
+                        engine,
+                    );
+                    write_json_report(path, &report);
+                }
+            }
+            #[cfg(not(feature = "streaming"))]
+            {
+                eprintln!(
+                    "warning: streaming engine requested but streaming feature is not enabled"
+                );
+            }
+        }
+        BenchmarkEngine::Both => {
+            let ffi_result = run_ffi_baseline(&sample, cfg);
+            println!(
+                "single_sample={} engine=full-buffer html_bytes={} avg_ms={:.3} p95_ms={:.3} req_per_s={:.1}",
+                sample.name,
+                ffi_result.html_bytes,
+                ffi_result.stats.avg_ms,
+                ffi_result.stats.p95_ms,
+                ffi_result.stats.req_per_s
+            );
+
+            #[cfg(feature = "streaming")]
+            {
+                let streaming_result = run_streaming_benchmark(&sample, cfg);
+                println!(
+                    "single_sample={} engine=streaming html_bytes={} avg_ms={:.3} p95_ms={:.3} ttfb_ms={:.3} ttlb_ms={:.3} req_per_s={:.1}",
+                    sample.name,
+                    streaming_result.html_bytes,
+                    streaming_result.stats.avg_ms,
+                    streaming_result.stats.p95_ms,
+                    streaming_result.ttfb_ms,
+                    streaming_result.ttlb_ms,
+                    streaming_result.stats.req_per_s
+                );
+
+                if let Some(path) = json_output {
+                    let report = build_measurement_report(
+                        &[(sample.clone(), ffi_result, cfg)],
+                        &Some(vec![(sample, streaming_result, cfg)]),
+                        &[],
+                        platform,
+                        engine,
+                    );
+                    write_json_report(path, &report);
+                }
+            }
+            #[cfg(not(feature = "streaming"))]
+            {
+                eprintln!(
+                    "warning: streaming engine requested but streaming feature is not enabled"
+                );
+                if let Some(path) = json_output {
+                    let report = build_measurement_report(
+                        &[(sample, ffi_result, cfg)],
+                        &None,
+                        &[],
+                        platform,
+                        engine,
+                    );
+                    write_json_report(path, &report);
+                }
+            }
+        }
     }
 }
 
@@ -933,52 +1383,175 @@ fn main() {
     let platform = cli.platform_override.unwrap_or_else(detect_platform);
 
     if let Some(ref single_name) = cli.single {
-        run_single_mode(single_name, cli.json_output.as_deref(), &platform);
+        run_single_mode(
+            single_name,
+            cli.json_output.as_deref(),
+            &platform,
+            cli.engine,
+        );
         return;
     }
 
     let samples = build_samples();
-    let mut results: Vec<(Sample, FfiSummary, RunConfig)> = Vec::new();
 
-    for sample in &samples {
-        let cfg = config_for_sample(sample.name);
-        let summary = run_ffi_baseline(sample, cfg);
-        results.push((sample.clone(), summary, cfg));
-    }
+    match cli.engine {
+        BenchmarkEngine::FullBuffer => {
+            let mut results: Vec<(Sample, FfiSummary, RunConfig)> = Vec::new();
 
-    // Existing text output (backward compatible).
-    let table_results: Vec<(Sample, FfiSummary)> = results
-        .iter()
-        .map(|(s, f, _)| (s.clone(), f.clone()))
-        .collect();
-    print_ffi_table(&table_results);
+            for sample in &samples {
+                let cfg = config_for_sample(sample.name);
+                let summary = run_ffi_baseline(sample, cfg);
+                results.push((sample.clone(), summary, cfg));
+            }
 
-    let medium = samples
-        .iter()
-        .find(|s| s.name == "medium")
-        .expect("medium sample");
-    let breakdown = run_breakdown(medium, 200);
-    let medium_ffi_avg = results
-        .iter()
-        .find(|(s, _, _)| s.name == "medium")
-        .map(|(_, r, _)| r.stats.avg_ms)
-        .expect("medium ffi result");
-    print_breakdown(medium, &breakdown, medium_ffi_avg);
+            // Existing text output (backward compatible).
+            let table_results: Vec<(Sample, FfiSummary)> = results
+                .iter()
+                .map(|(s, f, _)| (s.clone(), f.clone()))
+                .collect();
+            print_ffi_table(&table_results);
 
-    if let Some(ref path) = cli.json_output {
-        // Run breakdowns for all tiers to populate stage_breakdown in JSON.
-        let mut breakdowns: Vec<(&str, BreakdownSummary)> = Vec::new();
-        for sample in &samples {
-            let bd_iters = match sample.name {
-                "small" => 500,
-                "medium" | "medium-front-matter" => 200,
-                "large" => 10,
-                _ => 100,
-            };
-            let bd = run_breakdown(sample, bd_iters);
-            breakdowns.push((sample.name, bd));
+            let medium = samples
+                .iter()
+                .find(|s| s.name == "medium")
+                .expect("medium sample");
+            let breakdown = run_breakdown(medium, 200);
+            let medium_ffi_avg = results
+                .iter()
+                .find(|(s, _, _)| s.name == "medium")
+                .map(|(_, r, _)| r.stats.avg_ms)
+                .expect("medium ffi result");
+            print_breakdown(medium, &breakdown, medium_ffi_avg);
+
+            if let Some(ref path) = cli.json_output {
+                // Run breakdowns for all tiers to populate stage_breakdown in JSON.
+                let mut breakdowns: Vec<(&str, BreakdownSummary)> = Vec::new();
+                for sample in &samples {
+                    let bd_iters = match sample.name {
+                        "small" => 500,
+                        "medium" | "medium-front-matter" => 200,
+                        "large" => 10,
+                        _ => 100,
+                    };
+                    let bd = run_breakdown(sample, bd_iters);
+                    breakdowns.push((sample.name, bd));
+                }
+                let report =
+                    build_measurement_report(&results, &None, &breakdowns, &platform, cli.engine);
+                write_json_report(path, &report);
+            }
         }
-        let report = build_measurement_report(&results, &breakdowns, &platform);
-        write_json_report(path, &report);
+        BenchmarkEngine::Streaming => {
+            #[cfg(feature = "streaming")]
+            {
+                let mut results: Vec<(Sample, StreamingSummary, RunConfig)> = Vec::new();
+
+                for sample in &samples {
+                    let cfg = config_for_sample(sample.name);
+                    let summary = run_streaming_benchmark(sample, cfg);
+                    results.push((sample.clone(), summary, cfg));
+                }
+
+                // Text output for streaming engine.
+                let table_results: Vec<(Sample, StreamingSummary)> = results
+                    .iter()
+                    .map(|(s, f, _)| (s.clone(), f.clone()))
+                    .collect();
+                print_streaming_table(&table_results);
+
+                if let Some(ref path) = cli.json_output {
+                    let report =
+                        build_measurement_report(&[], &Some(results), &[], &platform, cli.engine);
+                    write_json_report(path, &report);
+                }
+            }
+            #[cfg(not(feature = "streaming"))]
+            {
+                eprintln!(
+                    "warning: streaming engine requested but streaming feature is not enabled"
+                );
+            }
+        }
+        BenchmarkEngine::Both => {
+            // Run full-buffer first.
+            let mut ffi_results: Vec<(Sample, FfiSummary, RunConfig)> = Vec::new();
+            for sample in &samples {
+                let cfg = config_for_sample(sample.name);
+                let summary = run_ffi_baseline(sample, cfg);
+                ffi_results.push((sample.clone(), summary, cfg));
+            }
+
+            // Print FFI table.
+            let ffi_table_results: Vec<(Sample, FfiSummary)> = ffi_results
+                .iter()
+                .map(|(s, f, _)| (s.clone(), f.clone()))
+                .collect();
+            print_ffi_table(&ffi_table_results);
+
+            // Then run streaming.
+            #[cfg(feature = "streaming")]
+            {
+                let mut streaming_results: Vec<(Sample, StreamingSummary, RunConfig)> = Vec::new();
+                for sample in &samples {
+                    let cfg = config_for_sample(sample.name);
+                    let summary = run_streaming_benchmark(sample, cfg);
+                    streaming_results.push((sample.clone(), summary, cfg));
+                }
+
+                // Print streaming table.
+                let streaming_table_results: Vec<(Sample, StreamingSummary)> = streaming_results
+                    .iter()
+                    .map(|(s, f, _)| (s.clone(), f.clone()))
+                    .collect();
+                print_streaming_table(&streaming_table_results);
+
+                // Print breakdown for medium sample.
+                let medium = samples
+                    .iter()
+                    .find(|s| s.name == "medium")
+                    .expect("medium sample");
+                let breakdown = run_breakdown(medium, 200);
+                let medium_ffi_avg = ffi_results
+                    .iter()
+                    .find(|(s, _, _)| s.name == "medium")
+                    .map(|(_, r, _)| r.stats.avg_ms)
+                    .expect("medium ffi result");
+                print_breakdown(medium, &breakdown, medium_ffi_avg);
+
+                if let Some(ref path) = cli.json_output {
+                    // Run breakdowns for all tiers to populate stage_breakdown in JSON.
+                    let mut breakdowns: Vec<(&str, BreakdownSummary)> = Vec::new();
+                    for sample in &samples {
+                        let bd_iters = match sample.name {
+                            "small" => 500,
+                            "medium" | "medium-front-matter" => 200,
+                            "large" => 10,
+                            _ => 100,
+                        };
+                        let bd = run_breakdown(sample, bd_iters);
+                        breakdowns.push((sample.name, bd));
+                    }
+                    let report = build_measurement_report(
+                        &ffi_results,
+                        &Some(streaming_results),
+                        &breakdowns,
+                        &platform,
+                        cli.engine,
+                    );
+                    write_json_report(path, &report);
+                }
+            }
+            #[cfg(not(feature = "streaming"))]
+            {
+                eprintln!(
+                    "warning: streaming engine requested but streaming feature is not enabled"
+                );
+                if let Some(ref path) = cli.json_output {
+                    let report =
+                        build_measurement_report(&ffi_results, &None, &[], &platform, cli.engine);
+                    write_json_report(path, &report);
+                }
+            }
+        }
     }
 }
