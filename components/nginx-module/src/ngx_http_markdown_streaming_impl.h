@@ -1191,21 +1191,36 @@ ngx_http_markdown_streaming_process_chunk(
             r->pool, r->connection->log);
 
         if (rc != NGX_OK) {
+            uint32_t  decomp_error_code;
+
+            /*
+             * Map decompressor return codes to FFI error codes:
+             * budget exceeded → ERROR_BUDGET_EXCEEDED for proper
+             * metrics/reason-code classification; all other errors
+             * → ERROR_INTERNAL.
+             */
+            if (rc == NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED) {
+                decomp_error_code = ERROR_BUDGET_EXCEEDED;
+            } else {
+                decomp_error_code = ERROR_INTERNAL;
+            }
+
             ngx_log_error(NGX_LOG_ERR,
                 r->connection->log, 0,
                 "markdown streaming: "
-                "decompression failed");
+                "decompression failed (rc=%i)",
+                rc);
 
             if (ctx->streaming.commit_state
                 == NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST)
             {
                 return
                     ngx_http_markdown_streaming_handle_postcommit_error(
-                        r, ctx, conf, ERROR_INTERNAL);
+                        r, ctx, conf, decomp_error_code);
             }
 
             return ngx_http_markdown_streaming_precommit_error(
-                r, ctx, conf, ERROR_INTERNAL);
+                r, ctx, conf, decomp_error_code);
         }
 
         if (decomp_data == NULL || decomp_len == 0) {
@@ -2179,7 +2194,8 @@ ngx_http_markdown_streaming_process_chain(
                     "idx=%ui cap=%ui",
                     idx,
                     ctx->streaming.failopen_consumed_capacity);
-                return NGX_ERROR;
+                return ngx_http_markdown_streaming_precommit_error(
+                    r, ctx, conf, ERROR_INTERNAL);
             }
 
             ctx->streaming.failopen_consumed_bufs[idx] = cl->buf;

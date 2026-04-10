@@ -39,6 +39,19 @@ ngx_http_markdown_streaming_decomp_size_to_uint(
 }
 
 /*
+ * Module-local sentinel: decompressed size budget exceeded.
+ *
+ * Returned by decomp_feed/decomp_finish when the cumulative
+ * decompressed output exceeds max_decompressed_size. The caller
+ * maps this to ERROR_BUDGET_EXCEEDED for proper metrics/reason-code
+ * classification, distinguishing it from ERROR_INTERNAL.
+ *
+ * Value chosen to avoid collision with NGX_OK (0), NGX_ERROR (-1),
+ * NGX_AGAIN (-2), NGX_DECLINED (-5), NGX_DONE (-4).
+ */
+#define NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED  -100
+
+/*
  * Streaming decompressor state.
  *
  * Maintains per-request decompression context for incremental
@@ -415,10 +428,24 @@ ngx_http_markdown_streaming_decomp_inflate_step(
 
         decomp->state.zlib.next_out =
             *buf_ptr + (*buf_size_ptr / 2);
-        decomp->state.zlib.avail_out =
-            (*buf_size_ptr / 2 > (size_t) UINT_MAX)
-            ? UINT_MAX
-            : (uInt) (*buf_size_ptr / 2);
+        {
+            uInt  half_out;
+
+            if (ngx_http_markdown_streaming_decomp_size_to_uint(
+                    *buf_size_ptr / 2, &half_out))
+            {
+                ngx_log_error(NGX_LOG_ERR, log, 0,
+                    "markdown streaming decomp: "
+                    "expanded buffer half %uz exceeds "
+                    "zlib uInt max",
+                    *buf_size_ptr / 2);
+                if (*heap_buf_ptr != NULL) {
+                    ngx_free(*heap_buf_ptr);
+                }
+                return -1;
+            }
+            decomp->state.zlib.avail_out = half_out;
+        }
     }
 
     return 0;
@@ -705,7 +732,7 @@ ngx_http_markdown_streaming_decomp_feed(
             >= decomp->max_decompressed_size)
         {
             /* Budget already exhausted */
-            return NGX_ERROR;
+            return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
         }
 
         remaining = decomp->max_decompressed_size
@@ -730,13 +757,25 @@ ngx_http_markdown_streaming_decomp_feed(
         ngx_int_t  inflate_rc;
 
         decomp->state.zlib.next_in = in_data;
-        decomp->state.zlib.avail_in =
-            (in_len > (size_t) UINT_MAX)
-            ? UINT_MAX : (uInt) in_len;
+        if (ngx_http_markdown_streaming_decomp_size_to_uint(
+                in_len, &decomp->state.zlib.avail_in))
+        {
+            ngx_log_error(NGX_LOG_ERR, log, 0,
+                "markdown streaming decomp: "
+                "input length %uz exceeds zlib uInt max",
+                in_len);
+            return NGX_ERROR;
+        }
         decomp->state.zlib.next_out = buf;
-        decomp->state.zlib.avail_out =
-            (buf_size > (size_t) UINT_MAX)
-            ? UINT_MAX : (uInt) buf_size;
+        if (ngx_http_markdown_streaming_decomp_size_to_uint(
+                buf_size, &decomp->state.zlib.avail_out))
+        {
+            ngx_log_error(NGX_LOG_ERR, log, 0,
+                "markdown streaming decomp: "
+                "buffer size %uz exceeds zlib uInt max",
+                buf_size);
+            return NGX_ERROR;
+        }
 
         inflate_rc =
             ngx_http_markdown_streaming_decomp_inflate_loop(
@@ -785,7 +824,7 @@ ngx_http_markdown_streaming_decomp_feed(
             "decompressed size %uz exceeds limit %uz",
             decomp->total_decompressed,
             decomp->max_decompressed_size);
-        return NGX_ERROR;
+        return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
     }
 
     *out_data = buf;
@@ -824,9 +863,15 @@ ngx_http_markdown_streaming_decomp_finish_zlib(
     decomp->state.zlib.next_in = Z_NULL;
     decomp->state.zlib.avail_in = 0;
     decomp->state.zlib.next_out = *buf_ptr;
-    decomp->state.zlib.avail_out =
-        (*buf_size_ptr > (size_t) UINT_MAX)
-        ? UINT_MAX : (uInt) *buf_size_ptr;
+    if (ngx_http_markdown_streaming_decomp_size_to_uint(
+            *buf_size_ptr, &decomp->state.zlib.avail_out))
+    {
+        ngx_log_error(NGX_LOG_ERR, log, 0,
+            "markdown streaming decomp: "
+            "finish buffer %uz exceeds zlib uInt max",
+            *buf_size_ptr);
+        return NGX_ERROR;
+    }
 
     for ( ;; ) {
         zrc = inflate(&decomp->state.zlib, Z_FINISH);
@@ -895,10 +940,23 @@ ngx_http_markdown_streaming_decomp_finish_zlib(
 
             using_heap = 1;
             decomp->state.zlib.next_out = *buf_ptr + old_size;
-            decomp->state.zlib.avail_out =
-                (*buf_size_ptr - old_size > (size_t) UINT_MAX)
-                ? UINT_MAX
-                : (uInt) (*buf_size_ptr - old_size);
+            {
+                uInt  expand_out;
+
+                if (ngx_http_markdown_streaming_decomp_size_to_uint(
+                        *buf_size_ptr - old_size, &expand_out))
+                {
+                    ngx_log_error(NGX_LOG_ERR, log, 0,
+                        "markdown streaming decomp: "
+                        "finish expand %uz exceeds "
+                        "zlib uInt max",
+                        *buf_size_ptr - old_size);
+                    ngx_http_markdown_streaming_decomp_finish_free_heap(
+                        &heap_buf);
+                    return NGX_ERROR;
+                }
+                decomp->state.zlib.avail_out = expand_out;
+            }
         }
     }
 
