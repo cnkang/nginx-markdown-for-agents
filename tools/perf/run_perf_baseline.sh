@@ -374,4 +374,14 @@ if [[ "$UPDATE_BASELINE" == true ]]; then
 fi
 
 log "Done."
-exit $THRESHOLD_EXIT
+
+# Final exit code: combine threshold engine and evidence pack verdicts.
+# If evidence pack was generated and returned NO_GO (exit 1), propagate
+# that even if the threshold engine passed (exit 0).  Errors (exit >= 2)
+# from either component are already handled above.
+FINAL_EXIT=$THRESHOLD_EXIT
+if [[ "$GENERATE_EVIDENCE_PACK" == true && $EVIDENCE_EXIT -eq 1 && $FINAL_EXIT -eq 0 ]]; then
+  log "[info] overriding exit code: evidence pack verdict is NO_GO"
+  FINAL_EXIT=1
+fi
+exit $FINAL_EXIT

@@ -114,6 +114,15 @@ def linear_regression_slope(x: list[float], y: list[float]) -> float:
 # ---------------------------------------------------------------------------
 
 
+def _first_not_none(*values: Any) -> Any:
+    """Return the first value that is not ``None``, or ``None`` if all are.
+
+    Unlike Python's ``or`` operator, this preserves legitimate falsy
+    values such as ``0``, ``0.0``, and ``""``.
+    """
+    return next((v for v in values if v is not None), None)
+
+
 def _resolve_streaming_metric(
     tier_name: str,
     key: str,
@@ -150,10 +159,14 @@ def _resolve_input_bytes(tier_data: dict) -> int | None:
     The Rust binary emits ``html_bytes``; the schema/docs use
     ``input_bytes``.  Prefer ``html_bytes`` (production key).
 
+    Uses ``is not None`` guard so that a legitimate ``html_bytes=0``
+    is preserved rather than falling through to ``input_bytes``.
+
     Returns:
         Input size in bytes, or ``None`` if neither key is present.
     """
-    return tier_data.get("html_bytes") or tier_data.get("input_bytes")
+    val = tier_data.get("html_bytes")
+    return val if val is not None else tier_data.get("input_bytes")
 
 
 def _safe_ratio(numerator: float, denominator: float) -> float:
@@ -522,15 +535,6 @@ def _build_streaming_report_subset(streaming_report: dict) -> dict:
     for tier_name, tier_data in streaming_report.get("tiers", {}).items():
         sm_tier = sm.get(tier_name, {})
 
-        # Use 'is not None' guards instead of 'or' to preserve legitimate
-        # zero values (e.g. peak_memory_bytes=0 on non-Unix platforms,
-        # p50_ms=0.0 for trivially fast conversions).
-        def _first_not_none(*values: Any) -> Any:
-            for v in values:
-                if v is not None:
-                    return v
-            return None
-
         tiers_subset[tier_name] = {
             "p50_ms": _first_not_none(
                 tier_data.get("p50_ms"), sm_tier.get("p50_ms")),
@@ -615,10 +619,12 @@ def generate_evidence_pack(
     ttfb_config = targets.get("ttfb_improvement", {})
     ttfb_max_ratio = ttfb_config.get("max_ratio", 0.5)
 
-    # No regression: JSON uses 'no_regression_small_medium', code accepts both
-    no_regression_config = targets.get(
-        "no_regression_small_medium"
-    ) or targets.get("no_regression", {})
+    # No regression: JSON uses 'no_regression_small_medium', code accepts both.
+    # Use 'is not None' so an empty dict {} (meaning "use all defaults") is
+    # not treated as falsy and silently replaced by the fallback key.
+    no_regression_config = targets.get("no_regression_small_medium")
+    if no_regression_config is None:
+        no_regression_config = targets.get("no_regression", {})
     no_regression_max_ratio = no_regression_config.get("max_ratio", 1.3)
 
     bounded_memory_result = evaluate_bounded_memory(
@@ -690,7 +696,9 @@ def generate_evidence_pack(
                     "p95_ms": tier_data.get("p95_ms"),
                     "p99_ms": tier_data.get("p99_ms"),
                     # Rust emits 'html_bytes'; accept both for compatibility.
-                    "input_bytes": tier_data.get("html_bytes") or tier_data.get("input_bytes"),
+                    "input_bytes": _first_not_none(
+                        tier_data.get("html_bytes"), tier_data.get("input_bytes"),
+                    ),
                 }
                 for tier_name, tier_data in fullbuffer_report.get("tiers", {}).items()
             },
