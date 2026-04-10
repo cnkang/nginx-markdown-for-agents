@@ -150,6 +150,64 @@ Required:
   reflect that (for example `_ms`, not `_us`).  Multiplying a coarse value
   to fill a finer unit creates false precision — operators and dashboards
   will interpret the metric as having resolution it does not possess.
+- **When a metric name implies a specific measurement semantics (for example
+  `cpu_time_ms`, `wall_time_ms`, `user_cpu_ms`), the implementation must
+  actually measure that quantity.  Do not alias one metric to another with a
+  misleading name (for example assigning `cpu_time_ms = ttlb_ms` and calling
+  it CPU time).  If the true measurement is unavailable, either (a) use a
+  name that accurately describes what is measured (for example `wall_time_ms`),
+  (b) add a comment explicitly documenting the approximation and its
+  limitations, or (c) defer the metric to a future release when the proper
+  data source is available.
+
+### 8b. Configuration–code alignment for tooling
+Historical issues: evidence targets nested under `targets` key but code read
+top-level keys; `no_regression_small_medium` in JSON but `no_regression` in
+code; `html_bytes` in Rust output but `input_bytes` in Python readers.
+
+Required:
+- When a configuration file (JSON, TOML, YAML) defines a nested schema (for
+  example `{"targets": {"bounded_memory": {...}}}`), every code path that
+  loads that configuration must use the correct nesting.  Do not assume the
+  configuration is flat if the production file has a top-level wrapper key.
+  **Always test with the actual production configuration file**, not only
+  with hand-crafted flat test fixtures.
+- When a configuration file and code use different key names for the same
+  concept (for example `max_slope_bytes_per_input_byte` in JSON vs
+  `max_slope` in code), use explicit fallback logic that tries both names
+  with a comment explaining the discrepancy.  Prefer aligning the names
+  across config and code in the same change set.
+- When a data producer (for example a Rust benchmark binary) emits a field
+  under one key name (for example `html_bytes`) and a consumer (for example
+  a Python evidence generator) reads under a different name (for example
+  `input_bytes`), the consumer must accept **both** names with a fallback
+  chain (for example `tier_data.get("html_bytes") or tier_data.get("input_bytes")`).
+  This is the consumer's responsibility — the producer's key name is the
+  source of truth.
+- **When combined reports are used** (for example `--engine both` produces a
+  single JSON with both full-buffer `tiers` and streaming `streaming_metrics`),
+  every evidence evaluation function that reads streaming data must check
+  **both** `streaming_metrics` (primary) and `tiers` (fallback), because the
+  same JSON file serves as both `--fullbuffer-report` and `--streaming-report`.
+
+### 8c. Benchmark averaging consistency
+Historical issues: warmup and fallback iterations included in latency/throughput
+averages but not in durations; markdown/token averages divided by `total_iters`
+while p50/p95 computed only from measured iterations.
+
+Required:
+- All per-iteration averages (latency, throughput, markdown size, token
+  estimates, flush count) must use the **same denominator** — the count of
+  iterations that contributed to the duration sample (non-warmup, non-error,
+  non-fallback).  Do not mix `total_iters` for some metrics and
+  `measured_iters` for others.
+- When accumulating per-iteration quantities (for example `markdown_len_sum`,
+  `token_sum`), only add to the accumulator when the iteration qualifies as
+  measured.  Use a per-iteration accumulator variable (for example
+  `iter_markdown_len`) and add it to the global sum only inside the measured
+  iteration guard.
+- In test assertions, verify that the denominator used for averages matches
+  the number of iterations contributing to percentile calculations.
 
 ### 9. Docs/tooling drift (README vs INSTALLATION vs validators)
 Historical issues: `726865e`, `2b0bd5d`, `83eca29`, `18dfb8c`, `4b2b761`, `09f5d1d`.
@@ -632,6 +690,8 @@ For each code change you are about to produce, mentally (or explicitly in a thin
 10. **FFI struct initialization**: when creating a zeroed/empty FFI struct (for example `MarkdownResult`), **prefer existing helper functions** (`empty_result()`, `zeroed_result()`, etc.) over writing literal `StructName { ... }` initializations. Only use literal initialization when the struct needs non-zero/default values, and in that case ensure all fields are present. (Rule 15)
 11. **FFI struct field additions**: when adding a field to any `#[repr(C)]` FFI struct (for example `MarkdownResult`), update (a) the Rust struct definition, (b) both public C header copies, (c) **all** struct literal initialization sites across `tests/` and `examples/` (grep for `StructName {`), (d) associated `reset_*()`/`free_*()` cleanup functions to zero the new field, and (e) any test helper constructors (`empty_result()`, `zeroed_result()`). (Rule 15)
 12. **Lifecycle ordering**: when reading data from a foreign-owned struct (FFI result, allocator-owned buffer), capture fields to local variables **before** calling the associated free/release function. Do not access struct fields after `*_free()` — the memory may be invalidated or zeroed. (Rule 15)
+13. **Benchmark averaging consistency**: all per-iteration averages (latency, throughput, markdown size, token estimates) must use the same denominator — the count of measured iterations (non-warmup, non-error, non-fallback). Do not mix `total_iters` for some metrics and `measured_iters` for others. Use per-iteration accumulators (for example `iter_markdown_len`) and add to global sums only inside the measured iteration guard. (Rule 8c)
+14. **Metric naming accuracy**: when a metric field name implies specific semantics (for example `cpu_time_ms`), the implementation must actually measure that quantity. If approximating with a different measurement (for example wall-clock TTLB), add a comment documenting the approximation or rename the field. (Rule 8)
 
 #### Shell scripts (`tools/`, e2e harnesses)
 1. Every `case` has a `*)` default clause. (Rule 18)
@@ -649,6 +709,17 @@ For each code change you are about to produce, mentally (or explicitly in a thin
    `shutil.which`), not just file existence. (Rule 19)
 2. Required harness checks affect pass/fail status (or exit non-zero), not
    INFO-only output. (Rule 19)
+3. **Configuration loading**: when loading a JSON/TOML/YAML config file,
+   verify the actual nesting structure matches what the code expects.  Test
+   with the production config file, not only hand-crafted flat fixtures.
+   (Rule 8b)
+4. **Consumer key compatibility**: when reading data from a producer that
+   may use different key names (for example `html_bytes` vs `input_bytes`),
+   accept both names with a fallback chain. (Rule 8b)
+5. **Combined report handling**: when a single JSON serves as both
+   full-buffer and streaming report (for example `--engine both`), read
+   streaming metrics from `streaming_metrics` first, fallback to `tiers`.
+   (Rule 8b)
 
 #### Documentation and tooling
 1. Canonical docs in `docs/` updated; no mirrored copies created. (Rule 9)
