@@ -1358,10 +1358,29 @@ ngx_http_markdown_streaming_finalize_decomp(
         r->pool, r->connection->log);
 
     if (rc != NGX_OK) {
+        uint32_t  finish_error_code;
+
+        /*
+         * Map decompressor return codes to FFI error codes:
+         * budget exceeded → ERROR_BUDGET_EXCEEDED for proper
+         * metrics/reason-code classification; all other errors
+         * → ERROR_INTERNAL (pre-commit) or ERROR_POST_COMMIT.
+         */
+        if (rc == NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED) {
+            finish_error_code = ERROR_BUDGET_EXCEEDED;
+        } else if (ctx->streaming.commit_state
+                   == NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST)
+        {
+            finish_error_code = ERROR_POST_COMMIT;
+        } else {
+            finish_error_code = ERROR_INTERNAL;
+        }
+
         ngx_log_error(NGX_LOG_ERR,
             r->connection->log, 0,
             "markdown streaming: decomp_finish "
-            "failed in finalize");
+            "failed in finalize (rc=%i)",
+            rc);
 
         if (ctx->streaming.commit_state
             == NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST)
@@ -1369,11 +1388,11 @@ ngx_http_markdown_streaming_finalize_decomp(
             return
                 ngx_http_markdown_streaming_handle_postcommit_error(
                     r, ctx, conf,
-                    ERROR_POST_COMMIT);
+                    finish_error_code);
         }
 
         return ngx_http_markdown_streaming_precommit_error(
-            r, ctx, conf, ERROR_INTERNAL);
+            r, ctx, conf, finish_error_code);
     }
 
     if (decomp_data != NULL && decomp_len > 0) {
