@@ -18,7 +18,7 @@ html5ever = "0.38"
 # DOM tree representation
 markup5ever_rcdom = "0.38"
 # Fast hashing for ETags (using version compatible with older Rust)
-blake3 = "1.2"
+blake3 = "1.8"
 # Hex encoding for ETag generation
 hex = "0.4"
 # Regular expressions for charset detection
