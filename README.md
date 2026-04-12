@@ -330,7 +330,7 @@ Makefile               Top-level build and test entrypoints
 
 ## Roadmap
 
-Current release (0.4.0):
+Current release (0.4.1):
 
 - Prometheus-compatible metrics endpoint for operational monitoring
 - Unified decision reason codes for conversion transparency
@@ -346,6 +346,7 @@ Current release (0.4.0):
 - Enhanced installation tooling
 - Shared metrics aggregation and runtime-regression coverage
 - Hardened CI/CD pipeline
+- Rust dependency audit remediation for `RUSTSEC-2026-0097` (`rand` `0.9.2` -> `0.9.3`)
 
 Near-term focus:
 

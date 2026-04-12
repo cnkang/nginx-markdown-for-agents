@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-04-12
+
+This patch release focuses on dependency security hygiene and release metadata alignment.
+
+### Fixed
+- Resolved RustSec advisory `RUSTSEC-2026-0097` by updating `rand` from `0.9.2` to `0.9.3` in `components/rust-converter/Cargo.lock` (dependency path: `proptest` -> `rand`)
+- Restored green status for the GitHub Actions `Rust Security Audit` job (`cargo audit --deny warnings`)
+
+### Changed
+- Bumped `nginx-markdown-converter` crate version to `0.4.1` for release-tag alignment
+- Updated release-facing project docs (`README.md`, `README_zh-CN.md`, `docs/project/PROJECT_STATUS.md`) to reflect the current release
+
 ## [0.4.0] - 2026-03-31
 
 This release focuses on operational visibility, rollout safety, and conversion performance. Key themes: Prometheus metrics endpoint, unified decision reason codes, rollout and rollback operational guides, benchmark corpus for regression detection, and parser path optimizations.
@@ -307,6 +319,11 @@ This project uses Semantic Versioning:
 - PATCH version for backwards-compatible bug fixes
 
 ### Upgrade Notes
+
+#### Upgrading to 0.4.1
+
+- This is a patch release with no directive or runtime behavior changes.
+- If you vendor `Cargo.lock`, refresh it to pick up the `rand` `0.9.3` security fix.
 
 #### Upgrading to 0.4.0
 
