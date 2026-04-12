@@ -28,7 +28,13 @@ const VOID_ELEMENTS: &[&str] = &[
 ];
 
 /// Elements whose entire subtree is removed (content discarded).
-const DANGEROUS_ELEMENTS: &[&str] = &["script", "style", "noscript", "applet", "link", "base"];
+const DANGEROUS_CONTAINER_ELEMENTS: &[&str] = &["script", "style", "noscript", "applet"];
+
+/// Dangerous elements that are also HTML void elements.
+///
+/// These must be handled as one-shot "skip this tag" events rather than
+/// entering skip-depth mode, because no matching end tag will arrive.
+const DANGEROUS_VOID_ELEMENTS: &[&str] = &["link", "base"];
 
 /// Embedded content elements: tags stripped, src/data URL extracted.
 const EMBEDDED_CONTENT_ELEMENTS: &[&str] = &["iframe", "object", "embed"];
@@ -78,6 +84,11 @@ pub struct StreamingSanitizer {
     /// Using a stack instead of a simple counter ensures mismatched end tags
     /// (e.g., `<iframe>...</form>`) don't corrupt the strip state.
     strip_stack: Vec<String>,
+    /// Open element names tracked for nesting-depth accounting.
+    ///
+    /// Using explicit names (rather than raw +/- counters) prevents malformed
+    /// end tags from reducing depth incorrectly.
+    nesting_stack: Vec<String>,
     /// Current HTML element nesting depth.
     nesting_depth: usize,
     /// Maximum allowed nesting depth.
@@ -100,6 +111,7 @@ impl StreamingSanitizer {
             skip_depth: 0,
             skip_element: None,
             strip_stack: Vec::new(),
+            nesting_stack: Vec::new(),
             nesting_depth: 0,
             max_nesting_depth: MAX_NESTING_DEPTH,
         }
@@ -180,14 +192,19 @@ impl StreamingSanitizer {
 
                 // Check nesting depth for elements that pass through to the emitter.
                 if !effectively_self_closing {
-                    self.nesting_depth = self.nesting_depth.saturating_add(1);
+                    self.nesting_stack.push(tag.to_string());
+                    self.nesting_depth = self.nesting_stack.len();
                     if self.nesting_depth > self.max_nesting_depth {
                         return SanitizeDecision::DepthExceeded;
                     }
                 }
 
                 // Dangerous elements: skip entire subtree
-                if DANGEROUS_ELEMENTS.contains(&tag) {
+                if DANGEROUS_VOID_ELEMENTS.contains(&tag) {
+                    return SanitizeDecision::Skip;
+                }
+
+                if DANGEROUS_CONTAINER_ELEMENTS.contains(&tag) {
                     if !effectively_self_closing {
                         self.skip_depth = 1;
                         self.skip_element = Some(tag.to_string());
@@ -262,7 +279,7 @@ impl StreamingSanitizer {
                         if self.skip_element.as_deref() == Some(tag) {
                             self.skip_depth = 0;
                             self.skip_element = None;
-                            self.nesting_depth = self.nesting_depth.saturating_sub(1);
+                            self.pop_open_tag(tag);
                         }
                     } else {
                         self.skip_depth = self.skip_depth.saturating_sub(1);
@@ -270,7 +287,7 @@ impl StreamingSanitizer {
                     return SanitizeDecision::Skip;
                 }
 
-                self.nesting_depth = self.nesting_depth.saturating_sub(1);
+                self.pop_open_tag(tag);
 
                 // Strip stack tracking for embedded/form elements.
                 // Only pop if the end tag matches the most recent strip entry,
@@ -341,6 +358,13 @@ impl StreamingSanitizer {
     pub fn nesting_depth(&self) -> usize {
         self.nesting_depth
     }
+
+    fn pop_open_tag(&mut self, tag: &str) {
+        if let Some(idx) = self.nesting_stack.iter().rposition(|open| open == tag) {
+            self.nesting_stack.remove(idx);
+        }
+        self.nesting_depth = self.nesting_stack.len();
+    }
 }
 
 impl Default for StreamingSanitizer {
@@ -377,15 +401,20 @@ impl Default for StreamingSanitizer {
 ///
 /// `true` if the trimmed, lowercased URL begins with any dangerous scheme prefix, `false` otherwise.
 fn is_dangerous_url(url: &str) -> bool {
-    let lower = url.trim().to_lowercase();
+    let trimmed = url.trim();
+    if trimmed.chars().any(|ch| ch == '\0' || ch.is_control()) {
+        return true;
+    }
+
+    let lower = trimmed.to_ascii_lowercase();
     DANGEROUS_URL_SCHEMES
         .iter()
         .any(|scheme| lower.starts_with(scheme))
 }
 
-/// Filters an attribute list, removing event-handler attributes (names starting with `on`
-/// except the exact name `"on"`) and `href`/`src` attributes whose values use a
-/// dangerous URL scheme.
+/// Filters an attribute list, removing event-handler attributes (names starting
+/// with `on` except the exact name `"on"`), inline `style`, and `href`/`src`
+/// attributes whose values use a dangerous URL scheme.
 ///
 /// Returns a new `Vec<(String, String)>` containing only the allowed attributes.
 ///
@@ -412,6 +441,10 @@ fn sanitize_attributes(attrs: &[(String, String)]) -> Vec<(String, String)> {
         .filter(|(name, value)| {
             // Remove event handlers (on* prefix, but not bare "on")
             if name.len() > 2 && name.starts_with("on") {
+                return false;
+            }
+            // Drop inline style to avoid CSS-based script/navigation vectors.
+            if name == "style" {
                 return false;
             }
             // Remove dangerous URLs from href/src
@@ -643,6 +676,25 @@ mod tests {
     }
 
     #[test]
+    fn test_style_attribute_removed() {
+        let mut san = StreamingSanitizer::new();
+        let decision = san.process_event(start_tag(
+            "div",
+            vec![
+                ("style", "background:url(javascript:alert(1))"),
+                ("class", "safe"),
+            ],
+        ));
+        match decision {
+            SanitizeDecision::PassModified(StreamEvent::StartTag { attrs, .. }) => {
+                assert!(!attrs.iter().any(|(k, _)| k == "style"));
+                assert!(attrs.iter().any(|(k, _)| k == "class"));
+            }
+            _ => panic!("Expected PassModified, got {:?}", decision),
+        }
+    }
+
+    #[test]
     fn test_bare_on_not_removed() {
         let mut san = StreamingSanitizer::new();
         let decision = san.process_event(start_tag("div", vec![("on", "value")]));
@@ -692,6 +744,12 @@ mod tests {
         assert!(is_dangerous_url("JAVASCRIPT:alert(1)"));
     }
 
+    #[test]
+    fn test_dangerous_url_with_control_chars() {
+        assert!(is_dangerous_url("javascript:\u{0000}alert(1)"));
+        assert!(is_dangerous_url("java\u{0009}script:alert(1)"));
+    }
+
     // --- Nesting depth ---
 
     #[test]
@@ -733,6 +791,44 @@ mod tests {
             san.process_event(end_tag("p")),
             SanitizeDecision::Pass(_)
         ));
+    }
+
+    #[test]
+    fn test_stray_end_tag_does_not_reduce_nesting_depth() {
+        let mut san = StreamingSanitizer::new();
+        assert!(matches!(
+            san.process_event(start_tag("div", vec![])),
+            SanitizeDecision::Pass(_)
+        ));
+        assert_eq!(san.nesting_depth(), 1);
+
+        assert!(matches!(
+            san.process_event(end_tag("span")),
+            SanitizeDecision::Pass(_)
+        ));
+        assert_eq!(san.nesting_depth(), 1);
+
+        assert!(matches!(
+            san.process_event(end_tag("div")),
+            SanitizeDecision::Pass(_)
+        ));
+        assert_eq!(san.nesting_depth(), 0);
+    }
+
+    #[test]
+    fn test_dangerous_void_elements_do_not_enter_skip_mode() {
+        let mut san = StreamingSanitizer::new();
+        assert_eq!(
+            san.process_event(start_tag("link", vec![("href", "https://x.test")],)),
+            SanitizeDecision::Skip
+        );
+        assert!(!san.is_skipping());
+
+        assert_eq!(
+            san.process_event(start_tag("base", vec![("href", "https://x.test")],)),
+            SanitizeDecision::Skip
+        );
+        assert!(!san.is_skipping());
     }
 
     // --- Mismatched tag resilience ---

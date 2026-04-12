@@ -264,7 +264,12 @@ impl SecurityValidator {
     /// assert!(!validator.is_dangerous_url("/relative/path"));
     /// ```
     pub fn is_dangerous_url(&self, url: &str) -> bool {
-        let url_lower = url.trim().to_lowercase();
+        let trimmed = url.trim();
+        if trimmed.chars().any(|ch| ch == '\0' || ch.is_control()) {
+            return true;
+        }
+
+        let url_lower = trimmed.to_ascii_lowercase();
         DANGEROUS_URL_SCHEMES
             .iter()
             .any(|scheme| url_lower.starts_with(scheme))
@@ -285,6 +290,11 @@ impl SecurityValidator {
 
             // Check for event handlers
             if self.is_event_handler(attr_name) {
+                return SanitizeAction::StripAttributes;
+            }
+
+            // Inline CSS can contain script/navigation vectors and obfuscation.
+            if attr_name == "style" {
                 return SanitizeAction::StripAttributes;
             }
 
@@ -371,6 +381,11 @@ impl SecurityValidator {
 
             // Remove event handlers
             if self.is_event_handler(attr_name) {
+                to_remove.push(attr_name.to_string());
+            }
+
+            // Remove inline style attributes for defense-in-depth.
+            if attr_name == "style" {
                 to_remove.push(attr_name.to_string());
             }
 
@@ -531,6 +546,8 @@ mod tests {
         assert!(validator.is_dangerous_url("data:text/html,<script>alert('xss')</script>"));
         assert!(validator.is_dangerous_url("vbscript:msgbox('xss')"));
         assert!(validator.is_dangerous_url("file:///etc/passwd"));
+        assert!(validator.is_dangerous_url("javascript:\u{0000}alert('xss')"));
+        assert!(validator.is_dangerous_url("java\u{0009}script:alert('xss')"));
 
         // Safe URLs
         assert!(!validator.is_dangerous_url("https://example.com"));

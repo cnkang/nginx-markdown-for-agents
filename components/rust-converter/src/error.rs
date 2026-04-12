@@ -3,7 +3,7 @@
 use std::fmt;
 
 /// Errors that can occur during HTML to Markdown conversion
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum ConversionError {
     /// HTML parsing failed
     ParseError(String),

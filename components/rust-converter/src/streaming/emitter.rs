@@ -545,7 +545,7 @@ impl IncrementalEmitter {
                 if let StructuralContext::CodeBlock(l) = ctx {
                     l.clone()
                 } else {
-                    self.code_fence_lang.clone()
+                    None
                 }
             })
             .or_else(|| self.code_fence_lang.clone());

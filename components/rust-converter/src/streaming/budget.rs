@@ -68,6 +68,58 @@ impl Default for MemoryBudget {
 }
 
 impl MemoryBudget {
+    /// Build a budget from a caller-provided total-memory cap.
+    ///
+    /// Behavior:
+    /// - `total == 0`: return defaults.
+    /// - `total >= default.total`: keep default stage caps and override only
+    ///   `total`.
+    /// - `total < default.total`: scale stage caps proportionally so stage-cap
+    ///   sum equals `total`.
+    pub fn for_total(total: usize) -> Self {
+        let defaults = Self::default();
+        if total == 0 {
+            return defaults;
+        }
+
+        if total >= defaults.total {
+            return Self { total, ..defaults };
+        }
+
+        let weights = [
+            defaults.state_stack,
+            defaults.output_buffer,
+            defaults.charset_sniff,
+            defaults.lookahead,
+        ];
+        let weight_sum = weights.iter().copied().sum::<usize>();
+
+        let mut scaled = [0usize; 4];
+        for (idx, weight) in weights.iter().copied().enumerate() {
+            scaled[idx] = total.saturating_mul(weight) / weight_sum;
+        }
+
+        // Distribute integer-division remainder deterministically so the
+        // sub-budget sum stays exactly equal to `total`.
+        let mut assigned = scaled.iter().copied().sum::<usize>();
+        let priority = [1usize, 0usize, 3usize, 2usize];
+        let mut pidx = 0usize;
+        while assigned < total {
+            let slot = priority[pidx % priority.len()];
+            scaled[slot] = scaled[slot].saturating_add(1);
+            assigned += 1;
+            pidx += 1;
+        }
+
+        Self {
+            total,
+            state_stack: scaled[0],
+            output_buffer: scaled[1],
+            charset_sniff: scaled[2],
+            lookahead: scaled[3],
+        }
+    }
+
     /// Validate that allocating `additional` bytes does not exceed the budget for a pipeline stage.
     ///
     /// # Errors
@@ -84,7 +136,6 @@ impl MemoryBudget {
     ///
     /// let _ = MemoryBudget::check_allocation("state_stack", 0, 100, 1024).unwrap();
     /// ```
-    #[cfg(feature = "streaming")]
     pub fn check_allocation(
         stage: &str,
         current: usize,
@@ -123,7 +174,6 @@ impl MemoryBudget {
     /// let b = MemoryBudget::default();
     /// assert!(b.check_state_stack(0, 100).is_ok());
     /// ```
-    #[cfg(feature = "streaming")]
     pub fn check_state_stack(
         &self,
         current: usize,
@@ -147,7 +197,6 @@ impl MemoryBudget {
     /// let b = MemoryBudget::default();
     /// assert!(b.check_output_buffer(0, 1024).is_ok());
     /// ```
-    #[cfg(feature = "streaming")]
     pub fn check_output_buffer(
         &self,
         current: usize,
@@ -172,7 +221,6 @@ impl MemoryBudget {
     /// let budget = MemoryBudget::default();
     /// assert!(budget.check_lookahead(0, 1024).is_ok());
     /// ```
-    #[cfg(feature = "streaming")]
     pub fn check_lookahead(
         &self,
         current: usize,
@@ -205,7 +253,6 @@ impl MemoryBudget {
     /// let err = budget.check_total(budget.total, 1).unwrap_err();
     /// assert_eq!(err.code(), 6);
     /// ```
-    #[cfg(feature = "streaming")]
     pub fn check_total(
         &self,
         current_total: usize,
@@ -227,6 +274,36 @@ mod tests {
         assert_eq!(budget.output_buffer, 256 * 1024);
         assert_eq!(budget.charset_sniff, 1024);
         assert_eq!(budget.lookahead, 64 * 1024);
+    }
+
+    #[test]
+    fn test_for_total_zero_returns_default() {
+        let budget = MemoryBudget::for_total(0);
+        assert_eq!(budget.total, 2 * 1024 * 1024);
+        assert_eq!(budget.state_stack, 64 * 1024);
+        assert_eq!(budget.output_buffer, 256 * 1024);
+        assert_eq!(budget.charset_sniff, 1024);
+        assert_eq!(budget.lookahead, 64 * 1024);
+    }
+
+    #[test]
+    fn test_for_total_large_keeps_default_stage_caps() {
+        let budget = MemoryBudget::for_total(8 * 1024 * 1024);
+        assert_eq!(budget.total, 8 * 1024 * 1024);
+        assert_eq!(budget.state_stack, 64 * 1024);
+        assert_eq!(budget.output_buffer, 256 * 1024);
+        assert_eq!(budget.charset_sniff, 1024);
+        assert_eq!(budget.lookahead, 64 * 1024);
+    }
+
+    #[test]
+    fn test_for_total_scales_down_and_preserves_sum() {
+        let budget = MemoryBudget::for_total(256 * 1024);
+        let sum =
+            budget.state_stack + budget.output_buffer + budget.charset_sniff + budget.lookahead;
+        assert_eq!(budget.total, 256 * 1024);
+        assert_eq!(sum, budget.total);
+        assert!(budget.output_buffer > 0);
     }
 
     #[test]

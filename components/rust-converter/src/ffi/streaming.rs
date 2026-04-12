@@ -51,6 +51,14 @@ pub struct StreamingConverterHandle {
     estimate_tokens: bool,
 }
 
+fn budget_from_streaming_total(streaming_budget: u64) -> MemoryBudget {
+    if streaming_budget > 0 {
+        MemoryBudget::for_total(streaming_budget as usize)
+    } else {
+        MemoryBudget::default()
+    }
+}
+
 /// Create a new streaming converter handle.
 ///
 /// The returned handle is an opaque pointer owned by the caller and must be
@@ -801,5 +809,15 @@ mod tests {
 
         /* Use free() instead of finalize() or abort() */
         unsafe { markdown_streaming_free(handle) };
+    }
+
+    #[test]
+    fn test_budget_from_streaming_total_scales_down() {
+        let budget = budget_from_streaming_total(64 * 1024);
+        let sum =
+            budget.state_stack + budget.output_buffer + budget.charset_sniff + budget.lookahead;
+
+        assert_eq!(budget.total, 64 * 1024);
+        assert_eq!(sum, budget.total);
     }
 }
