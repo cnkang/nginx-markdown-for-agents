@@ -58,22 +58,22 @@ impl PageMetadata {
     /// ```
     pub fn bytes_estimate(&self) -> usize {
         let mut total = 0usize;
-        if let Some(ref s) = self.title {
+        if let Some(s) = self.title.as_ref() {
             total = total.saturating_add(s.len());
         }
-        if let Some(ref s) = self.description {
+        if let Some(s) = self.description.as_ref() {
             total = total.saturating_add(s.len());
         }
-        if let Some(ref s) = self.url {
+        if let Some(s) = self.url.as_ref() {
             total = total.saturating_add(s.len());
         }
-        if let Some(ref s) = self.image {
+        if let Some(s) = self.image.as_ref() {
             total = total.saturating_add(s.len());
         }
-        if let Some(ref s) = self.author {
+        if let Some(s) = self.author.as_ref() {
             total = total.saturating_add(s.len());
         }
-        if let Some(ref s) = self.published {
+        if let Some(s) = self.published.as_ref() {
             total = total.saturating_add(s.len());
         }
         total

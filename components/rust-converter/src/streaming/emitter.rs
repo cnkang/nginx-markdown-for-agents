@@ -40,6 +40,8 @@ const FLUSH_TAGS: &[&str] = &[
 /// them to `flushed` at each flush point. The caller retrieves ready
 /// output via [`take_flushed`](Self::take_flushed).
 pub struct IncrementalEmitter {
+    /// Memory budget used for output-buffer enforcement.
+    budget: MemoryBudget,
     /// Pending output bytes (bounded by `max_buffer_size`).
     buffer: Vec<u8>,
     /// Maximum size of the pending buffer (from [`MemoryBudget`]).
@@ -94,6 +96,7 @@ impl IncrementalEmitter {
     /// ```
     pub fn new(budget: &MemoryBudget) -> Self {
         Self {
+            budget: budget.clone(),
             buffer: Vec::new(),
             max_buffer_size: budget.output_buffer,
             flushed: Vec::new(),
@@ -360,18 +363,15 @@ impl IncrementalEmitter {
                 self.write_str("\n")?;
                 self.last_was_newline = true;
                 self.needs_block_separator = true;
-                self.trigger_flush()?;
             }
             StructuralContext::Paragraph => {
                 self.write_str("\n")?;
                 self.last_was_newline = true;
                 self.needs_block_separator = true;
-                self.trigger_flush()?;
             }
             StructuralContext::OrderedList(_) | StructuralContext::UnorderedList => {
                 self.list_depth = sm.list_depth;
                 self.needs_block_separator = true;
-                self.trigger_flush()?;
             }
             StructuralContext::ListItem => {
                 // Ensure newline after list item content
@@ -379,7 +379,6 @@ impl IncrementalEmitter {
                     self.write_str("\n")?;
                     self.last_was_newline = true;
                 }
-                self.trigger_flush()?;
             }
             StructuralContext::CodeBlock(_) => {
                 // Emit deferred code fence if not yet emitted (empty code block)
@@ -394,7 +393,6 @@ impl IncrementalEmitter {
                 self.code_fence_lang = None;
                 self.last_was_newline = true;
                 self.needs_block_separator = true;
-                self.trigger_flush()?;
             }
             StructuralContext::InlineCode => {
                 if self.in_link {
@@ -406,7 +404,6 @@ impl IncrementalEmitter {
             StructuralContext::Blockquote => {
                 self.blockquote_depth = sm.blockquote_depth;
                 self.needs_block_separator = true;
-                self.trigger_flush()?;
             }
             StructuralContext::Link(href) => {
                 self.in_link = false;
@@ -431,6 +428,11 @@ impl IncrementalEmitter {
                 }
             }
             _ => {}
+        }
+        if let Some(tag) = flush_tag_for_context(ctx)
+            && is_flush_tag(tag)
+        {
+            self.trigger_flush()?;
         }
         Ok(())
     }
@@ -726,13 +728,7 @@ impl IncrementalEmitter {
                     // Prepend blockquote markers on the new line
                     if self.blockquote_depth > 0 {
                         let prefix_size = 2 * self.blockquote_depth;
-                        if self.buffer.len().saturating_add(prefix_size) > self.max_buffer_size {
-                            return Err(ConversionError::BudgetExceeded {
-                                stage: "output_buffer".to_string(),
-                                used: self.buffer.len() + prefix_size,
-                                limit: self.max_buffer_size,
-                            });
-                        }
+                        self.check_buffer_budget(prefix_size)?;
                         for _ in 0..self.blockquote_depth {
                             self.buffer.extend_from_slice(b"> ");
                         }
@@ -779,15 +775,8 @@ impl IncrementalEmitter {
 
     /// Check that adding `additional` bytes won't exceed the buffer budget.
     fn check_buffer_budget(&self, additional: usize) -> Result<(), ConversionError> {
-        let new_size = self.buffer.len().saturating_add(additional);
-        if new_size > self.max_buffer_size {
-            return Err(ConversionError::BudgetExceeded {
-                stage: "output_buffer".to_string(),
-                used: new_size,
-                limit: self.max_buffer_size,
-            });
-        }
-        Ok(())
+        self.budget
+            .check_output_buffer(self.buffer.len(), additional)
     }
 
     /// Flushes pending output into the ready/flushed buffer and records a flush point.
@@ -959,6 +948,24 @@ fn normalize_pending(bytes: &[u8]) -> Vec<u8> {
 /// `true` if `tag` is a block-level flush trigger, `false` otherwise.
 pub fn is_flush_tag(tag: &str) -> bool {
     FLUSH_TAGS.contains(&tag)
+}
+
+fn flush_tag_for_context(ctx: &StructuralContext) -> Option<&'static str> {
+    match ctx {
+        StructuralContext::Heading(1) => Some("h1"),
+        StructuralContext::Heading(2) => Some("h2"),
+        StructuralContext::Heading(3) => Some("h3"),
+        StructuralContext::Heading(4) => Some("h4"),
+        StructuralContext::Heading(5) => Some("h5"),
+        StructuralContext::Heading(6) => Some("h6"),
+        StructuralContext::Paragraph => Some("p"),
+        StructuralContext::ListItem => Some("li"),
+        StructuralContext::CodeBlock(_) => Some("pre"),
+        StructuralContext::Blockquote => Some("blockquote"),
+        StructuralContext::OrderedList(_) => Some("ol"),
+        StructuralContext::UnorderedList => Some("ul"),
+        _ => None,
+    }
 }
 
 #[cfg(test)]

@@ -21,8 +21,9 @@ use std::borrow::Cow;
 use crate::charset::detect_charset;
 use crate::error::ConversionError;
 
-/// Maximum bytes to buffer for charset sniffing (matches `charset::META_SCAN_LIMIT`).
-const SNIFF_BUFFER_LIMIT: usize = 1024;
+/// Default maximum bytes to buffer for charset sniffing
+/// (matches `charset::META_SCAN_LIMIT`).
+const DEFAULT_SNIFF_BUFFER_LIMIT: usize = 1024;
 
 /// Streaming charset detection state machine.
 ///
@@ -37,6 +38,8 @@ pub enum CharsetState {
         header_charset: Option<String>,
         /// Accumulated bytes for meta charset sniffing.
         sniff_buffer: Vec<u8>,
+        /// Maximum bytes retained in `sniff_buffer` before resolution.
+        sniff_limit: usize,
     },
     /// Charset resolved; decoder is `None` for UTF-8 (zero-copy).
     Resolved {
@@ -84,6 +87,7 @@ impl std::fmt::Debug for CharsetState {
             CharsetState::Pending {
                 header_charset,
                 sniff_buffer,
+                ..
             } => f
                 .debug_struct("Pending")
                 .field("header_charset", header_charset)
@@ -101,7 +105,8 @@ impl std::fmt::Debug for CharsetState {
 impl CharsetState {
     /// Creates a new `CharsetState` in the `Pending` state with no header charset and an empty sniff buffer.
     ///
-    /// The returned state will accumulate bytes (up to SNIFF_BUFFER_LIMIT) while awaiting charset resolution.
+    /// The returned state will accumulate bytes (up to the default sniff limit)
+    /// while awaiting charset resolution.
     ///
     /// # Examples
     ///
@@ -112,9 +117,15 @@ impl CharsetState {
     /// state.set_content_type(Some("text/html; charset=UTF-8"));
     /// ```
     pub fn new() -> Self {
+        Self::with_sniff_limit(DEFAULT_SNIFF_BUFFER_LIMIT)
+    }
+
+    /// Creates a new `CharsetState` with a custom sniff-buffer limit.
+    pub fn with_sniff_limit(sniff_limit: usize) -> Self {
         CharsetState::Pending {
             header_charset: None,
             sniff_buffer: Vec::new(),
+            sniff_limit,
         }
     }
 
@@ -185,9 +196,10 @@ impl CharsetState {
             CharsetState::Pending {
                 header_charset,
                 mut sniff_buffer,
+                sniff_limit,
             } => {
                 // If header charset is set, resolve immediately
-                if let Some(ref cs) = header_charset {
+                if let Some(cs) = header_charset.as_ref() {
                     let (mut new_state, _) = resolve_charset(cs).map_err(|e| {
                         *self = CharsetState::Failed(format!("{}", e));
                         e
@@ -207,15 +219,15 @@ impl CharsetState {
                     return Ok(Cow::Owned(result));
                 }
 
-                // Accumulate data in sniff buffer, capped at SNIFF_BUFFER_LIMIT.
+                // Accumulate data in sniff buffer, capped at sniff_limit.
                 // Only retain enough bytes for charset detection; any excess
                 // from a large chunk is kept aside and transcoded after
                 // resolution, avoiding unbounded sniff buffer growth.
-                let remaining_capacity = SNIFF_BUFFER_LIMIT.saturating_sub(sniff_buffer.len());
+                let remaining_capacity = sniff_limit.saturating_sub(sniff_buffer.len());
                 let sniff_bytes = data.len().min(remaining_capacity);
                 sniff_buffer.extend_from_slice(&data[..sniff_bytes]);
 
-                if sniff_buffer.len() >= SNIFF_BUFFER_LIMIT {
+                if sniff_buffer.len() >= sniff_limit {
                     // Enough data to detect charset from HTML meta or default
                     let detected = detect_charset(None, &sniff_buffer);
                     let (mut new_state, _) = resolve_charset(&detected).map_err(|e| {
@@ -243,6 +255,7 @@ impl CharsetState {
                     *self = CharsetState::Pending {
                         header_charset,
                         sniff_buffer,
+                        sniff_limit,
                     };
                     Ok(Cow::Owned(Vec::new()))
                 }
@@ -301,13 +314,14 @@ impl CharsetState {
             CharsetState::Pending {
                 header_charset,
                 sniff_buffer,
+                ..
             } => {
                 if sniff_buffer.is_empty() {
                     *self = CharsetState::Resolved { decoder: None };
                     return Ok(Vec::new());
                 }
                 // Resolve charset with whatever we have
-                let charset = if let Some(ref cs) = header_charset {
+                let charset = if let Some(cs) = header_charset.as_ref() {
                     cs.clone()
                 } else {
                     detect_charset(None, &sniff_buffer)
@@ -572,6 +586,22 @@ mod tests {
         assert!(result.is_empty());
     }
 
+    #[test]
+    fn test_custom_sniff_limit_is_enforced() {
+        let mut state = CharsetState::with_sniff_limit(8);
+
+        let first = state.feed(b"<p>1234").unwrap();
+        assert!(first.is_empty(), "first chunk should stay pending");
+        assert!(state.is_pending());
+
+        let second = state.feed(b"5").unwrap();
+        assert!(
+            !second.is_empty(),
+            "second chunk should resolve once sniff limit is reached"
+        );
+        assert!(state.is_resolved());
+    }
+
     // --- HTML meta charset detection ---
 
     #[test]
@@ -581,8 +611,8 @@ mod tests {
         // Build HTML with meta charset that exceeds sniff buffer
         let mut html = Vec::new();
         html.extend_from_slice(b"<html><head><meta charset=\"UTF-8\"></head><body>");
-        // Pad to exceed SNIFF_BUFFER_LIMIT
-        while html.len() < SNIFF_BUFFER_LIMIT + 1 {
+        // Pad to exceed DEFAULT_SNIFF_BUFFER_LIMIT
+        while html.len() < DEFAULT_SNIFF_BUFFER_LIMIT + 1 {
             html.extend_from_slice(b"x");
         }
         html.extend_from_slice(b"</body></html>");
@@ -618,7 +648,7 @@ mod tests {
         // Feed data without any charset indication, exceeding sniff limit
         let mut html = Vec::new();
         html.extend_from_slice(b"<html><body>");
-        while html.len() < SNIFF_BUFFER_LIMIT + 1 {
+        while html.len() < DEFAULT_SNIFF_BUFFER_LIMIT + 1 {
             html.extend_from_slice(b"Hello World ");
         }
         html.extend_from_slice(b"</body></html>");
@@ -787,7 +817,7 @@ mod tests {
         // Build HTML with ISO-8859-1 meta charset, padded to exceed sniff limit
         let mut html = Vec::new();
         html.extend_from_slice(b"<html><head><meta charset=\"ISO-8859-1\"></head><body>caf\xe9");
-        while html.len() < SNIFF_BUFFER_LIMIT + 1 {
+        while html.len() < DEFAULT_SNIFF_BUFFER_LIMIT + 1 {
             html.push(b' ');
         }
         html.extend_from_slice(b"</body></html>");
@@ -1032,7 +1062,7 @@ mod tests {
 
             // Streaming: feed all data at once (exceeding sniff buffer)
             let mut padded = encoded_bytes.to_vec();
-            while padded.len() < SNIFF_BUFFER_LIMIT + 1 {
+            while padded.len() < DEFAULT_SNIFF_BUFFER_LIMIT + 1 {
                 // Pad with spaces (safe in all single-byte encodings)
                 padded.push(b' ');
             }

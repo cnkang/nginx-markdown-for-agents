@@ -135,7 +135,7 @@ impl StreamingConverter {
         };
         Self {
             options,
-            charset_state: CharsetState::new(),
+            charset_state: CharsetState::with_sniff_limit(budget.charset_sniff),
             tokenizer: StreamingTokenizer::new(),
             sanitizer: StreamingSanitizer::new(),
             state_machine: StructuralStateMachine::new(&budget),
@@ -594,7 +594,7 @@ impl StreamingConverter {
         self.bytes_emitted = self.bytes_emitted.saturating_add(flushed.len());
 
         // Update ETag hasher
-        if let Some(ref mut hasher) = self.etag_hasher {
+        if let Some(hasher) = self.etag_hasher.as_mut() {
             hasher.update(flushed);
         }
 
@@ -632,13 +632,7 @@ impl StreamingConverter {
 
         // Enforce budget.total: the working set must not exceed the
         // declared total-memory cap.
-        if working_set > self.budget.total {
-            return Err(ConversionError::BudgetExceeded {
-                stage: "total".to_string(),
-                used: working_set,
-                limit: self.budget.total,
-            });
-        }
+        self.budget.check_total(0, working_set)?;
         Ok(())
     }
 
@@ -666,10 +660,13 @@ impl StreamingConverter {
             StreamEvent::Text(t) => t.len(),
             _ => 0,
         };
+        let lookahead_check = self
+            .budget
+            .check_lookahead(self.head_bytes_seen, event_cost);
         self.head_bytes_seen = self.head_bytes_seen.saturating_add(event_cost);
 
         // Check lookahead budget — if exceeded, signal fallback needed.
-        if self.head_bytes_seen > self.budget.lookahead {
+        if lookahead_check.is_err() {
             return true; // budget exceeded
         }
 
@@ -852,7 +849,7 @@ impl StreamingConverter {
         if url.starts_with("http://") || url.starts_with("https://") || url.starts_with("//") {
             return url.to_string();
         }
-        let Some(ref base) = self.options.base_url else {
+        let Some(base) = self.options.base_url.as_ref() else {
             return url.to_string();
         };
         if !base.starts_with("http://") && !base.starts_with("https://") {
@@ -1069,6 +1066,27 @@ mod tests {
         // without waiting for the 1024-byte sniff buffer to fill.
         conv.set_content_type(Some("text/html; charset=UTF-8".to_string()));
         conv
+    }
+
+    #[test]
+    fn test_converter_uses_charset_sniff_budget() {
+        let budget = MemoryBudget {
+            charset_sniff: 8,
+            ..MemoryBudget::default()
+        };
+        let mut conv = StreamingConverter::new(ConversionOptions::default(), budget);
+
+        let first = conv.charset_state.feed(b"<p>1234").unwrap();
+        assert!(
+            first.is_empty(),
+            "converter charset state should remain pending before sniff limit"
+        );
+
+        let second = conv.charset_state.feed(b"5").unwrap();
+        assert!(
+            !second.is_empty(),
+            "converter charset state should resolve at configured sniff limit"
+        );
     }
 
     // ── resolve_final_url unit tests ────────────────────────────────

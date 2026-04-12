@@ -39,10 +39,6 @@ pub enum StructuralContext {
     Italic,
     /// Table element (triggers fallback).
     Table,
-    /// Stripped element (iframe/form etc) — tags stripped, content kept.
-    StrippedElement,
-    /// Skipped element (script etc) — all content skipped.
-    SkippedElement,
 }
 
 /// Action produced by the state machine for the emitter.
@@ -68,8 +64,8 @@ pub enum StateMachineAction {
 pub struct StructuralStateMachine {
     /// Bounded context stack.
     stack: Vec<StructuralContext>,
-    /// Maximum stack depth derived from the memory budget.
-    max_stack_depth: usize,
+    /// Memory budget used for stack enforcement.
+    budget: MemoryBudget,
     /// Whether the previous block-level element needs a blank line separator.
     pub needs_block_separator: bool,
     /// Current list nesting depth (for indentation).
@@ -87,9 +83,8 @@ pub struct StructuralStateMachine {
 impl StructuralStateMachine {
     /// Create a StructuralStateMachine with a maximum stack depth derived from `budget`.
     ///
-    /// The `state_stack` byte allowance from `MemoryBudget` is divided by an estimated
-    /// 64 bytes per `StructuralContext` to compute the maximum number of stack entries,
-    /// with a minimum of 16 levels enforced.
+    /// The `state_stack` byte allowance from `MemoryBudget` is enforced using
+    /// an estimated 64 bytes per `StructuralContext` stack entry.
     ///
     /// # Examples
     ///
@@ -100,11 +95,9 @@ impl StructuralStateMachine {
     /// assert_eq!(sm.depth(), 0);
     /// ```
     pub fn new(budget: &MemoryBudget) -> Self {
-        // Each StructuralContext is roughly 64 bytes.
-        let max_depth = budget.state_stack / 64;
         Self {
             stack: Vec::new(),
-            max_stack_depth: max_depth.max(16), // minimum 16 levels
+            budget: budget.clone(),
             needs_block_separator: false,
             list_depth: 0,
             blockquote_depth: 0,
@@ -377,7 +370,7 @@ impl StructuralStateMachine {
 
     /// Pushes a `StructuralContext` onto the state's context stack while enforcing the configured maximum depth.
     ///
-    /// If the stack has already reached `max_stack_depth`, this returns
+    /// If pushing another entry would exceed `budget.state_stack`, this returns
     /// `ConversionError::BudgetExceeded` with `stage` set to `"state_stack"` and
     /// `used`/`limit` reporting the estimated bytes consumed and allowed (each
     /// stack slot is accounted as 64 bytes).
@@ -389,13 +382,8 @@ impl StructuralStateMachine {
     /// let _ = machine.push_context(StructuralContext::Paragraph);
     /// ```
     fn push_context(&mut self, ctx: StructuralContext) -> Result<(), ConversionError> {
-        if self.stack.len() >= self.max_stack_depth {
-            return Err(ConversionError::BudgetExceeded {
-                stage: "state_stack".to_string(),
-                used: self.stack.len().saturating_mul(64),
-                limit: self.max_stack_depth.saturating_mul(64),
-            });
-        }
+        let current_stack_bytes = self.stack.len().saturating_mul(64);
+        self.budget.check_state_stack(current_stack_bytes, 64)?;
         self.stack.push(ctx);
         Ok(())
     }
@@ -847,12 +835,11 @@ mod tests {
     #[test]
     fn test_stack_depth_exceeded() {
         let budget = MemoryBudget {
-            // 16 * 64 = 1024 bytes → max depth 16 (the minimum)
+            // 16 * 64 = 1024 bytes → max depth 16.
             state_stack: 1024,
             ..MemoryBudget::default()
         };
         let mut sm = StructuralStateMachine::new(&budget);
-        assert_eq!(sm.max_stack_depth, 16);
         // Fill the stack to the limit with alternating bold/italic
         for _ in 0..8 {
             sm.process_event(&start_tag("strong")).unwrap();
@@ -862,6 +849,19 @@ mod tests {
         // Next push should exceed the limit
         let err = sm.process_event(&start_tag("p")).unwrap_err();
         assert_eq!(err.code(), 6); // BudgetExceeded
+    }
+
+    #[test]
+    fn test_state_stack_budget_respected_without_flooring() {
+        let budget = MemoryBudget {
+            state_stack: 64,
+            ..MemoryBudget::default()
+        };
+        let mut sm = StructuralStateMachine::new(&budget);
+
+        sm.process_event(&start_tag("strong")).unwrap();
+        let err = sm.process_event(&start_tag("em")).unwrap_err();
+        assert_eq!(err.code(), 6);
     }
 
     #[test]
