@@ -10,7 +10,7 @@ use proptest::prelude::*;
 use streaming_test_support::{
     convert_full_buffer, convert_incremental, convert_streaming_chunked, convert_streaming_single,
     default_streaming_budget, default_streaming_options, fixture_relative_name,
-    known_differences_path,
+    known_differences_path, normalize_whitespace_tokens,
 };
 
 use nginx_markdown_converter::error::ConversionError;
@@ -24,7 +24,7 @@ struct ThreeWayResult {
 }
 
 fn normalize_whitespace_for_diff(input: &str) -> String {
-    input.chars().filter(|ch| !ch.is_whitespace()).collect()
+    normalize_whitespace_tokens(input)
 }
 
 fn normalize_ordered_list_numbering(input: &str) -> String {

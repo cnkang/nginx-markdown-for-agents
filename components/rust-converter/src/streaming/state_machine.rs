@@ -414,7 +414,11 @@ impl StructuralStateMachine {
             .iter()
             .rposition(|ctx| context_matches_tag(ctx, tag_name));
         if let Some(idx) = pos {
-            Some(self.stack.remove(idx))
+            if idx + 1 == self.stack.len() {
+                self.stack.pop()
+            } else {
+                Some(self.stack.remove(idx))
+            }
         } else {
             None
         }

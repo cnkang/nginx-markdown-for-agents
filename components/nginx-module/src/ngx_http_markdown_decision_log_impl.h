@@ -53,10 +53,11 @@ static void ngx_http_markdown_log_decision_debug(
  *   - "STREAMING_FAIL_" substring (streaming post-commit failures)
  *   - "STREAMING_PRECOMMIT_" prefix (streaming pre-commit failures)
  *   - "STREAMING_BUDGET_" prefix (streaming budget exceeded)
+ *   - "STREAMING_FALLBACK_" prefix (streaming degraded to fallback path)
  *
  * All other codes (SKIP_*, ELIGIBLE_CONVERTED, ENGINE_*,
- * STREAMING_CONVERT, STREAMING_SHADOW, STREAMING_FALLBACK_*,
- * STREAMING_SKIP_*) are non-failure outcomes.
+ * STREAMING_CONVERT, STREAMING_SHADOW, STREAMING_SKIP_*)
+ * are non-failure outcomes.
  *
  * Parameters:
  *   reason_code - pointer to the reason code ngx_str_t
@@ -102,7 +103,6 @@ ngx_http_markdown_is_failure_outcome(const ngx_str_t *reason_code)
      * Non-failures (informational):
      *   STREAMING_CONVERT
      *   STREAMING_SHADOW
-     *   STREAMING_FALLBACK_PREBUFFER
      *   STREAMING_SKIP_UNSUPPORTED
      */
     if (reason_code->len >= 10
@@ -133,6 +133,15 @@ ngx_http_markdown_is_failure_outcome(const ngx_str_t *reason_code)
             && ngx_strncmp(reason_code->data,
                            (const u_char *) "STREAMING_BUDGET_",
                            17) == 0)
+        {
+            return 1;
+        }
+
+        /* "STREAMING_FALLBACK_" (19 chars) */
+        if (reason_code->len >= 19
+            && ngx_strncmp(reason_code->data,
+                           (const u_char *) "STREAMING_FALLBACK_",
+                           19) == 0)
         {
             return 1;
         }

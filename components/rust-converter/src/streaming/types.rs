@@ -31,7 +31,7 @@ pub enum CommitState {
 }
 
 /// Reason for falling back from streaming to full-buffer conversion.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FallbackReason {
     /// A `<table>` element was detected.
     TableDetected,

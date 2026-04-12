@@ -161,6 +161,10 @@ ngx_http_markdown_is_excluded_stream_type(
     }
 
     types = conf->stream_types->elts;
+    if (r->headers_out.content_type.data == NULL) {
+        return 0;
+    }
+
     for (i = 0; i < conf->stream_types->nelts; i++) {
         if (r->headers_out.content_type.len
                 >= types[i].len
@@ -415,9 +419,6 @@ ngx_http_markdown_streaming_update_headers(
     if (rc != NGX_OK) {
         return NGX_ERROR;
     }
-
-    /* Enable chunked transfer encoding */
-    r->chunked = 1;
 
     return NGX_OK;
 }
@@ -762,7 +763,7 @@ ngx_http_markdown_streaming_fallback_to_fullbuffer(
     ngx_http_markdown_ctx_t *ctx,
     ngx_http_markdown_conf_t *conf)
 {
-    ngx_log_error(NGX_LOG_INFO, r->connection->log, 0,
+    ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
         "markdown streaming: Pre-Commit fallback "
         "to full-buffer path");
 

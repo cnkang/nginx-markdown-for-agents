@@ -715,7 +715,16 @@ ngx_http_markdown_streaming_decomp_feed(
         return NGX_DECLINED;
     }
 
-    /* Check size limit */
+    /* Check size limit and protect against integer overflow. */
+    if (decomp->total_decompressed > NGX_MAX_SIZE_T_VALUE - produced) {
+        ngx_log_error(NGX_LOG_WARN, log, 0,
+            "markdown streaming decomp: "
+            "decompressed size overflow, total=%uz produced=%uz",
+            decomp->total_decompressed,
+            produced);
+        return NGX_ERROR;
+    }
+
     decomp->total_decompressed += produced;
     if (decomp->max_decompressed_size > 0
         && decomp->total_decompressed
