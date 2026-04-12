@@ -6,7 +6,16 @@ This project is a production-oriented NGINX filter module backed by a Rust HTML-
 
 ## Current Assessment
 
-As of **version 0.4.0**, the project includes Prometheus-compatible metrics, unified decision reason codes, rollout and rollback operational guides, a benchmark corpus with evidence-based regression detection, restructured installation and first-run documentation, and parser path optimizations. Core features are implemented and tested. The codebase includes unit, integration, E2E, and fuzz-oriented validation entrypoints, along with documentation covering installation, configuration, operations, and architecture.
+As of **version 0.4.1**, the project includes Prometheus-compatible metrics, unified decision reason codes, rollout and rollback operational guides, a benchmark corpus with evidence-based regression detection, restructured installation and first-run documentation, and parser path optimizations. Core features are implemented and tested. The codebase includes unit, integration, E2E, and fuzz-oriented validation entrypoints, along with documentation covering installation, configuration, operations, and architecture.
+
+### Release 0.4.1 Patch Updates
+
+- Dependency security maintenance:
+  - `rand` updated from `0.9.2` to `0.9.3` in `components/rust-converter/Cargo.lock` to resolve RustSec advisory `RUSTSEC-2026-0097` (via `proptest` dependency path).
+  - GitHub Actions `Rust Security Audit` (`cargo audit --deny warnings`) restored to passing status.
+- Release metadata alignment:
+  - Rust converter crate version bumped to `0.4.1`.
+  - Top-level release-facing documentation updated to reflect `0.4.1` as the current release.
 
 ### Release 0.4.0 Updates
 
@@ -220,7 +229,7 @@ See [DEPLOYMENT_EXAMPLES.md](../guides/DEPLOYMENT_EXAMPLES.md) for configuration
 
 ## Current Focus and Roadmap
 
-### Current Release (0.4.0)
+### Current Release (0.4.1)
 - Prometheus-compatible metrics endpoint for operational monitoring
 - Unified decision reason codes for conversion transparency
 - Rollout cookbook with selective enablement and canary patterns
@@ -343,7 +352,7 @@ See `examples/docker/` for Docker build examples.
 
 ## Summary
 
-**NGINX Markdown for Agents** is at version 0.4.0. The project provides HTML-to-Markdown conversion through NGINX content negotiation, with Prometheus-compatible metrics, unified decision reason codes, rollout and rollback operational guides, a benchmark corpus with evidence-based regression detection, parser path optimizations, incremental processing for large responses, release automation, performance baseline gating, runtime validation reuse, fuzzing workflows, and shared metrics aggregation for observability.
+**NGINX Markdown for Agents** is at version 0.4.1. The project provides HTML-to-Markdown conversion through NGINX content negotiation, with Prometheus-compatible metrics, unified decision reason codes, rollout and rollback operational guides, a benchmark corpus with evidence-based regression detection, parser path optimizations, incremental processing for large responses, release automation, performance baseline gating, runtime validation reuse, fuzzing workflows, and shared metrics aggregation for observability.
 
 ### Key Components
 - Core feature implementation
