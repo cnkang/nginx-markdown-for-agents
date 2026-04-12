@@ -206,11 +206,18 @@ Required:
   iterations that contributed to the duration sample (non-warmup, non-error,
   non-fallback).  Do not mix `total_iters` for some metrics and
   `measured_iters` for others.
+- For every derived metric, define one explicit inclusion predicate
+  (for example “measured iteration only”) and update both the numerator and its
+  sample count under that same predicate.  Do not update numerator and
+  denominator under different guards.
 - When accumulating per-iteration quantities (for example `markdown_len_sum`,
   `token_sum`), only add to the accumulator when the iteration qualifies as
   measured.  Use a per-iteration accumulator variable (for example
   `iter_markdown_len`) and add it to the global sum only inside the measured
   iteration guard.
+- Do not combine counters from different granularities in one aggregate
+  (for example per-chunk incremental counters plus per-iteration cumulative
+  counters) unless they are first normalized to the same basis.
 - In test assertions, verify that the denominator used for averages matches
   the number of iterations contributing to percentile calculations.
 
@@ -708,7 +715,7 @@ For each code change you are about to produce, mentally (or explicitly in a thin
 13. Depth/stack state must be explicit and name-aware: do not model HTML/XML nesting safety with blind counter decrement on every end-tag. Track open elements explicitly (stack or equivalent) so mismatched/stray end-tags cannot reduce depth and bypass limits. (Rules 5, 14)
 14. Dangerous-element classification must separate container vs void semantics when skip-mode state is involved. Void dangerous elements (for example `<link>`, `<base>`) should be handled as one-shot skips, not by entering persistent skip-depth that expects a closing tag.
 15. Dangerous URL detection must reject control characters (including NUL) before scheme checks; scheme-prefix matching alone is insufficient for obfuscated payloads.
-16. **Benchmark averaging consistency**: all per-iteration averages (latency, throughput, markdown size, token estimates) must use the same denominator — the count of measured iterations (non-warmup, non-error, non-fallback). Do not mix `total_iters` for some metrics and `measured_iters` for others. Use per-iteration accumulators (for example `iter_markdown_len`) and add to global sums only inside the measured iteration guard. (Rule 8c)
+16. **Benchmark averaging consistency**: all per-iteration averages (latency, throughput, markdown size, token estimates, flush count) must use the same denominator — the count of measured iterations (non-warmup, non-error, non-fallback). For every derived metric, keep numerator and sample count under the same inclusion predicate, and do not mix counter granularities (chunk-level vs iteration-level) in one aggregate without normalization. (Rule 8c)
 17. **Metric naming accuracy**: when a metric field name implies specific semantics (for example `cpu_time_ms`), the implementation must actually measure that quantity. If approximating with a different measurement (for example wall-clock TTLB), add a comment documenting the approximation or rename the field. (Rule 8)
 18. **Rust 2024 edition pattern binding**: do not use explicit `ref` or `ref mut` binding modifiers when matching on a reference type (`&T`, `&Option<T>`, `&Vec<T>`, etc.). Rust 2024 edition treats this as an error because the reference already implies borrowing. Use `ref` only when matching on an owned value where you need to borrow without moving. Before writing `if let Some(ref x) = expr`, check whether `expr` is a reference — if so, drop the `ref`.
 
