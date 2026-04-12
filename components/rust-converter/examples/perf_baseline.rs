@@ -625,8 +625,8 @@ fn run_streaming_benchmark_chunked(
     let mut total_attempts = 0u32;
     let mut ttfb_ms_sum = 0.0;
     let mut ttlb_ms_sum = 0.0;
-    // Track whether we recorded TTFB in any iteration (for averaging).
-    let mut ttfb_recorded_count = 0usize;
+    // Count measured iterations that recorded TTFB.
+    let mut ttfb_measured_count = 0usize;
 
     let total_iters = cfg.warmup + cfg.iterations;
     for iter_idx in 0..total_iters {
@@ -637,7 +637,6 @@ fn run_streaming_benchmark_chunked(
         let ttfb_start = Instant::now();
         let mut ttfb_recorded = false;
         let mut ttfb_ms = 0.0;
-        let mut iter_flush_count = 0u32;
         let mut iter_fallback = false;
         let mut iter_total_attempts = 0u32;
         let mut iter_markdown_len = 0usize;
@@ -651,7 +650,6 @@ fn run_streaming_benchmark_chunked(
                         ttfb_ms = ttfb_start.elapsed().as_secs_f64() * 1000.0;
                         ttfb_recorded = true;
                     }
-                    iter_flush_count += output.flush_count;
                     iter_markdown_len += output.markdown.len();
                 }
                 Err(ConversionError::StreamingFallback { .. }) => {
@@ -689,21 +687,26 @@ fn run_streaming_benchmark_chunked(
 
         let elapsed = iter_start.elapsed().as_secs_f64();
 
-        if ttfb_recorded {
-            ttfb_ms_sum += ttfb_ms;
-            ttfb_recorded_count += 1;
-        }
         let ttlb_ms = elapsed * 1000.0;
 
-        iter_flush_count += result.stats.flush_count;
+        /*
+         * Use converter-level cumulative flush count for this iteration.
+         * Per-chunk flush_count values are incremental and would double-count
+         * if summed again with result.stats.flush_count.
+         */
+        let iter_flush_count = result.stats.flush_count;
         total_attempts += iter_total_attempts;
 
         if iter_idx >= cfg.warmup && !iter_fallback {
             // Only include non-warmup, non-fallback iterations in measured stats.
             durations.push(elapsed);
+            if ttfb_recorded {
+                ttfb_ms_sum += ttfb_ms;
+                ttfb_measured_count += 1;
+            }
             ttlb_ms_sum += ttlb_ms;
             markdown_len_sum += iter_markdown_len + result.final_markdown.len();
-            flush_count_sum += iter_flush_count as u64;
+            flush_count_sum += u64::from(iter_flush_count);
             if let Some(tokens) = result.token_estimate {
                 token_sum += u64::from(tokens);
             }
@@ -720,8 +723,8 @@ fn run_streaming_benchmark_chunked(
         markdown_bytes_avg: markdown_len_sum / measured_iters,
         token_estimate_avg: (token_sum / measured_iters as u64) as u32,
         peak_memory_bytes: peak_mem,
-        ttfb_ms: if ttfb_recorded_count > 0 {
-            ttfb_ms_sum / ttfb_recorded_count as f64
+        ttfb_ms: if ttfb_measured_count > 0 {
+            ttfb_ms_sum / ttfb_measured_count as f64
         } else {
             0.0
         },
@@ -738,6 +741,81 @@ fn run_streaming_benchmark_chunked(
         },
         fallback_count,
         total_attempts,
+    }
+}
+
+#[cfg(all(test, feature = "streaming"))]
+mod tests {
+    use super::*;
+
+    fn make_streaming_safe_sample() -> Sample {
+        let mut html = String::from("<!DOCTYPE html><html><body>");
+        for i in 0..512 {
+            html.push_str(&format!("<p>line-{i} alpha beta gamma</p>"));
+        }
+        html.push_str("</body></html>");
+
+        Sample {
+            name: "regression-sample",
+            html: html.into_bytes(),
+            target_label: "small",
+            front_matter: false,
+            base_url: None,
+        }
+    }
+
+    #[test]
+    fn streaming_benchmark_ttfb_ignores_non_measured_iterations() {
+        let sample = make_streaming_safe_sample();
+        let cfg = RunConfig {
+            warmup: 1,
+            iterations: 0,
+        };
+
+        let summary = run_streaming_benchmark_chunked(&sample, cfg, 256);
+
+        /*
+         * No measured iterations means no measured TTFB samples.
+         * Warmup-only timing must not leak into reported averages.
+         */
+        assert_eq!(summary.ttfb_ms, 0.0);
+        assert_eq!(summary.ttlb_ms, 0.0);
+        assert_eq!(summary.cpu_time_ms, 0.0);
+    }
+
+    #[test]
+    fn streaming_benchmark_flush_count_uses_single_iteration_source() {
+        let sample = make_streaming_safe_sample();
+        let chunk_size = 64;
+        let cfg = RunConfig {
+            warmup: 0,
+            iterations: 1,
+        };
+
+        let summary = run_streaming_benchmark_chunked(&sample, cfg, chunk_size);
+
+        let options = build_streaming_options(&sample);
+        let budget = MemoryBudget::default();
+        let mut conv = StreamingConverter::new(options, budget);
+        conv.set_content_type(Some("text/html; charset=UTF-8".to_string()));
+
+        for chunk in sample.html.chunks(chunk_size) {
+            match conv.feed_chunk(chunk) {
+                Ok(_) => {}
+                Err(e) => panic!("unexpected feed_chunk error in regression test: {e:?}"),
+            }
+        }
+
+        let result = match conv.finalize() {
+            Ok(r) => r,
+            Err(e) => panic!("unexpected finalize error in regression test: {e:?}"),
+        };
+
+        /*
+         * For a single measured iteration, the benchmark's flush_count should
+         * match the converter's per-iteration cumulative flush_count exactly.
+         */
+        assert_eq!(summary.flush_count, result.stats.flush_count);
     }
 }
 
