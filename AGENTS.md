@@ -116,6 +116,11 @@ Required:
   and confirm each one handles the new namespace.  Prefer exhaustive
   enumeration or a registry-based approach over open-ended prefix matching
   when the set of classifiable values grows across subsystem boundaries.
+- Degradation reason codes (for example fallback/retry/deferred paths that
+  indicate the preferred engine/path could not complete) must be classified as
+  operationally visible outcomes in severity gating (typically failure/warn).
+  Do not classify degradation-only outcomes as informational by default when
+  that would hide rollout risk at `warn` verbosity.
 
 ### 8. Metrics endpoint correctness and observability gaps
 Historical issues: `478db96`, `b905fee`, `461908f`, `9f3885e`.
@@ -674,6 +679,7 @@ For each code change you are about to produce, mentally (or explicitly in a thin
 16. Const-correctness: pointer parameters that are only read through must be `const`-qualified. No const-dropping casts in read-only paths. When changing a parameter's const qualification, update forward declarations and header prototypes in the same change set. (Rule 24)
 17. No macro-shadow declarations: do not declare functions/variables with names that are NGINX macros (`ngx_log_error`, `ngx_memzero`, `ngx_str_set`, etc.). Validate against canonical headers and preserve exact signature parity (including `const`) when adding forward declarations. (Rule 24)
 18. Reason-code classification coverage: when adding a new family of reason codes (for example `STREAMING_*` alongside `ELIGIBLE_*`/`FAIL_*`), update every function that classifies reason codes by string pattern (prefix match, substring). Prefix-based classifiers silently miss new namespaces whose failure codes do not share the existing prefix. Grep for all reason-code classification call sites and confirm each handles the new namespace. (Rule 7)
+19. `ngx_str_t` token matching must be length-bounded: never call `ngx_strcasecmp()` on config/header values unless they are explicitly NUL-terminated. For directive keyword matching, require exact length equality and use `ngx_strncasecmp(..., expected_len)` (or a shared helper that enforces both). This prevents out-of-bounds reads on short/truncated inputs.
 
 #### C test code (`components/nginx-module/tests/unit/`)
 1. No dead stores — simulation-style tests set the final value directly; initial state documented in comments only. (Rule 16)
@@ -699,9 +705,12 @@ For each code change you are about to produce, mentally (or explicitly in a thin
 10. **FFI struct initialization**: when creating a zeroed/empty FFI struct (for example `MarkdownResult`), **prefer existing helper functions** (`empty_result()`, `zeroed_result()`, etc.) over writing literal `StructName { ... }` initializations. Only use literal initialization when the struct needs non-zero/default values, and in that case ensure all fields are present. (Rule 15)
 11. **FFI struct field additions**: when adding a field to any `#[repr(C)]` FFI struct (for example `MarkdownResult`), update (a) the Rust struct definition, (b) both public C header copies, (c) **all** struct literal initialization sites across `tests/` and `examples/` (grep for `StructName {`), (d) associated `reset_*()`/`free_*()` cleanup functions to zero the new field, and (e) any test helper constructors (`empty_result()`, `zeroed_result()`). (Rule 15)
 12. **Lifecycle ordering**: when reading data from a foreign-owned struct (FFI result, allocator-owned buffer), capture fields to local variables **before** calling the associated free/release function. Do not access struct fields after `*_free()` — the memory may be invalidated or zeroed. (Rule 15)
-13. **Benchmark averaging consistency**: all per-iteration averages (latency, throughput, markdown size, token estimates) must use the same denominator — the count of measured iterations (non-warmup, non-error, non-fallback). Do not mix `total_iters` for some metrics and `measured_iters` for others. Use per-iteration accumulators (for example `iter_markdown_len`) and add to global sums only inside the measured iteration guard. (Rule 8c)
-14. **Metric naming accuracy**: when a metric field name implies specific semantics (for example `cpu_time_ms`), the implementation must actually measure that quantity. If approximating with a different measurement (for example wall-clock TTLB), add a comment documenting the approximation or rename the field. (Rule 8)
-15. **Rust 2024 edition pattern binding**: do not use explicit `ref` or `ref mut` binding modifiers when matching on a reference type (`&T`, `&Option<T>`, `&Vec<T>`, etc.). Rust 2024 edition treats this as an error because the reference already implies borrowing. Use `ref` only when matching on an owned value where you need to borrow without moving. Before writing `if let Some(ref x) = expr`, check whether `expr` is a reference — if so, drop the `ref`.
+13. Depth/stack state must be explicit and name-aware: do not model HTML/XML nesting safety with blind counter decrement on every end-tag. Track open elements explicitly (stack or equivalent) so mismatched/stray end-tags cannot reduce depth and bypass limits. (Rules 5, 14)
+14. Dangerous-element classification must separate container vs void semantics when skip-mode state is involved. Void dangerous elements (for example `<link>`, `<base>`) should be handled as one-shot skips, not by entering persistent skip-depth that expects a closing tag.
+15. Dangerous URL detection must reject control characters (including NUL) before scheme checks; scheme-prefix matching alone is insufficient for obfuscated payloads.
+16. **Benchmark averaging consistency**: all per-iteration averages (latency, throughput, markdown size, token estimates) must use the same denominator — the count of measured iterations (non-warmup, non-error, non-fallback). Do not mix `total_iters` for some metrics and `measured_iters` for others. Use per-iteration accumulators (for example `iter_markdown_len`) and add to global sums only inside the measured iteration guard. (Rule 8c)
+17. **Metric naming accuracy**: when a metric field name implies specific semantics (for example `cpu_time_ms`), the implementation must actually measure that quantity. If approximating with a different measurement (for example wall-clock TTLB), add a comment documenting the approximation or rename the field. (Rule 8)
+18. **Rust 2024 edition pattern binding**: do not use explicit `ref` or `ref mut` binding modifiers when matching on a reference type (`&T`, `&Option<T>`, `&Vec<T>`, etc.). Rust 2024 edition treats this as an error because the reference already implies borrowing. Use `ref` only when matching on an owned value where you need to borrow without moving. Before writing `if let Some(ref x) = expr`, check whether `expr` is a reference — if so, drop the `ref`.
 
 #### Shell scripts (`tools/`, e2e harnesses)
 1. Every `case` has a `*)` default clause. (Rule 18)

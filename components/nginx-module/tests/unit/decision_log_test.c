@@ -71,7 +71,7 @@ static void test_null_inputs(void);
  *
  * Failure outcomes: reason codes starting with "ELIGIBLE_FAILED",
  * "FAIL_", "STREAMING_FAIL_", "STREAMING_PRECOMMIT_", or
- * "STREAMING_BUDGET_".
+ * "STREAMING_BUDGET_", or "STREAMING_FALLBACK_".
  */
 static ngx_int_t
 is_failure_outcome(const ngx_str_t *reason_code)
@@ -105,11 +105,11 @@ is_failure_outcome(const ngx_str_t *reason_code)
      *   STREAMING_PRECOMMIT_FAILOPEN
      *   STREAMING_PRECOMMIT_REJECT
      *   STREAMING_BUDGET_EXCEEDED
+     *   STREAMING_FALLBACK_PREBUFFER
      *
      * Non-failures (informational):
      *   STREAMING_CONVERT
      *   STREAMING_SHADOW
-     *   STREAMING_FALLBACK_PREBUFFER
      *   STREAMING_SKIP_UNSUPPORTED
      */
     if (reason_code->len >= 10
@@ -139,6 +139,15 @@ is_failure_outcome(const ngx_str_t *reason_code)
             && ngx_strncmp(reason_code->data,
                            (u_char *) "STREAMING_BUDGET_",
                            17) == 0)
+        {
+            return 1;
+        }
+
+        /* "STREAMING_FALLBACK_" (19 chars) */
+        if (reason_code->len >= 19
+            && ngx_strncmp(reason_code->data,
+                           (u_char *) "STREAMING_FALLBACK_",
+                           19) == 0)
         {
             return 1;
         }
@@ -259,6 +268,9 @@ test_failure_outcome_classification(void)
     TEST_ASSERT(
         is_failure_outcome(&rc_streaming_budget_exceeded) == 1,
         "STREAMING_BUDGET_EXCEEDED is failure");
+    TEST_ASSERT(
+        is_failure_outcome(&rc_streaming_fallback) == 1,
+        "STREAMING_FALLBACK_PREBUFFER is failure");
 
     TEST_PASS("All failure outcomes correctly classified");
 }
@@ -300,9 +312,6 @@ test_non_failure_outcome_classification(void)
     TEST_ASSERT(
         is_failure_outcome(&rc_streaming_shadow) == 0,
         "STREAMING_SHADOW is not failure");
-    TEST_ASSERT(
-        is_failure_outcome(&rc_streaming_fallback) == 0,
-        "STREAMING_FALLBACK_PREBUFFER is not failure");
     TEST_ASSERT(
         is_failure_outcome(&rc_streaming_skip) == 0,
         "STREAMING_SKIP_UNSUPPORTED is not failure");
@@ -347,9 +356,6 @@ test_log_level_selection(void)
         expected_log_level(&rc_streaming_shadow) == NGX_LOG_INFO,
         "STREAMING_SHADOW -> NGX_LOG_INFO");
     TEST_ASSERT(
-        expected_log_level(&rc_streaming_fallback) == NGX_LOG_INFO,
-        "STREAMING_FALLBACK_PREBUFFER -> NGX_LOG_INFO");
-    TEST_ASSERT(
         expected_log_level(&rc_streaming_skip) == NGX_LOG_INFO,
         "STREAMING_SKIP_UNSUPPORTED -> NGX_LOG_INFO");
 
@@ -370,6 +376,10 @@ test_log_level_selection(void)
         expected_log_level(&rc_streaming_budget_exceeded)
             == NGX_LOG_WARN,
         "STREAMING_BUDGET_EXCEEDED -> NGX_LOG_WARN");
+    TEST_ASSERT(
+        expected_log_level(&rc_streaming_fallback)
+            == NGX_LOG_WARN,
+        "STREAMING_FALLBACK_PREBUFFER -> NGX_LOG_WARN");
 
     TEST_PASS("Log level selection correct for all outcomes");
 }
@@ -474,10 +484,6 @@ test_verbosity_gating_warn(void)
         "warn suppresses STREAMING_SHADOW");
     TEST_ASSERT(
         should_emit(NGX_HTTP_MARKDOWN_LOG_WARN,
-                    &rc_streaming_fallback) == 0,
-        "warn suppresses STREAMING_FALLBACK_PREBUFFER");
-    TEST_ASSERT(
-        should_emit(NGX_HTTP_MARKDOWN_LOG_WARN,
                     &rc_streaming_skip) == 0,
         "warn suppresses STREAMING_SKIP_UNSUPPORTED");
 
@@ -520,6 +526,10 @@ test_verbosity_gating_warn(void)
         should_emit(NGX_HTTP_MARKDOWN_LOG_WARN,
                     &rc_streaming_budget_exceeded) == 1,
         "warn emits STREAMING_BUDGET_EXCEEDED");
+    TEST_ASSERT(
+        should_emit(NGX_HTTP_MARKDOWN_LOG_WARN,
+                    &rc_streaming_fallback) == 1,
+        "warn emits STREAMING_FALLBACK_PREBUFFER");
 
     TEST_PASS("warn verbosity gates correctly");
 }
@@ -576,6 +586,10 @@ test_verbosity_gating_error(void)
         should_emit(NGX_HTTP_MARKDOWN_LOG_ERROR,
                     &rc_streaming_budget_exceeded) == 1,
         "error emits STREAMING_BUDGET_EXCEEDED");
+    TEST_ASSERT(
+        should_emit(NGX_HTTP_MARKDOWN_LOG_ERROR,
+                    &rc_streaming_fallback) == 1,
+        "error emits STREAMING_FALLBACK_PREBUFFER");
 
     TEST_PASS("error verbosity gates correctly");
 }

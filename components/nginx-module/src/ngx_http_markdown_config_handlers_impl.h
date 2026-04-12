@@ -12,6 +12,25 @@
  * configuration object lifecycle and the directive registry table.
  */
 
+static ngx_int_t
+ngx_http_markdown_arg_equals(
+    const ngx_str_t *arg,
+    const u_char *expected,
+    size_t expected_len)
+{
+    if (arg == NULL || arg->data == NULL) {
+        return 0;
+    }
+
+    if (arg->len != expected_len) {
+        return 0;
+    }
+
+    return ngx_strncasecmp(arg->data,
+                           expected,
+                           expected_len) == 0;
+}
+
 /*
  * Configuration directive handler: markdown_filter
  *
@@ -102,10 +121,13 @@ ngx_http_markdown_on_error(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         return "is duplicate";
     }
 
-    if (ngx_strcasecmp(value[1].data, pass_str) == 0) {
+    if (ngx_http_markdown_arg_equals(&value[1], pass_str,
+                                     sizeof(pass_str) - 1))
+    {
         mcf->on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
-    } else if (ngx_strcasecmp(value[1].data,
-                              reject_str) == 0)
+    } else if (ngx_http_markdown_arg_equals(
+                   &value[1], reject_str,
+                   sizeof(reject_str) - 1))
     {
         mcf->on_error = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
     } else {
@@ -134,10 +156,13 @@ ngx_http_markdown_flavor(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         return "is duplicate";
     }
 
-    if (ngx_strcasecmp(value[1].data, cm_str) == 0) {
+    if (ngx_http_markdown_arg_equals(&value[1], cm_str,
+                                     sizeof(cm_str) - 1))
+    {
         mcf->flavor = NGX_HTTP_MARKDOWN_FLAVOR_COMMONMARK;
-    } else if (ngx_strcasecmp(value[1].data,
-                              gfm_str) == 0)
+    } else if (ngx_http_markdown_arg_equals(
+                   &value[1], gfm_str,
+                   sizeof(gfm_str) - 1))
     {
         mcf->flavor = NGX_HTTP_MARKDOWN_FLAVOR_GFM;
     } else {
@@ -166,10 +191,13 @@ ngx_http_markdown_auth_policy(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         return "is duplicate";
     }
 
-    if (ngx_strcasecmp(value[1].data, allow_str) == 0) {
+    if (ngx_http_markdown_arg_equals(&value[1], allow_str,
+                                     sizeof(allow_str) - 1))
+    {
         mcf->auth_policy = NGX_HTTP_MARKDOWN_AUTH_POLICY_ALLOW;
-    } else if (ngx_strcasecmp(value[1].data,
-                              deny_str) == 0)
+    } else if (ngx_http_markdown_arg_equals(
+                   &value[1], deny_str,
+                   sizeof(deny_str) - 1))
     {
         mcf->auth_policy = NGX_HTTP_MARKDOWN_AUTH_POLICY_DENY;
     } else {
@@ -243,16 +271,20 @@ ngx_http_markdown_conditional_requests(ngx_conf_t *cf, ngx_command_t *cmd, void 
         return "is duplicate";
     }
 
-    if (ngx_strcasecmp(value[1].data, full_str) == 0) {
+    if (ngx_http_markdown_arg_equals(&value[1], full_str,
+                                     sizeof(full_str) - 1))
+    {
         mcf->conditional_requests =
             NGX_HTTP_MARKDOWN_CONDITIONAL_FULL_SUPPORT;
-    } else if (ngx_strcasecmp(value[1].data,
-                              ims_str) == 0)
+    } else if (ngx_http_markdown_arg_equals(
+                   &value[1], ims_str,
+                   sizeof(ims_str) - 1))
     {
         mcf->conditional_requests =
             NGX_HTTP_MARKDOWN_CONDITIONAL_IF_MODIFIED_SINCE;
-    } else if (ngx_strcasecmp(value[1].data,
-                              dis_str) == 0)
+    } else if (ngx_http_markdown_arg_equals(
+                   &value[1], dis_str,
+                   sizeof(dis_str) - 1))
     {
         mcf->conditional_requests = NGX_HTTP_MARKDOWN_CONDITIONAL_DISABLED;
     } else {
@@ -283,18 +315,23 @@ ngx_http_markdown_log_verbosity(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         return "is duplicate";
     }
 
-    if (ngx_strcasecmp(value[1].data, err_str) == 0) {
+    if (ngx_http_markdown_arg_equals(&value[1], err_str,
+                                     sizeof(err_str) - 1))
+    {
         mcf->log_verbosity = NGX_HTTP_MARKDOWN_LOG_ERROR;
-    } else if (ngx_strcasecmp(value[1].data,
-                              warn_str) == 0)
+    } else if (ngx_http_markdown_arg_equals(
+                   &value[1], warn_str,
+                   sizeof(warn_str) - 1))
     {
         mcf->log_verbosity = NGX_HTTP_MARKDOWN_LOG_WARN;
-    } else if (ngx_strcasecmp(value[1].data,
-                              info_str) == 0)
+    } else if (ngx_http_markdown_arg_equals(
+                   &value[1], info_str,
+                   sizeof(info_str) - 1))
     {
         mcf->log_verbosity = NGX_HTTP_MARKDOWN_LOG_INFO;
-    } else if (ngx_strcasecmp(value[1].data,
-                              debug_str) == 0)
+    } else if (ngx_http_markdown_arg_equals(
+                   &value[1], debug_str,
+                   sizeof(debug_str) - 1))
     {
         mcf->log_verbosity = NGX_HTTP_MARKDOWN_LOG_DEBUG;
     } else {
@@ -463,11 +500,14 @@ ngx_http_markdown_metrics_format(ngx_conf_t *cf,
         return "is duplicate";
     }
 
-    if (ngx_strcasecmp(value[1].data, auto_str) == 0) {
+    if (ngx_http_markdown_arg_equals(&value[1], auto_str,
+                                     sizeof(auto_str) - 1))
+    {
         mcf->ops.metrics_format =
             NGX_HTTP_MARKDOWN_METRICS_FORMAT_AUTO;
-    } else if (ngx_strcasecmp(value[1].data,
-                              prom_str) == 0)
+    } else if (ngx_http_markdown_arg_equals(
+                   &value[1], prom_str,
+                   sizeof(prom_str) - 1))
     {
         mcf->ops.metrics_format =
             NGX_HTTP_MARKDOWN_METRICS_FORMAT_PROMETHEUS;
@@ -560,9 +600,15 @@ ngx_http_markdown_streaming_engine(ngx_conf_t *cf,
 
     if (var_marker == NULL) {
         /* Static value: must be "off", "on", or "auto" */
-        if (ngx_strcasecmp(value[1].data, off_str) != 0
-            && ngx_strcasecmp(value[1].data, on_str) != 0
-            && ngx_strcasecmp(value[1].data, auto_str) != 0)
+        if (!ngx_http_markdown_arg_equals(
+                &value[1], off_str,
+                sizeof(off_str) - 1)
+            && !ngx_http_markdown_arg_equals(
+                &value[1], on_str,
+                sizeof(on_str) - 1)
+            && !ngx_http_markdown_arg_equals(
+                &value[1], auto_str,
+                sizeof(auto_str) - 1))
         {
             ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
                 "invalid value \"%V\" in \"%V\" "

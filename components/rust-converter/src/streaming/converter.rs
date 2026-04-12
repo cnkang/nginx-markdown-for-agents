@@ -579,7 +579,8 @@ impl StreamingConverter {
     /// This updates the converter's cumulative counters and optional ETag state:
     /// - increments `bytes_emitted` by the flushed byte length (saturating),
     /// - updates the incremental ETag hasher (if enabled) with `flushed`,
-    /// - increments `total_markdown_chars` by the number of Unicode scalar values in `flushed` (decoded with `String::from_utf8_lossy`, saturating),
+    /// - increments `total_markdown_chars` by the number of Unicode scalar
+    ///   values in `flushed` (fast UTF-8 path with lossy fallback, saturating),
     /// - and refreshes `stats.flush_count` from the emitter.
     ///
     /// # Parameters
@@ -600,8 +601,10 @@ impl StreamingConverter {
         // Accumulate character count for token estimation.
         // The final token count is computed once in finalize() as
         // ceil(total_chars / 4.0) to match the one-shot TokenEstimator.
-        let text = String::from_utf8_lossy(flushed);
-        let char_count = text.chars().count() as u64;
+        let char_count = match std::str::from_utf8(flushed) {
+            Ok(text) => text.chars().count() as u64,
+            Err(_) => String::from_utf8_lossy(flushed).chars().count() as u64,
+        };
         self.total_markdown_chars = self.total_markdown_chars.saturating_add(char_count);
 
         // Update stats
@@ -994,10 +997,12 @@ impl StreamingConverter {
 
 /// Split a byte slice at the last valid UTF-8 boundary.
 ///
-/// Returns `(valid, tail)` where `valid` is guaranteed to be well-formed
-/// UTF-8 and `tail` contains 0–3 trailing bytes that start an incomplete
-/// multibyte sequence. At end-of-input the caller should feed `tail`
-/// through lossy conversion.
+/// Returns `(valid, tail)` where:
+/// - in the common case, `valid` is well-formed UTF-8 and `tail` contains
+///   0-3 trailing bytes that start an incomplete multibyte sequence.
+/// - in the fallback case (interior invalid byte sequence that cannot be
+///   isolated to an incomplete tail), returns `(bytes, &[])` so the caller
+///   can handle invalid bytes via lossy conversion in the next stage.
 fn split_utf8_tail(bytes: &[u8]) -> (&[u8], &[u8]) {
     // Fast path: if the entire slice is valid UTF-8, no split needed.
     if std::str::from_utf8(bytes).is_ok() {
@@ -2104,5 +2109,45 @@ mod tests {
             Some("https://base.example.com"),
             "no canonical with href → base_url should win over og:url"
         );
+    }
+
+    #[test]
+    fn test_split_utf8_tail_empty_input() {
+        let (valid, tail) = split_utf8_tail(b"");
+        assert!(valid.is_empty());
+        assert!(tail.is_empty());
+    }
+
+    #[test]
+    fn test_split_utf8_tail_incomplete_two_byte_sequence() {
+        let (valid, tail) = split_utf8_tail(&[0xE2, 0x82]);
+        assert!(valid.is_empty());
+        assert_eq!(tail, &[0xE2, 0x82]);
+    }
+
+    #[test]
+    fn test_split_utf8_tail_incomplete_one_to_three_byte_cases() {
+        let (_, tail1) = split_utf8_tail(&[0xF0]);
+        let (_, tail2) = split_utf8_tail(&[0xF0, 0x9F]);
+        let (_, tail3) = split_utf8_tail(&[0xF0, 0x9F, 0x92]);
+
+        assert_eq!(tail1, &[0xF0]);
+        assert_eq!(tail2, &[0xF0, 0x9F]);
+        assert_eq!(tail3, &[0xF0, 0x9F, 0x92]);
+    }
+
+    #[test]
+    fn test_split_utf8_tail_invalid_interior_fallback() {
+        // Interior invalid byte can be isolated: split occurs before it.
+        let bytes = [0x48, 0x65, 0xFF, 0x6C, 0x6F];
+        let (valid, tail) = split_utf8_tail(&bytes);
+        assert_eq!(valid, b"He");
+        assert_eq!(tail, &[0xFF, 0x6C, 0x6F]);
+
+        // No lead byte candidate near the tail: fallback returns the full slice.
+        let continuation_only = [0x80, 0x80];
+        let (valid2, tail2) = split_utf8_tail(&continuation_only);
+        assert_eq!(valid2, &continuation_only);
+        assert!(tail2.is_empty());
     }
 }
