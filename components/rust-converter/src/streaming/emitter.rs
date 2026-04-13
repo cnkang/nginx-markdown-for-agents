@@ -689,8 +689,9 @@ impl IncrementalEmitter {
             if self.max_buffer_size > 0 {
                 let marker_room = self.max_buffer_size.min(LINK_TRUNCATION_MARKER.len());
                 let keep = self.max_buffer_size.saturating_sub(marker_room);
-                if self.link_text.len() > keep {
-                    self.link_text.truncate(keep);
+                let safe_keep = self.link_text.floor_char_boundary(keep);
+                if self.link_text.len() > safe_keep {
+                    self.link_text.truncate(safe_keep);
                 }
                 self.link_text
                     .push_str(&LINK_TRUNCATION_MARKER[..marker_room]);
@@ -1335,6 +1336,23 @@ mod tests {
 
         assert!(emitter.link_text_overflow, "overflow flag should be set");
         assert_eq!(emitter.link_text, "this text is...");
+    }
+
+    #[test]
+    fn test_link_text_overflow_multibyte_chars() {
+        let budget = MemoryBudget {
+            total: 1024,
+            state_stack: 256,
+            output_buffer: 12,
+            charset_sniff: 16,
+            lookahead: 64,
+        };
+        let mut emitter = IncrementalEmitter::new(&budget);
+
+        emitter.append_link_text("こんにちは世界");
+        assert!(emitter.link_text_overflow, "overflow flag should be set");
+        assert!(std::str::from_utf8(emitter.link_text.as_bytes()).is_ok(), "link_text should be valid UTF-8 after truncation");
+        assert!(emitter.link_text.ends_with("..."), "link_text should end with truncation marker");
     }
 
     // ── Image tests ─────────────────────────────────────────────────
