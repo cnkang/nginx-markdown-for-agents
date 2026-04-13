@@ -221,8 +221,8 @@ If you use a custom NGINX build, or a platform not supported by the pre-built bi
 
 | Component | Minimum Version | Purpose |
 |-----------|----------------|---------|
-| **Rust Toolchain** | 1.85.0+ | Building the Rust converter |
-| **Cargo** | 1.85.0+ | Rust package manager (included with Rust) |
+| **Rust Toolchain** | 1.91.0+ | Building the Rust converter |
+| **Cargo** | 1.91.0+ | Rust package manager (included with Rust) |
 | **cbindgen** | 0.24.0+ | Generating C header files from Rust |
 | **NGINX** | 1.24.0+ | Web server (source code required for module compilation) |
 | **GCC/Clang** | GCC 4.8+ or Clang 3.4+ | C compiler for NGINX module |

@@ -1273,25 +1273,25 @@ fn build_measurement_report(
     // When running --engine streaming (no FFI results), populate tiers from
     // streaming data so downstream consumers (threshold engine, evidence pack)
     // have tier-level metrics to compare against.
-    if tiers.is_empty() {
-        if let Some(streaming_results) = streaming_results {
-            for (sample, streaming, cfg) in streaming_results {
-                let key = tier_key(sample.name);
-                let tier_value = serde_json::json!({
-                    "html_bytes": streaming.html_bytes,
-                    "markdown_bytes_avg": streaming.markdown_bytes_avg,
-                    "token_estimate_avg": streaming.token_estimate_avg,
-                    "p50_ms": streaming.stats.p50_ms,
-                    "p95_ms": streaming.stats.p95_ms,
-                    "p99_ms": streaming.stats.p99_ms,
-                    "peak_memory_bytes": streaming.peak_memory_bytes,
-                    "req_per_s": streaming.stats.req_per_s,
-                    "input_mb_per_s": streaming.stats.input_mb_per_s,
-                    "iterations": cfg.iterations,
-                    "warmup": cfg.warmup,
-                });
-                tiers.insert(key.to_string(), tier_value);
-            }
+    if tiers.is_empty()
+        && let Some(streaming_results) = streaming_results
+    {
+        for (sample, streaming, cfg) in streaming_results {
+            let key = tier_key(sample.name);
+            let tier_value = serde_json::json!({
+                "html_bytes": streaming.html_bytes,
+                "markdown_bytes_avg": streaming.markdown_bytes_avg,
+                "token_estimate_avg": streaming.token_estimate_avg,
+                "p50_ms": streaming.stats.p50_ms,
+                "p95_ms": streaming.stats.p95_ms,
+                "p99_ms": streaming.stats.p99_ms,
+                "peak_memory_bytes": streaming.peak_memory_bytes,
+                "req_per_s": streaming.stats.req_per_s,
+                "input_mb_per_s": streaming.stats.input_mb_per_s,
+                "iterations": cfg.iterations,
+                "warmup": cfg.warmup,
+            });
+            tiers.insert(key.to_string(), tier_value);
         }
     }
 
