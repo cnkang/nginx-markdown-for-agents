@@ -4,5 +4,11 @@
   "expected-conversion-result": "converted",
   "input-size-bytes": 1092,
   "source-description": "HTML with ordered, unordered, and nested lists for list conversion testing",
-  "failure-corpus": false
+  "failure-corpus": false,
+  "streaming_notes": {
+    "expected_fallback": false,
+    "known_diff_ids": [
+      "DIFF-PARITY-SIMPLE-LISTS"
+    ]
+  }
 }

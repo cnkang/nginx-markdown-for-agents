@@ -43,6 +43,27 @@
  */
 #define ERROR_INVALID_INPUT 5
 
+#if defined(MARKDOWN_STREAMING_ENABLED)
+/**
+ * Memory budget exceeded during streaming conversion.
+ */
+#define ERROR_BUDGET_EXCEEDED 6
+#endif
+
+#if defined(MARKDOWN_STREAMING_ENABLED)
+/**
+ * Streaming engine requests fallback to full-buffer conversion (Pre-Commit only).
+ */
+#define ERROR_STREAMING_FALLBACK 7
+#endif
+
+#if defined(MARKDOWN_STREAMING_ENABLED)
+/**
+ * Error after the streaming engine has already emitted partial output (Post-Commit).
+ */
+#define ERROR_POST_COMMIT 8
+#endif
+
 /**
  * Internal error (unexpected condition, panic caught).
  */
@@ -67,6 +88,13 @@ typedef struct IncrementalConverterHandle IncrementalConverterHandle;
  */
 typedef struct MarkdownConverterHandle MarkdownConverterHandle;
 
+#if defined(MARKDOWN_STREAMING_ENABLED)
+/**
+ * Opaque handle wrapping a [`StreamingConverter`] for the C ABI.
+ */
+typedef struct StreamingConverterHandle StreamingConverterHandle;
+#endif
+
 /**
  * Conversion options passed from C to Rust.
  */
@@ -80,6 +108,14 @@ typedef struct MarkdownOptions {
   uintptr_t content_type_len;
   const uint8_t *base_url;
   uintptr_t base_url_len;
+  /**
+   * Streaming memory budget in bytes (0 = use default).
+   *
+   * When non-zero, the streaming converter uses this value as the
+   * total memory budget instead of the compiled-in default (2 MiB).
+   * Populated from the `markdown_streaming_budget` NGINX directive.
+   */
+  uint64_t streaming_budget;
 } MarkdownOptions;
 
 /**
@@ -94,6 +130,18 @@ typedef struct MarkdownResult {
   uint32_t error_code;
   uint8_t *error_message;
   uintptr_t error_len;
+  /**
+   * Peak working-set memory estimate during streaming conversion (bytes).
+   *
+   * This value is derived from converter-owned resident state and is
+   * not a process RSS/high-water-mark measurement.
+   *
+   * Populated by `markdown_streaming_finalize()` from
+   * `StreamingStats.peak_memory_estimate`. Valid only when
+   * `error_code == 0` (ERROR_SUCCESS). Must be read before
+   * calling `markdown_result_free()`.
+   */
+  uintptr_t peak_memory_estimate;
 } MarkdownResult;
 
 /**
@@ -179,11 +227,11 @@ void markdown_converter_free(struct MarkdownConverterHandle *handle);
  * ```ignore
  * # use std::ptr;
  * use nginx_markdown_converter::ffi::{MarkdownOptions, markdown_incremental_new, markdown_incremental_free};
- * // Construct options appropriate for your environment.
+ * Construct options appropriate for your environment.
  * let opts = MarkdownOptions::default();
  * let handle = unsafe { markdown_incremental_new(&opts) };
  * assert!(!handle.is_null());
- * // Either finalize to produce output or free when done without producing output.
+ * Either finalize to produce output or free when done without producing output.
  * unsafe { markdown_incremental_free(handle) };
  * ```ignore
  */
@@ -211,12 +259,13 @@ struct IncrementalConverterHandle *markdown_incremental_new(const struct Markdow
  * use std::ptr;
  * use nginx_markdown_converter::ffi::{markdown_incremental_new, markdown_incremental_feed, markdown_incremental_free};
  * unsafe {
- *     let options = ptr::null(); // populate as needed
+ *     Populate as needed for your environment.
+ *     let options = ptr::null();
  *     let handle = markdown_incremental_new(options);
  *     if !handle.is_null() {
- *         // feed a chunk
+ *         Feed a chunk.
  *         let _ = markdown_incremental_feed(handle, b"hello".as_ptr(), 5);
- *         // finalize or free the handle as appropriate
+ *         Finalize or free the handle as appropriate.
  *         markdown_incremental_free(handle);
  *     }
  * }
@@ -252,7 +301,7 @@ uint32_t markdown_incremental_feed(struct IncrementalConverterHandle *handle,
  * use std::ptr::null_mut;
  * use nginx_markdown_converter::ffi::{markdown_incremental_finalize, ERROR_INVALID_INPUT};
  *
- * // Passing NULL result pointer is invalid and returns ERROR_INVALID_INPUT.
+ * Passing NULL result pointer is invalid and returns ERROR_INVALID_INPUT.
  * let code = unsafe { markdown_incremental_finalize(null_mut(), null_mut()) };
  * assert_eq!(code, ERROR_INVALID_INPUT);
  * ```
@@ -279,6 +328,151 @@ uint32_t markdown_incremental_finalize(struct IncrementalConverterHandle *handle
  *   [`markdown_incremental_new`] that has not been finalized or freed.
  */
 void markdown_incremental_free(struct IncrementalConverterHandle *handle);
+#endif
+
+#if defined(MARKDOWN_STREAMING_ENABLED)
+/**
+ * Create a new streaming converter handle.
+ *
+ * The returned handle is an opaque pointer owned by the caller and must be
+ * consumed by exactly one of `markdown_streaming_finalize`,
+ * `markdown_streaming_abort`, or `markdown_streaming_free`.
+ *
+ * # Safety
+ *
+ * - `options` must point to a valid, properly aligned `MarkdownOptions` that
+ *   remains readable for the duration of this call.
+ * - The returned pointer is heap-allocated; the caller owns it and must not
+ *   dereference it except via the `markdown_streaming_*` family of functions.
+ *
+ * # Returns
+ *
+ * A non-NULL handle on success, or NULL if `options` is NULL, if
+ * `MarkdownOptions` cannot be decoded, or if an internal panic is caught.
+ */
+struct StreamingConverterHandle *markdown_streaming_new(const struct MarkdownOptions *options);
+#endif
+
+#if defined(MARKDOWN_STREAMING_ENABLED)
+/**
+ * Feed a chunk of HTML input and receive any ready Markdown output.
+ *
+ * On success (`ERROR_SUCCESS`), `*out_data` and `*out_len` are set to the
+ * Markdown output buffer allocated by Rust. The caller must free this buffer
+ * via [`markdown_streaming_output_free`]. If no output is ready, `*out_data`
+ * is NULL and `*out_len` is 0.
+ *
+ * On error, `*out_data` is set to NULL and `*out_len` to 0. The returned
+ * error code indicates the failure type.
+ *
+ * # Safety
+ *
+ * - `handle` must be a live pointer returned by [`markdown_streaming_new`].
+ * - `data` must point to at least `data_len` readable bytes, or be NULL
+ *   when `data_len` is 0.
+ * - `out_data` must be a valid, writable pointer to `*mut u8`.
+ * - `out_len` must be a valid, writable pointer to `usize`.
+ *
+ * # Returns
+ *
+ * - `ERROR_SUCCESS` (0) on success
+ * - `ERROR_STREAMING_FALLBACK` (7) for pre-commit fallback signal
+ * - `ERROR_BUDGET_EXCEEDED` (6) for memory budget exceeded
+ * - `ERROR_POST_COMMIT` (8) for post-commit error
+ * - `ERROR_TIMEOUT` (3) for timeout
+ * - `ERROR_INVALID_INPUT` (5) for NULL handle or output pointers
+ * - `ERROR_INTERNAL` (99) for caught panics
+ */
+uint32_t markdown_streaming_feed(struct StreamingConverterHandle *handle,
+                                 const uint8_t *data,
+                                 uintptr_t data_len,
+                                 uint8_t **out_data,
+                                 uintptr_t *out_len);
+#endif
+
+#if defined(MARKDOWN_STREAMING_ENABLED)
+/**
+ * Finalize a streaming conversion, consume the handle, and write the result.
+ *
+ * This call always consumes the provided `handle`; after this function
+ * returns (whether success, failure, or internal panic) the handle is
+ * invalid and must not be used again or freed by the caller.
+ *
+ * # Safety
+ *
+ * - `handle` must be a live pointer returned by `markdown_streaming_new`
+ *   that has not already been finalized, aborted, or freed.
+ * - `result` must be a valid, writable pointer to a `MarkdownResult`. Any
+ *   buffers previously owned by `result` must either be NULL/zero-length
+ *   or must have been previously returned by this API.
+ *
+ * # Returns
+ *
+ * `ERROR_SUCCESS` (0) on success, or a non-zero error code on failure.
+ * In all cases `result` is populated with either the produced markdown
+ * (and optional ETag/token estimate) or an error code and message.
+ */
+uint32_t markdown_streaming_finalize(struct StreamingConverterHandle *handle,
+                                     struct MarkdownResult *result);
+#endif
+
+#if defined(MARKDOWN_STREAMING_ENABLED)
+/**
+ * Abort a streaming conversion and release all Rust resources.
+ *
+ * Use this function when the conversion must be abandoned (e.g. client
+ * abort or unrecoverable error). This always consumes the handle.
+ *
+ * Passing NULL is a safe no-op.
+ *
+ * # Safety
+ *
+ * - `handle` must be NULL or a live pointer returned by
+ *   [`markdown_streaming_new`] that has not been finalized, aborted,
+ *   or freed.
+ */
+void markdown_streaming_abort(struct StreamingConverterHandle *handle);
+#endif
+
+#if defined(MARKDOWN_STREAMING_ENABLED)
+/**
+ * Free a streaming converter handle without finalizing.
+ *
+ * Use this function to release resources when the conversion is being
+ * abandoned in an error path where neither `finalize` nor `abort` was
+ * called. If the handle has already been consumed by `finalize` or
+ * `abort`, do **not** call this function — that would be a double-free.
+ *
+ * Passing NULL is a safe no-op.
+ *
+ * This delegates to [`markdown_streaming_abort`] which has identical
+ * semantics (both consume the handle by dropping it).
+ *
+ * # Safety
+ *
+ * - `handle` must be NULL or a live pointer returned by
+ *   [`markdown_streaming_new`] that has not been finalized, aborted,
+ *   or freed.
+ */
+void markdown_streaming_free(struct StreamingConverterHandle *handle);
+#endif
+
+#if defined(MARKDOWN_STREAMING_ENABLED)
+/**
+ * Free a Markdown output buffer returned by [`markdown_streaming_feed`].
+ *
+ * The `data` pointer and `len` must be exactly the values written to
+ * `out_data` and `out_len` by a previous `feed` call. Passing NULL/0
+ * is a safe no-op.
+ *
+ * # Safety
+ *
+ * - `data` must be NULL or a pointer previously returned via
+ *   `markdown_streaming_feed`'s `out_data` parameter.
+ * - `len` must be the corresponding `out_len` value.
+ * - Each (data, len) pair must be freed exactly once.
+ */
+void markdown_streaming_output_free(uint8_t *data, uintptr_t len);
 #endif
 
 #endif  /* NGINX_MARKDOWN_CONVERTER_H */

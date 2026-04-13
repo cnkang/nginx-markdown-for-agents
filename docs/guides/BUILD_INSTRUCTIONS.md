@@ -85,7 +85,42 @@ Available targets include:
 - `make test` - Build and run the default smoke test (`components/nginx-module/tests` smoke targets)
 - `make test-nginx-unit-clang-smoke` - Run smoke tests with clang compiler
 - `make test-nginx-unit-sanitize-smoke` - Run smoke tests with AddressSanitizer/UndefinedBehaviorSanitizer
+- `make sonar-compile-db` - Generate `compile_commands.json` for SonarQube for VS Code C/C++ analysis
 - `make clean` - Clean Rust and selected NGINX module test artifacts
+
+## SonarQube for VS Code (C/C++)
+
+If SonarQube for VS Code shows:
+
+```text
+No compilation databases were found in the workspace
+```
+
+generate a compilation database from the project root:
+
+```bash
+make sonar-compile-db
+```
+
+This command:
+
+- downloads/builds a local NGINX source tree under `.sonar/` (first run only)
+- builds the module with a compiler wrapper
+- writes `compile_commands.json` to the repository root
+
+After generation, reload VS Code (or run the SonarQube embedded action to switch compilation database) and ensure the active database is:
+
+- `<workspace>/compile_commands.json`
+
+Optional script flags:
+
+```bash
+# Explicit NGINX version
+tools/sonar/generate_compile_commands.sh --nginx-version 1.28.0
+
+# Custom output path
+tools/sonar/generate_compile_commands.sh --output /absolute/path/compile_commands.json
+```
 
 ## Detailed Build Steps
 

@@ -1,0 +1,31 @@
+{
+  "strictness": 2,
+  "commentTypes": ["logic", "syntax"],
+  "rules": [
+    {
+      "id": "markdown-semantics-stability",
+      "rule": "Flag changes that may alter Markdown output semantics, structural correctness, or edge-case conversion behavior without explicit tests.",
+      "severity": "high"
+    },
+    {
+      "id": "utf8-charset-boundary-safety",
+      "rule": "Streaming conversion must preserve incomplete UTF-8 tails across chunk boundaries and flush charset decoder state at EOF; avoid lossy conversion shortcuts that mask boundary bugs.",
+      "severity": "high"
+    },
+    {
+      "id": "sanitizer-html-semantics",
+      "rule": "Sanitizer logic must preserve HTML semantics: treat void elements correctly, keep dangerous-element skip mode name-aware, and keep nesting-depth accounting saturation-safe.",
+      "severity": "high"
+    },
+    {
+      "id": "error-propagation",
+      "rule": "Do not swallow or remap converter errors in ways that lose original error classification needed by fallback behavior, cache semantics, or observability.",
+      "severity": "high"
+    },
+    {
+      "id": "buffering-and-allocation-awareness",
+      "rule": "Flag changes that introduce unbounded growth, unnecessary full-buffer copies, or repeated parsing in incremental or large-response conversion paths.",
+      "severity": "high"
+    }
+  ]
+}

@@ -436,6 +436,182 @@ markdown_trust_forwarded_headers on;
 
 ---
 
+### Streaming Directives (0.5.0+)
+
+These directives control the streaming conversion path introduced in 0.5.0. They
+are only effective when `markdown_streaming_engine` is enabled. When
+`markdown_streaming_engine off` (the default), all streaming directives are ignored
+and behavior is identical to 0.4.0.
+
+#### markdown_streaming_on_error
+
+**Syntax:** `markdown_streaming_on_error pass | reject;`
+**Default:** `pass`
+**Context:** http, server, location
+
+Controls the failure behavior during the streaming Pre-Commit Phase — the window
+between when streaming conversion starts and when the first Markdown chunk is sent
+to the client.
+
+- `pass`: Fail-open. Abort the streaming conversion and serve the original HTML
+  response to the client. The client is unaware that streaming was attempted.
+- `reject`: Fail-closed. Abort the streaming conversion and return an HTTP error
+  to the client.
+
+This directive has no effect on Post-Commit Phase failures. Once the first Markdown
+chunk has been sent to the client (the Commit Boundary has been crossed), failures
+always result in fail-closed behavior: the response is truncated by sending an empty
+`last_buf`. This is not configurable because the response headers (including
+`Content-Type: text/markdown`) have already been sent and cannot be changed.
+
+**Example:**
+```nginx
+# Fail-open (default, recommended for production)
+markdown_streaming_on_error pass;
+
+# Fail-closed (strict mode)
+markdown_streaming_on_error reject;
+```
+
+#### Relationship Between `markdown_on_error` and `markdown_streaming_on_error`
+
+These two directives have completely independent scopes. Changing one never affects
+the behavior of the other.
+
+| Directive | Scope | Controls |
+|-----------|-------|----------|
+| `markdown_on_error` | Full-buffer path and incremental path | Failure behavior when full-buffer conversion fails |
+| `markdown_streaming_on_error` | Streaming path, Pre-Commit Phase only | Failure behavior when streaming pre-commit conversion fails |
+| *(not configurable)* | Streaming path, Post-Commit Phase | Always fail-closed (response truncated) |
+
+Key points for operators:
+
+- You can set `markdown_on_error reject` and `markdown_streaming_on_error pass`
+  (or any other combination) without conflict.
+- When `markdown_streaming_engine off` (the default), `markdown_streaming_on_error`
+  is ignored entirely. All failure handling follows `markdown_on_error`.
+- Neither directive controls the `ERROR_STREAMING_FALLBACK` signal. When the Rust
+  engine determines that a capability requires full-buffer processing (e.g., table
+  conversion), the fallback to full-buffer always executes regardless of either
+  directive's value.
+
+**Configuration Examples:**
+
+```nginx
+# Example 1: Production — fail-open everywhere
+# Both full-buffer and streaming failures serve original HTML
+markdown_on_error pass;
+markdown_streaming_on_error pass;
+```
+
+```nginx
+# Example 2: Strict mode — fail-closed everywhere
+# Both full-buffer and streaming failures return errors
+markdown_on_error reject;
+markdown_streaming_on_error reject;
+```
+
+```nginx
+# Example 3: Mixed — strict full-buffer, lenient streaming
+# Full-buffer failures return errors; streaming pre-commit failures
+# serve original HTML (streaming is newer, so be more lenient)
+markdown_on_error reject;
+markdown_streaming_on_error pass;
+```
+
+```nginx
+# Example 4: Full streaming setup with independent error policies
+http {
+    markdown_filter on;
+    markdown_streaming_engine on;
+    markdown_on_error pass;
+    markdown_streaming_on_error pass;
+
+    server {
+        listen 80;
+        server_name docs.example.com;
+
+        location /api-docs {
+            # Strict mode for API documentation
+            markdown_on_error reject;
+            markdown_streaming_on_error reject;
+            proxy_pass http://backend;
+        }
+
+        location /blog {
+            # Lenient mode for blog content
+            markdown_on_error pass;
+            markdown_streaming_on_error pass;
+            proxy_pass http://backend;
+        }
+    }
+}
+```
+
+**Monitoring streaming failures:**
+
+Use the metrics endpoint to monitor streaming-specific failure counters:
+
+| Metric | Meaning |
+|--------|---------|
+| `precommit_failopen_total` | Pre-commit failures handled by `pass` (fail-open) |
+| `precommit_reject_total` | Pre-commit failures handled by `reject` (fail-closed) |
+| `postcommit_error_total` | Post-commit failures (always fail-closed) |
+| `fallback_total` | Capability fallbacks to full-buffer (always executes) |
+
+If `precommit_failopen_total` or `precommit_reject_total` is
+growing, investigate the NGINX error log for the specific error types triggering
+the failures.
+
+#### markdown_streaming_shadow
+
+**Syntax:** `markdown_streaming_shadow on | off;`
+**Default:** `off`
+**Context:** http, server, location
+
+Enables shadow mode for the streaming conversion engine. When enabled, the module
+runs both the full-buffer and streaming engines on the same decompressed HTML input
+after a successful full-buffer conversion, compares their outputs, and records
+differences in metrics and the debug log. The full-buffer result is always used for
+the client response — shadow mode never affects what the client receives.
+
+Shadow mode is intended for Phase 0 of a streaming rollout to verify engine output
+parity before enabling streaming for live traffic. See the
+[Streaming Rollout Cookbook](streaming-rollout-cookbook.md) for phased deployment
+guidance.
+
+**Metrics produced:**
+
+| Metric (JSON path) | Prometheus series | Description |
+|---------------------|-------------------|-------------|
+| `streaming.shadow_total` | `nginx_markdown_streaming_shadow_total` | Successful shadow comparison runs |
+| `streaming.shadow_diff_total` | `nginx_markdown_streaming_shadow_diff_total` | Comparisons where outputs differed |
+
+**Important caveats:**
+
+- Shadow mode verifies engine output parity on already-decompressed HTML. It does
+  **not** exercise chunk boundaries, streaming decompression, backpressure, or
+  commit boundaries — those runtime behaviors are covered by integration tests and
+  chunk-boundary fuzzing.
+- `streaming.shadow_total` only increments when both engines produce comparable
+  results. If the streaming engine consistently fails, `shadow_total` stays at 0.
+- Shadow mode adds latency to every converted request (the streaming engine runs
+  in addition to the full-buffer engine). Disable it once Phase 0 verification is
+  complete.
+
+**Example:**
+```nginx
+# Phase 0: shadow mode verification
+markdown_filter on;
+markdown_streaming_engine off;
+markdown_streaming_shadow on;
+
+# Phase 1+: disable shadow after verification
+markdown_streaming_shadow off;
+```
+
+---
+
 ### Large Response Processing
 
 #### markdown_large_body_threshold
@@ -1635,4 +1811,5 @@ tail -f /var/log/nginx/error.log | grep "conversion time"
 - **Requirements Traceability:** [../project/PROJECT_STATUS.md](../project/PROJECT_STATUS.md)
 - **Architecture Index:** [../architecture/README.md](../architecture/README.md)
 - **Configuration to Behavior Map:** [../architecture/CONFIG_BEHAVIOR_MAP.md](../architecture/CONFIG_BEHAVIOR_MAP.md)
+- **Streaming Compatibility Matrix:** [../project/compatibility-matrix-0-5-0.md](../project/compatibility-matrix-0-5-0.md)
 - **NGINX Documentation:** https://nginx.org/en/docs/
