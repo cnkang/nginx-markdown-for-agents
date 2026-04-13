@@ -487,7 +487,7 @@ typedef struct {
         ngx_atomic_t  shadow_total;              /* Shadow mode runs */
         ngx_atomic_t  shadow_diff_total;         /* Shadow output diffs */
         ngx_atomic_t  last_ttfb_ms;              /* Last streaming TTFB (milliseconds) */
-        ngx_atomic_t  last_peak_memory_bytes;    /* Last streaming peak memory estimate (bytes) */
+        ngx_atomic_t  last_peak_memory_bytes;    /* Last streaming peak estimate (bytes; not RSS) */
     } streaming;
 #endif
 

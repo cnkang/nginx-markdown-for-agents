@@ -451,6 +451,10 @@ ngx_http_markdown_streaming_send_output(
         /*
          * Copy Rust-allocated data into pool memory so we
          * can free the Rust buffer immediately.
+         *
+         * Trade-off: this introduces a transient double-buffer
+         * window (Rust buffer + pool copy) up to `len` bytes
+         * for this chunk.
          */
         b->pos = ngx_palloc(r->pool, len);
         if (b->pos == NULL) {

@@ -95,7 +95,10 @@ pub struct StreamingStats {
     pub tokens_processed: u64,
     /// Total number of flush points emitted.
     pub flush_count: u32,
-    /// Peak estimated memory usage in bytes.
+    /// Peak estimated working-set memory usage in bytes.
+    ///
+    /// This is a heuristic estimate from resident converter state
+    /// (for example buffers and stacks), not a process RSS measurement.
     pub peak_memory_estimate: usize,
     /// Number of input chunks processed.
     pub chunks_processed: u32,

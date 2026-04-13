@@ -131,7 +131,10 @@ typedef struct MarkdownResult {
   uint8_t *error_message;
   uintptr_t error_len;
   /**
-   * Peak memory estimate during streaming conversion (bytes).
+   * Peak working-set memory estimate during streaming conversion (bytes).
+   *
+   * This value is derived from converter-owned resident state and is
+   * not a process RSS/high-water-mark measurement.
    *
    * Populated by `markdown_streaming_finalize()` from
    * `StreamingStats.peak_memory_estimate`. Valid only when
