@@ -16,6 +16,16 @@ Goal: prevent repeated classes of mistakes that previously caused regressions.
 
 If two rules conflict, follow the higher-priority source.
 
+## Harness Map
+- `AGENTS.md` remains the Codex-first contract and engineering rule map.
+- `docs/harness/README.md` is the repo-owned harness entrypoint.
+- `docs/harness/core.md` defines the execution loop, conflict protocol, and
+  status semantics.
+- `docs/harness/routing-manifest.json` is the canonical structured routing
+  source; `docs/harness/routing-manifest.md` is the readable overlay.
+- `.kiro/steering/` is an optional local adapter surface only. It should point
+  back to `docs/harness/` and must not define stronger semantics than this file.
+
 ## Non-Negotiable NGINX Baseline
 
 ### API and lifecycle correctness
