@@ -1,4 +1,6 @@
 # Local editor / IDE state
+.arts/
+.codeartsdoer/
 .kiro/
 .serena/
 .vscode/
@@ -15,6 +17,9 @@ components/rust-converter/fuzz/artifacts/
 components/rust-converter/fuzz/corpus/
 components/rust-converter/fuzz/coverage/
 components/rust-converter/fuzz/target/
+
+# Proptest old-style regression files (superseded by proptest-regressions/ dirs)
+**/*.proptest-regressions
 
 # Generated C header mirror (copy from Rust include)
 components/nginx-module/src/markdown_converter.h
@@ -36,6 +41,10 @@ perf_completeness_*.json
 tools/corpus/samples/
 tools/corpus/test-corpus-conversion/target/
 
+# Generated large test fixtures (regenerated via tests/corpus/large/generate-large-fixtures.sh)
+tests/corpus/large/*.html
+tests/corpus/large/*.meta.json
+
 # Generic build output
 build/
 dist/
@@ -43,6 +52,9 @@ out/
 coverage/
 test-output/
 test-results/
+compile_commands.json
+compile_commands.*.json
+.sonarlint/
 
 # Tool caches
 tools/**/.cache/
@@ -56,7 +68,6 @@ tests/**/tmp/
 .nox/
 .tox/
 .sonar/
-.sonarcloud.properties
 
 # Matrix updater transient artifact
 matrix-diff.json

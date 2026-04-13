@@ -19,6 +19,37 @@ struct MarkdownOptions;
  */
 #define NGX_HTTP_MARKDOWN_PATH_FULLBUFFER   0  /* Full-buffer path */
 #define NGX_HTTP_MARKDOWN_PATH_INCREMENTAL  1  /* Incremental path */
+#define NGX_HTTP_MARKDOWN_PATH_STREAMING    2  /* Streaming path */
+
+#ifdef MARKDOWN_STREAMING_ENABLED
+/*
+ * Streaming engine mode constants
+ */
+#define NGX_HTTP_MARKDOWN_STREAMING_ENGINE_OFF   0
+#define NGX_HTTP_MARKDOWN_STREAMING_ENGINE_ON    1
+#define NGX_HTTP_MARKDOWN_STREAMING_ENGINE_AUTO  2
+
+/*
+ * Streaming commit state constants
+ */
+#define NGX_HTTP_MARKDOWN_STREAMING_COMMIT_PRE   0
+#define NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST  1
+
+/*
+ * Default streaming budget: 2 MiB
+ */
+#define NGX_HTTP_MARKDOWN_STREAMING_BUDGET_DEFAULT \
+    (2 * 1024 * 1024)
+
+/*
+ * Streaming on_error policy constants
+ *
+ * Controls Pre_Commit_Phase failure behavior for the
+ * markdown_streaming_on_error directive.
+ */
+#define NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_PASS    0
+#define NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_REJECT  1
+#endif /* MARKDOWN_STREAMING_ENABLED */
 
 /*
  * Threshold off sentinel — used in merge and path selection logic.
@@ -146,6 +177,13 @@ typedef struct {
         ngx_flag_t   trust_forwarded_headers; /* markdown_trust_forwarded_headers on|off (default: off) */
         ngx_uint_t   metrics_format;       /* markdown_metrics_format auto|prometheus (default: auto) */
     } ops;
+
+#ifdef MARKDOWN_STREAMING_ENABLED
+    ngx_http_complex_value_t  *streaming_engine;  /* markdown_streaming_engine (complex value) */
+    size_t                     streaming_budget;   /* markdown_streaming_budget (default: 2m) */
+    ngx_uint_t                 streaming_on_error; /* markdown_streaming_on_error pass|reject */
+    ngx_flag_t                 streaming_shadow;   /* markdown_streaming_shadow on|off */
+#endif
 } ngx_http_markdown_conf_t;
 
 /*
@@ -251,6 +289,66 @@ typedef struct {
     /* Last error category from conversion failure (for decision log) */
     ngx_http_markdown_error_category_t    last_error_category;
     ngx_flag_t                            has_error_category;
+
+#ifdef MARKDOWN_STREAMING_ENABLED
+    /*
+     * Streaming state sub-struct.
+     *
+     * Grouped to comply with SonarCloud c:S1820
+     * 20-field limit.
+     */
+    struct {
+        /* Streaming converter handle (Rust opaque pointer) */
+        struct StreamingConverterHandle  *handle;
+
+        /* Commit state: PRE or POST */
+        ngx_uint_t                        commit_state;
+
+        /* Pending output chain for backpressure */
+        ngx_chain_t                      *pending_output;
+
+        /* Incremental decompressor state */
+        void                             *decompressor;
+
+        /* Per-request statistics */
+        ngx_uint_t                        chunks_processed;
+        ngx_uint_t                        flushes_sent;
+        size_t                            total_input_bytes;
+        size_t                            total_output_bytes;
+
+        /* TTFB tracking (from first feed to first non-empty output) */
+        ngx_msec_t                        feed_start_ms;
+        ngx_flag_t                        ttfb_recorded;
+
+        /* Pending output chain has non-empty data (for TTFB resume path) */
+        ngx_flag_t                        pending_has_data;
+
+        /* Pre-Commit prebuffer for fallback */
+        ngx_http_markdown_buffer_t        prebuffer;
+        size_t                            prebuffer_limit;
+        ngx_flag_t                        prebuffer_initialized;
+
+        /* Reused fail-open restoration slots (avoid per-call allocations) */
+        ngx_buf_t                       **failopen_consumed_bufs;
+        u_char                          **failopen_consumed_pos;
+        ngx_uint_t                        failopen_consumed_capacity;
+        ngx_uint_t                        failopen_consumed_count;
+
+        /* Deferred terminal last_buf (backpressure during finalize) */
+        ngx_flag_t                        finalize_pending_lastbuf;
+
+        /* Metrics deferred for terminal last_buf (backpressure on
+         * terminal send — set when send_output(last_buf=1) returns
+         * NGX_AGAIN, cleared when resume drain succeeds or fails). */
+        ngx_flag_t                        pending_terminal_metrics;
+
+        /* Post-commit failure metrics have been recorded for this request. */
+        ngx_flag_t                        failure_recorded;
+
+        /* Continue finalize() after tail-output backpressure drains */
+        ngx_flag_t                        finalize_after_pending;
+    } streaming;
+#endif
 } ngx_http_markdown_ctx_t;
 
 /*
@@ -356,6 +454,9 @@ typedef struct {
     struct {
         ngx_atomic_t  fullbuffer;      /* Requests routed to full-buffer path */
         ngx_atomic_t  incremental;     /* Requests routed to incremental path */
+#ifdef MARKDOWN_STREAMING_ENABLED
+        ngx_atomic_t  streaming;       /* Requests routed to streaming path */
+#endif
     } path_hits;
 
     /*
@@ -366,6 +467,29 @@ typedef struct {
      * rate calculations.
      */
     ngx_atomic_t  requests_entered;
+
+#ifdef MARKDOWN_STREAMING_ENABLED
+    /*
+     * Streaming metrics sub-struct.
+     *
+     * Grouped to comply with SonarCloud c:S1820
+     * 20-field limit.
+     */
+    struct {
+        ngx_atomic_t  requests_total;          /* Entered streaming path */
+        ngx_atomic_t  fallback_total;          /* Pre-Commit fallbacks */
+        ngx_atomic_t  succeeded_total;         /* Streaming successes */
+        ngx_atomic_t  failed_total;            /* Streaming failures */
+        ngx_atomic_t  postcommit_error_total;  /* Post-Commit errors */
+        ngx_atomic_t  precommit_failopen_total;  /* Pre-Commit fail-open */
+        ngx_atomic_t  precommit_reject_total;    /* Pre-Commit fail-closed */
+        ngx_atomic_t  budget_exceeded_total;     /* Memory budget exceeded */
+        ngx_atomic_t  shadow_total;              /* Shadow mode runs */
+        ngx_atomic_t  shadow_diff_total;         /* Shadow output diffs */
+        ngx_atomic_t  last_ttfb_ms;              /* Last streaming TTFB (milliseconds) */
+        ngx_atomic_t  last_peak_memory_bytes;    /* Last streaming peak memory estimate (bytes) */
+    } streaming;
+#endif
 
     /*
      * Skip counters by reason code.
@@ -446,7 +570,7 @@ ngx_int_t ngx_http_markdown_buffer_reserve(ngx_http_markdown_buffer_t *buf,
 
 /* Append data to buffer with size limit checking */
 ngx_int_t ngx_http_markdown_buffer_append(ngx_http_markdown_buffer_t *buf,
-    u_char *data, size_t len);
+    const u_char *data, size_t len);
 
 /*
  * Error classification functions
@@ -471,7 +595,7 @@ const ngx_str_t *ngx_http_markdown_error_category_string(
 
 /* Check if response is eligible for conversion */
 ngx_http_markdown_eligibility_t ngx_http_markdown_check_eligibility(
-    ngx_http_request_t *r, ngx_http_markdown_conf_t *conf,
+    const ngx_http_request_t *r, const ngx_http_markdown_conf_t *conf,
     ngx_flag_t filter_enabled);
 
 /* Get human-readable string for eligibility result */
@@ -508,6 +632,19 @@ const ngx_str_t *ngx_http_markdown_reason_failed_closed(void);
 /* Return the SKIP_ACCEPT reason code (not in eligibility enum) */
 const ngx_str_t *ngx_http_markdown_reason_skip_accept(void);
 
+#ifdef MARKDOWN_STREAMING_ENABLED
+/* Streaming reason code accessors */
+const ngx_str_t *ngx_http_markdown_reason_engine_streaming(void);
+const ngx_str_t *ngx_http_markdown_reason_streaming_convert(void);
+const ngx_str_t *ngx_http_markdown_reason_streaming_fallback(void);
+const ngx_str_t *ngx_http_markdown_reason_streaming_fail_postcommit(void);
+const ngx_str_t *ngx_http_markdown_reason_streaming_skip_unsupported(void);
+const ngx_str_t *ngx_http_markdown_reason_streaming_budget_exceeded(void);
+const ngx_str_t *ngx_http_markdown_reason_streaming_precommit_failopen(void);
+const ngx_str_t *ngx_http_markdown_reason_streaming_precommit_reject(void);
+const ngx_str_t *ngx_http_markdown_reason_streaming_shadow(void);
+#endif /* MARKDOWN_STREAMING_ENABLED */
+
 /*
  * Header management functions
  *
@@ -528,12 +665,7 @@ void ngx_http_markdown_remove_content_encoding(ngx_http_request_t *r);
  * to ensure secure caching behavior.
  */
 
-/* Check if request is authenticated (Authorization header or auth cookies) */
-ngx_int_t ngx_http_markdown_is_authenticated(ngx_http_request_t *r,
-    const ngx_http_markdown_conf_t *conf);
-
-/* Modify Cache-Control header for authenticated content */
-ngx_int_t ngx_http_markdown_modify_cache_control_for_auth(ngx_http_request_t *r);
+#include "ngx_http_markdown_exports.h"
 
 /*
  * Shared conversion-option helpers
@@ -560,13 +692,13 @@ ngx_int_t ngx_http_markdown_prepare_conversion_options(ngx_http_request_t *r,
  * generate a Markdown-variant ETag for comparison.
  */
 ngx_int_t ngx_http_markdown_handle_if_none_match(ngx_http_request_t *r,
-    ngx_http_markdown_conf_t *conf, ngx_http_markdown_ctx_t *ctx,
+    ngx_http_markdown_conf_t *conf, const ngx_http_markdown_ctx_t *ctx,
     struct MarkdownConverterHandle *converter,
     struct MarkdownResult **result);
 
 /* Send 304 Not Modified response */
 ngx_int_t ngx_http_markdown_send_304(ngx_http_request_t *r,
-    struct MarkdownResult *result);
+    const struct MarkdownResult *result);
 
 /*
  * Decompression functions

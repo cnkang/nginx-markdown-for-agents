@@ -216,3 +216,169 @@ ngx_http_markdown_reason_skip_accept(void)
 {
     return &ngx_http_markdown_reason_skip_accept_str;
 }
+
+
+#ifdef MARKDOWN_STREAMING_ENABLED
+
+/* Streaming reason codes */
+
+static ngx_str_t ngx_http_markdown_reason_engine_streaming_str =
+    ngx_string("ENGINE_STREAMING");
+static ngx_str_t ngx_http_markdown_reason_streaming_convert_str =
+    ngx_string("STREAMING_CONVERT");
+static ngx_str_t ngx_http_markdown_reason_streaming_fallback_str =
+    ngx_string("STREAMING_FALLBACK_PREBUFFER");
+static ngx_str_t ngx_http_markdown_reason_streaming_fail_postcommit_str =
+    ngx_string("STREAMING_FAIL_POSTCOMMIT");
+static ngx_str_t ngx_http_markdown_reason_streaming_skip_str =
+    ngx_string("STREAMING_SKIP_UNSUPPORTED");
+static ngx_str_t ngx_http_markdown_reason_streaming_budget_str =
+    ngx_string("STREAMING_BUDGET_EXCEEDED");
+static ngx_str_t ngx_http_markdown_reason_streaming_precommit_failopen_str =
+    ngx_string("STREAMING_PRECOMMIT_FAILOPEN");
+static ngx_str_t ngx_http_markdown_reason_streaming_precommit_reject_str =
+    ngx_string("STREAMING_PRECOMMIT_REJECT");
+static ngx_str_t ngx_http_markdown_reason_streaming_shadow_str =
+    ngx_string("STREAMING_SHADOW");
+
+
+/*
+ * Return the ENGINE_STREAMING reason code.
+ *
+ * Logged when the engine selector chooses the streaming path.
+ *
+ * Returns:
+ *   Pointer to static ngx_str_t "ENGINE_STREAMING"
+ */
+const ngx_str_t *
+ngx_http_markdown_reason_engine_streaming(void)
+{
+    return &ngx_http_markdown_reason_engine_streaming_str;
+}
+
+
+/*
+ * Return the STREAMING_CONVERT reason code.
+ *
+ * Logged when streaming conversion completes successfully.
+ *
+ * Returns:
+ *   Pointer to static ngx_str_t "STREAMING_CONVERT"
+ */
+const ngx_str_t *
+ngx_http_markdown_reason_streaming_convert(void)
+{
+    return &ngx_http_markdown_reason_streaming_convert_str;
+}
+
+
+/*
+ * Return the STREAMING_FALLBACK_PREBUFFER reason code.
+ *
+ * Logged when streaming falls back to full-buffer in
+ * the Pre_Commit_Phase due to Rust engine returning
+ * ERROR_STREAMING_FALLBACK.
+ *
+ * Returns:
+ *   Pointer to static ngx_str_t "STREAMING_FALLBACK_PREBUFFER"
+ */
+const ngx_str_t *
+ngx_http_markdown_reason_streaming_fallback(void)
+{
+    return &ngx_http_markdown_reason_streaming_fallback_str;
+}
+
+
+/*
+ * Return the STREAMING_FAIL_POSTCOMMIT reason code.
+ *
+ * Logged when a post-commit error occurs during streaming.
+ *
+ * Returns:
+ *   Pointer to static ngx_str_t "STREAMING_FAIL_POSTCOMMIT"
+ */
+const ngx_str_t *
+ngx_http_markdown_reason_streaming_fail_postcommit(void)
+{
+    return &ngx_http_markdown_reason_streaming_fail_postcommit_str;
+}
+
+
+/*
+ * Return the STREAMING_SKIP_UNSUPPORTED reason code.
+ *
+ * Logged when the engine selector rejects streaming due to
+ * unsupported capability or policy, before Rust session starts.
+ *
+ * Returns:
+ *   Pointer to static ngx_str_t "STREAMING_SKIP_UNSUPPORTED"
+ */
+const ngx_str_t *
+ngx_http_markdown_reason_streaming_skip_unsupported(void)
+{
+    return &ngx_http_markdown_reason_streaming_skip_str;
+}
+
+
+/*
+ * Return the STREAMING_BUDGET_EXCEEDED reason code.
+ *
+ * Auxiliary classification code logged when memory budget
+ * is exceeded.  The terminal state is determined by the
+ * markdown_streaming_on_error policy.
+ *
+ * Returns:
+ *   Pointer to static ngx_str_t "STREAMING_BUDGET_EXCEEDED"
+ */
+const ngx_str_t *
+ngx_http_markdown_reason_streaming_budget_exceeded(void)
+{
+    return &ngx_http_markdown_reason_streaming_budget_str;
+}
+
+
+/*
+ * Return the STREAMING_PRECOMMIT_FAILOPEN reason code.
+ *
+ * Logged when a pre-commit error triggers fail-open behavior.
+ *
+ * Returns:
+ *   Pointer to static ngx_str_t "STREAMING_PRECOMMIT_FAILOPEN"
+ */
+const ngx_str_t *
+ngx_http_markdown_reason_streaming_precommit_failopen(void)
+{
+    return &ngx_http_markdown_reason_streaming_precommit_failopen_str;
+}
+
+
+/*
+ * Return the STREAMING_PRECOMMIT_REJECT reason code.
+ *
+ * Logged when a pre-commit error triggers fail-closed behavior.
+ *
+ * Returns:
+ *   Pointer to static ngx_str_t "STREAMING_PRECOMMIT_REJECT"
+ */
+const ngx_str_t *
+ngx_http_markdown_reason_streaming_precommit_reject(void)
+{
+    return &ngx_http_markdown_reason_streaming_precommit_reject_str;
+}
+
+
+/*
+ * Return the STREAMING_SHADOW reason code.
+ *
+ * Logged when shadow mode runs a comparison.
+ *
+ * Returns:
+ *   Pointer to static ngx_str_t "STREAMING_SHADOW"
+ */
+const ngx_str_t *
+ngx_http_markdown_reason_streaming_shadow(void)
+{
+    return &ngx_http_markdown_reason_streaming_shadow_str;
+}
+
+#endif /* MARKDOWN_STREAMING_ENABLED */

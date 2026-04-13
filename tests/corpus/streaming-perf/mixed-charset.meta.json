@@ -1,0 +1,12 @@
+{
+  "fixture-id": "streaming-perf/mixed-charset",
+  "page-type": "clean-article",
+  "expected-conversion-result": "converted",
+  "input-size-bytes": 702,
+  "source-description": "Streaming benchmark fixture with mixed declared charset and multibyte content",
+  "failure-corpus": false,
+  "streaming_notes": {
+    "expected_fallback": false,
+    "known_diff_ids": []
+  }
+}
