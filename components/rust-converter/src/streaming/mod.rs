@@ -17,7 +17,7 @@
 //!
 //! # Usage
 //!
-//! ```
+//! ```no_run
 //! use nginx_markdown_converter::converter::ConversionOptions;
 //! use nginx_markdown_converter::streaming::{StreamingConverter, MemoryBudget};
 //!

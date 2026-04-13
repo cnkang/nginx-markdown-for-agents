@@ -17,6 +17,7 @@
 #include <stdio.h>    /* For printf, fprintf */
 #include <stdlib.h>   /* For malloc, free, exit */
 #include <string.h>   /* For memset, memcpy, strcmp */
+#include <strings.h>  /* For strcasecmp */
 #include <stdint.h>   /* For uint8_t, uint32_t, etc. */
 
 #ifndef ngx_inline
