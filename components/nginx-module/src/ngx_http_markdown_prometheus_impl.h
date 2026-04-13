@@ -238,7 +238,8 @@ ngx_http_markdown_metrics_write_prometheus(
     p = ngx_slprintf(p, end,
         "# HELP "
         "nginx_markdown_streaming_peak_memory_bytes "
-        "Last streaming conversion peak memory estimate.\n"
+        "Last streaming conversion peak working-set estimate; "
+        "not process RSS.\n"
         "# TYPE "
         "nginx_markdown_streaming_peak_memory_bytes gauge\n"
         "nginx_markdown_streaming_peak_memory_bytes "

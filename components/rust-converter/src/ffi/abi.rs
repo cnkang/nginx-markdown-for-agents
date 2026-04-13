@@ -56,8 +56,12 @@ pub struct MarkdownResult {
     pub error_code: u32,
     pub error_message: *mut u8,
     pub error_len: usize,
-    /// Peak memory estimate during streaming conversion (bytes).
-    /// Populated by `markdown_streaming_finalize` from `StreamingStats.peak_memory_estimate`.
+    /// Peak working-set memory estimate during streaming conversion (bytes).
+    ///
+    /// This is derived from converter-owned resident state and is not
+    /// a process RSS/high-water-mark measurement.
+    /// Populated by `markdown_streaming_finalize` from
+    /// `StreamingStats.peak_memory_estimate`.
     pub peak_memory_estimate: usize,
 }
 

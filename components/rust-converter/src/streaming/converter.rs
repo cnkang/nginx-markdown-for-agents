@@ -1031,7 +1031,15 @@ fn split_utf8_tail(bytes: &[u8]) -> (&[u8], &[u8]) {
                 // The incomplete part must be after this sequence
                 break;
             }
-            // Invalid sequence — treat as split point
+            // Invalid complete sequence. If it starts at offset 0, it cannot
+            // be repaired by appending future bytes; keep it in `valid` so the
+            // caller can recover via lossy conversion now instead of carrying
+            // an ever-growing deferred tail across chunks.
+            if i == 0 {
+                return (bytes, &[]);
+            }
+            // Otherwise split before the invalid region so the valid prefix can
+            // still be emitted immediately.
             return (&bytes[..i], &bytes[i..]);
         }
     }
@@ -2167,5 +2175,36 @@ mod tests {
         let (valid2, tail2) = split_utf8_tail(&continuation_only);
         assert_eq!(valid2, &continuation_only);
         assert!(tail2.is_empty());
+    }
+
+    #[test]
+    fn test_split_utf8_tail_invalid_complete_sequence_at_start() {
+        let bytes = [0xC2, 0x41];
+        let (valid, tail) = split_utf8_tail(&bytes);
+
+        assert_eq!(valid, &bytes);
+        assert!(tail.is_empty());
+    }
+
+    #[test]
+    fn test_split_utf8_tail_incomplete_then_invalid_followup_recovers() {
+        let first_chunk = [0x41, 0xC2];
+        let (valid1, tail1) = split_utf8_tail(&first_chunk);
+        assert_eq!(valid1, b"A");
+        assert_eq!(tail1, &[0xC2]);
+
+        let second_chunk = [tail1[0], 0x41];
+        let (valid2, tail2) = split_utf8_tail(&second_chunk);
+        assert_eq!(valid2, &second_chunk);
+        assert!(tail2.is_empty());
+    }
+
+    #[test]
+    fn test_split_utf8_tail_invalid_four_byte_start_not_deferred() {
+        let bytes = [0xF0, 0x28, 0x8C, 0xBC];
+        let (valid, tail) = split_utf8_tail(&bytes);
+
+        assert_eq!(valid, &bytes);
+        assert!(tail.is_empty());
     }
 }
