@@ -34,6 +34,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Restored green `make harness-check-full` validation by aligning release-gate compatibility-matrix parsing with the current 0.5.0 canonical document structure
 - Prevented local scratch markdown files from causing false failures in canonical docs validation
+- Bumped Rust MSRV from 1.87 to 1.91 to support `str::floor_char_boundary` used in UTF-8 safe link text truncation
+- Updated minimum Rust toolchain version in installation docs to 1.91.0+
 
 ## [0.4.1] - 2026-04-12
 

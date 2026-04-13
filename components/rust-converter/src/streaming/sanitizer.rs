@@ -39,6 +39,9 @@ const DANGEROUS_VOID_ELEMENTS: &[&str] = &["link", "base"];
 /// Embedded content elements: tags stripped, src/data URL extracted.
 const EMBEDDED_CONTENT_ELEMENTS: &[&str] = &["iframe", "object", "embed"];
 
+/// Media content elements: tags stripped, URL extracted from src/href.
+const MEDIA_CONTENT_ELEMENTS: &[&str] = &["video", "audio", "source", "track", "area"];
+
 /// Form elements: tags stripped, child text preserved.
 const FORM_ELEMENTS: &[&str] = &[
     "form", "button", "select", "textarea", "fieldset", "legend", "label", "option", "optgroup",
@@ -236,6 +239,34 @@ impl StreamingSanitizer {
                     return SanitizeDecision::Skip;
                 }
 
+                // Media content elements: strip tag, extract src/href URL.
+                if MEDIA_CONTENT_ELEMENTS.contains(&tag) {
+                    if !effectively_self_closing {
+                        self.strip_stack.push(tag.to_string());
+                    }
+                    let url = if tag == "area" {
+                        attrs
+                            .iter()
+                            .find(|(k, _)| k == "href")
+                            .or_else(|| attrs.iter().find(|(k, _)| k == "src"))
+                            .map(|(_, v)| v.clone())
+                    } else {
+                        attrs
+                            .iter()
+                            .find(|(k, _)| k == "src")
+                            .map(|(_, v)| v.clone())
+                    };
+                    if let Some(url_val) = url
+                        && !is_dangerous_url(&url_val)
+                    {
+                        return SanitizeDecision::PassModified(StreamEvent::Text(format!(
+                            "[{}]({})",
+                            tag, url_val
+                        )));
+                    }
+                    return SanitizeDecision::Skip;
+                }
+
                 // Form elements: strip tag, keep content
                 if FORM_ELEMENTS.contains(&tag) || VOID_FORM_CONTROLS.contains(&tag) {
                     if !effectively_self_closing && !VOID_FORM_CONTROLS.contains(&tag) {
@@ -292,7 +323,10 @@ impl StreamingSanitizer {
                 // Strip stack tracking for embedded/form elements.
                 // Only pop if the end tag matches the most recent strip entry,
                 // preventing mismatched tags from corrupting the strip state.
-                if EMBEDDED_CONTENT_ELEMENTS.contains(&tag) || FORM_ELEMENTS.contains(&tag) {
+                if EMBEDDED_CONTENT_ELEMENTS.contains(&tag)
+                    || MEDIA_CONTENT_ELEMENTS.contains(&tag)
+                    || FORM_ELEMENTS.contains(&tag)
+                {
                     if self.strip_stack.last().is_some_and(|t| t == tag) {
                         self.strip_stack.pop();
                     }
@@ -625,6 +659,74 @@ mod tests {
             }
             _ => panic!("Expected PassModified with URL, got {:?}", decision),
         }
+    }
+
+    #[test]
+    fn test_video_src_url_extracted() {
+        let mut san = StreamingSanitizer::new();
+        let decision = san.process_event(start_tag(
+            "video",
+            vec![("src", "https://example.com/v.mp4")],
+        ));
+        match decision {
+            SanitizeDecision::PassModified(StreamEvent::Text(t)) => {
+                assert_eq!(t, "[video](https://example.com/v.mp4)");
+            }
+            _ => panic!("Expected PassModified with URL, got {:?}", decision),
+        }
+        let child = san.process_event(text("fallback text"));
+        assert!(matches!(child, SanitizeDecision::Pass(_)));
+        assert_eq!(san.process_event(end_tag("video")), SanitizeDecision::Skip);
+    }
+
+    #[test]
+    fn test_source_src_url_extracted() {
+        let mut san = StreamingSanitizer::new();
+        let decision = san.process_event(start_tag(
+            "source",
+            vec![("src", "https://example.com/a.mp3")],
+        ));
+        match decision {
+            SanitizeDecision::PassModified(StreamEvent::Text(t)) => {
+                assert_eq!(t, "[source](https://example.com/a.mp3)");
+            }
+            _ => panic!("Expected PassModified with URL, got {:?}", decision),
+        }
+    }
+
+    #[test]
+    fn test_area_href_url_extracted() {
+        let mut san = StreamingSanitizer::new();
+        let decision =
+            san.process_event(start_tag("area", vec![("href", "https://example.com/map")]));
+        match decision {
+            SanitizeDecision::PassModified(StreamEvent::Text(t)) => {
+                assert_eq!(t, "[area](https://example.com/map)");
+            }
+            _ => panic!("Expected PassModified with URL, got {:?}", decision),
+        }
+    }
+
+    #[test]
+    fn test_track_src_url_extracted() {
+        let mut san = StreamingSanitizer::new();
+        let decision = san.process_event(start_tag(
+            "track",
+            vec![("src", "https://example.com/captions.vtt")],
+        ));
+        match decision {
+            SanitizeDecision::PassModified(StreamEvent::Text(t)) => {
+                assert_eq!(t, "[track](https://example.com/captions.vtt)");
+            }
+            _ => panic!("Expected PassModified with URL, got {:?}", decision),
+        }
+    }
+
+    #[test]
+    fn test_media_dangerous_url_blocked() {
+        let mut san = StreamingSanitizer::new();
+        let decision = san.process_event(start_tag("audio", vec![("src", "javascript:alert(1)")]));
+        assert_eq!(decision, SanitizeDecision::Skip);
     }
 
     // --- Form elements ---

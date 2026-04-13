@@ -676,14 +676,26 @@ impl IncrementalEmitter {
     /// Append text to `link_text`, respecting the output buffer budget.
     ///
     /// When the accumulated link text would exceed `max_buffer_size`,
-    /// the overflow flag is set and further appends are silently dropped.
-    /// The link is still closed properly on `Exit(Link)` — the text is
-    /// simply truncated.
+    /// the overflow flag is set and further appends are dropped.
+    /// A truncation marker is appended when possible so output drift is
+    /// operator-visible. The link is still closed on `Exit(Link)`.
     fn append_link_text(&mut self, s: &str) {
+        const LINK_TRUNCATION_MARKER: &str = "...";
+
         if self.link_text_overflow {
             return;
         }
         if self.link_text.len().saturating_add(s.len()) > self.max_buffer_size {
+            if self.max_buffer_size > 0 {
+                let marker_room = self.max_buffer_size.min(LINK_TRUNCATION_MARKER.len());
+                let keep = self.max_buffer_size.saturating_sub(marker_room);
+                let safe_keep = self.link_text.floor_char_boundary(keep);
+                if self.link_text.len() > safe_keep {
+                    self.link_text.truncate(safe_keep);
+                }
+                self.link_text
+                    .push_str(&LINK_TRUNCATION_MARKER[..marker_room]);
+            }
             self.link_text_overflow = true;
             return;
         }
@@ -1305,6 +1317,47 @@ mod tests {
             output.contains("[Click here](https://example.com)"),
             "got: {}",
             output
+        );
+    }
+
+    #[test]
+    fn test_link_text_overflow_appends_marker() {
+        let budget = MemoryBudget {
+            total: 1024,
+            state_stack: 256,
+            output_buffer: 16,
+            charset_sniff: 16,
+            lookahead: 64,
+        };
+        let mut emitter = IncrementalEmitter::new(&budget);
+
+        emitter.append_link_text("this text is");
+        emitter.append_link_text(" intentionally very long");
+
+        assert!(emitter.link_text_overflow, "overflow flag should be set");
+        assert_eq!(emitter.link_text, "this text is...");
+    }
+
+    #[test]
+    fn test_link_text_overflow_multibyte_chars() {
+        let budget = MemoryBudget {
+            total: 1024,
+            state_stack: 256,
+            output_buffer: 12,
+            charset_sniff: 16,
+            lookahead: 64,
+        };
+        let mut emitter = IncrementalEmitter::new(&budget);
+
+        emitter.append_link_text("こんにちは世界");
+        assert!(emitter.link_text_overflow, "overflow flag should be set");
+        assert!(
+            std::str::from_utf8(emitter.link_text.as_bytes()).is_ok(),
+            "link_text should be valid UTF-8 after truncation"
+        );
+        assert!(
+            emitter.link_text.ends_with("..."),
+            "link_text should end with truncation marker"
         );
     }
 

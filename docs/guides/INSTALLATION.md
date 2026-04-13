@@ -221,8 +221,8 @@ If you use a custom NGINX build, or a platform not supported by the pre-built bi
 
 | Component | Minimum Version | Purpose |
 |-----------|----------------|---------|
-| **Rust Toolchain** | 1.85.0+ | Building the Rust converter |
-| **Cargo** | 1.85.0+ | Rust package manager (included with Rust) |
+| **Rust Toolchain** | 1.91.0+ | Building the Rust converter |
+| **Cargo** | 1.91.0+ | Rust package manager (included with Rust) |
 | **cbindgen** | 0.24.0+ | Generating C header files from Rust |
 | **NGINX** | 1.24.0+ | Web server (source code required for module compilation) |
 | **GCC/Clang** | GCC 4.8+ or Clang 3.4+ | C compiler for NGINX module |
@@ -575,10 +575,10 @@ If your NGINX version is >= 1.24.0 but not listed in the matrix below, use the [
 | 1.28.3 | glibc | x86_64 | Full |
 | 1.28.3 | musl | aarch64 | Full |
 | 1.28.3 | musl | x86_64 | Full |
-| 1.29.7 | glibc | aarch64 | Full |
-| 1.29.7 | glibc | x86_64 | Full |
-| 1.29.7 | musl | aarch64 | Full |
-| 1.29.7 | musl | x86_64 | Full |
+| 1.29.8 | glibc | aarch64 | Full |
+| 1.29.8 | glibc | x86_64 | Full |
+| 1.29.8 | musl | aarch64 | Full |
+| 1.29.8 | musl | x86_64 | Full |
 <!-- END AUTO-GENERATED MATRIX -->
 
 ---
