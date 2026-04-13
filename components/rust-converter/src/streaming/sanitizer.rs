@@ -244,16 +244,18 @@ impl StreamingSanitizer {
                     if !effectively_self_closing {
                         self.strip_stack.push(tag.to_string());
                     }
-                    let url = attrs
-                        .iter()
-                        .find(|(k, _)| {
-                            if tag == "area" {
-                                k == "href" || k == "src"
-                            } else {
-                                k == "src"
-                            }
-                        })
-                        .map(|(_, v)| v.clone());
+                    let url = if tag == "area" {
+                        attrs
+                            .iter()
+                            .find(|(k, _)| k == "href")
+                            .or_else(|| attrs.iter().find(|(k, _)| k == "src"))
+                            .map(|(_, v)| v.clone())
+                    } else {
+                        attrs
+                            .iter()
+                            .find(|(k, _)| k == "src")
+                            .map(|(_, v)| v.clone())
+                    };
                     if let Some(url_val) = url
                         && !is_dangerous_url(&url_val)
                     {
@@ -700,6 +702,21 @@ mod tests {
         match decision {
             SanitizeDecision::PassModified(StreamEvent::Text(t)) => {
                 assert_eq!(t, "[area](https://example.com/map)");
+            }
+            _ => panic!("Expected PassModified with URL, got {:?}", decision),
+        }
+    }
+
+    #[test]
+    fn test_track_src_url_extracted() {
+        let mut san = StreamingSanitizer::new();
+        let decision = san.process_event(start_tag(
+            "track",
+            vec![("src", "https://example.com/captions.vtt")],
+        ));
+        match decision {
+            SanitizeDecision::PassModified(StreamEvent::Text(t)) => {
+                assert_eq!(t, "[track](https://example.com/captions.vtt)");
             }
             _ => panic!("Expected PassModified with URL, got {:?}", decision),
         }
