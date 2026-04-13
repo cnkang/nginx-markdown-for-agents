@@ -1,0 +1,20 @@
+{
+  "fixture-id": "streaming/blockquote-nested",
+  "page-type": "complex-common",
+  "expected-conversion-result": "converted",
+  "input-size-bytes": 519,
+  "source-description": "Nested blockquote fixture with list and code block content",
+  "failure-corpus": false,
+  "streaming_notes": {
+    "expected_fallback": false,
+    "known_diff_ids": [
+      "DIFF-HIGHRISK-BLOCKQUOTE-SEMANTICS"
+    ],
+    "high_risk_structures": [
+      "blockquote",
+      "nested-blockquote",
+      "blockquote-list",
+      "blockquote-code"
+    ]
+  }
+}

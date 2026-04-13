@@ -1,0 +1,19 @@
+{
+  "fixture-id": "streaming/normalization-crlf",
+  "page-type": "clean-article",
+  "expected-conversion-result": "converted",
+  "input-size-bytes": 380,
+  "source-description": "Line ending and whitespace normalization scenarios",
+  "failure-corpus": false,
+  "streaming_notes": {
+    "expected_fallback": false,
+    "known_diff_ids": [
+      "DIFF-PARITY-WHITESPACE-ONLY"
+    ],
+    "high_risk_structures": [
+      "line-ending",
+      "whitespace-normalization",
+      "unicode-normalization"
+    ]
+  }
+}

@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Code Blocks Mixed Fixture</title>
+</head>
+<body>
+    <!--
+        Streaming parity test fixture: code block and inline code variants.
+
+        Covers fenced code blocks with/without language identifiers,
+        HTML entity decoding inside code, and inline code containing
+        literal backticks. These are high-risk because the streaming
+        emitter must preserve raw content verbatim and select correct
+        fence lengths.
+    -->
+    <h1>Code Blocks</h1>
+
+    <h2>Fenced with Language</h2>
+    <pre><code class="language-rust">fn main() {
+    println!("hello");
+}</code></pre>
+
+    <h2>Fenced without Language</h2>
+    <pre><code>line one
+line two
+line three</code></pre>
+
+    <h2>HTML Entities in Code</h2>
+    <pre><code>&lt;div class=&quot;sample&quot;&gt;A &amp; B&lt;/div&gt;</code></pre>
+
+    <h2>Inline Code with Backticks</h2>
+    <p>Use <code>literal `ticks` inside inline code</code> and keep spacing stable.</p>
+</body>
+</html>

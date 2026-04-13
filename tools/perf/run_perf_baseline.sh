@@ -9,9 +9,13 @@
 #
 # Options:
 #   --tier <name>            Run only the specified sample tier
+#   --engine <mode>          Benchmark engine: full-buffer, streaming, both (default: full-buffer)
 #   --json-output <path>     Write Measurement Report to <path>
 #   --verdict-output <path>  Write Verdict Report to <path>
 #   --update-baseline        Extract core metrics and save as baseline
+#   --generate-evidence-pack Generate evidence pack JSON
+#   --evidence-output <path> Evidence pack output path (default: perf/reports/evidence-pack-{platform}-{timestamp}.json)
+#   --parity-report <path>   Path to parity report for dual-threshold evaluation
 #
 # Must be executed from the repository root.
 
@@ -24,6 +28,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 REPORT_UTILS="$REPO_ROOT/tools/perf/report_utils.py"
+EVIDENCE_GENERATOR="$REPO_ROOT/tools/perf/evidence_pack_generator.py"
 
 PERF_BINARY="components/rust-converter/target/release/examples/perf_baseline"
 
@@ -39,9 +44,11 @@ fi
 DEFAULT_REPORTS_DIR="perf/reports"
 DEFAULT_JSON_OUTPUT="${DEFAULT_REPORTS_DIR}/latest-measurement-${PLATFORM}.json"
 DEFAULT_VERDICT_OUTPUT="${DEFAULT_REPORTS_DIR}/latest-verdict-${PLATFORM}.json"
+DEFAULT_EVIDENCE_OUTPUT="${DEFAULT_REPORTS_DIR}/evidence-pack-${PLATFORM}.json"
 
 METRICS_SCHEMA="perf/metrics-schema.json"
 THRESHOLDS_CONFIG="perf/thresholds.json"
+EVIDENCE_TARGETS="perf/streaming-evidence-targets.json"
 BASELINES_DIR="perf/baselines"
 
 ###############################################################################
@@ -49,14 +56,22 @@ BASELINES_DIR="perf/baselines"
 ###############################################################################
 
 TIER=""
+ENGINE="full-buffer"
 JSON_OUTPUT=""
 VERDICT_OUTPUT=""
+EVIDENCE_OUTPUT=""
+PARITY_REPORT=""
 UPDATE_BASELINE=false
+GENERATE_EVIDENCE_PACK=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --tier)
       TIER="$2"
+      shift 2
+      ;;
+    --engine)
+      ENGINE="$2"
       shift 2
       ;;
     --json-output)
@@ -71,9 +86,21 @@ while [[ $# -gt 0 ]]; do
       UPDATE_BASELINE=true
       shift
       ;;
+    --generate-evidence-pack)
+      GENERATE_EVIDENCE_PACK=true
+      shift
+      ;;
+    --evidence-output)
+      EVIDENCE_OUTPUT="$2"
+      shift 2
+      ;;
+    --parity-report)
+      PARITY_REPORT="$2"
+      shift 2
+      ;;
     *)
       echo >&2 "error: unknown argument: $1"
-      echo >&2 "usage: $0 [--tier <name>] [--json-output <path>] [--verdict-output <path>] [--update-baseline]"
+      echo >&2 "usage: $0 [--tier <name>] [--engine <mode>] [--json-output <path>] [--verdict-output <path>] [--update-baseline] [--generate-evidence-pack] [--evidence-output <path>] [--parity-report <path>]"
       exit 1
       ;;
   esac
@@ -83,6 +110,13 @@ done
 if [[ "$UPDATE_BASELINE" == true && -n "$TIER" ]]; then
   echo >&2 "error: --update-baseline and --tier cannot be used together"
   echo >&2 "       --update-baseline must run all sample tiers to produce a complete baseline"
+  exit 1
+fi
+
+# --generate-evidence-pack requires both engines for meaningful comparison.
+if [[ "$GENERATE_EVIDENCE_PACK" == true && "$ENGINE" != "both" ]]; then
+  echo >&2 "error: --generate-evidence-pack requires --engine both"
+  echo >&2 "       evidence pack needs both full-buffer and streaming metrics for comparison"
   exit 1
 fi
 
@@ -132,13 +166,14 @@ mkdir -p "$(dirname "$JSON_OUTPUT")"
 # Step 3: Run benchmarks
 ###############################################################################
 
-PERF_ARGS=("--json-output" "$JSON_OUTPUT" "--platform" "$PLATFORM")
+PERF_ARGS=("--engine" "$ENGINE" "--json-output" "$JSON_OUTPUT" "--platform" "$PLATFORM")
 
 if [[ -n "$TIER" ]]; then
   PERF_ARGS+=("--single" "$TIER")
 fi
 
 log "=== Running benchmarks (platform: ${PLATFORM}) ==="
+log "  engine: $ENGINE"
 if [[ -n "$TIER" ]]; then
   log "  tier: $TIER"
 fi
@@ -174,12 +209,14 @@ with open(json_file) as f:
 platform = report.get('platform', 'unknown')
 commit = report.get('git_commit', 'unknown')
 ts = report.get('timestamp', 'unknown')
+engine = report.get('engine', 'full-buffer')
 
 print('', file=sys.stderr)
 print('=== Performance Summary ===', file=sys.stderr)
 print(f'Platform : {platform}', file=sys.stderr)
 print(f'Commit   : {commit}', file=sys.stderr)
 print(f'Timestamp: {ts}', file=sys.stderr)
+print(f'Engine   : {engine}', file=sys.stderr)
 print('', file=sys.stderr)
 print(f'{"Tier":<25} {"P50 ms":>10} {"P95 ms":>10} {"P99 ms":>10} {"Req/s":>12} {"MB/s":>10} {"Peak Mem":>14}', file=sys.stderr)
 print('-' * 95, file=sys.stderr)
@@ -196,12 +233,86 @@ for tier_name in sorted(tiers.keys()):
     mem_str = f'{mem / (1024*1024):.1f} MB' if mem > 0 else 'N/A'
     print(f'{tier_name:<25} {p50:>10.3f} {p95:>10.3f} {p99:>10.3f} {rps:>12.1f} {mbps:>10.2f} {mem_str:>14}', file=sys.stderr)
 
+# Show streaming metrics if present
+streaming_metrics = report.get('streaming_metrics', {})
+if streaming_metrics:
+    print('', file=sys.stderr)
+    print('=== Streaming Metrics ===', file=sys.stderr)
+    print(f'{"Tier":<25} {"TTFB ms":>10} {"TTLB ms":>10} {"CPU ms":>10} {"Flushes":>10} {"Fallback%":>12} {"Peak Mem":>14}', file=sys.stderr)
+    print('-' * 95, file=sys.stderr)
+    for tier_name in sorted(streaming_metrics.keys()):
+        sm = streaming_metrics[tier_name]
+        ttfb = sm.get('ttfb_ms', 0)
+        ttlb = sm.get('ttlb_ms', 0)
+        cpu = sm.get('cpu_time_ms', 0)
+        flushes = sm.get('flush_count', 0)
+        fallback = sm.get('fallback_rate', 0) * 100
+        mem = sm.get('peak_memory_bytes', 0)
+        mem_str = f'{mem / (1024*1024):.1f} MB' if mem > 0 else 'N/A'
+        print(f'{tier_name:<25} {ttfb:>10.3f} {ttlb:>10.3f} {cpu:>10.3f} {flushes:>10} {fallback:>11.2f}% {mem_str:>14}', file=sys.stderr)
+
 print('', file=sys.stderr)
 print(f'Measurement report: {json_file}', file=sys.stderr)
 PYEOF
 }
 
 print_summary "$JSON_OUTPUT"
+
+###############################################################################
+# Step 4b: Generate Evidence Pack (optional)
+###############################################################################
+
+if [[ "$GENERATE_EVIDENCE_PACK" == true ]]; then
+  # Resolve evidence output path
+  if [[ -z "$EVIDENCE_OUTPUT" ]]; then
+    TIMESTAMP="$(python3 -c 'import datetime; print(datetime.datetime.utcnow().strftime("%Y%m%dT%H%M%SZ"))' 2>/dev/null || date -u +%Y%m%dT%H%M%SZ)"
+    EVIDENCE_OUTPUT="${DEFAULT_EVIDENCE_OUTPUT/.json/-${TIMESTAMP}.json}"
+  fi
+
+  mkdir -p "$(dirname "$EVIDENCE_OUTPUT")"
+
+  log "=== Generating Evidence Pack ==="
+  log "  evidence output: $EVIDENCE_OUTPUT"
+
+  if [[ -n "$PARITY_REPORT" ]]; then
+    log "  parity report: $PARITY_REPORT"
+  fi
+
+  if ! command -v python3 &>/dev/null; then
+    log "[error] python3 is required for --generate-evidence-pack"
+    exit 1
+  fi
+
+  # Run evidence pack generator
+  EVIDENCE_ARGS=(
+    "$EVIDENCE_GENERATOR"
+    "--fullbuffer-report" "$JSON_OUTPUT"
+    "--streaming-report" "$JSON_OUTPUT"
+    "--evidence-targets" "$REPO_ROOT/$EVIDENCE_TARGETS"
+    "--output" "$EVIDENCE_OUTPUT"
+  )
+
+  if [[ -n "$PARITY_REPORT" && -f "$PARITY_REPORT" ]]; then
+    EVIDENCE_ARGS+=("--parity-report" "$PARITY_REPORT")
+  fi
+
+  EVIDENCE_EXIT=0
+  python3 "${EVIDENCE_ARGS[@]}" || EVIDENCE_EXIT=$?
+
+  # Exit code 0 = GO verdict, 1 = NO_GO verdict (valid outcome),
+  # exit code >= 2 = generator error (missing file, JSON parse, etc.).
+  if [[ $EVIDENCE_EXIT -ge 2 ]]; then
+    log "[error] evidence pack generator failed (exit code: $EVIDENCE_EXIT)"
+    exit $EVIDENCE_EXIT
+  fi
+
+  if [[ $EVIDENCE_EXIT -eq 1 ]]; then
+    log "[warn] streaming evidence verdict is NO_GO; continuing to threshold engine"
+  fi
+
+  log "=== Evidence Pack generated ==="
+  log "  output: $EVIDENCE_OUTPUT"
+fi
 
 ###############################################################################
 # Step 5: Threshold engine verdict
@@ -263,4 +374,14 @@ if [[ "$UPDATE_BASELINE" == true ]]; then
 fi
 
 log "Done."
-exit $THRESHOLD_EXIT
+
+# Final exit code: combine threshold engine and evidence pack verdicts.
+# If evidence pack was generated and returned NO_GO (exit 1), propagate
+# that even if the threshold engine passed (exit 0).  Errors (exit >= 2)
+# from either component are already handled above.
+FINAL_EXIT=$THRESHOLD_EXIT
+if [[ "$GENERATE_EVIDENCE_PACK" == true && $EVIDENCE_EXIT -eq 1 && $FINAL_EXIT -eq 0 ]]; then
+  log "[info] overriding exit code: evidence pack verdict is NO_GO"
+  FINAL_EXIT=1
+fi
+exit $FINAL_EXIT

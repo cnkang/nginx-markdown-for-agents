@@ -37,6 +37,15 @@ static u_char ngx_http_markdown_cc_suffix_private[] = ", private";
 
 static ngx_int_t ngx_http_markdown_cookie_matches_pattern(ngx_str_t *cookie_name,
                                                           ngx_str_t *pattern);
+static void ngx_http_markdown_skip_cache_control_separators(
+    const u_char **cursor, const u_char *end);
+static void ngx_http_markdown_trim_cache_control_token(
+    const u_char **token_start, const u_char **token_end);
+static ngx_int_t ngx_http_markdown_next_cache_control_token(
+    const u_char **cursor, const u_char *end,
+    const u_char **token_start, const u_char **token_end);
+static ngx_flag_t ngx_http_markdown_cache_control_token_is_public(
+    const u_char *token_start, const u_char *token_end);
 
 /* Find a response header by name in the outgoing headers list. */
 static ngx_table_elt_t *
@@ -44,18 +53,18 @@ ngx_http_markdown_find_response_header(ngx_http_request_t *r,
                                        u_char *name,
                                        size_t name_len)
 {
-    ngx_list_part_t  *part;
-
     if (r->headers_out.headers.part.nelts == 0) {
         return NULL;
     }
 
-    for (part = &r->headers_out.headers.part; part != NULL; part = part->next) {
+    for (ngx_list_part_t *part = &r->headers_out.headers.part;
+         part != NULL;
+         part = part->next)
+    {
         ngx_table_elt_t  *headers;
-        ngx_uint_t        i;
 
         headers = part->elts;
-        for (i = 0; i < part->nelts; i++) {
+        for (ngx_uint_t i = 0; i < part->nelts; i++) {
             if (headers[i].key.len == name_len
                 && ngx_strncasecmp(headers[i].key.data, name, name_len) == 0)
             {
@@ -128,14 +137,14 @@ static ngx_int_t
 ngx_http_markdown_strip_public_and_append_private(ngx_http_request_t *r,
                                                   ngx_table_elt_t *cache_control)
 {
-    u_char     *new_value;
-    size_t      new_len;
-    u_char     *p;
-    u_char     *end;
-    u_char     *token_start;
-    u_char     *token_end;
-    u_char     *dst;
-    ngx_flag_t  wrote_token;
+    u_char         *new_value;
+    size_t          new_len;
+    const u_char   *p;
+    const u_char   *end;
+    const u_char   *token_start;
+    const u_char   *token_end;
+    u_char         *dst;
+    ngx_flag_t      wrote_token;
 
     if (cache_control->value.len > (((size_t) -1) - (sizeof(ngx_http_markdown_cc_suffix_private) - 1)) / 2) {
         return NGX_ERROR;
@@ -147,40 +156,16 @@ ngx_http_markdown_strip_public_and_append_private(ngx_http_request_t *r,
         return NGX_ERROR;
     }
 
-    p = cache_control->value.data;
-    end = cache_control->value.data + cache_control->value.len;
+    p = (const u_char *) cache_control->value.data;
+    end = p + cache_control->value.len;
     dst = new_value;
     wrote_token = 0;
 
-    while (p < end) {
-        while (p < end && (*p == ' ' || *p == '\t' || *p == ',')) {
-            p++;
-        }
-        if (p >= end) {
-            break;
-        }
-
-        token_start = p;
-        while (p < end && *p != ',') {
-            p++;
-        }
-        token_end = p;
-
-        while (token_start < token_end
-               && (*token_start == ' ' || *token_start == '\t'))
-        {
-            token_start++;
-        }
-        while (token_end > token_start
-               && (*(token_end - 1) == ' ' || *(token_end - 1) == '\t'))
-        {
-            token_end--;
-        }
-
-        if ((size_t) (token_end - token_start) == sizeof(ngx_http_markdown_cc_public) - 1
-            && ngx_strncasecmp(token_start,
-                               ngx_http_markdown_cc_public,
-                               sizeof(ngx_http_markdown_cc_public) - 1) == 0)
+    while (ngx_http_markdown_next_cache_control_token(
+               &p, end, &token_start, &token_end) == NGX_OK)
+    {
+        if (ngx_http_markdown_cache_control_token_is_public(
+                token_start, token_end))
         {
             continue;
         }
@@ -193,7 +178,8 @@ ngx_http_markdown_strip_public_and_append_private(ngx_http_request_t *r,
             *dst++ = ',';
             *dst++ = ' ';
         }
-        dst = ngx_cpymem(dst, token_start, token_end - token_start);
+        dst = ngx_cpymem(dst, token_start,
+                         (size_t) (token_end - token_start));
         wrote_token = 1;
     }
 
@@ -213,6 +199,72 @@ ngx_http_markdown_strip_public_and_append_private(ngx_http_request_t *r,
                   &cache_control->value);
 
     return NGX_OK;
+}
+
+static void
+ngx_http_markdown_skip_cache_control_separators(const u_char **cursor,
+                                                const u_char *end)
+{
+    while (*cursor < end
+           && (**cursor == ' ' || **cursor == '\t' || **cursor == ','))
+    {
+        (*cursor)++;
+    }
+}
+
+static void
+ngx_http_markdown_trim_cache_control_token(const u_char **token_start,
+                                           const u_char **token_end)
+{
+    while (*token_start < *token_end
+           && (**token_start == ' ' || **token_start == '\t'))
+    {
+        (*token_start)++;
+    }
+
+    while (*token_end > *token_start
+           && ((*(*token_end - 1) == ' ')
+               || (*(*token_end - 1) == '\t')))
+    {
+        (*token_end)--;
+    }
+}
+
+static ngx_int_t
+ngx_http_markdown_next_cache_control_token(const u_char **cursor,
+                                           const u_char *end,
+                                           const u_char **token_start,
+                                           const u_char **token_end)
+{
+    ngx_http_markdown_skip_cache_control_separators(cursor, end);
+    if (*cursor >= end) {
+        return NGX_DECLINED;
+    }
+
+    *token_start = *cursor;
+    while (*cursor < end && **cursor != ',') {
+        (*cursor)++;
+    }
+    *token_end = *cursor;
+
+    ngx_http_markdown_trim_cache_control_token(token_start, token_end);
+    return NGX_OK;
+}
+
+static ngx_flag_t
+ngx_http_markdown_cache_control_token_is_public(const u_char *token_start,
+                                                const u_char *token_end)
+{
+    if ((size_t) (token_end - token_start)
+        != sizeof(ngx_http_markdown_cc_public) - 1)
+    {
+        return 0;
+    }
+
+    return (ngx_strncasecmp((u_char *) token_start,
+                            ngx_http_markdown_cc_public,
+                            sizeof(ngx_http_markdown_cc_public) - 1)
+            == 0);
 }
 
 /* Return configured auth-cookie patterns, falling back to built-in defaults. */
@@ -236,13 +288,13 @@ ngx_http_markdown_get_auth_patterns(const ngx_http_markdown_conf_t *conf,
     }
 
     *patterns = default_patterns;
-    *pattern_count = (ngx_uint_t) ((sizeof(default_patterns)
-                                    / sizeof(default_patterns[0])) - 1);
+    *pattern_count = (sizeof(default_patterns)
+                      / sizeof(default_patterns[0])) - 1;
 }
 
 /* Advance cursor past optional whitespace in a Cookie header value. */
 static void
-ngx_http_markdown_skip_cookie_whitespace(u_char **cursor, u_char *end)
+ngx_http_markdown_skip_cookie_whitespace(u_char **cursor, const u_char *end)
 {
     while (*cursor < end && (**cursor == ' ' || **cursor == '\t')) {
         (*cursor)++;
@@ -251,7 +303,7 @@ ngx_http_markdown_skip_cookie_whitespace(u_char **cursor, u_char *end)
 
 /* Skip past the cookie value and its trailing semicolon delimiter. */
 static void
-ngx_http_markdown_skip_cookie_value(u_char **cursor, u_char *end)
+ngx_http_markdown_skip_cookie_value(u_char **cursor, const u_char *end)
 {
     while (*cursor < end && **cursor != ';') {
         (*cursor)++;
@@ -263,10 +315,11 @@ ngx_http_markdown_skip_cookie_value(u_char **cursor, u_char *end)
 
 /* Extract the next cookie name from the cursor position, trimming whitespace. */
 static ngx_int_t
-ngx_http_markdown_read_cookie_name(u_char **cursor, u_char *end, ngx_str_t *cookie_name)
+ngx_http_markdown_read_cookie_name(u_char **cursor, const u_char *end,
+                                   ngx_str_t *cookie_name)
 {
     u_char  *name_start;
-    u_char  *name_end;
+    const u_char  *name_end;
 
     ngx_http_markdown_skip_cookie_whitespace(cursor, end);
     if (*cursor >= end) {
@@ -300,9 +353,7 @@ ngx_http_markdown_cookie_matches_any_pattern(ngx_str_t *cookie_name,
                                              ngx_uint_t pattern_count,
                                              ngx_str_t **matched_pattern)
 {
-    ngx_uint_t  j;
-
-    for (j = 0; j < pattern_count; j++) {
+    for (ngx_uint_t j = 0; j < pattern_count; j++) {
         if (ngx_http_markdown_cookie_matches_pattern(cookie_name, &patterns[j])) {
             if (matched_pattern != NULL) {
                 *matched_pattern = &patterns[j];
@@ -326,7 +377,7 @@ ngx_http_markdown_cookie_matches_any_pattern(ngx_str_t *cookie_name,
  * @return   1 if Authorization header present, 0 otherwise
  */
 static ngx_int_t
-ngx_http_markdown_has_authorization_header(ngx_http_request_t *r)
+ngx_http_markdown_has_authorization_header(const ngx_http_request_t *r)
 {
     if (r == NULL || r->headers_in.authorization == NULL) {
         return 0;
@@ -353,10 +404,10 @@ ngx_http_markdown_has_authorization_header(ngx_http_request_t *r)
 static ngx_int_t
 ngx_http_markdown_cookie_matches_pattern(ngx_str_t *cookie_name, ngx_str_t *pattern)
 {
-    size_t  pattern_len;
-    size_t  cookie_len;
-    u_char *pattern_data;
-    u_char *cookie_data;
+    size_t         pattern_len;
+    size_t         cookie_len;
+    const u_char  *pattern_data;
+    const u_char  *cookie_data;
 
     if (cookie_name == NULL || pattern == NULL ||
         cookie_name->len == 0 || pattern->len == 0)
@@ -441,8 +492,8 @@ ngx_http_markdown_has_auth_cookies(ngx_http_request_t *r,
     ngx_http_markdown_get_auth_patterns(conf, &patterns, &pattern_count);
 
     for (; cookie_header != NULL; cookie_header = cookie_header->next) {
-        u_char *p;
-        u_char *end;
+        u_char        *p;
+        const u_char  *end;
 
         p = cookie_header->value.data;
         end = p + cookie_header->value.len;
@@ -521,7 +572,8 @@ ngx_http_markdown_cache_control_has_directive(const ngx_str_t *value,
     const ngx_str_t *directive)
 {
     size_t directive_len;
-    u_char *p, *end;
+    u_char *p;
+    u_char *end;
 
     if (value == NULL || value->len == 0 || directive == NULL) {
         return 0;
@@ -542,19 +594,16 @@ ngx_http_markdown_cache_control_has_directive(const ngx_str_t *value,
             break;
         }
 
-        /* Check if this token matches the directive */
-        if ((size_t)(end - p) >= directive_len &&
-            ngx_strncasecmp(p, directive->data, directive_len) == 0)
+        /* Check if this token matches the directive as a complete token */
+        if ((size_t)(end - p) >= directive_len
+            && ngx_strncasecmp(p, directive->data, directive_len) == 0
+            && (p + directive_len == end
+                || p[directive_len] == ' '
+                || p[directive_len] == '\t'
+                || p[directive_len] == ','
+                || p[directive_len] == '='))
         {
-            /* Verify it's a complete token (not part of another word) */
-            if (p + directive_len == end ||
-                p[directive_len] == ' ' ||
-                p[directive_len] == '\t' ||
-                p[directive_len] == ',' ||
-                p[directive_len] == '=')
-            {
-                return 1;
-            }
+            return 1;
         }
 
         /* Skip to next token */

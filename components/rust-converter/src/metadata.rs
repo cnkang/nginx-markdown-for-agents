@@ -25,9 +25,58 @@ pub struct PageMetadata {
 }
 
 impl PageMetadata {
-    /// Create an empty metadata container.
+    /// Constructs an empty PageMetadata with all fields unset.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use nginx_markdown_converter::metadata::PageMetadata;
+    ///
+    /// let meta = PageMetadata::new();
+    /// assert_eq!(meta, PageMetadata::default());
+    /// assert!(meta.title.is_none() && meta.description.is_none());
+    /// ```
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Estimate the total byte length of all populated metadata fields.
+    ///
+    /// Counts the UTF-8 byte length of each `Some(String)` field and returns their saturating sum.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use nginx_markdown_converter::metadata::PageMetadata;
+    ///
+    /// let meta = PageMetadata {
+    ///     title: Some("a".into()),
+    ///     description: Some("bc".into()),
+    ///     ..Default::default()
+    /// };
+    /// assert_eq!(meta.bytes_estimate(), 3);
+    /// ```
+    pub fn bytes_estimate(&self) -> usize {
+        let mut total = 0usize;
+        if let Some(s) = self.title.as_ref() {
+            total = total.saturating_add(s.len());
+        }
+        if let Some(s) = self.description.as_ref() {
+            total = total.saturating_add(s.len());
+        }
+        if let Some(s) = self.url.as_ref() {
+            total = total.saturating_add(s.len());
+        }
+        if let Some(s) = self.image.as_ref() {
+            total = total.saturating_add(s.len());
+        }
+        if let Some(s) = self.author.as_ref() {
+            total = total.saturating_add(s.len());
+        }
+        if let Some(s) = self.published.as_ref() {
+            total = total.saturating_add(s.len());
+        }
+        total
     }
 }
 

@@ -18,6 +18,25 @@
  * These directives control the behavior of the Markdown filter.
  * Each directive includes validation and clear error messages.
  */
+
+#ifdef MARKDOWN_STREAMING_ENABLED
+/*
+ * Enum table for markdown_streaming_on_error directive.
+ *
+ * Used by ngx_conf_set_enum_slot to validate and map string
+ * values to integer constants.  Invalid values are automatically
+ * rejected by the NGINX configuration parser.
+ */
+static ngx_conf_enum_t
+    ngx_http_markdown_streaming_on_error_enum[] = {
+    { ngx_string("pass"),
+      NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_PASS },
+    { ngx_string("reject"),
+      NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_REJECT },
+    { ngx_null_string, 0 }
+};
+#endif /* MARKDOWN_STREAMING_ENABLED */
+
 static ngx_command_t ngx_http_markdown_filter_commands[] = {
     /*
      * markdown_filter on|off|$variable
@@ -447,6 +466,103 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
         0,
         NULL
     },
+
+#ifdef MARKDOWN_STREAMING_ENABLED
+    /*
+     * markdown_streaming_engine off|on|auto|$variable
+     *
+     * Streaming engine selection mode.
+     * Supports per-request variable-driven rollout.
+     * Default: off (all requests use full-buffer path)
+     * Context: http, server, location
+     *
+     * Example:
+     *   markdown_streaming_engine auto;
+     *   markdown_streaming_engine $streaming_flag;
+     */
+    {
+        ngx_string("markdown_streaming_engine"),
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF
+            |NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+        ngx_http_markdown_streaming_engine,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        0,
+        NULL
+    },
+
+    /*
+     * markdown_streaming_budget <size>
+     *
+     * Memory budget for streaming conversion (passed to Rust).
+     * Default: 2m (2 megabytes)
+     * Context: http, server, location
+     *
+     * Example:
+     *   markdown_streaming_budget 4m;
+     */
+    {
+        ngx_string("markdown_streaming_budget"),
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF
+            |NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+        ngx_conf_set_size_slot,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        offsetof(ngx_http_markdown_conf_t,
+                 streaming_budget),
+        NULL
+    },
+
+    /*
+     * markdown_streaming_on_error pass|reject
+     *
+     * Failure strategy for streaming Pre_Commit_Phase errors:
+     * - pass: Fail-open, return original HTML (default)
+     * - reject: Fail-closed, return error
+     *
+     * This directive is independent of markdown_on_error which
+     * controls the full-buffer path.  Post_Commit_Phase errors
+     * are always fail-closed regardless of this setting.
+     *
+     * Default: pass
+     * Context: http, server, location
+     *
+     * Example:
+     *   markdown_streaming_on_error reject;
+     */
+    {
+        ngx_string("markdown_streaming_on_error"),
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF
+            |NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+        ngx_conf_set_enum_slot,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        offsetof(ngx_http_markdown_conf_t,
+                 streaming_on_error),
+        &ngx_http_markdown_streaming_on_error_enum
+    },
+
+    /*
+     * markdown_streaming_shadow on|off
+     *
+     * Enable shadow mode: run both full-buffer and streaming
+     * engines, return full-buffer result to client, compare
+     * outputs and record differences in debug log and metrics.
+     *
+     * Default: off
+     * Context: http, server, location
+     *
+     * Example:
+     *   markdown_streaming_shadow on;
+     */
+    {
+        ngx_string("markdown_streaming_shadow"),
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF
+            |NGX_HTTP_LOC_CONF|NGX_CONF_FLAG,
+        ngx_conf_set_flag_slot,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        offsetof(ngx_http_markdown_conf_t,
+                 streaming_shadow),
+        NULL
+    },
+#endif /* MARKDOWN_STREAMING_ENABLED */
 
     ngx_null_command
 };
