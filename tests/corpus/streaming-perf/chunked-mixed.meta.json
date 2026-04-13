@@ -1,0 +1,12 @@
+{
+  "fixture-id": "streaming-perf/chunked-mixed",
+  "page-type": "clean-article",
+  "expected-conversion-result": "converted",
+  "input-size-bytes": 1328,
+  "source-description": "Mixed-content streaming benchmark fixture with headings, paragraphs, and lists",
+  "failure-corpus": false,
+  "streaming_notes": {
+    "expected_fallback": false,
+    "known_diff_ids": []
+  }
+}
