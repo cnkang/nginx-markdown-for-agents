@@ -1351,8 +1351,14 @@ mod tests {
 
         emitter.append_link_text("こんにちは世界");
         assert!(emitter.link_text_overflow, "overflow flag should be set");
-        assert!(std::str::from_utf8(emitter.link_text.as_bytes()).is_ok(), "link_text should be valid UTF-8 after truncation");
-        assert!(emitter.link_text.ends_with("..."), "link_text should end with truncation marker");
+        assert!(
+            std::str::from_utf8(emitter.link_text.as_bytes()).is_ok(),
+            "link_text should be valid UTF-8 after truncation"
+        );
+        assert!(
+            emitter.link_text.ends_with("..."),
+            "link_text should end with truncation marker"
+        );
     }
 
     // ── Image tests ─────────────────────────────────────────────────
