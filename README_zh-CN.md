@@ -292,6 +292,22 @@ make test-rust-fuzz-smoke
 
 更完整的集成测试、E2E 与性能基线说明见 [docs/testing/README.md](docs/testing/README.md)。
 
+如果你修改的是仓库 contract、文档校验器或 agent 工作流规则，还需要运行 harness 检查：
+
+```bash
+# 仓库级 harness 真相面的廉价阻断检查
+make harness-check
+
+# 包含文档与 release-gate 的完整 harness 校验
+make harness-check-full
+```
+
+对于本地 spec 导向的工作，harness 也可以根据提示词或可选的本地指针文件解析最可能的 spec：
+
+```bash
+python3 tools/harness/resolve_spec.py --hint "continue streaming parity diff work"
+```
+
 ## 文档导航
 
 | 目标 | 文档 |
@@ -303,6 +319,9 @@ make test-rust-fuzz-smoke
 | 运维与排障 | [docs/guides/OPERATIONS.md](docs/guides/OPERATIONS.md) |
 | 报告漏洞或查看安全支持范围 | [SECURITY.md](SECURITY.md) |
 | 了解架构与设计取舍 | [docs/architecture/README.md](docs/architecture/README.md) |
+| 了解 harness 的架构设计 | [docs/architecture/HARNESS_ARCHITECTURE.md](docs/architecture/HARNESS_ARCHITECTURE.md) |
+| 理解 spec 路由、risk pack 与 harness 检查 | [docs/harness/README.md](docs/harness/README.md) |
+| 维护 repo-owned harness 规则与本地适配流程 | [docs/guides/HARNESS_MAINTENANCE.md](docs/guides/HARNESS_MAINTENANCE.md) |
 | 理解配置如何映射到运行时行为 | [docs/architecture/CONFIG_BEHAVIOR_MAP.md](docs/architecture/CONFIG_BEHAVIOR_MAP.md) |
 | 深入实现细节 | [docs/features/README.md](docs/features/README.md) |
 | 查看测试说明 | [docs/testing/README.md](docs/testing/README.md) |
@@ -317,6 +336,9 @@ make test-rust-fuzz-smoke
 - 准备上线运维：看 [docs/guides/OPERATIONS.md](docs/guides/OPERATIONS.md)
 - 报告漏洞：看 [SECURITY.md](SECURITY.md)
 - 想理解系统结构和技术选型：看 [docs/architecture/README.md](docs/architecture/README.md)
+- 想理解 harness 为什么是仓库级资产以及它如何工作：看 [docs/architecture/HARNESS_ARCHITECTURE.md](docs/architecture/HARNESS_ARCHITECTURE.md)
+- 想理解 repo-owned agent 工作流与 spec 路由：看 [docs/harness/README.md](docs/harness/README.md)
+- 想维护 harness 规则、risk pack 与本地适配层：看 [docs/guides/HARNESS_MAINTENANCE.md](docs/guides/HARNESS_MAINTENANCE.md)
 - 想理解 directive 会改动哪段运行时路径：看 [docs/architecture/CONFIG_BEHAVIOR_MAP.md](docs/architecture/CONFIG_BEHAVIOR_MAP.md)
 - 想深入实现：看 [docs/features/README.md](docs/features/README.md)
 - 想了解验证方式：看 [docs/testing/README.md](docs/testing/README.md)
@@ -331,6 +353,7 @@ docs/                  用户、运维、测试与架构文档
   architecture/        系统设计、ADR 与配置行为映射
   features/            具体功能的实现细节
   guides/              安装、配置、部署与运维指南
+  harness/             repo-owned spec 路由、risk pack 与 harness 检查
   project/             项目状态与路线图
   testing/             测试策略与参考文档
 examples/
@@ -346,6 +369,21 @@ tools/                 安装脚本、CI 脚本与开发工具
 .github/workflows/     CI/CD 流水线定义
 Makefile               顶层构建与测试入口
 ```
+
+## 贡献者工作流
+
+如果你改的是运行时行为，请继续使用现有测试入口。
+
+如果你改的是仓库 contract、验证工具或 agent-facing 文档，请把 harness 工作流纳入默认路径：
+
+1. 当任务存在歧义时，先解析当前 spec：  
+   `python3 tools/harness/resolve_spec.py --hint "..."`
+2. 优先更新 repo-owned truth：  
+   `AGENTS.md`、`docs/harness/`、`tools/harness/`、`Makefile`、CI wiring
+3. 运行 `make harness-check`
+4. 在结束更广义的文档或 release-gate 改动前，运行 `make harness-check-full`
+
+可选的本地 `.kiro/` 文件可以增强 spec 解析和适配层检查，但公开 clone 的仓库在没有这些文件时也必须通过。
 
 ## 路线方向
 

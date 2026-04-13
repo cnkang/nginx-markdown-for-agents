@@ -5,6 +5,7 @@ on:
   pull_request:
     branches: [main, master]
     paths:
+      - "AGENTS.md"
       - "components/**"
       - "tools/**"
       - "tests/**"
@@ -18,6 +19,7 @@ on:
   push:
     branches: [main, master]
     paths:
+      - "AGENTS.md"
       - "components/**"
       - "tools/**"
       - "tests/**"
@@ -59,6 +61,7 @@ jobs:
         with:
           filters: |
             docs:
+              - 'AGENTS.md'
               - 'docs/**'
               - 'README.md'
               - 'README_zh-CN.md'

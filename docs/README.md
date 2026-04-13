@@ -15,6 +15,8 @@ Think of this directory as the maintained map behind that landing page: guides f
 | Configure directives and behavior | [guides/CONFIGURATION.md](guides/CONFIGURATION.md) |
 | Operate and troubleshoot a deployment | [guides/OPERATIONS.md](guides/OPERATIONS.md) |
 | Understand the architecture and design rationale | [architecture/README.md](architecture/README.md) |
+| Understand agent routing, risk packs, and harness checks | [harness/README.md](harness/README.md) |
+| Maintain repo-owned harness rules and local adapter workflow | [guides/HARNESS_MAINTENANCE.md](guides/HARNESS_MAINTENANCE.md) |
 | Understand implementation details | [features/README.md](features/README.md) |
 | Review tests and validation references | [testing/README.md](testing/README.md) |
 | Check current status and maintenance notes | [project/README.md](project/README.md) |
@@ -29,6 +31,7 @@ Canonical user and operator documentation:
 - source builds and local verification
 - directive reference
 - deployment examples and runbooks
+- harness maintenance and contributor workflow for repo-owned agent rules
 
 Index: [guides/README.md](guides/README.md)
 
@@ -50,9 +53,20 @@ System structure, component boundaries, and decision rationale:
 - runtime architecture overview
 - configuration-to-behavior mapping
 - repository structure
+- harness architecture and design rationale
 - ADRs for major technical choices
 
 Index: [architecture/README.md](architecture/README.md)
+
+### `harness/`
+
+Repo-owned harness overlays for agent execution:
+
+- spec resolver and conflict policy
+- routing manifest and verification families
+- risk-pack index and high-risk overlays
+
+Index: [harness/README.md](harness/README.md)
 
 ### `testing/`
 

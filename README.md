@@ -273,6 +273,24 @@ make test-rust-fuzz-smoke
 
 See [docs/testing/README.md](docs/testing/README.md) for integration, E2E, and performance-oriented test references.
 
+If you are changing repo contracts, docs validators, or agent workflow rules,
+run the harness checks as well:
+
+```bash
+# Cheap blocker for repo-owned harness truth
+make harness-check
+
+# Full harness validation, including docs and release-gate checks
+make harness-check-full
+```
+
+For local spec-oriented work, the harness can also resolve the most likely spec
+from your hints or an optional local pointer file:
+
+```bash
+python3 tools/harness/resolve_spec.py --hint "continue streaming parity diff work"
+```
+
 ## Documentation Map
 
 | Goal | Document |
@@ -284,6 +302,7 @@ See [docs/testing/README.md](docs/testing/README.md) for integration, E2E, and p
 | Operate and troubleshoot | [docs/guides/OPERATIONS.md](docs/guides/OPERATIONS.md) |
 | Report a vulnerability or review security support | [SECURITY.md](SECURITY.md) |
 | Understand architecture and design choices | [docs/architecture/README.md](docs/architecture/README.md) |
+| Understand spec routing, risk packs, and harness checks | [docs/harness/README.md](docs/harness/README.md) |
 | Map directives to runtime behavior | [docs/architecture/CONFIG_BEHAVIOR_MAP.md](docs/architecture/CONFIG_BEHAVIOR_MAP.md) |
 | Explore implementation details | [docs/features/README.md](docs/features/README.md) |
 | Review testing references | [docs/testing/README.md](docs/testing/README.md) |
@@ -298,6 +317,7 @@ See [docs/testing/README.md](docs/testing/README.md) for integration, E2E, and p
 - Operating in production: use [docs/guides/OPERATIONS.md](docs/guides/OPERATIONS.md)
 - Reporting a vulnerability: use [SECURITY.md](SECURITY.md)
 - Understanding system design: use [docs/architecture/README.md](docs/architecture/README.md)
+- Understanding repo-owned agent workflow and spec routing: use [docs/harness/README.md](docs/harness/README.md)
 - Understanding what directives change in the runtime path: use [docs/architecture/CONFIG_BEHAVIOR_MAP.md](docs/architecture/CONFIG_BEHAVIOR_MAP.md)
 - Reading implementation details: use [docs/features/README.md](docs/features/README.md)
 - Validating changes: use [docs/testing/README.md](docs/testing/README.md)
@@ -312,6 +332,7 @@ docs/                  User, operator, testing, and architecture docs
   architecture/        System design, ADRs, and config behavior maps
   features/            Implementation details for specific features
   guides/              Installation, configuration, deployment, and operations
+  harness/             Repo-owned spec routing, risk packs, and harness checks
   project/             Project status and roadmap
   testing/             Testing strategy and references
 examples/
@@ -327,6 +348,23 @@ tools/                 Installers, CI scripts, and developer tooling
 .github/workflows/     CI/CD pipeline definitions
 Makefile               Top-level build and test entrypoints
 ```
+
+## Contributor Workflow
+
+If you are changing runtime behavior, use the existing test commands.
+
+If you are changing repo contracts, validation tooling, or agent-facing docs,
+add the harness workflow to your default path:
+
+1. Resolve the current spec when the task is ambiguous:
+   `python3 tools/harness/resolve_spec.py --hint "..."`
+2. Update repo-owned truth first:
+   `AGENTS.md`, `docs/harness/`, `tools/harness/`, `Makefile`, CI wiring
+3. Run `make harness-check`
+4. Run `make harness-check-full` before closing broader docs or release-gate work
+
+Optional local `.kiro/` files can refine spec resolution and adapter checks, but
+public clones must still pass without them.
 
 ## Roadmap
 
