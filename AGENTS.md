@@ -38,6 +38,9 @@ If two rules conflict, follow the higher-priority source.
   `int`, and declarations without proper prototypes).
 - Use `u_char *`, `ngx_str_t`, and NGINX helpers (`ngx_snprintf`, `ngx_memcpy`, etc.) consistently.
 - Use `NULL` pointer comparisons (not `0`).
+- For POSIX string helpers (for example `strcasecmp`, `strncasecmp`), include
+  `<strings.h>` explicitly in the translation unit or shared header. Do not
+  rely on transitive includes or implicit declarations.
 - **Never dereference or perform relational operations on values that may be uninitialized, NULL, or invalid without an explicit guard.** This includes: pointer comparisons (`p > q`, `p < q`), pointer arithmetic, field access through pointers, array indexing with unvalidated bounds. When the validity of a value depends on runtime state (for example `pos/last` may both be NULL in empty buffers), use an explicit boolean flag set at the production site rather than inferring state from value relationships.
 
 ## Frequent Error Patterns and Required Prevention
@@ -325,6 +328,11 @@ Required:
   `tests/corpus/**/.meta.json -> streaming_notes.known_diff_ids` synchronized
   with `tests/streaming/known-differences.toml` IDs to avoid silent metadata
   drift.
+- Any new `tests/corpus/**/*.html` fixture must include a same-basename
+  `.meta.json` sidecar in the same change set, with all required fields:
+  `fixture-id`, `page-type`, `expected-conversion-result`, `input-size-bytes`,
+  `source-description`, and `failure-corpus`. Run
+  `tools/corpus/validate_corpus.sh` (or `make test-benchmark`) before merge.
 - Regression tests for classification logic, routing decisions, or metrics
   increments must exercise code that mirrors the production branching — not
   manually set expected values in a local struct and assert them.  A test
@@ -487,6 +495,9 @@ Required:
   - **Public API entry points** (for example `StreamingConverter`, `MemoryBudget`, `StreamingResult`):
     use `no_run` or runnable doctests with full `nginx_markdown_converter::...` imports to maintain
     compile-time regression protection.
+  - Public API doctests that exercise feature-gated runtime paths must not
+    assume `Result::unwrap()` success across all feature sets; either keep them
+    `no_run` or match expected fallback/error variants explicitly.
   - **Internal implementation details** (for example `CharsetState`, `IncrementalEmitter`,
     `StructuralStateMachine`, `StreamingTokenizer`, helper methods): use `ignore` mode to keep
     documentation illustrative without causing compilation failures. These should have their
