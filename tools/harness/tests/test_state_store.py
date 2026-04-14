@@ -46,3 +46,20 @@ def test_load_events_skips_malformed_jsonl_lines(tmp_path, monkeypatch):
     events = state_store.load_events()
     assert len(events) == 1
     assert events[0]["event_type"] == "loop"
+
+
+def test_summary_skips_entries_missing_event_type(tmp_path, monkeypatch):
+    monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path))
+    path = state_store.state_file()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "\n".join(
+            [
+                '{"event_type":"loop","key":"runtime","source":"t","note":"ok","ts":"2026-04-13T00:00:00+00:00"}',
+                '{"key":"runtime","source":"t","note":"missing","ts":"2026-04-13T00:00:01+00:00"}',
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    assert state_store.summarize() == "1 events, loop=1"

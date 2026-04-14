@@ -5,7 +5,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -42,6 +44,15 @@ def _load_manifest(path: Path | None = None) -> dict:
 def _required_text(path: Path, needles: list[str]) -> list[str]:
     text = path.read_text(encoding="utf-8")
     return [needle for needle in needles if needle not in text]
+
+
+def _required_patterns(path: Path, patterns: dict[str, str]) -> list[str]:
+    text = path.read_text(encoding="utf-8")
+    missing: list[str] = []
+    for label, pattern in patterns.items():
+        if not re.search(pattern, text, flags=re.MULTILINE):
+            missing.append(label)
+    return missing
 
 
 def _result(name: str, status: str, detail: str) -> CheckResult:
@@ -84,12 +95,13 @@ def _check_manifest_structure(manifest: dict) -> CheckResult:
             + ", ".join(missing_truth_surface_keys),
         )
 
-    if manifest["status_semantics"] != [
+    expected_statuses = [
         PASS,
         FAIL,
         SKIP_NOT_PRESENT,
         WARN_NEEDS_AUTHOR_REVIEW,
-    ]:
+    ]
+    if Counter(manifest["status_semantics"]) != Counter(expected_statuses):
         return _result(
             "manifest-status-semantics",
             FAIL,
@@ -152,32 +164,47 @@ def _check_risk_pack_docs(manifest: dict) -> CheckResult:
 
 def _check_harness_docs(manifest: dict) -> CheckResult:
     missing: list[str] = []
+    missing.extend(_required_patterns(
+        README_PATH,
+        {
+            "core.md link": r"\[[^\]]+\]\(core\.md\)",
+            "routing-manifest.json link": (
+                r"\[[^\]]+\]\(routing-manifest\.json\)"
+            ),
+            "routing-manifest.md link": r"\[[^\]]+\]\(routing-manifest\.md\)",
+            "risk-packs/README.md link": (
+                r"\[[^\]]+\]\(risk-packs/README\.md\)"
+            ),
+        },
+    ))
     missing.extend(
-        _required_text(
-            README_PATH,
-            [
-                "core.md",
-                "routing-manifest.json",
-                "routing-manifest.md",
-                "risk-packs/README.md",
-            ],
+        _required_patterns(
+            SUMMARY_PATH,
+            {
+                pack_id: rf"\b{re.escape(pack_id)}\b"
+                for pack_id in [pack["id"] for pack in manifest["risk_packs"]]
+            },
         )
     )
-    pack_ids = [pack["id"] for pack in manifest["risk_packs"]]
-    missing.extend(_required_text(SUMMARY_PATH, pack_ids))
     missing.extend(
-        _required_text(
+        _required_patterns(
             CORE_PATH,
-            [
-                PASS,
-                FAIL,
-                SKIP_NOT_PRESENT,
-                WARN_NEEDS_AUTHOR_REVIEW,
-                "outside voice",
-                "state carrier",
-                "stop and explain the mismatch",
-                "tools/harness/resolve_spec.py",
-            ],
+            {
+                PASS: rf"`{re.escape(PASS)}`",
+                FAIL: rf"`{re.escape(FAIL)}`",
+                SKIP_NOT_PRESENT: rf"`{re.escape(SKIP_NOT_PRESENT)}`",
+                WARN_NEEDS_AUTHOR_REVIEW: (
+                    rf"`{re.escape(WARN_NEEDS_AUTHOR_REVIEW)}`"
+                ),
+                "outside voice": r"\boutside voice\b",
+                "state carrier": r"\bstate carrier\b",
+                "stop and explain the mismatch": (
+                    r"\bstop and explain the mismatch\b"
+                ),
+                "tools/harness/resolve_spec.py": (
+                    r"python3\s+tools/harness/resolve_spec\.py"
+                ),
+            },
         )
     )
     if missing:
@@ -191,14 +218,16 @@ def _check_harness_docs(manifest: dict) -> CheckResult:
 
 
 def _check_agents_map() -> CheckResult:
-    missing = _required_text(
+    missing = _required_patterns(
         AGENTS_PATH,
-        [
-            "docs/harness/README.md",
-            "docs/harness/core.md",
-            "docs/harness/routing-manifest.json",
-            "Codex-first",
-        ],
+        {
+            "docs/harness/README.md": r"`docs/harness/README\.md`",
+            "docs/harness/core.md": r"`docs/harness/core\.md`",
+            "docs/harness/routing-manifest.json": (
+                r"`docs/harness/routing-manifest\.json`"
+            ),
+            "Codex-first": r"\bCodex-first\b",
+        },
     )
     if missing:
         return _result(

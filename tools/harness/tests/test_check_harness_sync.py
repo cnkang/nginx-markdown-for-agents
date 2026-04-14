@@ -104,6 +104,32 @@ def test_collect_results_fail_when_optional_adapters_key_missing(tmp_path, monke
     assert "truth surface keys" in results[0].detail
 
 
+def test_collect_results_accept_reordered_status_semantics(tmp_path, monkeypatch):
+    repo = tmp_path
+    _write_repo_fixture(repo, with_kiro=False)
+    manifest_path = repo / "docs/harness/routing-manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["status_semantics"] = [
+        sync.WARN_NEEDS_AUTHOR_REVIEW,
+        sync.SKIP_NOT_PRESENT,
+        sync.FAIL,
+        sync.PASS,
+    ]
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    monkeypatch.setattr(sync, "REPO_ROOT", repo)
+    monkeypatch.setattr(sync, "MANIFEST_PATH", manifest_path)
+    monkeypatch.setattr(sync, "README_PATH", repo / "docs/harness/README.md")
+    monkeypatch.setattr(sync, "CORE_PATH", repo / "docs/harness/core.md")
+    monkeypatch.setattr(sync, "SUMMARY_PATH", repo / "docs/harness/routing-manifest.md")
+    monkeypatch.setattr(sync, "PACK_INDEX_PATH", repo / "docs/harness/risk-packs/README.md")
+    monkeypatch.setattr(sync, "AGENTS_PATH", repo / "AGENTS.md")
+
+    results = sync.collect_results()
+    manifest_result = next(item for item in results if item.name == "manifest-structure")
+    assert manifest_result.status == sync.PASS
+
+
 def _write_repo_fixture(repo: Path, *, with_kiro: bool, kiro_has_links: bool = True) -> None:
     for rel in [
         "docs/harness/risk-packs",
@@ -141,7 +167,6 @@ def _write_repo_fixture(repo: Path, *, with_kiro: bool, kiro_has_links: bool = T
             sync.SKIP_NOT_PRESENT,
             sync.WARN_NEEDS_AUTHOR_REVIEW,
         ],
-        "spec_resolver": {},
         "spec_resolver": {
             "priority": ["user-task", "active-spec-pointer"],
             "pointer_candidates": [
@@ -167,7 +192,15 @@ def _write_repo_fixture(repo: Path, *, with_kiro: bool, kiro_has_links: bool = T
         json.dumps(manifest), encoding="utf-8"
     )
     (repo / "docs/harness/README.md").write_text(
-        "core.md\nrouting-manifest.json\nrouting-manifest.md\nrisk-packs/README.md\n",
+        "\n".join(
+            [
+                "[Workflow](core.md)",
+                "[Manifest JSON](routing-manifest.json)",
+                "[Manifest Summary](routing-manifest.md)",
+                "[Risk Packs](risk-packs/README.md)",
+            ]
+        )
+        + "\n",
         encoding="utf-8",
     )
     (repo / "docs/harness/core.md").write_text(
@@ -200,7 +233,15 @@ def _write_repo_fixture(repo: Path, *, with_kiro: bool, kiro_has_links: bool = T
         "duplication\n", encoding="utf-8"
     )
     (repo / "AGENTS.md").write_text(
-        "docs/harness/README.md\ndocs/harness/core.md\ndocs/harness/routing-manifest.json\nCodex-first\n",
+        "\n".join(
+            [
+                "- `docs/harness/README.md` is the repo-owned harness entrypoint.",
+                "- `docs/harness/core.md` defines the execution loop.",
+                "- `docs/harness/routing-manifest.json` is the canonical route source.",
+                "- Codex-first semantics apply.",
+            ]
+        )
+        + "\n",
         encoding="utf-8",
     )
 

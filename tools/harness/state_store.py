@@ -81,9 +81,16 @@ def summarize(repo_root: Path | None = None) -> str:
     events = load_events(repo_root)
     if not events:
         return "No harness state recorded yet."
-    counts = Counter(event["event_type"] for event in events)
+    counts = Counter(
+        event_type
+        for event in events
+        if (event_type := event.get("event_type")) is not None
+    )
+    event_count = sum(counts.values())
+    if not counts:
+        return "No harness state recorded yet."
     parts = [f"{key}={counts[key]}" for key in sorted(counts)]
-    return f"{len(events)} events, " + ", ".join(parts)
+    return f"{event_count} events, " + ", ".join(parts)
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
