@@ -561,7 +561,9 @@ def check_compat_capabilities(
         result.passed(CHECK_COMPAT_CAPS)
 
 
-def check_compat_states(result: ValidationResult, header: list[str]) -> list[int]:
+def check_compat_states(
+    result: ValidationResult, header: list[str]
+) -> tuple[list[int], int]:
     """Sub-check: header must have exactly the valid state columns.
 
     This function verifies that the compatibility matrix header contains
@@ -577,11 +579,11 @@ def check_compat_states(result: ValidationResult, header: list[str]) -> list[int
     capability_idx, classification_idx = _compat_column_indices(header)
     if capability_idx == -1:
         result.failed(CHECK_COMPAT_STATES, "capability column not found")
-        return []
+        return [], -1
 
     if classification_idx is not None:
         result.passed(CHECK_COMPAT_STATES)
-        return [classification_idx]
+        return [classification_idx], capability_idx
 
     state_columns = [h for h in header if h.strip() and h.lower() in _VALID_STATES_LOWER]
     extra_columns = [
@@ -595,19 +597,24 @@ def check_compat_states(result: ValidationResult, header: list[str]) -> list[int
             CHECK_COMPAT_STATES,
             f"expected {len(VALID_STATES)} state columns, found {len(state_columns)}: {state_columns}",
         )
-        return []
+        return [], capability_idx
     if extra_columns:
         result.failed(
             CHECK_COMPAT_STATES,
             f"unexpected columns in matrix header: {extra_columns}",
         )
-        return []
+        return [], capability_idx
     result.passed(CHECK_COMPAT_STATES)
-    return [i for i, h in enumerate(header) if h.strip() and h.lower() in _VALID_STATES_LOWER]
+    return [
+        i for i, h in enumerate(header) if h.strip() and h.lower() in _VALID_STATES_LOWER
+    ], capability_idx
 
 
 def check_compat_row_validity(
-    result: ValidationResult, data_rows: list[list[str]], state_indices: list[int]
+    result: ValidationResult,
+    data_rows: list[list[str]],
+    state_indices: list[int],
+    capability_idx: int,
 ) -> None:
     """Sub-check: each data row must mark exactly one state.
 
@@ -625,14 +632,14 @@ def check_compat_row_validity(
 
     for row in data_rows:
         cap_name = "<empty>"
-        if len(row) >= 2:
-            cap_name = row[1].strip() or cap_name
+        if capability_idx >= 0 and capability_idx < len(row):
+            cap_name = row[capability_idx].strip() or cap_name
         elif row:
             cap_name = row[0].strip() or cap_name
 
         if uses_classification_column:
             idx = state_indices[0]
-            if idx >= len(row):
+            if idx >= len(row) or not row[idx].strip():
                 invalid_rows.append(f"{cap_name} (missing classification)")
                 continue
             state_value = _normalize_state_value(row[idx])
@@ -680,8 +687,9 @@ def check_compatibility_matrix(result: ValidationResult) -> None:
     check_compat_capabilities(result, rows)
 
     # Check that the header has the correct state columns and validate rows
-    if state_indices := check_compat_states(result, rows[0]):
-        check_compat_row_validity(result, rows[1:], state_indices)
+    state_indices, capability_idx = check_compat_states(result, rows[0])
+    if state_indices:
+        check_compat_row_validity(result, rows[1:], state_indices, capability_idx)
 
 
 _CHECKLIST_RE_PREFIX = "- ["

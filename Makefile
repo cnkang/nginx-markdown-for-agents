@@ -162,18 +162,20 @@ test-benchmark-summary:
 	python3 tools/perf/format_pr_summary.py \
 		--report $(CORPUS_REPORT)
 
-docs-check:
+docs-check-base:
 	python3 tools/docs/check_docs.py
 	python3 tools/docs/check_packaging_docs.py
 	python3 tools/docs/check_packaging_consistency.py
+
+docs-check: docs-check-base
 	python3 tools/harness/check_harness_sync.py
 
 harness-check:
 	python3 tools/harness/check_harness_sync.py
 
 harness-check-full:
+	$(MAKE) docs-check-base
 	python3 tools/harness/check_harness_sync.py --full
-	$(MAKE) docs-check
 	$(MAKE) release-gates-check
 
 license-check:

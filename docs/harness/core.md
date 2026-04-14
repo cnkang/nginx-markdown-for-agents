@@ -67,6 +67,14 @@ Run checks in phases:
 Verification may raise the effective risk level above the initial route. If it
 does, the route changes. The initial guess does not get special authority.
 
+The default path should stay cheap. Prefer a fast blocker-first flow and widen
+only when the touched surface, warnings, or drift signals justify more cost.
+Do not spend replay or history-scan budget on every task by default.
+
+Warnings are not cleanup theater. Do not silence a warning by weakening checks,
+shrinking coverage, or deleting behavior unless the warning itself proves the
+behavior is invalid. Fix the underlying problem or escalate it explicitly.
+
 ## Status Semantics
 
 - `PASS`: the check ran and matched the contract
@@ -74,6 +82,11 @@ does, the route changes. The initial guess does not get special authority.
 - `SKIP_NOT_PRESENT`: optional local-only input was not present
 - `WARN_NEEDS_AUTHOR_REVIEW`: the harness found a likely drift that should be
   reviewed by the author, but it is not a public-repo failure by itself
+
+Harness tools must map malformed or unreadable inputs into these explicit
+statuses whenever possible. Public manifests should fail clearly. Optional local
+inputs and user-local state should degrade explicitly instead of crashing with a
+raw traceback.
 
 ## Conflict Protocol
 
@@ -93,6 +106,13 @@ On the first drift trigger:
 
 If the same pattern repeats, escalate or ask for outside voice. The harness
 must not burn tokens pretending every retry is fresh work.
+
+## Proving Grounds
+
+When validating harness evolution across broad scenarios, keep the first proving
+ground on runtime-risk surfaces and add static-quality proving grounds second.
+This preserves the priority order from the design reviews: correctness and
+safety on the real request path first, quality-discipline expansion second.
 
 ## Outside Voice
 

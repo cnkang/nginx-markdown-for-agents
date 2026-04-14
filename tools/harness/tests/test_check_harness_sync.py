@@ -1,13 +1,9 @@
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[3]
-sys.path.insert(0, str(ROOT / "tools"))
-
-from harness import check_harness_sync as sync
+from tools.harness import check_harness_sync as sync
 
 
 def test_collect_results_skips_missing_kiro(tmp_path, monkeypatch):
@@ -63,6 +59,49 @@ def test_collect_results_fail_when_pack_doc_missing(tmp_path, monkeypatch):
     pack = next(item for item in results if item.name == "risk-pack-contract")
     assert pack.status == sync.FAIL
     assert "missing docs" in pack.detail
+
+
+def test_collect_results_fail_for_invalid_manifest_json(tmp_path, monkeypatch):
+    repo = tmp_path
+    _write_repo_fixture(repo, with_kiro=False)
+    manifest_path = repo / "docs/harness/routing-manifest.json"
+    manifest_path.write_text("{not-json", encoding="utf-8")
+
+    monkeypatch.setattr(sync, "REPO_ROOT", repo)
+    monkeypatch.setattr(sync, "MANIFEST_PATH", manifest_path)
+    monkeypatch.setattr(sync, "README_PATH", repo / "docs/harness/README.md")
+    monkeypatch.setattr(sync, "CORE_PATH", repo / "docs/harness/core.md")
+    monkeypatch.setattr(sync, "SUMMARY_PATH", repo / "docs/harness/routing-manifest.md")
+    monkeypatch.setattr(sync, "PACK_INDEX_PATH", repo / "docs/harness/risk-packs/README.md")
+    monkeypatch.setattr(sync, "AGENTS_PATH", repo / "AGENTS.md")
+
+    results = sync.collect_results()
+    assert len(results) == 1
+    assert results[0].name == "manifest-load"
+    assert results[0].status == sync.FAIL
+
+
+def test_collect_results_fail_when_optional_adapters_key_missing(tmp_path, monkeypatch):
+    repo = tmp_path
+    _write_repo_fixture(repo, with_kiro=False)
+    manifest_path = repo / "docs/harness/routing-manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    del manifest["truth_surfaces"]["optional_adapters"]
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    monkeypatch.setattr(sync, "REPO_ROOT", repo)
+    monkeypatch.setattr(sync, "MANIFEST_PATH", manifest_path)
+    monkeypatch.setattr(sync, "README_PATH", repo / "docs/harness/README.md")
+    monkeypatch.setattr(sync, "CORE_PATH", repo / "docs/harness/core.md")
+    monkeypatch.setattr(sync, "SUMMARY_PATH", repo / "docs/harness/routing-manifest.md")
+    monkeypatch.setattr(sync, "PACK_INDEX_PATH", repo / "docs/harness/risk-packs/README.md")
+    monkeypatch.setattr(sync, "AGENTS_PATH", repo / "AGENTS.md")
+
+    results = sync.collect_results()
+    assert len(results) == 1
+    assert results[0].name == "manifest-structure"
+    assert results[0].status == sync.FAIL
+    assert "truth surface keys" in results[0].detail
 
 
 def _write_repo_fixture(repo: Path, *, with_kiro: bool, kiro_has_links: bool = True) -> None:

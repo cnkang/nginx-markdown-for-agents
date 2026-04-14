@@ -18,13 +18,21 @@ If two rules conflict, follow the higher-priority source.
 
 ## Harness Map
 - `AGENTS.md` remains the Codex-first contract and engineering rule map.
+- `AGENTS.md` and `docs/harness/` are the owning harness truth surfaces for
+  tracked repository behavior; Make/CI/checkers must consume these, not local
+  adapter-only summaries.
 - `docs/harness/README.md` is the repo-owned harness entrypoint.
 - `docs/harness/core.md` defines the execution loop, conflict protocol, and
   status semantics.
 - `docs/harness/routing-manifest.json` is the canonical structured routing
   source; `docs/harness/routing-manifest.md` is the readable overlay.
+- `.kiro/specs/` is read-only optional input for local spec-oriented work. Do
+  not write harness caches, annotations, or durable repo truth into `.kiro/`.
 - `.kiro/steering/` is an optional local adapter surface only. It should point
   back to `docs/harness/` and must not define stronger semantics than this file.
+- Outside voice and the user-local harness state carrier are advisory execution
+  tools. They may challenge or inform the current path, but they do not weaken
+  the repo-owned correctness and safety contract.
 
 ## Non-Negotiable NGINX Baseline
 

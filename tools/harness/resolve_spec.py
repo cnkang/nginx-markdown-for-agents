@@ -61,12 +61,16 @@ class Resolution:
     pointer: str | None = None
 
 
-def discover_specs(specs_root: Path = SPECS_ROOT) -> list[SpecCandidate]:
+def discover_specs(specs_root: Path | None = None) -> list[SpecCandidate]:
+    specs_root = specs_root or SPECS_ROOT
     if not specs_root.exists():
         return []
     specs: list[SpecCandidate] = []
     for config_path in sorted(specs_root.glob("*/.config.kiro")):
-        data = json.loads(config_path.read_text(encoding="utf-8"))
+        try:
+            data = json.loads(config_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            continue
         specs.append(
             SpecCandidate(
                 dir_name=config_path.parent.name,
@@ -105,13 +109,17 @@ def _match_by_identity(candidates: list[SpecCandidate], value: str) -> list[Spec
 
 
 def _read_pointer(
-    pointer_candidates: list[Path] = POINTER_CANDIDATES,
+    pointer_candidates: list[Path] | None = None,
 ) -> tuple[str | None, str | None]:
+    pointer_candidates = pointer_candidates or POINTER_CANDIDATES
     for path in pointer_candidates:
         if not path.exists():
             continue
         if path.suffix == ".json":
-            data = json.loads(path.read_text(encoding="utf-8"))
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+                continue
             try:
                 path_display = str(path.relative_to(REPO_ROOT))
             except ValueError:
@@ -120,7 +128,10 @@ def _read_pointer(
                 data.get("spec"),
                 path_display,
             )
-        value = path.read_text(encoding="utf-8").strip()
+        try:
+            value = path.read_text(encoding="utf-8").strip()
+        except (OSError, UnicodeDecodeError):
+            continue
         if value:
             try:
                 path_display = str(path.relative_to(REPO_ROOT))
@@ -155,8 +166,8 @@ def resolve_spec(
     *,
     explicit_specs: list[str] | None = None,
     hints: list[str] | None = None,
-    specs_root: Path = SPECS_ROOT,
-    pointer_candidates: list[Path] = POINTER_CANDIDATES,
+    specs_root: Path | None = None,
+    pointer_candidates: list[Path] | None = None,
 ) -> Resolution:
     explicit_specs = explicit_specs or []
     hints = hints or []

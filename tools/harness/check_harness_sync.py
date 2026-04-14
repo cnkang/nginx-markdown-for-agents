@@ -31,8 +31,12 @@ class CheckResult:
     detail: str
 
 
-def _load_manifest(path: Path = MANIFEST_PATH) -> dict:
-    return json.loads(path.read_text(encoding="utf-8"))
+def _load_manifest(path: Path | None = None) -> dict:
+    path = path or MANIFEST_PATH
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"failed to load harness manifest from {path}: {exc}") from exc
 
 
 def _required_text(path: Path, needles: list[str]) -> list[str]:
@@ -60,6 +64,24 @@ def _check_manifest_structure(manifest: dict) -> CheckResult:
             "manifest-structure",
             FAIL,
             f"missing top-level keys: {', '.join(missing)}",
+        )
+
+    truth_surfaces = manifest["truth_surfaces"]
+    required_truth_surface_keys = {
+        "contract",
+        "harness",
+        "canonical_docs",
+        "optional_adapters",
+    }
+    missing_truth_surface_keys = sorted(
+        required_truth_surface_keys - set(truth_surfaces)
+    )
+    if missing_truth_surface_keys:
+        return _result(
+            "manifest-structure",
+            FAIL,
+            "missing truth surface keys: "
+            + ", ".join(missing_truth_surface_keys),
         )
 
     if manifest["status_semantics"] != [
@@ -188,7 +210,7 @@ def _check_agents_map() -> CheckResult:
 
 
 def _check_optional_kiro(manifest: dict, full: bool) -> CheckResult:
-    adapters = manifest["truth_surfaces"]["optional_adapters"]
+    adapters = manifest.get("truth_surfaces", {}).get("optional_adapters", [])
     present = [REPO_ROOT / rel for rel in adapters if (REPO_ROOT / rel).exists()]
     if not present:
         return _result(
@@ -220,9 +242,17 @@ def _check_optional_kiro(manifest: dict, full: bool) -> CheckResult:
 
 
 def collect_results(full: bool = False) -> list[CheckResult]:
-    manifest = _load_manifest()
+    try:
+        manifest = _load_manifest()
+    except ValueError as exc:
+        return [_result("manifest-load", FAIL, str(exc))]
+
+    manifest_structure = _check_manifest_structure(manifest)
+    if manifest_structure.status == FAIL:
+        return [manifest_structure]
+
     return [
-        _check_manifest_structure(manifest),
+        manifest_structure,
         _check_truth_surfaces(manifest),
         _check_risk_pack_docs(manifest),
         _check_harness_docs(manifest),

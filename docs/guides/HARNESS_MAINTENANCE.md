@@ -62,6 +62,10 @@ make harness-check-full
 6. If optional local `.kiro/` adapters exist, keep them aligned after the
    tracked change is correct.
 
+The cheap path is intentional. Do not automatically widen every maintenance
+change into replay scans, history analysis, or release-level checks unless the
+change actually touches those surfaces.
+
 ## Adding or Changing a Risk Pack
 
 Create or update a risk pack only when the surface is distinct and durable.
@@ -104,6 +108,10 @@ Before promoting a rule, ask:
 - does it cross tasks or specs
 - would a stronger rule or pack actually prevent the mistake
 
+Use bounded scans for this work. Start with the highest-signal history and the
+most relevant spec subset instead of scanning every commit and every replay
+artifact by default.
+
 ## Optional Local Inputs
 
 The project deliberately allows richer local workflows without making them a
@@ -122,6 +130,9 @@ Rules for optional inputs:
 - presence may enable stricter local checks
 - repo-owned truth still wins if there is disagreement
 - `.kiro/specs/` is read-only input, not a cache or annotation store
+- malformed local pointer files, malformed local spec metadata, and damaged
+  user-local state files should degrade explicitly rather than crash the tool
+  with a raw traceback
 
 ## Outside Voice
 
@@ -134,6 +145,10 @@ Use outside voice when the harness stops converging cleanly:
 
 Prefer a different model family than the current driver so the second opinion
 is more likely to challenge the current assumptions.
+
+Outside voice is most valuable after repeated drift, ambiguous routing, or
+warning triage that does not converge. Use it as a challenge mechanism, not as
+the first step for routine maintenance.
 
 ## Open-Source Documentation Expectations
 
@@ -157,6 +172,10 @@ Before closing substantial harness work:
 - make sure new docs are linked from the relevant index pages
 - make sure the readable summary matches the structured manifest
 - make sure local-only helpers are still optional rather than required
+- add regression coverage for malformed optional inputs and degraded-state paths
+  when you touch harness parsing or validation logic
+- keep the sync gate healthy: tracked truth, Make targets, CI wiring, and local
+  adapters should all reflect the same public contract
 
 ## References
 

@@ -151,6 +151,9 @@ The verification matrix is phased:
 Verification may raise the effective risk above the initial route. The first
 guess never outranks later evidence.
 
+This design intentionally favors a cheap fast path. Broader scans, replay, and
+history-heavy analysis are escalation tools, not default taxes on every task.
+
 ### State carrier
 
 The harness keeps short-lived execution memory in a user-local state carrier,
@@ -185,6 +188,9 @@ Two maintenance paths are expected:
 - rule evolution: update packs or routing when repeated fixes, replay evidence,
   or historical commit patterns justify a stronger rule
 
+The sync gate exists to keep those truth surfaces from drifting apart. The
+maintenance loop is not only social process; it is backed by executable checks.
+
 The maintenance loop is supported by:
 
 - `make harness-check`
@@ -208,6 +214,17 @@ In those cases the harness should either:
 - downgrade to core plus candidate packs
 - request explicit human confirmation
 - or ask for outside voice from a different model family
+
+## Validation Sequencing
+
+The harness design reviews settled on a dual proving-ground strategy:
+
+1. runtime-risk first
+2. static-quality second
+
+This sequencing is deliberate. It proves the harness against the most expensive
+correctness and safety surfaces before widening to style, lint, or broader
+quality-discipline scenarios.
 
 ## Relationship to Other Docs
 

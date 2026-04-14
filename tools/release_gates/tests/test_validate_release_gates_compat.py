@@ -1,11 +1,6 @@
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
-
-from release_gates.validate_release_gates import (
+from tools.release_gates.validate_release_gates import (
     ValidationResult,
     check_compat_capabilities,
     check_compat_row_validity,
@@ -44,8 +39,8 @@ def test_single_classification_column_matrix_passes():
     rows = extract_table_under_heading(content, "Capability Classification Matrix")
     result = ValidationResult()
     check_compat_capabilities(result, rows)
-    state_indices = check_compat_states(result, rows[0])
-    check_compat_row_validity(result, rows[1:], state_indices)
+    state_indices, capability_idx = check_compat_states(result, rows[0])
+    check_compat_row_validity(result, rows[1:], state_indices, capability_idx)
     assert not result.has_failures, [r for r in result.results if r[0] == "FAIL"]
 
 
@@ -61,8 +56,27 @@ def test_single_classification_column_rejects_invalid_state():
     )
     rows = extract_table_under_heading(content, "Capability Classification Matrix")
     result = ValidationResult()
-    state_indices = check_compat_states(result, rows[0])
-    check_compat_row_validity(result, rows[1:], state_indices)
+    state_indices, capability_idx = check_compat_states(result, rows[0])
+    check_compat_row_validity(result, rows[1:], state_indices, capability_idx)
     assert result.has_failures
     fail_detail = next(d for s, _, d in result.results if s == "FAIL")
     assert "invalid state" in fail_detail
+
+
+def test_single_classification_column_rejects_missing_state_cell():
+    content = "\n".join(
+        [
+            "## Capability Classification Matrix",
+            "",
+            "| # | Capability | Classification | Notes |",
+            "|---|-----------|---------------|-------|",
+            "| 1 | automatic decompression |  | note |",
+        ]
+    )
+    rows = extract_table_under_heading(content, "Capability Classification Matrix")
+    result = ValidationResult()
+    state_indices, capability_idx = check_compat_states(result, rows[0])
+    check_compat_row_validity(result, rows[1:], state_indices, capability_idx)
+    assert result.has_failures
+    fail_detail = next(d for s, _, d in result.results if s == "FAIL")
+    assert "missing classification" in fail_detail

@@ -26,14 +26,15 @@ class StateEvent:
     ts: str
 
 
-def state_dir(repo_root: Path = REPO_ROOT) -> Path:
+def state_dir(repo_root: Path | None = None) -> Path:
+    repo_root = repo_root or REPO_ROOT
     override = os.environ.get("HARNESS_STATE_DIR")
     if override:
         return Path(override).expanduser()
     return Path.home() / ".gstack" / "projects" / repo_root.name / "harness-state"
 
 
-def state_file(repo_root: Path = REPO_ROOT) -> Path:
+def state_file(repo_root: Path | None = None) -> Path:
     return state_dir(repo_root) / DEFAULT_FILE
 
 
@@ -42,7 +43,7 @@ def append_event(
     key: str,
     source: str,
     note: str,
-    repo_root: Path = REPO_ROOT,
+    repo_root: Path | None = None,
 ) -> Path:
     path = state_file(repo_root)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -58,18 +59,25 @@ def append_event(
     return path
 
 
-def load_events(repo_root: Path = REPO_ROOT) -> list[dict[str, Any]]:
+def load_events(repo_root: Path | None = None) -> list[dict[str, Any]]:
     path = state_file(repo_root)
     if not path.exists():
         return []
     events: list[dict[str, Any]] = []
-    for line in path.read_text(encoding="utf-8").splitlines():
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeDecodeError):
+        return []
+    for line in lines:
         if line.strip():
-            events.append(json.loads(line))
+            try:
+                events.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
     return events
 
 
-def summarize(repo_root: Path = REPO_ROOT) -> str:
+def summarize(repo_root: Path | None = None) -> str:
     events = load_events(repo_root)
     if not events:
         return "No harness state recorded yet."

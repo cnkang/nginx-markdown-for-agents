@@ -20,6 +20,7 @@ Think of this directory as the maintained map behind that landing page: guides f
 | Understand implementation details | [features/README.md](features/README.md) |
 | Review tests and validation references | [testing/README.md](testing/README.md) |
 | Check current status and maintenance notes | [project/README.md](project/README.md) |
+| Understand why the repo-owned harness was added and what it intentionally does not do | [project/HARNESS_HISTORY.md](project/HARNESS_HISTORY.md) |
 
 ## Documentation Sections
 
@@ -82,6 +83,10 @@ Index: [testing/README.md](testing/README.md)
 ### `project/`
 
 Project-level status and maintenance-oriented references.
+
+- current project status
+- version planning
+- harness rationale, boundaries, and historical context
 
 Index: [project/README.md](project/README.md)
 

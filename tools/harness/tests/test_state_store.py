@@ -1,12 +1,8 @@
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[3]
-sys.path.insert(0, str(ROOT / "tools"))
-
-from harness import state_store
+from tools.harness import state_store
 
 
 def test_state_dir_uses_override(monkeypatch):
@@ -26,3 +22,27 @@ def test_append_and_summary(tmp_path, monkeypatch):
     summary = state_store.summarize()
     assert "1 events" in summary
     assert "loop=1" in summary
+
+
+def test_summary_reports_no_events_when_state_missing(tmp_path, monkeypatch):
+    monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path))
+    assert state_store.summarize() == "No harness state recorded yet."
+
+
+def test_load_events_skips_malformed_jsonl_lines(tmp_path, monkeypatch):
+    monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path))
+    path = state_store.state_file()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "\n".join(
+            [
+                '{"event_type":"loop","key":"runtime","source":"t","note":"ok","ts":"2026-04-13T00:00:00+00:00"}',
+                "{bad-json",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    events = state_store.load_events()
+    assert len(events) == 1
+    assert events[0]["event_type"] == "loop"
