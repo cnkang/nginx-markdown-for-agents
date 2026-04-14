@@ -7,7 +7,8 @@ import argparse
 import json
 import subprocess
 import sys
-from pathlib import Path, PurePosixPath
+from fnmatch import fnmatch
+from pathlib import Path
 
 
 def _find_repo_root(start: Path) -> Path:
@@ -91,15 +92,7 @@ def _git_status_files() -> list[str]:
         ) from exc
 
     files: list[str] = []
-    for line in out.splitlines():
-        if len(line) < 4:
-            continue
-        entry = line[3:]
-        if " -> " in entry:
-            entry = entry.split(" -> ", 1)[1]
-        entry = entry.strip()
-        if not entry:
-            continue
+    for entry in _parse_status_output(out):
         abs_entry = REPO_ROOT / entry
         if abs_entry.is_dir():
             cmd = ["git", "ls-files", "--others", "--exclude-standard", "--", entry]
@@ -132,13 +125,34 @@ def _normalize_files(raw: list[str]) -> list[str]:
     return sorted(set(files))
 
 
+def _parse_status_output(output: str) -> list[str]:
+    parsed: list[str] = []
+    for line in output.splitlines():
+        if len(line) < 4:
+            continue
+        entry = line[3:].strip()
+        if not entry:
+            continue
+        if " -> " in entry:
+            old_path, new_path = entry.split(" -> ", 1)
+            old_path = old_path.strip()
+            new_path = new_path.strip()
+            if old_path:
+                parsed.append(old_path)
+            if new_path:
+                parsed.append(new_path)
+            continue
+        parsed.append(entry)
+    return parsed
+
+
 def _match_path(path: str, pattern: str) -> bool:
-    candidate = PurePosixPath(path)
-    if candidate.match(pattern):
-        return True
+    path = path.replace("\\", "/")
+    pattern = pattern.replace("\\", "/")
     if pattern.endswith("/**"):
-        return path.startswith(pattern[:-3])
-    return False
+        prefix = pattern[:-3].rstrip("/")
+        return path == prefix or path.startswith(prefix + "/")
+    return fnmatch(path, pattern)
 
 
 def _pack_matches(pack: dict, files: list[str], hint_text: str) -> dict | None:
