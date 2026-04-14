@@ -9,7 +9,17 @@ from pathlib import Path
 
 import pytest
 
-from harness_route import _find_repo_root, _load_manifest, _match_path, _parse_status_output
+import harness_route
+from harness_route import (
+    _find_repo_root,
+    _git_diff_files,
+    _load_manifest,
+    _match_path,
+    _normalize_files,
+    _pack_matches,
+    _parse_status_output,
+    _verification_plan,
+)
 
 
 def test_find_repo_root_from_repo_file() -> None:
@@ -42,6 +52,22 @@ def test_load_manifest_validates_types() -> None:
             _load_manifest(manifest_path)
 
 
+def test_load_manifest_validates_risk_pack_shape() -> None:
+    with tempfile.TemporaryDirectory() as tmpdir:
+        manifest_path = Path(tmpdir) / "manifest.json"
+        manifest_path.write_text(
+            json.dumps(
+                {
+                    "risk_packs": [{}],
+                    "verification_families": {},
+                }
+            ),
+            encoding="utf-8",
+        )
+        with pytest.raises(SystemExit, match=r"risk_packs\[0\] missing keys"):
+            _load_manifest(manifest_path)
+
+
 def test_match_path_directory_glob_has_boundary() -> None:
     assert _match_path(
         "components/nginx-module/src/foo.c", "components/nginx-module/**"
@@ -59,3 +85,75 @@ def test_parse_status_output_keeps_old_and_new_on_rename() -> None:
         "docs/harness/README.md",
     ]
 
+
+def test_git_diff_files_uses_delete_filter(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, list[str]] = {}
+
+    def fake_check_output(cmd, cwd, stderr, text):
+        captured["cmd"] = cmd
+        return "docs/harness/README.md\n"
+
+    monkeypatch.setattr(harness_route.subprocess, "check_output", fake_check_output)
+    files = _git_diff_files(None)
+    assert files == ["docs/harness/README.md"]
+    assert "--diff-filter=d" in captured["cmd"]
+
+
+def test_normalize_files_splits_commas_and_normalizes_backslashes() -> None:
+    raw = ["a/b.py, c\\d.py", "  e/f.py  "]
+    assert _normalize_files(raw) == ["a/b.py", "c/d.py", "e/f.py"]
+
+
+def test_pack_matches_scores_path_hits_higher_than_keywords() -> None:
+    pack = {
+        "id": "docs-tooling-drift",
+        "doc": "docs/harness/risk-packs/docs-tooling-drift.md",
+        "paths": ["docs/**"],
+        "keywords": ["docs", "drift"],
+        "verification_families": ["harness-sync"],
+    }
+    files = ["docs/harness/README.md", "components/x.c"]
+    match = _pack_matches(pack, files, "drift in docs")
+    assert match is not None
+    assert match["id"] == "docs-tooling-drift"
+    assert match["path_hits"] == ["docs/harness/README.md"]
+    assert "docs" in match["keyword_hits"]
+    assert match["score"] == 4
+
+
+def test_pack_matches_returns_none_without_any_hit() -> None:
+    pack = {
+        "id": "runtime-streaming",
+        "doc": "docs/harness/risk-packs/runtime-streaming.md",
+        "paths": ["components/nginx-module/**"],
+        "keywords": ["NGX_AGAIN"],
+        "verification_families": ["nginx-streaming"],
+    }
+    assert _pack_matches(pack, ["docs/README.md"], "unrelated text") is None
+
+
+def test_verification_plan_dedupes_and_sorts_by_phase() -> None:
+    manifest = {
+        "verification_families": {
+            "release-quality": {
+                "phase": "umbrella",
+                "commands": ["make harness-check-full"],
+            },
+            "harness-sync": {
+                "phase": "cheap-blocker",
+                "commands": ["make harness-check"],
+            },
+            "ffi-boundary": {
+                "phase": "focused-semantic",
+                "commands": ["make test-rust"],
+            },
+        }
+    }
+    plan = _verification_plan(
+        manifest, ["release-quality", "harness-sync", "ffi-boundary", "harness-sync"]
+    )
+    assert [item["family"] for item in plan] == [
+        "harness-sync",
+        "ffi-boundary",
+        "release-quality",
+    ]

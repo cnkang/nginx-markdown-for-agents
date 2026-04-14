@@ -55,11 +55,39 @@ def _load_manifest(path: Path) -> dict:
     if not isinstance(data["verification_families"], dict):
         raise SystemExit(f"manifest {path}: 'verification_families' must be a dict")
 
+    for index, pack in enumerate(data["risk_packs"]):
+        if not isinstance(pack, dict):
+            raise SystemExit(f"manifest {path}: risk_packs[{index}] must be an object")
+        required_pack_keys = ("id", "doc", "paths", "keywords", "verification_families")
+        missing_pack = [key for key in required_pack_keys if key not in pack]
+        if missing_pack:
+            raise SystemExit(
+                "manifest "
+                f"{path}: risk_packs[{index}] missing keys: {', '.join(sorted(missing_pack))}"
+            )
+        if not isinstance(pack["id"], str) or not pack["id"].strip():
+            raise SystemExit(f"manifest {path}: risk_packs[{index}].id must be a non-empty string")
+        if not isinstance(pack["doc"], str) or not pack["doc"].strip():
+            raise SystemExit(
+                f"manifest {path}: risk_packs[{index}].doc must be a non-empty string"
+            )
+        if not isinstance(pack["paths"], list):
+            raise SystemExit(f"manifest {path}: risk_packs[{index}].paths must be a list")
+        if not isinstance(pack["keywords"], list):
+            raise SystemExit(
+                f"manifest {path}: risk_packs[{index}].keywords must be a list"
+            )
+        if not isinstance(pack["verification_families"], list):
+            raise SystemExit(
+                "manifest "
+                f"{path}: risk_packs[{index}].verification_families must be a list"
+            )
+
     return data
 
 
 def _git_diff_files(base: str | None) -> list[str]:
-    cmd = ["git", "diff", "--name-only"]
+    cmd = ["git", "diff", "--name-only", "--diff-filter=d"]
     if base:
         cmd.append(f"{base}...HEAD")
     try:
