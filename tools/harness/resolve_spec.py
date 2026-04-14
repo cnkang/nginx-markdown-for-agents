@@ -123,6 +123,34 @@ def _match_by_identity(candidates: list[SpecCandidate], value: str) -> list[Spec
     return matches
 
 
+def _display_for(path: Path) -> str:
+    """Return a repo-relative display string for *path*, falling back to str."""
+    try:
+        return str(path.relative_to(REPO_ROOT))
+    except ValueError:
+        return str(path)
+
+
+def _read_json_pointer(path: Path) -> tuple[str | None, str | None]:
+    """Try to read a JSON pointer file. Return (value, display) or (None, None)."""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return None, None
+    return data.get("spec"), _display_for(path)
+
+
+def _read_text_pointer(path: Path) -> tuple[str | None, str | None]:
+    """Try to read a plain-text pointer file. Return (value, display) or (None, None)."""
+    try:
+        value = path.read_text(encoding="utf-8").strip()
+    except (OSError, UnicodeDecodeError):
+        return None, None
+    if not value:
+        return None, None
+    return value, _display_for(path)
+
+
 def _read_pointer(
     pointer_candidates: list[Path] | None = None,
 ) -> tuple[str | None, str | None]:
@@ -130,29 +158,10 @@ def _read_pointer(
     for path in pointer_candidates:
         if not path.exists():
             continue
-        if path.suffix == ".json":
-            try:
-                data = json.loads(path.read_text(encoding="utf-8"))
-            except (OSError, UnicodeDecodeError, json.JSONDecodeError):
-                continue
-            try:
-                path_display = str(path.relative_to(REPO_ROOT))
-            except ValueError:
-                path_display = str(path)
-            return (
-                data.get("spec"),
-                path_display,
-            )
-        try:
-            value = path.read_text(encoding="utf-8").strip()
-        except (OSError, UnicodeDecodeError):
-            continue
-        if value:
-            try:
-                path_display = str(path.relative_to(REPO_ROOT))
-            except ValueError:
-                path_display = str(path)
-            return value, path_display
+        reader = _read_json_pointer if path.suffix == ".json" else _read_text_pointer
+        value, display = reader(path)
+        if value is not None:
+            return value, display
     return None, None
 
 
@@ -289,7 +298,6 @@ def resolve_spec(
     specs_root: Path | None = None,
     pointer_candidates: list[Path] | None = None,
 ) -> Resolution:
-    explicit_specs = explicit_specs or []
     hints = hints or []
     candidates = discover_specs(specs_root)
     if not candidates:
@@ -300,16 +308,13 @@ def resolve_spec(
             candidates=[],
         )
 
-    if explicit_specs:
+    if explicit_specs := explicit_specs or []:
         result = _resolve_explicit(candidates, explicit_specs)
         if result is not None:
             return result
 
     result = _resolve_pointer(candidates, pointer_candidates)
-    if result is not None:
-        return result
-
-    return _resolve_hints(candidates, hints)
+    return result if result is not None else _resolve_hints(candidates, hints)
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
