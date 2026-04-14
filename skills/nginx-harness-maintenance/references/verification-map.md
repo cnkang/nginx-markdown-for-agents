@@ -4,6 +4,7 @@ Source of truth:
 `docs/harness/routing-manifest.json -> verification_families`.
 
 Use this map as a fast lookup, then trust the manifest for final values.
+If this file and the manifest disagree, the manifest wins.
 
 ## Families
 
@@ -33,3 +34,7 @@ Use this map as a fast lookup, then trust the manifest for final values.
 2. `focused-semantic`
 3. `umbrella` (only when required by touched surfaces)
 
+## Sync Note
+
+After changing this file, run `make harness-check` to validate harness contract
+alignment.

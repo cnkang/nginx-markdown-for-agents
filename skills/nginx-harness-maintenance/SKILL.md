@@ -20,6 +20,21 @@ verification matrix with minimal guesswork.
 5. If docs/release wiring changed, run:
    `make harness-check-full`
 
+## Example Output
+
+```text
+$ python3 skills/nginx-harness-maintenance/scripts/harness_route.py --from-git
+files: 2
+  - docs/harness/README.md
+  - docs/guides/HARNESS_MAINTENANCE.md
+matched risk packs: 1
+  - docs-tooling-drift (docs/harness/risk-packs/docs-tooling-drift.md)
+verification families: 3
+  - [cheap-blocker] docs-tooling
+  - [cheap-blocker] harness-sync
+  - [umbrella] release-quality
+```
+
 ## Workflow
 
 1. Treat `AGENTS.md` and `docs/harness/` as canonical contract surfaces.
@@ -31,12 +46,22 @@ verification matrix with minimal guesswork.
    - `cheap-blocker` first
    - then `focused-semantic`
    - then `umbrella` only when needed
-5. On first drift trigger, shrink scope and retry once. If drift repeats,
-   escalate instead of looping.
+5. On first drift trigger:
+   - identify minimal changed files related to the failing family
+   - rerun only affected verification family commands
+   - run `make harness-check` before broad retries
+   - if drift repeats, escalate with full error output and affected surfaces
 6. Keep optional local adapters optional. Missing local files must degrade as
    `SKIP_NOT_PRESENT`, not repository failure.
 7. If harness behavior changes, update repo truth in the same change set:
    `AGENTS.md`, `docs/harness/`, `tools/harness/`, `Makefile`, CI workflow.
+
+## Definition of Done
+
+- `resolve_spec.py` returns `PASS` or explicitly documented `WARN_*`
+- matched verification families have been run and outcomes recorded
+- repeated drift has either converged or been escalated with concrete evidence
+- repo truth surfaces are updated when harness behavior changed
 
 ## References
 
@@ -44,4 +69,3 @@ verification matrix with minimal guesswork.
   [references/verification-map.md](references/verification-map.md)
 - Truth surfaces and escalation rules:
   [references/truth-surfaces.md](references/truth-surfaces.md)
-
