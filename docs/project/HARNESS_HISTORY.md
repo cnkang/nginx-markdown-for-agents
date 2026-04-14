@@ -65,14 +65,15 @@ discipline instead of forcing contributors to rediscover them manually.
 
 The harness is deliberately scoped.
 
-- It does not replace runtime architecture docs.
-- It does not store private spec content in tracked repository files.
-- It does not turn the repository into a full agent platform or orchestration
-  service.
-- It does not allow local adapters or outside voice tools to overrule the
-  repository contract.
-- It does not treat warnings as cosmetic cleanup work; warnings still require
-  real triage and, when necessary, real fixes.
+- Runtime architecture docs remain separate; the harness complements them
+  rather than replacing them.
+- Private spec content stays out of tracked repository files.
+- The repository is not an agent platform or orchestration service — the
+  harness governs workflow, not infrastructure.
+- Local adapters and outside voice tools cannot overrule the repository
+  contract.
+- Warnings require real triage and, when necessary, real fixes — they are
+  never treated as cosmetic cleanup.
 
 ## Durable Design Outcomes
 
