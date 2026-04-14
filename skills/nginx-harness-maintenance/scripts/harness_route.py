@@ -10,16 +10,51 @@ import sys
 from pathlib import Path, PurePosixPath
 
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
+def _find_repo_root(start: Path) -> Path:
+    current = start.resolve()
+    if current.is_file():
+        current = current.parent
+
+    while True:
+        if (current / "AGENTS.md").exists():
+            return current
+        parent = current.parent
+        if parent == current:
+            break
+        current = parent
+
+    raise SystemExit(
+        f"cannot locate repository root from {start} (expected AGENTS.md in ancestors)"
+    )
+
+
+REPO_ROOT = _find_repo_root(Path(__file__).resolve())
 DEFAULT_MANIFEST = REPO_ROOT / "docs" / "harness" / "routing-manifest.json"
 PHASE_ORDER = {"cheap-blocker": 0, "focused-semantic": 1, "umbrella": 2}
 
 
 def _load_manifest(path: Path) -> dict:
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise SystemExit(f"failed to load manifest {path}: {exc}") from exc
+
+    if not isinstance(data, dict):
+        raise SystemExit(f"manifest {path} must be a JSON object")
+
+    required_keys = ("risk_packs", "verification_families")
+    missing = [key for key in required_keys if key not in data]
+    if missing:
+        raise SystemExit(
+            f"manifest {path} missing required keys: {', '.join(sorted(missing))}"
+        )
+
+    if not isinstance(data["risk_packs"], list):
+        raise SystemExit(f"manifest {path}: 'risk_packs' must be a list")
+    if not isinstance(data["verification_families"], dict):
+        raise SystemExit(f"manifest {path}: 'verification_families' must be a dict")
+
+    return data
 
 
 def _git_diff_files(base: str | None) -> list[str]:
