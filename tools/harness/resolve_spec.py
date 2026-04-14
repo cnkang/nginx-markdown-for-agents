@@ -10,17 +10,28 @@ import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+try:
+    from tools.harness.constants import (
+        FAIL,
+        PASS,
+        SKIP_NOT_PRESENT,
+        WARN_NEEDS_AUTHOR_REVIEW,
+    )
+except ModuleNotFoundError:
+    from constants import (  # type: ignore[no-redef]
+        FAIL,
+        PASS,
+        SKIP_NOT_PRESENT,
+        WARN_NEEDS_AUTHOR_REVIEW,
+    )
 
-PASS = "PASS"
-FAIL = "FAIL"
-SKIP_NOT_PRESENT = "SKIP_NOT_PRESENT"
-WARN_NEEDS_AUTHOR_REVIEW = "WARN_NEEDS_AUTHOR_REVIEW"
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SPECS_ROOT = REPO_ROOT / ".kiro" / "specs"
+_KIRO_DIR = ".kiro"
+SPECS_ROOT = REPO_ROOT / _KIRO_DIR / "specs"
 POINTER_CANDIDATES = [
-    REPO_ROOT / ".kiro" / "active-spec.json",
-    REPO_ROOT / ".kiro" / "active-spec.txt",
+    REPO_ROOT / _KIRO_DIR / "active-spec.json",
+    REPO_ROOT / _KIRO_DIR / "active-spec.txt",
 ]
 TOKEN_RE = re.compile(r"[a-z0-9]{3,}")
 STOP_WORDS = {
@@ -153,8 +164,7 @@ def _score_candidates(candidates: list[SpecCandidate], hints: list[str]) -> list
     scored: list[tuple[int, SpecCandidate]] = []
     for candidate in candidates:
         candidate_tokens = _tokenize(candidate.dir_name, candidate.spec_id, candidate.spec_type)
-        score = len(candidate_tokens & hint_tokens)
-        if score:
+        if score := len(candidate_tokens & hint_tokens):
             scored.append((score, candidate))
     scored.sort(key=lambda item: (-item[0], item[1].dir_name))
     return scored

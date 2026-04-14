@@ -11,18 +11,27 @@ from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
+try:
+    from tools.harness.constants import (
+        FAIL,
+        PASS,
+        SKIP_NOT_PRESENT,
+        WARN_NEEDS_AUTHOR_REVIEW,
+    )
+except ModuleNotFoundError:
+    from constants import (  # type: ignore[no-redef]
+        FAIL,
+        PASS,
+        SKIP_NOT_PRESENT,
+        WARN_NEEDS_AUTHOR_REVIEW,
+    )
 
-PASS = "PASS"
-FAIL = "FAIL"
-SKIP_NOT_PRESENT = "SKIP_NOT_PRESENT"
-WARN_NEEDS_AUTHOR_REVIEW = "WARN_NEEDS_AUTHOR_REVIEW"
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MANIFEST_PATH = REPO_ROOT / "docs" / "harness" / "routing-manifest.json"
 README_PATH = REPO_ROOT / "docs" / "harness" / "README.md"
 CORE_PATH = REPO_ROOT / "docs" / "harness" / "core.md"
 SUMMARY_PATH = REPO_ROOT / "docs" / "harness" / "routing-manifest.md"
-PACK_INDEX_PATH = REPO_ROOT / "docs" / "harness" / "risk-packs" / "README.md"
 AGENTS_PATH = REPO_ROOT / "AGENTS.md"
 
 
@@ -62,9 +71,11 @@ def _required_patterns(path: Path, patterns: dict[str, str]) -> list[str]:
     except (OSError, UnicodeDecodeError):
         return [f"{_display_path(path)} unreadable"]
     missing: list[str] = []
-    for label, pattern in patterns.items():
-        if not re.search(pattern, text, flags=re.MULTILINE):
-            missing.append(label)
+    missing.extend(
+        label
+        for label, pattern in patterns.items()
+        if not re.search(pattern, text, flags=re.MULTILINE)
+    )
     return missing
 
 
@@ -82,8 +93,7 @@ def _check_manifest_structure(manifest: dict) -> CheckResult:
         "risk_packs",
         "task_entrypoints",
     }
-    missing = sorted(required_keys - set(manifest))
-    if missing:
+    if missing := sorted(required_keys - set(manifest)):
         return _result(
             "manifest-structure",
             FAIL,
@@ -97,10 +107,9 @@ def _check_manifest_structure(manifest: dict) -> CheckResult:
         "canonical_docs",
         "optional_adapters",
     }
-    missing_truth_surface_keys = sorted(
+    if missing_truth_surface_keys := sorted(
         required_truth_surface_keys - set(truth_surfaces)
-    )
-    if missing_truth_surface_keys:
+    ):
         return _result(
             "manifest-structure",
             FAIL,
@@ -142,9 +151,11 @@ def _check_manifest_structure(manifest: dict) -> CheckResult:
 def _check_truth_surfaces(manifest: dict) -> CheckResult:
     missing: list[str] = []
     for category in ("contract", "harness", "canonical_docs"):
-        for rel in manifest["truth_surfaces"][category]:
-            if not (REPO_ROOT / rel).exists():
-                missing.append(rel)
+        missing.extend(
+            rel
+            for rel in manifest["truth_surfaces"][category]
+            if not (REPO_ROOT / rel).exists()
+        )
     if missing:
         return _result(
             "truth-surfaces",
@@ -162,9 +173,11 @@ def _check_risk_pack_docs(manifest: dict) -> CheckResult:
         doc_path = REPO_ROOT / pack["doc"]
         if not doc_path.exists():
             missing_docs.append(pack["doc"])
-        for family in pack["verification_families"]:
-            if family not in families:
-                missing_families.append(f"{pack['id']}->{family}")
+        missing_families.extend(
+            f"{pack['id']}->{family}"
+            for family in pack["verification_families"]
+            if family not in families
+        )
     if missing_docs or missing_families:
         parts = []
         if missing_docs:

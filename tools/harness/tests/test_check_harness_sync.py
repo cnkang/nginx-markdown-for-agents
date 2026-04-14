@@ -14,7 +14,6 @@ def test_collect_results_skips_missing_kiro(tmp_path, monkeypatch):
     monkeypatch.setattr(sync, "README_PATH", repo / "docs/harness/README.md")
     monkeypatch.setattr(sync, "CORE_PATH", repo / "docs/harness/core.md")
     monkeypatch.setattr(sync, "SUMMARY_PATH", repo / "docs/harness/routing-manifest.md")
-    monkeypatch.setattr(sync, "PACK_INDEX_PATH", repo / "docs/harness/risk-packs/README.md")
     monkeypatch.setattr(sync, "AGENTS_PATH", repo / "AGENTS.md")
 
     results = sync.collect_results()
@@ -30,7 +29,6 @@ def test_collect_results_warns_for_local_kiro_drift(tmp_path, monkeypatch):
     monkeypatch.setattr(sync, "README_PATH", repo / "docs/harness/README.md")
     monkeypatch.setattr(sync, "CORE_PATH", repo / "docs/harness/core.md")
     monkeypatch.setattr(sync, "SUMMARY_PATH", repo / "docs/harness/routing-manifest.md")
-    monkeypatch.setattr(sync, "PACK_INDEX_PATH", repo / "docs/harness/risk-packs/README.md")
     monkeypatch.setattr(sync, "AGENTS_PATH", repo / "AGENTS.md")
 
     results = sync.collect_results(full=False)
@@ -52,7 +50,6 @@ def test_collect_results_fail_when_pack_doc_missing(tmp_path, monkeypatch):
     monkeypatch.setattr(sync, "README_PATH", repo / "docs/harness/README.md")
     monkeypatch.setattr(sync, "CORE_PATH", repo / "docs/harness/core.md")
     monkeypatch.setattr(sync, "SUMMARY_PATH", repo / "docs/harness/routing-manifest.md")
-    monkeypatch.setattr(sync, "PACK_INDEX_PATH", repo / "docs/harness/risk-packs/README.md")
     monkeypatch.setattr(sync, "AGENTS_PATH", repo / "AGENTS.md")
 
     results = sync.collect_results()
@@ -71,7 +68,6 @@ def test_collect_results_handles_missing_harness_doc_without_crash(tmp_path, mon
     monkeypatch.setattr(sync, "README_PATH", repo / "docs/harness/README.md")
     monkeypatch.setattr(sync, "CORE_PATH", repo / "docs/harness/core.md")
     monkeypatch.setattr(sync, "SUMMARY_PATH", repo / "docs/harness/routing-manifest.md")
-    monkeypatch.setattr(sync, "PACK_INDEX_PATH", repo / "docs/harness/risk-packs/README.md")
     monkeypatch.setattr(sync, "AGENTS_PATH", repo / "AGENTS.md")
 
     results = sync.collect_results()
@@ -93,7 +89,6 @@ def test_collect_results_fail_for_invalid_manifest_json(tmp_path, monkeypatch):
     monkeypatch.setattr(sync, "README_PATH", repo / "docs/harness/README.md")
     monkeypatch.setattr(sync, "CORE_PATH", repo / "docs/harness/core.md")
     monkeypatch.setattr(sync, "SUMMARY_PATH", repo / "docs/harness/routing-manifest.md")
-    monkeypatch.setattr(sync, "PACK_INDEX_PATH", repo / "docs/harness/risk-packs/README.md")
     monkeypatch.setattr(sync, "AGENTS_PATH", repo / "AGENTS.md")
 
     results = sync.collect_results()
@@ -115,7 +110,6 @@ def test_collect_results_fail_when_optional_adapters_key_missing(tmp_path, monke
     monkeypatch.setattr(sync, "README_PATH", repo / "docs/harness/README.md")
     monkeypatch.setattr(sync, "CORE_PATH", repo / "docs/harness/core.md")
     monkeypatch.setattr(sync, "SUMMARY_PATH", repo / "docs/harness/routing-manifest.md")
-    monkeypatch.setattr(sync, "PACK_INDEX_PATH", repo / "docs/harness/risk-packs/README.md")
     monkeypatch.setattr(sync, "AGENTS_PATH", repo / "AGENTS.md")
 
     results = sync.collect_results()
@@ -143,7 +137,6 @@ def test_collect_results_accept_reordered_status_semantics(tmp_path, monkeypatch
     monkeypatch.setattr(sync, "README_PATH", repo / "docs/harness/README.md")
     monkeypatch.setattr(sync, "CORE_PATH", repo / "docs/harness/core.md")
     monkeypatch.setattr(sync, "SUMMARY_PATH", repo / "docs/harness/routing-manifest.md")
-    monkeypatch.setattr(sync, "PACK_INDEX_PATH", repo / "docs/harness/risk-packs/README.md")
     monkeypatch.setattr(sync, "AGENTS_PATH", repo / "AGENTS.md")
 
     results = sync.collect_results()
