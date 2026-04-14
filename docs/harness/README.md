@@ -69,3 +69,13 @@ flowchart LR
 - [../architecture/README.md](../architecture/README.md)
 - [../testing/README.md](../testing/README.md)
 - [../DOCUMENTATION_DUPLICATION_POLICY.md](../DOCUMENTATION_DUPLICATION_POLICY.md)
+
+## Optional Local Skill
+
+For local agent workflows, a repo-tracked helper skill is available at:
+
+- [../../skills/nginx-harness-maintenance/SKILL.md](../../skills/nginx-harness-maintenance/SKILL.md)
+
+This skill is an execution choreographer only. It must route and verify against
+repo-owned truth surfaces (`AGENTS.md`, `docs/harness/`, `tools/harness/`,
+`Makefile`, CI), and must not redefine runtime semantics.
