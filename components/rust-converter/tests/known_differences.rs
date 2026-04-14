@@ -24,33 +24,23 @@ pub struct KnownDifference {
     pub diff_contains: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum DriftType {
     WhitespaceOnly,
     OrderedListNumbering,
     EntityEncoding,
     Structural,
     Semantic,
+    #[default]
     Unknown,
 }
 
-impl Default for DriftType {
-    fn default() -> Self {
-        Self::Unknown
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum DriftSeverity {
     Benign,
+    #[default]
     AcceptableDivergence,
     NeedsInvestigation,
-}
-
-impl Default for DriftSeverity {
-    fn default() -> Self {
-        Self::AcceptableDivergence
-    }
 }
 
 #[derive(Debug, Clone)]
