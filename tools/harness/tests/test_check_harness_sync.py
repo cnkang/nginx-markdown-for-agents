@@ -61,6 +61,27 @@ def test_collect_results_fail_when_pack_doc_missing(tmp_path, monkeypatch):
     assert "missing docs" in pack.detail
 
 
+def test_collect_results_handles_missing_harness_doc_without_crash(tmp_path, monkeypatch):
+    repo = tmp_path
+    _write_repo_fixture(repo, with_kiro=False)
+    (repo / "docs/harness/core.md").unlink()
+
+    monkeypatch.setattr(sync, "REPO_ROOT", repo)
+    monkeypatch.setattr(sync, "MANIFEST_PATH", repo / "docs/harness/routing-manifest.json")
+    monkeypatch.setattr(sync, "README_PATH", repo / "docs/harness/README.md")
+    monkeypatch.setattr(sync, "CORE_PATH", repo / "docs/harness/core.md")
+    monkeypatch.setattr(sync, "SUMMARY_PATH", repo / "docs/harness/routing-manifest.md")
+    monkeypatch.setattr(sync, "PACK_INDEX_PATH", repo / "docs/harness/risk-packs/README.md")
+    monkeypatch.setattr(sync, "AGENTS_PATH", repo / "AGENTS.md")
+
+    results = sync.collect_results()
+    truth = next(item for item in results if item.name == "truth-surfaces")
+    docs = next(item for item in results if item.name == "harness-docs")
+    assert truth.status == sync.FAIL
+    assert docs.status == sync.FAIL
+    assert "unreadable" in docs.detail
+
+
 def test_collect_results_fail_for_invalid_manifest_json(tmp_path, monkeypatch):
     repo = tmp_path
     _write_repo_fixture(repo, with_kiro=False)

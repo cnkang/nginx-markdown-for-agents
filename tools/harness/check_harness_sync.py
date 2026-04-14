@@ -33,6 +33,13 @@ class CheckResult:
     detail: str
 
 
+def _display_path(path: Path) -> str:
+    try:
+        return str(path.relative_to(REPO_ROOT))
+    except ValueError:
+        return str(path)
+
+
 def _load_manifest(path: Path | None = None) -> dict:
     path = path or MANIFEST_PATH
     try:
@@ -42,12 +49,18 @@ def _load_manifest(path: Path | None = None) -> dict:
 
 
 def _required_text(path: Path, needles: list[str]) -> list[str]:
-    text = path.read_text(encoding="utf-8")
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return [f"{_display_path(path)} unreadable"]
     return [needle for needle in needles if needle not in text]
 
 
 def _required_patterns(path: Path, patterns: dict[str, str]) -> list[str]:
-    text = path.read_text(encoding="utf-8")
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return [f"{_display_path(path)} unreadable"]
     missing: list[str] = []
     for label, pattern in patterns.items():
         if not re.search(pattern, text, flags=re.MULTILINE):

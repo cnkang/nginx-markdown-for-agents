@@ -38,6 +38,15 @@ def state_file(repo_root: Path | None = None) -> Path:
     return state_dir(repo_root) / DEFAULT_FILE
 
 
+def _as_event(payload: Any) -> dict[str, Any] | None:
+    if not isinstance(payload, dict):
+        return None
+    event_type = payload.get("event_type")
+    if not isinstance(event_type, str) or not event_type:
+        return None
+    return payload
+
+
 def append_event(
     event_type: str,
     key: str,
@@ -71,9 +80,12 @@ def load_events(repo_root: Path | None = None) -> list[dict[str, Any]]:
     for line in lines:
         if line.strip():
             try:
-                events.append(json.loads(line))
+                payload = json.loads(line)
             except json.JSONDecodeError:
                 continue
+            event = _as_event(payload)
+            if event is not None:
+                events.append(event)
     return events
 
 
@@ -84,7 +96,11 @@ def summarize(repo_root: Path | None = None) -> str:
     counts = Counter(
         event_type
         for event in events
-        if (event_type := event.get("event_type")) is not None
+        if (
+            isinstance(event, dict)
+            and isinstance(event_type := event.get("event_type"), str)
+            and event_type
+        )
     )
     event_count = sum(counts.values())
     if not counts:

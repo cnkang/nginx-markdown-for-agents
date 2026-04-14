@@ -177,9 +177,12 @@ def test_multiple_states_marked_fails():
         i for i, h in enumerate(header)
         if h.strip().lower() in {s.lower() for s in VALID_STATES}
     ]
+    capability_idx = next(
+        i for i, value in enumerate(header) if value.strip().lower() == "capability"
+    )
 
     result = ValidationResult()
-    check_compat_row_validity(result, rows[1:], state_indices)
+    check_compat_row_validity(result, rows[1:], state_indices, capability_idx)
     assert result.has_failures
     fail_detail = next(d for s, _, d in result.results if s == "FAIL")
     assert "marked 2 states" in fail_detail

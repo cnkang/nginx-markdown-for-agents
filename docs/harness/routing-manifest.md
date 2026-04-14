@@ -13,8 +13,11 @@ This page is the readable overlay, not the machine-owned truth.
 | `nginx-streaming` | focused semantic | `make test-nginx-unit-streaming` |
 | `ffi-boundary` | focused semantic | `make build`, `make test-rust` |
 | `observability-metrics` | focused semantic | `make docs-check`, `make release-gates-check` |
-| `runtime-e2e` | umbrella | `make verify-chunked-native-e2e-smoke`, `make verify-streaming-failure-cache-e2e-plan` |
+| `runtime-e2e` | umbrella | `make verify-chunked-native-e2e-smoke`, `make verify-streaming-failure-cache-e2e` |
 | `release-quality` | umbrella | `make harness-check-full` |
+
+`runtime-e2e` requires at least one executing runtime target each session.
+Plan-only targets (for example `*-plan`) are documentation aids, not evidence.
 
 ## Risk Packs
 

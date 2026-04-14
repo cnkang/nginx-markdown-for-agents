@@ -11,7 +11,7 @@ steering files.
 
 ## Current Assessment
 
-As of **version 0.4.1**, the project includes Prometheus-compatible metrics, unified decision reason codes, rollout and rollback operational guides, a benchmark corpus with evidence-based regression detection, restructured installation and first-run documentation, parser path optimizations, and a repo-owned harness for agent workflow governance. Core features are implemented and tested. The codebase includes unit, integration, E2E, fuzz-oriented validation entrypoints, and harness-specific validation entrypoints, along with documentation covering installation, configuration, operations, architecture, and contributor-facing harness maintenance.
+As of the **current development line (Unreleased / upcoming 0.5.0)**, the project includes Prometheus-compatible metrics, unified decision reason codes, rollout and rollback operational guides, a benchmark corpus with evidence-based regression detection, restructured installation and first-run documentation, parser path optimizations, and a repo-owned harness for agent workflow governance. Core features are implemented and tested. The codebase includes unit, integration, E2E, fuzz-oriented validation entrypoints, and harness-specific validation entrypoints, along with documentation covering installation, configuration, operations, architecture, and contributor-facing harness maintenance.
 
 ### Repository Harness Updates
 

@@ -27,6 +27,7 @@ plumbing, or error-code classification change.
 make harness-check
 make build
 make test-rust
+make test-nginx-unit
 ```
 
 ## Canonical References

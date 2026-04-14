@@ -87,7 +87,7 @@
       "phase": "umbrella",
       "commands": [
         "make verify-chunked-native-e2e-smoke",
-        "make verify-streaming-failure-cache-e2e-plan"
+        "make verify-streaming-failure-cache-e2e"
       ]
     },
     "release-quality": {

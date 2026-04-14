@@ -66,6 +66,7 @@ jobs:
               - 'README.md'
               - 'README_zh-CN.md'
               - 'tools/docs/**'
+              - 'tools/harness/**'
               - 'tools/release-matrix.json'
               - 'examples/nginx-configs/**'
             rust:
@@ -107,11 +108,7 @@ jobs:
           python-version: '3.14.3'
 
       - name: Validate docs
-        run: |
-          python3 tools/docs/check_duplicate_docs.py
-          python3 tools/docs/check_docs.py
-          python3 tools/docs/check_packaging_docs.py
-          python3 tools/docs/check_packaging_consistency.py
+        run: make docs-check
 
   rust-quality:
     name: Rust Quality Gate

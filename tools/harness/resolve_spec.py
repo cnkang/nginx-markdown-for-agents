@@ -97,13 +97,18 @@ def _tokenize(*values: str) -> set[str]:
 
 def _match_by_identity(candidates: list[SpecCandidate], value: str) -> list[SpecCandidate]:
     needle = _normalize(value)
+    if not needle:
+        return []
     matches = []
     for candidate in candidates:
-        haystack = {
-            _normalize(candidate.dir_name),
-            _normalize(candidate.spec_id),
-        }
-        if needle in haystack or needle in _normalize(candidate.dir_name) or needle in _normalize(candidate.spec_id):
+        dir_name = _normalize(candidate.dir_name)
+        spec_id = _normalize(candidate.spec_id)
+        if (
+            needle == dir_name
+            or needle == spec_id
+            or needle in dir_name
+            or needle in spec_id
+        ):
             matches.append(candidate)
     return matches
 
@@ -180,6 +185,7 @@ def resolve_spec(
             candidates=[],
         )
 
+    unmatched_explicit: list[str] = []
     for explicit in explicit_specs:
         matches = _match_by_identity(candidates, explicit)
         if len(matches) == 1:
@@ -196,6 +202,18 @@ def resolve_spec(
                 chosen=None,
                 candidates=[_candidate_dict(candidate) for candidate in matches],
             )
+        unmatched_explicit.append(explicit)
+
+    if explicit_specs and unmatched_explicit:
+        return Resolution(
+            status=WARN_NEEDS_AUTHOR_REVIEW,
+            reason=(
+                "explicit spec does not match any local spec: "
+                + ", ".join(unmatched_explicit)
+            ),
+            chosen=None,
+            candidates=[_candidate_dict(candidate) for candidate in candidates],
+        )
 
     pointer_value, pointer_path = _read_pointer(pointer_candidates)
     if pointer_value:

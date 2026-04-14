@@ -67,6 +67,8 @@ def test_resolve_warns_on_explicit_spec_without_match(tmp_path):
         pointer_candidates=[],
     )
     assert result.status == resolve_spec.WARN_NEEDS_AUTHOR_REVIEW
+    assert "explicit spec does not match any local spec" in result.reason
+    assert "non-existent-spec" in result.reason
     assert result.chosen is None
     assert {candidate["dir_name"] for candidate in result.candidates} == {
         "14-nginx-streaming-runtime-and-ffi",
