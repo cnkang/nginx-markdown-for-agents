@@ -11,6 +11,7 @@ Use these documents when you need decisions and procedures you can act on direct
 3. [CONFIGURATION.md](CONFIGURATION.md) if you need the full directive reference and tuning details.
 4. [OPERATIONS.md](OPERATIONS.md) if you are preparing for production monitoring and troubleshooting.
 5. [BUILD_INSTRUCTIONS.md](BUILD_INSTRUCTIONS.md) if you are building from source or working locally.
+6. [HARNESS_MAINTENANCE.md](HARNESS_MAINTENANCE.md) if you are maintaining repo-owned agent workflow rules and validation.
 
 ## Guide Index
 
@@ -21,6 +22,7 @@ Use these documents when you need decisions and procedures you can act on direct
 | [CONFIGURATION.md](CONFIGURATION.md) | Directive reference, defaults, and configuration behavior |
 | [OPERATIONS.md](OPERATIONS.md) | Monitoring, troubleshooting, and operational runbooks |
 | [BUILD_INSTRUCTIONS.md](BUILD_INSTRUCTIONS.md) | Source builds, development workflows, and local verification |
+| [HARNESS_MAINTENANCE.md](HARNESS_MAINTENANCE.md) | Maintaining repo-owned harness rules, checks, and local adapters |
 
 ## Scope
 
@@ -32,3 +34,5 @@ In short:
 - `DEPLOYMENT_EXAMPLES.md` gets you to a working rollout pattern faster
 - `CONFIGURATION.md` defines the knobs and policies
 - `OPERATIONS.md` covers monitoring, troubleshooting, and runtime practice
+- `HARNESS_MAINTENANCE.md` explains how to evolve the repo-owned harness without
+  moving public rules into local-only files

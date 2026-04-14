@@ -7,7 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Repo-owned harness documentation under `docs/harness/`, including a central overview, core execution loop, canonical routing manifest, and initial risk-pack overlays for runtime streaming, FFI boundary work, observability, and docs/tooling drift
+- Durable open-source documentation for the harness design and maintenance model:
+  - `docs/architecture/HARNESS_ARCHITECTURE.md`
+  - `docs/architecture/ADR/0005-repo-owned-harness.md`
+  - `docs/guides/HARNESS_MAINTENANCE.md`
+- Executable harness tooling:
+  - `tools/harness/check_harness_sync.py`
+  - `tools/harness/resolve_spec.py`
+  - `tools/harness/state_store.py`
+- Harness regression coverage for sync checks, spec resolution, and local state-carrier behavior
+- Local maintenance skills for ongoing harness upkeep:
+  - `sync-harness-rules`
+  - `evolve-harness-rules`
+
 ### Changed
+- `AGENTS.md` now points explicitly at the repo-owned harness entrypoints instead of leaving agent workflow guidance scattered across local-only steering docs
+- `.kiro/steering/product.md`, `structure.md`, and `tech.md` were reduced to thin local adapter summaries that point back to `docs/harness/`
+- `Makefile` now exposes `make harness-check` and `make harness-check-full`
+- CI path filters now include `AGENTS.md` so harness contract changes trigger validation
+- `tools/docs/check_docs.py` now scans maintained canonical markdown truth surfaces instead of also treating root-level scratch notes as release-facing docs
+- Release-gates compatibility-matrix validation now supports both the legacy three-state-column table format and the current canonical single `Classification` column format
+- `README.md`, `docs/README.md`, `docs/architecture/README.md`, and `docs/testing/README.md` now point contributors at the harness workflow and commands
+
+### Fixed
+- Restored green `make harness-check-full` validation by aligning release-gate compatibility-matrix parsing with the current 0.5.0 canonical document structure
+- Prevented local scratch markdown files from causing false failures in canonical docs validation
 - Bumped Rust MSRV from 1.87 to 1.91 to support `str::floor_char_boundary` used in UTF-8 safe link text truncation
 - Updated minimum Rust toolchain version in installation docs to 1.91.0+
 

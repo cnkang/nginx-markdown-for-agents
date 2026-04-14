@@ -1,0 +1,245 @@
+{
+  "version": 1,
+  "codex_first": true,
+  "truth_surfaces": {
+    "contract": [
+      "AGENTS.md"
+    ],
+    "harness": [
+      "docs/harness/README.md",
+      "docs/harness/core.md",
+      "docs/harness/routing-manifest.md",
+      "docs/harness/routing-manifest.json",
+      "docs/harness/risk-packs/README.md"
+    ],
+    "canonical_docs": [
+      "docs/architecture/README.md",
+      "docs/testing/README.md",
+      "docs/DOCUMENTATION_DUPLICATION_POLICY.md"
+    ],
+    "optional_adapters": [
+      ".kiro/steering/product.md",
+      ".kiro/steering/structure.md",
+      ".kiro/steering/tech.md"
+    ]
+  },
+  "status_semantics": [
+    "PASS",
+    "FAIL",
+    "SKIP_NOT_PRESENT",
+    "WARN_NEEDS_AUTHOR_REVIEW"
+  ],
+  "spec_resolver": {
+    "priority": [
+      "user-task",
+      "active-spec-pointer",
+      "agents-contract",
+      "harness-core",
+      "replay-calibration"
+    ],
+    "pointer_candidates": [
+      ".kiro/active-spec.json",
+      ".kiro/active-spec.txt"
+    ],
+    "multiple_spec_policy": "explain-current-choice",
+    "conflict_policy": "stop-and-confirm"
+  },
+  "verification_families": {
+    "harness-sync": {
+      "phase": "cheap-blocker",
+      "commands": [
+        "make harness-check"
+      ]
+    },
+    "docs-tooling": {
+      "phase": "cheap-blocker",
+      "commands": [
+        "make docs-check"
+      ]
+    },
+    "rust-streaming": {
+      "phase": "focused-semantic",
+      "commands": [
+        "make test-rust-streaming"
+      ]
+    },
+    "nginx-streaming": {
+      "phase": "focused-semantic",
+      "commands": [
+        "make test-nginx-unit-streaming"
+      ]
+    },
+    "ffi-boundary": {
+      "phase": "focused-semantic",
+      "commands": [
+        "make build",
+        "make test-rust"
+      ]
+    },
+    "observability-metrics": {
+      "phase": "focused-semantic",
+      "commands": [
+        "make docs-check",
+        "make release-gates-check"
+      ]
+    },
+    "runtime-e2e": {
+      "phase": "umbrella",
+      "commands": [
+        "make verify-chunked-native-e2e-smoke",
+        "make verify-streaming-failure-cache-e2e"
+      ]
+    },
+    "release-quality": {
+      "phase": "umbrella",
+      "commands": [
+        "make harness-check-full"
+      ]
+    }
+  },
+  "risk_packs": [
+    {
+      "id": "runtime-streaming",
+      "doc": "docs/harness/risk-packs/runtime-streaming.md",
+      "primary_surfaces": [
+        "streaming",
+        "pending-chain",
+        "fail-open"
+      ],
+      "supporting_surfaces": [
+        "observability"
+      ],
+      "paths": [
+        "components/nginx-module/**",
+        "components/rust-converter/src/incremental.rs",
+        "components/rust-converter/src/charset.rs",
+        "tools/e2e/**"
+      ],
+      "keywords": [
+        "streaming",
+        "chunk",
+        "NGX_AGAIN",
+        "pending chain",
+        "last_buf"
+      ],
+      "verification_families": [
+        "harness-sync",
+        "rust-streaming",
+        "nginx-streaming",
+        "runtime-e2e"
+      ]
+    },
+    {
+      "id": "ffi-boundary",
+      "doc": "docs/harness/risk-packs/ffi-boundary.md",
+      "primary_surfaces": [
+        "ffi",
+        "header-sync",
+        "abi"
+      ],
+      "supporting_surfaces": [
+        "observability"
+      ],
+      "paths": [
+        "components/rust-converter/include/**",
+        "components/rust-converter/src/ffi.rs",
+        "components/rust-converter/src/ffi/**",
+        "components/nginx-module/src/markdown_converter.h",
+        "components/nginx-module/src/**"
+      ],
+      "keywords": [
+        "ffi",
+        "markdown_converter.h",
+        "repr(C)",
+        "error code",
+        "struct field"
+      ],
+      "verification_families": [
+        "harness-sync",
+        "ffi-boundary",
+        "release-quality"
+      ]
+    },
+    {
+      "id": "observability-metrics",
+      "doc": "docs/harness/risk-packs/observability-metrics.md",
+      "primary_surfaces": [
+        "metrics",
+        "reason-codes",
+        "operator-contract"
+      ],
+      "supporting_surfaces": [
+        "docs-tooling"
+      ],
+      "paths": [
+        "components/nginx-module/src/**",
+        "docs/guides/prometheus-metrics.md",
+        "docs/project/release-gates/**",
+        "tools/release_gates/**",
+        "tools/release/**"
+      ],
+      "keywords": [
+        "metrics",
+        "prometheus",
+        "reason code",
+        "snapshot",
+        "ttfb"
+      ],
+      "verification_families": [
+        "harness-sync",
+        "observability-metrics",
+        "release-quality"
+      ]
+    },
+    {
+      "id": "docs-tooling-drift",
+      "doc": "docs/harness/risk-packs/docs-tooling-drift.md",
+      "primary_surfaces": [
+        "docs",
+        "validators",
+        "ci-gating"
+      ],
+      "supporting_surfaces": [
+        "observability"
+      ],
+      "paths": [
+        "AGENTS.md",
+        "docs/**",
+        "tools/docs/**",
+        "tools/release/**",
+        ".github/workflows/**",
+        "Makefile"
+      ],
+      "keywords": [
+        "docs",
+        "validator",
+        "release gate",
+        "path filter",
+        "installation"
+      ],
+      "verification_families": [
+        "harness-sync",
+        "docs-tooling",
+        "release-quality"
+      ]
+    }
+  ],
+  "task_entrypoints": [
+    {
+      "id": "implement-spec",
+      "default_route": "manifest-driven"
+    },
+    {
+      "id": "fix-regression",
+      "default_route": "historical-traps-first"
+    },
+    {
+      "id": "fix-static-quality",
+      "default_route": "correctness-over-green"
+    },
+    {
+      "id": "sync-docs-or-contract",
+      "default_route": "cheap-blockers-first"
+    }
+  ]
+}

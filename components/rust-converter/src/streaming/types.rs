@@ -40,6 +40,10 @@ pub enum FallbackReason {
     /// Front matter extraction requires data beyond the lookahead budget.
     FrontMatterOverflow,
     /// An unsupported HTML structure/capability was encountered.
+    ///
+    /// The embedded string must be a stable internal identifier
+    /// (for example `"table"` or `"prune_noise_regions"`), not
+    /// user-controlled content.
     UnsupportedStructure(String),
 }
 
@@ -93,6 +97,8 @@ pub struct StreamingResult {
 pub struct StreamingStats {
     /// Total number of HTML tokens processed.
     pub tokens_processed: u64,
+    /// Total number of tokenizer parse-error events observed.
+    pub parse_errors: u64,
     /// Total number of flush points emitted.
     pub flush_count: u32,
     /// Peak estimated working-set memory usage in bytes.

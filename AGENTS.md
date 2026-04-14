@@ -16,6 +16,24 @@ Goal: prevent repeated classes of mistakes that previously caused regressions.
 
 If two rules conflict, follow the higher-priority source.
 
+## Harness Map
+- `AGENTS.md` remains the Codex-first contract and engineering rule map.
+- `AGENTS.md` and `docs/harness/` are the owning harness truth surfaces for
+  tracked repository behavior; Make/CI/checkers must consume these, not local
+  adapter-only summaries.
+- `docs/harness/README.md` is the repo-owned harness entrypoint.
+- `docs/harness/core.md` defines the execution loop, conflict protocol, and
+  status semantics.
+- `docs/harness/routing-manifest.json` is the canonical structured routing
+  source; `docs/harness/routing-manifest.md` is the readable overlay.
+- `.kiro/specs/` is read-only optional input for local spec-oriented work. Do
+  not write harness caches, annotations, or durable repo truth into `.kiro/`.
+- `.kiro/steering/` is an optional local adapter surface only. It should point
+  back to `docs/harness/` and must not define stronger semantics than this file.
+- Outside voice and the user-local harness state carrier are advisory execution
+  tools. They may challenge or inform the current path, but they do not weaken
+  the repo-owned correctness and safety contract.
+
 ## Non-Negotiable NGINX Baseline
 
 ### API and lifecycle correctness
@@ -107,6 +125,13 @@ Required:
 - In-link formatting markers (bold/italic/inline-code) must be accumulated in link text, not flushed outside link context.
 - Code-block output must preserve raw content (blank lines/trailing spaces) and bypass generic normalization.
 - Blockquote markers must be emitted consistently on entry and after newline boundaries.
+- URL extraction parity must include media-bearing elements, not only `img`
+  (at minimum `video`, `audio`, `source`, `track`, and `area` where
+  applicable), with regression tests that cover missing-attribute and
+  attribute-present branches.
+- Human-readable fallback/detail strings that are carried in enums or result
+  types (for example `UnsupportedStructure(...)`) must use stable internal
+  identifiers, not user-influenced payloads.
 
 ### 7. Eligibility/reason-code drift and status handling bugs
 Historical issues: `d2d836f`, `5288c1b`, `19c896c`, `bc35a1f`.
@@ -328,6 +353,10 @@ Required:
   `tests/corpus/**/.meta.json -> streaming_notes.known_diff_ids` synchronized
   with `tests/streaming/known-differences.toml` IDs to avoid silent metadata
   drift.
+- Known-difference registries must carry structured drift classification
+  metadata (for example `drift_type` and `severity`) in addition to binary
+  accept/reject flags. Parsers must degrade safely for missing/unknown values
+  and tests must cover classification parsing defaults.
 - Any new `tests/corpus/**/*.html` fixture must include a same-basename
   `.meta.json` sidecar in the same change set, with all required fields:
   `fixture-id`, `page-type`, `expected-conversion-result`, `input-size-bytes`,

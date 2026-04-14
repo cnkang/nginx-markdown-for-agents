@@ -465,6 +465,9 @@ impl StreamingConverter {
     /// ```
     fn process_single_event(&mut self, event: StreamEvent) -> Result<(), ConversionError> {
         self.stats.tokens_processed = self.stats.tokens_processed.saturating_add(1);
+        if matches!(event, StreamEvent::ParseError(_)) {
+            self.stats.parse_errors = self.stats.parse_errors.saturating_add(1);
+        }
 
         // Front matter extraction: collect metadata from <head> region,
         // but only when metadata extraction is enabled (Requirement 10.1).
@@ -727,12 +730,33 @@ impl StreamingConverter {
                 if self.collecting_title && !text.is_empty() {
                     // Collect raw text into the separate buffer.
                     // The final trim happens at </title> above.
-                    self.html_title_buf.push_str(text);
+                    self.append_title_text_bounded(text);
                 }
             }
             _ => {}
         }
         false // within budget
+    }
+
+    /// Append title text while preserving the configured lookahead bound.
+    ///
+    /// We intentionally cap the dedicated title collector by the same
+    /// configured lookahead budget used for `<head>` processing so
+    /// collector growth remains explicitly bounded.
+    fn append_title_text_bounded(&mut self, text: &str) {
+        let limit = self.budget.lookahead;
+        if limit == 0 || self.html_title_buf.len() >= limit {
+            return;
+        }
+
+        let remaining = limit.saturating_sub(self.html_title_buf.len());
+        if text.len() <= remaining {
+            self.html_title_buf.push_str(text);
+            return;
+        }
+
+        let keep = text.floor_char_boundary(remaining);
+        self.html_title_buf.push_str(&text[..keep]);
     }
 
     /// Update page metadata from a `<meta>` tag's attributes.
@@ -1409,6 +1433,28 @@ mod tests {
 
         assert!(result.stats.tokens_processed > 0);
         assert!(result.stats.chunks_processed >= 1);
+        assert_eq!(result.stats.parse_errors, 0);
+    }
+
+    #[test]
+    fn test_parse_error_counter_increments() {
+        let mut conv = make_converter();
+        conv.process_single_event(StreamEvent::ParseError("broken tag".to_string()))
+            .unwrap();
+
+        assert_eq!(conv.stats.parse_errors, 1);
+        assert_eq!(conv.stats.tokens_processed, 1);
+    }
+
+    #[test]
+    fn test_title_collector_respects_lookahead_limit() {
+        let mut conv = make_converter_with_metadata();
+        conv.budget.lookahead = 8;
+
+        conv.append_title_text_bounded("abcdef");
+        conv.append_title_text_bounded("ghijkl");
+
+        assert_eq!(conv.html_title_buf, "abcdefgh");
     }
 
     /// Regression: peak_memory_estimate must reflect the working set

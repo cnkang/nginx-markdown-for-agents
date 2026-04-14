@@ -53,6 +53,7 @@ NGINX_HEADER := $(NGINX_MODULE_DIR)/src/markdown_converter.h
         test test-rust test-rust-doc test-nginx-unit test-nginx-unit-streaming test-nginx-unit-clang-smoke test-nginx-unit-sanitize-smoke \
         test-nginx-integration test-e2e test-all test-rust-fuzz-smoke sonar-compile-db \
         test-benchmark test-benchmark-compare test-benchmark-summary \
+        harness-check harness-check-full \
         docs-check license-check release-gates-check release-gates-check-legacy release-gates-check-strict \
         verify-large-e2e verify-huge-native-e2e verify-huge-allowed-native-e2e \
         verify-chunked-native-e2e verify-chunked-native-e2e-smoke verify-chunked-native-e2e-stress \
@@ -161,10 +162,21 @@ test-benchmark-summary:
 	python3 tools/perf/format_pr_summary.py \
 		--report $(CORPUS_REPORT)
 
-docs-check:
+docs-check-base:
 	python3 tools/docs/check_docs.py
 	python3 tools/docs/check_packaging_docs.py
 	python3 tools/docs/check_packaging_consistency.py
+
+docs-check: docs-check-base
+	python3 tools/harness/check_harness_sync.py
+
+harness-check:
+	python3 tools/harness/check_harness_sync.py
+
+harness-check-full:
+	$(MAKE) docs-check-base
+	python3 tools/harness/check_harness_sync.py --full
+	$(MAKE) release-gates-check
 
 license-check:
 	python3 tools/ci/check_c_licenses.py
@@ -234,6 +246,8 @@ help:
 	@echo "  test-benchmark           - Run corpus benchmark and produce Unified Report"
 	@echo "  test-benchmark-compare   - Compare corpus reports (baseline vs current)"
 	@echo "  test-benchmark-summary   - Generate PR benchmark summary from latest report"
+	@echo "  harness-check            - Validate harness truth surfaces and optional local adapters"
+	@echo "  harness-check-full       - Run full harness validation plus docs/release checks"
 	@echo "  docs-check               - Validate documentation links/style"
 	@echo "  license-check            - Verify license policy and THIRD-PARTY-NOTICES coverage"
 	@echo "  release-gates-check      - Validate 0.5.0 release gate framework (spec #12 deliverables)"

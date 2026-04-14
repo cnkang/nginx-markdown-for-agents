@@ -21,8 +21,16 @@ from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parents[2]
 ARCHIVE_SEGMENT = "docs/archive/"
+MAINTAINED_ROOT_DOCS = {"AGENTS.md", "README.md", "README_zh-CN.md"}
 LINK_RE = re.compile(r"(!?\[[^\]]+\]\(([^)]+)\))")
 HAN_RE = re.compile(r"[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF]")
+
+
+def is_maintained_markdown(rel_path: str) -> bool:
+    """Return whether a markdown path belongs to maintained repo truth surfaces."""
+    if rel_path in MAINTAINED_ROOT_DOCS:
+        return True
+    return rel_path.startswith("docs/") and not rel_path.startswith(ARCHIVE_SEGMENT)
 
 
 def iter_markdown_files() -> list[Path]:
@@ -45,7 +53,9 @@ def iter_markdown_files() -> list[Path]:
         candidates = set(ROOT.rglob("*.md"))
 
     return sorted(
-        p for p in candidates if ARCHIVE_SEGMENT not in p.relative_to(ROOT).as_posix()
+        p
+        for p in candidates
+        if is_maintained_markdown(p.relative_to(ROOT).as_posix())
     )
 
 

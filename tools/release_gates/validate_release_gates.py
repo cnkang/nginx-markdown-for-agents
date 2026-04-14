@@ -485,6 +485,38 @@ CHECK_GATE_CHECKLIST = "gate-failures:checklist"
 _VALID_STATES_LOWER = {s.lower() for s in VALID_STATES}
 
 
+def _normalize_state_value(value: str) -> str:
+    """Normalize a state cell from either matrix format to a canonical state.
+
+    Supports:
+    - old format: state columns marked with a checkmark
+    - new format: single Classification column containing values such as
+      "`streaming-supported`" or "`streaming-supported` (conditional)"
+    """
+    normalized = value.strip().replace("`", "").lower()
+    if " " in normalized:
+        normalized = normalized.split(" ", 1)[0]
+    return normalized
+
+
+def _compat_column_indices(header: list[str]) -> tuple[int, int | None]:
+    """Return the capability column index and optional classification column index."""
+    lowered = [cell.strip().lower() for cell in header]
+    capability_idx = -1
+    for idx, value in enumerate(lowered):
+        if value == "capability":
+            capability_idx = idx
+            break
+
+    classification_idx = None
+    for idx, value in enumerate(lowered):
+        if value == "classification":
+            classification_idx = idx
+            break
+
+    return capability_idx, classification_idx
+
+
 def check_compat_capabilities(
     result: ValidationResult, rows: list[list[str]]
 ) -> None:
@@ -502,8 +534,15 @@ def check_compat_capabilities(
         result.failed(CHECK_COMPAT_CAPS, "no table rows to check")
         return
 
-    # Collect first-column values from data rows (skip header)
-    row_caps = [row[0].strip().lower() for row in rows[1:] if row]
+    capability_idx, _ = _compat_column_indices(rows[0])
+    if capability_idx == -1:
+        result.failed(CHECK_COMPAT_CAPS, "capability column not found")
+        return
+
+    row_caps = []
+    for row in rows[1:]:
+        if capability_idx < len(row):
+            row_caps.append(row[capability_idx].strip().lower())
 
     missing = []
     for cap in CANONICAL_CAPABILITIES:
@@ -522,7 +561,9 @@ def check_compat_capabilities(
         result.passed(CHECK_COMPAT_CAPS)
 
 
-def check_compat_states(result: ValidationResult, header: list[str]) -> list[int]:
+def check_compat_states(
+    result: ValidationResult, header: list[str]
+) -> tuple[list[int], int]:
     """Sub-check: header must have exactly the valid state columns.
 
     This function verifies that the compatibility matrix header contains
@@ -535,31 +576,45 @@ def check_compat_states(result: ValidationResult, header: list[str]) -> list[int
     Returns:
         List of column indices for the state columns, or empty list on failure
     """
+    capability_idx, classification_idx = _compat_column_indices(header)
+    if capability_idx == -1:
+        result.failed(CHECK_COMPAT_STATES, "capability column not found")
+        return [], -1
+
+    if classification_idx is not None:
+        result.passed(CHECK_COMPAT_STATES)
+        return [classification_idx], capability_idx
+
     state_columns = [h for h in header if h.strip() and h.lower() in _VALID_STATES_LOWER]
     extra_columns = [
         h for h in header
         if h.strip()
         and h.lower() not in _VALID_STATES_LOWER
-        and h.lower() not in ("capability", "notes")
+        and h.lower() not in ("#", "capability", "notes")
     ]
     if len(state_columns) != len(VALID_STATES):
         result.failed(
             CHECK_COMPAT_STATES,
             f"expected {len(VALID_STATES)} state columns, found {len(state_columns)}: {state_columns}",
         )
-        return []
+        return [], capability_idx
     if extra_columns:
         result.failed(
             CHECK_COMPAT_STATES,
             f"unexpected columns in matrix header: {extra_columns}",
         )
-        return []
+        return [], capability_idx
     result.passed(CHECK_COMPAT_STATES)
-    return [i for i, h in enumerate(header) if h.strip() and h.lower() in _VALID_STATES_LOWER]
+    return [
+        i for i, h in enumerate(header) if h.strip() and h.lower() in _VALID_STATES_LOWER
+    ], capability_idx
 
 
 def check_compat_row_validity(
-    result: ValidationResult, data_rows: list[list[str]], state_indices: list[int]
+    result: ValidationResult,
+    data_rows: list[list[str]],
+    state_indices: list[int],
+    capability_idx: int,
 ) -> None:
     """Sub-check: each data row must mark exactly one state.
 
@@ -573,14 +628,27 @@ def check_compat_row_validity(
         state_indices: List of column indices for the state columns
     """
     invalid_rows = []
+    uses_classification_column = len(state_indices) == 1
+
     for row in data_rows:
-        # Count how many states are marked in this row
-        marked = sum(
-            bool(idx < len(row) and row[idx].strip())
-            for idx in state_indices
-        )
+        cap_name = "<empty>"
+        if capability_idx >= 0 and capability_idx < len(row):
+            cap_name = row[capability_idx].strip() or cap_name
+        elif row:
+            cap_name = row[0].strip() or cap_name
+
+        if uses_classification_column:
+            idx = state_indices[0]
+            if idx >= len(row) or not row[idx].strip():
+                invalid_rows.append(f"{cap_name} (missing classification)")
+                continue
+            state_value = _normalize_state_value(row[idx])
+            if state_value not in _VALID_STATES_LOWER:
+                invalid_rows.append(f"{cap_name} (invalid state: {row[idx].strip()})")
+            continue
+
+        marked = sum(bool(idx < len(row) and row[idx].strip()) for idx in state_indices)
         if marked != 1:
-            cap_name = row[0].strip() if row else "<empty>"
             invalid_rows.append(f"{cap_name} (marked {marked} states)")
     if invalid_rows:
         result.failed(
@@ -619,8 +687,9 @@ def check_compatibility_matrix(result: ValidationResult) -> None:
     check_compat_capabilities(result, rows)
 
     # Check that the header has the correct state columns and validate rows
-    if state_indices := check_compat_states(result, rows[0]):
-        check_compat_row_validity(result, rows[1:], state_indices)
+    state_indices, capability_idx = check_compat_states(result, rows[0])
+    if state_indices:
+        check_compat_row_validity(result, rows[1:], state_indices, capability_idx)
 
 
 _CHECKLIST_RE_PREFIX = "- ["

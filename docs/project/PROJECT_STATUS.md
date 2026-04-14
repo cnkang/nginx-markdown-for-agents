@@ -4,9 +4,26 @@
 
 This project is a production-oriented NGINX filter module backed by a Rust HTML-to-Markdown converter (via FFI). It performs HTTP content negotiation and returns Markdown when clients request `Accept: text/markdown`.
 
+The repository also includes a repo-owned harness for spec resolution, agent
+routing, risk overlays, and harness-specific validation. That harness is
+tracked in public docs and tools rather than living only in private local
+steering files.
+
 ## Current Assessment
 
-As of **version 0.4.1**, the project includes Prometheus-compatible metrics, unified decision reason codes, rollout and rollback operational guides, a benchmark corpus with evidence-based regression detection, restructured installation and first-run documentation, and parser path optimizations. Core features are implemented and tested. The codebase includes unit, integration, E2E, and fuzz-oriented validation entrypoints, along with documentation covering installation, configuration, operations, and architecture.
+As of the **current development line (Unreleased / upcoming 0.5.0)**, the project includes Prometheus-compatible metrics, unified decision reason codes, rollout and rollback operational guides, a benchmark corpus with evidence-based regression detection, restructured installation and first-run documentation, parser path optimizations, and a repo-owned harness for agent workflow governance. Core features are implemented and tested. The codebase includes unit, integration, E2E, fuzz-oriented validation entrypoints, and harness-specific validation entrypoints, along with documentation covering installation, configuration, operations, architecture, and contributor-facing harness maintenance.
+
+### Repository Harness Updates
+
+- `docs/harness/` is the public entrypoint for spec routing, risk packs, and
+  harness checks.
+- `tools/harness/check_harness_sync.py` and Make targets
+  `make harness-check` / `make harness-check-full` provide executable
+  validation instead of prose-only workflow rules.
+- Optional local `.kiro/` adapters remain supported, but public repository
+  validation no longer depends on private spec assets being present.
+- The harness now records short-lived execution memory in a user-local state
+  carrier instead of tracked repository docs.
 
 ### Release 0.4.1 Patch Updates
 
