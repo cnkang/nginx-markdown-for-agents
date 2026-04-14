@@ -255,6 +255,38 @@ impl StructuralStateMachine {
                 // but <img> never has a matching end tag either way.
                 return Ok(StateMachineAction::Enter(ctx));
             }
+            "video" | "audio" => {
+                if let Some(src) = attrs
+                    .iter()
+                    .find(|(k, _)| k == "src")
+                    .map(|(_, v)| v.clone())
+                {
+                    // Media elements with inline src are emitted as URL-bearing
+                    // artifacts for parity with full-buffer URL extraction.
+                    let ctx = StructuralContext::Image {
+                        src,
+                        alt: name.to_string(),
+                    };
+                    return Ok(StateMachineAction::Enter(ctx));
+                }
+                // No inline src (for example <video><source ...>): child tags
+                // may still carry extractable URLs.
+                return Ok(StateMachineAction::None);
+            }
+            "source" | "track" | "area" => {
+                if let Some(src) = attrs
+                    .iter()
+                    .find(|(k, _)| *k == "src" || *k == "href")
+                    .map(|(_, v)| v.clone())
+                {
+                    let ctx = StructuralContext::Image {
+                        src,
+                        alt: name.to_string(),
+                    };
+                    return Ok(StateMachineAction::Enter(ctx));
+                }
+                return Ok(StateMachineAction::None);
+            }
             "strong" | "b" => StructuralContext::Bold,
             "em" | "i" => StructuralContext::Italic,
             "table" | "thead" | "tbody" | "tr" | "th" | "td" => {
@@ -830,6 +862,81 @@ mod tests {
         let mut sm = default_sm();
         let action = sm.process_event(&start_tag("table")).unwrap();
         assert_eq!(action, StateMachineAction::FallbackRequired);
+    }
+
+    #[test]
+    fn test_video_and_audio_with_src_emit_image_context() {
+        let mut sm = default_sm();
+
+        let video = sm
+            .process_event(&start_tag_with_attrs(
+                "video",
+                vec![("src", "https://example.com/video.mp4")],
+            ))
+            .unwrap();
+        assert_eq!(
+            video,
+            StateMachineAction::Enter(StructuralContext::Image {
+                src: "https://example.com/video.mp4".to_string(),
+                alt: "video".to_string(),
+            })
+        );
+
+        let audio = sm
+            .process_event(&start_tag_with_attrs(
+                "audio",
+                vec![("src", "https://example.com/audio.mp3")],
+            ))
+            .unwrap();
+        assert_eq!(
+            audio,
+            StateMachineAction::Enter(StructuralContext::Image {
+                src: "https://example.com/audio.mp3".to_string(),
+                alt: "audio".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn test_media_void_tags_extract_src_or_href() {
+        let mut sm = default_sm();
+
+        let source = sm
+            .process_event(&start_tag_with_attrs(
+                "source",
+                vec![("src", "https://example.com/v.webm")],
+            ))
+            .unwrap();
+        assert_eq!(
+            source,
+            StateMachineAction::Enter(StructuralContext::Image {
+                src: "https://example.com/v.webm".to_string(),
+                alt: "source".to_string(),
+            })
+        );
+
+        let area = sm
+            .process_event(&start_tag_with_attrs(
+                "area",
+                vec![("href", "https://example.com/map")],
+            ))
+            .unwrap();
+        assert_eq!(
+            area,
+            StateMachineAction::Enter(StructuralContext::Image {
+                src: "https://example.com/map".to_string(),
+                alt: "area".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn test_video_without_inline_src_is_noop() {
+        let mut sm = default_sm();
+        let action = sm
+            .process_event(&start_tag_with_attrs("video", vec![("controls", "true")]))
+            .unwrap();
+        assert_eq!(action, StateMachineAction::None);
     }
 
     #[test]

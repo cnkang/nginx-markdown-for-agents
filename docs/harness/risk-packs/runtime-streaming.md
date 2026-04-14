@@ -5,7 +5,12 @@ chains, fail-open flow, or deferred output ordering.
 
 ## Triggers
 
+- primary surface identifiers: `streaming`, `pending-chain`, `fail-open`
 - touched files under `components/nginx-module/**`
+- touched files under
+  `components/rust-converter/src/incremental.rs`
+- touched files under
+  `components/rust-converter/src/charset.rs`
 - touched files under `tools/e2e/**`
 - keywords like `NGX_AGAIN`, `last_buf`, `pending chain`, `streaming`
 
@@ -19,7 +24,11 @@ chains, fail-open flow, or deferred output ordering.
 - pending chain persistence vs terminal buffer emission
 - header-forwarded state vs fail-open branches
 - UTF-8 tail handling vs chunk boundaries
+- media URL extraction parity (`img`/`video`/`audio`/`source`/`track`/`area`)
+  vs full-buffer behavior
 - replay/runtime fixtures vs new failure paths
+- known-difference registry schema drift (`drift_type`/`severity`) vs parity
+  suppressor semantics
 
 ## Minimum Verification
 

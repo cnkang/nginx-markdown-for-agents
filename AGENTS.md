@@ -125,6 +125,13 @@ Required:
 - In-link formatting markers (bold/italic/inline-code) must be accumulated in link text, not flushed outside link context.
 - Code-block output must preserve raw content (blank lines/trailing spaces) and bypass generic normalization.
 - Blockquote markers must be emitted consistently on entry and after newline boundaries.
+- URL extraction parity must include media-bearing elements, not only `img`
+  (at minimum `video`, `audio`, `source`, `track`, and `area` where
+  applicable), with regression tests that cover missing-attribute and
+  attribute-present branches.
+- Human-readable fallback/detail strings that are carried in enums or result
+  types (for example `UnsupportedStructure(...)`) must use stable internal
+  identifiers, not user-influenced payloads.
 
 ### 7. Eligibility/reason-code drift and status handling bugs
 Historical issues: `d2d836f`, `5288c1b`, `19c896c`, `bc35a1f`.
@@ -346,6 +353,10 @@ Required:
   `tests/corpus/**/.meta.json -> streaming_notes.known_diff_ids` synchronized
   with `tests/streaming/known-differences.toml` IDs to avoid silent metadata
   drift.
+- Known-difference registries must carry structured drift classification
+  metadata (for example `drift_type` and `severity`) in addition to binary
+  accept/reject flags. Parsers must degrade safely for missing/unknown values
+  and tests must cover classification parsing defaults.
 - Any new `tests/corpus/**/*.html` fixture must include a same-basename
   `.meta.json` sidecar in the same change set, with all required fields:
   `fixture-id`, `page-type`, `expected-conversion-result`, `input-size-bytes`,

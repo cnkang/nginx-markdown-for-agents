@@ -242,6 +242,8 @@ proptest! {
                 // Note: streaming and full-buffer may differ in exact whitespace
                 // due to DOM tree builder vs raw tokenizer differences.
                 // We verify semantic equivalence: same non-empty lines present.
+                // Byte-level parity is covered by corpus parity tests in
+                // `tests/streaming_parity.rs` with known-difference controls.
                 let streaming_lines: Vec<&str> = streaming_str
                     .lines()
                     .map(|l| l.trim())

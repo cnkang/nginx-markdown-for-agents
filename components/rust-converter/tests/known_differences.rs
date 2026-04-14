@@ -14,12 +14,43 @@ pub struct KnownDifference {
     pub description: String,
     pub trigger: String,
     pub reason: String,
+    pub drift_type: DriftType,
+    pub severity: DriftSeverity,
     pub acceptable: bool,
     pub fix_version: String,
     pub fixture_contains: Option<String>,
     pub full_buffer_snippet: Option<String>,
     pub streaming_snippet: Option<String>,
     pub diff_contains: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DriftType {
+    WhitespaceOnly,
+    OrderedListNumbering,
+    EntityEncoding,
+    Structural,
+    Semantic,
+    Unknown,
+}
+
+impl Default for DriftType {
+    fn default() -> Self {
+        Self::Unknown
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DriftSeverity {
+    Benign,
+    AcceptableDivergence,
+    NeedsInvestigation,
+}
+
+impl Default for DriftSeverity {
+    fn default() -> Self {
+        Self::AcceptableDivergence
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -55,6 +86,12 @@ impl KnownDifferences {
                         description: string_field(table, "description"),
                         trigger: string_field(table, "trigger"),
                         reason: string_field(table, "reason"),
+                        drift_type: parse_drift_type(
+                            table.get("drift_type").and_then(toml::Value::as_str),
+                        ),
+                        severity: parse_drift_severity(
+                            table.get("severity").and_then(toml::Value::as_str),
+                        ),
                         acceptable: table
                             .get("acceptable")
                             .and_then(toml::Value::as_bool)
@@ -138,6 +175,25 @@ fn optional_string_field(table: &toml::map::Map<String, toml::Value>, key: &str)
         .map(ToOwned::to_owned)
 }
 
+fn parse_drift_type(raw: Option<&str>) -> DriftType {
+    match raw.unwrap_or_default() {
+        "whitespace_only" => DriftType::WhitespaceOnly,
+        "ordered_list_numbering" => DriftType::OrderedListNumbering,
+        "entity_encoding" => DriftType::EntityEncoding,
+        "structural" => DriftType::Structural,
+        "semantic" => DriftType::Semantic,
+        _ => DriftType::Unknown,
+    }
+}
+
+fn parse_drift_severity(raw: Option<&str>) -> DriftSeverity {
+    match raw.unwrap_or_default() {
+        "benign" => DriftSeverity::Benign,
+        "needs_investigation" => DriftSeverity::NeedsInvestigation,
+        _ => DriftSeverity::AcceptableDivergence,
+    }
+}
+
 #[test]
 fn known_differences_matches_by_fixture_and_snippet() {
     let known = KnownDifferences {
@@ -146,6 +202,8 @@ fn known_differences_matches_by_fixture_and_snippet() {
             description: "test".to_string(),
             trigger: "collapse".to_string(),
             reason: "reason".to_string(),
+            drift_type: DriftType::WhitespaceOnly,
+            severity: DriftSeverity::Benign,
             acceptable: true,
             fix_version: "0.6.0".to_string(),
             fixture_contains: Some("streaming".to_string()),
@@ -163,4 +221,26 @@ fn known_differences_matches_by_fixture_and_snippet() {
 
     assert!(known.matches("streaming/example.html", &out).is_some());
     assert!(known.matches("simple/example.html", &out).is_none());
+}
+
+#[test]
+fn known_differences_parse_structured_fields() {
+    assert_eq!(
+        parse_drift_type(Some("ordered_list_numbering")),
+        DriftType::OrderedListNumbering
+    );
+    assert_eq!(
+        parse_drift_type(Some("unknown_new_value")),
+        DriftType::Unknown
+    );
+
+    assert_eq!(parse_drift_severity(Some("benign")), DriftSeverity::Benign);
+    assert_eq!(
+        parse_drift_severity(Some("needs_investigation")),
+        DriftSeverity::NeedsInvestigation
+    );
+    assert_eq!(
+        parse_drift_severity(Some("unexpected")),
+        DriftSeverity::AcceptableDivergence
+    );
 }
