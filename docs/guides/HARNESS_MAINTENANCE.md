@@ -129,6 +129,19 @@ Rules for optional inputs:
   user-local state files should degrade explicitly rather than crash the tool
   with a raw traceback
 
+## Optional Local Skill Accelerator
+
+For local agent execution choreography, use the repo-tracked skill:
+
+- `skills/nginx-harness-maintenance/SKILL.md`
+
+Rules for this skill:
+
+- it accelerates routing and verification only
+- it does not own durable repository semantics
+- it must read routing and checks from `docs/harness/routing-manifest.json`
+- it must keep repo-owned truth surfaces authoritative
+
 ## Outside Voice
 
 Use outside voice when the harness stops converging cleanly:

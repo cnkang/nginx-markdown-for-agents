@@ -1,0 +1,5 @@
+interface:
+  display_name: "NGINX Harness Maintainer"
+  short_description: "Route harness work and run repo truth checks."
+  default_prompt: "Use $nginx-harness-maintenance to route this harness task and run the right verification matrix."
+
