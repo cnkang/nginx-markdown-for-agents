@@ -6,7 +6,6 @@ from __future__ import annotations
 import argparse
 import json
 import re
-import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -177,6 +176,112 @@ def _candidate_dict(candidate: SpecCandidate, *, score: int | None = None) -> di
     return data
 
 
+def _resolve_explicit(
+    candidates: list[SpecCandidate],
+    explicit_specs: list[str],
+) -> Resolution | None:
+    """Try to resolve from explicit spec names. Return None to continue."""
+    unmatched: list[str] = []
+    for explicit in explicit_specs:
+        matches = _match_by_identity(candidates, explicit)
+        if len(matches) == 1:
+            return Resolution(
+                status=PASS,
+                reason=f"explicit spec match: {explicit}",
+                chosen=_candidate_dict(matches[0]),
+                candidates=[_candidate_dict(matches[0])],
+            )
+        if len(matches) > 1:
+            return Resolution(
+                status=WARN_NEEDS_AUTHOR_REVIEW,
+                reason=f"explicit spec is ambiguous: {explicit}",
+                chosen=None,
+                candidates=[_candidate_dict(c) for c in matches],
+            )
+        unmatched.append(explicit)
+
+    if unmatched:
+        return Resolution(
+            status=WARN_NEEDS_AUTHOR_REVIEW,
+            reason="explicit spec does not match any local spec: "
+            + ", ".join(unmatched),
+            chosen=None,
+            candidates=[_candidate_dict(c) for c in candidates],
+        )
+    return None
+
+
+def _resolve_pointer(
+    candidates: list[SpecCandidate],
+    pointer_candidates: list[Path] | None,
+) -> Resolution | None:
+    """Try to resolve from an active-spec pointer file. Return None to continue."""
+    pointer_value, pointer_path = _read_pointer(pointer_candidates)
+    if not pointer_value:
+        return None
+
+    matches = _match_by_identity(candidates, pointer_value)
+    if len(matches) == 1:
+        return Resolution(
+            status=PASS,
+            reason=f"active pointer match: {pointer_value}",
+            chosen=_candidate_dict(matches[0]),
+            candidates=[_candidate_dict(matches[0])],
+            pointer=pointer_path,
+        )
+    if len(matches) > 1:
+        return Resolution(
+            status=WARN_NEEDS_AUTHOR_REVIEW,
+            reason=f"active pointer is ambiguous: {pointer_value}",
+            chosen=None,
+            candidates=[_candidate_dict(c) for c in matches],
+            pointer=pointer_path,
+        )
+    return Resolution(
+        status=WARN_NEEDS_AUTHOR_REVIEW,
+        reason=f"active pointer does not match any local spec: {pointer_value}",
+        chosen=None,
+        candidates=[_candidate_dict(c) for c in candidates],
+        pointer=pointer_path,
+    )
+
+
+def _resolve_hints(
+    candidates: list[SpecCandidate],
+    hints: list[str],
+) -> Resolution:
+    """Resolve from hint-based token scoring (always returns a result)."""
+    scored = _score_candidates(candidates, hints)
+    if not scored:
+        return Resolution(
+            status=WARN_NEEDS_AUTHOR_REVIEW,
+            reason="no spec could be bound confidently from hints",
+            chosen=None,
+            candidates=[_candidate_dict(c) for c in candidates],
+        )
+
+    best_score, best_candidate = scored[0]
+    tied = [item for item in scored if item[0] == best_score]
+    if len(tied) > 1:
+        return Resolution(
+            status=WARN_NEEDS_AUTHOR_REVIEW,
+            reason="multiple specs match the current hints",
+            chosen=None,
+            candidates=[
+                _candidate_dict(c, score=s) for s, c in tied
+            ],
+        )
+
+    return Resolution(
+        status=PASS,
+        reason="best hint match",
+        chosen=_candidate_dict(best_candidate, score=best_score),
+        candidates=[
+            _candidate_dict(c, score=s) for s, c in scored
+        ],
+    )
+
+
 def resolve_spec(
     *,
     explicit_specs: list[str] | None = None,
@@ -195,88 +300,16 @@ def resolve_spec(
             candidates=[],
         )
 
-    unmatched_explicit: list[str] = []
-    for explicit in explicit_specs:
-        matches = _match_by_identity(candidates, explicit)
-        if len(matches) == 1:
-            return Resolution(
-                status=PASS,
-                reason=f"explicit spec match: {explicit}",
-                chosen=_candidate_dict(matches[0]),
-                candidates=[_candidate_dict(matches[0])],
-            )
-        if len(matches) > 1:
-            return Resolution(
-                status=WARN_NEEDS_AUTHOR_REVIEW,
-                reason=f"explicit spec is ambiguous: {explicit}",
-                chosen=None,
-                candidates=[_candidate_dict(candidate) for candidate in matches],
-            )
-        unmatched_explicit.append(explicit)
+    if explicit_specs:
+        result = _resolve_explicit(candidates, explicit_specs)
+        if result is not None:
+            return result
 
-    if explicit_specs and unmatched_explicit:
-        return Resolution(
-            status=WARN_NEEDS_AUTHOR_REVIEW,
-            reason=(
-                "explicit spec does not match any local spec: "
-                + ", ".join(unmatched_explicit)
-            ),
-            chosen=None,
-            candidates=[_candidate_dict(candidate) for candidate in candidates],
-        )
+    result = _resolve_pointer(candidates, pointer_candidates)
+    if result is not None:
+        return result
 
-    pointer_value, pointer_path = _read_pointer(pointer_candidates)
-    if pointer_value:
-        matches = _match_by_identity(candidates, pointer_value)
-        if len(matches) == 1:
-            return Resolution(
-                status=PASS,
-                reason=f"active pointer match: {pointer_value}",
-                chosen=_candidate_dict(matches[0]),
-                candidates=[_candidate_dict(matches[0])],
-                pointer=pointer_path,
-            )
-        if len(matches) > 1:
-            return Resolution(
-                status=WARN_NEEDS_AUTHOR_REVIEW,
-                reason=f"active pointer is ambiguous: {pointer_value}",
-                chosen=None,
-                candidates=[_candidate_dict(candidate) for candidate in matches],
-                pointer=pointer_path,
-            )
-        return Resolution(
-            status=WARN_NEEDS_AUTHOR_REVIEW,
-            reason=f"active pointer does not match any local spec: {pointer_value}",
-            chosen=None,
-            candidates=[_candidate_dict(candidate) for candidate in candidates],
-            pointer=pointer_path,
-        )
-
-    scored = _score_candidates(candidates, hints)
-    if not scored:
-        return Resolution(
-            status=WARN_NEEDS_AUTHOR_REVIEW,
-            reason="no spec could be bound confidently from hints",
-            chosen=None,
-            candidates=[_candidate_dict(candidate) for candidate in candidates],
-        )
-
-    best_score, best_candidate = scored[0]
-    tied = [item for item in scored if item[0] == best_score]
-    if len(tied) > 1:
-        return Resolution(
-            status=WARN_NEEDS_AUTHOR_REVIEW,
-            reason="multiple specs match the current hints",
-            chosen=None,
-            candidates=[_candidate_dict(candidate, score=score) for score, candidate in tied],
-        )
-
-    return Resolution(
-        status=PASS,
-        reason="best hint match",
-        chosen=_candidate_dict(best_candidate, score=best_score),
-        candidates=[_candidate_dict(candidate, score=score) for score, candidate in scored],
-    )
+    return _resolve_hints(candidates, hints)
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
