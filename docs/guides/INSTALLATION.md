@@ -317,7 +317,7 @@ tar -xzf nginx-1.24.0.tar.gz
 
 ```bash
 # Check Rust version
-rustc --version  # Should be 1.85.0 or higher
+rustc --version  # Should be 1.91.0 or higher
 
 # Check Cargo version
 cargo --version
@@ -1226,7 +1226,7 @@ brew install pcre
 # Update Rust toolchain
 rustup update
 
-# Check Rust version (must be 1.85.0+)
+# Check Rust version (must be 1.91.0+)
 rustc --version
 
 # Clean and rebuild

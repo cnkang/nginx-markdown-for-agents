@@ -13,8 +13,8 @@ resolution, risk routing, validation, and maintenance was still fragmented.
 Important behavior lived in several places:
 
 - `AGENTS.md`
-- local `.kiro/steering/` files
-- local `.kiro/specs/`
+- local adapter files
+- local spec pointer inputs
 - CI and Make targets
 - maintainer habit and review history
 
@@ -25,7 +25,7 @@ This caused three structural problems:
 3. validation behavior was partly implicit instead of executable
 
 At the same time, the project needed to remain open-source friendly. Private
-`.kiro/` assets are useful for local work, but the repository must not require
+local assets can be useful for local work, but the repository must not require
 them in order to validate or understand the public contract.
 
 ## Decision
@@ -39,8 +39,8 @@ Adopt a repo-owned harness with the following structure:
 - `docs/harness/routing-manifest.md` is the human-readable summary of that same
   source
 - risk packs are organized by technical hazard, not by task label
-- `.kiro/specs/` remains read-only input
-- `.kiro/steering/` becomes an optional thin adapter layer, not a second source
+- local spec inputs remain read-only
+- local adapter layers remain optional and do not become a second source
   of truth
 - short-lived execution memory moves to a user-local state carrier rather than
   tracked docs
@@ -53,7 +53,7 @@ Adopt a repo-owned harness with the following structure:
 
 - Open-source readers can understand the harness from tracked repository files.
 - Codex-first repository rules become durable and reviewable.
-- Public validation does not depend on private `.kiro/` contents.
+- Public validation does not depend on private local adapter contents.
 - Human-readable and machine-readable routing stay aligned around one canonical
   structured source.
 - Repeated failures can drive measured harness evolution instead of relying only
@@ -74,10 +74,10 @@ Adopt a repo-owned harness with the following structure:
 Rejected because it keeps too much important behavior outside the tracked
 repository or compresses too much into one file.
 
-### 2. Make `.kiro/` the primary harness source
+### 2. Make local adapter data the primary harness source
 
-Rejected because `.kiro/` is intentionally private and optional. The public
-repository cannot depend on it.
+Rejected because local adapter data is intentionally private and optional. The
+public repository cannot depend on it.
 
 ### 3. Use prose-only harness docs with no canonical structured manifest
 

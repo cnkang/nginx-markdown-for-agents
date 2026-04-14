@@ -8,7 +8,7 @@ Use it when you need to understand:
 - why the harness exists as a repository asset instead of a local-only prompt
 - which files own durable harness truth
 - how spec resolution, routing, verification, and maintenance fit together
-- how the harness stays compatible with optional local `.kiro/` data without
+- how the harness stays compatible with optional local adapter data without
   making the public repository depend on it
 
 ## Problem Statement
@@ -18,8 +18,8 @@ historical fixes captured in `AGENTS.md`, but agent workflow behavior was still
 spread across:
 
 - `AGENTS.md`
-- local `.kiro/steering/` files
-- local `.kiro/specs/`
+- local adapter files
+- local spec pointer inputs
 - CI and Make targets
 - reviewer and maintainer habits
 
@@ -92,10 +92,8 @@ humans and consumable by tools.
 
 ### 3. Optional local inputs and adapters
 
-- `.kiro/specs/`
-- `.kiro/active-spec.json`
-- `.kiro/active-spec.txt`
-- `.kiro/steering/*.md`
+- local spec pointer files
+- local adapter summaries
 
 These files are optional. Public clones must still pass repo validation without
 them. When present, they refine local resolution and adapter behavior, but they
@@ -172,7 +170,7 @@ still giving maintenance flows a durable signal source.
 The harness supports one public behavior model with adaptive checks.
 
 - Public repo truth is always checked.
-- Optional local `.kiro/` inputs add stricter checks when present.
+- Optional local adapter inputs add stricter checks when present.
 - Missing local files become `SKIP_NOT_PRESENT`, not repository failures.
 
 This keeps the project open-source friendly while still supporting richer local

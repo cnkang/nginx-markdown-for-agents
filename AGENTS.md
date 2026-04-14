@@ -4,13 +4,13 @@
 This file defines repository-specific engineering rules for AI agents working on `nginx-markdown-for-agents`.
 
 These rules are distilled from:
-- NGINX official development constraints in `.kiro/nginx-development-guide.md`
+- NGINX official development constraints in the Kiro local development guide (when present)
 - Historical fix/doc and hidden-fix commits across local branches and remote-only commits (deduplicated by commit SHA)
 
 Goal: prevent repeated classes of mistakes that previously caused regressions.
 
 ## Rule Priority
-1. `.kiro/nginx-development-guide.md` (highest priority)
+1. Kiro local development guide, when present (highest priority)
 2. This `AGENTS.md`
 3. Task-specific user instructions
 
@@ -26,10 +26,11 @@ If two rules conflict, follow the higher-priority source.
   status semantics.
 - `docs/harness/routing-manifest.json` is the canonical structured routing
   source; `docs/harness/routing-manifest.md` is the readable overlay.
-- `.kiro/specs/` is read-only optional input for local spec-oriented work. Do
-  not write harness caches, annotations, or durable repo truth into `.kiro/`.
-- `.kiro/steering/` is an optional local adapter surface only. It should point
-  back to `docs/harness/` and must not define stronger semantics than this file.
+- Optional local spec inputs are read-only for local spec-oriented work. Do not
+  write harness caches, annotations, or durable repo truth into local adapter
+  surfaces.
+- Optional local steering adapters should point back to `docs/harness/` and
+  must not define stronger semantics than this file.
 - Outside voice and the user-local harness state carrier are advisory execution
   tools. They may challenge or inform the current path, but they do not weaken
   the repo-owned correctness and safety contract.
@@ -703,7 +704,7 @@ Required:
 ## Required Agent Workflow
 
 ### Before coding
-- Read relevant sections in `.kiro/nginx-development-guide.md` for touched area (HTTP/filter/memory/style).
+- Read relevant sections in the local development guide (if available) for touched area (HTTP/filter/memory/style).
 - Identify invariants likely to break (header ordering, backpressure, reason codes, buffer bounds).
 - List boundary surfaces up front when the change crosses layers (NGINX C, Rust core, FFI/header, docs, scripts, CI).
 - Identify minimum verification commands before writing code.

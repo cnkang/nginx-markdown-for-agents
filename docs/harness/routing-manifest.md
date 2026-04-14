@@ -40,8 +40,7 @@ Plan-only targets (for example `*-plan`) are documentation aids, not evidence.
 ## Adaptive Checks
 
 - Public truth surfaces always check.
-- Optional local `.kiro/` adapters check only when present.
-- Missing `.kiro/` should produce `SKIP_NOT_PRESENT`, not failure.
-- Optional local active-spec pointers may refine spec resolution:
-  - `.kiro/active-spec.json`
-  - `.kiro/active-spec.txt`
+- Optional local adapters check only when present.
+- Missing optional local adapters should produce `SKIP_NOT_PRESENT`, not
+  failure.
+- Optional local active-spec pointers may refine spec resolution.

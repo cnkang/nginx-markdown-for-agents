@@ -7,34 +7,68 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+No changes yet.
+
+## [0.5.0] - 2026-04-14
+
+This release delivers the 0.5.0 streaming line. It moves the project from
+full-buffer-only operation to a dual-engine model with bounded-memory
+streaming, plus the harness and release-gate surfaces needed to operate it.
+
 ### Added
-- Repo-owned harness documentation under `docs/harness/`, including a central overview, core execution loop, canonical routing manifest, and initial risk-pack overlays for runtime streaming, FFI boundary work, observability, and docs/tooling drift
-- Durable open-source documentation for the harness design and maintenance model:
+- Streaming-focused 0.5.0 scope covering release gates, runtime integration,
+  failure semantics, parity testing, rollout observability, and performance
+  evidence
+- True streaming engine path (opt-in) with chunk-driven conversion and
+  dual-engine request routing (`full-buffer` default plus `streaming`)
+- Streaming rollout controls and observability primitives, including
+  shadow-mode verification flows, streaming reason-code coverage, and
+  streaming-oriented metrics/reporting surfaces
+- Repo-owned harness documentation under `docs/harness/`, including a central
+  overview, core execution loop, canonical routing manifest, and risk-pack
+  overlays for runtime streaming, FFI boundary work, observability, and
+  docs/tooling drift
+- Durable open-source documentation for harness design and maintenance:
   - `docs/architecture/HARNESS_ARCHITECTURE.md`
   - `docs/architecture/ADR/0005-repo-owned-harness.md`
   - `docs/guides/HARNESS_MAINTENANCE.md`
 - Executable harness tooling:
   - `tools/harness/check_harness_sync.py`
-  - `tools/harness/resolve_spec.py`
   - `tools/harness/state_store.py`
-- Harness regression coverage for sync checks, spec resolution, and local state-carrier behavior
-- Local maintenance skills for ongoing harness upkeep:
+- Harness regression coverage for sync checks, spec resolution, and local
+  state-carrier behavior
+- Local maintenance skills for harness upkeep:
   - `sync-harness-rules`
   - `evolve-harness-rules`
 
 ### Changed
-- `AGENTS.md` now points explicitly at the repo-owned harness entrypoints instead of leaving agent workflow guidance scattered across local-only steering docs
-- `.kiro/steering/product.md`, `structure.md`, and `tech.md` were reduced to thin local adapter summaries that point back to `docs/harness/`
+- `AGENTS.md` now points explicitly at repo-owned harness entrypoints instead
+  of relying on local-only steering docs
+- Local adapter summaries were reduced to thin references that point back to
+  `docs/harness/`
 - `Makefile` now exposes `make harness-check` and `make harness-check-full`
-- CI path filters now include `AGENTS.md` so harness contract changes trigger validation
-- `tools/docs/check_docs.py` now scans maintained canonical markdown truth surfaces instead of also treating root-level scratch notes as release-facing docs
-- Release-gates compatibility-matrix validation now supports both the legacy three-state-column table format and the current canonical single `Classification` column format
-- `README.md`, `docs/README.md`, `docs/architecture/README.md`, and `docs/testing/README.md` now point contributors at the harness workflow and commands
+- CI path filters now include `AGENTS.md` so harness contract changes trigger
+  validation
+- `tools/docs/check_docs.py` now scans canonical markdown truth surfaces rather
+  than also treating root-level scratch notes as release-facing docs
+- Release-gates compatibility-matrix validation now supports both the legacy
+  three-state-column format and the current canonical single
+  `Classification` column format
+- `README.md`, `docs/README.md`, `docs/architecture/README.md`, and
+  `docs/testing/README.md` now point contributors at harness workflow and
+  commands
 
 ### Fixed
-- Restored green `make harness-check-full` validation by aligning release-gate compatibility-matrix parsing with the current 0.5.0 canonical document structure
-- Prevented local scratch markdown files from causing false failures in canonical docs validation
-- Bumped Rust MSRV from 1.87 to 1.91 to support `str::floor_char_boundary` used in UTF-8 safe link text truncation
+- Restored green `make harness-check-full` validation by aligning
+  release-gate compatibility-matrix parsing with the 0.5.0 canonical document
+  structure
+- Prevented local scratch markdown files from causing false failures in
+  canonical docs validation
+- Hardened streaming correctness and safety paths across backpressure,
+  UTF-8 boundary handling, memory-budget enforcement, and fail-open/fallback
+  lifecycle behavior
+- Bumped Rust MSRV from 1.87 to 1.91 to support
+  `str::floor_char_boundary` used in UTF-8 safe link text truncation
 - Updated minimum Rust toolchain version in installation docs to 1.91.0+
 
 ## [0.4.1] - 2026-04-12

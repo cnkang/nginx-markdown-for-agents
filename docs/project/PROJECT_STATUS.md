@@ -11,7 +11,16 @@ steering files.
 
 ## Current Assessment
 
-As of the **current development line (Unreleased / upcoming 0.5.0)**, the project includes Prometheus-compatible metrics, unified decision reason codes, rollout and rollback operational guides, a benchmark corpus with evidence-based regression detection, restructured installation and first-run documentation, parser path optimizations, and a repo-owned harness for agent workflow governance. Core features are implemented and tested. The codebase includes unit, integration, E2E, fuzz-oriented validation entrypoints, and harness-specific validation entrypoints, along with documentation covering installation, configuration, operations, architecture, and contributor-facing harness maintenance.
+As of the **current release line (0.5.0)**, the project includes a dual-engine
+conversion model (full-buffer default plus opt-in streaming), streaming
+failure semantics aligned to commit boundaries, parity and diff validation for
+streaming behavior, rollout observability with shadow-mode checks, benchmark
+evidence for release gates, and a repo-owned harness for agent workflow
+governance. Core features are implemented and tested. The codebase includes
+unit, integration, E2E, fuzz-oriented validation entrypoints, and
+harness-specific validation entrypoints, along with documentation covering
+installation, configuration, operations, architecture, and contributor-facing
+harness maintenance.
 
 ### Repository Harness Updates
 
@@ -20,19 +29,26 @@ As of the **current development line (Unreleased / upcoming 0.5.0)**, the projec
 - `tools/harness/check_harness_sync.py` and Make targets
   `make harness-check` / `make harness-check-full` provide executable
   validation instead of prose-only workflow rules.
-- Optional local `.kiro/` adapters remain supported, but public repository
-  validation no longer depends on private spec assets being present.
+- Optional local adapter inputs remain supported, but public repository
+  validation no longer depends on private local assets being present.
 - The harness now records short-lived execution memory in a user-local state
   carrier instead of tracked repository docs.
 
-### Release 0.4.1 Patch Updates
+### Release 0.5.0 Updates
 
-- Dependency security maintenance:
-  - `rand` updated from `0.9.2` to `0.9.3` in `components/rust-converter/Cargo.lock` to resolve RustSec advisory `RUSTSEC-2026-0097` (via `proptest` dependency path).
-  - GitHub Actions `Rust Security Audit` (`cargo audit --deny warnings`) restored to passing status.
-- Release metadata alignment:
-  - Rust converter crate version bumped to `0.4.1`.
-  - Top-level release-facing documentation updated to reflect `0.4.1` as the current release.
+- Streaming architecture and runtime:
+  - True streaming path integrated into the dual-engine model (opt-in), with
+    request-scoped engine selection.
+  - Streaming lifecycle and failure semantics hardened across fallback,
+    backpressure, and post-commit handling.
+- Streaming quality gates:
+  - Expanded parity, diff, and chunk-boundary validation for streaming outputs.
+  - Streaming-focused evidence and release-gate tooling aligned with 0.5.0
+    scope.
+- Harness and governance:
+  - Repo-owned harness docs and checks promoted as canonical truth surfaces.
+  - `make harness-check` and `make harness-check-full` are wired as executable
+    validation entrypoints.
 
 ### Release 0.4.0 Updates
 
@@ -246,38 +262,37 @@ See [DEPLOYMENT_EXAMPLES.md](../guides/DEPLOYMENT_EXAMPLES.md) for configuration
 
 ## Current Focus and Roadmap
 
-### Current Release (0.4.1)
+### Current Release (0.5.0)
+- Dual-engine conversion architecture: full-buffer default plus opt-in
+  streaming path
+- Streaming failure semantics and fallback controls aligned to commit
+  boundaries
+- Streaming parity and differential validation across chunk boundaries and
+  failure paths
+- Streaming rollout observability, including shadow-mode verification support
+- Benchmark corpus and evidence-based release-gate validation for 0.5.0
+- Repo-owned harness governance (`AGENTS.md`, `docs/harness/`, `tools/harness/`)
 - Prometheus-compatible metrics endpoint for operational monitoring
-- Unified decision reason codes for conversion transparency
-- Rollout cookbook with selective enablement and canary patterns
-- Rollback guide with trigger conditions and executable procedures
-- Benchmark corpus with reproducible evidence and regression detection
-- Parser path optimizations: noise region pruning, simple structure fast path
-- Restructured installation guide with shortest success path
-- Incremental processing for large responses
-- Matrix-driven release automation pipeline
-- Performance baseline gating system
-- Variable-driven configuration support
-- Enhanced installation tooling
-- Shared metrics aggregation and runtime-regression coverage
-- Hardened CI/CD pipeline
+- Rollout and rollback guides with executable operator procedures
+- Performance baseline gating system and hardened CI/CD validation
 
 ### Near-Term
-- Performance regression tracking with CI artifact capture
-- Deployment validation across diverse environments
-- Community feedback integration
+- Expand streaming rollout samples across mixed traffic profiles
+- Increase automated evidence collection for release-gate checks
+- Continue operator-facing diagnostics hardening for drift/degradation cases
 
 ### Future Exploration
-- Streaming-oriented conversion approaches for large documents
+- OpenTelemetry tracing integration
 - Additional Markdown flavors and output formats
-- Expanded observability integrations beyond the built-in shared metrics endpoint
-- Performance improvements for high-throughput scenarios
+- Expanded observability integrations beyond built-in shared metrics
+- Packaging and distribution expansion (apt/yum/brew and ingress-oriented bundles)
 
 ## Known Limitations
 
 The following limitations are documented:
 
-1. **Full Buffering Required**: The module buffers the entire response before conversion (no streaming)
+1. **Streaming Is Opt-In**: Full-buffer remains the default path; streaming is
+   enabled deliberately per rollout strategy
 2. **HTML Input**: Requires HTML input (uncompressed or automatically decompressed)
 3. **Conversion Fidelity**: Some complex HTML structures may not convert perfectly to Markdown
 4. **Performance Overhead**: Large documents incur conversion overhead (mitigated by caching)
@@ -358,7 +373,7 @@ View the latest CI status: [GitHub Actions](https://github.com/cnkang/nginx-mark
 - macOS (Apple Silicon and Intel)
 - Linux (x86_64 and aarch64)
 - NGINX 1.24.0 and later
-- Rust 1.85.0 and later
+- Rust 1.91.0 and later
 
 ### Docker Support
 - Official NGINX base images
@@ -369,7 +384,14 @@ See `examples/docker/` for Docker build examples.
 
 ## Summary
 
-**NGINX Markdown for Agents** is at version 0.4.1. The project provides HTML-to-Markdown conversion through NGINX content negotiation, with Prometheus-compatible metrics, unified decision reason codes, rollout and rollback operational guides, a benchmark corpus with evidence-based regression detection, parser path optimizations, incremental processing for large responses, release automation, performance baseline gating, runtime validation reuse, fuzzing workflows, and shared metrics aggregation for observability.
+**NGINX Markdown for Agents** is at version 0.5.0. The project provides
+HTML-to-Markdown conversion through NGINX content negotiation with a
+dual-engine model, adding bounded-memory streaming as an opt-in path while
+keeping full-buffer conversion as the default baseline. It includes
+Prometheus-compatible metrics, decision reason codes, rollout and rollback
+guides, parity and evidence workflows for streaming rollout safety, release
+automation, performance baseline gating, runtime validation reuse, fuzzing
+workflows, and shared metrics aggregation for observability.
 
 ### Key Components
 - Core feature implementation

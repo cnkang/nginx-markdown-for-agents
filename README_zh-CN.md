@@ -176,7 +176,7 @@ curl -sD - -o /dev/null -H "Accept: text/html" http://localhost/docs/
 下面这些情况就不一定是最佳选择：
 
 - 你已经有专门的 Markdown 或 JSON 内容 API
-- 你今天就必须支持超大页面的真正流式 Markdown 转换
+- 你无法接受渐进式启用，要求 streaming 从第一天开始全量强制开启
 - 你希望转换逻辑完全脱离请求路径
 
 ## 与边缘层转换的对比
@@ -304,9 +304,7 @@ make harness-check-full
 
 对于本地 spec 导向的工作，harness 也可以根据提示词或可选的本地指针文件解析最可能的 spec：
 
-```bash
-python3 tools/harness/resolve_spec.py --hint "continue streaming parity diff work"
-```
+把 harness 检查当作仓库 contract 和 release-gate 变更的主入口：
 
 ## 文档导航
 
@@ -376,46 +374,35 @@ Makefile               顶层构建与测试入口
 
 如果你改的是仓库 contract、验证工具或 agent-facing 文档，请把 harness 工作流纳入默认路径：
 
-1. 当任务存在歧义时，先解析当前 spec：  
-   `python3 tools/harness/resolve_spec.py --hint "..."`
-2. 优先更新 repo-owned truth：  
+1. 优先更新 repo-owned truth：  
    `AGENTS.md`、`docs/harness/`、`tools/harness/`、`Makefile`、CI wiring
-3. 运行 `make harness-check`
-4. 在结束更广义的文档或 release-gate 改动前，运行 `make harness-check-full`
-
-可选的本地 `.kiro/` 文件可以增强 spec 解析和适配层检查，但公开 clone 的仓库在没有这些文件时也必须通过。
+2. 运行 `make harness-check`
+3. 在结束更广义的文档或 release-gate 改动前，运行 `make harness-check-full`
 
 ## 路线方向
 
-当前版本 (0.4.1)：
+当前版本 (0.5.0)：
 
-- 兼容 Prometheus 的指标端点，用于运维监控
-- 统一的决策原因码，提升转换透明度
-- 灰度发布手册，支持选择性启用和金丝雀模式
-- 回滚指南，包含触发条件和可执行流程
-- 基准语料库，支持可复现的证据和回归检测
-- 解析路径优化：噪声区域剪枝、简单结构快速路径
-- 重构安装指南，提供最短成功路径
-- 大响应增量处理
-- 矩阵驱动的发布自动化流水线
-- 性能基线门禁系统
-- 变量驱动的配置支持
-- 增强的安装工具
-- 共享指标聚合与运行时回归覆盖
-- 强化的 CI/CD 流水线
-- Rust 依赖安全审计修复：`RUSTSEC-2026-0097`（`rand` 从 `0.9.2` 升级到 `0.9.3`）
+- 双引擎架构：默认 full-buffer，按需启用 true streaming
+- Streaming 失败语义与 commit boundary 对齐，支持可控 fallback 策略
+- 覆盖 chunk 边界与失败路径的 streaming parity/diff 测试体系
+- 带 shadow mode 的 streaming rollout 可观测性与 reason-code 可见性
+- 面向发布门禁的 streaming 性能证据与 evidence 工作流
+- repo-owned harness 工作流（`docs/harness/`、`tools/harness/`、`make harness-check*`）
+- Prometheus 指标、rollout/rollback 手册与基准回归检测持续可用
+- 安装与发布文档已与 Rust 1.91.0+ 和当前 CI 基线对齐
 
 近期重点：
 
-- 通过 CI 制品持续记录性能基线
-- 多样化环境下的部署验证
-- 社区反馈整合
+- 扩展 streaming 在混合流量场景下的 rollout 示例
+- 强化 release gate 的跨环境证据自动化
+- 持续增强 conversion drift/degradation 的运维诊断能力
 
 未来探索：
 
-- 大文档的流式转换方案
+- OpenTelemetry tracing 集成
 - 更多 Markdown 风格与输出格式
-- 基于内置共享指标的更丰富可观测性集成
+- 扩展分发形态（apt/yum/brew 及 ingress 侧交付）
 
 ## 许可证
 

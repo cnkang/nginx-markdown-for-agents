@@ -26,14 +26,15 @@ semantics. Those stay in canonical docs and in `AGENTS.md`.
 
 Use the repo helper when you want a concrete resolution pass:
 
+Prefer explicit scoped checks tied to the files you changed, then run
+`make harness-check` / `make harness-check-full` for repo-level validation.
+
 ```bash
-python3 tools/harness/resolve_spec.py --hint "continue streaming parity work"
+python3 tools/harness/resolve_spec.py --hint "continue rollout observability work"
 ```
 
-Optional local pointer files:
-
-- `.kiro/active-spec.json` with `{"spec": "<dir-name-or-specId>"}`
-- `.kiro/active-spec.txt` with one dir name or specId
+Optional local pointer files may refine local workflows, but they are advisory
+and never required for public repository validation.
 
 ## Preflight Risk Card
 

@@ -44,9 +44,9 @@ flowchart TD
 flowchart LR
     A["AGENTS.md<br/>map + contract"] --> B["docs/harness/<br/>core + manifest + packs"]
     B --> C["Make / CI / checkers"]
-    B --> D["Optional .kiro/steering adapters"]
+    B --> D["Optional local adapters"]
     B --> E["Rule-maintenance skills"]
-    F[".kiro/specs (read-only input)"] --> B
+    F["Optional local spec hints (read-only)"] --> B
     G["User-local state carrier"] --> E
     E --> B
 ```
@@ -55,8 +55,10 @@ flowchart LR
 
 - `AGENTS.md` remains the Codex-first contract.
 - `docs/harness/` owns reusable harness truth, not domain semantics already documented elsewhere.
-- `.kiro/specs/` is read-only input, not a place for harness caches or annotations.
-- `.kiro/steering/` is an adapter layer. It can summarize and link, but it does not get its own rules.
+- Optional local spec inputs are read-only and must not be used as a cache or
+  annotation store for repository truth.
+- Optional local adapter layers can summarize and link, but they do not define
+  independent rules.
 - Outside voice is advisory. A different model family can challenge the current path, but it does not overrule the user.
 
 ## Canonical References

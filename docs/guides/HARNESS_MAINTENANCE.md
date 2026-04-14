@@ -8,7 +8,7 @@ Use it when you need to:
 - update agent-facing repository rules
 - add or refine a risk pack
 - wire new validation paths into the harness
-- reconcile public repo truth with optional local `.kiro/` helpers
+- reconcile public repo truth with optional local adapter helpers
 
 ## What the Harness Owns
 
@@ -23,7 +23,7 @@ The harness owns repository-level execution guidance for spec-driven work:
 It does **not** own:
 
 - runtime NGINX semantics already documented elsewhere
-- private spec details that live only in `.kiro/specs/`
+- private local spec details outside tracked repository contracts
 - ephemeral task logs that belong in local state, not tracked docs
 
 ## Public Source of Truth
@@ -59,7 +59,7 @@ make harness-check
 make harness-check-full
 ```
 
-6. If optional local `.kiro/` adapters exist, keep them aligned after the
+6. If optional local adapters exist, keep them aligned after the
    tracked change is correct.
 
 The cheap path is intentional. Do not automatically widen every maintenance
@@ -117,19 +117,14 @@ artifact by default.
 The project deliberately allows richer local workflows without making them a
 public requirement.
 
-Supported optional inputs include:
-
-- `.kiro/specs/`
-- `.kiro/active-spec.json`
-- `.kiro/active-spec.txt`
-- `.kiro/steering/*.md`
+Supported optional inputs include local spec pointers and adapter summaries.
 
 Rules for optional inputs:
 
 - absence is reported as `SKIP_NOT_PRESENT`, not failure
 - presence may enable stricter local checks
 - repo-owned truth still wins if there is disagreement
-- `.kiro/specs/` is read-only input, not a cache or annotation store
+- local spec inputs are read-only, not a cache or annotation store
 - malformed local pointer files, malformed local spec metadata, and damaged
   user-local state files should degrade explicitly rather than crash the tool
   with a raw traceback

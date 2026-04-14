@@ -15,8 +15,8 @@ historical engineering rules in `AGENTS.md`, but the practical workflow for AI
 assistance was still fragmented across:
 
 - public tracked docs
-- local `.kiro/steering/` files
-- local `.kiro/specs/`
+- local adapter files
+- local spec pointer inputs
 - review habits
 - ad hoc execution memory inside individual sessions
 
@@ -51,7 +51,7 @@ the final definition of success.
 ### 4. Local-only tooling becoming the real contract
 
 The project still supports richer local workflows, especially through optional
-`.kiro/` inputs, but those local files must remain adapters. Public repository
+local adapter inputs, but those local files must remain adapters. Public repository
 truth lives in tracked docs, checkers, and Make/CI entrypoints.
 
 ### 5. Repeating the same classes of fixes
