@@ -17,7 +17,7 @@ try:
         WARN_NEEDS_AUTHOR_REVIEW,
     )
 except ModuleNotFoundError:
-    from constants import (  # type: ignore[no-redef]
+    from constants import (  # type: ignore[no-redef]  # noqa: F401
         FAIL,
         PASS,
         SKIP_NOT_PRESENT,
@@ -146,9 +146,7 @@ def _read_text_pointer(path: Path) -> tuple[str | None, str | None]:
         value = path.read_text(encoding="utf-8").strip()
     except (OSError, UnicodeDecodeError):
         return None, None
-    if not value:
-        return None, None
-    return value, _display_for(path)
+    return (value, _display_for(path)) if value else (None, None)
 
 
 def _read_pointer(

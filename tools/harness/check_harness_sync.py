@@ -7,7 +7,6 @@ import argparse
 import json
 import re
 import sys
-from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -19,7 +18,7 @@ try:
         WARN_NEEDS_AUTHOR_REVIEW,
     )
 except ModuleNotFoundError:
-    from constants import (  # type: ignore[no-redef]
+    from constants import (  # type: ignore[no-redef]  # noqa: F401
         FAIL,
         PASS,
         SKIP_NOT_PRESENT,
@@ -117,13 +116,14 @@ def _check_manifest_structure(manifest: dict) -> CheckResult:
             + ", ".join(missing_truth_surface_keys),
         )
 
-    expected_statuses = [
+    expected_statuses = {
         PASS,
         FAIL,
         SKIP_NOT_PRESENT,
         WARN_NEEDS_AUTHOR_REVIEW,
-    ]
-    if Counter(manifest["status_semantics"]) != Counter(expected_statuses):
+    }
+    actual_statuses = manifest["status_semantics"]
+    if not isinstance(actual_statuses, list) or set(actual_statuses) != expected_statuses:
         return _result(
             "manifest-status-semantics",
             FAIL,
