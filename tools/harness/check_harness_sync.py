@@ -123,7 +123,11 @@ def _check_manifest_structure(manifest: dict) -> CheckResult:
         WARN_NEEDS_AUTHOR_REVIEW,
     }
     actual_statuses = manifest["status_semantics"]
-    if not isinstance(actual_statuses, list) or set(actual_statuses) != expected_statuses:
+    if (
+        not isinstance(actual_statuses, list)
+        or len(actual_statuses) != len(expected_statuses)
+        or set(actual_statuses) != expected_statuses
+    ):
         return _result(
             "manifest-status-semantics",
             FAIL,
