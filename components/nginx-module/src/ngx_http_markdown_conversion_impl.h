@@ -26,7 +26,29 @@ static void ngx_http_markdown_metric_inc_failopen(
     const ngx_http_markdown_conf_t *conf);
 static ngx_int_t ngx_http_markdown_reject_or_fail_open_buffered_response(
     ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx,
-    ngx_http_markdown_conf_t *conf, const char *debug_message);
+    const ngx_http_markdown_conf_t *conf, const char *debug_message);
+
+/*
+ * Local case-insensitive compare for const-qualified byte slices.
+ * Mirrors ngx_strncasecmp semantics without dropping qualifiers.
+ */
+static ngx_int_t
+ngx_http_markdown_const_strncasecmp(const u_char *s1, const u_char *s2,
+                                    size_t n)
+{
+    for (size_t i = 0; i < n; i++) {
+        u_char c1;
+        u_char c2;
+
+        c1 = ngx_tolower(s1[i]);
+        c2 = ngx_tolower(s2[i]);
+        if (c1 != c2) {
+            return (ngx_int_t) c1 - (ngx_int_t) c2;
+        }
+    }
+
+    return 0;
+}
 
 /*
  * Construct base URL for resolving relative URLs
@@ -74,7 +96,9 @@ ngx_http_markdown_find_request_header_value(ngx_http_request_t *r,
         headers = part->elts;
         for (ngx_uint_t i = 0; i < part->nelts; i++) {
             if (headers[i].key.len == name_len
-                && ngx_strncasecmp(headers[i].key.data, name, name_len) == 0)
+                && ngx_http_markdown_const_strncasecmp(headers[i].key.data,
+                                                       name,
+                                                       name_len) == 0)
             {
                 return &headers[i].value;
             }

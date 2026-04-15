@@ -22,7 +22,7 @@ void ngx_conf_log_error(ngx_uint_t level, ngx_conf_t *cf,
 
 /* Helper declared early because merge logic uses it before its definition. */
 static void ngx_http_markdown_log_merged_conf(ngx_conf_t *cf,
-    ngx_http_markdown_conf_t *conf);
+    const ngx_http_markdown_conf_t *conf);
 
 /*
  * Shared-memory initializer for cross-worker metrics storage.

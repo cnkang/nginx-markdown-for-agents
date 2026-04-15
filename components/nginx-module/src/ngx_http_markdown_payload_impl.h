@@ -43,7 +43,7 @@ ngx_int_t ngx_http_markdown_decompress(ngx_http_request_t *r,
     ngx_http_markdown_compression_type_e type, ngx_chain_t *in,
     ngx_chain_t **out);
 static void ngx_http_markdown_log_decision_with_category(
-    ngx_http_request_t *r, ngx_http_markdown_conf_t *conf,
+    ngx_http_request_t *r, const ngx_http_markdown_conf_t *conf,
     const ngx_str_t *reason_code, const ngx_str_t *error_category);
 static void ngx_http_markdown_metric_inc_failopen(
     const ngx_http_markdown_conf_t *conf);

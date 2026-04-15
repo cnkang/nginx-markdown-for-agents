@@ -32,13 +32,13 @@ void ngx_log_error(ngx_uint_t level, ngx_log_t *log, ngx_err_t err,
 
 /* Forward declarations — defined below */
 static void ngx_http_markdown_log_decision(ngx_http_request_t *r,
-    ngx_http_markdown_conf_t *conf, const ngx_str_t *reason_code);
+    const ngx_http_markdown_conf_t *conf, const ngx_str_t *reason_code);
 static void ngx_http_markdown_log_decision_with_category(
-    ngx_http_request_t *r, ngx_http_markdown_conf_t *conf,
+    ngx_http_request_t *r, const ngx_http_markdown_conf_t *conf,
     const ngx_str_t *reason_code,
     const ngx_str_t *error_category);
 static void ngx_http_markdown_log_decision_debug(
-    ngx_http_request_t *r, ngx_http_markdown_conf_t *conf,
+    ngx_http_request_t *r, const ngx_http_markdown_conf_t *conf,
     const ngx_str_t *reason_code, const ngx_str_t *error_category,
     ngx_uint_t log_level, ngx_str_t *method_name,
     ngx_str_t *content_type);
@@ -167,7 +167,7 @@ ngx_http_markdown_is_failure_outcome(const ngx_str_t *reason_code)
  */
 static void
 ngx_http_markdown_log_decision_debug(ngx_http_request_t *r,
-    ngx_http_markdown_conf_t *conf, const ngx_str_t *reason_code,
+    const ngx_http_markdown_conf_t *conf, const ngx_str_t *reason_code,
     const ngx_str_t *error_category, ngx_uint_t log_level,
     ngx_str_t *method_name, ngx_str_t *content_type)
 {
@@ -295,7 +295,7 @@ ngx_http_markdown_log_decision_debug(ngx_http_request_t *r,
  */
 static void
 ngx_http_markdown_log_decision_with_category(ngx_http_request_t *r,
-    ngx_http_markdown_conf_t *conf, const ngx_str_t *reason_code,
+    const ngx_http_markdown_conf_t *conf, const ngx_str_t *reason_code,
     const ngx_str_t *error_category)
 {
     ngx_uint_t       log_level;
@@ -370,7 +370,7 @@ ngx_http_markdown_log_decision_with_category(ngx_http_request_t *r,
  */
 static void
 ngx_http_markdown_log_decision(ngx_http_request_t *r,
-    ngx_http_markdown_conf_t *conf, const ngx_str_t *reason_code)
+    const ngx_http_markdown_conf_t *conf, const ngx_str_t *reason_code)
 {
     ngx_http_markdown_log_decision_with_category(
         r, conf, reason_code, NULL);

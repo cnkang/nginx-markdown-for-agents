@@ -55,6 +55,8 @@ static ngx_http_markdown_specificity_t ngx_http_markdown_get_specificity(
 static int ngx_http_markdown_compare_entries(const void *a, const void *b);
 static ngx_int_t ngx_http_markdown_matches_markdown(
     ngx_http_markdown_accept_entry_t *entry, ngx_flag_t on_wildcard);
+static ngx_int_t ngx_http_markdown_const_strncasecmp(const u_char *left,
+    const u_char *right, size_t len);
 static ngx_table_elt_t *ngx_http_markdown_get_accept_header(ngx_http_request_t *r);
 static ngx_table_elt_t *ngx_http_markdown_find_request_header(ngx_http_request_t *r,
     const u_char *name, size_t name_len);
@@ -583,6 +585,24 @@ ngx_http_markdown_get_accept_header(ngx_http_request_t *r)
         sizeof(ngx_http_markdown_hdr_accept) - 1);
 }
 
+static ngx_int_t
+ngx_http_markdown_const_strncasecmp(const u_char *left, const u_char *right,
+    size_t len)
+{
+    for (size_t i = 0; i < len; i++) {
+        u_char left_c;
+        u_char right_c;
+
+        left_c = ngx_tolower(left[i]);
+        right_c = ngx_tolower(right[i]);
+        if (left_c != right_c) {
+            return (ngx_int_t) left_c - (ngx_int_t) right_c;
+        }
+    }
+
+    return 0;
+}
+
 /*
  * Find a request header in nginx's linked-list header storage.
  *
@@ -607,7 +627,9 @@ ngx_http_markdown_find_request_header(ngx_http_request_t *r,
     for ( ;; ) {
         for (ngx_uint_t i = 0; i < part->nelts; i++) {
             if (headers[i].key.len == name_len
-                && ngx_strncasecmp(headers[i].key.data, name, name_len) == 0)
+                && ngx_http_markdown_const_strncasecmp(headers[i].key.data,
+                                                       name,
+                                                       name_len) == 0)
             {
                 return &headers[i];
             }
