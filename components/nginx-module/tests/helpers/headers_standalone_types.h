@@ -102,6 +102,7 @@ typedef struct MarkdownResult {
     uint32_t error_code;
     uint8_t *error_message;
     uintptr_t error_len;
+    uintptr_t peak_memory_estimate;
 } MarkdownResult;
 
 extern void *ngx_pnalloc(const ngx_pool_t *pool, size_t size);
