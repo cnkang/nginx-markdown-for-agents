@@ -13,6 +13,7 @@ make test
 make test-rust
 make test-nginx-unit
 make test-nginx-integration
+make harness-check
 ```
 
 Use the documents in this directory when you need to understand what is covered, what requires a real `nginx` runtime, and where performance expectations are documented.
@@ -26,6 +27,9 @@ Use the documents in this directory when you need to understand what is covered,
 | [INTEGRATION_TESTS.md](INTEGRATION_TESTS.md) | Integration scenarios and expected behavior |
 | [E2E_TESTS.md](E2E_TESTS.md) | End-to-end workflows with real NGINX and backend services |
 | [PERFORMANCE_BASELINES.md](PERFORMANCE_BASELINES.md) | Performance expectations and comparison guidance |
+
+For repo-owned harness validation and adaptive local `.kiro` checks, use
+[../harness/README.md](../harness/README.md) plus `make harness-check`.
 
 ## Common Commands
 

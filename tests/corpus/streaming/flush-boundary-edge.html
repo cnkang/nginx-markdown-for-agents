@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Flush Boundary Edge Fixture</title>
+</head>
+<body>
+    <!--
+        Streaming parity test fixture: flush-point boundary alignment.
+
+        Repeats similarly sized paragraph blocks so that chunk splits
+        are likely to land exactly at or near flush-point boundaries
+        (end of </p> tags). Tests that the emitter handles flush-point
+        alignment correctly when chunk boundaries coincide with block
+        element boundaries.
+    -->
+    <h1>Flush Boundary</h1>
+    <p>This fixture intentionally repeats similarly sized blocks.</p>
+    <p>Block 01: alpha beta gamma delta epsilon zeta eta theta iota kappa.</p>
+    <p>Block 02: alpha beta gamma delta epsilon zeta eta theta iota kappa.</p>
+    <p>Block 03: alpha beta gamma delta epsilon zeta eta theta iota kappa.</p>
+    <p>Block 04: alpha beta gamma delta epsilon zeta eta theta iota kappa.</p>
+    <p>Block 05: alpha beta gamma delta epsilon zeta eta theta iota kappa.</p>
+    <p>Block 06: alpha beta gamma delta epsilon zeta eta theta iota kappa.</p>
+    <p>Block 07: alpha beta gamma delta epsilon zeta eta theta iota kappa.</p>
+    <p>Block 08: alpha beta gamma delta epsilon zeta eta theta iota kappa.</p>
+</body>
+</html>

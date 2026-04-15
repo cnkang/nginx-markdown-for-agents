@@ -37,6 +37,10 @@ typedef struct {
     ngx_uint_t                         order;       /* Original order in header */
 } ngx_http_markdown_accept_entry_t;
 
+/* Static string constants for media type comparisons */
+static u_char  ngx_http_markdown_str_text[] = "text";
+static u_char  ngx_http_markdown_str_markdown[] = "markdown";
+
 /* Forward declarations */
 static ngx_int_t ngx_http_markdown_parse_accept_entry(ngx_str_t *entry_str,
     ngx_http_markdown_accept_entry_t *entry, ngx_uint_t order);
@@ -433,15 +437,15 @@ ngx_http_markdown_matches_markdown(ngx_http_markdown_accept_entry_t *entry,
     ngx_flag_t on_wildcard)
 {
     /* Check for explicit text/markdown */
-    if (entry->type.len == 4 && ngx_strncasecmp(entry->type.data, (u_char *)"text", 4) == 0 &&
-        entry->subtype.len == 8 && ngx_strncasecmp(entry->subtype.data, (u_char *)"markdown", 8) == 0) {
+    if (entry->type.len == 4 && ngx_strncasecmp(entry->type.data, ngx_http_markdown_str_text, 4) == 0 &&
+        entry->subtype.len == 8 && ngx_strncasecmp(entry->subtype.data, ngx_http_markdown_str_markdown, 8) == 0) {
         return 1;
     }
     
     /* Check wildcards if configured */
     if (on_wildcard) {
         /* Check for text slash star */
-        if (entry->type.len == 4 && ngx_strncasecmp(entry->type.data, (u_char *)"text", 4) == 0 &&
+        if (entry->type.len == 4 && ngx_strncasecmp(entry->type.data, ngx_http_markdown_str_text, 4) == 0 &&
             entry->subtype.len == 1 && entry->subtype.data[0] == '*') {
             return 1;
         }
@@ -530,9 +534,9 @@ ngx_http_markdown_should_convert(ngx_http_request_t *r,
     for (i = 0; i < entries->nelts; i++) {
         if (entry[i].q_value == 0.0f &&
             entry[i].type.len == 4 &&
-            ngx_strncasecmp(entry[i].type.data, (u_char *)"text", 4) == 0 &&
+            ngx_strncasecmp(entry[i].type.data, ngx_http_markdown_str_text, 4) == 0 &&
             entry[i].subtype.len == 8 &&
-            ngx_strncasecmp(entry[i].subtype.data, (u_char *)"markdown", 8) == 0)
+            ngx_strncasecmp(entry[i].subtype.data, ngx_http_markdown_str_markdown, 8) == 0)
         {
             ngx_log_error(NGX_LOG_DEBUG, r->connection->log, 0,
                          "markdown: text/markdown explicitly rejected (q=0)");

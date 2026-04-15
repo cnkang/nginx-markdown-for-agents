@@ -7,6 +7,70 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+No changes yet.
+
+## [0.5.0] - 2026-04-14
+
+This release delivers the 0.5.0 streaming line. It moves the project from
+full-buffer-only operation to a dual-engine model with bounded-memory
+streaming, plus the harness and release-gate surfaces needed to operate it.
+
+### Added
+- Streaming-focused 0.5.0 scope covering release gates, runtime integration,
+  failure semantics, parity testing, rollout observability, and performance
+  evidence
+- True streaming engine path (opt-in) with chunk-driven conversion and
+  dual-engine request routing (`full-buffer` default plus `streaming`)
+- Streaming rollout controls and observability primitives, including
+  shadow-mode verification flows, streaming reason-code coverage, and
+  streaming-oriented metrics/reporting surfaces
+- Repo-owned harness documentation under `docs/harness/`, including a central
+  overview, core execution loop, canonical routing manifest, and risk-pack
+  overlays for runtime streaming, FFI boundary work, observability, and
+  docs/tooling drift
+- Durable open-source documentation for harness design and maintenance:
+  - `docs/architecture/HARNESS_ARCHITECTURE.md`
+  - `docs/architecture/ADR/0005-repo-owned-harness.md`
+  - `docs/guides/HARNESS_MAINTENANCE.md`
+- Executable harness tooling:
+  - `tools/harness/check_harness_sync.py`
+  - `tools/harness/state_store.py`
+- Harness regression coverage for sync checks, spec resolution, and local
+  state-carrier behavior
+- Local maintenance skills for harness upkeep:
+  - `sync-harness-rules`
+  - `evolve-harness-rules`
+
+### Changed
+- `AGENTS.md` now points explicitly at repo-owned harness entrypoints instead
+  of relying on local-only steering docs
+- Local adapter summaries were reduced to thin references that point back to
+  `docs/harness/`
+- `Makefile` now exposes `make harness-check` and `make harness-check-full`
+- CI path filters now include `AGENTS.md` so harness contract changes trigger
+  validation
+- `tools/docs/check_docs.py` now scans canonical markdown truth surfaces rather
+  than also treating root-level scratch notes as release-facing docs
+- Release-gates compatibility-matrix validation now supports both the legacy
+  three-state-column format and the current canonical single
+  `Classification` column format
+- `README.md`, `docs/README.md`, `docs/architecture/README.md`, and
+  `docs/testing/README.md` now point contributors at harness workflow and
+  commands
+
+### Fixed
+- Restored green `make harness-check-full` validation by aligning
+  release-gate compatibility-matrix parsing with the 0.5.0 canonical document
+  structure
+- Prevented local scratch markdown files from causing false failures in
+  canonical docs validation
+- Hardened streaming correctness and safety paths across backpressure,
+  UTF-8 boundary handling, memory-budget enforcement, and fail-open/fallback
+  lifecycle behavior
+- Bumped Rust MSRV from 1.87 to 1.91 to support
+  `str::floor_char_boundary` used in UTF-8 safe link text truncation
+- Updated minimum Rust toolchain version in installation docs to 1.91.0+
+
 ## [0.4.1] - 2026-04-12
 
 This patch release focuses on dependency security hygiene and release metadata alignment.
@@ -319,6 +383,20 @@ This project uses Semantic Versioning:
 - PATCH version for backwards-compatible bug fixes
 
 ### Upgrade Notes
+
+#### Upgrading to 0.5.0
+
+- **Rust MSRV raised from 1.87 to 1.91.** The streaming engine uses
+  `str::floor_char_boundary` (stabilized in 1.80) and other APIs that require
+  Rust 1.91+. Update your toolchain before building.
+- All new streaming directives (`markdown_streaming_engine`,
+  `markdown_streaming_on_error`, `markdown_streaming_shadow`,
+  `markdown_streaming_budget`) default to **off / safe values**. With no
+  configuration changes, runtime behavior is identical to 0.4.x.
+- New `make harness-check` and `make harness-check-full` targets are available
+  for validating repo contracts and release-gate documents. They are optional
+  for runtime-only contributors.
+- The `nginx-markdown-converter` crate version is now `0.5.0`.
 
 #### Upgrading to 0.4.1
 

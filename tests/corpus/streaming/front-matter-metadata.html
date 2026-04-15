@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Front Matter Metadata Fixture</title>
+    <meta name="description" content="Fixture for front matter metadata extraction.">
+    <meta name="author" content="Fixture Author">
+    <meta property="og:title" content="Front Matter OG Title">
+    <meta property="og:description" content="OpenGraph description text.">
+    <meta property="og:image" content="https://example.com/cover.png">
+    <meta property="article:published_time" content="2026-01-02T03:04:05Z">
+</head>
+<body>
+    <!--
+        Streaming parity test fixture: HTML head metadata extraction.
+
+        Exercises title, description, author, OpenGraph, and article
+        metadata in <head>. The converter's front-matter feature extracts
+        these into YAML front matter; streaming must produce identical
+        metadata output to the full-buffer path.
+    -->
+    <h1>Metadata Document</h1>
+    <p>The body content is secondary; head metadata is primary.</p>
+</body>
+</html>

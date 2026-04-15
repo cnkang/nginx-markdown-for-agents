@@ -3,7 +3,7 @@
 use std::fmt;
 
 /// Errors that can occur during HTML to Markdown conversion
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum ConversionError {
     /// HTML parsing failed
     ParseError(String),
@@ -17,18 +17,56 @@ pub enum ConversionError {
     InvalidInput(String),
     /// Internal error
     InternalError(String),
+
+    /// Memory budget exceeded during streaming conversion.
+    #[cfg(feature = "streaming")]
+    BudgetExceeded {
+        /// Pipeline stage that exceeded its budget.
+        stage: String,
+        /// Bytes used when the breach was detected.
+        used: usize,
+        /// Budget limit in bytes.
+        limit: usize,
+    },
+
+    /// Streaming engine requests fallback to full-buffer conversion.
+    /// Only produced during the pre-commit phase.
+    #[cfg(feature = "streaming")]
+    StreamingFallback {
+        /// Reason for the fallback.
+        reason: crate::streaming::types::FallbackReason,
+    },
+
+    /// Error after the streaming engine has already emitted partial output.
+    /// The caller must handle this according to its stream failure policy.
+    #[cfg(feature = "streaming")]
+    PostCommitError {
+        /// Description of the error.
+        reason: String,
+        /// Number of Markdown bytes already emitted before the error.
+        bytes_emitted: usize,
+        /// Error code of the original error before post-commit wrapping.
+        /// Preserves the classification (e.g. timeout=3, budget=6) so
+        /// downstream consumers can categorise the failure correctly.
+        original_code: u32,
+    },
 }
 
 impl ConversionError {
-    /// Map a `ConversionError` variant to its numeric FFI error code.
+    /// Map a `ConversionError` to its numeric FFI error code.
     ///
-    /// The mapping is:
-    /// - `ParseError(_)` -> 1
-    /// - `EncodingError(_)` -> 2
-    /// - `Timeout` -> 3
-    /// - `MemoryLimit(_)` -> 4
-    /// - `InvalidInput(_)` -> 5
-    /// - `InternalError(_)` -> 99
+    /// The returned code identifies the error for FFI boundaries:
+    /// - `ParseError(_)` -> `1`
+    /// - `EncodingError(_)` -> `2`
+    /// - `Timeout` -> `3`
+    /// - `MemoryLimit(_)` -> `4`
+    /// - `InvalidInput(_)` -> `5`
+    /// - `InternalError(_)` -> `99`
+    ///
+    /// When compiled with the `streaming` feature enabled, the following additional mappings apply:
+    /// - `BudgetExceeded { .. }` -> `6`
+    /// - `StreamingFallback { .. }` -> `7`
+    /// - `PostCommitError { .. }` -> `8`
     ///
     /// # Examples
     ///
@@ -45,18 +83,25 @@ impl ConversionError {
             ConversionError::Timeout => 3,
             ConversionError::MemoryLimit(_) => 4,
             ConversionError::InvalidInput(_) => 5,
+            #[cfg(feature = "streaming")]
+            ConversionError::BudgetExceeded { .. } => 6,
+            #[cfg(feature = "streaming")]
+            ConversionError::StreamingFallback { .. } => 7,
+            #[cfg(feature = "streaming")]
+            ConversionError::PostCommitError { .. } => 8,
             ConversionError::InternalError(_) => 99,
         }
     }
 }
 
 impl fmt::Display for ConversionError {
-    /// Formats a human-readable message for the error suitable for logs and FFI boundaries.
+    /// Format a human-readable message describing the conversion error for logs and FFI boundaries.
     ///
     /// # Examples
     ///
     /// ```
     /// use nginx_markdown_converter::error::ConversionError;
+    ///
     /// let err = ConversionError::ParseError("unexpected tag".into());
     /// assert_eq!(format!("{}", err), "Parse error: unexpected tag");
     /// ```
@@ -68,6 +113,30 @@ impl fmt::Display for ConversionError {
             ConversionError::MemoryLimit(msg) => write!(f, "Memory limit exceeded: {}", msg),
             ConversionError::InvalidInput(msg) => write!(f, "Invalid input: {}", msg),
             ConversionError::InternalError(msg) => write!(f, "Internal error: {}", msg),
+            #[cfg(feature = "streaming")]
+            ConversionError::BudgetExceeded { stage, used, limit } => {
+                write!(
+                    f,
+                    "Budget exceeded in {}: used {} bytes, limit {} bytes",
+                    stage, used, limit
+                )
+            }
+            #[cfg(feature = "streaming")]
+            ConversionError::StreamingFallback { reason } => {
+                write!(f, "Streaming fallback: {}", reason)
+            }
+            #[cfg(feature = "streaming")]
+            ConversionError::PostCommitError {
+                reason,
+                bytes_emitted,
+                original_code,
+            } => {
+                write!(
+                    f,
+                    "Post-commit error (original_code={}) after {} bytes emitted: {}",
+                    original_code, bytes_emitted, reason
+                )
+            }
         }
     }
 }

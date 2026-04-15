@@ -98,6 +98,7 @@ pub unsafe extern "C" fn markdown_result_free(result: *mut MarkdownResult) {
     free_buffer(&mut result_ref.error_message, &mut result_ref.error_len);
     result_ref.token_estimate = 0;
     result_ref.error_code = 0;
+    result_ref.peak_memory_estimate = 0;
 }
 
 /// Destroy a converter handle previously returned by `markdown_converter_new()`.

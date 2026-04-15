@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Normalization Fixture</title>
+</head>
+<body>
+    <!--
+        Streaming parity test fixture: output normalization edge cases.
+
+        Covers trailing whitespace in paragraphs, consecutive blank lines
+        between blocks, whitespace preservation inside <pre><code>, and
+        Unicode normalization (composed vs decomposed forms). The streaming
+        emitter must produce identical normalized output to the full-buffer
+        path.
+    -->
+    <h1>Normalization Cases</h1>
+    <p>Paragraph with trailing spaces.   </p>
+
+    <p>Paragraph separated by blank lines.</p>
+
+
+    <pre><code>alpha
+beta
+
+gamma   </code></pre>
+
+    <p>Unicode normalization sample: café and café.</p>
+</body>
+</html>

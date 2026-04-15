@@ -36,6 +36,10 @@ pub mod token_estimator;
 #[cfg(feature = "incremental")]
 pub mod incremental;
 
+// Streaming conversion API (feature-gated, off by default)
+#[cfg(feature = "streaming")]
+pub mod streaming;
+
 // Re-export main types for convenience
 pub use converter::MarkdownConverter;
 pub use error::ConversionError;

@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Code Heavy - Streaming Test</title>
+</head>
+<body>
+<h1>Code Heavy Test Document</h1>
+<p>This document contains multiple code blocks to test streaming code-block handling.</p>
+
+<h2>JavaScript Example</h2>
+<pre><code class="language-javascript">function fibonacci(n) {
+    if (n &lt;= 1) return n;
+    
+    let prev = 0, curr = 1;
+    for (let i = 2; i &lt;= n; i++) {
+        const next = prev + curr;
+        prev = curr;
+        curr = next;
+    }
+    return curr;
+}
+
+// Test the function
+console.log(fibonacci(10));
+</code></pre>
+
+<h2>Python Example</h2>
+<pre><code class="language-python">def quicksort(arr: list[int]) -&gt; list[int]:
+    if len(arr) &lt;= 1:
+        return arr
+    
+    pivot = arr[len(arr) // 2]
+    left = [x for x in arr if x &lt; pivot]
+    middle = [x for x in arr if x == pivot]
+    right = [x for x in arr if x &gt; pivot]
+    
+    return quicksort(left) + middle + quicksort(right)
+
+# Test
+print(quicksort([3, 6, 8, 10, 1, 2, 1]))
+</code></pre>
+
+<h2>Rust Example</h2>
+<pre><code class="language-rust">fn binary_search(arr: &amp;[i32], target: i32) -&gt; Option&lt;usize&gt; {
+    let mut left = 0;
+    let mut right = arr.len();
+    
+    while left &lt; right {
+        let mid = left + (right - left) / 2;
+        match arr[mid].cmp(&amp;target) {
+            std::cmp::Ordering::Equal =&gt; return Some(mid),
+            std::cmp::Ordering::Less =&gt; left = mid + 1,
+            std::cmp::Ordering::Greater =&gt; right = mid,
+        }
+    }
+    None
+}
+</code></pre>
+
+<h2>HTML Example</h2>
+<pre><code class="language-html">&lt;div class="container"&gt;
+    &lt;h1&gt;Title&lt;/h1&gt;
+    &lt;p&gt;Paragraph with &lt;strong&gt;bold&lt;/strong&gt; text.&lt;/p&gt;
+    &lt;ul&gt;
+        &lt;li&gt;Item 1&lt;/li&gt;
+        &lt;li&gt;Item 2&lt;/li&gt;
+    &lt;/ul&gt;
+&lt;/div&gt;
+</code></pre>
+
+</body>
+</html>

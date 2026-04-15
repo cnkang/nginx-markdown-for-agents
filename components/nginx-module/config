@@ -76,6 +76,13 @@ if nm "$ngx_markdown_rust_lib" 2>/dev/null | grep -q 'markdown_incremental_new';
     CFLAGS="$CFLAGS -DMARKDOWN_INCREMENTAL_ENABLED"
 fi
 
+# Detect whether the Rust library was built with the `streaming` feature.
+# If the symbol is present, define MARKDOWN_STREAMING_ENABLED so the C
+# header exposes the streaming API declarations.
+if nm "$ngx_markdown_rust_lib" 2>/dev/null | grep -q 'markdown_streaming_new'; then
+    CFLAGS="$CFLAGS -DMARKDOWN_STREAMING_ENABLED"
+fi
+
 # Check if module is configured as dynamic
 if test -n "$ngx_module_link"; then
     # Dynamic module

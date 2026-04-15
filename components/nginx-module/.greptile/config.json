@@ -1,0 +1,31 @@
+{
+  "strictness": 2,
+  "commentTypes": ["logic", "syntax"],
+  "rules": [
+    {
+      "id": "nginx-request-lifecycle-safety",
+      "rule": "Flag changes that may alter request lifecycle behavior, header/body filter ordering, buffering/streaming transitions, fallback paths, or finalization semantics without targeted tests.",
+      "severity": "high"
+    },
+    {
+      "id": "nginx-backpressure-pending-chain",
+      "rule": "In body-filter paths, if downstream returns NGX_AGAIN, pending output chain state must be preserved and resumed; avoid state transitions that can overwrite pending data with terminal buffers.",
+      "severity": "high"
+    },
+    {
+      "id": "nginx-fail-open-pointer-semantics",
+      "rule": "Fail-open branches must use semantically correct return codes, keep header forwarding idempotent, and must not advance unconsumed buffer positions when passing chains through unchanged.",
+      "severity": "high"
+    },
+    {
+      "id": "cache-variant-correctness",
+      "rule": "Flag changes that may break negotiation/cache invariants (`Vary: Accept`, ETag varianting, cache key interaction, conditional request behavior, or reason-code mapping).",
+      "severity": "high"
+    },
+    {
+      "id": "metrics-layout-compatibility",
+      "rule": "When SHM-backed metrics layout or metric naming changes, ensure compatibility strategy and synchronization across C code, tests, docs, and Prometheus output.",
+      "severity": "high"
+    }
+  ]
+}

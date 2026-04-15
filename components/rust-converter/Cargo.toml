@@ -1,7 +1,8 @@
 [package]
 name = "nginx-markdown-converter"
-version = "0.4.1"
+version = "0.5.0"
 edition = "2024"
+rust-version = "1.91"
 authors = ["NGINX Markdown for Agents Contributors"]
 description = "Rust-based HTML to Markdown conversion engine for NGINX"
 license = "BSD-2-Clause"
@@ -17,7 +18,7 @@ html5ever = "0.38"
 # DOM tree representation
 markup5ever_rcdom = "0.38"
 # Fast hashing for ETags (using version compatible with older Rust)
-blake3 = "1.2"
+blake3 = "1.8"
 # Hex encoding for ETag generation
 hex = "0.4"
 # Regular expressions for charset detection
@@ -34,10 +35,16 @@ criterion = "0.8"
 serde_json = "1.0"
 # Platform-specific APIs (getrusage for peak RSS measurement)
 libc = "0.2"
+# Parse known-difference registry for streaming parity harness
+toml = "0.8"
+# Compression regression fixtures for streaming parity tests
+flate2 = "1.0"
+brotli = "7.0"
 
 [features]
 default = []
 incremental = []
+streaming = []
 prune_noise_regions = []
 
 [profile.release]

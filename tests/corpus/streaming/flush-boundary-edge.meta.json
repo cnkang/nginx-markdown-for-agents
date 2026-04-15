@@ -1,0 +1,18 @@
+{
+  "fixture-id": "streaming/flush-boundary-edge",
+  "page-type": "clean-article",
+  "expected-conversion-result": "converted",
+  "input-size-bytes": 875,
+  "source-description": "Fixture designed to exercise flush-point and chunk-boundary edges",
+  "failure-corpus": false,
+  "streaming_notes": {
+    "expected_fallback": false,
+    "known_diff_ids": [
+      "DIFF-PARITY-WHITESPACE-ONLY"
+    ],
+    "high_risk_structures": [
+      "flush-boundary",
+      "chunk-boundary"
+    ]
+  }
+}

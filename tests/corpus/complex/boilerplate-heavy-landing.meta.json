@@ -4,5 +4,11 @@
   "expected-conversion-result": "converted",
   "input-size-bytes": 4219,
   "source-description": "Product landing page with extensive navigation, sidebar widgets, and multi-column footer",
-  "failure-corpus": false
+  "failure-corpus": false,
+  "streaming_notes": {
+    "expected_fallback": false,
+    "known_diff_ids": [
+      "DIFF-PARITY-WHITESPACE-ONLY"
+    ]
+  }
 }

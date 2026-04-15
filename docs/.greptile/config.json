@@ -1,0 +1,22 @@
+{
+  "strictness": 2,
+  "commentTypes": ["logic"],
+  "triggerOnUpdates": true,
+  "rules": [
+    {
+      "id": "docs-match-runtime",
+      "rule": "Flag documentation changes that contradict runtime behavior, configuration semantics, rollout guidance, troubleshooting expectations, or fail-open/streaming behavior.",
+      "severity": "high"
+    },
+    {
+      "id": "docs-validator-sync",
+      "rule": "When docs tables/examples/steps change, ensure related validators and release-gate tooling stay synchronized and compare the intended section/scope.",
+      "severity": "high"
+    },
+    {
+      "id": "metrics-name-consistency",
+      "rule": "Metric names in docs must match emitted JSON keys and Prometheus series exactly; avoid aliases or synthetic prefixes that diverge from runtime output.",
+      "severity": "high"
+    }
+  ]
+}

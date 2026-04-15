@@ -16,6 +16,8 @@
     ngx_log_debug1((level), (log), (err), (fmt), (arg))
 #endif
 
+#include "ngx_http_markdown_exports.h"
+
 #ifndef NGX_HTTP_MARKDOWN_SPRINTF_TOKEN
 #define NGX_HTTP_MARKDOWN_SPRINTF_TOKEN(buf, token_count) \
     ngx_sprintf((buf), "%ui", (token_count))

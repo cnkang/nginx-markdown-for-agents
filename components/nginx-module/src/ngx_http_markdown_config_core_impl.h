@@ -13,6 +13,13 @@
  * helpers used outside directive parsing.
  */
 
+/* C99 declaration visibility for standalone static analysis of this impl header. */
+ngx_int_t ngx_strncasecmp(u_char *s1, u_char *s2, size_t n);
+ngx_int_t ngx_http_complex_value(ngx_http_request_t *r,
+    ngx_http_complex_value_t *val, ngx_str_t *value);
+void ngx_conf_log_error(ngx_uint_t level, ngx_conf_t *cf,
+    ngx_err_t err, const char *fmt, ...);
+
 /* Helper declared early because merge logic uses it before its definition. */
 static void ngx_http_markdown_log_merged_conf(ngx_conf_t *cf,
     ngx_http_markdown_conf_t *conf);
@@ -142,6 +149,13 @@ ngx_http_markdown_create_conf(ngx_conf_t *cf)
     conf->ops.trust_forwarded_headers = NGX_CONF_UNSET;
     conf->ops.metrics_format = NGX_CONF_UNSET_UINT;
 
+#ifdef MARKDOWN_STREAMING_ENABLED
+    conf->streaming_engine = NULL;
+    conf->streaming_budget = NGX_CONF_UNSET_SIZE;
+    conf->streaming_on_error = NGX_CONF_UNSET_UINT;
+    conf->streaming_shadow = NGX_CONF_UNSET;
+#endif
+
     return conf;
 }
 
@@ -212,6 +226,20 @@ ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
 
     ngx_conf_merge_ptr_value(conf->auth_cookies, prev->auth_cookies, NULL);
     ngx_conf_merge_ptr_value(conf->stream_types, prev->stream_types, NULL);
+
+#ifdef MARKDOWN_STREAMING_ENABLED
+    if (conf->streaming_engine == NULL) {
+        conf->streaming_engine = prev->streaming_engine;
+    }
+    ngx_conf_merge_size_value(conf->streaming_budget,
+                              prev->streaming_budget,
+                              NGX_HTTP_MARKDOWN_STREAMING_BUDGET_DEFAULT);
+    ngx_conf_merge_uint_value(conf->streaming_on_error,
+                              prev->streaming_on_error,
+                              NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_PASS);
+    ngx_conf_merge_value(conf->streaming_shadow,
+                         prev->streaming_shadow, 0);
+#endif
 
     ngx_http_markdown_log_merged_conf(cf, conf);
 
@@ -568,7 +596,14 @@ ngx_http_markdown_log_merged_conf(ngx_conf_t *cf, ngx_http_markdown_conf_t *conf
                        "stream_types=%ui "
                        "large_body_threshold=%uz "
                        "trust_forwarded_headers=%ui "
-                       "metrics_format=%V",
+                       "metrics_format=%V"
+#ifdef MARKDOWN_STREAMING_ENABLED
+                       " streaming_engine=%s"
+                       " streaming_budget=%uz"
+                       " streaming_on_error=%V"
+                       " streaming_shadow=%i"
+#endif
+                       ,
                        (ngx_uint_t) conf->enabled,
                        ngx_http_markdown_enabled_source_name(conf->enabled_source),
                        conf->max_size,
@@ -588,7 +623,16 @@ ngx_http_markdown_log_merged_conf(ngx_conf_t *cf, ngx_http_markdown_conf_t *conf
                        conf->large_body_threshold,
                        (ngx_uint_t) conf->ops.trust_forwarded_headers,
                        ngx_http_markdown_metrics_format_name(
-                           conf->ops.metrics_format));
+                           conf->ops.metrics_format)
+#ifdef MARKDOWN_STREAMING_ENABLED
+                       , conf->streaming_engine != NULL
+                           ? "configured" : "NULL"
+                       , conf->streaming_budget
+                       , ngx_http_markdown_on_error_name(
+                             conf->streaming_on_error)
+                       , (ngx_int_t) conf->streaming_shadow
+#endif
+                       );
 }
 
 #endif /* NGX_HTTP_MARKDOWN_CONFIG_CORE_IMPL_H */

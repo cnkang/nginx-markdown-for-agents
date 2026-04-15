@@ -20,6 +20,7 @@ typedef struct ngx_pool_s         ngx_pool_t;
 typedef struct ngx_shm_zone_s     ngx_shm_zone_t;
 typedef struct ngx_chain_s        ngx_chain_t;
 typedef struct ngx_array_s        ngx_array_t;
+typedef struct ngx_buf_s          ngx_buf_t;
 typedef struct ngx_http_complex_value_s ngx_http_complex_value_t;
 
 #define ngx_string(str)     { sizeof(str) - 1, (u_char *) str }

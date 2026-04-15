@@ -157,7 +157,7 @@ This project is a strong fit if you:
 It is a weaker fit if you:
 
 - already have a purpose-built Markdown or JSON content API
-- require true streaming Markdown conversion today for very large pages
+- cannot adopt an opt-in rollout model and require streaming to be always-on from day one
 - want transformation logic completely outside the request path
 
 ## How This Compares to Edge-Layer Conversion
@@ -273,6 +273,20 @@ make test-rust-fuzz-smoke
 
 See [docs/testing/README.md](docs/testing/README.md) for integration, E2E, and performance-oriented test references.
 
+If you are changing repo contracts, docs validators, or agent workflow rules,
+run the harness checks as well:
+
+```bash
+# Cheap blocker for repo-owned harness truth
+make harness-check
+
+# Full harness validation, including docs and release-gate checks
+make harness-check-full
+```
+
+Use harness checks as the primary guardrail for repo contract and release-gate
+changes:
+
 ## Documentation Map
 
 | Goal | Document |
@@ -284,6 +298,9 @@ See [docs/testing/README.md](docs/testing/README.md) for integration, E2E, and p
 | Operate and troubleshoot | [docs/guides/OPERATIONS.md](docs/guides/OPERATIONS.md) |
 | Report a vulnerability or review security support | [SECURITY.md](SECURITY.md) |
 | Understand architecture and design choices | [docs/architecture/README.md](docs/architecture/README.md) |
+| Understand harness architecture and design rationale | [docs/architecture/HARNESS_ARCHITECTURE.md](docs/architecture/HARNESS_ARCHITECTURE.md) |
+| Understand spec routing, risk packs, and harness checks | [docs/harness/README.md](docs/harness/README.md) |
+| Maintain repo-owned harness rules and local adapter workflows | [docs/guides/HARNESS_MAINTENANCE.md](docs/guides/HARNESS_MAINTENANCE.md) |
 | Map directives to runtime behavior | [docs/architecture/CONFIG_BEHAVIOR_MAP.md](docs/architecture/CONFIG_BEHAVIOR_MAP.md) |
 | Explore implementation details | [docs/features/README.md](docs/features/README.md) |
 | Review testing references | [docs/testing/README.md](docs/testing/README.md) |
@@ -298,6 +315,9 @@ See [docs/testing/README.md](docs/testing/README.md) for integration, E2E, and p
 - Operating in production: use [docs/guides/OPERATIONS.md](docs/guides/OPERATIONS.md)
 - Reporting a vulnerability: use [SECURITY.md](SECURITY.md)
 - Understanding system design: use [docs/architecture/README.md](docs/architecture/README.md)
+- Understanding harness architecture and why it is a repo-level asset: use [docs/architecture/HARNESS_ARCHITECTURE.md](docs/architecture/HARNESS_ARCHITECTURE.md)
+- Understanding repo-owned agent workflow and spec routing: use [docs/harness/README.md](docs/harness/README.md)
+- Maintaining harness rules, risk packs, and local adapter layers: use [docs/guides/HARNESS_MAINTENANCE.md](docs/guides/HARNESS_MAINTENANCE.md)
 - Understanding what directives change in the runtime path: use [docs/architecture/CONFIG_BEHAVIOR_MAP.md](docs/architecture/CONFIG_BEHAVIOR_MAP.md)
 - Reading implementation details: use [docs/features/README.md](docs/features/README.md)
 - Validating changes: use [docs/testing/README.md](docs/testing/README.md)
@@ -312,6 +332,7 @@ docs/                  User, operator, testing, and architecture docs
   architecture/        System design, ADRs, and config behavior maps
   features/            Implementation details for specific features
   guides/              Installation, configuration, deployment, and operations
+  harness/             Repo-owned spec routing, risk packs, and harness checks
   project/             Project status and roadmap
   testing/             Testing strategy and references
 examples/
@@ -328,37 +349,42 @@ tools/                 Installers, CI scripts, and developer tooling
 Makefile               Top-level build and test entrypoints
 ```
 
+## Contributor Workflow
+
+If you are changing runtime behavior, use the existing test commands.
+
+If you are changing repo contracts, validation tooling, or agent-facing docs,
+add the harness workflow to your default path:
+
+1. Update repo-owned truth first:
+   `AGENTS.md`, `docs/harness/`, `tools/harness/`, `Makefile`, CI wiring
+2. Run `make harness-check`
+3. Run `make harness-check-full` before closing broader docs or release-gate work
+
 ## Roadmap
 
-Current release (0.4.1):
+Current release (0.5.0):
 
-- Prometheus-compatible metrics endpoint for operational monitoring
-- Unified decision reason codes for conversion transparency
-- Rollout cookbook with selective enablement and canary patterns
-- Rollback guide with trigger conditions and executable procedures
-- Benchmark corpus with reproducible evidence and regression detection
-- Parser path optimizations: noise region pruning, simple structure fast path
-- Restructured installation guide with shortest success path
-- Incremental processing for large responses
-- Matrix-driven release automation pipeline
-- Performance baseline gating system
-- Variable-driven configuration support
-- Enhanced installation tooling
-- Shared metrics aggregation and runtime-regression coverage
-- Hardened CI/CD pipeline
-- Rust dependency audit remediation for `RUSTSEC-2026-0097` (`rand` `0.9.2` -> `0.9.3`)
+- Dual-engine architecture: full-buffer default plus opt-in true streaming path
+- Streaming failure semantics and fallback controls aligned with commit boundaries
+- Streaming parity and diff coverage across chunk boundaries and failure paths
+- Streaming rollout observability with shadow-mode validation and reason-code visibility
+- Streaming performance evidence workflow and release-gate alignment
+- Repo-owned harness workflow (`docs/harness/`, `tools/harness/`, `make harness-check*`)
+- Prometheus-compatible metrics, rollout/rollback guides, and benchmark-driven regression checks
+- Installation and release docs aligned to Rust 1.91.0+ and current CI expectations
 
 Near-term focus:
 
-- Performance regression tracking with CI artifact capture
-- Deployment validation across diverse environments
-- Community feedback integration
+- Expand streaming rollout examples across mixed traffic profiles
+- Strengthen cross-environment evidence automation for release gates
+- Continue tightening operator diagnostics for conversion drifts and degradations
 
 Future exploration:
 
-- Streaming-oriented conversion approaches for large documents
+- OpenTelemetry tracing integration
 - Additional Markdown flavors and output formats
-- Expanded observability integrations beyond the built-in shared metrics endpoint
+- Packaging and distribution expansion (apt/yum/brew and ingress-oriented bundles)
 
 ## License
 

@@ -68,6 +68,7 @@ fn ffi_test_default_options() -> MarkdownOptions {
         content_type_len: 0,
         base_url: ptr::null(),
         base_url_len: 0,
+        streaming_budget: 0,
     }
 }
 
@@ -81,7 +82,34 @@ fn ffi_test_empty_result() -> MarkdownResult {
         error_code: 0,
         error_message: ptr::null_mut(),
         error_len: 0,
+        peak_memory_estimate: 0,
     }
+}
+
+/// Verify that `markdown_result_free` clears `peak_memory_estimate` to 0.
+#[test]
+fn test_result_free_clears_peak_memory_estimate() {
+    let converter = markdown_converter_new();
+    assert!(!converter.is_null(), "Converter should not be NULL");
+
+    let html = b"<h1>Test</h1><p>Content</p>";
+    let options = ffi_test_default_options();
+    let mut result = ffi_test_empty_result();
+
+    ffi_markdown_convert(converter, html.as_ptr(), html.len(), &options, &mut result);
+
+    assert_eq!(result.error_code, 0, "Conversion should succeed");
+
+    /* peak_memory_estimate is only populated by streaming finalize,
+     * so it remains 0 for full-buffer conversions. Verify free clears it. */
+    ffi_markdown_result_free(&mut result);
+
+    assert_eq!(
+        result.peak_memory_estimate, 0,
+        "peak_memory_estimate should be 0 after free"
+    );
+
+    ffi_markdown_converter_free(converter);
 }
 
 #[test]
@@ -114,6 +142,7 @@ fn test_basic_conversion() {
         content_type_len: 0,
         base_url: ptr::null(),
         base_url_len: 0,
+        streaming_budget: 0,
     };
 
     // Perform conversion
@@ -126,6 +155,7 @@ fn test_basic_conversion() {
         error_code: 0,
         error_message: ptr::null_mut(),
         error_len: 0,
+        peak_memory_estimate: 0,
     };
 
     ffi_markdown_convert(converter, html.as_ptr(), html.len(), &options, &mut result);
@@ -404,6 +434,7 @@ fn test_null_pointer_handling() {
         content_type_len: 0,
         base_url: ptr::null(),
         base_url_len: 0,
+        streaming_budget: 0,
     };
 
     let mut result = MarkdownResult {
@@ -415,6 +446,7 @@ fn test_null_pointer_handling() {
         error_code: 0,
         error_message: ptr::null_mut(),
         error_len: 0,
+        peak_memory_estimate: 0,
     };
 
     // Test NULL converter handle
@@ -439,6 +471,7 @@ fn test_null_pointer_handling() {
         error_code: 0,
         error_message: ptr::null_mut(),
         error_len: 0,
+        peak_memory_estimate: 0,
     };
 
     // Test NULL HTML pointer with zero length (allowed, treated as empty input)
@@ -463,6 +496,7 @@ fn test_null_pointer_handling() {
         error_code: 0,
         error_message: ptr::null_mut(),
         error_len: 0,
+        peak_memory_estimate: 0,
     };
 
     // Test NULL options pointer
@@ -497,6 +531,7 @@ fn test_multiple_conversions() {
         content_type_len: 0,
         base_url: ptr::null(),
         base_url_len: 0,
+        streaming_budget: 0,
     };
 
     // Perform multiple conversions
@@ -504,16 +539,7 @@ fn test_multiple_conversions() {
         let html = format!("<h1>Test {}</h1><p>Content {}</p>", i, i);
         let html_bytes = html.as_bytes();
 
-        let mut result = MarkdownResult {
-            markdown: ptr::null_mut(),
-            markdown_len: 0,
-            etag: ptr::null_mut(),
-            etag_len: 0,
-            token_estimate: 0,
-            error_code: 0,
-            error_message: ptr::null_mut(),
-            error_len: 0,
-        };
+        let mut result = ffi_test_empty_result();
 
         ffi_markdown_convert(
             converter,
@@ -555,6 +581,7 @@ fn test_idempotent_free() {
         content_type_len: 0,
         base_url: ptr::null(),
         base_url_len: 0,
+        streaming_budget: 0,
     };
 
     let mut result = MarkdownResult {
@@ -566,6 +593,7 @@ fn test_idempotent_free() {
         error_code: 0,
         error_message: ptr::null_mut(),
         error_len: 0,
+        peak_memory_estimate: 0,
     };
 
     ffi_markdown_convert(converter, html.as_ptr(), html.len(), &options, &mut result);
@@ -600,6 +628,7 @@ fn test_content_type_charset_detection() {
         content_type_len: content_type.len(),
         base_url: ptr::null(),
         base_url_len: 0,
+        streaming_budget: 0,
     };
 
     let mut result = MarkdownResult {
@@ -611,6 +640,7 @@ fn test_content_type_charset_detection() {
         error_code: 0,
         error_message: ptr::null_mut(),
         error_len: 0,
+        peak_memory_estimate: 0,
     };
 
     ffi_markdown_convert(converter, html.as_ptr(), html.len(), &options, &mut result);
@@ -646,6 +676,7 @@ fn test_gfm_flavor() {
         content_type_len: 0,
         base_url: ptr::null(),
         base_url_len: 0,
+        streaming_budget: 0,
     };
 
     let mut result = MarkdownResult {
@@ -657,6 +688,7 @@ fn test_gfm_flavor() {
         error_code: 0,
         error_message: ptr::null_mut(),
         error_len: 0,
+        peak_memory_estimate: 0,
     };
 
     ffi_markdown_convert(converter, html.as_ptr(), html.len(), &options, &mut result);
@@ -704,6 +736,7 @@ fn test_null_result_pointer() {
         content_type_len: 0,
         base_url: ptr::null(),
         base_url_len: 0,
+        streaming_budget: 0,
     };
 
     // Call with NULL result pointer - should not crash
@@ -745,6 +778,7 @@ fn test_free_empty_result() {
         error_code: 0,
         error_message: ptr::null_mut(),
         error_len: 0,
+        peak_memory_estimate: 0,
     };
 
     // Should handle empty result gracefully
@@ -774,6 +808,7 @@ fn test_memory_cleanup_with_all_fields() {
         content_type_len: 0,
         base_url: ptr::null(),
         base_url_len: 0,
+        streaming_budget: 0,
     };
 
     let mut result = MarkdownResult {
@@ -785,6 +820,7 @@ fn test_memory_cleanup_with_all_fields() {
         error_code: 0,
         error_message: ptr::null_mut(),
         error_len: 0,
+        peak_memory_estimate: 0,
     };
 
     ffi_markdown_convert(converter, html.as_ptr(), html.len(), &options, &mut result);
@@ -828,6 +864,7 @@ fn test_memory_cleanup_error_case() {
         content_type_len: 0,
         base_url: ptr::null(),
         base_url_len: 0,
+        streaming_budget: 0,
     };
 
     let mut result = MarkdownResult {
@@ -839,6 +876,7 @@ fn test_memory_cleanup_error_case() {
         error_code: 0,
         error_message: ptr::null_mut(),
         error_len: 0,
+        peak_memory_estimate: 0,
     };
 
     // Trigger error with NULL HTML pointer and non-zero length.
@@ -883,6 +921,7 @@ fn test_panic_catching_invalid_utf8() {
         content_type_len: 0,
         base_url: ptr::null(),
         base_url_len: 0,
+        streaming_budget: 0,
     };
 
     let mut result = MarkdownResult {
@@ -894,6 +933,7 @@ fn test_panic_catching_invalid_utf8() {
         error_code: 0,
         error_message: ptr::null_mut(),
         error_len: 0,
+        peak_memory_estimate: 0,
     };
 
     ffi_markdown_convert(
@@ -941,6 +981,7 @@ fn test_zero_length_html() {
         content_type_len: 0,
         base_url: ptr::null(),
         base_url_len: 0,
+        streaming_budget: 0,
     };
 
     let mut result = MarkdownResult {
@@ -952,6 +993,7 @@ fn test_zero_length_html() {
         error_code: 0,
         error_message: ptr::null_mut(),
         error_len: 0,
+        peak_memory_estimate: 0,
     };
 
     ffi_markdown_convert(converter, html.as_ptr(), html.len(), &options, &mut result);
@@ -982,6 +1024,7 @@ fn test_zero_length_html_with_null_pointer() {
         content_type_len: 0,
         base_url: ptr::null(),
         base_url_len: 0,
+        streaming_budget: 0,
     };
 
     let mut result = ffi_test_empty_result();
@@ -1018,6 +1061,7 @@ fn test_null_content_type_with_zero_length() {
         content_type_len: 0,       // Zero length
         base_url: ptr::null(),
         base_url_len: 0,
+        streaming_budget: 0,
     };
 
     let mut result = MarkdownResult {
@@ -1029,6 +1073,7 @@ fn test_null_content_type_with_zero_length() {
         error_code: 0,
         error_message: ptr::null_mut(),
         error_len: 0,
+        peak_memory_estimate: 0,
     };
 
     ffi_markdown_convert(
@@ -1066,6 +1111,7 @@ fn test_error_state_consistency() {
         content_type_len: 0,
         base_url: ptr::null(),
         base_url_len: 0,
+        streaming_budget: 0,
     };
 
     let mut result = MarkdownResult {
@@ -1077,6 +1123,7 @@ fn test_error_state_consistency() {
         error_code: 0,
         error_message: ptr::null_mut(),
         error_len: 0,
+        peak_memory_estimate: 0,
     };
 
     // Trigger error with NULL converter
