@@ -205,8 +205,10 @@
         "AGENTS.md",
         "docs/**",
         "tools/docs/**",
+        "tools/sonar/**",
         "tools/release/**",
         ".github/workflows/**",
+        ".sonarcloud.properties",
         "Makefile"
       ],
       "keywords": [
@@ -214,7 +216,9 @@
         "validator",
         "release gate",
         "path filter",
-        "installation"
+        "installation",
+        "sonar",
+        "compile_commands"
       ],
       "verification_families": [
         "harness-sync",
