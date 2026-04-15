@@ -4,12 +4,12 @@ FROM ${OS_BASE}
 
 RUN apk add --no-cache \
     build-base \
-    pcre-dev \
-    zlib-dev \
-    openssl-dev \
-    linux-headers \
     curl \
+    linux-headers \
+    openssl-dev \
+    pcre-dev \
     python3 \
+    zlib-dev \
     && curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
     && /root/.cargo/bin/cargo install cbindgen
 ENV PATH="/root/.cargo/bin:${PATH}"
@@ -17,7 +17,7 @@ ENV PATH="/root/.cargo/bin:${PATH}"
 ARG NGINX_VERSION=1.28.2
 
 WORKDIR /build
-RUN curl -fsSL "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" | tar xz
+RUN curl --proto '=https' --tlsv1.2 -fsSL "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" | tar xz
 
 COPY Makefile /src/Makefile
 COPY components/rust-converter /src/components/rust-converter

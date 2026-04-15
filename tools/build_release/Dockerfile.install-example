@@ -9,10 +9,10 @@ FROM nginx:${NGINX_VERSION}-alpine
 RUN apk add --no-cache \
     bash \
     curl \
+    gzip \
     python3 \
     tar \
-    gzip \
-    && curl -fsSL "https://raw.githubusercontent.com/cnkang/nginx-markdown-for-agents/${MODULE_REF}/tools/install.sh" -o /tmp/install.sh \
+    && curl --proto '=https' --tlsv1.2 -fsSL "https://raw.githubusercontent.com/cnkang/nginx-markdown-for-agents/${MODULE_REF}/tools/install.sh" -o /tmp/install.sh \
     && chmod +x /tmp/install.sh \
     && SKIP_ROOT_CHECK=1 /tmp/install.sh \
     && rm -f /tmp/install.sh

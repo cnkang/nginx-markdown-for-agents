@@ -68,4 +68,4 @@ docker run --rm \
   -e DOWNLOAD_URL_OVERRIDE="http://host.docker.internal:8000/${ASSET_NAME}" \
   -e DOWNLOAD_SHA256="${ASSET_SHA256}" \
   nginx:1.28.2 \
-  bash -c "apt-get update && apt-get install -y curl python3 && /install.sh && printf '%s\n' 'load_module /etc/nginx/modules/ngx_http_markdown_filter_module.so;' 'worker_processes 1;' 'events {}' 'http {}' > /tmp/nginx-test.conf && nginx -t -c /tmp/nginx-test.conf"
+  bash -c "apt-get update && apt-get install -y --no-install-recommends curl python3 && /install.sh && printf '%s\n' 'load_module /etc/nginx/modules/ngx_http_markdown_filter_module.so;' 'worker_processes 1;' 'events {}' 'http {}' > /tmp/nginx-test.conf && nginx -t -c /tmp/nginx-test.conf"
