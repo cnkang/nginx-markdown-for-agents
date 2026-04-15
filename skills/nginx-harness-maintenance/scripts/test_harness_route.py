@@ -68,6 +68,60 @@ def test_load_manifest_validates_risk_pack_shape() -> None:
             _load_manifest(manifest_path)
 
 
+@pytest.mark.parametrize(
+    ("pack", "error_match"),
+    [
+        (
+            {
+                "id": "",
+                "doc": "docs/harness/risk-packs/example.md",
+                "paths": ["docs/**"],
+                "keywords": ["docs"],
+                "verification_families": ["harness-sync"],
+            },
+            r"risk_packs\[0\]\.id must be a non-empty string",
+        ),
+        (
+            {
+                "id": "docs-tooling-drift",
+                "doc": 42,
+                "paths": ["docs/**"],
+                "keywords": ["docs"],
+                "verification_families": ["harness-sync"],
+            },
+            r"risk_packs\[0\]\.doc must be a non-empty string",
+        ),
+        (
+            {
+                "id": "docs-tooling-drift",
+                "doc": "docs/harness/risk-packs/example.md",
+                "paths": "docs/**",
+                "keywords": ["docs"],
+                "verification_families": ["harness-sync"],
+            },
+            r"risk_packs\[0\]\.paths must be a list",
+        ),
+    ],
+)
+def test_load_manifest_validates_risk_pack_field_types(
+    pack: dict,
+    error_match: str,
+) -> None:
+    with tempfile.TemporaryDirectory() as tmpdir:
+        manifest_path = Path(tmpdir) / "manifest.json"
+        manifest_path.write_text(
+            json.dumps(
+                {
+                    "risk_packs": [pack],
+                    "verification_families": {},
+                }
+            ),
+            encoding="utf-8",
+        )
+        with pytest.raises(SystemExit, match=error_match):
+            _load_manifest(manifest_path)
+
+
 def test_match_path_directory_glob_has_boundary() -> None:
     assert _match_path(
         "components/nginx-module/src/foo.c", "components/nginx-module/**"
@@ -83,6 +137,20 @@ def test_parse_status_output_keeps_old_and_new_on_rename() -> None:
         "old/path.c",
         "new/path.c",
         "docs/harness/README.md",
+    ]
+
+
+def test_parse_status_output_skips_deleted_entries() -> None:
+    output = (
+        "D  removed/from-index.c\n"
+        " D removed/from-worktree.c\n"
+        "R  old/path.c -> new/path.c\n"
+        "A  added/new-file.c\n"
+    )
+    assert _parse_status_output(output) == [
+        "old/path.c",
+        "new/path.c",
+        "added/new-file.c",
     ]
 
 
@@ -130,6 +198,17 @@ def test_pack_matches_returns_none_without_any_hit() -> None:
         "verification_families": ["nginx-streaming"],
     }
     assert _pack_matches(pack, ["docs/README.md"], "unrelated text") is None
+
+
+def test_pack_matches_avoids_substring_keyword_false_positive() -> None:
+    pack = {
+        "id": "docs-tooling-drift",
+        "doc": "docs/harness/risk-packs/docs-tooling-drift.md",
+        "paths": [],
+        "keywords": ["docs"],
+        "verification_families": ["harness-sync"],
+    }
+    assert _pack_matches(pack, ["tools/mydocsify/check.py"], "unrelated") is None
 
 
 def test_verification_plan_dedupes_and_sorts_by_phase() -> None:
