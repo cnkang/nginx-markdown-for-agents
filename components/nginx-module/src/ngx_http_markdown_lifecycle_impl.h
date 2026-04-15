@@ -14,7 +14,7 @@
 
 /* Wire this module into the header and body filter chains. */
 static ngx_int_t
-ngx_http_markdown_filter_init(ngx_conf_t *cf)
+ngx_http_markdown_filter_init(ngx_conf_t *cf) /* NOSONAR: nginx callback signature */
 {
     (void) cf;
 

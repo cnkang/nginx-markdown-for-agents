@@ -91,7 +91,7 @@ ngx_http_markdown_find_request_header_value(ngx_http_request_t *r,
          part != NULL;
          part = part->next)
     {
-        ngx_table_elt_t  *headers;
+        const ngx_table_elt_t  *headers;
 
         headers = part->elts;
         for (ngx_uint_t i = 0; i < part->nelts; i++) {
@@ -455,7 +455,7 @@ ngx_http_markdown_prepare_conversion_options(ngx_http_request_t *r,
 static ngx_int_t
 ngx_http_markdown_handle_conversion_failure(ngx_http_request_t *r,
                                             ngx_http_markdown_ctx_t *ctx,
-                                            ngx_http_markdown_conf_t *conf,
+                                            const ngx_http_markdown_conf_t *conf,
                                             struct MarkdownResult *result,
                                             ngx_msec_t elapsed_ms)
 {
@@ -534,7 +534,7 @@ ngx_http_markdown_record_system_failure(
 static ngx_int_t
 ngx_http_markdown_validate_conversion_result(ngx_http_request_t *r,
                                              ngx_http_markdown_ctx_t *ctx,
-                                             ngx_http_markdown_conf_t *conf,
+                                             const ngx_http_markdown_conf_t *conf,
                                              struct MarkdownResult *result)
 {
     if ((result->markdown == NULL && result->markdown_len > 0)
@@ -588,7 +588,7 @@ static ngx_int_t
 ngx_http_markdown_handle_converter_not_initialized(
     ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx,
-    ngx_http_markdown_conf_t *conf)
+    const ngx_http_markdown_conf_t *conf)
 {
     ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0,
                  "markdown filter: converter not "

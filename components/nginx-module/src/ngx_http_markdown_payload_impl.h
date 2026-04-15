@@ -190,7 +190,7 @@ ngx_http_markdown_handle_decompression_alloc_error(
 static ngx_int_t
 ngx_http_markdown_prepare_compressed_chain(ngx_http_request_t *r,
                                            ngx_http_markdown_ctx_t *ctx,
-                                           ngx_http_markdown_conf_t *conf,
+                                           const ngx_http_markdown_conf_t *conf,
                                            ngx_chain_t **compressed_chain)
 {
     ngx_buf_t *compressed_buf;
@@ -242,7 +242,7 @@ ngx_http_markdown_prepare_compressed_chain(ngx_http_request_t *r,
 static ngx_int_t
 ngx_http_markdown_apply_decompressed_payload(ngx_http_request_t *r,
                                              ngx_http_markdown_ctx_t *ctx,
-                                             ngx_http_markdown_conf_t *conf,
+                                             const ngx_http_markdown_conf_t *conf,
                                              const ngx_chain_t *decompressed_chain)
 {
     const u_char *decompressed_data;
@@ -391,7 +391,7 @@ ngx_http_markdown_emit_failure_decision(ngx_http_request_t *r,
 static ngx_int_t
 ngx_http_markdown_handle_buffer_init_failure(ngx_http_request_t *r,
                                              ngx_http_markdown_ctx_t *ctx,
-                                             ngx_http_markdown_conf_t *conf,
+                                             const ngx_http_markdown_conf_t *conf,
                                              ngx_chain_t *in)
 {
     ngx_int_t  rc;
@@ -439,7 +439,7 @@ ngx_http_markdown_handle_buffer_init_failure(ngx_http_request_t *r,
 static ngx_int_t
 ngx_http_markdown_handle_buffer_append_failure(ngx_http_request_t *r,
                                                ngx_http_markdown_ctx_t *ctx,
-                                               ngx_http_markdown_conf_t *conf,
+                                               const ngx_http_markdown_conf_t *conf,
                                                ngx_chain_t *cl,
                                                size_t chunk_size)
 {

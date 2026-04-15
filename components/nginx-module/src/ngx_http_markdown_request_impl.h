@@ -19,12 +19,12 @@
 
 /* Forward declarations for helpers defined in this file */
 static ngx_int_t ngx_http_markdown_handle_ctx_alloc_failure(
-    ngx_http_request_t *r, ngx_http_markdown_conf_t *conf);
+    ngx_http_request_t *r, const ngx_http_markdown_conf_t *conf);
 static void ngx_http_markdown_init_ctx(ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx, ngx_flag_t filter_enabled);
 static void ngx_http_markdown_log_failure_decision(
-    ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx,
-    ngx_http_markdown_conf_t *conf);
+    ngx_http_request_t *r, const ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_conf_t *conf);
 static ngx_int_t ngx_http_markdown_handle_unsupported_compression(
     ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx,
     ngx_http_markdown_conf_t *conf);
@@ -59,8 +59,8 @@ const ngx_str_t *ngx_http_markdown_eligibility_string(
  */
 static void
 ngx_http_markdown_log_failure_decision(ngx_http_request_t *r,
-    ngx_http_markdown_ctx_t *ctx,
-    ngx_http_markdown_conf_t *conf)
+    const ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_conf_t *conf)
 {
     ngx_http_markdown_emit_failure_decision(r, ctx, conf);
 }
@@ -140,7 +140,7 @@ ngx_http_markdown_handle_unsupported_compression(
  */
 static ngx_int_t
 ngx_http_markdown_handle_ctx_alloc_failure(ngx_http_request_t *r,
-    ngx_http_markdown_conf_t *conf)
+    const ngx_http_markdown_conf_t *conf)
 {
     ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0,
                  "markdown filter: failed to allocate "

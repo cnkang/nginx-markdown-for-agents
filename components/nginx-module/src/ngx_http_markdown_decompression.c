@@ -256,7 +256,7 @@ ngx_http_markdown_calc_output_size(ngx_http_request_t *r, size_t input_size,
 ngx_int_t
 ngx_http_markdown_decompress_gzip(ngx_http_request_t *r,
                                    ngx_http_markdown_compression_type_e type,
-                                   ngx_chain_t *in,
+                                   const ngx_chain_t *in,
                                    ngx_chain_t **out)
 {
     z_stream                           stream;

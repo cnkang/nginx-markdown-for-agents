@@ -695,7 +695,7 @@ ngx_int_t ngx_http_markdown_prepare_conversion_options(ngx_http_request_t *r,
  * generate a Markdown-variant ETag for comparison.
  */
 ngx_int_t ngx_http_markdown_handle_if_none_match(ngx_http_request_t *r,
-    ngx_http_markdown_conf_t *conf, const ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_conf_t *conf, const ngx_http_markdown_ctx_t *ctx,
     struct MarkdownConverterHandle *converter,
     struct MarkdownResult **result);
 
@@ -717,7 +717,7 @@ ngx_http_markdown_detect_compression(ngx_http_request_t *r);
 ngx_int_t
 ngx_http_markdown_decompress_gzip(ngx_http_request_t *r,
                                    ngx_http_markdown_compression_type_e type,
-                                   ngx_chain_t *in,
+                                   const ngx_chain_t *in,
                                    ngx_chain_t **out);
 
 /* Decompress brotli compressed data using brotli library */
