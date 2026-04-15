@@ -2,11 +2,13 @@
 
 ## Supported Versions
 
-This project is currently maintained on the `0.3.x` line.
+This project is currently maintained on the `0.5.x` line.
 
 | Version | Supported |
 |---------|-----------|
-| `0.3.x` | Yes |
+| `0.5.x` | Yes |
+| `0.4.x` | No |
+| `0.3.x` | No |
 | `0.2.x` | No |
 | `0.1.x` | No |
 | `< 0.1.0` | No |

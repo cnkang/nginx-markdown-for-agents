@@ -6,6 +6,7 @@ Thank you for your interest in contributing to this project! This document provi
 
 - [Code of Conduct](#code-of-conduct)
 - [Getting Started](#getting-started)
+- [Harness Skill Setup (Optional but Recommended)](#harness-skill-setup-optional-but-recommended)
 - [Development Workflow](#development-workflow)
 - [Coding Standards](#coding-standards)
 - [Testing Requirements](#testing-requirements)
@@ -28,7 +29,7 @@ This project follows a professional and respectful code of conduct. Please:
 
 Before contributing, ensure you have:
 
-- Rust 1.85.0 or higher
+- Rust 1.91.0 or higher
 - NGINX 1.24.0 or higher (source code for module development)
 - cbindgen for C header generation
 - Basic understanding of NGINX module development (for C contributions)
@@ -60,6 +61,25 @@ Before contributing, ensure you have:
    ```bash
    make test-all
    ```
+
+## Harness Skill Setup (Optional but Recommended)
+
+If you plan to maintain harness-related surfaces (`AGENTS.md`,
+`docs/harness/`, `tools/harness/`, harness CI wiring), install the local helper
+skill so your IDE/agent can route and verify changes consistently.
+
+From the repository root:
+
+```bash
+npx skills add . --full-depth --skill nginx-markdown-harness-maintenance -y
+npx skills ls
+```
+
+Why `--full-depth`: this repository keeps skills under `skills/`, so recursive
+discovery is required.
+
+For full setup details (project/global/manual symlink options and verification),
+see [docs/guides/HARNESS_SKILL_SETUP.md](docs/guides/HARNESS_SKILL_SETUP.md).
 
 ## Development Workflow
 
