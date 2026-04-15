@@ -111,7 +111,7 @@ ngx_http_markdown_find_header(ngx_http_request_t *r, const u_char *name, size_t 
 }
 
 static void
-ngx_http_markdown_invalidate_headers_in_part(ngx_http_request_t *r,
+ngx_http_markdown_invalidate_headers_in_part(const ngx_http_request_t *r,
                                              ngx_list_part_t *part,
                                              const u_char *name,
                                              size_t name_len,

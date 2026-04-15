@@ -40,7 +40,9 @@ ngx_http_markdown_arg_equals(
  * - complex value containing variables
  */
 static char *
-ngx_http_markdown_filter(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
+ngx_http_markdown_filter(ngx_conf_t *cf,
+    ngx_command_t *cmd, /* NOSONAR: nginx directive callback signature */
+    void *conf)
 {
     static u_char                      on_str[]  = "on";
     static u_char                      off_str[] = "off";
@@ -442,7 +444,8 @@ ngx_http_markdown_stream_types(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
  */
 static char *
 ngx_http_markdown_large_body_threshold(ngx_conf_t *cf,
-    ngx_command_t *cmd, void *conf)
+    ngx_command_t *cmd, /* NOSONAR: nginx directive callback signature */
+    void *conf)
 {
     static u_char             off_str[] = "off";
     ngx_http_markdown_conf_t *mcf = conf;
