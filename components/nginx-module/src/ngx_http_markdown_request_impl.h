@@ -524,7 +524,7 @@ path_selected:
 static ngx_int_t
 ngx_http_markdown_body_filter_convert_and_output(ngx_http_request_t *r,
                                                  ngx_http_markdown_ctx_t *ctx,
-                                                 ngx_http_markdown_conf_t *conf)
+                                                 const ngx_http_markdown_conf_t *conf)
 {
     ngx_int_t             rc;
     ngx_msec_t            elapsed_ms;
