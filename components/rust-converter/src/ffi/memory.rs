@@ -12,6 +12,7 @@ pub(crate) fn reset_result(result: &mut MarkdownResult) {
     result.error_code = ERROR_SUCCESS;
     result.error_message = ptr::null_mut();
     result.error_len = 0;
+    result.peak_memory_estimate = 0;
 }
 
 /// Populate a result struct with an owned error payload.
