@@ -18,6 +18,10 @@
 #include "ngx_http_markdown_metrics_impl.h"
 #include "ngx_http_markdown_prometheus_impl.h"
 
+#ifdef MARKDOWN_STREAMING_ENABLED
+#include "ngx_http_markdown_streaming_impl.h"
+#endif
+
 /*
  * Module context
  *

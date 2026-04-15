@@ -24,18 +24,18 @@ static u_char ngx_http_markdown_empty_string[] = "";
 static ngx_table_elt_t *
 ngx_http_markdown_find_request_header(ngx_http_request_t *r, u_char *name, size_t name_len)
 {
-    ngx_list_part_t  *part;
-
     if (r->headers_in.headers.part.nelts == 0) {
         return NULL;
     }
 
-    for (part = &r->headers_in.headers.part; part != NULL; part = part->next) {
+    for (ngx_list_part_t *part = &r->headers_in.headers.part;
+         part != NULL;
+         part = part->next)
+    {
         ngx_table_elt_t  *headers;
-        ngx_uint_t        i;
 
         headers = part->elts;
-        for (i = 0; i < part->nelts; i++) {
+        for (ngx_uint_t i = 0; i < part->nelts; i++) {
             if (headers[i].key.len == name_len
                 && ngx_strncasecmp(headers[i].key.data, name, name_len) == 0)
             {
@@ -213,10 +213,9 @@ ngx_http_markdown_parse_if_none_match(ngx_http_request_t *r, ngx_array_t **etags
  */
 static ngx_int_t
 ngx_http_markdown_compare_etag(const u_char *etag, size_t etag_len,
-                               ngx_array_t *if_none_match)
+                               const ngx_array_t *if_none_match)
 {
-    ngx_str_t  *client_etag;
-    ngx_uint_t  i;
+    const ngx_str_t *client_etag;
     const u_char *generated_norm;
     size_t        generated_norm_len;
     const u_char *client_norm;
@@ -251,7 +250,7 @@ ngx_http_markdown_compare_etag(const u_char *etag, size_t etag_len,
         generated_norm_len -= 2;
     }
 
-    for (i = 0; i < if_none_match->nelts; i++) {
+    for (ngx_uint_t i = 0; i < if_none_match->nelts; i++) {
         /* Check for wildcard match */
         if (client_etag[i].len == 1 && client_etag[i].data[0] == '*') {
             ngx_log_debug0(NGX_LOG_DEBUG_HTTP, NULL, 0,
@@ -311,7 +310,7 @@ ngx_http_markdown_compare_etag(const u_char *etag, size_t etag_len,
 ngx_int_t
 ngx_http_markdown_handle_if_none_match(ngx_http_request_t *r,
                                        ngx_http_markdown_conf_t *conf,
-                                       ngx_http_markdown_ctx_t *ctx,
+                                       const ngx_http_markdown_ctx_t *ctx,
                                        struct MarkdownConverterHandle *converter,
                                        struct MarkdownResult **result)
 {
@@ -507,7 +506,8 @@ ngx_http_markdown_handle_if_none_match(ngx_http_request_t *r,
  * @return          NGX_OK on success, NGX_ERROR on failure
  */
 ngx_int_t
-ngx_http_markdown_send_304(ngx_http_request_t *r, struct MarkdownResult *result)
+ngx_http_markdown_send_304(ngx_http_request_t *r,
+                           const struct MarkdownResult *result)
 {
     ngx_table_elt_t  *h;
     ngx_int_t         rc;
