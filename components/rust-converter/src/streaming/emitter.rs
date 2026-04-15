@@ -408,7 +408,13 @@ impl IncrementalEmitter {
             StructuralContext::Link(href) => {
                 self.in_link = false;
                 let text = std::mem::take(&mut self.link_text);
-                self.write_str(&format!("[{}]({})", text, href))?;
+                if !text.trim().is_empty() {
+                    if href.trim().is_empty() {
+                        self.write_str(&text)?;
+                    } else {
+                        self.write_str(&format!("[{}]({})", text, href))?;
+                    }
+                }
             }
             StructuralContext::Image { .. } => {
                 // Image is fully emitted on Enter (self-closing style)
@@ -1316,6 +1322,27 @@ mod tests {
         assert!(
             output.contains("[Click here](https://example.com)"),
             "got: {}",
+            output
+        );
+    }
+
+    #[test]
+    fn test_link_with_empty_href_emits_plain_text() {
+        let output = emit_html(&[
+            start_tag("p"),
+            start_tag_with_attrs("a", vec![("href", "")]),
+            text("Not a link"),
+            end_tag("a"),
+            end_tag("p"),
+        ]);
+        assert!(
+            output.contains("Not a link"),
+            "link text should be preserved, got: {}",
+            output
+        );
+        assert!(
+            !output.contains("[Not a link]()"),
+            "empty href must not emit markdown link, got: {}",
             output
         );
     }
