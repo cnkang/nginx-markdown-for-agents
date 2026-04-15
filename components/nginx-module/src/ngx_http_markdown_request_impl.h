@@ -21,8 +21,7 @@
 static ngx_int_t ngx_http_markdown_handle_ctx_alloc_failure(
     ngx_http_request_t *r, ngx_http_markdown_conf_t *conf);
 static void ngx_http_markdown_init_ctx(ngx_http_request_t *r,
-    ngx_http_markdown_ctx_t *ctx, ngx_http_markdown_conf_t *conf,
-    ngx_flag_t filter_enabled);
+    ngx_http_markdown_ctx_t *ctx, ngx_flag_t filter_enabled);
 static void ngx_http_markdown_log_failure_decision(
     ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx,
     ngx_http_markdown_conf_t *conf);
@@ -189,13 +188,11 @@ ngx_http_markdown_handle_ctx_alloc_failure(ngx_http_request_t *r,
  * Parameters:
  *   r    - NGINX request structure
  *   ctx  - freshly allocated context (zeroed by ngx_pcalloc)
- *   conf - module location configuration
  *   filter_enabled - cached header-phase filter decision
  */
 static void
 ngx_http_markdown_init_ctx(ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx,
-    ngx_http_markdown_conf_t *conf,
     ngx_flag_t filter_enabled)
 {
     ctx->request = r;
@@ -359,10 +356,10 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
     }
 
     /* Initialize context */
-    ngx_http_markdown_init_ctx(r, ctx, conf, filter_enabled);
+    ngx_http_markdown_init_ctx(r, ctx, filter_enabled);
 
     /* Set context for this request */
-    ngx_http_set_ctx(r, ctx, ngx_http_markdown_filter_module);
+    r->ctx[ngx_http_markdown_filter_module.ctx_index] = ctx;
 
     /*
      * Detect compression type if auto_decompress is enabled (Task 2.1, 4.2)

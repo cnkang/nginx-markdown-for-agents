@@ -23,16 +23,16 @@ static void ngx_http_markdown_reclassify_fail_open_path(
     ngx_http_markdown_ctx_t *ctx);
 static ngx_int_t ngx_http_markdown_handle_decompression_alloc_error(
     ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx,
-    ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_conf_t *conf,
     ngx_http_markdown_error_category_t category,
     const char *debug_message);
 static ngx_int_t ngx_http_markdown_handle_decompression_conversion_error(
     ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx,
-    ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_conf_t *conf,
     const char *debug_message);
 static void ngx_http_markdown_emit_failure_decision(
-    ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx,
-    ngx_http_markdown_conf_t *conf);
+    ngx_http_request_t *r, const ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_conf_t *conf);
 static void ngx_http_markdown_record_system_failure(
     ngx_http_markdown_ctx_t *ctx);
 const ngx_str_t *ngx_http_markdown_reason_failed_closed(void);
@@ -96,7 +96,7 @@ static ngx_int_t
 ngx_http_markdown_reject_or_fail_open_buffered_response(
     ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx,
-    ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_conf_t *conf,
     const char *debug_message)
 {
     ngx_int_t  rc;
@@ -142,7 +142,7 @@ static ngx_int_t
 ngx_http_markdown_handle_decompression_alloc_error(
     ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx,
-    ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_conf_t *conf,
     ngx_http_markdown_error_category_t category,
     const char *debug_message)
 {
@@ -243,7 +243,7 @@ static ngx_int_t
 ngx_http_markdown_apply_decompressed_payload(ngx_http_request_t *r,
                                              ngx_http_markdown_ctx_t *ctx,
                                              ngx_http_markdown_conf_t *conf,
-                                             ngx_chain_t *decompressed_chain)
+                                             const ngx_chain_t *decompressed_chain)
 {
     const u_char *decompressed_data;
     u_char       *target_data;
@@ -314,7 +314,7 @@ ngx_http_markdown_apply_decompressed_payload(ngx_http_request_t *r,
 /* Log decompression metrics and strip Content-Encoding after success. */
 static void
 ngx_http_markdown_record_decompression_success(ngx_http_request_t *r,
-                                               ngx_http_markdown_ctx_t *ctx)
+                                               const ngx_http_markdown_ctx_t *ctx)
 {
     float ratio;
 
@@ -365,8 +365,8 @@ ngx_http_markdown_record_decompression_success(ngx_http_request_t *r,
  */
 static void
 ngx_http_markdown_emit_failure_decision(ngx_http_request_t *r,
-    ngx_http_markdown_ctx_t *ctx,
-    ngx_http_markdown_conf_t *conf)
+    const ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_conf_t *conf)
 {
     const ngx_str_t  *reason;
     const ngx_str_t  *fail_category;
@@ -525,7 +525,6 @@ ngx_http_markdown_body_filter_buffer_input(ngx_http_request_t *r,
                                            ngx_http_markdown_ctx_t *ctx,
                                            ngx_http_markdown_conf_t *conf)
 {
-    ngx_chain_t  *cl;
     ngx_int_t     rc;
     ngx_flag_t    last_buf;
     size_t        reserve_hint;
@@ -554,7 +553,7 @@ ngx_http_markdown_body_filter_buffer_input(ngx_http_request_t *r,
     }
 
     last_buf = 0;
-    for (cl = in; cl != NULL; cl = cl->next) {
+    for (ngx_chain_t *cl = in; cl != NULL; cl = cl->next) {
         rc = ngx_http_markdown_append_buffered_chunk(r, ctx, conf, cl);
         if (rc != NGX_OK) {
             return rc;
@@ -597,7 +596,7 @@ static ngx_int_t
 ngx_http_markdown_handle_decompression_conversion_error(
     ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx,
-    ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_conf_t *conf,
     const char *debug_message)
 {
     return ngx_http_markdown_handle_decompression_alloc_error(

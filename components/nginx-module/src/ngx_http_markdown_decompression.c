@@ -94,14 +94,14 @@ ngx_http_markdown_detect_compression(ngx_http_request_t *r)
  *   Total size in bytes
  */
 static size_t
-ngx_http_markdown_chain_size(ngx_chain_t *in)
+ngx_http_markdown_chain_size(const ngx_chain_t *in)
 {
     size_t  size;
     size_t  len;
     
     size = 0;
     
-    for (ngx_chain_t *cl = in; cl != NULL; cl = cl->next) {
+    for (const ngx_chain_t *cl = in; cl != NULL; cl = cl->next) {
         if (cl->buf != NULL) {
             len = cl->buf->last - cl->buf->pos;
             if (len > ((size_t) -1) - size) {
@@ -128,14 +128,15 @@ ngx_http_markdown_chain_size(ngx_chain_t *in)
  *   NGX_OK on success, NGX_ERROR on failure
  */
 static ngx_int_t
-ngx_http_markdown_chain_to_buffer(ngx_chain_t *in, u_char *dest, size_t size)
+ngx_http_markdown_chain_to_buffer(const ngx_chain_t *in, u_char *dest,
+                                  size_t size)
 {
     size_t  copied;
     size_t  len;
     
     copied = 0;
     
-    for (ngx_chain_t *cl = in; cl != NULL; cl = cl->next) {
+    for (const ngx_chain_t *cl = in; cl != NULL; cl = cl->next) {
         if (cl->buf == NULL) {
             continue;
         }
@@ -464,8 +465,8 @@ ngx_http_markdown_decompress_gzip(ngx_http_request_t *r,
  */
 ngx_int_t
 ngx_http_markdown_decompress_brotli(ngx_http_request_t *r,
-                                     ngx_chain_t *in,
-                                     ngx_chain_t **out)
+                                    const ngx_chain_t *in,
+                                    ngx_chain_t **out)
 {
 #ifdef NGX_HTTP_BROTLI
     /* Brotli support is compiled in */

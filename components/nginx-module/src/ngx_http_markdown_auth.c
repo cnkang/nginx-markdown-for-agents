@@ -258,9 +258,7 @@ ngx_http_markdown_token_equals_ignore_case(const u_char *left,
                                            const u_char *right,
                                            size_t len)
 {
-    size_t  i;
-
-    for (i = 0; i < len; i++) {
+    for (size_t i = 0; i < len; i++) {
         if (ngx_tolower(left[i]) != ngx_tolower(right[i])) {
             return 0;
         }
@@ -590,7 +588,7 @@ ngx_http_markdown_cache_control_has_directive(const ngx_str_t *value,
 {
     size_t directive_len;
     u_char *p;
-    u_char *end;
+    const u_char *end;
 
     if (value == NULL || value->len == 0 || directive == NULL) {
         return 0;

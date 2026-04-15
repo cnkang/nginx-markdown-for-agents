@@ -48,7 +48,7 @@ ngx_http_markdown_filter(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     ngx_http_compile_complex_value_t   ccv;
     ngx_http_complex_value_t          *complex_value;
     ngx_str_t                         *value;
-    u_char                            *var_marker;
+    const u_char                      *var_marker;
 
     (void) cmd;
 
@@ -216,9 +216,8 @@ static char *
 ngx_http_markdown_auth_cookies(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
     ngx_http_markdown_conf_t *mcf = conf;
-    ngx_str_t                *value;
+    const ngx_str_t          *value;
     ngx_str_t                *pattern;
-    ngx_uint_t                i;
 
     value = cf->args->elts;
 
@@ -231,7 +230,7 @@ ngx_http_markdown_auth_cookies(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         return NGX_CONF_ERROR;
     }
 
-    for (i = 1; i < cf->args->nelts; i++) {
+    for (ngx_uint_t i = 1; i < cf->args->nelts; i++) {
         if (value[i].len == 0) {
             ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
                                "empty cookie pattern in \"%V\" directive",
@@ -366,12 +365,11 @@ static char *
 ngx_http_markdown_stream_types(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
     ngx_http_markdown_conf_t *mcf = conf;
-    ngx_str_t                *value;
+    const ngx_str_t          *value;
     ngx_str_t                *type;
-    char                     *type_value;
-    char                     *slash;
-    char                     *next_slash;
-    ngx_uint_t                i;
+    const char               *type_value;
+    const char               *slash;
+    const char               *next_slash;
 
     value = cf->args->elts;
 
@@ -384,7 +382,7 @@ ngx_http_markdown_stream_types(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         return NGX_CONF_ERROR;
     }
 
-    for (i = 1; i < cf->args->nelts; i++) {
+    for (ngx_uint_t i = 1; i < cf->args->nelts; i++) {
         if (value[i].len == 0) {
             ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
                                "empty content type in \"%V\" directive",
@@ -392,12 +390,12 @@ ngx_http_markdown_stream_types(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
             return NGX_CONF_ERROR;
         }
 
-        type_value = (char *) value[i].data;
-        slash = ngx_strchr(type_value, '/');
+        type_value = (const char *) value[i].data;
+        slash = (const char *) ngx_strchr(type_value, '/');
         next_slash = NULL;
 
         if (slash != NULL && (size_t) (slash - type_value + 1) < value[i].len) {
-            next_slash = ngx_strchr(slash + 1, '/');
+            next_slash = (const char *) ngx_strchr(slash + 1, '/');
         }
 
         if (slash == NULL
@@ -476,11 +474,7 @@ ngx_http_markdown_large_body_threshold(ngx_conf_t *cf,
         return NGX_CONF_ERROR;
     }
 
-    if (mcf->large_body_threshold == 0) {
-        /* Explicit "0" is treated as off */
-        return NGX_CONF_OK;
-    }
-
+    /* Explicit "0" is treated as off and already normalized above. */
     return NGX_CONF_OK;
 }
 

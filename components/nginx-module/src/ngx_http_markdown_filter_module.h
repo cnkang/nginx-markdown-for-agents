@@ -548,7 +548,7 @@ void ngx_http_markdown_sort_accept_entries(ngx_array_t *entries);
 
 /* Determine if request should be converted based on Accept header */
 ngx_int_t ngx_http_markdown_should_convert(ngx_http_request_t *r,
-    ngx_http_markdown_conf_t *conf);
+    const ngx_http_markdown_conf_t *conf);
 
 /* Resolve markdown_filter on/off state for the current request */
 ngx_flag_t ngx_http_markdown_is_enabled(ngx_http_request_t *r,
@@ -665,7 +665,10 @@ void ngx_http_markdown_remove_content_encoding(ngx_http_request_t *r);
  * to ensure secure caching behavior.
  */
 
-#include "ngx_http_markdown_exports.h"
+ngx_int_t ngx_http_markdown_is_authenticated(ngx_http_request_t *r,
+    const ngx_http_markdown_conf_t *conf);
+ngx_int_t ngx_http_markdown_modify_cache_control_for_auth(
+    ngx_http_request_t *r);
 
 /*
  * Shared conversion-option helpers
@@ -676,7 +679,7 @@ void ngx_http_markdown_remove_content_encoding(ngx_http_request_t *r);
 ngx_int_t ngx_http_markdown_construct_base_url(ngx_http_request_t *r,
     ngx_pool_t *pool, ngx_str_t *base_url);
 ngx_int_t ngx_http_markdown_prepare_conversion_options(ngx_http_request_t *r,
-    ngx_http_markdown_conf_t *conf, struct MarkdownOptions *options);
+    const ngx_http_markdown_conf_t *conf, struct MarkdownOptions *options);
 
 /*
  * Conditional request handling functions
@@ -720,8 +723,8 @@ ngx_http_markdown_decompress_gzip(ngx_http_request_t *r,
 /* Decompress brotli compressed data using brotli library */
 ngx_int_t
 ngx_http_markdown_decompress_brotli(ngx_http_request_t *r,
-                                     ngx_chain_t *in,
-                                     ngx_chain_t **out);
+                                    const ngx_chain_t *in,
+                                    ngx_chain_t **out);
 
 /* Unified decompression entry function */
 ngx_int_t
