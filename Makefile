@@ -60,6 +60,7 @@ NGINX_HEADER := $(NGINX_MODULE_DIR)/src/markdown_converter.h
         verify-streaming-failure-cache-e2e \
         verify-streaming-failure-cache-e2e-plan \
         test-rust-streaming \
+        coverage-c coverage-rust coverage-all \
         clean help
 
 all: build
@@ -218,10 +219,27 @@ verify-streaming-failure-cache-e2e:
 verify-streaming-failure-cache-e2e-plan:
 	./tools/e2e/verify_streaming_failure_cache_e2e.sh --plan
 
+# ── Coverage targets ────────────────────────────────────────────────
+# Generate lcov reports consumed by SonarCloud.  Output lands in
+# coverage/ at the repo root so sonar.coverageReportPaths can find it.
+
+COVERAGE_DIR := coverage
+
+coverage-c:
+	@mkdir -p $(COVERAGE_DIR)
+	$(MAKE) -C $(NGINX_TEST_DIR) unit-coverage COV_DIR=$(CURDIR)/$(COVERAGE_DIR)
+
+coverage-rust:
+	@mkdir -p $(COVERAGE_DIR)
+	cd $(RUST_DIR) && cargo llvm-cov --all-features --lcov --output-path $(CURDIR)/$(COVERAGE_DIR)/rust-coverage.lcov
+
+coverage-all: coverage-c coverage-rust
+
 clean:
 	cd $(RUST_DIR) && cargo clean
 	$(MAKE) -C $(NGINX_TEST_DIR) clean || true
 	find $(NGINX_MODULE_DIR) -name '*.dSYM' -type d -prune -exec rm -rf {} +
+	rm -rf coverage
 
 help:
 	@echo "NGINX Markdown for Agents - Build/Test"
@@ -253,4 +271,7 @@ help:
 	@echo "  release-gates-check      - Validate 0.5.0 release gate framework (spec #12 deliverables)"
 	@echo "  release-gates-check-legacy - Validate 0.4.0 release gate documents"
 	@echo "  release-gates-check-strict - Validate all sub-specs #12-#18 for full compliance"
+	@echo "  coverage-c               - Generate C unit test coverage (lcov)"
+	@echo "  coverage-rust            - Generate Rust test coverage (llvm-cov lcov)"
+	@echo "  coverage-all             - Generate all coverage reports"
 	@echo "  clean                    - Clean build artifacts"
