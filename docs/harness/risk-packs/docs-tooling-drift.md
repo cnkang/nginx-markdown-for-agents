@@ -6,8 +6,10 @@ summaries change together.
 ## Triggers
 
 - touched files under `docs/**`, `tools/docs/**`, `tools/release/**`
+- touched `tools/sonar/**` or `.sonarcloud.properties`
 - touched `AGENTS.md`, `Makefile`, or `.github/workflows/**`
-- keywords like `validator`, `path filter`, `installation`, `release gate`
+- keywords like `validator`, `path filter`, `installation`, `release gate`,
+  `sonar`, `compile_commands`
 
 ## Common Supporting Packs
 
