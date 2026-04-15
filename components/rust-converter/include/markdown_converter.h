@@ -133,13 +133,10 @@ typedef struct MarkdownResult {
   /**
    * Peak working-set memory estimate during streaming conversion (bytes).
    *
-   * This value is derived from converter-owned resident state and is
-   * not a process RSS/high-water-mark measurement.
-   *
-   * Populated by `markdown_streaming_finalize()` from
-   * `StreamingStats.peak_memory_estimate`. Valid only when
-   * `error_code == 0` (ERROR_SUCCESS). Must be read before
-   * calling `markdown_result_free()`.
+   * This is derived from converter-owned resident state and is not
+   * a process RSS/high-water-mark measurement.
+   * Populated by `markdown_streaming_finalize` from
+   * `StreamingStats.peak_memory_estimate`.
    */
   uintptr_t peak_memory_estimate;
 } MarkdownResult;
@@ -227,11 +224,11 @@ void markdown_converter_free(struct MarkdownConverterHandle *handle);
  * ```ignore
  * # use std::ptr;
  * use nginx_markdown_converter::ffi::{MarkdownOptions, markdown_incremental_new, markdown_incremental_free};
- * Construct options appropriate for your environment.
+ * // Construct options appropriate for your environment.
  * let opts = MarkdownOptions::default();
  * let handle = unsafe { markdown_incremental_new(&opts) };
  * assert!(!handle.is_null());
- * Either finalize to produce output or free when done without producing output.
+ * // Either finalize to produce output or free when done without producing output.
  * unsafe { markdown_incremental_free(handle) };
  * ```ignore
  */
@@ -259,13 +256,12 @@ struct IncrementalConverterHandle *markdown_incremental_new(const struct Markdow
  * use std::ptr;
  * use nginx_markdown_converter::ffi::{markdown_incremental_new, markdown_incremental_feed, markdown_incremental_free};
  * unsafe {
- *     Populate as needed for your environment.
- *     let options = ptr::null();
+ *     let options = ptr::null(); // populate as needed
  *     let handle = markdown_incremental_new(options);
  *     if !handle.is_null() {
- *         Feed a chunk.
+ *         // feed a chunk
  *         let _ = markdown_incremental_feed(handle, b"hello".as_ptr(), 5);
- *         Finalize or free the handle as appropriate.
+ *         // finalize or free the handle as appropriate
  *         markdown_incremental_free(handle);
  *     }
  * }
@@ -301,7 +297,7 @@ uint32_t markdown_incremental_feed(struct IncrementalConverterHandle *handle,
  * use std::ptr::null_mut;
  * use nginx_markdown_converter::ffi::{markdown_incremental_finalize, ERROR_INVALID_INPUT};
  *
- * Passing NULL result pointer is invalid and returns ERROR_INVALID_INPUT.
+ * // Passing NULL result pointer is invalid and returns ERROR_INVALID_INPUT.
  * let code = unsafe { markdown_incremental_finalize(null_mut(), null_mut()) };
  * assert_eq!(code, ERROR_INVALID_INPUT);
  * ```
@@ -328,6 +324,30 @@ uint32_t markdown_incremental_finalize(struct IncrementalConverterHandle *handle
  *   [`markdown_incremental_new`] that has not been finalized or freed.
  */
 void markdown_incremental_free(struct IncrementalConverterHandle *handle);
+#endif
+
+#if defined(MARKDOWN_STREAMING_ENABLED)
+/**
+ * Create a new streaming converter handle and return an explicit status code.
+ *
+ * This API is the recommended constructor for C callers that need actionable
+ * failure classification. On success, `*out_handle` receives a non-NULL handle.
+ * On error, `*out_handle` is set to NULL and the function returns an error code.
+ *
+ * # Safety
+ *
+ * - `out_handle` must be a valid, writable pointer to `*mut StreamingConverterHandle`.
+ * - `options` must point to a valid, properly aligned `MarkdownOptions` that
+ *   remains readable for the duration of this call.
+ *
+ * # Returns
+ *
+ * - `ERROR_SUCCESS` (0) on success
+ * - `ERROR_INVALID_INPUT` (5) for NULL pointers or invalid options
+ * - `ERROR_INTERNAL` (99) for caught panics
+ */
+uint32_t markdown_streaming_new_with_code(const struct MarkdownOptions *options,
+                                          struct StreamingConverterHandle **out_handle);
 #endif
 
 #if defined(MARKDOWN_STREAMING_ENABLED)

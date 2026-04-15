@@ -59,6 +59,74 @@ fn budget_from_streaming_total(streaming_budget: u64) -> MemoryBudget {
     }
 }
 
+fn markdown_streaming_new_impl(
+    options: *const MarkdownOptions,
+) -> Result<*mut StreamingConverterHandle, u32> {
+    if options.is_null() {
+        return Err(ERROR_INVALID_INPUT);
+    }
+
+    // SAFETY: caller guarantees `options` is valid and aligned.
+    let opts_ref = unsafe { &*options };
+    let decoded = decode_options(opts_ref).map_err(|err| err.code())?;
+
+    let budget = budget_from_streaming_total(decoded.streaming_budget);
+
+    let mut converter = StreamingConverter::new(decoded.conversion, budget);
+    converter.set_content_type(decoded.content_type.map(ToOwned::to_owned));
+    if !decoded.timeout.is_zero() {
+        converter.set_timeout(decoded.timeout);
+    }
+
+    Ok(Box::into_raw(Box::new(StreamingConverterHandle {
+        inner: converter,
+        generate_etag: decoded.generate_etag,
+        estimate_tokens: decoded.estimate_tokens,
+    })))
+}
+
+/// Create a new streaming converter handle and return an explicit status code.
+///
+/// This API is the recommended constructor for C callers that need actionable
+/// failure classification. On success, `*out_handle` receives a non-NULL handle.
+/// On error, `*out_handle` is set to NULL and the function returns an error code.
+///
+/// # Safety
+///
+/// - `out_handle` must be a valid, writable pointer to `*mut StreamingConverterHandle`.
+/// - `options` must point to a valid, properly aligned `MarkdownOptions` that
+///   remains readable for the duration of this call.
+///
+/// # Returns
+///
+/// - `ERROR_SUCCESS` (0) on success
+/// - `ERROR_INVALID_INPUT` (5) for NULL pointers or invalid options
+/// - `ERROR_INTERNAL` (99) for caught panics
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn markdown_streaming_new_with_code(
+    options: *const MarkdownOptions,
+    out_handle: *mut *mut StreamingConverterHandle,
+) -> u32 {
+    if out_handle.is_null() {
+        return ERROR_INVALID_INPUT;
+    }
+
+    // SAFETY: validated as non-NULL above.
+    unsafe { *out_handle = ptr::null_mut() };
+
+    let result = panic::catch_unwind(|| markdown_streaming_new_impl(options));
+
+    match result {
+        Ok(Ok(handle)) => {
+            // SAFETY: validated as non-NULL above.
+            unsafe { *out_handle = handle };
+            ERROR_SUCCESS
+        }
+        Ok(Err(code)) => code,
+        Err(_) => ERROR_INTERNAL,
+    }
+}
+
 /// Create a new streaming converter handle.
 ///
 /// The returned handle is an opaque pointer owned by the caller and must be
@@ -80,34 +148,12 @@ fn budget_from_streaming_total(streaming_budget: u64) -> MemoryBudget {
 pub unsafe extern "C" fn markdown_streaming_new(
     options: *const MarkdownOptions,
 ) -> *mut StreamingConverterHandle {
-    let result = panic::catch_unwind(|| -> Result<*mut StreamingConverterHandle, ()> {
-        if options.is_null() {
-            return Err(());
-        }
-        // SAFETY: caller guarantees `options` is valid and aligned.
-        let opts_ref = unsafe { &*options };
-        let decoded = decode_options(opts_ref).map_err(|e| {
-            eprintln!("markdown_streaming_new: failed to decode options: {e}");
-        })?;
-
-        let budget = budget_from_streaming_total(decoded.streaming_budget);
-
-        let mut converter = StreamingConverter::new(decoded.conversion, budget);
-        converter.set_content_type(decoded.content_type.map(ToOwned::to_owned));
-        if !decoded.timeout.is_zero() {
-            converter.set_timeout(decoded.timeout);
-        }
-
-        Ok(Box::into_raw(Box::new(StreamingConverterHandle {
-            inner: converter,
-            generate_etag: decoded.generate_etag,
-            estimate_tokens: decoded.estimate_tokens,
-        })))
-    });
-
-    match result {
-        Ok(Ok(ptr)) => ptr,
-        _ => ptr::null_mut(),
+    let mut handle = ptr::null_mut();
+    let rc = unsafe { markdown_streaming_new_with_code(options, &mut handle) };
+    if rc == ERROR_SUCCESS {
+        handle
+    } else {
+        ptr::null_mut()
     }
 }
 
@@ -656,6 +702,44 @@ mod tests {
     fn test_streaming_null_options() {
         let handle = unsafe { markdown_streaming_new(ptr::null()) };
         assert!(handle.is_null(), "NULL options should return NULL handle");
+    }
+
+    #[test]
+    fn test_streaming_new_with_code_success() {
+        let opts = test_options();
+        let mut handle: *mut StreamingConverterHandle = ptr::null_mut();
+        let rc = unsafe { markdown_streaming_new_with_code(&opts, &mut handle) };
+        assert_eq!(rc, ERROR_SUCCESS);
+        assert!(!handle.is_null());
+        unsafe { markdown_streaming_abort(handle) };
+    }
+
+    #[test]
+    fn test_streaming_new_with_code_null_options() {
+        let mut handle: *mut StreamingConverterHandle = ptr::null_mut();
+        let rc = unsafe { markdown_streaming_new_with_code(ptr::null(), &mut handle) };
+        assert_eq!(rc, ERROR_INVALID_INPUT);
+        assert!(handle.is_null(), "error path must keep out handle NULL");
+    }
+
+    #[test]
+    fn test_streaming_new_with_code_null_out_handle() {
+        let opts = test_options();
+        let rc = unsafe { markdown_streaming_new_with_code(&opts, ptr::null_mut()) };
+        assert_eq!(rc, ERROR_INVALID_INPUT);
+    }
+
+    #[test]
+    fn test_streaming_new_with_code_decoding_error() {
+        let opts = MarkdownOptions {
+            content_type: ptr::null(),
+            content_type_len: 1,
+            ..test_options()
+        };
+        let mut handle: *mut StreamingConverterHandle = ptr::null_mut();
+        let rc = unsafe { markdown_streaming_new_with_code(&opts, &mut handle) };
+        assert_eq!(rc, ERROR_INVALID_INPUT);
+        assert!(handle.is_null(), "decode failure must not allocate handle");
     }
 
     #[test]

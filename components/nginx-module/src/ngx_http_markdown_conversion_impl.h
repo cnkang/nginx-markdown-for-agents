@@ -591,6 +591,7 @@ ngx_http_markdown_shadow_compare(
     struct MarkdownResult             st_result;
     uint8_t                          *out_data;
     uintptr_t                         out_len;
+    uint32_t                          init_rc;
     uint32_t                          rc;
     ngx_time_t                       *tp;
     ngx_msec_t                        shadow_start;
@@ -612,12 +613,14 @@ ngx_http_markdown_shadow_compare(
     tp = ngx_timeofday();
     shadow_start = (ngx_msec_t) (tp->sec * 1000 + tp->msec);
 
-    handle = markdown_streaming_new(&options);
-    if (handle == NULL) {
-        ngx_log_debug0(NGX_LOG_DEBUG_HTTP,
+    init_rc = markdown_streaming_new_with_code(
+        &options, &handle);
+    if (init_rc != ERROR_SUCCESS || handle == NULL) {
+        ngx_log_debug1(NGX_LOG_DEBUG_HTTP,
             r->connection->log, 0,
             "markdown shadow: streaming engine "
-            "init failed");
+            "init failed rc=%ui",
+            (ngx_uint_t) init_rc);
         return;
     }
 

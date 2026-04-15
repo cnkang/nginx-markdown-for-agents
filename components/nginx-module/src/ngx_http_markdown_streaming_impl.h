@@ -1712,6 +1712,7 @@ ngx_http_markdown_streaming_init_handle(
 {
     struct MarkdownOptions  options;
     ngx_pool_cleanup_t     *cln;
+    uint32_t                init_rc;
     ngx_int_t               rc;
 
     ngx_memzero(&options, sizeof(struct MarkdownOptions));
@@ -1727,15 +1728,18 @@ ngx_http_markdown_streaming_init_handle(
             r, ctx, conf, 0);
     }
 
-    ctx->streaming.handle =
-        markdown_streaming_new(&options);
-    if (ctx->streaming.handle == NULL) {
+    init_rc = markdown_streaming_new_with_code(
+        &options, &ctx->streaming.handle);
+    if (init_rc != ERROR_SUCCESS
+        || ctx->streaming.handle == NULL)
+    {
         ngx_log_error(NGX_LOG_ERR,
             r->connection->log, 0,
             "markdown streaming: failed to "
-            "create streaming handle");
+            "create streaming handle rc=%ui",
+            (ngx_uint_t) init_rc);
         return ngx_http_markdown_streaming_precommit_error(
-            r, ctx, conf, 0);
+            r, ctx, conf, init_rc);
     }
 
     /*
