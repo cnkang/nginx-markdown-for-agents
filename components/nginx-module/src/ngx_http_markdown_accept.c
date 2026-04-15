@@ -47,11 +47,15 @@ static ngx_int_t ngx_http_markdown_parse_accept_entry(ngx_str_t *entry_str,
     ngx_http_markdown_accept_entry_t *entry, ngx_uint_t order);
 static ngx_int_t ngx_http_markdown_parse_accept_segment(ngx_http_request_t *r,
     u_char *start, const u_char *end, ngx_array_t *entries, ngx_uint_t *order);
-static void ngx_http_markdown_skip_accept_spaces(u_char **p, u_char *end);
-static void ngx_http_markdown_skip_accept_comma(u_char **p, u_char *end);
+static void ngx_http_markdown_skip_accept_spaces(u_char **p,
+    const u_char *end);
+static void ngx_http_markdown_skip_accept_comma(u_char **p,
+    const u_char *end);
 static float ngx_http_markdown_parse_q_value(ngx_str_t *params);
+static float ngx_http_markdown_extract_q_param(u_char *start,
+    const u_char *end);
 static ngx_http_markdown_specificity_t ngx_http_markdown_get_specificity(
-    ngx_str_t *type, ngx_str_t *subtype);
+    const ngx_str_t *type, const ngx_str_t *subtype);
 static int ngx_http_markdown_compare_entries(const void *a, const void *b);
 static ngx_int_t ngx_http_markdown_matches_markdown(
     ngx_http_markdown_accept_entry_t *entry, ngx_flag_t on_wildcard);
@@ -76,9 +80,11 @@ ngx_int_t
 ngx_http_markdown_parse_accept(ngx_http_request_t *r, ngx_str_t *accept,
     ngx_array_t *entries)
 {
-    u_char      *p, *start, *end;
-    ngx_uint_t   order;
-    ngx_int_t    rc;
+    u_char            *p;
+    u_char            *start;
+    const u_char      *end;
+    ngx_uint_t         order;
+    ngx_int_t          rc;
     
     if (accept == NULL || accept->len == 0) {
         return NGX_ERROR;
@@ -117,7 +123,7 @@ ngx_http_markdown_parse_accept(ngx_http_request_t *r, ngx_str_t *accept,
 }
 
 static void
-ngx_http_markdown_skip_accept_spaces(u_char **p, u_char *end)
+ngx_http_markdown_skip_accept_spaces(u_char **p, const u_char *end)
 {
     /* RFC 9110 allows optional whitespace around separators and parameters. */
     while (*p < end && (**p == ' ' || **p == '\t')) {
@@ -126,7 +132,7 @@ ngx_http_markdown_skip_accept_spaces(u_char **p, u_char *end)
 }
 
 static void
-ngx_http_markdown_skip_accept_comma(u_char **p, u_char *end)
+ngx_http_markdown_skip_accept_comma(u_char **p, const u_char *end)
 {
     /* Caller already consumed one segment; skip a trailing comma if present. */
     if (*p < end && **p == ',') {
@@ -194,7 +200,9 @@ static ngx_int_t
 ngx_http_markdown_parse_accept_entry(ngx_str_t *entry_str,
     ngx_http_markdown_accept_entry_t *entry, ngx_uint_t order)
 {
-    u_char      *p, *slash, *semicolon;
+    u_char      *p;
+    u_char      *slash;
+    u_char      *semicolon;
     ngx_str_t    params;
     
     p = entry_str->data;
@@ -264,6 +272,45 @@ ngx_http_markdown_parse_accept_entry(ngx_str_t *entry_str,
 }
 
 /*
+ * Extract and parse a numeric q-value from a "q=<value>" token.
+ *
+ * @param start  Pointer to the first character after "q="
+ * @param end    Pointer past the end of the parameter region
+ * @return       Parsed q-value clamped to [0.0, 1.0], or -1.0f on error
+ */
+static float
+ngx_http_markdown_extract_q_param(u_char *start, const u_char *end)
+{
+    const u_char  *p;
+    float          q_value;
+    ngx_int_t      n;
+
+    p = start;
+
+    /* Find end of q-value (semicolon, comma, or end) */
+    while (p < end && *p != ';' && *p != ',') {
+        p++;
+    }
+
+    /* Parse q-value */
+    n = ngx_atofp(start, p - start, 3);
+    if (n == NGX_ERROR) {
+        return -1.0f;
+    }
+
+    q_value = (float) n / 1000.0f;
+
+    /* Clamp to valid range [0.0, 1.0] */
+    if (q_value < 0.0f) {
+        q_value = 0.0f;
+    } else if (q_value > 1.0f) {
+        q_value = 1.0f;
+    }
+
+    return q_value;
+}
+
+/*
  * Parse q-value from parameters
  *
  * Extracts the q-value from parameter string like "q=0.9".
@@ -275,9 +322,9 @@ ngx_http_markdown_parse_accept_entry(ngx_str_t *entry_str,
 static float
 ngx_http_markdown_parse_q_value(ngx_str_t *params)
 {
-    u_char  *p, *end, *q_start;
-    float    q_value;
-    ngx_int_t  n;
+    u_char        *p;
+    const u_char  *end;
+    float          result;
     
     p = params->data;
     end = params->data + params->len;
@@ -296,29 +343,13 @@ ngx_http_markdown_parse_q_value(ngx_str_t *params)
         /* Check for "q=" */
         if (p + 2 <= end && *p == 'q' && *(p + 1) == '=') {
             p += 2;
-            q_start = p;
-            
-            /* Find end of q-value (semicolon, comma, or end) */
-            while (p < end && *p != ';' && *p != ',') {
-                p++;
-            }
-            
-            /* Parse q-value */
-            n = ngx_atofp(q_start, p - q_start, 3);
-            if (n == NGX_ERROR) {
+
+            result = ngx_http_markdown_extract_q_param(p, end);
+            if (result < 0.0f) {
                 return 1.0f; /* Invalid q-value, use default */
             }
-            
-            q_value = (float)n / 1000.0f;
-            
-            /* Clamp to valid range [0.0, 1.0] */
-            if (q_value < 0.0f) {
-                q_value = 0.0f;
-            } else if (q_value > 1.0f) {
-                q_value = 1.0f;
-            }
-            
-            return q_value;
+
+            return result;
         }
         
         /* Skip to next parameter */
@@ -346,7 +377,8 @@ ngx_http_markdown_parse_q_value(ngx_str_t *params)
  * @return         The specificity level
  */
 static ngx_http_markdown_specificity_t
-ngx_http_markdown_get_specificity(ngx_str_t *type, ngx_str_t *subtype)
+ngx_http_markdown_get_specificity(const ngx_str_t *type,
+    const ngx_str_t *subtype)
 {
     /* Check for star/slash-star */
     if (type->len == 1 && type->data[0] == '*' &&

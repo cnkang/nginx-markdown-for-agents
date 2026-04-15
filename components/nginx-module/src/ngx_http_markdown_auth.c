@@ -35,8 +35,9 @@ static u_char ngx_http_markdown_cc_public[] = "public";
 static u_char ngx_http_markdown_cc_no_store[] = "no-store";
 static u_char ngx_http_markdown_cc_suffix_private[] = ", private";
 
-static ngx_int_t ngx_http_markdown_cookie_matches_pattern(ngx_str_t *cookie_name,
-                                                          ngx_str_t *pattern);
+static ngx_int_t ngx_http_markdown_cookie_matches_pattern(
+    const ngx_str_t *cookie_name,
+    const ngx_str_t *pattern);
 static void ngx_http_markdown_skip_cache_control_separators(
     const u_char **cursor, const u_char *end);
 static void ngx_http_markdown_trim_cache_control_token(
@@ -363,7 +364,7 @@ ngx_http_markdown_read_cookie_name(u_char **cursor, const u_char *end,
 
 /* Test a cookie name against all configured auth patterns, returning the first match. */
 static ngx_int_t
-ngx_http_markdown_cookie_matches_any_pattern(ngx_str_t *cookie_name,
+ngx_http_markdown_cookie_matches_any_pattern(const ngx_str_t *cookie_name,
                                              ngx_str_t *patterns,
                                              ngx_uint_t pattern_count,
                                              ngx_str_t **matched_pattern)
@@ -417,7 +418,8 @@ ngx_http_markdown_has_authorization_header(const ngx_http_request_t *r)
  * @return             1 if matches, 0 otherwise
  */
 static ngx_int_t
-ngx_http_markdown_cookie_matches_pattern(ngx_str_t *cookie_name, ngx_str_t *pattern)
+ngx_http_markdown_cookie_matches_pattern(const ngx_str_t *cookie_name,
+    const ngx_str_t *pattern)
 {
     size_t         pattern_len;
     size_t         cookie_len;
