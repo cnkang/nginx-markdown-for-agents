@@ -46,6 +46,8 @@ static ngx_int_t ngx_http_markdown_next_cache_control_token(
     const u_char **token_start, const u_char **token_end);
 static ngx_flag_t ngx_http_markdown_cache_control_token_is_public(
     const u_char *token_start, const u_char *token_end);
+static ngx_flag_t ngx_http_markdown_token_equals_ignore_case(
+    const u_char *left, const u_char *right, size_t len);
 
 /* Find a response header by name in the outgoing headers list. */
 static ngx_table_elt_t *
@@ -252,6 +254,22 @@ ngx_http_markdown_next_cache_control_token(const u_char **cursor,
 }
 
 static ngx_flag_t
+ngx_http_markdown_token_equals_ignore_case(const u_char *left,
+                                           const u_char *right,
+                                           size_t len)
+{
+    size_t  i;
+
+    for (i = 0; i < len; i++) {
+        if (ngx_tolower(left[i]) != ngx_tolower(right[i])) {
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
+static ngx_flag_t
 ngx_http_markdown_cache_control_token_is_public(const u_char *token_start,
                                                 const u_char *token_end)
 {
@@ -261,10 +279,9 @@ ngx_http_markdown_cache_control_token_is_public(const u_char *token_start,
         return 0;
     }
 
-    return (ngx_strncasecmp((u_char *) token_start,
-                            ngx_http_markdown_cc_public,
-                            sizeof(ngx_http_markdown_cc_public) - 1)
-            == 0);
+    return ngx_http_markdown_token_equals_ignore_case(
+        token_start, ngx_http_markdown_cc_public,
+        sizeof(ngx_http_markdown_cc_public) - 1);
 }
 
 /* Return configured auth-cookie patterns, falling back to built-in defaults. */

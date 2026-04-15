@@ -159,6 +159,26 @@ def check_duplicate_sync() -> list[str]:
     return [f"duplicate-sync: {line}" for line in output.splitlines() if line.strip()]
 
 
+def _validate_kiro_reference(raw: str, tracked: set[str]) -> str | None:
+    if raw in ALLOWED_KIRO_PATHS:
+        if tracked and raw not in tracked:
+            return f"referenced path '{raw}' is not tracked"
+        return None
+
+    if raw.endswith("/") or "*" in raw:
+        return (
+            f"avoid directory/glob reference '{raw}'; "
+            "link tracked files instead"
+        )
+
+    if tracked and raw not in tracked:
+        return (
+            f"internal path '{raw}' is not tracked; "
+            "remove or replace with tracked file reference"
+        )
+    return None
+
+
 def check_internal_reference_policy(
     files: list[Path], tracked_paths: set[str] | None = None
 ) -> list[str]:
@@ -183,23 +203,9 @@ def check_internal_reference_policy(
 
             for m in KIRO_PATH_RE.finditer(line):
                 raw = m.group("path").rstrip(".,:;)]}\"'")
-                if raw in ALLOWED_KIRO_PATHS:
-                    if tracked and raw not in tracked:
-                        errors.append(
-                            f"{f}:{line_no}: referenced path '{raw}' is not tracked"
-                        )
-                    continue
-                if raw.endswith("/") or "*" in raw:
-                    errors.append(
-                        f"{f}:{line_no}: avoid directory/glob reference '{raw}'; "
-                        "link tracked files instead"
-                    )
-                    continue
-                if tracked and raw not in tracked:
-                    errors.append(
-                        f"{f}:{line_no}: internal path '{raw}' is not tracked; "
-                        "remove or replace with tracked file reference"
-                    )
+                reference_error = _validate_kiro_reference(raw, tracked)
+                if reference_error is not None:
+                    errors.append(f"{f}:{line_no}: {reference_error}")
     return errors
 
 

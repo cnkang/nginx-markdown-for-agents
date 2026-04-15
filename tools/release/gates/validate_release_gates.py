@@ -122,6 +122,8 @@ TEST_MATRIX_DIMENSIONS = {
     "Conversion Path": ["convert", "skip", "fallback/fail-open"],
 }
 
+EMPTY_CAPABILITY_NAME = "<empty>"
+
 
 class ValidationResult:
     """Collects pass/fail/skip results for structured output."""
@@ -613,10 +615,10 @@ def check_compat_states(
 def _row_cap_name(row: list[str], capability_idx: int) -> str:
     """Return the capability name from a row, or '<empty>' as fallback."""
     if 0 <= capability_idx < len(row):
-        return row[capability_idx].strip() or "<empty>"
+        return row[capability_idx].strip() or EMPTY_CAPABILITY_NAME
     if row:
-        return row[0].strip() or "<empty>"
-    return "<empty>"
+        return row[0].strip() or EMPTY_CAPABILITY_NAME
+    return EMPTY_CAPABILITY_NAME
 
 
 def _validate_classification_row(row: list[str], idx: int, cap_name: str) -> str | None:
@@ -634,9 +636,7 @@ def _validate_multi_state_row(
 ) -> str | None:
     """Return an error string if the row does not mark exactly one state, else None."""
     marked = sum(bool(idx < len(row) and row[idx].strip()) for idx in state_indices)
-    if marked != 1:
-        return f"{cap_name} (marked {marked} states)"
-    return None
+    return f"{cap_name} (marked {marked} states)" if marked != 1 else None
 
 
 def check_compat_row_validity(
