@@ -1,0 +1,34 @@
+{
+  "schema_version": "1.0.0",
+  "diff_testing_complete": "FAIL",
+  "rollout_docs_complete": "FAIL",
+  "targets": {
+    "bounded_memory": {
+      "description": "Peak RSS does not scale linearly with input size",
+      "method": "Linear regression on peak_rss for large + extra-large tier (1MB, 5MB, 10MB, 64MB+), slope < 0.5 bytes/input_byte",
+      "max_slope_bytes_per_input_byte": 0.5,
+      "min_data_points": 4,
+      "insufficient_data_policy": "If data points < min_data_points, verdict is INSUFFICIENT_DATA (treated as FAIL)"
+    },
+    "ttfb_improvement": {
+      "description": "Streaming TTFB is significantly earlier than full-buffer conversion completion time",
+      "method": "For large tier, streaming ttfb_ms < full-buffer p50_ms * 0.5",
+      "max_ratio": 0.5
+    },
+    "no_regression_small_medium": {
+      "description": "No unacceptable regression on small/medium tier",
+      "method": "streaming p50_ms <= full-buffer p50_ms * 1.3",
+      "max_ratio": 1.3
+    },
+    "streaming_supported_parity": {
+      "description": "Streaming-supported corpus output is byte-identical to full-buffer output",
+      "method": "All fixtures in streaming-supported corpus must have 100% parity",
+      "threshold": 1.0
+    },
+    "fallback_expected_correctness": {
+      "description": "Fallback-expected corpus correctly triggers pre-commit fallback",
+      "method": "All fixtures in fallback-expected corpus must return fallback signal in Pre_Commit_Phase and produce correct output via full-buffer",
+      "threshold": 1.0
+    }
+  }
+}
