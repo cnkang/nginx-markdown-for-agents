@@ -174,7 +174,7 @@ ngx_http_markdown_log_decision_debug(ngx_http_request_t *r,
     ngx_str_t                     accept_value;
     ngx_str_t                     filter_value;
     ngx_str_t                     empty = ngx_string("-");
-    ngx_http_markdown_ctx_t      *ctx;
+    const ngx_http_markdown_ctx_t *ctx;
 
     /*
      * Resolve filter_value from the cached header-phase decision

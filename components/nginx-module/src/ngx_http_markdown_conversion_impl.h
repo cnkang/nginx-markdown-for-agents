@@ -56,23 +56,23 @@ static u_char ngx_http_markdown_scheme_http[] = "http";
 static u_char ngx_http_markdown_scheme_https[] = "https";
 
 /* Find a request header value by name in the generic linked-list storage. */
-static ngx_str_t *
+static const ngx_str_t *
 ngx_http_markdown_find_request_header_value(ngx_http_request_t *r,
-                                            u_char *name,
+                                            const u_char *name,
                                             size_t name_len)
 {
-    ngx_list_part_t  *part;
-
     if (r->headers_in.headers.part.nelts == 0) {
         return NULL;
     }
 
-    for (part = &r->headers_in.headers.part; part != NULL; part = part->next) {
+    for (ngx_list_part_t *part = &r->headers_in.headers.part;
+         part != NULL;
+         part = part->next)
+    {
         ngx_table_elt_t  *headers;
-        ngx_uint_t        i;
 
         headers = part->elts;
-        for (i = 0; i < part->nelts; i++) {
+        for (ngx_uint_t i = 0; i < part->nelts; i++) {
             if (headers[i].key.len == name_len
                 && ngx_strncasecmp(headers[i].key.data, name, name_len) == 0)
             {
@@ -108,10 +108,10 @@ ngx_http_markdown_select_base_url_parts(ngx_http_request_t *r,
                                         ngx_str_t *scheme,
                                         ngx_str_t *host)
 {
-    ngx_str_t                 *x_forwarded_proto;
-    ngx_str_t                 *x_forwarded_host;
-    ngx_http_core_srv_conf_t *cscf;
-    ngx_http_markdown_conf_t *conf;
+    const ngx_str_t                 *x_forwarded_proto;
+    const ngx_str_t                 *x_forwarded_host;
+    const ngx_http_core_srv_conf_t *cscf;
+    const ngx_http_markdown_conf_t *conf;
 
     conf = ngx_http_get_module_loc_conf(r, ngx_http_markdown_filter_module);
 
@@ -374,17 +374,33 @@ ngx_http_markdown_resolve_conditional_result(ngx_http_request_t *r,
  */
 ngx_int_t
 ngx_http_markdown_prepare_conversion_options(ngx_http_request_t *r,
-                                             ngx_http_markdown_conf_t *conf,
+                                             const ngx_http_markdown_conf_t *conf,
                                              struct MarkdownOptions *options)
 {
     ngx_str_t base_url;
 
     ngx_memzero(options, sizeof(struct MarkdownOptions));
-    options->flavor = conf->flavor;
-    options->timeout_ms = conf->timeout;
-    options->generate_etag = conf->generate_etag;
-    options->estimate_tokens = conf->token_estimate;
-    options->front_matter = conf->front_matter;
+    if (conf->flavor > UINT32_MAX) {
+        ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
+                     "markdown filter: flavor=%ui exceeds uint32 max, clamping",
+                     conf->flavor);
+        options->flavor = UINT32_MAX;
+    } else {
+        options->flavor = (uint32_t) conf->flavor;
+    }
+
+    if (conf->timeout > UINT32_MAX) {
+        ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
+                     "markdown filter: timeout=%M exceeds uint32 max, clamping",
+                     conf->timeout);
+        options->timeout_ms = UINT32_MAX;
+    } else {
+        options->timeout_ms = (uint32_t) conf->timeout;
+    }
+
+    options->generate_etag = conf->generate_etag ? 1U : 0U;
+    options->estimate_tokens = conf->token_estimate ? 1U : 0U;
+    options->front_matter = conf->front_matter ? 1U : 0U;
     options->content_type = NULL;
     options->content_type_len = 0;
     options->base_url = NULL;
@@ -522,7 +538,7 @@ ngx_http_markdown_validate_conversion_result(ngx_http_request_t *r,
 /* Update metrics counters after a successful conversion. */
 static void
 ngx_http_markdown_record_conversion_success(ngx_http_markdown_ctx_t *ctx,
-                                            struct MarkdownResult *result,
+                                            const struct MarkdownResult *result,
                                             ngx_msec_t elapsed_ms)
 {
     ctx->conversion_succeeded = 1;
@@ -786,9 +802,9 @@ ngx_http_markdown_shadow_compare(
 
 static void
 ngx_http_markdown_record_token_savings_if_enabled(
-    ngx_http_markdown_ctx_t *ctx,
-    ngx_http_markdown_conf_t *conf,
-    struct MarkdownResult *result)
+    const ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_conf_t *conf,
+    const struct MarkdownResult *result)
 {
     ngx_atomic_uint_t  html_tokens;
     ngx_atomic_uint_t  savings;
@@ -840,7 +856,7 @@ ngx_http_markdown_execute_conversion(ngx_http_request_t *r,
                                      ngx_msec_t *elapsed_ms)
 {
     struct MarkdownOptions  options;
-    ngx_time_t             *tp;
+    const ngx_time_t       *tp;
     ngx_msec_t              start_time;
     ngx_msec_t              end_time;
     ngx_int_t               rc;
@@ -963,7 +979,7 @@ ngx_http_markdown_execute_conversion(ngx_http_request_t *r,
 
 /* Prepare an empty output buffer for HEAD requests (body omitted). */
 static void
-ngx_http_markdown_prepare_head_output_buffer(ngx_http_request_t *r,
+ngx_http_markdown_prepare_head_output_buffer(const ngx_http_request_t *r,
                                              ngx_buf_t *b,
                                              struct MarkdownResult *result)
 {
@@ -1012,13 +1028,15 @@ ngx_http_markdown_prepare_body_output_buffer(ngx_http_request_t *r,
 static ngx_int_t
 ngx_http_markdown_send_conversion_output(ngx_http_request_t *r,
                                          ngx_http_markdown_ctx_t *ctx,
-                                         ngx_http_markdown_conf_t *conf,
+                                         const ngx_http_markdown_conf_t *conf,
                                          struct MarkdownResult *result,
                                          ngx_msec_t elapsed_ms)
 {
     ngx_int_t   rc;
     ngx_chain_t *out;
     ngx_buf_t   *b;
+
+    (void) elapsed_ms;
 
     ngx_log_debug3(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                   "markdown filter: conversion succeeded, "

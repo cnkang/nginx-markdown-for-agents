@@ -40,12 +40,13 @@ typedef struct {
 /* Static string constants for media type comparisons */
 static u_char  ngx_http_markdown_str_text[] = "text";
 static u_char  ngx_http_markdown_str_markdown[] = "markdown";
+static u_char  ngx_http_markdown_hdr_accept[] = "Accept";
 
 /* Forward declarations */
 static ngx_int_t ngx_http_markdown_parse_accept_entry(ngx_str_t *entry_str,
     ngx_http_markdown_accept_entry_t *entry, ngx_uint_t order);
 static ngx_int_t ngx_http_markdown_parse_accept_segment(ngx_http_request_t *r,
-    u_char *start, u_char *end, ngx_array_t *entries, ngx_uint_t *order);
+    u_char *start, const u_char *end, ngx_array_t *entries, ngx_uint_t *order);
 static void ngx_http_markdown_skip_accept_spaces(u_char **p, u_char *end);
 static void ngx_http_markdown_skip_accept_comma(u_char **p, u_char *end);
 static float ngx_http_markdown_parse_q_value(ngx_str_t *params);
@@ -56,7 +57,7 @@ static ngx_int_t ngx_http_markdown_matches_markdown(
     ngx_http_markdown_accept_entry_t *entry, ngx_flag_t on_wildcard);
 static ngx_table_elt_t *ngx_http_markdown_get_accept_header(ngx_http_request_t *r);
 static ngx_table_elt_t *ngx_http_markdown_find_request_header(ngx_http_request_t *r,
-    const char *name, size_t name_len);
+    const u_char *name, size_t name_len);
 
 /*
  * Parse Accept header into structured entries
@@ -139,7 +140,7 @@ ngx_http_markdown_skip_accept_comma(u_char **p, u_char *end)
  */
 static ngx_int_t
 ngx_http_markdown_parse_accept_segment(ngx_http_request_t *r,
-    u_char *start, u_char *end, ngx_array_t *entries, ngx_uint_t *order)
+    u_char *start, const u_char *end, ngx_array_t *entries, ngx_uint_t *order)
 {
     ngx_str_t                            entry_str;
     ngx_http_markdown_accept_entry_t    *entry;
@@ -475,13 +476,12 @@ ngx_http_markdown_matches_markdown(ngx_http_markdown_accept_entry_t *entry,
  */
 ngx_int_t
 ngx_http_markdown_should_convert(ngx_http_request_t *r,
-    ngx_http_markdown_conf_t *conf)
+    const ngx_http_markdown_conf_t *conf)
 {
     ngx_str_t                            *accept;
     ngx_table_elt_t                      *accept_header;
     ngx_array_t                          *entries;
     ngx_http_markdown_accept_entry_t     *entry;
-    ngx_uint_t                            i;
     
     /*
      * markdown_filter is resolved once in header filter and cached in request
@@ -531,7 +531,7 @@ ngx_http_markdown_should_convert(ngx_http_request_t *r,
      * sends a wildcard (for example "star/slash-star;q=1, text/markdown;q=0").
      */
     entry = entries->elts;
-    for (i = 0; i < entries->nelts; i++) {
+    for (ngx_uint_t i = 0; i < entries->nelts; i++) {
         if (entry[i].q_value == 0.0f &&
             entry[i].type.len == 4 &&
             ngx_strncasecmp(entry[i].type.data, ngx_http_markdown_str_text, 4) == 0 &&
@@ -577,7 +577,10 @@ ngx_http_markdown_get_accept_header(ngx_http_request_t *r)
     }
 #endif
 
-    return ngx_http_markdown_find_request_header(r, "Accept", sizeof("Accept") - 1);
+    return ngx_http_markdown_find_request_header(
+        r,
+        ngx_http_markdown_hdr_accept,
+        sizeof(ngx_http_markdown_hdr_accept) - 1);
 }
 
 /*
@@ -587,12 +590,12 @@ ngx_http_markdown_get_accept_header(ngx_http_request_t *r)
  * request header counts are typically small and this runs once per decision.
  */
 static ngx_table_elt_t *
-ngx_http_markdown_find_request_header(ngx_http_request_t *r, const char *name,
+ngx_http_markdown_find_request_header(ngx_http_request_t *r,
+    const u_char *name,
     size_t name_len)
 {
     ngx_list_part_t *part;
     ngx_table_elt_t *headers;
-    ngx_uint_t       i;
 
     if (r == NULL || name == NULL || name_len == 0) {
         return NULL;
@@ -602,9 +605,9 @@ ngx_http_markdown_find_request_header(ngx_http_request_t *r, const char *name,
     headers = part->elts;
 
     for ( ;; ) {
-        for (i = 0; i < part->nelts; i++) {
+        for (ngx_uint_t i = 0; i < part->nelts; i++) {
             if (headers[i].key.len == name_len
-                && ngx_strncasecmp(headers[i].key.data, (u_char *) name, name_len) == 0)
+                && ngx_strncasecmp(headers[i].key.data, name, name_len) == 0)
             {
                 return &headers[i];
             }

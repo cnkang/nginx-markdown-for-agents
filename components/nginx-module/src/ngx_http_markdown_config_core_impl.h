@@ -440,7 +440,7 @@ ngx_http_markdown_parse_filter_flag(ngx_str_t *value, ngx_flag_t *enabled)
     /* Normalize surrounding ASCII whitespace before token matching. */
     ngx_str_t  normalized;
     u_char    *start;
-    u_char    *end;
+    const u_char *end;
 
     if (value == NULL || enabled == NULL) {
         return NGX_ERROR;
@@ -572,7 +572,8 @@ ngx_http_markdown_is_enabled(ngx_http_request_t *r, ngx_http_markdown_conf_t *co
  * @param conf Merged per-location markdown filter configuration to describe.
  */
 static void
-ngx_http_markdown_log_merged_conf(ngx_conf_t *cf, ngx_http_markdown_conf_t *conf)
+ngx_http_markdown_log_merged_conf(ngx_conf_t *cf,
+    const ngx_http_markdown_conf_t *conf)
 {
     ngx_uint_t log_level;
     ngx_uint_t auth_cookie_count = (conf->auth_cookies != NULL) ? conf->auth_cookies->nelts : 0;

@@ -78,10 +78,6 @@ ngx_http_markdown_metric_inc_skip(
         /* No-op: eligible requests are not skips */
         return;
 
-    case NGX_HTTP_MARKDOWN_INELIGIBLE_CONFIG:
-        NGX_HTTP_MARKDOWN_METRIC_INC(skips.config);
-        return;
-
     case NGX_HTTP_MARKDOWN_INELIGIBLE_METHOD:
         NGX_HTTP_MARKDOWN_METRIC_INC(skips.method);
         return;
@@ -110,6 +106,7 @@ ngx_http_markdown_metric_inc_skip(
         NGX_HTTP_MARKDOWN_METRIC_INC(skips.range);
         return;
 
+    case NGX_HTTP_MARKDOWN_INELIGIBLE_CONFIG:
     default:
         /*
          * Unknown eligibility value — count under

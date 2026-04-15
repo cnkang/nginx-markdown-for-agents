@@ -7,7 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-No changes yet.
+### Fixed
+- Resolved SonarCloud leak-period C findings in the NGINX module by tightening
+  const-correctness, loop-local variable declarations, narrowing conversions in
+  conversion-option wiring, and macro/unused-parameter hygiene without changing
+  runtime conversion semantics.
 
 ## [0.5.0] - 2026-04-14
 

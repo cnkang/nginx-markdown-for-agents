@@ -38,7 +38,7 @@ static u_char *
 ngx_http_markdown_metrics_write_prometheus(
     u_char *p,
     u_char *end,
-    ngx_http_markdown_metrics_snapshot_t *snapshot)
+    const ngx_http_markdown_metrics_snapshot_t *snapshot)
 {
     /* requests_total */
     p = ngx_slprintf(p, end,
