@@ -74,6 +74,6 @@ ngx_flag_t ngx_http_markdown_is_enabled(ngx_http_request_t *r,
     ngx_http_markdown_conf_t *conf);
 /* Emit merged-config summary for observability and debugging. */
 static void ngx_http_markdown_log_merged_conf(ngx_conf_t *cf,
-    ngx_http_markdown_conf_t *conf);
+    const ngx_http_markdown_conf_t *conf);
 
 #endif /* NGX_HTTP_MARKDOWN_CONFIG_IMPL_H */

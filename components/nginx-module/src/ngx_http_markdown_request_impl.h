@@ -29,10 +29,10 @@ static ngx_int_t ngx_http_markdown_handle_unsupported_compression(
     ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx,
     ngx_http_markdown_conf_t *conf);
 static void ngx_http_markdown_log_decision_with_category(
-    ngx_http_request_t *r, ngx_http_markdown_conf_t *conf,
+    ngx_http_request_t *r, const ngx_http_markdown_conf_t *conf,
     const ngx_str_t *reason_code, const ngx_str_t *error_category);
 static void ngx_http_markdown_log_decision(ngx_http_request_t *r,
-    ngx_http_markdown_conf_t *conf, const ngx_str_t *reason_code);
+    const ngx_http_markdown_conf_t *conf, const ngx_str_t *reason_code);
 static void ngx_http_markdown_metric_inc_failopen(
     const ngx_http_markdown_conf_t *conf);
 static ngx_http_output_header_filter_pt ngx_http_next_header_filter;
