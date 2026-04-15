@@ -7,7 +7,7 @@ import os
 import re
 from typing import Iterator, Optional, Tuple, List
 
-from tools.release.release_constants import SUBSPECS_KEYWORDS
+from tools.release.legacy.release_constants import SUBSPECS_KEYWORDS
 
 # Required sections in requirements documents (Property 1)
 #
@@ -205,9 +205,7 @@ def _classify_checkpoint(
         return "missing"
     if _PLACEHOLDER_STATUS_RE.search(matched_row):
         return "placeholder"
-    if not _VALID_STATUS_RE.search(matched_row):
-        return "placeholder"
-    return None
+    return None if _VALID_STATUS_RE.search(matched_row) else "placeholder"
 
 
 def _dod_checkpoints_for_content(
@@ -511,37 +509,36 @@ def check_boundary_descriptions(specs_dir: str) -> Tuple[bool, List[str]]:
         if not has_boundary:
             all_present = False
             messages.append(
-                f"  FAIL  {name}/{_DESIGN_DOC} has no boundary description "
-                + "or scope anchors section"
+                f"  FAIL  {name}/{_DESIGN_DOC} has no boundary description or scope anchors section"
             )
             continue
 
-        # Check for all five required fields.
-        # For scope-anchor-style docs, accept alternative terms.
-        # Non-feature specs (tooling, docs, governance) express boundaries
-        # differently: "no runtime changes" implies 0.5.x scope, "must
-        # integrate with existing" implies prerequisites, etc.
+        missing_fields = []
         _BOUNDARY_FIELD_PATTERNS = [
             (r"capability|scope", "capability"),
-            (r"0\.4\.0\s+scope|0\.4\.0|existing\s+\w+",
-             "0.4.0 scope"),
-            (r"0\.5\.x\s+scope|0\.5|deferred|long.?term"
-             + r"|no.*runtime|not.*streaming|tooling\s+only"
-             + r"|documentation.only|no.*change.*to\s+default"
-             + r"|out\s+of\s+scope|interface\s+frozen"
-             + r"|no\s+new\s+config|no\s+new\s+directive|unchanged",
-             "0.5.x scope"),
-            (r"rationale|because|why\s+the\s+boundary"
-             + r"|single\s+source\s+of\s+truth|to\s+set\s+clear"
-             + r"|this\s+avoid|this\s+keep|not\s+a\s+new",
-             "rationale"),
-            (r"prerequisit|before.*deferred|require.*before"
-             + r"|must\s+integrate|stop\s+line|existing.*infra"
-             + r"|frozen|out\s+of\s+scope|minimum\s+supported"
-             + r"|all\s+code\s+follow|follow.*steering",
-             "prerequisites"),
+            (r"0\.4\.0\s+scope|0\.4\.0|existing\s+\w+", "0.4.0 scope"),
+            (
+                r"0\.5\.x\s+scope|0\.5|deferred|long.?term"
+                + r"|no.*runtime|not.*streaming|tooling\s+only"
+                + r"|documentation.only|no.*change.*to\s+default"
+                + r"|out\s+of\s+scope|interface\s+frozen"
+                + r"|no\s+new\s+config|no\s+new\s+directive|unchanged",
+                "0.5.x scope",
+            ),
+            (
+                r"rationale|because|why\s+the\s+boundary"
+                + r"|single\s+source\s+of\s+truth|to\s+set\s+clear"
+                + r"|this\s+avoid|this\s+keep|not\s+a\s+new",
+                "rationale",
+            ),
+            (
+                r"prerequisit|before.*deferred|require.*before"
+                + r"|must\s+integrate|stop\s+line|existing.*infra"
+                + r"|frozen|out\s+of\s+scope|minimum\s+supported"
+                + r"|all\s+code\s+follow|follow.*steering",
+                "prerequisites",
+            ),
         ]
-        missing_fields = []
         missing_fields.extend(
             label
             for pattern, label in _BOUNDARY_FIELD_PATTERNS
@@ -550,13 +547,12 @@ def check_boundary_descriptions(specs_dir: str) -> Tuple[bool, List[str]]:
         if missing_fields:
             all_present = False
             messages.append(
-                f"  FAIL  {name}/{_DESIGN_DOC} boundary/scope-anchor section "
-                + "missing fields: " + ", ".join(missing_fields)
+                f"  FAIL  {name}/{_DESIGN_DOC} boundary/scope-anchor section missing fields: "
+                + ", ".join(missing_fields)
             )
         else:
             messages.append(
-                f"  PASS  {name}/{_DESIGN_DOC} has boundary description "
-                + "or scope anchors with all fields"
+                f"  PASS  {name}/{_DESIGN_DOC} has boundary description or scope anchors with all fields"
             )
 
     return all_present, messages

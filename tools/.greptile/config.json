@@ -1,0 +1,31 @@
+{
+  "strictness": 2,
+  "commentTypes": ["logic", "syntax"],
+  "rules": [
+    {
+      "id": "installer-safety",
+      "rule": "Flag changes that may mis-detect NGINX versions, install incompatible artifacts, or make rollback/troubleshooting harder.",
+      "severity": "high"
+    },
+    {
+      "id": "shell-portability-and-hygiene",
+      "rule": "Shell scripts should remain macOS bash 3.2 compatible, include default case branches, route diagnostics to stderr, avoid GNU/PCRE-only assumptions, and keep usage text synchronized with parsed flags/defaults.",
+      "severity": "high"
+    },
+    {
+      "id": "required-checks-must-fail-hard",
+      "rule": "Checks documented as required must affect pass/fail outcome; avoid INFO-only paths for mandatory assertions in e2e or release-gate tooling.",
+      "severity": "high"
+    },
+    {
+      "id": "python-harness-prereq-validation",
+      "rule": "Python harnesses should validate binary executability (not only path existence) and fail non-zero when required runtime checks fail.",
+      "severity": "high"
+    },
+    {
+      "id": "release-matrix-integrity",
+      "rule": "Flag changes that may break release matrix completeness, artifact naming consistency, or release gate assumptions/docs synchronization.",
+      "severity": "high"
+    }
+  ]
+}

@@ -1,0 +1,89 @@
+{
+  "files": [
+    {
+      "path": "AGENTS.md",
+      "description": "Repository-specific engineering and regression-prevention rules."
+    },
+    {
+      "path": ".kiro/nginx-development-guide.md",
+      "description": "Primary NGINX development constraints and lifecycle expectations."
+    },
+    {
+      "path": "README.md",
+      "description": "Public behavior contract and high-level runtime promises."
+    },
+    {
+      "path": "CONTRIBUTING.md",
+      "description": "Contribution workflow and testing expectations."
+    },
+    {
+      "path": "SECURITY.md",
+      "description": "Security policy and vulnerability reporting flow."
+    },
+    {
+      "path": "docs/architecture/REQUEST_LIFECYCLE.md",
+      "description": "Request and filter lifecycle expectations for module behavior.",
+      "scope": ["components/nginx-module/**"]
+    },
+    {
+      "path": "docs/architecture/SYSTEM_ARCHITECTURE.md",
+      "description": "Cross-component architecture and responsibility boundaries.",
+      "scope": ["components/**", "tools/**", "docs/**"]
+    },
+    {
+      "path": "docs/guides/CONFIGURATION.md",
+      "description": "Directive semantics and operator-facing configuration behavior.",
+      "scope": ["components/nginx-module/**", "docs/**"]
+    },
+    {
+      "path": "docs/guides/INSTALLATION.md",
+      "description": "Installation and packaging behavior for operators and tooling.",
+      "scope": ["tools/**", "docs/**"]
+    },
+    {
+      "path": "docs/guides/OPERATIONS.md",
+      "description": "Operational guidance and runtime troubleshooting expectations.",
+      "scope": ["components/nginx-module/**", "tools/e2e/**", "docs/**"]
+    },
+    {
+      "path": "docs/guides/prometheus-metrics.md",
+      "description": "Canonical Prometheus metric names and semantics.",
+      "scope": ["components/nginx-module/**", "docs/**"]
+    },
+    {
+      "path": "docs/features/CONTENT_NEGOTIATION.md",
+      "description": "Negotiation behavior and representation selection semantics.",
+      "scope": ["components/nginx-module/**", "docs/features/**"]
+    },
+    {
+      "path": "docs/features/CACHE_AWARE_RESPONSES.md",
+      "description": "Cache-aware conversion and failure semantics.",
+      "scope": ["components/nginx-module/**", "docs/features/**"]
+    },
+    {
+      "path": "docs/features/charset-detection.md",
+      "description": "Charset and encoding handling expectations in conversion paths.",
+      "scope": ["components/rust-converter/**", "docs/features/**"]
+    },
+    {
+      "path": "docs/features/deterministic-output.md",
+      "description": "Deterministic output contract for the Rust converter.",
+      "scope": ["components/rust-converter/**", "docs/features/**"]
+    },
+    {
+      "path": "docs/testing/README.md",
+      "description": "Testing strategy across unit/integration/e2e/perf layers.",
+      "scope": ["components/**", "tools/**", "docs/**"]
+    },
+    {
+      "path": "docs/testing/E2E_TESTS.md",
+      "description": "E2E expectations and coverage for runtime behavior.",
+      "scope": ["components/nginx-module/**", "tools/e2e/**"]
+    },
+    {
+      "path": "docs/project/release-gates/README.md",
+      "description": "Release-gate contracts that tooling and docs must satisfy.",
+      "scope": ["tools/release/**", "docs/project/**"]
+    }
+  ]
+}

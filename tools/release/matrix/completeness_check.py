@@ -6,7 +6,7 @@ build artifacts and reports any missing combinations. Exits with code 1 when
 artifacts are missing, printing the missing combinations to stderr.
 
 Usage:
-    python3 tools/release/completeness_check.py \
+    python3 tools/release/matrix/completeness_check.py \
         --matrix tools/release-matrix.json \
         --artifacts <artifact-dir-or-list>
 """
@@ -37,8 +37,9 @@ def _require_entry_keys(entry: dict, *, context: str) -> None:
     Raises:
         KeyError: If any required keys are missing; the message includes the provided context and the missing key names.
     """
-    missing_keys = [key for key in REQUIRED_ENTRY_KEYS if key not in entry]
-    if missing_keys:
+    if missing_keys := [
+        key for key in REQUIRED_ENTRY_KEYS if key not in entry
+    ]:
         raise KeyError(f"{context} missing required keys: {', '.join(missing_keys)}")
 
 
@@ -151,11 +152,10 @@ def format_missing(missing: List[Tuple[dict, str]]) -> str:
         "  - {filename}  (nginx={nginx} os={os_type} arch={arch})".
     """
     lines = [f"Missing {len(missing)} artifact(s):"]
-    for entry, filename in missing:
-        lines.append(
-            f"  - {filename}  "
-            f"(nginx={entry['nginx']} os={entry['os_type']} arch={entry['arch']})"
-        )
+    lines.extend(
+        f"  - {filename}  (nginx={entry['nginx']} os={entry['os_type']} arch={entry['arch']})"
+        for entry, filename in missing
+    )
     return "\n".join(lines)
 
 
@@ -196,9 +196,7 @@ def main(argv: List[str] | None = None) -> int:
         return 1
 
     actual_artifacts = collect_artifacts(args.artifacts)
-    missing = check_completeness(matrix_entries, actual_artifacts)
-
-    if missing:
+    if missing := check_completeness(matrix_entries, actual_artifacts):
         print(format_missing(missing), file=sys.stderr)
         return 1
 

@@ -13,14 +13,14 @@ import os
 import sys
 from typing import Callable, List, Tuple
 
-# Allow running as `python3 tools/release/validate_release_gates.py` from
+# Allow running as `python3 tools/release/legacy/validate_release_gates.py` from
 # the project root by ensuring the project root is on sys.path.
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-_PROJECT_ROOT = os.path.abspath(os.path.join(_SCRIPT_DIR, "..", ".."))
+_PROJECT_ROOT = os.path.abspath(os.path.join(_SCRIPT_DIR, "..", "..", ".."))
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
-from tools.release.release_gate_checks import (  # noqa: E402
+from tools.release.legacy.release_gate_checks import (  # noqa: E402
     check_document_existence,
     check_requirements_completeness,
     check_design_completeness,

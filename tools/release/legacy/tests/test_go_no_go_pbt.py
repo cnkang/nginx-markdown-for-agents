@@ -9,7 +9,7 @@ Validates: Requirements 7.5
 import hypothesis.strategies as st
 from hypothesis import given, settings
 
-from tools.release.release_constants import P0_SUBSPECS
+from tools.release.legacy.release_constants import P0_SUBSPECS
 
 
 def go_no_go_decision(p0_statuses: dict[str, bool], p1_status: bool) -> str:

@@ -1,0 +1,10 @@
+# Python development/test dependencies for release gate validation
+# and property-based tests.
+#
+# Install: pip install -r requirements-dev.txt
+# Used by: pytest tools/release/gates/tests/
+#          pytest tools/release/matrix/tests/
+#          pytest tools/release/legacy/tests/
+#          pytest tests/property/
+hypothesis>=6.0
+pytest>=7.0

@@ -6,7 +6,7 @@ the cross-spec naming convention reference.
 
 import pytest
 
-from tools.release.naming_conventions import (
+from tools.release.legacy.naming_conventions import (
     is_valid_directive_name,
     is_valid_metric_name,
     is_valid_reason_code,

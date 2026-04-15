@@ -14,7 +14,7 @@ from hypothesis import given, settings
 from pathlib import Path
 from typing import List, Optional
 
-from tools.release.release_constants import NON_GOALS
+from tools.release.legacy.release_constants import NON_GOALS
 
 # Lowercase versions for case-insensitive matching
 _NON_GOALS_LOWER = [ng.lower() for ng in NON_GOALS]
