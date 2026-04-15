@@ -565,6 +565,44 @@ ngx_http_markdown_handle_converter_not_initialized(
 
 
 #ifdef MARKDOWN_STREAMING_ENABLED
+static ngx_flag_t
+ngx_http_markdown_shadow_output_diff(struct MarkdownResult *fb_result,
+                                     const uint8_t *feed_data,
+                                     uintptr_t feed_len,
+                                     struct MarkdownResult *st_result)
+{
+    size_t   total_len;
+    u_char  *fb_ptr;
+
+    total_len = (size_t) feed_len + (size_t) st_result->markdown_len;
+    if (total_len != fb_result->markdown_len) {
+        return 1;
+    }
+
+    if (total_len == 0) {
+        return 0;
+    }
+
+    fb_ptr = fb_result->markdown;
+    if (feed_data != NULL && feed_len > 0) {
+        if (ngx_memcmp(feed_data, fb_ptr, feed_len) != 0) {
+            return 1;
+        }
+        fb_ptr += feed_len;
+    }
+
+    if (st_result->markdown != NULL
+        && st_result->markdown_len > 0
+        && ngx_memcmp(st_result->markdown,
+                      fb_ptr,
+                      st_result->markdown_len) != 0)
+    {
+        return 1;
+    }
+
+    return 0;
+}
+
 /*
  * Shadow mode: run the streaming engine on the same input that
  * was just converted by the full-buffer engine, compare outputs,
@@ -721,52 +759,11 @@ ngx_http_markdown_shadow_compare(
      * The full-buffer output is: fb_result->markdown[0..fb_result->markdown_len).
      */
     {
-        size_t   total_len;
-        int      diff_detected;
+        size_t total_len;
 
-        total_len = (size_t) out_len
-            + (size_t) st_result.markdown_len;
-        diff_detected = 0;
-
-        if (total_len != fb_result->markdown_len) {
-            diff_detected = 1;
-        } else if (total_len > 0) {
-            /*
-             * Lengths match — compare byte content in two
-             * slices against fb_result->markdown sequentially.
-             * No allocation needed.
-             */
-            u_char  *fb_ptr;
-
-            fb_ptr = fb_result->markdown;
-
-            /* Compare feed output slice */
-            if (out_data != NULL && out_len > 0) {
-                if (ngx_memcmp(out_data, fb_ptr,
-                               out_len) != 0)
-                {
-                    diff_detected = 1;
-                }
-                fb_ptr += out_len;
-            }
-
-            /* Compare finalize output slice */
-            if (!diff_detected
-                && st_result.markdown != NULL
-                && st_result.markdown_len > 0)
-            {
-                if (ngx_memcmp(st_result.markdown,
-                               fb_ptr,
-                               st_result.markdown_len)
-                    != 0)
-                {
-                    diff_detected = 1;
-                }
-            }
-        }
-        /* else: total_len == 0 and fb_len == 0 → no diff */
-
-        if (diff_detected) {
+        total_len = (size_t) out_len + (size_t) st_result.markdown_len;
+        if (ngx_http_markdown_shadow_output_diff(fb_result, out_data, out_len,
+                                                 &st_result)) {
             NGX_HTTP_MARKDOWN_METRIC_INC(
                 streaming.shadow_diff_total);
             ngx_log_debug2(NGX_LOG_DEBUG_HTTP,
@@ -786,6 +783,33 @@ ngx_http_markdown_shadow_compare(
     markdown_result_free(&st_result);
 }
 #endif /* MARKDOWN_STREAMING_ENABLED */
+
+static void
+ngx_http_markdown_record_token_savings_if_enabled(
+    ngx_http_markdown_ctx_t *ctx,
+    ngx_http_markdown_conf_t *conf,
+    struct MarkdownResult *result)
+{
+    ngx_atomic_uint_t  html_tokens;
+    ngx_atomic_uint_t  savings;
+
+    if (!(conf->token_estimate
+          && result->token_estimate > 0
+          && ctx->buffer.size > 0))
+    {
+        return;
+    }
+
+    html_tokens = ctx->buffer.size / 4;
+    if (html_tokens <= result->token_estimate) {
+        return;
+    }
+
+    savings = html_tokens - (ngx_atomic_uint_t) result->token_estimate;
+    if (savings > 0) {
+        NGX_HTTP_MARKDOWN_METRIC_ADD(estimated_token_savings, savings);
+    }
+}
 
 
 /**
@@ -932,34 +956,7 @@ ngx_http_markdown_execute_conversion(ngx_http_request_t *r,
     }
 #endif
 
-    /*
-     * Estimate token savings when markdown_token_estimate
-     * is enabled and the Rust FFI returned a non-zero
-     * token estimate for the Markdown output.
-     *
-     * HTML token estimate uses a rough 4-bytes-per-token
-     * heuristic.  Savings = max(0, html_tokens - md_tokens).
-     */
-    if (conf->token_estimate
-        && result->token_estimate > 0
-        && ctx->buffer.size > 0)
-    {
-        ngx_atomic_uint_t  html_tokens;
-        ngx_atomic_uint_t  savings;
-
-        html_tokens = ctx->buffer.size / 4;
-        if (html_tokens > result->token_estimate) {
-            savings = html_tokens
-                - (ngx_atomic_uint_t) result->token_estimate;
-        } else {
-            savings = 0;
-        }
-
-        if (savings > 0) {
-            NGX_HTTP_MARKDOWN_METRIC_ADD(
-                estimated_token_savings, savings);
-        }
-    }
+    ngx_http_markdown_record_token_savings_if_enabled(ctx, conf, result);
 
     return NGX_OK;
 }
