@@ -14,7 +14,7 @@ endif
 endif
 SANITIZER_ENV ?= ASAN_OPTIONS=$(ASAN_OPTIONS_BASE) UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1
 
-.PHONY: unit unit-smoke unit-clang-smoke unit-sanitize-smoke $(addprefix unit-,$(UNIT_NAMES)) integration-c integration-nginx e2e clean
+.PHONY: unit unit-smoke unit-clang-smoke unit-sanitize-smoke $(addprefix unit-,$(UNIT_NAMES)) integration-c integration-nginx e2e unit-coverage clean
 
 build/unit build/integration build/generated:
 	@mkdir -p $@
@@ -69,6 +69,25 @@ integration-nginx:
 
 e2e:
 	@bash ../../../tools/e2e/run_e2e_suite.sh
+
+# ── Coverage target ─────────────────────────────────────────────────
+# Rebuild all unit tests with gcov instrumentation, run them, and
+# collect an lcov report.  The output directory is passed via COV_DIR
+# (default: build/coverage).
+COV_DIR ?= build/coverage
+
+unit-coverage:
+	@$(MAKE) clean
+	@$(MAKE) unit \
+		CFLAGS_COMMON="-Wall -Wextra -Werror=implicit-function-declaration -Werror=incompatible-pointer-types -g --coverage -std=$(CSTD) -Iinclude" \
+		LDFLAGS_COMMON="--coverage"
+	@mkdir -p $(COV_DIR)
+	lcov --capture --directory build/unit --output-file $(COV_DIR)/raw.lcov \
+		--rc lcov_branch_coverage=1 --ignore-errors mismatch,mismatch
+	lcov --remove $(COV_DIR)/raw.lcov '*/tests/*' '/usr/*' \
+		--output-file $(COV_DIR)/c-coverage.lcov \
+		--rc lcov_branch_coverage=1 --ignore-errors unused,unused
+	@echo "C coverage report: $(COV_DIR)/c-coverage.lcov"
 
 clean:
 	rm -rf build
