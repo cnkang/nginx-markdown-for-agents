@@ -15,7 +15,8 @@ use nginx_markdown_converter::ffi::{
 /// defaults.  This significantly improves option-space coverage compared
 /// to indexing individual bytes.
 fn option_bits(data: &[u8]) -> u8 {
-    data.iter().fold(0u8, |acc, &b| acc.wrapping_add(b) ^ b.rotate_left(3))
+    data.iter()
+        .fold(0u8, |acc, &b| acc.wrapping_add(b) ^ b.rotate_left(3))
 }
 
 fuzz_target!(|data: &[u8]| {
@@ -49,11 +50,8 @@ fuzz_target!(|data: &[u8]| {
         } else {
             ptr::null()
         },
-        base_url_len: if bits & 0x08 == 0 {
-            base_url.len()
-        } else {
-            0
-        },
+        base_url_len: if bits & 0x08 == 0 { base_url.len() } else { 0 },
+        streaming_budget: 0,
     };
 
     let mut result = MarkdownResult {
@@ -65,6 +63,7 @@ fuzz_target!(|data: &[u8]| {
         error_code: 0,
         error_message: ptr::null_mut(),
         error_len: 0,
+        peak_memory_estimate: 0,
     };
 
     unsafe {
