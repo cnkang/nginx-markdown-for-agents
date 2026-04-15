@@ -169,8 +169,8 @@ These metrics are only emitted when the module is compiled with `MARKDOWN_STREAM
 
 | Metric Name | Type | Label Key | Label Values | Description |
 |---|---|---|---|---|
-| `nginx_markdown_streaming_total` | counter | `result` | `success`, `failed`, `fallback`, `postcommit_error` | Streaming conversion outcomes by result. |
-| `nginx_markdown_streaming_failures_total` | counter | `stage` | `precommit_failopen`, `precommit_reject` | Detailed streaming pre-commit failures by stage. |
+| `nginx_markdown_streaming_total` | counter | `result` | `success`, `failed`, `fallback` | Streaming conversion outcomes by result (mutually exclusive). |
+| `nginx_markdown_streaming_failures_total` | counter | `stage` | `precommit_failopen`, `precommit_reject`, `postcommit_error` | Detailed streaming failures by stage. |
 
 #### Streaming Gauge Metrics
 

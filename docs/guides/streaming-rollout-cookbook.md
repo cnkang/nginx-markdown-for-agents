@@ -253,7 +253,7 @@ map $http_user_agent $markdown_streaming_engine {
   `STREAMING_FAIL_POSTCOMMIT` reason code and
   `streaming.postcommit_error_total` counter (JSON path:
   `streaming.postcommit_error_total`; Prometheus:
-  `nginx_markdown_streaming_total{result="postcommit_error"}`).
+  `nginx_markdown_streaming_failures_total{stage="postcommit_error"}`).
 - **No silent semantic drift**: Shadow mode detects output differences
   between engines and records them in `streaming.shadow_diff_total`
   (Prometheus: `nginx_markdown_streaming_shadow_diff_total`).
