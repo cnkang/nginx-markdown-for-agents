@@ -134,6 +134,8 @@ Rules for optional inputs:
 For local agent execution choreography, use the repo-tracked skill:
 
 - `skills/nginx-harness-maintenance/SKILL.md`
+- Contributor setup and install options:
+  [HARNESS_SKILL_SETUP.md](HARNESS_SKILL_SETUP.md)
 
 Rules for this skill:
 
