@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Nested Lists Deep Fixture</title>
+</head>
+<body>
+    <!--
+        Streaming parity test fixture: deeply nested mixed list structures.
+
+        Exercises three-level nesting with mixed ordered/unordered lists,
+        paragraphs inside list items, and code blocks inside list items.
+        These are high-risk for streaming because list state machine depth
+        tracking and indentation must survive chunk boundaries.
+    -->
+    <h1>Deep Mixed Lists</h1>
+
+    <ul>
+        <li>
+            Level 1 unordered
+            <p>Paragraph inside level 1 item.</p>
+            <ol>
+                <li>
+                    Level 2 ordered
+                    <ul>
+                        <li>Level 3 unordered leaf</li>
+                        <li>
+                            Level 3 with code
+                            <pre><code>printf("nested");
+return 0;</code></pre>
+                        </li>
+                    </ul>
+                </li>
+                <li>Level 2 ordered sibling</li>
+            </ol>
+        </li>
+        <li>Another level 1 unordered item</li>
+    </ul>
+
+    <ol>
+        <li>
+            Level 1 ordered
+            <ul>
+                <li>Level 2 unordered</li>
+                <li>
+                    Level 2 unordered with paragraph.
+                    <p>Inline paragraph content for spacing behavior.</p>
+                </li>
+            </ul>
+        </li>
+    </ol>
+</body>
+</html>

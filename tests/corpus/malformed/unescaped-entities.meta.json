@@ -4,5 +4,11 @@
   "expected-conversion-result": "converted",
   "input-size-bytes": 1500,
   "source-description": "HTML with unescaped entities and special characters to test entity handling",
-  "failure-corpus": true
+  "failure-corpus": true,
+  "streaming_notes": {
+    "expected_fallback": false,
+    "known_diff_ids": [
+      "DIFF-PARITY-WHITESPACE-ONLY"
+    ]
+  }
 }
