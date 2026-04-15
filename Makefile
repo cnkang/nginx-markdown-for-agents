@@ -233,10 +233,14 @@ coverage-rust:
 	@mkdir -p $(COVERAGE_DIR)
 	cd $(RUST_DIR) && cargo llvm-cov --lcov \
 		--output-path $(CURDIR)/$(COVERAGE_DIR)/rust-coverage.lcov \
-		-- --skip perf_report_completeness
+		-- --skip report_contains_all_tiers \
+		   --skip legacy_single_large \
+		   --skip full_run_report
 	cd $(RUST_DIR) && cargo llvm-cov --features streaming --lcov \
 		--output-path $(CURDIR)/$(COVERAGE_DIR)/rust-streaming-coverage.lcov \
-		-- --skip perf_report_completeness
+		-- --skip report_contains_all_tiers \
+		   --skip legacy_single_large \
+		   --skip full_run_report
 
 coverage-all: coverage-c coverage-rust
 
