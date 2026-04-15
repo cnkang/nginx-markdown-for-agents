@@ -13,9 +13,9 @@ from pathlib import Path
 from hypothesis import given, settings, assume
 from hypothesis import strategies as st
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent.parent))
 
-from release_gates.go_nogo_evaluator import (
+from tools.release.gates.go_nogo_evaluator import (
     evaluate_scope,
     NON_GOALS,
     NON_GOAL_RULES,
@@ -62,7 +62,7 @@ def test_streaming_related_proposals_not_auto_rejected(proposal):
     # Also skip if any token-mode rule matches at word boundary
     for rule in NON_GOAL_RULES:
         if rule.match_mode == "token":
-            from release_gates.go_nogo_evaluator import _get_token_pattern
+            from tools.release.gates.go_nogo_evaluator import _get_token_pattern
 
             assume(not _get_token_pattern(rule.value).search(proposal))
     result = evaluate_scope(proposal)

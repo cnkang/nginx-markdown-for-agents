@@ -83,7 +83,7 @@
     {
       "path": "docs/project/release-gates/README.md",
       "description": "Release-gate contracts that tooling and docs must satisfy.",
-      "scope": ["tools/release/**", "tools/release_gates/**", "docs/project/**"]
+      "scope": ["tools/release/**", "docs/project/**"]
     }
   ]
 }

@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from tools.release.release_gate_checks import (
+from tools.release.legacy.release_gate_checks import (
     check_boundary_descriptions,
     check_checklist_verifiability,
     check_design_completeness,

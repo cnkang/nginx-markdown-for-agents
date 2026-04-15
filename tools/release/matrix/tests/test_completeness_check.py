@@ -1,4 +1,4 @@
-"""Property-based tests for tools/release/completeness_check.py.
+"""Property-based tests for tools/release/matrix/completeness_check.py.
 
 **Validates: Requirements 11.4, 11.5**
 
@@ -18,7 +18,7 @@ _repo_root = Path(__file__).resolve().parents[3]
 if str(_repo_root) not in sys.path:
     sys.path.insert(0, str(_repo_root))
 
-from tools.release.completeness_check import check_completeness, expected_artifact_name
+from tools.release.matrix.completeness_check import check_completeness, expected_artifact_name
 
 
 # ---------------------------------------------------------------------------

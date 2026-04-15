@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from tools.release_gates.validate_release_gates import (
+from tools.release.gates.validate_release_gates import (
     ValidationResult,
     check_compat_capabilities,
     check_compat_row_validity,

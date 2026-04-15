@@ -16,9 +16,9 @@ from pathlib import Path
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent.parent))
 
-from release_gates.go_nogo_evaluator import (
+from tools.release.gates.go_nogo_evaluator import (
     evaluate_go_nogo,
     ReleaseStatus,
     P0_SUBSPECS,

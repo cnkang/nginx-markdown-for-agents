@@ -7,7 +7,7 @@ guide and compares it against the canonical release-matrix.json definition.
 Exit code 0 = in sync, exit code 1 = out of sync or parse error.
 
 Usage:
-    python3 tools/release/validate_doc_matrix_sync.py
+    python3 tools/release/matrix/validate_doc_matrix_sync.py
 """
 
 import json
@@ -16,7 +16,7 @@ from pathlib import Path
 
 # Paths relative to the repository root
 SCRIPT_DIR = Path(__file__).resolve().parent
-REPO_ROOT = SCRIPT_DIR.parent.parent
+REPO_ROOT = SCRIPT_DIR.parent.parent.parent
 MATRIX_PATH = REPO_ROOT / "tools" / "release-matrix.json"
 DOC_PATH = REPO_ROOT / "docs" / "guides" / "INSTALLATION.md"
 
@@ -48,13 +48,15 @@ def load_matrix_entries(path: Path) -> list[tuple[str, str, str, str]]:
         return []
 
     entries = []
-    for item in data["matrix"]:
-        entries.append((
+    entries.extend(
+        (
             item["nginx"],
             item["os_type"],
             item["arch"],
             _normalize_tier(item["support_tier"]),
-        ))
+        )
+        for item in data["matrix"]
+    )
     return sorted(entries)
 
 
@@ -65,7 +67,11 @@ def _is_table_header_or_separator(nginx: str) -> bool:
     Returns:
         `true` if the cell equals "nginx version" (case-insensitive), contains only dashes, or starts with "-", `false` otherwise.
     """
-    return nginx.lower() == "nginx version" or set(nginx.replace("-", "")) == set() or nginx.startswith("-")
+    return (
+        nginx.lower() == "nginx version"
+        or not set(nginx.replace("-", ""))
+        or nginx.startswith("-")
+    )
 
 
 def _parse_table_row(line: str) -> tuple[str, str, str, str] | None:
@@ -80,10 +86,7 @@ def _parse_table_row(line: str) -> tuple[str, str, str, str] | None:
         return None
 
     cells = [cell.strip() for cell in stripped[1:-1].split("|")]
-    if len(cells) != 4 or any(cell == "" for cell in cells):
-        return None
-
-    return tuple(cells)  # type: ignore[return-value]
+    return None if len(cells) != 4 or "" in cells else tuple(cells)
 
 
 def parse_doc_matrix(path: Path) -> list[tuple[str, str, str, str]]:
@@ -218,9 +221,7 @@ def main() -> int:
         )
         return 1
 
-    diffs = compare_matrices(json_entries, doc_entries)
-
-    if diffs:
+    if diffs := compare_matrices(json_entries, doc_entries):
         print(
             "Sync check FAILED — INSTALLATION.md matrix is out of sync "
             "with release-matrix.json:",

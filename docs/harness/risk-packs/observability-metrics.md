@@ -6,7 +6,7 @@ Prometheus output, or release-gate monitoring semantics change.
 ## Triggers
 
 - touched files in metrics renderers or reason-code classification paths
-- touched files under `tools/release_gates/**` or `tools/release/**`
+- touched files under `tools/release/**`
 - touched files under `docs/guides/prometheus-metrics.md`
 - keywords like `prometheus`, `reason code`, `ttfb`, `snapshot`, `metrics`
 

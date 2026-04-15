@@ -14,7 +14,7 @@ Exit codes:
     2 — Stale matrix detected (only in ``--check-only`` mode)
 
 Usage:
-    python3 tools/release/update_matrix.py [--dry-run] [--check-only]
+    python3 tools/release/matrix/update_matrix.py [--dry-run] [--check-only]
 """
 
 
@@ -36,7 +36,7 @@ from urllib.error import URLError
 # Path constants (same pattern as validate_doc_matrix_sync.py)
 # ---------------------------------------------------------------------------
 SCRIPT_DIR = Path(__file__).resolve().parent
-REPO_ROOT = SCRIPT_DIR.parent.parent
+REPO_ROOT = SCRIPT_DIR.parent.parent.parent
 MATRIX_PATH = REPO_ROOT / "tools" / "release-matrix.json"
 INSTALL_SCRIPT_PATH = REPO_ROOT / "tools" / "install.sh"
 DOC_PATH = REPO_ROOT / "docs" / "guides" / "INSTALLATION.md"

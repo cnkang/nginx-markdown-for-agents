@@ -15,9 +15,9 @@ from pathlib import Path
 from hypothesis import given, settings, assume
 from hypothesis import strategies as st
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent.parent))
 
-from release_gates.validate_release_gates import (
+from tools.release.gates.validate_release_gates import (
     ValidationResult,
     VALID_STATES,
     extract_table_under_heading,

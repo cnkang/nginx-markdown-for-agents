@@ -6,8 +6,8 @@ This checklist aggregates all release gate verification steps, organized by the 
 
 ## Documentation Gates
 
-- [ ] All 7 sub-specs have requirements documents — Verify: `make release-gates-check-strict` or `tools/release_gates/validate_release_gates.py --mode strict --check docs-exist`
-- [ ] All 7 sub-specs have design documents — Verify: `make release-gates-check-strict` or `tools/release_gates/validate_release_gates.py --mode strict --check docs-exist`
+- [ ] All 7 sub-specs have requirements documents — Verify: `make release-gates-check-strict` or `tools/release/gates/validate_release_gates.py --mode strict --check docs-exist`
+- [ ] All 7 sub-specs have design documents — Verify: `make release-gates-check-strict` or `tools/release/gates/validate_release_gates.py --mode strict --check docs-exist`
 - [ ] All new operator-facing surfaces are documented — Verify: manual review + `make docs-check`
 - [ ] Streaming configuration guide is complete — Verify: document existence check in `docs/guides/`
 - [ ] Rollout cookbook is complete (streaming enable, shadow mode, gradual expansion) — Verify: document existence check
@@ -27,7 +27,7 @@ This checklist aggregates all release gate verification steps, organized by the 
 - [ ] Streaming path bounded-memory evidence generated — Verify: memory analysis report in Evidence Pack
 - [ ] Evidence Pack generated and archived — Verify: Evidence Pack artifact exists
 - [ ] Rust property-based tests pass — Verify: `cargo test` with proptest exit code 0
-- [ ] Python property-based tests pass — Verify: `pytest tools/release_gates/tests/` exit code 0
+- [ ] Python property-based tests pass — Verify: `pytest tools/release/gates/tests/` exit code 0
 
 ## Compatibility Gates
 

@@ -34,7 +34,7 @@ from pathlib import Path
 
 # Resolve project root relative to this script
 SCRIPT_DIR = Path(__file__).resolve().parent
-PROJECT_ROOT = SCRIPT_DIR.parent.parent
+PROJECT_ROOT = SCRIPT_DIR.parent.parent.parent
 
 # Default sub-spec directories under .kiro/specs/
 DEFAULT_SPECS_DIR = PROJECT_ROOT / ".kiro" / "specs"
@@ -502,18 +502,17 @@ def _normalize_state_value(value: str) -> str:
 def _compat_column_indices(header: list[str]) -> tuple[int, int | None]:
     """Return the capability column index and optional classification column index."""
     lowered = [cell.strip().lower() for cell in header]
-    capability_idx = -1
-    for idx, value in enumerate(lowered):
-        if value == "capability":
-            capability_idx = idx
-            break
-
-    classification_idx = None
-    for idx, value in enumerate(lowered):
-        if value == "classification":
-            classification_idx = idx
-            break
-
+    capability_idx = next(
+        (idx for idx, value in enumerate(lowered) if value == "capability"), -1
+    )
+    classification_idx = next(
+        (
+            idx
+            for idx, value in enumerate(lowered)
+            if value == "classification"
+        ),
+        None,
+    )
     return capability_idx, classification_idx
 
 
@@ -540,10 +539,11 @@ def check_compat_capabilities(
         return
 
     row_caps = []
-    for row in rows[1:]:
-        if capability_idx < len(row):
-            row_caps.append(row[capability_idx].strip().lower())
-
+    row_caps.extend(
+        row[capability_idx].strip().lower()
+        for row in rows[1:]
+        if capability_idx < len(row)
+    )
     missing = []
     for cap in CANONICAL_CAPABILITIES:
         cap_lower = cap.lower()
@@ -610,6 +610,35 @@ def check_compat_states(
     ], capability_idx
 
 
+def _row_cap_name(row: list[str], capability_idx: int) -> str:
+    """Return the capability name from a row, or '<empty>' as fallback."""
+    if 0 <= capability_idx < len(row):
+        return row[capability_idx].strip() or "<empty>"
+    if row:
+        return row[0].strip() or "<empty>"
+    return "<empty>"
+
+
+def _validate_classification_row(row: list[str], idx: int, cap_name: str) -> str | None:
+    """Return an error string if the classification cell is invalid, else None."""
+    if idx >= len(row) or not row[idx].strip():
+        return f"{cap_name} (missing classification)"
+    state_value = _normalize_state_value(row[idx])
+    if state_value not in _VALID_STATES_LOWER:
+        return f"{cap_name} (invalid state: {row[idx].strip()})"
+    return None
+
+
+def _validate_multi_state_row(
+    row: list[str], state_indices: list[int], cap_name: str
+) -> str | None:
+    """Return an error string if the row does not mark exactly one state, else None."""
+    marked = sum(bool(idx < len(row) and row[idx].strip()) for idx in state_indices)
+    if marked != 1:
+        return f"{cap_name} (marked {marked} states)"
+    return None
+
+
 def check_compat_row_validity(
     result: ValidationResult,
     data_rows: list[list[str]],
@@ -631,25 +660,14 @@ def check_compat_row_validity(
     uses_classification_column = len(state_indices) == 1
 
     for row in data_rows:
-        cap_name = "<empty>"
-        if capability_idx >= 0 and capability_idx < len(row):
-            cap_name = row[capability_idx].strip() or cap_name
-        elif row:
-            cap_name = row[0].strip() or cap_name
-
+        cap_name = _row_cap_name(row, capability_idx)
         if uses_classification_column:
-            idx = state_indices[0]
-            if idx >= len(row) or not row[idx].strip():
-                invalid_rows.append(f"{cap_name} (missing classification)")
-                continue
-            state_value = _normalize_state_value(row[idx])
-            if state_value not in _VALID_STATES_LOWER:
-                invalid_rows.append(f"{cap_name} (invalid state: {row[idx].strip()})")
-            continue
+            error = _validate_classification_row(row, state_indices[0], cap_name)
+        else:
+            error = _validate_multi_state_row(row, state_indices, cap_name)
+        if error:
+            invalid_rows.append(error)
 
-        marked = sum(bool(idx < len(row) and row[idx].strip()) for idx in state_indices)
-        if marked != 1:
-            invalid_rows.append(f"{cap_name} (marked {marked} states)")
     if invalid_rows:
         result.failed(
             "compat-matrix:row-validity",

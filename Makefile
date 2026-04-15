@@ -184,15 +184,15 @@ license-check:
 	python3 tools/ci/check_third_party_notices.py
 
 release-gates-check:
-	python3 tools/release_gates/validate_release_gates.py
-	python3 tools/release_gates/validate_naming.py
+	python3 tools/release/gates/validate_release_gates.py
+	python3 tools/release/gates/validate_naming.py
 
 release-gates-check-legacy:
-	python3 tools/release/validate_release_gates.py
+	python3 tools/release/legacy/validate_release_gates.py
 
 release-gates-check-strict:
-	python3 tools/release_gates/validate_release_gates.py --mode strict
-	python3 tools/release_gates/validate_naming.py
+	python3 tools/release/gates/validate_release_gates.py --mode strict
+	python3 tools/release/gates/validate_naming.py
 
 verify-large-e2e:
 	./tools/e2e/verify_large_markdown_response_e2e.sh

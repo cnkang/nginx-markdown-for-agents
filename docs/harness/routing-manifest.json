@@ -175,7 +175,6 @@
         "components/nginx-module/src/**",
         "docs/guides/prometheus-metrics.md",
         "docs/project/release-gates/**",
-        "tools/release_gates/**",
         "tools/release/**"
       ],
       "keywords": [

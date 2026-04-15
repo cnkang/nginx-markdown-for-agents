@@ -47,7 +47,7 @@ jobs:
           FRESHNESS_MODE: ${{ inputs.matrix_freshness }}
         run: |
           set +e
-          python3 tools/release/update_matrix.py --check-only
+          python3 tools/release/matrix/update_matrix.py --check-only
           exit_code=$?
           set -e
 
@@ -174,7 +174,7 @@ jobs:
 
       - name: Run completeness check
         run: |
-          python3 tools/release/completeness_check.py \
+          python3 tools/release/matrix/completeness_check.py \
             --matrix tools/release-matrix.json \
             --artifacts artifact-list.txt
 
