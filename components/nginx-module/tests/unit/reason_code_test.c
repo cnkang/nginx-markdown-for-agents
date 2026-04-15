@@ -209,7 +209,60 @@ test_skip_accept_code(void)
 }
 
 
-/* All 15 reason code string pointers for format validation */
+#ifdef MARKDOWN_STREAMING_ENABLED
+/*
+ * Test: streaming reason code accessor functions return
+ * expected strings.
+ */
+static void
+test_streaming_reason_codes(void)
+{
+    const ngx_str_t *rc;
+
+    TEST_SUBSECTION("Streaming reason codes");
+
+    rc = ngx_http_markdown_reason_engine_streaming();
+    TEST_ASSERT(ngx_str_eq(rc, "ENGINE_STREAMING"),
+        "engine_streaming() -> ENGINE_STREAMING");
+
+    rc = ngx_http_markdown_reason_streaming_convert();
+    TEST_ASSERT(ngx_str_eq(rc, "STREAMING_CONVERT"),
+        "streaming_convert() -> STREAMING_CONVERT");
+
+    rc = ngx_http_markdown_reason_streaming_fallback();
+    TEST_ASSERT(ngx_str_eq(rc, "STREAMING_FALLBACK_PREBUFFER"),
+        "streaming_fallback() -> STREAMING_FALLBACK_PREBUFFER");
+
+    rc = ngx_http_markdown_reason_streaming_fail_postcommit();
+    TEST_ASSERT(ngx_str_eq(rc, "STREAMING_FAIL_POSTCOMMIT"),
+        "streaming_fail_postcommit() -> STREAMING_FAIL_POSTCOMMIT");
+
+    rc = ngx_http_markdown_reason_streaming_skip_unsupported();
+    TEST_ASSERT(ngx_str_eq(rc, "STREAMING_SKIP_UNSUPPORTED"),
+        "streaming_skip_unsupported() -> STREAMING_SKIP_UNSUPPORTED");
+
+    rc = ngx_http_markdown_reason_streaming_budget_exceeded();
+    TEST_ASSERT(ngx_str_eq(rc, "STREAMING_BUDGET_EXCEEDED"),
+        "streaming_budget_exceeded() -> STREAMING_BUDGET_EXCEEDED");
+
+    rc = ngx_http_markdown_reason_streaming_precommit_failopen();
+    TEST_ASSERT(ngx_str_eq(rc, "STREAMING_PRECOMMIT_FAILOPEN"),
+        "streaming_precommit_failopen() -> STREAMING_PRECOMMIT_FAILOPEN");
+
+    rc = ngx_http_markdown_reason_streaming_precommit_reject();
+    TEST_ASSERT(ngx_str_eq(rc, "STREAMING_PRECOMMIT_REJECT"),
+        "streaming_precommit_reject() -> STREAMING_PRECOMMIT_REJECT");
+
+    rc = ngx_http_markdown_reason_streaming_shadow();
+    TEST_ASSERT(ngx_str_eq(rc, "STREAMING_SHADOW"),
+        "streaming_shadow() -> STREAMING_SHADOW");
+
+    TEST_PASS("All streaming reason codes correct");
+}
+#endif /* MARKDOWN_STREAMING_ENABLED */
+
+
+/* All reason code string pointers for format validation */
 
 static const ngx_str_t *codes[] = {
     &ngx_http_markdown_reason_skip_config_str,
@@ -226,7 +279,18 @@ static const ngx_str_t *codes[] = {
     &ngx_http_markdown_reason_failed_closed_str,
     &ngx_http_markdown_reason_fail_conversion_str,
     &ngx_http_markdown_reason_fail_resource_limit_str,
-    &ngx_http_markdown_reason_fail_system_str
+    &ngx_http_markdown_reason_fail_system_str,
+#ifdef MARKDOWN_STREAMING_ENABLED
+    &ngx_http_markdown_reason_engine_streaming_str,
+    &ngx_http_markdown_reason_streaming_convert_str,
+    &ngx_http_markdown_reason_streaming_fallback_str,
+    &ngx_http_markdown_reason_streaming_fail_postcommit_str,
+    &ngx_http_markdown_reason_streaming_skip_str,
+    &ngx_http_markdown_reason_streaming_budget_str,
+    &ngx_http_markdown_reason_streaming_precommit_failopen_str,
+    &ngx_http_markdown_reason_streaming_precommit_reject_str,
+    &ngx_http_markdown_reason_streaming_shadow_str,
+#endif
 };
 
 
@@ -245,7 +309,7 @@ test_snake_case_format(void)
                     "Reason code should match ^[A-Z][A-Z0-9_]*$");
     }
 
-    TEST_PASS("All 15 reason codes match uppercase snake_case format");
+    TEST_PASS("All reason codes match uppercase snake_case format");
 }
 
 
@@ -260,6 +324,9 @@ main(void)
     test_error_category_reason_codes();
     test_eligible_outcome_codes();
     test_skip_accept_code();
+#ifdef MARKDOWN_STREAMING_ENABLED
+    test_streaming_reason_codes();
+#endif
     test_snake_case_format();
 
     printf("\n========================================\n");
