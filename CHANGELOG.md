@@ -384,6 +384,20 @@ This project uses Semantic Versioning:
 
 ### Upgrade Notes
 
+#### Upgrading to 0.5.0
+
+- **Rust MSRV raised from 1.87 to 1.91.** The streaming engine uses
+  `str::floor_char_boundary` (stabilized in 1.80) and other APIs that require
+  Rust 1.91+. Update your toolchain before building.
+- All new streaming directives (`markdown_streaming_engine`,
+  `markdown_streaming_on_error`, `markdown_streaming_shadow`,
+  `markdown_streaming_budget`) default to **off / safe values**. With no
+  configuration changes, runtime behavior is identical to 0.4.x.
+- New `make harness-check` and `make harness-check-full` targets are available
+  for validating repo contracts and release-gate documents. They are optional
+  for runtime-only contributors.
+- The `nginx-markdown-converter` crate version is now `0.5.0`.
+
 #### Upgrading to 0.4.1
 
 - This is a patch release with no directive or runtime behavior changes.

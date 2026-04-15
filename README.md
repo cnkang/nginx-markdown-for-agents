@@ -298,7 +298,9 @@ changes:
 | Operate and troubleshoot | [docs/guides/OPERATIONS.md](docs/guides/OPERATIONS.md) |
 | Report a vulnerability or review security support | [SECURITY.md](SECURITY.md) |
 | Understand architecture and design choices | [docs/architecture/README.md](docs/architecture/README.md) |
+| Understand harness architecture and design rationale | [docs/architecture/HARNESS_ARCHITECTURE.md](docs/architecture/HARNESS_ARCHITECTURE.md) |
 | Understand spec routing, risk packs, and harness checks | [docs/harness/README.md](docs/harness/README.md) |
+| Maintain repo-owned harness rules and local adapter workflows | [docs/guides/HARNESS_MAINTENANCE.md](docs/guides/HARNESS_MAINTENANCE.md) |
 | Map directives to runtime behavior | [docs/architecture/CONFIG_BEHAVIOR_MAP.md](docs/architecture/CONFIG_BEHAVIOR_MAP.md) |
 | Explore implementation details | [docs/features/README.md](docs/features/README.md) |
 | Review testing references | [docs/testing/README.md](docs/testing/README.md) |
@@ -313,7 +315,9 @@ changes:
 - Operating in production: use [docs/guides/OPERATIONS.md](docs/guides/OPERATIONS.md)
 - Reporting a vulnerability: use [SECURITY.md](SECURITY.md)
 - Understanding system design: use [docs/architecture/README.md](docs/architecture/README.md)
+- Understanding harness architecture and why it is a repo-level asset: use [docs/architecture/HARNESS_ARCHITECTURE.md](docs/architecture/HARNESS_ARCHITECTURE.md)
 - Understanding repo-owned agent workflow and spec routing: use [docs/harness/README.md](docs/harness/README.md)
+- Maintaining harness rules, risk packs, and local adapter layers: use [docs/guides/HARNESS_MAINTENANCE.md](docs/guides/HARNESS_MAINTENANCE.md)
 - Understanding what directives change in the runtime path: use [docs/architecture/CONFIG_BEHAVIOR_MAP.md](docs/architecture/CONFIG_BEHAVIOR_MAP.md)
 - Reading implementation details: use [docs/features/README.md](docs/features/README.md)
 - Validating changes: use [docs/testing/README.md](docs/testing/README.md)

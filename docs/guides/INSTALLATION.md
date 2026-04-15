@@ -957,7 +957,7 @@ The system cannot reach GitHub to download the pre-built binary or checksum file
    Manual download is intended only for air-gapped or troubleshooting scenarios — prefer the [install script](#4-primary-install-script) for normal installations.
    ```bash
    # On a connected machine — substitute <release_tag>, <nginx_version>, <os_type>, and <arch>
-   # <release_tag> must match the current release (e.g. v0.4.0)
+   # <release_tag> must match the current release (e.g. v0.5.0)
    wget https://github.com/cnkang/nginx-markdown-for-agents/releases/download/<release_tag>/ngx_http_markdown_filter_module-<nginx_version>-<os_type>-<arch>.tar.gz
    wget https://github.com/cnkang/nginx-markdown-for-agents/releases/download/<release_tag>/ngx_http_markdown_filter_module-<nginx_version>-<os_type>-<arch>.tar.gz.sha256
    ```
@@ -989,7 +989,7 @@ The SHA-256 hash of the downloaded binary does not match the expected checksum f
    Manual download is intended only for troubleshooting — prefer the [install script](#4-primary-install-script) for normal installations.
    ```bash
    # Download the binary and checksum file — substitute <release_tag>, <nginx_version>, <os_type>, <arch>
-   # <release_tag> must match the current release (e.g. v0.4.0)
+   # <release_tag> must match the current release (e.g. v0.5.0)
    wget https://github.com/cnkang/nginx-markdown-for-agents/releases/download/<release_tag>/ngx_http_markdown_filter_module-<nginx_version>-<os_type>-<arch>.tar.gz
    wget https://github.com/cnkang/nginx-markdown-for-agents/releases/download/<release_tag>/ngx_http_markdown_filter_module-<nginx_version>-<os_type>-<arch>.tar.gz.sha256
 
