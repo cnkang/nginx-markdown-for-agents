@@ -13,6 +13,7 @@ import harness_route
 from harness_route import (
     _find_repo_root,
     _git_diff_files,
+    _git_status_files,
     _load_manifest,
     _match_path,
     _normalize_files,
@@ -65,6 +66,25 @@ def test_load_manifest_validates_risk_pack_shape() -> None:
             encoding="utf-8",
         )
         with pytest.raises(SystemExit, match=r"risk_packs\[0\] missing keys"):
+            _load_manifest(manifest_path)
+
+
+def test_load_manifest_validates_verification_family_key_shape() -> None:
+    with tempfile.TemporaryDirectory() as tmpdir:
+        manifest_path = Path(tmpdir) / "manifest.json"
+        manifest_path.write_text(
+            json.dumps(
+                {
+                    "risk_packs": [],
+                    "verification_families": {"": {"phase": "cheap-blocker"}},
+                }
+            ),
+            encoding="utf-8",
+        )
+        with pytest.raises(
+            SystemExit,
+            match="verification_families keys must be non-empty strings",
+        ):
             _load_manifest(manifest_path)
 
 
@@ -122,6 +142,66 @@ def test_load_manifest_validates_risk_pack_field_types(
             _load_manifest(manifest_path)
 
 
+@pytest.mark.parametrize(
+    ("paths", "keywords", "families", "error_match"),
+    [
+        (
+            ["docs/**", ""],
+            ["docs"],
+            ["harness-sync"],
+            r"risk_packs\[0\]\.paths\[1\] must be a non-empty string",
+        ),
+        (
+            ["docs/**"],
+            ["docs", ""],
+            ["harness-sync"],
+            r"risk_packs\[0\]\.keywords\[1\] must be a non-empty string",
+        ),
+        (
+            ["docs/**"],
+            ["docs"],
+            [""],
+            r"risk_packs\[0\]\.verification_families\[0\] must be a non-empty string",
+        ),
+        (
+            ["docs/**"],
+            ["docs"],
+            ["unknown-family"],
+            r"risk_packs\[0\]\.verification_families contains unknown family 'unknown-family'",
+        ),
+    ],
+)
+def test_load_manifest_validates_risk_pack_entry_values(
+    paths: list[str],
+    keywords: list[str],
+    families: list[str],
+    error_match: str,
+) -> None:
+    with tempfile.TemporaryDirectory() as tmpdir:
+        manifest_path = Path(tmpdir) / "manifest.json"
+        manifest_path.write_text(
+            json.dumps(
+                {
+                    "risk_packs": [
+                        {
+                            "id": "docs-tooling-drift",
+                            "doc": "docs/harness/risk-packs/example.md",
+                            "paths": paths,
+                            "keywords": keywords,
+                            "verification_families": families,
+                        }
+                    ],
+                    "verification_families": {
+                        "harness-sync": {"phase": "cheap-blocker", "commands": []}
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        with pytest.raises(SystemExit, match=error_match):
+            _load_manifest(manifest_path)
+
+
 def test_match_path_directory_glob_has_boundary() -> None:
     assert _match_path(
         "components/nginx-module/src/foo.c", "components/nginx-module/**"
@@ -167,6 +247,67 @@ def test_git_diff_files_uses_delete_filter(monkeypatch: pytest.MonkeyPatch) -> N
     assert "--diff-filter=d" in captured["cmd"]
 
 
+def test_git_status_files_expands_directory_with_nested_files(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_check_output(cmd, cwd, stderr, text):
+        if cmd[:2] == ["git", "status"]:
+            return "?? some_dir\n"
+        if cmd[:2] == ["git", "ls-files"]:
+            assert cmd[-1] == "some_dir"
+            return "some_dir/file1.c\nsome_dir/nested/file2.c\n"
+        raise AssertionError(f"unexpected command: {cmd}")
+
+    def fake_is_dir(path: Path) -> bool:
+        return path.as_posix().endswith("/some_dir")
+
+    monkeypatch.setattr(harness_route.subprocess, "check_output", fake_check_output)
+    monkeypatch.setattr(Path, "is_dir", fake_is_dir)
+
+    assert _git_status_files() == [
+        "some_dir/file1.c",
+        "some_dir/nested/file2.c",
+    ]
+
+
+def test_git_status_files_directory_without_nested_files_falls_back_to_dir(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_check_output(cmd, cwd, stderr, text):
+        if cmd[:2] == ["git", "status"]:
+            return "?? some_dir\n"
+        if cmd[:2] == ["git", "ls-files"]:
+            return ""
+        raise AssertionError(f"unexpected command: {cmd}")
+
+    def fake_is_dir(path: Path) -> bool:
+        return path.as_posix().endswith("/some_dir")
+
+    monkeypatch.setattr(harness_route.subprocess, "check_output", fake_check_output)
+    monkeypatch.setattr(Path, "is_dir", fake_is_dir)
+
+    assert _git_status_files() == ["some_dir"]
+
+
+def test_git_status_files_directory_ls_files_error_falls_back_to_dir(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_check_output(cmd, cwd, stderr, text):
+        if cmd[:2] == ["git", "status"]:
+            return "?? some_dir\n"
+        if cmd[:2] == ["git", "ls-files"]:
+            raise harness_route.subprocess.CalledProcessError(1, cmd, output="boom")
+        raise AssertionError(f"unexpected command: {cmd}")
+
+    def fake_is_dir(path: Path) -> bool:
+        return path.as_posix().endswith("/some_dir")
+
+    monkeypatch.setattr(harness_route.subprocess, "check_output", fake_check_output)
+    monkeypatch.setattr(Path, "is_dir", fake_is_dir)
+
+    assert _git_status_files() == ["some_dir"]
+
+
 def test_normalize_files_splits_commas_and_normalizes_backslashes() -> None:
     raw = ["a/b.py, c\\d.py", "  e/f.py  "]
     assert _normalize_files(raw) == ["a/b.py", "c/d.py", "e/f.py"]
@@ -187,6 +328,21 @@ def test_pack_matches_scores_path_hits_higher_than_keywords() -> None:
     assert match["path_hits"] == ["docs/harness/README.md"]
     assert "docs" in match["keyword_hits"]
     assert match["score"] == 4
+
+
+def test_pack_matches_score_uses_unique_hits() -> None:
+    pack = {
+        "id": "docs-tooling-drift",
+        "doc": "docs/harness/risk-packs/docs-tooling-drift.md",
+        "paths": ["docs/**", "docs/**"],
+        "keywords": ["docs", "docs"],
+        "verification_families": ["harness-sync"],
+    }
+    match = _pack_matches(pack, ["docs/harness/README.md"], "docs docs")
+    assert match is not None
+    assert match["path_hits"] == ["docs/harness/README.md"]
+    assert match["keyword_hits"] == ["docs"]
+    assert match["score"] == 3
 
 
 def test_pack_matches_returns_none_without_any_hit() -> None:
@@ -222,17 +378,32 @@ def test_verification_plan_dedupes_and_sorts_by_phase() -> None:
                 "phase": "cheap-blocker",
                 "commands": ["make harness-check"],
             },
+            "docs-tooling": {
+                "phase": "cheap-blocker",
+                "commands": ["make docs-check"],
+            },
             "ffi-boundary": {
                 "phase": "focused-semantic",
                 "commands": ["make test-rust"],
             },
         }
     }
-    plan = _verification_plan(
-        manifest, ["release-quality", "harness-sync", "ffi-boundary", "harness-sync"]
+    result = _verification_plan(
+        manifest,
+        [
+            "release-quality",
+            "docs-tooling",
+            "unknown-family",
+            "harness-sync",
+            "ffi-boundary",
+            "harness-sync",
+        ],
     )
+    plan = result["plan"]
     assert [item["family"] for item in plan] == [
+        "docs-tooling",
         "harness-sync",
         "ffi-boundary",
         "release-quality",
     ]
+    assert result["unknown_verification_families"] == ["unknown-family"]
