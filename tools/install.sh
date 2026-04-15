@@ -231,14 +231,14 @@ fetch_release_json() {
     release_api="https://api.github.com/repos/${REPO}/releases/tags/${RELEASE_VERSION}"
   fi
 
-  curl -fsSL -H 'Accept: application/vnd.github+json' "$release_api" 2>/dev/null
+  curl --proto '=https' --tlsv1.2 -fsSL -H 'Accept: application/vnd.github+json' "$release_api" 2>/dev/null
 }
 
 # fetch_dist_index_json fetches the GitHub API JSON listing for the repository's `dist` directory at the specified ref and writes it to stdout.
 fetch_dist_index_json() {
   local ref_name="$1"
   local dist_api="https://api.github.com/repos/${REPO}/contents/dist?ref=${ref_name}"
-  curl -fsSL -H 'Accept: application/vnd.github+json' "$dist_api" 2>/dev/null
+  curl --proto '=https' --tlsv1.2 -fsSL -H 'Accept: application/vnd.github+json' "$dist_api" 2>/dev/null
 }
 
 # resolve_download_info determines the download URL, SHA-256 digest, and available prebuilt nginx versions for a requested asset and prints them as three newline-separated lines.

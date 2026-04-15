@@ -33,7 +33,7 @@ resolve_nginx_version() {
 
   case "${requested}" in
     stable|mainline)
-      page="$(curl -fsSL https://nginx.org/en/download.html)"
+      page="$(curl --proto '=https' --tlsv1.2 -fsSL https://nginx.org/en/download.html)"
       version="$({
         NGINX_DOWNLOAD_HTML="${page}" CHANNEL="${requested}" python3 - <<'PY'
 import os
@@ -149,7 +149,7 @@ mkdir -p "${BUILDROOT}"
 
 if [[ ! -f "${TARBALL}" ]]; then
   echo "==> Downloading NGINX ${REAL_NGINX_VERSION}"
-  curl -fsSL "https://nginx.org/download/nginx-${REAL_NGINX_VERSION}.tar.gz" -o "${TARBALL}"
+  curl --proto '=https' --tlsv1.2 -fsSL "https://nginx.org/download/nginx-${REAL_NGINX_VERSION}.tar.gz" -o "${TARBALL}"
 fi
 
 tar -xzf "${TARBALL}" -C "${BUILDROOT}" --strip-components=1
