@@ -35,6 +35,22 @@ static void ngx_http_markdown_emit_failure_decision(
     ngx_http_markdown_conf_t *conf);
 static void ngx_http_markdown_record_system_failure(
     ngx_http_markdown_ctx_t *ctx);
+const ngx_str_t *ngx_http_markdown_reason_failed_closed(void);
+const ngx_str_t *ngx_http_markdown_reason_failed_open(void);
+const ngx_str_t *ngx_http_markdown_reason_from_error_category(
+    ngx_http_markdown_error_category_t category, const ngx_log_t *log);
+ngx_int_t ngx_http_markdown_decompress(ngx_http_request_t *r,
+    ngx_http_markdown_compression_type_e type, ngx_chain_t *in,
+    ngx_chain_t **out);
+static void ngx_http_markdown_log_decision_with_category(
+    ngx_http_request_t *r, ngx_http_markdown_conf_t *conf,
+    const ngx_str_t *reason_code, const ngx_str_t *error_category);
+static void ngx_http_markdown_metric_inc_failopen(
+    const ngx_http_markdown_conf_t *conf);
+static const ngx_str_t *ngx_http_markdown_compression_name(
+    ngx_http_markdown_compression_type_e compression_type);
+static ngx_http_output_header_filter_pt ngx_http_next_header_filter;
+static ngx_http_output_body_filter_pt ngx_http_next_body_filter;
 
 static void
 ngx_http_markdown_reclassify_fail_open_path(ngx_http_markdown_ctx_t *ctx)

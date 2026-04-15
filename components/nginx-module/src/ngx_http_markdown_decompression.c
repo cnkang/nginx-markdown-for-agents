@@ -22,6 +22,10 @@
 
 #include "ngx_http_markdown_filter_module.h"
 
+static u_char ngx_http_markdown_encoding_gzip[] = "gzip";
+static u_char ngx_http_markdown_encoding_deflate[] = "deflate";
+static u_char ngx_http_markdown_encoding_br[] = "br";
+
 /*
  * Detect compression type from Content-Encoding header
  *
@@ -55,17 +59,17 @@ ngx_http_markdown_detect_compression(ngx_http_request_t *r)
     }
     
     /* Check for gzip compression (case-insensitive, Requirement 1.2) */
-    if (ngx_strcasecmp(h->value.data, (u_char *) "gzip") == 0) {
+    if (ngx_strcasecmp(h->value.data, ngx_http_markdown_encoding_gzip) == 0) {
         return NGX_HTTP_MARKDOWN_COMPRESSION_GZIP;
     }
     
     /* Check for deflate compression (case-insensitive, Requirement 1.3) */
-    if (ngx_strcasecmp(h->value.data, (u_char *) "deflate") == 0) {
+    if (ngx_strcasecmp(h->value.data, ngx_http_markdown_encoding_deflate) == 0) {
         return NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE;
     }
     
     /* Check for brotli compression (case-insensitive, Requirement 1.4) */
-    if (ngx_strcasecmp(h->value.data, (u_char *) "br") == 0) {
+    if (ngx_strcasecmp(h->value.data, ngx_http_markdown_encoding_br) == 0) {
         return NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI;
     }
     
@@ -92,13 +96,12 @@ ngx_http_markdown_detect_compression(ngx_http_request_t *r)
 static size_t
 ngx_http_markdown_chain_size(ngx_chain_t *in)
 {
-    size_t        size;
-    size_t        len;
-    ngx_chain_t  *cl;
+    size_t  size;
+    size_t  len;
     
     size = 0;
     
-    for (cl = in; cl != NULL; cl = cl->next) {
+    for (ngx_chain_t *cl = in; cl != NULL; cl = cl->next) {
         if (cl->buf != NULL) {
             len = cl->buf->last - cl->buf->pos;
             if (len > ((size_t) -1) - size) {
@@ -127,13 +130,12 @@ ngx_http_markdown_chain_size(ngx_chain_t *in)
 static ngx_int_t
 ngx_http_markdown_chain_to_buffer(ngx_chain_t *in, u_char *dest, size_t size)
 {
-    size_t        copied;
-    size_t        len;
-    ngx_chain_t  *cl;
+    size_t  copied;
+    size_t  len;
     
     copied = 0;
     
-    for (cl = in; cl != NULL; cl = cl->next) {
+    for (ngx_chain_t *cl = in; cl != NULL; cl = cl->next) {
         if (cl->buf == NULL) {
             continue;
         }
@@ -256,16 +258,17 @@ ngx_http_markdown_decompress_gzip(ngx_http_request_t *r,
                                    ngx_chain_t *in,
                                    ngx_chain_t **out)
 {
-    z_stream                     stream;
-    ngx_buf_t                   *b;
-    ngx_chain_t                 *cl;
-    u_char                      *input_data;
-    size_t                       input_size;
-    u_char                      *output_data;
-    size_t                       output_size;
-    int                          rc;
-    int                          window_bits;
-    ngx_http_markdown_conf_t    *conf;
+    z_stream                           stream;
+    ngx_buf_t                         *b;
+    ngx_chain_t                       *cl;
+    u_char                            *input_data;
+    size_t                             input_size;
+    u_char                            *output_data;
+    size_t                             output_size;
+    ngx_int_t                          chain_rc;
+    int                                zrc;
+    int                                window_bits;
+    const ngx_http_markdown_conf_t    *conf;
     
     conf = ngx_http_get_module_loc_conf(r, ngx_http_markdown_filter_module);
     
@@ -294,18 +297,25 @@ ngx_http_markdown_decompress_gzip(ngx_http_request_t *r,
         return NGX_ERROR;
     }
     
-    rc = ngx_http_markdown_chain_to_buffer(in, input_data, input_size);
-    if (rc != NGX_OK) {
+    chain_rc = ngx_http_markdown_chain_to_buffer(in, input_data, input_size);
+    if (chain_rc != NGX_OK) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                      "markdown filter: failed to collect input data, "
                      "category=system");
+        return NGX_ERROR;
+    }
+
+    if (input_size > (size_t) UINT_MAX) {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                     "markdown filter: compressed input too large for zlib "
+                     "decoder counters, size=%uz", input_size);
         return NGX_ERROR;
     }
     
     /* Initialize zlib stream */
     ngx_memzero(&stream, sizeof(z_stream));
     stream.next_in = input_data;
-    stream.avail_in = input_size;
+    stream.avail_in = (uInt) input_size;
     
     /* Set windowBits based on compression type (Requirement 2.1, 2.2) */
     if (type == NGX_HTTP_MARKDOWN_COMPRESSION_GZIP) {
@@ -316,11 +326,11 @@ ngx_http_markdown_decompress_gzip(ngx_http_request_t *r,
         window_bits = MAX_WBITS;
     }
     
-    rc = inflateInit2(&stream, window_bits);
-    if (rc != Z_OK) {
+    zrc = inflateInit2(&stream, window_bits);
+    if (zrc != Z_OK) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                      "markdown filter: decompression failed, "
-                     "inflateInit2 error: %d, category=conversion", rc);
+                     "inflateInit2 error: %d, category=conversion", zrc);
         return NGX_ERROR;
     }
     
@@ -344,15 +354,15 @@ ngx_http_markdown_decompress_gzip(ngx_http_request_t *r,
     }
     
     stream.next_out = output_data;
-    stream.avail_out = output_size;
+    stream.avail_out = (uInt) output_size;
     
     /* Perform decompression using Z_FINISH flag (Requirement 2.3) */
-    rc = inflate(&stream, Z_FINISH);
+    zrc = inflate(&stream, Z_FINISH);
     
     /* Check for Z_STREAM_END (Requirement 6.5) */
-    if (rc != Z_STREAM_END) {
+    if (zrc != Z_STREAM_END) {
         /* Check if failure was due to insufficient output buffer space */
-        if (rc == Z_BUF_ERROR && stream.total_out >= conf->max_size) {
+        if (zrc == Z_BUF_ERROR && stream.total_out >= conf->max_size) {
             /* Decompressed size would exceed limit (Requirement 9.3, 9.4) */
             ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                          "markdown filter: decompressed size exceeds limit (%uz), "
@@ -365,7 +375,7 @@ ngx_http_markdown_decompress_gzip(ngx_http_request_t *r,
         /* Other decompression error */
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                      "markdown filter: decompression failed, "
-                     "inflate error: %d, category=conversion", rc);
+                     "inflate error: %d, category=conversion", zrc);
         inflateEnd(&stream);
         return NGX_ERROR;
     }
@@ -472,7 +482,7 @@ ngx_http_markdown_decompress_brotli(ngx_http_request_t *r,
     const uint8_t               *next_in;
     uint8_t                     *next_out;
     size_t                       total_out;
-    ngx_http_markdown_conf_t    *conf;
+    const ngx_http_markdown_conf_t    *conf;
     
     conf = ngx_http_get_module_loc_conf(r, ngx_http_markdown_filter_module);
     
@@ -642,6 +652,9 @@ ngx_http_markdown_decompress_brotli(ngx_http_request_t *r,
     return NGX_OK;
     
 #else
+    (void) in;
+    (void) out;
+
     /* Brotli support not compiled in (Requirement 3.3) */
     ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
                  "markdown filter: brotli not supported, "

@@ -60,6 +60,9 @@ typedef struct {
     struct {
         ngx_atomic_uint_t fullbuffer;
         ngx_atomic_uint_t incremental;
+#ifdef MARKDOWN_STREAMING_ENABLED
+        ngx_atomic_uint_t streaming;
+#endif
     } path_hits;
 
     /* Requests entering the decision chain */
@@ -81,9 +84,50 @@ typedef struct {
     /* Fail-open counter */
     ngx_atomic_uint_t failopen_count;
 
+#ifdef MARKDOWN_STREAMING_ENABLED
+    /* Streaming metrics */
+    struct {
+        ngx_atomic_uint_t requests_total;
+        ngx_atomic_uint_t fallback_total;
+        ngx_atomic_uint_t succeeded_total;
+        ngx_atomic_uint_t failed_total;
+        ngx_atomic_uint_t postcommit_error_total;
+        ngx_atomic_uint_t precommit_failopen_total;
+        ngx_atomic_uint_t precommit_reject_total;
+        ngx_atomic_uint_t budget_exceeded_total;
+        ngx_atomic_uint_t shadow_total;
+        ngx_atomic_uint_t shadow_diff_total;
+        ngx_atomic_uint_t last_ttfb_ms;
+        ngx_atomic_uint_t last_peak_memory_bytes;
+    } streaming;
+#endif
+
     /* Estimated cumulative token savings */
     ngx_atomic_uint_t estimated_token_savings;
 } ngx_http_markdown_metrics_snapshot_t;
+
+typedef struct {
+    ngx_atomic_uint_t conversions_completed;
+    ngx_atomic_uint_t conversion_time_avg_ms;
+    ngx_atomic_uint_t input_bytes_avg;
+    ngx_atomic_uint_t output_bytes_avg;
+} ngx_http_markdown_metrics_derived_t;
+
+#ifndef ngx_str_set
+#define ngx_str_set(str, text)                                                    \
+    do {                                                                          \
+        (str)->len = sizeof(text) - 1;                                            \
+        (str)->data = (u_char *) text;                                            \
+    } while (0)
+#endif
+
+/* C99 declaration visibility for standalone static analysis of this impl header. */
+#ifndef ngx_memzero
+void ngx_memzero(void *buf, size_t n);
+#endif
+u_char *ngx_slprintf(u_char *buf, u_char *last, const char *fmt, ...);
+ngx_int_t ngx_http_output_filter(ngx_http_request_t *r, ngx_chain_t *out);
+ngx_int_t ngx_strncasecmp(u_char *s1, u_char *s2, size_t n);
 
 /*
  * Response buffer size for the metrics endpoint.
@@ -91,13 +135,13 @@ typedef struct {
  * Estimated current output per format:
  *   JSON:       ~2.0 KiB
  *   Plain text: ~1.5 KiB
- *   Prometheus: ~3.2 KiB (most verbose due to HELP/TYPE lines)
+ *   Prometheus: ~3.8 KiB (most verbose due to HELP/TYPE lines)
  *
- * The 5 KiB buffer provides ~1.8 KiB headroom above the largest
+ * The 8 KiB buffer provides headroom above the largest
  * format.  Increase this constant if new metrics push the
  * Prometheus output beyond the limit.
  */
-#define NGX_HTTP_MARKDOWN_METRICS_BUF_SIZE  5120
+#define NGX_HTTP_MARKDOWN_METRICS_BUF_SIZE  8192
 
 /*
  * Forward declaration: the Prometheus renderer is defined in
@@ -115,10 +159,7 @@ ngx_http_markdown_metrics_render_response_body(
     ngx_buf_t *b,
     ngx_uint_t format,
     ngx_http_markdown_metrics_snapshot_t *snapshot,
-    ngx_atomic_uint_t conversions_completed,
-    ngx_atomic_uint_t conversion_time_avg_ms,
-    ngx_atomic_uint_t input_bytes_avg,
-    ngx_atomic_uint_t output_bytes_avg);
+    const ngx_http_markdown_metrics_derived_t *derived);
 static ngx_int_t
 ngx_http_markdown_metrics_send_response(
     ngx_http_request_t *r,
@@ -178,6 +219,9 @@ ngx_http_markdown_collect_metrics_snapshot(ngx_http_markdown_metrics_snapshot_t 
     snapshot->decompressions.brotli = metrics->decompressions.brotli;
     snapshot->path_hits.fullbuffer = metrics->path_hits.fullbuffer;
     snapshot->path_hits.incremental = metrics->path_hits.incremental;
+#ifdef MARKDOWN_STREAMING_ENABLED
+    snapshot->path_hits.streaming = metrics->path_hits.streaming;
+#endif
     snapshot->requests_entered = metrics->requests_entered;
     snapshot->skips.config = metrics->skips.config;
     snapshot->skips.method = metrics->skips.method;
@@ -189,6 +233,32 @@ ngx_http_markdown_collect_metrics_snapshot(ngx_http_markdown_metrics_snapshot_t 
     snapshot->skips.range = metrics->skips.range;
     snapshot->skips.accept = metrics->skips.accept;
     snapshot->failopen_count = metrics->failopen_count;
+#ifdef MARKDOWN_STREAMING_ENABLED
+    snapshot->streaming.requests_total =
+        metrics->streaming.requests_total;
+    snapshot->streaming.fallback_total =
+        metrics->streaming.fallback_total;
+    snapshot->streaming.succeeded_total =
+        metrics->streaming.succeeded_total;
+    snapshot->streaming.failed_total =
+        metrics->streaming.failed_total;
+    snapshot->streaming.postcommit_error_total =
+        metrics->streaming.postcommit_error_total;
+    snapshot->streaming.precommit_failopen_total =
+        metrics->streaming.precommit_failopen_total;
+    snapshot->streaming.precommit_reject_total =
+        metrics->streaming.precommit_reject_total;
+    snapshot->streaming.budget_exceeded_total =
+        metrics->streaming.budget_exceeded_total;
+    snapshot->streaming.shadow_total =
+        metrics->streaming.shadow_total;
+    snapshot->streaming.shadow_diff_total =
+        metrics->streaming.shadow_diff_total;
+    snapshot->streaming.last_ttfb_ms =
+        metrics->streaming.last_ttfb_ms;
+    snapshot->streaming.last_peak_memory_bytes =
+        metrics->streaming.last_peak_memory_bytes;
+#endif
     snapshot->estimated_token_savings = metrics->estimated_token_savings;
 }
 
@@ -432,19 +502,17 @@ ngx_http_markdown_metrics_select_format(
 static void
 ngx_http_markdown_metrics_derive_values(
     ngx_http_markdown_metrics_snapshot_t *snapshot,
-    ngx_atomic_uint_t *conversions_completed,
-    ngx_atomic_uint_t *conversion_time_avg_ms,
-    ngx_atomic_uint_t *input_bytes_avg,
-    ngx_atomic_uint_t *output_bytes_avg)
+    ngx_http_markdown_metrics_derived_t *derived)
 {
-    *conversions_completed = snapshot->conversions_succeeded + snapshot->conversions_failed;
-    *conversion_time_avg_ms = (*conversions_completed > 0)
-        ? (snapshot->conversion_time_sum_ms / *conversions_completed)
+    derived->conversions_completed =
+        snapshot->conversions_succeeded + snapshot->conversions_failed;
+    derived->conversion_time_avg_ms = (derived->conversions_completed > 0)
+        ? (snapshot->conversion_time_sum_ms / derived->conversions_completed)
         : 0;
-    *input_bytes_avg = (snapshot->conversions_succeeded > 0)
+    derived->input_bytes_avg = (snapshot->conversions_succeeded > 0)
         ? (snapshot->input_bytes / snapshot->conversions_succeeded)
         : 0;
-    *output_bytes_avg = (snapshot->conversions_succeeded > 0)
+    derived->output_bytes_avg = (snapshot->conversions_succeeded > 0)
         ? (snapshot->output_bytes / snapshot->conversions_succeeded)
         : 0;
 }
@@ -505,6 +573,23 @@ ngx_http_markdown_metrics_write_json(
         "  \"decompressions_brotli\": %uA,\n"
         "  \"fullbuffer_path_hits\": %uA,\n"
         "  \"incremental_path_hits\": %uA,\n"
+#ifdef MARKDOWN_STREAMING_ENABLED
+        "  \"streaming_path_hits\": %uA,\n"
+        "  \"streaming\": {\n"
+        "    \"requests_total\": %uA,\n"
+        "    \"fallback_total\": %uA,\n"
+        "    \"succeeded_total\": %uA,\n"
+        "    \"failed_total\": %uA,\n"
+        "    \"postcommit_error_total\": %uA,\n"
+        "    \"precommit_failopen_total\": %uA,\n"
+        "    \"precommit_reject_total\": %uA,\n"
+        "    \"budget_exceeded_total\": %uA,\n"
+        "    \"shadow_total\": %uA,\n"
+        "    \"shadow_diff_total\": %uA,\n"
+        "    \"last_ttfb_ms\": %uA,\n"
+        "    \"last_peak_memory_bytes\": %uA\n"
+        "  },\n"
+#endif
         "  \"requests_entered\": %uA,\n"
         "  \"skips\": {\n"
         "    \"config\": %uA,\n"
@@ -546,6 +631,21 @@ ngx_http_markdown_metrics_write_json(
         snapshot->decompressions.brotli,
         snapshot->path_hits.fullbuffer,
         snapshot->path_hits.incremental,
+#ifdef MARKDOWN_STREAMING_ENABLED
+        snapshot->path_hits.streaming,
+        snapshot->streaming.requests_total,
+        snapshot->streaming.fallback_total,
+        snapshot->streaming.succeeded_total,
+        snapshot->streaming.failed_total,
+        snapshot->streaming.postcommit_error_total,
+        snapshot->streaming.precommit_failopen_total,
+        snapshot->streaming.precommit_reject_total,
+        snapshot->streaming.budget_exceeded_total,
+        snapshot->streaming.shadow_total,
+        snapshot->streaming.shadow_diff_total,
+        snapshot->streaming.last_ttfb_ms,
+        snapshot->streaming.last_peak_memory_bytes,
+#endif
         snapshot->requests_entered,
         snapshot->skips.config,
         snapshot->skips.method,
@@ -619,6 +719,23 @@ ngx_http_markdown_metrics_write_text(
         "Path Routing:\n"
         "- Full-Buffer Path Hits: %uA\n"
         "- Incremental Path Hits: %uA\n"
+#ifdef MARKDOWN_STREAMING_ENABLED
+        "- Streaming Path Hits: %uA\n"
+        "\n"
+        "Streaming:\n"
+        "- Streaming Requests Total: %uA\n"
+        "- Streaming Fallback Total: %uA\n"
+        "- Streaming Succeeded Total: %uA\n"
+        "- Streaming Failed Total: %uA\n"
+        "- Streaming Post-Commit Errors: %uA\n"
+        "- Streaming Pre-Commit Fail-Open: %uA\n"
+        "- Streaming Pre-Commit Reject: %uA\n"
+        "- Streaming Budget Exceeded: %uA\n"
+        "- Streaming Shadow Total: %uA\n"
+        "- Streaming Shadow Diff Total: %uA\n"
+        "- Streaming Last TTFB (ms): %uA\n"
+        "- Streaming Peak Memory (bytes): %uA\n"
+#endif
         "\n"
         "Decision Chain:\n"
         "- Requests Entered: %uA\n"
@@ -659,6 +776,21 @@ ngx_http_markdown_metrics_write_text(
         snapshot->decompressions.brotli,
         snapshot->path_hits.fullbuffer,
         snapshot->path_hits.incremental,
+#ifdef MARKDOWN_STREAMING_ENABLED
+        snapshot->path_hits.streaming,
+        snapshot->streaming.requests_total,
+        snapshot->streaming.fallback_total,
+        snapshot->streaming.succeeded_total,
+        snapshot->streaming.failed_total,
+        snapshot->streaming.postcommit_error_total,
+        snapshot->streaming.precommit_failopen_total,
+        snapshot->streaming.precommit_reject_total,
+        snapshot->streaming.budget_exceeded_total,
+        snapshot->streaming.shadow_total,
+        snapshot->streaming.shadow_diff_total,
+        snapshot->streaming.last_ttfb_ms,
+        snapshot->streaming.last_peak_memory_bytes,
+#endif
         snapshot->requests_entered,
         snapshot->skips.config,
         snapshot->skips.method,
@@ -688,10 +820,7 @@ ngx_http_markdown_metrics_render_response_body(
     ngx_buf_t *b,
     ngx_uint_t format,
     ngx_http_markdown_metrics_snapshot_t *snapshot,
-    ngx_atomic_uint_t conversions_completed,
-    ngx_atomic_uint_t conversion_time_avg_ms,
-    ngx_atomic_uint_t input_bytes_avg,
-    ngx_atomic_uint_t output_bytes_avg)
+    const ngx_http_markdown_metrics_derived_t *derived)
 {
     u_char  *p;
 
@@ -703,10 +832,22 @@ ngx_http_markdown_metrics_render_response_body(
         /* JSON and plain text share the precomputed aggregate values. */
         p = ngx_http_markdown_metrics_write_json(
                 p, b->end, snapshot,
-                conversions_completed,
-                conversion_time_avg_ms,
-                input_bytes_avg,
-                output_bytes_avg);
+                derived->conversions_completed,
+                derived->conversion_time_avg_ms,
+                derived->input_bytes_avg,
+                derived->output_bytes_avg);
+        /*
+         * Detect truncation: ngx_slprintf returns end when
+         * the buffer is exhausted.  Emit a hard failure
+         * instead of a partial JSON payload.
+         */
+        if (p >= b->end) {
+            ngx_log_error(NGX_LOG_ERR,
+                r->connection->log, 0,
+                "markdown_metrics: JSON output "
+                "truncated, buffer too small");
+            return NULL;
+        }
         ngx_str_set(&r->headers_out.content_type,
                      "application/json");
         return p;
@@ -731,10 +872,22 @@ ngx_http_markdown_metrics_render_response_body(
     default:
         p = ngx_http_markdown_metrics_write_text(
                 p, b->end, snapshot,
-                conversions_completed,
-                conversion_time_avg_ms,
-                input_bytes_avg,
-                output_bytes_avg);
+                derived->conversions_completed,
+                derived->conversion_time_avg_ms,
+                derived->input_bytes_avg,
+                derived->output_bytes_avg);
+        /*
+         * Detect truncation: ngx_slprintf returns end when
+         * the buffer is exhausted.  Emit a hard failure
+         * instead of a partial plain-text payload.
+         */
+        if (p >= b->end) {
+            ngx_log_error(NGX_LOG_ERR,
+                r->connection->log, 0,
+                "markdown_metrics: plain-text output "
+                "truncated, buffer too small");
+            return NULL;
+        }
         ngx_str_set(&r->headers_out.content_type,
                      "text/plain");
         return p;
@@ -803,10 +956,7 @@ ngx_http_markdown_metrics_handler(ngx_http_request_t *r)
     u_char                               *response_end;
     ngx_uint_t                            format;
     ngx_http_markdown_metrics_snapshot_t  snapshot;
-    ngx_atomic_uint_t                     conversions_completed;
-    ngx_atomic_uint_t                     conversion_time_avg_ms;
-    ngx_atomic_uint_t                     input_bytes_avg;
-    ngx_atomic_uint_t                     output_bytes_avg;
+    ngx_http_markdown_metrics_derived_t   derived;
 
     rc = ngx_http_markdown_metrics_validate_request(r);
     if (rc != NGX_OK) {
@@ -823,12 +973,7 @@ ngx_http_markdown_metrics_handler(ngx_http_request_t *r)
 
     /* Take one best-effort snapshot and derive all aggregate values from it. */
     ngx_http_markdown_collect_metrics_snapshot(&snapshot);
-    ngx_http_markdown_metrics_derive_values(
-        &snapshot,
-        &conversions_completed,
-        &conversion_time_avg_ms,
-        &input_bytes_avg,
-        &output_bytes_avg);
+    ngx_http_markdown_metrics_derive_values(&snapshot, &derived);
 
     /* Render into a fixed-size temporary buffer before sending headers. */
     b = ngx_create_temp_buf(r->pool,
@@ -841,11 +986,7 @@ ngx_http_markdown_metrics_handler(ngx_http_request_t *r)
     }
 
     response_end = ngx_http_markdown_metrics_render_response_body(
-        r, b, format, &snapshot,
-        conversions_completed,
-        conversion_time_avg_ms,
-        input_bytes_avg,
-        output_bytes_avg);
+        r, b, format, &snapshot, &derived);
     if (response_end == NULL) {
         return NGX_HTTP_INTERNAL_SERVER_ERROR;
     }

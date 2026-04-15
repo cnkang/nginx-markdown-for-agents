@@ -105,7 +105,7 @@ ngx_http_markdown_buffer_init(ngx_http_markdown_buffer_t *buf,
  */
 ngx_int_t
 ngx_http_markdown_buffer_append(ngx_http_markdown_buffer_t *buf,
-                                 u_char *data,
+                                 const u_char *data,
                                  size_t len)
 {
     /* Validate parameters */
