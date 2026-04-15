@@ -28,7 +28,7 @@ jobs:
           python-version: '3.14.3'
 
       - name: Run matrix updater
-        run: python3 tools/release/update_matrix.py
+        run: python3 tools/release/matrix/update_matrix.py
 
       - name: Check for changes
         id: changes
@@ -42,8 +42,8 @@ jobs:
       - name: Run validation scripts
         if: steps.changes.outputs.has_changes == 'true'
         run: |
-          python3 tools/release/validate_doc_matrix_sync.py
-          python3 tools/release/validate_matrix_install_consistency.py
+          python3 tools/release/matrix/validate_doc_matrix_sync.py
+          python3 tools/release/matrix/validate_matrix_install_consistency.py
 
       - name: Build PR title and body from diff
         if: steps.changes.outputs.has_changes == 'true'
@@ -101,7 +101,7 @@ jobs:
         if: steps.changes.outputs.has_changes == 'true'
         id: create_pr
         continue-on-error: true
-        uses: peter-evans/create-pull-request@c0f553fe549906ede9cf27b5156039d195d2ece0 # v8.1.0
+        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
         with:
           branch: auto/update-matrix
           title: ${{ steps.pr_meta.outputs.title }}

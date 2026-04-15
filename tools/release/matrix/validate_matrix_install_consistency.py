@@ -10,7 +10,7 @@ Ensures that:
 Exit code 0 = consistent, exit code 1 = inconsistencies found.
 
 Usage:
-    python3 tools/release/validate_matrix_install_consistency.py
+    python3 tools/release/matrix/validate_matrix_install_consistency.py
 """
 
 import json
@@ -20,7 +20,7 @@ from pathlib import Path
 
 # Paths relative to the repository root
 SCRIPT_DIR = Path(__file__).resolve().parent
-REPO_ROOT = SCRIPT_DIR.parent.parent
+REPO_ROOT = SCRIPT_DIR.parent.parent.parent
 MATRIX_PATH = REPO_ROOT / "tools" / "release-matrix.json"
 INSTALL_SCRIPT_PATH = REPO_ROOT / "tools" / "install.sh"
 

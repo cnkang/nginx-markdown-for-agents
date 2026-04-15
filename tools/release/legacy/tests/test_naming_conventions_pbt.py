@@ -9,7 +9,7 @@ Validates: Requirements 4.1, 4.2, 4.3, 4.4
 import hypothesis.strategies as st
 from hypothesis import given, settings
 
-from tools.release.naming_conventions import (
+from tools.release.legacy.naming_conventions import (
     is_valid_directive_name,
     is_valid_metric_name,
     is_valid_reason_code,
@@ -61,9 +61,7 @@ def test_valid_benchmark_fields_accepted(name):
 
 # --- Invalid name rejection ---
 
-@given(name=st.text(min_size=0, max_size=50).filter(
-    lambda s: not s.startswith("markdown_") or len(s) <= len("markdown_") or
-    not s[len("markdown_"):][0:1].isalpha() or not s[len("markdown_"):][0:1].islower()))
+@given(name=st.text(min_size=0, max_size=50).filter(lambda s: not s.startswith("markdown_") or len(s) <= len("markdown_") or not s[len("markdown_"):][:1].isalpha() or not s[len("markdown_"):][:1].islower()))
 @settings(max_examples=100)
 def test_invalid_directive_names_rejected(name):
     # Mirror the rule encoded in DIRECTIVE_PATTERN so every generated sample
@@ -71,8 +69,8 @@ def test_invalid_directive_names_rejected(name):
     expected = (
         name.startswith("markdown_")
         and len(name) > len("markdown_")
-        and name[len("markdown_"):][0:1].isalpha()
-        and name[len("markdown_"):][0:1].islower()
+        and name[len("markdown_") :][:1].isalpha()
+        and name[len("markdown_") :][:1].islower()
     )
     assert is_valid_directive_name(name) == expected
 

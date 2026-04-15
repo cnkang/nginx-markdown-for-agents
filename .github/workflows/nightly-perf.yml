@@ -33,7 +33,7 @@ jobs:
           python-version: '3.14.3'
 
       - name: Install Python test dependencies
-        run: pip install hypothesis pytest
+        run: pip install -r requirements-dev.txt
 
       - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1

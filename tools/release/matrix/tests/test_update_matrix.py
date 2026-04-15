@@ -1,8 +1,10 @@
-"""Property-based tests for tools/release/update_matrix.py.
+"""Property-based tests for tools/release/matrix/update_matrix.py.
 
 Tests for the automated nginx release matrix updater.
 """
 
+
+import itertools
 from hypothesis import given, settings, assume, HealthCheck
 from hypothesis import strategies as st
 
@@ -16,7 +18,7 @@ _repo_root = Path(__file__).resolve().parents[3]
 if str(_repo_root) not in sys.path:
     sys.path.insert(0, str(_repo_root))
 
-from tools.release.update_matrix import (
+from tools.release.matrix.update_matrix import (
     classify_version,
     version_tuple,
     compute_matrix,
@@ -32,7 +34,7 @@ from tools.release.update_matrix import (
     _resolve_repo_write_path,
 )
 
-from tools.release.update_matrix import filter_versions
+from tools.release.matrix.update_matrix import filter_versions
 
 # ---------------------------------------------------------------------------
 # Strategies
@@ -106,7 +108,7 @@ def test_version_filtering_completeness(versions, min_version):
 # Import parse_nginx_versions for unit tests
 # ---------------------------------------------------------------------------
 
-from tools.release.update_matrix import parse_nginx_versions
+from tools.release.matrix.update_matrix import parse_nginx_versions
 
 # ---------------------------------------------------------------------------
 # Unit Tests — HTML Parsing (parse_nginx_versions)
@@ -191,7 +193,7 @@ def test_classify_version_rejects_malformed_strings(version):
 # Import load_matrix for unit tests
 # ---------------------------------------------------------------------------
 
-from tools.release.update_matrix import load_matrix
+from tools.release.matrix.update_matrix import load_matrix
 
 # ---------------------------------------------------------------------------
 # Unit Tests — load_matrix
@@ -317,7 +319,7 @@ def test_resolve_repo_write_path_rejects_paths_outside_repo(tmp_path, monkeypatc
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
 
-    import tools.release.update_matrix as um
+    import tools.release.matrix.update_matrix as um
 
     monkeypatch.setattr(um, "REPO_ROOT", repo_root)
 
@@ -335,7 +337,7 @@ def _allow_repo_writes(monkeypatch, repo_root: Path) -> None:
     """
     repo_root.mkdir(parents=True, exist_ok=True)
 
-    import tools.release.update_matrix as um
+    import tools.release.matrix.update_matrix as um
 
     monkeypatch.setattr(um, "REPO_ROOT", repo_root)
 
@@ -434,11 +436,10 @@ def test_property3_matrix_cross_product_completeness(versions):
 
     # Every expected combination is present
     for v in versions:
-        for os_type in os_types:
-            for arch in archs:
-                assert (v, os_type, arch) in seen, (
-                    f"Missing entry for ({v}, {os_type}, {arch})"
-                )
+        for os_type, arch in itertools.product(os_types, archs):
+            assert (v, os_type, arch) in seen, (
+                f"Missing entry for ({v}, {os_type}, {arch})"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -747,7 +748,7 @@ def test_write_matrix_cleans_up_temp_on_failure(tmp_path, monkeypatch):
 
     _allow_repo_writes(monkeypatch, tmp_path)
     target = tmp_path / "release-matrix.json"
-    tmp_file = target.with_suffix(target.suffix + ".tmp")
+    tmp_file = target.with_suffix(f"{target.suffix}.tmp")
 
     # Make os.replace raise an OSError to simulate a rename failure
     def failing_replace(src, dst):
@@ -1056,7 +1057,7 @@ def test_property9_read_only_modes_do_not_modify_files(tmp_path, versions, monke
 
     **Validates: Requirements 4.10, 5.1, 6.6**
     """
-    import tools.release.update_matrix as um
+    import tools.release.matrix.update_matrix as um
 
     # --- Set up temporary files -------------------------------------------
     matrix_path = tmp_path / "release-matrix.json"
@@ -1176,8 +1177,8 @@ def test_property10_idempotent_matrix_computation(versions):
 # Unit Tests — CLI and orchestration (Task 6.4)
 # ---------------------------------------------------------------------------
 
-import tools.release.update_matrix as um
-from tools.release.update_matrix import write_diff_file, MatrixDiff
+import tools.release.matrix.update_matrix as um
+from tools.release.matrix.update_matrix import write_diff_file, MatrixDiff
 
 
 def _setup_cli_env(tmp_path, versions_in_matrix, monkeypatch, *, html_versions=None):
@@ -1216,14 +1217,15 @@ def _setup_cli_env(tmp_path, versions_in_matrix, monkeypatch, *, html_versions=N
     entries = []
     for v in versions_in_matrix:
         for os_type in ["glibc", "musl"]:
-            for arch in ["x86_64", "aarch64"]:
-                entries.append({
+            entries.extend(
+                {
                     "nginx": v,
                     "os_type": os_type,
                     "arch": arch,
                     "support_tier": "full",
-                })
-
+                }
+                for arch in ["x86_64", "aarch64"]
+            )
     matrix_data = {
         "schema_version": "1.0.0",
         "updated_at": "2025-07-14T00:00:00Z",

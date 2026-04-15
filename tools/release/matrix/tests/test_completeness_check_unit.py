@@ -1,4 +1,4 @@
-"""Unit tests for tools/release/completeness_check.py."""
+"""Unit tests for tools/release/matrix/completeness_check.py."""
 
 import json
 import tempfile
@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from tools.release.completeness_check import (
+from tools.release.matrix.completeness_check import (
     check_completeness,
     collect_artifacts,
     expected_artifact_name,

@@ -21,8 +21,19 @@ from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parents[2]
 ARCHIVE_SEGMENT = "docs/archive/"
+MAINTAINED_ROOT_DOCS = {"AGENTS.md", "README.md", "README_zh-CN.md"}
 LINK_RE = re.compile(r"(!?\[[^\]]+\]\(([^)]+)\))")
 HAN_RE = re.compile(r"[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF]")
+SPEC_INDEX_RE = re.compile(r"\bspecs?\s*(?:1[2-9]|[2-9]\d)(?:\s*[-–]\s*(?:1[2-9]|[2-9]\d))?\b", re.IGNORECASE)
+KIRO_PATH_RE = re.compile(r"(?P<path>\.kiro/[A-Za-z0-9._/*-]+)")
+ALLOWED_KIRO_PATHS = {".kiro/nginx-development-guide.md"}
+
+
+def is_maintained_markdown(rel_path: str) -> bool:
+    """Return whether a markdown path belongs to maintained repo truth surfaces."""
+    if rel_path in MAINTAINED_ROOT_DOCS:
+        return True
+    return rel_path.startswith("docs/") and not rel_path.startswith(ARCHIVE_SEGMENT)
 
 
 def iter_markdown_files() -> list[Path]:
@@ -45,8 +56,26 @@ def iter_markdown_files() -> list[Path]:
         candidates = set(ROOT.rglob("*.md"))
 
     return sorted(
-        p for p in candidates if ARCHIVE_SEGMENT not in p.relative_to(ROOT).as_posix()
+        p
+        for p in candidates
+        if is_maintained_markdown(p.relative_to(ROOT).as_posix())
     )
+
+
+def get_git_tracked_paths() -> set[str]:
+    try:
+        proc = subprocess.run(
+            ["git", "ls-files"],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        if proc.returncode != 0:
+            return set()
+        return {line.strip() for line in proc.stdout.splitlines() if line.strip()}
+    except FileNotFoundError:
+        return set()
 
 
 def iter_unfenced_lines(text: str) -> list[tuple[int, str]]:
@@ -130,6 +159,50 @@ def check_duplicate_sync() -> list[str]:
     return [f"duplicate-sync: {line}" for line in output.splitlines() if line.strip()]
 
 
+def check_internal_reference_policy(
+    files: list[Path], tracked_paths: set[str] | None = None
+) -> list[str]:
+    """Reject internal/untracked reference patterns in maintained docs.
+
+    Policy:
+    - Avoid numbered internal shorthand like "spec 12" or "specs 12-18".
+    - Allow relative references to tracked files under `.kiro/`.
+    - Reject `.kiro/` directory references, globs, and untracked targets.
+    """
+    errors: list[str] = []
+    tracked = tracked_paths if tracked_paths is not None else get_git_tracked_paths()
+
+    for f in files:
+        text = f.read_text(encoding="utf-8", errors="ignore")
+        for line_no, line in iter_unfenced_lines(text):
+            if SPEC_INDEX_RE.search(line):
+                errors.append(
+                    f"{f}:{line_no}: avoid internal numbered references like "
+                    "'spec X'; describe release scope/capability directly"
+                )
+
+            for m in KIRO_PATH_RE.finditer(line):
+                raw = m.group("path").rstrip(".,:;)]}\"'")
+                if raw in ALLOWED_KIRO_PATHS:
+                    if tracked and raw not in tracked:
+                        errors.append(
+                            f"{f}:{line_no}: referenced path '{raw}' is not tracked"
+                        )
+                    continue
+                if raw.endswith("/") or "*" in raw:
+                    errors.append(
+                        f"{f}:{line_no}: avoid directory/glob reference '{raw}'; "
+                        "link tracked files instead"
+                    )
+                    continue
+                if tracked and raw not in tracked:
+                    errors.append(
+                        f"{f}:{line_no}: internal path '{raw}' is not tracked; "
+                        "remove or replace with tracked file reference"
+                    )
+    return errors
+
+
 def main() -> int:
     files = iter_markdown_files()
     failures: list[str] = []
@@ -137,6 +210,7 @@ def main() -> int:
     failures.extend(check_links(files))
     failures.extend(check_heading_hierarchy(files))
     failures.extend(check_english_policy(files))
+    failures.extend(check_internal_reference_policy(files))
     failures.extend(check_duplicate_sync())
 
     if failures:
@@ -150,6 +224,7 @@ def main() -> int:
     print("- Local links: OK")
     print("- Heading hierarchy: OK")
     print("- English docs policy (Han-character scan): OK")
+    print("- Internal reference policy (tracked paths/no 'spec X'): OK")
     print("- Duplicate canonical/mirror sync: OK")
     return 0
 
