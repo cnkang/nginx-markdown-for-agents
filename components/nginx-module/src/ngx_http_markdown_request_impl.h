@@ -27,7 +27,7 @@ static void ngx_http_markdown_log_failure_decision(
     const ngx_http_markdown_conf_t *conf);
 static ngx_int_t ngx_http_markdown_handle_unsupported_compression(
     ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx,
-    ngx_http_markdown_conf_t *conf);
+    const ngx_http_markdown_conf_t *conf);
 static void ngx_http_markdown_log_decision_with_category(
     ngx_http_request_t *r, const ngx_http_markdown_conf_t *conf,
     const ngx_str_t *reason_code, const ngx_str_t *error_category);
@@ -85,7 +85,7 @@ static ngx_int_t
 ngx_http_markdown_handle_unsupported_compression(
     ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx,
-    ngx_http_markdown_conf_t *conf)
+    const ngx_http_markdown_conf_t *conf)
 {
     ctx->eligible = 0;
     ctx->last_error_category =
