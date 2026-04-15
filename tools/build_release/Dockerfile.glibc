@@ -2,13 +2,13 @@
 ARG OS_BASE=debian:bookworm-slim
 FROM ${OS_BASE}
 
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     curl \
     libpcre3-dev \
-    zlib1g-dev \
     libssl-dev \
     python3 \
+    zlib1g-dev \
     && curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
     && /root/.cargo/bin/cargo install cbindgen \
     && rm -rf /var/lib/apt/lists/*
@@ -17,7 +17,7 @@ ENV PATH="/root/.cargo/bin:${PATH}"
 ARG NGINX_VERSION=1.28.2
 
 WORKDIR /build
-RUN curl -fsSL "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" | tar xz
+RUN curl --proto '=https' --tlsv1.2 -fsSL "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" | tar xz
 
 # Copy only files required for module build.
 COPY Makefile /src/Makefile
