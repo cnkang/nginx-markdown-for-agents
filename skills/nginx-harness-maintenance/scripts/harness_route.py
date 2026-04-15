@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import subprocess
 import sys
 from fnmatch import fnmatch
@@ -158,6 +159,10 @@ def _parse_status_output(output: str) -> list[str]:
     for line in output.splitlines():
         if len(line) < 4:
             continue
+        index_status = line[0]
+        worktree_status = line[1]
+        if index_status == "D" or worktree_status == "D":
+            continue
         entry = line[3:].strip()
         if not entry:
             continue
@@ -193,7 +198,7 @@ def _pack_matches(pack: dict, files: list[str], hint_text: str) -> dict | None:
     haystack = f"{hint_text} {' '.join(files)}".lower()
     for keyword in pack.get("keywords", []):
         needle = str(keyword).lower()
-        if needle and needle in haystack:
+        if needle and _keyword_matches_haystack(needle, haystack):
             keyword_hits.append(str(keyword))
 
     if not path_hits and not keyword_hits:
@@ -207,6 +212,11 @@ def _pack_matches(pack: dict, files: list[str], hint_text: str) -> dict | None:
         "keyword_hits": sorted(set(keyword_hits)),
         "score": (2 * len(path_hits)) + len(keyword_hits),
     }
+
+
+def _keyword_matches_haystack(needle: str, haystack: str) -> bool:
+    pattern = rf"(?<![0-9a-z_]){re.escape(needle)}(?![0-9a-z_])"
+    return re.search(pattern, haystack) is not None
 
 
 def _verification_plan(manifest: dict, families: list[str]) -> list[dict]:
