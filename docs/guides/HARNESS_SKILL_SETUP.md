@@ -1,7 +1,7 @@
 # Harness Skill Setup
 
 This guide shows how contributors can wire the repository-tracked
-`nginx-harness-maintenance` skill into their local AI agent workflow after
+`nginx-markdown-harness-maintenance` skill into their local AI agent workflow after
 cloning this project.
 
 Use this when:
@@ -13,14 +13,14 @@ Use this when:
 
 The skill itself lives at:
 
-- `skills/nginx-harness-maintenance/SKILL.md`
+- `skills/nginx-markdown-harness-maintenance/SKILL.md`
 
 ## Recommended: Install from Your Local Clone with `npx skills`
 
 From the repository root:
 
 ```bash
-npx skills add . --full-depth --skill nginx-harness-maintenance -y
+npx skills add . --full-depth --skill nginx-markdown-harness-maintenance -y
 npx skills ls
 ```
 
@@ -39,7 +39,7 @@ If you want the skill available across projects:
 ```bash
 npx skills add /absolute/path/to/nginx-markdown-for-agents \
   --full-depth \
-  --skill nginx-harness-maintenance \
+  --skill nginx-markdown-harness-maintenance \
   -g -y
 ```
 
@@ -51,16 +51,16 @@ Codex:
 
 ```bash
 mkdir -p "${CODEX_HOME:-$HOME/.codex}/skills"
-ln -sfn "$PWD/skills/nginx-harness-maintenance" \
-  "${CODEX_HOME:-$HOME/.codex}/skills/nginx-harness-maintenance"
+ln -sfn "$PWD/skills/nginx-markdown-harness-maintenance" \
+  "${CODEX_HOME:-$HOME/.codex}/skills/nginx-markdown-harness-maintenance"
 ```
 
 Claude Code:
 
 ```bash
 mkdir -p "$HOME/.claude/skills"
-ln -sfn "$PWD/skills/nginx-harness-maintenance" \
-  "$HOME/.claude/skills/nginx-harness-maintenance"
+ln -sfn "$PWD/skills/nginx-markdown-harness-maintenance" \
+  "$HOME/.claude/skills/nginx-markdown-harness-maintenance"
 ```
 
 ## Verify the Skill Wiring
@@ -68,7 +68,7 @@ ln -sfn "$PWD/skills/nginx-harness-maintenance" \
 Run a direct route check:
 
 ```bash
-python3 skills/nginx-harness-maintenance/scripts/harness_route.py --from-git
+python3 skills/nginx-markdown-harness-maintenance/scripts/harness_route.py --from-git
 ```
 
 Then run the standard harness check:

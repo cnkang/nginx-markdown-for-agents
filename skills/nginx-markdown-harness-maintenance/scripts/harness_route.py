@@ -56,6 +56,12 @@ def _load_manifest(path: Path) -> dict:
     if not isinstance(data["verification_families"], dict):
         raise SystemExit(f"manifest {path}: 'verification_families' must be a dict")
 
+    for family in data["verification_families"].keys():
+        if not isinstance(family, str) or not family.strip():
+            raise SystemExit(
+                f"manifest {path}: verification_families keys must be non-empty strings"
+            )
+
     for index, pack in enumerate(data["risk_packs"]):
         if not isinstance(pack, dict):
             raise SystemExit(f"manifest {path}: risk_packs[{index}] must be an object")
@@ -83,6 +89,32 @@ def _load_manifest(path: Path) -> dict:
                 "manifest "
                 f"{path}: risk_packs[{index}].verification_families must be a list"
             )
+
+        for item_index, pattern in enumerate(pack["paths"]):
+            if not isinstance(pattern, str) or not pattern.strip():
+                raise SystemExit(
+                    f"manifest {path}: risk_packs[{index}].paths[{item_index}] "
+                    "must be a non-empty string"
+                )
+        for item_index, keyword in enumerate(pack["keywords"]):
+            if not isinstance(keyword, str) or not keyword.strip():
+                raise SystemExit(
+                    f"manifest {path}: risk_packs[{index}].keywords[{item_index}] "
+                    "must be a non-empty string"
+                )
+        for item_index, family in enumerate(pack["verification_families"]):
+            if not isinstance(family, str) or not family.strip():
+                raise SystemExit(
+                    "manifest "
+                    f"{path}: risk_packs[{index}].verification_families[{item_index}] "
+                    "must be a non-empty string"
+                )
+            if family not in data["verification_families"]:
+                raise SystemExit(
+                    "manifest "
+                    f"{path}: risk_packs[{index}].verification_families "
+                    f"contains unknown family '{family}'"
+                )
 
     return data
 
@@ -204,13 +236,16 @@ def _pack_matches(pack: dict, files: list[str], hint_text: str) -> dict | None:
     if not path_hits and not keyword_hits:
         return None
 
+    uniq_path_hits = sorted(set(path_hits))
+    uniq_keyword_hits = sorted(set(keyword_hits))
+
     return {
         "id": pack["id"],
         "doc": pack["doc"],
         "verification_families": pack.get("verification_families", []),
-        "path_hits": sorted(set(path_hits)),
-        "keyword_hits": sorted(set(keyword_hits)),
-        "score": (2 * len(path_hits)) + len(keyword_hits),
+        "path_hits": uniq_path_hits,
+        "keyword_hits": uniq_keyword_hits,
+        "score": (2 * len(uniq_path_hits)) + len(uniq_keyword_hits),
     }
 
 
@@ -219,16 +254,18 @@ def _keyword_matches_haystack(needle: str, haystack: str) -> bool:
     return re.search(pattern, haystack) is not None
 
 
-def _verification_plan(manifest: dict, families: list[str]) -> list[dict]:
+def _verification_plan(manifest: dict, families: list[str]) -> dict[str, list]:
     family_map = manifest.get("verification_families", {})
     seen = set()
     plan: list[dict] = []
-    for family in families:
+    unknown_families: list[str] = []
+    for order, family in enumerate(families):
         if family in seen:
             continue
         seen.add(family)
         payload = family_map.get(family)
         if not isinstance(payload, dict):
+            unknown_families.append(family)
             continue
         phase = str(payload.get("phase", "focused-semantic"))
         commands = payload.get("commands", [])
@@ -237,10 +274,16 @@ def _verification_plan(manifest: dict, families: list[str]) -> list[dict]:
                 "family": family,
                 "phase": phase,
                 "commands": commands if isinstance(commands, list) else [],
+                "order": order,
             }
         )
-    plan.sort(key=lambda item: (PHASE_ORDER.get(item["phase"], 99), item["family"]))
-    return plan
+    plan.sort(key=lambda item: (PHASE_ORDER.get(item["phase"], 99), item["order"]))
+    for item in plan:
+        item.pop("order", None)
+    return {
+        "plan": plan,
+        "unknown_verification_families": sorted(unknown_families),
+    }
 
 
 def _parse_args() -> argparse.Namespace:
@@ -287,13 +330,16 @@ def main() -> int:
     families: list[str] = []
     for pack in matched:
         families.extend(pack["verification_families"])
-    plan = _verification_plan(manifest, families)
+    verification = _verification_plan(manifest, families)
+    plan = verification["plan"]
+    unknown_families = verification["unknown_verification_families"]
 
     payload = {
         "files": files,
         "hints": args.hint,
         "matched_risk_packs": matched,
         "verification_plan": plan,
+        "unknown_verification_families": unknown_families,
     }
 
     if args.json:
@@ -318,6 +364,14 @@ def main() -> int:
             print(f"  - [{item['phase']}] {item['family']}")
             for command in item["commands"]:
                 print(f"      {command}")
+        if unknown_families:
+            joined = ", ".join(unknown_families)
+            print(
+                "warning: unknown verification families "
+                "(no entry in manifest.verification_families): "
+                f"{joined}",
+                file=sys.stderr,
+            )
 
     return 0
 

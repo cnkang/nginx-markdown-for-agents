@@ -71,7 +71,7 @@ skill so your IDE/agent can route and verify changes consistently.
 From the repository root:
 
 ```bash
-npx skills add . --full-depth --skill nginx-harness-maintenance -y
+npx skills add . --full-depth --skill nginx-markdown-harness-maintenance -y
 npx skills ls
 ```
 

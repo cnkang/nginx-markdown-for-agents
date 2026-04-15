@@ -74,7 +74,7 @@ flowchart LR
 
 For local agent workflows, a repo-tracked helper skill is available at:
 
-- [../../skills/nginx-harness-maintenance/SKILL.md](../../skills/nginx-harness-maintenance/SKILL.md)
+- [../../skills/nginx-markdown-harness-maintenance/SKILL.md](../../skills/nginx-markdown-harness-maintenance/SKILL.md)
 - Setup guide for contributors and local IDE/agent wiring:
   [../guides/HARNESS_SKILL_SETUP.md](../guides/HARNESS_SKILL_SETUP.md)
 
