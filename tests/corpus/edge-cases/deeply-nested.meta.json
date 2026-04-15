@@ -4,5 +4,11 @@
   "expected-conversion-result": "converted",
   "input-size-bytes": 1517,
   "source-description": "Deeply nested HTML structure to stress converter recursion depth",
-  "failure-corpus": true
+  "failure-corpus": true,
+  "streaming_notes": {
+    "expected_fallback": false,
+    "known_diff_ids": [
+      "DIFF-PARITY-WHITESPACE-ONLY"
+    ]
+  }
 }

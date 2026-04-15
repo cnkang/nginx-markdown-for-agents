@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="windows-1252">
+    <title>Charset Mismatch Fixture</title>
+</head>
+<body>
+    <!--
+        Streaming parity test fixture: Content-Type vs meta charset mismatch.
+
+        The <meta charset="windows-1252"> in <head> conflicts with the
+        runtime Content-Type header "text/html; charset=ISO-8859-1" used
+        by the streaming regression test. Tests that streaming charset
+        resolution handles windows-1252 vs ISO-8859-1 mismatch without
+        corrupting characters like café, piñata, £, ©.
+    -->
+    <h1>Charset Mismatch</h1>
+    <p>Café and piñata should stay readable.</p>
+    <p>£ and © symbols are included for transcoding checks.</p>
+</body>
+</html>

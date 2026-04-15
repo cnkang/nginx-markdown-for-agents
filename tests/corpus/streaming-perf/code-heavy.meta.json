@@ -1,0 +1,12 @@
+{
+  "fixture-id": "streaming-perf/code-heavy",
+  "page-type": "documentation",
+  "expected-conversion-result": "converted",
+  "input-size-bytes": 1902,
+  "source-description": "Streaming benchmark fixture with multiple code blocks and mixed prose",
+  "failure-corpus": false,
+  "streaming_notes": {
+    "expected_fallback": false,
+    "known_diff_ids": []
+  }
+}

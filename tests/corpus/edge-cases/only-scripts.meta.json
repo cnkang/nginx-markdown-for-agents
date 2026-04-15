@@ -4,5 +4,11 @@
   "expected-conversion-result": "converted",
   "input-size-bytes": 1407,
   "source-description": "HTML containing only script elements with no visible content",
-  "failure-corpus": true
+  "failure-corpus": true,
+  "streaming_notes": {
+    "expected_fallback": false,
+    "known_diff_ids": [
+      "DIFF-PARITY-WHITESPACE-ONLY"
+    ]
+  }
 }

@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Nested Blockquote Fixture</title>
+</head>
+<body>
+    <!--
+        Streaming parity test fixture: nested blockquote structures.
+
+        Exercises two-level blockquote nesting with lists and code blocks
+        inside quotes. High-risk because the streaming emitter must
+        prepend correct "> " prefixes at each nesting level and maintain
+        prefix state across chunk boundaries.
+    -->
+    <h1>Blockquote Cases</h1>
+
+    <blockquote>
+        <p>Level 1 quote paragraph.</p>
+        <blockquote>
+            <p>Level 2 quote paragraph.</p>
+            <ul>
+                <li>Quoted list item A</li>
+                <li>Quoted list item B</li>
+            </ul>
+            <pre><code>quoted code
+second line</code></pre>
+        </blockquote>
+    </blockquote>
+</body>
+</html>

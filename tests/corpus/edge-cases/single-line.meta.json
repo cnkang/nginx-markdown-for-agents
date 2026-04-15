@@ -4,5 +4,11 @@
   "expected-conversion-result": "converted",
   "input-size-bytes": 618,
   "source-description": "Entire HTML document on a single line to test whitespace-independent parsing",
-  "failure-corpus": false
+  "failure-corpus": false,
+  "streaming_notes": {
+    "expected_fallback": false,
+    "known_diff_ids": [
+      "DIFF-PARITY-EDGE-SINGLE-LINE"
+    ]
+  }
 }

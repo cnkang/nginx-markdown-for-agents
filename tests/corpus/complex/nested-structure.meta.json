@@ -4,5 +4,11 @@
   "expected-conversion-result": "converted",
   "input-size-bytes": 2769,
   "source-description": "Deeply nested HTML structure with navigation menus and nested containers",
-  "failure-corpus": false
+  "failure-corpus": false,
+  "streaming_notes": {
+    "expected_fallback": false,
+    "known_diff_ids": [
+      "DIFF-PARITY-WHITESPACE-ONLY"
+    ]
+  }
 }

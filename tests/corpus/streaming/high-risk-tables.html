@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>High Risk Tables Fixture</title>
+</head>
+<body>
+    <!--
+        Streaming parity test fixture: high-risk table structures.
+
+        This fixture intentionally includes BOTH deprecated HTML attributes
+        AND modern CSS equivalents. The deprecated patterns (align, colspan,
+        rowspan, nested tables without <th>) are common in legacy web content
+        that the converter must handle correctly. SonarCloud warnings on these
+        patterns are expected and should not be "fixed" — they are the test.
+
+        Sections:
+          1. Simple Table          — baseline with <th> headers
+          2. Aligned Table (legacy)— deprecated align="" attributes (Web:S1827)
+          3. Aligned Table (CSS)   — modern style="" equivalent
+          4. Span Table            — colspan/rowspan without <th> (Web:S5256)
+          5. Nested Table          — table-in-table without outer <th>
+          6. Caption and Semantic   — modern <caption>, <thead>, <tbody>, <tfoot>
+    -->
+
+    <h1>Tables Coverage</h1>
+
+    <!-- Section 1: Simple table with proper <th> headers -->
+    <h2>Simple Table</h2>
+    <table>
+        <tr><th>Name</th><th>Score</th></tr>
+        <tr><td>Alice</td><td>95</td></tr>
+        <tr><td>Bob</td><td>88</td></tr>
+    </table>
+
+    <!--
+        Section 2: Deprecated align="" attributes (intentional).
+        SonarCloud Web:S1827 fires here. These attributes are deprecated in
+        HTML5 but remain widespread in legacy content, email HTML, and CMS
+        output. The converter must handle them without crashing or losing
+        alignment semantics during Markdown table generation.
+    -->
+    <h2>Aligned Table (Legacy Attributes)</h2>
+    <table>
+        <tr><th align="left">Left</th><th align="center">Center</th><th align="right">Right</th></tr>
+        <tr><td align="left">L1</td><td align="center">C1</td><td align="right">R1</td></tr>
+    </table>
+
+    <!-- Section 3: Modern CSS-based alignment (HTML5 equivalent of Section 2) -->
+    <h2>Aligned Table (CSS Style)</h2>
+    <table>
+        <tr>
+            <th style="text-align: left">Left</th>
+            <th style="text-align: center">Center</th>
+            <th style="text-align: right">Right</th>
+        </tr>
+        <tr>
+            <td style="text-align: left">L1</td>
+            <td style="text-align: center">C1</td>
+            <td style="text-align: right">R1</td>
+        </tr>
+    </table>
+
+    <!--
+        Section 4: colspan/rowspan without <th> on every row.
+        SonarCloud Web:S5256 fires here because the second and third <tr>
+        lack <th> elements. This is valid HTML for span layouts and common
+        in real-world content.
+    -->
+    <h2>Span Table</h2>
+    <table>
+        <tr><th colspan="2">Header Span</th></tr>
+        <tr><td rowspan="2">Row Span</td><td>Cell A</td></tr>
+        <tr><td>Cell B</td></tr>
+    </table>
+
+    <!--
+        Section 5: Nested table (table inside <td>).
+        The outer table has no <th> (Web:S5256). Nested tables are a
+        high-risk structure for streaming because the inner table may
+        trigger fallback independently of the outer table.
+    -->
+    <h2>Nested Table</h2>
+    <table>
+        <tr>
+            <td>Outer Cell</td>
+            <td>
+                <table>
+                    <tr><th>Inner A</th><th>Inner B</th></tr>
+                    <tr><td>1</td><td>2</td></tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+
+    <!--
+        Section 6: Modern semantic table with <caption>, <thead>,
+        <tbody>, and <tfoot>. This exercises the converter's handling
+        of HTML5 table sectioning elements that legacy fixtures lack.
+    -->
+    <h2>Semantic Table (Modern HTML5)</h2>
+    <table>
+        <caption>Quarterly Results</caption>
+        <thead>
+            <tr><th>Quarter</th><th>Revenue</th><th>Growth</th></tr>
+        </thead>
+        <tbody>
+            <tr><td>Q1</td><td>$1.2M</td><td>+5%</td></tr>
+            <tr><td>Q2</td><td>$1.4M</td><td>+17%</td></tr>
+        </tbody>
+        <tfoot>
+            <tr><td>Total</td><td>$2.6M</td><td>+11%</td></tr>
+        </tfoot>
+    </table>
+</body>
+</html>
