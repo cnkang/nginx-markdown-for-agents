@@ -87,7 +87,7 @@ resolve_nginx_version() {
 
   case "${requested}" in
     stable|mainline)
-      page="$(curl -fsSL https://nginx.org/en/download.html)"
+      page="$(curl --proto '=https' --tlsv1.2 -fsSL https://nginx.org/en/download.html)"
       version="$(
         NGINX_DOWNLOAD_HTML="${page}" CHANNEL="${requested}" python3 - <<'PY'
 import os
@@ -185,7 +185,7 @@ else
   markdown_prepare_rust_converter_release "${WORKSPACE_ROOT}" "${RUST_TARGET}"
 
   echo "==> Downloading NGINX ${NGINX_VERSION}"
-  curl -fsSL "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" -o "${BUILDROOT}/nginx.tar.gz"
+  curl --proto '=https' --tlsv1.2 -fsSL "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" -o "${BUILDROOT}/nginx.tar.gz"
   tar -xzf "${BUILDROOT}/nginx.tar.gz" -C "${BUILDROOT}" --strip-components=1
 
   echo "==> Configuring NGINX"

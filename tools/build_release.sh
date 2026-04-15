@@ -21,7 +21,7 @@ resolve_nginx_version() {
                 exit 1
             fi
 
-            page="$(curl -fsSL https://nginx.org/en/download.html)"
+            page="$(curl --proto '=https' --tlsv1.2 -fsSL https://nginx.org/en/download.html)"
             version="$(
                 NGINX_DOWNLOAD_HTML="${page}" CHANNEL="${requested}" python3 - <<'PY'
 import os
