@@ -221,8 +221,8 @@ If you use a custom NGINX build, or a platform not supported by the pre-built bi
 
 | Component | Minimum Version | Purpose |
 |-----------|----------------|---------|
-| **Rust Toolchain** | 1.85.0+ | Building the Rust converter |
-| **Cargo** | 1.85.0+ | Rust package manager (included with Rust) |
+| **Rust Toolchain** | 1.91.0+ | Building the Rust converter |
+| **Cargo** | 1.91.0+ | Rust package manager (included with Rust) |
 | **cbindgen** | 0.24.0+ | Generating C header files from Rust |
 | **NGINX** | 1.24.0+ | Web server (source code required for module compilation) |
 | **GCC/Clang** | GCC 4.8+ or Clang 3.4+ | C compiler for NGINX module |
@@ -317,7 +317,7 @@ tar -xzf nginx-1.24.0.tar.gz
 
 ```bash
 # Check Rust version
-rustc --version  # Should be 1.85.0 or higher
+rustc --version  # Should be 1.91.0 or higher
 
 # Check Cargo version
 cargo --version
@@ -575,10 +575,10 @@ If your NGINX version is >= 1.24.0 but not listed in the matrix below, use the [
 | 1.28.3 | glibc | x86_64 | Full |
 | 1.28.3 | musl | aarch64 | Full |
 | 1.28.3 | musl | x86_64 | Full |
-| 1.29.7 | glibc | aarch64 | Full |
-| 1.29.7 | glibc | x86_64 | Full |
-| 1.29.7 | musl | aarch64 | Full |
-| 1.29.7 | musl | x86_64 | Full |
+| 1.29.8 | glibc | aarch64 | Full |
+| 1.29.8 | glibc | x86_64 | Full |
+| 1.29.8 | musl | aarch64 | Full |
+| 1.29.8 | musl | x86_64 | Full |
 <!-- END AUTO-GENERATED MATRIX -->
 
 ---
@@ -957,7 +957,7 @@ The system cannot reach GitHub to download the pre-built binary or checksum file
    Manual download is intended only for air-gapped or troubleshooting scenarios — prefer the [install script](#4-primary-install-script) for normal installations.
    ```bash
    # On a connected machine — substitute <release_tag>, <nginx_version>, <os_type>, and <arch>
-   # <release_tag> must match the current release (e.g. v0.4.0)
+   # <release_tag> must match the current release (e.g. v0.5.0)
    wget https://github.com/cnkang/nginx-markdown-for-agents/releases/download/<release_tag>/ngx_http_markdown_filter_module-<nginx_version>-<os_type>-<arch>.tar.gz
    wget https://github.com/cnkang/nginx-markdown-for-agents/releases/download/<release_tag>/ngx_http_markdown_filter_module-<nginx_version>-<os_type>-<arch>.tar.gz.sha256
    ```
@@ -989,7 +989,7 @@ The SHA-256 hash of the downloaded binary does not match the expected checksum f
    Manual download is intended only for troubleshooting — prefer the [install script](#4-primary-install-script) for normal installations.
    ```bash
    # Download the binary and checksum file — substitute <release_tag>, <nginx_version>, <os_type>, <arch>
-   # <release_tag> must match the current release (e.g. v0.4.0)
+   # <release_tag> must match the current release (e.g. v0.5.0)
    wget https://github.com/cnkang/nginx-markdown-for-agents/releases/download/<release_tag>/ngx_http_markdown_filter_module-<nginx_version>-<os_type>-<arch>.tar.gz
    wget https://github.com/cnkang/nginx-markdown-for-agents/releases/download/<release_tag>/ngx_http_markdown_filter_module-<nginx_version>-<os_type>-<arch>.tar.gz.sha256
 
@@ -1226,7 +1226,7 @@ brew install pcre
 # Update Rust toolchain
 rustup update
 
-# Check Rust version (must be 1.85.0+)
+# Check Rust version (must be 1.91.0+)
 rustc --version
 
 # Clean and rebuild
