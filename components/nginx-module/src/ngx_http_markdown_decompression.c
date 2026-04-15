@@ -692,7 +692,7 @@ ngx_http_markdown_decompress_brotli(ngx_http_request_t *r,
 ngx_int_t
 ngx_http_markdown_decompress(ngx_http_request_t *r,
                               ngx_http_markdown_compression_type_e type,
-                              ngx_chain_t *in,
+                              const ngx_chain_t *in,
                               ngx_chain_t **out)
 {
     ngx_int_t  rc;

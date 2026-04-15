@@ -309,7 +309,7 @@ ngx_http_markdown_record_conversion_latency(ngx_msec_t elapsed_ms)
 static ngx_int_t
 ngx_http_markdown_resolve_conditional_result(ngx_http_request_t *r,
                                              ngx_http_markdown_ctx_t *ctx,
-                                             ngx_http_markdown_conf_t *conf,
+                                             const ngx_http_markdown_conf_t *conf,
                                              struct MarkdownResult *result,
                                              ngx_msec_t *elapsed_ms,
                                              ngx_flag_t *has_result)
@@ -875,7 +875,7 @@ ngx_http_markdown_record_token_savings_if_enabled(
 static ngx_int_t
 ngx_http_markdown_execute_conversion(ngx_http_request_t *r,
                                      ngx_http_markdown_ctx_t *ctx,
-                                     ngx_http_markdown_conf_t *conf,
+                                     const ngx_http_markdown_conf_t *conf,
                                      struct MarkdownResult *result,
                                      ngx_msec_t *elapsed_ms)
 {

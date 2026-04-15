@@ -40,7 +40,7 @@ const ngx_str_t *ngx_http_markdown_reason_failed_open(void);
 const ngx_str_t *ngx_http_markdown_reason_from_error_category(
     ngx_http_markdown_error_category_t category, const ngx_log_t *log);
 ngx_int_t ngx_http_markdown_decompress(ngx_http_request_t *r,
-    ngx_http_markdown_compression_type_e type, ngx_chain_t *in,
+    ngx_http_markdown_compression_type_e type, const ngx_chain_t *in,
     ngx_chain_t **out);
 static void ngx_http_markdown_log_decision_with_category(
     ngx_http_request_t *r, const ngx_http_markdown_conf_t *conf,
@@ -489,7 +489,7 @@ ngx_http_markdown_handle_buffer_append_failure(ngx_http_request_t *r,
 static ngx_int_t
 ngx_http_markdown_append_buffered_chunk(ngx_http_request_t *r,
                                         ngx_http_markdown_ctx_t *ctx,
-                                        ngx_http_markdown_conf_t *conf,
+                                        const ngx_http_markdown_conf_t *conf,
                                         ngx_chain_t *cl)
 {
     ngx_int_t rc;
@@ -609,7 +609,7 @@ ngx_http_markdown_handle_decompression_conversion_error(
 static ngx_int_t
 ngx_http_markdown_body_filter_decompress_if_needed(ngx_http_request_t *r,
                                                    ngx_http_markdown_ctx_t *ctx,
-                                                   ngx_http_markdown_conf_t *conf)
+                                                   const ngx_http_markdown_conf_t *conf)
 {
     ngx_chain_t  *compressed_chain;
     ngx_chain_t  *decompressed_chain;
