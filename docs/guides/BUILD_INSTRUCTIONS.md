@@ -85,10 +85,10 @@ Available targets include:
 - `make test` - Build and run the default smoke test (`components/nginx-module/tests` smoke targets)
 - `make test-nginx-unit-clang-smoke` - Run smoke tests with clang compiler
 - `make test-nginx-unit-sanitize-smoke` - Run smoke tests with AddressSanitizer/UndefinedBehaviorSanitizer
-- `make sonar-compile-db` - Generate `compile_commands.json` for SonarQube for VS Code C/C++ analysis
+- `make sonar-compile-db` - Generate `compile_commands.json` for SonarQube C/C++ analysis (local + CI)
 - `make clean` - Clean Rust and selected NGINX module test artifacts
 
-## SonarQube for VS Code (C/C++)
+## SonarQube C/C++ Compilation Database
 
 If SonarQube for VS Code shows:
 
@@ -111,6 +111,27 @@ This command:
 After generation, reload VS Code (or run the SonarQube embedded action to switch compilation database) and ensure the active database is:
 
 - `<workspace>/compile_commands.json`
+
+Do not commit `compile_commands.json`.
+It is a generated build artifact and is ignored by git.
+
+### CI-based SonarCloud analysis
+
+The repository includes a dedicated GitHub Actions workflow:
+
+- `.github/workflows/sonarcloud.yml`
+
+This workflow:
+
+- runs `make sonar-compile-db` on Ubuntu
+- runs SonarCloud scan with `-Dproject.settings=.sonarcloud.properties`
+- uses `sonar.cfamily.compile-commands=compile_commands.json` for higher C/C++ analysis quality
+
+Required repository secret:
+
+- `SONAR_TOKEN`
+
+If `SONAR_TOKEN` is not set (for example fork PRs), the Sonar job is skipped.
 
 Optional script flags:
 
