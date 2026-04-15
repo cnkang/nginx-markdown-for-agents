@@ -4,5 +4,11 @@
   "expected-conversion-result": "converted",
   "input-size-bytes": 504,
   "source-description": "HTML without a body element to test missing body handling",
-  "failure-corpus": true
+  "failure-corpus": true,
+  "streaming_notes": {
+    "expected_fallback": false,
+    "known_diff_ids": [
+      "DIFF-PARITY-WHITESPACE-ONLY"
+    ]
+  }
 }

@@ -47,7 +47,7 @@ jobs:
           FRESHNESS_MODE: ${{ inputs.matrix_freshness }}
         run: |
           set +e
-          python3 tools/release/update_matrix.py --check-only
+          python3 tools/release/matrix/update_matrix.py --check-only
           exit_code=$?
           set -e
 
@@ -174,7 +174,7 @@ jobs:
 
       - name: Run completeness check
         run: |
-          python3 tools/release/completeness_check.py \
+          python3 tools/release/matrix/completeness_check.py \
             --matrix tools/release-matrix.json \
             --artifacts artifact-list.txt
 
@@ -273,7 +273,7 @@ jobs:
           PY
 
       - name: Upload Assets
-        uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2
+        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3
         with:
           files: |
             artifacts/**/*.tar.gz

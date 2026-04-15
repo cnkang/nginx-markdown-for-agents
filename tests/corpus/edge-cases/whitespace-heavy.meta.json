@@ -4,5 +4,11 @@
   "expected-conversion-result": "converted",
   "input-size-bytes": 1179,
   "source-description": "HTML with excessive whitespace to test whitespace normalization",
-  "failure-corpus": false
+  "failure-corpus": false,
+  "streaming_notes": {
+    "expected_fallback": false,
+    "known_diff_ids": [
+      "DIFF-PARITY-WHITESPACE-ONLY"
+    ]
+  }
 }

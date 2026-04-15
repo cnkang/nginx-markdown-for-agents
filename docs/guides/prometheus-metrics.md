@@ -152,9 +152,36 @@ All metrics use the `nginx_markdown_` prefix. Counter metrics use the `_total` s
 |---|---|---|---|---|
 | `nginx_markdown_conversion_duration_seconds` | gauge | `le` | `0.01`, `0.1`, `1.0`, `+Inf` | Cumulative conversion count per latency bucket. Each bucket value is an independent atomic counter, not a native Prometheus histogram. |
 
+### Streaming Metrics (0.5.0+, `MARKDOWN_STREAMING_ENABLED`)
+
+These metrics are only emitted when the module is compiled with `MARKDOWN_STREAMING_ENABLED`. They are absent from the output when the feature is not compiled in.
+
+#### Streaming Counter Metrics (no labels)
+
+| Metric Name | Type | Description |
+|---|---|---|
+| `nginx_markdown_streaming_path_total` | counter | Requests routed to the streaming processing path. |
+| `nginx_markdown_streaming_budget_exceeded_total` | counter | Streaming memory budget exceeded count (auxiliary classification; terminal state depends on `markdown_streaming_on_error`). |
+| `nginx_markdown_streaming_shadow_total` | counter | Shadow mode comparison attempts (incremented unconditionally at entry, including init/feed/finalize failures). |
+| `nginx_markdown_streaming_shadow_diff_total` | counter | Shadow mode comparisons where outputs differed. |
+
+#### Streaming Counter Metrics (with labels)
+
+| Metric Name | Type | Label Key | Label Values | Description |
+|---|---|---|---|---|
+| `nginx_markdown_streaming_total` | counter | `result` | `success`, `failed`, `fallback` | Streaming conversion outcomes by result (mutually exclusive). |
+| `nginx_markdown_streaming_failures_total` | counter | `stage` | `precommit_failopen`, `precommit_reject`, `postcommit_error` | Detailed streaming failures by stage. |
+
+#### Streaming Gauge Metrics
+
+| Metric Name | Type | Description |
+|---|---|---|
+| `nginx_markdown_streaming_ttfb_seconds` | gauge | Last streaming time-to-first-byte in seconds (millisecond resolution). Recorded on the first successful non-empty downstream send; may be updated even if the request later fails post-commit. |
+| `nginx_markdown_streaming_peak_memory_bytes` | gauge | Last streaming conversion peak memory estimate (bytes). Updated on each successful streaming conversion (primary path or shadow mode). |
+
 ### Total Time Series
 
-The endpoint produces exactly 28 unique time series:
+The endpoint produces exactly 28 base time series (always present):
 
 - 9 unlabeled counters (requests, conversions, passthrough, failopen, large response path, input bytes, output bytes, token savings, decompression failures)
 - 9 skip reason labels
@@ -162,7 +189,18 @@ The endpoint produces exactly 28 unique time series:
 - 3 decompression format labels
 - 4 latency bucket labels
 
-This count is deterministic and bounded. No request-specific or high-cardinality labels are used.
+When `MARKDOWN_STREAMING_ENABLED` is compiled in, an additional 12 streaming time series are emitted:
+
+- 1 streaming path counter
+- 4 streaming outcome labels (`result`)
+- 2 streaming failure stage labels (`stage`)
+- 1 budget exceeded counter
+- 1 shadow total counter
+- 1 shadow diff counter
+- 1 TTFB gauge
+- 1 peak memory gauge
+
+**Total with streaming: 40 time series.** This count is deterministic and bounded. No request-specific or high-cardinality labels are used.
 
 ---
 
@@ -433,3 +471,18 @@ All metrics listed in the [Metric Catalog](#metric-catalog) section are consider
 | `nginx_markdown_decompressions_total` | counter | `format` | Stable |
 | `nginx_markdown_decompression_failures_total` | counter | — | Stable |
 | `nginx_markdown_conversion_duration_seconds` | gauge | `le` | Stable |
+
+### Published Metrics (0.5.0, Streaming)
+
+These metrics are added in 0.5.0 and are only emitted when `MARKDOWN_STREAMING_ENABLED` is compiled in. Their names, types, and label key sets are covered by the stability policy above.
+
+| Metric Name | Type | Label Keys | Stability |
+|---|---|---|---|
+| `nginx_markdown_streaming_path_total` | counter | — | Stable |
+| `nginx_markdown_streaming_total` | counter | `result` | Stable |
+| `nginx_markdown_streaming_failures_total` | counter | `stage` | Stable |
+| `nginx_markdown_streaming_budget_exceeded_total` | counter | — | Stable |
+| `nginx_markdown_streaming_shadow_total` | counter | — | Stable |
+| `nginx_markdown_streaming_shadow_diff_total` | counter | — | Stable |
+| `nginx_markdown_streaming_ttfb_seconds` | gauge | — | Stable |
+| `nginx_markdown_streaming_peak_memory_bytes` | gauge | — | Stable |

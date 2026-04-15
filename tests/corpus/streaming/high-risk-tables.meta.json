@@ -1,0 +1,22 @@
+{
+  "fixture-id": "streaming/high-risk-tables",
+  "page-type": "complex-common",
+  "expected-conversion-result": "converted",
+  "input-size-bytes": 4223,
+  "source-description": "High-risk table structures including legacy align attributes, modern CSS alignment, nested tables, span layouts, and HTML5 semantic table elements",
+  "failure-corpus": false,
+  "streaming_notes": {
+    "expected_fallback": true,
+    "known_diff_ids": [],
+    "high_risk_structures": [
+      "table",
+      "nested-table",
+      "colspan",
+      "rowspan",
+      "deprecated-align",
+      "css-align",
+      "caption",
+      "thead-tbody-tfoot"
+    ]
+  }
+}
