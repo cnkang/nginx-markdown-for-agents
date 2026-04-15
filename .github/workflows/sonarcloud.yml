@@ -112,7 +112,7 @@ jobs:
         if: steps.token.outputs.enabled == 'true'
         shell: bash
         run: |
-          for f in coverage/c-coverage.lcov coverage/rust-coverage.lcov; do
+          for f in coverage/c-coverage.lcov coverage/rust-coverage.lcov coverage/rust-streaming-coverage.lcov; do
             if [[ ! -s "$f" ]]; then
               echo "WARNING: Coverage report missing or empty: $f" >&2
             else

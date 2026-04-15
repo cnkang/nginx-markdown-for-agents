@@ -231,7 +231,8 @@ coverage-c:
 
 coverage-rust:
 	@mkdir -p $(COVERAGE_DIR)
-	cd $(RUST_DIR) && cargo llvm-cov --all-features --lcov --output-path $(CURDIR)/$(COVERAGE_DIR)/rust-coverage.lcov
+	cd $(RUST_DIR) && cargo llvm-cov --lcov --output-path $(CURDIR)/$(COVERAGE_DIR)/rust-coverage.lcov
+	cd $(RUST_DIR) && cargo llvm-cov --features streaming --lcov --output-path $(CURDIR)/$(COVERAGE_DIR)/rust-streaming-coverage.lcov
 
 coverage-all: coverage-c coverage-rust
 
