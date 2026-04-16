@@ -51,6 +51,19 @@ The canonical E2E suite is intentionally focused on runtime paths that benefit f
 - chunked buffering behavior
 - large-response handling and fail-open size protection
 
+### Coverage E2E Scenarios
+
+The coverage script (`tools/sonar/collect_nginx_coverage.sh`) runs expanded E2E scenarios against an instrumented NGINX instance to collect gcov/lcov data. These scenarios are organized by subsystem:
+
+| Category | Scenarios |
+|----------|-----------|
+| **Auth detection** | Bearer token, cookie prefix match (`session*`), cookie suffix match (`*_logged_in`), no auth, non-matching cookie |
+| **Conditional requests** | `If-None-Match: *`, quoted ETag, multi-ETag, `If-Modified-Since`, IMS-only bypass, disabled conditional bypass |
+| **Error paths** | 404 passthrough, reject-error, POST method ineligibility, Range header skip |
+| **Accept header diversity** | Exact match, subtype wildcard (`text/*`), all wildcard (`*/*`), q-value sorting, q=0 rejection, no markdown match, multi-entry tie-break, wildcard-disabled rejection |
+| **Metrics formats** | Prometheus format, auto format (text/plain), auto format (application/json), default metrics endpoint |
+| **Body filter / headers** | Small file (single-buffer), large file (chain accumulation), HEAD request, GFM flavor, CommonMark flavor, size-limit rejection, auth Cache-Control modification |
+
 These checks complement, rather than replace, `make test-nginx-integration`.
 
 Use the integration suite for:

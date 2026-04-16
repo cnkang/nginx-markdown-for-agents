@@ -11,7 +11,7 @@
  * for that, see the e2e and integration test suites.
  */
 
-#include "test_common.h"
+#include "../include/test_common.h"
 #include <ctype.h>
 
 #include <ngx_http_markdown_filter_module.h>
@@ -21,6 +21,16 @@
 /* Function prototypes */
 
 static void test_snake_case_format(void);
+
+/*
+ * Forward-declare reason code accessors so the compilation unit
+ * is self-contained even when the analyzer cannot resolve the
+ * NGINX include paths for <ngx_http_markdown_filter_module.h>.
+ */
+const ngx_str_t *ngx_http_markdown_reason_converted(void);
+const ngx_str_t *ngx_http_markdown_reason_failed_open(void);
+const ngx_str_t *ngx_http_markdown_reason_failed_closed(void);
+const ngx_str_t *ngx_http_markdown_reason_skip_accept(void);
 
 
 /*

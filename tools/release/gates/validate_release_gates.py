@@ -203,8 +203,55 @@ def _parse_table_cells_positional(line: str) -> list[str]:
 # Per-sub-spec checks (used in strict mode for all specs, framework for #12)
 # ---------------------------------------------------------------------------
 
+REQUIREMENTS_MD = "requirements.md"
 DESIGN_MD = "design.md"
 DESIGN_NOT_FOUND = "design.md not found"
+
+
+def _resolve_spec_dir(specs_dir: Path, name: str) -> Path | None:
+    """Locate a sub-spec directory, checking archive/ as a fallback.
+
+    Completed specs may be moved to ``specs_dir / "archive" / name``.
+    This helper checks the top-level location first, then the archive.
+
+    Security: rejects absolute paths and ``..`` segments to prevent
+    path traversal, and verifies the resolved path is contained within
+    ``specs_dir``.
+
+    Returns:
+        The resolved directory ``Path``, or ``None`` if not found or
+        if the name fails validation.
+    """
+    name_path = Path(name)
+    if name_path.is_absolute() or ".." in name_path.parts:
+        return None
+
+    specs_resolved = specs_dir.resolve()
+
+    candidate = (specs_dir / name).resolve()
+    if candidate.is_dir() and candidate.is_relative_to(specs_resolved):
+        return candidate
+
+    archived = (specs_dir / "archive" / name).resolve()
+    if archived.is_dir() and archived.is_relative_to(specs_resolved):
+        return archived
+
+    return None
+
+
+def _resolve_spec_file(
+    specs_dir: Path, name: str, filename: str
+) -> Path | None:
+    """Locate a file inside a sub-spec directory (with archive fallback).
+
+    Combines ``_resolve_spec_dir`` with a filename join.  Returns the
+    file ``Path`` if the directory is found (the file itself may or may
+    not exist), or ``None`` if the directory cannot be resolved.
+    """
+    spec_dir = _resolve_spec_dir(specs_dir, name)
+    if spec_dir is None:
+        return None
+    return spec_dir / filename
 
 
 def check_subspecs_docs_exist(
@@ -212,11 +259,11 @@ def check_subspecs_docs_exist(
 ) -> None:
     """Property 2: every sub-spec must have requirements.md and design.md."""
     for name in subspecs:
-        spec_dir = specs_dir / name
-        if not spec_dir.is_dir():
+        spec_dir = _resolve_spec_dir(specs_dir, name)
+        if spec_dir is None:
             result.failed(f"docs-exist:{name}", "sub-spec directory not found")
             continue
-        for doc in ("requirements.md", DESIGN_MD):
+        for doc in (REQUIREMENTS_MD, DESIGN_MD):
             path = spec_dir / doc
             if path.is_file():
                 result.passed(f"docs-exist:{name}/{doc}")
@@ -253,10 +300,13 @@ def check_requirements_sections(
                 "governance spec (defines section requirements, does not follow them)",
             )
             continue
-        req_path = specs_dir / name / "requirements.md"
-        content = _read_file_safe(req_path)
+        resolved = _resolve_spec_dir(specs_dir, name)
+        if resolved is None:
+            result.skipped(f"req-sections:{name}", f"{REQUIREMENTS_MD} not found")
+            continue
+        content = _read_file_safe(resolved / REQUIREMENTS_MD)
         if content is None:
-            result.skipped(f"req-sections:{name}", "requirements.md not found")
+            result.skipped(f"req-sections:{name}", f"{REQUIREMENTS_MD} not found")
             continue
         headings = _extract_headings(content)
         if missing := [
@@ -277,7 +327,10 @@ def check_boundary_descriptions(
 ) -> None:
     """Property 3: sub-specs with natural extensions must have boundary descriptions."""
     for name in subspecs:
-        design_path = specs_dir / name / DESIGN_MD
+        design_path = _resolve_spec_file(specs_dir, name, DESIGN_MD)
+        if design_path is None:
+            result.skipped(f"boundary:{name}", DESIGN_NOT_FOUND)
+            continue
         content = _read_file_safe(design_path)
         if content is None:
             result.skipped(f"boundary:{name}", DESIGN_NOT_FOUND)
@@ -303,7 +356,10 @@ def check_dod_assessment(
 ) -> None:
     """Property 5: completed sub-specs must have DoD assessment with all checkpoints."""
     for name in subspecs:
-        design_path = specs_dir / name / DESIGN_MD
+        design_path = _resolve_spec_file(specs_dir, name, DESIGN_MD)
+        if design_path is None:
+            result.skipped(f"dod:{name}", DESIGN_NOT_FOUND)
+            continue
         content = _read_file_safe(design_path)
         if content is None:
             result.skipped(f"dod:{name}", DESIGN_NOT_FOUND)
@@ -400,7 +456,10 @@ def check_risk_register(
 ) -> None:
     """Property 7: sub-specs must have risk registers; high-severity needs mitigation."""
     for name in subspecs:
-        design_path = specs_dir / name / DESIGN_MD
+        design_path = _resolve_spec_file(specs_dir, name, DESIGN_MD)
+        if design_path is None:
+            result.skipped(f"risk:{name}", DESIGN_NOT_FOUND)
+            continue
         content = _read_file_safe(design_path)
         if content is None:
             result.skipped(f"risk:{name}", DESIGN_NOT_FOUND)

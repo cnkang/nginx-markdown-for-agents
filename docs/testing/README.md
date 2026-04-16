@@ -52,6 +52,15 @@ make test-nginx-integration
 # Canonical end-to-end tests
 make test-e2e
 
+# C module coverage (E2E + lcov)
+make coverage-c
+
+# Rust converter coverage
+make coverage-rust
+
+# Full coverage pipeline (C + Rust + SonarQube XML)
+make coverage-all
+
 # Use a specific nginx binary when it is not on PATH
 NGINX_BIN=/path/to/nginx make test-nginx-integration
 NGINX_BIN=/path/to/nginx make test-e2e
@@ -59,6 +68,15 @@ NGINX_BIN=/path/to/nginx make test-e2e
 # Short fuzz smoke checks (requires nightly + cargo-fuzz)
 make test-rust-fuzz-smoke
 ```
+
+## Coverage Standards
+
+- **Minimum**: 80% aggregate line coverage for both the C module and the Rust converter
+- **Target**: 90% aggregate line coverage
+- **Critical paths** (auth, error handling, FFI boundary, conditional requests): 90% line coverage for new code
+- Coverage is collected via `make coverage-c` (C module E2E + gcov/lcov) and `make coverage-rust` (Rust `cargo llvm-cov`)
+- Advisory per-file thresholds are logged by the coverage script but are not CI-blocking gates
+- The lcov report is always produced regardless of coverage level, ensuring SonarCloud trends remain visible
 
 ## Terminology
 
