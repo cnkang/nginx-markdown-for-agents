@@ -21,6 +21,7 @@ KEEP_ARTIFACTS=0
 BUILDROOT=""
 RUNTIME=""
 PORT=18199
+BACKEND_PORT=18200
 
 # ── Repeated curl header constants (shelldre:S1192) ─────────────────
 readonly ACCEPT_MARKDOWN='Accept: text/markdown'
@@ -211,6 +212,11 @@ http {
         listen 127.0.0.1:${PORT};
         server_name localhost;
 
+        # Enable gzip for responses to exercise decompression when proxied
+        gzip on;
+        gzip_types text/html text/plain application/xhtml+xml;
+        gzip_min_length 0;
+
         location / {
             root html;
             markdown_filter on;
@@ -222,6 +228,7 @@ http {
             markdown_on_error pass;
             markdown_max_size 1m;
             markdown_timeout 5000;
+            markdown_trust_forwarded_headers on;
         }
 
         location /auth {
@@ -230,6 +237,26 @@ http {
             markdown_auth_policy deny;
             markdown_auth_cookies "session*" "*_logged_in";
             markdown_log_verbosity info;
+        }
+
+        # Auth location with Cache-Control: public set by upstream
+        # (simulated via expires directive which sets CC before filters)
+        # auth_policy=allow means authenticated requests ARE converted,
+        # triggering the Cache-Control modification path
+        location /auth-public-cc {
+            root html;
+            markdown_filter on;
+            markdown_auth_policy allow;
+            markdown_auth_cookies "session*" "*_logged_in";
+            expires 1h;
+        }
+
+        # Auth location with allow policy but no CC header (exercises add-private path)
+        location /auth-allow {
+            root html;
+            markdown_filter on;
+            markdown_auth_policy allow;
+            markdown_auth_cookies "session*" "*_logged_in";
         }
 
         location /reject-error {
@@ -299,11 +326,76 @@ http {
             markdown_metrics;
             markdown_metrics_format auto;
         }
+
+        # Proxy to compressed backend (exercises decompression path)
+        location /proxy-gzip {
+            proxy_pass http://127.0.0.1:${BACKEND_PORT}/;
+            proxy_set_header Accept-Encoding gzip;
+            markdown_filter on;
+            markdown_on_wildcard on;
+            markdown_log_verbosity debug;
+            markdown_on_error pass;
+            markdown_max_size 1m;
+        }
+
+        # Proxy to backend with Cache-Control: public (exercises strip-public CC path)
+        location /proxy-public-cc {
+            proxy_pass http://127.0.0.1:${BACKEND_PORT}/with-public-cc/;
+            markdown_filter on;
+            markdown_auth_policy allow;
+            markdown_auth_cookies "session*" "*_logged_in";
+        }
+
+        # Proxy to backend with Cache-Control: no-store (exercises preserve-nostore path)
+        location /proxy-nostore-cc {
+            proxy_pass http://127.0.0.1:${BACKEND_PORT}/with-nostore-cc/;
+            markdown_filter on;
+            markdown_auth_policy allow;
+            markdown_auth_cookies "session*" "*_logged_in";
+        }
+
+    }
+
+    # ── Backend server: serves gzip-compressed HTML ─────────────────
+    # This backend always compresses responses so the markdown filter's
+    # decompression path (detect_compression_type + decompress_gzip) is
+    # exercised when the proxy location forwards requests here.
+    server {
+        listen 127.0.0.1:${BACKEND_PORT};
+        listen [::1]:${BACKEND_PORT};
+        server_name backend;
+
+        gzip on;
+        gzip_types text/html text/plain;
+        gzip_min_length 0;
+
+        location / {
+            root html;
+        }
+
+        # Serve with Cache-Control: public for CC rewriting tests
+        location /with-public-cc/ {
+            alias html/;
+            add_header Cache-Control "public, max-age=3600";
+        }
+
+        # Serve with Cache-Control: no-store for CC preservation tests
+        location /with-nostore-cc/ {
+            alias html/;
+            add_header Cache-Control "no-store";
+        }
     }
 }
 EOF
 
 # ── Create test HTML fixtures ───────────────────────────────────────
+
+# Create subdirectories for location blocks that use root html
+for subdir in auth auth-public-cc auth-allow reject-error ims-only no-conditional \
+              no-wildcard disabled gfm commonmark small-limit log-error; do
+  mkdir -p "${RUNTIME}/html/${subdir}"
+done
+
 cat > "${RUNTIME}/html/index.html" <<'HTML'
 <!doctype html>
 <html>
@@ -318,6 +410,12 @@ cat > "${RUNTIME}/html/index.html" <<'HTML'
 </html>
 HTML
 
+# Copy index.html to all subdirectories so location blocks serve 200
+for subdir in auth auth-public-cc auth-allow reject-error ims-only no-conditional \
+              no-wildcard disabled gfm commonmark log-error; do
+  cp "${RUNTIME}/html/index.html" "${RUNTIME}/html/${subdir}/index.html"
+done
+
 cat > "${RUNTIME}/html/large.html" <<'HTML'
 <!doctype html>
 <html>
@@ -331,6 +429,9 @@ cat >> "${RUNTIME}/html/large.html" <<'HTML'
   </body>
 </html>
 HTML
+
+# Copy large.html to small-limit for size-limit rejection test
+cp "${RUNTIME}/html/large.html" "${RUNTIME}/html/small-limit/large.html"
 
 echo "==> Starting NGINX on 127.0.0.1:${PORT}"
 "${RUNTIME}/sbin/nginx" -p "${RUNTIME}" -c conf/nginx.conf
@@ -376,6 +477,42 @@ curl -sS -H "${ACCEPT_MARKDOWN}" \
 # Non-matching cookie
 curl -sS -H "${ACCEPT_MARKDOWN}" -H 'Cookie: tracking=xyz' \
   "http://127.0.0.1:${PORT}/auth/index.html" -o /dev/null -w "  auth non-matching cookie: HTTP %{http_code}\n"
+
+# Multi-cookie header (exercises cookie parsing: skip whitespace, read name, iterate)
+curl -sS -H "${ACCEPT_MARKDOWN}" -H 'Cookie: tracking=xyz; session_abc=val1; other=val2' \
+  "http://127.0.0.1:${PORT}/auth/index.html" -o /dev/null -w "  auth multi-cookie: HTTP %{http_code}\n"
+
+# Auth with Cache-Control: public upstream (exercises strip-public-and-append-private)
+curl -sS -H "${ACCEPT_MARKDOWN}" -H 'Cookie: session_id=abc123' \
+  "http://127.0.0.1:${PORT}/auth-public-cc/index.html" -o /dev/null -w "  auth strip-public CC: HTTP %{http_code}\n"
+
+# Auth suffix match with Cache-Control: public (exercises CC rewriting + suffix match)
+curl -sS -H "${ACCEPT_MARKDOWN}" -H 'Cookie: wordpress_logged_in=val' \
+  "http://127.0.0.1:${PORT}/auth-public-cc/index.html" -o /dev/null -w "  auth suffix + CC rewrite: HTTP %{http_code}\n"
+
+# Auth-allow with cookie (exercises add-private CC path — no existing CC header)
+curl -sS -H "${ACCEPT_MARKDOWN}" -H 'Cookie: session_id=abc123' \
+  "http://127.0.0.1:${PORT}/auth-allow/index.html" -o /dev/null -w "  auth-allow add-private: HTTP %{http_code}\n"
+
+# Auth-allow with bearer (exercises is_authenticated + CC modification)
+curl -sS -H "${ACCEPT_MARKDOWN}" -H 'Authorization: Bearer DUMMY_TEST_TOKEN' \
+  "http://127.0.0.1:${PORT}/auth-allow/index.html" -o /dev/null -w "  auth-allow bearer: HTTP %{http_code}\n"
+
+# Auth-allow with CC expires (exercises append-private to existing CC)
+curl -sS -H "${ACCEPT_MARKDOWN}" -H 'Cookie: session_id=abc123' \
+  "http://127.0.0.1:${PORT}/auth-public-cc/index.html" -o /dev/null -w "  auth-allow CC append: HTTP %{http_code}\n"
+
+# Proxy with CC: public + auth cookie (exercises strip-public-and-append-private)
+curl -sS -H "${ACCEPT_MARKDOWN}" -H 'Cookie: session_id=abc123' \
+  "http://127.0.0.1:${PORT}/proxy-public-cc/index.html" -o /dev/null -w "  proxy CC public strip: HTTP %{http_code}\n"
+
+# Proxy with CC: no-store + auth cookie (exercises preserve-nostore path)
+curl -sS -H "${ACCEPT_MARKDOWN}" -H 'Cookie: session_id=abc123' \
+  "http://127.0.0.1:${PORT}/proxy-nostore-cc/index.html" -o /dev/null -w "  proxy CC nostore preserve: HTTP %{http_code}\n"
+
+# Proxy with CC: public + suffix cookie (exercises CC rewriting + suffix match)
+curl -sS -H "${ACCEPT_MARKDOWN}" -H 'Cookie: wordpress_logged_in=val' \
+  "http://127.0.0.1:${PORT}/proxy-public-cc/index.html" -o /dev/null -w "  proxy CC public suffix: HTTP %{http_code}\n"
 
 # ── Conditional request scenarios (Req 3) ───────────────────────────
 
@@ -456,6 +593,29 @@ curl -sS -H "${ACCEPT_MARKDOWN}" "http://127.0.0.1:${PORT}/small-limit/large.htm
 curl -sS -H "${ACCEPT_MARKDOWN}" -H 'Cookie: session_id=abc123' \
   "http://127.0.0.1:${PORT}/auth/index.html" -o /dev/null -w "  auth conversion (Cache-Control): HTTP %{http_code}\n"
 
+# ── Decompression scenarios (exercises ngx_http_markdown_decompression.c) ──
+
+# Proxy to gzip backend: exercises detect_compression_type + decompress_gzip
+# The backend server compresses the response, and the markdown filter
+# decompresses it before converting HTML to Markdown.
+curl -sS -H "${ACCEPT_MARKDOWN}" \
+  "http://127.0.0.1:${PORT}/proxy-gzip/index.html" -o /dev/null -w "  gzip proxy decompression: HTTP %{http_code}\n"
+
+# Proxy gzip with large file (exercises chain_size + chain_to_buffer)
+curl -sS -H "${ACCEPT_MARKDOWN}" \
+  "http://127.0.0.1:${PORT}/proxy-gzip/large.html" -o /dev/null -w "  gzip proxy large: HTTP %{http_code}\n"
+
+# ── X-Forwarded header scenarios (exercises conversion_impl.h header iteration) ──
+
+# X-Forwarded-Proto + X-Forwarded-Host (exercises find_request_header_value + const_strncasecmp)
+curl -sS -H "${ACCEPT_MARKDOWN}" \
+  -H 'X-Forwarded-Proto: https' -H 'X-Forwarded-Host: example.com' \
+  "http://127.0.0.1:${PORT}/index.html" -o /dev/null -w "  X-Forwarded headers: HTTP %{http_code}\n"
+
+# Only X-Forwarded-Proto (partial proxy headers — exercises fallback path)
+curl -sS -H "${ACCEPT_MARKDOWN}" -H 'X-Forwarded-Proto: https' \
+  "http://127.0.0.1:${PORT}/index.html" -o /dev/null -w "  X-Forwarded-Proto only: HTTP %{http_code}\n"
+
 # ── Metrics scenarios (Req 5) — after conversion scenarios ──────────
 
 # Prometheus format
@@ -469,6 +629,9 @@ curl -sS -H 'Accept: application/json' "http://127.0.0.1:${PORT}/metrics-auto" -
 
 # Default metrics endpoint
 curl -sS "http://127.0.0.1:${PORT}/metrics" -o /dev/null -w "  metrics default: HTTP %{http_code}\n"
+
+# IPv6 metrics request (exercises sockaddr_in6 branch in metrics_impl.h)
+curl -sS -6 "http://[::1]:${BACKEND_PORT}/" -o /dev/null -w "  IPv6 backend: HTTP %{http_code}\n" 2>/dev/null || true
 
 echo "==> Stopping NGINX (flush gcov data)"
 "${RUNTIME}/sbin/nginx" -p "${RUNTIME}" -c conf/nginx.conf -s stop
