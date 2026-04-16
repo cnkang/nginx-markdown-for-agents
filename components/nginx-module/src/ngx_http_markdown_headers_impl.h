@@ -31,7 +31,7 @@ static u_char ngx_http_markdown_hdr_etag[] = "ETag";
 static u_char ngx_http_markdown_hdr_content_encoding[] = "Content-Encoding";
 static u_char ngx_http_markdown_hdr_accept_ranges[] = "Accept-Ranges";
 static u_char ngx_http_markdown_hdr_token_count[] = "X-Markdown-Tokens";
-static u_char ngx_http_markdown_content_type[] = "text/markdown; charset=utf-8";
+u_char ngx_http_markdown_content_type[] = "text/markdown; charset=utf-8";
 static u_char ngx_http_markdown_vary_suffix[] = ", Accept";
 
 /* ASCII-only lowercase helper used for case-insensitive HTTP token matching. */
@@ -211,7 +211,7 @@ ngx_http_markdown_contains_csv_token(const ngx_str_t *value,
     return 0;
 }
 
-static ngx_int_t
+ngx_int_t
 ngx_http_markdown_add_vary_accept(ngx_http_request_t *r)
 {
     ngx_table_elt_t *vary;
@@ -275,7 +275,7 @@ ngx_http_markdown_add_vary_accept(ngx_http_request_t *r)
     return NGX_OK;
 }
 
-static ngx_int_t
+ngx_int_t
 ngx_http_markdown_set_etag(ngx_http_request_t *r, const u_char *etag, size_t etag_len)
 {
     ngx_table_elt_t *h;
@@ -385,7 +385,7 @@ ngx_http_markdown_update_headers(ngx_http_request_t *r,
     }
 
     r->headers_out.content_type.data = ngx_http_markdown_content_type;
-    r->headers_out.content_type.len = sizeof(ngx_http_markdown_content_type) - 1;
+    r->headers_out.content_type.len = NGX_HTTP_MARKDOWN_CONTENT_TYPE_LEN;
     r->headers_out.content_type_len = r->headers_out.content_type.len;
     r->headers_out.charset.len = 0;
     r->headers_out.charset.data = NULL;

@@ -658,6 +658,14 @@ ngx_int_t ngx_http_markdown_update_headers(ngx_http_request_t *r,
 /* Remove Content-Encoding header (called after decompression) */
 void ngx_http_markdown_remove_content_encoding(ngx_http_request_t *r);
 
+/* Shared header helpers used by both full-buffer and streaming paths */
+extern u_char ngx_http_markdown_content_type[];
+#define NGX_HTTP_MARKDOWN_CONTENT_TYPE_LEN \
+    (sizeof("text/markdown; charset=utf-8") - 1)
+ngx_int_t ngx_http_markdown_add_vary_accept(ngx_http_request_t *r);
+ngx_int_t ngx_http_markdown_set_etag(ngx_http_request_t *r,
+    const u_char *etag, size_t etag_len);
+
 /*
  * Authentication detection and cache control functions
  *

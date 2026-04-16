@@ -764,7 +764,7 @@ ngx_http_markdown_streaming_decomp_feed(
     {
         ngx_int_t  inflate_rc;
 
-        decomp->state.zlib.next_in = in_data;
+        decomp->state.zlib.next_in = (Bytef *) in_data;
         if (ngx_http_markdown_streaming_decomp_size_to_uint(
                 in_len, &decomp->state.zlib.avail_in))
         {
