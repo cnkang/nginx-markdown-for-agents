@@ -297,6 +297,27 @@ test_q_value_edge_cases(void)
     TEST_ASSERT(should_convert("text/markdown;q=0.5", 0) == 1,
                 "q=0.5 should convert");
 
+    /*
+     * Negative q-value: atof("-0.1") returns -0.1, clamped to 0.0 by
+     * clamp_q_value().  Production ngx_atofp() rejects negative input
+     * and defaults to 1.0; this test verifies the stub's clamping path.
+     */
+    TEST_ASSERT(should_convert("text/markdown;q=-0.1", 0) == 0,
+                "negative q should clamp to 0.0 and reject");
+
+    /*
+     * Whitespace around q-values: the stub's strstr("q=") + atof()
+     * tolerates leading whitespace after '=' (atof skips it) and
+     * trailing whitespace (atof stops at non-numeric).  Space before
+     * '=' prevents strstr from finding "q=", so q defaults to 1.0.
+     */
+    TEST_ASSERT(should_convert("text/markdown;q= 0.5", 0) == 1,
+                "leading space after '=' in q-value accepted (atof skips)");
+    TEST_ASSERT(should_convert("text/markdown;q=0.5 ", 0) == 1,
+                "trailing space after q-value accepted (atof stops)");
+    TEST_ASSERT(should_convert("text/markdown;q =0.5", 0) == 1,
+                "space before '=' means strstr misses q=, defaults to 1.0");
+
     TEST_PASS("Q-value edge cases passed");
 }
 

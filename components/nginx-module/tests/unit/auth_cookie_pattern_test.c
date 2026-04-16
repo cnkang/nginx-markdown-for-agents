@@ -16,10 +16,24 @@
  * following the same logic as the production code in
  * ngx_http_markdown_auth.c.
  *
+ * DIVERGENCE RISK: The production function operates on ngx_str_t (NGINX
+ * length-delimited strings) and cannot be linked into standalone unit
+ * tests.  This reimplementation uses NUL-terminated C strings but must
+ * mirror the production matching semantics exactly.  If the production
+ * logic in ngx_http_markdown_auth.c changes, update this function in
+ * the same change set and re-run this test.
+ *
  * Supports three matching modes:
  * 1. Exact match: "session" matches "session" only
  * 2. Prefix match with wildcard: "session*" matches "session", "session_id", etc.
  * 3. Suffix match with wildcard: "*_logged_in" matches "wordpress_logged_in", etc.
+ *
+ * Patterns with '*' in the middle (e.g. "sess*id") or at both ends
+ * (e.g. "*session*") are NOT treated as substring wildcards.  The
+ * last-char-is-'*' check fires first, so "*session*" enters the
+ * prefix-wildcard branch with prefix "*session" (which will only
+ * match cookie names starting with "*session").  "sess*id" has no
+ * leading or trailing '*', so it falls through to exact match.
  */
 static int
 cookie_matches_pattern(const char *cookie_name, const char *pattern)
@@ -256,6 +270,43 @@ test_empty_inputs_and_edge_cases(void)
 
 /* ── Non-matching patterns ───────────────────────────────────────── */
 
+/*
+ * Patterns with '*' in the middle or at both ends are not treated as
+ * general substring wildcards.  Document current behavior so future
+ * changes to the matching logic don't silently alter semantics.
+ */
+static void
+test_middle_and_double_wildcard(void)
+{
+    TEST_SUBSECTION("Middle and double wildcard behavior");
+
+    /*
+     * "*session*" — last char is '*', so the prefix-wildcard branch
+     * fires with prefix "*session".  Only cookie names literally
+     * starting with "*session" would match.
+     */
+    TEST_ASSERT(cookie_matches_pattern("sessionid", "*session*") == 0,
+                "*session* does not substring-match sessionid");
+    TEST_ASSERT(cookie_matches_pattern("my_session_cookie", "*session*") == 0,
+                "*session* does not substring-match my_session_cookie");
+
+    /* "sess*id" — no leading/trailing '*', falls to exact match */
+    TEST_ASSERT(cookie_matches_pattern("sessionid", "sess*id") == 0,
+                "sess*id does not wildcard-match sessionid");
+    TEST_ASSERT(cookie_matches_pattern("sess*id", "sess*id") == 1,
+                "sess*id exact-matches itself (literal '*' in name)");
+
+    /* Double wildcard "**" — last char is '*', prefix is "*" (literal
+     * asterisk).  strncmp compares the first char of the cookie against
+     * '*', so only cookie names starting with '*' would match. */
+    TEST_ASSERT(cookie_matches_pattern("anything", "**") == 0,
+                "** does not match arbitrary cookies (prefix is literal '*')");
+    TEST_ASSERT(cookie_matches_pattern("*foo", "**") == 1,
+                "** matches cookie names starting with literal '*'");
+
+    TEST_PASS("Middle and double wildcard behavior correct");
+}
+
 static void
 test_non_matching_patterns(void)
 {
@@ -284,6 +335,7 @@ main(void)
     test_suffix_wildcard_property();
     test_exact_matching();
     test_empty_inputs_and_edge_cases();
+    test_middle_and_double_wildcard();
     test_non_matching_patterns();
 
     printf("\n========================================\n");

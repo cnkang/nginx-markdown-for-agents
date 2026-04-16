@@ -4,6 +4,7 @@
  */
 
 #include "../include/test_common.h"
+#include <limits.h>
 
 enum {
     ERROR_SUCCESS = 0,
@@ -128,6 +129,10 @@ test_error_code_classification_completeness(void)
     TEST_ASSERT(classify_error(42U) == CAT_SYSTEM, "Unknown code 42 -> CAT_SYSTEM");
     TEST_ASSERT(classify_error(100U) == CAT_SYSTEM, "Unknown code 100 -> CAT_SYSTEM");
     TEST_ASSERT(classify_error(200U) == CAT_SYSTEM, "Unknown code 200 -> CAT_SYSTEM");
+
+    /* Boundary value: maximum unsigned int must also fall through to default */
+    TEST_ASSERT(classify_error((unsigned int) UINT_MAX) == CAT_SYSTEM,
+                "UINT_MAX -> CAT_SYSTEM (upper bound of unknown codes)");
 
     TEST_PASS("Error code classification completeness verified");
 }
