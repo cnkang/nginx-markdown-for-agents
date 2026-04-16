@@ -16,6 +16,24 @@ import sys
 import xml.etree.ElementTree as ET
 
 
+def _parse_da_line(
+    line: str,
+    result: dict[str, dict[int, int]],
+    current_file: str,
+) -> None:
+    """Parse a single DA: (line-data) record and merge into result."""
+    parts = line[3:].split(",", 2)
+    if len(parts) < 2:
+        return
+    try:
+        lineno = int(parts[0])
+        hits = int(parts[1])
+    except ValueError:
+        return
+    file_lines = result.setdefault(current_file, {})
+    file_lines[lineno] = max(file_lines.get(lineno, 0), hits)
+
+
 def parse_lcov(path: str) -> dict[str, dict[int, int]]:
     """Parse an lcov file and return {filepath: {line: hit_count}}."""
     result: dict[str, dict[int, int]] = {}
@@ -27,17 +45,7 @@ def parse_lcov(path: str) -> dict[str, dict[int, int]]:
             if line.startswith("SF:"):
                 current_file = line[3:]
             elif line.startswith("DA:") and current_file is not None:
-                parts = line[3:].split(",", 2)
-                if len(parts) >= 2:
-                    try:
-                        lineno = int(parts[0])
-                        hits = int(parts[1])
-                    except ValueError:
-                        continue
-                    if current_file not in result:
-                        result[current_file] = {}
-                    existing = result[current_file].get(lineno, 0)
-                    result[current_file][lineno] = max(existing, hits)
+                _parse_da_line(line, result, current_file)
             elif line == "end_of_record":
                 current_file = None
 
