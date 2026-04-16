@@ -271,7 +271,10 @@ def check_requirements_sections(
             )
             continue
         resolved = _resolve_spec_dir(specs_dir, name)
-        req_path = resolved / REQUIREMENTS_MD if resolved else specs_dir / name / REQUIREMENTS_MD
+        if resolved is None:
+            result.skipped(f"req-sections:{name}", f"{REQUIREMENTS_MD} not found")
+            continue
+        req_path = resolved / REQUIREMENTS_MD
         content = _read_file_safe(req_path)
         if content is None:
             result.skipped(f"req-sections:{name}", f"{REQUIREMENTS_MD} not found")
@@ -296,7 +299,10 @@ def check_boundary_descriptions(
     """Property 3: sub-specs with natural extensions must have boundary descriptions."""
     for name in subspecs:
         resolved = _resolve_spec_dir(specs_dir, name)
-        design_path = (resolved / DESIGN_MD) if resolved else (specs_dir / name / DESIGN_MD)
+        if resolved is None:
+            result.skipped(f"boundary:{name}", DESIGN_NOT_FOUND)
+            continue
+        design_path = resolved / DESIGN_MD
         content = _read_file_safe(design_path)
         if content is None:
             result.skipped(f"boundary:{name}", DESIGN_NOT_FOUND)
@@ -323,7 +329,10 @@ def check_dod_assessment(
     """Property 5: completed sub-specs must have DoD assessment with all checkpoints."""
     for name in subspecs:
         resolved = _resolve_spec_dir(specs_dir, name)
-        design_path = (resolved / DESIGN_MD) if resolved else (specs_dir / name / DESIGN_MD)
+        if resolved is None:
+            result.skipped(f"dod:{name}", DESIGN_NOT_FOUND)
+            continue
+        design_path = resolved / DESIGN_MD
         content = _read_file_safe(design_path)
         if content is None:
             result.skipped(f"dod:{name}", DESIGN_NOT_FOUND)
@@ -421,7 +430,10 @@ def check_risk_register(
     """Property 7: sub-specs must have risk registers; high-severity needs mitigation."""
     for name in subspecs:
         resolved = _resolve_spec_dir(specs_dir, name)
-        design_path = (resolved / DESIGN_MD) if resolved else (specs_dir / name / DESIGN_MD)
+        if resolved is None:
+            result.skipped(f"risk:{name}", DESIGN_NOT_FOUND)
+            continue
+        design_path = resolved / DESIGN_MD
         content = _read_file_safe(design_path)
         if content is None:
             result.skipped(f"risk:{name}", DESIGN_NOT_FOUND)
