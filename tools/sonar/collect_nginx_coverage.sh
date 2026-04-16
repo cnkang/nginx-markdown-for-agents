@@ -157,8 +157,8 @@ umask 022
 chmod 755 "${BUILDROOT}"
 mkdir -p "${RUNTIME}/conf" "${RUNTIME}/html" "${RUNTIME}/logs"
 
-echo "==> Building Rust converter (${RUST_TARGET})"
-markdown_prepare_rust_converter_release "${WORKSPACE_ROOT}" "${RUST_TARGET}"
+echo "==> Building Rust converter (${RUST_TARGET}) with streaming feature"
+markdown_prepare_rust_converter_release "${WORKSPACE_ROOT}" "${RUST_TARGET}" --features streaming
 
 echo "==> Downloading NGINX ${NGINX_VERSION}"
 curl --proto '=https' --tlsv1.2 -fsSL \
@@ -354,6 +354,33 @@ http {
             markdown_auth_cookies "session*" "*_logged_in";
         }
 
+        # ── Streaming engine locations (requires --features streaming) ──
+        location /streaming {
+            root html;
+            markdown_filter on;
+            markdown_streaming_engine on;
+            markdown_conditional_requests disabled;
+            markdown_log_verbosity debug;
+        }
+
+        location /streaming-auto {
+            root html;
+            markdown_filter on;
+            markdown_streaming_engine auto;
+            markdown_conditional_requests disabled;
+            markdown_log_verbosity debug;
+        }
+
+        # Streaming with tiny budget to trigger budget-exceeded failure
+        location /streaming-tiny-budget {
+            root html;
+            markdown_filter on;
+            markdown_streaming_engine on;
+            markdown_conditional_requests disabled;
+            markdown_streaming_budget 1;
+            markdown_log_verbosity debug;
+            markdown_on_error pass;
+        }
     }
 
     # ── Backend server: serves gzip-compressed HTML ─────────────────
@@ -392,7 +419,8 @@ EOF
 
 # Create subdirectories for location blocks that use root html
 for subdir in auth auth-public-cc auth-allow reject-error ims-only no-conditional \
-              no-wildcard disabled gfm commonmark small-limit log-error; do
+              no-wildcard disabled gfm commonmark small-limit log-error \
+              streaming streaming-auto streaming-tiny-budget; do
   mkdir -p "${RUNTIME}/html/${subdir}"
 done
 
@@ -412,7 +440,8 @@ HTML
 
 # Copy index.html to all subdirectories so location blocks serve 200
 for subdir in auth auth-public-cc auth-allow reject-error ims-only no-conditional \
-              no-wildcard disabled gfm commonmark log-error; do
+              no-wildcard disabled gfm commonmark log-error \
+              streaming streaming-auto streaming-tiny-budget; do
   cp "${RUNTIME}/html/index.html" "${RUNTIME}/html/${subdir}/index.html"
 done
 
@@ -615,6 +644,24 @@ curl -sS -H "${ACCEPT_MARKDOWN}" \
 # Only X-Forwarded-Proto (partial proxy headers — exercises fallback path)
 curl -sS -H "${ACCEPT_MARKDOWN}" -H 'X-Forwarded-Proto: https' \
   "http://127.0.0.1:${PORT}/index.html" -o /dev/null -w "  X-Forwarded-Proto only: HTTP %{http_code}\n"
+
+# ── Streaming engine scenarios (exercises streaming code paths) ─────
+
+# Streaming conversion (exercises streaming path selection + reason codes)
+curl -sS -H "${ACCEPT_MARKDOWN}" \
+  "http://127.0.0.1:${PORT}/streaming/index.html" -o /dev/null -w "  streaming convert: HTTP %{http_code}\n"
+
+# Streaming auto mode (exercises auto engine selection)
+curl -sS -H "${ACCEPT_MARKDOWN}" \
+  "http://127.0.0.1:${PORT}/streaming-auto/index.html" -o /dev/null -w "  streaming auto: HTTP %{http_code}\n"
+
+# Streaming with non-markdown Accept (exercises streaming skip path)
+curl -sS -H 'Accept: text/html' \
+  "http://127.0.0.1:${PORT}/streaming/index.html" -o /dev/null -w "  streaming skip: HTTP %{http_code}\n"
+
+# Streaming with tiny budget (exercises budget-exceeded failure + fallback)
+curl -sS -H "${ACCEPT_MARKDOWN}" \
+  "http://127.0.0.1:${PORT}/streaming-tiny-budget/index.html" -o /dev/null -w "  streaming budget fail: HTTP %{http_code}\n"
 
 # ── Metrics scenarios (Req 5) — after conversion scenarios ──────────
 
