@@ -18,74 +18,332 @@
 #include "ngx_http_markdown_streaming_decomp_impl.h"
 
 /* Forward declarations */
+
+/*
+ * Streaming body filter main entry point.
+ *
+ * Implements the streaming state machine lifecycle:
+ * Idle -> PreCommit -> PostCommit -> Finalized.
+ * Handles backpressure recovery, fallback to full-buffer,
+ * and fail-open passthrough.
+ *
+ * r  - current HTTP request
+ * in - incoming chain of upstream buffers (NULL on resume)
+ *
+ * Returns:
+ *   NGX_OK      on success
+ *   NGX_AGAIN   on downstream backpressure
+ *   NGX_ERROR   on unrecoverable failure
+ */
 static ngx_int_t
 ngx_http_markdown_streaming_body_filter(
     ngx_http_request_t *r, ngx_chain_t *in);
+
+/*
+ * Process a single upstream buffer through the streaming pipeline.
+ *
+ * Decompresses (if needed), enforces cumulative size limits,
+ * saves to prebuffer in Pre-Commit state, feeds data to the
+ * Rust streaming FFI, and dispatches output or errors.
+ *
+ * r    - current HTTP request
+ * ctx  - per-request module context
+ * conf - location configuration
+ * buf  - upstream buffer to process
+ *
+ * Returns:
+ *   NGX_OK       on success
+ *   NGX_AGAIN    on downstream backpressure
+ *   NGX_DECLINED on fail-open or fallback
+ *   NGX_ERROR    on failure
+ */
 static ngx_int_t
 ngx_http_markdown_streaming_process_chunk(
     ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx,
     ngx_http_markdown_conf_t *conf,
     ngx_buf_t *buf);
+
+/*
+ * Send converted Markdown output downstream.
+ *
+ * Copies data from the Rust-allocated buffer into pool memory,
+ * constructs an output chain, and passes it to the next body
+ * filter. Records TTFB on the first successful non-empty send.
+ * On NGX_AGAIN, saves the chain as pending output for later
+ * resume.
+ *
+ * r        - current HTTP request
+ * ctx      - per-request module context
+ * data     - Markdown output bytes (NULL for empty terminal)
+ * len      - length of data in bytes
+ * last_buf - 1 if this is the final output chunk
+ *
+ * Returns:
+ *   NGX_OK    on successful downstream delivery
+ *   NGX_AGAIN on downstream backpressure
+ *   NGX_ERROR on allocation or filter failure
+ */
 static ngx_int_t
 ngx_http_markdown_streaming_send_output(
     ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx,
     u_char *data, size_t len,
     ngx_flag_t last_buf);
+
+/*
+ * Finalize the streaming conversion on last_buf.
+ *
+ * Flushes any remaining decompression tail data, calls
+ * markdown_streaming_finalize() to obtain the final Markdown
+ * output and result metadata (ETag, token estimate), then
+ * sends the terminal chunk downstream. Records success or
+ * failure metrics based on commit state.
+ *
+ * r    - current HTTP request
+ * ctx  - per-request module context
+ * conf - location configuration
+ *
+ * Returns:
+ *   NGX_OK       on success
+ *   NGX_AGAIN    if pending output defers finalization
+ *   NGX_DECLINED on pre-commit fail-open
+ *   NGX_ERROR    on failure
+ */
 static ngx_int_t
 ngx_http_markdown_streaming_finalize_request(
     ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx,
     ngx_http_markdown_conf_t *conf);
+
+/*
+ * Pre-Commit fallback from streaming to full-buffer path.
+ *
+ * Aborts the Rust streaming handle, transfers prebuffered
+ * decompressed data to the main buffer, resets conversion
+ * state flags, and corrects path-hit metrics. Called when
+ * the Rust FFI returns ERROR_STREAMING_FALLBACK.
+ *
+ * r    - current HTTP request
+ * ctx  - per-request module context
+ * conf - location configuration
+ *
+ * Returns:
+ *   NGX_DECLINED to signal the caller to re-enter
+ *                the full-buffer body filter path
+ *   NGX_ERROR    on buffer initialization failure
+ */
 static ngx_int_t
 ngx_http_markdown_streaming_fallback_to_fullbuffer(
     ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx,
     ngx_http_markdown_conf_t *conf);
+
+/*
+ * Post-Commit error handler for streaming conversion.
+ *
+ * After headers have been sent downstream, the response cannot
+ * be reverted to HTML or an HTTP error status. Aborts the Rust
+ * streaming handle and sends an empty last_buf to terminate
+ * the truncated Markdown response. Records failure metrics
+ * and budget-exceeded classification when applicable.
+ *
+ * r          - current HTTP request
+ * ctx        - per-request module context
+ * conf       - location configuration
+ * error_code - FFI error code from the Rust streaming engine
+ *
+ * Returns:
+ *   NGX_OK    on successful terminal send
+ *   NGX_AGAIN on downstream backpressure
+ *   NGX_ERROR on send failure
+ */
 static ngx_int_t
 ngx_http_markdown_streaming_handle_postcommit_error(
     ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx,
     ngx_http_markdown_conf_t *conf,
     uint32_t error_code);
+
+/*
+ * Pre-Commit error handler: apply streaming_on_error policy.
+ *
+ * Single entry point for all pre-commit streaming failures.
+ * Routes to fallback (ERROR_STREAMING_FALLBACK), fail-open
+ * (pass original HTML), or fail-closed (reject) based on
+ * the error code and the markdown_streaming_on_error directive.
+ *
+ * r          - current HTTP request
+ * ctx        - per-request module context
+ * conf       - location configuration
+ * error_code - FFI error code from the Rust streaming engine
+ *
+ * Returns:
+ *   NGX_DECLINED on fallback or fail-open
+ *   NGX_ERROR    on fail-closed (reject)
+ */
 static ngx_int_t
 ngx_http_markdown_streaming_precommit_error(
     ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx,
     ngx_http_markdown_conf_t *conf,
     uint32_t error_code);
+
+/*
+ * Handle downstream backpressure during streaming output.
+ *
+ * Sets the NGX_HTTP_MARKDOWN_BUFFERED flag on the request
+ * to signal that this filter has unsent data. The pending
+ * chain is preserved in ctx for later resume.
+ *
+ * r   - current HTTP request
+ * ctx - per-request module context
+ *
+ * Returns:
+ *   NGX_AGAIN always (signals caller to pause processing)
+ */
 static ngx_int_t
 ngx_http_markdown_streaming_handle_backpressure(
     ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx);
+
+/*
+ * Resume sending pending output after backpressure clears.
+ *
+ * Retries the buffered chain via ngx_http_next_body_filter.
+ * On success, records deferred TTFB and terminal metrics if
+ * applicable, then sends any deferred last_buf. Clears the
+ * NGX_HTTP_MARKDOWN_BUFFERED flag when the pending chain
+ * drains.
+ *
+ * r    - current HTTP request
+ * ctx  - per-request module context
+ * conf - location configuration
+ *
+ * Returns:
+ *   NGX_OK    when all pending output is drained
+ *   NGX_AGAIN if backpressure persists
+ *   NGX_ERROR on downstream failure
+ */
 static ngx_int_t
 ngx_http_markdown_streaming_resume_pending(
     ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx,
     ngx_http_markdown_conf_t *conf);
+
+/*
+ * Record post-commit failure metrics for streaming conversion.
+ *
+ * Increments postcommit_error_total and failed_total counters
+ * (guarded by a one-shot latch to prevent double-counting),
+ * then logs the streaming fail-postcommit reason code.
+ *
+ * r    - current HTTP request
+ * ctx  - per-request module context
+ * conf - location configuration
+ */
 static void
 ngx_http_markdown_streaming_record_postcommit_failure(
     ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx,
     ngx_http_markdown_conf_t *conf);
+
+/*
+ * Pool cleanup handler for streaming resources.
+ *
+ * Releases the Rust streaming handle and frees any pending
+ * output chain buffers that hold Rust-allocated memory.
+ * Registered via ngx_pool_cleanup_add() to ensure cleanup
+ * even on abnormal request termination (client abort, timeout).
+ *
+ * data - pointer to the per-request ngx_http_markdown_ctx_t
+ */
 static void
 ngx_http_markdown_streaming_cleanup(void *data);
+
+/*
+ * Engine selector: determine the processing path for a request.
+ *
+ * Evaluates the markdown_streaming_engine complex value and
+ * applies the selection rules (engine mode, HEAD request,
+ * 304 status, conditional_requests policy, content-type
+ * exclusions, and auto-mode content-length threshold).
+ *
+ * r    - current HTTP request
+ * conf - location configuration
+ *
+ * Returns:
+ *   NGX_HTTP_MARKDOWN_PATH_STREAMING   for streaming path
+ *   NGX_HTTP_MARKDOWN_PATH_FULLBUFFER  for full-buffer path
+ */
 static ngx_uint_t
 ngx_http_markdown_select_processing_path(
     ngx_http_request_t *r,
     ngx_http_markdown_conf_t *conf);
+
+/*
+ * Update response headers at the streaming commit boundary.
+ *
+ * Sets Content-Type to text/markdown; charset=utf-8, adds
+ * Vary: Accept, clears Content-Length (streaming uses chunked
+ * transfer), removes Content-Encoding if decompressing, and
+ * removes any stale upstream ETag.
+ *
+ * r    - current HTTP request
+ * ctx  - per-request module context
+ * conf - location configuration
+ *
+ * Returns:
+ *   NGX_OK    on success
+ *   NGX_ERROR on header manipulation failure
+ */
 static ngx_int_t
 ngx_http_markdown_streaming_update_headers(
     ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx,
     ngx_http_markdown_conf_t *conf);
+
+/*
+ * Lazily initialize the Rust streaming converter handle.
+ *
+ * On first invocation (handle == NULL and eligible), calls
+ * the streaming init function. On init failure with
+ * NGX_DECLINED (fail-open), forwards deferred headers and
+ * passes the body chain downstream unchanged.
+ *
+ * r    - current HTTP request
+ * ctx  - per-request module context
+ * conf - location configuration
+ * in   - incoming chain (forwarded on fail-open)
+ *
+ * Returns:
+ *   NGX_OK    when handle is ready or already initialized
+ *   NGX_ERROR on unrecoverable init failure
+ *   result of ngx_http_next_body_filter on fail-open
+ */
 static ngx_int_t
 ngx_http_markdown_streaming_ensure_handle(
     ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx,
     ngx_http_markdown_conf_t *conf,
     ngx_chain_t *in);
+
+/*
+ * Re-enter the full-buffer body filter after streaming fallback.
+ *
+ * The current chain node was already consumed into the prebuffer
+ * by the streaming path, so re-entry starts at cl->next. If this
+ * was the terminal node with no successor, synthesizes an empty
+ * terminal chain to preserve end-of-stream signaling.
+ *
+ * r        - current HTTP request
+ * cl       - chain link at which fallback occurred
+ * last_buf - 1 if the fallback chain carried last_buf
+ *
+ * Returns:
+ *   result of ngx_http_markdown_body_filter on the
+ *   remaining (or synthesized terminal) chain
+ */
 static ngx_int_t
 ngx_http_markdown_streaming_reenter_fullbuffer_after_fallback(
     ngx_http_request_t *r,
