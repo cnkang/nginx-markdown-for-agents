@@ -87,6 +87,7 @@ unit-coverage:
 	lcov --remove $(COV_DIR)/raw.lcov '*/tests/*' '/usr/*' \
 		--output-file $(COV_DIR)/c-coverage.lcov \
 		--rc lcov_branch_coverage=1 --ignore-errors unused,unused
+	@rm -f $(COV_DIR)/raw.lcov
 	@echo "C coverage report: $(COV_DIR)/c-coverage.lcov"
 
 clean:
