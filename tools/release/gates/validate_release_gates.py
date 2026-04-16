@@ -203,8 +203,25 @@ def _parse_table_cells_positional(line: str) -> list[str]:
 # Per-sub-spec checks (used in strict mode for all specs, framework for #12)
 # ---------------------------------------------------------------------------
 
+REQUIREMENTS_MD = "requirements.md"
 DESIGN_MD = "design.md"
 DESIGN_NOT_FOUND = "design.md not found"
+
+
+def _resolve_spec_dir(specs_dir: Path, name: str) -> Path | None:
+    """Locate a sub-spec directory, checking archive/ as a fallback.
+
+    Completed specs may be moved to ``specs_dir / "archive" / name``.
+    This helper checks the top-level location first, then the archive.
+
+    Returns:
+        The resolved directory ``Path``, or ``None`` if not found.
+    """
+    candidate = specs_dir / name
+    if candidate.is_dir():
+        return candidate
+    archived = specs_dir / "archive" / name
+    return archived if archived.is_dir() else None
 
 
 def check_subspecs_docs_exist(
@@ -212,11 +229,11 @@ def check_subspecs_docs_exist(
 ) -> None:
     """Property 2: every sub-spec must have requirements.md and design.md."""
     for name in subspecs:
-        spec_dir = specs_dir / name
-        if not spec_dir.is_dir():
+        spec_dir = _resolve_spec_dir(specs_dir, name)
+        if spec_dir is None:
             result.failed(f"docs-exist:{name}", "sub-spec directory not found")
             continue
-        for doc in ("requirements.md", DESIGN_MD):
+        for doc in (REQUIREMENTS_MD, DESIGN_MD):
             path = spec_dir / doc
             if path.is_file():
                 result.passed(f"docs-exist:{name}/{doc}")
@@ -253,10 +270,11 @@ def check_requirements_sections(
                 "governance spec (defines section requirements, does not follow them)",
             )
             continue
-        req_path = specs_dir / name / "requirements.md"
+        resolved = _resolve_spec_dir(specs_dir, name)
+        req_path = resolved / REQUIREMENTS_MD if resolved else specs_dir / name / REQUIREMENTS_MD
         content = _read_file_safe(req_path)
         if content is None:
-            result.skipped(f"req-sections:{name}", "requirements.md not found")
+            result.skipped(f"req-sections:{name}", f"{REQUIREMENTS_MD} not found")
             continue
         headings = _extract_headings(content)
         if missing := [
@@ -277,7 +295,8 @@ def check_boundary_descriptions(
 ) -> None:
     """Property 3: sub-specs with natural extensions must have boundary descriptions."""
     for name in subspecs:
-        design_path = specs_dir / name / DESIGN_MD
+        resolved = _resolve_spec_dir(specs_dir, name)
+        design_path = (resolved / DESIGN_MD) if resolved else (specs_dir / name / DESIGN_MD)
         content = _read_file_safe(design_path)
         if content is None:
             result.skipped(f"boundary:{name}", DESIGN_NOT_FOUND)
@@ -303,7 +322,8 @@ def check_dod_assessment(
 ) -> None:
     """Property 5: completed sub-specs must have DoD assessment with all checkpoints."""
     for name in subspecs:
-        design_path = specs_dir / name / DESIGN_MD
+        resolved = _resolve_spec_dir(specs_dir, name)
+        design_path = (resolved / DESIGN_MD) if resolved else (specs_dir / name / DESIGN_MD)
         content = _read_file_safe(design_path)
         if content is None:
             result.skipped(f"dod:{name}", DESIGN_NOT_FOUND)
@@ -400,7 +420,8 @@ def check_risk_register(
 ) -> None:
     """Property 7: sub-specs must have risk registers; high-severity needs mitigation."""
     for name in subspecs:
-        design_path = specs_dir / name / DESIGN_MD
+        resolved = _resolve_spec_dir(specs_dir, name)
+        design_path = (resolved / DESIGN_MD) if resolved else (specs_dir / name / DESIGN_MD)
         content = _read_file_safe(design_path)
         if content is None:
             result.skipped(f"risk:{name}", DESIGN_NOT_FOUND)
