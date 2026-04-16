@@ -180,10 +180,19 @@ echo "==> Building and installing NGINX"
   make install
 )
 
-# ── Write a minimal nginx.conf for the smoke scenario ───────────────
+# ── Write a comprehensive nginx.conf for coverage ───────────────────
+# This config exercises as many module code paths as possible:
+# - Multiple server blocks with different directive combinations
+# - Auth policy with cookie patterns
+# - Conditional request support (ETag + If-Modified-Since)
+# - Prometheus metrics format
+# - Error handling (on_error pass/reject)
+# - Various log verbosity levels
+# - Token estimation
+# - Large body threshold
 cat > "${RUNTIME}/conf/nginx.conf" <<EOF
 worker_processes  1;
-error_log  logs/error.log info;
+error_log  logs/error.log debug;
 pid        logs/nginx.pid;
 
 events { worker_connections 128; }
@@ -194,6 +203,7 @@ http {
     sendfile      on;
     keepalive_timeout  5;
 
+    # ── Primary server: full feature set ────────────────────────────
     server {
         listen 127.0.0.1:${PORT};
         server_name localhost;
@@ -204,11 +214,87 @@ http {
             markdown_on_wildcard on;
             markdown_etag on;
             markdown_conditional_requests full_support;
+            markdown_log_verbosity debug;
+            markdown_token_estimate on;
+            markdown_on_error pass;
+            markdown_max_size 1m;
+            markdown_timeout 5000;
+        }
+
+        location /auth {
+            root html;
+            markdown_filter on;
+            markdown_auth_policy deny;
+            markdown_auth_cookies "session*" "*_logged_in";
             markdown_log_verbosity info;
+        }
+
+        location /reject-error {
+            root html;
+            markdown_filter on;
+            markdown_on_error reject;
+            markdown_log_verbosity warn;
+        }
+
+        location /ims-only {
+            root html;
+            markdown_filter on;
+            markdown_conditional_requests if_modified_since_only;
+        }
+
+        location /no-conditional {
+            root html;
+            markdown_filter on;
+            markdown_conditional_requests disabled;
+        }
+
+        location /no-wildcard {
+            root html;
+            markdown_filter on;
+            markdown_on_wildcard off;
+        }
+
+        location /disabled {
+            root html;
+            markdown_filter off;
         }
 
         location /metrics {
             markdown_metrics;
+        }
+
+        location /metrics-prometheus {
+            markdown_metrics;
+            markdown_metrics_format prometheus;
+        }
+
+        location /gfm {
+            root html;
+            markdown_filter on;
+            markdown_flavor gfm;
+        }
+
+        location /commonmark {
+            root html;
+            markdown_filter on;
+            markdown_flavor commonmark;
+        }
+
+        location /small-limit {
+            root html;
+            markdown_filter on;
+            markdown_max_size 100;
+        }
+
+        location /log-error {
+            root html;
+            markdown_filter on;
+            markdown_log_verbosity error;
+        }
+
+        location /metrics-auto {
+            markdown_metrics;
+            markdown_metrics_format auto;
         }
     }
 }
@@ -249,6 +335,8 @@ sleep 1
 
 echo "==> Running coverage smoke scenario"
 
+# ── Basic conversion scenarios ───────────────────────────────────────
+
 # Request with markdown Accept header (exercises filter + conversion)
 curl -sS -H 'Accept: text/markdown' "http://127.0.0.1:${PORT}/index.html" -o /dev/null -w "  markdown request: HTTP %{http_code}\n"
 
@@ -258,21 +346,126 @@ curl -sS -H 'Accept: text/html' "http://127.0.0.1:${PORT}/index.html" -o /dev/nu
 # Wildcard Accept
 curl -sS -H 'Accept: */*' "http://127.0.0.1:${PORT}/index.html" -o /dev/null -w "  wildcard request: HTTP %{http_code}\n"
 
-# Conditional request (If-Modified-Since)
-curl -sS -H 'Accept: text/markdown' -H 'If-Modified-Since: Thu, 01 Jan 2099 00:00:00 GMT' \
-  "http://127.0.0.1:${PORT}/index.html" -o /dev/null -w "  conditional request: HTTP %{http_code}\n"
-
 # HEAD request
 curl -sS -I -H 'Accept: text/markdown' "http://127.0.0.1:${PORT}/index.html" -o /dev/null -w "  HEAD request: HTTP %{http_code}\n"
 
-# Large page
+# Large page (chain accumulation)
 curl -sS -H 'Accept: text/markdown' "http://127.0.0.1:${PORT}/large.html" -o /dev/null -w "  large page: HTTP %{http_code}\n"
 
-# Metrics endpoint
-curl -sS "http://127.0.0.1:${PORT}/metrics" -o /dev/null -w "  metrics: HTTP %{http_code}\n"
+# ── Auth detection scenarios (Req 2) ────────────────────────────────
 
-# Non-existent page (404 path)
+# Bearer token auth
+curl -sS -H 'Accept: text/markdown' -H 'Authorization: Bearer token123' \
+  "http://127.0.0.1:${PORT}/auth/index.html" -o /dev/null -w "  auth bearer: HTTP %{http_code}\n"
+
+# Cookie prefix match (session*)
+curl -sS -H 'Accept: text/markdown' -H 'Cookie: session_id=abc123' \
+  "http://127.0.0.1:${PORT}/auth/index.html" -o /dev/null -w "  auth cookie prefix: HTTP %{http_code}\n"
+
+# Cookie suffix match (*_logged_in)
+curl -sS -H 'Accept: text/markdown' -H 'Cookie: wordpress_logged_in_hash=val' \
+  "http://127.0.0.1:${PORT}/auth/index.html" -o /dev/null -w "  auth cookie suffix: HTTP %{http_code}\n"
+
+# No auth credentials (negative detection)
+curl -sS -H 'Accept: text/markdown' \
+  "http://127.0.0.1:${PORT}/auth/index.html" -o /dev/null -w "  auth none: HTTP %{http_code}\n"
+
+# Non-matching cookie
+curl -sS -H 'Accept: text/markdown' -H 'Cookie: tracking=xyz' \
+  "http://127.0.0.1:${PORT}/auth/index.html" -o /dev/null -w "  auth non-matching cookie: HTTP %{http_code}\n"
+
+# ── Conditional request scenarios (Req 3) ───────────────────────────
+
+# If-None-Match wildcard
+curl -sS -H 'Accept: text/markdown' -H 'If-None-Match: *' \
+  "http://127.0.0.1:${PORT}/index.html" -o /dev/null -w "  INM wildcard: HTTP %{http_code}\n"
+
+# If-None-Match quoted etag
+curl -sS -H 'Accept: text/markdown' -H 'If-None-Match: "some-etag-value"' \
+  "http://127.0.0.1:${PORT}/index.html" -o /dev/null -w "  INM quoted: HTTP %{http_code}\n"
+
+# If-None-Match multi-etag
+curl -sS -H 'Accept: text/markdown' -H 'If-None-Match: "etag1", "etag2"' \
+  "http://127.0.0.1:${PORT}/index.html" -o /dev/null -w "  INM multi: HTTP %{http_code}\n"
+
+# If-Modified-Since
+curl -sS -H 'Accept: text/markdown' -H 'If-Modified-Since: Thu, 01 Jan 2099 00:00:00 GMT' \
+  "http://127.0.0.1:${PORT}/index.html" -o /dev/null -w "  conditional IMS: HTTP %{http_code}\n"
+
+# If-None-Match to IMS-only location (bypass)
+curl -sS -H 'Accept: text/markdown' -H 'If-None-Match: "etag"' \
+  "http://127.0.0.1:${PORT}/ims-only/index.html" -o /dev/null -w "  INM ims-only bypass: HTTP %{http_code}\n"
+
+# If-None-Match to disabled conditional location (bypass)
+curl -sS -H 'Accept: text/markdown' -H 'If-None-Match: "etag"' \
+  "http://127.0.0.1:${PORT}/no-conditional/index.html" -o /dev/null -w "  INM disabled bypass: HTTP %{http_code}\n"
+
+# ── Error path scenarios (Req 4) ────────────────────────────────────
+
+# Non-existent page (404 passthrough)
 curl -sS -H 'Accept: text/markdown' "http://127.0.0.1:${PORT}/nonexistent.html" -o /dev/null -w "  404 path: HTTP %{http_code}\n" || true
+
+# Reject-error path
+curl -sS -H 'Accept: text/markdown' "http://127.0.0.1:${PORT}/reject-error/index.html" -o /dev/null -w "  reject-error: HTTP %{http_code}\n"
+
+# POST request (method ineligibility)
+curl -sS -X POST -H 'Accept: text/markdown' "http://127.0.0.1:${PORT}/index.html" -o /dev/null -w "  POST method: HTTP %{http_code}\n" || true
+
+# Range header (range skip)
+curl -sS -H 'Accept: text/markdown' -H 'Range: bytes=0-100' \
+  "http://127.0.0.1:${PORT}/index.html" -o /dev/null -w "  range skip: HTTP %{http_code}\n"
+
+# ── Accept header diversity scenarios (Req 6) ──────────────────────
+
+# Subtype wildcard
+curl -sS -H 'Accept: text/*' "http://127.0.0.1:${PORT}/index.html" -o /dev/null -w "  text/* subtype wildcard: HTTP %{http_code}\n"
+
+# Q-value sorting
+curl -sS -H 'Accept: text/html;q=0.9, text/markdown;q=1.0' \
+  "http://127.0.0.1:${PORT}/index.html" -o /dev/null -w "  q-value sorting: HTTP %{http_code}\n"
+
+# Explicit rejection (q=0)
+curl -sS -H 'Accept: text/markdown;q=0' \
+  "http://127.0.0.1:${PORT}/index.html" -o /dev/null -w "  q=0 rejection: HTTP %{http_code}\n"
+
+# No markdown match
+curl -sS -H 'Accept: text/html' "http://127.0.0.1:${PORT}/index.html" -o /dev/null -w "  no markdown match: HTTP %{http_code}\n"
+
+# Multi-entry tie-break
+curl -sS -H 'Accept: text/markdown, text/html' \
+  "http://127.0.0.1:${PORT}/index.html" -o /dev/null -w "  multi-entry tie-break: HTTP %{http_code}\n"
+
+# Wildcard-disabled rejection
+curl -sS -H 'Accept: */*' "http://127.0.0.1:${PORT}/no-wildcard/index.html" -o /dev/null -w "  wildcard disabled: HTTP %{http_code}\n"
+
+# ── Body filter, headers, and flavor scenarios (Req 7, 8) ──────────
+
+# GFM flavor
+curl -sS -H 'Accept: text/markdown' "http://127.0.0.1:${PORT}/gfm/index.html" -o /dev/null -w "  GFM flavor: HTTP %{http_code}\n"
+
+# CommonMark flavor
+curl -sS -H 'Accept: text/markdown' "http://127.0.0.1:${PORT}/commonmark/index.html" -o /dev/null -w "  CommonMark flavor: HTTP %{http_code}\n"
+
+# Size-limit rejection (small-limit with large file)
+curl -sS -H 'Accept: text/markdown' "http://127.0.0.1:${PORT}/small-limit/large.html" -o /dev/null -w "  size-limit rejection: HTTP %{http_code}\n"
+
+# Auth request triggering conversion (Cache-Control modification)
+curl -sS -H 'Accept: text/markdown' -H 'Cookie: session_id=abc123' \
+  "http://127.0.0.1:${PORT}/auth/index.html" -o /dev/null -w "  auth conversion (Cache-Control): HTTP %{http_code}\n"
+
+# ── Metrics scenarios (Req 5) — after conversion scenarios ──────────
+
+# Prometheus format
+curl -sS "http://127.0.0.1:${PORT}/metrics-prometheus" -o /dev/null -w "  metrics prometheus: HTTP %{http_code}\n"
+
+# Auto format (plain text)
+curl -sS -H 'Accept: text/plain' "http://127.0.0.1:${PORT}/metrics-auto" -o /dev/null -w "  metrics auto text: HTTP %{http_code}\n"
+
+# Auto format (JSON)
+curl -sS -H 'Accept: application/json' "http://127.0.0.1:${PORT}/metrics-auto" -o /dev/null -w "  metrics auto json: HTTP %{http_code}\n"
+
+# Default metrics endpoint
+curl -sS "http://127.0.0.1:${PORT}/metrics" -o /dev/null -w "  metrics default: HTTP %{http_code}\n"
 
 echo "==> Stopping NGINX (flush gcov data)"
 "${RUNTIME}/sbin/nginx" -p "${RUNTIME}" -c conf/nginx.conf -s stop
@@ -310,3 +503,56 @@ echo "==> C module e2e coverage report: ${OUTPUT_LCOV}"
 # shellcheck disable=SC2086
 lcov --summary "${OUTPUT_LCOV}" --rc branch_coverage=1 \
   ${LCOV_IGNORE} 2>&1 | grep -E 'lines|functions|branches' || true
+
+# ── Advisory per-file coverage threshold checks ────────────────────
+# These thresholds are advisory (warnings only, not blocking).
+# The lcov report is always produced regardless of coverage level.
+echo "==> Checking advisory coverage thresholds"
+# shellcheck disable=SC2086
+lcov --list "${OUTPUT_LCOV}" --rc branch_coverage=1 \
+  ${LCOV_IGNORE} 2>/dev/null | while IFS= read -r line; do
+  # Extract file path and line coverage percentage
+  file="$(echo "${line}" | awk '{print $1}')"
+  pct="$(echo "${line}" | awk '{print $NF}')"
+  # Remove trailing % if present
+  pct="${pct%\%}"
+
+  # Skip non-data lines
+  case "${file}" in
+    ngx_http_markdown_*) ;;
+    *) continue ;;
+  esac
+
+  # Advisory thresholds per file (Req 13)
+  threshold=""
+  case "${file}" in
+    ngx_http_markdown_auth.c)                threshold=60 ;;
+    ngx_http_markdown_conditional.c)         threshold=40 ;;
+    ngx_http_markdown_error.c)               threshold=50 ;;
+    ngx_http_markdown_prometheus_impl.h)     threshold=50 ;;
+    ngx_http_markdown_reason.c)              threshold=50 ;;
+    ngx_http_markdown_accept.c)              threshold=70 ;;
+    ngx_http_markdown_config_handlers_impl.h) threshold=40 ;;
+    *) ;;
+  esac
+
+  if [[ -n "${threshold}" ]] && [[ -n "${pct}" ]]; then
+    # Compare as integers (truncate decimal)
+    pct_int="${pct%%.*}"
+    if [[ -n "${pct_int}" ]] && [[ "${pct_int}" -lt "${threshold}" ]]; then
+      echo "  WARNING: ${file} line coverage ${pct}% below advisory threshold ${threshold}%" >&2
+    fi
+  fi
+done || true
+
+# Aggregate line coverage advisory check (80% minimum)
+aggregate="$(lcov --summary "${OUTPUT_LCOV}" --rc branch_coverage=1 \
+  ${LCOV_IGNORE} 2>&1 | awk '/lines\.\.\.\./{print $2}' || true)"
+if [[ -n "${aggregate}" ]]; then
+  aggregate_int="${aggregate%%.*}"
+  if [[ -n "${aggregate_int}" ]] && [[ "${aggregate_int}" -lt 80 ]]; then
+    echo "  WARNING: Aggregate line coverage ${aggregate}% below 80% minimum" >&2
+  else
+    echo "  Aggregate line coverage: ${aggregate}% (meets 80% minimum)"
+  fi
+fi
