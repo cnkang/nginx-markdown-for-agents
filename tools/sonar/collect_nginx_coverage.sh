@@ -22,6 +22,9 @@ BUILDROOT=""
 RUNTIME=""
 PORT=18199
 
+# ── Repeated curl header constants (shelldre:S1192) ─────────────────
+readonly ACCEPT_MARKDOWN='Accept: text/markdown'
+
 usage() {
   cat >&2 <<EOF
 Usage: $(basename "$0") [--output PATH] [--keep-artifacts] [--nginx-version VER]
@@ -338,7 +341,7 @@ echo "==> Running coverage smoke scenario"
 # ── Basic conversion scenarios ───────────────────────────────────────
 
 # Request with markdown Accept header (exercises filter + conversion)
-curl -sS -H 'Accept: text/markdown' "http://127.0.0.1:${PORT}/index.html" -o /dev/null -w "  markdown request: HTTP %{http_code}\n"
+curl -sS -H "${ACCEPT_MARKDOWN}" "http://127.0.0.1:${PORT}/index.html" -o /dev/null -w "  markdown request: HTTP %{http_code}\n"
 
 # Request without markdown Accept (exercises passthrough/eligibility)
 curl -sS -H 'Accept: text/html' "http://127.0.0.1:${PORT}/index.html" -o /dev/null -w "  html request: HTTP %{http_code}\n"
@@ -347,72 +350,72 @@ curl -sS -H 'Accept: text/html' "http://127.0.0.1:${PORT}/index.html" -o /dev/nu
 curl -sS -H 'Accept: */*' "http://127.0.0.1:${PORT}/index.html" -o /dev/null -w "  wildcard request: HTTP %{http_code}\n"
 
 # HEAD request
-curl -sS -I -H 'Accept: text/markdown' "http://127.0.0.1:${PORT}/index.html" -o /dev/null -w "  HEAD request: HTTP %{http_code}\n"
+curl -sS -I -H "${ACCEPT_MARKDOWN}" "http://127.0.0.1:${PORT}/index.html" -o /dev/null -w "  HEAD request: HTTP %{http_code}\n"
 
 # Large page (chain accumulation)
-curl -sS -H 'Accept: text/markdown' "http://127.0.0.1:${PORT}/large.html" -o /dev/null -w "  large page: HTTP %{http_code}\n"
+curl -sS -H "${ACCEPT_MARKDOWN}" "http://127.0.0.1:${PORT}/large.html" -o /dev/null -w "  large page: HTTP %{http_code}\n"
 
 # ── Auth detection scenarios (Req 2) ────────────────────────────────
 
-# Bearer token auth
-curl -sS -H 'Accept: text/markdown' -H 'Authorization: Bearer token123' \
+# Bearer token auth (dummy placeholder — exercises auth detection code path)
+curl -sS -H "${ACCEPT_MARKDOWN}" -H 'Authorization: Bearer DUMMY_TEST_TOKEN' \
   "http://127.0.0.1:${PORT}/auth/index.html" -o /dev/null -w "  auth bearer: HTTP %{http_code}\n"
 
 # Cookie prefix match (session*)
-curl -sS -H 'Accept: text/markdown' -H 'Cookie: session_id=abc123' \
+curl -sS -H "${ACCEPT_MARKDOWN}" -H 'Cookie: session_id=abc123' \
   "http://127.0.0.1:${PORT}/auth/index.html" -o /dev/null -w "  auth cookie prefix: HTTP %{http_code}\n"
 
 # Cookie suffix match (*_logged_in)
-curl -sS -H 'Accept: text/markdown' -H 'Cookie: wordpress_logged_in_hash=val' \
+curl -sS -H "${ACCEPT_MARKDOWN}" -H 'Cookie: wordpress_logged_in_hash=val' \
   "http://127.0.0.1:${PORT}/auth/index.html" -o /dev/null -w "  auth cookie suffix: HTTP %{http_code}\n"
 
 # No auth credentials (negative detection)
-curl -sS -H 'Accept: text/markdown' \
+curl -sS -H "${ACCEPT_MARKDOWN}" \
   "http://127.0.0.1:${PORT}/auth/index.html" -o /dev/null -w "  auth none: HTTP %{http_code}\n"
 
 # Non-matching cookie
-curl -sS -H 'Accept: text/markdown' -H 'Cookie: tracking=xyz' \
+curl -sS -H "${ACCEPT_MARKDOWN}" -H 'Cookie: tracking=xyz' \
   "http://127.0.0.1:${PORT}/auth/index.html" -o /dev/null -w "  auth non-matching cookie: HTTP %{http_code}\n"
 
 # ── Conditional request scenarios (Req 3) ───────────────────────────
 
 # If-None-Match wildcard
-curl -sS -H 'Accept: text/markdown' -H 'If-None-Match: *' \
+curl -sS -H "${ACCEPT_MARKDOWN}" -H 'If-None-Match: *' \
   "http://127.0.0.1:${PORT}/index.html" -o /dev/null -w "  INM wildcard: HTTP %{http_code}\n"
 
 # If-None-Match quoted etag
-curl -sS -H 'Accept: text/markdown' -H 'If-None-Match: "some-etag-value"' \
+curl -sS -H "${ACCEPT_MARKDOWN}" -H 'If-None-Match: "some-etag-value"' \
   "http://127.0.0.1:${PORT}/index.html" -o /dev/null -w "  INM quoted: HTTP %{http_code}\n"
 
 # If-None-Match multi-etag
-curl -sS -H 'Accept: text/markdown' -H 'If-None-Match: "etag1", "etag2"' \
+curl -sS -H "${ACCEPT_MARKDOWN}" -H 'If-None-Match: "etag1", "etag2"' \
   "http://127.0.0.1:${PORT}/index.html" -o /dev/null -w "  INM multi: HTTP %{http_code}\n"
 
 # If-Modified-Since
-curl -sS -H 'Accept: text/markdown' -H 'If-Modified-Since: Thu, 01 Jan 2099 00:00:00 GMT' \
+curl -sS -H "${ACCEPT_MARKDOWN}" -H 'If-Modified-Since: Thu, 01 Jan 2099 00:00:00 GMT' \
   "http://127.0.0.1:${PORT}/index.html" -o /dev/null -w "  conditional IMS: HTTP %{http_code}\n"
 
 # If-None-Match to IMS-only location (bypass)
-curl -sS -H 'Accept: text/markdown' -H 'If-None-Match: "etag"' \
+curl -sS -H "${ACCEPT_MARKDOWN}" -H 'If-None-Match: "etag"' \
   "http://127.0.0.1:${PORT}/ims-only/index.html" -o /dev/null -w "  INM ims-only bypass: HTTP %{http_code}\n"
 
 # If-None-Match to disabled conditional location (bypass)
-curl -sS -H 'Accept: text/markdown' -H 'If-None-Match: "etag"' \
+curl -sS -H "${ACCEPT_MARKDOWN}" -H 'If-None-Match: "etag"' \
   "http://127.0.0.1:${PORT}/no-conditional/index.html" -o /dev/null -w "  INM disabled bypass: HTTP %{http_code}\n"
 
 # ── Error path scenarios (Req 4) ────────────────────────────────────
 
 # Non-existent page (404 passthrough)
-curl -sS -H 'Accept: text/markdown' "http://127.0.0.1:${PORT}/nonexistent.html" -o /dev/null -w "  404 path: HTTP %{http_code}\n" || true
+curl -sS -H "${ACCEPT_MARKDOWN}" "http://127.0.0.1:${PORT}/nonexistent.html" -o /dev/null -w "  404 path: HTTP %{http_code}\n" || true
 
 # Reject-error path
-curl -sS -H 'Accept: text/markdown' "http://127.0.0.1:${PORT}/reject-error/index.html" -o /dev/null -w "  reject-error: HTTP %{http_code}\n"
+curl -sS -H "${ACCEPT_MARKDOWN}" "http://127.0.0.1:${PORT}/reject-error/index.html" -o /dev/null -w "  reject-error: HTTP %{http_code}\n"
 
 # POST request (method ineligibility)
-curl -sS -X POST -H 'Accept: text/markdown' "http://127.0.0.1:${PORT}/index.html" -o /dev/null -w "  POST method: HTTP %{http_code}\n" || true
+curl -sS -X POST -H "${ACCEPT_MARKDOWN}" "http://127.0.0.1:${PORT}/index.html" -o /dev/null -w "  POST method: HTTP %{http_code}\n" || true
 
 # Range header (range skip)
-curl -sS -H 'Accept: text/markdown' -H 'Range: bytes=0-100' \
+curl -sS -H "${ACCEPT_MARKDOWN}" -H 'Range: bytes=0-100' \
   "http://127.0.0.1:${PORT}/index.html" -o /dev/null -w "  range skip: HTTP %{http_code}\n"
 
 # ── Accept header diversity scenarios (Req 6) ──────────────────────
@@ -441,16 +444,16 @@ curl -sS -H 'Accept: */*' "http://127.0.0.1:${PORT}/no-wildcard/index.html" -o /
 # ── Body filter, headers, and flavor scenarios (Req 7, 8) ──────────
 
 # GFM flavor
-curl -sS -H 'Accept: text/markdown' "http://127.0.0.1:${PORT}/gfm/index.html" -o /dev/null -w "  GFM flavor: HTTP %{http_code}\n"
+curl -sS -H "${ACCEPT_MARKDOWN}" "http://127.0.0.1:${PORT}/gfm/index.html" -o /dev/null -w "  GFM flavor: HTTP %{http_code}\n"
 
 # CommonMark flavor
-curl -sS -H 'Accept: text/markdown' "http://127.0.0.1:${PORT}/commonmark/index.html" -o /dev/null -w "  CommonMark flavor: HTTP %{http_code}\n"
+curl -sS -H "${ACCEPT_MARKDOWN}" "http://127.0.0.1:${PORT}/commonmark/index.html" -o /dev/null -w "  CommonMark flavor: HTTP %{http_code}\n"
 
 # Size-limit rejection (small-limit with large file)
-curl -sS -H 'Accept: text/markdown' "http://127.0.0.1:${PORT}/small-limit/large.html" -o /dev/null -w "  size-limit rejection: HTTP %{http_code}\n"
+curl -sS -H "${ACCEPT_MARKDOWN}" "http://127.0.0.1:${PORT}/small-limit/large.html" -o /dev/null -w "  size-limit rejection: HTTP %{http_code}\n"
 
 # Auth request triggering conversion (Cache-Control modification)
-curl -sS -H 'Accept: text/markdown' -H 'Cookie: session_id=abc123' \
+curl -sS -H "${ACCEPT_MARKDOWN}" -H 'Cookie: session_id=abc123' \
   "http://127.0.0.1:${PORT}/auth/index.html" -o /dev/null -w "  auth conversion (Cache-Control): HTTP %{http_code}\n"
 
 # ── Metrics scenarios (Req 5) — after conversion scenarios ──────────
