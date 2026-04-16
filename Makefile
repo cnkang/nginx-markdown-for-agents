@@ -60,7 +60,7 @@ NGINX_HEADER := $(NGINX_MODULE_DIR)/src/markdown_converter.h
         verify-streaming-failure-cache-e2e \
         verify-streaming-failure-cache-e2e-plan \
         test-rust-streaming \
-        coverage-c coverage-rust coverage-all \
+        coverage-c coverage-rust coverage-sonar-xml coverage-all \
         clean help
 
 all: build
@@ -242,7 +242,14 @@ coverage-rust:
 		   --skip legacy_single_large \
 		   --skip full_run_report
 
-coverage-all: coverage-c coverage-rust
+# Convert all lcov reports to SonarQube Generic Coverage XML.
+# sonar.coverageReportPaths expects this format, not raw lcov.
+coverage-sonar-xml:
+	python3 tools/sonar/lcov_to_sonar_xml.py \
+		-o $(COVERAGE_DIR)/sonar-coverage.xml \
+		$(wildcard $(COVERAGE_DIR)/*.lcov)
+
+coverage-all: coverage-c coverage-rust coverage-sonar-xml
 
 clean:
 	cd $(RUST_DIR) && cargo clean

@@ -108,18 +108,19 @@ jobs:
         if: steps.token.outputs.enabled == 'true'
         run: make coverage-rust
 
+      - name: Convert lcov reports to SonarQube XML
+        if: steps.token.outputs.enabled == 'true'
+        run: make coverage-sonar-xml
+
       - name: Verify coverage reports exist
         if: steps.token.outputs.enabled == 'true'
         shell: bash
         run: |
-          for f in coverage/c-coverage.lcov coverage/rust-coverage.lcov coverage/rust-streaming-coverage.lcov; do
-            if [[ ! -s "$f" ]]; then
-              echo "WARNING: Coverage report missing or empty: $f" >&2
-            else
-              lines=$(wc -l < "$f")
-              echo "OK: $f ($lines lines)"
-            fi
-          done
+          if [[ ! -s coverage/sonar-coverage.xml ]]; then
+            echo "ERROR: coverage/sonar-coverage.xml missing or empty" >&2
+            exit 1
+          fi
+          echo "OK: coverage/sonar-coverage.xml ($(wc -l < coverage/sonar-coverage.xml) lines)"
 
       - name: SonarCloud Scan
         if: steps.token.outputs.enabled == 'true'
