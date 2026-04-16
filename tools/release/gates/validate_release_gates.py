@@ -214,14 +214,44 @@ def _resolve_spec_dir(specs_dir: Path, name: str) -> Path | None:
     Completed specs may be moved to ``specs_dir / "archive" / name``.
     This helper checks the top-level location first, then the archive.
 
+    Security: rejects absolute paths and ``..`` segments to prevent
+    path traversal, and verifies the resolved path is contained within
+    ``specs_dir``.
+
     Returns:
-        The resolved directory ``Path``, or ``None`` if not found.
+        The resolved directory ``Path``, or ``None`` if not found or
+        if the name fails validation.
     """
-    candidate = specs_dir / name
-    if candidate.is_dir():
+    name_path = Path(name)
+    if name_path.is_absolute() or ".." in name_path.parts:
+        return None
+
+    specs_resolved = specs_dir.resolve()
+
+    candidate = (specs_dir / name).resolve()
+    if candidate.is_dir() and str(candidate).startswith(str(specs_resolved)):
         return candidate
-    archived = specs_dir / "archive" / name
-    return archived if archived.is_dir() else None
+
+    archived = (specs_dir / "archive" / name).resolve()
+    if archived.is_dir() and str(archived).startswith(str(specs_resolved)):
+        return archived
+
+    return None
+
+
+def _resolve_spec_file(
+    specs_dir: Path, name: str, filename: str
+) -> Path | None:
+    """Locate a file inside a sub-spec directory (with archive fallback).
+
+    Combines ``_resolve_spec_dir`` with a filename join.  Returns the
+    file ``Path`` if the directory is found (the file itself may or may
+    not exist), or ``None`` if the directory cannot be resolved.
+    """
+    spec_dir = _resolve_spec_dir(specs_dir, name)
+    if spec_dir is None:
+        return None
+    return spec_dir / filename
 
 
 def check_subspecs_docs_exist(
@@ -274,8 +304,7 @@ def check_requirements_sections(
         if resolved is None:
             result.skipped(f"req-sections:{name}", f"{REQUIREMENTS_MD} not found")
             continue
-        req_path = resolved / REQUIREMENTS_MD
-        content = _read_file_safe(req_path)
+        content = _read_file_safe(resolved / REQUIREMENTS_MD)
         if content is None:
             result.skipped(f"req-sections:{name}", f"{REQUIREMENTS_MD} not found")
             continue
@@ -298,11 +327,10 @@ def check_boundary_descriptions(
 ) -> None:
     """Property 3: sub-specs with natural extensions must have boundary descriptions."""
     for name in subspecs:
-        resolved = _resolve_spec_dir(specs_dir, name)
-        if resolved is None:
+        design_path = _resolve_spec_file(specs_dir, name, DESIGN_MD)
+        if design_path is None:
             result.skipped(f"boundary:{name}", DESIGN_NOT_FOUND)
             continue
-        design_path = resolved / DESIGN_MD
         content = _read_file_safe(design_path)
         if content is None:
             result.skipped(f"boundary:{name}", DESIGN_NOT_FOUND)
@@ -328,11 +356,10 @@ def check_dod_assessment(
 ) -> None:
     """Property 5: completed sub-specs must have DoD assessment with all checkpoints."""
     for name in subspecs:
-        resolved = _resolve_spec_dir(specs_dir, name)
-        if resolved is None:
+        design_path = _resolve_spec_file(specs_dir, name, DESIGN_MD)
+        if design_path is None:
             result.skipped(f"dod:{name}", DESIGN_NOT_FOUND)
             continue
-        design_path = resolved / DESIGN_MD
         content = _read_file_safe(design_path)
         if content is None:
             result.skipped(f"dod:{name}", DESIGN_NOT_FOUND)
@@ -429,11 +456,10 @@ def check_risk_register(
 ) -> None:
     """Property 7: sub-specs must have risk registers; high-severity needs mitigation."""
     for name in subspecs:
-        resolved = _resolve_spec_dir(specs_dir, name)
-        if resolved is None:
+        design_path = _resolve_spec_file(specs_dir, name, DESIGN_MD)
+        if design_path is None:
             result.skipped(f"risk:{name}", DESIGN_NOT_FOUND)
             continue
-        design_path = resolved / DESIGN_MD
         content = _read_file_safe(design_path)
         if content is None:
             result.skipped(f"risk:{name}", DESIGN_NOT_FOUND)

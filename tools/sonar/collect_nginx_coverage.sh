@@ -540,15 +540,17 @@ lcov --list "${OUTPUT_LCOV}" --rc branch_coverage=1 \
   esac
 
   if [[ -n "${threshold}" ]] && [[ -n "${pct}" ]]; then
-    # Compare as integers (truncate decimal)
+    # Compare as integers (truncate decimal); skip non-numeric values
     pct_int="${pct%%.*}"
-    if [[ -n "${pct_int}" ]] && [[ "${pct_int}" -lt "${threshold}" ]]; then
+    if [[ -n "${pct_int}" ]] && [[ "${pct_int}" =~ ^[0-9]+$ ]] \
+       && [[ "${pct_int}" -lt "${threshold}" ]]; then
       echo "  WARNING: ${file} line coverage ${pct}% below advisory threshold ${threshold}%" >&2
     fi
   fi
 done || true
 
 # Aggregate line coverage advisory check (80% minimum)
+# shellcheck disable=SC2086
 aggregate="$(lcov --summary "${OUTPUT_LCOV}" --rc branch_coverage=1 \
   ${LCOV_IGNORE} 2>&1 | awk '/lines\.\.\.\./{print $2}' || true)"
 if [[ -n "${aggregate}" ]]; then
