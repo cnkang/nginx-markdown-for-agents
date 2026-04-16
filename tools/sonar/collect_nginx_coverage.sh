@@ -69,6 +69,16 @@ while [[ $# -gt 0 ]]; do
 done
 
 resolve_nginx_version() {
+  # Resolve an NGINX version string from a channel name or pass through.
+  #
+  # Arguments:
+  #   $1 - requested version: "stable", "mainline", or a literal version
+  #
+  # Output:
+  #   Prints the resolved version number (e.g. "1.28.2") to stdout.
+  #
+  # Exit:
+  #   1 if the channel page cannot be fetched or the version pattern is not found.
   local requested="$1"
   local page version
 
@@ -109,6 +119,14 @@ PY
 # that do not occur with gcc on Linux.  We tolerate those on macOS but
 # keep the Linux CI path strict.
 build_lcov_ignore_args() {
+  # Build platform-aware lcov error-suppression flags.
+  #
+  # Apple Clang's gcov has known version-mismatch and processing quirks
+  # that do not occur with gcc on Linux.  We tolerate those on macOS but
+  # keep the Linux CI path strict.
+  #
+  # Output:
+  #   Prints space-separated --ignore-errors flags to stdout.
   local args=""
   # inconsistent: lcov limitation with branch tracking on multi-condition
   # if/else-if chains — line coverage is correct, only branch counts are
@@ -125,6 +143,12 @@ build_lcov_ignore_args() {
 }
 
 cleanup() {
+  # EXIT trap handler: stop NGINX and optionally remove build artifacts.
+  #
+  # Behaviour:
+  #   - Sends a graceful stop signal to NGINX if it is still running.
+  #   - Removes BUILDROOT on success unless --keep-artifacts was passed.
+  #   - Prints the artifact path to stderr when artifacts are retained.
   local rc=$?
   if [[ -n "${RUNTIME:-}" ]] && [[ -f "${RUNTIME}/logs/nginx.pid" ]]; then
     local pid

@@ -70,6 +70,20 @@ ngx_http_markdown_strncasecmp_const(const u_char *s1, const u_char *s2, size_t n
     return 0;
 }
 
+/*
+ * Search for a response header by name within a header list part.
+ *
+ * Walks the linked list of ngx_list_part_t nodes starting from
+ * the given part, performing case-insensitive name comparison.
+ *
+ * part     - first list part to search
+ * name     - header name to match (case-insensitive)
+ * name_len - length of the header name
+ *
+ * Returns:
+ *   pointer to the matching ngx_table_elt_t on success
+ *   NULL if no header with the given name is found
+ */
 static ngx_table_elt_t *
 ngx_http_markdown_find_header_in_part(ngx_list_part_t *part,
                                       const u_char *name,
@@ -99,6 +113,20 @@ ngx_http_markdown_find_header_in_part(ngx_list_part_t *part,
     return NULL;
 }
 
+/*
+ * Search for a response header by name in the request's output headers.
+ *
+ * Convenience wrapper around ngx_http_markdown_find_header_in_part
+ * that starts from r->headers_out.headers.part.
+ *
+ * r        - current HTTP request
+ * name     - header name to match (case-insensitive)
+ * name_len - length of the header name
+ *
+ * Returns:
+ *   pointer to the matching ngx_table_elt_t on success
+ *   NULL if the header list is empty or no match is found
+ */
 static ngx_table_elt_t *
 ngx_http_markdown_find_header(ngx_http_request_t *r, const u_char *name, size_t name_len)
 {
@@ -110,6 +138,21 @@ ngx_http_markdown_find_header(ngx_http_request_t *r, const u_char *name, size_t 
                                                  name, name_len);
 }
 
+/*
+ * Invalidate response headers by name within a header list part.
+ *
+ * Walks the linked list of ngx_list_part_t nodes and sets hash = 0
+ * on each matching header, which marks it as removed in NGINX's
+ * header output. Optionally stops after the first match and emits
+ * a debug log message.
+ *
+ * r                - current HTTP request (used for logging)
+ * part             - first list part to search
+ * name             - header name to match (case-insensitive)
+ * name_len         - length of the header name
+ * stop_after_first - if 1, return after invalidating the first match
+ * log_message      - debug message to log per invalidation, or NULL
+ */
 static void
 ngx_http_markdown_invalidate_headers_in_part(const ngx_http_request_t *r,
                                              ngx_list_part_t *part,
@@ -152,6 +195,18 @@ ngx_http_markdown_invalidate_headers_in_part(const ngx_http_request_t *r,
     }
 }
 
+/*
+ * Invalidate response headers by name in the request's output headers.
+ *
+ * Convenience wrapper around ngx_http_markdown_invalidate_headers_in_part
+ * that starts from r->headers_out.headers.part.
+ *
+ * r                - current HTTP request
+ * name             - header name to match (case-insensitive)
+ * name_len         - length of the header name
+ * stop_after_first - if 1, stop after invalidating the first match
+ * log_message      - debug message to log per invalidation, or NULL
+ */
 static void
 ngx_http_markdown_invalidate_headers(ngx_http_request_t *r,
                                      const u_char *name,
@@ -168,6 +223,21 @@ ngx_http_markdown_invalidate_headers(ngx_http_request_t *r,
                                                  log_message);
 }
 
+/*
+ * Check whether a comma-separated header value contains a specific token.
+ *
+ * Parses the value as a comma-delimited list, trims whitespace from
+ * each token, and performs case-insensitive comparison against the
+ * target token.
+ *
+ * value     - the header value string to search
+ * token     - the token to look for (case-insensitive)
+ * token_len - length of the token
+ *
+ * Returns:
+ *   1 if the token is found in the CSV list
+ *   0 otherwise
+ */
 static ngx_flag_t
 ngx_http_markdown_contains_csv_token(const ngx_str_t *value,
                                      const u_char *token,
@@ -211,6 +281,20 @@ ngx_http_markdown_contains_csv_token(const ngx_str_t *value,
     return 0;
 }
 
+/*
+ * Add or append "Accept" to the Vary response header.
+ *
+ * If no Vary header exists, creates one with value "Accept".
+ * If a Vary header exists but does not already contain the
+ * "Accept" token, appends ", Accept" to the existing value.
+ * Skips modification if "Accept" is already present.
+ *
+ * r - current HTTP request
+ *
+ * Returns:
+ *   NGX_OK    on success (header added, appended, or already present)
+ *   NGX_ERROR on allocation failure or overflow
+ */
 ngx_int_t
 ngx_http_markdown_add_vary_accept(ngx_http_request_t *r)
 {
@@ -275,6 +359,22 @@ ngx_http_markdown_add_vary_accept(ngx_http_request_t *r)
     return NGX_OK;
 }
 
+/*
+ * Set or clear the ETag response header.
+ *
+ * First invalidates all existing ETag headers in the output list.
+ * If etag is NULL or etag_len is 0, clears r->headers_out.etag
+ * (removes the ETag). Otherwise, allocates a new header entry
+ * with the provided ETag value.
+ *
+ * r        - current HTTP request
+ * etag     - ETag value bytes, or NULL to clear
+ * etag_len - length of the ETag value
+ *
+ * Returns:
+ *   NGX_OK    on success
+ *   NGX_ERROR on allocation failure
+ */
 ngx_int_t
 ngx_http_markdown_set_etag(ngx_http_request_t *r, const u_char *etag, size_t etag_len)
 {
@@ -315,6 +415,19 @@ ngx_http_markdown_set_etag(ngx_http_request_t *r, const u_char *etag, size_t eta
     return NGX_OK;
 }
 
+/*
+ * Add the X-Markdown-Tokens response header with the estimated token count.
+ *
+ * Skips header creation when token_count is 0. Formats the count
+ * as a decimal string using NGX_HTTP_MARKDOWN_SPRINTF_TOKEN.
+ *
+ * r           - current HTTP request
+ * token_count - estimated token count to emit
+ *
+ * Returns:
+ *   NGX_OK    on success or when token_count is 0
+ *   NGX_ERROR on allocation failure
+ */
 static ngx_int_t
 ngx_http_markdown_add_token_header(ngx_http_request_t *r, uint32_t token_count)
 {
@@ -348,6 +461,16 @@ ngx_http_markdown_add_token_header(ngx_http_request_t *r, uint32_t token_count)
     return NGX_OK;
 }
 
+/*
+ * Remove the Content-Encoding response header.
+ *
+ * Clears r->headers_out.content_encoding and invalidates the
+ * first Content-Encoding entry in the output header list.
+ * Called after decompression so the downstream response does
+ * not claim a transfer encoding that no longer applies.
+ *
+ * r - current HTTP request
+ */
 void
 ngx_http_markdown_remove_content_encoding(ngx_http_request_t *r)
 {
@@ -360,6 +483,16 @@ ngx_http_markdown_remove_content_encoding(ngx_http_request_t *r)
                                          "markdown filter: removed Content-Encoding header");
 }
 
+/*
+ * Remove the Accept-Ranges response header.
+ *
+ * Clears r->allow_ranges and r->headers_out.accept_ranges,
+ * then invalidates the first Accept-Ranges entry in the output
+ * header list. Prevents clients from requesting byte ranges on
+ * the converted Markdown response.
+ *
+ * r - current HTTP request
+ */
 static void
 ngx_http_markdown_remove_accept_ranges(ngx_http_request_t *r)
 {
@@ -373,6 +506,23 @@ ngx_http_markdown_remove_accept_ranges(ngx_http_request_t *r)
                                          "markdown filter: removed Accept-Ranges header");
 }
 
+/*
+ * Update all response headers for a completed full-buffer conversion.
+ *
+ * Sets Content-Type to text/markdown; charset=utf-8, adds Vary: Accept,
+ * replaces Content-Length with the Markdown body length, sets or clears
+ * the ETag based on configuration, adds X-Markdown-Tokens if enabled,
+ * removes Content-Encoding and Accept-Ranges, and adjusts Cache-Control
+ * for authenticated content when auth cache control is enabled.
+ *
+ * r      - current HTTP request
+ * result - completed MarkdownResult from the Rust converter
+ * conf   - location configuration
+ *
+ * Returns:
+ *   NGX_OK    on success
+ *   NGX_ERROR on any header manipulation failure or NULL arguments
+ */
 ngx_int_t
 ngx_http_markdown_update_headers(ngx_http_request_t *r,
                                  const struct MarkdownResult *result,
