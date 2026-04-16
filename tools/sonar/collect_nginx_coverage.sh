@@ -366,7 +366,7 @@ curl -sS -H "${ACCEPT_MARKDOWN}" -H 'Cookie: session_id=abc123' \
   "http://127.0.0.1:${PORT}/auth/index.html" -o /dev/null -w "  auth cookie prefix: HTTP %{http_code}\n"
 
 # Cookie suffix match (*_logged_in)
-curl -sS -H "${ACCEPT_MARKDOWN}" -H 'Cookie: wordpress_logged_in_hash=val' \
+curl -sS -H "${ACCEPT_MARKDOWN}" -H 'Cookie: wordpress_logged_in=val' \
   "http://127.0.0.1:${PORT}/auth/index.html" -o /dev/null -w "  auth cookie suffix: HTTP %{http_code}\n"
 
 # No auth credentials (negative detection)
@@ -514,9 +514,12 @@ echo "==> Checking advisory coverage thresholds"
 # shellcheck disable=SC2086
 lcov --list "${OUTPUT_LCOV}" --rc branch_coverage=1 \
   ${LCOV_IGNORE} 2>/dev/null | while IFS= read -r line; do
-  # Extract file path and line coverage percentage
-  file="$(echo "${line}" | awk '{print $1}')"
-  pct="$(echo "${line}" | awk '{print $NF}')"
+  # Extract file path and line coverage percentage.
+  # lcov --list output is pipe-delimited; the Lines rate is in the second
+  # pipe-delimited column (e.g. "60.0%   38").  Extract the percentage
+  # from that column rather than using $NF which may pick up branch counts.
+  file="$(echo "${line}" | awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/, "", $1); print $1}')"
+  pct="$(echo "${line}" | awk -F'|' '{gsub(/%/, "", $2); gsub(/^[ \t]+/, "", $2); split($2, a, " "); print a[1]}')"
   # Remove trailing % if present
   pct="${pct%\%}"
 

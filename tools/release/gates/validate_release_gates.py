@@ -229,11 +229,11 @@ def _resolve_spec_dir(specs_dir: Path, name: str) -> Path | None:
     specs_resolved = specs_dir.resolve()
 
     candidate = (specs_dir / name).resolve()
-    if candidate.is_dir() and str(candidate).startswith(str(specs_resolved)):
+    if candidate.is_dir() and candidate.is_relative_to(specs_resolved):
         return candidate
 
     archived = (specs_dir / "archive" / name).resolve()
-    if archived.is_dir() and str(archived).startswith(str(specs_resolved)):
+    if archived.is_dir() and archived.is_relative_to(specs_resolved):
         return archived
 
     return None

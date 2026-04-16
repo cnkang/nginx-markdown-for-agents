@@ -65,7 +65,7 @@ Run checks in phases:
 3. Coverage (when touching production source files)
    - C module changes: `make coverage-c` (advisory per-file thresholds logged but not blocking)
    - Rust converter changes: `make coverage-rust`
-   - Aggregate 80% minimum as release-readiness quality gate
+   - Aggregate 80% minimum as release-readiness advisory bar (logged, not CI-blocking)
    - Critical paths (auth, error handling, FFI boundary, conditional requests): 90% target
 4. Broader umbrella checks
    - runtime smoke, replay-driven comparisons, or release-level checks
