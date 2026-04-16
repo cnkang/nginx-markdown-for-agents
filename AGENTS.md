@@ -701,6 +701,19 @@ Required:
 - When fixing declaration/type-safety findings, run at least one compile+unit
   target for the touched C area and report residual warnings explicitly.
 
+### 25. Test coverage discipline
+
+Required:
+- New C module code must include e2e scenarios or unit tests that maintain the
+  80% aggregate line coverage bar.
+- New Rust converter code must include tests that maintain the 80% aggregate
+  line coverage bar.
+- Critical paths (auth, error handling, FFI boundary, conditional requests)
+  require 90% line coverage for new code.
+- Before declaring a task complete when the change touches production source
+  files, run `make coverage-c` (C module) or `make coverage-rust` (Rust
+  converter) and verify coverage does not regress below the per-file threshold.
+
 ## Required Agent Workflow
 
 ### Before coding
@@ -739,6 +752,7 @@ For each code change you are about to produce, mentally (or explicitly in a thin
 17. No macro-shadow declarations: do not declare functions/variables with names that are NGINX macros (`ngx_log_error`, `ngx_memzero`, `ngx_str_set`, etc.). Validate against canonical headers and preserve exact signature parity (including `const`) when adding forward declarations. (Rule 24)
 18. Reason-code classification coverage: when adding a new family of reason codes (for example `STREAMING_*` alongside `ELIGIBLE_*`/`FAIL_*`), update every function that classifies reason codes by string pattern (prefix match, substring). Prefix-based classifiers silently miss new namespaces whose failure codes do not share the existing prefix. Grep for all reason-code classification call sites and confirm each handles the new namespace. (Rule 7)
 19. `ngx_str_t` token matching must be length-bounded: never call `ngx_strcasecmp()` on config/header values unless they are explicitly NUL-terminated. For directive keyword matching, require exact length equality and use `ngx_strncasecmp(..., expected_len)` (or a shared helper that enforces both). This prevents out-of-bounds reads on short/truncated inputs.
+20. Coverage: if this change adds or modifies production code paths, verify that e2e or unit test coverage for the touched files does not regress below the per-file threshold. (Rule 25)
 
 #### C test code (`components/nginx-module/tests/unit/`)
 1. No dead stores — simulation-style tests set the final value directly; initial state documented in comments only. (Rule 16)
@@ -770,6 +784,7 @@ For each code change you are about to produce, mentally (or explicitly in a thin
 16. **Benchmark averaging consistency**: all per-iteration averages (latency, throughput, markdown size, token estimates, flush count) must use the same denominator — the count of measured iterations (non-warmup, non-error, non-fallback). For every derived metric, keep numerator and sample count under the same inclusion predicate, and do not mix counter granularities (chunk-level vs iteration-level) in one aggregate without normalization. (Rule 8c)
 17. **Metric naming accuracy**: when a metric field name implies specific semantics (for example `cpu_time_ms`), the implementation must actually measure that quantity. If approximating with a different measurement (for example wall-clock TTLB), add a comment documenting the approximation or rename the field. (Rule 8)
 18. **Rust 2024 edition pattern binding**: do not use explicit `ref` or `ref mut` binding modifiers when matching on a reference type (`&T`, `&Option<T>`, `&Vec<T>`, etc.). Rust 2024 edition treats this as an error because the reference already implies borrowing. Use `ref` only when matching on an owned value where you need to borrow without moving. Before writing `if let Some(ref x) = expr`, check whether `expr` is a reference — if so, drop the `ref`.
+19. Coverage: if this change adds or modifies production code, verify that `cargo llvm-cov` coverage for the touched files does not regress below 80%. (Rule 25)
 
 #### Shell scripts (`tools/`, e2e harnesses)
 1. Every `case` has a `*)` default clause. (Rule 18)
@@ -827,6 +842,8 @@ Follow evidence-first verification (no completion claim without fresh command ou
   with `--all-targets`, not the default `cargo check`).
 - Streaming parser/sanitizer/error-path changes: `make test-rust-fuzz-smoke`
 - NGINX C module changes: `make test-nginx-unit`
+- C module production source changes: `make coverage-c` (verify coverage bar)
+- Rust converter production source changes: `make coverage-rust` (verify coverage bar)
 - Streaming runtime/e2e changes: `make verify-chunked-native-e2e-smoke` (or stronger profile when required)
 - New `#[ignore]` tests introduced in this change: run targeted
   `cargo test ... -- --ignored` at least once and report result.
