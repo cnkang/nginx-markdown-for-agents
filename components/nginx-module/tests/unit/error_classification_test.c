@@ -3,7 +3,8 @@
  * Description: error classification
  */
 
-#include "test_common.h"
+#include "../include/test_common.h"
+#include <limits.h>
 
 enum {
     ERROR_SUCCESS = 0,
@@ -80,6 +81,62 @@ test_system_errors_and_strings(void)
     TEST_PASS("System fallback and strings are correct");
 }
 
+/* Task 5.1: ERROR_SUCCESS mapping and unknown category string */
+
+static void
+test_error_success_mapping(void)
+{
+    TEST_SUBSECTION("ERROR_SUCCESS (code 0) maps to system default");
+    TEST_ASSERT(classify_error(ERROR_SUCCESS) == CAT_SYSTEM,
+                "ERROR_SUCCESS (0) should map to CAT_SYSTEM (default)");
+    TEST_PASS("ERROR_SUCCESS mapping correct");
+}
+
+static void
+test_unknown_category_string(void)
+{
+    TEST_SUBSECTION("Unknown category value returns \"unknown\"");
+    TEST_ASSERT(STR_EQ(category_string((error_category_t) 99), "unknown"),
+                "Out-of-range category should return \"unknown\"");
+    TEST_ASSERT(STR_EQ(category_string((error_category_t) 255), "unknown"),
+                "High out-of-range category should return \"unknown\"");
+    TEST_PASS("Unknown category string correct");
+}
+
+/* Feature: improve-test-coverage, Property 1: Error code classification completeness */
+
+static void
+test_error_code_classification_completeness(void)
+{
+    unsigned int codes[] = {
+        ERROR_SUCCESS, ERROR_PARSE, ERROR_ENCODING,
+        ERROR_TIMEOUT, ERROR_MEMORY_LIMIT, ERROR_INVALID_INPUT,
+        ERROR_INTERNAL
+    };
+    error_category_t expected[] = {
+        CAT_SYSTEM, CAT_CONVERSION, CAT_CONVERSION,
+        CAT_RESOURCE_LIMIT, CAT_RESOURCE_LIMIT, CAT_CONVERSION,
+        CAT_SYSTEM
+    };
+
+    TEST_SUBSECTION("Property 1: Error code classification completeness");
+    for (size_t i = 0; i < ARRAY_SIZE(codes); i++) {
+        TEST_ASSERT(classify_error(codes[i]) == expected[i],
+                    "Each defined error code maps to correct category");
+    }
+
+    /* Unknown codes default to CAT_SYSTEM */
+    TEST_ASSERT(classify_error(42U) == CAT_SYSTEM, "Unknown code 42 -> CAT_SYSTEM");
+    TEST_ASSERT(classify_error(100U) == CAT_SYSTEM, "Unknown code 100 -> CAT_SYSTEM");
+    TEST_ASSERT(classify_error(200U) == CAT_SYSTEM, "Unknown code 200 -> CAT_SYSTEM");
+
+    /* Boundary value: maximum unsigned int must also fall through to default */
+    TEST_ASSERT(classify_error((unsigned int) UINT_MAX) == CAT_SYSTEM,
+                "UINT_MAX -> CAT_SYSTEM (upper bound of unknown codes)");
+
+    TEST_PASS("Error code classification completeness verified");
+}
+
 int
 main(void)
 {
@@ -90,6 +147,9 @@ main(void)
     test_conversion_errors();
     test_resource_limit_errors();
     test_system_errors_and_strings();
+    test_error_success_mapping();
+    test_unknown_category_string();
+    test_error_code_classification_completeness();
 
     printf("\n========================================\n");
     printf("All tests passed!\n");

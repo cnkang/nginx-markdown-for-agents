@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Expanded E2E coverage scenarios in `collect_nginx_coverage.sh` from ~8 to ~35+
+  curl requests, covering auth detection, conditional requests, error paths,
+  Accept header diversity, metrics formats, body filter paths, and flavor
+  variants
+- Added location blocks for `markdown_flavor gfm/commonmark`, `markdown_max_size`
+  size-limit, `markdown_log_verbosity error`, and `markdown_metrics_format auto`
+  to the coverage nginx.conf
+- New `auth_cookie_pattern_test.c` unit test covering prefix/suffix wildcard
+  matching, exact matching, empty inputs, and edge cases
+- Expanded `error_classification_test.c` with ERROR_SUCCESS mapping, unknown
+  category string, and error code classification completeness property test
+- Expanded `accept_parser_test.c` with q-value edge cases (q=0, q=1, q=0.000,
+  q=1.000), malformed q-values (q=abc, q=, q=2.0), and q-value range invariant
+  property test
+- Advisory per-file coverage threshold logging in `collect_nginx_coverage.sh`
+  (warnings only, not CI-blocking)
+
 ### Fixed
 - Resolved SonarCloud leak-period C findings in the NGINX module by tightening
   const-correctness, loop-local variable declarations, narrowing conversions in

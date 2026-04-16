@@ -62,7 +62,12 @@ Run checks in phases:
    - other low-cost docs or config checks for the touched area
 2. Focused semantic checks
    - one or more pack-specific commands from the routing manifest
-3. Broader umbrella checks
+3. Coverage (when touching production source files)
+   - C module changes: `make coverage-c` (advisory per-file thresholds logged but not blocking)
+   - Rust converter changes: `make coverage-rust`
+   - Aggregate 80% minimum as release-readiness advisory bar (logged, not CI-blocking)
+   - Critical paths (auth, error handling, FFI boundary, conditional requests): 90% target
+4. Broader umbrella checks
    - runtime smoke, replay-driven comparisons, or release-level checks
 
 Verification may raise the effective risk level above the initial route. If it
@@ -140,3 +145,16 @@ for:
 - evidence that a small mistake has repeated enough to justify a rule upgrade
 
 Repo-owned docs keep durable truth. The state carrier keeps execution memory.
+
+## Coverage Standards
+
+- **Minimum**: 80% aggregate line coverage for both the C module and the Rust converter
+- **Target**: 90% aggregate line coverage
+- **Critical paths** (auth, error handling, FFI boundary, conditional requests): 90% line coverage for new code
+- Coverage is collected via `make coverage-c` (C module E2E + gcov/lcov) and `make coverage-rust` (Rust `cargo llvm-cov`)
+- Advisory per-file thresholds are logged by the coverage script but are not CI-blocking gates
+- The lcov report is always produced regardless of coverage level, ensuring SonarCloud trends remain visible
+
+## Spec Template Convention
+
+When a new spec is created for a feature or bugfix that touches C module or Rust converter production code, the spec's tasks document SHALL include a coverage verification checkpoint as a required (non-optional) task. This is enforced by convention in this harness documentation, not by tooling.
