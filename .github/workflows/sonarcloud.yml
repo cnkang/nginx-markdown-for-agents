@@ -35,7 +35,7 @@ jobs:
   sonarcloud:
     name: SonarCloud Scan
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 55
     env:
       SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
       SONAR_HOST_URL: https://sonarcloud.io
@@ -93,9 +93,10 @@ jobs:
           fi
 
       # ── Coverage collection ───────────────────────────────────────
-      # C coverage: unit tests that #include production .c/_impl.h files
-      # produce gcov data for those source files.
-      - name: Generate C unit test coverage
+      # C coverage: build NGINX from source with --coverage, run a
+      # smoke e2e scenario, and collect gcov data for all 20+ module
+      # source files.
+      - name: Generate C module e2e coverage
         if: steps.token.outputs.enabled == 'true'
         run: make coverage-c
 

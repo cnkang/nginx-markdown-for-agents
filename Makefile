@@ -227,7 +227,7 @@ COVERAGE_DIR := coverage
 
 coverage-c:
 	@mkdir -p $(COVERAGE_DIR)
-	$(MAKE) -C $(NGINX_TEST_DIR) unit-coverage COV_DIR=$(CURDIR)/$(COVERAGE_DIR)
+	tools/sonar/collect_nginx_coverage.sh --output $(CURDIR)/$(COVERAGE_DIR)/c-coverage.lcov
 
 coverage-rust:
 	@mkdir -p $(COVERAGE_DIR)
@@ -287,7 +287,7 @@ help:
 	@echo "  release-gates-check      - Validate 0.5.0 release gate framework (spec #12 deliverables)"
 	@echo "  release-gates-check-legacy - Validate 0.4.0 release gate documents"
 	@echo "  release-gates-check-strict - Validate all sub-specs #12-#18 for full compliance"
-	@echo "  coverage-c               - Generate C unit test coverage (lcov)"
+	@echo "  coverage-c               - Generate C module e2e coverage (builds NGINX with --coverage)"
 	@echo "  coverage-rust            - Generate Rust test coverage (llvm-cov lcov)"
 	@echo "  coverage-all             - Generate all coverage reports"
 	@echo "  clean                    - Clean build artifacts"
