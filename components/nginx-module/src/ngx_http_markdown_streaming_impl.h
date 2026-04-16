@@ -384,7 +384,7 @@ ngx_http_markdown_streaming_update_headers(
     r->headers_out.content_type.data =
         ngx_http_markdown_content_type;
     r->headers_out.content_type.len =
-        sizeof(ngx_http_markdown_content_type) - 1;
+        NGX_HTTP_MARKDOWN_CONTENT_TYPE_LEN;
     r->headers_out.content_type_len =
         r->headers_out.content_type.len;
     r->headers_out.charset.len = 0;
