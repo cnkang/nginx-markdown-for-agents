@@ -130,11 +130,11 @@ mod tests {
         let generator = ETagGenerator::new();
         let content = b"consistent content";
 
-        let etag1 = generator.generate(content);
-        let etag2 = generator.generate(content);
+        let etag_first = generator.generate(content);
+        let etag_second = generator.generate(content);
 
         // Same content should produce same ETag
-        assert_eq!(etag1, etag2);
+        assert_eq!(etag_first, etag_second);
     }
 
     #[test]
@@ -185,12 +185,12 @@ mod tests {
 
     #[test]
     fn test_etag_deterministic_across_instances() {
-        let generator1 = ETagGenerator::new();
-        let generator2 = ETagGenerator::new();
+        let generator_first = ETagGenerator::new();
+        let generator_second = ETagGenerator::new();
         let content = b"deterministic test";
 
-        let etag1 = generator1.generate(content);
-        let etag2 = generator2.generate(content);
+        let etag1 = generator_first.generate(content);
+        let etag2 = generator_second.generate(content);
 
         // Different instances should produce same ETag for same content
         assert_eq!(etag1, etag2);

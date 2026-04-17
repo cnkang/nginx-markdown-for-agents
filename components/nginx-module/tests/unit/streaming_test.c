@@ -145,10 +145,10 @@ static void test_timeout_precommit(void);
 static int test_precommit_route(uint32_t error_code, ngx_uint_t on_error);
 
 /* Bug condition exploration test prototypes */
-static void test_bug1_fallback_return_value(void);
-static void test_bug2_decomp_incomplete_inflate(void);
-static void test_bug3_finalize_tail_feed_error(void);
-static void test_bug4_config_invalid_static_value(void);
+static void test_fallback_return_value_on_error(void);
+static void test_decomp_incomplete_inflate_error(void);
+static void test_finalize_tail_feed_error(void);
+static void test_config_invalid_static_value(void);
 
 /* Streaming headers policy test prototypes (spec 15, task 6) */
 static void test_commit_boundary_removes_content_length(void);
@@ -162,17 +162,17 @@ static void test_init_failure_respects_streaming_on_error(void);
 static void test_streaming_failopen_increments_global_counter(void);
 
 /* Preservation test prototypes (non-bug-condition baseline) */
-static void test_preserve_bug1_normal_feed_returns_ok(void);
-static void test_preserve_bug1_fallback_buffer_fail(void);
-static void test_preserve_bug2_small_data_complete(void);
-static void test_preserve_bug2_empty_input_ok(void);
-static void test_preserve_bug2_exceeds_max_size(void);
-static void test_preserve_bug3_tail_feed_success(void);
-static void test_preserve_bug3_no_tail_data(void);
-static void test_preserve_bug3_no_decompression(void);
-static void test_preserve_bug4_valid_static_values(void);
-static void test_preserve_bug4_variable_expression(void);
-static void test_preserve_bug4_duplicate_directive(void);
+static void test_preserve_normal_feed_returns_ok(void);
+static void test_preserve_fallback_buffer_fail(void);
+static void test_preserve_small_data_complete(void);
+static void test_preserve_empty_input_ok(void);
+static void test_preserve_exceeds_max_size(void);
+static void test_preserve_tail_feed_success(void);
+static void test_preserve_no_tail_data(void);
+static void test_preserve_no_decompression(void);
+static void test_preserve_valid_static_values(void);
+static void test_preserve_variable_expression(void);
+static void test_preserve_duplicate_directive(void);
 
 
 /*
@@ -3274,28 +3274,28 @@ test_postcommit_budget_exceeded(void)
 static void
 test_precommit_memory_limit_budget_parity(void)
 {
-    test_streaming_metrics_t  m4;
-    test_streaming_metrics_t  m6;
+    test_streaming_metrics_t  metrics_memory_limit;
+    test_streaming_metrics_t  metrics_budget_exceeded;
 
     TEST_SUBSECTION(
         "Budget parity: MEMORY_LIMIT and "
         "BUDGET_EXCEEDED both classify");
 
-    memset(&m4, 0, sizeof(m4));
+    memset(&metrics_memory_limit, 0, sizeof(metrics_memory_limit));
     test_precommit_error_stub(
-        ERROR_MEMORY_LIMIT, ON_ERROR_PASS, &m4);
+        ERROR_MEMORY_LIMIT, ON_ERROR_PASS, &metrics_memory_limit);
 
-    memset(&m6, 0, sizeof(m6));
+    memset(&metrics_budget_exceeded, 0, sizeof(metrics_budget_exceeded));
     test_precommit_error_stub(
-        ERROR_BUDGET_EXCEEDED, ON_ERROR_PASS, &m6);
+        ERROR_BUDGET_EXCEEDED, ON_ERROR_PASS, &metrics_budget_exceeded);
 
-    TEST_ASSERT(m4.budget_exceeded_total == 1,
+    TEST_ASSERT(metrics_memory_limit.budget_exceeded_total == 1,
         "MEMORY_LIMIT should trigger budget counter");
-    TEST_ASSERT(m6.budget_exceeded_total == 1,
+    TEST_ASSERT(metrics_budget_exceeded.budget_exceeded_total == 1,
         "BUDGET_EXCEEDED should trigger budget counter");
     TEST_ASSERT(
-        m4.budget_exceeded_total
-            == m6.budget_exceeded_total,
+        metrics_memory_limit.budget_exceeded_total
+            == metrics_budget_exceeded.budget_exceeded_total,
         "Both codes should produce same budget count");
 
     /* Non-budget code should NOT trigger */
@@ -3837,7 +3837,7 @@ static int  bug_exploration_failures = 0;
  * **Validates: Requirements 1.1, 1.2, 1.3**
  */
 static void
-test_bug1_fallback_return_value(void)
+test_fallback_return_value_on_error(void)
 {
     ngx_int_t   fallback_rc;
     uint32_t    feed_rc;
@@ -3892,7 +3892,7 @@ test_bug1_fallback_return_value(void)
  * **Validates: Requirements 4.1, 4.2, 4.3, 4.4**
  */
 static void
-test_bug2_decomp_incomplete_inflate(void)
+test_decomp_incomplete_inflate_error(void)
 {
     size_t  compressed_len;
     size_t  expected_decompressed_len;
@@ -3958,7 +3958,7 @@ test_bug2_decomp_incomplete_inflate(void)
  * **Validates: Requirements 7.1, 7.2, 7.3**
  */
 static void
-test_bug3_finalize_tail_feed_error(void)
+test_finalize_tail_feed_error(void)
 {
     uint32_t  tail_feed_rc;
     int       error_handled;
@@ -4028,7 +4028,7 @@ test_bug3_finalize_tail_feed_error(void)
  * **Validates: Requirements 10.1, 10.2**
  */
 static void
-test_bug4_config_invalid_static_value(void)
+test_config_invalid_static_value(void)
 {
     const char  *test_values[] = {
         "atuo", "oof", "yes", "true", "enabled", ""
@@ -4129,7 +4129,7 @@ test_bug4_config_invalid_static_value(void)
  * **Validates: Requirements 3.2**
  */
 static void
-test_preserve_bug1_normal_feed_returns_ok(void)
+test_preserve_normal_feed_returns_ok(void)
 {
     uint32_t   feed_rc;
     ngx_int_t  process_chunk_rc;
@@ -4172,7 +4172,7 @@ test_preserve_bug1_normal_feed_returns_ok(void)
  * **Validates: Requirements 3.1**
  */
 static void
-test_preserve_bug1_fallback_buffer_fail(void)
+test_preserve_fallback_buffer_fail(void)
 {
     ngx_int_t  buffer_init_rc;
     ngx_int_t  fallback_rc;
@@ -4216,7 +4216,7 @@ test_preserve_bug1_fallback_buffer_fail(void)
  * **Validates: Requirements 6.1**
  */
 static void
-test_preserve_bug2_small_data_complete(void)
+test_preserve_small_data_complete(void)
 {
     size_t  compressed_len;
     size_t  expected_decompressed_len;
@@ -4269,7 +4269,7 @@ test_preserve_bug2_small_data_complete(void)
  * **Validates: Requirements 6.3**
  */
 static void
-test_preserve_bug2_empty_input_ok(void)
+test_preserve_empty_input_ok(void)
 {
     size_t           in_len;
     const u_char    *out_data;
@@ -4314,7 +4314,7 @@ test_preserve_bug2_empty_input_ok(void)
  * **Validates: Requirements 6.2**
  */
 static void
-test_preserve_bug2_exceeds_max_size(void)
+test_preserve_exceeds_max_size(void)
 {
     size_t     total_decompressed;
     size_t     max_decompressed_size;
@@ -4363,7 +4363,7 @@ test_preserve_bug2_exceeds_max_size(void)
  * **Validates: Requirements 9.1**
  */
 static void
-test_preserve_bug3_tail_feed_success(void)
+test_preserve_tail_feed_success(void)
 {
     uint32_t        tail_feed_rc;
     const u_char   *out_data;
@@ -4412,7 +4412,7 @@ test_preserve_bug3_tail_feed_success(void)
  * **Validates: Requirements 9.2**
  */
 static void
-test_preserve_bug3_no_tail_data(void)
+test_preserve_no_tail_data(void)
 {
     ngx_int_t        decomp_finish_rc;
     const u_char    *decomp_data;
@@ -4460,7 +4460,7 @@ test_preserve_bug3_no_tail_data(void)
  * **Validates: Requirements 9.3**
  */
 static void
-test_preserve_bug3_no_decompression(void)
+test_preserve_no_decompression(void)
 {
     int  decompression_needed;
     int  decomp_finish_called;
@@ -4502,7 +4502,7 @@ test_preserve_bug3_no_decompression(void)
  * **Validates: Requirements 12.1**
  */
 static void
-test_preserve_bug4_valid_static_values(void)
+test_preserve_valid_static_values(void)
 {
     const char  *valid_values[] = {
         "off", "on", "auto", "OFF", "ON", "AUTO",
@@ -4550,7 +4550,7 @@ test_preserve_bug4_valid_static_values(void)
  * **Validates: Requirements 12.2**
  */
 static void
-test_preserve_bug4_variable_expression(void)
+test_preserve_variable_expression(void)
 {
     const char  *var_values[] = {
         "$streaming_mode", "${streaming_mode}",
@@ -4599,7 +4599,7 @@ test_preserve_bug4_variable_expression(void)
  * **Validates: Requirements 12.3**
  */
 static void
-test_preserve_bug4_duplicate_directive(void)
+test_preserve_duplicate_directive(void)
 {
     int          streaming_engine_set;
     const char  *result;
@@ -4752,29 +4752,29 @@ main(void)
     test_ttfb_nonempty_pending_records();
 
     TEST_SECTION("Bug 1 Preservation (Baseline)");
-    test_preserve_bug1_normal_feed_returns_ok();
-    test_preserve_bug1_fallback_buffer_fail();
+    test_preserve_normal_feed_returns_ok();
+    test_preserve_fallback_buffer_fail();
 
     TEST_SECTION("Bug 2 Preservation (Baseline)");
-    test_preserve_bug2_small_data_complete();
-    test_preserve_bug2_empty_input_ok();
-    test_preserve_bug2_exceeds_max_size();
+    test_preserve_small_data_complete();
+    test_preserve_empty_input_ok();
+    test_preserve_exceeds_max_size();
 
     TEST_SECTION("Bug 3 Preservation (Baseline)");
-    test_preserve_bug3_tail_feed_success();
-    test_preserve_bug3_no_tail_data();
-    test_preserve_bug3_no_decompression();
+    test_preserve_tail_feed_success();
+    test_preserve_no_tail_data();
+    test_preserve_no_decompression();
 
     TEST_SECTION("Bug 4 Preservation (Baseline)");
-    test_preserve_bug4_valid_static_values();
-    test_preserve_bug4_variable_expression();
-    test_preserve_bug4_duplicate_directive();
+    test_preserve_valid_static_values();
+    test_preserve_variable_expression();
+    test_preserve_duplicate_directive();
 
     TEST_SECTION("Bug Condition Exploration (Bugfix Spec)");
-    test_bug1_fallback_return_value();
-    test_bug2_decomp_incomplete_inflate();
-    test_bug3_finalize_tail_feed_error();
-    test_bug4_config_invalid_static_value();
+    test_fallback_return_value_on_error();
+    test_decomp_incomplete_inflate_error();
+    test_finalize_tail_feed_error();
+    test_config_invalid_static_value();
 
     if (bug_exploration_failures > 0) {
         printf("\n========================================\n");

@@ -376,7 +376,7 @@ def parse_prometheus(text):
 
 @given(snap=snapshot_strategy())
 @settings(max_examples=100)
-def test_property1_round_trip(snap):
+def test_round_trip_serialization(snap):
     """Property 1: Round-trip — generate random snapshots, render
     via reference model, parse with prometheus_client text parser,
     verify values match.
@@ -472,7 +472,7 @@ def test_property1_round_trip(snap):
 
 @given(snap=snapshot_strategy())
 @settings(max_examples=100)
-def test_property2_metric_naming_compliance(snap):
+def test_metric_naming_compliance(snap):
     """Property 2: Metric naming compliance — all names start with
     nginx_markdown_, use snake_case, counter-typed end with _total.
 
@@ -511,7 +511,7 @@ def test_property2_metric_naming_compliance(snap):
 
 @given(snap=snapshot_strategy())
 @settings(max_examples=100)
-def test_property3_label_boundary_enforcement(snap):
+def test_label_boundary_enforcement(snap):
     """Property 3: Label boundary enforcement — all label keys in
     {reason, stage, format, le}, no forbidden labels, values in
     bounded sets.
@@ -562,7 +562,7 @@ def test_property3_label_boundary_enforcement(snap):
 
 @given(snap=snapshot_strategy())
 @settings(max_examples=100)
-def test_property6_help_and_type_completeness(snap):
+def test_help_and_type_completeness(snap):
     """Property 6: HELP and TYPE completeness — every metric family
     has exactly one HELP and one TYPE line.
 
@@ -610,7 +610,7 @@ def test_property6_help_and_type_completeness(snap):
 
 @given(snap=snapshot_strategy())
 @settings(max_examples=100)
-def test_property7_time_series_count_bounded(snap):
+def test_time_series_count_bounded(snap):
     """Property 7: Time series count is bounded — exactly 28 unique
     time series lines (9 unlabeled counters + 9 reason labels +
     3 stage labels + 3 format labels + 4 le buckets).
@@ -702,7 +702,7 @@ metrics_format_strategy = st.sampled_from(
     accept=accept_header_strategy,
 )
 @settings(max_examples=200)
-def test_property5_content_negotiation(metrics_format, accept):
+def test_content_negotiation(metrics_format, accept):
     """Property 5: Content negotiation selects correct format.
 
     For any combination of metrics_format setting and Accept
@@ -862,7 +862,7 @@ def constrained_snapshot_strategy(draw):
 
 @given(snap=constrained_snapshot_strategy())
 @settings(max_examples=200)
-def test_property4_counter_accounting_invariant(snap):
+def test_counter_accounting_invariant(snap):
     """Property 4: Counter accounting invariant.
 
     For constrained snapshots where the arithmetic invariants
