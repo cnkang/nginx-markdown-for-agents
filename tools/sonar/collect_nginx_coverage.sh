@@ -26,6 +26,7 @@ BACKEND_PORT=18200
 # ── Repeated curl header constants (shelldre:S1192) ─────────────────
 readonly ACCEPT_MARKDOWN='Accept: text/markdown'
 readonly AUTH_COOKIE_SESSION='Cookie: session_id=abc123'
+readonly HDR_X_FORWARDED_PROTO_HTTPS='X-Forwarded-Proto: https'
 
 usage() {
   cat >&2 <<EOF
@@ -900,16 +901,16 @@ curl -sS -H "${ACCEPT_MARKDOWN}" \
 
 # X-Forwarded-Proto + X-Forwarded-Host (exercises find_request_header_value + const_strncasecmp)
 curl -sS -H "${ACCEPT_MARKDOWN}" \
-  -H 'X-Forwarded-Proto: https' -H 'X-Forwarded-Host: example.com' \
+  -H "${HDR_X_FORWARDED_PROTO_HTTPS}" -H 'X-Forwarded-Host: example.com' \
   "http://127.0.0.1:${PORT}/index.html" -o /dev/null -w "  X-Forwarded headers: HTTP %{http_code}\n"
 
 # Only X-Forwarded-Proto (partial proxy headers — exercises fallback path)
-curl -sS -H "${ACCEPT_MARKDOWN}" -H 'X-Forwarded-Proto: https' \
+curl -sS -H "${ACCEPT_MARKDOWN}" -H "${HDR_X_FORWARDED_PROTO_HTTPS}" \
   "http://127.0.0.1:${PORT}/index.html" -o /dev/null -w "  X-Forwarded-Proto only: HTTP %{http_code}\n"
 
 # Forwarded headers ignored when trust_forwarded_headers=off
 curl -sS -H "${ACCEPT_MARKDOWN}" \
-  -H 'X-Forwarded-Proto: https' -H 'X-Forwarded-Host: ignored.example' \
+  -H "${HDR_X_FORWARDED_PROTO_HTTPS}" -H 'X-Forwarded-Host: ignored.example' \
   "http://127.0.0.1:${PORT}/no-forwarded-trust/index.html" -o /dev/null -w "  X-Forwarded trust disabled: HTTP %{http_code}\n"
 
 # ── Streaming engine scenarios (exercises streaming code paths) ─────
@@ -1024,10 +1025,10 @@ curl -sS -H "${ACCEPT_MARKDOWN}" \
 
 # Full options: front_matter + token_estimate + etag + gfm + forwarded headers
 curl -sS -H "${ACCEPT_MARKDOWN}" \
-  -H 'X-Forwarded-Proto: https' -H 'X-Forwarded-Host: cdn.example.com' \
+  -H "${HDR_X_FORWARDED_PROTO_HTTPS}" -H 'X-Forwarded-Host: cdn.example.com' \
   "http://127.0.0.1:${PORT}/full-options/index.html" -o /dev/null -w "  full-options: HTTP %{http_code}\n"
 curl -sS -H "${ACCEPT_MARKDOWN}" \
-  -H 'X-Forwarded-Proto: https' -H 'X-Forwarded-Host: cdn.example.com' \
+  -H "${HDR_X_FORWARDED_PROTO_HTTPS}" -H 'X-Forwarded-Host: cdn.example.com' \
   "http://127.0.0.1:${PORT}/full-options/large.html" -o /dev/null -w "  full-options large: HTTP %{http_code}\n"
 
 # Full options without forwarded headers (exercises direct request base_url)
