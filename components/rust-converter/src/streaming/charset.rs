@@ -848,8 +848,8 @@ mod tests {
 
         // Subsequent calls should also fail with a meaningful message,
         // NOT "transitioning"
-        let err2 = state.feed(b"more data").unwrap_err();
-        let msg = format!("{}", err2);
+        let second_error = state.feed(b"more data").unwrap_err();
+        let msg = format!("{}", second_error);
         assert!(
             !msg.contains("transitioning"),
             "Error after failure should not say 'transitioning', got: {}",

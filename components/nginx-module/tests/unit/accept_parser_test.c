@@ -1,11 +1,29 @@
 /*
  * Test: accept_parser
- * Description: Accept header parsing
+ * Description: Accept header parsing and content negotiation logic.
+ *
+ * Validates: Requirements 9.4 (Accept header parsing), 6.1 (content negotiation)
+ *
+ * This test reimplements the Accept header parsing logic from the production
+ * module using standard C (no NGINX dependencies) to verify parsing semantics
+ * in isolation.  The production code uses ngx_atofp() for q-value parsing;
+ * this stub uses atof() which has different error handling — see inline notes.
  */
 
 #include "../include/test_common.h"
 #include <ctype.h>
 
+/*
+ * Parsed representation of a single media-range entry from an Accept header.
+ *
+ * Fields:
+ *   type        - media type (e.g. "text")
+ *   subtype     - media subtype (e.g. "markdown", "*")
+ *   q           - quality factor in [0.0, 1.0], default 1.0
+ *   specificity - match priority: 3=exact, 2=subtype wildcard, 1=full wildcard
+ *   order       - original position in the header (for tie-breaking)
+ *   valid       - 1 if the entry was successfully parsed, 0 otherwise
+ */
 typedef struct {
     char type[32];
     char subtype[32];
@@ -15,6 +33,12 @@ typedef struct {
     int valid;
 } accept_entry_t;
 
+/*
+ * Case-insensitive string equality check (ASCII only).
+ *
+ * Returns:
+ *   1 if the strings are equal ignoring case, 0 otherwise.
+ */
 static int
 str_case_eq(const char *a, const char *b)
 {
@@ -28,6 +52,12 @@ str_case_eq(const char *a, const char *b)
     return *a == '\0' && *b == '\0';
 }
 
+/*
+ * Trim leading and trailing whitespace/tabs from a byte range.
+ *
+ * Advances *start forward and retreats *end backward past ASCII
+ * whitespace characters (space and horizontal tab).
+ */
 static void
 trim(char **start, char **end)
 {
@@ -39,6 +69,14 @@ trim(char **start, char **end)
     }
 }
 
+/*
+ * Compute match specificity for a media type/subtype pair.
+ *
+ * Returns:
+ *   3 for exact type match (e.g. text/markdown, text/html)
+ *   2 for subtype wildcard (text/*)
+ *   1 for full wildcard (* / *)
+ */
 static int
 specificity_for(const char *type, const char *subtype)
 {
@@ -54,6 +92,11 @@ specificity_for(const char *type, const char *subtype)
     return 3;
 }
 
+/*
+ * Clamp a q-value to the valid RFC 7231 range [0.0, 1.0].
+ *
+ * Negative values are clamped to 0.0; values above 1.0 are clamped to 1.0.
+ */
 static void
 clamp_q_value(float *q_value)
 {
@@ -66,6 +109,12 @@ clamp_q_value(float *q_value)
     }
 }
 
+/*
+ * Extract and parse the q= parameter from a semicolon-separated parameter string.
+ *
+ * Uses atof() for parsing (differs from production ngx_atofp() — see file header).
+ * If no q= parameter is found, the entry's q value is left unchanged (default 1.0).
+ */
 static void
 parse_q_param(accept_entry_t *entry, const char *params)
 {
@@ -84,6 +133,12 @@ parse_q_param(accept_entry_t *entry, const char *params)
     clamp_q_value(&entry->q);
 }
 
+/*
+ * Copy a NUL-terminated token into a fixed-size destination buffer.
+ *
+ * Returns:
+ *   1 on success, 0 if the source is too long for the destination.
+ */
 static int
 copy_token(char *dst, size_t dst_size, const char *src)
 {
@@ -102,6 +157,15 @@ copy_token(char *dst, size_t dst_size, const char *src)
     return 1;
 }
 
+/*
+ * Parse an Accept header string into an array of media-range entries.
+ *
+ * Splits the header on commas, extracts type/subtype, parses q-values,
+ * and computes specificity for each entry.
+ *
+ * Returns:
+ *   The number of valid entries parsed (0 if header is NULL or empty).
+ */
 static int
 parse_accept(const char *header, accept_entry_t *entries, int max_entries)
 {
@@ -170,6 +234,15 @@ parse_accept(const char *header, accept_entry_t *entries, int max_entries)
     return n;
 }
 
+/*
+ * Check whether a parsed Accept entry matches text/markdown.
+ *
+ * When on_wildcard is true, subtype wildcards (text/*) and full
+ * wildcards (* / *) also count as a match.
+ *
+ * Returns:
+ *   1 if the entry matches markdown, 0 otherwise.
+ */
 static int
 matches_markdown(const accept_entry_t *e, int on_wildcard)
 {
@@ -188,6 +261,16 @@ matches_markdown(const accept_entry_t *e, int on_wildcard)
     return 0;
 }
 
+/*
+ * End-to-end Accept header evaluation: parse, rank, and decide.
+ *
+ * Parses the Accept header, selects the best entry by q-value and
+ * specificity, checks for explicit text/markdown;q=0 rejection, and
+ * returns whether the request should trigger Markdown conversion.
+ *
+ * Returns:
+ *   1 if conversion should proceed, 0 otherwise.
+ */
 static int
 should_convert(const char *accept_header, int on_wildcard)
 {

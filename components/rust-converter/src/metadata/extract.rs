@@ -101,30 +101,20 @@ impl MetadataExtractor {
             Some("og:description") | Some("twitter:description") => {
                 metadata.description = Some(content);
             }
-            Some("description") => {
-                if metadata.description.is_none() {
-                    metadata.description = Some(content);
-                }
+            Some("description") if metadata.description.is_none() => {
+                metadata.description = Some(content);
             }
-            Some("og:image") | Some("twitter:image") => {
-                if metadata.image.is_none() {
-                    metadata.image = Some(self.resolve_url(&content));
-                }
+            Some("og:image") | Some("twitter:image") if metadata.image.is_none() => {
+                metadata.image = Some(self.resolve_url(&content));
             }
-            Some("og:url") => {
-                if metadata.url.is_none() {
-                    metadata.url = Some(content);
-                }
+            Some("og:url") if metadata.url.is_none() => {
+                metadata.url = Some(content);
             }
-            Some("author") => {
-                if metadata.author.is_none() {
-                    metadata.author = Some(content);
-                }
+            Some("author") if metadata.author.is_none() => {
+                metadata.author = Some(content);
             }
-            Some("article:published_time") => {
-                if metadata.published.is_none() {
-                    metadata.published = Some(content);
-                }
+            Some("article:published_time") if metadata.published.is_none() => {
+                metadata.published = Some(content);
             }
             _ => {}
         }

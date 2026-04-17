@@ -197,11 +197,11 @@ def test_scope_evaluation_deterministic(data):
     proposal = data.draw(
         st.text(min_size=1, max_size=80).filter(lambda s: "\x00" not in s)
     )
-    result1 = evaluate_scope(proposal)
-    result2 = evaluate_scope(proposal)
-    assert result1 == result2, (
+    result_first = evaluate_scope(proposal)
+    result_second = evaluate_scope(proposal)
+    assert result_first == result_second, (
         f"Non-deterministic result for '{proposal}': "
-        f"first={result1}, second={result2}"
+        f"first={result_first}, second={result_second}"
     )
 
 

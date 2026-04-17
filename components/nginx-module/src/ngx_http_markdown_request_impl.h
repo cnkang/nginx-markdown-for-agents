@@ -13,6 +13,21 @@
  * evolve separately from payload buffering, decompression, and output shaping.
  */
 
+/*
+ * Forward declarations for streaming functions defined in
+ * ngx_http_markdown_streaming_impl.h (included after this header).
+ * Required so call sites in this header see proper prototypes.
+ */
+#ifdef MARKDOWN_STREAMING_ENABLED
+static ngx_uint_t
+ngx_http_markdown_select_processing_path(
+    ngx_http_request_t *r,
+    ngx_http_markdown_conf_t *conf);
+static ngx_int_t
+ngx_http_markdown_streaming_body_filter(
+    ngx_http_request_t *r, ngx_chain_t *in);
+#endif
+
 #include "ngx_http_markdown_payload_impl.h"
 #include "ngx_http_markdown_conversion_impl.h"
 #include "ngx_http_markdown_exports.h"
