@@ -465,6 +465,60 @@ test_forwarded_headers_priority(void)
     TEST_PASS("Trusted forwarded-header path is correct");
 }
 
+
+/*
+ * Test: X-Forwarded-* headers are ignored when trust is disabled.
+ *
+ * Verifies that with trust_forwarded_headers = 0, the base_url is
+ * derived from the direct request schema/server even when
+ * X-Forwarded-Proto and X-Forwarded-Host are present.
+ */
+static void
+test_untrusted_forwarded_headers_ignored(void)
+{
+    ngx_http_request_t r;
+    ngx_http_markdown_conf_t conf;
+    ngx_table_elt_t headers[2];
+    ngx_str_t scheme;
+    ngx_str_t host;
+    ngx_str_t base_url;
+
+    TEST_SUBSECTION("X-Forwarded headers ignored when untrusted");
+
+    init_request(&r);
+    memset(&conf, 0, sizeof(conf));
+    conf.ops.trust_forwarded_headers = 0;
+
+    set_str(&r.schema, "http");
+    set_str(&r.headers_in.server, "origin.example.com");
+    set_str(&r.uri, "/articles/page.html");
+
+    set_str(&headers[0].key, "X-Forwarded-Proto");
+    set_str(&headers[0].value, "https");
+    headers[0].hash = 1;
+    set_str(&headers[1].key, "X-Forwarded-Host");
+    set_str(&headers[1].value, "attacker.example.com");
+    headers[1].hash = 1;
+    set_single_header_list(&r, headers, ARRAY_SIZE(headers));
+    r.loc_conf = &conf;
+
+    TEST_ASSERT(ngx_http_markdown_select_base_url_parts(&r, &scheme, &host) == NGX_OK,
+                "untrusted forwarded headers should still produce base_url");
+    assert_str_eq(&scheme, "http",
+                  "scheme should come from request, not X-Forwarded-Proto");
+    assert_str_eq(&host, "origin.example.com",
+                  "host should come from request, not X-Forwarded-Host");
+
+    TEST_ASSERT(ngx_http_markdown_construct_base_url(&r, r.pool, &base_url) == NGX_OK,
+                "construct_base_url should succeed ignoring forwarded headers");
+    assert_str_eq(&base_url, "http://origin.example.com/articles/page.html",
+                  "base_url should use direct request, not forwarded headers");
+    free(base_url.data);
+
+    TEST_PASS("Untrusted forwarded headers correctly ignored");
+}
+
+
 static void
 test_direct_request_path(void)
 {
@@ -849,6 +903,7 @@ main(void)
     printf("========================================\n");
 
     test_forwarded_headers_priority();
+    test_untrusted_forwarded_headers_ignored();
     test_direct_request_path();
     test_server_name_fallback_path();
     test_missing_base_url_inputs_fail();

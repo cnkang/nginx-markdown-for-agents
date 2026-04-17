@@ -226,6 +226,7 @@ verify-streaming-failure-cache-e2e-plan:
 COVERAGE_DIR := coverage
 
 coverage-c:
+	@command -v lcov >/dev/null 2>&1 || { echo "ERROR: lcov is required for coverage-c but not found in PATH" >&2; exit 1; }
 	@mkdir -p $(COVERAGE_DIR) $(COVERAGE_DIR)/tmp
 	tools/sonar/collect_nginx_coverage.sh --output $(CURDIR)/$(COVERAGE_DIR)/tmp/c-e2e-coverage.lcov
 	$(MAKE) -C $(NGINX_TEST_DIR) unit-coverage COV_DIR=$(CURDIR)/$(COVERAGE_DIR)/tmp/c-unit

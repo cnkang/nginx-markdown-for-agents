@@ -1081,11 +1081,13 @@ echo "==> Stopping NGINX (flush gcov data)"
 sleep 2
 
 echo "==> Running extended streaming failure/cache e2e coverage"
-bash "${WORKSPACE_ROOT}/tools/e2e/verify_streaming_failure_cache_e2e.sh" \
+if ! bash "${WORKSPACE_ROOT}/tools/e2e/verify_streaming_failure_cache_e2e.sh" \
   --nginx-bin "${RUNTIME}/sbin/nginx" \
   --port 18296 \
   --upstream-port 19296 \
-  --markdown-max-size 1m
+  --markdown-max-size 1m; then
+    echo "  WARNING: streaming failure/cache e2e coverage run failed; continuing" >&2
+fi
 
 echo "==> Running streaming e2e coverage"
 if ! bash "${WORKSPACE_ROOT}/tools/e2e/verify_streaming_e2e.sh" \

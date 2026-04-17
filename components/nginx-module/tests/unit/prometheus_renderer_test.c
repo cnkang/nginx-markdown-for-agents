@@ -280,6 +280,10 @@ test_known_values(void)
     s.decompressions.deflate = 10;
     s.decompressions.brotli = 5;
     s.decompressions.failed = 2;
+    s.skips.method = 3;
+    s.skips.status = 2;
+    s.skips.content_type = 5;
+    s.skips.accept = 1;
     s.conversion_latency_le_10ms = 80;
     s.conversion_latency_le_100ms = 50;
     s.conversion_latency_le_1000ms = 15;
@@ -345,6 +349,34 @@ test_known_values(void)
             "nginx_markdown_conversion_duration_seconds"
             "{le=\"+Inf\"} 150"),
         "latency le +Inf should be 150");
+
+    /* Decompression metrics */
+    TEST_ASSERT(
+        contains((char *) buf,
+            "nginx_markdown_decompressions_total"
+            "{format=\"gzip\"} 40"),
+        "decompressions gzip should be 40");
+    TEST_ASSERT(
+        contains((char *) buf,
+            "nginx_markdown_decompressions_total"
+            "{format=\"deflate\"} 10"),
+        "decompressions deflate should be 10");
+    TEST_ASSERT(
+        contains((char *) buf,
+            "nginx_markdown_decompression_failures_total 2"),
+        "decompression failures should be 2");
+
+    /* Skip metrics */
+    TEST_ASSERT(
+        contains((char *) buf,
+            "nginx_markdown_skips_total"
+            "{reason=\"SKIP_METHOD\"} 3"),
+        "skips method should be 3");
+    TEST_ASSERT(
+        contains((char *) buf,
+            "nginx_markdown_skips_total"
+            "{reason=\"SKIP_CONTENT_TYPE\"} 5"),
+        "skips content_type should be 5");
 
     TEST_PASS("Known-value snapshot renders correctly");
 }
