@@ -21,6 +21,8 @@ summaries change together.
 - docs vs validator scope and naming
 - CI path filters vs new truth surfaces
 - operator commands vs actual output format requirements
+- cross-script CLI contract consistency (flag/env/positional semantics)
+- cross-script invocation portability (no executable-bit assumptions in CI)
 
 ## Minimum Verification
 
@@ -28,6 +30,8 @@ summaries change together.
 make harness-check
 make docs-check
 make harness-check-full
+make coverage-c
+make coverage-sonar-xml
 ```
 
 ## Canonical References
