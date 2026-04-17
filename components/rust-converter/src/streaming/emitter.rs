@@ -373,12 +373,10 @@ impl IncrementalEmitter {
                 self.list_depth = sm.list_depth;
                 self.needs_block_separator = true;
             }
-            StructuralContext::ListItem => {
+            StructuralContext::ListItem if !self.last_was_newline => {
                 // Ensure newline after list item content
-                if !self.last_was_newline {
-                    self.write_str("\n")?;
-                    self.last_was_newline = true;
-                }
+                self.write_str("\n")?;
+                self.last_was_newline = true;
             }
             StructuralContext::CodeBlock(_) => {
                 // Emit deferred code fence if not yet emitted (empty code block)
