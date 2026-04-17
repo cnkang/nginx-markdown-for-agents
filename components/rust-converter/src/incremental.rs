@@ -306,9 +306,9 @@ mod tests {
         let incremental_result = conv.finalize().unwrap();
 
         // Direct path
-        let options2 = ConversionOptions::default();
+        let custom_options = ConversionOptions::default();
         let dom = parse_html(html).unwrap();
-        let converter = MarkdownConverter::with_options(options2);
+        let converter = MarkdownConverter::with_options(custom_options);
         let direct_result = converter.convert(&dom).unwrap();
 
         assert_eq!(incremental_result, direct_result);

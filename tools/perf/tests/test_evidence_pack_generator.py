@@ -279,9 +279,9 @@ class TestLinearRegressionSlope:
         """Same input always produces same output (Property 1)."""
         x = [100.0, 200.0, 300.0, 400.0]
         y = [150.0, 250.0, 350.0, 450.0]
-        slope1 = linear_regression_slope(x, y)
-        slope2 = linear_regression_slope(x, y)
-        assert slope1 == slope2
+        slope_first = linear_regression_slope(x, y)
+        slope_second = linear_regression_slope(x, y)
+        assert slope_first == slope_second
 
 
 # ---------------------------------------------------------------------------
@@ -795,14 +795,14 @@ class TestGenerateEvidencePack:
         streaming = _make_streaming_report()
         targets = _make_evidence_targets()
 
-        pack1 = generate_evidence_pack(fullbuffer, streaming, targets)
-        pack2 = generate_evidence_pack(fullbuffer, streaming, targets)
+        pack_first = generate_evidence_pack(fullbuffer, streaming, targets)
+        pack_second = generate_evidence_pack(fullbuffer, streaming, targets)
 
         # Compare everything except timestamp and git_commit (which may vary)
-        assert pack1["evidence_targets"] == pack2["evidence_targets"]
-        assert pack1["release_gates"] == pack2["release_gates"]
-        assert pack1["streaming_evidence_verdict"] == pack2["streaming_evidence_verdict"]
-        assert pack1["p1_status"] == pack2["p1_status"]
+        assert pack_first["evidence_targets"] == pack_second["evidence_targets"]
+        assert pack_first["release_gates"] == pack_second["release_gates"]
+        assert pack_first["streaming_evidence_verdict"] == pack_second["streaming_evidence_verdict"]
+        assert pack_first["p1_status"] == pack_second["p1_status"]
 
 
 # ---------------------------------------------------------------------------

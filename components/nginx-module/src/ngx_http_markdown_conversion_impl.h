@@ -660,7 +660,7 @@ static void
 ngx_http_markdown_shadow_compare(
     ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx,
-    ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_conf_t *conf,
     struct MarkdownResult *fb_result,
     ngx_msec_t fb_elapsed_ms)
 {
@@ -802,6 +802,7 @@ ngx_http_markdown_shadow_compare(
         size_t total_len;
 
         total_len = (size_t) out_len + (size_t) st_result.markdown_len;
+        (void) total_len;  /* used only in debug log below */
         if (ngx_http_markdown_shadow_output_diff(fb_result, out_data, out_len,
                                                  &st_result)) {
             NGX_HTTP_MARKDOWN_METRIC_INC(

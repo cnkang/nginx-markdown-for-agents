@@ -717,6 +717,35 @@ Required:
   informational warnings only — the binding gate is the 80% aggregate bar
   (90% for critical paths).
 
+### 26. Naming and documentation discipline
+
+Required:
+- Use meaningful, descriptive names for all functions, variables, types, and
+  constants.  Avoid single-letter names outside of short loop counters (`i`,
+  `j`, `n`) and well-established NGINX conventions (`r`, `cf`, `ctx`, `cl`).
+  When a name encodes a unit or semantic (for example `elapsed_ms`,
+  `pattern_count`), the name must match what the value actually represents.
+- NGINX numbered macros (`ngx_log_debug0` through `ngx_log_debug8`,
+  `ngx_log_error`) are framework conventions and must not be renamed.  The
+  trailing digit indicates the argument count, not a version or sequence.
+- Every non-trivial function must have a block comment immediately before its
+  definition describing purpose, parameters, return values, and side effects.
+  For C code use `/* */` block comments per NGINX style.  For Rust use `///`
+  doc comments.  For Python use docstrings.  For shell functions use `#`
+  comment blocks.
+- Complex or non-obvious logic must have inline comments explaining the
+  reasoning — not restating what the code does, but why it does it and what
+  invariants it relies on.
+- When a test reimplements production logic (because the production function
+  cannot be linked), the test must document the divergence risk and the
+  semantic contract it mirrors.
+- Struct and enum type definitions must have a comment describing the purpose
+  of the type and the meaning of each field/variant, especially for types
+  that cross language or module boundaries (FFI structs, shared config types).
+- Shell scripts must document each function with a comment block stating
+  purpose, arguments, output, and exit behaviour.  Repeated string constants
+  must be extracted into `readonly` variables with a descriptive name.
+
 ## Required Agent Workflow
 
 ### Before coding
@@ -756,6 +785,7 @@ For each code change you are about to produce, mentally (or explicitly in a thin
 18. Reason-code classification coverage: when adding a new family of reason codes (for example `STREAMING_*` alongside `ELIGIBLE_*`/`FAIL_*`), update every function that classifies reason codes by string pattern (prefix match, substring). Prefix-based classifiers silently miss new namespaces whose failure codes do not share the existing prefix. Grep for all reason-code classification call sites and confirm each handles the new namespace. (Rule 7)
 19. `ngx_str_t` token matching must be length-bounded: never call `ngx_strcasecmp()` on config/header values unless they are explicitly NUL-terminated. For directive keyword matching, require exact length equality and use `ngx_strncasecmp(..., expected_len)` (or a shared helper that enforces both). This prevents out-of-bounds reads on short/truncated inputs.
 20. Coverage: if this change adds or modifies production code paths, verify that aggregate e2e or unit test coverage does not regress below 80% (90% for critical paths). (Rule 25)
+21. Naming and documentation: every new or modified function has a block comment (purpose, parameters, return values). Variables and types use descriptive names. Complex logic has inline comments explaining *why*. (Rule 26)
 
 #### C test code (`components/nginx-module/tests/unit/`)
 1. No dead stores — simulation-style tests set the final value directly; initial state documented in comments only. (Rule 16)
@@ -788,6 +818,7 @@ For each code change you are about to produce, mentally (or explicitly in a thin
 17. **Metric naming accuracy**: when a metric field name implies specific semantics (for example `cpu_time_ms`), the implementation must actually measure that quantity. If approximating with a different measurement (for example wall-clock TTLB), add a comment documenting the approximation or rename the field. (Rule 8)
 18. **Rust 2024 edition pattern binding**: do not use explicit `ref` or `ref mut` binding modifiers when matching on a reference type (`&T`, `&Option<T>`, `&Vec<T>`, etc.). Rust 2024 edition treats this as an error because the reference already implies borrowing. Use `ref` only when matching on an owned value where you need to borrow without moving. Before writing `if let Some(ref x) = expr`, check whether `expr` is a reference — if so, drop the `ref`.
 19. Coverage: if this change adds or modifies production code, verify that `cargo llvm-cov` aggregate coverage does not regress below 80% (90% for critical paths). (Rule 25)
+20. Naming and documentation: every new or modified public function has `///` doc comments (purpose, arguments, returns, safety for unsafe). Internal helpers have `//` comments. Types and fields are documented. (Rule 26)
 
 #### Shell scripts (`tools/`, e2e harnesses)
 1. Every `case` has a `*)` default clause. (Rule 18)
@@ -799,6 +830,7 @@ For each code change you are about to produce, mentally (or explicitly in a thin
 7. Required checks must fail the case/run when missing (not INFO-only). (Rule 18)
 8. `--plan`/dry-run modes short-circuit before runtime prerequisites. (Rule 18)
 9. `usage()` text matches parsed flags/defaults exactly. (Rule 18)
+10. Every function has a comment block stating purpose, arguments, output, and exit behaviour. Repeated string constants use `readonly` variables with descriptive names. (Rule 26)
 
 #### Python test/tooling scripts (`tests/e2e/`, `tools/`)
 1. Binary prerequisites validate executability (`os.access(..., os.X_OK)` or
@@ -825,6 +857,7 @@ For each code change you are about to produce, mentally (or explicitly in a thin
 5. Operator docs referencing metrics use real JSON key paths or Prometheus series names, not invented flat names. Derived rates include computation formulas. Verification commands include explicit `Accept` headers matching the parsed format. (Rules 9, 23)
 6. All C code examples and C-style guidance in docs/README/steering must use
    C99-or-newer forms and must not introduce pre-C99 syntax.
+7. Code examples in documentation must use meaningful names and include comments explaining non-obvious logic, matching the same standards as production code. (Rule 26)
 
 **If any item would be violated, redesign the change before writing it.** Do not emit code that you know will need a follow-up fix — that wastes time, wastes tokens and review cycles.
 

@@ -161,7 +161,7 @@ def reason_from_error_category(category: ErrorCategory) -> str:
 
 @given(eligibility=eligibility_values)
 @settings(max_examples=100)
-def test_property1_eligibility_reason_code_non_empty_and_format(eligibility):
+def test_eligibility_reason_code_non_empty_and_format(eligibility):
     """Every eligibility enum value maps to a non-empty uppercase snake_case
     reason code.
 
@@ -177,7 +177,7 @@ def test_property1_eligibility_reason_code_non_empty_and_format(eligibility):
 
 @given(category=error_category_values)
 @settings(max_examples=100)
-def test_property1_error_category_reason_code_non_empty_and_format(category):
+def test_error_category_reason_code_non_empty_and_format(category):
     """Every error category enum value maps to a non-empty uppercase
     snake_case reason code.
 
@@ -191,7 +191,7 @@ def test_property1_error_category_reason_code_non_empty_and_format(category):
     )
 
 
-def test_property1_accept_skip_reason_code_format():
+def test_accept_skip_reason_code_format():
     """The Accept-based skip reason code is non-empty and matches the
     uppercase snake_case pattern.
 
@@ -203,7 +203,7 @@ def test_property1_accept_skip_reason_code_format():
     )
 
 
-def test_property1_eligible_outcome_reason_codes_format():
+def test_eligible_outcome_reason_codes_format():
     """The three eligible outcome reason codes are non-empty and match the
     uppercase snake_case pattern.
 
@@ -220,7 +220,7 @@ def test_property1_eligible_outcome_reason_codes_format():
         )
 
 
-def test_property1_all_reason_codes_complete():
+def test_all_reason_codes_complete():
     """The complete set of reason codes contains exactly 15 entries as
     specified in the design document mapping table.
 
@@ -234,7 +234,7 @@ def test_property1_all_reason_codes_complete():
 
 @given(code=all_reason_codes_strategy)
 @settings(max_examples=100)
-def test_property1_all_defined_reason_codes_match_format(code):
+def test_all_defined_reason_codes_match_format(code):
     """Every defined reason code in the complete set matches the uppercase
     snake_case pattern.
 
@@ -246,7 +246,7 @@ def test_property1_all_defined_reason_codes_match_format(code):
     )
 
 
-def test_property1_eligibility_enum_completeness():
+def test_eligibility_enum_completeness():
     """Every value in the Eligibility enum has a mapping in the reason code
     table — no enum value is left unmapped.
 
@@ -258,7 +258,7 @@ def test_property1_eligibility_enum_completeness():
         )
 
 
-def test_property1_error_category_enum_completeness():
+def test_error_category_enum_completeness():
     """Every value in the ErrorCategory enum has a mapping in the reason code
     table — no enum value is left unmapped.
 
@@ -292,7 +292,7 @@ VALID_REQUEST_STATES = {
 
 @given(reason_code=request_state_reason_codes_strategy)
 @settings(max_examples=100)
-def test_property7_reason_code_maps_to_exactly_one_request_state(reason_code):
+def test_reason_code_maps_to_exactly_one_request_state(reason_code):
     """Every defined reason code maps to exactly one of the four request
     states (NOT_ENABLED, SKIPPED, CONVERTED, FAILED).
 
@@ -307,7 +307,7 @@ def test_property7_reason_code_maps_to_exactly_one_request_state(reason_code):
 
 @given(reason_code=request_state_reason_codes_strategy)
 @settings(max_examples=100)
-def test_property7_skip_config_maps_to_not_enabled(reason_code):
+def test_skip_config_maps_to_not_enabled(reason_code):
     """SKIP_CONFIG maps to NOT_ENABLED; no other reason code maps to
     NOT_ENABLED.
 
@@ -327,7 +327,7 @@ def test_property7_skip_config_maps_to_not_enabled(reason_code):
 
 @given(reason_code=request_state_reason_codes_strategy)
 @settings(max_examples=100)
-def test_property7_skip_codes_map_to_correct_state(reason_code):
+def test_skip_codes_map_to_correct_state(reason_code):
     """All SKIP_* codes (except SKIP_CONFIG) map to SKIPPED, ELIGIBLE_CONVERTED
     maps to CONVERTED, and ELIGIBLE_FAILED_* codes map to FAILED.
 
@@ -355,7 +355,7 @@ def test_property7_skip_codes_map_to_correct_state(reason_code):
         )
 
 
-def test_property7_request_state_mapping_is_total():
+def test_request_state_mapping_is_total():
     """The REASON_TO_REQUEST_STATE mapping covers exactly the 12 primary
     reason codes (all reason codes except failure sub-classification codes).
 
@@ -383,7 +383,7 @@ def test_property7_request_state_mapping_is_total():
     )
 
 
-def test_property7_all_request_states_are_covered():
+def test_all_request_states_are_covered():
     """Every one of the four request states is the target of at least one
     reason code mapping.
 
@@ -465,7 +465,7 @@ NON_FAILURE_REASON_CODES = [
     verbosity=verbosity_levels_strategy,
 )
 @settings(max_examples=200)
-def test_property4_verbosity_gating_controls_emission(reason_code, verbosity):
+def test_verbosity_gating_controls_emission(reason_code, verbosity):
     """For any (outcome, verbosity_level) pair, a decision log entry is
     emitted if and only if: (a) verbosity is info or debug (all outcomes
     logged), or (b) verbosity is warn or error and the outcome is a failure.
@@ -497,7 +497,7 @@ def test_property4_verbosity_gating_controls_emission(reason_code, verbosity):
     verbosity=st.sampled_from([LOG_ERROR, LOG_WARN]),
 )
 @settings(max_examples=100)
-def test_property4_non_failure_suppressed_at_warn_and_error(
+def test_non_failure_suppressed_at_warn_and_error(
     reason_code, verbosity
 ):
     """Non-failure outcomes (SKIP_* and ELIGIBLE_CONVERTED) shall not produce
@@ -516,7 +516,7 @@ def test_property4_non_failure_suppressed_at_warn_and_error(
     verbosity=verbosity_levels_strategy,
 )
 @settings(max_examples=100)
-def test_property4_failure_outcomes_always_emitted(reason_code, verbosity):
+def test_failure_outcomes_always_emitted(reason_code, verbosity):
     """Failure outcomes are emitted at every verbosity level.
 
     **Validates: Requirements 3.1, 3.4**
@@ -557,7 +557,7 @@ def expected_nginx_log_level(reason_code: str) -> int:
 
 @given(reason_code=all_reason_codes_strategy)
 @settings(max_examples=100)
-def test_property6_nginx_log_level_matches_outcome_type(reason_code):
+def test_nginx_log_level_matches_outcome_type(reason_code):
     """For any emitted decision log entry, the NGINX log level shall be
     NGX_LOG_INFO for non-failure outcomes and NGX_LOG_WARN for failure
     outcomes.
@@ -581,7 +581,7 @@ def test_property6_nginx_log_level_matches_outcome_type(reason_code):
     reason_code=st.sampled_from(NON_FAILURE_REASON_CODES),
 )
 @settings(max_examples=100)
-def test_property6_non_failure_uses_info_level(reason_code):
+def test_non_failure_uses_info_level(reason_code):
     """Non-failure outcomes (SKIP_* and ELIGIBLE_CONVERTED) shall use
     NGX_LOG_INFO.
 
@@ -596,7 +596,7 @@ def test_property6_non_failure_uses_info_level(reason_code):
     reason_code=st.sampled_from(ALL_FAILURE_REASON_CODES),
 )
 @settings(max_examples=100)
-def test_property6_failure_uses_warn_level(reason_code):
+def test_failure_uses_warn_level(reason_code):
     """Failure outcomes (ELIGIBLE_FAILED_OPEN, ELIGIBLE_FAILED_CLOSED,
     FAIL_*) shall use NGX_LOG_WARN.
 
@@ -671,7 +671,7 @@ failing_subset_strategy = st.lists(
 
 @given(failing_checks=failing_subset_strategy)
 @settings(max_examples=200)
-def test_property2_decision_chain_first_failing_check(failing_checks):
+def test_decision_chain_first_failing_check(failing_checks):
     """For any request with multiple failing eligibility conditions, the
     reason code assigned shall correspond to the first check in the
     documented decision chain order that fails.
@@ -701,23 +701,23 @@ def test_property2_decision_chain_first_failing_check(failing_checks):
 
 @given(failing_checks=failing_subset_strategy)
 @settings(max_examples=100)
-def test_property2_first_check_reason_is_deterministic(failing_checks):
+def test_first_check_reason_is_deterministic(failing_checks):
     """The first-failing-check determination is deterministic: the same set
     of failing checks always produces the same reason code.
 
     **Validates: Requirements 2.2, 2.3**
     """
-    result1 = first_failing_check(failing_checks)
-    result2 = first_failing_check(failing_checks)
-    assert result1 == result2, (
-        f"Non-deterministic: got {result1} and {result2} for same input"
+    result_first = first_failing_check(failing_checks)
+    result_second = first_failing_check(failing_checks)
+    assert result_first == result_second, (
+        f"Non-deterministic: got {result_first} and {result_second} for same input"
     )
-    reason1 = ELIGIBILITY_TO_REASON[result1]
-    reason2 = ELIGIBILITY_TO_REASON[result2]
-    assert reason1 == reason2
+    reason_first = ELIGIBILITY_TO_REASON[result_first]
+    reason_second = ELIGIBILITY_TO_REASON[result_second]
+    assert reason_first == reason_second
 
 
-def test_property2_chain_order_matches_design():
+def test_chain_order_matches_design():
     """The decision chain order encoded in tests matches the design document
     Mermaid diagram exactly.
 
@@ -769,7 +769,7 @@ def failure_outcome_for_policy(on_error: str) -> str:
 
 @given(on_error=on_error_policy_strategy)
 @settings(max_examples=100)
-def test_property3_failure_outcome_depends_on_policy(on_error):
+def test_failure_outcome_depends_on_policy(on_error):
     """For any eligible request where conversion fails, the reason code
     shall be ELIGIBLE_FAILED_OPEN when on_error is 'pass', and
     ELIGIBLE_FAILED_CLOSED when on_error is 'reject'.
@@ -791,7 +791,7 @@ def test_property3_failure_outcome_depends_on_policy(on_error):
 
 @given(on_error=on_error_policy_strategy)
 @settings(max_examples=100)
-def test_property3_failure_outcome_is_always_failed_state(on_error):
+def test_failure_outcome_is_always_failed_state(on_error):
     """Regardless of on_error policy, a failed conversion always maps to
     the FAILED request state.
 
@@ -807,7 +807,7 @@ def test_property3_failure_outcome_is_always_failed_state(on_error):
 
 @given(on_error=on_error_policy_strategy)
 @settings(max_examples=100)
-def test_property3_pass_and_reject_produce_different_codes(on_error):
+def test_pass_and_reject_produce_different_codes(on_error):
     """The two on_error policies produce distinct reason codes — they are
     never the same string.
 
@@ -914,7 +914,7 @@ def parse_log_fields(entry):
     status=status_strategy,
 )
 @settings(max_examples=200)
-def test_property5_base_fields_always_present(
+def test_base_fields_always_present(
     reason_code, method, uri, content_type,
     verbosity, filter_value, accept, status
 ):
@@ -948,7 +948,7 @@ def test_property5_base_fields_always_present(
     status=status_strategy,
 )
 @settings(max_examples=200)
-def test_property5_debug_includes_extended_fields(
+def test_debug_includes_extended_fields(
     reason_code, method, uri, content_type,
     filter_value, accept, status
 ):
@@ -979,7 +979,7 @@ def test_property5_debug_includes_extended_fields(
     status=status_strategy,
 )
 @settings(max_examples=200)
-def test_property5_non_debug_excludes_extended_fields(
+def test_non_debug_excludes_extended_fields(
     reason_code, method, uri, content_type,
     verbosity, filter_value, accept, status
 ):
@@ -1031,7 +1031,7 @@ error_category_reason_strategy = st.sampled_from(
     status=status_strategy,
 )
 @settings(max_examples=200)
-def test_property8_failure_entries_include_category(
+def test_failure_entries_include_category(
     reason_code, error_category, method, uri, content_type,
     verbosity, filter_value, accept, status
 ):
@@ -1069,7 +1069,7 @@ def test_property8_failure_entries_include_category(
     status=status_strategy,
 )
 @settings(max_examples=200)
-def test_property8_non_failure_entries_no_category(
+def test_non_failure_entries_no_category(
     reason_code, method, uri, content_type,
     verbosity, filter_value, accept, status
 ):

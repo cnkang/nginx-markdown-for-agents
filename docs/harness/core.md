@@ -158,3 +158,30 @@ Repo-owned docs keep durable truth. The state carrier keeps execution memory.
 ## Spec Template Convention
 
 When a new spec is created for a feature or bugfix that touches C module or Rust converter production code, the spec's tasks document SHALL include a coverage verification checkpoint as a required (non-optional) task. This is enforced by convention in this harness documentation, not by tooling.
+
+## Naming and Documentation Standards
+
+All code in the repository — C, Rust, Python, shell, and test code — must follow
+these naming and documentation principles:
+
+- **Meaningful names**: functions, variables, types, and constants use descriptive
+  names that convey intent. Avoid single-letter names outside of short loop
+  counters and well-established NGINX conventions (`r`, `cf`, `ctx`, `cl`).
+- **Function documentation**: every non-trivial function has a block comment
+  describing purpose, parameters, return values, and side effects. Use the
+  language-appropriate format: `/* */` for C (NGINX style), `///` for Rust,
+  docstrings for Python, `#` blocks for shell.
+- **Inline comments**: complex or non-obvious logic has comments explaining
+  *why*, not *what*. Invariants, trade-offs, and edge-case reasoning are
+  documented at the point of use.
+- **Type documentation**: struct and enum definitions include comments describing
+  the purpose of the type and the meaning of each field or variant.
+- **Framework conventions preserved**: NGINX numbered macros (`ngx_log_debug0`
+  through `ngx_log_debug8`) are framework conventions where the trailing digit
+  indicates argument count. These must not be renamed.
+- **Test divergence documentation**: when a test reimplements production logic
+  (because the production function cannot be linked), the test must document
+  the divergence risk and the semantic contract it mirrors.
+
+This standard is codified as AGENTS.md Rule 26 and enforced through the
+pre-output checklist.

@@ -1338,21 +1338,21 @@ mod tests {
         let converter = MarkdownConverter::new();
 
         // Test with no trailing newline
-        let input1 = "Content".to_string();
-        let result1 = converter.normalize_output(input1);
-        assert!(result1.ends_with('\n'));
-        assert!(!result1.ends_with("\n\n"));
+        let input_no_trailing_newline = "Content".to_string();
+        let result_no_trailing = converter.normalize_output(input_no_trailing_newline);
+        assert!(result_no_trailing.ends_with('\n'));
+        assert!(!result_no_trailing.ends_with("\n\n"));
 
         // Test with multiple trailing newlines
-        let input2 = "Content\n\n\n".to_string();
-        let result2 = converter.normalize_output(input2);
-        assert!(result2.ends_with('\n'));
-        assert!(!result2.ends_with("\n\n"));
+        let input_multiple_trailing_newlines = "Content\n\n\n".to_string();
+        let result_multiple_trailing = converter.normalize_output(input_multiple_trailing_newlines);
+        assert!(result_multiple_trailing.ends_with('\n'));
+        assert!(!result_multiple_trailing.ends_with("\n\n"));
 
         // Test with single trailing newline (should be preserved)
-        let input3 = "Content\n".to_string();
-        let result3 = converter.normalize_output(input3);
-        assert_eq!(result3, "Content\n");
+        let input_single_trailing_newline = "Content\n".to_string();
+        let result_single_trailing = converter.normalize_output(input_single_trailing_newline);
+        assert_eq!(result_single_trailing, "Content\n");
     }
 
     /// Test that consecutive spaces are collapsed to single space (outside code blocks)
@@ -1416,16 +1416,20 @@ mod tests {
         let html = b"<h1>Title</h1><p>Paragraph with <strong>bold</strong> text.</p><ul><li>Item 1</li><li>Item 2</li></ul>";
 
         // Convert the same HTML twice
-        let dom1 = parse_html(html).expect("Parse failed");
-        let converter1 = MarkdownConverter::new();
-        let result1 = converter1.convert(&dom1).expect("Conversion failed");
+        let dom_first_parse = parse_html(html).expect("Parse failed");
+        let converter_first = MarkdownConverter::new();
+        let result_first_conversion = converter_first
+            .convert(&dom_first_parse)
+            .expect("Conversion failed");
 
-        let dom2 = parse_html(html).expect("Parse failed");
-        let converter2 = MarkdownConverter::new();
-        let result2 = converter2.convert(&dom2).expect("Conversion failed");
+        let dom_second_parse = parse_html(html).expect("Parse failed");
+        let converter_second = MarkdownConverter::new();
+        let result_second_conversion = converter_second
+            .convert(&dom_second_parse)
+            .expect("Conversion failed");
 
         // Results should be byte-for-byte identical
-        assert_eq!(result1, result2);
+        assert_eq!(result_first_conversion, result_second_conversion);
     }
 
     /// Test deterministic output with various HTML inputs
