@@ -443,6 +443,15 @@ Required:
 - Script usage/help text must stay synchronized with parsed flags and defaults
   (for example every parsed `--flag` appears in `usage()` with the same default
   variable shown to users).
+- When one tooling script orchestrates other repo scripts, the caller must match
+  the callee's real interface contract exactly (flag vs environment variable vs
+  positional argument). Do not pass synthetic flags that the callee does not
+  parse; verify against the callee's `usage()`/option parser in the same
+  changeset.
+- Cross-script invocations in CI/tooling paths must not assume executable bits
+  are preserved in all environments. Prefer `bash path/to/script.sh` (or ensure
+  the executable bit is enforced) so coverage/release pipelines do not fail with
+  `Permission denied`.
 
 ### 19. Python e2e/tooling harness guardrails
 

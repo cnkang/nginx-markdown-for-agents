@@ -5,7 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.5.0] - 2026-04-17
+
+This release delivers the 0.5.0 streaming line. It moves the project from
+full-buffer-only operation to a dual-engine model with bounded-memory
+streaming, plus the harness and release-gate surfaces needed to operate it.
 
 ### Added
 - Expanded E2E coverage scenarios in `collect_nginx_coverage.sh` from ~8 to ~35+
@@ -24,23 +28,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   property test
 - Advisory per-file coverage threshold logging in `collect_nginx_coverage.sh`
   (warnings only, not CI-blocking)
-
-### Fixed
-- Resolved SonarCloud leak-period C findings in the NGINX module by tightening
-  const-correctness, loop-local variable declarations, narrowing conversions in
-  conversion-option wiring, and macro/unused-parameter hygiene without changing
-  runtime conversion semantics.
-- Updated harness optional-skill documentation to avoid hard local-link
-  dependency in docs checks; the skill remains documented as an optional
-  repo-tracked path via `docs/guides/HARNESS_SKILL_SETUP.md`.
-
-## [0.5.0] - 2026-04-14
-
-This release delivers the 0.5.0 streaming line. It moves the project from
-full-buffer-only operation to a dual-engine model with bounded-memory
-streaming, plus the harness and release-gate surfaces needed to operate it.
-
-### Added
 - Streaming-focused 0.5.0 scope covering release gates, runtime integration,
   failure semantics, parity testing, rollout observability, and performance
   evidence
@@ -84,6 +71,13 @@ streaming, plus the harness and release-gate surfaces needed to operate it.
   commands
 
 ### Fixed
+- Resolved SonarCloud leak-period C findings in the NGINX module by tightening
+  const-correctness, loop-local variable declarations, narrowing conversions in
+  conversion-option wiring, and macro/unused-parameter hygiene without changing
+  runtime conversion semantics.
+- Updated harness optional-skill documentation to avoid hard local-link
+  dependency in docs checks; the skill remains documented as an optional
+  repo-tracked path via `docs/guides/HARNESS_SKILL_SETUP.md`.
 - Restored green `make harness-check-full` validation by aligning
   release-gate compatibility-matrix parsing with the 0.5.0 canonical document
   structure
