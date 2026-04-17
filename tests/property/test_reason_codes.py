@@ -701,23 +701,23 @@ def test_decision_chain_first_failing_check(failing_checks):
 
 @given(failing_checks=failing_subset_strategy)
 @settings(max_examples=100)
-def test_property2_first_check_reason_is_deterministic(failing_checks):
+def test_first_check_reason_is_deterministic(failing_checks):
     """The first-failing-check determination is deterministic: the same set
     of failing checks always produces the same reason code.
 
     **Validates: Requirements 2.2, 2.3**
     """
-    result1 = first_failing_check(failing_checks)
-    result2 = first_failing_check(failing_checks)
-    assert result1 == result2, (
-        f"Non-deterministic: got {result1} and {result2} for same input"
+    result_first = first_failing_check(failing_checks)
+    result_second = first_failing_check(failing_checks)
+    assert result_first == result_second, (
+        f"Non-deterministic: got {result_first} and {result_second} for same input"
     )
-    reason1 = ELIGIBILITY_TO_REASON[result1]
-    reason2 = ELIGIBILITY_TO_REASON[result2]
-    assert reason1 == reason2
+    reason_first = ELIGIBILITY_TO_REASON[result_first]
+    reason_second = ELIGIBILITY_TO_REASON[result_second]
+    assert reason_first == reason_second
 
 
-def test_property2_chain_order_matches_design():
+def test_chain_order_matches_design():
     """The decision chain order encoded in tests matches the design document
     Mermaid diagram exactly.
 
@@ -769,7 +769,7 @@ def failure_outcome_for_policy(on_error: str) -> str:
 
 @given(on_error=on_error_policy_strategy)
 @settings(max_examples=100)
-def test_property3_failure_outcome_depends_on_policy(on_error):
+def test_failure_outcome_depends_on_policy(on_error):
     """For any eligible request where conversion fails, the reason code
     shall be ELIGIBLE_FAILED_OPEN when on_error is 'pass', and
     ELIGIBLE_FAILED_CLOSED when on_error is 'reject'.
@@ -791,7 +791,7 @@ def test_property3_failure_outcome_depends_on_policy(on_error):
 
 @given(on_error=on_error_policy_strategy)
 @settings(max_examples=100)
-def test_property3_failure_outcome_is_always_failed_state(on_error):
+def test_failure_outcome_is_always_failed_state(on_error):
     """Regardless of on_error policy, a failed conversion always maps to
     the FAILED request state.
 
@@ -807,7 +807,7 @@ def test_property3_failure_outcome_is_always_failed_state(on_error):
 
 @given(on_error=on_error_policy_strategy)
 @settings(max_examples=100)
-def test_property3_pass_and_reject_produce_different_codes(on_error):
+def test_pass_and_reject_produce_different_codes(on_error):
     """The two on_error policies produce distinct reason codes — they are
     never the same string.
 
@@ -914,7 +914,7 @@ def parse_log_fields(entry):
     status=status_strategy,
 )
 @settings(max_examples=200)
-def test_property5_base_fields_always_present(
+def test_base_fields_always_present(
     reason_code, method, uri, content_type,
     verbosity, filter_value, accept, status
 ):
@@ -948,7 +948,7 @@ def test_property5_base_fields_always_present(
     status=status_strategy,
 )
 @settings(max_examples=200)
-def test_property5_debug_includes_extended_fields(
+def test_debug_includes_extended_fields(
     reason_code, method, uri, content_type,
     filter_value, accept, status
 ):
@@ -979,7 +979,7 @@ def test_property5_debug_includes_extended_fields(
     status=status_strategy,
 )
 @settings(max_examples=200)
-def test_property5_non_debug_excludes_extended_fields(
+def test_non_debug_excludes_extended_fields(
     reason_code, method, uri, content_type,
     verbosity, filter_value, accept, status
 ):
@@ -1031,7 +1031,7 @@ error_category_reason_strategy = st.sampled_from(
     status=status_strategy,
 )
 @settings(max_examples=200)
-def test_property8_failure_entries_include_category(
+def test_failure_entries_include_category(
     reason_code, error_category, method, uri, content_type,
     verbosity, filter_value, accept, status
 ):
@@ -1069,7 +1069,7 @@ def test_property8_failure_entries_include_category(
     status=status_strategy,
 )
 @settings(max_examples=200)
-def test_property8_non_failure_entries_no_category(
+def test_non_failure_entries_no_category(
     reason_code, method, uri, content_type,
     verbosity, filter_value, accept, status
 ):

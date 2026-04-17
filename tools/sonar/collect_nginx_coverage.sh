@@ -25,6 +25,7 @@ BACKEND_PORT=18200
 
 # ── Repeated curl header constants (shelldre:S1192) ─────────────────
 readonly ACCEPT_MARKDOWN='Accept: text/markdown'
+readonly AUTH_COOKIE_SESSION='Cookie: session_id=abc123'
 
 usage() {
   cat >&2 <<EOF
@@ -207,6 +208,15 @@ echo "==> Building and installing NGINX"
   make -j"$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)"
   make install
 )
+
+# ── Detect IPv6 loopback support ─────────────────────────────────────
+# Some CI runners disable IPv6; only emit the [::1] listen directive
+# when the loopback interface actually supports it.
+IPV6_LISTEN=""
+if curl -s --connect-timeout 1 -o /dev/null "http://[::1]:1/" 2>/dev/null \
+   || [ -f /proc/net/if_inet6 ]; then
+    IPV6_LISTEN="listen [::1]:${BACKEND_PORT};"
+fi
 
 # ── Write a comprehensive nginx.conf for coverage ───────────────────
 # This config exercises as many module code paths as possible:
@@ -413,7 +423,7 @@ http {
     # exercised when the proxy location forwards requests here.
     server {
         listen 127.0.0.1:${BACKEND_PORT};
-        listen [::1]:${BACKEND_PORT};
+        ${IPV6_LISTEN}
         server_name backend;
 
         gzip on;
@@ -516,7 +526,7 @@ curl -sS -H "${ACCEPT_MARKDOWN}" -H 'Authorization: Bearer DUMMY_TEST_TOKEN' \
   "http://127.0.0.1:${PORT}/auth/index.html" -o /dev/null -w "  auth bearer: HTTP %{http_code}\n"
 
 # Cookie prefix match (session*)
-curl -sS -H "${ACCEPT_MARKDOWN}" -H 'Cookie: session_id=abc123' \
+curl -sS -H "${ACCEPT_MARKDOWN}" -H "${AUTH_COOKIE_SESSION}" \
   "http://127.0.0.1:${PORT}/auth/index.html" -o /dev/null -w "  auth cookie prefix: HTTP %{http_code}\n"
 
 # Cookie suffix match (*_logged_in)
@@ -536,7 +546,7 @@ curl -sS -H "${ACCEPT_MARKDOWN}" -H 'Cookie: tracking=xyz; session_abc=val1; oth
   "http://127.0.0.1:${PORT}/auth/index.html" -o /dev/null -w "  auth multi-cookie: HTTP %{http_code}\n"
 
 # Auth with Cache-Control: public upstream (exercises strip-public-and-append-private)
-curl -sS -H "${ACCEPT_MARKDOWN}" -H 'Cookie: session_id=abc123' \
+curl -sS -H "${ACCEPT_MARKDOWN}" -H "${AUTH_COOKIE_SESSION}" \
   "http://127.0.0.1:${PORT}/auth-public-cc/index.html" -o /dev/null -w "  auth strip-public CC: HTTP %{http_code}\n"
 
 # Auth suffix match with Cache-Control: public (exercises CC rewriting + suffix match)
@@ -544,7 +554,7 @@ curl -sS -H "${ACCEPT_MARKDOWN}" -H 'Cookie: wordpress_logged_in=val' \
   "http://127.0.0.1:${PORT}/auth-public-cc/index.html" -o /dev/null -w "  auth suffix + CC rewrite: HTTP %{http_code}\n"
 
 # Auth-allow with cookie (exercises add-private CC path — no existing CC header)
-curl -sS -H "${ACCEPT_MARKDOWN}" -H 'Cookie: session_id=abc123' \
+curl -sS -H "${ACCEPT_MARKDOWN}" -H "${AUTH_COOKIE_SESSION}" \
   "http://127.0.0.1:${PORT}/auth-allow/index.html" -o /dev/null -w "  auth-allow add-private: HTTP %{http_code}\n"
 
 # Auth-allow with bearer (exercises is_authenticated + CC modification)
@@ -552,15 +562,15 @@ curl -sS -H "${ACCEPT_MARKDOWN}" -H 'Authorization: Bearer DUMMY_TEST_TOKEN' \
   "http://127.0.0.1:${PORT}/auth-allow/index.html" -o /dev/null -w "  auth-allow bearer: HTTP %{http_code}\n"
 
 # Auth-allow with CC expires (exercises append-private to existing CC)
-curl -sS -H "${ACCEPT_MARKDOWN}" -H 'Cookie: session_id=abc123' \
+curl -sS -H "${ACCEPT_MARKDOWN}" -H "${AUTH_COOKIE_SESSION}" \
   "http://127.0.0.1:${PORT}/auth-public-cc/index.html" -o /dev/null -w "  auth-allow CC append: HTTP %{http_code}\n"
 
 # Proxy with CC: public + auth cookie (exercises strip-public-and-append-private)
-curl -sS -H "${ACCEPT_MARKDOWN}" -H 'Cookie: session_id=abc123' \
+curl -sS -H "${ACCEPT_MARKDOWN}" -H "${AUTH_COOKIE_SESSION}" \
   "http://127.0.0.1:${PORT}/proxy-public-cc/index.html" -o /dev/null -w "  proxy CC public strip: HTTP %{http_code}\n"
 
 # Proxy with CC: no-store + auth cookie (exercises preserve-nostore path)
-curl -sS -H "${ACCEPT_MARKDOWN}" -H 'Cookie: session_id=abc123' \
+curl -sS -H "${ACCEPT_MARKDOWN}" -H "${AUTH_COOKIE_SESSION}" \
   "http://127.0.0.1:${PORT}/proxy-nostore-cc/index.html" -o /dev/null -w "  proxy CC nostore preserve: HTTP %{http_code}\n"
 
 # Proxy with CC: public + suffix cookie (exercises CC rewriting + suffix match)
@@ -643,7 +653,7 @@ curl -sS -H "${ACCEPT_MARKDOWN}" "http://127.0.0.1:${PORT}/commonmark/index.html
 curl -sS -H "${ACCEPT_MARKDOWN}" "http://127.0.0.1:${PORT}/small-limit/large.html" -o /dev/null -w "  size-limit rejection: HTTP %{http_code}\n"
 
 # Auth request triggering conversion (Cache-Control modification)
-curl -sS -H "${ACCEPT_MARKDOWN}" -H 'Cookie: session_id=abc123' \
+curl -sS -H "${ACCEPT_MARKDOWN}" -H "${AUTH_COOKIE_SESSION}" \
   "http://127.0.0.1:${PORT}/auth/index.html" -o /dev/null -w "  auth conversion (Cache-Control): HTTP %{http_code}\n"
 
 # ── Decompression scenarios (exercises ngx_http_markdown_decompression.c) ──
@@ -702,7 +712,10 @@ curl -sS -H 'Accept: application/json' "http://127.0.0.1:${PORT}/metrics-auto" -
 curl -sS "http://127.0.0.1:${PORT}/metrics" -o /dev/null -w "  metrics default: HTTP %{http_code}\n"
 
 # IPv6 metrics request (exercises sockaddr_in6 branch in metrics_impl.h)
-curl -sS -6 "http://[::1]:${BACKEND_PORT}/" -o /dev/null -w "  IPv6 backend: HTTP %{http_code}\n" 2>/dev/null || true
+# Only attempt when IPv6 loopback is available on this host.
+if [[ -n "${IPV6_LISTEN}" ]]; then
+    curl -sS -6 "http://[::1]:${BACKEND_PORT}/" -o /dev/null -w "  IPv6 backend: HTTP %{http_code}\n" 2>/dev/null || true
+fi
 
 echo "==> Stopping NGINX (flush gcov data)"
 "${RUNTIME}/sbin/nginx" -p "${RUNTIME}" -c conf/nginx.conf -s stop
