@@ -8,7 +8,61 @@
 #include <time.h>
 
 #include "../../src/ngx_http_markdown_filter_module.h"
-#include "../../src/markdown_converter.h"
+
+/*
+ * Local definition of MarkdownOptions matching the Rust FFI ABI layout.
+ * This avoids depending on the cbindgen-generated markdown_converter.h
+ * which only exists after building the Rust library (not available in
+ * the C-only unit test CI job).
+ */
+struct MarkdownOptions {
+    uint32_t       flavor;
+    uint32_t       timeout_ms;
+    uint8_t        generate_etag;
+    uint8_t        estimate_tokens;
+    uint8_t        front_matter;
+    const uint8_t *content_type;
+    uintptr_t      content_type_len;
+    const uint8_t *base_url;
+    uintptr_t      base_url_len;
+    uint64_t       streaming_budget;
+};
+
+struct MarkdownResult {
+    uint8_t   *markdown;
+    uintptr_t  markdown_len;
+    uint8_t   *etag;
+    uintptr_t  etag_len;
+    uint32_t   token_estimate;
+    uint32_t   error_code;
+    uint8_t   *error_message;
+    uintptr_t  error_len;
+    uintptr_t  peak_memory_estimate;
+};
+
+struct MarkdownConverterHandle;
+
+/* FFI stub constants and functions used by conversion_impl.h */
+#define ERROR_SUCCESS 0
+
+static void
+markdown_convert(struct MarkdownConverterHandle *handle,
+    const uint8_t *html, uintptr_t html_len,
+    const struct MarkdownOptions *options,
+    struct MarkdownResult *result)
+{
+    UNUSED(handle);
+    UNUSED(html);
+    UNUSED(html_len);
+    UNUSED(options);
+    memset(result, 0, sizeof(*result));
+}
+
+static void
+markdown_result_free(struct MarkdownResult *result)
+{
+    UNUSED(result);
+}
 
 typedef struct ngx_list_part_s ngx_list_part_t;
 typedef struct ngx_table_elt_s ngx_table_elt_t;
