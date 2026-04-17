@@ -211,10 +211,12 @@ echo "==> Building and installing NGINX"
 
 # ── Detect IPv6 loopback support ─────────────────────────────────────
 # Some CI runners disable IPv6; only emit the [::1] listen directive
-# when the loopback interface actually supports it.
+# when the loopback interface actually supports it.  Detection uses
+# filesystem checks only — no network probes required.
 IPV6_LISTEN=""
-if curl -s --connect-timeout 1 -o /dev/null "http://[::1]:1/" 2>/dev/null \
-   || [ -f /proc/net/if_inet6 ]; then
+if [[ -f /proc/net/if_inet6 ]] \
+   || ip -6 addr show dev lo >/dev/null 2>&1 \
+   || ifconfig lo0 inet6 >/dev/null 2>&1; then
     IPV6_LISTEN="listen [::1]:${BACKEND_PORT};"
 fi
 
@@ -713,8 +715,10 @@ curl -sS "http://127.0.0.1:${PORT}/metrics" -o /dev/null -w "  metrics default: 
 
 # IPv6 metrics request (exercises sockaddr_in6 branch in metrics_impl.h)
 # Only attempt when IPv6 loopback is available on this host.
+# Clear-text HTTP to localhost is intentional — this is a local coverage
+# test, not a production data path.
 if [[ -n "${IPV6_LISTEN}" ]]; then
-    curl -sS -6 "http://[::1]:${BACKEND_PORT}/" -o /dev/null -w "  IPv6 backend: HTTP %{http_code}\n" 2>/dev/null || true
+    curl -sS -6 "http://[::1]:${BACKEND_PORT}/" -o /dev/null -w "  IPv6 backend: HTTP %{http_code}\n" 2>/dev/null || true  # NOSONAR — localhost-only coverage test
 fi
 
 echo "==> Stopping NGINX (flush gcov data)"
