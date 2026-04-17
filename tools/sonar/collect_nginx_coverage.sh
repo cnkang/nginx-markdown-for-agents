@@ -476,7 +476,9 @@ cat > "${RUNTIME}/html/index.html" <<'HTML'
 </html>
 HTML
 
-# Copy index.html to all subdirectories so location blocks serve 200
+# Copy index.html to all subdirectories so location blocks serve 200.
+# Note: small-limit is intentionally excluded — it only receives large.html
+# (below) so the size-limit rejection test exercises the over-limit path.
 for subdir in auth auth-public-cc auth-allow reject-error ims-only no-conditional \
               no-wildcard disabled gfm commonmark log-error \
               streaming streaming-auto streaming-tiny-budget; do
