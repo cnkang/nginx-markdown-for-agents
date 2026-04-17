@@ -226,7 +226,7 @@ if [[ -n "${NGINX_BIN}" ]]; then
   NGINX_EXECUTABLE="${NGINX_BIN}"
 else
   echo "==> Building Rust converter (${RUST_TARGET})"
-  markdown_prepare_rust_converter_release "${WORKSPACE_ROOT}" "${RUST_TARGET}" >/dev/null
+  markdown_prepare_rust_converter_release "${WORKSPACE_ROOT}" "${RUST_TARGET}" --features streaming >/dev/null
 
   echo "==> Downloading/building NGINX ${NGINX_VERSION}"
   curl --proto '=https' --tlsv1.2 -fsSL "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" -o "${BUILDROOT}/nginx.tar.gz"

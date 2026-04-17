@@ -1,5 +1,12 @@
 include make/targets.mk
 
+SECTION_GC_LDFLAGS ?=
+ifeq ($(UNAME_S),Darwin)
+SECTION_GC_LDFLAGS := -Wl,-dead_strip
+else
+SECTION_GC_LDFLAGS := -Wl,--gc-sections
+endif
+
 CLANG ?= clang
 SANITIZER_FLAGS ?= -O1 -fno-omit-frame-pointer -fsanitize=address,undefined
 UNAME_S ?= $(shell uname -s)
@@ -27,7 +34,9 @@ build/unit/%: unit/%_test.c include/test_common.h include/test_metrics_snapshot.
 	  headers) extra_srcs="helpers/headers_standalone.c" ;; \
 	  header_compile|reason_code) extra_cflags="-I../src -Iinclude/nginx_stubs -DMARKDOWN_STREAMING_ENABLED" ;; \
 	  gzip_deflate_decompression) extra_ldflags="-lz" ;; \
+	  streaming_decomp) extra_cflags="-I../src -Iinclude/nginx_stubs -DMARKDOWN_STREAMING_ENABLED"; extra_ldflags="-lz" ;; \
 	  streaming) extra_cflags="-DMARKDOWN_STREAMING_ENABLED" ;; \
+	  conversion_impl_base_url) extra_cflags="-Iinclude/nginx_stubs -ffunction-sections" ; extra_ldflags="$$SECTION_GC_LDFLAGS" ;; \
 	esac; \
 	$(CC) $(CFLAGS_COMMON) $(LDFLAGS_COMMON) $$extra_cflags -o "$@" "$<" $$extra_srcs $$extra_ldflags
 

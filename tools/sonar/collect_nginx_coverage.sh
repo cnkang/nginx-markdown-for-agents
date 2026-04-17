@@ -198,6 +198,7 @@ echo "==> Configuring NGINX with --coverage"
   cd "${BUILDROOT}"
   ./configure \
     --without-http_rewrite_module \
+    --with-http_ssl_module \
     --prefix="${RUNTIME}" \
     --add-module="${WORKSPACE_ROOT}/components/nginx-module" \
     --with-cc-opt="--coverage -O0 -g" \
@@ -376,6 +377,35 @@ http {
             markdown_max_size 1m;
         }
 
+        # Streaming + gzip proxy (exercises streaming decompression path)
+        location /streaming-proxy-gzip {
+            proxy_pass http://127.0.0.1:${BACKEND_PORT}/;
+            proxy_set_header Accept-Encoding gzip;
+            markdown_filter on;
+            markdown_on_wildcard on;
+            markdown_streaming_engine on;
+            markdown_conditional_requests disabled;
+            markdown_streaming_on_error pass;
+            markdown_log_verbosity debug;
+            markdown_on_error pass;
+            markdown_max_size 1m;
+        }
+
+        # Streaming + gzip proxy + tiny budget + reject
+        location /streaming-proxy-gzip-reject {
+            proxy_pass http://127.0.0.1:${BACKEND_PORT}/;
+            proxy_set_header Accept-Encoding gzip;
+            markdown_filter on;
+            markdown_on_wildcard on;
+            markdown_streaming_engine on;
+            markdown_conditional_requests disabled;
+            markdown_streaming_budget 1;
+            markdown_streaming_on_error reject;
+            markdown_log_verbosity debug;
+            markdown_on_error pass;
+            markdown_max_size 1m;
+        }
+
         # Proxy to backend with Cache-Control: public (exercises strip-public CC path)
         location /proxy-public-cc {
             proxy_pass http://127.0.0.1:${BACKEND_PORT}/with-public-cc/;
@@ -409,6 +439,31 @@ http {
             markdown_log_verbosity debug;
         }
 
+        # Streaming engine selected by request arg (on/off/auto/invalid)
+        location /streaming-variable {
+            root html;
+            markdown_filter on;
+            markdown_streaming_engine \$arg_engine;
+            markdown_conditional_requests disabled;
+            markdown_log_verbosity debug;
+        }
+
+        location /streaming-fullsupport {
+            root html;
+            markdown_filter on;
+            markdown_streaming_engine on;
+            markdown_conditional_requests full_support;
+            markdown_log_verbosity debug;
+        }
+
+        location /streaming-ims-only {
+            root html;
+            markdown_filter on;
+            markdown_streaming_engine on;
+            markdown_conditional_requests if_modified_since_only;
+            markdown_log_verbosity debug;
+        }
+
         # Streaming with tiny budget to trigger budget-exceeded failure
         location /streaming-tiny-budget {
             root html;
@@ -418,6 +473,24 @@ http {
             markdown_streaming_budget 1;
             markdown_log_verbosity debug;
             markdown_on_error pass;
+        }
+
+        location /streaming-reject-budget {
+            root html;
+            markdown_filter on;
+            markdown_streaming_engine on;
+            markdown_conditional_requests disabled;
+            markdown_streaming_budget 1;
+            markdown_streaming_on_error reject;
+            markdown_log_verbosity debug;
+            markdown_on_error pass;
+        }
+
+        location /no-forwarded-trust {
+            root html;
+            markdown_filter on;
+            markdown_trust_forwarded_headers off;
+            markdown_log_verbosity debug;
         }
     }
 
@@ -458,7 +531,9 @@ EOF
 # Create subdirectories for location blocks that use root html
 for subdir in auth auth-public-cc auth-allow reject-error ims-only no-conditional \
               no-wildcard disabled gfm commonmark small-limit log-error \
-              streaming streaming-auto streaming-tiny-budget; do
+              streaming streaming-auto streaming-tiny-budget \
+              streaming-variable streaming-fullsupport streaming-ims-only \
+              streaming-reject-budget no-forwarded-trust; do
   mkdir -p "${RUNTIME}/html/${subdir}"
 done
 
@@ -481,7 +556,9 @@ HTML
 # (below) so the size-limit rejection test exercises the over-limit path.
 for subdir in auth auth-public-cc auth-allow reject-error ims-only no-conditional \
               no-wildcard disabled gfm commonmark log-error \
-              streaming streaming-auto streaming-tiny-budget; do
+              streaming streaming-auto streaming-tiny-budget \
+              streaming-variable streaming-fullsupport streaming-ims-only \
+              streaming-reject-budget no-forwarded-trust; do
   cp "${RUNTIME}/html/index.html" "${RUNTIME}/html/${subdir}/index.html"
 done
 
@@ -674,6 +751,15 @@ curl -sS -H "${ACCEPT_MARKDOWN}" \
 curl -sS -H "${ACCEPT_MARKDOWN}" \
   "http://127.0.0.1:${PORT}/proxy-gzip/large.html" -o /dev/null -w "  gzip proxy large: HTTP %{http_code}\n"
 
+# Streaming + gzip proxy (exercises streaming_decomp_impl.h)
+curl -sS -H "${ACCEPT_MARKDOWN}" \
+  "http://127.0.0.1:${PORT}/streaming-proxy-gzip/index.html" -o /dev/null -w "  streaming gzip proxy: HTTP %{http_code}\n"
+
+# Streaming + gzip proxy + reject on pre-commit failure
+curl -sS -H "${ACCEPT_MARKDOWN}" \
+  "http://127.0.0.1:${PORT}/streaming-proxy-gzip-reject/large.html" \
+  -o /dev/null -w "  streaming gzip reject: HTTP %{http_code}\n" || true
+
 # ── X-Forwarded header scenarios (exercises conversion_impl.h header iteration) ──
 
 # X-Forwarded-Proto + X-Forwarded-Host (exercises find_request_header_value + const_strncasecmp)
@@ -684,6 +770,11 @@ curl -sS -H "${ACCEPT_MARKDOWN}" \
 # Only X-Forwarded-Proto (partial proxy headers — exercises fallback path)
 curl -sS -H "${ACCEPT_MARKDOWN}" -H 'X-Forwarded-Proto: https' \
   "http://127.0.0.1:${PORT}/index.html" -o /dev/null -w "  X-Forwarded-Proto only: HTTP %{http_code}\n"
+
+# Forwarded headers ignored when trust_forwarded_headers=off
+curl -sS -H "${ACCEPT_MARKDOWN}" \
+  -H 'X-Forwarded-Proto: https' -H 'X-Forwarded-Host: ignored.example' \
+  "http://127.0.0.1:${PORT}/no-forwarded-trust/index.html" -o /dev/null -w "  X-Forwarded trust disabled: HTTP %{http_code}\n"
 
 # ── Streaming engine scenarios (exercises streaming code paths) ─────
 
@@ -703,10 +794,38 @@ curl -sS -H 'Accept: text/html' \
 curl -sS -H "${ACCEPT_MARKDOWN}" \
   "http://127.0.0.1:${PORT}/streaming-tiny-budget/index.html" -o /dev/null -w "  streaming budget fail: HTTP %{http_code}\n"
 
+# Streaming tiny budget + reject branch
+curl -sS -H "${ACCEPT_MARKDOWN}" \
+  "http://127.0.0.1:${PORT}/streaming-reject-budget/index.html" -o /dev/null -w "  streaming budget reject: HTTP %{http_code}\n" || true
+
+# Streaming HEAD and Range requests
+curl -sS -I -H "${ACCEPT_MARKDOWN}" \
+  "http://127.0.0.1:${PORT}/streaming/index.html" -o /dev/null -w "  streaming HEAD: HTTP %{http_code}\n"
+curl -sS -H "${ACCEPT_MARKDOWN}" -H 'Range: bytes=0-100' \
+  "http://127.0.0.1:${PORT}/streaming/index.html" -o /dev/null -w "  streaming Range: HTTP %{http_code}\n"
+
+# Streaming conditional modes
+curl -sS -H "${ACCEPT_MARKDOWN}" -H 'If-None-Match: "etag-value"' \
+  "http://127.0.0.1:${PORT}/streaming-fullsupport/index.html" -o /dev/null -w "  streaming full_support INM: HTTP %{http_code}\n"
+curl -sS -H "${ACCEPT_MARKDOWN}" -H 'If-Modified-Since: Thu, 01 Jan 2099 00:00:00 GMT' \
+  "http://127.0.0.1:${PORT}/streaming-ims-only/index.html" -o /dev/null -w "  streaming ims-only IMS: HTTP %{http_code}\n"
+
+# Streaming engine variable selection (on/off/auto/invalid)
+curl -sS -H "${ACCEPT_MARKDOWN}" \
+  "http://127.0.0.1:${PORT}/streaming-variable/index.html?engine=on" -o /dev/null -w "  streaming variable on: HTTP %{http_code}\n"
+curl -sS -H "${ACCEPT_MARKDOWN}" \
+  "http://127.0.0.1:${PORT}/streaming-variable/index.html?engine=off" -o /dev/null -w "  streaming variable off: HTTP %{http_code}\n"
+curl -sS -H "${ACCEPT_MARKDOWN}" \
+  "http://127.0.0.1:${PORT}/streaming-variable/index.html?engine=auto" -o /dev/null -w "  streaming variable auto: HTTP %{http_code}\n"
+curl -sS -H "${ACCEPT_MARKDOWN}" \
+  "http://127.0.0.1:${PORT}/streaming-variable/index.html?engine=bad" -o /dev/null -w "  streaming variable invalid: HTTP %{http_code}\n"
+
 # ── Metrics scenarios (Req 5) — after conversion scenarios ──────────
 
 # Prometheus format
 curl -sS "http://127.0.0.1:${PORT}/metrics-prometheus" -o /dev/null -w "  metrics prometheus: HTTP %{http_code}\n"
+curl -sS -H 'Accept: text/plain; version=0.0.4' \
+  "http://127.0.0.1:${PORT}/metrics-prometheus" -o /dev/null -w "  metrics prometheus accept-v0.0.4: HTTP %{http_code}\n"
 
 # Auto format (plain text)
 curl -sS -H 'Accept: text/plain' "http://127.0.0.1:${PORT}/metrics-auto" -o /dev/null -w "  metrics auto text: HTTP %{http_code}\n"
@@ -728,6 +847,44 @@ fi
 echo "==> Stopping NGINX (flush gcov data)"
 "${RUNTIME}/sbin/nginx" -p "${RUNTIME}" -c conf/nginx.conf -s stop
 sleep 2
+
+echo "==> Running extended streaming failure/cache e2e coverage"
+"${WORKSPACE_ROOT}/tools/e2e/verify_streaming_failure_cache_e2e.sh" \
+  --nginx-bin "${RUNTIME}/sbin/nginx" \
+  --port 18296 \
+  --upstream-port 19296 \
+  --markdown-max-size 1m
+
+echo "==> Running streaming e2e coverage"
+if ! bash "${WORKSPACE_ROOT}/tools/e2e/verify_streaming_e2e.sh" \
+  --nginx-bin "${RUNTIME}/sbin/nginx"; then
+    echo "  WARNING: streaming e2e coverage run failed; continuing" >&2
+fi
+
+echo "==> Running chunked streaming e2e coverage (smoke)"
+if ! NGINX_BIN="${RUNTIME}/sbin/nginx" \
+  bash "${WORKSPACE_ROOT}/tools/e2e/verify_chunked_streaming_native_e2e.sh" \
+    --profile smoke \
+    --port 18294 \
+    --upstream-port 19294 \
+    --markdown-max-size 1m; then
+    echo "  WARNING: chunked streaming e2e coverage run failed; continuing" >&2
+fi
+
+echo "==> Running large markdown response e2e coverage"
+if ! NGINX_BIN="${RUNTIME}/sbin/nginx" \
+  bash "${WORKSPACE_ROOT}/tools/e2e/verify_large_markdown_response_e2e.sh" \
+    --port 18291; then
+    echo "  WARNING: large markdown e2e coverage run failed; continuing" >&2
+fi
+
+echo "==> Running proxy TLS backend e2e coverage"
+if ! NGINX_BIN="${RUNTIME}/sbin/nginx" \
+  bash "${WORKSPACE_ROOT}/tools/e2e/verify_proxy_tls_backend_e2e.sh" \
+    --port 18289 \
+    --backend-port 19289; then
+    echo "  WARNING: proxy TLS backend e2e coverage run failed; continuing" >&2
+fi
 
 # ── Collect gcov/lcov coverage ──────────────────────────────────────
 echo "==> Collecting coverage data"
