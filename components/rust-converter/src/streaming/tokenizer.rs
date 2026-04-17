@@ -334,9 +334,9 @@ mod tests {
     #[test]
     fn test_text_before_tag_preserves_trailing_space() {
         // Single chunk: "Text with <strong>bold</strong>"
-        let mut tok1 = StreamingTokenizer::new();
-        let events1 = tok1.feed("<p>Text with <strong>bold</strong></p>").unwrap();
-        let texts1: Vec<String> = events1
+        let mut tok_first_chunk = StreamingTokenizer::new();
+        let events_first_chunk = tok_first_chunk.feed("<p>Text with <strong>bold</strong></p>").unwrap();
+        let texts_first_chunk: Vec<String> = events_first_chunk
             .iter()
             .filter_map(|e| {
                 if let StreamEvent::Text(t) = e {
@@ -348,10 +348,10 @@ mod tests {
             .collect();
 
         // Chunked: split inside the <strong> tag
-        let mut tok2 = StreamingTokenizer::new();
-        let ev2a = tok2.feed("<p>Text with <str").unwrap();
-        let ev2b = tok2.feed("ong>bold</strong></p>").unwrap();
-        let texts2: Vec<String> = ev2a
+        let mut tok_second_chunk = StreamingTokenizer::new();
+        let ev2a = tok_second_chunk.feed("<p>Text with <str").unwrap();
+        let ev2b = tok_second_chunk.feed("ong>bold</strong></p>").unwrap();
+        let texts_second_chunk: Vec<String> = ev2a
             .iter()
             .chain(ev2b.iter())
             .filter_map(|e| {
@@ -363,13 +363,13 @@ mod tests {
             })
             .collect();
 
-        let combined1 = texts1.join("");
-        let combined2 = texts2.join("");
+        let combined_first = texts_first_chunk.join("");
+        let combined_second = texts_second_chunk.join("");
         assert_eq!(
-            combined1, combined2,
+            combined_first, combined_second,
             "Text content should be identical regardless of chunk split.\n\
              Single: {:?}\nChunked: {:?}",
-            texts1, texts2
+            texts_first_chunk, texts_second_chunk
         );
     }
 

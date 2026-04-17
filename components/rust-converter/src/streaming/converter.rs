@@ -1398,15 +1398,15 @@ mod tests {
     #[test]
     fn test_multi_chunk_feed() {
         let mut conv = make_converter();
-        let out1 = conv.feed_chunk(b"<h1>Title</h1>").unwrap();
-        let out2 = conv.feed_chunk(b"<p>Paragraph one.</p>").unwrap();
-        let out3 = conv.feed_chunk(b"<p>Paragraph two.</p>").unwrap();
+        let out_title = conv.feed_chunk(b"<h1>Title</h1>").unwrap();
+        let out_paragraph_one = conv.feed_chunk(b"<p>Paragraph one.</p>").unwrap();
+        let out_paragraph_two = conv.feed_chunk(b"<p>Paragraph two.</p>").unwrap();
         let result = conv.finalize().unwrap();
 
         let mut full = Vec::new();
-        full.extend_from_slice(&out1.markdown);
-        full.extend_from_slice(&out2.markdown);
-        full.extend_from_slice(&out3.markdown);
+        full.extend_from_slice(&out_title.markdown);
+        full.extend_from_slice(&out_paragraph_one.markdown);
+        full.extend_from_slice(&out_paragraph_two.markdown);
         full.extend_from_slice(&result.final_markdown);
         let text = String::from_utf8(full).unwrap();
         assert!(text.contains("# Title"), "got: {}", text);
@@ -1746,12 +1746,12 @@ mod tests {
         assert_eq!(conv.metadata().url, None);
 
         // After finalize, url should fall back to base_url
-        let opts2 = ConversionOptions {
+        let streaming_opts = ConversionOptions {
             extract_metadata: true,
             base_url: Some("https://fallback.example.com".to_string()),
             ..ConversionOptions::default()
         };
-        let mut conv2 = StreamingConverter::new(opts2, MemoryBudget::default());
+        let mut conv2 = StreamingConverter::new(streaming_opts, MemoryBudget::default());
         conv2.set_content_type(Some("text/html; charset=UTF-8".to_string()));
         conv2
             .feed_chunk(b"<html><head><title>T</title></head><body><p>x</p></body></html>")
@@ -1997,12 +1997,12 @@ mod tests {
         // After finalize, base_url should overwrite og:url (no canonical)
         // We need a second converter to test post-finalize state since
         // finalize consumes self. Verify via a fresh instance.
-        let opts2 = ConversionOptions {
+        let alternate_opts = ConversionOptions {
             extract_metadata: true,
             base_url: Some("https://base.example.com".to_string()),
             ..ConversionOptions::default()
         };
-        let mut conv2 = StreamingConverter::new(opts2, MemoryBudget::default());
+        let mut conv2 = StreamingConverter::new(alternate_opts, MemoryBudget::default());
         conv2.set_content_type(Some("text/html; charset=UTF-8".to_string()));
         conv2
             .feed_chunk(
@@ -2199,13 +2199,13 @@ mod tests {
 
     #[test]
     fn test_split_utf8_tail_incomplete_one_to_three_byte_cases() {
-        let (_, tail1) = split_utf8_tail(&[0xF0]);
-        let (_, tail2) = split_utf8_tail(&[0xF0, 0x9F]);
-        let (_, tail3) = split_utf8_tail(&[0xF0, 0x9F, 0x92]);
+        let (_, tail_first_chunk) = split_utf8_tail(&[0xF0]);
+        let (_, tail_second_chunk) = split_utf8_tail(&[0xF0, 0x9F]);
+        let (_, tail_third_chunk) = split_utf8_tail(&[0xF0, 0x9F, 0x92]);
 
-        assert_eq!(tail1, &[0xF0]);
-        assert_eq!(tail2, &[0xF0, 0x9F]);
-        assert_eq!(tail3, &[0xF0, 0x9F, 0x92]);
+        assert_eq!(tail_first_chunk, &[0xF0]);
+        assert_eq!(tail_second_chunk, &[0xF0, 0x9F]);
+        assert_eq!(tail_third_chunk, &[0xF0, 0x9F, 0x92]);
     }
 
     #[test]
@@ -2235,13 +2235,13 @@ mod tests {
     #[test]
     fn test_split_utf8_tail_incomplete_then_invalid_followup_recovers() {
         let first_chunk = [0x41, 0xC2];
-        let (valid1, tail1) = split_utf8_tail(&first_chunk);
-        assert_eq!(valid1, b"A");
+        let (valid_first_chunk, tail1) = split_utf8_tail(&first_chunk);
+        assert_eq!(valid_first_chunk, b"A");
         assert_eq!(tail1, &[0xC2]);
 
         let second_chunk = [tail1[0], 0x41];
-        let (valid2, tail2) = split_utf8_tail(&second_chunk);
-        assert_eq!(valid2, &second_chunk);
+        let (valid_second_chunk, tail2) = split_utf8_tail(&second_chunk);
+        assert_eq!(valid_second_chunk, &second_chunk);
         assert!(tail2.is_empty());
     }
 

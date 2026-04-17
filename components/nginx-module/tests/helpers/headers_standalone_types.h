@@ -126,6 +126,11 @@ extern u_char *ngx_http_markdown_sprintf_token(u_char *buf, ngx_uint_t token_cou
     (str)->len = sizeof(text) - 1; (str)->data = (u_char *) text
 
 #define ngx_memcpy memcpy
+/* Shared content-type constant and length used by headers_impl.h */
+extern u_char ngx_http_markdown_content_type[];
+#define NGX_HTTP_MARKDOWN_CONTENT_TYPE_LEN \
+    (sizeof("text/markdown; charset=utf-8") - 1)
+
 #define NGX_HTTP_MARKDOWN_ENABLE_AUTH_CACHE_CONTROL 0
 
 #endif
