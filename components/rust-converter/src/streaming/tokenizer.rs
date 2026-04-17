@@ -335,7 +335,9 @@ mod tests {
     fn test_text_before_tag_preserves_trailing_space() {
         // Single chunk: "Text with <strong>bold</strong>"
         let mut tok_first_chunk = StreamingTokenizer::new();
-        let events_first_chunk = tok_first_chunk.feed("<p>Text with <strong>bold</strong></p>").unwrap();
+        let events_first_chunk = tok_first_chunk
+            .feed("<p>Text with <strong>bold</strong></p>")
+            .unwrap();
         let texts_first_chunk: Vec<String> = events_first_chunk
             .iter()
             .filter_map(|e| {
