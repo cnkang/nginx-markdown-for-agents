@@ -1418,11 +1418,15 @@ mod tests {
         // Convert the same HTML twice
         let dom_first_parse = parse_html(html).expect("Parse failed");
         let converter_first = MarkdownConverter::new();
-        let result_first_conversion = converter_first.convert(&dom_first_parse).expect("Conversion failed");
+        let result_first_conversion = converter_first
+            .convert(&dom_first_parse)
+            .expect("Conversion failed");
 
         let dom_second_parse = parse_html(html).expect("Parse failed");
         let converter_second = MarkdownConverter::new();
-        let result_second_conversion = converter_second.convert(&dom_second_parse).expect("Conversion failed");
+        let result_second_conversion = converter_second
+            .convert(&dom_second_parse)
+            .expect("Conversion failed");
 
         // Results should be byte-for-byte identical
         assert_eq!(result_first_conversion, result_second_conversion);
