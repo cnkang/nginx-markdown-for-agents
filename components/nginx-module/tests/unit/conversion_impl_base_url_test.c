@@ -294,8 +294,9 @@ ngx_http_markdown_metrics_t *ngx_http_markdown_metrics = NULL;
 ngx_int_t (*ngx_http_next_body_filter)(ngx_http_request_t *r, ngx_chain_t *in) = NULL;
 
 static ngx_int_t
-ngx_http_markdown_forward_headers(ngx_http_request_t *r,
-    ngx_http_markdown_ctx_t *ctx)
+ngx_http_markdown_forward_headers(
+    ngx_http_request_t *r,     /* NOSONAR c:S995 — must match production signature */
+    ngx_http_markdown_ctx_t *ctx)  /* NOSONAR c:S995 — must match production signature */
 {
     UNUSED(r);
     UNUSED(ctx);
@@ -311,7 +312,8 @@ ngx_http_markdown_metric_inc_failopen(
 
 static ngx_int_t
 ngx_http_markdown_reject_or_fail_open_buffered_response(
-    ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx,
+    ngx_http_request_t *r,     /* NOSONAR c:S995 — must match impl forward decl */
+    ngx_http_markdown_ctx_t *ctx,  /* NOSONAR c:S995 — must match impl forward decl */
     const ngx_http_markdown_conf_t *conf, const char *debug_message)
 {
     UNUSED(r);
@@ -332,13 +334,17 @@ const ngx_str_t *
 ngx_http_markdown_error_category_string(
     ngx_http_markdown_error_category_t category)
 {
-    static ngx_str_t system_str = { 11, (u_char *) "FAIL_SYSTEM" };
+    static u_char system_str_data[] = "FAIL_SYSTEM";
+    static ngx_str_t system_str = {
+        sizeof("FAIL_SYSTEM") - 1, system_str_data
+    };
     UNUSED(category);
     return &system_str;
 }
 
 ngx_int_t
-ngx_http_markdown_update_headers(ngx_http_request_t *r,
+ngx_http_markdown_update_headers(
+    ngx_http_request_t *r,     /* NOSONAR c:S995 — must match module header decl */
     const struct MarkdownResult *result,
     const ngx_http_markdown_conf_t *conf)
 {
@@ -349,10 +355,11 @@ ngx_http_markdown_update_headers(ngx_http_request_t *r,
 }
 
 ngx_int_t
-ngx_http_markdown_handle_if_none_match(ngx_http_request_t *r,
+ngx_http_markdown_handle_if_none_match(
+    ngx_http_request_t *r,     /* NOSONAR c:S995 — must match module header decl */
     const ngx_http_markdown_conf_t *conf,
     const ngx_http_markdown_ctx_t *ctx,
-    struct MarkdownConverterHandle *converter,
+    struct MarkdownConverterHandle *converter,  /* NOSONAR c:S995 — must match module header decl */
     struct MarkdownResult **result)
 {
     UNUSED(r);
@@ -364,7 +371,8 @@ ngx_http_markdown_handle_if_none_match(ngx_http_request_t *r,
 }
 
 ngx_int_t
-ngx_http_markdown_send_304(ngx_http_request_t *r,
+ngx_http_markdown_send_304(
+    ngx_http_request_t *r,     /* NOSONAR c:S995 — must match module header decl */
     const struct MarkdownResult *result)
 {
     UNUSED(r);
