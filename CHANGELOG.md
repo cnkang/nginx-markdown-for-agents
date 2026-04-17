@@ -30,6 +30,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   const-correctness, loop-local variable declarations, narrowing conversions in
   conversion-option wiring, and macro/unused-parameter hygiene without changing
   runtime conversion semantics.
+- Updated harness optional-skill documentation to avoid hard local-link
+  dependency in docs checks; the skill remains documented as an optional
+  repo-tracked path via `docs/guides/HARNESS_SKILL_SETUP.md`.
 
 ## [0.5.0] - 2026-04-14
 
