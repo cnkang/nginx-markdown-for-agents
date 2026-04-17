@@ -35,8 +35,11 @@ typedef unsigned long ngx_atomic_uint_t;
  * Field names, types, and order must match exactly so that the offsets
  * used by ngx_http_markdown_metrics_write_prometheus() are correct.
  * Any change to the production struct requires updating this local copy.
+ *
+ * NOSONAR c:S1820 — field count mirrors production struct; grouping
+ * into sub-structs would break ABI compatibility with the impl header.
  */
-typedef struct {
+typedef struct { /* NOSONAR */
     ngx_atomic_t  conversions_attempted;
     ngx_atomic_t  conversions_succeeded;
     ngx_atomic_t  conversions_failed;
@@ -102,15 +105,17 @@ typedef struct {
  * The production ngx_slprintf uses NGINX's own format specifiers
  * (%uA for ngx_atomic_uint_t).  In this test stub we map %uA to
  * %d since ngx_atomic_t is int.
+ *
+ * NOSONAR c:S923 — variadic signature must match production ngx_slprintf.
  */
 static u_char *
-ngx_slprintf(u_char *buf, u_char *last, const char *fmt, ...)
+ngx_slprintf(u_char *buf, u_char *last, const char *fmt, ...) /* NOSONAR */
 {
-    va_list  args;
-    int      n;
-    size_t   remaining;
-    char    *rewritten;
-    char     local_fmt[4096];
+    va_list      args;
+    int          n;
+    size_t       remaining;
+    const char  *rewritten;
+    char         local_fmt[4096];
     size_t   fi;
     size_t   oi;
 
@@ -168,8 +173,11 @@ ngx_slprintf(u_char *buf, u_char *last, const char *fmt, ...)
 /* Enable streaming metrics in the renderer */
 #define MARKDOWN_STREAMING_ENABLED 1
 
-/* Include the real production renderer */
-#include "../../src/ngx_http_markdown_prometheus_impl.h"
+/*
+ * NOSONAR c:S954 — the impl header must follow type definitions and
+ * stubs above; it cannot be moved to the top of the file.
+ */
+#include "../../src/ngx_http_markdown_prometheus_impl.h" /* NOSONAR */
 
 /* ── Helpers ──────────────────────────────────────────────────────── */
 
@@ -410,7 +418,7 @@ static void
 test_truncation_detection(void)
 {
     u_char buf[64];  /* intentionally tiny */
-    u_char *p;
+    const u_char *p;
     ngx_http_markdown_metrics_snapshot_t s;
 
     TEST_SUBSECTION("Buffer truncation returns NULL");
