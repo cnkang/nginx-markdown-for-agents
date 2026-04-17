@@ -113,6 +113,7 @@ PY
       printf '%s\n' "${requested}"
       ;;
   esac
+  return 0
 }
 
 # ── Platform-aware lcov error policy ────────────────────────────────
@@ -141,6 +142,7 @@ build_lcov_ignore_args() {
   fi
 
   printf '%s' "${args}"
+  return 0
 }
 
 cleanup() {
