@@ -687,21 +687,19 @@ impl StreamingConverter {
                     "meta" => {
                         self.extract_meta_tag(attrs);
                     }
-                    "link" => {
+                    "link" if !self.canonical_found => {
                         // First `<link rel="canonical" href="...">` with an href
                         // wins. Canonicals without href are skipped, matching
                         // full-buffer `find_link_href_recursive` which returns
                         // `get_attr("href")` — if None, recursion continues.
-                        if !self.canonical_found {
-                            let is_canonical =
-                                attrs.iter().any(|(k, v)| k == "rel" && v == "canonical");
-                            if is_canonical
-                                && let Some((_, href)) = attrs.iter().find(|(k, _)| k == "href")
-                            {
-                                self.canonical_found = true;
-                                self.metadata.url = Some(self.resolve_url(href));
-                                // No href → skip this canonical, keep looking
-                            }
+                        let is_canonical =
+                            attrs.iter().any(|(k, v)| k == "rel" && v == "canonical");
+                        if is_canonical
+                            && let Some((_, href)) = attrs.iter().find(|(k, _)| k == "href")
+                        {
+                            self.canonical_found = true;
+                            self.metadata.url = Some(self.resolve_url(href));
+                            // No href → skip this canonical, keep looking
                         }
                     }
                     _ => {}
@@ -711,27 +709,23 @@ impl StreamingConverter {
                     self.collecting_title = false;
                 }
             }
-            StreamEvent::EndTag { name } => {
-                if name == "title" {
-                    self.collecting_title = false;
-                    // First <title> wins unconditionally (matching full-buffer
-                    // find_title which returns the first match's trimmed text,
-                    // even if empty). Mark html_title_set regardless of content
-                    // so subsequent <title> elements are ignored.
-                    if !self.social_title_set && !self.html_title_set {
-                        let trimmed = self.html_title_buf.trim().to_string();
-                        self.metadata.title = Some(trimmed);
-                        self.html_title_set = true;
-                    }
-                    self.html_title_buf.clear();
+            StreamEvent::EndTag { name } if name == "title" => {
+                self.collecting_title = false;
+                // First <title> wins unconditionally (matching full-buffer
+                // find_title which returns the first match's trimmed text,
+                // even if empty). Mark html_title_set regardless of content
+                // so subsequent <title> elements are ignored.
+                if !self.social_title_set && !self.html_title_set {
+                    let trimmed = self.html_title_buf.trim().to_string();
+                    self.metadata.title = Some(trimmed);
+                    self.html_title_set = true;
                 }
+                self.html_title_buf.clear();
             }
-            StreamEvent::Text(text) => {
-                if self.collecting_title && !text.is_empty() {
-                    // Collect raw text into the separate buffer.
-                    // The final trim happens at </title> above.
-                    self.append_title_text_bounded(text);
-                }
+            StreamEvent::Text(text) if self.collecting_title && !text.is_empty() => {
+                // Collect raw text into the separate buffer.
+                // The final trim happens at </title> above.
+                self.append_title_text_bounded(text);
             }
             _ => {}
         }
@@ -813,31 +807,21 @@ impl StreamingConverter {
                     self.metadata.description = Some(content);
                 }
                 // Generic description: first-wins fallback
-                "description" => {
-                    if self.metadata.description.is_none() {
-                        self.metadata.description = Some(content);
-                    }
+                "description" if self.metadata.description.is_none() => {
+                    self.metadata.description = Some(content);
                 }
                 // OG/Twitter image: first-wins (resolve URL if configured)
-                "og:image" | "twitter:image" => {
-                    if self.metadata.image.is_none() {
-                        self.metadata.image = Some(self.resolve_url(&content));
-                    }
+                "og:image" | "twitter:image" if self.metadata.image.is_none() => {
+                    self.metadata.image = Some(self.resolve_url(&content));
                 }
-                "og:url" => {
-                    if self.metadata.url.is_none() {
-                        self.metadata.url = Some(content);
-                    }
+                "og:url" if self.metadata.url.is_none() => {
+                    self.metadata.url = Some(content);
                 }
-                "author" => {
-                    if self.metadata.author.is_none() {
-                        self.metadata.author = Some(content);
-                    }
+                "author" if self.metadata.author.is_none() => {
+                    self.metadata.author = Some(content);
                 }
-                "article:published_time" => {
-                    if self.metadata.published.is_none() {
-                        self.metadata.published = Some(content);
-                    }
+                "article:published_time" if self.metadata.published.is_none() => {
+                    self.metadata.published = Some(content);
                 }
                 _ => {}
             }
