@@ -492,6 +492,109 @@ http {
             markdown_trust_forwarded_headers off;
             markdown_log_verbosity debug;
         }
+
+        # Streaming with ETag + token estimate (exercises finalize metadata paths)
+        location /streaming-etag-tokens {
+            root html;
+            markdown_filter on;
+            markdown_streaming_engine on;
+            markdown_conditional_requests disabled;
+            markdown_etag on;
+            markdown_token_estimate on;
+            markdown_log_verbosity debug;
+        }
+
+        # Streaming with front_matter enabled (exercises conversion options)
+        location /streaming-front-matter {
+            root html;
+            markdown_filter on;
+            markdown_streaming_engine on;
+            markdown_conditional_requests disabled;
+            markdown_front_matter on;
+            markdown_log_verbosity debug;
+        }
+
+        # Streaming with GFM flavor (exercises prepare_conversion_options flavor path)
+        location /streaming-gfm {
+            root html;
+            markdown_filter on;
+            markdown_streaming_engine on;
+            markdown_conditional_requests disabled;
+            markdown_flavor gfm;
+            markdown_log_verbosity debug;
+        }
+
+        # Streaming with large budget (exercises normal streaming finalize)
+        location /streaming-large-budget {
+            root html;
+            markdown_filter on;
+            markdown_streaming_engine on;
+            markdown_conditional_requests disabled;
+            markdown_streaming_budget 10m;
+            markdown_etag on;
+            markdown_token_estimate on;
+            markdown_log_verbosity debug;
+            markdown_on_error pass;
+            markdown_max_size 10m;
+        }
+
+        # Streaming with on_error reject (exercises reject policy in streaming init)
+        location /streaming-on-error-reject {
+            root html;
+            markdown_filter on;
+            markdown_streaming_engine on;
+            markdown_conditional_requests disabled;
+            markdown_on_error reject;
+            markdown_log_verbosity debug;
+        }
+
+        # Streaming + gzip proxy with large budget (exercises multi-chunk decomp)
+        location /streaming-proxy-gzip-large {
+            proxy_pass http://127.0.0.1:${BACKEND_PORT}/;
+            proxy_set_header Accept-Encoding gzip;
+            markdown_filter on;
+            markdown_on_wildcard on;
+            markdown_streaming_engine on;
+            markdown_conditional_requests disabled;
+            markdown_streaming_budget 10m;
+            markdown_streaming_on_error pass;
+            markdown_etag on;
+            markdown_token_estimate on;
+            markdown_log_verbosity debug;
+            markdown_on_error pass;
+            markdown_max_size 10m;
+        }
+
+        # Streaming with warn verbosity (exercises verbosity gating)
+        location /streaming-warn {
+            root html;
+            markdown_filter on;
+            markdown_streaming_engine on;
+            markdown_conditional_requests disabled;
+            markdown_log_verbosity warn;
+        }
+
+        # Streaming with error verbosity (exercises verbosity gating)
+        location /streaming-error-verbosity {
+            root html;
+            markdown_filter on;
+            markdown_streaming_engine on;
+            markdown_conditional_requests disabled;
+            markdown_log_verbosity error;
+        }
+
+        # Front matter + token estimate + base_url (exercises conversion_impl options)
+        location /full-options {
+            root html;
+            markdown_filter on;
+            markdown_front_matter on;
+            markdown_token_estimate on;
+            markdown_etag on;
+            markdown_flavor gfm;
+            markdown_trust_forwarded_headers on;
+            markdown_log_verbosity debug;
+            markdown_on_error pass;
+        }
     }
 
     # ── Backend server: serves gzip-compressed HTML ─────────────────
@@ -533,7 +636,10 @@ for subdir in auth auth-public-cc auth-allow reject-error ims-only no-conditiona
               no-wildcard disabled gfm commonmark small-limit log-error \
               streaming streaming-auto streaming-tiny-budget \
               streaming-variable streaming-fullsupport streaming-ims-only \
-              streaming-reject-budget no-forwarded-trust; do
+              streaming-reject-budget no-forwarded-trust \
+              streaming-etag-tokens streaming-front-matter streaming-gfm \
+              streaming-large-budget streaming-on-error-reject \
+              streaming-warn streaming-error-verbosity full-options; do
   mkdir -p "${RUNTIME}/html/${subdir}"
 done
 
@@ -558,7 +664,10 @@ for subdir in auth auth-public-cc auth-allow reject-error ims-only no-conditiona
               no-wildcard disabled gfm commonmark log-error \
               streaming streaming-auto streaming-tiny-budget \
               streaming-variable streaming-fullsupport streaming-ims-only \
-              streaming-reject-budget no-forwarded-trust; do
+              streaming-reject-budget no-forwarded-trust \
+              streaming-etag-tokens streaming-front-matter streaming-gfm \
+              streaming-large-budget streaming-on-error-reject \
+              streaming-warn streaming-error-verbosity full-options; do
   cp "${RUNTIME}/html/index.html" "${RUNTIME}/html/${subdir}/index.html"
 done
 
@@ -578,6 +687,33 @@ HTML
 
 # Copy large.html to small-limit for size-limit rejection test
 cp "${RUNTIME}/html/large.html" "${RUNTIME}/html/small-limit/large.html"
+
+# Copy large.html to streaming locations for multi-chunk and budget tests
+for subdir in streaming streaming-large-budget streaming-etag-tokens \
+              streaming-gfm streaming-front-matter streaming-on-error-reject \
+              streaming-warn streaming-error-verbosity full-options; do
+  cp "${RUNTIME}/html/large.html" "${RUNTIME}/html/${subdir}/large.html"
+done
+
+# Create table.html for streaming fallback testing (table triggers fallback)
+cat > "${RUNTIME}/html/streaming/table.html" <<'HTML'
+<!doctype html>
+<html>
+  <head><title>Table Page</title></head>
+  <body>
+    <h1>Page with Table</h1>
+    <p>This page contains a table that triggers streaming fallback.</p>
+    <table>
+      <tr><th>Name</th><th>Value</th></tr>
+      <tr><td>Alpha</td><td>100</td></tr>
+      <tr><td>Beta</td><td>200</td></tr>
+    </table>
+    <p>Content after table.</p>
+  </body>
+</html>
+HTML
+cp "${RUNTIME}/html/streaming/table.html" "${RUNTIME}/html/streaming-large-budget/table.html"
+cp "${RUNTIME}/html/streaming/table.html" "${RUNTIME}/html/streaming-on-error-reject/table.html"
 
 echo "==> Starting NGINX on 127.0.0.1:${PORT}"
 "${RUNTIME}/sbin/nginx" -p "${RUNTIME}" -c conf/nginx.conf
@@ -819,6 +955,101 @@ curl -sS -H "${ACCEPT_MARKDOWN}" \
   "http://127.0.0.1:${PORT}/streaming-variable/index.html?engine=auto" -o /dev/null -w "  streaming variable auto: HTTP %{http_code}\n"
 curl -sS -H "${ACCEPT_MARKDOWN}" \
   "http://127.0.0.1:${PORT}/streaming-variable/index.html?engine=bad" -o /dev/null -w "  streaming variable invalid: HTTP %{http_code}\n"
+
+# ── Extended streaming scenarios (exercises streaming_impl.h deeper paths) ──
+
+# Streaming with large content (exercises multi-chunk feed, commit boundary, finalize)
+curl -sS -H "${ACCEPT_MARKDOWN}" \
+  "http://127.0.0.1:${PORT}/streaming/large.html" -o /dev/null -w "  streaming large: HTTP %{http_code}\n"
+
+# Streaming with table content (exercises fallback to full-buffer path)
+curl -sS -H "${ACCEPT_MARKDOWN}" \
+  "http://127.0.0.1:${PORT}/streaming/table.html" -o /dev/null -w "  streaming table fallback: HTTP %{http_code}\n"
+
+# Streaming with ETag + token estimate (exercises finalize metadata paths)
+curl -sS -H "${ACCEPT_MARKDOWN}" \
+  "http://127.0.0.1:${PORT}/streaming-etag-tokens/index.html" -o /dev/null -w "  streaming etag+tokens: HTTP %{http_code}\n"
+
+# Streaming with ETag + token estimate + large content
+curl -sS -H "${ACCEPT_MARKDOWN}" \
+  "http://127.0.0.1:${PORT}/streaming-etag-tokens/large.html" -o /dev/null -w "  streaming etag+tokens large: HTTP %{http_code}\n"
+
+# Streaming with front_matter (exercises conversion options front_matter path)
+curl -sS -H "${ACCEPT_MARKDOWN}" \
+  "http://127.0.0.1:${PORT}/streaming-front-matter/index.html" -o /dev/null -w "  streaming front-matter: HTTP %{http_code}\n"
+
+# Streaming with GFM flavor (exercises prepare_conversion_options flavor=1)
+curl -sS -H "${ACCEPT_MARKDOWN}" \
+  "http://127.0.0.1:${PORT}/streaming-gfm/index.html" -o /dev/null -w "  streaming GFM: HTTP %{http_code}\n"
+
+# Streaming with large budget + large content (exercises normal finalize path)
+curl -sS -H "${ACCEPT_MARKDOWN}" \
+  "http://127.0.0.1:${PORT}/streaming-large-budget/index.html" -o /dev/null -w "  streaming large budget: HTTP %{http_code}\n"
+curl -sS -H "${ACCEPT_MARKDOWN}" \
+  "http://127.0.0.1:${PORT}/streaming-large-budget/large.html" -o /dev/null -w "  streaming large budget+large: HTTP %{http_code}\n"
+
+# Streaming with table + large budget (exercises fallback with prebuffer transfer)
+curl -sS -H "${ACCEPT_MARKDOWN}" \
+  "http://127.0.0.1:${PORT}/streaming-large-budget/table.html" -o /dev/null -w "  streaming large budget table: HTTP %{http_code}\n"
+
+# Streaming with on_error reject (exercises reject policy in streaming init)
+curl -sS -H "${ACCEPT_MARKDOWN}" \
+  "http://127.0.0.1:${PORT}/streaming-on-error-reject/index.html" -o /dev/null -w "  streaming on_error reject: HTTP %{http_code}\n"
+
+# Streaming with table + on_error reject (exercises fallback + reject)
+curl -sS -H "${ACCEPT_MARKDOWN}" \
+  "http://127.0.0.1:${PORT}/streaming-on-error-reject/table.html" -o /dev/null -w "  streaming table+reject: HTTP %{http_code}\n"
+
+# Streaming with warn verbosity (exercises verbosity gating — non-failure suppressed)
+curl -sS -H "${ACCEPT_MARKDOWN}" \
+  "http://127.0.0.1:${PORT}/streaming-warn/index.html" -o /dev/null -w "  streaming warn verbosity: HTTP %{http_code}\n"
+
+# Streaming with error verbosity (exercises verbosity gating — only errors)
+curl -sS -H "${ACCEPT_MARKDOWN}" \
+  "http://127.0.0.1:${PORT}/streaming-error-verbosity/index.html" -o /dev/null -w "  streaming error verbosity: HTTP %{http_code}\n"
+
+# ── Extended streaming decompression scenarios ──────────────────────
+
+# Streaming + gzip proxy with large content (exercises inflate_loop, expand_buf)
+curl -sS -H "${ACCEPT_MARKDOWN}" \
+  "http://127.0.0.1:${PORT}/streaming-proxy-gzip/large.html" -o /dev/null -w "  streaming gzip large: HTTP %{http_code}\n"
+
+# Streaming + gzip proxy with large budget (exercises full decomp + convert path)
+curl -sS -H "${ACCEPT_MARKDOWN}" \
+  "http://127.0.0.1:${PORT}/streaming-proxy-gzip-large/index.html" -o /dev/null -w "  streaming gzip large-budget: HTTP %{http_code}\n"
+curl -sS -H "${ACCEPT_MARKDOWN}" \
+  "http://127.0.0.1:${PORT}/streaming-proxy-gzip-large/large.html" -o /dev/null -w "  streaming gzip large-budget+large: HTTP %{http_code}\n"
+
+# ── Extended conversion_impl.h scenarios ────────────────────────────
+
+# Full options: front_matter + token_estimate + etag + gfm + forwarded headers
+curl -sS -H "${ACCEPT_MARKDOWN}" \
+  -H 'X-Forwarded-Proto: https' -H 'X-Forwarded-Host: cdn.example.com' \
+  "http://127.0.0.1:${PORT}/full-options/index.html" -o /dev/null -w "  full-options: HTTP %{http_code}\n"
+curl -sS -H "${ACCEPT_MARKDOWN}" \
+  -H 'X-Forwarded-Proto: https' -H 'X-Forwarded-Host: cdn.example.com' \
+  "http://127.0.0.1:${PORT}/full-options/large.html" -o /dev/null -w "  full-options large: HTTP %{http_code}\n"
+
+# Full options without forwarded headers (exercises direct request base_url)
+curl -sS -H "${ACCEPT_MARKDOWN}" \
+  "http://127.0.0.1:${PORT}/full-options/index.html" -o /dev/null -w "  full-options direct: HTTP %{http_code}\n"
+
+# ── Extended reason code scenarios ──────────────────────────────────
+
+# Streaming success (exercises STREAMING_CONVERT reason code)
+# Already covered by streaming/index.html above
+
+# Streaming budget fail with warn verbosity (exercises reason code + verbosity)
+curl -sS -H "${ACCEPT_MARKDOWN}" \
+  "http://127.0.0.1:${PORT}/streaming-warn/large.html" -o /dev/null -w "  streaming warn+large: HTTP %{http_code}\n"
+
+# Disabled location (exercises SKIP_CONFIG reason code)
+curl -sS -H "${ACCEPT_MARKDOWN}" \
+  "http://127.0.0.1:${PORT}/disabled/index.html" -o /dev/null -w "  disabled config: HTTP %{http_code}\n"
+
+# Log-error verbosity (exercises error-only verbosity gating)
+curl -sS -H "${ACCEPT_MARKDOWN}" \
+  "http://127.0.0.1:${PORT}/log-error/index.html" -o /dev/null -w "  log-error verbosity: HTTP %{http_code}\n"
 
 # ── Metrics scenarios (Req 5) — after conversion scenarios ──────────
 

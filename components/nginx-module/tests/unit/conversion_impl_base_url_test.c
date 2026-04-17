@@ -440,6 +440,261 @@ test_base_url_add_len_overflow_guard(void)
     TEST_PASS("Overflow guard is correct");
 }
 
+
+/*
+ * Test: prepare_conversion_options populates all fields correctly.
+ */
+static void
+test_prepare_conversion_options_basic(void)
+{
+    ngx_http_request_t r;
+    ngx_http_markdown_conf_t conf;
+    struct MarkdownOptions options;
+
+    TEST_SUBSECTION("prepare_conversion_options: basic field population");
+
+    init_request(&r);
+    memset(&conf, 0, sizeof(conf));
+
+    set_str(&r.schema, "http");
+    set_str(&r.headers_in.server, "example.com");
+    set_str(&r.uri, "/page.html");
+    set_str(&r.headers_out.content_type, "text/html; charset=utf-8");
+    r.loc_conf = &conf;
+
+    conf.flavor = 0;  /* CommonMark */
+    conf.timeout = 5000;
+    conf.generate_etag = 1;
+    conf.token_estimate = 1;
+    conf.front_matter = 1;
+
+    TEST_ASSERT(ngx_http_markdown_prepare_conversion_options(&r, &conf, &options) == NGX_OK,
+                "prepare_conversion_options should succeed");
+    TEST_ASSERT(options.flavor == 0, "flavor should be CommonMark (0)");
+    TEST_ASSERT(options.timeout_ms == 5000, "timeout should be 5000");
+    TEST_ASSERT(options.generate_etag == 1, "generate_etag should be 1");
+    TEST_ASSERT(options.estimate_tokens == 1, "estimate_tokens should be 1");
+    TEST_ASSERT(options.front_matter == 1, "front_matter should be 1");
+    TEST_ASSERT(options.content_type != NULL, "content_type should be set");
+    TEST_ASSERT(options.content_type_len > 0, "content_type_len should be > 0");
+    TEST_ASSERT(options.base_url != NULL, "base_url should be constructed");
+    TEST_ASSERT(options.base_url_len > 0, "base_url_len should be > 0");
+
+    /* Clean up allocated base_url */
+    if (options.base_url != NULL) {
+        free((void *)(uintptr_t) options.base_url);
+    }
+
+    TEST_PASS("prepare_conversion_options basic fields correct");
+}
+
+
+/*
+ * Test: prepare_conversion_options with GFM flavor.
+ */
+static void
+test_prepare_conversion_options_gfm(void)
+{
+    ngx_http_request_t r;
+    ngx_http_markdown_conf_t conf;
+    struct MarkdownOptions options;
+
+    TEST_SUBSECTION("prepare_conversion_options: GFM flavor");
+
+    init_request(&r);
+    memset(&conf, 0, sizeof(conf));
+
+    set_str(&r.schema, "https");
+    set_str(&r.headers_in.server, "gfm.example.com");
+    set_str(&r.uri, "/doc.html");
+    set_str(&r.headers_out.content_type, "text/html");
+    r.loc_conf = &conf;
+
+    conf.flavor = 1;  /* GFM */
+    conf.timeout = 3000;
+
+    TEST_ASSERT(ngx_http_markdown_prepare_conversion_options(&r, &conf, &options) == NGX_OK,
+                "prepare_conversion_options should succeed for GFM");
+    TEST_ASSERT(options.flavor == 1, "flavor should be GFM (1)");
+    TEST_ASSERT(options.timeout_ms == 3000, "timeout should be 3000");
+
+    if (options.base_url != NULL) {
+        free((void *)(uintptr_t) options.base_url);
+    }
+
+    TEST_PASS("prepare_conversion_options GFM flavor correct");
+}
+
+
+/*
+ * Test: prepare_conversion_options without content_type.
+ */
+static void
+test_prepare_conversion_options_no_content_type(void)
+{
+    ngx_http_request_t r;
+    ngx_http_markdown_conf_t conf;
+    struct MarkdownOptions options;
+
+    TEST_SUBSECTION("prepare_conversion_options: no content_type");
+
+    init_request(&r);
+    memset(&conf, 0, sizeof(conf));
+
+    set_str(&r.schema, "http");
+    set_str(&r.headers_in.server, "example.com");
+    set_str(&r.uri, "/page.html");
+    r.headers_out.content_type.len = 0;
+    r.headers_out.content_type.data = NULL;
+    r.loc_conf = &conf;
+
+    TEST_ASSERT(ngx_http_markdown_prepare_conversion_options(&r, &conf, &options) == NGX_OK,
+                "prepare_conversion_options should succeed without content_type");
+    TEST_ASSERT(options.content_type == NULL, "content_type should be NULL");
+    TEST_ASSERT(options.content_type_len == 0, "content_type_len should be 0");
+
+    if (options.base_url != NULL) {
+        free((void *)(uintptr_t) options.base_url);
+    }
+
+    TEST_PASS("prepare_conversion_options no content_type correct");
+}
+
+
+/*
+ * Test: prepare_conversion_options with failed base_url construction.
+ */
+static void
+test_prepare_conversion_options_no_base_url(void)
+{
+    ngx_http_request_t r;
+    ngx_http_markdown_conf_t conf;
+    ngx_http_core_srv_conf_t cscf;
+    struct MarkdownOptions options;
+
+    TEST_SUBSECTION("prepare_conversion_options: no base_url");
+
+    init_request(&r);
+    memset(&conf, 0, sizeof(conf));
+    memset(&cscf, 0, sizeof(cscf));
+
+    /* Empty schema/server/server_name → base_url construction fails */
+    set_str(&r.schema, "");
+    set_str(&r.headers_in.server, "");
+    set_str(&r.uri, "/page.html");
+    set_str(&cscf.server_name, "");
+    r.loc_conf = &conf;
+    r.srv_conf = &cscf;
+
+    TEST_ASSERT(ngx_http_markdown_prepare_conversion_options(&r, &conf, &options) == NGX_OK,
+                "prepare_conversion_options should succeed even without base_url");
+    TEST_ASSERT(options.base_url == NULL, "base_url should be NULL on failure");
+    TEST_ASSERT(options.base_url_len == 0, "base_url_len should be 0 on failure");
+
+    TEST_PASS("prepare_conversion_options no base_url correct");
+}
+
+
+/*
+ * Test: scheme_is_http_family validates http and https.
+ */
+static void
+test_scheme_is_http_family(void)
+{
+    ngx_str_t http_scheme;
+    ngx_str_t https_scheme;
+    ngx_str_t ftp_scheme;
+    ngx_str_t empty_scheme;
+
+    TEST_SUBSECTION("scheme_is_http_family validation");
+
+    set_str(&http_scheme, "http");
+    set_str(&https_scheme, "https");
+    set_str(&ftp_scheme, "ftp");
+    empty_scheme.len = 0;
+    empty_scheme.data = NULL;
+
+    TEST_ASSERT(ngx_http_markdown_scheme_is_http_family(&http_scheme) == 1,
+                "http should be http family");
+    TEST_ASSERT(ngx_http_markdown_scheme_is_http_family(&https_scheme) == 1,
+                "https should be http family");
+    TEST_ASSERT(ngx_http_markdown_scheme_is_http_family(&ftp_scheme) == 0,
+                "ftp should not be http family");
+    TEST_ASSERT(ngx_http_markdown_scheme_is_http_family(&empty_scheme) == 0,
+                "empty should not be http family");
+
+    TEST_PASS("scheme_is_http_family validation correct");
+}
+
+
+/*
+ * Test: find_request_header_value with multi-part header list.
+ */
+static void
+test_find_request_header_multi_part(void)
+{
+    ngx_http_request_t r;
+    ngx_http_markdown_conf_t conf;
+    ngx_table_elt_t headers_part1[1];
+    ngx_table_elt_t headers_part2[1];
+    ngx_list_part_t part2;
+    const ngx_str_t *result;
+
+    TEST_SUBSECTION("find_request_header_value: multi-part list");
+
+    init_request(&r);
+    memset(&conf, 0, sizeof(conf));
+    r.loc_conf = &conf;
+
+    /* Part 1: one header */
+    set_str(&headers_part1[0].key, "X-First");
+    set_str(&headers_part1[0].value, "value1");
+    headers_part1[0].hash = 1;
+
+    /* Part 2: one header */
+    set_str(&headers_part2[0].key, "X-Forwarded-Proto");
+    set_str(&headers_part2[0].value, "https");
+    headers_part2[0].hash = 1;
+
+    part2.elts = headers_part2;
+    part2.nelts = 1;
+    part2.next = NULL;
+
+    r.headers_in.headers.part.elts = headers_part1;
+    r.headers_in.headers.part.nelts = 1;
+    r.headers_in.headers.part.next = &part2;
+
+    conf.ops.trust_forwarded_headers = 1;
+
+    /* Search for X-Forwarded-Proto — should find it in part 2 */
+    result = ngx_http_markdown_find_request_header_value(
+        &r,
+        (const u_char *) "X-Forwarded-Proto",
+        sizeof("X-Forwarded-Proto") - 1);
+    TEST_ASSERT(result != NULL, "should find header in second part");
+    TEST_ASSERT(result->len == 5, "value length should be 5");
+    TEST_ASSERT(memcmp(result->data, "https", 5) == 0, "value should be https");
+
+    /* Search for non-existent header */
+    result = ngx_http_markdown_find_request_header_value(
+        &r,
+        (const u_char *) "X-Nonexistent",
+        sizeof("X-Nonexistent") - 1);
+    TEST_ASSERT(result == NULL, "non-existent header should return NULL");
+
+    /* Search with empty header list */
+    r.headers_in.headers.part.nelts = 0;
+    r.headers_in.headers.part.next = NULL;
+    result = ngx_http_markdown_find_request_header_value(
+        &r,
+        (const u_char *) "X-Forwarded-Proto",
+        sizeof("X-Forwarded-Proto") - 1);
+    TEST_ASSERT(result == NULL, "empty list should return NULL");
+
+    TEST_PASS("find_request_header_value multi-part correct");
+}
+
+
 int
 main(void)
 {
@@ -452,6 +707,12 @@ main(void)
     test_server_name_fallback_path();
     test_missing_base_url_inputs_fail();
     test_base_url_add_len_overflow_guard();
+    test_prepare_conversion_options_basic();
+    test_prepare_conversion_options_gfm();
+    test_prepare_conversion_options_no_content_type();
+    test_prepare_conversion_options_no_base_url();
+    test_scheme_is_http_family();
+    test_find_request_header_multi_part();
 
     printf("\n========================================\n");
     printf("All tests passed!\n");
