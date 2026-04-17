@@ -46,7 +46,7 @@ struct MarkdownConverterHandle;
 #define ERROR_SUCCESS 0
 
 static void
-markdown_convert(struct MarkdownConverterHandle *handle,
+markdown_convert(struct MarkdownConverterHandle *handle, /* NOSONAR: must match FFI signature */
     const uint8_t *html, uintptr_t html_len,
     const struct MarkdownOptions *options,
     struct MarkdownResult *result)
@@ -59,7 +59,7 @@ markdown_convert(struct MarkdownConverterHandle *handle,
 }
 
 static void
-markdown_result_free(struct MarkdownResult *result)
+markdown_result_free(struct MarkdownResult *result) /* NOSONAR: must match FFI signature */
 {
     UNUSED(result);
 }
@@ -280,13 +280,97 @@ ngx_timeofday_stub(void)
 #define ngx_timeofday() ngx_timeofday_stub()
 #endif
 
-static ngx_int_t ngx_http_markdown_forward_headers(ngx_http_request_t *r,
-    ngx_http_markdown_ctx_t *ctx);
+/*
+ * Stub definitions for external symbols referenced by conversion_impl.h
+ * but not exercised by the base_url / prepare_options tests.
+ * These must be defined before the #include of conversion_impl.h
+ * because the impl header contains static forward declarations that
+ * the linker resolves (GCC on Linux does not strip unused statics).
+ */
 
 u_char ngx_http_markdown_empty_string[] = "";
 struct MarkdownConverterHandle *ngx_http_markdown_converter = NULL;
 ngx_http_markdown_metrics_t *ngx_http_markdown_metrics = NULL;
 ngx_int_t (*ngx_http_next_body_filter)(ngx_http_request_t *r, ngx_chain_t *in) = NULL;
+
+static ngx_int_t
+ngx_http_markdown_forward_headers(ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx)
+{
+    UNUSED(r);
+    UNUSED(ctx);
+    return NGX_OK;
+}
+
+static void
+ngx_http_markdown_metric_inc_failopen(
+    const ngx_http_markdown_conf_t *conf)
+{
+    UNUSED(conf);
+}
+
+static ngx_int_t
+ngx_http_markdown_reject_or_fail_open_buffered_response(
+    ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_conf_t *conf, const char *debug_message)
+{
+    UNUSED(r);
+    UNUSED(ctx);
+    UNUSED(conf);
+    UNUSED(debug_message);
+    return NGX_OK;
+}
+
+ngx_http_markdown_error_category_t
+ngx_http_markdown_classify_error(uint32_t error_code)
+{
+    UNUSED(error_code);
+    return NGX_HTTP_MARKDOWN_ERROR_SYSTEM;
+}
+
+const ngx_str_t *
+ngx_http_markdown_error_category_string(
+    ngx_http_markdown_error_category_t category)
+{
+    static ngx_str_t system_str = { 11, (u_char *) "FAIL_SYSTEM" };
+    UNUSED(category);
+    return &system_str;
+}
+
+ngx_int_t
+ngx_http_markdown_update_headers(ngx_http_request_t *r,
+    const struct MarkdownResult *result,
+    const ngx_http_markdown_conf_t *conf)
+{
+    UNUSED(r);
+    UNUSED(result);
+    UNUSED(conf);
+    return NGX_OK;
+}
+
+ngx_int_t
+ngx_http_markdown_handle_if_none_match(ngx_http_request_t *r,
+    const ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_ctx_t *ctx,
+    struct MarkdownConverterHandle *converter,
+    struct MarkdownResult **result)
+{
+    UNUSED(r);
+    UNUSED(conf);
+    UNUSED(ctx);
+    UNUSED(converter);
+    UNUSED(result);
+    return NGX_DECLINED;
+}
+
+ngx_int_t
+ngx_http_markdown_send_304(ngx_http_request_t *r,
+    const struct MarkdownResult *result)
+{
+    UNUSED(r);
+    UNUSED(result);
+    return NGX_OK;
+}
 
 #include "../../src/ngx_http_markdown_conversion_impl.h" /* NOSONAR: must follow stub definitions */
 
