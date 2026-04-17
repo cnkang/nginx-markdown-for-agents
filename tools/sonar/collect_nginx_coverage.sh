@@ -1081,7 +1081,7 @@ echo "==> Stopping NGINX (flush gcov data)"
 sleep 2
 
 echo "==> Running extended streaming failure/cache e2e coverage"
-"${WORKSPACE_ROOT}/tools/e2e/verify_streaming_failure_cache_e2e.sh" \
+bash "${WORKSPACE_ROOT}/tools/e2e/verify_streaming_failure_cache_e2e.sh" \
   --nginx-bin "${RUNTIME}/sbin/nginx" \
   --port 18296 \
   --upstream-port 19296 \
@@ -1094,8 +1094,8 @@ if ! bash "${WORKSPACE_ROOT}/tools/e2e/verify_streaming_e2e.sh" \
 fi
 
 echo "==> Running chunked streaming e2e coverage (smoke)"
-if ! NGINX_BIN="${RUNTIME}/sbin/nginx" \
-  bash "${WORKSPACE_ROOT}/tools/e2e/verify_chunked_streaming_native_e2e.sh" \
+if ! bash "${WORKSPACE_ROOT}/tools/e2e/verify_chunked_streaming_native_e2e.sh" \
+    --nginx-bin "${RUNTIME}/sbin/nginx" \
     --profile smoke \
     --port 18294 \
     --upstream-port 19294 \
@@ -1104,15 +1104,15 @@ if ! NGINX_BIN="${RUNTIME}/sbin/nginx" \
 fi
 
 echo "==> Running large markdown response e2e coverage"
-if ! NGINX_BIN="${RUNTIME}/sbin/nginx" \
-  bash "${WORKSPACE_ROOT}/tools/e2e/verify_large_markdown_response_e2e.sh" \
+if ! bash "${WORKSPACE_ROOT}/tools/e2e/verify_large_markdown_response_e2e.sh" \
+    --nginx-bin "${RUNTIME}/sbin/nginx" \
     --port 18291; then
     echo "  WARNING: large markdown e2e coverage run failed; continuing" >&2
 fi
 
 echo "==> Running proxy TLS backend e2e coverage"
-if ! NGINX_BIN="${RUNTIME}/sbin/nginx" \
-  bash "${WORKSPACE_ROOT}/tools/e2e/verify_proxy_tls_backend_e2e.sh" \
+if ! bash "${WORKSPACE_ROOT}/tools/e2e/verify_proxy_tls_backend_e2e.sh" \
+    --nginx-bin "${RUNTIME}/sbin/nginx" \
     --port 18289 \
     --backend-port 19289; then
     echo "  WARNING: proxy TLS backend e2e coverage run failed; continuing" >&2

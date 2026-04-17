@@ -28,6 +28,14 @@ typedef unsigned long ngx_atomic_uint_t;
 
 /* ── Metrics snapshot type (mirrors production layout) ────────────── */
 
+/*
+ * DIVERGENCE RISK: This struct must remain bitwise/field-order compatible
+ * with the canonical ngx_http_markdown_metrics_snapshot_t defined in
+ * ngx_http_markdown_filter_module.h (via ngx_http_markdown_metrics_t).
+ * Field names, types, and order must match exactly so that the offsets
+ * used by ngx_http_markdown_metrics_write_prometheus() are correct.
+ * Any change to the production struct requires updating this local copy.
+ */
 typedef struct {
     ngx_atomic_t  conversions_attempted;
     ngx_atomic_t  conversions_succeeded;

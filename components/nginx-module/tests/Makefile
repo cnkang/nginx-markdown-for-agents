@@ -1,5 +1,7 @@
 include make/targets.mk
 
+UNAME_S ?= $(shell uname -s)
+
 SECTION_GC_LDFLAGS ?=
 ifeq ($(UNAME_S),Darwin)
 SECTION_GC_LDFLAGS := -Wl,-dead_strip
@@ -9,7 +11,6 @@ endif
 
 CLANG ?= clang
 SANITIZER_FLAGS ?= -O1 -fno-omit-frame-pointer -fsanitize=address,undefined
-UNAME_S ?= $(shell uname -s)
 ASAN_OPTIONS_BASE ?= abort_on_error=1
 ifeq ($(UNAME_S),Linux)
 ASAN_OPTIONS_BASE := $(strip $(ASAN_OPTIONS_BASE))
@@ -36,7 +37,7 @@ build/unit/%: unit/%_test.c include/test_common.h include/test_metrics_snapshot.
 	  gzip_deflate_decompression) extra_ldflags="-lz" ;; \
 	  streaming_decomp) extra_cflags="-I../src -Iinclude/nginx_stubs -DMARKDOWN_STREAMING_ENABLED"; extra_ldflags="-lz" ;; \
 	  streaming) extra_cflags="-DMARKDOWN_STREAMING_ENABLED" ;; \
-	  conversion_impl_base_url) extra_cflags="-Iinclude/nginx_stubs -ffunction-sections" ; extra_ldflags="$$SECTION_GC_LDFLAGS" ;; \
+	  conversion_impl_base_url) extra_cflags="-Iinclude/nginx_stubs -ffunction-sections" ; extra_ldflags="$(SECTION_GC_LDFLAGS)" ;; \
 	  prometheus_renderer) extra_cflags="-DMARKDOWN_STREAMING_ENABLED" ;; \
 	esac; \
 	$(CC) $(CFLAGS_COMMON) $(LDFLAGS_COMMON) $$extra_cflags -o "$@" "$<" $$extra_srcs $$extra_ldflags

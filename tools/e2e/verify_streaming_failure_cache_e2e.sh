@@ -927,7 +927,9 @@ fi
 t03_pass=1
 
 # Verify reject behavior: either explicit HTTP error (4xx/5xx) or transport close.
-if [[ "${t03_code}" != "000" && "${t03_code}" -lt 400 ]]; then
+if [[ "${t03_code}" == "000" ]]; then
+    echo "  10.3 INFO: transport close (connection reset = implicit reject)" >&2
+elif [[ "${t03_code}" -lt 400 ]]; then
     echo "  10.3 FAIL: expected error response, got ${t03_code}" >&2
     t03_pass=0
 fi
@@ -1118,7 +1120,9 @@ curl -sS -D "${RAW_DIR}/t09b.hdr" -o "${RAW_DIR}/t09b.body" \
 t09_pass=1
 
 # 10.9a: streaming_on_error=reject should produce error
-if [[ "${t09a_code}" != "000" && "${t09a_code}" -lt 400 ]]; then
+if [[ "${t09a_code}" == "000" ]]; then
+    echo "  10.9a INFO: transport close (connection reset = implicit reject)" >&2
+elif [[ "${t09a_code}" -lt 400 ]]; then
     echo "  10.9a FAIL: expected error (streaming_on_error=reject)," \
          "got ${t09a_code}" >&2
     t09_pass=0

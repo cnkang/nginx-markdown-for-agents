@@ -557,13 +557,23 @@ fn test_converter_table_with_alignment() {
 #[test]
 fn test_converter_table_with_pipe_in_cell() {
     let md = convert_html("<table><tr><th>Header</th></tr><tr><td>a | b</td></tr></table>");
-    /* Pipe in cell should be escaped */
-    assert!(md.contains("a \\| b") || md.contains("a | b"));
+    /* Table cell content should be preserved (escaped or literal depending on format) */
+    assert!(
+        md.contains("a | b") || md.contains("a \\| b"),
+        "table cell content should be preserved, got: {}",
+        md
+    );
 }
 
 #[test]
 fn test_converter_empty_table() {
-    let _md = convert_html("<table></table>");
+    let md = convert_html("<table></table>");
+    /* Empty table should produce empty or whitespace-only output */
+    assert!(
+        md.trim().is_empty(),
+        "empty table should produce no content, got: {}",
+        md
+    );
 }
 
 #[test]
@@ -701,10 +711,20 @@ fn test_converter_image_with_alt() {
 
 #[test]
 fn test_converter_video_source() {
-    let _md = convert_html(r#"<video><source src="https://example.com/video.mp4"></video>"#);
+    let md = convert_html(r#"<video><source src="https://example.com/video.mp4"></video>"#);
+    assert!(
+        md.contains("video.mp4") || md.trim().is_empty(),
+        "video source should extract URL or produce empty output, got: {}",
+        md
+    );
 }
 
 #[test]
 fn test_converter_audio_source() {
-    let _md = convert_html(r#"<audio src="https://example.com/audio.mp3">Audio</audio>"#);
+    let md = convert_html(r#"<audio src="https://example.com/audio.mp3">Audio</audio>"#);
+    assert!(
+        md.contains("Audio") || md.contains("audio.mp3"),
+        "audio should preserve fallback text or URL, got: {}",
+        md
+    );
 }
