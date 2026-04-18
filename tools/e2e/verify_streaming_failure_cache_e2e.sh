@@ -14,6 +14,8 @@ set -euo pipefail
 #   10.7  Streaming response headers: no Content-Length, chunked transfer
 #   10.8  streaming_engine off + streaming_on_error config: 0.4.0 behavior
 #   10.9  markdown_on_error vs markdown_streaming_on_error independence
+#   10.10 HEAD request does not enter streaming path
+#   10.11 304 response does not enter streaming path
 #
 # When NGINX_BIN is not set, exits with code 1 unless --plan is specified.
 
@@ -45,6 +47,7 @@ readonly PATTERN_CT_HTML='^Content-Type: text/html'
 readonly PATTERN_CL='^Content-Length:'
 readonly PATTERN_ETAG='^ETag:'
 readonly PATTERN_HTTP_200='HTTP/1.1 200'
+readonly PATTERN_HTTP_304='HTTP/1.1 304'
 readonly PATTERN_TRANSFER_CHUNKED='^Transfer-Encoding:.*chunked'
 readonly PATTERN_VARY_ACCEPT='^Vary:.*Accept'
 readonly PATTERN_MARKDOWN_HEADING='^# '
@@ -88,6 +91,8 @@ Test cases:
   10.7  Streaming response headers
   10.8  streaming_engine off + streaming_on_error
   10.9  Directive independence
+  10.10 HEAD request does not enter streaming path
+  10.11 304 response does not enter streaming path
 EOF
     return 0
 }
@@ -342,6 +347,14 @@ echo "  - Cross-config: on_error pass + streaming_on_error reject"
 echo "  - Cross-config: on_error reject + streaming_on_error pass"
 echo "  - Verify: each directive controls only its own path"
 echo ""
+echo "10.10 HEAD request does not enter streaming path"
+echo "  - streaming_engine on + HEAD request"
+echo "  - Verify: HTTP 200 and empty response body"
+echo ""
+echo "10.11 304 response does not enter streaming path"
+echo "  - Capture ETag from full-buffer location"
+echo "  - Re-request with If-None-Match and verify HTTP 304 + empty body"
+echo ""
 
 if [[ "${PLAN_ONLY}" -eq 1 ]]; then
     echo "Plan-only mode. All test cases documented. Exiting."
@@ -418,9 +431,9 @@ Test upstream server for streaming failure/cache E2E tests.
 Endpoints:
   /health              Health check
   /simple              Small valid HTML (streaming-friendly)
+  /simple-with-etag    Small HTML with upstream ETag header
   /oversize            HTML exceeding typical max_size (triggers pre-commit error)
   /partial-abort       Sends partial HTML then aborts (triggers post-commit error)
-  /simple-with-etag    Small HTML with upstream ETag header
 """
 import argparse
 import time
@@ -545,6 +558,21 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/health":
             self.send_response(200)
             self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        if path == "/simple":
+            body = SIMPLE_HTML.encode('utf-8')
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            return
+        if path == "/simple-with-etag":
+            body = SIMPLE_HTML.encode('utf-8')
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("ETag", '"upstream-etag-v1"')
             self.end_headers()
             return
         self.send_response(404)
@@ -803,6 +831,42 @@ http {
             markdown_conditional_requests if_modified_since_only;
             markdown_max_size 20m;
             markdown_streaming_budget 1k;
+            markdown_timeout 120000;
+            markdown_log_verbosity info;
+
+            proxy_http_version 1.1;
+            proxy_buffering off;
+            proxy_set_header Connection "";
+            proxy_pass http://127.0.0.1:${UPSTREAM_PORT}/;
+        }
+
+        # 10.10: HEAD request should bypass streaming body processing
+        location /t10/ {
+            markdown_filter on;
+            markdown_on_wildcard on;
+            markdown_etag on;
+            markdown_streaming_engine on;
+            markdown_conditional_requests if_modified_since_only;
+            markdown_max_size ${MARKDOWN_MAX_SIZE};
+            markdown_on_error pass;
+            markdown_timeout 120000;
+            markdown_log_verbosity info;
+
+            proxy_http_version 1.1;
+            proxy_buffering off;
+            proxy_set_header Connection "";
+            proxy_pass http://127.0.0.1:${UPSTREAM_PORT}/;
+        }
+
+        # 10.11: 304 should bypass streaming path selection
+        location /t11/ {
+            markdown_filter on;
+            markdown_on_wildcard on;
+            markdown_etag on;
+            markdown_streaming_engine on;
+            markdown_conditional_requests full_support;
+            markdown_max_size ${MARKDOWN_MAX_SIZE};
+            markdown_on_error pass;
             markdown_timeout 120000;
             markdown_log_verbosity info;
 
@@ -1142,6 +1206,70 @@ if [[ ${t09_pass} -eq 1 ]]; then
     report_case "10.9" "PASS" "Directive independence verified"
 else
     report_case "10.9" "FAIL" "Directive independence verified"
+fi
+
+# ---------------------------------------------------------------------------
+# 10.10 HEAD request does not enter streaming path
+# ---------------------------------------------------------------------------
+echo "==> 10.10 HEAD request does not enter streaming path"
+curl -sS -D "${RAW_DIR}/t10.hdr" -o "${RAW_DIR}/t10.body" \
+    -X HEAD -H "${ACCEPT_MARKDOWN_HEADER}" --max-time 30 \
+    "http://127.0.0.1:${PORT}/t10/simple"
+
+t10_pass=1
+
+assert_http_200 "${RAW_DIR}/t10.hdr" "10.10" t10_pass \
+    "${MSG_EXPECTED_HTTP_200}"
+assert_content_type_markdown "${RAW_DIR}/t10.hdr" "10.10" t10_pass \
+    "${MSG_EXPECTED_CT_MARKDOWN}"
+if [[ -s "${RAW_DIR}/t10.body" ]]; then
+    mark_case_fail "10.10" "HEAD response should not include a body" t10_pass
+fi
+
+if [[ ${t10_pass} -eq 1 ]]; then
+    report_case "10.10" "PASS" "HEAD bypasses streaming body processing"
+else
+    report_case "10.10" "FAIL" "HEAD bypasses streaming body processing"
+fi
+
+# ---------------------------------------------------------------------------
+# 10.11 304 response does not enter streaming path
+# ---------------------------------------------------------------------------
+echo "==> 10.11 304 response does not enter streaming path"
+curl -sS -D "${RAW_DIR}/t11_first.hdr" -o "${RAW_DIR}/t11_first.body" \
+    -H "${ACCEPT_MARKDOWN_HEADER}" --max-time 30 \
+    "http://127.0.0.1:${PORT}/t11/simple-with-etag"
+
+t11_pass=1
+t11_etag="$(awk '{
+    line = $0
+    if (tolower(line) ~ /^etag:/) {
+        sub(/^[^:]+:[[:space:]]*/, "", line)
+        gsub(/\r/, "", line)
+        print line
+        exit
+    }
+}' "${RAW_DIR}/t11_first.hdr")"
+if [[ -z "${t11_etag}" ]]; then
+    mark_case_fail "10.11" "first request did not return ETag for conditional revalidation" t11_pass
+else
+    curl -sS -D "${RAW_DIR}/t11_304.hdr" -o "${RAW_DIR}/t11_304.body" \
+        -H "${ACCEPT_MARKDOWN_HEADER}" \
+        -H "If-None-Match: ${t11_etag}" --max-time 30 \
+        "http://127.0.0.1:${PORT}/t11/simple-with-etag"
+
+    if ! grep -q "${PATTERN_HTTP_304}" "${RAW_DIR}/t11_304.hdr"; then
+        mark_case_fail "10.11" "expected HTTP 304 for matching If-None-Match" t11_pass
+    fi
+    if [[ -s "${RAW_DIR}/t11_304.body" ]]; then
+        mark_case_fail "10.11" "304 response should not include a body" t11_pass
+    fi
+fi
+
+if [[ ${t11_pass} -eq 1 ]]; then
+    report_case "10.11" "PASS" "304 bypasses streaming conversion path"
+else
+    report_case "10.11" "FAIL" "304 bypasses streaming conversion path"
 fi
 
 # ---------------------------------------------------------------------------

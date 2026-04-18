@@ -3,9 +3,15 @@ set -euo pipefail
 
 # Native-only E2E validation for chunked/streaming upstream responses.
 #
-# Validates two critical paths:
+# Validates six critical paths:
 #  1) Chunked body below markdown_max_size converts successfully to Markdown.
 #  2) Chunked body above markdown_max_size triggers fail-open without truncation.
+#  3) Streaming + gzip decompression converts to Markdown and strips
+#     Content-Encoding.
+#  4) Streaming + deflate decompression converts to Markdown and strips
+#     Content-Encoding.
+#  5) Truncated gzip stream triggers decomp finalize failure and fail-open.
+#  6) Truncated deflate stream triggers decomp finalize failure and fail-open.
 
 NGINX_VERSION="${NGINX_VERSION:-1.28.2}"
 PORT="${PORT:-18094}"
@@ -24,6 +30,13 @@ LOAD_MODULE_LINE=""
 UPSTREAM_PID=""
 ORIG_ARGS=("$@")
 ACCEPT_MARKDOWN_HEADER='Accept: text/markdown'
+readonly CURL_METRICS_FMT='http=%{http_code} size=%{size_download} total=%{time_total}\n'
+readonly PATTERN_HTTP_200='http=200 '
+readonly PATTERN_CT_MARKDOWN='^Content-Type: text/markdown; charset=utf-8'
+readonly PATTERN_CT_HTML='^Content-Type: text/html'
+readonly PATTERN_TRANSFER_CHUNKED='^Transfer-Encoding:.*chunked'
+readonly PATTERN_CONTENT_LENGTH='^Content-Length:'
+readonly PATTERN_CONTENT_ENCODING='^Content-Encoding:'
 # shellcheck disable=SC1090
 source "${NATIVE_BUILD_HELPER}"
 
@@ -52,6 +65,41 @@ require_flag_value() {
   fi
 
   return 0
+}
+
+assert_streaming_markdown_response() {
+  local case_name="$1"
+  local hdr_file="$2"
+  local body_file="$3"
+  local heading="$4"
+  local end_token="${5:-}"
+
+  grep -qi "${PATTERN_CT_MARKDOWN}" "${hdr_file}" || {
+    echo "${case_name} expected markdown Content-Type" >&2
+    exit 1
+  }
+  grep -qi "${PATTERN_TRANSFER_CHUNKED}" "${hdr_file}" || {
+    echo "${case_name} missing chunked transfer encoding header" >&2
+    exit 1
+  }
+  grep -qi "${PATTERN_CONTENT_LENGTH}" "${hdr_file}" && {
+    echo "${case_name} unexpected Content-Length in streaming response" >&2
+    exit 1
+  }
+  grep -qi "${PATTERN_CONTENT_ENCODING}" "${hdr_file}" && {
+    echo "${case_name} response leaked Content-Encoding header" >&2
+    exit 1
+  }
+  grep -q "${heading}" "${body_file}" || {
+    echo "${case_name} missing converted heading marker" >&2
+    exit 1
+  }
+  if [[ -n "${end_token}" ]]; then
+    grep -q "${end_token}" "${body_file}" || {
+      echo "${case_name} missing tail marker after conversion" >&2
+      exit 1
+    }
+  fi
 }
 
 cleanup() {
@@ -158,12 +206,16 @@ mkdir -p "${RAW_DIR}"
 cat > "${UPSTREAM_SCRIPT}" <<'PY'
 #!/usr/bin/env python3
 import argparse
+import zlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 
 SMALL_END_TOKEN = "SMALL_STREAM_END_TOKEN"
 OVERSIZE_END_TOKEN = "OVERSIZE_STREAM_END_TOKEN"
+GZIP_END_TOKEN = "GZIP_STREAM_END_TOKEN"
+DEFLATE_END_TOKEN = "DEFLATE_STREAM_END_TOKEN"
 SMALL_TARGET = 2 * 1024 * 1024
+COMPRESSED_TARGET = 64 * 1024
 OVERSIZE_TARGET = 12 * 1024 * 1024
 CHUNK_SIZE = 16 * 1024
 
@@ -186,8 +238,32 @@ def build_payload(title: str, target_size: int, end_token: str) -> bytes:
     return bytes(out)
 
 
+def compress_payload(body: bytes, mode: str) -> bytes:
+    if mode == "gzip":
+        wbits = zlib.MAX_WBITS | 16
+    elif mode == "deflate":
+        wbits = -zlib.MAX_WBITS
+    else:
+        raise ValueError(f"unsupported mode: {mode}")
+
+    compressor = zlib.compressobj(level=6, wbits=wbits)
+    return compressor.compress(body) + compressor.flush()
+
+
 SMALL_BODY = build_payload("Chunked Small", SMALL_TARGET, SMALL_END_TOKEN)
 OVERSIZE_BODY = build_payload("Chunked Oversize", OVERSIZE_TARGET, OVERSIZE_END_TOKEN)
+GZIP_SOURCE_BODY = build_payload(
+    "Chunked Gzip", COMPRESSED_TARGET, GZIP_END_TOKEN
+)
+DEFLATE_SOURCE_BODY = build_payload(
+    "Chunked Deflate", COMPRESSED_TARGET, DEFLATE_END_TOKEN
+)
+GZIP_BODY = compress_payload(GZIP_SOURCE_BODY, "gzip")
+DEFLATE_BODY = compress_payload(DEFLATE_SOURCE_BODY, "deflate")
+TRUNCATED_GZIP_BODY = GZIP_BODY[:-8] if len(GZIP_BODY) > 8 else GZIP_BODY
+TRUNCATED_DEFLATE_BODY = (
+    DEFLATE_BODY[:-4] if len(DEFLATE_BODY) > 4 else DEFLATE_BODY
+)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -196,11 +272,13 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt: str, *args):
         return
 
-    def _write_chunked(self, body: bytes):
+    def _write_chunked(self, body: bytes, content_encoding=None):
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=UTF-8")
         self.send_header("Transfer-Encoding", "chunked")
         self.send_header("Connection", "close")
+        if content_encoding:
+            self.send_header("Content-Encoding", content_encoding)
         self.end_headers()
 
         for i in range(0, len(body), CHUNK_SIZE):
@@ -227,6 +305,20 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/oversize":
             self._write_chunked(OVERSIZE_BODY)
             return
+        if path == "/small-gzip":
+            self._write_chunked(GZIP_BODY, content_encoding="gzip")
+            return
+        if path == "/small-deflate":
+            self._write_chunked(DEFLATE_BODY, content_encoding="deflate")
+            return
+        if path == "/truncated-gzip":
+            self._write_chunked(TRUNCATED_GZIP_BODY, content_encoding="gzip")
+            return
+        if path == "/truncated-deflate":
+            self._write_chunked(
+                TRUNCATED_DEFLATE_BODY, content_encoding="deflate"
+            )
+            return
         self.send_response(404)
         self.send_header("Content-Length", "0")
         self.end_headers()
@@ -242,6 +334,34 @@ class Handler(BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=UTF-8")
             self.send_header("Transfer-Encoding", "chunked")
+            self.end_headers()
+            return
+        if path == "/small-gzip":
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=UTF-8")
+            self.send_header("Transfer-Encoding", "chunked")
+            self.send_header("Content-Encoding", "gzip")
+            self.end_headers()
+            return
+        if path == "/small-deflate":
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=UTF-8")
+            self.send_header("Transfer-Encoding", "chunked")
+            self.send_header("Content-Encoding", "deflate")
+            self.end_headers()
+            return
+        if path == "/truncated-gzip":
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=UTF-8")
+            self.send_header("Transfer-Encoding", "chunked")
+            self.send_header("Content-Encoding", "gzip")
+            self.end_headers()
+            return
+        if path == "/truncated-deflate":
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=UTF-8")
+            self.send_header("Transfer-Encoding", "chunked")
+            self.send_header("Content-Encoding", "deflate")
             self.end_headers()
             return
         self.send_response(404)
@@ -260,8 +380,19 @@ def main():
     if args.print_metrics:
         print(f"SMALL_LEN={len(SMALL_BODY)}")
         print(f"OVERSIZE_LEN={len(OVERSIZE_BODY)}")
+        print(f"GZIP_SOURCE_LEN={len(GZIP_SOURCE_BODY)}")
+        print(f"GZIP_COMPRESSED_LEN={len(GZIP_BODY)}")
+        print(f"DEFLATE_SOURCE_LEN={len(DEFLATE_SOURCE_BODY)}")
+        print(f"DEFLATE_COMPRESSED_LEN={len(DEFLATE_BODY)}")
+        print(f"TRUNCATED_GZIP_COMPRESSED_LEN={len(TRUNCATED_GZIP_BODY)}")
+        print(
+            f"TRUNCATED_DEFLATE_COMPRESSED_LEN="
+            f"{len(TRUNCATED_DEFLATE_BODY)}"
+        )
         print(f"SMALL_END_TOKEN={SMALL_END_TOKEN}")
         print(f"OVERSIZE_END_TOKEN={OVERSIZE_END_TOKEN}")
+        print(f"GZIP_END_TOKEN={GZIP_END_TOKEN}")
+        print(f"DEFLATE_END_TOKEN={DEFLATE_END_TOKEN}")
         return
 
     if args.serve:
@@ -343,6 +474,25 @@ http {
             proxy_set_header Connection "";
             proxy_pass http://127.0.0.1:${UPSTREAM_PORT}/;
         }
+
+        location /streaming/ {
+            markdown_filter on;
+            markdown_on_wildcard on;
+            markdown_etag on;
+            markdown_streaming_engine on;
+            markdown_streaming_on_error pass;
+            markdown_conditional_requests if_modified_since_only;
+            markdown_max_size ${MARKDOWN_MAX_SIZE};
+            markdown_streaming_budget 64m;
+            markdown_on_error pass;
+            markdown_timeout 120000;
+            markdown_log_verbosity info;
+
+            proxy_http_version 1.1;
+            proxy_buffering off;
+            proxy_set_header Connection "";
+            proxy_pass http://127.0.0.1:${UPSTREAM_PORT}/;
+        }
     }
 }
 EOF
@@ -355,10 +505,10 @@ echo "==> Case 1: chunked below max_size should convert to Markdown"
 small_line="$(curl -sS -D "${RAW_DIR}/small.hdr" -o "${RAW_DIR}/small.body" \
   -H "${ACCEPT_MARKDOWN_HEADER}" --max-time 180 \
   "http://127.0.0.1:${PORT}/stream/small-valid" \
-  -w 'http=%{http_code} size=%{size_download} total=%{time_total}\n')"
+  -w "${CURL_METRICS_FMT}")"
 echo "${small_line}" | tee "${RAW_DIR}/small.metrics" >/dev/null
-echo "${small_line}" | grep -q 'http=200 ' || { echo "small-valid failed: ${small_line}" >&2; exit 1; }
-grep -qi '^Content-Type: text/markdown; charset=utf-8' "${RAW_DIR}/small.hdr" || {
+echo "${small_line}" | grep -q "${PATTERN_HTTP_200}" || { echo "small-valid failed: ${small_line}" >&2; exit 1; }
+grep -qi "${PATTERN_CT_MARKDOWN}" "${RAW_DIR}/small.hdr" || {
   echo "small-valid expected markdown Content-Type" >&2
   exit 1
 }
@@ -375,10 +525,10 @@ echo "==> Case 2: chunked above max_size should fail-open without truncation"
 oversize_line="$(curl -sS -D "${RAW_DIR}/oversize.hdr" -o "${RAW_DIR}/oversize.body" \
   -H "${ACCEPT_MARKDOWN_HEADER}" --max-time 240 \
   "http://127.0.0.1:${PORT}/stream/oversize" \
-  -w 'http=%{http_code} size=%{size_download} total=%{time_total}\n')"
+  -w "${CURL_METRICS_FMT}")"
 echo "${oversize_line}" | tee "${RAW_DIR}/oversize.metrics" >/dev/null
-echo "${oversize_line}" | grep -q 'http=200 ' || { echo "oversize failed: ${oversize_line}" >&2; exit 1; }
-grep -qi '^Content-Type: text/html' "${RAW_DIR}/oversize.hdr" || {
+echo "${oversize_line}" | grep -q "${PATTERN_HTTP_200}" || { echo "oversize failed: ${oversize_line}" >&2; exit 1; }
+grep -qi "${PATTERN_CT_HTML}" "${RAW_DIR}/oversize.hdr" || {
   echo "oversize expected fail-open pass-through Content-Type text/html" >&2
   exit 1
 }
@@ -393,9 +543,71 @@ grep -q "${OVERSIZE_END_TOKEN}" "${RAW_DIR}/oversize.body" || {
   exit 1
 }
 
+echo "==> Case 3: streaming gzip decompression should convert to Markdown"
+gzip_line="$(curl -sS -D "${RAW_DIR}/gzip.hdr" -o "${RAW_DIR}/gzip.body" \
+  -H "${ACCEPT_MARKDOWN_HEADER}" --max-time 180 \
+  "http://127.0.0.1:${PORT}/streaming/small-gzip" \
+  -w "${CURL_METRICS_FMT}")"
+echo "${gzip_line}" | tee "${RAW_DIR}/gzip.metrics" >/dev/null
+echo "${gzip_line}" | grep -q "${PATTERN_HTTP_200}" || { echo "small-gzip failed: ${gzip_line}" >&2; exit 1; }
+assert_streaming_markdown_response \
+  "small-gzip" "${RAW_DIR}/gzip.hdr" "${RAW_DIR}/gzip.body" \
+  "# Chunked Gzip" "${GZIP_END_TOKEN}"
+
+echo "==> Case 4: streaming deflate decompression should convert to Markdown"
+deflate_line="$(curl -sS -D "${RAW_DIR}/deflate.hdr" -o "${RAW_DIR}/deflate.body" \
+  -H "${ACCEPT_MARKDOWN_HEADER}" --max-time 180 \
+  "http://127.0.0.1:${PORT}/streaming/small-deflate" \
+  -w "${CURL_METRICS_FMT}")"
+echo "${deflate_line}" | tee "${RAW_DIR}/deflate.metrics" >/dev/null
+echo "${deflate_line}" | grep -q "${PATTERN_HTTP_200}" || { echo "small-deflate failed: ${deflate_line}" >&2; exit 1; }
+assert_streaming_markdown_response \
+  "small-deflate" "${RAW_DIR}/deflate.hdr" "${RAW_DIR}/deflate.body" \
+  "# Chunked Deflate" "${DEFLATE_END_TOKEN}"
+
+echo "==> Case 5: truncated gzip should trigger post-commit failure"
+trunc_gzip_line="$(curl -sS -D "${RAW_DIR}/trunc_gzip.hdr" -o "${RAW_DIR}/trunc_gzip.body" \
+  -H "${ACCEPT_MARKDOWN_HEADER}" --max-time 180 \
+  "http://127.0.0.1:${PORT}/streaming/truncated-gzip" \
+  -w "${CURL_METRICS_FMT}")"
+echo "${trunc_gzip_line}" | tee "${RAW_DIR}/trunc_gzip.metrics" >/dev/null
+echo "${trunc_gzip_line}" | grep -q "${PATTERN_HTTP_200}" || { echo "truncated-gzip failed: ${trunc_gzip_line}" >&2; exit 1; }
+grep -qi "${PATTERN_CT_MARKDOWN}" "${RAW_DIR}/trunc_gzip.hdr" || {
+  echo "truncated-gzip expected markdown Content-Type (post-commit path)" >&2
+  exit 1
+}
+grep -q '# Chunked Gzip' "${RAW_DIR}/trunc_gzip.body" || {
+  echo "truncated-gzip missing converted heading marker" >&2
+  exit 1
+}
+
+echo "==> Case 6: truncated deflate should trigger post-commit failure"
+trunc_deflate_line="$(curl -sS -D "${RAW_DIR}/trunc_deflate.hdr" -o "${RAW_DIR}/trunc_deflate.body" \
+  -H "${ACCEPT_MARKDOWN_HEADER}" --max-time 180 \
+  "http://127.0.0.1:${PORT}/streaming/truncated-deflate" \
+  -w "${CURL_METRICS_FMT}")"
+echo "${trunc_deflate_line}" | tee "${RAW_DIR}/trunc_deflate.metrics" >/dev/null
+echo "${trunc_deflate_line}" | grep -q "${PATTERN_HTTP_200}" || { echo "truncated-deflate failed: ${trunc_deflate_line}" >&2; exit 1; }
+grep -qi "${PATTERN_CT_MARKDOWN}" "${RAW_DIR}/trunc_deflate.hdr" || {
+  echo "truncated-deflate expected markdown Content-Type (post-commit path)" >&2
+  exit 1
+}
+grep -q '# Chunked Deflate' "${RAW_DIR}/trunc_deflate.body" || {
+  echo "truncated-deflate missing converted heading marker" >&2
+  exit 1
+}
+
 echo "==> Log sanity checks"
 grep -q 'response size exceeds limit' "${RUNTIME}/logs/error.log" || {
   echo "missing size-limit log for chunked oversize case" >&2
+  exit 1
+}
+grep -q 'decomp_finish failed in finalize' "${RUNTIME}/logs/error.log" || {
+  echo "missing decomp finalize failure log for truncated compressed cases" >&2
+  exit 1
+}
+grep -q 'reason=STREAMING_FAIL_POSTCOMMIT' "${RUNTIME}/logs/error.log" || {
+  echo "missing STREAMING_FAIL_POSTCOMMIT decision log for truncated cases" >&2
   exit 1
 }
 
@@ -435,6 +647,16 @@ echo "  small_expected_html_bytes=${SMALL_LEN}"
 echo "  small_result=$(cat "${RAW_DIR}/small.metrics")"
 echo "  oversize_expected_html_bytes=${OVERSIZE_LEN}"
 echo "  oversize_result=$(cat "${RAW_DIR}/oversize.metrics")"
+echo "  gzip_source_html_bytes=${GZIP_SOURCE_LEN}"
+echo "  gzip_compressed_bytes=${GZIP_COMPRESSED_LEN}"
+echo "  gzip_result=$(cat "${RAW_DIR}/gzip.metrics")"
+echo "  deflate_source_html_bytes=${DEFLATE_SOURCE_LEN}"
+echo "  deflate_compressed_bytes=${DEFLATE_COMPRESSED_LEN}"
+echo "  deflate_result=$(cat "${RAW_DIR}/deflate.metrics")"
+echo "  truncated_gzip_compressed_bytes=${TRUNCATED_GZIP_COMPRESSED_LEN}"
+echo "  truncated_gzip_result=$(cat "${RAW_DIR}/trunc_gzip.metrics")"
+echo "  truncated_deflate_compressed_bytes=${TRUNCATED_DEFLATE_COMPRESSED_LEN}"
+echo "  truncated_deflate_result=$(cat "${RAW_DIR}/trunc_deflate.metrics")"
 if [[ "${PROFILE}" == "stress" ]]; then
   echo "  stress_small_ab_rps=${small_rps:-unknown}"
   echo "  stress_oversize_ab_rps=${oversize_rps:-unknown}"
