@@ -726,6 +726,12 @@ reset_globals(void)
     g_streaming_finalize_rc = ERROR_SUCCESS;
     ngx_memzero(&g_streaming_finalize_result,
         sizeof(g_streaming_finalize_result));
+    /*
+     * Tests frequently bind ngx_http_markdown_metrics to stack-local
+     * storage; always clear it here so later tests cannot read a stale
+     * out-of-scope pointer.
+     */
+    ngx_http_markdown_metrics = NULL;
 }
 
 static void
