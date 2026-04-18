@@ -380,6 +380,14 @@ compress_payload(const u_char *in, size_t in_len,
         return NGX_ERROR;
     }
 
+    if (in_len > (size_t) UINT_MAX || cap > (size_t) UINT_MAX) {
+        free(*out);
+        free(in_copy);
+        *out = NULL;
+        deflateEnd(&s);
+        return NGX_ERROR;
+    }
+
     s.next_in = in_copy;
     s.avail_in = (uInt) in_len;
     s.next_out = *out;

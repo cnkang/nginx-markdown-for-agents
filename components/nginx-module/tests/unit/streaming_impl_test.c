@@ -268,22 +268,34 @@ ngx_module_t ngx_http_markdown_filter_module = { 0 };
         UNUSED(level); UNUSED(log); UNUSED(err); UNUSED(fmt);                        \
     } while (0)
 
+#ifdef ngx_log_debug0
+#undef ngx_log_debug0
+#endif
 #define ngx_log_debug0(level, log, err, fmt)                                        \
     do {                                                                             \
         UNUSED(level); UNUSED(log); UNUSED(err); UNUSED(fmt);                        \
     } while (0)
 
+#ifdef ngx_log_debug1
+#undef ngx_log_debug1
+#endif
 #define ngx_log_debug1(level, log, err, fmt, arg1)                                  \
     do {                                                                             \
         UNUSED(level); UNUSED(log); UNUSED(err); UNUSED(fmt); UNUSED(arg1);          \
     } while (0)
 
+#ifdef ngx_log_debug3
+#undef ngx_log_debug3
+#endif
 #define ngx_log_debug3(level, log, err, fmt, arg1, arg2, arg3)                      \
     do {                                                                             \
         UNUSED(level); UNUSED(log); UNUSED(err); UNUSED(fmt);                        \
         UNUSED(arg1); UNUSED(arg2); UNUSED(arg3);                                    \
     } while (0)
 
+#ifdef ngx_log_debug4
+#undef ngx_log_debug4
+#endif
 #define ngx_log_debug4(level, log, err, fmt, arg1, arg2, arg3, arg4)                \
     do {                                                                             \
         UNUSED(level); UNUSED(log); UNUSED(err); UNUSED(fmt);                        \
@@ -1322,8 +1334,8 @@ test_null_input_tracking_and_body_filter_entry(void)
     ngx_chain_t             pending;
     ngx_buf_t               pending_buf;
     ngx_int_t               rc;
-    ngx_flag_t              last_buf;
-    ngx_chain_t            *fallback_cl;
+    ngx_flag_t              last_buf = 0;
+    ngx_chain_t            *fallback_cl = NULL;
 
     TEST_SUBSECTION("null-input, failopen tracking, and body_filter entry");
     reset_globals();
@@ -1781,8 +1793,8 @@ test_process_chain_and_body_filter_deep_paths(void)
     ngx_event_t             read_event;
     ngx_chain_t             in;
     ngx_buf_t               in_buf;
-    ngx_chain_t            *fallback_cl;
-    ngx_flag_t              last_buf;
+    ngx_chain_t            *fallback_cl = NULL;
+    ngx_flag_t              last_buf = 0;
     ngx_int_t               rc;
     ngx_buf_t              *saved_bufs[2] = { NULL, NULL };
     u_char                 *saved_pos[2] = { NULL, NULL };
