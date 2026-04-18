@@ -22,7 +22,7 @@
 #define NGX_CONF_OK ((char *) NULL)
 #endif
 #ifndef NGX_CONF_ERROR
-#define NGX_CONF_ERROR ((char *) 1)
+#define NGX_CONF_ERROR ((char *) -1)
 #endif
 
 #ifndef NGX_CONF_UNSET

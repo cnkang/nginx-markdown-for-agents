@@ -67,6 +67,18 @@ require_flag_value() {
   return 0
 }
 
+#
+# Validate a streaming markdown HTTP response contract.
+# Args:
+#   case_name: logical case label used in diagnostics
+#   hdr_file: response header artifact path
+#   body_file: response body artifact path
+#   heading: required markdown heading token in body
+#   end_token: optional tail token expected in body
+# Output/exit:
+#   emits diagnostics to stderr and exits non-zero on assertion failure;
+#   returns 0 when all assertions pass.
+#
 assert_streaming_markdown_response() {
   local case_name="$1"
   local hdr_file="$2"
@@ -100,6 +112,8 @@ assert_streaming_markdown_response() {
       exit 1
     }
   fi
+
+  return 0
 }
 
 cleanup() {
@@ -569,7 +583,7 @@ echo "==> Case 5: truncated gzip should trigger post-commit failure"
 trunc_gzip_line="$(curl -sS -D "${RAW_DIR}/trunc_gzip.hdr" -o "${RAW_DIR}/trunc_gzip.body" \
   -H "${ACCEPT_MARKDOWN_HEADER}" --max-time 180 \
   "http://127.0.0.1:${PORT}/streaming/truncated-gzip" \
-  -w "${CURL_METRICS_FMT}")"
+  -w "${CURL_METRICS_FMT}" || true)"
 echo "${trunc_gzip_line}" | tee "${RAW_DIR}/trunc_gzip.metrics" >/dev/null
 echo "${trunc_gzip_line}" | grep -q "${PATTERN_HTTP_200}" || { echo "truncated-gzip failed: ${trunc_gzip_line}" >&2; exit 1; }
 grep -qi "${PATTERN_CT_MARKDOWN}" "${RAW_DIR}/trunc_gzip.hdr" || {
@@ -585,7 +599,7 @@ echo "==> Case 6: truncated deflate should trigger post-commit failure"
 trunc_deflate_line="$(curl -sS -D "${RAW_DIR}/trunc_deflate.hdr" -o "${RAW_DIR}/trunc_deflate.body" \
   -H "${ACCEPT_MARKDOWN_HEADER}" --max-time 180 \
   "http://127.0.0.1:${PORT}/streaming/truncated-deflate" \
-  -w "${CURL_METRICS_FMT}")"
+  -w "${CURL_METRICS_FMT}" || true)"
 echo "${trunc_deflate_line}" | tee "${RAW_DIR}/trunc_deflate.metrics" >/dev/null
 echo "${trunc_deflate_line}" | grep -q "${PATTERN_HTTP_200}" || { echo "truncated-deflate failed: ${trunc_deflate_line}" >&2; exit 1; }
 grep -qi "${PATTERN_CT_MARKDOWN}" "${RAW_DIR}/trunc_deflate.hdr" || {

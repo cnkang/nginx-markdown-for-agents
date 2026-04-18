@@ -19,10 +19,12 @@
 #define NGX_ERROR -1
 #endif
 #ifndef NGX_CONF_OK
-#define NGX_CONF_OK ((char *) "OK")
+static char ngx_conf_ok[] = "OK";
+#define NGX_CONF_OK ngx_conf_ok
 #endif
 #ifndef NGX_CONF_ERROR
-#define NGX_CONF_ERROR ((char *) "ERROR")
+static char ngx_conf_error[] = "ERROR";
+#define NGX_CONF_ERROR ngx_conf_error
 #endif
 
 #ifndef NGX_CONF_UNSET

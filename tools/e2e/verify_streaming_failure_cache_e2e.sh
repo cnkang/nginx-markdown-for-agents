@@ -1212,8 +1212,9 @@ fi
 # 10.10 HEAD request does not enter streaming path
 # ---------------------------------------------------------------------------
 echo "==> 10.10 HEAD request does not enter streaming path"
-curl -sS -D "${RAW_DIR}/t10.hdr" -o "${RAW_DIR}/t10.body" \
-    -X HEAD -H "${ACCEPT_MARKDOWN_HEADER}" --max-time 30 \
+: > "${RAW_DIR}/t10.body"
+curl -sS --head -D "${RAW_DIR}/t10.hdr" \
+    -H "${ACCEPT_MARKDOWN_HEADER}" --max-time 30 \
     "http://127.0.0.1:${PORT}/t10/simple"
 
 t10_pass=1
