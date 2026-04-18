@@ -196,6 +196,7 @@ else
     cd "${BUILDROOT}"
     ./configure \
       --without-http_rewrite_module \
+      --with-cc-opt="-DMARKDOWN_STREAMING_ENABLED" \
       --prefix="${RUNTIME}" \
       --add-module="${WORKSPACE_ROOT}/components/nginx-module"
   )
