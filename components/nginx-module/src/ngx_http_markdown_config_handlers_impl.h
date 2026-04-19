@@ -40,7 +40,7 @@ ngx_http_markdown_arg_equals(
  * parser (k/K, m/M, g/G) and rejects overflow or malformed input.
  */
 static size_t
-ngx_http_markdown_parse_size(ngx_str_t *line)
+ngx_http_markdown_parse_size(const ngx_str_t *line)
 {
     char                 buf[64];
     char                *endptr;
