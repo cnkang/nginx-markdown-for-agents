@@ -44,6 +44,11 @@ def test_install_verify_workflow_avoids_js_actions_on_alpine_arm64_and_uses_bash
         "${{ !(matrix.target.pkg_manager == 'apk' && matrix.target.arch == 'aarch64') }}"
     )
 
+    resolve_run = workflow["jobs"]["resolve-matrix"]["steps"][2]["run"]
+    assert '"variant": "mainline-upper"' in resolve_run
+    assert '"expected_install_success": False' in resolve_run
+    assert '"variant": "upper-bound"' in resolve_run
+
     steps = {step["name"]: step for step in job["steps"]}
     assert steps["Checkout repository"]["if"] == "${{ env.JS_ACTIONS_SUPPORTED == 'true' }}"
     assert steps["Checkout repository (Alpine arm64 fallback)"]["if"] == (
