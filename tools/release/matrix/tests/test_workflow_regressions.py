@@ -43,6 +43,7 @@ def test_update_matrix_pr_creation_is_non_blocking_when_repo_disallows_actions_p
     """Scheduled matrix refreshes should succeed even if PR creation is policy-blocked."""
     text = _workflow_text("update-matrix.yml")
     assert "continue-on-error: true" in text
+    assert "Source: latest GitHub release assets for this repository." in text
     assert "Matrix update branch pushed, but automatic PR creation is blocked." in text
 
 
@@ -66,6 +67,7 @@ def test_install_verify_workflow_avoids_js_actions_on_alpine_arm64_and_uses_bash
         "Select representative matrix entries",
     )
     resolve_run = resolve_step["run"]
+    assert "nginx.org/en/download.html" in resolve_run
     assert '"variant": "mainline-upper"' in resolve_run
     assert '"expected_install_success": False' in resolve_run
     assert '"variant": "upper-bound"' in resolve_run

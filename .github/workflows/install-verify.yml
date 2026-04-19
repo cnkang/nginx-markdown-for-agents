@@ -42,6 +42,9 @@ jobs:
           python3 - <<'PY'
           import json
           import os
+          import re
+          import sys
+          from urllib.request import urlopen
 
           with open("tools/release-matrix.json", "r") as f:
               data = json.load(f)
@@ -58,10 +61,39 @@ jobs:
               minor = int(version.split(".")[1])
               return "stable" if minor % 2 == 0 else "mainline"
 
+          def fetch_upstream_versions() -> list[str]:
+              try:
+                  with urlopen("https://nginx.org/en/download.html", timeout=30) as resp:
+                      html = resp.read().decode("utf-8")
+              except Exception as exc:
+                  print(
+                      f"Warning: failed to fetch nginx.org download page: {exc}",
+                      file=sys.stderr,
+                  )
+                  return []
+
+              versions = re.findall(r"/download/nginx-(\d+\.\d+\.\d+)\.tar\.gz", html)
+              return list(dict.fromkeys(versions))
+
+          upstream_versions = fetch_upstream_versions()
+          if not upstream_versions:
+              upstream_versions = sorted(
+                  {e["nginx"] for e in full_entries},
+                  key=version_tuple,
+              )
+          upstream_stable_versions = [
+              v for v in sorted(set(upstream_versions), key=version_tuple)
+              if classify_version(v) == "stable"
+          ]
+          upstream_mainline_versions = [
+              v for v in sorted(set(upstream_versions), key=version_tuple)
+              if classify_version(v) == "mainline"
+          ]
+
           # Pick representative nginx versions per (os_type, arch):
           # - lower bound: minimum supported version
           # - stable upper bound: latest stable version for distro-backed glibc
-          # - mainline upper bound: latest version in the prebuilt matrix
+          # - mainline upper bound: latest upstream mainline version
           #   (validated via official nginx images for glibc/musl)
           by_platform = {}
           for e in full_entries:
@@ -91,8 +123,13 @@ jobs:
                           "expected_install_success": True,
                       })
                   if mainline_versions:
+                      upstream_mainline = (
+                          upstream_mainline_versions[-1]
+                          if upstream_mainline_versions
+                          else mainline_versions[-1]
+                      )
                       selected.append({
-                          "nginx": mainline_versions[-1],
+                          "nginx": upstream_mainline,
                           "os_type": os_type,
                           "arch": arch,
                           "variant": "mainline-upper",
@@ -103,8 +140,13 @@ jobs:
                           "expected_install_success": False,
                       })
               else:
+                  upstream_upper = (
+                      upstream_versions[-1]
+                      if upstream_versions
+                      else sorted_v[-1]
+                  )
                   selected.append({
-                      "nginx": sorted_v[-1],
+                      "nginx": upstream_upper,
                       "os_type": os_type,
                       "arch": arch,
                       "variant": "upper-bound",
