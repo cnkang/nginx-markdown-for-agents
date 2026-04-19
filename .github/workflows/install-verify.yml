@@ -96,7 +96,11 @@ jobs:
                           "os_type": os_type,
                           "arch": arch,
                           "variant": "mainline-upper",
-                          "expected_install_success": True,
+                          # The newest upstream images can move ahead of the
+                          # published binary-module matrix, so this target
+                          # intentionally verifies the failure path until the
+                          # matching release artifacts exist.
+                          "expected_install_success": False,
                       })
               else:
                   selected.append({
@@ -104,7 +108,9 @@ jobs:
                       "os_type": os_type,
                       "arch": arch,
                       "variant": "upper-bound",
-                      "expected_install_success": True,
+                      # The Alpine upper-bound target is the first version
+                      # beyond the published binary-module matrix.
+                      "expected_install_success": False,
                   })
 
           # Spec-required distro environments: Ubuntu 22.04, Ubuntu 24.04,
@@ -240,7 +246,6 @@ jobs:
     permissions:
       contents: read
     env:
-      JS_ACTIONS_SUPPORTED: ${{ !(matrix.target.pkg_manager == 'apk' && matrix.target.arch == 'aarch64') }}
     strategy:
       fail-fast: false
       matrix:
@@ -248,6 +253,11 @@ jobs:
     container: ${{ matrix.target.container || null }}
 
     steps:
+      - name: Determine JS actions support
+        id: js_actions_support
+        run: |
+          echo "supported=${{ !(matrix.target.pkg_manager == 'apk' && matrix.target.arch == 'aarch64') }}" >> "$GITHUB_OUTPUT"
+
       - name: Install prerequisites (Alpine)
         if: matrix.target.pkg_manager == 'apk'
         run: |
@@ -346,17 +356,18 @@ jobs:
           fi
 
       - name: Checkout repository
-        if: ${{ env.JS_ACTIONS_SUPPORTED == 'true' }}
+        if: ${{ steps.js_actions_support.outputs.supported == 'true' }}
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           ref: ${{ github.event.inputs.ref || github.ref }}
 
       - name: Checkout repository (Alpine arm64 fallback)
-        if: ${{ env.JS_ACTIONS_SUPPORTED != 'true' }}
+        if: ${{ steps.js_actions_support.outputs.supported != 'true' }}
         env:
           REPO_URL: https://github.com/${{ github.repository }}.git
           CHECKOUT_REF: ${{ github.event.inputs.ref || github.ref }}
         run: |
+          git config --global --add safe.directory "${GITHUB_WORKSPACE}"
           git init .
           git remote add origin "${REPO_URL}"
           git fetch --depth=1 origin "${CHECKOUT_REF}"
@@ -732,10 +743,45 @@ jobs:
           fi
 
       - name: Upload verification artifacts
-        if: ${{ always() && env.JS_ACTIONS_SUPPORTED == 'true' }}
+        if: ${{ always() && steps.js_actions_support.outputs.supported == 'true' }}
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
         with:
           name: ${{ matrix.target.artifact_name }}
           path: ${{ runner.temp }}/install-verify/
           if-no-files-found: ignore
           retention-days: 30
+
+      - name: Dump verification artifacts
+        if: ${{ always() && steps.js_actions_support.outputs.supported != 'true' }}
+        run: |
+          RESULTS_DIR="${{ runner.temp }}/install-verify"
+          SUMMARY_FILE="${GITHUB_STEP_SUMMARY:-/dev/null}"
+
+          {
+            echo "## Verification artifacts"
+            echo
+          } | tee -a "${SUMMARY_FILE}"
+
+          for artifact in \
+            summary.txt \
+            install-stdout.json \
+            install-stderr.log \
+            env-snapshot.txt \
+            nginx-test.log \
+            smoke-test.log \
+            nginx-smoke-config.log \
+            nginx-start-stderr.log \
+            smoke-curl-stderr.log \
+            module-check.log
+          do
+            path="${RESULTS_DIR}/${artifact}"
+            {
+              echo "### ${artifact}"
+              if [ -f "${path}" ]; then
+                cat "${path}"
+              else
+                echo "<missing>"
+              fi
+              echo
+            } | tee -a "${SUMMARY_FILE}"
+          done
