@@ -750,3 +750,38 @@ jobs:
           path: ${{ runner.temp }}/install-verify/
           if-no-files-found: ignore
           retention-days: 30
+
+      - name: Dump verification artifacts
+        if: ${{ always() && steps.js_actions_support.outputs.supported != 'true' }}
+        run: |
+          RESULTS_DIR="${{ runner.temp }}/install-verify"
+          SUMMARY_FILE="${GITHUB_STEP_SUMMARY:-/dev/null}"
+
+          {
+            echo "## Verification artifacts"
+            echo
+          } | tee -a "${SUMMARY_FILE}"
+
+          for artifact in \
+            summary.txt \
+            install-stdout.json \
+            install-stderr.log \
+            env-snapshot.txt \
+            nginx-test.log \
+            smoke-test.log \
+            nginx-smoke-config.log \
+            nginx-start-stderr.log \
+            smoke-curl-stderr.log \
+            module-check.log
+          do
+            path="${RESULTS_DIR}/${artifact}"
+            {
+              echo "### ${artifact}"
+              if [ -f "${path}" ]; then
+                cat "${path}"
+              else
+                echo "<missing>"
+              fi
+              echo
+            } | tee -a "${SUMMARY_FILE}"
+          done

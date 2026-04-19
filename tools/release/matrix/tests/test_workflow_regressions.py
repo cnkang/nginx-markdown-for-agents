@@ -8,10 +8,16 @@ import yaml
 
 
 def _workflow_data(name: str) -> dict[str, object]:
+    """Load workflows with BaseLoader so workflow keys stay stable strings.
+
+    yaml.BaseLoader intentionally returns only strings, lists, and dicts.
+    That avoids YAML 1.1 boolean coercion, where an unquoted `on:` key can
+    become `True` and break lookups like `workflow["on"]["workflow_dispatch"]`.
+    """
     repo_root = Path(__file__).resolve().parents[4]
     path = repo_root / ".github" / "workflows" / name
     with path.open(encoding="utf-8") as f:
-        return yaml.load(f, Loader=yaml.BaseLoader)
+        return yaml.load(f, Loader=yaml.BaseLoader)  # noqa: S506
 
 
 def _workflow_text(name: str) -> str:
@@ -48,6 +54,7 @@ def test_install_verify_workflow_avoids_js_actions_on_alpine_arm64_and_uses_bash
 
     job = workflow["jobs"]["install-verify"]
     steps = {step["name"]: step for step in job["steps"]}
+    step_names = [step["name"] for step in job["steps"]]
     assert "Determine JS actions support" in steps
     assert steps["Determine JS actions support"]["run"] == (
         'echo "supported=${{ !(matrix.target.pkg_manager == \'apk\' && matrix.target.arch == \'aarch64\') }}" '
@@ -75,4 +82,12 @@ def test_install_verify_workflow_avoids_js_actions_on_alpine_arm64_and_uses_bash
     assert steps["Run install script"]["shell"] == "bash"
     assert steps["Upload verification artifacts"]["if"] == (
         "${{ always() && steps.js_actions_support.outputs.supported == 'true' }}"
+    )
+    assert steps["Dump verification artifacts"]["if"] == (
+        "${{ always() && steps.js_actions_support.outputs.supported != 'true' }}"
+    )
+    assert "install-stdout.json" in steps["Dump verification artifacts"]["run"]
+    assert "GITHUB_STEP_SUMMARY" in steps["Dump verification artifacts"]["run"]
+    assert step_names.index("Upload verification artifacts") < step_names.index(
+        "Dump verification artifacts"
     )
