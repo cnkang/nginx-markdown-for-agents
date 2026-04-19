@@ -182,7 +182,10 @@ if [[ -n "${NGINX_BIN}" ]]; then
   NGINX_EXECUTABLE="${NGINX_BIN}"
 else
   echo "==> Building Rust converter (${RUST_TARGET})"
-  markdown_prepare_rust_converter_release "${WORKSPACE_ROOT}" "${RUST_TARGET}"
+  # Keep streaming feature enabled so this retained binary can be safely
+  # reused by downstream streaming E2E checks in CI.
+  markdown_prepare_rust_converter_release "${WORKSPACE_ROOT}" "${RUST_TARGET}" \
+    --features streaming
 
   echo "==> Downloading NGINX ${NGINX_VERSION}"
   curl --proto '=https' --tlsv1.2 -fsSL "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" -o "${BUILDROOT}/nginx.tar.gz"
@@ -191,8 +194,11 @@ else
   echo "==> Configuring NGINX"
   (
     cd "${BUILDROOT}"
+    # Enable streaming at compile time so the C module includes streaming
+    # code paths; this must match the Rust --features streaming flag above.
     ./configure \
       --without-http_rewrite_module \
+      --with-cc-opt="-DMARKDOWN_STREAMING_ENABLED" \
       --prefix="${RUNTIME}" \
       --add-module="${WORKSPACE_ROOT}/components/nginx-module"
   )
