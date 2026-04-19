@@ -5,6 +5,7 @@
 
 #include "../include/test_common.h"
 #include <ctype.h>
+#include <limits.h>
 #include <time.h>
 
 #include "../../src/ngx_http_markdown_filter_module.h"
@@ -42,8 +43,41 @@ struct MarkdownResult {
 
 struct MarkdownConverterHandle;
 
+/*
+ * Test-controlled stub state.  Each global allows tests to inject
+ * specific return codes or trigger one-shot allocation failures
+ * without modifying the stub function bodies.
+ */
+static ngx_int_t g_forward_headers_rc = 0;
+static ngx_int_t g_update_headers_rc = 0;
+static ngx_int_t g_failopen_rc = 0;
+static ngx_uint_t g_failopen_call_count = 0;
+static ngx_int_t g_next_body_filter_rc = 0;
+static ngx_uint_t g_markdown_result_free_calls = 0;
+static ngx_uint_t g_pnalloc_fail_once = 0;
+static ngx_uint_t g_pcalloc_fail_once = 0;
+static ngx_uint_t g_alloc_chain_fail_once = 0;
+
 /* FFI stub constants and functions used by conversion_impl.h */
 #define ERROR_SUCCESS 0
+#ifndef ERROR_PARSE
+#define ERROR_PARSE 1
+#endif
+#ifndef ERROR_ENCODING
+#define ERROR_ENCODING 2
+#endif
+#ifndef ERROR_TIMEOUT
+#define ERROR_TIMEOUT 3
+#endif
+#ifndef ERROR_MEMORY_LIMIT
+#define ERROR_MEMORY_LIMIT 4
+#endif
+#ifndef ERROR_INVALID_INPUT
+#define ERROR_INVALID_INPUT 5
+#endif
+#ifndef ERROR_INTERNAL
+#define ERROR_INTERNAL 99
+#endif
 
 static void
 markdown_convert(struct MarkdownConverterHandle *handle, /* NOSONAR: must match FFI signature */
@@ -58,10 +92,30 @@ markdown_convert(struct MarkdownConverterHandle *handle, /* NOSONAR: must match 
     memset(result, 0, sizeof(*result));
 }
 
+/*
+ * FFI lifecycle stub for markdown_result_free.  Clears all public ABI
+ * fields (pointer, length, and numeric/error fields) to prevent
+ * stale-state regressions, and increments g_markdown_result_free_calls
+ * so tests can verify the expected number of free invocations.
+ *
+ * Per AGENTS.md rule 15: partial clears create false confidence and
+ * can mask stale-state regressions, so every field is zeroed.
+ */
 static void
 markdown_result_free(struct MarkdownResult *result) /* NOSONAR: must match FFI signature */
 {
-    UNUSED(result);
+    g_markdown_result_free_calls++;
+    if (result != NULL) {
+        result->markdown = NULL;
+        result->etag = NULL;
+        result->error_message = NULL;
+        result->markdown_len = 0;
+        result->etag_len = 0;
+        result->token_estimate = 0;
+        result->error_code = 0;
+        result->error_len = 0;
+        result->peak_memory_estimate = 0;
+    }
 }
 
 typedef struct ngx_list_part_s ngx_list_part_t;
@@ -163,17 +217,20 @@ struct ngx_http_request_s {
 #ifndef NGX_ERROR
 #define NGX_ERROR (-1)
 #endif
+#ifndef NGX_DONE
+#define NGX_DONE (-4)
+#endif
 #ifndef NGX_DECLINED
 #define NGX_DECLINED (-5)
 #endif
 #ifndef NGX_HTTP_HEAD
-#define NGX_HTTP_HEAD 2
+#define NGX_HTTP_HEAD 4
 #endif
 #ifndef NGX_HTTP_NOT_MODIFIED
 #define NGX_HTTP_NOT_MODIFIED 304
 #endif
 #ifndef NGX_HTTP_MARKDOWN_BUFFERED
-#define NGX_HTTP_MARKDOWN_BUFFERED 0x00000001
+#define NGX_HTTP_MARKDOWN_BUFFERED 0x08
 #endif
 #ifndef NGX_LOG_DEBUG_HTTP
 #define NGX_LOG_DEBUG_HTTP 0
@@ -225,27 +282,53 @@ ngx_pfree(ngx_pool_t *pool, void *p)
     return NGX_OK;
 }
 
+/*
+ * Pool allocator stub delegating to malloc(3).  When g_pnalloc_fail_once
+ * is set, returns NULL once and clears the flag, simulating allocation
+ * failure.
+ */
 static ngx_inline void *
 ngx_pnalloc(ngx_pool_t *pool, size_t size)
 {
     (void) pool;
+    if (g_pnalloc_fail_once) {
+        g_pnalloc_fail_once = 0;
+        return NULL;
+    }
     return malloc(size);
 }
 
+/*
+ * Pool allocator stub delegating to calloc(3) with zero-initialization.
+ * When g_pcalloc_fail_once is set, returns NULL once and clears the flag,
+ * simulating allocation failure.
+ */
 static ngx_inline void *
 ngx_pcalloc(ngx_pool_t *pool, size_t size)
 {
     void *p;
 
     (void) pool;
+    if (g_pcalloc_fail_once) {
+        g_pcalloc_fail_once = 0;
+        return NULL;
+    }
     p = calloc(1, size);
     return p;
 }
 
+/*
+ * Chain link allocator stub.  When g_alloc_chain_fail_once is set,
+ * returns NULL once and clears the flag, simulating allocation failure.
+ */
 static ngx_inline ngx_chain_t *
 ngx_alloc_chain_link(ngx_pool_t *pool)
 {
     (void) pool;
+    if (g_alloc_chain_fail_once) {
+        g_alloc_chain_fail_once = 0;
+        return NULL;
+    }
     return calloc(1, sizeof(ngx_chain_t));
 }
 
@@ -293,6 +376,10 @@ struct MarkdownConverterHandle *ngx_http_markdown_converter = NULL;
 ngx_http_markdown_metrics_t *ngx_http_markdown_metrics = NULL;
 ngx_int_t (*ngx_http_next_body_filter)(ngx_http_request_t *r, ngx_chain_t *in) = NULL;
 
+/*
+ * Forward-headers stub returning the test-controlled g_forward_headers_rc,
+ * allowing tests to simulate header forwarding failures.
+ */
 static ngx_int_t
 ngx_http_markdown_forward_headers(
     ngx_http_request_t *r,     /* NOSONAR c:S995 — must match production signature */
@@ -300,7 +387,7 @@ ngx_http_markdown_forward_headers(
 {
     UNUSED(r);
     UNUSED(ctx);
-    return NGX_OK;
+    return g_forward_headers_rc;
 }
 
 static void
@@ -310,6 +397,11 @@ ngx_http_markdown_metric_inc_failopen(
     UNUSED(conf);
 }
 
+/*
+ * Fail-open stub.  Increments g_failopen_call_count and returns
+ * g_failopen_rc, allowing tests to verify invocation count and control
+ * return behavior.
+ */
 static ngx_int_t
 ngx_http_markdown_reject_or_fail_open_buffered_response(
     ngx_http_request_t *r,     /* NOSONAR c:S995 — must match impl forward decl */
@@ -320,28 +412,65 @@ ngx_http_markdown_reject_or_fail_open_buffered_response(
     UNUSED(ctx);
     UNUSED(conf);
     UNUSED(debug_message);
-    return NGX_OK;
+    g_failopen_call_count++;
+    return g_failopen_rc;
 }
 
+/*
+ * Classify FFI error codes into semantic categories.  PARSE/ENCODING/
+ * INVALID_INPUT map to CONVERSION, TIMEOUT/MEMORY_LIMIT map to
+ * RESOURCE_LIMIT, all others map to SYSTEM.  Mirrors the production
+ * classification contract.
+ */
 ngx_http_markdown_error_category_t
 ngx_http_markdown_classify_error(uint32_t error_code)
 {
-    UNUSED(error_code);
-    return NGX_HTTP_MARKDOWN_ERROR_SYSTEM;
+    switch (error_code) {
+        case ERROR_PARSE:
+        case ERROR_ENCODING:
+        case ERROR_INVALID_INPUT:
+            return NGX_HTTP_MARKDOWN_ERROR_CONVERSION;
+        case ERROR_TIMEOUT:
+        case ERROR_MEMORY_LIMIT:
+            return NGX_HTTP_MARKDOWN_ERROR_RESOURCE_LIMIT;
+        default:
+            return NGX_HTTP_MARKDOWN_ERROR_SYSTEM;
+    }
 }
 
+/*
+ * Return a human-readable string for each error category.  Covers
+ * CONVERSION, RESOURCE_LIMIT, and SYSTEM categories.
+ */
 const ngx_str_t *
 ngx_http_markdown_error_category_string(
     ngx_http_markdown_error_category_t category)
 {
+    static u_char conversion_str_data[] = "FAIL_CONVERSION";
+    static u_char resource_str_data[] = "FAIL_RESOURCE_LIMIT";
     static u_char system_str_data[] = "FAIL_SYSTEM";
+    static ngx_str_t conversion_str = {
+        sizeof("FAIL_CONVERSION") - 1, conversion_str_data
+    };
+    static ngx_str_t resource_str = {
+        sizeof("FAIL_RESOURCE_LIMIT") - 1, resource_str_data
+    };
     static ngx_str_t system_str = {
         sizeof("FAIL_SYSTEM") - 1, system_str_data
     };
-    UNUSED(category);
+    if (category == NGX_HTTP_MARKDOWN_ERROR_CONVERSION) {
+        return &conversion_str;
+    }
+    if (category == NGX_HTTP_MARKDOWN_ERROR_RESOURCE_LIMIT) {
+        return &resource_str;
+    }
     return &system_str;
 }
 
+/*
+ * Header-update stub returning the test-controlled g_update_headers_rc,
+ * allowing tests to simulate header update failures.
+ */
 ngx_int_t
 ngx_http_markdown_update_headers(
     ngx_http_request_t *r,     /* NOSONAR c:S995 — must match module header decl */
@@ -351,7 +480,7 @@ ngx_http_markdown_update_headers(
     UNUSED(r);
     UNUSED(result);
     UNUSED(conf);
-    return NGX_OK;
+    return g_update_headers_rc;
 }
 
 ngx_int_t
@@ -420,6 +549,43 @@ assert_str_eq(const ngx_str_t *actual, const char *expected, const char *msg)
     expected_len = strlen(expected);
     TEST_ASSERT(actual->len == expected_len, msg);
     TEST_ASSERT(memcmp(actual->data, expected, expected_len) == 0, msg);
+}
+
+/*
+ * Body filter chain stub returning the test-controlled
+ * g_next_body_filter_rc.
+ */
+static ngx_int_t
+test_next_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
+{
+    UNUSED(r);
+    UNUSED(in);
+    return g_next_body_filter_rc;
+}
+
+/*
+ * Reset all stub state to deterministic defaults for each test section.
+ *
+ * Inputs: none.
+ * Output: none.
+ * Side effects:
+ * - restores default return values for forwarding/update/fail-open stubs
+ * - clears one-shot allocation failure injectors and call counters
+ * - reinstalls ngx_http_next_body_filter to the local test stub
+ */
+static void
+reset_stub_state(void)
+{
+    g_forward_headers_rc = NGX_OK;
+    g_update_headers_rc = NGX_OK;
+    g_failopen_rc = NGX_OK;
+    g_failopen_call_count = 0;
+    g_next_body_filter_rc = NGX_OK;
+    g_markdown_result_free_calls = 0;
+    g_pnalloc_fail_once = 0;
+    g_pcalloc_fail_once = 0;
+    g_alloc_chain_fail_once = 0;
+    ngx_http_next_body_filter = test_next_body_filter;
 }
 
 static void
@@ -894,6 +1060,315 @@ test_find_request_header_multi_part(void)
     TEST_PASS("find_request_header_value multi-part correct");
 }
 
+/*
+ * Verify validate_conversion_result invariant checks: NULL markdown with
+ * non-zero length triggers fail-open; NULL error_message with non-zero
+ * length triggers fail-open; NULL etag with non-zero length triggers
+ * fail-open; valid result passes without invoking fail-open.
+ */
+static void
+test_validate_conversion_result_paths(void)
+{
+    ngx_http_request_t        r;
+    ngx_http_markdown_ctx_t   ctx;
+    ngx_http_markdown_conf_t  conf;
+    struct MarkdownResult     result;
+    ngx_int_t                 rc;
+
+    TEST_SUBSECTION("validate_conversion_result invariants");
+
+    reset_stub_state();
+    init_request(&r);
+    memset(&ctx, 0, sizeof(ctx));
+    memset(&conf, 0, sizeof(conf));
+
+    memset(&result, 0, sizeof(result));
+    result.markdown = NULL;
+    result.markdown_len = 1;
+    g_failopen_rc = NGX_DECLINED;
+    rc = ngx_http_markdown_validate_conversion_result(&r, &ctx, &conf, &result);
+    TEST_ASSERT(rc == NGX_DECLINED, "invalid markdown invariants should fail-open");
+    TEST_ASSERT(g_failopen_call_count == 1,
+                "invalid markdown invariants should invoke fail-open stub");
+    TEST_ASSERT(g_markdown_result_free_calls == 1,
+                "invalid result should be freed");
+
+    reset_stub_state();
+    memset(&result, 0, sizeof(result));
+    result.error_message = NULL;
+    result.error_len = 3;
+    rc = ngx_http_markdown_validate_conversion_result(&r, &ctx, &conf, &result);
+    TEST_ASSERT(rc == NGX_OK, "stub fail-open default should propagate as NGX_OK");
+    TEST_ASSERT(g_failopen_call_count == 1,
+                "error message invariant failure should invoke fail-open stub");
+
+    reset_stub_state();
+    memset(&result, 0, sizeof(result));
+    result.etag = NULL;
+    result.etag_len = 2;
+    rc = ngx_http_markdown_validate_conversion_result(&r, &ctx, &conf, &result);
+    TEST_ASSERT(rc == NGX_OK, "etag invariant failure should route through fail-open");
+    TEST_ASSERT(g_failopen_call_count == 1,
+                "etag invariant failure should invoke fail-open stub");
+
+    reset_stub_state();
+    memset(&result, 0, sizeof(result));
+    rc = ngx_http_markdown_validate_conversion_result(&r, &ctx, &conf, &result);
+    TEST_ASSERT(rc == NGX_OK, "valid invariants should pass");
+    TEST_ASSERT(g_failopen_call_count == 0,
+                "valid invariants should not invoke fail-open stub");
+
+    TEST_PASS("validate_conversion_result branches covered");
+}
+
+/*
+ * Verify handle_conversion_failure error category classification:
+ * PARSE errors map to CONVERSION category; TIMEOUT errors map to
+ * RESOURCE_LIMIT category; INTERNAL errors map to SYSTEM category.
+ * Each path propagates the fail-open return code.
+ */
+static void
+test_handle_conversion_failure_paths(void)
+{
+    ngx_http_request_t        r;
+    ngx_http_markdown_ctx_t   ctx;
+    ngx_http_markdown_conf_t  conf;
+    struct MarkdownResult     result;
+    ngx_int_t                 rc;
+    u_char                    msg[] = "oops";
+
+    TEST_SUBSECTION("handle_conversion_failure categories");
+
+    reset_stub_state();
+    init_request(&r);
+    memset(&ctx, 0, sizeof(ctx));
+    memset(&conf, 0, sizeof(conf));
+    memset(&result, 0, sizeof(result));
+    result.error_code = ERROR_PARSE;
+    result.error_message = msg;
+    result.error_len = sizeof(msg) - 1;
+    g_failopen_rc = NGX_DONE;
+    rc = ngx_http_markdown_handle_conversion_failure(
+        &r, &ctx, &conf, &result, 12);
+    TEST_ASSERT(rc == NGX_DONE, "conversion category should propagate fail-open return");
+    TEST_ASSERT(ctx.has_error_category == 1, "error category should be recorded");
+    TEST_ASSERT(ctx.last_error_category == NGX_HTTP_MARKDOWN_ERROR_CONVERSION,
+                "conversion category expected");
+
+    reset_stub_state();
+    memset(&ctx, 0, sizeof(ctx));
+    memset(&result, 0, sizeof(result));
+    result.error_code = ERROR_TIMEOUT;
+    /*
+     * Exercise oversized length handling without risking reads past a tiny
+     * stack buffer: NULL message means no payload should be dereferenced.
+     */
+    result.error_message = NULL;
+    result.error_len = (size_t) INT_MAX + 11U;
+    rc = ngx_http_markdown_handle_conversion_failure(
+        &r, &ctx, &conf, &result, 99);
+    TEST_ASSERT(rc == NGX_OK, "resource category should use default fail-open");
+    TEST_ASSERT(ctx.last_error_category == NGX_HTTP_MARKDOWN_ERROR_RESOURCE_LIMIT,
+                "resource category expected");
+
+    reset_stub_state();
+    memset(&ctx, 0, sizeof(ctx));
+    memset(&result, 0, sizeof(result));
+    result.error_code = ERROR_INTERNAL;
+    result.error_message = NULL;
+    result.error_len = 0;
+    rc = ngx_http_markdown_handle_conversion_failure(
+        &r, &ctx, &conf, &result, 1);
+    TEST_ASSERT(rc == NGX_OK, "system category should route through fail-open");
+    TEST_ASSERT(ctx.last_error_category == NGX_HTTP_MARKDOWN_ERROR_SYSTEM,
+                "system category expected");
+
+    TEST_PASS("handle_conversion_failure branches covered");
+}
+
+/*
+ * Verify handle_converter_not_initialized follows the configured
+ * fail-open strategy and records the system error category.
+ */
+static void
+test_converter_not_initialized_path(void)
+{
+    ngx_http_request_t        r;
+    ngx_http_markdown_ctx_t   ctx;
+    ngx_http_markdown_conf_t  conf;
+    ngx_int_t                 rc;
+
+    TEST_SUBSECTION("converter_not_initialized path");
+
+    reset_stub_state();
+    init_request(&r);
+    memset(&ctx, 0, sizeof(ctx));
+    memset(&conf, 0, sizeof(conf));
+    g_failopen_rc = NGX_DECLINED;
+
+    rc = ngx_http_markdown_handle_converter_not_initialized(
+        &r, &ctx, &conf);
+    TEST_ASSERT(rc == NGX_DECLINED,
+                "converter_not_initialized should follow fail-open strategy");
+    TEST_ASSERT(ctx.has_error_category == 1,
+                "system failure should set error category flag");
+
+    TEST_PASS("converter_not_initialized covered");
+}
+
+/*
+ * Verify send_conversion_output branch coverage: HEAD method output,
+ * body output, header update failure, forward header failure, buffer
+ * allocation failure (pcalloc), body allocation failure (pnalloc),
+ * chain allocation failure.
+ */
+static void
+test_send_conversion_output_paths(void)
+{
+    ngx_http_request_t        r;
+    ngx_http_markdown_ctx_t   ctx;
+    ngx_http_markdown_conf_t  conf;
+    struct MarkdownResult     result;
+    ngx_int_t                 rc;
+    u_char                    out[] = "markdown";
+
+    TEST_SUBSECTION("send_conversion_output branches");
+
+    reset_stub_state();
+    init_request(&r);
+    memset(&ctx, 0, sizeof(ctx));
+    memset(&conf, 0, sizeof(conf));
+    memset(&result, 0, sizeof(result));
+    r.method = NGX_HTTP_HEAD;
+    result.markdown = out;
+    result.markdown_len = sizeof(out) - 1;
+    rc = ngx_http_markdown_send_conversion_output(
+        &r, &ctx, &conf, &result, 1);
+    TEST_ASSERT(rc == NGX_OK, "HEAD output path should succeed");
+    TEST_ASSERT(g_markdown_result_free_calls == 1,
+                "HEAD output should free result");
+
+    reset_stub_state();
+    init_request(&r);
+    memset(&ctx, 0, sizeof(ctx));
+    memset(&conf, 0, sizeof(conf));
+    memset(&result, 0, sizeof(result));
+    r.method = 0;
+    result.markdown = out;
+    result.markdown_len = sizeof(out) - 1;
+    rc = ngx_http_markdown_send_conversion_output(
+        &r, &ctx, &conf, &result, 1);
+    TEST_ASSERT(rc == NGX_OK, "body output path should succeed");
+
+    reset_stub_state();
+    init_request(&r);
+    memset(&ctx, 0, sizeof(ctx));
+    memset(&conf, 0, sizeof(conf));
+    memset(&result, 0, sizeof(result));
+    result.markdown = out;
+    result.markdown_len = sizeof(out) - 1;
+    g_update_headers_rc = NGX_ERROR;
+    rc = ngx_http_markdown_send_conversion_output(
+        &r, &ctx, &conf, &result, 1);
+    TEST_ASSERT(rc == NGX_ERROR, "header update failure should return NGX_ERROR");
+
+    reset_stub_state();
+    init_request(&r);
+    memset(&ctx, 0, sizeof(ctx));
+    memset(&conf, 0, sizeof(conf));
+    memset(&result, 0, sizeof(result));
+    result.markdown = out;
+    result.markdown_len = sizeof(out) - 1;
+    g_forward_headers_rc = NGX_ERROR;
+    rc = ngx_http_markdown_send_conversion_output(
+        &r, &ctx, &conf, &result, 1);
+    TEST_ASSERT(rc == NGX_ERROR, "forward header failure should propagate");
+
+    reset_stub_state();
+    init_request(&r);
+    memset(&ctx, 0, sizeof(ctx));
+    memset(&conf, 0, sizeof(conf));
+    memset(&result, 0, sizeof(result));
+    result.markdown = out;
+    result.markdown_len = sizeof(out) - 1;
+    g_pcalloc_fail_once = 1;
+    rc = ngx_http_markdown_send_conversion_output(
+        &r, &ctx, &conf, &result, 1);
+    TEST_ASSERT(rc == NGX_ERROR, "buffer allocation failure should return NGX_ERROR");
+
+    reset_stub_state();
+    init_request(&r);
+    memset(&ctx, 0, sizeof(ctx));
+    memset(&conf, 0, sizeof(conf));
+    memset(&result, 0, sizeof(result));
+    result.markdown = out;
+    result.markdown_len = sizeof(out) - 1;
+    g_pnalloc_fail_once = 1;
+    rc = ngx_http_markdown_send_conversion_output(
+        &r, &ctx, &conf, &result, 1);
+    TEST_ASSERT(rc == NGX_ERROR, "body allocation failure should return NGX_ERROR");
+
+    reset_stub_state();
+    init_request(&r);
+    memset(&ctx, 0, sizeof(ctx));
+    memset(&conf, 0, sizeof(conf));
+    memset(&result, 0, sizeof(result));
+    result.markdown = out;
+    result.markdown_len = sizeof(out) - 1;
+    g_alloc_chain_fail_once = 1;
+    rc = ngx_http_markdown_send_conversion_output(
+        &r, &ctx, &conf, &result, 1);
+    TEST_ASSERT(rc == NGX_ERROR, "chain allocation failure should return NGX_ERROR");
+
+    TEST_PASS("send_conversion_output branches covered");
+}
+
+/*
+ * Verify miscellaneous conversion helper branches:
+ * record_conversion_latency, record_system_failure, and
+ * record_token_savings_if_enabled with various token_estimate
+ * configurations.
+ */
+static void
+test_misc_conversion_helpers(void)
+{
+    ngx_http_markdown_ctx_t   ctx;
+    ngx_http_markdown_conf_t  conf;
+    struct MarkdownResult     result;
+
+    TEST_SUBSECTION("misc conversion helper branches");
+
+    reset_stub_state();
+    memset(&ctx, 0, sizeof(ctx));
+    memset(&conf, 0, sizeof(conf));
+    memset(&result, 0, sizeof(result));
+
+    ngx_http_markdown_record_conversion_latency(1);
+    ngx_http_markdown_record_conversion_latency(50);
+    ngx_http_markdown_record_conversion_latency(500);
+    ngx_http_markdown_record_conversion_latency(5000);
+
+    ngx_http_markdown_record_system_failure(&ctx);
+    TEST_ASSERT(ctx.has_error_category == 1,
+                "record_system_failure should set context flag");
+
+    ctx.buffer.size = 400;
+    conf.token_estimate = 1;
+    result.token_estimate = 50;
+    ngx_http_markdown_record_token_savings_if_enabled(
+        &ctx, &conf, &result);
+
+    result.token_estimate = 200;
+    ngx_http_markdown_record_token_savings_if_enabled(
+        &ctx, &conf, &result);
+
+    conf.token_estimate = 0;
+    ngx_http_markdown_record_token_savings_if_enabled(
+        &ctx, &conf, &result);
+
+    TEST_PASS("misc conversion helpers covered");
+}
+
 
 int
 main(void)
@@ -914,6 +1389,11 @@ main(void)
     test_prepare_conversion_options_no_base_url();
     test_scheme_is_http_family();
     test_find_request_header_multi_part();
+    test_validate_conversion_result_paths();
+    test_handle_conversion_failure_paths();
+    test_converter_not_initialized_path();
+    test_send_conversion_output_paths();
+    test_misc_conversion_helpers();
 
     printf("\n========================================\n");
     printf("All tests passed!\n");

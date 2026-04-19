@@ -579,6 +579,10 @@ If your NGINX version is >= 1.24.0 but not listed in the matrix below, use the [
 | 1.29.8 | glibc | x86_64 | Full |
 | 1.29.8 | musl | aarch64 | Full |
 | 1.29.8 | musl | x86_64 | Full |
+| 1.30.0 | glibc | aarch64 | Full |
+| 1.30.0 | glibc | x86_64 | Full |
+| 1.30.0 | musl | aarch64 | Full |
+| 1.30.0 | musl | x86_64 | Full |
 <!-- END AUTO-GENERATED MATRIX -->
 
 ---

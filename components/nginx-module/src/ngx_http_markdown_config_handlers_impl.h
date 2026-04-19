@@ -12,6 +12,9 @@
  * configuration object lifecycle and the directive registry table.
  */
 
+#include <errno.h>
+#include <stdlib.h>
+
 static ngx_int_t
 ngx_http_markdown_arg_equals(
     const ngx_str_t *arg,
@@ -29,6 +32,85 @@ ngx_http_markdown_arg_equals(
     return ngx_strncasecmp(arg->data,
                            expected,
                            expected_len) == 0;
+}
+
+/*
+ * Parse an ngx_str_t size token using the module's directive
+ * semantics.  Supports the same suffix families as NGINX's size
+ * parser (k/K, m/M, g/G) and rejects overflow or malformed input.
+ */
+static size_t
+ngx_http_markdown_parse_size(ngx_str_t *line)
+{
+    char                 buf[64];
+    char                *endptr;
+    size_t               len;
+    size_t               value;
+    size_t               scale;
+    unsigned long long   raw;
+    char                 suffix;
+
+    if (line == NULL || line->data == NULL || line->len == 0) {
+        return (size_t) NGX_ERROR;
+    }
+
+    len = line->len;
+    if (len >= sizeof(buf)) {
+        return (size_t) NGX_ERROR;
+    }
+
+    memcpy(buf, line->data, len);
+    buf[len] = '\0';
+
+    suffix = '\0';
+    if (len > 1) {
+        switch (buf[len - 1]) {
+        case 'k':
+        case 'K':
+        case 'm':
+        case 'M':
+        case 'g':
+        case 'G':
+            suffix = buf[len - 1];
+            buf[len - 1] = '\0';
+            break;
+        default:
+            break;
+        }
+    }
+
+    errno = 0;
+    raw = strtoull(buf, &endptr, 10);
+    if (errno == ERANGE || *endptr != '\0'
+        || raw > (unsigned long long) NGX_MAX_SIZE_T_VALUE)
+    {
+        return (size_t) NGX_ERROR;
+    }
+
+    value = (size_t) raw;
+
+    switch (suffix) {
+    case 'k':
+    case 'K':
+        scale = (size_t) 1024;
+        break;
+    case 'm':
+    case 'M':
+        scale = (size_t) 1024 * 1024;
+        break;
+    case 'g':
+    case 'G':
+        scale = (size_t) 1024 * 1024 * 1024;
+        break;
+    default:
+        return value;
+    }
+
+    if (value > NGX_MAX_SIZE_T_VALUE / scale) {
+        return (size_t) NGX_ERROR;
+    }
+
+    return value * scale;
 }
 
 /*
@@ -466,7 +548,7 @@ ngx_http_markdown_large_body_threshold(ngx_conf_t *cf,
         return NGX_CONF_OK;
     }
 
-    mcf->large_body_threshold = ngx_parse_size(&value[1]);
+    mcf->large_body_threshold = ngx_http_markdown_parse_size(&value[1]);
     if (mcf->large_body_threshold == (size_t) NGX_ERROR) {
         ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
             "invalid value \"%V\" in "
