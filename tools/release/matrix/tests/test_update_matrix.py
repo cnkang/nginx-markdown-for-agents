@@ -199,6 +199,23 @@ def test_parse_release_module_versions_extracts_assets():
     assert parse_release_module_versions(release_json) == {"1.28.3", "1.29.8"}
 
 
+def test_parse_release_module_versions_ignores_nonconforming_assets():
+    """Malformed asset names must not be misclassified as release versions."""
+    release_json = json.dumps(
+        {
+            "assets": [
+                {"name": "ngx_http_markdown_filter_module-1.29.8-glibc-x86_64.zip"},
+                {"name": "ngx_http_markdown_filter_module-1.29.8-glibc.tar.gz"},
+                {"name": "ngx_http_markdown_filter_module-1.29.8-glibc-x86_64.tar.gz"},
+                {"name": "ngx_http_markdown_filter_module-mainline-glibc-x86_64.tar.gz"},
+                {"name": "README.txt"},
+            ]
+        }
+    )
+
+    assert parse_release_module_versions(release_json) == {"1.29.8"}
+
+
 @pytest.mark.parametrize("version", ["1", "1x26x3", "mainline"])
 def test_classify_version_rejects_malformed_strings(version):
     """Malformed versions raise ValueError instead of crashing with IndexError."""

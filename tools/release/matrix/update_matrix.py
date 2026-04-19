@@ -275,17 +275,32 @@ def parse_release_module_versions(release_json: str) -> set[str]:
     if not isinstance(assets, list):
         return set()
 
-    pattern = re.compile(
-        r"^ngx_http_markdown_filter_module-(\d+\.\d+\.\d+)-[^/]+-[^/]+\.tar\.gz$"
-    )
+    prefix = "ngx_http_markdown_filter_module-"
+    suffix = ".tar.gz"
+
+    def _is_version(version: str) -> bool:
+        parts = version.split(".")
+        return len(parts) == 3 and all(part.isdigit() for part in parts)
+
     versions: set[str] = set()
     for asset in assets:
         if not isinstance(asset, dict):
             continue
         name = asset.get("name", "")
-        match = pattern.match(name)
-        if match:
-            versions.add(match.group(1))
+        if not isinstance(name, str):
+            continue
+        if not name.startswith(prefix) or not name.endswith(suffix):
+            continue
+        core = name[len(prefix) : -len(suffix)]
+        parts = core.split("-")
+        if len(parts) != 3:
+            continue
+        version, os_type, arch = parts
+        if not _is_version(version):
+            continue
+        if not os_type or not arch:
+            continue
+        versions.add(version)
     return versions
 
 
