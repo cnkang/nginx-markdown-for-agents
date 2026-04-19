@@ -396,6 +396,10 @@ Required:
   5. **Test helper constructors**: any `empty_result()`, `zeroed_result()`, or similar test helper must include the new field.
 - **Prefer helper functions over literal initialization for FFI structs**: When writing test code that needs a zeroed/empty FFI struct, **always use existing helper functions** (for example `empty_result()`, `zeroed_result()`, `ffi_test_empty_result()`) rather than writing `StructName { field: value, ... }` literals. This reduces future maintenance cost when the struct gains new fields — only the helper needs updating, not every call site. If no helper exists for a struct, create one before writing multiple literal initializations.
 - **Lifecycle ordering rule: read data from foreign-owned structs BEFORE calling their associated free/release function.** Do not access fields after `markdown_result_free()`, `markdown_converter_free()`, or similar cleanup calls — the memory may be invalidated, zeroed, or returned to the allocator. Capture values to local variables first, then free.
+- In C unit tests that stub FFI lifecycle helpers (for example
+  `markdown_result_free()`), clear **all** struct fields covered by the public
+  ABI (pointer, length, and numeric/error fields). Partial clears create false
+  confidence and can mask stale-state regressions.
 - When C code classifies FFI error codes into semantic categories, the
   classification branch must cover **all** codes defined in the FFI header
   that map to that category.  Do not assume a 1:1 mapping between C-local
@@ -414,6 +418,10 @@ Required:
 - Declare loop variables (`i`, `feed_count`, etc.) inside the `for` statement when they are not used after the loop. The test code already uses C99 features, so `for (size_t i = 0; ...)` is preferred over declaring `i` at function scope.
 - When a test assigns a variable to verify a cast or representation, ensure the variable is actually read by a `TEST_ASSERT` before the function ends.
 - Initialize variables at declaration when the compiler cannot prove they are always assigned before use (for example variables set only inside conditional branches).
+- Output variables passed by pointer to helpers (for example
+  `foo(..., &last_buf, ..., &fallback_cl)`) must be initialized before the call
+  even when the callee is expected to assign them on success; early-return
+  paths in test/prod helpers can otherwise read indeterminate storage.
 
 ### 17. Cognitive complexity in C functions
 SonarCloud rule: `c:S3776`.
@@ -452,6 +460,13 @@ Required:
   are preserved in all environments. Prefer `bash path/to/script.sh` (or ensure
   the executable bit is enforced) so coverage/release pipelines do not fail with
   `Permission denied`.
+- Under `set -e`, command substitutions that intentionally inspect failure-path
+  responses (for example truncated-stream curl probes) must not abort before
+  assertions run. Use explicit tolerance (`|| true`) and then enforce behavior
+  via subsequent checks on status/header/body artifacts.
+- For HTTP HEAD validation in curl-based harness scripts, use `curl --head`
+  (or `-I`) instead of `-X HEAD`, and create any expected empty body artifact
+  explicitly when downstream checks read a body file.
 
 ### 19. Python e2e/tooling harness guardrails
 

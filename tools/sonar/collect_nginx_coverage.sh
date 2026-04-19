@@ -318,6 +318,16 @@ http {
             markdown_conditional_requests disabled;
         }
 
+        # ETag disabled with full_support conditional requests; exercises the
+        # branch where If-None-Match is present but ETag comparison cannot
+        # proceed because markdown_etag is off.
+        location /no-etag {
+            root html;
+            markdown_filter on;
+            markdown_etag off;
+            markdown_conditional_requests full_support;
+        }
+
         location /no-wildcard {
             root html;
             markdown_filter on;
@@ -405,6 +415,36 @@ http {
             markdown_log_verbosity debug;
             markdown_on_error pass;
             markdown_max_size 1m;
+        }
+
+        # Proxy to backend that advertises gzip without valid gzip payload
+        # (exercises decompression error + fail-open handling)
+        location /proxy-fake-gzip {
+            proxy_pass http://127.0.0.1:${BACKEND_PORT}/fake-gzip/;
+            markdown_filter on;
+            markdown_on_wildcard on;
+            markdown_log_verbosity debug;
+            markdown_on_error pass;
+        }
+
+        # Proxy to backend that advertises brotli without valid brotli payload
+        # (exercises unsupported/invalid compressed-stream handling)
+        location /proxy-fake-br {
+            proxy_pass http://127.0.0.1:${BACKEND_PORT}/fake-br/;
+            markdown_filter on;
+            markdown_on_wildcard on;
+            markdown_log_verbosity debug;
+            markdown_on_error pass;
+        }
+
+        # Proxy to backend that advertises deflate without valid deflate payload
+        # (exercises deflate decompression error handling)
+        location /proxy-fake-deflate {
+            proxy_pass http://127.0.0.1:${BACKEND_PORT}/fake-deflate/;
+            markdown_filter on;
+            markdown_on_wildcard on;
+            markdown_log_verbosity debug;
+            markdown_on_error pass;
         }
 
         # Proxy to backend with Cache-Control: public (exercises strip-public CC path)
@@ -626,6 +666,26 @@ http {
             alias html/;
             add_header Cache-Control "no-store";
         }
+
+        # Deliberately mislabeled encodings for decompression negative-path coverage.
+        # Each serves plain HTML with a Content-Encoding header that does not
+        # match the actual body, triggering decompression error handling.
+        location /fake-gzip/ {
+            alias html/;
+            add_header Content-Encoding "gzip" always;
+        }
+
+        # Brotli encoding advertised but unsupported/mismatched payload.
+        location /fake-br/ {
+            alias html/;
+            add_header Content-Encoding "br" always;
+        }
+
+        # Deflate encoding advertised but body is not deflate-compressed.
+        location /fake-deflate/ {
+            alias html/;
+            add_header Content-Encoding "deflate" always;
+        }
     }
 }
 EOF
@@ -633,7 +693,7 @@ EOF
 # ── Create test HTML fixtures ───────────────────────────────────────
 
 # Create subdirectories for location blocks that use root html
-for subdir in auth auth-public-cc auth-allow reject-error ims-only no-conditional \
+for subdir in auth auth-public-cc auth-allow reject-error ims-only no-conditional no-etag \
               no-wildcard disabled gfm commonmark small-limit log-error \
               streaming streaming-auto streaming-tiny-budget \
               streaming-variable streaming-fullsupport streaming-ims-only \
@@ -661,7 +721,7 @@ HTML
 # Copy index.html to all subdirectories so location blocks serve 200.
 # Note: small-limit is intentionally excluded — it only receives large.html
 # (below) so the size-limit rejection test exercises the over-limit path.
-for subdir in auth auth-public-cc auth-allow reject-error ims-only no-conditional \
+for subdir in auth auth-public-cc auth-allow reject-error ims-only no-conditional no-etag \
               no-wildcard disabled gfm commonmark log-error \
               streaming streaming-auto streaming-tiny-budget \
               streaming-variable streaming-fullsupport streaming-ims-only \
@@ -823,6 +883,22 @@ curl -sS -H "${ACCEPT_MARKDOWN}" -H 'If-None-Match: "etag"' \
 curl -sS -H "${ACCEPT_MARKDOWN}" -H 'If-None-Match: "etag"' \
   "http://127.0.0.1:${PORT}/no-conditional/index.html" -o /dev/null -w "  INM disabled bypass: HTTP %{http_code}\n"
 
+# If-None-Match with ETag disabled (branch: cannot compare)
+curl -sS -H "${ACCEPT_MARKDOWN}" -H 'If-None-Match: "etag-disabled"' \
+  "http://127.0.0.1:${PORT}/no-etag/index.html" -o /dev/null -w "  INM etag-off bypass: HTTP %{http_code}\n"
+
+# Malformed If-None-Match (unterminated quote)
+curl -sS -H "${ACCEPT_MARKDOWN}" -H 'If-None-Match: "unterminated' \
+  "http://127.0.0.1:${PORT}/index.html" -o /dev/null -w "  INM malformed quote: HTTP %{http_code}\n"
+
+# Weak/quoted ETag token handling
+curl -sS -H "${ACCEPT_MARKDOWN}" -H 'If-None-Match: W/"some-etag-value"' \
+  "http://127.0.0.1:${PORT}/index.html" -o /dev/null -w "  INM weak validator: HTTP %{http_code}\n"
+
+# Unquoted multi-token ETag parsing
+curl -sS -H "${ACCEPT_MARKDOWN}" -H 'If-None-Match: etagA, etagB' \
+  "http://127.0.0.1:${PORT}/index.html" -o /dev/null -w "  INM unquoted multi: HTTP %{http_code}\n"
+
 # ── Error path scenarios (Req 4) ────────────────────────────────────
 
 # Non-existent page (404 passthrough)
@@ -896,6 +972,20 @@ curl -sS -H "${ACCEPT_MARKDOWN}" \
 curl -sS -H "${ACCEPT_MARKDOWN}" \
   "http://127.0.0.1:${PORT}/streaming-proxy-gzip-reject/large.html" \
   -o /dev/null -w "  streaming gzip reject: HTTP %{http_code}\n" || true
+
+# Proxy with invalid/mislabeled compressed payloads
+# These exercise the decompression error/fail-open paths: the backend
+# advertises Content-Encoding but serves plain HTML, so the decompressor
+# must detect the mismatch and fall back to pass-through or error.
+curl -sS -H "${ACCEPT_MARKDOWN}" \
+  "http://127.0.0.1:${PORT}/proxy-fake-gzip/index.html" \
+  -o /dev/null -w "  fake gzip payload: HTTP %{http_code}\n" || true
+curl -sS -H "${ACCEPT_MARKDOWN}" \
+  "http://127.0.0.1:${PORT}/proxy-fake-br/index.html" \
+  -o /dev/null -w "  fake br payload: HTTP %{http_code}\n" || true
+curl -sS -H "${ACCEPT_MARKDOWN}" \
+  "http://127.0.0.1:${PORT}/proxy-fake-deflate/index.html" \
+  -o /dev/null -w "  fake deflate payload: HTTP %{http_code}\n" || true
 
 # ── X-Forwarded header scenarios (exercises conversion_impl.h header iteration) ──
 
@@ -1080,8 +1170,14 @@ echo "==> Stopping NGINX (flush gcov data)"
 "${RUNTIME}/sbin/nginx" -p "${RUNTIME}" -c conf/nginx.conf -s stop
 sleep 2
 
+# Capture the NGINX binary path before e2e sub-scripts so each can
+# reuse the same streaming-enabled binary via NGINX_BIN env var,
+# avoiding redundant rebuilds inside each sub-script.
+REUSE_NGINX_BIN="${RUNTIME}/sbin/nginx"
+
 echo "==> Running extended streaming failure/cache e2e coverage"
-if ! bash "${WORKSPACE_ROOT}/tools/e2e/verify_streaming_failure_cache_e2e.sh" \
+if ! env NGINX_BIN="${REUSE_NGINX_BIN}" \
+  bash "${WORKSPACE_ROOT}/tools/e2e/verify_streaming_failure_cache_e2e.sh" \
   --nginx-bin "${RUNTIME}/sbin/nginx" \
   --port 18296 \
   --upstream-port 19296 \
@@ -1090,34 +1186,58 @@ if ! bash "${WORKSPACE_ROOT}/tools/e2e/verify_streaming_failure_cache_e2e.sh" \
 fi
 
 echo "==> Running streaming e2e coverage"
-if ! bash "${WORKSPACE_ROOT}/tools/e2e/verify_streaming_e2e.sh" \
+if ! env NGINX_BIN="${REUSE_NGINX_BIN}" \
+  bash "${WORKSPACE_ROOT}/tools/e2e/verify_streaming_e2e.sh" \
   --nginx-bin "${RUNTIME}/sbin/nginx"; then
     echo "  WARNING: streaming e2e coverage run failed; continuing" >&2
 fi
 
 echo "==> Running chunked streaming e2e coverage (smoke)"
-if ! bash "${WORKSPACE_ROOT}/tools/e2e/verify_chunked_streaming_native_e2e.sh" \
-    --nginx-bin "${RUNTIME}/sbin/nginx" \
+# Keep 10m so streaming gzip/deflate fixtures can validate decompression
+# behavior instead of tripping full-buffer size fail-open at 1m.
+if ! env NGINX_BIN="${REUSE_NGINX_BIN}" \
+    bash "${WORKSPACE_ROOT}/tools/e2e/verify_chunked_streaming_native_e2e.sh" \
     --profile smoke \
     --port 18294 \
     --upstream-port 19294 \
-    --markdown-max-size 1m; then
+    --markdown-max-size 10m; then
     echo "  WARNING: chunked streaming e2e coverage run failed; continuing" >&2
 fi
 
 echo "==> Running large markdown response e2e coverage"
-if ! bash "${WORKSPACE_ROOT}/tools/e2e/verify_large_markdown_response_e2e.sh" \
-    --nginx-bin "${RUNTIME}/sbin/nginx" \
+if ! env NGINX_BIN="${REUSE_NGINX_BIN}" \
+    bash "${WORKSPACE_ROOT}/tools/e2e/verify_large_markdown_response_e2e.sh" \
     --port 18291; then
     echo "  WARNING: large markdown e2e coverage run failed; continuing" >&2
 fi
 
 echo "==> Running proxy TLS backend e2e coverage"
-if ! bash "${WORKSPACE_ROOT}/tools/e2e/verify_proxy_tls_backend_e2e.sh" \
-    --nginx-bin "${RUNTIME}/sbin/nginx" \
+if ! env NGINX_BIN="${REUSE_NGINX_BIN}" \
+    bash "${WORKSPACE_ROOT}/tools/e2e/verify_proxy_tls_backend_e2e.sh" \
     --port 18289 \
     --backend-port 19289; then
     echo "  WARNING: proxy TLS backend e2e coverage run failed; continuing" >&2
+fi
+
+echo "==> Running huge-body native e2e coverage (skip 1GB GET)"
+# RUN_1G_GET=0 and --skip-1g-get avoid the slow 1GB GET test in CI;
+# the remaining huge-body sub-tests still cover oversize and fail-open.
+if ! env NGINX_BIN="${REUSE_NGINX_BIN}" RUN_1G_GET=0 \
+    bash "${WORKSPACE_ROOT}/tools/e2e/verify_huge_body_native_e2e.sh" \
+    --port 18292 \
+    --skip-1g-get; then
+    echo "  WARNING: huge-body native e2e coverage run failed; continuing" >&2
+fi
+
+echo "==> Running huge-body allowed native e2e coverage (skip 1GB GET)"
+# --markdown-max-size 1536m allows bodies up to 1.5 GiB, exercising the
+# allowed-huge-body path where conversion proceeds instead of fail-open.
+if ! env NGINX_BIN="${REUSE_NGINX_BIN}" RUN_1G_GET=0 \
+    bash "${WORKSPACE_ROOT}/tools/e2e/verify_huge_body_allowed_native_e2e.sh" \
+    --port 18293 \
+    --skip-1g-get \
+    --markdown-max-size 1536m; then
+    echo "  WARNING: huge-body allowed native e2e coverage run failed; continuing" >&2
 fi
 
 # ── Collect gcov/lcov coverage ──────────────────────────────────────
