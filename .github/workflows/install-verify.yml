@@ -239,6 +239,8 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read
+    env:
+      JS_ACTIONS_SUPPORTED: ${{ !(matrix.target.pkg_manager == 'apk' && matrix.target.arch == 'aarch64') }}
     strategy:
       fail-fast: false
       matrix:
@@ -344,13 +346,13 @@ jobs:
           fi
 
       - name: Checkout repository
-        if: ${{ !(matrix.target.pkg_manager == 'apk' && matrix.target.arch == 'aarch64') }}
+        if: ${{ env.JS_ACTIONS_SUPPORTED == 'true' }}
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           ref: ${{ github.event.inputs.ref || github.ref }}
 
       - name: Checkout repository (Alpine arm64 fallback)
-        if: ${{ matrix.target.pkg_manager == 'apk' && matrix.target.arch == 'aarch64' }}
+        if: ${{ env.JS_ACTIONS_SUPPORTED != 'true' }}
         env:
           REPO_URL: https://github.com/${{ github.repository }}.git
           CHECKOUT_REF: ${{ github.event.inputs.ref || github.ref }}
@@ -730,7 +732,7 @@ jobs:
           fi
 
       - name: Upload verification artifacts
-        if: ${{ always() && !(matrix.target.pkg_manager == 'apk' && matrix.target.arch == 'aarch64') }}
+        if: ${{ always() && env.JS_ACTIONS_SUPPORTED == 'true' }}
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
         with:
           name: ${{ matrix.target.artifact_name }}

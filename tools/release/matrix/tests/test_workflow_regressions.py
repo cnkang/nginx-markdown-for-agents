@@ -4,6 +4,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import yaml
+
+
+def _workflow_data(name: str) -> dict[str, object]:
+    repo_root = Path(__file__).resolve().parents[4]
+    path = repo_root / ".github" / "workflows" / name
+    with path.open(encoding="utf-8") as f:
+        return yaml.load(f, Loader=yaml.BaseLoader)
+
 
 def _workflow_text(name: str) -> str:
     repo_root = Path(__file__).resolve().parents[4]
@@ -26,12 +35,21 @@ def test_update_matrix_pr_creation_is_non_blocking_when_repo_disallows_actions_p
 
 def test_install_verify_workflow_avoids_js_actions_on_alpine_arm64_and_uses_bash() -> None:
     """Install verification must stay runnable on Alpine arm64 GitHub containers."""
-    text = _workflow_text("install-verify.yml")
-    assert "workflow_dispatch:" in text
-    assert "ref:" in text
-    assert "version:" in text
-    assert "Checkout repository (Alpine arm64 fallback)" in text
-    assert "git fetch --depth=1 origin" in text
-    assert "shell: bash" in text
-    assert "Upload verification artifacts" in text
-    assert "pkg_manager == 'apk' && matrix.target.arch == 'aarch64'" in text
+    workflow = _workflow_data("install-verify.yml")
+    assert workflow["on"]["workflow_dispatch"]["inputs"]["ref"]["default"] == ""
+    assert workflow["on"]["workflow_dispatch"]["inputs"]["version"]["default"] == ""
+
+    job = workflow["jobs"]["install-verify"]
+    assert job["env"]["JS_ACTIONS_SUPPORTED"] == (
+        "${{ !(matrix.target.pkg_manager == 'apk' && matrix.target.arch == 'aarch64') }}"
+    )
+
+    steps = {step["name"]: step for step in job["steps"]}
+    assert steps["Checkout repository"]["if"] == "${{ env.JS_ACTIONS_SUPPORTED == 'true' }}"
+    assert steps["Checkout repository (Alpine arm64 fallback)"]["if"] == (
+        "${{ env.JS_ACTIONS_SUPPORTED != 'true' }}"
+    )
+    assert steps["Run install script"]["shell"] == "bash"
+    assert steps["Upload verification artifacts"]["if"] == (
+        "${{ always() && env.JS_ACTIONS_SUPPORTED == 'true' }}"
+    )
