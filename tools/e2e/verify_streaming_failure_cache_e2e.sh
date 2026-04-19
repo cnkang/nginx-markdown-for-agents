@@ -47,6 +47,8 @@ readonly PATTERN_CT_HTML='^Content-Type: text/html'
 readonly PATTERN_CL='^Content-Length:'
 readonly PATTERN_ETAG='^ETag:'
 readonly PATTERN_HTTP_200='HTTP/1.1 200'
+# Pattern for detecting HTTP 304 Not Modified in response headers;
+# used by case 10.11 to verify conditional revalidation bypasses streaming.
 readonly PATTERN_HTTP_304='HTTP/1.1 304'
 readonly PATTERN_TRANSFER_CHUNKED='^Transfer-Encoding:.*chunked'
 readonly PATTERN_VARY_ACCEPT='^Vary:.*Accept'
@@ -841,6 +843,8 @@ http {
         }
 
         # 10.10: HEAD request should bypass streaming body processing
+        # Uses if_modified_since_only so streaming is eligible for GET,
+        # but HEAD must still skip the streaming body path entirely.
         location /t10/ {
             markdown_filter on;
             markdown_on_wildcard on;
@@ -859,6 +863,8 @@ http {
         }
 
         # 10.11: 304 should bypass streaming path selection
+        # Uses full_support so ETag is generated, enabling If-None-Match
+        # revalidation that must produce 304 without entering streaming.
         location /t11/ {
             markdown_filter on;
             markdown_on_wildcard on;
@@ -1212,6 +1218,8 @@ fi
 # 10.10 HEAD request does not enter streaming path
 # ---------------------------------------------------------------------------
 echo "==> 10.10 HEAD request does not enter streaming path"
+# Create an empty body file before curl --head, which writes headers but
+# not a body file; downstream -s test needs the file to exist.
 : > "${RAW_DIR}/t10.body"
 curl -sS --head -D "${RAW_DIR}/t10.hdr" \
     -H "${ACCEPT_MARKDOWN_HEADER}" --max-time 30 \
@@ -1237,11 +1245,16 @@ fi
 # 10.11 304 response does not enter streaming path
 # ---------------------------------------------------------------------------
 echo "==> 10.11 304 response does not enter streaming path"
+# First request: capture the ETag from a full-support conditional location
+# so we can send a conditional revalidation request next.
 curl -sS -D "${RAW_DIR}/t11_first.hdr" -o "${RAW_DIR}/t11_first.body" \
     -H "${ACCEPT_MARKDOWN_HEADER}" --max-time 30 \
     "http://127.0.0.1:${PORT}/t11/simple-with-etag"
 
 t11_pass=1
+# Extract the ETag value from response headers using awk.
+# tolower + regex match handles case-insensitive header names;
+# sub/gsub strips the header name prefix and trailing CR.
 t11_etag="$(awk '{
     line = $0
     if (tolower(line) ~ /^etag:/) {

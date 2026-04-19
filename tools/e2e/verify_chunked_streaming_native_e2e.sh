@@ -30,12 +30,19 @@ LOAD_MODULE_LINE=""
 UPSTREAM_PID=""
 ORIG_ARGS=("$@")
 ACCEPT_MARKDOWN_HEADER='Accept: text/markdown'
+# curl -w format string for capturing HTTP status, download size, and total
+# time from each request; used to populate .metrics artifact files.
 readonly CURL_METRICS_FMT='http=%{http_code} size=%{size_download} total=%{time_total}\n'
+# Grep patterns for validating response headers and status codes.
 readonly PATTERN_HTTP_200='http=200 '
 readonly PATTERN_CT_MARKDOWN='^Content-Type: text/markdown; charset=utf-8'
 readonly PATTERN_CT_HTML='^Content-Type: text/html'
 readonly PATTERN_TRANSFER_CHUNKED='^Transfer-Encoding:.*chunked'
+# Pattern matching Content-Length header; streaming responses must not
+# include this header (they use chunked transfer instead).
 readonly PATTERN_CONTENT_LENGTH='^Content-Length:'
+# Pattern matching Content-Encoding header; used to verify that streaming
+# decompression strips the header from the downstream response.
 readonly PATTERN_CONTENT_ENCODING='^Content-Encoding:'
 # shellcheck disable=SC1090
 source "${NATIVE_BUILD_HELPER}"
@@ -55,6 +62,14 @@ EOF
   return 0
 }
 
+#
+# Validate that a flag requiring a value has one.
+# Arguments:
+#   $1: flag name (for diagnostics)
+#   $2: flag value (must be non-empty)
+# Output: prints usage to stderr on failure
+# Exit: exits with code 2 if value is missing
+#
 require_flag_value() {
   local flag_name="$1"
 
@@ -116,6 +131,12 @@ assert_streaming_markdown_response() {
   return 0
 }
 
+#
+# Trap handler: stop upstream and NGINX, then optionally remove build artifacts.
+# Arguments: none (reads global UPSTREAM_PID, RUNTIME, NGINX_EXECUTABLE, etc.)
+# Output: diagnostic message to stderr on failure with artifact path
+# Exit: returns the original trap exit code
+#
 cleanup() {
   local rc=$?
 
@@ -580,10 +601,16 @@ assert_streaming_markdown_response \
   "# Chunked Deflate" "${DEFLATE_END_TOKEN}"
 
 echo "==> Case 5: truncated gzip should trigger post-commit failure"
+# The upstream sends a gzip stream with the final 8 bytes removed, so
+# decompression succeeds incrementally but fails at finalize.  Because
+# headers were already committed, the module must emit partial Markdown
+# (post-commit fail-open) rather than switching to HTML pass-through.
 trunc_gzip_line="$(curl -sS -D "${RAW_DIR}/trunc_gzip.hdr" -o "${RAW_DIR}/trunc_gzip.body" \
   -H "${ACCEPT_MARKDOWN_HEADER}" --max-time 180 \
   "http://127.0.0.1:${PORT}/streaming/truncated-gzip" \
   -w "${CURL_METRICS_FMT}" || true)"
+# || true: under set -e, curl may return non-zero when the server closes
+# the connection after a truncated stream; suppress so assertions can run.
 echo "${trunc_gzip_line}" | tee "${RAW_DIR}/trunc_gzip.metrics" >/dev/null
 echo "${trunc_gzip_line}" | grep -q "${PATTERN_HTTP_200}" || { echo "truncated-gzip failed: ${trunc_gzip_line}" >&2; exit 1; }
 grep -qi "${PATTERN_CT_MARKDOWN}" "${RAW_DIR}/trunc_gzip.hdr" || {
@@ -596,10 +623,13 @@ grep -q '# Chunked Gzip' "${RAW_DIR}/trunc_gzip.body" || {
 }
 
 echo "==> Case 6: truncated deflate should trigger post-commit failure"
+# Same rationale as case 5 but for deflate: the final 4 bytes are
+# stripped so the deflate finalizer fails after the commit boundary.
 trunc_deflate_line="$(curl -sS -D "${RAW_DIR}/trunc_deflate.hdr" -o "${RAW_DIR}/trunc_deflate.body" \
   -H "${ACCEPT_MARKDOWN_HEADER}" --max-time 180 \
   "http://127.0.0.1:${PORT}/streaming/truncated-deflate" \
   -w "${CURL_METRICS_FMT}" || true)"
+# || true: same rationale as truncated-gzip case above.
 echo "${trunc_deflate_line}" | tee "${RAW_DIR}/trunc_deflate.metrics" >/dev/null
 echo "${trunc_deflate_line}" | grep -q "${PATTERN_HTTP_200}" || { echo "truncated-deflate failed: ${trunc_deflate_line}" >&2; exit 1; }
 grep -qi "${PATTERN_CT_MARKDOWN}" "${RAW_DIR}/trunc_deflate.hdr" || {
@@ -616,6 +646,9 @@ grep -q 'response size exceeds limit' "${RUNTIME}/logs/error.log" || {
   echo "missing size-limit log for chunked oversize case" >&2
   exit 1
 }
+# Verify that the truncated compressed streams produced the expected
+# internal diagnostics: a decompression finalize failure and a
+# STREAMING_FAIL_POSTCOMMIT decision log entry.
 grep -q 'decomp_finish failed in finalize' "${RUNTIME}/logs/error.log" || {
   echo "missing decomp finalize failure log for truncated compressed cases" >&2
   exit 1

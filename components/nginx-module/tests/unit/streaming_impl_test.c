@@ -1,6 +1,17 @@
 /*
  * Test: streaming_impl
- * Description: direct branch coverage for streaming_impl helper paths.
+ *
+ * Unit tests for the NGINX markdown filter module's streaming implementation
+ * helpers (ngx_http_markdown_streaming_impl.h).  Provides direct branch
+ * coverage for path selection, header updates, output sending, backpressure,
+ * commit/finalize lifecycle, fail-open passthrough, and cleanup paths.
+ *
+ * When MARKDOWN_STREAMING_ENABLED is not defined, the test binary compiles
+ * to a skip stub that reports the missing feature and exits successfully.
+ *
+ * Otherwise, the file reimplements a minimal subset of NGINX runtime types
+ * and API stubs so the streaming implementation header can be included and
+ * exercised without linking against the full NGINX core library.
  */
 
 #include "../include/test_common.h"
@@ -13,6 +24,11 @@
 
 #ifndef MARKDOWN_STREAMING_ENABLED
 
+/*
+ * Skip stub entry point.  When streaming is disabled at compile time,
+ * print a skip banner and return 0 so the test harness records success
+ * without exercising any streaming code paths.
+ */
 int
 main(void)
 {
@@ -23,7 +39,7 @@ main(void)
     return 0;
 }
 
-#else  /* MARKDOWN_STREAMING_ENABLED */
+#else  /* MARKDOWN_STREAMING_ENABLED — main test body follows */
 
 /*
  * DIVERGENCE RISK:
@@ -54,46 +70,86 @@ typedef struct ngx_pool_cleanup_s ngx_pool_cleanup_t;
 typedef struct ngx_time_s ngx_time_t;
 typedef struct ngx_event_s ngx_event_t;
 
+/*
+ * Minimal ngx_event_s stub.  Only the pending_eof bit-field is retained
+ * because the streaming abort-check path reads it via connection->read.
+ * Divergence risk: if production adds event fields used by streaming,
+ * this stub must be extended.
+ */
 struct ngx_event_s {
     unsigned pending_eof:1;
 };
 
+/*
+ * Minimal ngx_list_part_s stub.  Retains elts/nelts/next for header list
+ * traversal.  Divergence risk: if streaming inspects other list-part
+ * fields, this stub must be extended.
+ */
 struct ngx_list_part_s {
     void            *elts;
     ngx_uint_t       nelts;
     ngx_list_part_t *next;
 };
 
+/*
+ * Minimal ngx_list_t wrapper.  Only the first part is needed for header
+ * iteration in streaming paths.
+ */
 typedef struct {
     ngx_list_part_t part;
 } ngx_list_t;
 
+/*
+ * Minimal ngx_table_elt_s stub.  Retains key/value/hash fields used by
+ * header comparison logic in streaming paths.
+ */
 struct ngx_table_elt_s {
     ngx_str_t key;
     ngx_str_t value;
     ngx_uint_t hash;
 };
 
+/* Sentinel log struct; no fields are read by streaming code under test. */
 struct ngx_log_s {
     int dummy;
 };
 
+/*
+ * Minimal ngx_connection_s stub.  Retains log/read/error fields used by
+ * the streaming abort-check and logging paths.
+ * Divergence risk: if streaming reads additional connection fields
+ * (e.g. fd, sent, buffered), this stub must be extended.
+ */
 struct ngx_connection_s {
     ngx_log_t   *log;
     ngx_event_t *read;
     unsigned     error:1;
 };
 
+/*
+ * Minimal ngx_pool_cleanup_s stub.  Retains handler/data/next for pool
+ * cleanup chaining used by streaming teardown tests.
+ * Divergence risk: if production adds cleanup fields inspected by
+ * streaming, this stub must be extended.
+ */
 struct ngx_pool_cleanup_s {
     void               (*handler)(void *data);
     void                *data;
     ngx_pool_cleanup_t  *next;
 };
 
+/* Minimal pool stub; only the cleanups list head is needed for teardown. */
 struct ngx_pool_s {
     ngx_pool_cleanup_t *cleanups;
 };
 
+/*
+ * Minimal ngx_buf_s stub.  Retains pos/last/start/end pointers and the
+ * temporary/memory/last_buf/last_in_chain/flush/sync bit-fields used by
+ * the streaming send and cleanup paths.
+ * Divergence risk: if streaming inspects additional buffer flags
+ * (e.g. recycled, file, in_file), this stub must be extended.
+ */
 struct ngx_buf_s {
     u_char   *pos;
     u_char   *last;
@@ -107,21 +163,32 @@ struct ngx_buf_s {
     unsigned  sync:1;
 };
 
+/* Minimal chain node; buf/next are used throughout streaming send paths. */
 struct ngx_chain_s {
     ngx_buf_t   *buf;
     ngx_chain_t *next;
 };
 
+/* Minimal array struct for stream_types exclusion list in path selection. */
 struct ngx_array_s {
     void      *elts;
     ngx_uint_t nelts;
 };
 
+/*
+ * Minimal request headers-in stub.  Retains headers list and server
+ * string used by streaming conditional-request checks.
+ */
 struct ngx_http_headers_in_s {
     ngx_list_t headers;
     ngx_str_t  server;
 };
 
+/*
+ * Minimal response headers-out stub.  Retains content_type, content_length_n,
+ * status, content_type_len, and charset fields read or mutated by the
+ * streaming header-update path.
+ */
 struct ngx_http_headers_out_s {
     ngx_str_t   content_type;
     off_t       content_length_n;
@@ -130,10 +197,18 @@ struct ngx_http_headers_out_s {
     ngx_str_t   charset;
 };
 
+/* Minimal server config stub; only server_name is retained for logging. */
 struct ngx_http_core_srv_conf_s {
     ngx_str_t server_name;
 };
 
+/*
+ * Minimal ngx_http_request_s stub.  Retains connection/pool/method/
+ * header_only/buffered/headers_in/headers_out/uri/loc_conf/ctx/main fields
+ * that are read or mutated by streaming helper paths.
+ * Divergence risk: if production streaming reads additional request fields
+ * (e.g. count, subrequests, postponed), this stub must be extended.
+ */
 struct ngx_http_request_s {
     ngx_connection_t      *connection;
     ngx_pool_t            *pool;
@@ -148,23 +223,32 @@ struct ngx_http_request_s {
     ngx_http_request_t    *main;
 };
 
+/* Sentinel module struct; not inspected by streaming code under test. */
 struct ngx_module_s {
     int dummy;
 };
 
+/* Sentinel conf struct; not inspected by streaming code under test. */
 struct ngx_conf_s {
     int dummy;
 };
 
+/* Sentinel complex-value struct; only the pointer existence is tested. */
 struct ngx_http_complex_value_s {
     int dummy;
 };
 
+/* Time struct used by ngx_timeofday() stub for deterministic timing. */
 struct ngx_time_s {
     time_t    sec;
     ngx_msec_t msec;
 };
 
+/*
+ * NGINX return-code and constant macros.  Guarded with #ifndef so the
+ * values from test_common.h or production headers take precedence when
+ * available.  These define the minimal set needed by streaming_impl.h.
+ */
 #ifndef NGX_OK
 #define NGX_OK 0
 #endif
@@ -198,6 +282,7 @@ struct ngx_time_s {
 #ifndef NGX_LOG_INFO
 #define NGX_LOG_INFO 3
 #endif
+/* Streaming-specific and utility macros for constants and memory ops. */
 #ifndef NGX_HTTP_MARKDOWN_BUFFERED
 #define NGX_HTTP_MARKDOWN_BUFFERED 0x08
 #endif
@@ -212,6 +297,20 @@ struct ngx_time_s {
 #define ngx_memcpy memcpy
 #endif
 
+/*
+ * Global stub control variables.  Each g_* variable configures the
+ * corresponding stub's return code or behaviour so tests can inject
+ * success, failure, or scripted sequences without modifying stub code.
+ *
+ * Return-code globals: set before a test to make the stub return that
+ * code on the next call.
+ *
+ * Counter globals: incremented by stubs on each invocation; tests read
+ * them to verify call counts.
+ *
+ * Fail-once globals: when non-zero, the stub returns NULL/failure once
+ * and then auto-clears, simulating a transient allocation failure.
+ */
 static ngx_int_t g_next_body_filter_rc = NGX_OK;
 static ngx_int_t g_next_header_filter_rc = NGX_OK;
 static ngx_int_t g_complex_value_rc = NGX_OK;
@@ -245,11 +344,25 @@ static uintptr_t g_streaming_feed_out_len = 0;
 static uint32_t g_streaming_finalize_rc = ERROR_SUCCESS;
 static struct MarkdownResult g_streaming_finalize_result;
 
+/*
+ * Production globals that must be defined for the streaming impl header to
+ * link.  ngx_http_markdown_content_type provides the module's content-type
+ * literal; ngx_http_markdown_metrics is the optional metrics collector
+ * (NULL by default, tests bind it to stack-local storage); the filter
+ * module struct is a sentinel.
+ */
 u_char ngx_http_markdown_content_type[] =
     NGX_HTTP_MARKDOWN_CONTENT_TYPE_LITERAL;
 ngx_http_markdown_metrics_t *ngx_http_markdown_metrics = NULL;
 ngx_module_t ngx_http_markdown_filter_module = { 0 };
 
+/*
+ * Metric macros.  NGX_HTTP_MARKDOWN_METRIC_ADD conditionally adds a value
+ * to a metrics struct field when the global metrics pointer is non-NULL.
+ * NGX_HTTP_MARKDOWN_METRIC_INC is a convenience wrapper that adds 1.
+ * These mirror the production macros so streaming code under test can
+ * update metrics without modification.
+ */
 #define NGX_HTTP_MARKDOWN_METRIC_ADD(field, value)                                  \
     do {                                                                             \
         if (ngx_http_markdown_metrics != NULL) {                                     \
@@ -260,6 +373,12 @@ ngx_module_t ngx_http_markdown_filter_module = { 0 };
 #define NGX_HTTP_MARKDOWN_METRIC_INC(field)                                          \
     NGX_HTTP_MARKDOWN_METRIC_ADD(field, 1)
 
+/*
+ * Logging macros (no-op stubs).  Production NGINX logging is replaced with
+ * macros that suppress all output and silence compiler warnings about
+ * unused parameters.  This avoids console noise during test runs while
+ * keeping the streaming code's log calls compilable.
+ */
 #ifdef ngx_log_error
 #undef ngx_log_error
 #endif
@@ -302,6 +421,12 @@ ngx_module_t ngx_http_markdown_filter_module = { 0 };
         UNUSED(arg1); UNUSED(arg2); UNUSED(arg3); UNUSED(arg4);                      \
     } while (0)
 
+/*
+ * Stub for ngx_http_next_body_filter.  Returns the next value from the
+ * scripted sequence (g_next_body_filter_seq) if available, otherwise
+ * returns g_next_body_filter_rc.  Ignores request and chain arguments.
+ * Side effect: consumes one slot from the sequence on each call.
+ */
 static ngx_int_t
 ngx_http_next_body_filter_stub(ngx_http_request_t *r, ngx_chain_t *in)
 {
@@ -313,6 +438,10 @@ ngx_http_next_body_filter_stub(ngx_http_request_t *r, ngx_chain_t *in)
     return g_next_body_filter_rc;
 }
 
+/*
+ * Stub for ngx_http_next_header_filter.  Always returns
+ * g_next_header_filter_rc.  Ignores the request argument.
+ */
 static ngx_int_t
 ngx_http_next_header_filter_stub(ngx_http_request_t *r)
 {
@@ -338,6 +467,14 @@ ngx_int_t (*ngx_http_next_body_filter)(ngx_http_request_t *r, ngx_chain_t *in) =
 ngx_int_t (*ngx_http_next_header_filter)(ngx_http_request_t *r) =
     ngx_http_next_header_filter_stub;
 
+/*
+ * Stub for ngx_palloc.  Delegates to malloc(3).  If g_palloc_fail_once is
+ * set, returns NULL once and clears the flag, simulating a transient
+ * allocation failure.
+ * Divergence risk: production ngx_palloc uses the pool allocator; this
+ * stub uses the C heap, so objects allocated here must be freed with
+ * free(3), not pool-based cleanup.
+ */
 void *
 ngx_palloc(ngx_pool_t *pool, size_t size)
 {
@@ -349,6 +486,11 @@ ngx_palloc(ngx_pool_t *pool, size_t size)
     return malloc(size);
 }
 
+/*
+ * Stub for ngx_pcalloc.  Same as ngx_palloc but zero-initialises the
+ * allocation via calloc(3).  Honours g_pcalloc_fail_once for one-shot
+ * failure injection.
+ */
 void *
 ngx_pcalloc(ngx_pool_t *pool, size_t size)
 {
@@ -362,12 +504,21 @@ ngx_pcalloc(ngx_pool_t *pool, size_t size)
     return p;
 }
 
+/*
+ * Stub for ngx_pnalloc.  Delegates directly to ngx_palloc; production
+ * would use a separate non-padded path, but the distinction is irrelevant
+ * for unit tests.
+ */
 void *
 ngx_pnalloc(ngx_pool_t *pool, size_t size)
 {
     return ngx_palloc(pool, size);
 }
 
+/*
+ * Stub for ngx_alloc.  Direct malloc(3) wrapper ignoring the log argument.
+ * Used by streaming code for off-pool allocations.
+ */
 void *
 ngx_alloc(size_t size, ngx_log_t *log)
 {
@@ -375,12 +526,20 @@ ngx_alloc(size_t size, ngx_log_t *log)
     return malloc(size);
 }
 
+/* Stub for ngx_free.  Direct free(3) wrapper. */
 void
 ngx_free(void *p)
 {
     free(p);
 }
 
+/*
+ * Stub for ngx_calloc_buf.  Allocates a zero-initialised ngx_buf_t via
+ * calloc(3).  Honours g_calloc_buf_fail_once for one-shot failure
+ * injection.
+ * Divergence risk: production allocates from the pool; this stub uses
+ * the C heap, so callers must free(3) the result.
+ */
 ngx_buf_t *
 ngx_calloc_buf(ngx_pool_t *pool)
 {
@@ -392,6 +551,12 @@ ngx_calloc_buf(ngx_pool_t *pool)
     return calloc(1, sizeof(ngx_buf_t));
 }
 
+/*
+ * Stub for ngx_alloc_chain_link.  Allocates a zero-initialised
+ * ngx_chain_t via calloc(3).  Honours g_alloc_chain_fail_once for
+ * one-shot failure injection.
+ * Divergence risk: same as ngx_calloc_buf — C heap vs pool.
+ */
 ngx_chain_t *
 ngx_alloc_chain_link(ngx_pool_t *pool)
 {
@@ -403,6 +568,14 @@ ngx_alloc_chain_link(ngx_pool_t *pool)
     return calloc(1, sizeof(ngx_chain_t));
 }
 
+/*
+ * Stub for ngx_pool_cleanup_add.  Allocates a cleanup node, prepends it
+ * to pool->cleanups, and returns it.  Returns NULL if pool is NULL or
+ * on one-shot failure (g_pool_cleanup_fail_once).
+ * Divergence risk: production also allocates a data buffer of the
+ * requested size; this stub ignores the size parameter because no test
+ * needs cleanup data.
+ */
 ngx_pool_cleanup_t *
 ngx_pool_cleanup_add(ngx_pool_t *pool, size_t size)
 {
@@ -427,12 +600,22 @@ ngx_pool_cleanup_add(ngx_pool_t *pool, size_t size)
     return cln;
 }
 
+/*
+ * Stub for ngx_http_clear_content_length.  Sets
+ * r->headers_out.content_length_n to -1, mirroring production behaviour.
+ */
 void
 ngx_http_clear_content_length(ngx_http_request_t *r)
 {
     r->headers_out.content_length_n = -1;
 }
 
+/*
+ * Stub for ngx_http_complex_value.  Returns g_complex_value_rc; on
+ * NGX_OK, copies g_complex_value into *val.
+ * Divergence risk: production evaluates the complex value script against
+ * the request; this stub returns a fixed string controlled by the test.
+ */
 ngx_int_t
 ngx_http_complex_value(ngx_http_request_t *r,
     ngx_http_complex_value_t *cv, ngx_str_t *val)
@@ -446,6 +629,10 @@ ngx_http_complex_value(ngx_http_request_t *r,
     return NGX_OK;
 }
 
+/*
+ * Stub for ngx_strncasecmp.  Case-insensitive comparison of the first n
+ * bytes, mirroring the production NGINX function.
+ */
 ngx_int_t
 ngx_strncasecmp(u_char *s1, u_char *s2, size_t n)
 {
@@ -459,12 +646,21 @@ ngx_strncasecmp(u_char *s1, u_char *s2, size_t n)
     return 0;
 }
 
+/*
+ * Stub for ngx_timeofday.  Returns a pointer to the deterministic
+ * g_now global so tests can control perceived time without touching
+ * the system clock.
+ */
 ngx_time_t *
 ngx_timeofday(void)
 {
     return &g_now;
 }
 
+/*
+ * Stub for ngx_http_get_module_ctx.  Returns r->ctx, mirroring the
+ * production macro that retrieves per-module context.
+ */
 void *
 ngx_http_get_module_ctx(ngx_http_request_t *r, ngx_module_t module)
 {
@@ -472,6 +668,10 @@ ngx_http_get_module_ctx(ngx_http_request_t *r, ngx_module_t module)
     return r->ctx;
 }
 
+/*
+ * Stub for ngx_http_get_module_loc_conf.  Returns r->loc_conf cast to
+ * the conf type, mirroring the production macro.
+ */
 ngx_http_markdown_conf_t *
 ngx_http_get_module_loc_conf(ngx_http_request_t *r, ngx_module_t module)
 {
@@ -479,6 +679,10 @@ ngx_http_get_module_loc_conf(ngx_http_request_t *r, ngx_module_t module)
     return (ngx_http_markdown_conf_t *) r->loc_conf;
 }
 
+/*
+ * Stub for ngx_http_set_ctx.  Sets r->ctx to the provided pointer,
+ * mirroring the production macro.
+ */
 void
 ngx_http_set_ctx(ngx_http_request_t *r, void *c, ngx_module_t module)
 {
@@ -486,6 +690,10 @@ ngx_http_set_ctx(ngx_http_request_t *r, void *c, ngx_module_t module)
     r->ctx = c;
 }
 
+/*
+ * Stub for markdown_streaming_abort.  Increments g_abort_calls so tests
+ * can verify the abort was invoked.  Ignores the handle argument.
+ */
 void
 markdown_streaming_abort(struct StreamingConverterHandle *handle)
 {
@@ -493,6 +701,11 @@ markdown_streaming_abort(struct StreamingConverterHandle *handle)
     g_abort_calls++;
 }
 
+/*
+ * Stub for markdown_streaming_output_free.  Increments
+ * g_output_free_calls so tests can verify the free was invoked.
+ * Ignores data and len arguments.
+ */
 void
 markdown_streaming_output_free(uint8_t *data, uintptr_t len)
 {
@@ -501,6 +714,14 @@ markdown_streaming_output_free(uint8_t *data, uintptr_t len)
     g_output_free_calls++;
 }
 
+/*
+ * Stub for markdown_streaming_feed.  Returns g_streaming_feed_rc and
+ * writes g_streaming_feed_out_data / g_streaming_feed_out_len into the
+ * output parameters if they are non-NULL.  Ignores handle, html_chunk,
+ * and chunk_len arguments.
+ * Divergence risk: production performs actual streaming conversion; this
+ * stub returns fixed test-controlled values.
+ */
 uint32_t
 markdown_streaming_feed(struct StreamingConverterHandle *handle,
     const uint8_t *html_chunk, uintptr_t chunk_len,
@@ -518,6 +739,12 @@ markdown_streaming_feed(struct StreamingConverterHandle *handle,
     return g_streaming_feed_rc;
 }
 
+/*
+ * Stub for markdown_streaming_finalize.  Returns g_streaming_finalize_rc
+ * and copies g_streaming_finalize_result into *result if non-NULL.
+ * Divergence risk: production finalizes the streaming converter; this
+ * stub returns fixed test-controlled values.
+ */
 uint32_t
 markdown_streaming_finalize(struct StreamingConverterHandle *handle,
     struct MarkdownResult *result)
@@ -529,6 +756,14 @@ markdown_streaming_finalize(struct StreamingConverterHandle *handle,
     return g_streaming_finalize_rc;
 }
 
+/*
+ * Stub for markdown_streaming_new_with_code.  Returns g_new_with_code_rc
+ * and sets *out_handle to a sentinel pointer (0x1) unless
+ * g_new_with_code_null_handle is set, which simulates a success return
+ * with a NULL handle.
+ * Divergence risk: production creates a real converter; this stub
+ * returns a fixed sentinel.
+ */
 uint32_t
 markdown_streaming_new_with_code(const struct MarkdownOptions *options,
     struct StreamingConverterHandle **out_handle)
@@ -540,6 +775,10 @@ markdown_streaming_new_with_code(const struct MarkdownOptions *options,
     return g_new_with_code_rc;
 }
 
+/*
+ * Stub for markdown_result_free.  Zeroes the result struct to simulate
+ * cleanup, mirroring production behaviour of releasing result resources.
+ */
 void
 markdown_result_free(struct MarkdownResult *result)
 {
@@ -548,6 +787,10 @@ markdown_result_free(struct MarkdownResult *result)
     }
 }
 
+/*
+ * Stub for ngx_http_markdown_add_vary_accept.  Returns g_add_vary_rc.
+ * Ignores the request argument.
+ */
 ngx_int_t
 ngx_http_markdown_add_vary_accept(ngx_http_request_t *r)
 {
@@ -555,6 +798,11 @@ ngx_http_markdown_add_vary_accept(ngx_http_request_t *r)
     return g_add_vary_rc;
 }
 
+/*
+ * Stub for ngx_http_markdown_remove_content_encoding.  Increments
+ * g_remove_content_encoding_calls so tests can verify invocation.
+ * Ignores the request argument.
+ */
 void
 ngx_http_markdown_remove_content_encoding(ngx_http_request_t *r)
 {
@@ -562,6 +810,10 @@ ngx_http_markdown_remove_content_encoding(ngx_http_request_t *r)
     g_remove_content_encoding_calls++;
 }
 
+/*
+ * Stub for ngx_http_markdown_set_etag.  Returns g_set_etag_rc.
+ * Ignores all arguments.
+ */
 ngx_int_t
 ngx_http_markdown_set_etag(ngx_http_request_t *r,
     const u_char *etag, size_t etag_len)
@@ -572,6 +824,10 @@ ngx_http_markdown_set_etag(ngx_http_request_t *r,
     return g_set_etag_rc;
 }
 
+/*
+ * Stub for ngx_http_markdown_forward_headers.  Returns g_forward_headers_rc.
+ * Ignores request and context arguments.
+ */
 ngx_int_t
 ngx_http_markdown_forward_headers(ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx)
@@ -581,6 +837,11 @@ ngx_http_markdown_forward_headers(ngx_http_request_t *r,
     return g_forward_headers_rc;
 }
 
+/*
+ * Stub for ngx_http_markdown_body_filter.  Returns g_body_filter_rc.
+ * Ignores request and chain arguments.  Used by the reentry-after-fallback
+ * tests.
+ */
 ngx_int_t
 ngx_http_markdown_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
 {
@@ -589,6 +850,13 @@ ngx_http_markdown_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
     return g_body_filter_rc;
 }
 
+/*
+ * Stub for ngx_http_markdown_buffer_init.  Allocates a data buffer via
+ * malloc(3) and initialises the buffer struct.  Returns g_buffer_init_rc
+ * if it is not NGX_OK; returns NGX_ERROR on malloc failure.
+ * Divergence risk: production uses pool allocation; this stub uses the
+ * C heap.
+ */
 ngx_int_t
 ngx_http_markdown_buffer_init(ngx_http_markdown_buffer_t *buf, size_t max_size,
     ngx_pool_t *pool)
@@ -607,6 +875,13 @@ ngx_http_markdown_buffer_init(ngx_http_markdown_buffer_t *buf, size_t max_size,
     return NGX_OK;
 }
 
+/*
+ * Stub for ngx_http_markdown_buffer_append.  Copies data into the buffer
+ * if capacity permits.  Returns g_buffer_append_rc if not NGX_OK; returns
+ * NGX_ERROR if buf->data is NULL or capacity is insufficient.
+ * Divergence risk: production uses pool-based reallocation; this stub
+ * performs a single memcpy and sets size = len.
+ */
 ngx_int_t
 ngx_http_markdown_buffer_append(ngx_http_markdown_buffer_t *buf,
     const u_char *data, size_t len)
@@ -624,6 +899,10 @@ ngx_http_markdown_buffer_append(ngx_http_markdown_buffer_t *buf,
     return NGX_OK;
 }
 
+/*
+ * Stub for ngx_http_markdown_prepare_conversion_options.  Returns
+ * g_prepare_options_rc.  Ignores all arguments.
+ */
 ngx_int_t
 ngx_http_markdown_prepare_conversion_options(ngx_http_request_t *r,
     const ngx_http_markdown_conf_t *conf, struct MarkdownOptions *options)
@@ -634,6 +913,11 @@ ngx_http_markdown_prepare_conversion_options(ngx_http_request_t *r,
     return g_prepare_options_rc;
 }
 
+/*
+ * Reason-code accessor stubs.  Each returns a static ngx_str_t containing
+ * the corresponding decision-reason literal.  These mirror the production
+ * accessors used by ngx_http_markdown_log_decision.
+ */
 const ngx_str_t *
 ngx_http_markdown_reason_streaming_convert(void)
 {
@@ -690,6 +974,11 @@ ngx_http_markdown_reason_streaming_precommit_reject(void)
     return &s;
 }
 
+/*
+ * Stub for ngx_http_markdown_log_decision.  Increments
+ * g_log_decision_calls so tests can verify invocation.  Ignores all
+ * arguments.
+ */
 void
 ngx_http_markdown_log_decision(ngx_http_request_t *r,
     const ngx_http_markdown_conf_t *conf, const ngx_str_t *reason_code)
@@ -700,8 +989,20 @@ ngx_http_markdown_log_decision(ngx_http_request_t *r,
     g_log_decision_calls++;
 }
 
+/*
+ * Include the streaming implementation header after all stubs are defined.
+ * This pulls in the inline/static helper functions that are the actual
+ * subjects under test, compiled against the stub NGINX runtime above.
+ */
 #include "../../src/ngx_http_markdown_streaming_impl.h"
 
+/*
+ * Reset all global stub control variables to their default (success)
+ * state.  Must be called at the start of every test function to ensure
+ * a clean slate with no residual state from a prior test.
+ * Side effect: sets ngx_http_markdown_metrics to NULL to avoid dangling
+ * pointers to stack-local metrics structs from previous tests.
+ */
 static void
 reset_globals(void)
 {
@@ -746,6 +1047,17 @@ reset_globals(void)
     ngx_http_markdown_metrics = NULL;
 }
 
+/*
+ * Program a sequence of return codes for ngx_http_next_body_filter_stub.
+ * Copies up to 8 entries from seq into g_next_body_filter_seq and resets
+ * the sequence index to 0.  Subsequent body-filter calls will return
+ * values from the sequence in order; once exhausted, the stub falls back
+ * to g_next_body_filter_rc.
+ *
+ * Parameters:
+ *   seq   - array of return codes to replay
+ *   count - number of entries in seq (clamped to array capacity)
+ */
 static void
 set_next_body_filter_sequence(const ngx_int_t *seq, ngx_uint_t count)
 {
@@ -765,6 +1077,24 @@ set_next_body_filter_sequence(const ngx_int_t *seq, ngx_uint_t count)
     g_next_body_filter_seq_idx = 0;
 }
 
+/*
+ * Initialise a request, context, config, pool, connection, log, and
+ * read-event struct to a consistent baseline state for streaming tests.
+ * Zeroes all structs, then wires the cross-pointers:
+ *   conn->log = log, conn->read = read_event,
+ *   r->connection = conn, r->pool = pool, r->main = r,
+ *   r->loc_conf = conf, r->ctx = ctx,
+ *   ctx->request = r, ctx->processing_path = STREAMING.
+ *
+ * Parameters:
+ *   r          - request to initialise
+ *   ctx        - module context to initialise
+ *   conf       - location config to initialise
+ *   pool       - pool to initialise
+ *   conn       - connection to initialise
+ *   log        - log to initialise
+ *   read_event - read event to initialise
+ */
 static void
 init_request_ctx_conf(ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx,
     ngx_http_markdown_conf_t *conf, ngx_pool_t *pool, ngx_connection_t *conn,
@@ -790,6 +1120,13 @@ init_request_ctx_conf(ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx,
     ctx->processing_path = NGX_HTTP_MARKDOWN_PATH_STREAMING;
 }
 
+/*
+ * Test streaming_cleanup paths.  Verifies that:
+ * - cleanup with NULL context is safe (no-op)
+ * - cleanup aborts the streaming handle and frees temporary pending
+ *   buffers, then clears both the handle and pending_output pointers
+ * Covers: ngx_http_markdown_streaming_cleanup
+ */
 static void
 test_cleanup_paths(void)
 {
@@ -823,6 +1160,24 @@ test_cleanup_paths(void)
     TEST_PASS("cleanup paths covered");
 }
 
+/*
+ * Test select_processing_path routing logic.  Verifies that:
+ * - engine=off routes to full-buffer
+ * - HEAD method routes to full-buffer
+ * - 304 status routes to full-buffer
+ * - full_support conditional mode routes to full-buffer
+ * - SSE content-type routes to full-buffer
+ * - excluded stream_types prefix routes to full-buffer
+ * - engine=on with no exclusions routes to streaming
+ * - non-matching stream_types keeps streaming enabled
+ * - NULL content-type data does not trigger exclusions
+ * - if_modified_since_only conditional mode keeps streaming
+ * - auto with small content-length routes to full-buffer
+ * - auto without content-length routes to streaming
+ * - complex-value failure routes to full-buffer
+ * - invalid engine value routes to full-buffer
+ * Covers: ngx_http_markdown_select_processing_path
+ */
 static void
 test_select_processing_path(void)
 {
@@ -938,6 +1293,14 @@ test_select_processing_path(void)
     TEST_PASS("path-selection branches covered");
 }
 
+/*
+ * Test streaming_update_headers success and failure branches.  Verifies:
+ * - successful header update sets markdown content-type, clears
+ *   content-length, and removes content-encoding when decompression needed
+ * - vary-accept add failure returns NGX_ERROR
+ * - etag clear failure returns NGX_ERROR
+ * Covers: ngx_http_markdown_streaming_update_headers
+ */
 static void
 test_update_headers_paths(void)
 {
@@ -976,6 +1339,17 @@ test_update_headers_paths(void)
     TEST_PASS("update_headers branches covered");
 }
 
+/*
+ * Test send_output and resume_pending backpressure branches.  Verifies:
+ * - successful send increments flush counter and records TTFB on first send
+ * - NGX_AGAIN from downstream stores pending output and sets buffered flag
+ * - resume_pending drains pending chain and clears buffered flag
+ * - resume with terminal metrics latch does not fail
+ * - resume downstream error propagates and records post-commit failure
+ * - deferred last_buf is sent on resume
+ * Covers: ngx_http_markdown_streaming_send_output,
+ *         ngx_http_markdown_streaming_resume_pending
+ */
 static void
 test_send_output_and_resume_paths(void)
 {
@@ -1063,6 +1437,18 @@ test_send_output_and_resume_paths(void)
     TEST_PASS("send_output/resume_pending branches covered");
 }
 
+/*
+ * Test send_output allocation errors and deferred-lastbuf branches.  Verifies:
+ * - buffer allocation failure returns NGX_ERROR
+ * - payload copy allocation failure returns NGX_ERROR
+ * - chain-link allocation failure returns NGX_ERROR
+ * - backpressure helper returns NGX_AGAIN and sets buffered flag
+ * - deferred last_buf propagates backpressure and latches terminal metrics
+ * - deferred last_buf propagates hard downstream errors and records failure
+ * Covers: ngx_http_markdown_streaming_send_output,
+ *         ngx_http_markdown_streaming_handle_backpressure,
+ *         ngx_http_markdown_streaming_send_deferred_lastbuf
+ */
 static void
 test_send_output_error_and_deferred_paths(void)
 {
@@ -1130,6 +1516,14 @@ test_send_output_error_and_deferred_paths(void)
     TEST_PASS("send_output error/deferred branches covered");
 }
 
+/*
+ * Test fallback_to_fullbuffer success and error branches.  Verifies:
+ * - fallback returns NGX_DECLINED, switches to full-buffer path,
+ *   clears conversion_attempted, initialises main buffer, and marks
+ *   decompression done
+ * - buffer_init failure propagates NGX_ERROR
+ * Covers: ngx_http_markdown_streaming_fallback_to_fullbuffer
+ */
 static void
 test_fallback_to_fullbuffer_paths(void)
 {
@@ -1180,6 +1574,17 @@ test_fallback_to_fullbuffer_paths(void)
     TEST_PASS("fallback branches covered");
 }
 
+/*
+ * Test postcommit and precommit error policy branches.  Verifies:
+ * - postcommit error sends terminal chunk and records failure once;
+ *   memory-limit errors are classified as budget-exceeded
+ * - precommit reject policy returns NGX_ERROR (fail-closed)
+ * - precommit pass policy returns NGX_DECLINED (fail-open) and marks
+ *   request ineligible
+ * - streaming fallback error routes through fallback path
+ * Covers: ngx_http_markdown_streaming_handle_postcommit_error,
+ *         ngx_http_markdown_streaming_precommit_error
+ */
 static void
 test_postcommit_and_precommit_error_paths(void)
 {
@@ -1235,6 +1640,20 @@ test_postcommit_and_precommit_error_paths(void)
     TEST_PASS("postcommit/precommit branches covered");
 }
 
+/*
+ * Test abort, passthrough, and reentry helper branches.  Verifies:
+ * - no connection error continues (returns 0)
+ * - connection error aborts request and clears streaming handle
+ * - passthrough forwards headers then body on first call
+ * - passthrough fails when header forwarding fails
+ * - passthrough calls next body filter when headers already forwarded
+ * - reentry passes cl->next to full-buffer body filter
+ * - reentry fails on terminal buffer or chain allocation failure
+ * - reentry synthesises terminal buffer when needed
+ * Covers: ngx_http_markdown_streaming_check_client_abort,
+ *         ngx_http_markdown_streaming_passthrough,
+ *         ngx_http_markdown_streaming_reenter_fullbuffer_after_fallback
+ */
 static void
 test_abort_passthrough_and_reentry_helpers(void)
 {
@@ -1317,6 +1736,26 @@ test_abort_passthrough_and_reentry_helpers(void)
     TEST_PASS("abort/passthrough/reentry helpers covered");
 }
 
+/*
+ * Test null-input handling, failopen tracking, and body_filter entry
+ * branches.  Verifies:
+ * - count_chain_bufs counts only non-NULL buffers
+ * - post-commit failopen tracking short-circuits
+ * - tracking allocation failure returns NGX_ERROR
+ * - tracking grows storage and copies prior consumed slots
+ * - null-input handler propagates resume backpressure
+ * - null-input handler finalizes when pending drain completes
+ * - process_chain skips NULL buffers safely
+ * - body_filter passthrough when ctx or conf is missing
+ * - body_filter stops on client abort
+ * - ineligible ctx passthroughs body filter
+ * - body_filter surfaces failopen tracking allocation errors
+ * Covers: ngx_http_markdown_streaming_count_chain_bufs,
+ *         ngx_http_markdown_streaming_prepare_failopen_tracking,
+ *         ngx_http_markdown_streaming_handle_null_input,
+ *         ngx_http_markdown_streaming_process_chain,
+ *         ngx_http_markdown_streaming_body_filter
+ */
 static void
 test_null_input_tracking_and_body_filter_entry(void)
 {
@@ -1460,6 +1899,22 @@ test_null_input_tracking_and_body_filter_entry(void)
     TEST_PASS("null-input/tracking/body-filter entry branches covered");
 }
 
+/*
+ * Test init_handle and chunk_result helper branches.  Verifies:
+ * - init_handle succeeds on happy path, sets handle, enters pre-commit
+ *   state, and marks conversion attempted
+ * - prepare-options failure routes through precommit_error
+ * - handle-create failure routes through precommit_error
+ * - NULL handle on success code still fails
+ * - cleanup registration failure returns NGX_ERROR
+ * - decompressor init failure routes through precommit_error
+ * - chunk_result propagates NGX_AGAIN and NGX_OK
+ * - chunk_result returns NGX_DONE after fallback switch
+ * - chunk_result fail-open surfaces header-forward errors
+ * - chunk_result propagates non-special errors
+ * Covers: ngx_http_markdown_streaming_init_handle,
+ *         ngx_http_markdown_streaming_handle_chunk_result
+ */
 static void
 test_init_handle_and_chunk_result_helpers(void)
 {
@@ -1563,6 +2018,29 @@ test_init_handle_and_chunk_result_helpers(void)
     TEST_PASS("init_handle/chunk_result branches covered");
 }
 
+/*
+ * Test commit, feed-result, and finalize core branches.  Verifies:
+ * - commit fails when header update or next header filter fails
+ * - commit propagates positive next header filter rc
+ * - commit succeeds on happy path, switches to post-commit, marks
+ *   headers forwarded
+ * - fallback feed result switches to full-buffer
+ * - post-commit feed errors terminate with downstream rc and record failure
+ * - pre-commit feed errors honor pass policy and mark ineligible
+ * - output byte counter saturates on overflow
+ * - successful feed surfaces backpressure (NGX_AGAIN)
+ * - empty successful feed output is a no-op
+ * - finalize emits terminal buffer when handle is null
+ * - pre-commit finalize errors honor pass policy
+ * - post-commit finalize errors terminate downstream
+ * - successful finalize increments success metrics and stores peak memory
+ * - finalize defers terminal last_buf on NGX_AGAIN and latches it
+ * - terminal last_buf backpressure latches pending terminal metrics
+ * - terminal last_buf hard errors propagate and record failure
+ * Covers: ngx_http_markdown_streaming_commit,
+ *         ngx_http_markdown_streaming_handle_feed_result,
+ *         ngx_http_markdown_streaming_finalize_request
+ */
 static void
 test_commit_feed_and_finalize_core_paths(void)
 {
@@ -1781,6 +2259,20 @@ test_commit_feed_and_finalize_core_paths(void)
     TEST_PASS("commit/feed-result/finalize core branches covered");
 }
 
+/*
+ * Test process-chain, failopen passthrough, and body_filter deep branches.
+ * Verifies:
+ * - failopen passthrough passes current chain for first invocation
+ * - failopen passthrough fails on prefix chain allocation errors
+ * - failopen passthrough rebuilds prefix chain on reentry
+ * - process_chain fails when failopen tracking capacity is exhausted
+ * - process_chain returns NGX_DONE when fallback switches path
+ * - body_filter reenters full-buffer path after fallback
+ * - body_filter fail-open passthrough when finalize declines
+ * Covers: ngx_http_markdown_streaming_failopen_passthrough,
+ *         ngx_http_markdown_streaming_process_chain,
+ *         ngx_http_markdown_streaming_body_filter
+ */
 static void
 test_process_chain_and_body_filter_deep_paths(void)
 {
@@ -1930,6 +2422,41 @@ test_process_chain_and_body_filter_deep_paths(void)
     TEST_PASS("process-chain/failopen/body-filter deep branches covered");
 }
 
+/*
+ * Test streaming helper gap branches — edge cases not covered by the
+ * focused tests above.  Verifies:
+ * - selector uses full-buffer when conf is NULL
+ * - resume_pending sends deferred last_buf branch
+ * - resume_pending sends deferred last_buf after pending drain
+ * - fallback fails when prebuffer append fails
+ * - feed errors with output fail-open in pre-commit pass mode and free
+ *   the output buffer
+ * - feed success propagates commit failure and still frees feed output
+ * - finalize propagates markdown send errors, preserves saturated output
+ *   counter, and records failure
+ * - finalize pre-commit surfaces commit errors
+ * - process_chunk short-circuits on NULL buffer, empty buffers, and
+ *   invalid pointer ordering
+ * - ensure_handle fails when fail-open header forwarding fails
+ * - ensure_handle passthrough when init declines
+ * - ensure_handle propagates hard init failures
+ * - ensure_handle returns NGX_OK when init succeeds
+ * - body_filter NULL input uses null-input helper success path
+ * - body_filter returns non-OK ensure_handle result
+ * - body_filter returns NGX_OK for non-terminal successful chunks
+ * - body_filter returns finalize rc on terminal buffer
+ * - finalize handles empty markdown result path
+ * - null-input helper returns NGX_OK when nothing is pending
+ * Covers: ngx_http_markdown_select_processing_path,
+ *         ngx_http_markdown_streaming_resume_pending,
+ *         ngx_http_markdown_streaming_fallback_to_fullbuffer,
+ *         ngx_http_markdown_streaming_handle_feed_result,
+ *         ngx_http_markdown_streaming_finalize_request,
+ *         ngx_http_markdown_streaming_process_chunk,
+ *         ngx_http_markdown_streaming_ensure_handle,
+ *         ngx_http_markdown_streaming_body_filter,
+ *         ngx_http_markdown_streaming_handle_null_input
+ */
 static void
 test_streaming_gap_branches(void)
 {
@@ -2187,6 +2714,11 @@ test_streaming_gap_branches(void)
     TEST_PASS("streaming helper gap branches covered");
 }
 
+/*
+ * Test entry point.  Runs all streaming_impl unit test functions in
+ * sequence.  Prints a banner before and after the test run.  Returns 0
+ * on success; individual test assertions abort via TEST_ASSERT on failure.
+ */
 int
 main(void)
 {

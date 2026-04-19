@@ -43,6 +43,11 @@ struct MarkdownResult {
 
 struct MarkdownConverterHandle;
 
+/*
+ * Test-controlled stub state.  Each global allows tests to inject
+ * specific return codes or trigger one-shot allocation failures
+ * without modifying the stub function bodies.
+ */
 static ngx_int_t g_forward_headers_rc = 0;
 static ngx_int_t g_update_headers_rc = 0;
 static ngx_int_t g_failopen_rc = 0;
@@ -87,6 +92,15 @@ markdown_convert(struct MarkdownConverterHandle *handle, /* NOSONAR: must match 
     memset(result, 0, sizeof(*result));
 }
 
+/*
+ * FFI lifecycle stub for markdown_result_free.  Clears all public ABI
+ * fields (pointer, length, and numeric/error fields) to prevent
+ * stale-state regressions, and increments g_markdown_result_free_calls
+ * so tests can verify the expected number of free invocations.
+ *
+ * Per AGENTS.md rule 15: partial clears create false confidence and
+ * can mask stale-state regressions, so every field is zeroed.
+ */
 static void
 markdown_result_free(struct MarkdownResult *result) /* NOSONAR: must match FFI signature */
 {
@@ -268,6 +282,11 @@ ngx_pfree(ngx_pool_t *pool, void *p)
     return NGX_OK;
 }
 
+/*
+ * Pool allocator stub delegating to malloc(3).  When g_pnalloc_fail_once
+ * is set, returns NULL once and clears the flag, simulating allocation
+ * failure.
+ */
 static ngx_inline void *
 ngx_pnalloc(ngx_pool_t *pool, size_t size)
 {
@@ -279,6 +298,11 @@ ngx_pnalloc(ngx_pool_t *pool, size_t size)
     return malloc(size);
 }
 
+/*
+ * Pool allocator stub delegating to calloc(3) with zero-initialization.
+ * When g_pcalloc_fail_once is set, returns NULL once and clears the flag,
+ * simulating allocation failure.
+ */
 static ngx_inline void *
 ngx_pcalloc(ngx_pool_t *pool, size_t size)
 {
@@ -293,6 +317,10 @@ ngx_pcalloc(ngx_pool_t *pool, size_t size)
     return p;
 }
 
+/*
+ * Chain link allocator stub.  When g_alloc_chain_fail_once is set,
+ * returns NULL once and clears the flag, simulating allocation failure.
+ */
 static ngx_inline ngx_chain_t *
 ngx_alloc_chain_link(ngx_pool_t *pool)
 {
@@ -348,6 +376,10 @@ struct MarkdownConverterHandle *ngx_http_markdown_converter = NULL;
 ngx_http_markdown_metrics_t *ngx_http_markdown_metrics = NULL;
 ngx_int_t (*ngx_http_next_body_filter)(ngx_http_request_t *r, ngx_chain_t *in) = NULL;
 
+/*
+ * Forward-headers stub returning the test-controlled g_forward_headers_rc,
+ * allowing tests to simulate header forwarding failures.
+ */
 static ngx_int_t
 ngx_http_markdown_forward_headers(
     ngx_http_request_t *r,     /* NOSONAR c:S995 — must match production signature */
@@ -365,6 +397,11 @@ ngx_http_markdown_metric_inc_failopen(
     UNUSED(conf);
 }
 
+/*
+ * Fail-open stub.  Increments g_failopen_call_count and returns
+ * g_failopen_rc, allowing tests to verify invocation count and control
+ * return behavior.
+ */
 static ngx_int_t
 ngx_http_markdown_reject_or_fail_open_buffered_response(
     ngx_http_request_t *r,     /* NOSONAR c:S995 — must match impl forward decl */
@@ -379,6 +416,12 @@ ngx_http_markdown_reject_or_fail_open_buffered_response(
     return g_failopen_rc;
 }
 
+/*
+ * Classify FFI error codes into semantic categories.  PARSE/ENCODING/
+ * INVALID_INPUT map to CONVERSION, TIMEOUT/MEMORY_LIMIT map to
+ * RESOURCE_LIMIT, all others map to SYSTEM.  Mirrors the production
+ * classification contract.
+ */
 ngx_http_markdown_error_category_t
 ngx_http_markdown_classify_error(uint32_t error_code)
 {
@@ -395,6 +438,10 @@ ngx_http_markdown_classify_error(uint32_t error_code)
     }
 }
 
+/*
+ * Return a human-readable string for each error category.  Covers
+ * CONVERSION, RESOURCE_LIMIT, and SYSTEM categories.
+ */
 const ngx_str_t *
 ngx_http_markdown_error_category_string(
     ngx_http_markdown_error_category_t category)
@@ -420,6 +467,10 @@ ngx_http_markdown_error_category_string(
     return &system_str;
 }
 
+/*
+ * Header-update stub returning the test-controlled g_update_headers_rc,
+ * allowing tests to simulate header update failures.
+ */
 ngx_int_t
 ngx_http_markdown_update_headers(
     ngx_http_request_t *r,     /* NOSONAR c:S995 — must match module header decl */
@@ -500,6 +551,10 @@ assert_str_eq(const ngx_str_t *actual, const char *expected, const char *msg)
     TEST_ASSERT(memcmp(actual->data, expected, expected_len) == 0, msg);
 }
 
+/*
+ * Body filter chain stub returning the test-controlled
+ * g_next_body_filter_rc.
+ */
 static ngx_int_t
 test_next_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
 {
@@ -1005,6 +1060,12 @@ test_find_request_header_multi_part(void)
     TEST_PASS("find_request_header_value multi-part correct");
 }
 
+/*
+ * Verify validate_conversion_result invariant checks: NULL markdown with
+ * non-zero length triggers fail-open; NULL error_message with non-zero
+ * length triggers fail-open; NULL etag with non-zero length triggers
+ * fail-open; valid result passes without invoking fail-open.
+ */
 static void
 test_validate_conversion_result_paths(void)
 {
@@ -1060,6 +1121,12 @@ test_validate_conversion_result_paths(void)
     TEST_PASS("validate_conversion_result branches covered");
 }
 
+/*
+ * Verify handle_conversion_failure error category classification:
+ * PARSE errors map to CONVERSION category; TIMEOUT errors map to
+ * RESOURCE_LIMIT category; INTERNAL errors map to SYSTEM category.
+ * Each path propagates the fail-open return code.
+ */
 static void
 test_handle_conversion_failure_paths(void)
 {
@@ -1119,6 +1186,10 @@ test_handle_conversion_failure_paths(void)
     TEST_PASS("handle_conversion_failure branches covered");
 }
 
+/*
+ * Verify handle_converter_not_initialized follows the configured
+ * fail-open strategy and records the system error category.
+ */
 static void
 test_converter_not_initialized_path(void)
 {
@@ -1145,6 +1216,12 @@ test_converter_not_initialized_path(void)
     TEST_PASS("converter_not_initialized covered");
 }
 
+/*
+ * Verify send_conversion_output branch coverage: HEAD method output,
+ * body output, header update failure, forward header failure, buffer
+ * allocation failure (pcalloc), body allocation failure (pnalloc),
+ * chain allocation failure.
+ */
 static void
 test_send_conversion_output_paths(void)
 {
@@ -1246,6 +1323,12 @@ test_send_conversion_output_paths(void)
     TEST_PASS("send_conversion_output branches covered");
 }
 
+/*
+ * Verify miscellaneous conversion helper branches:
+ * record_conversion_latency, record_system_failure, and
+ * record_token_savings_if_enabled with various token_estimate
+ * configurations.
+ */
 static void
 test_misc_conversion_helpers(void)
 {
