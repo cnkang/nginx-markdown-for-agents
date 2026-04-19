@@ -742,6 +742,7 @@ test_filter_flag_and_is_enabled(void)
     memset(&conf, 0, sizeof(conf));
     conf.enabled = 1;
     conf.enabled_source = NGX_HTTP_MARKDOWN_ENABLED_STATIC;
+    memset(&req, 0, sizeof(req));
     TEST_ASSERT(ngx_http_markdown_is_enabled(&req, &conf) == 1,
         "static enabled should bypass complex evaluation");
 
