@@ -254,7 +254,9 @@ http {
 
         # Enable gzip for responses to exercise decompression when proxied
         gzip on;
-        gzip_types text/html text/plain application/xhtml+xml;
+        # text/html is nginx's default gzip type, so listing it here only
+        # triggers duplicate MIME type warnings during config parsing.
+        gzip_types text/plain application/xhtml+xml;
         gzip_min_length 0;
 
         location / {
@@ -648,7 +650,7 @@ http {
         server_name backend;
 
         gzip on;
-        gzip_types text/html text/plain;
+        gzip_types text/plain;
         gzip_min_length 0;
 
         location / {
