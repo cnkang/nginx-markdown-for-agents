@@ -264,6 +264,35 @@ def parse_nginx_versions(html: str) -> list[str]:
     return list(dict.fromkeys(versions))
 
 
+def _release_asset_version(name: object) -> str | None:
+    """Extract the nginx version from a release asset name."""
+    if not isinstance(name, str):
+        return None
+
+    prefix = "ngx_http_markdown_filter_module-"
+    suffix = ".tar.gz"
+    if not name.startswith(prefix) or not name.endswith(suffix):
+        return None
+
+    core = name[len(prefix) : -len(suffix)]
+    parts = core.split("-")
+    if len(parts) != 3:
+        return None
+
+    version, os_type, arch = parts
+    if not _is_dotted_version(version):
+        return None
+    if not os_type or not arch:
+        return None
+    return version
+
+
+def _is_dotted_version(version: str) -> bool:
+    """Return True when version is strictly X.Y.Z dotted numeric form."""
+    parts = version.split(".")
+    return len(parts) == 3 and all(part.isdigit() for part in parts)
+
+
 def parse_release_module_versions(release_json: str) -> set[str]:
     """Extract module versions from the latest GitHub release assets."""
     try:
@@ -275,32 +304,13 @@ def parse_release_module_versions(release_json: str) -> set[str]:
     if not isinstance(assets, list):
         return set()
 
-    prefix = "ngx_http_markdown_filter_module-"
-    suffix = ".tar.gz"
-
-    def _is_version(version: str) -> bool:
-        parts = version.split(".")
-        return len(parts) == 3 and all(part.isdigit() for part in parts)
-
     versions: set[str] = set()
     for asset in assets:
         if not isinstance(asset, dict):
             continue
-        name = asset.get("name", "")
-        if not isinstance(name, str):
-            continue
-        if not name.startswith(prefix) or not name.endswith(suffix):
-            continue
-        core = name[len(prefix) : -len(suffix)]
-        parts = core.split("-")
-        if len(parts) != 3:
-            continue
-        version, os_type, arch = parts
-        if not _is_version(version):
-            continue
-        if not os_type or not arch:
-            continue
-        versions.add(version)
+        version = _release_asset_version(asset.get("name"))
+        if version is not None:
+            versions.add(version)
     return versions
 
 
