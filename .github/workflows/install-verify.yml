@@ -239,6 +239,8 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read
+    env:
+      JS_ACTIONS_SUPPORTED: ${{ !(matrix.target.pkg_manager == 'apk' && matrix.target.arch == 'aarch64') }}
     strategy:
       fail-fast: false
       matrix:
@@ -250,7 +252,7 @@ jobs:
         if: matrix.target.pkg_manager == 'apk'
         run: |
           apk update
-          apk add --no-cache bash curl python3 tar coreutils
+          apk add --no-cache bash curl python3 tar coreutils git ca-certificates
 
       - name: Install prerequisites (apt — container)
         if: matrix.target.pkg_manager == 'apt' && matrix.target.container != ''
@@ -344,9 +346,21 @@ jobs:
           fi
 
       - name: Checkout repository
+        if: ${{ env.JS_ACTIONS_SUPPORTED == 'true' }}
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           ref: ${{ github.event.inputs.ref || github.ref }}
+
+      - name: Checkout repository (Alpine arm64 fallback)
+        if: ${{ env.JS_ACTIONS_SUPPORTED != 'true' }}
+        env:
+          REPO_URL: https://github.com/${{ github.repository }}.git
+          CHECKOUT_REF: ${{ github.event.inputs.ref || github.ref }}
+        run: |
+          git init .
+          git remote add origin "${REPO_URL}"
+          git fetch --depth=1 origin "${CHECKOUT_REF}"
+          git checkout --force FETCH_HEAD
 
       - name: Prepare results directory
         run: |
@@ -389,6 +403,7 @@ jobs:
         env:
           VERSION: ${{ github.event.inputs.version || '' }}
           IS_CONTAINER: ${{ matrix.target.container != '' && 'true' || 'false' }}
+        shell: bash
         run: |
           RESULTS_DIR="${{ runner.temp }}/install-verify"
           # The installer writes to root-owned paths (/usr/lib/nginx/modules,
@@ -664,6 +679,7 @@ jobs:
           EXPECTED_INSTALL_SUCCESS: ${{ matrix.target.expected_install_success && 'true' || 'false' }}
         run: |
           RESULTS_DIR="${{ runner.temp }}/install-verify"
+          mkdir -p "${RESULTS_DIR}"
           INSTALL_EXIT="${{ steps.install.outputs.install_exit }}"
           VALIDATE_OUTCOME="${{ steps.validate_outcome.conclusion }}"
           NGINX_TEST_EXIT="${{ steps.nginx_test.outputs.nginx_test_exit }}"
@@ -716,7 +732,7 @@ jobs:
           fi
 
       - name: Upload verification artifacts
-        if: always()
+        if: ${{ always() && env.JS_ACTIONS_SUPPORTED == 'true' }}
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
         with:
           name: ${{ matrix.target.artifact_name }}
