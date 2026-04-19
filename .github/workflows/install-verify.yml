@@ -357,6 +357,7 @@ jobs:
           REPO_URL: https://github.com/${{ github.repository }}.git
           CHECKOUT_REF: ${{ github.event.inputs.ref || github.ref }}
         run: |
+          git config --global --add safe.directory "${GITHUB_WORKSPACE}"
           git init .
           git remote add origin "${REPO_URL}"
           git fetch --depth=1 origin "${CHECKOUT_REF}"

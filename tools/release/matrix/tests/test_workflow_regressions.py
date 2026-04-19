@@ -49,6 +49,9 @@ def test_install_verify_workflow_avoids_js_actions_on_alpine_arm64_and_uses_bash
     assert steps["Checkout repository (Alpine arm64 fallback)"]["if"] == (
         "${{ env.JS_ACTIONS_SUPPORTED != 'true' }}"
     )
+    assert "git config --global --add safe.directory" in steps[
+        "Checkout repository (Alpine arm64 fallback)"
+    ]["run"]
     assert steps["Run install script"]["shell"] == "bash"
     assert steps["Upload verification artifacts"]["if"] == (
         "${{ always() && env.JS_ACTIONS_SUPPORTED == 'true' }}"
