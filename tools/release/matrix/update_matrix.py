@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Automated nginx release matrix updater.
 
-Scrapes nginx.org for current supported versions, computes the desired
-matrix state (respecting ``managed_by: manual`` Pin_Entries), and updates
-both ``tools/release-matrix.json`` and the Platform Compatibility Matrix
-table in ``docs/guides/INSTALLATION.md``.  A machine-readable diff summary
-is written to ``matrix-diff.json`` when changes are detected, for
+Scrapes the latest GitHub release assets for this repository, computes the
+desired matrix state (respecting ``managed_by: manual`` Pin_Entries), and
+updates both ``tools/release-matrix.json`` and the Platform Compatibility
+Matrix table in ``docs/guides/INSTALLATION.md``.  A machine-readable diff
+summary is written to ``matrix-diff.json`` when changes are detected, for
 consumption by the GitHub Actions workflow.
 
 Exit codes:
@@ -29,7 +29,7 @@ import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 from urllib.error import URLError
 
 # ---------------------------------------------------------------------------
@@ -46,6 +46,8 @@ DIFF_PATH = MATRIX_PATH.parent / "matrix-diff.json"
 # Scraping / version constants
 # ---------------------------------------------------------------------------
 NGINX_DOWNLOAD_URL = "https://nginx.org/en/download.html"
+REPO_SLUG = os.environ.get("GITHUB_REPOSITORY", "cnkang/nginx-markdown-for-agents")
+GITHUB_API_ACCEPT = "application/vnd.github+json"
 
 # Supported platform combinations
 OS_TYPES = ["glibc", "musl"]
@@ -232,6 +234,20 @@ def fetch_download_page(url: str) -> str:
         return resp.read().decode("utf-8")
 
 
+def fetch_release_json(url: str | None = None) -> str:
+    """Fetch the latest GitHub release JSON for this repository."""
+    release_url = url or f"https://api.github.com/repos/{REPO_SLUG}/releases/latest"
+    request = Request(
+        release_url,
+        headers={
+            "Accept": GITHUB_API_ACCEPT,
+            "User-Agent": "nginx-markdown-for-agents-matrix-updater",
+        },
+    )
+    with urlopen(request, timeout=30) as resp:
+        return resp.read().decode("utf-8")
+
+
 def parse_nginx_versions(html: str) -> list[str]:
     """
     Extract nginx version numbers from the provided download-page HTML.
@@ -246,6 +262,31 @@ def parse_nginx_versions(html: str) -> list[str]:
     pattern = re.compile(r"/download/nginx-(\d+\.\d+\.\d+)\.tar\.gz")
     versions = pattern.findall(html)
     return list(dict.fromkeys(versions))
+
+
+def parse_release_module_versions(release_json: str) -> set[str]:
+    """Extract module versions from the latest GitHub release assets."""
+    try:
+        release_data = json.loads(release_json)
+    except json.JSONDecodeError:
+        return set()
+
+    assets = release_data.get("assets", [])
+    if not isinstance(assets, list):
+        return set()
+
+    pattern = re.compile(
+        r"^ngx_http_markdown_filter_module-(\d+\.\d+\.\d+)-[^/]+-[^/]+\.tar\.gz$"
+    )
+    versions: set[str] = set()
+    for asset in assets:
+        if not isinstance(asset, dict):
+            continue
+        name = asset.get("name", "")
+        match = pattern.match(name)
+        if match:
+            versions.add(match.group(1))
+    return versions
 
 
 # ---------------------------------------------------------------------------
@@ -814,24 +855,35 @@ def main(argv: list[str] | None = None) -> int:
     if not args.dry_run and not args.check_only:
         with contextlib.suppress(OSError):
             DIFF_PATH.unlink(missing_ok=True)
-    # --- Fetch and parse nginx.org -------------------------------------------
     try:
-        html = fetch_download_page(NGINX_DOWNLOAD_URL)
+        release_json = fetch_release_json()
     except URLError as exc:
-        print(f"Error fetching {NGINX_DOWNLOAD_URL}: {exc}", file=sys.stderr)
+        print(
+            "Error fetching latest GitHub release metadata "
+            f"for {REPO_SLUG}: {exc}",
+            file=sys.stderr,
+        )
         return 1
 
-    all_versions = parse_nginx_versions(html)
-    if not all_versions:
+    release_versions = parse_release_module_versions(release_json)
+    if not release_versions:
         print(
-            "Error: zero nginx versions parsed from download page",
+            "Error: zero module versions parsed from the latest GitHub "
+            "release assets",
             file=sys.stderr,
         )
         return 1
 
     # --- Filter to supported versions >= MIN_SUPPORTED -----------------------
     min_version = read_min_version(INSTALL_SCRIPT_PATH)
-    versions = filter_versions(all_versions, min_version)
+    versions = filter_versions(sorted(release_versions), min_version)
+    if not versions:
+        print(
+            "Error: no release asset versions satisfy the minimum supported "
+            "NGINX version",
+            file=sys.stderr,
+        )
+        return 1
 
     # --- Load existing matrix ------------------------------------------------
     data, current_auto, manual_entries = load_matrix(MATRIX_PATH)

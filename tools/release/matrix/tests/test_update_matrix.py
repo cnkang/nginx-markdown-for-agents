@@ -24,6 +24,7 @@ from tools.release.matrix.update_matrix import (
     compute_matrix,
     merge_matrix,
     diff_matrix,
+    parse_release_module_versions,
     write_matrix,
     update_doc_table,
     parse_args,
@@ -180,6 +181,22 @@ def test_parse_deduplication():
     )
     versions = parse_nginx_versions(html)
     assert versions == ["1.26.3", "1.24.0"]
+
+
+def test_parse_release_module_versions_extracts_assets():
+    """Only markdown module tarballs should contribute release versions."""
+    release_json = json.dumps(
+        {
+            "assets": [
+                {"name": "nginx-version-groups.json"},
+                {"name": "ngx_http_markdown_filter_module-1.28.3-glibc-x86_64.tar.gz"},
+                {"name": "ngx_http_markdown_filter_module-1.29.8-musl-aarch64.tar.gz"},
+                {"name": "README.txt"},
+            ]
+        }
+    )
+
+    assert parse_release_module_versions(release_json) == {"1.28.3", "1.29.8"}
 
 
 @pytest.mark.parametrize("version", ["1", "1x26x3", "mainline"])
@@ -1113,6 +1130,17 @@ def test_property9_read_only_modes_do_not_modify_files(tmp_path, versions, monke
 
     mock_html = _build_mock_html(versions)
     monkeypatch.setattr(um, "fetch_download_page", lambda _url: mock_html)
+    mock_release_json = json.dumps(
+        {
+            "assets": [
+                {
+                    "name": f"ngx_http_markdown_filter_module-{v}-glibc-x86_64.tar.gz"
+                }
+                for v in versions
+            ]
+        }
+    )
+    monkeypatch.setattr(um, "fetch_release_json", lambda _url=None: mock_release_json)
 
     # --- Run --dry-run ----------------------------------------------------
     main(["--dry-run"])
@@ -1181,7 +1209,14 @@ import tools.release.matrix.update_matrix as um
 from tools.release.matrix.update_matrix import write_diff_file, MatrixDiff
 
 
-def _setup_cli_env(tmp_path, versions_in_matrix, monkeypatch, *, html_versions=None):
+def _setup_cli_env(
+    tmp_path,
+    versions_in_matrix,
+    monkeypatch,
+    *,
+    html_versions=None,
+    release_versions=None,
+):
     """
     Create a complete temporary CLI test environment and monkeypatch module-level paths and download behavior for main()/CLI tests.
     
@@ -1191,7 +1226,7 @@ def _setup_cli_env(tmp_path, versions_in_matrix, monkeypatch, *, html_versions=N
     - install.sh containing MIN_SUPPORTED_NGINX_VERSION="1.24.0".
     - matrix-diff.json is not created by default (path is returned for tests that expect it).
     
-    Monkeypatches the update_matrix module's path constants (MATRIX_PATH, DOC_PATH, DIFF_PATH, INSTALL_SCRIPT_PATH, REPO_ROOT) to point into tmp_path and replaces fetch_download_page to return HTML built from html_versions.
+    Monkeypatches the update_matrix module's path constants (MATRIX_PATH, DOC_PATH, DIFF_PATH, INSTALL_SCRIPT_PATH, REPO_ROOT) to point into tmp_path and replaces fetch_download_page / fetch_release_json with deterministic fixtures.
     
     Parameters:
         tmp_path: Temporary filesystem path object where test files will be created.
@@ -1199,12 +1234,16 @@ def _setup_cli_env(tmp_path, versions_in_matrix, monkeypatch, *, html_versions=N
         monkeypatch: pytest monkeypatch fixture used to set attributes on the update_matrix module.
         html_versions (optional): Iterable of nginx version strings to include in the mocked HTML returned by fetch_download_page.
             If omitted, html_versions defaults to versions_in_matrix.
+        release_versions (optional): Iterable of nginx version strings to include in the mocked latest GitHub release JSON.
+            If omitted, release_versions defaults to versions_in_matrix.
     
     Returns:
         tuple: (matrix_path, doc_path, diff_path) Path objects for the created matrix file, documentation file, and diff file path respectively.
     """
     if html_versions is None:
         html_versions = versions_in_matrix
+    if release_versions is None:
+        release_versions = versions_in_matrix
 
     matrix_path = tmp_path / "release-matrix.json"
     doc_path = tmp_path / "INSTALLATION.md"
@@ -1260,6 +1299,17 @@ def _setup_cli_env(tmp_path, versions_in_matrix, monkeypatch, *, html_versions=N
 
     mock_html = _build_mock_html(html_versions)
     monkeypatch.setattr(um, "fetch_download_page", lambda _url: mock_html)
+    mock_release_json = json.dumps(
+        {
+            "assets": [
+                {
+                    "name": f"ngx_http_markdown_filter_module-{v}-glibc-x86_64.tar.gz"
+                }
+                for v in release_versions
+            ]
+        }
+    )
+    monkeypatch.setattr(um, "fetch_release_json", lambda _url=None: mock_release_json)
 
     return matrix_path, doc_path, diff_path
 
@@ -1275,7 +1325,11 @@ def test_cli_dry_run_no_file_writes(tmp_path, monkeypatch, capsys):
     from_nginx = ["1.24.0", "1.26.3", "1.28.0"]  # 1.28.0 is new
 
     matrix_path, doc_path, diff_path = _setup_cli_env(
-        tmp_path, existing, monkeypatch, html_versions=from_nginx,
+        tmp_path,
+        existing,
+        monkeypatch,
+        html_versions=from_nginx,
+        release_versions=from_nginx,
     )
 
     matrix_before = matrix_path.read_bytes()
@@ -1311,6 +1365,25 @@ def test_cli_check_only_fresh_exit_0(tmp_path, monkeypatch):
     assert exit_code == 0
 
 
+def test_cli_check_only_ignores_upstream_only_versions_without_release_assets(
+    tmp_path, monkeypatch
+):
+    """Upstream-only versions should not enter the matrix until release assets exist."""
+    existing = ["1.24.0", "1.26.3", "1.28.3", "1.29.8"]
+    upstream = existing + ["1.30.0"]
+
+    _setup_cli_env(
+        tmp_path,
+        existing,
+        monkeypatch,
+        html_versions=upstream,
+        release_versions=existing,
+    )
+
+    exit_code = main(["--check-only"])
+    assert exit_code == 0
+
+
 def test_cli_check_only_stale_exit_2(tmp_path, monkeypatch):
     """
     Verify the CLI exits with status code 2 when the local release matrix is stale because newer versions exist upstream.
@@ -1319,7 +1392,11 @@ def test_cli_check_only_stale_exit_2(tmp_path, monkeypatch):
     from_nginx = ["1.24.0", "1.26.3"]  # 1.26.3 missing from matrix
 
     _setup_cli_env(
-        tmp_path, existing, monkeypatch, html_versions=from_nginx,
+        tmp_path,
+        existing,
+        monkeypatch,
+        html_versions=from_nginx,
+        release_versions=from_nginx,
     )
 
     exit_code = main(["--check-only"])
@@ -1335,7 +1412,7 @@ def test_cli_check_only_error_exit_1(tmp_path, monkeypatch):
 
     # Make fetch raise a URLError to simulate network failure
     from urllib.error import URLError
-    def raise_url_error(_url):
+    def raise_url_error(_url=None):
         """
         Raise a URLError indicating the network is down.
         
@@ -1343,7 +1420,7 @@ def test_cli_check_only_error_exit_1(tmp_path, monkeypatch):
             URLError: Always raised with the message "network down".
         """
         raise URLError("network down")
-    monkeypatch.setattr(um, "fetch_download_page", raise_url_error)
+    monkeypatch.setattr(um, "fetch_release_json", raise_url_error)
 
     exit_code = main(["--check-only"])
     assert exit_code == 1
@@ -1360,7 +1437,11 @@ def test_cli_diff_json_structure(tmp_path, monkeypatch):
     from_nginx = ["1.24.0", "1.26.3"]  # 1.26.3 is new
 
     _, _, diff_path = _setup_cli_env(
-        tmp_path, existing, monkeypatch, html_versions=from_nginx,
+        tmp_path,
+        existing,
+        monkeypatch,
+        html_versions=from_nginx,
+        release_versions=from_nginx,
     )
 
     exit_code = main([])
@@ -1380,12 +1461,15 @@ def test_cli_diff_json_removed_versions(tmp_path, monkeypatch):
     from_nginx = ["1.26.3"]  # 1.24.0 dropped from nginx.org
 
     _, _, diff_path = _setup_cli_env(
-        tmp_path, existing, monkeypatch, html_versions=from_nginx,
+        tmp_path,
+        existing,
+        monkeypatch,
+        html_versions=from_nginx,
+        release_versions=from_nginx,
     )
 
-    # Need min_version to allow 1.26.3 but not require 1.24.0
-    # The default min is 1.24.0, so 1.26.3 passes. 1.24.0 is simply
-    # not in the HTML anymore, so it gets removed.
+    # The default min is 1.24.0, so 1.26.3 passes. 1.24.0 disappears from
+    # the latest release asset set, so it gets removed from the desired matrix.
     exit_code = main([])
     assert exit_code == 0
     assert diff_path.exists()
@@ -1410,7 +1494,11 @@ def test_cli_rollback_on_doc_write_failure(tmp_path, monkeypatch):
     from_nginx = ["1.24.0", "1.26.3"]
 
     matrix_path, _, _ = _setup_cli_env(
-        tmp_path, existing, monkeypatch, html_versions=from_nginx,
+        tmp_path,
+        existing,
+        monkeypatch,
+        html_versions=from_nginx,
+        release_versions=from_nginx,
     )
 
     matrix_before = matrix_path.read_text()
@@ -1465,7 +1553,11 @@ def test_cli_no_change_exit_0(tmp_path, monkeypatch, capsys):
     """When matrix is already up to date, exit 0 with informational message."""
     versions = ["1.24.0", "1.26.3"]
     matrix_path, doc_path, diff_path = _setup_cli_env(
-        tmp_path, versions, monkeypatch, html_versions=versions,
+        tmp_path,
+        versions,
+        monkeypatch,
+        html_versions=versions,
+        release_versions=versions,
     )
 
     matrix_before = matrix_path.read_bytes()
@@ -1495,7 +1587,11 @@ def test_cli_version_logging(tmp_path, monkeypatch, capsys):
     from_nginx = ["1.26.3", "1.28.0"]  # add 1.28.0, remove 1.24.0
 
     _setup_cli_env(
-        tmp_path, existing, monkeypatch, html_versions=from_nginx,
+        tmp_path,
+        existing,
+        monkeypatch,
+        html_versions=from_nginx,
+        release_versions=from_nginx,
     )
 
     exit_code = main([])
