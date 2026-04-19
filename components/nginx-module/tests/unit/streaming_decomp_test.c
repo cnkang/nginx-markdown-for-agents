@@ -1320,21 +1320,29 @@ test_feed_empty_and_large_size_paths(void)
     TEST_ASSERT(rc == NGX_ERROR,
         "feed should fail when initial output buffer allocation fails");
 
+    g_palloc_fail_once = 0;
+    g_palloc_return_static_once = 0;
     huge_in_len = ((size_t) -1 / 4) + 1;
-    g_palloc_fail_once = 1;
     one_byte = 'x';
+    out = NULL;
+    out_len = 0;
+    g_palloc_return_static_once = 1;
     rc = ngx_http_markdown_streaming_decomp_feed(
         decomp, &one_byte, huge_in_len, &out, &out_len,
         &tp.pool, &test_log);
     TEST_ASSERT(rc == NGX_ERROR,
         "feed should fail safely on saturated initial size");
+    g_palloc_return_static_once = 0;
 
+    out = NULL;
+    out_len = 0;
     g_palloc_return_static_once = 1;
     rc = ngx_http_markdown_streaming_decomp_feed(
         decomp, &one_byte, ((size_t) UINT_MAX / 2) + 1,
         &out, &out_len, &tp.pool, &test_log);
     TEST_ASSERT(rc == NGX_ERROR,
         "feed should fail when output buffer size exceeds zlib uInt");
+    g_palloc_return_static_once = 0;
 
     free(decomp);
     TEST_PASS("feed empty/large-size branches covered");

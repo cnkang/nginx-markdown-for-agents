@@ -449,7 +449,8 @@ if [[ -n "${NGINX_BIN}" ]]; then
   NGINX_EXECUTABLE="${NGINX_BIN}"
 else
   echo "==> Building Rust converter (${RUST_TARGET})"
-  markdown_prepare_rust_converter_release "${WORKSPACE_ROOT}" "${RUST_TARGET}" >/dev/null
+  markdown_prepare_rust_converter_release \
+    "${WORKSPACE_ROOT}" "${RUST_TARGET}" --features streaming >/dev/null
 
   echo "==> Downloading/building NGINX ${NGINX_VERSION}"
   curl --proto '=https' --tlsv1.2 -fsSL "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" -o "${BUILDROOT}/nginx.tar.gz"
@@ -457,7 +458,11 @@ else
   tar -xzf "${BUILDROOT}/nginx.tar.gz" -C "${BUILDROOT}/src" --strip-components=1
   (
     cd "${BUILDROOT}/src"
-    ./configure --without-http_rewrite_module --prefix="${RUNTIME}" --add-module="${WORKSPACE_ROOT}/components/nginx-module" >/dev/null
+    ./configure \
+      --without-http_rewrite_module \
+      --with-cc-opt="-DMARKDOWN_STREAMING_ENABLED" \
+      --prefix="${RUNTIME}" \
+      --add-module="${WORKSPACE_ROOT}/components/nginx-module" >/dev/null
     make -j"$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)" >/dev/null
     make install >/dev/null
   )
@@ -649,14 +654,16 @@ grep -q 'response size exceeds limit' "${RUNTIME}/logs/error.log" || {
 # Verify that the truncated compressed streams produced the expected
 # internal diagnostics: a decompression finalize failure and a
 # STREAMING_FAIL_POSTCOMMIT decision log entry.
-grep -q 'decomp_finish failed in finalize' "${RUNTIME}/logs/error.log" || {
-  echo "missing decomp finalize failure log for truncated compressed cases" >&2
+decomp_finalize_count="$(grep -Fc 'decomp_finish failed in finalize' "${RUNTIME}/logs/error.log" || true)"
+postcommit_count="$(grep -Fc 'reason=STREAMING_FAIL_POSTCOMMIT' "${RUNTIME}/logs/error.log" || true)"
+if [[ "${decomp_finalize_count}" -lt 2 ]]; then
+  echo "missing decomp finalize failure logs for truncated gzip/deflate cases: ${decomp_finalize_count}" >&2
   exit 1
-}
-grep -q 'reason=STREAMING_FAIL_POSTCOMMIT' "${RUNTIME}/logs/error.log" || {
-  echo "missing STREAMING_FAIL_POSTCOMMIT decision log for truncated cases" >&2
+fi
+if [[ "${postcommit_count}" -lt 2 ]]; then
+  echo "missing STREAMING_FAIL_POSTCOMMIT decision logs for truncated gzip/deflate cases: ${postcommit_count}" >&2
   exit 1
-}
+fi
 
 if [[ "${PROFILE}" == "stress" ]]; then
   echo "==> Stress profile: ApacheBench for chunked conversion and fail-open paths"

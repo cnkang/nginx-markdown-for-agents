@@ -470,72 +470,6 @@ ngx_array_push(ngx_array_t *a)
 }
 
 /*
- * Size parser stub supporting optional k/K/m/M suffixes.
- *
- * Test-local reimplementation of the NGINX primitive because the
- * production symbol cannot be linked in the unit harness.
- *
- * Divergence risk: medium — production ngx_parse_size supports
- * additional suffixes (g/G) and overflow checks; this stub
- * handles only k/K/m/M and performs no overflow detection.
- *
- * Parameters:
- *   line - ngx_str_t containing the size token to parse.
- *
- * Return: parsed size in bytes, or (size_t)NGX_ERROR on invalid
- *         input (NULL, empty, non-numeric, or overflow).
- *
- * Side effects: none.
- */
-static size_t
-ngx_parse_size(ngx_str_t *line)
-{
-    char    buf[64];
-    char   *endptr;
-    size_t  len;
-    size_t  value;
-
-    if (line == NULL || line->data == NULL || line->len == 0) {
-        return (size_t) NGX_ERROR;
-    }
-
-    len = line->len;
-    if (len >= sizeof(buf)) {
-        return (size_t) NGX_ERROR;
-    }
-
-    memcpy(buf, line->data, len);
-    buf[len] = '\0';
-
-    if (len > 1 && (buf[len - 1] == 'k' || buf[len - 1] == 'K'
-                 || buf[len - 1] == 'm' || buf[len - 1] == 'M'))
-    {
-        char suffix;
-
-        suffix = buf[len - 1];
-        buf[len - 1] = '\0';
-
-        value = (size_t) strtoull(buf, &endptr, 10);
-        if (*endptr != '\0') {
-            return (size_t) NGX_ERROR;
-        }
-
-        if (suffix == 'k' || suffix == 'K') {
-            return value * 1024;
-        }
-
-        return value * 1024 * 1024;
-    }
-
-    value = (size_t) strtoull(buf, &endptr, 10);
-    if (*endptr != '\0') {
-        return (size_t) NGX_ERROR;
-    }
-
-    return value;
-}
-
-/*
  * Complex value compilation stub.  Copies the input string to the
  * output complex_value and returns g_compile_complex_rc, allowing
  * tests to control compilation success or failure.
@@ -1084,13 +1018,13 @@ test_stream_types_handler(void)
 }
 
 /*
- * Verify large_body_threshold handler: off, size suffixes (k/m),
+ * Verify large_body_threshold handler: off, size suffixes (k/m/g),
  * invalid token, and duplicate detection.
  *
  * Semantic contract mirrored: ngx_http_markdown_large_body_threshold
- * maps "off" to 0, parses size tokens with optional k/K/m/M
- * suffixes via ngx_parse_size, rejects duplicates, and returns
- * NGX_CONF_ERROR for invalid tokens.
+ * maps "off" to 0, parses size tokens with optional k/K/m/M/g/G
+ * suffixes via the shared production parser helper, rejects
+ * duplicates, and returns NGX_CONF_ERROR for invalid tokens.
  *
  * Return: void.
  *
@@ -1131,6 +1065,28 @@ test_large_body_threshold_handler(void)
     TEST_ASSERT(rc == NGX_CONF_OK, "1m should parse");
     TEST_ASSERT(mcf.large_body_threshold == 1024 * 1024,
         "1m should map correctly");
+
+    init_conf(&mcf);
+    set_arg(&values[1], "1g");
+    rc = ngx_http_markdown_large_body_threshold(&cf, &cmd, &mcf);
+    TEST_ASSERT(rc == NGX_CONF_OK, "1g should parse");
+    TEST_ASSERT(mcf.large_body_threshold == (size_t) 1024 * 1024 * 1024,
+        "1g should map correctly");
+
+    init_conf(&mcf);
+    {
+        char overflow_token[32];
+        size_t overflow_value;
+
+        overflow_value = (NGX_MAX_SIZE_T_VALUE
+                          / ((size_t) 1024 * 1024 * 1024)) + 1;
+        snprintf(overflow_token, sizeof(overflow_token), "%zuG",
+            overflow_value);
+        set_arg(&values[1], overflow_token);
+    }
+    rc = ngx_http_markdown_large_body_threshold(&cf, &cmd, &mcf);
+    TEST_ASSERT(rc == NGX_CONF_ERROR,
+        "overflow threshold token should fail");
 
     init_conf(&mcf);
     set_arg(&values[1], "bad");
