@@ -318,6 +318,9 @@ http {
             markdown_conditional_requests disabled;
         }
 
+        # ETag disabled with full_support conditional requests; exercises the
+        # branch where If-None-Match is present but ETag comparison cannot
+        # proceed because markdown_etag is off.
         location /no-etag {
             root html;
             markdown_filter on;
@@ -665,16 +668,20 @@ http {
         }
 
         # Deliberately mislabeled encodings for decompression negative-path coverage.
+        # Each serves plain HTML with a Content-Encoding header that does not
+        # match the actual body, triggering decompression error handling.
         location /fake-gzip/ {
             alias html/;
             add_header Content-Encoding "gzip" always;
         }
 
+        # Brotli encoding advertised but unsupported/mismatched payload.
         location /fake-br/ {
             alias html/;
             add_header Content-Encoding "br" always;
         }
 
+        # Deflate encoding advertised but body is not deflate-compressed.
         location /fake-deflate/ {
             alias html/;
             add_header Content-Encoding "deflate" always;
@@ -967,6 +974,9 @@ curl -sS -H "${ACCEPT_MARKDOWN}" \
   -o /dev/null -w "  streaming gzip reject: HTTP %{http_code}\n" || true
 
 # Proxy with invalid/mislabeled compressed payloads
+# These exercise the decompression error/fail-open paths: the backend
+# advertises Content-Encoding but serves plain HTML, so the decompressor
+# must detect the mismatch and fall back to pass-through or error.
 curl -sS -H "${ACCEPT_MARKDOWN}" \
   "http://127.0.0.1:${PORT}/proxy-fake-gzip/index.html" \
   -o /dev/null -w "  fake gzip payload: HTTP %{http_code}\n" || true
@@ -1160,6 +1170,9 @@ echo "==> Stopping NGINX (flush gcov data)"
 "${RUNTIME}/sbin/nginx" -p "${RUNTIME}" -c conf/nginx.conf -s stop
 sleep 2
 
+# Capture the NGINX binary path before e2e sub-scripts so each can
+# reuse the same streaming-enabled binary via NGINX_BIN env var,
+# avoiding redundant rebuilds inside each sub-script.
 REUSE_NGINX_BIN="${RUNTIME}/sbin/nginx"
 
 echo "==> Running extended streaming failure/cache e2e coverage"
@@ -1207,6 +1220,8 @@ if ! env NGINX_BIN="${REUSE_NGINX_BIN}" \
 fi
 
 echo "==> Running huge-body native e2e coverage (skip 1GB GET)"
+# RUN_1G_GET=0 and --skip-1g-get avoid the slow 1GB GET test in CI;
+# the remaining huge-body sub-tests still cover oversize and fail-open.
 if ! env NGINX_BIN="${REUSE_NGINX_BIN}" RUN_1G_GET=0 \
     bash "${WORKSPACE_ROOT}/tools/e2e/verify_huge_body_native_e2e.sh" \
     --port 18292 \
@@ -1215,6 +1230,8 @@ if ! env NGINX_BIN="${REUSE_NGINX_BIN}" RUN_1G_GET=0 \
 fi
 
 echo "==> Running huge-body allowed native e2e coverage (skip 1GB GET)"
+# --markdown-max-size 1536m allows bodies up to 1.5 GiB, exercising the
+# allowed-huge-body path where conversion proceeds instead of fail-open.
 if ! env NGINX_BIN="${REUSE_NGINX_BIN}" RUN_1G_GET=0 \
     bash "${WORKSPACE_ROOT}/tools/e2e/verify_huge_body_allowed_native_e2e.sh" \
     --port 18293 \

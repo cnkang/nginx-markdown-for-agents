@@ -27,6 +27,12 @@ SANITIZER_ENV ?= ASAN_OPTIONS=$(ASAN_OPTIONS_BASE) UBSAN_OPTIONS=print_stacktrac
 build/unit build/integration build/generated:
 	@mkdir -p $@
 
+# Unit test build rule.  The case statement selects per-target flags:
+#   streaming_impl  - full streaming pipeline; needs NGINX src headers, nginx_stubs,
+#                      Rust FFI headers, streaming enabled, and -lz for decomp.
+#   config_handlers_impl / config_core_impl - config-layer unit tests; need
+#                      nginx_stubs for NGINX API redefinitions and -ffunction-sections
+#                      for dead-code elimination of unused stubs.
 build/unit/%: unit/%_test.c include/test_common.h include/test_metrics_snapshot.h | build/unit build/generated
 	@extra_srcs=""; \
 	extra_cflags=""; \

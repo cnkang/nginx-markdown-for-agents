@@ -104,15 +104,24 @@ struct ngx_shm_zone_s {
     ngx_int_t (*init)(ngx_shm_zone_t *zone, void *data);
 };
 
+/* Global module symbol required by the config implementation header. */
 ngx_module_t ngx_http_markdown_filter_module;
 ngx_str_t ngx_http_markdown_metrics_shm_name = ngx_string("markdown_metrics");
 ngx_shm_zone_t *ngx_http_markdown_metrics_shm_zone = NULL;
 
+/* Test-controlled state for allocator and SHM stubs. */
 static size_t ngx_pagesize = 4096;
 static ngx_shm_zone_t *g_shared_zone;
 static size_t g_shared_size;
 static ngx_int_t g_slab_alloc_fail;
 
+/*
+ * NGINX configuration merge macros (test-local definitions).
+ * These replicate the standard ngx_conf_merge_* family for environments
+ * where the real NGINX headers are unavailable.  Each macro assigns
+ * default_value when conf is at its unset sentinel, inheriting from
+ * prev if prev is not also unset.
+ */
 #define ngx_conf_init_size_value(conf, default_value) \
     if ((conf) == NGX_CONF_UNSET_SIZE) {              \
         (conf) = (default_value);                      \
@@ -174,6 +183,16 @@ static ngx_int_t g_slab_alloc_fail;
  * If production NGINX semantics for these primitives change, dependent tests
  * in this file must be reviewed and updated to keep branch expectations valid.
  */
+/*
+ * Case-insensitive comparison of the first n bytes of s1 and s2.
+ *
+ * Returns 0 if equal, or the difference of the first mismatching
+ * lowercased byte (cast to ngx_int_t) otherwise.
+ *
+ * Note: this is a test-local reimplementation of the NGINX primitive
+ * because the production symbol cannot be linked in the unit harness.
+ * It mirrors the semantic contract of ngx_strncasecmp in ngx_string.h.
+ */
 static ngx_int_t
 ngx_strncasecmp(u_char *s1, u_char *s2, size_t n)
 {
@@ -194,6 +213,11 @@ ngx_strncasecmp(u_char *s1, u_char *s2, size_t n)
     return 0;
 }
 
+/*
+ * No-op stub for ngx_conf_log_error.  Consumes the variadic argument list
+ * without producing output, since the unit harness has no real NGINX log
+ * cycle.  All parameters are marked UNUSED to suppress compiler warnings.
+ */
 static void
 ngx_conf_log_error(ngx_uint_t level, ngx_conf_t *cf, ngx_err_t err,
     const char *fmt, ...)
@@ -208,6 +232,11 @@ ngx_conf_log_error(ngx_uint_t level, ngx_conf_t *cf, ngx_err_t err,
     va_end(ap);
 }
 
+/*
+ * Pool allocator stub that delegates to calloc(3).  Ignores the pool
+ * argument and always zero-initializes, matching the semantic guarantee
+ * of the production ngx_pcalloc.
+ */
 static void *
 ngx_pcalloc(ngx_pool_t *pool, size_t size)
 {
@@ -215,12 +244,21 @@ ngx_pcalloc(ngx_pool_t *pool, size_t size)
     return calloc(1, size);
 }
 
+/*
+ * Zero-fill wrapper delegating to memset(3).  Mirrors the production
+ * ngx_memzero macro semantics for the unit harness.
+ */
 static void
 ngx_memzero(void *p, size_t n)
 {
     memset(p, 0, n);
 }
 
+/*
+ * Slab allocator stub.  Returns NULL when g_slab_alloc_fail is set
+ * (simulating shared-memory pressure), otherwise delegates to calloc(3).
+ * The pool argument is unused in this stub.
+ */
 static void *
 ngx_slab_alloc(ngx_slab_pool_t *pool, size_t size)
 {
@@ -233,6 +271,11 @@ ngx_slab_alloc(ngx_slab_pool_t *pool, size_t size)
     return calloc(1, size);
 }
 
+/*
+ * Shared-memory zone registration stub.  Records the requested size in
+ * g_shared_size and returns the preconfigured g_shared_zone pointer.
+ * cf, name, and module are unused in this stub.
+ */
 static ngx_shm_zone_t *
 ngx_shared_memory_add(ngx_conf_t *cf, ngx_str_t *name, size_t size,
     ngx_module_t *module)
@@ -245,6 +288,12 @@ ngx_shared_memory_add(ngx_conf_t *cf, ngx_str_t *name, size_t size,
     return g_shared_zone;
 }
 
+/*
+ * Complex value evaluation stub.  Copies val->value to the output and
+ * returns val->eval_rc, allowing tests to control both the resolved
+ * string and the return code.  Returns NGX_ERROR if either pointer is
+ * NULL.
+ */
 static ngx_int_t
 ngx_http_complex_value(ngx_http_request_t *r,
     ngx_http_complex_value_t *val, ngx_str_t *value)
@@ -265,6 +314,11 @@ static ngx_pool_t g_pool;
 static ngx_log_t g_log;
 static ngx_connection_t g_conn = { &g_log };
 
+/*
+ * Assign a C string literal to an ngx_str_t.  Sets data to the literal
+ * pointer (cast through uintptr_t to satisfy the u_char* type) and len
+ * to the string length.  The caller must ensure src outlives dst.
+ */
 static void
 set_str(ngx_str_t *dst, const char *src)
 {
@@ -272,6 +326,11 @@ set_str(ngx_str_t *dst, const char *src)
     dst->len = strlen(src);
 }
 
+/*
+ * Initialize a complex value stub with a fixed string and return code.
+ * The test harness will return these when ngx_http_complex_value is
+ * called with this object.
+ */
 static void
 init_complex(ngx_http_complex_value_t *cv, const char *value, ngx_int_t rc)
 {
@@ -279,6 +338,15 @@ init_complex(ngx_http_complex_value_t *cv, const char *value, ngx_int_t rc)
     cv->eval_rc = rc;
 }
 
+/*
+ * Verify ngx_http_markdown_init_metrics_zone branch coverage:
+ *  - reuse path when old_metrics is provided (zone.data preserved);
+ *  - NULL slab pool detection (NGX_ERROR);
+ *  - existing SHM with valid data pointer (attach);
+ *  - existing SHM with NULL data (NGX_ERROR);
+ *  - fresh allocation on non-existing SHM (zero-initialized metrics);
+ *  - slab allocation failure (g_slab_alloc_fail simulation).
+ */
 static void
 test_metrics_zone_init(void)
 {
@@ -346,6 +414,14 @@ test_metrics_zone_init(void)
     TEST_PASS("metrics zone init branches covered");
 }
 
+/*
+ * Verify create_main_conf and init_main_conf:
+ *  - create_main_conf allocates and returns a zeroed main conf with
+ *    metrics_shm_size unset and metrics_shm_zone NULL;
+ *  - init_main_conf applies the default SHM size (8 pages), stores the
+ *    zone pointer, and sets the init callback;
+ *  - init_main_conf returns NGX_CONF_ERROR when shared_memory_add fails.
+ */
 static void
 test_main_conf_create_and_init(void)
 {
@@ -390,6 +466,11 @@ test_main_conf_create_and_init(void)
     TEST_PASS("main conf create/init branches covered");
 }
 
+/*
+ * Verify that create_conf initializes all fields to their NGINX unset
+ * sentinel values (NGX_CONF_UNSET_SIZE, NGX_CONF_UNSET_MSEC, etc.),
+ * ensuring merge_conf will later inherit from the parent.
+ */
 static void
 test_create_conf_defaults(void)
 {
@@ -418,6 +499,13 @@ test_create_conf_defaults(void)
     TEST_PASS("create_conf defaults covered");
 }
 
+/*
+ * Verify merge_conf inheritance and override semantics:
+ *  - child fields at their unset sentinels inherit from parent;
+ *  - child with a static enabled_source clears the complex pointer;
+ *  - streaming_engine, streaming_budget, and streaming_on_error are
+ *    inherited from parent when child leaves them unset.
+ */
 static void
 test_merge_conf(void)
 {
@@ -535,6 +623,13 @@ test_merge_conf(void)
     TEST_PASS("merge_conf branches covered");
 }
 
+/*
+ * Verify enum-to-name helpers and log verbosity level mapping:
+ *  - log_verbosity_to_ngx_level maps each verbosity to the correct
+ *    NGINX log level, with unknown values defaulting to NGX_LOG_INFO;
+ *  - on_error_name, flavor_name, auth_policy_name, etc. return the
+ *    expected string length for known and unknown enum values.
+ */
 static void
 test_name_helpers_and_levels(void)
 {
@@ -588,6 +683,17 @@ test_name_helpers_and_levels(void)
     TEST_PASS("name helper branches covered");
 }
 
+/*
+ * Verify parse_filter_flag and is_enabled branch coverage:
+ *  - is_ascii_space recognizes space/tab and rejects non-whitespace;
+ *  - parse_filter_flag rejects NULL inputs, trims whitespace, and
+ *    parses on/off/true/false/1/0/yes/no (case-insensitive);
+ *  - empty token after trimming defaults to disabled;
+ *  - invalid tokens return NGX_ERROR;
+ *  - is_enabled with static source bypasses complex evaluation;
+ *  - is_enabled with complex source evaluates via the stub, handling
+ *    NULL request, evaluation failure, and invalid/off/on tokens.
+ */
 static void
 test_filter_flag_and_is_enabled(void)
 {
@@ -668,6 +774,11 @@ test_filter_flag_and_is_enabled(void)
     TEST_PASS("parse_filter_flag and is_enabled branches covered");
 }
 
+/*
+ * Verify log_merged_conf does not crash with NULL or populated conf
+ * pointers.  The stub log function discards output, so this test
+ * exercises the formatting branches without verifying log text.
+ */
 static void
 test_log_merged_conf(void)
 {
@@ -704,6 +815,10 @@ test_log_merged_conf(void)
     TEST_PASS("log_merged_conf covered");
 }
 
+/*
+ * Entry point: run all config_core_impl unit tests.
+ * Returns 0 on success; aborts via TEST_ASSERT on failure.
+ */
 int
 main(void)
 {

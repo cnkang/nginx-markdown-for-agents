@@ -1,6 +1,19 @@
 /*
  * Test: streaming_decomp
- * Description: direct coverage for streaming decompression helpers
+ *
+ * Purpose: Unit tests for the streaming decompression pipeline used by the
+ * nginx markdown filter module.  Validates create/feed/finish lifecycle,
+ * error propagation, budget enforcement, buffer expansion, size-overflow
+ * guards, and cleanup semantics for gzip and deflate streams.
+ *
+ * When MARKDOWN_STREAMING_ENABLED is not defined the entire suite is
+ * compiled to a no-op that reports a skip banner.
+ *
+ * Stubs: ngx_palloc, ngx_pcalloc, ngx_alloc, ngx_free,
+ *        ngx_pool_cleanup_add, inflateInit2, inflateEnd, inflate
+ * are reimplemented here to inject allocation failures and controlled
+ * inflate behaviour without depending on exact compressed-payload shapes.
+ * See per-stub DIVERGENCE RISK notes below.
  */
 
 #include "../include/test_common.h"
@@ -15,6 +28,10 @@
 
 #include <ngx_http_markdown_filter_module.h>
 
+/*
+ * Skip path: when the streaming feature flag is absent at compile time,
+ * emit a skip banner and return 0 so the test binary still succeeds.
+ */
 #ifndef MARKDOWN_STREAMING_ENABLED
 
 int
@@ -29,6 +46,17 @@ main(void)
 
 #else /* MARKDOWN_STREAMING_ENABLED */
 
+/*
+ * test_pool_cleanup_t - Minimal stand-in for ngx_pool_cleanup_t.
+ * Mirrors the production linked-list cleanup structure so that
+ * ngx_pool_cleanup_add and test_pool_run_cleanups can exercise
+ * registration and execution of cleanup handlers.
+ *
+ * Fields:
+ *   handler - callback to invoke on pool destruction
+ *   data    - opaque context passed to handler
+ *   next    - linked-list pointer to the next cleanup entry
+ */
 typedef struct test_pool_cleanup_s test_pool_cleanup_t;
 typedef test_pool_cleanup_t ngx_pool_cleanup_t;
 
@@ -38,10 +66,25 @@ struct test_pool_cleanup_s {
     ngx_pool_cleanup_t    *next;
 };
 
+/*
+ * ngx_pool_s - Minimal stand-in for the NGINX pool structure.
+ * Only the cleanups list is needed for these tests.
+ *
+ * Fields:
+ *   cleanups - head of the linked list of registered cleanup handlers
+ */
 struct ngx_pool_s {
     ngx_pool_cleanup_t    *cleanups;
 };
 
+/*
+ * ngx_log_s - Minimal stand-in for the NGINX log structure.
+ * No fields are exercised by the tests; the struct exists only so
+ * that function signatures match production code.
+ *
+ * Fields:
+ *   unused - placeholder to avoid an empty struct
+ */
 struct ngx_log_s {
     int                    unused;
 };
@@ -49,15 +92,65 @@ struct ngx_log_s {
 #define ngx_memcpy memcpy
 #define NGX_MAX_SIZE_T_VALUE SIZE_MAX
 
+/* test_log - Dummy log instance passed to production APIs under test. */
 static ngx_log_t test_log;
+
+/*
+ * g_palloc_fail_once - When non-zero, the next call to ngx_palloc returns
+ * NULL and the flag is cleared.  Used to inject a single allocation failure.
+ */
 static ngx_uint_t g_palloc_fail_once = 0;
+
+/*
+ * g_palloc_return_static_once - When non-zero, the next call to ngx_palloc
+ * returns g_static_pool_buf instead of a malloc'd block and the flag is
+ * cleared.  Used to test the code path where the output buffer is a
+ * pool-allocated (non-heap) pointer.
+ */
 static ngx_uint_t g_palloc_return_static_once = 0;
+
+/*
+ * g_pcalloc_fail_once - When non-zero, the next call to ngx_pcalloc returns
+ * NULL and the flag is cleared.  Used to inject a single zeroed-allocation
+ * failure.
+ */
 static ngx_uint_t g_pcalloc_fail_once = 0;
+
+/*
+ * g_alloc_fail_once - When non-zero, the next call to ngx_alloc returns
+ * NULL and the flag is cleared.  Used to inject a single raw-allocation
+ * failure (e.g. for buffer expansion).
+ */
 static ngx_uint_t g_alloc_fail_once = 0;
+
+/*
+ * g_cleanup_add_fail_once - When non-zero, the next call to
+ * ngx_pool_cleanup_add returns NULL and the flag is cleared.
+ * Used to test cleanup-registration failure in create.
+ */
 static ngx_uint_t g_cleanup_add_fail_once = 0;
+
+/*
+ * g_inflate_init_fail_once - When non-zero, the next call to
+ * test_inflateInit2 returns Z_MEM_ERROR and the flag is cleared.
+ * Used to test inflateInit2 failure in create.
+ */
 static ngx_uint_t g_inflate_init_fail_once = 0;
+
+/*
+ * g_static_pool_buf - Fixed-size buffer returned by ngx_palloc when
+ * g_palloc_return_static_once is set.  Simulates a pool-allocated
+ * buffer whose lifetime is managed by the pool, not by free().
+ */
 static u_char g_static_pool_buf[8192];
 
+/*
+ * test_inflate_mode_t - Enumerates the controllable behaviours of the
+ * test_inflate mock.  Each mode exercises a specific inflate path in
+ * streaming_decomp_impl (feed expansion, finish error, budget exceed,
+ * multi-call finish, etc.).  TEST_INFLATE_MODE_REAL delegates to the
+ * real zlib inflate().
+ */
 typedef enum {
     TEST_INFLATE_MODE_REAL = 0,
     TEST_INFLATE_MODE_FEED_EXPAND_THEN_ERROR,
@@ -69,12 +162,28 @@ typedef enum {
     TEST_INFLATE_MODE_FINISH_EXPAND_THEN_END
 } test_inflate_mode_t;
 
+/* g_inflate_mode - Selects which mock behaviour test_inflate exhibits. */
 static test_inflate_mode_t g_inflate_mode = TEST_INFLATE_MODE_REAL;
+
+/* g_inflate_call_count - Counts invocations of test_inflate within the
+ * current test case; used by multi-call mock modes to vary behaviour
+ * on the first versus subsequent calls. */
 static ngx_uint_t g_inflate_call_count = 0;
 
+/* g_real_inflate_fn - Saved pointer to the real zlib inflate() function;
+ * used by TEST_INFLATE_MODE_REAL to delegate to genuine decompression. */
 static int (*g_real_inflate_fn)(z_streamp, int) = inflate;
+
+/* g_real_inflate_end_fn - Saved pointer to the real zlib inflateEnd();
+ * test_inflateEnd delegates to this so stream teardown is always real. */
 static int (*g_real_inflate_end_fn)(z_streamp) = inflateEnd;
 
+/*
+ * test_reset_inflate_mode - Reset the inflate mock to its default state
+ * (real zlib behaviour, call count zeroed).
+ *
+ * Side effects: clears g_inflate_mode and g_inflate_call_count.
+ */
 static void
 test_reset_inflate_mode(void)
 {
@@ -82,6 +191,24 @@ test_reset_inflate_mode(void)
     g_inflate_call_count = 0;
 }
 
+/*
+ * ngx_palloc - Stub for the NGINX pool allocator.
+ *
+ * DIVERGENCE RISK: Production ngx_palloc allocates from a pool chunk and
+ * never calls malloc().  This stub uses malloc() so allocations are
+ * individually freeable, and supports two test-only injection points:
+ *   - g_palloc_fail_once: return NULL once to simulate OOM
+ *   - g_palloc_return_static_once: return g_static_pool_buf once to
+ *     simulate a pool-managed (non-heap) buffer
+ * The semantic contract mirrored is: "returns NULL on failure, a valid
+ * pointer of at least `size` bytes on success."
+ *
+ * Parameters:
+ *   pool - ignored (UNUSED)
+ *   size - number of bytes to allocate
+ *
+ * Return: pointer to allocated memory, or NULL on injected failure.
+ */
 void *
 ngx_palloc(ngx_pool_t *pool, size_t size)
 {
@@ -97,6 +224,21 @@ ngx_palloc(ngx_pool_t *pool, size_t size)
     return malloc(size);
 }
 
+/*
+ * ngx_pcalloc - Stub for the NGINX zeroed pool allocator.
+ *
+ * DIVERGENCE RISK: Production ngx_pcalloc zeroes a pool chunk; this stub
+ * uses calloc(1, size) for the same zeroing semantics but with individual
+ * freeability.  Supports g_pcalloc_fail_once to inject a single failure.
+ * The semantic contract mirrored is: "returns NULL on failure, a
+ * zero-filled pointer of at least `size` bytes on success."
+ *
+ * Parameters:
+ *   pool - ignored (UNUSED)
+ *   size - number of bytes to allocate and zero
+ *
+ * Return: pointer to zeroed memory, or NULL on injected failure.
+ */
 void *
 ngx_pcalloc(ngx_pool_t *pool, size_t size)
 {
@@ -108,6 +250,20 @@ ngx_pcalloc(ngx_pool_t *pool, size_t size)
     return calloc(1, size);
 }
 
+/*
+ * ngx_alloc - Stub for the NGINX raw (non-pool) allocator.
+ *
+ * DIVERGENCE RISK: Production ngx_alloc logs on failure; this stub
+ * suppresses logging.  Supports g_alloc_fail_once to inject a single
+ * failure.  The semantic contract mirrored is: "returns NULL on failure,
+ * a valid pointer of at least `size` bytes on success."
+ *
+ * Parameters:
+ *   size - number of bytes to allocate
+ *   log  - ignored (UNUSED)
+ *
+ * Return: pointer to allocated memory, or NULL on injected failure.
+ */
 void *
 ngx_alloc(size_t size, ngx_log_t *log)
 {
@@ -119,12 +275,39 @@ ngx_alloc(size_t size, ngx_log_t *log)
     return malloc(size);
 }
 
+/*
+ * ngx_free - Stub for the NGINX deallocator.
+ *
+ * DIVERGENCE RISK: Production ngx_free may differ from libc free on
+ * platforms with custom allocators; this stub simply calls free().
+ * The semantic contract mirrored is: "releases memory allocated by
+ * ngx_alloc or ngx_palloc stubs."
+ *
+ * Parameters:
+ *   p - pointer to memory to free
+ */
 void
 ngx_free(void *p)
 {
     free(p);
 }
 
+/*
+ * ngx_pool_cleanup_add - Stub for the NGINX pool cleanup registration API.
+ *
+ * DIVERGENCE RISK: Production ngx_pool_cleanup_add allocates the cleanup
+ * structure from the pool itself; this stub uses calloc() so it is
+ * individually freeable.  Supports g_cleanup_add_fail_once to inject a
+ * single registration failure.  The semantic contract mirrored is:
+ * "returns NULL on failure (or NULL pool), otherwise a cleanup entry
+ * linked into pool->cleanups."
+ *
+ * Parameters:
+ *   pool - pool to register the cleanup on; NULL causes immediate failure
+ *   size - size of cleanup data (ignored in this stub)
+ *
+ * Return: pointer to new cleanup entry, or NULL on failure.
+ */
 ngx_pool_cleanup_t *
 ngx_pool_cleanup_add(ngx_pool_t *pool, size_t size)
 {
@@ -150,6 +333,23 @@ ngx_pool_cleanup_add(ngx_pool_t *pool, size_t size)
     return cln;
 }
 
+/*
+ * test_inflateInit2 - Stub for zlib inflateInit2.
+ *
+ * DIVERGENCE RISK: Production inflateInit2 always attempts real
+ * initialisation; this stub can inject Z_MEM_ERROR via
+ * g_inflate_init_fail_once to test the create-failure path.
+ * On the non-failure path it delegates to inflateInit2_() (the
+ * versioned entry point) to perform genuine initialisation.
+ * The semantic contract mirrored is: "returns Z_OK on success,
+ * a zlib error code on failure."
+ *
+ * Parameters:
+ *   strm        - zlib stream to initialise
+ *   window_bits - window size / format selector (gzip vs deflate)
+ *
+ * Return: Z_OK on success, Z_MEM_ERROR on injected failure.
+ */
 int
 test_inflateInit2(z_streamp strm, int window_bits)
 {
@@ -161,6 +361,19 @@ test_inflateInit2(z_streamp strm, int window_bits)
                          (int) sizeof(z_stream));
 }
 
+/*
+ * test_inflateEnd - Stub for zlib inflateEnd.
+ *
+ * DIVERGENCE RISK: None.  This stub unconditionally delegates to the
+ * real inflateEnd via g_real_inflate_end_fn so that zlib stream teardown
+ * is always genuine.  The semantic contract mirrored is identical to
+ * inflateEnd: "releases inflate working memory, returns Z_OK on success."
+ *
+ * Parameters:
+ *   strm - zlib stream to finalise
+ *
+ * Return: zlib return code from the real inflateEnd.
+ */
 int
 test_inflateEnd(z_streamp strm)
 {
@@ -283,6 +496,12 @@ test_inflate(z_streamp strm, int flush)
     return g_real_inflate_fn(strm, flush);
 }
 
+/*
+ * Redirect zlib inflate/inflateInit2/inflateEnd to the test stubs so that
+ * the production implementation (included next) calls our mockable
+ * versions.  This must precede the #include of the implementation header
+ * so that the macros take effect during its compilation.
+ */
 #ifdef inflate
 #undef inflate
 #endif
@@ -296,12 +515,33 @@ test_inflate(z_streamp strm, int flush)
 #define inflateInit2 test_inflateInit2
 #define inflateEnd test_inflateEnd
 
+/* Include the production streaming decompression implementation so that
+ * its functions are compiled against the stubs defined above. */
 #include "../src/ngx_http_markdown_streaming_decomp_impl.h"
 
+/*
+ * test_pool_t - Wrapper around ngx_pool_s that provides a local pool
+ * instance for tests.  The embedded pool field is passed to production
+ * APIs under test.
+ *
+ * Fields:
+ *   pool - embedded NGINX pool structure (minimal stub)
+ */
 typedef struct {
     ngx_pool_t            pool;
 } test_pool_t;
 
+/*
+ * test_pool_reset - Zero-initialise a test pool and clear all failure-injection
+ * flags and inflate mock state.  Call at the start of every test case to
+ * ensure a clean slate.
+ *
+ * Parameters:
+ *   tp - test pool to reset
+ *
+ * Side effects: zeroes *tp, clears all g_*_fail_once flags,
+ *               resets inflate mode to real.
+ */
 static void
 test_pool_reset(test_pool_t *tp)
 {
@@ -315,6 +555,17 @@ test_pool_reset(test_pool_t *tp)
     test_reset_inflate_mode();
 }
 
+/*
+ * test_pool_run_cleanups - Execute all registered cleanup handlers on a
+ * test pool, then free each cleanup entry and clear the list.
+ * Mirrors the behaviour of NGINX pool destruction for test assertions.
+ *
+ * Parameters:
+ *   tp - test pool whose cleanups should be run
+ *
+ * Side effects: invokes each handler, frees each cleanup node,
+ *               sets tp->pool.cleanups to NULL.
+ */
 static void
 test_pool_run_cleanups(test_pool_t *tp)
 {
@@ -334,6 +585,23 @@ test_pool_run_cleanups(test_pool_t *tp)
     tp->pool.cleanups = NULL;
 }
 
+/*
+ * compress_payload - Compress a plain-text buffer using zlib deflate with
+ * the specified compression type (gzip or deflate).  Used by round-trip
+ * and budget tests to produce valid compressed input for the decompressor.
+ *
+ * Parameters:
+ *   in      - input bytes to compress
+ *   in_len  - length of in
+ *   type    - compression format (GZIP or DEFLATE)
+ *   out     - [out] receives a malloc'd buffer with the compressed data
+ *   out_len - [out] receives the length of the compressed data
+ *
+ * Return: NGX_OK on success, NGX_ERROR on any failure (NULL args,
+ *         unsupported type, zlib error, or malloc failure).
+ *
+ * Side effects: allocates via malloc; caller must free(*out) on success.
+ */
 static int
 compress_payload(const u_char *in, size_t in_len,
     ngx_http_markdown_compression_type_e type,
@@ -408,6 +676,14 @@ compress_payload(const u_char *in, size_t in_len,
     return NGX_OK;
 }
 
+/*
+ * test_size_to_uint_guards - Verify the size_to_uint narrowing helper
+ * correctly rejects values above UINT_MAX and accepts values within range.
+ *
+ * Branches covered:
+ *   - overflow path (value > UINT_MAX returns 1)
+ *   - success path  (value <= UINT_MAX returns 0, preserves value)
+ */
 static void
 test_size_to_uint_guards(void)
 {
@@ -431,6 +707,18 @@ test_size_to_uint_guards(void)
     TEST_PASS("size_to_uint guard branches covered");
 }
 
+/*
+ * test_create_and_cleanup - Verify the create/cleanup lifecycle for the
+ * streaming decompressor.
+ *
+ * Branches covered:
+ *   - NULL pool returns NULL
+ *   - unsupported compression type returns NULL
+ *   - successful gzip create sets initialized and registers cleanup
+ *   - cleanup(NULL) is a safe no-op
+ *   - cleanup on zeroed (uninitialised) struct leaves initialized == 0
+ *   - registered cleanup handler clears initialized flag
+ */
 static void
 test_create_and_cleanup(void)
 {
@@ -479,6 +767,17 @@ test_create_and_cleanup(void)
     TEST_PASS("create and cleanup branches covered");
 }
 
+/*
+ * test_create_failure_paths_and_cleanup_default - Verify create failure
+ * when sub-allocations fail and the default switch arm in cleanup.
+ *
+ * Branches covered:
+ *   - ngx_pcalloc failure returns NULL
+ *   - inflateInit2 failure for gzip returns NULL
+ *   - inflateInit2 failure for deflate returns NULL
+ *   - cleanup with NGX_HTTP_MARKDOWN_COMPRESSION_UNKNOWN type clears
+ *     initialized (default switch arm)
+ */
 static void
 test_create_failure_paths_and_cleanup_default(void)
 {
@@ -518,6 +817,15 @@ test_create_failure_paths_and_cleanup_default(void)
     TEST_PASS("create failure/default cleanup branches covered");
 }
 
+/*
+ * test_roundtrip_and_empty_feed - Verify end-to-end decompression round-trip
+ * for both gzip and deflate, plus empty-input and post-stream finish no-ops.
+ *
+ * Branches covered:
+ *   - feed of a fully-compressed payload produces the original text
+ *   - feed with NULL/zero-length input is a no-op (no output emitted)
+ *   - finish after a completed stream is a no-op (no tail output)
+ */
 static void
 test_roundtrip_and_empty_feed(void)
 {
@@ -602,6 +910,16 @@ test_roundtrip_and_empty_feed(void)
     TEST_PASS("feed round-trip and empty-input branches covered");
 }
 
+/*
+ * test_budget_and_invalid_type_branches - Verify budget-exceeded detection
+ * and the invalid-type decline/error paths in feed and finish.
+ *
+ * Branches covered:
+ *   - feed returns NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED when
+ *     decompressed output exceeds the configured limit
+ *   - feed returns NGX_DECLINED for UNKNOWN compression type
+ *   - finish returns NGX_ERROR for UNKNOWN compression type
+ */
 static void
 test_budget_and_invalid_type_branches(void)
 {
@@ -673,6 +991,14 @@ test_budget_and_invalid_type_branches(void)
     TEST_PASS("budget and invalid-type branches covered");
 }
 
+/*
+ * test_truncated_finish_errors - Verify that finish returns NGX_ERROR when
+ * the compressed stream was truncated (incomplete gzip trailer).
+ *
+ * Branches covered:
+ *   - feed of a truncated payload succeeds and emits partial output
+ *   - finish on an incomplete stream returns NGX_ERROR
+ */
 static void
 test_truncated_finish_errors(void)
 {
@@ -732,6 +1058,20 @@ test_truncated_finish_errors(void)
     TEST_PASS("finish error branch covered");
 }
 
+/*
+ * test_create_helper_and_limit_branches - Verify cleanup-registration
+ * failure in create, check_limit boundary conditions, expand_buf overflow
+ * and allocation-failure paths, and finalize_buf allocation-failure path.
+ *
+ * Branches covered:
+ *   - cleanup_add failure causes create to return NULL
+ *   - check_limit fails when total already exceeds max
+ *   - check_limit fails when produced exceeds remaining budget
+ *   - check_limit passes on exact boundary
+ *   - expand_buf fails on size_t overflow
+ *   - expand_buf fails when ngx_alloc returns NULL
+ *   - finalize_buf fails when ngx_palloc returns NULL
+ */
 static void
 test_create_helper_and_limit_branches(void)
 {
@@ -810,6 +1150,17 @@ test_create_helper_and_limit_branches(void)
     TEST_PASS("create/helper/limit branches covered");
 }
 
+/*
+ * test_feed_guard_and_overflow_branches - Verify feed's early-exit guard
+ * clauses and size-overflow checks.
+ *
+ * Branches covered:
+ *   - NULL decompressor returns NGX_ERROR
+ *   - finished decompressor returns NGX_OK with empty output (no-op)
+ *   - exhausted budget returns NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED
+ *   - input length exceeding uInt range returns NGX_ERROR
+ *   - total_decompressed overflow check returns NGX_ERROR
+ */
 static void
 test_feed_guard_and_overflow_branches(void)
 {
@@ -872,6 +1223,15 @@ test_feed_guard_and_overflow_branches(void)
     TEST_PASS("feed guard/overflow branches covered");
 }
 
+/*
+ * test_finish_guard_and_alloc_branches - Verify finish's early-exit guard
+ * clauses and output-buffer allocation failure.
+ *
+ * Branches covered:
+ *   - NULL decompressor returns NGX_ERROR
+ *   - finished decompressor returns NGX_OK with empty output (no-op)
+ *   - ngx_palloc failure for the output buffer returns NGX_ERROR
+ */
 static void
 test_finish_guard_and_alloc_branches(void)
 {
@@ -915,6 +1275,17 @@ test_finish_guard_and_alloc_branches(void)
     TEST_PASS("finish guard/allocation branches covered");
 }
 
+/*
+ * test_feed_empty_and_large_size_paths - Verify feed behaviour with
+ * zero-length input, initial buffer allocation failure, and saturated
+ * size calculations that would overflow uInt.
+ *
+ * Branches covered:
+ *   - zero-length input is a no-op (no output)
+ *   - initial output buffer allocation failure returns NGX_ERROR
+ *   - saturated initial size (near SIZE_MAX) returns NGX_ERROR
+ *   - output buffer size exceeding zlib uInt range returns NGX_ERROR
+ */
 static void
 test_feed_empty_and_large_size_paths(void)
 {
@@ -969,6 +1340,17 @@ test_feed_empty_and_large_size_paths(void)
     TEST_PASS("feed empty/large-size branches covered");
 }
 
+/*
+ * test_feed_mocked_inflate_paths - Verify feed's inflate-loop error,
+ * budget, and expansion paths using the controlled inflate mock.
+ *
+ * Branches covered:
+ *   - expand_buf failure during inflate loop returns NGX_ERROR
+ *   - inflate error after heap expansion returns NGX_ERROR
+ *   - mocked oversized output classified as budget exceeded
+ *   - finalize_buf allocation failure returns NGX_ERROR
+ *   - total_decompressed overflow on feed completion returns NGX_ERROR
+ */
 static void
 test_feed_mocked_inflate_paths(void)
 {
@@ -1048,6 +1430,20 @@ test_feed_mocked_inflate_paths(void)
     TEST_PASS("feed mocked inflate branches covered");
 }
 
+/*
+ * test_finish_zlib_paths_and_helpers - Verify the finish_zlib helper's
+ * error, budget, overflow, expansion, and finalize-failure paths, plus
+ * the finish_free_heap helper.
+ *
+ * Branches covered:
+ *   - finish_free_heap frees and clears a non-NULL heap pointer
+ *   - inflate error during Z_FINISH returns NGX_ERROR
+ *   - budget exceeded during finish tail returns
+ *     NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED
+ *   - initial finish buffer exceeding uInt range returns NGX_ERROR
+ *   - expand-then-end flow succeeds and reports produced > old size
+ *   - finalize_buf allocation failure during finish returns NGX_ERROR
+ */
 static void
 test_finish_zlib_paths_and_helpers(void)
 {
@@ -1154,6 +1550,17 @@ test_finish_zlib_paths_and_helpers(void)
     TEST_PASS("finish_zlib helper/error/budget/expand branches covered");
 }
 
+/*
+ * test_finish_wrapper_success_and_overflow_paths - Verify the finish
+ * wrapper's success path and total_decompressed overflow saturation.
+ *
+ * Branches covered:
+ *   - finish succeeds for a mocked continue-then-end inflate flow
+ *   - finish marks the decompressor as finished
+ *   - finish publishes tail output on success
+ *   - finish accumulates produced bytes into total_decompressed
+ *   - finish saturates total_decompressed to (size_t)-1 on overflow
+ */
 static void
 test_finish_wrapper_success_and_overflow_paths(void)
 {
@@ -1206,6 +1613,10 @@ test_finish_wrapper_success_and_overflow_paths(void)
     TEST_PASS("finish wrapper success/overflow branches covered");
 }
 
+/*
+ * main - Test entry point.  Runs all streaming decompression test cases
+ * and prints a summary banner.  Returns 0 on success.
+ */
 int
 main(void)
 {

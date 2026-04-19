@@ -197,6 +197,8 @@ else
     ./configure \
       --without-http_rewrite_module \
       --with-cc-opt="-DMARKDOWN_STREAMING_ENABLED" \
+      # ^ Enable streaming at compile time so the C module includes streaming
+      #   code paths; must match the Rust --features streaming flag above.
       --prefix="${RUNTIME}" \
       --add-module="${WORKSPACE_ROOT}/components/nginx-module"
   )
