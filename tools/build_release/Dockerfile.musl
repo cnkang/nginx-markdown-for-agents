@@ -2,17 +2,34 @@
 ARG OS_BASE=alpine:3.20
 FROM ${OS_BASE}
 
-RUN apk add --no-cache \
-    ca-certificates \
-    build-base \
-    curl \
-    linux-headers \
-    openssl-dev \
-    pcre-dev \
-    python3 \
-    zlib-dev \
-    && curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
-    && /root/.cargo/bin/cargo install cbindgen
+RUN set -eux; \
+    retry() { \
+        attempts="$1"; \
+        shift; \
+        count=1; \
+        while :; do \
+            "$@" && break; \
+            if [ "$count" -ge "$attempts" ]; then \
+                echo "command failed after ${attempts} attempts: $*" >&2; \
+                exit 1; \
+            fi; \
+            sleep "$((count * 5))"; \
+            count=$((count + 1)); \
+        done; \
+    }; \
+    retry 5 apk add --no-cache \
+        ca-certificates \
+        build-base \
+        curl \
+        linux-headers \
+        openssl-dev \
+        pcre-dev \
+        python3 \
+        zlib-dev; \
+    retry 5 curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs -o /tmp/rustup-init.sh; \
+    sh /tmp/rustup-init.sh -y; \
+    rm -f /tmp/rustup-init.sh; \
+    /root/.cargo/bin/cargo install cbindgen
 ENV PATH="/root/.cargo/bin:${PATH}"
 
 RUN update-ca-certificates
