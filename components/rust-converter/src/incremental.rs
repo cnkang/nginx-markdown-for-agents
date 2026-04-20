@@ -37,9 +37,9 @@ use crate::parser::parse_html_with_charset;
 /// parses the complete HTML document, and runs the standard conversion
 /// pipeline to produce Markdown output.
 ///
-/// This is a first-iteration prototype: the full document is still parsed
-/// and converted in one pass during `finalize`.  Future iterations may
-/// introduce true streaming conversion.
+/// This is the chunk-oriented incremental API. The separate `streaming`
+/// module owns the true streaming engine path; this module keeps a bounded
+/// buffer for compatibility and fallback use.
 ///
 /// # Buffer size limit
 ///
@@ -98,8 +98,7 @@ impl IncrementalConverter {
     ///
     /// If `max_buffer_size` is 0, the default `MAX_BUFFER_SIZE` is used.
     /// Values above the hard 64 MiB ceiling are intentionally clamped back to
-    /// [`MAX_BUFFER_SIZE`](Self::MAX_BUFFER_SIZE) until a true streaming parser
-    /// replaces the current DOM-based implementation.
+    /// [`MAX_BUFFER_SIZE`](Self::MAX_BUFFER_SIZE) to keep this API bounded.
     ///
     /// # Examples
     ///
