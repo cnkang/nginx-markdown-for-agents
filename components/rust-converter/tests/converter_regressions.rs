@@ -1,3 +1,13 @@
+//! Regression tests for the HTML-to-Markdown converter.
+//!
+//! Each test in this module addresses a specific bug or edge case that was
+//! previously mishandled. They serve as permanent guards against regressions
+//! in inline code fencing, whitespace handling, link formatting, and nested
+//! list structure.
+//!
+//! When adding a new regression test, include a comment referencing the
+//! original issue or commit that introduced the fix.
+
 use nginx_markdown_converter::converter::{ConversionOptions, MarkdownConverter, MarkdownFlavor};
 use nginx_markdown_converter::parser::parse_html;
 

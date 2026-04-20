@@ -1,3 +1,10 @@
+"""Tests for the check_docs harness check.
+
+Validates that maintained markdown surfaces are correctly identified and
+that the internal reference policy rejects forbidden shorthand and
+directory/glob references while allowing tracked file references.
+"""
+
 from __future__ import annotations
 
 import sys

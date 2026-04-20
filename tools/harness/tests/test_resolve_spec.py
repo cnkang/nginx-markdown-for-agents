@@ -1,3 +1,10 @@
+"""Tests for the spec resolver.
+
+Validates spec resolution via explicit names, active-spec pointers, and
+free-text hints, including graceful handling of malformed pointers,
+missing specs, and ambiguous hint matches.
+"""
+
 from __future__ import annotations
 
 import json

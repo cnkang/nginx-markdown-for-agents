@@ -50,7 +50,20 @@ static ngx_flag_t ngx_http_markdown_cache_control_token_is_public(
 static ngx_flag_t ngx_http_markdown_token_equals_ignore_case(
     const u_char *left, const u_char *right, size_t len);
 
-/* Find a response header by name in the outgoing headers list. */
+/*
+ * Find a response header by name in the outgoing headers list.
+ *
+ * Iterates the response's headers_out.headers list and returns the
+ * first header whose key matches the given name (case-insensitive).
+ *
+ * Parameters:
+ *   r        - the HTTP request whose outgoing headers are searched
+ *   name     - header name to search for (need not be NUL-terminated)
+ *   name_len - length of the header name in bytes
+ *
+ * Returns:
+ *   pointer to the matching header entry, or NULL if not found
+ */
 static ngx_table_elt_t *
 ngx_http_markdown_find_response_header(ngx_http_request_t *r,
                                        u_char *name,
@@ -79,7 +92,19 @@ ngx_http_markdown_find_response_header(ngx_http_request_t *r,
     return NULL;
 }
 
-/* Insert a new "Cache-Control: private" header when none exists. */
+/*
+ * Insert a new "Cache-Control: private" header when none exists.
+ *
+ * Allocates a new header entry in the response's outgoing headers list
+ * and sets it to "Cache-Control: private".
+ *
+ * Parameters:
+ *   r - the HTTP request to modify
+ *
+ * Returns:
+ *   NGX_OK    - header added successfully
+ *   NGX_ERROR - allocation failed
+ */
 static ngx_int_t
 ngx_http_markdown_add_private_cache_control_header(ngx_http_request_t *r)
 {
@@ -102,7 +127,21 @@ ngx_http_markdown_add_private_cache_control_header(ngx_http_request_t *r)
     return NGX_OK;
 }
 
-/* Append ", private" to an existing Cache-Control value. */
+/*
+ * Append ", private" to an existing Cache-Control header value.
+ *
+ * Allocates a new buffer in the request pool, copies the existing value
+ * plus the ", private" suffix, and updates the header's value pointer
+ * and length. The old value is not freed (it remains in the pool).
+ *
+ * Parameters:
+ *   r             - the HTTP request (pool used for allocation)
+ *   cache_control - the Cache-Control header entry to modify
+ *
+ * Returns:
+ *   NGX_OK    - directive appended successfully
+ *   NGX_ERROR - allocation failed or length overflow
+ */
 static ngx_int_t
 ngx_http_markdown_append_private_directive(ngx_http_request_t *r,
                                            ngx_table_elt_t *cache_control)
@@ -135,7 +174,21 @@ ngx_http_markdown_append_private_directive(ngx_http_request_t *r,
     return NGX_OK;
 }
 
-/* Remove "public" token from Cache-Control and append "private". */
+/*
+ * Remove "public" token from Cache-Control and append "private".
+ *
+ * Rebuilds the Cache-Control value by tokenizing it, skipping any
+ * "public" token, copying all other tokens, and appending "private".
+ * Allocates a new buffer up to 2x original length + suffix length.
+ *
+ * Parameters:
+ *   r             - the HTTP request (pool used for allocation, logging)
+ *   cache_control - the Cache-Control header entry to modify
+ *
+ * Returns:
+ *   NGX_OK    - Cache-Control rebuilt successfully
+ *   NGX_ERROR - allocation failed
+ */
 static ngx_int_t
 ngx_http_markdown_strip_public_and_append_private(ngx_http_request_t *r,
                                                   ngx_table_elt_t *cache_control)
@@ -204,6 +257,17 @@ ngx_http_markdown_strip_public_and_append_private(ngx_http_request_t *r,
     return NGX_OK;
 }
 
+/*
+ * Skip Cache-Control separator characters (space, tab, comma).
+ *
+ * Advances *cursor past any whitespace or comma characters in the
+ * Cache-Control header value, stopping at the first non-separator
+ * byte or when *cursor reaches end.
+ *
+ * Parameters:
+ *   cursor - pointer to current parse position; advanced in-place
+ *   end    - pointer one past the last byte of the header value
+ */
 static void
 ngx_http_markdown_skip_cache_control_separators(const u_char **cursor,
                                                 const u_char *end)
@@ -215,6 +279,17 @@ ngx_http_markdown_skip_cache_control_separators(const u_char **cursor,
     }
 }
 
+/*
+ * Trim leading and trailing whitespace from a Cache-Control token.
+ *
+ * Adjusts *token_start forward past leading spaces/tabs and
+ * *token_end backward past trailing spaces/tabs, so that
+ * [*token_start, *token_end) contains the trimmed token.
+ *
+ * Parameters:
+ *   token_start - pointer to start of token; advanced in-place
+ *   token_end   - pointer to end of token; retreated in-place
+ */
 static void
 ngx_http_markdown_trim_cache_control_token(const u_char **token_start,
                                            const u_char **token_end)
@@ -233,6 +308,22 @@ ngx_http_markdown_trim_cache_control_token(const u_char **token_start,
     }
 }
 
+/*
+ * Parse the next Cache-Control directive token.
+ *
+ * Skips leading separators, records the token start, advances to the
+ * next comma or end-of-input, and trims whitespace from the result.
+ *
+ * Parameters:
+ *   cursor      - pointer to current parse position; advanced in-place
+ *   end         - pointer one past the last byte of the header value
+ *   token_start - set to the start of the trimmed token on success
+ *   token_end   - set to the end of the trimmed token on success
+ *
+ * Returns:
+ *   NGX_OK      - a token was found; bounds stored in token_start/token_end
+ *   NGX_DECLINED - no more tokens (cursor reached end)
+ */
 static ngx_int_t
 ngx_http_markdown_next_cache_control_token(const u_char **cursor,
                                            const u_char *end,
@@ -254,6 +345,21 @@ ngx_http_markdown_next_cache_control_token(const u_char **cursor,
     return NGX_OK;
 }
 
+/*
+ * Case-insensitive byte comparison of two memory regions.
+ *
+ * Compares len bytes from left and right after lowercasing each byte
+ * via ngx_tolower. Both regions must contain at least len bytes.
+ *
+ * Parameters:
+ *   left  - start of first memory region
+ *   right - start of second memory region
+ *   len   - number of bytes to compare
+ *
+ * Returns:
+ *   1 - regions are equal (case-insensitive)
+ *   0 - regions differ
+ */
 static ngx_flag_t
 ngx_http_markdown_token_equals_ignore_case(const u_char *left,
                                            const u_char *right,
@@ -268,6 +374,20 @@ ngx_http_markdown_token_equals_ignore_case(const u_char *left,
     return 1;
 }
 
+/*
+ * Check whether a Cache-Control token equals "public" (case-insensitive).
+ *
+ * Compares the token bounded by [token_start, token_end) against the
+ * literal string "public" using case-insensitive comparison.
+ *
+ * Parameters:
+ *   token_start - start of the token to compare
+ *   token_end   - end of the token to compare
+ *
+ * Returns:
+ *   1 - token equals "public"
+ *   0 - token does not equal "public"
+ */
 static ngx_flag_t
 ngx_http_markdown_cache_control_token_is_public(const u_char *token_start,
                                                 const u_char *token_end)
@@ -283,7 +403,18 @@ ngx_http_markdown_cache_control_token_is_public(const u_char *token_start,
         sizeof(ngx_http_markdown_cc_public) - 1);
 }
 
-/* Return configured auth-cookie patterns, falling back to built-in defaults. */
+/*
+ * Return configured auth-cookie patterns, falling back to built-in defaults.
+ *
+ * If the module configuration provides custom auth_cookies patterns, those
+ * are returned. Otherwise, the built-in default patterns are used:
+ * "session*", "auth*", "PHPSESSID", "wordpress_logged_in_*".
+ *
+ * Parameters:
+ *   conf          - module configuration (may be NULL)
+ *   patterns      - set to point to the patterns array
+ *   pattern_count - set to the number of patterns
+ */
 static void
 ngx_http_markdown_get_auth_patterns(const ngx_http_markdown_conf_t *conf,
                                     ngx_str_t **patterns,
@@ -308,7 +439,13 @@ ngx_http_markdown_get_auth_patterns(const ngx_http_markdown_conf_t *conf,
                       / sizeof(default_patterns[0])) - 1;
 }
 
-/* Advance cursor past optional whitespace in a Cookie header value. */
+/*
+ * Advance cursor past optional whitespace in a Cookie header value.
+ *
+ * Parameters:
+ *   cursor - pointer to current parse position; advanced in-place
+ *   end    - pointer one past the last byte of the Cookie header value
+ */
 static void
 ngx_http_markdown_skip_cookie_whitespace(u_char **cursor, const u_char *end)
 {
@@ -317,7 +454,16 @@ ngx_http_markdown_skip_cookie_whitespace(u_char **cursor, const u_char *end)
     }
 }
 
-/* Skip past the cookie value and its trailing semicolon delimiter. */
+/*
+ * Skip past the cookie value and its trailing semicolon delimiter.
+ *
+ * Advances *cursor past all bytes until a semicolon is found (or end
+ * of input), then advances past the semicolon itself if present.
+ *
+ * Parameters:
+ *   cursor - pointer to current parse position; advanced in-place
+ *   end    - pointer one past the last byte of the Cookie header value
+ */
 static void
 ngx_http_markdown_skip_cookie_value(u_char **cursor, const u_char *end)
 {
@@ -329,7 +475,23 @@ ngx_http_markdown_skip_cookie_value(u_char **cursor, const u_char *end)
     }
 }
 
-/* Extract the next cookie name from the cursor position, trimming whitespace. */
+/*
+ * Extract the next cookie name from the cursor position, trimming whitespace.
+ *
+ * Skips leading whitespace, reads the cookie name (up to '=' or ';'),
+ * trims whitespace from the name, then skips the cookie value and
+ * delimiter. The cursor is left positioned at the start of the next
+ * cookie (or at end).
+ *
+ * Parameters:
+ *   cursor       - pointer to current parse position; advanced in-place
+ *   end          - pointer one past the last byte of the Cookie header value
+ *   cookie_name  - set to the trimmed cookie name on success
+ *
+ * Returns:
+ *   NGX_OK       - cookie name extracted successfully
+ *   NGX_DECLINED - no more cookies (cursor reached end)
+ */
 static ngx_int_t
 ngx_http_markdown_read_cookie_name(u_char **cursor, const u_char *end,
                                    ngx_str_t *cookie_name)
@@ -362,7 +524,24 @@ ngx_http_markdown_read_cookie_name(u_char **cursor, const u_char *end,
     return NGX_OK;
 }
 
-/* Test a cookie name against all configured auth patterns, returning the first match. */
+/*
+ * Test a cookie name against all configured auth patterns, returning the first match.
+ *
+ * Iterates all auth-cookie patterns and checks if cookie_name matches
+ * any of them via ngx_http_markdown_cookie_matches_pattern. Returns
+ * on the first match, optionally setting matched_pattern to the
+ * matching pattern for diagnostics.
+ *
+ * Parameters:
+ *   cookie_name     - the cookie name to test
+ *   patterns        - array of auth-cookie patterns
+ *   pattern_count   - number of patterns in the array
+ *   matched_pattern - if non-NULL, set to the matching pattern on match
+ *
+ * Returns:
+ *   1 - cookie name matches at least one pattern
+ *   0 - cookie name matches no patterns
+ */
 static ngx_int_t
 ngx_http_markdown_cookie_matches_any_pattern(const ngx_str_t *cookie_name,
                                              ngx_str_t *patterns,

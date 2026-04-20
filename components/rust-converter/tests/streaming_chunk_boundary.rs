@@ -1,3 +1,13 @@
+//! Property-based tests for streaming chunk boundary invariance.
+//!
+//! Validates that the streaming converter produces identical output regardless
+//! of how input bytes are split into chunks. Uses proptest to generate random
+//! HTML inputs and arbitrary chunk splits, then asserts that different
+//! partitionings of the same input yield the same Markdown result. Also tests
+//! special chunk boundary strategies: single-byte chunks, tag-boundary-aligned
+//! chunks, and UTF-8 mid-character splits to ensure correct handling of
+//! multi-byte sequences at chunk boundaries.
+
 #![cfg(feature = "streaming")]
 
 #[path = "known_differences.rs"]

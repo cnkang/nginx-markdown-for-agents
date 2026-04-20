@@ -1,3 +1,13 @@
+//! Shared test support utilities for streaming conversion tests.
+//!
+//! Provides common helper functions and data structures used across all
+//! streaming test modules, including: fixture discovery and loading, full-buffer
+//! and streaming conversion wrappers, chunking strategies (single-byte,
+//! tag-boundary, UTF-8 mid-character), fixture metadata parsing, known
+//! differences loading, whitespace normalization for comparison, and evidence
+//! output serialization. This module is imported via `#[path]` by the various
+//! streaming test files and is not compiled as a standalone test binary.
+
 #![cfg(feature = "streaming")]
 #![allow(dead_code)]
 

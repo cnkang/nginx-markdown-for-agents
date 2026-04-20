@@ -1,3 +1,10 @@
+"""Tests for the harness state store.
+
+Verifies state directory override, event append/summarize round-trips,
+and graceful handling of missing state, malformed JSONL lines, and
+non-dict entries.
+"""
+
 from __future__ import annotations
 
 from pathlib import Path

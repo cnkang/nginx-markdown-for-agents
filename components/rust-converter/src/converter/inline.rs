@@ -1,6 +1,49 @@
+//! Inline element handlers for the Markdown converter.
+//!
+//! This module contains methods on [`MarkdownConverter`] that handle inline
+//! (phrasing-content) HTML elements during DOM-to-Markdown traversal. Inline
+//! elements produce Markdown inline constructs (links, images, emphasis, code
+//! spans) and do not emit surrounding blank lines.
+//!
+//! # Element Coverage
+//!
+//! | HTML Element | Markdown Output | Handler |
+//! |-------------|----------------|---------|
+//! | `<a>` | `[text](url)` | `handle_link` |
+//! | `<img>` | `![alt](src)` | `handle_image` |
+//! | `<strong>`, `<b>` | `**text**` | `handle_strong` |
+//! | `<em>`, `<i>` | `*text*` | `handle_emphasis` |
+//! | `<code>` | `` `text` `` | `handle_inline_code` |
+//! | `<br>` | hard line break | `handle_line_break` |
+//! | `<sub>`, `<sup>` | Unicode subscript/superscript | fallback text |
+//!
+//! # Security
+//!
+//! Link and image URL extraction passes through [`SecurityValidator::sanitize_url`]
+//! to suppress dangerous URL schemes (`javascript:`, `data:`, `vbscript:`).
+//! When a URL is rejected, the link text is still emitted but the URL is
+//! omitted, preventing XSS while preserving content accessibility for AI agents.
+//!
+//! # Title Escaping
+//!
+//! [`escape_markdown_title`] applies minimal escaping for link title attributes
+//! (backslash and double-quote) to produce valid Markdown link syntax.
+
 use super::*;
 
 impl MarkdownConverter {
+    /// Escape backslash and double-quote characters in a Markdown link title.
+    ///
+    /// Markdown link titles are enclosed in double quotes, so backslashes and
+    /// quotes inside the title must be escaped to produce valid syntax.
+    ///
+    /// # Arguments
+    ///
+    /// * `title` - Raw title string to escape
+    ///
+    /// # Returns
+    ///
+    /// Escaped title safe for use inside `"..."` in a Markdown link.
     fn escape_markdown_title(title: &str) -> String {
         title.replace('\\', "\\\\").replace('"', "\\\"")
     }

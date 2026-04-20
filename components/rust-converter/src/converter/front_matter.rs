@@ -1,3 +1,29 @@
+//! YAML front matter generation for Markdown output.
+//!
+//! When both `include_front_matter` and `extract_metadata` are enabled in
+//! [`ConversionOptions`], this module prepends a YAML front matter block
+//! to the Markdown output. The front matter is enclosed in `---` delimiters
+//! and contains metadata extracted from the HTML document (title, description,
+//! canonical URL, Open Graph tags, etc.).
+//!
+//! # Example Output
+//!
+//! ```yaml
+//! ---
+//! title: "Example Page"
+//! description: "A sample document"
+//! url: "https://example.com/page"
+//! og_image: "https://example.com/image.png"
+//! ---
+//! ```
+//!
+//! # YAML Safety
+//!
+//! String values are double-quoted and escaped to prevent YAML injection.
+//! Only fields with non-empty values are included. The front matter block
+//! is always terminated with a trailing `---` followed by a blank line to
+//! ensure clean separation from the Markdown body.
+
 use super::*;
 
 impl MarkdownConverter {

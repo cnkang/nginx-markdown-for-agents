@@ -1,3 +1,33 @@
+//! DOM traversal for HTML metadata extraction.
+//!
+//! This module implements the metadata extraction logic that pulls structured
+//! page metadata from an HTML DOM tree. The extraction is used to populate
+//! YAML front matter when `include_front_matter` and `extract_metadata` are
+//! both enabled.
+//!
+//! # Extraction Order
+//!
+//! Extraction follows a deterministic order so that repeated conversions over
+//! identical input yield stable front-matter output:
+//!
+//! 1. `<title>` element text → `title` field
+//! 2. `<meta>` tags (name=description, og:*, twitter:*) → corresponding fields
+//! 3. `<link rel="canonical">` → `url` field (resolved to absolute if base URL set)
+//!
+//! # Supported Meta Tags
+//!
+//! | Meta Name/Property | Target Field |
+//! |-------------------|-------------|
+//! | `description` | `description` |
+//! | `og:title` | `og_title` |
+//! | `og:description` | `og_description` |
+//! | `og:image` | `og_image` |
+//! | `og:url` | `og_url` |
+//! | `twitter:card` | `twitter_card` |
+//! | `twitter:title` | `twitter_title` |
+//! | `twitter:description` | `twitter_description` |
+//! | `twitter:image` | `twitter_image` |
+
 use std::cell::Ref;
 
 use markup5ever_rcdom::{Handle, NodeData, RcDom};

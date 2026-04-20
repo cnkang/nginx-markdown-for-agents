@@ -1,3 +1,34 @@
+//! FFI ABI type definitions and error code constants.
+//!
+//! This module defines the C-compatible (`#[repr(C)]`) structs and constants
+//! that form the stable ABI boundary between the NGINX C module and the Rust
+//! conversion engine. Every type defined here is shared across the FFI
+//! boundary and must maintain layout compatibility with the corresponding
+//! C declarations in `markdown_converter.h`.
+//!
+//! # Error Codes
+//!
+//! Error codes are returned in the `error_code` field of [`MarkdownResult`].
+//! The `ERROR_SUCCESS` (0) value indicates no error; all other values
+//! indicate a specific failure mode. Streaming-specific error codes
+//! (`ERROR_BUDGET_EXCEEDED`, `ERROR_STREAMING_FALLBACK`, `ERROR_POST_COMMIT`)
+//! are feature-gated behind the `streaming` feature.
+//!
+//! # Struct Layout Stability
+//!
+//! **Adding fields to any `#[repr(C)]` struct is a breaking ABI change.**
+//! When a field is added, both copies of `markdown_converter.h` (in
+//! `components/rust-converter/include/` and `components/nginx-module/src/`)
+//! must be updated in the same change set. See AGENTS.md Rule 15 for the
+//! complete FFI struct synchronization checklist.
+//!
+//! # Memory Ownership
+//!
+//! - Pointer fields in result structs (`markdown`, `etag`, `error_message`)
+//!   are owned by Rust and must be freed via `markdown_result_free()`.
+//! - Pointer fields in option structs (`content_type`, `base_url`) are
+//!   borrowed from the C caller for the duration of the FFI call only.
+
 use crate::etag_generator::ETagGenerator;
 use crate::token_estimator::TokenEstimator;
 

@@ -1,3 +1,40 @@
+//! DOM tree traversal for the Markdown converter.
+//!
+//! This module implements the depth-first, left-to-right traversal of the
+//! html5ever DOM tree that drives the conversion process. Each node is
+//! dispatched to the appropriate element handler based on its tag name.
+//!
+//! # Traversal Strategy
+//!
+//! The traversal is implemented as a recursive walk over the `RcDom` handle
+//! tree. At each element node, the local tag name is matched against known
+//! HTML element types and dispatched to the corresponding handler in
+//! `blocks.rs`, `inline.rs`, or `tables.rs`. Unknown or unhandled elements
+//! are traversed transparently (their children are processed, but the element
+//! itself produces no direct output).
+//!
+//! # Timeout Integration
+//!
+//! The traversal supports cooperative timeout checking via
+//! [`ConversionContext`]. Every 100 nodes, the elapsed time is checked
+//! against the configured timeout. If exceeded, a
+//! [`ConversionError::Timeout`] is returned immediately, unwinding the
+//! recursive traversal.
+//!
+//! # Fast Path
+//!
+//! When [`ConversionContext::is_fast_path`] is `true`, the traversal skips
+//! branches that the qualification scan has proven unreachable for simple
+//! documents (form controls, embedded content, table/media processing),
+//! reducing per-node overhead.
+//!
+//! # Text Node Handling
+//!
+//! [`write_normalized_text_node`] handles the subtleties of inter-node
+//! whitespace: HTML parsing can split adjacent text into multiple nodes, so
+//! this function reconstructs proper spacing to avoid accidental token
+//! concatenation in the Markdown output.
+
 use super::*;
 
 impl MarkdownConverter {

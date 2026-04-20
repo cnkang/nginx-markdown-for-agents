@@ -1,3 +1,10 @@
+"""Tests for the harness sync consistency checker.
+
+Covers manifest loading, truth-surface existence, risk-pack doc contracts,
+harness documentation references, AGENTS.md mapping, and optional Kiro
+adapter drift detection under both quick and full modes.
+"""
+
 from __future__ import annotations
 
 import json

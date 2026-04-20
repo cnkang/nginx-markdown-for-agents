@@ -1,3 +1,13 @@
+//! Streaming vs. full-buffer output parity tests across the HTML fixture corpus.
+//!
+//! Systematically compares streaming conversion output (both single-chunk and
+//! chunked modes) against full-buffer conversion for every HTML fixture in the
+//! corpus. Divergences are classified as either known differences (pre-approved
+//! in the known-differences TOML) or unexpected regressions. Evidence of
+//! mismatches is written to a JSON file for post-run analysis. This module
+//! serves as the primary gate for ensuring streaming conversion maintains
+//! output parity with the reference full-buffer implementation.
+
 #![cfg(feature = "streaming")]
 
 #[path = "known_differences.rs"]

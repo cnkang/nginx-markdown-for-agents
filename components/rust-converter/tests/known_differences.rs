@@ -1,3 +1,13 @@
+//! Known differences registry between full-buffer and streaming conversion outputs.
+//!
+//! Provides data structures and TOML parsing for cataloging acceptable output
+//! divergences between the full-buffer and streaming HTML-to-Markdown conversion
+//! paths. Each known difference is classified by drift type (whitespace, entity
+//! encoding, structural, etc.) and severity (benign, acceptable divergence, or
+//! needs investigation). This module is shared across streaming test files to
+//! determine whether an observed mismatch is a pre-approved known difference
+//! or an unexpected regression.
+
 #![allow(dead_code)]
 
 use std::fs;

@@ -1,3 +1,30 @@
+//! Output normalization for deterministic Markdown generation.
+//!
+//! This module provides whitespace and structural normalization that ensures
+//! the converter produces deterministic, well-formed Markdown output suitable
+//! for reliable ETag generation and caching.
+//!
+//! # Normalization Rules
+//!
+//! 1. **CRLF → LF**: All Windows-style line endings are converted to Unix-style.
+//! 2. **Blank line collapse**: Runs of 3+ consecutive newlines are collapsed to
+//!    exactly 2 (one blank line between blocks).
+//! 3. **Trailing whitespace removal**: Spaces and tabs at end of lines are stripped.
+//! 4. **Consecutive space collapse**: Runs of multiple spaces are collapsed to one,
+//!    except inside inline code spans (`` ` ``) and code blocks (` ``` `).
+//! 5. **List indentation preservation**: Leading spaces for nested list items are
+//!    kept intact (2-space indentation per nesting level).
+//! 6. **Single trailing newline**: Output always ends with exactly one `\n`.
+//!
+//! # Two Normalization Paths
+//!
+//! - **Small documents** use [`MarkdownConverter::normalize_output`], which
+//!   performs a full two-pass normalization (CRLF replacement + line-by-line
+//!   whitespace collapse).
+//! - **Large documents** (output > 256 KB) use [`FusedNormalizer`] from the
+//!   `large_response` module, which fuses CRLF normalization and whitespace
+//!   collapse into a single pass to avoid allocating a second full-size string.
+
 use super::*;
 
 /// Normalize whitespace within a single line.

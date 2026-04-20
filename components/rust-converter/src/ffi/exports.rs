@@ -1,3 +1,29 @@
+//! Public FFI export functions callable from C.
+//!
+//! This module contains the `#[unsafe(no_mangle)] extern "C"` functions that
+//! form the public C API of the conversion library. Each export wraps the
+//! internal conversion logic with:
+//!
+//! 1. **Input validation** — NULL pointer checks via `required_ref`/`required_bytes`
+//! 2. **Panic catching** — `panic::catch_unwind` to prevent Rust panics from
+//!    unwinding into C frames (undefined behavior per the FFI contract)
+//! 3. **Result marshalling** — conversion of Rust `Result` into C `MarkdownResult`
+//!
+//! # Exported Functions
+//!
+//! | Function | Purpose |
+//! |----------|---------|
+//! | `markdown_converter_new` | Allocate a converter handle |
+//! | `markdown_convert` | Full HTML-to-Markdown conversion |
+//! | `markdown_converter_free` | Release a converter handle |
+//! | `markdown_result_free` | Release conversion result buffers |
+//!
+//! # Safety
+//!
+//! All functions in this module are `unsafe` (either explicitly or by
+//! accepting raw pointers). Each function's `# Safety` doc section
+//! specifies the preconditions the C caller must uphold.
+
 use std::panic;
 use std::ptr;
 

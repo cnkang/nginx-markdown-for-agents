@@ -1,10 +1,29 @@
 #!/bin/bash
+# build_release.sh — Build the nginx-markdown-for-agents dynamic module for a
+# specific NGINX version, OS type, and architecture using Docker.
+#
+# Usage: tools/build_release.sh [nginx_version] [os_type] [arch]
+#   nginx_version — nginx version string, "stable", or "mainline" (default: stable)
+#   os_type       — "glibc" or "musl" (default: glibc)
+#   arch          — "x86_64", "amd64", "aarch64", or "arm64" (default: x86_64)
 set -euo pipefail
 
 NGINX_VERSION=${1:-stable}
 OS_TYPE=${2:-glibc} # glibc or musl
 ARCH=${3:-x86_64} # x86_64/amd64 or aarch64/arm64
 
+# Resolve a requested nginx version string to an exact MAJOR.MINOR.PATCH version.
+#
+# Arguments:
+#   $1 - requested version: "stable" or "mainline" to fetch the latest from
+#        nginx.org, or an explicit version string returned as-is
+#
+# Outputs:
+#   Writes the resolved MAJOR.MINOR.PATCH version string to stdout
+#
+# Returns:
+#   0 on success; exits with status 1 if curl or python3 is missing,
+#   or if the version cannot be resolved from the nginx.org download page
 resolve_nginx_version() {
     local requested="$1"
     local page=""

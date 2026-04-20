@@ -1,3 +1,28 @@
+//! FFI option decoding and input validation helpers.
+//!
+//! This module translates C `MarkdownOptions` structs into Rust
+//! [`ConversionOptions`] and provides pointer/slice validation helpers
+//! used by all FFI export entry points.
+//!
+//! # Option Decoding
+//!
+//! [`decode_options`] reads the C struct fields and converts them:
+//! - `flavor` u32 → [`MarkdownFlavor`] enum
+//! - `timeout_ms` u32 → `Duration`
+//! - `generate_etag` u8 → `bool`
+//! - `estimate_tokens` u8 → `bool`
+//! - `content_type` pointer/len → `Option<&str>` (charset detection hint)
+//! - `base_url` pointer/len → `Option<String>` (URL resolution base)
+//! - `streaming_budget` u64 → passed through for streaming configuration
+//!
+//! # Validation Helpers
+//!
+//! - [`required_ref`] — convert a non-NULL C pointer to a Rust reference
+//! - [`required_bytes`] — convert a C pointer/length pair to a byte slice
+//!
+//! Both return `ConversionError::InvalidInput` on NULL pointers, providing
+//! a named error message for diagnostics.
+
 use std::slice;
 use std::time::Duration;
 

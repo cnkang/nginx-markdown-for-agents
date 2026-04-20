@@ -1,3 +1,27 @@
+//! FFI memory management helpers for result struct lifecycle.
+//!
+//! This module provides internal helpers for managing the memory of
+//! [`MarkdownResult`] fields across the FFI boundary. All pointer fields in
+//! the result struct are owned by Rust and allocated via `Box::into_raw`;
+//! they must be freed by calling `markdown_result_free()` from C.
+//!
+//! # Functions
+//!
+//! | Function | Purpose |
+//! |----------|---------|
+//! | `reset_result` | Zero-initialize all fields of a `MarkdownResult` |
+//! | `set_error_result` | Populate error code and message into a result |
+//! | `set_success_result` | Populate markdown/etag/token fields into a result |
+//! | `free_buffer` | Release one heap-allocated buffer back to Rust |
+//!
+//! # Safety
+//!
+//! - `free_buffer` must only be called on pointers that were originally
+//!   produced by `Box::into_raw(Box<[u8]>)`. Calling it on any other
+//!   pointer is undefined behavior.
+//! - After `free_buffer` is called, the pointer is set to NULL and the
+//!   length to 0, preventing double-free.
+
 use std::ptr;
 
 use super::abi::{ConversionOutput, ERROR_SUCCESS, MarkdownResult};

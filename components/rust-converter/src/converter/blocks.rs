@@ -1,3 +1,38 @@
+//! Block-level element handlers for the Markdown converter.
+//!
+//! This module contains methods on [`MarkdownConverter`] that handle block-level
+//! HTML elements during DOM-to-Markdown traversal. Block elements produce
+//! structural Markdown constructs (headings, paragraphs, lists, code blocks,
+//! blockquotes, horizontal rules) and typically emit surrounding blank lines
+//! to maintain proper Markdown paragraph separation.
+//!
+//! # Element Coverage
+//!
+//! | HTML Element | Markdown Output | Handler |
+//! |-------------|----------------|---------|
+//! | `<h1>`–`<h6>` | `#`–`######` | `handle_heading` |
+//! | `<p>` | plain text + blank line | `handle_paragraph` |
+//! | `<ul>`, `<ol>` | `- ` / `1. ` lists | `handle_list` |
+//! | `<li>` | list item with indentation | `format_list_item_lines` |
+//! | `<pre>`, `<code>` | fenced code block | `handle_preformatted` |
+//! | `<blockquote>` | `> ` prefix | `handle_blockquote` |
+//! | `<hr>` | `---` | `handle_horizontal_rule` |
+//! | `<div>`, `<section>`, etc. | transparent container | traversal passthrough |
+//!
+//! # List Formatting
+//!
+//! Nested and multi-line list items require careful indentation management.
+//! [`format_list_item_lines`] handles continuation-line indentation so that
+//! wrapped content aligns with the list marker, and nested sub-lists are
+//! indented by 2 spaces per depth level (CommonMark convention).
+//!
+//! # Code Block Fencing
+//!
+//! [`choose_fence_delimiter`] selects a backtick fence length that is strictly
+//! longer than any backtick run in the code payload, preventing premature
+//! fence termination. [`longest_backtick_run`] is the helper that scans the
+//! payload for the longest contiguous backtick sequence.
+
 use super::*;
 
 impl MarkdownConverter {
