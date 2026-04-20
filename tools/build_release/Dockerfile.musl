@@ -3,6 +3,7 @@ ARG OS_BASE=alpine:3.20
 FROM ${OS_BASE}
 
 RUN apk add --no-cache \
+    ca-certificates \
     build-base \
     curl \
     linux-headers \
@@ -13,6 +14,8 @@ RUN apk add --no-cache \
     && curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
     && /root/.cargo/bin/cargo install cbindgen
 ENV PATH="/root/.cargo/bin:${PATH}"
+
+RUN update-ca-certificates
 
 ARG NGINX_VERSION=1.28.2
 
