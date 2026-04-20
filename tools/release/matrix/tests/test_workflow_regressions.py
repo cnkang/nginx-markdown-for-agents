@@ -33,9 +33,10 @@ def _step_by_name(steps: list[dict[str, object]], name: str) -> dict[str, object
     raise AssertionError(f"Missing workflow step: {name}")
 
 
-def test_release_binaries_only_checks_matrix_freshness_on_manual_dispatch() -> None:
-    """Release-triggered binary builds must not run workflow-dispatch freshness logic."""
+def test_release_binaries_checks_matrix_freshness_on_release_and_manual_dispatch() -> None:
+    """Release binaries must gate published artifacts on nginx.org freshness."""
     text = _workflow_text("release-binaries.yml")
+    assert "if: github.event_name == 'release'" in text
     assert "if: github.event_name == 'workflow_dispatch' && inputs.matrix_freshness != 'off'" in text
 
 
@@ -43,7 +44,7 @@ def test_update_matrix_pr_creation_is_non_blocking_when_repo_disallows_actions_p
     """Scheduled matrix refreshes should succeed even if PR creation is policy-blocked."""
     text = _workflow_text("update-matrix.yml")
     assert "continue-on-error: true" in text
-    assert "Source: latest GitHub release assets for this repository." in text
+    assert "Source: nginx.org download page." in text
     assert "Matrix update branch pushed, but automatic PR creation is blocked." in text
 
 

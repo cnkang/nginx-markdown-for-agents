@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0.0",
-  "updated_at": "2026-04-19T13:02:13Z",
+  "updated_at": "2026-04-20T06:46:40Z",
   "support_tiers": {
     "full": "Prebuilt binary + install script + CI verification",
     "source_only": "Build from source required"
@@ -79,25 +79,49 @@
       "support_tier": "full"
     },
     {
-      "nginx": "1.29.7",
+      "nginx": "1.29.8",
       "os_type": "glibc",
       "arch": "aarch64",
       "support_tier": "full"
     },
     {
-      "nginx": "1.29.7",
+      "nginx": "1.29.8",
       "os_type": "glibc",
       "arch": "x86_64",
       "support_tier": "full"
     },
     {
-      "nginx": "1.29.7",
+      "nginx": "1.29.8",
       "os_type": "musl",
       "arch": "aarch64",
       "support_tier": "full"
     },
     {
-      "nginx": "1.29.7",
+      "nginx": "1.29.8",
+      "os_type": "musl",
+      "arch": "x86_64",
+      "support_tier": "full"
+    },
+    {
+      "nginx": "1.30.0",
+      "os_type": "glibc",
+      "arch": "aarch64",
+      "support_tier": "full"
+    },
+    {
+      "nginx": "1.30.0",
+      "os_type": "glibc",
+      "arch": "x86_64",
+      "support_tier": "full"
+    },
+    {
+      "nginx": "1.30.0",
+      "os_type": "musl",
+      "arch": "aarch64",
+      "support_tier": "full"
+    },
+    {
+      "nginx": "1.30.0",
       "os_type": "musl",
       "arch": "x86_64",
       "support_tier": "full"

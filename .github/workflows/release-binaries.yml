@@ -41,7 +41,11 @@ jobs:
         with:
           python-version: '3.14.3'
 
-      - name: Check matrix freshness
+      - name: Check matrix freshness for release events
+        if: github.event_name == 'release'
+        run: python3 tools/release/matrix/update_matrix.py --check-only
+
+      - name: Check matrix freshness for manual dispatch
         if: github.event_name == 'workflow_dispatch' && inputs.matrix_freshness != 'off'
         env:
           FRESHNESS_MODE: ${{ inputs.matrix_freshness }}

@@ -70,7 +70,7 @@ jobs:
           body_lines = [
               "Automated update of the nginx release matrix.",
               "",
-              "Source: latest GitHub release assets for this repository.",
+              "Source: nginx.org download page.",
               "",
           ]
           if added:
