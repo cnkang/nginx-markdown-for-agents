@@ -45,7 +45,11 @@ cargo build --features incremental
 cargo test --features incremental
 ```
 
-The incremental C ABI reuses the existing `MarkdownOptions` layout, so enabling the `incremental` feature does not change the legacy `markdown_convert()` call signature for external callers. The incremental converter itself still keeps its own built-in 64 MiB hard ceiling to avoid unsafe memory growth before true streaming support exists.
+The incremental C ABI reuses the existing `MarkdownOptions` layout, so
+enabling the `incremental` feature does not change the legacy
+`markdown_convert()` call signature for external callers. The incremental
+converter enforces its own 64 MiB hard ceiling to keep the chunk-oriented
+API bounded.
 
 ### Rust API
 
@@ -82,7 +86,10 @@ Existing FFI function signatures are not modified.
 
 ### Limitations
 
-This is a first-iteration prototype. The converter buffers all fed data internally and performs a single full parse-and-convert pass during `finalize`. True streaming conversion may be introduced in a future iteration.
+This API buffers all fed data internally and performs a single full
+parse-and-convert pass during `finalize`. The separate `streaming`
+module owns the true streaming engine path used by the 0.5.0 release
+line.
 
 ### Equivalence Guarantee
 
