@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """Automated nginx release matrix updater.
 
-Scrapes the latest GitHub release assets for this repository, computes the
-desired matrix state (respecting ``managed_by: manual`` Pin_Entries), and
-updates both ``tools/release-matrix.json`` and the Platform Compatibility
-Matrix table in ``docs/guides/INSTALLATION.md``.  A machine-readable diff
-summary is written to ``matrix-diff.json`` when changes are detected, for
-consumption by the GitHub Actions workflow.
+Scrapes the nginx.org download page, computes the desired matrix state
+(respecting ``managed_by: manual`` Pin_Entries), and updates both
+``tools/release-matrix.json`` and the Platform Compatibility Matrix table
+in ``docs/guides/INSTALLATION.md``.  A machine-readable diff summary is
+written to ``matrix-diff.json`` when changes are detected, for consumption
+by the GitHub Actions workflow.
 
 Exit codes:
     0 — Success (no changes needed, or changes written successfully)
@@ -235,7 +235,10 @@ def fetch_download_page(url: str) -> str:
 
 
 def fetch_release_json(url: str | None = None) -> str:
-    """Fetch the latest GitHub release JSON for this repository."""
+    """Fetch the latest GitHub release JSON for this repository.
+
+    Legacy helper retained for tests and historical tooling.
+    """
     release_url = url or f"https://api.github.com/repos/{REPO_SLUG}/releases/latest"
     request = Request(
         release_url,
@@ -294,7 +297,10 @@ def _is_dotted_version(version: str) -> bool:
 
 
 def parse_release_module_versions(release_json: str) -> set[str]:
-    """Extract module versions from the latest GitHub release assets."""
+    """Extract module versions from a GitHub release asset payload.
+
+    Legacy helper retained for tests and historical tooling.
+    """
     try:
         release_data = json.loads(release_json)
     except json.JSONDecodeError:
@@ -881,30 +887,30 @@ def main(argv: list[str] | None = None) -> int:
         with contextlib.suppress(OSError):
             DIFF_PATH.unlink(missing_ok=True)
     try:
-        release_json = fetch_release_json()
+        download_html = fetch_download_page(NGINX_DOWNLOAD_URL)
     except URLError as exc:
         print(
-            "Error fetching latest GitHub release metadata "
-            f"for {REPO_SLUG}: {exc}",
+            "Error fetching nginx download page "
+            f"from {NGINX_DOWNLOAD_URL}: {exc}",
             file=sys.stderr,
         )
         return 1
 
-    release_versions = parse_release_module_versions(release_json)
-    if not release_versions:
+    download_versions = parse_nginx_versions(download_html)
+    if not download_versions:
         print(
-            "Error: zero module versions parsed from the latest GitHub "
-            "release assets",
+            "Error: zero nginx versions parsed from the nginx.org "
+            "download page",
             file=sys.stderr,
         )
         return 1
 
     # --- Filter to supported versions >= MIN_SUPPORTED -----------------------
     min_version = read_min_version(INSTALL_SCRIPT_PATH)
-    versions = filter_versions(sorted(release_versions), min_version)
+    versions = filter_versions(sorted(download_versions), min_version)
     if not versions:
         print(
-            "Error: no release asset versions satisfy the minimum supported "
+            "Error: no nginx.org versions satisfy the minimum supported "
             "NGINX version",
             file=sys.stderr,
         )

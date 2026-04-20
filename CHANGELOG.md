@@ -75,6 +75,10 @@ streaming, plus the harness and release-gate surfaces needed to operate it.
   const-correctness, loop-local variable declarations, narrowing conversions in
   conversion-option wiring, and macro/unused-parameter hygiene without changing
   runtime conversion semantics.
+- Refreshed the release-binaries matrix to track nginx.org stable/mainline
+  releases directly, so `0.5.0` now publishes binaries for nginx `1.29.8`
+  and `1.30.0`, and added a release-event freshness gate so future published
+  binaries cannot silently lag behind the official nginx download page.
 - Updated harness optional-skill documentation to avoid hard local-link
   dependency in docs checks; the skill remains documented as an optional
   repo-tracked path via `docs/guides/HARNESS_SKILL_SETUP.md`.
