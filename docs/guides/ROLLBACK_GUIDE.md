@@ -16,6 +16,23 @@
 
 ## Overview
 
+```mermaid
+flowchart TD
+    Trigger["Rollback Trigger"] --> Type{"Trigger Type"}
+    Type -->|High error rate| Disable["markdown_filter off"]
+    Type -->|Conversion failures| Narrow["Narrow scope to<br/>specific paths only"]
+    Type -->|Performance issue| IncreaseLimit["Increase markdown_max_size<br/>or markdown_timeout"]
+    Type -->|Streaming issues| DisableStream["markdown_streaming_engine off"]
+    Disable --> Verify["Verify HTML responses<br/>work correctly"]
+    Narrow --> Verify
+    IncreaseLimit --> Verify
+    DisableStream --> Verify
+    Verify --> Monitor["Monitor metrics<br/>and error logs"]
+    
+    style Trigger fill:#c00,color:#fff
+    style Verify fill:#090,color:#fff
+```
+
 This guide documents how to disable or narrow Markdown conversion scope when problems arise. All rollback methods take effect within seconds and require only an NGINX configuration change and reload.
 
 Use this guide when an [observation checkpoint](ROLLOUT_COOKBOOK.md#observation-guidance) reveals unhealthy behavior, or when operator judgment calls for reducing conversion scope.
@@ -464,3 +481,10 @@ curl -sD - -o /dev/null \
   http://www.example.com/docs/
 # Expected: Content-Type: text/html
 ```
+
+
+## Document Updates
+
+| Version | Date | Author | Changes |
+|---------|------|--------|---------|
+| 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |

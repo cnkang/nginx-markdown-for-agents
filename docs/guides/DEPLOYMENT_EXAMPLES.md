@@ -415,3 +415,10 @@ location ~* \.md$ {
 | Cache returns wrong content | Cache key misconfiguration | [Details](OPERATIONS.md#issue-5-incorrect-cache-behavior) |
 
 Complete troubleshooting guide: [OPERATIONS.md](OPERATIONS.md#troubleshooting)
+
+
+## Document Updates
+
+| Version | Date | Author | Changes |
+|---------|------|--------|---------|
+| 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |

@@ -26,3 +26,9 @@ mapping (including partial content scenarios), or cache variant behavior.
 For fixes in streaming, parsing, sanitizer, fallback, metrics, or reason-code
 paths, include targeted regression tests, including malformed-input and
 cross-boundary cases where relevant.
+
+## Document Updates
+
+| Version | Date | Author | Changes |
+|---------|------|--------|---------|
+| 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |

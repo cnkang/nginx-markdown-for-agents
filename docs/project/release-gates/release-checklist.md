@@ -48,3 +48,9 @@ Requirements references: 10.1, 10.2, 10.3, 10.4, 10.5.
 - [x] Operator can observe module behavior — verified by `curl` against metrics endpoint in e2e test
 - [x] Operator can observe decision reasons — verified by log inspection in e2e test
 - [x] Operator can perform rollback — verified by e2e test against `docs/guides/` rollback procedure
+
+## Document Updates
+
+| Version | Date | Author | Changes |
+|---------|------|--------|---------|
+| 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |

@@ -47,3 +47,9 @@ Each sub-spec must include at least one boundary description for any capability 
 - State what is delivered and what is deferred
 - Avoid commitment words like "planned", "will" when describing 0.6.x+ content
 - Use neutral terms like "deferred", "out of scope"
+
+## Document Updates
+
+| Version | Date | Author | Changes |
+|---------|------|--------|---------|
+| 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |

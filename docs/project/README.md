@@ -28,3 +28,9 @@ detailed in `HARNESS_HISTORY.md`, `docs/harness/`,
 `docs/guides/HARNESS_MAINTENANCE.md`.
 
 Use this section for repository-wide status, maintenance posture, and other project-level notes that should stay aligned with the current tracked codebase.
+
+## Document Updates
+
+| Version | Date | Author | Changes |
+|---------|------|--------|---------|
+| 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |

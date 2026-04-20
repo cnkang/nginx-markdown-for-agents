@@ -465,3 +465,9 @@ For issues, questions, or feature requests, please use the repository's issue tr
 ## License
 
 This project is licensed under the BSD 2-Clause "Simplified" License (`BSD-2-Clause`).
+
+## Document Updates
+
+| Version | Date | Author | Changes |
+|---------|------|--------|---------|
+| 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |

@@ -44,3 +44,9 @@ make verify-chunked-native-e2e-smoke
 - [../../architecture/REQUEST_LIFECYCLE.md](../../architecture/REQUEST_LIFECYCLE.md)
 - [../../testing/README.md](../../testing/README.md)
 - [../../../AGENTS.md](../../../AGENTS.md)
+
+## Document Updates
+
+| Version | Date | Author | Changes |
+|---------|------|--------|---------|
+| 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |

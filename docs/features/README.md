@@ -53,3 +53,9 @@ If you need rollout steps, operator checklists, or directive syntax, go back to:
 - source-level structures and implementation contracts
 
 Keep setup instructions and rollout steps in [../guides/README.md](../guides/README.md) instead of duplicating them here.
+
+## Document Updates
+
+| Version | Date | Author | Changes |
+|---------|------|--------|---------|
+| 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |

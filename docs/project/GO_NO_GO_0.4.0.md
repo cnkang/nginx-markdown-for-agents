@@ -82,3 +82,9 @@ The following High-likelihood or High-impact risks were identified across sub-sp
 | R1: Early pruning of nav/footer/aside causes false kills on pages with primary content in these elements | Medium | High | Tag-name-only matching (no heuristics), validate against benchmark corpus, tricky-case fixtures, fallback to Normal_Path | Mitigated — property tests and corpus validation pass |
 | R3: Fast path qualification criteria too broad, causing incorrect output | Low | High | Property-based tests verify output equivalence, fast path falls back to Normal_Path, corpus diff catches regressions | Mitigated — property tests pass |
 | R4: Optimization work consumes too much time and threatens 0.4.0 release | Medium | High | P1 spec — defer entirely if it risks the release; P0 specs take priority | Resolved — all P1 tasks complete without impacting P0 timeline |
+
+## Document Updates
+
+| Version | Date | Author | Changes |
+|---------|------|--------|---------|
+| 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |

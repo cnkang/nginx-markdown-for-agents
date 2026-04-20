@@ -412,3 +412,9 @@ Core features are implemented and tested. The focus is on operational validation
 - **Contribute**: See [CONTRIBUTING](../../CONTRIBUTING.md) for guidelines
 
 For questions, issues, or feature requests, use the [GitHub issue tracker](https://github.com/cnkang/nginx-markdown-for-agents/issues).
+
+## Document Updates
+
+| Version | Date | Author | Changes |
+|---------|------|--------|---------|
+| 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |

@@ -28,3 +28,9 @@ Copy the table below into your sub-spec and populate it with identified risks.
 5. Assess likelihood and impact independently using Low, Med, or High.
 6. For any row where likelihood or impact is High, write a mitigation that names a concrete action, owner, and timeline.
 7. Review and update the register as implementation progresses.
+
+## Document Updates
+
+| Version | Date | Author | Changes |
+|---------|------|--------|---------|
+| 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |

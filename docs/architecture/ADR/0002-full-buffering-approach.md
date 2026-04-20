@@ -175,3 +175,9 @@ Track these metrics to inform future decisions:
 ## Authors
 
 Project Team
+
+## Document Updates
+
+| Version | Date | Author | Changes |
+|---------|------|--------|---------|
+| 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |

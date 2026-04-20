@@ -106,3 +106,9 @@ Index: [project/README.md](project/README.md)
 - Keep archived or historical notes out of the maintained path.
 
 For duplication policy and mirrored-doc rules, see [DOCUMENTATION_DUPLICATION_POLICY.md](DOCUMENTATION_DUPLICATION_POLICY.md).
+
+## Document Updates
+
+| Version | Date | Author | Changes |
+|---------|------|--------|---------|
+| 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |

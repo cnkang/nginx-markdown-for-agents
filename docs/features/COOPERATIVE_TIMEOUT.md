@@ -2,6 +2,23 @@
 
 ## Overview
 
+```mermaid
+flowchart TD
+    Start["Start Conversion"] --> Check{"Timeout Check"}
+    Check -->|within limit| Continue["Continue Processing"]
+    Check -->|exceeded| Fail["Timeout Exceeded"]
+    Continue --> Done{"Conversion Complete?"}
+    Done -->|yes| Success["Return Markdown"]
+    Done -->|no| Check
+    Fail --> OnError{"markdown_on_error?"}
+    OnError -->|pass| FailOpen["Return Original HTML"]
+    OnError -->|reject| FailClosed["Return 502 Error"]
+    
+    style Success fill:#090,color:#fff
+    style FailOpen fill:#f90,color:#000
+    style FailClosed fill:#c00,color:#fff
+```
+
 The NGINX Markdown for Agents converter implements a **cooperative timeout mechanism** to protect against resource exhaustion from slow or malicious HTML conversions. This mechanism provides timeout enforcement without thread spawning, making it compatible with NGINX's event-driven worker model.
 
 This document focuses on the converter-side implementation. For user-facing directive syntax and deployment tuning, use `docs/guides/CONFIGURATION.md`.
@@ -243,3 +260,10 @@ This implementation validates the following requirements:
 - Requirements Document: FR-10 (Resource Protection)
 - Implementation: `components/rust-converter/src/converter.rs` (ConversionContext)
 - Tests: `components/rust-converter/tests/timeout_test.rs`
+
+
+## Document Updates
+
+| Version | Date | Author | Changes |
+|---------|------|--------|---------|
+| 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |

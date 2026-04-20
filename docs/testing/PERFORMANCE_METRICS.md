@@ -131,3 +131,10 @@ tools/perf/run_perf_baseline.sh
 - [`perf/metrics-schema.json`](../../perf/metrics-schema.json) — Machine-readable metric definitions
 - [`perf/baselines/README.md`](../../perf/baselines/README.md) — Baseline storage and bootstrap details
 - [`docs/testing/PERFORMANCE_BASELINES.md`](PERFORMANCE_BASELINES.md) — Historical local baseline data
+
+
+## Document Updates
+
+| Version | Date | Author | Changes |
+|---------|------|--------|---------|
+| 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |

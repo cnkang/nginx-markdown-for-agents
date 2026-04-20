@@ -41,3 +41,9 @@
 - [ ] Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/)
 - [ ] All tests pass
 - [ ] `cargo fmt` and `cargo clippy` pass (for Rust changes)
+
+## Document Updates
+
+| Version | Date | Author | Changes |
+|---------|------|--------|---------|
+| 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |

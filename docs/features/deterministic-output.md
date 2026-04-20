@@ -260,3 +260,10 @@ assert_eq!(result1, result2);
 - [POSIX Text File Requirements](https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/V1_chap03.html#tag_03_403)
 - [HTTP ETag Header](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/ETag)
 - [Architecture ADR: Full Buffering Approach](../architecture/ADR/0002-full-buffering-approach.md)
+
+
+## Document Updates
+
+| Version | Date | Author | Changes |
+|---------|------|--------|---------|
+| 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |

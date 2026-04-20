@@ -407,3 +407,9 @@ Makefile               顶层构建与测试入口
 ## 许可证
 
 BSD 2-Clause "Simplified" License。详见 [LICENSE](LICENSE)。
+
+## Document Updates
+
+| Version | Date | Author | Changes |
+|---------|------|--------|---------|
+| 0.5.0 | 2026-04-21 | docs-standardization | Synchronized Quick Start steps between English and Chinese versions; added update tracking section |

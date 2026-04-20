@@ -17,6 +17,28 @@ continue, pause, or roll back.
 
 ## Prerequisites
 
+```mermaid
+flowchart LR
+    P0["Phase 0<br/>Shadow Mode"] --> P0Check{"Shadow diff rate<br/>acceptable?"}
+    P0Check -->|yes| P1["Phase 1<br/>Canary (1%)"]
+    P0Check -->|no| Investigate["Investigate<br/>differences"]
+    Investigate --> P0
+    P1 --> P1Check{"Error rate<br/>within threshold?"}
+    P1Check -->|yes| P2["Phase 2<br/>Ramp-up (10-50%)"]
+    P1Check -->|no| Rollback1["Rollback<br/>to Phase 0"]
+    P2 --> P2Check{"Metrics stable?"}
+    P2Check -->|yes| P3["Phase 3<br/>Full rollout (100%)"]
+    P2Check -->|no| Rollback2["Rollback<br/>to Phase 1"]
+    P3 --> Done["Streaming enabled<br/>for all traffic"]
+    
+    style P0 fill:#036,color:#fff
+    style P1 fill:#06c,color:#fff
+    style P2 fill:#09c,color:#fff
+    style P3 fill:#0c0,color:#fff
+    style Rollback1 fill:#c00,color:#fff
+    style Rollback2 fill:#c00,color:#fff
+```
+
 - NGINX built with the Markdown module and `MARKDOWN_STREAMING_ENABLED`
 - Rust converter library compiled with the `streaming` feature
 - Metrics endpoint enabled (`markdown_metrics;` in a location block)
@@ -289,3 +311,10 @@ map $http_user_agent $markdown_streaming_engine {
 - Review debug logs for diff details (output length differences)
 - Small diffs may be acceptable (whitespace normalization differences)
 - Investigate if diffs affect semantic content
+
+
+## Document Updates
+
+| Version | Date | Author | Changes |
+|---------|------|--------|---------|
+| 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |

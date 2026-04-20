@@ -531,3 +531,10 @@ nginx -t && nginx -s reload
 | Worker crashes | Any unexpected restart |
 | P95 latency | > 2x baseline sustained 5+ min |
 | Worker memory | > 2x baseline |
+
+
+## Document Updates
+
+| Version | Date | Author | Changes |
+|---------|------|--------|---------|
+| 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |

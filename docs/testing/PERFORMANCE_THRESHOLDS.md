@@ -78,3 +78,10 @@ matching the platform's `uname`-style identifier (`<os>-<arch>`, e.g.,
   account for their inherently higher variance.
 - **Skip on missing baseline**: When no baseline exists for a platform,
   the engine skips comparison (exit 0) rather than producing false failures.
+
+
+## Document Updates
+
+| Version | Date | Author | Changes |
+|---------|------|--------|---------|
+| 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |

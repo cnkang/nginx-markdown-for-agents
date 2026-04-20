@@ -178,3 +178,10 @@ The baseline system integrates with CI pipelines:
 - [perf/streaming-evidence-targets.json](../streaming-evidence-targets.json) - Streaming evidence targets
 - [perf/metrics-schema.json](../metrics-schema.json) - Metric definitions and sample tiers
 - [tools/perf/evidence_pack_generator.py](../../tools/perf/evidence_pack_generator.py) - Evidence pack generation logic
+
+
+## Document Updates
+
+| Version | Date | Author | Changes |
+|---------|------|--------|---------|
+| 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |
