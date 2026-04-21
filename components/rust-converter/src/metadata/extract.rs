@@ -21,8 +21,8 @@
 //! | `description` | `description` |
 //! | `og:title` | `og_title` |
 //! | `og:description` | `og_description` |
-//! | `og:image` | `og_image` |
-//! | `og:url` | `og_url` |
+//! | `og:image` | `image` |
+//! | `og:url` | `url` |
 //! | `twitter:card` | `twitter_card` |
 //! | `twitter:title` | `twitter_title` |
 //! | `twitter:description` | `twitter_description` |

@@ -3,10 +3,13 @@
 //! Systematically compares streaming conversion output (both single-chunk and
 //! chunked modes) against full-buffer conversion for every HTML fixture in the
 //! corpus. Divergences are classified as either known differences (pre-approved
-//! in the known-differences TOML) or unexpected regressions. Evidence of
-//! mismatches is written to a JSON file for post-run analysis. This module
-//! serves as the primary gate for ensuring streaming conversion maintains
-//! output parity with the reference full-buffer implementation.
+//! in the known-differences TOML) or unexpected regressions. Mismatches are
+//! accumulated in-memory and reported by the final assertion at the end of the
+//! test run. A separate `#[ignore]` test (`bounded_memory_and_ttfb_evidence_pack`)
+//! writes a JSON evidence pack for bounded-memory analysis, but that file does
+//! not contain mismatch evidence. This module serves as the primary gate for
+//! ensuring streaming conversion maintains output parity with the reference
+//! full-buffer implementation.
 
 #![cfg(feature = "streaming")]
 

@@ -13,7 +13,7 @@
 //! title: "Example Page"
 //! description: "A sample document"
 //! url: "https://example.com/page"
-//! og_image: "https://example.com/image.png"
+//! image: "https://example.com/image.png"
 //! ---
 //! ```
 //!

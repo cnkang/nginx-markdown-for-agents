@@ -28,7 +28,7 @@
 //!
 //! # Code Block Fencing
 //!
-//! [`choose_fence_delimiter`] selects a backtick fence length that is strictly
+//! [`choose_code_fence`] selects a backtick fence length that is strictly
 //! longer than any backtick run in the code payload, preventing premature
 //! fence termination. [`longest_backtick_run`] is the helper that scans the
 //! payload for the longest contiguous backtick sequence.

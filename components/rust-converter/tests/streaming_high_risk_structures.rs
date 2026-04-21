@@ -3,10 +3,13 @@
 //! Validates that the streaming converter correctly handles HTML constructs
 //! known to be challenging for streaming processing, such as deeply nested
 //! elements, large tables, complex blockquote structures, and mixed content
-//! models. Each fixture in the streaming corpus with high-risk metadata is
-//! converted via both single-chunk and chunked streaming, then compared
+//! models. Selected fixtures in the streaming corpus with high-risk metadata
+//! are converted via both single-chunk and chunked streaming, then compared
 //! against full-buffer output. Fixtures marked as expecting fallback are
 //! verified to return `StreamingFallback` errors.
+//!
+//! Note: this file runs a specific set of named regression fixtures, not an
+//! exhaustive discovery of all high-risk corpus entries.
 
 #![cfg(feature = "streaming")]
 

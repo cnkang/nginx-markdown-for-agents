@@ -41,11 +41,33 @@ pub(crate) fn normalize_line_whitespace(line: &str) -> String {
     let mut prev_space = false;
     let mut at_start = true;
     let mut in_inline_code = false;
+    let mut fence_len: usize = 0;
+    let chars: Vec<char> = line.chars().collect();
+    let len = chars.len();
+    let mut i = 0;
 
-    for ch in line.chars() {
+    while i < len {
+        let ch = chars[i];
+
         if ch == '`' {
-            in_inline_code = !in_inline_code;
-            result.push(ch);
+            /* Count the run of consecutive backticks. */
+            let run_start = i;
+            while i < len && chars[i] == '`' {
+                i += 1;
+            }
+            let run_len = i - run_start;
+
+            if !in_inline_code {
+                in_inline_code = true;
+                fence_len = run_len;
+            } else if run_len == fence_len {
+                in_inline_code = false;
+                fence_len = 0;
+            }
+            /* Push the entire backtick run. */
+            for _ in 0..run_len {
+                result.push('`');
+            }
             prev_space = false;
             at_start = false;
         } else if ch == ' ' {
@@ -55,10 +77,12 @@ pub(crate) fn normalize_line_whitespace(line: &str) -> String {
                 result.push(ch);
                 prev_space = true;
             }
+            i += 1;
         } else {
             result.push(ch);
             prev_space = false;
             at_start = false;
+            i += 1;
         }
     }
 
@@ -81,8 +105,24 @@ impl MarkdownConverter {
         let mut in_code_block = false;
 
         for line in output.lines() {
-            if line.trim_start().starts_with("```") {
+            let is_fence = line.trim_start().starts_with("```");
+
+            if is_fence {
                 in_code_block = !in_code_block;
+                /* Fence lines are emitted raw to preserve any info string. */
+                result.push_str(line.trim_end());
+                result.push('\n');
+                prev_blank = false;
+                continue;
+            }
+
+            if in_code_block {
+                /* Inside fenced code blocks, preserve raw content including
+                 * trailing spaces and blank lines. */
+                result.push_str(line);
+                result.push('\n');
+                prev_blank = false;
+                continue;
             }
 
             let trimmed = line.trim_end();
@@ -93,12 +133,8 @@ impl MarkdownConverter {
                     prev_blank = true;
                 }
             } else {
-                if in_code_block {
-                    result.push_str(trimmed);
-                } else {
-                    let normalized = normalize_line_whitespace(trimmed);
-                    result.push_str(&normalized);
-                }
+                let normalized = normalize_line_whitespace(trimmed);
+                result.push_str(&normalized);
                 result.push('\n');
                 prev_blank = false;
             }

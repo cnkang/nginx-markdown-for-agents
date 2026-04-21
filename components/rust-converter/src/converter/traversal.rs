@@ -221,15 +221,19 @@ impl MarkdownConverter {
 
                 if let Some(u) = url {
                     let trimmed_url = u.trim();
-                    if !trimmed_url.is_empty()
-                        && !self.security_validator.is_dangerous_url(trimmed_url)
+                    if let Some(safe_url) =
+                        self.security_validator.sanitize_url(trimmed_url)
                     {
                         let label = title
                             .as_deref()
                             .map(|t| t.trim())
                             .filter(|t| !t.is_empty())
-                            .unwrap_or(trimmed_url);
-                        output.push_str(&format!("[{}]({})", label, trimmed_url));
+                            .unwrap_or(safe_url);
+                        let escaped_label = label
+                            .replace('[', "\\[")
+                            .replace(']', "\\]")
+                            .replace('\n', " ");
+                        output.push_str(&format!("[{}]({})", escaped_label, safe_url));
                         output.push('\n');
                     }
                 }
@@ -381,13 +385,17 @@ impl MarkdownConverter {
 
             if let Some(u) = src {
                 let trimmed = u.trim();
-                if !trimmed.is_empty() && !self.security_validator.is_dangerous_url(trimmed) {
+                if let Some(safe_url) = self.security_validator.sanitize_url(trimmed) {
                     let label = title
                         .as_deref()
                         .map(|t| t.trim())
                         .filter(|t| !t.is_empty())
-                        .unwrap_or(trimmed);
-                    output.push_str(&format!("[{}]({})", label, trimmed));
+                        .unwrap_or(safe_url);
+                    let escaped_label = label
+                        .replace('[', "\\[")
+                        .replace(']', "\\]")
+                        .replace('\n', " ");
+                    output.push_str(&format!("[{}]({})", escaped_label, safe_url));
                     output.push('\n');
                 }
             }
@@ -400,8 +408,8 @@ impl MarkdownConverter {
                     .map(|a| a.value.to_string())
             {
                 let trimmed = poster.trim();
-                if !trimmed.is_empty() && !self.security_validator.is_dangerous_url(trimmed) {
-                    output.push_str(&format!("![]({})", trimmed));
+                if let Some(safe_url) = self.security_validator.sanitize_url(trimmed) {
+                    output.push_str(&format!("![]({})", safe_url));
                     output.push('\n');
                 }
             }
@@ -419,7 +427,7 @@ impl MarkdownConverter {
 
             if let Some(u) = src {
                 let trimmed = u.trim();
-                if !trimmed.is_empty() && !self.security_validator.is_dangerous_url(trimmed) {
+                if let Some(safe_url) = self.security_validator.sanitize_url(trimmed) {
                     // Use type attribute as context if available
                     let type_attr = attrs_borrowed
                         .iter()
@@ -429,8 +437,12 @@ impl MarkdownConverter {
                         .as_deref()
                         .map(|t| t.trim())
                         .filter(|t| !t.is_empty())
-                        .unwrap_or(trimmed);
-                    output.push_str(&format!("[{}]({})", label, trimmed));
+                        .unwrap_or(safe_url);
+                    let escaped_label = label
+                        .replace('[', "\\[")
+                        .replace(']', "\\]")
+                        .replace('\n', " ");
+                    output.push_str(&format!("[{}]({})", escaped_label, safe_url));
                     output.push('\n');
                 }
             }
@@ -448,7 +460,7 @@ impl MarkdownConverter {
 
             if let Some(u) = src {
                 let trimmed = u.trim();
-                if !trimmed.is_empty() && !self.security_validator.is_dangerous_url(trimmed) {
+                if let Some(safe_url) = self.security_validator.sanitize_url(trimmed) {
                     let label = attrs_borrowed
                         .iter()
                         .find(|a| a.name.local.as_ref() == "label")
@@ -457,8 +469,12 @@ impl MarkdownConverter {
                         .as_deref()
                         .map(|t| t.trim())
                         .filter(|t| !t.is_empty())
-                        .unwrap_or(trimmed);
-                    output.push_str(&format!("[{}]({})", display, trimmed));
+                        .unwrap_or(safe_url);
+                    let escaped_display = display
+                        .replace('[', "\\[")
+                        .replace(']', "\\]")
+                        .replace('\n', " ");
+                    output.push_str(&format!("[{}]({})", escaped_display, safe_url));
                     output.push('\n');
                 }
             }
@@ -476,7 +492,7 @@ impl MarkdownConverter {
 
             if let Some(u) = href {
                 let trimmed = u.trim();
-                if !trimmed.is_empty() && !self.security_validator.is_dangerous_url(trimmed) {
+                if let Some(safe_url) = self.security_validator.sanitize_url(trimmed) {
                     let alt = attrs_borrowed
                         .iter()
                         .find(|a| a.name.local.as_ref() == "alt")
@@ -490,8 +506,12 @@ impl MarkdownConverter {
                         .map(|t| t.trim())
                         .filter(|t| !t.is_empty())
                         .or_else(|| title.as_deref().map(|t| t.trim()).filter(|t| !t.is_empty()))
-                        .unwrap_or(trimmed);
-                    output.push_str(&format!("[{}]({})", display, trimmed));
+                        .unwrap_or(safe_url);
+                    let escaped_display = display
+                        .replace('[', "\\[")
+                        .replace(']', "\\]")
+                        .replace('\n', " ");
+                    output.push_str(&format!("[{}]({})", escaped_display, safe_url));
                     output.push('\n');
                 }
             }

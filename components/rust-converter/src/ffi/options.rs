@@ -44,7 +44,12 @@ pub(crate) struct DecodedOptions<'a> {
 }
 
 /// Convert a required raw pointer from C into a Rust reference.
-pub(crate) fn required_ref<'a, T>(ptr: *const T, name: &str) -> Result<&'a T, ConversionError> {
+///
+/// # Safety
+///
+/// The caller must ensure that `ptr` is non-NULL, properly aligned, and
+/// points to a valid `T` that will remain live for the returned lifetime `'a`.
+pub(crate) unsafe fn required_ref<'a, T>(ptr: *const T, name: &str) -> Result<&'a T, ConversionError> {
     if ptr.is_null() {
         return Err(ConversionError::InvalidInput(format!(
             "{name} pointer is NULL"
@@ -57,7 +62,13 @@ pub(crate) fn required_ref<'a, T>(ptr: *const T, name: &str) -> Result<&'a T, Co
 }
 
 /// Convert a required pointer/length byte pair into a borrowed slice.
-pub(crate) fn required_bytes<'a>(
+///
+/// # Safety
+///
+/// The caller must ensure that when `len > 0`, `ptr` is non-NULL, properly
+/// aligned, and points to at least `len` readable bytes that remain valid
+/// for the returned lifetime `'a`.
+pub(crate) unsafe fn required_bytes<'a>(
     ptr: *const u8,
     len: usize,
     name: &str,
@@ -96,7 +107,12 @@ fn optional_utf8<'a>(
     // SAFETY: Pointer is non-NULL and caller guarantees `len` readable bytes.
     let bytes = unsafe { slice::from_raw_parts(ptr, len) };
 
-    Ok(std::str::from_utf8(bytes).ok())
+    match std::str::from_utf8(bytes) {
+        Ok(s) => Ok(Some(s)),
+        Err(_) => Err(ConversionError::InvalidInput(format!(
+            "{field_name} contains invalid UTF-8"
+        ))),
+    }
 }
 
 /// Decode C ABI option fields into strongly-typed Rust conversion settings.
@@ -117,7 +133,7 @@ fn optional_utf8<'a>(
 ///     flavor: 0,
 ///     front_matter: 0,
 ///     timeout_ms: 0,
-///     generate_etag: 0,
+///     generate_etag: 1,
 ///     estimate_tokens: 0,
 ///     streaming_budget: 0,
 /// };
