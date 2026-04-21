@@ -32,15 +32,15 @@ resolve_nginx_version() {
     case "$requested" in
         stable|mainline)
             if ! command -v curl >/dev/null 2>&1; then
-                echo "curl is required to resolve nginx channel: $requested"
+                echo "curl is required to resolve nginx channel: $requested" >&2
                 exit 1
             fi
             if ! command -v python3 >/dev/null 2>&1; then
-                echo "python3 is required to resolve nginx channel: $requested"
+                echo "python3 is required to resolve nginx channel: $requested" >&2
                 exit 1
             fi
 
-            page="$(curl --proto '=https' --tlsv1.2 -fsSL https://nginx.org/en/download.html)"
+            page="$(curl --proto '=https' --tlsv1.2 --connect-timeout 5 --max-time 20 -fsSL https://nginx.org/en/download.html)"
             version="$(
                 NGINX_DOWNLOAD_HTML="${page}" CHANNEL="${requested}" python3 - <<'PY'
 import os
@@ -65,7 +65,7 @@ PY
             )"
 
             if [[ -z "$version" ]]; then
-                echo "Failed to resolve latest ${requested} nginx version."
+                echo "Failed to resolve latest ${requested} nginx version." >&2
                 exit 1
             fi
             printf '%s\n' "$version"
@@ -81,7 +81,7 @@ PY
 case "$OS_TYPE" in
     glibc|musl) ;;
     *)
-        echo "OS_TYPE must be 'glibc' or 'musl'."
+        echo "OS_TYPE must be 'glibc' or 'musl'." >&2
         exit 1
         ;;
 esac
@@ -96,7 +96,7 @@ case "$ARCH" in
         PLATFORM="linux/arm64"
         ;;
     *)
-        echo "ARCH must be one of: x86_64, amd64, aarch64, arm64."
+        echo "ARCH must be one of: x86_64, amd64, aarch64, arm64." >&2
         exit 1
         ;;
 esac
@@ -107,7 +107,7 @@ DOCKERFILE="tools/build_release/Dockerfile.$OS_TYPE"
 OUT_DIR="dist/${NGINX_VERSION}-${OS_TYPE}-${ARCH}"
 
 if [[ ! -f "$DOCKERFILE" ]]; then
-    echo "Dockerfile not found: $DOCKERFILE"
+    echo "Dockerfile not found: $DOCKERFILE" >&2
     exit 1
 fi
 

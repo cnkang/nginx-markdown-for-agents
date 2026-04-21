@@ -221,9 +221,7 @@ impl MarkdownConverter {
 
                 if let Some(u) = url {
                     let trimmed_url = u.trim();
-                    if let Some(safe_url) =
-                        self.security_validator.sanitize_url(trimmed_url)
-                    {
+                    if let Some(safe_url) = self.security_validator.sanitize_url(trimmed_url) {
                         let label = title
                             .as_deref()
                             .map(|t| t.trim())

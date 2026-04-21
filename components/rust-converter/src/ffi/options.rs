@@ -49,7 +49,10 @@ pub(crate) struct DecodedOptions<'a> {
 ///
 /// The caller must ensure that `ptr` is non-NULL, properly aligned, and
 /// points to a valid `T` that will remain live for the returned lifetime `'a`.
-pub(crate) unsafe fn required_ref<'a, T>(ptr: *const T, name: &str) -> Result<&'a T, ConversionError> {
+pub(crate) unsafe fn required_ref<'a, T>(
+    ptr: *const T,
+    name: &str,
+) -> Result<&'a T, ConversionError> {
     if ptr.is_null() {
         return Err(ConversionError::InvalidInput(format!(
             "{name} pointer is NULL"
