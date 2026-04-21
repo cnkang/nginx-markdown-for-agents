@@ -40,11 +40,20 @@ resolve_nginx_version() {
                 exit 1
             fi
 
-            page="$(curl --proto '=https' --tlsv1.2 --connect-timeout 5 --max-time 20 -fsSL https://nginx.org/en/download.html)"
-            version="$(
+            if ! page="$(curl --proto '=https' --tlsv1.2 --connect-timeout 5 --max-time 20 -fsSL https://nginx.org/en/download.html 2>/dev/null)"; then
+                page=""
+            fi
+
+            if [[ -z "$page" ]]; then
+                echo "Failed to fetch nginx download page for channel: ${requested}" >&2
+                exit 1
+            fi
+
+            if ! version="$(
                 NGINX_DOWNLOAD_HTML="${page}" CHANNEL="${requested}" python3 - <<'PY'
 import os
 import re
+import sys
 
 html = os.environ.get("NGINX_DOWNLOAD_HTML", "")
 channel = os.environ.get("CHANNEL", "")
@@ -54,15 +63,19 @@ if channel == "mainline":
 elif channel == "stable":
     pattern = r"Stable version.*?nginx-([0-9]+\.[0-9]+\.[0-9]+)\.tar\.gz"
 else:
+    print(f"Unknown CHANNEL: {channel!r}", file=sys.stderr)
     raise SystemExit(1)
 
 match = re.search(pattern, html, flags=re.IGNORECASE | re.DOTALL)
 if not match:
+    print(f"No version match for channel {channel!r} in download page", file=sys.stderr)
     raise SystemExit(1)
 
 print(match.group(1))
 PY
-            )"
+            )"; then
+                version=""
+            fi
 
             if [[ -z "$version" ]]; then
                 echo "Failed to resolve latest ${requested} nginx version." >&2
