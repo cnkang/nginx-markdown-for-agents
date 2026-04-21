@@ -371,7 +371,7 @@ The implementation details in this document feed into a few operator-facing conc
 
 ---
 
-**Last Updated**: 2024-02-25  
+**Last Updated**: 2026-04-21  
 **Version**: 1.0  
 **Status**: Production Ready
 

@@ -24,19 +24,24 @@ flowchart LR
     P0Check -->|no| Investigate["Investigate<br/>differences"]
     Investigate --> P0
     P1 --> P1Check{"Error rate<br/>within threshold?"}
-    P1Check -->|yes| P2["Phase 2<br/>Ramp-up (10-50%)"]
+    P1Check -->|yes| P2["Phase 2<br/>Ramp-up (10%)"]
     P1Check -->|no| Rollback1["Rollback<br/>to Phase 0"]
     P2 --> P2Check{"Metrics stable?"}
-    P2Check -->|yes| P3["Phase 3<br/>Full rollout (100%)"]
+    P2Check -->|yes| P3["Phase 3<br/>Wider rollout (50%)"]
     P2Check -->|no| Rollback2["Rollback<br/>to Phase 1"]
-    P3 --> Done["Streaming enabled<br/>for all traffic"]
+    P3 --> P3Check{"Metrics stable?"}
+    P3Check -->|yes| P4["Phase 4<br/>Full rollout (100%)"]
+    P3Check -->|no| Rollback3["Rollback<br/>to Phase 2"]
+    P4 --> Done["Streaming enabled<br/>for all traffic"]
     
     style P0 fill:#036,color:#fff
     style P1 fill:#06c,color:#fff
     style P2 fill:#09c,color:#fff
-    style P3 fill:#0c0,color:#fff
+    style P3 fill:#0a6,color:#fff
+    style P4 fill:#0c0,color:#fff
     style Rollback1 fill:#c00,color:#fff
     style Rollback2 fill:#c00,color:#fff
+    style Rollback3 fill:#c00,color:#fff
 ```
 
 - NGINX built with the Markdown module and `MARKDOWN_STREAMING_ENABLED`
