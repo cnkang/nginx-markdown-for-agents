@@ -222,17 +222,7 @@ impl MarkdownConverter {
                 if let Some(u) = url {
                     let trimmed_url = u.trim();
                     if let Some(safe_url) = self.security_validator.sanitize_url(trimmed_url) {
-                        let label = title
-                            .as_deref()
-                            .map(|t| t.trim())
-                            .filter(|t| !t.is_empty())
-                            .unwrap_or(safe_url);
-                        let escaped_label = label
-                            .replace('[', "\\[")
-                            .replace(']', "\\]")
-                            .replace('\n', " ");
-                        output.push_str(&format!("[{}]({})", escaped_label, safe_url));
-                        output.push('\n');
+                        Self::emit_markdown_link(&[title.as_deref()], safe_url, safe_url, output);
                     }
                 }
             }
@@ -366,6 +356,68 @@ impl MarkdownConverter {
         self.handle_element_internal(node, tag_name, output, depth, Some(ctx))
     }
 
+    /// Escape a URL destination for use inside a Markdown link.
+    ///
+    /// If the URL contains characters that would break a bare `(url)`
+    /// destination (spaces, parentheses, `<`, `>`), the URL is wrapped in
+    /// angle brackets with `>` percent-encoded.  Otherwise the URL is
+    /// returned unchanged.
+    ///
+    /// # Arguments
+    ///
+    /// * `url` - The sanitized URL string to escape.
+    ///
+    /// # Returns
+    ///
+    /// A `String` safe for use as a Markdown link destination.
+    pub(super) fn escape_link_destination(url: &str) -> String {
+        if url.contains(' ')
+            || url.contains('(')
+            || url.contains(')')
+            || url.contains('<')
+            || url.contains('>')
+        {
+            /* Wrap in angle brackets; percent-encode '>' so it does not
+             * terminate the angle-bracket destination prematurely. */
+            let escaped = url.replace('>', "%3E");
+            format!("<{}>", escaped)
+        } else {
+            url.to_string()
+        }
+    }
+
+    /// Emit a Markdown link `[label](url)\n` into `output`.
+    ///
+    /// Centralizes the label-escape and URL-destination-escape logic shared
+    /// by the embedded-content, media, source, track, and area emit sites.
+    ///
+    /// # Arguments
+    ///
+    /// * `label_candidates` - Ordered slice of optional label strings; the
+    ///   first non-empty trimmed value is used.
+    /// * `fallback_label` - Fallback label when all candidates are empty.
+    /// * `safe_url` - Already-sanitized URL from `SecurityValidator`.
+    /// * `output` - The output buffer to append to.
+    fn emit_markdown_link(
+        label_candidates: &[Option<&str>],
+        fallback_label: &str,
+        safe_url: &str,
+        output: &mut String,
+    ) {
+        let label = label_candidates
+            .iter()
+            .filter_map(|opt| opt.map(|s| s.trim()).filter(|s| !s.is_empty()))
+            .next()
+            .unwrap_or(fallback_label);
+        let escaped_label = label
+            .replace('[', "\\[")
+            .replace(']', "\\]")
+            .replace('\n', " ");
+        let escaped_dest = Self::escape_link_destination(safe_url);
+        output.push_str(&format!("[{}]({})", escaped_label, escaped_dest));
+        output.push('\n');
+    }
+
     /// Extract `src` and `poster` URLs from `<video>` / `<audio>` elements
     /// as Markdown links so AI agents know what media was referenced.
     fn extract_media_urls(&self, node: &Handle, tag_name: &str, output: &mut String) {
@@ -384,17 +436,7 @@ impl MarkdownConverter {
             if let Some(u) = src {
                 let trimmed = u.trim();
                 if let Some(safe_url) = self.security_validator.sanitize_url(trimmed) {
-                    let label = title
-                        .as_deref()
-                        .map(|t| t.trim())
-                        .filter(|t| !t.is_empty())
-                        .unwrap_or(safe_url);
-                    let escaped_label = label
-                        .replace('[', "\\[")
-                        .replace(']', "\\]")
-                        .replace('\n', " ");
-                    output.push_str(&format!("[{}]({})", escaped_label, safe_url));
-                    output.push('\n');
+                    Self::emit_markdown_link(&[title.as_deref()], safe_url, safe_url, output);
                 }
             }
 
@@ -407,7 +449,8 @@ impl MarkdownConverter {
             {
                 let trimmed = poster.trim();
                 if let Some(safe_url) = self.security_validator.sanitize_url(trimmed) {
-                    output.push_str(&format!("![]({})", safe_url));
+                    let escaped_dest = Self::escape_link_destination(safe_url);
+                    output.push_str(&format!("![]({})", escaped_dest));
                     output.push('\n');
                 }
             }
@@ -431,17 +474,7 @@ impl MarkdownConverter {
                         .iter()
                         .find(|a| a.name.local.as_ref() == "type")
                         .map(|a| a.value.to_string());
-                    let label = type_attr
-                        .as_deref()
-                        .map(|t| t.trim())
-                        .filter(|t| !t.is_empty())
-                        .unwrap_or(safe_url);
-                    let escaped_label = label
-                        .replace('[', "\\[")
-                        .replace(']', "\\]")
-                        .replace('\n', " ");
-                    output.push_str(&format!("[{}]({})", escaped_label, safe_url));
-                    output.push('\n');
+                    Self::emit_markdown_link(&[type_attr.as_deref()], safe_url, safe_url, output);
                 }
             }
         }
@@ -463,17 +496,7 @@ impl MarkdownConverter {
                         .iter()
                         .find(|a| a.name.local.as_ref() == "label")
                         .map(|a| a.value.to_string());
-                    let display = label
-                        .as_deref()
-                        .map(|t| t.trim())
-                        .filter(|t| !t.is_empty())
-                        .unwrap_or(safe_url);
-                    let escaped_display = display
-                        .replace('[', "\\[")
-                        .replace(']', "\\]")
-                        .replace('\n', " ");
-                    output.push_str(&format!("[{}]({})", escaped_display, safe_url));
-                    output.push('\n');
+                    Self::emit_markdown_link(&[label.as_deref()], safe_url, safe_url, output);
                 }
             }
         }
@@ -499,18 +522,12 @@ impl MarkdownConverter {
                         .iter()
                         .find(|a| a.name.local.as_ref() == "title")
                         .map(|a| a.value.to_string());
-                    let display = alt
-                        .as_deref()
-                        .map(|t| t.trim())
-                        .filter(|t| !t.is_empty())
-                        .or_else(|| title.as_deref().map(|t| t.trim()).filter(|t| !t.is_empty()))
-                        .unwrap_or(safe_url);
-                    let escaped_display = display
-                        .replace('[', "\\[")
-                        .replace(']', "\\]")
-                        .replace('\n', " ");
-                    output.push_str(&format!("[{}]({})", escaped_display, safe_url));
-                    output.push('\n');
+                    Self::emit_markdown_link(
+                        &[alt.as_deref(), title.as_deref()],
+                        safe_url,
+                        safe_url,
+                        output,
+                    );
                 }
             }
         }

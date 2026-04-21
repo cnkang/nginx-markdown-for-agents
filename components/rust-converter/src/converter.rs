@@ -992,6 +992,66 @@ mod tests {
         assert!(result.contains("After"));
     }
 
+    /// Regression: URLs containing spaces or parentheses must be escaped in
+    /// Markdown link destinations so the link is not broken.
+    #[test]
+    fn test_link_url_with_spaces_escaped() {
+        let html = br#"<a href="https://example.com/path with spaces/page">Link</a>"#;
+        let dom = parse_html(html).expect("Parse failed");
+        let converter = MarkdownConverter::new();
+        let result = converter.convert(&dom).expect("Conversion failed");
+
+        /* The URL must be wrapped in angle brackets because it contains spaces. */
+        assert!(
+            result.contains("[Link](<https://example.com/path with spaces/page>)"),
+            "URL with spaces must use angle-bracket destination.\nGot: {result}"
+        );
+    }
+
+    /// Regression: URLs containing parentheses must be escaped.
+    #[test]
+    fn test_link_url_with_parens_escaped() {
+        let html =
+            br#"<a href="https://en.wikipedia.org/wiki/Rust_(programming_language)">Rust</a>"#;
+        let dom = parse_html(html).expect("Parse failed");
+        let converter = MarkdownConverter::new();
+        let result = converter.convert(&dom).expect("Conversion failed");
+
+        assert!(
+            result.contains("[Rust](<https://en.wikipedia.org/wiki/Rust_(programming_language)>)"),
+            "URL with parens must use angle-bracket destination.\nGot: {result}"
+        );
+    }
+
+    /// Regression: URLs containing '>' must have it percent-encoded inside
+    /// angle-bracket destinations.
+    #[test]
+    fn test_link_url_with_angle_bracket_escaped() {
+        let html = br#"<a href="https://example.com/a>b">Link</a>"#;
+        let dom = parse_html(html).expect("Parse failed");
+        let converter = MarkdownConverter::new();
+        let result = converter.convert(&dom).expect("Conversion failed");
+
+        assert!(
+            result.contains("[Link](<https://example.com/a%3Eb>)"),
+            "URL with '>' must be percent-encoded.\nGot: {result}"
+        );
+    }
+
+    /// Normal URLs without problematic characters remain bare (no angle brackets).
+    #[test]
+    fn test_link_url_normal_not_wrapped() {
+        let html = br#"<a href="https://example.com/page">Link</a>"#;
+        let dom = parse_html(html).expect("Parse failed");
+        let converter = MarkdownConverter::new();
+        let result = converter.convert(&dom).expect("Conversion failed");
+
+        assert!(
+            result.contains("[Link](https://example.com/page)"),
+            "Normal URL should not be wrapped in angle brackets.\nGot: {result}"
+        );
+    }
+
     /// Test video element: src and poster extracted, fallback text preserved.
     #[test]
     fn test_video_url_extraction() {
@@ -1394,6 +1454,37 @@ mod tests {
         // Code block content should preserve spacing
         assert!(result.contains("fn  test()  {"));
         assert!(result.contains("let  x  =  5;"));
+    }
+
+    /// Regression: a four-backtick fenced block containing a literal ```
+    /// line must preserve raw content (blank lines, trailing spaces) inside
+    /// the outer fence.  The old toggle-based fence detection would
+    /// incorrectly treat the inner ``` as a fence boundary.
+    #[test]
+    fn test_normalize_four_backtick_fence_with_inner_triple() {
+        let converter = MarkdownConverter::new();
+        let input = concat!(
+            "````\n",
+            "```\n",
+            "raw blank line follows\n",
+            "\n",
+            "trailing spaces   \n",
+            "```\n",
+            "````\n",
+        )
+        .to_string();
+        let result = converter.normalize_output(input);
+
+        /* The outer ```` ... ```` block must be preserved verbatim:
+         * inner ``` lines are content, not fence boundaries. */
+        assert!(
+            result.contains("```\nraw blank line follows\n\ntrailing spaces   \n```"),
+            "Inner ``` and raw content must be preserved inside four-backtick fence.\n\
+             Got: {result}"
+        );
+        /* The outer fences themselves must appear. */
+        assert!(result.starts_with("````\n"));
+        assert!(result.trim_end().ends_with("````"));
     }
 
     /// Test that list indentation is preserved (2 spaces for nested lists)

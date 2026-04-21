@@ -102,13 +102,23 @@ impl MarkdownConverter {
 
         let mut result = String::with_capacity(output.len());
         let mut prev_blank = false;
-        let mut in_code_block = false;
+        let mut active_fence_len: Option<usize> = None;
 
         for line in output.lines() {
-            let is_fence = line.trim_start().starts_with("```");
+            let trimmed_start = line.trim_start();
+            let fence_len = trimmed_start.bytes().take_while(|&b| b == b'`').count();
+            let is_opening_fence = active_fence_len.is_none() && fence_len >= 3;
+            let is_closing_fence = active_fence_len
+                .map(|len| fence_len >= len && trimmed_start[fence_len..].trim().is_empty())
+                .unwrap_or(false);
+            let is_fence = is_opening_fence || is_closing_fence;
 
             if is_fence {
-                in_code_block = !in_code_block;
+                if is_opening_fence {
+                    active_fence_len = Some(fence_len);
+                } else {
+                    active_fence_len = None;
+                }
                 /* Fence lines are emitted raw to preserve any info string. */
                 result.push_str(line.trim_end());
                 result.push('\n');
@@ -116,7 +126,7 @@ impl MarkdownConverter {
                 continue;
             }
 
-            if in_code_block {
+            if active_fence_len.is_some() {
                 /* Inside fenced code blocks, preserve raw content including
                  * trailing spaces and blank lines. */
                 result.push_str(line);

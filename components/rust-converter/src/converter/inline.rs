@@ -87,10 +87,11 @@ impl MarkdownConverter {
         if let Some(url) = href {
             if let Some(safe_url) = self.security_validator.sanitize_url(&url) {
                 if !normalized_text.is_empty() {
+                    let escaped_dest = Self::escape_link_destination(safe_url);
                     output.push('[');
                     output.push_str(&normalized_text);
                     output.push_str("](");
-                    output.push_str(safe_url);
+                    output.push_str(&escaped_dest);
                     output.push(')');
                 }
             } else if !normalized_text.is_empty() {
@@ -139,10 +140,11 @@ impl MarkdownConverter {
             .and_then(|u| self.security_validator.sanitize_url(u));
 
         if let Some(url) = safe_url {
+            let escaped_dest = Self::escape_link_destination(url);
             output.push_str("![");
             output.push_str(&alt);
             output.push_str("](");
-            output.push_str(url);
+            output.push_str(&escaped_dest);
             if let Some(ref t) = title {
                 let trimmed = t.trim();
                 if !trimmed.is_empty() {
