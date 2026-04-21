@@ -150,3 +150,10 @@ Areas that could be expanded later without changing the current feature contract
 3. Additional metadata sources (JSON-LD, microdata)
 4. YAML validation using external library
 5. Support for nested YAML structures
+
+
+## Document Updates
+
+| Version | Date | Author | Changes |
+|---------|------|--------|---------|
+| 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |

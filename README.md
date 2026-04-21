@@ -55,10 +55,11 @@ AI bot (by User-Agent)                 -> Markdown (via NGINX config)
 
 ## Quick Start
 
-Two steps are enough for a first trial:
+Three steps are enough for a first trial:
 
 1. Install the module.
-2. Verify that Markdown and HTML variants both behave as expected.
+2. Enable Markdown on a location.
+3. Verify that Markdown and HTML variants both behave as expected.
 
 ### 1. Install the module
 
@@ -71,11 +72,31 @@ The install script auto-detects the local NGINX version, downloads the matching 
 
 For alternative installation methods (source builds, Docker, custom NGINX builds), troubleshooting, and detailed instructions, see the [Installation Guide](docs/guides/INSTALLATION.md).
 
-### 2. Verify behavior
+### 2. Enable Markdown on a location
 
-The install script already enables `markdown_filter on` and wires `load_module`, so the default NGINX welcome page is ready for conversion. No additional configuration is needed for a first trial.
+```nginx
+load_module modules/ngx_http_markdown_filter_module.so;
 
-If you want to enable conversion on a specific route with a backend instead, see the [Deployment Examples](docs/guides/DEPLOYMENT_EXAMPLES.md).
+http {
+    upstream backend {
+        server 127.0.0.1:8080;
+    }
+
+    server {
+        listen 80;
+
+        location / {
+            markdown_filter on;
+            proxy_set_header Accept-Encoding "";
+            proxy_pass http://backend;
+        }
+    }
+}
+```
+
+If your upstream may return compressed responses, `proxy_set_header Accept-Encoding "";` is the easiest way to get started. Once the basic pipeline works, switch to the module's built-in decompression support — see [Automatic Decompression](docs/features/AUTOMATIC_DECOMPRESSION.md).
+
+### 3. Verify behavior
 
 ```bash
 # Markdown variant
@@ -389,3 +410,9 @@ Future exploration:
 ## License
 
 BSD 2-Clause "Simplified" License. See [LICENSE](LICENSE).
+
+## Document Updates
+
+| Version | Date | Author | Changes |
+|---------|------|--------|---------|
+| 0.5.0 | 2026-04-21 | docs-standardization | Synchronized Quick Start steps between English and Chinese versions; added update tracking section |

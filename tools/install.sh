@@ -201,6 +201,16 @@ semver_lt() {
   return 1
 }
 
+# Compute the SHA-256 hash of a file, trying sha256sum, shasum, and openssl in order.
+#
+# Arguments:
+#   $1 - path to the file to hash
+#
+# Outputs:
+#   Writes the hex SHA-256 digest (without filename or prefix) to stdout
+#
+# Returns:
+#   0 on success, 1 if no supported hashing tool is available
 sha256_file() {
   local file="$1"
 
@@ -222,6 +232,16 @@ sha256_file() {
   return 1
 }
 
+# Fetch the GitHub release JSON for the project, selecting the latest release or a tagged version.
+#
+# Arguments:
+#   (none; uses RELEASE_VERSION and REPO global variables)
+#
+# Outputs:
+#   Writes the raw GitHub API JSON response to stdout
+#
+# Returns:
+#   0 on success, non-zero if curl fails
 fetch_release_json() {
   local release_api=""
 
@@ -373,6 +393,17 @@ PY
   fi
 }
 
+# Format a space-separated list of nginx versions grouped by major.minor series for display.
+#
+# Arguments:
+#   $1 - space-separated list of version strings (e.g. "1.24.0 1.26.0 1.26.2")
+#
+# Outputs:
+#   Writes grouped version lines to stdout, one line per major.minor series
+#   (e.g. "  1.24.x: 1.24.0" and "  1.26.x: 1.26.0 1.26.2")
+#
+# Returns:
+#   0 on success (also returns 0 if versions is empty or python3 is unavailable)
 format_versions_by_series() {
   local versions="$1"
 
@@ -405,12 +436,35 @@ for series in sorted(groups.keys(), key=lambda s: tuple(int(p) for p in s.split(
 PY
 }
 
+# Extract the value of a --key=VALUE argument from nginx -V output.
+#
+# Arguments:
+#   $1 - the configure key name (e.g. "prefix", "conf-path", "modules-path")
+#   $2 - the full output of `nginx -V`
+#
+# Outputs:
+#   Writes the extracted value to stdout, or nothing if the key is not found
+#
+# Returns:
+#   0 always
 extract_configure_arg() {
   local key="$1"
   local nginx_v_output="$2"
   printf '%s\n' "$nginx_v_output" | sed -n "s/.*--${key}=\\([^ ]*\\).*/\\1/p" | head -n1
 }
 
+# Resolve a path value by prepending a prefix if the candidate is relative.
+#
+# Arguments:
+#   $1 - candidate path (may be empty, absolute, or relative)
+#   $2 - prefix to prepend for relative paths (may be empty)
+#
+# Outputs:
+#   Writes the resolved absolute or relative path to stdout;
+#   an empty line if the candidate is empty
+#
+# Returns:
+#   0 always
 resolve_path_with_prefix() {
   local candidate="$1"
   local prefix="$2"

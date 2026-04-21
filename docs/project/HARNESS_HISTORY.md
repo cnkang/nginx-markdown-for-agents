@@ -99,3 +99,9 @@ Interactive review logs, branching A/B/C plan alternatives, raw review JSONL,
 and timeline telemetry remain planning history rather than public contract.
 They are useful during design and maintenance, but they would add noise and
 duplicate transient reasoning if copied into the tracked docs.
+
+## Document Updates
+
+| Version | Date | Author | Changes |
+|---------|------|--------|---------|
+| 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |

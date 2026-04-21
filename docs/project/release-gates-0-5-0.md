@@ -152,3 +152,9 @@ The following topics are explicitly out of scope for 0.5.0:
 9. Richer agent integrations / control-plane ideas
 
 0.5.0 is not a feature expansion release, not a new output format release, not an observability platform release.
+
+## Document Updates
+
+| Version | Date | Author | Changes |
+|---------|------|--------|---------|
+| 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |

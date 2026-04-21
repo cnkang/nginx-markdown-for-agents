@@ -43,3 +43,9 @@ This list is mirrored in `tools/release/release_constants.py::NON_GOALS` and mus
 - AI post-processing capabilities (summarization, rewriting, extraction)
 - Complex shadow streaming replacement
 - Positioning 0.4.0 as a "1.0.0 pre-release"
+
+## Document Updates
+
+| Version | Date | Author | Changes |
+|---------|------|--------|---------|
+| 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |

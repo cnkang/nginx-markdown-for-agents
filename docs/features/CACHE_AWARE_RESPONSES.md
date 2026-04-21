@@ -2,6 +2,19 @@
 
 ## Overview
 
+```mermaid
+flowchart LR
+    Request["Client Request"] --> ETag{"Has If-None-Match?"}
+    ETag -->|yes| Compare["Compare ETag"]
+    Compare -->|match| NotModified["304 Not Modified"]
+    Compare -->|no match| Convert["Convert & Return Markdown"]
+    ETag -->|no| Convert
+    Convert --> SetHeaders["Set Vary: Accept<br/>Set ETag<br/>Set Content-Type"]
+    
+    style NotModified fill:#090,color:#fff
+    style Convert fill:#009639,color:#fff
+```
+
 This module generates cache-aware responses with proper ETags, Vary headers, and conditional request support. This ensures that Markdown variants are cached correctly and efficiently by browsers, CDNs, and reverse proxies.
 
 ## Key Features
@@ -392,3 +405,10 @@ The cache-aware response logic is implemented in:
 - `components/rust-converter/src/etag_generator.rs` - ETag generation
 
 For implementation details, see the source code and inline comments.
+
+
+## Document Updates
+
+| Version | Date | Author | Changes |
+|---------|------|--------|---------|
+| 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |

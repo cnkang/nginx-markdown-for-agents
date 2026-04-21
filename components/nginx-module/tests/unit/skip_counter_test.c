@@ -96,12 +96,20 @@ metric_inc_skip(eligibility_t eligibility)
     }
 }
 
+/*
+ * Test: reset metrics struct to zero
+ * Expected: all counter fields in the metrics struct are zeroed
+ */
 static void
 reset_metrics(metrics_t *m)
 {
     memset(m, 0, sizeof(metrics_t));
 }
 
+/*
+ * Test: ELIGIBLE eligibility value does not increment any skip counter
+ * Expected: all skip counters remain at zero after calling metric_inc_skip with ELIGIBLE
+ */
 static void
 test_eligible_is_noop(void)
 {
@@ -137,6 +145,12 @@ test_eligible_is_noop(void)
     TEST_PASS("ELIGIBLE does not increment any counter");
 }
 
+/*
+ * Test: each ineligibility enum value maps to the correct skip counter field
+ * Expected: METHOD->skips.method, STATUS->skips.status, CONTENT_TYPE->skips.content_type,
+ *           SIZE->skips.size, STREAMING->skips.streaming, AUTH->skips.auth,
+ *           RANGE->skips.range, CONFIG->skips.config
+ */
 static void
 test_each_enum_maps_correctly(void)
 {
@@ -199,6 +213,10 @@ test_each_enum_maps_correctly(void)
     TEST_PASS("All enum values map to correct counters");
 }
 
+/*
+ * Test: unknown eligibility enum value falls back to skips.config counter
+ * Expected: skips.config is incremented and no other counters are touched
+ */
 static void
 test_unknown_falls_back_to_config(void)
 {
@@ -223,6 +241,10 @@ test_unknown_falls_back_to_config(void)
     TEST_PASS("Unknown enum falls back to skips.config");
 }
 
+/*
+ * Test: NULL metrics pointer is handled safely without crashing
+ * Expected: metric_inc_skip returns without dereferencing NULL for any eligibility value
+ */
 static void
 test_null_metrics_is_safe(void)
 {
@@ -238,6 +260,10 @@ test_null_metrics_is_safe(void)
     TEST_PASS("No crash with NULL metrics pointer");
 }
 
+/*
+ * Test: multiple metric_inc_skip calls accumulate correctly across counters
+ * Expected: repeated calls to the same counter accumulate, and different counters are independent
+ */
 static void
 test_multiple_increments_accumulate(void)
 {
@@ -269,6 +295,10 @@ test_multiple_increments_accumulate(void)
     TEST_PASS("Counters accumulate correctly");
 }
 
+/*
+ * Test: entry point for skip_counter unit tests
+ * Expected: runs all test functions in sequence and returns 0 on success
+ */
 int
 main(void)
 {

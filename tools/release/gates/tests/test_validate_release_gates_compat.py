@@ -1,3 +1,9 @@
+"""Tests for release-gate compatibility validation.
+
+Ensures the capability classification matrix accepts valid single-column
+states and rejects invalid states or missing classification cells.
+"""
+
 from __future__ import annotations
 
 from tools.release.gates.validate_release_gates import (

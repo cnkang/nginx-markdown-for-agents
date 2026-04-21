@@ -2,6 +2,22 @@
 
 ## Overview
 
+```mermaid
+flowchart TD
+    Client["Client Request"] --> Accept{"Accept Header?"}
+    Accept -->|"text/markdown"| Convert["Convert to Markdown"]
+    Accept -->|"text/html"| PassHTML["Pass HTML Through"]
+    Accept -->|"*/*"| Wildcard{"markdown_on_wildcard?"}
+    Wildcard -->|on| Convert
+    Wildcard -->|off| PassHTML
+    Accept -->|"application/json"| PassHTML
+    Convert --> Response["Response with<br/>Content-Type: text/markdown"]
+    PassHTML --> Response2["Response with<br/>Content-Type: text/html"]
+    
+    style Convert fill:#009639,color:#fff
+    style Wildcard fill:#f90,color:#000
+```
+
 This module implements HTTP content negotiation to serve Markdown representations of HTML content. Clients request Markdown using the standard `Accept` header, and the module decides whether to convert the response based on eligibility rules and configuration.
 
 ## How It Works
@@ -392,3 +408,10 @@ The content negotiation logic is implemented in:
 - `src/ngx_http_markdown_filter_module.c` - Main filter logic
 
 For implementation details, see the source code and inline comments.
+
+
+## Document Updates
+
+| Version | Date | Author | Changes |
+|---------|------|--------|---------|
+| 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |

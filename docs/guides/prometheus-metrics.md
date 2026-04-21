@@ -16,6 +16,20 @@
 
 ## Overview
 
+```mermaid
+flowchart LR
+    NGINX["NGINX Workers"] --> SHM["Shared Memory<br/>Metrics Zone"]
+    SHM --> Endpoint["markdown_metrics<br/>Endpoint"]
+    Endpoint -->|"Accept: application/json"| JSON["JSON Output"]
+    Endpoint -->|"Accept: text/plain"| Plain["Plain Text Output"]
+    Endpoint -->|"Accept: text/plain; version=0.0.4"| Prom["Prometheus Format"]
+    Prom --> Prometheus["Prometheus Server<br/>(scrape)"]
+    Prometheus --> Grafana["Grafana Dashboard"]
+    
+    style SHM fill:#009639,color:#fff
+    style Prom fill:#e6522c,color:#fff
+```
+
 The NGINX Markdown filter module exposes module-level operational metrics via the existing `markdown_metrics` endpoint. Starting with version 0.4.0, the endpoint supports Prometheus text exposition format (`text/plain; version=0.0.4; charset=utf-8`) as an opt-in output format alongside the existing JSON and plain-text formats.
 
 These metrics help operators answer three questions:
@@ -486,3 +500,10 @@ These metrics are added in 0.5.0 and are only emitted when `MARKDOWN_STREAMING_E
 | `nginx_markdown_streaming_shadow_diff_total` | counter | — | Stable |
 | `nginx_markdown_streaming_ttfb_seconds` | gauge | — | Stable |
 | `nginx_markdown_streaming_peak_memory_bytes` | gauge | — | Stable |
+
+
+## Document Updates
+
+| Version | Date | Author | Changes |
+|---------|------|--------|---------|
+| 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |

@@ -467,3 +467,10 @@ The following items are explicitly out of scope for 0.4.0:
 - **New NGINX configuration directives** for optimization control.
 - **Optimization-specific metrics or logging** — No new reason codes or
   decision logging for optimization paths.
+
+
+## Document Updates
+
+| Version | Date | Author | Changes |
+|---------|------|--------|---------|
+| 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |

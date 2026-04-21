@@ -149,3 +149,9 @@ These codes map to the existing `ngx_http_markdown_eligibility_t` enum values an
 ```
 
 All project-specific C preprocessor constants must use the `NGX_HTTP_MARKDOWN_` prefix. Function-like macros use the lowercase `ngx_http_markdown_` prefix per NGINX convention.
+
+## Document Updates
+
+| Version | Date | Author | Changes |
+|---------|------|--------|---------|
+| 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |

@@ -1,3 +1,13 @@
+//! Integration tests for HTML table to GFM Markdown table conversion.
+//!
+//! Tests cover:
+//! - Basic table structure (headers + rows)
+//! - Column alignment (left, center, right) via `<th>` style and `<col>` elements
+//! - Edge cases: empty tables, single-column tables, mismatched column counts
+//! - Tables without explicit `<thead>` (first `<tr>` used as header)
+//! - Inline Markdown within table cells (links, emphasis, code)
+//! - CommonMark fallback (tables traversed as inline content when GFM is off)
+
 use nginx_markdown_converter::converter::{ConversionOptions, MarkdownConverter, MarkdownFlavor};
 use nginx_markdown_converter::parser::parse_html;
 

@@ -92,3 +92,10 @@ For decompression-specific validation coverage and runnable commands:
 For operational troubleshooting:
 
 - `docs/guides/OPERATIONS.md`
+
+
+## Document Updates
+
+| Version | Date | Author | Changes |
+|---------|------|--------|---------|
+| 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |

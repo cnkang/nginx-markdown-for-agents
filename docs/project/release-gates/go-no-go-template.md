@@ -52,3 +52,9 @@ Unresolved failures with documented exceptions must be recorded here with risk a
 1. All P0 sub-specs must pass their DoD evaluation before a Go decision.
 2. The P1 sub-spec (parser-path-optimization) may be excluded without blocking the release (Req 7.5).
 3. Any unresolved failure with a documented exception must be recorded in this decision record with risk assessment and mitigation (Req 7.6).
+
+## Document Updates
+
+| Version | Date | Author | Changes |
+|---------|------|--------|---------|
+| 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |

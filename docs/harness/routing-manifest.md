@@ -44,3 +44,9 @@ Plan-only targets (for example `*-plan`) are documentation aids, not evidence.
 - Missing optional local adapters should produce `SKIP_NOT_PRESENT`, not
   failure.
 - Optional local active-spec pointers may refine spec resolution.
+
+## Document Updates
+
+| Version | Date | Author | Changes |
+|---------|------|--------|---------|
+| 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |

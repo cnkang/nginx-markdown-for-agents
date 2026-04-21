@@ -24,3 +24,9 @@ Missing optional inputs must degrade as `SKIP_NOT_PRESENT`.
 4. Run `make harness-check` for normal harness maintenance.
 5. Run `make harness-check-full` when broader docs/release wiring changes.
 
+
+## Document Updates
+
+| Version | Date | Author | Changes |
+|---------|------|--------|---------|
+| 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |

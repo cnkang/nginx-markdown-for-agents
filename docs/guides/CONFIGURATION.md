@@ -443,6 +443,67 @@ are only effective when `markdown_streaming_engine` is enabled. When
 `markdown_streaming_engine off` (the default), all streaming directives are ignored
 and behavior is identical to 0.4.0.
 
+
+#### markdown_streaming_engine
+
+**Syntax:** `markdown_streaming_engine off | on | auto | $variable;`
+**Default:** `off`
+**Context:** http, server, location
+
+Controls whether the streaming conversion engine is used. When `off` (the default),
+all requests use the full-buffer conversion path and behavior is identical to 0.4.0.
+
+- `off`: Disable streaming. All requests use the full-buffer path.
+- `on`: Enable streaming for all eligible requests.
+- `auto`: Enable streaming with automatic fallback to full-buffer when the streaming
+  engine encounters unsupported features (e.g., tables requiring full-buffer processing).
+- `$variable`: Per-request variable-driven control. Resolved values accept `on`/`off`/`auto`
+  (case-insensitive). This enables canary and percentage-based rollouts.
+
+**Example:**
+```nginx
+# Enable streaming for all requests
+markdown_streaming_engine on;
+
+# Auto mode with fallback
+markdown_streaming_engine auto;
+
+# Variable-driven canary rollout
+map $http_cookie $streaming_flag {
+    default      off;
+    "~*canary=1" on;
+}
+markdown_streaming_engine $streaming_flag;
+```
+
+#### markdown_streaming_budget
+
+**Syntax:** `markdown_streaming_budget <size>;`
+**Default:** `2m`
+**Context:** http, server, location
+
+Sets the memory budget for streaming conversion, passed to the Rust streaming engine.
+The streaming engine enforces this budget to ensure bounded memory usage regardless
+of input size. If the budget is exceeded, the streaming engine reports a budget-exceeded
+error and the failure is handled according to `markdown_streaming_on_error`.
+
+**Valid Units:** `k` (kilobytes), `m` (megabytes)
+
+**Example:**
+```nginx
+# Default budget (2 MB)
+markdown_streaming_budget 2m;
+
+# Larger budget for complex pages
+markdown_streaming_budget 4m;
+```
+
+**Behavior:**
+- The budget applies to the total working set of the streaming converter, including
+  parser state, sanitizer state, and output buffers.
+- When the budget is exceeded, the `nginx_markdown_streaming_budget_exceeded_total`
+  Prometheus counter increments and the error is classified as a pre-commit failure.
+- The budget does not affect the full-buffer path, which uses `markdown_max_size` instead.
 #### markdown_streaming_on_error
 
 **Syntax:** `markdown_streaming_on_error pass | reject;`
@@ -704,6 +765,63 @@ location /markdown-metrics {
 - `fullbuffer_path_hits`: Requests routed to the full-buffer conversion path
 - `incremental_path_hits`: Requests routed to the incremental conversion path
 
+
+#### markdown_metrics_format
+
+**Syntax:** `markdown_metrics_format auto | prometheus;`
+**Default:** `auto`
+**Context:** http, server, location
+
+Controls the output format of the `markdown_metrics` endpoint for non-JSON requests.
+
+- `auto`: JSON for `Accept: application/json`, plain text for `Accept: text/plain`,
+  and Prometheus text exposition format for `Accept: text/plain; version=0.0.4` or
+  `Accept: application/openmetrics-text` (default).
+- `prometheus`: Prometheus text exposition format for all non-JSON requests. JSON output
+  remains available regardless of this setting.
+
+When `markdown_metrics_format prometheus` is configured, plain `Accept: text/plain`
+requests also return Prometheus format. This simplifies Prometheus scrape configuration
+by eliminating the need for a custom Accept header.
+
+**Example:**
+```nginx
+location /markdown-metrics {
+    markdown_metrics;
+    markdown_metrics_format prometheus;
+}
+```
+
+See [Prometheus Metrics Guide](prometheus-metrics.md) for scrape configuration
+and metric catalog.
+
+#### markdown_metrics_shm_size
+
+**Syntax:** `markdown_metrics_shm_size <size>;`
+**Default:** `8 * ngx_pagesize` (typically 32k or 64k depending on platform)
+**Context:** http
+
+Sets the size of the shared-memory zone used to aggregate metrics across NGINX worker
+processes. The shared-memory zone holds the metrics struct that all workers update
+atomically.
+
+This directive must appear in the `http` context, not in `server` or `location`.
+
+**Valid Units:** `k` (kilobytes), `m` (megabytes)
+
+**Example:**
+```nginx
+http {
+    markdown_metrics_shm_size 128k;
+}
+```
+
+**Notes:**
+- The default size is sufficient for typical deployments. Increase only if the
+  metrics struct grows due to new fields in a future release.
+- When the SHM-backed metrics struct layout changes between releases, the module
+  bumps the SHM zone name to prevent hot-reload layout mismatch. A full restart
+  is recommended after upgrading.
 ---
 
 ## Configuration Examples
@@ -1813,3 +1931,9 @@ tail -f /var/log/nginx/error.log | grep "conversion time"
 - **Configuration to Behavior Map:** [../architecture/CONFIG_BEHAVIOR_MAP.md](../architecture/CONFIG_BEHAVIOR_MAP.md)
 - **Streaming Compatibility Matrix:** [../project/compatibility-matrix-0-5-0.md](../project/compatibility-matrix-0-5-0.md)
 - **NGINX Documentation:** https://nginx.org/en/docs/
+
+## Document Updates
+
+| Version | Date | Author | Changes |
+|---------|------|--------|---------|
+| 0.5.0 | 2026-04-21 | docs-standardization | Added `markdown_streaming_engine`, `markdown_streaming_budget`, `markdown_metrics_format`, and `markdown_metrics_shm_size` directive documentation previously missing from this guide; added update tracking section |

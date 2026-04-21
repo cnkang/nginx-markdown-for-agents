@@ -209,3 +209,10 @@ When the NGINX C module calls the Rust converter:
 - [W3C Character Encodings](https://www.w3.org/International/questions/qa-html-encoding-declarations)
 - [HTML5 Charset Detection](https://html.spec.whatwg.org/multipage/parsing.html#determining-the-character-encoding)
 - [RFC 9110 - HTTP Semantics](https://www.rfc-editor.org/rfc/rfc9110.html#name-content-type)
+
+
+## Document Updates
+
+| Version | Date | Author | Changes |
+|---------|------|--------|---------|
+| 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |

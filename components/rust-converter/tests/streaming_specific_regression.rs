@@ -1,3 +1,12 @@
+//! Regression tests for specific streaming conversion bugs and edge cases.
+//!
+//! Contains targeted tests for previously identified bugs in the streaming
+//! converter, including gzip/zlib compressed input handling, chunked transfer
+//! encoding simulation, and specific HTML patterns that caused regressions.
+//! Each test reproduces a concrete scenario that previously failed, ensuring
+//! the fix remains effective. Also validates that compressed input round-trips
+//! correctly through the streaming pipeline.
+
 #![cfg(feature = "streaming")]
 
 #[path = "known_differences.rs"]

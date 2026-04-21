@@ -74,3 +74,9 @@ Branch: `feat/11-release-0-4-0`
   - Evidence: Decision logging with reason codes documented in `docs/guides/OPERATIONS.md`; `markdown_log_verbosity` controls output
 - [x] Operator can perform rollback — verified by e2e test against `docs/guides/` rollback procedure
   - Evidence: `docs/guides/ROLLBACK_GUIDE.md` provides rollback methods, trigger conditions, and verification steps
+
+## Document Updates
+
+| Version | Date | Author | Changes |
+|---------|------|--------|---------|
+| 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |

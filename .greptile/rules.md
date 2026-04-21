@@ -34,3 +34,9 @@ and sanitize path or command inputs to prevent traversal/injection issues.
 When runtime behavior changes, verify docs and validators evolve together.
 Documentation examples, JSON keys, and Prometheus series names should match actual
 emitted behavior exactly.
+
+## Document Updates
+
+| Version | Date | Author | Changes |
+|---------|------|--------|---------|
+| 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |

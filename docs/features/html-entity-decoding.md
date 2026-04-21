@@ -128,3 +128,10 @@ The implementation:
 - [HTML5 Specification - Character References](https://html.spec.whatwg.org/multipage/syntax.html#character-references)
 - [html5ever Documentation](https://docs.rs/html5ever/)
 - [List of HTML Entities](https://html.spec.whatwg.org/multipage/named-characters.html)
+
+
+## Document Updates
+
+| Version | Date | Author | Changes |
+|---------|------|--------|---------|
+| 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |

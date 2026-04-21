@@ -247,3 +247,10 @@ CI uploads these artifacts:
 - **Token reduction** shows estimated byte savings. Higher is better. Values above 50% are typical for content-rich pages.
 - **Latency percentiles** measure conversion speed. P50 is the typical case; P95/P99 catch tail latency.
 - **Per-fixture details** in the report show exactly which fixtures converted, skipped, or failed.
+
+
+## Document Updates
+
+| Version | Date | Author | Changes |
+|---------|------|--------|---------|
+| 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |

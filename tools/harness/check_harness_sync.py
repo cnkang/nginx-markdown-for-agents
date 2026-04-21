@@ -42,6 +42,14 @@ class CheckResult:
 
 
 def _display_path(path: Path) -> str:
+    """Return a repo-relative display string for *path*, falling back to the full path.
+
+    Args:
+        path: Absolute or relative path to format.
+
+    Returns:
+        Path string relative to REPO_ROOT if possible, otherwise the full path.
+    """
     try:
         return str(path.relative_to(REPO_ROOT))
     except ValueError:
@@ -49,6 +57,17 @@ def _display_path(path: Path) -> str:
 
 
 def _load_manifest(path: Path | None = None) -> dict:
+    """Load and parse the routing manifest JSON file.
+
+    Args:
+        path: Path to the manifest file. Defaults to MANIFEST_PATH.
+
+    Returns:
+        Parsed manifest as a dictionary.
+
+    Raises:
+        ValueError: If the file cannot be read or contains invalid JSON.
+    """
     path = path or MANIFEST_PATH
     try:
         return json.loads(path.read_text(encoding="utf-8"))
@@ -57,6 +76,16 @@ def _load_manifest(path: Path | None = None) -> dict:
 
 
 def _required_text(path: Path, needles: list[str]) -> list[str]:
+    """Return the subset of *needles* not found in the text at *path*.
+
+    Args:
+        path: File to search.
+        needles: Exact strings that must appear in the file.
+
+    Returns:
+        List of needles absent from the file, or an unreadability marker
+        if the file cannot be read.
+    """
     try:
         text = path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
@@ -65,6 +94,17 @@ def _required_text(path: Path, needles: list[str]) -> list[str]:
 
 
 def _required_patterns(path: Path, patterns: dict[str, str]) -> list[str]:
+    """Return the labels whose regex patterns are not matched in the file at *path*.
+
+    Args:
+        path: File to search.
+        patterns: Mapping of label to regex pattern; each pattern is
+            searched with the MULTILINE flag.
+
+    Returns:
+        List of labels whose patterns were not found, or an unreadability
+        marker if the file cannot be read.
+    """
     try:
         text = path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
@@ -79,10 +119,32 @@ def _required_patterns(path: Path, patterns: dict[str, str]) -> list[str]:
 
 
 def _result(name: str, status: str, detail: str) -> CheckResult:
+    """Build a CheckResult with the given fields.
+
+    Args:
+        name: Check identifier.
+        status: One of PASS, FAIL, SKIP_NOT_PRESENT, or WARN_NEEDS_AUTHOR_REVIEW.
+        detail: Human-readable explanation of the outcome.
+
+    Returns:
+        A frozen CheckResult dataclass instance.
+    """
     return CheckResult(name=name, status=status, detail=detail)
 
 
 def _check_manifest_structure(manifest: dict) -> CheckResult:
+    """Validate that the manifest contains all required top-level and nested keys.
+
+    Checks for required top-level keys, truth-surface sub-keys, the
+    canonical four-state status semantics, and spec-resolver keys.
+
+    Args:
+        manifest: Parsed routing manifest dictionary.
+
+    Returns:
+        CheckResult with PASS if the schema is complete, or FAIL with
+        details of the first missing key set.
+    """
     required_keys = {
         "version",
         "truth_surfaces",
@@ -153,6 +215,15 @@ def _check_manifest_structure(manifest: dict) -> CheckResult:
 
 
 def _check_truth_surfaces(manifest: dict) -> CheckResult:
+    """Verify that all repo-owned truth-surface files exist on disk.
+
+    Args:
+        manifest: Parsed routing manifest dictionary.
+
+    Returns:
+        CheckResult with PASS if every contract, harness, and
+        canonical_docs file exists, or FAIL listing missing paths.
+    """
     missing: list[str] = []
     for category in ("contract", "harness", "canonical_docs"):
         missing.extend(
@@ -170,6 +241,15 @@ def _check_truth_surfaces(manifest: dict) -> CheckResult:
 
 
 def _check_risk_pack_docs(manifest: dict) -> CheckResult:
+    """Verify that every risk pack has its doc file and references known verification families.
+
+    Args:
+        manifest: Parsed routing manifest dictionary.
+
+    Returns:
+        CheckResult with PASS if all risk-pack docs exist and their
+        verification families are defined, or FAIL with details.
+    """
     missing_docs: list[str] = []
     missing_families: list[str] = []
     families = set(manifest["verification_families"])
@@ -193,6 +273,18 @@ def _check_risk_pack_docs(manifest: dict) -> CheckResult:
 
 
 def _check_harness_docs(manifest: dict) -> CheckResult:
+    """Verify that harness documentation files contain required links, phrases, and patterns.
+
+    Checks README.md for navigation links, routing-manifest.md for
+    risk-pack identifiers, and core.md for status labels and key phrases.
+
+    Args:
+        manifest: Parsed routing manifest dictionary.
+
+    Returns:
+        CheckResult with PASS if all required references are present,
+        or FAIL listing the missing items.
+    """
     missing: list[str] = []
     missing.extend(_required_patterns(
         README_PATH,
@@ -248,6 +340,12 @@ def _check_harness_docs(manifest: dict) -> CheckResult:
 
 
 def _check_agents_map() -> CheckResult:
+    """Verify that AGENTS.md references the harness entrypoints and Codex-first semantics.
+
+    Returns:
+        CheckResult with PASS if all required references are present,
+        or FAIL listing the missing items.
+    """
     missing = _required_patterns(
         AGENTS_PATH,
         {
@@ -269,6 +367,20 @@ def _check_agents_map() -> CheckResult:
 
 
 def _check_optional_kiro(manifest: dict, full: bool) -> CheckResult:
+    """Check optional .kiro/steering adapters for drift against harness truth surfaces.
+
+    If no adapters are present, returns SKIP_NOT_PRESENT.  If adapters
+    exist but lack required links, returns WARN_NEEDS_AUTHOR_REVIEW in
+    quick mode or FAIL in full mode.
+
+    Args:
+        manifest: Parsed routing manifest dictionary.
+        full: If True, treat missing links as a blocking failure.
+
+    Returns:
+        CheckResult indicating whether optional adapters are in sync,
+        absent, or need author review.
+    """
     adapters = manifest.get("truth_surfaces", {}).get("optional_adapters", [])
     present = [REPO_ROOT / rel for rel in adapters if (REPO_ROOT / rel).exists()]
     if not present:
@@ -301,6 +413,19 @@ def _check_optional_kiro(manifest: dict, full: bool) -> CheckResult:
 
 
 def collect_results(full: bool = False) -> list[CheckResult]:
+    """Run all harness-sync checks and return their results.
+
+    Loads the manifest first; if that fails or the manifest structure is
+    invalid, returns early with a single failure result.  Otherwise
+    returns results for manifest structure, truth surfaces, risk-pack
+    docs, harness docs, AGENTS.md map, and optional Kiro adapters.
+
+    Args:
+        full: If True, treat optional adapter drift as a blocking failure.
+
+    Returns:
+        List of CheckResult instances, one per check.
+    """
     try:
         manifest = _load_manifest()
     except ValueError as exc:
@@ -321,6 +446,14 @@ def collect_results(full: bool = False) -> list[CheckResult]:
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
+    """Parse command-line arguments for the harness-sync checker.
+
+    Args:
+        argv: Argument strings to parse (typically sys.argv[1:]).
+
+    Returns:
+        Parsed namespace with the ``full`` boolean flag.
+    """
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--full",
@@ -331,6 +464,17 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Entry point for the harness-sync CLI.
+
+    Runs all checks, prints each result, and returns an exit code of 1
+    if any result is blocking (FAIL, or WARN in full mode), otherwise 0.
+
+    Args:
+        argv: Command-line arguments. Defaults to sys.argv[1:].
+
+    Returns:
+        Exit code: 0 for success, 1 for failure.
+    """
     args = parse_args(argv or sys.argv[1:])
     results = collect_results(full=args.full)
     failing_statuses = {FAIL}

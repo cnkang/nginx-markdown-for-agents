@@ -39,3 +39,9 @@ make coverage-sonar-xml
 - [../../DOCUMENTATION_DUPLICATION_POLICY.md](../../DOCUMENTATION_DUPLICATION_POLICY.md)
 - [../../README.md](../../README.md)
 - [../../../AGENTS.md](../../../AGENTS.md)
+
+## Document Updates
+
+| Version | Date | Author | Changes |
+|---------|------|--------|---------|
+| 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |

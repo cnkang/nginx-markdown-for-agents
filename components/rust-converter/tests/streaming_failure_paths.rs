@@ -1,3 +1,12 @@
+//! Tests for streaming converter failure and error-handling paths.
+//!
+//! Validates that the streaming converter gracefully handles adverse conditions
+//! including memory budget exhaustion (returning `BudgetExceeded`), timeout
+//! expiration (returning `Timeout` or `PostCommitError`), and malformed HTML
+//! input (no panics). Also uses proptest to fuzz the converter with random
+//! byte sequences, ensuring robustness against arbitrary input without
+//! panicking or producing invalid state.
+
 #![cfg(feature = "streaming")]
 
 #[path = "streaming_test_support.rs"]

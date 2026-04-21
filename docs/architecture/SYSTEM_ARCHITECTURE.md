@@ -18,19 +18,25 @@ At runtime, the system has two main components:
 - the NGINX module in C, which participates in the NGINX request and filter pipeline
 - the conversion engine in Rust, which parses HTML and produces Markdown through a small FFI boundary
 
-```text
-Client
-  -> NGINX request processing
-  -> Markdown filter module (C)
-     -> eligibility checks
-     -> buffering / decompression / header policy
-     -> Rust FFI call
-  -> Rust converter
-     -> HTML parsing
-     -> sanitization
-     -> Markdown generation
-     -> metadata / ETag support
-  -> NGINX response delivery
+```mermaid
+flowchart TD
+    Client["Client"] --> Nginx["NGINX Request Processing"]
+    Nginx --> Filter["Markdown Filter Module (C)"]
+    Filter --> Eligibility{"Eligibility Checks"}
+    Eligibility -->|eligible| Buffer["Buffering / Decompression / Header Policy"]
+    Eligibility -->|not eligible| PassThrough["Pass Through (original response)"]
+    Buffer --> FFI["Rust FFI Call"]
+    FFI --> Rust["Rust Converter"]
+    Rust --> Parse["HTML Parsing"]
+    Parse --> Sanitize["Sanitization"]
+    Sanitize --> Generate["Markdown Generation"]
+    Generate --> Meta["Metadata / ETag Support"]
+    Meta --> Response["NGINX Response Delivery"]
+    PassThrough --> Response
+
+    style Filter fill:#009639,color:#fff
+    style Rust fill:#ce422b,color:#fff
+    style Eligibility fill:#f90,color:#000
 ```
 
 ## Why C + Rust
@@ -115,6 +121,31 @@ This reduces coupling and makes it easier to test each side independently.
 
 For an eligible Markdown request, the runtime flow is:
 
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant N as NGINX
+    participant M as Markdown Module
+    participant R as Rust Converter
+
+    C->>N: HTTP Request
+    N->>M: Evaluate markdown_filter
+    M->>M: Check eligibility (method, status, content-type, policy)
+    alt Eligible
+        M->>M: Buffer body + decompress if needed
+        M->>R: FFI call (HTML bytes + options)
+        R->>R: Parse HTML → Sanitize → Generate Markdown
+        R-->>M: Markdown output + metadata
+        M->>M: Update headers (Content-Type, Vary, ETag)
+        M->>M: Record metrics
+        M-->>C: Markdown response
+    else Not Eligible
+        M-->>C: Original response (unchanged)
+    end
+```
+
+Step-by-step:
+
 1. NGINX receives the request and evaluates the configured `markdown_filter` behavior.
 2. The module checks request and response eligibility such as method, status, content type, and policy exclusions.
 3. If needed, the module buffers the upstream body and decompresses supported encodings.
@@ -162,3 +193,10 @@ This decision is documented in [ADR-0003](ADR/0003-inline-origin-near-conversion
 - Origin-near positioning decision: [ADR/0003-inline-origin-near-conversion.md](ADR/0003-inline-origin-near-conversion.md)
 - Repository layout: [REPOSITORY_STRUCTURE.md](REPOSITORY_STRUCTURE.md)
 - Operator-facing behavior: [../guides/CONFIGURATION.md](../guides/CONFIGURATION.md)
+
+
+## Document Updates
+
+| Version | Date | Author | Changes |
+|---------|------|--------|---------|
+| 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |

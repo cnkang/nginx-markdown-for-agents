@@ -1,3 +1,14 @@
+//! Three-way parity tests comparing full-buffer, incremental, and streaming conversion.
+//!
+//! Validates that all three conversion paths (full-buffer, incremental, and
+//! streaming) produce consistent Markdown output for the same HTML input.
+//! Uses both fixture-based and property-based testing to ensure the incremental
+//! and streaming converters remain faithful to the reference full-buffer
+//! implementation. Divergences are classified as whitespace-only drift,
+//! ordered-list numbering drift, or unexpected mismatches, with known
+//! differences consulted before flagging a regression. Requires both
+//! `incremental` and `streaming` features to be enabled.
+
 #![cfg(all(feature = "incremental", feature = "streaming"))]
 
 #[path = "known_differences.rs"]

@@ -116,3 +116,9 @@ affected documents.
   sub-capability rows
 - Downstream sub-specs must not introduce new top-level operator-facing capability
   rows without first updating spec #12
+
+## Document Updates
+
+| Version | Date | Author | Changes |
+|---------|------|--------|---------|
+| 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |

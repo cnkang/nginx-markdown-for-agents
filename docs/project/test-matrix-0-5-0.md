@@ -58,3 +58,9 @@ Before release, aggregate all sub-spec coverage mappings to ensure each value in
 | Conversion Path | convert | — | Pending |
 | Conversion Path | skip | — | Pending |
 | Conversion Path | fallback/fail-open | — | Pending |
+
+## Document Updates
+
+| Version | Date | Author | Changes |
+|---------|------|--------|---------|
+| 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |
