@@ -18,8 +18,8 @@ RUN set -eux; \
         done; \
     }; \
     retry 5 apk add --no-cache \
-        ca-certificates \
         build-base \
+        ca-certificates \
         curl \
         linux-headers \
         openssl-dev \

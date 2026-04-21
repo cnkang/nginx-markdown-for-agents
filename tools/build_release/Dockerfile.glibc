@@ -3,8 +3,8 @@ ARG OS_BASE=debian:bookworm-slim
 FROM ${OS_BASE}
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates \
     build-essential \
+    ca-certificates \
     curl \
     libpcre3-dev \
     libssl-dev \
