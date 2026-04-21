@@ -10,6 +10,38 @@ Use this document as a code-structure map, not just a directory listing.
 
 ## Top-Level Layout
 
+```mermaid
+graph TB
+    Root["nginx-markdown-for-agents"] --> Components["components/"]
+    Root --> Docs["docs/"]
+    Root --> Examples["examples/"]
+    Root --> Tests["tests/"]
+    Root --> Tools["tools/"]
+    Root --> Makefile["Makefile"]
+
+    Components --> NginxMod["nginx-module/<br/>C source + tests"]
+    Components --> RustConv["rust-converter/<br/>Rust engine + FFI"]
+
+    Docs --> Arch["architecture/"]
+    Docs --> Features["features/"]
+    Docs --> Guides["guides/"]
+    Docs --> Testing["testing/"]
+    Docs --> Project["project/"]
+    Docs --> Harness["harness/"]
+
+    Tests --> Corpus["corpus/<br/>HTML fixtures"]
+
+    Tools --> DocsTools["docs/"]
+    Tools --> CI["ci/"]
+    Tools --> E2E["e2e/"]
+    Tools --> Build["build_release/"]
+    Tools --> Install["install.sh"]
+
+    style NginxMod fill:#009639,color:#fff
+    style RustConv fill:#ce422b,color:#fff
+    style Docs fill:#036,color:#fff
+```
+
 | Path | Purpose |
 |------|---------|
 | `components/nginx-module/` | NGINX module source, module-specific tests, and NGINX integration artifacts |
@@ -173,3 +205,10 @@ If you are new to the codebase:
 - Do not add new top-level project scripts when an existing `tools/<domain>/` location fits.
 - Keep user- and operator-facing guidance in `docs/`, not in source-tree README files alone.
 - Keep generated headers and build outputs clearly separated from hand-maintained source.
+
+
+## Document Updates
+
+| Version | Date | Author | Changes |
+|---------|------|--------|---------|
+| 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |

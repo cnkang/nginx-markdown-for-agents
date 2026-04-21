@@ -185,3 +185,9 @@ these naming and documentation principles:
 
 This standard is codified as AGENTS.md Rule 26 and enforced through the
 pre-output checklist.
+
+## Document Updates
+
+| Version | Date | Author | Changes |
+|---------|------|--------|---------|
+| 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |

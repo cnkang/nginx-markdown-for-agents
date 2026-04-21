@@ -164,3 +164,10 @@ This corpus should be updated when:
 - Conversion bugs are discovered and fixed
 - New features are added (e.g., new element handlers)
 - Edge cases are identified through testing
+
+
+## Document Updates
+
+| Version | Date | Author | Changes |
+|---------|------|--------|---------|
+| 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |

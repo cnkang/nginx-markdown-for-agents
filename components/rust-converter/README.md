@@ -132,3 +132,10 @@ fuzz/
 - Keep FFI changes deliberate and version-conscious.
 - Treat deterministic output and safety behavior as compatibility-sensitive.
 - Prefer adding focused tests when changing parsing, sanitization, or output normalization behavior.
+
+
+## Document Updates
+
+| Version | Date | Author | Changes |
+|---------|------|--------|---------|
+| 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |

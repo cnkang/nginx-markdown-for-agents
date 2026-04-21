@@ -487,6 +487,18 @@ grep "markdown decision:" /var/log/nginx/error.log | \
 
 ## Selective Enablement Patterns
 
+```mermaid
+flowchart TD
+    Start["Enable markdown_filter"] --> Path{"Enablement Strategy"}
+    Path -->|Path-based| PathEnable["location /docs/ {<br/>markdown_filter on; }"]
+    Path -->|Host-based| HostEnable["server {<br/>server_name docs.example.com;<br/>markdown_filter on; }"]
+    Path -->|Header-based| HeaderEnable["map $http_accept $mf {<br/>~*markdown 1; }"]
+    Path -->|UA-based| UAEnable["map $http_user_agent $mf {<br/>~*Bot 1; }"]
+    Path -->|Canary| CanaryEnable["map $cookie_canary $mf {<br/>1 1; }"]
+    
+    style Path fill:#f90,color:#000
+```
+
 These patterns let you target conversion to specific traffic segments using NGINX configuration primitives and the module's `markdown_filter $variable` capability.
 
 ### Path-Based Enablement
@@ -1352,3 +1364,10 @@ When a trigger fires:
 3. If the issue is isolated to a single path, consider narrowing your rollout scope to exclude that path.
 4. If the issue is widespread, consider rolling back — see the Rollback Guide (`ROLLBACK_GUIDE.md`) for procedures.
 5. Resolve the underlying issue before resuming rollout expansion.
+
+
+## Document Updates
+
+| Version | Date | Author | Changes |
+|---------|------|--------|---------|
+| 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |

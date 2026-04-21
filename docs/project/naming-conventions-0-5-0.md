@@ -68,3 +68,9 @@ Forbidden labels (high cardinality): `url`, `host`, `ua`, `query`, `referer`, `r
 | Engine selection | `ENGINE_FULLBUFFER` | Full-buffer engine selected |
 | Engine selection | `ENGINE_STREAMING` | Streaming engine selected |
 | Budget | `STREAMING_BUDGET_EXCEEDED` | Streaming memory budget exceeded |
+
+## Document Updates
+
+| Version | Date | Author | Changes |
+|---------|------|--------|---------|
+| 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |

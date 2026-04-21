@@ -38,3 +38,9 @@ If this file and the manifest disagree, the manifest wins.
 
 After changing this file, run `make harness-check` to validate harness contract
 alignment.
+
+## Document Updates
+
+| Version | Date | Author | Changes |
+|---------|------|--------|---------|
+| 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |

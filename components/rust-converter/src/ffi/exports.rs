@@ -1,3 +1,39 @@
+//! Public FFI export functions callable from C.
+//!
+//! This module contains the `#[unsafe(no_mangle)] extern "C"` functions that
+//! form the public C API of the conversion library.
+//!
+//! `markdown_convert` is the primary entry point and wraps the internal
+//! conversion logic with:
+//!
+//! 1. **Input validation** — NULL pointer checks via `required_ref`/`required_bytes`
+//! 2. **Panic catching** — `panic::catch_unwind` to prevent Rust panics from
+//!    unwinding into C frames (undefined behavior per the FFI contract)
+//! 3. **Result marshalling** — conversion of Rust `Result` into C `MarkdownResult`
+//!
+//! The remaining exports are lifecycle helpers:
+//! - `markdown_converter_new` — safe constructor that allocates a converter
+//!   handle (uses `catch_unwind` but does not perform input validation or
+//!   result marshalling)
+//! - `markdown_converter_free` / `markdown_result_free` — release functions
+//!   that deallocate handles and result buffers without conversion or
+//!   panic-catching
+//!
+//! # Exported Functions
+//!
+//! | Function | Purpose |
+//! |----------|---------|
+//! | `markdown_converter_new` | Allocate a converter handle |
+//! | `markdown_convert` | Full HTML-to-Markdown conversion |
+//! | `markdown_converter_free` | Release a converter handle |
+//! | `markdown_result_free` | Release conversion result buffers |
+//!
+//! # Safety
+//!
+//! All functions in this module are `unsafe` (either explicitly or by
+//! accepting raw pointers). Each function's `# Safety` doc section
+//! specifies the preconditions the C caller must uphold.
+
 use std::panic;
 use std::ptr;
 
@@ -61,9 +97,11 @@ pub unsafe extern "C" fn markdown_convert(
     reset_result(result_ref);
 
     let panic_result = panic::catch_unwind(|| -> Result<_, ConversionError> {
-        let handle_ref = required_ref(handle.cast_const(), "Converter handle")?;
-        let options_ref = required_ref(options, "Options")?;
-        let html_slice = required_bytes(html, html_len, "HTML")?;
+        // SAFETY: Pointers originate from the C caller who upholds the FFI
+        // contract documented in this function's # Safety section.
+        let handle_ref = unsafe { required_ref(handle.cast_const(), "Converter handle") }?;
+        let options_ref = unsafe { required_ref(options, "Options") }?;
+        let html_slice = unsafe { required_bytes(html, html_len, "HTML") }?;
         convert_inner(handle_ref, html_slice, options_ref)
     });
 

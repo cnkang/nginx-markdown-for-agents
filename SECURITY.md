@@ -105,3 +105,9 @@ Nightly GitHub Actions coverage is defined in `.github/workflows/nightly-fuzz.ym
 - implementation threat model and defenses: `docs/features/security.md`
 - configuration guidance: `docs/guides/CONFIGURATION.md`
 - operations and monitoring guidance: `docs/guides/OPERATIONS.md`
+
+## Document Updates
+
+| Version | Date | Author | Changes |
+|---------|------|--------|---------|
+| 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |

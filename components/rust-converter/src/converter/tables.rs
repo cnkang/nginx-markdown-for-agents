@@ -1,3 +1,36 @@
+//! HTML table to GFM Markdown table conversion.
+//!
+//! This module handles conversion of HTML `<table>` elements into GitHub
+//! Flavored Markdown (GFM) pipe tables. Table conversion is only active when
+//! the converter is configured with [`MarkdownFlavor::GitHubFlavoredMarkdown`]
+//! and `preserve_tables` is enabled; otherwise, table content is traversed
+//! as plain inline content.
+//!
+//! # GFM Table Format
+//!
+//! The output follows the GFM pipe-table specification:
+//!
+//! ```markdown
+//! | Header 1 | Header 2 | Header 3 |
+//! | -------- |:--------:| --------:|
+//! | Cell 1   | Cell 2   | Cell 3   |
+//! ```
+//!
+//! # Alignment
+//!
+//! Column alignment is extracted from `<th>` or `<col>` elements:
+//! - `style="text-align: left"` or `<col align="left">` → `:-------`
+//! - `style="text-align: center"` or `<col align="center">` → `:-----:`
+//! - `style="text-align: right"` or `<col align="right">` → `------:`
+//! - Default (no alignment) → `-------`
+//!
+//! # Edge Cases
+//!
+//! - Tables without `<thead>` use the first `<tr>` as the header row.
+//! - Tables with mismatched column counts are padded with empty cells.
+//! - Empty tables (no rows) produce no output.
+//! - Cell content is recursively converted, allowing inline Markdown within cells.
+
 use super::*;
 
 impl MarkdownConverter {

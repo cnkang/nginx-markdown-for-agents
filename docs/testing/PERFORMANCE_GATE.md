@@ -125,3 +125,10 @@ above to bootstrap.
   schema version. Re-generate the baseline with `--update-baseline`.
 - **JSON parse error**: Check that the measurement and baseline files are
   valid JSON. The error message includes the file path and parse details.
+
+
+## Document Updates
+
+| Version | Date | Author | Changes |
+|---------|------|--------|---------|
+| 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |

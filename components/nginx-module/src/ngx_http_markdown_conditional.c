@@ -20,6 +20,14 @@ static u_char ngx_http_markdown_empty_string[] = "";
  *
  * This helper is used for conditional request processing so the parser can
  * inspect `If-None-Match` even when convenience header pointers are absent.
+ *
+ * Parameters:
+ *   r        - the HTTP request whose incoming headers are searched
+ *   name     - header name to search for (need not be NUL-terminated)
+ *   name_len - length of the header name in bytes
+ *
+ * Returns:
+ *   pointer to the matching header entry, or NULL if not found
  */
 static ngx_table_elt_t *
 ngx_http_markdown_find_request_header(ngx_http_request_t *r, u_char *name, size_t name_len)
@@ -47,6 +55,22 @@ ngx_http_markdown_find_request_header(ngx_http_request_t *r, u_char *name, size_
     return NULL;
 }
 
+/*
+ * Push an ETag token onto the parsed etags array.
+ *
+ * Allocates a new ngx_str_t element in the array and sets its data
+ * and len fields to the provided values. Does not copy the data;
+ * the caller must ensure the data pointer remains valid.
+ *
+ * Parameters:
+ *   etags - array to push onto (must be initialized)
+ *   data  - pointer to the ETag value bytes
+ *   len   - length of the ETag value in bytes
+ *
+ * Returns:
+ *   NGX_OK    - element pushed successfully
+ *   NGX_ERROR - array allocation failed
+ */
 static ngx_int_t
 ngx_http_markdown_push_etag_token(ngx_array_t *etags, u_char *data, size_t len)
 {
@@ -62,6 +86,17 @@ ngx_http_markdown_push_etag_token(ngx_array_t *etags, u_char *data, size_t len)
     return NGX_OK;
 }
 
+/*
+ * Skip If-None-Match separator characters (space, tab, comma).
+ *
+ * Advances *cursor past any whitespace or comma characters in the
+ * If-None-Match header value, stopping at the first non-separator
+ * byte or when *cursor reaches end.
+ *
+ * Parameters:
+ *   cursor - pointer to current parse position; advanced in-place
+ *   end    - pointer one past the last byte of the header value
+ */
 static void
 ngx_http_markdown_skip_if_none_match_separators(u_char **cursor, const u_char *end)
 {
@@ -72,6 +107,25 @@ ngx_http_markdown_skip_if_none_match_separators(u_char **cursor, const u_char *e
     }
 }
 
+/*
+ * Parse a quoted ETag value from an If-None-Match header.
+ *
+ * Expects *cursor to point at the opening double-quote. Reads bytes
+ * until the closing double-quote is found, then pushes the ETag
+ * value (without quotes) onto the etags array and advances *cursor
+ * past the closing quote.
+ *
+ * Parameters:
+ *   r      - the HTTP request (for logging on malformed input)
+ *   cursor - pointer to current parse position; advanced in-place
+ *   end    - pointer one past the last byte of the header value
+ *   etags  - array to push the parsed ETag token onto
+ *
+ * Returns:
+ *   NGX_OK      - ETag parsed and pushed successfully
+ *   NGX_DECLINED - closing quote not found (malformed header)
+ *   NGX_ERROR   - array allocation failed
+ */
 static ngx_int_t
 ngx_http_markdown_parse_quoted_etag(ngx_http_request_t *r,
                                     u_char **cursor,
@@ -101,6 +155,23 @@ ngx_http_markdown_parse_quoted_etag(ngx_http_request_t *r,
     return ngx_http_markdown_push_etag_token(etags, start, len);
 }
 
+/*
+ * Parse an unquoted ETag value from an If-None-Match header.
+ *
+ * Reads bytes from *cursor until a comma, space, tab, or end-of-input
+ * is encountered, then pushes the ETag value onto the etags array.
+ * Does not advance past the delimiter; the caller is responsible for
+ * skipping separators between tokens.
+ *
+ * Parameters:
+ *   cursor - pointer to current parse position; advanced in-place
+ *   end    - pointer one past the last byte of the header value
+ *   etags  - array to push the parsed ETag token onto
+ *
+ * Returns:
+ *   NGX_OK    - ETag parsed and pushed successfully
+ *   NGX_ERROR - array allocation failed
+ */
 static ngx_int_t
 ngx_http_markdown_parse_unquoted_etag(u_char **cursor, const u_char *end,
                                       ngx_array_t *etags)

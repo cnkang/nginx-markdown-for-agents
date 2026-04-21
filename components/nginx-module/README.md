@@ -99,3 +99,10 @@ For the full directive reference, see [../../docs/guides/CONFIGURATION.md](../..
 - Follow NGINX coding conventions and memory-management rules.
 - Prefer NGINX types and helpers over generic C abstractions in module code.
 - Keep behavior-oriented explanations in the docs tree and source-specific notes here.
+
+
+## Document Updates
+
+| Version | Date | Author | Changes |
+|---------|------|--------|---------|
+| 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |

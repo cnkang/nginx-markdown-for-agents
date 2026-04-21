@@ -16,3 +16,9 @@ runtime semantics from canonical docs. They answer four practical questions:
 | [ffi-boundary.md](ffi-boundary.md) | Rust/C headers, ABI, FFI error codes, option structs | `AGENTS.md`, `docs/architecture/REPOSITORY_STRUCTURE.md` |
 | [observability-metrics.md](observability-metrics.md) | metrics, reason codes, release visibility, dashboards | `AGENTS.md`, `docs/guides/prometheus-metrics.md` |
 | [docs-tooling-drift.md](docs-tooling-drift.md) | docs, validators, release-gate commands, CI path filters | `AGENTS.md`, `docs/DOCUMENTATION_DUPLICATION_POLICY.md` |
+
+## Document Updates
+
+| Version | Date | Author | Changes |
+|---------|------|--------|---------|
+| 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |

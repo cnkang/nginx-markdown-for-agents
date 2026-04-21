@@ -1,3 +1,22 @@
+//! Core FFI conversion logic shared by all export entry points.
+//!
+//! This module implements [`convert_inner`], the single internal function that
+//! executes a full HTML-to-Markdown conversion request. All public FFI exports
+//! (`markdown_convert`, `markdown_convert_incremental`, streaming variants)
+//! delegate to this function after validating their inputs.
+//!
+//! # Conversion Pipeline
+//!
+//! 1. **Decode options** — translate C `MarkdownOptions` into Rust `ConversionOptions`
+//! 2. **Empty payload fast path** — skip DOM parsing for zero-length input
+//! 3. **Parse HTML** — build DOM tree via html5ever with optional charset detection
+//! 4. **Convert** — traverse DOM with cooperative timeout checks
+//! 5. **Derive ETag** — compute BLAKE3-based ETag if requested
+//! 6. **Estimate tokens** — compute LLM token count if requested
+//!
+//! Keeping these steps in one place avoids divergent behavior across exports
+//! and keeps error propagation deterministic for C callers.
+
 use crate::converter::{ConversionContext, MarkdownConverter};
 use crate::error::ConversionError;
 use crate::parser::parse_html_with_charset;

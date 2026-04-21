@@ -181,3 +181,10 @@ That helper owns:
 - `make test-e2e` is the stable user-facing command.
 - The maintained native E2E truth lives under `tools/e2e/`.
 - Performance measurements captured during native checks are local diagnostics, not product guarantees. Canonical recorded baselines belong in [PERFORMANCE_BASELINES.md](PERFORMANCE_BASELINES.md).
+
+
+## Document Updates
+
+| Version | Date | Author | Changes |
+|---------|------|--------|---------|
+| 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |

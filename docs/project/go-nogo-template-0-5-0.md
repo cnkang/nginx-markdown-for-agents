@@ -73,3 +73,9 @@ The Go/No-Go decision must be based on the following verifiable artifacts:
 | # | Gate Item | Exception Rationale | Risk Assessment | Mitigation Strategy |
 |---|----------|--------------------|-----------------|--------------------|
 ```
+
+## Document Updates
+
+| Version | Date | Author | Changes |
+|---------|------|--------|---------|
+| 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |

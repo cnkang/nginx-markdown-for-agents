@@ -58,8 +58,11 @@ pub(crate) struct FusedNormalizer {
     output: String,
     /// Whether the previous line was blank (for collapsing consecutive blanks).
     prev_blank: bool,
-    /// Whether we are inside a fenced code block (``` delimited).
-    in_code_block: bool,
+    /// Length of the active opening fence (number of backticks), or `None`
+    /// when outside a fenced code block.  A closing fence must have at least
+    /// as many backticks as the opening fence and contain nothing else
+    /// (after trimming), matching CommonMark semantics.
+    active_fence_len: Option<usize>,
 }
 
 impl FusedNormalizer {
@@ -72,14 +75,14 @@ impl FusedNormalizer {
         Self {
             output: String::with_capacity(capacity),
             prev_blank: false,
-            in_code_block: false,
+            active_fence_len: None,
         }
     }
 
     /// Append a line of content, applying normalization rules inline.
     ///
     /// This replicates the per-line logic of `normalize_output`:
-    /// - Tracks code-block state (lines starting with `` ``` ``).
+    /// - Tracks code-block state via active fence length (CommonMark semantics).
     /// - Collapses consecutive blank lines to a single blank line.
     /// - Trims trailing whitespace.
     /// - Normalizes inline whitespace for non-code-block lines (collapses
@@ -90,8 +93,17 @@ impl FusedNormalizer {
         let line = line.strip_suffix('\r').unwrap_or(line);
 
         let trimmed_start = line.trim_start();
-        if trimmed_start.starts_with("```") {
-            self.in_code_block = !self.in_code_block;
+        let fence_len = trimmed_start.bytes().take_while(|&b| b == b'`').count();
+        let is_opening_fence = self.active_fence_len.is_none() && fence_len >= 3;
+        let is_closing_fence = self
+            .active_fence_len
+            .map(|len| fence_len >= len && trimmed_start[fence_len..].trim().is_empty())
+            .unwrap_or(false);
+
+        if is_opening_fence {
+            self.active_fence_len = Some(fence_len);
+        } else if is_closing_fence {
+            self.active_fence_len = None;
         }
 
         let trimmed = line.trim_end();
@@ -102,7 +114,7 @@ impl FusedNormalizer {
                 self.prev_blank = true;
             }
         } else {
-            if self.in_code_block {
+            if self.active_fence_len.is_some() {
                 self.output.push_str(trimmed);
             } else {
                 let normalized = super::normalize::normalize_line_whitespace(trimmed);
@@ -211,12 +223,22 @@ mod tests {
         let output = input.replace("\r\n", "\n");
         let mut result = String::with_capacity(output.len());
         let mut prev_blank = false;
-        let mut in_code_block = false;
+        let mut active_fence_len: Option<usize> = None;
 
         for line in output.lines() {
-            if line.trim_start().starts_with("```") {
-                in_code_block = !in_code_block;
+            let trimmed_start = line.trim_start();
+            let fence_len = trimmed_start.bytes().take_while(|&b| b == b'`').count();
+            let is_opening_fence = active_fence_len.is_none() && fence_len >= 3;
+            let is_closing_fence = active_fence_len
+                .map(|len| fence_len >= len && trimmed_start[fence_len..].trim().is_empty())
+                .unwrap_or(false);
+
+            if is_opening_fence {
+                active_fence_len = Some(fence_len);
+            } else if is_closing_fence {
+                active_fence_len = None;
             }
+
             let trimmed = line.trim_end();
             if trimmed.is_empty() {
                 if !prev_blank {
@@ -224,7 +246,7 @@ mod tests {
                     prev_blank = true;
                 }
             } else {
-                if in_code_block {
+                if active_fence_len.is_some() || is_closing_fence {
                     result.push_str(trimmed);
                 } else {
                     result.push_str(&normalize_line_whitespace(trimmed));
@@ -381,5 +403,29 @@ mod tests {
         let result = normalize_via_fused(input);
         assert!(result.ends_with('\n'));
         assert!(!result.ends_with("\n\n"));
+    }
+
+    /// Regression: a four-backtick fenced block containing a literal ```
+    /// line must preserve raw content inside the outer fence.  Both the
+    /// fused normalizer and the reference implementation must agree.
+    #[test]
+    fn fused_four_backtick_fence_with_inner_triple() {
+        let input = concat!(
+            "````\n",
+            "```\n",
+            "raw blank line follows\n",
+            "\n",
+            "trailing spaces   \n",
+            "```\n",
+            "````\n",
+        );
+        let fused = normalize_via_fused(input);
+        let reference = normalize_reference(input);
+        assert_eq!(fused, reference);
+        /* Inner ``` lines are content, not fence boundaries. */
+        assert!(
+            fused.contains("```\nraw blank line follows\n\ntrailing spaces"),
+            "Inner ``` and raw content must be preserved.\nGot: {fused}"
+        );
     }
 }

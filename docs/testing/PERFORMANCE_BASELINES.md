@@ -329,3 +329,10 @@ Single-request validation (`curl`, `Accept: text/markdown`):
 2. Preserve and regression-test the body-filter buffer-consumption fix for large responses.
 3. Prioritize parser-path optimization in Rust (`parse_html_with_charset`) before high-complexity zero-copy C/Rust output handoff.
 4. Use native arm64 (not Rosetta) for macOS benchmark baselines and capacity estimates.
+
+
+## Document Updates
+
+| Version | Date | Author | Changes |
+|---------|------|--------|---------|
+| 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |

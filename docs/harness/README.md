@@ -81,3 +81,9 @@ For local agent workflows, a repo-tracked helper skill is available at:
 This skill is an execution choreographer only. It must route and verify against
 repo-owned truth surfaces (`AGENTS.md`, `docs/harness/`, `tools/harness/`,
 `Makefile`, CI), and must not redefine runtime semantics.
+
+## Document Updates
+
+| Version | Date | Author | Changes |
+|---------|------|--------|---------|
+| 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |

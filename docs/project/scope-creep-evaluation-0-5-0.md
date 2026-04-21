@@ -55,3 +55,9 @@ The following topics are explicitly out of scope for 0.5.0 (referenced from `doc
 | Date | Proposal Description | Evaluation Result | Rationale | Affected Sub-Specs |
 |------|---------------------|-------------------|-----------|-------------------|
 | — | — | Accept/Reject | — | — |
+
+## Document Updates
+
+| Version | Date | Author | Changes |
+|---------|------|--------|---------|
+| 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |

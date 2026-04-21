@@ -36,3 +36,9 @@ In short:
 - `OPERATIONS.md` covers monitoring, troubleshooting, and runtime practice
 - `HARNESS_MAINTENANCE.md` explains how to evolve the repo-owned harness without
   moving public rules into local-only files
+
+## Document Updates
+
+| Version | Date | Author | Changes |
+|---------|------|--------|---------|
+| 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |

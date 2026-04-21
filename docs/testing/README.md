@@ -96,3 +96,9 @@ As a working rule:
 - module behavior changes usually need `make test-nginx-unit`
 - compiler compatibility checks use `make test-nginx-unit-clang-smoke` and `make test-nginx-unit-sanitize-smoke`
 - proxy-chain, header-propagation, and runtime-path changes usually need `make test-nginx-integration` or `make test-e2e`
+
+## Document Updates
+
+| Version | Date | Author | Changes |
+|---------|------|--------|---------|
+| 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |

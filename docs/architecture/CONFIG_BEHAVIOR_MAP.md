@@ -19,6 +19,43 @@ Each directive is described in four dimensions:
 - implementation areas: where that behavior primarily lives in code
 - practical note: how to think about it during rollout or debugging
 
+```mermaid
+flowchart LR
+    subgraph HeaderPhase["Header Filter Phase"]
+        MF["markdown_filter"]
+        MW["markdown_on_wildcard"]
+        AP["markdown_auth_policy"]
+        AC["markdown_auth_cookies"]
+        CT["markdown_conditional_requests"]
+        ET["markdown_etag"]
+        LV["markdown_log_verbosity"]
+        SE["markdown_streaming_engine"]
+    end
+
+    subgraph BodyPhase["Body Filter Phase"]
+        MS["markdown_max_size"]
+        TO["markdown_timeout"]
+        OE["markdown_on_error"]
+        FL["markdown_flavor"]
+        BC["markdown_buffer_chunked"]
+        ST["markdown_stream_types"]
+        TF["markdown_trust_forwarded_headers"]
+        LBT["markdown_large_body_threshold"]
+        SB["markdown_streaming_budget"]
+        SOE["markdown_streaming_on_error"]
+        SS["markdown_streaming_shadow"]
+    end
+
+    subgraph Metrics["Metrics"]
+        MM["markdown_metrics"]
+        MFmt["markdown_metrics_format"]
+        MSHM["markdown_metrics_shm_size"]
+    end
+
+    HeaderPhase --> BodyPhase --> Metrics
+```
+
+
 ## Core Enablement and Negotiation
 
 ### `markdown_filter`
@@ -231,3 +268,10 @@ Mostly:
 - `markdown_etag`
 
 Those are the knobs most directly reflected in the conversion options passed through FFI.
+
+
+## Document Updates
+
+| Version | Date | Author | Changes |
+|---------|------|--------|---------|
+| 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |

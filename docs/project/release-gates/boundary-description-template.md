@@ -31,3 +31,9 @@ Copy the table below into your sub-spec and populate it for each capability with
 5. Write the 0.5.x Scope as a factual description of what is deferred — avoid words like "will", "planned", or "expected".
 6. State the rationale for the boundary placement (e.g., risk, complexity, dependency, timeline).
 7. List concrete prerequisites that must exist before the deferred work can begin (e.g., APIs, infrastructure, design decisions).
+
+## Document Updates
+
+| Version | Date | Author | Changes |
+|---------|------|--------|---------|
+| 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |

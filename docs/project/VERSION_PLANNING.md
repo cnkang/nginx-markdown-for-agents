@@ -88,3 +88,9 @@ The strategic review implies the following documentation posture:
 - Re-check this document before release freeze for `0.4.0`.
 - Re-check it again when the first streaming design for `0.5.0` is written.
 - Update it only when scope, architecture assumptions, or release sequencing materially change.
+
+## Document Updates
+
+| Version | Date | Author | Changes |
+|---------|------|--------|---------|
+| 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |

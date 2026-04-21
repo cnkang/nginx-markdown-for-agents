@@ -75,3 +75,9 @@ verification families: 3
   [references/verification-map.md](references/verification-map.md)
 - Truth surfaces and escalation rules:
   [references/truth-surfaces.md](references/truth-surfaces.md)
+
+## Document Updates
+
+| Version | Date | Author | Changes |
+|---------|------|--------|---------|
+| 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |

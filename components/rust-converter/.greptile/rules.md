@@ -24,3 +24,9 @@ parsing, redundant copies, or state growth without explicit bounds.
 ## FFI/interface sync and tests
 If FFI structs/options/error codes/defaults change, ensure Rust ABI, public C
 headers, NGINX call sites, docs, and boundary-level tests stay synchronized.
+
+## Document Updates
+
+| Version | Date | Author | Changes |
+|---------|------|--------|---------|
+| 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |

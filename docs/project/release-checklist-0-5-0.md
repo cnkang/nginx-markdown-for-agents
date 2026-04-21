@@ -58,3 +58,9 @@ When a checklist item cannot be satisfied:
 1. The item must be escalated to the Go/No-Go review
 2. An explicit exception must be recorded, including: rationale, risk assessment, mitigation plan
 3. Unresolved failures without exceptions block the release
+
+## Document Updates
+
+| Version | Date | Author | Changes |
+|---------|------|--------|---------|
+| 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |
