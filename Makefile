@@ -187,7 +187,6 @@ license-check:
 release-gates-check:
 	python3 tools/release/gates/validate_release_gates.py
 	python3 tools/release/gates/validate_naming.py
-	python3 tools/release/gates/validate_release_gates_055.py
 
 release-gates-check-055:
 	python3 tools/release/gates/validate_release_gates_055.py
