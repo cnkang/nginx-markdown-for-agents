@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "generated_by": "tools/streaming/generate_evidence_summary.py",
+  "generated_at": "2026-04-24T23:59:00Z",
+  "total_comparisons": 51,
+  "identical_count": 17,
+  "known_difference_count": 34,
+  "known_difference_by_drift_type": {
+    "whitespace": 3,
+    "formatting": 10,
+    "structural": 2,
+    "fallback": 3
+  },
+  "known_difference_by_severity": {
+    "low": 10,
+    "medium": 8
+  },
+  "unknown_difference_count": 0,
+  "error_parity_mismatch_count": 0,
+  "pass": true,
+  "known_differences_registry": "tests/streaming/known-differences.toml",
+  "known_differences_total_entries": 18,
+  "corpus_root": "tests/corpus",
+  "verification_command": "cargo test --features streaming corpus_driven_differential_harness",
+  "verification_result": "PASS"
+}
