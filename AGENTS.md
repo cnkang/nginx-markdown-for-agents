@@ -363,6 +363,12 @@ Required:
   `fixture-id`, `page-type`, `expected-conversion-result`, `input-size-bytes`,
   `source-description`, and `failure-corpus`. Run
   `tools/corpus/validate_corpus.sh` (or `make test-benchmark`) before merge.
+- Corpus `.meta.json` `page-type` values must use the validator's current
+  canonical taxonomy (`clean-article`, `documentation`, `nav-heavy`,
+  `boilerplate-heavy`, or `complex-common`) unless the validator and coverage
+  checks are updated in the same change set. Use fixture-specific detail fields
+  such as `archetype` or `streaming_notes.high_risk_structures` for narrower
+  traits like media-rich content.
 - Regression tests for classification logic, routing decisions, or metrics
   increments must exercise code that mirrors the production branching — not
   manually set expected values in a local struct and assert them.  A test
@@ -464,6 +470,12 @@ Required:
   responses (for example truncated-stream curl probes) must not abort before
   assertions run. Use explicit tolerance (`|| true`) and then enforce behavior
   via subsequent checks on status/header/body artifacts.
+- Under `set -e`, command substitutions whose exit status is expected to drive
+  an error-reporting branch must be placed directly in the `if` condition
+  (`if output=$(cmd); then ... else ... fi`) or otherwise made explicitly
+  tolerant. Do not assign first and check `$?` afterward; a non-zero command
+  substitution can exit the script before diagnostics, summaries, or artifact
+  generation run.
 - For HTTP HEAD validation in curl-based harness scripts, use `curl --head`
   (or `-I`) instead of `-X HEAD`, and create any expected empty body artifact
   explicitly when downstream checks read a body file.

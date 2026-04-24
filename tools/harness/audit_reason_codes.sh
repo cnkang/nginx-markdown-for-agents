@@ -39,11 +39,10 @@ for code in $reason_codes; do
 
     # (a) Static string definition — already confirmed by extraction
     # (b) Accessor function — check header for declaration
-    if ! grep -q "$code" "$HEADER_FILE" 2>/dev/null; then
-        # Check if it's accessed via from_eligibility or from_error_category
-        if ! grep -q "\"$code\"" "$REASON_FILE" 2>/dev/null; then
-            missing="${missing} accessor"
-        fi
+    if ! grep -q "$code" "$HEADER_FILE" 2>/dev/null \
+        && ! grep -q "\"$code\"" "$REASON_FILE" 2>/dev/null; then
+        # Check if it's accessed via from_eligibility or from_error_category.
+        missing="${missing} accessor"
     fi
 
     # (c) Emission site — check for log_decision calls using this code
@@ -59,17 +58,17 @@ for code in $reason_codes; do
     # (d) Documentation entry — check operator-facing docs
     doc_found=0
     for doc in "$OPS_DOC" "$COOKBOOK_DOC" "$DECISION_CHAIN_DOC"; do
-        if [ -f "$doc" ] && grep -q "$code" "$doc" 2>/dev/null; then
+        if [[ -f "$doc" ]] && grep -q "$code" "$doc" 2>/dev/null; then
             doc_found=1
             break
         fi
     done
 
-    if [ "$doc_found" -eq 0 ]; then
+    if [[ "$doc_found" -eq 0 ]]; then
         missing="${missing} documentation"
     fi
 
-    if [ -n "$missing" ]; then
+    if [[ -n "$missing" ]]; then
         echo "FAIL: $code — missing:$missing" >&2
         errors=$((errors + 1))
     else
@@ -81,7 +80,7 @@ echo "" >&2
 echo "=== Audit Summary ===" >&2
 echo "Total reason codes: $(echo "$reason_codes" | wc -w | tr -d ' ')" >&2
 
-if [ "$errors" -gt 0 ]; then
+if [[ "$errors" -gt 0 ]]; then
     echo "FAIL: $errors reason code(s) with broken lifecycle chains" >&2
     exit 1
 else

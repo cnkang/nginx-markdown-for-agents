@@ -1,6 +1,6 @@
 {
   "fixture-id": "simple/media-rich",
-  "page-type": "media-content",
+  "page-type": "clean-article",
   "expected-conversion-result": "converted",
   "input-size-bytes": 1562,
   "source-description": "Media-rich fixture with video, audio, source, track, and area elements for URL extraction coverage",

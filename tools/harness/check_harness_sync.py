@@ -439,40 +439,7 @@ def _check_recent_analysis_reports() -> CheckResult:
 
     missing: list[str] = []
     for report in reports:
-        try:
-            text = report.read_text(encoding="utf-8")
-        except OSError as exc:
-            missing.append(f"{_display_path(report)}::unreadable ({exc})")
-            continue
-
-        for section in (
-            "## Phase 1 Analysis",
-            "## Findings",
-            "## Remediation Results",
-            "## Verification",
-        ):
-            if section not in text:
-                missing.append(f"{_display_path(report)}::{section}")
-
-        finding_ids = sorted(set(re.findall(r"\|\s*(P[0-3]-\d{3})\s*\|", text)))
-        if not finding_ids:
-            missing.append(f"{_display_path(report)}::finding ids")
-            continue
-
-        remediation_start = text.find("## Remediation Results")
-        remediation_text = text[remediation_start:] if remediation_start >= 0 else ""
-        for finding_id in finding_ids:
-            row_match = re.search(
-                rf"\|\s*{re.escape(finding_id)}\s*\|([^\n]+)\|",
-                remediation_text,
-                re.IGNORECASE,
-            )
-            if not row_match:
-                missing.append(f"{_display_path(report)}::{finding_id} remediation row")
-                continue
-            row = row_match.group(0).lower()
-            if not any(status in row for status in REMEDIATION_STATUSES):
-                missing.append(f"{_display_path(report)}::{finding_id} final status")
+        missing.extend(_missing_recent_report_evidence(report))
 
     if missing:
         return _result(
@@ -486,6 +453,57 @@ def _check_recent_analysis_reports() -> CheckResult:
         PASS,
         "recent analysis reports include findings, remediation, and verification",
     )
+
+
+def _missing_recent_report_evidence(report: Path) -> list[str]:
+    """Return closeout evidence gaps for one recent-analysis report."""
+    try:
+        text = report.read_text(encoding="utf-8")
+    except OSError as exc:
+        return [f"{_display_path(report)}::unreadable ({exc})"]
+
+    missing = _missing_recent_report_sections(report, text)
+    finding_ids = sorted(set(re.findall(r"\|\s*(P[0-3]-\d{3})\s*\|", text)))
+    if not finding_ids:
+        missing.append(f"{_display_path(report)}::finding ids")
+        return missing
+
+    remediation_start = text.find("## Remediation Results")
+    remediation_text = text[remediation_start:] if remediation_start >= 0 else ""
+    for finding_id in finding_ids:
+        missing.extend(_missing_recent_finding_closeout(report, remediation_text, finding_id))
+    return missing
+
+
+def _missing_recent_report_sections(report: Path, text: str) -> list[str]:
+    """Return required section headings absent from a report."""
+    required = (
+        "## Phase 1 Analysis",
+        "## Findings",
+        "## Remediation Results",
+        "## Verification",
+    )
+    return [f"{_display_path(report)}::{section}" for section in required if section not in text]
+
+
+def _missing_recent_finding_closeout(
+    report: Path,
+    remediation_text: str,
+    finding_id: str,
+) -> list[str]:
+    """Return remediation row/final-status gaps for one finding."""
+    row_match = re.search(
+        rf"\|\s*{re.escape(finding_id)}\s*\|([^\n]+)\|",
+        remediation_text,
+        re.IGNORECASE,
+    )
+    if not row_match:
+        return [f"{_display_path(report)}::{finding_id} remediation row"]
+
+    row = row_match.group(0).lower()
+    if not any(status in row for status in REMEDIATION_STATUSES):
+        return [f"{_display_path(report)}::{finding_id} final status"]
+    return []
 
 
 def collect_results(full: bool = False) -> list[CheckResult]:
