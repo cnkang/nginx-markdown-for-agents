@@ -1841,13 +1841,13 @@ The module maps decision outcomes to NGINX log levels so that NGINX's own `error
 
 | Outcome Type | NGINX Log Level | Reason Codes |
 |---|---|---|
-| Non-failure | `NGX_LOG_INFO` | All `SKIP_*` codes, `ELIGIBLE_CONVERTED` |
-| Failure | `NGX_LOG_WARN` | `ELIGIBLE_FAILED_OPEN`, `ELIGIBLE_FAILED_CLOSED` |
+| Non-failure | `NGX_LOG_INFO` | All `SKIP_*` codes, `ELIGIBLE_CONVERTED`, `ENGINE_STREAMING`, `STREAMING_CONVERT`, `STREAMING_SHADOW`, `STREAMING_SKIP_UNSUPPORTED`, `STREAMING_FALLBACK_PREBUFFER` |
+| Failure | `NGX_LOG_WARN` | `ELIGIBLE_FAILED_OPEN`, `ELIGIBLE_FAILED_CLOSED`, `STREAMING_FAIL_POSTCOMMIT`, `STREAMING_PRECOMMIT_FAILOPEN`, `STREAMING_PRECOMMIT_REJECT`, `STREAMING_BUDGET_EXCEEDED` |
 
 This means:
-- If your NGINX `error_log` level is set to `warn`, you will only see failure decision entries regardless of `markdown_log_verbosity`.
-- If your NGINX `error_log` level is set to `info` or `debug`, the `markdown_log_verbosity` directive controls which entries appear.
-- For full decision logging visibility, ensure `error_log` is at `info` level or lower.
+- If your NGINX `error_log` level is set to `warn`, you will only see failure decision entries (including streaming failures) regardless of `markdown_log_verbosity`.
+- If your NGINX `error_log` level is set to `info` or `debug`, the `markdown_log_verbosity` directive controls which entries appear; streaming non-failure entries are emitted at `info` level.
+- For full decision logging visibility (including all streaming outcomes), ensure `error_log` is at `info` level or lower.
 
 ### Parsing Decision Log Entries
 
