@@ -17,6 +17,9 @@ Start here, then branch out:
 | Canonical machine-readable routing source | [routing-manifest.json](routing-manifest.json) |
 | Human-readable routing summary | [routing-manifest.md](routing-manifest.md) |
 | Risk-pack index | [risk-packs/README.md](risk-packs/README.md) |
+| Recent Git analysis and remediation closeout | [risk-packs/harness-remediation.md](risk-packs/harness-remediation.md) |
+| NGINX protocol/auth/cache/conditional safety | [risk-packs/nginx-protocol-safety.md](risk-packs/nginx-protocol-safety.md) |
+| Release gate and source-build governance | [risk-packs/release-governance.md](risk-packs/release-governance.md) |
 | System design and rationale for the harness itself | [../architecture/HARNESS_ARCHITECTURE.md](../architecture/HARNESS_ARCHITECTURE.md) |
 | Contributor maintenance workflow for evolving harness rules | [../guides/HARNESS_MAINTENANCE.md](../guides/HARNESS_MAINTENANCE.md) |
 
@@ -87,3 +90,5 @@ repo-owned truth surfaces (`AGENTS.md`, `docs/harness/`, `tools/harness/`,
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |
+| 0.5.5 | 2026-04-24 | Codex | Added harness-remediation entrypoint |
+| 0.5.5 | 2026-04-24 | Codex | Added 60-day protocol and release governance entrypoints |

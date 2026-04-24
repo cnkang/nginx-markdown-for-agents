@@ -1,0 +1,64 @@
+# Release Governance Pack
+
+Use this as the primary pack when release gates, release matrices, source-build
+CI, scope governance, or go/no-go tooling changes.
+
+## Triggers
+
+- touched release gate validators, release matrix tooling, install/release CI,
+  or release gate documents
+- touched source-build scripts, binary release workflows, or install
+  verification commands
+- keywords like `release gate`, `scope`, `go/no-go`, `matrix`,
+  `source-build`, `release-binaries`, or `governance`
+
+## Common Supporting Packs
+
+- `docs-tooling-drift` when release docs and validators must stay aligned
+- `harness-remediation` when release findings come from broad history analysis
+- `nginx-protocol-safety` when release gates classify auth, cache-control, or
+  conditional request capability rows
+
+## Sync Points
+
+- release gate documents and validators agree on section names, required
+  artifacts, and pass/fail semantics
+- regex or table parsers avoid backtracking-prone patterns and use deterministic
+  parsing where practical
+- source-build CI targets, package prerequisites, CA certificates, and
+  unprivileged-worker temporary directories are explicitly validated
+- Make targets, workflow steps, and release scripts call each other through real
+  supported interfaces, not synthetic flags
+- legacy and current release gate validators remain intentionally separated
+  unless a change updates both paths and tests
+
+## Minimum Verification
+
+```bash
+make harness-check
+make docs-check
+make release-gates-check
+```
+
+When release gate schema, legacy validation, or matrix governance changes, also
+run:
+
+```bash
+make release-gates-check-strict
+```
+
+Run `make release-gates-check-legacy` only when the legacy spec inputs it
+requires are present.  In clones where those inputs are absent, record the
+absence instead of treating legacy validation as default evidence.
+
+## Canonical References
+
+- [../../project/release-gates/README.md](../../project/release-gates/README.md)
+- [../../guides/INSTALLATION.md](../../guides/INSTALLATION.md)
+- [../../../AGENTS.md](../../../AGENTS.md)
+
+## Document Updates
+
+| Version | Date | Author | Changes |
+|---------|------|--------|---------|
+| 0.5.5 | 2026-04-24 | Codex | Added 60-day release governance routing |

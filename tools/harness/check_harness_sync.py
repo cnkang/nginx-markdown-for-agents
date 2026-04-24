@@ -32,6 +32,12 @@ README_PATH = REPO_ROOT / "docs" / "harness" / "README.md"
 CORE_PATH = REPO_ROOT / "docs" / "harness" / "core.md"
 SUMMARY_PATH = REPO_ROOT / "docs" / "harness" / "routing-manifest.md"
 AGENTS_PATH = REPO_ROOT / "AGENTS.md"
+RECENT_ANALYSIS_REPORT_GLOB = "docs/project/recent-git-harness-steering-analysis-*.md"
+REMEDIATION_STATUSES = {
+    "fixed",
+    "intentionally deferred",
+    "not applicable after review",
+}
 
 
 @dataclass(frozen=True)
@@ -412,6 +418,76 @@ def _check_optional_kiro(manifest: dict, full: bool) -> CheckResult:
     return _result("kiro-adapters", PASS, "optional local Kiro adapters point at harness truth")
 
 
+def _check_recent_analysis_reports() -> CheckResult:
+    """Validate recent-change analysis reports when they are present.
+
+    These reports are optional project evidence, but once one exists it must
+    carry enough structure to make findings traceable through remediation and
+    verification.  This keeps post-hoc harness updates from becoming prose-only
+    recommendations with no closeout state.
+
+    Returns:
+        CheckResult indicating skip, pass, or missing report evidence.
+    """
+    reports = sorted(REPO_ROOT.glob(RECENT_ANALYSIS_REPORT_GLOB))
+    if not reports:
+        return _result(
+            "recent-analysis-report",
+            SKIP_NOT_PRESENT,
+            "no recent Git harness/steering analysis reports found",
+        )
+
+    missing: list[str] = []
+    for report in reports:
+        try:
+            text = report.read_text(encoding="utf-8")
+        except OSError as exc:
+            missing.append(f"{_display_path(report)}::unreadable ({exc})")
+            continue
+
+        for section in (
+            "## Phase 1 Analysis",
+            "## Findings",
+            "## Remediation Results",
+            "## Verification",
+        ):
+            if section not in text:
+                missing.append(f"{_display_path(report)}::{section}")
+
+        finding_ids = sorted(set(re.findall(r"\|\s*(P[0-3]-\d{3})\s*\|", text)))
+        if not finding_ids:
+            missing.append(f"{_display_path(report)}::finding ids")
+            continue
+
+        remediation_start = text.find("## Remediation Results")
+        remediation_text = text[remediation_start:] if remediation_start >= 0 else ""
+        for finding_id in finding_ids:
+            row_match = re.search(
+                rf"\|\s*{re.escape(finding_id)}\s*\|([^\n]+)\|",
+                remediation_text,
+                re.IGNORECASE,
+            )
+            if not row_match:
+                missing.append(f"{_display_path(report)}::{finding_id} remediation row")
+                continue
+            row = row_match.group(0).lower()
+            if not any(status in row for status in REMEDIATION_STATUSES):
+                missing.append(f"{_display_path(report)}::{finding_id} final status")
+
+    if missing:
+        return _result(
+            "recent-analysis-report",
+            FAIL,
+            "analysis reports are missing traceable closeout evidence: "
+            + ", ".join(missing),
+        )
+    return _result(
+        "recent-analysis-report",
+        PASS,
+        "recent analysis reports include findings, remediation, and verification",
+    )
+
+
 def collect_results(full: bool = False) -> list[CheckResult]:
     """Run all harness-sync checks and return their results.
 
@@ -441,6 +517,7 @@ def collect_results(full: bool = False) -> list[CheckResult]:
         _check_risk_pack_docs(manifest),
         _check_harness_docs(manifest),
         _check_agents_map(),
+        _check_recent_analysis_reports(),
         _check_optional_kiro(manifest, full=full),
     ]
 

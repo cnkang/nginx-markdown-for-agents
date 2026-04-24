@@ -151,6 +151,85 @@ def test_collect_results_accept_reordered_status_semantics(tmp_path, monkeypatch
     assert manifest_result.status == sync.PASS
 
 
+def test_collect_results_passes_traceable_recent_analysis_report(tmp_path, monkeypatch):
+    repo = tmp_path
+    _write_repo_fixture(repo, with_kiro=False)
+    report = repo / "docs/project/recent-git-harness-steering-analysis-2026-04-24.md"
+    report.parent.mkdir(parents=True)
+    report.write_text(
+        "\n".join(
+            [
+                "# Recent Git Harness Steering Analysis",
+                "## Phase 1 Analysis",
+                "summary",
+                "## Findings",
+                "| ID | Priority | Finding |",
+                "|----|----------|---------|",
+                "| P0-001 | P0 | Missing traceability |",
+                "## Remediation Results",
+                "| ID | Status | Evidence |",
+                "|----|--------|----------|",
+                "| P0-001 | fixed | checker verifies closeout |",
+                "## Verification",
+                "make harness-check",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(sync, "REPO_ROOT", repo)
+    monkeypatch.setattr(sync, "MANIFEST_PATH", repo / "docs/harness/routing-manifest.json")
+    monkeypatch.setattr(sync, "README_PATH", repo / "docs/harness/README.md")
+    monkeypatch.setattr(sync, "CORE_PATH", repo / "docs/harness/core.md")
+    monkeypatch.setattr(sync, "SUMMARY_PATH", repo / "docs/harness/routing-manifest.md")
+    monkeypatch.setattr(sync, "AGENTS_PATH", repo / "AGENTS.md")
+
+    results = sync.collect_results()
+    report_result = next(item for item in results if item.name == "recent-analysis-report")
+    assert report_result.status == sync.PASS
+
+
+def test_collect_results_fails_unclosed_recent_analysis_report(tmp_path, monkeypatch):
+    repo = tmp_path
+    _write_repo_fixture(repo, with_kiro=False)
+    report = repo / "docs/project/recent-git-harness-steering-analysis-2026-04-24.md"
+    report.parent.mkdir(parents=True)
+    report.write_text(
+        "\n".join(
+            [
+                "# Recent Git Harness Steering Analysis",
+                "## Phase 1 Analysis",
+                "summary",
+                "## Findings",
+                "| ID | Priority | Finding |",
+                "|----|----------|---------|",
+                "| P1-001 | P1 | Missing closeout |",
+                "## Remediation Results",
+                "| ID | Status | Evidence |",
+                "|----|--------|----------|",
+                "| P1-001 | open | not closed |",
+                "## Verification",
+                "pending",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(sync, "REPO_ROOT", repo)
+    monkeypatch.setattr(sync, "MANIFEST_PATH", repo / "docs/harness/routing-manifest.json")
+    monkeypatch.setattr(sync, "README_PATH", repo / "docs/harness/README.md")
+    monkeypatch.setattr(sync, "CORE_PATH", repo / "docs/harness/core.md")
+    monkeypatch.setattr(sync, "SUMMARY_PATH", repo / "docs/harness/routing-manifest.md")
+    monkeypatch.setattr(sync, "AGENTS_PATH", repo / "AGENTS.md")
+
+    results = sync.collect_results()
+    report_result = next(item for item in results if item.name == "recent-analysis-report")
+    assert report_result.status == sync.FAIL
+    assert "P1-001 final status" in report_result.detail
+
+
 def _write_repo_fixture(repo: Path, *, with_kiro: bool, kiro_has_links: bool = True) -> None:
     for rel in [
         "docs/harness/risk-packs",

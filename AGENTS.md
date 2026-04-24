@@ -974,8 +974,29 @@ review cycle, the agent must evaluate whether `AGENTS.md` needs updating:
    answer: "What specific check does the agent perform, and what does
    failure look like?"
 
+## Recent Git Analysis and Remediation Closeout
+
+When a task asks for broad recent Git analysis plus actual harness/steering
+remediation:
+
+1. Collect local and remote refs for the requested time window, deduplicate by
+   commit SHA, classify titles by changed surface, and deep-check high-risk
+   diffs before changing rules.
+2. Write a report under `docs/project/` with stable finding IDs, priority,
+   evidence, recommended fix, and verification method.
+3. Implement all P0/P1 findings first.  Then implement all worthwhile P2/P3
+   findings or mark them `intentionally deferred` with a concrete reason.
+4. Append remediation results to the same report.  Every finding ID must have a
+   final status: `fixed`, `intentionally deferred`, or
+   `not applicable after review`.
+5. Route the work through `docs/harness/risk-packs/harness-remediation.md` and
+   run `make harness-check`; if a
+   `docs/project/recent-git-harness-steering-analysis-*.md` report exists, the
+   harness checker must validate its closeout evidence.
+
 ## Document Updates
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |
+| 0.5.5 | 2026-04-24 | Codex | Added recent Git analysis remediation closeout rule |
