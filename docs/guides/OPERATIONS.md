@@ -1606,6 +1606,29 @@ The table below maps each reason code to its internal enum, error category, requ
 | `ELIGIBLE_FAILED_OPEN` | `NGX_HTTP_MARKDOWN_ELIGIBLE` | _(any)_ | FAILED | Conversion attempted but failed; original HTML served (`markdown_on_error pass`) | Investigate the failure sub-classification (see below). The client received HTML, so no user impact. Review failure rate trends. |
 | `ELIGIBLE_FAILED_CLOSED` | `NGX_HTTP_MARKDOWN_ELIGIBLE` | _(any)_ | FAILED | Conversion attempted but failed; 502 returned (`markdown_on_error reject`) | Urgent — clients are receiving errors. Switch to `markdown_on_error pass` or disable conversion for the affected scope. Investigate root cause. |
 
+#### Engine Selection Codes
+
+When the streaming engine is enabled, the engine selector emits a reason code indicating which path was chosen:
+
+| Reason Code | Family | Severity | Description | Suggested Operator Action |
+|---|---|---|---|---|
+| `ENGINE_STREAMING` | ENGINE | INFO | Streaming engine selected for this request | Informational — no action needed. Indicates the request entered the streaming conversion path. |
+
+#### Streaming Reason Codes
+
+When the streaming engine is active (`markdown_streaming_engine on`), the following reason codes are emitted at streaming decision points:
+
+| Reason Code | Family | Severity | Description | Suggested Operator Action |
+|---|---|---|---|---|
+| `STREAMING_CONVERT` | STREAMING | INFO | Streaming conversion completed successfully | No action needed — this is the streaming success path. |
+| `STREAMING_FALLBACK_PREBUFFER` | STREAMING | WARN | Streaming abandoned pre-commit, fell back to full-buffer | Monitor fallback rate. High rates may indicate content features unsupported by the streaming engine. Consider excluding affected paths from streaming. |
+| `STREAMING_FAIL_POSTCOMMIT` | STREAMING | WARN | Post-commit error during streaming, response may be truncated | Urgent — headers were already sent. Monitor rate and rollback streaming if it exceeds 0.1%. |
+| `STREAMING_SKIP_UNSUPPORTED` | STREAMING | INFO | Streaming not supported for this request, fell through to full-buffer | Informational — the request was handled by the full-buffer path instead. |
+| `STREAMING_BUDGET_EXCEEDED` | STREAMING | WARN | Working-set memory budget exceeded during streaming | Review `markdown_streaming_budget` configuration. Increase budget or exclude large pages from streaming scope. |
+| `STREAMING_PRECOMMIT_FAILOPEN` | STREAMING | WARN | Pre-commit error, fail-open to pass-through (original HTML served) | Investigate root cause. The client received HTML, so no user impact. Review error rate trends. |
+| `STREAMING_PRECOMMIT_REJECT` | STREAMING | WARN | Pre-commit error, fail-closed (error returned to client) | Urgent — clients are receiving errors. Switch to fail-open policy or disable streaming for the affected scope. |
+| `STREAMING_SHADOW` | STREAMING | INFO | Shadow mode comparison completed | Informational — shadow mode ran a comparison between streaming and full-buffer output. Check shadow diff metrics for divergence. |
+
 #### Failure Sub-Classification Codes
 
 When conversion fails (`ELIGIBLE_FAILED_OPEN` or `ELIGIBLE_FAILED_CLOSED`), the decision log also records a failure sub-classification that provides more detail:
@@ -1789,12 +1812,12 @@ The `markdown_log_verbosity` directive controls which decision outcomes produce 
 
 | Verbosity Level | Outcomes Logged | Format | Use Case |
 |---|---|---|---|
-| `error` | Failure outcomes (`ELIGIBLE_FAILED_OPEN`, `ELIGIBLE_FAILED_CLOSED`) only | Base | Production with minimal log volume |
-| `warn` | Failure outcomes (`ELIGIBLE_FAILED_OPEN`, `ELIGIBLE_FAILED_CLOSED`) only | Base | Production monitoring |
+| `error` | Failure outcomes only | Base | Production with minimal log volume |
+| `warn` | Failure outcomes only | Base | Production monitoring |
 | `info` (default) | All outcomes | Base | Recommended for rollout — full visibility into every decision |
 | `debug` | All outcomes | Extended (adds `filter_value`, `accept`, `status`) | Troubleshooting — maximum detail for diagnosing specific requests |
 
-At `error` and `warn` levels, non-failure outcomes (`SKIP_*` and `ELIGIBLE_CONVERTED`) are silently suppressed. Both levels only emit failure outcomes. At `info` and `debug` levels, they include full outcomes. When failures are logged at any level, failure subclassifications (like `FAIL_CONVERSION`, `FAIL_RESOURCE_LIMIT`, `FAIL_SYSTEM`) are emitted in the `category=` field per `ngx_http_markdown_log_decision_with_category()`, not as standalone `FAIL_*` codes in the `reason=` field.
+At `error` and `warn` levels, non-failure outcomes (`SKIP_*`, `ELIGIBLE_CONVERTED`, `ENGINE_STREAMING`, `STREAMING_CONVERT`, `STREAMING_SHADOW`, `STREAMING_SKIP_UNSUPPORTED`) are silently suppressed. Both levels only emit failure outcomes: `ELIGIBLE_FAILED_OPEN`, `ELIGIBLE_FAILED_CLOSED`, `STREAMING_FAIL_POSTCOMMIT`, `STREAMING_PRECOMMIT_FAILOPEN`, `STREAMING_PRECOMMIT_REJECT`, `STREAMING_BUDGET_EXCEEDED`, `STREAMING_FALLBACK_PREBUFFER`. At `info` and `debug` levels, they include full outcomes. When failures are logged at any level, failure subclassifications (like `FAIL_CONVERSION`, `FAIL_RESOURCE_LIMIT`, `FAIL_SYSTEM`) are emitted in the `category=` field per `ngx_http_markdown_log_decision_with_category()`, not as standalone `FAIL_*` codes in the `reason=` field.
 
 #### Configuration examples
 

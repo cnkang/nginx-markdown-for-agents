@@ -13,7 +13,7 @@
  * coverage, use the e2e and integration test suites.
  */
 
-#include "test_common.h"
+#include "../include/test_common.h"
 
 /*
  * Minimal ngx_str_t definition matching NGINX's { len, data } layout.
@@ -63,6 +63,7 @@ static void test_verbosity_gating_debug(void);
 static void test_verbosity_gating_warn(void);
 static void test_verbosity_gating_error(void);
 static void test_null_inputs(void);
+static void test_unknown_family_classification(void);
 
 
 /*
@@ -218,6 +219,8 @@ static ngx_str_t rc_fail_resource =
 static ngx_str_t rc_fail_system = ngx_string("FAIL_SYSTEM");
 
 /* Streaming reason codes */
+static ngx_str_t rc_engine_streaming =
+    ngx_string("ENGINE_STREAMING");
 static ngx_str_t rc_streaming_convert =
     ngx_string("STREAMING_CONVERT");
 static ngx_str_t rc_streaming_shadow =
@@ -305,6 +308,10 @@ test_non_failure_outcome_classification(void)
     TEST_ASSERT(is_failure_outcome(&rc_converted) == 0,
                 "ELIGIBLE_CONVERTED is not failure");
 
+    /* Engine selection codes */
+    TEST_ASSERT(is_failure_outcome(&rc_engine_streaming) == 0,
+                "ENGINE_STREAMING is not failure");
+
     /* Streaming non-failure codes */
     TEST_ASSERT(
         is_failure_outcome(&rc_streaming_convert) == 0,
@@ -335,6 +342,10 @@ test_log_level_selection(void)
                 "SKIP_METHOD -> NGX_LOG_INFO");
     TEST_ASSERT(expected_log_level(&rc_converted) == NGX_LOG_INFO,
                 "ELIGIBLE_CONVERTED -> NGX_LOG_INFO");
+
+    /* Engine selection -> NGX_LOG_INFO */
+    TEST_ASSERT(expected_log_level(&rc_engine_streaming) == NGX_LOG_INFO,
+                "ENGINE_STREAMING -> NGX_LOG_INFO");
 
     /* Failure outcomes use NGX_LOG_WARN */
     TEST_ASSERT(expected_log_level(&rc_failed_open) == NGX_LOG_WARN,
@@ -398,6 +409,7 @@ test_verbosity_gating_info(void)
         &rc_skip_accept, &rc_converted, &rc_failed_open,
         &rc_failed_closed, &rc_fail_conversion,
         &rc_fail_resource, &rc_fail_system,
+        &rc_engine_streaming,
         &rc_streaming_convert, &rc_streaming_shadow,
         &rc_streaming_fallback, &rc_streaming_skip,
         &rc_streaming_fail_postcommit,
@@ -431,6 +443,7 @@ test_verbosity_gating_debug(void)
         &rc_skip_accept, &rc_converted, &rc_failed_open,
         &rc_failed_closed, &rc_fail_conversion,
         &rc_fail_resource, &rc_fail_system,
+        &rc_engine_streaming,
         &rc_streaming_convert, &rc_streaming_shadow,
         &rc_streaming_fallback, &rc_streaming_skip,
         &rc_streaming_fail_postcommit,
@@ -472,6 +485,12 @@ test_verbosity_gating_warn(void)
         should_emit(NGX_HTTP_MARKDOWN_LOG_WARN,
                     &rc_converted) == 0,
         "warn suppresses ELIGIBLE_CONVERTED");
+
+    /* Engine selection suppressed */
+    TEST_ASSERT(
+        should_emit(NGX_HTTP_MARKDOWN_LOG_WARN,
+                    &rc_engine_streaming) == 0,
+        "warn suppresses ENGINE_STREAMING");
 
     /* Streaming non-failure outcomes suppressed */
     TEST_ASSERT(
@@ -614,6 +633,32 @@ test_null_inputs(void)
 }
 
 
+/*
+ * Test: unknown family codes are classified as non-failure (Req 8.5)
+ */
+static void
+test_unknown_family_classification(void)
+{
+    ngx_str_t unknown_info =
+        ngx_string("FUTURE_INFORMATIONAL");
+    ngx_str_t unknown_prefix =
+        ngx_string("NEWNS_SOMETHING");
+    ngx_str_t partial_match =
+        ngx_string("STREAMING");
+
+    TEST_SUBSECTION("Unknown family classification");
+
+    TEST_ASSERT(is_failure_outcome(&unknown_info) == 0,
+        "FUTURE_INFORMATIONAL -> non-failure (unknown family)");
+    TEST_ASSERT(is_failure_outcome(&unknown_prefix) == 0,
+        "NEWNS_SOMETHING -> non-failure (unknown family)");
+    TEST_ASSERT(is_failure_outcome(&partial_match) == 0,
+        "STREAMING (bare, no underscore suffix) -> non-failure");
+
+    TEST_PASS("Unknown family codes classified as non-failure");
+}
+
+
 int
 main(void)
 {
@@ -629,6 +674,7 @@ main(void)
     test_verbosity_gating_warn();
     test_verbosity_gating_error();
     test_null_inputs();
+    test_unknown_family_classification();
 
     printf("\n========================================\n");
     printf("All tests passed!\n");
