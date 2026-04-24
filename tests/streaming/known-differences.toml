@@ -23,7 +23,10 @@ trigger = "whitespace-only-chunk-drift"
 reason = "Streaming tokenizer/commit boundary currently has known whitespace normalization instability under extreme chunk fragmentation"
 acceptable = true
 fix_version = "0.6.0"
+drift_type = "whitespace"
+severity = "low"
 diff_contains = "whitespace-only-chunk-drift"
+global_suppressor_justification = "Intentionally global: chunk-split whitespace drift is not fixture-specific; it depends on chunk boundary alignment which varies across all fixtures under extreme fragmentation patterns."
 
 [[difference]]
 id = "DIFF-PARITY-WHITESPACE-ONLY"
@@ -32,7 +35,10 @@ trigger = "whitespace-only-parity-drift"
 reason = "Streaming path still has known whitespace normalization drift in pre-heading and list indentation regions"
 acceptable = true
 fix_version = "0.6.0"
+drift_type = "whitespace"
+severity = "low"
 diff_contains = "whitespace-only-parity-drift"
+global_suppressor_justification = "Intentionally global: whitespace normalization drift in pre-heading and list indentation regions can occur across multiple fixture categories, not limited to a single fixture."
 
 [[difference]]
 id = "DIFF-PARITY-ORDERED-LIST-NUMBERING"
@@ -41,6 +47,9 @@ trigger = "ordered-list-numbering-drift"
 reason = "Streaming structural state machine currently rewrites ordered-list item numbers in some mixed/empty-item inputs"
 acceptable = true
 fix_version = "0.6.0"
+drift_type = "formatting"
+severity = "low"
+fixture_contains = "simple/lists.html"
 diff_contains = "ordered-list-numbering-drift"
 
 [[difference]]
@@ -50,6 +59,8 @@ trigger = "Deep Mixed Lists"
 reason = "Streaming list state machine currently emits different nesting/indentation layout for deeply mixed list structures"
 acceptable = true
 fix_version = "0.6.0"
+drift_type = "formatting"
+severity = "medium"
 fixture_contains = "streaming/nested-lists-deep.html"
 
 [[difference]]
@@ -59,6 +70,8 @@ trigger = "Inline Code with Backticks"
 reason = "Streaming inline-code emitter does not yet align with full-buffer fence-length selection for embedded backticks"
 acceptable = true
 fix_version = "0.6.0"
+drift_type = "formatting"
+severity = "medium"
 fixture_contains = "streaming/code-blocks-mixed.html"
 
 [[difference]]
@@ -68,6 +81,8 @@ trigger = "Quoted list item A"
 reason = "Streaming blockquote emission currently preserves quote marker structure where full-buffer output flattens quote context"
 acceptable = true
 fix_version = "0.6.0"
+drift_type = "structural"
+severity = "medium"
 fixture_contains = "streaming/blockquote-nested.html"
 
 [[difference]]
@@ -77,6 +92,8 @@ trigger = "Code Block Examples"
 reason = "Streaming pre-commit heading emission and code-fence normalization are not yet parity-equivalent"
 acceptable = true
 fix_version = "0.6.0"
+drift_type = "formatting"
+severity = "low"
 fixture_contains = "simple/code-blocks.html"
 
 [[difference]]
@@ -86,6 +103,8 @@ trigger = "Image Examples"
 reason = "Streaming image/link emission differs from full-buffer path for nested image/link structures"
 acceptable = true
 fix_version = "0.6.0"
+drift_type = "formatting"
+severity = "low"
 fixture_contains = "simple/images.html"
 
 [[difference]]
@@ -95,6 +114,8 @@ trigger = "List Examples"
 reason = "Streaming list state machine currently formats mixed nesting differently from full-buffer converter"
 acceptable = true
 fix_version = "0.6.0"
+drift_type = "formatting"
+severity = "low"
 fixture_contains = "simple/lists.html"
 
 [[difference]]
@@ -104,6 +125,8 @@ trigger = "Building an NGINX Module for AI Agents"
 reason = "Streaming and full-buffer converters differ on complex boilerplate + quote/list composition"
 acceptable = true
 fix_version = "0.6.0"
+drift_type = "formatting"
+severity = "medium"
 fixture_contains = "complex/blog-post.html"
 
 [[difference]]
@@ -113,6 +136,8 @@ trigger = "Unclosed Tags Example"
 reason = "Streaming tokenizer/state-machine recovery differs from full-buffer parser recovery on severely unclosed markup"
 acceptable = true
 fix_version = "0.6.0"
+drift_type = "structural"
+severity = "medium"
 fixture_contains = "malformed/unclosed-tags.html"
 
 [[difference]]
@@ -122,6 +147,8 @@ trigger = "Latin-1 (ISO-8859-1) Test"
 reason = "Full-buffer and streaming paths currently diverge in charset decoding fallback behavior for this fixture"
 acceptable = true
 fix_version = "0.6.0"
+drift_type = "formatting"
+severity = "low"
 fixture_contains = "encoding/latin1.html"
 
 [[difference]]
@@ -131,6 +158,8 @@ trigger = "Single Line HTML"
 reason = "Streaming path currently has known heading boundary formatting drift on one-line documents"
 acceptable = true
 fix_version = "0.6.0"
+drift_type = "whitespace"
+severity = "low"
 fixture_contains = "edge-cases/single-line.html"
 
 [[difference]]
@@ -140,6 +169,8 @@ trigger = "Charset Mismatch"
 reason = "Streaming path prioritizes runtime charset resolution differently from full-buffer path for this mismatch fixture"
 acceptable = true
 fix_version = "0.6.0"
+drift_type = "formatting"
+severity = "low"
 fixture_contains = "streaming/charset-mismatch.html"
 
 [[difference]]
@@ -149,6 +180,8 @@ trigger = "streaming-fallback"
 reason = "Legacy corpus metadata does not yet mark all table-driven fallback fixtures"
 acceptable = true
 fix_version = "0.6.0"
+drift_type = "fallback"
+severity = "medium"
 fixture_contains = "complex/"
 diff_contains = "streaming-fallback"
 
@@ -159,14 +192,30 @@ trigger = "streaming-fallback"
 reason = "Legacy corpus metadata does not yet mark table-driven fallback for simple/tables.html"
 acceptable = true
 fix_version = "0.6.0"
+drift_type = "fallback"
+severity = "medium"
 fixture_contains = "simple/tables.html"
 diff_contains = "streaming-fallback"
 
 [[difference]]
 id = "DIFF-PARITY-POSTCOMMIT-TABLE-ERROR"
-description = "Chunked streaming may hit post-commit table fallback for table-heavy fixtures"
+description = "Chunked streaming may hit post-commit table fallback for any fixture containing table-like HTML structures"
 trigger = "streaming-error"
-reason = "Table detection after commit is currently a known non-parity behavior in streaming path"
+reason = "Table detection after commit is currently a known non-parity behavior in streaming path; any fixture with table-like structures can trigger this when chunk boundaries fall before the table element"
 acceptable = true
 fix_version = "0.6.0"
+drift_type = "fallback"
+severity = "medium"
 diff_contains = "table detected after commit"
+global_suppressor_justification = "Intentionally global: post-commit table detection depends on chunk boundary alignment relative to table elements, which can occur in any fixture containing table-like HTML (complex, malformed, encoding, simple). The diff_contains constraint provides semantic scoping to table-specific errors only."
+
+[[difference]]
+id = "DIFF-PARITY-SIMPLE-MEDIA-RICH"
+description = "Media-rich fixture differs in URL extraction formatting and whitespace between conversion paths"
+trigger = "Media Rich Content"
+reason = "Streaming path uses simplified media element URL extraction compared to full-buffer path which extracts poster, type labels, and alt text"
+acceptable = true
+fix_version = "0.6.0"
+drift_type = "formatting"
+severity = "low"
+fixture_contains = "simple/media-rich.html"

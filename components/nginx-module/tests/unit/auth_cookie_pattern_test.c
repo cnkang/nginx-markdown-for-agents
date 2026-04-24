@@ -47,8 +47,8 @@ cookie_matches_pattern(const char *cookie_name, const char *pattern)
         return 0;
     }
 
-    cookie_len = strlen(cookie_name);
-    pattern_len = strlen(pattern);
+    cookie_len = test_cstrnlen(cookie_name, 4096);
+    pattern_len = test_cstrnlen(pattern, 4096);
 
     /* Prefix wildcard: pattern ends with '*' */
     if (pattern[pattern_len - 1] == '*') {
@@ -220,6 +220,8 @@ test_exact_matching(void)
                 "PHPSESSID exact match");
     TEST_ASSERT(cookie_matches_pattern("PHPSESSID", "phpsessid") == 0,
                 "Exact match is case-sensitive");
+    TEST_ASSERT(cookie_matches_pattern("PHPSESSID2", "PHPSESSID") == 0,
+                "PHPSESSID does not match PHPSESSID2 (different length)");
     TEST_ASSERT(cookie_matches_pattern("session", "session") == 1,
                 "session exact match");
     TEST_ASSERT(cookie_matches_pattern("session_id", "session") == 0,

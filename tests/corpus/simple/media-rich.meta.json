@@ -1,0 +1,22 @@
+{
+  "fixture-id": "simple/media-rich",
+  "page-type": "media-content",
+  "expected-conversion-result": "converted",
+  "input-size-bytes": 1562,
+  "source-description": "Media-rich fixture with video, audio, source, track, and area elements for URL extraction coverage",
+  "failure-corpus": false,
+  "archetype": "media-rich",
+  "streaming_notes": {
+    "expected_fallback": false,
+    "known_diff_ids": [
+      "DIFF-PARITY-SIMPLE-MEDIA-RICH"
+    ],
+    "high_risk_structures": [
+      "video",
+      "audio",
+      "source",
+      "track",
+      "area"
+    ]
+  }
+}

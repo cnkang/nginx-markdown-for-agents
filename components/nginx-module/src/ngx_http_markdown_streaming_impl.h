@@ -678,6 +678,30 @@ ngx_http_markdown_streaming_update_headers(
         return NGX_ERROR;
     }
 
+    /*
+     * Auth cache control for streaming path (Requirement 11.1).
+     *
+     * Apply the same auth/cache safety logic as the full-buffer
+     * path (ngx_http_markdown_update_headers).  When the request
+     * is authenticated and auth_policy is allow, upgrade
+     * Cache-Control to at least private.  This ensures the
+     * streaming conversion engine choice does not affect cache
+     * safety.
+     *
+     * Guarded by NGX_HTTP_MARKDOWN_ENABLE_AUTH_CACHE_CONTROL
+     * to match the full-buffer path's compile-time gate.
+     */
+#if NGX_HTTP_MARKDOWN_ENABLE_AUTH_CACHE_CONTROL
+    if (ngx_http_markdown_is_authenticated(r, conf)) {
+        rc = ngx_http_markdown_modify_cache_control_for_auth(r);
+        if (rc != NGX_OK) {
+            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                "markdown streaming: failed to modify "
+                "Cache-Control for authenticated content");
+        }
+    }
+#endif
+
     return NGX_OK;
 }
 

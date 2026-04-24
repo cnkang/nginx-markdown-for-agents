@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Media Rich Fixture</title>
+</head>
+<body>
+    <!-- Test Purpose: Verify URL extraction for video, audio, source, track, and area elements -->
+    <h1>Media Rich Content</h1>
+
+    <h2>Video Element</h2>
+    <video src="https://example.com/video.mp4" poster="https://example.com/poster.jpg">
+        <source src="https://example.com/video.webm" type="video/webm">
+        <track src="https://example.com/captions.vtt" kind="captions" srclang="en" label="English">
+        Your browser does not support the video tag.
+    </video>
+
+    <h2>Audio Element</h2>
+    <audio src="https://example.com/audio.mp3">
+        <source src="https://example.com/audio.ogg" type="audio/ogg">
+        <track src="https://example.com/audio-captions.vtt" kind="captions" srclang="en" label="English">
+        Your browser does not support the audio tag.
+    </audio>
+
+    <h2>Image Map with Areas</h2>
+    <img src="https://example.com/map.png" alt="Navigation Map" usemap="#navmap">
+    <map name="navmap">
+        <area href="https://example.com/section1" alt="Section 1" shape="rect" coords="0,0,100,100">
+        <area href="https://example.com/section2" alt="Section 2" shape="rect" coords="100,0,200,100">
+    </map>
+
+    <h2>Video Without Src</h2>
+    <video poster="https://example.com/fallback.jpg">
+        <source src="https://example.com/alt-video.mp4" type="video/mp4">
+        <track src="https://example.com/alt-video-captions.vtt" kind="captions" srclang="en" label="English">
+        Fallback text for video.
+    </video>
+
+    <h2>Audio Without Src</h2>
+    <audio>
+        <source src="https://example.com/alt-audio.mp3" type="audio/mpeg">
+        <track src="https://example.com/alt-audio-captions.vtt" kind="captions" srclang="en" label="English">
+        Fallback text for audio.
+    </audio>
+</body>
+</html>

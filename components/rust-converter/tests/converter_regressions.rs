@@ -46,6 +46,41 @@ fn link_text_extraction_should_skip_removed_children() {
     assert!(!result.contains("alert"));
 }
 
+/// Headings nested inside container elements (`<div>`, `<section>`, `<article>`)
+/// must preserve their Markdown level regardless of container nesting depth.
+/// Regression guard for Requirement 1.4 (semantic fidelity spec).
+#[test]
+fn headings_inside_containers_preserve_level() {
+    // Heading inside <div>
+    let result = convert_html(b"<div><h1>Div Title</h1></div>");
+    assert!(
+        result.contains("# Div Title"),
+        "h1 inside <div> should produce '# ': {result:?}"
+    );
+
+    // Heading inside <section>
+    let result = convert_html(b"<section><h2>Section Title</h2></section>");
+    assert!(
+        result.contains("## Section Title"),
+        "h2 inside <section> should produce '## ': {result:?}"
+    );
+
+    // Heading inside <article>
+    let result = convert_html(b"<article><h3>Article Title</h3></article>");
+    assert!(
+        result.contains("### Article Title"),
+        "h3 inside <article> should produce '### ': {result:?}"
+    );
+
+    // Deeply nested containers
+    let result =
+        convert_html(b"<div><section><article><h4>Deep Title</h4></article></section></div>");
+    assert!(
+        result.contains("#### Deep Title"),
+        "h4 inside nested containers should produce '#### ': {result:?}"
+    );
+}
+
 #[test]
 fn nested_lists_should_not_double_indent_pre_rendered_children() {
     let result = convert_html_with_options(
