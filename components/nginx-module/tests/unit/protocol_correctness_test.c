@@ -175,22 +175,29 @@ ngx_http_clear_content_length(ngx_http_request_t *r)
     r->headers_out.content_length_n = -1;
 }
 
-void ngx_log_error(int level, void *log, int err, const char *fmt)
-{
-    UNUSED(level); UNUSED(log); UNUSED(err); UNUSED(fmt);
-}
+#ifdef ngx_log_error
+#undef ngx_log_error
+#endif
+#define ngx_log_error(level, log, err, fmt, ...)                                    \
+    do {                                                                             \
+        UNUSED(level); UNUSED(log); UNUSED(err); UNUSED(fmt);                        \
+    } while (0)
 
-void ngx_log_debug0(int level, void *log, int err, const char *fmt)
-{
-    UNUSED(level); UNUSED(log); UNUSED(err); UNUSED(fmt);
-}
+#ifdef ngx_log_debug0
+#undef ngx_log_debug0
+#endif
+#define ngx_log_debug0(level, log, err, fmt)                                        \
+    do {                                                                             \
+        UNUSED(level); UNUSED(log); UNUSED(err); UNUSED(fmt);                        \
+    } while (0)
 
-void
-ngx_http_markdown_log_debug1(int level, void *log, int err,
-                             const char *fmt, uintptr_t arg)
-{
-    UNUSED(level); UNUSED(log); UNUSED(err); UNUSED(fmt); UNUSED(arg);
-}
+#ifdef ngx_http_markdown_log_debug1
+#undef ngx_http_markdown_log_debug1
+#endif
+#define ngx_http_markdown_log_debug1(level, log, err, fmt, arg)                     \
+    do {                                                                             \
+        UNUSED(level); UNUSED(log); UNUSED(err); UNUSED(fmt); UNUSED(arg);          \
+    } while (0)
 
 int
 ngx_strncasecmp(const u_char *s1, const u_char *s2, size_t n)
@@ -226,8 +233,13 @@ ngx_http_markdown_sprintf_token(u_char *buf, ngx_uint_t token_count)
     return buf + len;
 }
 
-#define NGX_HTTP_MARKDOWN_LOG_DEBUG1(level, log, err, fmt, arg) \
-    ngx_http_markdown_log_debug1((level), (log), (err), (fmt), (uintptr_t) (arg))
+#ifdef NGX_HTTP_MARKDOWN_LOG_DEBUG1
+#undef NGX_HTTP_MARKDOWN_LOG_DEBUG1
+#endif
+#define NGX_HTTP_MARKDOWN_LOG_DEBUG1(level, log, err, fmt, arg)                     \
+    do {                                                                             \
+        UNUSED(level); UNUSED(log); UNUSED(err); UNUSED(fmt); UNUSED(arg);          \
+    } while (0)
 
 #define NGX_HTTP_MARKDOWN_SPRINTF_TOKEN(buf, token_count) \
     ngx_http_markdown_sprintf_token((buf), (token_count))
