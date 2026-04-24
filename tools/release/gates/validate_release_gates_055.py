@@ -238,29 +238,10 @@ def check_evidence_artifact(result: ValidationResult) -> None:
 
 def check_known_differences_metadata(result: ValidationResult) -> None:
     """Verify known-difference entries have structured metadata."""
-    if not KNOWN_DIFF_PATH.is_file():
-        result.failed("known-diffs:exists", "tests/streaming/known-differences.toml not found")
+    entries = _load_known_difference_entries(result)
+    if entries is None:
         return
 
-    result.passed("known-diffs:exists")
-
-    try:
-        import tomllib
-    except ModuleNotFoundError:
-        try:
-            import tomli as tomllib  # type: ignore[no-redef]
-        except ModuleNotFoundError:
-            result.skipped("known-diffs:metadata", "tomllib/tomli not available")
-            return
-
-    try:
-        with open(KNOWN_DIFF_PATH, "rb") as f:
-            data = tomllib.load(f)
-    except Exception as exc:
-        result.failed("known-diffs:parse", f"TOML parse error: {exc}")
-        return
-
-    entries = data.get("difference", [])
     if not entries:
         result.failed("known-diffs:entries", "no [[difference]] entries found")
         return
@@ -289,6 +270,33 @@ def check_known_differences_metadata(result: ValidationResult) -> None:
         )
     else:
         result.passed("known-diffs:suppressor-scope", "all entries scoped or justified")
+
+
+def _load_known_difference_entries(result: ValidationResult) -> list[dict[str, object]] | None:
+    """Load known-difference entries, reporting gate status on failure."""
+    if not KNOWN_DIFF_PATH.is_file():
+        result.failed("known-diffs:exists", "tests/streaming/known-differences.toml not found")
+        return None
+
+    result.passed("known-diffs:exists")
+
+    try:
+        import tomllib
+    except ModuleNotFoundError:
+        try:
+            import tomli as tomllib  # type: ignore[no-redef]
+        except ModuleNotFoundError:
+            result.skipped("known-diffs:metadata", "tomllib/tomli not available")
+            return None
+
+    try:
+        with open(KNOWN_DIFF_PATH, "rb") as f:
+            data = tomllib.load(f)
+    except Exception as exc:
+        result.failed("known-diffs:parse", f"TOML parse error: {exc}")
+        return None
+
+    return data.get("difference", [])
 
 
 def check_changelog_entry(result: ValidationResult) -> None:

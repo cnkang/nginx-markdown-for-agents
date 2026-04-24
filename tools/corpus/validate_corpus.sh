@@ -158,7 +158,7 @@ while IFS= read -r -d '' html_file; do
     # Validate metadata sidecar content — pass path via env to avoid injection.
     # Use single-quoted Python block so no shell interpolation occurs.
     # Access dict keys via .get() to avoid backslash-quote issues.
-    META_RESULT=$(META_FILE="$meta_file" python3 -c '
+    if META_RESULT=$(META_FILE="$meta_file" python3 -c '
 import json, sys, os
 
 valid_page_types = {"clean-article", "documentation", "nav-heavy", "boilerplate-heavy", "complex-common"}
@@ -200,9 +200,7 @@ try:
 except Exception as e:
     print("PARSE_ERROR:" + str(e))
     sys.exit(1)
-' 2>&1)
-
-    if [[ $? -eq 0 ]]; then
+' 2>&1); then
         page_type=$(echo "$META_RESULT" | cut -d'|' -f1)
         is_failure=$(echo "$META_RESULT" | cut -d'|' -f2)
 
