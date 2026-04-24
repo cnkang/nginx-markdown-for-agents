@@ -292,7 +292,7 @@
       ],
       "supporting_surfaces": [
         "docs-tooling",
-        "harness-remediation"
+        "harness-rules"
       ],
       "paths": [
         "tools/release/**",
