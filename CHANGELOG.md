@@ -5,6 +5,41 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] - 0.5.5
+
+This release is a stabilization and correctness release focused on semantic
+fidelity, protocol correctness, auth/cache safety, streaming parity evidence,
+operator diagnostics, and release gate/documentation synchronization.
+
+### Added
+- 0.5.5 release checklist (`docs/project/release-checklist-0-5-5.md`) with
+  phased verification gates organized by cheap blockers, focused semantic
+  checks, and umbrella checks
+- 0.5.5 test matrix (`docs/project/test-matrix-0-5-5.md`) mapping every change
+  surface touched by the stabilization workstreams to verification commands
+- Go/no-go criteria with explicit gate references, aggregate thresholds, and
+  structured waiver process (waiver ID format: `WAIVER-0.5.5-<NNN>`)
+- Docs sync trigger classification table and docs alignment map documenting
+  which behavioral surfaces map to which documentation files
+- Streaming parity evidence artifact gate requiring
+  `tests/streaming/evidence/summary.json` to exist and validate against
+  `schema_version=1`
+
+### Changed
+- Documentation synchronization audit across Prometheus metrics guide,
+  configuration guide, streaming rollout cookbook, and operator-facing command
+  examples to verify naming consistency with code-truth metric names
+- Verified all operator-facing command examples include correct `Accept` headers
+  matching the output format being parsed (JSON, Prometheus, or plain-text)
+- Verified harness routing references point to current content across
+  `AGENTS.md`, routing manifest, and risk pack documentation
+- Verified version framing consistency across CHANGELOG, release gate tooling,
+  and documentation
+
+### Fixed
+- No code fixes in this workstream (documentation and release gate
+  synchronization only)
+
 ## [0.5.0] - 2026-04-20
 
 This release delivers the 0.5.0 streaming line. It moves the project from
