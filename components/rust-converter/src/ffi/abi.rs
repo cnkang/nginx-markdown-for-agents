@@ -59,14 +59,37 @@ pub const ERROR_INTERNAL: u32 = 99;
 /// Conversion options passed from C to Rust.
 #[repr(C)]
 pub struct MarkdownOptions {
+    /// Markdown flavor selector.
+    ///
+    /// `0` selects CommonMark-compatible output and `1` selects the GFM
+    /// extension set. Other values are rejected during option decoding.
     pub flavor: u32,
+    /// Cooperative conversion timeout in milliseconds.
+    ///
+    /// `0` disables the deadline. The value is copied from C at call entry and
+    /// is not retained after the FFI call returns.
     pub timeout_ms: u32,
+    /// Non-zero when Rust should generate a Markdown-variant ETag.
     pub generate_etag: u8,
+    /// Non-zero when Rust should estimate token count/savings.
     pub estimate_tokens: u8,
+    /// Non-zero when Rust should extract YAML front matter metadata.
     pub front_matter: u8,
+    /// Borrowed Content-Type bytes from the C caller.
+    ///
+    /// Must either be NULL with `content_type_len == 0` or point to
+    /// `content_type_len` readable bytes for the duration of the FFI call.
+    /// Rust never takes ownership of this buffer.
     pub content_type: *const u8,
+    /// Length in bytes of [`MarkdownOptions::content_type`].
     pub content_type_len: usize,
+    /// Borrowed base URL bytes used for resolving relative links.
+    ///
+    /// Must either be NULL with `base_url_len == 0` or point to
+    /// `base_url_len` readable UTF-8 bytes for the duration of the FFI call.
+    /// Rust copies any value it needs to retain.
     pub base_url: *const u8,
+    /// Length in bytes of [`MarkdownOptions::base_url`].
     pub base_url_len: usize,
     /// Streaming memory budget in bytes (0 = use default).
     ///
@@ -79,13 +102,31 @@ pub struct MarkdownOptions {
 /// Conversion result returned from Rust to C.
 #[repr(C)]
 pub struct MarkdownResult {
+    /// Rust-owned Markdown output buffer.
+    ///
+    /// Valid only when `error_code == ERROR_SUCCESS`. The C caller must release
+    /// it with `markdown_result_free()` and must not mutate it.
     pub markdown: *mut u8,
+    /// Length in bytes of [`MarkdownResult::markdown`].
     pub markdown_len: usize,
+    /// Rust-owned ETag bytes, or NULL when ETag generation was disabled.
+    ///
+    /// Valid only when `etag_len > 0` and released by `markdown_result_free()`.
     pub etag: *mut u8,
+    /// Length in bytes of [`MarkdownResult::etag`].
     pub etag_len: usize,
+    /// Estimated token count for successful conversions.
+    ///
+    /// `0` means token estimation was disabled or no estimate was produced.
     pub token_estimate: u32,
+    /// FFI error code; `ERROR_SUCCESS` means the output fields are valid.
     pub error_code: u32,
+    /// Rust-owned UTF-8 diagnostic message for non-success results.
+    ///
+    /// The pointer may be NULL when no diagnostic is available. Release through
+    /// `markdown_result_free()` together with the rest of the result.
     pub error_message: *mut u8,
+    /// Length in bytes of [`MarkdownResult::error_message`].
     pub error_len: usize,
     /// Peak working-set memory estimate during streaming conversion (bytes).
     ///
@@ -96,7 +137,17 @@ pub struct MarkdownResult {
     pub peak_memory_estimate: usize,
 }
 
-/// Opaque handle to Rust converter state shared across conversions.
+/// Opaque handle to a reusable Rust converter instance shared across FFI calls.
+///
+/// This struct holds stateful components (ETag generator, token estimator) that
+/// are reused across multiple conversions to avoid re-initialization overhead.
+/// The handle is created via `markdown_converter_new()` and freed via
+/// `markdown_converter_free()` on the C side.
+///
+/// # Thread Safety
+///
+/// This handle is NOT thread-safe. The caller must ensure exclusive access
+/// when using a handle across multiple FFI calls.
 pub struct MarkdownConverterHandle {
     pub(crate) etag_generator: ETagGenerator,
     pub(crate) token_estimator: TokenEstimator,

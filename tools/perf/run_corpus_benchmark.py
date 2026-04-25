@@ -16,7 +16,19 @@ Usage:
         --corpus-dir tests/corpus \
         --converter-bin <path> \
         --output <path> \
-        --examples-dir perf/reports/examples
+        --examples-dir perf/reports/examples \
+        --token-approx-factor 1.0 \
+        --converter-version 0.4.0
+
+Output:
+    Writes the Unified Report JSON to --output. Optional before/after examples
+    are written under --examples-dir. Progress, warnings, and converter errors
+    are emitted to stderr so callers can capture the report path independently.
+
+Exit codes:
+    0 when discovery, conversion, and report validation all succeed.
+    1 when prerequisites are missing, any required input is invalid, or report
+    generation fails.
 """
 
 from __future__ import annotations

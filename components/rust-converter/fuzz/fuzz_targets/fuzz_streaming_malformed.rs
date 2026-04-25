@@ -1,4 +1,11 @@
 #![no_main]
+
+//! Fuzz malformed streaming input and teardown.
+//!
+//! Random bytes are fed in repeated small chunks so the converter exercises
+//! cross-boundary tokenization, error transitions, and `finalize()` cleanup
+//! after early feed errors without panicking.
+
 use libfuzzer_sys::fuzz_target;
 use nginx_markdown_converter::converter::ConversionOptions;
 use nginx_markdown_converter::streaming::budget::MemoryBudget;

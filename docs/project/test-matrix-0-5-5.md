@@ -83,7 +83,7 @@ distinguishes runtime verification targets from static verification targets.
 | Type | Count | Description |
 |------|-------|-------------|
 | Runtime | 18 | Commands that execute module code or run tests against compiled artifacts |
-| Static | 16 | Commands that check docs, naming, configuration consistency, or manual audits |
+| Static | 21 | Commands that check docs, naming, configuration consistency, or manual audits |
 
 ## Coverage Gaps
 
@@ -105,7 +105,7 @@ All verification families referenced in this matrix are defined in
 - `rust-streaming` → focused semantic → `make test-rust-streaming`
 - `nginx-streaming` → focused semantic → `make test-nginx-unit-streaming`
 - `observability-metrics` → focused semantic → `make docs-check`, `make release-gates-check`
-- `release-governance` → focused semantic → `make release-gates-check`, `make release-gates-check-strict`
+- `release-governance` → focused semantic → `make release-gates-check`, `make release-gates-check-strict`, `make release-gates-check-055`
 - `runtime-e2e` → umbrella → `make verify-chunked-native-e2e-smoke`, `make verify-streaming-failure-cache-e2e`
 - `release-quality` → umbrella → `make harness-check-full`
 

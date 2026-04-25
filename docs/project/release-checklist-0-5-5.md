@@ -27,22 +27,22 @@ These gates catch obvious failures fast and must pass before deeper checks.
 
 These gates verify pack-specific behavioral correctness for touched surfaces.
 
-| Gate ID | Verification Family | Command | Expected Output | Pass Criterion |
-|---------|-------------------|---------|-----------------|----------------|
-| FS-01 | `ffi-boundary` | `make build` | Build succeeds | Exit code 0 |
-| FS-02 | `ffi-boundary` | `make test-rust` | All tests pass | Exit code 0 |
-| FS-03 | `nginx-protocol` | `make test-nginx-unit` | All tests pass | Exit code 0 |
-| FS-04 | `nginx-protocol` | `make test-nginx-integration` | All tests pass | Exit code 0 |
-| FS-05 | `rust-streaming` | `make test-rust-streaming` | All tests pass | Exit code 0 |
-| FS-06 | `nginx-streaming` | `make test-nginx-unit-streaming` | All tests pass | Exit code 0 |
-| FS-07 | `observability-metrics` | `make docs-check` | Metrics naming consistent | Exit code 0 |
-| FS-08 | `observability-metrics` | `make release-gates-check` | All gates pass | Exit code 0 | **Note:** Currently validates 0.5.0 release gate surfaces; serves as a non-regression baseline for 0.5.5 |
-| FS-09 | `release-governance` | `make release-gates-check` | All gates pass | Exit code 0 | **Note:** Currently validates 0.5.0 release gate surfaces; serves as a non-regression baseline for 0.5.5 |
-| FS-10 | `release-governance` | `make release-gates-check-strict` | All gates pass | Exit code 0 | **Note:** Currently validates 0.5.0 release gate surfaces; serves as a non-regression baseline for 0.5.5 |
-| FS-11 | metrics-naming | Manual audit | Documented names match emitted names | All names verified |
-| FS-12 | command-examples | Manual audit | All examples include correct Accept headers | All examples verified |
-| FS-13 | harness-references | Manual audit | All references point to current content | All references verified |
-| FS-14 | release-checklist | Manual audit | Checklist covers all verification families | All families covered |
+| Gate ID | Verification Family | Command | Expected Output | Pass Criterion | Notes |
+|---------|-------------------|---------|-----------------|----------------|-------|
+| FS-01 | `ffi-boundary` | `make build` | Build succeeds | Exit code 0 | |
+| FS-02 | `ffi-boundary` | `make test-rust` | All tests pass | Exit code 0 | |
+| FS-03 | `nginx-protocol` | `make test-nginx-unit` | All tests pass | Exit code 0 | |
+| FS-04 | `nginx-protocol` | `make test-nginx-integration` | All tests pass | Exit code 0 | |
+| FS-05 | `rust-streaming` | `make test-rust-streaming` | All tests pass | Exit code 0 | |
+| FS-06 | `nginx-streaming` | `make test-nginx-unit-streaming` | All tests pass | Exit code 0 | |
+| FS-07 | `observability-metrics` | `make docs-check` | Metrics naming consistent | Exit code 0 | |
+| FS-08 | `observability-metrics` | `make release-gates-check` | All gates pass | Exit code 0 | Currently validates 0.5.0 release gate surfaces; serves as a non-regression baseline for 0.5.5 |
+| FS-09 | `release-governance` | `make release-gates-check` | All gates pass | Exit code 0 | Currently validates 0.5.0 release gate surfaces; serves as a non-regression baseline for 0.5.5 |
+| FS-10 | `release-governance` | `make release-gates-check-strict` | All gates pass | Exit code 0 | Currently validates 0.5.0 release gate surfaces; serves as a non-regression baseline for 0.5.5 |
+| FS-11 | metrics-naming | Manual audit | Documented names match emitted names | All names verified | |
+| FS-12 | command-examples | Manual audit | All examples include correct Accept headers | All examples verified | |
+| FS-13 | harness-references | Manual audit | All references point to current content | All references verified | |
+| FS-14 | release-checklist | Manual audit | Checklist covers all verification families | All families covered | |
 
 ## Phase 3: Umbrella Checks
 

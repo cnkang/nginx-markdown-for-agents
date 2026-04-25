@@ -4,10 +4,44 @@
 # Validates all HTML files in tests/corpus, verifies converter runtime,
 # and checks fixture metadata sidecars.
 #
+# Usage:
+#   bash tools/corpus/validate_corpus.sh
+#
+# Prerequisites:
+#   - cargo: builds the Rust converter and runs the basic conversion example.
+#   - python3: validates corpus-version.json and fixture metadata JSON.
+#
+# Output contract:
+#   - Human-readable progress and summary are written to stdout.
+#   - Build/runtime diagnostics from cargo and python may be written to stderr.
+#
+# Exit codes:
+#   0 - all corpus fixtures and metadata passed validation.
+#   1 - build, converter smoke check, fixture, or metadata validation failed.
+#
 
 set -e
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+
+usage() {
+    sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'
+    return 0
+}
+
+case "${1-}" in
+    -h|--help)
+        usage
+        exit 0
+        ;;
+    "")
+        ;;
+    *)
+        echo "Unknown argument: $1" >&2
+        usage >&2
+        exit 1
+        ;;
+esac
 
 # Colors
 GREEN='\033[0;32m'

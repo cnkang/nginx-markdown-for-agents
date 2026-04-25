@@ -645,7 +645,7 @@ guidance.
 
 | Metric (JSON path) | Prometheus series | Description |
 |---------------------|-------------------|-------------|
-| `streaming.shadow_total` | `nginx_markdown_streaming_shadow_total` | Successful shadow comparison runs |
+| `streaming.shadow_total` | `nginx_markdown_streaming_shadow_total` | Shadow comparison attempts, including init/feed/finalize failures |
 | `streaming.shadow_diff_total` | `nginx_markdown_streaming_shadow_diff_total` | Comparisons where outputs differed |
 
 **Important caveats:**
@@ -654,8 +654,9 @@ guidance.
   **not** exercise chunk boundaries, streaming decompression, backpressure, or
   commit boundaries — those runtime behaviors are covered by integration tests and
   chunk-boundary fuzzing.
-- `streaming.shadow_total` only increments when both engines produce comparable
-  results. If the streaming engine consistently fails, `shadow_total` stays at 0.
+- `streaming.shadow_total` increments at shadow-mode entry so failed comparison
+  attempts are visible. Use `streaming.shadow_diff_total` and decision logs to
+  distinguish output drift from initialization, feed, or finalize failures.
 - Shadow mode adds latency to every converted request (the streaming engine runs
   in addition to the full-buffer engine). Disable it once Phase 0 verification is
   complete.
@@ -741,6 +742,7 @@ location /markdown-metrics {
 - JSON: `Accept: application/json`
 
 **JSON Fields Exposed (current implementation):**
+- `requests_entered`: Requests that reached the module decision chain
 - `conversions_attempted`: Total conversion attempts
 - `conversions_succeeded`: Successful conversions
 - `conversions_failed`: Failed conversions
@@ -764,6 +766,13 @@ location /markdown-metrics {
 - `decompressions_brotli`: Successful brotli decompressions
 - `fullbuffer_path_hits`: Requests routed to the full-buffer conversion path
 - `incremental_path_hits`: Requests routed to the incremental conversion path
+- `skips`: Object containing per-reason skip counters (`config`, `method`,
+  `status`, `content_type`, `size`, `streaming`, `auth`, `range`, `accept`)
+- `failopen_count`: Fail-open responses where original HTML was served
+- `estimated_token_savings`: Cumulative token-savings estimate
+- `streaming_path_hits`: Feature-gated requests routed to the streaming path
+- `streaming`: Feature-gated streaming object with outcome, fallback,
+  shadow, TTFB, and peak-memory counters
 
 
 #### markdown_metrics_format
@@ -775,14 +784,14 @@ location /markdown-metrics {
 Controls the output format of the `markdown_metrics` endpoint for non-JSON requests.
 
 - `auto`: JSON for `Accept: application/json`, plain text for `Accept: text/plain`,
-  and Prometheus text exposition format for `Accept: text/plain; version=0.0.4` or
-  `Accept: application/openmetrics-text` (default).
-- `prometheus`: Prometheus text exposition format for all non-JSON requests. JSON output
-  remains available regardless of this setting.
+  and plain text for Prometheus-style Accept values (default).
+- `prometheus`: Prometheus text exposition format for explicit Prometheus Accept
+  values (`text/plain; version=0.0.4` or `application/openmetrics-text`). JSON
+  output remains available regardless of this setting.
 
-When `markdown_metrics_format prometheus` is configured, plain `Accept: text/plain`
-requests also return Prometheus format. This simplifies Prometheus scrape configuration
-by eliminating the need for a custom Accept header.
+When `markdown_metrics_format prometheus` is configured, Prometheus scrapes should
+send an explicit Prometheus Accept header. Plain `Accept: text/plain` requests keep
+the human-readable text format.
 
 **Example:**
 ```nginx

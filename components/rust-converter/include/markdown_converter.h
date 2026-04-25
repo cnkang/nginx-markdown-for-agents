@@ -84,7 +84,17 @@ typedef struct IncrementalConverterHandle IncrementalConverterHandle;
 #endif
 
 /**
- * Opaque handle to Rust converter state shared across conversions.
+ * Opaque handle to a reusable Rust converter instance shared across FFI calls.
+ *
+ * This struct holds stateful components (ETag generator, token estimator) that
+ * are reused across multiple conversions to avoid re-initialization overhead.
+ * The handle is created via `markdown_converter_new()` and freed via
+ * `markdown_converter_free()` on the C side.
+ *
+ * # Thread Safety
+ *
+ * This handle is NOT thread-safe. The caller must ensure exclusive access
+ * when using a handle across multiple FFI calls.
  */
 typedef struct MarkdownConverterHandle MarkdownConverterHandle;
 
@@ -99,14 +109,55 @@ typedef struct StreamingConverterHandle StreamingConverterHandle;
  * Conversion options passed from C to Rust.
  */
 typedef struct MarkdownOptions {
+  /**
+   * Markdown flavor selector.
+   *
+   * `0` selects CommonMark-compatible output and `1` selects the GFM
+   * extension set. Other values are rejected during option decoding.
+   */
   uint32_t flavor;
+  /**
+   * Cooperative conversion timeout in milliseconds.
+   *
+   * `0` disables the deadline. The value is copied from C at call entry and
+   * is not retained after the FFI call returns.
+   */
   uint32_t timeout_ms;
+  /**
+   * Non-zero when Rust should generate a Markdown-variant ETag.
+   */
   uint8_t generate_etag;
+  /**
+   * Non-zero when Rust should estimate token count/savings.
+   */
   uint8_t estimate_tokens;
+  /**
+   * Non-zero when Rust should extract YAML front matter metadata.
+   */
   uint8_t front_matter;
+  /**
+   * Borrowed Content-Type bytes from the C caller.
+   *
+   * Must either be NULL with `content_type_len == 0` or point to
+   * `content_type_len` readable bytes for the duration of the FFI call.
+   * Rust never takes ownership of this buffer.
+   */
   const uint8_t *content_type;
+  /**
+   * Length in bytes of [`MarkdownOptions::content_type`].
+   */
   uintptr_t content_type_len;
+  /**
+   * Borrowed base URL bytes used for resolving relative links.
+   *
+   * Must either be NULL with `base_url_len == 0` or point to
+   * `base_url_len` readable UTF-8 bytes for the duration of the FFI call.
+   * Rust copies any value it needs to retain.
+   */
   const uint8_t *base_url;
+  /**
+   * Length in bytes of [`MarkdownOptions::base_url`].
+   */
   uintptr_t base_url_len;
   /**
    * Streaming memory budget in bytes (0 = use default).
@@ -122,13 +173,47 @@ typedef struct MarkdownOptions {
  * Conversion result returned from Rust to C.
  */
 typedef struct MarkdownResult {
+  /**
+   * Rust-owned Markdown output buffer.
+   *
+   * Valid only when `error_code == ERROR_SUCCESS`. The C caller must release
+   * it with `markdown_result_free()` and must not mutate it.
+   */
   uint8_t *markdown;
+  /**
+   * Length in bytes of [`MarkdownResult::markdown`].
+   */
   uintptr_t markdown_len;
+  /**
+   * Rust-owned ETag bytes, or NULL when ETag generation was disabled.
+   *
+   * Valid only when `etag_len > 0` and released by `markdown_result_free()`.
+   */
   uint8_t *etag;
+  /**
+   * Length in bytes of [`MarkdownResult::etag`].
+   */
   uintptr_t etag_len;
+  /**
+   * Estimated token count for successful conversions.
+   *
+   * `0` means token estimation was disabled or no estimate was produced.
+   */
   uint32_t token_estimate;
+  /**
+   * FFI error code; `ERROR_SUCCESS` means the output fields are valid.
+   */
   uint32_t error_code;
+  /**
+   * Rust-owned UTF-8 diagnostic message for non-success results.
+   *
+   * The pointer may be NULL when no diagnostic is available. Release through
+   * `markdown_result_free()` together with the rest of the result.
+   */
   uint8_t *error_message;
+  /**
+   * Length in bytes of [`MarkdownResult::error_message`].
+   */
   uintptr_t error_len;
   /**
    * Peak working-set memory estimate during streaming conversion (bytes).
@@ -222,15 +307,25 @@ void markdown_converter_free(struct MarkdownConverterHandle *handle);
  * # Examples
  *
  * ```ignore
- * # use std::ptr;
  * use nginx_markdown_converter::ffi::{MarkdownOptions, markdown_incremental_new, markdown_incremental_free};
- * // Construct options appropriate for your environment.
- * let opts = MarkdownOptions::default();
+ * // Construct and fully initialize MarkdownOptions for your environment.
+ * let opts = MarkdownOptions {
+ *     flavor: 0,
+ *     timeout_ms: 0,
+ *     generate_etag: 0,
+ *     estimate_tokens: 0,
+ *     front_matter: 0,
+ *     content_type: std::ptr::null(),
+ *     content_type_len: 0,
+ *     base_url: std::ptr::null(),
+ *     base_url_len: 0,
+ *     streaming_budget: 0,
+ * };
  * let handle = unsafe { markdown_incremental_new(&opts) };
  * assert!(!handle.is_null());
  * // Either finalize to produce output or free when done without producing output.
  * unsafe { markdown_incremental_free(handle) };
- * ```ignore
+ * ```
  */
 struct IncrementalConverterHandle *markdown_incremental_new(const struct MarkdownOptions *options);
 #endif

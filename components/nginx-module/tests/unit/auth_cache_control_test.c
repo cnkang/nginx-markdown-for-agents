@@ -356,16 +356,15 @@ test_cache_control_adjustment(void)
     /*
      * no-cache="public" should NOT trigger public detection (Requirement 10.3).
      *
-     * Note: The test reimplementation uses strstr which would incorrectly
-     * match "public" inside the quoted string. The production code tokenizes
-     * on commas first, so "no-cache=\"public\"" is a single token that does
-     * not start with "public". This test verifies the production behavior
-     * by checking that the result gets ", private" appended (neutral path)
-     * rather than having "public" stripped.
-     *
-     * The test helper uses strstr for simplicity, so we verify the
-     * production invariant indirectly: no-cache="public" should not
-     * have "public" stripped — it should get ", private" appended.
+     * The production code tokenizes on commas first, so
+     * "no-cache=\"public\"" is a single token that does not start with
+     * "public".  The test helper uses strstr for simplicity and would
+     * incorrectly match "public" inside the quoted string, so we cannot
+     * reliably assert the result here.  This invariant is verified by
+     * E2E test case 10.13 in verify_streaming_failure_cache_e2e.sh,
+     * which sends Cache-Control: no-cache="public" through the
+     * production NGINX module and asserts the tokenizer does not
+     * treat the quoted "public" as a bare public directive.
      */
     TEST_PASS("Cache-Control adjustment passed");
 }
@@ -496,8 +495,31 @@ test_streaming_path_auth_cache_control(void)
  * When conversion fails (fail-open), Cache-Control must be preserved
  * unchanged regardless of auth state. The adjust function is NOT called
  * on fail-open — this test verifies that the unadjusted value is
- * preserved.
+ * preserved by simulating the fail-open dispatch contract.
+ *
+ * NOTE: This is a contract simulation, not production fail-open path
+ * coverage.  The test proves that if fail-open bypasses adjust, the
+ * header is preserved.  Production path coverage is provided by
+ * E2E test case 10.12 in verify_streaming_failure_cache_e2e.sh,
+ * which triggers a real conversion failure with an authenticated
+ * request and asserts Cache-Control is preserved unchanged.
  */
+
+/*
+ * Simulate the fail-open dispatch contract: conversion failed, so
+ * the module bypasses adjust_cache_control_for_auth and returns the
+ * original Cache-Control unchanged.  This mirrors the contract of
+ * ngx_http_markdown_fail_open_buffered_response() which calls
+ * forward_headers() without touching Cache-Control, but does NOT
+ * call the production function itself.
+ */
+static const char *
+fail_open_dispatch_cache_control(const char *original_cc, int authenticated)
+{
+    (void) authenticated;  /* fail-open never calls adjust */
+    return original_cc;
+}
+
 static void
 test_fail_open_preserves_cache_control(void)
 {
@@ -505,24 +527,35 @@ test_fail_open_preserves_cache_control(void)
 
     /*
      * On fail-open, the module does NOT call adjust_cache_control_for_auth.
-     * The original Cache-Control is passed through unchanged.
-     * We verify this by confirming that NOT calling the adjust function
-     * preserves the original value.
+     * The original Cache-Control is passed through unchanged via the
+     * fail-open dispatch path.  We verify this by routing through the
+     * fail_open_dispatch helper and asserting the original header is
+     * preserved — even when the request is authenticated (which would
+     * normally trigger rewriting).
      */
     {
         const char *original_cc = "public, max-age=600";
-        /* Fail-open: no adjustment applied, original preserved */
-        TEST_ASSERT(STR_EQ(original_cc, "public, max-age=600"),
-                    "Fail-open: original CC preserved when adjust not called");
+        const char *result = fail_open_dispatch_cache_control(original_cc, 1);
+        TEST_ASSERT(result == original_cc,
+                    "Fail-open: original CC pointer preserved (no copy/rewrite)");
+        TEST_ASSERT(STR_EQ(result, "public, max-age=600"),
+                    "Fail-open: original CC value preserved via dispatch (authenticated)");
     }
 
     {
         const char *original_cc = "no-store";
-        TEST_ASSERT(STR_EQ(original_cc, "no-store"),
-                    "Fail-open: no-store preserved when adjust not called");
+        const char *result = fail_open_dispatch_cache_control(original_cc, 1);
+        TEST_ASSERT(result == original_cc,
+                    "Fail-open: no-store pointer preserved (no copy/rewrite)");
+        TEST_ASSERT(STR_EQ(result, "no-store"),
+                    "Fail-open: no-store value preserved via dispatch (authenticated)");
     }
 
-    /* Verify that unauthenticated path also preserves CC */
+    /* Control: verify that the normal (non-fail-open) path DOES adjust */
+    TEST_ASSERT(STR_EQ(adjust_cache_control_for_auth("public, max-age=600", 1),
+                        "max-age=600, private"),
+                "Control: authenticated path adjusts CC (proves dispatch bypasses adjust)");
+
     TEST_ASSERT(STR_EQ(adjust_cache_control_for_auth("public, max-age=600", 0),
                         "public, max-age=600"),
                 "Unauthenticated: CC preserved unchanged");

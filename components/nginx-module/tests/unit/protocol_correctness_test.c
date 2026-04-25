@@ -208,6 +208,9 @@ ngx_strncasecmp(const u_char *s1, const u_char *s2, size_t n)
         if (c1 != c2) {
             return c1 - c2;
         }
+        /* Deliberate test-only simplification: early NUL-stop breaks
+         * on embedded NULs. Production NGINX treats buffers as
+         * length-bounded and may allow embedded NULs. */
         if (s1[i] == '\0' || s2[i] == '\0') {
             break;
         }
@@ -383,6 +386,23 @@ count_active_headers(const ngx_http_request_t *r, const char *key)
  * DIVERGENCE RISK: These functions mirror the production parsing and
  * comparison logic in ngx_http_markdown_conditional.c. If the production
  * code changes, these must be updated in the same change set.
+ *
+ * The production implementations use NGINX-native types (ngx_array_t,
+ * ngx_pool_t, ngx_str_t with u_char pointer + length) and are
+ * static-scoped, making direct reuse in this test build infeasible
+ * without a significant refactoring (exporting the functions, creating
+ * a shared header, and adapting the test mock infrastructure to
+ * provide ngx_array_t and ngx_pool_t). The test uses simplified
+ * C-string-based equivalents instead.
+ *
+ * Key differences from production:
+ * - parse_if_none_match: uses char[][] output instead of ngx_array_t
+ * - normalize_etag: uses char* instead of u_char pointer + len
+ * - etag_matches: combines parse + normalize + compare in one call
+ *   (production splits this across parse_if_none_match + compare_etag)
+ *
+ * When production ETag normalization or INM parsing logic changes,
+ * update these functions accordingly and add regression tests.
  */
 
 #define TEST_ETAG_INPUT_MAX 1024
@@ -689,31 +709,53 @@ test_weak_comparison(void)
 static void
 test_304_response_properties(void)
 {
+    ngx_http_request_t r = new_request();
+    ngx_http_markdown_conf_t conf;
+    MarkdownResult result;
+    static uint8_t etag_val[] = "\"md-304\"";
+
     TEST_SUBSECTION("Task 4.4-4.6: 304 response properties");
 
-    /*
-     * 304 response contract (verified against production send_304):
-     * - Status: 304
-     * - ETag: present (matching Markdown ETag)
-     * - Vary: Accept present
-     * - Content-Length: absent (cleared)
-     * - Body: absent
-     * - Cache-Control: preserved from upstream
-     * - Last-Modified: preserved from upstream
-     */
-    TEST_ASSERT(1 == 1, "304 status set to NGX_HTTP_NOT_MODIFIED (audited)");
-    TEST_ASSERT(1 == 1, "304 Content-Length cleared via ngx_http_clear_content_length (audited)");
-    TEST_ASSERT(1 == 1, "304 ETag set from result->etag (audited)");
-    TEST_ASSERT(1 == 1, "304 Vary: Accept added (audited)");
-    TEST_ASSERT(1 == 1, "304 finalized via ngx_http_finalize_request(r, NGX_HTTP_NOT_MODIFIED) (audited)");
+    memset(&conf, 0, sizeof(conf));
+    conf.generate_etag = 1;
+    memset(&result, 0, sizeof(result));
+    result.markdown_len = 100;
+    result.etag = etag_val;
+    result.etag_len = sizeof(etag_val) - 1;
+
+    /* Exercise the header mutations that occur before send_304 */
+    TEST_ASSERT(ngx_http_markdown_update_headers(&r, &result, &conf) == NGX_OK,
+                "update_headers should succeed for 304 prelude");
+
+    /* ETag: present and matching result->etag */
+    TEST_ASSERT(r.headers_out.etag != NULL,
+                "304 ETag set from result->etag");
+    TEST_ASSERT(r.headers_out.etag->value.len == result.etag_len,
+                "304 ETag value length matches result->etag");
+
+    /* Vary: Accept present */
+    TEST_ASSERT(find_header(&r, "Vary") != NULL,
+                "304 Vary: Accept added");
+
+    /* Content-Length cleared via ngx_http_clear_content_length */
+    ngx_http_clear_content_length(&r);
+    TEST_ASSERT(r.headers_out.content_length_n == -1,
+                "304 Content-Length cleared to -1");
 
     /*
-     * Cache-Control and Last-Modified survive 304 because send_304
-     * does not modify them. The auth/cache safety logic runs during
-     * conversion (before the 304 decision), so modified Cache-Control
-     * is already in headers_out when send_304 is called.
+     * DIVERGENCE RISK: The following 304 properties cannot be driven
+     * in this unit test because ngx_http_markdown_send_304 calls
+     * ngx_http_finalize_request(r, NGX_HTTP_NOT_MODIFIED) which
+     * requires a full NGINX connection lifecycle. These are verified
+     * by e2e tests instead:
+     * - Status: 304 (NGX_HTTP_NOT_MODIFIED)
+     * - Body: absent (send_304 finalizes without body)
+     * - Cache-Control: preserved from upstream (send_304 does not modify)
+     * - Last-Modified: preserved from upstream (send_304 does not modify)
      */
-    TEST_PASS("304 response properties verified (audit + contract)");
+
+    free_request(&r);
+    TEST_PASS("304 response properties verified");
 }
 
 /* ══════════════════════════════════════════════════════════════════
@@ -945,16 +987,38 @@ test_encoding_and_ranges_removal(void)
 static void
 test_streaming_etag_clearing(void)
 {
+    ngx_http_request_t r = new_request();
+    ngx_table_elt_t *vary;
+
     TEST_SUBSECTION("Task 8.5: Streaming path clears upstream ETag");
 
-    /*
-     * Verified by audit of ngx_http_markdown_streaming_update_headers():
-     * - Calls ngx_http_markdown_set_etag(r, NULL, 0) unconditionally
-     * - This invalidates all existing ETag headers and sets etag = NULL
-     * - Content-Length cleared to -1 (chunked transfer)
-     * - Vary: Accept added
-     */
-    TEST_PASS("Streaming path clears upstream ETag (audited)");
+    /* Seed request with upstream ETag to simulate pre-streaming state */
+    push_header(&r, "ETag", "\"upstream-html\"");
+    r.headers_out.etag = find_header(&r, "ETag");
+
+    /* Simulate streaming path: ngx_http_markdown_set_etag(r, NULL, 0)
+     * invalidates all ETag headers and sets etag = NULL */
+    TEST_ASSERT(ngx_http_markdown_set_etag(&r, NULL, 0) == NGX_OK,
+                "set_etag(NULL, 0) should succeed");
+    TEST_ASSERT(r.headers_out.etag == NULL,
+                "Streaming path clears ETag pointer");
+
+    /* Streaming path clears Content-Length to -1 (chunked transfer) */
+    ngx_http_clear_content_length(&r);
+    r.headers_out.content_length_n = -1;
+    TEST_ASSERT(r.headers_out.content_length_n == -1,
+                "Streaming path sets Content-Length to -1");
+
+    /* Streaming path adds Vary: Accept */
+    TEST_ASSERT(ngx_http_markdown_add_vary_accept(&r) == NGX_OK,
+                "add_vary_accept should succeed");
+    vary = find_header(&r, "Vary");
+    TEST_ASSERT(vary != NULL, "Streaming path adds Vary header");
+    TEST_ASSERT(STR_EQ((char *) vary->value.data, "Accept"),
+                "Streaming Vary is 'Accept'");
+
+    free_request(&r);
+    TEST_PASS("Streaming path clears upstream ETag");
 }
 
 static void
@@ -1015,20 +1079,64 @@ static void
 test_upstream_etag_preserved_failopen(void)
 {
     ngx_http_request_t r = new_request();
+    ngx_http_request_t r_control = new_request();
     ngx_table_elt_t *etag_h;
+    ngx_table_elt_t *etag_h_control;
+    ngx_http_markdown_conf_t conf;
+    MarkdownResult result;
+    static uint8_t md_etag[] = "\"md-etag\"";
 
     TEST_SUBSECTION("Task 9.5: Upstream ETag preserved on fail-open");
 
+    /* Seed request with upstream ETag via push_header/new_request */
     etag_h = push_header(&r, "ETag", "\"upstream-html\"");
     r.headers_out.etag = etag_h;
 
-    /* On fail-open, update_headers is NOT called */
+    /*
+     * On fail-open, ngx_http_markdown_update_headers is NOT called.
+     * The fail-open path (ngx_http_markdown_fail_open_buffered_response
+     * or ngx_http_markdown_streaming_failopen_passthrough) forwards the
+     * original response without modifying headers, so the upstream ETag
+     * must remain intact. We simulate this by simply not calling
+     * update_headers and asserting the ETag is preserved.
+     *
+     * NOTE: This is a fail-open header preservation simulation, not
+     * production fail-open path coverage.  The test proves that
+     * omitting update_headers preserves the upstream ETag.  Production
+     * path coverage is provided by E2E test case 10.12 in
+     * verify_streaming_failure_cache_e2e.sh, which triggers a real
+     * conversion failure and asserts the upstream ETag is preserved.
+     */
     TEST_ASSERT(r.headers_out.etag == etag_h,
                 "ETag pointer unchanged on fail-open");
     TEST_ASSERT(count_active_headers(&r, "ETag") == 1,
                 "One active ETag remains");
 
+    /*
+     * Control case: verify that the normal (non-fail-open) update path
+     * DOES change the ETag when conversion succeeds.  This proves the
+     * fail-open test is non-trivial — the update path would replace
+     * the upstream ETag with a conversion ETag.
+     */
+    etag_h_control = push_header(&r_control, "ETag", "\"upstream-html\"");
+    r_control.headers_out.etag = etag_h_control;
+
+    memset(&conf, 0, sizeof(conf));
+    conf.generate_etag = 1;
+    conf.token_estimate = 1;
+    memset(&result, 0, sizeof(result));
+    result.markdown_len = 100;
+    result.etag = md_etag;
+    result.etag_len = sizeof(md_etag) - 1;
+    result.token_estimate = 10;
+
+    TEST_ASSERT(ngx_http_markdown_update_headers(&r_control, &result, &conf) == NGX_OK,
+                "Control: update_headers should succeed");
+    TEST_ASSERT(r_control.headers_out.etag != etag_h_control,
+                "Control: ETag pointer changed after update_headers (proves fail-open bypass is non-trivial)");
+
     free_request(&r);
+    free_request(&r_control);
     TEST_PASS("Upstream ETag preserved on fail-open");
 }
 
@@ -1173,12 +1281,40 @@ test_matrix_streaming_exceptions(void)
  * Task 12: Full-Buffer / Streaming Parity Checks
  * ══════════════════════════════════════════════════════════════════ */
 
+/*
+ * Simulate the streaming header update path.
+ *
+ * Mirrors the production streaming path which sets Content-Type,
+ * clears Content-Length, and calls set_etag + add_vary_accept.
+ * Centralizes the streaming header setup so parity tests don't
+ * duplicate manual field assignments.
+ */
+static ngx_int_t
+simulate_streaming_update_headers(ngx_http_request_t *r)
+{
+    r->headers_out.content_type.data = (u_char *) "text/markdown; charset=utf-8";
+    r->headers_out.content_type.len = NGX_HTTP_MARKDOWN_CONTENT_TYPE_LEN;
+    ngx_http_clear_content_length(r);
+    r->headers_out.content_length_n = -1;
+
+    if (ngx_http_markdown_set_etag(r, NULL, 0) != NGX_OK) {
+        return NGX_ERROR;
+    }
+    if (ngx_http_markdown_add_vary_accept(r) != NGX_OK) {
+        return NGX_ERROR;
+    }
+
+    return NGX_OK;
+}
+
 static void
 test_parity_content_type(void)
 {
     ngx_http_request_t r = new_request();
+    ngx_http_request_t r_stream = new_request();
     ngx_http_markdown_conf_t conf;
     MarkdownResult result;
+    ngx_table_elt_t *vary_fb, *vary_st;
 
     TEST_SUBSECTION("Task 12.1/12.4: Content-Type parity");
 
@@ -1186,19 +1322,29 @@ test_parity_content_type(void)
     memset(&result, 0, sizeof(result));
     result.markdown_len = 100;
 
+    /* Full-buffer path */
     TEST_ASSERT(ngx_http_markdown_update_headers(&r, &result, &conf) == NGX_OK,
                 "update_headers should succeed");
+
+    /* Streaming path: simulate via centralized helper */
+    TEST_ASSERT(simulate_streaming_update_headers(&r_stream) == NGX_OK,
+                "streaming update_headers simulation should succeed");
 
     /* Both paths produce text/markdown; charset=utf-8 */
     TEST_ASSERT(STR_EQ((char *) r.headers_out.content_type.data,
                         "text/markdown; charset=utf-8"),
                 "Full-buffer Content-Type correct");
-    /* Streaming path also sets same Content-Type (audited) */
+    TEST_ASSERT(r.headers_out.content_type.len == r_stream.headers_out.content_type.len,
+                "Content-Type length parity between FB and streaming");
 
     /* Both paths have Vary: Accept */
-    TEST_ASSERT(find_header(&r, "Vary") != NULL, "Full-buffer has Vary");
+    vary_fb = find_header(&r, "Vary");
+    vary_st = find_header(&r_stream, "Vary");
+    TEST_ASSERT(vary_fb != NULL, "Full-buffer has Vary");
+    TEST_ASSERT(vary_st != NULL, "Streaming has Vary");
 
     free_request(&r);
+    free_request(&r_stream);
     TEST_PASS("Content-Type and Vary parity verified");
 }
 
@@ -1206,6 +1352,7 @@ static void
 test_parity_exceptions(void)
 {
     ngx_http_request_t r = new_request();
+    ngx_http_request_t r_stream = new_request();
     ngx_http_markdown_conf_t conf;
     MarkdownResult result;
     static uint8_t etag_val[] = "\"md-parity\"";
@@ -1221,22 +1368,39 @@ test_parity_exceptions(void)
     result.etag_len = sizeof(etag_val) - 1;
     result.token_estimate = 50;
 
+    /* Full-buffer path */
     TEST_ASSERT(ngx_http_markdown_update_headers(&r, &result, &conf) == NGX_OK,
                 "update_headers should succeed");
 
+    /* Streaming path: simulate via centralized helper */
+    TEST_ASSERT(simulate_streaming_update_headers(&r_stream) == NGX_OK,
+                "streaming update_headers simulation should succeed");
+
     /* Exception 1: ETag - FB present, ST absent */
     TEST_ASSERT(r.headers_out.etag != NULL, "FB has ETag");
-    /* ST clears ETag at commit boundary (audited) */
+    TEST_ASSERT(r_stream.headers_out.etag == NULL, "ST clears ETag");
 
-    /* Exception 2: Content-Length - FB exact, ST absent */
+    /* Exception 2: Content-Length - FB exact, ST absent (-1) */
     TEST_ASSERT(r.headers_out.content_length_n == 200, "FB has exact CL");
-    /* ST sets CL to -1 (audited) */
+    TEST_ASSERT(r_stream.headers_out.content_length_n == -1, "ST sets CL to -1");
 
     /* Exception 3: X-Markdown-Tokens - FB present, ST absent */
     TEST_ASSERT(find_header(&r, "X-Markdown-Tokens") != NULL,
                 "FB has X-Markdown-Tokens");
+    TEST_ASSERT(find_header(&r_stream, "X-Markdown-Tokens") == NULL,
+                "ST has no X-Markdown-Tokens");
+
+    /* Shared: Content-Type parity */
+    TEST_ASSERT(STR_EQ((char *) r.headers_out.content_type.data,
+                        (char *) r_stream.headers_out.content_type.data),
+                "Content-Type parity between FB and ST");
+
+    /* Shared: Vary parity */
+    TEST_ASSERT(find_header(&r, "Vary") != NULL, "FB has Vary");
+    TEST_ASSERT(find_header(&r_stream, "Vary") != NULL, "ST has Vary");
 
     free_request(&r);
+    free_request(&r_stream);
     TEST_PASS("Parity exceptions documented and verified");
 }
 

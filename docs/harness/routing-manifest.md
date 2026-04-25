@@ -14,7 +14,7 @@ This page is the readable overlay, not the machine-owned truth.
 | `nginx-protocol` | focused semantic | `make test-nginx-unit`, `make test-nginx-integration` |
 | `ffi-boundary` | focused semantic | `make build`, `make test-rust` |
 | `observability-metrics` | focused semantic | `make docs-check`, `make release-gates-check` |
-| `release-governance` | focused semantic | `make release-gates-check`, `make release-gates-check-strict` |
+| `release-governance` | focused semantic | `make release-gates-check`, `make release-gates-check-strict`, `make release-gates-check-055` |
 | `runtime-e2e` | umbrella | `make verify-chunked-native-e2e-smoke`, `make verify-streaming-failure-cache-e2e` |
 | `release-quality` | umbrella | `make harness-check-full` |
 

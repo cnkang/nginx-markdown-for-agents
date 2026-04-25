@@ -1,9 +1,10 @@
-/// Example demonstrating deterministic Markdown output
-///
-/// This example shows how the converter produces identical output for identical HTML input,
-/// which is critical for stable ETag generation and predictable caching behavior.
-///
-/// Run with: cargo run --example deterministic_output
+//! Example demonstrating deterministic Markdown output.
+//!
+//! This example shows how the converter produces identical output for
+//! identical HTML input, which is critical for stable ETag generation and
+//! predictable caching behavior.
+//!
+//! Run with: `cargo run --example deterministic_output`.
 use nginx_markdown_converter::{MarkdownConverter, parse_html};
 
 fn main() {

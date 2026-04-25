@@ -94,3 +94,26 @@ fn nested_lists_should_not_double_indent_pre_rendered_children() {
     assert!(result.contains("\n  - Child"));
     assert!(!result.contains("\n    - Child"));
 }
+
+#[test]
+fn link_url_with_angle_brackets_percent_encodes_both() {
+    // Regression: URLs containing literal '<' or '>' must be
+    // percent-encoded when wrapped in angle-bracket destinations.
+    // Previously only '>' was encoded, leaving '<' to break the
+    // angle-bracket destination syntax.
+    let result = convert_html(br#"<a href="https://example.com/path?a=1&lt;b=2&gt;c=3">link</a>"#);
+    // Both %3C (for <) and %3E (for >) must appear in the output
+    assert!(
+        result.contains("%3C"),
+        "expected %3C for literal '<' in URL, got: {result}"
+    );
+    assert!(
+        result.contains("%3E"),
+        "expected %3E for literal '>' in URL, got: {result}"
+    );
+    // The destination must be wrapped in angle brackets
+    assert!(
+        result.contains("<https://") || result.contains("<http://"),
+        "expected angle-bracket destination wrapping, got: {result}"
+    );
+}

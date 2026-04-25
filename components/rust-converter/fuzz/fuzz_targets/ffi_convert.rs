@@ -1,5 +1,11 @@
 #![no_main]
 
+//! Fuzz the C ABI conversion entrypoint.
+//!
+//! The target varies option bits, nullable borrowed pointers, and arbitrary
+//! HTML bytes while asserting that FFI lifecycle calls remain panic-safe and
+//! every Rust-owned result buffer can be released exactly once.
+
 use std::ptr;
 
 use libfuzzer_sys::fuzz_target;

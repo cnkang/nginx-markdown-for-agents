@@ -94,7 +94,8 @@
       "phase": "focused-semantic",
       "commands": [
         "make release-gates-check",
-        "make release-gates-check-strict"
+        "make release-gates-check-strict",
+        "make release-gates-check-055"
       ]
     },
     "runtime-e2e": {

@@ -12,17 +12,22 @@
 //!
 //! ```markdown
 //! | Header 1 | Header 2 | Header 3 |
-//! | -------- |:--------:| --------:|
+//! | --- |:---:| ---:|
 //! | Cell 1   | Cell 2   | Cell 3   |
 //! ```
 //!
 //! # Alignment
 //!
-//! Column alignment is extracted from `<th>` or `<col>` elements:
-//! - `style="text-align: left"` or `<col align="left">` → `:-------`
-//! - `style="text-align: center"` or `<col align="center">` → `:-----:`
-//! - `style="text-align: right"` or `<col align="right">` → `------:`
-//! - Default (no alignment) → `-------`
+//! Column alignment is extracted from `<colgroup>/<col>` elements and
+//! `<th>` style/align attributes:
+//! - `style="text-align: left"` or `align="left"` → `---`
+//! - `style="text-align: center"` or `align="center"` → `:---:`
+//! - `style="text-align: right"` or `align="right"` → `---:`
+//! - Default (no alignment) → `---`
+//!
+//! `<colgroup>/<col>` alignment takes precedence over `<th>` alignment
+//! when both are present, because `<col>` is a column-level declaration
+//! that applies to all rows in the column.
 //!
 //! # Edge Cases
 //!
@@ -59,6 +64,18 @@ impl MarkdownConverter {
         let mut headers: Vec<String> = Vec::new();
         let mut alignments: Vec<TableAlignment> = Vec::new();
         let mut rows: Vec<Vec<String>> = Vec::new();
+
+        // Extract column alignments from <colgroup>/<col> first.
+        // These take precedence over <th> alignment because <col> is a
+        // column-level declaration.
+        let mut col_alignments: Vec<TableAlignment> = Vec::new();
+        for child in node.children.borrow().iter() {
+            if let NodeData::Element { ref name, .. } = child.data
+                && name.local.as_ref() == "colgroup"
+            {
+                self.extract_colgroup_alignments(child, &mut col_alignments);
+            }
+        }
 
         // Table cell extraction now respects the conversion budget via ctx.
         let mut ctx = ctx;
@@ -142,6 +159,15 @@ impl MarkdownConverter {
             alignments.push(TableAlignment::Left);
         }
 
+        // Apply <colgroup>/<col> alignments — these override <th> alignments.
+        for (i, &col_align) in col_alignments.iter().enumerate() {
+            if i < alignments.len() {
+                alignments[i] = col_align;
+            } else {
+                alignments.push(col_align);
+            }
+        }
+
         self.write_gfm_table(output, &headers, &alignments, &rows)?;
 
         if !output.ends_with("\n\n") {
@@ -149,6 +175,29 @@ impl MarkdownConverter {
         }
 
         Ok(())
+    }
+
+    /// Extract column alignments from a `<colgroup>` element.
+    ///
+    /// Each `<col>` child's `align` attribute or `style="text-align: ..."`
+    /// is resolved using the same logic as [`Self::extract_alignment`].
+    pub(super) fn extract_colgroup_alignments(
+        &self,
+        colgroup: &Handle,
+        col_alignments: &mut Vec<TableAlignment>,
+    ) {
+        for child in colgroup.children.borrow().iter() {
+            if let NodeData::Element {
+                ref name,
+                ref attrs,
+                ..
+            } = child.data
+                && name.local.as_ref() == "col"
+            {
+                let attrs_borrowed = attrs.borrow();
+                col_alignments.push(self.extract_alignment(&attrs_borrowed));
+            }
+        }
     }
 
     /// Extract header cells from a `<thead>` section.
