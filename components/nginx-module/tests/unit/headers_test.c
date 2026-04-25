@@ -406,6 +406,85 @@ test_update_headers_without_optional_fields(void)
     TEST_PASS("Optional field handling works");
 }
 
+static void
+test_update_headers_null_args(void)
+{
+    ngx_http_request_t r = new_request();
+    ngx_http_markdown_conf_t conf;
+    MarkdownResult result;
+
+    TEST_SUBSECTION("Update headers with NULL arguments");
+
+    memset(&conf, 0, sizeof(conf));
+    memset(&result, 0, sizeof(result));
+
+    TEST_ASSERT(ngx_http_markdown_update_headers(NULL, &result, &conf) == NGX_ERROR,
+                "NULL request should fail");
+    TEST_ASSERT(ngx_http_markdown_update_headers(&r, NULL, &conf) == NGX_ERROR,
+                "NULL result should fail");
+    TEST_ASSERT(ngx_http_markdown_update_headers(&r, &result, NULL) == NGX_ERROR,
+                "NULL conf should fail");
+
+    free_request(&r);
+    TEST_PASS("NULL argument validation works");
+}
+
+static void
+test_update_headers_etag_no_existing(void)
+{
+    ngx_http_request_t r = new_request();
+    ngx_http_markdown_conf_t conf;
+    MarkdownResult result;
+    static uint8_t etag_value[] = "\"abc123\"";
+
+    TEST_SUBSECTION("Update headers with ETag but no existing Vary header");
+
+    memset(&conf, 0, sizeof(conf));
+    conf.generate_etag = 1;
+    conf.token_estimate = 0;
+
+    memset(&result, 0, sizeof(result));
+    result.markdown_len = 10;
+    result.etag = etag_value;
+    result.etag_len = sizeof(etag_value) - 1;
+
+    /* No existing Vary header - tests the "create new Vary" path */
+    TEST_ASSERT(ngx_http_markdown_update_headers(&r, &result, &conf) == NGX_OK,
+                "update_headers with new Vary should succeed");
+
+    TEST_ASSERT(r.headers_out.etag != NULL, "ETag should be set");
+    TEST_ASSERT(find_header(&r, "Vary") != NULL, "Vary header should be created");
+
+    free_request(&r);
+    TEST_PASS("ETag with new Vary path works");
+}
+
+static void
+test_update_headers_token_zero(void)
+{
+    ngx_http_request_t r = new_request();
+    ngx_http_markdown_conf_t conf;
+    MarkdownResult result;
+
+    TEST_SUBSECTION("Update headers with token_estimate enabled but zero count");
+
+    memset(&conf, 0, sizeof(conf));
+    conf.generate_etag = 0;
+    conf.token_estimate = 1;
+
+    memset(&result, 0, sizeof(result));
+    result.markdown_len = 5;
+    result.token_estimate = 0;
+
+    TEST_ASSERT(ngx_http_markdown_update_headers(&r, &result, &conf) == NGX_OK,
+                "update_headers with zero tokens should succeed");
+    TEST_ASSERT(find_header(&r, "X-Markdown-Tokens") == NULL,
+                "Token header should not be added for zero count");
+
+    free_request(&r);
+    TEST_PASS("Zero token count handling works");
+}
+
 int
 main(void)
 {
@@ -415,6 +494,9 @@ main(void)
 
     test_update_headers_full_path();
     test_update_headers_without_optional_fields();
+    test_update_headers_null_args();
+    test_update_headers_etag_no_existing();
+    test_update_headers_token_zero();
 
     printf("\n========================================\n");
     printf("All tests passed!\n");

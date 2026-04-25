@@ -242,6 +242,11 @@ def validate_required_fields(data: dict[str, object], result: ValidationResult) 
     for field_name, expected_type in required_fields:
         if field_name not in data:
             missing_fields.append(field_name)
+        elif expected_type is int and isinstance(data[field_name], bool):
+            wrong_type_fields.append(
+                f"{field_name}: expected int, "
+                f"got {type(data[field_name]).__name__}"
+            )
         elif not isinstance(data[field_name], expected_type):
             wrong_type_fields.append(
                 f"{field_name}: expected {expected_type.__name__}, "
@@ -270,7 +275,7 @@ def validate_non_negative_counts(data: dict[str, object], result: ValidationResu
     ]
     negative_fields = [
         f for f in count_fields
-        if f in data and isinstance(data[f], int) and data[f] < 0
+        if f in data and (isinstance(data[f], bool) or (isinstance(data[f], int) and data[f] < 0))
     ]
     if negative_fields:
         result.failed(
@@ -352,11 +357,11 @@ def validate_breakdown_values(data: dict[str, object], result: ValidationResult)
 
     bad_drift_vals = [
         f"{k}={v}" for k, v in entries_by_drift.items()
-        if not isinstance(v, int) or v < 0
+        if isinstance(v, bool) or not isinstance(v, int) or v < 0
     ] if isinstance(entries_by_drift, dict) else ["not a dict"]
     bad_severity_vals = [
         f"{k}={v}" for k, v in entries_by_severity.items()
-        if not isinstance(v, int) or v < 0
+        if isinstance(v, bool) or not isinstance(v, int) or v < 0
     ] if isinstance(entries_by_severity, dict) else ["not a dict"]
     if not bad_drift_vals and not bad_severity_vals:
         result.passed("evidence-artifact:breakdown-values", "all breakdown dict values are non-negative integers")

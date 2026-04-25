@@ -13,13 +13,21 @@
 #     as a ngx_http_markdown_log_decision / log_decision_with_category call.
 #     This is a file-level proximity check, not a call-graph proof.
 #   - mapper-based codes (SKIP_* via reason_from_eligibility):
-#     mapper function must be called from a file that also calls log_decision
+#     mapper function must be called from a file that also calls log_decision;
+#     additionally, the eligibility enum must appear in the eligibility
+#     implementation and the same request path must call
+#     ngx_http_markdown_check_eligibility before logging the decision.
+#     Falls back to file-level co-occurrence only when the enum cannot be
+#     derived from the reason code string.
 #   - FAIL_* category codes: reason_from_error_category must appear in a
 #     file that calls log_decision_with_category (category= emission path)
-#   NOTE: All three tiers are file-level heuristics. They confirm that the
-#   accessor and log call coexist in the same translation unit but do not
-#   prove the accessor is invoked at a specific log_decision call site.
-#   A call-graph or function-block-level check would be needed for that.
+#   NOTE: Direct-accessor and category tiers are file-level heuristics.
+#   They confirm that the accessor and log call coexist in the same
+#   translation unit but do not prove the accessor is invoked at a
+#   specific log_decision call site.  The mapper tier now includes
+#   runtime-call verification (enum-level callsite search) when the
+#   enum identifier can be derived from the code string; it falls back
+#   to file-level co-occurrence only when derivation is not possible.
 #
 # Usage: bash tools/harness/audit_reason_codes.sh
 #
@@ -65,7 +73,7 @@ SKIP_STATUS	ngx_http_markdown_reason_from_eligibility	mapper
 SKIP_CONTENT_TYPE	ngx_http_markdown_reason_from_eligibility	mapper
 SKIP_SIZE	ngx_http_markdown_reason_from_eligibility	mapper
 SKIP_STREAMING	ngx_http_markdown_reason_from_eligibility	mapper
-SKIP_AUTH	ngx_http_markdown_reason_from_eligibility	mapper
+SKIP_AUTH	ngx_http_markdown_reason_from_eligibility	direct
 SKIP_RANGE	ngx_http_markdown_reason_from_eligibility	mapper
 SKIP_ACCEPT	ngx_http_markdown_reason_skip_accept	direct
 ELIGIBLE_CONVERTED	ngx_http_markdown_reason_converted	direct
@@ -167,14 +175,54 @@ check_mapper_emission() {
         return 1
     fi
 
-    for src_file in "$SRC_DIR"/*.c "$SRC_DIR"/*_impl.h; do
-        if [[ ! -f "$src_file" ]]; then continue; fi
-        if grep -q "$accessor" "$src_file" 2>/dev/null \
-            && grep -q "ngx_http_markdown_log_decision" "$src_file" 2>/dev/null; then
-            found=1
-            break
+    # 1b. Runtime-call verification: derive the enum identifier from the
+    #     code string and verify the two halves of the call chain:
+    #       - the eligibility implementation returns the enum
+    #       - the request path calls ngx_http_markdown_check_eligibility and
+    #         then logs the decision
+    #     Mapping: SKIP_X → NGX_HTTP_MARKDOWN_INELIGIBLE_X
+    local enum_id=""
+    if [[ "$code" =~ ^SKIP_(.*)$ ]]; then
+        enum_id="NGX_HTTP_MARKDOWN_INELIGIBLE_${BASH_REMATCH[1]}"
+    fi
+    if [[ -n "$enum_id" ]]; then
+        local enum_returned=0
+        local request_chain_found=0
+
+        if grep -q "return ${enum_id};" \
+            "${SRC_DIR}/ngx_http_markdown_eligibility.c" 2>/dev/null; then
+            enum_returned=1
         fi
-    done
+
+        for src_file in "$SRC_DIR"/*.c "$SRC_DIR"/*_impl.h; do
+            if [[ ! -f "$src_file" ]]; then continue; fi
+            if grep -q "ngx_http_markdown_check_eligibility" "$src_file" 2>/dev/null \
+                && grep -q "ngx_http_markdown_log_decision" "$src_file" 2>/dev/null; then
+                request_chain_found=1
+                break
+            fi
+        done
+
+        if [[ "$enum_returned" -eq 1 && "$request_chain_found" -eq 1 ]]; then
+            found=1
+        else
+            return 1
+        fi
+    fi
+    # If enum_id could not be derived, fall through to file-level check below.
+
+    if [[ "$found" -eq 0 ]]; then
+        # Fallback: file-level co-occurrence check (accessor + log_decision
+        # in same file) when enum derivation was not possible.
+        for src_file in "$SRC_DIR"/*.c "$SRC_DIR"/*_impl.h; do
+            if [[ ! -f "$src_file" ]]; then continue; fi
+            if grep -q "$accessor" "$src_file" 2>/dev/null \
+                && grep -q "ngx_http_markdown_log_decision" "$src_file" 2>/dev/null; then
+                found=1
+                break
+            fi
+        done
+    fi
 
     if [[ "$found" -eq 0 ]]; then
         return 1
