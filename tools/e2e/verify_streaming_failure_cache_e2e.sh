@@ -187,6 +187,38 @@ assert_has_header() {
     return 0
 }
 
+cache_control_value() {
+    local hdr_file="$1"
+
+    awk '
+        tolower($0) ~ /^cache-control:[ \t]*/ {
+            line = $0
+            sub(/^[^:]*:[ \t]*/, "", line)
+            sub(/\r$/, "", line)
+            print line
+            exit
+        }
+    ' "${hdr_file}" 2>/dev/null
+    return 0
+}
+
+cache_control_has_token() {
+    local header_value="$1"
+    local expected_token="$2"
+    local token
+    local -a tokens
+
+    IFS=',' read -r -a tokens <<< "${header_value}"
+    for token in "${tokens[@]}"; do
+        token=$(printf '%s' "${token}" \
+            | sed 's/^[[:space:]]*//; s/[[:space:]\r]*$//')
+        if [[ "${token}" == "${expected_token}" ]]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
 assert_no_header() {
     local hdr_file="$1"
     local pattern="$2"
@@ -1415,8 +1447,10 @@ assert_has_header "${RAW_DIR}/t12.hdr" "${PATTERN_CT_HTML}" "10.12" t12_pass \
     "expected Content-Type text/html for fail-open"
 
 # Cache-Control must be preserved as "public, max-age=600" (not rewritten to private)
-if ! grep -qi '^Cache-Control:.*public.*max-age=600' "${RAW_DIR}/t12.hdr" 2>/dev/null; then
-    mark_case_fail "10.12" "Cache-Control not preserved as 'public, max-age=600' (auth rewrite may have occurred on fail-open path)" t12_pass
+t12_cache_control=$(cache_control_value "${RAW_DIR}/t12.hdr")
+if ! cache_control_has_token "${t12_cache_control}" "public" \
+    || ! cache_control_has_token "${t12_cache_control}" "max-age=600"; then
+    mark_case_fail "10.12" "Cache-Control not preserved as exact tokens 'public' and 'max-age=600' (auth rewrite may have occurred on fail-open path)" t12_pass
 fi
 
 # ETag must be preserved as the upstream value
@@ -1481,8 +1515,8 @@ assert_http_200 "${RAW_DIR}/t13.hdr" "10.13" t13_pass \
 # "public" inside no-cache="public" as a standalone public directive).
 # A correct tokenizer sees no-cache="public" as a single token and
 # either appends ", private" or leaves it as-is.
-if grep -qi '^Cache-Control:.*\bpublic\b' "${RAW_DIR}/t13.hdr" 2>/dev/null \
-    && ! grep -qi '^Cache-Control:.*no-cache="public"' "${RAW_DIR}/t13.hdr" 2>/dev/null; then
+t13_cache_control=$(cache_control_value "${RAW_DIR}/t13.hdr")
+if cache_control_has_token "${t13_cache_control}" "public"; then
     mark_case_fail "10.13" "Cache-Control contains bare 'public' directive — tokenizer may have incorrectly parsed quoted no-cache=\"public\" as bare public" t13_pass
 fi
 

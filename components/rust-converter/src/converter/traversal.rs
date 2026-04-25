@@ -359,9 +359,9 @@ impl MarkdownConverter {
     /// Escape a URL destination for use inside a Markdown link.
     ///
     /// If the URL contains characters that would break a bare `(url)`
-    /// destination (spaces, parentheses, `<`, `>`), the URL is wrapped in
-    /// angle brackets with `>` percent-encoded.  Otherwise the URL is
-    /// returned unchanged.
+    /// destination (spaces, parentheses, `<`, `>`), `escape_link_destination`
+    /// wraps the URL in angle brackets with both `<` and `>` percent-encoded.
+    /// Otherwise the URL is returned unchanged.
     ///
     /// # Arguments
     ///

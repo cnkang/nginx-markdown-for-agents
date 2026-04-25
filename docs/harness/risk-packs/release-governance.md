@@ -31,6 +31,9 @@ CI, scope governance, or go/no-go tooling changes.
   supported interfaces, not synthetic flags
 - legacy and current release gate validators remain intentionally separated
   unless a change updates both paths and tests
+- release-gate validators keep SonarCloud quality rules green: split complex
+  validation functions into helper checks and promote repeated gate IDs to
+  named constants
 
 ## Minimum Verification
 
@@ -62,3 +65,4 @@ absence instead of treating legacy validation as default evidence.
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 0.5.5 | 2026-04-24 | Codex | Added 60-day release governance routing |
+| 0.5.5 | 2026-04-25 | Codex | Added SonarCloud quality sync points for release-gate validators |

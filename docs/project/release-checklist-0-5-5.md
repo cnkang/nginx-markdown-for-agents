@@ -79,7 +79,7 @@ waived before the release proceeds.
 
 | Criterion | Gate(s) | Threshold | Blocking |
 |-----------|---------|-----------|----------|
-| Cheap blockers pass | CB-01, CB-02, CB-03 | All PASS | Yes |
+| Cheap blockers pass | CB-01, CB-02, CB-03, CB-04 | All PASS | Yes |
 | Focused semantic checks pass | FS-01 through FS-14 | All PASS for touched surfaces | Yes |
 | Runtime evidence exists | UB-02, UB-03 | At least one runtime target per runtime-sensitive workstream | Yes |
 | C module coverage | UB-04 | ≥ 80% aggregate | Yes |

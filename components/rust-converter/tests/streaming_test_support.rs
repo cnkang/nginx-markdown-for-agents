@@ -277,8 +277,12 @@ pub fn convert_streaming_chunked(
     }
     out.extend_from_slice(&result.final_markdown);
 
+    let markdown = String::from_utf8(out).map_err(|err| {
+        ConversionError::EncodingError(format!("streaming emitted invalid UTF-8: {err}"))
+    })?;
+
     Ok(StreamingRun {
-        markdown: String::from_utf8_lossy(&out).into_owned(),
+        markdown,
         stats: result.stats,
         first_non_empty_at,
         elapsed: start.elapsed(),

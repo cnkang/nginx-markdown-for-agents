@@ -10,6 +10,8 @@ Security: All regex patterns are pre-compiled constants — no user-supplied
 patterns are compiled at runtime (ReDoS prevention).
 """
 
+from __future__ import annotations
+
 import re
 import sys
 
