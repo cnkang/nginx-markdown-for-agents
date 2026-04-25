@@ -187,6 +187,25 @@ assert_has_header() {
     return 0
 }
 
+# cache_control_value — extract the Cache-Control header value from an HTTP
+# response header file.
+#
+# Arguments:
+#   $1 — path to the header file (e.g., RAW_DIR/t13.hdr)
+#
+# Output:
+#   Prints the Cache-Control header value (everything after "Cache-Control:")
+#   with leading/trailing whitespace and trailing CR stripped.  Prints nothing
+#   if the header is absent.
+#
+# Exit behaviour:
+#   Always returns 0, even when no Cache-Control header is found.  Callers
+#   must assert presence separately (e.g., via cache_control_has_token or
+#   a non-empty string check).
+#
+# Example:
+#   cc=$(cache_control_value "${RAW_DIR}/t13.hdr")
+#   # cc might be: 'no-cache="public", private'
 cache_control_value() {
     local hdr_file="$1"
 
@@ -202,6 +221,26 @@ cache_control_value() {
     return 0
 }
 
+# cache_control_has_token — check whether a Cache-Control header value contains
+# a specific directive token.
+#
+# Arguments:
+#   $1 — header_value: the full Cache-Control header value string
+#        (e.g., 'no-cache="public", private')
+#   $2 — expected_token: the token to search for
+#        (e.g., 'public' or 'no-cache="public"')
+#
+# Output:
+#   None (writes nothing to stdout).
+#
+# Exit behaviour:
+#   Returns 0 when the expected_token matches a comma-separated directive
+#   exactly (after trimming whitespace/CR).  Returns 1 when no directive
+#   matches.
+#
+# Example:
+#   cache_control_has_token 'no-cache="public", private' 'no-cache="public"'  # → 0
+#   cache_control_has_token 'no-cache="public", private' 'public'             # → 1
 cache_control_has_token() {
     local header_value="$1"
     local expected_token="$2"
@@ -217,6 +256,40 @@ cache_control_has_token() {
         fi
     done
     return 1
+}
+
+# header_value — extract the value of a named HTTP header from a response
+# header file.
+#
+# Arguments:
+#   $1 — path to the header file (e.g., RAW_DIR/t12.hdr)
+#   $2 — header name, case-insensitive (e.g., 'ETag')
+#
+# Output:
+#   Prints the header value with leading/trailing whitespace and trailing CR
+#   stripped.  Prints nothing if the header is absent.
+#
+# Exit behaviour:
+#   Always returns 0, even when the header is not found.  Callers must assert
+#   presence separately.
+#
+# Example:
+#   etag=$(header_value "${RAW_DIR}/t12.hdr" 'ETag')
+#   # etag might be: '"upstream-failopen-etag"'
+header_value() {
+    local hdr_file="$1"
+    local header_name="$2"
+
+    awk -v name="${header_name}" '
+        tolower($0) ~ tolower(name) ":[ \t]*" {
+            line = $0
+            sub(/^[^:]*:[ \t]*/, "", line)
+            sub(/\r$/, "", line)
+            print line
+            exit
+        }
+    ' "${hdr_file}" 2>/dev/null
+    return 0
 }
 
 assert_no_header() {
@@ -1454,8 +1527,9 @@ if ! cache_control_has_token "${t12_cache_control}" "public" \
 fi
 
 # ETag must be preserved as the upstream value
-if ! grep -qi '^ETag:.*upstream-failopen-etag' "${RAW_DIR}/t12.hdr" 2>/dev/null; then
-    mark_case_fail "10.12" "ETag not preserved as upstream value on fail-open path" t12_pass
+t12_etag=$(header_value "${RAW_DIR}/t12.hdr" 'ETag')
+if [[ "${t12_etag}" != '"upstream-failopen-etag"' ]]; then
+    mark_case_fail "10.12" "ETag not preserved as upstream value on fail-open path (got: ${t12_etag})" t12_pass
 fi
 
 # Body must contain the oversize end token (complete HTML, not truncated)
@@ -1473,9 +1547,14 @@ assert_body_contains "${RAW_DIR}/t12.body" "${OVERSIZE_END_TOKEN}" "10.12" \
 # STREAMING_PRECOMMIT_FAILOPEN.
 t12_log_new=""
 if [[ -f "${T12_ERROR_LOG}" ]] && [[ "${t12_log_offset}" -ge 0 ]]; then
-    t12_log_new=$(tail -c +"$((t12_log_offset + 1))" "${T12_ERROR_LOG}" 2>/dev/null || true)
+    t12_current_size=$(wc -c < "${T12_ERROR_LOG}" 2>/dev/null || echo 0)
+    if [[ "${t12_log_offset}" -lt "${t12_current_size}" ]]; then
+        t12_log_new=$(tail -c +"$((t12_log_offset + 1))" "${T12_ERROR_LOG}" 2>/dev/null || true)
+    fi
 fi
-if echo "${t12_log_new}" | grep -q 'reason=STREAMING_PRECOMMIT_FAILOPEN' 2>/dev/null; then
+if [[ -z "${t12_log_new}" ]]; then
+    mark_case_fail "10.12" "no new bytes in T12_ERROR_LOG; cannot verify STREAMING_PRECOMMIT_FAILOPEN" t12_pass
+elif echo "${t12_log_new}" | grep -q 'reason=STREAMING_PRECOMMIT_FAILOPEN' 2>/dev/null; then
     : # terminal fail-open outcome found in 10.12 log segment — pass
 else
     mark_case_fail "10.12" "decision log missing STREAMING_PRECOMMIT_FAILOPEN for /t12/ request (request may not have hit streaming fail-open path)" t12_pass
@@ -1518,6 +1597,10 @@ assert_http_200 "${RAW_DIR}/t13.hdr" "10.13" t13_pass \
 t13_cache_control=$(cache_control_value "${RAW_DIR}/t13.hdr")
 if cache_control_has_token "${t13_cache_control}" "public"; then
     mark_case_fail "10.13" "Cache-Control contains bare 'public' directive — tokenizer may have incorrectly parsed quoted no-cache=\"public\" as bare public" t13_pass
+fi
+
+if ! cache_control_has_token "${t13_cache_control}" 'no-cache="public"'; then
+    mark_case_fail "10.13" "Cache-Control missing 'no-cache=\"public\"' token — tokenizer may have stripped the quoted value" t13_pass
 fi
 
 if [[ ${t13_pass} -eq 1 ]]; then

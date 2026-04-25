@@ -7,6 +7,9 @@ PROXY_TLS_SCRIPT="${WORKSPACE_ROOT}/tools/e2e/verify_proxy_tls_backend_e2e.sh"
 CHUNKED_SCRIPT="${WORKSPACE_ROOT}/tools/e2e/verify_chunked_streaming_native_e2e.sh"
 LARGE_SCRIPT="${WORKSPACE_ROOT}/tools/e2e/verify_large_markdown_response_e2e.sh"
 STREAMING_FAILURE_CACHE_SCRIPT="${WORKSPACE_ROOT}/tools/e2e/verify_streaming_failure_cache_e2e.sh"
+ACCEPT_NEGOTIATION_SCRIPT="${WORKSPACE_ROOT}/tools/e2e/verify_accept_negotiation_e2e.sh"
+SECURITY_SCRIPT="${WORKSPACE_ROOT}/tools/e2e/verify_security_e2e.sh"
+ERROR_HANDLING_SCRIPT="${WORKSPACE_ROOT}/tools/e2e/verify_error_handling_e2e.sh"
 SUITE_BUILDROOT=""
 SUITE_NGINX_BIN=""
 NGINX_BIN_OUTPUT_FILE=""
@@ -21,6 +24,9 @@ Run the canonical E2E suite:
   2. chunked native smoke verification
   3. large-response native verification
   4. streaming failure/cache semantics verification
+  5. Accept-header content-negotiation verification
+  6. security behavior verification
+  7. error-handling and fail-open verification
 
 Environment variables:
   NGINX_BIN       Optional reusable module-enabled nginx binary
@@ -100,9 +106,24 @@ if [[ "${KEEP_ARTIFACTS}" -eq 1 ]]; then
 fi
 env NGINX_BIN="${SUITE_NGINX_BIN}" bash "${STREAMING_FAILURE_CACHE_SCRIPT}" "${streaming_fc_args[@]}"
 
+accept_args=()
+security_args=()
+error_args=()
+if [[ "${KEEP_ARTIFACTS}" -eq 1 ]]; then
+  accept_args=(--keep-artifacts)
+  security_args=(--keep-artifacts)
+  error_args=(--keep-artifacts)
+fi
+env NGINX_BIN="${SUITE_NGINX_BIN}" bash "${ACCEPT_NEGOTIATION_SCRIPT}" "${accept_args[@]}"
+env NGINX_BIN="${SUITE_NGINX_BIN}" bash "${SECURITY_SCRIPT}" "${security_args[@]}"
+env NGINX_BIN="${SUITE_NGINX_BIN}" bash "${ERROR_HANDLING_SCRIPT}" "${error_args[@]}"
+
 echo "Canonical E2E suite summary:"
 echo "  proxy_tls_backend=passed"
 echo "  chunked_native_smoke=passed"
 echo "  large_response_native=passed"
 echo "  streaming_failure_cache=passed"
+echo "  accept_negotiation=passed"
+echo "  security=passed"
+echo "  error_handling=passed"
 echo "  reusable_nginx_bin=${SUITE_NGINX_BIN}"

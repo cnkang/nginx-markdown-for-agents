@@ -100,8 +100,13 @@ echo ""
 # Build the converter first
 echo "Building Rust converter..."
 cd "$ROOT/components/rust-converter"
-cargo build --release --quiet 2>&1 | grep -v "warning:" || true
+build_output=$(cargo build --release 2>&1) && build_exit=0 || build_exit=$?
+echo "$build_output" | grep -v "warning:" || true
 cd "$ROOT"
+if [[ "$build_exit" -ne 0 ]]; then
+    echo -e "${RED}✗${NC} Rust converter build failed (exit code $build_exit)"
+    exit 1
+fi
 
 # Shared find command for HTML corpus files (used for both counting and processing)
 HTML_FIND_CMD=(find "$ROOT/tests/corpus" -name "*.html" -type f ! -name "generate-*")
