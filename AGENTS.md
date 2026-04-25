@@ -429,20 +429,26 @@ Required:
   even when the callee is expected to assign them on success; early-return
   paths in test/prod helpers can otherwise read indeterminate storage.
 
-### 17. Cognitive complexity in C functions
-SonarCloud rule: `c:S3776`.
+### 17. Cognitive complexity in C and Python functions
+SonarCloud rules: `c:S3776`, `python:S3776`.
 
 Required:
 - Keep function cognitive complexity at or below the configured threshold (currently 25).
+- For Python release-gate/tooling validators, keep function cognitive complexity
+  at or below SonarCloud's configured threshold (currently 15) by extracting
+  independent validation steps into small helpers.
 - Extract helper functions for self-contained sub-decisions (for example content-type exclusion checks, observability logging) to flatten the main function's control flow.
 - Prefer early-return guard clauses over nested `if`/`else` chains.
 - When adding new rules or conditions to an existing decision function, check whether the addition pushes complexity over the limit and proactively extract before merging.
 
 ### 18. Shell script hygiene in e2e/tooling scripts
-SonarCloud rules: `shelldre:S131`, `shelldre:S7677`, `shelldre:S1066`, `shelldre:S1192`.
+SonarCloud rules: `shelldre:S131`, `shelldre:S7677`, `shelldre:S1066`, `shelldre:S1192`, `shelldre:S7682`.
 
 Required:
 - Every `case` statement must include a default `*)` clause, even if it only logs an error to stderr.
+- Shell functions that may intentionally emit no output must still end with an
+  explicit `return 0` when success is intended, so static analysis and callers
+  do not inherit an accidental status from the last command.
 - Diagnostic and informational messages (INFO, WARN, DEBUG) must be redirected to stderr (`>&2`) so they do not pollute stdout when scripts are piped or their output is captured.
 - Merge nested `if` statements that have no `else` branch into a single compound condition (`if [[ cond1 ]] && cmd; then`).
 - Extract string literals used 4+ times into `readonly` constants defined near the top of the script. Grep patterns, expected header values, and expected body tokens are common candidates.
@@ -488,6 +494,8 @@ Required:
   `shutil.which(...)`).
 - Harness checks that represent required behavior must affect pass/fail status
   (or exit non-zero), not only print informational diagnostics.
+- Repeated gate/check ID strings must be module-level constants once reused,
+  so result recording and exception branches cannot drift.
 
 ### 20. Spec task-completion and evidence-drift guardrails
 
@@ -866,7 +874,9 @@ For each code change you are about to produce, mentally (or explicitly in a thin
 7. Required checks must fail the case/run when missing (not INFO-only). (Rule 18)
 8. `--plan`/dry-run modes short-circuit before runtime prerequisites. (Rule 18)
 9. `usage()` text matches parsed flags/defaults exactly. (Rule 18)
-10. Every function has a comment block stating purpose, arguments, output, and exit behaviour. Repeated string constants use `readonly` variables with descriptive names. (Rule 26)
+10. Shell functions end with an explicit success `return 0` when they may emit
+    no output intentionally. (Rule 18)
+11. Every function has a comment block stating purpose, arguments, output, and exit behaviour. Repeated string constants use `readonly` variables with descriptive names. (Rule 26)
 
 #### Python test/tooling scripts (`tests/e2e/`, `tools/`)
 1. Binary prerequisites validate executability (`os.access(..., os.X_OK)` or
@@ -884,6 +894,10 @@ For each code change you are about to produce, mentally (or explicitly in a thin
    full-buffer and streaming report (for example `--engine both`), read
    streaming metrics from `streaming_metrics` first, fallback to `tiers`.
    (Rule 8b)
+6. Release-gate/tooling functions stay below the Python cognitive complexity
+   threshold; extract independent validation steps before adding branches.
+   (Rule 17)
+7. Repeated gate/check ID strings are module-level constants. (Rule 19)
 
 #### Documentation and tooling
 1. Canonical docs in `docs/` updated; no mirrored copies created. (Rule 9)

@@ -132,7 +132,7 @@ if [[ ! -f "$CORPUS_VERSION_FILE" ]]; then
 else
     # Pass path via env var to avoid shell injection; use single-quoted
     # Python string so the regex dollar sign is not interpreted by bash.
-    VERSION=$(VALIDATE_PATH="$CORPUS_VERSION_FILE" python3 -c '
+    if VERSION=$(VALIDATE_PATH="$CORPUS_VERSION_FILE" python3 -c '
 import json, sys, re, os
 try:
     path = os.environ["VALIDATE_PATH"]
@@ -147,7 +147,7 @@ except Exception as e:
     print(f"ERROR: {e}", file=sys.stderr)
     sys.exit(1)
 ' 2>&1)
-    if [[ $? -eq 0 ]]; then
+    then
         echo -e "${GREEN}✓${NC} corpus-version.json: v${VERSION}"
     else
         echo -e "${RED}✗${NC} corpus-version.json: invalid semver"

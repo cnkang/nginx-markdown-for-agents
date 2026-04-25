@@ -215,19 +215,24 @@ scrape_configs:
 
 ```promql
 # Failure rate
-rate(conversions_failed[5m]) / rate(conversions_attempted[5m]) * 100
+sum(rate(nginx_markdown_failures_total[5m]))
+/ clamp_min(rate(nginx_markdown_requests_total[5m]), 1e-10) * 100
 
-# Average conversion time
-rate(conversion_time_sum_ms[5m]) / clamp_min(rate(conversion_completed[5m]), 1)
+# Slow conversion bucket share (> 1s)
+(rate(nginx_markdown_conversion_duration_seconds{le="+Inf"}[5m])
+  - rate(nginx_markdown_conversion_duration_seconds{le="1.0"}[5m]))
+/ clamp_min(rate(nginx_markdown_conversion_duration_seconds{le="+Inf"}[5m]), 1e-10) * 100
 
 # Throughput (conversions per second)
-rate(conversions_succeeded[1m])
+rate(nginx_markdown_conversions_total[1m])
 
 # Size reduction percentage (proxy for token reduction trend)
-(1 - (rate(output_bytes[5m]) / rate(input_bytes[5m]))) * 100
+(1 - (rate(nginx_markdown_output_bytes_total[5m])
+  / clamp_min(rate(nginx_markdown_input_bytes_total[5m]), 1))) * 100
 
 # Decompression failure rate
-rate(decompressions_failed[5m]) / rate(decompressions_attempted[5m]) * 100
+rate(nginx_markdown_decompression_failures_total[5m])
+/ clamp_min(sum(rate(nginx_markdown_decompressions_total[5m])), 1e-10) * 100
 ```
 
 ---

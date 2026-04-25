@@ -720,6 +720,7 @@ ngx_http_markdown_streaming_update_headers(
             ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                 "markdown streaming: failed to modify "
                 "Cache-Control for authenticated content");
+            return rc;
         }
     }
 #endif

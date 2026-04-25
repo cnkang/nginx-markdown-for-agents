@@ -94,6 +94,7 @@ lookup_accessor() {
     if [[ -n "$line" ]]; then
         echo "$line" | cut -f2
     fi
+    return 0
 }
 
 # Look up emission kind from the explicit registry.
@@ -105,6 +106,7 @@ lookup_emission_kind() {
     if [[ -n "$line" ]]; then
         echo "$line" | cut -f3
     fi
+    return 0
 }
 
 # ── Emission check helpers ──────────────────────────────────────────
@@ -116,7 +118,21 @@ lookup_emission_kind() {
 check_direct_emission() {
     local accessor="$1"
     local found=0
+    local accessor_seen=0
+
     for src_file in "$SRC_DIR"/*.c "$SRC_DIR"/*.h; do
+        if [[ ! -f "$src_file" ]]; then continue; fi
+        if grep -q "$accessor" "$src_file" 2>/dev/null; then
+            accessor_seen=1
+            break
+        fi
+    done
+
+    if [[ "$accessor_seen" -eq 0 ]]; then
+        return 1
+    fi
+
+    for src_file in "$SRC_DIR"/*.c "$SRC_DIR"/*_impl.h; do
         if [[ ! -f "$src_file" ]]; then continue; fi
         if grep -q "$accessor" "$src_file" 2>/dev/null \
             && grep -q "ngx_http_markdown_log_decision" "$src_file" 2>/dev/null; then
@@ -135,9 +151,23 @@ check_mapper_emission() {
     local accessor="$1"
     local code="$2"
     local found=0
+    local accessor_seen=0
 
-    # 1. Mapper is called from a file that calls log_decision
+    # 1. Mapper accessor may be declared in headers, but runtime emission
+    #    proof must come from implementation files.
     for src_file in "$SRC_DIR"/*.c "$SRC_DIR"/*.h; do
+        if [[ ! -f "$src_file" ]]; then continue; fi
+        if grep -q "$accessor" "$src_file" 2>/dev/null; then
+            accessor_seen=1
+            break
+        fi
+    done
+
+    if [[ "$accessor_seen" -eq 0 ]]; then
+        return 1
+    fi
+
+    for src_file in "$SRC_DIR"/*.c "$SRC_DIR"/*_impl.h; do
         if [[ ! -f "$src_file" ]]; then continue; fi
         if grep -q "$accessor" "$src_file" 2>/dev/null \
             && grep -q "ngx_http_markdown_log_decision" "$src_file" 2>/dev/null; then
@@ -183,10 +213,24 @@ check_category_emission() {
     local accessor="$1"
     local code="$2"
     local found=0
+    local accessor_seen=0
 
     # 1. reason_from_error_category is called from a file that
-    #    calls log_decision_with_category
+    #    calls log_decision_with_category. Headers may prove the accessor
+    #    exists, but implementation files must prove runtime emission.
     for src_file in "$SRC_DIR"/*.c "$SRC_DIR"/*.h; do
+        if [[ ! -f "$src_file" ]]; then continue; fi
+        if grep -q "$accessor" "$src_file" 2>/dev/null; then
+            accessor_seen=1
+            break
+        fi
+    done
+
+    if [[ "$accessor_seen" -eq 0 ]]; then
+        return 1
+    fi
+
+    for src_file in "$SRC_DIR"/*.c "$SRC_DIR"/*_impl.h; do
         if [[ ! -f "$src_file" ]]; then continue; fi
         if grep -q "$accessor" "$src_file" 2>/dev/null \
             && grep -q "log_decision_with_category" "$src_file" 2>/dev/null; then
@@ -269,7 +313,7 @@ for code in $reason_codes; do
             ;;
         *)
             # Unknown emission kind — fall back to file-level check
-            for src_file in "$SRC_DIR"/*.c "$SRC_DIR"/*.h; do
+            for src_file in "$SRC_DIR"/*.c "$SRC_DIR"/*_impl.h; do
                 if [[ ! -f "$src_file" ]]; then continue; fi
                 if grep -q "ngx_http_markdown_log_decision" "$src_file" 2>/dev/null \
                     && grep -q "$accessor" "$src_file" 2>/dev/null; then

@@ -325,3 +325,29 @@ fn table_colgroup_alignment_overrides_th_alignment() {
         "expected colgroup to override th alignment, got: {result}"
     );
 }
+
+#[test]
+fn table_colgroup_bare_col_does_not_override_th_alignment() {
+    let result = convert_table_html(
+        b"<table><colgroup><col><col></colgroup><thead><tr><th style=\"text-align: right\">A</th><th>B</th></tr></thead><tbody><tr><td>1</td><td>2</td></tr></tbody></table>",
+        MarkdownFlavor::GitHubFlavoredMarkdown,
+    );
+
+    assert!(
+        result.contains("| ---: | --- |"),
+        "expected bare colgroup columns to preserve th alignment, got: {result}"
+    );
+}
+
+#[test]
+fn table_colgroup_span_applies_alignment_to_multiple_columns() {
+    let result = convert_table_html(
+        b"<table><colgroup><col span=\"2\" align=\"center\"><col align=\"right\"></colgroup><thead><tr><th>A</th><th>B</th><th>C</th></tr></thead><tbody><tr><td>1</td><td>2</td><td>3</td></tr></tbody></table>",
+        MarkdownFlavor::GitHubFlavoredMarkdown,
+    );
+
+    assert!(
+        result.contains("| :---: | :---: | ---: |"),
+        "expected col span to apply alignment to consecutive columns, got: {result}"
+    );
+}

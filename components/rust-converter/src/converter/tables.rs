@@ -65,10 +65,10 @@ impl MarkdownConverter {
         let mut alignments: Vec<TableAlignment> = Vec::new();
         let mut rows: Vec<Vec<String>> = Vec::new();
 
-        // Extract column alignments from <colgroup>/<col> first.
-        // These take precedence over <th> alignment because <col> is a
-        // column-level declaration.
-        let mut col_alignments: Vec<TableAlignment> = Vec::new();
+        // Extract explicit column alignments from <colgroup>/<col> first.
+        // Explicit <col> declarations take precedence over <th> alignment
+        // because <col> is a column-level declaration.
+        let mut col_alignments: Vec<Option<TableAlignment>> = Vec::new();
         for child in node.children.borrow().iter() {
             if let NodeData::Element { ref name, .. } = child.data
                 && name.local.as_ref() == "colgroup"
@@ -159,12 +159,15 @@ impl MarkdownConverter {
             alignments.push(TableAlignment::Left);
         }
 
-        // Apply <colgroup>/<col> alignments — these override <th> alignments.
-        for (i, &col_align) in col_alignments.iter().enumerate() {
-            if i < alignments.len() {
-                alignments[i] = col_align;
-            } else {
-                alignments.push(col_align);
+        // Apply explicit <colgroup>/<col> alignments. Bare <col> elements
+        // preserve alignments derived from <th> cells.
+        for (i, col_align) in col_alignments.iter().enumerate() {
+            if let Some(col_align) = col_align {
+                if i < alignments.len() {
+                    alignments[i] = *col_align;
+                } else {
+                    alignments.push(*col_align);
+                }
             }
         }
 
@@ -179,12 +182,13 @@ impl MarkdownConverter {
 
     /// Extract column alignments from a `<colgroup>` element.
     ///
-    /// Each `<col>` child's `align` attribute or `style="text-align: ..."`
-    /// is resolved using the same logic as [`Self::extract_alignment`].
+    /// Each `<col>` child's explicit `align` attribute or
+    /// `style="text-align: ..."` is resolved using the same alignment rules
+    /// as header cells. Bare columns are preserved as `None`.
     pub(super) fn extract_colgroup_alignments(
         &self,
         colgroup: &Handle,
-        col_alignments: &mut Vec<TableAlignment>,
+        col_alignments: &mut Vec<Option<TableAlignment>>,
     ) {
         for child in colgroup.children.borrow().iter() {
             if let NodeData::Element {
@@ -195,7 +199,16 @@ impl MarkdownConverter {
                 && name.local.as_ref() == "col"
             {
                 let attrs_borrowed = attrs.borrow();
-                col_alignments.push(self.extract_alignment(&attrs_borrowed));
+                let span = attrs_borrowed
+                    .iter()
+                    .find(|attr| attr.name.local.as_ref() == "span")
+                    .and_then(|attr| attr.value.parse::<usize>().ok())
+                    .unwrap_or(1)
+                    .clamp(1, 1_000);
+                let alignment = self.extract_explicit_alignment(&attrs_borrowed);
+                for _ in 0..span {
+                    col_alignments.push(alignment);
+                }
             }
         }
     }
@@ -317,14 +330,19 @@ impl MarkdownConverter {
     /// Priority is `align="..."` first, then CSS `text-align` from `style`.
     /// Unknown values fall back to left alignment.
     pub(super) fn extract_alignment(&self, attrs: &Ref<Vec<Attribute>>) -> TableAlignment {
+        self.extract_explicit_alignment(attrs)
+            .unwrap_or(TableAlignment::Left)
+    }
+
+    fn extract_explicit_alignment(&self, attrs: &Ref<Vec<Attribute>>) -> Option<TableAlignment> {
         for attr in attrs.iter() {
             if attr.name.local.as_ref() == "align" {
                 let value = attr.value.to_string().to_lowercase();
                 return match value.as_str() {
-                    "left" => TableAlignment::Left,
-                    "center" => TableAlignment::Center,
-                    "right" => TableAlignment::Right,
-                    _ => TableAlignment::Left,
+                    "left" => Some(TableAlignment::Left),
+                    "center" => Some(TableAlignment::Center),
+                    "right" => Some(TableAlignment::Right),
+                    _ => None,
                 };
             }
         }
@@ -347,17 +365,17 @@ impl MarkdownConverter {
 
                     if key == "text-align" {
                         return match value.as_str() {
-                            "center" => TableAlignment::Center,
-                            "right" => TableAlignment::Right,
-                            "left" => TableAlignment::Left,
-                            _ => TableAlignment::Left,
+                            "center" => Some(TableAlignment::Center),
+                            "right" => Some(TableAlignment::Right),
+                            "left" => Some(TableAlignment::Left),
+                            _ => None,
                         };
                     }
                 }
             }
         }
 
-        TableAlignment::Left
+        None
     }
 
     /// Escape row/cell content for safe GFM table rendering.

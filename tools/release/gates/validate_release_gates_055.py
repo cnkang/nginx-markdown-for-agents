@@ -59,6 +59,9 @@ KNOWN_DIFF_PATH = (
 )
 CHANGELOG_PATH = PROJECT_ROOT / "CHANGELOG.md"
 
+EVIDENCE_ARTIFACT_REQUIRED_FIELDS = "evidence-artifact:required-fields"
+REASON_CODES_AUDIT = "reason-codes:audit"
+
 
 # ---------------------------------------------------------------------------
 # Result collector
@@ -201,7 +204,21 @@ def check_evidence_artifact(result: ValidationResult) -> None:
         result.failed("evidence-artifact:parse", f"JSON parse error: {exc}")
         return
 
-    # Required fields and type validation
+    validate_required_fields(data, result)
+    validate_non_negative_counts(data, result)
+    validate_schema_version(data, result)
+    validate_pass_flag(data, result)
+    validate_unknown_diffs(data, result)
+    validate_error_parity(data, result)
+    validate_total_comparisons(data, result)
+    validate_count_consistency(data, result)
+    validate_breakdown_values(data, result)
+    validate_entries_consistency(data, result)
+    validate_verification_result(data, result)
+
+
+def validate_required_fields(data: dict[str, object], result: ValidationResult) -> None:
+    """Validate required evidence fields and their JSON types."""
     required_fields = [
         ("schema_version", int),
         ("verified_by", str),
@@ -233,18 +250,20 @@ def check_evidence_artifact(result: ValidationResult) -> None:
 
     if missing_fields:
         result.failed(
-            "evidence-artifact:required-fields",
+            EVIDENCE_ARTIFACT_REQUIRED_FIELDS,
             f"missing: {', '.join(missing_fields)}",
         )
     elif wrong_type_fields:
         result.failed(
-            "evidence-artifact:required-fields",
+            EVIDENCE_ARTIFACT_REQUIRED_FIELDS,
             f"type mismatches: {'; '.join(wrong_type_fields)}",
         )
     else:
-        result.passed("evidence-artifact:required-fields", "all required fields present with correct types")
+        result.passed(EVIDENCE_ARTIFACT_REQUIRED_FIELDS, "all required fields present with correct types")
 
-    # Count fields must be non-negative integers
+
+def validate_non_negative_counts(data: dict[str, object], result: ValidationResult) -> None:
+    """Validate count fields are non-negative integers when present."""
     count_fields = [
         "total_comparisons", "identical_count", "known_difference_count",
         "unknown_difference_count", "error_parity_mismatch_count",
@@ -261,6 +280,9 @@ def check_evidence_artifact(result: ValidationResult) -> None:
     else:
         result.passed("evidence-artifact:non-negative", "all count fields non-negative")
 
+
+def validate_schema_version(data: dict[str, object], result: ValidationResult) -> None:
+    """Validate evidence schema version."""
     if data.get("schema_version") != 1:
         result.failed(
             "evidence-artifact:schema-version",
@@ -269,11 +291,17 @@ def check_evidence_artifact(result: ValidationResult) -> None:
     else:
         result.passed("evidence-artifact:schema-version")
 
+
+def validate_pass_flag(data: dict[str, object], result: ValidationResult) -> None:
+    """Validate the evidence pass flag."""
     if data.get("pass") is not True:
         result.failed("evidence-artifact:pass", f"pass={data.get('pass')}, expected true")
     else:
         result.passed("evidence-artifact:pass")
 
+
+def validate_unknown_diffs(data: dict[str, object], result: ValidationResult) -> None:
+    """Validate that no unknown differences were reported."""
     if data.get("unknown_difference_count", -1) != 0:
         result.failed(
             "evidence-artifact:unknown-diffs",
@@ -282,6 +310,9 @@ def check_evidence_artifact(result: ValidationResult) -> None:
     else:
         result.passed("evidence-artifact:unknown-diffs")
 
+
+def validate_error_parity(data: dict[str, object], result: ValidationResult) -> None:
+    """Validate that no error-parity mismatches were reported."""
     if data.get("error_parity_mismatch_count", -1) != 0:
         result.failed(
             "evidence-artifact:error-parity",
@@ -290,13 +321,19 @@ def check_evidence_artifact(result: ValidationResult) -> None:
     else:
         result.passed("evidence-artifact:error-parity")
 
+
+def validate_total_comparisons(data: dict[str, object], result: ValidationResult) -> None:
+    """Validate that evidence includes at least one comparison."""
     total = data.get("total_comparisons", 0)
     if total > 0:
         result.passed("evidence-artifact:total-comparisons", f"{total} comparisons")
     else:
         result.failed("evidence-artifact:total-comparisons", "total_comparisons is 0")
 
-    # Basic arithmetic consistency: identical + known_diffs should equal total
+
+def validate_count_consistency(data: dict[str, object], result: ValidationResult) -> None:
+    """Validate identical plus known differences equals total comparisons."""
+    total = data.get("total_comparisons", 0)
     identical = data.get("identical_count", 0)
     known_diffs = data.get("known_difference_count", 0)
     if identical + known_diffs == total:
@@ -307,12 +344,12 @@ def check_evidence_artifact(result: ValidationResult) -> None:
                       f"identical({identical}) + known_diffs({known_diffs}) = "
                       f"{identical + known_diffs}, expected total({total})")
 
-    # Registry breakdown should sum to known_differences_registry_total_entries
-    entries_total = data.get("known_differences_registry_total_entries", 0)
+
+def validate_breakdown_values(data: dict[str, object], result: ValidationResult) -> None:
+    """Validate known-difference breakdown values are non-negative integers."""
     entries_by_drift = data.get("known_difference_registry_by_drift_type", {})
     entries_by_severity = data.get("known_difference_registry_by_severity", {})
 
-    # Breakdown dict values must be non-negative integers
     bad_drift_vals = [
         f"{k}={v}" for k, v in entries_by_drift.items()
         if not isinstance(v, int) or v < 0
@@ -331,6 +368,12 @@ def check_evidence_artifact(result: ValidationResult) -> None:
             msgs.append(f"severity: {', '.join(bad_severity_vals)}")
         result.failed("evidence-artifact:breakdown-values", "; ".join(msgs))
 
+
+def validate_entries_consistency(data: dict[str, object], result: ValidationResult) -> None:
+    """Validate registry breakdown sums match total registry entries."""
+    entries_total = data.get("known_differences_registry_total_entries", 0)
+    entries_by_drift = data.get("known_difference_registry_by_drift_type", {})
+    entries_by_severity = data.get("known_difference_registry_by_severity", {})
     drift_sum = sum(entries_by_drift.values()) if isinstance(entries_by_drift, dict) else 0
     severity_sum = sum(entries_by_severity.values()) if isinstance(entries_by_severity, dict) else 0
     if drift_sum == entries_total and severity_sum == entries_total:
@@ -341,7 +384,9 @@ def check_evidence_artifact(result: ValidationResult) -> None:
                       f"drift_type sum={drift_sum}, severity sum={severity_sum}, "
                       f"expected entries_total={entries_total}")
 
-    # verification_result must be PASS
+
+def validate_verification_result(data: dict[str, object], result: ValidationResult) -> None:
+    """Validate the evidence verification command reported PASS."""
     if data.get("verification_result") == "PASS":
         result.passed("evidence-artifact:verification-result")
     else:
@@ -426,12 +471,6 @@ def check_changelog_entry(result: ValidationResult) -> None:
     else:
         result.failed("changelog:0.5.5-entry", "no 0.5.5 entry found in CHANGELOG.md")
 
-
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
-
-
 def check_reason_code_audit(result: ValidationResult) -> None:
     """Run the reason-code lifecycle audit script and report its status."""
     import subprocess
@@ -450,14 +489,19 @@ def check_reason_code_audit(result: ValidationResult) -> None:
             timeout=60,
         )
     except (subprocess.TimeoutExpired, OSError) as exc:
-        result.failed("reason-codes:audit", f"audit_reason_codes.sh execution error: {exc}")
+        result.failed(REASON_CODES_AUDIT, f"audit_reason_codes.sh execution error: {exc}")
         return
 
     if proc.returncode == 0:
-        result.passed("reason-codes:audit", "all reason codes have complete lifecycles")
+        result.passed(REASON_CODES_AUDIT, "all reason codes have complete lifecycles")
     else:
         detail = proc.stderr.strip().split("\n")[-1] if proc.stderr.strip() else "exit code non-zero"
-        result.failed("reason-codes:audit", detail)
+        result.failed(REASON_CODES_AUDIT, detail)
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
 
 
 def main() -> int:
