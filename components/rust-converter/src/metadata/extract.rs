@@ -16,17 +16,22 @@
 //!
 //! # Supported Meta Tags
 //!
-//! | Meta Name/Property | Target Field |
-//! |-------------------|-------------|
-//! | `description` | `description` |
-//! | `og:title` | `og_title` |
-//! | `og:description` | `og_description` |
-//! | `og:image` | `image` |
-//! | `og:url` | `url` |
-//! | `twitter:card` | `twitter_card` |
-//! | `twitter:title` | `twitter_title` |
-//! | `twitter:description` | `twitter_description` |
-//! | `twitter:image` | `twitter_image` |
+//! | Meta Name/Property | Target Field | Semantics |
+//! |-------------------|-------------|-----------|
+//! | `description` | `description` | First-wins (generic fallback) |
+//! | `og:title` | `title` | Overrides `<title>` |
+//! | `og:description` | `description` | Overrides generic `description` |
+//! | `og:image` | `image` | First-wins |
+//! | `og:url` | `url` | First-wins |
+//! | `twitter:title` | `title` | Overrides `<title>` |
+//! | `twitter:description` | `description` | Overrides generic `description` |
+//! | `twitter:image` | `image` | First-wins |
+//! | `author` | `author` | First-wins |
+//! | `article:published_time` | `published` | First-wins |
+//!
+//! **Override rule:** `og:*` and `twitter:*` tags for `title` and `description`
+//! always override the generic field, even if already set by `<title>` or
+//! `<meta name="description">`.  All other fields use first-wins semantics.
 
 use std::cell::Ref;
 

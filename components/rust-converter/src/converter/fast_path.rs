@@ -117,6 +117,12 @@ pub(crate) enum FastPathResult {
 ///
 /// [`FastPathResult::Qualifies`] if the document can use the fast path,
 /// [`FastPathResult::Normal`] otherwise.
+///
+/// # Complexity
+///
+/// The scan visits at most `min(n, FAST_PATH_MAX_NODES + 1)` DOM nodes and
+/// stores only the recursion stack. Stack depth is bounded by
+/// `FAST_PATH_MAX_DEPTH + 1` before the document is disqualified.
 pub(crate) fn qualifies(dom: &RcDom) -> FastPathResult {
     let mut visited: usize = 0;
     if check_node(&dom.document, 0, &mut visited) {

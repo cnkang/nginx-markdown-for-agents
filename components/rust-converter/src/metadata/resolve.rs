@@ -16,7 +16,7 @@
 //! | `relative/path` | `https://host/dir/` | `https://host/dir/relative/path` |
 //! | empty string | any | empty string (no resolution) |
 //!
-//! # Safety
+//! # Validation
 //!
 //! Base URL validation requires an `http://` or `https://` scheme. Invalid
 //! base URLs cause the original relative URL to be returned unchanged,

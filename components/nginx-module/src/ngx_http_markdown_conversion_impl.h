@@ -54,7 +54,8 @@ ngx_http_markdown_const_strncasecmp(const u_char *s1, const u_char *s2,
  * Construct base URL for resolving relative URLs
  *
  * This function constructs the base URL using the following priority order:
- * 1. X-Forwarded-Proto + X-Forwarded-Host (reverse proxy scenario)
+ * 1. X-Forwarded-Proto + X-Forwarded-Host only when
+ *    markdown_trust_forwarded_headers is enabled
  * 2. r->schema + r->headers_in.server (direct connection)
  * 3. server_name from configuration (fallback)
  *
@@ -70,7 +71,7 @@ ngx_http_markdown_const_strncasecmp(const u_char *s1, const u_char *s2,
  * @return      NGX_OK on success, NGX_ERROR on failure
  *
  * Requirements: Design - URL Resolution, NGINX Integration
- * Task: 14.8 Implement base_url construction with X-Forwarded headers priority
+ * Task: 14.8 Implement base_url construction with guarded X-Forwarded headers
  */
 static u_char ngx_http_markdown_hdr_x_forwarded_proto[] = "X-Forwarded-Proto";
 static u_char ngx_http_markdown_hdr_x_forwarded_host[] = "X-Forwarded-Host";
@@ -125,7 +126,8 @@ ngx_http_markdown_scheme_is_http_family(const ngx_str_t *scheme)
 /*
  * Select scheme and host for base URL construction.
  *
- * Priority: X-Forwarded-Proto/Host > request schema/server > server_name.
+ * Priority: trusted X-Forwarded-Proto/Host > request schema/server
+ * > server_name.
  */
 static ngx_int_t
 ngx_http_markdown_select_base_url_parts(ngx_http_request_t *r,
@@ -385,11 +387,17 @@ ngx_http_markdown_resolve_conditional_result(ngx_http_request_t *r,
 /**
  * Fill a MarkdownOptions structure from the location configuration and the HTTP request.
  *
- * Populates option fields (flavor, timeout_ms, generate_etag,
- * estimate_tokens, front_matter) from the provided location config, copies the
- * response Content-Type if present, and attempts to construct and attach a
- * base_url using the request; if base_url construction fails the function
- * continues without it. The options structure is zeroed before population.
+ * Populates scalar option fields (flavor, timeout_ms, generate_etag,
+ * estimate_tokens, front_matter, streaming_budget) from the provided location
+ * config, borrows the response Content-Type if present, and attempts to
+ * construct and attach a request-pool base_url. If base_url construction
+ * fails, conversion continues without it. The options structure is zeroed
+ * before population so every FFI field has an explicit value.
+ *
+ * Pointer lifetime:
+ *   content_type points into NGINX response header storage and base_url points
+ *   into request-pool memory. Both remain readable for the synchronous Rust FFI
+ *   conversion call and are not owned by Rust.
  *
  * @param r The current ngx HTTP request used to read response headers and URI.
  * @param conf The location configuration providing default option values.

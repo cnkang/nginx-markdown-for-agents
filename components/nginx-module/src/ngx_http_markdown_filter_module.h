@@ -144,6 +144,15 @@ typedef enum {
  * - buffer_chunked: 1 (on by default)
  * - stream_types: NULL (no exclusions by default)
  * - auto_decompress: 1 (on by default)
+ * - large_body_threshold: NGX_HTTP_MARKDOWN_THRESHOLD_OFF
+ * - ops.trust_forwarded_headers: 0 (off by default)
+ * - ops.metrics_format: NGX_HTTP_MARKDOWN_METRICS_FORMAT_AUTO
+ *
+ * Streaming defaults when MARKDOWN_STREAMING_ENABLED is compiled in:
+ * - streaming_engine: compiled complex value for "off"
+ * - streaming_budget: NGX_HTTP_MARKDOWN_STREAMING_BUDGET_DEFAULT
+ * - streaming_on_error: NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_PASS
+ * - streaming_shadow: 0 (off by default)
  */
 typedef struct {
     ngx_flag_t   enabled;              /* markdown_filter static resolved value */
@@ -462,9 +471,9 @@ typedef struct {
     /*
      * Total requests that entered the decision chain.
      *
-     * Incremented in the header filter after scope enablement
-     * check passes.  This is the denominator for conversion
-     * rate calculations.
+     * Incremented in the header filter when a request reaches the module
+     * decision chain, including requests later classified as SKIP_CONFIG.
+     * This is the broad denominator for module decision-rate calculations.
      */
     ngx_atomic_t  requests_entered;
 

@@ -70,15 +70,25 @@ pub struct IncrementalConverterHandle {
 /// # Examples
 ///
 /// ```ignore
-/// # use std::ptr;
 /// use nginx_markdown_converter::ffi::{MarkdownOptions, markdown_incremental_new, markdown_incremental_free};
-/// // Construct options appropriate for your environment.
-/// let opts = MarkdownOptions::default();
+/// // Construct and fully initialize MarkdownOptions for your environment.
+/// let opts = MarkdownOptions {
+///     flavor: 0,
+///     timeout_ms: 0,
+///     generate_etag: 0,
+///     estimate_tokens: 0,
+///     front_matter: 0,
+///     content_type: std::ptr::null(),
+///     content_type_len: 0,
+///     base_url: std::ptr::null(),
+///     base_url_len: 0,
+///     streaming_budget: 0,
+/// };
 /// let handle = unsafe { markdown_incremental_new(&opts) };
 /// assert!(!handle.is_null());
 /// // Either finalize to produce output or free when done without producing output.
 /// unsafe { markdown_incremental_free(handle) };
-/// ```ignore
+/// ```
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn markdown_incremental_new(
     options: *const MarkdownOptions,

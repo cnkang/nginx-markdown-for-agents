@@ -377,9 +377,9 @@ impl MarkdownConverter {
             || url.contains('<')
             || url.contains('>')
         {
-            /* Wrap in angle brackets; percent-encode '>' so it does not
-             * terminate the angle-bracket destination prematurely. */
-            let escaped = url.replace('>', "%3E");
+            /* Wrap in angle brackets; percent-encode '<' and '>' so they
+             * do not break angle-bracket destination semantics. */
+            let escaped = url.replace('<', "%3C").replace('>', "%3E");
             format!("<{}>", escaped)
         } else {
             url.to_string()

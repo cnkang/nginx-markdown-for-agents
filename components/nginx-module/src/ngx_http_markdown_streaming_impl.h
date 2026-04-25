@@ -249,6 +249,28 @@ ngx_http_markdown_streaming_record_postcommit_failure(
     ngx_http_markdown_conf_t *conf);
 
 /*
+ * Send deferred terminal last_buf after backpressure drain.
+ *
+ * Called when finalize() encountered NGX_AGAIN while trying
+ * to send the terminal empty last_buf. Retries the send and
+ * records success/failure metrics based on the actual result.
+ *
+ * r    - current HTTP request
+ * ctx  - per-request module context
+ * conf - location configuration
+ *
+ * Returns:
+ *   NGX_OK    on successful terminal send
+ *   NGX_AGAIN on persistent backpressure
+ *   NGX_ERROR on send failure
+ */
+static ngx_int_t
+ngx_http_markdown_streaming_send_deferred_lastbuf(
+    ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx,
+    ngx_http_markdown_conf_t *conf);
+
+/*
  * Pool cleanup handler for streaming resources.
  *
  * Releases the Rust streaming handle and frees any pending
@@ -2097,17 +2119,17 @@ ngx_http_markdown_streaming_init_handle(
 
 
 /*
- * Handle the result of process_chunk within the body filter loop.
+ * Forward original upstream bytes after a Pre-Commit streaming fail-open.
  *
- * Dispatches fallback, fail-open, and error paths. Returns the
- * value the body filter should return, or NGX_OK to continue
- * processing the next buffer in the chain.
+ * The streaming path may have advanced buffer positions while trying to
+ * convert the current invocation.  Before passing data through unchanged,
+ * restore every recorded buffer position and rebuild a prefix chain for bytes
+ * consumed by earlier invocations.  This preserves fail-open semantics without
+ * losing input data or emitting headers twice.
  *
  * Returns:
- *   NGX_OK       - continue processing next buffer
- *   NGX_AGAIN    - backpressure, return immediately
- *   NGX_ERROR    - fatal error
- *   other        - return value to propagate
+ *   NGX_OK/NGX_AGAIN - status from the downstream body filter
+ *   NGX_ERROR        - allocation or header-forwarding failure
  */
 static ngx_int_t
 ngx_http_markdown_streaming_failopen_passthrough(
@@ -2164,6 +2186,21 @@ ngx_http_markdown_streaming_failopen_passthrough(
 }
 
 
+/*
+ * Handle the result of process_chunk within the body filter loop.
+ *
+ * Dispatches fallback, fail-open, and error paths. Returns the value the body
+ * filter should return, or NGX_OK to continue processing the next buffer in the
+ * chain. NGX_AGAIN is preserved as backpressure and must not be treated as
+ * success.
+ *
+ * Returns:
+ *   NGX_OK       - continue processing next buffer
+ *   NGX_AGAIN    - backpressure, return immediately
+ *   NGX_DONE     - streaming fell back; caller should re-enter full-buffer path
+ *   NGX_ERROR    - fatal error
+ *   other        - return value to propagate
+ */
 static ngx_int_t
 ngx_http_markdown_streaming_handle_chunk_result(
     ngx_http_request_t *r,
@@ -2349,6 +2386,13 @@ ngx_http_markdown_streaming_reenter_fullbuffer_after_fallback(
 }
 
 
+/*
+ * Resume pending output when the body filter is re-entered with NULL input.
+ *
+ * NULL input is used by NGINX filter re-entry to give the module a chance to
+ * flush data saved after downstream NGX_AGAIN.  If finalization was deferred
+ * behind pending output, finalize only after that chain has drained.
+ */
 static ngx_int_t
 ngx_http_markdown_streaming_handle_null_input(
     ngx_http_request_t *r,
@@ -2373,6 +2417,12 @@ ngx_http_markdown_streaming_handle_null_input(
 }
 
 
+/*
+ * Count non-NULL buffers in an input chain.
+ *
+ * Used to size fail-open bookkeeping before any buffer positions are advanced,
+ * so Pre-Commit replay can restore and forward every consumed buffer.
+ */
 static ngx_uint_t
 ngx_http_markdown_streaming_count_chain_bufs(
     ngx_chain_t *in)
@@ -2391,6 +2441,13 @@ ngx_http_markdown_streaming_count_chain_bufs(
 }
 
 
+/*
+ * Ensure fail-open replay arrays can store one entry per chain buffer.
+ *
+ * The arrays are request-pool allocated and grow only in Pre-Commit state.
+ * After Post-Commit, replay is no longer possible because bytes may already
+ * have reached the client.
+ */
 static ngx_int_t
 ngx_http_markdown_streaming_prepare_failopen_tracking(
     ngx_http_request_t *r,
@@ -2447,6 +2504,14 @@ ngx_http_markdown_streaming_prepare_failopen_tracking(
 }
 
 
+/*
+ * Process every buffer in an input chain through the streaming converter.
+ *
+ * Tracks terminal buffers, preserves Pre-Commit buffer positions for fail-open
+ * replay, and reports the chain link that triggered fallback so callers can
+ * re-enter the full-buffer path at the correct point.  NGX_AGAIN is propagated
+ * immediately to honor downstream backpressure.
+ */
 static ngx_int_t
 ngx_http_markdown_streaming_process_chain(
     ngx_http_request_t *r,

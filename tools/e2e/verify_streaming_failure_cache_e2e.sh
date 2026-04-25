@@ -16,6 +16,8 @@ set -euo pipefail
 #   10.9  markdown_on_error vs markdown_streaming_on_error independence
 #   10.10 HEAD request does not enter streaming path
 #   10.11 304 response does not enter streaming path
+#   10.12 Fail-open preserves Cache-Control and ETag (authenticated request)
+#   10.13 no-cache="public" quoted directive not treated as bare public
 #
 # When NGINX_BIN is not set, exits with code 1 unless --plan is specified.
 
@@ -95,6 +97,8 @@ Test cases:
   10.9  Directive independence
   10.10 HEAD request does not enter streaming path
   10.11 304 response does not enter streaming path
+  10.12 Fail-open preserves Cache-Control and ETag (authenticated)
+  10.13 no-cache="public" quoted directive not treated as bare public
 EOF
     return 0
 }
@@ -357,6 +361,18 @@ echo "10.11 304 response does not enter streaming path"
 echo "  - Capture ETag from full-buffer location"
 echo "  - Re-request with If-None-Match and verify HTTP 304 + empty body"
 echo ""
+echo "10.12 Fail-open preserves Cache-Control and ETag (authenticated)"
+echo "  - streaming_engine on, streaming_on_error pass, auth_policy allow"
+echo "  - Trigger pre-commit failure (budget exceeded) with authenticated request"
+echo "  - Verify: Cache-Control preserved as 'public, max-age=600' (not rewritten to private)"
+echo "  - Verify: ETag preserved as upstream value"
+echo "  - Verify: decision log contains STREAMING_PRECOMMIT_FAILOPEN (terminal fail-open outcome)"
+echo ""
+echo "10.13 no-cache=\"public\" quoted directive not treated as bare public"
+echo "  - auth_policy allow, authenticated request with Cookie header"
+echo "  - Upstream returns Cache-Control: no-cache=\"public\" (quoted directive)"
+echo "  - Verify: response does not contain bare 'public' Cache-Control directive"
+echo ""
 
 if [[ "${PLAN_ONLY}" -eq 1 ]]; then
     echo "Plan-only mode. All test cases documented. Exiting."
@@ -527,6 +543,35 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(OVERSIZE_BODY)))
             self.end_headers()
             self.wfile.write(OVERSIZE_BODY)
+            return
+
+        if path == "/failopen-headers":
+            # Oversize HTML with Cache-Control, ETag, and Set-Cookie.
+            # Used by test 10.12 to verify fail-open preserves upstream
+            # headers without auth rewrite.
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(OVERSIZE_BODY)))
+            self.send_header("Cache-Control", "public, max-age=600")
+            self.send_header("ETag", '"upstream-failopen-etag"')
+            self.send_header("Set-Cookie", "session_id=abc123; Path=/")
+            self.end_headers()
+            self.wfile.write(OVERSIZE_BODY)
+            return
+
+        if path == "/no-cache-quoted":
+            # Simple HTML with Cache-Control: no-cache="public" (quoted
+            # directive).  Used by test 10.13 to verify the production
+            # tokenizer does NOT treat the quoted "public" as a bare
+            # public directive, and thus does not rewrite to private
+            # on authenticated requests.
+            body = SIMPLE_HTML.encode('utf-8')
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", 'no-cache="public"')
+            self.end_headers()
+            self.wfile.write(body)
             return
 
         if path == "/partial-abort":
@@ -873,6 +918,52 @@ http {
             markdown_conditional_requests full_support;
             markdown_max_size ${MARKDOWN_MAX_SIZE};
             markdown_on_error pass;
+            markdown_timeout 120000;
+            markdown_log_verbosity info;
+
+            proxy_http_version 1.1;
+            proxy_buffering off;
+            proxy_set_header Connection "";
+            proxy_pass http://127.0.0.1:${UPSTREAM_PORT}/;
+        }
+
+        # 10.12: Fail-open preserves Cache-Control and ETag (authenticated)
+        # Uses auth_policy ALLOW so the request enters conversion/streaming,
+        # then streaming_budget 1k triggers pre-commit failure -> fail-open.
+        # With auth_policy allow + auth_cookies "session*" + Cookie header,
+        # the normal (non-fail-open) path would rewrite Cache-Control to
+        # private.  Fail-open must bypass that rewrite.
+        location /t12/ {
+            markdown_filter on;
+            markdown_on_wildcard on;
+            markdown_etag on;
+            markdown_streaming_engine on;
+            markdown_streaming_on_error pass;
+            markdown_on_error pass;
+            markdown_conditional_requests if_modified_since_only;
+            markdown_max_size 20m;
+            markdown_streaming_budget 1k;
+            markdown_auth_policy allow;
+            markdown_auth_cookies "session*";
+            markdown_timeout 120000;
+            markdown_log_verbosity info;
+
+            proxy_http_version 1.1;
+            proxy_buffering off;
+            proxy_set_header Connection "";
+            proxy_pass http://127.0.0.1:${UPSTREAM_PORT}/;
+        }
+
+        # 10.13: no-cache="public" quoted directive not treated as bare public
+        location /t13/ {
+            markdown_filter on;
+            markdown_on_wildcard on;
+            markdown_etag on;
+            markdown_on_error pass;
+            markdown_conditional_requests if_modified_since_only;
+            markdown_max_size ${MARKDOWN_MAX_SIZE};
+            markdown_auth_policy allow;
+            markdown_auth_cookies "session*";
             markdown_timeout 120000;
             markdown_log_verbosity info;
 
@@ -1284,6 +1375,121 @@ if [[ ${t11_pass} -eq 1 ]]; then
     report_case "10.11" "PASS" "304 bypasses streaming conversion path"
 else
     report_case "10.11" "FAIL" "304 bypasses streaming conversion path"
+fi
+
+# ---------------------------------------------------------------------------
+# 10.12 Fail-open preserves Cache-Control and ETag (authenticated request)
+# ---------------------------------------------------------------------------
+# This test exercises the PRODUCTION fail-open path end-to-end:
+#   - Upstream returns HTML with Cache-Control: public, max-age=600,
+#     ETag, and Set-Cookie: session_id=...
+#   - markdown_auth_policy allow + auth_cookies "session*" + Cookie header
+#     means the request is authenticated and would normally get
+#     Cache-Control rewritten to private on the success path.
+#   - markdown_streaming_budget 1k triggers pre-commit failure
+#   - Fail-open MUST bypass the auth Cache-Control rewrite.
+#   - We assert: Cache-Control preserved, ETag preserved, and the
+#     decision log contains a streaming fail-open reason code.
+echo "==> 10.12 Fail-open preserves Cache-Control and ETag (authenticated)"
+
+# Record error log offset before the 10.12 request so we only inspect
+# newly appended log lines (earlier cases like 10.2/10.9b also emit
+# STREAMING_PRECOMMIT_FAILOPEN to the shared error.log).
+T12_ERROR_LOG="${RUNTIME}/logs/error.log"
+t12_log_offset=0
+if [[ -f "${T12_ERROR_LOG}" ]]; then
+    t12_log_offset=$(wc -c < "${T12_ERROR_LOG}" 2>/dev/null || echo 0)
+fi
+
+curl -sS -D "${RAW_DIR}/t12.hdr" -o "${RAW_DIR}/t12.body" \
+    -H "${ACCEPT_MARKDOWN_HEADER}" \
+    -H "Cookie: session_id=abc123" \
+    --max-time 60 \
+    "http://127.0.0.1:${PORT}/t12/failopen-headers"
+
+t12_pass=1
+
+assert_http_200 "${RAW_DIR}/t12.hdr" "10.12" t12_pass \
+    "expected HTTP 200 for fail-open"
+assert_has_header "${RAW_DIR}/t12.hdr" "${PATTERN_CT_HTML}" "10.12" t12_pass \
+    "expected Content-Type text/html for fail-open"
+
+# Cache-Control must be preserved as "public, max-age=600" (not rewritten to private)
+if ! grep -qi '^Cache-Control:.*public.*max-age=600' "${RAW_DIR}/t12.hdr" 2>/dev/null; then
+    mark_case_fail "10.12" "Cache-Control not preserved as 'public, max-age=600' (auth rewrite may have occurred on fail-open path)" t12_pass
+fi
+
+# ETag must be preserved as the upstream value
+if ! grep -qi '^ETag:.*upstream-failopen-etag' "${RAW_DIR}/t12.hdr" 2>/dev/null; then
+    mark_case_fail "10.12" "ETag not preserved as upstream value on fail-open path" t12_pass
+fi
+
+# Body must contain the oversize end token (complete HTML, not truncated)
+assert_body_contains "${RAW_DIR}/t12.body" "${OVERSIZE_END_TOKEN}" "10.12" \
+    t12_pass "missing end token (possible truncation)"
+
+# Decision log must contain STREAMING_PRECOMMIT_FAILOPEN in the lines
+# appended by the 10.12 request — this is the terminal fail-open outcome
+# that proves the request went through the streaming -> budget exceeded ->
+# fail-open path (not just a SKIP_AUTH passthrough).
+# STREAMING_BUDGET_EXCEEDED is the upstream classification signal but
+# PRECOMMIT_FAILOPEN is the definitive outcome; we require the latter.
+# We only inspect log lines after the pre-curl offset to avoid false
+# positives from earlier test cases (10.2, 10.9b) that also emit
+# STREAMING_PRECOMMIT_FAILOPEN.
+t12_log_new=""
+if [[ -f "${T12_ERROR_LOG}" ]] && [[ "${t12_log_offset}" -ge 0 ]]; then
+    t12_log_new=$(tail -c +"$((t12_log_offset + 1))" "${T12_ERROR_LOG}" 2>/dev/null || true)
+fi
+if echo "${t12_log_new}" | grep -q 'reason=STREAMING_PRECOMMIT_FAILOPEN' 2>/dev/null; then
+    : # terminal fail-open outcome found in 10.12 log segment — pass
+else
+    mark_case_fail "10.12" "decision log missing STREAMING_PRECOMMIT_FAILOPEN for /t12/ request (request may not have hit streaming fail-open path)" t12_pass
+fi
+
+if [[ ${t12_pass} -eq 1 ]]; then
+    report_case "10.12" "PASS" "Fail-open preserves Cache-Control and ETag with authenticated request"
+else
+    report_case "10.12" "FAIL" "Fail-open preserves Cache-Control and ETag with authenticated request"
+fi
+
+# ---------------------------------------------------------------------------
+# 10.13 no-cache="public" quoted directive not treated as bare public
+# ---------------------------------------------------------------------------
+# This test verifies the production Cache-Control tokenizer correctly
+# handles quoted directives: no-cache="public" is a single token where
+# "public" is a quoted field name, NOT a bare public directive.  On an
+# authenticated request, the module should NOT strip "public" and add
+# "private" — it should treat the whole value as neutral and append
+# ", private" (or leave it unchanged depending on implementation).
+# The key invariant: the response must NOT contain a bare "public"
+# Cache-Control directive for an authenticated request.
+echo "==> 10.13 no-cache=\"public\" quoted directive not treated as bare public"
+curl -sS -D "${RAW_DIR}/t13.hdr" -o "${RAW_DIR}/t13.body" \
+    -H "${ACCEPT_MARKDOWN_HEADER}" \
+    -H "Cookie: session_id=abc123" \
+    --max-time 30 \
+    "http://127.0.0.1:${PORT}/t13/no-cache-quoted"
+
+t13_pass=1
+
+assert_http_200 "${RAW_DIR}/t13.hdr" "10.13" t13_pass \
+    "expected HTTP 200"
+
+# The response Cache-Control must NOT contain a bare "public" directive
+# (which would indicate the tokenizer incorrectly parsed the quoted
+# "public" inside no-cache="public" as a standalone public directive).
+# A correct tokenizer sees no-cache="public" as a single token and
+# either appends ", private" or leaves it as-is.
+if grep -qi '^Cache-Control:.*\bpublic\b' "${RAW_DIR}/t13.hdr" 2>/dev/null \
+    && ! grep -qi '^Cache-Control:.*no-cache="public"' "${RAW_DIR}/t13.hdr" 2>/dev/null; then
+    mark_case_fail "10.13" "Cache-Control contains bare 'public' directive — tokenizer may have incorrectly parsed quoted no-cache=\"public\" as bare public" t13_pass
+fi
+
+if [[ ${t13_pass} -eq 1 ]]; then
+    report_case "10.13" "PASS" "no-cache=\"public\" quoted directive not treated as bare public"
+else
+    report_case "10.13" "FAIL" "no-cache=\"public\" quoted directive not treated as bare public"
 fi
 
 # ---------------------------------------------------------------------------

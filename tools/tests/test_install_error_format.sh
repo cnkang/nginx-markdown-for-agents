@@ -8,7 +8,7 @@
 #
 # Usage: bash tools/tests/test_install_error_format.sh
 # Exit 0 if all tests pass, exit 1 if any fail.
-# Compatible with bash 4.0+ on macOS and Linux.
+# Compatible with bash 3.2+ on macOS and Linux.
 
 set -uo pipefail
 
