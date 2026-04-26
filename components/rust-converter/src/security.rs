@@ -268,11 +268,43 @@ impl SecurityValidator {
         if trimmed.chars().any(|ch| ch == '\0' || ch.is_control()) {
             return true;
         }
+        if Self::contains_percent_encoded_control(trimmed) {
+            return true;
+        }
 
         let url_lower = trimmed.to_ascii_lowercase();
         DANGEROUS_URL_SCHEMES
             .iter()
             .any(|scheme| url_lower.starts_with(scheme))
+    }
+
+    fn contains_percent_encoded_control(url: &str) -> bool {
+        let bytes = url.as_bytes();
+        for window in bytes.windows(3) {
+            if window[0] != b'%' {
+                continue;
+            }
+            let Some(high) = Self::hex_value(window[1]) else {
+                continue;
+            };
+            let Some(low) = Self::hex_value(window[2]) else {
+                continue;
+            };
+            let value = (high << 4) | low;
+            if value < 0x20 || value == 0x7f {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn hex_value(byte: u8) -> Option<u8> {
+        match byte {
+            b'0'..=b'9' => Some(byte - b'0'),
+            b'a'..=b'f' => Some(byte - b'a' + 10),
+            b'A'..=b'F' => Some(byte - b'A' + 10),
+            _ => None,
+        }
     }
 
     /// Check if attributes contain event handlers or dangerous URLs

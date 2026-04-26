@@ -604,6 +604,52 @@ impl MarkdownConverter {
 
         Ok(markdown)
     }
+
+    pub(super) fn resolve_url(&self, url: &str) -> String {
+        if !self.options.resolve_relative_urls || url.is_empty() {
+            return url.to_string();
+        }
+        if url.starts_with("http://") || url.starts_with("https://") || url.starts_with("//") {
+            return url.to_string();
+        }
+
+        let Some(base) = self.options.base_url.as_ref() else {
+            return url.to_string();
+        };
+        if !base.starts_with("http://") && !base.starts_with("https://") {
+            return url.to_string();
+        }
+
+        if url.starts_with('/') {
+            let after_scheme = base
+                .strip_prefix("https://")
+                .or_else(|| base.strip_prefix("http://"))
+                .unwrap_or(base);
+            let origin = if let Some(pos) = after_scheme.find('/') {
+                let scheme_len = if base.starts_with("https://") { 8 } else { 7 };
+                &base[..scheme_len + pos]
+            } else {
+                base.as_str()
+            };
+            return format!("{}{}", origin, url);
+        }
+
+        if base.ends_with('/') {
+            return format!("{}{}", base, url);
+        }
+
+        let trimmed = base.trim_end_matches('/');
+        let base_dir = if let Some(pos) = trimmed.rfind('/') {
+            if pos > 0 && trimmed.as_bytes().get(pos - 1) == Some(&b'/') {
+                trimmed
+            } else {
+                &trimmed[..pos]
+            }
+        } else {
+            trimmed
+        };
+        format!("{}/{}", base_dir, url)
+    }
 }
 
 impl Default for MarkdownConverter {

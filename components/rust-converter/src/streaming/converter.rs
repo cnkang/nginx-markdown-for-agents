@@ -877,6 +877,9 @@ impl StreamingConverter {
             };
             return format!("{}{}", origin, url);
         }
+        if base.ends_with('/') {
+            return format!("{}{}", base, url);
+        }
         let trimmed = base.trim_end_matches('/');
         let base_dir = if let Some(pos) = trimmed.rfind('/') {
             if pos > 0 && trimmed.as_bytes().get(pos - 1) == Some(&b'/') {

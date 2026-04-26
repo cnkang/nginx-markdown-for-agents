@@ -5,12 +5,12 @@
 
 #![cfg(feature = "streaming")]
 
-use nginx_markdown_converter::streaming::converter::StreamingConverter;
-use nginx_markdown_converter::streaming::budget::MemoryBudget;
-use nginx_markdown_converter::streaming::types::*;
 use nginx_markdown_converter::converter::ConversionOptions;
-use nginx_markdown_converter::ffi::*;
 use nginx_markdown_converter::error::ConversionError;
+use nginx_markdown_converter::ffi::*;
+use nginx_markdown_converter::streaming::budget::MemoryBudget;
+use nginx_markdown_converter::streaming::converter::StreamingConverter;
+use nginx_markdown_converter::streaming::types::*;
 use std::ptr;
 
 fn make_converter() -> StreamingConverter {
@@ -97,7 +97,9 @@ fn test_streaming_with_content_type() {
 fn test_streaming_with_budget() {
     let budget = MemoryBudget::for_total(1024 * 1024);
     let mut converter = StreamingConverter::new(ConversionOptions::default(), budget);
-    converter.feed_chunk(b"<p>Small content</p>").expect("feed failed");
+    converter
+        .feed_chunk(b"<p>Small content</p>")
+        .expect("feed failed");
     let result = converter.finalize().expect("finalize failed");
     let md = String::from_utf8_lossy(&result.final_markdown);
     assert!(md.contains("Small content"));
@@ -214,7 +216,9 @@ fn test_streaming_table() {
         Ok(r) => {
             let final_md = String::from_utf8_lossy(&r.final_markdown);
             let combined = format!("{}{}", feed_md, final_md);
-            assert!(combined.contains("H1") || combined.contains("A") || combined.contains("table"));
+            assert!(
+                combined.contains("H1") || combined.contains("A") || combined.contains("table")
+            );
         }
         Err(ConversionError::StreamingFallback { .. }) => {
             /* Table detection triggers fallback - this is correct behavior */
@@ -259,26 +263,40 @@ fn test_streaming_list() {
 fn test_streaming_set_content_type_after_resolved() {
     let mut converter = make_converter();
     converter.set_content_type(Some("text/html; charset=utf-8".to_string()));
-    let output1 = converter.feed_chunk(b"<p>First</p>").expect("feed 1 failed");
+    let output1 = converter
+        .feed_chunk(b"<p>First</p>")
+        .expect("feed 1 failed");
     /* Set content type again - should be no-op since already resolved */
     converter.set_content_type(Some("text/html; charset=iso-8859-1".to_string()));
-    let output2 = converter.feed_chunk(b"<p>Second</p>").expect("feed 2 failed");
+    let output2 = converter
+        .feed_chunk(b"<p>Second</p>")
+        .expect("feed 2 failed");
     let result = converter.finalize().expect("finalize failed");
     let feed1_md = String::from_utf8_lossy(&output1.markdown);
     let feed2_md = String::from_utf8_lossy(&output2.markdown);
     let final_md = String::from_utf8_lossy(&result.final_markdown);
     let combined = format!("{}{}{}", feed1_md, feed2_md, final_md);
-    assert!(combined.contains("First") || combined.contains("Second"),
-        "Content should appear in combined output");
+    assert!(
+        combined.contains("First") || combined.contains("Second"),
+        "Content should appear in combined output"
+    );
 }
 
 #[test]
 fn test_streaming_stats_populated() {
     let mut converter = make_converter();
-    converter.feed_chunk(b"<h1>Title</h1><p>Content</p>").expect("feed failed");
+    converter
+        .feed_chunk(b"<h1>Title</h1><p>Content</p>")
+        .expect("feed failed");
     let result = converter.finalize().expect("finalize failed");
-    assert!(result.stats.tokens_processed > 0, "tokens_processed should be > 0");
-    assert!(result.stats.chunks_processed > 0, "chunks_processed should be > 0");
+    assert!(
+        result.stats.tokens_processed > 0,
+        "tokens_processed should be > 0"
+    );
+    assert!(
+        result.stats.chunks_processed > 0,
+        "chunks_processed should be > 0"
+    );
 }
 
 /* ================================================================
@@ -287,10 +305,22 @@ fn test_streaming_stats_populated() {
 
 #[test]
 fn test_fallback_reason_display() {
-    assert_eq!(format!("{}", FallbackReason::TableDetected), "table element detected");
-    assert_eq!(format!("{}", FallbackReason::LookaheadExceeded), "lookahead buffer exceeded budget");
-    assert_eq!(format!("{}", FallbackReason::FrontMatterOverflow), "front matter data exceeds lookahead budget");
-    assert_eq!(format!("{}", FallbackReason::UnsupportedStructure("test".into())), "unsupported structure: test");
+    assert_eq!(
+        format!("{}", FallbackReason::TableDetected),
+        "table element detected"
+    );
+    assert_eq!(
+        format!("{}", FallbackReason::LookaheadExceeded),
+        "lookahead buffer exceeded budget"
+    );
+    assert_eq!(
+        format!("{}", FallbackReason::FrontMatterOverflow),
+        "front matter data exceeds lookahead budget"
+    );
+    assert_eq!(
+        format!("{}", FallbackReason::UnsupportedStructure("test".into())),
+        "unsupported structure: test"
+    );
 }
 
 #[test]
@@ -348,7 +378,10 @@ fn test_ffi_streaming_basic_lifecycle() {
 
     unsafe {
         let handle = markdown_streaming_new(&options);
-        assert!(!handle.is_null(), "streaming new should return non-NULL handle");
+        assert!(
+            !handle.is_null(),
+            "streaming new should return non-NULL handle"
+        );
 
         let html = b"<h1>Title</h1>";
         let mut out_data: *mut u8 = ptr::null_mut();
@@ -419,13 +452,21 @@ fn test_ffi_streaming_with_timeout() {
         let html = b"<p>Quick content</p>";
         let mut out_data: *mut u8 = ptr::null_mut();
         let mut out_len: usize = 0;
-        markdown_streaming_feed(handle, html.as_ptr(), html.len(), &mut out_data, &mut out_len);
+        let feed_rc = markdown_streaming_feed(
+            handle,
+            html.as_ptr(),
+            html.len(),
+            &mut out_data,
+            &mut out_len,
+        );
+        assert_eq!(feed_rc, 0, "feed should succeed");
         if !out_data.is_null() {
             markdown_streaming_output_free(out_data, out_len);
         }
 
         let mut result = ffi_test_empty_result();
-        markdown_streaming_finalize(handle, &mut result);
+        let finalize_rc = markdown_streaming_finalize(handle, &mut result);
+        assert_eq!(finalize_rc, 0, "finalize should succeed");
         assert_eq!(result.error_code, 0, "should complete within timeout");
         markdown_result_free(&mut result);
     }
@@ -446,15 +487,26 @@ fn test_ffi_streaming_with_etag_and_tokens() {
         let html = b"<h1>Title</h1><p>Content</p>";
         let mut out_data: *mut u8 = ptr::null_mut();
         let mut out_len: usize = 0;
-        markdown_streaming_feed(handle, html.as_ptr(), html.len(), &mut out_data, &mut out_len);
+        let feed_rc = markdown_streaming_feed(
+            handle,
+            html.as_ptr(),
+            html.len(),
+            &mut out_data,
+            &mut out_len,
+        );
+        assert_eq!(feed_rc, 0, "feed should succeed");
         if !out_data.is_null() {
             markdown_streaming_output_free(out_data, out_len);
         }
 
         let mut result = ffi_test_empty_result();
-        markdown_streaming_finalize(handle, &mut result);
+        let finalize_rc = markdown_streaming_finalize(handle, &mut result);
+        assert_eq!(finalize_rc, 0, "finalize should succeed");
         assert_eq!(result.error_code, 0);
-        assert!(!result.etag.is_null() || result.etag_len == 0, "ETag field should be set (null or non-null)");
+        assert!(
+            !result.etag.is_null() || result.etag_len == 0,
+            "ETag field should be set (null or non-null)"
+        );
         assert!(result.token_estimate > 0, "Token estimate should be > 0");
         markdown_result_free(&mut result);
     }
@@ -486,7 +538,8 @@ fn test_ffi_streaming_multiple_feeds() {
         }
 
         let mut result = ffi_test_empty_result();
-        markdown_streaming_finalize(handle, &mut result);
+        let finalize_rc = markdown_streaming_finalize(handle, &mut result);
+        assert_eq!(finalize_rc, 0, "finalize should succeed");
         assert_eq!(result.error_code, 0);
         assert!(result.markdown_len > 0);
         markdown_result_free(&mut result);
@@ -509,13 +562,21 @@ fn test_ffi_streaming_with_content_type() {
         let html = b"<p>Test</p>";
         let mut out_data: *mut u8 = ptr::null_mut();
         let mut out_len: usize = 0;
-        markdown_streaming_feed(handle, html.as_ptr(), html.len(), &mut out_data, &mut out_len);
+        let feed_rc = markdown_streaming_feed(
+            handle,
+            html.as_ptr(),
+            html.len(),
+            &mut out_data,
+            &mut out_len,
+        );
+        assert_eq!(feed_rc, 0, "feed should succeed");
         if !out_data.is_null() {
             markdown_streaming_output_free(out_data, out_len);
         }
 
         let mut result = ffi_test_empty_result();
-        markdown_streaming_finalize(handle, &mut result);
+        let finalize_rc = markdown_streaming_finalize(handle, &mut result);
+        assert_eq!(finalize_rc, 0, "finalize should succeed");
         assert_eq!(result.error_code, 0);
         markdown_result_free(&mut result);
     }

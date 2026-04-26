@@ -549,6 +549,8 @@ test_merge_conf(void)
 
     child.enabled = NGX_CONF_UNSET;
     child.enabled_source = NGX_HTTP_MARKDOWN_ENABLED_UNSET;
+    child.enabled = 1;
+    child.enabled_complex = (ngx_http_complex_value_t *) &child;
     child.max_size = NGX_CONF_UNSET_SIZE;
     child.timeout = NGX_CONF_UNSET_MSEC;
     child.on_error = NGX_CONF_UNSET_UINT;

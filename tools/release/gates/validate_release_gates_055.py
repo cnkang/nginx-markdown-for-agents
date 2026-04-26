@@ -23,6 +23,8 @@ validation (path traversal prevention).
 from __future__ import annotations
 
 import json
+import re
+import shutil
 import sys
 from pathlib import Path
 
@@ -59,7 +61,32 @@ KNOWN_DIFF_PATH = (
 )
 CHANGELOG_PATH = PROJECT_ROOT / "CHANGELOG.md"
 
+RELEASE_SPEC_SECTIONS = "release-spec:sections"
+RELEASE_CHECKLIST_GO_NOGO = "release-checklist:go-nogo"
+RELEASE_CHECKLIST_WAIVER_PROCESS = "release-checklist:waiver-process"
+TEST_MATRIX_WORKSTREAMS = "test-matrix:workstreams"
+EVIDENCE_ARTIFACT_EXISTS = "evidence-artifact:exists"
+EVIDENCE_ARTIFACT_PARSE = "evidence-artifact:parse"
 EVIDENCE_ARTIFACT_REQUIRED_FIELDS = "evidence-artifact:required-fields"
+EVIDENCE_ARTIFACT_NON_NEGATIVE = "evidence-artifact:non-negative"
+EVIDENCE_ARTIFACT_SCHEMA_VERSION = "evidence-artifact:schema-version"
+EVIDENCE_ARTIFACT_PASS = "evidence-artifact:pass"
+EVIDENCE_ARTIFACT_UNKNOWN_DIFFS = "evidence-artifact:unknown-diffs"
+EVIDENCE_ARTIFACT_ERROR_PARITY = "evidence-artifact:error-parity"
+EVIDENCE_ARTIFACT_TOTAL_COMPARISONS = "evidence-artifact:total-comparisons"
+EVIDENCE_ARTIFACT_COUNT_CONSISTENCY = "evidence-artifact:count-consistency"
+EVIDENCE_ARTIFACT_BREAKDOWN_VALUES = "evidence-artifact:breakdown-values"
+EVIDENCE_ARTIFACT_ENTRIES_CONSISTENCY = "evidence-artifact:entries-consistency"
+EVIDENCE_ARTIFACT_VERIFICATION_RESULT = "evidence-artifact:verification-result"
+KNOWN_DIFFS_EXISTS = "known-diffs:exists"
+KNOWN_DIFFS_METADATA = "known-diffs:metadata"
+KNOWN_DIFFS_STRUCTURED_METADATA = "known-diffs:structured-metadata"
+KNOWN_DIFFS_SUPPRESSOR_SCOPE = "known-diffs:suppressor-scope"
+CHANGELOG_0_5_5_ENTRY = "changelog:0.5.5-entry"
+CHANGELOG_RELEASE_PATTERN = re.compile(
+    r"(?m)^(?:#{1,6}\s+(?:\[0\.5\.5\]|0\.5\.5\b)|\[0\.5\.5\])"
+)
+REASON_CODE_AUDIT_SCRIPT = "reason-code:audit-script"
 REASON_CODES_AUDIT = "reason-codes:audit"
 
 
@@ -137,9 +164,12 @@ def check_release_spec(result: ValidationResult) -> None:
     ]
     missing = [s for s in required_sections if s not in content]
     if missing:
-        result.failed("release-spec:sections", f"missing sections: {', '.join(missing)}")
+        result.failed(RELEASE_SPEC_SECTIONS, f"missing sections: {', '.join(missing)}")
     else:
-        result.passed("release-spec:sections", f"all {len(required_sections)} key sections present")
+        result.passed(
+            RELEASE_SPEC_SECTIONS,
+            f"all {len(required_sections)} key sections present",
+        )
 
 
 def check_release_checklist(result: ValidationResult) -> None:
@@ -158,14 +188,14 @@ def check_release_checklist(result: ValidationResult) -> None:
             result.failed(f"release-checklist:{check_id}", f"missing section: {section}")
 
     if "Go/No-Go Criteria" in content:
-        result.passed("release-checklist:go-nogo")
+        result.passed(RELEASE_CHECKLIST_GO_NOGO)
     else:
-        result.failed("release-checklist:go-nogo", "missing Go/No-Go Criteria section")
+        result.failed(RELEASE_CHECKLIST_GO_NOGO, "missing Go/No-Go Criteria section")
 
     if "Waiver Process" in content:
-        result.passed("release-checklist:waiver-process")
+        result.passed(RELEASE_CHECKLIST_WAIVER_PROCESS)
     else:
-        result.failed("release-checklist:waiver-process", "missing Waiver Process section")
+        result.failed(RELEASE_CHECKLIST_WAIVER_PROCESS, "missing Waiver Process section")
 
 
 def check_test_matrix(result: ValidationResult) -> None:
@@ -185,23 +215,30 @@ def check_test_matrix(result: ValidationResult) -> None:
     ]
     missing = [w for w in workstreams if w not in content]
     if missing:
-        result.failed("test-matrix:workstreams", f"missing workstreams: {', '.join(missing)}")
+        result.failed(TEST_MATRIX_WORKSTREAMS, f"missing workstreams: {', '.join(missing)}")
     else:
-        result.passed("test-matrix:workstreams", f"all {len(workstreams)} workstreams covered")
+        result.passed(TEST_MATRIX_WORKSTREAMS, f"all {len(workstreams)} workstreams covered")
 
 
 def check_evidence_artifact(result: ValidationResult) -> None:
     """Verify the streaming evidence artifact exists and validates."""
     if not EVIDENCE_PATH.is_file():
-        result.failed("evidence-artifact:exists", "tests/streaming/evidence/summary.json not found")
+        result.failed(EVIDENCE_ARTIFACT_EXISTS, "tests/streaming/evidence/summary.json not found")
         return
 
-    result.passed("evidence-artifact:exists")
+    result.passed(EVIDENCE_ARTIFACT_EXISTS)
 
     try:
         data = json.loads(EVIDENCE_PATH.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError) as exc:
-        result.failed("evidence-artifact:parse", f"JSON parse error: {exc}")
+        result.failed(EVIDENCE_ARTIFACT_PARSE, f"JSON parse error: {exc}")
+        return
+
+    if not isinstance(data, dict):
+        result.failed(
+            EVIDENCE_ARTIFACT_PARSE,
+            f"Expected JSON object at top-level, got {type(data).__name__}",
+        )
         return
 
     validate_required_fields(data, result)
@@ -237,21 +274,17 @@ def validate_required_fields(data: dict[str, object], result: ValidationResult) 
         ("verification_command", str),
         ("verification_result", str),
     ]
-    missing_fields = []
-    wrong_type_fields = []
-    for field_name, expected_type in required_fields:
-        if field_name not in data:
-            missing_fields.append(field_name)
-        elif expected_type is int and isinstance(data[field_name], bool):
-            wrong_type_fields.append(
-                f"{field_name}: expected int, "
-                f"got {type(data[field_name]).__name__}"
-            )
-        elif not isinstance(data[field_name], expected_type):
-            wrong_type_fields.append(
-                f"{field_name}: expected {expected_type.__name__}, "
-                f"got {type(data[field_name]).__name__}"
-            )
+    missing_fields = [
+        field_name
+        for field_name, _expected_type in required_fields
+        if field_name not in data
+    ]
+    wrong_type_fields = [
+        type_mismatch_message(data, field_name, expected_type)
+        for field_name, expected_type in required_fields
+        if field_name in data
+        and not evidence_field_has_type(data[field_name], expected_type)
+    ]
 
     if missing_fields:
         result.failed(
@@ -264,7 +297,29 @@ def validate_required_fields(data: dict[str, object], result: ValidationResult) 
             f"type mismatches: {'; '.join(wrong_type_fields)}",
         )
     else:
-        result.passed(EVIDENCE_ARTIFACT_REQUIRED_FIELDS, "all required fields present with correct types")
+        result.passed(
+            EVIDENCE_ARTIFACT_REQUIRED_FIELDS,
+            "all required fields present with correct types",
+        )
+
+
+def evidence_field_has_type(value: object, expected_type: type) -> bool:
+    """Return whether an evidence field value has the expected JSON type."""
+    if expected_type is int and isinstance(value, bool):
+        return False
+    return isinstance(value, expected_type)
+
+
+def type_mismatch_message(
+    data: dict[str, object],
+    field_name: str,
+    expected_type: type,
+) -> str:
+    """Format a field type mismatch for release gate diagnostics."""
+    return (
+        f"{field_name}: expected {expected_type.__name__}, "
+        f"got {type(data[field_name]).__name__}"
+    )
 
 
 def validate_non_negative_counts(data: dict[str, object], result: ValidationResult) -> None:
@@ -279,61 +334,61 @@ def validate_non_negative_counts(data: dict[str, object], result: ValidationResu
     ]
     if negative_fields:
         result.failed(
-            "evidence-artifact:non-negative",
+            EVIDENCE_ARTIFACT_NON_NEGATIVE,
             f"negative values: {', '.join(negative_fields)}",
         )
     else:
-        result.passed("evidence-artifact:non-negative", "all count fields non-negative")
+        result.passed(EVIDENCE_ARTIFACT_NON_NEGATIVE, "all count fields non-negative")
 
 
 def validate_schema_version(data: dict[str, object], result: ValidationResult) -> None:
     """Validate evidence schema version."""
     if data.get("schema_version") != 1:
         result.failed(
-            "evidence-artifact:schema-version",
+            EVIDENCE_ARTIFACT_SCHEMA_VERSION,
             f"expected schema_version=1, got {data.get('schema_version')}",
         )
     else:
-        result.passed("evidence-artifact:schema-version")
+        result.passed(EVIDENCE_ARTIFACT_SCHEMA_VERSION)
 
 
 def validate_pass_flag(data: dict[str, object], result: ValidationResult) -> None:
     """Validate the evidence pass flag."""
     if data.get("pass") is not True:
-        result.failed("evidence-artifact:pass", f"pass={data.get('pass')}, expected true")
+        result.failed(EVIDENCE_ARTIFACT_PASS, f"pass={data.get('pass')}, expected true")
     else:
-        result.passed("evidence-artifact:pass")
+        result.passed(EVIDENCE_ARTIFACT_PASS)
 
 
 def validate_unknown_diffs(data: dict[str, object], result: ValidationResult) -> None:
     """Validate that no unknown differences were reported."""
     if data.get("unknown_difference_count", -1) != 0:
         result.failed(
-            "evidence-artifact:unknown-diffs",
+            EVIDENCE_ARTIFACT_UNKNOWN_DIFFS,
             f"unknown_difference_count={data.get('unknown_difference_count')}, expected 0",
         )
     else:
-        result.passed("evidence-artifact:unknown-diffs")
+        result.passed(EVIDENCE_ARTIFACT_UNKNOWN_DIFFS)
 
 
 def validate_error_parity(data: dict[str, object], result: ValidationResult) -> None:
     """Validate that no error-parity mismatches were reported."""
     if data.get("error_parity_mismatch_count", -1) != 0:
         result.failed(
-            "evidence-artifact:error-parity",
+            EVIDENCE_ARTIFACT_ERROR_PARITY,
             f"error_parity_mismatch_count={data.get('error_parity_mismatch_count')}, expected 0",
         )
     else:
-        result.passed("evidence-artifact:error-parity")
+        result.passed(EVIDENCE_ARTIFACT_ERROR_PARITY)
 
 
 def validate_total_comparisons(data: dict[str, object], result: ValidationResult) -> None:
     """Validate that evidence includes at least one comparison."""
     total = data.get("total_comparisons", 0)
     if total > 0:
-        result.passed("evidence-artifact:total-comparisons", f"{total} comparisons")
+        result.passed(EVIDENCE_ARTIFACT_TOTAL_COMPARISONS, f"{total} comparisons")
     else:
-        result.failed("evidence-artifact:total-comparisons", "total_comparisons is 0")
+        result.failed(EVIDENCE_ARTIFACT_TOTAL_COMPARISONS, "total_comparisons is 0")
 
 
 def validate_count_consistency(data: dict[str, object], result: ValidationResult) -> None:
@@ -342,12 +397,16 @@ def validate_count_consistency(data: dict[str, object], result: ValidationResult
     identical = data.get("identical_count", 0)
     known_diffs = data.get("known_difference_count", 0)
     if identical + known_diffs == total:
-        result.passed("evidence-artifact:count-consistency",
-                      f"identical({identical}) + known_diffs({known_diffs}) = total({total})")
+        result.passed(
+            EVIDENCE_ARTIFACT_COUNT_CONSISTENCY,
+            f"identical({identical}) + known_diffs({known_diffs}) = total({total})",
+        )
     else:
-        result.failed("evidence-artifact:count-consistency",
-                      f"identical({identical}) + known_diffs({known_diffs}) = "
-                      f"{identical + known_diffs}, expected total({total})")
+        result.failed(
+            EVIDENCE_ARTIFACT_COUNT_CONSISTENCY,
+            f"identical({identical}) + known_diffs({known_diffs}) = "
+            f"{identical + known_diffs}, expected total({total})",
+        )
 
 
 def validate_breakdown_values(data: dict[str, object], result: ValidationResult) -> None:
@@ -364,14 +423,17 @@ def validate_breakdown_values(data: dict[str, object], result: ValidationResult)
         if isinstance(v, bool) or not isinstance(v, int) or v < 0
     ] if isinstance(entries_by_severity, dict) else ["not a dict"]
     if not bad_drift_vals and not bad_severity_vals:
-        result.passed("evidence-artifact:breakdown-values", "all breakdown dict values are non-negative integers")
+        result.passed(
+            EVIDENCE_ARTIFACT_BREAKDOWN_VALUES,
+            "all breakdown dict values are non-negative integers",
+        )
     else:
         msgs = []
         if bad_drift_vals:
             msgs.append(f"drift_type: {', '.join(bad_drift_vals)}")
         if bad_severity_vals:
             msgs.append(f"severity: {', '.join(bad_severity_vals)}")
-        result.failed("evidence-artifact:breakdown-values", "; ".join(msgs))
+        result.failed(EVIDENCE_ARTIFACT_BREAKDOWN_VALUES, "; ".join(msgs))
 
 
 def validate_entries_consistency(data: dict[str, object], result: ValidationResult) -> None:
@@ -382,21 +444,25 @@ def validate_entries_consistency(data: dict[str, object], result: ValidationResu
     drift_sum = sum(entries_by_drift.values()) if isinstance(entries_by_drift, dict) else 0
     severity_sum = sum(entries_by_severity.values()) if isinstance(entries_by_severity, dict) else 0
     if drift_sum == entries_total and severity_sum == entries_total:
-        result.passed("evidence-artifact:entries-consistency",
-                      f"drift_type({drift_sum}) = severity({severity_sum}) = registry_entries({entries_total})")
+        result.passed(
+            EVIDENCE_ARTIFACT_ENTRIES_CONSISTENCY,
+            f"drift_type({drift_sum}) = severity({severity_sum}) = registry_entries({entries_total})",
+        )
     else:
-        result.failed("evidence-artifact:entries-consistency",
-                      f"drift_type sum={drift_sum}, severity sum={severity_sum}, "
-                      f"expected entries_total={entries_total}")
+        result.failed(
+            EVIDENCE_ARTIFACT_ENTRIES_CONSISTENCY,
+            f"drift_type sum={drift_sum}, severity sum={severity_sum}, "
+            f"expected entries_total={entries_total}",
+        )
 
 
 def validate_verification_result(data: dict[str, object], result: ValidationResult) -> None:
     """Validate the evidence verification command reported PASS."""
     if data.get("verification_result") == "PASS":
-        result.passed("evidence-artifact:verification-result")
+        result.passed(EVIDENCE_ARTIFACT_VERIFICATION_RESULT)
     else:
         result.failed(
-            "evidence-artifact:verification-result",
+            EVIDENCE_ARTIFACT_VERIFICATION_RESULT,
             f"verification_result={data.get('verification_result')}, expected PASS",
         )
 
@@ -422,28 +488,31 @@ def check_known_differences_metadata(result: ValidationResult) -> None:
 
     if missing_metadata:
         result.failed(
-            "known-diffs:structured-metadata",
+            KNOWN_DIFFS_STRUCTURED_METADATA,
             f"entries missing drift_type/severity: {', '.join(missing_metadata)}",
         )
     else:
-        result.passed("known-diffs:structured-metadata", f"all {len(entries)} entries have drift_type and severity")
+        result.passed(
+            KNOWN_DIFFS_STRUCTURED_METADATA,
+            f"all {len(entries)} entries have drift_type and severity",
+        )
 
     if unscoped_without_justification:
         result.failed(
-            "known-diffs:suppressor-scope",
+            KNOWN_DIFFS_SUPPRESSOR_SCOPE,
             f"entries without fixture_contains or global_suppressor_justification: {', '.join(unscoped_without_justification)}",
         )
     else:
-        result.passed("known-diffs:suppressor-scope", "all entries scoped or justified")
+        result.passed(KNOWN_DIFFS_SUPPRESSOR_SCOPE, "all entries scoped or justified")
 
 
 def _load_known_difference_entries(result: ValidationResult) -> list[dict[str, object]] | None:
     """Load known-difference entries, reporting gate status on failure."""
     if not KNOWN_DIFF_PATH.is_file():
-        result.failed("known-diffs:exists", "tests/streaming/known-differences.toml not found")
+        result.failed(KNOWN_DIFFS_EXISTS, "tests/streaming/known-differences.toml not found")
         return None
 
-    result.passed("known-diffs:exists")
+    result.passed(KNOWN_DIFFS_EXISTS)
 
     try:
         import tomllib
@@ -451,7 +520,10 @@ def _load_known_difference_entries(result: ValidationResult) -> list[dict[str, o
         try:
             import tomli as tomllib  # type: ignore[no-redef]
         except ModuleNotFoundError:
-            result.skipped("known-diffs:metadata", "tomllib/tomli not available")
+            result.failed(
+                KNOWN_DIFFS_METADATA,
+                "tomllib/tomli not available; install tomli via pip",
+            )
             return None
 
     try:
@@ -471,10 +543,10 @@ def check_changelog_entry(result: ValidationResult) -> None:
         return
 
     content = CHANGELOG_PATH.read_text(encoding="utf-8")
-    if "0.5.5" in content:
-        result.passed("changelog:0.5.5-entry")
+    if CHANGELOG_RELEASE_PATTERN.search(content):
+        result.passed(CHANGELOG_0_5_5_ENTRY)
     else:
-        result.failed("changelog:0.5.5-entry", "no 0.5.5 entry found in CHANGELOG.md")
+        result.failed(CHANGELOG_0_5_5_ENTRY, "no 0.5.5 entry found in CHANGELOG.md")
 
 def check_reason_code_audit(result: ValidationResult) -> None:
     """Run the reason-code lifecycle audit script and report its status."""
@@ -482,12 +554,17 @@ def check_reason_code_audit(result: ValidationResult) -> None:
 
     audit_script = PROJECT_ROOT / "tools" / "harness" / "audit_reason_codes.sh"
     if not audit_script.is_file():
-        result.failed("reason-code:audit-script", "tools/harness/audit_reason_codes.sh not found")
+        result.failed(REASON_CODE_AUDIT_SCRIPT, "tools/harness/audit_reason_codes.sh not found")
+        return
+
+    bash_path = shutil.which("bash")
+    if bash_path is None:
+        result.failed(REASON_CODE_AUDIT_SCRIPT, "bash not found on PATH")
         return
 
     try:
         proc = subprocess.run(
-            ["bash", str(audit_script)],
+            [bash_path, str(audit_script)],
             capture_output=True,
             text=True,
             cwd=str(PROJECT_ROOT),

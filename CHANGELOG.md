@@ -5,40 +5,117 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] - 0.5.5
-
-This release is a stabilization and correctness release focused on semantic
-fidelity, protocol correctness, auth/cache safety, streaming parity evidence,
-operator diagnostics, and release gate/documentation synchronization.
+## [Unreleased]
 
 ### Added
-- 0.5.5 release checklist (`docs/project/release-checklist-0-5-5.md`) with
-  phased verification gates organized by cheap blockers, focused semantic
-  checks, and umbrella checks
-- 0.5.5 test matrix (`docs/project/test-matrix-0-5-5.md`) mapping every change
-  surface touched by the stabilization workstreams to verification commands
-- Go/no-go criteria with explicit gate references, aggregate thresholds, and
-  structured waiver process (waiver ID format: `WAIVER-0.5.5-<NNN>`)
-- Docs sync trigger classification table and docs alignment map documenting
-  which behavioral surfaces map to which documentation files
-- Streaming parity evidence artifact gate requiring
-  `tests/streaming/evidence/summary.json` to exist and validate against
-  `schema_version=1`
+- Nothing yet.
 
 ### Changed
-- Documentation synchronization audit across Prometheus metrics guide,
-  configuration guide, streaming rollout cookbook, and operator-facing command
-  examples to verify naming consistency with code-truth metric names
-- Verified all operator-facing command examples include correct `Accept` headers
-  matching the output format being parsed (JSON, Prometheus, or plain-text)
-- Verified harness routing references point to current content across
-  `AGENTS.md`, routing manifest, and risk pack documentation
-- Verified version framing consistency across CHANGELOG, release gate tooling,
-  and documentation
+- Nothing yet.
 
 ### Fixed
-- No code fixes in this workstream (documentation and release gate
-  synchronization only)
+- Nothing yet.
+
+## [0.5.5] - 2026-04-26
+
+This release consolidates all post-0.5.0 work into one stabilization release,
+including converter correctness fixes, build-script hardening, documentation
+synchronization, and the 0.5.5 correctness workstreams.
+
+The release focuses on semantic fidelity, HTTP protocol correctness,
+auth/cache safety, streaming parity evidence, operator diagnostics, and
+release-gate/documentation synchronization.
+
+### Added
+- Semantic-fidelity coverage for high-risk HTML structures, including headings,
+  nested lists, tables, blockquotes, code blocks, links, metadata/front matter,
+  malformed input, UTF-8 chunk boundaries, and media-bearing elements.
+- Media extraction coverage for `video`, `audio`, `source`, `track`, and
+  `area`, with regression tests for both missing-attribute and
+  attribute-present branches.
+- A media-rich corpus fixture and sidecar metadata for streaming parity and
+  corpus validation.
+- Protocol-correctness unit coverage for ETag replacement/removal, weak and
+  wildcard `If-None-Match` matching, 304 response metadata, `Vary: Accept`,
+  HEAD routing/header parity, 206 handling, and fail-open header preservation.
+- Auth/cache-safety coverage for cookie pattern matching and authenticated
+  response cache-control behavior across full-buffer and streaming paths.
+- Streaming parity evidence artifact at
+  `tests/streaming/evidence/summary.json`, plus stricter known-difference
+  metadata (`drift_type`, `severity`, and fixture/global-scope discipline).
+- Streaming reason-code lifecycle audit tooling
+  (`tools/harness/audit_reason_codes.sh`) and decision-log tests covering
+  failure/degradation classification and verbosity gating.
+- 0.5.5 release governance surfaces:
+  `docs/project/0.5.5-release-spec.md`,
+  `docs/project/release-checklist-0-5-5.md`,
+  `docs/project/test-matrix-0-5-5.md`, go/no-go criteria, waiver format, and
+  version-specific release-gate validator
+  (`tools/release/gates/validate_release_gates_055.py`).
+- New E2E validation scripts for Accept negotiation, error handling, and
+  sanitizer/security behavior.
+- Harness remediation and release-governance risk-pack documentation, plus
+  routing-manifest updates for 0.5.5 verification families.
+
+### Changed
+- Consolidated all post-0.5.0 patch work into this 0.5.5 release; no
+  intermediate release note or compatibility step is required.
+- Expanded full-buffer URL resolution so FFI `base_url` is reflected in emitted
+  Markdown links and media URLs, including `http://`, host-only, trailing-slash,
+  root-relative, and already-absolute URL cases.
+- Aligned streaming URL resolution behavior with full-buffer trailing-slash
+  base URL handling.
+- Hardened URL sanitization to reject percent-encoded control characters such
+  as `%00`, `%01`, and `%7F`, not only literal control bytes.
+- Tightened CommonMark output behavior for nested code fences and link
+  destination escaping inherited from the post-0.5.0 patch work.
+- Updated streaming, FFI, charset, budget, fail-open, fast-path, fuzz-target,
+  shell CLI, and performance-tool documentation so implementation contracts
+  describe current runtime behavior.
+- Updated operator documentation for actual metrics names, JSON key paths,
+  Prometheus series names, HELP text semantics, skip metrics, 206 `SKIP_RANGE`
+  handling, shadow metrics, and `markdown_metrics_format prometheus`.
+- Required operator-facing verification examples to send explicit `Accept`
+  headers matching the format being parsed.
+- Updated `AGENTS.md`, harness docs, routing manifest, and risk packs so
+  release-gate and remediation work route through repo-owned truth surfaces.
+- Refined release-gate tooling to validate 0.5.5 document existence,
+  evidence-artifact schema, known-difference metadata, changelog version
+  heading, reason-code audit execution, and missing interpreter/tool failures.
+- Improved shell portability and automation behavior in release/build/corpus
+  scripts, including curl timeouts, stderr diagnostics, and safer failure-path
+  handling.
+- Refreshed repository documentation broadly across README, architecture,
+  guides, testing docs, project docs, examples, and component READMEs.
+- Updated CI/dependency maintenance surfaces, including GitHub Action bumps and
+  sorted Docker package lists.
+
+### Fixed
+- Fixed full-buffer relative-link resolution from FFI options; URL-resolution
+  tests now assert the emitted Markdown content, not just `error_code == 0`.
+- Fixed sanitizer coverage gaps where percent-encoded control characters could
+  remain visible as unsafe URL text in converted output.
+- Fixed review and SonarCloud findings in Rust tests, shell E2E scripts,
+  release-gate Python validators, C unit tests, and corpus validation scripts.
+- Fixed shell E2E tests that previously logged warning-only mismatches for
+  required assertions, including missing `Vary: Accept`, upstream 5xx status
+  preservation, 206 content-type preservation, and oversize fail-open behavior.
+- Fixed the oversize E2E fixture so the `markdown_max_size 1k` path actually
+  exercises an input larger than 1024 bytes.
+- Fixed streaming FFI tests that relied on default `result.error_code` instead
+  of asserting direct return codes from `markdown_streaming_feed()` and
+  `markdown_streaming_finalize()`.
+- Fixed C unit tests so merge-conf and header-update assertions verify
+  production writes rather than initial zeroed state.
+- Fixed release-gate validator fragility: JSON top-level type errors now fail
+  cleanly, changelog detection requires a real release heading, missing
+  `tomllib`/`tomli` is a hard failure with installation guidance, and missing
+  `bash` is reported before subprocess execution.
+- Fixed build and release helper diagnostics from the post-0.5.0 patch work,
+  including curl/python failure tolerance, stderr routing, and release-version
+  resolver timeout behavior.
+- Fixed stale or overclaimed documentation descriptions, generated-header ABI
+  comments, metadata drift, and current-version framing across release docs.
 
 ## [0.5.0] - 2026-04-20
 
