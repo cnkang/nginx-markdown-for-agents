@@ -74,7 +74,7 @@ SKIP_STATUS	ngx_http_markdown_reason_from_eligibility	mapper
 SKIP_CONTENT_TYPE	ngx_http_markdown_reason_from_eligibility	mapper
 SKIP_SIZE	ngx_http_markdown_reason_from_eligibility	mapper
 SKIP_STREAMING	ngx_http_markdown_reason_from_eligibility	mapper
-SKIP_AUTH	ngx_http_markdown_reason_from_eligibility	direct
+SKIP_AUTH	ngx_http_markdown_reason_from_eligibility	mapper
 SKIP_RANGE	ngx_http_markdown_reason_from_eligibility	mapper
 SKIP_ACCEPT	ngx_http_markdown_reason_skip_accept	direct
 ELIGIBLE_CONVERTED	ngx_http_markdown_reason_converted	direct
@@ -94,8 +94,14 @@ STREAMING_PRECOMMIT_REJECT	ngx_http_markdown_reason_streaming_precommit_reject	d
 STREAMING_SHADOW	ngx_http_markdown_reason_streaming_shadow	direct
 REGISTRY_EOF
 
-# Look up accessor function name from the explicit registry.
-# Returns empty string if not found.
+#
+# Look up the accessor function name for a reason code.
+# Arguments:
+#   $1: reason code string.
+# Output: writes the accessor name to stdout when registered; writes nothing
+#   when the code is absent from the registry.
+# Exit: returns 0 for both found and normal not-found cases.
+#
 lookup_accessor() {
     local code="$1"
     local line
@@ -106,8 +112,14 @@ lookup_accessor() {
     return 0
 }
 
-# Look up emission kind from the explicit registry.
-# Returns "direct", "mapper", "category", or empty string.
+#
+# Look up the emission kind for a reason code.
+# Arguments:
+#   $1: reason code string.
+# Output: writes "direct", "mapper", or "category" to stdout when registered;
+#   writes nothing when the code is absent from the registry.
+# Exit: returns 0 for both found and normal not-found cases.
+#
 lookup_emission_kind() {
     local code="$1"
     local line
@@ -120,59 +132,98 @@ lookup_emission_kind() {
 
 # ── Emission check helpers ──────────────────────────────────────────
 
-# Check direct accessor emission: accessor must appear in a source file
-# that also contains a log_decision or log_decision_with_category call.
-# This is stronger than "same file has both" — it requires the accessor
-# name to actually appear (not just the mapper) in a file with log calls.
+#
+# Search source files for one exact identifier.
+# Arguments:
+#   $1: fixed identifier/pattern to find.
+#   $2...: optional file globs relative to SRC_DIR; defaults to *.c and *.h.
+# Output: writes nothing to stdout.
+# Exit: returns 0 when a match is found, 1 when no match is found.
+#
+_grep_in_src_files() {
+    local pattern="$1"
+    local file_glob
+    local src_file
+    shift
+    if [[ $# -eq 0 ]]; then
+        set -- "*.c" "*.h"
+    fi
+    for file_glob in "$@"; do
+        for src_file in "$SRC_DIR"/$file_glob; do
+            if [[ ! -f "$src_file" ]]; then continue; fi
+            if grep -wF -q -- "$pattern" "$src_file" 2>/dev/null; then
+                return 0
+            fi
+        done
+    done
+    return 1
+}
+
+#
+# Search source files for two exact identifiers in the same file.
+# Arguments:
+#   $1: first fixed identifier/pattern.
+#   $2: second fixed identifier/pattern.
+#   $3...: optional file globs relative to SRC_DIR; defaults to *.c and *.h.
+# Output: writes nothing to stdout.
+# Exit: returns 0 when both identifiers appear in the same file, otherwise 1.
+#
+_grep_pair_in_src_files() {
+    local pattern_a="$1"
+    local pattern_b="$2"
+    local file_glob
+    local src_file
+    shift 2
+    if [[ $# -eq 0 ]]; then
+        set -- "*.c" "*.h"
+    fi
+    for file_glob in "$@"; do
+        for src_file in "$SRC_DIR"/$file_glob; do
+            if [[ ! -f "$src_file" ]]; then continue; fi
+            if grep -wF -q -- "$pattern_a" "$src_file" 2>/dev/null \
+                && grep -wF -q -- "$pattern_b" "$src_file" 2>/dev/null; then
+                return 0
+            fi
+        done
+    done
+    return 1
+}
+
+#
+# Check direct accessor emission.
+# Arguments:
+#   $1: accessor function name.
+# Output: writes nothing to stdout.
+# Exit: returns 0 when the accessor exists and appears in a source file that
+#   also contains a log-decision call; returns 1 for normal not-found cases.
+#
 check_direct_emission() {
     local accessor="$1"
-    local found=0
-    local accessor_seen=0
 
-    for src_file in "$SRC_DIR"/*.c "$SRC_DIR"/*.h; do
-        if [[ ! -f "$src_file" ]]; then continue; fi
-        if grep -q "$accessor" "$src_file" 2>/dev/null; then
-            accessor_seen=1
-            break
-        fi
-    done
-
-    if [[ "$accessor_seen" -eq 0 ]]; then
+    if ! _grep_in_src_files "$accessor" "*.c" "*.h"; then
         return 1
     fi
 
-    for src_file in "$SRC_DIR"/*.c "$SRC_DIR"/*_impl.h; do
-        if [[ ! -f "$src_file" ]]; then continue; fi
-        if grep -q "$accessor" "$src_file" 2>/dev/null \
-            && grep -q "$LOG_DECISION_SYMBOL" "$src_file" 2>/dev/null; then
-            found=1
-            break
-        fi
-    done
-    return $((1 - found))
+    _grep_pair_in_src_files "$accessor" "$LOG_DECISION_SYMBOL" "*.c" "*_impl.h"
 }
 
-# Check mapper-based emission: the mapper function (reason_from_eligibility
-# or reason_from_error_category) must be called from a file that also
-# calls log_decision.  Additionally, the mapper's switch in reason.c
-# must have a branch that returns the code's static string variable.
+#
+# Check mapper-based emission.
+# Arguments:
+#   $1: mapper accessor function name.
+#   $2: reason code string.
+# Output: writes nothing to stdout.
+# Exit: returns 0 when the mapper is present, the runtime chain is found, and
+#   the reason mapper returns the code; returns 1 for normal not-found cases.
+#
 check_mapper_emission() {
     local accessor="$1"
     local code="$2"
     local found=0
-    local accessor_seen=0
 
     # 1. Mapper accessor may be declared in headers, but runtime emission
     #    proof must come from implementation files.
-    for src_file in "$SRC_DIR"/*.c "$SRC_DIR"/*.h; do
-        if [[ ! -f "$src_file" ]]; then continue; fi
-        if grep -q "$accessor" "$src_file" 2>/dev/null; then
-            accessor_seen=1
-            break
-        fi
-    done
-
-    if [[ "$accessor_seen" -eq 0 ]]; then
+    if ! _grep_in_src_files "$accessor" "*.c" "*.h"; then
         return 1
     fi
 
@@ -191,18 +242,15 @@ check_mapper_emission() {
         local request_chain_found=0
 
         if grep -q "return ${enum_id};" \
-            "${SRC_DIR}/ngx_http_markdown_eligibility.c" 2>/dev/null; then
+            "${SRC_DIR}/ngx_http_markdown_eligibility.c" 2>/dev/null \
+            || _grep_in_src_files "$enum_id" "*.c" "*_impl.h"; then
             enum_returned=1
         fi
 
-        for src_file in "$SRC_DIR"/*.c "$SRC_DIR"/*_impl.h; do
-            if [[ ! -f "$src_file" ]]; then continue; fi
-            if grep -q "ngx_http_markdown_check_eligibility" "$src_file" 2>/dev/null \
-                && grep -q "$LOG_DECISION_SYMBOL" "$src_file" 2>/dev/null; then
-                request_chain_found=1
-                break
-            fi
-        done
+        if _grep_pair_in_src_files "ngx_http_markdown_check_eligibility" \
+            "$LOG_DECISION_SYMBOL" "*.c" "*_impl.h"; then
+            request_chain_found=1
+        fi
 
         if [[ "$enum_returned" -eq 1 && "$request_chain_found" -eq 1 ]]; then
             found=1
@@ -215,14 +263,10 @@ check_mapper_emission() {
     if [[ "$found" -eq 0 ]]; then
         # Fallback: file-level co-occurrence check (accessor + log_decision
         # in same file) when enum derivation was not possible.
-        for src_file in "$SRC_DIR"/*.c "$SRC_DIR"/*_impl.h; do
-            if [[ ! -f "$src_file" ]]; then continue; fi
-            if grep -q "$accessor" "$src_file" 2>/dev/null \
-                && grep -q "$LOG_DECISION_SYMBOL" "$src_file" 2>/dev/null; then
-                found=1
-                break
-            fi
-        done
+        if _grep_pair_in_src_files "$accessor" "$LOG_DECISION_SYMBOL" \
+            "*.c" "*_impl.h"; then
+            found=1
+        fi
     fi
 
     if [[ "$found" -eq 0 ]]; then
@@ -253,40 +297,32 @@ check_mapper_emission() {
     return 1
 }
 
-# Check category emission: FAIL_* codes are emitted via
-# log_decision_with_category's category= parameter.
-# Verify: reason_from_error_category is called from a file that
-# calls log_decision_with_category, and the code's static string
-# variable is returned from the mapper's switch.
+#
+# Check category emission.
+# Arguments:
+#   $1: category mapper accessor function name.
+#   $2: reason code string.
+# Output: writes nothing to stdout.
+# Exit: returns 0 when category emission and mapper return paths are found;
+#   returns 1 for normal not-found cases.
+#
 check_category_emission() {
     local accessor="$1"
     local code="$2"
     local found=0
-    local accessor_seen=0
 
     # 1. reason_from_error_category is called from a file that
     #    calls log_decision_with_category. Headers may prove the accessor
     #    exists, but implementation files must prove runtime emission.
-    for src_file in "$SRC_DIR"/*.c "$SRC_DIR"/*.h; do
-        if [[ ! -f "$src_file" ]]; then continue; fi
-        if grep -q "$accessor" "$src_file" 2>/dev/null; then
-            accessor_seen=1
-            break
-        fi
-    done
-
-    if [[ "$accessor_seen" -eq 0 ]]; then
+    if ! _grep_in_src_files "$accessor" "*.c" "*.h"; then
         return 1
     fi
 
-    for src_file in "$SRC_DIR"/*.c "$SRC_DIR"/*_impl.h; do
-        if [[ ! -f "$src_file" ]]; then continue; fi
-        if grep -q "$accessor" "$src_file" 2>/dev/null \
-            && grep -q "log_decision_with_category" "$src_file" 2>/dev/null; then
-            found=1
-            break
-        fi
-    done
+    if _grep_pair_in_src_files "$accessor" \
+        "ngx_http_markdown_log_decision_with_category" \
+        "*.c" "*_impl.h"; then
+        found=1
+    fi
 
     if [[ "$found" -eq 0 ]]; then
         return 1
@@ -325,16 +361,13 @@ for code in $reason_codes; do
     accessor=$(lookup_accessor "$code")
     accessor_found=0
     if [[ -n "$accessor" ]]; then
-        if grep -q "$accessor" "$HEADER_FILE" 2>/dev/null; then
+        if grep -wF -q -- "$accessor" "$HEADER_FILE" 2>/dev/null; then
             accessor_found=1
         fi
         if [[ "$accessor_found" -eq 0 ]]; then
-            for src_file in "$SRC_DIR"/*.c "$SRC_DIR"/*.h; do
-                if [[ -f "$src_file" ]] && grep -q "$accessor" "$src_file" 2>/dev/null; then
-                    accessor_found=1
-                    break
-                fi
-            done
+            if _grep_in_src_files "$accessor" "*.c" "*.h"; then
+                accessor_found=1
+            fi
         fi
     fi
     if [[ "$accessor_found" -eq 0 ]]; then
@@ -361,15 +394,17 @@ for code in $reason_codes; do
             fi
             ;;
         *)
-            # Unknown emission kind — fall back to file-level check
-            for src_file in "$SRC_DIR"/*.c "$SRC_DIR"/*_impl.h; do
-                if [[ ! -f "$src_file" ]]; then continue; fi
-                if grep -q "$LOG_DECISION_SYMBOL" "$src_file" 2>/dev/null \
-                    && grep -q "$accessor" "$src_file" 2>/dev/null; then
-                    emission_found=1
-                    break
-                fi
-            done
+            echo "ERROR: unknown emission kind '${emission_kind}' for ${code}; add a handler in tools/harness/audit_reason_codes.sh" >&2
+            if [[ -n "$accessor" ]] \
+                && _grep_pair_in_src_files "$accessor" "$LOG_DECISION_SYMBOL" \
+                    "*.c" "*_impl.h"; then
+                emission_found=1
+            fi
+            if [[ "$emission_found" -eq 0 ]]; then
+                echo "ERROR: no valid emission handler matched ${code} (${accessor:-no accessor})" >&2
+                exit 2
+            fi
+            exit 2
             ;;
     esac
     if [[ "$emission_found" -eq 0 ]]; then
