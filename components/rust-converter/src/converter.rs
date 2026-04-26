@@ -609,7 +609,7 @@ impl MarkdownConverter {
         if !self.options.resolve_relative_urls || url.is_empty() {
             return url.to_string();
         }
-        if url.starts_with("http://") || url.starts_with("https://") || url.starts_with("//") {
+        if Self::has_absolute_uri_scheme(url) || url.starts_with("//") {
             return url.to_string();
         }
 
@@ -649,6 +649,21 @@ impl MarkdownConverter {
             trimmed
         };
         format!("{}/{}", base_dir, url)
+    }
+
+    fn has_absolute_uri_scheme(url: &str) -> bool {
+        let Some(colon) = url.find(':') else {
+            return false;
+        };
+        if url[..colon].contains('/') {
+            return false;
+        }
+        let mut chars = url[..colon].chars();
+        let Some(first) = chars.next() else {
+            return false;
+        };
+        first.is_ascii_alphabetic()
+            && chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '+' || ch == '-' || ch == '.')
     }
 }
 
@@ -739,6 +754,32 @@ mod tests {
 
         assert!(result.contains("# Title"));
         assert!(result.contains("## Subtitle"));
+    }
+
+    #[test]
+    fn test_resolve_url_preserves_absolute_uri_schemes() {
+        let converter = MarkdownConverter::with_options(ConversionOptions {
+            resolve_relative_urls: true,
+            base_url: Some("https://example.com/path/to/page.html".to_string()),
+            ..ConversionOptions::default()
+        });
+
+        assert_eq!(
+            converter.resolve_url("mailto:team@example.com"),
+            "mailto:team@example.com"
+        );
+        assert_eq!(
+            converter.resolve_url("tel:+15551234567"),
+            "tel:+15551234567"
+        );
+        assert_eq!(
+            converter.resolve_url("ftp://files.example.com/a"),
+            "ftp://files.example.com/a"
+        );
+        assert_eq!(
+            converter.resolve_url("icons/logo.svg"),
+            "https://example.com/path/to/icons/logo.svg"
+        );
     }
 
     #[test]
