@@ -280,3 +280,74 @@ fn table_should_escape_cell_delimiters_and_newlines() {
         result.contains("| x\\|y | line1<br>line2 |") || result.contains("| x\\|y | line1 line2 |")
     );
 }
+
+#[test]
+fn table_colgroup_col_alignment_with_align_attr() {
+    // <colgroup>/<col> with align attribute should set column alignment.
+    let result = convert_table_html(
+        b"<table><colgroup><col align=\"left\"><col align=\"center\"><col align=\"right\"></colgroup><thead><tr><th>L</th><th>C</th><th>R</th></tr></thead><tbody><tr><td>1</td><td>2</td><td>3</td></tr></tbody></table>",
+        MarkdownFlavor::GitHubFlavoredMarkdown,
+    );
+
+    // GFM: left alignment renders as "---" (no leading colon)
+    assert!(
+        result.contains("| --- | :---: | ---: |"),
+        "expected colgroup align-driven alignment row, got: {result}"
+    );
+}
+
+#[test]
+fn table_colgroup_col_alignment_with_style() {
+    // <colgroup>/<col> with style="text-align: ..." should also work.
+    let result = convert_table_html(
+        b"<table><colgroup><col style=\"text-align: left\"><col style=\"text-align: center\"><col style=\"text-align: right\"></colgroup><thead><tr><th>L</th><th>C</th><th>R</th></tr></thead><tbody><tr><td>1</td><td>2</td><td>3</td></tr></tbody></table>",
+        MarkdownFlavor::GitHubFlavoredMarkdown,
+    );
+
+    assert!(
+        result.contains("| --- | :---: | ---: |"),
+        "expected colgroup style-driven alignment row, got: {result}"
+    );
+}
+
+#[test]
+fn table_colgroup_alignment_overrides_th_alignment() {
+    // <colgroup> alignment should override <th> alignment.
+    let result = convert_table_html(
+        b"<table><colgroup><col align=\"right\"><col align=\"left\"></colgroup><thead><tr><th style=\"text-align: left\">A</th><th style=\"text-align: right\">B</th></tr></thead><tbody><tr><td>1</td><td>2</td></tr></tbody></table>",
+        MarkdownFlavor::GitHubFlavoredMarkdown,
+    );
+
+    // col says right,left; th says left,right → col wins
+    // GFM: left renders as "---", right as "---:"
+    assert!(
+        result.contains("| ---: | --- |"),
+        "expected colgroup to override th alignment, got: {result}"
+    );
+}
+
+#[test]
+fn table_colgroup_bare_col_does_not_override_th_alignment() {
+    let result = convert_table_html(
+        b"<table><colgroup><col><col></colgroup><thead><tr><th style=\"text-align: right\">A</th><th>B</th></tr></thead><tbody><tr><td>1</td><td>2</td></tr></tbody></table>",
+        MarkdownFlavor::GitHubFlavoredMarkdown,
+    );
+
+    assert!(
+        result.contains("| ---: | --- |"),
+        "expected bare colgroup columns to preserve th alignment, got: {result}"
+    );
+}
+
+#[test]
+fn table_colgroup_span_applies_alignment_to_multiple_columns() {
+    let result = convert_table_html(
+        b"<table><colgroup><col span=\"2\" align=\"center\"><col align=\"right\"></colgroup><thead><tr><th>A</th><th>B</th><th>C</th></tr></thead><tbody><tr><td>1</td><td>2</td><td>3</td></tr></tbody></table>",
+        MarkdownFlavor::GitHubFlavoredMarkdown,
+    );
+
+    assert!(
+        result.contains("| :---: | :---: | ---: |"),
+        "expected col span to apply alignment to consecutive columns, got: {result}"
+    );
+}

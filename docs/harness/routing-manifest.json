@@ -69,6 +69,13 @@
         "make test-nginx-unit-streaming"
       ]
     },
+    "nginx-protocol": {
+      "phase": "focused-semantic",
+      "commands": [
+        "make test-nginx-unit",
+        "make test-nginx-integration"
+      ]
+    },
     "ffi-boundary": {
       "phase": "focused-semantic",
       "commands": [
@@ -81,6 +88,14 @@
       "commands": [
         "make docs-check",
         "make release-gates-check"
+      ]
+    },
+    "release-governance": {
+      "phase": "focused-semantic",
+      "commands": [
+        "make release-gates-check",
+        "make release-gates-check-strict",
+        "make release-gates-check-055"
       ]
     },
     "runtime-e2e": {
@@ -219,6 +234,119 @@
         "installation",
         "sonar",
         "compile_commands"
+      ],
+      "verification_families": [
+        "harness-sync",
+        "docs-tooling",
+        "release-quality"
+      ]
+    },
+    {
+      "id": "nginx-protocol-safety",
+      "doc": "docs/harness/risk-packs/nginx-protocol-safety.md",
+      "primary_surfaces": [
+        "nginx-protocol",
+        "auth-cache",
+        "conditional-requests"
+      ],
+      "supporting_surfaces": [
+        "observability",
+        "docs-tooling"
+      ],
+      "paths": [
+        "components/nginx-module/src/ngx_http_markdown_auth.c",
+        "components/nginx-module/src/ngx_http_markdown_conditional.c",
+        "components/nginx-module/src/ngx_http_markdown_request_impl.h",
+        "components/nginx-module/src/ngx_http_markdown_filter_module.c",
+        "components/nginx-module/src/ngx_http_markdown_filter_module.h",
+        "components/nginx-module/tests/**",
+        "tools/e2e/**",
+        "tools/ci/verify_real_nginx_ims.sh",
+        "tools/sonar/collect_nginx_coverage.sh"
+      ],
+      "keywords": [
+        "auth",
+        "cache-control",
+        "conditional request",
+        "If-None-Match",
+        "If-Modified-Since",
+        "ETag",
+        "HEAD",
+        "206",
+        "304",
+        "header"
+      ],
+      "verification_families": [
+        "harness-sync",
+        "nginx-protocol",
+        "runtime-e2e",
+        "release-quality"
+      ]
+    },
+    {
+      "id": "release-governance",
+      "doc": "docs/harness/risk-packs/release-governance.md",
+      "primary_surfaces": [
+        "release-gates",
+        "scope-governance",
+        "source-build-ci"
+      ],
+      "supporting_surfaces": [
+        "docs-tooling",
+        "harness-rules"
+      ],
+      "paths": [
+        "tools/release/**",
+        "docs/project/release-gates/**",
+        "docs/project/release-gates-*.md",
+        ".github/workflows/release-binaries.yml",
+        ".github/workflows/ci.yml",
+        "tools/install.sh",
+        "tools/ci/**",
+        "Makefile"
+      ],
+      "keywords": [
+        "release gate",
+        "scope",
+        "go/no-go",
+        "matrix",
+        "source-build",
+        "release-binaries",
+        "governance"
+      ],
+      "verification_families": [
+        "harness-sync",
+        "docs-tooling",
+        "release-governance",
+        "release-quality"
+      ]
+    },
+    {
+      "id": "harness-remediation",
+      "doc": "docs/harness/risk-packs/harness-remediation.md",
+      "primary_surfaces": [
+        "harness-rules",
+        "steering-adapters",
+        "post-analysis-remediation"
+      ],
+      "supporting_surfaces": [
+        "docs-tooling",
+        "observability"
+      ],
+      "paths": [
+        "AGENTS.md",
+        "docs/harness/**",
+        ".kiro/steering/**",
+        "tools/harness/**",
+        "docs/project/recent-git-harness-steering-analysis-*.md"
+      ],
+      "keywords": [
+        "recent git",
+        "remediation",
+        "finding",
+        "steering",
+        "risk pack",
+        "harness rule"
       ],
       "verification_families": [
         "harness-sync",

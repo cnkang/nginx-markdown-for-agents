@@ -17,6 +17,7 @@ Usage:
     python3 tools/release/matrix/update_matrix.py [--dry-run] [--check-only]
 """
 
+from __future__ import annotations
 
 
 import argparse

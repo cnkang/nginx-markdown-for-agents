@@ -30,6 +30,21 @@ Usage:
         --evidence-targets perf/config/evidence-targets.json \\
         --parity-report perf/reports/parity.json \\
         --output perf/reports/evidence-pack.json
+
+    python3 tools/perf/evidence_pack_generator.py \\
+        --fullbuffer-report perf/reports/combined.json \\
+        --streaming-report perf/reports/combined.json \\
+        --evidence-targets perf/thresholds.json \\
+        --summary-only
+
+Output:
+    Full mode writes the Evidence Pack JSON to --output and prints a short
+    status summary. Summary-only mode skips the --output requirement and writes
+    the evaluated release-gate summary to stderr for CI logs.
+
+Exit codes:
+    0 when the evidence pack can be generated and evaluated.
+    1 when required inputs are missing, malformed, or fail validation.
 """
 
 from __future__ import annotations

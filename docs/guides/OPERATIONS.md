@@ -36,7 +36,10 @@ This operational guide provides procedures for monitoring, troubleshooting, tuni
 
 - This guide includes example commands, sample metrics, and suggested thresholds. Validate them in staging before production use.
 - Metric field names in this guide should match the current metrics endpoint implementation in `components/nginx-module/src/ngx_http_markdown_filter_module.c`.
-- The built-in metrics endpoint returns a human-readable plain-text report or a JSON object (selected by `Accept` header); it is not a native Prometheus exposition endpoint.
+- The built-in metrics endpoint returns human-readable text, JSON, or native
+  Prometheus exposition. Prometheus output requires
+  `markdown_metrics_format prometheus` and an explicit Prometheus `Accept`
+  header; see [Prometheus Metrics Guide](prometheus-metrics.md).
 - Metrics are aggregated in shared memory across workers; a single endpoint response reflects the whole NGINX instance, not just the worker that served `/markdown-metrics`.
 - For “why this request took a specific branch,” use [../architecture/REQUEST_LIFECYCLE.md](../architecture/REQUEST_LIFECYCLE.md) and [../architecture/CONFIG_BEHAVIOR_MAP.md](../architecture/CONFIG_BEHAVIOR_MAP.md) alongside this runbook.
 
@@ -191,36 +194,45 @@ Performance:
 
 ---
 
-### Prometheus Integration (via Adapter or Transformation)
+### Prometheus Integration
 
-The built-in endpoint does not emit native Prometheus exposition format. To integrate with Prometheus, use an adapter/exporter that converts the JSON or plain-text endpoint output into Prometheus metrics.
+The built-in endpoint can emit native Prometheus exposition format. Configure
+`markdown_metrics_format prometheus` on the metrics location and send an
+explicit Prometheus `Accept` header from the scraper. See
+[Prometheus Metrics Guide](prometheus-metrics.md) for the full metric catalog.
 
-**Example `prometheus.yml` (scraping an adapter/exporter):**
+**Example `prometheus.yml`:**
 ```yaml
 scrape_configs:
   - job_name: 'nginx-markdown'
     static_configs:
-      - targets: ['localhost:9105']  # Example adapter endpoint
-    metrics_path: '/metrics'
+      - targets: ['localhost:80']
+    metrics_path: '/markdown-metrics'
+    # Prometheus sends a Prometheus/OpenMetrics Accept header by default.
 ```
 
 **Grafana Dashboard Queries:**
 
 ```promql
 # Failure rate
-rate(conversions_failed[5m]) / rate(conversions_attempted[5m]) * 100
+sum(rate(nginx_markdown_failures_total[5m]))
+/ clamp_min(rate(nginx_markdown_requests_total[5m]), 1e-10) * 100
 
-# Average conversion time
-rate(conversion_time_sum_ms[5m]) / clamp_min(rate(conversion_completed[5m]), 1)
+# Slow conversion bucket share (> 1s)
+(rate(nginx_markdown_conversion_duration_seconds{le="+Inf"}[5m])
+  - rate(nginx_markdown_conversion_duration_seconds{le="1.0"}[5m]))
+/ clamp_min(rate(nginx_markdown_conversion_duration_seconds{le="+Inf"}[5m]), 1e-10) * 100
 
 # Throughput (conversions per second)
-rate(conversions_succeeded[1m])
+rate(nginx_markdown_conversions_total[1m])
 
 # Size reduction percentage (proxy for token reduction trend)
-(1 - (rate(output_bytes[5m]) / rate(input_bytes[5m]))) * 100
+(1 - (rate(nginx_markdown_output_bytes_total[5m])
+  / clamp_min(rate(nginx_markdown_input_bytes_total[5m]), 1))) * 100
 
 # Decompression failure rate
-rate(decompressions_failed[5m]) / rate(decompressions_attempted[5m]) * 100
+rate(nginx_markdown_decompression_failures_total[5m])
+/ clamp_min(sum(rate(nginx_markdown_decompressions_total[5m])), 1e-10) * 100
 ```
 
 ---
@@ -1595,8 +1607,8 @@ The table below maps each reason code to its internal enum, error category, requ
 |---|---|---|---|---|---|
 | `SKIP_CONFIG` | `NGX_HTTP_MARKDOWN_INELIGIBLE_CONFIG` | — | NOT_ENABLED | Module disabled by configuration for this scope | Expected for scopes where you have not enabled conversion. If unexpected, check `markdown_filter` in the relevant `location`/`server` block. |
 | `SKIP_METHOD` | `NGX_HTTP_MARKDOWN_INELIGIBLE_METHOD` | — | SKIPPED | Request method is not GET or HEAD | Expected for POST/PUT/DELETE requests. No action needed. |
-| `SKIP_STATUS` | `NGX_HTTP_MARKDOWN_INELIGIBLE_STATUS` | — | SKIPPED | Upstream response status is not 200 OK or 206 Partial Content | Check upstream health if you see many non-200/206 responses for pages you expect to convert. |
-| `SKIP_RANGE` | `NGX_HTTP_MARKDOWN_INELIGIBLE_RANGE` | — | SKIPPED | Client sent a Range request header | Expected behavior — partial content cannot be converted. No action needed. |
+| `SKIP_STATUS` | `NGX_HTTP_MARKDOWN_INELIGIBLE_STATUS` | — | SKIPPED | Upstream response status is not 200 OK; 206 Partial Content maps to `SKIP_RANGE` | Check upstream health if you see many non-200 responses for pages you expect to convert. |
+| `SKIP_RANGE` | `NGX_HTTP_MARKDOWN_INELIGIBLE_RANGE` | — | SKIPPED | Client sent a Range request header or upstream returned 206 Partial Content | Expected behavior — partial content cannot be converted. No action needed. |
 | `SKIP_STREAMING` | `NGX_HTTP_MARKDOWN_INELIGIBLE_STREAMING` | — | SKIPPED | Response matches `markdown_stream_types` (unbounded streaming) | Expected for SSE/streaming endpoints. If a static page triggers this, check your `markdown_stream_types` configuration. |
 | `SKIP_CONTENT_TYPE` | `NGX_HTTP_MARKDOWN_INELIGIBLE_CONTENT_TYPE` | — | SKIPPED | Upstream Content-Type is not `text/html` | Expected for JSON, XML, image, and other non-HTML responses. If an HTML page triggers this, check the upstream `Content-Type` header. |
 | `SKIP_SIZE` | `NGX_HTTP_MARKDOWN_INELIGIBLE_SIZE` | — | SKIPPED | Response body exceeds `markdown_max_size` | Increase `markdown_max_size` if the page should be converted, or exclude oversized pages from conversion scope. |
@@ -1605,6 +1617,29 @@ The table below maps each reason code to its internal enum, error category, requ
 | `ELIGIBLE_CONVERTED` | `NGX_HTTP_MARKDOWN_ELIGIBLE` | — | CONVERTED | All checks passed, conversion succeeded | No action needed — this is the success path. |
 | `ELIGIBLE_FAILED_OPEN` | `NGX_HTTP_MARKDOWN_ELIGIBLE` | _(any)_ | FAILED | Conversion attempted but failed; original HTML served (`markdown_on_error pass`) | Investigate the failure sub-classification (see below). The client received HTML, so no user impact. Review failure rate trends. |
 | `ELIGIBLE_FAILED_CLOSED` | `NGX_HTTP_MARKDOWN_ELIGIBLE` | _(any)_ | FAILED | Conversion attempted but failed; 502 returned (`markdown_on_error reject`) | Urgent — clients are receiving errors. Switch to `markdown_on_error pass` or disable conversion for the affected scope. Investigate root cause. |
+
+#### Engine Selection Codes
+
+When the streaming engine is enabled, the engine selector emits a reason code indicating which path was chosen:
+
+| Reason Code | Family | Severity | Description | Suggested Operator Action |
+|---|---|---|---|---|
+| `ENGINE_STREAMING` | ENGINE | INFO | Streaming engine selected for this request | Informational — no action needed. Indicates the request entered the streaming conversion path. |
+
+#### Streaming Reason Codes
+
+When the streaming engine is active (`markdown_streaming_engine on`), the following reason codes are emitted at streaming decision points:
+
+| Reason Code | Family | Severity | Description | Suggested Operator Action |
+|---|---|---|---|---|
+| `STREAMING_CONVERT` | STREAMING | INFO | Streaming conversion completed successfully | No action needed — this is the streaming success path. |
+| `STREAMING_FALLBACK_PREBUFFER` | STREAMING | WARN | Streaming abandoned pre-commit, fell back to full-buffer | Monitor fallback rate. High rates may indicate content features unsupported by the streaming engine. Consider excluding affected paths from streaming. |
+| `STREAMING_FAIL_POSTCOMMIT` | STREAMING | WARN | Post-commit error during streaming, response may be truncated | Urgent — headers were already sent. Monitor rate and rollback streaming if it exceeds 0.1%. |
+| `STREAMING_SKIP_UNSUPPORTED` | STREAMING | INFO | Streaming not supported for this request, fell through to full-buffer | Informational — the request was handled by the full-buffer path instead. |
+| `STREAMING_BUDGET_EXCEEDED` | STREAMING | WARN | Working-set memory budget exceeded during streaming | Review `markdown_streaming_budget` configuration. Increase budget or exclude large pages from streaming scope. |
+| `STREAMING_PRECOMMIT_FAILOPEN` | STREAMING | WARN | Pre-commit error, fail-open to pass-through (original HTML served) | Investigate root cause. The client received HTML, so no user impact. Review error rate trends. |
+| `STREAMING_PRECOMMIT_REJECT` | STREAMING | WARN | Pre-commit error, fail-closed (error returned to client) | Urgent — clients are receiving errors. Switch to fail-open policy or disable streaming for the affected scope. |
+| `STREAMING_SHADOW` | STREAMING | INFO | Shadow mode comparison completed | Informational — shadow mode ran a comparison between streaming and full-buffer output. Check shadow diff metrics for divergence. |
 
 #### Failure Sub-Classification Codes
 
@@ -1631,9 +1666,14 @@ Every request ends in one of four mutually exclusive states, derived from its re
 
 You can determine the count of requests in each state using the metrics endpoint and decision log entries.
 
-**From the metrics endpoint** (`curl -s http://localhost/markdown-metrics`):
+**From the metrics endpoint** (`curl -s -H "Accept: application/json" http://localhost/markdown-metrics`):
 
 ```text
+NOT_ENABLED = skips.config
+
+SKIPPED     = skips.method + skips.status + skips.range + skips.streaming
+              + skips.content_type + skips.size + skips.auth + skips.accept
+
 CONVERTED   = conversions_succeeded
 
 FAILED      = conversions_failed
@@ -1642,7 +1682,7 @@ FAILED      = conversions_failed
 
 > **Note:** `conversions_failed` counts all requests that entered the FAILED state, including conversion errors, decompression failures, and system errors. The breakdown counters (`failures_conversion`, `failures_resource_limit`, `failures_system`) provide the sub-classification.
 
-**From decision log entries** (skip reason distribution is not in the metrics endpoint — use log grep):
+**From decision log entries** (useful for request-level correlation):
 
 ```text
 NOT_ENABLED = count of "reason=SKIP_CONFIG" in decision log entries
@@ -1652,7 +1692,10 @@ SKIPPED     = count of "reason=SKIP_*" (excluding SKIP_CONFIG) in decision log e
                + SKIP_CONTENT_TYPE + SKIP_SIZE + SKIP_AUTH + SKIP_ACCEPT)
 ```
 
-> **Note:** Per-skip-reason counters are not currently in the metrics endpoint; use decision log grep patterns to derive skip reason distribution.
+> **Note:** Per-skip-reason counters are exposed as JSON `skips.*` fields and
+> as Prometheus `nginx_markdown_skips_total{reason="..."}` series. Use decision
+> log grep patterns when you need request URIs, status details, or correlation
+> with a specific upstream response.
 
 Example commands to check each state:
 
@@ -1682,7 +1725,7 @@ The alignment works as follows:
 
 | Reason Code Category | Metrics Endpoint Field | Log Correlation | Example |
 |---|---|---|---|
-| Skip codes (`SKIP_*`) | _(not in metrics endpoint — use log grep)_ | `reason` field in decision log | `grep "reason=SKIP_METHOD" error.log` |
+| Skip codes (`SKIP_*`) | JSON `skips.*`; Prometheus `nginx_markdown_skips_total{reason="..."}` | `reason` field in decision log | `grep "reason=SKIP_METHOD" error.log` |
 | Failure codes (`FAIL_*`) | `failures_conversion`, `failures_resource_limit`, `failures_system` | `category` field in decision log | `grep "category=FAIL_CONVERSION" error.log` |
 | `ELIGIBLE_CONVERTED` | `conversions_succeeded` | `reason` field in decision log | `grep "reason=ELIGIBLE_CONVERTED" error.log` |
 | `ELIGIBLE_FAILED_OPEN` | `conversions_failed` (aggregate) | `reason` field in decision log | `grep "reason=ELIGIBLE_FAILED_OPEN" error.log` |
@@ -1789,12 +1832,12 @@ The `markdown_log_verbosity` directive controls which decision outcomes produce 
 
 | Verbosity Level | Outcomes Logged | Format | Use Case |
 |---|---|---|---|
-| `error` | Failure outcomes (`ELIGIBLE_FAILED_OPEN`, `ELIGIBLE_FAILED_CLOSED`) only | Base | Production with minimal log volume |
-| `warn` | Failure outcomes (`ELIGIBLE_FAILED_OPEN`, `ELIGIBLE_FAILED_CLOSED`) only | Base | Production monitoring |
+| `error` | Failure outcomes only | Base | Production with minimal log volume |
+| `warn` | Failure outcomes only | Base | Production monitoring |
 | `info` (default) | All outcomes | Base | Recommended for rollout — full visibility into every decision |
 | `debug` | All outcomes | Extended (adds `filter_value`, `accept`, `status`) | Troubleshooting — maximum detail for diagnosing specific requests |
 
-At `error` and `warn` levels, non-failure outcomes (`SKIP_*` and `ELIGIBLE_CONVERTED`) are silently suppressed. Both levels only emit failure outcomes. At `info` and `debug` levels, they include full outcomes. When failures are logged at any level, failure subclassifications (like `FAIL_CONVERSION`, `FAIL_RESOURCE_LIMIT`, `FAIL_SYSTEM`) are emitted in the `category=` field per `ngx_http_markdown_log_decision_with_category()`, not as standalone `FAIL_*` codes in the `reason=` field.
+At `error` and `warn` levels, non-failure outcomes (`SKIP_*`, `ELIGIBLE_CONVERTED`, `ENGINE_STREAMING`, `STREAMING_CONVERT`, `STREAMING_SHADOW`, `STREAMING_SKIP_UNSUPPORTED`) are silently suppressed. Both levels only emit failure outcomes: `ELIGIBLE_FAILED_OPEN`, `ELIGIBLE_FAILED_CLOSED`, `STREAMING_FAIL_POSTCOMMIT`, `STREAMING_PRECOMMIT_FAILOPEN`, `STREAMING_PRECOMMIT_REJECT`, `STREAMING_BUDGET_EXCEEDED`, `STREAMING_FALLBACK_PREBUFFER`. At `info` and `debug` levels, they include full outcomes. When failures are logged at any level, failure subclassifications (like `FAIL_CONVERSION`, `FAIL_RESOURCE_LIMIT`, `FAIL_SYSTEM`) are emitted in the `category=` field per `ngx_http_markdown_log_decision_with_category()`, not as standalone `FAIL_*` codes in the `reason=` field.
 
 #### Configuration examples
 
@@ -1818,13 +1861,13 @@ The module maps decision outcomes to NGINX log levels so that NGINX's own `error
 
 | Outcome Type | NGINX Log Level | Reason Codes |
 |---|---|---|
-| Non-failure | `NGX_LOG_INFO` | All `SKIP_*` codes, `ELIGIBLE_CONVERTED` |
-| Failure | `NGX_LOG_WARN` | `ELIGIBLE_FAILED_OPEN`, `ELIGIBLE_FAILED_CLOSED` |
+| Non-failure | `NGX_LOG_INFO` | All `SKIP_*` codes, `ELIGIBLE_CONVERTED`, `ENGINE_STREAMING`, `STREAMING_CONVERT`, `STREAMING_SHADOW`, `STREAMING_SKIP_UNSUPPORTED` |
+| Failure | `NGX_LOG_WARN` | `ELIGIBLE_FAILED_OPEN`, `ELIGIBLE_FAILED_CLOSED`, `STREAMING_FAIL_POSTCOMMIT`, `STREAMING_PRECOMMIT_FAILOPEN`, `STREAMING_PRECOMMIT_REJECT`, `STREAMING_BUDGET_EXCEEDED`, `STREAMING_FALLBACK_PREBUFFER` |
 
 This means:
-- If your NGINX `error_log` level is set to `warn`, you will only see failure decision entries regardless of `markdown_log_verbosity`.
-- If your NGINX `error_log` level is set to `info` or `debug`, the `markdown_log_verbosity` directive controls which entries appear.
-- For full decision logging visibility, ensure `error_log` is at `info` level or lower.
+- If your NGINX `error_log` level is set to `warn`, you will only see failure decision entries (including streaming failures) regardless of `markdown_log_verbosity`.
+- If your NGINX `error_log` level is set to `info` or `debug`, the `markdown_log_verbosity` directive controls which entries appear; streaming non-failure entries are emitted at `info` level.
+- For full decision logging visibility (including all streaming outcomes), ensure `error_log` is at `info` level or lower.
 
 ### Parsing Decision Log Entries
 

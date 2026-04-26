@@ -11,8 +11,8 @@
 //! ```yaml
 //! ---
 //! title: "Example Page"
-//! description: "A sample document"
 //! url: "https://example.com/page"
+//! description: "A sample document"
 //! image: "https://example.com/image.png"
 //! ---
 //! ```

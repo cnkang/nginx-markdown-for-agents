@@ -4,10 +4,66 @@
 # Validates all HTML files in tests/corpus, verifies converter runtime,
 # and checks fixture metadata sidecars.
 #
+# Usage:
+#   bash tools/corpus/validate_corpus.sh
+#
+# Prerequisites:
+#   - cargo: builds the Rust converter and runs the basic conversion example.
+#   - python3: validates corpus-version.json and fixture metadata JSON.
+#
+# Output contract:
+#   - Human-readable progress and summary are written to stdout.
+#   - Build/runtime diagnostics from cargo and python may be written to stderr.
+#
+# Exit codes:
+#   0 - all corpus fixtures and metadata passed validation.
+#   1 - build, converter smoke check, fixture, or metadata validation failed.
+#
 
 set -e
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+
+# Print command usage.
+#
+# Arguments:
+#   None.
+#
+# Output:
+#   Writes help text to stdout. Callers may redirect it to stderr.
+#
+# Exit behavior:
+#   Returns success after printing the usage text.
+usage() {
+    awk '
+        NR == 1 { next }
+        /^#($| )/ {
+            sub(/^# ?/, "")
+            print
+            next
+        }
+        /^$/ {
+            print
+            next
+        }
+        { exit }
+    ' "$0"
+    return 0
+}
+
+case "${1-}" in
+    -h|--help)
+        usage
+        exit 0
+        ;;
+    "")
+        ;;
+    *)
+        echo "Unknown argument: $1" >&2
+        usage >&2
+        exit 1
+        ;;
+esac
 
 # Colors
 GREEN='\033[0;32m'
@@ -66,8 +122,13 @@ echo ""
 # Build the converter first
 echo "Building Rust converter..."
 cd "$ROOT/components/rust-converter"
-cargo build --release --quiet 2>&1 | grep -v "warning:" || true
+build_output=$(cargo build --release 2>&1) && build_exit=0 || build_exit=$?
+echo "$build_output" | grep -v "warning:" >&2 || true
 cd "$ROOT"
+if [[ "$build_exit" -ne 0 ]]; then
+    echo -e "${RED}✗${NC} Rust converter build failed (exit code $build_exit)"
+    exit 1
+fi
 
 # Shared find command for HTML corpus files (used for both counting and processing)
 HTML_FIND_CMD=(find "$ROOT/tests/corpus" -name "*.html" -type f ! -name "generate-*")
@@ -98,7 +159,7 @@ if [[ ! -f "$CORPUS_VERSION_FILE" ]]; then
 else
     # Pass path via env var to avoid shell injection; use single-quoted
     # Python string so the regex dollar sign is not interpreted by bash.
-    VERSION=$(VALIDATE_PATH="$CORPUS_VERSION_FILE" python3 -c '
+    if VERSION=$(VALIDATE_PATH="$CORPUS_VERSION_FILE" python3 -c '
 import json, sys, re, os
 try:
     path = os.environ["VALIDATE_PATH"]
@@ -113,7 +174,7 @@ except Exception as e:
     print(f"ERROR: {e}", file=sys.stderr)
     sys.exit(1)
 ' 2>&1)
-    if [[ $? -eq 0 ]]; then
+    then
         echo -e "${GREEN}✓${NC} corpus-version.json: v${VERSION}"
     else
         echo -e "${RED}✗${NC} corpus-version.json: invalid semver"
@@ -158,7 +219,7 @@ while IFS= read -r -d '' html_file; do
     # Validate metadata sidecar content — pass path via env to avoid injection.
     # Use single-quoted Python block so no shell interpolation occurs.
     # Access dict keys via .get() to avoid backslash-quote issues.
-    META_RESULT=$(META_FILE="$meta_file" python3 -c '
+    if META_RESULT=$(META_FILE="$meta_file" python3 -c '
 import json, sys, os
 
 valid_page_types = {"clean-article", "documentation", "nav-heavy", "boilerplate-heavy", "complex-common"}
@@ -200,9 +261,7 @@ try:
 except Exception as e:
     print("PARSE_ERROR:" + str(e))
     sys.exit(1)
-' 2>&1)
-
-    if [[ $? -eq 0 ]]; then
+' 2>&1); then
         page_type=$(echo "$META_RESULT" | cut -d'|' -f1)
         is_failure=$(echo "$META_RESULT" | cut -d'|' -f2)
 

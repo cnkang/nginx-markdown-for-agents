@@ -52,6 +52,15 @@ static const ngx_str_t *ngx_http_markdown_compression_name(
 static ngx_http_output_header_filter_pt ngx_http_next_header_filter;
 static ngx_http_output_body_filter_pt ngx_http_next_body_filter;
 
+/*
+ * Reclassify an incremental-path attempt as full-buffer fail-open.
+ *
+ * Incremental routing increments the path-hit metric before the final
+ * conversion outcome is known.  If that path later fails open and serves the
+ * original buffered body, operators should see the request counted with the
+ * full-buffer/fail-open behavior that actually reached the client.  The
+ * decrement guard avoids underflow after counter resets or partial tests.
+ */
 static void
 ngx_http_markdown_reclassify_fail_open_path(ngx_http_markdown_ctx_t *ctx)
 {
@@ -485,7 +494,15 @@ ngx_http_markdown_handle_buffer_append_failure(ngx_http_request_t *r,
     return NGX_DONE;
 }
 
-/* Append one chain link's buffer data into the module accumulation buffer. */
+/*
+ * Append one chain link's in-memory bytes into the accumulation buffer.
+ *
+ * Preconditions: `cl` is a live NGINX chain link and any non-NULL buffer has
+ * valid `pos <= last` memory pointers.  On success the buffer position is
+ * advanced to `last` because the bytes are now owned by the request-pool
+ * accumulation buffer.  On append failure the fail-open path receives the
+ * original chain link before its position is advanced.
+ */
 static ngx_int_t
 ngx_http_markdown_append_buffered_chunk(ngx_http_request_t *r,
                                         ngx_http_markdown_ctx_t *ctx,
@@ -678,7 +695,16 @@ ngx_http_markdown_body_filter_decompress_if_needed(ngx_http_request_t *r,
     return NGX_OK;
 }
 
-/* Forward deferred response headers to the next filter in the chain. */
+/*
+ * Forward deferred response headers to the next filter in the chain.
+ *
+ * Header forwarding is explicit and idempotent because the module may choose
+ * conversion, fail-open, decompression fallback, or streaming fallback after
+ * the header filter has deferred output.  The helper restores source
+ * Last-Modified metadata when needed, calls the next header filter before any
+ * body bytes are sent, and marks `headers_forwarded` only after the downstream
+ * filter accepts the headers.
+ */
 static ngx_int_t
 ngx_http_markdown_forward_headers(ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx)
 {

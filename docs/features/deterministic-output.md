@@ -126,7 +126,8 @@ Output: ![Description](image.png)
 
 ## Implementation
 
-The normalization is implemented in the `normalize_output()` function in `src/converter.rs`:
+The normalization is implemented in the `normalize_output()` function in
+`components/rust-converter/src/converter/normalize.rs`:
 
 ```rust
 fn normalize_output(&self, output: String) -> String {

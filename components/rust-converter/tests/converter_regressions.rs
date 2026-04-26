@@ -46,6 +46,41 @@ fn link_text_extraction_should_skip_removed_children() {
     assert!(!result.contains("alert"));
 }
 
+/// Headings nested inside container elements (`<div>`, `<section>`, `<article>`)
+/// must preserve their Markdown level regardless of container nesting depth.
+/// Regression guard for Requirement 1.4 (semantic fidelity spec).
+#[test]
+fn headings_inside_containers_preserve_level() {
+    // Heading inside <div>
+    let result = convert_html(b"<div><h1>Div Title</h1></div>");
+    assert!(
+        result.contains("# Div Title"),
+        "h1 inside <div> should produce '# ': {result:?}"
+    );
+
+    // Heading inside <section>
+    let result = convert_html(b"<section><h2>Section Title</h2></section>");
+    assert!(
+        result.contains("## Section Title"),
+        "h2 inside <section> should produce '## ': {result:?}"
+    );
+
+    // Heading inside <article>
+    let result = convert_html(b"<article><h3>Article Title</h3></article>");
+    assert!(
+        result.contains("### Article Title"),
+        "h3 inside <article> should produce '### ': {result:?}"
+    );
+
+    // Deeply nested containers
+    let result =
+        convert_html(b"<div><section><article><h4>Deep Title</h4></article></section></div>");
+    assert!(
+        result.contains("#### Deep Title"),
+        "h4 inside nested containers should produce '#### ': {result:?}"
+    );
+}
+
 #[test]
 fn nested_lists_should_not_double_indent_pre_rendered_children() {
     let result = convert_html_with_options(
@@ -58,4 +93,27 @@ fn nested_lists_should_not_double_indent_pre_rendered_children() {
 
     assert!(result.contains("\n  - Child"));
     assert!(!result.contains("\n    - Child"));
+}
+
+#[test]
+fn link_url_with_angle_brackets_percent_encodes_both() {
+    // Regression: URLs containing literal '<' or '>' must be
+    // percent-encoded when wrapped in angle-bracket destinations.
+    // Previously only '>' was encoded, leaving '<' to break the
+    // angle-bracket destination syntax.
+    let result = convert_html(br#"<a href="https://example.com/path?a=1&lt;b=2&gt;c=3">link</a>"#);
+    // Both %3C (for <) and %3E (for >) must appear in the output
+    assert!(
+        result.contains("%3C"),
+        "expected %3C for literal '<' in URL, got: {result}"
+    );
+    assert!(
+        result.contains("%3E"),
+        "expected %3E for literal '>' in URL, got: {result}"
+    );
+    // The destination must be wrapped in angle brackets
+    assert!(
+        result.contains("<https://") || result.contains("<http://"),
+        "expected angle-bracket destination wrapping, got: {result}"
+    );
 }

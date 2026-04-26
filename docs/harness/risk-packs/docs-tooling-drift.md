@@ -23,6 +23,8 @@ summaries change together.
 - operator commands vs actual output format requirements
 - cross-script CLI contract consistency (flag/env/positional semantics)
 - cross-script invocation portability (no executable-bit assumptions in CI)
+- shell helper functions use explicit success returns when intentionally
+  producing no output, so static analysis and callers see deterministic status
 
 ## Minimum Verification
 
@@ -45,3 +47,4 @@ make coverage-sonar-xml
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |
+| 0.5.5 | 2026-04-25 | Codex | Added shell helper explicit-return drift guardrail |

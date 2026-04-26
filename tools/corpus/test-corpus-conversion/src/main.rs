@@ -1,3 +1,13 @@
+//! Minimal full-buffer corpus conversion CLI.
+//!
+//! Usage: `test-corpus-conversion <html_file>`.
+//!
+//! The tool reads one HTML fixture from disk, parses it with the full-buffer
+//! parser, converts it to Markdown, and writes the Markdown to stdout. Usage,
+//! read, parse, and conversion errors are written to stderr and exit with code
+//! 1. This binary intentionally does not exercise streaming or incremental
+//!    paths; corpus validators use it as a small full-buffer runtime smoke test.
+
 use nginx_markdown_converter::converter::MarkdownConverter;
 use nginx_markdown_converter::parser::parse_html;
 use std::env;

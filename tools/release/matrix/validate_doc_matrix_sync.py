@@ -10,6 +10,8 @@ Usage:
     python3 tools/release/matrix/validate_doc_matrix_sync.py
 """
 
+from __future__ import annotations
+
 import json
 import sys
 from pathlib import Path

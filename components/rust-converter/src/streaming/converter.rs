@@ -830,11 +830,13 @@ impl StreamingConverter {
 
     /// Resolve a possibly-relative URL against the converter's configured base URL.
     ///
-    /// If relative resolution is disabled, the input is empty, the input is already absolute
-    /// (`http://`, `https://`, or `//`), the converter has no `base_url`, or the `base_url`
-    /// does not start with `http://` or `https://`, the original `url` is returned unchanged.
-    /// If `url` starts with `/`, it is resolved against the origin (scheme + authority) of
-    /// `base_url`. Otherwise `url` is resolved relative to the directory portion of `base_url`.
+    /// If relative resolution is disabled, the input is empty, the input is
+    /// already absolute (for example `https:`, `mailto:`, or `//`), the
+    /// converter has no `base_url`, or the `base_url` does not start with
+    /// `http://` or `https://`, the original `url` is returned unchanged. If
+    /// `url` starts with `/`, it is resolved against the origin (scheme +
+    /// authority) of `base_url`. Otherwise `url` is resolved relative to the
+    /// directory portion of `base_url`.
     ///
     /// # Examples
     ///
@@ -849,12 +851,13 @@ impl StreamingConverter {
     /// assert_eq!(conv.resolve_url("/img.png"), "https://example.com/img.png");
     /// assert_eq!(conv.resolve_url("icons/logo.svg"), "https://example.com/path/to/icons/logo.svg");
     /// assert_eq!(conv.resolve_url("https://other.test/x"), "https://other.test/x");
+    /// assert_eq!(conv.resolve_url("mailto:a@example.com"), "mailto:a@example.com");
     /// ```
     fn resolve_url(&self, url: &str) -> String {
         if !self.options.resolve_relative_urls || url.is_empty() {
             return url.to_string();
         }
-        if url.starts_with("http://") || url.starts_with("https://") || url.starts_with("//") {
+        if Self::has_absolute_uri_scheme(url) || url.starts_with("//") {
             return url.to_string();
         }
         let Some(base) = self.options.base_url.as_ref() else {
@@ -877,6 +880,9 @@ impl StreamingConverter {
             };
             return format!("{}{}", origin, url);
         }
+        if base.ends_with('/') {
+            return format!("{}{}", base, url);
+        }
         let trimmed = base.trim_end_matches('/');
         let base_dir = if let Some(pos) = trimmed.rfind('/') {
             if pos > 0 && trimmed.as_bytes().get(pos - 1) == Some(&b'/') {
@@ -888,6 +894,21 @@ impl StreamingConverter {
             trimmed
         };
         format!("{}/{}", base_dir, url)
+    }
+
+    fn has_absolute_uri_scheme(url: &str) -> bool {
+        let Some(colon) = url.find(':') else {
+            return false;
+        };
+        if url[..colon].contains('/') {
+            return false;
+        }
+        let mut chars = url[..colon].chars();
+        let Some(first) = chars.next() else {
+            return false;
+        };
+        first.is_ascii_alphabetic()
+            && chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '+' || ch == '-' || ch == '.')
     }
 
     /// Selects the final metadata URL, preferring a discovered canonical over the base URL.
@@ -1102,6 +1123,30 @@ mod tests {
         assert!(
             !second.is_empty(),
             "converter charset state should resolve at configured sniff limit"
+        );
+    }
+
+    #[test]
+    fn test_resolve_url_preserves_absolute_uri_schemes() {
+        let opts = ConversionOptions {
+            resolve_relative_urls: true,
+            base_url: Some("https://example.com/path/to/page.html".to_string()),
+            ..ConversionOptions::default()
+        };
+        let conv = StreamingConverter::new(opts, MemoryBudget::default());
+
+        assert_eq!(
+            conv.resolve_url("mailto:team@example.com"),
+            "mailto:team@example.com"
+        );
+        assert_eq!(conv.resolve_url("tel:+15551234567"), "tel:+15551234567");
+        assert_eq!(
+            conv.resolve_url("ftp://files.example.com/a"),
+            "ftp://files.example.com/a"
+        );
+        assert_eq!(
+            conv.resolve_url("icons/logo.svg"),
+            "https://example.com/path/to/icons/logo.svg"
         );
     }
 
