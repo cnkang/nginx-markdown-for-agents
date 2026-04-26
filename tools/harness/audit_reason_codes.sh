@@ -45,6 +45,7 @@ readonly OPS_DOC="docs/guides/OPERATIONS.md"
 readonly COOKBOOK_DOC="docs/guides/streaming-rollout-cookbook.md"
 readonly DECISION_CHAIN_DOC="docs/features/DECISION_CHAIN.md"
 readonly LOG_DECISION_SYMBOL="ngx_http_markdown_log_decision"
+readonly IMPL_HEADER_GLOB="*_impl.h"
 
 errors=0
 
@@ -204,7 +205,7 @@ check_direct_emission() {
         return 1
     fi
 
-    _grep_pair_in_src_files "$accessor" "$LOG_DECISION_SYMBOL" "*.c" "*_impl.h"
+    _grep_pair_in_src_files "$accessor" "$LOG_DECISION_SYMBOL" "*.c" "$IMPL_HEADER_GLOB"
 }
 
 #
@@ -243,12 +244,12 @@ check_mapper_emission() {
 
         if grep -q "return ${enum_id};" \
             "${SRC_DIR}/ngx_http_markdown_eligibility.c" 2>/dev/null \
-            || _grep_in_src_files "$enum_id" "*.c" "*_impl.h"; then
+            || _grep_in_src_files "$enum_id" "*.c" "$IMPL_HEADER_GLOB"; then
             enum_returned=1
         fi
 
         if _grep_pair_in_src_files "ngx_http_markdown_check_eligibility" \
-            "$LOG_DECISION_SYMBOL" "*.c" "*_impl.h"; then
+            "$LOG_DECISION_SYMBOL" "*.c" "$IMPL_HEADER_GLOB"; then
             request_chain_found=1
         fi
 
@@ -264,7 +265,7 @@ check_mapper_emission() {
     # in same file) when enum derivation was not possible.
     if [[ "$found" -eq 0 ]] \
         && _grep_pair_in_src_files "$accessor" "$LOG_DECISION_SYMBOL" \
-            "*.c" "*_impl.h"; then
+            "*.c" "$IMPL_HEADER_GLOB"; then
         found=1
     fi
 
@@ -319,7 +320,7 @@ check_category_emission() {
 
     if _grep_pair_in_src_files "$accessor" \
         "ngx_http_markdown_log_decision_with_category" \
-        "*.c" "*_impl.h"; then
+        "*.c" "$IMPL_HEADER_GLOB"; then
         found=1
     fi
 
@@ -363,11 +364,10 @@ for code in $reason_codes; do
         && grep -wF -q -- "$accessor" "$HEADER_FILE" 2>/dev/null; then
         accessor_found=1
     fi
-    if [[ -n "$accessor" ]]; then
-        if [[ "$accessor_found" -eq 0 ]] \
-            && _grep_in_src_files "$accessor" "*.c" "*.h"; then
-            accessor_found=1
-        fi
+    if [[ -n "$accessor" ]] \
+        && [[ "$accessor_found" -eq 0 ]] \
+        && _grep_in_src_files "$accessor" "*.c" "*.h"; then
+        accessor_found=1
     fi
     if [[ "$accessor_found" -eq 0 ]]; then
         missing="${missing} accessor"
