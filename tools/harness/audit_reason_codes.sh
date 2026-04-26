@@ -359,10 +359,11 @@ for code in $reason_codes; do
     # (b) Accessor function — use explicit registry, then verify in header/source
     accessor=$(lookup_accessor "$code")
     accessor_found=0
+    if [[ -n "$accessor" ]] \
+        && grep -wF -q -- "$accessor" "$HEADER_FILE" 2>/dev/null; then
+        accessor_found=1
+    fi
     if [[ -n "$accessor" ]]; then
-        if grep -wF -q -- "$accessor" "$HEADER_FILE" 2>/dev/null; then
-            accessor_found=1
-        fi
         if [[ "$accessor_found" -eq 0 ]] \
             && _grep_in_src_files "$accessor" "*.c" "*.h"; then
             accessor_found=1
@@ -393,15 +394,7 @@ for code in $reason_codes; do
             ;;
         *)
             echo "ERROR: unknown emission kind '${emission_kind}' for ${code}; add a handler in tools/harness/audit_reason_codes.sh" >&2
-            if [[ -n "$accessor" ]] \
-                && _grep_pair_in_src_files "$accessor" "$LOG_DECISION_SYMBOL" \
-                    "*.c" "*_impl.h"; then
-                emission_found=1
-            fi
-            if [[ "$emission_found" -eq 0 ]]; then
-                echo "ERROR: no valid emission handler matched ${code} (${accessor:-no accessor})" >&2
-                exit 2
-            fi
+            echo "ERROR: no valid emission handler matched ${code} (${accessor:-no accessor})" >&2
             exit 2
             ;;
     esac
