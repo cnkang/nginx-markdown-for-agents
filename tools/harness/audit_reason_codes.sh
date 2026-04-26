@@ -260,13 +260,12 @@ check_mapper_emission() {
     fi
     # If enum_id could not be derived, fall through to file-level check below.
 
-    if [[ "$found" -eq 0 ]]; then
-        # Fallback: file-level co-occurrence check (accessor + log_decision
-        # in same file) when enum derivation was not possible.
-        if _grep_pair_in_src_files "$accessor" "$LOG_DECISION_SYMBOL" \
+    # Fallback: file-level co-occurrence check (accessor + log_decision
+    # in same file) when enum derivation was not possible.
+    if [[ "$found" -eq 0 ]] \
+        && _grep_pair_in_src_files "$accessor" "$LOG_DECISION_SYMBOL" \
             "*.c" "*_impl.h"; then
-            found=1
-        fi
+        found=1
     fi
 
     if [[ "$found" -eq 0 ]]; then
@@ -364,10 +363,9 @@ for code in $reason_codes; do
         if grep -wF -q -- "$accessor" "$HEADER_FILE" 2>/dev/null; then
             accessor_found=1
         fi
-        if [[ "$accessor_found" -eq 0 ]]; then
-            if _grep_in_src_files "$accessor" "*.c" "*.h"; then
-                accessor_found=1
-            fi
+        if [[ "$accessor_found" -eq 0 ]] \
+            && _grep_in_src_files "$accessor" "*.c" "*.h"; then
+            accessor_found=1
         fi
     fi
     if [[ "$accessor_found" -eq 0 ]]; then
