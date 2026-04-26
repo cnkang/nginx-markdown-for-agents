@@ -271,14 +271,15 @@ fn test_traversal_video_with_poster() {
     let md = convert_html(
         r#"<video src="https://example.com/video.mp4" poster="https://example.com/poster.jpg">No video</video>"#,
     );
-    /* Should extract video src and/or poster */
-    assert!(md.contains("example.com") || md.contains("No video"));
+    /* Should extract video src and/or poster. */
+    assert!(md.contains("example.com"));
 }
 
 #[test]
 fn test_traversal_video_missing_src() {
     let md = convert_html(r#"<video>No video</video>"#);
-    assert!(!md.contains("example.com"));
+    assert!(!md.contains("://"));
+    assert!(md.contains("No video"));
 }
 
 #[test]
@@ -296,7 +297,8 @@ fn test_traversal_video_dangerous_src() {
 #[test]
 fn test_traversal_audio_missing_src() {
     let md = convert_html(r#"<audio>No audio</audio>"#);
-    assert!(!md.contains("example.com"));
+    assert!(!md.contains("://"));
+    assert!(md.contains("No audio"));
 }
 
 #[test]

@@ -161,6 +161,7 @@ pub(crate) fn decode_options(
     };
 
     let include_front_matter = options.front_matter != 0;
+    let generate_etag = options.generate_etag != 0;
     let resolve_relative_urls = base_url.is_some();
     let timeout = if options.timeout_ms > 0 {
         Duration::from_millis(u64::from(options.timeout_ms))
@@ -171,13 +172,13 @@ pub(crate) fn decode_options(
     Ok(DecodedOptions {
         content_type,
         timeout,
-        generate_etag: options.generate_etag != 0,
+        generate_etag,
         estimate_tokens: options.estimate_tokens != 0,
         streaming_budget: options.streaming_budget,
         conversion: ConversionOptions {
             flavor,
             include_front_matter,
-            extract_metadata: include_front_matter,
+            extract_metadata: include_front_matter || generate_etag,
             simplify_navigation: true,
             preserve_tables: true,
             base_url,

@@ -67,7 +67,7 @@ fn test_streaming_empty_feed() {
     converter.feed_chunk(b"").expect("empty feed failed");
     let result = converter.finalize().expect("finalize failed");
     let md = String::from_utf8_lossy(&result.final_markdown);
-    assert!(md.trim().is_empty() || md.len() < 10);
+    assert!(md.trim().is_empty());
 }
 
 #[test]
@@ -276,9 +276,10 @@ fn test_streaming_set_content_type_after_resolved() {
     let feed2_md = String::from_utf8_lossy(&output2.markdown);
     let final_md = String::from_utf8_lossy(&result.final_markdown);
     let combined = format!("{}{}{}", feed1_md, feed2_md, final_md);
+    assert!(combined.contains("First"), "First chunk should use UTF-8");
     assert!(
-        combined.contains("First") || combined.contains("Second"),
-        "Content should appear in combined output"
+        combined.contains("Second"),
+        "Second chunk should still use UTF-8"
     );
 }
 
@@ -504,8 +505,8 @@ fn test_ffi_streaming_with_etag_and_tokens() {
         assert_eq!(finalize_rc, 0, "finalize should succeed");
         assert_eq!(result.error_code, 0);
         assert!(
-            !result.etag.is_null() || result.etag_len == 0,
-            "ETag field should be set (null or non-null)"
+            !result.etag.is_null() && result.etag_len > 0,
+            "ETag field should be non-null with non-zero length"
         );
         assert!(result.token_estimate > 0, "Token estimate should be > 0");
         markdown_result_free(&mut result);
