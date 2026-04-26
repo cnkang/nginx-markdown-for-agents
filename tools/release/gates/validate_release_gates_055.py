@@ -85,7 +85,7 @@ KNOWN_DIFFS_STRUCTURED_METADATA = "known-diffs:structured-metadata"
 KNOWN_DIFFS_SUPPRESSOR_SCOPE = "known-diffs:suppressor-scope"
 CHANGELOG_0_5_5_ENTRY = "changelog:0.5.5-entry"
 CHANGELOG_RELEASE_PATTERN = re.compile(
-    r"(?m)^(?:#{1,6}\s+(?:\[0\.5\.5\]|0\.5\.5\b)|\[0\.5\.5\])"
+    r"(?m)^(?:#{1,6}\s+(?:\[0\.5\.5\]|0\.5\.5(?!\.\d))|\[0\.5\.5\])"
 )
 REASON_CODE_AUDIT_SCRIPT = "reason-code:audit-script"
 REASON_CODES_AUDIT = "reason-codes:audit"
@@ -242,7 +242,8 @@ def check_evidence_artifact(result: ValidationResult) -> None:
         )
         return
 
-    validate_required_fields(data, result)
+    if not validate_required_fields(data, result):
+        return
     validate_non_negative_counts(data, result)
     validate_schema_version(data, result)
     validate_pass_flag(data, result)
@@ -256,7 +257,7 @@ def check_evidence_artifact(result: ValidationResult) -> None:
     validate_verification_result(data, result)
 
 
-def validate_required_fields(data: dict[str, object], result: ValidationResult) -> None:
+def validate_required_fields(data: dict[str, object], result: ValidationResult) -> bool:
     """Validate required evidence fields and their JSON types."""
     required_fields = [
         ("schema_version", int),
@@ -295,16 +296,19 @@ def validate_required_fields(data: dict[str, object], result: ValidationResult) 
             EVIDENCE_ARTIFACT_REQUIRED_FIELDS,
             f"missing: {', '.join(missing_fields)}",
         )
+        return False
     elif wrong_type_fields:
         result.failed(
             EVIDENCE_ARTIFACT_REQUIRED_FIELDS,
             f"type mismatches: {'; '.join(wrong_type_fields)}",
         )
+        return False
     else:
         result.passed(
             EVIDENCE_ARTIFACT_REQUIRED_FIELDS,
             "all required fields present with correct types",
         )
+        return True
 
 
 def evidence_field_has_type(value: object, expected_type: type) -> bool:

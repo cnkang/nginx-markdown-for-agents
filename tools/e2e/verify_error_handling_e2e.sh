@@ -34,6 +34,12 @@ readonly AWK_HTTP_STATUS="{print \$2}"
 # shellcheck disable=SC1090
 source "${NATIVE_BUILD_HELPER}"
 
+#
+# Print command-line usage for this E2E script.
+# Arguments: none.
+# Output: writes help text to stdout; callers may redirect to stderr.
+# Exit: returns 0 and does not exit the script.
+#
 usage() {
   cat <<EOF
 Usage: $(basename "$0") [--keep-artifacts] [--nginx-version VERSION] [--port PORT] [--upstream-port PORT]
@@ -45,6 +51,14 @@ EOF
   return 0
 }
 
+#
+# Require that an option flag was followed by a non-empty value.
+# Arguments:
+#   $1: flag name used in diagnostics.
+#   $2: flag value to validate.
+# Output: writes diagnostics and usage to stderr on failure.
+# Exit: exits with status 2 when the value is missing; returns 0 otherwise.
+#
 require_flag_value() {
   local flag_name="$1"
   if [[ $# -lt 2 || -z "${2-}" ]]; then
@@ -55,6 +69,13 @@ require_flag_value() {
   return 0
 }
 
+#
+# Stop child services and remove temporary artifacts when appropriate.
+# Arguments: none.
+# Output: writes failure artifact diagnostics to stderr.
+# Exit: returns 0; preserves the original script status by running from trap.
+# Side effects: stops upstream/NGINX and may remove BUILDROOT on success.
+#
 cleanup() {
   local rc=$?
   if [[ -n "${UPSTREAM_PID}" ]]; then
@@ -73,6 +94,32 @@ cleanup() {
   return 0
 }
 trap cleanup EXIT
+
+#
+# Poll an HTTP endpoint until it becomes reachable.
+# Arguments:
+#   $1: URL to poll for readiness.
+#   $2: label for failure diagnostics.
+# Output: writes timeout diagnostics and curl output to stderr on failure.
+# Exit: returns 0 when the endpoint responds; returns 1 after timeout.
+#
+wait_for_http() {
+  local url="$1"
+  local label="$2"
+  local curl_output=""
+  for _ in $(seq 1 50); do
+    if curl -sS --max-time 1 "$url" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 0.1
+  done
+  curl_output=$(curl -sS --max-time 2 "$url" 2>&1 || true)
+  echo "${label} failed to become ready after 5s" >&2
+  if [[ -n "${curl_output}" ]]; then
+    echo "curl output: ${curl_output}" >&2
+  fi
+  return 1
+}
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -236,17 +283,17 @@ PY
 
 chmod +x "${UPSTREAM_SCRIPT}"
 
-echo "==> Host architecture: $(uname -m)"
+echo "==> Host architecture: $(uname -m)" >&2
 if [[ -n "${NGINX_BIN}" ]]; then
-  echo "==> Reusing existing NGINX binary (${NGINX_BIN})"
+  echo "==> Reusing existing NGINX binary (${NGINX_BIN})" >&2
   LOAD_MODULE_LINE="$(markdown_prepare_runtime_reuse "${NGINX_BIN}" "${RUNTIME}")"
   NGINX_EXECUTABLE="${NGINX_BIN}"
 else
-  echo "==> Building Rust converter (${RUST_TARGET})"
+  echo "==> Building Rust converter (${RUST_TARGET})" >&2
   markdown_prepare_rust_converter_release \
     "${WORKSPACE_ROOT}" "${RUST_TARGET}" --features streaming >/dev/null
 
-  echo "==> Downloading/building NGINX ${NGINX_VERSION}"
+  echo "==> Downloading/building NGINX ${NGINX_VERSION}" >&2
   curl --proto '=https' --tlsv1.2 -fsSL "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" -o "${BUILDROOT}/nginx.tar.gz"
   mkdir -p "${BUILDROOT}/src"
   tar -xzf "${BUILDROOT}/nginx.tar.gz" -C "${BUILDROOT}/src" --strip-components=1
@@ -268,13 +315,8 @@ mkdir -p "${RUNTIME}/conf" "${RUNTIME}/logs"
 echo "==> Starting error-handling upstream on 127.0.0.1:${UPSTREAM_PORT}" >&2
 python3 "${UPSTREAM_SCRIPT}" --serve --host 127.0.0.1 --port "${UPSTREAM_PORT}" > "${RAW_DIR}/upstream.log" 2>&1 &
 UPSTREAM_PID=$!
-for _ in $(seq 1 50); do
-  if curl -sS "http://127.0.0.1:${UPSTREAM_PORT}/health" >/dev/null 2>&1; then
-    break
-  fi
-  sleep 0.1
-done
-curl -sS "http://127.0.0.1:${UPSTREAM_PORT}/health" >/dev/null
+wait_for_http "http://127.0.0.1:${UPSTREAM_PORT}/health" \
+  "Upstream on ${UPSTREAM_PORT}"
 
 cat > "${RUNTIME}/conf/nginx.conf" <<EOF
 ${LOAD_MODULE_LINE}worker_processes 1;
@@ -332,12 +374,13 @@ http {
 }
 EOF
 
-echo "==> Starting NGINX on 127.0.0.1:${PORT}"
+echo "==> Starting NGINX on 127.0.0.1:${PORT}" >&2
 "${NGINX_EXECUTABLE}" -p "${RUNTIME}" -c conf/nginx.conf
-sleep 1
+wait_for_http "http://127.0.0.1:${PORT}/md/valid" \
+  "NGINX on ${PORT}"
 
 # --- Case 1: Valid HTML converts successfully ---
-echo "==> Case 1: Valid HTML converts successfully"
+echo "==> Case 1: Valid HTML converts successfully" >&2
 curl -sS -D "${RAW_DIR}/case1.hdr" -o "${RAW_DIR}/case1.body" \
   -H "${ACCEPT_MARKDOWN}" --max-time 30 \
   "http://127.0.0.1:${PORT}/md/valid" >/dev/null
@@ -345,10 +388,10 @@ grep -qi "${PATTERN_CT_MARKDOWN}" "${RAW_DIR}/case1.hdr" || {
   echo "FAIL: Case 1 - expected markdown Content-Type" >&2
   exit 1
 }
-echo "  PASS: Valid HTML converts to Markdown"
+echo "  PASS: Valid HTML converts to Markdown" >&2
 
 # --- Case 2: Malformed HTML does not crash (fail-open) ---
-echo "==> Case 2: Malformed HTML does not crash (fail-open with on_error pass)"
+echo "==> Case 2: Malformed HTML does not crash (fail-open with on_error pass)" >&2
 curl -sS -D "${RAW_DIR}/case2.hdr" -o "${RAW_DIR}/case2.body" \
   -H "${ACCEPT_MARKDOWN}" --max-time 30 \
   "http://127.0.0.1:${PORT}/md/malformed" >/dev/null
@@ -358,10 +401,10 @@ if [[ "${status_code}" != "200" ]]; then
   echo "FAIL: Case 2 - expected 200, got ${status_code}" >&2
   exit 1
 fi
-echo "  PASS: Malformed HTML handled without crash (HTTP ${status_code})"
+echo "  PASS: Malformed HTML handled without crash (HTTP ${status_code})" >&2
 
 # --- Case 3: Empty response body does not crash ---
-echo "==> Case 3: Empty response body does not crash"
+echo "==> Case 3: Empty response body does not crash" >&2
 curl -sS -D "${RAW_DIR}/case3.hdr" -o "${RAW_DIR}/case3.body" \
   -H "${ACCEPT_MARKDOWN}" --max-time 30 \
   "http://127.0.0.1:${PORT}/md/empty" >/dev/null
@@ -370,7 +413,7 @@ if [[ "${status_code}" != "200" ]]; then
   echo "FAIL: Case 3 - expected 200, got ${status_code}" >&2
   exit 1
 fi
-echo "  PASS: Empty body handled without crash"
+echo "  PASS: Empty body handled without crash" >&2
 
 # --- Case 4: Upstream 500 error is not converted ---
 echo "==> Case 4: Upstream 500 error is not converted" >&2
@@ -382,7 +425,7 @@ if [[ "${status_code}" != "500" ]]; then
   echo "FAIL: Case 4 - expected 500, got ${status_code}" >&2
   exit 1
 else
-  echo "  PASS: Upstream 500 preserved (not converted)"
+  echo "  PASS: Upstream 500 preserved (not converted)" >&2
 fi
 
 # --- Case 5: Upstream 502 error is not converted ---
@@ -395,11 +438,11 @@ if [[ "${status_code}" != "502" ]]; then
   echo "FAIL: Case 5 - expected 502, got ${status_code}" >&2
   exit 1
 else
-  echo "  PASS: Upstream 502 preserved (not converted)"
+  echo "  PASS: Upstream 502 preserved (not converted)" >&2
 fi
 
 # --- Case 6: 206 Partial Content is not converted ---
-echo "==> Case 6: 206 Partial Content is not converted"
+echo "==> Case 6: 206 Partial Content is not converted" >&2
 curl -sS -D "${RAW_DIR}/case6.hdr" -o "${RAW_DIR}/case6.body" \
   -H "${ACCEPT_MARKDOWN}" --max-time 30 \
   "http://127.0.0.1:${PORT}/md/partial206" >/dev/null
@@ -410,14 +453,14 @@ if [[ "${status_code}" == "206" ]]; then
     echo "FAIL: Case 6 - 206 response Content-Type is not text/html" >&2
     exit 1
   }
-  echo "  PASS: 206 Partial Content not converted"
+  echo "  PASS: 206 Partial Content not converted" >&2
 else
   echo "FAIL: Case 6 - expected 206, got ${status_code}" >&2
   exit 1
 fi
 
 # --- Case 7: Small max_size allows small response ---
-echo "==> Case 7: Small max_size (1k) allows small response"
+echo "==> Case 7: Small max_size (1k) allows small response" >&2
 curl -sS -D "${RAW_DIR}/case7.hdr" -o "${RAW_DIR}/case7.body" \
   -H "${ACCEPT_MARKDOWN}" --max-time 30 \
   "http://127.0.0.1:${PORT}/md-small/small" >/dev/null
@@ -425,10 +468,10 @@ grep -qi "${PATTERN_CT_MARKDOWN}" "${RAW_DIR}/case7.hdr" || {
   echo "FAIL: Case 7 - small response should convert with 1k max_size" >&2
   exit 1
 }
-echo "  PASS: Small response converts with 1k max_size"
+echo "  PASS: Small response converts with 1k max_size" >&2
 
 # --- Case 8: Small max_size fail-opens for larger response ---
-echo "==> Case 8: Small max_size (1k) fail-opens for larger response"
+echo "==> Case 8: Small max_size (1k) fail-opens for larger response" >&2
 oversize_bytes="$(curl -sS --max-time 30 \
   "http://127.0.0.1:${UPSTREAM_PORT}/large" | wc -c | tr -d ' ')"
 if [[ "${oversize_bytes}" -le 1024 ]]; then
@@ -443,7 +486,7 @@ grep -qi "${PATTERN_CT_HTML}" "${RAW_DIR}/case8.hdr" || {
   echo "FAIL: Case 8 - expected text/html for oversize response" >&2
   exit 1
 }
-echo "  PASS: Oversize response fail-open verified"
+echo "  PASS: Oversize response fail-open verified" >&2
 
 echo "" >&2
 echo "========================================" >&2
