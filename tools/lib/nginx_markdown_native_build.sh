@@ -1,5 +1,23 @@
 #!/usr/bin/env bash
+#
+# Shared native-build helpers for release and E2E scripts.
+#
+# Contract:
+#   - Functions named markdown_* are shell-library entrypoints.
+#   - Data-returning helpers write machine-readable values to stdout.
+#   - Diagnostics and prerequisites failures are written to stderr.
+#   - Functions return 0 on success and non-zero on validation, discovery,
+#     copy, or unsupported-platform failures.
+#   - Callers must source this file; it is not intended to run as a script.
 
+# Args:
+#   $1 - command name to find in PATH.
+# Stdout:
+#   None.
+# Stderr:
+#   Missing-command diagnostic.
+# Returns:
+#   0 when the command is available; 1 otherwise.
 markdown_need_cmd() {
   local cmd_name="$1"
 
@@ -11,6 +29,15 @@ markdown_need_cmd() {
   return 0
 }
 
+# Args:
+#   $1 - current script path; remaining arguments are forwarded on re-exec.
+# Stdout:
+#   None.
+# Stderr:
+#   Re-exec diagnostic when Rosetta translation is detected.
+# Returns:
+#   0 when no re-exec is needed. On translated Apple Silicon, replaces the
+#   current process with native arm64 /bin/bash.
 markdown_ensure_native_apple_silicon() {
   local script_path="$1"
   shift || true
@@ -29,6 +56,14 @@ markdown_ensure_native_apple_silicon() {
   return 0
 }
 
+# Args:
+#   None.
+# Stdout:
+#   Rust target triple for the current host.
+# Stderr:
+#   Unsupported-host diagnostic.
+# Returns:
+#   0 when a supported target is detected; 1 otherwise.
 markdown_detect_rust_target() {
   local host_os host_arch libc_variant
 

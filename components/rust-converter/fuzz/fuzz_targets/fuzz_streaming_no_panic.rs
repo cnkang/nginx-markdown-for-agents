@@ -1,4 +1,11 @@
 #![no_main]
+
+//! Fuzz the basic no-panic streaming contract.
+//!
+//! The first byte toggles whether an explicit UTF-8 Content-Type is supplied;
+//! the remaining bytes are fed as one chunk. The target accepts conversion
+//! errors but rejects panics across charset detection, feed, and finalize.
+
 use libfuzzer_sys::fuzz_target;
 use nginx_markdown_converter::converter::ConversionOptions;
 use nginx_markdown_converter::streaming::budget::MemoryBudget;

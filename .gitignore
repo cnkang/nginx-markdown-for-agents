@@ -5,11 +5,21 @@
 .serena/
 .vscode/
 .idea/
+.fleet/
+*.iml
+
+# Local environment files
+.env
+.env.*
+!.env.example
+!.env.sample
+.direnv/
 
 # Documentation local archive (not source-of-truth)
 docs/archive/
 
 # Rust artifacts
+target/
 components/rust-converter/target/
 
 # Rust fuzzing local state and generated outputs
@@ -49,12 +59,34 @@ tests/corpus/large/*.meta.json
 build/
 dist/
 out/
+tmp/
+temp/
 coverage/
 test-output/
 test-results/
 compile_commands.json
 compile_commands.*.json
 .sonarlint/
+
+# CMake / Ninja local output
+CMakeFiles/
+CMakeCache.txt
+cmake-build-*/
+.ninja_deps
+.ninja_log
+
+# Node / frontend local output
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.pnpm-store/
+.npm/
+.yarn/cache/
+.yarn/unplugged/
+.yarn/build-state.yml
+.yarn/install-state.gz
 
 # Tool caches
 tools/**/.cache/
@@ -63,10 +95,23 @@ tests/**/tmp/
 *.py[cod]
 .pytest_cache/
 .hypothesis/
+.coverage
+.coverage.*
+htmlcov/
 .mypy_cache/
+.pyre/
+.pytype/
 .ruff_cache/
+.ipynb_checkpoints/
+.python_history
+__pypackages__/
+pip-wheel-metadata/
 .nox/
 .tox/
+.env/
+env/
+venv/
+.venv/
 .sonar/
 
 # Matrix updater transient artifact
@@ -99,6 +144,9 @@ matrix-diff.json
 .AppleDouble
 .LSOverride
 .directory
+Thumbs.db
+ehthumbs.db
+Desktop.ini
 
 # Vim swap
 *.swp

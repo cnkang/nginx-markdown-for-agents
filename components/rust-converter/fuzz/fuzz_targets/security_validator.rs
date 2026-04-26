@@ -1,5 +1,11 @@
 #![no_main]
 
+//! Fuzz security validation primitives and DOM traversal.
+//!
+//! The target treats arbitrary text as element names, attributes, and URLs, then
+//! walks parsed DOMs when parsing succeeds. It accepts validation failures but
+//! ensures dangerous-input handling and depth checks remain panic-free.
+
 use libfuzzer_sys::fuzz_target;
 use markup5ever_rcdom::{Handle, NodeData};
 use nginx_markdown_converter::parser::parse_html;

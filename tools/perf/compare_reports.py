@@ -11,6 +11,16 @@ Usage:
         --current perf/reports/current.json \
         --thresholds perf/quality-thresholds.json \
         --output perf/reports/corpus-verdict.json
+
+Output:
+    Writes the corpus-verdict JSON to --output and prints the final verdict to
+    stdout. Metric warnings and failures are written to stderr so captured JSON
+    output remains clean.
+
+Exit codes:
+    0 when the overall verdict is pass or warn.
+    1 when report validation fails, inputs cannot be read, or the verdict is
+    fail.
 """
 
 from __future__ import annotations

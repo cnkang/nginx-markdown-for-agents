@@ -10,7 +10,7 @@ Implemented comprehensive deterministic output normalization for the NGINX Markd
 
 ### 1. Enhanced `normalize_output()` Function
 
-**Location**: `components/rust-converter/src/converter.rs`
+**Location**: `components/rust-converter/src/converter/normalize.rs`
 
 **Changes**:
 - Added CRLF to LF line ending normalization
@@ -33,7 +33,7 @@ fn normalize_output(&self, output: String) -> String {
 
 ### 2. New `normalize_line_whitespace()` Function
 
-**Location**: `components/rust-converter/src/converter.rs`
+**Location**: `components/rust-converter/src/converter/normalize.rs`
 
 **Purpose**: Normalize whitespace within individual lines while preserving:
 - Inline code spacing (between backticks)
@@ -76,7 +76,9 @@ fn normalize_line_whitespace(&self, line: &str) -> String {
 
 ### Unit Tests Added (13 new tests)
 
-All tests located in `components/rust-converter/src/converter.rs`:
+Normalization-focused tests are located in
+`components/rust-converter/src/converter.rs` and exercise the implementation
+in `components/rust-converter/src/converter/normalize.rs`:
 
 1. **`test_normalize_crlf_to_lf`**: Verifies CRLF → LF conversion
 2. **`test_normalize_consecutive_blank_lines`**: Verifies blank line collapsing

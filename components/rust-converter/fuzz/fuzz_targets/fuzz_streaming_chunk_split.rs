@@ -1,4 +1,12 @@
 #![no_main]
+
+//! Fuzz streaming chunk-boundary invariants.
+//!
+//! Single-chunk and seeded multi-chunk conversion must keep success/error
+//! parity. When both paths succeed, only ASCII-whitespace-normalized drift is
+//! tolerated so tokenizer, UTF-8 tail, sanitizer, and emitter boundary bugs are
+//! exposed as regressions.
+
 use libfuzzer_sys::fuzz_target;
 mod streaming_utils;
 

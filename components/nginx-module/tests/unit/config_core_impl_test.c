@@ -547,8 +547,10 @@ test_merge_conf(void)
     parent.streaming_on_error = NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_REJECT;
     parent.streaming_shadow = 1;
 
-    child.enabled = NGX_CONF_UNSET;
+    /* Initially unset; enabled below reflects the post-action state. */
     child.enabled_source = NGX_HTTP_MARKDOWN_ENABLED_UNSET;
+    child.enabled = 1;
+    child.enabled_complex = (ngx_http_complex_value_t *) &child;
     child.max_size = NGX_CONF_UNSET_SIZE;
     child.timeout = NGX_CONF_UNSET_MSEC;
     child.on_error = NGX_CONF_UNSET_UINT;
@@ -698,7 +700,7 @@ static void
 test_filter_flag_and_is_enabled(void)
 {
     ngx_str_t value;
-    ngx_flag_t enabled;
+    ngx_flag_t enabled = 0;
     ngx_http_markdown_conf_t conf;
     ngx_http_complex_value_t cv;
     ngx_http_request_t req;
@@ -817,6 +819,166 @@ test_log_merged_conf(void)
 }
 
 /*
+ * Verify parse_filter_flag additional branches:
+ *  - "1" and "0" single-character numeric flags
+ *  - "no" and "false" word flags
+ *  - "yes" word flag
+ */
+static void
+test_filter_flag_additional_branches(void)
+{
+    ngx_str_t value;
+    ngx_flag_t enabled = 0;
+
+    TEST_SUBSECTION("parse_filter_flag additional branches");
+
+    set_str(&value, "1");
+    TEST_ASSERT(ngx_http_markdown_parse_filter_flag(&value, &enabled) == NGX_OK,
+        "numeric 1 should parse");
+    TEST_ASSERT(enabled == 1, "1 should enable");
+
+    set_str(&value, "0");
+    TEST_ASSERT(ngx_http_markdown_parse_filter_flag(&value, &enabled) == NGX_OK,
+        "numeric 0 should parse");
+    TEST_ASSERT(enabled == 0, "0 should disable");
+
+    set_str(&value, "no");
+    TEST_ASSERT(ngx_http_markdown_parse_filter_flag(&value, &enabled) == NGX_OK,
+        "no should parse");
+    TEST_ASSERT(enabled == 0, "no should disable");
+
+    set_str(&value, "false");
+    TEST_ASSERT(ngx_http_markdown_parse_filter_flag(&value, &enabled) == NGX_OK,
+        "false should parse");
+    TEST_ASSERT(enabled == 0, "false should disable");
+
+    set_str(&value, "yes");
+    TEST_ASSERT(ngx_http_markdown_parse_filter_flag(&value, &enabled) == NGX_OK,
+        "yes should parse");
+    TEST_ASSERT(enabled == 1, "yes should enable");
+
+    TEST_PASS("parse_filter_flag additional branches covered");
+}
+
+/*
+ * Verify name helper default/unknown branches:
+ *  - flavor_name with unknown value
+ *  - auth_policy_name with unknown value
+ *  - conditional_requests_name with unknown value
+ *  - log_verbosity_name with unknown value
+ *  - metrics_format_name with unknown value
+ *  - compression_name with deflate and unknown type
+ *  - enabled_source_name with unknown value
+ */
+static void
+test_name_helpers_unknown_branches(void)
+{
+    const ngx_str_t *name;
+
+    TEST_SUBSECTION("name helper unknown/default branches");
+
+    name = ngx_http_markdown_flavor_name(999);
+    TEST_ASSERT(name->len == strlen("unknown"), "flavor unknown name");
+
+    name = ngx_http_markdown_auth_policy_name(999);
+    TEST_ASSERT(name->len == strlen("unknown"), "auth policy unknown name");
+
+    name = ngx_http_markdown_conditional_requests_name(999);
+    TEST_ASSERT(name->len == strlen("unknown"), "conditional unknown name");
+
+    name = ngx_http_markdown_log_verbosity_name(999);
+    TEST_ASSERT(name->len == strlen("unknown"), "verbosity unknown name");
+
+    name = ngx_http_markdown_metrics_format_name(999);
+    TEST_ASSERT(name->len == strlen("unknown"), "metrics format unknown name");
+
+    name = ngx_http_markdown_compression_name(NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE);
+    TEST_ASSERT(name->len == strlen("deflate"), "compression deflate name");
+
+    name = ngx_http_markdown_compression_name(NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI);
+    TEST_ASSERT(name->len == strlen("brotli"), "compression brotli name");
+
+    name = ngx_http_markdown_compression_name(NGX_HTTP_MARKDOWN_COMPRESSION_UNKNOWN);
+    TEST_ASSERT(name->len == strlen("unknown"), "compression unknown enum name");
+
+    name = ngx_http_markdown_enabled_source_name(999);
+    TEST_ASSERT(name->len == strlen("unknown"), "enabled source unknown name");
+
+    name = ngx_http_markdown_enabled_source_name(NGX_HTTP_MARKDOWN_ENABLED_UNSET);
+    TEST_ASSERT(name->len == strlen("unset"), "enabled source unset name");
+
+    TEST_PASS("name helper unknown branches covered");
+}
+
+/*
+ * Verify merge_conf double-UNSET path:
+ *  When both parent and child have enabled_source == UNSET,
+ *  the child should default to STATIC with enabled=0.
+ */
+static void
+test_merge_conf_double_unset(void)
+{
+    ngx_conf_t cf;
+    ngx_http_markdown_conf_t parent;
+    ngx_http_markdown_conf_t child;
+    char *rc;
+
+    TEST_SUBSECTION("merge_conf double-UNSET enabled path");
+
+    memset(&cf, 0, sizeof(cf));
+    cf.pool = &g_pool;
+
+    memset(&parent, 0, sizeof(parent));
+    memset(&child, 0, sizeof(child));
+
+    /* Both parent and child have UNSET enabled_source */
+    parent.enabled_source = NGX_HTTP_MARKDOWN_ENABLED_UNSET;
+    parent.max_size = 4096;
+    parent.timeout = 100;
+    parent.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
+    parent.flavor = NGX_HTTP_MARKDOWN_FLAVOR_COMMONMARK;
+    parent.auth_policy = NGX_HTTP_MARKDOWN_AUTH_POLICY_ALLOW;
+    parent.conditional_requests = NGX_HTTP_MARKDOWN_CONDITIONAL_FULL_SUPPORT;
+    parent.log_verbosity = NGX_HTTP_MARKDOWN_LOG_INFO;
+    parent.ops.metrics_format = NGX_HTTP_MARKDOWN_METRICS_FORMAT_AUTO;
+
+    child.enabled_source = NGX_HTTP_MARKDOWN_ENABLED_UNSET;
+    child.max_size = NGX_CONF_UNSET_SIZE;
+    child.timeout = NGX_CONF_UNSET_MSEC;
+    child.on_error = NGX_CONF_UNSET_UINT;
+    child.flavor = NGX_CONF_UNSET_UINT;
+    child.token_estimate = NGX_CONF_UNSET;
+    child.front_matter = NGX_CONF_UNSET;
+    child.on_wildcard = NGX_CONF_UNSET;
+    child.auth_policy = NGX_CONF_UNSET_UINT;
+    child.auth_cookies = NGX_CONF_UNSET_PTR;
+    child.generate_etag = NGX_CONF_UNSET;
+    child.conditional_requests = NGX_CONF_UNSET_UINT;
+    child.log_verbosity = NGX_CONF_UNSET_UINT;
+    child.buffer_chunked = NGX_CONF_UNSET;
+    child.stream_types = NGX_CONF_UNSET_PTR;
+    child.auto_decompress = NGX_CONF_UNSET;
+    child.large_body_threshold = NGX_CONF_UNSET_SIZE;
+    child.ops.trust_forwarded_headers = NGX_CONF_UNSET;
+    child.ops.metrics_format = NGX_CONF_UNSET_UINT;
+    child.streaming_budget = NGX_CONF_UNSET_SIZE;
+    child.streaming_on_error = NGX_CONF_UNSET_UINT;
+    child.streaming_shadow = NGX_CONF_UNSET;
+
+    rc = ngx_http_markdown_merge_conf(&cf, &parent, &child);
+    TEST_ASSERT(rc == NGX_CONF_OK,
+        "merge_conf double-UNSET should succeed");
+    TEST_ASSERT(child.enabled_source == NGX_HTTP_MARKDOWN_ENABLED_STATIC,
+        "double-UNSET should default to STATIC");
+    TEST_ASSERT(child.enabled == 0,
+        "double-UNSET should default to disabled");
+    TEST_ASSERT(child.enabled_complex == NULL,
+        "double-UNSET should clear complex pointer");
+
+    TEST_PASS("merge_conf double-UNSET path covered");
+}
+
+/*
  * Entry point: run all config_core_impl unit tests.
  * Returns 0 on success; aborts via TEST_ASSERT on failure.
  */
@@ -831,8 +993,11 @@ main(void)
     test_main_conf_create_and_init();
     test_create_conf_defaults();
     test_merge_conf();
+    test_merge_conf_double_unset();
     test_name_helpers_and_levels();
+    test_name_helpers_unknown_branches();
     test_filter_flag_and_is_enabled();
+    test_filter_flag_additional_branches();
     test_log_merged_conf();
 
     printf("\n========================================\n");

@@ -28,7 +28,7 @@ pub struct MemoryBudget {
     pub state_stack: usize,
     /// Budget for the pending Markdown output buffer.
     pub output_buffer: usize,
-    /// Budget for the charset sniff buffer (fixed).
+    /// Budget for the charset sniff buffer (default 1024 bytes).
     pub charset_sniff: usize,
     /// Budget for lookahead buffering (front matter, etc.).
     pub lookahead: usize,

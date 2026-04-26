@@ -113,6 +113,23 @@ On the first drift trigger:
 If the same pattern repeats, escalate or ask for outside voice. The harness
 must not burn tokens pretending every retry is fresh work.
 
+## History Analysis and Remediation
+
+When a task asks for recent Git analysis plus actual harness or steering
+remediation, split the work into two explicit phases:
+
+1. Phase 1 analysis: collect local and remote commits in the requested window,
+   deduplicate by SHA, classify by subject and touched surface, and deep-check
+   high-risk diffs before proposing rule changes.
+2. Phase 2 remediation: implement every P0/P1 finding first, then complete all
+   worthwhile P2/P3 improvements or record why they are intentionally deferred.
+
+The closeout artifact must include stable finding IDs, final status, changed
+files, and verification evidence.  Use `harness-remediation` as the primary
+risk pack for this work.  If a report matching
+`docs/project/recent-git-harness-steering-analysis-*.md` exists, `make
+harness-check` validates that findings are traceable through remediation.
+
 ## Proving Grounds
 
 When validating harness evolution across broad scenarios, keep the first proving

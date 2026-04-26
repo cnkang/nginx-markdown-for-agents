@@ -87,7 +87,8 @@ impl MarkdownConverter {
         if let Some(url) = href {
             if let Some(safe_url) = self.security_validator.sanitize_url(&url) {
                 if !normalized_text.is_empty() {
-                    let escaped_dest = Self::escape_link_destination(safe_url);
+                    let resolved_url = self.resolve_url(safe_url);
+                    let escaped_dest = Self::escape_link_destination(&resolved_url);
                     output.push('[');
                     output.push_str(&normalized_text);
                     output.push_str("](");
@@ -140,7 +141,8 @@ impl MarkdownConverter {
             .and_then(|u| self.security_validator.sanitize_url(u));
 
         if let Some(url) = safe_url {
-            let escaped_dest = Self::escape_link_destination(url);
+            let resolved_url = self.resolve_url(url);
+            let escaped_dest = Self::escape_link_destination(&resolved_url);
             output.push_str("![");
             output.push_str(&alt);
             output.push_str("](");

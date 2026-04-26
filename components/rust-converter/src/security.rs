@@ -268,11 +268,43 @@ impl SecurityValidator {
         if trimmed.chars().any(|ch| ch == '\0' || ch.is_control()) {
             return true;
         }
+        if Self::contains_percent_encoded_control(trimmed) {
+            return true;
+        }
 
         let url_lower = trimmed.to_ascii_lowercase();
         DANGEROUS_URL_SCHEMES
             .iter()
             .any(|scheme| url_lower.starts_with(scheme))
+    }
+
+    fn contains_percent_encoded_control(url: &str) -> bool {
+        let bytes = url.as_bytes();
+        for window in bytes.windows(3) {
+            if window[0] != b'%' {
+                continue;
+            }
+            let Some(high) = Self::hex_value(window[1]) else {
+                continue;
+            };
+            let Some(low) = Self::hex_value(window[2]) else {
+                continue;
+            };
+            let value = (high << 4) | low;
+            if value < 0x20 || value == 0x7f {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn hex_value(byte: u8) -> Option<u8> {
+        match byte {
+            b'0'..=b'9' => Some(byte - b'0'),
+            b'a'..=b'f' => Some(byte - b'a' + 10),
+            b'A'..=b'F' => Some(byte - b'A' + 10),
+            _ => None,
+        }
     }
 
     /// Check if attributes contain event handlers or dangerous URLs
@@ -555,6 +587,56 @@ mod tests {
         assert!(!validator.is_dangerous_url("/relative/path"));
         assert!(!validator.is_dangerous_url("../parent/path"));
         assert!(!validator.is_dangerous_url("#anchor"));
+    }
+
+    #[test]
+    fn test_percent_encoded_control_characters_are_dangerous() {
+        let validator = SecurityValidator::new();
+
+        for url in [
+            "https://example.com/%00",
+            "https://example.com/%7F",
+            "https://example.com/%0a",
+            "https://example.com/%0A",
+            "https://example.com/%7f",
+            "%00",
+            "a%00",
+            "a%7Fb",
+        ] {
+            assert!(
+                validator.is_dangerous_url(url),
+                "percent-encoded control should be rejected: {url}"
+            );
+            assert!(
+                SecurityValidator::contains_percent_encoded_control(url),
+                "helper should detect percent-encoded control: {url}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_malformed_percent_triplets_are_not_control_characters() {
+        let validator = SecurityValidator::new();
+
+        for url in [
+            "https://example.com/%0",
+            "https://example.com/%xG",
+            "https://example.com/%G0",
+            "https://example.com/%20",
+            "https://example.com/abc%",
+            "https://example.com/abc%4",
+            "https://example.com/abc%41",
+            "%",
+        ] {
+            assert!(
+                !validator.is_dangerous_url(url),
+                "non-control or malformed triplet should not be dangerous: {url}"
+            );
+            assert!(
+                !SecurityValidator::contains_percent_encoded_control(url),
+                "helper should ignore non-control or malformed triplet: {url}"
+            );
+        }
     }
 
     #[test]

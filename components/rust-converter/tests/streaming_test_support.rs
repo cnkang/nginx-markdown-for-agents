@@ -25,16 +25,23 @@ use nginx_markdown_converter::incremental::IncrementalConverter;
 
 #[derive(Debug, Clone, Default)]
 pub struct FixtureMeta {
+    /// Whether the fixture is expected to trigger streaming fallback.
     pub expected_fallback: bool,
+    /// Fixture-scoped known-difference identifiers from the sidecar metadata.
     pub known_diff_ids: Vec<String>,
+    /// High-risk structures used to explain why the fixture is in the corpus.
     pub high_risk_structures: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
 pub struct StreamingRun {
+    /// Concatenated Markdown emitted by all feed calls plus finalize.
     pub markdown: String,
+    /// Runtime statistics returned by the streaming converter.
     pub stats: StreamingStats,
+    /// Elapsed time when the first non-empty Markdown chunk was observed.
     pub first_non_empty_at: Option<Duration>,
+    /// Total feed plus finalize wall-clock duration measured by the helper.
     pub elapsed: Duration,
 }
 
@@ -213,6 +220,13 @@ pub fn convert_streaming_single(
     )
 }
 
+/// Convert HTML through the streaming path using an explicit chunk schedule.
+///
+/// This is the shared production-like test harness for streaming parity tests:
+/// it applies content type, timeout, budget, and options once, feeds chunks in
+/// order, records first-output timing, and appends finalize output. Supplying
+/// chunk sizes that split tags or multibyte UTF-8 characters lets tests verify
+/// boundary handling without duplicating converter orchestration logic.
 pub fn convert_streaming_chunked(
     html: &[u8],
     chunk_sizes: &[usize],
@@ -263,8 +277,12 @@ pub fn convert_streaming_chunked(
     }
     out.extend_from_slice(&result.final_markdown);
 
+    let markdown = String::from_utf8(out).map_err(|err| {
+        ConversionError::EncodingError(format!("streaming emitted invalid UTF-8: {err}"))
+    })?;
+
     Ok(StreamingRun {
-        markdown: String::from_utf8_lossy(&out).into_owned(),
+        markdown,
         stats: result.stats,
         first_non_empty_at,
         elapsed: start.elapsed(),
@@ -275,6 +293,10 @@ pub fn single_byte_chunks(len: usize) -> Vec<usize> {
     vec![1; len]
 }
 
+/// Convert absolute split positions into per-feed chunk sizes.
+///
+/// Positions are sorted, de-duplicated, and clamped inside `(0, len)`, which
+/// keeps boundary strategies deterministic even when generated positions repeat.
 pub fn positions_to_sizes(len: usize, mut split_positions: Vec<usize>) -> Vec<usize> {
     if len == 0 {
         return Vec::new();
@@ -296,6 +318,10 @@ pub fn positions_to_sizes(len: usize, mut split_positions: Vec<usize>) -> Vec<us
     sizes
 }
 
+/// Build chunk sizes that split immediately after tag boundary bytes.
+///
+/// This exercises tokenizer state transitions around `<` and `>` so streaming
+/// tests cover partial tag and adjacent text paths, not only text-only chunks.
 pub fn tag_boundary_chunks(html: &[u8]) -> Vec<usize> {
     let mut positions = Vec::new();
     for (idx, byte) in html.iter().enumerate() {
@@ -306,6 +332,10 @@ pub fn tag_boundary_chunks(html: &[u8]) -> Vec<usize> {
     positions_to_sizes(html.len(), positions)
 }
 
+/// Build chunk sizes that split inside multibyte UTF-8 characters.
+///
+/// The strategy verifies the streaming UTF-8 tail buffer: split bytes must be
+/// preserved and reassembled before text reaches lossy string conversion.
 pub fn utf8_mid_char_chunks(html: &[u8]) -> Vec<usize> {
     let text = match std::str::from_utf8(html) {
         Ok(text) => text,

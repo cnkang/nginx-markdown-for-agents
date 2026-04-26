@@ -4,12 +4,14 @@
 //! as [`detect_charset`](crate::charset::detect_charset):
 //!
 //! 1. Content-Type header charset (priority 1)
-//! 2. HTML meta charset tag within the first 1024 bytes (priority 2)
+//! 2. HTML meta charset tag within the configured sniff limit (priority 2)
 //! 3. Default UTF-8 (priority 3)
 //!
-//! The streaming version accumulates up to 1024 bytes in a sniff buffer before
-//! resolving the charset. Once resolved, subsequent data is transcoded
-//! incrementally using `encoding_rs`.
+//! The streaming version accumulates up to the configured sniff limit before
+//! resolving the charset. The default is 1024 bytes, but callers can lower or
+//! raise it through [`MemoryBudget`](crate::streaming::budget::MemoryBudget).
+//! Once resolved, subsequent data is transcoded incrementally using
+//! `encoding_rs`.
 //!
 //! # Zero-Copy Path
 //!
@@ -21,8 +23,10 @@ use std::borrow::Cow;
 use crate::charset::detect_charset;
 use crate::error::ConversionError;
 
-/// Default maximum bytes to buffer for charset sniffing
-/// (matches `charset::META_SCAN_LIMIT`).
+/// Default maximum bytes to buffer for charset sniffing.
+///
+/// The default matches `charset::META_SCAN_LIMIT`, but streaming callers pass
+/// the runtime budget value through [`CharsetState::with_sniff_limit`].
 const DEFAULT_SNIFF_BUFFER_LIMIT: usize = 1024;
 
 /// Streaming charset detection state machine.
@@ -161,11 +165,11 @@ impl CharsetState {
 
     /// Process an input chunk, performing charset detection while pending and transcoding bytes to UTF-8.
     ///
-    /// While the state is `Pending`, incoming bytes are buffered (up to 1024 bytes) until a charset is
-    /// determined from the Content-Type header, an HTML `<meta charset=...>` within the sniff buffer,
-    /// or the sniff buffer limit is reached. When the charset is resolved the buffered bytes and the
-    /// new input are transcoded and the state transitions to `Resolved`. When the state is `Resolved`,
-    /// incoming bytes are transcoded directly.
+    /// While the state is `Pending`, incoming bytes are buffered up to the configured sniff limit
+    /// until a charset is determined from the Content-Type header, an HTML `<meta charset=...>` within
+    /// the sniff buffer, or the sniff buffer limit is reached. When the charset is resolved the
+    /// buffered bytes and the new input are transcoded and the state transitions to `Resolved`. When
+    /// the state is `Resolved`, incoming bytes are transcoded directly.
     ///
     /// # Returns
     ///
