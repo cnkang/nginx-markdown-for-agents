@@ -547,7 +547,7 @@ test_merge_conf(void)
     parent.streaming_on_error = NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_REJECT;
     parent.streaming_shadow = 1;
 
-    child.enabled = NGX_CONF_UNSET;
+    /* Initially unset; enabled below reflects the post-action state. */
     child.enabled_source = NGX_HTTP_MARKDOWN_ENABLED_UNSET;
     child.enabled = 1;
     child.enabled_complex = (ngx_http_complex_value_t *) &child;
@@ -700,7 +700,7 @@ static void
 test_filter_flag_and_is_enabled(void)
 {
     ngx_str_t value;
-    ngx_flag_t enabled;
+    ngx_flag_t enabled = 0;
     ngx_http_markdown_conf_t conf;
     ngx_http_complex_value_t cv;
     ngx_http_request_t req;
@@ -828,7 +828,7 @@ static void
 test_filter_flag_additional_branches(void)
 {
     ngx_str_t value;
-    ngx_flag_t enabled;
+    ngx_flag_t enabled = 0;
 
     TEST_SUBSECTION("parse_filter_flag additional branches");
 
