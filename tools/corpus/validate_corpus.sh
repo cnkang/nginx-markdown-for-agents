@@ -24,8 +24,30 @@ set -e
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
+# Print command usage.
+#
+# Arguments:
+#   None.
+#
+# Output:
+#   Writes help text to stdout. Callers may redirect it to stderr.
+#
+# Exit behavior:
+#   Returns success after printing the usage text.
 usage() {
-    sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'
+    awk '
+        NR == 1 { next }
+        /^#($| )/ {
+            sub(/^# ?/, "")
+            print
+            next
+        }
+        /^$/ {
+            print
+            next
+        }
+        { exit }
+    ' "$0"
     return 0
 }
 
@@ -101,7 +123,7 @@ echo ""
 echo "Building Rust converter..."
 cd "$ROOT/components/rust-converter"
 build_output=$(cargo build --release 2>&1) && build_exit=0 || build_exit=$?
-echo "$build_output" | grep -v "warning:" || true
+echo "$build_output" | grep -v "warning:" >&2 || true
 cd "$ROOT"
 if [[ "$build_exit" -ne 0 ]]; then
     echo -e "${RED}✗${NC} Rust converter build failed (exit code $build_exit)"

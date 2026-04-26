@@ -436,6 +436,7 @@ test_update_headers_etag_no_existing(void)
     ngx_http_markdown_conf_t conf;
     MarkdownResult result;
     static uint8_t etag_value[] = "\"abc123\"";
+    ngx_table_elt_t *vary;
 
     TEST_SUBSECTION("Update headers with ETag but no existing Vary header");
 
@@ -453,7 +454,10 @@ test_update_headers_etag_no_existing(void)
                 "update_headers with new Vary should succeed");
 
     TEST_ASSERT(r.headers_out.etag != NULL, "ETag should be set");
-    TEST_ASSERT(find_header(&r, "Vary") != NULL, "Vary header should be created");
+    vary = find_header(&r, "Vary");
+    TEST_ASSERT(vary != NULL, "Vary header should be created");
+    TEST_ASSERT(strstr((char *) vary->value.data, "Accept") != NULL,
+                "Vary should include Accept");
 
     free_request(&r);
     TEST_PASS("ETag with new Vary path works");

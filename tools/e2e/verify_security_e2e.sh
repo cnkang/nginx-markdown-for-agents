@@ -158,6 +158,12 @@ MIXED_DANGEROUS_HTML = b"""<html><head><title>Mixed Test</title></head>
 </body></html>
 """
 
+CONTROL_CHAR_URL_HTML = b"""<html><head><title>Control URL Test</title></head>
+<body><h1>Control URL Test</h1>
+<a href="https://example.com/%00evil">control char link</a>
+<p>Safe content</p></body></html>
+"""
+
 
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
@@ -176,6 +182,7 @@ class Handler(BaseHTTPRequestHandler):
             "/style-attr": (STYLE_ATTR_HTML, "text/html; charset=UTF-8"),
             "/deep-nest": (DEEP_NEST_HTML, "text/html; charset=UTF-8"),
             "/mixed": (MIXED_DANGEROUS_HTML, "text/html; charset=UTF-8"),
+            "/control-url": (CONTROL_CHAR_URL_HTML, "text/html; charset=UTF-8"),
         }
         if path in routes:
             body, ct = routes[path]
@@ -382,6 +389,25 @@ grep -q "https://example.com" "${RAW_DIR}/case7.body" || {
   exit 1
 }
 echo "  PASS: Mixed dangerous content stripped, safe content preserved"
+
+# --- Case 8: Control characters in URLs are neutralized ---
+echo "==> Case 8: Control-character URL is neutralized"
+curl -sS -D "${RAW_DIR}/case8.hdr" -o "${RAW_DIR}/case8.body" \
+  -H "${ACCEPT_MARKDOWN}" --max-time 30 \
+  "http://127.0.0.1:${PORT}/md/control-url" >/dev/null
+grep -qi "${PATTERN_CT_MARKDOWN}" "${RAW_DIR}/case8.hdr" || {
+  echo "FAIL: Case 8 - expected markdown Content-Type" >&2
+  exit 1
+}
+grep -Eiq '%0[01]|https://example\.com/%00evil' "${RAW_DIR}/case8.body" && {
+  echo "FAIL: Case 8 - control-character URL leaked into Markdown output" >&2
+  exit 1
+}
+if [[ -n "$(LC_ALL=C tr -d '\011\012\015\040-\176' < "${RAW_DIR}/case8.body")" ]]; then
+  echo "FAIL: Case 8 - raw control character leaked into Markdown output" >&2
+  exit 1
+fi
+echo "  PASS: Control-character URL neutralized"
 
 echo ""
 echo "========================================"

@@ -222,7 +222,13 @@ impl MarkdownConverter {
                 if let Some(u) = url {
                     let trimmed_url = u.trim();
                     if let Some(safe_url) = self.security_validator.sanitize_url(trimmed_url) {
-                        Self::emit_markdown_link(&[title.as_deref()], safe_url, safe_url, output);
+                        let resolved_url = self.resolve_url(safe_url);
+                        Self::emit_markdown_link(
+                            &[title.as_deref()],
+                            &resolved_url,
+                            &resolved_url,
+                            output,
+                        );
                     }
                 }
             }
@@ -436,7 +442,13 @@ impl MarkdownConverter {
             if let Some(u) = src {
                 let trimmed = u.trim();
                 if let Some(safe_url) = self.security_validator.sanitize_url(trimmed) {
-                    Self::emit_markdown_link(&[title.as_deref()], safe_url, safe_url, output);
+                    let resolved_url = self.resolve_url(safe_url);
+                    Self::emit_markdown_link(
+                        &[title.as_deref()],
+                        &resolved_url,
+                        &resolved_url,
+                        output,
+                    );
                 }
             }
 
@@ -449,7 +461,8 @@ impl MarkdownConverter {
             {
                 let trimmed = poster.trim();
                 if let Some(safe_url) = self.security_validator.sanitize_url(trimmed) {
-                    let escaped_dest = Self::escape_link_destination(safe_url);
+                    let resolved_url = self.resolve_url(safe_url);
+                    let escaped_dest = Self::escape_link_destination(&resolved_url);
                     output.push_str(&format!("![]({})", escaped_dest));
                     output.push('\n');
                 }
@@ -474,7 +487,13 @@ impl MarkdownConverter {
                         .iter()
                         .find(|a| a.name.local.as_ref() == "type")
                         .map(|a| a.value.to_string());
-                    Self::emit_markdown_link(&[type_attr.as_deref()], safe_url, safe_url, output);
+                    let resolved_url = self.resolve_url(safe_url);
+                    Self::emit_markdown_link(
+                        &[type_attr.as_deref()],
+                        &resolved_url,
+                        &resolved_url,
+                        output,
+                    );
                 }
             }
         }
@@ -496,7 +515,13 @@ impl MarkdownConverter {
                         .iter()
                         .find(|a| a.name.local.as_ref() == "label")
                         .map(|a| a.value.to_string());
-                    Self::emit_markdown_link(&[label.as_deref()], safe_url, safe_url, output);
+                    let resolved_url = self.resolve_url(safe_url);
+                    Self::emit_markdown_link(
+                        &[label.as_deref()],
+                        &resolved_url,
+                        &resolved_url,
+                        output,
+                    );
                 }
             }
         }
@@ -522,10 +547,11 @@ impl MarkdownConverter {
                         .iter()
                         .find(|a| a.name.local.as_ref() == "title")
                         .map(|a| a.value.to_string());
+                    let resolved_url = self.resolve_url(safe_url);
                     Self::emit_markdown_link(
                         &[alt.as_deref(), title.as_deref()],
-                        safe_url,
-                        safe_url,
+                        &resolved_url,
+                        &resolved_url,
                         output,
                     );
                 }

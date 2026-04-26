@@ -350,6 +350,7 @@ echo "  PASS: Accept: text/html -> text/html response with HTML content"
 # --- Case 3: No Accept header returns original HTML ---
 echo "==> Case 3: No Accept header returns original HTML (default)"
 curl -sS -D "${RAW_DIR}/case3.hdr" -o "${RAW_DIR}/case3.body" \
+  -H 'Accept:' \
   --max-time 30 \
   "http://127.0.0.1:${PORT}/md/html" >/dev/null
 grep -qi "${PATTERN_CT_HTML}" "${RAW_DIR}/case3.hdr" || {
@@ -383,7 +384,8 @@ echo "  PASS: Accept: */* + on_wildcard off -> text/html"
 # --- Case 6: Vary: Accept header in converted responses ---
 echo "==> Case 6: Vary: Accept header present in converted response"
 grep -qi "${PATTERN_VARY_ACCEPT}" "${RAW_DIR}/case1.hdr" || {
-  echo "  WARN: Vary: Accept not found in converted response (may not be implemented)"
+  echo "FAIL: Case 6 - Vary: Accept not found in converted response" >&2
+  exit 1
 }
 echo "  INFO: Vary header check completed"
 

@@ -114,7 +114,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 
 VALID_HTML = b"""<html><head><title>Valid</title></head>
-<body><h1>Valid Page</h1><p>Content here.</p></body></html>
+<body><h1>Valid Page</h1>""" + (b"<p>Content here.</p>" * 80) + b"""</body></html>
 """
 
 MALFORMED_HTML = b"""<html><head><title>Bad
@@ -251,7 +251,7 @@ fi
 
 mkdir -p "${RUNTIME}/conf" "${RUNTIME}/logs"
 
-echo "==> Starting error-handling upstream on 127.0.0.1:${UPSTREAM_PORT}"
+echo "==> Starting error-handling upstream on 127.0.0.1:${UPSTREAM_PORT}" >&2
 python3 "${UPSTREAM_SCRIPT}" --serve --host 127.0.0.1 --port "${UPSTREAM_PORT}" > "${RAW_DIR}/upstream.log" 2>&1 &
 UPSTREAM_PID=$!
 for _ in $(seq 1 50); do
@@ -359,25 +359,27 @@ fi
 echo "  PASS: Empty body handled without crash"
 
 # --- Case 4: Upstream 500 error is not converted ---
-echo "==> Case 4: Upstream 500 error is not converted"
+echo "==> Case 4: Upstream 500 error is not converted" >&2
 curl -sS -D "${RAW_DIR}/case4.hdr" -o "${RAW_DIR}/case4.body" \
   -H "${ACCEPT_MARKDOWN}" --max-time 30 \
   "http://127.0.0.1:${PORT}/md/error500" >/dev/null
 status_code="$(head -1 "${RAW_DIR}/case4.hdr" | awk '{print $2}')"
 if [[ "${status_code}" != "500" ]]; then
-  echo "  WARN: Case 4 - expected 500, got ${status_code} (proxy may modify status)"
+  echo "FAIL: Case 4 - expected 500, got ${status_code}" >&2
+  exit 1
 else
   echo "  PASS: Upstream 500 preserved (not converted)"
 fi
 
 # --- Case 5: Upstream 502 error is not converted ---
-echo "==> Case 5: Upstream 502 error is not converted"
+echo "==> Case 5: Upstream 502 error is not converted" >&2
 curl -sS -D "${RAW_DIR}/case5.hdr" -o "${RAW_DIR}/case5.body" \
   -H "${ACCEPT_MARKDOWN}" --max-time 30 \
   "http://127.0.0.1:${PORT}/md/error502" >/dev/null
 status_code="$(head -1 "${RAW_DIR}/case5.hdr" | awk '{print $2}')"
 if [[ "${status_code}" != "502" ]]; then
-  echo "  WARN: Case 5 - expected 502, got ${status_code}"
+  echo "FAIL: Case 5 - expected 502, got ${status_code}" >&2
+  exit 1
 else
   echo "  PASS: Upstream 502 preserved (not converted)"
 fi
@@ -391,11 +393,13 @@ status_code="$(head -1 "${RAW_DIR}/case6.hdr" | awk '{print $2}')"
 if [[ "${status_code}" == "206" ]]; then
   # 206 should not be converted - body should be HTML
   grep -qi "${PATTERN_CT_HTML}" "${RAW_DIR}/case6.hdr" || {
-    echo "  WARN: Case 6 - 206 response Content-Type is not text/html (may be acceptable)"
+    echo "FAIL: Case 6 - 206 response Content-Type is not text/html" >&2
+    exit 1
   }
   echo "  PASS: 206 Partial Content not converted"
 else
-  echo "  INFO: Case 6 - got status ${status_code} (upstream 206 may be modified by proxy)"
+  echo "FAIL: Case 6 - expected 206, got ${status_code}" >&2
+  exit 1
 fi
 
 # --- Case 7: Small max_size allows small response ---
@@ -411,14 +415,21 @@ echo "  PASS: Small response converts with 1k max_size"
 
 # --- Case 8: Small max_size fail-opens for larger response ---
 echo "==> Case 8: Small max_size (1k) fail-opens for larger response"
+oversize_bytes="$(curl -sS --max-time 30 \
+  "http://127.0.0.1:${UPSTREAM_PORT}/valid" | wc -c | tr -d ' ')"
+if [[ "${oversize_bytes}" -le 1024 ]]; then
+  echo "FAIL: Case 8 - /md-small/valid fixture must be >1024 bytes, got ${oversize_bytes}" >&2
+  exit 1
+fi
 curl -sS -D "${RAW_DIR}/case8.hdr" -o "${RAW_DIR}/case8.body" \
   -H "${ACCEPT_MARKDOWN}" --max-time 30 \
   "http://127.0.0.1:${PORT}/md-small/valid" >/dev/null
 # The valid HTML is larger than 1k, so it should fail-open to HTML
 grep -qi "${PATTERN_CT_HTML}" "${RAW_DIR}/case8.hdr" || {
-  echo "  WARN: Case 8 - expected text/html for oversize response (may still convert if under limit)"
+  echo "FAIL: Case 8 - expected text/html for oversize response" >&2
+  exit 1
 }
-echo "  INFO: Oversize response handling verified"
+echo "  PASS: Oversize response fail-open verified"
 
 echo ""
 echo "========================================"

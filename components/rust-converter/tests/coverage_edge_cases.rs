@@ -45,9 +45,7 @@ fn test_security_dangerous_src_stripped_via_conversion() {
 
 #[test]
 fn test_security_multiple_dangerous_attributes() {
-    let md = convert_html(
-        r#"<div onclick="alert(1)" style="display:none"><p>Content</p></div>"#,
-    );
+    let md = convert_html(r#"<div onclick="alert(1)" style="display:none"><p>Content</p></div>"#);
     assert!(md.contains("Content"));
     assert!(!md.contains("onclick"));
     assert!(!md.contains("style"));
@@ -60,6 +58,9 @@ fn test_security_control_chars_in_url() {
     assert!(validator.is_dangerous_url("https://example.com/\x03path"));
     assert!(validator.is_dangerous_url("https://example.com/\x1Fpath"));
     assert!(validator.is_dangerous_url("https://example.com/\x7Fpath"));
+    assert!(validator.is_dangerous_url("https://example.com/%00path"));
+    assert!(validator.is_dangerous_url("https://example.com/%1fpath"));
+    assert!(validator.is_dangerous_url("https://example.com/%7Fpath"));
     /* DEL character (0x7F) is a control character */
     assert!(validator.is_dangerous_url("\x7F"));
 }
@@ -193,9 +194,8 @@ fn test_tables_empty_tbody() {
 
 #[test]
 fn test_tables_body_row_more_columns_than_header() {
-    let md = convert_html(
-        "<table><tr><th>A</th></tr><tr><td>1</td><td>2</td><td>3</td></tr></table>",
-    );
+    let md =
+        convert_html("<table><tr><th>A</th></tr><tr><td>1</td><td>2</td><td>3</td></tr></table>");
     assert!(md.contains("A"));
     assert!(md.contains("1"));
     assert!(md.contains("2"));
@@ -245,7 +245,9 @@ fn test_traversal_input_with_value() {
 
 #[test]
 fn test_traversal_iframe_with_title() {
-    let md = convert_html(r#"<iframe src="https://example.com/embed" title="Embedded Video"><p>Fallback</p></iframe>"#);
+    let md = convert_html(
+        r#"<iframe src="https://example.com/embed" title="Embedded Video"><p>Fallback</p></iframe>"#,
+    );
     /* Should extract URL as link and preserve fallback text */
     assert!(md.contains("example.com") || md.contains("Fallback"));
 }
@@ -274,9 +276,39 @@ fn test_traversal_video_with_poster() {
 }
 
 #[test]
+fn test_traversal_video_missing_src() {
+    let md = convert_html(r#"<video>No video</video>"#);
+    assert!(!md.contains("example.com"));
+}
+
+#[test]
+fn test_traversal_video_with_src() {
+    let md = convert_html(r#"<video src="https://example.com/video.mp4">No video</video>"#);
+    assert!(md.contains("example.com"));
+}
+
+#[test]
 fn test_traversal_video_dangerous_src() {
     let md = convert_html(r#"<video src="javascript:void(0)">No video</video>"#);
     assert!(!md.contains("javascript:"));
+}
+
+#[test]
+fn test_traversal_audio_missing_src() {
+    let md = convert_html(r#"<audio>No audio</audio>"#);
+    assert!(!md.contains("example.com"));
+}
+
+#[test]
+fn test_traversal_audio_with_src() {
+    let md = convert_html(r#"<audio src="https://example.com/audio.mp3">No audio</audio>"#);
+    assert!(md.contains("example.com"));
+}
+
+#[test]
+fn test_traversal_source_missing_src() {
+    let md = convert_html(r#"<video><source type="audio/mpeg"></video>"#);
+    assert!(md.trim().is_empty());
 }
 
 #[test]
@@ -284,7 +316,13 @@ fn test_traversal_source_with_type() {
     let md = convert_html(
         r#"<video><source src="https://example.com/audio.mp3" type="audio/mpeg"></video>"#,
     );
-    assert!(md.contains("example.com") || md.trim().is_empty());
+    assert!(md.contains("example.com"));
+}
+
+#[test]
+fn test_traversal_track_missing_attributes() {
+    let md = convert_html(r#"<video><track></video>"#);
+    assert!(md.trim().is_empty());
 }
 
 #[test]
@@ -292,7 +330,13 @@ fn test_traversal_track_with_label() {
     let md = convert_html(
         r#"<video><track src="https://example.com/subs.vtt" label="English"></video>"#,
     );
-    assert!(md.contains("example.com") || md.trim().is_empty());
+    assert!(md.contains("example.com") || md.contains("English"));
+}
+
+#[test]
+fn test_traversal_area_missing_attributes() {
+    let md = convert_html(r#"<map name="m"><area></map>"#);
+    assert!(md.trim().is_empty());
 }
 
 #[test]
@@ -300,7 +344,7 @@ fn test_traversal_area_link() {
     let md = convert_html(
         r#"<map name="m"><area href="https://example.com/region" alt="Region"></map>"#,
     );
-    assert!(md.contains("example.com") || md.contains("Region") || md.trim().is_empty());
+    assert!(md.contains("example.com") || md.contains("Region"));
 }
 
 #[test]
@@ -353,6 +397,15 @@ fn ffi_test_empty_result() -> MarkdownResult {
     }
 }
 
+fn ffi_result_markdown(result: &MarkdownResult) -> String {
+    if result.markdown.is_null() || result.markdown_len == 0 {
+        return String::new();
+    }
+
+    let bytes = unsafe { std::slice::from_raw_parts(result.markdown, result.markdown_len) };
+    String::from_utf8_lossy(bytes).into_owned()
+}
+
 #[test]
 fn test_url_resolution_http_base_url() {
     let converter = markdown_converter_new();
@@ -371,6 +424,8 @@ fn test_url_resolution_http_base_url() {
         markdown_convert(converter, html.as_ptr(), html.len(), &options, &mut result);
     }
     assert_eq!(result.error_code, 0, "http:// base URL should work");
+    let md = ffi_result_markdown(&result);
+    assert!(md.contains("http://example.com/docs/page.html"));
     unsafe { markdown_result_free(&mut result) };
     unsafe { markdown_converter_free(converter) };
 }
@@ -393,6 +448,8 @@ fn test_url_resolution_base_url_no_path() {
         markdown_convert(converter, html.as_ptr(), html.len(), &options, &mut result);
     }
     assert_eq!(result.error_code, 0, "base URL with no path should work");
+    let md = ffi_result_markdown(&result);
+    assert!(md.contains("https://example.com/page"));
     unsafe { markdown_result_free(&mut result) };
     unsafe { markdown_converter_free(converter) };
 }
@@ -414,7 +471,12 @@ fn test_url_resolution_base_url_trailing_slash_only() {
     unsafe {
         markdown_convert(converter, html.as_ptr(), html.len(), &options, &mut result);
     }
-    assert_eq!(result.error_code, 0, "base URL with trailing slash only should work");
+    assert_eq!(
+        result.error_code, 0,
+        "base URL with trailing slash only should work"
+    );
+    let md = ffi_result_markdown(&result);
+    assert!(md.contains("https://example.com/page.html"));
     unsafe { markdown_result_free(&mut result) };
     unsafe { markdown_converter_free(converter) };
 }
@@ -436,7 +498,12 @@ fn test_url_resolution_already_absolute_http() {
     unsafe {
         markdown_convert(converter, html.as_ptr(), html.len(), &options, &mut result);
     }
-    assert_eq!(result.error_code, 0, "already-absolute http:// URL should work");
+    assert_eq!(
+        result.error_code, 0,
+        "already-absolute http:// URL should work"
+    );
+    let md = ffi_result_markdown(&result);
+    assert!(md.contains("http://other.com/page"));
     unsafe { markdown_result_free(&mut result) };
     unsafe { markdown_converter_free(converter) };
 }
@@ -480,9 +547,7 @@ fn test_conversion_link_with_url() {
 
 #[test]
 fn test_conversion_definition_list() {
-    let md = convert_html(
-        "<dl><dt>Term</dt><dd>Definition</dd></dl>",
-    );
+    let md = convert_html("<dl><dt>Term</dt><dd>Definition</dd></dl>");
     assert!(md.contains("Term"));
     assert!(md.contains("Definition"));
 }
@@ -496,13 +561,15 @@ fn test_conversion_sup_sub_scripts() {
 
 #[test]
 fn test_conversion_abbr_element() {
-    let md = convert_html("<p>The <abbr title=\"HyperText Markup Language\">HTML</abbr> standard</p>");
+    let md =
+        convert_html("<p>The <abbr title=\"HyperText Markup Language\">HTML</abbr> standard</p>");
     assert!(md.contains("HTML"));
 }
 
 #[test]
 fn test_conversion_details_summary() {
-    let md = convert_html("<details><summary>Click to expand</summary><p>Hidden content</p></details>");
+    let md =
+        convert_html("<details><summary>Click to expand</summary><p>Hidden content</p></details>");
     assert!(md.contains("Click to expand"));
     assert!(md.contains("Hidden content"));
 }
