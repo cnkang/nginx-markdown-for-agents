@@ -464,6 +464,42 @@ test_update_headers_etag_no_existing(void)
 }
 
 static void
+test_update_headers_etag_existing_vary_accept(void)
+{
+    ngx_http_request_t r = new_request();
+    ngx_http_markdown_conf_t conf;
+    MarkdownResult result;
+    static uint8_t etag_value[] = "\"abc123\"";
+    ngx_table_elt_t *vary;
+
+    TEST_SUBSECTION("Update headers with ETag and existing Vary: Accept");
+
+    memset(&conf, 0, sizeof(conf));
+    conf.generate_etag = 1;
+    conf.token_estimate = 0;
+
+    memset(&result, 0, sizeof(result));
+    result.markdown_len = 10;
+    result.etag = etag_value;
+    result.etag_len = sizeof(etag_value) - 1;
+
+    push_header(&r, "Vary", "Accept");
+    TEST_ASSERT(ngx_http_markdown_update_headers(&r, &result, &conf) == NGX_OK,
+                "update_headers with existing Vary: Accept should succeed");
+
+    TEST_ASSERT(count_active_headers(&r, "Vary") == 1,
+                "Existing Vary: Accept should not be duplicated");
+    vary = find_header(&r, "Vary");
+    TEST_ASSERT(vary != NULL, "Vary header should still exist");
+    TEST_ASSERT(vary->value.len == sizeof("Accept") - 1 &&
+                memcmp(vary->value.data, "Accept", vary->value.len) == 0,
+                "Vary header value should remain unchanged");
+
+    free_request(&r);
+    TEST_PASS("Existing Vary: Accept path works");
+}
+
+static void
 test_update_headers_token_zero(void)
 {
     ngx_http_request_t r = new_request();
@@ -500,6 +536,7 @@ main(void)
     test_update_headers_without_optional_fields();
     test_update_headers_null_args();
     test_update_headers_etag_no_existing();
+    test_update_headers_etag_existing_vary_accept();
     test_update_headers_token_zero();
 
     printf("\n========================================\n");
