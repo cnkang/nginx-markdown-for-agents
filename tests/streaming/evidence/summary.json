@@ -5,6 +5,16 @@
   "total_comparisons": 51,
   "identical_count": 17,
   "known_difference_count": 34,
+  "known_difference_by_drift_type": {
+    "whitespace": 6,
+    "formatting": 20,
+    "structural": 4,
+    "fallback": 4
+  },
+  "known_difference_by_severity": {
+    "low": 20,
+    "medium": 14
+  },
   "known_difference_registry_by_drift_type": {
     "whitespace": 3,
     "formatting": 10,

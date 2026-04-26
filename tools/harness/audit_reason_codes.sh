@@ -10,7 +10,7 @@
 #
 # Emission check precision (c) — file-level heuristic:
 #   - direct accessor codes: accessor must appear in the same source file
-#     as a ngx_http_markdown_log_decision / log_decision_with_category call.
+#     as a log-decision or log_decision_with_category call.
 #     This is a file-level proximity check, not a call-graph proof.
 #   - mapper-based codes (SKIP_* via reason_from_eligibility):
 #     mapper function must be called from a file that also calls log_decision;
@@ -44,6 +44,7 @@ readonly SRC_DIR="components/nginx-module/src"
 readonly OPS_DOC="docs/guides/OPERATIONS.md"
 readonly COOKBOOK_DOC="docs/guides/streaming-rollout-cookbook.md"
 readonly DECISION_CHAIN_DOC="docs/features/DECISION_CHAIN.md"
+readonly LOG_DECISION_SYMBOL="ngx_http_markdown_log_decision"
 
 errors=0
 
@@ -143,7 +144,7 @@ check_direct_emission() {
     for src_file in "$SRC_DIR"/*.c "$SRC_DIR"/*_impl.h; do
         if [[ ! -f "$src_file" ]]; then continue; fi
         if grep -q "$accessor" "$src_file" 2>/dev/null \
-            && grep -q "ngx_http_markdown_log_decision" "$src_file" 2>/dev/null; then
+            && grep -q "$LOG_DECISION_SYMBOL" "$src_file" 2>/dev/null; then
             found=1
             break
         fi
@@ -197,7 +198,7 @@ check_mapper_emission() {
         for src_file in "$SRC_DIR"/*.c "$SRC_DIR"/*_impl.h; do
             if [[ ! -f "$src_file" ]]; then continue; fi
             if grep -q "ngx_http_markdown_check_eligibility" "$src_file" 2>/dev/null \
-                && grep -q "ngx_http_markdown_log_decision" "$src_file" 2>/dev/null; then
+                && grep -q "$LOG_DECISION_SYMBOL" "$src_file" 2>/dev/null; then
                 request_chain_found=1
                 break
             fi
@@ -217,7 +218,7 @@ check_mapper_emission() {
         for src_file in "$SRC_DIR"/*.c "$SRC_DIR"/*_impl.h; do
             if [[ ! -f "$src_file" ]]; then continue; fi
             if grep -q "$accessor" "$src_file" 2>/dev/null \
-                && grep -q "ngx_http_markdown_log_decision" "$src_file" 2>/dev/null; then
+                && grep -q "$LOG_DECISION_SYMBOL" "$src_file" 2>/dev/null; then
                 found=1
                 break
             fi
@@ -363,7 +364,7 @@ for code in $reason_codes; do
             # Unknown emission kind — fall back to file-level check
             for src_file in "$SRC_DIR"/*.c "$SRC_DIR"/*_impl.h; do
                 if [[ ! -f "$src_file" ]]; then continue; fi
-                if grep -q "ngx_http_markdown_log_decision" "$src_file" 2>/dev/null \
+                if grep -q "$LOG_DECISION_SYMBOL" "$src_file" 2>/dev/null \
                     && grep -q "$accessor" "$src_file" 2>/dev/null; then
                     emission_found=1
                     break

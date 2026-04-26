@@ -29,6 +29,7 @@ ORIG_ARGS=("$@")
 readonly ACCEPT_MARKDOWN='Accept: text/markdown'
 readonly PATTERN_CT_MARKDOWN='^Content-Type: text/markdown'
 readonly PATTERN_CT_HTML='^Content-Type: text/html'
+readonly AWK_HTTP_STATUS="{print \$2}"
 
 # shellcheck disable=SC1090
 source "${NATIVE_BUILD_HELPER}"
@@ -117,6 +118,10 @@ VALID_HTML = b"""<html><head><title>Valid</title></head>
 <body><h1>Valid Page</h1>""" + (b"<p>Content here.</p>" * 80) + b"""</body></html>
 """
 
+LARGE_HTML = b"""<html><head><title>Large</title></head>
+<body><h1>Large Page</h1>""" + (b"<p>Oversize content.</p>" * 120) + b"""</body></html>
+"""
+
 MALFORMED_HTML = b"""<html><head><title>Bad
 <body><h1>Unclosed heading
 <div><div><div>nested without closing
@@ -155,6 +160,15 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(VALID_HTML)))
             self.end_headers()
             self.wfile.write(VALID_HTML)
+            return
+        if path == "/large":
+            if len(LARGE_HTML) <= 1024:
+                raise RuntimeError(f"LARGE_HTML must exceed 1024 bytes, got {len(LARGE_HTML)}")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=UTF-8")
+            self.send_header("Content-Length", str(len(LARGE_HTML)))
+            self.end_headers()
+            self.wfile.write(LARGE_HTML)
             return
         if path == "/malformed":
             self.send_response(200)
@@ -339,7 +353,7 @@ curl -sS -D "${RAW_DIR}/case2.hdr" -o "${RAW_DIR}/case2.body" \
   -H "${ACCEPT_MARKDOWN}" --max-time 30 \
   "http://127.0.0.1:${PORT}/md/malformed" >/dev/null
 # Should get a 200 response (either converted or fail-open to HTML)
-status_code="$(head -1 "${RAW_DIR}/case2.hdr" | awk '{print $2}')"
+status_code="$(head -1 "${RAW_DIR}/case2.hdr" | awk "${AWK_HTTP_STATUS}")"
 if [[ "${status_code}" != "200" ]]; then
   echo "FAIL: Case 2 - expected 200, got ${status_code}" >&2
   exit 1
@@ -351,7 +365,7 @@ echo "==> Case 3: Empty response body does not crash"
 curl -sS -D "${RAW_DIR}/case3.hdr" -o "${RAW_DIR}/case3.body" \
   -H "${ACCEPT_MARKDOWN}" --max-time 30 \
   "http://127.0.0.1:${PORT}/md/empty" >/dev/null
-status_code="$(head -1 "${RAW_DIR}/case3.hdr" | awk '{print $2}')"
+status_code="$(head -1 "${RAW_DIR}/case3.hdr" | awk "${AWK_HTTP_STATUS}")"
 if [[ "${status_code}" != "200" ]]; then
   echo "FAIL: Case 3 - expected 200, got ${status_code}" >&2
   exit 1
@@ -363,7 +377,7 @@ echo "==> Case 4: Upstream 500 error is not converted" >&2
 curl -sS -D "${RAW_DIR}/case4.hdr" -o "${RAW_DIR}/case4.body" \
   -H "${ACCEPT_MARKDOWN}" --max-time 30 \
   "http://127.0.0.1:${PORT}/md/error500" >/dev/null
-status_code="$(head -1 "${RAW_DIR}/case4.hdr" | awk '{print $2}')"
+status_code="$(head -1 "${RAW_DIR}/case4.hdr" | awk "${AWK_HTTP_STATUS}")"
 if [[ "${status_code}" != "500" ]]; then
   echo "FAIL: Case 4 - expected 500, got ${status_code}" >&2
   exit 1
@@ -376,7 +390,7 @@ echo "==> Case 5: Upstream 502 error is not converted" >&2
 curl -sS -D "${RAW_DIR}/case5.hdr" -o "${RAW_DIR}/case5.body" \
   -H "${ACCEPT_MARKDOWN}" --max-time 30 \
   "http://127.0.0.1:${PORT}/md/error502" >/dev/null
-status_code="$(head -1 "${RAW_DIR}/case5.hdr" | awk '{print $2}')"
+status_code="$(head -1 "${RAW_DIR}/case5.hdr" | awk "${AWK_HTTP_STATUS}")"
 if [[ "${status_code}" != "502" ]]; then
   echo "FAIL: Case 5 - expected 502, got ${status_code}" >&2
   exit 1
@@ -389,7 +403,7 @@ echo "==> Case 6: 206 Partial Content is not converted"
 curl -sS -D "${RAW_DIR}/case6.hdr" -o "${RAW_DIR}/case6.body" \
   -H "${ACCEPT_MARKDOWN}" --max-time 30 \
   "http://127.0.0.1:${PORT}/md/partial206" >/dev/null
-status_code="$(head -1 "${RAW_DIR}/case6.hdr" | awk '{print $2}')"
+status_code="$(head -1 "${RAW_DIR}/case6.hdr" | awk "${AWK_HTTP_STATUS}")"
 if [[ "${status_code}" == "206" ]]; then
   # 206 should not be converted - body should be HTML
   grep -qi "${PATTERN_CT_HTML}" "${RAW_DIR}/case6.hdr" || {
@@ -416,22 +430,22 @@ echo "  PASS: Small response converts with 1k max_size"
 # --- Case 8: Small max_size fail-opens for larger response ---
 echo "==> Case 8: Small max_size (1k) fail-opens for larger response"
 oversize_bytes="$(curl -sS --max-time 30 \
-  "http://127.0.0.1:${UPSTREAM_PORT}/valid" | wc -c | tr -d ' ')"
+  "http://127.0.0.1:${UPSTREAM_PORT}/large" | wc -c | tr -d ' ')"
 if [[ "${oversize_bytes}" -le 1024 ]]; then
-  echo "FAIL: Case 8 - /md-small/valid fixture must be >1024 bytes, got ${oversize_bytes}" >&2
+  echo "FAIL: Case 8 - /md-small/large fixture must be >1024 bytes, got ${oversize_bytes}" >&2
   exit 1
 fi
 curl -sS -D "${RAW_DIR}/case8.hdr" -o "${RAW_DIR}/case8.body" \
   -H "${ACCEPT_MARKDOWN}" --max-time 30 \
-  "http://127.0.0.1:${PORT}/md-small/valid" >/dev/null
-# The valid HTML is larger than 1k, so it should fail-open to HTML
+  "http://127.0.0.1:${PORT}/md-small/large" >/dev/null
+# The large HTML is bigger than 1k, so it should fail-open to HTML.
 grep -qi "${PATTERN_CT_HTML}" "${RAW_DIR}/case8.hdr" || {
   echo "FAIL: Case 8 - expected text/html for oversize response" >&2
   exit 1
 }
 echo "  PASS: Oversize response fail-open verified"
 
-echo ""
-echo "========================================"
-echo "All error-handling E2E tests passed!"
-echo "========================================"
+echo "" >&2
+echo "========================================" >&2
+echo "All error-handling E2E tests passed!" >&2
+echo "========================================" >&2

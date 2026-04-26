@@ -76,6 +76,7 @@ EVIDENCE_ARTIFACT_ERROR_PARITY = "evidence-artifact:error-parity"
 EVIDENCE_ARTIFACT_TOTAL_COMPARISONS = "evidence-artifact:total-comparisons"
 EVIDENCE_ARTIFACT_COUNT_CONSISTENCY = "evidence-artifact:count-consistency"
 EVIDENCE_ARTIFACT_BREAKDOWN_VALUES = "evidence-artifact:breakdown-values"
+EVIDENCE_ARTIFACT_MATCH_BREAKDOWN = "evidence-artifact:matched-breakdown"
 EVIDENCE_ARTIFACT_ENTRIES_CONSISTENCY = "evidence-artifact:entries-consistency"
 EVIDENCE_ARTIFACT_VERIFICATION_RESULT = "evidence-artifact:verification-result"
 KNOWN_DIFFS_EXISTS = "known-diffs:exists"
@@ -250,6 +251,7 @@ def check_evidence_artifact(result: ValidationResult) -> None:
     validate_total_comparisons(data, result)
     validate_count_consistency(data, result)
     validate_breakdown_values(data, result)
+    validate_matched_breakdown_consistency(data, result)
     validate_entries_consistency(data, result)
     validate_verification_result(data, result)
 
@@ -263,6 +265,8 @@ def validate_required_fields(data: dict[str, object], result: ValidationResult) 
         ("total_comparisons", int),
         ("identical_count", int),
         ("known_difference_count", int),
+        ("known_difference_by_drift_type", dict),
+        ("known_difference_by_severity", dict),
         ("known_differences_registry_total_entries", int),
         ("known_difference_registry_by_drift_type", dict),
         ("known_difference_registry_by_severity", dict),
@@ -411,29 +415,71 @@ def validate_count_consistency(data: dict[str, object], result: ValidationResult
 
 def validate_breakdown_values(data: dict[str, object], result: ValidationResult) -> None:
     """Validate known-difference breakdown values are non-negative integers."""
-    entries_by_drift = data.get("known_difference_registry_by_drift_type", {})
-    entries_by_severity = data.get("known_difference_registry_by_severity", {})
+    breakdowns = {
+        "known_difference_by_drift_type": data.get("known_difference_by_drift_type", {}),
+        "known_difference_by_severity": data.get("known_difference_by_severity", {}),
+        "known_difference_registry_by_drift_type": data.get(
+            "known_difference_registry_by_drift_type", {}
+        ),
+        "known_difference_registry_by_severity": data.get(
+            "known_difference_registry_by_severity", {}
+        ),
+    }
+    bad_values = []
+    for field_name, value in breakdowns.items():
+        bad_values.extend(invalid_breakdown_values(field_name, value))
 
-    bad_drift_vals = [
-        f"{k}={v}" for k, v in entries_by_drift.items()
-        if isinstance(v, bool) or not isinstance(v, int) or v < 0
-    ] if isinstance(entries_by_drift, dict) else ["not a dict"]
-    bad_severity_vals = [
-        f"{k}={v}" for k, v in entries_by_severity.items()
-        if isinstance(v, bool) or not isinstance(v, int) or v < 0
-    ] if isinstance(entries_by_severity, dict) else ["not a dict"]
-    if not bad_drift_vals and not bad_severity_vals:
+    if not bad_values:
         result.passed(
             EVIDENCE_ARTIFACT_BREAKDOWN_VALUES,
             "all breakdown dict values are non-negative integers",
         )
     else:
-        msgs = []
-        if bad_drift_vals:
-            msgs.append(f"drift_type: {', '.join(bad_drift_vals)}")
-        if bad_severity_vals:
-            msgs.append(f"severity: {', '.join(bad_severity_vals)}")
-        result.failed(EVIDENCE_ARTIFACT_BREAKDOWN_VALUES, "; ".join(msgs))
+        result.failed(EVIDENCE_ARTIFACT_BREAKDOWN_VALUES, "; ".join(bad_values))
+
+
+def invalid_breakdown_values(field_name: str, value: object) -> list[str]:
+    """Return invalid value diagnostics for a breakdown dict."""
+    if not isinstance(value, dict):
+        return [f"{field_name}: not a dict"]
+    return [
+        f"{field_name}.{k}={v}"
+        for k, v in value.items()
+        if isinstance(v, bool) or not isinstance(v, int) or v < 0
+    ]
+
+
+def int_breakdown_sum(value: object) -> int:
+    """Sum a previously type-checked integer breakdown dict."""
+    if not isinstance(value, dict):
+        return 0
+    return sum(
+        v for v in value.values()
+        if isinstance(v, int) and not isinstance(v, bool)
+    )
+
+
+def validate_matched_breakdown_consistency(
+    data: dict[str, object],
+    result: ValidationResult,
+) -> None:
+    """Validate matched known-difference breakdowns partition matched count."""
+    known_diffs = data.get("known_difference_count", 0)
+    drift_sum = int_breakdown_sum(data.get("known_difference_by_drift_type", {}))
+    severity_sum = int_breakdown_sum(data.get("known_difference_by_severity", {}))
+
+    if drift_sum == known_diffs and severity_sum == known_diffs:
+        result.passed(
+            EVIDENCE_ARTIFACT_MATCH_BREAKDOWN,
+            f"drift_type({drift_sum}) = severity({severity_sum}) = "
+            f"known_diffs({known_diffs})",
+        )
+    else:
+        result.failed(
+            EVIDENCE_ARTIFACT_MATCH_BREAKDOWN,
+            f"drift_type sum={drift_sum}, severity sum={severity_sum}, "
+            f"expected known_difference_count={known_diffs}",
+        )
 
 
 def validate_entries_consistency(data: dict[str, object], result: ValidationResult) -> None:
@@ -441,8 +487,8 @@ def validate_entries_consistency(data: dict[str, object], result: ValidationResu
     entries_total = data.get("known_differences_registry_total_entries", 0)
     entries_by_drift = data.get("known_difference_registry_by_drift_type", {})
     entries_by_severity = data.get("known_difference_registry_by_severity", {})
-    drift_sum = sum(entries_by_drift.values()) if isinstance(entries_by_drift, dict) else 0
-    severity_sum = sum(entries_by_severity.values()) if isinstance(entries_by_severity, dict) else 0
+    drift_sum = int_breakdown_sum(entries_by_drift)
+    severity_sum = int_breakdown_sum(entries_by_severity)
     if drift_sum == entries_total and severity_sum == entries_total:
         result.passed(
             EVIDENCE_ARTIFACT_ENTRIES_CONSISTENCY,
