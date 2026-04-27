@@ -222,6 +222,21 @@ verify-streaming-failure-cache-e2e:
 verify-streaming-failure-cache-e2e-plan:
 	./tools/e2e/verify_streaming_failure_cache_e2e.sh --plan
 
+verify-metrics-endpoint-e2e:
+	./tools/e2e/verify_metrics_endpoint_e2e.sh
+
+verify-conditional-requests-e2e:
+	./tools/e2e/verify_conditional_requests_e2e.sh
+
+verify-config-merge-e2e:
+	./tools/e2e/verify_config_merge_e2e.sh
+
+verify-auth-cache-e2e:
+	./tools/e2e/verify_auth_cache_e2e.sh
+
+verify-status-codes-e2e:
+	./tools/e2e/verify_status_codes_e2e.sh
+
 # ── Coverage targets ────────────────────────────────────────────────
 # Generate lcov reports consumed by SonarCloud.  Output lands in
 # coverage/ at the repo root so sonar.coverageReportPaths can find it.
@@ -291,6 +306,11 @@ help:
 	@echo "  test-e2e                 - Run end-to-end tests"
 	@echo "  verify-streaming-failure-cache-e2e - Run streaming failure/cache e2e tests"
 	@echo "  verify-streaming-failure-cache-e2e-plan - Print test plan only (no NGINX_BIN required)"
+	@echo "  verify-metrics-endpoint-e2e  - Run metrics endpoint e2e tests (JSON/text/Prometheus)"
+	@echo "  verify-conditional-requests-e2e - Run conditional-request e2e tests (ETag/304)"
+	@echo "  verify-config-merge-e2e     - Run config-merge e2e tests (http/server/location)"
+	@echo "  verify-auth-cache-e2e       - Run auth/cache interaction e2e tests"
+	@echo "  verify-status-codes-e2e     - Run upstream status-code passthrough e2e tests"
 	@echo "  test-all                 - Run build + rust + unit tests"
 	@echo "  sonar-compile-db         - Generate compile_commands.json for SonarQube for VS Code C/C++ analysis"
 	@echo "  test-benchmark           - Run corpus benchmark and produce Unified Report"
