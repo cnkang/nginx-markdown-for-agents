@@ -381,7 +381,7 @@ Makefile               顶层构建与测试入口
 
 ## 路线方向
 
-当前版本 (0.5.0)：
+当前版本 (0.5.5)：
 
 - 双引擎架构：默认 full-buffer，按需启用 true streaming
 - Streaming 失败语义与 commit boundary 对齐，支持可控 fallback 策略
