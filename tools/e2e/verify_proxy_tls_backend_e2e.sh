@@ -36,6 +36,9 @@ EOF
   return 0
 }
 
+# shellcheck disable=SC1090
+source "${NATIVE_BUILD_HELPER}"
+
 nginx_supports_ssl_upstream() {
   local nginx_bin="$1"
   "${nginx_bin}" -V 2>&1 | grep -q -- '--with-http_ssl_module'
@@ -84,9 +87,6 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
-
-# shellcheck disable=SC1090
-source "${NATIVE_BUILD_HELPER}"
 
 if (( ${#ORIG_ARGS[@]} )); then
   markdown_ensure_native_apple_silicon "$0" "${ORIG_ARGS[@]}"

@@ -52,15 +52,6 @@ EOF
 }
 
 #
-# Require that an option flag was followed by a non-empty value.
-# Arguments:
-#   $1: flag name used in diagnostics.
-#   $2: flag value to validate.
-# Output: writes diagnostics and usage to stderr on failure.
-# Exit: exits with status 2 when the value is missing; returns 0 otherwise.
-#
-
-#
 # Stop child services and remove temporary artifacts when appropriate.
 # Arguments: none.
 # Output: writes failure artifact diagnostics to stderr.
@@ -85,32 +76,6 @@ cleanup() {
   return 0
 }
 trap cleanup EXIT
-
-#
-# Poll an HTTP endpoint until it becomes reachable.
-# Arguments:
-#   $1: URL to poll for readiness.
-#   $2: label for failure diagnostics.
-# Output: writes timeout diagnostics and curl output to stderr on failure.
-# Exit: returns 0 when the endpoint responds; returns 1 after timeout.
-#
-wait_for_http() {
-  local url="$1"
-  local label="$2"
-  local curl_output=""
-  for _ in $(seq 1 50); do
-    if curl -sS --max-time 1 "$url" >/dev/null 2>&1; then
-      return 0
-    fi
-    sleep 0.1
-  done
-  curl_output=$(curl -sS --max-time 2 "$url" 2>&1 || true)
-  echo "${label} failed to become ready after 5s" >&2
-  if [[ -n "${curl_output}" ]]; then
-    echo "curl output: ${curl_output}" >&2
-  fi
-  return 1
-}
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -303,8 +268,8 @@ mkdir -p "${RUNTIME}/conf" "${RUNTIME}/logs"
 echo "==> Starting error-handling upstream on 127.0.0.1:${UPSTREAM_PORT}" >&2
 python3 "${UPSTREAM_SCRIPT}" --serve --host 127.0.0.1 --port "${UPSTREAM_PORT}" > "${RAW_DIR}/upstream.log" 2>&1 &
 UPSTREAM_PID=$!
-wait_for_http "http://127.0.0.1:${UPSTREAM_PORT}/health" \
-  "Upstream on ${UPSTREAM_PORT}"
+markdown_wait_for_http "http://127.0.0.1:${UPSTREAM_PORT}/health" \
+  "Upstream on ${UPSTREAM_PORT}" || exit 1
 
 cat > "${RUNTIME}/conf/nginx.conf" <<EOF
 ${LOAD_MODULE_LINE}worker_processes 1;
@@ -364,8 +329,8 @@ EOF
 
 echo "==> Starting NGINX on 127.0.0.1:${PORT}" >&2
 "${NGINX_EXECUTABLE}" -p "${RUNTIME}" -c conf/nginx.conf
-wait_for_http "http://127.0.0.1:${PORT}/md/valid" \
-  "NGINX on ${PORT}"
+markdown_wait_for_http "http://127.0.0.1:${PORT}/md/valid" \
+  "NGINX on ${PORT}" || exit 1
 
 # --- Case 1: Valid HTML converts successfully ---
 echo "==> Case 1: Valid HTML converts successfully" >&2
