@@ -27,9 +27,9 @@ RUN set -eux; \
         python3 \
         zlib-dev; \
     retry 5 curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs -o /tmp/rustup-init.sh; \
-    sh /tmp/rustup-init.sh -y; \
+    retry 5 sh /tmp/rustup-init.sh -y; \
     rm -f /tmp/rustup-init.sh; \
-    /root/.cargo/bin/cargo install cbindgen
+    retry 5 /root/.cargo/bin/cargo install cbindgen
 ENV PATH="/root/.cargo/bin:${PATH}"
 
 RUN update-ca-certificates
@@ -37,7 +37,23 @@ RUN update-ca-certificates
 ARG NGINX_VERSION=1.28.2
 
 WORKDIR /build
-RUN curl --proto '=https' --tlsv1.2 -fsSL "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" | tar xz
+RUN set -eux; \
+    retry() { \
+        attempts="$1"; \
+        shift; \
+        count=1; \
+        while :; do \
+            "$@" && break; \
+            if [ "$count" -ge "$attempts" ]; then \
+                echo "command failed after ${attempts} attempts: $*" >&2; \
+                exit 1; \
+            fi; \
+            sleep "$((count * 5))"; \
+            count=$((count + 1)); \
+        done; \
+    }; \
+    retry 5 curl --proto '=https' --tlsv1.2 -fsSL \
+        "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" | tar xz
 
 COPY Makefile /src/Makefile
 COPY components/rust-converter /src/components/rust-converter

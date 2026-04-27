@@ -2,23 +2,56 @@
 ARG OS_BASE=debian:bookworm-slim
 FROM ${OS_BASE}
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    ca-certificates \
-    curl \
-    libpcre3-dev \
-    libssl-dev \
-    python3 \
-    zlib1g-dev \
-    && curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
-    && /root/.cargo/bin/cargo install cbindgen \
-    && rm -rf /var/lib/apt/lists/*
+RUN set -eux; \
+    retry() { \
+        attempts="$1"; \
+        shift; \
+        count=1; \
+        while :; do \
+            "$@" && break; \
+            if [ "$count" -ge "$attempts" ]; then \
+                echo "command failed after ${attempts} attempts: $*" >&2; \
+                exit 1; \
+            fi; \
+            sleep "$((count * 5))"; \
+            count=$((count + 1)); \
+        done; \
+    }; \
+    apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
+        ca-certificates \
+        curl \
+        libpcre3-dev \
+        libssl-dev \
+        python3 \
+        zlib1g-dev; \
+    retry 5 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o /tmp/rustup-init.sh; \
+    retry 5 sh /tmp/rustup-init.sh -y; \
+    rm -f /tmp/rustup-init.sh; \
+    retry 5 /root/.cargo/bin/cargo install cbindgen; \
+    rm -rf /var/lib/apt/lists/*
 ENV PATH="/root/.cargo/bin:${PATH}"
 
 ARG NGINX_VERSION=1.28.2
 
 WORKDIR /build
-RUN curl --proto '=https' --tlsv1.2 -fsSL "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" | tar xz
+RUN set -eux; \
+    retry() { \
+        attempts="$1"; \
+        shift; \
+        count=1; \
+        while :; do \
+            "$@" && break; \
+            if [ "$count" -ge "$attempts" ]; then \
+                echo "command failed after ${attempts} attempts: $*" >&2; \
+                exit 1; \
+            fi; \
+            sleep "$((count * 5))"; \
+            count=$((count + 1)); \
+        done; \
+    }; \
+    retry 5 curl --proto '=https' --tlsv1.2 -fsSL \
+        "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" | tar xz
 
 # Copy only files required for module build.
 COPY Makefile /src/Makefile
