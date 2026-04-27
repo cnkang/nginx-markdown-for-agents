@@ -384,7 +384,7 @@ add the harness workflow to your default path:
 
 ## Roadmap
 
-Current release (0.5.0):
+Current release (0.5.5):
 
 - Dual-engine architecture: full-buffer default plus opt-in true streaming path
 - Streaming failure semantics and fallback controls aligned with commit boundaries
