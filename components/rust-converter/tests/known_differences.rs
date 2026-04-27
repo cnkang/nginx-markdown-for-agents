@@ -73,12 +73,12 @@ impl KnownDifferences {
             return Ok(Self::default());
         }
 
-        let value = raw
-            .parse::<toml::Value>()
+        let table = raw
+            .parse::<toml::Table>()
             .map_err(|err| format!("parse known-differences TOML {}: {err}", path.display()))?;
 
         let mut entries = Vec::new();
-        if let Some(diff_array) = value.get("difference").and_then(toml::Value::as_array) {
+        if let Some(diff_array) = table.get("difference").and_then(toml::Value::as_array) {
             for table in diff_array {
                 if let Some(table) = table.as_table() {
                     entries.push(KnownDifference {
