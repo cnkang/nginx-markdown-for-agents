@@ -10,6 +10,11 @@ STREAMING_FAILURE_CACHE_SCRIPT="${WORKSPACE_ROOT}/tools/e2e/verify_streaming_fai
 ACCEPT_NEGOTIATION_SCRIPT="${WORKSPACE_ROOT}/tools/e2e/verify_accept_negotiation_e2e.sh"
 SECURITY_SCRIPT="${WORKSPACE_ROOT}/tools/e2e/verify_security_e2e.sh"
 ERROR_HANDLING_SCRIPT="${WORKSPACE_ROOT}/tools/e2e/verify_error_handling_e2e.sh"
+METRICS_SCRIPT="${WORKSPACE_ROOT}/tools/e2e/verify_metrics_endpoint_e2e.sh"
+CONDITIONAL_SCRIPT="${WORKSPACE_ROOT}/tools/e2e/verify_conditional_requests_e2e.sh"
+CONFIG_MERGE_SCRIPT="${WORKSPACE_ROOT}/tools/e2e/verify_config_merge_e2e.sh"
+AUTH_CACHE_SCRIPT="${WORKSPACE_ROOT}/tools/e2e/verify_auth_cache_e2e.sh"
+STATUS_CODES_SCRIPT="${WORKSPACE_ROOT}/tools/e2e/verify_status_codes_e2e.sh"
 SUITE_BUILDROOT=""
 SUITE_NGINX_BIN=""
 NGINX_BIN_OUTPUT_FILE=""
@@ -20,13 +25,18 @@ usage() {
 Usage: $(basename "$0") [--keep-artifacts]
 
 Run the canonical E2E suite:
-  1. proxy/TLS backend verification
-  2. chunked native smoke verification
-  3. large-response native verification
-  4. streaming failure/cache semantics verification
-  5. Accept-header content-negotiation verification
-  6. security behavior verification
-  7. error-handling and fail-open verification
+   1. proxy/TLS backend verification
+   2. chunked native smoke verification
+   3. large-response native verification
+   4. streaming failure/cache semantics verification
+   5. Accept-header content-negotiation verification
+   6. security behavior verification
+   7. error-handling and fail-open verification
+   8. metrics endpoint verification
+   9. conditional-request (ETag/If-None-Match/If-Modified-Since) verification
+  10. config-merge (http/server/location) verification
+  11. auth/cache interaction verification
+  12. upstream status-code passthrough verification
 
 Environment variables:
   NGINX_BIN       Optional reusable module-enabled nginx binary
@@ -109,14 +119,29 @@ env NGINX_BIN="${SUITE_NGINX_BIN}" bash "${STREAMING_FAILURE_CACHE_SCRIPT}" "${s
 accept_args=()
 security_args=()
 error_args=()
+metrics_args=()
+conditional_args=()
+config_merge_args=()
+auth_cache_args=()
+status_codes_args=()
 if [[ "${KEEP_ARTIFACTS}" -eq 1 ]]; then
   accept_args=(--keep-artifacts)
   security_args=(--keep-artifacts)
   error_args=(--keep-artifacts)
+  metrics_args=(--keep-artifacts)
+  conditional_args=(--keep-artifacts)
+  config_merge_args=(--keep-artifacts)
+  auth_cache_args=(--keep-artifacts)
+  status_codes_args=(--keep-artifacts)
 fi
 env NGINX_BIN="${SUITE_NGINX_BIN}" bash "${ACCEPT_NEGOTIATION_SCRIPT}" "${accept_args[@]}"
 env NGINX_BIN="${SUITE_NGINX_BIN}" bash "${SECURITY_SCRIPT}" "${security_args[@]}"
 env NGINX_BIN="${SUITE_NGINX_BIN}" bash "${ERROR_HANDLING_SCRIPT}" "${error_args[@]}"
+env NGINX_BIN="${SUITE_NGINX_BIN}" bash "${METRICS_SCRIPT}" "${metrics_args[@]}"
+env NGINX_BIN="${SUITE_NGINX_BIN}" bash "${CONDITIONAL_SCRIPT}" "${conditional_args[@]}"
+env NGINX_BIN="${SUITE_NGINX_BIN}" bash "${CONFIG_MERGE_SCRIPT}" "${config_merge_args[@]}"
+env NGINX_BIN="${SUITE_NGINX_BIN}" bash "${AUTH_CACHE_SCRIPT}" "${auth_cache_args[@]}"
+env NGINX_BIN="${SUITE_NGINX_BIN}" bash "${STATUS_CODES_SCRIPT}" "${status_codes_args[@]}"
 
 echo "Canonical E2E suite summary:"
 echo "  proxy_tls_backend=passed"
@@ -126,4 +151,9 @@ echo "  streaming_failure_cache=passed"
 echo "  accept_negotiation=passed"
 echo "  security=passed"
 echo "  error_handling=passed"
+echo "  metrics_endpoint=passed"
+echo "  conditional_requests=passed"
+echo "  config_merge=passed"
+echo "  auth_cache=passed"
+echo "  status_codes=passed"
 echo "  reusable_nginx_bin=${SUITE_NGINX_BIN}"
