@@ -35,18 +35,6 @@ EOF
   return 0
 }
 
-require_flag_value() {
-  local flag_name="$1"
-
-  if [[ $# -lt 2 || -z "${2-}" ]]; then
-    echo "Missing value for ${flag_name}" >&2
-    usage >&2
-    exit 2
-  fi
-
-  return 0
-}
-
 cleanup() {
   local rc=$?
 
@@ -74,12 +62,12 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --nginx-version)
-      require_flag_value "$1" "${2-}"
+      markdown_require_flag_value "$1" "${2-}"
       NGINX_VERSION="$2"
       shift 2
       ;;
     --port)
-      require_flag_value "$1" "${2-}"
+      markdown_require_flag_value "$1" "${2-}"
       PORT="$2"
       shift 2
       ;;

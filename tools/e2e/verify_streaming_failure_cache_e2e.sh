@@ -103,16 +103,6 @@ EOF
     return 0
 }
 
-require_flag_value() {
-    local flag_name="$1"
-    if [[ $# -lt 2 || -z "${2-}" ]]; then
-        echo "Missing value for ${flag_name}" >&2
-        usage >&2
-        exit 2
-    fi
-    return 0
-}
-
 report_case() {
     local case_id="$1"
     local status="$2"
@@ -370,27 +360,27 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         --nginx-bin)
-            require_flag_value "$1" "${2-}"
+            markdown_require_flag_value "$1" "${2-}"
             NGINX_BIN="$2"
             shift 2
             ;;
         --nginx-version)
-            require_flag_value "$1" "${2-}"
+            markdown_require_flag_value "$1" "${2-}"
             NGINX_VERSION="$2"
             shift 2
             ;;
         --port)
-            require_flag_value "$1" "${2-}"
+            markdown_require_flag_value "$1" "${2-}"
             PORT="$2"
             shift 2
             ;;
         --upstream-port)
-            require_flag_value "$1" "${2-}"
+            markdown_require_flag_value "$1" "${2-}"
             UPSTREAM_PORT="$2"
             shift 2
             ;;
         --markdown-max-size)
-            require_flag_value "$1" "${2-}"
+            markdown_require_flag_value "$1" "${2-}"
             MARKDOWN_MAX_SIZE="$2"
             shift 2
             ;;
@@ -405,7 +395,6 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
-
 
 # ---------------------------------------------------------------------------
 # Test plan (always printed)
@@ -583,7 +572,6 @@ PARTIAL_HTML_PREFIX = (
     '<p>This content will be followed by an abrupt connection close.</p>'
 )
 
-
 def build_oversize_payload():
     prefix = (
         '<!doctype html><html><head><meta charset="UTF-8">'
@@ -601,9 +589,7 @@ def build_oversize_payload():
     out += suffix
     return out.encode('utf-8')
 
-
 OVERSIZE_BODY = build_oversize_payload()
-
 
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
@@ -731,7 +717,6 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", "0")
         self.end_headers()
 
-
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--serve", action="store_true")
@@ -750,14 +735,12 @@ def main():
         server = ThreadingHTTPServer((args.host, args.port), Handler)
         server.serve_forever()
 
-
 if __name__ == "__main__":
     main()
 UPSTREAM_PY
 
 chmod +x "${UPSTREAM_SCRIPT}"
 eval "$(python3 "${UPSTREAM_SCRIPT}" --print-metrics)"
-
 
 # ---------------------------------------------------------------------------
 # Prepare NGINX runtime (reuse existing binary)
@@ -1081,13 +1064,12 @@ http {
 }
 EOF
 
-
 # ---------------------------------------------------------------------------
 # Start NGINX
 # ---------------------------------------------------------------------------
 echo "==> Starting NGINX on 127.0.0.1:${PORT}"
 "${NGINX_EXECUTABLE}" -p "${RUNTIME}" -c conf/nginx.conf
-markdown_wait_for_http "http://127.0.0.1:${PORT}/simple" "NGINX" || exit 1
+markdown_wait_for_http "http://127.0.0.1:${PORT}/t01/simple" "NGINX" || exit 1
 
 echo ""
 echo "${SEPARATOR}"
@@ -1302,7 +1284,6 @@ if [[ ${t06_pass} -eq 1 ]]; then
 else
     report_case "10.6" "FAIL" "if_modified_since_only allows streaming"
 fi
-
 
 # ---------------------------------------------------------------------------
 # 10.7 Streaming response headers

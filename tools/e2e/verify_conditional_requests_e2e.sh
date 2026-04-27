@@ -60,18 +60,6 @@ EOF
   return 0
 }
 
-require_flag_value() {
-  local flag_name="$1"
-
-  if [[ $# -lt 2 || -z "${2:-}" ]]; then
-    echo "Missing value for ${flag_name}" >&2
-    usage >&2
-    exit 2
-  fi
-
-  return 0
-}
-
 cleanup() {
   local rc=$?
 
@@ -103,17 +91,17 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --nginx-version)
-      require_flag_value "$1" "${2:-}"
+      markdown_require_flag_value "$1" "${2:-}"
       NGINX_VERSION="$2"
       shift 2
       ;;
     --port)
-      require_flag_value "$1" "${2:-}"
+      markdown_require_flag_value "$1" "${2:-}"
       PORT="$2"
       shift 2
       ;;
     --upstream-port)
-      require_flag_value "$1" "${2:-}"
+      markdown_require_flag_value "$1" "${2:-}"
       UPSTREAM_PORT="$2"
       shift 2
       ;;
@@ -170,7 +158,6 @@ HTML_BODY = b"""<!doctype html>
 UPSTREAM_ETAG = '"upstream-original-etag-12345"'
 LAST_MODIFIED = "Mon, 01 Jan 2024 00:00:00 GMT"
 
-
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
@@ -201,7 +188,6 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", "0")
         self.end_headers()
 
-
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--serve", action="store_true")
@@ -211,7 +197,6 @@ def main():
     if args.serve:
         server = ThreadingHTTPServer((args.host, args.port), Handler)
         server.serve_forever()
-
 
 if __name__ == "__main__":
     main()
@@ -298,18 +283,12 @@ echo "==> Case 1: Converted response includes ETag header"
 curl -sS -D "${RAW_DIR}/case1.hdr" -o "${RAW_DIR}/case1.body" \
   -H "${ACCEPT_MARKDOWN}" --max-time 30 \
   "http://127.0.0.1:${PORT}/md/html" >/dev/null
-grep -qi "${PATTERN_HTTP_200}" "${RAW_DIR}/case1.hdr" || {
-  echo "FAIL: Case 1 - expected HTTP 200" >&2
-  exit 1
-}
-grep -qi '^ETag:' "${RAW_DIR}/case1.hdr" || {
-  echo "FAIL: Case 1 - expected ETag header in converted response" >&2
-  exit 1
-}
+markdown_expect_status "Case 1" "${RAW_DIR}/case1.hdr" "${PATTERN_HTTP_200}"
+markdown_expect_header "Case 1" "${RAW_DIR}/case1.hdr" '^ETag:'
 echo "  PASS: Converted response includes ETag header"
 
 # Extract the ETag value for subsequent tests
-RESPONSE_ETAG="$(grep -i '^ETag:' "${RAW_DIR}/case1.hdr" | sed 's/^ETag:[[:space:]]*//I' | tr -d '\r\n')"
+RESPONSE_ETAG="$(markdown_extract_header "${RAW_DIR}/case1.hdr" "ETag")"
 
 # --- Case 2: ETag differs from upstream's original ETag ---
 echo "==> Case 2: ETag differs from upstream original"
@@ -326,10 +305,7 @@ curl -sS -D "${RAW_DIR}/case3.hdr" -o "${RAW_DIR}/case3.body" \
   -H "If-None-Match: ${RESPONSE_ETAG}" \
   --max-time 30 \
   "http://127.0.0.1:${PORT}/md/html" >/dev/null
-grep -qi "${PATTERN_HTTP_304}" "${RAW_DIR}/case3.hdr" || {
-  echo "FAIL: Case 3 - expected 304 for matching If-None-Match" >&2
-  exit 1
-}
+markdown_expect_status "Case 3" "${RAW_DIR}/case3.hdr" "${PATTERN_HTTP_304}"
 echo "  PASS: If-None-Match with matching ETag returns 304"
 
 # --- Case 4: If-None-Match with non-matching ETag returns 200 ---
@@ -339,10 +315,7 @@ curl -sS -D "${RAW_DIR}/case4.hdr" -o "${RAW_DIR}/case4.body" \
   -H 'If-None-Match: "non-matching-etag-99999"' \
   --max-time 30 \
   "http://127.0.0.1:${PORT}/md/html" >/dev/null
-grep -qi "${PATTERN_HTTP_200}" "${RAW_DIR}/case4.hdr" || {
-  echo "FAIL: Case 4 - expected 200 for non-matching If-None-Match" >&2
-  exit 1
-}
+markdown_expect_status "Case 4" "${RAW_DIR}/case4.hdr" "${PATTERN_HTTP_200}"
 echo "  PASS: If-None-Match with non-matching ETag returns 200"
 
 # --- Case 5: If-Modified-Since with future date returns 304 ---
@@ -352,10 +325,7 @@ curl -sS -D "${RAW_DIR}/case5.hdr" -o "${RAW_DIR}/case5.body" \
   -H 'If-Modified-Since: Mon, 01 Jan 2030 00:00:00 GMT' \
   --max-time 30 \
   "http://127.0.0.1:${PORT}/md/html" >/dev/null
-grep -qi "${PATTERN_HTTP_304}" "${RAW_DIR}/case5.hdr" || {
-  echo "FAIL: Case 5 - expected 304 for future If-Modified-Since" >&2
-  exit 1
-}
+markdown_expect_status "Case 5" "${RAW_DIR}/case5.hdr" "${PATTERN_HTTP_304}"
 echo "  PASS: If-Modified-Since with future date returns 304"
 
 # --- Case 6: If-Modified-Since with past date returns 200 ---
@@ -365,10 +335,7 @@ curl -sS -D "${RAW_DIR}/case6.hdr" -o "${RAW_DIR}/case6.body" \
   -H 'If-Modified-Since: Mon, 01 Jan 2020 00:00:00 GMT' \
   --max-time 30 \
   "http://127.0.0.1:${PORT}/md/html" >/dev/null
-grep -qi "${PATTERN_HTTP_200}" "${RAW_DIR}/case6.hdr" || {
-  echo "FAIL: Case 6 - expected 200 for past If-Modified-Since" >&2
-  exit 1
-}
+markdown_expect_status "Case 6" "${RAW_DIR}/case6.hdr" "${PATTERN_HTTP_200}"
 echo "  PASS: If-Modified-Since with past date returns 200"
 
 # --- Case 7: Weak ETag matching returns 304 ---
@@ -379,10 +346,7 @@ curl -sS -D "${RAW_DIR}/case7.hdr" -o "${RAW_DIR}/case7.body" \
   -H "If-None-Match: ${WEAK_ETAG}" \
   --max-time 30 \
   "http://127.0.0.1:${PORT}/md/html" >/dev/null
-grep -qi "${PATTERN_HTTP_304}" "${RAW_DIR}/case7.hdr" || {
-  echo "FAIL: Case 7 - expected 304 for weak ETag If-None-Match" >&2
-  exit 1
-}
+markdown_expect_status "Case 7" "${RAW_DIR}/case7.hdr" "${PATTERN_HTTP_304}"
 echo "  PASS: Weak ETag matching returns 304"
 
 # --- Case 8: Wildcard If-None-Match: * returns 304 ---
@@ -392,18 +356,12 @@ curl -sS -D "${RAW_DIR}/case8.hdr" -o "${RAW_DIR}/case8.body" \
   -H 'If-None-Match: *' \
   --max-time 30 \
   "http://127.0.0.1:${PORT}/md/html" >/dev/null
-grep -qi "${PATTERN_HTTP_304}" "${RAW_DIR}/case8.hdr" || {
-  echo "FAIL: Case 8 - expected 304 for wildcard If-None-Match" >&2
-  exit 1
-}
+markdown_expect_status "Case 8" "${RAW_DIR}/case8.hdr" "${PATTERN_HTTP_304}"
 echo "  PASS: Wildcard If-None-Match returns 304"
 
 # --- Case 9: Vary: Accept present in 304 response ---
 echo "==> Case 9: Vary: Accept present in 304 response"
-grep -qi '^Vary:.*Accept' "${RAW_DIR}/case3.hdr" || {
-  echo "FAIL: Case 9 - Vary: Accept not found in 304 response" >&2
-  exit 1
-}
+markdown_expect_header "Case 9" "${RAW_DIR}/case3.hdr" '^Vary:.*Accept'
 echo "  PASS: Vary: Accept present in 304 response"
 
 # --- Case 10: HEAD returns same ETag as GET ---
@@ -411,11 +369,8 @@ echo "==> Case 10: HEAD returns same ETag as GET"
 curl -sS -D "${RAW_DIR}/case10.hdr" -o "${RAW_DIR}/case10.body" \
   --head -H "${ACCEPT_MARKDOWN}" --max-time 30 \
   "http://127.0.0.1:${PORT}/md/html" >/dev/null
-grep -qi "${PATTERN_HTTP_200}" "${RAW_DIR}/case10.hdr" || {
-  echo "FAIL: Case 10 - expected HTTP 200 for HEAD" >&2
-  exit 1
-}
-HEAD_ETAG="$(grep -i '^ETag:' "${RAW_DIR}/case10.hdr" | sed 's/^ETag:[[:space:]]*//I' | tr -d '\r\n')"
+markdown_expect_status "Case 10" "${RAW_DIR}/case10.hdr" "${PATTERN_HTTP_200}"
+HEAD_ETAG="$(markdown_extract_header "${RAW_DIR}/case10.hdr" "ETag")"
 [[ "${HEAD_ETAG}" == "${RESPONSE_ETAG}" ]] || {
   echo "FAIL: Case 10 - HEAD ETag (${HEAD_ETAG}) != GET ETag (${RESPONSE_ETAG})" >&2
   exit 1

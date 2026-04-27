@@ -342,7 +342,8 @@ markdown_prepare_rust_converter_release() {
 # Stderr:
 #   Timeout diagnostics and curl output on failure.
 # Returns:
-#   0 when the endpoint responds; 1 after timeout (~5s).
+#   0 when the endpoint responds; 1 after ~5s of unreachable attempts
+#   (wall-clock can grow if the server accepts but stalls per request).
 markdown_wait_for_http() {
   local url="$1"
   local label="$2"
@@ -362,4 +363,104 @@ markdown_wait_for_http() {
     echo "curl output: ${curl_output}" >&2
   fi
   return 1
+}
+
+# Validate that a CLI flag received a non-empty value.
+#
+# Intended for use in argument-parsing loops: the caller passes the flag
+# name and the prospective value; if the value is missing or empty, an
+# error is printed and the script exits with status 2.
+#
+# This function relies on the caller's scope providing a `usage` function
+# (bash dynamic scoping).  Callers that do not define `usage` should
+# not use this helper.
+#
+# Args:
+#   $1 - flag name (e.g. --nginx-version) for diagnostics.
+#   $2 - flag value; must be non-empty.
+# Stdout:
+#   None.
+# Stderr:
+#   Missing-value diagnostic and usage text on failure.
+# Returns:
+#   0 when the flag has a value; exits with 2 otherwise.
+markdown_require_flag_value() {
+  local flag_name="$1"
+
+  if [[ $# -lt 2 || -z "${2:-}" ]]; then
+    echo "Missing value for ${flag_name}" >&2
+    usage >&2
+    exit 2
+  fi
+
+  return 0
+}
+
+# Assert that an HTTP status line pattern appears in a header file.
+#
+# Args:
+#   $1 - case label for diagnostics (e.g. "Case 1").
+#   $2 - header file path.
+#   $3 - grep pattern (e.g. "HTTP/1.1 200").
+# Stdout:
+#   None on success.
+# Stderr:
+#   FAIL message on assertion failure.
+# Exits:
+#   1 when the pattern is not found.
+#   Returns 0 on success.
+markdown_expect_status() {
+  local label="$1"
+  local hdr_file="$2"
+  local pattern="$3"
+
+  grep -qi "${pattern}" "${hdr_file}" || {
+    echo "FAIL: ${label} - expected ${pattern}" >&2
+    exit 1
+  }
+  return 0
+}
+
+# Assert that a header pattern appears in a header file.
+#
+# Args:
+#   $1 - case label for diagnostics (e.g. "Case 1").
+#   $2 - header file path.
+#   $3 - grep pattern (e.g. "^ETag:").
+# Stdout:
+#   None on success.
+# Stderr:
+#   FAIL message on assertion failure.
+# Exits:
+#   1 when the pattern is not found.
+#   Returns 0 on success.
+markdown_expect_header() {
+  local label="$1"
+  local hdr_file="$2"
+  local pattern="$3"
+
+  grep -qi "${pattern}" "${hdr_file}" || {
+    echo "FAIL: ${label} - expected header matching ${pattern}" >&2
+    exit 1
+  }
+  return 0
+}
+
+# Extract a header value from a header file.
+#
+# Args:
+#   $1 - header file path.
+#   $2 - header name (e.g. "ETag").
+# Stdout:
+#   The header value with leading whitespace and trailing CR/LF stripped.
+# Stderr:
+#   None.
+# Returns:
+#   0 always.
+markdown_extract_header() {
+  local hdr_file="$1"
+  local header="$2"
+
+  grep -i "^${header}:" "${hdr_file}" | sed "s/^${header}:[[:space:]]*//I" | tr -d '\r\n'
+  return 0
 }

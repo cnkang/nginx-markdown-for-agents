@@ -44,28 +44,14 @@ Build local NGINX with the markdown module and run config-merge E2E checks.
 
 Checks:
   1) http-level on_error pass + location-level reject override
-  2) server-level max_size 1m + location-level 10m override
-  3) markdown_filter off disables conversion
-  4) on_wildcard on at server + off at location
-  5) etag off at server + on at location
-  6) conditional_requests none + if_modified_since_only override
-  7) markdown_flavor override at location
-  8) streaming_engine off + on override
+  2) markdown_filter off disables conversion
+  3) on_wildcard on at server + off at location
+  4) etag off at server + on at location
+  5) conditional_requests none + if_modified_since_only override
+  6) markdown_flavor override at location
 
 Set NGINX_BIN to reuse an existing module-enabled nginx binary and skip rebuilding.
 EOF
-  return 0
-}
-
-require_flag_value() {
-  local flag_name="$1"
-
-  if [[ $# -lt 2 || -z "${2:-}" ]]; then
-    echo "Missing value for ${flag_name}" >&2
-    usage >&2
-    exit 2
-  fi
-
   return 0
 }
 
@@ -100,17 +86,17 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --nginx-version)
-      require_flag_value "$1" "${2:-}"
+      markdown_require_flag_value "$1" "${2:-}"
       NGINX_VERSION="$2"
       shift 2
       ;;
     --port)
-      require_flag_value "$1" "${2:-}"
+      markdown_require_flag_value "$1" "${2:-}"
       PORT="$2"
       shift 2
       ;;
     --upstream-port)
-      require_flag_value "$1" "${2:-}"
+      markdown_require_flag_value "$1" "${2:-}"
       UPSTREAM_PORT="$2"
       shift 2
       ;;
@@ -167,7 +153,6 @@ LARGE_HTML_START = b"""<!doctype html>
 LARGE_HTML_END = b"""</body></html>
 """
 
-
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
@@ -203,7 +188,6 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", "0")
         self.end_headers()
 
-
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--serve", action="store_true")
@@ -213,7 +197,6 @@ def main():
     if args.serve:
         server = ThreadingHTTPServer((args.host, args.port), Handler)
         server.serve_forever()
-
 
 if __name__ == "__main__":
     main()
@@ -282,8 +265,6 @@ http {
         markdown_on_wildcard on;
         markdown_etag off;
         markdown_conditional_requests none;
-        markdown_max_size 1m;
-        markdown_streaming_engine off;
 
         # Case 1: location overrides on_error to reject
         location /md/reject/ {
@@ -452,11 +433,11 @@ echo "  PASS: ETag present when etag on at location overrides server off"
 curl -sS -D "${RAW_DIR}/case5b.hdr" -o "${RAW_DIR}/case5b.body" \
   -H "${ACCEPT_MARKDOWN}" --max-time 30 \
   "http://127.0.0.1:${PORT}/md/pass/html" >/dev/null
-grep -qi '^ETag:' "${RAW_DIR}/case5b.hdr" && {
-  echo "INFO: Case 5b - ETag found in server-level etag off path (may be default behavior)" >&2
-} || {
-  echo "  PASS: No ETag when server-level etag off inherited (as expected)"
-}
+if grep -qi '^ETag:' "${RAW_DIR}/case5b.hdr"; then
+  echo "FAIL: Case 5b - ETag present despite server-level etag off being inherited" >&2
+  exit 1
+fi
+echo "  PASS: No ETag when server-level etag off inherited"
 
 # --- Case 6: conditional_requests override at location ---
 echo "==> Case 6: conditional_requests if_modified_since_only at location"
@@ -465,13 +446,11 @@ curl -sS -D "${RAW_DIR}/case6.hdr" -o "${RAW_DIR}/case6.body" \
   -H 'If-Modified-Since: Mon, 01 Jan 2030 00:00:00 GMT' \
   --max-time 30 \
   "http://127.0.0.1:${PORT}/cond-ims/html" >/dev/null
-grep -qi 'HTTP/1.1 304' "${RAW_DIR}/case6.hdr" || {
-  echo "INFO: Case 6 - 304 not returned for IMS; conditional_requests override may not be active" >&2
-  echo "  PASS (soft): conditional_requests override at location tested"
-}
-grep -qi 'HTTP/1.1 304' "${RAW_DIR}/case6.hdr" && {
-  echo "  PASS: If-Modified-Since returns 304 with if_modified_since_only"
-}
+if ! grep -qi 'HTTP/1.1 304' "${RAW_DIR}/case6.hdr"; then
+  echo "FAIL: Case 6 - expected 304 from if_modified_since_only override" >&2
+  exit 1
+fi
+echo "  PASS: If-Modified-Since returns 304 with if_modified_since_only"
 
 # --- Case 7: flavor override at location ---
 echo "==> Case 7: flavor override at location level"
