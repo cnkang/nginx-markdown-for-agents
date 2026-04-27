@@ -63,15 +63,6 @@ EOF
 }
 
 #
-# Validate that a flag requiring a value has one.
-# Arguments:
-#   $1: flag name (for diagnostics)
-#   $2: flag value (must be non-empty)
-# Output: prints usage to stderr on failure
-# Exit: exits with code 2 if value is missing
-#
-
-#
 # Validate a streaming markdown HTTP response contract.
 # Args:
 #   case_name: logical case label used in diagnostics
@@ -457,13 +448,7 @@ mkdir -p "${RUNTIME}/conf" "${RUNTIME}/logs"
 echo "==> Starting chunked upstream on 127.0.0.1:${UPSTREAM_PORT}"
 python3 "${UPSTREAM_SCRIPT}" --serve --host 127.0.0.1 --port "${UPSTREAM_PORT}" > "${RAW_DIR}/upstream.log" 2>&1 &
 UPSTREAM_PID=$!
-for _ in $(seq 1 50); do
-  if curl -sS "http://127.0.0.1:${UPSTREAM_PORT}/health" >/dev/null 2>&1; then
-    break
-  fi
-  sleep 0.1
-done
-curl -sS "http://127.0.0.1:${UPSTREAM_PORT}/health" >/dev/null
+markdown_wait_for_http "http://127.0.0.1:${UPSTREAM_PORT}/health" "Upstream on ${UPSTREAM_PORT}" || exit 1
 
 cat > "${RUNTIME}/conf/nginx.conf" <<EOF
 ${LOAD_MODULE_LINE}worker_processes 1;

@@ -369,11 +369,9 @@ markdown_wait_for_http() {
 #
 # Intended for use in argument-parsing loops: the caller passes the flag
 # name and the prospective value; if the value is missing or empty, an
-# error is printed and the script exits with status 2.
-#
-# This function relies on the caller's scope providing a `usage` function
-# (bash dynamic scoping).  Callers that do not define `usage` should
-# not use this helper.
+# error is printed and the function returns 2.  Under set -e, the
+# non-zero return will terminate the caller; callers that run without
+# set -e should check the return value explicitly.
 #
 # Args:
 #   $1 - flag name (e.g. --nginx-version) for diagnostics.
@@ -381,16 +379,15 @@ markdown_wait_for_http() {
 # Stdout:
 #   None.
 # Stderr:
-#   Missing-value diagnostic and usage text on failure.
+#   Missing-value diagnostic on failure.
 # Returns:
-#   0 when the flag has a value; exits with 2 otherwise.
+#   0 when the flag has a value; 2 otherwise.
 markdown_require_flag_value() {
   local flag_name="$1"
 
   if [[ $# -lt 2 || -z "${2:-}" ]]; then
     echo "Missing value for ${flag_name}" >&2
-    usage >&2
-    exit 2
+    return 2
   fi
 
   return 0
@@ -448,6 +445,9 @@ markdown_expect_header() {
 
 # Extract a header value from a header file.
 #
+# Uses awk for POSIX portability; avoids GNU-sed /I flag which is
+# not available on macOS BSD sed.
+#
 # Args:
 #   $1 - header file path.
 #   $2 - header name (e.g. "ETag").
@@ -461,6 +461,9 @@ markdown_extract_header() {
   local hdr_file="$1"
   local header="$2"
 
-  grep -i "^${header}:" "${hdr_file}" | sed "s/^${header}:[[:space:]]*//I" | tr -d '\r\n'
+  awk -v hdr="${header}" 'BEGIN { lower=tolower(hdr) }
+    tolower($1) ~ tolower(hdr) ":" {
+      sub(/^[^:]+:[[:space:]]+/, ""); sub(/\r$/, ""); print; exit
+    }' "${hdr_file}"
   return 0
 }
