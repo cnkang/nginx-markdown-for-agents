@@ -331,3 +331,35 @@ markdown_prepare_rust_converter_release() {
     markdown_sync_converter_header "${workspace_root}"
   )
 }
+
+# Wait for an HTTP endpoint to become reachable.
+#
+# Args:
+#   $1 - URL to poll.
+#   $2 - human-readable label for failure diagnostics.
+# Stdout:
+#   None.
+# Stderr:
+#   Timeout diagnostics and curl output on failure.
+# Returns:
+#   0 when the endpoint responds; 1 after timeout (~5s).
+markdown_wait_for_http() {
+  local url="$1"
+  local label="$2"
+  local curl_output=""
+  local _i
+
+  for _i in $(seq 1 50); do
+    if curl -sS --max-time 1 "$url" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 0.1
+  done
+
+  curl_output=$(curl -sS --max-time 2 "$url" 2>&1 || true)
+  echo "${label} failed to become ready after 5s" >&2
+  if [[ -n "${curl_output}" ]]; then
+    echo "curl output: ${curl_output}" >&2
+  fi
+  return 1
+}
