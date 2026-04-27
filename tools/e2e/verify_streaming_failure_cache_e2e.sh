@@ -1087,7 +1087,7 @@ EOF
 # ---------------------------------------------------------------------------
 echo "==> Starting NGINX on 127.0.0.1:${PORT}"
 "${NGINX_EXECUTABLE}" -p "${RUNTIME}" -c conf/nginx.conf
-sleep 1
+markdown_wait_for_http "http://127.0.0.1:${PORT}/simple" "NGINX" || exit 1
 
 echo ""
 echo "${SEPARATOR}"

@@ -288,7 +288,7 @@ EOF
 
 echo "==> Starting NGINX on 127.0.0.1:${PORT}"
 "${NGINX_EXECUTABLE}" -p "${RUNTIME}" -c conf/nginx.conf
-sleep 1
+markdown_wait_for_http "http://127.0.0.1:${PORT}/sec/script" "NGINX" || exit 1
 
 # --- Case 1: <script> content is stripped ---
 echo "==> Case 1: <script> content is stripped from Markdown output"
