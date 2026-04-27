@@ -31,6 +31,18 @@ ORIG_ARGS=("$@")
 # shellcheck source=tools/lib/nginx_markdown_native_build.sh
 source "${NATIVE_BUILD_HELPER}"
 
+require_flag_value() {
+  local flag_name="$1"
+
+  if [[ $# -lt 2 || -z "${2:-}" ]]; then
+    echo "Missing value for ${flag_name}" >&2
+    usage >&2
+    exit 2
+  fi
+
+  return 0
+}
+
 usage() {
   cat <<EOF
 Usage: $(basename "$0") [--keep-artifacts] [--nginx-version VERSION] [--port PORT] [--skip-1g-get] [--markdown-max-size SIZE]
@@ -78,10 +90,12 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --nginx-version)
+      require_flag_value "$1" "${2:-}"
       NGINX_VERSION="$2"
       shift 2
       ;;
     --port)
+      require_flag_value "$1" "${2:-}"
       PORT="$2"
       shift 2
       ;;
@@ -90,6 +104,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --markdown-max-size)
+      require_flag_value "$1" "${2:-}"
       MARKDOWN_MAX_SIZE="$2"
       shift 2
       ;;
@@ -211,7 +226,7 @@ EOF
 
 echo "==> Starting NGINX on 127.0.0.1:${PORT}"
 "${NGINX_EXECUTABLE}" -p "${RUNTIME}" -c conf/nginx.conf
-sleep 1
+markdown_wait_for_http "http://127.0.0.1:${PORT}/html/full/allowed-100m.html" "NGINX" || exit 1
 
 check_head_markdown() {
   local name="$1"

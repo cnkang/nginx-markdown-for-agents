@@ -319,7 +319,7 @@ EOF
 
 echo "==> Starting NGINX on 127.0.0.1:${PORT}"
 "${NGINX_EXECUTABLE}" -p "${RUNTIME}" -c conf/nginx.conf
-sleep 1
+markdown_wait_for_http "http://127.0.0.1:${PORT}/simple" "NGINX" || exit 1
 
 echo "==> Case 1: proxy/TLS Markdown conversion"
 basic_code="$(curl -sS -D "${RAW_DIR}/basic.hdr" -o "${RAW_DIR}/basic.body" \
@@ -369,7 +369,7 @@ grep -qi '^Content-Type: text/html' "${RAW_DIR}/error.hdr" || {
 
 echo "==> Case 4: HEAD through proxy"
 head_code="$(curl -sS -D "${RAW_DIR}/head.hdr" -o "${RAW_DIR}/head.body" \
-  -X HEAD -H 'Accept: text/markdown' \
+  --head -H 'Accept: text/markdown' \
   "http://127.0.0.1:${PORT}/simple" \
   -w '%{http_code}')"
 [[ "${head_code}" == "200" ]] || { echo "Expected HEAD /simple 200, got ${head_code}" >&2; exit 1; }

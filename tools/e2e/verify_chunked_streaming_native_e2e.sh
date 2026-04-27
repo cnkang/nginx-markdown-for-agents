@@ -539,7 +539,7 @@ EOF
 
 echo "==> Starting NGINX on 127.0.0.1:${PORT}"
 "${NGINX_EXECUTABLE}" -p "${RUNTIME}" -c conf/nginx.conf
-sleep 1
+markdown_wait_for_http "http://127.0.0.1:${PORT}/stream/small-valid" "NGINX" || exit 1
 
 echo "==> Case 1: chunked below max_size should convert to Markdown"
 small_line="$(curl -sS -D "${RAW_DIR}/small.hdr" -o "${RAW_DIR}/small.body" \
