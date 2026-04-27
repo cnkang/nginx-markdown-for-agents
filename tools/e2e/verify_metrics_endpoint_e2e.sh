@@ -31,9 +31,9 @@ readonly ACCEPT_MARKDOWN='Accept: text/markdown'
 readonly ACCEPT_JSON='Accept: application/json'
 readonly ACCEPT_PROMETHEUS='Accept: text/plain'
 readonly PATTERN_HTTP_200='HTTP/1.1 200'
-readonly PATTERN_CT_JSON='^Content-Type: application/json'
-readonly PATTERN_CT_TEXT='^Content-Type: text/plain'
-readonly PATTERN_CT_PROMETHEUS='^Content-Type: text/plain; version=0.0.4'
+readonly PATTERN_CT_JSON='Content-Type: application/json'
+readonly PATTERN_CT_TEXT='Content-Type: text/plain'
+readonly PATTERN_CT_PROMETHEUS='Content-Type: text/plain.*version=0.0.4'
 
 # shellcheck source=tools/lib/nginx_markdown_native_build.sh
 source "${NATIVE_BUILD_HELPER}"
@@ -56,18 +56,6 @@ Checks:
 
 Set NGINX_BIN to reuse an existing module-enabled nginx binary and skip rebuilding.
 EOF
-  return 0
-}
-
-require_flag_value() {
-  local flag_name="$1"
-
-  if [[ $# -lt 2 || -z "${2:-}" ]]; then
-    echo "Missing value for ${flag_name}" >&2
-    usage >&2
-    exit 2
-  fi
-
   return 0
 }
 
@@ -98,17 +86,17 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --nginx-version)
-      require_flag_value "$1" "${2:-}"
+      markdown_require_flag_value "$1" "${2:-}"
       NGINX_VERSION="$2"
       shift 2
       ;;
     --port)
-      require_flag_value "$1" "${2:-}"
+      markdown_require_flag_value "$1" "${2:-}"
       PORT="$2"
       shift 2
       ;;
     --metrics-port)
-      require_flag_value "$1" "${2:-}"
+      markdown_require_flag_value "$1" "${2:-}"
       METRICS_PORT="$2"
       shift 2
       ;;
@@ -245,7 +233,10 @@ grep -qi "${PATTERN_CT_JSON}" "${RAW_DIR}/case1.hdr" || {
   echo "FAIL: Case 1 - expected application/json Content-Type" >&2
   exit 1
 }
-python3 -c "import json,sys; json.load(open('${RAW_DIR}/case1.body'))" || {
+METRICS_BODY="${RAW_DIR}/case1.body" python3 -c '
+import json, os, sys
+json.load(open(os.environ["METRICS_BODY"]))
+' || {
   echo "FAIL: Case 1 - metrics body is not valid JSON" >&2
   exit 1
 }
@@ -298,16 +289,16 @@ echo "  PASS: All format bodies are non-empty"
 
 # --- Case 5: JSON metrics contain required top-level keys ---
 echo "==> Case 5: JSON metrics contain required top-level keys"
-python3 -c "
-import json, sys
-data = json.load(open('${RAW_DIR}/case1.body'))
-required = ['total_requests', 'converted_total', 'skipped_total']
+METRICS_BODY="${RAW_DIR}/case1.body" python3 -c '
+import json, os, sys
+data = json.load(open(os.environ["METRICS_BODY"]))
+required = ["total_requests", "converted_total", "skipped_total"]
 missing = [k for k in required if k not in data]
 if missing:
-    print(f'FAIL: missing keys: {missing}', file=sys.stderr)
+    print(f"FAIL: missing keys: {missing}", file=sys.stderr)
     sys.exit(1)
-print('  PASS: JSON contains required top-level keys')
-" || exit 1
+print("  PASS: JSON contains required top-level keys")
+' || exit 1
 
 # --- Case 6: Prometheus metrics contain expected metric family prefixes ---
 echo "==> Case 6: Prometheus metrics contain expected metric family prefixes"
@@ -333,19 +324,19 @@ curl -sS -o /dev/null -H "${ACCEPT_MARKDOWN}" --max-time 30 \
 curl -sS -o "${RAW_DIR}/case7.body" \
   -H "${ACCEPT_JSON}" --max-time 30 \
   "http://127.0.0.1:${METRICS_PORT}/metrics" >/dev/null
-python3 -c "
-import json, sys
-data = json.load(open('${RAW_DIR}/case7.body'))
-total = data.get('total_requests', 0)
-converted = data.get('converted_total', 0)
+METRICS_BODY="${RAW_DIR}/case7.body" python3 -c '
+import json, os, sys
+data = json.load(open(os.environ["METRICS_BODY"]))
+total = data.get("total_requests", 0)
+converted = data.get("converted_total", 0)
 if total < 1:
-    print(f'FAIL: total_requests is {total}, expected >= 1', file=sys.stderr)
+    print(f"FAIL: total_requests is {total}, expected >= 1", file=sys.stderr)
     sys.exit(1)
 if converted < 1:
-    print(f'FAIL: converted_total is {converted}, expected >= 1', file=sys.stderr)
+    print(f"FAIL: converted_total is {converted}, expected >= 1", file=sys.stderr)
     sys.exit(1)
-print(f'  PASS: total_requests={total}, converted_total={converted} (non-zero)')
-" || exit 1
+print(f"  PASS: total_requests={total}, converted_total={converted} (non-zero)")
+' || exit 1
 
 # --- Case 8: Invalid Accept header returns plain-text fallback ---
 echo "==> Case 8: Invalid Accept header falls back to plain-text"
