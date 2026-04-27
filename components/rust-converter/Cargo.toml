@@ -39,7 +39,7 @@ libc = "0.2"
 toml = "0.8"
 # Compression regression fixtures for streaming parity tests
 flate2 = "1.0"
-brotli = "7.0"
+brotli = "8.0"
 
 [features]
 default = []
