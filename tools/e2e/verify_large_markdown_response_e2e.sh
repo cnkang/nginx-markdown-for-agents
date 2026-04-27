@@ -204,7 +204,7 @@ EOF
 
 echo "==> Starting NGINX on 127.0.0.1:${PORT}"
 "${NGINX_EXECUTABLE}" -p "${RUNTIME}" -c conf/nginx.conf
-sleep 1
+markdown_wait_for_http "http://127.0.0.1:${PORT}/passthrough/large.html" "NGINX" || exit 1
 
 echo "==> Validating large passthrough + markdown responses"
 pt_code="$(curl -sS -D "${RAW_DIR}/passthrough_large.hdr" -o "${RAW_DIR}/passthrough_large.body" \
