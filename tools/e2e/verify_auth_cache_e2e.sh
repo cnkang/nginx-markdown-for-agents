@@ -31,6 +31,7 @@ readonly ACCEPT_MARKDOWN='Accept: text/markdown'
 readonly PATTERN_HTTP_200='HTTP/1.1 200'
 readonly PATTERN_CT_MARKDOWN='^Content-Type: text/markdown'
 readonly PATTERN_CT_HTML='^Content-Type: text/html'
+readonly HEADER_COOKIE_AUTH='Cookie: session=abc123'
 
 # shellcheck source=tools/lib/nginx_markdown_native_build.sh
 source "${NATIVE_BUILD_HELPER}"
@@ -52,18 +53,6 @@ Checks:
 
 Set NGINX_BIN to reuse an existing module-enabled nginx binary and skip rebuilding.
 EOF
-  return 0
-}
-
-require_flag_value() {
-  local flag_name="$1"
-
-  if [[ $# -lt 2 || -z "${2:-}" ]]; then
-    echo "Missing value for ${flag_name}" >&2
-    usage >&2
-    exit 2
-  fi
-
   return 0
 }
 
@@ -98,17 +87,17 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --nginx-version)
-      require_flag_value "$1" "${2:-}"
+      markdown_require_flag_value "$1" "${2:-}"
       NGINX_VERSION="$2"
       shift 2
       ;;
     --port)
-      require_flag_value "$1" "${2:-}"
+      markdown_require_flag_value "$1" "${2:-}"
       PORT="$2"
       shift 2
       ;;
     --upstream-port)
-      require_flag_value "$1" "${2:-}"
+      markdown_require_flag_value "$1" "${2:-}"
       UPSTREAM_PORT="$2"
       shift 2
       ;;
@@ -160,7 +149,6 @@ HTML_BODY = b"""<!doctype html>
 
 UPSTREAM_ETAG = '"upstream-auth-etag-001"'
 
-
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
@@ -195,7 +183,6 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", "0")
         self.end_headers()
 
-
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--serve", action="store_true")
@@ -205,7 +192,6 @@ def main():
     if args.serve:
         server = ThreadingHTTPServer((args.host, args.port), Handler)
         server.serve_forever()
-
 
 if __name__ == "__main__":
     main()
@@ -307,20 +293,18 @@ markdown_wait_for_http "http://127.0.0.1:${PORT}/md/html" "NGINX on ${PORT}" || 
 echo "==> Case 1: Auth request with Cookie gets Cache-Control: private"
 curl -sS -D "${RAW_DIR}/case1.hdr" -o "${RAW_DIR}/case1.body" \
   -H "${ACCEPT_MARKDOWN}" \
-  -H 'Cookie: session=abc123' \
+  -H "${HEADER_COOKIE_AUTH}" \
   --max-time 30 \
   "http://127.0.0.1:${PORT}/md/html" >/dev/null
 grep -qi "${PATTERN_HTTP_200}" "${RAW_DIR}/case1.hdr" || {
   echo "FAIL: Case 1 - expected HTTP 200" >&2
   exit 1
 }
-grep -qi '^Cache-Control:.*private' "${RAW_DIR}/case1.hdr" || {
-  echo "INFO: Case 1 - Cache-Control: private not found; module may not rewrite CC for auth requests" >&2
-  echo "  PASS (soft): Auth request conversion completed"
-}
-grep -qi '^Cache-Control:.*private' "${RAW_DIR}/case1.hdr" && {
-  echo "  PASS: Cache-Control contains private for auth request"
-}
+if ! grep -qi '^Cache-Control:.*private' "${RAW_DIR}/case1.hdr"; then
+  echo "FAIL: Case 1 - expected Cache-Control: private for auth request" >&2
+  exit 1
+fi
+echo "  PASS: Cache-Control contains private for auth request"
 
 # --- Case 2: Non-auth request retains Cache-Control: public ---
 echo "==> Case 2: Non-auth request retains upstream Cache-Control: public"
@@ -331,19 +315,17 @@ grep -qi "${PATTERN_HTTP_200}" "${RAW_DIR}/case2.hdr" || {
   echo "FAIL: Case 2 - expected HTTP 200" >&2
   exit 1
 }
-grep -qi '^Cache-Control:.*public' "${RAW_DIR}/case2.hdr" || {
-  echo "INFO: Case 2 - Cache-Control: public not found in response" >&2
-  echo "  PASS (soft): Non-auth request conversion completed"
-}
-grep -qi '^Cache-Control:.*public' "${RAW_DIR}/case2.hdr" && {
-  echo "  PASS: Cache-Control contains public for non-auth request"
-}
+if ! grep -qi '^Cache-Control:.*public' "${RAW_DIR}/case2.hdr"; then
+  echo "FAIL: Case 2 - expected Cache-Control: public for non-auth request" >&2
+  exit 1
+fi
+echo "  PASS: Cache-Control contains public for non-auth request"
 
 # --- Case 3: auth_policy deny rejects conversion for auth requests ---
 echo "==> Case 3: auth_policy deny rejects conversion for auth requests"
 curl -sS -D "${RAW_DIR}/case3.hdr" -o "${RAW_DIR}/case3.body" \
   -H "${ACCEPT_MARKDOWN}" \
-  -H 'Cookie: session=abc123' \
+  -H "${HEADER_COOKIE_AUTH}" \
   --max-time 30 \
   "http://127.0.0.1:${PORT}/md-deny/html" >/dev/null
 grep -qi "${PATTERN_HTTP_200}" "${RAW_DIR}/case3.hdr" || {
@@ -379,12 +361,13 @@ echo "==> Case 5: Auth fail-open preserves upstream Cache-Control"
 # With on_error pass and auth request, if conversion fails, upstream headers preserved
 curl -sS -D "${RAW_DIR}/case5.hdr" -o "${RAW_DIR}/case5.body" \
   -H "${ACCEPT_MARKDOWN}" \
-  -H 'Cookie: session=abc123' \
+  -H "${HEADER_COOKIE_AUTH}" \
   --max-time 30 \
   "http://127.0.0.1:${PORT}/md/html" >/dev/null
-grep -qi "^Cache-Control:" "${RAW_DIR}/case5.hdr" || {
-  echo "INFO: Case 5 - No Cache-Control header in response" >&2
-}
+if ! grep -qi "^Cache-Control:" "${RAW_DIR}/case5.hdr"; then
+  echo "FAIL: Case 5 - expected Cache-Control header in auth request response" >&2
+  exit 1
+fi
 echo "  PASS: Auth request response has Cache-Control header"
 
 # --- Case 6: Non-auth ETag replacement ---
@@ -407,12 +390,13 @@ echo "==> Case 7: Vary header in auth response"
 # The upstream sends Vary: Cookie for auth requests; check if forwarded
 curl -sS -D "${RAW_DIR}/case7.hdr" -o "${RAW_DIR}/case7.body" \
   -H "${ACCEPT_MARKDOWN}" \
-  -H 'Cookie: session=abc123' \
+  -H "${HEADER_COOKIE_AUTH}" \
   --max-time 30 \
   "http://127.0.0.1:${PORT}/md/html" >/dev/null
-grep -qi '^Vary:' "${RAW_DIR}/case7.hdr" || {
-  echo "INFO: Case 7 - No Vary header in auth response" >&2
-}
+if ! grep -qi '^Vary:' "${RAW_DIR}/case7.hdr"; then
+  echo "FAIL: Case 7 - expected Vary header in auth response" >&2
+  exit 1
+fi
 echo "  PASS: Auth response has Vary header"
 
 echo ""

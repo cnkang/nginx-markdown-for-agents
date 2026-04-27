@@ -42,18 +42,6 @@ nginx_supports_ssl_upstream() {
   return $?
 }
 
-require_flag_value() {
-  local flag_name="$1"
-
-  if [[ $# -lt 2 || -z "${2:-}" ]]; then
-    echo "Missing value for ${flag_name}" >&2
-    usage >&2
-    exit 2
-  fi
-
-  return 0
-}
-
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --keep-artifacts)
@@ -61,27 +49,27 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --nginx-version)
-      require_flag_value "$1" "${2:-}"
+      markdown_require_flag_value "$1" "${2:-}"
       NGINX_VERSION="$2"
       shift 2
       ;;
     --port)
-      require_flag_value "$1" "${2:-}"
+      markdown_require_flag_value "$1" "${2:-}"
       PORT="$2"
       shift 2
       ;;
     --backend-port)
-      require_flag_value "$1" "${2:-}"
+      markdown_require_flag_value "$1" "${2:-}"
       BACKEND_PORT="$2"
       shift 2
       ;;
     --nginx-bin-output)
-      require_flag_value "$1" "${2:-}"
+      markdown_require_flag_value "$1" "${2:-}"
       NGINX_BIN_OUTPUT_FILE="$2"
       shift 2
       ;;
     --buildroot-output)
-      require_flag_value "$1" "${2:-}"
+      markdown_require_flag_value "$1" "${2:-}"
       BUILDROOT_OUTPUT_FILE="$2"
       shift 2
       ;;
@@ -368,6 +356,7 @@ grep -qi '^Content-Type: text/html' "${RAW_DIR}/error.hdr" || {
 }
 
 echo "==> Case 4: HEAD through proxy"
+: > "${RAW_DIR}/head.body"
 head_code="$(curl -sS -D "${RAW_DIR}/head.hdr" -o "${RAW_DIR}/head.body" \
   --head -H 'Accept: text/markdown' \
   "http://127.0.0.1:${PORT}/simple" \

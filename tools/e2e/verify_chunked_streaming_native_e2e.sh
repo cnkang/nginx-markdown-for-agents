@@ -70,17 +70,6 @@ EOF
 # Output: prints usage to stderr on failure
 # Exit: exits with code 2 if value is missing
 #
-require_flag_value() {
-  local flag_name="$1"
-
-  if [[ $# -lt 2 || -z "${2-}" ]]; then
-    echo "Missing value for ${flag_name}" >&2
-    usage >&2
-    exit 2
-  fi
-
-  return 0
-}
 
 #
 # Validate a streaming markdown HTTP response contract.
@@ -169,27 +158,27 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --nginx-version)
-      require_flag_value "$1" "${2-}"
+      markdown_require_flag_value "$1" "${2-}"
       NGINX_VERSION="$2"
       shift 2
       ;;
     --port)
-      require_flag_value "$1" "${2-}"
+      markdown_require_flag_value "$1" "${2-}"
       PORT="$2"
       shift 2
       ;;
     --upstream-port)
-      require_flag_value "$1" "${2-}"
+      markdown_require_flag_value "$1" "${2-}"
       UPSTREAM_PORT="$2"
       shift 2
       ;;
     --markdown-max-size)
-      require_flag_value "$1" "${2-}"
+      markdown_require_flag_value "$1" "${2-}"
       MARKDOWN_MAX_SIZE="$2"
       shift 2
       ;;
     --profile)
-      require_flag_value "$1" "${2-}"
+      markdown_require_flag_value "$1" "${2-}"
       PROFILE="$2"
       shift 2
       ;;
@@ -254,7 +243,6 @@ COMPRESSED_TARGET = 64 * 1024
 OVERSIZE_TARGET = 12 * 1024 * 1024
 CHUNK_SIZE = 16 * 1024
 
-
 def build_payload(title: str, target_size: int, end_token: str) -> bytes:
     prefix = (
         f'<!doctype html><html><head><meta charset="UTF-8"><title>{title}</title></head>'
@@ -272,7 +260,6 @@ def build_payload(title: str, target_size: int, end_token: str) -> bytes:
     out.extend(suffix)
     return bytes(out)
 
-
 def compress_payload(body: bytes, mode: str) -> bytes:
     if mode == "gzip":
         wbits = zlib.MAX_WBITS | 16
@@ -283,7 +270,6 @@ def compress_payload(body: bytes, mode: str) -> bytes:
 
     compressor = zlib.compressobj(level=6, wbits=wbits)
     return compressor.compress(body) + compressor.flush()
-
 
 SMALL_BODY = build_payload("Chunked Small", SMALL_TARGET, SMALL_END_TOKEN)
 OVERSIZE_BODY = build_payload("Chunked Oversize", OVERSIZE_TARGET, OVERSIZE_END_TOKEN)
@@ -299,7 +285,6 @@ TRUNCATED_GZIP_BODY = GZIP_BODY[:-8] if len(GZIP_BODY) > 8 else GZIP_BODY
 TRUNCATED_DEFLATE_BODY = (
     DEFLATE_BODY[:-4] if len(DEFLATE_BODY) > 4 else DEFLATE_BODY
 )
-
 
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
@@ -403,7 +388,6 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", "0")
         self.end_headers()
 
-
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--serve", action="store_true")
@@ -433,7 +417,6 @@ def main():
     if args.serve:
         server = ThreadingHTTPServer((args.host, args.port), Handler)
         server.serve_forever()
-
 
 if __name__ == "__main__":
     main()
