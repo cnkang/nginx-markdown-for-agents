@@ -49,15 +49,6 @@ EOF
 }
 
 #
-# Validate a flag requiring a value has one.
-# Arguments:
-#   $1: flag name (for diagnostics)
-#   $2: flag value (must be non-empty)
-# Output: prints usage to stderr on failure
-# Exit: exits with code 2 if value is missing
-#
-
-#
 # Trap handler: stop upstream and NGINX, then optionally remove build artifacts.
 #
 cleanup() {
@@ -78,42 +69,6 @@ cleanup() {
   return 0
 }
 trap cleanup EXIT
-
-#
-# Poll an HTTP endpoint until it becomes reachable.
-# Arguments:
-#   $1: URL to poll for readiness.
-#   $2: label for failure diagnostics.
-# Output: writes timeout diagnostics and curl output to stderr on failure.
-# Exit: returns 0 when the endpoint responds; returns 1 after timeout.
-#
-wait_for_http() {
-  local url="$1"
-  local label="$2"
-  local curl_output=""
-  for _ in $(seq 1 50); do
-    if curl -sS --max-time 1 "$url" >/dev/null 2>&1; then
-      return 0
-    fi
-    sleep 0.1
-  done
-  curl_output=$(curl -sS --max-time 2 "$url" 2>&1 || true)
-  echo "${label} failed to become ready after 5s" >&2
-  if [[ -n "${curl_output}" ]]; then
-    echo "curl output: ${curl_output}" >&2
-  fi
-  return 1
-}
-
-assert_http_200_header() {
-  local header_file="$1"
-  local case_name="$2"
-  grep -qi "${PATTERN_HTTP_200}" "${header_file}" || {
-    echo "FAIL: ${case_name} - expected HTTP 200 response" >&2
-    exit 1
-  }
-  return 0
-}
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -284,8 +239,8 @@ mkdir -p "${RUNTIME}/conf" "${RUNTIME}/logs"
 echo "==> Starting accept-negotiation upstream on 127.0.0.1:${UPSTREAM_PORT}"
 python3 "${UPSTREAM_SCRIPT}" --serve --host 127.0.0.1 --port "${UPSTREAM_PORT}" > "${RAW_DIR}/upstream.log" 2>&1 &
 UPSTREAM_PID=$!
-wait_for_http "http://127.0.0.1:${UPSTREAM_PORT}/health" \
-  "Upstream on ${UPSTREAM_PORT}"
+markdown_wait_for_http "http://127.0.0.1:${UPSTREAM_PORT}/health" \
+  "Upstream on ${UPSTREAM_PORT}" || exit 1
 
 # --- NGINX config with wildcard on ---
 cat > "${RUNTIME}/conf/nginx.conf" <<EOF
@@ -334,15 +289,15 @@ EOF
 
 echo "==> Starting NGINX on 127.0.0.1:${PORT}"
 "${NGINX_EXECUTABLE}" -p "${RUNTIME}" -c conf/nginx.conf
-wait_for_http "http://127.0.0.1:${PORT}/md/html" \
-  "NGINX on ${PORT}"
+markdown_wait_for_http "http://127.0.0.1:${PORT}/md/html" \
+  "NGINX on ${PORT}" || exit 1
 
 # --- Case 1: Accept: text/markdown triggers conversion ---
 echo "==> Case 1: Accept: text/markdown triggers conversion"
 curl -sS -D "${RAW_DIR}/case1.hdr" -o "${RAW_DIR}/case1.body" \
   -H "${ACCEPT_MARKDOWN}" --max-time 30 \
   "http://127.0.0.1:${PORT}/md/html" >/dev/null
-assert_http_200_header "${RAW_DIR}/case1.hdr" "Case 1"
+markdown_expect_status "Case 1" "${RAW_DIR}/case1.hdr" "${PATTERN_HTTP_200}"
 grep -qi "${PATTERN_CT_MARKDOWN}" "${RAW_DIR}/case1.hdr" || {
   echo "FAIL: Case 1 - expected text/markdown Content-Type" >&2
   exit 1
@@ -358,7 +313,7 @@ echo "==> Case 2: Accept: text/html returns original HTML"
 curl -sS -D "${RAW_DIR}/case2.hdr" -o "${RAW_DIR}/case2.body" \
   -H "${ACCEPT_HTML}" --max-time 30 \
   "http://127.0.0.1:${PORT}/md/html" >/dev/null
-assert_http_200_header "${RAW_DIR}/case2.hdr" "Case 2"
+markdown_expect_status "Case 2" "${RAW_DIR}/case2.hdr" "${PATTERN_HTTP_200}"
 grep -qi "${PATTERN_CT_HTML}" "${RAW_DIR}/case2.hdr" || {
   echo "FAIL: Case 2 - expected text/html Content-Type" >&2
   exit 1
@@ -375,7 +330,7 @@ curl -sS -D "${RAW_DIR}/case3.hdr" -o "${RAW_DIR}/case3.body" \
   -H 'Accept:' \
   --max-time 30 \
   "http://127.0.0.1:${PORT}/md/html" >/dev/null
-assert_http_200_header "${RAW_DIR}/case3.hdr" "Case 3"
+markdown_expect_status "Case 3" "${RAW_DIR}/case3.hdr" "${PATTERN_HTTP_200}"
 grep -qi "${PATTERN_CT_HTML}" "${RAW_DIR}/case3.hdr" || {
   echo "FAIL: Case 3 - expected text/html Content-Type (no conversion without Accept)" >&2
   exit 1
@@ -387,7 +342,7 @@ echo "==> Case 4: Accept: */* with markdown_on_wildcard on triggers conversion"
 curl -sS -D "${RAW_DIR}/case4.hdr" -o "${RAW_DIR}/case4.body" \
   -H "${ACCEPT_WILDCARD}" --max-time 30 \
   "http://127.0.0.1:${PORT}/md/html" >/dev/null
-assert_http_200_header "${RAW_DIR}/case4.hdr" "Case 4"
+markdown_expect_status "Case 4" "${RAW_DIR}/case4.hdr" "${PATTERN_HTTP_200}"
 grep -qi "${PATTERN_CT_MARKDOWN}" "${RAW_DIR}/case4.hdr" || {
   echo "FAIL: Case 4 - expected text/markdown with wildcard Accept and on_wildcard on" >&2
   exit 1
@@ -399,7 +354,7 @@ echo "==> Case 5: Accept: */* with markdown_on_wildcard off does NOT convert"
 curl -sS -D "${RAW_DIR}/case5.hdr" -o "${RAW_DIR}/case5.body" \
   -H "${ACCEPT_WILDCARD}" --max-time 30 \
   "http://127.0.0.1:${PORT}/no-wildcard/html" >/dev/null
-assert_http_200_header "${RAW_DIR}/case5.hdr" "Case 5"
+markdown_expect_status "Case 5" "${RAW_DIR}/case5.hdr" "${PATTERN_HTTP_200}"
 grep -qi "${PATTERN_CT_HTML}" "${RAW_DIR}/case5.hdr" || {
   echo "FAIL: Case 5 - expected text/html with wildcard Accept and on_wildcard off" >&2
   exit 1
@@ -419,7 +374,7 @@ echo "==> Case 7: Non-HTML Content-Type (application/json) is not converted"
 curl -sS -D "${RAW_DIR}/case7.hdr" -o "${RAW_DIR}/case7.body" \
   -H "${ACCEPT_MARKDOWN}" --max-time 30 \
   "http://127.0.0.1:${PORT}/md/json" >/dev/null
-assert_http_200_header "${RAW_DIR}/case7.hdr" "Case 7"
+markdown_expect_status "Case 7" "${RAW_DIR}/case7.hdr" "${PATTERN_HTTP_200}"
 grep -qi "application/json" "${RAW_DIR}/case7.hdr" || {
   echo "FAIL: Case 7 - expected application/json Content-Type to be preserved" >&2
   exit 1
@@ -431,7 +386,7 @@ echo "==> Case 8: text/plain Content-Type is not converted"
 curl -sS -D "${RAW_DIR}/case8.hdr" -o "${RAW_DIR}/case8.body" \
   -H "${ACCEPT_MARKDOWN}" --max-time 30 \
   "http://127.0.0.1:${PORT}/md/plain" >/dev/null
-assert_http_200_header "${RAW_DIR}/case8.hdr" "Case 8"
+markdown_expect_status "Case 8" "${RAW_DIR}/case8.hdr" "${PATTERN_HTTP_200}"
 grep -qi "text/plain" "${RAW_DIR}/case8.hdr" || {
   echo "FAIL: Case 8 - expected text/plain Content-Type to be preserved" >&2
   exit 1

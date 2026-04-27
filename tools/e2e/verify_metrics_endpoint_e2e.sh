@@ -33,7 +33,7 @@ readonly ACCEPT_PROMETHEUS='Accept: text/plain'
 readonly PATTERN_HTTP_200='HTTP/1.1 200'
 readonly PATTERN_CT_JSON='Content-Type: application/json'
 readonly PATTERN_CT_TEXT='Content-Type: text/plain'
-readonly PATTERN_CT_PROMETHEUS='Content-Type: text/plain.*version=0.0.4'
+readonly PATTERN_CT_PROMETHEUS='Content-Type: text/plain.*version=0\.0\.4'
 
 # shellcheck source=tools/lib/nginx_markdown_native_build.sh
 source "${NATIVE_BUILD_HELPER}"
@@ -225,14 +225,8 @@ echo "==> Case 1: JSON format via Accept: application/json"
 curl -sS -D "${RAW_DIR}/case1.hdr" -o "${RAW_DIR}/case1.body" \
   -H "${ACCEPT_JSON}" --max-time 30 \
   "http://127.0.0.1:${METRICS_PORT}/metrics" >/dev/null
-grep -qi "${PATTERN_HTTP_200}" "${RAW_DIR}/case1.hdr" || {
-  echo "FAIL: Case 1 - expected HTTP 200 for JSON metrics" >&2
-  exit 1
-}
-grep -qi "${PATTERN_CT_JSON}" "${RAW_DIR}/case1.hdr" || {
-  echo "FAIL: Case 1 - expected application/json Content-Type" >&2
-  exit 1
-}
+markdown_expect_status "Case 1" "${RAW_DIR}/case1.hdr" "${PATTERN_HTTP_200}"
+markdown_expect_header "Case 1" "${RAW_DIR}/case1.hdr" "${PATTERN_CT_JSON}"
 METRICS_BODY="${RAW_DIR}/case1.body" python3 -c '
 import json, os, sys
 json.load(open(os.environ["METRICS_BODY"]))
@@ -247,14 +241,8 @@ echo "==> Case 2: Plain-text format (default)"
 curl -sS -D "${RAW_DIR}/case2.hdr" -o "${RAW_DIR}/case2.body" \
   --max-time 30 \
   "http://127.0.0.1:${METRICS_PORT}/metrics" >/dev/null
-grep -qi "${PATTERN_HTTP_200}" "${RAW_DIR}/case2.hdr" || {
-  echo "FAIL: Case 2 - expected HTTP 200 for plain-text metrics" >&2
-  exit 1
-}
-grep -qi "${PATTERN_CT_TEXT}" "${RAW_DIR}/case2.hdr" || {
-  echo "FAIL: Case 2 - expected text/plain Content-Type" >&2
-  exit 1
-}
+markdown_expect_status "Case 2" "${RAW_DIR}/case2.hdr" "${PATTERN_HTTP_200}"
+markdown_expect_header "Case 2" "${RAW_DIR}/case2.hdr" "${PATTERN_CT_TEXT}"
 [[ -s "${RAW_DIR}/case2.body" ]] || {
   echo "FAIL: Case 2 - plain-text metrics body is empty" >&2
   exit 1
@@ -266,10 +254,7 @@ echo "==> Case 3: Prometheus exposition format"
 curl -sS -D "${RAW_DIR}/case3.hdr" -o "${RAW_DIR}/case3.body" \
   -H "${ACCEPT_PROMETHEUS}" --max-time 30 \
   "http://127.0.0.1:${METRICS_PORT}/metrics" >/dev/null
-grep -qi "${PATTERN_HTTP_200}" "${RAW_DIR}/case3.hdr" || {
-  echo "FAIL: Case 3 - expected HTTP 200 for Prometheus metrics" >&2
-  exit 1
-}
+markdown_expect_status "Case 3" "${RAW_DIR}/case3.hdr" "${PATTERN_HTTP_200}"
 grep -qi "${PATTERN_CT_PROMETHEUS}" "${RAW_DIR}/case3.hdr" || {
   echo "INFO: Case 3 - Prometheus Content-Type variant not matched; checking body format as fallback" >&2
   grep -qi "^# HELP" "${RAW_DIR}/case3.body" || {
@@ -343,14 +328,8 @@ echo "==> Case 8: Invalid Accept header falls back to plain-text"
 curl -sS -D "${RAW_DIR}/case8.hdr" -o "${RAW_DIR}/case8.body" \
   -H 'Accept: application/xml' --max-time 30 \
   "http://127.0.0.1:${METRICS_PORT}/metrics" >/dev/null
-grep -qi "${PATTERN_HTTP_200}" "${RAW_DIR}/case8.hdr" || {
-  echo "FAIL: Case 8 - expected HTTP 200 for unknown Accept" >&2
-  exit 1
-}
-grep -qi "${PATTERN_CT_TEXT}" "${RAW_DIR}/case8.hdr" || {
-  echo "FAIL: Case 8 - expected text/plain fallback for unknown Accept" >&2
-  exit 1
-}
+markdown_expect_status "Case 8" "${RAW_DIR}/case8.hdr" "${PATTERN_HTTP_200}"
+markdown_expect_header "Case 8" "${RAW_DIR}/case8.hdr" "${PATTERN_CT_TEXT}"
 echo "  PASS: Unknown Accept returns plain-text fallback"
 
 echo ""

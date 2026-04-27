@@ -5,13 +5,11 @@ set -euo pipefail
 #
 # Validates critical config-merge paths:
 #  1) http-level markdown_on_error pass + location-level override reject
-#  2) server-level markdown_max_size 1m + location-level override 10m
-#  3) markdown_filter off location disables conversion despite Accept header
-#  4) markdown_on_wildcard on at server + off at location
-#  5) markdown_etag off at server + on at location (location wins)
-#  6) markdown_conditional_requests none at server + if_modified_since_only at location
-#  7) markdown_flavor override at location level
-#  8) markdown_streaming_engine off at server + on at location
+#  2) markdown_filter off location disables conversion despite Accept header
+#  3) markdown_on_wildcard on at server + off at location
+#  4) markdown_etag off at server + on at location (location wins)
+#  5) markdown_conditional_requests none at server + if_modified_since_only at location
+#  6) markdown_flavor override at location level
 
 NGINX_VERSION="${NGINX_VERSION:-1.28.2}"
 PORT="${PORT:-18101}"

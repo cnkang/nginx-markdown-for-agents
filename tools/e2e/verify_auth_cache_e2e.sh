@@ -359,31 +359,42 @@ echo "  PASS: Non-matching cookie does not trigger auth logic"
 # --- Case 5: Auth fail-open preserves Cache-Control ---
 echo "==> Case 5: Auth fail-open preserves upstream Cache-Control"
 # With on_error pass and auth request, if conversion fails, upstream headers preserved
+# Capture upstream Cache-Control value for comparison
+curl -sS -D "${RAW_DIR}/case5up.hdr" -o /dev/null \
+  --max-time 30 \
+  "http://127.0.0.1:${UPSTREAM_PORT}/html" >/dev/null
+UPSTREAM_CC="$(markdown_extract_header "${RAW_DIR}/case5up.hdr" "Cache-Control")"
 curl -sS -D "${RAW_DIR}/case5.hdr" -o "${RAW_DIR}/case5.body" \
   -H "${ACCEPT_MARKDOWN}" \
   -H "${HEADER_COOKIE_AUTH}" \
   --max-time 30 \
   "http://127.0.0.1:${PORT}/md/html" >/dev/null
-if ! grep -qi "^Cache-Control:" "${RAW_DIR}/case5.hdr"; then
+AUTH_CC="$(markdown_extract_header "${RAW_DIR}/case5.hdr" "Cache-Control")"
+if [[ -z "${AUTH_CC}" ]]; then
   echo "FAIL: Case 5 - expected Cache-Control header in auth request response" >&2
   exit 1
 fi
-echo "  PASS: Auth request response has Cache-Control header"
+if [[ "${AUTH_CC}" != "${UPSTREAM_CC}" ]]; then
+  echo "FAIL: Case 5 - auth Cache-Control (${AUTH_CC}) differs from upstream (${UPSTREAM_CC})" >&2
+  exit 1
+fi
+echo "  PASS: Auth response preserves upstream Cache-Control (${AUTH_CC})"
 
 # --- Case 6: Non-auth ETag replacement ---
 echo "==> Case 6: Non-auth conversion replaces upstream ETag with markdown ETag"
 curl -sS -D "${RAW_DIR}/case6.hdr" -o "${RAW_DIR}/case6.body" \
   -H "${ACCEPT_MARKDOWN}" --max-time 30 \
   "http://127.0.0.1:${PORT}/md/html" >/dev/null
-MD_ETAG="$(grep -i '^ETag:' "${RAW_DIR}/case6.hdr" | sed 's/^ETag:[[:space:]]*//I' | tr -d '\r\n')"
-if [[ -n "${MD_ETAG}" && "${MD_ETAG}" != '"upstream-auth-etag-001"' ]]; then
-  echo "  PASS: Markdown ETag differs from upstream (upstream=upstream-auth-etag-001, got=${MD_ETAG})"
-elif [[ -z "${MD_ETAG}" ]]; then
-  echo "  PASS (soft): No ETag in response (etag may be off by default)"
-else
+MD_ETAG="$(markdown_extract_header "${RAW_DIR}/case6.hdr" "ETag")"
+if [[ -z "${MD_ETAG}" ]]; then
+  echo "FAIL: Case 6 - expected ETag header in non-auth conversion response" >&2
+  exit 1
+fi
+if [[ "${MD_ETAG}" == '"upstream-auth-etag-001"' ]]; then
   echo "FAIL: Case 6 - ETag should differ from upstream for markdown content" >&2
   exit 1
 fi
+echo "  PASS: Markdown ETag differs from upstream (upstream=upstream-auth-etag-001, got=${MD_ETAG})"
 
 # --- Case 7: Vary: Cookie in auth response ---
 echo "==> Case 7: Vary header in auth response"
@@ -393,11 +404,11 @@ curl -sS -D "${RAW_DIR}/case7.hdr" -o "${RAW_DIR}/case7.body" \
   -H "${HEADER_COOKIE_AUTH}" \
   --max-time 30 \
   "http://127.0.0.1:${PORT}/md/html" >/dev/null
-if ! grep -qi '^Vary:' "${RAW_DIR}/case7.hdr"; then
-  echo "FAIL: Case 7 - expected Vary header in auth response" >&2
+if ! grep -qi '^Vary:.*Cookie' "${RAW_DIR}/case7.hdr"; then
+  echo "FAIL: Case 7 - expected Vary header containing Cookie in auth response" >&2
   exit 1
 fi
-echo "  PASS: Auth response has Vary header"
+echo "  PASS: Vary header contains Cookie in auth response"
 
 echo ""
 echo "========================================="
