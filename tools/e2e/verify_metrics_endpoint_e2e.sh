@@ -56,6 +56,7 @@ assert_non_empty_body() {
     echo "FAIL: ${label} - response body is empty" >&2
     exit 1
   }
+  return 0
 }
 
 #

@@ -446,9 +446,10 @@ SonarCloud rules: `shelldre:S131`, `shelldre:S7677`, `shelldre:S1066`, `shelldre
 
 Required:
 - Every `case` statement must include a default `*)` clause, even if it only logs an error to stderr.
-- Shell functions that may intentionally emit no output must still end with an
-  explicit `return 0` when success is intended, so static analysis and callers
-  do not inherit an accidental status from the last command.
+- Every shell function must end with an explicit `return` statement
+  (`return 0` on success, or the appropriate status on failure), so static
+  analysis and callers do not inherit an accidental exit status from the last
+  command. This applies to all functions, not only those that emit no output.
 - Diagnostic and informational messages (INFO, WARN, DEBUG) must be redirected to stderr (`>&2`) so they do not pollute stdout when scripts are piped or their output is captured.
 - Merge nested `if` statements that have no `else` branch into a single compound condition (`if [[ cond1 ]] && cmd; then`).
 - Extract string literals used 4+ times into `readonly` constants defined near the top of the script. Grep patterns, expected header values, and expected body tokens are common candidates.
@@ -874,8 +875,9 @@ For each code change you are about to produce, mentally (or explicitly in a thin
 7. Required checks must fail the case/run when missing (not INFO-only). (Rule 18)
 8. `--plan`/dry-run modes short-circuit before runtime prerequisites. (Rule 18)
 9. `usage()` text matches parsed flags/defaults exactly. (Rule 18)
-10. Shell functions end with an explicit success `return 0` when they may emit
-    no output intentionally. (Rule 18)
+10. Every shell function ends with an explicit `return` statement (`return 0`
+    on success, or the appropriate status on failure). This applies to all
+    functions, not only those that emit no output. (Rule 18)
 11. Every function has a comment block stating purpose, arguments, output, and exit behaviour. Repeated string constants use `readonly` variables with descriptive names. (Rule 26)
 
 #### Python test/tooling scripts (`tests/e2e/`, `tools/`)
