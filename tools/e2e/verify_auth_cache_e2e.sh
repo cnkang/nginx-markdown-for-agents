@@ -31,7 +31,7 @@ readonly ACCEPT_MARKDOWN='Accept: text/markdown'
 readonly PATTERN_HTTP_200='HTTP/1.1 200'
 readonly PATTERN_CT_MARKDOWN='^Content-Type: text/markdown'
 readonly PATTERN_CT_HTML='^Content-Type: text/html'
-readonly HEADER_COOKIE_AUTH='Cookie: session=abc123'
+readonly HEADER_COOKIE_AUTH='Cookie: session_user=abc123'
 
 # shellcheck source=tools/lib/nginx_markdown_native_build.sh
 source "${NATIVE_BUILD_HELPER}"
@@ -367,6 +367,7 @@ echo "==> Case 5: Auth fail-open preserves upstream Cache-Control"
 # With on_error pass and auth request, if conversion fails, upstream headers preserved
 # Capture upstream Cache-Control value for comparison
 curl -sS -D "${RAW_DIR}/case5up.hdr" -o /dev/null \
+  -H "${HEADER_COOKIE_AUTH}" \
   --max-time 30 \
   "http://127.0.0.1:${UPSTREAM_PORT}/html" >/dev/null
 UPSTREAM_CC="$(markdown_extract_header "${RAW_DIR}/case5up.hdr" "Cache-Control")"

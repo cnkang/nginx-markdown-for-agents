@@ -194,6 +194,27 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", "0")
         self.end_headers()
 
+    def do_HEAD(self):
+        path = urlparse(self.path).path
+        if path == "/health":
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain")
+            self.send_header("Content-Length", "2")
+            self.end_headers()
+            return
+        if path == "/html":
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=UTF-8")
+            self.send_header("Content-Length", str(len(HTML_BODY)))
+            self.send_header("ETag", UPSTREAM_ETAG)
+            self.send_header("Last-Modified", LAST_MODIFIED)
+            self.send_header("Cache-Control", "public, max-age=3600")
+            self.end_headers()
+            return
+        self.send_response(404)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--serve", action="store_true")

@@ -157,6 +157,14 @@ LARGE_HTML_START = b"""<!doctype html>
 LARGE_HTML_END = b"""</body></html>
 """
 
+MALFORMED_HTML = b"""<html><head><title>Bad
+<body><h1>Unclosed heading
+<div><div><div>nested without closing
+<p>paragraph without closing
+<a href="link without quote>text</a>
+</html>
+"""
+
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
@@ -187,6 +195,13 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+            return
+        if path == "/malformed":
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=UTF-8")
+            self.send_header("Content-Length", str(len(MALFORMED_HTML)))
+            self.end_headers()
+            self.wfile.write(MALFORMED_HTML)
             return
         self.send_response(404)
         self.send_header("Content-Length", "0")
@@ -387,6 +402,35 @@ grep -qi "${PATTERN_CT_MARKDOWN}" "${RAW_DIR}/case1b.hdr" || {
   exit 1
 }
 echo "  PASS: http-level on_error pass inherited correctly"
+
+# --- Case 1c: on_error reject + malformed input returns error ---
+echo "==> Case 1c: on_error reject with malformed input"
+curl -sS -D "${RAW_DIR}/case1c.hdr" -o "${RAW_DIR}/case1c.body" \
+  -H "${ACCEPT_MARKDOWN}" --max-time 30 \
+  "http://127.0.0.1:${PORT}/md/reject/malformed" >/dev/null
+REJECT_STATUS="$(head -1 "${RAW_DIR}/case1c.hdr" | awk '{print $2}')"
+if [[ "${REJECT_STATUS}" == "200" ]]; then
+  grep -qi "${PATTERN_CT_MARKDOWN}" "${RAW_DIR}/case1c.hdr" || {
+    echo "FAIL: Case 1c - on_error reject returned 200 but not markdown (unexpected pass-through)" >&2
+    exit 1
+  }
+fi
+echo "  PASS: on_error reject handles malformed input without markdown conversion"
+
+# --- Case 1d: on_error pass + malformed input returns fail-open HTML ---
+echo "==> Case 1d: on_error pass with malformed input (fail-open)"
+curl -sS -D "${RAW_DIR}/case1d.hdr" -o "${RAW_DIR}/case1d.body" \
+  -H "${ACCEPT_MARKDOWN}" --max-time 30 \
+  "http://127.0.0.1:${PORT}/md/pass/malformed" >/dev/null
+grep -qi "${PATTERN_HTTP_200}" "${RAW_DIR}/case1d.hdr" || {
+  echo "FAIL: Case 1d - expected 200 for on_error pass with malformed input" >&2
+  exit 1
+}
+grep -qi "${PATTERN_CT_HTML}" "${RAW_DIR}/case1d.hdr" || {
+  echo "FAIL: Case 1d - expected text/html fail-open for malformed input with on_error pass" >&2
+  exit 1
+}
+echo "  PASS: on_error pass fail-opens malformed input to HTML"
 
 # --- Case 3: markdown_filter off disables conversion ---
 echo "==> Case 3: markdown_filter off disables conversion"
