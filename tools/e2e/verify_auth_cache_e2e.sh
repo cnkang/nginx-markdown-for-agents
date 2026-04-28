@@ -55,6 +55,7 @@ assert_header_contains() {
     echo "FAIL: ${label} - expected header matching ${pattern}" >&2
     exit 1
   }
+  return 0
 }
 
 #
@@ -76,6 +77,7 @@ assert_header_not_contains() {
     echo "FAIL: ${label} - unexpected header matching ${pattern}" >&2
     exit 1
   fi
+  return 0
 }
 
 #

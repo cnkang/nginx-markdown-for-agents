@@ -63,6 +63,7 @@ assert_http_status() {
     echo "FAIL: ${label} - expected status ${expected}" >&2
     exit 1
   }
+  return 0
 }
 
 #
@@ -84,6 +85,7 @@ assert_header_contains() {
     echo "FAIL: ${label} - expected header matching ${pattern}" >&2
     exit 1
   }
+  return 0
 }
 
 #
