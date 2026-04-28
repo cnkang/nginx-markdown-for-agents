@@ -33,6 +33,7 @@ ORIG_ARGS=("$@")
 readonly ACCEPT_MARKDOWN='Accept: text/markdown'
 readonly PATTERN_HTTP_200='HTTP/1.1 200'
 readonly PATTERN_HTTP_304='HTTP/1.1 304'
+readonly MD_HTML_URL="http://127.0.0.1:${PORT}/md/html"
 
 # shellcheck source=tools/lib/nginx_markdown_native_build.sh
 source "${NATIVE_BUILD_HELPER}"
@@ -40,11 +41,23 @@ source "${NATIVE_BUILD_HELPER}"
 #
 # Print command-line usage for this E2E script.
 #
+# Arguments: none
+# Output: usage text to stdout
+# Exit behavior: returns 0
+#
 usage() {
   cat <<EOF
-Usage: $(basename "$0") [--keep-artifacts] [--nginx-version VERSION] [--port PORT] [--upstream-port PORT]
+Usage: $(basename "$0") [--keep-artifacts] [--nginx-version VERSION] [--port PORT] [--upstream-port PORT] [-h|--help]
 
 Build local NGINX with the markdown module and run conditional-request E2E checks.
+
+Options:
+  --keep-artifacts       Keep build artifacts after run (default: remove on success)
+  --nginx-version VERSION
+                         NGINX version to build (default: ${NGINX_VERSION})
+  --port PORT            Main NGINX listen port (default: ${PORT})
+  --upstream-port PORT   Upstream server listen port (default: ${UPSTREAM_PORT})
+  -h, --help             Show this help message
 
 Checks:
   1) Converted response includes ETag
@@ -66,6 +79,10 @@ EOF
 #
 # Trap handler: stop upstream and NGINX, then optionally remove build artifacts.
 #
+# Arguments: none (reads global state)
+# Output: diagnostic messages to stderr
+# Exit behavior: returns 0
+#
 cleanup() {
   local rc=$?
 
@@ -84,7 +101,7 @@ cleanup() {
   if [[ $rc -ne 0 && -n "${BUILDROOT}" && -d "${BUILDROOT}" ]]; then
     echo "Conditional-request E2E failed. Artifacts kept at: ${BUILDROOT}" >&2
   elif [[ "${KEEP_ARTIFACTS}" -eq 1 && -n "${BUILDROOT}" ]]; then
-    echo "Conditional-request E2E succeeded. Artifacts kept at: ${BUILDROOT}"
+    echo "Conditional-request E2E succeeded. Artifacts kept at: ${BUILDROOT}" >&2
   fi
   return 0
 }
@@ -199,7 +216,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/health":
             self.send_response(200)
             self.send_header("Content-Type", "text/plain")
-            self.send_header("Content-Length", "2")
+            self.send_header("Content-Length", "3")
             self.end_headers()
             return
         if path == "/html":
@@ -232,17 +249,17 @@ PY
 chmod +x "${UPSTREAM_SCRIPT}"
 
 # --- Build or reuse NGINX ---
-echo "==> Host architecture: $(uname -m)"
+echo "==> Host architecture: $(uname -m)" >&2
 if [[ -n "${NGINX_BIN}" ]]; then
-  echo "==> Reusing existing NGINX binary (${NGINX_BIN})"
+  echo "==> Reusing existing NGINX binary (${NGINX_BIN})" >&2
   LOAD_MODULE_LINE="$(markdown_prepare_runtime_reuse "${NGINX_BIN}" "${RUNTIME}")"
   NGINX_EXECUTABLE="${NGINX_BIN}"
 else
-  echo "==> Building Rust converter (${RUST_TARGET})"
+  echo "==> Building Rust converter (${RUST_TARGET})" >&2
   markdown_prepare_rust_converter_release \
     "${WORKSPACE_ROOT}" "${RUST_TARGET}" --features streaming >/dev/null
 
-  echo "==> Downloading/building NGINX ${NGINX_VERSION}"
+  echo "==> Downloading/building NGINX ${NGINX_VERSION}" >&2
   curl --proto '=https' --tlsv1.2 -fsSL "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" -o "${BUILDROOT}/nginx.tar.gz"
   mkdir -p "${BUILDROOT}/src"
   tar -xzf "${BUILDROOT}/nginx.tar.gz" -C "${BUILDROOT}/src" --strip-components=1
@@ -262,7 +279,7 @@ fi
 mkdir -p "${RUNTIME}/conf" "${RUNTIME}/logs"
 
 # --- Start upstream ---
-echo "==> Starting conditional-request upstream on 127.0.0.1:${UPSTREAM_PORT}"
+echo "==> Starting conditional-request upstream on 127.0.0.1:${UPSTREAM_PORT}" >&2
 python3 "${UPSTREAM_SCRIPT}" --serve --host 127.0.0.1 --port "${UPSTREAM_PORT}" > "${RAW_DIR}/upstream.log" 2>&1 &
 UPSTREAM_PID=$!
 markdown_wait_for_http "http://127.0.0.1:${UPSTREAM_PORT}/health" "Upstream on ${UPSTREAM_PORT}" || exit 1
@@ -301,110 +318,110 @@ http {
 }
 EOF
 
-echo "==> Starting NGINX on 127.0.0.1:${PORT}"
+echo "==> Starting NGINX on 127.0.0.1:${PORT}" >&2
 "${NGINX_EXECUTABLE}" -p "${RUNTIME}" -c conf/nginx.conf
-markdown_wait_for_http "http://127.0.0.1:${PORT}/md/html" "NGINX on ${PORT}" || exit 1
+markdown_wait_for_http "${MD_HTML_URL}" "NGINX on ${PORT}" || exit 1
 
 # --- Case 1: Converted response includes ETag header ---
-echo "==> Case 1: Converted response includes ETag header"
+echo "==> Case 1: Converted response includes ETag header" >&2
 curl -sS -D "${RAW_DIR}/case1.hdr" -o "${RAW_DIR}/case1.body" \
   -H "${ACCEPT_MARKDOWN}" --max-time 30 \
-  "http://127.0.0.1:${PORT}/md/html" >/dev/null
+  "${MD_HTML_URL}" >/dev/null
 markdown_expect_status "Case 1" "${RAW_DIR}/case1.hdr" "${PATTERN_HTTP_200}"
 markdown_expect_header "Case 1" "${RAW_DIR}/case1.hdr" '^ETag:'
-echo "  PASS: Converted response includes ETag header"
+echo "  PASS: Converted response includes ETag header" >&2
 
 # Extract the ETag value for subsequent tests
 RESPONSE_ETAG="$(markdown_extract_header "${RAW_DIR}/case1.hdr" "ETag")"
 
 # --- Case 2: ETag differs from upstream's original ETag ---
-echo "==> Case 2: ETag differs from upstream original"
+echo "==> Case 2: ETag differs from upstream original" >&2
 [[ "${RESPONSE_ETAG}" != '"upstream-original-etag-12345"' ]] || {
   echo "FAIL: Case 2 - markdown ETag should differ from upstream ETag, got: ${RESPONSE_ETAG}" >&2
   exit 1
 }
-echo "  PASS: Markdown ETag differs from upstream (upstream=upstream-original-etag-12345, got=${RESPONSE_ETAG})"
+echo "  PASS: Markdown ETag differs from upstream (upstream=upstream-original-etag-12345, got=${RESPONSE_ETAG})" >&2
 
 # --- Case 3: If-None-Match with matching ETag returns 304 ---
-echo "==> Case 3: If-None-Match matching ETag returns 304"
+echo "==> Case 3: If-None-Match matching ETag returns 304" >&2
 curl -sS -D "${RAW_DIR}/case3.hdr" -o "${RAW_DIR}/case3.body" \
   -H "${ACCEPT_MARKDOWN}" \
   -H "If-None-Match: ${RESPONSE_ETAG}" \
   --max-time 30 \
-  "http://127.0.0.1:${PORT}/md/html" >/dev/null
+  "${MD_HTML_URL}" >/dev/null
 markdown_expect_status "Case 3" "${RAW_DIR}/case3.hdr" "${PATTERN_HTTP_304}"
-echo "  PASS: If-None-Match with matching ETag returns 304"
+echo "  PASS: If-None-Match with matching ETag returns 304" >&2
 
 # --- Case 4: If-None-Match with non-matching ETag returns 200 ---
-echo "==> Case 4: If-None-Match non-matching ETag returns 200"
+echo "==> Case 4: If-None-Match non-matching ETag returns 200" >&2
 curl -sS -D "${RAW_DIR}/case4.hdr" -o "${RAW_DIR}/case4.body" \
   -H "${ACCEPT_MARKDOWN}" \
   -H 'If-None-Match: "non-matching-etag-99999"' \
   --max-time 30 \
-  "http://127.0.0.1:${PORT}/md/html" >/dev/null
+  "${MD_HTML_URL}" >/dev/null
 markdown_expect_status "Case 4" "${RAW_DIR}/case4.hdr" "${PATTERN_HTTP_200}"
-echo "  PASS: If-None-Match with non-matching ETag returns 200"
+echo "  PASS: If-None-Match with non-matching ETag returns 200" >&2
 
 # --- Case 5: If-Modified-Since with future date returns 304 ---
-echo "==> Case 5: If-Modified-Since with future date returns 304"
+echo "==> Case 5: If-Modified-Since with future date returns 304" >&2
 curl -sS -D "${RAW_DIR}/case5.hdr" -o "${RAW_DIR}/case5.body" \
   -H "${ACCEPT_MARKDOWN}" \
   -H 'If-Modified-Since: Mon, 01 Jan 2030 00:00:00 GMT' \
   --max-time 30 \
-  "http://127.0.0.1:${PORT}/md/html" >/dev/null
+  "${MD_HTML_URL}" >/dev/null
 markdown_expect_status "Case 5" "${RAW_DIR}/case5.hdr" "${PATTERN_HTTP_304}"
-echo "  PASS: If-Modified-Since with future date returns 304"
+echo "  PASS: If-Modified-Since with future date returns 304" >&2
 
 # --- Case 6: If-Modified-Since with past date returns 200 ---
-echo "==> Case 6: If-Modified-Since with past date returns 200"
+echo "==> Case 6: If-Modified-Since with past date returns 200" >&2
 curl -sS -D "${RAW_DIR}/case6.hdr" -o "${RAW_DIR}/case6.body" \
   -H "${ACCEPT_MARKDOWN}" \
   -H 'If-Modified-Since: Mon, 01 Jan 2020 00:00:00 GMT' \
   --max-time 30 \
-  "http://127.0.0.1:${PORT}/md/html" >/dev/null
+  "${MD_HTML_URL}" >/dev/null
 markdown_expect_status "Case 6" "${RAW_DIR}/case6.hdr" "${PATTERN_HTTP_200}"
-echo "  PASS: If-Modified-Since with past date returns 200"
+echo "  PASS: If-Modified-Since with past date returns 200" >&2
 
 # --- Case 7: Weak ETag matching returns 304 ---
-echo "==> Case 7: Weak ETag matching returns 304"
+echo "==> Case 7: Weak ETag matching returns 304" >&2
 WEAK_ETAG="W/${RESPONSE_ETAG}"
 curl -sS -D "${RAW_DIR}/case7.hdr" -o "${RAW_DIR}/case7.body" \
   -H "${ACCEPT_MARKDOWN}" \
   -H "If-None-Match: ${WEAK_ETAG}" \
   --max-time 30 \
-  "http://127.0.0.1:${PORT}/md/html" >/dev/null
+  "${MD_HTML_URL}" >/dev/null
 markdown_expect_status "Case 7" "${RAW_DIR}/case7.hdr" "${PATTERN_HTTP_304}"
-echo "  PASS: Weak ETag matching returns 304"
+echo "  PASS: Weak ETag matching returns 304" >&2
 
 # --- Case 8: Wildcard If-None-Match: * returns 304 ---
-echo "==> Case 8: Wildcard If-None-Match: * returns 304"
+echo "==> Case 8: Wildcard If-None-Match: * returns 304" >&2
 curl -sS -D "${RAW_DIR}/case8.hdr" -o "${RAW_DIR}/case8.body" \
   -H "${ACCEPT_MARKDOWN}" \
   -H 'If-None-Match: *' \
   --max-time 30 \
-  "http://127.0.0.1:${PORT}/md/html" >/dev/null
+  "${MD_HTML_URL}" >/dev/null
 markdown_expect_status "Case 8" "${RAW_DIR}/case8.hdr" "${PATTERN_HTTP_304}"
-echo "  PASS: Wildcard If-None-Match returns 304"
+echo "  PASS: Wildcard If-None-Match returns 304" >&2
 
 # --- Case 9: Vary: Accept present in 304 response ---
-echo "==> Case 9: Vary: Accept present in 304 response"
+echo "==> Case 9: Vary: Accept present in 304 response" >&2
 markdown_expect_header "Case 9" "${RAW_DIR}/case3.hdr" '^Vary:.*Accept'
-echo "  PASS: Vary: Accept present in 304 response"
+echo "  PASS: Vary: Accept present in 304 response" >&2
 
 # --- Case 10: HEAD returns same ETag as GET ---
-echo "==> Case 10: HEAD returns same ETag as GET"
+echo "==> Case 10: HEAD returns same ETag as GET" >&2
 curl -sS -D "${RAW_DIR}/case10.hdr" -o "${RAW_DIR}/case10.body" \
   --head -H "${ACCEPT_MARKDOWN}" --max-time 30 \
-  "http://127.0.0.1:${PORT}/md/html" >/dev/null
+  "${MD_HTML_URL}" >/dev/null
 markdown_expect_status "Case 10" "${RAW_DIR}/case10.hdr" "${PATTERN_HTTP_200}"
 HEAD_ETAG="$(markdown_extract_header "${RAW_DIR}/case10.hdr" "ETag")"
 [[ "${HEAD_ETAG}" == "${RESPONSE_ETAG}" ]] || {
   echo "FAIL: Case 10 - HEAD ETag (${HEAD_ETAG}) != GET ETag (${RESPONSE_ETAG})" >&2
   exit 1
 }
-echo "  PASS: HEAD and GET return identical ETag"
+echo "  PASS: HEAD and GET return identical ETag" >&2
 
-echo ""
-echo "=============================================="
-echo "All conditional-request E2E tests passed!"
-echo "=============================================="
+echo "" >&2
+echo "==============================================" >&2
+echo "All conditional-request E2E tests passed!" >&2
+echo "==============================================" >&2
