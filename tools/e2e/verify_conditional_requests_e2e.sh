@@ -37,6 +37,9 @@ readonly PATTERN_HTTP_304='HTTP/1.1 304'
 # shellcheck source=tools/lib/nginx_markdown_native_build.sh
 source "${NATIVE_BUILD_HELPER}"
 
+#
+# Print command-line usage for this E2E script.
+#
 usage() {
   cat <<EOF
 Usage: $(basename "$0") [--keep-artifacts] [--nginx-version VERSION] [--port PORT] [--upstream-port PORT]
@@ -60,6 +63,9 @@ EOF
   return 0
 }
 
+#
+# Trap handler: stop upstream and NGINX, then optionally remove build artifacts.
+#
 cleanup() {
   local rc=$?
 

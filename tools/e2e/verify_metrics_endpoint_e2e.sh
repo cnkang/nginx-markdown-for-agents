@@ -38,6 +38,9 @@ readonly PATTERN_CT_PROMETHEUS='Content-Type: text/plain.*version=0\.0\.4'
 # shellcheck source=tools/lib/nginx_markdown_native_build.sh
 source "${NATIVE_BUILD_HELPER}"
 
+#
+# Print command-line usage for this E2E script.
+#
 usage() {
   cat <<EOF
 Usage: $(basename "$0") [--keep-artifacts] [--nginx-version VERSION] [--port PORT] [--metrics-port PORT]
@@ -59,6 +62,9 @@ EOF
   return 0
 }
 
+#
+# Trap handler: stop NGINX, then optionally remove build artifacts.
+#
 cleanup() {
   local rc=$?
 

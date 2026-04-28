@@ -168,8 +168,8 @@ Scripts are grouped by domain rather than scattered at repo root.
 |------|---------|
 | `tools/docs/` | Documentation validation and duplicate-doc checks |
 | `tools/ci/` | CI-specific helpers such as license and environment checks |
-| `tools/e2e/` | Canonical native E2E verification scripts, including the proxy/TLS backend suite and shared runtime orchestration |
-| `tools/lib/` | Shared shell helpers for native build/test orchestration |
+| `tools/e2e/` | Canonical native E2E verification scripts covering proxy/TLS, streaming, metrics, conditional requests, config merge, auth/cache, status codes, Accept negotiation, error handling, and security paths |
+| `tools/lib/` | Shared shell helpers for native build/test orchestration (`markdown_wait_for_http`, `markdown_require_flag_value`, `markdown_expect_status`, `markdown_expect_header`, `markdown_extract_header`) |
 | `tools/corpus/` | Corpus validation and conversion tooling |
 | `tools/build_release/` | Release packaging support and packaging Dockerfiles |
 | `tools/c-extract/` | Small developer utility for extracting C functions |

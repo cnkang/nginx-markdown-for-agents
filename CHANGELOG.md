@@ -16,6 +16,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Nothing yet.
 
+## [0.5.6] - 2026-04-28
+
+This release adds end-to-end validation coverage for metrics, conditional
+requests, config merge, auth/cache, and status-code passthrough paths, and
+hardens the shared E2E helper library with portability and assertion fixes.
+
+### Added
+- New E2E validation scripts: `verify_metrics_endpoint_e2e.sh`,
+  `verify_conditional_requests_e2e.sh`, `verify_config_merge_e2e.sh`,
+  `verify_auth_cache_e2e.sh`, `verify_status_codes_e2e.sh`.
+- Shared helper functions in `nginx_markdown_native_build.sh`:
+  `markdown_wait_for_http` (HTTP readiness polling),
+  `markdown_require_flag_value` (CLI flag validation),
+  `markdown_expect_status` (HTTP status assertion),
+  `markdown_expect_header` (header pattern assertion),
+  `markdown_extract_header` (header value extraction).
+- Makefile targets for all new E2E scripts.
+
+### Changed
+- `markdown_require_flag_value` now returns 2 instead of calling
+  `usage` and exiting, allowing callers to handle the error under
+  `set -e` without coupling to a `usage` function.
+- `markdown_extract_header` now uses POSIX awk instead of GNU sed
+  `/I` for macOS portability.
+- `PATTERN_CT_PROMETHEUS` now escapes dots (`0\.0\.4`) for
+  correct grep matching.
+- Deduplicated local `wait_for_http` and `assert_http_200_header`
+  definitions across E2E scripts in favor of shared helpers.
+- Hardened auth/cache E2E assertions: Case 5 compares exact
+  upstream Cache-Control, Case 6 fails on empty ETag, Case 7
+  requires `Vary:.*Cookie` (not just `Vary:`).
+- Synced `verify_config_merge_e2e.sh` top docstring to actual
+  checks; fixed `verify_proxy_tls_backend_e2e.sh` source ordering.
+
+### Fixed
+- SonarCloud finding: missing `return 0` in
+  `check_status_passthrough` (`verify_status_codes_e2e.sh`).
+- SonarCloud finding: repeated `'Cookie: session=abc123'` literal
+  extracted to `readonly HEADER_COOKIE_AUTH`.
+- CodeRabbit findings: SC2015 anti-patterns, readiness URL
+  mismatches, inline Python string interpolation, missing
+  `.PHONY` targets, `wait_for_http` docstring drift.
+- Orphaned doc blocks and stale local helper definitions removed
+  from `verify_accept_negotiation_e2e.sh`,
+  `verify_chunked_streaming_native_e2e.sh`,
+  `verify_error_handling_e2e.sh`.
+
 ## [0.5.5] - 2026-04-26
 
 This release consolidates all post-0.5.0 work into one stabilization release,
