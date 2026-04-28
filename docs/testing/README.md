@@ -87,7 +87,7 @@ make test-rust-fuzz-smoke
 - Performance references are guidance for regression detection, not hard SLAs.
 - The CI workflow records non-blocking performance artifacts for `perf_baseline`, including a front-matter-enabled medium sample, and runs a runtime-regression job that self-builds a module-enabled NGINX runtime for delegated `If-Modified-Since`, then reuses that retained binary for the chunked native smoke and large-response checks.
 - Nightly fuzzing runs parser, FFI, and security-validator targets from `components/rust-converter/fuzz/`.
-- The native NGINX verification scripts share `tools/lib/nginx_markdown_native_build.sh`, which centralizes Rust target detection, header sync, and macOS deployment-target alignment for Rust and NGINX builds.
+- The native NGINX verification scripts share `tools/lib/nginx_markdown_native_build.sh`, which centralizes Rust target detection, header sync, macOS deployment-target alignment, HTTP readiness polling, CLI flag validation, and HTTP status/header assertion helpers for E2E scripts.
 - A separate non-blocking Darwin/macOS smoke workflow exercises native Rust build, real-nginx IMS validation, and chunked native smoke on GitHub-hosted macOS runners.
 
 As a working rule:
@@ -101,4 +101,5 @@ As a working rule:
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.5.6 | 2026-04-28 | release-prep | Updated shared helper description to include new E2E helpers |
 | 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |

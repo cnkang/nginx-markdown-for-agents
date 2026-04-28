@@ -24,13 +24,24 @@ Use this page to answer three questions:
 tools/e2e/run_e2e_suite.sh
 ```
 
-That suite currently runs three focused checks:
+That suite currently runs focused checks across all E2E scenarios:
 
 | Script | Purpose |
 |--------|---------|
 | `tools/e2e/verify_proxy_tls_backend_e2e.sh` | Real proxy-chain validation against a local TLS backend |
 | `tools/e2e/verify_chunked_streaming_native_e2e.sh --profile smoke` | Chunked buffering and oversized fail-open smoke coverage |
 | `tools/e2e/verify_large_markdown_response_e2e.sh` | Large-response buffering and conversion validation |
+| `tools/e2e/verify_metrics_endpoint_e2e.sh` | Metrics endpoint format negotiation (JSON, text, Prometheus) |
+| `tools/e2e/verify_conditional_requests_e2e.sh` | ETag, If-None-Match, If-Modified-Since, 304, HEAD parity |
+| `tools/e2e/verify_config_merge_e2e.sh` | Directive merge precedence and override behavior |
+| `tools/e2e/verify_auth_cache_e2e.sh` | Auth cookie detection, Cache-Control, ETag replacement, Vary |
+| `tools/e2e/verify_status_codes_e2e.sh` | Non-2xx passthrough and redirect handling |
+| `tools/e2e/verify_accept_negotiation_e2e.sh` | Accept header content negotiation and wildcard behavior |
+| `tools/e2e/verify_error_handling_e2e.sh` | Error passthrough, fail-open, 206 skip, max-size boundary |
+| `tools/e2e/verify_security_e2e.sh` | Security header and sanitizer behavior |
+| `tools/e2e/verify_huge_body_allowed_native_e2e.sh` | Huge body within max-size converts successfully |
+| `tools/e2e/verify_huge_body_native_e2e.sh` | Huge body exceeding max-size fail-opens |
+| `tools/e2e/verify_streaming_failure_cache_e2e.sh` | Streaming failure cache and retry behavior |
 
 The suite keeps the public command stable:
 
@@ -50,6 +61,13 @@ The canonical E2E suite is intentionally focused on runtime paths that benefit f
 - `HEAD` requests through a proxy path
 - chunked buffering behavior
 - large-response handling and fail-open size protection
+- metrics endpoint format negotiation (JSON, plain-text, Prometheus exposition)
+- conditional request semantics (ETag, If-None-Match, If-Modified-Since, 304, HEAD parity)
+- directive merge precedence and override behavior
+- auth cookie detection, Cache-Control/ETag/Vary header handling
+- non-2xx status code passthrough and redirect handling
+- Accept header content negotiation and wildcard behavior
+- error passthrough, fail-open, 206 skip, max-size boundary
 
 ### Coverage E2E Scenarios
 
@@ -175,6 +193,11 @@ That helper owns:
 - header sync for native verification builds
 - macOS deployment-target alignment
 - reusable runtime layout checks
+- HTTP readiness polling (`markdown_wait_for_http`)
+- CLI flag validation (`markdown_require_flag_value`)
+- HTTP status assertion (`markdown_expect_status`)
+- header pattern assertion (`markdown_expect_header`)
+- header value extraction (`markdown_extract_header`)
 
 ## Notes
 
@@ -187,4 +210,5 @@ That helper owns:
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.5.6 | 2026-04-28 | release-prep | Added new E2E scripts (metrics, conditional requests, config merge, auth/cache, status codes); listed shared helpers |
 | 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |
