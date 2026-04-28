@@ -330,6 +330,7 @@ markdown_prepare_rust_converter_release() {
     markdown_copy_rust_release_archive "${workspace_root}" "${rust_target}"
     markdown_sync_converter_header "${workspace_root}"
   )
+  return 0
 }
 
 # Wait for an HTTP endpoint to become reachable.
