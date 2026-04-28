@@ -37,13 +37,67 @@ readonly HEADER_COOKIE_AUTH='Cookie: session_user=abc123'
 source "${NATIVE_BUILD_HELPER}"
 
 #
+# Assert that a headers file contains a line matching a pattern.
+#
+# Arguments:
+#   $1 - case label (for diagnostic messages)
+#   $2 - headers file path
+#   $3 - grep pattern to match
+# Output: FAIL diagnostic to stderr on failure
+# Exit behavior: exits 1 if pattern not found
+#
+assert_header_contains() {
+  local label="$1"
+  local hdr_file="$2"
+  local pattern="$3"
+
+  grep -qi "${pattern}" "${hdr_file}" || {
+    echo "FAIL: ${label} - expected header matching ${pattern}" >&2
+    exit 1
+  }
+}
+
+#
+# Assert that a headers file does NOT contain a line matching a pattern.
+#
+# Arguments:
+#   $1 - case label (for diagnostic messages)
+#   $2 - headers file path
+#   $3 - grep pattern that must not match
+# Output: FAIL diagnostic to stderr on failure
+# Exit behavior: exits 1 if pattern is found
+#
+assert_header_not_contains() {
+  local label="$1"
+  local hdr_file="$2"
+  local pattern="$3"
+
+  if grep -qi "${pattern}" "${hdr_file}"; then
+    echo "FAIL: ${label} - unexpected header matching ${pattern}" >&2
+    exit 1
+  fi
+}
+
+#
 # Print command-line usage for this E2E script.
+#
+# Arguments: none
+# Output: usage text to stdout
+# Exit behavior: returns 0
 #
 usage() {
   cat <<EOF
-Usage: $(basename "$0") [--keep-artifacts] [--nginx-version VERSION] [--port PORT] [--upstream-port PORT]
+Usage: $(basename "$0") [--keep-artifacts] [--nginx-version VERSION] [--port PORT] [--upstream-port PORT] [-h|--help]
 
 Build local NGINX with the markdown module and run auth/cache E2E checks.
+
+Options:
+  --keep-artifacts       Keep build artifacts after run (default: remove on success)
+  --nginx-version VERSION
+                         NGINX version to build (default: ${NGINX_VERSION})
+  --port PORT            Main NGINX listen port (default: ${PORT})
+  --upstream-port PORT   Upstream server listen port (default: ${UPSTREAM_PORT})
+  -h, --help             Show this help message
 
 Checks:
   1) Auth request Cache-Control: private
@@ -61,6 +115,10 @@ EOF
 
 #
 # Trap handler: stop upstream and NGINX, then optionally remove build artifacts.
+#
+# Arguments: none (reads global state)
+# Output: diagnostic messages to stderr
+# Exit behavior: returns 0
 #
 cleanup() {
   local rc=$?
@@ -80,7 +138,7 @@ cleanup() {
   if [[ $rc -ne 0 && -n "${BUILDROOT}" && -d "${BUILDROOT}" ]]; then
     echo "Auth/cache E2E failed. Artifacts kept at: ${BUILDROOT}" >&2
   elif [[ "${KEEP_ARTIFACTS}" -eq 1 && -n "${BUILDROOT}" ]]; then
-    echo "Auth/cache E2E succeeded. Artifacts kept at: ${BUILDROOT}"
+    echo "Auth/cache E2E succeeded. Artifacts kept at: ${BUILDROOT}" >&2
   fi
   return 0
 }
@@ -206,17 +264,17 @@ PY
 chmod +x "${UPSTREAM_SCRIPT}"
 
 # --- Build or reuse NGINX ---
-echo "==> Host architecture: $(uname -m)"
+echo "==> Host architecture: $(uname -m)" >&2
 if [[ -n "${NGINX_BIN}" ]]; then
-  echo "==> Reusing existing NGINX binary (${NGINX_BIN})"
+  echo "==> Reusing existing NGINX binary (${NGINX_BIN})" >&2
   LOAD_MODULE_LINE="$(markdown_prepare_runtime_reuse "${NGINX_BIN}" "${RUNTIME}")"
   NGINX_EXECUTABLE="${NGINX_BIN}"
 else
-  echo "==> Building Rust converter (${RUST_TARGET})"
+  echo "==> Building Rust converter (${RUST_TARGET})" >&2
   markdown_prepare_rust_converter_release \
     "${WORKSPACE_ROOT}" "${RUST_TARGET}" --features streaming >/dev/null
 
-  echo "==> Downloading/building NGINX ${NGINX_VERSION}"
+  echo "==> Downloading/building NGINX ${NGINX_VERSION}" >&2
   curl --proto '=https' --tlsv1.2 -fsSL "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" -o "${BUILDROOT}/nginx.tar.gz"
   mkdir -p "${BUILDROOT}/src"
   tar -xzf "${BUILDROOT}/nginx.tar.gz" -C "${BUILDROOT}/src" --strip-components=1
@@ -236,7 +294,7 @@ fi
 mkdir -p "${RUNTIME}/conf" "${RUNTIME}/logs"
 
 # --- Start upstream ---
-echo "==> Starting auth/cache upstream on 127.0.0.1:${UPSTREAM_PORT}"
+echo "==> Starting auth/cache upstream on 127.0.0.1:${UPSTREAM_PORT}" >&2
 python3 "${UPSTREAM_SCRIPT}" --serve --host 127.0.0.1 --port "${UPSTREAM_PORT}" > "${RAW_DIR}/upstream.log" 2>&1 &
 UPSTREAM_PID=$!
 markdown_wait_for_http "http://127.0.0.1:${UPSTREAM_PORT}/health" "Upstream on ${UPSTREAM_PORT}" || exit 1
@@ -291,79 +349,55 @@ http {
 }
 EOF
 
-echo "==> Starting NGINX on 127.0.0.1:${PORT}"
+echo "==> Starting NGINX on 127.0.0.1:${PORT}" >&2
 "${NGINX_EXECUTABLE}" -p "${RUNTIME}" -c conf/nginx.conf
 markdown_wait_for_http "http://127.0.0.1:${PORT}/md/html" "NGINX on ${PORT}" || exit 1
 
 # --- Case 1: Auth request with Cookie gets Cache-Control: private ---
-echo "==> Case 1: Auth request with Cookie gets Cache-Control: private"
+echo "==> Case 1: Auth request with Cookie gets Cache-Control: private" >&2
 curl -sS -D "${RAW_DIR}/case1.hdr" -o "${RAW_DIR}/case1.body" \
   -H "${ACCEPT_MARKDOWN}" \
   -H "${HEADER_COOKIE_AUTH}" \
   --max-time 30 \
   "http://127.0.0.1:${PORT}/md/html" >/dev/null
-grep -qi "${PATTERN_HTTP_200}" "${RAW_DIR}/case1.hdr" || {
-  echo "FAIL: Case 1 - expected HTTP 200" >&2
-  exit 1
-}
-if ! grep -qi '^Cache-Control:.*private' "${RAW_DIR}/case1.hdr"; then
-  echo "FAIL: Case 1 - expected Cache-Control: private for auth request" >&2
-  exit 1
-fi
-echo "  PASS: Cache-Control contains private for auth request"
+assert_header_contains "Case 1 status" "${RAW_DIR}/case1.hdr" "${PATTERN_HTTP_200}"
+assert_header_contains "Case 1 cache-control" "${RAW_DIR}/case1.hdr" '^Cache-Control:.*private'
+echo "  PASS: Cache-Control contains private for auth request" >&2
 
 # --- Case 2: Non-auth request retains Cache-Control: public ---
-echo "==> Case 2: Non-auth request retains upstream Cache-Control: public"
+echo "==> Case 2: Non-auth request retains upstream Cache-Control: public" >&2
 curl -sS -D "${RAW_DIR}/case2.hdr" -o "${RAW_DIR}/case2.body" \
   -H "${ACCEPT_MARKDOWN}" --max-time 30 \
   "http://127.0.0.1:${PORT}/md/html" >/dev/null
-grep -qi "${PATTERN_HTTP_200}" "${RAW_DIR}/case2.hdr" || {
-  echo "FAIL: Case 2 - expected HTTP 200" >&2
-  exit 1
-}
-if ! grep -qi '^Cache-Control:.*public' "${RAW_DIR}/case2.hdr"; then
-  echo "FAIL: Case 2 - expected Cache-Control: public for non-auth request" >&2
-  exit 1
-fi
-echo "  PASS: Cache-Control contains public for non-auth request"
+assert_header_contains "Case 2 status" "${RAW_DIR}/case2.hdr" "${PATTERN_HTTP_200}"
+assert_header_contains "Case 2 cache-control" "${RAW_DIR}/case2.hdr" '^Cache-Control:.*public'
+echo "  PASS: Cache-Control contains public for non-auth request" >&2
 
 # --- Case 3: auth_policy deny rejects conversion for auth requests ---
-echo "==> Case 3: auth_policy deny rejects conversion for auth requests"
+echo "==> Case 3: auth_policy deny rejects conversion for auth requests" >&2
 curl -sS -D "${RAW_DIR}/case3.hdr" -o "${RAW_DIR}/case3.body" \
   -H "${ACCEPT_MARKDOWN}" \
   -H "${HEADER_COOKIE_AUTH}" \
   --max-time 30 \
   "http://127.0.0.1:${PORT}/md-deny/html" >/dev/null
-grep -qi "${PATTERN_HTTP_200}" "${RAW_DIR}/case3.hdr" || {
-  echo "FAIL: Case 3 - expected HTTP 200 (passthrough)" >&2
-  exit 1
-}
-grep -qi "${PATTERN_CT_HTML}" "${RAW_DIR}/case3.hdr" || {
-  echo "FAIL: Case 3 - expected text/html when auth_policy deny blocks conversion" >&2
-  exit 1
-}
-echo "  PASS: auth_policy deny returns HTML passthrough"
+assert_header_contains "Case 3 status" "${RAW_DIR}/case3.hdr" "${PATTERN_HTTP_200}"
+assert_header_contains "Case 3 content-type" "${RAW_DIR}/case3.hdr" "${PATTERN_CT_HTML}"
+echo "  PASS: auth_policy deny returns HTML passthrough" >&2
 
 # --- Case 4: auth_cookies pattern matching ---
-echo "==> Case 4: auth_cookies pattern matching"
+echo "==> Case 4: auth_cookies pattern matching" >&2
 # A cookie that does NOT match session_* should not trigger auth logic
 curl -sS -D "${RAW_DIR}/case4.hdr" -o "${RAW_DIR}/case4.body" \
   -H "${ACCEPT_MARKDOWN}" \
   -H 'Cookie: preferences=dark' \
   --max-time 30 \
   "http://127.0.0.1:${PORT}/md/html" >/dev/null
-grep -qi "${PATTERN_HTTP_200}" "${RAW_DIR}/case4.hdr" || {
-  echo "FAIL: Case 4 - expected HTTP 200" >&2
-  exit 1
-}
-grep -qi "${PATTERN_CT_MARKDOWN}" "${RAW_DIR}/case4.hdr" || {
-  echo "FAIL: Case 4 - expected text/markdown for non-auth cookie" >&2
-  exit 1
-}
-echo "  PASS: Non-matching cookie does not trigger auth logic"
+assert_header_contains "Case 4 status" "${RAW_DIR}/case4.hdr" "${PATTERN_HTTP_200}"
+assert_header_contains "Case 4 content-type" "${RAW_DIR}/case4.hdr" "${PATTERN_CT_MARKDOWN}"
+echo "  PASS: Non-matching cookie does not trigger auth logic" >&2
 
 # --- Case 5: Auth fail-open preserves Cache-Control ---
-echo "==> Case 5: Auth fail-open preserves upstream Cache-Control"
+echo "==> Case 5: Auth fail-open preserves upstream Cache-Control" >&2
 # With on_error pass and auth request, if conversion fails, upstream headers preserved
 # Capture upstream Cache-Control value for comparison
 curl -sS -D "${RAW_DIR}/case5up.hdr" -o /dev/null \
@@ -385,10 +419,10 @@ if [[ "${AUTH_CC}" != "${UPSTREAM_CC}" ]]; then
   echo "FAIL: Case 5 - auth Cache-Control (${AUTH_CC}) differs from upstream (${UPSTREAM_CC})" >&2
   exit 1
 fi
-echo "  PASS: Auth response preserves upstream Cache-Control (${AUTH_CC})"
+echo "  PASS: Auth response preserves upstream Cache-Control (${AUTH_CC})" >&2
 
 # --- Case 6: Non-auth ETag replacement ---
-echo "==> Case 6: Non-auth conversion replaces upstream ETag with markdown ETag"
+echo "==> Case 6: Non-auth conversion replaces upstream ETag with markdown ETag" >&2
 curl -sS -D "${RAW_DIR}/case6.hdr" -o "${RAW_DIR}/case6.body" \
   -H "${ACCEPT_MARKDOWN}" --max-time 30 \
   "http://127.0.0.1:${PORT}/md/html" >/dev/null
@@ -401,23 +435,20 @@ if [[ "${MD_ETAG}" == '"upstream-auth-etag-001"' ]]; then
   echo "FAIL: Case 6 - ETag should differ from upstream for markdown content" >&2
   exit 1
 fi
-echo "  PASS: Markdown ETag differs from upstream (upstream=upstream-auth-etag-001, got=${MD_ETAG})"
+echo "  PASS: Markdown ETag differs from upstream (upstream=upstream-auth-etag-001, got=${MD_ETAG})" >&2
 
 # --- Case 7: Vary: Cookie in auth response ---
-echo "==> Case 7: Vary header in auth response"
+echo "==> Case 7: Vary header in auth response" >&2
 # The upstream sends Vary: Cookie for auth requests; check if forwarded
 curl -sS -D "${RAW_DIR}/case7.hdr" -o "${RAW_DIR}/case7.body" \
   -H "${ACCEPT_MARKDOWN}" \
   -H "${HEADER_COOKIE_AUTH}" \
   --max-time 30 \
   "http://127.0.0.1:${PORT}/md/html" >/dev/null
-if ! grep -qi '^Vary:.*Cookie' "${RAW_DIR}/case7.hdr"; then
-  echo "FAIL: Case 7 - expected Vary header containing Cookie in auth response" >&2
-  exit 1
-fi
-echo "  PASS: Vary header contains Cookie in auth response"
+assert_header_contains "Case 7 vary" "${RAW_DIR}/case7.hdr" '^Vary:.*Cookie'
+echo "  PASS: Vary header contains Cookie in auth response" >&2
 
-echo ""
-echo "========================================="
-echo "All auth/cache E2E tests passed!"
-echo "========================================="
+echo "" >&2
+echo "=========================================" >&2
+echo "All auth/cache E2E tests passed!" >&2
+echo "=========================================" >&2
