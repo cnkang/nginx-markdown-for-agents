@@ -271,9 +271,17 @@ grep -qi "${PATTERN_CT_PROMETHEUS}" "${RAW_DIR}/case3.hdr" || {
 echo "  PASS: Prometheus format returned"
 
 # --- Case 4: Non-empty metrics body ---
-echo "==> Case 4: Metrics endpoint returns non-empty body"
+echo "==> Case 4: Metrics endpoint returns non-empty body for all formats"
 [[ -s "${RAW_DIR}/case1.body" ]] || {
   echo "FAIL: Case 4 - JSON metrics body is empty" >&2
+  exit 1
+}
+[[ -s "${RAW_DIR}/case2.body" ]] || {
+  echo "FAIL: Case 4 - plain-text metrics body is empty" >&2
+  exit 1
+}
+[[ -s "${RAW_DIR}/case3.body" ]] || {
+  echo "FAIL: Case 4 - Prometheus metrics body is empty" >&2
   exit 1
 }
 echo "  PASS: All format bodies are non-empty"
