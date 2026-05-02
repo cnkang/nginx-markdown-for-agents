@@ -254,6 +254,7 @@ ngx_http_markdown_flavor(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     static u_char             cm_str[]  = "commonmark";
     static u_char             gfm_str[] = "gfm";
     static u_char             mdx_str[] = "mdx";
+    static u_char             org_str[] = "org-mode";
     ngx_http_markdown_conf_t *mcf = conf;
     ngx_str_t                *value;
 
@@ -277,10 +278,15 @@ ngx_http_markdown_flavor(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
                    sizeof(mdx_str) - 1))
     {
         mcf->flavor = NGX_HTTP_MARKDOWN_FLAVOR_MDX;
+    } else if (ngx_http_markdown_arg_equals(
+                   &value[1], org_str,
+                   sizeof(org_str) - 1))
+    {
+        mcf->flavor = NGX_HTTP_MARKDOWN_FLAVOR_ORG_MODE;
     } else {
         ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
                            "invalid value \"%V\" in \"%V\" directive, "
-                           "it must be \"commonmark\", \"gfm\", or \"mdx\"",
+                           "it must be \"commonmark\", \"gfm\", \"mdx\", or \"org-mode\"",
                            &value[1], &cmd->name);
         return NGX_CONF_ERROR;
     }
