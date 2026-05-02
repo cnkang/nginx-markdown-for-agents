@@ -132,11 +132,12 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
     },
 
     /*
-     * markdown_flavor commonmark|gfm
+     * markdown_flavor commonmark|gfm|mdx
      *
      * Markdown flavor to generate:
      * - commonmark: CommonMark specification (default)
      * - gfm: GitHub Flavored Markdown (includes tables, strikethrough)
+     * - mdx: MDX (Markdown + JSX, components preserved as-is)
      * Default: commonmark
      * Context: http, server, location
      *

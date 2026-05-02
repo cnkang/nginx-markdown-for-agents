@@ -174,6 +174,7 @@ pub(crate) fn decode_options(
 
     let flavor = match options.flavor {
         1 => MarkdownFlavor::GitHubFlavoredMarkdown,
+        2 => MarkdownFlavor::Mdx,
         _ => MarkdownFlavor::CommonMark,
     };
 
