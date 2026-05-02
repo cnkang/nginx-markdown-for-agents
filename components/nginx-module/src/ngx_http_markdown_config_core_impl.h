@@ -150,6 +150,7 @@ ngx_http_markdown_create_conf(ngx_conf_t *cf)
     conf->ops.trust_forwarded_headers = NGX_CONF_UNSET;
     conf->ops.metrics_format = NGX_CONF_UNSET_UINT;
     conf->ops.metrics_per_path = NGX_CONF_UNSET;
+    conf->ops.otel_enabled = NGX_CONF_UNSET;
 
 #ifdef MARKDOWN_STREAMING_ENABLED
     conf->streaming_engine = NULL;
@@ -166,6 +167,9 @@ ngx_http_markdown_create_conf(ngx_conf_t *cf)
     conf->memory_budget = NGX_CONF_UNSET_SIZE;
     conf->llm_provider = NGX_CONF_UNSET_UINT;
     conf->chars_per_token_fixed = NGX_CONF_UNSET_UINT;
+    conf->dynconf_enabled = NGX_CONF_UNSET;
+    conf->dynconf_path.len = 0;
+    conf->dynconf_path.data = NULL;
 
     return conf;
 }
@@ -243,6 +247,7 @@ ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
     ngx_conf_merge_uint_value(conf->ops.metrics_format, prev->ops.metrics_format,
                               NGX_HTTP_MARKDOWN_METRICS_FORMAT_AUTO);
     ngx_conf_merge_value(conf->ops.metrics_per_path, prev->ops.metrics_per_path, 0);
+    ngx_conf_merge_value(conf->ops.otel_enabled, prev->ops.otel_enabled, 0);
     ngx_conf_merge_size_value(conf->large_body_threshold,
                               prev->large_body_threshold,
                               NGX_HTTP_MARKDOWN_THRESHOLD_OFF);
@@ -288,6 +293,10 @@ ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
     ngx_conf_merge_uint_value(conf->chars_per_token_fixed,
                               prev->chars_per_token_fixed,
                               0);
+    ngx_conf_merge_value(conf->dynconf_enabled, prev->dynconf_enabled, 0);
+    if (conf->dynconf_path.len == 0 && prev->dynconf_path.len > 0) {
+        conf->dynconf_path = prev->dynconf_path;
+    }
 
     /*
      * Apply unified memory_budget to max_size when max_size was not
@@ -668,7 +677,7 @@ ngx_http_markdown_log_merged_conf(ngx_conf_t *cf,
                         "content_types=%ui "
                        "large_body_threshold=%uz "
                        "trust_forwarded_headers=%ui "
-                        "metrics_format=%V metrics_per_path=%i"
+                        "metrics_format=%V metrics_per_path=%i otel=%i"
 #ifdef MARKDOWN_STREAMING_ENABLED
                         " streaming_engine=%s"
                         " streaming_budget=%uz"
@@ -699,6 +708,7 @@ ngx_http_markdown_log_merged_conf(ngx_conf_t *cf,
                         ngx_http_markdown_metrics_format_name(
                             conf->ops.metrics_format)
                         , (ngx_int_t) conf->ops.metrics_per_path
+                        , (ngx_int_t) conf->ops.otel_enabled
 #ifdef MARKDOWN_STREAMING_ENABLED
                         , conf->streaming_engine != NULL
                             ? "configured" : "auto (default)"
