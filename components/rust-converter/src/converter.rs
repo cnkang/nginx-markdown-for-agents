@@ -138,6 +138,8 @@ pub enum MarkdownFlavor {
     CommonMark,
     /// GitHub Flavored Markdown
     GitHubFlavoredMarkdown,
+    /// MDX (Markdown + JSX): JSX components preserved as-is
+    Mdx,
 }
 
 /// Table column alignment (GFM)

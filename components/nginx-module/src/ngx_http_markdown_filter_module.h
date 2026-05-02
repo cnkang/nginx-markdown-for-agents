@@ -77,6 +77,7 @@ struct MarkdownOptions;
  */
 #define NGX_HTTP_MARKDOWN_FLAVOR_COMMONMARK  0  /* CommonMark flavor */
 #define NGX_HTTP_MARKDOWN_FLAVOR_GFM         1  /* GitHub Flavored Markdown */
+#define NGX_HTTP_MARKDOWN_FLAVOR_MDX         2  /* MDX (Markdown + JSX) */
 
 /*
  * Configuration constants for auth_policy directive

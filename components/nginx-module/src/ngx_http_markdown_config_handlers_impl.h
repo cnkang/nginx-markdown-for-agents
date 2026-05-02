@@ -233,6 +233,61 @@ ngx_http_markdown_content_types(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     return NGX_CONF_OK;
 }
 
+/*
+ * Handle the "markdown_flavor" configuration directive.
+ *
+ * Accepts "commonmark", "gfm", or "mdx" and sets the flavor enum.
+ *
+ * Parameters:
+ *   cf  - Configuration parsing context
+ *   cmd - Directive metadata
+ *   conf - Module configuration
+ *
+ * Returns:
+ *   NGX_CONF_OK on success
+ *   NGX_CONF_ERROR on invalid value
+ *   "is duplicate" if already set
+ */
+static char *
+ngx_http_markdown_flavor(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
+{
+    static u_char             cm_str[]  = "commonmark";
+    static u_char             gfm_str[] = "gfm";
+    static u_char             mdx_str[] = "mdx";
+    ngx_http_markdown_conf_t *mcf = conf;
+    ngx_str_t                *value;
+
+    value = cf->args->elts;
+
+    if (mcf->flavor != NGX_CONF_UNSET_UINT) {
+        return "is duplicate";
+    }
+
+    if (ngx_http_markdown_arg_equals(&value[1], cm_str,
+                                     sizeof(cm_str) - 1))
+    {
+        mcf->flavor = NGX_HTTP_MARKDOWN_FLAVOR_COMMONMARK;
+    } else if (ngx_http_markdown_arg_equals(
+                   &value[1], gfm_str,
+                   sizeof(gfm_str) - 1))
+    {
+        mcf->flavor = NGX_HTTP_MARKDOWN_FLAVOR_GFM;
+    } else if (ngx_http_markdown_arg_equals(
+                   &value[1], mdx_str,
+                   sizeof(mdx_str) - 1))
+    {
+        mcf->flavor = NGX_HTTP_MARKDOWN_FLAVOR_MDX;
+    } else {
+        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+                           "invalid value \"%V\" in \"%V\" directive, "
+                           "it must be \"commonmark\", \"gfm\", or \"mdx\"",
+                           &value[1], &cmd->name);
+        return NGX_CONF_ERROR;
+    }
+
+    return NGX_CONF_OK;
+}
+
 /**
  * Handle the "markdown_stream_types" configuration directive by validating
  * and storing one or more MIME type strings in the form "type/subtype".
