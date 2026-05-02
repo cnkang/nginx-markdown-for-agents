@@ -40,10 +40,10 @@ static ngx_conf_enum_t
 static ngx_conf_enum_t
     ngx_http_markdown_llm_provider_values[] = {
     { ngx_string("default"),           0 },
-    { ngx_string("openai-gpt4"),       1 },
+    { ngx_string("openai-gpt"),        1 },
     { ngx_string("anthropic-claude"),  2 },
     { ngx_string("google-gemini"),     3 },
-    { ngx_string("meta-llama3"),       4 },
+    { ngx_string("meta-llama"),        4 },
     { ngx_null_string, 0 }
 };
 
@@ -749,7 +749,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
     },
 
     /*
-     * markdown_llm_provider default|openai-gpt4|anthropic-claude|google-gemini|meta-llama3
+     * markdown_llm_provider default|openai-gpt|anthropic-claude|google-gemini|meta-llama
      *
      * LLM provider for token estimation.  Each provider has a characteristic
      * chars-per-token ratio that improves estimate accuracy for that provider's
@@ -759,7 +759,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      * Context: http, server, location
      *
      * Example:
-     *   markdown_llm_provider openai-gpt4;
+     *   markdown_llm_provider openai-gpt;
      */
     {
         ngx_string("markdown_llm_provider"),
