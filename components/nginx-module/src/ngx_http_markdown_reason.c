@@ -241,6 +241,12 @@ static ngx_str_t ngx_http_markdown_reason_streaming_precommit_reject_str =
 static ngx_str_t ngx_http_markdown_reason_streaming_shadow_str =
     ngx_string("STREAMING_SHADOW");
 
+/* Auto-mode engine selection reason codes */
+static ngx_str_t ngx_http_markdown_reason_eligible_streaming_auto_str =
+    ngx_string("ELIGIBLE_STREAMING_AUTO");
+static ngx_str_t ngx_http_markdown_reason_eligible_fullbuffer_auto_str =
+    ngx_string("ELIGIBLE_FULLBUFFER_AUTO");
+
 
 /*
  * Return the ENGINE_STREAMING reason code.
@@ -379,6 +385,38 @@ const ngx_str_t *
 ngx_http_markdown_reason_streaming_shadow(void)
 {
     return &ngx_http_markdown_reason_streaming_shadow_str;
+}
+
+
+/*
+ * Return the ELIGIBLE_STREAMING_AUTO reason code.
+ *
+ * Logged when auto mode selects the streaming engine
+ * (Content-Length >= auto_threshold or chunked transfer).
+ *
+ * Returns:
+ *   Pointer to static ngx_str_t "ELIGIBLE_STREAMING_AUTO"
+ */
+const ngx_str_t *
+ngx_http_markdown_reason_eligible_streaming_auto(void)
+{
+    return &ngx_http_markdown_reason_eligible_streaming_auto_str;
+}
+
+
+/*
+ * Return the ELIGIBLE_FULLBUFFER_AUTO reason code.
+ *
+ * Logged when auto mode selects the full-buffer engine
+ * (Content-Length < auto_threshold).
+ *
+ * Returns:
+ *   Pointer to static ngx_str_t "ELIGIBLE_FULLBUFFER_AUTO"
+ */
+const ngx_str_t *
+ngx_http_markdown_reason_eligible_fullbuffer_auto(void)
+{
+    return &ngx_http_markdown_reason_eligible_fullbuffer_auto_str;
 }
 
 #endif /* MARKDOWN_STREAMING_ENABLED */

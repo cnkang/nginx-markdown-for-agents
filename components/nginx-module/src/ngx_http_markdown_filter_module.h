@@ -42,6 +42,16 @@ struct MarkdownOptions;
     (2 * 1024 * 1024)
 
 /*
+ * Default auto-mode threshold: 32 KiB
+ *
+ * When streaming_engine is auto, responses with
+ * Content-Length >= this threshold use streaming;
+ * smaller responses use full-buffer.
+ */
+#define NGX_HTTP_MARKDOWN_STREAMING_AUTO_THRESHOLD_DEFAULT \
+    (32 * 1024)
+
+/*
  * Streaming on_error policy constants
  *
  * Controls Pre_Commit_Phase failure behavior for the
@@ -149,10 +159,11 @@ typedef enum {
  * - ops.metrics_format: NGX_HTTP_MARKDOWN_METRICS_FORMAT_AUTO
  *
  * Streaming defaults when MARKDOWN_STREAMING_ENABLED is compiled in:
- * - streaming_engine: compiled complex value for "off"
+ * - streaming_engine: NULL (auto mode in v0.6.0; was off in 0.5.x)
  * - streaming_budget: NGX_HTTP_MARKDOWN_STREAMING_BUDGET_DEFAULT
  * - streaming_on_error: NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_PASS
  * - streaming_shadow: 0 (off by default)
+ * - streaming_auto_threshold: NGX_HTTP_MARKDOWN_STREAMING_AUTO_THRESHOLD_DEFAULT
  */
 typedef struct {
     ngx_flag_t   enabled;              /* markdown_filter static resolved value */
@@ -190,9 +201,19 @@ typedef struct {
 #ifdef MARKDOWN_STREAMING_ENABLED
     ngx_http_complex_value_t  *streaming_engine;  /* markdown_streaming_engine (complex value) */
     size_t                     streaming_budget;   /* markdown_streaming_budget (default: 2m) */
+    ngx_flag_t                 streaming_budget_explicit; /* 1 if operator set markdown_streaming_budget */
     ngx_uint_t                 streaming_on_error; /* markdown_streaming_on_error pass|reject */
     ngx_flag_t                 streaming_shadow;   /* markdown_streaming_shadow on|off */
+    size_t                     streaming_auto_threshold; /* markdown_streaming_auto_threshold (default: 32k) */
 #endif
+
+    /*
+     * Noise pruning configuration (v0.6.0).
+     */
+    ngx_flag_t                 prune_noise;               /* markdown_prune_noise on|off (default: on) */
+    ngx_str_t                 *prune_selectors;           /* markdown_prune_selectors (default: built-in list) */
+    ngx_str_t                 *prune_protection_selectors; /* markdown_prune_protection_selectors (default: empty) */
+    size_t                     memory_budget;             /* markdown_memory_budget (default: NGX_CONF_UNSET_SIZE) */
 } ngx_http_markdown_conf_t;
 
 /*
@@ -652,6 +673,8 @@ const ngx_str_t *ngx_http_markdown_reason_streaming_budget_exceeded(void);
 const ngx_str_t *ngx_http_markdown_reason_streaming_precommit_failopen(void);
 const ngx_str_t *ngx_http_markdown_reason_streaming_precommit_reject(void);
 const ngx_str_t *ngx_http_markdown_reason_streaming_shadow(void);
+const ngx_str_t *ngx_http_markdown_reason_eligible_streaming_auto(void);
+const ngx_str_t *ngx_http_markdown_reason_eligible_fullbuffer_auto(void);
 #endif /* MARKDOWN_STREAMING_ENABLED */
 
 /*

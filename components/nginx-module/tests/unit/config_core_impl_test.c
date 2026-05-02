@@ -544,8 +544,12 @@ test_merge_conf(void)
     parent.ops.metrics_format = NGX_HTTP_MARKDOWN_METRICS_FORMAT_PROMETHEUS;
     parent.streaming_engine = &cv;
     parent.streaming_budget = 777;
+    parent.streaming_budget_explicit = 1;
     parent.streaming_on_error = NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_REJECT;
     parent.streaming_shadow = 1;
+    parent.streaming_auto_threshold = 32768;
+    parent.prune_noise = 1;
+    parent.memory_budget = NGX_CONF_UNSET_SIZE;
 
     /* Initially unset; enabled below reflects the post-action state. */
     child.enabled_source = NGX_HTTP_MARKDOWN_ENABLED_UNSET;
@@ -570,8 +574,14 @@ test_merge_conf(void)
     child.ops.trust_forwarded_headers = NGX_CONF_UNSET;
     child.ops.metrics_format = NGX_CONF_UNSET_UINT;
     child.streaming_budget = NGX_CONF_UNSET_SIZE;
+    child.streaming_budget_explicit = 0;
     child.streaming_on_error = NGX_CONF_UNSET_UINT;
     child.streaming_shadow = NGX_CONF_UNSET;
+    child.streaming_auto_threshold = NGX_CONF_UNSET_SIZE;
+    child.prune_noise = NGX_CONF_UNSET;
+    child.prune_selectors = NGX_CONF_UNSET_PTR;
+    child.prune_protection_selectors = NGX_CONF_UNSET_PTR;
+    child.memory_budget = NGX_CONF_UNSET_SIZE;
 
     rc = ngx_http_markdown_merge_conf(&cf, &parent, &child);
     TEST_ASSERT(rc == NGX_CONF_OK,
@@ -613,8 +623,14 @@ test_merge_conf(void)
     child.ops.trust_forwarded_headers = NGX_CONF_UNSET;
     child.ops.metrics_format = NGX_CONF_UNSET_UINT;
     child.streaming_budget = NGX_CONF_UNSET_SIZE;
+    child.streaming_budget_explicit = 0;
     child.streaming_on_error = NGX_CONF_UNSET_UINT;
     child.streaming_shadow = NGX_CONF_UNSET;
+    child.streaming_auto_threshold = NGX_CONF_UNSET_SIZE;
+    child.prune_noise = NGX_CONF_UNSET;
+    child.prune_selectors = NGX_CONF_UNSET_PTR;
+    child.prune_protection_selectors = NGX_CONF_UNSET_PTR;
+    child.memory_budget = NGX_CONF_UNSET_SIZE;
 
     rc = ngx_http_markdown_merge_conf(&cf, &parent, &child);
     TEST_ASSERT(rc == NGX_CONF_OK,
@@ -962,6 +978,7 @@ test_merge_conf_double_unset(void)
     child.ops.trust_forwarded_headers = NGX_CONF_UNSET;
     child.ops.metrics_format = NGX_CONF_UNSET_UINT;
     child.streaming_budget = NGX_CONF_UNSET_SIZE;
+    child.streaming_budget_explicit = 0;
     child.streaming_on_error = NGX_CONF_UNSET_UINT;
     child.streaming_shadow = NGX_CONF_UNSET;
 
@@ -982,6 +999,167 @@ test_merge_conf_double_unset(void)
  * Entry point: run all config_core_impl unit tests.
  * Returns 0 on success; aborts via TEST_ASSERT on failure.
  */
+/*
+ * Test memory_budget priority chain: explicit per-engine > unified > default.
+ *
+ * This test simulates the priority chain logic from merge_conf and
+ * prepare_conversion_options without calling the full NGINX merge
+ * infrastructure. The key invariant is:
+ *
+ *   1. If operator sets markdown_max_size explicitly, memory_budget
+ *      does NOT override it (explicit wins).
+ *   2. If operator does NOT set markdown_max_size but sets
+ *      markdown_memory_budget, the budget applies to max_size.
+ *   3. Same logic for streaming_budget vs memory_budget.
+ */
+static void
+test_memory_budget_priority_chain(void)
+{
+    TEST_SUBSECTION("memory_budget priority chain");
+
+    /* Case 1: Only memory_budget set -> applies to max_size */
+    {
+        size_t max_size = NGX_CONF_UNSET_SIZE;
+        size_t memory_budget = 50 * 1024 * 1024;
+        ngx_flag_t max_size_set = (max_size != NGX_CONF_UNSET_SIZE);
+
+        /* Simulate: ngx_conf_merge_size_value resolves max_size to default */
+        max_size = 10 * 1024 * 1024;
+
+        /* Apply unified budget when max_size not explicitly set */
+        if (memory_budget != NGX_CONF_UNSET_SIZE && !max_size_set) {
+            max_size = memory_budget;
+        }
+
+        TEST_ASSERT(max_size == 50 * 1024 * 1024,
+                    "memory_budget should override default max_size");
+    }
+
+    /* Case 2: Both max_size and memory_budget set -> max_size wins */
+    {
+        size_t max_size = 5 * 1024 * 1024;  /* explicitly set */
+        size_t memory_budget = 50 * 1024 * 1024;
+        ngx_flag_t max_size_set = (max_size != NGX_CONF_UNSET_SIZE);
+
+        /* After merge, max_size keeps its explicit value */
+        /* (merge would use prev or default, but explicit wins) */
+
+        if (memory_budget != NGX_CONF_UNSET_SIZE && !max_size_set) {
+            max_size = memory_budget;
+        }
+
+        TEST_ASSERT(max_size == 5 * 1024 * 1024,
+                    "explicit max_size should win over memory_budget");
+    }
+
+    /* Case 3: Neither set -> default 10MB */
+    {
+        size_t max_size = NGX_CONF_UNSET_SIZE;
+        size_t memory_budget = NGX_CONF_UNSET_SIZE;
+        ngx_flag_t max_size_set = (max_size != NGX_CONF_UNSET_SIZE);
+
+        /* merge resolves to default */
+        max_size = 10 * 1024 * 1024;
+
+        if (memory_budget != NGX_CONF_UNSET_SIZE && !max_size_set) {
+            max_size = memory_budget;
+        }
+
+        TEST_ASSERT(max_size == 10 * 1024 * 1024,
+                    "default max_size when nothing explicitly set");
+    }
+
+    /* Case 4: streaming_budget_explicit flag works correctly */
+    {
+        ngx_flag_t streaming_budget_explicit = 0;
+        size_t memory_budget = 50 * 1024 * 1024;
+        size_t streaming_budget = NGX_HTTP_MARKDOWN_STREAMING_BUDGET_DEFAULT;
+
+        /* memory_budget should apply when streaming_budget not explicit */
+        if (memory_budget != NGX_CONF_UNSET_SIZE
+            && !streaming_budget_explicit)
+        {
+            streaming_budget = memory_budget;
+        }
+
+        TEST_ASSERT(streaming_budget == 50 * 1024 * 1024,
+                    "memory_budget applies to streaming_budget when not explicit");
+
+        /* Now with explicit streaming_budget */
+        streaming_budget_explicit = 1;
+        streaming_budget = NGX_HTTP_MARKDOWN_STREAMING_BUDGET_DEFAULT;
+
+        if (memory_budget != NGX_CONF_UNSET_SIZE
+            && !streaming_budget_explicit)
+        {
+            streaming_budget = memory_budget;
+        }
+
+        TEST_ASSERT(streaming_budget == NGX_HTTP_MARKDOWN_STREAMING_BUDGET_DEFAULT,
+                    "explicit streaming_budget wins over memory_budget");
+    }
+
+    /*
+     * Cases 5-7: Exercise the production merge_conf path directly,
+     * verifying that the save-before-merge priority chain works end-to-end.
+     */
+    {
+        ngx_http_markdown_conf_t parent_conf;
+        ngx_http_markdown_conf_t child_conf;
+        ngx_conf_t merge_cf;
+        char *rc;
+
+        memset(&merge_cf, 0, sizeof(merge_cf));
+        memset(&parent_conf, 0, sizeof(parent_conf));
+        memset(&child_conf, 0, sizeof(child_conf));
+
+        /* Case 5: memory_budget only -> overrides default max_size */
+        parent_conf.enabled_source = NGX_HTTP_MARKDOWN_ENABLED_STATIC;
+        parent_conf.enabled = 1;
+        parent_conf.max_size = 10 * 1024 * 1024;
+        parent_conf.streaming_budget = NGX_HTTP_MARKDOWN_STREAMING_BUDGET_DEFAULT;
+        parent_conf.streaming_budget_explicit = 0;
+        parent_conf.streaming_auto_threshold = 32768;
+        parent_conf.prune_noise = 1;
+        parent_conf.memory_budget = 50 * 1024 * 1024;
+
+        child_conf.enabled_source = NGX_HTTP_MARKDOWN_ENABLED_UNSET;
+        child_conf.max_size = NGX_CONF_UNSET_SIZE;
+        child_conf.streaming_budget = NGX_CONF_UNSET_SIZE;
+        child_conf.streaming_budget_explicit = 0;
+        child_conf.streaming_auto_threshold = NGX_CONF_UNSET_SIZE;
+        child_conf.prune_noise = NGX_CONF_UNSET;
+        child_conf.prune_selectors = NGX_CONF_UNSET_PTR;
+        child_conf.prune_protection_selectors = NGX_CONF_UNSET_PTR;
+        child_conf.memory_budget = NGX_CONF_UNSET_SIZE;
+
+        rc = ngx_http_markdown_merge_conf(&merge_cf, &parent_conf, &child_conf);
+        TEST_ASSERT(rc == NGX_CONF_OK,
+                    "merge_conf case 5 should succeed");
+        TEST_ASSERT(child_conf.max_size == 50 * 1024 * 1024,
+                    "unified budget overrides default max_size via merge");
+
+        /* Case 6: explicit max_size + memory_budget -> max_size wins */
+        memset(&child_conf, 0, sizeof(child_conf));
+        child_conf.enabled_source = NGX_HTTP_MARKDOWN_ENABLED_STATIC;
+        child_conf.enabled = 1;
+        child_conf.max_size = 5 * 1024 * 1024;
+        child_conf.streaming_budget = NGX_CONF_UNSET_SIZE;
+        child_conf.streaming_budget_explicit = 0;
+        child_conf.streaming_auto_threshold = NGX_CONF_UNSET_SIZE;
+        child_conf.prune_noise = NGX_CONF_UNSET;
+        child_conf.prune_selectors = NGX_CONF_UNSET_PTR;
+        child_conf.prune_protection_selectors = NGX_CONF_UNSET_PTR;
+        child_conf.memory_budget = 50 * 1024 * 1024;
+
+        rc = ngx_http_markdown_merge_conf(&merge_cf, &parent_conf, &child_conf);
+        TEST_ASSERT(rc == NGX_CONF_OK,
+                    "merge_conf case 6 should succeed");
+        TEST_ASSERT(child_conf.max_size == 5 * 1024 * 1024,
+                    "explicit max_size wins over memory_budget via merge");
+    }
+}
+
 int
 main(void)
 {
@@ -999,6 +1177,7 @@ main(void)
     test_filter_flag_and_is_enabled();
     test_filter_flag_additional_branches();
     test_log_merged_conf();
+    test_memory_budget_priority_chain();
 
     printf("\n========================================\n");
     printf("All tests passed!\n");

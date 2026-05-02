@@ -152,9 +152,16 @@ ngx_http_markdown_create_conf(ngx_conf_t *cf)
 #ifdef MARKDOWN_STREAMING_ENABLED
     conf->streaming_engine = NULL;
     conf->streaming_budget = NGX_CONF_UNSET_SIZE;
+    conf->streaming_budget_explicit = 0;
     conf->streaming_on_error = NGX_CONF_UNSET_UINT;
     conf->streaming_shadow = NGX_CONF_UNSET;
+    conf->streaming_auto_threshold = NGX_CONF_UNSET_SIZE;
 #endif
+
+    conf->prune_noise = NGX_CONF_UNSET;
+    conf->prune_selectors = NGX_CONF_UNSET_PTR;
+    conf->prune_protection_selectors = NGX_CONF_UNSET_PTR;
+    conf->memory_budget = NGX_CONF_UNSET_SIZE;
 
     return conf;
 }
@@ -199,6 +206,17 @@ ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
         conf->enabled_complex = NULL;
     }
 
+    /*
+     * Save whether max_size and streaming_budget were explicitly set at
+     * this configuration level BEFORE ngx_conf_merge_size_value replaces
+     * NGX_CONF_UNSET_SIZE with the inherited/default value.  This is
+     * needed for the unified memory_budget priority chain below.
+     */
+    ngx_flag_t  max_size_set = (conf->max_size != NGX_CONF_UNSET_SIZE);
+#ifdef MARKDOWN_STREAMING_ENABLED
+    ngx_flag_t  streaming_budget_set = (conf->streaming_budget != NGX_CONF_UNSET_SIZE);
+#endif
+
     ngx_conf_merge_size_value(conf->max_size, prev->max_size, 10 * 1024 * 1024);
     ngx_conf_merge_msec_value(conf->timeout, prev->timeout, 5000);
     ngx_conf_merge_uint_value(conf->on_error, prev->on_error,
@@ -234,12 +252,45 @@ ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
     ngx_conf_merge_size_value(conf->streaming_budget,
                               prev->streaming_budget,
                               NGX_HTTP_MARKDOWN_STREAMING_BUDGET_DEFAULT);
+    /*
+     * streaming_budget_explicit tracks whether the operator set
+     * markdown_streaming_budget at this level or any parent level.
+     * streaming_budget_set was captured before merge.
+     */
+    conf->streaming_budget_explicit = streaming_budget_set
+        || prev->streaming_budget_explicit;
     ngx_conf_merge_uint_value(conf->streaming_on_error,
                               prev->streaming_on_error,
                               NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_PASS);
     ngx_conf_merge_value(conf->streaming_shadow,
                          prev->streaming_shadow, 0);
+    ngx_conf_merge_size_value(conf->streaming_auto_threshold,
+                              prev->streaming_auto_threshold,
+                              NGX_HTTP_MARKDOWN_STREAMING_AUTO_THRESHOLD_DEFAULT);
 #endif
+
+    ngx_conf_merge_value(conf->prune_noise, prev->prune_noise, 1);
+    ngx_conf_merge_ptr_value(conf->prune_selectors, prev->prune_selectors, NULL);
+    ngx_conf_merge_ptr_value(conf->prune_protection_selectors,
+                             prev->prune_protection_selectors, NULL);
+    ngx_conf_merge_size_value(conf->memory_budget,
+                              prev->memory_budget,
+                              NGX_CONF_UNSET_SIZE);
+
+    /*
+     * Apply unified memory_budget to max_size when max_size was not
+     * explicitly set by the operator at this or any parent level.
+     *
+     * Priority: explicit max_size > memory_budget > default (10MB)
+     *
+     * max_size_set was captured before ngx_conf_merge_size_value
+     * resolved max_size to its default/inherited value.
+     */
+    if (conf->memory_budget != NGX_CONF_UNSET_SIZE
+        && !max_size_set)
+    {
+        conf->max_size = conf->memory_budget;
+    }
 
     ngx_http_markdown_log_merged_conf(cf, conf);
 
@@ -599,10 +650,11 @@ ngx_http_markdown_log_merged_conf(ngx_conf_t *cf,
                        "trust_forwarded_headers=%ui "
                        "metrics_format=%V"
 #ifdef MARKDOWN_STREAMING_ENABLED
-                       " streaming_engine=%s"
-                       " streaming_budget=%uz"
-                       " streaming_on_error=%V"
-                       " streaming_shadow=%i"
+                        " streaming_engine=%s"
+                        " streaming_budget=%uz"
+                        " streaming_on_error=%V"
+                        " streaming_shadow=%i"
+                        " streaming_auto_threshold=%uz"
 #endif
                        ,
                        (ngx_uint_t) conf->enabled,
@@ -626,12 +678,13 @@ ngx_http_markdown_log_merged_conf(ngx_conf_t *cf,
                        ngx_http_markdown_metrics_format_name(
                            conf->ops.metrics_format)
 #ifdef MARKDOWN_STREAMING_ENABLED
-                       , conf->streaming_engine != NULL
-                           ? "configured" : "NULL"
+                        , conf->streaming_engine != NULL
+                            ? "configured" : "auto (default)"
                        , conf->streaming_budget
                        , ngx_http_markdown_on_error_name(
                              conf->streaming_on_error)
-                       , (ngx_int_t) conf->streaming_shadow
+                        , (ngx_int_t) conf->streaming_shadow
+                        , conf->streaming_auto_threshold
 #endif
                        );
 }

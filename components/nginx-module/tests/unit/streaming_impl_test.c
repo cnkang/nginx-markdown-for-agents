@@ -974,6 +974,22 @@ ngx_http_markdown_reason_streaming_precommit_reject(void)
     return &s;
 }
 
+const ngx_str_t *
+ngx_http_markdown_reason_eligible_streaming_auto(void)
+{
+    static ngx_str_t s = { sizeof("ELIGIBLE_STREAMING_AUTO") - 1,
+        (u_char *) "ELIGIBLE_STREAMING_AUTO" };
+    return &s;
+}
+
+const ngx_str_t *
+ngx_http_markdown_reason_eligible_fullbuffer_auto(void)
+{
+    static ngx_str_t s = { sizeof("ELIGIBLE_FULLBUFFER_AUTO") - 1,
+        (u_char *) "ELIGIBLE_FULLBUFFER_AUTO" };
+    return &s;
+}
+
 /*
  * Stub for ngx_http_markdown_log_decision.  Increments
  * g_log_decision_calls so tests can verify invocation.  Ignores all
@@ -1199,6 +1215,7 @@ test_select_processing_path(void)
     conf.streaming_engine = (ngx_http_complex_value_t *) (uintptr_t) 0x1;
     conf.conditional_requests = NGX_HTTP_MARKDOWN_CONDITIONAL_DISABLED;
     conf.large_body_threshold = 1024;
+    conf.streaming_auto_threshold = 1024;
     r.headers_out.content_type = (ngx_str_t) { 9, (u_char *) "text/html" };
     r.headers_out.content_length_n = 2048;
 
@@ -1289,6 +1306,32 @@ test_select_processing_path(void)
     path = ngx_http_markdown_select_processing_path(&r, &conf);
     TEST_ASSERT(path == NGX_HTTP_MARKDOWN_PATH_FULLBUFFER,
         "invalid engine value should route full-buffer");
+
+    /*
+     * v0.6.0: streaming_engine == NULL defaults to auto mode.
+     * With content_length < streaming_auto_threshold, routes to
+     * full-buffer; with content_length >= threshold or no CL,
+     * routes to streaming.
+     */
+    conf.streaming_engine = NULL;
+    conf.streaming_auto_threshold = 1024;
+    r.headers_out.content_length_n = 10;
+    path = ngx_http_markdown_select_processing_path(&r, &conf);
+    TEST_ASSERT(path == NGX_HTTP_MARKDOWN_PATH_FULLBUFFER,
+        "NULL engine (auto default) with small CL should route full-buffer");
+
+    r.headers_out.content_length_n = 2048;
+    path = ngx_http_markdown_select_processing_path(&r, &conf);
+    TEST_ASSERT(path == NGX_HTTP_MARKDOWN_PATH_STREAMING,
+        "NULL engine (auto default) with large CL should route streaming");
+
+    r.headers_out.content_length_n = -1;
+    path = ngx_http_markdown_select_processing_path(&r, &conf);
+    TEST_ASSERT(path == NGX_HTTP_MARKDOWN_PATH_STREAMING,
+        "NULL engine (auto default) without CL should route streaming");
+
+    /* Restore streaming_engine for subsequent tests */
+    conf.streaming_engine = (ngx_http_complex_value_t *) (uintptr_t) 0x1;
 
     TEST_PASS("path-selection branches covered");
 }

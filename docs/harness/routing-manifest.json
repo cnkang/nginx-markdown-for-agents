@@ -110,6 +110,28 @@
       "commands": [
         "make harness-check-full"
       ]
+    },
+    "coverage-gate": {
+      "phase": "focused-semantic",
+      "commands": [
+        "make coverage-c",
+        "make coverage-rust"
+      ]
+    },
+    "release-governance-060": {
+      "phase": "focused-semantic",
+      "commands": [
+        "make release-gates-check-060"
+      ]
+    },
+    "packaging-e2e": {
+      "phase": "umbrella",
+      "commands": [
+        "dpkg-deb --info dist/nginx-markdown-module.deb",
+        "rpm -qip dist/nginx-markdown-module.rpm",
+        "helm lint charts/nginx-markdown"
+      ],
+      "notes": "commands validate existing artifacts; build steps are in CI workflows release-apt.yml and release-yum.yml"
     }
   },
   "risk_packs": [
@@ -351,6 +373,80 @@
       "verification_families": [
         "harness-sync",
         "docs-tooling",
+        "release-quality"
+      ]
+    },
+    {
+      "id": "otel-integration",
+      "doc": "docs/harness/risk-packs/otel-integration.md",
+      "primary_surfaces": [
+        "otel-tracing",
+        "otel-metrics",
+        "otlp-export"
+      ],
+      "supporting_surfaces": [
+        "observability",
+        "nginx-protocol"
+      ],
+      "paths": [
+        "components/nginx-module/src/ngx_http_markdown_otel.c",
+        "components/nginx-module/src/ngx_http_markdown_otel.h",
+        "docs/features/otel-tracing.md"
+      ],
+      "keywords": [
+        "otel",
+        "opentelemetry",
+        "otlp",
+        "span",
+        "trace",
+        "collector"
+      ],
+      "verification_families": [
+        "harness-sync",
+        "observability-metrics",
+        "nginx-protocol",
+        "release-quality"
+      ]
+    },
+    {
+      "id": "packaging-distribution",
+      "doc": "docs/harness/risk-packs/packaging-distribution.md",
+      "primary_surfaces": [
+        "apt-repo",
+        "yum-repo",
+        "helm-chart"
+      ],
+      "supporting_surfaces": [
+        "homebrew-tap",
+        "docs-tooling",
+        "release-governance"
+      ],
+      "paths": [
+        ".github/workflows/release-apt.yml",
+        ".github/workflows/release-yum.yml",
+        "charts/nginx-markdown/**",
+        "docs/guides/kubernetes-deployment.md",
+        "docs/guides/INSTALLATION.md",
+        "tools/install.sh",
+        "tools/release-matrix.json",
+        "tools/release/matrix/**"
+      ],
+      "keywords": [
+        "apt",
+        "yum",
+        "brew",
+        "helm",
+        "kubernetes",
+        "ingress",
+        "deb",
+        "rpm",
+        "package"
+      ],
+      "verification_families": [
+        "harness-sync",
+        "docs-tooling",
+        "release-governance-060",
+        "packaging-e2e",
         "release-quality"
       ]
     }

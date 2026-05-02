@@ -54,7 +54,7 @@ NGINX_HEADER := $(NGINX_MODULE_DIR)/src/markdown_converter.h
         test-nginx-integration test-e2e test-all test-rust-fuzz-smoke sonar-compile-db \
         test-benchmark test-benchmark-compare test-benchmark-summary \
         harness-check harness-check-full \
-        docs-check license-check release-gates-check release-gates-check-055 release-gates-check-legacy release-gates-check-strict \
+        docs-check license-check release-gates-check release-gates-check-055 release-gates-check-060 release-gates-check-legacy release-gates-check-strict \
         verify-large-e2e verify-huge-native-e2e verify-huge-allowed-native-e2e \
         verify-chunked-native-e2e verify-chunked-native-e2e-smoke verify-chunked-native-e2e-stress \
         verify-streaming-failure-cache-e2e \
@@ -193,6 +193,9 @@ release-gates-check:
 release-gates-check-055:
 	python3 tools/release/gates/validate_release_gates_055.py
 
+release-gates-check-060:
+	python3 tools/release/gates/validate_release_gates_060.py
+
 release-gates-check-legacy:
 	python3 tools/release/legacy/validate_release_gates.py
 
@@ -324,6 +327,7 @@ help:
 	@echo "  license-check            - Verify license policy and THIRD-PARTY-NOTICES coverage"
 	@echo "  release-gates-check      - Validate release gate framework (0.5.0 + 0.5.5)"
 	@echo "  release-gates-check-055  - Validate 0.5.5 release gates (evidence, known-diffs, docs)"
+	@echo "  release-gates-check-060  - Validate 0.6.0 release gates (streaming default, pruning, budget)"
 	@echo "  release-gates-check-legacy - Validate 0.4.0 release gate documents"
 	@echo "  release-gates-check-strict - Validate all sub-specs #12-#18 for full compliance"
 	@echo "  coverage-c               - Generate C module e2e coverage (builds NGINX with --coverage)"

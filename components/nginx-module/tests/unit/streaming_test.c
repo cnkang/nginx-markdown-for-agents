@@ -98,6 +98,7 @@ typedef struct {
     ngx_uint_t   engine_mode;       /* resolved engine value */
     ngx_uint_t   conditional_requests;
     size_t       large_body_threshold;
+    size_t       streaming_auto_threshold;
     size_t       max_size;
     size_t       streaming_budget;
     ngx_uint_t   on_error;
@@ -231,11 +232,10 @@ test_select_processing_path(const test_conf_t *conf,
 
     /* Rules 7-9: engine auto */
     if (r->content_length >= 0
-        && conf->large_body_threshold > 0
         && (size_t) r->content_length
-           < conf->large_body_threshold)
+           < conf->streaming_auto_threshold)
     {
-        /* CL < threshold: full-buffer */
+        /* CL < auto_threshold: full-buffer */
         return PATH_FULLBUFFER;
     }
 
@@ -481,7 +481,7 @@ test_engine_auto_large_cl(void)
     memset(&conf, 0, sizeof(conf));
     conf.engine_mode = ENGINE_AUTO;
     conf.conditional_requests = CONDITIONAL_DISABLED;
-    conf.large_body_threshold = 1024;
+    conf.streaming_auto_threshold = 1024;
 
     memset(&req, 0, sizeof(req));
     req.method = NGX_HTTP_GET;
@@ -507,7 +507,7 @@ test_engine_auto_small_cl(void)
     memset(&conf, 0, sizeof(conf));
     conf.engine_mode = ENGINE_AUTO;
     conf.conditional_requests = CONDITIONAL_DISABLED;
-    conf.large_body_threshold = 1024;
+    conf.streaming_auto_threshold = 1024;
 
     memset(&req, 0, sizeof(req));
     req.method = NGX_HTTP_GET;
@@ -533,7 +533,7 @@ test_engine_auto_no_cl(void)
     memset(&conf, 0, sizeof(conf));
     conf.engine_mode = ENGINE_AUTO;
     conf.conditional_requests = CONDITIONAL_DISABLED;
-    conf.large_body_threshold = 1024;
+    conf.streaming_auto_threshold = 1024;
 
     memset(&req, 0, sizeof(req));
     req.method = NGX_HTTP_GET;
