@@ -95,6 +95,12 @@ typedef struct { /* NOSONAR */
     } skips;
     ngx_atomic_t  failopen_count;
     ngx_atomic_t  estimated_token_savings;
+    struct {
+        ngx_atomic_t  path_entries;
+        ngx_atomic_t  path_conversions;
+        ngx_atomic_t  path_conversion_time_sum_ms;
+        ngx_atomic_t  overflow_count;
+    } per_path;
 } ngx_http_markdown_metrics_snapshot_t;
 
 /* ── ngx_slprintf stub ────────────────────────────────────────────── */
@@ -172,6 +178,14 @@ ngx_slprintf(u_char *buf, u_char *last, const char *fmt, ...) /* NOSONAR */
 
 /* Enable streaming metrics in the renderer */
 #define MARKDOWN_STREAMING_ENABLED 1
+
+/*
+ * Disable per-path RB-tree walk in the Prometheus renderer.
+ * The test harness lacks NGINX SHM/slab/rbtree type definitions
+ * needed by the tree walk code.  The aggregate per-path counters
+ * are still tested via the snapshot.
+ */
+#define NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED 0
 
 /*
  * NOSONAR c:S954 — the impl header must follow type definitions and
