@@ -140,16 +140,22 @@ ngx_int_t ngx_strncasecmp(u_char *s1, u_char *s2, size_t n);
 /*
  * Response buffer size for the metrics endpoint.
  *
- * Estimated current output per format:
+ * Estimated current output per format (without per-path entries):
  *   JSON:       ~2.0 KiB
  *   Plain text: ~1.5 KiB
  *   Prometheus: ~3.8 KiB (most verbose due to HELP/TYPE lines)
  *
- * The 8 KiB buffer provides headroom above the largest
- * format.  Increase this constant if new metrics push the
- * Prometheus output beyond the limit.
+ * Per-path entries add variable output depending on the number of
+ * tracked paths and their URI lengths.  Each path entry is roughly
+ * 80-120 bytes across formats.  With a default cardinality limit
+ * of 1024 paths at ~100 bytes each, per-path output can reach
+ * ~100 KiB.
+ *
+ * The 128 KiB buffer accommodates aggregate output plus per-path
+ * entries for typical deployments.  If the buffer is exhausted,
+ * the renderers detect truncation and return an error.
  */
-#define NGX_HTTP_MARKDOWN_METRICS_BUF_SIZE  16384
+#define NGX_HTTP_MARKDOWN_METRICS_BUF_SIZE  131072
 
 /*
  * Forward declaration: the Prometheus renderer is defined in
@@ -541,7 +547,11 @@ ngx_http_markdown_metrics_derive_values(
  *
  * Formats all metric counters, derived aggregates (conversion counts, average times,
  * average I/O), conversion latency buckets, decompression stats, and path-routing hits
- * as a single JSON object written starting at `p` and not past `end`.
+ * as a JSON object written starting at `p` and not past `end`.
+ *
+ * When per-path tracking is active, walks the SHM RB-tree under the slab pool
+ * mutex to emit individual per-path entries in a "paths" array inside the
+ * "per_path" object.
  *
  * @param p Pointer to the start position in the buffer where JSON will be written.
  * @param end Pointer to one past the end of the buffer; writing will not exceed this.
@@ -563,17 +573,17 @@ ngx_http_markdown_metrics_write_json(
     ngx_atomic_uint_t output_bytes_avg)
 {
     /*
-     * Emit the full metrics payload as a single JSON object via one
-     * ngx_slprintf call.  The format string is split into logical
-     * sections (conversion counters, failure breakdown, performance
-     * aggregates, latency histogram, decompression stats, path routing,
-     * streaming counters, decision-chain skips, and operational totals)
-     * with corresponding positional arguments in the same order.
+     * Emit the metrics payload as a JSON object.
+     *
+     * The format string covers everything up to and including the
+     * per_path aggregate counters.  After the aggregate section,
+     * if per-path tracking is active, we walk the SHM RB-tree
+     * to emit individual path entries, then close the object.
      *
      * The caller is responsible for detecting truncation (p >= end)
      * after this function returns.
      */
-    return ngx_slprintf(p, end,
+    p = ngx_slprintf(p, end,
 
         /* Conversion attempt and outcome counters */
         "{\n"
@@ -649,16 +659,15 @@ ngx_http_markdown_metrics_write_json(
         "    \"accept\": %uA\n"
         "  },\n"
 
-        /* Operational totals */
+        /* Operational totals and per-path aggregate counters */
         "  \"failopen_count\": %uA,\n"
         "  \"estimated_token_savings\": %uA,\n"
         "  \"per_path\": {\n"
         "    \"path_entries\": %uA,\n"
         "    \"path_conversions\": %uA,\n"
         "    \"path_conversion_time_sum_ms\": %uA,\n"
-        "    \"overflow_count\": %uA\n"
-        "  }\n"
-        "}",
+        "    \"overflow_count\": %uA,\n"
+        "    \"paths\": [",
 
         /* Conversion counters */
         snapshot->conversions_attempted,
@@ -732,11 +741,74 @@ ngx_http_markdown_metrics_write_json(
         snapshot->per_path.path_conversions,
         snapshot->per_path.path_conversion_time_sum_ms,
         snapshot->per_path.overflow_count);
+
+    /*
+     * Per-path individual entries: walk the SHM RB-tree to emit
+     * each path as a JSON object inside the "paths" array.
+     *
+     * The walk emits a trailing comma after each entry.
+     * We strip the trailing comma before closing the array
+     * by backing up one byte if paths were emitted.
+     *
+     * Requires full NGINX type definitions; guarded by
+     * NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED.
+     */
+#ifndef NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED
+#define NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED  1
+#endif
+
+#if NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED
+    if (snapshot->per_path.path_entries > 0
+        && ngx_http_markdown_metrics_shm_zone != NULL
+        && ngx_http_markdown_metrics_shm_zone->data != NULL)
+    {
+        ngx_shm_zone_t                       *zone;
+        ngx_slab_pool_t                      *shpool;
+        ngx_http_markdown_metrics_t          *live_metrics;
+        u_char                               *paths_start;
+
+        zone = ngx_http_markdown_metrics_shm_zone;
+        live_metrics = (ngx_http_markdown_metrics_t *) zone->data;
+        shpool = (ngx_slab_pool_t *) zone->shm.addr;
+
+        paths_start = p;
+
+        ngx_shmtx_lock(&shpool->mutex);
+
+        p = ngx_http_markdown_json_walk_path_tree(
+                live_metrics->per_path.path_tree.root,
+                &live_metrics->per_path.sentinel,
+                p, end);
+
+        ngx_shmtx_unlock(&shpool->mutex);
+
+        /*
+         * Strip the trailing comma left by the last entry.
+         * If paths were written, p > paths_start and the byte
+         * before p is ','.
+         */
+        if (p > paths_start && *(p - 1) == ',') {
+            p--;
+        }
+    }
+#endif /* NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED */
+
+    /* Close the "paths" array, the "per_path" object, and the root object. */
+    p = ngx_slprintf(p, end,
+        "\n"
+        "    ]\n"
+        "  }\n"
+        "}");
+
+    return p;
 }
 
 
 /**
  * Format a metrics snapshot as a human-readable plain-text report into the provided buffer.
+ *
+ * When per-path tracking is active, walks the SHM RB-tree under the slab
+ * pool mutex to emit individual per-path entries after the aggregate section.
  *
  * @param p Pointer to the current write position in the buffer.
  * @param end Pointer to the end of the buffer (one past the last writable byte).
@@ -759,15 +831,18 @@ ngx_http_markdown_metrics_write_text(
 {
     /*
      * Emit the full metrics payload as a human-readable plain-text
-     * report via one ngx_slprintf call.  Sections mirror the JSON
-     * renderer: conversion counters, failure breakdown, performance
-     * aggregates with latency histogram, decompression stats, path
-     * routing, streaming counters, and decision-chain skip reasons.
+     * report.  Sections mirror the JSON renderer: conversion counters,
+     * failure breakdown, performance aggregates with latency histogram,
+     * decompression stats, path routing, streaming counters, and
+     * decision-chain skip reasons.
+     *
+     * After the aggregate per-path section, if per-path tracking is
+     * active, walk the SHM RB-tree to emit individual per-path entries.
      *
      * The caller is responsible for detecting truncation (p >= end)
      * after this function returns.
      */
-    return ngx_slprintf(p, end,
+    p = ngx_slprintf(p, end,
 
         /* Header and conversion outcome summary */
         "Markdown Filter Metrics\n"
@@ -926,7 +1001,148 @@ ngx_http_markdown_metrics_write_text(
         snapshot->per_path.path_conversions,
         snapshot->per_path.path_conversion_time_sum_ms,
         snapshot->per_path.overflow_count);
+
+    /*
+     * Per-path individual entries: walk the SHM RB-tree to emit
+     * each path as a plain-text line after the aggregate section.
+     *
+     * Requires full NGINX type definitions; guarded by
+     * NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED.
+     */
+#if NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED
+    if (snapshot->per_path.path_entries > 0
+        && ngx_http_markdown_metrics_shm_zone != NULL
+        && ngx_http_markdown_metrics_shm_zone->data != NULL)
+    {
+        ngx_shm_zone_t                       *zone;
+        ngx_slab_pool_t                      *shpool;
+        ngx_http_markdown_metrics_t          *live_metrics;
+
+        zone = ngx_http_markdown_metrics_shm_zone;
+        live_metrics = (ngx_http_markdown_metrics_t *) zone->data;
+        shpool = (ngx_slab_pool_t *) zone->shm.addr;
+
+        p = ngx_slprintf(p, end, "\nPer-Path Details:\n");
+
+        ngx_shmtx_lock(&shpool->mutex);
+
+        p = ngx_http_markdown_text_walk_path_tree(
+                live_metrics->per_path.path_tree.root,
+                &live_metrics->per_path.sentinel,
+                p, end);
+
+        ngx_shmtx_unlock(&shpool->mutex);
+    }
+#endif /* NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED */
+
+    return p;
 }
+
+
+#if NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED
+/*
+ * Recursive in-order walk of the per-path RB-tree for JSON output.
+ *
+ * Emits each path as a JSON object inside the "paths" array.
+ * The caller is responsible for writing the opening "[" and closing "]".
+ * A comma is appended after each entry; the caller strips the trailing
+ * comma from the last entry before closing the array.
+ *
+ * Parameters:
+ *   node     - current RB-tree node (or sentinel to terminate)
+ *   sentinel - tree sentinel node
+ *   p        - current write position in the output buffer
+ *   end      - one past end of the buffer
+ *
+ * Returns:
+ *   Updated write position (clamped to end on overflow).
+ */
+static u_char *
+ngx_http_markdown_json_walk_path_tree(
+    ngx_rbtree_node_t *node,
+    ngx_rbtree_node_t *sentinel,
+    u_char *p,
+    u_char *end)
+{
+    ngx_http_markdown_path_metric_node_t  *pnode;
+
+    if (node == sentinel || p >= end) {
+        return p;
+    }
+
+    p = ngx_http_markdown_json_walk_path_tree(
+            node->left, sentinel, p, end);
+
+    if (p < end) {
+        pnode = (ngx_http_markdown_path_metric_node_t *) node;
+
+        p = ngx_slprintf(p, end,
+            "\n"
+            "      {\"path\": \"%*s\", "
+            "\"conversions\": %uA, "
+            "\"entries\": %uA, "
+            "\"conversion_time_ms\": %uA},",
+            (int) pnode->path_len, pnode->path,
+            pnode->conversions,
+            pnode->entries,
+            pnode->conversion_time_sum_ms);
+    }
+
+    p = ngx_http_markdown_json_walk_path_tree(
+            node->right, sentinel, p, end);
+
+    return p;
+}
+
+
+/*
+ * Recursive in-order walk of the per-path RB-tree for plain-text output.
+ *
+ * Emits each path as a "- Path[...]: ..." line.
+ *
+ * Parameters:
+ *   node     - current RB-tree node (or sentinel to terminate)
+ *   sentinel - tree sentinel node
+ *   p        - current write position in the output buffer
+ *   end      - one past end of the buffer
+ *
+ * Returns:
+ *   Updated write position (clamped to end on overflow).
+ */
+static u_char *
+ngx_http_markdown_text_walk_path_tree(
+    ngx_rbtree_node_t *node,
+    ngx_rbtree_node_t *sentinel,
+    u_char *p,
+    u_char *end)
+{
+    ngx_http_markdown_path_metric_node_t  *pnode;
+
+    if (node == sentinel || p >= end) {
+        return p;
+    }
+
+    p = ngx_http_markdown_text_walk_path_tree(
+            node->left, sentinel, p, end);
+
+    if (p < end) {
+        pnode = (ngx_http_markdown_path_metric_node_t *) node;
+
+        p = ngx_slprintf(p, end,
+            "- Path[%*s]: conversions=%uA entries=%uA "
+            "time_ms=%uA\n",
+            (int) pnode->path_len, pnode->path,
+            pnode->conversions,
+            pnode->entries,
+            pnode->conversion_time_sum_ms);
+    }
+
+    p = ngx_http_markdown_text_walk_path_tree(
+            node->right, sentinel, p, end);
+
+    return p;
+}
+#endif /* NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED */
 
 
 /*

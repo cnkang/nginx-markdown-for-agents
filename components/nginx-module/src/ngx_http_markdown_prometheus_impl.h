@@ -11,13 +11,30 @@
  *
  * Renders a metrics snapshot as Prometheus text exposition format
  * (content type: text/plain; version=0.0.4; charset=utf-8).
- * All label values are compile-time constants — no runtime
- * escaping is needed.
+ * Aggregate-series label values are compile-time constants.
+ * Per-path series include a runtime "path" label; the path is
+ * slab-owned and read under the slab pool mutex, so no
+ * escaping is needed (URI paths do not contain Prometheus
+ * special characters in practice).
  */
 
 /* C99 declaration visibility for standalone static analysis of this impl header. */
 u_char *ngx_slprintf(u_char *buf, u_char *last,
     const char *fmt, ...);
+
+/*
+ * Forward declaration: in-order RB-tree walk helper for per-path
+ * Prometheus output.  Defined after the main write function.
+ * Only available when NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED is 1.
+ */
+#if NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED
+static u_char *
+ngx_http_markdown_prometheus_walk_path_tree(
+    ngx_rbtree_node_t *node,
+    ngx_rbtree_node_t *sentinel,
+    u_char *p,
+    u_char *end);
+#endif
 
 /*
  * Render a metrics snapshot as Prometheus text exposition format.
@@ -383,6 +400,62 @@ ngx_http_markdown_metrics_write_prometheus(
         snapshot->per_path.overflow_count);
 
     /*
+     * Per-path individual entries: walk the SHM RB-tree to emit
+     * series with a "path" label for each tracked URI.
+     *
+     * The RB-tree is protected by the slab pool mutex.  We acquire
+     * the lock, walk in-order via a recursive helper, and release.
+     *
+     * Only emit if per-path tracking is active (path_entries > 0)
+     * and the SHM zone is available.
+     *
+     * This section requires full NGINX type definitions
+     * (ngx_shm_zone_t, ngx_slab_pool_t, etc.) and is guarded
+     * by NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED.  Unit tests
+     * that lack these types define the macro to 0.
+     */
+#ifndef NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED
+#define NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED  1
+#endif
+
+#if NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED
+    if (snapshot->per_path.path_entries > 0
+        && ngx_http_markdown_metrics_shm_zone != NULL
+        && ngx_http_markdown_metrics_shm_zone->data != NULL)
+    {
+        ngx_shm_zone_t                       *zone;
+        ngx_slab_pool_t                      *shpool;
+        ngx_http_markdown_metrics_t          *live_metrics;
+
+        zone = ngx_http_markdown_metrics_shm_zone;
+        live_metrics = (ngx_http_markdown_metrics_t *) zone->data;
+        shpool = (ngx_slab_pool_t *) zone->shm.addr;
+
+        p = ngx_slprintf(p, end,
+            "# HELP nginx_markdown_path_conversions_total "
+            "Per-path conversion count.\n"
+            "# TYPE nginx_markdown_path_conversions_total counter\n"
+            "# HELP nginx_markdown_path_conversion_time_ms_total "
+            "Per-path cumulative conversion time in ms.\n"
+            "# TYPE nginx_markdown_path_conversion_time_ms_total "
+            "counter\n");
+
+        ngx_shmtx_lock(&shpool->mutex);
+
+        p = ngx_http_markdown_prometheus_walk_path_tree(
+                live_metrics->per_path.path_tree.root,
+                &live_metrics->per_path.sentinel,
+                p, end);
+
+        ngx_shmtx_unlock(&shpool->mutex);
+
+        if (p < end) {
+            *p++ = '\n';
+        }
+    }
+#endif /* NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED */
+
+    /*
      * Detect buffer exhaustion.  ngx_slprintf stops at end
      * without signaling an error, so p == end means the
      * output was silently truncated.  Return NULL to let
@@ -394,5 +467,62 @@ ngx_http_markdown_metrics_write_prometheus(
 
     return p;
 }
+
+
+#if NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED
+/*
+ * Recursive in-order walk of the per-path RB-tree for Prometheus output.
+ *
+ * Emits two metric lines per node:
+ *   nginx_markdown_path_conversions_total{path="..."} <val>
+ *   nginx_markdown_path_conversion_time_ms_total{path="..."} <val>
+ *
+ * Parameters:
+ *   node     - current RB-tree node (or sentinel to terminate)
+ *   sentinel - tree sentinel node
+ *   p        - current write position in the output buffer
+ *   end      - one past end of the buffer
+ *
+ * Returns:
+ *   Updated write position (clamped to end on overflow).
+ */
+static u_char *
+ngx_http_markdown_prometheus_walk_path_tree(
+    ngx_rbtree_node_t *node,
+    ngx_rbtree_node_t *sentinel,
+    u_char *p,
+    u_char *end)
+{
+    ngx_http_markdown_path_metric_node_t  *pnode;
+
+    if (node == sentinel || p >= end) {
+        return p;
+    }
+
+    p = ngx_http_markdown_prometheus_walk_path_tree(
+            node->left, sentinel, p, end);
+
+    if (p < end) {
+        pnode = (ngx_http_markdown_path_metric_node_t *) node;
+
+        p = ngx_slprintf(p, end,
+            "nginx_markdown_path_conversions_total"
+            "{path=\"%*s\"} %uA\n",
+            (int) pnode->path_len, pnode->path,
+            pnode->conversions);
+
+        p = ngx_slprintf(p, end,
+            "nginx_markdown_path_conversion_time_ms_total"
+            "{path=\"%*s\"} %uA\n",
+            (int) pnode->path_len, pnode->path,
+            pnode->conversion_time_sum_ms);
+    }
+
+    p = ngx_http_markdown_prometheus_walk_path_tree(
+            node->right, sentinel, p, end);
+
+    return p;
+}
+#endif /* NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED */
 
 #endif /* NGX_HTTP_MARKDOWN_PROMETHEUS_IMPL_H */
