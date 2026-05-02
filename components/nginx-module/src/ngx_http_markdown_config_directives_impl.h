@@ -501,6 +501,29 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
         NULL
     },
 
+    /*
+     * markdown_metrics_per_path on|off
+     *
+     * Enable per-URL-path metrics tracking.  When enabled, the top-N
+     * most-hit URI paths are tracked individually alongside global
+     * aggregates.  Per-path data is exposed in the metrics endpoint
+     * under the "per_path" key.
+     *
+     * Default: off
+     * Context: http, server, location
+     *
+     * Example:
+     *   markdown_metrics_per_path on;
+     */
+    {
+        ngx_string("markdown_metrics_per_path"),
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_FLAG,
+        ngx_conf_set_flag_slot,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        offsetof(ngx_http_markdown_conf_t, metrics_per_path),
+        NULL
+    },
+
 #ifdef MARKDOWN_STREAMING_ENABLED
     /*
      * markdown_streaming_engine off|on|auto|$variable

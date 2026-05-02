@@ -542,6 +542,7 @@ test_merge_conf(void)
     parent.large_body_threshold = 4096;
     parent.ops.trust_forwarded_headers = 1;
     parent.ops.metrics_format = NGX_HTTP_MARKDOWN_METRICS_FORMAT_PROMETHEUS;
+    parent.ops.metrics_per_path = 1;
     parent.streaming_engine = &cv;
     parent.streaming_budget = 777;
     parent.streaming_budget_explicit = 1;
@@ -576,6 +577,7 @@ test_merge_conf(void)
     child.large_body_threshold = NGX_CONF_UNSET_SIZE;
     child.ops.trust_forwarded_headers = NGX_CONF_UNSET;
     child.ops.metrics_format = NGX_CONF_UNSET_UINT;
+    child.ops.metrics_per_path = NGX_CONF_UNSET;
     child.streaming_budget = NGX_CONF_UNSET_SIZE;
     child.streaming_budget_explicit = 0;
     child.streaming_on_error = NGX_CONF_UNSET_UINT;
@@ -628,6 +630,7 @@ test_merge_conf(void)
     child.large_body_threshold = NGX_CONF_UNSET_SIZE;
     child.ops.trust_forwarded_headers = NGX_CONF_UNSET;
     child.ops.metrics_format = NGX_CONF_UNSET_UINT;
+    child.ops.metrics_per_path = NGX_CONF_UNSET;
     child.streaming_budget = NGX_CONF_UNSET_SIZE;
     child.streaming_budget_explicit = 0;
     child.streaming_on_error = NGX_CONF_UNSET_UINT;
@@ -965,6 +968,7 @@ test_merge_conf_double_unset(void)
     parent.conditional_requests = NGX_HTTP_MARKDOWN_CONDITIONAL_FULL_SUPPORT;
     parent.log_verbosity = NGX_HTTP_MARKDOWN_LOG_INFO;
     parent.ops.metrics_format = NGX_HTTP_MARKDOWN_METRICS_FORMAT_AUTO;
+    parent.ops.metrics_per_path = 0;
 
     child.enabled_source = NGX_HTTP_MARKDOWN_ENABLED_UNSET;
     child.max_size = NGX_CONF_UNSET_SIZE;
@@ -986,6 +990,7 @@ test_merge_conf_double_unset(void)
     child.large_body_threshold = NGX_CONF_UNSET_SIZE;
     child.ops.trust_forwarded_headers = NGX_CONF_UNSET;
     child.ops.metrics_format = NGX_CONF_UNSET_UINT;
+    child.ops.metrics_per_path = NGX_CONF_UNSET;
     child.streaming_budget = NGX_CONF_UNSET_SIZE;
     child.streaming_budget_explicit = 0;
     child.streaming_on_error = NGX_CONF_UNSET_UINT;
