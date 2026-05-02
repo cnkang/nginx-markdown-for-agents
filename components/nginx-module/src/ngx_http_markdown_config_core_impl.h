@@ -144,6 +144,7 @@ ngx_http_markdown_create_conf(ngx_conf_t *cf)
     conf->log_verbosity = NGX_CONF_UNSET_UINT;
     conf->buffer_chunked = NGX_CONF_UNSET;
     conf->stream_types = NGX_CONF_UNSET_PTR;
+    conf->content_types = NGX_CONF_UNSET_PTR;
     conf->auto_decompress = NGX_CONF_UNSET;
     conf->large_body_threshold = NGX_CONF_UNSET_SIZE;
     conf->ops.trust_forwarded_headers = NGX_CONF_UNSET;
@@ -244,6 +245,7 @@ ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
 
     ngx_conf_merge_ptr_value(conf->auth_cookies, prev->auth_cookies, NULL);
     ngx_conf_merge_ptr_value(conf->stream_types, prev->stream_types, NULL);
+    ngx_conf_merge_ptr_value(conf->content_types, prev->content_types, NULL);
 
 #ifdef MARKDOWN_STREAMING_ENABLED
     if (conf->streaming_engine == NULL) {
@@ -629,6 +631,7 @@ ngx_http_markdown_log_merged_conf(ngx_conf_t *cf,
     ngx_uint_t log_level;
     ngx_uint_t auth_cookie_count = (conf->auth_cookies != NULL) ? conf->auth_cookies->nelts : 0;
     ngx_uint_t stream_type_count = (conf->stream_types != NULL) ? conf->stream_types->nelts : 0;
+    ngx_uint_t content_type_count = (conf->content_types != NULL) ? conf->content_types->nelts : 0;
 
     if (cf == NULL) {
         return;
@@ -645,7 +648,8 @@ ngx_http_markdown_log_merged_conf(ngx_conf_t *cf,
                        "auth_cookie_patterns=%ui etag=%ui "
                        "conditional_requests=%V "
                        "log_verbosity=%V buffer_chunked=%ui "
-                       "stream_types=%ui "
+                        "stream_types=%ui "
+                        "content_types=%ui "
                        "large_body_threshold=%uz "
                        "trust_forwarded_headers=%ui "
                        "metrics_format=%V"
@@ -672,7 +676,8 @@ ngx_http_markdown_log_merged_conf(ngx_conf_t *cf,
                        ngx_http_markdown_conditional_requests_name(conf->conditional_requests),
                        ngx_http_markdown_log_verbosity_name(conf->log_verbosity),
                        (ngx_uint_t) conf->buffer_chunked,
-                       stream_type_count,
+                        stream_type_count,
+                        content_type_count,
                        conf->large_body_threshold,
                        (ngx_uint_t) conf->ops.trust_forwarded_headers,
                        ngx_http_markdown_metrics_format_name(

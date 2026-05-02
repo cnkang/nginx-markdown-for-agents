@@ -35,6 +35,13 @@ static ngx_str_t ngx_http_markdown_reason_skip_range_str =
 static ngx_str_t ngx_http_markdown_reason_skip_accept_str =
     ngx_string("SKIP_ACCEPT");
 
+/* Content-type routing reason codes (v0.6.0 P1-3) */
+
+static ngx_str_t ngx_http_markdown_reason_ct_route_default_str =
+    ngx_string("CT_ROUTE_DEFAULT");
+static ngx_str_t ngx_http_markdown_reason_ct_route_configured_str =
+    ngx_string("CT_ROUTE_CONFIGURED");
+
 /* Eligible outcome reason codes */
 
 static ngx_str_t ngx_http_markdown_reason_converted_str =
@@ -420,3 +427,35 @@ ngx_http_markdown_reason_eligible_fullbuffer_auto(void)
 }
 
 #endif /* MARKDOWN_STREAMING_ENABLED */
+
+
+/*
+ * Return the CT_ROUTE_DEFAULT reason code.
+ *
+ * Logged when the content-type allowlist is the default
+ * (text/html only) and the request matches.
+ *
+ * Returns:
+ *   Pointer to static ngx_str_t "CT_ROUTE_DEFAULT"
+ */
+const ngx_str_t *
+ngx_http_markdown_reason_ct_route_default(void)
+{
+    return &ngx_http_markdown_reason_ct_route_default_str;
+}
+
+
+/*
+ * Return the CT_ROUTE_CONFIGURED reason code.
+ *
+ * Logged when the content-type allowlist was configured
+ * via markdown_content_types and the request matches.
+ *
+ * Returns:
+ *   Pointer to static ngx_str_t "CT_ROUTE_CONFIGURED"
+ */
+const ngx_str_t *
+ngx_http_markdown_reason_ct_route_configured(void)
+{
+    return &ngx_http_markdown_reason_ct_route_configured_str;
+}
