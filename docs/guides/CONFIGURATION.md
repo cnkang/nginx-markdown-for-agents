@@ -551,7 +551,7 @@ Key points for operators:
 
 - You can set `markdown_on_error reject` and `markdown_streaming_on_error pass`
   (or any other combination) without conflict.
-- When `markdown_streaming_engine off` (the default), `markdown_streaming_on_error`
+- When `markdown_streaming_engine` is not set or is `auto` (the default), streaming is enabled for eligible responses. When explicitly set to `off`, `markdown_streaming_on_error`
   is ignored entirely. All failure handling follows `markdown_on_error`.
 - Neither directive controls the `ERROR_STREAMING_FALLBACK` signal. When the Rust
   engine determines that a capability requires full-buffer processing (e.g., table
