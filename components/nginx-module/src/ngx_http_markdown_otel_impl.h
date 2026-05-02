@@ -11,9 +11,11 @@
  *   - Ring buffer for in-flight spans (avoid per-request heap alloc)
  *   - Batch export on span completion or buffer pressure
  *
- * Status: Skeleton implementation — span creation and attribute
- * recording are functional; OTLP export and trace context propagation
- * are deferred to a follow-up change set.
+ * Status: Span creation, attribute recording, and diagnostic
+ * export are functional.  Spans are wired into the full-buffer
+ * and streaming conversion paths.  OTLP HTTP protobuf export
+ * to a collector endpoint and trace context propagation are
+ * deferred to a follow-up change set.
  *
  * Requirements: ADR-0006
  */
@@ -185,26 +187,53 @@ ngx_http_markdown_otel_span_end(ngx_http_markdown_otel_span_t *span)
 
 
 /*
- * Export a completed span to the OTLP endpoint.
+ * Export a completed span for diagnostic consumption.
  *
- * Current implementation: no-op.  Full OTLP HTTP protobuf
- * export is deferred to a follow-up change set.  Spans are
- * discarded after this call.
+ * Logs span attributes at NGX_LOG_INFO level so operators can
+ * observe conversion telemetry when markdown_log_verbosity >= info.
+ * Full OTLP HTTP protobuf export to a collector endpoint is
+ * deferred to a follow-up change set.
  *
  * Parameters:
  *   span - Completed OTel span
- *   log  - NGINX log for error reporting
+ *   log  - NGINX log for error reporting and attribute output
  */
 static void
 ngx_http_markdown_otel_span_export(ngx_http_markdown_otel_span_t *span,
-                                   const ngx_log_t *log)
+                                   ngx_log_t *log)
 {
+    ngx_uint_t  i;
+
     if (span == NULL) {
         return;
     }
 
-    /* OTLP export deferred — span attributes are available for
-     * diagnostic logging if needed. */
+    ngx_log_error(NGX_LOG_INFO, log, 0,
+                 "markdown otel: span %s "
+                 "duration_ms=%M attrs=%ui",
+                 NGX_HTTP_MARKDOWN_OTEL_SPAN_NAME,
+                 (span->end_ms >= span->start_ms)
+                     ? (ngx_msec_t) (span->end_ms - span->start_ms)
+                     : (ngx_msec_t) 0,
+                 span->attr_count);
+
+    for (i = 0; i < span->attr_count; i++) {
+        if (span->attrs[i].is_int) {
+            ngx_log_error(NGX_LOG_INFO, log, 0,
+                         "markdown otel: attr %*s=%L",
+                         (size_t) span->attrs[i].key_len,
+                         span->attrs[i].key,
+                         span->attrs[i].int_value);
+        } else {
+            ngx_log_error(NGX_LOG_INFO, log, 0,
+                         "markdown otel: attr %*s=%*s",
+                         (size_t) span->attrs[i].key_len,
+                         span->attrs[i].key,
+                         (size_t) span->attrs[i].str_value_len,
+                         span->attrs[i].str_value);
+        }
+    }
+
     span->exported = 1;
 }
 

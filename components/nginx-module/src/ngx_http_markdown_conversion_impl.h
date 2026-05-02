@@ -1110,6 +1110,26 @@ ngx_http_markdown_execute_conversion(ngx_http_request_t *r,
             r, ctx, conf);
     }
 
+    ctx->otel_span = NULL;
+    if (conf->ops.otel_enabled) {
+        ctx->otel_span = ngx_http_markdown_otel_span_start(r, conf);
+        if (ctx->otel_span != NULL) {
+            ngx_http_markdown_otel_set_str_attr(ctx->otel_span,
+                (const u_char *) "flavor", 6,
+                (const u_char *) (conf->flavor == 1
+                    ? "gfm" : "commonmark"),
+                conf->flavor == 1 ? 3 : 10);
+            ngx_http_markdown_otel_set_str_attr(ctx->otel_span,
+                (const u_char *) "engine", 6,
+                (const u_char *) "fullbuffer", 10);
+            if (r->uri.len > 0) {
+                ngx_http_markdown_otel_set_str_attr(ctx->otel_span,
+                    (const u_char *) "uri", 3,
+                    r->uri.data, r->uri.len);
+            }
+        }
+    }
+
     ngx_http_markdown_prepare_conversion_options(r, conf, &options);
 
     tp = ngx_timeofday();
@@ -1186,6 +1206,21 @@ ngx_http_markdown_execute_conversion(ngx_http_request_t *r,
     }
 
     if (result->error_code != ERROR_SUCCESS) {
+        if (ctx->otel_span != NULL) {
+            ngx_http_markdown_otel_set_int_attr(ctx->otel_span,
+                (const u_char *) "input_bytes", 11,
+                (int64_t) ctx->buffer.size);
+            ngx_http_markdown_otel_set_int_attr(ctx->otel_span,
+                (const u_char *) "output_bytes", 12,
+                (int64_t) 0);
+            ngx_http_markdown_otel_set_int_attr(ctx->otel_span,
+                (const u_char *) "error_code", 10,
+                (int64_t) result->error_code);
+            ngx_http_markdown_otel_span_end(ctx->otel_span);
+            ngx_http_markdown_otel_span_export(ctx->otel_span,
+                r->connection->log);
+            ctx->otel_span = NULL;
+        }
         return ngx_http_markdown_handle_conversion_failure(
             r, ctx, conf, result, *elapsed_ms);
     }
@@ -1219,6 +1254,22 @@ ngx_http_markdown_execute_conversion(ngx_http_request_t *r,
 #endif
 
     ngx_http_markdown_record_token_savings_if_enabled(ctx, conf, result);
+
+    if (ctx->otel_span != NULL) {
+        ngx_http_markdown_otel_set_int_attr(ctx->otel_span,
+            (const u_char *) "input_bytes", 11,
+            (int64_t) ctx->buffer.size);
+        ngx_http_markdown_otel_set_int_attr(ctx->otel_span,
+            (const u_char *) "output_bytes", 12,
+            (int64_t) result->markdown_len);
+        ngx_http_markdown_otel_set_int_attr(ctx->otel_span,
+            (const u_char *) "error_code", 10,
+            (int64_t) result->error_code);
+        ngx_http_markdown_otel_span_end(ctx->otel_span);
+        ngx_http_markdown_otel_span_export(ctx->otel_span,
+            r->connection->log);
+        ctx->otel_span = NULL;
+    }
 
     return NGX_OK;
 }
