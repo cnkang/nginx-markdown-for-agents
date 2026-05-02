@@ -27,6 +27,7 @@ pub mod converter;
 pub mod error;
 pub mod etag_generator;
 pub mod ffi;
+pub mod llm_adapter;
 pub mod metadata;
 pub mod parser;
 pub mod security;

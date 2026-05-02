@@ -215,6 +215,8 @@ typedef struct {
     ngx_str_t                 *prune_selectors;           /* markdown_prune_selectors (default: built-in list) */
     ngx_str_t                 *prune_protection_selectors; /* markdown_prune_protection_selectors (default: empty) */
     size_t                     memory_budget;             /* markdown_memory_budget (default: NGX_CONF_UNSET_SIZE) */
+    ngx_uint_t                 llm_provider;              /* markdown_llm_provider (default: 0=default) */
+    ngx_uint_t                 chars_per_token_fixed;     /* markdown_chars_per_token (default: 0=use provider) */
 } ngx_http_markdown_conf_t;
 
 /*

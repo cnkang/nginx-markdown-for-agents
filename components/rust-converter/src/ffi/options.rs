@@ -28,6 +28,7 @@ use std::time::Duration;
 
 use crate::converter::{ConversionOptions, MarkdownFlavor};
 use crate::error::ConversionError;
+use crate::llm_adapter::LlmProvider;
 
 use super::abi::MarkdownOptions;
 
@@ -47,6 +48,10 @@ pub(crate) struct DecodedOptions<'a> {
     pub(crate) prune_protection_selectors: Option<&'a str>,
     #[allow(dead_code)]
     pub(crate) memory_budget: u64,
+    #[allow(dead_code)]
+    pub(crate) llm_provider: LlmProvider,
+    #[allow(dead_code)]
+    pub(crate) chars_per_token: f32,
 }
 
 /// Convert a required raw pointer from C into a Rust reference.
@@ -203,6 +208,12 @@ pub(crate) fn decode_options(
         prune_selectors,
         prune_protection_selectors,
         memory_budget: options.memory_budget,
+        llm_provider: LlmProvider::from_ffi(options.llm_provider),
+        chars_per_token: if options.chars_per_token_fixed > 0 {
+            options.chars_per_token_fixed as f32 / 10.0
+        } else {
+            LlmProvider::from_ffi(options.llm_provider).chars_per_token()
+        },
         conversion: ConversionOptions {
             flavor,
             include_front_matter,

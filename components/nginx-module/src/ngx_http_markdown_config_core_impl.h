@@ -163,6 +163,8 @@ ngx_http_markdown_create_conf(ngx_conf_t *cf)
     conf->prune_selectors = NGX_CONF_UNSET_PTR;
     conf->prune_protection_selectors = NGX_CONF_UNSET_PTR;
     conf->memory_budget = NGX_CONF_UNSET_SIZE;
+    conf->llm_provider = NGX_CONF_UNSET_UINT;
+    conf->chars_per_token_fixed = NGX_CONF_UNSET_UINT;
 
     return conf;
 }
@@ -278,6 +280,12 @@ ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
     ngx_conf_merge_size_value(conf->memory_budget,
                               prev->memory_budget,
                               NGX_CONF_UNSET_SIZE);
+    ngx_conf_merge_uint_value(conf->llm_provider,
+                              prev->llm_provider,
+                              0);
+    ngx_conf_merge_uint_value(conf->chars_per_token_fixed,
+                              prev->chars_per_token_fixed,
+                              0);
 
     /*
      * Apply unified memory_budget to max_size when max_size was not

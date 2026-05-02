@@ -550,6 +550,8 @@ test_merge_conf(void)
     parent.streaming_auto_threshold = 32768;
     parent.prune_noise = 1;
     parent.memory_budget = NGX_CONF_UNSET_SIZE;
+    parent.llm_provider = NGX_CONF_UNSET_UINT;
+    parent.chars_per_token_fixed = NGX_CONF_UNSET_UINT;
 
     /* Initially unset; enabled below reflects the post-action state. */
     child.enabled_source = NGX_HTTP_MARKDOWN_ENABLED_UNSET;
@@ -583,6 +585,8 @@ test_merge_conf(void)
     child.prune_selectors = NGX_CONF_UNSET_PTR;
     child.prune_protection_selectors = NGX_CONF_UNSET_PTR;
     child.memory_budget = NGX_CONF_UNSET_SIZE;
+    child.llm_provider = NGX_CONF_UNSET_UINT;
+    child.chars_per_token_fixed = NGX_CONF_UNSET_UINT;
 
     rc = ngx_http_markdown_merge_conf(&cf, &parent, &child);
     TEST_ASSERT(rc == NGX_CONF_OK,
@@ -633,6 +637,8 @@ test_merge_conf(void)
     child.prune_selectors = NGX_CONF_UNSET_PTR;
     child.prune_protection_selectors = NGX_CONF_UNSET_PTR;
     child.memory_budget = NGX_CONF_UNSET_SIZE;
+    child.llm_provider = NGX_CONF_UNSET_UINT;
+    child.chars_per_token_fixed = NGX_CONF_UNSET_UINT;
 
     rc = ngx_http_markdown_merge_conf(&cf, &parent, &child);
     TEST_ASSERT(rc == NGX_CONF_OK,

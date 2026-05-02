@@ -211,6 +211,24 @@ typedef struct MarkdownOptions {
    * Populated from the `markdown_memory_budget` NGINX directive.
    */
   uint64_t memory_budget;
+  /**
+   * LLM provider for token estimation (0=default, 1=openai-gpt4, 2=anthropic-claude,
+   * 3=google-gemini, 4=meta-llama3).
+   *
+   * When non-zero and `estimate_tokens` is enabled, the provider's
+   * characteristic chars-per-token ratio overrides the default 4.0.
+   * Populated from the `markdown_llm_provider` NGINX directive.
+   */
+  uint8_t llm_provider;
+  /**
+   * Explicit chars-per-token ratio for token estimation (0 = use default/provider).
+   *
+   * When non-zero, this value overrides both the default 4.0 and the
+   * provider-specific ratio.  Stored as fixed-point: actual ratio =
+   * `chars_per_token_fixed / 10.0` (e.g., 38 = 3.8 chars/token).
+   * Populated from the `markdown_chars_per_token` NGINX directive.
+   */
+  uint8_t chars_per_token_fixed;
 } MarkdownOptions;
 
 /**
