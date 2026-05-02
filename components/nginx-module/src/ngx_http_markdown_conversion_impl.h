@@ -472,6 +472,9 @@ ngx_http_markdown_prepare_conversion_options(ngx_http_request_t *r,
     options->memory_budget = (conf->memory_budget != NGX_CONF_UNSET_SIZE)
         ? conf->memory_budget : 0;
 
+    options->llm_provider = (uint8_t) conf->llm_provider;
+    options->chars_per_token_fixed = (uint8_t) conf->chars_per_token_fixed;
+
     /*
      * Apply unified budget to streaming_budget when it was not
      * explicitly set by the operator.

@@ -37,6 +37,16 @@ static ngx_conf_enum_t
 };
 #endif /* MARKDOWN_STREAMING_ENABLED */
 
+static ngx_conf_enum_t
+    ngx_http_markdown_llm_provider_values[] = {
+    { ngx_string("default"),           0 },
+    { ngx_string("openai-gpt4"),       1 },
+    { ngx_string("anthropic-claude"),  2 },
+    { ngx_string("google-gemini"),     3 },
+    { ngx_string("meta-llama3"),       4 },
+    { ngx_null_string, 0 }
+};
+
 static ngx_command_t ngx_http_markdown_filter_commands[] = {
     /*
      * markdown_filter on|off|$variable
@@ -710,6 +720,53 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
         NGX_HTTP_LOC_CONF_OFFSET,
         offsetof(ngx_http_markdown_conf_t,
                  memory_budget),
+        NULL
+    },
+
+    /*
+     * markdown_llm_provider default|openai-gpt4|anthropic-claude|google-gemini|meta-llama3
+     *
+     * LLM provider for token estimation.  Each provider has a characteristic
+     * chars-per-token ratio that improves estimate accuracy for that provider's
+     * tokenizer family.
+     *
+     * Default: default (4.0 chars/token, English average)
+     * Context: http, server, location
+     *
+     * Example:
+     *   markdown_llm_provider openai-gpt4;
+     */
+    {
+        ngx_string("markdown_llm_provider"),
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+        ngx_conf_set_enum_slot,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        offsetof(ngx_http_markdown_conf_t, llm_provider),
+        &ngx_http_markdown_llm_provider_values
+    },
+
+    /*
+     * markdown_chars_per_token <number>
+     *
+     * Explicit chars-per-token ratio for token estimation, stored as
+     * fixed-point * 10 (e.g., 38 = 3.8 chars/token).  Overrides both
+     * the default (40) and the provider-specific ratio.  Set to 0 to
+     * use the provider's default.
+     *
+     * Range: 0-255 (0.0-25.5 chars/token).  Practical range: 20-60.
+     *
+     * Default: 0 (use provider default)
+     * Context: http, server, location
+     *
+     * Example:
+     *   markdown_chars_per_token 38;
+     */
+    {
+        ngx_string("markdown_chars_per_token"),
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+        ngx_conf_set_num_slot,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        offsetof(ngx_http_markdown_conf_t, chars_per_token_fixed),
         NULL
     },
 
