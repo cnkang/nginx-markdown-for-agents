@@ -89,6 +89,8 @@ pub struct IncrementalConverterHandle {
 ///     prune_protection_selectors: std::ptr::null(),
 ///     prune_protection_selector_len: 0,
 ///     memory_budget: 0,
+///     llm_provider: 0,
+///     chars_per_token_fixed: 0,
 /// };
 /// let handle = unsafe { markdown_incremental_new(&opts) };
 /// assert!(!handle.is_null());

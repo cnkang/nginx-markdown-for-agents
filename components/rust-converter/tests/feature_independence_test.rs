@@ -127,6 +127,8 @@ fn convert_with_feature_toggles(
         prune_protection_selectors: ptr::null(),
         prune_protection_selector_len: 0,
         memory_budget: 0,
+        llm_provider: 0,
+        chars_per_token_fixed: 0,
     };
 
     let mut result = empty_result();
@@ -198,6 +200,8 @@ fn test_both_features_enabled() {
         prune_protection_selectors: ptr::null(),
         prune_protection_selector_len: 0,
         memory_budget: 0,
+        llm_provider: 0,
+        chars_per_token_fixed: 0,
     };
 
     let mut result = MarkdownResult {
@@ -283,6 +287,8 @@ fn test_token_estimation_only() {
         prune_protection_selectors: ptr::null(),
         prune_protection_selector_len: 0,
         memory_budget: 0,
+        llm_provider: 0,
+        chars_per_token_fixed: 0,
     };
 
     let mut result = MarkdownResult {
@@ -365,6 +371,8 @@ fn test_front_matter_only() {
         prune_protection_selectors: ptr::null(),
         prune_protection_selector_len: 0,
         memory_budget: 0,
+        llm_provider: 0,
+        chars_per_token_fixed: 0,
     };
 
     let mut result = MarkdownResult {
@@ -447,6 +455,8 @@ fn test_both_features_disabled() {
         prune_protection_selectors: ptr::null(),
         prune_protection_selector_len: 0,
         memory_budget: 0,
+        llm_provider: 0,
+        chars_per_token_fixed: 0,
     };
 
     let mut result = MarkdownResult {
@@ -544,6 +554,8 @@ fn test_feature_independence_comprehensive() {
             prune_protection_selectors: ptr::null(),
             prune_protection_selector_len: 0,
             memory_budget: 0,
+            llm_provider: 0,
+            chars_per_token_fixed: 0,
         };
 
         let mut result = empty_result();
@@ -639,6 +651,8 @@ fn test_no_hidden_dependencies() {
         prune_protection_selectors: ptr::null(),
         prune_protection_selector_len: 0,
         memory_budget: 0,
+        llm_provider: 0,
+        chars_per_token_fixed: 0,
     };
 
     let mut result1 = empty_result();
@@ -682,6 +696,8 @@ fn test_no_hidden_dependencies() {
         prune_protection_selectors: ptr::null(),
         prune_protection_selector_len: 0,
         memory_budget: 0,
+        llm_provider: 0,
+        chars_per_token_fixed: 0,
     };
 
     let mut result2 = empty_result();
