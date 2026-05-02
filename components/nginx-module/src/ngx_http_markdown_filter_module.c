@@ -17,6 +17,8 @@
 #include "ngx_http_markdown_request_impl.h"
 #include "ngx_http_markdown_metrics_impl.h"
 #include "ngx_http_markdown_prometheus_impl.h"
+#include "ngx_http_markdown_otel_impl.h"
+#include "ngx_http_markdown_dynconf_impl.h"
 
 #ifdef MARKDOWN_STREAMING_ENABLED
 #include "ngx_http_markdown_streaming_impl.h"

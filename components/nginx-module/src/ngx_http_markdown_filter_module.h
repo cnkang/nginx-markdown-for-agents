@@ -330,6 +330,9 @@ typedef struct {
     ngx_http_markdown_error_category_t    last_error_category;
     ngx_flag_t                            has_error_category;
 
+    /* OpenTelemetry span for per-request conversion tracing */
+    ngx_http_markdown_otel_span_t        *otel_span;
+
 #ifdef MARKDOWN_STREAMING_ENABLED
     /*
      * Streaming state sub-struct.

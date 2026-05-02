@@ -388,6 +388,16 @@ ngx_http_markdown_streaming_cleanup(void *data)
         return;
     }
 
+    if (ctx->otel_span != NULL) {
+        ngx_http_markdown_otel_set_int_attr(ctx->otel_span,
+            (const u_char *) "error_code", 10,
+            (int64_t) -1);
+        ngx_http_markdown_otel_span_end(ctx->otel_span);
+        ngx_http_markdown_otel_span_export(ctx->otel_span,
+            ctx->request->connection->log);
+        ctx->otel_span = NULL;
+    }
+
     if (ctx->streaming.handle != NULL) {
         markdown_streaming_abort(ctx->streaming.handle);
         ctx->streaming.handle = NULL;
@@ -945,6 +955,22 @@ ngx_http_markdown_streaming_send_deferred_lastbuf(
             ngx_http_markdown_reason_streaming_convert());
 
         ngx_http_markdown_record_per_path_metrics(r, conf, 0);
+
+        if (ctx->otel_span != NULL) {
+            ngx_http_markdown_otel_set_int_attr(ctx->otel_span,
+                (const u_char *) "input_bytes", 11,
+                (int64_t) ctx->streaming.total_input_bytes);
+            ngx_http_markdown_otel_set_int_attr(ctx->otel_span,
+                (const u_char *) "output_bytes", 12,
+                (int64_t) ctx->streaming.total_output_bytes);
+            ngx_http_markdown_otel_set_int_attr(ctx->otel_span,
+                (const u_char *) "error_code", 10,
+                (int64_t) 0);
+            ngx_http_markdown_otel_span_end(ctx->otel_span);
+            ngx_http_markdown_otel_span_export(ctx->otel_span,
+                r->connection->log);
+            ctx->otel_span = NULL;
+        }
     } else {
         /*
          * Deferred last_buf send failed with a definitive
@@ -1069,6 +1095,22 @@ ngx_http_markdown_streaming_resume_pending(
 
         ngx_http_markdown_record_per_path_metrics(r, conf, 0);
 
+        if (ctx->otel_span != NULL) {
+            ngx_http_markdown_otel_set_int_attr(ctx->otel_span,
+                (const u_char *) "input_bytes", 11,
+                (int64_t) ctx->streaming.total_input_bytes);
+            ngx_http_markdown_otel_set_int_attr(ctx->otel_span,
+                (const u_char *) "output_bytes", 12,
+                (int64_t) ctx->streaming.total_output_bytes);
+            ngx_http_markdown_otel_set_int_attr(ctx->otel_span,
+                (const u_char *) "error_code", 10,
+                (int64_t) 0);
+            ngx_http_markdown_otel_span_end(ctx->otel_span);
+            ngx_http_markdown_otel_span_export(ctx->otel_span,
+                r->connection->log);
+            ctx->otel_span = NULL;
+        }
+
         ctx->streaming.pending_terminal_metrics = 0;
     }
 
@@ -1105,6 +1147,16 @@ ngx_http_markdown_streaming_fallback_to_fullbuffer(
     if (ctx->streaming.handle != NULL) {
         markdown_streaming_abort(ctx->streaming.handle);
         ctx->streaming.handle = NULL;
+    }
+
+    if (ctx->otel_span != NULL) {
+        ngx_http_markdown_otel_set_str_attr(ctx->otel_span,
+            (const u_char *) "fallback", 8,
+            (const u_char *) "fullbuffer", 10);
+        ngx_http_markdown_otel_span_end(ctx->otel_span);
+        ngx_http_markdown_otel_span_export(ctx->otel_span,
+            r->connection->log);
+        ctx->otel_span = NULL;
     }
 
     /* Switch to full-buffer path */
@@ -1823,6 +1875,22 @@ ngx_http_markdown_streaming_finalize_request(
             "markdown streaming: finalize error "
             "code=%ui", (ngx_uint_t) rc_ffi);
 
+        if (ctx->otel_span != NULL) {
+            ngx_http_markdown_otel_set_int_attr(ctx->otel_span,
+                (const u_char *) "input_bytes", 11,
+                (int64_t) ctx->streaming.total_input_bytes);
+            ngx_http_markdown_otel_set_int_attr(ctx->otel_span,
+                (const u_char *) "output_bytes", 12,
+                (int64_t) ctx->streaming.total_output_bytes);
+            ngx_http_markdown_otel_set_int_attr(ctx->otel_span,
+                (const u_char *) "error_code", 10,
+                (int64_t) rc_ffi);
+            ngx_http_markdown_otel_span_end(ctx->otel_span);
+            ngx_http_markdown_otel_span_export(ctx->otel_span,
+                r->connection->log);
+            ctx->otel_span = NULL;
+        }
+
         markdown_result_free(&result);
 
         if (ctx->streaming.commit_state
@@ -2003,6 +2071,22 @@ ngx_http_markdown_streaming_finalize_request(
             ngx_http_markdown_reason_streaming_convert());
 
         ngx_http_markdown_record_per_path_metrics(r, conf, 0);
+
+        if (ctx->otel_span != NULL) {
+            ngx_http_markdown_otel_set_int_attr(ctx->otel_span,
+                (const u_char *) "input_bytes", 11,
+                (int64_t) ctx->streaming.total_input_bytes);
+            ngx_http_markdown_otel_set_int_attr(ctx->otel_span,
+                (const u_char *) "output_bytes", 12,
+                (int64_t) ctx->streaming.total_output_bytes);
+            ngx_http_markdown_otel_set_int_attr(ctx->otel_span,
+                (const u_char *) "error_code", 10,
+                (int64_t) 0);
+            ngx_http_markdown_otel_span_end(ctx->otel_span);
+            ngx_http_markdown_otel_span_export(ctx->otel_span,
+                r->connection->log);
+            ctx->otel_span = NULL;
+        }
     } else if (rc == NGX_AGAIN) {
         /*
          * Terminal last_buf send hit backpressure. Set a latch
@@ -2136,6 +2220,26 @@ ngx_http_markdown_streaming_init_handle(
         conversions_attempted);
     NGX_HTTP_MARKDOWN_METRIC_INC(
         streaming.requests_total);
+
+    ctx->otel_span = NULL;
+    if (conf->ops.otel_enabled) {
+        ctx->otel_span = ngx_http_markdown_otel_span_start(r, conf);
+        if (ctx->otel_span != NULL) {
+            ngx_http_markdown_otel_set_str_attr(ctx->otel_span,
+                (const u_char *) "flavor", 6,
+                (const u_char *) (conf->flavor == 1
+                    ? "gfm" : "commonmark"),
+                conf->flavor == 1 ? 3 : 10);
+            ngx_http_markdown_otel_set_str_attr(ctx->otel_span,
+                (const u_char *) "engine", 6,
+                (const u_char *) "streaming", 9);
+            if (r->uri.len > 0) {
+                ngx_http_markdown_otel_set_str_attr(ctx->otel_span,
+                    (const u_char *) "uri", 3,
+                    r->uri.data, r->uri.len);
+            }
+        }
+    }
 
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP,
         r->connection->log, 0,
