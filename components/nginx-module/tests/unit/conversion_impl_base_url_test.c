@@ -633,6 +633,64 @@ ngx_http_markdown_otel_span_export(ngx_http_markdown_otel_span_t *span,
     UNUSED(log);
 }
 
+static ngx_inline void
+ngx_http_markdown_log_decision(ngx_http_request_t *r,
+    const ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_ctx_t *ctx,
+    const char *reason)
+{
+    UNUSED(r);
+    UNUSED(conf);
+    UNUSED(ctx);
+    UNUSED(reason);
+}
+
+typedef int StreamingConverterHandle;
+
+static ngx_inline int
+markdown_streaming_new_with_code(const struct MarkdownOptions *opts,
+    StreamingConverterHandle **handle)
+{
+    UNUSED(opts);
+    UNUSED(handle);
+    return 0;
+}
+
+static ngx_inline int
+markdown_streaming_feed(StreamingConverterHandle *handle,
+    const uint8_t *data, size_t len,
+    uint8_t **out_data, size_t *out_len)
+{
+    UNUSED(handle);
+    UNUSED(data);
+    UNUSED(len);
+    UNUSED(out_data);
+    UNUSED(out_len);
+    return 0;
+}
+
+static ngx_inline void
+markdown_streaming_abort(StreamingConverterHandle *handle)
+{
+    UNUSED(handle);
+}
+
+static ngx_inline void
+markdown_streaming_output_free(uint8_t *data, size_t len)
+{
+    UNUSED(data);
+    UNUSED(len);
+}
+
+static ngx_inline int
+markdown_streaming_finalize(StreamingConverterHandle *handle,
+    struct MarkdownResult *result)
+{
+    UNUSED(handle);
+    UNUSED(result);
+    return 0;
+}
+
 #include "../../src/ngx_http_markdown_conversion_impl.h" /* NOSONAR: must follow stub definitions */
 
 static ngx_connection_t g_connection = { 0 };
