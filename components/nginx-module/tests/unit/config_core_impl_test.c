@@ -569,6 +569,7 @@ test_merge_conf(void)
     child.log_verbosity = NGX_CONF_UNSET_UINT;
     child.buffer_chunked = NGX_CONF_UNSET;
     child.stream_types = NGX_CONF_UNSET_PTR;
+    child.content_types = NGX_CONF_UNSET_PTR;
     child.auto_decompress = NGX_CONF_UNSET;
     child.large_body_threshold = NGX_CONF_UNSET_SIZE;
     child.ops.trust_forwarded_headers = NGX_CONF_UNSET;
@@ -618,6 +619,7 @@ test_merge_conf(void)
     child.log_verbosity = NGX_CONF_UNSET_UINT;
     child.buffer_chunked = NGX_CONF_UNSET;
     child.stream_types = NGX_CONF_UNSET_PTR;
+    child.content_types = NGX_CONF_UNSET_PTR;
     child.auto_decompress = NGX_CONF_UNSET;
     child.large_body_threshold = NGX_CONF_UNSET_SIZE;
     child.ops.trust_forwarded_headers = NGX_CONF_UNSET;
@@ -973,6 +975,7 @@ test_merge_conf_double_unset(void)
     child.log_verbosity = NGX_CONF_UNSET_UINT;
     child.buffer_chunked = NGX_CONF_UNSET;
     child.stream_types = NGX_CONF_UNSET_PTR;
+    child.content_types = NGX_CONF_UNSET_PTR;
     child.auto_decompress = NGX_CONF_UNSET;
     child.large_body_threshold = NGX_CONF_UNSET_SIZE;
     child.ops.trust_forwarded_headers = NGX_CONF_UNSET;

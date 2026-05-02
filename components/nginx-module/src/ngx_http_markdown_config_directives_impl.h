@@ -344,6 +344,28 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
     },
 
     /*
+     * markdown_content_types <type> [<type> ...]
+     *
+     * Content types eligible for Markdown conversion (positive allowlist).
+     * Uses prefix + boundary-char matching: "text/html" matches
+     * "text/html" and "text/html; charset=utf-8" but not "text/htmlx".
+     *
+     * Default: text/html (backward compatible)
+     * Context: http, server, location
+     *
+     * Example:
+     *   markdown_content_types text/html application/xhtml+xml;
+     */
+    {
+        ngx_string("markdown_content_types"),
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_1MORE,
+        ngx_http_markdown_content_types,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        0,
+        NULL
+    },
+
+    /*
      * markdown_trust_forwarded_headers on|off
      *
      * Controls whether X-Forwarded-Proto and X-Forwarded-Host headers

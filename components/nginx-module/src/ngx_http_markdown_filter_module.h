@@ -183,6 +183,7 @@ typedef struct {
     ngx_uint_t   log_verbosity;        /* markdown_log_verbosity error|warn|info|debug (default: info) */
     ngx_flag_t   buffer_chunked;       /* markdown_buffer_chunked on|off (default: on) */
     ngx_array_t *stream_types;         /* markdown_stream_types exclusion list (default: NULL) */
+    ngx_array_t *content_types;        /* markdown_content_types allowlist (default: text/html) */
     ngx_flag_t   auto_decompress;      /* markdown_auto_decompress on|off (default: on) */
     size_t       large_body_threshold; /* markdown_large_body_threshold (NGX_HTTP_MARKDOWN_THRESHOLD_OFF = off) */
 
@@ -676,6 +677,9 @@ const ngx_str_t *ngx_http_markdown_reason_streaming_shadow(void);
 const ngx_str_t *ngx_http_markdown_reason_eligible_streaming_auto(void);
 const ngx_str_t *ngx_http_markdown_reason_eligible_fullbuffer_auto(void);
 #endif /* MARKDOWN_STREAMING_ENABLED */
+
+const ngx_str_t *ngx_http_markdown_reason_ct_route_default(void);
+const ngx_str_t *ngx_http_markdown_reason_ct_route_configured(void);
 
 /*
  * Header management functions

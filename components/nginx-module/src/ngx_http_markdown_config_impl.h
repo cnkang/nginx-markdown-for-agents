@@ -50,6 +50,8 @@ static char *ngx_http_markdown_conditional_requests(ngx_conf_t *cf, ngx_command_
 static char *ngx_http_markdown_log_verbosity(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 /* Parse streaming content types excluded from buffering/conversion. */
 static char *ngx_http_markdown_stream_types(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
+/* Parse content types eligible for Markdown conversion (positive allowlist). */
+static char *ngx_http_markdown_content_types(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 /* Parse large body threshold for incremental path routing. */
 static char *ngx_http_markdown_large_body_threshold(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 /* Parse metrics endpoint enablement and URI settings. */

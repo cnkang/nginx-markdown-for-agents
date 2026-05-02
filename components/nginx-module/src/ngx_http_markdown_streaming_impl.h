@@ -451,7 +451,10 @@ ngx_http_markdown_is_excluded_stream_type(
             && ngx_strncasecmp(
                    r->headers_out.content_type.data,
                    types[i].data,
-                   types[i].len) == 0)
+                   types[i].len) == 0
+            && (r->headers_out.content_type.len == types[i].len
+                || r->headers_out.content_type.data[types[i].len] == ';'
+                || r->headers_out.content_type.data[types[i].len] == ' '))
         {
             return 1;
         }
