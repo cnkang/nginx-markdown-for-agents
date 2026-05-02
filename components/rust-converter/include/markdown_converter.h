@@ -112,9 +112,8 @@ typedef struct MarkdownOptions {
   /**
    * Markdown flavor selector.
    *
-   * `0` selects CommonMark-compatible output, `1` selects the GFM
-   * extension set, `2` selects MDX (JSX preserved as-is), and
-   * `3` selects Org-mode. Other values are rejected during option decoding.
+   * `0` selects CommonMark-compatible output and `1` selects the GFM
+   * extension set. Other values are rejected during option decoding.
    */
   uint32_t flavor;
   /**
@@ -222,11 +221,11 @@ typedef struct MarkdownOptions {
    */
   uint8_t llm_provider;
   /**
-   * Explicit chars-per-token ratio for token estimation (0 = use default/provider).
+   * Explicit chars-per-token ratio for token estimation (0.0 = use default/provider).
    *
    * When non-zero, this value overrides both the default 4.0 and the
-   * provider-specific ratio.  Stored as fixed-point: actual ratio =
-   * `chars_per_token_fixed / 10.0` (e.g., 38 = 3.8 chars/token).
+   * provider-specific ratio.  Stored as a fixed-point value: actual
+   * ratio = `chars_per_token_fixed / 10.0` (e.g., 38 = 3.8 chars/token).
    * Populated from the `markdown_chars_per_token` NGINX directive.
    */
   uint8_t chars_per_token_fixed;
@@ -389,6 +388,8 @@ void markdown_converter_free(struct MarkdownConverterHandle *handle);
  *     prune_protection_selectors: std::ptr::null(),
  *     prune_protection_selector_len: 0,
  *     memory_budget: 0,
+ *     llm_provider: 0,
+ *     chars_per_token_fixed: 0,
  * };
  * let handle = unsafe { markdown_incremental_new(&opts) };
  * assert!(!handle.is_null());

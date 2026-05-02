@@ -6,10 +6,11 @@
 //! tokenization (tiktoken, sentencepiece, etc.).
 
 /// Known LLM providers with provider-specific token estimation constants.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[repr(u8)]
 pub enum LlmProvider {
     /// Default heuristic (4.0 chars/token, English-average).
+    #[default]
     Default = 0,
     /// OpenAI GPT family (GPT-4, GPT-4o, GPT-5, etc.; cl100k / o200k_base tokenizer).
     OpenAiGpt = 1,
@@ -68,12 +69,6 @@ impl LlmProvider {
     }
 }
 
-impl Default for LlmProvider {
-    fn default() -> Self {
-        LlmProvider::Default
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -91,7 +86,10 @@ mod tests {
     fn test_provider_context_window() {
         assert_eq!(LlmProvider::Default.context_window_tokens(), 0);
         assert_eq!(LlmProvider::OpenAiGpt.context_window_tokens(), 128_000);
-        assert_eq!(LlmProvider::AnthropicClaude.context_window_tokens(), 200_000);
+        assert_eq!(
+            LlmProvider::AnthropicClaude.context_window_tokens(),
+            200_000
+        );
         assert_eq!(LlmProvider::GoogleGemini.context_window_tokens(), 1_000_000);
     }
 
