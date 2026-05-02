@@ -346,6 +346,7 @@ ngx_http_markdown_flavor_name(ngx_uint_t value)
     static ngx_str_t commonmark = ngx_string("commonmark");
     static ngx_str_t gfm = ngx_string("gfm");
     static ngx_str_t mdx = ngx_string("mdx");
+    static ngx_str_t org_mode = ngx_string("org-mode");
     static ngx_str_t unknown = ngx_string("unknown");
 
     switch (value) {
@@ -355,6 +356,8 @@ ngx_http_markdown_flavor_name(ngx_uint_t value)
             return &gfm;
         case NGX_HTTP_MARKDOWN_FLAVOR_MDX:
             return &mdx;
+        case NGX_HTTP_MARKDOWN_FLAVOR_ORG_MODE:
+            return &org_mode;
         default:
             return &unknown;
     }

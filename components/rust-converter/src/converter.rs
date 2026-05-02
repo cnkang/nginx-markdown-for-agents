@@ -140,6 +140,8 @@ pub enum MarkdownFlavor {
     GitHubFlavoredMarkdown,
     /// MDX (Markdown + JSX): JSX components preserved as-is
     Mdx,
+    /// Org-mode: Emacs outline format
+    OrgMode,
 }
 
 /// Table column alignment (GFM)

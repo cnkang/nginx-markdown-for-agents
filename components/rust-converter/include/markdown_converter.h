@@ -113,8 +113,8 @@ typedef struct MarkdownOptions {
    * Markdown flavor selector.
    *
    * `0` selects CommonMark-compatible output, `1` selects the GFM
-   * extension set, and `2` selects MDX (JSX preserved as-is).
-   * Other values are rejected during option decoding.
+   * extension set, `2` selects MDX (JSX preserved as-is), and
+   * `3` selects Org-mode. Other values are rejected during option decoding.
    */
   uint32_t flavor;
   /**
