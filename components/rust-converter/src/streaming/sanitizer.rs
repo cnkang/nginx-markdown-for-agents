@@ -454,6 +454,12 @@ impl StreamingSanitizer {
         self.nesting_depth
     }
 
+    /// Returns the current prune depth (0 if not pruning).
+    #[cfg(test)]
+    pub(crate) fn prune_depth(&self) -> usize {
+        self.prune_depth
+    }
+
     fn pop_open_tag(&mut self, tag: &str) {
         if let Some(idx) = self.nesting_stack.iter().rposition(|open| open == tag) {
             self.nesting_stack.remove(idx);
@@ -1260,5 +1266,148 @@ mod tests {
             let url = format!("{}{}", scheme, suffix);
             prop_assert!(is_dangerous_url(&url), "URL '{}' should be dangerous", url);
         }
+    }
+
+    #[test]
+    fn test_pruned_element_does_not_enter_nesting_stack() {
+        let mut san = StreamingSanitizer::with_max_depth(10);
+        san.prune_config.enabled = true;
+        san.prune_config.selectors = vec!["nav".to_string()];
+
+        assert_eq!(
+            san.process_event(start_tag("nav", vec![])),
+            SanitizeDecision::Skip
+        );
+        assert_eq!(
+            san.nesting_depth(),
+            0,
+            "pruned nav should not increase nesting_depth"
+        );
+        assert_eq!(san.prune_depth(), 1);
+
+        assert_eq!(
+            san.process_event(start_tag("div", vec![])),
+            SanitizeDecision::Skip
+        );
+        assert_eq!(san.nesting_depth(), 0);
+
+        assert_eq!(san.process_event(end_tag("div")), SanitizeDecision::Skip);
+        assert_eq!(san.process_event(end_tag("nav")), SanitizeDecision::Skip);
+        assert_eq!(san.prune_depth(), 0);
+        assert_eq!(san.nesting_depth(), 0);
+    }
+
+    #[test]
+    fn test_mismatched_end_tag_inside_prune_region() {
+        let mut san = StreamingSanitizer::with_max_depth(10);
+        san.prune_config.enabled = true;
+        san.prune_config.selectors = vec!["footer".to_string()];
+
+        assert_eq!(
+            san.process_event(start_tag("footer", vec![])),
+            SanitizeDecision::Skip
+        );
+
+        assert_eq!(san.process_event(end_tag("div")), SanitizeDecision::Skip);
+        assert_eq!(
+            san.prune_depth(),
+            1,
+            "mismatched end tag should not exit prune"
+        );
+
+        assert_eq!(san.process_event(end_tag("footer")), SanitizeDecision::Skip);
+        assert_eq!(san.prune_depth(), 0);
+    }
+
+    #[test]
+    fn test_text_and_comments_suppressed_during_prune() {
+        let mut san = StreamingSanitizer::with_max_depth(10);
+        san.prune_config.enabled = true;
+        san.prune_config.selectors = vec!["aside".to_string()];
+
+        assert_eq!(
+            san.process_event(start_tag("aside", vec![])),
+            SanitizeDecision::Skip
+        );
+
+        let text_event = StreamEvent::Text("important content".into());
+        assert_eq!(san.process_event(text_event), SanitizeDecision::Skip);
+
+        let comment_event = StreamEvent::Comment("<!-- hidden -->".into());
+        assert_eq!(san.process_event(comment_event), SanitizeDecision::Skip);
+
+        assert_eq!(san.process_event(end_tag("aside")), SanitizeDecision::Skip);
+        assert_eq!(san.prune_depth(), 0);
+    }
+
+    #[test]
+    fn test_prune_depth_increments_for_nested_elements() {
+        let mut san = StreamingSanitizer::with_max_depth(10);
+        san.prune_config.enabled = true;
+        san.prune_config.selectors = vec!["nav".to_string()];
+
+        assert_eq!(
+            san.process_event(start_tag("nav", vec![])),
+            SanitizeDecision::Skip
+        );
+        assert_eq!(san.prune_depth(), 1);
+
+        assert_eq!(
+            san.process_event(start_tag("div", vec![])),
+            SanitizeDecision::Skip
+        );
+        assert_eq!(san.prune_depth(), 2);
+
+        assert_eq!(
+            san.process_event(start_tag("span", vec![])),
+            SanitizeDecision::Skip
+        );
+        assert_eq!(san.prune_depth(), 3);
+
+        assert_eq!(san.process_event(end_tag("span")), SanitizeDecision::Skip);
+        assert_eq!(san.prune_depth(), 2);
+
+        assert_eq!(san.process_event(end_tag("div")), SanitizeDecision::Skip);
+        assert_eq!(san.prune_depth(), 1);
+
+        assert_eq!(san.process_event(end_tag("nav")), SanitizeDecision::Skip);
+        assert_eq!(san.prune_depth(), 0);
+    }
+
+    #[test]
+    fn test_nesting_depth_intact_after_prune_exit() {
+        let mut san = StreamingSanitizer::with_max_depth(10);
+        san.prune_config.enabled = true;
+        san.prune_config.selectors = vec!["nav".to_string()];
+
+        assert!(matches!(
+            san.process_event(start_tag("div", vec![])),
+            SanitizeDecision::Pass(_)
+        ));
+        assert_eq!(san.nesting_depth(), 1);
+
+        assert_eq!(
+            san.process_event(start_tag("nav", vec![])),
+            SanitizeDecision::Skip
+        );
+        assert_eq!(
+            san.process_event(start_tag("p", vec![])),
+            SanitizeDecision::Skip
+        );
+        assert_eq!(san.process_event(end_tag("p")), SanitizeDecision::Skip);
+        assert_eq!(san.process_event(end_tag("nav")), SanitizeDecision::Skip);
+        assert_eq!(san.prune_depth(), 0);
+
+        assert_eq!(
+            san.nesting_depth(),
+            1,
+            "nesting_depth should still be 1 after prune exit"
+        );
+
+        assert!(matches!(
+            san.process_event(end_tag("div")),
+            SanitizeDecision::Pass(_)
+        ));
+        assert_eq!(san.nesting_depth(), 0);
     }
 }
