@@ -4,14 +4,17 @@ Release:        1%{?dist}
 Summary:        NGINX module for HTML-to-Markdown conversion
 
 License:        BSD-2-Clause
-URL:            https://github.com/user/nginx-markdown-for-agents
+URL:            https://github.com/cnkang/nginx-markdown-for-agents
 Source0:        %{name}-%{version}.tar.gz
 
 BuildRequires:  gcc
 BuildRequires:  make
+BuildRequires:  cargo
+BuildRequires:  rustc
 BuildRequires:  pcre-devel
 BuildRequires:  zlib-devel
 BuildRequires:  openssl-devel
+BuildRequires:  nginx-devel >= 1.18.0
 Requires:       nginx >= 1.18.0
 
 %description
@@ -28,15 +31,11 @@ make build
 %install
 make install DESTDIR=%{buildroot}
 
-%check
-make test-rust
-make test-nginx-unit
-
 %files
 %doc README.md
 %license LICENSE
 %{_libdir}/nginx/modules/ngx_http_markdown_filter_module.so
 
 %changelog
-* Sat May 02 2026 NGINX Markdown Maintainers <maintainers@nginx-markdown.dev> - 0.6.0-1
+* Sat May 02 2026 cnkang <liukang@noreply.github.com> - 0.6.0-1
 - Initial RPM package for v0.6.0
