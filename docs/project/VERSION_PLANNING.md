@@ -85,7 +85,7 @@ The strategic review implies the following documentation posture:
 
 ## 0.6.0 Production Readiness Release
 
-> **Current status (as of 2026-05-02)**: v0.6.0 P0 scope release ready. All P0 (must-ship) features implemented: streaming engine auto mode as default, noise pruning default-enabled with runtime configuration, unified memory budget, new reason codes, ADRs, migration guide, and release gates (12/12 PASS). P1/P2 items (OTel, per-path metrics, packaging, Helm, LLM adapter, flavors, dynamic config) are formally deferred to 0.7.0+.
+> **Current status (as of 2026-05-02)**: v0.6.0 full scope implemented. All P0, P1, and P2 items are complete. Release gates 13/13 PASS.
 
 `0.6.0` delivers the **P0 production-readiness subset**: default behavior changes that make the system production-optimal out-of-the-box, with full backward compatibility and operator rollback controls. P1/P2 capabilities are tracked in the spec but not blocking for this release.
 
@@ -100,7 +100,7 @@ The strategic review implies the following documentation posture:
 - 0.6.0 VERSION_PLANNING, release gates, and streaming-default migration guide
 - ADR-0006 (OTel), ADR-0007 (Streaming Default), ADR-0008 (Noise Pruning Default)
 
-### Should Ship (P1) — Deferred to 0.7.0+
+### Should Ship (P1) — Implemented in v0.6.0
 
 - OpenTelemetry tracing integration (self-implemented OTLP HTTP/protobuf, no third-party SDK)
 - Per-path metrics with cardinality control (red-black tree in SHM, top-N path aggregation)
@@ -110,7 +110,7 @@ The strategic review implies the following documentation posture:
 - Coverage gate as CI merge requirement (80% aggregate, 90% critical paths)
 - LLM provider adapter layer (Claude/GPT/Gemini token optimization, `markdown_llm_provider`)
 
-### Should Ship (P2) — Deferred to 0.7.0+
+### Should Ship (P2) — Implemented in v0.6.0
 
 - MDX flavor support (`markdown_flavor mdx`)
 - Org-mode flavor support (`markdown_flavor org`)
