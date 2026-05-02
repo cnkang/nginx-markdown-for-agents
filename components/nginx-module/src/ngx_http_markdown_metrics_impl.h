@@ -108,7 +108,9 @@ typedef struct {
     /* Per-path metrics (v0.6.0 P1-2) */
     struct {
         ngx_atomic_uint_t path_entries;
-        ngx_atomic_uint_t path_conversions_time_sum_ms;
+        ngx_atomic_uint_t path_conversions;
+        ngx_atomic_uint_t path_conversion_time_sum_ms;
+        ngx_atomic_uint_t overflow_count;
     } per_path;
 } ngx_http_markdown_metrics_snapshot_t;
 
@@ -147,7 +149,7 @@ ngx_int_t ngx_strncasecmp(u_char *s1, u_char *s2, size_t n);
  * format.  Increase this constant if new metrics push the
  * Prometheus output beyond the limit.
  */
-#define NGX_HTTP_MARKDOWN_METRICS_BUF_SIZE  8192
+#define NGX_HTTP_MARKDOWN_METRICS_BUF_SIZE  16384
 
 /*
  * Forward declaration: the Prometheus renderer is defined in
@@ -269,8 +271,12 @@ ngx_http_markdown_collect_metrics_snapshot(ngx_http_markdown_metrics_snapshot_t 
 
     snapshot->per_path.path_entries =
         metrics->per_path.path_entries;
+    snapshot->per_path.path_conversions =
+        metrics->per_path.path_conversions;
     snapshot->per_path.path_conversion_time_sum_ms =
         metrics->per_path.path_conversion_time_sum_ms;
+    snapshot->per_path.overflow_count =
+        metrics->per_path.overflow_count;
 }
 
 static ngx_flag_t ngx_http_markdown_metrics_value_contains(
@@ -648,7 +654,9 @@ ngx_http_markdown_metrics_write_json(
         "  \"estimated_token_savings\": %uA,\n"
         "  \"per_path\": {\n"
         "    \"path_entries\": %uA,\n"
-        "    \"path_conversion_time_sum_ms\": %uA\n"
+        "    \"path_conversions\": %uA,\n"
+        "    \"path_conversion_time_sum_ms\": %uA,\n"
+        "    \"overflow_count\": %uA\n"
         "  }\n"
         "}",
 
@@ -721,7 +729,9 @@ ngx_http_markdown_metrics_write_json(
         snapshot->failopen_count,
         snapshot->estimated_token_savings,
         snapshot->per_path.path_entries,
-        snapshot->per_path.path_conversion_time_sum_ms);
+        snapshot->per_path.path_conversions,
+        snapshot->per_path.path_conversion_time_sum_ms,
+        snapshot->per_path.overflow_count);
 }
 
 
@@ -840,7 +850,9 @@ ngx_http_markdown_metrics_write_text(
         "- Fail-Open Count: %uA\n"
         "- Estimated Token Savings: %uA\n"
         "- Per-Path Entries: %uA\n"
-        "- Per-Path Conversion Time (ms): %uA\n",
+        "- Per-Path Conversions: %uA\n"
+        "- Per-Path Conversion Time (ms): %uA\n"
+        "- Per-Path Overflow Count: %uA\n",
 
         /* Conversion counters */
         snapshot->conversions_attempted,
@@ -911,8 +923,11 @@ ngx_http_markdown_metrics_write_text(
         snapshot->failopen_count,
         snapshot->estimated_token_savings,
         snapshot->per_path.path_entries,
-        snapshot->per_path.path_conversion_time_sum_ms);
+        snapshot->per_path.path_conversions,
+        snapshot->per_path.path_conversion_time_sum_ms,
+        snapshot->per_path.overflow_count);
 }
+
 
 /*
  * Render the metrics response body for the negotiated format and set the
