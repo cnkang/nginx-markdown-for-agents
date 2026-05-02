@@ -217,15 +217,6 @@ impl StreamingSanitizer {
                     return SanitizeDecision::Skip;
                 }
 
-                // Check nesting depth for elements that pass through to the emitter.
-                if !effectively_self_closing {
-                    self.nesting_stack.push(tag.to_string());
-                    self.nesting_depth = self.nesting_stack.len();
-                    if self.nesting_depth > self.max_nesting_depth {
-                        return SanitizeDecision::DepthExceeded;
-                    }
-                }
-
                 // Dangerous elements: skip entire subtree
                 if DANGEROUS_VOID_ELEMENTS.contains(&tag) {
                     return SanitizeDecision::Skip;
@@ -260,6 +251,15 @@ impl StreamingSanitizer {
                         self.prune_element = Some(tag.to_string());
                     }
                     return SanitizeDecision::Skip;
+                }
+
+                // Element passes all skip checks — track nesting depth.
+                if !effectively_self_closing {
+                    self.nesting_stack.push(tag.to_string());
+                    self.nesting_depth = self.nesting_stack.len();
+                    if self.nesting_depth > self.max_nesting_depth {
+                        return SanitizeDecision::DepthExceeded;
+                    }
                 }
 
                 // Embedded content elements: strip tag, extract URL
@@ -1005,26 +1005,27 @@ mod tests {
     fn test_deep_nesting_inside_dangerous_element_is_safe() {
         let mut san = StreamingSanitizer::with_max_depth(5);
 
-        // Open a script element (nesting_depth goes to 1)
+        // Open a script element (skipped, does not enter nesting_stack)
         assert_eq!(
             san.process_event(start_tag("script", vec![])),
             SanitizeDecision::Skip
         );
         assert!(san.is_skipping());
-        assert_eq!(san.nesting_depth(), 1);
+        assert_eq!(san.nesting_depth(), 0);
 
         // Nest 100 elements inside the script — all skipped, nesting_depth
-        // stays at 1 because these elements never reach the emitter.
+        // stays at 0 because these elements never reach the emitter.
         for _ in 0..100 {
             assert_eq!(
                 san.process_event(start_tag("div", vec![])),
                 SanitizeDecision::Skip
             );
         }
-        // nesting_depth should still be 1 (only the script itself)
+        // nesting_depth should still be 0 (dangerous elements do not
+        // contribute to nesting_stack)
         assert_eq!(
             san.nesting_depth(),
-            1,
+            0,
             "nesting_depth should not increase for elements inside a dangerous element"
         );
 
