@@ -148,6 +148,248 @@ ngx_http_markdown_filter(ngx_conf_t *cf,
         mcf->enabled = 1;
         mcf->enabled_source = NGX_HTTP_MARKDOWN_ENABLED_STATIC;
         mcf->enabled_complex = NULL;
+        return NGX_CONF_OK;
+    }
+
+    if (value[1].len == 3
+        && ngx_strcasecmp(value[1].data, off_str) == 0)
+    {
+        mcf->enabled = 0;
+        mcf->enabled_source = NGX_HTTP_MARKDOWN_ENABLED_STATIC;
+        mcf->enabled_complex = NULL;
+        return NGX_CONF_OK;
+    }
+
+    var_marker = ngx_strlchr(value[1].data, value[1].data + value[1].len, '$');
+    if (var_marker == NULL) {
+        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+                           "invalid value \"%V\" in \"markdown_filter\" directive, "
+                           "it must be \"on\", \"off\", or contain a variable",
+                           &value[1]);
+        return NGX_CONF_ERROR;
+    }
+
+    complex_value = ngx_palloc(cf->pool, sizeof(ngx_http_complex_value_t));
+    if (complex_value == NULL) {
+        return NGX_CONF_ERROR;
+    }
+
+    ngx_memzero(&ccv, sizeof(ngx_http_compile_complex_value_t));
+    ccv.cf = cf;
+    ccv.value = &value[1];
+    ccv.complex_value = complex_value;
+
+    if (ngx_http_compile_complex_value(&ccv) != NGX_OK) {
+        return NGX_CONF_ERROR;
+    }
+
+    mcf->enabled = 0;
+    mcf->enabled_source = NGX_HTTP_MARKDOWN_ENABLED_COMPLEX;
+    mcf->enabled_complex = complex_value;
+
+    return NGX_CONF_OK;
+}
+
+/* Configuration directive handler: markdown_on_error (pass | reject). */
+static char *
+ngx_http_markdown_on_error(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
+{
+    static u_char             pass_str[]   = "pass";
+    static u_char             reject_str[] = "reject";
+    ngx_http_markdown_conf_t *mcf = conf;
+    ngx_str_t                *value;
+
+    value = cf->args->elts;
+
+    if (mcf->on_error != NGX_CONF_UNSET_UINT) {
+        return "is duplicate";
+    }
+
+    if (ngx_http_markdown_arg_equals(&value[1], pass_str,
+                                     sizeof(pass_str) - 1))
+    {
+        mcf->on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
+    } else if (ngx_http_markdown_arg_equals(
+                   &value[1], reject_str,
+                   sizeof(reject_str) - 1))
+    {
+        mcf->on_error = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
+    } else {
+        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+                           "invalid value \"%V\" in \"%V\" directive, "
+                           "it must be \"pass\" or \"reject\"",
+                           &value[1], &cmd->name);
+        return NGX_CONF_ERROR;
+    }
+
+    return NGX_CONF_OK;
+}
+
+/* Configuration directive handler: markdown_auth_policy (allow | deny). */
+static char *
+ngx_http_markdown_auth_policy(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
+{
+    static u_char             allow_str[] = "allow";
+    static u_char             deny_str[]  = "deny";
+    ngx_http_markdown_conf_t *mcf = conf;
+    ngx_str_t                *value;
+
+    value = cf->args->elts;
+
+    if (mcf->auth_policy != NGX_CONF_UNSET_UINT) {
+        return "is duplicate";
+    }
+
+    if (ngx_http_markdown_arg_equals(&value[1], allow_str,
+                                     sizeof(allow_str) - 1))
+    {
+        mcf->auth_policy = NGX_HTTP_MARKDOWN_AUTH_POLICY_ALLOW;
+    } else if (ngx_http_markdown_arg_equals(
+                   &value[1], deny_str,
+                   sizeof(deny_str) - 1))
+    {
+        mcf->auth_policy = NGX_HTTP_MARKDOWN_AUTH_POLICY_DENY;
+    } else {
+        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+                           "invalid value \"%V\" in \"%V\" directive, "
+                           "it must be \"allow\" or \"deny\"",
+                           &value[1], &cmd->name);
+        return NGX_CONF_ERROR;
+    }
+
+    return NGX_CONF_OK;
+}
+
+/* Configuration directive handler: markdown_auth_cookies <pattern ...>. */
+static char *
+ngx_http_markdown_auth_cookies(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
+{
+    ngx_http_markdown_conf_t *mcf = conf;
+    const ngx_str_t          *value;
+    ngx_str_t                *pattern;
+
+    value = cf->args->elts;
+
+    if (mcf->auth_cookies != NGX_CONF_UNSET_PTR) {
+        return "is duplicate";
+    }
+
+    mcf->auth_cookies = ngx_array_create(cf->pool, cf->args->nelts - 1, sizeof(ngx_str_t));
+    if (mcf->auth_cookies == NULL) {
+        return NGX_CONF_ERROR;
+    }
+
+    for (ngx_uint_t i = 1; i < cf->args->nelts; i++) {
+        if (value[i].len == 0) {
+            ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+                               "empty cookie pattern in \"%V\" directive",
+                               &cmd->name);
+            return NGX_CONF_ERROR;
+        }
+
+        pattern = ngx_array_push(mcf->auth_cookies);
+        if (pattern == NULL) {
+            return NGX_CONF_ERROR;
+        }
+
+        *pattern = value[i];
+
+        ngx_conf_log_error(NGX_LOG_DEBUG, cf, 0,
+                           "markdown_auth_cookies: added pattern \"%V\"",
+                           pattern);
+    }
+
+    return NGX_CONF_OK;
+}
+
+/* Configuration directive handler: markdown_conditional_requests. */
+static char *
+ngx_http_markdown_conditional_requests(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
+{
+    static u_char             full_str[] = "full_support";
+    static u_char             ims_str[]  =
+        "if_modified_since_only";
+    static u_char             dis_str[]  = "disabled";
+    ngx_http_markdown_conf_t *mcf = conf;
+    ngx_str_t                *value;
+
+    value = cf->args->elts;
+
+    if (mcf->conditional_requests != NGX_CONF_UNSET_UINT) {
+        return "is duplicate";
+    }
+
+    if (ngx_http_markdown_arg_equals(&value[1], full_str,
+                                     sizeof(full_str) - 1))
+    {
+        mcf->conditional_requests =
+            NGX_HTTP_MARKDOWN_CONDITIONAL_FULL_SUPPORT;
+    } else if (ngx_http_markdown_arg_equals(
+                   &value[1], ims_str,
+                   sizeof(ims_str) - 1))
+    {
+        mcf->conditional_requests =
+            NGX_HTTP_MARKDOWN_CONDITIONAL_IF_MODIFIED_SINCE;
+    } else if (ngx_http_markdown_arg_equals(
+                   &value[1], dis_str,
+                   sizeof(dis_str) - 1))
+    {
+        mcf->conditional_requests = NGX_HTTP_MARKDOWN_CONDITIONAL_DISABLED;
+    } else {
+        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+                           "invalid value \"%V\" in \"%V\" directive, "
+                           "it must be \"full_support\", \"if_modified_since_only\", or \"disabled\"",
+                           &value[1], &cmd->name);
+        return NGX_CONF_ERROR;
+    }
+
+    return NGX_CONF_OK;
+}
+
+/* Configuration directive handler: markdown_log_verbosity. */
+static char *
+ngx_http_markdown_log_verbosity(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
+{
+    static u_char             err_str[]   = "error";
+    static u_char             warn_str[]  = "warn";
+    static u_char             info_str[]  = "info";
+    static u_char             debug_str[] = "debug";
+    ngx_http_markdown_conf_t *mcf = conf;
+    ngx_str_t                *value;
+
+    value = cf->args->elts;
+
+    if (mcf->log_verbosity != NGX_CONF_UNSET_UINT) {
+        return "is duplicate";
+    }
+
+    if (ngx_http_markdown_arg_equals(&value[1], err_str,
+                                     sizeof(err_str) - 1))
+    {
+        mcf->log_verbosity = NGX_HTTP_MARKDOWN_LOG_ERROR;
+    } else if (ngx_http_markdown_arg_equals(
+                   &value[1], warn_str,
+                   sizeof(warn_str) - 1))
+    {
+        mcf->log_verbosity = NGX_HTTP_MARKDOWN_LOG_WARN;
+    } else if (ngx_http_markdown_arg_equals(
+                   &value[1], info_str,
+                   sizeof(info_str) - 1))
+    {
+        mcf->log_verbosity = NGX_HTTP_MARKDOWN_LOG_INFO;
+    } else if (ngx_http_markdown_arg_equals(
+                   &value[1], debug_str,
+                   sizeof(debug_str) - 1))
+    {
+        mcf->log_verbosity = NGX_HTTP_MARKDOWN_LOG_DEBUG;
+    } else {
+        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+                           "invalid value \"%V\" in \"%V\" directive, "
+                           "it must be \"error\", \"warn\", \"info\", or \"debug\"",
+                           &value[1], &cmd->name);
+        return NGX_CONF_ERROR;
+    }
+
     return NGX_CONF_OK;
 }
 
