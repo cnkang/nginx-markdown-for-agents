@@ -149,6 +149,7 @@ ngx_http_markdown_create_conf(ngx_conf_t *cf)
     conf->large_body_threshold = NGX_CONF_UNSET_SIZE;
     conf->ops.trust_forwarded_headers = NGX_CONF_UNSET;
     conf->ops.metrics_format = NGX_CONF_UNSET_UINT;
+    conf->ops.metrics_per_path = NGX_CONF_UNSET;
 
 #ifdef MARKDOWN_STREAMING_ENABLED
     conf->streaming_engine = NULL;
@@ -241,6 +242,7 @@ ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
     ngx_conf_merge_value(conf->ops.trust_forwarded_headers, prev->ops.trust_forwarded_headers, 0);
     ngx_conf_merge_uint_value(conf->ops.metrics_format, prev->ops.metrics_format,
                               NGX_HTTP_MARKDOWN_METRICS_FORMAT_AUTO);
+    ngx_conf_merge_value(conf->ops.metrics_per_path, prev->ops.metrics_per_path, 0);
     ngx_conf_merge_size_value(conf->large_body_threshold,
                               prev->large_body_threshold,
                               NGX_HTTP_MARKDOWN_THRESHOLD_OFF);
@@ -666,7 +668,7 @@ ngx_http_markdown_log_merged_conf(ngx_conf_t *cf,
                         "content_types=%ui "
                        "large_body_threshold=%uz "
                        "trust_forwarded_headers=%ui "
-                       "metrics_format=%V"
+                        "metrics_format=%V metrics_per_path=%i"
 #ifdef MARKDOWN_STREAMING_ENABLED
                         " streaming_engine=%s"
                         " streaming_budget=%uz"
@@ -694,8 +696,9 @@ ngx_http_markdown_log_merged_conf(ngx_conf_t *cf,
                         content_type_count,
                        conf->large_body_threshold,
                        (ngx_uint_t) conf->ops.trust_forwarded_headers,
-                       ngx_http_markdown_metrics_format_name(
-                           conf->ops.metrics_format)
+                        ngx_http_markdown_metrics_format_name(
+                            conf->ops.metrics_format)
+                        , (ngx_int_t) conf->ops.metrics_per_path
 #ifdef MARKDOWN_STREAMING_ENABLED
                         , conf->streaming_engine != NULL
                             ? "configured" : "auto (default)"

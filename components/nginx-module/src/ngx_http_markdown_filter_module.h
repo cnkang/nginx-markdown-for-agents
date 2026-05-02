@@ -199,6 +199,7 @@ typedef struct {
     struct {
         ngx_flag_t   trust_forwarded_headers; /* markdown_trust_forwarded_headers on|off (default: off) */
         ngx_uint_t   metrics_format;       /* markdown_metrics_format auto|prometheus (default: auto) */
+        ngx_flag_t   metrics_per_path;    /* markdown_metrics_per_path on|off (default: off) */
     } ops;
 
 #ifdef MARKDOWN_STREAMING_ENABLED
@@ -559,6 +560,23 @@ typedef struct {
      * is enabled.  Value is an approximation.
      */
     ngx_atomic_t  estimated_token_savings;
+
+    /*
+     * Per-path metrics (v0.6.0 P1-2).
+     *
+     * When markdown_metrics_per_path is enabled, the top-N most-hit
+     * URI paths are tracked individually.  The RB-tree and node pool
+     * are allocated from the slab allocator on first use.
+     *
+     * path_entries tracks the number of distinct paths currently
+     * stored.  path_tree_root is the RB-tree sentinel node.
+     * path_node_pool points to a slab-allocated pool of tree nodes.
+     */
+    struct {
+        ngx_atomic_t  path_entries;
+        ngx_atomic_t  path_conversions;
+        ngx_atomic_t  path_conversion_time_sum_ms;
+    } per_path;
 } ngx_http_markdown_metrics_t;
 
 /* Module declaration */

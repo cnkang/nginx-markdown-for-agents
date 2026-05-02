@@ -104,6 +104,12 @@ typedef struct {
 
     /* Estimated cumulative token savings */
     ngx_atomic_uint_t estimated_token_savings;
+
+    /* Per-path metrics (v0.6.0 P1-2) */
+    struct {
+        ngx_atomic_uint_t path_entries;
+        ngx_atomic_uint_t path_conversions_time_sum_ms;
+    } per_path;
 } ngx_http_markdown_metrics_snapshot_t;
 
 typedef struct {
@@ -260,6 +266,11 @@ ngx_http_markdown_collect_metrics_snapshot(ngx_http_markdown_metrics_snapshot_t 
         metrics->streaming.last_peak_memory_bytes;
 #endif
     snapshot->estimated_token_savings = metrics->estimated_token_savings;
+
+    snapshot->per_path.path_entries =
+        metrics->per_path.path_entries;
+    snapshot->per_path.path_conversion_time_sum_ms =
+        metrics->per_path.path_conversion_time_sum_ms;
 }
 
 static ngx_flag_t ngx_http_markdown_metrics_value_contains(
@@ -634,7 +645,11 @@ ngx_http_markdown_metrics_write_json(
 
         /* Operational totals */
         "  \"failopen_count\": %uA,\n"
-        "  \"estimated_token_savings\": %uA\n"
+        "  \"estimated_token_savings\": %uA,\n"
+        "  \"per_path\": {\n"
+        "    \"path_entries\": %uA,\n"
+        "    \"path_conversion_time_sum_ms\": %uA\n"
+        "  }\n"
         "}",
 
         /* Conversion counters */
@@ -704,8 +719,11 @@ ngx_http_markdown_metrics_write_json(
         snapshot->skips.range,
         snapshot->skips.accept,
         snapshot->failopen_count,
-        snapshot->estimated_token_savings);
+        snapshot->estimated_token_savings,
+        snapshot->per_path.path_entries,
+        snapshot->per_path.path_conversion_time_sum_ms);
 }
+
 
 /**
  * Format a metrics snapshot as a human-readable plain-text report into the provided buffer.
@@ -820,7 +838,9 @@ ngx_http_markdown_metrics_write_text(
         "- Skips (Range): %uA\n"
         "- Skips (Accept): %uA\n"
         "- Fail-Open Count: %uA\n"
-        "- Estimated Token Savings: %uA\n",
+        "- Estimated Token Savings: %uA\n"
+        "- Per-Path Entries: %uA\n"
+        "- Per-Path Conversion Time (ms): %uA\n",
 
         /* Conversion counters */
         snapshot->conversions_attempted,
@@ -889,7 +909,9 @@ ngx_http_markdown_metrics_write_text(
         snapshot->skips.range,
         snapshot->skips.accept,
         snapshot->failopen_count,
-        snapshot->estimated_token_savings);
+        snapshot->estimated_token_savings,
+        snapshot->per_path.path_entries,
+        snapshot->per_path.path_conversion_time_sum_ms);
 }
 
 /*
