@@ -27,6 +27,14 @@ struct MarkdownOptions {
     const uint8_t *base_url;
     uintptr_t      base_url_len;
     uint64_t       streaming_budget;
+    uint32_t       prune_noise;
+    const uint8_t *prune_selectors;
+    uintptr_t      prune_selector_len;
+    const uint8_t *prune_protection_selectors;
+    uintptr_t      prune_protection_selector_len;
+    uint64_t       memory_budget;
+    uint8_t        llm_provider;
+    uint8_t        chars_per_token_fixed;
 };
 
 struct MarkdownResult {
@@ -376,6 +384,76 @@ struct MarkdownConverterHandle *ngx_http_markdown_converter = NULL;
 ngx_http_markdown_metrics_t *ngx_http_markdown_metrics = NULL;
 ngx_int_t (*ngx_http_next_body_filter)(ngx_http_request_t *r, ngx_chain_t *in) = NULL;
 
+#ifndef NGX_CONF_UNSET_SIZE
+#define NGX_CONF_UNSET_SIZE ((size_t) -1)
+#endif
+
+typedef struct {
+    int dummy;
+} ngx_shmtx_t;
+
+struct ngx_slab_pool_s {
+    ngx_shmtx_t   mutex;
+};
+typedef struct ngx_slab_pool_s ngx_slab_pool_t;
+
+struct ngx_shm_zone_s {
+    void          *data;
+    struct {
+        void      *addr;
+    } shm;
+};
+
+ngx_shm_zone_t *ngx_http_markdown_metrics_shm_zone = NULL;
+
+#ifndef ngx_atomic_fetch_add
+#define ngx_atomic_fetch_add(p, v)  (*(p) += (v), *(p))
+#endif
+
+static ngx_inline void
+ngx_shmtx_lock(ngx_shmtx_t *mtx)
+{
+    UNUSED(mtx);
+}
+
+static ngx_inline void
+ngx_shmtx_unlock(ngx_shmtx_t *mtx)
+{
+    UNUSED(mtx);
+}
+
+static ngx_inline ngx_uint_t
+ngx_hash_key(u_char *data, size_t len)
+{
+    ngx_uint_t  hash;
+    hash = 0;
+    for (size_t i = 0; i < len; i++) {
+        hash = hash * 31 + data[i];
+    }
+    return hash;
+}
+
+static ngx_inline void *
+ngx_slab_alloc_locked(ngx_slab_pool_t *pool, size_t size)
+{
+    UNUSED(pool);
+    return calloc(1, size);
+}
+
+static ngx_inline void
+ngx_slab_free_locked(ngx_slab_pool_t *pool, void *p)
+{
+    UNUSED(pool);
+    free(p);
+}
+
+static ngx_inline void
+ngx_rbtree_insert(ngx_rbtree_t *tree, ngx_rbtree_node_t *node)
+{
+    UNUSED(tree);
+    UNUSED(node);
+}
+
 /*
  * Forward-headers stub returning the test-controlled g_forward_headers_rc,
  * allowing tests to simulate header forwarding failures.
@@ -507,6 +585,52 @@ ngx_http_markdown_send_304(
     UNUSED(r);
     UNUSED(result);
     return NGX_OK;
+}
+
+static ngx_inline ngx_http_markdown_otel_span_t *
+ngx_http_markdown_otel_span_start(ngx_http_request_t *r,
+    const ngx_http_markdown_conf_t *conf)
+{
+    UNUSED(r);
+    UNUSED(conf);
+    return NULL;
+}
+
+static ngx_inline void
+ngx_http_markdown_otel_set_str_attr(ngx_http_markdown_otel_span_t *span,
+    const u_char *key, size_t key_len,
+    const u_char *val, size_t val_len)
+{
+    UNUSED(span);
+    UNUSED(key);
+    UNUSED(key_len);
+    UNUSED(val);
+    UNUSED(val_len);
+}
+
+static ngx_inline void
+ngx_http_markdown_otel_set_int_attr(ngx_http_markdown_otel_span_t *span,
+    const u_char *key, size_t key_len,
+    int64_t val)
+{
+    UNUSED(span);
+    UNUSED(key);
+    UNUSED(key_len);
+    UNUSED(val);
+}
+
+static ngx_inline void
+ngx_http_markdown_otel_span_end(ngx_http_markdown_otel_span_t *span)
+{
+    UNUSED(span);
+}
+
+static ngx_inline void
+ngx_http_markdown_otel_span_export(ngx_http_markdown_otel_span_t *span,
+    ngx_log_t *log)
+{
+    UNUSED(span);
+    UNUSED(log);
 }
 
 #include "../../src/ngx_http_markdown_conversion_impl.h" /* NOSONAR: must follow stub definitions */
