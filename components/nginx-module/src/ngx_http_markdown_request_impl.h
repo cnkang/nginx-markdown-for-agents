@@ -275,6 +275,23 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
     ngx_flag_t                       filter_enabled;
     ngx_int_t                        should_convert;
 
+    /* Apply pending dynamic config reload if signaled. */
+    if (ngx_http_markdown_dynconf_watcher.reload_pending) {
+        ngx_http_markdown_dynconf_watcher.reload_pending = 0;
+
+        ngx_log_error(NGX_LOG_INFO, r->connection->log, 0,
+                      "markdown dynconf: applying configuration reload from \"%V\"",
+                      &ngx_http_markdown_dynconf_watcher.path);
+
+        /*
+         * For v0.6.0: reload signaling is operational.  Full config
+         * reparse + atomic swap requires the parser module that
+         * reads the dynconf path file.  This placeholder logs the
+         * reload event and clears the pending flag.  A follow-up
+         * change set will implement the actual config swap.
+         */
+    }
+
     /* Get module configuration */
     conf = ngx_http_get_module_loc_conf(r, ngx_http_markdown_filter_module);
     if (conf == NULL) {

@@ -44,6 +44,11 @@ static ngx_str_t ngx_http_markdown_metrics_shm_name =
     ngx_string("nginx_markdown_metrics_v5");
 static u_char ngx_http_markdown_empty_string[] = "";
 
+/* Global dynamic config watcher for this worker process. */
+static ngx_http_markdown_dynconf_watcher_t ngx_http_markdown_dynconf_watcher = {
+    { NULL, 0 }, 0, NULL, 0, 0
+};
+
 #define NGX_HTTP_MARKDOWN_METRIC_ADD(field, value)                                  \
     do {                                                                            \
         if (ngx_http_markdown_metrics != NULL) {                                    \
