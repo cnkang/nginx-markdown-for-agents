@@ -2,7 +2,7 @@ class NginxMarkdownModule < Formula
   desc "NGINX module for HTML-to-Markdown conversion"
   homepage "https://github.com/cnkang/nginx-markdown-for-agents"
   url "https://github.com/cnkang/nginx-markdown-for-agents/archive/v0.6.0.tar.gz"
-  sha256 "PLACEHOLDER_RELEASE_TARBALL_SHA256"
+  sha256 "ac5080ee598b9a7cba229c4306efe8d5177dd3df2404f8a5534a103be4860715"
   license "BSD-2-Clause"
 
   depends_on "rust" => :build
