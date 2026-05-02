@@ -795,6 +795,73 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
         NULL
     },
 
+    /*
+     * markdown_otel on|off
+     *
+     * Enable OpenTelemetry span creation for conversion requests.
+     * When enabled, each conversion creates a span with attributes
+     * for flavor, engine, content_type, input/output bytes, and
+     * reason code.
+     *
+     * Default: off
+     * Context: http, server, location
+     *
+     * Example:
+     *   markdown_otel on;
+     */
+    {
+        ngx_string("markdown_otel"),
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_FLAG,
+        ngx_conf_set_flag_slot,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        offsetof(ngx_http_markdown_conf_t, ops.otel_enabled),
+        NULL
+    },
+
+    /*
+     * markdown_dynamic_config on|off
+     *
+     * Enable runtime configuration hot-reload without NGINX restart.
+     * Watches the file specified by markdown_dynamic_config_path for
+     * changes and atomically swaps the active configuration.
+     *
+     * Default: off
+     * Context: http, server, location
+     *
+     * Example:
+     *   markdown_dynamic_config on;
+     *   markdown_dynamic_config_path /etc/nginx/markdown_dynamic.conf;
+     */
+    {
+        ngx_string("markdown_dynamic_config"),
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_FLAG,
+        ngx_conf_set_flag_slot,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        offsetof(ngx_http_markdown_conf_t, dynconf_enabled),
+        NULL
+    },
+
+    /*
+     * markdown_dynamic_config_path <path>
+     *
+     * Path to the dynamic configuration file to watch for changes.
+     * Only effective when markdown_dynamic_config is on.
+     *
+     * Default: (none)
+     * Context: http, server, location
+     *
+     * Example:
+     *   markdown_dynamic_config_path /etc/nginx/markdown_dynamic.conf;
+     */
+    {
+        ngx_string("markdown_dynamic_config_path"),
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+        ngx_conf_set_str_slot,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        offsetof(ngx_http_markdown_conf_t, dynconf_path),
+        NULL
+    },
+
     ngx_null_command
 };
 

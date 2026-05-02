@@ -200,6 +200,7 @@ typedef struct {
         ngx_flag_t   trust_forwarded_headers; /* markdown_trust_forwarded_headers on|off (default: off) */
         ngx_uint_t   metrics_format;       /* markdown_metrics_format auto|prometheus (default: auto) */
         ngx_flag_t   metrics_per_path;    /* markdown_metrics_per_path on|off (default: off) */
+        ngx_flag_t   otel_enabled;       /* markdown_otel on|off (default: off) */
     } ops;
 
 #ifdef MARKDOWN_STREAMING_ENABLED
@@ -220,6 +221,8 @@ typedef struct {
     size_t                     memory_budget;             /* markdown_memory_budget (default: NGX_CONF_UNSET_SIZE) */
     ngx_uint_t                 llm_provider;              /* markdown_llm_provider (default: 0=default) */
     ngx_uint_t                 chars_per_token_fixed;     /* markdown_chars_per_token (default: 0=use provider) */
+    ngx_flag_t                 dynconf_enabled;           /* markdown_dynamic_config on|off (default: off) */
+    ngx_str_t                  dynconf_path;              /* markdown_dynamic_config_path (default: empty) */
 } ngx_http_markdown_conf_t;
 
 /*
