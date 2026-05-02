@@ -213,8 +213,8 @@ typedef struct MarkdownOptions {
    */
   uint64_t memory_budget;
   /**
-   * LLM provider for token estimation (0=default, 1=openai-gpt4, 2=anthropic-claude,
-   * 3=google-gemini, 4=meta-llama3).
+   * LLM provider for token estimation (0=default, 1=openai-gpt, 2=anthropic-claude,
+   * 3=google-gemini, 4=meta-llama).
    *
    * When non-zero and `estimate_tokens` is enabled, the provider's
    * characteristic chars-per-token ratio overrides the default 4.0.
