@@ -1,0 +1,69 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "nginx-markdown.fullname" . }}-config
+  labels:
+    {{- include "nginx-markdown.labels" . | nindent 4 }}
+data:
+  nginx.conf: |
+    worker_processes auto;
+    events { worker_connections 1024; }
+    http {
+      server {
+        listen 80;
+        {{- if .Values.markdown.enabled }}
+        markdown_filter on;
+        markdown_max_size {{ .Values.markdown.maxSize }};
+        markdown_timeout {{ .Values.markdown.timeout }};
+        markdown_on_error {{ .Values.markdown.onError }};
+        markdown_flavor {{ .Values.markdown.flavor }};
+        {{- if .Values.markdown.tokenEstimate }}
+        markdown_token_estimate on;
+        {{- end }}
+        {{- if not .Values.markdown.etag }}
+        markdown_etag off;
+        {{- end }}
+        markdown_conditional_requests {{ .Values.markdown.conditionalRequests }};
+        markdown_log_verbosity {{ .Values.markdown.logVerbosity }};
+        {{- if .Values.markdown.streaming }}
+        markdown_streaming_engine {{ .Values.markdown.streaming.engine }};
+        markdown_streaming_budget {{ .Values.markdown.streaming.budget }};
+        markdown_streaming_on_error {{ .Values.markdown.streaming.onError }};
+        markdown_streaming_auto_threshold {{ .Values.markdown.streaming.autoThreshold }};
+        {{- if .Values.markdown.streaming.shadow }}
+        markdown_streaming_shadow on;
+        {{- end }}
+        {{- end }}
+        {{- if .Values.markdown.prune }}
+        markdown_prune_noise {{ ternary "on" "off" .Values.markdown.prune.noise }};
+        {{- if .Values.markdown.prune.selectors }}
+        markdown_prune_selectors {{ .Values.markdown.prune.selectors }};
+        {{- end }}
+        {{- if .Values.markdown.prune.protectionSelectors }}
+        markdown_prune_protection_selectors {{ .Values.markdown.prune.protectionSelectors }};
+        {{- end }}
+        {{- end }}
+        {{- if .Values.markdown.contentTypes }}
+        markdown_content_types {{ join " " .Values.markdown.contentTypes }};
+        {{- end }}
+        {{- if ne .Values.markdown.llm.provider "default" }}
+        markdown_llm_provider {{ .Values.markdown.llm.provider }};
+        {{- end }}
+        {{- if .Values.markdown.llm.charsPerToken }}
+        markdown_chars_per_token {{ .Values.markdown.llm.charsPerToken }};
+        {{- end }}
+        {{- if .Values.markdown.memoryBudget }}
+        markdown_memory_budget {{ .Values.markdown.memoryBudget }};
+        {{- end }}
+        {{- end }}
+        {{- if .Values.metrics.enabled }}
+        markdown_metrics on;
+        markdown_metrics_uri {{ .Values.metrics.uri }};
+        markdown_metrics_format {{ .Values.metrics.format }};
+        markdown_metrics_shm_size {{ .Values.metrics.shmSize }};
+        {{- end }}
+        location / {
+          root /usr/share/nginx/html;
+        }
+      }
+    }

@@ -1,0 +1,16 @@
+#!/usr/bin/make -f
+
+export DH_VERBOSE = 1
+
+%:
+	dh $@
+
+override_dh_auto_build:
+	$(MAKE) build
+
+override_dh_auto_install:
+	$(MAKE) install DESTDIR=$(CURDIR)/debian/nginx-markdown-module
+
+override_dh_auto_test:
+	$(MAKE) test-rust
+	$(MAKE) test-nginx-unit
