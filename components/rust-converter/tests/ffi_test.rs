@@ -75,6 +75,8 @@ fn ffi_test_default_options() -> MarkdownOptions {
         prune_protection_selectors: ptr::null(),
         prune_protection_selector_len: 0,
         memory_budget: 0,
+        llm_provider: 0,
+        chars_per_token_fixed: 0,
     }
 }
 
@@ -155,6 +157,8 @@ fn test_basic_conversion() {
         prune_protection_selectors: ptr::null(),
         prune_protection_selector_len: 0,
         memory_budget: 0,
+        llm_provider: 0,
+        chars_per_token_fixed: 0,
     };
 
     // Perform conversion
@@ -453,6 +457,8 @@ fn test_null_pointer_handling() {
         prune_protection_selectors: ptr::null(),
         prune_protection_selector_len: 0,
         memory_budget: 0,
+        llm_provider: 0,
+        chars_per_token_fixed: 0,
     };
 
     let mut result = MarkdownResult {
@@ -556,6 +562,8 @@ fn test_multiple_conversions() {
         prune_protection_selectors: ptr::null(),
         prune_protection_selector_len: 0,
         memory_budget: 0,
+        llm_provider: 0,
+        chars_per_token_fixed: 0,
     };
 
     // Perform multiple conversions
@@ -612,6 +620,8 @@ fn test_idempotent_free() {
         prune_protection_selectors: ptr::null(),
         prune_protection_selector_len: 0,
         memory_budget: 0,
+        llm_provider: 0,
+        chars_per_token_fixed: 0,
     };
 
     let mut result = MarkdownResult {
@@ -665,6 +675,8 @@ fn test_content_type_charset_detection() {
         prune_protection_selectors: ptr::null(),
         prune_protection_selector_len: 0,
         memory_budget: 0,
+        llm_provider: 0,
+        chars_per_token_fixed: 0,
     };
 
     let mut result = MarkdownResult {
@@ -719,6 +731,8 @@ fn test_gfm_flavor() {
         prune_protection_selectors: ptr::null(),
         prune_protection_selector_len: 0,
         memory_budget: 0,
+        llm_provider: 0,
+        chars_per_token_fixed: 0,
     };
 
     let mut result = MarkdownResult {
@@ -785,6 +799,8 @@ fn test_null_result_pointer() {
         prune_protection_selectors: ptr::null(),
         prune_protection_selector_len: 0,
         memory_budget: 0,
+        llm_provider: 0,
+        chars_per_token_fixed: 0,
     };
 
     // Call with NULL result pointer - should not crash
@@ -863,6 +879,8 @@ fn test_memory_cleanup_with_all_fields() {
         prune_protection_selectors: ptr::null(),
         prune_protection_selector_len: 0,
         memory_budget: 0,
+        llm_provider: 0,
+        chars_per_token_fixed: 0,
     };
 
     let mut result = MarkdownResult {
@@ -925,6 +943,8 @@ fn test_memory_cleanup_error_case() {
         prune_protection_selectors: ptr::null(),
         prune_protection_selector_len: 0,
         memory_budget: 0,
+        llm_provider: 0,
+        chars_per_token_fixed: 0,
     };
 
     let mut result = MarkdownResult {
@@ -988,6 +1008,8 @@ fn test_panic_catching_invalid_utf8() {
         prune_protection_selectors: ptr::null(),
         prune_protection_selector_len: 0,
         memory_budget: 0,
+        llm_provider: 0,
+        chars_per_token_fixed: 0,
     };
 
     let mut result = MarkdownResult {
@@ -1054,6 +1076,8 @@ fn test_zero_length_html() {
         prune_protection_selectors: ptr::null(),
         prune_protection_selector_len: 0,
         memory_budget: 0,
+        llm_provider: 0,
+        chars_per_token_fixed: 0,
     };
 
     let mut result = MarkdownResult {
@@ -1103,6 +1127,8 @@ fn test_zero_length_html_with_null_pointer() {
         prune_protection_selectors: ptr::null(),
         prune_protection_selector_len: 0,
         memory_budget: 0,
+        llm_provider: 0,
+        chars_per_token_fixed: 0,
     };
 
     let mut result = ffi_test_empty_result();
@@ -1146,6 +1172,8 @@ fn test_null_content_type_with_zero_length() {
         prune_protection_selectors: ptr::null(),
         prune_protection_selector_len: 0,
         memory_budget: 0,
+        llm_provider: 0,
+        chars_per_token_fixed: 0,
     };
 
     let mut result = MarkdownResult {
@@ -1202,6 +1230,8 @@ fn test_error_state_consistency() {
         prune_protection_selectors: ptr::null(),
         prune_protection_selector_len: 0,
         memory_budget: 0,
+        llm_provider: 0,
+        chars_per_token_fixed: 0,
     };
 
     let mut result = MarkdownResult {
