@@ -943,6 +943,8 @@ ngx_http_markdown_streaming_send_deferred_lastbuf(
 
         ngx_http_markdown_log_decision(r, conf,
             ngx_http_markdown_reason_streaming_convert());
+
+        ngx_http_markdown_record_per_path_metrics(r, conf, 0);
     } else {
         /*
          * Deferred last_buf send failed with a definitive
@@ -1064,6 +1066,8 @@ ngx_http_markdown_streaming_resume_pending(
 
         ngx_http_markdown_log_decision(r, conf,
             ngx_http_markdown_reason_streaming_convert());
+
+        ngx_http_markdown_record_per_path_metrics(r, conf, 0);
 
         ctx->streaming.pending_terminal_metrics = 0;
     }
@@ -1997,6 +2001,8 @@ ngx_http_markdown_streaming_finalize_request(
 
         ngx_http_markdown_log_decision(r, conf,
             ngx_http_markdown_reason_streaming_convert());
+
+        ngx_http_markdown_record_per_path_metrics(r, conf, 0);
     } else if (rc == NGX_AGAIN) {
         /*
          * Terminal last_buf send hit backpressure. Set a latch

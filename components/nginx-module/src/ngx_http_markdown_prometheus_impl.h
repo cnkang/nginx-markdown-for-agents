@@ -345,6 +345,43 @@ ngx_http_markdown_metrics_write_prometheus(
             + snapshot->conversion_latency_le_1000ms
             + snapshot->conversion_latency_gt_1000ms);
 
+    /* per_path_entries */
+    p = ngx_slprintf(p, end,
+        "# HELP nginx_markdown_per_path_entries "
+        "Number of distinct URI paths tracked in per-path metrics.\n"
+        "# TYPE nginx_markdown_per_path_entries gauge\n"
+        "nginx_markdown_per_path_entries %uA\n"
+        "\n",
+        snapshot->per_path.path_entries);
+
+    /* per_path_conversions_total */
+    p = ngx_slprintf(p, end,
+        "# HELP nginx_markdown_per_path_conversions_total "
+        "Total successful conversions recorded in per-path metrics.\n"
+        "# TYPE nginx_markdown_per_path_conversions_total counter\n"
+        "nginx_markdown_per_path_conversions_total %uA\n"
+        "\n",
+        snapshot->per_path.path_conversions);
+
+    /* per_path_conversion_time_ms_total */
+    p = ngx_slprintf(p, end,
+        "# HELP nginx_markdown_per_path_conversion_time_ms_total "
+        "Cumulative conversion time (ms) recorded in per-path metrics.\n"
+        "# TYPE nginx_markdown_per_path_conversion_time_ms_total counter\n"
+        "nginx_markdown_per_path_conversion_time_ms_total %uA\n"
+        "\n",
+        snapshot->per_path.path_conversion_time_sum_ms);
+
+    /* per_path_overflow_total */
+    p = ngx_slprintf(p, end,
+        "# HELP nginx_markdown_per_path_overflow_total "
+        "Paths dropped because per-path cardinality limit was reached. "
+        "Controlled by markdown_metrics_per_path_cardinality.\n"
+        "# TYPE nginx_markdown_per_path_overflow_total counter\n"
+        "nginx_markdown_per_path_overflow_total %uA\n"
+        "\n",
+        snapshot->per_path.overflow_count);
+
     /*
      * Detect buffer exhaustion.  ngx_slprintf stops at end
      * without signaling an error, so p == end means the

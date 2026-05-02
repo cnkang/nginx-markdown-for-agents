@@ -25,10 +25,72 @@ static void ngx_http_markdown_log_merged_conf(ngx_conf_t *cf,
     const ngx_http_markdown_conf_t *conf);
 
 /*
+ * RB-tree insert callback for per-path metric nodes.
+ *
+ * Compares by rbnode.key (hash) first, then by path_len
+ * and path bytes to resolve hash collisions.
+ */
+static void
+ngx_http_markdown_path_rbtree_insert_value(ngx_rbtree_node_t *temp,
+    ngx_rbtree_node_t *node, ngx_rbtree_node_t *sentinel)
+{
+    ngx_rbtree_node_t                    **p;
+    ngx_http_markdown_path_metric_node_t  *n;
+    ngx_http_markdown_path_metric_node_t  *t;
+
+    for ( ;; ) {
+
+        if (node->key < temp->key) {
+            p = &temp->left;
+        } else if (node->key > temp->key) {
+            p = &temp->right;
+        } else {
+            n = (ngx_http_markdown_path_metric_node_t *) node;
+            t = (ngx_http_markdown_path_metric_node_t *) temp;
+
+            if (n->path_len < t->path_len) {
+                p = &temp->left;
+            } else if (n->path_len > t->path_len) {
+                p = &temp->right;
+            } else {
+                if (ngx_memcmp(n->path, t->path, n->path_len) < 0) {
+                    p = &temp->left;
+                } else {
+                    p = &temp->right;
+                }
+            }
+        }
+
+        if (*p == sentinel) {
+            break;
+        }
+
+        temp = *p;
+    }
+
+    *p = node;
+    node->parent = temp;
+    node->left = sentinel;
+    node->right = sentinel;
+    ngx_rbt_red(node);
+}
+
+/*
+ * Default per-path cardinality limit.
+ *
+ * Caps the number of distinct URI paths tracked in the shared
+ * RB-tree to prevent unbounded memory growth in the slab pool.
+ * Configurable via markdown_metrics_per_path_cardinality (future).
+ */
+#define NGX_HTTP_MARKDOWN_PER_PATH_CARDINALITY_DEFAULT  100
+
+/*
  * Shared-memory initializer for cross-worker metrics storage.
  *
  * On reload, nginx may pass previous zone data (`data != NULL`), which is
- * reattached instead of allocating a fresh counter block.
+ * reattached instead of allocating a fresh counter block.  The SHM zone
+ * name is versioned (v5) so an incompatible layout after hot reload
+ * allocates a fresh slab instead of reattaching stale data.
  */
 static ngx_int_t
 ngx_http_markdown_init_metrics_zone(ngx_shm_zone_t *shm_zone, void *data)
@@ -57,6 +119,13 @@ ngx_http_markdown_init_metrics_zone(ngx_shm_zone_t *shm_zone, void *data)
     }
 
     ngx_memzero(metrics, sizeof(ngx_http_markdown_metrics_t));
+
+    ngx_rbtree_init(&metrics->per_path.path_tree,
+                    &metrics->per_path.sentinel,
+                    ngx_http_markdown_path_rbtree_insert_value);
+    metrics->per_path.cardinality_limit =
+        NGX_HTTP_MARKDOWN_PER_PATH_CARDINALITY_DEFAULT;
+
     shpool->data = metrics;
     shm_zone->data = metrics;
 
@@ -131,6 +200,7 @@ ngx_http_markdown_create_conf(ngx_conf_t *cf)
     conf->enabled_source = NGX_HTTP_MARKDOWN_ENABLED_UNSET;
     conf->enabled_complex = NULL;
     conf->max_size = NGX_CONF_UNSET_SIZE;
+    conf->max_size_explicit = 0;
     conf->timeout = NGX_CONF_UNSET_MSEC;
     conf->on_error = NGX_CONF_UNSET_UINT;
     conf->flavor = NGX_CONF_UNSET_UINT;
@@ -221,6 +291,7 @@ ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
      * needed for the unified memory_budget priority chain below.
      */
     ngx_flag_t  max_size_set = (conf->max_size != NGX_CONF_UNSET_SIZE);
+    ngx_flag_t  memory_budget_set = (conf->memory_budget != NGX_CONF_UNSET_SIZE);
 #ifdef MARKDOWN_STREAMING_ENABLED
     ngx_flag_t  streaming_budget_set = (conf->streaming_budget != NGX_CONF_UNSET_SIZE);
 #endif
@@ -306,9 +377,15 @@ ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
      *
      * max_size_set was captured before ngx_conf_merge_size_value
      * resolved max_size to its default/inherited value.
+     * max_size_explicit propagates across levels like
+     * streaming_budget_explicit so that a parent-level explicit
+     * max_size is not silently overwritten by a child-level
+     * memory_budget.
      */
+    conf->max_size_explicit = max_size_set || prev->max_size_explicit;
+
     if (conf->memory_budget != NGX_CONF_UNSET_SIZE
-        && !max_size_set)
+        && !conf->max_size_explicit)
     {
         conf->max_size = conf->memory_budget;
     }

@@ -172,6 +172,7 @@ typedef struct {
     ngx_uint_t   enabled_source;       /* markdown_filter source (static|complex|unset) */
     ngx_http_complex_value_t *enabled_complex; /* markdown_filter variable/complex expression */
     size_t       max_size;             /* markdown_max_size (default: 10MB) */
+    ngx_flag_t   max_size_explicit;    /* 1 if operator set markdown_max_size at this or parent level */
     ngx_msec_t   timeout;              /* markdown_timeout (default: 5000ms) */
     ngx_uint_t   on_error;             /* markdown_on_error pass|reject (default: pass) */
     ngx_uint_t   flavor;               /* markdown_flavor commonmark|gfm (default: commonmark) */
@@ -567,20 +568,44 @@ typedef struct {
     /*
      * Per-path metrics (v0.6.0 P1-2).
      *
-     * When markdown_metrics_per_path is enabled, the top-N most-hit
-     * URI paths are tracked individually.  The RB-tree and node pool
-     * are allocated from the slab allocator on first use.
+     * When markdown_metrics_per_path is enabled, URI paths are
+     * tracked individually in an RB-tree allocated from the slab
+     * allocator.  Each node holds per-path conversion and timing
+     * counters.  The tree is protected by the slab pool mutex.
      *
-     * path_entries tracks the number of distinct paths currently
-     * stored.  path_tree_root is the RB-tree sentinel node.
-     * path_node_pool points to a slab-allocated pool of tree nodes.
+     * cardinality_limit caps the number of distinct paths stored;
+     * overflow_count tracks paths dropped when at capacity.
+     * Aggregate counters (path_conversions, path_conversion_time_sum_ms)
+     * accumulate across all per-path nodes for fast rendering
+     * without tree traversal.
      */
     struct {
-        ngx_atomic_t  path_entries;
-        ngx_atomic_t  path_conversions;
-        ngx_atomic_t  path_conversion_time_sum_ms;
+        ngx_rbtree_t       path_tree;
+        ngx_rbtree_node_t  sentinel;
+        ngx_atomic_t       path_entries;
+        ngx_atomic_t       path_conversions;
+        ngx_atomic_t       path_conversion_time_sum_ms;
+        ngx_uint_t         cardinality_limit;
+        ngx_atomic_t       overflow_count;
     } per_path;
 } ngx_http_markdown_metrics_t;
+
+/*
+ * Per-path metric node stored in the shared RB-tree.
+ *
+ * rbnode.key holds a hash of the path for O(1) first-level
+ * lookup; collisions are resolved by comparing path_len then
+ * path bytes.  The path string is slab-owned and must be
+ * freed with ngx_slab_free() when the node is removed.
+ */
+typedef struct {
+    ngx_rbtree_node_t  rbnode;
+    ngx_uint_t         path_len;
+    u_char            *path;
+    ngx_atomic_t       conversions;
+    ngx_atomic_t       conversion_time_sum_ms;
+    ngx_atomic_t       entries;
+} ngx_http_markdown_path_metric_node_t;
 
 /* Module declaration */
 extern ngx_module_t ngx_http_markdown_filter_module;

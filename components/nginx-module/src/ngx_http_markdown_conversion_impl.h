@@ -631,6 +631,167 @@ ngx_http_markdown_record_conversion_success(ngx_http_markdown_ctx_t *ctx,
 }
 
 /*
+ * Record per-path metrics for a successful conversion.
+ *
+ * Looks up the request URI in the shared RB-tree.  If the path
+ * is not found and the tree is below cardinality_limit, allocates
+ * a new node from the slab pool and inserts it.  If at capacity,
+ * increments overflow_count.  Updates per-path and aggregate
+ * counters under the slab pool mutex.
+ *
+ * Parameters:
+ *   r          - the HTTP request (provides r->uri as the path key)
+ *   conf       - module location configuration
+ *   elapsed_ms - conversion elapsed time in milliseconds
+ */
+static void
+ngx_http_markdown_record_per_path_metrics(
+    ngx_http_request_t *r,
+    const ngx_http_markdown_conf_t *conf,
+    ngx_msec_t elapsed_ms)
+{
+    ngx_shm_zone_t                       *zone;
+    ngx_slab_pool_t                      *shpool;
+    ngx_http_markdown_metrics_t          *metrics;
+    ngx_http_markdown_path_metric_node_t *node;
+    ngx_rbtree_node_t                    *rbnode;
+    ngx_rbtree_node_t                    *sentinel;
+    ngx_uint_t                            hash;
+    ngx_uint_t                            key;
+
+    if (!conf->ops.metrics_per_path) {
+        return;
+    }
+
+    zone = ngx_http_markdown_metrics_shm_zone;
+    if (zone == NULL || zone->data == NULL) {
+        return;
+    }
+
+    metrics = (ngx_http_markdown_metrics_t *) zone->data;
+    shpool = (ngx_slab_pool_t *) zone->shm.addr;
+
+    if (r->uri.len == 0 || r->uri.data == NULL) {
+        return;
+    }
+
+    hash = ngx_hash_key(r->uri.data, r->uri.len);
+    key = hash;
+
+    ngx_shmtx_lock(&shpool->mutex);
+
+    sentinel = &metrics->per_path.sentinel;
+
+    if (metrics->per_path.path_tree.root != sentinel) {
+        rbnode = metrics->per_path.path_tree.root;
+
+        for ( ;; ) {
+            if (key < rbnode->key) {
+                if (rbnode->left == sentinel) {
+                    break;
+                }
+                rbnode = rbnode->left;
+                continue;
+            }
+
+            if (key > rbnode->key) {
+                if (rbnode->right == sentinel) {
+                    break;
+                }
+                rbnode = rbnode->right;
+                continue;
+            }
+
+            node = (ngx_http_markdown_path_metric_node_t *) rbnode;
+
+            if (r->uri.len == node->path_len
+                && ngx_memcmp(r->uri.data, node->path,
+                              node->path_len) == 0)
+            {
+                ngx_atomic_fetch_add(&node->conversions, 1);
+                ngx_atomic_fetch_add(&node->entries, 1);
+                ngx_atomic_fetch_add(&node->conversion_time_sum_ms,
+                                     (ngx_atomic_uint_t) elapsed_ms);
+                ngx_atomic_fetch_add(
+                    &metrics->per_path.path_conversions, 1);
+                ngx_atomic_fetch_add(
+                    &metrics->per_path.path_conversion_time_sum_ms,
+                    (ngx_atomic_uint_t) elapsed_ms);
+                ngx_shmtx_unlock(&shpool->mutex);
+                return;
+            }
+
+            if (r->uri.len < node->path_len) {
+                if (rbnode->left == sentinel) {
+                    break;
+                }
+                rbnode = rbnode->left;
+            } else if (r->uri.len > node->path_len) {
+                if (rbnode->right == sentinel) {
+                    break;
+                }
+                rbnode = rbnode->right;
+            } else {
+                if (ngx_memcmp(r->uri.data, node->path,
+                               node->path_len) < 0) {
+                    if (rbnode->left == sentinel) {
+                        break;
+                    }
+                    rbnode = rbnode->left;
+                } else {
+                    if (rbnode->right == sentinel) {
+                        break;
+                    }
+                    rbnode = rbnode->right;
+                }
+            }
+        }
+    }
+
+    if (metrics->per_path.path_entries
+        >= metrics->per_path.cardinality_limit)
+    {
+        ngx_atomic_fetch_add(&metrics->per_path.overflow_count, 1);
+        ngx_atomic_fetch_add(&metrics->per_path.path_conversions, 1);
+        ngx_atomic_fetch_add(
+            &metrics->per_path.path_conversion_time_sum_ms,
+            (ngx_atomic_uint_t) elapsed_ms);
+        ngx_shmtx_unlock(&shpool->mutex);
+        return;
+    }
+
+    node = ngx_slab_alloc_locked(shpool,
+        sizeof(ngx_http_markdown_path_metric_node_t));
+    if (node == NULL) {
+        ngx_shmtx_unlock(&shpool->mutex);
+        return;
+    }
+
+    node->path = ngx_slab_alloc_locked(shpool, r->uri.len);
+    if (node->path == NULL) {
+        ngx_slab_free_locked(shpool, node);
+        ngx_shmtx_unlock(&shpool->mutex);
+        return;
+    }
+
+    ngx_memcpy(node->path, r->uri.data, r->uri.len);
+    node->path_len = r->uri.len;
+    node->rbnode.key = key;
+    node->conversions = 1;
+    node->entries = 1;
+    node->conversion_time_sum_ms = (ngx_atomic_t) elapsed_ms;
+
+    ngx_rbtree_insert(&metrics->per_path.path_tree, &node->rbnode);
+
+    ngx_atomic_fetch_add(&metrics->per_path.path_entries, 1);
+    ngx_atomic_fetch_add(&metrics->per_path.path_conversions, 1);
+    ngx_atomic_fetch_add(&metrics->per_path.path_conversion_time_sum_ms,
+                         (ngx_atomic_uint_t) elapsed_ms);
+
+    ngx_shmtx_unlock(&shpool->mutex);
+}
+
+/*
  * Record a system-level conversion failure when the converter
  * handle is not initialized.
  *
@@ -1035,6 +1196,8 @@ ngx_http_markdown_execute_conversion(ngx_http_request_t *r,
     }
 
     ngx_http_markdown_record_conversion_success(ctx, result, *elapsed_ms);
+
+    ngx_http_markdown_record_per_path_metrics(r, conf, *elapsed_ms);
 
 #ifdef MARKDOWN_STREAMING_ENABLED
     /*
