@@ -13,6 +13,7 @@
 //! - Dangerous URL schemes (javascript:, data:, etc.) are blocked
 //! - Nesting depth is limited to prevent stack exhaustion
 
+use crate::converter::pruning::{PruneConfig, should_prune_with_config};
 use crate::streaming::types::StreamEvent;
 
 /// HTML void elements that never have children.
@@ -96,6 +97,14 @@ pub struct StreamingSanitizer {
     nesting_depth: usize,
     /// Maximum allowed nesting depth.
     max_nesting_depth: usize,
+    /// Noise-region pruning configuration.
+    prune_config: PruneConfig,
+    /// Depth counter for noise-region pruning. When > 0, events inside
+    /// a pruned element (nav, footer, aside, etc.) are suppressed.
+    prune_depth: usize,
+    /// Name of the outermost pruned element that entered prune mode,
+    /// for name-aware exit (same pattern as skip_element).
+    prune_element: Option<String>,
 }
 
 impl StreamingSanitizer {
@@ -117,6 +126,21 @@ impl StreamingSanitizer {
             nesting_stack: Vec::new(),
             nesting_depth: 0,
             max_nesting_depth: MAX_NESTING_DEPTH,
+            prune_config: PruneConfig::disabled(),
+            prune_depth: 0,
+            prune_element: None,
+        }
+    }
+
+    /// Creates a `StreamingSanitizer` with noise-region pruning enabled.
+    ///
+    /// Elements matching the prune config (nav, footer, aside, etc.) and
+    /// their entire subtrees will be suppressed, equivalent to the
+    /// full-buffer path's `should_prune_with_config()` behavior.
+    pub fn with_prune_config(prune_config: PruneConfig) -> Self {
+        Self {
+            prune_config,
+            ..Self::new()
         }
     }
 
@@ -211,6 +235,29 @@ impl StreamingSanitizer {
                     if !effectively_self_closing {
                         self.skip_depth = 1;
                         self.skip_element = Some(tag.to_string());
+                    }
+                    return SanitizeDecision::Skip;
+                }
+
+                // Noise-region pruning: skip entire subtree of nav, footer,
+                // aside, etc. when pruning is enabled. Uses the same depth-
+                // counter + name-aware-exit pattern as dangerous elements.
+                if self.prune_depth > 0 {
+                    if !effectively_self_closing {
+                        self.prune_depth = self.prune_depth.saturating_add(1);
+                    }
+                    return SanitizeDecision::Skip;
+                }
+
+                if self.prune_config.enabled
+                    && matches!(
+                        should_prune_with_config(tag, &self.prune_config),
+                        crate::converter::pruning::PruneDecision::SkipSubtree
+                    )
+                {
+                    if !effectively_self_closing {
+                        self.prune_depth = 1;
+                        self.prune_element = Some(tag.to_string());
                     }
                     return SanitizeDecision::Skip;
                 }
@@ -318,6 +365,20 @@ impl StreamingSanitizer {
                     return SanitizeDecision::Skip;
                 }
 
+                // Prune depth: name-aware exit, same pattern as skip_depth.
+                if self.prune_depth > 0 {
+                    if self.prune_depth == 1 {
+                        if self.prune_element.as_deref() == Some(tag) {
+                            self.prune_depth = 0;
+                            self.prune_element = None;
+                            self.pop_open_tag(tag);
+                        }
+                    } else {
+                        self.prune_depth = self.prune_depth.saturating_sub(1);
+                    }
+                    return SanitizeDecision::Skip;
+                }
+
                 self.pop_open_tag(tag);
 
                 // Strip stack tracking for embedded/form elements.
@@ -337,7 +398,7 @@ impl StreamingSanitizer {
             }
 
             StreamEvent::Text(_) | StreamEvent::Comment(_) => {
-                if self.skip_depth > 0 {
+                if self.skip_depth > 0 || self.prune_depth > 0 {
                     return SanitizeDecision::Skip;
                 }
                 SanitizeDecision::Pass(event)

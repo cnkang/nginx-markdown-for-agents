@@ -473,7 +473,8 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      *
      * Streaming engine selection mode.
      * Supports per-request variable-driven rollout.
-     * Default: off (all requests use full-buffer path)
+     * Default: auto (per-request selection based on
+     *          markdown_streaming_auto_threshold)
      * Context: http, server, location
      *
      * Example:
@@ -562,7 +563,133 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
                  streaming_shadow),
         NULL
     },
+
+    /*
+     * markdown_streaming_auto_threshold <size>
+     *
+     * Content-Length threshold for auto mode engine selection.
+     * When markdown_streaming_engine is auto, responses with
+     * Content-Length >= this value use streaming; smaller
+     * responses use full-buffer. Chunked responses always
+     * use streaming in auto mode.
+     *
+     * Default: 32k
+     * Context: http, server, location
+     *
+     * Example:
+     *   markdown_streaming_auto_threshold 64k;
+     */
+    {
+        ngx_string("markdown_streaming_auto_threshold"),
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF
+            |NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+        ngx_conf_set_size_slot,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        offsetof(ngx_http_markdown_conf_t,
+                 streaming_auto_threshold),
+        NULL
+    },
 #endif /* MARKDOWN_STREAMING_ENABLED */
+
+    /*
+     * markdown_prune_noise on|off
+     *
+     * Enable or disable noise region pruning at runtime.
+     * When enabled, structural HTML regions matching prune
+     * selectors are excluded from Markdown output.
+     *
+     * Default: on (v0.6.0)
+     * Context: http, server, location
+     *
+     * Example:
+     *   markdown_prune_noise off;
+     */
+    {
+        ngx_string("markdown_prune_noise"),
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF
+            |NGX_HTTP_LOC_CONF|NGX_CONF_FLAG,
+        ngx_conf_set_flag_slot,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        offsetof(ngx_http_markdown_conf_t,
+                 prune_noise),
+        NULL
+    },
+
+    /*
+     * markdown_prune_selectors <string>
+     *
+     * Space-separated tag names for regions to prune.
+     * Replaces built-in defaults when set.
+     * Built-in defaults: nav footer aside
+     *
+     * Default: built-in defaults
+     * Context: http, server, location
+     *
+     * Example:
+     *   markdown_prune_selectors "nav footer aside sidebar";
+     */
+    {
+        ngx_string("markdown_prune_selectors"),
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF
+            |NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+        ngx_conf_set_str_slot,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        offsetof(ngx_http_markdown_conf_t,
+                 prune_selectors),
+        NULL
+    },
+
+    /*
+     * markdown_prune_protection_selectors <string>
+     *
+     * Space-separated tag names for regions to protect
+     * from pruning. Protection wins over prune: an element
+     * matching both is kept.
+     *
+     * Default: empty (no protection)
+     * Context: http, server, location
+     *
+     * Example:
+     *   markdown_prune_protection_selectors "nav";
+     */
+    {
+        ngx_string("markdown_prune_protection_selectors"),
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF
+            |NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+        ngx_conf_set_str_slot,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        offsetof(ngx_http_markdown_conf_t,
+                 prune_protection_selectors),
+        NULL
+    },
+
+    /*
+     * markdown_memory_budget <size>
+     *
+     * Unified memory budget for both streaming and full-buffer
+     * conversion engines. When set, this value is used as the
+     * memory limit for both paths unless overridden by the
+     * path-specific directives (markdown_max_size for
+     * full-buffer, markdown_streaming_budget for streaming).
+     *
+     * Priority: explicit path-specific > unified > default
+     *
+     * Default: unset (use path-specific defaults)
+     * Context: http, server, location
+     *
+     * Example:
+     *   markdown_memory_budget 8m;
+     */
+    {
+        ngx_string("markdown_memory_budget"),
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF
+            |NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+        ngx_conf_set_size_slot,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        offsetof(ngx_http_markdown_conf_t,
+                 memory_budget),
+        NULL
+    },
 
     ngx_null_command
 };

@@ -69,6 +69,12 @@ fn ffi_test_default_options() -> MarkdownOptions {
         base_url: ptr::null(),
         base_url_len: 0,
         streaming_budget: 0,
+        prune_noise: 1,
+        prune_selectors: ptr::null(),
+        prune_selector_len: 0,
+        prune_protection_selectors: ptr::null(),
+        prune_protection_selector_len: 0,
+        memory_budget: 0,
     }
 }
 
@@ -143,6 +149,12 @@ fn test_basic_conversion() {
         base_url: ptr::null(),
         base_url_len: 0,
         streaming_budget: 0,
+        prune_noise: 1,
+        prune_selectors: ptr::null(),
+        prune_selector_len: 0,
+        prune_protection_selectors: ptr::null(),
+        prune_protection_selector_len: 0,
+        memory_budget: 0,
     };
 
     // Perform conversion
@@ -435,6 +447,12 @@ fn test_null_pointer_handling() {
         base_url: ptr::null(),
         base_url_len: 0,
         streaming_budget: 0,
+        prune_noise: 1,
+        prune_selectors: ptr::null(),
+        prune_selector_len: 0,
+        prune_protection_selectors: ptr::null(),
+        prune_protection_selector_len: 0,
+        memory_budget: 0,
     };
 
     let mut result = MarkdownResult {
@@ -532,6 +550,12 @@ fn test_multiple_conversions() {
         base_url: ptr::null(),
         base_url_len: 0,
         streaming_budget: 0,
+        prune_noise: 1,
+        prune_selectors: ptr::null(),
+        prune_selector_len: 0,
+        prune_protection_selectors: ptr::null(),
+        prune_protection_selector_len: 0,
+        memory_budget: 0,
     };
 
     // Perform multiple conversions
@@ -582,6 +606,12 @@ fn test_idempotent_free() {
         base_url: ptr::null(),
         base_url_len: 0,
         streaming_budget: 0,
+        prune_noise: 1,
+        prune_selectors: ptr::null(),
+        prune_selector_len: 0,
+        prune_protection_selectors: ptr::null(),
+        prune_protection_selector_len: 0,
+        memory_budget: 0,
     };
 
     let mut result = MarkdownResult {
@@ -629,6 +659,12 @@ fn test_content_type_charset_detection() {
         base_url: ptr::null(),
         base_url_len: 0,
         streaming_budget: 0,
+        prune_noise: 1,
+        prune_selectors: ptr::null(),
+        prune_selector_len: 0,
+        prune_protection_selectors: ptr::null(),
+        prune_protection_selector_len: 0,
+        memory_budget: 0,
     };
 
     let mut result = MarkdownResult {
@@ -677,6 +713,12 @@ fn test_gfm_flavor() {
         base_url: ptr::null(),
         base_url_len: 0,
         streaming_budget: 0,
+        prune_noise: 1,
+        prune_selectors: ptr::null(),
+        prune_selector_len: 0,
+        prune_protection_selectors: ptr::null(),
+        prune_protection_selector_len: 0,
+        memory_budget: 0,
     };
 
     let mut result = MarkdownResult {
@@ -737,6 +779,12 @@ fn test_null_result_pointer() {
         base_url: ptr::null(),
         base_url_len: 0,
         streaming_budget: 0,
+        prune_noise: 1,
+        prune_selectors: ptr::null(),
+        prune_selector_len: 0,
+        prune_protection_selectors: ptr::null(),
+        prune_protection_selector_len: 0,
+        memory_budget: 0,
     };
 
     // Call with NULL result pointer - should not crash
@@ -809,6 +857,12 @@ fn test_memory_cleanup_with_all_fields() {
         base_url: ptr::null(),
         base_url_len: 0,
         streaming_budget: 0,
+        prune_noise: 1,
+        prune_selectors: ptr::null(),
+        prune_selector_len: 0,
+        prune_protection_selectors: ptr::null(),
+        prune_protection_selector_len: 0,
+        memory_budget: 0,
     };
 
     let mut result = MarkdownResult {
@@ -865,6 +919,12 @@ fn test_memory_cleanup_error_case() {
         base_url: ptr::null(),
         base_url_len: 0,
         streaming_budget: 0,
+        prune_noise: 1,
+        prune_selectors: ptr::null(),
+        prune_selector_len: 0,
+        prune_protection_selectors: ptr::null(),
+        prune_protection_selector_len: 0,
+        memory_budget: 0,
     };
 
     let mut result = MarkdownResult {
@@ -922,6 +982,12 @@ fn test_panic_catching_invalid_utf8() {
         base_url: ptr::null(),
         base_url_len: 0,
         streaming_budget: 0,
+        prune_noise: 1,
+        prune_selectors: ptr::null(),
+        prune_selector_len: 0,
+        prune_protection_selectors: ptr::null(),
+        prune_protection_selector_len: 0,
+        memory_budget: 0,
     };
 
     let mut result = MarkdownResult {
@@ -982,6 +1048,12 @@ fn test_zero_length_html() {
         base_url: ptr::null(),
         base_url_len: 0,
         streaming_budget: 0,
+        prune_noise: 1,
+        prune_selectors: ptr::null(),
+        prune_selector_len: 0,
+        prune_protection_selectors: ptr::null(),
+        prune_protection_selector_len: 0,
+        memory_budget: 0,
     };
 
     let mut result = MarkdownResult {
@@ -1025,6 +1097,12 @@ fn test_zero_length_html_with_null_pointer() {
         base_url: ptr::null(),
         base_url_len: 0,
         streaming_budget: 0,
+        prune_noise: 1,
+        prune_selectors: ptr::null(),
+        prune_selector_len: 0,
+        prune_protection_selectors: ptr::null(),
+        prune_protection_selector_len: 0,
+        memory_budget: 0,
     };
 
     let mut result = ffi_test_empty_result();
@@ -1062,6 +1140,12 @@ fn test_null_content_type_with_zero_length() {
         base_url: ptr::null(),
         base_url_len: 0,
         streaming_budget: 0,
+        prune_noise: 1,
+        prune_selectors: ptr::null(),
+        prune_selector_len: 0,
+        prune_protection_selectors: ptr::null(),
+        prune_protection_selector_len: 0,
+        memory_budget: 0,
     };
 
     let mut result = MarkdownResult {
@@ -1112,6 +1196,12 @@ fn test_error_state_consistency() {
         base_url: ptr::null(),
         base_url_len: 0,
         streaming_budget: 0,
+        prune_noise: 1,
+        prune_selectors: ptr::null(),
+        prune_selector_len: 0,
+        prune_protection_selectors: ptr::null(),
+        prune_protection_selector_len: 0,
+        memory_budget: 0,
     };
 
     let mut result = MarkdownResult {

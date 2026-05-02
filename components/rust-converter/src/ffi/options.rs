@@ -37,10 +37,16 @@ pub(crate) struct DecodedOptions<'a> {
     pub(crate) generate_etag: bool,
     pub(crate) estimate_tokens: bool,
     pub(crate) conversion: ConversionOptions,
-    // Read in streaming.rs:85-86 to configure MemoryBudget. Only consumed by
-    // the streaming FFI path; may appear unused when streaming feature is off.
     #[allow(dead_code)]
     pub(crate) streaming_budget: u64,
+    #[allow(dead_code)]
+    pub(crate) prune_noise: bool,
+    #[allow(dead_code)]
+    pub(crate) prune_selectors: Option<&'a str>,
+    #[allow(dead_code)]
+    pub(crate) prune_protection_selectors: Option<&'a str>,
+    #[allow(dead_code)]
+    pub(crate) memory_budget: u64,
 }
 
 /// Convert a required raw pointer from C into a Rust reference.
@@ -139,6 +145,12 @@ fn optional_utf8<'a>(
 ///     generate_etag: 1,
 ///     estimate_tokens: 0,
 ///     streaming_budget: 0,
+///     prune_noise: 1,
+///     prune_selectors: std::ptr::null(),
+///     prune_selector_len: 0,
+///     prune_protection_selectors: std::ptr::null(),
+///     prune_protection_selector_len: 0,
+///     memory_budget: 0,
 /// };
 ///
 /// let decoded = decode_options(&opts).unwrap();
@@ -169,12 +181,28 @@ pub(crate) fn decode_options(
         Duration::ZERO
     };
 
+    let prune_noise = options.prune_noise != 0;
+    let prune_selectors = optional_utf8(
+        options.prune_selectors,
+        options.prune_selector_len,
+        "prune_selectors",
+    )?;
+    let prune_protection_selectors = optional_utf8(
+        options.prune_protection_selectors,
+        options.prune_protection_selector_len,
+        "prune_protection_selectors",
+    )?;
+
     Ok(DecodedOptions {
         content_type,
         timeout,
         generate_etag,
         estimate_tokens: options.estimate_tokens != 0,
         streaming_budget: options.streaming_budget,
+        prune_noise,
+        prune_selectors,
+        prune_protection_selectors,
+        memory_budget: options.memory_budget,
         conversion: ConversionOptions {
             flavor,
             include_front_matter,
@@ -183,6 +211,11 @@ pub(crate) fn decode_options(
             preserve_tables: true,
             base_url,
             resolve_relative_urls,
+            prune_config: crate::converter::pruning::PruneConfig::from_ffi(
+                prune_noise,
+                prune_selectors,
+                prune_protection_selectors,
+            ),
         },
     })
 }

@@ -16,13 +16,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Nothing yet.
 
-## [0.5.6] - 2026-04-28
+## [0.6.0] - 2026-05-02
 
-This release adds end-to-end validation coverage for metrics, conditional
-requests, config merge, auth/cache, and status-code passthrough paths, and
-hardens the shared E2E helper library with portability and assertion fixes.
+This release upgrades nginx-markdown-for-agents from a feature-complete opt-in
+system to a production-ready default-enabled system. Streaming engine is now the
+default conversion path (auto mode), noise pruning is enabled out-of-the-box,
+and a unified memory budget simplifies configuration.
 
 ### Added
+- Streaming engine auto mode: `markdown_streaming_engine` default changed from
+  `off` to `auto`. In auto mode, responses with Content-Length >=
+  `markdown_streaming_auto_threshold` (default 32K) or chunked transfer use
+  streaming; smaller responses use full-buffer.
+- `markdown_streaming_auto_threshold` directive (default 32k, context:
+  http/server/location) for controlling the auto-mode engine selection
+  threshold.
+- `markdown_prune_noise` directive (default on, context: http/server/location)
+  for runtime enable/disable of noise region pruning.
+- `markdown_prune_selectors` directive (context: http/server/location) for
+  custom prune selectors (space-separated tag names, replaces built-in
+  defaults: `nav footer aside`).
+- `markdown_prune_protection_selectors` directive (context: http/server/location)
+  for protection selectors that override prune selectors (protection wins).
+- `markdown_memory_budget` directive (context: http/server/location) for
+  unified memory budget controlling both streaming and full-buffer engines.
+  Priority: explicit per-engine > unified > default.
+- Reason codes `ELIGIBLE_STREAMING_AUTO` and `ELIGIBLE_FULLBUFFER_AUTO` for
+  auto-mode engine selection observability.
+- Rust `PruneConfig` struct with runtime-configurable pruning: `from_ffi()`,
+  `default_enabled()`, `disabled()`, custom selectors, and protection-selector
+  override.
+- Rust `should_prune_with_config()` function for runtime pruning decisions.
+- FFI fields: `prune_noise`, `prune_selectors`/`len`,
+  `prune_protection_selectors`/`len`, `memory_budget` in `MarkdownOptions`.
+- ADR-0007: Streaming Engine as Default (auto mode).
+- ADR-0008: Noise Pruning Enabled by Default.
+- Migration guide: `docs/guides/streaming-default-migration.md` with rollback
+  instructions for both default changes.
+- Release gate validator: `tools/release/gates/validate_release_gates_060.py`
+  (12 gates covering spec docs, ADRs, migration guide, directives, reason
+  codes, Cargo features, and harness manifest).
+- Makefile target `release-gates-check-060`.
 - New E2E validation scripts: `verify_metrics_endpoint_e2e.sh`,
   `verify_conditional_requests_e2e.sh`, `verify_config_merge_e2e.sh`,
   `verify_auth_cache_e2e.sh`, `verify_status_codes_e2e.sh`.
@@ -35,6 +69,20 @@ hardens the shared E2E helper library with portability and assertion fixes.
 - Makefile targets for all new E2E scripts.
 
 ### Changed
+- **Default behavior change**: `markdown_streaming_engine` default changed from
+  `off` to `auto`. Operators who need identical 0.5.x output must set
+  `markdown_streaming_engine off` explicitly.
+- **Default behavior change**: `prune_noise_regions` Cargo feature is now in
+  `default = ["prune_noise_regions"]` (was opt-in). Operators who need
+  identical 0.5.x output must set `markdown_prune_noise off` explicitly.
+- Auto-mode threshold uses `markdown_streaming_auto_threshold` instead of
+  `markdown_large_body_threshold` (which retains its original semantics for
+  the full-buffer threshold router).
+- Engine selection logic: when `streaming_engine == NULL` (no directive set),
+  defaults to auto mode instead of full-buffer (v0.6.0 default).
+- `REASON_TO_REQUEST_STATE` mapping updated with `ELIGIBLE_STREAMING_AUTO` and
+  `ELIGIBLE_FULLBUFFER_AUTO` mapping to `CONVERTED` state.
+- Total defined reason codes count: 17 (was 15).
 - `markdown_require_flag_value` now returns 2 instead of calling
   `usage` and exiting, allowing callers to handle the error under
   `set -e` without coupling to a `usage` function.

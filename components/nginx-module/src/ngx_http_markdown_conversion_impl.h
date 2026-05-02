@@ -443,6 +443,53 @@ ngx_http_markdown_prepare_conversion_options(ngx_http_request_t *r,
     options->streaming_budget = 0;
 #endif
 
+    options->prune_noise = conf->prune_noise ? 1U : 0U;
+    options->prune_selectors = NULL;
+    options->prune_selector_len = 0;
+    options->prune_protection_selectors = NULL;
+    options->prune_protection_selector_len = 0;
+
+    if (conf->prune_selectors != NULL) {
+        options->prune_selectors = conf->prune_selectors->data;
+        options->prune_selector_len = conf->prune_selectors->len;
+    }
+
+    if (conf->prune_protection_selectors != NULL) {
+        options->prune_protection_selectors =
+            conf->prune_protection_selectors->data;
+        options->prune_protection_selector_len =
+            conf->prune_protection_selectors->len;
+    }
+
+    /*
+     * Unified memory budget with priority:
+     *   explicit per-engine > unified > default
+     * For streaming_budget: if streaming_budget was explicitly set
+     * (not NGX_CONF_UNSET_SIZE), use it; else if memory_budget is
+     * set, use it; else streaming_budget keeps its merge default.
+     * For max_size: same priority chain applies.
+     */
+    options->memory_budget = (conf->memory_budget != NGX_CONF_UNSET_SIZE)
+        ? conf->memory_budget : 0;
+
+    /*
+     * Apply unified budget to streaming_budget when it was not
+     * explicitly set by the operator.
+     *
+     * Priority: explicit streaming_budget > memory_budget > default
+     *
+     * streaming_budget_explicit is set during merge_conf when the
+     * operator explicitly configured markdown_streaming_budget at
+     * this or any parent configuration level.
+     */
+#ifdef MARKDOWN_STREAMING_ENABLED
+    if (conf->memory_budget != NGX_CONF_UNSET_SIZE
+        && !conf->streaming_budget_explicit)
+    {
+        options->streaming_budget = conf->memory_budget;
+    }
+#endif
+
     if (r->headers_out.content_type.len > 0) {
         options->content_type = r->headers_out.content_type.data;
         options->content_type_len = r->headers_out.content_type.len;

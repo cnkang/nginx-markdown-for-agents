@@ -5,3 +5,5 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc 7b772691c5814c4fcd02a24748860ff518b601fec09ab48c8679f5f92fb1e7fd # shrinks to disqualifier = "table", content = "0  aA"
+cc cd34648e462d495d2e5d225b76118c8c2866e1703bce6b9b4643a54db578affa # shrinks to content_elements = [("header", "aa")], noise_elements = [("nav", "aaAAa")]
+cc 136ea370b282c1de10f1c657bf7d21b61aba020babb3f8ba7b9c8910a812f09c # shrinks to children = [(false, "header", "0")]

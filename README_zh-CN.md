@@ -176,7 +176,7 @@ curl -sD - -o /dev/null -H "Accept: text/html" http://localhost/docs/
 下面这些情况就不一定是最佳选择：
 
 - 你已经有专门的 Markdown 或 JSON 内容 API
-- 你无法接受渐进式启用，要求 streaming 从第一天开始全量强制开启
+- 你要求 streaming 全量强制开启，无法使用 auto 阈值模式
 - 你希望转换逻辑完全脱离请求路径
 
 ## 与边缘层转换的对比
@@ -381,9 +381,9 @@ Makefile               顶层构建与测试入口
 
 ## 路线方向
 
-当前版本 (0.5.5)：
+当前版本 (0.6.0)：
 
-- 双引擎架构：默认 full-buffer，按需启用 true streaming
+- 双引擎架构：streaming auto 模式默认，小响应使用 full-buffer
 - Streaming 失败语义与 commit boundary 对齐，支持可控 fallback 策略
 - 覆盖 chunk 边界与失败路径的 streaming parity/diff 测试体系
 - 带 shadow mode 的 streaming rollout 可观测性与 reason-code 可见性

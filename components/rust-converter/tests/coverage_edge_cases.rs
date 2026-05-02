@@ -382,6 +382,12 @@ fn ffi_test_default_options() -> MarkdownOptions {
         base_url: ptr::null(),
         base_url_len: 0,
         streaming_budget: 0,
+        prune_noise: 1,
+        prune_selectors: ptr::null(),
+        prune_selector_len: 0,
+        prune_protection_selectors: ptr::null(),
+        prune_protection_selector_len: 0,
+        memory_budget: 0,
     }
 }
 

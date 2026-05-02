@@ -178,7 +178,7 @@ This project is a strong fit if you:
 It is a weaker fit if you:
 
 - already have a purpose-built Markdown or JSON content API
-- cannot adopt an opt-in rollout model and require streaming to be always-on from day one
+- require streaming to be always-on and cannot use the auto threshold model
 - want transformation logic completely outside the request path
 
 ## How This Compares to Edge-Layer Conversion
@@ -384,9 +384,9 @@ add the harness workflow to your default path:
 
 ## Roadmap
 
-Current release (0.5.5):
+Current release (0.6.0):
 
-- Dual-engine architecture: full-buffer default plus opt-in true streaming path
+- Dual-engine architecture: streaming auto mode default, full-buffer for small responses
 - Streaming failure semantics and fallback controls aligned with commit boundaries
 - Streaming parity and diff coverage across chunk boundaries and failure paths
 - Streaming rollout observability with shadow-mode validation and reason-code visibility

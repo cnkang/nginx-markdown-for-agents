@@ -133,11 +133,12 @@ impl StreamingConverter {
         } else {
             None
         };
+        let sanitizer = StreamingSanitizer::with_prune_config(options.prune_config.clone());
         Self {
             options,
             charset_state: CharsetState::with_sniff_limit(budget.charset_sniff),
             tokenizer: StreamingTokenizer::new(),
-            sanitizer: StreamingSanitizer::new(),
+            sanitizer,
             state_machine: StructuralStateMachine::new(&budget),
             emitter: IncrementalEmitter::new(&budget),
             budget,
@@ -237,14 +238,12 @@ impl StreamingConverter {
         // 1. Check cooperative timeout
         self.check_timeout()?;
 
-        // 0.5.0 spec: when noise-region pruning feature is compiled in,
-        // streaming path is `pre-commit-fallback-only`.
-        #[cfg(feature = "prune_noise_regions")]
-        if matches!(self.commit_state, CommitState::PreCommit) {
-            return Err(ConversionError::StreamingFallback {
-                reason: FallbackReason::UnsupportedStructure("prune_noise_regions".to_string()),
-            });
-        }
+        // v0.6.0: noise-region pruning is now supported at the
+        // streaming tokenizer level via should_prune_with_config().
+        // The pre-commit fallback is no longer needed when pruning
+        // is enabled — pruned elements are simply skipped during
+        // tokenization.  Remove the blanket fallback that was
+        // required in 0.5.x when streaming lacked pruning support.
 
         // 2. Charset detection / transcoding
         let transcoded = self
@@ -1131,7 +1130,12 @@ mod tests {
         let opts = ConversionOptions {
             resolve_relative_urls: true,
             base_url: Some("https://example.com/path/to/page.html".to_string()),
-            ..ConversionOptions::default()
+            flavor: crate::converter::MarkdownFlavor::CommonMark,
+            include_front_matter: false,
+            extract_metadata: false,
+            simplify_navigation: true,
+            preserve_tables: true,
+            prune_config: crate::converter::pruning::PruneConfig::default_enabled(),
         };
         let conv = StreamingConverter::new(opts, MemoryBudget::default());
 
@@ -1217,7 +1221,13 @@ mod tests {
     fn make_converter_with_metadata() -> StreamingConverter {
         let opts = ConversionOptions {
             extract_metadata: true,
-            ..ConversionOptions::default()
+            flavor: crate::converter::MarkdownFlavor::CommonMark,
+            include_front_matter: false,
+            simplify_navigation: true,
+            preserve_tables: true,
+            base_url: None,
+            resolve_relative_urls: true,
+            prune_config: crate::converter::pruning::PruneConfig::default_enabled(),
         };
         let mut conv = StreamingConverter::new(opts, MemoryBudget::default());
         conv.set_content_type(Some("text/html; charset=UTF-8".to_string()));
@@ -1764,7 +1774,12 @@ mod tests {
         let opts = ConversionOptions {
             extract_metadata: true,
             base_url: Some("https://fallback.example.com".to_string()),
-            ..ConversionOptions::default()
+            flavor: crate::converter::MarkdownFlavor::CommonMark,
+            include_front_matter: false,
+            simplify_navigation: true,
+            preserve_tables: true,
+            resolve_relative_urls: true,
+            prune_config: crate::converter::pruning::PruneConfig::default_enabled(),
         };
         let mut conv = StreamingConverter::new(opts, MemoryBudget::default());
         conv.set_content_type(Some("text/html; charset=UTF-8".to_string()));
@@ -1778,7 +1793,12 @@ mod tests {
         let streaming_opts = ConversionOptions {
             extract_metadata: true,
             base_url: Some("https://fallback.example.com".to_string()),
-            ..ConversionOptions::default()
+            flavor: crate::converter::MarkdownFlavor::CommonMark,
+            include_front_matter: false,
+            simplify_navigation: true,
+            preserve_tables: true,
+            resolve_relative_urls: true,
+            prune_config: crate::converter::pruning::PruneConfig::default_enabled(),
         };
         let mut conv2 = StreamingConverter::new(streaming_opts, MemoryBudget::default());
         conv2.set_content_type(Some("text/html; charset=UTF-8".to_string()));
@@ -2004,7 +2024,12 @@ mod tests {
         let opts = ConversionOptions {
             extract_metadata: true,
             base_url: Some("https://base.example.com".to_string()),
-            ..ConversionOptions::default()
+            flavor: crate::converter::MarkdownFlavor::CommonMark,
+            include_front_matter: false,
+            simplify_navigation: true,
+            preserve_tables: true,
+            resolve_relative_urls: true,
+            prune_config: crate::converter::pruning::PruneConfig::default_enabled(),
         };
         let mut conv = StreamingConverter::new(opts, MemoryBudget::default());
         conv.set_content_type(Some("text/html; charset=UTF-8".to_string()));
@@ -2029,7 +2054,12 @@ mod tests {
         let alternate_opts = ConversionOptions {
             extract_metadata: true,
             base_url: Some("https://base.example.com".to_string()),
-            ..ConversionOptions::default()
+            flavor: crate::converter::MarkdownFlavor::CommonMark,
+            include_front_matter: false,
+            simplify_navigation: true,
+            preserve_tables: true,
+            resolve_relative_urls: true,
+            prune_config: crate::converter::pruning::PruneConfig::default_enabled(),
         };
         let mut conv2 = StreamingConverter::new(alternate_opts, MemoryBudget::default());
         conv2.set_content_type(Some("text/html; charset=UTF-8".to_string()));
@@ -2057,7 +2087,12 @@ mod tests {
         let opts = ConversionOptions {
             extract_metadata: true,
             base_url: None,
-            ..ConversionOptions::default()
+            flavor: crate::converter::MarkdownFlavor::CommonMark,
+            include_front_matter: false,
+            simplify_navigation: true,
+            preserve_tables: true,
+            resolve_relative_urls: true,
+            prune_config: crate::converter::pruning::PruneConfig::default_enabled(),
         };
         let mut conv = StreamingConverter::new(opts, MemoryBudget::default());
         conv.set_content_type(Some("text/html; charset=UTF-8".to_string()));
@@ -2134,7 +2169,12 @@ mod tests {
     /// let opts = ConversionOptions {
     ///     extract_metadata: true,
     ///     base_url: Some("https://base.example.com".to_string()),
-    ///     ..ConversionOptions::default()
+    ///     flavor: crate::converter::MarkdownFlavor::CommonMark,
+    ///     include_front_matter: false,
+    ///     simplify_navigation: true,
+    ///     preserve_tables: true,
+    ///     resolve_relative_urls: true,
+    ///     prune_config: crate::converter::pruning::PruneConfig::default_enabled(),
     /// };
     /// let mut conv = StreamingConverter::new(opts, MemoryBudget::default());
     /// conv.set_content_type(Some("text/html; charset=UTF-8".to_string()));
@@ -2151,7 +2191,12 @@ mod tests {
         let opts = ConversionOptions {
             extract_metadata: true,
             base_url: Some("https://base.example.com".to_string()),
-            ..ConversionOptions::default()
+            flavor: crate::converter::MarkdownFlavor::CommonMark,
+            include_front_matter: false,
+            simplify_navigation: true,
+            preserve_tables: true,
+            resolve_relative_urls: true,
+            prune_config: crate::converter::pruning::PruneConfig::default_enabled(),
         };
         let mut conv = StreamingConverter::new(opts, MemoryBudget::default());
         conv.set_content_type(Some("text/html; charset=UTF-8".to_string()));
@@ -2181,7 +2226,12 @@ mod tests {
         let opts = ConversionOptions {
             extract_metadata: true,
             base_url: Some("https://base.example.com".to_string()),
-            ..ConversionOptions::default()
+            flavor: crate::converter::MarkdownFlavor::CommonMark,
+            include_front_matter: false,
+            simplify_navigation: true,
+            preserve_tables: true,
+            resolve_relative_urls: true,
+            prune_config: crate::converter::pruning::PruneConfig::default_enabled(),
         };
         let mut conv = StreamingConverter::new(opts, MemoryBudget::default());
         conv.set_content_type(Some("text/html; charset=UTF-8".to_string()));

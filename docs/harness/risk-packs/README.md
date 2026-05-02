@@ -19,6 +19,8 @@ runtime semantics from canonical docs. They answer four practical questions:
 | [nginx-protocol-safety.md](nginx-protocol-safety.md) | auth/cache-control, conditional requests, statuses, headers | `AGENTS.md`, `docs/architecture/REQUEST_LIFECYCLE.md` |
 | [release-governance.md](release-governance.md) | release gates, source-build CI, scope governance, matrix tooling | `AGENTS.md`, `docs/project/release-gates/README.md` |
 | [harness-remediation.md](harness-remediation.md) | recent Git analysis, harness rules, steering adapters, remediation closeout | `AGENTS.md`, `docs/harness/core.md` |
+| [otel-integration.md](otel-integration.md) | OTel tracing, OTel metrics, OTLP export, span attributes | `AGENTS.md`, `docs/features/otel-tracing.md` |
+| [packaging-distribution.md](packaging-distribution.md) | APT/YUM repos, Homebrew tap, Helm chart, K8s Ingress | `AGENTS.md`, `docs/guides/INSTALLATION.md` |
 
 ## Document Updates
 
@@ -27,3 +29,4 @@ runtime semantics from canonical docs. They answer four practical questions:
 | 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |
 | 0.5.5 | 2026-04-24 | Codex | Added harness-remediation pack |
 | 0.5.5 | 2026-04-24 | Codex | Added protocol safety and release governance packs |
+| 0.6.0 | 2026-04-28 | v0.6.0-planning | Added otel-integration and packaging-distribution packs |

@@ -505,9 +505,11 @@ ngx_http_markdown_log_conditional_streaming(
  * 6. Content-Type is text/event-stream -> PATH_FULLBUFFER
  * 7. stream_types exclusion match -> PATH_FULLBUFFER
  * 8. engine == on -> PATH_STREAMING
- * 9. engine == auto + CL >= threshold -> PATH_STREAMING
- * 10. engine == auto + no CL -> PATH_STREAMING
- * 11. engine == auto + CL < threshold -> fall through
+ * 9. engine == auto + CL >= auto_threshold -> PATH_STREAMING
+ * 10. engine == auto + chunked -> PATH_STREAMING
+ * 11. engine == auto + CL < auto_threshold -> PATH_FULLBUFFER
+ *
+ * Default (no markdown_streaming_engine directive): auto mode.
  */
 static ngx_uint_t
 ngx_http_markdown_select_processing_path(
@@ -517,8 +519,19 @@ ngx_http_markdown_select_processing_path(
     ngx_str_t    val;
     ngx_uint_t   engine_mode;
 
-    if (conf == NULL || conf->streaming_engine == NULL) {
+    if (conf == NULL) {
         return NGX_HTTP_MARKDOWN_PATH_FULLBUFFER;
+    }
+
+    /*
+     * v0.6.0 default: when no markdown_streaming_engine directive
+     * is set (streaming_engine == NULL), use auto mode.
+     * Operators who need 0.5.x behavior set
+     * markdown_streaming_engine off explicitly.
+     */
+    if (conf->streaming_engine == NULL) {
+        engine_mode = NGX_HTTP_MARKDOWN_STREAMING_ENGINE_AUTO;
+        goto common_checks;
     }
 
     /* Evaluate the complex value */
@@ -569,6 +582,8 @@ ngx_http_markdown_select_processing_path(
             return NGX_HTTP_MARKDOWN_PATH_FULLBUFFER;
         }
     }
+
+common_checks:
 
     /* Rule 3: HEAD request */
     if (r->method == NGX_HTTP_HEAD) {
@@ -633,15 +648,18 @@ ngx_http_markdown_select_processing_path(
 
     /* Rules 9-11: engine == auto */
     if (r->headers_out.content_length_n >= 0
-        && conf->large_body_threshold > 0
         && (size_t) r->headers_out.content_length_n
-           < conf->large_body_threshold)
+           < conf->streaming_auto_threshold)
     {
-        /* CL < threshold: let threshold router decide */
+        /* CL < auto_threshold: use full-buffer */
+        ngx_http_markdown_log_decision(r, conf,
+            ngx_http_markdown_reason_eligible_fullbuffer_auto());
         return NGX_HTTP_MARKDOWN_PATH_FULLBUFFER;
     }
 
-    /* auto + CL >= threshold or no CL */
+    /* auto + CL >= auto_threshold or chunked (no CL) */
+    ngx_http_markdown_log_decision(r, conf,
+        ngx_http_markdown_reason_eligible_streaming_auto());
     return NGX_HTTP_MARKDOWN_PATH_STREAMING;
 }
 
