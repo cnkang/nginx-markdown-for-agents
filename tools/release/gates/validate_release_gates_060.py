@@ -84,6 +84,11 @@ GATE_CARGO_DEFAULT_FEATURE = "cargo:default-prune-noise-regions"
 GATE_C_DIRECTIVES = "c-directives:v060-new"
 GATE_REASON_CODES = "reason-codes:v060-new"
 GATE_CHANGELOG = "changelog:060-entry"
+GATE_COVERAGE_GATE_SCRIPT = "coverage-gate:script-exists"
+
+COVERAGE_GATE_SCRIPT = (
+    PROJECT_ROOT / "tools" / "ci" / "coverage_gate.py"
+)
 
 
 class ValidationResult:
@@ -244,6 +249,18 @@ def check_changelog(result: ValidationResult) -> None:
         result.skip(GATE_CHANGELOG, "0.6.0 entry not yet in CHANGELOG")
 
 
+def check_coverage_gate_script(result: ValidationResult) -> None:
+    """Verify coverage gate enforcement script exists."""
+    if COVERAGE_GATE_SCRIPT.is_file():
+        content = COVERAGE_GATE_SCRIPT.read_text(encoding="utf-8")
+        if "coverage_gate" in content and "parse_lcov_summary" in content:
+            result.pass_(GATE_COVERAGE_GATE_SCRIPT, "coverage_gate.py exists with required functions")
+        else:
+            result.fail(GATE_COVERAGE_GATE_SCRIPT, "coverage_gate.py missing required functions")
+    else:
+        result.fail(GATE_COVERAGE_GATE_SCRIPT, f"coverage_gate.py missing at {COVERAGE_GATE_SCRIPT}")
+
+
 def main() -> int:
     """Run 0.6.0 release gate validation and report results."""
     result = ValidationResult()
@@ -258,6 +275,7 @@ def main() -> int:
     check_c_directives(result)
     check_reason_codes(result)
     check_changelog(result)
+    check_coverage_gate_script(result)
 
     print("0.6.0 Release Gate Validation Report")
     print("=" * 60)

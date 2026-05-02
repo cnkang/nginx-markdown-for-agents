@@ -114,8 +114,7 @@
     "coverage-gate": {
       "phase": "focused-semantic",
       "commands": [
-        "make coverage-c",
-        "make coverage-rust"
+        "make coverage-gate"
       ]
     },
     "release-governance-060": {

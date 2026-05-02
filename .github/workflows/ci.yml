@@ -16,6 +16,7 @@ on:
       - "README.md"
       - "README_zh-CN.md"
       - ".github/workflows/**"
+      - "tools/ci/coverage_gate.py"
   push:
     branches: [main, master]
     paths:
@@ -30,6 +31,7 @@ on:
       - "README.md"
       - "README_zh-CN.md"
       - ".github/workflows/**"
+      - "tools/ci/coverage_gate.py"
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -427,6 +429,54 @@ jobs:
         with:
           name: perf-verdict-${{ steps.platform.outputs.name }}.json
           path: perf/reports/perf-verdict-${{ steps.platform.outputs.name }}.json
+
+  coverage-gate:
+    name: Coverage Gate (80%)
+    needs: changes
+    if: needs.changes.outputs.nginx == 'true' || needs.changes.outputs.rust == 'true' || needs.changes.outputs.workflows == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Install coverage deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            curl \
+            lcov \
+            pkg-config \
+            python3 \
+            zlib1g-dev \
+            apache2-utils
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          workspaces: |
+            components/rust-converter -> target
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@7f8e0b58a3db368f15a49b98cfe8d3f7be32b7e3 # v2
+        with:
+          tool: cargo-llvm-cov
+
+      - name: Run coverage gate
+        run: make coverage-gate
+
+      - name: Upload coverage reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage-reports
+          path: coverage/
 
   corpus-benchmark:
     name: Corpus Benchmark Gate

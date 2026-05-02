@@ -287,6 +287,21 @@ coverage-sonar-xml:
 
 coverage-all: coverage-c coverage-rust coverage-sonar-xml
 
+COVERAGE_C_MIN_LINE ?= 80
+COVERAGE_C_MIN_FUNC ?= 80
+COVERAGE_RUST_MIN_LINE ?= 80
+COVERAGE_RUST_MIN_FUNC ?= 80
+
+coverage-gate: coverage-c coverage-rust
+	python3 tools/ci/coverage_gate.py \
+		--c-lcov $(COVERAGE_DIR)/c-coverage.lcov \
+		--rust-lcov $(COVERAGE_DIR)/rust-coverage.lcov \
+		--rust-streaming-lcov $(COVERAGE_DIR)/rust-streaming-coverage.lcov \
+		--c-min-line $(COVERAGE_C_MIN_LINE) \
+		--c-min-func $(COVERAGE_C_MIN_FUNC) \
+		--rust-min-line $(COVERAGE_RUST_MIN_LINE) \
+		--rust-min-func $(COVERAGE_RUST_MIN_FUNC)
+
 clean:
 	cd $(RUST_DIR) && cargo clean
 	$(MAKE) -C $(NGINX_TEST_DIR) clean || true
@@ -333,4 +348,5 @@ help:
 	@echo "  coverage-c               - Generate C module e2e coverage (builds NGINX with --coverage)"
 	@echo "  coverage-rust            - Generate Rust test coverage (llvm-cov lcov)"
 	@echo "  coverage-all             - Generate all coverage reports"
+	@echo "  coverage-gate            - Generate coverage and enforce min thresholds (default 80%%)"
 	@echo "  clean                    - Clean build artifacts"
