@@ -626,6 +626,32 @@ ngx_http_markdown_dynconf_reload(
 
     ngx_close_file(fd);
 
+    /*
+     * Process final line if the file does not end with a newline.
+     * When EOF is reached with unprocessed data between line_start
+     * and pos, that data constitutes the final line.
+     */
+    if (line_start < pos) {
+        size_t  line_len;
+
+        line_len = pos - line_start;
+        if (line_len > 0 && buf[line_start + line_len - 1] == '\r') {
+            line_len--;
+        }
+
+        if (ngx_http_markdown_dynconf_parse_line(
+                buf + line_start, line_len,
+                &key, &value, &value_len) == NGX_OK)
+        {
+            if (ngx_http_markdown_dynconf_apply(
+                    conf, key, value, value_len,
+                    r->connection->log) == NGX_OK)
+            {
+                applied++;
+            }
+        }
+    }
+
     if (applied > 0) {
         ngx_log_error(NGX_LOG_INFO, r->connection->log, 0,
                       "markdown dynconf: applied %ui settings from \"%V\"",
