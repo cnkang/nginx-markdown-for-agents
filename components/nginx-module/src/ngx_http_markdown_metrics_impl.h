@@ -1041,6 +1041,66 @@ ngx_http_markdown_metrics_write_text(
 
 #if NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED
 /*
+ * Escape a byte string for use inside a JSON string value.
+ *
+ * JSON requires escaping: " -> \", \ -> \\, control chars (< 0x20) -> \uXXXX.
+ *
+ * Parameters:
+ *   dst  - destination buffer start
+ *   last - one past end of destination buffer
+ *   src  - source bytes
+ *   len  - source length
+ *
+ * Returns:
+ *   Updated write position (clamped to last on overflow).
+ */
+static u_char *
+ngx_http_markdown_escape_json_string(u_char *dst, u_char *last,
+                                     const u_char *src, size_t len)
+{
+    size_t   i;
+    u_char   ch;
+
+    for (i = 0; i < len && dst < last; i++) {
+        ch = src[i];
+
+        switch (ch) {
+        case '"':
+            if (dst + 2 > last) { return last; }
+            *dst++ = '\\'; *dst++ = '"';
+            break;
+        case '\\':
+            if (dst + 2 > last) { return last; }
+            *dst++ = '\\'; *dst++ = '\\';
+            break;
+        case '\n':
+            if (dst + 2 > last) { return last; }
+            *dst++ = '\\'; *dst++ = 'n';
+            break;
+        case '\r':
+            if (dst + 2 > last) { return last; }
+            *dst++ = '\\'; *dst++ = 'r';
+            break;
+        case '\t':
+            if (dst + 2 > last) { return last; }
+            *dst++ = '\\'; *dst++ = 't';
+            break;
+        default:
+            if (ch < 0x20) {
+                if (dst + 6 > last) { return last; }
+                dst = ngx_snprintf(dst, 7, "\\u%04Xd", (unsigned) ch);
+            } else {
+                *dst++ = ch;
+            }
+            break;
+        }
+    }
+
+    return dst;
+}
+
+
+/*
  * Recursive in-order walk of the per-path RB-tree for JSON output.
  *
  * Emits each path as a JSON object inside the "paths" array.
@@ -1078,11 +1138,14 @@ ngx_http_markdown_json_walk_path_tree(
 
         p = ngx_slprintf(p, end,
             "\n"
-            "      {\"path\": \"%*s\", "
+            "      {\"path\": \"");
+        p = ngx_http_markdown_escape_json_string(
+                p, end, pnode->path, pnode->path_len);
+        p = ngx_slprintf(p, end,
+            "\", "
             "\"conversions\": %uA, "
             "\"entries\": %uA, "
             "\"conversion_time_ms\": %uA},",
-            (int) pnode->path_len, pnode->path,
             pnode->conversions,
             pnode->entries,
             pnode->conversion_time_sum_ms);
@@ -1128,10 +1191,12 @@ ngx_http_markdown_text_walk_path_tree(
     if (p < end) {
         pnode = (ngx_http_markdown_path_metric_node_t *) node;
 
+        p = ngx_slprintf(p, end, "- Path[");
+        p = ngx_http_markdown_escape_json_string(
+                p, end, pnode->path, pnode->path_len);
         p = ngx_slprintf(p, end,
-            "- Path[%*s]: conversions=%uA entries=%uA "
+            "]: conversions=%uA entries=%uA "
             "time_ms=%uA\n",
-            (int) pnode->path_len, pnode->path,
             pnode->conversions,
             pnode->entries,
             pnode->conversion_time_sum_ms);

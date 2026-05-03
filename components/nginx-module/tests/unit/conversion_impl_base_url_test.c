@@ -627,10 +627,11 @@ ngx_http_markdown_otel_span_end(ngx_http_markdown_otel_span_t *span)
 
 static ngx_inline void
 ngx_http_markdown_otel_span_export(ngx_http_markdown_otel_span_t *span,
-    ngx_log_t *log)
+    ngx_log_t *log, void *r)
 {
     UNUSED(span);
     UNUSED(log);
+    UNUSED(r);
 }
 
 static ngx_inline void
