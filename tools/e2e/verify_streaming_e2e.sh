@@ -20,10 +20,9 @@ set -euo pipefail
 
 NGINX_BIN="${NGINX_BIN:-}"
 
-# PORT and UPSTREAM_PORT are reserved for future runtime E2E tests
-# that start an NGINX instance and upstream server.
-# PORT="${PORT:-18095}"
-# UPSTREAM_PORT="${UPSTREAM_PORT:-19095}"
+# PORT and UPSTREAM_PORT for runtime E2E tests
+PORT="${PORT:-19876}"
+UPSTREAM_PORT="${UPSTREAM_PORT:-19877}"
 
 SEPARATOR='========================================='
 
@@ -37,8 +36,8 @@ the test plan and exits with code 0.
 
 Options:
   --nginx-bin PATH         Path to streaming-enabled nginx binary
-  --port PORT              (reserved, not yet implemented)
-  --upstream-port PORT     (reserved, not yet implemented)
+  --port PORT              NGINX listen port (default: 19876)
+  --upstream-port PORT     Upstream HTTP server port (default: 19877)
   -h, --help               Show this help
 
 Test cases:
@@ -70,7 +69,7 @@ while [[ $# -gt 0 ]]; do
                 echo "Error: --port requires a value" >&2
                 exit 2
             fi
-            echo "Warning: --port is reserved for future use and currently has no effect" >&2
+            PORT="$2"
             shift 2
             ;;
         --upstream-port)
@@ -78,7 +77,7 @@ while [[ $# -gt 0 ]]; do
                 echo "Error: --upstream-port requires a value" >&2
                 exit 2
             fi
-            echo "Warning: --upstream-port is reserved for future use and currently has no effect" >&2
+            UPSTREAM_PORT="$2"
             shift 2
             ;;
         -h|--help)
