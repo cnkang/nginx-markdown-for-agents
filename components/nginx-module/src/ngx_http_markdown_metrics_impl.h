@@ -811,6 +811,26 @@ ngx_http_markdown_text_walk_path_tree(
         if (p > paths_start && *(p - 1) == ',') {
             p--;
         }
+
+        /*
+         * Emit the __other__ pseudo-path entry for overflow paths
+         * that were dropped when the cardinality limit was reached.
+         * This allows operators to see the count of untracked paths
+         * without enumerating them.
+         */
+        if (snapshot->per_path.overflow_count > 0 && p < end) {
+            if (p > paths_start) {
+                p = ngx_slprintf(p, end, ",");
+            }
+            p = ngx_slprintf(p, end,
+                "\n"
+                "      {\"path\":\"__other__\","
+                "\"conversions\":%uA,"
+                "\"conversion_time_sum_ms\":0,"
+                "\"entries\":%uA}",
+                snapshot->per_path.overflow_count,
+                snapshot->per_path.overflow_count);
+        }
     }
 #endif /* NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED */
 

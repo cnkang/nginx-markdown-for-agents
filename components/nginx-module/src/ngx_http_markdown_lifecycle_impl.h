@@ -82,6 +82,19 @@ ngx_http_markdown_init_worker(ngx_cycle_t *cycle)
                 /* Non-fatal: worker continues without hot-reload. */
             }
         }
+
+        /*
+         * Wire per-path cardinality limit from configuration into
+         * the shared metrics struct.  The SHM initializer sets a
+         * default; override it with the operator's configured value.
+         */
+        if (lcf != NULL && lcf->ops.metrics_per_path
+            && lcf->ops.metrics_per_path_cardinality > 0
+            && ngx_http_markdown_metrics != NULL)
+        {
+            ngx_http_markdown_metrics->per_path.cardinality_limit =
+                lcf->ops.metrics_per_path_cardinality;
+        }
     }
 
     return NGX_OK;
