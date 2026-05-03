@@ -842,55 +842,72 @@ ngx_http_markdown_modify_cache_control_for_auth(ngx_http_request_t *r)
     ngx_table_elt_t  *cache_control;
     ngx_int_t         has_no_store;
     ngx_int_t         has_private;
-    ngx_int_t         has_public;
     ngx_flag_t        any_public;
 
     if (r == NULL) {
         return NGX_ERROR;
     }
 
-    cache_control = ngx_http_markdown_find_response_header(
-        r,
-        ngx_http_markdown_hdr_cache_control,
-        sizeof(ngx_http_markdown_hdr_cache_control) - 1);
-
-    if (cache_control == NULL) {
+    if (r->headers_out.headers.part.nelts == 0) {
         return ngx_http_markdown_add_private_cache_control_header(r);
     }
 
     /*
-     * Cache-Control header exists.  Check directives in the first
-     * header.  Also scan for any additional Cache-Control headers
-     * that might contain "public" — multiple Cache-Control headers
-     * are valid per RFC 9111 and a later header can override an
-     * earlier one.
+     * Scan ALL Cache-Control headers (not just the first) to detect
+     * no-store, private, and public directives across the entire
+     * header set.  Multiple Cache-Control headers are valid per
+     * RFC 9111 and a later header can override an earlier one.
+     *
+     * We iterate the full linked-list of header parts so that
+     * no-store detection is independent of any_public gating,
+     * and we collect all entries that contain "public" for
+     * per-entry rewrite below.
      */
-    has_no_store = ngx_http_markdown_cache_control_has_directive(
-        &cache_control->value, &ngx_http_markdown_no_store);
-    has_private = ngx_http_markdown_cache_control_has_directive(
-        &cache_control->value, &ngx_http_markdown_private);
-    has_public = ngx_http_markdown_cache_control_has_directive(
-        &cache_control->value, &ngx_http_markdown_public);
-    any_public = (ngx_flag_t) has_public;
+    has_no_store = 0;
+    has_private = 0;
+    any_public = 0;
+    cache_control = NULL;
 
-    /*
-     * Scan additional Cache-Control headers for "public" that the
-     * first-header-only lookup would miss.  If any subsequent
-     * header contains "public", treat the effective policy as
-     * public even if the first header does not.
-     */
-    if (!any_public && r->headers_out.headers.part.nelts > 1) {
-        for (ngx_list_part_t *part = &r->headers_out.headers.part;
-             part != NULL;
-             part = part->next)
-        {
-            ngx_table_elt_t  *headers;
+    {
+        ngx_list_part_t  *part;
+        ngx_table_elt_t  *headers;
+        ngx_uint_t        i;
 
+        part = &r->headers_out.headers.part;
+        for (/* void */; part != NULL; part = part->next) {
             headers = part->elts;
-            for (ngx_uint_t i = 0; i < part->nelts; i++) {
-                if (&headers[i] == cache_control) {
+            for (i = 0; i < part->nelts; i++) {
+                if (headers[i].key.len
+                        != sizeof(ngx_http_markdown_hdr_cache_control) - 1
+                    || ngx_strncasecmp(headers[i].key.data,
+                                        ngx_http_markdown_hdr_cache_control,
+                                        sizeof(ngx_http_markdown_hdr_cache_control) - 1) != 0)
+                {
                     continue;
                 }
+
+                /* Found a Cache-Control entry — check its directives. */
+                if (cache_control == NULL) {
+                    cache_control = &headers[i];
+                }
+                if (ngx_http_markdown_cache_control_has_directive(
+                        &headers[i].value, &ngx_http_markdown_no_store))
+                {
+                    has_no_store = 1;
+                }
+                if (ngx_http_markdown_cache_control_has_directive(
+                        &headers[i].value, &ngx_http_markdown_private))
+                {
+                    has_private = 1;
+                }
+                if (ngx_http_markdown_cache_control_has_directive(
+                        &headers[i].value, &ngx_http_markdown_public))
+                {
+                    any_public = 1;
+                }
+            }
+        }
+    }
                 if (headers[i].key.len
                         == sizeof(ngx_http_markdown_hdr_cache_control) - 1
                     && ngx_strncasecmp(headers[i].key.data,
@@ -914,6 +931,10 @@ ngx_http_markdown_modify_cache_control_for_auth(ngx_http_request_t *r)
         }
     }
 
+    if (cache_control == NULL) {
+        return ngx_http_markdown_add_private_cache_control_header(r);
+    }
+
     /*
      * Rule 3: Preserve "no-store" - NEVER downgrade
      * If any Cache-Control header contains "no-store", leave all
@@ -926,15 +947,55 @@ ngx_http_markdown_modify_cache_control_for_auth(ngx_http_request_t *r)
     }
 
     /*
-     * If any Cache-Control header still contains "public" after
-     * checking all headers, we need to strip it.  This covers:
+     * If any Cache-Control header still contains "public", strip
+     * public from ALL such entries and append private.  This covers:
      *   - First header has "public"
      *   - First header has "private" but a later header has "public"
-     * In both cases, the effective policy is public due to the
-     * later header, so we must strip public and ensure private.
+     *   - Multiple headers each have "public"
+     * In all cases, each entry with public is rewritten.
      */
     if (any_public) {
-        return ngx_http_markdown_strip_public_and_append_private(r, cache_control);
+        ngx_list_part_t  *part;
+        ngx_table_elt_t  *headers;
+        ngx_uint_t        i;
+
+        part = &r->headers_out.headers.part;
+        for (/* void */; part != NULL; part = part->next) {
+            headers = part->elts;
+            for (i = 0; i < part->nelts; i++) {
+                if (headers[i].key.len
+                        != sizeof(ngx_http_markdown_hdr_cache_control) - 1
+                    || ngx_strncasecmp(headers[i].key.data,
+                                        ngx_http_markdown_hdr_cache_control,
+                                        sizeof(ngx_http_markdown_hdr_cache_control) - 1) != 0)
+                {
+                    continue;
+                }
+
+                if (ngx_http_markdown_cache_control_has_directive(
+                        &headers[i].value, &ngx_http_markdown_public))
+                {
+                    ngx_int_t  rc;
+
+                    rc = ngx_http_markdown_strip_public_and_append_private(
+                             r, &headers[i]);
+                    if (rc != NGX_OK) {
+                        return rc;
+                    }
+                } else if (!ngx_http_markdown_cache_control_has_directive(
+                               &headers[i].value, &ngx_http_markdown_private))
+                {
+                    ngx_int_t  rc;
+
+                    rc = ngx_http_markdown_append_private_directive(r, &headers[i]);
+                    if (rc != NGX_OK) {
+                        return rc;
+                    }
+                }
+            }
+        }
+
+        return NGX_OK;
     }
 
     if (has_private) {
