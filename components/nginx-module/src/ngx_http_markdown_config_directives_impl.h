@@ -844,17 +844,22 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
     /*
      * markdown_otel_endpoint <url>
      *
-     * OTel collector endpoint URL for span export.  When set, the
-     * endpoint is included in the OTLP JSON resource attributes so
-     * the export target is unambiguous.  Actual HTTP POST to the
-     * collector is a future enhancement; currently the JSON payload
-     * is written to the error log at info level.
+     * OTel collector endpoint URL for span export.  The module
+     * issues an HTTP POST via NGINX subrequest to this URI,
+     * sending the OTLP JSON payload as the request body.
+     *
+     * The URL should reference an internal proxy location that
+     * forwards to the OTel collector (e.g. http://host:4318/v1/traces).
+     * An internal location block must be configured in nginx.conf
+     * to proxy_pass to the actual collector.
      *
      * Default: (empty — no endpoint configured)
      * Context: http, server, location
      *
      * Example:
-     *   markdown_otel_endpoint http://localhost:4318/v1/traces;
+     *   markdown_otel_endpoint /_otel_export;
+     *   # with corresponding nginx.conf location:
+     *   # location = /_otel_export { internal; proxy_pass http://collector:4318/v1/traces; }
      */
     {
         ngx_string("markdown_otel_endpoint"),
@@ -862,6 +867,94 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
         ngx_conf_set_str_slot,
         NGX_HTTP_LOC_CONF_OFFSET,
         offsetof(ngx_http_markdown_conf_t, ops.otel_endpoint),
+        NULL
+    },
+
+    /*
+     * markdown_otel_tracing on|off
+     *
+     * Enable OTel span creation for conversion request tracing.
+     * When enabled, each conversion creates a span with trace
+     * context propagation and conversion attributes.
+     *
+     * Default: off
+     * Context: http, server, location
+     */
+    {
+        ngx_string("markdown_otel_tracing"),
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_FLAG,
+        ngx_conf_set_flag_slot,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        offsetof(ngx_http_markdown_conf_t, ops.otel_tracing),
+        NULL
+    },
+
+    /*
+     * markdown_otel_metrics on|off
+     *
+     * Enable OTel metrics export via OTLP protocol.
+     *
+     * Default: off
+     * Context: http, server, location
+     */
+    {
+        ngx_string("markdown_otel_metrics"),
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_FLAG,
+        ngx_conf_set_flag_slot,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        offsetof(ngx_http_markdown_conf_t, ops.otel_metrics),
+        NULL
+    },
+
+    /*
+     * markdown_otel_service_name <name>
+     *
+     * Service name label for OTel resource attributes.
+     *
+     * Default: nginx-markdown
+     * Context: http, server, location
+     */
+    {
+        ngx_string("markdown_otel_service_name"),
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+        ngx_conf_set_str_slot,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        offsetof(ngx_http_markdown_conf_t, ops.otel_service_name),
+        NULL
+    },
+
+    /*
+     * markdown_otel_span_buffer_size <number>
+     *
+     * Buffer size for spans when the collector is unreachable.
+     * Buffered spans are retried on the next export window.
+     *
+     * Default: 1024
+     * Context: http, server, location
+     */
+    {
+        ngx_string("markdown_otel_span_buffer_size"),
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+        ngx_conf_set_num_slot,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        offsetof(ngx_http_markdown_conf_t, ops.otel_span_buffer_size),
+        NULL
+    },
+
+    /*
+     * markdown_otel_export_timeout <time>
+     *
+     * Timeout for OTLP HTTP export requests.
+     *
+     * Default: 5s
+     * Context: http, server, location
+     */
+    {
+        ngx_string("markdown_otel_export_timeout"),
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+        ngx_conf_set_msec_slot,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        offsetof(ngx_http_markdown_conf_t, ops.otel_export_timeout),
         NULL
     },
 
