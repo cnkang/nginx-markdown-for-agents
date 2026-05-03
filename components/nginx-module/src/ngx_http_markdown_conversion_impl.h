@@ -1218,7 +1218,7 @@ ngx_http_markdown_execute_conversion(ngx_http_request_t *r,
                 (int64_t) result->error_code);
             ngx_http_markdown_otel_span_end(ctx->otel_span);
             ngx_http_markdown_otel_span_export(ctx->otel_span,
-                r->connection->log);
+                r->connection->log, r);
             ctx->otel_span = NULL;
         }
         return ngx_http_markdown_handle_conversion_failure(
@@ -1267,7 +1267,7 @@ ngx_http_markdown_execute_conversion(ngx_http_request_t *r,
             (int64_t) result->error_code);
         ngx_http_markdown_otel_span_end(ctx->otel_span);
         ngx_http_markdown_otel_span_export(ctx->otel_span,
-            r->connection->log);
+            r->connection->log, r);
         ctx->otel_span = NULL;
     }
 
