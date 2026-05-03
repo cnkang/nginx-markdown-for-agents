@@ -212,67 +212,6 @@ ngx_http_markdown_otel_parse_traceparent(ngx_http_request_t *r,
     return NGX_DECLINED;
 }
 
-    /* Find traceparent header. */
-    for (i = 0; i < r->headers_in.part.nelts; i++) {
-        if (h[i].key.len == 11
-            && ngx_strncasecmp(h[i].key.data,
-                               (const u_char *) "traceparent", 11) == 0
-            && h[i].value.len == NGX_HTTP_MARKDOWN_OTEL_TRACEPARENT_LEN)
-        {
-            p = h[i].value.data;
-
-            /* Check version: must be "00-" */
-            if (p[0] != '0' || p[1] != '0' || p[2] != '-') {
-                return NGX_DECLINED;
-            }
-
-            p += 3;
-
-            /* Copy trace_id (32 hex chars). */
-            ngx_memcpy(span->trace_id, p,
-                       NGX_HTTP_MARKDOWN_OTEL_TRACE_ID_LEN);
-            span->trace_id[NGX_HTTP_MARKDOWN_OTEL_TRACE_ID_LEN] = '\0';
-
-            p += NGX_HTTP_MARKDOWN_OTEL_TRACE_ID_LEN;
-
-            if (*p != '-') {
-                return NGX_DECLINED;
-            }
-            p++;
-
-            /* Copy parent span_id (16 hex chars). */
-            ngx_memcpy(span->parent_span_id, p,
-                       NGX_HTTP_MARKDOWN_OTEL_SPAN_ID_LEN);
-            span->parent_span_id[NGX_HTTP_MARKDOWN_OTEL_SPAN_ID_LEN] = '\0';
-
-            p += NGX_HTTP_MARKDOWN_OTEL_SPAN_ID_LEN;
-
-            if (*p != '-') {
-                return NGX_DECLINED;
-            }
-            p++;
-
-            /* Parse trace-flags (2 hex chars). */
-            span->trace_flags = 0;
-            if (p[0] >= '0' && p[0] <= '9') {
-                span->trace_flags = (p[0] - '0') << 4;
-            } else if (p[0] >= 'a' && p[0] <= 'f') {
-                span->trace_flags = (p[0] - 'a' + 10) << 4;
-            }
-            if (p[1] >= '0' && p[1] <= '9') {
-                span->trace_flags |= (p[1] - '0');
-            } else if (p[1] >= 'a' && p[1] <= 'f') {
-                span->trace_flags |= (p[1] - 'a' + 10);
-            }
-
-            span->has_parent = 1;
-            return NGX_OK;
-        }
-    }
-
-    return NGX_DECLINED;
-}
-
 
 /*
  * Create a new OTel span for a conversion request.
@@ -454,7 +393,7 @@ ngx_http_markdown_otel_escape_json_string(u_char *dst, u_char *last,
         default:
             if (ch < 0x20) {
                 if (dst + 6 > last) { return last; }
-                dst = ngx_snprintf(dst, 7, "\\u%04Xd", (unsigned) ch);
+                dst = ngx_snprintf(dst, 6, "\\u%04X", (unsigned) ch);
             } else {
                 *dst++ = ch;
             }
