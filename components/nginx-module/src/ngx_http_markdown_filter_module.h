@@ -211,7 +211,7 @@ typedef struct {
         ngx_flag_t   otel_enabled;       /* markdown_otel on|off (default: off) */
         ngx_flag_t   otel_tracing;      /* markdown_otel_tracing on|off (default: off) */
         ngx_flag_t   otel_metrics;      /* markdown_otel_metrics on|off (default: off) */
-        ngx_str_t    otel_endpoint;      /* markdown_otel_endpoint URL (default: empty) */
+        ngx_str_t    otel_endpoint;      /* markdown_otel_endpoint: internal NGINX URI for subrequest export (default: empty) */
         ngx_str_t    otel_service_name;  /* markdown_otel_service_name (default: nginx-markdown) */
         ngx_uint_t   otel_span_buffer_size; /* markdown_otel_span_buffer_size (default: 1024) */
         ngx_msec_t   otel_export_timeout;   /* markdown_otel_export_timeout (default: 5000ms) */
