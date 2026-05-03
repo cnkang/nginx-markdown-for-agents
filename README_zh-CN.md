@@ -72,6 +72,15 @@ sudo nginx -t && sudo nginx -s reload
 如果你使用自编译 NGINX 或希望从源码构建，请从 [安装指南](docs/guides/INSTALLATION.md) 开始。
 如果你希望基于官方 NGINX Docker 镜像进行源码构建，请参考 `examples/docker/Dockerfile.official-nginx-source-build` 以及 [docs/guides/INSTALLATION.md](docs/guides/INSTALLATION.md) 里的 Docker 小节。
 
+如果你在 macOS 上通过自己的 Homebrew tap 安装（基于 release tag 制品）：
+
+```bash
+brew tap <owner>/<tap>
+brew install <owner>/<tap>/nginx-markdown-module
+```
+
+tap 发布与 GitHub macOS 发布后校验流程见 [docs/guides/HOMEBREW_TAP_RELEASE.md](docs/guides/HOMEBREW_TAP_RELEASE.md)。
+
 ### 2. 在一个路由上开启 Markdown
 
 ```nginx
