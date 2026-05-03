@@ -282,6 +282,19 @@ def _nginx_bin():
 
 
 def _fetch(url, accept="text/markdown", method="GET"):
+    """Perform a simple HTTP request for E2E assertions.
+
+    Args:
+        url: Request URL.
+        accept: Optional Accept header value; omitted when empty.
+        method: HTTP method to send.
+
+    Returns:
+        Tuple of (status code, response body bytes, response headers dict).
+        HTTPError responses are returned with their status/body/headers so tests
+        can assert failure semantics. URLError and timeout cases return
+        (0, b"", {}) after logging the connection failure to stderr.
+    """
     req = Request(url, method=method)
     if accept:
         req.add_header("Accept", accept)
@@ -290,7 +303,8 @@ def _fetch(url, accept="text/markdown", method="GET"):
         return resp.status, resp.read(), dict(resp.headers)
     except HTTPError as e:
         return e.code, e.read() if e.fp else b"", dict(e.headers) if e.headers else {}
-    except URLError:
+    except URLError as e:
+        print(f"NGINX request failed for {url}: {e}", file=sys.stderr)
         return 0, b"", {}
 
 
