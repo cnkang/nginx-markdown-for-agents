@@ -295,18 +295,18 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
             dynconf_rc = ngx_http_markdown_dynconf_reload(
                 &ngx_http_markdown_dynconf_watcher, conf, r);
 
-            ngx_http_markdown_dynconf_watcher.reload_pending = 0;
-
-            if (dynconf_rc != NGX_OK) {
+            if (dynconf_rc == NGX_OK) {
+                ngx_http_markdown_dynconf_watcher.reload_pending = 0;
+            } else {
                 ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
                               "markdown dynconf: reload failed (rc=%i), "
-                              "flag cleared; will retry on next change",
+                              "flag retained; will retry on next request",
                               dynconf_rc);
             }
         } else {
-            ngx_http_markdown_dynconf_watcher.reload_pending = 0;
             ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
                           "markdown dynconf: no configuration to reload into");
+            ngx_http_markdown_dynconf_watcher.reload_pending = 0;
         }
     }
 
