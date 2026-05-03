@@ -280,6 +280,7 @@
         "components/nginx-module/src/ngx_http_markdown_request_impl.h",
         "components/nginx-module/src/ngx_http_markdown_filter_module.c",
         "components/nginx-module/src/ngx_http_markdown_filter_module.h",
+        "examples/nginx-configs/**",
         "components/nginx-module/tests/**",
         "tools/e2e/**",
         "tools/ci/verify_real_nginx_ims.sh",
@@ -318,9 +319,13 @@
       ],
       "paths": [
         "tools/release/**",
+        "tools/release-matrix.json",
         "docs/project/release-gates/**",
         "docs/project/release-gates-*.md",
+        ".github/workflows/install-verify.yml",
+        ".github/workflows/update-matrix.yml",
         ".github/workflows/release-binaries.yml",
+        ".github/workflows/official-nginx-docker.yml",
         ".github/workflows/ci.yml",
         "tools/install.sh",
         "tools/ci/**",
@@ -331,6 +336,8 @@
         "scope",
         "go/no-go",
         "matrix",
+        "install-verify",
+        "update-matrix",
         "source-build",
         "release-binaries",
         "governance"
@@ -390,7 +397,13 @@
       "paths": [
         "components/nginx-module/src/ngx_http_markdown_otel.c",
         "components/nginx-module/src/ngx_http_markdown_otel.h",
-        "docs/features/otel-tracing.md"
+        "components/nginx-module/src/ngx_http_markdown_otel_impl.h",
+        "components/nginx-module/src/ngx_http_markdown_config_directives_impl.h",
+        "components/nginx-module/src/ngx_http_markdown_config_handlers_impl.h",
+        "components/nginx-module/src/ngx_http_markdown_conversion_impl.h",
+        "docs/architecture/ADR/0006-otel-integration.md",
+        "docs/features/otel-tracing.md",
+        "examples/nginx-configs/**"
       ],
       "keywords": [
         "otel",
@@ -423,12 +436,21 @@
       "paths": [
         ".github/workflows/release-apt.yml",
         ".github/workflows/release-yum.yml",
+        ".github/workflows/homebrew-*.yml",
         "charts/nginx-markdown/**",
+        "packaging/debian/**",
+        "packaging/homebrew/**",
+        "packaging/rpm/**",
+        "docs/guides/HOMEBREW_TAP_RELEASE.md",
         "docs/guides/kubernetes-deployment.md",
         "docs/guides/INSTALLATION.md",
+        "README.md",
+        "README_zh-CN.md",
+        "CHANGELOG.md",
         "tools/install.sh",
         "tools/release-matrix.json",
-        "tools/release/matrix/**"
+        "tools/release/matrix/**",
+        "tools/release/gates/**"
       ],
       "keywords": [
         "apt",
@@ -446,6 +468,45 @@
         "docs-tooling",
         "release-governance-060",
         "packaging-e2e",
+        "release-quality"
+      ]
+    },
+    {
+      "id": "dynamic-config-hot-reload",
+      "doc": "docs/harness/risk-packs/dynamic-config-hot-reload.md",
+      "primary_surfaces": [
+        "dynconf-parser",
+        "reload-lifecycle",
+        "runtime-config-apply"
+      ],
+      "supporting_surfaces": [
+        "nginx-protocol",
+        "observability",
+        "docs-tooling"
+      ],
+      "paths": [
+        "components/nginx-module/src/ngx_http_markdown_dynconf_impl.h",
+        "components/nginx-module/src/ngx_http_markdown_request_impl.h",
+        "components/nginx-module/src/ngx_http_markdown_lifecycle_impl.h",
+        "components/nginx-module/src/ngx_http_markdown_module_state_impl.h",
+        "components/nginx-module/src/ngx_http_markdown_config_core_impl.h",
+        "components/nginx-module/src/ngx_http_markdown_config_directives_impl.h",
+        "components/nginx-module/src/ngx_http_markdown_config_handlers_impl.h",
+        "components/nginx-module/tests/unit/config_core_impl_test.c",
+        "docs/guides/CONFIGURATION.md",
+        "examples/nginx-configs/**"
+      ],
+      "keywords": [
+        "dynconf",
+        "dynamic config",
+        "hot reload",
+        "reload_pending",
+        "config reload"
+      ],
+      "verification_families": [
+        "harness-sync",
+        "docs-tooling",
+        "nginx-protocol",
         "release-quality"
       ]
     }
