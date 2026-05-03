@@ -207,7 +207,9 @@ typedef struct {
         ngx_flag_t   trust_forwarded_headers; /* markdown_trust_forwarded_headers on|off (default: off) */
         ngx_uint_t   metrics_format;       /* markdown_metrics_format auto|prometheus (default: auto) */
         ngx_flag_t   metrics_per_path;    /* markdown_metrics_per_path on|off (default: off) */
+        ngx_uint_t   metrics_per_path_cardinality; /* markdown_metrics_per_path_cardinality (default: 100) */
         ngx_flag_t   otel_enabled;       /* markdown_otel on|off (default: off) */
+        ngx_str_t    otel_endpoint;      /* markdown_otel_endpoint URL (default: empty) */
     } ops;
 
 #ifdef MARKDOWN_STREAMING_ENABLED
