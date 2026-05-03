@@ -34,13 +34,13 @@ fn escape_markdown_destination(url: &str) -> std::borrow::Cow<'_, str> {
     }
     let mut out = String::with_capacity(url.len() + 4);
     out.push('<');
-    for b in url.bytes() {
-        match b {
-            b'>' => out.push_str("\\>"),
-            b'\\' => out.push_str("\\\\"),
-            b'\n' => out.push_str("\\n"),
-            b'\r' => out.push_str("\\r"),
-            _ => out.push(b as char),
+    for ch in url.chars() {
+        match ch {
+            '>' => out.push_str("\\>"),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            _ => out.push(ch),
         }
     }
     out.push('>');
