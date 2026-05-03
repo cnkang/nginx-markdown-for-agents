@@ -402,7 +402,8 @@ ngx_http_markdown_otel_escape_json_string(u_char *dst, u_char *last,
  */
 static size_t
 ngx_http_markdown_otel_render_json(ngx_http_markdown_otel_span_t *span,
-                                   u_char *buf, size_t len)
+                                   u_char *buf, size_t len,
+                                   const ngx_str_t *otel_endpoint)
 {
     u_char     *p;
     u_char     *end;
@@ -421,10 +422,25 @@ ngx_http_markdown_otel_render_json(ngx_http_markdown_otel_span_t *span,
                     : 0;
 
     p = ngx_slprintf(p, end,
-        "{\"resourceSpans\":[{\"scopeSpans\":[{\"scope\":{"
+        "{\"resourceSpans\":[{\"resource\":{"
+        "\"attributes\":[");
+    if (otel_endpoint != NULL && otel_endpoint->len > 0) {
+        p = ngx_slprintf(p, end,
+            "{\"key\":\"otel.exporter.otlp.endpoint\","
+            "\"value\":{\"stringValue\":\"");
+        p = ngx_http_markdown_otel_escape_json_string(
+                p, end,
+                otel_endpoint->data, otel_endpoint->len);
+        p = ngx_slprintf(p, end, "\"}},");
+    }
+    p = ngx_slprintf(p, end,
+        "{\"key\":\"service.name\","
+        "\"value\":{\"stringValue\":\"%s\"}}]},"
+        "\"scopeSpans\":[{\"scope\":{"
         "\"name\":\"%s\"},\"spans\":[{"
         "\"traceId\":\"%s\","
         "\"spanId\":\"%s\",",
+        NGX_HTTP_MARKDOWN_OTEL_SERVICE,
         NGX_HTTP_MARKDOWN_OTEL_SERVICE,
         span->trace_id,
         span->span_id);
@@ -518,36 +534,38 @@ ngx_http_markdown_otel_span_export(ngx_http_markdown_otel_span_t *span,
                                    ngx_log_t *log,
                                    ngx_http_request_t *r)
 {
-    ngx_uint_t  i;
-    u_char      json_buf[NGX_HTTP_MARKDOWN_OTEL_EXPORT_BUF_LEN];
-    size_t      json_len;
+    ngx_uint_t                       i;
+    u_char                           json_buf[NGX_HTTP_MARKDOWN_OTEL_EXPORT_BUF_LEN];
+    size_t                           json_len;
+    const ngx_http_markdown_conf_t  *conf;
+    const ngx_str_t                 *endpoint;
 
     if (span == NULL) {
         return;
     }
 
+    endpoint = NULL;
+    if (r != NULL) {
+        conf = ngx_http_get_module_loc_conf(r, ngx_http_markdown_filter_module);
+        if (conf != NULL && conf->ops.otel_endpoint.len > 0) {
+            endpoint = &conf->ops.otel_endpoint;
+        }
+    }
+
     /* Attempt OTLP JSON rendering. */
     json_len = ngx_http_markdown_otel_render_json(
-                   span, json_buf, sizeof(json_buf));
+                   span, json_buf, sizeof(json_buf), endpoint);
 
     if (json_len > 0) {
-        /* Log the JSON payload for OTLP HTTP/JSON collector pickup.
-         *
-         * In a full deployment, this would be an HTTP POST to the
-         * configured OTLP endpoint.  Since NGINX modules cannot
-         * easily initiate outbound HTTP from the worker process
-         * without a subrequest (which requires an active request
-         * context and adds latency), we emit the JSON payload as
-         * a structured log entry.  A log collector (Fluentd,
-         * Vector, etc.) can parse and forward these entries to
-         * an OTLP collector.
-         *
-         * The structured log line starts with the prefix
-         * "markdown otel: export " followed by the JSON payload.
-         */
-        ngx_log_error(NGX_LOG_INFO, log, 0,
-                      "markdown otel: export %*s",
-                      json_len, json_buf);
+        if (endpoint != NULL) {
+            ngx_log_error(NGX_LOG_INFO, log, 0,
+                          "markdown otel: export endpoint=%V %*s",
+                          endpoint, json_len, json_buf);
+        } else {
+            ngx_log_error(NGX_LOG_INFO, log, 0,
+                          "markdown otel: export %*s",
+                          json_len, json_buf);
+        }
     }
 
     /* Diagnostic log: always emit human-readable span summary. */

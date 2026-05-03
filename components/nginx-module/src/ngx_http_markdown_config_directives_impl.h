@@ -524,6 +524,29 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
         NULL
     },
 
+    /*
+     * markdown_metrics_per_path_cardinality <number>
+     *
+     * Maximum number of distinct URI paths tracked individually in
+     * the per-path RB-tree.  When this limit is reached, further
+     * unique paths are counted in the overflow_count aggregate
+     * and appear under the "__other__" pseudo-path in output.
+     *
+     * Default: 100
+     * Context: http, server, location
+     *
+     * Example:
+     *   markdown_metrics_per_path_cardinality 200;
+     */
+    {
+        ngx_string("markdown_metrics_per_path_cardinality"),
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+        ngx_conf_set_num_slot,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        offsetof(ngx_http_markdown_conf_t, ops.metrics_per_path_cardinality),
+        NULL
+    },
+
 #ifdef MARKDOWN_STREAMING_ENABLED
     /*
      * markdown_streaming_engine off|on|auto|$variable
@@ -815,6 +838,30 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
         ngx_conf_set_flag_slot,
         NGX_HTTP_LOC_CONF_OFFSET,
         offsetof(ngx_http_markdown_conf_t, ops.otel_enabled),
+        NULL
+    },
+
+    /*
+     * markdown_otel_endpoint <url>
+     *
+     * OTel collector endpoint URL for span export.  When set, the
+     * endpoint is included in the OTLP JSON resource attributes so
+     * the export target is unambiguous.  Actual HTTP POST to the
+     * collector is a future enhancement; currently the JSON payload
+     * is written to the error log at info level.
+     *
+     * Default: (empty — no endpoint configured)
+     * Context: http, server, location
+     *
+     * Example:
+     *   markdown_otel_endpoint http://localhost:4318/v1/traces;
+     */
+    {
+        ngx_string("markdown_otel_endpoint"),
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+        ngx_conf_set_str_slot,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        offsetof(ngx_http_markdown_conf_t, ops.otel_endpoint),
         NULL
     },
 

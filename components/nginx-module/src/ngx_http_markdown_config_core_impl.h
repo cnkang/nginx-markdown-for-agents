@@ -220,7 +220,10 @@ ngx_http_markdown_create_conf(ngx_conf_t *cf)
     conf->ops.trust_forwarded_headers = NGX_CONF_UNSET;
     conf->ops.metrics_format = NGX_CONF_UNSET_UINT;
     conf->ops.metrics_per_path = NGX_CONF_UNSET;
+    conf->ops.metrics_per_path_cardinality = NGX_CONF_UNSET_UINT;
     conf->ops.otel_enabled = NGX_CONF_UNSET;
+    conf->ops.otel_endpoint.len = 0;
+    conf->ops.otel_endpoint.data = NULL;
 
 #ifdef MARKDOWN_STREAMING_ENABLED
     conf->streaming_engine = NULL;
@@ -318,7 +321,13 @@ ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
     ngx_conf_merge_uint_value(conf->ops.metrics_format, prev->ops.metrics_format,
                               NGX_HTTP_MARKDOWN_METRICS_FORMAT_AUTO);
     ngx_conf_merge_value(conf->ops.metrics_per_path, prev->ops.metrics_per_path, 0);
+    ngx_conf_merge_uint_value(conf->ops.metrics_per_path_cardinality,
+                              prev->ops.metrics_per_path_cardinality,
+                              NGX_HTTP_MARKDOWN_PER_PATH_CARDINALITY_DEFAULT);
     ngx_conf_merge_value(conf->ops.otel_enabled, prev->ops.otel_enabled, 0);
+    if (conf->ops.otel_endpoint.len == 0 && prev->ops.otel_endpoint.len > 0) {
+        conf->ops.otel_endpoint = prev->ops.otel_endpoint;
+    }
     ngx_conf_merge_size_value(conf->large_body_threshold,
                               prev->large_body_threshold,
                               NGX_HTTP_MARKDOWN_THRESHOLD_OFF);
