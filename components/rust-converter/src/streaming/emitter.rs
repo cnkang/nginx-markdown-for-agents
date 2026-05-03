@@ -36,6 +36,7 @@ fn escape_markdown_destination(url: &str) -> std::borrow::Cow<'_, str> {
     out.push('<');
     for ch in url.chars() {
         match ch {
+            '<' => out.push_str("\\<"),
             '>' => out.push_str("\\>"),
             '\\' => out.push_str("\\\\"),
             '\n' => out.push_str("\\n"),
