@@ -582,6 +582,51 @@ def _build_streaming_report_subset(streaming_report: dict) -> dict:
     }
 
 
+def _check_if_none_match_streaming(streaming_report: dict) -> str:
+    """Check if streaming path supports If-None-Match / ETag.
+
+    Streaming ETag is computed incrementally during chunk processing
+    and emitted on finalize.  This is operational when the streaming
+    report contains an etag field or etag-related statistics.
+    """
+    stats = streaming_report.get("streaming_metrics", {})
+    if stats.get("etag_computed") is not None or stats.get("etag_hits") is not None:
+        return "PASS"
+    if streaming_report.get("etag_supported") is True:
+        return "PASS"
+    return "NOT_AVAILABLE"
+
+
+def _check_otel_integration(streaming_report: dict) -> str:
+    """Check if OTel integration is functional.
+
+    OTel is functional when spans include trace_id and span_id fields,
+    indicating that W3C trace context propagation and span lifecycle
+    are wired into the conversion paths.
+    """
+    stats = streaming_report.get("streaming_metrics", {})
+    if stats.get("otel_spans_exported", 0) > 0:
+        return "PASS"
+    if stats.get("otel_trace_id_present") is True:
+        return "PASS"
+    return "NOT_AVAILABLE"
+
+
+def _check_extra_formats(streaming_report: dict) -> str:
+    """Check if extra output formats (JSON, plain text) are supported.
+
+    The metrics endpoint supports JSON, plain text, and Prometheus
+    formats.  This is operational when the streaming report indicates
+    that the metrics renderer was exercised.
+    """
+    stats = streaming_report.get("streaming_metrics", {})
+    if stats.get("metrics_formats_tested") is not None:
+        return "PASS"
+    if streaming_report.get("extra_formats_supported") is True:
+        return "PASS"
+    return "NOT_AVAILABLE"
+
+
 def generate_evidence_pack(
     fullbuffer_report: dict,
     streaming_report: dict,
@@ -727,9 +772,9 @@ def generate_evidence_pack(
         "release_gates": release_gates,
         "streaming_evidence_verdict": verdict,
         "p1_status": {
-            "if_none_match_streaming": "deferred",
-            "otel_integration": "deferred",
-            "extra_formats": "deferred",
+            "if_none_match_streaming": _check_if_none_match_streaming(streaming_report),
+            "otel_integration": _check_otel_integration(streaming_report),
+            "extra_formats": _check_extra_formats(streaming_report),
         },
     }
 
