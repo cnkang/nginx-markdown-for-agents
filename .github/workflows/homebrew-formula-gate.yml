@@ -1,0 +1,54 @@
+name: Homebrew Formula Gate
+
+on:
+  pull_request:
+    branches: [main, master]
+    paths:
+      - "packaging/homebrew/**"
+      - ".github/workflows/homebrew-formula-gate.yml"
+      - "Makefile"
+      - "components/**"
+  push:
+    branches: [main, master]
+    paths:
+      - "packaging/homebrew/**"
+      - ".github/workflows/homebrew-formula-gate.yml"
+      - "Makefile"
+      - "components/**"
+
+permissions:
+  contents: read
+
+jobs:
+  brew-formula-check:
+    name: Formula audit/install/test
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Homebrew environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          brew --version
+          brew update-reset
+
+      - name: Audit local formula
+        shell: bash
+        run: |
+          set -euo pipefail
+          brew audit --strict ./packaging/homebrew/nginx-markdown-module.rb
+
+      - name: Install local formula from source
+        shell: bash
+        run: |
+          set -euo pipefail
+          brew install --build-from-source ./packaging/homebrew/nginx-markdown-module.rb
+
+      - name: Run formula test
+        shell: bash
+        run: |
+          set -euo pipefail
+          brew test nginx-markdown-module
