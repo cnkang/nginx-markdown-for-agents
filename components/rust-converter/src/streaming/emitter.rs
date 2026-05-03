@@ -19,6 +19,34 @@ use crate::streaming::budget::MemoryBudget;
 use crate::streaming::sanitizer::is_dangerous_url;
 use crate::streaming::state_machine::{StateMachineAction, StructuralContext};
 
+/// Escape a URL for use as a Markdown link/image destination.
+///
+/// CommonMark requires that link destinations containing spaces, parentheses,
+/// or angle brackets be enclosed in angle brackets (`<…>`), with `>` and `\`
+/// backslash-escaped inside.  URLs without such characters are emitted bare
+/// for readability.
+fn escape_markdown_destination(url: &str) -> std::borrow::Cow<'_, str> {
+    let needs_escape = url
+        .bytes()
+        .any(|b| matches!(b, b' ' | b'(' | b')' | b'<' | b'>' | b'\\' | b'\n' | b'\r'));
+    if !needs_escape {
+        return std::borrow::Cow::Borrowed(url);
+    }
+    let mut out = String::with_capacity(url.len() + 4);
+    out.push('<');
+    for b in url.bytes() {
+        match b {
+            b'>' => out.push_str("\\>"),
+            b'\\' => out.push_str("\\\\"),
+            b'\n' => out.push_str("\\n"),
+            b'\r' => out.push_str("\\r"),
+            _ => out.push(b as char),
+        }
+    }
+    out.push('>');
+    std::borrow::Cow::Owned(out)
+}
+
 /// Block-level tags whose closing triggers a flush point.
 const FLUSH_TAGS: &[&str] = &[
     "h1",
@@ -313,7 +341,8 @@ impl IncrementalEmitter {
                 self.link_text_overflow = false;
             }
             StructuralContext::Image { src, alt } => {
-                self.write_str(&format!("![{}]({})", alt, src))?;
+                let escaped = escape_markdown_destination(src);
+                self.write_str(&format!("![{}]({})", alt, escaped))?;
             }
             StructuralContext::Bold => {
                 if self.in_link {
@@ -411,7 +440,8 @@ impl IncrementalEmitter {
                     if href.trim().is_empty() || is_dangerous_url(href) {
                         self.write_str(&text)?;
                     } else {
-                        self.write_str(&format!("[{}]({})", text, href))?;
+                        let escaped = escape_markdown_destination(href);
+                        self.write_str(&format!("[{}]({})", text, escaped))?;
                     }
                 }
             }
