@@ -67,6 +67,18 @@ and a unified memory budget simplifies configuration.
   `markdown_expect_header` (header pattern assertion),
   `markdown_extract_header` (header value extraction).
 - Makefile targets for all new E2E scripts.
+- Homebrew tap publication workflow:
+  `.github/workflows/homebrew-tap-publish.yml`
+  (release/manual trigger, computes SHA-256 from GitHub tag tarball, updates
+  formula, pushes to external tap repository).
+- Homebrew post-release macOS verification workflow:
+  `.github/workflows/homebrew-post-release-verify.yml`
+  (`brew tap`, `brew audit --strict`, `brew install --build-from-source`,
+  `brew test`).
+- Homebrew formula PR/push gate on GitHub macOS runners:
+  `.github/workflows/homebrew-formula-gate.yml`.
+- Homebrew tap release guide:
+  `docs/guides/HOMEBREW_TAP_RELEASE.md`.
 
 ### Changed
 - **Default behavior change**: `markdown_streaming_engine` default changed from
@@ -97,6 +109,8 @@ and a unified memory budget simplifies configuration.
   requires `Vary:.*Cookie` (not just `Vary:`).
 - Synced `verify_config_merge_e2e.sh` top docstring to actual
   checks; fixed `verify_proxy_tls_backend_e2e.sh` source ordering.
+- Updated installation documentation and READMEs with Homebrew tap install
+  path and release-tag checksum guidance.
 
 ### Fixed
 - SonarCloud finding: missing `return 0` in
