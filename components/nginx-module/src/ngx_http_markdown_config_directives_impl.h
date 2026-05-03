@@ -842,24 +842,26 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
     },
 
     /*
-     * markdown_otel_endpoint <url>
+     * markdown_otel_endpoint <uri>
      *
-     * OTel collector endpoint URL for span export.  The module
-     * issues an HTTP POST via NGINX subrequest to this URI,
-     * sending the OTLP JSON payload as the request body.
+     * Internal NGINX URI for OTel span export via subrequest.
+     * The module issues an HTTP POST to this URI using
+     * ngx_http_subrequest(), sending the OTLP JSON payload
+     * as the request body.
      *
-     * The URL should reference an internal proxy location that
-     * forwards to the OTel collector (e.g. http://host:4318/v1/traces).
-     * An internal location block must be configured in nginx.conf
-     * to proxy_pass to the actual collector.
+     * This URI must map to an internal location block in
+     * nginx.conf that proxy_passes to the OTel collector:
      *
-     * Default: (empty — no endpoint configured)
+     *   location = /_otel_export {
+     *       internal;
+     *       proxy_pass http://collector:4318/v1/traces;
+     *   }
+     *
+     * Default: (empty -- no endpoint configured)
      * Context: http, server, location
      *
      * Example:
      *   markdown_otel_endpoint /_otel_export;
-     *   # with corresponding nginx.conf location:
-     *   # location = /_otel_export { internal; proxy_pass http://collector:4318/v1/traces; }
      */
     {
         ngx_string("markdown_otel_endpoint"),
