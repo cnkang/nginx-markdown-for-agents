@@ -73,6 +73,8 @@ typedef struct {
 typedef struct ngx_http_markdown_otel_span_s {
     ngx_msec_t    start_ms;
     ngx_msec_t    end_ms;
+    int64_t       start_epoch_nano;
+    int64_t       end_epoch_nano;
     ngx_uint_t    attr_count;
     ngx_http_markdown_otel_attr_t  attrs[NGX_HTTP_MARKDOWN_OTEL_MAX_ATTRS];
     ngx_uint_t    exported;
@@ -233,6 +235,11 @@ ngx_http_markdown_otel_span_start(ngx_http_request_t *r,
     }
 
     span->start_ms = ngx_current_msec;
+    {
+        ngx_time_t  *tp = ngx_timeofday();
+        span->start_epoch_nano = (int64_t) tp->sec * 1000000000LL
+                                 + (int64_t) tp->msec * 1000000LL;
+    }
     span->attr_count = 0;
     span->exported = 0;
     span->has_parent = 0;
@@ -330,6 +337,11 @@ ngx_http_markdown_otel_span_end(ngx_http_markdown_otel_span_t *span)
     }
 
     span->end_ms = ngx_current_msec;
+    {
+        ngx_time_t  *tp = ngx_timeofday();
+        span->end_epoch_nano = (int64_t) tp->sec * 1000000000LL
+                               + (int64_t) tp->msec * 1000000LL;
+    }
     span->exported = 0;
 }
 
@@ -452,24 +464,14 @@ ngx_http_markdown_otel_render_json(ngx_http_markdown_otel_span_t *span,
     }
 
     /*
-     * Compute Unix-epoch nanoseconds from ngx_current_msec.
+     * Use epoch nanoseconds captured at span start/end.
      *
-     * ngx_current_msec is derived from ngx_cached_time->msec,
-     * which is the millisecond portion of the cached wall-clock
-     * time updated by ngx_time_update().  We reconstruct the
-     * full Unix-epoch milliseconds by combining sec * 1000 + msec.
+     * These were recorded in ngx_http_markdown_otel_span_start() and
+     * ngx_http_markdown_otel_span_end() using ngx_timeofday(), so they
+     * reflect the actual wall-clock time at each event regardless of
+     * export delay or second-boundary crossings.
      */
     {
-        ngx_time_t  *tp;
-        int64_t      start_nano;
-        int64_t      end_nano;
-
-        tp = ngx_timeofday();
-        start_nano = (int64_t) tp->sec * 1000000000LL
-                     + (int64_t) (span->start_ms % 1000) * 1000000LL;
-        end_nano   = (int64_t) tp->sec * 1000000000LL
-                     + (int64_t) (span->end_ms % 1000) * 1000000LL;
-
         p = ngx_slprintf(p, end,
             "\"name\":\"%s\","
             "\"kind\":1,"
@@ -477,7 +479,7 @@ ngx_http_markdown_otel_render_json(ngx_http_markdown_otel_span_t *span,
             "\"endTimeUnixNano\":\"%L\","
             "\"attributes\":[",
             NGX_HTTP_MARKDOWN_OTEL_SPAN_NAME,
-            start_nano, end_nano);
+            span->start_epoch_nano, span->end_epoch_nano);
     }
 
     for (i = 0; i < span->attr_count && p < end; i++) {
@@ -557,10 +559,87 @@ ngx_http_markdown_otel_span_export(ngx_http_markdown_otel_span_t *span,
                    span, json_buf, sizeof(json_buf), endpoint);
 
     if (json_len > 0) {
-        if (endpoint != NULL) {
-            ngx_log_error(NGX_LOG_INFO, log, 0,
-                          "markdown otel: export endpoint=%V %*s",
-                          endpoint, json_len, json_buf);
+        /*
+         * When an OTLP endpoint is configured, attempt HTTP POST via
+         * NGINX subrequest.  This is the idiomatic NGINX approach for
+         * outbound HTTP from a module: the subrequest goes to a local
+         * URI that proxies to the collector, keeping the worker
+         * non-blocking and leveraging the existing proxy infrastructure.
+         *
+         * Requirements for operator setup:
+         *   - An internal location (e.g. /_otel_export) that proxies
+         *     to the collector endpoint must be configured in nginx.conf
+         *   - The markdown_otel_endpoint value should match this internal URI
+         *
+         * If the subrequest cannot be initiated (no active request,
+         * subrequest limit reached, etc.), fall back to structured log.
+         */
+        if (endpoint != NULL && r != NULL) {
+            ngx_http_post_subrequest_t  *psr;
+            ngx_str_t                   uri;
+
+            uri = *endpoint;
+
+            psr = ngx_palloc(r->pool, sizeof(ngx_http_post_subrequest_t));
+            if (psr != NULL) {
+                ngx_http_request_t  *sr;
+
+                psr->handler = NULL;
+                psr->data = NULL;
+
+                if (ngx_http_subrequest(r, &uri, NULL, &sr, psr,
+                                        NGX_HTTP_SUBREQUEST_IN_MEMORY)
+                    == NGX_OK)
+                {
+                    /*
+                     * Subrequest initiated.  Set the request body to
+                     * the OTLP JSON payload so the proxy module will
+                     * POST it to the collector.
+                     */
+                    sr->method = NGX_HTTP_POST;
+                    sr->method_name = ngx_string("POST");
+
+                    if (sr->request_body == NULL) {
+                        sr->request_body = ngx_pcalloc(
+                            sr->pool, sizeof(ngx_http_request_body_t));
+                    }
+
+                    if (sr->request_body != NULL) {
+                        ngx_buf_t  *b;
+
+                        b = ngx_create_temp_buf(sr->pool, json_len);
+                        if (b != NULL) {
+                            ngx_memcpy(b->pos, json_buf, json_len);
+                            b->last = b->pos + json_len;
+                            b->last_in_chain = 1;
+                            b->last_buf = 1;
+
+                            sr->request_body->bufs = ngx_alloc_chain_link(sr->pool);
+                            if (sr->request_body->bufs != NULL) {
+                                sr->request_body->bufs->buf = b;
+                                sr->request_body->bufs->next = NULL;
+                            }
+                        }
+                    }
+
+                    ngx_log_error(NGX_LOG_INFO, log, 0,
+                                  "markdown otel: OTLP POST subrequest to %V "
+                                  "(%uz bytes)",
+                                  endpoint, json_len);
+                } else {
+                    ngx_log_error(NGX_LOG_WARN, log, 0,
+                                  "markdown otel: subrequest to %V failed, "
+                                  "falling back to log export",
+                                  endpoint);
+                    ngx_log_error(NGX_LOG_INFO, log, 0,
+                                  "markdown otel: export %*s",
+                                  json_len, json_buf);
+                }
+            } else {
+                ngx_log_error(NGX_LOG_INFO, log, 0,
+                              "markdown otel: export endpoint=%V %*s",
+                              endpoint, json_len, json_buf);
+            }
         } else {
             ngx_log_error(NGX_LOG_INFO, log, 0,
                           "markdown otel: export %*s",
