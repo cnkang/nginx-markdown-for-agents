@@ -73,7 +73,7 @@ build: rust-lib copy-headers
 
 rust-lib:
 	@echo "Building Rust library for $(RUST_TARGET)..."
-	cd $(RUST_DIR) && cargo build --target $(RUST_TARGET) --release
+	cd $(RUST_DIR) && cargo build --locked --target $(RUST_TARGET) --release
 	@echo "Generating C header with cbindgen..."
 	cd $(RUST_DIR) && mkdir -p include && cbindgen --config cbindgen.toml --crate nginx-markdown-converter --output include/markdown_converter.h
 
