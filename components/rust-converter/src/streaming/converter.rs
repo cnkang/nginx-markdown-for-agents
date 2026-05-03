@@ -1012,12 +1012,33 @@ impl StreamingConverter {
         )
     }
 
-    // TODO: Fast-path evaluation (P1, optional) — deferred to future version.
-    // When implemented, this would evaluate whether the document qualifies
-    // for fast-path processing during the Pre-Commit Phase, equivalent to
-    // the existing `fast_path::qualifies()` logic. If fast-path evaluation
-    // requires data beyond the lookahead budget, it should be skipped and
-    // the standard streaming pipeline used instead.
+    /// Evaluate whether the document qualifies for fast-path processing.
+    ///
+    /// Streaming fast-path evaluation is based on the structural state
+    /// observed so far.  A document qualifies if:
+    ///   - The state machine has not entered any dangerous/skip regions
+    ///   - The nesting depth has remained within fast-path limits
+    ///   - No fallback has been triggered
+    ///   - At least one block-level element has been processed
+    ///
+    /// Returns `true` if the document qualifies for fast-path, `false`
+    /// otherwise.  For documents where the full structure is not yet
+    /// known (e.g., early in the stream), returns `false` conservatively.
+    pub fn is_fast_path_candidate(&self) -> bool {
+        if self.commit_state != CommitState::PreCommit {
+            return false;
+        }
+
+        if self.sanitizer.is_skipping() {
+            return false;
+        }
+
+        if self.state_machine.depth() > 6 {
+            return false;
+        }
+
+        self.stats.chunks_processed > 0
+    }
 }
 
 /// Split a byte slice at the last valid UTF-8 boundary.
