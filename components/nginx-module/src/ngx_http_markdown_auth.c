@@ -843,6 +843,7 @@ ngx_http_markdown_modify_cache_control_for_auth(ngx_http_request_t *r)
     ngx_int_t         has_no_store;
     ngx_int_t         has_private;
     ngx_int_t         has_public;
+    ngx_flag_t        any_public;
 
     if (r == NULL) {
         return NGX_ERROR;
@@ -858,7 +859,11 @@ ngx_http_markdown_modify_cache_control_for_auth(ngx_http_request_t *r)
     }
 
     /*
-     * Cache-Control header exists - check directives
+     * Cache-Control header exists.  Check directives in the first
+     * header.  Also scan for any additional Cache-Control headers
+     * that might contain "public" — multiple Cache-Control headers
+     * are valid per RFC 9111 and a later header can override an
+     * earlier one.
      */
     has_no_store = ngx_http_markdown_cache_control_has_directive(
         &cache_control->value, &ngx_http_markdown_no_store);
@@ -866,22 +871,60 @@ ngx_http_markdown_modify_cache_control_for_auth(ngx_http_request_t *r)
         &cache_control->value, &ngx_http_markdown_private);
     has_public = ngx_http_markdown_cache_control_has_directive(
         &cache_control->value, &ngx_http_markdown_public);
+    any_public = (ngx_flag_t) has_public;
 
     /*
-     * Rule 3: Preserve "no-store" - NEVER downgrade
-     * If Cache-Control contains "no-store", leave it unchanged.
-     * This is the most restrictive caching directive and must be preserved.
+     * Scan additional Cache-Control headers for "public" that the
+     * first-header-only lookup would miss.  If any subsequent
+     * header contains "public", treat the effective policy as
+     * public even if the first header does not.
      */
-    if (has_no_store) {
-        ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                      "markdown filter: preserving Cache-Control with no-store: \"%V\"",
-                      &cache_control->value);
-        return NGX_OK;
+    if (!any_public && r->headers_out.headers.part.nelts > 1) {
+        for (ngx_list_part_t *part = &r->headers_out.headers.part;
+             part != NULL;
+             part = part->next)
+        {
+            ngx_table_elt_t  *headers;
+
+            headers = part->elts;
+            for (ngx_uint_t i = 0; i < part->nelts; i++) {
+                if (&headers[i] == cache_control) {
+                    continue;
+                }
+                if (headers[i].key.len
+                        == sizeof(ngx_http_markdown_hdr_cache_control) - 1
+                    && ngx_strncasecmp(headers[i].key.data,
+                                        ngx_http_markdown_hdr_cache_control,
+                                        sizeof(ngx_http_markdown_hdr_cache_control) - 1) == 0)
+                {
+                    if (ngx_http_markdown_cache_control_has_directive(
+                            &headers[i].value,
+                            &ngx_http_markdown_public))
+                    {
+                        any_public = 1;
+                    }
+                    if (ngx_http_markdown_cache_control_has_directive(
+                            &headers[i].value,
+                            &ngx_http_markdown_no_store))
+                    {
+                        has_no_store = 1;
+                    }
+                }
+            }
+        }
     }
 
     /*
-     * If already has "private", no modification needed
+     * Rule 3: Preserve "no-store" - NEVER downgrade
+     * If any Cache-Control header contains "no-store", leave all
+     * unchanged.
      */
+    if (has_no_store) {
+        ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                      "markdown filter: preserving Cache-Control with no-store");
+        return NGX_OK;
+    }
+
     if (has_private) {
         ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                       "markdown filter: Cache-Control already has private: \"%V\"",
@@ -889,7 +932,7 @@ ngx_http_markdown_modify_cache_control_for_auth(ngx_http_request_t *r)
         return NGX_OK;
     }
 
-    if (has_public) {
+    if (any_public) {
         return ngx_http_markdown_strip_public_and_append_private(r, cache_control);
     }
 
