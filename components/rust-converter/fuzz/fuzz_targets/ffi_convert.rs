@@ -64,6 +64,8 @@ fuzz_target!(|data: &[u8]| {
         prune_protection_selectors: ptr::null(),
         prune_protection_selector_len: 0,
         memory_budget: 0,
+        llm_provider: 0,
+        chars_per_token_fixed: 0,
     };
 
     let mut result = MarkdownResult {

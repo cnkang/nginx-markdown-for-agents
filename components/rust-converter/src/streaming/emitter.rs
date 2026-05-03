@@ -16,6 +16,7 @@
 
 use crate::error::ConversionError;
 use crate::streaming::budget::MemoryBudget;
+use crate::streaming::sanitizer::is_dangerous_url;
 use crate::streaming::state_machine::{StateMachineAction, StructuralContext};
 
 /// Block-level tags whose closing triggers a flush point.
@@ -407,7 +408,7 @@ impl IncrementalEmitter {
                 self.in_link = false;
                 let text = std::mem::take(&mut self.link_text);
                 if !text.trim().is_empty() {
-                    if href.trim().is_empty() {
+                    if href.trim().is_empty() || is_dangerous_url(href) {
                         self.write_str(&text)?;
                     } else {
                         self.write_str(&format!("[{}]({})", text, href))?;

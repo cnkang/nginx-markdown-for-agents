@@ -72,7 +72,7 @@
 // │ Front matter (beyond lookahead)     │ pre-commit-fallback-only     │
 // │ Noise region pruning                │ pre-commit-fallback-only     │
 // │ ETag (response header)              │ full-buffer-only             │
-// │ Fast-path evaluation                │ P1 (optional, deferred)      │
+// │ Fast-path evaluation                │ lookahead-based heuristic    │
 // └─────────────────────────────────────┴──────────────────────────────┘
 //
 // Known differences from full-buffer path:

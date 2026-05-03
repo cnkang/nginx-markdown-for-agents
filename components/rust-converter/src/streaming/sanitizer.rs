@@ -501,7 +501,7 @@ impl Default for StreamingSanitizer {
 /// # Returns
 ///
 /// `true` if the trimmed, lowercased URL begins with any dangerous scheme prefix, `false` otherwise.
-fn is_dangerous_url(url: &str) -> bool {
+pub(crate) fn is_dangerous_url(url: &str) -> bool {
     let trimmed = url.trim();
     if trimmed.chars().any(|ch| ch == '\0' || ch.is_control()) {
         return true;
