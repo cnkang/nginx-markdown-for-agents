@@ -451,16 +451,19 @@ ngx_http_markdown_dynconf_apply(ngx_http_markdown_conf_t *conf,
     case NGX_HTTP_MARKDOWN_DYNCONF_KEY_STREAMING_BUDGET:
 #ifdef MARKDOWN_STREAMING_ENABLED
         {
-            size_t  budget;
+            ngx_str_t   val;
+            ssize_t     parsed;
 
-            budget = ngx_atosz((u_char *) value, value_len);
-            if (budget == (size_t) NGX_ERROR) {
+            val.data = (u_char *) value;
+            val.len = value_len;
+            parsed = ngx_parse_size(&val);
+            if (parsed == NGX_ERROR) {
                 ngx_log_error(NGX_LOG_WARN, (ngx_log_t *) log, 0,
                               "markdown dynconf: invalid streaming_budget value \"%*s\"",
                               (int) value_len, value);
                 return NGX_ERROR;
             }
-            conf->streaming_budget = budget;
+            conf->streaming_budget = (size_t) parsed;
         }
 #else
         ngx_log_error(NGX_LOG_WARN, (ngx_log_t *) log, 0,
@@ -471,16 +474,19 @@ ngx_http_markdown_dynconf_apply(ngx_http_markdown_conf_t *conf,
 
     case NGX_HTTP_MARKDOWN_DYNCONF_KEY_MEMORY_BUDGET:
         {
-            size_t  budget;
+            ngx_str_t   val;
+            ssize_t     parsed;
 
-            budget = ngx_atosz((u_char *) value, value_len);
-            if (budget == (size_t) NGX_ERROR) {
+            val.data = (u_char *) value;
+            val.len = value_len;
+            parsed = ngx_parse_size(&val);
+            if (parsed == NGX_ERROR) {
                 ngx_log_error(NGX_LOG_WARN, (ngx_log_t *) log, 0,
                               "markdown dynconf: invalid memory_budget value \"%*s\"",
                               (int) value_len, value);
                 return NGX_ERROR;
             }
-            conf->memory_budget = budget;
+            conf->memory_budget = (size_t) parsed;
         }
         break;
 
