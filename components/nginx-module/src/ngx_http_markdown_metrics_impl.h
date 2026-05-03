@@ -757,6 +757,27 @@ ngx_http_markdown_metrics_write_json(
 #define NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED  1
 #endif
 
+/*
+ * Forward declarations for per-path RB-tree walk helpers.
+ * Defined after the main write functions.  Only available
+ * when NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED is 1.
+ */
+#if NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED
+static u_char *
+ngx_http_markdown_json_walk_path_tree(
+    ngx_rbtree_node_t *node,
+    ngx_rbtree_node_t *sentinel,
+    u_char *p,
+    u_char *end);
+
+static u_char *
+ngx_http_markdown_text_walk_path_tree(
+    ngx_rbtree_node_t *node,
+    ngx_rbtree_node_t *sentinel,
+    u_char *p,
+    u_char *end);
+#endif
+
 #if NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED
     if (snapshot->per_path.path_entries > 0
         && ngx_http_markdown_metrics_shm_zone != NULL

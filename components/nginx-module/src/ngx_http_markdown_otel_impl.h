@@ -335,6 +335,57 @@ ngx_http_markdown_otel_span_end(ngx_http_markdown_otel_span_t *span)
 
 
 /*
+ * Escape a byte string for use inside a JSON string value.
+ *
+ * JSON requires escaping: " -> \", \ -> \\, control chars (< 0x20) -> \uXXXX.
+ */
+static u_char *
+ngx_http_markdown_otel_escape_json_string(u_char *dst, u_char *last,
+                                          const u_char *src, size_t len)
+{
+    size_t   i;
+    u_char   ch;
+
+    for (i = 0; i < len && dst < last; i++) {
+        ch = src[i];
+
+        switch (ch) {
+        case '"':
+            if (dst + 2 > last) { return last; }
+            *dst++ = '\\'; *dst++ = '"';
+            break;
+        case '\\':
+            if (dst + 2 > last) { return last; }
+            *dst++ = '\\'; *dst++ = '\\';
+            break;
+        case '\n':
+            if (dst + 2 > last) { return last; }
+            *dst++ = '\\'; *dst++ = 'n';
+            break;
+        case '\r':
+            if (dst + 2 > last) { return last; }
+            *dst++ = '\\'; *dst++ = 'r';
+            break;
+        case '\t':
+            if (dst + 2 > last) { return last; }
+            *dst++ = '\\'; *dst++ = 't';
+            break;
+        default:
+            if (ch < 0x20) {
+                if (dst + 6 > last) { return last; }
+                dst = ngx_snprintf(dst, 7, "\\u%04Xd", (unsigned) ch);
+            } else {
+                *dst++ = ch;
+            }
+            break;
+        }
+    }
+
+    return dst;
+}
+
+
+/*
  * Render a completed span as OTLP JSON for export.
  *
  * Produces a JSON payload compatible with the OTLP HTTP/JSON
@@ -384,15 +435,34 @@ ngx_http_markdown_otel_render_json(ngx_http_markdown_otel_span_t *span,
             span->parent_span_id);
     }
 
-    p = ngx_slprintf(p, end,
-        "\"name\":\"%s\","
-        "\"kind\":1,"
-        "\"startTimeUnixNano\":\"%M000000\","
-        "\"endTimeUnixNano\":\"%M000000\","
-        "\"attributes\":[",
-        NGX_HTTP_MARKDOWN_OTEL_SPAN_NAME,
-        span->start_ms,
-        span->end_ms);
+    /*
+     * Compute Unix-epoch nanoseconds from ngx_current_msec.
+     *
+     * ngx_current_msec is derived from ngx_cached_time->msec,
+     * which is the millisecond portion of the cached wall-clock
+     * time updated by ngx_time_update().  We reconstruct the
+     * full Unix-epoch milliseconds by combining sec * 1000 + msec.
+     */
+    {
+        ngx_time_t  *tp;
+        int64_t      start_nano;
+        int64_t      end_nano;
+
+        tp = ngx_timeofday();
+        start_nano = (int64_t) tp->sec * 1000000000LL
+                     + (int64_t) (span->start_ms % 1000) * 1000000LL;
+        end_nano   = (int64_t) tp->sec * 1000000000LL
+                     + (int64_t) (span->end_ms % 1000) * 1000000LL;
+
+        p = ngx_slprintf(p, end,
+            "\"name\":\"%s\","
+            "\"kind\":1,"
+            "\"startTimeUnixNano\":\"%L\","
+            "\"endTimeUnixNano\":\"%L\","
+            "\"attributes\":[",
+            NGX_HTTP_MARKDOWN_OTEL_SPAN_NAME,
+            start_nano, end_nano);
+    }
 
     for (i = 0; i < span->attr_count && p < end; i++) {
         if (i > 0) {
@@ -409,11 +479,12 @@ ngx_http_markdown_otel_render_json(ngx_http_markdown_otel_span_t *span,
         } else {
             p = ngx_slprintf(p, end,
                 "{\"key\":\"%*s\","
-                "\"value\":{\"stringValue\":\"%*s\"}}",
-                (size_t) span->attrs[i].key_len,
-                span->attrs[i].key,
-                (size_t) span->attrs[i].str_value_len,
-                span->attrs[i].str_value);
+                "\"value\":{\"stringValue\":\"");
+            p = ngx_http_markdown_otel_escape_json_string(
+                    p, end,
+                    span->attrs[i].str_value,
+                    span->attrs[i].str_value_len);
+            p = ngx_slprintf(p, end, "\"}}");
         }
     }
 
