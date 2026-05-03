@@ -72,6 +72,15 @@ The install script auto-detects the local NGINX version, downloads the matching 
 
 For alternative installation methods (source builds, Docker, custom NGINX builds), troubleshooting, and detailed instructions, see the [Installation Guide](docs/guides/INSTALLATION.md).
 
+For macOS package-manager installation through your own Homebrew tap (release-tag artifact):
+
+```bash
+brew tap <owner>/<tap>
+brew install <owner>/<tap>/nginx-markdown-module
+```
+
+Tap publication and macOS post-release verification workflows are documented in [docs/guides/HOMEBREW_TAP_RELEASE.md](docs/guides/HOMEBREW_TAP_RELEASE.md).
+
 ### 2. Enable Markdown on a location
 
 ```nginx
