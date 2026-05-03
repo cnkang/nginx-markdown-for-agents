@@ -29,6 +29,11 @@ CI, scope governance, or go/no-go tooling changes.
   unprivileged-worker temporary directories are explicitly validated
 - Make targets, workflow steps, and release scripts call each other through real
   supported interfaces, not synthetic flags
+- install-verify and update-matrix workflows remain covered by workflow
+  regression tests when supported NGINX versions, upstream-vs-release matrix
+  sources, or JS action gates change
+- release matrix tooling keeps upstream-discovery data separate from shipped
+  release artifacts so install docs do not claim unsupported binaries
 - legacy and current release gate validators remain intentionally separated
   unless a change updates both paths and tests
 - release-gate validators keep SonarCloud quality rules green: split complex
@@ -66,3 +71,4 @@ absence instead of treating legacy validation as default evidence.
 |---------|------|--------|---------|
 | 0.5.5 | 2026-04-24 | Codex | Added 60-day release governance routing |
 | 0.5.5 | 2026-04-25 | Codex | Added SonarCloud quality sync points for release-gate validators |
+| 0.6.0 | 2026-05-03 | Codex | Added install-verify/update-matrix regression sync points |
