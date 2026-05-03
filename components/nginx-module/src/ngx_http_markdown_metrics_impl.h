@@ -1132,7 +1132,7 @@ ngx_http_markdown_escape_json_string(u_char *dst, u_char *last,
         default:
             if (ch < 0x20) {
                 if (dst + 6 > last) { return last; }
-                dst = ngx_snprintf(dst, 7, "\\u%04Xd", (unsigned) ch);
+                dst = ngx_snprintf(dst, 6, "\\u%04X", (unsigned) ch);
             } else {
                 *dst++ = ch;
             }
