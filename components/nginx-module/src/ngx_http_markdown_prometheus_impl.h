@@ -453,6 +453,20 @@ ngx_http_markdown_metrics_write_prometheus(
 
         ngx_shmtx_unlock(&shpool->mutex);
 
+        /*
+         * Emit __other__ pseudo-path series for overflow paths
+         * that were dropped when the cardinality limit was reached.
+         * This mirrors the JSON __other__ pseudo-path entry.
+         */
+        if (snapshot->per_path.overflow_count > 0 && p < end) {
+            p = ngx_slprintf(p, end,
+                "nginx_markdown_path_conversions_total"
+                "{path=\"__other__\"} %uA\n"
+                "nginx_markdown_path_conversion_time_ms_total"
+                "{path=\"__other__\"} 0\n",
+                snapshot->per_path.overflow_count);
+        }
+
         if (p < end) {
             *p++ = '\n';
         }
