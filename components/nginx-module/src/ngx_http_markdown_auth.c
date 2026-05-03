@@ -908,28 +908,6 @@ ngx_http_markdown_modify_cache_control_for_auth(ngx_http_request_t *r)
             }
         }
     }
-                if (headers[i].key.len
-                        == sizeof(ngx_http_markdown_hdr_cache_control) - 1
-                    && ngx_strncasecmp(headers[i].key.data,
-                                        ngx_http_markdown_hdr_cache_control,
-                                        sizeof(ngx_http_markdown_hdr_cache_control) - 1) == 0)
-                {
-                    if (ngx_http_markdown_cache_control_has_directive(
-                            &headers[i].value,
-                            &ngx_http_markdown_public))
-                    {
-                        any_public = 1;
-                    }
-                    if (ngx_http_markdown_cache_control_has_directive(
-                            &headers[i].value,
-                            &ngx_http_markdown_no_store))
-                    {
-                        has_no_store = 1;
-                    }
-                }
-            }
-        }
-    }
 
     if (cache_control == NULL) {
         return ngx_http_markdown_add_private_cache_control_header(r);
