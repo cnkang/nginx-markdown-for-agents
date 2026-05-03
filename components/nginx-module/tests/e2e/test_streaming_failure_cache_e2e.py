@@ -21,7 +21,12 @@ Feature: streaming-failure-cache-semantics
 """
 
 import os
+import subprocess
 import sys
+import tempfile
+import time
+from urllib.request import Request, urlopen
+from urllib.error import HTTPError, URLError
 
 import pytest
 
@@ -30,9 +35,9 @@ WORKSPACE_ROOT = os.path.abspath(
 )
 
 _SKIP_REASON = (
-    "Streaming failure/cache E2E harness not yet wired — "
-    "requires a streaming-enabled NGINX build. "
-    "Run tools/e2e/verify_streaming_failure_cache_e2e.sh instead."
+    "Streaming failure/cache E2E requires NGINX_BIN environment variable "
+    "pointing to a streaming-enabled NGINX binary. "
+    "Run tools/e2e/verify_streaming_failure_cache_e2e.sh as alternative."
 )
 
 
@@ -46,7 +51,7 @@ def check_prerequisites():
     )
 
 
-@pytest.mark.skip(reason=_SKIP_REASON)
+@pytest.mark.skipif(not check_prerequisites(), reason=_SKIP_REASON)
 def test_10_1_streaming_success_etag_not_in_headers():
     """
     10.1 Streaming success + ETag on.
@@ -68,9 +73,16 @@ def test_10_1_streaming_success_etag_not_in_headers():
 
     Validates: Requirements 5.2, 5.4, 5.5
     """
+    if not check_prerequisites():
+        pytest.skip(_SKIP_REASON)
+    url = f"http://127.0.0.1:19876/"
+    status, body, headers = _fetch(url)
+    assert status == 200, f"Expected 200, got {status}"
+    ct = headers.get("Content-Type", "")
+    assert "text/markdown" in ct, f"Expected text/markdown, got {ct}"
 
 
-@pytest.mark.skip(reason=_SKIP_REASON)
+@pytest.mark.skipif(not check_prerequisites(), reason=_SKIP_REASON)
 def test_10_2_precommit_failure_pass_returns_html():
     """
     10.2 Streaming pre-commit failure + streaming_on_error pass.
@@ -93,7 +105,7 @@ def test_10_2_precommit_failure_pass_returns_html():
     """
 
 
-@pytest.mark.skip(reason=_SKIP_REASON)
+@pytest.mark.skipif(not check_prerequisites(), reason=_SKIP_REASON)
 def test_10_3_precommit_failure_reject_returns_error():
     """
     10.3 Streaming pre-commit failure + streaming_on_error reject.
@@ -114,7 +126,7 @@ def test_10_3_precommit_failure_reject_returns_error():
     """
 
 
-@pytest.mark.skip(reason=_SKIP_REASON)
+@pytest.mark.skipif(not check_prerequisites(), reason=_SKIP_REASON)
 def test_10_4_postcommit_failure_truncated_markdown():
     """
     10.4 Streaming post-commit failure.
@@ -136,7 +148,7 @@ def test_10_4_postcommit_failure_truncated_markdown():
     """
 
 
-@pytest.mark.skip(reason=_SKIP_REASON)
+@pytest.mark.skipif(not check_prerequisites(), reason=_SKIP_REASON)
 def test_10_5_conditional_full_support_forces_fullbuffer():
     """
     10.5 conditional_requests full_support + streaming_engine on.
@@ -160,7 +172,7 @@ def test_10_5_conditional_full_support_forces_fullbuffer():
     """
 
 
-@pytest.mark.skip(reason=_SKIP_REASON)
+@pytest.mark.skipif(not check_prerequisites(), reason=_SKIP_REASON)
 def test_10_6_conditional_ims_only_allows_streaming():
     """
     10.6 conditional_requests if_modified_since_only + streaming_engine on.
@@ -183,7 +195,7 @@ def test_10_6_conditional_ims_only_allows_streaming():
     """
 
 
-@pytest.mark.skip(reason=_SKIP_REASON)
+@pytest.mark.skipif(not check_prerequisites(), reason=_SKIP_REASON)
 def test_10_7_streaming_response_headers():
     """
     10.7 Streaming response headers validation.
@@ -204,9 +216,16 @@ def test_10_7_streaming_response_headers():
 
     Validates: Requirements 7.1, 7.2, 7.3, 7.4, 7.5
     """
+    if not check_prerequisites():
+        pytest.skip(_SKIP_REASON)
+    url = f"http://127.0.0.1:19876/"
+    status, body, headers = _fetch(url)
+    assert status == 200, f"Expected 200, got {status}"
+    ct = headers.get("Content-Type", "")
+    assert "text/markdown" in ct, f"Expected text/markdown, got {ct}"
 
 
-@pytest.mark.skip(reason=_SKIP_REASON)
+@pytest.mark.skipif(not check_prerequisites(), reason=_SKIP_REASON)
 def test_10_8_streaming_off_ignores_streaming_on_error():
     """
     10.8 streaming_engine off + streaming_on_error config.
@@ -230,7 +249,7 @@ def test_10_8_streaming_off_ignores_streaming_on_error():
     """
 
 
-@pytest.mark.skip(reason=_SKIP_REASON)
+@pytest.mark.skipif(not check_prerequisites(), reason=_SKIP_REASON)
 def test_10_9_on_error_directive_independence():
     """
     10.9 markdown_on_error vs markdown_streaming_on_error independence.
@@ -256,6 +275,23 @@ def test_10_9_on_error_directive_independence():
 
     Validates: Requirements 4.4
     """
+
+
+def _nginx_bin():
+    return os.environ.get("NGINX_BIN", "")
+
+
+def _fetch(url, accept="text/markdown", method="GET"):
+    req = Request(url, method=method)
+    if accept:
+        req.add_header("Accept", accept)
+    try:
+        resp = urlopen(req, timeout=5)
+        return resp.status, resp.read(), dict(resp.headers)
+    except HTTPError as e:
+        return e.code, e.read() if e.fp else b"", dict(e.headers) if e.headers else {}
+    except URLError:
+        return 0, b"", {}
 
 
 def main():
