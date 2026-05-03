@@ -15,6 +15,12 @@
 struct MarkdownOptions;
 
 /*
+ * Forward declaration for OTel span type.
+ * Full definition is in ngx_http_markdown_otel_impl.h.
+ */
+typedef struct ngx_http_markdown_otel_span_s  ngx_http_markdown_otel_span_t;
+
+/*
  * Processing path constants for threshold router
  */
 #define NGX_HTTP_MARKDOWN_PATH_FULLBUFFER   0  /* Full-buffer path */

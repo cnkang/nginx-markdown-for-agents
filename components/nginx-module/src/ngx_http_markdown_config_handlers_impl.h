@@ -441,11 +441,14 @@ ngx_http_markdown_content_types(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         }
 
         type_value = (const char *) value[i].data;
-        slash = (const char *) ngx_strchr(type_value, '/');
+        slash = (const char *) ngx_strlchr(value[i].data,
+                                           value[i].data + value[i].len, '/');
         next_slash = NULL;
 
         if (slash != NULL && (size_t) (slash - type_value + 1) < value[i].len) {
-            next_slash = (const char *) ngx_strchr(slash + 1, '/');
+            next_slash = (const char *) ngx_strlchr(
+                            (const u_char *) (slash + 1),
+                            value[i].data + value[i].len, '/');
         }
 
         if (slash == NULL
@@ -583,11 +586,14 @@ ngx_http_markdown_stream_types(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         }
 
         type_value = (const char *) value[i].data;
-        slash = (const char *) ngx_strchr(type_value, '/');
+        slash = (const char *) ngx_strlchr(value[i].data,
+                                           value[i].data + value[i].len, '/');
         next_slash = NULL;
 
         if (slash != NULL && (size_t) (slash - type_value + 1) < value[i].len) {
-            next_slash = (const char *) ngx_strchr(slash + 1, '/');
+            next_slash = (const char *) ngx_strlchr(
+                            (const u_char *) (slash + 1),
+                            value[i].data + value[i].len, '/');
         }
 
         if (slash == NULL

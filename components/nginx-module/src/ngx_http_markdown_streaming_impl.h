@@ -394,7 +394,7 @@ ngx_http_markdown_streaming_cleanup(void *data)
             (int64_t) -1);
         ngx_http_markdown_otel_span_end(ctx->otel_span);
         ngx_http_markdown_otel_span_export(ctx->otel_span,
-            ctx->request->connection->log);
+            ctx->request->connection->log, ctx->request);
         ctx->otel_span = NULL;
     }
 
@@ -969,7 +969,7 @@ ngx_http_markdown_streaming_send_deferred_lastbuf(
                 (int64_t) 0);
             ngx_http_markdown_otel_span_end(ctx->otel_span);
             ngx_http_markdown_otel_span_export(ctx->otel_span,
-                r->connection->log);
+                r->connection->log, r);
             ctx->otel_span = NULL;
         }
     } else {
@@ -1108,7 +1108,7 @@ ngx_http_markdown_streaming_resume_pending(
                 (int64_t) 0);
             ngx_http_markdown_otel_span_end(ctx->otel_span);
             ngx_http_markdown_otel_span_export(ctx->otel_span,
-                r->connection->log);
+                r->connection->log, r);
             ctx->otel_span = NULL;
         }
 
@@ -1156,7 +1156,7 @@ ngx_http_markdown_streaming_fallback_to_fullbuffer(
             (const u_char *) "fullbuffer", 10);
         ngx_http_markdown_otel_span_end(ctx->otel_span);
         ngx_http_markdown_otel_span_export(ctx->otel_span,
-            r->connection->log);
+            r->connection->log, r);
         ctx->otel_span = NULL;
     }
 
@@ -1888,7 +1888,7 @@ ngx_http_markdown_streaming_finalize_request(
                 (int64_t) rc_ffi);
             ngx_http_markdown_otel_span_end(ctx->otel_span);
             ngx_http_markdown_otel_span_export(ctx->otel_span,
-                r->connection->log);
+                r->connection->log, r);
             ctx->otel_span = NULL;
         }
 
@@ -2085,7 +2085,7 @@ ngx_http_markdown_streaming_finalize_request(
                 (int64_t) 0);
             ngx_http_markdown_otel_span_end(ctx->otel_span);
             ngx_http_markdown_otel_span_export(ctx->otel_span,
-                r->connection->log);
+                r->connection->log, r);
             ctx->otel_span = NULL;
         }
     } else if (rc == NGX_AGAIN) {

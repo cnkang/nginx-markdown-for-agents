@@ -43,11 +43,16 @@ struct ngx_rbtree_s {
                                  ngx_rbtree_node_t *sentinel);
 };
 
-typedef struct {
+typedef struct ngx_http_markdown_otel_span_s {
     ngx_msec_t    start_ms;
     ngx_msec_t    end_ms;
     ngx_uint_t    attr_count;
     ngx_uint_t    exported;
+    u_char        trace_id[33];
+    u_char        span_id[17];
+    u_char        parent_span_id[17];
+    ngx_uint_t    trace_flags;
+    ngx_uint_t    has_parent;
 } ngx_http_markdown_otel_span_t;
 
 #define ngx_string(str)     { sizeof(str) - 1, (u_char *) str }
@@ -56,6 +61,7 @@ typedef struct {
 #define ngx_log_error(level, log, err, fmt, ...) (void)(log)
 
 #define ngx_memcmp(s1, s2, n)  memcmp(s1, s2, n)
+#define ngx_random()           rand()
 #define ngx_rbt_red(node)      ((node)->color = 1)
 #define ngx_rbt_black(node)    ((node)->color = 0)
 #define ngx_rbtree_init(tree, s, i)  \
