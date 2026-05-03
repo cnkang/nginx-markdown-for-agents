@@ -62,7 +62,7 @@ NGINX_HEADER := $(NGINX_MODULE_DIR)/src/markdown_converter.h
         verify-metrics-endpoint-e2e verify-conditional-requests-e2e verify-config-merge-e2e \
         verify-auth-cache-e2e verify-status-codes-e2e \
         test-rust-streaming \
-        coverage-c coverage-rust coverage-sonar-xml coverage-all \
+        coverage-c coverage-rust coverage-sonar-xml coverage-all coverage-gate \
         clean help
 
 all: build
