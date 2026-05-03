@@ -134,14 +134,83 @@ static ngx_int_t
 ngx_http_markdown_otel_parse_traceparent(ngx_http_request_t *r,
                                          ngx_http_markdown_otel_span_t *span)
 {
-    ngx_table_elt_t  *h;
     u_char           *p;
-    size_t            i;
 
-    h = r->headers_in.part.elts;
-    if (h == NULL) {
-        return NGX_DECLINED;
+    /*
+     * Iterate all linked-list parts of the request headers,
+     * not just the first part.  NGINX headers can span multiple
+     * ngx_list_part_t entries, so a single-part scan would miss
+     * traceparent in later parts.
+     */
+    for (ngx_list_part_t *part = &r->headers_in.headers.part;
+         part != NULL;
+         part = part->next)
+    {
+        ngx_table_elt_t  *h;
+
+        h = part->elts;
+        for (ngx_uint_t i = 0; i < part->nelts; i++) {
+            if (h[i].key.len != 11
+                || ngx_strncasecmp(h[i].key.data,
+                                   (const u_char *) "traceparent", 11) != 0
+                || h[i].value.len != NGX_HTTP_MARKDOWN_OTEL_TRACEPARENT_LEN)
+            {
+                continue;
+            }
+
+            p = h[i].value.data;
+
+            /* Check version: must be "00-" */
+            if (p[0] != '0' || p[1] != '0' || p[2] != '-') {
+                return NGX_DECLINED;
+            }
+
+            p += 3;
+
+            /* Copy trace_id (32 hex chars). */
+            ngx_memcpy(span->trace_id, p,
+                       NGX_HTTP_MARKDOWN_OTEL_TRACE_ID_LEN);
+            span->trace_id[NGX_HTTP_MARKDOWN_OTEL_TRACE_ID_LEN] = '\0';
+
+            p += NGX_HTTP_MARKDOWN_OTEL_TRACE_ID_LEN;
+
+            if (*p != '-') {
+                return NGX_DECLINED;
+            }
+            p++;
+
+            /* Copy parent span_id (16 hex chars). */
+            ngx_memcpy(span->parent_span_id, p,
+                       NGX_HTTP_MARKDOWN_OTEL_SPAN_ID_LEN);
+            span->parent_span_id[NGX_HTTP_MARKDOWN_OTEL_SPAN_ID_LEN] = '\0';
+
+            p += NGX_HTTP_MARKDOWN_OTEL_SPAN_ID_LEN;
+
+            if (*p != '-') {
+                return NGX_DECLINED;
+            }
+            p++;
+
+            /* Parse trace-flags (2 hex chars). */
+            span->trace_flags = 0;
+            if (p[0] >= '0' && p[0] <= '9') {
+                span->trace_flags = (p[0] - '0') << 4;
+            } else if (p[0] >= 'a' && p[0] <= 'f') {
+                span->trace_flags = (p[0] - 'a' + 10) << 4;
+            }
+            if (p[1] >= '0' && p[1] <= '9') {
+                span->trace_flags |= (p[1] - '0');
+            } else if (p[1] >= 'a' && p[1] <= 'f') {
+                span->trace_flags |= (p[1] - 'a' + 10);
+            }
+
+            span->has_parent = 1;
+            return NGX_OK;
+        }
     }
+
+    return NGX_DECLINED;
+}
 
     /* Find traceparent header. */
     for (i = 0; i < r->headers_in.part.nelts; i++) {
