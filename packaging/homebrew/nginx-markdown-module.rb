@@ -2,10 +2,12 @@ class NginxMarkdownModule < Formula
   desc "NGINX module for HTML-to-Markdown conversion"
   homepage "https://github.com/cnkang/nginx-markdown-for-agents"
   url "https://github.com/cnkang/nginx-markdown-for-agents/archive/refs/tags/v0.6.0.tar.gz"
-  # NOTE: SHA-256 must be regenerated from the actual GitHub archive artifact
-  # after pushing the v0.6.0 tag.  Run:
+  # NOTE: SHA-256 is generated from git archive HEAD.  After pushing the
+  # v0.6.0 tag, regenerate from the actual GitHub archive artifact:
   #   curl -sL https://github.com/cnkang/nginx-markdown-for-agents/archive/refs/tags/v0.6.0.tar.gz | sha256sum
-  sha256 "ac5080ee598b9a7cba229c4306efe8d5177dd3df2404f8a5534a103be4860715"
+  # and update this value.  GitHub archives include a commit-date prefix
+  # that differs from git archive, so the SHA will change.
+  sha256 "e03bfda89faeb44aa419c9dc8e79ce8058e092505af1f2b764d1d70bfb1af81a"
   license "BSD-2-Clause"
 
   depends_on "rust" => :build
