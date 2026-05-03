@@ -17,7 +17,7 @@ This page is the readable overlay, not the machine-owned truth.
 | `release-governance` | focused semantic | `make release-gates-check`, `make release-gates-check-strict`, `make release-gates-check-055` |
 | `runtime-e2e` | umbrella | `make verify-chunked-native-e2e-smoke`, `make verify-streaming-failure-cache-e2e` |
 | `release-quality` | umbrella | `make harness-check-full` |
-| `coverage-gate` | focused semantic | `make coverage-c`, `make coverage-rust` |
+| `coverage-gate` | focused semantic | `make coverage-gate` |
 | `release-governance-060` | focused semantic | `make release-gates-check-060` |
 | `packaging-e2e` | umbrella | `dpkg-deb --info`, `rpm -qip`, `helm lint` |
 
@@ -37,6 +37,7 @@ Plan-only targets (for example `*-plan`) are documentation aids, not evidence.
 | `harness-remediation` | harness rules, steering adapters, post-analysis closeout | docs-tooling, observability | [risk-packs/harness-remediation.md](risk-packs/harness-remediation.md) |
 | `otel-integration` | OTel tracing, OTel metrics, OTLP export, span attributes | observability, nginx-protocol | [risk-packs/otel-integration.md](risk-packs/otel-integration.md) |
 | `packaging-distribution` | APT/YUM repos, Homebrew tap, Helm chart, K8s Ingress | docs-tooling, release-governance | [risk-packs/packaging-distribution.md](risk-packs/packaging-distribution.md) |
+| `dynamic-config-hot-reload` | dynamic config parser, reload lifecycle, runtime apply | nginx-protocol, observability, docs-tooling | [risk-packs/dynamic-config-hot-reload.md](risk-packs/dynamic-config-hot-reload.md) |
 
 ## Task Entry Points
 
@@ -64,3 +65,5 @@ Plan-only targets (for example `*-plan`) are documentation aids, not evidence.
 | 0.5.5 | 2026-04-24 | Codex | Added 60-day protocol and release governance packs |
 | 0.5.5 | 2026-04-24 | Codex | Scoped legacy release-gate validation to clones with legacy specs |
 | 0.6.0 | 2026-04-28 | v0.6.0-planning | Added coverage-gate, release-governance-060, packaging-e2e families; otel-integration, packaging-distribution packs |
+| 0.6.0 | 2026-05-03 | Codex | Aligned coverage-gate overlay command with machine manifest |
+| 0.6.0 | 2026-05-03 | Codex | Added dynamic-config-hot-reload pack and tightened protocol/release routes from two-week branch scan |

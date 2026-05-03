@@ -2,7 +2,9 @@
 
 ## Triggers
 
-Changes to `.github/workflows/release-apt.yml`, `release-yum.yml`, Helm chart files, Homebrew formula, install scripts, or packaging documentation.
+Changes to package workflows, Helm chart files, Debian/RPM package metadata,
+Homebrew formula/tap workflows, install scripts, release-gate packaging checks,
+or packaging documentation.
 
 ## Risks
 
@@ -11,6 +13,10 @@ Changes to `.github/workflows/release-apt.yml`, `release-yum.yml`, Helm chart fi
 - Helm chart values not mapping to all markdown configuration directives
 - Ingress annotation parsing errors causing silent misconfiguration
 - Package dependency conflicts across NGINX versions (1.24.x/1.26.x/1.29.x/1.30.x)
+- Homebrew formula checksums generated from a different source archive than
+  the release/tag that the formula installs
+- Tap publish/verification workflows drifting from the repo-owned release-gate
+  and installation docs
 
 ## Common Supporting Packs
 
@@ -22,8 +28,11 @@ Changes to `.github/workflows/release-apt.yml`, `release-yum.yml`, Helm chart fi
 - `tools/install.sh` must stay consistent with new package formats
 - `tools/release-matrix.json` must include all supported platforms
 - `tools/release/matrix/` tooling must stay consistent with matrix schema
-- Homebrew formula repository (external) must stay in sync with release artifacts; Homebrew tap is a supporting surface pending implementation
+- Homebrew formula repository and repo-owned formula template must stay in sync
+  with release artifacts, tag timing, checksums, and post-release verification.
 - `docs/guides/INSTALLATION.md` must document all installation methods
+- `docs/guides/HOMEBREW_TAP_RELEASE.md`, `README.md`, and `CHANGELOG.md`
+  must stay consistent with Homebrew tap behavior when those surfaces exist.
 - `docs/guides/kubernetes-deployment.md` must document Helm chart usage
 - `CHANGELOG.md` must record packaging changes
 
@@ -41,3 +50,4 @@ make release-gates-check
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 0.6.0 | 2026-04-28 | v0.6.0-planning | Initial pack definition |
+| 0.6.0 | 2026-05-03 | Codex | Covered Homebrew workflows/formula, package metadata, and release-gate docs |

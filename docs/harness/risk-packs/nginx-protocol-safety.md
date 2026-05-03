@@ -25,6 +25,12 @@ cache-control, conditional request, status, or header semantics change.
 - headers are finalized before body data and are not emitted twice
 - auth-denied, auth-allowed, and authenticated cache-control branches are all
   covered by tests
+- repeated header fields are evaluated across every `ngx_list_part_t`, not only
+  the first list part or first matching value
+- cache-control decisions aggregate all relevant values before applying
+  precedence, especially `public` with `private`/`no-store` combinations
+- auth/cache-bypass cookie patterns match full cookie-name boundaries and do
+  not create substring false positives
 - conditional request modes preserve the intended full-buffer vs streaming path
 - status-specific eligibility, especially `206` and `304`, maps to the intended
   reason code under normal and malformed upstream responses
@@ -54,3 +60,4 @@ behavior, also run the matching focused E2E or `make harness-check-full`.
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 0.5.5 | 2026-04-24 | Codex | Added 60-day protocol safety routing |
+| 0.6.0 | 2026-05-03 | Codex | Added multi-header and cookie-boundary sync points |
