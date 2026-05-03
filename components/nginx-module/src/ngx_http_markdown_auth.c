@@ -925,15 +925,23 @@ ngx_http_markdown_modify_cache_control_for_auth(ngx_http_request_t *r)
         return NGX_OK;
     }
 
+    /*
+     * If any Cache-Control header still contains "public" after
+     * checking all headers, we need to strip it.  This covers:
+     *   - First header has "public"
+     *   - First header has "private" but a later header has "public"
+     * In both cases, the effective policy is public due to the
+     * later header, so we must strip public and ensure private.
+     */
+    if (any_public) {
+        return ngx_http_markdown_strip_public_and_append_private(r, cache_control);
+    }
+
     if (has_private) {
         ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                       "markdown filter: Cache-Control already has private: \"%V\"",
                       &cache_control->value);
         return NGX_OK;
-    }
-
-    if (any_public) {
-        return ngx_http_markdown_strip_public_and_append_private(r, cache_control);
     }
 
     return ngx_http_markdown_append_private_directive(r, cache_control);
