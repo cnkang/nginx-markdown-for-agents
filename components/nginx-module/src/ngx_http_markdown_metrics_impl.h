@@ -542,6 +542,34 @@ ngx_http_markdown_metrics_derive_values(
         : 0;
 }
 
+/*
+ * Per-path RB-tree walk enable macro and forward declarations.
+ *
+ * These must be at file scope because C rejects block-scope
+ * function declarations with static storage class.  Unit tests
+ * that lack full NGINX type definitions define the macro to 0
+ * before including this header.
+ */
+#ifndef NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED
+#define NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED  1
+#endif
+
+#if NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED
+static u_char *
+ngx_http_markdown_json_walk_path_tree(
+    ngx_rbtree_node_t *node,
+    ngx_rbtree_node_t *sentinel,
+    u_char *p,
+    u_char *end);
+
+static u_char *
+ngx_http_markdown_text_walk_path_tree(
+    ngx_rbtree_node_t *node,
+    ngx_rbtree_node_t *sentinel,
+    u_char *p,
+    u_char *end);
+#endif
+
 /**
  * Render the collected metrics snapshot as a JSON object into the provided buffer.
  *
@@ -753,31 +781,6 @@ ngx_http_markdown_metrics_write_json(
      * Requires full NGINX type definitions; guarded by
      * NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED.
      */
-#ifndef NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED
-#define NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED  1
-#endif
-
-/*
- * Forward declarations for per-path RB-tree walk helpers.
- * Defined after the main write functions.  Only available
- * when NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED is 1.
- */
-#if NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED
-static u_char *
-ngx_http_markdown_json_walk_path_tree(
-    ngx_rbtree_node_t *node,
-    ngx_rbtree_node_t *sentinel,
-    u_char *p,
-    u_char *end);
-
-static u_char *
-ngx_http_markdown_text_walk_path_tree(
-    ngx_rbtree_node_t *node,
-    ngx_rbtree_node_t *sentinel,
-    u_char *p,
-    u_char *end);
-#endif
-
 #if NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED
     if (snapshot->per_path.path_entries > 0
         && ngx_http_markdown_metrics_shm_zone != NULL
