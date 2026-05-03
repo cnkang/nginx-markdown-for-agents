@@ -25,7 +25,7 @@ use crate::streaming::state_machine::{StateMachineAction, StructuralContext};
 /// or angle brackets be enclosed in angle brackets (`<…>`), with `>` and `\`
 /// backslash-escaped inside.  URLs without such characters are emitted bare
 /// for readability.
-fn escape_markdown_destination(url: &str) -> std::borrow::Cow<'_, str> {
+pub(crate) fn escape_markdown_destination(url: &str) -> std::borrow::Cow<'_, str> {
     let needs_escape = url
         .bytes()
         .any(|b| matches!(b, b' ' | b'(' | b')' | b'<' | b'>' | b'\\' | b'\n' | b'\r'));

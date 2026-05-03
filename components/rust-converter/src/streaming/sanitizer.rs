@@ -14,6 +14,7 @@
 //! - Nesting depth is limited to prevent stack exhaustion
 
 use crate::converter::pruning::{PruneConfig, should_prune_with_config};
+use crate::streaming::emitter::escape_markdown_destination;
 use crate::streaming::types::StreamEvent;
 
 /// HTML void elements that never have children.
@@ -277,10 +278,10 @@ impl StreamingSanitizer {
                     if let Some(url_val) = url
                         && !is_dangerous_url(&url_val)
                     {
-                        // Return a text event with the URL as a markdown link placeholder
+                        let escaped = escape_markdown_destination(&url_val);
                         return SanitizeDecision::PassModified(StreamEvent::Text(format!(
                             "[{}]({})",
-                            tag, url_val
+                            tag, escaped
                         )));
                     }
                     return SanitizeDecision::Skip;
@@ -306,9 +307,10 @@ impl StreamingSanitizer {
                     if let Some(url_val) = url
                         && !is_dangerous_url(&url_val)
                     {
+                        let escaped = escape_markdown_destination(&url_val);
                         return SanitizeDecision::PassModified(StreamEvent::Text(format!(
                             "[{}]({})",
-                            tag, url_val
+                            tag, escaped
                         )));
                     }
                     return SanitizeDecision::Skip;
@@ -505,6 +507,26 @@ pub(crate) fn is_dangerous_url(url: &str) -> bool {
     let trimmed = url.trim();
     if trimmed.chars().any(|ch| ch == '\0' || ch.is_control()) {
         return true;
+    }
+
+    // Reject percent-encoded control characters (%00-%1f, %7f).
+    // These can bypass the raw control-character check above but are
+    // decoded by user agents and can enable script injection.
+    let bytes = trimmed.as_bytes();
+    let mut i = 0;
+    while i + 2 < bytes.len() {
+        if bytes[i] == b'%' && bytes[i + 1].is_ascii_hexdigit() && bytes[i + 2].is_ascii_hexdigit()
+        {
+            let hi = (bytes[i + 1] as char).to_digit(16).unwrap_or(0) as u8;
+            let lo = (bytes[i + 2] as char).to_digit(16).unwrap_or(0) as u8;
+            let decoded = hi << 4 | lo;
+            if decoded <= 0x1f || decoded == 0x7f {
+                return true;
+            }
+            i += 3;
+        } else {
+            i += 1;
+        }
     }
 
     let lower = trimmed.to_ascii_lowercase();
@@ -714,6 +736,44 @@ mod tests {
     }
 
     #[test]
+    fn test_iframe_url_destination_escaped() {
+        let mut san = StreamingSanitizer::new();
+        let decision = san.process_event(start_tag(
+            "iframe",
+            vec![("src", "https://example.com/path?a=1&b=2)")],
+        ));
+        match decision {
+            SanitizeDecision::PassModified(StreamEvent::Text(t)) => {
+                assert!(
+                    t.contains('<'),
+                    "Parenthesis in URL must trigger angle-bracket escaping, got: {}",
+                    t
+                );
+            }
+            _ => panic!("Expected PassModified with escaped URL, got {:?}", decision),
+        }
+    }
+
+    #[test]
+    fn test_media_url_destination_escaped() {
+        let mut san = StreamingSanitizer::new();
+        let decision = san.process_event(start_tag(
+            "video",
+            vec![("src", "https://example.com/vid)eo.mp4")],
+        ));
+        match decision {
+            SanitizeDecision::PassModified(StreamEvent::Text(t)) => {
+                assert!(
+                    t.contains('<'),
+                    "Parenthesis in URL must trigger angle-bracket escaping, got: {}",
+                    t
+                );
+            }
+            _ => panic!("Expected PassModified with escaped URL, got {:?}", decision),
+        }
+    }
+
+    #[test]
     fn test_object_data_url_extracted() {
         let mut san = StreamingSanitizer::new();
         let decision = san.process_event(start_tag(
@@ -917,6 +977,17 @@ mod tests {
     fn test_dangerous_url_with_control_chars() {
         assert!(is_dangerous_url("javascript:\u{0000}alert(1)"));
         assert!(is_dangerous_url("java\u{0009}script:alert(1)"));
+    }
+
+    #[test]
+    fn test_dangerous_url_with_percent_encoded_control_chars() {
+        assert!(is_dangerous_url("https://example.com/%00"));
+        assert!(is_dangerous_url("https://example.com/%0a"));
+        assert!(is_dangerous_url("https://example.com/%0d"));
+        assert!(is_dangerous_url("https://example.com/%1f"));
+        assert!(is_dangerous_url("https://example.com/%7f"));
+        assert!(!is_dangerous_url("https://example.com/%20"));
+        assert!(!is_dangerous_url("https://example.com/%41"));
     }
 
     // --- Nesting depth ---
