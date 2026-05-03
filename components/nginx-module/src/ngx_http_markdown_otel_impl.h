@@ -530,7 +530,7 @@ ngx_http_markdown_otel_render_json(ngx_http_markdown_otel_span_t *span,
 /*
  * Export a completed span.
  *
- * Attempts OTLP JSON export if a collector endpoint is configured
+ * Attempts OTLP JSON export if an internal endpoint URI is configured
  * (via the markdown_otel_endpoint directive).  Falls back to
  * log-level diagnostic output when no endpoint is available.
  *
