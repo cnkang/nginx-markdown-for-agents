@@ -222,8 +222,14 @@ ngx_http_markdown_create_conf(ngx_conf_t *cf)
     conf->ops.metrics_per_path = NGX_CONF_UNSET;
     conf->ops.metrics_per_path_cardinality = NGX_CONF_UNSET_UINT;
     conf->ops.otel_enabled = NGX_CONF_UNSET;
+    conf->ops.otel_tracing = NGX_CONF_UNSET;
+    conf->ops.otel_metrics = NGX_CONF_UNSET;
     conf->ops.otel_endpoint.len = 0;
     conf->ops.otel_endpoint.data = NULL;
+    conf->ops.otel_service_name.len = 0;
+    conf->ops.otel_service_name.data = NULL;
+    conf->ops.otel_span_buffer_size = NGX_CONF_UNSET_UINT;
+    conf->ops.otel_export_timeout = NGX_CONF_UNSET_MSEC;
 
 #ifdef MARKDOWN_STREAMING_ENABLED
     conf->streaming_engine = NULL;
@@ -325,9 +331,27 @@ ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
                               prev->ops.metrics_per_path_cardinality,
                               NGX_HTTP_MARKDOWN_PER_PATH_CARDINALITY_DEFAULT);
     ngx_conf_merge_value(conf->ops.otel_enabled, prev->ops.otel_enabled, 0);
+    ngx_conf_merge_value(conf->ops.otel_tracing, prev->ops.otel_tracing, 0);
+    ngx_conf_merge_value(conf->ops.otel_metrics, prev->ops.otel_metrics, 0);
+
+    /*
+     * Auto-enable otel_enabled when either tracing or metrics
+     * is explicitly turned on, so operators don't need to set
+     * both markdown_otel on AND markdown_otel_tracing on.
+     */
+    if (conf->ops.otel_tracing || conf->ops.otel_metrics) {
+        conf->ops.otel_enabled = 1;
+    }
     if (conf->ops.otel_endpoint.len == 0 && prev->ops.otel_endpoint.len > 0) {
         conf->ops.otel_endpoint = prev->ops.otel_endpoint;
     }
+    if (conf->ops.otel_service_name.len == 0 && prev->ops.otel_service_name.len > 0) {
+        conf->ops.otel_service_name = prev->ops.otel_service_name;
+    }
+    ngx_conf_merge_uint_value(conf->ops.otel_span_buffer_size,
+                              prev->ops.otel_span_buffer_size, 1024);
+    ngx_conf_merge_msec_value(conf->ops.otel_export_timeout,
+                              prev->ops.otel_export_timeout, 5000);
     ngx_conf_merge_size_value(conf->large_body_threshold,
                               prev->large_body_threshold,
                               NGX_HTTP_MARKDOWN_THRESHOLD_OFF);
