@@ -39,7 +39,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          brew audit --strict ./packaging/homebrew/nginx-markdown-module.rb
+          cp ./packaging/homebrew/nginx-markdown-module.rb "$(brew --repository homebrew/core)/Formula/n/nginx-markdown-module.rb"
+          brew audit --strict nginx-markdown-module
 
       - name: Install local formula from source
         shell: bash

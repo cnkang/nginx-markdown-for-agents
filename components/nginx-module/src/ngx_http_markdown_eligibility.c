@@ -221,10 +221,13 @@ ngx_http_markdown_is_streaming(const ngx_http_request_t *r,
         stream_type = conf->stream_types->elts;
         
         for (ngx_uint_t i = 0; i < conf->stream_types->nelts; i++) {
-            /* Check if Content-Type starts with configured stream type */
+            /* Prefix + boundary match (same semantics as content_types). */
             if (content_type->len >= stream_type[i].len &&
                 ngx_strncasecmp(content_type->data, stream_type[i].data,
-                               stream_type[i].len) == 0)
+                               stream_type[i].len) == 0 &&
+                (content_type->len == stream_type[i].len
+                 || content_type->data[stream_type[i].len] == ';'
+                 || content_type->data[stream_type[i].len] == ' '))
             {
                 return 1;
             }
