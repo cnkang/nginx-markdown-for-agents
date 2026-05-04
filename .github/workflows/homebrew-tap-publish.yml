@@ -71,6 +71,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          case "${FORMULA_DEST}" in
+            ""|/*|../*|*/../*|..|*/..)
+              echo "::error::HOMEBREW_FORMULA_PATH must stay within tap checkout: ${FORMULA_DEST}" >&2
+              exit 1
+              ;;
+          esac
           dest="tap/${FORMULA_DEST}"
           mkdir -p "$(dirname "${dest}")"
           cp "${FORMULA_SOURCE}" "${dest}"

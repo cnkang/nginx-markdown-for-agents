@@ -107,6 +107,12 @@ ngx_http_markdown_append_private_directive(ngx_http_request_t *r,
     u_char  *new_value;
     size_t   new_len;
 
+    if (cache_control->value.len == 0) {
+        cache_control->value.data = ngx_http_markdown_cc_private;
+        cache_control->value.len = sizeof(ngx_http_markdown_cc_private) - 1;
+        return NGX_OK;
+    }
+
     if (cache_control->value.len > ((size_t) -1) - (sizeof(ngx_http_markdown_cc_suffix_private) - 1)) {
         return NGX_ERROR;
     }

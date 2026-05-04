@@ -464,7 +464,7 @@ jobs:
             components/rust-converter -> target
 
       - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@7f8e0b58a3db368f15a49b98cfe8d3f7be32b7e3 # v2
+        uses: taiki-e/install-action@v2
         with:
           tool: cargo-llvm-cov
 

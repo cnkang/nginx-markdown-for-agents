@@ -53,19 +53,25 @@ ngx_http_markdown_classify_error(uint32_t error_code)
         case ERROR_PARSE:
         case ERROR_ENCODING:
         case ERROR_INVALID_INPUT:
+#if defined(MARKDOWN_STREAMING_ENABLED)
         case ERROR_POST_COMMIT:
+#endif
             return NGX_HTTP_MARKDOWN_ERROR_CONVERSION;
 
         /* Resource limit errors: timeout, memory limit,
          * budget exceeded (streaming working-set limit) */
         case ERROR_TIMEOUT:
         case ERROR_MEMORY_LIMIT:
+#if defined(MARKDOWN_STREAMING_ENABLED)
         case ERROR_BUDGET_EXCEEDED:
+#endif
             return NGX_HTTP_MARKDOWN_ERROR_RESOURCE_LIMIT;
 
         /* System errors: internal errors, unexpected conditions,
          * streaming fallback (engine downgrade, not a resource limit) */
+#if defined(MARKDOWN_STREAMING_ENABLED)
         case ERROR_STREAMING_FALLBACK:
+#endif
         case ERROR_INTERNAL:
             return NGX_HTTP_MARKDOWN_ERROR_SYSTEM;
 
