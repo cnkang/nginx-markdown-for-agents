@@ -48,6 +48,8 @@
  */
 #define NGX_HTTP_MARKDOWN_OTEL_EXPORT_BUF_LEN  4096
 
+static u_char ngx_http_markdown_otel_traceparent_name[] = "traceparent";
+
 /*
  * OTel span attribute (key-value pair).
  *
@@ -152,7 +154,7 @@ ngx_http_markdown_otel_parse_traceparent(ngx_http_request_t *r,
         for (ngx_uint_t i = 0; i < part->nelts; i++) {
             if (h[i].key.len != 11
                 || ngx_strncasecmp(h[i].key.data,
-                                   (const u_char *) "traceparent", 11) != 0
+                                   ngx_http_markdown_otel_traceparent_name, 11) != 0
                 || h[i].value.len != NGX_HTTP_MARKDOWN_OTEL_TRACEPARENT_LEN)
             {
                 continue;
@@ -505,7 +507,9 @@ ngx_http_markdown_otel_render_json(ngx_http_markdown_otel_span_t *span,
         } else {
             p = ngx_slprintf(p, end,
                 "{\"key\":\"%*s\","
-                "\"value\":{\"stringValue\":\"");
+                "\"value\":{\"stringValue\":\"",
+                (size_t) span->attrs[i].key_len,
+                span->attrs[i].key);
             p = ngx_http_markdown_otel_escape_json_string(
                     p, end,
                     span->attrs[i].str_value,
@@ -605,7 +609,8 @@ ngx_http_markdown_otel_span_export(ngx_http_markdown_otel_span_t *span,
                      * POST it to the collector.
                      */
                     sr->method = NGX_HTTP_POST;
-                    sr->method_name = ngx_string("POST");
+                    sr->method_name.len = sizeof("POST") - 1;
+                    sr->method_name.data = (u_char *) "POST";
 
                     if (sr->request_body == NULL) {
                         sr->request_body = ngx_pcalloc(

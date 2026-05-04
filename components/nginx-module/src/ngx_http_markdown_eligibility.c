@@ -69,6 +69,12 @@ ngx_http_markdown_check_status(const ngx_http_request_t *r)
     return (r->headers_out.status == NGX_HTTP_OK);
 }
 
+static ngx_int_t
+ngx_http_markdown_has_range_header(const ngx_http_request_t *r)
+{
+    return r->headers_in.range != NULL;
+}
+
 /*
  * Check if response Content-Type matches the configured allowlist.
  *

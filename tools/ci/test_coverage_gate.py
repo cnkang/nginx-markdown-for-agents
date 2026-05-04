@@ -84,6 +84,29 @@ class TestParseLcovSummary(unittest.TestCase):
         self.assertEqual(result.functions_found, 2)
         self.assertEqual(result.functions_hit, 1)
 
+    def test_parse_records_with_fna_format(self) -> None:
+        content = textwrap.dedent("""\
+            TN:
+            SF:src/example.c
+            FNL:0,10,20
+            FNA:0,3,first_func
+            FNL:1,21,30
+            FNA:1,0,second_func
+            FNF:2
+            FNH:1
+            DA:10,1
+            DA:11,0
+            end_of_record
+        """)
+        with NamedTemporaryFile(mode="w", suffix=".lcov", delete=False, encoding="utf-8") as f:
+            f.write(content)
+            f.flush()
+            result = parse_lcov_summary(Path(f.name))
+        self.assertEqual(result.lines_found, 2)
+        self.assertEqual(result.lines_hit, 1)
+        self.assertEqual(result.functions_found, 2)
+        self.assertEqual(result.functions_hit, 1)
+
     def test_file_not_found(self) -> None:
         with self.assertRaises(FileNotFoundError):
             parse_lcov_summary(Path("/nonexistent/file.lcov"))
