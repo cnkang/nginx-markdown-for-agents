@@ -300,7 +300,6 @@ ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
      * needed for the unified memory_budget priority chain below.
      */
     ngx_flag_t  max_size_set = (conf->max_size != NGX_CONF_UNSET_SIZE);
-    ngx_flag_t  memory_budget_set = (conf->memory_budget != NGX_CONF_UNSET_SIZE);
 #ifdef MARKDOWN_STREAMING_ENABLED
     ngx_flag_t  streaming_budget_set = (conf->streaming_budget != NGX_CONF_UNSET_SIZE);
 #endif

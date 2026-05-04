@@ -51,48 +51,6 @@ static ngx_flag_t ngx_http_markdown_token_equals_ignore_case(
     const u_char *left, const u_char *right, size_t len);
 
 /*
- * Find a response header by name in the outgoing headers list.
- *
- * Iterates the response's headers_out.headers list and returns the
- * first header whose key matches the given name (case-insensitive).
- *
- * Parameters:
- *   r        - the HTTP request whose outgoing headers are searched
- *   name     - header name to search for (need not be NUL-terminated)
- *   name_len - length of the header name in bytes
- *
- * Returns:
- *   pointer to the matching header entry, or NULL if not found
- */
-static ngx_table_elt_t *
-ngx_http_markdown_find_response_header(ngx_http_request_t *r,
-                                       u_char *name,
-                                       size_t name_len)
-{
-    if (r->headers_out.headers.part.nelts == 0) {
-        return NULL;
-    }
-
-    for (ngx_list_part_t *part = &r->headers_out.headers.part;
-         part != NULL;
-         part = part->next)
-    {
-        ngx_table_elt_t  *headers;
-
-        headers = part->elts;
-        for (ngx_uint_t i = 0; i < part->nelts; i++) {
-            if (headers[i].key.len == name_len
-                && ngx_strncasecmp(headers[i].key.data, name, name_len) == 0)
-            {
-                return &headers[i];
-            }
-        }
-    }
-
-    return NULL;
-}
-
-/*
  * Insert a new "Cache-Control: private" header when none exists.
  *
  * Allocates a new header entry in the response's outgoing headers list

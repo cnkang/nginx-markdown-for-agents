@@ -343,10 +343,16 @@ ngx_memzero(void *p, size_t n)
  *
  * Side effects: allocates heap memory via malloc(3).
  */
+static int g_next_palloc_fails;
+
 static void *
 ngx_palloc(ngx_pool_t *pool, size_t size)
 {
     UNUSED(pool);
+    if (g_next_palloc_fails > 0) {
+        g_next_palloc_fails--;
+        return NULL;
+    }
     return malloc(size);
 }
 
@@ -1247,6 +1253,100 @@ test_streaming_engine_handler(void)
 }
 
 /*
+ * Verify ngx_http_markdown_parse_size edge cases: NULL input,
+ * oversized input, and bare number (no suffix).
+ *
+ * Semantic contract mirrored: parse_size returns (size_t) NGX_ERROR
+ * for NULL/empty/oversized inputs, and returns the raw value when
+ * no suffix is present (default case in suffix switch).
+ *
+ * Return: void.
+ *
+ * Side effects: none (assertions only).
+ */
+static void
+test_parse_size_edge_cases(void)
+{
+    ngx_str_t line;
+    size_t    result;
+
+    TEST_SUBSECTION("parse_size edge cases");
+
+    line.data = NULL;
+    line.len = 0;
+    result = ngx_http_markdown_parse_size(&line);
+    TEST_ASSERT(result == (size_t) NGX_ERROR,
+        "NULL data should return NGX_ERROR");
+
+    line.data = (u_char *) "123";
+    line.len = 0;
+    result = ngx_http_markdown_parse_size(&line);
+    TEST_ASSERT(result == (size_t) NGX_ERROR,
+        "zero length should return NGX_ERROR");
+
+    {
+        u_char long_buf[128];
+        line.data = long_buf;
+        line.len = sizeof(long_buf);
+        memset(long_buf, '1', sizeof(long_buf));
+        result = ngx_http_markdown_parse_size(&line);
+        TEST_ASSERT(result == (size_t) NGX_ERROR,
+            "oversized input should return NGX_ERROR");
+    }
+
+    set_arg(&line, "2048");
+    result = ngx_http_markdown_parse_size(&line);
+    TEST_ASSERT(result == 2048,
+        "bare number (no suffix) should return value directly");
+
+    set_arg(&line, "0");
+    result = ngx_http_markdown_parse_size(&line);
+    TEST_ASSERT(result == 0,
+        "zero value should parse");
+
+    TEST_PASS("parse_size edge cases covered");
+}
+
+/*
+ * Verify ngx_http_markdown_filter palloc failure path.
+ *
+ * Simulates pool allocation failure by setting a flag that makes
+ * ngx_palloc return NULL for the next call, covering the error
+ * branch in the filter handler.
+ *
+ * Return: void.
+ *
+ * Side effects: modifies g_next_palloc_fails; asserts on return code.
+ */
+static void
+test_markdown_filter_palloc_failure(void)
+{
+    ngx_conf_t               cf;
+    ngx_array_t              args;
+    ngx_str_t                values[2];
+    ngx_command_t            cmd;
+    ngx_http_markdown_conf_t mcf;
+    char                    *rc;
+
+    TEST_SUBSECTION("markdown_filter palloc failure");
+
+    init_conf(&mcf);
+    setup_cf(&cf, &args, values, 2);
+    set_arg(&cmd.name, "markdown_filter");
+    set_arg(&values[0], "markdown_filter");
+    set_arg(&values[1], "$var");
+
+    g_compile_complex_rc = NGX_OK;
+    g_next_palloc_fails = 1;
+    rc = ngx_http_markdown_filter(&cf, &cmd, &mcf);
+    g_next_palloc_fails = 0;
+    TEST_ASSERT(rc == NGX_CONF_ERROR,
+        "palloc failure should return NGX_CONF_ERROR");
+
+    TEST_PASS("markdown_filter palloc failure covered");
+}
+
+/*
  * Entry point: run all config_handlers_impl unit tests.
  *
  * Return: 0 on success (all assertions pass).
@@ -1271,6 +1371,8 @@ main(void)
     test_large_body_threshold_handler();
     test_metrics_handlers();
     test_streaming_engine_handler();
+    test_parse_size_edge_cases();
+    test_markdown_filter_palloc_failure();
 
     printf("\n========================================\n");
     printf("All tests passed!\n");

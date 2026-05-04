@@ -18,6 +18,18 @@
 #include "ngx_http_markdown_streaming_decomp_impl.h"
 
 /* Forward declarations */
+static ngx_http_markdown_otel_span_t *ngx_http_markdown_otel_span_start(
+    ngx_http_request_t *r, const ngx_http_markdown_conf_t *conf);
+static void ngx_http_markdown_otel_set_str_attr(
+    ngx_http_markdown_otel_span_t *span, const u_char *key, size_t key_len,
+    const u_char *value, size_t val_len);
+static void ngx_http_markdown_otel_set_int_attr(
+    ngx_http_markdown_otel_span_t *span, const u_char *key, size_t key_len,
+    int64_t value);
+static void ngx_http_markdown_otel_span_end(ngx_http_markdown_otel_span_t *span);
+static void ngx_http_markdown_otel_span_export(
+    ngx_http_markdown_otel_span_t *span, ngx_log_t *log,
+    ngx_http_request_t *r);
 
 /*
  * Streaming body filter main entry point.

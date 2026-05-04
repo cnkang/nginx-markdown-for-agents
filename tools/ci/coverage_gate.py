@@ -85,6 +85,8 @@ def _compute_from_records(text: str) -> CoverageSummary:
     lines_hit: set[tuple[str, int]] = set()
     functions_found: set[tuple[str, str]] = set()
     functions_hit: set[tuple[str, str]] = set()
+    functions_found_fallback = 0
+    functions_hit_fallback = 0
     current_file = ""
 
     for raw_line in text.splitlines():
@@ -103,17 +105,35 @@ def _compute_from_records(text: str) -> CoverageSummary:
             parts = line[3:].split(",", 1)
             if len(parts) == 2:
                 functions_found.add((current_file, parts[1]))
+        elif line.startswith("FNA:"):
+            parts = line[4:].split(",", 2)
+            if len(parts) == 3:
+                name = parts[2]
+                functions_found.add((current_file, name))
+                if int(parts[1]) > 0:
+                    functions_hit.add((current_file, name))
         elif line.startswith("FNDA:"):
             parts = line[5:].split(",", 1)
             if len(parts) == 2:
                 if int(parts[0]) > 0:
                     functions_hit.add((current_file, parts[1]))
+        elif line.startswith("FNF:"):
+            functions_found_fallback += int(line[4:])
+        elif line.startswith("FNH:"):
+            functions_hit_fallback += int(line[4:])
+
+    if functions_found:
+        functions_found_total = len(functions_found)
+        functions_hit_total = len(functions_hit)
+    else:
+        functions_found_total = functions_found_fallback
+        functions_hit_total = functions_hit_fallback
 
     return CoverageSummary(
         lines_found=len(lines_found),
         lines_hit=len(lines_hit),
-        functions_found=len(functions_found),
-        functions_hit=len(functions_hit),
+        functions_found=functions_found_total,
+        functions_hit=functions_hit_total,
     )
 
 

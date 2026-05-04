@@ -264,6 +264,8 @@ http {
             markdown_filter on;
             markdown_on_wildcard on;
             markdown_etag on;
+            markdown_otel on;
+            markdown_otel_tracing on;
             markdown_conditional_requests full_support;
             markdown_log_verbosity debug;
             markdown_token_estimate on;
@@ -271,6 +273,8 @@ http {
             markdown_max_size 1m;
             markdown_timeout 5000;
             markdown_trust_forwarded_headers on;
+            markdown_dynamic_config on;
+            markdown_dynamic_config_path ${RUNTIME}/conf/markdown-dynconf.conf;
         }
 
         location /auth {
@@ -778,6 +782,14 @@ HTML
 cp "${RUNTIME}/html/streaming/table.html" "${RUNTIME}/html/streaming-large-budget/table.html"
 cp "${RUNTIME}/html/streaming/table.html" "${RUNTIME}/html/streaming-on-error-reject/table.html"
 
+cat > "${RUNTIME}/conf/markdown-dynconf.conf" <<'EOF'
+markdown_filter=on
+prune_noise=on
+log_verbosity=debug
+streaming_budget=4k
+memory_budget=8m
+EOF
+
 echo "==> Starting NGINX on 127.0.0.1:${PORT}"
 "${RUNTIME}/sbin/nginx" -p "${RUNTIME}" -c conf/nginx.conf
 sleep 1
@@ -800,6 +812,22 @@ curl -sS -I -H "${ACCEPT_MARKDOWN}" "http://127.0.0.1:${PORT}/index.html" -o /de
 
 # Large page (chain accumulation)
 curl -sS -H "${ACCEPT_MARKDOWN}" "http://127.0.0.1:${PORT}/large.html" -o /dev/null -w "  large page: HTTP %{http_code}\n"
+
+# OTel trace context parsing path.
+curl -sS -H "${ACCEPT_MARKDOWN}" \
+  -H 'traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01' \
+  "http://127.0.0.1:${PORT}/index.html" -o /dev/null -w "  otel traceparent request: HTTP %{http_code}\n"
+
+# Dynconf watcher/reload path.
+cat > "${RUNTIME}/conf/markdown-dynconf.conf" <<'EOF'
+markdown_filter=on
+prune_noise=off
+log_verbosity=info
+streaming_budget=2k
+memory_budget=4m
+EOF
+sleep 2
+curl -sS -H "${ACCEPT_MARKDOWN}" "http://127.0.0.1:${PORT}/index.html" -o /dev/null -w "  dynconf reload trigger: HTTP %{http_code}\n"
 
 # ── Auth detection scenarios (Req 2) ────────────────────────────────
 

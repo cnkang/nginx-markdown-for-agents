@@ -20,6 +20,7 @@ struct MarkdownOptions;
  */
 typedef struct ngx_http_markdown_otel_span_s  ngx_http_markdown_otel_span_t;
 
+
 /*
  * Processing path constants for threshold router
  */
