@@ -589,9 +589,13 @@ def _check_if_none_match_streaming(streaming_report: dict) -> str:
     and emitted on finalize.  This is operational when the streaming
     report contains an etag field or etag-related statistics.
     """
-    stats = streaming_report.get("streaming_metrics", {})
-    if stats.get("etag_computed") is not None or stats.get("etag_hits") is not None:
-        return "PASS"
+    streaming_metrics = streaming_report.get("streaming_metrics", {})
+    for tier_stats in streaming_metrics.values():
+        if not isinstance(tier_stats, dict):
+            continue
+        if (tier_stats.get("etag_computed") is not None
+                or tier_stats.get("etag_hits") is not None):
+            return "PASS"
     if streaming_report.get("etag_supported") is True:
         return "PASS"
     return "NOT_AVAILABLE"
@@ -604,11 +608,14 @@ def _check_otel_integration(streaming_report: dict) -> str:
     indicating that W3C trace context propagation and span lifecycle
     are wired into the conversion paths.
     """
-    stats = streaming_report.get("streaming_metrics", {})
-    if stats.get("otel_spans_exported", 0) > 0:
-        return "PASS"
-    if stats.get("otel_trace_id_present") is True:
-        return "PASS"
+    streaming_metrics = streaming_report.get("streaming_metrics", {})
+    for tier_stats in streaming_metrics.values():
+        if not isinstance(tier_stats, dict):
+            continue
+        if tier_stats.get("otel_spans_exported", 0) > 0:
+            return "PASS"
+        if tier_stats.get("otel_trace_id_present") is True:
+            return "PASS"
     return "NOT_AVAILABLE"
 
 
@@ -619,9 +626,12 @@ def _check_extra_formats(streaming_report: dict) -> str:
     formats.  This is operational when the streaming report indicates
     that the metrics renderer was exercised.
     """
-    stats = streaming_report.get("streaming_metrics", {})
-    if stats.get("metrics_formats_tested") is not None:
-        return "PASS"
+    streaming_metrics = streaming_report.get("streaming_metrics", {})
+    for tier_stats in streaming_metrics.values():
+        if not isinstance(tier_stats, dict):
+            continue
+        if tier_stats.get("metrics_formats_tested") is not None:
+            return "PASS"
     if streaming_report.get("extra_formats_supported") is True:
         return "PASS"
     return "NOT_AVAILABLE"

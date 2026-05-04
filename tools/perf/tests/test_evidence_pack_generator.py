@@ -728,17 +728,16 @@ class TestGenerateEvidencePack:
 
     def test_p1_status_does_not_affect_verdict(self):
         """P1 status fields should NOT affect the verdict (Property 5)."""
-        # Even with all P1 deferred, if gates pass, verdict is GO
+        # Even with P1 checks not available, if gates pass, verdict is GO
         targets = _make_evidence_targets()
         pack = generate_evidence_pack(
             _make_fullbuffer_report(),
             _make_streaming_report(),
             targets,
         )
-        # P1 status is always "deferred"
-        assert pack["p1_status"]["if_none_match_streaming"] == "deferred"
-        assert pack["p1_status"]["otel_integration"] == "deferred"
-        assert pack["p1_status"]["extra_formats"] == "deferred"
+        assert pack["p1_status"]["if_none_match_streaming"] == "NOT_AVAILABLE"
+        assert pack["p1_status"]["otel_integration"] == "NOT_AVAILABLE"
+        assert pack["p1_status"]["extra_formats"] == "NOT_AVAILABLE"
 
     def test_parity_unknown_causes_no_go(self):
         """No parity report -> parity gates UNKNOWN -> verdict NO_GO."""

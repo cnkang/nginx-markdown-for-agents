@@ -415,7 +415,7 @@ static char *
 ngx_http_markdown_content_types(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
     ngx_http_markdown_conf_t *mcf = conf;
-    const ngx_str_t          *value;
+    ngx_str_t                *value;
     ngx_str_t                *type;
     const char               *type_value;
     const char               *slash;
@@ -481,7 +481,8 @@ ngx_http_markdown_content_types(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 /*
  * Handle the "markdown_flavor" configuration directive.
  *
- * Accepts "commonmark", "gfm", or "mdx" and sets the flavor enum.
+ * Accepts "commonmark", "gfm", "mdx", or "org-mode" and sets
+ * the flavor enum.
  *
  * Parameters:
  *   cf  - Configuration parsing context
@@ -560,7 +561,7 @@ static char *
 ngx_http_markdown_stream_types(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
     ngx_http_markdown_conf_t *mcf = conf;
-    const ngx_str_t          *value;
+    ngx_str_t                *value;
     ngx_str_t                *type;
     const char               *type_value;
     const char               *slash;
