@@ -239,6 +239,15 @@ ngx_http_markdown_buffer_ensure_capacity(ngx_http_markdown_buffer_t *buf, size_t
     return NGX_OK;
 }
 
+/*
+ * Pool cleanup handler for ngx_http_markdown_buffer_t.
+ *
+ * Frees the heap-allocated data buffer and resets size/capacity to zero.
+ * Safe to call with NULL data pointer.
+ *
+ * Parameters:
+ *   data  - pointer to the buffer to clean up (may be NULL)
+ */
 static void
 ngx_http_markdown_buffer_cleanup(void *data)
 {

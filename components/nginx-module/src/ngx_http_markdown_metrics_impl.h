@@ -449,6 +449,21 @@ ngx_http_markdown_metrics_prefers_prometheus(
     return 0;
 }
 
+/*
+ * Case-insensitive substring search within an ngx_str_t.
+ *
+ * Scans `value` for the first occurrence of `needle` using
+ * ngx_strncasecmp for each candidate position.  Returns 1 if
+ * found, 0 otherwise.
+ *
+ * Parameters:
+ *   value       - string to search within (may be NULL)
+ *   needle      - substring to find (may be NULL)
+ *   needle_len  - length of needle in bytes
+ *
+ * Returns:
+ *   1 if needle occurs in value, 0 otherwise.
+ */
 static ngx_flag_t
 ngx_http_markdown_metrics_value_contains(ngx_str_t *value,
     u_char *needle,
