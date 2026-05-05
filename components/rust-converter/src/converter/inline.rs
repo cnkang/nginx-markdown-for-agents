@@ -88,15 +88,16 @@ impl MarkdownConverter {
             if let Some(safe_url) = self.security_validator.sanitize_url(&url) {
                 if !normalized_text.is_empty() {
                     let resolved_url = self.resolve_url(safe_url);
+                    let escaped_text = Self::escape_link_label(&normalized_text);
                     let escaped_dest = Self::escape_link_destination(&resolved_url);
                     output.push('[');
-                    output.push_str(&normalized_text);
+                    output.push_str(&escaped_text);
                     output.push_str("](");
                     output.push_str(&escaped_dest);
                     output.push(')');
                 }
             } else if !normalized_text.is_empty() {
-                output.push_str(&normalized_text);
+                output.push_str(&Self::escape_link_label(&normalized_text));
             }
         } else if !normalized_text.is_empty() {
             output.push_str(&normalized_text);
@@ -143,8 +144,9 @@ impl MarkdownConverter {
         if let Some(url) = safe_url {
             let resolved_url = self.resolve_url(url);
             let escaped_dest = Self::escape_link_destination(&resolved_url);
+            let escaped_alt = Self::escape_link_label(&alt);
             output.push_str("![");
-            output.push_str(&alt);
+            output.push_str(&escaped_alt);
             output.push_str("](");
             output.push_str(&escaped_dest);
             if let Some(ref t) = title {
@@ -158,7 +160,7 @@ impl MarkdownConverter {
             output.push(')');
         } else if !alt.trim().is_empty() {
             // URL missing or dangerous — preserve alt text for AI agents
-            output.push_str(alt.trim());
+            output.push_str(&Self::escape_link_label(alt.trim()));
         }
 
         Ok(())
