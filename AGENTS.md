@@ -1028,3 +1028,4 @@ remediation:
 |---------|------|--------|---------|
 | 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |
 | 0.5.5 | 2026-04-24 | Codex | Added recent Git analysis remediation closeout rule |
+| 0.6.0 | 2026-05-02 | Kang | Comment/doc audit: Rust module docs, C function comments, Python docstrings, shell script headers; version 0.6.0 consistency fixes |

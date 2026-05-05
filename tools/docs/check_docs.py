@@ -37,6 +37,12 @@ def is_maintained_markdown(rel_path: str) -> bool:
 
 
 def iter_markdown_files() -> list[Path]:
+    """Return a sorted list of maintained Markdown files in the repository.
+
+    Uses ``git ls-files`` when available, falling back to ``rglob`` otherwise.
+    Only files under ``docs/`` (excluding the archive subtree) and top-level
+    project docs (README, CHANGELOG, etc.) are included.
+    """
     try:
         proc = subprocess.run(
             ["git", "ls-files", "--cached", "--others", "--exclude-standard", "--", "*.md"],
@@ -63,6 +69,10 @@ def iter_markdown_files() -> list[Path]:
 
 
 def get_git_tracked_paths() -> set[str]:
+    """Return the set of file paths tracked by git in the repository.
+
+    Falls back to an empty set if git is unavailable or the command fails.
+    """
     try:
         proc = subprocess.run(
             ["git", "ls-files"],
@@ -79,6 +89,12 @@ def get_git_tracked_paths() -> set[str]:
 
 
 def iter_unfenced_lines(text: str) -> list[tuple[int, str]]:
+    """Extract lines that are outside fenced code blocks.
+
+    Returns a list of ``(line_number, line_text)`` tuples for lines not
+    inside `````...``` `` blocks, useful for checking Markdown structural
+    rules without false positives from code samples.
+    """
     lines: list[tuple[int, str]] = []
     in_fence = False
     for line_no, line in enumerate(text.splitlines(), 1):
@@ -91,6 +107,13 @@ def iter_unfenced_lines(text: str) -> list[tuple[int, str]]:
 
 
 def normalized_link_target(raw_target: str) -> str:
+    """Normalize a Markdown link target for local-file existence checks.
+
+    Strips angle brackets, discards external URLs (http/https/mailto) and
+    fragment-only references, and removes trailing fragments/query strings.
+    Returns the normalized relative path or an empty string for external
+    or fragment-only targets.
+    """
     target = raw_target.strip().strip("<>")
     if target.startswith("#"):
         return ""
@@ -101,6 +124,12 @@ def normalized_link_target(raw_target: str) -> str:
 
 
 def check_links(files: list[Path]) -> list[str]:
+    """Check that local Markdown link targets exist on disk.
+
+    Scans each file for ``[text](target)`` links outside code fences and
+    reports any target whose normalized path does not resolve to an
+    existing file relative to the link's source directory.
+    """
     errors: list[str] = []
     for f in files:
         text = f.read_text(encoding="utf-8", errors="ignore")
@@ -116,6 +145,11 @@ def check_links(files: list[Path]) -> list[str]:
 
 
 def check_heading_hierarchy(files: list[Path]) -> list[str]:
+    """Check that heading levels do not skip (e.g., H1 directly to H3).
+
+    Returns a list of error messages for files where a heading jumps more
+    than one level from the previous heading.
+    """
     errors: list[str] = []
     for f in files:
         prev = 0
@@ -134,6 +168,11 @@ def check_heading_hierarchy(files: list[Path]) -> list[str]:
 
 
 def check_english_policy(files: list[Path]) -> list[str]:
+    """Check that non-README_zh-CN maintained docs contain no CJK characters.
+
+    Returns a list of ``file:line:content`` entries for lines containing
+    Han script characters in files other than ``README_zh-CN.md``.
+    """
     errors: list[str] = []
     for f in files:
         if f.name == "README_zh-CN.md":
@@ -146,6 +185,11 @@ def check_english_policy(files: list[Path]) -> list[str]:
 
 
 def check_duplicate_sync() -> list[str]:
+    """Run the duplicate-document sync checker and return any errors.
+
+    Delegates to ``check_duplicate_docs.py`` and surfaces its stderr/stdout
+    as error entries if the subprocess exits non-zero.
+    """
     script = ROOT / "tools" / "docs" / "check_duplicate_docs.py"
     proc = subprocess.run(
         [sys.executable, str(script)],
@@ -160,6 +204,12 @@ def check_duplicate_sync() -> list[str]:
 
 
 def _validate_kiro_reference(raw: str, tracked: set[str]) -> str | None:
+    """Validate a single .kiro/ path reference against repository tracking.
+
+    Returns an error message string if the reference violates policy
+    (untracked target, directory/glob reference, etc.), or ``None`` if
+    the reference is acceptable.
+    """
     if raw in ALLOWED_KIRO_PATHS:
         if tracked and raw not in tracked:
             return f"referenced path '{raw}' is not tracked"
@@ -210,6 +260,10 @@ def check_internal_reference_policy(
 
 
 def main() -> int:
+    """Entry point: run all doc consistency checks and print a report.
+
+    Returns 0 if all checks pass, 1 if any errors are found.
+    """
     files = iter_markdown_files()
     failures: list[str] = []
 
