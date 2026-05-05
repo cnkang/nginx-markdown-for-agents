@@ -4,5 +4,8 @@
   "expected-conversion-result": "converted",
   "input-size-bytes": 3522,
   "source-description": "Wikipedia-style article with table of contents, infoboxes, and navigation",
-  "failure-corpus": false
+  "failure-corpus": false,
+  "streaming_notes": {
+    "known_diff_ids": ["DIFF-PARITY-WIKIPEDIA-TITLE-WHITESPACE"]
+  }
 }

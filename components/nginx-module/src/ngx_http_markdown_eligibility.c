@@ -69,58 +69,61 @@ ngx_http_markdown_check_status(const ngx_http_request_t *r)
     return (r->headers_out.status == NGX_HTTP_OK);
 }
 
-/*
- * Check if request contains Range header
- *
- * Per FR-07.2, requests with Range headers should not be converted
- * because converting partial HTML content would produce invalid or
- * incomplete Markdown.
- *
- * Parameters:
- *   r - NGINX request structure
- *
- * Returns:
- *   1 if Range header is present
- *   0 if Range header is not present
- */
 static ngx_int_t
 ngx_http_markdown_has_range_header(const ngx_http_request_t *r)
 {
-    const ngx_table_elt_t *range_header;
-    
-    /* Look for Range header in request headers */
-    range_header = r->headers_in.range;
-    
-    return (range_header != NULL);
+    return r->headers_in.range != NULL;
 }
 
 /*
- * Check if Content-Type is eligible for conversion
+ * Check if response Content-Type matches the configured allowlist.
  *
- * Only text/html (with optional charset) is eligible per FR-02.3.
+ * If markdown_content_types is configured, matches against that list
+ * using prefix + boundary-char semantics (type/subtype must be followed
+ * by ';', space, or end-of-string).  If not configured, defaults to
+ * text/html only (backward compatible).
  *
  * Parameters:
- *   r - NGINX request structure
+ *   r    - NGINX request structure
+ *   conf - Module configuration
  *
  * Returns:
- *   1 if Content-Type is text/html
+ *   1 if Content-Type matches the allowlist
  *   0 otherwise
  */
 static ngx_int_t
-ngx_http_markdown_check_content_type(const ngx_http_request_t *r)
+ngx_http_markdown_check_content_type(const ngx_http_request_t *r,
+                                     const ngx_http_markdown_conf_t *conf)
 {
     static u_char  text_html[] = "text/html";
     const ngx_str_t     *content_type;
-    
-    /* Get Content-Type header */
+    const ngx_str_t     *ct_entry;
+
     if (r->headers_out.content_type.len == 0) {
         return 0;
     }
-    
+
     content_type = &r->headers_out.content_type;
-    
-    /* Check for text/html (case-insensitive) */
-    /* Accept "text/html" or "text/html; charset=..." */
+
+    if (conf->content_types != NULL) {
+        ct_entry = conf->content_types->elts;
+
+        for (ngx_uint_t i = 0; i < conf->content_types->nelts; i++) {
+            if (content_type->len >= ct_entry[i].len
+                && ngx_strncasecmp(content_type->data,
+                                   ct_entry[i].data,
+                                   ct_entry[i].len) == 0
+                && (content_type->len == ct_entry[i].len
+                    || content_type->data[ct_entry[i].len] == ';'
+                    || content_type->data[ct_entry[i].len] == ' '))
+            {
+                return 1;
+            }
+        }
+
+        return 0;
+    }
+
     if (content_type->len >= 9
         && ngx_strncasecmp(content_type->data,
                            text_html, 9) == 0
@@ -130,7 +133,7 @@ ngx_http_markdown_check_content_type(const ngx_http_request_t *r)
     {
         return 1;
     }
-    
+
     return 0;
 }
 
@@ -217,10 +220,13 @@ ngx_http_markdown_is_streaming(const ngx_http_request_t *r,
         stream_type = conf->stream_types->elts;
         
         for (ngx_uint_t i = 0; i < conf->stream_types->nelts; i++) {
-            /* Check if Content-Type starts with configured stream type */
+            /* Prefix + boundary match (same semantics as content_types). */
             if (content_type->len >= stream_type[i].len &&
                 ngx_strncasecmp(content_type->data, stream_type[i].data,
-                               stream_type[i].len) == 0)
+                               stream_type[i].len) == 0 &&
+                (content_type->len == stream_type[i].len
+                 || content_type->data[stream_type[i].len] == ';'
+                 || content_type->data[stream_type[i].len] == ' '))
             {
                 return 1;
             }
@@ -308,7 +314,7 @@ ngx_http_markdown_check_eligibility(const ngx_http_request_t *r,
         return NGX_HTTP_MARKDOWN_INELIGIBLE_STREAMING;
     }
     
-    if (!ngx_http_markdown_check_content_type(r)) {
+    if (!ngx_http_markdown_check_content_type(r, conf)) {
         return NGX_HTTP_MARKDOWN_INELIGIBLE_CONTENT_TYPE;
     }
     

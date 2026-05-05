@@ -80,8 +80,10 @@ ACCEPT_SKIP_REASON = "SKIP_ACCEPT"
 ELIGIBLE_CONVERTED_REASON = "ELIGIBLE_CONVERTED"
 ELIGIBLE_FAILED_OPEN_REASON = "ELIGIBLE_FAILED_OPEN"
 ELIGIBLE_FAILED_CLOSED_REASON = "ELIGIBLE_FAILED_CLOSED"
+ELIGIBLE_STREAMING_AUTO_REASON = "ELIGIBLE_STREAMING_AUTO"
+ELIGIBLE_FULLBUFFER_AUTO_REASON = "ELIGIBLE_FULLBUFFER_AUTO"
 
-# All 15 defined reason codes (complete set from design)
+# All 17 defined reason codes (complete set from design)
 ALL_REASON_CODES = sorted(
     set(ELIGIBILITY_TO_REASON.values())
     | set(ERROR_CATEGORY_TO_REASON.values())
@@ -89,6 +91,8 @@ ALL_REASON_CODES = sorted(
         ACCEPT_SKIP_REASON,
         ELIGIBLE_FAILED_OPEN_REASON,
         ELIGIBLE_FAILED_CLOSED_REASON,
+        ELIGIBLE_STREAMING_AUTO_REASON,
+        ELIGIBLE_FULLBUFFER_AUTO_REASON,
     }
 )
 
@@ -115,6 +119,8 @@ REASON_TO_REQUEST_STATE = {
     "ELIGIBLE_CONVERTED": REQUEST_STATE_CONVERTED,
     "ELIGIBLE_FAILED_OPEN": REQUEST_STATE_FAILED,
     "ELIGIBLE_FAILED_CLOSED": REQUEST_STATE_FAILED,
+    "ELIGIBLE_STREAMING_AUTO": REQUEST_STATE_CONVERTED,
+    "ELIGIBLE_FULLBUFFER_AUTO": REQUEST_STATE_CONVERTED,
 }
 
 # Failure sub-classification codes are not request-state codes; they are
@@ -226,8 +232,8 @@ def test_all_reason_codes_complete():
 
     **Validates: Requirements 1.1, 13.3**
     """
-    assert len(ALL_REASON_CODES) == 15, (
-        f"Expected 15 reason codes, got {len(ALL_REASON_CODES)}: "
+    assert len(ALL_REASON_CODES) == 17, (
+        f"Expected 17 reason codes, got {len(ALL_REASON_CODES)}: "
         f"{ALL_REASON_CODES}"
     )
 
@@ -345,6 +351,11 @@ def test_skip_codes_map_to_correct_state(reason_code):
         assert state == REQUEST_STATE_CONVERTED, (
             f"ELIGIBLE_CONVERTED should map to CONVERTED, got '{state}'"
         )
+    elif reason_code in ("ELIGIBLE_STREAMING_AUTO",
+                         "ELIGIBLE_FULLBUFFER_AUTO"):
+        assert state == REQUEST_STATE_CONVERTED, (
+            f"'{reason_code}' should map to CONVERTED, got '{state}'"
+        )
     elif reason_code in ("ELIGIBLE_FAILED_OPEN", "ELIGIBLE_FAILED_CLOSED"):
         assert state == REQUEST_STATE_FAILED, (
             f"'{reason_code}' should map to FAILED, got '{state}'"
@@ -374,6 +385,8 @@ def test_request_state_mapping_is_total():
         "ELIGIBLE_CONVERTED",
         "ELIGIBLE_FAILED_OPEN",
         "ELIGIBLE_FAILED_CLOSED",
+        "ELIGIBLE_STREAMING_AUTO",
+        "ELIGIBLE_FULLBUFFER_AUTO",
     }
     actual_codes = set(REASON_TO_REQUEST_STATE.keys())
     assert actual_codes == expected_codes, (

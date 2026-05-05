@@ -167,6 +167,68 @@ typedef struct MarkdownOptions {
    * Populated from the `markdown_streaming_budget` NGINX directive.
    */
   uint64_t streaming_budget;
+  /**
+   * Non-zero when noise region pruning is enabled at runtime.
+   *
+   * When non-zero, structural HTML regions matching the prune selectors
+   * are excluded from output. Protection selectors override prune selectors.
+   * Populated from the `markdown_prune_noise` NGINX directive.
+   */
+  uint32_t prune_noise;
+  /**
+   * Borrowed prune selector string from the C caller.
+   *
+   * Space-separated tag names for regions to prune (e.g., "nav footer aside").
+   * Must either be NULL with `prune_selectors_len == 0` or point to
+   * `prune_selector_len` readable UTF-8 bytes for the duration of the FFI call.
+   * Rust never takes ownership of this buffer.
+   */
+  const uint8_t *prune_selectors;
+  /**
+   * Length in bytes of [`MarkdownOptions::prune_selectors`].
+   */
+  uintptr_t prune_selector_len;
+  /**
+   * Borrowed protection selector string from the C caller.
+   *
+   * Space-separated tag names for regions to protect from pruning.
+   * An element matching both a prune selector and a protection selector
+   * is kept (protection wins). Must either be NULL with
+   * `prune_protection_selector_len == 0` or point to
+   * `prune_protection_selector_len` readable UTF-8 bytes.
+   */
+  const uint8_t *prune_protection_selectors;
+  /**
+   * Length in bytes of [`MarkdownOptions::prune_protection_selectors`].
+   */
+  uintptr_t prune_protection_selector_len;
+  /**
+   * Unified memory budget in bytes (0 = use per-engine defaults).
+   *
+   * When non-zero, this value overrides the default budget for both
+   * streaming and full-buffer engines, unless a per-engine explicit
+   * budget is set. Priority: per-engine explicit > unified > default.
+   * Populated from the `markdown_memory_budget` NGINX directive.
+   */
+  uint64_t memory_budget;
+  /**
+   * LLM provider for token estimation (0=default, 1=openai-gpt, 2=anthropic-claude,
+   * 3=google-gemini, 4=meta-llama).
+   *
+   * When non-zero and `estimate_tokens` is enabled, the provider's
+   * characteristic chars-per-token ratio overrides the default 4.0.
+   * Populated from the `markdown_llm_provider` NGINX directive.
+   */
+  uint8_t llm_provider;
+  /**
+   * Explicit chars-per-token ratio for token estimation (0.0 = use default/provider).
+   *
+   * When non-zero, this value overrides both the default 4.0 and the
+   * provider-specific ratio.  Stored as a fixed-point value: actual
+   * ratio = `chars_per_token_fixed / 10.0` (e.g., 38 = 3.8 chars/token).
+   * Populated from the `markdown_chars_per_token` NGINX directive.
+   */
+  uint8_t chars_per_token_fixed;
 } MarkdownOptions;
 
 /**
@@ -320,6 +382,14 @@ void markdown_converter_free(struct MarkdownConverterHandle *handle);
  *     base_url: std::ptr::null(),
  *     base_url_len: 0,
  *     streaming_budget: 0,
+ *     prune_noise: 1,
+ *     prune_selectors: std::ptr::null(),
+ *     prune_selector_len: 0,
+ *     prune_protection_selectors: std::ptr::null(),
+ *     prune_protection_selector_len: 0,
+ *     memory_budget: 0,
+ *     llm_provider: 0,
+ *     chars_per_token_fixed: 0,
  * };
  * let handle = unsafe { markdown_incremental_new(&opts) };
  * assert!(!handle.is_null());

@@ -6,6 +6,7 @@
 2. [Shortest Success Path](#2-shortest-success-path)
 3. [Install Path Tiers](#3-install-path-tiers)
 4. [Primary: Install Script](#4-primary-install-script)
+4.1 [Convenience: Homebrew Tap (macOS)](#41-convenience-homebrew-tap-macos)
 5. [Secondary: Docker Source Build](#5-secondary-docker-source-build)
 6. [Secondary: Manual Source Build](#6-secondary-manual-source-build)
 7. [Compatibility Matrix](#7-compatibility-matrix)
@@ -78,11 +79,12 @@ Each installation method is classified into a tier that sets expectations for fr
 |------|---------|-------------|---------|
 | **Primary** | Recommended, lowest friction | Yes | `tools/install.sh` |
 | **Secondary** | Supported, more steps required | Yes | Docker source build, manual source build |
-| **Convenience** | Available, not officially recommended | No | Community-maintained methods |
+| **Convenience** | Available, not officially recommended | Partial | Homebrew tap (macOS) |
 
 - **Primary** — Recommended for most users. Pre-built binary, automated configuration, CI-verified across the full platform matrix.
 - **Secondary** — Fully supported but requires more manual steps. Use when the primary path does not cover your platform or you need a custom NGINX build.
 - **Convenience** — Community-contributed methods that are not part of the project's CI pipeline. Use at your own discretion.
+  - Homebrew tap publication and post-release verification are available through repository workflows, but this path remains convenience-tier.
 
 ---
 
@@ -125,6 +127,26 @@ sudo nginx -t && sudo nginx -s reload
 - Your NGINX version is not in the [Compatibility Matrix](#7-compatibility-matrix) → use [Manual Source Build](#6-secondary-manual-source-build)
 - You need a fully self-contained Docker image → use [Docker Source Build](#5-secondary-docker-source-build)
 - You are on macOS → use [Manual Source Build](#6-secondary-manual-source-build) (no pre-built macOS binaries)
+
+---
+
+## 4.1 Convenience: Homebrew Tap (macOS)
+
+**Tier: Convenience**
+
+This project can be installed from a dedicated Homebrew tap on macOS:
+
+```bash
+brew tap <owner>/<tap>
+brew install <owner>/<tap>/nginx-markdown-module
+```
+
+Notes:
+- The formula is tied to GitHub release tag artifacts (`refs/tags/<tag>.tar.gz`).
+- SHA-256 must be generated from the downloadable GitHub tag artifact, not local `git archive`.
+- Tap publish and macOS post-release verification automation are documented in [`docs/guides/HOMEBREW_TAP_RELEASE.md`](./HOMEBREW_TAP_RELEASE.md).
+
+If you need deterministic control over compiler flags or local patching, use [Manual Source Build](#6-secondary-manual-source-build).
 
 ---
 
@@ -1135,7 +1157,9 @@ For a fully self-contained Docker build, use the [Docker Source Build](#5-second
 
 ### macOS
 
-macOS is **source build only** — no pre-built binaries are available. Follow the [Manual Source Build](#6-secondary-manual-source-build) instructions with the macOS-specific prerequisites.
+macOS has no pre-built binary path in `tools/install.sh`, so use either:
+- [Manual Source Build](#6-secondary-manual-source-build), or
+- Homebrew tap installation (see [4.1 Convenience: Homebrew Tap (macOS)](#41-convenience-homebrew-tap-macos)).
 
 For Apple Silicon (M1/M2/M3), ensure you build the Rust library for the correct target:
 

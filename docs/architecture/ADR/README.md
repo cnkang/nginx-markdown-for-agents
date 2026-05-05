@@ -59,6 +59,9 @@ What other options were considered and why were they not chosen?
 | [0003](0003-inline-origin-near-conversion.md) | Inline Origin-Near Conversion | Accepted | 2026-03-18 |
 | [0004](0004-streaming-bounded-memory-conversion.md) | Streaming Conversion with Bounded Memory and Controlled Fallback | Proposed | 2026-03-23 |
 | [0005](0005-repo-owned-harness.md) | Repo-Owned Harness for Agent Workflow and Spec Routing | Accepted | 2026-04-13 |
+| [0006](0006-otel-integration.md) | OpenTelemetry Integration Architecture | Proposed | 2026-04-28 |
+| [0007](0007-streaming-default.md) | Streaming Engine as Default (auto mode) | Proposed | 2026-04-28 |
+| [0008](0008-noise-pruning-default.md) | Noise Pruning Enabled by Default | Proposed | 2026-04-28 |
 
 ## Creating a New ADR
 

@@ -11,13 +11,37 @@
  *
  * Renders a metrics snapshot as Prometheus text exposition format
  * (content type: text/plain; version=0.0.4; charset=utf-8).
- * All label values are compile-time constants — no runtime
- * escaping is needed.
+ * Aggregate-series label values are compile-time constants.
+ * Per-path series include a runtime "path" label; the path value
+ * is escaped for Prometheus label syntax (backslash, double-quote,
+ * newlines, control characters).
  */
 
 /* C99 declaration visibility for standalone static analysis of this impl header. */
 u_char *ngx_slprintf(u_char *buf, u_char *last,
     const char *fmt, ...);
+
+/*
+ * Default: per-path RB-tree walk is enabled in production builds.
+ * Unit test stubs define this to 0 before including this header.
+ */
+#ifndef NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED
+#define NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED  1
+#endif
+
+/*
+ * Forward declaration: in-order RB-tree walk helper for per-path
+ * Prometheus output.  Defined after the main write function.
+ * Only available when NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED is 1.
+ */
+#if NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED
+static u_char *
+ngx_http_markdown_prometheus_walk_path_tree(
+    ngx_rbtree_node_t *node,
+    ngx_rbtree_node_t *sentinel,
+    u_char *p,
+    u_char *end);
+#endif
 
 /*
  * Render a metrics snapshot as Prometheus text exposition format.
@@ -68,7 +92,7 @@ ngx_http_markdown_metrics_write_prometheus(
         "nginx_markdown_passthrough_total %uA\n"
         "\n",
         snapshot->conversions_bypassed
-            + snapshot->failopen_count);
+            + snapshot->results.failopen_count);
 
     /* skips_total{reason=...} */
     p = ngx_slprintf(p, end,
@@ -128,7 +152,7 @@ ngx_http_markdown_metrics_write_prometheus(
         "# TYPE nginx_markdown_failopen_total counter\n"
         "nginx_markdown_failopen_total %uA\n"
         "\n",
-        snapshot->failopen_count);
+        snapshot->results.failopen_count);
 
     /* large_response_path_total */
     p = ngx_slprintf(p, end,
@@ -279,7 +303,7 @@ ngx_http_markdown_metrics_write_prometheus(
         "nginx_markdown_estimated_token_savings_total"
         " %uA\n"
         "\n",
-        snapshot->estimated_token_savings);
+        snapshot->results.estimated_token_savings);
 
     /* decompressions_total{format=...} */
     p = ngx_slprintf(p, end,
@@ -334,16 +358,120 @@ ngx_http_markdown_metrics_write_prometheus(
         "{le=\"1.0\"} %uA\n"
         "nginx_markdown_conversion_duration_seconds"
         "{le=\"+Inf\"} %uA\n",
-        snapshot->conversion_latency_le_10ms,
-        snapshot->conversion_latency_le_10ms
-            + snapshot->conversion_latency_le_100ms,
-        snapshot->conversion_latency_le_10ms
-            + snapshot->conversion_latency_le_100ms
-            + snapshot->conversion_latency_le_1000ms,
-        snapshot->conversion_latency_le_10ms
-            + snapshot->conversion_latency_le_100ms
-            + snapshot->conversion_latency_le_1000ms
-            + snapshot->conversion_latency_gt_1000ms);
+        snapshot->conversion_latency.le_10ms,
+        snapshot->conversion_latency.le_10ms
+            + snapshot->conversion_latency.le_100ms,
+        snapshot->conversion_latency.le_10ms
+            + snapshot->conversion_latency.le_100ms
+            + snapshot->conversion_latency.le_1000ms,
+        snapshot->conversion_latency.le_10ms
+            + snapshot->conversion_latency.le_100ms
+            + snapshot->conversion_latency.le_1000ms
+            + snapshot->conversion_latency.gt_1000ms);
+
+    /* per_path_entries */
+    p = ngx_slprintf(p, end,
+        "# HELP nginx_markdown_per_path_entries "
+        "Number of distinct URI paths tracked in per-path metrics.\n"
+        "# TYPE nginx_markdown_per_path_entries gauge\n"
+        "nginx_markdown_per_path_entries %uA\n"
+        "\n",
+        snapshot->per_path.path_entries);
+
+    /* per_path_conversions_total */
+    p = ngx_slprintf(p, end,
+        "# HELP nginx_markdown_per_path_conversions_total "
+        "Total successful conversions recorded in per-path metrics.\n"
+        "# TYPE nginx_markdown_per_path_conversions_total counter\n"
+        "nginx_markdown_per_path_conversions_total %uA\n"
+        "\n",
+        snapshot->per_path.path_conversions);
+
+    /* per_path_conversion_time_ms_total */
+    p = ngx_slprintf(p, end,
+        "# HELP nginx_markdown_per_path_conversion_time_ms_total "
+        "Cumulative conversion time (ms) recorded in per-path metrics.\n"
+        "# TYPE nginx_markdown_per_path_conversion_time_ms_total counter\n"
+        "nginx_markdown_per_path_conversion_time_ms_total %uA\n"
+        "\n",
+        snapshot->per_path.path_conversion_time_sum_ms);
+
+    /* per_path_overflow_total */
+    p = ngx_slprintf(p, end,
+        "# HELP nginx_markdown_per_path_overflow_total "
+        "Paths dropped because per-path cardinality limit was reached. "
+        "Controlled by markdown_metrics_per_path_cardinality.\n"
+        "# TYPE nginx_markdown_per_path_overflow_total counter\n"
+        "nginx_markdown_per_path_overflow_total %uA\n"
+        "\n",
+        snapshot->per_path.overflow_count);
+
+    /*
+     * Per-path individual entries: walk the SHM RB-tree to emit
+     * series with a "path" label for each tracked URI.
+     *
+     * The RB-tree is protected by the slab pool mutex.  We acquire
+     * the lock, walk in-order via a recursive helper, and release.
+     *
+     * Only emit if per-path tracking is active (path_entries > 0)
+     * and the SHM zone is available.
+     *
+     * This section requires full NGINX type definitions
+      * (ngx_shm_zone_t, ngx_slab_pool_t, etc.) and is guarded
+      * by NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED.  Unit tests
+      * that lack these types define the macro to 0.
+      */
+
+#if NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED
+    if (snapshot->per_path.path_entries > 0
+        && ngx_http_markdown_metrics_shm_zone != NULL
+        && ngx_http_markdown_metrics_shm_zone->data != NULL)
+    {
+        ngx_shm_zone_t                       *zone;
+        ngx_slab_pool_t                      *shpool;
+        ngx_http_markdown_metrics_t          *live_metrics;
+
+        zone = ngx_http_markdown_metrics_shm_zone;
+        live_metrics = (ngx_http_markdown_metrics_t *) zone->data;
+        shpool = (ngx_slab_pool_t *) zone->shm.addr;
+
+        p = ngx_slprintf(p, end,
+            "# HELP nginx_markdown_path_conversions_total "
+            "Per-path conversion count.\n"
+            "# TYPE nginx_markdown_path_conversions_total counter\n"
+            "# HELP nginx_markdown_path_conversion_time_ms_total "
+            "Per-path cumulative conversion time in ms.\n"
+            "# TYPE nginx_markdown_path_conversion_time_ms_total "
+            "counter\n");
+
+        ngx_shmtx_lock(&shpool->mutex);
+
+        p = ngx_http_markdown_prometheus_walk_path_tree(
+                live_metrics->per_path.path_tree.root,
+                &live_metrics->per_path.sentinel,
+                p, end);
+
+        ngx_shmtx_unlock(&shpool->mutex);
+
+        /*
+         * Emit __other__ pseudo-path series for overflow paths
+         * that were dropped when the cardinality limit was reached.
+         * This mirrors the JSON __other__ pseudo-path entry.
+         */
+        if (snapshot->per_path.overflow_count > 0 && p < end) {
+            p = ngx_slprintf(p, end,
+                "nginx_markdown_path_conversions_total"
+                "{path=\"__other__\"} %uA\n"
+                "nginx_markdown_path_conversion_time_ms_total"
+                "{path=\"__other__\"} 0\n",
+                snapshot->per_path.overflow_count);
+        }
+
+        if (p < end) {
+            *p++ = '\n';
+        }
+    }
+#endif /* NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED */
 
     /*
      * Detect buffer exhaustion.  ngx_slprintf stops at end
@@ -357,5 +485,150 @@ ngx_http_markdown_metrics_write_prometheus(
 
     return p;
 }
+
+
+#if NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED
+/*
+ * Write a two-character escape sequence (backslash + second char)
+ * into the destination buffer for Prometheus label syntax.
+ *
+ * Returns the updated write position, or last if the buffer
+ * cannot accommodate two more bytes.
+ */
+static u_char *
+ngx_http_markdown_escape_prom_two_char(u_char *dst, u_char *last,
+                                       u_char second)
+{
+    if (dst + 2 > last) {
+        return last;
+    }
+
+    *dst++ = '\\';
+    *dst++ = second;
+
+    return dst;
+}
+
+
+/*
+ * Escape a byte string for use as a Prometheus label value.
+ *
+ * Prometheus label values require escaping: \ -> \\, " -> \", newline -> \n.
+ * Carriage return and tab are also escaped for safety.
+ *
+ * Parameters:
+ *   dst  - destination buffer start
+ *   last - one past end of destination buffer
+ *   src  - source bytes
+ *   len  - source length
+ *
+ * Returns:
+ *   Updated write position (clamped to last on overflow).
+ */
+static u_char *
+ngx_http_markdown_escape_prometheus_label(u_char *dst, u_char *last,
+                                          const u_char *src, size_t len)
+{
+    size_t   i;
+    u_char   ch;
+
+    i = 0;
+    while (i < len && dst < last) {
+        ch = src[i];
+        i++;
+
+        switch (ch) {
+        case '\\':
+            dst = ngx_http_markdown_escape_prom_two_char(dst, last, '\\');
+            break;
+        case '"':
+            dst = ngx_http_markdown_escape_prom_two_char(dst, last, '"');
+            break;
+        case '\n':
+            dst = ngx_http_markdown_escape_prom_two_char(dst, last, 'n');
+            break;
+        case '\r':
+            dst = ngx_http_markdown_escape_prom_two_char(dst, last, 'r');
+            break;
+        case '\t':
+            dst = ngx_http_markdown_escape_prom_two_char(dst, last, 't');
+            break;
+        default:
+            if (ch >= 0x20) {
+                *dst++ = ch;
+                break;
+            }
+
+            /* Other control characters: emit as \uXXXX */
+            if (dst + 6 > last) {
+                return last;
+            }
+            dst = ngx_snprintf(dst, 6, "\\u%04X", (unsigned) ch);
+            break;
+        }
+    }
+
+    return dst;
+}
+
+
+/*
+ * Recursive in-order walk of the per-path RB-tree for Prometheus output.
+ *
+ * Emits two metric lines per node:
+ *   nginx_markdown_path_conversions_total{path="..."} <val>
+ *   nginx_markdown_path_conversion_time_ms_total{path="..."} <val>
+ *
+ * Parameters:
+ *   node     - current RB-tree node (or sentinel to terminate)
+ *   sentinel - tree sentinel node
+ *   p        - current write position in the output buffer
+ *   end      - one past end of the buffer
+ *
+ * Returns:
+ *   Updated write position (clamped to end on overflow).
+ */
+static u_char *
+ngx_http_markdown_prometheus_walk_path_tree(
+    ngx_rbtree_node_t *node,
+    ngx_rbtree_node_t *sentinel,
+    u_char *p,
+    u_char *end)
+{
+    const ngx_http_markdown_path_metric_node_t  *pnode;
+
+    if (node == sentinel || p >= end) {
+        return p;
+    }
+
+    p = ngx_http_markdown_prometheus_walk_path_tree(
+            node->left, sentinel, p, end);
+
+    if (p < end) {
+        pnode = (const ngx_http_markdown_path_metric_node_t *) node;
+
+        p = ngx_slprintf(p, end,
+            "nginx_markdown_path_conversions_total"
+            "{path=\"");
+        p = ngx_http_markdown_escape_prometheus_label(
+                p, end, pnode->path, pnode->path_len);
+        p = ngx_slprintf(p, end, "\"} %uA\n",
+            pnode->conversions);
+
+        p = ngx_slprintf(p, end,
+            "nginx_markdown_path_conversion_time_ms_total"
+            "{path=\"");
+        p = ngx_http_markdown_escape_prometheus_label(
+                p, end, pnode->path, pnode->path_len);
+        p = ngx_slprintf(p, end, "\"} %uA\n",
+            pnode->conversion_time_sum_ms);
+    }
+
+    p = ngx_http_markdown_prometheus_walk_path_tree(
+            node->right, sentinel, p, end);
+
+    return p;
+}
+#endif /* NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED */
 
 #endif /* NGX_HTTP_MARKDOWN_PROMETHEUS_IMPL_H */

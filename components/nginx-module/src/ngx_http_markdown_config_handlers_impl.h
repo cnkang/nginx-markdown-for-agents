@@ -225,41 +225,6 @@ ngx_http_markdown_on_error(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     return NGX_CONF_OK;
 }
 
-/* Configuration directive handler: markdown_flavor (commonmark | gfm). */
-static char *
-ngx_http_markdown_flavor(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
-{
-    static u_char             cm_str[]  = "commonmark";
-    static u_char             gfm_str[] = "gfm";
-    ngx_http_markdown_conf_t *mcf = conf;
-    ngx_str_t                *value;
-
-    value = cf->args->elts;
-
-    if (mcf->flavor != NGX_CONF_UNSET_UINT) {
-        return "is duplicate";
-    }
-
-    if (ngx_http_markdown_arg_equals(&value[1], cm_str,
-                                     sizeof(cm_str) - 1))
-    {
-        mcf->flavor = NGX_HTTP_MARKDOWN_FLAVOR_COMMONMARK;
-    } else if (ngx_http_markdown_arg_equals(
-                   &value[1], gfm_str,
-                   sizeof(gfm_str) - 1))
-    {
-        mcf->flavor = NGX_HTTP_MARKDOWN_FLAVOR_GFM;
-    } else {
-        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
-                           "invalid value \"%V\" in \"%V\" directive, "
-                           "it must be \"commonmark\" or \"gfm\"",
-                           &value[1], &cmd->name);
-        return NGX_CONF_ERROR;
-    }
-
-    return NGX_CONF_OK;
-}
-
 /* Configuration directive handler: markdown_auth_policy (allow | deny). */
 static char *
 ngx_http_markdown_auth_policy(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
@@ -428,6 +393,150 @@ ngx_http_markdown_log_verbosity(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     return NGX_CONF_OK;
 }
 
+
+/*
+ * Parse markdown_content_types directive.
+ *
+ * Accepts one or more content type/subtype strings, validates
+ * format (must contain exactly one '/'), and stores in the
+ * content_types array.
+ *
+ * Parameters:
+ *   cf  - Configuration parsing context
+ *   cmd - Directive definition
+ *   conf - Module location configuration
+ *
+ * Returns:
+ *   NGX_CONF_OK on success
+ *   NGX_CONF_ERROR on allocation or validation failure
+ *   "is duplicate" if directive already set
+ */
+static char *
+ngx_http_markdown_content_types(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
+{
+    ngx_http_markdown_conf_t *mcf = conf;
+    ngx_str_t                *value;
+    ngx_str_t                *type;
+    u_char                   *slash;
+    const u_char             *next_slash;
+
+    value = cf->args->elts;
+
+    if (mcf->content_types != NGX_CONF_UNSET_PTR) {
+        return "is duplicate";
+    }
+
+    mcf->content_types = ngx_array_create(cf->pool, cf->args->nelts - 1, sizeof(ngx_str_t));
+    if (mcf->content_types == NULL) {
+        return NGX_CONF_ERROR;
+    }
+
+    for (ngx_uint_t i = 1; i < cf->args->nelts; i++) {
+        if (value[i].len == 0) {
+            ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+                               "empty content type in \"%V\" directive",
+                               &cmd->name);
+            return NGX_CONF_ERROR;
+        }
+
+        slash = ngx_strlchr(value[i].data,
+                            value[i].data + value[i].len, '/');
+        next_slash = NULL;
+
+        if (slash != NULL && (size_t) ((slash - value[i].data) + 1) < value[i].len) {
+            next_slash = ngx_strlchr(slash + 1,
+                                     value[i].data + value[i].len, '/');
+        }
+
+        if (slash == NULL
+            || slash == value[i].data
+            || (size_t) (slash - value[i].data) == value[i].len - 1
+            || next_slash != NULL)
+        {
+            ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+                               "invalid content type \"%V\" in \"%V\" directive, "
+                               "must be in format \"type/subtype\"",
+                               &value[i], &cmd->name);
+            return NGX_CONF_ERROR;
+        }
+
+        type = ngx_array_push(mcf->content_types);
+        if (type == NULL) {
+            return NGX_CONF_ERROR;
+        }
+
+        *type = value[i];
+
+        ngx_conf_log_error(NGX_LOG_DEBUG, cf, 0,
+                           "markdown_content_types: added type \"%V\"",
+                           type);
+    }
+
+    return NGX_CONF_OK;
+}
+
+/*
+ * Handle the "markdown_flavor" configuration directive.
+ *
+ * Accepts "commonmark", "gfm", "mdx", or "org-mode" and sets
+ * the flavor enum.
+ *
+ * Parameters:
+ *   cf  - Configuration parsing context
+ *   cmd - Directive metadata
+ *   conf - Module configuration
+ *
+ * Returns:
+ *   NGX_CONF_OK on success
+ *   NGX_CONF_ERROR on invalid value
+ *   "is duplicate" if already set
+ */
+static char *
+ngx_http_markdown_flavor(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
+{
+    static u_char             cm_str[]  = "commonmark";
+    static u_char             gfm_str[] = "gfm";
+    static u_char             mdx_str[] = "mdx";
+    static u_char             org_str[] = "org-mode";
+    ngx_http_markdown_conf_t *mcf = conf;
+    ngx_str_t                *value;
+
+    value = cf->args->elts;
+
+    if (mcf->flavor != NGX_CONF_UNSET_UINT) {
+        return "is duplicate";
+    }
+
+    if (ngx_http_markdown_arg_equals(&value[1], cm_str,
+                                     sizeof(cm_str) - 1))
+    {
+        mcf->flavor = NGX_HTTP_MARKDOWN_FLAVOR_COMMONMARK;
+    } else if (ngx_http_markdown_arg_equals(
+                   &value[1], gfm_str,
+                   sizeof(gfm_str) - 1))
+    {
+        mcf->flavor = NGX_HTTP_MARKDOWN_FLAVOR_GFM;
+    } else if (ngx_http_markdown_arg_equals(
+                   &value[1], mdx_str,
+                   sizeof(mdx_str) - 1))
+    {
+        mcf->flavor = NGX_HTTP_MARKDOWN_FLAVOR_MDX;
+    } else if (ngx_http_markdown_arg_equals(
+                   &value[1], org_str,
+                   sizeof(org_str) - 1))
+    {
+        mcf->flavor = NGX_HTTP_MARKDOWN_FLAVOR_ORG_MODE;
+    } else {
+        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+                           "invalid value \"%V\" in \"%V\" directive, "
+                           "it must be \"commonmark\", \"gfm\", \"mdx\", or \"org-mode\"",
+                           &value[1], &cmd->name);
+        return NGX_CONF_ERROR;
+    }
+
+    return NGX_CONF_OK;
+}
+
 /**
  * Handle the "markdown_stream_types" configuration directive by validating
  * and storing one or more MIME type strings in the form "type/subtype".
@@ -449,11 +558,10 @@ static char *
 ngx_http_markdown_stream_types(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
     ngx_http_markdown_conf_t *mcf = conf;
-    const ngx_str_t          *value;
+    ngx_str_t                *value;
     ngx_str_t                *type;
-    const char               *type_value;
-    const char               *slash;
-    const char               *next_slash;
+    u_char                   *slash;
+    const u_char             *next_slash;
 
     value = cf->args->elts;
 
@@ -474,17 +582,18 @@ ngx_http_markdown_stream_types(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
             return NGX_CONF_ERROR;
         }
 
-        type_value = (const char *) value[i].data;
-        slash = (const char *) ngx_strchr(type_value, '/');
+        slash = ngx_strlchr(value[i].data,
+                            value[i].data + value[i].len, '/');
         next_slash = NULL;
 
-        if (slash != NULL && (size_t) (slash - type_value + 1) < value[i].len) {
-            next_slash = (const char *) ngx_strchr(slash + 1, '/');
+        if (slash != NULL && (size_t) ((slash - value[i].data) + 1) < value[i].len) {
+            next_slash = ngx_strlchr(slash + 1,
+                                     value[i].data + value[i].len, '/');
         }
 
         if (slash == NULL
-            || slash == type_value
-            || (size_t) (slash - type_value) == value[i].len - 1
+            || slash == value[i].data
+            || (size_t) (slash - value[i].data) == value[i].len - 1
             || next_slash != NULL)
         {
             ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,

@@ -210,5 +210,5 @@ That helper owns:
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 0.5.6 | 2026-04-28 | release-prep | Added new E2E scripts (metrics, conditional requests, config merge, auth/cache, status codes); listed shared helpers |
+| 0.6.0 | 2026-05-02 | v060-prod | Added new E2E scripts (metrics, conditional requests, config merge, auth/cache, status codes); listed shared helpers |
 | 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |

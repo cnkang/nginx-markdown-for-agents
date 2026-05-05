@@ -15,6 +15,13 @@
 struct MarkdownOptions;
 
 /*
+ * Forward declaration for OTel span type.
+ * Full definition is in ngx_http_markdown_otel_impl.h.
+ */
+typedef struct ngx_http_markdown_otel_span_s  ngx_http_markdown_otel_span_t;
+
+
+/*
  * Processing path constants for threshold router
  */
 #define NGX_HTTP_MARKDOWN_PATH_FULLBUFFER   0  /* Full-buffer path */
@@ -42,6 +49,16 @@ struct MarkdownOptions;
     (2 * 1024 * 1024)
 
 /*
+ * Default auto-mode threshold: 32 KiB
+ *
+ * When streaming_engine is auto, responses with
+ * Content-Length >= this threshold use streaming;
+ * smaller responses use full-buffer.
+ */
+#define NGX_HTTP_MARKDOWN_STREAMING_AUTO_THRESHOLD_DEFAULT \
+    (32 * 1024)
+
+/*
  * Streaming on_error policy constants
  *
  * Controls Pre_Commit_Phase failure behavior for the
@@ -67,6 +84,8 @@ struct MarkdownOptions;
  */
 #define NGX_HTTP_MARKDOWN_FLAVOR_COMMONMARK  0  /* CommonMark flavor */
 #define NGX_HTTP_MARKDOWN_FLAVOR_GFM         1  /* GitHub Flavored Markdown */
+#define NGX_HTTP_MARKDOWN_FLAVOR_MDX         2  /* MDX (Markdown + JSX) */
+#define NGX_HTTP_MARKDOWN_FLAVOR_ORG_MODE    3  /* Org-mode */
 
 /*
  * Configuration constants for auth_policy directive
@@ -149,16 +168,25 @@ typedef enum {
  * - ops.metrics_format: NGX_HTTP_MARKDOWN_METRICS_FORMAT_AUTO
  *
  * Streaming defaults when MARKDOWN_STREAMING_ENABLED is compiled in:
- * - streaming_engine: compiled complex value for "off"
+ * - streaming_engine: NULL (auto mode in v0.6.0; was off in 0.5.x)
  * - streaming_budget: NGX_HTTP_MARKDOWN_STREAMING_BUDGET_DEFAULT
  * - streaming_on_error: NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_PASS
  * - streaming_shadow: 0 (off by default)
+ * - streaming_auto_threshold: NGX_HTTP_MARKDOWN_STREAMING_AUTO_THRESHOLD_DEFAULT
  */
-typedef struct {
+/* sonarcloud-c:S1820: intentionally exceeded; fields are already logically
+ * grouped via the ops sub-struct and #ifdef-gated streaming section.  Further
+ * grouping (auth, content, pruning, llm, dynconf, response) would require
+ * updating 160+ call sites across 15 files (offsetof directives, merge logic,
+ * eligibility checks, conversion paths, tests) for no semantic benefit and
+ * significant regression risk.  The field count reflects NGINX module
+ * configuration breadth, not poor structure design. */
+typedef struct { /* NOSONAR: c:S1820, module config shape mirrors directive surface */
     ngx_flag_t   enabled;              /* markdown_filter static resolved value */
     ngx_uint_t   enabled_source;       /* markdown_filter source (static|complex|unset) */
     ngx_http_complex_value_t *enabled_complex; /* markdown_filter variable/complex expression */
     size_t       max_size;             /* markdown_max_size (default: 10MB) */
+    ngx_flag_t   max_size_explicit;    /* 1 if operator set markdown_max_size at this or parent level */
     ngx_msec_t   timeout;              /* markdown_timeout (default: 5000ms) */
     ngx_uint_t   on_error;             /* markdown_on_error pass|reject (default: pass) */
     ngx_uint_t   flavor;               /* markdown_flavor commonmark|gfm (default: commonmark) */
@@ -172,6 +200,7 @@ typedef struct {
     ngx_uint_t   log_verbosity;        /* markdown_log_verbosity error|warn|info|debug (default: info) */
     ngx_flag_t   buffer_chunked;       /* markdown_buffer_chunked on|off (default: on) */
     ngx_array_t *stream_types;         /* markdown_stream_types exclusion list (default: NULL) */
+    ngx_array_t *content_types;        /* markdown_content_types allowlist (default: text/html) */
     ngx_flag_t   auto_decompress;      /* markdown_auto_decompress on|off (default: on) */
     size_t       large_body_threshold; /* markdown_large_body_threshold (NGX_HTTP_MARKDOWN_THRESHOLD_OFF = off) */
 
@@ -185,14 +214,37 @@ typedef struct {
     struct {
         ngx_flag_t   trust_forwarded_headers; /* markdown_trust_forwarded_headers on|off (default: off) */
         ngx_uint_t   metrics_format;       /* markdown_metrics_format auto|prometheus (default: auto) */
+        ngx_flag_t   metrics_per_path;    /* markdown_metrics_per_path on|off (default: off) */
+        ngx_uint_t   metrics_per_path_cardinality; /* markdown_metrics_per_path_cardinality (default: 100) */
+        ngx_flag_t   otel_enabled;       /* markdown_otel on|off (default: off) */
+        ngx_flag_t   otel_tracing;      /* markdown_otel_tracing on|off (default: off) */
+        ngx_flag_t   otel_metrics;      /* markdown_otel_metrics on|off (default: off) */
+        ngx_str_t    otel_endpoint;      /* markdown_otel_endpoint: internal NGINX URI for subrequest export (default: empty) */
+        ngx_str_t    otel_service_name;  /* markdown_otel_service_name (default: nginx-markdown) */
+        ngx_uint_t   otel_span_buffer_size; /* markdown_otel_span_buffer_size (default: 1024) */
+        ngx_msec_t   otel_export_timeout;   /* markdown_otel_export_timeout (default: 5000ms) */
     } ops;
 
 #ifdef MARKDOWN_STREAMING_ENABLED
     ngx_http_complex_value_t  *streaming_engine;  /* markdown_streaming_engine (complex value) */
     size_t                     streaming_budget;   /* markdown_streaming_budget (default: 2m) */
+    ngx_flag_t                 streaming_budget_explicit; /* 1 if operator set markdown_streaming_budget */
     ngx_uint_t                 streaming_on_error; /* markdown_streaming_on_error pass|reject */
     ngx_flag_t                 streaming_shadow;   /* markdown_streaming_shadow on|off */
+    size_t                     streaming_auto_threshold; /* markdown_streaming_auto_threshold (default: 32k) */
 #endif
+
+    /*
+     * Noise pruning configuration (v0.6.0).
+     */
+    ngx_flag_t                 prune_noise;               /* markdown_prune_noise on|off (default: on) */
+    ngx_str_t                 *prune_selectors;           /* markdown_prune_selectors (default: built-in list) */
+    ngx_str_t                 *prune_protection_selectors; /* markdown_prune_protection_selectors (default: empty) */
+    size_t                     memory_budget;             /* markdown_memory_budget (default: NGX_CONF_UNSET_SIZE) */
+    ngx_uint_t                 llm_provider;              /* markdown_llm_provider (default: 0=default) */
+    ngx_uint_t                 chars_per_token_fixed;     /* markdown_chars_per_token (default: 0=use provider) */
+    ngx_flag_t                 dynconf_enabled;           /* markdown_dynamic_config on|off (default: off) */
+    ngx_str_t                  dynconf_path;              /* markdown_dynamic_config_path (default: empty) */
 } ngx_http_markdown_conf_t;
 
 /*
@@ -298,6 +350,9 @@ typedef struct {
     /* Last error category from conversion failure (for decision log) */
     ngx_http_markdown_error_category_t    last_error_category;
     ngx_flag_t                            has_error_category;
+
+    /* OpenTelemetry span for per-request conversion tracing */
+    ngx_http_markdown_otel_span_t        *otel_span;
 
 #ifdef MARKDOWN_STREAMING_ENABLED
     /*
@@ -430,10 +485,22 @@ typedef struct {
     ngx_atomic_t  conversion_time_sum_ms;   /* Sum of conversion times in milliseconds (for averaging) */
     ngx_atomic_t  input_bytes;              /* Sum of input HTML sizes in bytes */
     ngx_atomic_t  output_bytes;             /* Sum of output Markdown sizes in bytes */
-    ngx_atomic_t  conversion_latency_le_10ms;    /* Completed conversions <= 10ms */
-    ngx_atomic_t  conversion_latency_le_100ms;   /* Completed conversions <= 100ms */
-    ngx_atomic_t  conversion_latency_le_1000ms;  /* Completed conversions <= 1000ms */
-    ngx_atomic_t  conversion_latency_gt_1000ms;  /* Completed conversions > 1000ms */
+
+    /*
+     * Latency histogram buckets.
+     *
+     * Grouped into a sub-struct so that the parent
+     * ngx_http_markdown_metrics_t stays within the 20-field limit
+     * enforced by static analysis (SonarCloud rule c:S1820).
+     * The JSON/text output format is unaffected — keys are still
+     * emitted as flat "conversion_latency_buckets" sub-object.
+     */
+    struct {
+        ngx_atomic_t  le_10ms;     /* Completed conversions <= 10ms */
+        ngx_atomic_t  le_100ms;    /* Completed conversions <= 100ms */
+        ngx_atomic_t  le_1000ms;   /* Completed conversions <= 1000ms */
+        ngx_atomic_t  gt_1000ms;   /* Completed conversions > 1000ms */
+    } conversion_latency;
 
     /*
      * Decompression metrics.
@@ -522,18 +589,70 @@ typedef struct {
     } skips;
 
     /*
-     * Fail-open counter: conversion failed but original HTML
-     * served due to markdown_on_error pass.
+     * Conversion result counters.
+     *
+     * Grouped into a sub-struct so that the parent
+     * ngx_http_markdown_metrics_t stays within the 20-field
+     * limit enforced by static analysis (SonarCloud rule
+     * c:S1820).  The JSON/text output format is unaffected
+     * — keys are still emitted as flat names.
      */
-    ngx_atomic_t  failopen_count;
+    struct {
+        /*
+         * Fail-open counter: conversion failed but original HTML
+         * served due to markdown_on_error pass.
+         */
+        ngx_atomic_t  failopen_count;
+
+        /*
+         * Estimated cumulative token savings across all successful
+         * conversions.  Only non-zero when markdown_token_estimate
+         * is enabled.  Value is an approximation.
+         */
+        ngx_atomic_t  estimated_token_savings;
+    } results;
 
     /*
-     * Estimated cumulative token savings across all successful
-     * conversions.  Only non-zero when markdown_token_estimate
-     * is enabled.  Value is an approximation.
+     * Per-path metrics (v0.6.0 P1-2).
+     *
+     * When markdown_metrics_per_path is enabled, URI paths are
+     * tracked individually in an RB-tree allocated from the slab
+     * allocator.  Each node holds per-path conversion and timing
+     * counters.  The tree is protected by the slab pool mutex.
+     *
+     * cardinality_limit caps the number of distinct paths stored;
+     * overflow_count tracks paths dropped when at capacity.
+     * Aggregate counters (path_conversions, path_conversion_time_sum_ms)
+     * accumulate across all per-path nodes for fast rendering
+     * without tree traversal.
      */
-    ngx_atomic_t  estimated_token_savings;
+    struct {
+        ngx_rbtree_t       path_tree;
+        ngx_rbtree_node_t  sentinel;
+        ngx_atomic_t       path_entries;
+        ngx_atomic_t       path_conversions;
+        ngx_atomic_t       path_conversion_time_sum_ms;
+        ngx_uint_t         cardinality_limit;
+        ngx_atomic_t       overflow_count;
+    } per_path;
 } ngx_http_markdown_metrics_t;
+
+/*
+ * Per-path metric node stored in the shared RB-tree.
+ *
+ * rbnode.key holds a hash of the path for O(1) first-level
+ * lookup; collisions are resolved by comparing path_len then
+ * path bytes.  The path string is slab-owned and must be
+ * freed with ngx_slab_free() when the node is removed.
+ */
+typedef struct {
+    ngx_rbtree_node_t  rbnode;
+    ngx_uint_t         path_len;
+    u_char            *path;
+    ngx_atomic_t       conversions;
+    ngx_atomic_t       conversion_time_sum_ms;
+    ngx_atomic_t       entries;
+} ngx_http_markdown_path_metric_node_t;
 
 /* Module declaration */
 extern ngx_module_t ngx_http_markdown_filter_module;
@@ -652,7 +771,12 @@ const ngx_str_t *ngx_http_markdown_reason_streaming_budget_exceeded(void);
 const ngx_str_t *ngx_http_markdown_reason_streaming_precommit_failopen(void);
 const ngx_str_t *ngx_http_markdown_reason_streaming_precommit_reject(void);
 const ngx_str_t *ngx_http_markdown_reason_streaming_shadow(void);
+const ngx_str_t *ngx_http_markdown_reason_eligible_streaming_auto(void);
+const ngx_str_t *ngx_http_markdown_reason_eligible_fullbuffer_auto(void);
 #endif /* MARKDOWN_STREAMING_ENABLED */
+
+const ngx_str_t *ngx_http_markdown_reason_ct_route_default(void);
+const ngx_str_t *ngx_http_markdown_reason_ct_route_configured(void);
 
 /*
  * Header management functions

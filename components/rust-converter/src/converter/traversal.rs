@@ -117,8 +117,8 @@ impl MarkdownConverter {
         // Early pruning: skip subtrees that produce no meaningful Markdown output.
         // This check runs before SecurityValidator to avoid unnecessary work for
         // elements that are always pruned (script/style/noscript) or optionally
-        // pruned noise regions (nav/footer/aside when feature-enabled).
-        match super::pruning::should_prune(tag_name) {
+        // pruned noise regions (nav/footer/aside when runtime or feature-enabled).
+        match super::pruning::should_prune_with_config(tag_name, &self.options.prune_config) {
             super::pruning::PruneDecision::SkipChildren
             | super::pruning::PruneDecision::SkipSubtree => return Ok(()),
             super::pruning::PruneDecision::Traverse => {}

@@ -19,9 +19,11 @@
  * ngx_atomic_uint_t values instead of ngx_atomic_t, since the snapshot
  * is only read from a single thread after collection.
  *
- * The decompression counters are grouped into an anonymous sub-struct
- * to keep the top-level field count within SonarCloud's 20-field limit
- * while preserving a flat JSON output format.
+ * The latency histogram, decompression counters, path-hit counters,
+ * skip counters, and per-path counters are each grouped into
+ * anonymous sub-structs to keep the top-level field count within
+ * SonarCloud's 20-field limit while preserving a flat JSON output
+ * format.
  */
 typedef struct {
     /* Conversion attempt tracking */
@@ -40,11 +42,13 @@ typedef struct {
     ngx_atomic_uint_t input_bytes;
     ngx_atomic_uint_t output_bytes;
 
-    /* Latency histogram buckets */
-    ngx_atomic_uint_t conversion_latency_le_10ms;
-    ngx_atomic_uint_t conversion_latency_le_100ms;
-    ngx_atomic_uint_t conversion_latency_le_1000ms;
-    ngx_atomic_uint_t conversion_latency_gt_1000ms;
+    /* Latency histogram buckets (grouped to keep top-level field count <= 20) */
+    struct {
+        ngx_atomic_uint_t le_10ms;
+        ngx_atomic_uint_t le_100ms;
+        ngx_atomic_uint_t le_1000ms;
+        ngx_atomic_uint_t gt_1000ms;
+    } conversion_latency;
 
     /* Decompression metrics (grouped to keep top-level field count <= 20) */
     struct {
@@ -81,8 +85,11 @@ typedef struct {
         ngx_atomic_uint_t accept;
     } skips;
 
-    /* Fail-open counter */
-    ngx_atomic_uint_t failopen_count;
+    /* Conversion result counters */
+    struct {
+        ngx_atomic_uint_t failopen_count;
+        ngx_atomic_uint_t estimated_token_savings;
+    } results;
 
 #ifdef MARKDOWN_STREAMING_ENABLED
     /* Streaming metrics */
@@ -102,8 +109,13 @@ typedef struct {
     } streaming;
 #endif
 
-    /* Estimated cumulative token savings */
-    ngx_atomic_uint_t estimated_token_savings;
+    /* Per-path metrics (v0.6.0 P1-2) */
+    struct {
+        ngx_atomic_uint_t path_entries;
+        ngx_atomic_uint_t path_conversions;
+        ngx_atomic_uint_t path_conversion_time_sum_ms;
+        ngx_atomic_uint_t overflow_count;
+    } per_path;
 } ngx_http_markdown_metrics_snapshot_t;
 
 typedef struct {
@@ -132,16 +144,22 @@ ngx_int_t ngx_strncasecmp(u_char *s1, u_char *s2, size_t n);
 /*
  * Response buffer size for the metrics endpoint.
  *
- * Estimated current output per format:
+ * Estimated current output per format (without per-path entries):
  *   JSON:       ~2.0 KiB
  *   Plain text: ~1.5 KiB
  *   Prometheus: ~3.8 KiB (most verbose due to HELP/TYPE lines)
  *
- * The 8 KiB buffer provides headroom above the largest
- * format.  Increase this constant if new metrics push the
- * Prometheus output beyond the limit.
+ * Per-path entries add variable output depending on the number of
+ * tracked paths and their URI lengths.  Each path entry is roughly
+ * 80-120 bytes across formats.  With a default cardinality limit
+ * of 1024 paths at ~100 bytes each, per-path output can reach
+ * ~100 KiB.
+ *
+ * The 128 KiB buffer accommodates aggregate output plus per-path
+ * entries for typical deployments.  If the buffer is exhausted,
+ * the renderers detect truncation and return an error.
  */
-#define NGX_HTTP_MARKDOWN_METRICS_BUF_SIZE  8192
+#define NGX_HTTP_MARKDOWN_METRICS_BUF_SIZE  131072
 
 /*
  * Forward declaration: the Prometheus renderer is defined in
@@ -207,10 +225,14 @@ ngx_http_markdown_collect_metrics_snapshot(ngx_http_markdown_metrics_snapshot_t 
     snapshot->conversion_time_sum_ms = metrics->conversion_time_sum_ms;
     snapshot->input_bytes = metrics->input_bytes;
     snapshot->output_bytes = metrics->output_bytes;
-    snapshot->conversion_latency_le_10ms = metrics->conversion_latency_le_10ms;
-    snapshot->conversion_latency_le_100ms = metrics->conversion_latency_le_100ms;
-    snapshot->conversion_latency_le_1000ms = metrics->conversion_latency_le_1000ms;
-    snapshot->conversion_latency_gt_1000ms = metrics->conversion_latency_gt_1000ms;
+    snapshot->conversion_latency.le_10ms =
+        metrics->conversion_latency.le_10ms;
+    snapshot->conversion_latency.le_100ms =
+        metrics->conversion_latency.le_100ms;
+    snapshot->conversion_latency.le_1000ms =
+        metrics->conversion_latency.le_1000ms;
+    snapshot->conversion_latency.gt_1000ms =
+        metrics->conversion_latency.gt_1000ms;
     snapshot->decompressions.attempted = metrics->decompressions.attempted;
     snapshot->decompressions.succeeded = metrics->decompressions.succeeded;
     snapshot->decompressions.failed = metrics->decompressions.failed;
@@ -232,7 +254,7 @@ ngx_http_markdown_collect_metrics_snapshot(ngx_http_markdown_metrics_snapshot_t 
     snapshot->skips.auth = metrics->skips.auth;
     snapshot->skips.range = metrics->skips.range;
     snapshot->skips.accept = metrics->skips.accept;
-    snapshot->failopen_count = metrics->failopen_count;
+    snapshot->results.failopen_count = metrics->results.failopen_count;
 #ifdef MARKDOWN_STREAMING_ENABLED
     snapshot->streaming.requests_total =
         metrics->streaming.requests_total;
@@ -259,7 +281,16 @@ ngx_http_markdown_collect_metrics_snapshot(ngx_http_markdown_metrics_snapshot_t 
     snapshot->streaming.last_peak_memory_bytes =
         metrics->streaming.last_peak_memory_bytes;
 #endif
-    snapshot->estimated_token_savings = metrics->estimated_token_savings;
+    snapshot->results.estimated_token_savings = metrics->results.estimated_token_savings;
+
+    snapshot->per_path.path_entries =
+        metrics->per_path.path_entries;
+    snapshot->per_path.path_conversions =
+        metrics->per_path.path_conversions;
+    snapshot->per_path.path_conversion_time_sum_ms =
+        metrics->per_path.path_conversion_time_sum_ms;
+    snapshot->per_path.overflow_count =
+        metrics->per_path.overflow_count;
 }
 
 static ngx_flag_t ngx_http_markdown_metrics_value_contains(
@@ -519,12 +550,44 @@ ngx_http_markdown_metrics_derive_values(
         : 0;
 }
 
+/*
+ * Per-path RB-tree walk enable macro and forward declarations.
+ *
+ * These must be at file scope because C rejects block-scope
+ * function declarations with static storage class.  Unit tests
+ * that lack full NGINX type definitions define the macro to 0
+ * before including this header.
+ */
+#ifndef NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED
+#define NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED  1
+#endif
+
+#if NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED
+static u_char *
+ngx_http_markdown_json_walk_path_tree(
+    ngx_rbtree_node_t *node,
+    ngx_rbtree_node_t *sentinel,
+    u_char *p,
+    u_char *end);
+
+static u_char *
+ngx_http_markdown_text_walk_path_tree(
+    ngx_rbtree_node_t *node,
+    ngx_rbtree_node_t *sentinel,
+    u_char *p,
+    u_char *end);
+#endif
+
 /**
  * Render the collected metrics snapshot as a JSON object into the provided buffer.
  *
  * Formats all metric counters, derived aggregates (conversion counts, average times,
  * average I/O), conversion latency buckets, decompression stats, and path-routing hits
- * as a single JSON object written starting at `p` and not past `end`.
+ * as a JSON object written starting at `p` and not past `end`.
+ *
+ * When per-path tracking is active, walks the SHM RB-tree under the slab pool
+ * mutex to emit individual per-path entries in a "paths" array inside the
+ * "per_path" object.
  *
  * @param p Pointer to the start position in the buffer where JSON will be written.
  * @param end Pointer to one past the end of the buffer; writing will not exceed this.
@@ -546,17 +609,17 @@ ngx_http_markdown_metrics_write_json(
     ngx_atomic_uint_t output_bytes_avg)
 {
     /*
-     * Emit the full metrics payload as a single JSON object via one
-     * ngx_slprintf call.  The format string is split into logical
-     * sections (conversion counters, failure breakdown, performance
-     * aggregates, latency histogram, decompression stats, path routing,
-     * streaming counters, decision-chain skips, and operational totals)
-     * with corresponding positional arguments in the same order.
+     * Emit the metrics payload as a JSON object.
+     *
+     * The format string covers everything up to and including the
+     * per_path aggregate counters.  After the aggregate section,
+     * if per-path tracking is active, we walk the SHM RB-tree
+     * to emit individual path entries, then close the object.
      *
      * The caller is responsible for detecting truncation (p >= end)
      * after this function returns.
      */
-    return ngx_slprintf(p, end,
+    p = ngx_slprintf(p, end,
 
         /* Conversion attempt and outcome counters */
         "{\n"
@@ -632,10 +695,15 @@ ngx_http_markdown_metrics_write_json(
         "    \"accept\": %uA\n"
         "  },\n"
 
-        /* Operational totals */
+        /* Operational totals and per-path aggregate counters */
         "  \"failopen_count\": %uA,\n"
-        "  \"estimated_token_savings\": %uA\n"
-        "}",
+        "  \"estimated_token_savings\": %uA,\n"
+        "  \"per_path\": {\n"
+        "    \"path_entries\": %uA,\n"
+        "    \"path_conversions\": %uA,\n"
+        "    \"path_conversion_time_sum_ms\": %uA,\n"
+        "    \"overflow_count\": %uA,\n"
+        "    \"paths\": [",
 
         /* Conversion counters */
         snapshot->conversions_attempted,
@@ -658,10 +726,10 @@ ngx_http_markdown_metrics_write_json(
         output_bytes_avg,
 
         /* Latency histogram */
-        snapshot->conversion_latency_le_10ms,
-        snapshot->conversion_latency_le_100ms,
-        snapshot->conversion_latency_le_1000ms,
-        snapshot->conversion_latency_gt_1000ms,
+        snapshot->conversion_latency.le_10ms,
+        snapshot->conversion_latency.le_100ms,
+        snapshot->conversion_latency.le_1000ms,
+        snapshot->conversion_latency.gt_1000ms,
 
         /* Decompression stats */
         snapshot->decompressions.attempted,
@@ -703,12 +771,96 @@ ngx_http_markdown_metrics_write_json(
         snapshot->skips.auth,
         snapshot->skips.range,
         snapshot->skips.accept,
-        snapshot->failopen_count,
-        snapshot->estimated_token_savings);
+        snapshot->results.failopen_count,
+        snapshot->results.estimated_token_savings,
+        snapshot->per_path.path_entries,
+        snapshot->per_path.path_conversions,
+        snapshot->per_path.path_conversion_time_sum_ms,
+        snapshot->per_path.overflow_count);
+
+    /*
+     * Per-path individual entries: walk the SHM RB-tree to emit
+     * each path as a JSON object inside the "paths" array.
+     *
+     * The walk emits a trailing comma after each entry.
+     * We strip the trailing comma before closing the array
+     * by backing up one byte if paths were emitted.
+     *
+     * Requires full NGINX type definitions; guarded by
+     * NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED.
+     */
+#if NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED
+    if (snapshot->per_path.path_entries > 0
+        && ngx_http_markdown_metrics_shm_zone != NULL
+        && ngx_http_markdown_metrics_shm_zone->data != NULL)
+    {
+        ngx_shm_zone_t                       *zone;
+        ngx_slab_pool_t                      *shpool;
+        ngx_http_markdown_metrics_t          *live_metrics;
+        const u_char                         *paths_start;
+
+        zone = ngx_http_markdown_metrics_shm_zone;
+        live_metrics = (ngx_http_markdown_metrics_t *) zone->data;
+        shpool = (ngx_slab_pool_t *) zone->shm.addr;
+
+        paths_start = p;
+
+        ngx_shmtx_lock(&shpool->mutex);
+
+        p = ngx_http_markdown_json_walk_path_tree(
+                live_metrics->per_path.path_tree.root,
+                &live_metrics->per_path.sentinel,
+                p, end);
+
+        ngx_shmtx_unlock(&shpool->mutex);
+
+        /*
+         * Strip the trailing comma left by the last entry.
+         * If paths were written, p > paths_start and the byte
+         * before p is ','.
+         */
+        if (p > paths_start && *(p - 1) == ',') {
+            p--;
+        }
+
+        /*
+         * Emit the __other__ pseudo-path entry for overflow paths
+         * that were dropped when the cardinality limit was reached.
+         * This allows operators to see the count of untracked paths
+         * without enumerating them.
+         */
+        if (snapshot->per_path.overflow_count > 0 && p < end) {
+            if (p > paths_start) {
+                p = ngx_slprintf(p, end, ",");
+            }
+            p = ngx_slprintf(p, end,
+                "\n"
+                "      {\"path\":\"__other__\","
+                "\"conversions\":%uA,"
+                "\"conversion_time_sum_ms\":0,"
+                "\"entries\":%uA}",
+                snapshot->per_path.overflow_count,
+                snapshot->per_path.overflow_count);
+        }
+    }
+#endif /* NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED */
+
+    /* Close the "paths" array, the "per_path" object, and the root object. */
+    p = ngx_slprintf(p, end,
+        "\n"
+        "    ]\n"
+        "  }\n"
+        "}");
+
+    return p;
 }
+
 
 /**
  * Format a metrics snapshot as a human-readable plain-text report into the provided buffer.
+ *
+ * When per-path tracking is active, walks the SHM RB-tree under the slab
+ * pool mutex to emit individual per-path entries after the aggregate section.
  *
  * @param p Pointer to the current write position in the buffer.
  * @param end Pointer to the end of the buffer (one past the last writable byte).
@@ -731,15 +883,18 @@ ngx_http_markdown_metrics_write_text(
 {
     /*
      * Emit the full metrics payload as a human-readable plain-text
-     * report via one ngx_slprintf call.  Sections mirror the JSON
-     * renderer: conversion counters, failure breakdown, performance
-     * aggregates with latency histogram, decompression stats, path
-     * routing, streaming counters, and decision-chain skip reasons.
+     * report.  Sections mirror the JSON renderer: conversion counters,
+     * failure breakdown, performance aggregates with latency histogram,
+     * decompression stats, path routing, streaming counters, and
+     * decision-chain skip reasons.
+     *
+     * After the aggregate per-path section, if per-path tracking is
+     * active, walk the SHM RB-tree to emit individual per-path entries.
      *
      * The caller is responsible for detecting truncation (p >= end)
      * after this function returns.
      */
-    return ngx_slprintf(p, end,
+    p = ngx_slprintf(p, end,
 
         /* Header and conversion outcome summary */
         "Markdown Filter Metrics\n"
@@ -820,7 +975,11 @@ ngx_http_markdown_metrics_write_text(
         "- Skips (Range): %uA\n"
         "- Skips (Accept): %uA\n"
         "- Fail-Open Count: %uA\n"
-        "- Estimated Token Savings: %uA\n",
+        "- Estimated Token Savings: %uA\n"
+        "- Per-Path Entries: %uA\n"
+        "- Per-Path Conversions: %uA\n"
+        "- Per-Path Conversion Time (ms): %uA\n"
+        "- Per-Path Overflow Count: %uA\n",
 
         /* Conversion counters */
         snapshot->conversions_attempted,
@@ -843,10 +1002,10 @@ ngx_http_markdown_metrics_write_text(
         output_bytes_avg,
 
         /* Latency histogram */
-        snapshot->conversion_latency_le_10ms,
-        snapshot->conversion_latency_le_100ms,
-        snapshot->conversion_latency_le_1000ms,
-        snapshot->conversion_latency_gt_1000ms,
+        snapshot->conversion_latency.le_10ms,
+        snapshot->conversion_latency.le_100ms,
+        snapshot->conversion_latency.le_1000ms,
+        snapshot->conversion_latency.gt_1000ms,
 
         /* Decompression stats */
         snapshot->decompressions.attempted,
@@ -888,9 +1047,243 @@ ngx_http_markdown_metrics_write_text(
         snapshot->skips.auth,
         snapshot->skips.range,
         snapshot->skips.accept,
-        snapshot->failopen_count,
-        snapshot->estimated_token_savings);
+        snapshot->results.failopen_count,
+        snapshot->results.estimated_token_savings,
+        snapshot->per_path.path_entries,
+        snapshot->per_path.path_conversions,
+        snapshot->per_path.path_conversion_time_sum_ms,
+        snapshot->per_path.overflow_count);
+
+    /*
+     * Per-path individual entries: walk the SHM RB-tree to emit
+     * each path as a plain-text line after the aggregate section.
+     *
+     * Requires full NGINX type definitions; guarded by
+     * NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED.
+     */
+#if NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED
+    if (snapshot->per_path.path_entries > 0
+        && ngx_http_markdown_metrics_shm_zone != NULL
+        && ngx_http_markdown_metrics_shm_zone->data != NULL)
+    {
+        ngx_shm_zone_t                       *zone;
+        ngx_slab_pool_t                      *shpool;
+        ngx_http_markdown_metrics_t          *live_metrics;
+
+        zone = ngx_http_markdown_metrics_shm_zone;
+        live_metrics = (ngx_http_markdown_metrics_t *) zone->data;
+        shpool = (ngx_slab_pool_t *) zone->shm.addr;
+
+        p = ngx_slprintf(p, end, "\nPer-Path Details:\n");
+
+        ngx_shmtx_lock(&shpool->mutex);
+
+        p = ngx_http_markdown_text_walk_path_tree(
+                live_metrics->per_path.path_tree.root,
+                &live_metrics->per_path.sentinel,
+                p, end);
+
+        ngx_shmtx_unlock(&shpool->mutex);
+    }
+#endif /* NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED */
+
+    return p;
 }
+
+
+#if NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED
+/*
+ * Write a two-character escape sequence (backslash + second char)
+ * into the destination buffer.
+ *
+ * Returns the updated write position, or last if the buffer
+ * cannot accommodate two more bytes.
+ */
+static u_char *
+ngx_http_markdown_escape_json_two_char(u_char *dst, u_char *last,
+                                       u_char second)
+{
+    if (dst + 2 > last) {
+        return last;
+    }
+
+    *dst++ = '\\';
+    *dst++ = second;
+
+    return dst;
+}
+
+
+/*
+ * Escape a byte string for use inside a JSON string value.
+ *
+ * JSON requires escaping: " -> \", \ -> \\, control chars (< 0x20) -> \uXXXX.
+ *
+ * Parameters:
+ *   dst  - destination buffer start
+ *   last - one past end of destination buffer
+ *   src  - source bytes
+ *   len  - source length
+ *
+ * Returns:
+ *   Updated write position (clamped to last on overflow).
+ */
+static u_char *
+ngx_http_markdown_escape_json_string(u_char *dst, u_char *last,
+                                     const u_char *src, size_t len)
+{
+    size_t   i;
+    u_char   ch;
+
+    i = 0;
+    while (i < len && dst < last) {
+        ch = src[i];
+        i++;
+
+        switch (ch) {
+        case '"':
+            dst = ngx_http_markdown_escape_json_two_char(dst, last, '"');
+            break;
+        case '\\':
+            dst = ngx_http_markdown_escape_json_two_char(dst, last, '\\');
+            break;
+        case '\n':
+            dst = ngx_http_markdown_escape_json_two_char(dst, last, 'n');
+            break;
+        case '\r':
+            dst = ngx_http_markdown_escape_json_two_char(dst, last, 'r');
+            break;
+        case '\t':
+            dst = ngx_http_markdown_escape_json_two_char(dst, last, 't');
+            break;
+        default:
+            if (ch >= 0x20) {
+                *dst++ = ch;
+                break;
+            }
+
+            /* Control character: emit as \uXXXX */
+            if (dst + 6 > last) {
+                return last;
+            }
+            dst = ngx_snprintf(dst, 6, "\\u%04X", (unsigned) ch);
+            break;
+        }
+    }
+
+    return dst;
+}
+
+
+/*
+ * Recursive in-order walk of the per-path RB-tree for JSON output.
+ *
+ * Emits each path as a JSON object inside the "paths" array.
+ * The caller is responsible for writing the opening "[" and closing "]".
+ * A comma is appended after each entry; the caller strips the trailing
+ * comma from the last entry before closing the array.
+ *
+ * Parameters:
+ *   node     - current RB-tree node (or sentinel to terminate)
+ *   sentinel - tree sentinel node
+ *   p        - current write position in the output buffer
+ *   end      - one past end of the buffer
+ *
+ * Returns:
+ *   Updated write position (clamped to end on overflow).
+ */
+static u_char *
+ngx_http_markdown_json_walk_path_tree(
+    ngx_rbtree_node_t *node,
+    ngx_rbtree_node_t *sentinel,
+    u_char *p,
+    u_char *end)
+{
+    const ngx_http_markdown_path_metric_node_t  *pnode;
+
+    if (node == sentinel || p >= end) {
+        return p;
+    }
+
+    p = ngx_http_markdown_json_walk_path_tree(
+            node->left, sentinel, p, end);
+
+    if (p < end) {
+        pnode = (const ngx_http_markdown_path_metric_node_t *) node;
+
+        p = ngx_slprintf(p, end,
+            "\n"
+            "      {\"path\": \"");
+        p = ngx_http_markdown_escape_json_string(
+                p, end, pnode->path, pnode->path_len);
+        p = ngx_slprintf(p, end,
+            "\", "
+            "\"conversions\": %uA, "
+            "\"entries\": %uA, "
+            "\"conversion_time_ms\": %uA},",
+            pnode->conversions,
+            pnode->entries,
+            pnode->conversion_time_sum_ms);
+    }
+
+    p = ngx_http_markdown_json_walk_path_tree(
+            node->right, sentinel, p, end);
+
+    return p;
+}
+
+
+/*
+ * Recursive in-order walk of the per-path RB-tree for plain-text output.
+ *
+ * Emits each path as a "- Path[...]: ..." line.
+ *
+ * Parameters:
+ *   node     - current RB-tree node (or sentinel to terminate)
+ *   sentinel - tree sentinel node
+ *   p        - current write position in the output buffer
+ *   end      - one past end of the buffer
+ *
+ * Returns:
+ *   Updated write position (clamped to end on overflow).
+ */
+static u_char *
+ngx_http_markdown_text_walk_path_tree(
+    ngx_rbtree_node_t *node,
+    ngx_rbtree_node_t *sentinel,
+    u_char *p,
+    u_char *end)
+{
+    const ngx_http_markdown_path_metric_node_t  *pnode;
+
+    if (node == sentinel || p >= end) {
+        return p;
+    }
+
+    p = ngx_http_markdown_text_walk_path_tree(
+            node->left, sentinel, p, end);
+
+    if (p < end) {
+        pnode = (const ngx_http_markdown_path_metric_node_t *) node;
+
+        p = ngx_slprintf(p, end, "- Path[");
+        p = ngx_http_markdown_escape_json_string(
+                p, end, pnode->path, pnode->path_len);
+        p = ngx_slprintf(p, end,
+            "]: conversions=%uA entries=%uA "
+            "time_ms=%uA\n",
+            pnode->conversions,
+            pnode->entries,
+            pnode->conversion_time_sum_ms);
+    }
+
+    p = ngx_http_markdown_text_walk_path_tree(
+            node->right, sentinel, p, end);
+
+    return p;
+}
+#endif /* NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED */
+
 
 /*
  * Render the metrics response body for the negotiated format and set the

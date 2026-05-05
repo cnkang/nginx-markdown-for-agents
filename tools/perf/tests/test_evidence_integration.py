@@ -311,3 +311,29 @@ class TestRealisticRustOutputCompatibility:
 
         # Verdict should be NO_GO because bounded_memory and parity are not PASS
         assert evidence_pack["streaming_evidence_verdict"] == "NO_GO"
+
+    def test_p1_status_reads_tier_level_streaming_metrics(self):
+        """P1 checks should pass when tier-level streaming metrics expose signals."""
+        streaming_report = {
+            **REALISTIC_STREAMING_REPORT,
+            "streaming_metrics": {
+                "small": {
+                    **REALISTIC_STREAMING_REPORT["streaming_metrics"]["small"],
+                    "etag_computed": 1,
+                    "metrics_formats_tested": ["json", "text", "prometheus"],
+                },
+                "medium": {
+                    **REALISTIC_STREAMING_REPORT["streaming_metrics"]["medium"],
+                    "otel_spans_exported": 2,
+                },
+            },
+        }
+        evidence_pack = generate_evidence_pack(
+            fullbuffer_report=REALISTIC_FULLBUFFER_REPORT,
+            streaming_report=streaming_report,
+            evidence_targets=EVIDENCE_TARGETS,
+            parity_report=None,
+        )
+        assert evidence_pack["p1_status"]["if_none_match_streaming"] == "PASS"
+        assert evidence_pack["p1_status"]["otel_integration"] == "PASS"
+        assert evidence_pack["p1_status"]["extra_formats"] == "PASS"

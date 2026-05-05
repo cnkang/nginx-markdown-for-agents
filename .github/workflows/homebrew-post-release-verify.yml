@@ -1,0 +1,88 @@
+name: Homebrew Post-Release Verify
+
+on:
+  workflow_run:
+    workflows: ["Publish Homebrew Formula to Tap"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      formula:
+        description: "Formula token name (without .rb), for example nginx-markdown-module"
+        required: false
+        default: "nginx-markdown-module"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success')
+    runs-on: macos-15
+    env:
+      TAP_REPO: ${{ vars.HOMEBREW_TAP_REPO }}
+      FORMULA_TOKEN: ${{ inputs.formula || vars.HOMEBREW_FORMULA_TOKEN || 'nginx-markdown-module' }}
+    steps:
+      - name: Validate required config
+        run: |
+          set -euo pipefail
+          if [ -z "${TAP_REPO}" ]; then
+            echo "::error::Repository variable HOMEBREW_TAP_REPO is required (format: owner/repo)." >&2
+            exit 1
+          fi
+
+      - name: Parse tap owner/name
+        id: tap
+        shell: bash
+        run: |
+          set -euo pipefail
+          owner="${TAP_REPO%%/*}"
+          name="${TAP_REPO#*/}"
+          if [ -z "${owner}" ] || [ -z "${name}" ] || [ "${owner}" = "${name}" ]; then
+            echo "::error::Invalid HOMEBREW_TAP_REPO value: ${TAP_REPO}" >&2
+            exit 1
+          fi
+          if [[ "${name}" == homebrew-* ]]; then
+            tap_name="${owner}/${name#homebrew-}"
+          else
+            tap_name="${owner}/${name}"
+          fi
+          echo "owner=${owner}" >> "$GITHUB_OUTPUT"
+          echo "repo=${name}" >> "$GITHUB_OUTPUT"
+          echo "tap_name=${tap_name}" >> "$GITHUB_OUTPUT"
+
+      - name: Homebrew environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          brew --version
+          brew update-reset
+
+      - name: Tap and audit formula
+        shell: bash
+        run: |
+          set -euo pipefail
+          brew tap "${{ steps.tap.outputs.tap_name }}" "https://github.com/${TAP_REPO}.git"
+          brew audit --strict "${{ steps.tap.outputs.tap_name }}/${FORMULA_TOKEN}"
+
+      - name: Build and install formula
+        shell: bash
+        run: |
+          set -euo pipefail
+          brew install --build-from-source "${{ steps.tap.outputs.tap_name }}/${FORMULA_TOKEN}"
+
+      - name: Run formula tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          brew test "${{ steps.tap.outputs.tap_name }}/${FORMULA_TOKEN}"
+
+      - name: Smoke validate shared object exists
+        shell: bash
+        run: |
+          set -euo pipefail
+          brew --prefix "${{ steps.tap.outputs.tap_name }}/${FORMULA_TOKEN}" \
+            | awk '{print $0"/lib/nginx/modules/ngx_http_markdown_filter_module.so"}' \
+            | xargs test -f
