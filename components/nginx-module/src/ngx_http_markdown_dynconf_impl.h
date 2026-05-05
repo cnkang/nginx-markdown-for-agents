@@ -431,7 +431,8 @@ ngx_http_markdown_dynconf_parse_line(u_char *line, size_t line_len,
  *   log       - NGINX log
  *
  * Returns:
- *   NGX_OK on success, NGX_ERROR on invalid value
+ *   NGX_OK on success, NGX_ERROR on invalid value,
+ *   NGX_DECLINED for unrecognized key
  */
 static ngx_int_t
 ngx_http_markdown_dynconf_apply(ngx_http_markdown_conf_t *conf,
@@ -439,6 +440,8 @@ ngx_http_markdown_dynconf_apply(ngx_http_markdown_conf_t *conf,
                                 u_char *value, size_t value_len,
                                 ngx_log_t *log)
 {
+    /* Canonical string constants for on/off and log-level matching.
+     * Length-bounded ngx_strncasecmp avoids NUL-termination dependency. */
     static u_char  on_value[] = "on";
     static u_char  off_value[] = "off";
     static u_char  error_value[] = "error";
@@ -448,6 +451,7 @@ ngx_http_markdown_dynconf_apply(ngx_http_markdown_conf_t *conf,
 
     switch (key) {
 
+    /* Toggle the markdown filter on or off for the current location. */
     case NGX_HTTP_MARKDOWN_DYNCONF_KEY_FILTER:
         if (value_len == 2 && ngx_strncasecmp(value, on_value, 2) == 0) {
             conf->enabled = 1;
@@ -461,6 +465,7 @@ ngx_http_markdown_dynconf_apply(ngx_http_markdown_conf_t *conf,
         }
         break;
 
+    /* Toggle noise pruning (boilerplate removal) on or off. */
     case NGX_HTTP_MARKDOWN_DYNCONF_KEY_PRUNE_NOISE:
         if (value_len == 2 && ngx_strncasecmp(value, on_value, 2) == 0) {
             conf->prune_noise = 1;
@@ -474,6 +479,8 @@ ngx_http_markdown_dynconf_apply(ngx_http_markdown_conf_t *conf,
         }
         break;
 
+    /* Set the decision-log verbosity: error, warn, info, or debug.
+     * Maps the string to the corresponding NGX_LOG_* constant. */
     case NGX_HTTP_MARKDOWN_DYNCONF_KEY_LOG_VERBOSITY:
         if (value_len == 5 && ngx_strncasecmp(value, error_value, 5) == 0) {
             conf->log_verbosity = NGX_LOG_ERR;
@@ -491,6 +498,8 @@ ngx_http_markdown_dynconf_apply(ngx_http_markdown_conf_t *conf,
         }
         break;
 
+    /* Set the streaming working-set budget (size value, e.g. "64k").
+     * Only available when compiled with MARKDOWN_STREAMING_ENABLED. */
     case NGX_HTTP_MARKDOWN_DYNCONF_KEY_STREAMING_BUDGET:
 #ifdef MARKDOWN_STREAMING_ENABLED
         {
@@ -509,12 +518,14 @@ ngx_http_markdown_dynconf_apply(ngx_http_markdown_conf_t *conf,
             conf->streaming_budget = (size_t) parsed;
         }
 #else
+        /* Streaming not compiled in; reject with a diagnostic. */
         ngx_log_error(NGX_LOG_WARN, log, 0,
                       "markdown dynconf: streaming_budget not supported "
                       "(streaming not compiled)");
 #endif
         break;
 
+    /* Set the total memory budget for full-buffer conversion (size value). */
     case NGX_HTTP_MARKDOWN_DYNCONF_KEY_MEMORY_BUDGET:
         {
             ngx_str_t   val;
@@ -533,6 +544,7 @@ ngx_http_markdown_dynconf_apply(ngx_http_markdown_conf_t *conf,
         }
         break;
 
+    /* Unrecognized key — caller decides how to handle. */
     default:
         return NGX_DECLINED;
     }
