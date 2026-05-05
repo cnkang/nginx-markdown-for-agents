@@ -46,7 +46,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          brew install --build-from-source nginx-markdown-module
+          brew install --build-from-source ./packaging/homebrew/nginx-markdown-module.rb
 
       - name: Run formula test
         shell: bash
