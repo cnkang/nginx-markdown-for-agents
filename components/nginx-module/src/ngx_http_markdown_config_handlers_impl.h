@@ -418,7 +418,7 @@ ngx_http_markdown_content_types(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     ngx_str_t                *value;
     ngx_str_t                *type;
     u_char                   *slash;
-    u_char                   *next_slash;
+    const u_char             *next_slash;
 
     value = cf->args->elts;
 
@@ -561,7 +561,7 @@ ngx_http_markdown_stream_types(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     ngx_str_t                *value;
     ngx_str_t                *type;
     u_char                   *slash;
-    u_char                   *next_slash;
+    const u_char             *next_slash;
 
     value = cf->args->elts;
 
