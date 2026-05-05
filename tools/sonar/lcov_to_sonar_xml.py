@@ -65,6 +65,39 @@ def merge_coverage(
             target[filepath][lineno] = max(existing, hits)
 
 
+def _resolve_to_workspace_path(filepath: str, workspace: str) -> str | None:
+    """Resolve lcov source path to a workspace-relative file path.
+
+    lcov records may come from temporary NGINX build roots (for example
+    /tmp/nginx-coverage-build.*/...) that mirror repository subpaths. This
+    helper re-roots known repo suffixes back into the current workspace so
+    Sonar can import those file entries.
+    """
+    workspace_abs = os.path.abspath(workspace)
+    path_abs = os.path.abspath(filepath)
+
+    if path_abs.startswith(workspace_abs + os.sep):
+        return path_abs
+
+    anchored_suffixes = [
+        os.path.join("components", "nginx-module") + os.sep,
+        os.path.join("components", "rust-converter") + os.sep,
+        os.path.join("tools") + os.sep,
+        os.path.join("tests") + os.sep,
+    ]
+
+    for suffix in anchored_suffixes:
+        marker = os.sep + suffix
+        idx = path_abs.find(marker)
+        if idx == -1:
+            continue
+        candidate = os.path.join(workspace_abs, path_abs[idx + 1 :])
+        if os.path.isfile(candidate):
+            return candidate
+
+    return None
+
+
 def to_sonar_xml(
     coverage: dict[str, dict[int, int]],
     workspace: str,
@@ -73,7 +106,10 @@ def to_sonar_xml(
     root = ET.Element("coverage", version="1")
 
     for filepath in sorted(coverage):
-        rel = os.path.relpath(filepath, workspace)
+        resolved = _resolve_to_workspace_path(filepath, workspace)
+        if resolved is None:
+            continue
+        rel = os.path.relpath(resolved, workspace)
         if rel.startswith(".."):
             continue
         file_el = ET.SubElement(root, "file", path=rel)
