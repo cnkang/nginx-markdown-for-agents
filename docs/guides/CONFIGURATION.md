@@ -436,22 +436,24 @@ markdown_trust_forwarded_headers on;
 
 ---
 
-### Streaming Directives (0.5.0+)
+### Streaming Directives (0.5.0+, default changed to auto in 0.6.0)
 
-These directives control the streaming conversion path introduced in 0.5.0. They
-are only effective when `markdown_streaming_engine` is enabled. When
-`markdown_streaming_engine off` (the default), all streaming directives are ignored
-and behavior is identical to 0.4.0.
+These directives control the streaming conversion path introduced in 0.5.0.
+In v0.6.0, the default changed from `off` to `auto`: responses are
+automatically routed to streaming or full-buffer based on Content-Length
+and `markdown_streaming_auto_threshold`. Set `markdown_streaming_engine off`
+explicitly to restore 0.5.x behavior.
 
 
 #### markdown_streaming_engine
 
 **Syntax:** `markdown_streaming_engine off | on | auto | $variable;`
-**Default:** `off`
+**Default:** `auto` (was `off` prior to 0.6.0)
 **Context:** http, server, location
 
-Controls whether the streaming conversion engine is used. When `off` (the default),
-all requests use the full-buffer conversion path and behavior is identical to 0.4.0.
+Controls whether the streaming conversion engine is used. When `off`,
+all requests use the full-buffer conversion path and behavior is identical to 0.5.x.
+When `auto` (the 0.6.0 default), the engine is selected automatically per-request.
 
 - `off`: Disable streaming. All requests use the full-buffer path.
 - `on`: Enable streaming for all eligible requests.
@@ -549,7 +551,7 @@ Key points for operators:
 
 - You can set `markdown_on_error reject` and `markdown_streaming_on_error pass`
   (or any other combination) without conflict.
-- When `markdown_streaming_engine off` (the default), `markdown_streaming_on_error`
+- When `markdown_streaming_engine` is not set or is `auto` (the default), streaming is enabled for eligible responses. When explicitly set to `off`, `markdown_streaming_on_error`
   is ignored entirely. All failure handling follows `markdown_on_error`.
 - Neither directive controls the `ERROR_STREAMING_FALLBACK` signal. When the Rust
   engine determines that a capability requires full-buffer processing (e.g., table

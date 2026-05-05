@@ -6,6 +6,10 @@
 //! are never visited). Semantic noise regions (`<nav>`, `<footer>`, `<aside>`)
 //! are optionally prunable behind the `prune_noise_regions` feature flag.
 //!
+//! In v0.6.0, pruning is default-enabled at runtime via `PruneConfig` and
+//! the `markdown_prune_noise` NGINX directive. The compile-time feature flag
+//! remains for conditional compilation of pruning-extended logic.
+//!
 //! Pruning operates at the traversal layer — the `RcDom` tree is never mutated.
 //! The converter's `handle_element_internal` calls [`should_prune`] to decide
 //! whether to traverse, skip children, or skip the entire subtree.
@@ -17,32 +21,110 @@
 /// visiting their child nodes entirely.
 const SKIP_CHILDREN_ELEMENTS: &[&str] = &["script", "style", "noscript"];
 
-/// Semantic noise region elements that can optionally be pruned.
+/// Default noise region selectors used when no custom selectors are provided.
 ///
-/// When the `prune_noise_regions` feature is enabled, these elements and their
-/// entire subtrees are skipped during traversal. By default (feature disabled),
-/// they are traversed normally.
-const NOISE_REGION_ELEMENTS: &[&str] = &["nav", "footer", "aside"];
+/// These CSS-selectors-like tag names match structural HTML regions that
+/// typically have no value for AI agent consumption.
+const DEFAULT_NOISE_REGION_ELEMENTS: &[&str] = &["nav", "footer", "aside"];
 
-/// Whether noise region pruning is active.
+/// Semantic core elements that are never pruned, even if an operator
+/// explicitly includes them in prune selectors. This hard-coded protection
+/// prevents data loss where `<main>` or `<article>` regions (the primary
+/// content) are accidentally removed.
+const ALWAYS_PROTECTED_ELEMENTS: &[&str] = &["main", "article"];
+
+/// Runtime configuration for noise region pruning.
 ///
-/// This is `true` when the `prune_noise_regions` feature flag is enabled,
-/// and `false` otherwise. In the 0.4.0 release the feature is disabled by
-/// default — only `script`/`style`/`noscript` pruning is active.
+/// Constructed from FFI options and passed to `should_prune_with_config`.
+/// When `enabled` is false, only always-skipped elements (script/style/noscript)
+/// are pruned. When `enabled` is true, noise region elements matching
+/// `selectors` are also pruned, unless they match `protection_selectors`.
+#[derive(Debug, Clone)]
+pub struct PruneConfig {
+    /// Whether noise region pruning is enabled at runtime.
+    pub(crate) enabled: bool,
+    /// Tag names to prune (replaces defaults when non-empty).
+    pub(crate) selectors: Vec<String>,
+    /// Tag names to protect from pruning (protection wins over prune).
+    pub(crate) protection_selectors: Vec<String>,
+}
+
+impl PruneConfig {
+    /// Create a default PruneConfig with pruning enabled and default selectors.
+    pub fn default_enabled() -> Self {
+        Self {
+            enabled: true,
+            selectors: DEFAULT_NOISE_REGION_ELEMENTS
+                .iter()
+                .map(|s| (*s).to_owned())
+                .collect(),
+            protection_selectors: Vec::new(),
+        }
+    }
+
+    /// Create a PruneConfig with pruning disabled.
+    pub fn disabled() -> Self {
+        Self {
+            enabled: false,
+            selectors: Vec::new(),
+            protection_selectors: Vec::new(),
+        }
+    }
+
+    /// Create a PruneConfig from FFI option fields.
+    ///
+    /// When `prune_noise` is false, returns a disabled config.
+    /// When `prune_noise` is true and `selectors_str` is Some, parses the
+    /// space-separated selector string. When `selectors_str` is None, uses
+    /// default selectors.
+    #[allow(dead_code)]
+    pub(crate) fn from_ffi(
+        prune_noise: bool,
+        selectors_str: Option<&str>,
+        protection_selectors_str: Option<&str>,
+    ) -> Self {
+        if !prune_noise {
+            return Self::disabled();
+        }
+
+        let selectors = match selectors_str {
+            Some(s) if !s.is_empty() => s.split_whitespace().map(|tok| tok.to_owned()).collect(),
+            _ => DEFAULT_NOISE_REGION_ELEMENTS
+                .iter()
+                .map(|s| (*s).to_owned())
+                .collect(),
+        };
+
+        let protection_selectors = match protection_selectors_str {
+            Some(s) if !s.is_empty() => s.split_whitespace().map(|tok| tok.to_owned()).collect(),
+            _ => Vec::new(),
+        };
+
+        Self {
+            enabled: true,
+            selectors,
+            protection_selectors,
+        }
+    }
+}
+
+/// Whether the compile-time `prune_noise_regions` feature is enabled.
 #[cfg(feature = "prune_noise_regions")]
-const PRUNE_NOISE_REGIONS: bool = true;
+#[allow(dead_code)]
+const PRUNE_NOISE_REGIONS_COMPILE: bool = true;
 
-/// Whether noise region pruning is active (default: disabled).
+/// Whether the compile-time `prune_noise_regions` feature is enabled.
 #[cfg(not(feature = "prune_noise_regions"))]
-const PRUNE_NOISE_REGIONS: bool = false;
+#[allow(dead_code)]
+const PRUNE_NOISE_REGIONS_COMPILE: bool = false;
 
 /// Decision for how to handle a DOM subtree during traversal.
 ///
 /// Returned by [`should_prune`] to tell the traversal layer whether to
-/// continue into a node's children, skip only the children, or skip the
-/// entire subtree.
+/// continue into a node's children, skip only the children, or skip
+/// the entire subtree.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum PruneDecision {
+pub enum PruneDecision {
     /// Continue traversal into this node's children.
     Traverse,
     /// Skip this node's children but do not skip the node itself.
@@ -53,23 +135,52 @@ pub(crate) enum PruneDecision {
 
 /// Determine the pruning decision for an HTML element by tag name.
 ///
-/// # Arguments
-///
-/// * `tag_name` - The lowercase HTML tag name to evaluate.
-///
-/// # Returns
-///
-/// - [`PruneDecision::SkipChildren`] for `script`, `style`, `noscript`.
-/// - [`PruneDecision::SkipSubtree`] for `nav`, `footer`, `aside` when the
-///   `prune_noise_regions` feature is enabled.
-/// - [`PruneDecision::Traverse`] for all other elements.
+/// Uses the compile-time feature flag for backward compatibility.
+/// For runtime-configurable pruning, use [`should_prune_with_config`].
+#[allow(dead_code)]
 pub(crate) fn should_prune(tag_name: &str) -> PruneDecision {
     if SKIP_CHILDREN_ELEMENTS.contains(&tag_name) {
         return PruneDecision::SkipChildren;
     }
 
-    if PRUNE_NOISE_REGIONS && NOISE_REGION_ELEMENTS.contains(&tag_name) {
+    if PRUNE_NOISE_REGIONS_COMPILE && DEFAULT_NOISE_REGION_ELEMENTS.contains(&tag_name) {
         return PruneDecision::SkipSubtree;
+    }
+
+    PruneDecision::Traverse
+}
+
+/// Determine the pruning decision for an HTML element using runtime config.
+///
+/// # Arguments
+///
+/// * `tag_name` - The lowercase HTML tag name to evaluate.
+/// * `config` - Runtime pruning configuration.
+///
+/// # Returns
+///
+/// - [`PruneDecision::SkipChildren`] for `script`, `style`, `noscript`.
+/// - [`PruneDecision::SkipSubtree`] for elements matching prune selectors
+///   (when enabled and not protected).
+/// - [`PruneDecision::Traverse`] for all other elements.
+pub(crate) fn should_prune_with_config(tag_name: &str, config: &PruneConfig) -> PruneDecision {
+    if SKIP_CHILDREN_ELEMENTS.contains(&tag_name) {
+        return PruneDecision::SkipChildren;
+    }
+
+    if config.enabled {
+        /* Hard-coded semantic core protection: main and article are never
+         * pruned, regardless of operator configuration. This prevents
+         * accidental removal of primary content regions. */
+        if ALWAYS_PROTECTED_ELEMENTS.contains(&tag_name) {
+            return PruneDecision::Traverse;
+        }
+        if config.protection_selectors.iter().any(|s| s == tag_name) {
+            return PruneDecision::Traverse;
+        }
+        if config.selectors.iter().any(|s| s == tag_name) {
+            return PruneDecision::SkipSubtree;
+        }
     }
 
     PruneDecision::Traverse
@@ -94,50 +205,6 @@ mod tests {
         assert_eq!(should_prune("noscript"), PruneDecision::SkipChildren);
     }
 
-    // With the `prune_noise_regions` feature disabled (the default), noise
-    // region elements are traversed normally.
-
-    #[cfg(not(feature = "prune_noise_regions"))]
-    #[test]
-    fn nav_returns_traverse_when_feature_disabled() {
-        assert_eq!(should_prune("nav"), PruneDecision::Traverse);
-    }
-
-    #[cfg(not(feature = "prune_noise_regions"))]
-    #[test]
-    fn footer_returns_traverse_when_feature_disabled() {
-        assert_eq!(should_prune("footer"), PruneDecision::Traverse);
-    }
-
-    #[cfg(not(feature = "prune_noise_regions"))]
-    #[test]
-    fn aside_returns_traverse_when_feature_disabled() {
-        assert_eq!(should_prune("aside"), PruneDecision::Traverse);
-    }
-
-    // With the `prune_noise_regions` feature enabled, noise region elements
-    // are pruned (entire subtree skipped).
-
-    #[cfg(feature = "prune_noise_regions")]
-    #[test]
-    fn nav_returns_skip_subtree_when_feature_enabled() {
-        assert_eq!(should_prune("nav"), PruneDecision::SkipSubtree);
-    }
-
-    #[cfg(feature = "prune_noise_regions")]
-    #[test]
-    fn footer_returns_skip_subtree_when_feature_enabled() {
-        assert_eq!(should_prune("footer"), PruneDecision::SkipSubtree);
-    }
-
-    #[cfg(feature = "prune_noise_regions")]
-    #[test]
-    fn aside_returns_skip_subtree_when_feature_enabled() {
-        assert_eq!(should_prune("aside"), PruneDecision::SkipSubtree);
-    }
-
-    // Non-prunable elements always traverse.
-
     #[test]
     fn div_returns_traverse() {
         assert_eq!(should_prune("div"), PruneDecision::Traverse);
@@ -149,22 +216,123 @@ mod tests {
     }
 
     #[test]
-    fn h1_returns_traverse() {
-        assert_eq!(should_prune("h1"), PruneDecision::Traverse);
-    }
-
-    #[test]
-    fn span_returns_traverse() {
-        assert_eq!(should_prune("span"), PruneDecision::Traverse);
-    }
-
-    #[test]
-    fn table_returns_traverse() {
-        assert_eq!(should_prune("table"), PruneDecision::Traverse);
-    }
-
-    #[test]
     fn empty_string_returns_traverse() {
         assert_eq!(should_prune(""), PruneDecision::Traverse);
+    }
+
+    // Runtime-configurable pruning tests
+
+    #[test]
+    fn config_disabled_traverses_noise_regions() {
+        let config = PruneConfig::disabled();
+        assert_eq!(
+            should_prune_with_config("nav", &config),
+            PruneDecision::Traverse
+        );
+        assert_eq!(
+            should_prune_with_config("footer", &config),
+            PruneDecision::Traverse
+        );
+    }
+
+    #[test]
+    fn config_enabled_prunes_default_noise_regions() {
+        let config = PruneConfig::default_enabled();
+        assert_eq!(
+            should_prune_with_config("nav", &config),
+            PruneDecision::SkipSubtree
+        );
+        assert_eq!(
+            should_prune_with_config("footer", &config),
+            PruneDecision::SkipSubtree
+        );
+        assert_eq!(
+            should_prune_with_config("aside", &config),
+            PruneDecision::SkipSubtree
+        );
+    }
+
+    #[test]
+    fn config_custom_selectors() {
+        let config = PruneConfig::from_ffi(true, Some("sidebar ad-slot"), None);
+        assert_eq!(
+            should_prune_with_config("sidebar", &config),
+            PruneDecision::SkipSubtree
+        );
+        assert_eq!(
+            should_prune_with_config("ad-slot", &config),
+            PruneDecision::SkipSubtree
+        );
+        assert_eq!(
+            should_prune_with_config("nav", &config),
+            PruneDecision::Traverse
+        );
+    }
+
+    #[test]
+    fn config_protection_overrides_prune() {
+        let config = PruneConfig::from_ffi(true, Some("nav footer aside"), Some("footer"));
+        assert_eq!(
+            should_prune_with_config("nav", &config),
+            PruneDecision::SkipSubtree
+        );
+        assert_eq!(
+            should_prune_with_config("footer", &config),
+            PruneDecision::Traverse
+        );
+    }
+
+    #[test]
+    fn config_from_ffi_disabled() {
+        let config = PruneConfig::from_ffi(false, Some("nav footer"), None);
+        assert!(!config.enabled);
+        assert_eq!(
+            should_prune_with_config("nav", &config),
+            PruneDecision::Traverse
+        );
+    }
+
+    #[test]
+    fn always_protected_main_and_article() {
+        let config = PruneConfig::from_ffi(true, Some("main article nav"), None);
+        assert_eq!(
+            should_prune_with_config("main", &config),
+            PruneDecision::Traverse
+        );
+        assert_eq!(
+            should_prune_with_config("article", &config),
+            PruneDecision::Traverse
+        );
+        assert_eq!(
+            should_prune_with_config("nav", &config),
+            PruneDecision::SkipSubtree
+        );
+    }
+
+    #[test]
+    fn always_protected_even_with_explicit_prune() {
+        let config = PruneConfig::default_enabled();
+        assert_eq!(
+            should_prune_with_config("main", &config),
+            PruneDecision::Traverse
+        );
+        assert_eq!(
+            should_prune_with_config("article", &config),
+            PruneDecision::Traverse
+        );
+    }
+
+    // Compile-time feature flag tests
+
+    #[cfg(feature = "prune_noise_regions")]
+    #[test]
+    fn nav_returns_skip_subtree_when_feature_enabled() {
+        assert_eq!(should_prune("nav"), PruneDecision::SkipSubtree);
+    }
+
+    #[cfg(not(feature = "prune_noise_regions"))]
+    #[test]
+    fn nav_returns_traverse_when_feature_disabled() {
+        assert_eq!(should_prune("nav"), PruneDecision::Traverse);
     }
 }

@@ -13,6 +13,8 @@
 //! - Dangerous URL schemes (javascript:, data:, etc.) are blocked
 //! - Nesting depth is limited to prevent stack exhaustion
 
+use crate::converter::pruning::{PruneConfig, should_prune_with_config};
+use crate::streaming::emitter::escape_markdown_destination;
 use crate::streaming::types::StreamEvent;
 
 /// HTML void elements that never have children.
@@ -96,6 +98,14 @@ pub struct StreamingSanitizer {
     nesting_depth: usize,
     /// Maximum allowed nesting depth.
     max_nesting_depth: usize,
+    /// Noise-region pruning configuration.
+    prune_config: PruneConfig,
+    /// Depth counter for noise-region pruning. When > 0, events inside
+    /// a pruned element (nav, footer, aside, etc.) are suppressed.
+    prune_depth: usize,
+    /// Name of the outermost pruned element that entered prune mode,
+    /// for name-aware exit (same pattern as skip_element).
+    prune_element: Option<String>,
 }
 
 impl StreamingSanitizer {
@@ -117,6 +127,21 @@ impl StreamingSanitizer {
             nesting_stack: Vec::new(),
             nesting_depth: 0,
             max_nesting_depth: MAX_NESTING_DEPTH,
+            prune_config: PruneConfig::disabled(),
+            prune_depth: 0,
+            prune_element: None,
+        }
+    }
+
+    /// Creates a `StreamingSanitizer` with noise-region pruning enabled.
+    ///
+    /// Elements matching the prune config (nav, footer, aside, etc.) and
+    /// their entire subtrees will be suppressed, equivalent to the
+    /// full-buffer path's `should_prune_with_config()` behavior.
+    pub fn with_prune_config(prune_config: PruneConfig) -> Self {
+        Self {
+            prune_config,
+            ..Self::new()
         }
     }
 
@@ -193,15 +218,6 @@ impl StreamingSanitizer {
                     return SanitizeDecision::Skip;
                 }
 
-                // Check nesting depth for elements that pass through to the emitter.
-                if !effectively_self_closing {
-                    self.nesting_stack.push(tag.to_string());
-                    self.nesting_depth = self.nesting_stack.len();
-                    if self.nesting_depth > self.max_nesting_depth {
-                        return SanitizeDecision::DepthExceeded;
-                    }
-                }
-
                 // Dangerous elements: skip entire subtree
                 if DANGEROUS_VOID_ELEMENTS.contains(&tag) {
                     return SanitizeDecision::Skip;
@@ -213,6 +229,38 @@ impl StreamingSanitizer {
                         self.skip_element = Some(tag.to_string());
                     }
                     return SanitizeDecision::Skip;
+                }
+
+                // Noise-region pruning: skip entire subtree of nav, footer,
+                // aside, etc. when pruning is enabled. Uses the same depth-
+                // counter + name-aware-exit pattern as dangerous elements.
+                if self.prune_depth > 0 {
+                    if !effectively_self_closing {
+                        self.prune_depth = self.prune_depth.saturating_add(1);
+                    }
+                    return SanitizeDecision::Skip;
+                }
+
+                if self.prune_config.enabled
+                    && matches!(
+                        should_prune_with_config(tag, &self.prune_config),
+                        crate::converter::pruning::PruneDecision::SkipSubtree
+                    )
+                {
+                    if !effectively_self_closing {
+                        self.prune_depth = 1;
+                        self.prune_element = Some(tag.to_string());
+                    }
+                    return SanitizeDecision::Skip;
+                }
+
+                // Element passes all skip checks — track nesting depth.
+                if !effectively_self_closing {
+                    self.nesting_stack.push(tag.to_string());
+                    self.nesting_depth = self.nesting_stack.len();
+                    if self.nesting_depth > self.max_nesting_depth {
+                        return SanitizeDecision::DepthExceeded;
+                    }
                 }
 
                 // Embedded content elements: strip tag, extract URL
@@ -230,10 +278,10 @@ impl StreamingSanitizer {
                     if let Some(url_val) = url
                         && !is_dangerous_url(&url_val)
                     {
-                        // Return a text event with the URL as a markdown link placeholder
+                        let escaped = escape_markdown_destination(&url_val);
                         return SanitizeDecision::PassModified(StreamEvent::Text(format!(
                             "[{}]({})",
-                            tag, url_val
+                            tag, escaped
                         )));
                     }
                     return SanitizeDecision::Skip;
@@ -259,9 +307,10 @@ impl StreamingSanitizer {
                     if let Some(url_val) = url
                         && !is_dangerous_url(&url_val)
                     {
+                        let escaped = escape_markdown_destination(&url_val);
                         return SanitizeDecision::PassModified(StreamEvent::Text(format!(
                             "[{}]({})",
-                            tag, url_val
+                            tag, escaped
                         )));
                     }
                     return SanitizeDecision::Skip;
@@ -318,6 +367,20 @@ impl StreamingSanitizer {
                     return SanitizeDecision::Skip;
                 }
 
+                // Prune depth: name-aware exit, same pattern as skip_depth.
+                if self.prune_depth > 0 {
+                    if self.prune_depth == 1 {
+                        if self.prune_element.as_deref() == Some(tag) {
+                            self.prune_depth = 0;
+                            self.prune_element = None;
+                            self.pop_open_tag(tag);
+                        }
+                    } else {
+                        self.prune_depth = self.prune_depth.saturating_sub(1);
+                    }
+                    return SanitizeDecision::Skip;
+                }
+
                 self.pop_open_tag(tag);
 
                 // Strip stack tracking for embedded/form elements.
@@ -337,7 +400,7 @@ impl StreamingSanitizer {
             }
 
             StreamEvent::Text(_) | StreamEvent::Comment(_) => {
-                if self.skip_depth > 0 {
+                if self.skip_depth > 0 || self.prune_depth > 0 {
                     return SanitizeDecision::Skip;
                 }
                 SanitizeDecision::Pass(event)
@@ -393,6 +456,12 @@ impl StreamingSanitizer {
         self.nesting_depth
     }
 
+    /// Returns the current prune depth (0 if not pruning).
+    #[cfg(test)]
+    pub(crate) fn prune_depth(&self) -> usize {
+        self.prune_depth
+    }
+
     fn pop_open_tag(&mut self, tag: &str) {
         if let Some(idx) = self.nesting_stack.iter().rposition(|open| open == tag) {
             self.nesting_stack.remove(idx);
@@ -434,10 +503,30 @@ impl Default for StreamingSanitizer {
 /// # Returns
 ///
 /// `true` if the trimmed, lowercased URL begins with any dangerous scheme prefix, `false` otherwise.
-fn is_dangerous_url(url: &str) -> bool {
+pub(crate) fn is_dangerous_url(url: &str) -> bool {
     let trimmed = url.trim();
     if trimmed.chars().any(|ch| ch == '\0' || ch.is_control()) {
         return true;
+    }
+
+    // Reject percent-encoded control characters (%00-%1f, %7f).
+    // These can bypass the raw control-character check above but are
+    // decoded by user agents and can enable script injection.
+    let bytes = trimmed.as_bytes();
+    let mut i = 0;
+    while i + 2 < bytes.len() {
+        if bytes[i] == b'%' && bytes[i + 1].is_ascii_hexdigit() && bytes[i + 2].is_ascii_hexdigit()
+        {
+            let hi = (bytes[i + 1] as char).to_digit(16).unwrap_or(0) as u8;
+            let lo = (bytes[i + 2] as char).to_digit(16).unwrap_or(0) as u8;
+            let decoded = hi << 4 | lo;
+            if decoded <= 0x1f || decoded == 0x7f {
+                return true;
+            }
+            i += 3;
+        } else {
+            i += 1;
+        }
     }
 
     let lower = trimmed.to_ascii_lowercase();
@@ -647,6 +736,44 @@ mod tests {
     }
 
     #[test]
+    fn test_iframe_url_destination_escaped() {
+        let mut san = StreamingSanitizer::new();
+        let decision = san.process_event(start_tag(
+            "iframe",
+            vec![("src", "https://example.com/path?a=1&b=2)")],
+        ));
+        match decision {
+            SanitizeDecision::PassModified(StreamEvent::Text(t)) => {
+                assert!(
+                    t.contains('<'),
+                    "Parenthesis in URL must trigger angle-bracket escaping, got: {}",
+                    t
+                );
+            }
+            _ => panic!("Expected PassModified with escaped URL, got {:?}", decision),
+        }
+    }
+
+    #[test]
+    fn test_media_url_destination_escaped() {
+        let mut san = StreamingSanitizer::new();
+        let decision = san.process_event(start_tag(
+            "video",
+            vec![("src", "https://example.com/vid)eo.mp4")],
+        ));
+        match decision {
+            SanitizeDecision::PassModified(StreamEvent::Text(t)) => {
+                assert!(
+                    t.contains('<'),
+                    "Parenthesis in URL must trigger angle-bracket escaping, got: {}",
+                    t
+                );
+            }
+            _ => panic!("Expected PassModified with escaped URL, got {:?}", decision),
+        }
+    }
+
+    #[test]
     fn test_object_data_url_extracted() {
         let mut san = StreamingSanitizer::new();
         let decision = san.process_event(start_tag(
@@ -852,6 +979,17 @@ mod tests {
         assert!(is_dangerous_url("java\u{0009}script:alert(1)"));
     }
 
+    #[test]
+    fn test_dangerous_url_with_percent_encoded_control_chars() {
+        assert!(is_dangerous_url("https://example.com/%00"));
+        assert!(is_dangerous_url("https://example.com/%0a"));
+        assert!(is_dangerous_url("https://example.com/%0d"));
+        assert!(is_dangerous_url("https://example.com/%1f"));
+        assert!(is_dangerous_url("https://example.com/%7f"));
+        assert!(!is_dangerous_url("https://example.com/%20"));
+        assert!(!is_dangerous_url("https://example.com/%41"));
+    }
+
     // --- Nesting depth ---
 
     #[test]
@@ -944,26 +1082,27 @@ mod tests {
     fn test_deep_nesting_inside_dangerous_element_is_safe() {
         let mut san = StreamingSanitizer::with_max_depth(5);
 
-        // Open a script element (nesting_depth goes to 1)
+        // Open a script element (skipped, does not enter nesting_stack)
         assert_eq!(
             san.process_event(start_tag("script", vec![])),
             SanitizeDecision::Skip
         );
         assert!(san.is_skipping());
-        assert_eq!(san.nesting_depth(), 1);
+        assert_eq!(san.nesting_depth(), 0);
 
         // Nest 100 elements inside the script — all skipped, nesting_depth
-        // stays at 1 because these elements never reach the emitter.
+        // stays at 0 because these elements never reach the emitter.
         for _ in 0..100 {
             assert_eq!(
                 san.process_event(start_tag("div", vec![])),
                 SanitizeDecision::Skip
             );
         }
-        // nesting_depth should still be 1 (only the script itself)
+        // nesting_depth should still be 0 (dangerous elements do not
+        // contribute to nesting_stack)
         assert_eq!(
             san.nesting_depth(),
-            1,
+            0,
             "nesting_depth should not increase for elements inside a dangerous element"
         );
 
@@ -1198,5 +1337,148 @@ mod tests {
             let url = format!("{}{}", scheme, suffix);
             prop_assert!(is_dangerous_url(&url), "URL '{}' should be dangerous", url);
         }
+    }
+
+    #[test]
+    fn test_pruned_element_does_not_enter_nesting_stack() {
+        let mut san = StreamingSanitizer::with_max_depth(10);
+        san.prune_config.enabled = true;
+        san.prune_config.selectors = vec!["nav".to_string()];
+
+        assert_eq!(
+            san.process_event(start_tag("nav", vec![])),
+            SanitizeDecision::Skip
+        );
+        assert_eq!(
+            san.nesting_depth(),
+            0,
+            "pruned nav should not increase nesting_depth"
+        );
+        assert_eq!(san.prune_depth(), 1);
+
+        assert_eq!(
+            san.process_event(start_tag("div", vec![])),
+            SanitizeDecision::Skip
+        );
+        assert_eq!(san.nesting_depth(), 0);
+
+        assert_eq!(san.process_event(end_tag("div")), SanitizeDecision::Skip);
+        assert_eq!(san.process_event(end_tag("nav")), SanitizeDecision::Skip);
+        assert_eq!(san.prune_depth(), 0);
+        assert_eq!(san.nesting_depth(), 0);
+    }
+
+    #[test]
+    fn test_mismatched_end_tag_inside_prune_region() {
+        let mut san = StreamingSanitizer::with_max_depth(10);
+        san.prune_config.enabled = true;
+        san.prune_config.selectors = vec!["footer".to_string()];
+
+        assert_eq!(
+            san.process_event(start_tag("footer", vec![])),
+            SanitizeDecision::Skip
+        );
+
+        assert_eq!(san.process_event(end_tag("div")), SanitizeDecision::Skip);
+        assert_eq!(
+            san.prune_depth(),
+            1,
+            "mismatched end tag should not exit prune"
+        );
+
+        assert_eq!(san.process_event(end_tag("footer")), SanitizeDecision::Skip);
+        assert_eq!(san.prune_depth(), 0);
+    }
+
+    #[test]
+    fn test_text_and_comments_suppressed_during_prune() {
+        let mut san = StreamingSanitizer::with_max_depth(10);
+        san.prune_config.enabled = true;
+        san.prune_config.selectors = vec!["aside".to_string()];
+
+        assert_eq!(
+            san.process_event(start_tag("aside", vec![])),
+            SanitizeDecision::Skip
+        );
+
+        let text_event = StreamEvent::Text("important content".into());
+        assert_eq!(san.process_event(text_event), SanitizeDecision::Skip);
+
+        let comment_event = StreamEvent::Comment("<!-- hidden -->".into());
+        assert_eq!(san.process_event(comment_event), SanitizeDecision::Skip);
+
+        assert_eq!(san.process_event(end_tag("aside")), SanitizeDecision::Skip);
+        assert_eq!(san.prune_depth(), 0);
+    }
+
+    #[test]
+    fn test_prune_depth_increments_for_nested_elements() {
+        let mut san = StreamingSanitizer::with_max_depth(10);
+        san.prune_config.enabled = true;
+        san.prune_config.selectors = vec!["nav".to_string()];
+
+        assert_eq!(
+            san.process_event(start_tag("nav", vec![])),
+            SanitizeDecision::Skip
+        );
+        assert_eq!(san.prune_depth(), 1);
+
+        assert_eq!(
+            san.process_event(start_tag("div", vec![])),
+            SanitizeDecision::Skip
+        );
+        assert_eq!(san.prune_depth(), 2);
+
+        assert_eq!(
+            san.process_event(start_tag("span", vec![])),
+            SanitizeDecision::Skip
+        );
+        assert_eq!(san.prune_depth(), 3);
+
+        assert_eq!(san.process_event(end_tag("span")), SanitizeDecision::Skip);
+        assert_eq!(san.prune_depth(), 2);
+
+        assert_eq!(san.process_event(end_tag("div")), SanitizeDecision::Skip);
+        assert_eq!(san.prune_depth(), 1);
+
+        assert_eq!(san.process_event(end_tag("nav")), SanitizeDecision::Skip);
+        assert_eq!(san.prune_depth(), 0);
+    }
+
+    #[test]
+    fn test_nesting_depth_intact_after_prune_exit() {
+        let mut san = StreamingSanitizer::with_max_depth(10);
+        san.prune_config.enabled = true;
+        san.prune_config.selectors = vec!["nav".to_string()];
+
+        assert!(matches!(
+            san.process_event(start_tag("div", vec![])),
+            SanitizeDecision::Pass(_)
+        ));
+        assert_eq!(san.nesting_depth(), 1);
+
+        assert_eq!(
+            san.process_event(start_tag("nav", vec![])),
+            SanitizeDecision::Skip
+        );
+        assert_eq!(
+            san.process_event(start_tag("p", vec![])),
+            SanitizeDecision::Skip
+        );
+        assert_eq!(san.process_event(end_tag("p")), SanitizeDecision::Skip);
+        assert_eq!(san.process_event(end_tag("nav")), SanitizeDecision::Skip);
+        assert_eq!(san.prune_depth(), 0);
+
+        assert_eq!(
+            san.nesting_depth(),
+            1,
+            "nesting_depth should still be 1 after prune exit"
+        );
+
+        assert!(matches!(
+            san.process_event(end_tag("div")),
+            SanitizeDecision::Pass(_)
+        ));
+        assert_eq!(san.nesting_depth(), 0);
     }
 }

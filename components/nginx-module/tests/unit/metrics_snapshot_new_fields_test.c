@@ -62,8 +62,8 @@ collect_snapshot(snapshot_t *snap)
     snap->skips.auth = m->skips.auth;
     snap->skips.range = m->skips.range;
     snap->skips.accept = m->skips.accept;
-    snap->failopen_count = m->failopen_count;
-    snap->estimated_token_savings = m->estimated_token_savings;
+    snap->results.failopen_count = m->results.failopen_count;
+    snap->results.estimated_token_savings = m->results.estimated_token_savings;
 }
 
 static void
@@ -96,9 +96,9 @@ test_null_metrics_zeroes_new_fields(void)
                 "skips.range should be zero");
     TEST_ASSERT(snap.skips.accept == 0,
                 "skips.accept should be zero");
-    TEST_ASSERT(snap.failopen_count == 0,
+    TEST_ASSERT(snap.results.failopen_count == 0,
                 "failopen_count should be zero");
-    TEST_ASSERT(snap.estimated_token_savings == 0,
+    TEST_ASSERT(snap.results.estimated_token_savings == 0,
                 "estimated_token_savings should be zero");
 
     TEST_PASS("All new fields are zeroed when metrics is NULL");
@@ -125,8 +125,8 @@ test_new_fields_copied_correctly(void)
     m.skips.auth = 7;
     m.skips.range = 8;
     m.skips.accept = 9;
-    m.failopen_count = 10;
-    m.estimated_token_savings = 15000;
+    m.results.failopen_count = 10;
+    m.results.estimated_token_savings = 15000;
 
     /* Also set some existing fields to verify no interference */
     m.conversions_attempted = 100;
@@ -156,9 +156,9 @@ test_new_fields_copied_correctly(void)
                 "skips.range should be copied");
     TEST_ASSERT(snap.skips.accept == 9,
                 "skips.accept should be copied");
-    TEST_ASSERT(snap.failopen_count == 10,
+    TEST_ASSERT(snap.results.failopen_count == 10,
                 "failopen_count should be copied");
-    TEST_ASSERT(snap.estimated_token_savings == 15000,
+    TEST_ASSERT(snap.results.estimated_token_savings == 15000,
                 "estimated_token_savings should be copied");
 
     /* Verify existing fields still work */

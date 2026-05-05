@@ -1,0 +1,15 @@
+Source: nginx-markdown-module
+Section: httpd
+Priority: optional
+Maintainer: cnkang <liukang@noreply.github.com>
+Build-Depends: debhelper (>= 10), cargo, rustc, libpcre3-dev, zlib1g-dev, libssl-dev, nginx-dev (>= 1.18.0)
+Standards-Version: 4.1.4
+Homepage: https://github.com/cnkang/nginx-markdown-for-agents
+
+Package: nginx-markdown-module
+Architecture: any
+Depends: nginx (>= 1.18.0), ${misc:Depends}, ${shlibs:Depends}
+Description: NGINX module for HTML-to-Markdown conversion
+ NGINX filter module that converts HTML responses to Markdown
+ for AI agent consumption. Supports streaming, GFM/MDX flavors,
+ noise pruning, token estimation, and conditional requests.

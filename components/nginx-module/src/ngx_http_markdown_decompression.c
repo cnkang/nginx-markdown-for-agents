@@ -59,17 +59,29 @@ ngx_http_markdown_detect_compression(ngx_http_request_t *r)
     }
     
     /* Check for gzip compression (case-insensitive, Requirement 1.2) */
-    if (ngx_strcasecmp(h->value.data, ngx_http_markdown_encoding_gzip) == 0) {
+    if (h->value.len == sizeof("gzip") - 1
+        && ngx_strncasecmp(h->value.data,
+                            ngx_http_markdown_encoding_gzip,
+                            sizeof("gzip") - 1) == 0)
+    {
         return NGX_HTTP_MARKDOWN_COMPRESSION_GZIP;
     }
     
     /* Check for deflate compression (case-insensitive, Requirement 1.3) */
-    if (ngx_strcasecmp(h->value.data, ngx_http_markdown_encoding_deflate) == 0) {
+    if (h->value.len == sizeof("deflate") - 1
+        && ngx_strncasecmp(h->value.data,
+                            ngx_http_markdown_encoding_deflate,
+                            sizeof("deflate") - 1) == 0)
+    {
         return NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE;
     }
     
     /* Check for brotli compression (case-insensitive, Requirement 1.4) */
-    if (ngx_strcasecmp(h->value.data, ngx_http_markdown_encoding_br) == 0) {
+    if (h->value.len == sizeof("br") - 1
+        && ngx_strncasecmp(h->value.data,
+                            ngx_http_markdown_encoding_br,
+                            sizeof("br") - 1) == 0)
+    {
         return NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI;
     }
     

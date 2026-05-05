@@ -1,0 +1,97 @@
+name: Publish Homebrew Formula to Tap
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to publish (for example v0.6.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Update tap formula for ${{ github.event.release.tag_name || inputs.tag }}
+    runs-on: ubuntu-latest
+    env:
+      FORMULA_SOURCE: packaging/homebrew/nginx-markdown-module.rb
+      FORMULA_DEST: ${{ vars.HOMEBREW_FORMULA_PATH || 'Formula/nginx-markdown-module.rb' }}
+      TAP_REPO: ${{ vars.HOMEBREW_TAP_REPO }}
+      TAP_BRANCH: ${{ vars.HOMEBREW_TAP_BRANCH || 'main' }}
+      RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      RELEASE_OWNER: ${{ github.repository_owner }}
+      RELEASE_REPO: ${{ github.event.repository.name }}
+    steps:
+      - name: Validate required config
+        run: |
+          set -euo pipefail
+          if [ -z "${TAP_REPO}" ]; then
+            echo "::error::Repository variable HOMEBREW_TAP_REPO is required (format: owner/repo)." >&2
+            exit 1
+          fi
+          if [ -z "${RELEASE_TAG}" ]; then
+            echo "::error::Release tag is required." >&2
+            exit 1
+          fi
+
+      - name: Checkout source repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Prepare formula for tagged artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          artifact_url="https://github.com/${RELEASE_OWNER}/${RELEASE_REPO}/archive/refs/tags/${RELEASE_TAG}.tar.gz"
+          sha256="$(curl -fsSL "${artifact_url}" | sha256sum | awk '{print $1}')"
+
+          if [ ! -f "${FORMULA_SOURCE}" ]; then
+            echo "::error::Formula source not found: ${FORMULA_SOURCE}" >&2
+            exit 1
+          fi
+
+          sed -i "s|^  url \".*\"$|  url \"${artifact_url}\"|" "${FORMULA_SOURCE}"
+          sed -i "s|^  sha256 \".*\"$|  sha256 \"${sha256}\"|" "${FORMULA_SOURCE}"
+
+          echo "Computed SHA256: ${sha256}"
+
+      - name: Checkout tap repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          repository: ${{ env.TAP_REPO }}
+          ref: ${{ env.TAP_BRANCH }}
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: tap
+
+      - name: Update tap formula
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "${FORMULA_DEST}" in
+            ""|/*|../*|*/../*|..|*/..)
+              echo "::error::HOMEBREW_FORMULA_PATH must stay within tap checkout: ${FORMULA_DEST}" >&2
+              exit 1
+              ;;
+          esac
+          dest="tap/${FORMULA_DEST}"
+          mkdir -p "$(dirname "${dest}")"
+          cp "${FORMULA_SOURCE}" "${dest}"
+
+      - name: Commit and push formula update
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "${FORMULA_DEST}"
+          if git diff --cached --quiet; then
+            echo "No formula changes to commit."
+            exit 0
+          fi
+          git commit -m "homebrew: publish ${RELEASE_REPO} ${RELEASE_TAG}"
+          git push origin "${TAP_BRANCH}"

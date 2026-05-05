@@ -339,6 +339,30 @@ main(void)
 #endif
     test_snake_case_format();
 
+#ifdef MARKDOWN_STREAMING_ENABLED
+    TEST_SUBSECTION("streaming auto accessor");
+    TEST_ASSERT(ngx_http_markdown_reason_eligible_streaming_auto() != NULL,
+        "eligible_streaming_auto should return non-NULL");
+    TEST_ASSERT(ngx_http_markdown_reason_eligible_streaming_auto()->len > 0,
+        "eligible_streaming_auto string should not be empty");
+
+    TEST_ASSERT(ngx_http_markdown_reason_eligible_fullbuffer_auto() != NULL,
+        "eligible_fullbuffer_auto should return non-NULL");
+    TEST_ASSERT(ngx_http_markdown_reason_eligible_fullbuffer_auto()->len > 0,
+        "eligible_fullbuffer_auto string should not be empty");
+#endif
+
+    TEST_SUBSECTION("ct_route accessor");
+    TEST_ASSERT(ngx_http_markdown_reason_ct_route_default() != NULL,
+        "ct_route_default should return non-NULL");
+    TEST_ASSERT(ngx_http_markdown_reason_ct_route_default()->len > 0,
+        "ct_route_default string should not be empty");
+
+    TEST_ASSERT(ngx_http_markdown_reason_ct_route_configured() != NULL,
+        "ct_route_configured should return non-NULL");
+    TEST_ASSERT(ngx_http_markdown_reason_ct_route_configured()->len > 0,
+        "ct_route_configured string should not be empty");
+
     printf("\n========================================\n");
     printf("All tests passed!\n");
     printf("========================================\n\n");

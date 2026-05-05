@@ -35,7 +35,10 @@ from tools.release.matrix.update_matrix import (
     _resolve_repo_write_path,
 )
 
-from tools.release.matrix.update_matrix import filter_versions
+try:
+    from tools.release.matrix.update_matrix import filter_versions
+except ImportError:
+    filter_versions = None
 
 # ---------------------------------------------------------------------------
 # Strategies

@@ -12,6 +12,7 @@ Use these documents when you need decisions and procedures you can act on direct
 4. [OPERATIONS.md](OPERATIONS.md) if you are preparing for production monitoring and troubleshooting.
 5. [BUILD_INSTRUCTIONS.md](BUILD_INSTRUCTIONS.md) if you are building from source or working locally.
 6. [HARNESS_MAINTENANCE.md](HARNESS_MAINTENANCE.md) if you are maintaining repo-owned agent workflow rules and validation.
+7. [HOMEBREW_TAP_RELEASE.md](HOMEBREW_TAP_RELEASE.md) if you publish via a dedicated Homebrew tap.
 
 ## Guide Index
 
@@ -23,6 +24,7 @@ Use these documents when you need decisions and procedures you can act on direct
 | [OPERATIONS.md](OPERATIONS.md) | Monitoring, troubleshooting, and operational runbooks |
 | [BUILD_INSTRUCTIONS.md](BUILD_INSTRUCTIONS.md) | Source builds, development workflows, and local verification |
 | [HARNESS_MAINTENANCE.md](HARNESS_MAINTENANCE.md) | Maintaining repo-owned harness rules, checks, and local adapters |
+| [HOMEBREW_TAP_RELEASE.md](HOMEBREW_TAP_RELEASE.md) | Homebrew tap publication and post-release macOS verification |
 
 ## Scope
 

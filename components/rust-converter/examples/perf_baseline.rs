@@ -455,6 +455,14 @@ fn run_ffi_baseline(sample: &Sample, cfg: RunConfig) -> FfiSummary {
         base_url: base_url.map_or(ptr::null(), |value| value.as_ptr()),
         base_url_len: base_url.map_or(0, |value| value.len()),
         streaming_budget: 0,
+        prune_noise: 1,
+        prune_selectors: ptr::null(),
+        prune_selector_len: 0,
+        prune_protection_selectors: ptr::null(),
+        prune_protection_selector_len: 0,
+        memory_budget: 0,
+        llm_provider: 0,
+        chars_per_token_fixed: 0,
     };
 
     let handle: *mut MarkdownConverterHandle = markdown_converter_new();
@@ -550,6 +558,7 @@ fn build_streaming_options(sample: &Sample) -> ConversionOptions {
         preserve_tables: true,
         base_url: sample.base_url.map(|s| s.to_string()),
         resolve_relative_urls: sample.base_url.is_some(),
+        prune_config: ConversionOptions::default().prune_config,
     }
 }
 
@@ -848,6 +857,7 @@ fn run_breakdown(sample: &Sample, iterations: usize) -> BreakdownSummary {
         preserve_tables: true,
         base_url: sample.base_url.map(|s| s.to_string()),
         resolve_relative_urls: sample.base_url.is_some(),
+        prune_config: ConversionOptions::default().prune_config,
     });
     let etag = ETagGenerator::new();
     let token = TokenEstimator::new();

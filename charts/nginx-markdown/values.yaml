@@ -1,0 +1,83 @@
+# Default values for nginx-markdown chart
+
+replicaCount: 1
+
+image:
+  repository: nginx-markdown
+  pullPolicy: IfNotPresent
+  tag: "0.6.0"
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+podSecurityContext: {}
+securityContext: {}
+
+service:
+  type: ClusterIP
+  port: 80
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts: []
+  tls: []
+
+resources: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# NGINX Markdown module configuration
+markdown:
+  enabled: true
+  maxSize: "10m"
+  timeout: "5s"
+  onError: "pass"
+  flavor: "commonmark"
+  tokenEstimate: false
+  etag: true
+  conditionalRequests: "full_support"
+  logVerbosity: "info"
+  bufferChunked: true
+  autoDecompress: true
+
+  # Streaming configuration
+  streaming:
+    engine: "auto"
+    budget: "2m"
+    onError: "pass"
+    autoThreshold: "32k"
+    shadow: false
+
+  # Noise pruning (v0.6.0)
+  prune:
+    noise: true
+    selectors: ""
+    protectionSelectors: ""
+
+  # Content-type routing (v0.6.0)
+  contentTypes: []
+
+  # LLM adapter (v0.6.0)
+  llm:
+    provider: "default"
+    charsPerToken: 0
+
+  # Unified memory budget (v0.6.0)
+  memoryBudget: ""
+
+# Metrics endpoint
+metrics:
+  enabled: false
+  uri: "/_markdown_metrics"
+  format: "auto"
+  shmSize: "8m"

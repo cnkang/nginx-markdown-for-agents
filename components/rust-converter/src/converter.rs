@@ -115,7 +115,7 @@ mod front_matter;
 mod inline;
 pub(crate) mod large_response;
 mod normalize;
-pub(crate) mod pruning;
+pub mod pruning;
 mod tables;
 mod traversal;
 
@@ -138,6 +138,10 @@ pub enum MarkdownFlavor {
     CommonMark,
     /// GitHub Flavored Markdown
     GitHubFlavoredMarkdown,
+    /// MDX (Markdown + JSX): JSX components preserved as-is
+    Mdx,
+    /// Org-mode: Emacs outline format
+    OrgMode,
 }
 
 /// Table column alignment (GFM)
@@ -165,6 +169,8 @@ pub struct ConversionOptions {
     pub base_url: Option<String>,
     /// Resolve relative URLs to absolute URLs
     pub resolve_relative_urls: bool,
+    /// Runtime noise pruning configuration
+    pub prune_config: pruning::PruneConfig,
 }
 
 impl Default for ConversionOptions {
@@ -178,6 +184,7 @@ impl Default for ConversionOptions {
             preserve_tables: true,
             base_url: None,
             resolve_relative_urls: true,
+            prune_config: pruning::PruneConfig::default_enabled(),
         }
     }
 }
@@ -398,7 +405,7 @@ impl ConversionContext {
 /// # Usage
 ///
 /// ```rust
-/// use nginx_markdown_converter::converter::{MarkdownConverter, ConversionOptions, MarkdownFlavor};
+/// use nginx_markdown_converter::converter::{MarkdownConverter, ConversionOptions, MarkdownFlavor, pruning};
 /// use nginx_markdown_converter::parser::parse_html;
 ///
 /// // Create converter with default options (CommonMark)
@@ -407,7 +414,13 @@ impl ConversionContext {
 /// // Or with custom options
 /// let options = ConversionOptions {
 ///     flavor: MarkdownFlavor::GitHubFlavoredMarkdown,
-///     ..Default::default()
+///     include_front_matter: false,
+///     extract_metadata: false,
+///     simplify_navigation: true,
+///     preserve_tables: true,
+///     base_url: None,
+///     resolve_relative_urls: true,
+///     prune_config: pruning::PruneConfig::default_enabled(),
 /// };
 /// let converter = MarkdownConverter::with_options(options);
 ///
@@ -446,13 +459,17 @@ impl MarkdownConverter {
     /// # Examples
     ///
     /// ```rust
-    /// use nginx_markdown_converter::converter::{MarkdownConverter, ConversionOptions, MarkdownFlavor};
+    /// use nginx_markdown_converter::converter::{MarkdownConverter, ConversionOptions, MarkdownFlavor, pruning};
     ///
     /// let options = ConversionOptions {
     ///     flavor: MarkdownFlavor::GitHubFlavoredMarkdown,
     ///     include_front_matter: true,
     ///     extract_metadata: true,
-    ///     ..Default::default()
+    ///     simplify_navigation: true,
+    ///     preserve_tables: true,
+    ///     base_url: None,
+    ///     resolve_relative_urls: true,
+    ///     prune_config: pruning::PruneConfig::default_enabled(),
     /// };
     /// let converter = MarkdownConverter::with_options(options);
     /// ```
@@ -555,7 +572,8 @@ impl MarkdownConverter {
         // enough for optimized traversal. When the document qualifies, the
         // traversal skips unreachable branches (form controls, embedded content,
         // table/media handling) reducing per-node overhead.
-        ctx.is_fast_path = fast_path::qualifies(dom) == fast_path::FastPathResult::Qualifies;
+        ctx.is_fast_path = fast_path::qualifies(dom, &self.options.prune_config)
+            == fast_path::FastPathResult::Qualifies;
 
         // Pre-allocate output buffer. For large documents (input size hint
         // exceeds LARGE_BODY_THRESHOLD), use estimate_output_capacity to
@@ -761,7 +779,12 @@ mod tests {
         let converter = MarkdownConverter::with_options(ConversionOptions {
             resolve_relative_urls: true,
             base_url: Some("https://example.com/path/to/page.html".to_string()),
-            ..ConversionOptions::default()
+            flavor: MarkdownFlavor::CommonMark,
+            include_front_matter: false,
+            extract_metadata: false,
+            simplify_navigation: true,
+            preserve_tables: true,
+            prune_config: pruning::PruneConfig::default_enabled(),
         });
 
         assert_eq!(
