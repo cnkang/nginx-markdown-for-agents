@@ -45,24 +45,24 @@ jobs:
           export CORE_FORMULA_PATH ARCHIVE_URL ARCHIVE_SHA
           cp ./packaging/homebrew/nginx-markdown-module.rb "${CORE_FORMULA_PATH}"
           python3 - <<'PY'
-import os
-from pathlib import Path
+          import os
+          from pathlib import Path
 
-path = Path(os.environ["CORE_FORMULA_PATH"])
-url = os.environ["ARCHIVE_URL"]
-sha = os.environ["ARCHIVE_SHA"]
-text = path.read_text(encoding="utf-8")
-lines = []
-for line in text.splitlines():
-    stripped = line.strip()
-    if stripped.startswith("url "):
-        lines.append(f'  url "{url}"')
-    elif stripped.startswith("sha256 "):
-        lines.append(f'  sha256 "{sha}"')
-    else:
-        lines.append(line)
-path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-PY
+          path = Path(os.environ["CORE_FORMULA_PATH"])
+          url = os.environ["ARCHIVE_URL"]
+          sha = os.environ["ARCHIVE_SHA"]
+          text = path.read_text(encoding="utf-8")
+          lines = []
+          for line in text.splitlines():
+              stripped = line.strip()
+              if stripped.startswith("url "):
+                  lines.append(f'  url "{url}"')
+              elif stripped.startswith("sha256 "):
+                  lines.append(f'  sha256 "{sha}"')
+              else:
+                  lines.append(line)
+          path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+          PY
           brew audit --strict nginx-markdown-module
 
       - name: Install local formula from source
