@@ -417,9 +417,8 @@ ngx_http_markdown_content_types(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     ngx_http_markdown_conf_t *mcf = conf;
     ngx_str_t                *value;
     ngx_str_t                *type;
-    const char               *type_value;
-    const char               *slash;
-    const char               *next_slash;
+    u_char                   *slash;
+    u_char                   *next_slash;
 
     value = cf->args->elts;
 
@@ -440,21 +439,18 @@ ngx_http_markdown_content_types(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
             return NGX_CONF_ERROR;
         }
 
-        type_value = (const char *) value[i].data;
-        slash = (const char *) ngx_strlchr(value[i].data,
-                                           value[i].data + value[i].len, '/');
+        slash = ngx_strlchr(value[i].data,
+                            value[i].data + value[i].len, '/');
         next_slash = NULL;
 
-        if (slash != NULL && (size_t) (slash - type_value + 1) < value[i].len) {
-            /* cast drops const per ngx_strlchr(u_char *, u_char *, u_char) API */
-            next_slash = (const char *) ngx_strlchr(
-                            (u_char *) (slash + 1),
-                            value[i].data + value[i].len, '/');
+        if (slash != NULL && (size_t) ((slash - value[i].data) + 1) < value[i].len) {
+            next_slash = ngx_strlchr(slash + 1,
+                                     value[i].data + value[i].len, '/');
         }
 
         if (slash == NULL
-            || slash == type_value
-            || (size_t) (slash - type_value) == value[i].len - 1
+            || slash == value[i].data
+            || (size_t) (slash - value[i].data) == value[i].len - 1
             || next_slash != NULL)
         {
             ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
@@ -564,9 +560,8 @@ ngx_http_markdown_stream_types(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     ngx_http_markdown_conf_t *mcf = conf;
     ngx_str_t                *value;
     ngx_str_t                *type;
-    const char               *type_value;
-    const char               *slash;
-    const char               *next_slash;
+    u_char                   *slash;
+    u_char                   *next_slash;
 
     value = cf->args->elts;
 
@@ -587,21 +582,18 @@ ngx_http_markdown_stream_types(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
             return NGX_CONF_ERROR;
         }
 
-        type_value = (const char *) value[i].data;
-        slash = (const char *) ngx_strlchr(value[i].data,
-                                           value[i].data + value[i].len, '/');
+        slash = ngx_strlchr(value[i].data,
+                            value[i].data + value[i].len, '/');
         next_slash = NULL;
 
-        if (slash != NULL && (size_t) (slash - type_value + 1) < value[i].len) {
-            /* cast drops const per ngx_strlchr(u_char *, u_char *, u_char) API */
-            next_slash = (const char *) ngx_strlchr(
-                            (u_char *) (slash + 1),
-                            value[i].data + value[i].len, '/');
+        if (slash != NULL && (size_t) ((slash - value[i].data) + 1) < value[i].len) {
+            next_slash = ngx_strlchr(slash + 1,
+                                     value[i].data + value[i].len, '/');
         }
 
         if (slash == NULL
-            || slash == type_value
-            || (size_t) (slash - type_value) == value[i].len - 1
+            || slash == value[i].data
+            || (size_t) (slash - value[i].data) == value[i].len - 1
             || next_slash != NULL)
         {
             ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,

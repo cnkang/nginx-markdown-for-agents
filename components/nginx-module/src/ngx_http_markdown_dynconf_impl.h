@@ -69,7 +69,7 @@ typedef struct {
  */
 static ngx_int_t
 ngx_http_markdown_dynconf_check(ngx_http_markdown_dynconf_watcher_t *watcher,
-                                const ngx_log_t *log)
+                                ngx_log_t *log)
 {
     ngx_file_info_t  fi;
 
@@ -81,7 +81,7 @@ ngx_http_markdown_dynconf_check(ngx_http_markdown_dynconf_watcher_t *watcher,
         u_char  path_buf[NGX_MAX_PATH + 1];
 
         if (watcher->path.len > NGX_MAX_PATH) {
-            ngx_log_error(NGX_LOG_WARN, (ngx_log_t *) log, 0,
+            ngx_log_error(NGX_LOG_WARN, log, 0,
                           "markdown dynconf: path too long (%uz bytes)",
                           watcher->path.len);
             return 0;
@@ -91,7 +91,7 @@ ngx_http_markdown_dynconf_check(ngx_http_markdown_dynconf_watcher_t *watcher,
         path_buf[watcher->path.len] = '\0';
 
         if (ngx_file_info(path_buf, &fi) == NGX_FILE_ERROR) {
-            ngx_log_error(NGX_LOG_WARN, (ngx_log_t *) log, 0,
+            ngx_log_error(NGX_LOG_WARN, log, 0,
                           "markdown dynconf: stat(\"%V\") failed",
                           &watcher->path);
             return 0;
@@ -167,7 +167,7 @@ static ngx_int_t
 ngx_http_markdown_dynconf_start(ngx_http_markdown_dynconf_watcher_t *watcher,
                                 ngx_cycle_t *cycle,
                                 const ngx_str_t *path,
-                                const ngx_log_t *log)
+                                ngx_log_t *log)
 {
     ngx_file_info_t  fi;
     u_char           path_buf[NGX_MAX_PATH + 1];
@@ -177,7 +177,7 @@ ngx_http_markdown_dynconf_start(ngx_http_markdown_dynconf_watcher_t *watcher,
     }
 
     if (path->len > NGX_MAX_PATH) {
-        ngx_log_error(NGX_LOG_ERR, (ngx_log_t *) log, 0,
+        ngx_log_error(NGX_LOG_ERR, log, 0,
                       "markdown dynconf: path too long (%uz bytes)",
                       path->len);
         return NGX_ERROR;
@@ -197,7 +197,7 @@ ngx_http_markdown_dynconf_start(ngx_http_markdown_dynconf_watcher_t *watcher,
     path_buf[path->len] = '\0';
 
     if (ngx_file_info(path_buf, &fi) == NGX_FILE_ERROR) {
-        ngx_log_error(NGX_LOG_WARN, (ngx_log_t *) log, 0,
+        ngx_log_error(NGX_LOG_WARN, log, 0,
                       "markdown dynconf: initial stat(\"%V\") failed, "
                       "will retry on timer",
                       path);
@@ -214,15 +214,14 @@ ngx_http_markdown_dynconf_start(ngx_http_markdown_dynconf_watcher_t *watcher,
 
     watcher->timer->handler = ngx_http_markdown_dynconf_timer_handler;
     watcher->timer->data = watcher;
-    /* Cast drops const: ngx_event_t.log is non-const per NGINX API. */
-    watcher->timer->log = (ngx_log_t *) log;
+    watcher->timer->log = log;
 
     watcher->active = 1;
     watcher->reload_pending = 0;
 
     ngx_add_timer(watcher->timer, NGX_HTTP_MARKDOWN_DYNCONF_WATCH_MS);
 
-    ngx_log_error(NGX_LOG_INFO, (ngx_log_t *) log, 0,
+    ngx_log_error(NGX_LOG_INFO, log, 0,
                   "markdown dynconf: watching \"%V\" "
                   "(interval=%dms)",
                   &watcher->path, NGX_HTTP_MARKDOWN_DYNCONF_WATCH_MS);
@@ -243,7 +242,7 @@ ngx_http_markdown_dynconf_start(ngx_http_markdown_dynconf_watcher_t *watcher,
  */
 static void
 ngx_http_markdown_dynconf_stop(ngx_http_markdown_dynconf_watcher_t *watcher,
-                               const ngx_log_t *log)
+                               ngx_log_t *log)
 {
     if (watcher == NULL || !watcher->active) {
         return;
@@ -256,7 +255,7 @@ ngx_http_markdown_dynconf_stop(ngx_http_markdown_dynconf_watcher_t *watcher,
     watcher->active = 0;
     watcher->reload_pending = 0;
 
-    ngx_log_error(NGX_LOG_INFO, (ngx_log_t *) log, 0,
+    ngx_log_error(NGX_LOG_INFO, log, 0,
                   "markdown dynconf: stopped watching \"%V\"",
                   &watcher->path);
 }
@@ -294,20 +293,24 @@ static ngx_int_t
 ngx_http_markdown_dynconf_match_key(u_char *p, const u_char *eq,
                                     ngx_uint_t *key)
 {
+    static u_char  markdown_filter_key[] = "markdown_filter";
+    static u_char  prune_noise_key[] = "prune_noise";
+    static u_char  log_verbosity_key[] = "log_verbosity";
+    static u_char  streaming_budget_key[] = "streaming_budget";
+    static u_char  memory_budget_key[] = "memory_budget";
     size_t  len;
 
     len = eq - p;
 
-    /* Cast drops const: ngx_strncasecmp() takes u_char * per NGINX API. */
-    if (len == 15 && ngx_strncasecmp(p, (u_char *) "markdown_filter", 15) == 0) {
+    if (len == 15 && ngx_strncasecmp(p, markdown_filter_key, 15) == 0) {
         *key = NGX_HTTP_MARKDOWN_DYNCONF_KEY_FILTER;
-    } else if (len == 11 && ngx_strncasecmp(p, (u_char *) "prune_noise", 11) == 0) {
+    } else if (len == 11 && ngx_strncasecmp(p, prune_noise_key, 11) == 0) {
         *key = NGX_HTTP_MARKDOWN_DYNCONF_KEY_PRUNE_NOISE;
-    } else if (len == 13 && ngx_strncasecmp(p, (u_char *) "log_verbosity", 13) == 0) {
+    } else if (len == 13 && ngx_strncasecmp(p, log_verbosity_key, 13) == 0) {
         *key = NGX_HTTP_MARKDOWN_DYNCONF_KEY_LOG_VERBOSITY;
-    } else if (len == 16 && ngx_strncasecmp(p, (u_char *) "streaming_budget", 16) == 0) {
+    } else if (len == 16 && ngx_strncasecmp(p, streaming_budget_key, 16) == 0) {
         *key = NGX_HTTP_MARKDOWN_DYNCONF_KEY_STREAMING_BUDGET;
-    } else if (len == 13 && ngx_strncasecmp(p, (u_char *) "memory_budget", 13) == 0) {
+    } else if (len == 13 && ngx_strncasecmp(p, memory_budget_key, 13) == 0) {
         *key = NGX_HTTP_MARKDOWN_DYNCONF_KEY_MEMORY_BUDGET;
     } else {
         return NGX_DECLINED;
@@ -434,18 +437,24 @@ static ngx_int_t
 ngx_http_markdown_dynconf_apply(ngx_http_markdown_conf_t *conf,
                                 ngx_uint_t key,
                                 u_char *value, size_t value_len,
-                                const ngx_log_t *log)
+                                ngx_log_t *log)
 {
+    static u_char  on_value[] = "on";
+    static u_char  off_value[] = "off";
+    static u_char  error_value[] = "error";
+    static u_char  warn_value[] = "warn";
+    static u_char  info_value[] = "info";
+    static u_char  debug_value[] = "debug";
+
     switch (key) {
 
     case NGX_HTTP_MARKDOWN_DYNCONF_KEY_FILTER:
-        /* Cast drops const: ngx_strncasecmp() takes u_char * per NGINX API. */
-        if (value_len == 2 && ngx_strncasecmp(value, (u_char *) "on", 2) == 0) {
+        if (value_len == 2 && ngx_strncasecmp(value, on_value, 2) == 0) {
             conf->enabled = 1;
-        } else if (value_len == 3 && ngx_strncasecmp(value, (u_char *) "off", 3) == 0) {
+        } else if (value_len == 3 && ngx_strncasecmp(value, off_value, 3) == 0) {
             conf->enabled = 0;
         } else {
-            ngx_log_error(NGX_LOG_WARN, (ngx_log_t *) log, 0,
+            ngx_log_error(NGX_LOG_WARN, log, 0,
                           "markdown dynconf: invalid markdown_filter value \"%*s\"",
                           (int) value_len, value);
             return NGX_ERROR;
@@ -453,12 +462,12 @@ ngx_http_markdown_dynconf_apply(ngx_http_markdown_conf_t *conf,
         break;
 
     case NGX_HTTP_MARKDOWN_DYNCONF_KEY_PRUNE_NOISE:
-        if (value_len == 2 && ngx_strncasecmp(value, (u_char *) "on", 2) == 0) {
+        if (value_len == 2 && ngx_strncasecmp(value, on_value, 2) == 0) {
             conf->prune_noise = 1;
-        } else if (value_len == 3 && ngx_strncasecmp(value, (u_char *) "off", 3) == 0) {
+        } else if (value_len == 3 && ngx_strncasecmp(value, off_value, 3) == 0) {
             conf->prune_noise = 0;
         } else {
-            ngx_log_error(NGX_LOG_WARN, (ngx_log_t *) log, 0,
+            ngx_log_error(NGX_LOG_WARN, log, 0,
                           "markdown dynconf: invalid prune_noise value \"%*s\"",
                           (int) value_len, value);
             return NGX_ERROR;
@@ -466,16 +475,16 @@ ngx_http_markdown_dynconf_apply(ngx_http_markdown_conf_t *conf,
         break;
 
     case NGX_HTTP_MARKDOWN_DYNCONF_KEY_LOG_VERBOSITY:
-        if (value_len == 5 && ngx_strncasecmp(value, (u_char *) "error", 5) == 0) {
+        if (value_len == 5 && ngx_strncasecmp(value, error_value, 5) == 0) {
             conf->log_verbosity = NGX_LOG_ERR;
-        } else if (value_len == 4 && ngx_strncasecmp(value, (u_char *) "warn", 4) == 0) {
+        } else if (value_len == 4 && ngx_strncasecmp(value, warn_value, 4) == 0) {
             conf->log_verbosity = NGX_LOG_WARN;
-        } else if (value_len == 4 && ngx_strncasecmp(value, (u_char *) "info", 4) == 0) {
+        } else if (value_len == 4 && ngx_strncasecmp(value, info_value, 4) == 0) {
             conf->log_verbosity = NGX_LOG_INFO;
-        } else if (value_len == 5 && ngx_strncasecmp(value, (u_char *) "debug", 5) == 0) {
+        } else if (value_len == 5 && ngx_strncasecmp(value, debug_value, 5) == 0) {
             conf->log_verbosity = NGX_LOG_DEBUG;
         } else {
-            ngx_log_error(NGX_LOG_WARN, (ngx_log_t *) log, 0,
+            ngx_log_error(NGX_LOG_WARN, log, 0,
                           "markdown dynconf: invalid log_verbosity value \"%*s\"",
                           (int) value_len, value);
             return NGX_ERROR;
@@ -492,7 +501,7 @@ ngx_http_markdown_dynconf_apply(ngx_http_markdown_conf_t *conf,
             val.len = value_len;
             parsed = ngx_parse_size(&val);
             if (parsed == NGX_ERROR) {
-                ngx_log_error(NGX_LOG_WARN, (ngx_log_t *) log, 0,
+                ngx_log_error(NGX_LOG_WARN, log, 0,
                               "markdown dynconf: invalid streaming_budget value \"%*s\"",
                               (int) value_len, value);
                 return NGX_ERROR;
@@ -500,7 +509,7 @@ ngx_http_markdown_dynconf_apply(ngx_http_markdown_conf_t *conf,
             conf->streaming_budget = (size_t) parsed;
         }
 #else
-        ngx_log_error(NGX_LOG_WARN, (ngx_log_t *) log, 0,
+        ngx_log_error(NGX_LOG_WARN, log, 0,
                       "markdown dynconf: streaming_budget not supported "
                       "(streaming not compiled)");
 #endif
@@ -515,7 +524,7 @@ ngx_http_markdown_dynconf_apply(ngx_http_markdown_conf_t *conf,
             val.len = value_len;
             parsed = ngx_parse_size(&val);
             if (parsed == NGX_ERROR) {
-                ngx_log_error(NGX_LOG_WARN, (ngx_log_t *) log, 0,
+                ngx_log_error(NGX_LOG_WARN, log, 0,
                               "markdown dynconf: invalid memory_budget value \"%*s\"",
                               (int) value_len, value);
                 return NGX_ERROR;
@@ -575,7 +584,7 @@ ngx_http_markdown_dynconf_line_len(const u_char *buf, size_t line_start,
 static void
 ngx_http_markdown_dynconf_try_line(ngx_http_markdown_conf_t *conf,
                                    u_char *line, size_t len,
-                                   const ngx_log_t *log,
+                                   ngx_log_t *log,
                                    ngx_uint_t *applied)
 {
     ngx_uint_t  key;
