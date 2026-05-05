@@ -12,8 +12,8 @@ class NginxMarkdownModule < Formula
   license "BSD-2-Clause"
 
   depends_on "rust" => :build
-  depends_on "pcre2"
   depends_on "openssl@3"
+  depends_on "pcre2"
 
   def install
     system "make", "build"
@@ -29,7 +29,6 @@ class NginxMarkdownModule < Formula
   end
 
   test do
-    assert File.exist?(lib/"nginx/modules/ngx_http_markdown_filter_module.so"),
-           "Shared object must exist after install"
+    assert_path_exists lib/"nginx/modules/ngx_http_markdown_filter_module.so"
   end
 end

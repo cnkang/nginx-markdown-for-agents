@@ -190,7 +190,11 @@ def check_cargo_default_feature(result: ValidationResult) -> None:
         result.fail(GATE_CARGO_DEFAULT_FEATURE, "Cargo.toml missing")
         return
     content = CARGO_TOML_PATH.read_text(encoding="utf-8")
-    if re.search(r'default\s*=\s*\[.*?"prune_noise_regions".*?\]', content, re.DOTALL):
+    if re.search(
+        r'default\s*=\s*\[[^\]]*"prune_noise_regions"[^\]]*\]',
+        content,
+        re.DOTALL,
+    ):
         result.pass_(GATE_CARGO_DEFAULT_FEATURE, "prune_noise_regions in default features")
     else:
         result.fail(GATE_CARGO_DEFAULT_FEATURE, "prune_noise_regions not in default features")

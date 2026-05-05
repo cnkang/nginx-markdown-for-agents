@@ -669,11 +669,11 @@ ngx_http_markdown_otel_export_via_subrequest(ngx_http_request_t *r,
     }
 
     /* Subrequest initiated; set method and body for POST. */
+    static u_char post_method[] = "POST";
+
     sr->method = NGX_HTTP_POST;
     sr->method_name.len = sizeof("POST") - 1;
-    /* method_name.data is u_char * (non-const per ngx_str_t);
-     * const cast intentional to match NGINX struct definition. */
-    sr->method_name.data = (u_char *) "POST";
+    sr->method_name.data = post_method;
 
     ngx_http_markdown_otel_set_subrequest_body(sr, json_buf, json_len);
 
@@ -692,7 +692,7 @@ ngx_http_markdown_otel_export_via_subrequest(ngx_http_request_t *r,
  *   log  - NGINX log for output
  */
 static void
-ngx_http_markdown_otel_log_span_attrs(ngx_http_markdown_otel_span_t *span,
+ngx_http_markdown_otel_log_span_attrs(const ngx_http_markdown_otel_span_t *span,
                                       ngx_log_t *log)
 {
     for (ngx_uint_t i = 0; i < span->attr_count; i++) {

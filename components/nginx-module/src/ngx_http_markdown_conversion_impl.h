@@ -721,8 +721,8 @@ ngx_http_markdown_otel_teardown_span(ngx_http_request_t *r,
  * @param node The tree node whose path is compared against
  */
 static int
-ngx_http_markdown_per_path_cmp(ngx_http_request_t *r,
-                               ngx_http_markdown_path_metric_node_t *node)
+ngx_http_markdown_per_path_cmp(const ngx_http_request_t *r,
+                               const ngx_http_markdown_path_metric_node_t *node)
 {
     if (r->uri.len < node->path_len) {
         return -1;
@@ -756,7 +756,7 @@ ngx_http_markdown_per_path_cmp(ngx_http_request_t *r,
  */
 static ngx_int_t
 ngx_http_markdown_per_path_lookup_and_update(
-    ngx_http_request_t *r,
+    const ngx_http_request_t *r,
     ngx_http_markdown_metrics_t *metrics,
     const ngx_rbtree_node_t *sentinel,
     ngx_uint_t key,
@@ -864,13 +864,12 @@ ngx_http_markdown_record_per_path_metrics(
 
     sentinel = &metrics->per_path.sentinel;
 
-    if (metrics->per_path.path_tree.root != sentinel) {
-        if (ngx_http_markdown_per_path_lookup_and_update(
-                r, metrics, sentinel, key, elapsed_ms) == NGX_OK)
-        {
-            ngx_shmtx_unlock(&shpool->mutex);
-            return;
-        }
+    if (metrics->per_path.path_tree.root != sentinel
+        && ngx_http_markdown_per_path_lookup_and_update(
+               r, metrics, sentinel, key, elapsed_ms) == NGX_OK)
+    {
+        ngx_shmtx_unlock(&shpool->mutex);
+        return;
     }
 
     if (metrics->per_path.path_entries
