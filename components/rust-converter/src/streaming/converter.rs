@@ -4,6 +4,27 @@
 //! charset detection → tokenization → sanitization → state machine → emission,
 //! plus incremental ETag hashing, token estimation, front matter extraction,
 //! timeout checking, and commit state tracking.
+//!
+//! ## Commit state
+//!
+//! The converter operates in two phases: **pre-commit** (input is still being
+//! fed and no output has been finalized) and **post-commit** (at least one
+//! flush has produced output).  Once committed, errors become
+//! [`PostCommitError`][crate::error::ConversionError::PostCommitError] and
+//! the caller must decide whether to deliver the partial output or discard it.
+//!
+//! ## UTF-8 tail handling
+//!
+//! Incomplete UTF-8 byte sequences at chunk boundaries are buffered in
+//! [`pending_utf8_tail`][StreamingConverter::pending_utf8_tail] and prepended
+//! to the next chunk, ensuring multi-byte characters are never split across
+//! `feed()` calls.
+//!
+//! ## Metadata extraction
+//!
+//! During the head-processing phase (before the first flush), the converter
+//! extracts `<meta>` tags and canonical URL references.  These are projected
+//! into the [`MarkdownMetadata`] FFI struct on [`finish`][StreamingConverter::finish].
 
 use std::time::{Duration, Instant};
 
@@ -895,6 +916,11 @@ impl StreamingConverter {
         format!("{}/{}", base_dir, url)
     }
 
+    /// Detects whether `url` begins with an absolute URI scheme per RFC 3986 §3.
+    ///
+    /// An absolute URI has the form `scheme:hier-part` where `scheme` is
+    /// `ALPHA *( ALPHA / DIGIT / "+" / "-" / "." )`.  Returns `false` for
+    /// relative paths, fragment-only, and query-only references.
     fn has_absolute_uri_scheme(url: &str) -> bool {
         let Some(colon) = url.find(':') else {
             return false;

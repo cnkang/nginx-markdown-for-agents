@@ -1,4 +1,12 @@
-//! Token count estimation for LLM context windows
+//! Token count estimation for LLM context windows.
+//!
+//! Provides a fast, allocation-free heuristic estimate based on character
+//! count divided by a configurable `chars_per_token` ratio (default 4.0,
+//! typical for English text).  This is **not** a replacement for actual
+//! BPE/tokenizer-based counting — accuracy varies significantly for
+//! code-heavy content (~1.5–2 chars/token), CJK text (~1.5–2 chars/char),
+//! and mixed-language documents.  Use when a quick upper bound suffices
+//! (e.g., context-window budget checks, progress logging).
 
 /// Token estimator using character-based heuristic
 pub struct TokenEstimator {

@@ -462,6 +462,12 @@ impl StreamingSanitizer {
         self.prune_depth
     }
 
+    /// Removes the most recent occurrence of `tag` from the nesting stack.
+    ///
+    /// Uses `rposition` (searches from the top of the stack) rather than a
+    /// simple `pop()` to correctly handle implicitly-closed or mismatched
+    /// tags where the target may not be at the top.  After removal, nesting
+    /// depth is recalculated from the stack length.
     fn pop_open_tag(&mut self, tag: &str) {
         if let Some(idx) = self.nesting_stack.iter().rposition(|open| open == tag) {
             self.nesting_stack.remove(idx);
