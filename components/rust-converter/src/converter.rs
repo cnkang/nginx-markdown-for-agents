@@ -623,6 +623,18 @@ impl MarkdownConverter {
         Ok(markdown)
     }
 
+    /// Resolves a potentially relative URL against the configured `base_url`.
+    ///
+    /// If `resolve_relative_urls` is disabled or `base_url` is absent, returns
+    /// the URL unchanged.  Handles three resolution forms:
+    ///
+    /// - **Absolute URI scheme** (e.g., `https:`, `mailto:`) — returned as-is.
+    /// - **Origin-relative** (leading `/`) — resolved against the origin
+    ///   (scheme + authority) portion of `base_url`.
+    /// - **Path-relative** (no leading `/`) — resolved against the directory
+    ///   portion of `base_url` (everything up to the last `/`).
+    ///
+    /// Protocol-relative URLs (`//host/path`) are returned unchanged.
     pub(super) fn resolve_url(&self, url: &str) -> String {
         if !self.options.resolve_relative_urls || url.is_empty() {
             return url.to_string();

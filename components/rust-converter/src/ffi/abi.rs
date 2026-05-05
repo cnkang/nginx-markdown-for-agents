@@ -210,8 +210,17 @@ impl MarkdownConverterHandle {
 }
 
 /// Internal conversion result before it is projected into the C ABI struct.
+///
+/// Holds the three outputs that the FFI boundary exposes: the converted
+/// Markdown bytes, an optional BLAKE3-based ETag, and a heuristic token
+/// estimate.  This struct is `pub(crate)` because it is consumed only by
+/// the FFI conversion entry point, which projects it into
+/// [`MarkdownResult`] for the C caller.
 pub(crate) struct ConversionOutput {
+    /// Converted Markdown content (owned bytes, copied into FFI-allocated memory on export).
     pub(crate) markdown: Box<[u8]>,
+    /// BLAKE3-based ETag for conditional request support, or `None` if ETag generation is disabled.
     pub(crate) etag: Option<Box<[u8]>>,
+    /// Heuristic token count estimate for LLM context-window budgeting.
     pub(crate) token_estimate: u32,
 }
