@@ -14,6 +14,8 @@ pruning, release gates, and Homebrew-based distribution.
 - Homebrew tap publication is automated after the release is published: the
   workflow computes the GitHub tag archive SHA-256 and copies the updated
   formula into the configured tap repository.
+- The Homebrew formula installs `cbindgen` as a build dependency for source
+  builds.
 - macOS post-release verification can install the tap formula and run a source
   build check on GitHub-hosted macOS runners.
 

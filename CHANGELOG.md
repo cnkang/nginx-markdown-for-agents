@@ -102,6 +102,8 @@ and a unified memory budget simplifies configuration.
   path and release-tag checksum guidance.
 
 ### Fixed
+- Homebrew source builds now install `cbindgen` as an explicit build
+  dependency before running `make build`.
 - SonarCloud finding: missing `return 0` in
   `check_status_passthrough` (`verify_status_codes_e2e.sh`).
 - SonarCloud finding: repeated `'Cookie: session=abc123'` literal
