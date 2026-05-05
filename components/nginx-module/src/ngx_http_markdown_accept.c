@@ -598,6 +598,15 @@ ngx_http_markdown_should_convert(ngx_http_request_t *r,
     return 0;
 }
 
+/*
+ * Retrieve the Accept header from the request.
+ *
+ * Parameters:
+ *   r  - HTTP request (may be NULL)
+ *
+ * Returns:
+ *   Pointer to the Accept header entry, or NULL if absent or r is NULL.
+ */
 static ngx_table_elt_t *
 ngx_http_markdown_get_accept_header(ngx_http_request_t *r)
 {
@@ -617,6 +626,21 @@ ngx_http_markdown_get_accept_header(ngx_http_request_t *r)
         sizeof(ngx_http_markdown_hdr_accept) - 1);
 }
 
+/*
+ * Case-insensitive comparison of exactly `len` bytes.
+ *
+ * Unlike ngx_strncasecmp, this function compares exactly `len` bytes
+ * without relying on NUL termination.  Returns 0 on match, or the
+ * difference of the first mismatching lowercase byte pair.
+ *
+ * Parameters:
+ *   left  - first byte string
+ *   right - second byte string
+ *   len   - number of bytes to compare
+ *
+ * Returns:
+ *   0 if equal, negative if left < right, positive if left > right.
+ */
 static ngx_int_t
 ngx_http_markdown_const_strncasecmp(const u_char *left, const u_char *right,
     size_t len)

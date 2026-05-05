@@ -912,7 +912,17 @@ ngx_http_markdown_streaming_handle_backpressure(
     return NGX_AGAIN;
 }
 
-
+/*
+ * Record a post-commit streaming failure in metrics and decision log.
+ *
+ * Increments postcommit_error_total and failed_total once (idempotent via
+ * the failure_recorded flag), then logs the postcommit failure reason code.
+ *
+ * Parameters:
+ *   r     - HTTP request
+ *   ctx   - per-request module context
+ *   conf  - module configuration
+ */
 static void
 ngx_http_markdown_streaming_record_postcommit_failure(
     ngx_http_request_t *r,
@@ -929,7 +939,23 @@ ngx_http_markdown_streaming_record_postcommit_failure(
         ngx_http_markdown_reason_streaming_fail_postcommit());
 }
 
-
+/*
+ * Send the deferred last_buf marker for a streaming response.
+ *
+ * Called when a streaming conversion completes successfully but the final
+ * empty buffer with last_buf=1 was deferred (e.g., due to pending output
+ * from a previous send).  Handles backpressure (NGX_AGAIN) by setting
+ * the pending_terminal_metrics latch so resume_pending() records success
+ * metrics after the drain completes.
+ *
+ * Parameters:
+ *   r     - HTTP request
+ *   ctx   - per-request module context
+ *   conf  - module configuration
+ *
+ * Returns:
+ *   NGX_OK, NGX_DONE, NGX_AGAIN, or NGX_ERROR.
+ */
 static ngx_int_t
 ngx_http_markdown_streaming_send_deferred_lastbuf(
     ngx_http_request_t *r,
