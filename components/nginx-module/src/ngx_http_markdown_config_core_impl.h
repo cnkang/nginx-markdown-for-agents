@@ -334,7 +334,7 @@ ngx_http_markdown_apply_memory_budget_override(ngx_http_markdown_conf_t *conf,
  * Merge base conversion/runtime options and operational flags.
  */
 static void
-ngx_http_markdown_merge_core_values(ngx_http_markdown_conf_t *conf,
+ngx_http_markdown_merge_core_base_values(ngx_http_markdown_conf_t *conf,
     const ngx_http_markdown_conf_t *prev)
 {
     ngx_conf_merge_size_value(conf->max_size, prev->max_size, 10 * 1024 * 1024);
@@ -355,6 +355,15 @@ ngx_http_markdown_merge_core_values(ngx_http_markdown_conf_t *conf,
                               NGX_HTTP_MARKDOWN_LOG_INFO);
     ngx_conf_merge_value(conf->buffer_chunked, prev->buffer_chunked, 1);
     ngx_conf_merge_value(conf->auto_decompress, prev->auto_decompress, 1);
+}
+
+/*
+ * Merge operational telemetry/metrics values.
+ */
+static void
+ngx_http_markdown_merge_core_ops_values(ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_conf_t *prev)
+{
     ngx_conf_merge_value(conf->ops.trust_forwarded_headers,
                          prev->ops.trust_forwarded_headers, 0);
     ngx_conf_merge_uint_value(conf->ops.metrics_format, prev->ops.metrics_format,
@@ -379,12 +388,33 @@ ngx_http_markdown_merge_core_values(ngx_http_markdown_conf_t *conf,
                               prev->ops.otel_span_buffer_size, 1024);
     ngx_conf_merge_msec_value(conf->ops.otel_export_timeout,
                               prev->ops.otel_export_timeout, 5000);
+}
+
+/*
+ * Merge remaining core pointer/threshold values.
+ */
+static void
+ngx_http_markdown_merge_core_ptr_values(ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_conf_t *prev)
+{
     ngx_conf_merge_size_value(conf->large_body_threshold,
                               prev->large_body_threshold,
                               NGX_HTTP_MARKDOWN_THRESHOLD_OFF);
     ngx_conf_merge_ptr_value(conf->auth_cookies, prev->auth_cookies, NULL);
     ngx_conf_merge_ptr_value(conf->stream_types, prev->stream_types, NULL);
     ngx_conf_merge_ptr_value(conf->content_types, prev->content_types, NULL);
+}
+
+/*
+ * Merge base conversion/runtime options and operational flags.
+ */
+static void
+ngx_http_markdown_merge_core_values(ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_conf_t *prev)
+{
+    ngx_http_markdown_merge_core_base_values(conf, prev);
+    ngx_http_markdown_merge_core_ops_values(conf, prev);
+    ngx_http_markdown_merge_core_ptr_values(conf, prev);
 }
 
 #ifdef MARKDOWN_STREAMING_ENABLED
@@ -449,7 +479,7 @@ ngx_http_markdown_merge_v060_values(ngx_http_markdown_conf_t *conf,
 static char *
 ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
 {
-    ngx_http_markdown_conf_t *prev = parent;
+    const ngx_http_markdown_conf_t *prev = parent;
     ngx_http_markdown_conf_t *conf = child;
 
     ngx_http_markdown_merge_enabled(conf, prev);
