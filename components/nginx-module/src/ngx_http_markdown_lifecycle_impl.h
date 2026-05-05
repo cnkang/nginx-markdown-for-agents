@@ -31,8 +31,8 @@ ngx_http_markdown_filter_init(ngx_conf_t *cf) /* NOSONAR: nginx callback signatu
 static ngx_int_t
 ngx_http_markdown_init_worker(ngx_cycle_t *cycle)
 {
-    ngx_http_conf_ctx_t       *http_ctx;
-    ngx_http_markdown_conf_t  *lcf;
+    const ngx_http_conf_ctx_t       *http_ctx;
+    const ngx_http_markdown_conf_t  *lcf;
 
     if (ngx_http_markdown_metrics_shm_zone == NULL
         || ngx_http_markdown_metrics_shm_zone->data == NULL)
@@ -65,22 +65,21 @@ ngx_http_markdown_init_worker(ngx_cycle_t *cycle)
 #endif
 
     /* Start dynamic config watcher if configured. */
-    http_ctx = (ngx_http_conf_ctx_t *)
+    http_ctx = (const ngx_http_conf_ctx_t *)
         ngx_get_conf(cycle->conf_ctx, ngx_http_module);
     if (http_ctx != NULL) {
-        lcf = http_ctx->loc_conf[ngx_http_markdown_filter_module.ctx_index];
+        lcf = (const ngx_http_markdown_conf_t *)
+            http_ctx->loc_conf[ngx_http_markdown_filter_module.ctx_index];
         if (lcf != NULL && lcf->dynconf_enabled
-            && lcf->dynconf_path.len > 0)
+            && lcf->dynconf_path.len > 0
+            && ngx_http_markdown_dynconf_start(
+                   &ngx_http_markdown_dynconf_watcher,
+                   cycle, &lcf->dynconf_path, cycle->log)
+               != NGX_OK)
         {
-            if (ngx_http_markdown_dynconf_start(
-                    &ngx_http_markdown_dynconf_watcher,
-                    cycle, &lcf->dynconf_path, cycle->log)
-                != NGX_OK)
-            {
-                ngx_log_error(NGX_LOG_WARN, cycle->log, 0,
-                              "markdown dynconf: failed to start watcher");
-                /* Non-fatal: worker continues without hot-reload. */
-            }
+            ngx_log_error(NGX_LOG_WARN, cycle->log, 0,
+                          "markdown dynconf: failed to start watcher");
+            /* Non-fatal: worker continues without hot-reload. */
         }
 
         /*

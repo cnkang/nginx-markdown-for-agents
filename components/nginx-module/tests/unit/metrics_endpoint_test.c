@@ -10,10 +10,12 @@ typedef struct {
     unsigned long conversions_succeeded;
     unsigned long conversions_failed;
     unsigned long conversion_time_sum_ms;
-    unsigned long conversion_latency_le_10ms;
-    unsigned long conversion_latency_le_100ms;
-    unsigned long conversion_latency_le_1000ms;
-    unsigned long conversion_latency_gt_1000ms;
+    struct {
+        unsigned long le_10ms;
+        unsigned long le_100ms;
+        unsigned long le_1000ms;
+        unsigned long gt_1000ms;
+    } conversion_latency;
     unsigned long decompressions_attempted;
     unsigned long decompressions_succeeded;
 } metrics_t;
@@ -57,8 +59,8 @@ handle_metrics_request(const char *method, const char *remote_addr, const char *
                  "\"decompressions_attempted\":%lu,\"decompressions_succeeded\":%lu}",
                  m->conversions_attempted, m->conversions_succeeded, m->conversions_failed,
                  completed, avg_ms,
-                 m->conversion_latency_le_10ms, m->conversion_latency_le_100ms,
-                 m->conversion_latency_le_1000ms, m->conversion_latency_gt_1000ms,
+                 m->conversion_latency.le_10ms, m->conversion_latency.le_100ms,
+                 m->conversion_latency.le_1000ms, m->conversion_latency.gt_1000ms,
                  m->decompressions_attempted, m->decompressions_succeeded);
     } else {
         snprintf(out.body, sizeof(out.body),
@@ -77,8 +79,8 @@ handle_metrics_request(const char *method, const char *remote_addr, const char *
                  "Decompressions Succeeded: %lu\n",
                  m->conversions_attempted, m->conversions_succeeded, m->conversions_failed,
                  completed, avg_ms,
-                 m->conversion_latency_le_10ms, m->conversion_latency_le_100ms,
-                 m->conversion_latency_le_1000ms, m->conversion_latency_gt_1000ms,
+                 m->conversion_latency.le_10ms, m->conversion_latency.le_100ms,
+                 m->conversion_latency.le_1000ms, m->conversion_latency.gt_1000ms,
                  m->decompressions_attempted, m->decompressions_succeeded);
     }
     return out;
@@ -92,10 +94,10 @@ sample_metrics(void)
     m.conversions_succeeded = 8;
     m.conversions_failed = 2;
     m.conversion_time_sum_ms = 100;
-    m.conversion_latency_le_10ms = 4;
-    m.conversion_latency_le_100ms = 5;
-    m.conversion_latency_le_1000ms = 1;
-    m.conversion_latency_gt_1000ms = 0;
+    m.conversion_latency.le_10ms = 4;
+    m.conversion_latency.le_100ms = 5;
+    m.conversion_latency.le_1000ms = 1;
+    m.conversion_latency.gt_1000ms = 0;
     m.decompressions_attempted = 4;
     m.decompressions_succeeded = 3;
     return m;

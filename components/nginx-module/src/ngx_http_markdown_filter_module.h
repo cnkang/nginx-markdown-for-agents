@@ -174,6 +174,13 @@ typedef enum {
  * - streaming_shadow: 0 (off by default)
  * - streaming_auto_threshold: NGX_HTTP_MARKDOWN_STREAMING_AUTO_THRESHOLD_DEFAULT
  */
+/* sonarcloud-c:S1820: intentionally exceeded; fields are already logically
+ * grouped via the ops sub-struct and #ifdef-gated streaming section.  Further
+ * grouping (auth, content, pruning, llm, dynconf, response) would require
+ * updating 160+ call sites across 15 files (offsetof directives, merge logic,
+ * eligibility checks, conversion paths, tests) for no semantic benefit and
+ * significant regression risk.  The field count reflects NGINX module
+ * configuration breadth, not poor structure design. */
 typedef struct {
     ngx_flag_t   enabled;              /* markdown_filter static resolved value */
     ngx_uint_t   enabled_source;       /* markdown_filter source (static|complex|unset) */
@@ -478,10 +485,22 @@ typedef struct {
     ngx_atomic_t  conversion_time_sum_ms;   /* Sum of conversion times in milliseconds (for averaging) */
     ngx_atomic_t  input_bytes;              /* Sum of input HTML sizes in bytes */
     ngx_atomic_t  output_bytes;             /* Sum of output Markdown sizes in bytes */
-    ngx_atomic_t  conversion_latency_le_10ms;    /* Completed conversions <= 10ms */
-    ngx_atomic_t  conversion_latency_le_100ms;   /* Completed conversions <= 100ms */
-    ngx_atomic_t  conversion_latency_le_1000ms;  /* Completed conversions <= 1000ms */
-    ngx_atomic_t  conversion_latency_gt_1000ms;  /* Completed conversions > 1000ms */
+
+    /*
+     * Latency histogram buckets.
+     *
+     * Grouped into a sub-struct so that the parent
+     * ngx_http_markdown_metrics_t stays within the 20-field limit
+     * enforced by static analysis (SonarCloud rule c:S1820).
+     * The JSON/text output format is unaffected — keys are still
+     * emitted as flat "conversion_latency_buckets" sub-object.
+     */
+    struct {
+        ngx_atomic_t  le_10ms;     /* Completed conversions <= 10ms */
+        ngx_atomic_t  le_100ms;    /* Completed conversions <= 100ms */
+        ngx_atomic_t  le_1000ms;   /* Completed conversions <= 1000ms */
+        ngx_atomic_t  gt_1000ms;   /* Completed conversions > 1000ms */
+    } conversion_latency;
 
     /*
      * Decompression metrics.
@@ -570,17 +589,28 @@ typedef struct {
     } skips;
 
     /*
-     * Fail-open counter: conversion failed but original HTML
-     * served due to markdown_on_error pass.
+     * Conversion result counters.
+     *
+     * Grouped into a sub-struct so that the parent
+     * ngx_http_markdown_metrics_t stays within the 20-field
+     * limit enforced by static analysis (SonarCloud rule
+     * c:S1820).  The JSON/text output format is unaffected
+     * — keys are still emitted as flat names.
      */
-    ngx_atomic_t  failopen_count;
+    struct {
+        /*
+         * Fail-open counter: conversion failed but original HTML
+         * served due to markdown_on_error pass.
+         */
+        ngx_atomic_t  failopen_count;
 
-    /*
-     * Estimated cumulative token savings across all successful
-     * conversions.  Only non-zero when markdown_token_estimate
-     * is enabled.  Value is an approximation.
-     */
-    ngx_atomic_t  estimated_token_savings;
+        /*
+         * Estimated cumulative token savings across all successful
+         * conversions.  Only non-zero when markdown_token_estimate
+         * is enabled.  Value is an approximation.
+         */
+        ngx_atomic_t  estimated_token_savings;
+    } results;
 
     /*
      * Per-path metrics (v0.6.0 P1-2).

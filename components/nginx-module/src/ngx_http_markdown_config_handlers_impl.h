@@ -446,6 +446,7 @@ ngx_http_markdown_content_types(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         next_slash = NULL;
 
         if (slash != NULL && (size_t) (slash - type_value + 1) < value[i].len) {
+            /* cast drops const per ngx_strlchr(u_char *, u_char *, u_char) API */
             next_slash = (const char *) ngx_strlchr(
                             (u_char *) (slash + 1),
                             value[i].data + value[i].len, '/');
@@ -592,6 +593,7 @@ ngx_http_markdown_stream_types(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         next_slash = NULL;
 
         if (slash != NULL && (size_t) (slash - type_value + 1) < value[i].len) {
+            /* cast drops const per ngx_strlchr(u_char *, u_char *, u_char) API */
             next_slash = (const char *) ngx_strlchr(
                             (u_char *) (slash + 1),
                             value[i].data + value[i].len, '/');
