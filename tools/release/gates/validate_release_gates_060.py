@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import re
 import sys
+import tomllib
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
@@ -189,12 +190,14 @@ def check_cargo_default_feature(result: ValidationResult) -> None:
     if not CARGO_TOML_PATH.is_file():
         result.fail(GATE_CARGO_DEFAULT_FEATURE, "Cargo.toml missing")
         return
-    content = CARGO_TOML_PATH.read_text(encoding="utf-8")
-    if re.search(
-        r'default\s*=\s*\[[^\]]*"prune_noise_regions"[^\]]*\]',
-        content,
-        re.DOTALL,
-    ):
+    try:
+        cargo = tomllib.loads(CARGO_TOML_PATH.read_text(encoding="utf-8"))
+    except tomllib.TOMLDecodeError as exc:
+        result.fail(GATE_CARGO_DEFAULT_FEATURE, f"Cargo.toml parse error: {exc}")
+        return
+
+    default_features = cargo.get("features", {}).get("default", [])
+    if isinstance(default_features, list) and "prune_noise_regions" in default_features:
         result.pass_(GATE_CARGO_DEFAULT_FEATURE, "prune_noise_regions in default features")
     else:
         result.fail(GATE_CARGO_DEFAULT_FEATURE, "prune_noise_regions not in default features")
