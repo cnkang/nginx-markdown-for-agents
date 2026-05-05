@@ -1,4 +1,25 @@
 #!/usr/bin/env bash
+# run_e2e_suite.sh - Orchestrator for the canonical E2E test suite.
+#
+# Runs all E2E verification scripts in sequence:
+#   1. proxy/TLS backend verification
+#   2. chunked native smoke verification
+#   3. large-response native verification
+#   4. streaming failure cache verification
+#   5. accept negotiation verification
+#   6. security verification
+#   7. error handling verification
+#   8. metrics endpoint verification
+#   9. conditional requests verification
+#  10. config merge verification
+#  11. auth cache verification
+#  12. status codes verification
+#
+# Options:
+#   --keep-artifacts  Preserve build artifacts after the suite completes.
+#
+# Exit behaviour:
+#   0 if all scripts pass, 1 if any script fails.
 set -euo pipefail
 
 KEEP_ARTIFACTS=0
@@ -63,6 +84,11 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# cleanup - Remove temporary build artifacts on exit.
+#
+# On success with --keep-artifacts disabled, removes the entire SUITE_BUILDROOT.
+# On failure, retains SUITE_BUILDROOT and prints its path for debugging.
+# Always removes the temporary NGINX_BIN/BUILDROOT output capture files.
 cleanup() {
   local rc=$?
 

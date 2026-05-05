@@ -39,12 +39,14 @@ class CoverageSummary:
 
     @property
     def line_pct(self) -> float:
+        """Line coverage as a percentage (0.0–100.0). Returns 0.0 when no lines are found."""
         if self.lines_found == 0:
             return 0.0
         return (self.lines_hit / self.lines_found) * 100.0
 
     @property
     def function_pct(self) -> float:
+        """Function coverage as a percentage (0.0–100.0). Returns 0.0 when no functions are found."""
         if self.functions_found == 0:
             return 0.0
         return (self.functions_hit / self.functions_found) * 100.0
@@ -235,6 +237,10 @@ def format_results(results: list[GateResult]) -> str:
 
 
 def main() -> int:
+    """CLI entry point: parse coverage data and enforce threshold gates.
+
+    Returns 0 if all coverage thresholds are met, 1 otherwise.
+    """
     parser = argparse.ArgumentParser(
         description="Enforce coverage thresholds for nginx-markdown-for-agents",
     )

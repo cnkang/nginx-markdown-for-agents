@@ -96,22 +96,28 @@ class ValidationResult:
     """Accumulate gate check results."""
 
     def __init__(self) -> None:
+        """Initialize an empty result accumulator."""
         self.results: list[tuple[str, str, str]] = []
 
     def pass_(self, gate_id: str, message: str) -> None:
+        """Record a passing gate check."""
         self.results.append(("PASS", gate_id, message))
 
     def fail(self, gate_id: str, message: str) -> None:
+        """Record a failing gate check."""
         self.results.append(("FAIL", gate_id, message))
 
     def skip(self, gate_id: str, message: str) -> None:
+        """Record a skipped gate check."""
         self.results.append(("SKIP", gate_id, message))
 
     @property
     def has_failures(self) -> bool:
+        """Return True if any gate check has failed."""
         return any(s == "FAIL" for s, _, _ in self.results)
 
     def print_report(self) -> None:
+        """Print a formatted report of all gate check results to stdout."""
         for status, gate_id, message in self.results:
             print(f"  {status:4s}  {gate_id:40s}  {message}")
 
