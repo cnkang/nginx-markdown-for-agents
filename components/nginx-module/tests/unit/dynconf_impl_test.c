@@ -90,7 +90,7 @@ ngx_shm_zone_t *ngx_http_markdown_metrics_shm_zone = NULL;
 #define ngx_memmove(dst, src, n) memmove((dst), (src), (n))
 
 static ngx_int_t
-ngx_strncasecmp(u_char *s1, u_char *s2, size_t n)
+ngx_strncasecmp(const u_char *s1, const u_char *s2, size_t n)
 {
     for (size_t i = 0; i < n; i++) {
         u_char c1 = (u_char) tolower((unsigned char) s1[i]);

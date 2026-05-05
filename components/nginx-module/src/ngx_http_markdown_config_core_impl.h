@@ -25,6 +25,45 @@ static void ngx_http_markdown_log_merged_conf(ngx_conf_t *cf,
     const ngx_http_markdown_conf_t *conf);
 
 /*
+ * Choose the RB-tree branch direction for a node vs an existing tree node.
+ *
+ * Compares by rbtree key (hash) first, then by path_len and path bytes
+ * to resolve hash collisions.  Returns &temp->left or &temp->right.
+ */
+static ngx_rbtree_node_t **
+ngx_http_markdown_path_rbtree_choose_branch(ngx_rbtree_node_t *temp,
+    ngx_rbtree_node_t *node)
+{
+    const ngx_http_markdown_path_metric_node_t  *n;
+    const ngx_http_markdown_path_metric_node_t  *t;
+
+    if (node->key < temp->key) {
+        return &temp->left;
+    }
+
+    if (node->key > temp->key) {
+        return &temp->right;
+    }
+
+    n = (const ngx_http_markdown_path_metric_node_t *) node;
+    t = (const ngx_http_markdown_path_metric_node_t *) temp;
+
+    if (n->path_len < t->path_len) {
+        return &temp->left;
+    }
+
+    if (n->path_len > t->path_len) {
+        return &temp->right;
+    }
+
+    if (ngx_memcmp(n->path, t->path, n->path_len) < 0) {
+        return &temp->left;
+    }
+
+    return &temp->right;
+}
+
+/*
  * RB-tree insert callback for per-path metric nodes.
  *
  * Compares by rbnode.key (hash) first, then by path_len
@@ -34,32 +73,10 @@ static void
 ngx_http_markdown_path_rbtree_insert_value(ngx_rbtree_node_t *temp,
     ngx_rbtree_node_t *node, ngx_rbtree_node_t *sentinel)
 {
-    ngx_rbtree_node_t                    **p;
-    ngx_http_markdown_path_metric_node_t  *n;
-    ngx_http_markdown_path_metric_node_t  *t;
+    ngx_rbtree_node_t  **p;
 
     for ( ;; ) {
-
-        if (node->key < temp->key) {
-            p = &temp->left;
-        } else if (node->key > temp->key) {
-            p = &temp->right;
-        } else {
-            n = (ngx_http_markdown_path_metric_node_t *) node;
-            t = (ngx_http_markdown_path_metric_node_t *) temp;
-
-            if (n->path_len < t->path_len) {
-                p = &temp->left;
-            } else if (n->path_len > t->path_len) {
-                p = &temp->right;
-            } else {
-                if (ngx_memcmp(n->path, t->path, n->path_len) < 0) {
-                    p = &temp->left;
-                } else {
-                    p = &temp->right;
-                }
-            }
-        }
+        p = ngx_http_markdown_path_rbtree_choose_branch(temp, node);
 
         if (*p == sentinel) {
             break;
@@ -253,6 +270,66 @@ ngx_http_markdown_create_conf(ngx_conf_t *cf)
     return conf;
 }
 
+/*
+ * Merge the enabled/source/complex triple from parent into child.
+ *
+ * Priority: child explicit > parent inherited > default off.
+ */
+static void
+ngx_http_markdown_merge_enabled(ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_conf_t *prev)
+{
+    if (conf->enabled_source == NGX_HTTP_MARKDOWN_ENABLED_UNSET) {
+        if (prev->enabled_source == NGX_HTTP_MARKDOWN_ENABLED_UNSET) {
+            conf->enabled_source = NGX_HTTP_MARKDOWN_ENABLED_STATIC;
+            conf->enabled = 0;
+            conf->enabled_complex = NULL;
+        } else {
+            conf->enabled_source = prev->enabled_source;
+            conf->enabled = prev->enabled;
+            conf->enabled_complex = prev->enabled_complex;
+        }
+        return;
+    }
+
+    if (conf->enabled_source == NGX_HTTP_MARKDOWN_ENABLED_STATIC) {
+        conf->enabled_complex = NULL;
+    }
+}
+
+/*
+ * Merge an ngx_str_t field from parent into child when child is empty.
+ *
+ * If the child string has zero length and the parent string is non-empty,
+ * copies the parent value into the child.
+ */
+static void
+ngx_http_markdown_merge_str_if_unset(ngx_str_t *child, const ngx_str_t *parent)
+{
+    if (child->len == 0 && parent->len > 0) {
+        *child = *parent;
+    }
+}
+
+/*
+ * Apply the unified memory_budget → max_size override.
+ *
+ * If memory_budget is set and max_size was not explicitly configured
+ * at this or any parent level, max_size takes the memory_budget value.
+ */
+static void
+ngx_http_markdown_apply_memory_budget_override(ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_conf_t *prev, ngx_flag_t max_size_set)
+{
+    conf->max_size_explicit = max_size_set || prev->max_size_explicit;
+
+    if (conf->memory_budget != NGX_CONF_UNSET_SIZE
+        && !conf->max_size_explicit)
+    {
+        conf->max_size = conf->memory_budget;
+    }
+}
+
 /**
  * Merge per-location markdown filter configuration with inheritance from parent.
  *
@@ -271,27 +348,7 @@ ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
     ngx_http_markdown_conf_t *prev = parent;
     ngx_http_markdown_conf_t *conf = child;
 
-    /*
-     * Merge markdown_filter with explicit source tracking.
-     *
-     * Priority:
-     * 1. Child explicit value (on/off or complex expression)
-     * 2. Parent inherited value
-     * 3. Default off
-     */
-    if (conf->enabled_source == NGX_HTTP_MARKDOWN_ENABLED_UNSET) {
-        if (prev->enabled_source == NGX_HTTP_MARKDOWN_ENABLED_UNSET) {
-            conf->enabled_source = NGX_HTTP_MARKDOWN_ENABLED_STATIC;
-            conf->enabled = 0;
-            conf->enabled_complex = NULL;
-        } else {
-            conf->enabled_source = prev->enabled_source;
-            conf->enabled = prev->enabled;
-            conf->enabled_complex = prev->enabled_complex;
-        }
-    } else if (conf->enabled_source == NGX_HTTP_MARKDOWN_ENABLED_STATIC) {
-        conf->enabled_complex = NULL;
-    }
+    ngx_http_markdown_merge_enabled(conf, prev);
 
     /*
      * Save whether max_size and streaming_budget were explicitly set at
@@ -341,12 +398,12 @@ ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
     if (conf->ops.otel_tracing || conf->ops.otel_metrics) {
         conf->ops.otel_enabled = 1;
     }
-    if (conf->ops.otel_endpoint.len == 0 && prev->ops.otel_endpoint.len > 0) {
-        conf->ops.otel_endpoint = prev->ops.otel_endpoint;
-    }
-    if (conf->ops.otel_service_name.len == 0 && prev->ops.otel_service_name.len > 0) {
-        conf->ops.otel_service_name = prev->ops.otel_service_name;
-    }
+
+    ngx_http_markdown_merge_str_if_unset(&conf->ops.otel_endpoint,
+                                         &prev->ops.otel_endpoint);
+    ngx_http_markdown_merge_str_if_unset(&conf->ops.otel_service_name,
+                                         &prev->ops.otel_service_name);
+
     ngx_conf_merge_uint_value(conf->ops.otel_span_buffer_size,
                               prev->ops.otel_span_buffer_size, 1024);
     ngx_conf_merge_msec_value(conf->ops.otel_export_timeout,
@@ -397,30 +454,9 @@ ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
                               prev->chars_per_token_fixed,
                               0);
     ngx_conf_merge_value(conf->dynconf_enabled, prev->dynconf_enabled, 0);
-    if (conf->dynconf_path.len == 0 && prev->dynconf_path.len > 0) {
-        conf->dynconf_path = prev->dynconf_path;
-    }
+    ngx_http_markdown_merge_str_if_unset(&conf->dynconf_path, &prev->dynconf_path);
 
-    /*
-     * Apply unified memory_budget to max_size when max_size was not
-     * explicitly set by the operator at this or any parent level.
-     *
-     * Priority: explicit max_size > memory_budget > default (10MB)
-     *
-     * max_size_set was captured before ngx_conf_merge_size_value
-     * resolved max_size to its default/inherited value.
-     * max_size_explicit propagates across levels like
-     * streaming_budget_explicit so that a parent-level explicit
-     * max_size is not silently overwritten by a child-level
-     * memory_budget.
-     */
-    conf->max_size_explicit = max_size_set || prev->max_size_explicit;
-
-    if (conf->memory_budget != NGX_CONF_UNSET_SIZE
-        && !conf->max_size_explicit)
-    {
-        conf->max_size = conf->memory_budget;
-    }
+    ngx_http_markdown_apply_memory_budget_override(conf, prev, max_size_set);
 
     ngx_http_markdown_log_merged_conf(cf, conf);
 

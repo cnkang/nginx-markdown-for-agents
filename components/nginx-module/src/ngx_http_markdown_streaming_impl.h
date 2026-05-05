@@ -1383,7 +1383,7 @@ ngx_http_markdown_streaming_precommit_error(
     ctx->eligible = 0;
     NGX_HTTP_MARKDOWN_METRIC_INC(
         streaming.precommit_failopen_total);
-    NGX_HTTP_MARKDOWN_METRIC_INC(failopen_count);
+    NGX_HTTP_MARKDOWN_METRIC_INC(results.failopen_count);
     ngx_http_markdown_log_decision(r, conf,
         ngx_http_markdown_reason_streaming_precommit_failopen());
     return NGX_DECLINED;

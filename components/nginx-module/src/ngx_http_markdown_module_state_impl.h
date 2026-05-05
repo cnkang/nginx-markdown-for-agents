@@ -143,7 +143,7 @@ ngx_http_markdown_metric_inc_failopen(
     if (conf->on_error
         == NGX_HTTP_MARKDOWN_ON_ERROR_PASS)
     {
-        NGX_HTTP_MARKDOWN_METRIC_INC(failopen_count);
+        NGX_HTTP_MARKDOWN_METRIC_INC(results.failopen_count);
     }
 }
 

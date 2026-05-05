@@ -92,7 +92,7 @@ ngx_http_markdown_metrics_write_prometheus(
         "nginx_markdown_passthrough_total %uA\n"
         "\n",
         snapshot->conversions_bypassed
-            + snapshot->failopen_count);
+            + snapshot->results.failopen_count);
 
     /* skips_total{reason=...} */
     p = ngx_slprintf(p, end,
@@ -152,7 +152,7 @@ ngx_http_markdown_metrics_write_prometheus(
         "# TYPE nginx_markdown_failopen_total counter\n"
         "nginx_markdown_failopen_total %uA\n"
         "\n",
-        snapshot->failopen_count);
+        snapshot->results.failopen_count);
 
     /* large_response_path_total */
     p = ngx_slprintf(p, end,
@@ -303,7 +303,7 @@ ngx_http_markdown_metrics_write_prometheus(
         "nginx_markdown_estimated_token_savings_total"
         " %uA\n"
         "\n",
-        snapshot->estimated_token_savings);
+        snapshot->results.estimated_token_savings);
 
     /* decompressions_total{format=...} */
     p = ngx_slprintf(p, end,
@@ -358,16 +358,16 @@ ngx_http_markdown_metrics_write_prometheus(
         "{le=\"1.0\"} %uA\n"
         "nginx_markdown_conversion_duration_seconds"
         "{le=\"+Inf\"} %uA\n",
-        snapshot->conversion_latency_le_10ms,
-        snapshot->conversion_latency_le_10ms
-            + snapshot->conversion_latency_le_100ms,
-        snapshot->conversion_latency_le_10ms
-            + snapshot->conversion_latency_le_100ms
-            + snapshot->conversion_latency_le_1000ms,
-        snapshot->conversion_latency_le_10ms
-            + snapshot->conversion_latency_le_100ms
-            + snapshot->conversion_latency_le_1000ms
-            + snapshot->conversion_latency_gt_1000ms);
+        snapshot->conversion_latency.le_10ms,
+        snapshot->conversion_latency.le_10ms
+            + snapshot->conversion_latency.le_100ms,
+        snapshot->conversion_latency.le_10ms
+            + snapshot->conversion_latency.le_100ms
+            + snapshot->conversion_latency.le_1000ms,
+        snapshot->conversion_latency.le_10ms
+            + snapshot->conversion_latency.le_100ms
+            + snapshot->conversion_latency.le_1000ms
+            + snapshot->conversion_latency.gt_1000ms);
 
     /* per_path_entries */
     p = ngx_slprintf(p, end,
@@ -489,6 +489,28 @@ ngx_http_markdown_metrics_write_prometheus(
 
 #if NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED
 /*
+ * Write a two-character escape sequence (backslash + second char)
+ * into the destination buffer for Prometheus label syntax.
+ *
+ * Returns the updated write position, or last if the buffer
+ * cannot accommodate two more bytes.
+ */
+static u_char *
+ngx_http_markdown_escape_prom_two_char(u_char *dst, u_char *last,
+                                       u_char second)
+{
+    if (dst + 2 > last) {
+        return last;
+    }
+
+    *dst++ = '\\';
+    *dst++ = second;
+
+    return dst;
+}
+
+
+/*
  * Escape a byte string for use as a Prometheus label value.
  *
  * Prometheus label values require escaping: \ -> \\, " -> \", newline -> \n.
@@ -510,38 +532,38 @@ ngx_http_markdown_escape_prometheus_label(u_char *dst, u_char *last,
     size_t   i;
     u_char   ch;
 
-    for (i = 0; i < len && dst < last; i++) {
+    i = 0;
+    while (i < len && dst < last) {
         ch = src[i];
+        i++;
 
         switch (ch) {
         case '\\':
-            if (dst + 2 > last) { return last; }
-            *dst++ = '\\'; *dst++ = '\\';
+            dst = ngx_http_markdown_escape_prom_two_char(dst, last, '\\');
             break;
         case '"':
-            if (dst + 2 > last) { return last; }
-            *dst++ = '\\'; *dst++ = '"';
+            dst = ngx_http_markdown_escape_prom_two_char(dst, last, '"');
             break;
         case '\n':
-            if (dst + 2 > last) { return last; }
-            *dst++ = '\\'; *dst++ = 'n';
+            dst = ngx_http_markdown_escape_prom_two_char(dst, last, 'n');
             break;
         case '\r':
-            if (dst + 2 > last) { return last; }
-            *dst++ = '\\'; *dst++ = 'r';
+            dst = ngx_http_markdown_escape_prom_two_char(dst, last, 'r');
             break;
         case '\t':
-            if (dst + 2 > last) { return last; }
-            *dst++ = '\\'; *dst++ = 't';
+            dst = ngx_http_markdown_escape_prom_two_char(dst, last, 't');
             break;
         default:
-            if (ch < 0x20) {
-                /* Other control characters: emit as \uXXXX */
-                if (dst + 6 > last) { return last; }
-                dst = ngx_snprintf(dst, 6, "\\u%04X", (unsigned) ch);
-            } else {
+            if (ch >= 0x20) {
                 *dst++ = ch;
+                break;
             }
+
+            /* Other control characters: emit as \uXXXX */
+            if (dst + 6 > last) {
+                return last;
+            }
+            dst = ngx_snprintf(dst, 6, "\\u%04X", (unsigned) ch);
             break;
         }
     }
@@ -573,7 +595,7 @@ ngx_http_markdown_prometheus_walk_path_tree(
     u_char *p,
     u_char *end)
 {
-    ngx_http_markdown_path_metric_node_t  *pnode;
+    const ngx_http_markdown_path_metric_node_t  *pnode;
 
     if (node == sentinel || p >= end) {
         return p;
@@ -583,7 +605,7 @@ ngx_http_markdown_prometheus_walk_path_tree(
             node->left, sentinel, p, end);
 
     if (p < end) {
-        pnode = (ngx_http_markdown_path_metric_node_t *) node;
+        pnode = (const ngx_http_markdown_path_metric_node_t *) node;
 
         p = ngx_slprintf(p, end,
             "nginx_markdown_path_conversions_total"

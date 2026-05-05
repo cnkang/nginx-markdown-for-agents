@@ -98,7 +98,6 @@ ngx_http_markdown_check_content_type(const ngx_http_request_t *r,
     static u_char  text_html[] = "text/html";
     const ngx_str_t     *content_type;
     const ngx_str_t     *ct_entry;
-    ngx_uint_t           i;
 
     if (r->headers_out.content_type.len == 0) {
         return 0;
@@ -109,7 +108,7 @@ ngx_http_markdown_check_content_type(const ngx_http_request_t *r,
     if (conf->content_types != NULL) {
         ct_entry = conf->content_types->elts;
 
-        for (i = 0; i < conf->content_types->nelts; i++) {
+        for (ngx_uint_t i = 0; i < conf->content_types->nelts; i++) {
             if (content_type->len >= ct_entry[i].len
                 && ngx_strncasecmp(content_type->data,
                                    ct_entry[i].data,

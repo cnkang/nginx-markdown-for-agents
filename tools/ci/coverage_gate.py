@@ -79,6 +79,66 @@ def parse_lcov_summary(lcov_path: Path) -> CoverageSummary:
     return _compute_from_records(text)
 
 
+def _parse_sf(line: str) -> str:
+    """Extract file path from an SF: record."""
+    return line[3:]
+
+
+def _parse_da(
+    line: str,
+    current_file: str,
+    lines_found: set[tuple[str, int]],
+    lines_hit: set[tuple[str, int]],
+) -> None:
+    """Process a DA: line-data record."""
+    parts = line[3:].split(",", 2)
+    if len(parts) < 2:
+        return
+    lineno = int(parts[0])
+    key = (current_file, lineno)
+    lines_found.add(key)
+    if int(parts[1]) > 0:
+        lines_hit.add(key)
+
+
+def _parse_fn(
+    line: str,
+    current_file: str,
+    functions_found: set[tuple[str, str]],
+) -> None:
+    """Process an FN: function-definition record."""
+    parts = line[3:].split(",", 1)
+    if len(parts) == 2:
+        functions_found.add((current_file, parts[1]))
+
+
+def _parse_fna(
+    line: str,
+    current_file: str,
+    functions_found: set[tuple[str, str]],
+    functions_hit: set[tuple[str, str]],
+) -> None:
+    """Process an FNA: function-call record."""
+    parts = line[4:].split(",", 2)
+    if len(parts) != 3:
+        return
+    name = parts[2]
+    functions_found.add((current_file, name))
+    if int(parts[1]) > 0:
+        functions_hit.add((current_file, name))
+
+
+def _parse_fnda(
+    line: str,
+    current_file: str,
+    functions_hit: set[tuple[str, str]],
+) -> None:
+    """Process an FNDA: function-call-data record."""
+    parts = line[5:].split(",", 1)
+    if len(parts) == 2 and int(parts[0]) > 0:
+        functions_hit.add((current_file, parts[1]))
+
+
 def _compute_from_records(text: str) -> CoverageSummary:
     """Compute coverage from raw SF/DA/FN/FNDA lcov records."""
     lines_found: set[tuple[str, int]] = set()
@@ -92,31 +152,15 @@ def _compute_from_records(text: str) -> CoverageSummary:
     for raw_line in text.splitlines():
         line = raw_line.strip()
         if line.startswith("SF:"):
-            current_file = line[3:]
+            current_file = _parse_sf(line)
         elif line.startswith("DA:"):
-            parts = line[3:].split(",", 2)
-            if len(parts) >= 2:
-                lineno = int(parts[0])
-                key = (current_file, lineno)
-                lines_found.add(key)
-                if int(parts[1]) > 0:
-                    lines_hit.add(key)
+            _parse_da(line, current_file, lines_found, lines_hit)
         elif line.startswith("FN:"):
-            parts = line[3:].split(",", 1)
-            if len(parts) == 2:
-                functions_found.add((current_file, parts[1]))
+            _parse_fn(line, current_file, functions_found)
         elif line.startswith("FNA:"):
-            parts = line[4:].split(",", 2)
-            if len(parts) == 3:
-                name = parts[2]
-                functions_found.add((current_file, name))
-                if int(parts[1]) > 0:
-                    functions_hit.add((current_file, name))
+            _parse_fna(line, current_file, functions_found, functions_hit)
         elif line.startswith("FNDA:"):
-            parts = line[5:].split(",", 1)
-            if len(parts) == 2:
-                if int(parts[0]) > 0:
-                    functions_hit.add((current_file, parts[1]))
+            _parse_fnda(line, current_file, functions_hit)
         elif line.startswith("FNF:"):
             functions_found_fallback += int(line[4:])
         elif line.startswith("FNH:"):

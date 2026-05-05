@@ -20,9 +20,9 @@ set -euo pipefail
 
 NGINX_BIN="${NGINX_BIN:-}"
 
-# TODO: keep these ports for the future runtime E2E harness. The current
-# script is still a plan-mode validator, but it already parses these flags so
-# callers can use the same interface when runtime checks are enabled.
+# NOTE: these ports are reserved for the future runtime E2E harness. The
+# current script is still a plan-mode validator, but it already parses these
+# flags so callers can use the same interface when runtime checks are enabled.
 PORT="${PORT:-19876}"
 UPSTREAM_PORT="${UPSTREAM_PORT:-19877}"
 

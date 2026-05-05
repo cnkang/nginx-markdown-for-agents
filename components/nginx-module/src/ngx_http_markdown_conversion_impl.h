@@ -297,21 +297,21 @@ ngx_http_markdown_record_conversion_latency(ngx_msec_t elapsed_ms)
     NGX_HTTP_MARKDOWN_METRIC_ADD(conversion_time_sum_ms, elapsed_ms);
 
     if (elapsed_ms <= 10) {
-        NGX_HTTP_MARKDOWN_METRIC_INC(conversion_latency_le_10ms);
+        NGX_HTTP_MARKDOWN_METRIC_INC(conversion_latency.le_10ms);
         return;
     }
 
     if (elapsed_ms <= 100) {
-        NGX_HTTP_MARKDOWN_METRIC_INC(conversion_latency_le_100ms);
+        NGX_HTTP_MARKDOWN_METRIC_INC(conversion_latency.le_100ms);
         return;
     }
 
     if (elapsed_ms <= 1000) {
-        NGX_HTTP_MARKDOWN_METRIC_INC(conversion_latency_le_1000ms);
+        NGX_HTTP_MARKDOWN_METRIC_INC(conversion_latency.le_1000ms);
         return;
     }
 
-    NGX_HTTP_MARKDOWN_METRIC_INC(conversion_latency_gt_1000ms);
+    NGX_HTTP_MARKDOWN_METRIC_INC(conversion_latency.gt_1000ms);
 }
 
 /*
@@ -712,6 +712,108 @@ ngx_http_markdown_otel_teardown_span(ngx_http_request_t *r,
 }
 
 /*
+ * Determine which child to follow in the per-path RB tree
+ * when the hash key matches but the URI path does not.
+ *
+ * Returns -1 to descend left, +1 to descend right.
+ *
+ * @param r    The request providing the URI to compare
+ * @param node The tree node whose path is compared against
+ */
+static int
+ngx_http_markdown_per_path_cmp(ngx_http_request_t *r,
+                               ngx_http_markdown_path_metric_node_t *node)
+{
+    if (r->uri.len < node->path_len) {
+        return -1;
+    }
+
+    if (r->uri.len > node->path_len) {
+        return 1;
+    }
+
+    if (ngx_memcmp(r->uri.data, node->path, node->path_len) < 0) {
+        return -1;
+    }
+
+    return 1;
+}
+
+/*
+ * Search the per-path RB tree for an existing entry matching the
+ * request URI.  On match, atomically increments per-path and
+ * aggregate counters and returns NGX_OK.  On miss, returns
+ * NGX_DECLINED so the caller can insert a new node.
+ *
+ * Must be called with shpool->mutex held.  The mutex is NOT
+ * released by this function on either return path.
+ *
+ * @param r          The request (provides r->uri as the lookup key)
+ * @param metrics    Shared metrics structure containing the RB tree
+ * @param sentinel   The RB tree sentinel node (read-only)
+ * @param key        Precomputed hash key for r->uri
+ * @param elapsed_ms Conversion elapsed time to record on match
+ */
+static ngx_int_t
+ngx_http_markdown_per_path_lookup_and_update(
+    ngx_http_request_t *r,
+    ngx_http_markdown_metrics_t *metrics,
+    const ngx_rbtree_node_t *sentinel,
+    ngx_uint_t key,
+    ngx_msec_t elapsed_ms)
+{
+    ngx_rbtree_node_t                    *rbnode;
+    ngx_http_markdown_path_metric_node_t *node;
+    ngx_rbtree_node_t                    *child;
+    int                                   cmp;
+
+    rbnode = metrics->per_path.path_tree.root;
+
+    for ( ;; ) {
+        if (key < rbnode->key) {
+            if (rbnode->left == sentinel) {
+                return NGX_DECLINED;
+            }
+            rbnode = rbnode->left;
+            continue;
+        }
+
+        if (key > rbnode->key) {
+            if (rbnode->right == sentinel) {
+                return NGX_DECLINED;
+            }
+            rbnode = rbnode->right;
+            continue;
+        }
+
+        node = (ngx_http_markdown_path_metric_node_t *) rbnode;
+
+        if (r->uri.len == node->path_len
+            && ngx_memcmp(r->uri.data, node->path,
+                          node->path_len) == 0)
+        {
+            ngx_atomic_fetch_add(&node->conversions, 1);
+            ngx_atomic_fetch_add(&node->entries, 1);
+            ngx_atomic_fetch_add(&node->conversion_time_sum_ms,
+                                 (ngx_atomic_uint_t) elapsed_ms);
+            ngx_atomic_fetch_add(
+                &metrics->per_path.path_conversions, 1);
+            ngx_atomic_fetch_add(
+                &metrics->per_path.path_conversion_time_sum_ms,
+                (ngx_atomic_uint_t) elapsed_ms);
+            return NGX_OK;
+        }
+
+        cmp = ngx_http_markdown_per_path_cmp(r, node);
+        child = (cmp < 0) ? rbnode->left : rbnode->right;
+        if (child == sentinel) {
+            return NGX_DECLINED;
+        }
+        rbnode = child;
+    }
+}
+
+/*
  * Record per-path metrics for a successful conversion.
  *
  * Looks up the request URI in the shared RB-tree.  If the path
@@ -735,8 +837,7 @@ ngx_http_markdown_record_per_path_metrics(
     ngx_slab_pool_t                      *shpool;
     ngx_http_markdown_metrics_t          *metrics;
     ngx_http_markdown_path_metric_node_t *node;
-    ngx_rbtree_node_t                    *rbnode;
-    ngx_rbtree_node_t                    *sentinel;
+    const ngx_rbtree_node_t              *sentinel;
     ngx_uint_t                            hash;
     ngx_uint_t                            key;
 
@@ -764,68 +865,11 @@ ngx_http_markdown_record_per_path_metrics(
     sentinel = &metrics->per_path.sentinel;
 
     if (metrics->per_path.path_tree.root != sentinel) {
-        rbnode = metrics->per_path.path_tree.root;
-
-        for ( ;; ) {
-            if (key < rbnode->key) {
-                if (rbnode->left == sentinel) {
-                    break;
-                }
-                rbnode = rbnode->left;
-                continue;
-            }
-
-            if (key > rbnode->key) {
-                if (rbnode->right == sentinel) {
-                    break;
-                }
-                rbnode = rbnode->right;
-                continue;
-            }
-
-            node = (ngx_http_markdown_path_metric_node_t *) rbnode;
-
-            if (r->uri.len == node->path_len
-                && ngx_memcmp(r->uri.data, node->path,
-                              node->path_len) == 0)
-            {
-                ngx_atomic_fetch_add(&node->conversions, 1);
-                ngx_atomic_fetch_add(&node->entries, 1);
-                ngx_atomic_fetch_add(&node->conversion_time_sum_ms,
-                                     (ngx_atomic_uint_t) elapsed_ms);
-                ngx_atomic_fetch_add(
-                    &metrics->per_path.path_conversions, 1);
-                ngx_atomic_fetch_add(
-                    &metrics->per_path.path_conversion_time_sum_ms,
-                    (ngx_atomic_uint_t) elapsed_ms);
-                ngx_shmtx_unlock(&shpool->mutex);
-                return;
-            }
-
-            if (r->uri.len < node->path_len) {
-                if (rbnode->left == sentinel) {
-                    break;
-                }
-                rbnode = rbnode->left;
-            } else if (r->uri.len > node->path_len) {
-                if (rbnode->right == sentinel) {
-                    break;
-                }
-                rbnode = rbnode->right;
-            } else {
-                if (ngx_memcmp(r->uri.data, node->path,
-                               node->path_len) < 0) {
-                    if (rbnode->left == sentinel) {
-                        break;
-                    }
-                    rbnode = rbnode->left;
-                } else {
-                    if (rbnode->right == sentinel) {
-                        break;
-                    }
-                    rbnode = rbnode->right;
-                }
-            }
+        if (ngx_http_markdown_per_path_lookup_and_update(
+                r, metrics, sentinel, key, elapsed_ms) == NGX_OK)
+        {
+            ngx_shmtx_unlock(&shpool->mutex);
+            return;
         }
     }
 
@@ -1156,7 +1200,7 @@ ngx_http_markdown_record_token_savings_if_enabled(
 
     savings = html_tokens - (ngx_atomic_uint_t) result->token_estimate;
     if (savings > 0) {
-        NGX_HTTP_MARKDOWN_METRIC_ADD(estimated_token_savings, savings);
+        NGX_HTTP_MARKDOWN_METRIC_ADD(results.estimated_token_savings, savings);
     }
 }
 

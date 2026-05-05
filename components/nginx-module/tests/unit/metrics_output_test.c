@@ -16,10 +16,12 @@ typedef struct {
     unsigned long conversion_time_sum_ms;
     unsigned long input_bytes;
     unsigned long output_bytes;
-    unsigned long conversion_latency_le_10ms;
-    unsigned long conversion_latency_le_100ms;
-    unsigned long conversion_latency_le_1000ms;
-    unsigned long conversion_latency_gt_1000ms;
+    struct {
+        unsigned long le_10ms;
+        unsigned long le_100ms;
+        unsigned long le_1000ms;
+        unsigned long gt_1000ms;
+    } conversion_latency;
     unsigned long decompressions_attempted;
     unsigned long decompressions_succeeded;
     unsigned long decompressions_failed;
@@ -83,16 +85,16 @@ format_metrics_text(const metrics_t *m, char *out, size_t out_len)
              avg_input,
              m->output_bytes,
              avg_output,
-             m->conversion_latency_le_10ms,
-             m->conversion_latency_le_100ms,
-             m->conversion_latency_le_1000ms,
-             m->conversion_latency_gt_1000ms,
-             m->decompressions_attempted,
-             m->decompressions_succeeded,
-             m->decompressions_failed,
-             m->decompressions_gzip,
-             m->decompressions_deflate,
-             m->decompressions_brotli);
+              m->conversion_latency.le_10ms,
+              m->conversion_latency.le_100ms,
+              m->conversion_latency.le_1000ms,
+              m->conversion_latency.gt_1000ms,
+              m->decompressions_attempted,
+              m->decompressions_succeeded,
+              m->decompressions_failed,
+              m->decompressions_gzip,
+              m->decompressions_deflate,
+              m->decompressions_brotli);
 }
 
 static void
@@ -127,10 +129,10 @@ format_metrics_json(const metrics_t *m, char *out, size_t out_len)
              avg_input,
              m->output_bytes,
              avg_output,
-             m->conversion_latency_le_10ms,
-             m->conversion_latency_le_100ms,
-             m->conversion_latency_le_1000ms,
-             m->conversion_latency_gt_1000ms,
+              m->conversion_latency.le_10ms,
+              m->conversion_latency.le_100ms,
+              m->conversion_latency.le_1000ms,
+              m->conversion_latency.gt_1000ms,
              m->decompressions_attempted,
              m->decompressions_succeeded,
              m->decompressions_failed,
@@ -153,10 +155,10 @@ sample(void)
     m.conversion_time_sum_ms = 5500;
     m.input_bytes = 80000;
     m.output_bytes = 32000;
-    m.conversion_latency_le_10ms = 40;
-    m.conversion_latency_le_100ms = 45;
-    m.conversion_latency_le_1000ms = 10;
-    m.conversion_latency_gt_1000ms = 5;
+    m.conversion_latency.le_10ms = 40;
+    m.conversion_latency.le_100ms = 45;
+    m.conversion_latency.le_1000ms = 10;
+    m.conversion_latency.gt_1000ms = 5;
     m.decompressions_attempted = 30;
     m.decompressions_succeeded = 27;
     m.decompressions_failed = 3;

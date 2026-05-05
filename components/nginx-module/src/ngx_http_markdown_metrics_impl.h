@@ -19,9 +19,11 @@
  * ngx_atomic_uint_t values instead of ngx_atomic_t, since the snapshot
  * is only read from a single thread after collection.
  *
- * The decompression counters are grouped into an anonymous sub-struct
- * to keep the top-level field count within SonarCloud's 20-field limit
- * while preserving a flat JSON output format.
+ * The latency histogram, decompression counters, path-hit counters,
+ * skip counters, and per-path counters are each grouped into
+ * anonymous sub-structs to keep the top-level field count within
+ * SonarCloud's 20-field limit while preserving a flat JSON output
+ * format.
  */
 typedef struct {
     /* Conversion attempt tracking */
@@ -40,11 +42,13 @@ typedef struct {
     ngx_atomic_uint_t input_bytes;
     ngx_atomic_uint_t output_bytes;
 
-    /* Latency histogram buckets */
-    ngx_atomic_uint_t conversion_latency_le_10ms;
-    ngx_atomic_uint_t conversion_latency_le_100ms;
-    ngx_atomic_uint_t conversion_latency_le_1000ms;
-    ngx_atomic_uint_t conversion_latency_gt_1000ms;
+    /* Latency histogram buckets (grouped to keep top-level field count <= 20) */
+    struct {
+        ngx_atomic_uint_t le_10ms;
+        ngx_atomic_uint_t le_100ms;
+        ngx_atomic_uint_t le_1000ms;
+        ngx_atomic_uint_t gt_1000ms;
+    } conversion_latency;
 
     /* Decompression metrics (grouped to keep top-level field count <= 20) */
     struct {
@@ -81,8 +85,11 @@ typedef struct {
         ngx_atomic_uint_t accept;
     } skips;
 
-    /* Fail-open counter */
-    ngx_atomic_uint_t failopen_count;
+    /* Conversion result counters */
+    struct {
+        ngx_atomic_uint_t failopen_count;
+        ngx_atomic_uint_t estimated_token_savings;
+    } results;
 
 #ifdef MARKDOWN_STREAMING_ENABLED
     /* Streaming metrics */
@@ -101,9 +108,6 @@ typedef struct {
         ngx_atomic_uint_t last_peak_memory_bytes;
     } streaming;
 #endif
-
-    /* Estimated cumulative token savings */
-    ngx_atomic_uint_t estimated_token_savings;
 
     /* Per-path metrics (v0.6.0 P1-2) */
     struct {
@@ -221,10 +225,14 @@ ngx_http_markdown_collect_metrics_snapshot(ngx_http_markdown_metrics_snapshot_t 
     snapshot->conversion_time_sum_ms = metrics->conversion_time_sum_ms;
     snapshot->input_bytes = metrics->input_bytes;
     snapshot->output_bytes = metrics->output_bytes;
-    snapshot->conversion_latency_le_10ms = metrics->conversion_latency_le_10ms;
-    snapshot->conversion_latency_le_100ms = metrics->conversion_latency_le_100ms;
-    snapshot->conversion_latency_le_1000ms = metrics->conversion_latency_le_1000ms;
-    snapshot->conversion_latency_gt_1000ms = metrics->conversion_latency_gt_1000ms;
+    snapshot->conversion_latency.le_10ms =
+        metrics->conversion_latency.le_10ms;
+    snapshot->conversion_latency.le_100ms =
+        metrics->conversion_latency.le_100ms;
+    snapshot->conversion_latency.le_1000ms =
+        metrics->conversion_latency.le_1000ms;
+    snapshot->conversion_latency.gt_1000ms =
+        metrics->conversion_latency.gt_1000ms;
     snapshot->decompressions.attempted = metrics->decompressions.attempted;
     snapshot->decompressions.succeeded = metrics->decompressions.succeeded;
     snapshot->decompressions.failed = metrics->decompressions.failed;
@@ -246,7 +254,7 @@ ngx_http_markdown_collect_metrics_snapshot(ngx_http_markdown_metrics_snapshot_t 
     snapshot->skips.auth = metrics->skips.auth;
     snapshot->skips.range = metrics->skips.range;
     snapshot->skips.accept = metrics->skips.accept;
-    snapshot->failopen_count = metrics->failopen_count;
+    snapshot->results.failopen_count = metrics->results.failopen_count;
 #ifdef MARKDOWN_STREAMING_ENABLED
     snapshot->streaming.requests_total =
         metrics->streaming.requests_total;
@@ -273,7 +281,7 @@ ngx_http_markdown_collect_metrics_snapshot(ngx_http_markdown_metrics_snapshot_t 
     snapshot->streaming.last_peak_memory_bytes =
         metrics->streaming.last_peak_memory_bytes;
 #endif
-    snapshot->estimated_token_savings = metrics->estimated_token_savings;
+    snapshot->results.estimated_token_savings = metrics->results.estimated_token_savings;
 
     snapshot->per_path.path_entries =
         metrics->per_path.path_entries;
@@ -718,10 +726,10 @@ ngx_http_markdown_metrics_write_json(
         output_bytes_avg,
 
         /* Latency histogram */
-        snapshot->conversion_latency_le_10ms,
-        snapshot->conversion_latency_le_100ms,
-        snapshot->conversion_latency_le_1000ms,
-        snapshot->conversion_latency_gt_1000ms,
+        snapshot->conversion_latency.le_10ms,
+        snapshot->conversion_latency.le_100ms,
+        snapshot->conversion_latency.le_1000ms,
+        snapshot->conversion_latency.gt_1000ms,
 
         /* Decompression stats */
         snapshot->decompressions.attempted,
@@ -763,8 +771,8 @@ ngx_http_markdown_metrics_write_json(
         snapshot->skips.auth,
         snapshot->skips.range,
         snapshot->skips.accept,
-        snapshot->failopen_count,
-        snapshot->estimated_token_savings,
+        snapshot->results.failopen_count,
+        snapshot->results.estimated_token_savings,
         snapshot->per_path.path_entries,
         snapshot->per_path.path_conversions,
         snapshot->per_path.path_conversion_time_sum_ms,
@@ -789,7 +797,7 @@ ngx_http_markdown_metrics_write_json(
         ngx_shm_zone_t                       *zone;
         ngx_slab_pool_t                      *shpool;
         ngx_http_markdown_metrics_t          *live_metrics;
-        u_char                               *paths_start;
+        const u_char                         *paths_start;
 
         zone = ngx_http_markdown_metrics_shm_zone;
         live_metrics = (ngx_http_markdown_metrics_t *) zone->data;
@@ -994,10 +1002,10 @@ ngx_http_markdown_metrics_write_text(
         output_bytes_avg,
 
         /* Latency histogram */
-        snapshot->conversion_latency_le_10ms,
-        snapshot->conversion_latency_le_100ms,
-        snapshot->conversion_latency_le_1000ms,
-        snapshot->conversion_latency_gt_1000ms,
+        snapshot->conversion_latency.le_10ms,
+        snapshot->conversion_latency.le_100ms,
+        snapshot->conversion_latency.le_1000ms,
+        snapshot->conversion_latency.gt_1000ms,
 
         /* Decompression stats */
         snapshot->decompressions.attempted,
@@ -1039,8 +1047,8 @@ ngx_http_markdown_metrics_write_text(
         snapshot->skips.auth,
         snapshot->skips.range,
         snapshot->skips.accept,
-        snapshot->failopen_count,
-        snapshot->estimated_token_savings,
+        snapshot->results.failopen_count,
+        snapshot->results.estimated_token_savings,
         snapshot->per_path.path_entries,
         snapshot->per_path.path_conversions,
         snapshot->per_path.path_conversion_time_sum_ms,
@@ -1085,6 +1093,28 @@ ngx_http_markdown_metrics_write_text(
 
 #if NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED
 /*
+ * Write a two-character escape sequence (backslash + second char)
+ * into the destination buffer.
+ *
+ * Returns the updated write position, or last if the buffer
+ * cannot accommodate two more bytes.
+ */
+static u_char *
+ngx_http_markdown_escape_json_two_char(u_char *dst, u_char *last,
+                                       u_char second)
+{
+    if (dst + 2 > last) {
+        return last;
+    }
+
+    *dst++ = '\\';
+    *dst++ = second;
+
+    return dst;
+}
+
+
+/*
  * Escape a byte string for use inside a JSON string value.
  *
  * JSON requires escaping: " -> \", \ -> \\, control chars (< 0x20) -> \uXXXX.
@@ -1105,37 +1135,38 @@ ngx_http_markdown_escape_json_string(u_char *dst, u_char *last,
     size_t   i;
     u_char   ch;
 
-    for (i = 0; i < len && dst < last; i++) {
+    i = 0;
+    while (i < len && dst < last) {
         ch = src[i];
+        i++;
 
         switch (ch) {
         case '"':
-            if (dst + 2 > last) { return last; }
-            *dst++ = '\\'; *dst++ = '"';
+            dst = ngx_http_markdown_escape_json_two_char(dst, last, '"');
             break;
         case '\\':
-            if (dst + 2 > last) { return last; }
-            *dst++ = '\\'; *dst++ = '\\';
+            dst = ngx_http_markdown_escape_json_two_char(dst, last, '\\');
             break;
         case '\n':
-            if (dst + 2 > last) { return last; }
-            *dst++ = '\\'; *dst++ = 'n';
+            dst = ngx_http_markdown_escape_json_two_char(dst, last, 'n');
             break;
         case '\r':
-            if (dst + 2 > last) { return last; }
-            *dst++ = '\\'; *dst++ = 'r';
+            dst = ngx_http_markdown_escape_json_two_char(dst, last, 'r');
             break;
         case '\t':
-            if (dst + 2 > last) { return last; }
-            *dst++ = '\\'; *dst++ = 't';
+            dst = ngx_http_markdown_escape_json_two_char(dst, last, 't');
             break;
         default:
-            if (ch < 0x20) {
-                if (dst + 6 > last) { return last; }
-                dst = ngx_snprintf(dst, 6, "\\u%04X", (unsigned) ch);
-            } else {
+            if (ch >= 0x20) {
                 *dst++ = ch;
+                break;
             }
+
+            /* Control character: emit as \uXXXX */
+            if (dst + 6 > last) {
+                return last;
+            }
+            dst = ngx_snprintf(dst, 6, "\\u%04X", (unsigned) ch);
             break;
         }
     }
@@ -1168,7 +1199,7 @@ ngx_http_markdown_json_walk_path_tree(
     u_char *p,
     u_char *end)
 {
-    ngx_http_markdown_path_metric_node_t  *pnode;
+    const ngx_http_markdown_path_metric_node_t  *pnode;
 
     if (node == sentinel || p >= end) {
         return p;
@@ -1178,7 +1209,7 @@ ngx_http_markdown_json_walk_path_tree(
             node->left, sentinel, p, end);
 
     if (p < end) {
-        pnode = (ngx_http_markdown_path_metric_node_t *) node;
+        pnode = (const ngx_http_markdown_path_metric_node_t *) node;
 
         p = ngx_slprintf(p, end,
             "\n"
@@ -1223,7 +1254,7 @@ ngx_http_markdown_text_walk_path_tree(
     u_char *p,
     u_char *end)
 {
-    ngx_http_markdown_path_metric_node_t  *pnode;
+    const ngx_http_markdown_path_metric_node_t  *pnode;
 
     if (node == sentinel || p >= end) {
         return p;
@@ -1233,7 +1264,7 @@ ngx_http_markdown_text_walk_path_tree(
             node->left, sentinel, p, end);
 
     if (p < end) {
-        pnode = (ngx_http_markdown_path_metric_node_t *) node;
+        pnode = (const ngx_http_markdown_path_metric_node_t *) node;
 
         p = ngx_slprintf(p, end, "- Path[");
         p = ngx_http_markdown_escape_json_string(
