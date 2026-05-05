@@ -998,6 +998,9 @@ pub fn is_flush_tag(tag: &str) -> bool {
     FLUSH_TAGS.contains(&tag)
 }
 
+/// Maps a [`StructuralContext`] to the HTML tag name that triggers a flush
+/// at that context boundary.  Returns `None` for contexts that do not
+/// correspond to a specific tag (e.g., `Root`, `TableCell`).
 fn flush_tag_for_context(ctx: &StructuralContext) -> Option<&'static str> {
     match ctx {
         StructuralContext::Heading(1) => Some("h1"),

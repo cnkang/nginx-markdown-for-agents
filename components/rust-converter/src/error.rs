@@ -1,4 +1,14 @@
-//! Error types for conversion operations
+//! Error types for conversion operations.
+//!
+//! Defines [`ConversionError`] with variants for each failure mode in the
+//! HTML-to-Markdown pipeline: parse errors, encoding errors, timeouts,
+//! memory/budget limits, invalid input, and streaming-specific conditions
+//! (fallback requests and post-commit errors).
+//!
+//! The [`ConversionError::code`] method maps each variant to a stable numeric
+//! FFI error code (1–8, 99) that is shared across the Rust↔C boundary via
+//! `markdown_converter.h`.  Adding a new variant requires updating both this
+//! mapping and the C-side classification in `ngx_http_markdown_error.c`.
 
 use std::fmt;
 
