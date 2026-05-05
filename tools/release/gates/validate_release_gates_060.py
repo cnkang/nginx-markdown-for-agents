@@ -6,7 +6,7 @@ Validates governance and evidence artifacts for the 0.6.0 production
 readiness release.
 
 Checks:
-- Spec documents existence (spec.md, design.md, tasks.md in .codeartsdoer/specs/v060_prod/)
+- Repo-owned 0.6.0 release spec surfaces exist
 - VERSION_PLANNING 0.6.0 section existence
 - ADR-0007 and ADR-0008 existence
 - Migration guide existence
@@ -31,10 +31,6 @@ import tomllib
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
-
-SPECS_DIR = PROJECT_ROOT / ".codeartsdoer" / "specs" / "v060_prod"
-
-SPEC_DOCS = ["spec.md", "design.md", "tasks.md"]
 
 VERSION_PLANNING_PATH = PROJECT_ROOT / "docs" / "project" / "VERSION_PLANNING.md"
 ADR_0007_PATH = (
@@ -91,6 +87,12 @@ COVERAGE_GATE_SCRIPT = (
     PROJECT_ROOT / "tools" / "ci" / "coverage_gate.py"
 )
 
+SPEC_SURFACES = [
+    ("VERSION_PLANNING.md", VERSION_PLANNING_PATH),
+    ("ADR-0007", ADR_0007_PATH),
+    ("ADR-0008", ADR_0008_PATH),
+]
+
 
 class ValidationResult:
     """Accumulate gate check results."""
@@ -123,13 +125,12 @@ class ValidationResult:
 
 
 def check_spec_docs(result: ValidationResult) -> None:
-    """Verify spec documents exist in .codeartsdoer/specs/v060_prod/."""
-    for doc in SPEC_DOCS:
-        path = SPECS_DIR / doc
+    """Verify repo-owned 0.6.0 release spec surfaces exist."""
+    for label, path in SPEC_SURFACES:
         if path.is_file():
-            result.pass_(GATE_SPEC_DOCS, f"{doc} exists")
+            result.pass_(GATE_SPEC_DOCS, f"{label} exists")
         else:
-            result.fail(GATE_SPEC_DOCS, f"{doc} missing at {path}")
+            result.fail(GATE_SPEC_DOCS, f"{label} missing at {path}")
 
 
 def check_version_planning(result: ValidationResult) -> None:
