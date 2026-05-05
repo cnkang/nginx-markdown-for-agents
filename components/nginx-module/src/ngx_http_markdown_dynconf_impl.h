@@ -113,7 +113,7 @@ ngx_http_markdown_dynconf_check(ngx_http_markdown_dynconf_watcher_t *watcher,
  * Called periodically by the NGINX event loop.  Checks the
  * watched file for changes.  If a change is detected, sets
  * reload_pending so the filter module can react on the next
- * request.  Re-arms the timer for the next check.
+ * request.  Re-arms the timer for the next poll cycle.
  *
  * Parameters:
  *   ev - Timer event (ev->data points to the watcher)
@@ -214,6 +214,7 @@ ngx_http_markdown_dynconf_start(ngx_http_markdown_dynconf_watcher_t *watcher,
 
     watcher->timer->handler = ngx_http_markdown_dynconf_timer_handler;
     watcher->timer->data = watcher;
+    /* Cast drops const: ngx_event_t.log is non-const per NGINX API. */
     watcher->timer->log = (ngx_log_t *) log;
 
     watcher->active = 1;
@@ -276,6 +277,46 @@ ngx_http_markdown_dynconf_stop(ngx_http_markdown_dynconf_watcher_t *watcher,
 #define NGX_HTTP_MARKDOWN_DYNCONF_KEY_MEMORY_BUDGET   5
 
 /*
+ * Match a config key name against known keys.
+ *
+ * Compares the key text between p and eq against the set of
+ * recognized dynamic configuration keys.
+ *
+ * Parameters:
+ *   p   - start of key text
+ *   eq  - end of key text (one past last char)
+ *   key - [out] matched key enum value
+ *
+ * Returns:
+ *   NGX_OK on match, NGX_DECLINED if unrecognized
+ */
+static ngx_int_t
+ngx_http_markdown_dynconf_match_key(const u_char *p, const u_char *eq,
+                                    ngx_uint_t *key)
+{
+    size_t  len;
+
+    len = eq - p;
+
+    if (len == 15 && ngx_strncasecmp(p, (const u_char *) "markdown_filter", 15) == 0) {
+        *key = NGX_HTTP_MARKDOWN_DYNCONF_KEY_FILTER;
+    } else if (len == 11 && ngx_strncasecmp(p, (const u_char *) "prune_noise", 11) == 0) {
+        *key = NGX_HTTP_MARKDOWN_DYNCONF_KEY_PRUNE_NOISE;
+    } else if (len == 13 && ngx_strncasecmp(p, (const u_char *) "log_verbosity", 13) == 0) {
+        *key = NGX_HTTP_MARKDOWN_DYNCONF_KEY_LOG_VERBOSITY;
+    } else if (len == 16 && ngx_strncasecmp(p, (const u_char *) "streaming_budget", 16) == 0) {
+        *key = NGX_HTTP_MARKDOWN_DYNCONF_KEY_STREAMING_BUDGET;
+    } else if (len == 13 && ngx_strncasecmp(p, (const u_char *) "memory_budget", 13) == 0) {
+        *key = NGX_HTTP_MARKDOWN_DYNCONF_KEY_MEMORY_BUDGET;
+    } else {
+        return NGX_DECLINED;
+    }
+
+    return NGX_OK;
+}
+
+
+/*
  * Parse a key=value line from the dynamic config file.
  *
  * Lines starting with '#' are comments. Blank lines are skipped.
@@ -294,16 +335,17 @@ ngx_http_markdown_dynconf_stop(ngx_http_markdown_dynconf_watcher_t *watcher,
  *   value_len - [out] parsed value length
  *
  * Returns:
- *   NGX_OK on successful parse, NGX_DECLINED if comment/blank, NGX_ERROR on parse error
+ *   NGX_OK on successful parse, NGX_DECLINED if comment/blank,
+ *   NGX_ERROR on parse error
  */
 static ngx_int_t
 ngx_http_markdown_dynconf_parse_line(u_char *line, size_t line_len,
                                      ngx_uint_t *key,
                                      u_char **value, size_t *value_len)
 {
-    u_char  *p;
-    u_char  *last;
-    u_char  *eq;
+    u_char        *p;
+    const u_char  *last;
+    u_char        *eq;
 
     p = line;
     last = line + line_len;
@@ -329,17 +371,7 @@ ngx_http_markdown_dynconf_parse_line(u_char *line, size_t line_len,
     }
 
     /* Match key. */
-    if (eq - p == 15 && ngx_strncasecmp(p, (u_char *) "markdown_filter", 15) == 0) {
-        *key = NGX_HTTP_MARKDOWN_DYNCONF_KEY_FILTER;
-    } else if (eq - p == 11 && ngx_strncasecmp(p, (u_char *) "prune_noise", 11) == 0) {
-        *key = NGX_HTTP_MARKDOWN_DYNCONF_KEY_PRUNE_NOISE;
-    } else if (eq - p == 13 && ngx_strncasecmp(p, (u_char *) "log_verbosity", 13) == 0) {
-        *key = NGX_HTTP_MARKDOWN_DYNCONF_KEY_LOG_VERBOSITY;
-    } else if (eq - p == 16 && ngx_strncasecmp(p, (u_char *) "streaming_budget", 16) == 0) {
-        *key = NGX_HTTP_MARKDOWN_DYNCONF_KEY_STREAMING_BUDGET;
-    } else if (eq - p == 13 && ngx_strncasecmp(p, (u_char *) "memory_budget", 13) == 0) {
-        *key = NGX_HTTP_MARKDOWN_DYNCONF_KEY_MEMORY_BUDGET;
-    } else {
+    if (ngx_http_markdown_dynconf_match_key(p, eq, key) != NGX_OK) {
         return NGX_DECLINED;
     }
 
@@ -406,9 +438,9 @@ ngx_http_markdown_dynconf_apply(ngx_http_markdown_conf_t *conf,
     switch (key) {
 
     case NGX_HTTP_MARKDOWN_DYNCONF_KEY_FILTER:
-        if (value_len == 2 && ngx_strncasecmp(value, (u_char *) "on", 2) == 0) {
+        if (value_len == 2 && ngx_strncasecmp(value, (const u_char *) "on", 2) == 0) {
             conf->enabled = 1;
-        } else if (value_len == 3 && ngx_strncasecmp(value, (u_char *) "off", 3) == 0) {
+        } else if (value_len == 3 && ngx_strncasecmp(value, (const u_char *) "off", 3) == 0) {
             conf->enabled = 0;
         } else {
             ngx_log_error(NGX_LOG_WARN, (ngx_log_t *) log, 0,
@@ -419,9 +451,9 @@ ngx_http_markdown_dynconf_apply(ngx_http_markdown_conf_t *conf,
         break;
 
     case NGX_HTTP_MARKDOWN_DYNCONF_KEY_PRUNE_NOISE:
-        if (value_len == 2 && ngx_strncasecmp(value, (u_char *) "on", 2) == 0) {
+        if (value_len == 2 && ngx_strncasecmp(value, (const u_char *) "on", 2) == 0) {
             conf->prune_noise = 1;
-        } else if (value_len == 3 && ngx_strncasecmp(value, (u_char *) "off", 3) == 0) {
+        } else if (value_len == 3 && ngx_strncasecmp(value, (const u_char *) "off", 3) == 0) {
             conf->prune_noise = 0;
         } else {
             ngx_log_error(NGX_LOG_WARN, (ngx_log_t *) log, 0,
@@ -432,13 +464,13 @@ ngx_http_markdown_dynconf_apply(ngx_http_markdown_conf_t *conf,
         break;
 
     case NGX_HTTP_MARKDOWN_DYNCONF_KEY_LOG_VERBOSITY:
-        if (value_len == 5 && ngx_strncasecmp(value, (u_char *) "error", 5) == 0) {
+        if (value_len == 5 && ngx_strncasecmp(value, (const u_char *) "error", 5) == 0) {
             conf->log_verbosity = NGX_LOG_ERR;
-        } else if (value_len == 4 && ngx_strncasecmp(value, (u_char *) "warn", 4) == 0) {
+        } else if (value_len == 4 && ngx_strncasecmp(value, (const u_char *) "warn", 4) == 0) {
             conf->log_verbosity = NGX_LOG_WARN;
-        } else if (value_len == 4 && ngx_strncasecmp(value, (u_char *) "info", 4) == 0) {
+        } else if (value_len == 4 && ngx_strncasecmp(value, (const u_char *) "info", 4) == 0) {
             conf->log_verbosity = NGX_LOG_INFO;
-        } else if (value_len == 5 && ngx_strncasecmp(value, (u_char *) "debug", 5) == 0) {
+        } else if (value_len == 5 && ngx_strncasecmp(value, (const u_char *) "debug", 5) == 0) {
             conf->log_verbosity = NGX_LOG_DEBUG;
         } else {
             ngx_log_error(NGX_LOG_WARN, (ngx_log_t *) log, 0,
@@ -454,7 +486,7 @@ ngx_http_markdown_dynconf_apply(ngx_http_markdown_conf_t *conf,
             ngx_str_t   val;
             ssize_t     parsed;
 
-            val.data = (u_char *) value;
+            val.data = value;
             val.len = value_len;
             parsed = ngx_parse_size(&val);
             if (parsed == NGX_ERROR) {
@@ -477,7 +509,7 @@ ngx_http_markdown_dynconf_apply(ngx_http_markdown_conf_t *conf,
             ngx_str_t   val;
             ssize_t     parsed;
 
-            val.data = (u_char *) value;
+            val.data = value;
             val.len = value_len;
             parsed = ngx_parse_size(&val);
             if (parsed == NGX_ERROR) {
@@ -495,6 +527,66 @@ ngx_http_markdown_dynconf_apply(ngx_http_markdown_conf_t *conf,
     }
 
     return NGX_OK;
+}
+
+
+/*
+ * Compute the length of a config line, stripping a trailing \r.
+ *
+ * Parameters:
+ *   buf        - buffer containing the line
+ *   line_start - start offset of the line in buf
+ *   line_end   - offset of the newline (or end) in buf
+ *
+ * Returns:
+ *   Line length with trailing \r stripped
+ */
+static size_t
+ngx_http_markdown_dynconf_line_len(const u_char *buf, size_t line_start,
+                                   size_t line_end)
+{
+    size_t  line_len;
+
+    line_len = line_end - line_start;
+    if (line_len > 0 && buf[line_start + line_len - 1] == '\r') {
+        line_len--;
+    }
+
+    return line_len;
+}
+
+
+/*
+ * Try to parse and apply one config line.
+ *
+ * Parses the line and, on success, applies the key=value pair
+ * to the configuration.  Increments the applied counter when
+ * both parse and apply succeed.
+ *
+ * Parameters:
+ *   conf    - Current location configuration
+ *   line    - line text
+ *   len     - line length
+ *   log     - NGINX log
+ *   applied - [in/out] counter of successfully applied keys
+ */
+static void
+ngx_http_markdown_dynconf_try_line(ngx_http_markdown_conf_t *conf,
+                                   u_char *line, size_t len,
+                                   const ngx_log_t *log,
+                                   ngx_uint_t *applied)
+{
+    ngx_uint_t  key;
+    u_char     *value;
+    size_t      value_len;
+
+    if (ngx_http_markdown_dynconf_parse_line(line, len,
+                                             &key, &value, &value_len) == NGX_OK
+        && ngx_http_markdown_dynconf_apply(conf, key, value, value_len,
+                                           log) == NGX_OK)
+    {
+        (*applied)++;
+    }
 }
 
 
@@ -528,9 +620,6 @@ ngx_http_markdown_dynconf_reload(
     ssize_t      n;
     size_t       line_start;
     size_t       pos;
-    ngx_uint_t   key;
-    u_char       *value;
-    size_t       value_len;
     ngx_uint_t   applied;
 
     if (watcher == NULL || conf == NULL || r == NULL) {
@@ -574,7 +663,6 @@ ngx_http_markdown_dynconf_reload(
 
         /* Process complete lines. */
         for ( ;; ) {
-            size_t  line_len;
             size_t  i;
 
             /* Find newline. */
@@ -585,31 +673,16 @@ ngx_http_markdown_dynconf_reload(
 
             if (i >= pos) {
                 /* No complete line; shift remaining data. */
-                if (line_start > 0) {
-                    ngx_memmove(buf, buf + line_start, pos - line_start);
-                    pos -= line_start;
-                    line_start = 0;
-                }
+                ngx_memmove(buf, buf + line_start, pos - line_start);
+                pos -= line_start;
+                line_start = 0;
                 break;
             }
 
-            /* Process line (strip \r\n). */
-            line_len = i - line_start;
-            if (line_len > 0 && buf[line_start + line_len - 1] == '\r') {
-                line_len--;
-            }
-
-            if (ngx_http_markdown_dynconf_parse_line(
-                    buf + line_start, line_len,
-                    &key, &value, &value_len) == NGX_OK)
-            {
-                if (ngx_http_markdown_dynconf_apply(
-                        conf, key, value, value_len,
-                        r->connection->log) == NGX_OK)
-                {
-                    applied++;
-                }
-            }
+            ngx_http_markdown_dynconf_try_line(
+                conf, buf + line_start,
+                ngx_http_markdown_dynconf_line_len(buf, line_start, i),
+                r->connection->log, &applied);
 
             line_start = i + 1;
         }
@@ -632,24 +705,10 @@ ngx_http_markdown_dynconf_reload(
      * and pos, that data constitutes the final line.
      */
     if (line_start < pos) {
-        size_t  line_len;
-
-        line_len = pos - line_start;
-        if (line_len > 0 && buf[line_start + line_len - 1] == '\r') {
-            line_len--;
-        }
-
-        if (ngx_http_markdown_dynconf_parse_line(
-                buf + line_start, line_len,
-                &key, &value, &value_len) == NGX_OK)
-        {
-            if (ngx_http_markdown_dynconf_apply(
-                    conf, key, value, value_len,
-                    r->connection->log) == NGX_OK)
-            {
-                applied++;
-            }
-        }
+        ngx_http_markdown_dynconf_try_line(
+            conf, buf + line_start,
+            ngx_http_markdown_dynconf_line_len(buf, line_start, pos),
+            r->connection->log, &applied);
     }
 
     if (applied > 0) {

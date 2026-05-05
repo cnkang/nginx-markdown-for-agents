@@ -61,7 +61,7 @@ format_prometheus(const snapshot_t *s, char *buf, size_t buf_len)
         "counter\n"
         "nginx_markdown_passthrough_total %lu\n"
         "\n",
-        s->conversions_bypassed + s->failopen_count);
+        s->conversions_bypassed + s->results.failopen_count);
 
     /* skips_total{reason=...} */
     PROM_WRITE(
@@ -121,7 +121,7 @@ format_prometheus(const snapshot_t *s, char *buf, size_t buf_len)
         "# TYPE nginx_markdown_failopen_total counter\n"
         "nginx_markdown_failopen_total %lu\n"
         "\n",
-        s->failopen_count);
+        s->results.failopen_count);
 
     /* large_response_path_total */
     PROM_WRITE(
@@ -166,7 +166,7 @@ format_prometheus(const snapshot_t *s, char *buf, size_t buf_len)
         "nginx_markdown_estimated_token_savings_total"
         " %lu\n"
         "\n",
-        s->estimated_token_savings);
+        s->results.estimated_token_savings);
 
     /* decompressions_total{format=...} */
     PROM_WRITE(
@@ -345,11 +345,11 @@ test_known_values(void)
     s.skips.accept = 1;
     s.failures_conversion = 4;
     s.failures_resource_limit = 1;
-    s.failopen_count = 3;
+    s.results.failopen_count = 3;
     s.path_hits.incremental = 7;
     s.input_bytes = 500000;
     s.output_bytes = 250000;
-    s.estimated_token_savings = 12000;
+    s.results.estimated_token_savings = 12000;
     s.decompressions.gzip = 20;
     s.decompressions.deflate = 5;
     s.decompressions.brotli = 3;

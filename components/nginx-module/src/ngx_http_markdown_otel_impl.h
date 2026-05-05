@@ -105,16 +105,82 @@ static void
 ngx_http_markdown_otel_random_hex(u_char *dst, size_t byte_count)
 {
     static const u_char  hex[] = "0123456789abcdef";
-    size_t               i;
     u_char               byte;
 
-    for (i = 0; i < byte_count; i++) {
+    for (size_t i = 0; i < byte_count; i++) {
         byte = (u_char) (ngx_random() & 0xFF);
         dst[i * 2]     = hex[byte >> 4];
         dst[i * 2 + 1] = hex[byte & 0x0F];
     }
 
     dst[byte_count * 2] = '\0';
+}
+
+
+/*
+ * Parse the value portion of a W3C traceparent header.
+ *
+ * Expected format: version-traceid-spanid-flags
+ * Only version 00 is supported.
+ *
+ * Parameters:
+ *   p    - Pointer to the start of the header value
+ *   span - Span to populate with parsed context
+ *
+ * Returns:
+ *   NGX_OK if parsed successfully,
+ *   NGX_DECLINED if format is invalid.
+ */
+static ngx_int_t
+ngx_http_markdown_otel_parse_traceparent_value(const u_char *p,
+    ngx_http_markdown_otel_span_t *span)
+{
+    /* Check version: must be "00-" */
+    if (p[0] != '0' || p[1] != '0' || p[2] != '-') {
+        return NGX_DECLINED;
+    }
+
+    p += 3;
+
+    /* Copy trace_id (32 hex chars). */
+    ngx_memcpy(span->trace_id, p,
+               NGX_HTTP_MARKDOWN_OTEL_TRACE_ID_LEN);
+    span->trace_id[NGX_HTTP_MARKDOWN_OTEL_TRACE_ID_LEN] = '\0';
+
+    p += NGX_HTTP_MARKDOWN_OTEL_TRACE_ID_LEN;
+
+    if (*p != '-') {
+        return NGX_DECLINED;
+    }
+    p++;
+
+    /* Copy parent span_id (16 hex chars). */
+    ngx_memcpy(span->parent_span_id, p,
+               NGX_HTTP_MARKDOWN_OTEL_SPAN_ID_LEN);
+    span->parent_span_id[NGX_HTTP_MARKDOWN_OTEL_SPAN_ID_LEN] = '\0';
+
+    p += NGX_HTTP_MARKDOWN_OTEL_SPAN_ID_LEN;
+
+    if (*p != '-') {
+        return NGX_DECLINED;
+    }
+    p++;
+
+    /* Parse trace-flags (2 hex chars). */
+    span->trace_flags = 0;
+    if (p[0] >= '0' && p[0] <= '9') {
+        span->trace_flags = (p[0] - '0') << 4;
+    } else if (p[0] >= 'a' && p[0] <= 'f') {
+        span->trace_flags = (p[0] - 'a' + 10) << 4;
+    }
+    if (p[1] >= '0' && p[1] <= '9') {
+        span->trace_flags |= (p[1] - '0');
+    } else if (p[1] >= 'a' && p[1] <= 'f') {
+        span->trace_flags |= (p[1] - 'a' + 10);
+    }
+
+    span->has_parent = 1;
+    return NGX_OK;
 }
 
 
@@ -136,8 +202,6 @@ static ngx_int_t
 ngx_http_markdown_otel_parse_traceparent(ngx_http_request_t *r,
                                          ngx_http_markdown_otel_span_t *span)
 {
-    u_char           *p;
-
     /*
      * Iterate all linked-list parts of the request headers,
      * not just the first part.  NGINX headers can span multiple
@@ -160,54 +224,8 @@ ngx_http_markdown_otel_parse_traceparent(ngx_http_request_t *r,
                 continue;
             }
 
-            p = h[i].value.data;
-
-            /* Check version: must be "00-" */
-            if (p[0] != '0' || p[1] != '0' || p[2] != '-') {
-                return NGX_DECLINED;
-            }
-
-            p += 3;
-
-            /* Copy trace_id (32 hex chars). */
-            ngx_memcpy(span->trace_id, p,
-                       NGX_HTTP_MARKDOWN_OTEL_TRACE_ID_LEN);
-            span->trace_id[NGX_HTTP_MARKDOWN_OTEL_TRACE_ID_LEN] = '\0';
-
-            p += NGX_HTTP_MARKDOWN_OTEL_TRACE_ID_LEN;
-
-            if (*p != '-') {
-                return NGX_DECLINED;
-            }
-            p++;
-
-            /* Copy parent span_id (16 hex chars). */
-            ngx_memcpy(span->parent_span_id, p,
-                       NGX_HTTP_MARKDOWN_OTEL_SPAN_ID_LEN);
-            span->parent_span_id[NGX_HTTP_MARKDOWN_OTEL_SPAN_ID_LEN] = '\0';
-
-            p += NGX_HTTP_MARKDOWN_OTEL_SPAN_ID_LEN;
-
-            if (*p != '-') {
-                return NGX_DECLINED;
-            }
-            p++;
-
-            /* Parse trace-flags (2 hex chars). */
-            span->trace_flags = 0;
-            if (p[0] >= '0' && p[0] <= '9') {
-                span->trace_flags = (p[0] - '0') << 4;
-            } else if (p[0] >= 'a' && p[0] <= 'f') {
-                span->trace_flags = (p[0] - 'a' + 10) << 4;
-            }
-            if (p[1] >= '0' && p[1] <= '9') {
-                span->trace_flags |= (p[1] - '0');
-            } else if (p[1] >= 'a' && p[1] <= 'f') {
-                span->trace_flags |= (p[1] - 'a' + 10);
-            }
-
-            span->has_parent = 1;
-            return NGX_OK;
+            return ngx_http_markdown_otel_parse_traceparent_value(
+                       h[i].value.data, span);
         }
     }
 
@@ -246,7 +264,7 @@ ngx_http_markdown_otel_span_start(ngx_http_request_t *r,
 
     span->start_ms = ngx_current_msec;
     {
-        ngx_time_t  *tp = ngx_timeofday();
+        const ngx_time_t  *tp = ngx_timeofday();
         span->start_epoch_nano = (int64_t) tp->sec * 1000000000LL
                                  + (int64_t) tp->msec * 1000000LL;
     }
@@ -348,7 +366,7 @@ ngx_http_markdown_otel_span_end(ngx_http_markdown_otel_span_t *span)
 
     span->end_ms = ngx_current_msec;
     {
-        ngx_time_t  *tp = ngx_timeofday();
+        const ngx_time_t  *tp = ngx_timeofday();
         span->end_epoch_nano = (int64_t) tp->sec * 1000000000LL
                                + (int64_t) tp->msec * 1000000LL;
     }
@@ -357,50 +375,79 @@ ngx_http_markdown_otel_span_end(ngx_http_markdown_otel_span_t *span)
 
 
 /*
+ * Escape a single character for JSON, writing to dst.
+ *
+ * Handles: " -> \", \ -> \\, \n -> \n, \r -> \r, \t -> \t,
+ * control chars (< 0x20) -> \uXXXX, others pass through.
+ *
+ * Parameters:
+ *   dst   - Current write position in output buffer
+ *   last  - End of output buffer (one past last writable byte)
+ *   ch    - Character to escape
+ *
+ * Returns:
+ *   Updated dst pointer after writing, or last if insufficient space.
+ */
+static u_char *
+ngx_http_markdown_otel_escape_char(u_char *dst, u_char *last, u_char ch)
+{
+    switch (ch) {
+    case '"':
+        if (dst + 2 > last) { return last; }
+        *dst++ = '\\'; *dst++ = '"';
+        return dst;
+    case '\\':
+        if (dst + 2 > last) { return last; }
+        *dst++ = '\\'; *dst++ = '\\';
+        return dst;
+    case '\n':
+        if (dst + 2 > last) { return last; }
+        *dst++ = '\\'; *dst++ = 'n';
+        return dst;
+    case '\r':
+        if (dst + 2 > last) { return last; }
+        *dst++ = '\\'; *dst++ = 'r';
+        return dst;
+    case '\t':
+        if (dst + 2 > last) { return last; }
+        *dst++ = '\\'; *dst++ = 't';
+        return dst;
+    default:
+        if (ch < 0x20) {
+            if (dst + 6 > last) { return last; }
+            return ngx_snprintf(dst, 6, "\\u%04X", (unsigned) ch);
+        }
+        *dst++ = ch;
+        return dst;
+    }
+}
+
+
+/*
  * Escape a byte string for use inside a JSON string value.
  *
  * JSON requires escaping: " -> \", \ -> \\, control chars (< 0x20) -> \uXXXX.
+ *
+ * Parameters:
+ *   dst  - Current write position in output buffer
+ *   last - End of output buffer
+ *   src  - Source string to escape
+ *   len  - Length of source string
+ *
+ * Returns:
+ *   Updated dst pointer after writing, or last on overflow.
  */
 static u_char *
 ngx_http_markdown_otel_escape_json_string(u_char *dst, u_char *last,
                                           const u_char *src, size_t len)
 {
-    size_t   i;
-    u_char   ch;
+    const u_char  *src_end;
 
-    for (i = 0; i < len && dst < last; i++) {
-        ch = src[i];
+    src_end = src + len;
 
-        switch (ch) {
-        case '"':
-            if (dst + 2 > last) { return last; }
-            *dst++ = '\\'; *dst++ = '"';
-            break;
-        case '\\':
-            if (dst + 2 > last) { return last; }
-            *dst++ = '\\'; *dst++ = '\\';
-            break;
-        case '\n':
-            if (dst + 2 > last) { return last; }
-            *dst++ = '\\'; *dst++ = 'n';
-            break;
-        case '\r':
-            if (dst + 2 > last) { return last; }
-            *dst++ = '\\'; *dst++ = 'r';
-            break;
-        case '\t':
-            if (dst + 2 > last) { return last; }
-            *dst++ = '\\'; *dst++ = 't';
-            break;
-        default:
-            if (ch < 0x20) {
-                if (dst + 6 > last) { return last; }
-                dst = ngx_snprintf(dst, 6, "\\u%04X", (unsigned) ch);
-            } else {
-                *dst++ = ch;
-            }
-            break;
-        }
+    while (src < src_end && dst < last) {
+        dst = ngx_http_markdown_otel_escape_char(dst, last, *src);
+        src++;
     }
 
     return dst;
@@ -429,7 +476,6 @@ ngx_http_markdown_otel_render_json(ngx_http_markdown_otel_span_t *span,
 {
     u_char     *p;
     u_char     *end;
-    ngx_uint_t  i;
     ngx_msec_t  duration_ms;
 
     if (span == NULL || buf == NULL || len == 0) {
@@ -481,18 +527,16 @@ ngx_http_markdown_otel_render_json(ngx_http_markdown_otel_span_t *span,
      * reflect the actual wall-clock time at each event regardless of
      * export delay or second-boundary crossings.
      */
-    {
-        p = ngx_slprintf(p, end,
-            "\"name\":\"%s\","
-            "\"kind\":1,"
-            "\"startTimeUnixNano\":\"%L\","
-            "\"endTimeUnixNano\":\"%L\","
-            "\"attributes\":[",
-            NGX_HTTP_MARKDOWN_OTEL_SPAN_NAME,
-            span->start_epoch_nano, span->end_epoch_nano);
-    }
+    p = ngx_slprintf(p, end,
+        "\"name\":\"%s\","
+        "\"kind\":1,"
+        "\"startTimeUnixNano\":\"%L\","
+        "\"endTimeUnixNano\":\"%L\","
+        "\"attributes\":[",
+        NGX_HTTP_MARKDOWN_OTEL_SPAN_NAME,
+        span->start_epoch_nano, span->end_epoch_nano);
 
-    for (i = 0; i < span->attr_count && p < end; i++) {
+    for (ngx_uint_t i = 0; i < span->attr_count && p < end; i++) {
         if (i > 0) {
             p = ngx_slprintf(p, end, ",");
         }
@@ -501,14 +545,14 @@ ngx_http_markdown_otel_render_json(ngx_http_markdown_otel_span_t *span,
             p = ngx_slprintf(p, end,
                 "{\"key\":\"%*s\","
                 "\"value\":{\"intValue\":\"%L\"}}",
-                (size_t) span->attrs[i].key_len,
+                span->attrs[i].key_len,
                 span->attrs[i].key,
                 span->attrs[i].int_value);
         } else {
             p = ngx_slprintf(p, end,
                 "{\"key\":\"%*s\","
                 "\"value\":{\"stringValue\":\"",
-                (size_t) span->attrs[i].key_len,
+                span->attrs[i].key_len,
                 span->attrs[i].key);
             p = ngx_http_markdown_otel_escape_json_string(
                     p, end,
@@ -532,6 +576,145 @@ ngx_http_markdown_otel_render_json(ngx_http_markdown_otel_span_t *span,
 
 
 /*
+ * Set the request body on a subrequest to carry the OTLP JSON payload.
+ *
+ * Parameters:
+ *   sr       - Subrequest whose body to populate
+ *   json_buf - JSON payload buffer
+ *   json_len - JSON payload length
+ */
+static void
+ngx_http_markdown_otel_set_subrequest_body(ngx_http_request_t *sr,
+                                           const u_char *json_buf,
+                                           size_t json_len)
+{
+    ngx_buf_t  *b;
+
+    if (sr->request_body == NULL) {
+        sr->request_body = ngx_pcalloc(
+            sr->pool, sizeof(ngx_http_request_body_t));
+    }
+
+    if (sr->request_body == NULL) {
+        return;
+    }
+
+    b = ngx_create_temp_buf(sr->pool, json_len);
+    if (b == NULL) {
+        return;
+    }
+
+    ngx_memcpy(b->pos, json_buf, json_len);
+    b->last = b->pos + json_len;
+    b->last_in_chain = 1;
+    b->last_buf = 1;
+
+    sr->request_body->bufs = ngx_alloc_chain_link(sr->pool);
+    if (sr->request_body->bufs != NULL) {
+        sr->request_body->bufs->buf = b;
+        sr->request_body->bufs->next = NULL;
+    }
+}
+
+
+/*
+ * Attempt OTLP export via NGINX subrequest.
+ *
+ * Initiates an HTTP POST subrequest to the configured internal
+ * endpoint URI.  Falls back to log-level export on failure.
+ *
+ * Parameters:
+ *   r         - Original NGINX request
+ *   endpoint  - Internal URI for the OTLP collector proxy
+ *   log       - NGINX log for error reporting
+ *   json_buf  - JSON payload buffer
+ *   json_len  - JSON payload length
+ */
+static void
+ngx_http_markdown_otel_export_via_subrequest(ngx_http_request_t *r,
+                                             const ngx_str_t *endpoint,
+                                             ngx_log_t *log,
+                                             const u_char *json_buf,
+                                             size_t json_len)
+{
+    ngx_http_post_subrequest_t  *psr;
+    ngx_str_t                   uri;
+    ngx_http_request_t         *sr;
+
+    uri = *endpoint;
+
+    psr = ngx_palloc(r->pool, sizeof(ngx_http_post_subrequest_t));
+    if (psr == NULL) {
+        ngx_log_error(NGX_LOG_INFO, log, 0,
+                      "markdown otel: export endpoint=%V %*s",
+                      endpoint, json_len, json_buf);
+        return;
+    }
+
+    psr->handler = NULL;
+    psr->data = NULL;
+
+    if (ngx_http_subrequest(r, &uri, NULL, &sr, psr,
+                            NGX_HTTP_SUBREQUEST_IN_MEMORY)
+        != NGX_OK)
+    {
+        ngx_log_error(NGX_LOG_WARN, log, 0,
+                      "markdown otel: subrequest to %V failed, "
+                      "falling back to log export",
+                      endpoint);
+        ngx_log_error(NGX_LOG_INFO, log, 0,
+                      "markdown otel: export %*s",
+                      json_len, json_buf);
+        return;
+    }
+
+    /* Subrequest initiated; set method and body for POST. */
+    sr->method = NGX_HTTP_POST;
+    sr->method_name.len = sizeof("POST") - 1;
+    /* method_name.data is u_char * (non-const per ngx_str_t);
+     * const cast intentional to match NGINX struct definition. */
+    sr->method_name.data = (u_char *) "POST";
+
+    ngx_http_markdown_otel_set_subrequest_body(sr, json_buf, json_len);
+
+    ngx_log_error(NGX_LOG_INFO, log, 0,
+                  "markdown otel: OTLP POST subrequest to %V "
+                  "(%uz bytes)",
+                  endpoint, json_len);
+}
+
+
+/*
+ * Log all span attributes at INFO level for diagnostics.
+ *
+ * Parameters:
+ *   span - OTel span whose attributes to log
+ *   log  - NGINX log for output
+ */
+static void
+ngx_http_markdown_otel_log_span_attrs(ngx_http_markdown_otel_span_t *span,
+                                      ngx_log_t *log)
+{
+    for (ngx_uint_t i = 0; i < span->attr_count; i++) {
+        if (span->attrs[i].is_int) {
+            ngx_log_error(NGX_LOG_INFO, log, 0,
+                         "markdown otel: attr %*s=%L",
+                         span->attrs[i].key_len,
+                         span->attrs[i].key,
+                         span->attrs[i].int_value);
+        } else {
+            ngx_log_error(NGX_LOG_INFO, log, 0,
+                         "markdown otel: attr %*s=%*s",
+                         span->attrs[i].key_len,
+                         span->attrs[i].key,
+                         span->attrs[i].str_value_len,
+                         span->attrs[i].str_value);
+        }
+    }
+}
+
+
+/*
  * Export a completed span.
  *
  * Attempts OTLP JSON export if an internal endpoint URI is configured
@@ -548,7 +731,6 @@ ngx_http_markdown_otel_span_export(ngx_http_markdown_otel_span_t *span,
                                    ngx_log_t *log,
                                    ngx_http_request_t *r)
 {
-    ngx_uint_t                       i;
     u_char                           json_buf[NGX_HTTP_MARKDOWN_OTEL_EXPORT_BUF_LEN];
     size_t                           json_len;
     const ngx_http_markdown_conf_t  *conf;
@@ -570,94 +752,13 @@ ngx_http_markdown_otel_span_export(ngx_http_markdown_otel_span_t *span,
     json_len = ngx_http_markdown_otel_render_json(
                    span, json_buf, sizeof(json_buf), endpoint);
 
-    if (json_len > 0) {
-        /*
-         * When an OTLP endpoint is configured, attempt HTTP POST via
-         * NGINX subrequest.  This is the idiomatic NGINX approach for
-         * outbound HTTP from a module: the subrequest goes to a local
-         * URI that proxies to the collector, keeping the worker
-         * non-blocking and leveraging the existing proxy infrastructure.
-         *
-         * Requirements for operator setup:
-         *   - An internal location (e.g. /_otel_export) that proxies
-         *     to the collector endpoint must be configured in nginx.conf
-         *   - The markdown_otel_endpoint value should match this internal URI
-         *
-         * If the subrequest cannot be initiated (no active request,
-         * subrequest limit reached, etc.), fall back to structured log.
-         */
-        if (endpoint != NULL && r != NULL) {
-            ngx_http_post_subrequest_t  *psr;
-            ngx_str_t                   uri;
-
-            uri = *endpoint;
-
-            psr = ngx_palloc(r->pool, sizeof(ngx_http_post_subrequest_t));
-            if (psr != NULL) {
-                ngx_http_request_t  *sr;
-
-                psr->handler = NULL;
-                psr->data = NULL;
-
-                if (ngx_http_subrequest(r, &uri, NULL, &sr, psr,
-                                        NGX_HTTP_SUBREQUEST_IN_MEMORY)
-                    == NGX_OK)
-                {
-                    /*
-                     * Subrequest initiated.  Set the request body to
-                     * the OTLP JSON payload so the proxy module will
-                     * POST it to the collector.
-                     */
-                    sr->method = NGX_HTTP_POST;
-                    sr->method_name.len = sizeof("POST") - 1;
-                    sr->method_name.data = (u_char *) "POST";
-
-                    if (sr->request_body == NULL) {
-                        sr->request_body = ngx_pcalloc(
-                            sr->pool, sizeof(ngx_http_request_body_t));
-                    }
-
-                    if (sr->request_body != NULL) {
-                        ngx_buf_t  *b;
-
-                        b = ngx_create_temp_buf(sr->pool, json_len);
-                        if (b != NULL) {
-                            ngx_memcpy(b->pos, json_buf, json_len);
-                            b->last = b->pos + json_len;
-                            b->last_in_chain = 1;
-                            b->last_buf = 1;
-
-                            sr->request_body->bufs = ngx_alloc_chain_link(sr->pool);
-                            if (sr->request_body->bufs != NULL) {
-                                sr->request_body->bufs->buf = b;
-                                sr->request_body->bufs->next = NULL;
-                            }
-                        }
-                    }
-
-                    ngx_log_error(NGX_LOG_INFO, log, 0,
-                                  "markdown otel: OTLP POST subrequest to %V "
-                                  "(%uz bytes)",
-                                  endpoint, json_len);
-                } else {
-                    ngx_log_error(NGX_LOG_WARN, log, 0,
-                                  "markdown otel: subrequest to %V failed, "
-                                  "falling back to log export",
-                                  endpoint);
-                    ngx_log_error(NGX_LOG_INFO, log, 0,
-                                  "markdown otel: export %*s",
-                                  json_len, json_buf);
-                }
-            } else {
-                ngx_log_error(NGX_LOG_INFO, log, 0,
-                              "markdown otel: export endpoint=%V %*s",
-                              endpoint, json_len, json_buf);
-            }
-        } else {
-            ngx_log_error(NGX_LOG_INFO, log, 0,
-                          "markdown otel: export %*s",
-                          json_len, json_buf);
-        }
+    if (json_len > 0 && endpoint != NULL && r != NULL) {
+        ngx_http_markdown_otel_export_via_subrequest(
+            r, endpoint, log, json_buf, json_len);
+    } else if (json_len > 0) {
+        ngx_log_error(NGX_LOG_INFO, log, 0,
+                      "markdown otel: export %*s",
+                      json_len, json_buf);
     }
 
     /* Diagnostic log: always emit human-readable span summary. */
@@ -675,22 +776,7 @@ ngx_http_markdown_otel_span_export(ngx_http_markdown_otel_span_t *span,
                      : (ngx_msec_t) 0,
                  span->attr_count);
 
-    for (i = 0; i < span->attr_count; i++) {
-        if (span->attrs[i].is_int) {
-            ngx_log_error(NGX_LOG_INFO, log, 0,
-                         "markdown otel: attr %*s=%L",
-                         (size_t) span->attrs[i].key_len,
-                         span->attrs[i].key,
-                         span->attrs[i].int_value);
-        } else {
-            ngx_log_error(NGX_LOG_INFO, log, 0,
-                         "markdown otel: attr %*s=%*s",
-                         (size_t) span->attrs[i].key_len,
-                         span->attrs[i].key,
-                         (size_t) span->attrs[i].str_value_len,
-                         span->attrs[i].str_value);
-        }
-    }
+    ngx_http_markdown_otel_log_span_attrs(span, log);
 
     span->exported = 1;
 }

@@ -50,10 +50,12 @@ typedef struct { /* NOSONAR */
     ngx_atomic_t  conversion_time_sum_ms;
     ngx_atomic_t  input_bytes;
     ngx_atomic_t  output_bytes;
-    ngx_atomic_t  conversion_latency_le_10ms;
-    ngx_atomic_t  conversion_latency_le_100ms;
-    ngx_atomic_t  conversion_latency_le_1000ms;
-    ngx_atomic_t  conversion_latency_gt_1000ms;
+    struct {
+        ngx_atomic_t  le_10ms;
+        ngx_atomic_t  le_100ms;
+        ngx_atomic_t  le_1000ms;
+        ngx_atomic_t  gt_1000ms;
+    } conversion_latency;
     struct {
         ngx_atomic_t  attempted;
         ngx_atomic_t  succeeded;
@@ -93,8 +95,10 @@ typedef struct { /* NOSONAR */
         ngx_atomic_t  range;
         ngx_atomic_t  accept;
     } skips;
-    ngx_atomic_t  failopen_count;
-    ngx_atomic_t  estimated_token_savings;
+    struct {
+        ngx_atomic_t  failopen_count;
+        ngx_atomic_t  estimated_token_savings;
+    } results;
     struct {
         ngx_atomic_t  path_entries;
         ngx_atomic_t  path_conversions;
@@ -283,13 +287,13 @@ test_known_values(void)
     s.requests_entered = 200;
     s.conversions_succeeded = 150;
     s.conversions_bypassed = 30;
-    s.failopen_count = 10;
+    s.results.failopen_count = 10;
     s.failures_conversion = 5;
     s.failures_resource_limit = 3;
     s.failures_system = 2;
     s.input_bytes = 1000000;
     s.output_bytes = 500000;
-    s.estimated_token_savings = 25000;
+    s.results.estimated_token_savings = 25000;
     s.decompressions.gzip = 40;
     s.decompressions.deflate = 10;
     s.decompressions.brotli = 5;
@@ -298,10 +302,10 @@ test_known_values(void)
     s.skips.status = 2;
     s.skips.content_type = 5;
     s.skips.accept = 1;
-    s.conversion_latency_le_10ms = 80;
-    s.conversion_latency_le_100ms = 50;
-    s.conversion_latency_le_1000ms = 15;
-    s.conversion_latency_gt_1000ms = 5;
+    s.conversion_latency.le_10ms = 80;
+    s.conversion_latency.le_100ms = 50;
+    s.conversion_latency.le_1000ms = 15;
+    s.conversion_latency.gt_1000ms = 5;
     s.path_hits.incremental = 20;
     s.path_hits.streaming = 30;
     s.streaming.succeeded_total = 25;

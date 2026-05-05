@@ -53,8 +53,10 @@ typedef struct {
         unsigned long range;
         unsigned long accept;
     } skips;
-    unsigned long failopen_count;
-    unsigned long estimated_token_savings;
+    struct {
+        unsigned long failopen_count;
+        unsigned long estimated_token_savings;
+    } results;
 } test_metrics_snapshot_t;
 
 #endif /* TEST_METRICS_SNAPSHOT_H */
