@@ -104,6 +104,8 @@ and a unified memory budget simplifies configuration.
 ### Fixed
 - Homebrew source builds now install `cbindgen` as an explicit build
   dependency before running `make build`.
+- Homebrew source builds now detect the installed Homebrew `nginx` version and
+  build the dynamic module against the matching NGINX source.
 - SonarCloud finding: missing `return 0` in
   `check_status_passthrough` (`verify_status_codes_e2e.sh`).
 - SonarCloud finding: repeated `'Cookie: session=abc123'` literal

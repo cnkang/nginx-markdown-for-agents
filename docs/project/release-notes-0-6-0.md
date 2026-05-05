@@ -16,6 +16,8 @@ pruning, release gates, and Homebrew-based distribution.
   formula into the configured tap repository.
 - The Homebrew formula installs `cbindgen` as a build dependency for source
   builds.
+- The Homebrew formula builds the dynamic module against the installed
+  Homebrew `nginx` version by downloading the matching NGINX source.
 - macOS post-release verification can install the tap formula and run a source
   build check on GitHub-hosted macOS runners.
 
