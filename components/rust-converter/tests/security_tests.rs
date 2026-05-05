@@ -101,6 +101,36 @@ fn test_xss_javascript_url_in_link() {
     assert!(!markdown.contains("[Click]"));
 }
 
+/// Test that link labels cannot break out into attacker-controlled destinations
+///
+/// **Validates: Requirements NFR-03.4 (Markdown Injection Prevention)**
+#[test]
+fn test_markdown_link_label_injection_blocked() {
+    let html = r#"<a href="https://safe.example/">safe](javascript:alert(1))</a>"#;
+
+    let dom = parse_html(html.as_bytes()).expect("Failed to parse HTML");
+    let converter = MarkdownConverter::new();
+    let markdown = converter.convert(&dom).expect("Failed to convert");
+
+    assert!(!markdown.contains("[safe](javascript:"));
+    assert!(markdown.contains(r#"[safe\](javascript:alert(1))](https://safe.example/)"#));
+}
+
+/// Test that image alt text cannot inject a Markdown destination
+///
+/// **Validates: Requirements NFR-03.4 (Markdown Injection Prevention)**
+#[test]
+fn test_markdown_image_alt_injection_blocked() {
+    let html = r#"<img src="https://safe.example/image.png" alt="alt](javascript:alert(1))">"#;
+
+    let dom = parse_html(html.as_bytes()).expect("Failed to parse HTML");
+    let converter = MarkdownConverter::new();
+    let markdown = converter.convert(&dom).expect("Failed to convert");
+
+    assert!(!markdown.contains("![alt](javascript:"));
+    assert!(markdown.contains(r#"![alt\](javascript:alert(1))](https://safe.example/image.png)"#));
+}
+
 /// Test that javascript: URLs are case-insensitive blocked
 ///
 /// **Validates: Requirements NFR-03.4 (XSS Prevention)**
