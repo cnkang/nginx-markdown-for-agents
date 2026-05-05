@@ -136,7 +136,15 @@ pub fn is_event_handler(&self, attr_name: &str) -> bool {
 **Implementation**:
 ```rust
 pub fn is_dangerous_url(&self, url: &str) -> bool {
-    let url_lower = url.trim().to_lowercase();
+    let trimmed = url.trim();
+    if trimmed.chars().any(|ch| ch == '\0' || ch.is_control()) {
+        return true;
+    }
+    if Self::contains_percent_encoded_control(trimmed) {
+        return true;
+    }
+
+    let url_lower = trimmed.to_ascii_lowercase();
     DANGEROUS_URL_SCHEMES
         .iter()
         .any(|scheme| url_lower.starts_with(scheme))
@@ -146,8 +154,21 @@ pub fn is_dangerous_url(&self, url: &str) -> bool {
 **Applied to**:
 - `<a href="...">` - Links
 - `<img src="...">` - Images (when URL is blocked, `alt` text is preserved as plain text; `title` attribute is included in Markdown image syntax)
+- Embedded/media URL attributes including `<iframe src>`, `<object data>`, `<embed src>`, `<video src/poster>`, `<audio src>`, `<source src>`, `<track src>`, and `<area href>`
 
-### Layer 5: XXE Prevention
+### Layer 5: Markdown Label Escaping
+
+**Location**: `src/converter/traversal.rs` - `MarkdownConverter::escape_link_label()`
+
+User-controlled text that appears inside Markdown link/image label brackets is escaped before emission. This prevents HTML text or attributes from breaking out of the label and injecting a new Markdown destination such as `](javascript:...)`.
+
+**Applied to**:
+- `<a>` child text before `[text](url)` emission
+- `<img alt>` before `![alt](url)` emission
+- Embedded/media labels emitted by `<iframe>`, `<object>`, `<embed>`, `<video>`, `<audio>`, `<source>`, `<track>`, and `<area>`
+- Plain-text fallback for blocked image URLs
+
+### Layer 6: XXE Prevention
 
 **Location**: `src/parser.rs` - html5ever parser
 
@@ -168,7 +189,7 @@ pub fn xxe_prevention_documentation() -> &'static str {
 }
 ```
 
-### Layer 6: Memory Safety (Rust)
+### Layer 7: Memory Safety (Rust)
 
 **Rust Safety Guarantees**:
 - No buffer overflows (bounds checking)
@@ -191,13 +212,14 @@ All `unsafe` blocks in the codebase are:
 
 **Test Categories**:
 
-1. **XSS Prevention** (10 tests):
+1. **XSS / Markdown Injection Prevention**:
    - Script tag removal
    - Inline script removal
    - Event handler removal
    - JavaScript URL blocking (case-insensitive)
    - Data URL blocking
    - VBScript URL blocking
+   - Markdown link-label and image-alt injection blocking
 
 2. **SSRF Prevention** (5 tests):
    - iframe tag stripping with URL extraction and dangerous scheme suppression

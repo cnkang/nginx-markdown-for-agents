@@ -392,6 +392,19 @@ impl MarkdownConverter {
         }
     }
 
+    /// Escape text for use inside Markdown link/image label brackets.
+    ///
+    /// Labels are enclosed in `[...]`; unescaped brackets or backslashes from
+    /// attacker-controlled HTML text can break out of the label and inject a
+    /// new Markdown destination.
+    pub(super) fn escape_link_label(label: &str) -> String {
+        label
+            .replace('\\', "\\\\")
+            .replace('[', "\\[")
+            .replace(']', "\\]")
+            .replace('\n', " ")
+    }
+
     /// Emit a Markdown link `[label](url)\n` into `output`.
     ///
     /// Centralizes the label-escape and URL-destination-escape logic shared
@@ -415,10 +428,7 @@ impl MarkdownConverter {
             .filter_map(|opt| opt.map(|s| s.trim()).filter(|s| !s.is_empty()))
             .next()
             .unwrap_or(fallback_label);
-        let escaped_label = label
-            .replace('[', "\\[")
-            .replace(']', "\\]")
-            .replace('\n', " ");
+        let escaped_label = Self::escape_link_label(label);
         let escaped_dest = Self::escape_link_destination(safe_url);
         output.push_str(&format!("[{}]({})", escaped_label, escaped_dest));
         output.push('\n');
