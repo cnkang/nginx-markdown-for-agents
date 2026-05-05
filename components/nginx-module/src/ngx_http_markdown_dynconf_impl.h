@@ -291,22 +291,23 @@ ngx_http_markdown_dynconf_stop(ngx_http_markdown_dynconf_watcher_t *watcher,
  *   NGX_OK on match, NGX_DECLINED if unrecognized
  */
 static ngx_int_t
-ngx_http_markdown_dynconf_match_key(const u_char *p, const u_char *eq,
+ngx_http_markdown_dynconf_match_key(u_char *p, const u_char *eq,
                                     ngx_uint_t *key)
 {
     size_t  len;
 
     len = eq - p;
 
-    if (len == 15 && ngx_strncasecmp(p, (const u_char *) "markdown_filter", 15) == 0) {
+    /* Cast drops const: ngx_strncasecmp() takes u_char * per NGINX API. */
+    if (len == 15 && ngx_strncasecmp(p, (u_char *) "markdown_filter", 15) == 0) {
         *key = NGX_HTTP_MARKDOWN_DYNCONF_KEY_FILTER;
-    } else if (len == 11 && ngx_strncasecmp(p, (const u_char *) "prune_noise", 11) == 0) {
+    } else if (len == 11 && ngx_strncasecmp(p, (u_char *) "prune_noise", 11) == 0) {
         *key = NGX_HTTP_MARKDOWN_DYNCONF_KEY_PRUNE_NOISE;
-    } else if (len == 13 && ngx_strncasecmp(p, (const u_char *) "log_verbosity", 13) == 0) {
+    } else if (len == 13 && ngx_strncasecmp(p, (u_char *) "log_verbosity", 13) == 0) {
         *key = NGX_HTTP_MARKDOWN_DYNCONF_KEY_LOG_VERBOSITY;
-    } else if (len == 16 && ngx_strncasecmp(p, (const u_char *) "streaming_budget", 16) == 0) {
+    } else if (len == 16 && ngx_strncasecmp(p, (u_char *) "streaming_budget", 16) == 0) {
         *key = NGX_HTTP_MARKDOWN_DYNCONF_KEY_STREAMING_BUDGET;
-    } else if (len == 13 && ngx_strncasecmp(p, (const u_char *) "memory_budget", 13) == 0) {
+    } else if (len == 13 && ngx_strncasecmp(p, (u_char *) "memory_budget", 13) == 0) {
         *key = NGX_HTTP_MARKDOWN_DYNCONF_KEY_MEMORY_BUDGET;
     } else {
         return NGX_DECLINED;
@@ -438,9 +439,10 @@ ngx_http_markdown_dynconf_apply(ngx_http_markdown_conf_t *conf,
     switch (key) {
 
     case NGX_HTTP_MARKDOWN_DYNCONF_KEY_FILTER:
-        if (value_len == 2 && ngx_strncasecmp(value, (const u_char *) "on", 2) == 0) {
+        /* Cast drops const: ngx_strncasecmp() takes u_char * per NGINX API. */
+        if (value_len == 2 && ngx_strncasecmp(value, (u_char *) "on", 2) == 0) {
             conf->enabled = 1;
-        } else if (value_len == 3 && ngx_strncasecmp(value, (const u_char *) "off", 3) == 0) {
+        } else if (value_len == 3 && ngx_strncasecmp(value, (u_char *) "off", 3) == 0) {
             conf->enabled = 0;
         } else {
             ngx_log_error(NGX_LOG_WARN, (ngx_log_t *) log, 0,
@@ -451,9 +453,9 @@ ngx_http_markdown_dynconf_apply(ngx_http_markdown_conf_t *conf,
         break;
 
     case NGX_HTTP_MARKDOWN_DYNCONF_KEY_PRUNE_NOISE:
-        if (value_len == 2 && ngx_strncasecmp(value, (const u_char *) "on", 2) == 0) {
+        if (value_len == 2 && ngx_strncasecmp(value, (u_char *) "on", 2) == 0) {
             conf->prune_noise = 1;
-        } else if (value_len == 3 && ngx_strncasecmp(value, (const u_char *) "off", 3) == 0) {
+        } else if (value_len == 3 && ngx_strncasecmp(value, (u_char *) "off", 3) == 0) {
             conf->prune_noise = 0;
         } else {
             ngx_log_error(NGX_LOG_WARN, (ngx_log_t *) log, 0,
@@ -464,13 +466,13 @@ ngx_http_markdown_dynconf_apply(ngx_http_markdown_conf_t *conf,
         break;
 
     case NGX_HTTP_MARKDOWN_DYNCONF_KEY_LOG_VERBOSITY:
-        if (value_len == 5 && ngx_strncasecmp(value, (const u_char *) "error", 5) == 0) {
+        if (value_len == 5 && ngx_strncasecmp(value, (u_char *) "error", 5) == 0) {
             conf->log_verbosity = NGX_LOG_ERR;
-        } else if (value_len == 4 && ngx_strncasecmp(value, (const u_char *) "warn", 4) == 0) {
+        } else if (value_len == 4 && ngx_strncasecmp(value, (u_char *) "warn", 4) == 0) {
             conf->log_verbosity = NGX_LOG_WARN;
-        } else if (value_len == 4 && ngx_strncasecmp(value, (const u_char *) "info", 4) == 0) {
+        } else if (value_len == 4 && ngx_strncasecmp(value, (u_char *) "info", 4) == 0) {
             conf->log_verbosity = NGX_LOG_INFO;
-        } else if (value_len == 5 && ngx_strncasecmp(value, (const u_char *) "debug", 5) == 0) {
+        } else if (value_len == 5 && ngx_strncasecmp(value, (u_char *) "debug", 5) == 0) {
             conf->log_verbosity = NGX_LOG_DEBUG;
         } else {
             ngx_log_error(NGX_LOG_WARN, (ngx_log_t *) log, 0,
