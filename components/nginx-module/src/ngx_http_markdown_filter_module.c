@@ -10,6 +10,8 @@
 
 #include "ngx_http_markdown_filter_module.h"
 #include "markdown_converter.h"
+#include "ngx_http_markdown_dynconf_impl.h"
+#include "ngx_http_markdown_otel_impl.h"
 #include "ngx_http_markdown_module_state_impl.h"
 #include "ngx_http_markdown_config_impl.h"
 #include "ngx_http_markdown_lifecycle_impl.h"

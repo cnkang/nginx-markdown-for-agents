@@ -35,6 +35,20 @@ static u_char ngx_http_markdown_cc_public[] = "public";
 static u_char ngx_http_markdown_cc_no_store[] = "no-store";
 static u_char ngx_http_markdown_cc_suffix_private[] = ", private";
 
+static ngx_str_t  ngx_http_markdown_no_store_directive =
+    { sizeof(ngx_http_markdown_cc_no_store) - 1, ngx_http_markdown_cc_no_store };
+static ngx_str_t  ngx_http_markdown_private_directive =
+    { sizeof(ngx_http_markdown_cc_private) - 1, ngx_http_markdown_cc_private };
+static ngx_str_t  ngx_http_markdown_public_directive =
+    { sizeof(ngx_http_markdown_cc_public) - 1, ngx_http_markdown_cc_public };
+
+typedef struct {
+    ngx_table_elt_t  *first_entry;
+    ngx_flag_t        has_no_store;
+    ngx_flag_t        has_private;
+    ngx_flag_t        any_public;
+} ngx_http_markdown_cc_scan_t;
+
 static ngx_int_t ngx_http_markdown_cookie_matches_pattern(
     const ngx_str_t *cookie_name,
     const ngx_str_t *pattern);
@@ -49,48 +63,14 @@ static ngx_flag_t ngx_http_markdown_cache_control_token_is_public(
     const u_char *token_start, const u_char *token_end);
 static ngx_flag_t ngx_http_markdown_token_equals_ignore_case(
     const u_char *left, const u_char *right, size_t len);
-
-/*
- * Find a response header by name in the outgoing headers list.
- *
- * Iterates the response's headers_out.headers list and returns the
- * first header whose key matches the given name (case-insensitive).
- *
- * Parameters:
- *   r        - the HTTP request whose outgoing headers are searched
- *   name     - header name to search for (need not be NUL-terminated)
- *   name_len - length of the header name in bytes
- *
- * Returns:
- *   pointer to the matching header entry, or NULL if not found
- */
-static ngx_table_elt_t *
-ngx_http_markdown_find_response_header(ngx_http_request_t *r,
-                                       u_char *name,
-                                       size_t name_len)
-{
-    if (r->headers_out.headers.part.nelts == 0) {
-        return NULL;
-    }
-
-    for (ngx_list_part_t *part = &r->headers_out.headers.part;
-         part != NULL;
-         part = part->next)
-    {
-        ngx_table_elt_t  *headers;
-
-        headers = part->elts;
-        for (ngx_uint_t i = 0; i < part->nelts; i++) {
-            if (headers[i].key.len == name_len
-                && ngx_strncasecmp(headers[i].key.data, name, name_len) == 0)
-            {
-                return &headers[i];
-            }
-        }
-    }
-
-    return NULL;
-}
+static ngx_flag_t ngx_http_markdown_is_cache_control_header(
+    const ngx_table_elt_t *header);
+static void ngx_http_markdown_scan_cache_control_headers(
+    ngx_list_t *headers, ngx_http_markdown_cc_scan_t *scan);
+static ngx_int_t ngx_http_markdown_rewrite_public_entries(
+    ngx_http_request_t *r, ngx_list_t *headers);
+static ngx_int_t ngx_http_markdown_ensure_private_on_entry(
+    ngx_http_request_t *r, ngx_table_elt_t *entry);
 
 /*
  * Insert a new "Cache-Control: private" header when none exists.
@@ -148,6 +128,12 @@ ngx_http_markdown_append_private_directive(ngx_http_request_t *r,
 {
     u_char  *new_value;
     size_t   new_len;
+
+    if (cache_control->value.len == 0) {
+        cache_control->value.data = ngx_http_markdown_cc_private;
+        cache_control->value.len = sizeof(ngx_http_markdown_cc_private) - 1;
+        return NGX_OK;
+    }
 
     if (cache_control->value.len > ((size_t) -1) - (sizeof(ngx_http_markdown_cc_suffix_private) - 1)) {
         return NGX_ERROR;
@@ -815,6 +801,164 @@ ngx_http_markdown_cache_control_has_directive(const ngx_str_t *value,
 }
 
 /*
+ * Test whether a header entry is a Cache-Control header.
+ *
+ * Compares key length and data against the canonical Cache-Control
+ * header name using case-insensitive comparison.
+ *
+ * Parameters:
+ *   header - the header entry to test
+ *
+ * Returns:
+ *   1 - header is Cache-Control
+ *   0 - header is not Cache-Control
+ */
+static ngx_flag_t
+ngx_http_markdown_is_cache_control_header(const ngx_table_elt_t *header)
+{
+    if (header->key.len != sizeof(ngx_http_markdown_hdr_cache_control) - 1) {
+        return 0;
+    }
+
+    return ngx_strncasecmp(header->key.data,
+                           ngx_http_markdown_hdr_cache_control,
+                           sizeof(ngx_http_markdown_hdr_cache_control) - 1) == 0;
+}
+
+/*
+ * Scan all Cache-Control headers and collect directive flags.
+ *
+ * Iterates the NGINX header linked list, identifies Cache-Control
+ * entries, and records whether any contain no-store, private, or
+ * public directives.  Also saves a pointer to the first Cache-Control
+ * entry found.
+ *
+ * Parameters:
+ *   headers - the outgoing headers list to scan
+ *   scan    - result struct populated with flags and first entry
+ */
+static void
+ngx_http_markdown_scan_cache_control_headers(ngx_list_t *headers,
+                                             ngx_http_markdown_cc_scan_t *scan)
+{
+    ngx_list_part_t  *part;
+    ngx_table_elt_t  *elts;
+
+    scan->first_entry = NULL;
+    scan->has_no_store = 0;
+    scan->has_private = 0;
+    scan->any_public = 0;
+
+    part = &headers->part;
+    for (/* void */; part != NULL; part = part->next) {
+        elts = part->elts;
+        for (size_t i = 0; i < part->nelts; i++) {
+            if (!ngx_http_markdown_is_cache_control_header(&elts[i])) {
+                continue;
+            }
+
+            if (scan->first_entry == NULL) {
+                scan->first_entry = &elts[i];
+            }
+            if (ngx_http_markdown_cache_control_has_directive(
+                    &elts[i].value, &ngx_http_markdown_no_store_directive))
+            {
+                scan->has_no_store = 1;
+            }
+            if (ngx_http_markdown_cache_control_has_directive(
+                    &elts[i].value, &ngx_http_markdown_private_directive))
+            {
+                scan->has_private = 1;
+            }
+            if (ngx_http_markdown_cache_control_has_directive(
+                    &elts[i].value, &ngx_http_markdown_public_directive))
+            {
+                scan->any_public = 1;
+            }
+        }
+    }
+}
+
+/*
+ * Ensure a single Cache-Control entry has the private directive.
+ *
+ * If the entry contains "public", strips it and appends "private".
+ * Otherwise, if it lacks "private", appends ", private".
+ * Entries that already contain "private" are left unchanged.
+ *
+ * Parameters:
+ *   r     - the HTTP request (pool used for allocation, logging)
+ *   entry - the Cache-Control header entry to modify
+ *
+ * Returns:
+ *   NGX_OK    - entry updated or already correct
+ *   NGX_ERROR - allocation failed
+ */
+static ngx_int_t
+ngx_http_markdown_ensure_private_on_entry(ngx_http_request_t *r,
+                                          ngx_table_elt_t *entry)
+{
+    ngx_int_t  rc;
+
+    if (ngx_http_markdown_cache_control_has_directive(
+            &entry->value, &ngx_http_markdown_public_directive))
+    {
+        rc = ngx_http_markdown_strip_public_and_append_private(r, entry);
+        return rc;
+    }
+
+    if (ngx_http_markdown_cache_control_has_directive(
+            &entry->value, &ngx_http_markdown_private_directive))
+    {
+        return NGX_OK;
+    }
+
+    rc = ngx_http_markdown_append_private_directive(r, entry);
+    return rc;
+}
+
+/*
+ * Rewrite all Cache-Control entries that contain "public" to use "private".
+ *
+ * Iterates the NGINX header linked list.  For each Cache-Control entry
+ * that contains "public", strips it and appends "private".  For entries
+ * that lack both "public" and "private", appends ", private".
+ *
+ * Parameters:
+ *   r       - the HTTP request (pool used for allocation, logging)
+ *   headers - the outgoing headers list to rewrite
+ *
+ * Returns:
+ *   NGX_OK    - all entries updated successfully
+ *   NGX_ERROR - allocation failed on any entry
+ */
+static ngx_int_t
+ngx_http_markdown_rewrite_public_entries(ngx_http_request_t *r,
+                                         ngx_list_t *headers)
+{
+    ngx_list_part_t  *part;
+    ngx_table_elt_t  *elts;
+    ngx_int_t         rc;
+
+    part = &headers->part;
+    for (/* void */; part != NULL; part = part->next) {
+        elts = part->elts;
+        for (size_t i = 0; i < part->nelts; i++) {
+            if (!ngx_http_markdown_is_cache_control_header(&elts[i])) {
+                continue;
+            }
+
+            rc = ngx_http_markdown_ensure_private_on_entry(r, &elts[i]);
+            if (rc != NGX_OK) {
+                return rc;
+            }
+        }
+    }
+
+    return NGX_OK;
+}
+
+/*
  * Modify Cache-Control header for authenticated content
  *
  * Applies the following rules to ensure secure caching:
@@ -833,65 +977,53 @@ ngx_http_markdown_cache_control_has_directive(const ngx_str_t *value,
 ngx_int_t
 ngx_http_markdown_modify_cache_control_for_auth(ngx_http_request_t *r)
 {
-    static ngx_str_t  ngx_http_markdown_no_store =
-        { sizeof(ngx_http_markdown_cc_no_store) - 1, ngx_http_markdown_cc_no_store };
-    static ngx_str_t  ngx_http_markdown_private =
-        { sizeof(ngx_http_markdown_cc_private) - 1, ngx_http_markdown_cc_private };
-    static ngx_str_t  ngx_http_markdown_public =
-        { sizeof(ngx_http_markdown_cc_public) - 1, ngx_http_markdown_cc_public };
-    ngx_table_elt_t  *cache_control;
-    ngx_int_t         has_no_store;
-    ngx_int_t         has_private;
-    ngx_int_t         has_public;
+    ngx_http_markdown_cc_scan_t  scan;
 
     if (r == NULL) {
         return NGX_ERROR;
     }
 
-    cache_control = ngx_http_markdown_find_response_header(
-        r,
-        ngx_http_markdown_hdr_cache_control,
-        sizeof(ngx_http_markdown_hdr_cache_control) - 1);
+    if (r->headers_out.headers.part.nelts == 0) {
+        return ngx_http_markdown_add_private_cache_control_header(r);
+    }
 
-    if (cache_control == NULL) {
+    ngx_http_markdown_scan_cache_control_headers(
+        &r->headers_out.headers, &scan);
+
+    if (scan.first_entry == NULL) {
         return ngx_http_markdown_add_private_cache_control_header(r);
     }
 
     /*
-     * Cache-Control header exists - check directives
-     */
-    has_no_store = ngx_http_markdown_cache_control_has_directive(
-        &cache_control->value, &ngx_http_markdown_no_store);
-    has_private = ngx_http_markdown_cache_control_has_directive(
-        &cache_control->value, &ngx_http_markdown_private);
-    has_public = ngx_http_markdown_cache_control_has_directive(
-        &cache_control->value, &ngx_http_markdown_public);
-
-    /*
      * Rule 3: Preserve "no-store" - NEVER downgrade
-     * If Cache-Control contains "no-store", leave it unchanged.
-     * This is the most restrictive caching directive and must be preserved.
+     * If any Cache-Control header contains "no-store", leave all
+     * unchanged.
      */
-    if (has_no_store) {
-        ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                      "markdown filter: preserving Cache-Control with no-store: \"%V\"",
-                      &cache_control->value);
+    if (scan.has_no_store) {
+        ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                      "markdown filter: preserving Cache-Control with no-store");
         return NGX_OK;
     }
 
     /*
-     * If already has "private", no modification needed
+     * If any Cache-Control header still contains "public", strip
+     * public from ALL such entries and append private.  This covers:
+     *   - First header has "public"
+     *   - First header has "private" but a later header has "public"
+     *   - Multiple headers each have "public"
+     * In all cases, each entry with public is rewritten.
      */
-    if (has_private) {
+    if (scan.any_public) {
+        return ngx_http_markdown_rewrite_public_entries(
+                   r, &r->headers_out.headers);
+    }
+
+    if (scan.has_private) {
         ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                       "markdown filter: Cache-Control already has private: \"%V\"",
-                      &cache_control->value);
+                      &scan.first_entry->value);
         return NGX_OK;
     }
 
-    if (has_public) {
-        return ngx_http_markdown_strip_public_and_append_private(r, cache_control);
-    }
-
-    return ngx_http_markdown_append_private_directive(r, cache_control);
+    return ngx_http_markdown_append_private_directive(r, scan.first_entry);
 }

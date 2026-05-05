@@ -22,10 +22,12 @@ typedef struct {
     unsigned long conversion_time_sum_ms;
     unsigned long input_bytes;
     unsigned long output_bytes;
-    unsigned long conversion_latency_le_10ms;
-    unsigned long conversion_latency_le_100ms;
-    unsigned long conversion_latency_le_1000ms;
-    unsigned long conversion_latency_gt_1000ms;
+    struct {
+        unsigned long le_10ms;
+        unsigned long le_100ms;
+        unsigned long le_1000ms;
+        unsigned long gt_1000ms;
+    } conversion_latency;
 } metrics_t;
 
 static void
@@ -34,13 +36,13 @@ record_latency(metrics_t *m, unsigned long elapsed_ms)
     m->conversion_time_sum_ms += elapsed_ms;
 
     if (elapsed_ms <= 10) {
-        m->conversion_latency_le_10ms++;
+        m->conversion_latency.le_10ms++;
     } else if (elapsed_ms <= 100) {
-        m->conversion_latency_le_100ms++;
+        m->conversion_latency.le_100ms++;
     } else if (elapsed_ms <= 1000) {
-        m->conversion_latency_le_1000ms++;
+        m->conversion_latency.le_1000ms++;
     } else {
-        m->conversion_latency_gt_1000ms++;
+        m->conversion_latency.gt_1000ms++;
     }
 }
 
@@ -97,10 +99,10 @@ test_metrics_accounting(void)
     TEST_ASSERT(m.input_bytes == 1000, "input bytes should accumulate");
     TEST_ASSERT(m.output_bytes == 300, "output bytes should accumulate");
     TEST_ASSERT(m.conversion_time_sum_ms == 2492, "elapsed time should accumulate for completed conversions");
-    TEST_ASSERT(m.conversion_latency_le_10ms == 0, "sub-10ms bucket should remain empty");
-    TEST_ASSERT(m.conversion_latency_le_100ms == 2, "up to 100ms bucket should include success and fast failure");
-    TEST_ASSERT(m.conversion_latency_le_1000ms == 1, "up to 1000ms bucket should include medium failure");
-    TEST_ASSERT(m.conversion_latency_gt_1000ms == 1, "greater than 1000ms bucket should include slow failure");
+    TEST_ASSERT(m.conversion_latency.le_10ms == 0, "sub-10ms bucket should remain empty");
+    TEST_ASSERT(m.conversion_latency.le_100ms == 2, "up to 100ms bucket should include success and fast failure");
+    TEST_ASSERT(m.conversion_latency.le_1000ms == 1, "up to 1000ms bucket should include medium failure");
+    TEST_ASSERT(m.conversion_latency.gt_1000ms == 1, "greater than 1000ms bucket should include slow failure");
     TEST_PASS("Metrics accounting works");
 }
 

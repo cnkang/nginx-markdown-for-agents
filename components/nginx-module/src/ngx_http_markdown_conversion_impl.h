@@ -27,6 +27,18 @@ static void ngx_http_markdown_metric_inc_failopen(
 static ngx_int_t ngx_http_markdown_reject_or_fail_open_buffered_response(
     ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx,
     const ngx_http_markdown_conf_t *conf, const char *debug_message);
+static ngx_http_markdown_otel_span_t *ngx_http_markdown_otel_span_start(
+    ngx_http_request_t *r, const ngx_http_markdown_conf_t *conf);
+static void ngx_http_markdown_otel_set_str_attr(
+    ngx_http_markdown_otel_span_t *span, const u_char *key, size_t key_len,
+    const u_char *value, size_t val_len);
+static void ngx_http_markdown_otel_set_int_attr(
+    ngx_http_markdown_otel_span_t *span, const u_char *key, size_t key_len,
+    int64_t value);
+static void ngx_http_markdown_otel_span_end(ngx_http_markdown_otel_span_t *span);
+static void ngx_http_markdown_otel_span_export(
+    ngx_http_markdown_otel_span_t *span, ngx_log_t *log,
+    ngx_http_request_t *r);
 
 /*
  * Local case-insensitive compare for const-qualified byte slices.
@@ -285,21 +297,21 @@ ngx_http_markdown_record_conversion_latency(ngx_msec_t elapsed_ms)
     NGX_HTTP_MARKDOWN_METRIC_ADD(conversion_time_sum_ms, elapsed_ms);
 
     if (elapsed_ms <= 10) {
-        NGX_HTTP_MARKDOWN_METRIC_INC(conversion_latency_le_10ms);
+        NGX_HTTP_MARKDOWN_METRIC_INC(conversion_latency.le_10ms);
         return;
     }
 
     if (elapsed_ms <= 100) {
-        NGX_HTTP_MARKDOWN_METRIC_INC(conversion_latency_le_100ms);
+        NGX_HTTP_MARKDOWN_METRIC_INC(conversion_latency.le_100ms);
         return;
     }
 
     if (elapsed_ms <= 1000) {
-        NGX_HTTP_MARKDOWN_METRIC_INC(conversion_latency_le_1000ms);
+        NGX_HTTP_MARKDOWN_METRIC_INC(conversion_latency.le_1000ms);
         return;
     }
 
-    NGX_HTTP_MARKDOWN_METRIC_INC(conversion_latency_gt_1000ms);
+    NGX_HTTP_MARKDOWN_METRIC_INC(conversion_latency.gt_1000ms);
 }
 
 /*
@@ -443,6 +455,70 @@ ngx_http_markdown_prepare_conversion_options(ngx_http_request_t *r,
     options->streaming_budget = 0;
 #endif
 
+    options->prune_noise = conf->prune_noise ? 1U : 0U;
+    options->prune_selectors = NULL;
+    options->prune_selector_len = 0;
+    options->prune_protection_selectors = NULL;
+    options->prune_protection_selector_len = 0;
+
+    if (conf->prune_selectors != NULL) {
+        options->prune_selectors = conf->prune_selectors->data;
+        options->prune_selector_len = conf->prune_selectors->len;
+    }
+
+    if (conf->prune_protection_selectors != NULL) {
+        options->prune_protection_selectors =
+            conf->prune_protection_selectors->data;
+        options->prune_protection_selector_len =
+            conf->prune_protection_selectors->len;
+    }
+
+    /*
+     * Unified memory budget with priority:
+     *   explicit per-engine > unified > default
+     * For streaming_budget: if streaming_budget was explicitly set
+     * (not NGX_CONF_UNSET_SIZE), use it; else if memory_budget is
+     * set, use it; else streaming_budget keeps its merge default.
+     * For max_size: same priority chain applies.
+     */
+    options->memory_budget = (conf->memory_budget != NGX_CONF_UNSET_SIZE)
+        ? conf->memory_budget : 0;
+
+    if (conf->llm_provider > UINT8_MAX) {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                      "markdown filter: llm_provider=%ui exceeds uint8 range",
+                      conf->llm_provider);
+        return NGX_ERROR;
+    }
+    if (conf->chars_per_token_fixed > UINT8_MAX) {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                      "markdown filter: chars_per_token_fixed=%ui exceeds "
+                      "uint8 range",
+                      conf->chars_per_token_fixed);
+        return NGX_ERROR;
+    }
+
+    options->llm_provider = (uint8_t) conf->llm_provider;
+    options->chars_per_token_fixed = (uint8_t) conf->chars_per_token_fixed;
+
+    /*
+     * Apply unified budget to streaming_budget when it was not
+     * explicitly set by the operator.
+     *
+     * Priority: explicit streaming_budget > memory_budget > default
+     *
+     * streaming_budget_explicit is set during merge_conf when the
+     * operator explicitly configured markdown_streaming_budget at
+     * this or any parent configuration level.
+     */
+#ifdef MARKDOWN_STREAMING_ENABLED
+    if (conf->memory_budget != NGX_CONF_UNSET_SIZE
+        && !conf->streaming_budget_explicit)
+    {
+        options->streaming_budget = conf->memory_budget;
+    }
+#endif
+
     if (r->headers_out.content_type.len > 0) {
         options->content_type = r->headers_out.content_type.data;
         options->content_type_len = r->headers_out.content_type.len;
@@ -578,6 +654,273 @@ ngx_http_markdown_record_conversion_success(ngx_http_markdown_ctx_t *ctx,
     NGX_HTTP_MARKDOWN_METRIC_INC(conversions_succeeded);
     NGX_HTTP_MARKDOWN_METRIC_ADD(input_bytes, ctx->buffer.size);
     NGX_HTTP_MARKDOWN_METRIC_ADD(output_bytes, result->markdown_len);
+}
+
+static const ngx_str_t *
+ngx_http_markdown_otel_flavor_name(ngx_uint_t flavor)
+{
+    static ngx_str_t gfm_name = ngx_string("gfm");
+    static ngx_str_t mdx_name = ngx_string("mdx");
+    static ngx_str_t org_mode_name = ngx_string("org-mode");
+    static ngx_str_t commonmark_name = ngx_string("commonmark");
+
+    switch (flavor) {
+    case NGX_HTTP_MARKDOWN_FLAVOR_GFM:
+        return &gfm_name;
+    case NGX_HTTP_MARKDOWN_FLAVOR_MDX:
+        return &mdx_name;
+    case NGX_HTTP_MARKDOWN_FLAVOR_ORG_MODE:
+        return &org_mode_name;
+    case NGX_HTTP_MARKDOWN_FLAVOR_COMMONMARK:
+    default:
+        return &commonmark_name;
+    }
+}
+
+static const ngx_str_t *
+ngx_http_markdown_otel_engine_name(ngx_uint_t path)
+{
+    static ngx_str_t incremental_name = ngx_string("incremental");
+    static ngx_str_t fullbuffer_name = ngx_string("fullbuffer");
+
+    if (path == NGX_HTTP_MARKDOWN_PATH_INCREMENTAL) {
+        return &incremental_name;
+    }
+    return &fullbuffer_name;
+}
+
+static void
+ngx_http_markdown_otel_teardown_span(ngx_http_request_t *r,
+                                     ngx_http_markdown_ctx_t *ctx,
+                                     size_t input_bytes,
+                                     size_t output_bytes,
+                                     int64_t error_code)
+{
+    if (ctx->otel_span == NULL) {
+        return;
+    }
+
+    ngx_http_markdown_otel_set_int_attr(ctx->otel_span,
+        (const u_char *) "input_bytes", 11, (int64_t) input_bytes);
+    ngx_http_markdown_otel_set_int_attr(ctx->otel_span,
+        (const u_char *) "output_bytes", 12, (int64_t) output_bytes);
+    ngx_http_markdown_otel_set_int_attr(ctx->otel_span,
+        (const u_char *) "error_code", 10, error_code);
+    ngx_http_markdown_otel_span_end(ctx->otel_span);
+    ngx_http_markdown_otel_span_export(ctx->otel_span, r->connection->log, r);
+    ctx->otel_span = NULL;
+}
+
+/*
+ * Determine which child to follow in the per-path RB tree
+ * when the hash key matches but the URI path does not.
+ *
+ * Returns -1 to descend left, +1 to descend right.
+ *
+ * @param r    The request providing the URI to compare
+ * @param node The tree node whose path is compared against
+ */
+static int
+ngx_http_markdown_per_path_cmp(const ngx_http_request_t *r,
+                               const ngx_http_markdown_path_metric_node_t *node)
+{
+    if (r->uri.len < node->path_len) {
+        return -1;
+    }
+
+    if (r->uri.len > node->path_len) {
+        return 1;
+    }
+
+    if (ngx_memcmp(r->uri.data, node->path, node->path_len) < 0) {
+        return -1;
+    }
+
+    return 1;
+}
+
+/*
+ * Search the per-path RB tree for an existing entry matching the
+ * request URI.  On match, atomically increments per-path and
+ * aggregate counters and returns NGX_OK.  On miss, returns
+ * NGX_DECLINED so the caller can insert a new node.
+ *
+ * Must be called with shpool->mutex held.  The mutex is NOT
+ * released by this function on either return path.
+ *
+ * @param r          The request (provides r->uri as the lookup key)
+ * @param metrics    Shared metrics structure containing the RB tree
+ * @param sentinel   The RB tree sentinel node (read-only)
+ * @param key        Precomputed hash key for r->uri
+ * @param elapsed_ms Conversion elapsed time to record on match
+ */
+static ngx_int_t
+ngx_http_markdown_per_path_lookup_and_update(
+    const ngx_http_request_t *r,
+    ngx_http_markdown_metrics_t *metrics,
+    const ngx_rbtree_node_t *sentinel,
+    ngx_uint_t key,
+    ngx_msec_t elapsed_ms)
+{
+    ngx_rbtree_node_t                    *rbnode;
+    ngx_http_markdown_path_metric_node_t *node;
+    ngx_rbtree_node_t                    *child;
+    int                                   cmp;
+
+    rbnode = metrics->per_path.path_tree.root;
+
+    for ( ;; ) {
+        if (key < rbnode->key) {
+            if (rbnode->left == sentinel) {
+                return NGX_DECLINED;
+            }
+            rbnode = rbnode->left;
+            continue;
+        }
+
+        if (key > rbnode->key) {
+            if (rbnode->right == sentinel) {
+                return NGX_DECLINED;
+            }
+            rbnode = rbnode->right;
+            continue;
+        }
+
+        node = (ngx_http_markdown_path_metric_node_t *) rbnode;
+
+        if (r->uri.len == node->path_len
+            && ngx_memcmp(r->uri.data, node->path,
+                          node->path_len) == 0)
+        {
+            ngx_atomic_fetch_add(&node->conversions, 1);
+            ngx_atomic_fetch_add(&node->entries, 1);
+            ngx_atomic_fetch_add(&node->conversion_time_sum_ms,
+                                 (ngx_atomic_uint_t) elapsed_ms);
+            ngx_atomic_fetch_add(
+                &metrics->per_path.path_conversions, 1);
+            ngx_atomic_fetch_add(
+                &metrics->per_path.path_conversion_time_sum_ms,
+                (ngx_atomic_uint_t) elapsed_ms);
+            return NGX_OK;
+        }
+
+        cmp = ngx_http_markdown_per_path_cmp(r, node);
+        child = (cmp < 0) ? rbnode->left : rbnode->right;
+        if (child == sentinel) {
+            return NGX_DECLINED;
+        }
+        rbnode = child;
+    }
+}
+
+/*
+ * Record per-path metrics for a successful conversion.
+ *
+ * Looks up the request URI in the shared RB-tree.  If the path
+ * is not found and the tree is below cardinality_limit, allocates
+ * a new node from the slab pool and inserts it.  If at capacity,
+ * increments overflow_count.  Updates per-path and aggregate
+ * counters under the slab pool mutex.
+ *
+ * Parameters:
+ *   r          - the HTTP request (provides r->uri as the path key)
+ *   conf       - module location configuration
+ *   elapsed_ms - conversion elapsed time in milliseconds
+ */
+static void
+ngx_http_markdown_record_per_path_metrics(
+    ngx_http_request_t *r,
+    const ngx_http_markdown_conf_t *conf,
+    ngx_msec_t elapsed_ms)
+{
+    ngx_shm_zone_t                       *zone;
+    ngx_slab_pool_t                      *shpool;
+    ngx_http_markdown_metrics_t          *metrics;
+    ngx_http_markdown_path_metric_node_t *node;
+    const ngx_rbtree_node_t              *sentinel;
+    ngx_uint_t                            hash;
+    ngx_uint_t                            key;
+
+    if (!conf->ops.metrics_per_path) {
+        return;
+    }
+
+    zone = ngx_http_markdown_metrics_shm_zone;
+    if (zone == NULL || zone->data == NULL) {
+        return;
+    }
+
+    metrics = (ngx_http_markdown_metrics_t *) zone->data;
+    shpool = (ngx_slab_pool_t *) zone->shm.addr;
+
+    if (r->uri.len == 0 || r->uri.data == NULL) {
+        return;
+    }
+
+    hash = ngx_hash_key(r->uri.data, r->uri.len);
+    key = hash;
+
+    ngx_shmtx_lock(&shpool->mutex);
+
+    sentinel = &metrics->per_path.sentinel;
+
+    if (metrics->per_path.path_tree.root != sentinel
+        && ngx_http_markdown_per_path_lookup_and_update(
+               r, metrics, sentinel, key, elapsed_ms) == NGX_OK)
+    {
+        ngx_shmtx_unlock(&shpool->mutex);
+        return;
+    }
+
+    if (metrics->per_path.path_entries
+        >= metrics->per_path.cardinality_limit)
+    {
+        ngx_atomic_fetch_add(&metrics->per_path.overflow_count, 1);
+        ngx_atomic_fetch_add(&metrics->per_path.path_conversions, 1);
+        ngx_atomic_fetch_add(
+            &metrics->per_path.path_conversion_time_sum_ms,
+            (ngx_atomic_uint_t) elapsed_ms);
+        ngx_shmtx_unlock(&shpool->mutex);
+        return;
+    }
+
+    node = ngx_slab_alloc_locked(shpool,
+        sizeof(ngx_http_markdown_path_metric_node_t));
+    if (node == NULL) {
+        ngx_atomic_fetch_add(&metrics->per_path.path_conversions, 1);
+        ngx_atomic_fetch_add(
+            &metrics->per_path.path_conversion_time_sum_ms,
+            (ngx_atomic_uint_t) elapsed_ms);
+        ngx_shmtx_unlock(&shpool->mutex);
+        return;
+    }
+
+    node->path = ngx_slab_alloc_locked(shpool, r->uri.len);
+    if (node->path == NULL) {
+        ngx_slab_free_locked(shpool, node);
+        ngx_atomic_fetch_add(&metrics->per_path.path_conversions, 1);
+        ngx_atomic_fetch_add(
+            &metrics->per_path.path_conversion_time_sum_ms,
+            (ngx_atomic_uint_t) elapsed_ms);
+        ngx_shmtx_unlock(&shpool->mutex);
+        return;
+    }
+
+    ngx_memcpy(node->path, r->uri.data, r->uri.len);
+    node->path_len = r->uri.len;
+    node->rbnode.key = key;
+    node->conversions = 1;
+    node->entries = 1;
+    node->conversion_time_sum_ms = (ngx_atomic_t) elapsed_ms;
+
+    ngx_rbtree_insert(&metrics->per_path.path_tree, &node->rbnode);
+
+    ngx_atomic_fetch_add(&metrics->per_path.path_entries, 1);
+    ngx_atomic_fetch_add(&metrics->per_path.path_conversions, 1);
+    ngx_atomic_fetch_add(&metrics->per_path.path_conversion_time_sum_ms,
+                         (ngx_atomic_uint_t) elapsed_ms);
+
+    ngx_shmtx_unlock(&shpool->mutex);
 }
 
 /*
@@ -856,7 +1199,7 @@ ngx_http_markdown_record_token_savings_if_enabled(
 
     savings = html_tokens - (ngx_atomic_uint_t) result->token_estimate;
     if (savings > 0) {
-        NGX_HTTP_MARKDOWN_METRIC_ADD(estimated_token_savings, savings);
+        NGX_HTTP_MARKDOWN_METRIC_ADD(results.estimated_token_savings, savings);
     }
 }
 
@@ -899,7 +1242,37 @@ ngx_http_markdown_execute_conversion(ngx_http_request_t *r,
             r, ctx, conf);
     }
 
-    ngx_http_markdown_prepare_conversion_options(r, conf, &options);
+    ctx->otel_span = NULL;
+    if (conf->ops.otel_enabled) {
+        const ngx_str_t *flavor_name;
+        const ngx_str_t *engine_name;
+
+        ctx->otel_span = ngx_http_markdown_otel_span_start(r, conf);
+        if (ctx->otel_span != NULL) {
+            flavor_name = ngx_http_markdown_otel_flavor_name(conf->flavor);
+            engine_name = ngx_http_markdown_otel_engine_name(
+                ctx->processing_path);
+            ngx_http_markdown_otel_set_str_attr(ctx->otel_span,
+                (const u_char *) "flavor", 6,
+                flavor_name->data, flavor_name->len);
+            ngx_http_markdown_otel_set_str_attr(ctx->otel_span,
+                (const u_char *) "engine", 6,
+                engine_name->data, engine_name->len);
+            if (r->uri.len > 0) {
+                ngx_http_markdown_otel_set_str_attr(ctx->otel_span,
+                    (const u_char *) "uri", 3,
+                    r->uri.data, r->uri.len);
+            }
+        }
+    }
+
+    rc = ngx_http_markdown_prepare_conversion_options(r, conf, &options);
+    if (rc != NGX_OK) {
+        ngx_http_markdown_otel_teardown_span(r, ctx, ctx->buffer.size, 0,
+                                             ERROR_INVALID_INPUT);
+        return ngx_http_markdown_reject_or_fail_open_buffered_response(
+            r, ctx, conf, NULL);
+    }
 
     tp = ngx_timeofday();
     start_time = (ngx_msec_t) (tp->sec * 1000 + tp->msec);
@@ -975,16 +1348,22 @@ ngx_http_markdown_execute_conversion(ngx_http_request_t *r,
     }
 
     if (result->error_code != ERROR_SUCCESS) {
+        ngx_http_markdown_otel_teardown_span(
+            r, ctx, ctx->buffer.size, 0, (int64_t) result->error_code);
         return ngx_http_markdown_handle_conversion_failure(
             r, ctx, conf, result, *elapsed_ms);
     }
 
     rc = ngx_http_markdown_validate_conversion_result(r, ctx, conf, result);
     if (rc != NGX_OK) {
+        ngx_http_markdown_otel_teardown_span(
+            r, ctx, ctx->buffer.size, 0, ERROR_INTERNAL);
         return rc;
     }
 
     ngx_http_markdown_record_conversion_success(ctx, result, *elapsed_ms);
+
+    ngx_http_markdown_record_per_path_metrics(r, conf, *elapsed_ms);
 
 #ifdef MARKDOWN_STREAMING_ENABLED
     /*
@@ -1006,6 +1385,9 @@ ngx_http_markdown_execute_conversion(ngx_http_request_t *r,
 #endif
 
     ngx_http_markdown_record_token_savings_if_enabled(ctx, conf, result);
+
+    ngx_http_markdown_otel_teardown_span(
+        r, ctx, ctx->buffer.size, result->markdown_len, 0);
 
     return NGX_OK;
 }

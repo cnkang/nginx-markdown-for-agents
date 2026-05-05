@@ -54,7 +54,7 @@ NGINX_HEADER := $(NGINX_MODULE_DIR)/src/markdown_converter.h
         test-nginx-integration test-e2e test-all test-rust-fuzz-smoke sonar-compile-db \
         test-benchmark test-benchmark-compare test-benchmark-summary \
         harness-check harness-check-full \
-        docs-check license-check release-gates-check release-gates-check-055 release-gates-check-legacy release-gates-check-strict \
+        docs-check license-check release-gates-check release-gates-check-055 release-gates-check-060 release-gates-check-legacy release-gates-check-strict \
         verify-large-e2e verify-huge-native-e2e verify-huge-allowed-native-e2e \
         verify-chunked-native-e2e verify-chunked-native-e2e-smoke verify-chunked-native-e2e-stress \
         verify-streaming-failure-cache-e2e \
@@ -62,7 +62,7 @@ NGINX_HEADER := $(NGINX_MODULE_DIR)/src/markdown_converter.h
         verify-metrics-endpoint-e2e verify-conditional-requests-e2e verify-config-merge-e2e \
         verify-auth-cache-e2e verify-status-codes-e2e \
         test-rust-streaming \
-        coverage-c coverage-rust coverage-sonar-xml coverage-all \
+        coverage-c coverage-rust coverage-sonar-xml coverage-all coverage-gate \
         clean help
 
 all: build
@@ -73,7 +73,7 @@ build: rust-lib copy-headers
 
 rust-lib:
 	@echo "Building Rust library for $(RUST_TARGET)..."
-	cd $(RUST_DIR) && cargo build --target $(RUST_TARGET) --release
+	cd $(RUST_DIR) && cargo build --locked --target $(RUST_TARGET) --release
 	@echo "Generating C header with cbindgen..."
 	cd $(RUST_DIR) && mkdir -p include && cbindgen --config cbindgen.toml --crate nginx-markdown-converter --output include/markdown_converter.h
 
@@ -193,6 +193,9 @@ release-gates-check:
 release-gates-check-055:
 	python3 tools/release/gates/validate_release_gates_055.py
 
+release-gates-check-060:
+	python3 tools/release/gates/validate_release_gates_060.py
+
 release-gates-check-legacy:
 	python3 tools/release/legacy/validate_release_gates.py
 
@@ -284,6 +287,21 @@ coverage-sonar-xml:
 
 coverage-all: coverage-c coverage-rust coverage-sonar-xml
 
+COVERAGE_C_MIN_LINE ?= 80
+COVERAGE_C_MIN_FUNC ?= 80
+COVERAGE_RUST_MIN_LINE ?= 80
+COVERAGE_RUST_MIN_FUNC ?= 80
+
+coverage-gate: coverage-c coverage-rust
+	python3 tools/ci/coverage_gate.py \
+		--c-lcov $(COVERAGE_DIR)/c-coverage.lcov \
+		--rust-lcov $(COVERAGE_DIR)/rust-coverage.lcov \
+		--rust-streaming-lcov $(COVERAGE_DIR)/rust-streaming-coverage.lcov \
+		--c-min-line $(COVERAGE_C_MIN_LINE) \
+		--c-min-func $(COVERAGE_C_MIN_FUNC) \
+		--rust-min-line $(COVERAGE_RUST_MIN_LINE) \
+		--rust-min-func $(COVERAGE_RUST_MIN_FUNC)
+
 clean:
 	cd $(RUST_DIR) && cargo clean
 	$(MAKE) -C $(NGINX_TEST_DIR) clean || true
@@ -324,9 +342,11 @@ help:
 	@echo "  license-check            - Verify license policy and THIRD-PARTY-NOTICES coverage"
 	@echo "  release-gates-check      - Validate release gate framework (0.5.0 + 0.5.5)"
 	@echo "  release-gates-check-055  - Validate 0.5.5 release gates (evidence, known-diffs, docs)"
+	@echo "  release-gates-check-060  - Validate 0.6.0 release gates (streaming default, pruning, budget)"
 	@echo "  release-gates-check-legacy - Validate 0.4.0 release gate documents"
 	@echo "  release-gates-check-strict - Validate all sub-specs #12-#18 for full compliance"
 	@echo "  coverage-c               - Generate C module e2e coverage (builds NGINX with --coverage)"
 	@echo "  coverage-rust            - Generate Rust test coverage (llvm-cov lcov)"
 	@echo "  coverage-all             - Generate all coverage reports"
+	@echo "  coverage-gate            - Generate coverage and enforce min thresholds (default 80%%)"
 	@echo "  clean                    - Clean build artifacts"

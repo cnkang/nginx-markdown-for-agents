@@ -12,7 +12,7 @@
 
 use markup5ever_rcdom::{Handle, NodeData, RcDom};
 
-use super::pruning::{PruneDecision, should_prune};
+use super::pruning::{PruneDecision, should_prune_with_config};
 
 /// Maximum nesting depth for fast-path qualification.
 ///
@@ -123,9 +123,9 @@ pub(crate) enum FastPathResult {
 /// The scan visits at most `min(n, FAST_PATH_MAX_NODES + 1)` DOM nodes and
 /// stores only the recursion stack. Stack depth is bounded by
 /// `FAST_PATH_MAX_DEPTH + 1` before the document is disqualified.
-pub(crate) fn qualifies(dom: &RcDom) -> FastPathResult {
+pub(crate) fn qualifies(dom: &RcDom, prune_config: &super::pruning::PruneConfig) -> FastPathResult {
     let mut visited: usize = 0;
-    if check_node(&dom.document, 0, &mut visited) {
+    if check_node(&dom.document, 0, &mut visited, prune_config) {
         FastPathResult::Qualifies
     } else {
         FastPathResult::Normal
@@ -138,7 +138,12 @@ pub(crate) fn qualifies(dom: &RcDom) -> FastPathResult {
 /// `false` otherwise. The `visited` counter is incremented for each node and
 /// the scan bails out to the normal path when [`FAST_PATH_MAX_NODES`] is
 /// exceeded, bounding pre-scan cost on very large DOMs.
-fn check_node(node: &Handle, depth: usize, visited: &mut usize) -> bool {
+fn check_node(
+    node: &Handle,
+    depth: usize,
+    visited: &mut usize,
+    prune_config: &super::pruning::PruneConfig,
+) -> bool {
     *visited += 1;
     if *visited > FAST_PATH_MAX_NODES {
         return false;
@@ -161,7 +166,7 @@ fn check_node(node: &Handle, depth: usize, visited: &mut usize) -> bool {
 
             // Prunable elements are acceptable — their subtrees are skipped
             // during traversal, so we don't need to inspect children.
-            if should_prune(tag) != PruneDecision::Traverse {
+            if should_prune_with_config(tag, prune_config) != PruneDecision::Traverse {
                 return true;
             }
 
@@ -174,7 +179,7 @@ fn check_node(node: &Handle, depth: usize, visited: &mut usize) -> bool {
 
     // Recursively check all children.
     for child in node.children.borrow().iter() {
-        if !check_node(child, depth + 1, visited) {
+        if !check_node(child, depth + 1, visited, prune_config) {
             return false;
         }
     }
@@ -184,6 +189,7 @@ fn check_node(node: &Handle, depth: usize, visited: &mut usize) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use super::super::pruning::PruneConfig;
     use super::*;
     use crate::parser::parse_html;
 
@@ -195,19 +201,28 @@ mod tests {
     #[test]
     fn simple_paragraph_qualifies() {
         let dom = parse("<html><body><p>Hello world</p></body></html>");
-        assert_eq!(qualifies(&dom), FastPathResult::Qualifies);
+        assert_eq!(
+            qualifies(&dom, &PruneConfig::default_enabled()),
+            FastPathResult::Qualifies
+        );
     }
 
     #[test]
     fn table_does_not_qualify() {
         let dom = parse("<html><body><table><tr><td>cell</td></tr></table></body></html>");
-        assert_eq!(qualifies(&dom), FastPathResult::Normal);
+        assert_eq!(
+            qualifies(&dom, &PruneConfig::default_enabled()),
+            FastPathResult::Normal
+        );
     }
 
     #[test]
     fn form_does_not_qualify() {
         let dom = parse("<html><body><form><input></form></body></html>");
-        assert_eq!(qualifies(&dom), FastPathResult::Normal);
+        assert_eq!(
+            qualifies(&dom, &PruneConfig::default_enabled()),
+            FastPathResult::Normal
+        );
     }
 
     #[test]
@@ -221,7 +236,10 @@ mod tests {
         let close: String = "</div>".repeat(explicit_divs);
         let html = format!("<html><body>{open}<p>deep</p>{close}</body></html>");
         let dom = parse(&html);
-        assert_eq!(qualifies(&dom), FastPathResult::Qualifies);
+        assert_eq!(
+            qualifies(&dom, &PruneConfig::default_enabled()),
+            FastPathResult::Qualifies
+        );
     }
 
     #[test]
@@ -232,7 +250,10 @@ mod tests {
         let close: String = "</div>".repeat(explicit_divs);
         let html = format!("<html><body>{open}<p>too deep</p>{close}</body></html>");
         let dom = parse(&html);
-        assert_eq!(qualifies(&dom), FastPathResult::Normal);
+        assert_eq!(
+            qualifies(&dom, &PruneConfig::default_enabled()),
+            FastPathResult::Normal
+        );
     }
 
     #[test]
@@ -247,20 +268,29 @@ mod tests {
              <p>Content</p>\
              </body></html>",
         );
-        assert_eq!(qualifies(&dom), FastPathResult::Qualifies);
+        assert_eq!(
+            qualifies(&dom, &PruneConfig::default_enabled()),
+            FastPathResult::Qualifies
+        );
     }
 
     #[test]
     fn empty_document_qualifies() {
         let dom = parse("<html><body></body></html>");
-        assert_eq!(qualifies(&dom), FastPathResult::Qualifies);
+        assert_eq!(
+            qualifies(&dom, &PruneConfig::default_enabled()),
+            FastPathResult::Qualifies
+        );
     }
 
     #[test]
     fn text_only_document_qualifies() {
         // html5ever wraps bare text in <html><head></head><body>…</body></html>
         let dom = parse("Just some text");
-        assert_eq!(qualifies(&dom), FastPathResult::Qualifies);
+        assert_eq!(
+            qualifies(&dom, &PruneConfig::default_enabled()),
+            FastPathResult::Qualifies
+        );
     }
 
     #[test]
@@ -276,7 +306,10 @@ mod tests {
              <footer><p>Copyright</p></footer>\
              </body></html>",
         );
-        assert_eq!(qualifies(&dom), FastPathResult::Qualifies);
+        assert_eq!(
+            qualifies(&dom, &PruneConfig::default_enabled()),
+            FastPathResult::Qualifies
+        );
     }
 
     #[test]
@@ -288,6 +321,9 @@ mod tests {
         let body: String = "<p>x</p>".repeat(paragraphs);
         let html = format!("<html><body>{body}</body></html>");
         let dom = parse(&html);
-        assert_eq!(qualifies(&dom), FastPathResult::Normal);
+        assert_eq!(
+            qualifies(&dom, &PruneConfig::default_enabled()),
+            FastPathResult::Normal
+        );
     }
 }

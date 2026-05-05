@@ -275,6 +275,41 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
     ngx_flag_t                       filter_enabled;
     ngx_int_t                        should_convert;
 
+    /* Apply pending dynamic config reload if signaled.
+     *
+     * IMPORTANT: reload_pending is cleared AFTER the reload attempt
+     * (not before), so a failed reload does not lose the signal.
+     * A subsequent request will retry the reload.
+     *
+     * WARNING: File I/O in this path is blocking.  This is acceptable
+     * for low-frequency config reloads but not for high-frequency
+     * events.  A future improvement should defer reload to a timer
+     * handler to avoid blocking the request.
+     */
+    if (ngx_http_markdown_dynconf_watcher.reload_pending) {
+        conf = ngx_http_get_module_loc_conf(r, ngx_http_markdown_filter_module);
+
+        if (conf != NULL) {
+            ngx_int_t  dynconf_rc;
+
+            dynconf_rc = ngx_http_markdown_dynconf_reload(
+                &ngx_http_markdown_dynconf_watcher, conf, r);
+
+            if (dynconf_rc == NGX_OK) {
+                ngx_http_markdown_dynconf_watcher.reload_pending = 0;
+            } else {
+                ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
+                              "markdown dynconf: reload failed (rc=%i), "
+                              "flag retained; will retry on next request",
+                              dynconf_rc);
+            }
+        } else {
+            ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
+                          "markdown dynconf: no configuration to reload into");
+            ngx_http_markdown_dynconf_watcher.reload_pending = 0;
+        }
+    }
+
     /* Get module configuration */
     conf = ngx_http_get_module_loc_conf(r, ngx_http_markdown_filter_module);
     if (conf == NULL) {

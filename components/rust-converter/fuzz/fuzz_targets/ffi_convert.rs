@@ -58,6 +58,14 @@ fuzz_target!(|data: &[u8]| {
         },
         base_url_len: if bits & 0x08 == 0 { base_url.len() } else { 0 },
         streaming_budget: 0,
+        prune_noise: 1,
+        prune_selectors: ptr::null(),
+        prune_selector_len: 0,
+        prune_protection_selectors: ptr::null(),
+        prune_protection_selector_len: 0,
+        memory_budget: 0,
+        llm_provider: 0,
+        chars_per_token_fixed: 0,
     };
 
     let mut result = MarkdownResult {

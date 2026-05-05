@@ -41,8 +41,13 @@ static ngx_shm_zone_t *ngx_http_markdown_metrics_shm_zone = NULL;
  * prevents attaching an incompatible old allocation after hot reload.
  */
 static ngx_str_t ngx_http_markdown_metrics_shm_name =
-    ngx_string("nginx_markdown_metrics_v3");
+    ngx_string("nginx_markdown_metrics_v5");
 static u_char ngx_http_markdown_empty_string[] = "";
+
+/* Global dynamic config watcher for this worker process. */
+static ngx_http_markdown_dynconf_watcher_t ngx_http_markdown_dynconf_watcher = {
+    { 0, NULL }, 0, NULL, 0, 0
+};
 
 #define NGX_HTTP_MARKDOWN_METRIC_ADD(field, value)                                  \
     do {                                                                            \
@@ -138,7 +143,7 @@ ngx_http_markdown_metric_inc_failopen(
     if (conf->on_error
         == NGX_HTTP_MARKDOWN_ON_ERROR_PASS)
     {
-        NGX_HTTP_MARKDOWN_METRIC_INC(failopen_count);
+        NGX_HTTP_MARKDOWN_METRIC_INC(results.failopen_count);
     }
 }
 

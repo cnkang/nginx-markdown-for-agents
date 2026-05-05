@@ -101,5 +101,5 @@ As a working rule:
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 0.5.6 | 2026-04-28 | release-prep | Updated shared helper description to include new E2E helpers |
+| 0.6.0 | 2026-05-02 | v060-prod | Updated shared helper description to include new E2E helpers |
 | 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |

@@ -33,21 +33,27 @@ build/unit build/integration build/generated:
 #   config_handlers_impl / config_core_impl - config-layer unit tests; need
 #                      nginx_stubs for NGINX API redefinitions and -ffunction-sections
 #                      for dead-code elimination of unused stubs.
+#   dynconf_impl     - dynamic config hot-reload; needs nginx_stubs for
+#                      NGINX API redefinitions, streaming enabled, and
+#                      -ffunction-sections for dead-code elimination.
 build/unit/%: unit/%_test.c include/test_common.h include/test_metrics_snapshot.h | build/unit build/generated
 	@extra_srcs=""; \
 	extra_cflags=""; \
 	extra_ldflags=""; \
 	case "$*" in \
 	  headers) extra_srcs="helpers/headers_standalone.c" ;; \
-	  header_compile|reason_code) extra_cflags="-I../src -Iinclude/nginx_stubs -DMARKDOWN_STREAMING_ENABLED" ;; \
+	  header_compile|reason_code|error_impl) extra_cflags="-I../src -Iinclude/nginx_stubs -DMARKDOWN_STREAMING_ENABLED" ;; \
 	  gzip_deflate_decompression) extra_ldflags="-lz" ;; \
 	  streaming_decomp) extra_cflags="-I../src -Iinclude/nginx_stubs -DMARKDOWN_STREAMING_ENABLED"; extra_ldflags="-lz" ;; \
 	  streaming) extra_cflags="-DMARKDOWN_STREAMING_ENABLED" ;; \
 	  streaming_impl) extra_cflags="-I../src -Iinclude/nginx_stubs -I../../rust-converter/include -DMARKDOWN_STREAMING_ENABLED -ffunction-sections" ; extra_ldflags="$(SECTION_GC_LDFLAGS) -lz" ;; \
 	  conversion_impl_base_url) extra_cflags="-Iinclude/nginx_stubs -ffunction-sections" ; extra_ldflags="$(SECTION_GC_LDFLAGS)" ;; \
 	  config_handlers_impl) extra_cflags="-Iinclude/nginx_stubs -ffunction-sections" ; extra_ldflags="$(SECTION_GC_LDFLAGS)" ;; \
+	  eligibility_impl) extra_cflags="-Iinclude/nginx_stubs -DMARKDOWN_STREAMING_ENABLED -ffunction-sections" ; extra_ldflags="$(SECTION_GC_LDFLAGS)" ;; \
 	  config_core_impl) extra_cflags="-Iinclude/nginx_stubs -ffunction-sections" ; extra_ldflags="$(SECTION_GC_LDFLAGS)" ;; \
+	  dynconf_impl) extra_cflags="-Iinclude/nginx_stubs -DMARKDOWN_STREAMING_ENABLED -ffunction-sections" ; extra_ldflags="$(SECTION_GC_LDFLAGS)" ;; \
 	  prometheus_renderer) extra_cflags="-DMARKDOWN_STREAMING_ENABLED" ;; \
+	  prometheus_per_path) extra_cflags="-DMARKDOWN_STREAMING_ENABLED" ;; \
 	esac; \
 	$(CC) $(CFLAGS_COMMON) $(LDFLAGS_COMMON) $$extra_cflags -o "$@" "$<" $$extra_srcs $$extra_ldflags
 

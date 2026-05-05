@@ -25,10 +25,89 @@ static void ngx_http_markdown_log_merged_conf(ngx_conf_t *cf,
     const ngx_http_markdown_conf_t *conf);
 
 /*
+ * Choose the RB-tree branch direction for a node vs an existing tree node.
+ *
+ * Compares by rbtree key (hash) first, then by path_len and path bytes
+ * to resolve hash collisions.  Returns &temp->left or &temp->right.
+ */
+static ngx_rbtree_node_t **
+ngx_http_markdown_path_rbtree_choose_branch(ngx_rbtree_node_t *temp,
+    const ngx_rbtree_node_t *node)
+{
+    const ngx_http_markdown_path_metric_node_t  *n;
+    const ngx_http_markdown_path_metric_node_t  *t;
+
+    if (node->key < temp->key) {
+        return &temp->left;
+    }
+
+    if (node->key > temp->key) {
+        return &temp->right;
+    }
+
+    n = (const ngx_http_markdown_path_metric_node_t *) node;
+    t = (const ngx_http_markdown_path_metric_node_t *) temp;
+
+    if (n->path_len < t->path_len) {
+        return &temp->left;
+    }
+
+    if (n->path_len > t->path_len) {
+        return &temp->right;
+    }
+
+    if (ngx_memcmp(n->path, t->path, n->path_len) < 0) {
+        return &temp->left;
+    }
+
+    return &temp->right;
+}
+
+/*
+ * RB-tree insert callback for per-path metric nodes.
+ *
+ * Compares by rbnode.key (hash) first, then by path_len
+ * and path bytes to resolve hash collisions.
+ */
+static void
+ngx_http_markdown_path_rbtree_insert_value(ngx_rbtree_node_t *temp,
+    ngx_rbtree_node_t *node, ngx_rbtree_node_t *sentinel)
+{
+    ngx_rbtree_node_t  **p;
+
+    for ( ;; ) {
+        p = ngx_http_markdown_path_rbtree_choose_branch(temp, node);
+
+        if (*p == sentinel) {
+            break;
+        }
+
+        temp = *p;
+    }
+
+    *p = node;
+    node->parent = temp;
+    node->left = sentinel;
+    node->right = sentinel;
+    ngx_rbt_red(node);
+}
+
+/*
+ * Default per-path cardinality limit.
+ *
+ * Caps the number of distinct URI paths tracked in the shared
+ * RB-tree to prevent unbounded memory growth in the slab pool.
+ * Configurable via markdown_metrics_per_path_cardinality (future).
+ */
+#define NGX_HTTP_MARKDOWN_PER_PATH_CARDINALITY_DEFAULT  100
+
+/*
  * Shared-memory initializer for cross-worker metrics storage.
  *
  * On reload, nginx may pass previous zone data (`data != NULL`), which is
- * reattached instead of allocating a fresh counter block.
+ * reattached instead of allocating a fresh counter block.  The SHM zone
+ * name is versioned (v5) so an incompatible layout after hot reload
+ * allocates a fresh slab instead of reattaching stale data.
  */
 static ngx_int_t
 ngx_http_markdown_init_metrics_zone(ngx_shm_zone_t *shm_zone, void *data)
@@ -57,6 +136,13 @@ ngx_http_markdown_init_metrics_zone(ngx_shm_zone_t *shm_zone, void *data)
     }
 
     ngx_memzero(metrics, sizeof(ngx_http_markdown_metrics_t));
+
+    ngx_rbtree_init(&metrics->per_path.path_tree,
+                    &metrics->per_path.sentinel,
+                    ngx_http_markdown_path_rbtree_insert_value);
+    metrics->per_path.cardinality_limit =
+        NGX_HTTP_MARKDOWN_PER_PATH_CARDINALITY_DEFAULT;
+
     shpool->data = metrics;
     shm_zone->data = metrics;
 
@@ -131,6 +217,7 @@ ngx_http_markdown_create_conf(ngx_conf_t *cf)
     conf->enabled_source = NGX_HTTP_MARKDOWN_ENABLED_UNSET;
     conf->enabled_complex = NULL;
     conf->max_size = NGX_CONF_UNSET_SIZE;
+    conf->max_size_explicit = 0;
     conf->timeout = NGX_CONF_UNSET_MSEC;
     conf->on_error = NGX_CONF_UNSET_UINT;
     conf->flavor = NGX_CONF_UNSET_UINT;
@@ -144,47 +231,54 @@ ngx_http_markdown_create_conf(ngx_conf_t *cf)
     conf->log_verbosity = NGX_CONF_UNSET_UINT;
     conf->buffer_chunked = NGX_CONF_UNSET;
     conf->stream_types = NGX_CONF_UNSET_PTR;
+    conf->content_types = NGX_CONF_UNSET_PTR;
     conf->auto_decompress = NGX_CONF_UNSET;
     conf->large_body_threshold = NGX_CONF_UNSET_SIZE;
     conf->ops.trust_forwarded_headers = NGX_CONF_UNSET;
     conf->ops.metrics_format = NGX_CONF_UNSET_UINT;
+    conf->ops.metrics_per_path = NGX_CONF_UNSET;
+    conf->ops.metrics_per_path_cardinality = NGX_CONF_UNSET_UINT;
+    conf->ops.otel_enabled = NGX_CONF_UNSET;
+    conf->ops.otel_tracing = NGX_CONF_UNSET;
+    conf->ops.otel_metrics = NGX_CONF_UNSET;
+    conf->ops.otel_endpoint.len = 0;
+    conf->ops.otel_endpoint.data = NULL;
+    conf->ops.otel_service_name.len = 0;
+    conf->ops.otel_service_name.data = NULL;
+    conf->ops.otel_span_buffer_size = NGX_CONF_UNSET_UINT;
+    conf->ops.otel_export_timeout = NGX_CONF_UNSET_MSEC;
 
 #ifdef MARKDOWN_STREAMING_ENABLED
     conf->streaming_engine = NULL;
     conf->streaming_budget = NGX_CONF_UNSET_SIZE;
+    conf->streaming_budget_explicit = 0;
     conf->streaming_on_error = NGX_CONF_UNSET_UINT;
     conf->streaming_shadow = NGX_CONF_UNSET;
+    conf->streaming_auto_threshold = NGX_CONF_UNSET_SIZE;
 #endif
+
+    conf->prune_noise = NGX_CONF_UNSET;
+    conf->prune_selectors = NGX_CONF_UNSET_PTR;
+    conf->prune_protection_selectors = NGX_CONF_UNSET_PTR;
+    conf->memory_budget = NGX_CONF_UNSET_SIZE;
+    conf->llm_provider = NGX_CONF_UNSET_UINT;
+    conf->chars_per_token_fixed = NGX_CONF_UNSET_UINT;
+    conf->dynconf_enabled = NGX_CONF_UNSET;
+    conf->dynconf_path.len = 0;
+    conf->dynconf_path.data = NULL;
 
     return conf;
 }
 
-/**
- * Merge per-location markdown filter configuration with inheritance from parent.
+/*
+ * Merge the enabled/source/complex triple from parent into child.
  *
- * Performs inheritance and defaults for a child location configuration by
- * applying parent values where the child is unset and enforcing sensible
- * defaults for all configuration fields.
- *
- * @param cf Configuration parsing context used for logging and error reporting.
- * @param parent Pointer to the parent (server/http) ngx_http_markdown_conf_t.
- * @param child Pointer to the child (location) ngx_http_markdown_conf_t to merge into.
- * @return NGX_CONF_OK when merge completes successfully, NGX_CONF_ERROR on failure.
+ * Priority: child explicit > parent inherited > default off.
  */
-static char *
-ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
+static void
+ngx_http_markdown_merge_enabled(ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_conf_t *prev)
 {
-    ngx_http_markdown_conf_t *prev = parent;
-    ngx_http_markdown_conf_t *conf = child;
-
-    /*
-     * Merge markdown_filter with explicit source tracking.
-     *
-     * Priority:
-     * 1. Child explicit value (on/off or complex expression)
-     * 2. Parent inherited value
-     * 3. Default off
-     */
     if (conf->enabled_source == NGX_HTTP_MARKDOWN_ENABLED_UNSET) {
         if (prev->enabled_source == NGX_HTTP_MARKDOWN_ENABLED_UNSET) {
             conf->enabled_source = NGX_HTTP_MARKDOWN_ENABLED_STATIC;
@@ -195,10 +289,54 @@ ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
             conf->enabled = prev->enabled;
             conf->enabled_complex = prev->enabled_complex;
         }
-    } else if (conf->enabled_source == NGX_HTTP_MARKDOWN_ENABLED_STATIC) {
-        conf->enabled_complex = NULL;
+        return;
     }
 
+    if (conf->enabled_source == NGX_HTTP_MARKDOWN_ENABLED_STATIC) {
+        conf->enabled_complex = NULL;
+    }
+}
+
+/*
+ * Merge an ngx_str_t field from parent into child when child is empty.
+ *
+ * If the child string has zero length and the parent string is non-empty,
+ * copies the parent value into the child.
+ */
+static void
+ngx_http_markdown_merge_str_if_unset(ngx_str_t *child, const ngx_str_t *parent)
+{
+    if (child->len == 0 && parent->len > 0) {
+        *child = *parent;
+    }
+}
+
+/*
+ * Apply the unified memory_budget → max_size override.
+ *
+ * If memory_budget is set and max_size was not explicitly configured
+ * at this or any parent level, max_size takes the memory_budget value.
+ */
+static void
+ngx_http_markdown_apply_memory_budget_override(ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_conf_t *prev, ngx_flag_t max_size_set)
+{
+    conf->max_size_explicit = max_size_set || prev->max_size_explicit;
+
+    if (conf->memory_budget != NGX_CONF_UNSET_SIZE
+        && !conf->max_size_explicit)
+    {
+        conf->max_size = conf->memory_budget;
+    }
+}
+
+/*
+ * Merge base conversion/runtime options and operational flags.
+ */
+static void
+ngx_http_markdown_merge_core_base_values(ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_conf_t *prev)
+{
     ngx_conf_merge_size_value(conf->max_size, prev->max_size, 10 * 1024 * 1024);
     ngx_conf_merge_msec_value(conf->timeout, prev->timeout, 5000);
     ngx_conf_merge_uint_value(conf->on_error, prev->on_error,
@@ -217,29 +355,155 @@ ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
                               NGX_HTTP_MARKDOWN_LOG_INFO);
     ngx_conf_merge_value(conf->buffer_chunked, prev->buffer_chunked, 1);
     ngx_conf_merge_value(conf->auto_decompress, prev->auto_decompress, 1);
-    ngx_conf_merge_value(conf->ops.trust_forwarded_headers, prev->ops.trust_forwarded_headers, 0);
+}
+
+/*
+ * Merge operational telemetry/metrics values.
+ */
+static void
+ngx_http_markdown_merge_core_ops_values(ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_conf_t *prev)
+{
+    ngx_conf_merge_value(conf->ops.trust_forwarded_headers,
+                         prev->ops.trust_forwarded_headers, 0);
     ngx_conf_merge_uint_value(conf->ops.metrics_format, prev->ops.metrics_format,
                               NGX_HTTP_MARKDOWN_METRICS_FORMAT_AUTO);
+    ngx_conf_merge_value(conf->ops.metrics_per_path, prev->ops.metrics_per_path, 0);
+    ngx_conf_merge_uint_value(conf->ops.metrics_per_path_cardinality,
+                              prev->ops.metrics_per_path_cardinality,
+                              NGX_HTTP_MARKDOWN_PER_PATH_CARDINALITY_DEFAULT);
+    ngx_conf_merge_value(conf->ops.otel_enabled, prev->ops.otel_enabled, 0);
+    ngx_conf_merge_value(conf->ops.otel_tracing, prev->ops.otel_tracing, 0);
+    ngx_conf_merge_value(conf->ops.otel_metrics, prev->ops.otel_metrics, 0);
+
+    if (conf->ops.otel_tracing || conf->ops.otel_metrics) {
+        conf->ops.otel_enabled = 1;
+    }
+
+    ngx_http_markdown_merge_str_if_unset(&conf->ops.otel_endpoint,
+                                         &prev->ops.otel_endpoint);
+    ngx_http_markdown_merge_str_if_unset(&conf->ops.otel_service_name,
+                                         &prev->ops.otel_service_name);
+    ngx_conf_merge_uint_value(conf->ops.otel_span_buffer_size,
+                              prev->ops.otel_span_buffer_size, 1024);
+    ngx_conf_merge_msec_value(conf->ops.otel_export_timeout,
+                              prev->ops.otel_export_timeout, 5000);
+}
+
+/*
+ * Merge remaining core pointer/threshold values.
+ */
+static void
+ngx_http_markdown_merge_core_ptr_values(ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_conf_t *prev)
+{
     ngx_conf_merge_size_value(conf->large_body_threshold,
                               prev->large_body_threshold,
                               NGX_HTTP_MARKDOWN_THRESHOLD_OFF);
-
     ngx_conf_merge_ptr_value(conf->auth_cookies, prev->auth_cookies, NULL);
     ngx_conf_merge_ptr_value(conf->stream_types, prev->stream_types, NULL);
+    ngx_conf_merge_ptr_value(conf->content_types, prev->content_types, NULL);
+}
+
+/*
+ * Merge base conversion/runtime options and operational flags.
+ */
+static void
+ngx_http_markdown_merge_core_values(ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_conf_t *prev)
+{
+    ngx_http_markdown_merge_core_base_values(conf, prev);
+    ngx_http_markdown_merge_core_ops_values(conf, prev);
+    ngx_http_markdown_merge_core_ptr_values(conf, prev);
+}
 
 #ifdef MARKDOWN_STREAMING_ENABLED
+/*
+ * Merge streaming-only options.
+ */
+static void
+ngx_http_markdown_merge_streaming_values(ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_conf_t *prev, ngx_flag_t streaming_budget_set)
+{
     if (conf->streaming_engine == NULL) {
         conf->streaming_engine = prev->streaming_engine;
     }
     ngx_conf_merge_size_value(conf->streaming_budget,
                               prev->streaming_budget,
                               NGX_HTTP_MARKDOWN_STREAMING_BUDGET_DEFAULT);
+    conf->streaming_budget_explicit = streaming_budget_set
+        || prev->streaming_budget_explicit;
     ngx_conf_merge_uint_value(conf->streaming_on_error,
                               prev->streaming_on_error,
                               NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_PASS);
-    ngx_conf_merge_value(conf->streaming_shadow,
-                         prev->streaming_shadow, 0);
+    ngx_conf_merge_value(conf->streaming_shadow, prev->streaming_shadow, 0);
+    ngx_conf_merge_size_value(conf->streaming_auto_threshold,
+                              prev->streaming_auto_threshold,
+                              NGX_HTTP_MARKDOWN_STREAMING_AUTO_THRESHOLD_DEFAULT);
+}
 #endif
+
+/*
+ * Merge v0.6.0-specific configuration surfaces.
+ */
+static void
+ngx_http_markdown_merge_v060_values(ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_conf_t *prev)
+{
+    ngx_conf_merge_value(conf->prune_noise, prev->prune_noise, 1);
+    ngx_conf_merge_ptr_value(conf->prune_selectors, prev->prune_selectors, NULL);
+    ngx_conf_merge_ptr_value(conf->prune_protection_selectors,
+                             prev->prune_protection_selectors, NULL);
+    ngx_conf_merge_size_value(conf->memory_budget,
+                              prev->memory_budget,
+                              NGX_CONF_UNSET_SIZE);
+    ngx_conf_merge_uint_value(conf->llm_provider, prev->llm_provider, 0);
+    ngx_conf_merge_uint_value(conf->chars_per_token_fixed,
+                              prev->chars_per_token_fixed, 0);
+    ngx_conf_merge_value(conf->dynconf_enabled, prev->dynconf_enabled, 0);
+    ngx_http_markdown_merge_str_if_unset(&conf->dynconf_path, &prev->dynconf_path);
+}
+
+/**
+ * Merge per-location markdown filter configuration with inheritance from parent.
+ *
+ * Performs inheritance and defaults for a child location configuration by
+ * applying parent values where the child is unset and enforcing sensible
+ * defaults for all configuration fields.
+ *
+ * @param cf Configuration parsing context used for logging and error reporting.
+ * @param parent Pointer to the parent (server/http) ngx_http_markdown_conf_t.
+ * @param child Pointer to the child (location) ngx_http_markdown_conf_t to merge into.
+ * @return NGX_CONF_OK when merge completes successfully, NGX_CONF_ERROR on failure.
+ */
+static char *
+ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
+{
+    const ngx_http_markdown_conf_t *prev = parent;
+    ngx_http_markdown_conf_t *conf = child;
+
+    ngx_http_markdown_merge_enabled(conf, prev);
+
+    /*
+     * Save whether max_size and streaming_budget were explicitly set at
+     * this configuration level BEFORE ngx_conf_merge_size_value replaces
+     * NGX_CONF_UNSET_SIZE with the inherited/default value.  This is
+     * needed for the unified memory_budget priority chain below.
+     */
+    ngx_flag_t  max_size_set = (conf->max_size != NGX_CONF_UNSET_SIZE);
+#ifdef MARKDOWN_STREAMING_ENABLED
+    ngx_flag_t  streaming_budget_set = (conf->streaming_budget != NGX_CONF_UNSET_SIZE);
+#endif
+
+    ngx_http_markdown_merge_core_values(conf, prev);
+
+#ifdef MARKDOWN_STREAMING_ENABLED
+    ngx_http_markdown_merge_streaming_values(conf, prev, streaming_budget_set);
+#endif
+
+    ngx_http_markdown_merge_v060_values(conf, prev);
+
+    ngx_http_markdown_apply_memory_budget_override(conf, prev, max_size_set);
 
     ngx_http_markdown_log_merged_conf(cf, conf);
 
@@ -284,6 +548,8 @@ ngx_http_markdown_flavor_name(ngx_uint_t value)
 {
     static ngx_str_t commonmark = ngx_string("commonmark");
     static ngx_str_t gfm = ngx_string("gfm");
+    static ngx_str_t mdx = ngx_string("mdx");
+    static ngx_str_t org_mode = ngx_string("org-mode");
     static ngx_str_t unknown = ngx_string("unknown");
 
     switch (value) {
@@ -291,6 +557,10 @@ ngx_http_markdown_flavor_name(ngx_uint_t value)
             return &commonmark;
         case NGX_HTTP_MARKDOWN_FLAVOR_GFM:
             return &gfm;
+        case NGX_HTTP_MARKDOWN_FLAVOR_MDX:
+            return &mdx;
+        case NGX_HTTP_MARKDOWN_FLAVOR_ORG_MODE:
+            return &org_mode;
         default:
             return &unknown;
     }
@@ -578,6 +848,7 @@ ngx_http_markdown_log_merged_conf(ngx_conf_t *cf,
     ngx_uint_t log_level;
     ngx_uint_t auth_cookie_count = (conf->auth_cookies != NULL) ? conf->auth_cookies->nelts : 0;
     ngx_uint_t stream_type_count = (conf->stream_types != NULL) ? conf->stream_types->nelts : 0;
+    ngx_uint_t content_type_count = (conf->content_types != NULL) ? conf->content_types->nelts : 0;
 
     if (cf == NULL) {
         return;
@@ -594,15 +865,17 @@ ngx_http_markdown_log_merged_conf(ngx_conf_t *cf,
                        "auth_cookie_patterns=%ui etag=%ui "
                        "conditional_requests=%V "
                        "log_verbosity=%V buffer_chunked=%ui "
-                       "stream_types=%ui "
+                        "stream_types=%ui "
+                        "content_types=%ui "
                        "large_body_threshold=%uz "
                        "trust_forwarded_headers=%ui "
-                       "metrics_format=%V"
+                        "metrics_format=%V metrics_per_path=%i otel=%i"
 #ifdef MARKDOWN_STREAMING_ENABLED
-                       " streaming_engine=%s"
-                       " streaming_budget=%uz"
-                       " streaming_on_error=%V"
-                       " streaming_shadow=%i"
+                        " streaming_engine=%s"
+                        " streaming_budget=%uz"
+                        " streaming_on_error=%V"
+                        " streaming_shadow=%i"
+                        " streaming_auto_threshold=%uz"
 #endif
                        ,
                        (ngx_uint_t) conf->enabled,
@@ -620,18 +893,22 @@ ngx_http_markdown_log_merged_conf(ngx_conf_t *cf,
                        ngx_http_markdown_conditional_requests_name(conf->conditional_requests),
                        ngx_http_markdown_log_verbosity_name(conf->log_verbosity),
                        (ngx_uint_t) conf->buffer_chunked,
-                       stream_type_count,
+                        stream_type_count,
+                        content_type_count,
                        conf->large_body_threshold,
                        (ngx_uint_t) conf->ops.trust_forwarded_headers,
-                       ngx_http_markdown_metrics_format_name(
-                           conf->ops.metrics_format)
+                        ngx_http_markdown_metrics_format_name(
+                            conf->ops.metrics_format)
+                        , (ngx_int_t) conf->ops.metrics_per_path
+                        , (ngx_int_t) conf->ops.otel_enabled
 #ifdef MARKDOWN_STREAMING_ENABLED
-                       , conf->streaming_engine != NULL
-                           ? "configured" : "NULL"
+                        , conf->streaming_engine != NULL
+                            ? "configured" : "auto (default)"
                        , conf->streaming_budget
                        , ngx_http_markdown_on_error_name(
                              conf->streaming_on_error)
-                       , (ngx_int_t) conf->streaming_shadow
+                        , (ngx_int_t) conf->streaming_shadow
+                        , conf->streaming_auto_threshold
 #endif
                        );
 }

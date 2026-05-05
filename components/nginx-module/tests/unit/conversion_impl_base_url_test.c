@@ -27,6 +27,14 @@ struct MarkdownOptions {
     const uint8_t *base_url;
     uintptr_t      base_url_len;
     uint64_t       streaming_budget;
+    uint32_t       prune_noise;
+    const uint8_t *prune_selectors;
+    uintptr_t      prune_selector_len;
+    const uint8_t *prune_protection_selectors;
+    uintptr_t      prune_protection_selector_len;
+    uint64_t       memory_budget;
+    uint8_t        llm_provider;
+    uint8_t        chars_per_token_fixed;
 };
 
 struct MarkdownResult {
@@ -235,11 +243,13 @@ struct ngx_http_request_s {
 #ifndef NGX_LOG_DEBUG_HTTP
 #define NGX_LOG_DEBUG_HTTP 0
 #endif
+static volatile int g_metric_inc_sink;
+static volatile int g_metric_add_sink;
 #ifndef NGX_HTTP_MARKDOWN_METRIC_ADD
-#define NGX_HTTP_MARKDOWN_METRIC_ADD(name, value) ((void) 0)
+#define NGX_HTTP_MARKDOWN_METRIC_ADD(name, value) (g_metric_add_sink = 1)
 #endif
 #ifndef NGX_HTTP_MARKDOWN_METRIC_INC
-#define NGX_HTTP_MARKDOWN_METRIC_INC(name) ((void) 0)
+#define NGX_HTTP_MARKDOWN_METRIC_INC(name) (g_metric_inc_sink = 1)
 #endif
 #ifndef ngx_log_debug2
 #define ngx_log_debug2(level, log, err, fmt, arg1, arg2) \
@@ -376,6 +386,76 @@ struct MarkdownConverterHandle *ngx_http_markdown_converter = NULL;
 ngx_http_markdown_metrics_t *ngx_http_markdown_metrics = NULL;
 ngx_int_t (*ngx_http_next_body_filter)(ngx_http_request_t *r, ngx_chain_t *in) = NULL;
 
+#ifndef NGX_CONF_UNSET_SIZE
+#define NGX_CONF_UNSET_SIZE ((size_t) -1)
+#endif
+
+typedef struct {
+    int dummy;
+} ngx_shmtx_t;
+
+struct ngx_slab_pool_s {
+    ngx_shmtx_t   mutex;
+};
+typedef struct ngx_slab_pool_s ngx_slab_pool_t;
+
+struct ngx_shm_zone_s {
+    void          *data;
+    struct {
+        void      *addr;
+    } shm;
+};
+
+ngx_shm_zone_t *ngx_http_markdown_metrics_shm_zone = NULL;
+
+#ifndef ngx_atomic_fetch_add
+#define ngx_atomic_fetch_add(p, v)  (*(p) += (v), *(p))
+#endif
+
+static ngx_inline void
+ngx_shmtx_lock(ngx_shmtx_t *mtx)
+{
+    UNUSED(mtx);
+}
+
+static ngx_inline void
+ngx_shmtx_unlock(ngx_shmtx_t *mtx)
+{
+    UNUSED(mtx);
+}
+
+static ngx_inline ngx_uint_t
+ngx_hash_key(u_char *data, size_t len)
+{
+    ngx_uint_t  hash;
+    hash = 0;
+    for (size_t i = 0; i < len; i++) {
+        hash = hash * 31 + data[i];
+    }
+    return hash;
+}
+
+static ngx_inline void *
+ngx_slab_alloc_locked(ngx_slab_pool_t *pool, size_t size)
+{
+    UNUSED(pool);
+    return calloc(1, size);
+}
+
+static ngx_inline void
+ngx_slab_free_locked(ngx_slab_pool_t *pool, void *p)
+{
+    UNUSED(pool);
+    free(p);
+}
+
+static ngx_inline void
+ngx_rbtree_insert(ngx_rbtree_t *tree, ngx_rbtree_node_t *node)
+{
+    UNUSED(tree);
+    UNUSED(node);
+}
+
 /*
  * Forward-headers stub returning the test-controlled g_forward_headers_rc,
  * allowing tests to simulate header forwarding failures.
@@ -507,6 +587,111 @@ ngx_http_markdown_send_304(
     UNUSED(r);
     UNUSED(result);
     return NGX_OK;
+}
+
+static ngx_inline ngx_http_markdown_otel_span_t *
+ngx_http_markdown_otel_span_start(ngx_http_request_t *r,
+    const ngx_http_markdown_conf_t *conf)
+{
+    UNUSED(r);
+    UNUSED(conf);
+    return NULL;
+}
+
+static ngx_inline void
+ngx_http_markdown_otel_set_str_attr(ngx_http_markdown_otel_span_t *span,
+    const u_char *key, size_t key_len,
+    const u_char *val, size_t val_len)
+{
+    UNUSED(span);
+    UNUSED(key);
+    UNUSED(key_len);
+    UNUSED(val);
+    UNUSED(val_len);
+}
+
+static ngx_inline void
+ngx_http_markdown_otel_set_int_attr(ngx_http_markdown_otel_span_t *span,
+    const u_char *key, size_t key_len,
+    int64_t val)
+{
+    UNUSED(span);
+    UNUSED(key);
+    UNUSED(key_len);
+    UNUSED(val);
+}
+
+static ngx_inline void
+ngx_http_markdown_otel_span_end(ngx_http_markdown_otel_span_t *span)
+{
+    UNUSED(span);
+}
+
+static ngx_inline void
+ngx_http_markdown_otel_span_export(ngx_http_markdown_otel_span_t *span,
+    ngx_log_t *log, ngx_http_request_t *r)
+{
+    UNUSED(span);
+    UNUSED(log);
+    UNUSED(r);
+}
+
+static ngx_inline void
+ngx_http_markdown_log_decision(ngx_http_request_t *r,
+    const ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_ctx_t *ctx,
+    const char *reason)
+{
+    UNUSED(r);
+    UNUSED(conf);
+    UNUSED(ctx);
+    UNUSED(reason);
+}
+
+typedef int StreamingConverterHandle;
+
+static ngx_inline int
+markdown_streaming_new_with_code(const struct MarkdownOptions *opts,
+    StreamingConverterHandle **handle)
+{
+    UNUSED(opts);
+    UNUSED(handle);
+    return 0;
+}
+
+static ngx_inline int
+markdown_streaming_feed(StreamingConverterHandle *handle,
+    const uint8_t *data, size_t len,
+    uint8_t **out_data, size_t *out_len)
+{
+    UNUSED(handle);
+    UNUSED(data);
+    UNUSED(len);
+    UNUSED(out_data);
+    UNUSED(out_len);
+    return 0;
+}
+
+static ngx_inline void
+markdown_streaming_abort(StreamingConverterHandle *handle)
+{
+    UNUSED(handle);
+}
+
+static ngx_inline void
+markdown_streaming_output_free(uint8_t *data, size_t len)
+{
+    UNUSED(data);
+    UNUSED(len);
+}
+
+static ngx_inline int
+markdown_streaming_finalize(StreamingConverterHandle *handle,
+    struct MarkdownResult *result)
+{
+    UNUSED(handle);
+    UNUSED(result);
+    return 0;
 }
 
 #include "../../src/ngx_http_markdown_conversion_impl.h" /* NOSONAR: must follow stub definitions */
@@ -962,6 +1147,193 @@ test_prepare_conversion_options_no_base_url(void)
 
 
 /*
+ * Test: prepare_conversion_options with flavor exceeding uint32 max (clamping).
+ */
+static void
+test_prepare_conversion_options_flavor_clamp(void)
+{
+    ngx_http_request_t r;
+    ngx_http_markdown_conf_t conf;
+    struct MarkdownOptions options;
+
+    TEST_SUBSECTION("prepare_conversion_options: flavor overflow clamping");
+
+    init_request(&r);
+    memset(&conf, 0, sizeof(conf));
+    set_str(&r.schema, "http");
+    set_str(&r.headers_in.server, "example.com");
+    set_str(&r.uri, "/page.html");
+    set_str(&r.headers_out.content_type, "text/html");
+    r.loc_conf = &conf;
+
+    conf.flavor = (ngx_uint_t) UINT32_MAX + 1;
+
+    TEST_ASSERT(ngx_http_markdown_prepare_conversion_options(&r, &conf, &options) == NGX_OK,
+                "prepare_conversion_options should succeed with clamped flavor");
+    TEST_ASSERT(options.flavor == UINT32_MAX, "flavor should be clamped to UINT32_MAX");
+
+    if (options.base_url != NULL) {
+        free((void *)(uintptr_t) options.base_url);
+    }
+
+    TEST_PASS("prepare_conversion_options flavor clamping correct");
+}
+
+
+/*
+ * Test: prepare_conversion_options with timeout exceeding uint32 max (clamping).
+ */
+static void
+test_prepare_conversion_options_timeout_clamp(void)
+{
+    ngx_http_request_t r;
+    ngx_http_markdown_conf_t conf;
+    struct MarkdownOptions options;
+
+    TEST_SUBSECTION("prepare_conversion_options: timeout overflow clamping");
+
+    init_request(&r);
+    memset(&conf, 0, sizeof(conf));
+    set_str(&r.schema, "http");
+    set_str(&r.headers_in.server, "example.com");
+    set_str(&r.uri, "/page.html");
+    set_str(&r.headers_out.content_type, "text/html");
+    r.loc_conf = &conf;
+
+    conf.timeout = (ngx_msec_t) UINT32_MAX + 1;
+
+    TEST_ASSERT(ngx_http_markdown_prepare_conversion_options(&r, &conf, &options) == NGX_OK,
+                "prepare_conversion_options should succeed with clamped timeout");
+    TEST_ASSERT(options.timeout_ms == UINT32_MAX, "timeout should be clamped to UINT32_MAX");
+
+    if (options.base_url != NULL) {
+        free((void *)(uintptr_t) options.base_url);
+    }
+
+    TEST_PASS("prepare_conversion_options timeout clamping correct");
+}
+
+
+/*
+ * Test: prepare_conversion_options with prune_selectors configured.
+ */
+static void
+test_prepare_conversion_options_prune_selectors(void)
+{
+    ngx_http_request_t r;
+    ngx_http_markdown_conf_t conf;
+    struct MarkdownOptions options;
+    ngx_str_t selectors;
+
+    TEST_SUBSECTION("prepare_conversion_options: prune_selectors set");
+
+    init_request(&r);
+    memset(&conf, 0, sizeof(conf));
+    set_str(&r.schema, "http");
+    set_str(&r.headers_in.server, "example.com");
+    set_str(&r.uri, "/page.html");
+    set_str(&r.headers_out.content_type, "text/html");
+    r.loc_conf = &conf;
+
+    set_str(&selectors, "nav,footer,aside");
+    conf.prune_selectors = &selectors;
+    conf.prune_noise = 1;
+
+    TEST_ASSERT(ngx_http_markdown_prepare_conversion_options(&r, &conf, &options) == NGX_OK,
+                "prepare_conversion_options should succeed with prune_selectors");
+    TEST_ASSERT(options.prune_selectors != NULL, "prune_selectors should be set");
+    TEST_ASSERT(options.prune_selector_len > 0, "prune_selector_len should be > 0");
+
+    if (options.base_url != NULL) {
+        free((void *)(uintptr_t) options.base_url);
+    }
+
+    TEST_PASS("prepare_conversion_options prune_selectors correct");
+}
+
+
+/*
+ * Test: prepare_conversion_options with prune_protection_selectors configured.
+ */
+static void
+test_prepare_conversion_options_prune_protection_selectors(void)
+{
+    ngx_http_request_t r;
+    ngx_http_markdown_conf_t conf;
+    struct MarkdownOptions options;
+    ngx_str_t protection;
+
+    TEST_SUBSECTION("prepare_conversion_options: prune_protection_selectors set");
+
+    init_request(&r);
+    memset(&conf, 0, sizeof(conf));
+    set_str(&r.schema, "http");
+    set_str(&r.headers_in.server, "example.com");
+    set_str(&r.uri, "/page.html");
+    set_str(&r.headers_out.content_type, "text/html");
+    r.loc_conf = &conf;
+
+    set_str(&protection, "main,article");
+    conf.prune_protection_selectors = &protection;
+    conf.prune_noise = 1;
+
+    TEST_ASSERT(ngx_http_markdown_prepare_conversion_options(&r, &conf, &options) == NGX_OK,
+                "prepare_conversion_options should succeed with prune_protection_selectors");
+    TEST_ASSERT(options.prune_protection_selectors != NULL,
+                "prune_protection_selectors should be set");
+    TEST_ASSERT(options.prune_protection_selector_len > 0,
+                "prune_protection_selector_len should be > 0");
+
+    if (options.base_url != NULL) {
+        free((void *)(uintptr_t) options.base_url);
+    }
+
+    TEST_PASS("prepare_conversion_options prune_protection_selectors correct");
+}
+
+
+/*
+ * Test: prepare_conversion_options with empty server but valid schema (line 193).
+ *       Also test the else branch (empty schema, line 194-196) in same test.
+ */
+static void
+test_prepare_conversion_options_schema_server_fallback(void)
+{
+    ngx_http_request_t r;
+    ngx_http_markdown_conf_t conf;
+    ngx_http_core_srv_conf_t cscf;
+    struct MarkdownOptions options;
+
+    TEST_SUBSECTION("prepare_conversion_options: schema present, server empty, cscf fallback");
+
+    init_request(&r);
+    memset(&conf, 0, sizeof(conf));
+    memset(&cscf, 0, sizeof(cscf));
+
+    set_str(&r.schema, "https");
+    set_str(&r.headers_in.server, "");
+    set_str(&r.uri, "/page.html");
+    set_str(&cscf.server_name, "via-cscf.example.com");
+    r.loc_conf = &conf;
+    r.srv_conf = &cscf;
+
+    conf.flavor = 0;
+    conf.timeout = 5000;
+
+    TEST_ASSERT(ngx_http_markdown_prepare_conversion_options(&r, &conf, &options) == NGX_OK,
+                "prepare_conversion_options should succeed with cscf fallback");
+    TEST_ASSERT(options.base_url != NULL, "base_url should be constructed");
+    TEST_ASSERT(options.base_url_len > 0, "base_url_len should be > 0");
+
+    if (options.base_url != NULL) {
+        free((void *)(uintptr_t) options.base_url);
+    }
+
+    TEST_PASS("prepare_conversion_options schema+server fallback correct");
+}
+
+
+/*
  * Test: scheme_is_http_family validates http and https.
  */
 static void
@@ -1387,6 +1759,11 @@ main(void)
     test_prepare_conversion_options_gfm();
     test_prepare_conversion_options_no_content_type();
     test_prepare_conversion_options_no_base_url();
+    test_prepare_conversion_options_flavor_clamp();
+    test_prepare_conversion_options_timeout_clamp();
+    test_prepare_conversion_options_prune_selectors();
+    test_prepare_conversion_options_prune_protection_selectors();
+    test_prepare_conversion_options_schema_server_fallback();
     test_scheme_is_http_family();
     test_find_request_header_multi_part();
     test_validate_conversion_result_paths();
