@@ -69,6 +69,18 @@ ngx_http_markdown_check_status(const ngx_http_request_t *r)
     return (r->headers_out.status == NGX_HTTP_OK);
 }
 
+/*
+ * Check whether the request carries a Range header.
+ *
+ * Range requests must be excluded from markdown conversion because the
+ * partial response body would not be valid HTML.
+ *
+ * Parameters:
+ *   r  - HTTP request (must not be NULL)
+ *
+ * Returns:
+ *   NGX_OK if Range header is present, NGX_DECLINED otherwise.
+ */
 static ngx_int_t
 ngx_http_markdown_has_range_header(const ngx_http_request_t *r)
 {
