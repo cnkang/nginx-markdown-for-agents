@@ -2,23 +2,44 @@ class NginxMarkdownModule < Formula
   desc "NGINX module for HTML-to-Markdown conversion"
   homepage "https://github.com/cnkang/nginx-markdown-for-agents"
   url "https://github.com/cnkang/nginx-markdown-for-agents/archive/refs/tags/v0.6.0.tar.gz"
-  # SHA-256 from `git archive --format=tar.gz HEAD | shasum -a 256`.
-  # PLACEHOLDER: This SHA matches the current HEAD commit only.
-  # After pushing refs/tags/v0.6.0 to origin, regenerate from the GitHub archive:
+  # Regenerate from the GitHub tag archive after publishing the release tag:
   #   curl -sL https://github.com/cnkang/nginx-markdown-for-agents/archive/refs/tags/v0.6.0.tar.gz | sha256sum
-  # GitHub archives include a commit-date prefix that differs from local
-  # git-archive output, so the SHA WILL change after tagging.
   sha256 "3715d35c3b17091e6fc3cd16bb9ff050ad1ee7a1636bef4ece1e72c9bef783bb"
   license "BSD-2-Clause"
 
   depends_on "cbindgen" => :build
+  depends_on "nginx" => :build
+  depends_on "pkgconf" => :build
   depends_on "rust" => :build
   depends_on "openssl@3"
   depends_on "pcre2"
 
   def install
     system "make", "build"
-    system "make", "install", "DESTDIR=#{prefix}"
+
+    nginx_bin = Formula["nginx"].opt_bin/"nginx"
+    version_output = shell_output("#{nginx_bin} -v 2>&1")
+    nginx_version = version_output[/nginx\/([0-9.]+)/, 1]
+    if nginx_version.nil? || nginx_version.empty?
+      odie "Unable to detect Homebrew nginx version from: #{version_output}"
+    end
+
+    nginx_archive = "nginx-#{nginx_version}.tar.gz"
+    system "curl", "-fsSL", "https://nginx.org/download/#{nginx_archive}",
+           "-o", nginx_archive
+    system "tar", "-xzf", nginx_archive
+
+    cd "nginx-#{nginx_version}" do
+      args = [
+        "--with-compat",
+        "--add-dynamic-module=#{buildpath}/components/nginx-module",
+        "--with-cc-opt=-I#{Formula["openssl@3"].opt_include} -I#{Formula["pcre2"].opt_include}",
+        "--with-ld-opt=-L#{Formula["openssl@3"].opt_lib} -L#{Formula["pcre2"].opt_lib}",
+      ]
+      system "./configure", *args
+      system "make", "modules"
+      (lib/"nginx/modules").install "objs/ngx_http_markdown_filter_module.so"
+    end
   end
 
   def caveats

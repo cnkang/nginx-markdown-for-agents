@@ -67,7 +67,11 @@ fi
 
 # Libraries required by the Rust FFI converter.
 # Use ngx_module_libs so dynamic-module builds link them into the module .so.
-ngx_module_libs="$ngx_markdown_rust_lib -lpthread -ldl -lm"
+if [ "$(uname -s 2>/dev/null)" = "Darwin" ]; then
+    ngx_module_libs="$ngx_markdown_rust_lib -lpthread -lm"
+else
+    ngx_module_libs="$ngx_markdown_rust_lib -lpthread -ldl -lm"
+fi
 
 # Detect whether the Rust library was built with the `incremental` feature.
 # If the symbol is present, define MARKDOWN_INCREMENTAL_ENABLED so the C
