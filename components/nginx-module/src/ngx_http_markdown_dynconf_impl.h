@@ -268,7 +268,7 @@ ngx_http_markdown_dynconf_timer_handler(ngx_event_t *ev)
  * @param watcher Pre-allocated watcher structure to initialize (caller-owned storage).
  * @param cycle NGINX cycle used for pool allocations and timer registration.
  * @param path Path to the dynamic configuration file to watch.
- * @param conf Current module location configuration used to initialize the active snapshot.
+ * @param conf Current module location configuration (mutable; dynconf applies snapshot writes via reload).
  * @param log NGINX log for reporting warnings and informational messages.
  *
  * @return NGX_OK on success, NGX_ERROR on failure.
@@ -277,7 +277,7 @@ static ngx_int_t
 ngx_http_markdown_dynconf_start(ngx_http_markdown_dynconf_watcher_t *watcher,
                                 ngx_cycle_t *cycle,
                                 const ngx_str_t *path,
-                                const ngx_http_markdown_conf_t *conf,
+                                ngx_http_markdown_conf_t *conf,
                                 ngx_log_t *log)
 {
     ngx_file_info_t  fi;
@@ -344,7 +344,7 @@ ngx_http_markdown_dynconf_start(ngx_http_markdown_dynconf_watcher_t *watcher,
 
     watcher->active = 1;
     watcher->version = 0;
-    watcher->conf = (ngx_http_markdown_conf_t *) conf;
+    watcher->conf = conf;
 
     /* Initialize active snapshot from current configuration. */
     ngx_http_markdown_dynconf_snapshot_from_conf(&watcher->active_snapshot,
@@ -772,6 +772,58 @@ ngx_http_markdown_dynconf_try_line(ngx_http_markdown_dynconf_snapshot_t *snapsho
 }
 
 
+/*
+ * Process complete lines from the read buffer.
+ *
+ * Scans for newline-terminated lines in buf[line_start..pos), calls
+ * try_line for each, and updates line_start.  Returns NGX_OK if all
+ * lines were processed, NGX_ERROR on a parse failure (caller should
+ * abort the reload).  When no complete line remains, shifts
+ * unprocessed data to the front of buf and updates pos/line_start.
+ *
+ * @param snapshot   Staging snapshot to apply lines to.
+ * @param buf        Read buffer.
+ * @param pos        [in/out] Current end of data in buf.
+ * @param line_start [in/out] Start of next unprocessed line.
+ * @param log        Logger.
+ * @param applied    [in/out] Count of successfully applied entries.
+ * @returns NGX_OK on success, NGX_ERROR on parse failure.
+ */
+static ngx_int_t
+ngx_http_markdown_dynconf_process_buffer(
+    ngx_http_markdown_dynconf_snapshot_t *snapshot,
+    u_char *buf, size_t *pos, size_t *line_start,
+    ngx_log_t *log, ngx_uint_t *applied)
+{
+    for ( ;; ) {
+        size_t  i;
+
+        /* Find newline. */
+        i = *line_start;
+        while (i < *pos && buf[i] != '\n') {
+            i++;
+        }
+
+        if (i >= *pos) {
+            /* No complete line; shift remaining data. */
+            ngx_memmove(buf, buf + *line_start, *pos - *line_start);
+            *pos -= *line_start;
+            *line_start = 0;
+            return NGX_OK;
+        }
+
+        if (ngx_http_markdown_dynconf_try_line(
+                snapshot, buf + *line_start,
+                ngx_http_markdown_dynconf_line_len(buf, *line_start, i),
+                log, applied) != NGX_OK)
+        {
+            return NGX_ERROR;
+        }
+
+        *line_start = i + 1;
+    }
+}
+
 /**
  * Perform a two-phase reload of dynamic configuration from the watcher's file.
  *
@@ -847,39 +899,16 @@ ngx_http_markdown_dynconf_reload(
 
         pos += (size_t) n;
 
-        /* Process complete lines. */
-        for ( ;; ) {
-            size_t  i;
-
-            /* Find newline. */
-            i = line_start;
-            while (i < pos && buf[i] != '\n') {
-                i++;
-            }
-
-            if (i >= pos) {
-                /* No complete line; shift remaining data. */
-                ngx_memmove(buf, buf + line_start, pos - line_start);
-                pos -= line_start;
-                line_start = 0;
-                break;
-            }
-
-            line_rc = ngx_http_markdown_dynconf_try_line(
-                &watcher->staging_snapshot, buf + line_start,
-                ngx_http_markdown_dynconf_line_len(buf, line_start, i),
-                log, &applied);
-
-            if (line_rc != NGX_OK) {
-                ngx_log_error(NGX_LOG_WARN, log, 0,
-                              "markdown dynconf: parse error in \"%V\", "
-                              "discarding staging; active config unchanged",
-                              &watcher->path);
-                ngx_close_file(fd);
-                return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_INVALID_FILE;
-            }
-
-            line_start = i + 1;
+        if (ngx_http_markdown_dynconf_process_buffer(
+                &watcher->staging_snapshot, buf, &pos, &line_start,
+                log, &applied) != NGX_OK)
+        {
+            ngx_log_error(NGX_LOG_WARN, log, 0,
+                          "markdown dynconf: parse error in \"%V\", "
+                          "discarding staging; active config unchanged",
+                          &watcher->path);
+            ngx_close_file(fd);
+            return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_INVALID_FILE;
         }
 
         if (pos >= sizeof(buf)) {
