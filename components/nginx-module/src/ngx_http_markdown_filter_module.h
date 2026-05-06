@@ -343,7 +343,7 @@ typedef struct {
      * This guarantees request-level consistency: body/conversion/logging
      * read the same snapshot even if a concurrent timer reload swaps the
      * global active snapshot.  NULL if dynconf is not enabled. */
-    const ngx_http_markdown_dynconf_snapshot_t *dynconf_snapshot;
+    ngx_http_markdown_dynconf_snapshot_t *dynconf_snapshot;
 
     /*
      * Decompression state.

@@ -694,18 +694,6 @@ markdown_streaming_finalize(StreamingConverterHandle *handle,
     return 0;
 }
 
-u_char *
-ngx_strlchr(u_char *p, u_char *last, u_char c)
-{
-    while (p < last) {
-        if (*p == c) {
-            return p;
-        }
-        p++;
-    }
-    return NULL;
-}
-
 #include "../../src/ngx_http_markdown_conversion_impl.h" /* NOSONAR: must follow stub definitions */
 
 static ngx_connection_t g_connection = { 0 };

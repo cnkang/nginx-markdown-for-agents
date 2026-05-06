@@ -51,7 +51,6 @@ handling, header value forwarding, or content-injection prevention changes.
 
 ```bash
 make harness-check
-cargo test --features security
 make test-rust
 make test-nginx-unit
 ```

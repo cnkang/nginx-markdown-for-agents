@@ -429,7 +429,7 @@ When `on`, the module extracts and validates the `X-Forwarded-Host` value:
 
 1. **First-hop extraction:** If the header contains multiple comma-separated values (from a proxy chain), only the first (closest trusted proxy) is used.
 2. **Character validation:** The extracted host is rejected if it contains control characters, spaces, commas, or path separators (`/`, `\`).
-3. **IPv6 support:** Bracket-enclosed IPv6 literals (e.g. `[::1]`) are allowed and must be properly closed with `]`.
+3. **IPv6 support:** Bracket-enclosed IPv6 literals (e.g. `[::1]`) are allowed and must be properly closed with `]`. An optional `:<port>` suffix is permitted after the closing bracket (e.g. `[::1]:8080`).
 4. **Fallback:** If validation fails, the module falls back to `r->headers_in.server` and logs a warning.
 
 **Example:**
@@ -720,6 +720,10 @@ dynconf file, eliminating blocking I/O from the request latency path.
 **Default:** `off`  
 **Context:** http, server, location
 
+> **Single-instance scope:** Only the first-initialized watcher wins; subsequent
+> `markdown_dynamic_config on` directives in other location blocks are ignored
+> with a warning. See Scope above.
+
 Enables or disables the dynamic configuration watcher.  When `on`,
 the worker process watches the file specified by
 `markdown_dynamic_config_path` for modification-time changes.
@@ -748,7 +752,7 @@ Path to the dynamic configuration file.  Only effective when
 conditional requests, and all other structural directives.
 
 **Example dynconf file:**
-```
+```ini
 # Runtime-safe overrides (no NGINX restart)
 markdown_filter=on
 prune_noise=off
