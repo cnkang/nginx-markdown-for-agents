@@ -59,8 +59,8 @@ jobs:
               if stripped.startswith("url "):
                   lines.append(f'  url "{url}"')
               elif stripped.startswith("sha256 "):
-                  lines.append(f'  sha256 "{sha}"')
                   lines.append('  version "0.6.0"')
+                  lines.append(f'  sha256 "{sha}"')
                   inserted_version = True
               elif stripped.startswith("version "):
                   continue
