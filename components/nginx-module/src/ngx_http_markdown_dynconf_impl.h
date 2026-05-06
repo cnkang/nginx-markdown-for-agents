@@ -101,15 +101,13 @@ static ngx_int_t ngx_http_markdown_dynconf_reload(
     ngx_log_t *log);
 
 
-/*
- * Initialize a dynconf snapshot from a live conf struct.
+/**
+ * Initialize a dynamic-configuration snapshot from the provided live module configuration.
  *
- * Copies the dynconf-controlled fields from the module
- * configuration into the snapshot.
+ * Copies runtime-modifiable fields from `conf` into `snapshot` and marks the snapshot as valid.
  *
- * Parameters:
- *   snapshot - Snapshot to initialize
- *   conf     - Source configuration
+ * @param snapshot Snapshot to populate; must be non-NULL.
+ * @param conf Source module configuration to copy from; must be non-NULL.
  */
 static void
 ngx_http_markdown_dynconf_snapshot_from_conf(
@@ -133,15 +131,15 @@ ngx_http_markdown_dynconf_snapshot_from_conf(
 }
 
 
-/*
- * Apply a snapshot back to a live conf struct.
+/**
+ * Apply a dynamic configuration snapshot to the live module configuration.
  *
- * Copies the snapshot fields into the module configuration,
- * making the snapshot the new running state.
+ * Copies runtime-modifiable fields from `snapshot` into `conf`, making the
+ * snapshot the active running state. No action is taken if `conf` or
+ * `snapshot` is NULL or if `snapshot->valid` is false.
  *
- * Parameters:
- *   conf     - Target configuration to update
- *   snapshot - Source snapshot
+ * @param conf Target configuration to update with snapshot values.
+ * @param snapshot Source snapshot containing runtime-modifiable settings.
  */
 static void
 ngx_http_markdown_dynconf_apply_snapshot(
@@ -218,17 +216,16 @@ ngx_http_markdown_dynconf_check(ngx_http_markdown_dynconf_watcher_t *watcher,
 }
 
 
-/*
- * Timer handler for the dynamic config watcher.
+/**
+ * Poll the dynamic-configuration watcher for file changes, log detected changes,
+ * and re-arm the watch timer.
  *
- * Called periodically by the NGINX event loop.  Checks the
- * watched file for changes.  If a change is detected, performs
- * the full two-phase reload: read file, parse into staging
- * snapshot, and on success atomically swap active snapshot.
- * The request path never does file I/O.
+ * This timer callback reads the watcher from ev->data, skips processing if the
+ * watcher is NULL or not active, calls the change-detection routine and logs an
+ * informational message if a change is observed, and re-arms the watch timer
+ * for the next polling interval.
  *
- * Parameters:
- *   ev - Timer event (ev->data points to the watcher)
+ * @param ev Timer event whose `data` field points to the watcher; may be NULL.
  */
 static void
 ngx_http_markdown_dynconf_timer_handler(ngx_event_t *ev)
@@ -260,25 +257,21 @@ ngx_http_markdown_dynconf_timer_handler(ngx_event_t *ev)
 }
 
 
-/*
- * Initialize the dynamic config watcher.
+/**
+ * Start and initialize a dynamic configuration file watcher and seed its active snapshot.
  *
- * Allocates the watcher and timer event from the cycle pool,
- * copies the path to pool-owned storage, performs an initial
- * stat to record the baseline mtime, and adds the periodic
- * timer to the event loop.  Also initializes the active
- * snapshot from the current configuration.
+ * Allocates timer storage from the provided cycle pool, copies the watched file path
+ * into pool-owned memory, records an initial file modification time (if stat succeeds),
+ * initializes the active snapshot from the given configuration, and arms the periodic
+ * watch timer.
  *
- * Parameters:
- *   watcher - Pre-allocated watcher struct (caller provides storage)
- *   cycle   - NGINX cycle structure
- *   path    - Path to the configuration file
- *   conf    - Current location configuration (for initial snapshot)
- *   log     - NGINX log
+ * @param watcher Pre-allocated watcher structure to initialize (caller-owned storage).
+ * @param cycle NGINX cycle used for pool allocations and timer registration.
+ * @param path Path to the dynamic configuration file to watch.
+ * @param conf Current module location configuration used to initialize the active snapshot.
+ * @param log NGINX log for reporting warnings and informational messages.
  *
- * Returns:
- *   NGX_OK on success
- *   NGX_ERROR on failure
+ * @return NGX_OK on success, NGX_ERROR on failure.
  */
 static ngx_int_t
 ngx_http_markdown_dynconf_start(ngx_http_markdown_dynconf_watcher_t *watcher,
@@ -368,15 +361,16 @@ ngx_http_markdown_dynconf_start(ngx_http_markdown_dynconf_watcher_t *watcher,
 }
 
 
-/*
- * Stop the dynamic config watcher.
+/**
+ * Stops the dynamic configuration watcher.
  *
- * Cancels the periodic timer and marks the watcher inactive.
- * Does not free the watcher itself (pool-owned).
+ * Cancels the watcher's periodic timer if set, marks the watcher as inactive,
+ * and logs the stop event. The watcher object is not freed and remains
+ * pool-owned.
  *
- * Parameters:
- *   watcher - Dynamic config watcher
- *   log     - NGINX log
+ * @param watcher Dynamic configuration watcher to stop; no action is taken if
+ *                NULL or not active.
+ * @param log     NGINX log used for informational messages.
  */
 static void
 ngx_http_markdown_dynconf_stop(ngx_http_markdown_dynconf_watcher_t *watcher,
@@ -730,25 +724,16 @@ ngx_http_markdown_dynconf_line_len(const u_char *buf, size_t line_start,
 }
 
 
-/*
- * Try to parse and apply one config line to a staging snapshot.
+/**
+ * Attempt to parse and apply a single dynamic config line to a staging snapshot.
  *
- * Parses the line and, on success, applies the key=value pair
- * to the staging snapshot.  Increments the applied counter when
- * both parse and apply succeed.  Returns NGX_ERROR immediately
- * on any parse or apply failure, enabling the caller to abort
- * the entire reload (staged-commit semantics: all-or-nothing).
- *
- * Parameters:
- *   snapshot - Staging snapshot to update
- *   line     - line text
- *   len      - line length
- *   log      - NGINX log
- *   applied  - [in/out] counter of successfully applied keys
- *
- * Returns:
- *   NGX_OK if line was skipped or applied successfully
- *   NGX_ERROR if parse or apply failed (caller should abort reload)
+ * Parses the provided line and, if it yields a recognized key/value pair, applies it to the staging snapshot and increments `*applied` when the apply succeeds.
+ * @param snapshot Staging snapshot to update.
+ * @param line Pointer to the line buffer (may not be NUL-terminated).
+ * @param len Length of the line in bytes.
+ * @param log NGINX log for reporting parse/apply warnings.
+ * @param applied In/out pointer to a counter of successfully applied entries; incremented when a key is applied.
+ * @returns `NGX_OK` if the line was skipped or applied successfully, `NGX_ERROR` if parsing or applying failed (caller should abort the reload).
  */
 static ngx_int_t
 ngx_http_markdown_dynconf_try_line(ngx_http_markdown_dynconf_snapshot_t *snapshot,
@@ -787,25 +772,21 @@ ngx_http_markdown_dynconf_try_line(ngx_http_markdown_dynconf_snapshot_t *snapsho
 }
 
 
-/*
- * Reload configuration from the dynamic config file into staging.
+/**
+ * Perform a two-phase reload of dynamic configuration from the watcher's file.
  *
- * Two-phase model: reads the entire file, parses all lines into
- * the staging snapshot, and only on full success atomically
- * replaces the active snapshot and applies it to conf.
- * On any error, the staging is discarded and the active snapshot
- * remains unchanged.
+ * Reads the entire file into a staging snapshot, parses and applies every line
+ * into that staging snapshot, and on complete success atomically replaces the
+ * watcher's active snapshot and applies it to the provided live configuration.
  *
- * Parameters:
- *   watcher - Dynamic config watcher (contains the file path)
- *   conf    - Current location configuration to update
- *   log     - Log for error reporting
+ * @param watcher Dynamic config watcher containing the file path and snapshots.
+ * @param conf Current module location configuration to update when commit succeeds.
+ * @param log Logger used for warnings and informational messages.
  *
- * Returns:
- *   NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_APPLIED      on success
- *   NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_NO_CHANGE     if file had no valid keys
- *   NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_INVALID_FILE  if any line failed to parse
- *   NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_IO_ERROR      on file open/read failure
+ * @returns NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_APPLIED      if one or more settings were applied and committed
+ * @returns NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_NO_CHANGE    if the file contained no effective keys to apply
+ * @returns NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_INVALID_FILE if any line failed to parse or a line was too long
+ * @returns NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_IO_ERROR     on file open/read failures or invalid inputs
  */
 static ngx_int_t
 ngx_http_markdown_dynconf_reload(

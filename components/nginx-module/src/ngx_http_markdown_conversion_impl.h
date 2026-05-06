@@ -136,11 +136,16 @@ ngx_http_markdown_scheme_is_http_family(const ngx_str_t *scheme)
                                sizeof(ngx_http_markdown_scheme_https) - 1) == 0);
 }
 
-/*
- * Select scheme and host for base URL construction.
+/**
+ * Selects the URL scheme and host to use when constructing a base URL for the request.
  *
- * Priority: trusted X-Forwarded-Proto/Host > request schema/server
- * > server_name.
+ * Selection priority (highest to lowest): trusted X-Forwarded-Proto/Host (when enabled) >
+ * request r->schema and r->headers_in.server > server_name from core server config.
+ *
+ * @param r The HTTP request to inspect.
+ * @param scheme Out parameter set to the selected scheme string.
+ * @param host Out parameter set to the selected host string (may include port or IPv6 brackets).
+ * @returns `NGX_OK` if both `scheme` and `host` were successfully selected and written; `NGX_ERROR` otherwise.
  */
 static ngx_int_t
 ngx_http_markdown_select_base_url_parts(ngx_http_request_t *r,

@@ -27,7 +27,19 @@ ngx_http_markdown_filter_init(ngx_conf_t *cf) /* NOSONAR: nginx callback signatu
     return NGX_OK;
 }
 
-/* Allocate per-worker converter handle and attach shared metrics zone. */
+/**
+ * Initialize per-worker markdown resources: allocate a converter, attach the
+ * shared metrics zone, optionally start the dynamic configuration watcher, and
+ * apply any configured per-path metrics cardinality.
+ *
+ * If the metrics shared-memory zone is unavailable or the converter cannot be
+ * created, initialization fails.
+ *
+ * @param cycle Pointer to the nginx cycle (used for logging and to obtain the HTTP configuration).
+ * @return NGX_OK on successful initialization;
+ *         NGX_ERROR if the metrics shared-memory zone is missing or the converter creation fails.
+ *         Note: failure to start the dynamic configuration watcher is logged as a warning but is non-fatal.
+ */
 static ngx_int_t
 ngx_http_markdown_init_worker(ngx_cycle_t *cycle)
 {
