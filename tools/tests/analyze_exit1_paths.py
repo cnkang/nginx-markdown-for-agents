@@ -10,8 +10,12 @@ Printed lines start with "PASS:" or "FAIL:" so the calling shell script
 can parse them easily.
 """
 
+import os
 import re
 import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from lib.path_validation import validate_read_path
 
 HELPER_FUNCS_RE = re.compile(
     r"^(die_with_error|emit_error|emit_suggest|json_output|semver_lt|sha256_file)\s*\(\)"
@@ -172,7 +176,8 @@ def _analyze_shell_lines(lines: list[str], line_types: list[str]) -> list[str]:
 
 
 def main(filepath: str) -> int:
-    with open(filepath, encoding="utf-8") as fh:
+    resolved = validate_read_path(filepath, purpose="install script")
+    with open(resolved, encoding="utf-8") as fh:
         lines = fh.readlines()
 
     line_types = _classify_lines(lines)
