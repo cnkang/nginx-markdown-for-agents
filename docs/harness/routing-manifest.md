@@ -38,6 +38,7 @@ Plan-only targets (for example `*-plan`) are documentation aids, not evidence.
 | `otel-integration` | OTel tracing, OTel metrics, OTLP export, span attributes | observability, nginx-protocol | [risk-packs/otel-integration.md](risk-packs/otel-integration.md) |
 | `packaging-distribution` | APT/YUM repos, Homebrew tap, Helm chart, K8s Ingress | docs-tooling, release-governance | [risk-packs/packaging-distribution.md](risk-packs/packaging-distribution.md) |
 | `dynamic-config-hot-reload` | dynamic config parser, reload lifecycle, runtime apply | nginx-protocol, observability, docs-tooling | [risk-packs/dynamic-config-hot-reload.md](risk-packs/dynamic-config-hot-reload.md) |
+| `output-safety` | Markdown escaping, link/URL emission, injection prevention | nginx-protocol, docs-tooling | [risk-packs/output-safety.md](risk-packs/output-safety.md) |
 
 ## Task Entry Points
 
@@ -67,3 +68,4 @@ Plan-only targets (for example `*-plan`) are documentation aids, not evidence.
 | 0.6.0 | 2026-04-28 | v0.6.0-planning | Added coverage-gate, release-governance-060, packaging-e2e families; otel-integration, packaging-distribution packs |
 | 0.6.0 | 2026-05-03 | Codex | Aligned coverage-gate overlay command with machine manifest |
 | 0.6.0 | 2026-05-03 | Codex | Added dynamic-config-hot-reload pack and tightened protocol/release routes from two-week branch scan |
+| 0.6.1 | 2026-05-06 | Kang | Added output-safety pack (Rule 27) and sync points for Rules 28–31 |
