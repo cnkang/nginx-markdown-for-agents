@@ -7,12 +7,15 @@ set -euo pipefail
 # VERSION=v0.1.0 curl -sSL https://raw.githubusercontent.com/cnkang/nginx-markdown-for-agents/main/tools/install.sh | sudo bash
 # OR (in Docker, skip root check):
 # SKIP_ROOT_CHECK=1 bash /path/to/install.sh
+# OR (auto-disable stale load_module snippets on ABI mismatch):
+# AUTO_DISABLE_STALE_MODULE=1 curl -sSL https://raw.githubusercontent.com/cnkang/nginx-markdown-for-agents/main/tools/install.sh | sudo bash
 
 REPO="cnkang/nginx-markdown-for-agents"
 RELEASE_VERSION="${VERSION:-}"
 DOWNLOAD_URL_OVERRIDE="${DOWNLOAD_URL_OVERRIDE:-}"
 DOWNLOAD_SHA256="${DOWNLOAD_SHA256:-}"
 ALLOW_INSECURE_NO_CHECKSUM="${ALLOW_INSECURE_NO_CHECKSUM:-0}"
+AUTO_DISABLE_STALE_MODULE="${AUTO_DISABLE_STALE_MODULE:-0}"
 MIN_SUPPORTED_NGINX_VERSION="1.24.0"
 SOURCE_BUILD_URL="https://github.com/cnkang/nginx-markdown-for-agents/tree/main/docs/guides/INSTALLATION.md#6-secondary-manual-source-build"
 SUPPORTED_ARCHITECTURES="x86_64, aarch64"
@@ -445,6 +448,95 @@ for series in sorted(groups.keys(), key=lambda s: tuple(int(p) for p in s.split(
 PY
 }
 
+# collect_stale_module_suggestions inspects current nginx config for an already-loaded
+# markdown module with ABI mismatch and appends concrete remediation suggestions into
+# the provided array variable name.
+collect_stale_module_suggestions() {
+  local out_var="$1"
+  local nginx_conf_dir="$2"
+  local module_so="$3"
+  local test_log=""
+  local -a hints=()
+
+  if [ -z "$nginx_conf_dir" ] || [ -z "$module_so" ]; then
+    return 0
+  fi
+
+  if [ ! -d "$nginx_conf_dir" ]; then
+    return 0
+  fi
+
+  if ! grep -R --include='*.conf' -Eq "^[[:space:]]*load_module[[:space:]]+.*${module_so}[[:space:]]*;" "$nginx_conf_dir"; then
+    return 0
+  fi
+
+  if ! test_log="$(mktemp)"; then
+    return 0
+  fi
+
+  if nginx -t >"$test_log" 2>&1; then
+    rm -f "$test_log" || true
+    return 0
+  fi
+
+  if grep -Eq "module \".*${module_so}\" version [0-9]+ instead of [0-9]+" "$test_log"; then
+    hints+=("Detected an already-enabled stale ${module_so} that does not match current NGINX ABI.")
+    hints+=("List loader snippets: sudo find ${nginx_conf_dir} -type f -name '*.conf' -exec grep -l '${module_so}' {} +")
+    hints+=("Disable each matched snippet by renaming it to *.disabled (or comment out its load_module line), then run: sudo nginx -t")
+    hints+=("After cleanup, build from source for this NGINX version: ${SOURCE_BUILD_URL}")
+  fi
+
+  rm -f "$test_log" || true
+  if [ "${#hints[@]}" -gt 0 ]; then
+    eval "$out_var=(\"\${hints[@]}\")"
+  fi
+  return 0
+}
+
+# auto_disable_stale_module_loaders renames nginx *.conf snippets containing the
+# target module load directive to *.disabled when AUTO_DISABLE_STALE_MODULE=1.
+auto_disable_stale_module_loaders() {
+  local nginx_conf_dir="$1"
+  local module_so="$2"
+  local disabled_count=0
+  local file=""
+
+  if [ "$AUTO_DISABLE_STALE_MODULE" != "1" ]; then
+    return 0
+  fi
+
+  if [ ! -d "$nginx_conf_dir" ]; then
+    return 0
+  fi
+
+  while IFS= read -r file; do
+    if [ -z "$file" ]; then
+      continue
+    fi
+    if [[ "$file" == *.disabled ]]; then
+      continue
+    fi
+    if mv "$file" "${file}.disabled"; then
+      echo "[+] Disabled stale module snippet: ${file} -> ${file}.disabled"
+      disabled_count=$((disabled_count + 1))
+    else
+      echo "[!] Failed to disable stale module snippet: ${file}" >&2
+    fi
+  done < <(
+    find "$nginx_conf_dir" -type f -name '*.conf' -print0 2>/dev/null \
+      | xargs -0 grep -l "load_module .*${module_so}" 2>/dev/null || true
+  )
+
+  if [ "$disabled_count" -gt 0 ]; then
+    if nginx -t >/dev/null 2>&1; then
+      echo "[+] nginx -t passed after disabling stale module snippets"
+    else
+      echo "[!] nginx -t still fails after auto-disable; manual review is required" >&2
+    fi
+  fi
+  return 0
+}
+
 # Extract the value of a --key=VALUE argument from nginx -V output.
 #
 # Arguments:
@@ -756,6 +848,15 @@ AVAILABLE_VERSIONS="${RELEASE_INFO[2]:-}"
 if [ -z "$DOWNLOAD_URL" ]; then
   _json_available_versions="$AVAILABLE_VERSIONS"
   _version_suggestions=("NGINX dynamic modules require an exact version match.")
+  _stale_module_suggestions=()
+  collect_stale_module_suggestions _stale_module_suggestions "$NGINX_CONF_DIR" "ngx_http_markdown_filter_module.so"
+  if [ "${#_stale_module_suggestions[@]}" -gt 0 ]; then
+    auto_disable_stale_module_loaders "$NGINX_CONF_DIR" "ngx_http_markdown_filter_module.so"
+    _version_suggestions+=("${_stale_module_suggestions[@]}")
+    if [ "$AUTO_DISABLE_STALE_MODULE" = "1" ]; then
+      _version_suggestions+=("AUTO_DISABLE_STALE_MODULE=1 enabled: attempted automatic disable of stale loader snippets.")
+    fi
+  fi
   if [ -n "$AVAILABLE_VERSIONS" ]; then
     echo "Available pre-built versions for ${OS_TYPE}/${ARCH} (grouped by major.minor):" >&2
     format_versions_by_series "$AVAILABLE_VERSIONS" >&2
