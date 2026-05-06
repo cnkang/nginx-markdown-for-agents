@@ -393,7 +393,7 @@ add the harness workflow to your default path:
 
 ## Roadmap
 
-Current release (0.6.0):
+Current release (0.6.1):
 
 - Dual-engine architecture: streaming auto mode default, full-buffer for small responses
 - Streaming failure semantics and fallback controls aligned with commit boundaries
