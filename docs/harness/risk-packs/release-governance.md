@@ -39,6 +39,10 @@ CI, scope governance, or go/no-go tooling changes.
 - release-gate validators keep SonarCloud quality rules green: split complex
   validation functions into helper checks and promote repeated gate IDs to
   named constants
+- after merge or >500-line single-file changes, verify compilation,
+  `git diff --check`, function count, and no duplicate adjacent blocks (Rule 31)
+- after >30-line single-file changes, verify the file is not truncated
+  (closing brace present) (Rule 31)
 
 ## Minimum Verification
 
@@ -72,3 +76,4 @@ absence instead of treating legacy validation as default evidence.
 | 0.5.5 | 2026-04-24 | Codex | Added 60-day release governance routing |
 | 0.5.5 | 2026-04-25 | Codex | Added SonarCloud quality sync points for release-gate validators |
 | 0.6.0 | 2026-05-03 | Codex | Added install-verify/update-matrix regression sync points |
+| 0.6.1 | 2026-05-06 | Kang | Added merge-integrity and residual-code sync points (Rule 31) |
