@@ -22,6 +22,21 @@ typedef struct ngx_http_markdown_dynconf_snapshot_s
     ngx_http_markdown_dynconf_snapshot_t;
 
 /*
+ * Effective configuration view for per-request consistency.
+ *
+ * Constructed once at header_filter time from the dynconf snapshot (if
+ * dynconf is enabled and the snapshot is valid) or from the live static
+ * conf otherwise.  All request-lifetime code reads mutable fields through
+ * this view rather than directly from ngx_http_markdown_conf_t, so that
+ * a mid-request dynconf reload cannot change behaviour for in-flight
+ * requests.
+ *
+ * Full definition is in ngx_http_markdown_dynconf_impl.h.
+ */
+typedef struct ngx_http_markdown_effective_conf_s
+    ngx_http_markdown_effective_conf_t;
+
+/*
  * Forward declaration for OTel span type.
  * Full definition is in ngx_http_markdown_otel_impl.h.
  */
@@ -339,11 +354,18 @@ typedef struct {
     /* Threshold router path selection (NGX_HTTP_MARKDOWN_PATH_FULLBUFFER or NGX_HTTP_MARKDOWN_PATH_INCREMENTAL) */
     ngx_uint_t                   processing_path;
 
-    /* Pointer to the active dynconf snapshot bound at header_filter time.
-     * This guarantees request-level consistency: body/conversion/logging
-     * read the same snapshot even if a concurrent timer reload swaps the
-     * global active snapshot.  NULL if dynconf is not enabled. */
+    /* Copy of the active dynconf snapshot into request pool at header_filter
+     * time.  NULL if dynconf is not enabled or pool allocation failed.
+     * Prefer reading through effective_conf below rather than dereferencing
+     * this directly. */
     ngx_http_markdown_dynconf_snapshot_t *dynconf_snapshot;
+
+    /* Effective configuration view built at header_filter time.
+     * Provides request-consistent values for all dynconf-mutable fields.
+     * All body/conversion/logging/budget code should read mutable fields
+     * through this view instead of directly from ngx_http_markdown_conf_t.
+     * NULL only on pool allocation failure (falls back to live conf). */
+    ngx_http_markdown_effective_conf_t *effective_conf;
 
     /*
      * Decompression state.
@@ -834,7 +856,9 @@ ngx_int_t ngx_http_markdown_modify_cache_control_for_auth(
 ngx_int_t ngx_http_markdown_construct_base_url(ngx_http_request_t *r,
     ngx_pool_t *pool, ngx_str_t *base_url);
 ngx_int_t ngx_http_markdown_prepare_conversion_options(ngx_http_request_t *r,
-    const ngx_http_markdown_conf_t *conf, struct MarkdownOptions *options);
+    const ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_effective_conf_t *eff,
+    struct MarkdownOptions *options);
 
 /*
  * Conditional request handling functions
