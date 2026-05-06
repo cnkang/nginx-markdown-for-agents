@@ -12,6 +12,7 @@ REPO="cnkang/nginx-markdown-for-agents"
 RELEASE_VERSION="${VERSION:-}"
 DOWNLOAD_URL_OVERRIDE="${DOWNLOAD_URL_OVERRIDE:-}"
 DOWNLOAD_SHA256="${DOWNLOAD_SHA256:-}"
+ALLOW_INSECURE_NO_CHECKSUM="${ALLOW_INSECURE_NO_CHECKSUM:-0}"
 MIN_SUPPORTED_NGINX_VERSION="1.24.0"
 SOURCE_BUILD_URL="https://github.com/cnkang/nginx-markdown-for-agents/tree/main/docs/guides/INSTALLATION.md#6-secondary-manual-source-build"
 SUPPORTED_ARCHITECTURES="x86_64, aarch64"
@@ -244,6 +245,7 @@ sha256_file() {
 #   0 on success, non-zero if curl fails
 fetch_release_json() {
   local release_api=""
+  local response=""
 
   if [ -z "$RELEASE_VERSION" ]; then
     release_api="https://api.github.com/repos/${REPO}/releases/latest"
@@ -251,14 +253,21 @@ fetch_release_json() {
     release_api="https://api.github.com/repos/${REPO}/releases/tags/${RELEASE_VERSION}"
   fi
 
-  curl --proto '=https' --tlsv1.2 -fsSL -H 'Accept: application/vnd.github+json' "$release_api" 2>/dev/null
+  if ! response="$(curl --proto '=https' --tlsv1.2 -fsSL -H 'Accept: application/vnd.github+json' "$release_api" 2>/dev/null)"; then
+    return 1
+  fi
+  printf '%s\n' "$response"
 }
 
 # fetch_dist_index_json fetches the GitHub API JSON listing for the repository's `dist` directory at the specified ref and writes it to stdout.
 fetch_dist_index_json() {
   local ref_name="$1"
   local dist_api="https://api.github.com/repos/${REPO}/contents/dist?ref=${ref_name}"
-  curl --proto '=https' --tlsv1.2 -fsSL -H 'Accept: application/vnd.github+json' "$dist_api" 2>/dev/null
+  local response=""
+  if ! response="$(curl --proto '=https' --tlsv1.2 -fsSL -H 'Accept: application/vnd.github+json' "$dist_api" 2>/dev/null)"; then
+    return 1
+  fi
+  printf '%s\n' "$response"
 }
 
 # resolve_download_info determines the download URL, SHA-256 digest, and available prebuilt nginx versions for a requested asset and prints them as three newline-separated lines.
@@ -696,6 +705,15 @@ if [ -n "$RELEASE_VERSION" ]; then
   source_ref="$RELEASE_VERSION"
 fi
 
+if [ -n "$DOWNLOAD_URL_OVERRIDE" ] && [ -z "$DOWNLOAD_SHA256" ]; then
+  if [ "${ALLOW_INSECURE_NO_CHECKSUM}" != "1" ]; then
+    die_with_error "checksum" \
+      "DOWNLOAD_URL_OVERRIDE requires DOWNLOAD_SHA256 unless ALLOW_INSECURE_NO_CHECKSUM=1 is set." \
+      "Set DOWNLOAD_SHA256 to the trusted SHA-256 digest of the override artifact." \
+      "Or set ALLOW_INSECURE_NO_CHECKSUM=1 only in trusted, controlled environments."
+  fi
+fi
+
 RELEASE_JSON=""
 if [ -z "$DOWNLOAD_URL_OVERRIDE" ]; then
   if ! RELEASE_JSON="$(fetch_release_json)"; then
@@ -782,7 +800,14 @@ if [ -n "$EXPECTED_SHA256" ]; then
   fi
   echo "[+] SHA256 checksum verified"
 else
-  echo "[!] Release asset does not provide a SHA256 digest; skipping checksum verification"
+  if [ "${ALLOW_INSECURE_NO_CHECKSUM}" = "1" ]; then
+    echo "[!] Release asset does not provide a SHA256 digest; proceeding because ALLOW_INSECURE_NO_CHECKSUM=1"
+  else
+    die_with_error "checksum" \
+      "Release asset does not provide a SHA256 digest; refusing to install unsigned artifact by default." \
+      "Set ALLOW_INSECURE_NO_CHECKSUM=1 only in trusted, controlled environments if you must bypass this guard." \
+      "Or provide DOWNLOAD_SHA256 together with DOWNLOAD_URL_OVERRIDE."
+  fi
 fi
 
 cd "$TMP_DIR"
