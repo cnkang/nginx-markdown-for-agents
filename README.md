@@ -69,6 +69,7 @@ sudo nginx -t && sudo nginx -s reload
 ```
 
 The install script auto-detects the local NGINX version, downloads the matching module artifact, and wires up `load_module` and `markdown_filter on` — no manual configuration editing required.
+It also enforces SHA-256 artifact integrity checks by default.
 
 For alternative installation methods (source builds, Docker, custom NGINX builds), troubleshooting, and detailed instructions, see the [Installation Guide](docs/guides/INSTALLATION.md).
 

@@ -101,6 +101,7 @@ curl -sSL https://raw.githubusercontent.com/cnkang/nginx-markdown-for-agents/mai
 ```
 
 The script requires `sudo` (root privileges) to write the module binary and modify NGINX configuration files.
+By default, the installer enforces SHA-256 integrity checks and refuses unsigned artifacts.
 
 ### Auto-Wiring Behavior
 
@@ -115,6 +116,12 @@ The install script performs the following automatically:
    - Relative path: `load_module modules/ngx_http_markdown_filter_module.so;`
 6. Enables `markdown_filter on;` automatically (prefers `conf.d` snippet, falls back to `http {}` insertion).
 7. Runs `nginx -t` and prints a targeted manual-action list only if auto-wiring is incomplete.
+
+### Integrity Guardrails (Install Script)
+
+- Default behavior: installation fails if no SHA-256 digest is available for the selected artifact.
+- `DOWNLOAD_URL_OVERRIDE` requires `DOWNLOAD_SHA256` by default.
+- Emergency bypass (not recommended): set `ALLOW_INSECURE_NO_CHECKSUM=1` only in trusted, controlled environments.
 
 After the script completes, reload NGINX:
 
@@ -1002,6 +1009,12 @@ The install script fails with an error such as:
 ERROR: SHA-256 checksum verification failed
 ```
 
+or:
+
+```text
+Release asset does not provide a SHA256 digest; refusing to install unsigned artifact by default.
+```
+
 **Root Cause:**
 The SHA-256 hash of the downloaded binary does not match the expected checksum from the release. This can be caused by a corrupted download, an incomplete transfer, a network intermediary modifying the file, or a tampered artifact.
 
@@ -1024,6 +1037,7 @@ The SHA-256 hash of the downloaded binary does not match the expected checksum f
    ```
 3. If the checksum still fails, try downloading from a different network or machine to rule out a network intermediary.
 4. If the issue persists, report it on the project's GitHub issue tracker — the release artifact may need to be re-published.
+5. If you must install in a controlled emergency scenario without a published digest, set `ALLOW_INSECURE_NO_CHECKSUM=1` explicitly and document the exception in your change record.
 
 ---
 
@@ -1152,6 +1166,10 @@ When running the install script inside a Docker container, the root check is unn
 ```bash
 SKIP_ROOT_CHECK=1 bash tools/install.sh
 ```
+
+If you fetch `tools/install.sh` remotely during image build, pin and verify its digest.
+The example [`tools/build_release/Dockerfile.install-example`](../../tools/build_release/Dockerfile.install-example)
+expects `INSTALL_SHA256` and checks the script before execution.
 
 For a fully self-contained Docker build, use the [Docker Source Build](#5-secondary-docker-source-build) method instead.
 
