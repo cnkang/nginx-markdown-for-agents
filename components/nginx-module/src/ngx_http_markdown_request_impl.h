@@ -548,14 +548,13 @@ path_selected:
 }
 
 /**
- * Coordinate conditional-request resolution, optional Markdown conversion, and emission of the conversion result for a buffered response.
- *
- * This function performs any deferred processing-path selection (switching to incremental processing when the buffered body reaches the configured threshold), resolves conditional-request outcomes, invokes the conversion engine if no conditional result is available, and sends the final conversion output. It may update the per-request context (e.g., processing_path) and module metrics as part of its processing.
+ * Determine conditional-request outcome, perform Markdown conversion if needed, and emit the conversion result for a buffered response.
  *
  * @param r The active nginx request.
  * @param ctx Per-request Markdown module context.
  * @param conf Module configuration for the current request.
- * @returns `NGX_OK` on success, or another `ngx_int_t` code returned by underlying helpers to indicate a filter-chain decision or an error. */
+ * @returns `NGX_OK` on success, `NGX_AGAIN` if downstream requires further processing, or another `ngx_int_t` code returned by underlying helpers to indicate a filter-chain decision or error.
+ */
 static ngx_int_t
 ngx_http_markdown_body_filter_convert_and_output(ngx_http_request_t *r,
                                                  ngx_http_markdown_ctx_t *ctx,
