@@ -77,6 +77,26 @@ typedef struct ngx_http_markdown_dynconf_snapshot_s {
 } ngx_http_markdown_dynconf_snapshot_t;
 
 /*
+ * Effective configuration view for per-request consistency.
+ *
+ * Contains only the fields that dynconf can modify at runtime.
+ * Built once at header_filter time from the dynconf snapshot (if valid)
+ * or from the live static conf.  Request-lifetime code reads mutable
+ * fields through this struct to guarantee mid-request consistency even
+ * when a concurrent timer reload swaps the global active_snapshot.
+ */
+struct ngx_http_markdown_effective_conf_s {
+    ngx_flag_t   enabled;
+    ngx_uint_t   enabled_source;
+    ngx_flag_t   prune_noise;
+    ngx_uint_t   log_verbosity;
+    size_t       memory_budget;
+#ifdef MARKDOWN_STREAMING_ENABLED
+    size_t       streaming_budget;
+#endif
+};
+
+/*
  * Dynamic configuration file watcher and runtime.
  *
  * Holds the file path, last modification time, a periodic
@@ -159,6 +179,145 @@ ngx_http_markdown_dynconf_apply_snapshot(
     conf->streaming_budget = snapshot->streaming_budget;
 #endif
     conf->memory_budget = snapshot->memory_budget;
+}
+
+
+/**
+ * Build the effective configuration view from a dynconf snapshot and live conf.
+ *
+ * If the snapshot is non-NULL and valid, its values take precedence.
+ * Otherwise, the corresponding fields from the live conf are used.
+ * The resulting view is stored in the caller-provided struct (typically
+ * allocated from the request pool and hung off ctx->effective_conf).
+ *
+ * @param eff  Target effective config view to populate; must be non-NULL.
+ * @param snap Dynconf snapshot bound to this request; may be NULL.
+ * @param conf Live module configuration for fallback; must be non-NULL.
+ */
+static void
+ngx_http_markdown_build_effective_conf(
+    ngx_http_markdown_effective_conf_t *eff,
+    const ngx_http_markdown_dynconf_snapshot_t *snap,
+    const ngx_http_markdown_conf_t *conf)
+{
+    if (eff == NULL || conf == NULL) {
+        return;
+    }
+
+    if (snap != NULL && snap->valid) {
+        eff->enabled        = snap->enabled;
+        eff->enabled_source = snap->enabled_source;
+        eff->prune_noise    = snap->prune_noise;
+        eff->log_verbosity  = snap->log_verbosity;
+        eff->memory_budget  = snap->memory_budget;
+#ifdef MARKDOWN_STREAMING_ENABLED
+        eff->streaming_budget = snap->streaming_budget;
+#endif
+    } else {
+        eff->enabled        = conf->enabled;
+        eff->enabled_source = conf->enabled_source;
+        eff->prune_noise    = conf->prune_noise;
+        eff->log_verbosity  = conf->log_verbosity;
+        eff->memory_budget  = conf->memory_budget;
+#ifdef MARKDOWN_STREAMING_ENABLED
+        eff->streaming_budget = conf->streaming_budget;
+#endif
+    }
+}
+
+
+/**
+ * Read effective log_verbosity for a request.
+ *
+ * Prefers the effective_conf view bound to ctx; falls back to live conf
+ * if the view is unavailable.
+ */
+static ngx_uint_t
+ngx_http_markdown_effective_log_verbosity(
+    const ngx_http_markdown_effective_conf_t *eff,
+    const ngx_http_markdown_conf_t *conf)
+{
+    if (eff != NULL) {
+        return eff->log_verbosity;
+    }
+    return conf->log_verbosity;
+}
+
+
+/**
+ * Read effective prune_noise for a request.
+ */
+static ngx_flag_t
+ngx_http_markdown_effective_prune_noise(
+    const ngx_http_markdown_effective_conf_t *eff,
+    const ngx_http_markdown_conf_t *conf)
+{
+    if (eff != NULL) {
+        return eff->prune_noise;
+    }
+    return conf->prune_noise;
+}
+
+
+/**
+ * Read effective memory_budget for a request.
+ */
+static size_t
+ngx_http_markdown_effective_memory_budget(
+    const ngx_http_markdown_effective_conf_t *eff,
+    const ngx_http_markdown_conf_t *conf)
+{
+    if (eff != NULL) {
+        return eff->memory_budget;
+    }
+    return conf->memory_budget;
+}
+
+
+#ifdef MARKDOWN_STREAMING_ENABLED
+/**
+ * Read effective streaming_budget for a request.
+ */
+static size_t
+ngx_http_markdown_effective_streaming_budget(
+    const ngx_http_markdown_effective_conf_t *eff,
+    const ngx_http_markdown_conf_t *conf)
+{
+    if (eff != NULL) {
+        return eff->streaming_budget;
+    }
+    return conf->streaming_budget;
+}
+#endif
+
+
+/**
+ * Read effective enabled flag for a request.
+ */
+static ngx_flag_t
+ngx_http_markdown_effective_enabled(
+    const ngx_http_markdown_effective_conf_t *eff,
+    const ngx_http_markdown_conf_t *conf)
+{
+    if (eff != NULL) {
+        return eff->enabled;
+    }
+    return conf->enabled;
+}
+
+
+/**
+ * Read effective enabled_source for a request.
+ */
+static ngx_uint_t
+ngx_http_markdown_effective_enabled_source(
+    const ngx_http_markdown_effective_conf_t *eff,
+    const ngx_http_markdown_conf_t *conf)
+{
+    if (eff != NULL) {
+        return eff->enabled_source;
+    }
+    return conf->enabled_source;
 }
 
 
