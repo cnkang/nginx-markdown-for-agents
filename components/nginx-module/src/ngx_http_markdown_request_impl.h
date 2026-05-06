@@ -45,9 +45,12 @@ static ngx_int_t ngx_http_markdown_handle_unsupported_compression(
     const ngx_http_markdown_conf_t *conf);
 static void ngx_http_markdown_log_decision_with_category(
     ngx_http_request_t *r, const ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_effective_conf_t *eff,
     const ngx_str_t *reason_code, const ngx_str_t *error_category);
 static void ngx_http_markdown_log_decision(ngx_http_request_t *r,
-    const ngx_http_markdown_conf_t *conf, const ngx_str_t *reason_code);
+    const ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_effective_conf_t *eff,
+    const ngx_str_t *reason_code);
 static void ngx_http_markdown_metric_inc_failopen(
     const ngx_http_markdown_conf_t *conf);
 static ngx_http_output_header_filter_pt ngx_http_next_header_filter;
@@ -173,7 +176,7 @@ ngx_http_markdown_handle_ctx_alloc_failure(ngx_http_request_t *r,
             "markdown filter: context allocation "
             "failed, rejecting (fail-closed)");
         ngx_http_markdown_log_decision_with_category(
-            r, conf,
+            r, conf, NULL,
             ngx_http_markdown_reason_failed_closed(),
             ngx_http_markdown_reason_from_error_category(
                 NGX_HTTP_MARKDOWN_ERROR_SYSTEM,
@@ -188,7 +191,7 @@ ngx_http_markdown_handle_ctx_alloc_failure(ngx_http_request_t *r,
                  "failed, returning original content "
                  "(fail-open)");
     ngx_http_markdown_log_decision_with_category(
-        r, conf,
+        r, conf, NULL,
         ngx_http_markdown_reason_failed_open(),
         ngx_http_markdown_reason_from_error_category(
             NGX_HTTP_MARKDOWN_ERROR_SYSTEM,
@@ -306,7 +309,7 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
         ngx_http_markdown_metric_inc_skip(
             NGX_HTTP_MARKDOWN_INELIGIBLE_CONFIG);
         NGX_HTTP_MARKDOWN_METRIC_INC(conversions_bypassed);
-        ngx_http_markdown_log_decision(r, conf,
+        ngx_http_markdown_log_decision(r, conf, NULL,
             ngx_http_markdown_reason_from_eligibility(
                 NGX_HTTP_MARKDOWN_INELIGIBLE_CONFIG,
                 r->connection->log));
@@ -341,7 +344,7 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
                           eligibility));
         ngx_http_markdown_metric_inc_skip(eligibility);
         NGX_HTTP_MARKDOWN_METRIC_INC(conversions_bypassed);
-        ngx_http_markdown_log_decision(r, conf,
+        ngx_http_markdown_log_decision(r, conf, NULL,
             ngx_http_markdown_reason_from_eligibility(
                 eligibility, r->connection->log));
         return ngx_http_next_header_filter(r);
@@ -357,7 +360,7 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
         ngx_http_markdown_metric_inc_skip(
             NGX_HTTP_MARKDOWN_INELIGIBLE_AUTH);
         NGX_HTTP_MARKDOWN_METRIC_INC(conversions_bypassed);
-        ngx_http_markdown_log_decision(r, conf,
+        ngx_http_markdown_log_decision(r, conf, NULL,
             ngx_http_markdown_reason_from_eligibility(
                 NGX_HTTP_MARKDOWN_INELIGIBLE_AUTH,
                 r->connection->log));
@@ -370,7 +373,7 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
         /* Client doesn't want Markdown, pass through */
         NGX_HTTP_MARKDOWN_METRIC_INC(skips.accept);
         NGX_HTTP_MARKDOWN_METRIC_INC(conversions_bypassed);
-        ngx_http_markdown_log_decision(r, conf,
+        ngx_http_markdown_log_decision(r, conf, NULL,
             ngx_http_markdown_reason_skip_accept());
         return ngx_http_next_header_filter(r);
     }
@@ -385,16 +388,36 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
     /* Initialize context */
     ngx_http_markdown_init_ctx(r, ctx, filter_enabled);
 
-    /* Bind the active dynconf snapshot to this request.
+    /* Copy the active dynconf snapshot into request pool at header phase.
      * This guarantees request-level consistency: all subsequent
-     * body/conversion/logging reads go through this snapshot,
-     * even if a concurrent timer reload swaps the global
-     * active_snapshot. */
+     * body/conversion/logging reads go through the effective_conf view
+     * derived from this snapshot, even if a concurrent timer reload
+     * swaps the global active_snapshot. */
     ctx->dynconf_snapshot =
         ngx_pcalloc(r->pool, sizeof(ngx_http_markdown_dynconf_snapshot_t));
     if (ctx->dynconf_snapshot != NULL) {
         *ctx->dynconf_snapshot =
             ngx_http_markdown_dynconf_watcher.active_snapshot;
+    } else if (conf->dynconf_enabled) {
+        ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
+                      "markdown filter: failed to allocate dynconf snapshot "
+                      "from request pool; request will use live conf values");
+    }
+
+    /* Build the effective configuration view for this request.
+     * All mutable-field reads during body/conversion/logging should
+     * go through ctx->effective_conf instead of directly through conf,
+     * so that mid-request dynconf reloads cannot affect in-flight
+     * requests. */
+    ctx->effective_conf =
+        ngx_pcalloc(r->pool, sizeof(ngx_http_markdown_effective_conf_t));
+    if (ctx->effective_conf != NULL) {
+        ngx_http_markdown_build_effective_conf(
+            ctx->effective_conf, ctx->dynconf_snapshot, conf);
+    } else if (conf->dynconf_enabled) {
+        ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
+                      "markdown filter: failed to allocate effective conf "
+                      "from request pool; request will use live conf values");
     }
 
     /* Set context for this request */
@@ -478,7 +501,7 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
             "markdown filter: streaming path "
             "selected by engine selector");
 
-        ngx_http_markdown_log_decision(r, conf,
+        ngx_http_markdown_log_decision(r, conf, ctx->effective_conf,
             ngx_http_markdown_reason_engine_streaming());
 
         goto path_selected;
@@ -619,7 +642,7 @@ ngx_http_markdown_body_filter_convert_and_output(ngx_http_request_t *r,
         r, ctx, conf, &result, &elapsed_ms, &has_result);
     if (rc == NGX_HTTP_NOT_MODIFIED) {
         /* 304 Not Modified — conversion matched, log as converted */
-        ngx_http_markdown_log_decision(r, conf,
+        ngx_http_markdown_log_decision(r, conf, ctx->effective_conf,
             ngx_http_markdown_reason_converted());
         return NGX_OK;
     }
@@ -646,7 +669,7 @@ ngx_http_markdown_body_filter_convert_and_output(ngx_http_request_t *r,
          * accepting the converted body chain. That is still a converted
          * request, so record the decision before propagating the status.
          */
-        ngx_http_markdown_log_decision(r, conf,
+        ngx_http_markdown_log_decision(r, conf, ctx->effective_conf,
             ngx_http_markdown_reason_converted());
     } else {
         /*
