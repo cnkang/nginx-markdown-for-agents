@@ -3,6 +3,7 @@
 
 ARG NGINX_VERSION=1.28.2
 ARG MODULE_REF=v0.1.0
+ARG INSTALL_SHA256
 FROM nginx:${NGINX_VERSION}-alpine
 
 # Install dependencies and install the module in one layer.
@@ -13,6 +14,8 @@ RUN apk add --no-cache \
     python3 \
     tar \
     && curl --proto '=https' --tlsv1.2 -fsSL "https://raw.githubusercontent.com/cnkang/nginx-markdown-for-agents/${MODULE_REF}/tools/install.sh" -o /tmp/install.sh \
+    && test -n "${INSTALL_SHA256}" \
+    && echo "${INSTALL_SHA256}  /tmp/install.sh" | sha256sum -c - \
     && chmod +x /tmp/install.sh \
     && SKIP_ROOT_CHECK=1 /tmp/install.sh \
     && rm -f /tmp/install.sh

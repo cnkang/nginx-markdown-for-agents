@@ -740,7 +740,30 @@ if __name__ == "__main__":
 UPSTREAM_PY
 
 chmod +x "${UPSTREAM_SCRIPT}"
-eval "$(python3 "${UPSTREAM_SCRIPT}" --print-metrics)"
+while IFS='=' read -r metric_name metric_value; do
+    case "${metric_name}" in
+        OVERSIZE_LEN|SIMPLE_HTML_LEN)
+            if [[ "${metric_value}" =~ ^[0-9]+$ ]]; then
+                printf -v "${metric_name}" '%s' "${metric_value}"
+            else
+                echo "Invalid numeric metric output: ${metric_name}=${metric_value}" >&2
+                exit 1
+            fi
+            ;;
+        OVERSIZE_END_TOKEN)
+            if [[ "${metric_value}" =~ ^[A-Za-z0-9_]+$ ]]; then
+                printf -v "${metric_name}" '%s' "${metric_value}"
+            else
+                echo "Invalid token metric output: ${metric_name}=${metric_value}" >&2
+                exit 1
+            fi
+            ;;
+        *)
+            echo "Unexpected metric output key: ${metric_name}" >&2
+            exit 1
+            ;;
+    esac
+done < <(python3 "${UPSTREAM_SCRIPT}" --print-metrics)
 
 # ---------------------------------------------------------------------------
 # Prepare NGINX runtime (reuse existing binary)
