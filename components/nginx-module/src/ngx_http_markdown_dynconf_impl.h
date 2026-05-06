@@ -92,6 +92,7 @@ typedef struct {
     ngx_http_markdown_dynconf_snapshot_t  active_snapshot;
     ngx_http_markdown_dynconf_snapshot_t  staging_snapshot;
     ngx_uint_t    version;
+    ngx_http_markdown_conf_t             *conf;
 } ngx_http_markdown_dynconf_watcher_t;
 
 
@@ -240,6 +241,11 @@ ngx_http_markdown_dynconf_timer_handler(ngx_event_t *ev)
                       "markdown dynconf: change detected on \"%V\", "
                       "performing two-phase reload",
                       &watcher->path);
+
+        if (watcher->conf != NULL) {
+            ngx_http_markdown_dynconf_reload(watcher, watcher->conf,
+                                             ev->log);
+        }
     }
 
     /* Re-arm the timer for the next poll cycle. */
@@ -340,6 +346,7 @@ ngx_http_markdown_dynconf_start(ngx_http_markdown_dynconf_watcher_t *watcher,
 
     watcher->active = 1;
     watcher->version = 0;
+    watcher->conf = (ngx_http_markdown_conf_t *) conf;
 
     /* Initialize active snapshot from current configuration. */
     ngx_http_markdown_dynconf_snapshot_from_conf(&watcher->active_snapshot,
