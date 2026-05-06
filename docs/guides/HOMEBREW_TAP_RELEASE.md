@@ -32,9 +32,12 @@ Set these in this repository before running the workflows:
 
 Workflow `Homebrew Post-Release Verify` runs on GitHub macOS and executes:
 
-1. `brew tap <owner>/<tap>`
-2. `brew audit --strict <tap>/<formula>`
-3. `brew install --build-from-source <tap>/<formula>`
-4. `brew test <tap>/<formula>`
+1. `brew tap cnkang/nginx-markdown`
+2. `brew audit --strict cnkang/nginx-markdown/nginx-markdown-module`
+3. `brew install --build-from-source cnkang/nginx-markdown/nginx-markdown-module`
+4. `brew test cnkang/nginx-markdown/nginx-markdown-module`
+
+If you use your own tap repository, replace `cnkang/nginx-markdown` with your
+tap name.
 
 You can run it manually through `workflow_dispatch` if needed.

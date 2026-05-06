@@ -73,11 +73,11 @@ It also enforces SHA-256 artifact integrity checks by default.
 
 For alternative installation methods (source builds, Docker, custom NGINX builds), troubleshooting, and detailed instructions, see the [Installation Guide](docs/guides/INSTALLATION.md).
 
-For macOS package-manager installation through your own Homebrew tap (release-tag artifact):
+For macOS package-manager installation through the project Homebrew tap (release-tag artifact):
 
 ```bash
-brew tap <owner>/<tap>
-brew install <owner>/<tap>/nginx-markdown-module
+brew tap cnkang/nginx-markdown
+brew install cnkang/nginx-markdown/nginx-markdown-module
 ```
 
 Tap publication and macOS post-release verification workflows are documented in [docs/guides/HOMEBREW_TAP_RELEASE.md](docs/guides/HOMEBREW_TAP_RELEASE.md).
