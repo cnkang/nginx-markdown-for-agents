@@ -47,6 +47,23 @@ risk pack, and introduces the two-phase dynconf snapshot model.
 - Dynconf request-path file I/O removed from filter chain.
 - Forwarded-header injection vectors from unsanitized `X-Forwarded-Host`.
 
+#### Upgrading to 0.6.1
+
+- **Dynamic config** is off by default (`markdown_dynamic_config off`).
+  To enable hot-reload without NGINX restart, set
+  `markdown_dynamic_config on` and `markdown_dynamic_config_path <path>`
+  at the http or server level.
+- **X-Forwarded-Host validation** is now stricter: leading/trailing
+  whitespace in the first-hop token is trimmed; non-IPv6 hosts with a
+  `:` must be followed by digits only (port); IPv6 bracket literals
+  may include an optional `:<port>` suffix (e.g. `[::1]:8080`).
+  Previously-accepted malformed values may now be rejected with a
+  fallback to `r->headers_in.server`.
+- **Request-bound dynconf snapshot**: each request deep-copies the
+  active snapshot at header_filter time, eliminating the window where
+  a concurrent timer reload could swap the snapshot mid-request.
+  No configuration change is required; behavior is more consistent.
+
 ## [0.6.0] - 2026-05-05
 
 This release upgrades nginx-markdown-for-agents from a feature-complete opt-in

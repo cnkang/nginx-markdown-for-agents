@@ -326,7 +326,7 @@ ngx_http_markdown_log_decision_with_category(ngx_http_request_t *r,
                       "markdown decision: invalid log_verbosity=%ui, "
                       "falling back to INFO",
                       conf->log_verbosity);
-        return;
+        conf->log_verbosity = NGX_HTTP_MARKDOWN_LOG_INFO;
     }
 
     if (conf->log_verbosity <= NGX_HTTP_MARKDOWN_LOG_WARN

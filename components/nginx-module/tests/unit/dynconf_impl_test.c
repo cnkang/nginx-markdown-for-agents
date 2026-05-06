@@ -1105,6 +1105,7 @@ static void
 test_timer_handler_change_detected(void)
 {
     ngx_http_markdown_dynconf_watcher_t  watcher;
+    ngx_http_markdown_conf_t             conf;
     ngx_event_t                          timer;
     ngx_event_t                          ev;
     const char                          *tmpfile;
@@ -1119,10 +1120,12 @@ test_timer_handler_change_detected(void)
     }
 
     memset(&watcher, 0, sizeof(watcher));
+    memset(&conf, 0, sizeof(conf));
     memset(&timer, 0, sizeof(timer));
     timer.timer_set = 0;
     watcher.active = 1;
     watcher.timer = &timer;
+    watcher.conf = &conf;
     set_ngx_str(&watcher.path, tmpfile);
 
     if (ngx_file_info((const u_char *) tmpfile, &fi) != NGX_FILE_ERROR) {
@@ -1135,6 +1138,11 @@ test_timer_handler_change_detected(void)
     ev.handler = ngx_http_markdown_dynconf_timer_handler;
 
     ngx_http_markdown_dynconf_timer_handler(&ev);
+
+    TEST_ASSERT(watcher.version > 0,
+                "timer_handler: version incremented after reload");
+    TEST_ASSERT(watcher.active_snapshot.enabled == 1,
+                "timer_handler: active_snapshot reflects new config");
 
     unlink(tmpfile);
     TEST_PASS("timer_handler: change detected, two-phase reload in timer");
@@ -1514,6 +1522,101 @@ test_snapshot_from_conf_and_apply(void)
     TEST_PASS("snapshot: from_conf and apply_snapshot round-trip");
 }
 
+static void
+test_dynconf_start_watcher_already_active(void)
+{
+    ngx_http_markdown_dynconf_watcher_t  watcher;
+    ngx_http_markdown_conf_t             conf;
+    ngx_int_t                            rc;
+    const char                          *path_a = "/tmp/dynconf_start_a.conf";
+    const char                          *path_b = "/tmp/dynconf_start_b.conf";
+    u_char                               path_buf_a[256];
+    u_char                               path_buf_b[256];
+    size_t                               len_a;
+    size_t                               len_b;
+
+    {
+        FILE *f = fopen(path_a, "w");
+        TEST_ASSERT(f != NULL, "create path_a");
+        fclose(f);
+    }
+    {
+        FILE *f = fopen(path_b, "w");
+        TEST_ASSERT(f != NULL, "create path_b");
+        fclose(f);
+    }
+
+    memset(&watcher, 0, sizeof(watcher));
+    memset(&conf, 0, sizeof(conf));
+
+    len_a = strlen(path_a);
+    ngx_memcpy(path_buf_a, path_a, len_a);
+    path_buf_a[len_a] = '\0';
+    watcher.path.data = path_buf_a;
+    watcher.path.len = len_a;
+    watcher.active = 1;
+
+    set_ngx_str(&conf.dynconf_path, path_b);
+
+    rc = ngx_http_markdown_dynconf_start(&watcher, NULL,
+                                          (const ngx_str_t *) &conf.dynconf_path,
+                                          &conf, &g_log);
+    TEST_ASSERT(rc == NGX_OK,
+                "start with already-active watcher returns NGX_OK");
+    TEST_ASSERT(watcher.active == 1,
+                "watcher still active after duplicate start");
+    TEST_ASSERT(watcher.path.len == len_a
+                && ngx_memcmp(watcher.path.data, path_buf_a, len_a) == 0,
+                "watcher path unchanged after duplicate start");
+
+    watcher.active = 0;
+
+    unlink(path_a);
+    unlink(path_b);
+    TEST_PASS("dynconf_start: watcher already active guard");
+}
+
+static void
+test_reload_line_too_long(void)
+{
+    const char                          *tmpfile;
+    ngx_http_markdown_dynconf_watcher_t  watcher;
+    ngx_http_markdown_conf_t             conf;
+    ngx_int_t                            rc;
+    ngx_uint_t                           orig_version;
+
+    tmpfile = "/tmp/dynconf_test_long_line.conf";
+    {
+        FILE *f = fopen(tmpfile, "w");
+        TEST_ASSERT(f != NULL, "create long-line dynconf file");
+        fprintf(f, "markdown_filter=on\n");
+        for (size_t j = 0; j < NGX_HTTP_MARKDOWN_DYNCONF_MAX_LINE + 100; j++) {
+            fputc('x', f);
+        }
+        fputc('\n', f);
+        fclose(f);
+    }
+
+    memset(&watcher, 0, sizeof(watcher));
+    memset(&conf, 0, sizeof(conf));
+    conf.enabled = 1;
+    set_ngx_str(&watcher.path, tmpfile);
+    watcher.active = 1;
+    watcher.version = 7;
+    orig_version = watcher.version;
+
+    rc = ngx_http_markdown_dynconf_reload(&watcher, &conf, &g_log);
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_INVALID_FILE,
+                "reload with too-long line returns INVALID_FILE");
+    TEST_ASSERT(watcher.version == orig_version,
+                "version unchanged after too-long line");
+    TEST_ASSERT(conf.enabled == 1,
+                "conf fields unchanged after too-long line");
+
+    unlink(tmpfile);
+    TEST_PASS("reload: line too long returns INVALID_FILE");
+}
+
 int
 main(void)
 {
@@ -1599,6 +1702,11 @@ main(void)
     test_reload_filter_overrides_complex();
     test_reload_verbosity_module_enum();
     test_reload_invalid_line_rejects_all();
+
+    TEST_SECTION("dynconf_impl: additional reload/start tests");
+
+    test_dynconf_start_watcher_already_active();
+    test_reload_line_too_long();
 
     TEST_SECTION("dynconf_impl: snapshot tests");
 

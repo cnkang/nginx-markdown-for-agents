@@ -391,7 +391,11 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
      * even if a concurrent timer reload swaps the global
      * active_snapshot. */
     ctx->dynconf_snapshot =
-        &ngx_http_markdown_dynconf_watcher.active_snapshot;
+        ngx_pcalloc(r->pool, sizeof(ngx_http_markdown_dynconf_snapshot_t));
+    if (ctx->dynconf_snapshot != NULL) {
+        *ctx->dynconf_snapshot =
+            ngx_http_markdown_dynconf_watcher.active_snapshot;
+    }
 
     /* Set context for this request */
     r->ctx[ngx_http_markdown_filter_module.ctx_index] = ctx;

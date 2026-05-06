@@ -524,10 +524,7 @@
         "docs-tooling"
       ],
       "paths": [
-        "components/rust-converter/src/emitter.rs",
-        "components/rust-converter/src/escaping.rs",
-        "components/rust-converter/src/link.rs",
-        "components/rust-converter/src/url.rs",
+        "components/rust-converter/src/streaming/emitter.rs",
         "components/nginx-module/src/ngx_http_markdown_conversion_impl.h",
         "components/nginx-module/src/ngx_http_markdown_request_impl.h",
         "components/rust-converter/tests/**",
