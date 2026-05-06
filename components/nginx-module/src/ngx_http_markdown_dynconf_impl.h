@@ -706,6 +706,85 @@ ngx_http_markdown_dynconf_parse_line(u_char *line, size_t line_len,
 
 
 /*
+ * Fallback definition for NGX_MAX_SIZE_T_VALUE when building
+ * outside the NGINX compilation environment (e.g. unit tests).
+ * NGINX core defines this in ngx_config.h.
+ */
+#ifndef NGX_MAX_SIZE_T_VALUE
+#define NGX_MAX_SIZE_T_VALUE  ((size_t) -1)
+#endif
+
+/**
+ * Safely parse a size value string and validate for assignment to a size_t field.
+ *
+ * Performs the complete "parse + validate + safe-cast" sequence to prevent
+ * CWE-190 integer overflow when converting ssize_t (signed) results from
+ * ngx_parse_size() to size_t (unsigned) snapshot fields.
+ *
+ * Validation checks:
+ *   1. ngx_parse_size() must succeed (not return NGX_ERROR)
+ *   2. Result must be non-negative (no negative ssize_t values)
+ *   3. Result must not exceed max_size_t (caller-specified upper bound;
+ *      pass SIZE_MAX to allow any non-negative value)
+ *
+ * On failure, logs a diagnostic with the key name, raw input, and rejection
+ * reason, and does NOT modify the snapshot field.
+ *
+ * @param value      Value string (not NUL-terminated)
+ * @param value_len  Length of value string
+ * @param key_name   Human-readable key name for error messages
+ * @param max_size_t Maximum allowed value (e.g. NGX_MAX_SIZE_T_VALUE or SIZE_MAX)
+ * @param log        NGINX log for error messages
+ * @param[out] out   Output size_t value; only written on NGX_OK return
+ *
+ * @returns NGX_OK on success (out populated), NGX_ERROR on any validation failure
+ */
+static ngx_int_t
+ngx_http_markdown_dynconf_parse_size_safe(const u_char *value, size_t value_len,
+                                          const char *key_name,
+                                          size_t max_size_t,
+                                          ngx_log_t *log,
+                                          size_t *out)
+{
+    ngx_str_t   val;
+    ssize_t     parsed;
+
+    val.data = (u_char *) value;
+    val.len = value_len;
+
+    parsed = ngx_parse_size(&val);
+
+    if (parsed == NGX_ERROR) {
+        ngx_log_error(NGX_LOG_WARN, log, 0,
+                      "markdown dynconf: invalid %s value \"%*s\" "
+                      "(parse error)", key_name,
+                      (int) value_len, value);
+        return NGX_ERROR;
+    }
+
+    if (parsed < 0) {
+        ngx_log_error(NGX_LOG_WARN, log, 0,
+                      "markdown dynconf: invalid %s value \"%*s\" "
+                      "(negative result: %z)", key_name,
+                      (int) value_len, value, parsed);
+        return NGX_ERROR;
+    }
+
+    if ((size_t) parsed > max_size_t) {
+        ngx_log_error(NGX_LOG_WARN, log, 0,
+                      "markdown dynconf: invalid %s value \"%*s\" "
+                      "(exceeds maximum: %z > %z)", key_name,
+                      (int) value_len, value,
+                      (size_t) parsed, max_size_t);
+        return NGX_ERROR;
+    }
+
+    *out = (size_t) parsed;
+    return NGX_OK;
+}
+
+
+/*
  * Apply a single parsed key=value pair to a staging snapshot.
  *
  * Only runtime-safe fields are modified.  Fields that require
@@ -807,19 +886,15 @@ ngx_http_markdown_dynconf_apply(ngx_http_markdown_dynconf_snapshot_t *snapshot,
     case NGX_HTTP_MARKDOWN_DYNCONF_KEY_STREAMING_BUDGET:
 #ifdef MARKDOWN_STREAMING_ENABLED
         {
-            ngx_str_t   val;
-            ssize_t     parsed;
+            size_t  budget;
 
-            val.data = value;
-            val.len = value_len;
-            parsed = ngx_parse_size(&val);
-            if (parsed == NGX_ERROR) {
-                ngx_log_error(NGX_LOG_WARN, log, 0,
-                              "markdown dynconf: invalid streaming_budget value \"%*s\"",
-                              (int) value_len, value);
+            if (ngx_http_markdown_dynconf_parse_size_safe(
+                    value, value_len, "streaming_budget",
+                    NGX_MAX_SIZE_T_VALUE, log, &budget) != NGX_OK)
+            {
                 return NGX_ERROR;
             }
-            snapshot->streaming_budget = (size_t) parsed;
+            snapshot->streaming_budget = budget;
         }
 #else
         /* Streaming not compiled in; reject with a diagnostic. */
@@ -832,19 +907,15 @@ ngx_http_markdown_dynconf_apply(ngx_http_markdown_dynconf_snapshot_t *snapshot,
     /* Set the total memory budget for full-buffer conversion (size value). */
     case NGX_HTTP_MARKDOWN_DYNCONF_KEY_MEMORY_BUDGET:
         {
-            ngx_str_t   val;
-            ssize_t     parsed;
+            size_t  budget;
 
-            val.data = value;
-            val.len = value_len;
-            parsed = ngx_parse_size(&val);
-            if (parsed == NGX_ERROR) {
-                ngx_log_error(NGX_LOG_WARN, log, 0,
-                              "markdown dynconf: invalid memory_budget value \"%*s\"",
-                              (int) value_len, value);
+            if (ngx_http_markdown_dynconf_parse_size_safe(
+                    value, value_len, "memory_budget",
+                    NGX_MAX_SIZE_T_VALUE, log, &budget) != NGX_OK)
+            {
                 return NGX_ERROR;
             }
-            snapshot->memory_budget = (size_t) parsed;
+            snapshot->memory_budget = budget;
         }
         break;
 
