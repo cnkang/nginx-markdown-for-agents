@@ -74,7 +74,7 @@ ngx_http_markdown_init_worker(ngx_cycle_t *cycle)
             && lcf->dynconf_path.len > 0
             && ngx_http_markdown_dynconf_start(
                    &ngx_http_markdown_dynconf_watcher,
-                   cycle, &lcf->dynconf_path, cycle->log)
+                   cycle, &lcf->dynconf_path, lcf, cycle->log)
                != NGX_OK)
         {
             ngx_log_error(NGX_LOG_WARN, cycle->log, 0,
