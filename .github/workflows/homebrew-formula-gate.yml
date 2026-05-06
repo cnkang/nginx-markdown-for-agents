@@ -59,7 +59,7 @@ jobs:
               if stripped.startswith("url "):
                   lines.append(f'  url "{url}"')
               elif stripped.startswith("sha256 "):
-                  lines.append('  version "0.6.0"')
+                   lines.append('  version "0.6.1"')
                   lines.append(f'  sha256 "{sha}"')
                   inserted_version = True
               elif stripped.startswith("version "):
@@ -67,7 +67,7 @@ jobs:
               else:
                   lines.append(line)
           if not inserted_version:
-              lines.append('  version "0.6.0"')
+               lines.append('  version "0.6.1"')
           path.write_text("\n".join(lines) + "\n", encoding="utf-8")
           PY
           brew audit --strict nginx-markdown-module
