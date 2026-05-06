@@ -15,9 +15,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 from typing import List, Set, Tuple
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
+from lib.path_validation import validate_read_path
 
 
 # Artifact naming convention:
@@ -55,7 +59,8 @@ def load_matrix(matrix_path: str) -> List[dict]:
     Returns:
         List[dict]: Matrix entries from the file whose `support_tier` equals "full".
     """
-    with open(matrix_path, "r", encoding="utf-8") as f:
+    resolved = validate_read_path(matrix_path, purpose="release matrix")
+    with open(resolved, "r", encoding="utf-8") as f:
         data = json.load(f)
 
     if not isinstance(data, dict) or not isinstance(data.get("matrix"), list):
