@@ -19,7 +19,6 @@
  * are visible through implementation-header include order.
  */
 ngx_int_t ngx_strncasecmp(u_char *s1, u_char *s2, size_t n);
-u_char *ngx_strlchr(u_char *p, u_char *last, u_char c);
 void markdown_result_free(struct MarkdownResult *result);
 static void ngx_http_markdown_record_system_failure(
     ngx_http_markdown_ctx_t *ctx);
@@ -197,30 +196,38 @@ ngx_http_markdown_select_base_url_parts(ngx_http_request_t *r,
              * On validation failure, fall through to
              * r->headers_in.server (C-01: link poisoning). */
             {
-                u_char       *comma;
-                size_t        host_len;
-                ngx_str_t     validated_host;
-                ngx_flag_t    is_ipv6;
-                ngx_flag_t    host_valid;
-                size_t        i;
+                 u_char       *host_data;
+                 size_t        host_len;
+                 ngx_str_t     validated_host;
+                 ngx_flag_t    is_ipv6;
+                 ngx_flag_t    host_valid;
+                 size_t        i;
 
-                comma = ngx_strlchr(x_forwarded_host->data,
-                                     x_forwarded_host->data
-                                         + x_forwarded_host->len,
-                                     ',');
-                if (comma != NULL) {
-                    host_len = (size_t)(comma - x_forwarded_host->data);
-                } else {
-                    host_len = x_forwarded_host->len;
-                }
+                 /* Find first comma to extract first-hop value. */
+                 host_len = x_forwarded_host->len;
+                 for (i = 0; i < x_forwarded_host->len; i++) {
+                     if (x_forwarded_host->data[i] == ',') {
+                         host_len = i;
+                         break;
+                     }
+                 }
 
-                /* Trim trailing whitespace from extracted host. */
-                while (host_len > 0
-                       && (x_forwarded_host->data[host_len - 1] == ' '
-                           || x_forwarded_host->data[host_len - 1] == '\t'))
-                {
-                    host_len--;
-                }
+                 /* Trim leading whitespace from extracted host. */
+                 host_data = x_forwarded_host->data;
+                 while (host_len > 0
+                        && (*host_data == ' ' || *host_data == '\t'))
+                 {
+                     host_data++;
+                     host_len--;
+                 }
+
+                 /* Trim trailing whitespace from extracted host. */
+                 while (host_len > 0
+                        && (host_data[host_len - 1] == ' '
+                            || host_data[host_len - 1] == '\t'))
+                 {
+                     host_len--;
+                 }
 
                 if (host_len == 0) {
                     goto forwarded_host_invalid;
@@ -228,36 +235,53 @@ ngx_http_markdown_select_base_url_parts(ngx_http_request_t *r,
 
                 /* Check for IPv6 bracket literal. */
                 is_ipv6 = (host_len >= 2
-                           && x_forwarded_host->data[0] == '[')
+                           && host_data[0] == '[')
                           ? 1 : 0;
 
-                /* Validate characters. */
+                /* Validate characters.
+                 * For non-IPv6 hosts, enforce digit-only port
+                 * after the first ':'. */
                 host_valid = 1;
-                for (i = 0; i < host_len; i++) {
-                    u_char  c = x_forwarded_host->data[i];
+                {
+                    ngx_flag_t  parsing_port = 0;
 
-                    if (c < 0x20 || c == 0x7F) {
-                        host_valid = 0;
-                        break;
-                    }
+                    for (i = 0; i < host_len; i++) {
+                        u_char  c = host_data[i];
 
-                    if (is_ipv6) {
-                        /* Inside IPv6 brackets: allow ':' and ']'. */
-                        if (c == '/' || c == '\\' || c == ' '
-                            || c == ',')
-                        {
+                        if (c < 0x20 || c == 0x7F) {
                             host_valid = 0;
                             break;
                         }
-                    } else {
-                        /* Regular host: reject path separators,
-                         * commas, and spaces.  Allow ':' for
-                         * host:port. */
-                        if (c == '/' || c == '\\' || c == ' '
-                            || c == ',')
-                        {
-                            host_valid = 0;
-                            break;
+
+                        if (parsing_port) {
+                            if (c < '0' || c > '9') {
+                                host_valid = 0;
+                                break;
+                            }
+                            continue;
+                        }
+
+                        if (is_ipv6) {
+                            if (c == '/' || c == '\\' || c == ' '
+                                || c == ',')
+                            {
+                                host_valid = 0;
+                                break;
+                            }
+                        } else {
+                            if (c == '/' || c == '\\' || c == ' '
+                                || c == ',')
+                            {
+                                host_valid = 0;
+                                break;
+                            }
+                            if (c == ':') {
+                                if (i == host_len - 1) {
+                                    host_valid = 0;
+                                    break;
+                                }
+                                parsing_port = 1;
+                            }
                         }
                     }
                 }
@@ -266,14 +290,37 @@ ngx_http_markdown_select_base_url_parts(ngx_http_request_t *r,
                     goto forwarded_host_invalid;
                 }
 
-                /* IPv6 literal must close with ']'. */
-                if (is_ipv6
-                    && x_forwarded_host->data[host_len - 1] != ']')
-                {
-                    goto forwarded_host_invalid;
+                /* IPv6 literal: find closing ']' and allow optional
+                 * :<port> suffix after it (e.g. [::1]:8080). */
+                if (is_ipv6) {
+                    size_t  bracket_end = 0;
+
+                    for (i = 1; i < host_len; i++) {
+                        if (host_data[i] == ']') {
+                            bracket_end = i;
+                            break;
+                        }
+                    }
+
+                    if (bracket_end == 0) {
+                        goto forwarded_host_invalid;
+                    }
+
+                    if (bracket_end + 1 < host_len) {
+                        if (host_data[bracket_end + 1] != ':') {
+                            goto forwarded_host_invalid;
+                        }
+                        for (i = bracket_end + 2; i < host_len; i++) {
+                            if (host_data[i] < '0'
+                                || host_data[i] > '9')
+                            {
+                                goto forwarded_host_invalid;
+                            }
+                        }
+                    }
                 }
 
-                validated_host.data = x_forwarded_host->data;
+                validated_host.data = host_data;
                 validated_host.len = host_len;
                 *host = validated_host;
                 return NGX_OK;

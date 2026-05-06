@@ -80,10 +80,18 @@ static ngx_http_markdown_dynconf_watcher_t ngx_http_markdown_dynconf_watcher = {
  */
 #define NGX_HTTP_MARKDOWN_METRIC_SAFE_DEC(field)                                    \
     do {                                                                            \
-        if (ngx_http_markdown_metrics != NULL                                       \
-            && ngx_http_markdown_metrics->field > 0)                                \
-        {                                                                           \
-            NGX_HTTP_MARKDOWN_METRIC_ADD(field, -1);                                \
+        if (ngx_http_markdown_metrics != NULL) {                                    \
+            ngx_atomic_uint_t  _cur;                                                \
+            for ( ;; ) {                                                            \
+                _cur = ngx_http_markdown_metrics->field;                            \
+                if (_cur == 0) { break; }                                           \
+                if (ngx_atomic_cmp_set(                                            \
+                        &ngx_http_markdown_metrics->field,                          \
+                        _cur, _cur - 1))                                            \
+                {                                                                   \
+                    break;                                                          \
+                }                                                                   \
+            }                                                                       \
         }                                                                           \
     } while (0)
 
