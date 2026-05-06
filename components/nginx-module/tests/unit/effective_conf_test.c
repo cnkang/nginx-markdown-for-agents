@@ -1,0 +1,621 @@
+/*
+ * Test: effective_conf consistency
+ * Description: Verify that ngx_http_markdown_effective_conf_t provides
+ *              per-request consistency for dynconf-mutable fields.
+ *              Tests cover:
+ *              - build_effective_conf from valid snapshot
+ *              - build_effective_conf with NULL/invalid snapshot (fallback)
+ *              - effective_* helpers read from effective_conf when present
+ *              - effective_* helpers fall back to live conf when eff is NULL
+ *              - Request-level snapshot consistency:
+ *                snapshot captured at time A remains effective even after
+ *                live conf is changed to values B (simulating mid-request
+ *                dynconf reload).
+ */
+
+#include "../include/test_common.h"
+
+#include <ctype.h>
+#include <stdarg.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
+
+#define MARKDOWN_STREAMING_ENABLED 1
+
+#include "../../src/ngx_http_markdown_filter_module.h"
+
+#ifndef NGX_OK
+#define NGX_OK       0
+#endif
+#ifndef NGX_ERROR
+#define NGX_ERROR   -1
+#endif
+#ifndef NGX_DECLINED
+#define NGX_DECLINED -2
+#endif
+
+#ifndef NGX_LOG_ERR
+#define NGX_LOG_ERR    1
+#endif
+#ifndef NGX_LOG_WARN
+#define NGX_LOG_WARN   2
+#endif
+#ifndef NGX_LOG_INFO
+#define NGX_LOG_INFO   3
+#endif
+#ifndef NGX_LOG_DEBUG
+#define NGX_LOG_DEBUG  4
+#endif
+
+typedef intptr_t ngx_err_t;
+
+typedef struct ngx_cycle_s     ngx_cycle_t;
+typedef struct ngx_connection_s ngx_connection_t;
+
+struct ngx_module_s {
+    int dummy;
+};
+
+struct ngx_pool_s {
+    int dummy;
+};
+
+struct ngx_log_s {
+    int dummy;
+};
+
+struct ngx_cycle_s {
+    ngx_pool_t *pool;
+    ngx_log_t  *log;
+};
+
+struct ngx_connection_s {
+    ngx_log_t *log;
+};
+
+struct ngx_http_request_s {
+    ngx_connection_t *connection;
+};
+
+struct ngx_http_complex_value_s {
+    ngx_str_t  value;
+    ngx_int_t  eval_rc;
+};
+
+ngx_module_t ngx_http_markdown_filter_module;
+ngx_str_t ngx_http_markdown_metrics_shm_name = ngx_string("");
+ngx_shm_zone_t *ngx_http_markdown_metrics_shm_zone = NULL;
+
+#define ngx_memzero(p, n)   memset((p), 0, (n))
+#define ngx_memcpy(dst, src, n) memcpy((dst), (src), (n))
+#define ngx_memmove(dst, src, n) memmove((dst), (src), (n))
+
+static ngx_int_t
+ngx_strncasecmp(u_char *s1, u_char *s2, size_t n)
+{
+    for (size_t i = 0; i < n; i++) {
+        u_char c1 = (u_char) tolower((unsigned char) s1[i]);
+        u_char c2 = (u_char) tolower((unsigned char) s2[i]);
+        if (c1 != c2) {
+            return (ngx_int_t) c1 - (ngx_int_t) c2;
+        }
+    }
+    return 0;
+}
+
+#undef ngx_log_error
+#define ngx_log_error(level, log, err, fmt, ...) do { UNUSED(log); } while(0)
+
+#define NGX_MAX_PATH 1024
+
+typedef time_t ngx_mtime_t;
+
+#define ngx_file_info_t       struct stat
+#define ngx_file_info(name, fi) stat((const char *)(name), (fi))
+#define ngx_file_mtime(fi)    ((fi)->st_mtime)
+#define NGX_FILE_ERROR        (-1)
+
+typedef int ngx_fd_t;
+#define NGX_INVALID_FILE     (-1)
+
+#define NGX_FILE_RDONLY      0
+#define NGX_FILE_OPEN        0
+
+static ngx_fd_t
+ngx_open_file(u_char *name, int mode, int create, int access)
+{
+    UNUSED(mode);
+    UNUSED(create);
+    UNUSED(access);
+    return open((const char *) name, O_RDONLY);
+}
+
+#define ngx_close_file(fd) close(fd)
+
+static ssize_t
+ngx_read_fd(ngx_fd_t fd, void *buf, size_t size)
+{
+    return read(fd, buf, size);
+}
+
+static void *
+ngx_pcalloc(ngx_pool_t *pool, size_t size)
+{
+    UNUSED(pool);
+    return calloc(1, size);
+}
+
+static void *
+ngx_pnalloc(ngx_pool_t *pool, size_t size)
+{
+    UNUSED(pool);
+    return malloc(size);
+}
+
+static ssize_t
+ngx_parse_size(ngx_str_t *line)
+{
+    ssize_t     num;
+    u_char     *last;
+
+    num = 0;
+    last = line->data + line->len;
+
+    for (u_char *p = line->data; p < last; p++) {
+        if (*p >= '0' && *p <= '9') {
+            num = num * 10 + (*p - '0');
+        } else {
+            switch (*p) {
+            case 'k': case 'K': return num * 1024;
+            case 'm': case 'M': return num * 1024 * 1024;
+            case 'g': case 'G': return num * 1024 * 1024 * 1024;
+            default: return NGX_ERROR;
+            }
+        }
+    }
+    return num;
+}
+
+typedef struct ngx_event_s ngx_event_t;
+
+struct ngx_event_s {
+    void        (*handler)(ngx_event_t *ev);
+    void         *data;
+    ngx_log_t   *log;
+    unsigned      timer_set;
+};
+
+static void
+ngx_add_timer(ngx_event_t *ev, ngx_msec_t timer)
+{
+    UNUSED(ev);
+    UNUSED(timer);
+}
+
+static void
+ngx_del_timer(ngx_event_t *ev)
+{
+    UNUSED(ev);
+}
+
+#define NGX_CONF_UNSET       (-1)
+#define NGX_CONF_UNSET_UINT  (ngx_uint_t) -1
+#define NGX_CONF_UNSET_SIZE  (size_t) -1
+
+#define NGX_HTTP_MARKDOWN_LOG_ERROR  0
+#define NGX_HTTP_MARKDOWN_LOG_WARN   1
+#define NGX_HTTP_MARKDOWN_LOG_INFO   2
+#define NGX_HTTP_MARKDOWN_LOG_DEBUG  3
+
+#include "../../src/ngx_http_markdown_dynconf_impl.h"
+
+static ngx_pool_t  g_pool;
+static ngx_log_t   g_log;
+static ngx_cycle_t g_cycle = { &g_pool, &g_log };
+static ngx_connection_t g_conn = { &g_log };
+
+
+static void
+test_build_effective_conf_from_valid_snapshot(void)
+{
+    ngx_http_markdown_conf_t conf;
+    ngx_http_markdown_dynconf_snapshot_t snap;
+    ngx_http_markdown_effective_conf_t eff;
+
+    TEST_SUBSECTION("build_effective_conf from valid snapshot");
+
+    ngx_memzero(&conf, sizeof(conf));
+    ngx_memzero(&snap, sizeof(snap));
+    ngx_memzero(&eff, sizeof(eff));
+
+    conf.enabled = 1;
+    conf.enabled_source = 2;
+    conf.prune_noise = 1;
+    conf.log_verbosity = NGX_HTTP_MARKDOWN_LOG_DEBUG;
+    conf.memory_budget = 4 * 1024 * 1024;
+    conf.streaming_budget = 2 * 1024 * 1024;
+
+    ngx_http_markdown_dynconf_snapshot_from_conf(&snap, &conf);
+
+    ngx_http_markdown_build_effective_conf(&eff, &snap, &conf);
+
+    TEST_ASSERT(eff.enabled == 1,
+                "effective enabled from snapshot");
+    TEST_ASSERT(eff.enabled_source == 2,
+                "effective enabled_source from snapshot");
+    TEST_ASSERT(eff.prune_noise == 1,
+                "effective prune_noise from snapshot");
+    TEST_ASSERT(eff.log_verbosity == NGX_HTTP_MARKDOWN_LOG_DEBUG,
+                "effective log_verbosity from snapshot");
+    TEST_ASSERT(eff.memory_budget == 4 * 1024 * 1024,
+                "effective memory_budget from snapshot");
+    TEST_ASSERT(eff.streaming_budget == 2 * 1024 * 1024,
+                "effective streaming_budget from snapshot");
+
+    TEST_PASS("build_effective_conf from valid snapshot");
+}
+
+
+static void
+test_build_effective_conf_null_snapshot_falls_back_to_conf(void)
+{
+    ngx_http_markdown_conf_t conf;
+    ngx_http_markdown_effective_conf_t eff;
+
+    TEST_SUBSECTION("build_effective_conf with NULL snapshot falls back to conf");
+
+    ngx_memzero(&conf, sizeof(conf));
+    ngx_memzero(&eff, sizeof(eff));
+
+    conf.enabled = 1;
+    conf.enabled_source = 3;
+    conf.prune_noise = 0;
+    conf.log_verbosity = NGX_HTTP_MARKDOWN_LOG_WARN;
+    conf.memory_budget = 8 * 1024 * 1024;
+    conf.streaming_budget = 4 * 1024 * 1024;
+
+    ngx_http_markdown_build_effective_conf(&eff, NULL, &conf);
+
+    TEST_ASSERT(eff.enabled == 1,
+                "effective enabled from conf when snapshot NULL");
+    TEST_ASSERT(eff.enabled_source == 3,
+                "effective enabled_source from conf when snapshot NULL");
+    TEST_ASSERT(eff.prune_noise == 0,
+                "effective prune_noise from conf when snapshot NULL");
+    TEST_ASSERT(eff.log_verbosity == NGX_HTTP_MARKDOWN_LOG_WARN,
+                "effective log_verbosity from conf when snapshot NULL");
+    TEST_ASSERT(eff.memory_budget == 8 * 1024 * 1024,
+                "effective memory_budget from conf when snapshot NULL");
+    TEST_ASSERT(eff.streaming_budget == 4 * 1024 * 1024,
+                "effective streaming_budget from conf when snapshot NULL");
+
+    TEST_PASS("build_effective_conf with NULL snapshot falls back to conf");
+}
+
+
+static void
+test_build_effective_conf_invalid_snapshot_falls_back(void)
+{
+    ngx_http_markdown_conf_t conf;
+    ngx_http_markdown_dynconf_snapshot_t snap;
+    ngx_http_markdown_effective_conf_t eff;
+
+    TEST_SUBSECTION("build_effective_conf with invalid snapshot falls back");
+
+    ngx_memzero(&conf, sizeof(conf));
+    ngx_memzero(&snap, sizeof(snap));
+    ngx_memzero(&eff, sizeof(eff));
+
+    conf.enabled = 1;
+    conf.log_verbosity = NGX_HTTP_MARKDOWN_LOG_INFO;
+    conf.memory_budget = 16 * 1024 * 1024;
+    conf.streaming_budget = 8 * 1024 * 1024;
+
+    snap.valid = 0;
+
+    ngx_http_markdown_build_effective_conf(&eff, &snap, &conf);
+
+    TEST_ASSERT(eff.log_verbosity == NGX_HTTP_MARKDOWN_LOG_INFO,
+                "effective log_verbosity falls back when snapshot invalid");
+    TEST_ASSERT(eff.memory_budget == 16 * 1024 * 1024,
+                "effective memory_budget falls back when snapshot invalid");
+    TEST_ASSERT(eff.streaming_budget == 8 * 1024 * 1024,
+                "effective streaming_budget falls back when snapshot invalid");
+
+    TEST_PASS("build_effective_conf with invalid snapshot falls back");
+}
+
+
+static void
+test_effective_helpers_read_from_eff_when_present(void)
+{
+    ngx_http_markdown_conf_t conf;
+    ngx_http_markdown_effective_conf_t eff;
+
+    TEST_SUBSECTION("effective_* helpers read from eff when present");
+
+    ngx_memzero(&conf, sizeof(conf));
+    ngx_memzero(&eff, sizeof(eff));
+
+    conf.log_verbosity = NGX_HTTP_MARKDOWN_LOG_ERROR;
+    conf.prune_noise = 0;
+    conf.memory_budget = 1024;
+    conf.streaming_budget = 512;
+
+    eff.log_verbosity = NGX_HTTP_MARKDOWN_LOG_DEBUG;
+    eff.prune_noise = 1;
+    eff.memory_budget = 2048;
+    eff.streaming_budget = 1024;
+
+    TEST_ASSERT(
+        ngx_http_markdown_effective_log_verbosity(&eff, &conf)
+            == NGX_HTTP_MARKDOWN_LOG_DEBUG,
+        "effective_log_verbosity reads from eff");
+    TEST_ASSERT(
+        ngx_http_markdown_effective_prune_noise(&eff, &conf) == 1,
+        "effective_prune_noise reads from eff");
+    TEST_ASSERT(
+        ngx_http_markdown_effective_memory_budget(&eff, &conf) == 2048,
+        "effective_memory_budget reads from eff");
+    TEST_ASSERT(
+        ngx_http_markdown_effective_streaming_budget(&eff, &conf) == 1024,
+        "effective_streaming_budget reads from eff");
+    TEST_ASSERT(
+        ngx_http_markdown_effective_enabled(&eff, &conf) == eff.enabled,
+        "effective_enabled reads from eff");
+    TEST_ASSERT(
+        ngx_http_markdown_effective_enabled_source(&eff, &conf)
+            == eff.enabled_source,
+        "effective_enabled_source reads from eff");
+
+    TEST_PASS("effective_* helpers read from eff when present");
+}
+
+
+static void
+test_effective_helpers_fall_back_when_eff_null(void)
+{
+    ngx_http_markdown_conf_t conf;
+
+    TEST_SUBSECTION("effective_* helpers fall back to conf when eff is NULL");
+
+    ngx_memzero(&conf, sizeof(conf));
+
+    conf.enabled = 1;
+    conf.enabled_source = 5;
+    conf.log_verbosity = NGX_HTTP_MARKDOWN_LOG_WARN;
+    conf.prune_noise = 1;
+    conf.memory_budget = 4096;
+    conf.streaming_budget = 2048;
+
+    TEST_ASSERT(
+        ngx_http_markdown_effective_log_verbosity(NULL, &conf)
+            == NGX_HTTP_MARKDOWN_LOG_WARN,
+        "effective_log_verbosity falls back to conf");
+    TEST_ASSERT(
+        ngx_http_markdown_effective_prune_noise(NULL, &conf) == 1,
+        "effective_prune_noise falls back to conf");
+    TEST_ASSERT(
+        ngx_http_markdown_effective_memory_budget(NULL, &conf) == 4096,
+        "effective_memory_budget falls back to conf");
+    TEST_ASSERT(
+        ngx_http_markdown_effective_streaming_budget(NULL, &conf) == 2048,
+        "effective_streaming_budget falls back to conf");
+    TEST_ASSERT(
+        ngx_http_markdown_effective_enabled(NULL, &conf) == 1,
+        "effective_enabled falls back to conf");
+    TEST_ASSERT(
+        ngx_http_markdown_effective_enabled_source(NULL, &conf) == 5,
+        "effective_enabled_source falls back to conf");
+
+    TEST_PASS("effective_* helpers fall back to conf when eff is NULL");
+}
+
+
+static void
+test_request_snapshot_consistency_after_conf_change(void)
+{
+    ngx_http_markdown_conf_t conf;
+    ngx_http_markdown_dynconf_snapshot_t snap_at_request_start;
+    ngx_http_markdown_effective_conf_t eff;
+
+    TEST_SUBSECTION("request snapshot consistency after live conf change");
+
+    ngx_memzero(&conf, sizeof(conf));
+    ngx_memzero(&snap_at_request_start, sizeof(snap_at_request_start));
+    ngx_memzero(&eff, sizeof(eff));
+
+    conf.enabled = 1;
+    conf.prune_noise = 1;
+    conf.log_verbosity = NGX_HTTP_MARKDOWN_LOG_DEBUG;
+    conf.memory_budget = 4 * 1024 * 1024;
+    conf.streaming_budget = 2 * 1024 * 1024;
+
+    ngx_http_markdown_dynconf_snapshot_from_conf(&snap_at_request_start, &conf);
+
+    ngx_http_markdown_build_effective_conf(
+        &eff, &snap_at_request_start, &conf);
+
+    TEST_ASSERT(eff.prune_noise == 1,
+                "before reload: prune_noise is 1");
+    TEST_ASSERT(eff.log_verbosity == NGX_HTTP_MARKDOWN_LOG_DEBUG,
+                "before reload: log_verbosity is DEBUG");
+    TEST_ASSERT(eff.memory_budget == 4 * 1024 * 1024,
+                "before reload: memory_budget is 4M");
+    TEST_ASSERT(eff.streaming_budget == 2 * 1024 * 1024,
+                "before reload: streaming_budget is 2M");
+
+    conf.prune_noise = 0;
+    conf.log_verbosity = NGX_HTTP_MARKDOWN_LOG_ERROR;
+    conf.memory_budget = 16 * 1024 * 1024;
+    conf.streaming_budget = 8 * 1024 * 1024;
+
+    TEST_ASSERT(eff.prune_noise == 1,
+                "after conf change: effective prune_noise still 1");
+    TEST_ASSERT(eff.log_verbosity == NGX_HTTP_MARKDOWN_LOG_DEBUG,
+                "after conf change: effective log_verbosity still DEBUG");
+    TEST_ASSERT(eff.memory_budget == 4 * 1024 * 1024,
+                "after conf change: effective memory_budget still 4M");
+    TEST_ASSERT(eff.streaming_budget == 2 * 1024 * 1024,
+                "after conf change: effective streaming_budget still 2M");
+
+    TEST_ASSERT(
+        ngx_http_markdown_effective_prune_noise(&eff, &conf) == 1,
+        "effective_prune_noise helper returns snapshot value, not live conf");
+    TEST_ASSERT(
+        ngx_http_markdown_effective_log_verbosity(&eff, &conf)
+            == NGX_HTTP_MARKDOWN_LOG_DEBUG,
+        "effective_log_verbosity helper returns snapshot value, not live conf");
+    TEST_ASSERT(
+        ngx_http_markdown_effective_memory_budget(&eff, &conf)
+            == 4 * 1024 * 1024,
+        "effective_memory_budget helper returns snapshot value, not live conf");
+    TEST_ASSERT(
+        ngx_http_markdown_effective_streaming_budget(&eff, &conf)
+            == 2 * 1024 * 1024,
+        "effective_streaming_budget helper returns snapshot value, not live conf");
+
+    TEST_PASS("request snapshot consistency after live conf change");
+}
+
+
+static void
+test_request_snapshot_consistency_with_dynconf_apply_snapshot(void)
+{
+    ngx_http_markdown_conf_t conf;
+    ngx_http_markdown_dynconf_snapshot_t snap_at_request_start;
+    ngx_http_markdown_dynconf_snapshot_t reload_snapshot;
+    ngx_http_markdown_effective_conf_t eff;
+
+    TEST_SUBSECTION("request consistency when dynconf_apply_snapshot modifies live conf");
+
+    ngx_memzero(&conf, sizeof(conf));
+    ngx_memzero(&snap_at_request_start, sizeof(snap_at_request_start));
+    ngx_memzero(&reload_snapshot, sizeof(reload_snapshot));
+    ngx_memzero(&eff, sizeof(eff));
+
+    conf.enabled = 1;
+    conf.prune_noise = 1;
+    conf.log_verbosity = NGX_HTTP_MARKDOWN_LOG_INFO;
+    conf.memory_budget = 4 * 1024 * 1024;
+    conf.streaming_budget = 2 * 1024 * 1024;
+
+    ngx_http_markdown_dynconf_snapshot_from_conf(&snap_at_request_start, &conf);
+
+    ngx_http_markdown_build_effective_conf(
+        &eff, &snap_at_request_start, &conf);
+
+    reload_snapshot.enabled = 1;
+    reload_snapshot.prune_noise = 0;
+    reload_snapshot.log_verbosity = NGX_HTTP_MARKDOWN_LOG_ERROR;
+    reload_snapshot.memory_budget = 32 * 1024 * 1024;
+    reload_snapshot.streaming_budget = 16 * 1024 * 1024;
+    reload_snapshot.valid = 1;
+
+    ngx_http_markdown_dynconf_apply_snapshot(&conf, &reload_snapshot);
+
+    TEST_ASSERT(conf.prune_noise == 0,
+                "live conf prune_noise changed by apply_snapshot");
+    TEST_ASSERT(conf.log_verbosity == NGX_HTTP_MARKDOWN_LOG_ERROR,
+                "live conf log_verbosity changed by apply_snapshot");
+    TEST_ASSERT(conf.memory_budget == 32 * 1024 * 1024,
+                "live conf memory_budget changed by apply_snapshot");
+
+    TEST_ASSERT(
+        ngx_http_markdown_effective_prune_noise(&eff, &conf) == 1,
+        "effective prune_noise still from original snapshot (1)");
+    TEST_ASSERT(
+        ngx_http_markdown_effective_log_verbosity(&eff, &conf)
+            == NGX_HTTP_MARKDOWN_LOG_INFO,
+        "effective log_verbosity still from original snapshot (INFO)");
+    TEST_ASSERT(
+        ngx_http_markdown_effective_memory_budget(&eff, &conf)
+            == 4 * 1024 * 1024,
+        "effective memory_budget still from original snapshot (4M)");
+    TEST_ASSERT(
+        ngx_http_markdown_effective_streaming_budget(&eff, &conf)
+            == 2 * 1024 * 1024,
+        "effective streaming_budget still from original snapshot (2M)");
+
+    TEST_PASS("request consistency preserved when dynconf_apply_snapshot modifies live conf");
+}
+
+
+static void
+test_build_effective_conf_null_inputs(void)
+{
+    ngx_http_markdown_effective_conf_t eff;
+
+    TEST_SUBSECTION("build_effective_conf with NULL inputs does not crash");
+
+    ngx_memzero(&eff, sizeof(eff));
+
+    ngx_http_markdown_build_effective_conf(NULL, NULL, NULL);
+    ngx_http_markdown_build_effective_conf(NULL, NULL,
+        (const ngx_http_markdown_conf_t *) &eff);
+    ngx_http_markdown_build_effective_conf(&eff, NULL, NULL);
+
+    TEST_PASS("build_effective_conf with NULL inputs does not crash");
+}
+
+
+static void
+test_effective_helpers_edge_values(void)
+{
+    ngx_http_markdown_conf_t conf;
+    ngx_http_markdown_effective_conf_t eff;
+
+    TEST_SUBSECTION("effective_* helpers with edge values (zero, max)");
+
+    ngx_memzero(&conf, sizeof(conf));
+    ngx_memzero(&eff, sizeof(eff));
+
+    conf.log_verbosity = 0;
+    conf.memory_budget = 0;
+    conf.streaming_budget = 0;
+
+    eff.log_verbosity = NGX_HTTP_MARKDOWN_LOG_DEBUG;
+    eff.memory_budget = SIZE_MAX;
+    eff.streaming_budget = SIZE_MAX;
+
+    TEST_ASSERT(
+        ngx_http_markdown_effective_log_verbosity(&eff, &conf)
+            == NGX_HTTP_MARKDOWN_LOG_DEBUG,
+        "effective_log_verbosity returns eff value (DEBUG)");
+    TEST_ASSERT(
+        ngx_http_markdown_effective_memory_budget(&eff, &conf) == SIZE_MAX,
+        "effective_memory_budget returns eff value (SIZE_MAX)");
+    TEST_ASSERT(
+        ngx_http_markdown_effective_streaming_budget(&eff, &conf) == SIZE_MAX,
+        "effective_streaming_budget returns eff value (SIZE_MAX)");
+
+    TEST_ASSERT(
+        ngx_http_markdown_effective_memory_budget(NULL, &conf) == 0,
+        "effective_memory_budget falls back to conf (0)");
+    TEST_ASSERT(
+        ngx_http_markdown_effective_streaming_budget(NULL, &conf) == 0,
+        "effective_streaming_budget falls back to conf (0)");
+
+    TEST_PASS("effective_* helpers with edge values");
+}
+
+
+int
+main(void)
+{
+    TEST_SECTION("Effective Configuration View Tests");
+
+    test_build_effective_conf_from_valid_snapshot();
+    test_build_effective_conf_null_snapshot_falls_back_to_conf();
+    test_build_effective_conf_invalid_snapshot_falls_back();
+    test_effective_helpers_read_from_eff_when_present();
+    test_effective_helpers_fall_back_when_eff_null();
+    test_request_snapshot_consistency_after_conf_change();
+    test_request_snapshot_consistency_with_dynconf_apply_snapshot();
+    test_build_effective_conf_null_inputs();
+    test_effective_helpers_edge_values();
+
+    printf("\nAll effective_conf consistency tests passed.\n");
+    return 0;
+}
