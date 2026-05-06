@@ -176,8 +176,109 @@ ngx_http_markdown_select_base_url_parts(ngx_http_request_t *r,
             && ngx_http_markdown_scheme_is_http_family(x_forwarded_proto))
         {
             *scheme = *x_forwarded_proto;
-            *host = *x_forwarded_host;
-            return NGX_OK;
+
+            /* Extract first hop from X-Forwarded-Host.
+             * The header may contain multiple comma-separated values
+             * from a chain of proxies.  Only the first (closest
+             * trusted proxy) is used.
+             *
+             * Validate the extracted host:
+             * - Reject control characters (0x00-0x1F, 0x7F)
+             * - Reject spaces, commas, and path separators (/,\)
+             * - Allow IPv6 bracket literals ([::1])
+             * - Allow host:port form
+             *
+             * On validation failure, fall through to
+             * r->headers_in.server (C-01: link poisoning). */
+            {
+                u_char       *comma;
+                size_t        host_len;
+                ngx_str_t     validated_host;
+                ngx_flag_t    is_ipv6;
+                ngx_flag_t    host_valid;
+                size_t        i;
+
+                comma = ngx_strlchr(x_forwarded_host->data,
+                                     x_forwarded_host->data
+                                         + x_forwarded_host->len,
+                                     ',');
+                if (comma != NULL) {
+                    host_len = (size_t)(comma - x_forwarded_host->data);
+                } else {
+                    host_len = x_forwarded_host->len;
+                }
+
+                /* Trim trailing whitespace from extracted host. */
+                while (host_len > 0
+                       && (x_forwarded_host->data[host_len - 1] == ' '
+                           || x_forwarded_host->data[host_len - 1] == '\t'))
+                {
+                    host_len--;
+                }
+
+                if (host_len == 0) {
+                    goto forwarded_host_invalid;
+                }
+
+                /* Check for IPv6 bracket literal. */
+                is_ipv6 = (host_len >= 2
+                           && x_forwarded_host->data[0] == '[')
+                          ? 1 : 0;
+
+                /* Validate characters. */
+                host_valid = 1;
+                for (i = 0; i < host_len; i++) {
+                    u_char  c = x_forwarded_host->data[i];
+
+                    if (c < 0x20 || c == 0x7F) {
+                        host_valid = 0;
+                        break;
+                    }
+
+                    if (is_ipv6) {
+                        /* Inside IPv6 brackets: allow ':' and ']'. */
+                        if (c == '/' || c == '\\' || c == ' '
+                            || c == ',')
+                        {
+                            host_valid = 0;
+                            break;
+                        }
+                    } else {
+                        /* Regular host: reject path separators,
+                         * commas, and spaces.  Allow ':' for
+                         * host:port. */
+                        if (c == '/' || c == '\\' || c == ' '
+                            || c == ',')
+                        {
+                            host_valid = 0;
+                            break;
+                        }
+                    }
+                }
+
+                if (!host_valid) {
+                    goto forwarded_host_invalid;
+                }
+
+                /* IPv6 literal must close with ']'. */
+                if (is_ipv6
+                    && x_forwarded_host->data[host_len - 1] != ']')
+                {
+                    goto forwarded_host_invalid;
+                }
+
+                validated_host.data = x_forwarded_host->data;
+                validated_host.len = host_len;
+                *host = validated_host;
+                return NGX_OK;
+
+            forwarded_host_invalid:
+                ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
+                              "markdown filter: X-Forwarded-Host "
+                              "value \"%V\" rejected (invalid host), "
+                              "falling back to server name",
+                              x_forwarded_host);
+            }
         }
     }
 
