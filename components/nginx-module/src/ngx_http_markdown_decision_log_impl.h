@@ -314,7 +314,21 @@ ngx_http_markdown_log_decision_with_category(ngx_http_request_t *r,
      * Verbosity gating (FR-03.4):
      *   info / debug  — all outcomes
      *   warn / error  — failure outcomes only
+     *
+     * Fallback guard: if log_verbosity holds an invalid value (outside
+     * the module enum range 0..3), treat it as INFO and emit a one-shot
+     * warning.  This prevents silent suppression when a corrupted or
+     * stale dynconf value (e.g. a raw NGX_LOG_* constant from a
+     * pre-v0.6.1 dynconf bug) is present.
      */
+    if (conf->log_verbosity > NGX_HTTP_MARKDOWN_LOG_DEBUG) {
+        ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
+                      "markdown decision: invalid log_verbosity=%ui, "
+                      "falling back to INFO",
+                      conf->log_verbosity);
+        return;
+    }
+
     if (conf->log_verbosity <= NGX_HTTP_MARKDOWN_LOG_WARN
         && !is_failure)
     {
