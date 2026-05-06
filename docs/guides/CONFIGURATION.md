@@ -425,6 +425,13 @@ Controls whether `X-Forwarded-Proto` and `X-Forwarded-Host` request headers are 
 
 When `off` (the default), only the NGINX request schema and server header are used. This prevents client-supplied header injection that could redirect all relative URLs in the Markdown output to an attacker-controlled domain.
 
+When `on`, the module extracts and validates the `X-Forwarded-Host` value:
+
+1. **First-hop extraction:** If the header contains multiple comma-separated values (from a proxy chain), only the first (closest trusted proxy) is used.
+2. **Character validation:** The extracted host is rejected if it contains control characters, spaces, commas, or path separators (`/`, `\`).
+3. **IPv6 support:** Bracket-enclosed IPv6 literals (e.g. `[::1]`) are allowed and must be properly closed with `]`.
+4. **Fallback:** If validation fails, the module falls back to `r->headers_in.server` and logs a warning.
+
 **Example:**
 ```nginx
 # Only enable behind a trusted reverse proxy that sets/overwrites
@@ -673,6 +680,94 @@ markdown_streaming_shadow on;
 # Phase 1+: disable shadow after verification
 markdown_streaming_shadow off;
 ```
+
+---
+
+### Dynamic Configuration (0.6.1+)
+
+Dynamic configuration (dynconf) enables runtime modification of select
+module parameters without restarting NGINX.  A periodic timer (1s
+interval) polls a configuration file for changes and applies them
+using a two-phase, staged-commit model.
+
+**Scope:** Dynconf supports a **single global watcher per worker
+process**.  If multiple location blocks configure different
+`markdown_dynamic_config_path` values, only the first one that
+initializes takes effect; subsequent attempts are logged as warnings
+and ignored.  Configure dynconf at the `http` or `server` level to
+avoid ambiguity.
+
+**Atomicity:** The entire configuration file is parsed into a staging
+snapshot.  Only if **every** line parses and validates successfully
+is the staging snapshot atomically promoted to the active snapshot.
+On any parse error, the staging is discarded and the active snapshot
+remains unchanged — partial updates are never applied.
+
+**Request Consistency:** Each request binds a pointer to the active
+snapshot at the time it enters the header filter.  The body filter,
+conversion, and logging all read from this bound snapshot for the
+lifetime of the request, even if a concurrent timer reload swaps the
+global active snapshot.  This guarantees that a single request never
+observes a mix of old and new configuration values.
+
+**No File I/O on the Request Path:** The timer handler performs all
+file reading and parsing.  The request path never opens or reads the
+dynconf file, eliminating blocking I/O from the request latency path.
+
+#### markdown_dynamic_config
+
+**Syntax:** `markdown_dynamic_config on | off;`  
+**Default:** `off`  
+**Context:** http, server, location
+
+Enables or disables the dynamic configuration watcher.  When `on`,
+the worker process watches the file specified by
+`markdown_dynamic_config_path` for modification-time changes.
+
+#### markdown_dynamic_config_path
+
+**Syntax:** `markdown_dynamic_config_path <path>;`  
+**Default:** (none)  
+**Context:** http, server, location
+
+Path to the dynamic configuration file.  Only effective when
+`markdown_dynamic_config on` is set.
+
+**Supported runtime keys** (no NGINX restart required):
+
+| Key | Value | Maps to |
+|-----|-------|---------|
+| `markdown_filter` | `on` \| `off` | `conf->enabled`, overrides complex values |
+| `prune_noise` | `on` \| `off` | `conf->prune_noise` |
+| `log_verbosity` | `error` \| `warn` \| `info` \| `debug` | `conf->log_verbosity` (module enum) |
+| `streaming_budget` | `<size>` (e.g. `64k`, `4m`) | `conf->streaming_budget` |
+| `memory_budget` | `<size>` (e.g. `128k`) | `conf->memory_budget` |
+
+**Not supported via dynconf** (require `nginx -s reload`):
+`markdown_content_types`, `markdown_stream_types`, auth policy,
+conditional requests, and all other structural directives.
+
+**Example dynconf file:**
+```
+# Runtime-safe overrides (no NGINX restart)
+markdown_filter=on
+prune_noise=off
+log_verbosity=warn
+streaming_budget=4m
+memory_budget=128k
+```
+
+**Safety Recommendations:**
+- Dynconf is off by default.  Enable it only when operational
+  workflows require hot-reload without restart.
+- Place the dynconf file on a local filesystem (not NFS) to ensure
+  reliable mtime detection.
+- Validate the file contents before writing (e.g. via `make
+  test-nginx-unit`) — an invalid file is rejected atomically but
+  the error is only visible in the worker error log.
+- Do not configure different `markdown_dynamic_config_path` values
+  in multiple location blocks; the global single-watcher constraint
+  means only one will take effect.
 
 ---
 
