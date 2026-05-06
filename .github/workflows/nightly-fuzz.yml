@@ -38,7 +38,7 @@ jobs:
             components/rust-converter -> target
 
       - name: Install cargo-fuzz
-        run: cargo +nightly install cargo-fuzz --locked
+        run: cargo +nightly install cargo-fuzz
 
       - name: Run nightly fuzz target
         run: |
