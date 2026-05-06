@@ -100,6 +100,12 @@ The install script (`tools/install.sh`) is the recommended installation method f
 curl -sSL https://raw.githubusercontent.com/cnkang/nginx-markdown-for-agents/main/tools/install.sh | sudo bash
 ```
 
+Optional safety switch for NGINX-upgrade scenarios with stale module snippets:
+
+```bash
+AUTO_DISABLE_STALE_MODULE=1 curl -sSL https://raw.githubusercontent.com/cnkang/nginx-markdown-for-agents/main/tools/install.sh | sudo bash
+```
+
 The script requires `sudo` (root privileges) to write the module binary and modify NGINX configuration files.
 By default, the installer enforces SHA-256 integrity checks and refuses unsigned artifacts.
 
@@ -853,6 +859,16 @@ module is not binary compatible
 **Root Cause:**
 NGINX dynamic modules require an exact version match. A module built for NGINX 1.26.2 will not load on NGINX 1.26.3. The pre-built binary does not exist for your exact NGINX version.
 
+Another common variant is a **stale previously-installed module** still being
+loaded by `load_module`. In that case `nginx -t` may fail with:
+
+```text
+module ".../ngx_http_markdown_filter_module.so" version 1024000 instead of 1028003
+```
+
+This means your current NGINX binary ABI changed, but an old module binary is
+still enabled in config.
+
 **Resolution Steps:**
 
 1. Check your exact NGINX version:
@@ -865,6 +881,24 @@ NGINX dynamic modules require an exact version match. A module built for NGINX 1
    ```
 3. If your version is not in the matrix but is >= 1.24.0, build from source using the [Manual Source Build](#6-secondary-manual-source-build) instructions.
 4. If your version is below 1.24.0, upgrade NGINX to a supported version.
+5. If you see `version ... instead of ...`, disable stale module loader snippets before retry:
+   ```bash
+   sudo find /etc/nginx -type f -name '*.conf' -exec grep -l 'ngx_http_markdown_filter_module.so' {} +
+   # For each matched file:
+   #   sudo mv <file>.conf <file>.conf.disabled
+   # or comment out the load_module line in that file.
+   sudo nginx -t
+   ```
+6. Re-run installer only after cleanup:
+   ```bash
+   curl -sSL https://raw.githubusercontent.com/cnkang/nginx-markdown-for-agents/main/tools/install.sh | sudo bash
+   ```
+7. For automated cleanup during reinstall, you can enable:
+   ```bash
+   AUTO_DISABLE_STALE_MODULE=1 curl -sSL https://raw.githubusercontent.com/cnkang/nginx-markdown-for-agents/main/tools/install.sh | sudo bash
+   ```
+   This mode renames matched loader snippets to `*.disabled` before exiting with
+   `version_mismatch` when no prebuilt binary exists for your exact NGINX version.
 
 ---
 
