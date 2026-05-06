@@ -17,10 +17,8 @@ class NginxMarkdownModule < Formula
   def install
     system "make", "build"
 
-    nginx_bin = Formula["nginx"].opt_bin/"nginx"
-    version_output = shell_output("#{nginx_bin} -v 2>&1")
-    nginx_version = version_output[%r{nginx/([0-9.]+)}, 1]
-    odie "Unable to detect Homebrew nginx version from: #{version_output}" if nginx_version.blank?
+    nginx_version = Formula["nginx"].version.to_s
+    odie "Unable to detect Homebrew nginx version" if nginx_version.blank?
 
     nginx_archive = "nginx-#{nginx_version}.tar.gz"
     system "curl", "-fsSL", "https://nginx.org/download/#{nginx_archive}",
