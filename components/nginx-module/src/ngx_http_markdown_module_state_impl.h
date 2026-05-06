@@ -49,9 +49,14 @@ static u_char ngx_http_markdown_empty_string[] = "";
  * staging_snapshot is used during two-phase reload. */
 static ngx_http_markdown_dynconf_watcher_t ngx_http_markdown_dynconf_watcher = {
     { 0, NULL }, 0, NULL, 0,
+#ifdef MARKDOWN_STREAMING_ENABLED
+    { 0, 0, NULL, 0, 0, 0, 0, 0 },
+    { 0, 0, NULL, 0, 0, 0, 0, 0 },
+#else
     { 0, 0, NULL, 0, 0, 0, 0 },
     { 0, 0, NULL, 0, 0, 0, 0 },
-    0
+#endif
+    0, NULL
 };
 
 #define NGX_HTTP_MARKDOWN_METRIC_ADD(field, value)                                  \

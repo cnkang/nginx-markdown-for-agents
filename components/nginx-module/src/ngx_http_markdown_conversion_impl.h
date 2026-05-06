@@ -19,6 +19,7 @@
  * are visible through implementation-header include order.
  */
 ngx_int_t ngx_strncasecmp(u_char *s1, u_char *s2, size_t n);
+u_char *ngx_strlchr(u_char *p, u_char *last, u_char c);
 void markdown_result_free(struct MarkdownResult *result);
 static void ngx_http_markdown_record_system_failure(
     ngx_http_markdown_ctx_t *ctx);
