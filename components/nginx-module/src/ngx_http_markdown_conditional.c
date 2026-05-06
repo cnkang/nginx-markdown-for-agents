@@ -467,7 +467,8 @@ ngx_http_markdown_handle_if_none_match(ngx_http_request_t *r,
         return NGX_ERROR;
     }
 
-    if (ngx_http_markdown_prepare_conversion_options(r, conf, &options)
+    if (ngx_http_markdown_prepare_conversion_options(
+            r, conf, ctx->effective_conf, &options)
         != NGX_OK)
     {
         return NGX_ERROR;
