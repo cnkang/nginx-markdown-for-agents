@@ -150,11 +150,12 @@ sudo nginx -t && sudo nginx -s reload
 This project can be installed from a dedicated Homebrew tap on macOS:
 
 ```bash
-brew tap <owner>/<tap>
-brew install <owner>/<tap>/nginx-markdown-module
+brew tap cnkang/nginx-markdown
+brew install cnkang/nginx-markdown/nginx-markdown-module
 ```
 
 Notes:
+- If you publish and maintain your own tap, replace `cnkang/nginx-markdown` with your tap name.
 - The formula is tied to GitHub release tag artifacts (`refs/tags/<tag>.tar.gz`).
 - SHA-256 must be generated from the downloadable GitHub tag artifact, not local `git archive`.
 - Tap publish and macOS post-release verification automation are documented in [`docs/guides/HOMEBREW_TAP_RELEASE.md`](./HOMEBREW_TAP_RELEASE.md).
