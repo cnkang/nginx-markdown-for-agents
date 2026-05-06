@@ -55,10 +55,6 @@
  * Forward declaration for timer handler.
  */
 static void ngx_http_markdown_dynconf_timer_handler(ngx_event_t *ev);
-static ngx_int_t ngx_http_markdown_dynconf_reload(
-    ngx_http_markdown_dynconf_watcher_t *watcher,
-    ngx_http_markdown_conf_t *conf,
-    ngx_log_t *log);
 
 /*
  * Dynamic configuration snapshot.
@@ -98,6 +94,11 @@ typedef struct {
     ngx_uint_t    version;
     ngx_http_markdown_conf_t             *conf;
 } ngx_http_markdown_dynconf_watcher_t;
+
+static ngx_int_t ngx_http_markdown_dynconf_reload(
+    ngx_http_markdown_dynconf_watcher_t *watcher,
+    ngx_http_markdown_conf_t *conf,
+    ngx_log_t *log);
 
 
 /*
