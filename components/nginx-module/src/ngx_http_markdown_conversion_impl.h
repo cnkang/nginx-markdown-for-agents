@@ -136,10 +136,180 @@ ngx_http_markdown_scheme_is_http_family(const ngx_str_t *scheme)
 }
 
 /*
- * Select scheme and host for base URL construction.
+ * Validate characters in an extracted host value.
  *
- * Priority: trusted X-Forwarded-Proto/Host > request schema/server
- * > server_name.
+ * Rejects control characters (0x00-0x1F, 0x7F), spaces, commas, and
+ * path separators (/,\).  For non-IPv6 hosts, enforces digit-only
+ * port after the first ':'.  For IPv6 bracket literals, only rejects
+ * the structural danger characters (port is validated separately
+ * after bracket matching).
+ *
+ * @param host_data  Pointer to the host string (not NUL-terminated).
+ * @param host_len   Length of the host string.
+ * @param is_ipv6    Whether the host starts with '[' (IPv6 literal).
+ * @returns 1 if valid, 0 if invalid.
+ */
+static ngx_flag_t
+ngx_http_markdown_validate_host_chars(const u_char *host_data,
+                                      size_t host_len,
+                                      ngx_flag_t is_ipv6)
+{
+    ngx_flag_t  parsing_port = 0;
+
+    for (size_t i = 0; i < host_len; i++) {
+        u_char  c = host_data[i];
+
+        if (c < 0x20 || c == 0x7F) {
+            return 0;
+        }
+
+        if (parsing_port) {
+            if (c < '0' || c > '9') {
+                return 0;
+            }
+            continue;
+        }
+
+        if (c == '/' || c == '\\' || c == ' ' || c == ',') {
+            return 0;
+        }
+
+        if (!is_ipv6 && c == ':') {
+            if (i == host_len - 1) {
+                return 0;
+            }
+            parsing_port = 1;
+        }
+    }
+
+    return 1;
+}
+
+/*
+ * Validate the structure of an IPv6 bracket literal host.
+ *
+ * Requires a closing ']' and allows an optional :<port> suffix
+ * after it (e.g. [::1]:8080).  Returns 1 if valid, 0 if invalid.
+ *
+ * @param host_data  Pointer to the host string starting with '['.
+ * @param host_len   Length of the host string.
+ * @returns 1 if valid, 0 if invalid.
+ */
+static ngx_flag_t
+ngx_http_markdown_validate_ipv6_brackets(const u_char *host_data,
+                                         size_t host_len)
+{
+    size_t  bracket_end = 0;
+
+    for (size_t i = 1; i < host_len; i++) {
+        if (host_data[i] == ']') {
+            bracket_end = i;
+            break;
+        }
+    }
+
+    if (bracket_end == 0) {
+        return 0;
+    }
+
+    if (bracket_end + 1 < host_len) {
+        if (host_data[bracket_end + 1] != ':') {
+            return 0;
+        }
+        for (size_t i = bracket_end + 2; i < host_len; i++) {
+            if (host_data[i] < '0' || host_data[i] > '9') {
+                return 0;
+            }
+        }
+    }
+
+    return 1;
+}
+
+/*
+ * Extract and validate the first-hop host from an X-Forwarded-Host value.
+ *
+ * The header may contain multiple comma-separated values from a chain
+ * of proxies.  Only the first (closest trusted proxy) is used.
+ * Leading and trailing whitespace is trimmed from the extracted value.
+ *
+ * On success, validated_host is populated and the function returns NGX_OK.
+ * On failure, returns NGX_ERROR (caller should fall through to server name).
+ *
+ * @param xfh             The raw X-Forwarded-Host header value.
+ * @param validated_host  Output: the extracted and validated host.
+ * @returns NGX_OK on success, NGX_ERROR on invalid or empty host.
+ */
+static ngx_int_t
+ngx_http_markdown_extract_forwarded_host(const ngx_str_t *xfh,
+                                         ngx_str_t *validated_host)
+{
+    u_char    *host_data;
+    size_t     host_len;
+    ngx_flag_t is_ipv6;
+
+    /* Find first comma to extract first-hop value. */
+    host_len = xfh->len;
+    for (size_t i = 0; i < xfh->len; i++) {
+        if (xfh->data[i] == ',') {
+            host_len = i;
+            break;
+        }
+    }
+
+    /* Trim leading whitespace from extracted host. */
+    host_data = xfh->data;
+    while (host_len > 0
+           && (*host_data == ' ' || *host_data == '\t'))
+    {
+        host_data++;
+        host_len--;
+    }
+
+    /* Trim trailing whitespace from extracted host. */
+    while (host_len > 0
+           && (host_data[host_len - 1] == ' '
+               || host_data[host_len - 1] == '\t'))
+    {
+        host_len--;
+    }
+
+    if (host_len == 0) {
+        return NGX_ERROR;
+    }
+
+    /* Check for IPv6 bracket literal. */
+    is_ipv6 = (host_len >= 2 && host_data[0] == '[') ? 1 : 0;
+
+    /* Validate characters (control chars, spaces, path separators, port). */
+    if (!ngx_http_markdown_validate_host_chars(host_data, host_len,
+                                               is_ipv6))
+    {
+        return NGX_ERROR;
+    }
+
+    /* IPv6 literal: validate bracket structure and optional port. */
+    if (is_ipv6
+        && !ngx_http_markdown_validate_ipv6_brackets(host_data, host_len))
+    {
+        return NGX_ERROR;
+    }
+
+    validated_host->data = host_data;
+    validated_host->len = host_len;
+    return NGX_OK;
+}
+
+/**
+ * Selects the URL scheme and host to use when constructing a base URL for the request.
+ *
+ * Selection priority (highest to lowest): trusted X-Forwarded-Proto/Host (when enabled) >
+ * request r->schema and r->headers_in.server > server_name from core server config.
+ *
+ * @param r The HTTP request to inspect.
+ * @param scheme Out parameter set to the selected scheme string.
+ * @param host Out parameter set to the selected host string (may include port or IPv6 brackets).
+ * @returns `NGX_OK` if both `scheme` and `host` were successfully selected and written; `NGX_ERROR` otherwise.
  */
 static ngx_int_t
 ngx_http_markdown_select_base_url_parts(ngx_http_request_t *r,
@@ -175,9 +345,22 @@ ngx_http_markdown_select_base_url_parts(ngx_http_request_t *r,
             && x_forwarded_host->len > 0
             && ngx_http_markdown_scheme_is_http_family(x_forwarded_proto))
         {
+            ngx_str_t  validated_host;
+
             *scheme = *x_forwarded_proto;
-            *host = *x_forwarded_host;
-            return NGX_OK;
+
+            if (ngx_http_markdown_extract_forwarded_host(
+                    x_forwarded_host, &validated_host) == NGX_OK)
+            {
+                *host = validated_host;
+                return NGX_OK;
+            }
+
+            ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
+                          "markdown filter: X-Forwarded-Host "
+                          "value \"%V\" rejected (invalid host), "
+                          "falling back to server name",
+                          x_forwarded_host);
         }
     }
 
