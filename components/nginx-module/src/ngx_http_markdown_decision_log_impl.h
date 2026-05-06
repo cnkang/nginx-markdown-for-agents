@@ -32,9 +32,12 @@ void ngx_log_error(ngx_uint_t level, ngx_log_t *log, ngx_err_t err,
 
 /* Forward declarations — defined below */
 static void ngx_http_markdown_log_decision(ngx_http_request_t *r,
-    const ngx_http_markdown_conf_t *conf, const ngx_str_t *reason_code);
+    const ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_effective_conf_t *eff,
+    const ngx_str_t *reason_code);
 static void ngx_http_markdown_log_decision_with_category(
     ngx_http_request_t *r, const ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_effective_conf_t *eff,
     const ngx_str_t *reason_code,
     const ngx_str_t *error_category);
 static void ngx_http_markdown_log_decision_debug(
@@ -290,12 +293,15 @@ ngx_http_markdown_log_decision_debug(ngx_http_request_t *r,
  * Parameters:
  *   r              - NGINX request structure
  *   conf           - module location configuration
+ *   eff            - effective configuration view for per-request log_verbosity
  *   reason_code    - the reason code string for this decision
  *   error_category - optional FAIL_* sub-classification (NULL if none)
  */
 static void
 ngx_http_markdown_log_decision_with_category(ngx_http_request_t *r,
-    const ngx_http_markdown_conf_t *conf, const ngx_str_t *reason_code,
+    const ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_effective_conf_t *eff,
+    const ngx_str_t *reason_code,
     const ngx_str_t *error_category)
 {
     ngx_uint_t       log_level;
@@ -311,7 +317,8 @@ ngx_http_markdown_log_decision_with_category(ngx_http_request_t *r,
 
     is_failure = ngx_http_markdown_is_failure_outcome(reason_code);
 
-    effective_verbosity = conf->log_verbosity;
+    effective_verbosity = ngx_http_markdown_effective_log_verbosity(
+        eff, conf);
 
     if (effective_verbosity > NGX_HTTP_MARKDOWN_LOG_DEBUG) {
         ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
@@ -345,7 +352,7 @@ ngx_http_markdown_log_decision_with_category(ngx_http_request_t *r,
     }
 
     /* Debug extended format (FR-03.3) — delegated to helper */
-    if (conf->log_verbosity == NGX_HTTP_MARKDOWN_LOG_DEBUG) {
+    if (effective_verbosity == NGX_HTTP_MARKDOWN_LOG_DEBUG) {
         ngx_http_markdown_log_decision_debug(r, conf,
             reason_code, error_category, log_level,
             &method_name, &content_type);
@@ -376,10 +383,12 @@ ngx_http_markdown_log_decision_with_category(ngx_http_request_t *r,
  */
 static void
 ngx_http_markdown_log_decision(ngx_http_request_t *r,
-    const ngx_http_markdown_conf_t *conf, const ngx_str_t *reason_code)
+    const ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_effective_conf_t *eff,
+    const ngx_str_t *reason_code)
 {
     ngx_http_markdown_log_decision_with_category(
-        r, conf, reason_code, NULL);
+        r, conf, eff, reason_code, NULL);
 }
 
 #endif /* NGX_HTTP_MARKDOWN_DECISION_LOG_IMPL_H */
