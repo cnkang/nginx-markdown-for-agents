@@ -4,7 +4,6 @@ class NginxMarkdownModule < Formula
   url "https://github.com/cnkang/nginx-markdown-for-agents/archive/refs/tags/v0.6.0.tar.gz"
   # Regenerate from the GitHub tag archive after publishing the release tag:
   #   curl -sL https://github.com/cnkang/nginx-markdown-for-agents/archive/refs/tags/v0.6.0.tar.gz | sha256sum
-  version "0.6.0"
   sha256 "3715d35c3b17091e6fc3cd16bb9ff050ad1ee7a1636bef4ece1e72c9bef783bb"
   license "BSD-2-Clause"
 
@@ -21,9 +20,7 @@ class NginxMarkdownModule < Formula
     nginx_bin = Formula["nginx"].opt_bin/"nginx"
     version_output = shell_output("#{nginx_bin} -v 2>&1")
     nginx_version = version_output[%r{nginx/([0-9.]+)}, 1]
-    if nginx_version.blank?
-      odie "Unable to detect Homebrew nginx version from: #{version_output}"
-    end
+    odie "Unable to detect Homebrew nginx version from: #{version_output}" if nginx_version.blank?
 
     nginx_archive = "nginx-#{nginx_version}.tar.gz"
     system "curl", "-fsSL", "https://nginx.org/download/#{nginx_archive}",
