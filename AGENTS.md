@@ -791,6 +791,134 @@ Required:
   purpose, arguments, output, and exit behaviour.  Repeated string constants
   must be extracted into `readonly` variables with a descriptive name.
 
+### 27. Markdown output escaping and injection prevention
+Historical issues: `3e1f7a2`, `a9b4c01`, `d72e8f3`, `b1a09c4`, `f5d3e12`, `c8e2a07`.
+
+Required:
+- All text emitted inside Markdown link labels `[...]` must escape `\`, `[`,
+  `]`, and newline characters before interpolation.  Unescaped brackets break
+  link structure and enable content-injection attacks.
+- All text emitted inside Markdown link destinations `(...)` or autolinks
+  `<...>` must escape `\`, `(`, `)`, `<`, `>`, spaces, and control characters.
+  In Rust, iterate over `chars()` not `bytes()` so multi-byte code points are
+  handled atomically.
+- All URL values must reject percent-encoded control characters (`%00`–`%1F`,
+  `%7F`) before scheme validation.  Scheme-prefix checks alone are
+  insufficient for obfuscated payloads.
+- All forwarded header values (for example `X-Forwarded-Host`, `X-Forwarded-Proto`)
+  must be validated: extract first-hop value only, reject control characters /
+  spaces / path separators, validate IPv6 bracket literals, and fall back to
+  server name on invalid input.
+- Every new emission site for links, images, or URLs must call the shared
+  escaping helper rather than formatting raw strings directly.  Introducing a
+  new `write!` or `format!` that interpolates unescaped text is a bug.
+
+Verification:
+- `grep -rn 'output.push_str.*normalized_text\|format!.*\[{.*}\]({' components/rust-converter/src/`
+- `cargo test --features security` (if security feature gate exists)
+- `grep -rn 'ngx_http_markdown_escape\|escape_link_label\|escape_link_destination' components/rust-converter/src/`
+
+### 28. Full ngx_list_part_t chain iteration and multi-value HTTP header semantics
+Historical issues: `4c2b8d9`, `e7a1f03`, `b3d9c52`, `f1a8e64`.
+
+Required:
+- Any function iterating `ngx_list_t` (for example output headers, variables)
+  must traverse the **full** `part → part->next` chain.  Iterating only the
+  first `ngx_list_part_t` silently drops headers on requests with more than
+  `NGX_LIST_PART_SIZE` (typically 8) headers.
+- Use the canonical NGINX iteration pattern:
+  ```
+  part = &list->part;
+  while (part) {
+      h = part->elts;
+      for (i = 0; i < part->nelts; i++) { /* process h[i] */ }
+      part = part->next;
+  }
+  ```
+- Single-header shortcut functions (for example "find first occurrence of
+  header X") must document the first-match-only limitation explicitly in
+  their doc comment.
+- When aggregating flags or values from multiple headers of the same name
+  (for example `X-Forwarded-For`), check the aggregated result before
+  branching on per-header flags, so a later header cannot override an
+  earlier decision.
+
+Verification:
+- `grep -rn 'part.nelts\|part.elts' components/nginx-module/src/` — confirm
+  every hit is inside a `while (part)` / `for (;; part = part->next)` loop.
+- `grep -rn 'r->headers_in.headers.part\b' components/nginx-module/src/`
+
+### 29. Flag and state clearing ordering (clear-after-success, not before)
+Historical issues: `5e9a2b1`, `c4d7f80`.
+
+Required:
+- Flags that gate operations (for example `reload_pending`, `staging_dirty`,
+  `config_applied`) must be cleared **after** the gated operation succeeds,
+  not before the attempt.  Clearing before the operation removes the retry
+  path on failure.
+- Correct pattern: `if (flag) { rc = op(); if (rc == NGX_OK) flag = 0; }`
+- Incorrect pattern: `if (flag) { flag = 0; rc = op(); /* no retry on failure */ }`
+- When a flag guards a multi-step operation, clear it only after all steps
+  succeed.  If any step fails, the flag remains set so the next cycle retries.
+- Doc comments on flag fields must state the clearing contract: "Cleared by
+  X after Y succeeds" or "Set by Z, cleared only on successful reload."
+
+Verification:
+- `grep -rn 'reload_pending\|staging_dirty\|config_applied\|_pending\b' components/nginx-module/src/`
+- For each hit, verify the flag is not unconditionally zeroed before the
+  guarded operation.
+
+### 30. NUL-termination of ngx_str_t before C API calls and EOF boundary handling
+Historical issues: `8b3d1a5`, `a2c6e90`.
+
+Required:
+- `ngx_str_t` values are **not** NUL-terminated.  Before passing an
+  `ngx_str_t`'s `data` pointer to any C API that requires NUL-terminated
+  input (for example `ngx_strcasecmp`, `stat()`, `ngx_file_info()`,
+  `opendir()`, `strstr()`), copy to a stack or pool buffer and append
+  `'\0'`.
+- Prefer length-bounded NGINX APIs (`ngx_strncasecmp`, `ngx_strlchr`,
+  `ngx_strnstr`) when the length is known, avoiding the copy entirely.
+- When a length-bounded API is not available and a copy is needed, use
+  `ngx_pnalloc(pool, len + 1)` and `ngx_memcpy` + NUL-terminate.  Free the
+  buffer from the pool when the pool lifetime covers the usage.
+- Line-oriented parsers that read files or buffers must handle the final
+  line that lacks a trailing `\n`.  Treating `\n` as the sole line delimiter
+  silently drops the last line if the file does not end with a newline.
+- When comparing `ngx_str_t` values for directive matching, require exact
+  length equality first and use `ngx_strncasecmp(..., expected_len)` to
+  prevent out-of-bounds reads on short or truncated inputs.
+
+Verification:
+- `grep -rn 'ngx_strcasecmp\|ngx_file_info\|stat(' components/nginx-module/src/`
+- For each hit, verify the input is guaranteed NUL-terminated or that a
+  length-bounded alternative should be used instead.
+- `grep -rn "while.*\\\\n\|split_on.*\\\\n" components/rust-converter/src/` —
+  verify EOF-last-line handling in Rust line iterators.
+
+### 31. Residual code integrity after merge and large commits
+Historical issues: `d6a4b2c`, `9f1e3a8`.
+
+Required:
+- After a merge commit or any change that modifies more than 500 lines in a
+  single file, verify: (a) the file compiles, (b) `git diff --check` shows
+  no whitespace conflicts, (c) the function/method count matches the expected
+  value (no functions silently dropped by merge conflict resolution), and
+  (d) no duplicate adjacent blocks exist (identical consecutive code blocks
+  are a common merge residual).
+- For any single file change exceeding 30 lines, verify the last function in
+  the file still has its closing brace and the file is not truncated.
+- CI configuration should flag diffs exceeding 100 lines for mandatory review
+  (not auto-merge).
+- After rebasing or cherry-picking, run `make test-nginx-unit` (or the
+  narrowest relevant test target) before pushing to catch silent conflict
+  artifacts.
+
+Verification:
+- `git diff --check` after merge/rebase
+- `make test-nginx-unit` after any change touching `components/nginx-module/`
+- `make test-rust` after any change touching `components/rust-converter/`
+
 ## Required Agent Workflow
 
 ### Before coding
@@ -831,6 +959,11 @@ For each code change you are about to produce, mentally (or explicitly in a thin
 19. `ngx_str_t` token matching must be length-bounded: never call `ngx_strcasecmp()` on config/header values unless they are explicitly NUL-terminated. For directive keyword matching, require exact length equality and use `ngx_strncasecmp(..., expected_len)` (or a shared helper that enforces both). This prevents out-of-bounds reads on short/truncated inputs.
 20. Coverage: if this change adds or modifies production code paths, verify that aggregate e2e or unit test coverage does not regress below 80% (90% for critical paths). (Rule 25)
 21. Naming and documentation: every new or modified function has a block comment (purpose, parameters, return values). Variables and types use descriptive names. Complex logic has inline comments explaining *why*. (Rule 26)
+22. Markdown output escaping: every new emission site for links, images, or URLs must call the shared escaping helper. No raw string interpolation in Markdown link labels `[...]` or destinations `(...)` / `<...>`. URL values must reject percent-encoded control characters before scheme validation. Forwarded header values must be validated (first-hop extraction, control char rejection, IPv6 bracket validation, fallback to server name). (Rule 27)
+23. Full `ngx_list_part_t` chain iteration: any function iterating `ngx_list_t` must traverse the full `part → part->next` chain, not only the first part. When aggregating flags from multiple headers of the same name, check the aggregated result before branching on per-header flags. (Rule 28)
+24. Flag clearing ordering: flags gating operations must be cleared **after** the gated operation succeeds, not before. Pattern: `if (flag) { rc = op(); if (rc == NGX_OK) flag = 0; }`. Doc comments must state the clearing contract. (Rule 29)
+25. NUL-termination of `ngx_str_t`: before passing `ngx_str_t.data` to C APIs requiring NUL-terminated input (`ngx_strcasecmp`, `stat()`, `ngx_file_info()`, `opendir()`, `strstr()`), copy to a stack/pool buffer and append `'\0'`. Prefer length-bounded NGINX APIs (`ngx_strncasecmp`, `ngx_strlchr`) when possible. For directive matching, require exact length equality first. (Rule 30)
+26. Residual code integrity: after merge or >500-line change in a single file, verify compilation, `git diff --check`, function count, and no duplicate adjacent blocks. For >30-line changes, verify the file is not truncated (closing brace present). (Rule 31)
 
 #### C test code (`components/nginx-module/tests/unit/`)
 1. No dead stores — simulation-style tests set the final value directly; initial state documented in comments only. (Rule 16)
@@ -864,6 +997,8 @@ For each code change you are about to produce, mentally (or explicitly in a thin
 18. **Rust 2024 edition pattern binding**: do not use explicit `ref` or `ref mut` binding modifiers when matching on a reference type (`&T`, `&Option<T>`, `&Vec<T>`, etc.). Rust 2024 edition treats this as an error because the reference already implies borrowing. Use `ref` only when matching on an owned value where you need to borrow without moving. Before writing `if let Some(ref x) = expr`, check whether `expr` is a reference — if so, drop the `ref`.
 19. Coverage: if this change adds or modifies production code, verify that `cargo llvm-cov` aggregate coverage does not regress below 80% (90% for critical paths). (Rule 25)
 20. Naming and documentation: every new or modified public function has `///` doc comments (purpose, arguments, returns, safety for unsafe). Internal helpers have `//` comments. Types and fields are documented. (Rule 26)
+21. Markdown output escaping: every new emission site for links, images, or URLs must call the shared escaping helper. No raw `write!`/`format!` that interpolates unescaped text in Markdown link labels `[...]` or destinations `(...)` / `<...>`. Use `chars()` not `bytes()` for escaping. URL values must reject percent-encoded control characters before scheme validation. (Rule 27)
+22. Residual code integrity: after merge or >500-line change in a single file, verify compilation with `cargo check`, `git diff --check`, and no duplicate adjacent blocks. For >30-line changes, verify the file is not truncated. (Rule 31)
 
 #### Shell scripts (`tools/`, e2e harnesses)
 1. Every `case` has a `*)` default clause. (Rule 18)
@@ -910,6 +1045,7 @@ For each code change you are about to produce, mentally (or explicitly in a thin
 6. All C code examples and C-style guidance in docs/README/steering must use
    C99-or-newer forms and must not introduce pre-C99 syntax.
 7. Code examples in documentation must use meaningful names and include comments explaining non-obvious logic, matching the same standards as production code. (Rule 26)
+8. Markdown escaping and link-destination examples in docs must use escaped forms; never show raw interpolation of untrusted text in link labels or destinations. (Rule 27)
 
 **If any item would be violated, redesign the change before writing it.** Do not emit code that you know will need a follow-up fix — that wastes time, wastes tokens and review cycles.
 
@@ -1029,3 +1165,4 @@ remediation:
 | 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |
 | 0.5.5 | 2026-04-24 | Codex | Added recent Git analysis remediation closeout rule |
 | 0.6.0 | 2026-05-02 | Kang | Comment/doc audit: Rust module docs, C function comments, Python docstrings, shell script headers; version 0.6.0 consistency fixes |
+| 0.6.1 | 2026-05-06 | Kang | Rules 27–31: Markdown escaping/injection prevention, full ngx_list_part_t iteration, flag clearing ordering, NUL-termination/EOF boundary, merge residual integrity; output-safety risk pack |

@@ -27,12 +27,24 @@ ngx_http_markdown_filter_init(ngx_conf_t *cf) /* NOSONAR: nginx callback signatu
     return NGX_OK;
 }
 
-/* Allocate per-worker converter handle and attach shared metrics zone. */
+/**
+ * Initialize per-worker markdown resources: allocate a converter, attach the
+ * shared metrics zone, optionally start the dynamic configuration watcher, and
+ * apply any configured per-path metrics cardinality.
+ *
+ * If the metrics shared-memory zone is unavailable or the converter cannot be
+ * created, initialization fails.
+ *
+ * @param cycle Pointer to the nginx cycle (used for logging and to obtain the HTTP configuration).
+ * @return NGX_OK on successful initialization;
+ *         NGX_ERROR if the metrics shared-memory zone is missing or the converter creation fails.
+ *         Note: failure to start the dynamic configuration watcher is logged as a warning but is non-fatal.
+ */
 static ngx_int_t
 ngx_http_markdown_init_worker(ngx_cycle_t *cycle)
 {
     const ngx_http_conf_ctx_t       *http_ctx;
-    const ngx_http_markdown_conf_t  *lcf;
+    ngx_http_markdown_conf_t  *lcf;
 
     if (ngx_http_markdown_metrics_shm_zone == NULL
         || ngx_http_markdown_metrics_shm_zone->data == NULL)
@@ -68,13 +80,13 @@ ngx_http_markdown_init_worker(ngx_cycle_t *cycle)
     http_ctx = (const ngx_http_conf_ctx_t *)
         ngx_get_conf(cycle->conf_ctx, ngx_http_module);
     if (http_ctx != NULL) {
-        lcf = (const ngx_http_markdown_conf_t *)
+        lcf = (ngx_http_markdown_conf_t *)
             http_ctx->loc_conf[ngx_http_markdown_filter_module.ctx_index];
         if (lcf != NULL && lcf->dynconf_enabled
             && lcf->dynconf_path.len > 0
             && ngx_http_markdown_dynconf_start(
                    &ngx_http_markdown_dynconf_watcher,
-                   cycle, &lcf->dynconf_path, cycle->log)
+                   cycle, &lcf->dynconf_path, lcf, cycle->log)
                != NGX_OK)
         {
             ngx_log_error(NGX_LOG_WARN, cycle->log, 0,

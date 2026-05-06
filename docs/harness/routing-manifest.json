@@ -509,6 +509,43 @@
         "nginx-protocol",
         "release-quality"
       ]
+    },
+    {
+      "id": "output-safety",
+      "doc": "docs/harness/risk-packs/output-safety.md",
+      "primary_surfaces": [
+        "markdown-escaping",
+        "link-emission",
+        "url-validation",
+        "injection-prevention"
+      ],
+      "supporting_surfaces": [
+        "nginx-protocol",
+        "docs-tooling"
+      ],
+      "paths": [
+        "components/rust-converter/src/streaming/emitter.rs",
+        "components/nginx-module/src/ngx_http_markdown_conversion_impl.h",
+        "components/nginx-module/src/ngx_http_markdown_request_impl.h",
+        "components/rust-converter/tests/**",
+        "components/nginx-module/tests/**"
+      ],
+      "keywords": [
+        "escape",
+        "sanitize",
+        "link label",
+        "link destination",
+        "autolink",
+        "X-Forwarded",
+        "injection",
+        "content injection"
+      ],
+      "verification_families": [
+        "harness-sync",
+        "ffi-boundary",
+        "nginx-protocol",
+        "release-quality"
+      ]
     }
   ],
   "task_entrypoints": [

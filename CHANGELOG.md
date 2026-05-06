@@ -5,6 +5,65 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.1] - 2026-05-06
+
+This release hardens the harness rule surface with five new defect-prevention
+rules (27–31) extracted from 14-day fix-commit analysis, adds an output-safety
+risk pack, and introduces the two-phase dynconf snapshot model.
+
+### Added
+- **Harness Rules 27–31** in AGENTS.md:
+  - Rule 27: Markdown output escaping and injection prevention
+  - Rule 28: Full `ngx_list_part_t` chain iteration and multi-value HTTP header
+    semantics
+  - Rule 29: Flag/state clearing ordering (clear-after-success, not before)
+  - Rule 30: NUL-termination of `ngx_str_t` before C API calls and EOF boundary
+    handling
+  - Rule 31: Residual code integrity after merge and large commits
+- **Output-safety risk pack** (`docs/harness/risk-packs/output-safety.md`) for
+  link/URL emission, escaping, and content-injection prevention routing.
+- Pre-output checklist items for C module (22–26), Rust (21–22), and
+  documentation (8) covering Rules 27–31.
+- NUL-termination and directive-matching sync points in `nginx-protocol-safety`
+  risk pack.
+- Merge-integrity sync points in `release-governance` risk pack.
+- `output-safety` pack entry in routing manifest (JSON + MD overlay).
+
+### Changed
+- Dynconf: two-phase snapshot model with `active_snapshot` and
+  `staging_snapshot`; staged commit semantics (entire file must parse or
+  nothing applied).
+- Dynconf: request-bound snapshot (`ctx->dynconf_snapshot`) bound at
+  header_filter time; no file I/O on request path.
+- Dynconf: `log_verbosity` module enum, `enabled_source`/`enabled_complex`
+  override, global-only scope guard.
+- Conversion: hardened `X-Forwarded-Host` normalization (first-hop extraction,
+  control character rejection, IPv6 bracket validation, fallback to server
+  name).
+- `METRIC_SAFE_DEC` macro for metrics decrement under dynconf.
+
+### Fixed
+- Invalid `log_verbosity` enum fallback in decision log impl.
+- Dynconf request-path file I/O removed from filter chain.
+- Forwarded-header injection vectors from unsanitized `X-Forwarded-Host`.
+
+#### Upgrading to 0.6.1
+
+- **Dynamic config** is off by default (`markdown_dynamic_config off`).
+  To enable hot-reload without NGINX restart, set
+  `markdown_dynamic_config on` and `markdown_dynamic_config_path <path>`
+  at the http or server level.
+- **X-Forwarded-Host validation** is now stricter: leading/trailing
+  whitespace in the first-hop token is trimmed; non-IPv6 hosts with a
+  `:` must be followed by digits only (port); IPv6 bracket literals
+  may include an optional `:<port>` suffix (e.g. `[::1]:8080`).
+  Previously-accepted malformed values may now be rejected with a
+  fallback to `r->headers_in.server`.
+- **Request-bound dynconf snapshot**: each request deep-copies the
+  active snapshot at header_filter time, eliminating the window where
+  a concurrent timer reload could swap the snapshot mid-request.
+  No configuration change is required; behavior is more consistent.
+
 ## [0.6.0] - 2026-05-05
 
 This release upgrades nginx-markdown-for-agents from a feature-complete opt-in

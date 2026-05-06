@@ -44,9 +44,19 @@ static ngx_str_t ngx_http_markdown_metrics_shm_name =
     ngx_string("nginx_markdown_metrics_v5");
 static u_char ngx_http_markdown_empty_string[] = "";
 
-/* Global dynamic config watcher for this worker process. */
+/* Global dynamic config watcher for this worker process.
+ * active_snapshot holds the currently effective configuration;
+ * staging_snapshot is used during two-phase reload. */
 static ngx_http_markdown_dynconf_watcher_t ngx_http_markdown_dynconf_watcher = {
-    { 0, NULL }, 0, NULL, 0, 0
+    { 0, NULL }, 0, NULL, 0,
+#ifdef MARKDOWN_STREAMING_ENABLED
+    { 0, 0, NULL, 0, 0, 0, 0, 0 },
+    { 0, 0, NULL, 0, 0, 0, 0, 0 },
+#else
+    { 0, 0, NULL, 0, 0, 0, 0 },
+    { 0, 0, NULL, 0, 0, 0, 0 },
+#endif
+    0, NULL
 };
 
 #define NGX_HTTP_MARKDOWN_METRIC_ADD(field, value)                                  \
@@ -59,6 +69,31 @@ static ngx_http_markdown_dynconf_watcher_t ngx_http_markdown_dynconf_watcher = {
 
 #define NGX_HTTP_MARKDOWN_METRIC_INC(field)                                         \
     NGX_HTTP_MARKDOWN_METRIC_ADD(field, 1)
+
+#define NGX_HTTP_MARKDOWN_METRIC_DEC(field)                                         \
+    NGX_HTTP_MARKDOWN_METRIC_ADD(field, -1)
+
+/*
+ * Safe decrement: only decrements if the counter is currently
+ * positive.  Prevents underflow/wraparound when a metrics zone
+ * reset (e.g. worker restart) leaves the counter at zero.
+ */
+#define NGX_HTTP_MARKDOWN_METRIC_SAFE_DEC(field)                                    \
+    do {                                                                            \
+        if (ngx_http_markdown_metrics != NULL) {                                    \
+            ngx_atomic_uint_t  _cur;                                                \
+            for ( ;; ) {                                                            \
+                _cur = ngx_http_markdown_metrics->field;                            \
+                if (_cur == 0) { break; }                                           \
+                if (ngx_atomic_cmp_set(                                            \
+                        &ngx_http_markdown_metrics->field,                          \
+                        _cur, _cur - 1))                                            \
+                {                                                                   \
+                    break;                                                          \
+                }                                                                   \
+            }                                                                       \
+        }                                                                           \
+    } while (0)
 
 /*
  * Increment the skip counter for the given eligibility result.

@@ -390,7 +390,7 @@ Makefile               顶层构建与测试入口
 
 ## 路线方向
 
-当前版本 (0.6.0)：
+当前版本 (0.6.1)：
 
 - 双引擎架构：streaming auto 模式默认，小响应使用 full-buffer
 - Streaming 失败语义与 commit boundary 对齐，支持可控 fallback 策略

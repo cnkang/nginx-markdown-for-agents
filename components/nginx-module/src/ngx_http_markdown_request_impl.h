@@ -275,40 +275,17 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
     ngx_flag_t                       filter_enabled;
     ngx_int_t                        should_convert;
 
-    /* Apply pending dynamic config reload if signaled.
+    /* Dynamic config: no file I/O in request path.
      *
-     * IMPORTANT: reload_pending is cleared AFTER the reload attempt
-     * (not before), so a failed reload does not lose the signal.
-     * A subsequent request will retry the reload.
-     *
-     * WARNING: File I/O in this path is blocking.  This is acceptable
-     * for low-frequency config reloads but not for high-frequency
-     * events.  A future improvement should defer reload to a timer
-     * handler to avoid blocking the request.
+     * The timer handler performs two-phase reload (read + parse
+     * into staging, then atomic swap of active snapshot) entirely
+     * in the event loop, never on the request path.  The request
+     * path reads only the active snapshot, which is an immutable
+     * pointer for the duration of this request (bound to ctx
+     * below).  A concurrent reload may swap the active snapshot,
+     * but this request continues using its bound snapshot,
+     * guaranteeing request-level consistency.
      */
-    if (ngx_http_markdown_dynconf_watcher.reload_pending) {
-        conf = ngx_http_get_module_loc_conf(r, ngx_http_markdown_filter_module);
-
-        if (conf != NULL) {
-            ngx_int_t  dynconf_rc;
-
-            dynconf_rc = ngx_http_markdown_dynconf_reload(
-                &ngx_http_markdown_dynconf_watcher, conf, r);
-
-            if (dynconf_rc == NGX_OK) {
-                ngx_http_markdown_dynconf_watcher.reload_pending = 0;
-            } else {
-                ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-                              "markdown dynconf: reload failed (rc=%i), "
-                              "flag retained; will retry on next request",
-                              dynconf_rc);
-            }
-        } else {
-            ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-                          "markdown dynconf: no configuration to reload into");
-            ngx_http_markdown_dynconf_watcher.reload_pending = 0;
-        }
-    }
 
     /* Get module configuration */
     conf = ngx_http_get_module_loc_conf(r, ngx_http_markdown_filter_module);
@@ -407,6 +384,18 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
 
     /* Initialize context */
     ngx_http_markdown_init_ctx(r, ctx, filter_enabled);
+
+    /* Bind the active dynconf snapshot to this request.
+     * This guarantees request-level consistency: all subsequent
+     * body/conversion/logging reads go through this snapshot,
+     * even if a concurrent timer reload swaps the global
+     * active_snapshot. */
+    ctx->dynconf_snapshot =
+        ngx_pcalloc(r->pool, sizeof(ngx_http_markdown_dynconf_snapshot_t));
+    if (ctx->dynconf_snapshot != NULL) {
+        *ctx->dynconf_snapshot =
+            ngx_http_markdown_dynconf_watcher.active_snapshot;
+    }
 
     /* Set context for this request */
     r->ctx[ngx_http_markdown_filter_module.ctx_index] = ctx;
@@ -563,14 +552,13 @@ path_selected:
 }
 
 /**
- * Coordinate conditional-request resolution, optional Markdown conversion, and emission of the conversion result for a buffered response.
- *
- * This function performs any deferred processing-path selection (switching to incremental processing when the buffered body reaches the configured threshold), resolves conditional-request outcomes, invokes the conversion engine if no conditional result is available, and sends the final conversion output. It may update the per-request context (e.g., processing_path) and module metrics as part of its processing.
+ * Determine conditional-request outcome, perform Markdown conversion if needed, and emit the conversion result for a buffered response.
  *
  * @param r The active nginx request.
  * @param ctx Per-request Markdown module context.
  * @param conf Module configuration for the current request.
- * @returns `NGX_OK` on success, or another `ngx_int_t` code returned by underlying helpers to indicate a filter-chain decision or an error. */
+ * @returns `NGX_OK` on success, `NGX_AGAIN` if downstream requires further processing, or another `ngx_int_t` code returned by underlying helpers to indicate a filter-chain decision or error.
+ */
 static ngx_int_t
 ngx_http_markdown_body_filter_convert_and_output(ngx_http_request_t *r,
                                                  ngx_http_markdown_ctx_t *ctx,
@@ -611,12 +599,7 @@ ngx_http_markdown_body_filter_convert_and_output(ngx_http_request_t *r,
          * (e.g. worker restart) could leave the counter at
          * zero.
          */
-        if (ngx_http_markdown_metrics != NULL
-            && ngx_http_markdown_metrics->path_hits.fullbuffer > 0)
-        {
-            NGX_HTTP_MARKDOWN_METRIC_ADD(
-                path_hits.fullbuffer, -1);
-        }
+        NGX_HTTP_MARKDOWN_METRIC_SAFE_DEC(path_hits.fullbuffer);
         NGX_HTTP_MARKDOWN_METRIC_INC(
             path_hits.incremental);
     }

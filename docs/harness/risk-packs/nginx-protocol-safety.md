@@ -37,6 +37,10 @@ cache-control, conditional request, status, or header semantics change.
 - HEAD requests and empty-body artifacts are verified with `curl --head` or an
   equivalent protocol-correct check
 - protocol docs use exact config names, reason codes, and retrievable metrics
+- `ngx_str_t` values are NUL-terminated before passing to C APIs that require
+  it; prefer length-bounded NGINX APIs where possible (Rule 30)
+- directive keyword matching requires exact length equality before
+  `ngx_strncasecmp` to prevent out-of-bounds reads on truncated inputs (Rule 30)
 
 ## Minimum Verification
 
@@ -61,3 +65,4 @@ behavior, also run the matching focused E2E or `make harness-check-full`.
 |---------|------|--------|---------|
 | 0.5.5 | 2026-04-24 | Codex | Added 60-day protocol safety routing |
 | 0.6.0 | 2026-05-03 | Codex | Added multi-header and cookie-boundary sync points |
+| 0.6.1 | 2026-05-06 | Kang | Added NUL-termination and directive-matching sync points (Rule 30) |

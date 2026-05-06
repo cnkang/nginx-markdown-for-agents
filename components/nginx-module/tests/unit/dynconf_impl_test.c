@@ -2,7 +2,7 @@
  * Test: dynconf_impl
  * Description: branch and line coverage for dynamic config hot-reload
  *              helpers (parse_line, apply, check, start, stop,
- *              timer_handler, reload).
+ *              timer_handler, reload) with two-phase snapshot model.
  */
 
 #include "../include/test_common.h"
@@ -441,48 +441,51 @@ test_parse_line_leading_whitespace(void)
 static void
 test_apply_filter_on(void)
 {
-    ngx_http_markdown_conf_t  conf;
-    ngx_int_t                 rc;
+    ngx_http_markdown_dynconf_snapshot_t  snapshot;
+    ngx_int_t                            rc;
 
-    memset(&conf, 0, sizeof(conf));
+    memset(&snapshot, 0, sizeof(snapshot));
+    snapshot.valid = 1;
 
     u_char val[] = "on";
-    rc = ngx_http_markdown_dynconf_apply(&conf,
+    rc = ngx_http_markdown_dynconf_apply(&snapshot,
                                          NGX_HTTP_MARKDOWN_DYNCONF_KEY_FILTER,
                                          val, 2, &g_log);
     TEST_ASSERT(rc == NGX_OK, "apply filter=on returns OK");
-    TEST_ASSERT(conf.enabled == 1, "enabled set to 1");
+    TEST_ASSERT(snapshot.enabled == 1, "enabled set to 1");
     TEST_PASS("apply: markdown_filter=on");
 }
 
 static void
 test_apply_filter_off(void)
 {
-    ngx_http_markdown_conf_t  conf;
-    ngx_int_t                 rc;
+    ngx_http_markdown_dynconf_snapshot_t  snapshot;
+    ngx_int_t                            rc;
 
-    memset(&conf, 0, sizeof(conf));
-    conf.enabled = 1;
+    memset(&snapshot, 0, sizeof(snapshot));
+    snapshot.enabled = 1;
+    snapshot.valid = 1;
 
     u_char val[] = "off";
-    rc = ngx_http_markdown_dynconf_apply(&conf,
+    rc = ngx_http_markdown_dynconf_apply(&snapshot,
                                          NGX_HTTP_MARKDOWN_DYNCONF_KEY_FILTER,
                                          val, 3, &g_log);
     TEST_ASSERT(rc == NGX_OK, "apply filter=off returns OK");
-    TEST_ASSERT(conf.enabled == 0, "enabled set to 0");
+    TEST_ASSERT(snapshot.enabled == 0, "enabled set to 0");
     TEST_PASS("apply: markdown_filter=off");
 }
 
 static void
 test_apply_filter_invalid(void)
 {
-    ngx_http_markdown_conf_t  conf;
-    ngx_int_t                 rc;
+    ngx_http_markdown_dynconf_snapshot_t  snapshot;
+    ngx_int_t                            rc;
 
-    memset(&conf, 0, sizeof(conf));
+    memset(&snapshot, 0, sizeof(snapshot));
+    snapshot.valid = 1;
 
     u_char val[] = "maybe";
-    rc = ngx_http_markdown_dynconf_apply(&conf,
+    rc = ngx_http_markdown_dynconf_apply(&snapshot,
                                          NGX_HTTP_MARKDOWN_DYNCONF_KEY_FILTER,
                                          val, 5, &g_log);
     TEST_ASSERT(rc == NGX_ERROR, "apply filter=maybe returns ERROR");
@@ -492,48 +495,51 @@ test_apply_filter_invalid(void)
 static void
 test_apply_prune_noise_on(void)
 {
-    ngx_http_markdown_conf_t  conf;
-    ngx_int_t                 rc;
+    ngx_http_markdown_dynconf_snapshot_t  snapshot;
+    ngx_int_t                            rc;
 
-    memset(&conf, 0, sizeof(conf));
+    memset(&snapshot, 0, sizeof(snapshot));
+    snapshot.valid = 1;
 
     u_char val[] = "on";
-    rc = ngx_http_markdown_dynconf_apply(&conf,
+    rc = ngx_http_markdown_dynconf_apply(&snapshot,
                                          NGX_HTTP_MARKDOWN_DYNCONF_KEY_PRUNE_NOISE,
                                          val, 2, &g_log);
     TEST_ASSERT(rc == NGX_OK, "apply prune_noise=on returns OK");
-    TEST_ASSERT(conf.prune_noise == 1, "prune_noise set to 1");
+    TEST_ASSERT(snapshot.prune_noise == 1, "prune_noise set to 1");
     TEST_PASS("apply: prune_noise=on");
 }
 
 static void
 test_apply_prune_noise_off(void)
 {
-    ngx_http_markdown_conf_t  conf;
-    ngx_int_t                 rc;
+    ngx_http_markdown_dynconf_snapshot_t  snapshot;
+    ngx_int_t                            rc;
 
-    memset(&conf, 0, sizeof(conf));
-    conf.prune_noise = 1;
+    memset(&snapshot, 0, sizeof(snapshot));
+    snapshot.prune_noise = 1;
+    snapshot.valid = 1;
 
     u_char val[] = "off";
-    rc = ngx_http_markdown_dynconf_apply(&conf,
+    rc = ngx_http_markdown_dynconf_apply(&snapshot,
                                          NGX_HTTP_MARKDOWN_DYNCONF_KEY_PRUNE_NOISE,
                                          val, 3, &g_log);
     TEST_ASSERT(rc == NGX_OK, "apply prune_noise=off returns OK");
-    TEST_ASSERT(conf.prune_noise == 0, "prune_noise set to 0");
+    TEST_ASSERT(snapshot.prune_noise == 0, "prune_noise set to 0");
     TEST_PASS("apply: prune_noise=off");
 }
 
 static void
 test_apply_prune_noise_invalid(void)
 {
-    ngx_http_markdown_conf_t  conf;
-    ngx_int_t                 rc;
+    ngx_http_markdown_dynconf_snapshot_t  snapshot;
+    ngx_int_t                            rc;
 
-    memset(&conf, 0, sizeof(conf));
+    memset(&snapshot, 0, sizeof(snapshot));
+    snapshot.valid = 1;
 
     u_char val[] = "yes";
-    rc = ngx_http_markdown_dynconf_apply(&conf,
+    rc = ngx_http_markdown_dynconf_apply(&snapshot,
                                          NGX_HTTP_MARKDOWN_DYNCONF_KEY_PRUNE_NOISE,
                                          val, 3, &g_log);
     TEST_ASSERT(rc == NGX_ERROR, "apply prune_noise=yes returns ERROR");
@@ -543,81 +549,90 @@ test_apply_prune_noise_invalid(void)
 static void
 test_apply_log_verbosity_error(void)
 {
-    ngx_http_markdown_conf_t  conf;
-    ngx_int_t                 rc;
+    ngx_http_markdown_dynconf_snapshot_t  snapshot;
+    ngx_int_t                            rc;
 
-    memset(&conf, 0, sizeof(conf));
+    memset(&snapshot, 0, sizeof(snapshot));
+    snapshot.valid = 1;
 
     u_char val[] = "error";
-    rc = ngx_http_markdown_dynconf_apply(&conf,
+    rc = ngx_http_markdown_dynconf_apply(&snapshot,
                                          NGX_HTTP_MARKDOWN_DYNCONF_KEY_LOG_VERBOSITY,
                                          val, 5, &g_log);
     TEST_ASSERT(rc == NGX_OK, "apply log_verbosity=error returns OK");
-    TEST_ASSERT(conf.log_verbosity == NGX_LOG_ERR, "set to NGX_LOG_ERR");
+    TEST_ASSERT(snapshot.log_verbosity == NGX_HTTP_MARKDOWN_LOG_ERROR,
+                "set to NGX_HTTP_MARKDOWN_LOG_ERROR");
     TEST_PASS("apply: log_verbosity=error");
 }
 
 static void
 test_apply_log_verbosity_warn(void)
 {
-    ngx_http_markdown_conf_t  conf;
-    ngx_int_t                 rc;
+    ngx_http_markdown_dynconf_snapshot_t  snapshot;
+    ngx_int_t                            rc;
 
-    memset(&conf, 0, sizeof(conf));
+    memset(&snapshot, 0, sizeof(snapshot));
+    snapshot.valid = 1;
 
     u_char val[] = "warn";
-    rc = ngx_http_markdown_dynconf_apply(&conf,
+    rc = ngx_http_markdown_dynconf_apply(&snapshot,
                                          NGX_HTTP_MARKDOWN_DYNCONF_KEY_LOG_VERBOSITY,
                                          val, 4, &g_log);
     TEST_ASSERT(rc == NGX_OK, "apply log_verbosity=warn returns OK");
-    TEST_ASSERT(conf.log_verbosity == NGX_LOG_WARN, "set to NGX_LOG_WARN");
+    TEST_ASSERT(snapshot.log_verbosity == NGX_HTTP_MARKDOWN_LOG_WARN,
+                "set to NGX_HTTP_MARKDOWN_LOG_WARN");
     TEST_PASS("apply: log_verbosity=warn");
 }
 
 static void
 test_apply_log_verbosity_info(void)
 {
-    ngx_http_markdown_conf_t  conf;
-    ngx_int_t                 rc;
+    ngx_http_markdown_dynconf_snapshot_t  snapshot;
+    ngx_int_t                            rc;
 
-    memset(&conf, 0, sizeof(conf));
+    memset(&snapshot, 0, sizeof(snapshot));
+    snapshot.valid = 1;
 
     u_char val[] = "info";
-    rc = ngx_http_markdown_dynconf_apply(&conf,
+    rc = ngx_http_markdown_dynconf_apply(&snapshot,
                                          NGX_HTTP_MARKDOWN_DYNCONF_KEY_LOG_VERBOSITY,
                                          val, 4, &g_log);
     TEST_ASSERT(rc == NGX_OK, "apply log_verbosity=info returns OK");
-    TEST_ASSERT(conf.log_verbosity == NGX_LOG_INFO, "set to NGX_LOG_INFO");
+    TEST_ASSERT(snapshot.log_verbosity == NGX_HTTP_MARKDOWN_LOG_INFO,
+                "set to NGX_HTTP_MARKDOWN_LOG_INFO");
     TEST_PASS("apply: log_verbosity=info");
 }
 
 static void
 test_apply_log_verbosity_debug(void)
 {
-    ngx_http_markdown_conf_t  conf;
-    ngx_int_t                 rc;
+    ngx_http_markdown_dynconf_snapshot_t  snapshot;
+    ngx_int_t                            rc;
 
-    memset(&conf, 0, sizeof(conf));
+    memset(&snapshot, 0, sizeof(snapshot));
+    snapshot.valid = 1;
 
     u_char val[] = "debug";
-    rc = ngx_http_markdown_dynconf_apply(&conf,
+    rc = ngx_http_markdown_dynconf_apply(&snapshot,
                                          NGX_HTTP_MARKDOWN_DYNCONF_KEY_LOG_VERBOSITY,
                                          val, 5, &g_log);
     TEST_ASSERT(rc == NGX_OK, "apply log_verbosity=debug returns OK");
-    TEST_ASSERT(conf.log_verbosity == NGX_LOG_DEBUG, "set to NGX_LOG_DEBUG");
+    TEST_ASSERT(snapshot.log_verbosity == NGX_HTTP_MARKDOWN_LOG_DEBUG,
+                "set to NGX_HTTP_MARKDOWN_LOG_DEBUG");
     TEST_PASS("apply: log_verbosity=debug");
 }
 
 static void
 test_apply_log_verbosity_invalid(void)
 {
-    ngx_http_markdown_conf_t  conf;
-    ngx_int_t                 rc;
+    ngx_http_markdown_dynconf_snapshot_t  snapshot;
+    ngx_int_t                            rc;
 
-    memset(&conf, 0, sizeof(conf));
+    memset(&snapshot, 0, sizeof(snapshot));
+    snapshot.valid = 1;
 
     u_char val[] = "trace";
-    rc = ngx_http_markdown_dynconf_apply(&conf,
+    rc = ngx_http_markdown_dynconf_apply(&snapshot,
                                          NGX_HTTP_MARKDOWN_DYNCONF_KEY_LOG_VERBOSITY,
                                          val, 5, &g_log);
     TEST_ASSERT(rc == NGX_ERROR, "apply log_verbosity=trace returns ERROR");
@@ -625,19 +640,70 @@ test_apply_log_verbosity_invalid(void)
 }
 
 static void
+test_apply_filter_on_overrides_complex(void)
+{
+    ngx_http_markdown_dynconf_snapshot_t  snapshot;
+    ngx_int_t                            rc;
+
+    memset(&snapshot, 0, sizeof(snapshot));
+    snapshot.enabled = 0;
+    snapshot.enabled_source = NGX_HTTP_MARKDOWN_ENABLED_COMPLEX;
+    snapshot.enabled_complex = (ngx_http_complex_value_t *) 1;
+    snapshot.valid = 1;
+
+    u_char val[] = "on";
+    rc = ngx_http_markdown_dynconf_apply(&snapshot,
+                                         NGX_HTTP_MARKDOWN_DYNCONF_KEY_FILTER,
+                                         val, 2, &g_log);
+    TEST_ASSERT(rc == NGX_OK, "apply filter=on with prior complex returns OK");
+    TEST_ASSERT(snapshot.enabled == 1, "enabled set to 1");
+    TEST_ASSERT(snapshot.enabled_source == NGX_HTTP_MARKDOWN_ENABLED_STATIC,
+                "enabled_source overridden to STATIC");
+    TEST_ASSERT(snapshot.enabled_complex == NULL,
+                "enabled_complex cleared to NULL");
+    TEST_PASS("apply: markdown_filter=on overrides complex value");
+}
+
+static void
+test_apply_filter_off_overrides_complex(void)
+{
+    ngx_http_markdown_dynconf_snapshot_t  snapshot;
+    ngx_int_t                            rc;
+
+    memset(&snapshot, 0, sizeof(snapshot));
+    snapshot.enabled = 1;
+    snapshot.enabled_source = NGX_HTTP_MARKDOWN_ENABLED_COMPLEX;
+    snapshot.enabled_complex = (ngx_http_complex_value_t *) 1;
+    snapshot.valid = 1;
+
+    u_char val[] = "off";
+    rc = ngx_http_markdown_dynconf_apply(&snapshot,
+                                         NGX_HTTP_MARKDOWN_DYNCONF_KEY_FILTER,
+                                         val, 3, &g_log);
+    TEST_ASSERT(rc == NGX_OK, "apply filter=off with prior complex returns OK");
+    TEST_ASSERT(snapshot.enabled == 0, "enabled set to 0");
+    TEST_ASSERT(snapshot.enabled_source == NGX_HTTP_MARKDOWN_ENABLED_STATIC,
+                "enabled_source overridden to STATIC");
+    TEST_ASSERT(snapshot.enabled_complex == NULL,
+                "enabled_complex cleared to NULL");
+    TEST_PASS("apply: markdown_filter=off overrides complex value");
+}
+
+static void
 test_apply_streaming_budget(void)
 {
-    ngx_http_markdown_conf_t  conf;
-    ngx_int_t                 rc;
+    ngx_http_markdown_dynconf_snapshot_t  snapshot;
+    ngx_int_t                            rc;
 
-    memset(&conf, 0, sizeof(conf));
+    memset(&snapshot, 0, sizeof(snapshot));
+    snapshot.valid = 1;
 
     u_char val[] = "4m";
-    rc = ngx_http_markdown_dynconf_apply(&conf,
+    rc = ngx_http_markdown_dynconf_apply(&snapshot,
                                          NGX_HTTP_MARKDOWN_DYNCONF_KEY_STREAMING_BUDGET,
                                          val, 2, &g_log);
     TEST_ASSERT(rc == NGX_OK, "apply streaming_budget=4m returns OK");
-    TEST_ASSERT(conf.streaming_budget == 4 * 1024 * 1024,
+    TEST_ASSERT(snapshot.streaming_budget == 4 * 1024 * 1024,
                 "streaming_budget set to 4MiB");
     TEST_PASS("apply: streaming_budget=4m");
 }
@@ -645,13 +711,14 @@ test_apply_streaming_budget(void)
 static void
 test_apply_streaming_budget_invalid(void)
 {
-    ngx_http_markdown_conf_t  conf;
-    ngx_int_t                 rc;
+    ngx_http_markdown_dynconf_snapshot_t  snapshot;
+    ngx_int_t                            rc;
 
-    memset(&conf, 0, sizeof(conf));
+    memset(&snapshot, 0, sizeof(snapshot));
+    snapshot.valid = 1;
 
     u_char val[] = "abc";
-    rc = ngx_http_markdown_dynconf_apply(&conf,
+    rc = ngx_http_markdown_dynconf_apply(&snapshot,
                                          NGX_HTTP_MARKDOWN_DYNCONF_KEY_STREAMING_BUDGET,
                                          val, 3, &g_log);
     TEST_ASSERT(rc == NGX_ERROR, "apply streaming_budget=abc returns ERROR");
@@ -661,17 +728,18 @@ test_apply_streaming_budget_invalid(void)
 static void
 test_apply_memory_budget(void)
 {
-    ngx_http_markdown_conf_t  conf;
-    ngx_int_t                 rc;
+    ngx_http_markdown_dynconf_snapshot_t  snapshot;
+    ngx_int_t                            rc;
 
-    memset(&conf, 0, sizeof(conf));
+    memset(&snapshot, 0, sizeof(snapshot));
+    snapshot.valid = 1;
 
     u_char val[] = "128k";
-    rc = ngx_http_markdown_dynconf_apply(&conf,
+    rc = ngx_http_markdown_dynconf_apply(&snapshot,
                                          NGX_HTTP_MARKDOWN_DYNCONF_KEY_MEMORY_BUDGET,
                                          val, 4, &g_log);
     TEST_ASSERT(rc == NGX_OK, "apply memory_budget=128k returns OK");
-    TEST_ASSERT(conf.memory_budget == 128 * 1024,
+    TEST_ASSERT(snapshot.memory_budget == 128 * 1024,
                 "memory_budget set to 128KiB");
     TEST_PASS("apply: memory_budget=128k");
 }
@@ -679,13 +747,14 @@ test_apply_memory_budget(void)
 static void
 test_apply_memory_budget_invalid(void)
 {
-    ngx_http_markdown_conf_t  conf;
-    ngx_int_t                 rc;
+    ngx_http_markdown_dynconf_snapshot_t  snapshot;
+    ngx_int_t                            rc;
 
-    memset(&conf, 0, sizeof(conf));
+    memset(&snapshot, 0, sizeof(snapshot));
+    snapshot.valid = 1;
 
     u_char val[] = "xyz";
-    rc = ngx_http_markdown_dynconf_apply(&conf,
+    rc = ngx_http_markdown_dynconf_apply(&snapshot,
                                          NGX_HTTP_MARKDOWN_DYNCONF_KEY_MEMORY_BUDGET,
                                          val, 3, &g_log);
     TEST_ASSERT(rc == NGX_ERROR, "apply memory_budget=xyz returns ERROR");
@@ -695,13 +764,14 @@ test_apply_memory_budget_invalid(void)
 static void
 test_apply_default_key(void)
 {
-    ngx_http_markdown_conf_t  conf;
-    ngx_int_t                 rc;
+    ngx_http_markdown_dynconf_snapshot_t  snapshot;
+    ngx_int_t                            rc;
 
-    memset(&conf, 0, sizeof(conf));
+    memset(&snapshot, 0, sizeof(snapshot));
+    snapshot.valid = 1;
 
     u_char val[] = "1";
-    rc = ngx_http_markdown_dynconf_apply(&conf, 99,
+    rc = ngx_http_markdown_dynconf_apply(&snapshot, 99,
                                          val, 1, &g_log);
     TEST_ASSERT(rc == NGX_DECLINED, "apply unknown key returns DECLINED");
     TEST_PASS("apply: unknown key -> DECLINED");
@@ -802,9 +872,11 @@ test_start_null_watcher(void)
 {
     ngx_int_t  rc;
     ngx_str_t  path;
+    ngx_http_markdown_conf_t  conf;
 
+    memset(&conf, 0, sizeof(conf));
     set_ngx_str(&path, "/tmp/some.conf");
-    rc = ngx_http_markdown_dynconf_start(NULL, &g_cycle, &path, &g_log);
+    rc = ngx_http_markdown_dynconf_start(NULL, &g_cycle, &path, &conf, &g_log);
     TEST_ASSERT(rc == NGX_OK, "start NULL watcher returns NGX_OK");
     TEST_PASS("start: NULL watcher");
 }
@@ -814,9 +886,11 @@ test_start_null_path(void)
 {
     ngx_http_markdown_dynconf_watcher_t  watcher;
     ngx_int_t                            rc;
+    ngx_http_markdown_conf_t             conf;
 
     memset(&watcher, 0, sizeof(watcher));
-    rc = ngx_http_markdown_dynconf_start(&watcher, &g_cycle, NULL, &g_log);
+    memset(&conf, 0, sizeof(conf));
+    rc = ngx_http_markdown_dynconf_start(&watcher, &g_cycle, NULL, &conf, &g_log);
     TEST_ASSERT(rc == NGX_OK, "start NULL path returns NGX_OK");
     TEST_PASS("start: NULL path");
 }
@@ -827,11 +901,13 @@ test_start_empty_path(void)
     ngx_http_markdown_dynconf_watcher_t  watcher;
     ngx_str_t                            path;
     ngx_int_t                            rc;
+    ngx_http_markdown_conf_t             conf;
 
     memset(&watcher, 0, sizeof(watcher));
+    memset(&conf, 0, sizeof(conf));
     path.data = (u_char *) "";
     path.len = 0;
-    rc = ngx_http_markdown_dynconf_start(&watcher, &g_cycle, &path, &g_log);
+    rc = ngx_http_markdown_dynconf_start(&watcher, &g_cycle, &path, &conf, &g_log);
     TEST_ASSERT(rc == NGX_OK, "start empty path returns NGX_OK");
     TEST_PASS("start: empty path");
 }
@@ -843,14 +919,16 @@ test_start_path_too_long(void)
     ngx_str_t                            path;
     ngx_int_t                            rc;
     u_char                               longpath[NGX_MAX_PATH + 2];
+    ngx_http_markdown_conf_t             conf;
 
     memset(&watcher, 0, sizeof(watcher));
+    memset(&conf, 0, sizeof(conf));
     memset(longpath, 'a', sizeof(longpath));
     longpath[sizeof(longpath) - 1] = '\0';
     path.data = longpath;
     path.len = NGX_MAX_PATH + 1;
 
-    rc = ngx_http_markdown_dynconf_start(&watcher, &g_cycle, &path, &g_log);
+    rc = ngx_http_markdown_dynconf_start(&watcher, &g_cycle, &path, &conf, &g_log);
     TEST_ASSERT(rc == NGX_ERROR, "start path too long returns ERROR");
     TEST_PASS("start: path too long");
 }
@@ -862,6 +940,7 @@ test_start_success(void)
     ngx_str_t                            path;
     ngx_int_t                            rc;
     const char                          *tmpfile;
+    ngx_http_markdown_conf_t             conf;
 
     tmpfile = "/tmp/dynconf_test_start.conf";
     {
@@ -872,14 +951,18 @@ test_start_success(void)
     }
 
     memset(&watcher, 0, sizeof(watcher));
+    memset(&conf, 0, sizeof(conf));
+    conf.enabled = 1;
     set_ngx_str(&path, tmpfile);
 
-    rc = ngx_http_markdown_dynconf_start(&watcher, &g_cycle, &path, &g_log);
+    rc = ngx_http_markdown_dynconf_start(&watcher, &g_cycle, &path, &conf, &g_log);
     TEST_ASSERT(rc == NGX_OK, "start returns NGX_OK");
     TEST_ASSERT(watcher.active == 1, "watcher is active");
     TEST_ASSERT(watcher.timer != NULL, "timer allocated");
     TEST_ASSERT(watcher.path.len == strlen(tmpfile), "path copied");
     TEST_ASSERT(watcher.last_mtime > 0, "mtime recorded");
+    TEST_ASSERT(watcher.active_snapshot.valid == 1, "active snapshot valid");
+    TEST_ASSERT(watcher.active_snapshot.enabled == 1, "active snapshot has enabled=1");
 
     free(watcher.path.data);
     free(watcher.timer);
@@ -894,14 +977,16 @@ test_start_stat_fails(void)
     ngx_str_t                            path;
     ngx_int_t                            rc;
     const char                          *tmpfile;
+    ngx_http_markdown_conf_t             conf;
 
     tmpfile = "/tmp/dynconf_test_start_nofile.conf";
     unlink(tmpfile);
 
     memset(&watcher, 0, sizeof(watcher));
+    memset(&conf, 0, sizeof(conf));
     set_ngx_str(&path, tmpfile);
 
-    rc = ngx_http_markdown_dynconf_start(&watcher, &g_cycle, &path, &g_log);
+    rc = ngx_http_markdown_dynconf_start(&watcher, &g_cycle, &path, &conf, &g_log);
     TEST_ASSERT(rc == NGX_OK, "start with nonexistent file still returns OK");
     TEST_ASSERT(watcher.active == 1, "watcher still becomes active");
     TEST_ASSERT(watcher.last_mtime == 0, "mtime set to 0 on stat failure");
@@ -941,12 +1026,10 @@ test_stop_active_watcher(void)
     timer.timer_set = 1;
     watcher.timer = &timer;
     watcher.active = 1;
-    watcher.reload_pending = 1;
     set_ngx_str(&watcher.path, "/tmp/dynconf_stop_test.conf");
 
     ngx_http_markdown_dynconf_stop(&watcher, &g_log);
     TEST_ASSERT(watcher.active == 0, "watcher marked inactive");
-    TEST_ASSERT(watcher.reload_pending == 0, "reload_pending cleared");
     TEST_PASS("stop: active watcher");
 }
 
@@ -1022,6 +1105,7 @@ static void
 test_timer_handler_change_detected(void)
 {
     ngx_http_markdown_dynconf_watcher_t  watcher;
+    ngx_http_markdown_conf_t             conf;
     ngx_event_t                          timer;
     ngx_event_t                          ev;
     const char                          *tmpfile;
@@ -1036,10 +1120,12 @@ test_timer_handler_change_detected(void)
     }
 
     memset(&watcher, 0, sizeof(watcher));
+    memset(&conf, 0, sizeof(conf));
     memset(&timer, 0, sizeof(timer));
     timer.timer_set = 0;
     watcher.active = 1;
     watcher.timer = &timer;
+    watcher.conf = &conf;
     set_ngx_str(&watcher.path, tmpfile);
 
     if (ngx_file_info((const u_char *) tmpfile, &fi) != NGX_FILE_ERROR) {
@@ -1052,38 +1138,34 @@ test_timer_handler_change_detected(void)
     ev.handler = ngx_http_markdown_dynconf_timer_handler;
 
     ngx_http_markdown_dynconf_timer_handler(&ev);
-    TEST_ASSERT(watcher.reload_pending == 1, "reload_pending set on change");
+
+    TEST_ASSERT(watcher.version > 0,
+                "timer_handler: version incremented after reload");
+    TEST_ASSERT(watcher.active_snapshot.enabled == 1,
+                "timer_handler: active_snapshot reflects new config");
 
     unlink(tmpfile);
-    TEST_PASS("timer_handler: change detected, reload_pending set");
+    TEST_PASS("timer_handler: change detected, two-phase reload in timer");
 }
 
 static void
 test_reload_null_args(void)
 {
     ngx_http_markdown_conf_t              conf;
-    ngx_http_request_t                    req;
     ngx_int_t                             rc;
 
     memset(&conf, 0, sizeof(conf));
-    memset(&req, 0, sizeof(req));
-    req.connection = &g_conn;
 
-    rc = ngx_http_markdown_dynconf_reload(NULL, &conf, &req);
-    TEST_ASSERT(rc == NGX_ERROR, "reload NULL watcher returns ERROR");
-
-    {
-        ngx_http_markdown_dynconf_watcher_t  watcher;
-        memset(&watcher, 0, sizeof(watcher));
-        rc = ngx_http_markdown_dynconf_reload(&watcher, NULL, &req);
-        TEST_ASSERT(rc == NGX_ERROR, "reload NULL conf returns ERROR");
-    }
+    rc = ngx_http_markdown_dynconf_reload(NULL, &conf, &g_log);
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_IO_ERROR,
+                "reload NULL watcher returns IO_ERROR");
 
     {
         ngx_http_markdown_dynconf_watcher_t  watcher;
         memset(&watcher, 0, sizeof(watcher));
-        rc = ngx_http_markdown_dynconf_reload(&watcher, &conf, NULL);
-        TEST_ASSERT(rc == NGX_ERROR, "reload NULL request returns ERROR");
+        rc = ngx_http_markdown_dynconf_reload(&watcher, NULL, &g_log);
+        TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_IO_ERROR,
+                    "reload NULL conf returns IO_ERROR");
     }
 
     TEST_PASS("reload: NULL arguments");
@@ -1094,18 +1176,15 @@ test_reload_file_not_found(void)
 {
     ngx_http_markdown_dynconf_watcher_t  watcher;
     ngx_http_markdown_conf_t             conf;
-    ngx_http_request_t                   req;
     ngx_int_t                            rc;
 
     memset(&watcher, 0, sizeof(watcher));
     memset(&conf, 0, sizeof(conf));
-    memset(&req, 0, sizeof(req));
-    req.connection = &g_conn;
-
     set_ngx_str(&watcher.path, "/tmp/nonexistent_dynconf_reload.conf");
 
-    rc = ngx_http_markdown_dynconf_reload(&watcher, &conf, &req);
-    TEST_ASSERT(rc == NGX_ERROR, "reload nonexistent file returns ERROR");
+    rc = ngx_http_markdown_dynconf_reload(&watcher, &conf, &g_log);
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_IO_ERROR,
+                "reload nonexistent file returns IO_ERROR");
     TEST_PASS("reload: file not found");
 }
 
@@ -1115,7 +1194,6 @@ test_reload_valid_file(void)
     const char                          *tmpfile;
     ngx_http_markdown_dynconf_watcher_t  watcher;
     ngx_http_markdown_conf_t             conf;
-    ngx_http_request_t                   req;
     ngx_int_t                            rc;
 
     tmpfile = "/tmp/dynconf_test_reload.conf";
@@ -1128,14 +1206,15 @@ test_reload_valid_file(void)
 
     memset(&watcher, 0, sizeof(watcher));
     memset(&conf, 0, sizeof(conf));
-    memset(&req, 0, sizeof(req));
-    req.connection = &g_conn;
     set_ngx_str(&watcher.path, tmpfile);
+    watcher.active_snapshot.valid = 1;
 
-    rc = ngx_http_markdown_dynconf_reload(&watcher, &conf, &req);
-    TEST_ASSERT(rc == NGX_OK, "reload valid file returns OK");
+    rc = ngx_http_markdown_dynconf_reload(&watcher, &conf, &g_log);
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_APPLIED,
+                "reload valid file returns APPLIED");
     TEST_ASSERT(conf.enabled == 1, "enabled applied");
     TEST_ASSERT(conf.prune_noise == 0, "prune_noise applied");
+    TEST_ASSERT(watcher.version == 1, "version incremented");
 
     unlink(tmpfile);
     TEST_PASS("reload: valid file with multiple keys");
@@ -1147,7 +1226,6 @@ test_reload_empty_file(void)
     const char                          *tmpfile;
     ngx_http_markdown_dynconf_watcher_t  watcher;
     ngx_http_markdown_conf_t             conf;
-    ngx_http_request_t                   req;
     ngx_int_t                            rc;
 
     tmpfile = "/tmp/dynconf_test_reload_empty.conf";
@@ -1159,12 +1237,12 @@ test_reload_empty_file(void)
 
     memset(&watcher, 0, sizeof(watcher));
     memset(&conf, 0, sizeof(conf));
-    memset(&req, 0, sizeof(req));
-    req.connection = &g_conn;
     set_ngx_str(&watcher.path, tmpfile);
+    watcher.active_snapshot.valid = 1;
 
-    rc = ngx_http_markdown_dynconf_reload(&watcher, &conf, &req);
-    TEST_ASSERT(rc == NGX_DECLINED, "reload empty file returns DECLINED");
+    rc = ngx_http_markdown_dynconf_reload(&watcher, &conf, &g_log);
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_NO_CHANGE,
+                "reload empty file returns NO_CHANGE");
 
     unlink(tmpfile);
     TEST_PASS("reload: empty file");
@@ -1176,7 +1254,6 @@ test_reload_comments_and_blanks(void)
     const char                          *tmpfile;
     ngx_http_markdown_dynconf_watcher_t  watcher;
     ngx_http_markdown_conf_t             conf;
-    ngx_http_request_t                   req;
     ngx_int_t                            rc;
 
     tmpfile = "/tmp/dynconf_test_reload_comments.conf";
@@ -1189,13 +1266,14 @@ test_reload_comments_and_blanks(void)
 
     memset(&watcher, 0, sizeof(watcher));
     memset(&conf, 0, sizeof(conf));
-    memset(&req, 0, sizeof(req));
-    req.connection = &g_conn;
     set_ngx_str(&watcher.path, tmpfile);
+    watcher.active_snapshot.valid = 1;
 
-    rc = ngx_http_markdown_dynconf_reload(&watcher, &conf, &req);
-    TEST_ASSERT(rc == NGX_OK, "reload file with comments returns OK");
-    TEST_ASSERT(conf.log_verbosity == NGX_LOG_WARN, "log_verbosity applied");
+    rc = ngx_http_markdown_dynconf_reload(&watcher, &conf, &g_log);
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_APPLIED,
+                "reload file with comments returns APPLIED");
+    TEST_ASSERT(conf.log_verbosity == NGX_HTTP_MARKDOWN_LOG_WARN,
+                "log_verbosity applied");
 
     unlink(tmpfile);
     TEST_PASS("reload: comments and blank lines");
@@ -1207,7 +1285,6 @@ test_reload_no_newline_at_eof(void)
     const char                          *tmpfile;
     ngx_http_markdown_dynconf_watcher_t  watcher;
     ngx_http_markdown_conf_t             conf;
-    ngx_http_request_t                   req;
     ngx_int_t                            rc;
 
     tmpfile = "/tmp/dynconf_test_reload_no_nl.conf";
@@ -1220,12 +1297,12 @@ test_reload_no_newline_at_eof(void)
 
     memset(&watcher, 0, sizeof(watcher));
     memset(&conf, 0, sizeof(conf));
-    memset(&req, 0, sizeof(req));
-    req.connection = &g_conn;
     set_ngx_str(&watcher.path, tmpfile);
+    watcher.active_snapshot.valid = 1;
 
-    rc = ngx_http_markdown_dynconf_reload(&watcher, &conf, &req);
-    TEST_ASSERT(rc == NGX_OK, "reload file without trailing NL returns OK");
+    rc = ngx_http_markdown_dynconf_reload(&watcher, &conf, &g_log);
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_APPLIED,
+                "reload file without trailing NL returns APPLIED");
     TEST_ASSERT(conf.memory_budget == 64 * 1024, "memory_budget applied");
 
     unlink(tmpfile);
@@ -1237,22 +1314,20 @@ test_reload_path_too_long(void)
 {
     ngx_http_markdown_dynconf_watcher_t  watcher;
     ngx_http_markdown_conf_t             conf;
-    ngx_http_request_t                   req;
     ngx_int_t                            rc;
     u_char                               longpath[NGX_MAX_PATH + 2];
 
     memset(&watcher, 0, sizeof(watcher));
     memset(&conf, 0, sizeof(conf));
-    memset(&req, 0, sizeof(req));
-    req.connection = &g_conn;
 
     memset(longpath, 'a', sizeof(longpath));
     longpath[sizeof(longpath) - 1] = '\0';
     watcher.path.data = longpath;
     watcher.path.len = NGX_MAX_PATH + 1;
 
-    rc = ngx_http_markdown_dynconf_reload(&watcher, &conf, &req);
-    TEST_ASSERT(rc == NGX_ERROR, "reload path too long returns ERROR");
+    rc = ngx_http_markdown_dynconf_reload(&watcher, &conf, &g_log);
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_IO_ERROR,
+                "reload path too long returns IO_ERROR");
     TEST_PASS("reload: path too long");
 }
 
@@ -1262,7 +1337,6 @@ test_reload_all_keys(void)
     const char                          *tmpfile;
     ngx_http_markdown_dynconf_watcher_t  watcher;
     ngx_http_markdown_conf_t             conf;
-    ngx_http_request_t                   req;
     ngx_int_t                            rc;
 
     tmpfile = "/tmp/dynconf_test_reload_all.conf";
@@ -1279,15 +1353,16 @@ test_reload_all_keys(void)
 
     memset(&watcher, 0, sizeof(watcher));
     memset(&conf, 0, sizeof(conf));
-    memset(&req, 0, sizeof(req));
-    req.connection = &g_conn;
     set_ngx_str(&watcher.path, tmpfile);
+    watcher.active_snapshot.valid = 1;
 
-    rc = ngx_http_markdown_dynconf_reload(&watcher, &conf, &req);
-    TEST_ASSERT(rc == NGX_OK, "reload all keys returns OK");
+    rc = ngx_http_markdown_dynconf_reload(&watcher, &conf, &g_log);
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_APPLIED,
+                "reload all keys returns APPLIED");
     TEST_ASSERT(conf.enabled == 0, "enabled=off applied");
     TEST_ASSERT(conf.prune_noise == 1, "prune_noise=on applied");
-    TEST_ASSERT(conf.log_verbosity == NGX_LOG_ERR, "log_verbosity=error applied");
+    TEST_ASSERT(conf.log_verbosity == NGX_HTTP_MARKDOWN_LOG_ERROR,
+                "log_verbosity=error applied");
     TEST_ASSERT(conf.streaming_budget == 8 * 1024 * 1024,
                 "streaming_budget=8m applied");
     TEST_ASSERT(conf.memory_budget == 256 * 1024,
@@ -1295,6 +1370,251 @@ test_reload_all_keys(void)
 
     unlink(tmpfile);
     TEST_PASS("reload: all keys in one file");
+}
+
+static void
+test_reload_filter_overrides_complex(void)
+{
+    const char                          *tmpfile;
+    ngx_http_markdown_dynconf_watcher_t  watcher;
+    ngx_http_markdown_conf_t             conf;
+    ngx_int_t                            rc;
+
+    tmpfile = "/tmp/dynconf_test_filter_override_complex.conf";
+    {
+        FILE *f = fopen(tmpfile, "w");
+        TEST_ASSERT(f != NULL, "create temp file for filter override");
+        fprintf(f, "markdown_filter=off\n");
+        fclose(f);
+    }
+
+    memset(&watcher, 0, sizeof(watcher));
+    memset(&conf, 0, sizeof(conf));
+    conf.enabled = 1;
+    conf.enabled_source = NGX_HTTP_MARKDOWN_ENABLED_COMPLEX;
+    conf.enabled_complex = (ngx_http_complex_value_t *) 1;
+    set_ngx_str(&watcher.path, tmpfile);
+    watcher.active_snapshot.valid = 1;
+    watcher.active_snapshot.enabled = 1;
+    watcher.active_snapshot.enabled_source = NGX_HTTP_MARKDOWN_ENABLED_COMPLEX;
+    watcher.active_snapshot.enabled_complex = (ngx_http_complex_value_t *) 1;
+
+    rc = ngx_http_markdown_dynconf_reload(&watcher, &conf, &g_log);
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_APPLIED,
+                "reload file with filter=off returns APPLIED");
+    TEST_ASSERT(conf.enabled == 0, "enabled=off applied");
+    TEST_ASSERT(conf.enabled_source == NGX_HTTP_MARKDOWN_ENABLED_STATIC,
+                "enabled_source overridden to STATIC after reload");
+    TEST_ASSERT(conf.enabled_complex == NULL,
+                "enabled_complex cleared after reload");
+
+    unlink(tmpfile);
+    TEST_PASS("reload: markdown_filter=off overrides complex value");
+}
+
+static void
+test_reload_verbosity_module_enum(void)
+{
+    const char                          *tmpfile;
+    ngx_http_markdown_dynconf_watcher_t  watcher;
+    ngx_http_markdown_conf_t             conf;
+    ngx_int_t                            rc;
+
+    tmpfile = "/tmp/dynconf_test_verbosity_module_enum.conf";
+    {
+        FILE *f = fopen(tmpfile, "w");
+        TEST_ASSERT(f != NULL, "create temp file for verbosity enum test");
+        fprintf(f, "log_verbosity=debug\n");
+        fclose(f);
+    }
+
+    memset(&watcher, 0, sizeof(watcher));
+    memset(&conf, 0, sizeof(conf));
+    set_ngx_str(&watcher.path, tmpfile);
+    watcher.active_snapshot.valid = 1;
+
+    rc = ngx_http_markdown_dynconf_reload(&watcher, &conf, &g_log);
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_APPLIED,
+                "reload verbosity=debug returns APPLIED");
+    TEST_ASSERT(conf.log_verbosity == NGX_HTTP_MARKDOWN_LOG_DEBUG,
+                "log_verbosity is module enum DEBUG (3), not NGX_LOG_DEBUG (4)");
+
+    unlink(tmpfile);
+    TEST_PASS("reload: log_verbosity maps to module enum, not NGX_LOG_*");
+}
+
+static void
+test_reload_invalid_line_rejects_all(void)
+{
+    const char                          *tmpfile;
+    ngx_http_markdown_dynconf_watcher_t  watcher;
+    ngx_http_markdown_conf_t             conf;
+    ngx_int_t                            rc;
+    ngx_uint_t                           orig_version;
+
+    tmpfile = "/tmp/dynconf_test_invalid_line.conf";
+    {
+        FILE *f = fopen(tmpfile, "w");
+        TEST_ASSERT(f != NULL, "create temp file with invalid line");
+        fprintf(f, "markdown_filter=on\n");
+        fprintf(f, "prune_noise=yes\n");
+        fprintf(f, "log_verbosity=warn\n");
+        fclose(f);
+    }
+
+    memset(&watcher, 0, sizeof(watcher));
+    memset(&conf, 0, sizeof(conf));
+    conf.prune_noise = 0;
+    set_ngx_str(&watcher.path, tmpfile);
+    watcher.active_snapshot.valid = 1;
+    watcher.active_snapshot.prune_noise = 0;
+    watcher.version = 0;
+    orig_version = watcher.version;
+
+    rc = ngx_http_markdown_dynconf_reload(&watcher, &conf, &g_log);
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_INVALID_FILE,
+                "reload with invalid line returns INVALID_FILE");
+    TEST_ASSERT(watcher.version == orig_version,
+                "version NOT incremented on invalid file");
+    TEST_ASSERT(conf.prune_noise == 0,
+                "conf unchanged after invalid file (staged commit)");
+
+    unlink(tmpfile);
+    TEST_PASS("reload: invalid line rejects entire file (staged commit)");
+}
+
+static void
+test_snapshot_from_conf_and_apply(void)
+{
+    ngx_http_markdown_conf_t             conf;
+    ngx_http_markdown_dynconf_snapshot_t  snapshot;
+
+    memset(&conf, 0, sizeof(conf));
+    conf.enabled = 1;
+    conf.enabled_source = NGX_HTTP_MARKDOWN_ENABLED_STATIC;
+    conf.prune_noise = 1;
+    conf.log_verbosity = NGX_HTTP_MARKDOWN_LOG_WARN;
+    conf.streaming_budget = 4 * 1024 * 1024;
+    conf.memory_budget = 128 * 1024;
+
+    ngx_http_markdown_dynconf_snapshot_from_conf(&snapshot, &conf);
+    TEST_ASSERT(snapshot.valid == 1, "snapshot marked valid");
+    TEST_ASSERT(snapshot.enabled == 1, "snapshot enabled=1");
+    TEST_ASSERT(snapshot.prune_noise == 1, "snapshot prune_noise=1");
+    TEST_ASSERT(snapshot.log_verbosity == NGX_HTTP_MARKDOWN_LOG_WARN,
+                "snapshot log_verbosity=WARN");
+    TEST_ASSERT(snapshot.streaming_budget == 4 * 1024 * 1024,
+                "snapshot streaming_budget=4MiB");
+    TEST_ASSERT(snapshot.memory_budget == 128 * 1024,
+                "snapshot memory_budget=128KiB");
+
+    memset(&conf, 0, sizeof(conf));
+    ngx_http_markdown_dynconf_apply_snapshot(&conf, &snapshot);
+    TEST_ASSERT(conf.enabled == 1, "apply snapshot: enabled=1");
+    TEST_ASSERT(conf.prune_noise == 1, "apply snapshot: prune_noise=1");
+    TEST_ASSERT(conf.log_verbosity == NGX_HTTP_MARKDOWN_LOG_WARN,
+                "apply snapshot: log_verbosity=WARN");
+    TEST_ASSERT(conf.streaming_budget == 4 * 1024 * 1024,
+                "apply snapshot: streaming_budget=4MiB");
+    TEST_ASSERT(conf.memory_budget == 128 * 1024,
+                "apply snapshot: memory_budget=128KiB");
+
+    TEST_PASS("snapshot: from_conf and apply_snapshot round-trip");
+}
+
+static void
+test_dynconf_start_watcher_already_active(void)
+{
+    ngx_http_markdown_dynconf_watcher_t  watcher;
+    ngx_http_markdown_conf_t             conf;
+    ngx_int_t                            rc;
+    const char                          *path_a = "/tmp/dynconf_start_a.conf";
+    const char                          *path_b = "/tmp/dynconf_start_b.conf";
+    u_char                               path_buf_a[256];
+    u_char                               path_buf_b[256];
+    size_t                               len_a;
+    size_t                               len_b;
+
+    {
+        FILE *f = fopen(path_a, "w");
+        TEST_ASSERT(f != NULL, "create path_a");
+        fclose(f);
+    }
+    {
+        FILE *f = fopen(path_b, "w");
+        TEST_ASSERT(f != NULL, "create path_b");
+        fclose(f);
+    }
+
+    memset(&watcher, 0, sizeof(watcher));
+    memset(&conf, 0, sizeof(conf));
+
+    len_a = strlen(path_a);
+    ngx_memcpy(path_buf_a, path_a, len_a);
+    path_buf_a[len_a] = '\0';
+    watcher.path.data = path_buf_a;
+    watcher.path.len = len_a;
+    watcher.active = 1;
+
+    set_ngx_str(&conf.dynconf_path, path_b);
+
+    rc = ngx_http_markdown_dynconf_start(&watcher, NULL,
+                                          (const ngx_str_t *) &conf.dynconf_path,
+                                          &conf, &g_log);
+    TEST_ASSERT(rc == NGX_OK,
+                "start with already-active watcher returns NGX_OK");
+    TEST_ASSERT(watcher.active == 1,
+                "watcher still active after duplicate start");
+    TEST_ASSERT(watcher.path.len == len_a
+                && ngx_memcmp(watcher.path.data, path_buf_a, len_a) == 0,
+                "watcher path unchanged after duplicate start");
+
+    watcher.active = 0;
+
+    unlink(path_a);
+    unlink(path_b);
+    TEST_PASS("dynconf_start: watcher already active guard");
+}
+
+static void
+test_reload_line_too_long(void)
+{
+    const char                          *tmpfile;
+    ngx_http_markdown_dynconf_watcher_t  watcher;
+    ngx_http_markdown_conf_t             conf;
+    ngx_int_t                            rc;
+    ngx_uint_t                           orig_version;
+
+    tmpfile = "/tmp/dynconf_test_long_line.conf";
+    {
+        FILE *f = fopen(tmpfile, "w");
+        TEST_ASSERT(f != NULL, "create long-line dynconf file");
+        fprintf(f, "markdown_filter=on\n");
+        for (size_t j = 0; j < NGX_HTTP_MARKDOWN_DYNCONF_MAX_LINE + 100; j++) {
+            fputc('x', f);
+        }
+        fputc('\n', f);
+        fclose(f);
+    }
+
+    memset(&watcher, 0, sizeof(watcher));
+    memset(&conf, 0, sizeof(conf));
+    conf.enabled = 1;
+    set_ngx_str(&watcher.path, tmpfile);
+    watcher.active = 1;
+    watcher.version = 7;
+    orig_version = watcher.version;
+
+    rc = ngx_http_markdown_dynconf_reload(&watcher, &conf, &g_log);
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_INVALID_FILE,
+                "reload with too-long line returns INVALID_FILE");
+    TEST_ASSERT(watcher.version == orig_version,
+                "version unchanged after too-long line");
+    TEST_ASSERT(conf.enabled == 1,
+                "conf fields unchanged after too-long line");
+
+    unlink(tmpfile);
+    TEST_PASS("reload: line too long returns INVALID_FILE");
 }
 
 int
@@ -1330,6 +1650,8 @@ main(void)
     test_apply_log_verbosity_info();
     test_apply_log_verbosity_debug();
     test_apply_log_verbosity_invalid();
+    test_apply_filter_on_overrides_complex();
+    test_apply_filter_off_overrides_complex();
     test_apply_streaming_budget();
     test_apply_streaming_budget_invalid();
     test_apply_memory_budget();
@@ -1377,6 +1699,18 @@ main(void)
     test_reload_no_newline_at_eof();
     test_reload_path_too_long();
     test_reload_all_keys();
+    test_reload_filter_overrides_complex();
+    test_reload_verbosity_module_enum();
+    test_reload_invalid_line_rejects_all();
+
+    TEST_SECTION("dynconf_impl: additional reload/start tests");
+
+    test_dynconf_start_watcher_already_active();
+    test_reload_line_too_long();
+
+    TEST_SECTION("dynconf_impl: snapshot tests");
+
+    test_snapshot_from_conf_and_apply();
 
     printf("\nAll dynconf_impl tests passed!\n");
     return 0;
