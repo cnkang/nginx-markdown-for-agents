@@ -20,6 +20,9 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from lib.path_validation import validate_read_path
+
 # ---------------------------------------------------------------------------
 # Default thresholds used when the thresholds config file is missing or a
 # metric/tier/platform entry is absent.
@@ -49,8 +52,9 @@ COMPARABLE_METRICS = [
 # ---------------------------------------------------------------------------
 
 def load_json(path):
-    """Load and return parsed JSON from *path*."""
-    with open(path, "r", encoding="utf-8") as fh:
+    """Load and return parsed JSON from *path* after path validation."""
+    resolved = validate_read_path(path, purpose="threshold engine input")
+    with open(resolved, "r", encoding="utf-8") as fh:
         return json.load(fh)
 
 
@@ -348,8 +352,9 @@ def _write_json(data, path):
     """
     if path is None:
         return
-    Path(path).parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as fh:
+    resolved = Path(path).resolve()
+    resolved.parent.mkdir(parents=True, exist_ok=True)
+    with open(resolved, "w", encoding="utf-8") as fh:
         json.dump(data, fh, indent=2, ensure_ascii=False)
         fh.write("\n")
 
