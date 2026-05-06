@@ -15,6 +15,13 @@
 struct MarkdownOptions;
 
 /*
+ * Forward declaration for dynconf snapshot type.
+ * Full definition is in ngx_http_markdown_dynconf_impl.h.
+ */
+typedef struct ngx_http_markdown_dynconf_snapshot_s
+    ngx_http_markdown_dynconf_snapshot_t;
+
+/*
  * Forward declaration for OTel span type.
  * Full definition is in ngx_http_markdown_otel_impl.h.
  */
@@ -331,6 +338,12 @@ typedef struct {
     
     /* Threshold router path selection (NGX_HTTP_MARKDOWN_PATH_FULLBUFFER or NGX_HTTP_MARKDOWN_PATH_INCREMENTAL) */
     ngx_uint_t                   processing_path;
+
+    /* Pointer to the active dynconf snapshot bound at header_filter time.
+     * This guarantees request-level consistency: body/conversion/logging
+     * read the same snapshot even if a concurrent timer reload swaps the
+     * global active snapshot.  NULL if dynconf is not enabled. */
+    const ngx_http_markdown_dynconf_snapshot_t *dynconf_snapshot;
 
     /*
      * Decompression state.
