@@ -34,8 +34,15 @@ ngx_http_markdown_streaming_body_filter(
 #include "ngx_http_markdown_exports.h"
 
 /* Forward declarations for helpers defined in this file */
+static void ngx_http_markdown_bind_request_snapshot(
+    ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_dynconf_snapshot_t *snap_copy,
+    const ngx_http_markdown_effective_conf_t *early_eff,
+    const ngx_http_markdown_conf_t *conf);
 static ngx_int_t ngx_http_markdown_handle_ctx_alloc_failure(
-    ngx_http_request_t *r, const ngx_http_markdown_conf_t *conf);
+    ngx_http_request_t *r, const ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_effective_conf_t *eff);
 static void ngx_http_markdown_init_ctx(ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx, ngx_flag_t filter_enabled);
 static void ngx_http_markdown_log_failure_decision(
@@ -82,6 +89,55 @@ ngx_http_markdown_log_failure_decision(ngx_http_request_t *r,
     const ngx_http_markdown_conf_t *conf)
 {
     ngx_http_markdown_emit_failure_decision(r, ctx, conf);
+}
+
+
+/*
+ * Bind the function-level snapshot copy and effective conf view into
+ * the request-pool-allocated context.  This eliminates the race window
+ * where the global active_snapshot could be swapped by a concurrent
+ * timer reload between the initial header-phase read and the ctx bind.
+ *
+ * After this call, ctx->dynconf_snapshot holds a pool-owned copy of
+ * snap_copy and ctx->effective_conf holds a pool-owned copy of
+ * early_eff.  If pool allocation fails, the corresponding pointer
+ * remains NULL and effective_conf helpers fall back to live conf
+ * values (degraded mode).
+ *
+ * Parameters:
+ *   r         - NGINX request structure (for pool and logging)
+ *   ctx       - per-request context (already initialised)
+ *   snap_copy - function-level snapshot captured once at header_filter entry
+ *   early_eff - function-level effective view derived from snap_copy
+ *   conf      - module location configuration (for dynconf_enabled check)
+ */
+static void
+ngx_http_markdown_bind_request_snapshot(
+    ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_dynconf_snapshot_t *snap_copy,
+    const ngx_http_markdown_effective_conf_t *early_eff,
+    const ngx_http_markdown_conf_t *conf)
+{
+    ctx->dynconf_snapshot =
+        ngx_pcalloc(r->pool, sizeof(ngx_http_markdown_dynconf_snapshot_t));
+    if (ctx->dynconf_snapshot != NULL) {
+        *ctx->dynconf_snapshot = *snap_copy;
+    } else if (conf->dynconf_enabled) {
+        ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
+                      "markdown filter: failed to allocate dynconf snapshot "
+                      "from request pool; request will use live conf values");
+    }
+
+    ctx->effective_conf =
+        ngx_pcalloc(r->pool, sizeof(ngx_http_markdown_effective_conf_t));
+    if (ctx->effective_conf != NULL) {
+        *ctx->effective_conf = *early_eff;
+    } else if (conf->dynconf_enabled) {
+        ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
+                      "markdown filter: failed to allocate effective conf "
+                      "from request pool; request will use live conf values");
+    }
 }
 
 
@@ -146,12 +202,15 @@ ngx_http_markdown_handle_unsupported_compression(
 /*
  * Handle context allocation failure in header filter.
  *
- * Records metrics, emits decision log, and applies the configured
- * error strategy (fail-closed returns 500, fail-open passes through).
+ * Records metrics, emits decision log with the effective conf view
+ * (or NULL if unavailable), and applies the configured error strategy
+ * (fail-closed returns 500, fail-open passes through).
  *
  * Parameters:
  *   r    - NGINX request structure
  *   conf - module location configuration
+ *   eff  - effective configuration view (may be NULL if allocation
+ *          failed before early_eff was built)
  *
  * Returns:
  *   NGX_HTTP_INTERNAL_SERVER_ERROR on fail-closed
@@ -159,7 +218,8 @@ ngx_http_markdown_handle_unsupported_compression(
  */
 static ngx_int_t
 ngx_http_markdown_handle_ctx_alloc_failure(ngx_http_request_t *r,
-    const ngx_http_markdown_conf_t *conf)
+    const ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_effective_conf_t *eff)
 {
     ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0,
                  "markdown filter: failed to allocate "
@@ -177,7 +237,7 @@ ngx_http_markdown_handle_ctx_alloc_failure(ngx_http_request_t *r,
             "markdown filter: context allocation "
             "failed, rejecting (fail-closed)");
         ngx_http_markdown_log_decision_with_category(
-            r, conf, NULL,
+            r, conf, eff,
             ngx_http_markdown_reason_failed_closed(),
             ngx_http_markdown_reason_from_error_category(
                 NGX_HTTP_MARKDOWN_ERROR_SYSTEM,
@@ -192,7 +252,7 @@ ngx_http_markdown_handle_ctx_alloc_failure(ngx_http_request_t *r,
                  "failed, returning original content "
                  "(fail-open)");
     ngx_http_markdown_log_decision_with_category(
-        r, conf, NULL,
+        r, conf, eff,
         ngx_http_markdown_reason_failed_open(),
         ngx_http_markdown_reason_from_error_category(
             NGX_HTTP_MARKDOWN_ERROR_SYSTEM,
@@ -278,7 +338,8 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
     ngx_http_markdown_eligibility_t  eligibility;
     ngx_flag_t                       filter_enabled;
     ngx_int_t                        should_convert;
-    ngx_http_markdown_effective_conf_t  early_eff;
+    ngx_http_markdown_dynconf_snapshot_t  snap_copy;
+    ngx_http_markdown_effective_conf_t    early_eff;
 
     /* Dynamic config: no file I/O in request path.
      *
@@ -306,19 +367,19 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
      * live conf.  This stack-allocated view is later copied into the
      * request-pool-allocated ctx->effective_conf.
      *
-     * The snapshot copy on the stack guarantees that the enabled decision
-     * is consistent with all subsequent body/conversion/logging reads,
-     * even if a concurrent timer reload swaps the global active_snapshot.
+     * snap_copy and early_eff are function-lifetime variables so they
+     * remain valid through ctx binding below.  The snapshot copy on
+     * the stack guarantees that the enabled decision is consistent
+     * with all subsequent body/conversion/logging reads, even if a
+     * concurrent timer reload swaps the global active_snapshot between
+     * the early read and the ctx bind — we copy snap_copy into ctx,
+     * never re-read the global active_snapshot.
      */
-    {
-        ngx_http_markdown_dynconf_snapshot_t  snap_copy;
+    ngx_memzero(&snap_copy, sizeof(snap_copy));
+    snap_copy = ngx_http_markdown_dynconf_watcher.active_snapshot;
 
-        ngx_memzero(&snap_copy, sizeof(snap_copy));
-        snap_copy = ngx_http_markdown_dynconf_watcher.active_snapshot;
-
-        ngx_memzero(&early_eff, sizeof(early_eff));
-        ngx_http_markdown_build_effective_conf(&early_eff, &snap_copy, conf);
-    }
+    ngx_memzero(&early_eff, sizeof(early_eff));
+    ngx_http_markdown_build_effective_conf(&early_eff, &snap_copy, conf);
 
     /*
      * Resolve markdown_filter once in header phase and cache the result in
@@ -405,54 +466,30 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
     ctx = ngx_pcalloc(r->pool, sizeof(ngx_http_markdown_ctx_t));
     if (ctx == NULL) {
         return ngx_http_markdown_handle_ctx_alloc_failure(
-            r, conf);
+            r, conf, &early_eff);
     }
 
     /* Initialize context */
     ngx_http_markdown_init_ctx(r, ctx, filter_enabled);
 
-    /* Copy the active dynconf snapshot into request pool at header phase.
-     * This guarantees request-level consistency: all subsequent
-     * body/conversion/logging reads go through the effective_conf view
-     * derived from this snapshot, even if a concurrent timer reload
-     * swaps the global active_snapshot.
+    /*
+     * Bind request-lifetime snapshot and effective_conf from the
+     * function-level snap_copy and early_eff.  This eliminates the
+     * race window where the global active_snapshot could be swapped
+     * by a concurrent timer reload between the early read (above)
+     * and a second read here.  We never re-read the global
+     * active_snapshot in this function after the initial copy.
      *
-     * Degraded mode: if pool allocation fails, the snapshot remains NULL
-     * and effective_conf helpers fall back to live conf values.  In this
-     * state, a concurrent dynconf reload may cause mid-request drift.
-     * This is a low-probability degraded mode under extreme memory
-     * pressure — the request still completes but without snapshot
-     * consistency guarantees.  The fallback is logged at NGX_LOG_WARN. */
-    ctx->dynconf_snapshot =
-        ngx_pcalloc(r->pool, sizeof(ngx_http_markdown_dynconf_snapshot_t));
-    if (ctx->dynconf_snapshot != NULL) {
-        *ctx->dynconf_snapshot =
-            ngx_http_markdown_dynconf_watcher.active_snapshot;
-    } else if (conf->dynconf_enabled) {
-        ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-                      "markdown filter: failed to allocate dynconf snapshot "
-                      "from request pool; request will use live conf values");
-    }
-
-    /* Build the effective configuration view for this request.
-     * All mutable-field reads during body/conversion/logging should
-     * go through ctx->effective_conf instead of directly through conf,
-     * so that mid-request dynconf reloads cannot affect in-flight
-     * requests.
-     *
-     * Degraded mode: if pool allocation fails, effective_conf remains
-     * NULL and helpers fall back to live conf.  See snapshot comment
-     * above for degraded-mode implications. */
-    ctx->effective_conf =
-        ngx_pcalloc(r->pool, sizeof(ngx_http_markdown_effective_conf_t));
-    if (ctx->effective_conf != NULL) {
-        ngx_http_markdown_build_effective_conf(
-            ctx->effective_conf, ctx->dynconf_snapshot, conf);
-    } else if (conf->dynconf_enabled) {
-        ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-                      "markdown filter: failed to allocate effective conf "
-                      "from request pool; request will use live conf values");
-    }
+     * Degraded mode: if pool allocation fails, the pointer remains
+     * NULL and effective_conf helpers fall back to live conf values.
+     * In this state, a concurrent dynconf reload may cause
+     * mid-request drift.  This is a low-probability degraded mode
+     * under extreme memory pressure — the request still completes
+     * but without snapshot consistency guarantees.  The fallback
+     * is logged at NGX_LOG_WARN.
+     */
+    ngx_http_markdown_bind_request_snapshot(
+        r, ctx, &snap_copy, &early_eff, conf);
 
     /* Set context for this request */
     r->ctx[ngx_http_markdown_filter_module.ctx_index] = ctx;
