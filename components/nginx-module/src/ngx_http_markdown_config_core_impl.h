@@ -793,21 +793,52 @@ ngx_http_markdown_parse_filter_flag(ngx_str_t *value, ngx_flag_t *enabled)
     return NGX_ERROR;
 }
 
+/**
+ * Resolve the effective markdown_filter on/off state for the current request.
+ *
+ * Uses effective_conf to read enabled/enabled_source, ensuring consistency
+ * with the request-local snapshot.  When eff is NULL (e.g. pool allocation
+ * failure), falls back to live conf values.
+ *
+ * For NGX_HTTP_MARKDOWN_ENABLED_COMPLEX, evaluates the complex variable
+ * at runtime; conf->enabled_complex is not a dynconf-mutable field and
+ * is read directly from conf.
+ *
+ * @param r    The active NGINX request; may be NULL for non-request contexts.
+ * @param conf Module location configuration; must be non-NULL for meaningful results.
+ * @param eff  Request-local effective configuration view; may be NULL to fall back to live conf.
+ * @return 1 if conversion is enabled, 0 otherwise.
+ */
 ngx_flag_t
-ngx_http_markdown_is_enabled(ngx_http_request_t *r, ngx_http_markdown_conf_t *conf)
+ngx_http_markdown_is_enabled(ngx_http_request_t *r,
+    ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_effective_conf_t *eff)
 {
     ngx_str_t    evaluated;
     ngx_flag_t   enabled;
     ngx_int_t    rc;
+    ngx_uint_t   effective_source;
+    ngx_flag_t   effective_enabled;
 
     if (conf == NULL) {
         return 0;
     }
 
-    if (conf->enabled_source != NGX_HTTP_MARKDOWN_ENABLED_COMPLEX
+    /* Read enabled_source and enabled from effective view when available,
+     * falling back to live conf when eff is NULL.  Inline reads here
+     * (rather than calling effective_* helpers) to avoid a dependency
+     * on dynconf_impl.h from config_core_impl.h. */
+    effective_source = (eff != NULL)
+        ? eff->enabled_source
+        : conf->enabled_source;
+
+    if (effective_source != NGX_HTTP_MARKDOWN_ENABLED_COMPLEX
         || conf->enabled_complex == NULL)
     {
-        return conf->enabled;
+        effective_enabled = (eff != NULL)
+            ? eff->enabled
+            : conf->enabled;
+        return effective_enabled;
     }
 
     if (r == NULL) {

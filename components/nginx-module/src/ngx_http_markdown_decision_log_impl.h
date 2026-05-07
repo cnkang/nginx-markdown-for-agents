@@ -42,6 +42,7 @@ static void ngx_http_markdown_log_decision_with_category(
     const ngx_str_t *error_category);
 static void ngx_http_markdown_log_decision_debug(
     ngx_http_request_t *r, const ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_effective_conf_t *eff,
     const ngx_str_t *reason_code, const ngx_str_t *error_category,
     ngx_uint_t log_level, ngx_str_t *method_name,
     ngx_str_t *content_type);
@@ -162,6 +163,7 @@ ngx_http_markdown_is_failure_outcome(const ngx_str_t *reason_code)
  * Parameters:
  *   r              - NGINX request structure
  *   conf           - module location configuration
+ *   eff            - request-local effective configuration view; may be NULL
  *   reason_code    - the reason code string for this decision
  *   error_category - optional FAIL_* sub-classification (NULL if none)
  *   log_level      - NGINX log level (NGX_LOG_WARN or NGX_LOG_INFO)
@@ -170,7 +172,9 @@ ngx_http_markdown_is_failure_outcome(const ngx_str_t *reason_code)
  */
 static void
 ngx_http_markdown_log_decision_debug(ngx_http_request_t *r,
-    const ngx_http_markdown_conf_t *conf, const ngx_str_t *reason_code,
+    const ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_effective_conf_t *eff,
+    const ngx_str_t *reason_code,
     const ngx_str_t *error_category, ngx_uint_t log_level,
     ngx_str_t *method_name, ngx_str_t *content_type)
 {
@@ -186,7 +190,9 @@ ngx_http_markdown_log_decision_debug(ngx_http_request_t *r,
      * header-phase result for dynamic variables.
      *
      * Fall back to evaluating conf->enabled_complex only when no
-     * cached decision exists (ctx is NULL).
+     * cached decision exists (ctx is NULL).  In that case, read
+     * enabled_source and enabled through the effective view to
+     * maintain request-level consistency.
      */
     ctx = ngx_http_get_module_ctx(r,
         ngx_http_markdown_filter_module);
@@ -197,7 +203,7 @@ ngx_http_markdown_log_decision_debug(ngx_http_request_t *r,
         } else {
             ngx_str_set(&filter_value, "off");
         }
-    } else if (conf->enabled_source
+    } else if (ngx_http_markdown_effective_enabled_source(eff, conf)
         == NGX_HTTP_MARKDOWN_ENABLED_COMPLEX
         && conf->enabled_complex != NULL)
     {
@@ -208,7 +214,7 @@ ngx_http_markdown_log_decision_debug(ngx_http_request_t *r,
             ngx_str_set(&filter_value,
                         "$variable(error)");
         }
-    } else if (conf->enabled) {
+    } else if (ngx_http_markdown_effective_enabled(eff, conf)) {
         ngx_str_set(&filter_value, "on");
     } else {
         ngx_str_set(&filter_value, "off");
@@ -353,7 +359,7 @@ ngx_http_markdown_log_decision_with_category(ngx_http_request_t *r,
 
     /* Debug extended format (FR-03.3) — delegated to helper */
     if (effective_verbosity == NGX_HTTP_MARKDOWN_LOG_DEBUG) {
-        ngx_http_markdown_log_decision_debug(r, conf,
+        ngx_http_markdown_log_decision_debug(r, conf, eff,
             reason_code, error_category, log_level,
             &method_name, &content_type);
         return;

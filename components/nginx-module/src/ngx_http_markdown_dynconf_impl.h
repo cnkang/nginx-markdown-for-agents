@@ -7,7 +7,7 @@
  * staging snapshot.  Only if the entire file parses successfully
  * is the active snapshot replaced, guaranteeing atomicity.
  *
- * Architecture (v0.6.1 two-phase model):
+ * Architecture (v0.6.2 effective-conf model):
  *   - Dedicated file watcher per worker process
  *   - Coarse-grained polling (1s interval via ngx_event_t timer)
  *   - On mtime change, the timer handler reads and parses the
@@ -15,15 +15,15 @@
  *     and applies successfully, the staging snapshot atomically
  *     replaces the active snapshot.  On any parse error the
  *     staging is discarded and the active snapshot is preserved.
- *   - The request path NEVER performs file I/O.  It reads only
- *     the active snapshot.  The header_filter binds the active
- *     snapshot pointer into the request context so that the
+ *   - The request path NEVER performs file I/O.  The header_filter
+ *     copies the active snapshot into request-pool memory and
+ *     builds an effective_conf view from that copy, so that the
  *     entire request lifecycle uses a consistent configuration
- *     even if a concurrent reload swaps the active snapshot.
+ *     even if a concurrent reload swaps the global active_snapshot.
  *   - Grace-period drain for in-flight requests is handled by
- *     request-bound snapshot pointers: each request holds a
- *     pointer to the snapshot that was active when it entered
- *     the header filter.
+ *     request-owned snapshot copies: each request holds its own
+ *     copy of the snapshot that was active when it entered the
+ *     header filter.
  *
  * Requirements: v0.6.0 P2-10, v0.6.1 P0-1, P0-2, P1-2
  */
@@ -57,11 +57,23 @@
 static void ngx_http_markdown_dynconf_timer_handler(ngx_event_t *ev);
 
 /*
- * Dynamic configuration snapshot.
+ * Request-local effective configuration view.
  *
- * Contains only the fields that dynconf can modify at runtime.
- * This is the unit of atomicity: a reload either replaces the
- * entire snapshot or leaves it unchanged.
+ * Dynconf-mutable fields that MUST be read through this struct
+ * (via ngx_http_markdown_effective_*() helpers) in all request-path
+ * code (body filter, conversion, logging, budget, streaming):
+ *   - enabled, enabled_source
+ *   - prune_noise
+ *   - log_verbosity
+ *   - memory_budget
+ *   - streaming_budget
+ *
+ * Direct conf-> reads of these fields in request-path code are
+ * violations of AGENTS.md Rule 34 and will be flagged by
+ * tools/harness/detect_live_conf_reads.sh.
+ *
+ * All fields through this struct to guarantee mid-request consistency even
+ * when a concurrent timer reload swaps the global active_snapshot.
  */
 typedef struct ngx_http_markdown_dynconf_snapshot_s {
     ngx_flag_t   enabled;
@@ -84,17 +96,11 @@ typedef struct ngx_http_markdown_dynconf_snapshot_s {
  * or from the live static conf.  Request-lifetime code reads mutable
  * fields through this struct to guarantee mid-request consistency even
  * when a concurrent timer reload swaps the global active_snapshot.
+ *
+ * Struct definition is in ngx_http_markdown_filter_module.h so that
+ * all translation units (including test binaries) can access fields
+ * without depending on this impl header's NGINX API requirements.
  */
-struct ngx_http_markdown_effective_conf_s {
-    ngx_flag_t   enabled;
-    ngx_uint_t   enabled_source;
-    ngx_flag_t   prune_noise;
-    ngx_uint_t   log_verbosity;
-    size_t       memory_budget;
-#ifdef MARKDOWN_STREAMING_ENABLED
-    size_t       streaming_budget;
-#endif
-};
 
 /*
  * Dynamic configuration file watcher and runtime.
@@ -447,14 +453,16 @@ ngx_http_markdown_dynconf_start(ngx_http_markdown_dynconf_watcher_t *watcher,
      * location block), reject this attempt to prevent ambiguous
      * multi-location configurations.  The operator must use the
      * same dynconf_path at the http/server level or ensure only
-     * one location enables dynconf. */
+     * one location enables dynconf.  Returning NGX_ERROR causes
+     * the worker init to fail, making misconfiguration visible
+     * at startup rather than silently ignored at runtime. */
     if (watcher != NULL && watcher->active) {
-        ngx_log_error(NGX_LOG_WARN, log, 0,
+        ngx_log_error(NGX_LOG_ERR, log, 0,
                       "markdown dynconf: watcher already active; "
                       "dynconf supports only a single global instance. "
-                      "Ignoring markdown_dynamic_config_path \"%V\"",
+                      "Rejecting duplicate markdown_dynamic_config_path \"%V\"",
                       path);
-        return NGX_OK;
+        return NGX_ERROR;
     }
 
     if (watcher == NULL || path == NULL || path->len == 0) {
