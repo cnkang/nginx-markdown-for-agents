@@ -919,6 +919,88 @@ Verification:
 - `make test-nginx-unit` after any change touching `components/nginx-module/`
 - `make test-rust` after any change touching `components/rust-converter/`
 
+### 32. Integer overflow in ssize_t→size_t and narrowing conversions (CWE-190)
+Historical issues: Snyk SNYK-CWE-190 (dynconf size parsing overflow).
+
+Required:
+- Every conversion from `ssize_t` or `ngx_int_t` to `size_t` or `ngx_uint_t`
+  must be preceded by an explicit non-negative check.  The pattern
+  `if (parsed < 0) return NGX_ERROR;` must appear before any `(size_t) parsed`
+  assignment.
+- Every narrowing conversion (e.g. `size_t → uInt`, `ngx_uint_t → uint8_t`,
+  `ngx_uint_t → uint32_t`) must be preceded by an explicit upper-bound check
+  against the destination type's maximum value, with an error/clamp path.
+- Size-value parsing via `ngx_parse_size()` must go through
+  `ngx_http_markdown_dynconf_parse_size_safe()` (or an equivalent
+  parse→validate→safe-cast helper).  Direct calls to `ngx_parse_size()` with
+  immediate `(size_t)` cast are forbidden in new code.
+- In Rust, `as usize` casts from `u64` or `i64` must include a runtime bounds
+  check on 32-bit targets or a `#[cfg(target_pointer_width = "64")]` guard.
+  `as u32` / `as u8` narrowing casts must include a bounds check or clamp.
+- Addition of two `size_t` values that will be used for memory allocation or
+  buffer sizing must include an overflow guard:
+  `if (a > (size_t)-1 - b) { /* saturate or error */ }`.
+
+Verification:
+- `tools/harness/detect_cwe190_casts.sh components/nginx-module/src/`
+- `make harness-security-checks`
+- Regression tests for each new size-parsing path
+
+### 33. Path traversal in Python tooling scripts (CWE-22)
+Historical issues: Snyk SNYK-CWE-22 (unvalidated path inputs in CLI tooling).
+
+Required:
+- Every `open(path, ...)` call in `tools/` Python scripts where `path` comes
+  from CLI arguments, function parameters, or environment variables must
+  pass through `validate_read_path()` (from `tools/lib/path_validation.py`)
+  before the `open()` call.  Hard-coded paths within the repo (e.g.
+  `REPO_ROOT / "known-file"`) are exempt.
+- Every write-path construction (`Path(path)`) where `path` comes from CLI
+  arguments must call `.resolve()` before `.mkdir(parents=True)` or `open()`
+  to prevent symlink traversal.
+- `Path(path).parent.mkdir(parents=True)` must use a resolved path:
+  `resolved = Path(path).resolve()` then `resolved.parent.mkdir(...)`.
+- New Python tooling scripts that accept file paths as CLI arguments must
+  import and use `path_validation` helpers.  Scripts that intentionally accept
+  arbitrary paths must document "trusted input only" in their `--help` text.
+- Subprocess calls with path arguments from CLI must use list form (not
+  string interpolation with shell=True) and validate executability.
+
+Verification:
+- `tools/harness/detect_cwe22_paths.py tools/`
+- `make harness-security-checks`
+
+### 34. Request-path code must read dynconf-mutable fields through effective_conf, not live conf
+Historical issues: P0 request-level consistency gap (snapshot bound but not consumed).
+
+Required:
+- In request-path code (body filter, conversion, logging, budget, streaming),
+  dynconf-mutable fields (`enabled`, `enabled_source`, `prune_noise`,
+  `log_verbosity`, `memory_budget`, `streaming_budget`) must be read through
+  `ctx->effective_conf` via the `ngx_http_markdown_effective_*()` helpers,
+  not directly from `conf->`.
+- Direct `conf->` reads of mutable fields are only allowed in:
+  - Configuration/initialization/merge code (`config_core_impl.h`,
+    `config_handlers_impl.h`)
+  - Dynconf snapshot construction/apply helpers (`dynconf_impl.h`)
+  - Fallback paths where `eff` is NULL (early header filter, allocation
+    failure) — these must be documented with a comment explaining why
+    `eff` is unavailable.
+- When adding a new dynconf-mutable field, the following must be updated in
+  the same changeset:
+  1. `ngx_http_markdown_dynconf_snapshot_t` — add the field
+  2. `ngx_http_markdown_effective_conf_t` — add the field
+  3. `ngx_http_markdown_dynconf_snapshot_from_conf()` — copy the field
+  4. `ngx_http_markdown_dynconf_apply_snapshot()` — apply the field
+  5. `ngx_http_markdown_build_effective_conf()` — populate from snapshot or conf
+  6. A new `ngx_http_markdown_effective_<field>()` helper function
+  7. All request-path reads of the field — switch to the helper
+  8. At least one regression test proving snapshot consistency
+
+Verification:
+- `tools/harness/detect_live_conf_reads.sh components/nginx-module/src/`
+- `make harness-security-checks`
+
 ## Required Agent Workflow
 
 ### Before coding
