@@ -118,6 +118,14 @@ static ngx_http_core_loc_conf_t *g_clcf;
 static ngx_int_t g_compile_complex_rc;
 
 /*
+ * Test instance of main configuration for
+ * ngx_http_conf_get_module_main_conf stub.
+ * Must be reset before each test that exercises
+ * ngx_http_markdown_set_dynconf_path.
+ */
+static ngx_http_markdown_main_conf_t g_main_conf;
+
+/*
  * No-op stub for the metrics content handler.
  *
  * Parameters:
@@ -554,6 +562,28 @@ ngx_http_conf_get_module_loc_conf(ngx_conf_t *cf, ngx_module_t module)
     UNUSED(cf);
     UNUSED(module);
     return g_clcf;
+}
+
+/*
+ * Returns the test instance of ngx_http_markdown_main_conf_t,
+ * allowing ngx_http_markdown_set_dynconf_path to read and write
+ * dynconf_path_configured / dynconf_first_path without linking
+ * the full NGINX configuration infrastructure.
+ *
+ * Parameters:
+ *   cf     - configuration context (unused).
+ *   module - module identifier (unused).
+ *
+ * Return: pointer to g_main_conf.
+ *
+ * Side effects: none.
+ */
+static void *
+ngx_http_conf_get_module_main_conf(ngx_conf_t *cf, ngx_module_t module)
+{
+    UNUSED(cf);
+    UNUSED(module);
+    return &g_main_conf;
 }
 
 #include "../../src/ngx_http_markdown_config_handlers_impl.h"
@@ -1347,6 +1377,68 @@ test_markdown_filter_palloc_failure(void)
 }
 
 /*
+ * Verify ngx_http_markdown_set_dynconf_path: normal path,
+ * empty value, duplicate rejection, and NULL conf.
+ *
+ * Semantic contract mirrored: set_dynconf_path sets mcf->dynconf_path,
+ * records the path in main_conf for duplicate detection, and returns
+ * NGX_CONF_ERROR on duplicate or invalid inputs.
+ *
+ * Return: void.
+ *
+ * Side effects: modifies g_main_conf; asserts on mcf and mmcf fields.
+ */
+static void
+test_set_dynconf_path(void)
+{
+    ngx_conf_t                 cf;
+    ngx_array_t                args;
+    ngx_str_t                  values[2];
+    ngx_command_t              cmd;
+    ngx_http_markdown_conf_t   mcf;
+    char                      *rc;
+
+    TEST_SUBSECTION("set_dynconf_path handler");
+
+    memset(&g_main_conf, 0, sizeof(g_main_conf));
+    init_conf(&mcf);
+    setup_cf(&cf, &args, values, 2);
+    set_arg(&cmd.name, "markdown_dynamic_config_path");
+    set_arg(&values[0], "markdown_dynamic_config_path");
+    set_arg(&values[1], "/etc/nginx/dynconf.conf");
+
+    rc = ngx_http_markdown_set_dynconf_path(&cf, &cmd, &mcf);
+    TEST_ASSERT(rc == NGX_CONF_OK, "valid path should parse");
+    TEST_ASSERT(mcf.dynconf_path.len == strlen("/etc/nginx/dynconf.conf"),
+                "dynconf_path stored in loc conf");
+    TEST_ASSERT(g_main_conf.dynconf_path_configured == 1,
+                "main conf marked as configured");
+    TEST_ASSERT(g_main_conf.dynconf_first_path.len > 0,
+                "first path recorded in main conf");
+
+    /* Duplicate should fail */
+    init_conf(&mcf);
+    rc = ngx_http_markdown_set_dynconf_path(&cf, &cmd, &mcf);
+    TEST_ASSERT(rc == NGX_CONF_ERROR,
+                "duplicate path should be rejected");
+
+    /* Empty value should succeed (no-op) */
+    memset(&g_main_conf, 0, sizeof(g_main_conf));
+    init_conf(&mcf);
+    set_arg(&values[1], "");
+    rc = ngx_http_markdown_set_dynconf_path(&cf, &cmd, &mcf);
+    TEST_ASSERT(rc == NGX_CONF_OK,
+                "empty value should return OK (no-op)");
+
+    /* NULL conf should fail */
+    rc = ngx_http_markdown_set_dynconf_path(&cf, &cmd, NULL);
+    TEST_ASSERT(rc == NGX_CONF_ERROR,
+                "NULL conf should return error");
+
+    TEST_PASS("set_dynconf_path branches covered");
+}
+
+/*
  * Entry point: run all config_handlers_impl unit tests.
  *
  * Return: 0 on success (all assertions pass).
@@ -1361,6 +1453,7 @@ main(void)
     printf("========================================\n");
 
     g_compile_complex_rc = NGX_OK;
+    memset(&g_main_conf, 0, sizeof(g_main_conf));
 
     test_arg_equals();
     test_markdown_filter_handler();
@@ -1373,6 +1466,7 @@ main(void)
     test_streaming_engine_handler();
     test_parse_size_edge_cases();
     test_markdown_filter_palloc_failure();
+    test_set_dynconf_path();
 
     printf("\n========================================\n");
     printf("All tests passed!\n");

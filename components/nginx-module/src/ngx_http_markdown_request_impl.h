@@ -137,14 +137,21 @@ ngx_http_markdown_bind_request_snapshot(
      * locations, which is the correct state.
      */
     if (conf->dynconf_enabled) {
-        ctx->dynconf_snapshot =
-            ngx_pcalloc(r->pool, sizeof(ngx_http_markdown_dynconf_snapshot_t));
-        if (ctx->dynconf_snapshot != NULL) {
-            *ctx->dynconf_snapshot = *snap_copy;
-        } else {
+        if (snap_copy == NULL) {
             ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-                          "markdown filter: failed to allocate dynconf snapshot "
-                          "from request pool; request will use live conf values");
+                          "markdown filter: dynconf_enabled is true but "
+                          "snap_copy is NULL; skipping dynconf snapshot binding, "
+                          "request will use live conf values");
+        } else {
+            ctx->dynconf_snapshot =
+                ngx_pcalloc(r->pool, sizeof(ngx_http_markdown_dynconf_snapshot_t));
+            if (ctx->dynconf_snapshot != NULL) {
+                *ctx->dynconf_snapshot = *snap_copy;
+            } else {
+                ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
+                              "markdown filter: failed to allocate dynconf snapshot "
+                              "from request pool; request will use live conf values");
+            }
         }
     }
 

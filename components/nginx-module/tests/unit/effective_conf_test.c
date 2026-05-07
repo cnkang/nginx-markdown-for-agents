@@ -620,6 +620,14 @@ typedef struct {
  * logic.  Kept in sync with ngx_http_markdown_request_impl.h — any change
  * to the production function must be reflected here.
  *
+ * DIVERGENCE RISK: This is a mirror, not a direct call.  If the production
+ * bind_request_snapshot logic changes (e.g. new allocation, different gating
+ * condition), this helper must be updated in the same changeset or the test
+ * will pass while behavior drifts.  The ideal fix is to extract the core
+ * bind/copy logic into a shared helper that both production and test code
+ * can include without pulling in the full NGINX request-path dependency set.
+ * That refactoring is deferred pending a seam in request_impl.h.
+ *
  * This helper exists because the production function is a static inline
  * in request_impl.h, which has NGINX-internal dependencies not available
  * in the unit test compilation environment.
