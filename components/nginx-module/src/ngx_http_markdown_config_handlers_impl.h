@@ -898,29 +898,4 @@ ngx_http_markdown_set_dynconf_path(ngx_conf_t *cf, ngx_command_t *cmd,
     return NGX_CONF_OK;
 }
 
-    /* Let NGINX set the string slot first */
-    value = cf->args->elts;
-
-    if (cf->args->nelts < 2) {
-        return NGX_CONF_ERROR;
-    }
-
-    if (value[1].len == 0) {
-        return NGX_CONF_OK;
-    }
-
-    if (ngx_http_markdown_dynconf_path_configured) {
-        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
-            "markdown_dynamic_config_path: duplicate configuration; "
-            "dynconf supports only a single global instance. "
-            "Place the directive at http/server level or in only one location");
-        return NGX_CONF_ERROR;
-    }
-
-    mcf->dynconf_path = value[1];
-    ngx_http_markdown_dynconf_path_configured = 1;
-
-    return NGX_CONF_OK;
-}
-
 #endif /* NGX_HTTP_MARKDOWN_CONFIG_HANDLERS_IMPL_H */
