@@ -971,7 +971,8 @@ Verification:
 - `make harness-security-checks`
 
 ### 34. Request-path code must read dynconf-mutable fields through effective_conf, not live conf
-Historical issues: P0 request-level consistency gap (snapshot bound but not consumed).
+Historical issues: P0 request-level consistency gap (snapshot bound but not consumed);
+P0 snapshot二次读取竞态 (active_snapshot read twice in header_filter).
 
 Required:
 - In request-path code (body filter, conversion, logging, budget, streaming),
@@ -996,6 +997,38 @@ Required:
   6. A new `ngx_http_markdown_effective_<field>()` helper function
   7. All request-path reads of the field — switch to the helper
   8. At least one regression test proving snapshot consistency
+
+Snapshot race elimination (v0.6.2):
+- In `ngx_http_markdown_header_filter()`, the global
+  `ngx_http_markdown_dynconf_watcher.active_snapshot` must be read exactly
+  once, at function entry, into a function-lifetime `snap_copy` variable.
+  `early_eff` is derived from that `snap_copy` once via
+  `ngx_http_markdown_build_effective_conf()`, also at function entry.
+- Both `snap_copy` and `early_eff` must have function-lifetime scope (not
+  block scope), so they remain valid through ctx binding.
+- When binding the snapshot and effective view into the request context,
+  copy directly from the function-level variables:
+  `*ctx->dynconf_snapshot = snap_copy` and `*ctx->effective_conf = early_eff`.
+  Do NOT re-read `ngx_http_markdown_dynconf_watcher.active_snapshot` or
+  re-invoke `ngx_http_markdown_build_effective_conf()` — either creates a
+  race window where a concurrent timer reload can swap the global snapshot
+  between the initial capture and the ctx bind, causing the request to see
+  inconsistent configuration.
+- The binding must be performed by
+  `ngx_http_markdown_bind_request_snapshot()`, which encapsulates the
+  allocation + copy + degraded-mode logging in one place.
+- `ngx_http_markdown_handle_ctx_alloc_failure()` must accept an `eff`
+  parameter and pass it to `log_decision_with_category()`.  Passing NULL
+  causes the log path to fall back to live conf, violating the effective-conf
+  model.  The caller in `header_filter` passes `&early_eff`.
+
+dynconf_path_configured lifecycle (v0.6.2):
+- The `dynconf_path_configured` flag must live in
+  `ngx_http_markdown_main_conf_t` (config-parse scope), not as a
+  file-scope static variable.  A file-scope static survives across
+  NGINX reloads, leaving stale state that prevents re-configuration.
+- `ngx_http_markdown_set_dynconf_path()` reads and writes the flag through
+  `ngx_http_conf_get_module_main_conf()`, providing per-reload isolation.
 
 Verification:
 - `tools/harness/detect_live_conf_reads.sh components/nginx-module/src/`
@@ -1046,6 +1079,7 @@ For each code change you are about to produce, mentally (or explicitly in a thin
 24. Flag clearing ordering: flags gating operations must be cleared **after** the gated operation succeeds, not before. Pattern: `if (flag) { rc = op(); if (rc == NGX_OK) flag = 0; }`. Doc comments must state the clearing contract. (Rule 29)
 25. NUL-termination of `ngx_str_t`: before passing `ngx_str_t.data` to C APIs requiring NUL-terminated input (`ngx_strcasecmp`, `stat()`, `ngx_file_info()`, `opendir()`, `strstr()`), copy to a stack/pool buffer and append `'\0'`. Prefer length-bounded NGINX APIs (`ngx_strncasecmp`, `ngx_strlchr`) when possible. For directive matching, require exact length equality first. (Rule 30)
 26. Residual code integrity: after merge or >500-line change in a single file, verify compilation, `git diff --check`, function count, and no duplicate adjacent blocks. For >30-line changes, verify the file is not truncated (closing brace present). (Rule 31)
+27. Snapshot race elimination: in `header_filter`, `ngx_http_markdown_dynconf_watcher.active_snapshot` must be read exactly once at function entry into a function-lifetime `snap_copy`; `early_eff` is built from that once. Both variables must have function-lifetime scope. ctx binding must copy from these function-level variables (via `ngx_http_markdown_bind_request_snapshot()`), never re-read the global `active_snapshot` or re-invoke `build_effective_conf()`. `handle_ctx_alloc_failure()` must receive `eff` (not NULL). (Rule 34)
 
 #### C test code (`components/nginx-module/tests/unit/`)
 1. No dead stores — simulation-style tests set the final value directly; initial state documented in comments only. (Rule 16)
@@ -1248,3 +1282,4 @@ remediation:
 | 0.5.5 | 2026-04-24 | Codex | Added recent Git analysis remediation closeout rule |
 | 0.6.0 | 2026-05-02 | Kang | Comment/doc audit: Rust module docs, C function comments, Python docstrings, shell script headers; version 0.6.0 consistency fixes |
 | 0.6.1 | 2026-05-06 | Kang | Rules 27–31: Markdown escaping/injection prevention, full ngx_list_part_t iteration, flag clearing ordering, NUL-termination/EOF boundary, merge residual integrity; output-safety risk pack |
+| 0.6.2 | 2026-05-07 | Kang | Rule 34 update: snapshot race elimination (active_snapshot read-once, bind_request_snapshot helper, handle_ctx_alloc_failure eff param), dynconf_path_configured lifecycle in main_conf_t; harness regression guards for active_snapshot re-read, build_effective_conf re-invocation, handle_ctx_alloc_failure NULL eff |

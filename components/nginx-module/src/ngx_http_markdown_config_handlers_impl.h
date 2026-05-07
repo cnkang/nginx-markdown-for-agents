@@ -830,15 +830,6 @@ ngx_http_markdown_streaming_engine(ngx_conf_t *cf,
 #endif /* MARKDOWN_STREAMING_ENABLED */
 
 
-/*
- * Module-level flag tracking whether a markdown_dynamic_config_path
- * directive has already been set in any configuration context.
- * Used to reject duplicate dynconf path configurations at config
- * parse time (nginx -t), before worker startup.
- */
-static ngx_flag_t  ngx_http_markdown_dynconf_path_configured = 0;
-
-
 /**
  * Custom directive handler for markdown_dynamic_config_path.
  *
@@ -850,6 +841,10 @@ static ngx_flag_t  ngx_http_markdown_dynconf_path_configured = 0;
  * Dynconf supports only a single global instance; the operator must
  * place the directive at http/server level or in only one location.
  *
+ * Duplicate detection reads from ngx_http_markdown_main_conf_t
+ * (config-parse scope) rather than a file-scope static, so the flag
+ * is reset correctly on reload.
+ *
  * @param cf    Configuration context.
  * @param cmd   Directive definition.
  * @param conf  Target configuration struct (ngx_http_markdown_conf_t).
@@ -859,12 +854,49 @@ static char *
 ngx_http_markdown_set_dynconf_path(ngx_conf_t *cf, ngx_command_t *cmd,
     void *conf)
 {
-    ngx_str_t  *value;
-    ngx_http_markdown_conf_t *mcf = conf;
+    ngx_str_t                      *value;
+    ngx_http_markdown_conf_t       *mcf = conf;
+    ngx_http_markdown_main_conf_t  *mmcf;
 
     if (mcf == NULL) {
         return NGX_CONF_ERROR;
     }
+
+    /* Let NGINX set the string slot first */
+    value = cf->args->elts;
+
+    if (cf->args->nelts < 2) {
+        return NGX_CONF_ERROR;
+    }
+
+    if (value[1].len == 0) {
+        return NGX_CONF_OK;
+    }
+
+    mmcf = ngx_http_conf_get_module_main_conf(
+        cf, ngx_http_markdown_filter_module);
+    if (mmcf == NULL) {
+        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+            "markdown_dynamic_config_path: failed to get main conf");
+        return NGX_CONF_ERROR;
+    }
+
+    if (mmcf->dynconf_path_configured) {
+        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+            "markdown_dynamic_config_path: duplicate configuration; "
+            "dynconf supports only a single global instance. "
+            "First path: \"%V\", this path: \"%V\". "
+            "Place the directive at http/server level or in only one location",
+            &mmcf->dynconf_first_path, &value[1]);
+        return NGX_CONF_ERROR;
+    }
+
+    mcf->dynconf_path = value[1];
+    mmcf->dynconf_path_configured = 1;
+    mmcf->dynconf_first_path = value[1];
+
+    return NGX_CONF_OK;
+}
 
     /* Let NGINX set the string slot first */
     value = cf->args->elts;

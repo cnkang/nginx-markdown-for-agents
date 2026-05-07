@@ -161,6 +161,9 @@ ngx_http_markdown_create_main_conf(ngx_conf_t *cf)
 
     conf->metrics_shm_size = NGX_CONF_UNSET_SIZE;
     conf->metrics_shm_zone = NULL;
+    conf->dynconf_path_configured = 0;
+    conf->dynconf_first_path.data = NULL;
+    conf->dynconf_first_path.len = 0;
 
     return conf;
 }
