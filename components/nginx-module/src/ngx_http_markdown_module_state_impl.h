@@ -48,15 +48,23 @@ static u_char ngx_http_markdown_empty_string[] = "";
  * active_snapshot holds the currently effective configuration;
  * staging_snapshot is used during two-phase reload. */
 static ngx_http_markdown_dynconf_watcher_t ngx_http_markdown_dynconf_watcher = {
-    { 0, NULL }, 0, NULL, 0,
+    .path            = { 0, NULL },
+    .last_mtime      = 0,
+    .applied_mtime   = 0,
+    .timer           = NULL,
+    .active          = 0,
+    .active_snapshot = { 0, 0, NULL, 0, 0,
 #ifdef MARKDOWN_STREAMING_ENABLED
-    { 0, 0, NULL, 0, 0, 0, 0, 0 },
-    { 0, 0, NULL, 0, 0, 0, 0, 0 },
-#else
-    { 0, 0, NULL, 0, 0, 0, 0 },
-    { 0, 0, NULL, 0, 0, 0, 0 },
+                         0,
 #endif
-    0, NULL
+                         0, 0 },
+    .staging_snapshot = { 0, 0, NULL, 0, 0,
+#ifdef MARKDOWN_STREAMING_ENABLED
+                          0,
+#endif
+                          0, 0 },
+    .version         = 0,
+    .conf            = NULL
 };
 
 #define NGX_HTTP_MARKDOWN_METRIC_ADD(field, value)                                  \

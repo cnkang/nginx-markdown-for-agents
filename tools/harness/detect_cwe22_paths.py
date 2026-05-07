@@ -10,6 +10,15 @@ Hard-coded paths within the repo (e.g. REPO_ROOT / "known-file") are
 exempt.  Files that have already integrated path_validation are noted
 as OK.
 
+CAVEAT: This script uses heuristic AST/pattern matching, not a full
+taint-flow analysis.  It may produce false positives (flagging safe
+paths that happen to match open() patterns) and false negatives
+(missing traversal risks in dynamic path construction it cannot
+statically resolve).  Findings should be reviewed by a human before
+acting on them.  A clean exit (code 0) does not guarantee the absence
+of CWE-22 vulnerabilities — it only means no heuristic patterns were
+matched.
+
 Usage:
     python3 tools/harness/detect_cwe22_paths.py [directory]
     python3 tools/harness/detect_cwe22_paths.py tools/
