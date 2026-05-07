@@ -296,10 +296,19 @@ typedef struct { /* NOSONAR: c:S1820, module config shape mirrors directive surf
  *
  * Holds process-wide shared state that is initialized once during
  * configuration parsing and then reused by all worker processes.
+ *
+ * dynconf_path_configured and dynconf_first_path track whether a
+ * markdown_dynamic_config_path directive has already been set in
+ * any configuration context, so duplicate detection lives in
+ * config-parse scope (per nginx -t / reload) rather than in a
+ * process-lifetime file-scope static variable that survives across
+ * reloads.
  */
 typedef struct {
     ngx_shm_zone_t *metrics_shm_zone;  /* Shared-memory zone for cross-worker metrics */
     size_t          metrics_shm_size;  /* Configured metrics SHM size (default: 8 pages) */
+    ngx_flag_t      dynconf_path_configured; /* 1 after first markdown_dynamic_config_path directive */
+    ngx_str_t       dynconf_first_path;      /* Path value from the first directive (for diagnostics) */
 } ngx_http_markdown_main_conf_t;
 
 /*

@@ -17,8 +17,8 @@
 #   - config_core_impl.h, config_handlers_impl.h: config init/merge
 #   - config_impl.h: config merge helpers
 #   - exports.h: public API wrappers
-#   - log_decision_debug: known P1 gap (reported as WARNING)
-#   - is_enabled: known P0 gap (reported as ERROR)
+#   - log_decision_debug: fixed in v0.6.2 (reported as ERROR)
+#   - is_enabled: fixed in v0.6.2 (reported as ERROR)
 #
 # Usage: bash tools/harness/detect_live_conf_reads.sh [directory]
 #   directory defaults to components/nginx-module/src
@@ -119,10 +119,10 @@ while IFS= read -r match; do
 
     # Regression guard: log_decision_debug() must read enabled/enabled_source
     # through eff parameter (fixed in v0.6.2).  Any future regression
-    # to direct conf-> reads will be caught here.
+    # to direct conf-> reads is an error, not a warning.
     if echo "$context_lines" | grep -q 'log_decision_debug'; then
-        echo "  WARNING ${file}:${line} — log_decision_debug() regression: reads live conf->: ${content}" >&2
-        warnings=$((warnings + 1))
+        echo "  ERROR   ${file}:${line} — log_decision_debug() regression: reads live conf->: ${content}" >&2
+        errors=$((errors + 1))
         hits=$((hits + 1))
         continue
     fi
@@ -191,6 +191,118 @@ if [ -f "$is_enabled_file" ]; then
     fi
 else
     echo "  WARNING ${is_enabled_file} not found — skipping targeted check" >&2
+    warnings=$((warnings + 1))
+fi
+echo "" >&2
+
+# ── Regression guard: active_snapshot must be read only once in header_filter ──
+# The header_filter must copy active_snapshot into a function-local snap_copy
+# exactly once (at the top), then bind that copy into ctx.  A second read of
+# ngx_http_markdown_dynconf_watcher.active_snapshot after the initial capture
+# creates a race window where a concurrent timer reload can swap the global
+# snapshot between the two reads, causing the request to see inconsistent
+# configuration.
+echo "--- Regression guard: active_snapshot read-once in header_filter ---" >&2
+
+request_impl="${SRC_DIR}/ngx_http_markdown_request_impl.h"
+if [ -f "$request_impl" ]; then
+    # Find the header_filter function body
+    hf_start="$(grep -n 'ngx_http_markdown_header_filter(' "$request_impl" 2>/dev/null \
+        | grep -v 'static' | head -1 | cut -d: -f1)"
+    if [ -z "$hf_start" ]; then
+        hf_start="$(grep -n 'ngx_http_markdown_header_filter(' "$request_impl" 2>/dev/null \
+            | head -1 | cut -d: -f1)"
+    fi
+    if [ -n "$hf_start" ]; then
+        # Find closing brace (next ^} at column 1 after start)
+        hf_end="$(sed -n "$((hf_start + 1)),\$p" "$request_impl" 2>/dev/null \
+            | grep -n '^}' | head -1 | cut -d: -f1)"
+        if [ -n "$hf_end" ]; then
+            hf_end=$((hf_start + hf_end))
+            # Count active_snapshot reads (excluding comments) in the function body
+            snap_reads="$(sed -n "${hf_start},${hf_end}p" "$request_impl" 2>/dev/null \
+                | grep -vE '^\s*/\*|^\s*\*' \
+                | grep -c 'ngx_http_markdown_dynconf_watcher\.active_snapshot' || true)"
+            if [ "$snap_reads" -eq 1 ]; then
+                echo "  OK      single active_snapshot read in header_filter (correct)" >&2
+            elif [ "$snap_reads" -eq 0 ]; then
+                echo "  WARNING no active_snapshot read in header_filter — dynconf may not be initialized" >&2
+                warnings=$((warnings + 1))
+            else
+                echo "  ERROR   ${snap_reads} active_snapshot reads in header_filter — must read exactly once to avoid race window" >&2
+                errors=$((errors + 1))
+            fi
+        else
+            echo "  WARNING could not find end of header_filter — skipping active_snapshot check" >&2
+            warnings=$((warnings + 1))
+        fi
+    else
+        echo "  WARNING header_filter not found — skipping active_snapshot check" >&2
+        warnings=$((warnings + 1))
+    fi
+else
+    echo "  WARNING ${request_impl} not found — skipping active_snapshot check" >&2
+    warnings=$((warnings + 1))
+fi
+echo "" >&2
+
+# ── Regression guard: handle_ctx_alloc_failure must receive eff parameter ──
+# After v0.6.2, handle_ctx_alloc_failure takes an eff parameter to avoid
+# falling back to live conf in log_decision_with_category.  A call passing
+# NULL (or omitting eff) is a regression.
+echo "--- Regression guard: handle_ctx_alloc_failure must receive eff ---" >&2
+
+if [ -f "$request_impl" ]; then
+    # Find calls to handle_ctx_alloc_failure
+    while IFS= read -r call_match; do
+        if [ -z "$call_match" ]; then
+            continue
+        fi
+        call_line="$(echo "$call_match" | cut -d: -f1)"
+        call_content="$(echo "$call_match" | cut -d: -f2-)"
+        # Check if the call passes NULL as the eff argument
+        # Pattern: handle_ctx_alloc_failure(r, conf, NULL) or handle_ctx_alloc_failure(r, conf) (2-arg old form)
+        if echo "$call_content" | grep -qE 'handle_ctx_alloc_failure\([^)]*,\s*NULL\s*\)' \
+            || echo "$call_content" | grep -qE 'handle_ctx_alloc_failure\([^)]*,\s*conf\s*\)$'; then
+            echo "  ERROR   ${request_impl}:${call_line} — handle_ctx_alloc_failure called with NULL/missing eff: ${call_content}" >&2
+            errors=$((errors + 1))
+        else
+            echo "  OK      ${request_impl}:${call_line} — handle_ctx_alloc_failure receives eff: ${call_content}" >&2
+        fi
+    done < <(grep -n 'ngx_http_markdown_handle_ctx_alloc_failure' "$request_impl" 2>/dev/null \
+        | grep -vE '^\s*/\*|^\s*\*|^.*static.*ngx_int_t' || true)
+else
+    echo "  WARNING ${request_impl} not found — skipping handle_ctx_alloc_failure check" >&2
+    warnings=$((warnings + 1))
+fi
+echo "" >&2
+
+# ── Regression guard: effective_conf must be copied from early_eff, not rebuilt ──
+# After v0.6.2, ctx->effective_conf is set by copying early_eff directly
+# (*ctx->effective_conf = early_eff) rather than calling build_effective_conf
+# again (which would re-read the global active_snapshot or the separately-bound
+# snapshot, both of which can drift).  A call to build_effective_conf inside
+# header_filter after the initial build is a regression.
+echo "--- Regression guard: no build_effective_conf re-invocation in header_filter ---" >&2
+
+if [ -f "$request_impl" ]; then
+    if [ -n "$hf_start" ] && [ -n "$hf_end" ]; then
+        # Count build_effective_conf calls in header_filter body
+        # (the initial build at the top is allowed; any after the snap_copy line are not)
+        rebuild_count="$(sed -n "${hf_start},${hf_end}p" "$request_impl" 2>/dev/null \
+            | grep -c 'ngx_http_markdown_build_effective_conf' || true)"
+        if [ "$rebuild_count" -le 1 ]; then
+            echo "  OK      at most 1 build_effective_conf call in header_filter (correct)" >&2
+        else
+            echo "  ERROR   ${rebuild_count} build_effective_conf calls in header_filter — must call at most once to avoid race" >&2
+            errors=$((errors + 1))
+        fi
+    else
+        echo "  WARNING header_filter range not determined — skipping build_effective_conf check" >&2
+        warnings=$((warnings + 1))
+    fi
+else
+    echo "  WARNING ${request_impl} not found — skipping build_effective_conf check" >&2
     warnings=$((warnings + 1))
 fi
 echo "" >&2

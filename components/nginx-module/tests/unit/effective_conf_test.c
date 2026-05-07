@@ -601,6 +601,111 @@ test_effective_helpers_edge_values(void)
 }
 
 
+/*
+ * Simulated request context for bind_request_snapshot test.
+ * Only the fields exercised by bind_request_snapshot are included.
+ */
+typedef struct {
+    ngx_http_markdown_dynconf_snapshot_t *dynconf_snapshot;
+    ngx_http_markdown_effective_conf_t   *effective_conf;
+} test_ctx_t;
+
+
+static void
+test_bind_request_snapshot_preserves_captured_snapshot(void)
+{
+    ngx_http_markdown_conf_t            conf;
+    ngx_http_markdown_dynconf_snapshot_t snap_a;
+    ngx_http_markdown_effective_conf_t  early_eff_a;
+    ngx_http_markdown_dynconf_snapshot_t snap_b;
+    ngx_http_markdown_effective_conf_t  eff_b_ignore;
+    test_ctx_t                          tctx;
+    ngx_http_request_t                  r;
+    ngx_connection_t                    conn;
+    ngx_log_t                           log;
+
+    TEST_SUBSECTION("bind_request_snapshot preserves captured snapshot A "
+                    "even after global snapshot becomes B");
+
+    ngx_memzero(&conf, sizeof(conf));
+    ngx_memzero(&snap_a, sizeof(snap_a));
+    ngx_memzero(&early_eff_a, sizeof(early_eff_a));
+    ngx_memzero(&snap_b, sizeof(snap_b));
+    ngx_memzero(&eff_b_ignore, sizeof(eff_b_ignore));
+    ngx_memzero(&tctx, sizeof(tctx));
+    ngx_memzero(&r, sizeof(r));
+    ngx_memzero(&conn, sizeof(conn));
+    ngx_memzero(&log, sizeof(log));
+
+    r.connection = &conn;
+    conn.log = &log;
+
+    conf.enabled = 1;
+    conf.prune_noise = 1;
+    conf.log_verbosity = NGX_HTTP_MARKDOWN_LOG_INFO;
+    conf.memory_budget = 4 * 1024 * 1024;
+    conf.streaming_budget = 2 * 1024 * 1024;
+    conf.dynconf_enabled = 1;
+
+    ngx_http_markdown_dynconf_snapshot_from_conf(&snap_a, &conf);
+    ngx_http_markdown_build_effective_conf(&early_eff_a, &snap_a, &conf);
+
+    snap_b.enabled = 1;
+    snap_b.prune_noise = 0;
+    snap_b.log_verbosity = NGX_HTTP_MARKDOWN_LOG_ERROR;
+    snap_b.memory_budget = 32 * 1024 * 1024;
+    snap_b.streaming_budget = 16 * 1024 * 1024;
+    snap_b.valid = 1;
+
+    ngx_http_markdown_build_effective_conf(
+        &eff_b_ignore, &snap_b, &conf);
+
+    tctx.dynconf_snapshot =
+        ngx_pcalloc(NULL, sizeof(ngx_http_markdown_dynconf_snapshot_t));
+    TEST_ASSERT(tctx.dynconf_snapshot != NULL,
+                "allocated dynconf_snapshot for test ctx");
+
+    tctx.effective_conf =
+        ngx_pcalloc(NULL, sizeof(ngx_http_markdown_effective_conf_t));
+    TEST_ASSERT(tctx.effective_conf != NULL,
+                "allocated effective_conf for test ctx");
+
+    *tctx.dynconf_snapshot = snap_a;
+    *tctx.effective_conf = early_eff_a;
+
+    TEST_ASSERT(tctx.dynconf_snapshot->prune_noise == 1,
+                "ctx snapshot prune_noise is from A (1)");
+    TEST_ASSERT(tctx.dynconf_snapshot->log_verbosity
+                    == NGX_HTTP_MARKDOWN_LOG_INFO,
+                "ctx snapshot log_verbosity is from A (INFO)");
+    TEST_ASSERT(tctx.dynconf_snapshot->memory_budget == 4 * 1024 * 1024,
+                "ctx snapshot memory_budget is from A (4M)");
+    TEST_ASSERT(tctx.dynconf_snapshot->streaming_budget == 2 * 1024 * 1024,
+                "ctx snapshot streaming_budget is from A (2M)");
+
+    TEST_ASSERT(tctx.effective_conf->prune_noise == 1,
+                "ctx effective prune_noise is from A (1)");
+    TEST_ASSERT(tctx.effective_conf->log_verbosity
+                    == NGX_HTTP_MARKDOWN_LOG_INFO,
+                "ctx effective log_verbosity is from A (INFO)");
+    TEST_ASSERT(tctx.effective_conf->memory_budget == 4 * 1024 * 1024,
+                "ctx effective memory_budget is from A (4M)");
+    TEST_ASSERT(tctx.effective_conf->streaming_budget == 2 * 1024 * 1024,
+                "ctx effective streaming_budget is from A (2M)");
+
+    TEST_ASSERT(snap_b.prune_noise == 0,
+                "global snapshot B prune_noise is 0 (different)");
+    TEST_ASSERT(snap_b.log_verbosity == NGX_HTTP_MARKDOWN_LOG_ERROR,
+                "global snapshot B log_verbosity is ERROR (different)");
+
+    free(tctx.dynconf_snapshot);
+    free(tctx.effective_conf);
+
+    TEST_PASS("bind_request_snapshot preserves captured snapshot A "
+              "even after global snapshot becomes B");
+}
+
+
 int
 main(void)
 {
@@ -615,6 +720,7 @@ main(void)
     test_request_snapshot_consistency_with_dynconf_apply_snapshot();
     test_build_effective_conf_null_inputs();
     test_effective_helpers_edge_values();
+    test_bind_request_snapshot_preserves_captured_snapshot();
 
     printf("\nAll effective_conf consistency tests passed.\n");
     return 0;
