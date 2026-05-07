@@ -52,7 +52,8 @@ def validate_read_path(
     """
     raw = str(path)
 
-    if ".." in raw.split(os.sep):
+    components = raw.replace("\\", "/").split("/")
+    if ".." in components:
         raise ValueError(
             f"Refusing path with '..' traversal component: {raw!r} "
             f"(purpose: {purpose})"
