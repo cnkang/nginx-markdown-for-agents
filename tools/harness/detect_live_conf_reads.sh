@@ -1,0 +1,153 @@
+#!/bin/bash
+#
+# Effective-Config Live Conf Read Detection Script
+#
+# Scans C source files in the request path for direct reads of
+# dynconf-mutable fields (enabled, enabled_source, prune_noise,
+# log_verbosity, memory_budget, streaming_budget) from live conf->
+# instead of through effective_conf helpers.
+#
+# Per AGENTS.md Rule 34, request-path code must read these fields
+# through ctx->effective_conf via ngx_http_markdown_effective_*()
+# helpers, not directly from conf->.
+#
+# Allowed (allowlisted) locations:
+#   - dynconf_impl.h: effective_* fallback, build_effective_conf,
+#     snapshot_from_conf, apply_snapshot
+#   - config_core_impl.h, config_handlers_impl.h: config init/merge
+#   - config_impl.h: config merge helpers
+#   - exports.h: public API wrappers
+#   - log_decision_debug: known P1 gap (reported as WARNING)
+#   - is_enabled: known P0 gap (reported as ERROR)
+#
+# Usage: bash tools/harness/detect_live_conf_reads.sh [directory]
+#   directory defaults to components/nginx-module/src
+#
+# Exit codes:
+#   0 — no findings (or only allowlisted/known patterns)
+#   1 — one or more findings requiring review
+#
+
+set -euo pipefail
+
+readonly SRC_DIR="${1:-components/nginx-module/src}"
+
+# Dynconf-mutable fields that must be read through effective_conf
+# in request-path code.
+readonly MUTABLE_FIELDS="enabled|enabled_source|prune_noise|log_verbosity|memory_budget|streaming_budget"
+readonly MUTABLE_FIELDS_EXACT="^(enabled|enabled_source|prune_noise|log_verbosity|memory_budget|streaming_budget)$"
+
+# Files where direct conf-> reads of mutable fields are allowed
+# (configuration/initialization/snapshot code).
+readonly ALLOWED_FILES=(
+    "ngx_http_markdown_dynconf_impl.h"
+    "ngx_http_markdown_config_core_impl.h"
+    "ngx_http_markdown_config_handlers_impl.h"
+    "ngx_http_markdown_config_impl.h"
+    "ngx_http_markdown_exports.h"
+    "ngx_http_markdown_filter_module.c"
+)
+
+errors=0
+warnings=0
+
+echo "=== Effective-Config Live Conf Read Detection ===" >&2
+echo "Scanning: ${SRC_DIR}" >&2
+echo "Mutable fields: ${MUTABLE_FIELDS}" >&2
+echo "" >&2
+
+# Build allowlist basename pattern for grep exclusion
+readonly ALLOW_PATTERN="$(IFS='|'; echo "${ALLOWED_FILES[*]}")"
+
+# ── Find all conf-><mutable_field> reads ──
+echo "--- Direct conf-><mutable_field> reads ---" >&2
+
+hits=0
+while IFS= read -r match; do
+    if [ -z "$match" ]; then
+        continue
+    fi
+    file="$(echo "$match" | cut -d: -f1)"
+    line="$(echo "$match" | cut -d: -f2)"
+    content="$(echo "$match" | cut -d: -f3-)"
+    basename="$(basename "$file")"
+
+    # Skip allowlisted files
+    for allowed in "${ALLOWED_FILES[@]}"; do
+        if [ "$basename" = "$allowed" ]; then
+            continue 2
+        fi
+    done
+
+    # Skip lines that are inside effective_* helper definitions
+    # (these are the fallback paths when eff is NULL, which is allowed)
+    if echo "$content" | grep -qE 'effective_'; then
+        echo "  OK      ${file}:${line} — inside effective_* helper: ${content}" >&2
+        hits=$((hits + 1))
+        continue
+    fi
+
+    # Skip lines that are comments
+    if echo "$content" | grep -qE '^\s*/\*|^\s*\*|^\s*//'; then
+        continue
+    fi
+
+    # Check for known P0 gap: ngx_http_markdown_is_enabled
+    # Check for known P1 gap: log_decision_debug (reads conf->enabled etc. when ctx is NULL)
+    func_start=$((line - 50))
+    if [ "$func_start" -lt 1 ]; then
+        func_start=1
+    fi
+    context_lines="$(sed -n "${func_start},${line}p" "$file" 2>/dev/null)"
+    if echo "$context_lines" | grep -q 'ngx_http_markdown_is_enabled'; then
+        echo "  ERROR   ${file}:${line} — P0: is_enabled() reads live conf-> (known gap): ${content}" >&2
+        errors=$((errors + 1))
+        hits=$((hits + 1))
+        continue
+    fi
+
+    # Check for known P1 gap: log_decision_debug
+    if echo "$context_lines" | grep -q 'log_decision_debug'; then
+        echo "  WARNING ${file}:${line} — P1: log_decision_debug reads live conf-> (known gap): ${content}" >&2
+        warnings=$((warnings + 1))
+        hits=$((hits + 1))
+        continue
+    fi
+
+    # Check if the line is inside build_effective_conf or snapshot functions
+    # These are legitimate conf-> reads to populate effective/snapshot
+    if sed -n "${func_start},${line}p" "$file" 2>/dev/null | grep -qE 'build_effective_conf|dynconf_snapshot_from_conf|dynconf_apply_snapshot'; then
+        echo "  OK      ${file}:${line} — inside snapshot/builder function: ${content}" >&2
+        hits=$((hits + 1))
+        continue
+    fi
+
+    # All other direct reads are errors
+    echo "  ERROR   ${file}:${line} — request-path reads live conf->: ${content}" >&2
+    errors=$((errors + 1))
+    hits=$((hits + 1))
+done < <(grep -rnE "conf->(enabled|enabled_source|prune_noise|log_verbosity|memory_budget|streaming_budget)[^_a-zA-Z]" "$SRC_DIR" --include='*.c' --include='*.h' 2>/dev/null || true)
+
+if [ "$hits" -eq 0 ]; then
+    echo "  (none found)" >&2
+fi
+echo "" >&2
+
+# ── Summary ──
+echo "=== Summary ===" >&2
+echo "  Errors:   ${errors}" >&2
+echo "  Warnings: ${warnings}" >&2
+echo "" >&2
+
+if [ "$errors" -gt 0 ]; then
+    echo "FAIL: ${errors} error(s) found — fix before merge" >&2
+    exit 1
+fi
+
+if [ "$warnings" -gt 0 ]; then
+    echo "PASS with warnings: ${warnings} warning(s) — review recommended" >&2
+    exit 0
+fi
+
+echo "PASS: no live conf read findings" >&2
+exit 0
