@@ -442,11 +442,13 @@ ngx_http_markdown_dynconf_start(ngx_http_markdown_dynconf_watcher_t *watcher,
     /* Scope guard: dynconf supports only a single global watcher.
      * If the watcher is already active (started by a previous
      * location block), reject this attempt to prevent ambiguous
-     * multi-location configurations.  The operator must use the
-     * same dynconf_path at the http/server level or ensure only
-     * one location enables dynconf.  Returning NGX_ERROR causes
-     * the worker init to fail, making misconfiguration visible
-     * at startup rather than silently ignored at runtime. */
+     * multi-location configurations.
+     *
+     * Primary enforcement is at config-parse time via
+     * ngx_http_markdown_set_dynconf_path(), which returns
+     * NGX_CONF_ERROR on duplicate.  This runtime check is a
+     * defensive fallback in case a code path bypasses the
+     * config handler. */
     if (watcher != NULL && watcher->active) {
         ngx_log_error(NGX_LOG_ERR, log, 0,
                       "markdown dynconf: watcher already active; "
