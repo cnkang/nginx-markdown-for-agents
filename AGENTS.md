@@ -972,7 +972,7 @@ Verification:
 
 ### 34. Request-path code must read dynconf-mutable fields through effective_conf, not live conf
 Historical issues: P0 request-level consistency gap (snapshot bound but not consumed);
-P0 snapshot二次读取竞态 (active_snapshot read twice in header_filter).
+P0 snapshot race (active_snapshot read twice in header_filter).
 
 Required:
 - In request-path code (body filter, conversion, logging, budget, streaming),
@@ -1282,4 +1282,31 @@ remediation:
 | 0.5.5 | 2026-04-24 | Codex | Added recent Git analysis remediation closeout rule |
 | 0.6.0 | 2026-05-02 | Kang | Comment/doc audit: Rust module docs, C function comments, Python docstrings, shell script headers; version 0.6.0 consistency fixes |
 | 0.6.1 | 2026-05-06 | Kang | Rules 27–31: Markdown escaping/injection prevention, full ngx_list_part_t iteration, flag clearing ordering, NUL-termination/EOF boundary, merge residual integrity; output-safety risk pack |
-| 0.6.2 | 2026-05-07 | Kang | Rule 34 update: snapshot race elimination (active_snapshot read-once, bind_request_snapshot helper, handle_ctx_alloc_failure eff param), dynconf_path_configured lifecycle in main_conf_t; harness regression guards for active_snapshot re-read, build_effective_conf re-invocation, handle_ctx_alloc_failure NULL eff |
+### 35. Dynconf snapshot isolation and reload retry contract
+
+Required:
+- When a location has `dynconf_enabled=0`, `header_filter` must pass NULL
+  snapshot to `ngx_http_markdown_build_effective_conf()`, and
+  `ngx_http_markdown_bind_request_snapshot()` must not allocate
+  `ctx->dynconf_snapshot`.  The global snapshot must never influence
+  non-dynconf locations.
+- `ngx_http_markdown_dynconf_watcher_t` must maintain separate
+  `last_mtime` (observed) and `applied_mtime` (confirmed after
+  successful reload).  `applied_mtime` must be updated only after
+  reload returns `RELOAD_APPLIED` or `RELOAD_NO_CHANGE`.
+- When `last_mtime != applied_mtime`, the timer handler must retry
+  the reload on the next poll cycle, regardless of whether
+  `dynconf_check()` detects a new mtime change.
+- Unknown dynconf keys must cause `NGX_ERROR` (atomic reload
+  rejection), not `NGX_DECLINED` (silent ignore).  The entire file
+  is rejected on any unrecognized key.
+- `harness-check-full` must include `harness-security-checks`.
+
+Verification:
+- `tools/harness/detect_live_conf_reads.sh` — checks dynconf_enabled
+  gate on build_effective_conf, applied_mtime guard, and retry logic.
+- `make test-nginx-unit` — effective_conf_test includes
+  test_dynconf_snapshot_not_consumed_when_dynconf_disabled.
+- `make harness-check-full` — now includes harness-security-checks.
+
+| 0.6.2 | 2026-05-07 | Kang | Rule 35: dynconf snapshot isolation (dynconf_enabled gate), reload retry contract (applied_mtime separation), unknown key atomic rejection, harness-check-full includes harness-security-checks |

@@ -307,6 +307,71 @@ else
 fi
 echo "" >&2
 
+# ── Regression guard: build_effective_conf snapshot gated by dynconf_enabled ──
+# After Finding 1 fix, header_filter must pass NULL snapshot to
+# build_effective_conf when dynconf_enabled is false, preventing global
+# snapshot values from leaking into non-dynconf locations.
+# Pattern: build_effective_conf(..., conf->dynconf_enabled ? &snap_copy : NULL, ...)
+echo "--- Regression guard: build_effective_conf snapshot gated by dynconf_enabled ---" >&2
+
+if [ -f "$request_impl" ]; then
+    if [ -n "$hf_start" ] && [ -n "$hf_end" ]; then
+        # Check that build_effective_conf call includes dynconf_enabled guard.
+        # The call may span multiple lines, so extract the entire function
+        # body and search for dynconf_enabled near build_effective_conf.
+        func_body="$(sed -n "${hf_start},${hf_end}p" "$request_impl" 2>/dev/null)"
+        if echo "$func_body" | grep -A3 'ngx_http_markdown_build_effective_conf' | grep -qE 'dynconf_enabled'; then
+            echo "  OK      build_effective_conf call gated by dynconf_enabled" >&2
+        else
+            echo "  ERROR   build_effective_conf not gated by dynconf_enabled — snapshot may leak to non-dynconf locations" >&2
+            errors=$((errors + 1))
+        fi
+    else
+        echo "  WARNING header_filter range not determined — skipping dynconf_enabled gate check" >&2
+        warnings=$((warnings + 1))
+    fi
+else
+    echo "  WARNING ${request_impl} not found — skipping dynconf_enabled gate check" >&2
+    warnings=$((warnings + 1))
+fi
+echo "" >&2
+
+# ── Regression guard: applied_mtime updated only on successful reload ──
+# After Finding 2 fix, timer_handler must update applied_mtime only after
+# a successful reload (RELOAD_APPLIED or RELOAD_NO_CHANGE), not on failure.
+echo "--- Regression guard: applied_mtime updated only on successful reload ---" >&2
+
+dynconf_impl="${SRC_DIR}/ngx_http_markdown_dynconf_impl.h"
+if [ -f "$dynconf_impl" ]; then
+    # Check that timer_handler contains applied_mtime assignment
+    # guarded by success return codes
+    if grep -q 'applied_mtime.*=.*last_mtime' "$dynconf_impl" 2>/dev/null; then
+        # Verify the guard checks for RELOAD_APPLIED or RELOAD_NO_CHANGE
+        if grep -A5 'applied_mtime' "$dynconf_impl" 2>/dev/null \
+            | grep -qE 'RELOAD_APPLIED|RELOAD_NO_CHANGE'; then
+            echo "  OK      applied_mtime assignment guarded by success return codes" >&2
+        else
+            echo "  ERROR   applied_mtime assignment not guarded by success codes — failed reload may confirm mtime" >&2
+            errors=$((errors + 1))
+        fi
+    else
+        echo "  ERROR   no applied_mtime assignment found — reload retry contract not enforced" >&2
+        errors=$((errors + 1))
+    fi
+
+    # Check that timer_handler has retry-on-failed-reload logic
+    if grep -q 'last_mtime.*!=.*applied_mtime' "$dynconf_impl" 2>/dev/null; then
+        echo "  OK      retry-on-failed-reload logic present (last_mtime != applied_mtime)" >&2
+    else
+        echo "  ERROR   no retry-on-failed-reload logic — failed reloads will not be retried" >&2
+        errors=$((errors + 1))
+    fi
+else
+    echo "  WARNING ${dynconf_impl} not found — skipping applied_mtime check" >&2
+    warnings=$((warnings + 1))
+fi
+echo "" >&2
+
 # ── Summary ──
 echo "=== Summary ===" >&2
 echo "  Errors:   ${errors}" >&2

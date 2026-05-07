@@ -180,6 +180,7 @@ harness-check-full:
 	$(MAKE) docs-check-base
 	python3 tools/harness/check_harness_sync.py --full
 	$(MAKE) release-gates-check
+	$(MAKE) harness-security-checks
 
 harness-security-checks:
 	bash tools/harness/detect_cwe190_casts.sh

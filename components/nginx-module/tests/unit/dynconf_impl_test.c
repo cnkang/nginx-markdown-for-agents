@@ -374,7 +374,7 @@ test_parse_line_unknown_key(void)
     u_char line[] = "unknown_key=value";
     rc = ngx_http_markdown_dynconf_parse_line(line, sizeof(line) - 1,
                                               &key, &value, &value_len);
-    TEST_ASSERT(rc == NGX_DECLINED, "unknown key returns DECLINED");
+    TEST_ASSERT(rc == NGX_ERROR, "unknown key returns ERROR (atomic reload rejection)");
     TEST_PASS("parse_line: unknown key");
 }
 
@@ -777,8 +777,8 @@ test_apply_default_key(void)
     u_char val[] = "1";
     rc = ngx_http_markdown_dynconf_apply(&snapshot, 99,
                                          val, 1, &g_log);
-    TEST_ASSERT(rc == NGX_DECLINED, "apply unknown key returns DECLINED");
-    TEST_PASS("apply: unknown key -> DECLINED");
+    TEST_ASSERT(rc == NGX_ERROR, "apply unknown key returns ERROR (atomic rejection)");
+    TEST_PASS("apply: unknown key -> ERROR");
 }
 
 static void
@@ -1767,8 +1767,8 @@ test_dynconf_start_watcher_already_active(void)
     rc = ngx_http_markdown_dynconf_start(&watcher, NULL,
                                           (const ngx_str_t *) &conf.dynconf_path,
                                           &conf, &g_log);
-    TEST_ASSERT(rc == NGX_OK,
-                "start with already-active watcher returns NGX_OK");
+    TEST_ASSERT(rc == NGX_ERROR,
+                "start with already-active watcher returns NGX_ERROR (duplicate rejected)");
     TEST_ASSERT(watcher.active == 1,
                 "watcher still active after duplicate start");
     TEST_ASSERT(watcher.path.len == len_a

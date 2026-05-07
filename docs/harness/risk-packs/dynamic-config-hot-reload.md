@@ -14,6 +14,8 @@ retry state, or worker lifecycle integration changes.
 ## Risks
 
 - Failed reload clears retry state and silently leaves workers stale
+- Global dynconf snapshot leaks into locations with dynconf_enabled=0
+- Unknown config key silently ignored instead of failing atomically
 - Blocking file I/O runs in the worker request path
 - Parser misses the final config line when the file has no trailing newline
 - Size/budget directives use raw integer parsers instead of NGINX size parsers
@@ -33,11 +35,22 @@ retry state, or worker lifecycle integration changes.
   bounds, units, accepted values, and error behavior.
 - `reload_pending` or equivalent retry latches must remain set after failed
   reloads and clear only after a successful apply.
+- `applied_mtime` must be updated only after a successful reload
+  (RELOAD_APPLIED or RELOAD_NO_CHANGE).  When `last_mtime !=
+  applied_mtime`, the timer handler must retry the reload on the next
+  poll cycle.
+- Unknown config keys must cause `NGX_ERROR` (atomic reload rejection)
+  rather than silent `NGX_DECLINED` (ignore).  The entire file is
+  rejected on any unrecognized key.
 - Worker timer setup and cleanup must match NGINX lifecycle ownership rules.
 - File paths used by reload code must be bounded, sanitized, and
   NUL-terminated before file-system APIs receive them.
 - Runtime reload tests must include final-line-without-newline, parse failure,
   retry, and successful apply cases.
+- **dynconf_enabled isolation**: `build_effective_conf` must receive NULL
+  snapshot when `conf->dynconf_enabled` is false.  `bind_request_snapshot`
+  must not allocate `ctx->dynconf_snapshot` for non-dynconf locations.
+  Detection script: `tools/harness/detect_live_conf_reads.sh`.
 - **effective_conf**: request-path code must read dynconf-mutable fields
   (`enabled`, `enabled_source`, `prune_noise`, `log_verbosity`,
   `memory_budget`, `streaming_budget`) through
@@ -76,3 +89,4 @@ integration or E2E target before broader release-quality checks.
 |---------|------|--------|---------|
 | 0.6.0 | 2026-05-03 | Codex | Initial pack from two-week branch scan |
 | 0.6.2 | 2026-05-07 | Kang | Added effective_conf, CWE-190, CWE-22 sync points and harness-security-checks |
+| 0.6.3 | 2026-05-07 | Kang | Added dynconf_enabled isolation, applied_mtime retry contract, unknown-key atomic rejection risks and sync points |
