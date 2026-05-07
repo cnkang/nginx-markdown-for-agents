@@ -481,6 +481,11 @@ ngx_http_markdown_dynconf_timer_handler(ngx_event_t *ev)
  * initializes the active snapshot from the given configuration, and arms the periodic
  * watch timer.
  *
+ * If the dynconf file already exists at startup, its contents are parsed and applied
+ * immediately so that runtime overrides persist across NGINX restart/reload.  If the
+ * initial parse fails, the watcher still starts (using static conf as the baseline)
+ * but applied_mtime is set to 0 so the timer will retry the reload on the next cycle.
+ *
  * @param watcher Pre-allocated watcher structure to initialize (caller-owned storage).
  * @param cycle NGINX cycle used for pool allocations and timer registration.
  * @param path Path to the dynamic configuration file to watch.
@@ -498,6 +503,7 @@ ngx_http_markdown_dynconf_start(ngx_http_markdown_dynconf_watcher_t *watcher,
 {
     ngx_file_info_t  fi;
     u_char           path_buf[NGX_MAX_PATH + 1];
+    ngx_int_t        initial_rc;
 
     /* Scope guard: dynconf supports only a single global watcher.
      * If the watcher is already active (started by a previous
@@ -548,17 +554,11 @@ ngx_http_markdown_dynconf_start(ngx_http_markdown_dynconf_watcher_t *watcher,
                       "will retry on timer",
                       path);
         watcher->last_mtime = 0;
+        watcher->applied_mtime = 0;
     } else {
         watcher->last_mtime = ngx_file_mtime(&fi);
+        watcher->applied_mtime = watcher->last_mtime;
     }
-
-    /*
-     * Initialize applied_mtime to last_mtime so the first timer
-     * cycle does not spuriously retry.  If the initial stat failed
-     * (last_mtime == 0), applied_mtime is also 0 and the first
-     * successful stat will trigger a reload.
-     */
-    watcher->applied_mtime = watcher->last_mtime;
 
     /* Allocate the timer event from the cycle pool. */
     watcher->timer = ngx_pcalloc(cycle->pool, sizeof(ngx_event_t));
@@ -577,6 +577,34 @@ ngx_http_markdown_dynconf_start(ngx_http_markdown_dynconf_watcher_t *watcher,
     /* Initialize active snapshot from current configuration. */
     ngx_http_markdown_dynconf_snapshot_from_conf(&watcher->active_snapshot,
                                                   conf);
+
+    /*
+     * Apply the dynconf file immediately at startup so that runtime
+     * overrides persist across NGINX restart/reload.  If the file
+     * exists and parses successfully, the active snapshot and live
+     * conf are updated before any request arrives.  If the initial
+     * parse fails, the watcher still starts with the static conf
+     * baseline but applied_mtime is set to 0 so the timer will
+     * retry on the next poll cycle.
+     */
+    if (watcher->last_mtime != 0) {
+        initial_rc = ngx_http_markdown_dynconf_reload(watcher, conf, log);
+        if (initial_rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_APPLIED
+            || initial_rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_NO_CHANGE)
+        {
+            watcher->applied_mtime = watcher->last_mtime;
+            ngx_log_error(NGX_LOG_INFO, log, 0,
+                          "markdown dynconf: applied existing file on startup "
+                          "(rc=%i, version=%ui)",
+                          initial_rc, watcher->version);
+        } else {
+            watcher->applied_mtime = 0;
+            ngx_log_error(NGX_LOG_WARN, log, 0,
+                          "markdown dynconf: initial reload of \"%V\" failed "
+                          "(rc=%i); starting from static conf, will retry on timer",
+                          &watcher->path, initial_rc);
+        }
+    }
 
     ngx_add_timer(watcher->timer, NGX_HTTP_MARKDOWN_DYNCONF_WATCH_MS);
 
@@ -869,8 +897,8 @@ ngx_http_markdown_dynconf_parse_size_safe(const u_char *value, size_t value_len,
  *   log       - NGINX log
  *
  * Returns:
- *   NGX_OK on success, NGX_ERROR on invalid value,
- *   NGX_DECLINED for unrecognized key
+ *   NGX_OK on success, NGX_ERROR on invalid value or unrecognized key
+ *   (atomic reload rejection)
  */
 static ngx_int_t
 ngx_http_markdown_dynconf_apply(ngx_http_markdown_dynconf_snapshot_t *snapshot,
