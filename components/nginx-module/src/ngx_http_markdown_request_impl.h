@@ -298,11 +298,32 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
     }
 
     /*
-     * Resolve markdown_filter once in header phase and cache the result in
-     * request context. Body phase must reuse this decision to avoid
-     * header/body inconsistencies for dynamic variables.
+     * Build a request-local effective configuration view early, before
+     * the enabled check, so that is_enabled() reads from the snapshot
+     * rather than live conf.  This stack-allocated view is later copied
+     * into the request-pool-allocated ctx->effective_conf.
+     *
+     * The snapshot copy on the stack guarantees that the enabled decision
+     * is consistent with all subsequent body/conversion/logging reads,
+     * even if a concurrent timer reload swaps the global active_snapshot.
      */
-    filter_enabled = ngx_http_markdown_is_enabled(r, conf);
+    {
+        ngx_http_markdown_dynconf_snapshot_t  snap_copy;
+        ngx_http_markdown_effective_conf_t   early_eff;
+
+        ngx_memzero(&snap_copy, sizeof(snap_copy));
+        snap_copy = ngx_http_markdown_dynconf_watcher.active_snapshot;
+
+        ngx_memzero(&early_eff, sizeof(early_eff));
+        ngx_http_markdown_build_effective_conf(&early_eff, &snap_copy, conf);
+
+        /*
+         * Resolve markdown_filter once in header phase and cache the result in
+         * request context. Body phase must reuse this decision to avoid
+         * header/body inconsistencies for dynamic variables.
+         */
+        filter_enabled = ngx_http_markdown_is_enabled(r, conf, &early_eff);
+    }
     if (!filter_enabled) {
         /* Module disabled, pass through */
         NGX_HTTP_MARKDOWN_METRIC_INC(requests_entered);
@@ -392,7 +413,14 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
      * This guarantees request-level consistency: all subsequent
      * body/conversion/logging reads go through the effective_conf view
      * derived from this snapshot, even if a concurrent timer reload
-     * swaps the global active_snapshot. */
+     * swaps the global active_snapshot.
+     *
+     * Degraded mode: if pool allocation fails, the snapshot remains NULL
+     * and effective_conf helpers fall back to live conf values.  In this
+     * state, a concurrent dynconf reload may cause mid-request drift.
+     * This is a low-probability degraded mode under extreme memory
+     * pressure — the request still completes but without snapshot
+     * consistency guarantees.  The fallback is logged at NGX_LOG_WARN. */
     ctx->dynconf_snapshot =
         ngx_pcalloc(r->pool, sizeof(ngx_http_markdown_dynconf_snapshot_t));
     if (ctx->dynconf_snapshot != NULL) {
@@ -408,7 +436,11 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
      * All mutable-field reads during body/conversion/logging should
      * go through ctx->effective_conf instead of directly through conf,
      * so that mid-request dynconf reloads cannot affect in-flight
-     * requests. */
+     * requests.
+     *
+     * Degraded mode: if pool allocation fails, effective_conf remains
+     * NULL and helpers fall back to live conf.  See snapshot comment
+     * above for degraded-mode implications. */
     ctx->effective_conf =
         ngx_pcalloc(r->pool, sizeof(ngx_http_markdown_effective_conf_t));
     if (ctx->effective_conf != NULL) {
