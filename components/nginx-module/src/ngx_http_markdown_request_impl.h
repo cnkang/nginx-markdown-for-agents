@@ -98,17 +98,26 @@ ngx_http_markdown_log_failure_decision(ngx_http_request_t *r,
  * where the global active_snapshot could be swapped by a concurrent
  * timer reload between the initial header-phase read and the ctx bind.
  *
- * After this call, ctx->dynconf_snapshot holds a pool-owned copy of
- * snap_copy and ctx->effective_conf holds a pool-owned copy of
- * early_eff.  If pool allocation fails, the corresponding pointer
- * remains NULL and effective_conf helpers fall back to live conf
- * values (degraded mode).
+ * After this call:
+ *   - When conf->dynconf_enabled is true: ctx->dynconf_snapshot holds
+ *     a pool-owned copy of snap_copy, and ctx->effective_conf holds a
+ *     pool-owned copy of early_eff (derived from the snapshot).
+ *   - When conf->dynconf_enabled is false: ctx->dynconf_snapshot is
+ *     NULL (no snapshot bound — this location uses static/inherited
+ *     config only), and ctx->effective_conf holds a pool-owned copy
+ *     of early_eff (derived from live conf, since header_filter
+ *     passed NULL snapshot to build_effective_conf for non-dynconf
+ *     locations).
+ *
+ * If pool allocation fails, the corresponding pointer remains NULL
+ * and effective_conf helpers fall back to live conf values (degraded
+ * mode).
  *
  * Parameters:
  *   r         - NGINX request structure (for pool and logging)
  *   ctx       - per-request context (already initialised)
  *   snap_copy - function-level snapshot captured once at header_filter entry
- *   early_eff - function-level effective view derived from snap_copy
+ *   early_eff - function-level effective view derived from snap_copy or live conf
  *   conf      - module location configuration (for dynconf_enabled check)
  */
 static void
@@ -119,21 +128,31 @@ ngx_http_markdown_bind_request_snapshot(
     const ngx_http_markdown_effective_conf_t *early_eff,
     const ngx_http_markdown_conf_t *conf)
 {
-    ctx->dynconf_snapshot =
-        ngx_pcalloc(r->pool, sizeof(ngx_http_markdown_dynconf_snapshot_t));
-    if (ctx->dynconf_snapshot != NULL) {
-        *ctx->dynconf_snapshot = *snap_copy;
-    } else if (conf->dynconf_enabled) {
-        ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-                      "markdown filter: failed to allocate dynconf snapshot "
-                      "from request pool; request will use live conf values");
+    /*
+     * Only bind the dynconf snapshot when this location has
+     * dynconf enabled.  Non-dynconf locations must never hold
+     * a reference to the global snapshot — their configuration
+     * comes exclusively from static/inherited conf values.
+     * ctx->dynconf_snapshot remains NULL for non-dynconf
+     * locations, which is the correct state.
+     */
+    if (conf->dynconf_enabled) {
+        ctx->dynconf_snapshot =
+            ngx_pcalloc(r->pool, sizeof(ngx_http_markdown_dynconf_snapshot_t));
+        if (ctx->dynconf_snapshot != NULL) {
+            *ctx->dynconf_snapshot = *snap_copy;
+        } else {
+            ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
+                          "markdown filter: failed to allocate dynconf snapshot "
+                          "from request pool; request will use live conf values");
+        }
     }
 
     ctx->effective_conf =
         ngx_pcalloc(r->pool, sizeof(ngx_http_markdown_effective_conf_t));
     if (ctx->effective_conf != NULL) {
         *ctx->effective_conf = *early_eff;
-    } else if (conf->dynconf_enabled) {
+    } else {
         ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
                       "markdown filter: failed to allocate effective conf "
                       "from request pool; request will use live conf values");
@@ -375,11 +394,24 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
      * the early read and the ctx bind — we copy snap_copy into ctx,
      * never re-read the global active_snapshot.
      */
-    ngx_memzero(&snap_copy, sizeof(snap_copy));
+     ngx_memzero(&snap_copy, sizeof(snap_copy));
     snap_copy = ngx_http_markdown_dynconf_watcher.active_snapshot;
 
+    /*
+     * Build effective conf from the global snapshot ONLY when
+     * dynconf_enabled is true for this location.  When a location
+     * has markdown_dynamic_config off, it must not consume values
+     * from the global dynconf snapshot — doing so would leak
+     * runtime changes from other locations into this location's
+     * static/inherited configuration.  Passing NULL causes
+     * build_effective_conf to fall back to the live conf, which
+     * is the correct source for non-dynconf locations.
+     */
     ngx_memzero(&early_eff, sizeof(early_eff));
-    ngx_http_markdown_build_effective_conf(&early_eff, &snap_copy, conf);
+    ngx_http_markdown_build_effective_conf(
+        &early_eff,
+        conf->dynconf_enabled ? &snap_copy : NULL,
+        conf);
 
     /*
      * Resolve markdown_filter once in header phase and cache the result in
