@@ -102,23 +102,26 @@ while IFS= read -r match; do
     fi
 
     # Check for regressed P0 gap: ngx_http_markdown_is_enabled
-    # Check for regressed P1 gap: log_decision_debug (reads conf->enabled etc. when ctx is NULL)
-    # These were fixed in v0.6.2; detection remains as regression guard.
+    # Regression guard: is_enabled() must read enabled/enabled_source
+    # through eff parameter (fixed in v0.6.2).  Any future regression
+    # to direct conf-> reads will be caught here.
     func_start=$((line - 50))
     if [ "$func_start" -lt 1 ]; then
         func_start=1
     fi
     context_lines="$(sed -n "${func_start},${line}p" "$file" 2>/dev/null)"
     if echo "$context_lines" | grep -q 'ngx_http_markdown_is_enabled'; then
-        echo "  ERROR   ${file}:${line} — P0: is_enabled() reads live conf-> (known gap): ${content}" >&2
+        echo "  ERROR   ${file}:${line} — is_enabled() regression: reads live conf->: ${content}" >&2
         errors=$((errors + 1))
         hits=$((hits + 1))
         continue
     fi
 
-    # Check for known P1 gap: log_decision_debug
+    # Regression guard: log_decision_debug() must read enabled/enabled_source
+    # through eff parameter (fixed in v0.6.2).  Any future regression
+    # to direct conf-> reads will be caught here.
     if echo "$context_lines" | grep -q 'log_decision_debug'; then
-        echo "  WARNING ${file}:${line} — P1: log_decision_debug reads live conf-> (known gap): ${content}" >&2
+        echo "  WARNING ${file}:${line} — log_decision_debug() regression: reads live conf->: ${content}" >&2
         warnings=$((warnings + 1))
         hits=$((hits + 1))
         continue

@@ -284,12 +284,12 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
      *
      * The timer handler performs two-phase reload (read + parse
      * into staging, then atomic swap of active snapshot) entirely
-     * in the event loop, never on the request path.  The request
-     * path reads only the active snapshot, which is an immutable
-     * pointer for the duration of this request (bound to ctx
-     * below).  A concurrent reload may swap the active snapshot,
-     * but this request continues using its bound snapshot,
-     * guaranteeing request-level consistency.
+     * in the event loop, never on the request path.  The
+     * header_filter copies the active snapshot into request-pool
+     * memory and builds an effective_conf view from that copy.
+     * A concurrent reload may swap the global active_snapshot,
+     * but this request continues using its own copy and derived
+     * effective view, guaranteeing request-level consistency.
      */
 
     /* Get module configuration */
