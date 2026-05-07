@@ -829,4 +829,66 @@ ngx_http_markdown_streaming_engine(ngx_conf_t *cf,
 }
 #endif /* MARKDOWN_STREAMING_ENABLED */
 
+
+/*
+ * Module-level flag tracking whether a markdown_dynamic_config_path
+ * directive has already been set in any configuration context.
+ * Used to reject duplicate dynconf path configurations at config
+ * parse time (nginx -t), before worker startup.
+ */
+static ngx_flag_t  ngx_http_markdown_dynconf_path_configured = 0;
+
+
+/**
+ * Custom directive handler for markdown_dynamic_config_path.
+ *
+ * Sets the dynconf_path field, then checks whether another location
+ * has already configured a path.  If so, returns NGX_CONF_ERROR
+ * to reject the configuration immediately — before nginx -t or
+ * worker startup — preventing ambiguous multi-location dynconf.
+ *
+ * Dynconf supports only a single global instance; the operator must
+ * place the directive at http/server level or in only one location.
+ *
+ * @param cf    Configuration context.
+ * @param cmd   Directive definition.
+ * @param conf  Target configuration struct (ngx_http_markdown_conf_t).
+ * @return NGX_CONF_OK on success, NGX_CONF_ERROR on duplicate.
+ */
+static char *
+ngx_http_markdown_set_dynconf_path(ngx_conf_t *cf, ngx_command_t *cmd,
+    void *conf)
+{
+    ngx_str_t  *value;
+    ngx_http_markdown_conf_t *mcf = conf;
+
+    if (mcf == NULL) {
+        return NGX_CONF_ERROR;
+    }
+
+    /* Let NGINX set the string slot first */
+    value = cf->args->elts;
+
+    if (cf->args->nelts < 2) {
+        return NGX_CONF_ERROR;
+    }
+
+    if (value[1].len == 0) {
+        return NGX_CONF_OK;
+    }
+
+    if (ngx_http_markdown_dynconf_path_configured) {
+        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+            "markdown_dynamic_config_path: duplicate configuration; "
+            "dynconf supports only a single global instance. "
+            "Place the directive at http/server level or in only one location");
+        return NGX_CONF_ERROR;
+    }
+
+    mcf->dynconf_path = value[1];
+    ngx_http_markdown_dynconf_path_configured = 1;
+
+    return NGX_CONF_OK;
+}
+
 #endif /* NGX_HTTP_MARKDOWN_CONFIG_HANDLERS_IMPL_H */
