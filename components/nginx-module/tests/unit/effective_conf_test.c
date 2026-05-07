@@ -75,6 +75,7 @@ struct ngx_connection_s {
 };
 
 struct ngx_http_request_s {
+    ngx_pool_t       *pool;
     ngx_connection_t *connection;
 };
 
@@ -604,11 +605,55 @@ test_effective_helpers_edge_values(void)
 /*
  * Simulated request context for bind_request_snapshot test.
  * Only the fields exercised by bind_request_snapshot are included.
+ * Field order and types must match ngx_http_markdown_ctx_t so that
+ * casting to (ngx_http_markdown_ctx_t*) for bind_request_snapshot
+ * is layout-compatible.
  */
 typedef struct {
     ngx_http_markdown_dynconf_snapshot_t *dynconf_snapshot;
     ngx_http_markdown_effective_conf_t   *effective_conf;
 } test_ctx_t;
+
+
+/*
+ * Test helper that mirrors the production ngx_http_markdown_bind_request_snapshot
+ * logic.  Kept in sync with ngx_http_markdown_request_impl.h — any change
+ * to the production function must be reflected here.
+ *
+ * This helper exists because the production function is a static inline
+ * in request_impl.h, which has NGINX-internal dependencies not available
+ * in the unit test compilation environment.
+ */
+static void
+test_bind_request_snapshot(
+    ngx_http_request_t *r,
+    test_ctx_t *ctx,
+    const ngx_http_markdown_dynconf_snapshot_t *snap_copy,
+    const ngx_http_markdown_effective_conf_t *early_eff,
+    const ngx_http_markdown_conf_t *conf)
+{
+    if (conf->dynconf_enabled) {
+        ctx->dynconf_snapshot =
+            ngx_pcalloc(r->pool, sizeof(ngx_http_markdown_dynconf_snapshot_t));
+        if (ctx->dynconf_snapshot != NULL) {
+            *ctx->dynconf_snapshot = *snap_copy;
+        } else {
+            ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
+                          "markdown filter: failed to allocate dynconf snapshot "
+                          "from request pool; request will use live conf values");
+        }
+    }
+
+    ctx->effective_conf =
+        ngx_pcalloc(r->pool, sizeof(ngx_http_markdown_effective_conf_t));
+    if (ctx->effective_conf != NULL) {
+        *ctx->effective_conf = *early_eff;
+    } else {
+        ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
+                      "markdown filter: failed to allocate effective conf "
+                      "from request pool; request will use live conf values");
+    }
+}
 
 
 static void
@@ -637,6 +682,7 @@ test_bind_request_snapshot_preserves_captured_snapshot(void)
     ngx_memzero(&conn, sizeof(conn));
     ngx_memzero(&log, sizeof(log));
 
+    r.pool = NULL;
     r.connection = &conn;
     conn.log = &log;
 
@@ -660,18 +706,13 @@ test_bind_request_snapshot_preserves_captured_snapshot(void)
     ngx_http_markdown_build_effective_conf(
         &eff_b_ignore, &snap_b, &conf);
 
-    tctx.dynconf_snapshot =
-        ngx_pcalloc(NULL, sizeof(ngx_http_markdown_dynconf_snapshot_t));
+    /* Call bind_request_snapshot with snapshot A (mirrors production code) */
+    test_bind_request_snapshot(&r, &tctx, &snap_a, &early_eff_a, &conf);
+
     TEST_ASSERT(tctx.dynconf_snapshot != NULL,
-                "allocated dynconf_snapshot for test ctx");
-
-    tctx.effective_conf =
-        ngx_pcalloc(NULL, sizeof(ngx_http_markdown_effective_conf_t));
+                "ctx dynconf_snapshot allocated (dynconf_enabled=1)");
     TEST_ASSERT(tctx.effective_conf != NULL,
-                "allocated effective_conf for test ctx");
-
-    *tctx.dynconf_snapshot = snap_a;
-    *tctx.effective_conf = early_eff_a;
+                "ctx effective_conf allocated");
 
     TEST_ASSERT(tctx.dynconf_snapshot->prune_noise == 1,
                 "ctx snapshot prune_noise is from A (1)");
@@ -706,6 +747,87 @@ test_bind_request_snapshot_preserves_captured_snapshot(void)
 }
 
 
+/*
+ * Regression test for Finding 1 (High): dynconf snapshot must NOT leak
+ * into a location that has dynconf_enabled=0.
+ *
+ * Scenario: Global snapshot contains different values from live conf.
+ * A location with dynconf_enabled=0 must only see its own static/inherited
+ * conf values, not the global snapshot values.
+ */
+static void
+test_dynconf_snapshot_not_consumed_when_dynconf_disabled(void)
+{
+    ngx_http_markdown_conf_t            conf;
+    ngx_http_markdown_dynconf_snapshot_t global_snap;
+    ngx_http_markdown_effective_conf_t  early_eff;
+    test_ctx_t                          tctx;
+    ngx_http_request_t                  r;
+    ngx_connection_t                    conn;
+    ngx_log_t                           log;
+
+    TEST_SUBSECTION("dynconf snapshot not consumed when dynconf_enabled=0");
+
+    ngx_memzero(&conf, sizeof(conf));
+    ngx_memzero(&global_snap, sizeof(global_snap));
+    ngx_memzero(&early_eff, sizeof(early_eff));
+    ngx_memzero(&tctx, sizeof(tctx));
+    ngx_memzero(&r, sizeof(r));
+    ngx_memzero(&conn, sizeof(conn));
+    ngx_memzero(&log, sizeof(log));
+
+    r.pool = NULL;
+    r.connection = &conn;
+    conn.log = &log;
+
+    /* Location config: dynconf disabled, different static values */
+    conf.enabled = 1;
+    conf.prune_noise = 0;
+    conf.log_verbosity = NGX_HTTP_MARKDOWN_LOG_ERROR;
+    conf.memory_budget = 1 * 1024 * 1024;
+    conf.streaming_budget = 512 * 1024;
+    conf.dynconf_enabled = 0;
+
+    /* Global snapshot has DIFFERENT values (from another location's reload) */
+    global_snap.enabled = 1;
+    global_snap.prune_noise = 1;
+    global_snap.log_verbosity = NGX_HTTP_MARKDOWN_LOG_DEBUG;
+    global_snap.memory_budget = 32 * 1024 * 1024;
+    global_snap.streaming_budget = 16 * 1024 * 1024;
+    global_snap.valid = 1;
+
+    /*
+     * Build effective conf with NULL snapshot (mirrors header_filter
+     * behavior when dynconf_enabled=0: passes NULL instead of &snap_copy).
+     */
+    ngx_http_markdown_build_effective_conf(&early_eff, NULL, &conf);
+
+    /* Bind: with dynconf_enabled=0, dynconf_snapshot must NOT be allocated */
+    test_bind_request_snapshot(&r, &tctx, &global_snap, &early_eff, &conf);
+
+    TEST_ASSERT(tctx.dynconf_snapshot == NULL,
+                "ctx dynconf_snapshot is NULL when dynconf_enabled=0");
+
+    TEST_ASSERT(tctx.effective_conf != NULL,
+                "ctx effective_conf allocated (always)");
+
+    /* Effective conf must reflect live conf, NOT the global snapshot */
+    TEST_ASSERT(tctx.effective_conf->prune_noise == 0,
+                "effective prune_noise from conf (0), not snapshot (1)");
+    TEST_ASSERT(tctx.effective_conf->log_verbosity
+                    == NGX_HTTP_MARKDOWN_LOG_ERROR,
+                "effective log_verbosity from conf (ERROR), not snapshot (DEBUG)");
+    TEST_ASSERT(tctx.effective_conf->memory_budget == 1 * 1024 * 1024,
+                "effective memory_budget from conf (1M), not snapshot (32M)");
+    TEST_ASSERT(tctx.effective_conf->streaming_budget == 512 * 1024,
+                "effective streaming_budget from conf (512K), not snapshot (16M)");
+
+    free(tctx.effective_conf);
+
+    TEST_PASS("dynconf snapshot not consumed when dynconf_enabled=0");
+}
+
+
 int
 main(void)
 {
@@ -721,6 +843,7 @@ main(void)
     test_build_effective_conf_null_inputs();
     test_effective_helpers_edge_values();
     test_bind_request_snapshot_preserves_captured_snapshot();
+    test_dynconf_snapshot_not_consumed_when_dynconf_disabled();
 
     printf("\nAll effective_conf consistency tests passed.\n");
     return 0;

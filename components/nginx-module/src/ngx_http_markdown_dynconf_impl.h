@@ -99,10 +99,20 @@ typedef struct ngx_http_markdown_dynconf_snapshot_s {
  * Holds the file path, last modification time, a periodic
  * timer event that polls for changes, and the two-phase
  * snapshot state (active + staging).
+ *
+ * last_mtime tracks the most recently observed file mtime
+ * (updated on stat, even if the subsequent reload fails).
+ * applied_mtime tracks the mtime of the last successfully
+ * applied reload.  When last_mtime != applied_mtime, a
+ * reload attempt is needed (either for the first time or
+ * as a retry after a previous failure).  This separation
+ * ensures that a failed reload does not prevent the timer
+ * from retrying on the next poll cycle.
  */
 typedef struct {
     ngx_str_t     path;
     time_t        last_mtime;
+    time_t        applied_mtime;
     ngx_event_t  *timer;
     ngx_uint_t    active;
 
@@ -381,18 +391,35 @@ ngx_http_markdown_dynconf_check(ngx_http_markdown_dynconf_watcher_t *watcher,
  * informational message if a change is observed, and re-arms the watch timer
  * for the next polling interval.
  *
+ * After a file change is detected (dynconf_check returns 1), a two-phase
+ * reload is attempted.  If the reload succeeds (RELOAD_APPLIED or
+ * RELOAD_NO_CHANGE), applied_mtime is updated to last_mtime, confirming
+ * the reload.  If the reload fails (INVALID_FILE or IO_ERROR),
+ * applied_mtime is NOT updated, so the next timer cycle will see
+ * last_mtime != applied_mtime and retry the reload — matching the
+ * failure-retry contract described in
+ * docs/harness/risk-packs/dynamic-config-hot-reload.md.
+ *
+ * Additionally, even when no new file change is detected (dynconf_check
+ * returns 0), if last_mtime != applied_mtime (indicating a previous
+ * failed reload), a retry is attempted.  This covers the case where
+ * the file content was invalid but the mtime has not changed since.
+ *
  * @param ev Timer event whose `data` field points to the watcher; may be NULL.
  */
 static void
 ngx_http_markdown_dynconf_timer_handler(ngx_event_t *ev)
 {
     ngx_http_markdown_dynconf_watcher_t  *watcher;
+    ngx_int_t                            reload_rc;
 
     watcher = ev->data;
 
     if (watcher == NULL || !watcher->active) {
         return;
     }
+
+    reload_rc = NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_NO_CHANGE;
 
     if (ngx_http_markdown_dynconf_check(watcher, ev->log)) {
         ngx_log_error(NGX_LOG_INFO, ev->log, 0,
@@ -401,9 +428,42 @@ ngx_http_markdown_dynconf_timer_handler(ngx_event_t *ev)
                       &watcher->path);
 
         if (watcher->conf != NULL) {
-            ngx_http_markdown_dynconf_reload(watcher, watcher->conf,
-                                             ev->log);
+            reload_rc = ngx_http_markdown_dynconf_reload(watcher,
+                                                          watcher->conf,
+                                                          ev->log);
         }
+    } else if (watcher->last_mtime != watcher->applied_mtime) {
+        /*
+         * No new mtime change detected, but a previous reload failed
+         * (last_mtime advanced but applied_mtime did not).  Retry the
+         * reload so that transient errors (e.g. briefly invalid file
+         * content) are eventually resolved without operator intervention.
+         */
+        ngx_log_error(NGX_LOG_INFO, ev->log, 0,
+                      "markdown dynconf: retrying failed reload on \"%V\" "
+                      "(last_mtime=%T, applied_mtime=%T)",
+                      &watcher->path,
+                      watcher->last_mtime, watcher->applied_mtime);
+
+        if (watcher->conf != NULL) {
+            reload_rc = ngx_http_markdown_dynconf_reload(watcher,
+                                                          watcher->conf,
+                                                          ev->log);
+        }
+    }
+
+    /*
+     * Update applied_mtime only after a successful reload.
+     * RELOAD_APPLIED: new settings committed.
+     * RELOAD_NO_CHANGE: file parsed successfully but contained no
+     *   effective keys — still a successful parse, so confirm.
+     * INVALID_FILE / IO_ERROR: reload failed; applied_mtime stays
+     *   at its previous value so the next timer cycle will retry.
+     */
+    if (reload_rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_APPLIED
+        || reload_rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_NO_CHANGE)
+    {
+        watcher->applied_mtime = watcher->last_mtime;
     }
 
     /* Re-arm the timer for the next poll cycle. */
@@ -492,6 +552,14 @@ ngx_http_markdown_dynconf_start(ngx_http_markdown_dynconf_watcher_t *watcher,
         watcher->last_mtime = ngx_file_mtime(&fi);
     }
 
+    /*
+     * Initialize applied_mtime to last_mtime so the first timer
+     * cycle does not spuriously retry.  If the initial stat failed
+     * (last_mtime == 0), applied_mtime is also 0 and the first
+     * successful stat will trigger a reload.
+     */
+    watcher->applied_mtime = watcher->last_mtime;
+
     /* Allocate the timer event from the cycle pool. */
     watcher->timer = ngx_pcalloc(cycle->pool, sizeof(ngx_event_t));
     if (watcher->timer == NULL) {
@@ -578,7 +646,7 @@ ngx_http_markdown_dynconf_stop(ngx_http_markdown_dynconf_watcher_t *watcher,
  *   key - [out] matched key enum value
  *
  * Returns:
- *   NGX_OK on match, NGX_DECLINED if unrecognized
+ *   NGX_OK on match, NGX_ERROR if unrecognized
  */
 static ngx_int_t
 ngx_http_markdown_dynconf_match_key(u_char *p, const u_char *eq,
@@ -604,7 +672,7 @@ ngx_http_markdown_dynconf_match_key(u_char *p, const u_char *eq,
     } else if (len == 13 && ngx_strncasecmp(p, memory_budget_key, 13) == 0) {
         *key = NGX_HTTP_MARKDOWN_DYNCONF_KEY_MEMORY_BUDGET;
     } else {
-        return NGX_DECLINED;
+        return NGX_ERROR;
     }
 
     return NGX_OK;
@@ -631,7 +699,7 @@ ngx_http_markdown_dynconf_match_key(u_char *p, const u_char *eq,
  *
  * Returns:
  *   NGX_OK on successful parse, NGX_DECLINED if comment/blank,
- *   NGX_ERROR on parse error
+ *   NGX_ERROR on parse error or unrecognized key
  */
 static ngx_int_t
 ngx_http_markdown_dynconf_parse_line(u_char *line, size_t line_len,
@@ -667,7 +735,7 @@ ngx_http_markdown_dynconf_parse_line(u_char *line, size_t line_len,
 
     /* Match key. */
     if (ngx_http_markdown_dynconf_match_key(p, eq, key) != NGX_OK) {
-        return NGX_DECLINED;
+        return NGX_ERROR;
     }
 
     /* Skip to '=' sign. */
@@ -920,9 +988,11 @@ ngx_http_markdown_dynconf_apply(ngx_http_markdown_dynconf_snapshot_t *snapshot,
         }
         break;
 
-    /* Unrecognized key — caller decides how to handle. */
+    /* Unrecognized key — should not reach here because match_key
+     * rejects unknown keys before apply is called.  Return error
+     * as a defensive fallback. */
     default:
-        return NGX_DECLINED;
+        return NGX_ERROR;
     }
 
     return NGX_OK;
@@ -992,10 +1062,6 @@ ngx_http_markdown_dynconf_try_line(ngx_http_markdown_dynconf_snapshot_t *snapsho
                                                 value_len, log);
     if (apply_rc == NGX_OK) {
         (*applied)++;
-        return NGX_OK;
-    }
-
-    if (apply_rc == NGX_DECLINED) {
         return NGX_OK;
     }
 
