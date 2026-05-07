@@ -57,23 +57,14 @@
 static void ngx_http_markdown_dynconf_timer_handler(ngx_event_t *ev);
 
 /*
- * Request-local effective configuration view.
+ * Dynconf snapshot — a point-in-time copy of all runtime-modifiable
+ * configuration fields.  Captured once per request at header_filter
+ * time and stored in ctx->dynconf_snapshot.  The effective_conf view
+ * is derived from this snapshot (or live conf as fallback).
  *
- * Dynconf-mutable fields that MUST be read through this struct
- * (via ngx_http_markdown_effective_*() helpers) in all request-path
- * code (body filter, conversion, logging, budget, streaming):
- *   - enabled, enabled_source
- *   - prune_noise
- *   - log_verbosity
- *   - memory_budget
- *   - streaming_budget
- *
- * Direct conf-> reads of these fields in request-path code are
- * violations of AGENTS.md Rule 34 and will be flagged by
- * tools/harness/detect_live_conf_reads.sh.
- *
- * All fields through this struct to guarantee mid-request consistency even
- * when a concurrent timer reload swaps the global active_snapshot.
+ * The snapshot guarantees that a request sees a consistent set of
+ * values even if a concurrent timer reload swaps the global
+ * active_snapshot mid-request.
  */
 typedef struct ngx_http_markdown_dynconf_snapshot_s {
     ngx_flag_t   enabled;

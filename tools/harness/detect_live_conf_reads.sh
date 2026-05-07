@@ -39,6 +39,15 @@ readonly MUTABLE_FIELDS_EXACT="^(enabled|enabled_source|prune_noise|log_verbosit
 
 # Files where direct conf-> reads of mutable fields are allowed
 # (configuration/initialization/snapshot code).
+#
+# config_core_impl.h: The entire file is allowlisted because it
+# contains configuration init (create_conf), merge (merge_conf and
+# sub-helpers), and diagnostic functions (log_merged_conf) that
+# legitimately read/write live conf.  The request-path function
+# is_enabled() is handled separately below via the P0 regression
+# guard (it now accepts an eff parameter and reads through effective
+# view; any future regression to direct conf-> reads will be caught
+# by the is_enabled-specific check below).
 readonly ALLOWED_FILES=(
     "ngx_http_markdown_dynconf_impl.h"
     "ngx_http_markdown_config_core_impl.h"
@@ -131,6 +140,55 @@ done < <(grep -rnE "conf->(enabled|enabled_source|prune_noise|log_verbosity|memo
 
 if [ "$hits" -eq 0 ]; then
     echo "  (none found)" >&2
+fi
+echo "" >&2
+
+# ── Targeted regression guard for is_enabled() ──
+# Even though config_core_impl.h is file-allowlisted above (because
+# its init/merge/diag functions legitimately read live conf), we
+# specifically check is_enabled() for regressions: it must read
+# enabled/enabled_source through the eff parameter, not directly
+# from conf->.
+echo "--- Regression guard: is_enabled() must use effective view ---" >&2
+
+is_enabled_file="${SRC_DIR}/ngx_http_markdown_config_core_impl.h"
+if [ -f "$is_enabled_file" ]; then
+    # Find the function body range of ngx_http_markdown_is_enabled
+    is_enabled_start="$(grep -n '^ngx_http_markdown_is_enabled(' "$is_enabled_file" 2>/dev/null | head -1 | cut -d: -f1)"
+    if [ -n "$is_enabled_start" ]; then
+        # Find the closing brace (simple heuristic: next ^} after function start)
+        is_enabled_end="$(sed -n "$((is_enabled_start + 1)),\$p" "$is_enabled_file" 2>/dev/null \
+            | grep -n '^}' | head -1 | cut -d: -f1)"
+        if [ -n "$is_enabled_end" ]; then
+            is_enabled_end=$((is_enabled_start + is_enabled_end))
+            # Check for direct conf->enabled or conf->enabled_source reads
+            # (excluding the ternary fallback pattern "eff != NULL ? eff->... : conf->...")
+            while IFS= read -r match; do
+                if [ -z "$match" ]; then
+                    continue
+                fi
+                iline="$(echo "$match" | cut -d: -f1)"
+                icontent="$(echo "$match" | cut -d: -f2-)"
+                # Allow the ternary fallback pattern ": conf->..."
+                if echo "$icontent" | grep -qE '^\s*:\s*conf->'; then
+                    echo "  OK      ${is_enabled_file}:${iline} — ternary fallback in eff check: ${icontent}" >&2
+                    continue
+                fi
+                echo "  ERROR   ${is_enabled_file}:${iline} — is_enabled() regression: direct conf-> read: ${icontent}" >&2
+                errors=$((errors + 1))
+            done < <(sed -n "${is_enabled_start},${is_enabled_end}p" "$is_enabled_file" 2>/dev/null \
+                | grep -nE 'conf->(enabled|enabled_source)[^_a-zA-Z]' || true)
+        else
+            echo "  WARNING could not find end of is_enabled() — skipping targeted check" >&2
+            warnings=$((warnings + 1))
+        fi
+    else
+        echo "  WARNING is_enabled() not found — skipping targeted check" >&2
+        warnings=$((warnings + 1))
+    fi
+else
+    echo "  WARNING ${is_enabled_file} not found — skipping targeted check" >&2
+    warnings=$((warnings + 1))
 fi
 echo "" >&2
 

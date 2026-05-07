@@ -313,7 +313,8 @@ ngx_http_markdown_streaming_cleanup(void *data);
 static ngx_uint_t
 ngx_http_markdown_select_processing_path(
     ngx_http_request_t *r,
-    ngx_http_markdown_conf_t *conf);
+    ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_effective_conf_t *eff);
 
 /*
  * Update response headers at the streaming commit boundary.
@@ -540,7 +541,8 @@ ngx_http_markdown_log_conditional_streaming(
 static ngx_uint_t
 ngx_http_markdown_select_processing_path(
     ngx_http_request_t *r,
-    ngx_http_markdown_conf_t *conf)
+    ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_effective_conf_t *eff)
 {
     ngx_str_t    val;
     ngx_uint_t   engine_mode;
@@ -651,7 +653,7 @@ common_checks:
                (u_char *) "text/event-stream",
                17) == 0)
     {
-        ngx_http_markdown_log_decision(r, conf, NULL,
+        ngx_http_markdown_log_decision(r, conf, eff,
             ngx_http_markdown_reason_streaming_skip_unsupported());
         return NGX_HTTP_MARKDOWN_PATH_FULLBUFFER;
     }
@@ -660,7 +662,7 @@ common_checks:
     if (ngx_http_markdown_is_excluded_stream_type(
             r, conf))
     {
-        ngx_http_markdown_log_decision(r, conf, NULL,
+        ngx_http_markdown_log_decision(r, conf, eff,
             ngx_http_markdown_reason_streaming_skip_unsupported());
         return NGX_HTTP_MARKDOWN_PATH_FULLBUFFER;
     }
@@ -678,13 +680,13 @@ common_checks:
            < conf->streaming_auto_threshold)
     {
         /* CL < auto_threshold: use full-buffer */
-        ngx_http_markdown_log_decision(r, conf, NULL,
+        ngx_http_markdown_log_decision(r, conf, eff,
             ngx_http_markdown_reason_eligible_fullbuffer_auto());
         return NGX_HTTP_MARKDOWN_PATH_FULLBUFFER;
     }
 
     /* auto + CL >= auto_threshold or chunked (no CL) */
-    ngx_http_markdown_log_decision(r, conf, NULL,
+    ngx_http_markdown_log_decision(r, conf, eff,
         ngx_http_markdown_reason_eligible_streaming_auto());
     return NGX_HTTP_MARKDOWN_PATH_STREAMING;
 }
