@@ -92,8 +92,9 @@ while IFS= read -r match; do
         continue
     fi
 
-    # Check for known P0 gap: ngx_http_markdown_is_enabled
-    # Check for known P1 gap: log_decision_debug (reads conf->enabled etc. when ctx is NULL)
+    # Check for regressed P0 gap: ngx_http_markdown_is_enabled
+    # Check for regressed P1 gap: log_decision_debug (reads conf->enabled etc. when ctx is NULL)
+    # These were fixed in v0.6.2; detection remains as regression guard.
     func_start=$((line - 50))
     if [ "$func_start" -lt 1 ]; then
         func_start=1

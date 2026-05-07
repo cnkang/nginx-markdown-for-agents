@@ -31,8 +31,30 @@ typedef struct ngx_http_markdown_dynconf_snapshot_s
  * a mid-request dynconf reload cannot change behaviour for in-flight
  * requests.
  *
- * Full definition is in ngx_http_markdown_dynconf_impl.h.
+ * Dynconf-mutable fields that MUST be read through this struct
+ * (via ngx_http_markdown_effective_*() helpers) in all request-path
+ * code (body filter, conversion, logging, budget, streaming):
+ *   - enabled, enabled_source
+ *   - prune_noise
+ *   - log_verbosity
+ *   - memory_budget
+ *   - streaming_budget
+ *
+ * Direct conf-> reads of these fields in request-path code are
+ * violations of AGENTS.md Rule 34 and will be flagged by
+ * tools/harness/detect_live_conf_reads.sh.
  */
+struct ngx_http_markdown_effective_conf_s {
+    ngx_flag_t   enabled;
+    ngx_uint_t   enabled_source;
+    ngx_flag_t   prune_noise;
+    ngx_uint_t   log_verbosity;
+    size_t       memory_budget;
+#ifdef MARKDOWN_STREAMING_ENABLED
+    size_t       streaming_budget;
+#endif
+};
+
 typedef struct ngx_http_markdown_effective_conf_s
     ngx_http_markdown_effective_conf_t;
 
@@ -715,7 +737,8 @@ ngx_int_t ngx_http_markdown_should_convert(ngx_http_request_t *r,
 
 /* Resolve markdown_filter on/off state for the current request */
 ngx_flag_t ngx_http_markdown_is_enabled(ngx_http_request_t *r,
-    ngx_http_markdown_conf_t *conf);
+    ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_effective_conf_t *eff);
 
 /*
  * Response buffer functions
