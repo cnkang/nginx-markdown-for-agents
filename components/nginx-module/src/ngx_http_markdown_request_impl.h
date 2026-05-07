@@ -22,7 +22,8 @@
 static ngx_uint_t
 ngx_http_markdown_select_processing_path(
     ngx_http_request_t *r,
-    ngx_http_markdown_conf_t *conf);
+    ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_effective_conf_t *eff);
 static ngx_int_t
 ngx_http_markdown_streaming_body_filter(
     ngx_http_request_t *r, ngx_chain_t *in);
@@ -277,6 +278,7 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
     ngx_http_markdown_eligibility_t  eligibility;
     ngx_flag_t                       filter_enabled;
     ngx_int_t                        should_convert;
+    ngx_http_markdown_effective_conf_t  early_eff;
 
     /* Dynamic config: no file I/O in request path.
      *
@@ -299,9 +301,10 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
 
     /*
      * Build a request-local effective configuration view early, before
-     * the enabled check, so that is_enabled() reads from the snapshot
-     * rather than live conf.  This stack-allocated view is later copied
-     * into the request-pool-allocated ctx->effective_conf.
+     * the enabled check, so that is_enabled() and all subsequent
+     * header-phase decision logs read from the snapshot rather than
+     * live conf.  This stack-allocated view is later copied into the
+     * request-pool-allocated ctx->effective_conf.
      *
      * The snapshot copy on the stack guarantees that the enabled decision
      * is consistent with all subsequent body/conversion/logging reads,
@@ -309,28 +312,27 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
      */
     {
         ngx_http_markdown_dynconf_snapshot_t  snap_copy;
-        ngx_http_markdown_effective_conf_t   early_eff;
 
         ngx_memzero(&snap_copy, sizeof(snap_copy));
         snap_copy = ngx_http_markdown_dynconf_watcher.active_snapshot;
 
         ngx_memzero(&early_eff, sizeof(early_eff));
         ngx_http_markdown_build_effective_conf(&early_eff, &snap_copy, conf);
-
-        /*
-         * Resolve markdown_filter once in header phase and cache the result in
-         * request context. Body phase must reuse this decision to avoid
-         * header/body inconsistencies for dynamic variables.
-         */
-        filter_enabled = ngx_http_markdown_is_enabled(r, conf, &early_eff);
     }
+
+    /*
+     * Resolve markdown_filter once in header phase and cache the result in
+     * request context. Body phase must reuse this decision to avoid
+     * header/body inconsistencies for dynamic variables.
+     */
+    filter_enabled = ngx_http_markdown_is_enabled(r, conf, &early_eff);
     if (!filter_enabled) {
         /* Module disabled, pass through */
         NGX_HTTP_MARKDOWN_METRIC_INC(requests_entered);
         ngx_http_markdown_metric_inc_skip(
             NGX_HTTP_MARKDOWN_INELIGIBLE_CONFIG);
         NGX_HTTP_MARKDOWN_METRIC_INC(conversions_bypassed);
-        ngx_http_markdown_log_decision(r, conf, NULL,
+        ngx_http_markdown_log_decision(r, conf, &early_eff,
             ngx_http_markdown_reason_from_eligibility(
                 NGX_HTTP_MARKDOWN_INELIGIBLE_CONFIG,
                 r->connection->log));
@@ -365,7 +367,7 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
                           eligibility));
         ngx_http_markdown_metric_inc_skip(eligibility);
         NGX_HTTP_MARKDOWN_METRIC_INC(conversions_bypassed);
-        ngx_http_markdown_log_decision(r, conf, NULL,
+        ngx_http_markdown_log_decision(r, conf, &early_eff,
             ngx_http_markdown_reason_from_eligibility(
                 eligibility, r->connection->log));
         return ngx_http_next_header_filter(r);
@@ -381,7 +383,7 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
         ngx_http_markdown_metric_inc_skip(
             NGX_HTTP_MARKDOWN_INELIGIBLE_AUTH);
         NGX_HTTP_MARKDOWN_METRIC_INC(conversions_bypassed);
-        ngx_http_markdown_log_decision(r, conf, NULL,
+        ngx_http_markdown_log_decision(r, conf, &early_eff,
             ngx_http_markdown_reason_from_eligibility(
                 NGX_HTTP_MARKDOWN_INELIGIBLE_AUTH,
                 r->connection->log));
@@ -394,7 +396,7 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
         /* Client doesn't want Markdown, pass through */
         NGX_HTTP_MARKDOWN_METRIC_INC(skips.accept);
         NGX_HTTP_MARKDOWN_METRIC_INC(conversions_bypassed);
-        ngx_http_markdown_log_decision(r, conf, NULL,
+        ngx_http_markdown_log_decision(r, conf, &early_eff,
             ngx_http_markdown_reason_skip_accept());
         return ngx_http_next_header_filter(r);
     }
@@ -523,7 +525,7 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
      */
     ctx->processing_path =
         ngx_http_markdown_select_processing_path(
-            r, conf);
+            r, conf, ctx->effective_conf);
 
     if (ctx->processing_path
         == NGX_HTTP_MARKDOWN_PATH_STREAMING)
