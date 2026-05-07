@@ -858,6 +858,8 @@ ngx_http_markdown_set_dynconf_path(ngx_conf_t *cf, ngx_command_t *cmd,
     ngx_http_markdown_conf_t       *mcf = conf;
     ngx_http_markdown_main_conf_t  *mmcf;
 
+    (void) cmd;
+
     if (mcf == NULL) {
         return NGX_CONF_ERROR;
     }

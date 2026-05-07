@@ -1300,13 +1300,21 @@ Required:
 - Unknown dynconf keys must cause `NGX_ERROR` (atomic reload
   rejection), not `NGX_DECLINED` (silent ignore).  The entire file
   is rejected on any unrecognized key.
+- `dynconf_start` must parse and apply the existing dynconf file
+  immediately at startup if it exists.  If the initial parse fails,
+  `applied_mtime` must be set to 0 so the timer retries on the
+  next poll cycle.  This ensures runtime overrides persist across
+  NGINX restart/reload.
 - `harness-check-full` must include `harness-security-checks`.
 
 Verification:
 - `tools/harness/detect_live_conf_reads.sh` — checks dynconf_enabled
   gate on build_effective_conf, applied_mtime guard, and retry logic.
 - `make test-nginx-unit` — effective_conf_test includes
-  test_dynconf_snapshot_not_consumed_when_dynconf_disabled.
+  test_dynconf_snapshot_not_consumed_when_dynconf_disabled;
+  dynconf_impl_test includes
+  test_start_applies_existing_file_on_startup and
+  test_start_invalid_file_leaves_applied_mtime_zero.
 - `make harness-check-full` — now includes harness-security-checks.
 
-| 0.6.2 | 2026-05-07 | Kang | Rule 35: dynconf snapshot isolation (dynconf_enabled gate), reload retry contract (applied_mtime separation), unknown key atomic rejection, harness-check-full includes harness-security-checks |
+| 0.6.2 | 2026-05-07 | Kang | Rule 35: dynconf snapshot isolation (dynconf_enabled gate), reload retry contract (applied_mtime separation), unknown key atomic rejection, startup apply of existing dynconf file, harness-check-full includes harness-security-checks |

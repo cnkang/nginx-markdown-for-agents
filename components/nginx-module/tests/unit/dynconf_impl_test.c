@@ -1000,6 +1000,121 @@ test_start_stat_fails(void)
     TEST_PASS("start: stat failure (file not yet created)");
 }
 
+
+/*
+ * Verify that dynconf_start applies an existing valid file immediately
+ * at startup, so runtime overrides persist across NGINX restart/reload.
+ */
+static void
+test_start_applies_existing_file_on_startup(void)
+{
+    ngx_http_markdown_dynconf_watcher_t  watcher;
+    ngx_str_t                            path;
+    ngx_int_t                            rc;
+    const char                          *tmpfile;
+    ngx_http_markdown_conf_t             conf;
+
+    TEST_SUBSECTION("start applies existing valid dynconf file on startup");
+
+    tmpfile = "/tmp/dynconf_test_start_apply.conf";
+    {
+        FILE *f = fopen(tmpfile, "w");
+        TEST_ASSERT(f != NULL, "create temp file with runtime overrides");
+        fprintf(f, "prune_noise=off\n");
+        fprintf(f, "log_verbosity=debug\n");
+        fclose(f);
+    }
+
+    memset(&watcher, 0, sizeof(watcher));
+    memset(&conf, 0, sizeof(conf));
+    conf.enabled = 1;
+    conf.prune_noise = 1;
+    conf.log_verbosity = NGX_HTTP_MARKDOWN_LOG_ERROR;
+    set_ngx_str(&path, tmpfile);
+
+    rc = ngx_http_markdown_dynconf_start(&watcher, &g_cycle, &path, &conf, &g_log);
+    TEST_ASSERT(rc == NGX_OK, "start returns NGX_OK");
+    TEST_ASSERT(watcher.active == 1, "watcher is active");
+
+    /* The initial reload should have applied the file contents,
+     * overriding the static conf values. */
+    TEST_ASSERT(watcher.active_snapshot.prune_noise == 0,
+                "active snapshot prune_noise overridden to 0 by startup reload");
+    TEST_ASSERT(watcher.active_snapshot.log_verbosity
+                    == NGX_HTTP_MARKDOWN_LOG_DEBUG,
+                "active snapshot log_verbosity overridden to DEBUG by startup reload");
+    TEST_ASSERT(watcher.applied_mtime == watcher.last_mtime,
+                "applied_mtime equals last_mtime after successful startup reload");
+    TEST_ASSERT(watcher.version == 1,
+                "version incremented after startup reload");
+
+    /* live conf should also reflect the applied values */
+    TEST_ASSERT(conf.prune_noise == 0,
+                "live conf prune_noise overridden by startup reload");
+    TEST_ASSERT(conf.log_verbosity == NGX_HTTP_MARKDOWN_LOG_DEBUG,
+                "live conf log_verbosity overridden by startup reload");
+
+    free(watcher.path.data);
+    free(watcher.timer);
+    unlink(tmpfile);
+    TEST_PASS("start applies existing valid dynconf file on startup");
+}
+
+
+/*
+ * Verify that when the existing dynconf file is invalid at startup,
+ * the watcher starts with static conf baseline and applied_mtime=0
+ * so the timer will retry on the next cycle.
+ */
+static void
+test_start_invalid_file_leaves_applied_mtime_zero(void)
+{
+    ngx_http_markdown_dynconf_watcher_t  watcher;
+    ngx_str_t                            path;
+    ngx_int_t                            rc;
+    const char                          *tmpfile;
+    ngx_http_markdown_conf_t             conf;
+
+    TEST_SUBSECTION("start with invalid existing file leaves applied_mtime=0 for retry");
+
+    tmpfile = "/tmp/dynconf_test_start_invalid.conf";
+    {
+        FILE *f = fopen(tmpfile, "w");
+        TEST_ASSERT(f != NULL, "create temp file with invalid content");
+        fprintf(f, "prune_noise=yes\n");  /* invalid value */
+        fclose(f);
+    }
+
+    memset(&watcher, 0, sizeof(watcher));
+    memset(&conf, 0, sizeof(conf));
+    conf.enabled = 1;
+    conf.prune_noise = 1;
+    set_ngx_str(&path, tmpfile);
+
+    rc = ngx_http_markdown_dynconf_start(&watcher, &g_cycle, &path, &conf, &g_log);
+    TEST_ASSERT(rc == NGX_OK, "start returns NGX_OK even with invalid file");
+    TEST_ASSERT(watcher.active == 1, "watcher is active");
+
+    /* The initial reload should have failed; static conf preserved. */
+    TEST_ASSERT(watcher.active_snapshot.prune_noise == 1,
+                "active snapshot prune_noise unchanged (1) after failed startup reload");
+    TEST_ASSERT(watcher.applied_mtime == 0,
+                "applied_mtime is 0 after failed startup reload (triggers timer retry)");
+    TEST_ASSERT(watcher.last_mtime > 0,
+                "last_mtime recorded from stat (file exists)");
+    TEST_ASSERT(watcher.last_mtime != watcher.applied_mtime,
+                "last_mtime != applied_mtime triggers retry on next timer cycle");
+
+    /* live conf unchanged */
+    TEST_ASSERT(conf.prune_noise == 1,
+                "live conf prune_noise unchanged after failed startup reload");
+
+    free(watcher.path.data);
+    free(watcher.timer);
+    unlink(tmpfile);
+    TEST_PASS("start with invalid existing file leaves applied_mtime=0 for retry");
+}
+
 static void
 test_stop_null_watcher(void)
 {
@@ -1880,6 +1995,8 @@ main(void)
     test_start_path_too_long();
     test_start_success();
     test_start_stat_fails();
+    test_start_applies_existing_file_on_startup();
+    test_start_invalid_file_leaves_applied_mtime_zero();
 
     TEST_SECTION("dynconf_impl: stop tests");
 
