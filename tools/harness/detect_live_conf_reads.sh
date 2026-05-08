@@ -274,9 +274,20 @@ if [[ -f "$request_impl" ]]; then
         /ngx_http_markdown_handle_ctx_alloc_failure/ && !/^\s*\/\*/ && !/^\s*\*/ && !/static.*ngx_int_t/ {
             line = NR
             text = $0
-            while (index(text, ")") == 0) {
+            depth = 0
+            for (i = 1; i <= length(text); i++) {
+                c = substr(text, i, 1)
+                if (c == "(") depth++
+                if (c == ")") depth--
+            }
+            while (depth > 0) {
                 getline
                 text = text " " $0
+                for (i = 1; i <= length($0); i++) {
+                    c = substr($0, i, 1)
+                    if (c == "(") depth++
+                    if (c == ")") depth--
+                }
             }
             print line ":" text
         }
