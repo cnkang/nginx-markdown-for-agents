@@ -1062,8 +1062,16 @@ def main() -> int:
     specs_dir = args.specs_dir.resolve()
     result = ValidationResult()
 
-    # Determine which sub-specs to check for per-spec validations
-    target_subspecs = SUBSPECS_050 if args.mode == "strict" else SPEC12_ONLY
+    # Determine which sub-specs to check for per-spec validations.
+    #
+    # Framework mode validates the repo-owned governance artifacts below
+    # (compatibility matrix, checklist, test matrix, etc.).  The historical
+    # .kiro/specs tree is an optional local adapter surface in this repository,
+    # so the default framework gate must not fail just because that local
+    # directory is absent.  Strict mode remains available for environments
+    # that intentionally provide the full sub-spec tree and want every
+    # per-spec document check enforced.
+    target_subspecs = SUBSPECS_050 if args.mode == "strict" else []
 
     # Per-sub-spec checks (scoped by mode)
     per_spec_checks: dict[str, object] = {
