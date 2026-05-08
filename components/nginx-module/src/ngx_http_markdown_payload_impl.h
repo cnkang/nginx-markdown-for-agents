@@ -44,6 +44,7 @@ ngx_int_t ngx_http_markdown_decompress(ngx_http_request_t *r,
     ngx_chain_t **out);
 static void ngx_http_markdown_log_decision_with_category(
     ngx_http_request_t *r, const ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_effective_conf_t *eff,
     const ngx_str_t *reason_code, const ngx_str_t *error_category);
 static void ngx_http_markdown_metric_inc_failopen(
     const ngx_http_markdown_conf_t *conf);
@@ -184,7 +185,7 @@ ngx_http_markdown_handle_decompression_alloc_error(
         : ngx_http_markdown_reason_failed_open();
 
     ngx_http_markdown_log_decision_with_category(
-        r, conf, reason,
+        r, conf, ctx->effective_conf, reason,
         ngx_http_markdown_reason_from_error_category(
             category, r->connection->log));
 
@@ -392,7 +393,7 @@ ngx_http_markdown_emit_failure_decision(ngx_http_request_t *r,
         : NULL;
 
     ngx_http_markdown_log_decision_with_category(
-        r, conf, reason, fail_category);
+        r, conf, ctx->effective_conf, reason, fail_category);
 }
 
 

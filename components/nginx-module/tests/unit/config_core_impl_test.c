@@ -775,33 +775,33 @@ test_filter_flag_and_is_enabled(void)
     conf.enabled = 1;
     conf.enabled_source = NGX_HTTP_MARKDOWN_ENABLED_STATIC;
     memset(&req, 0, sizeof(req));
-    TEST_ASSERT(ngx_http_markdown_is_enabled(&req, &conf) == 1,
+    TEST_ASSERT(ngx_http_markdown_is_enabled(&req, &conf, NULL) == 1,
         "static enabled should bypass complex evaluation");
 
     conf.enabled_source = NGX_HTTP_MARKDOWN_ENABLED_COMPLEX;
     conf.enabled_complex = &cv;
 
-    TEST_ASSERT(ngx_http_markdown_is_enabled(NULL, &conf) == 0,
+    TEST_ASSERT(ngx_http_markdown_is_enabled(NULL, &conf, NULL) == 0,
         "NULL request should disable complex mode");
 
     init_complex(&cv, "on", NGX_ERROR);
     req.connection = &g_conn;
-    TEST_ASSERT(ngx_http_markdown_is_enabled(&req, &conf) == 0,
+    TEST_ASSERT(ngx_http_markdown_is_enabled(&req, &conf, NULL) == 0,
         "complex evaluation failure should disable");
 
     init_complex(&cv, "maybe", NGX_OK);
-    TEST_ASSERT(ngx_http_markdown_is_enabled(&req, &conf) == 0,
+    TEST_ASSERT(ngx_http_markdown_is_enabled(&req, &conf, NULL) == 0,
         "invalid complex token should disable");
 
     init_complex(&cv, "off", NGX_OK);
-    TEST_ASSERT(ngx_http_markdown_is_enabled(&req, &conf) == 0,
+    TEST_ASSERT(ngx_http_markdown_is_enabled(&req, &conf, NULL) == 0,
         "complex off should disable");
 
     init_complex(&cv, "yes", NGX_OK);
-    TEST_ASSERT(ngx_http_markdown_is_enabled(&req, &conf) == 1,
+    TEST_ASSERT(ngx_http_markdown_is_enabled(&req, &conf, NULL) == 1,
         "complex yes should enable");
 
-    TEST_ASSERT(ngx_http_markdown_is_enabled(&req, NULL) == 0,
+    TEST_ASSERT(ngx_http_markdown_is_enabled(&req, NULL, NULL) == 0,
         "NULL conf should disable");
 
     TEST_PASS("parse_filter_flag and is_enabled branches covered");

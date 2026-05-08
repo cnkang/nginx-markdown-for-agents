@@ -32,16 +32,31 @@ void ngx_log_error(ngx_uint_t level, ngx_log_t *log, ngx_err_t err,
 
 /* Forward declarations — defined below */
 static void ngx_http_markdown_log_decision(ngx_http_request_t *r,
-    const ngx_http_markdown_conf_t *conf, const ngx_str_t *reason_code);
+    const ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_effective_conf_t *eff,
+    const ngx_str_t *reason_code);
 static void ngx_http_markdown_log_decision_with_category(
     ngx_http_request_t *r, const ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_effective_conf_t *eff,
     const ngx_str_t *reason_code,
     const ngx_str_t *error_category);
-static void ngx_http_markdown_log_decision_debug(
-    ngx_http_request_t *r, const ngx_http_markdown_conf_t *conf,
-    const ngx_str_t *reason_code, const ngx_str_t *error_category,
-    ngx_uint_t log_level, ngx_str_t *method_name,
-    ngx_str_t *content_type);
+
+/*
+ * Resolved request metadata for decision log emission.
+ * Groups method name and content-type to keep log_decision_debug
+ * parameter count within the 7-parameter limit (c:S107).
+ */
+typedef struct {
+    ngx_str_t *method_name;
+    ngx_str_t *content_type;
+} ngx_http_markdown_decision_meta_t;
+
+static void ngx_http_markdown_log_decision_debug(ngx_http_request_t *r,
+    const ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_effective_conf_t *eff,
+    const ngx_str_t *reason_code,
+    const ngx_str_t *error_category, ngx_uint_t log_level,
+    ngx_http_markdown_decision_meta_t *meta);
 
 
 /*
@@ -159,6 +174,7 @@ ngx_http_markdown_is_failure_outcome(const ngx_str_t *reason_code)
  * Parameters:
  *   r              - NGINX request structure
  *   conf           - module location configuration
+ *   eff            - request-local effective configuration view; may be NULL
  *   reason_code    - the reason code string for this decision
  *   error_category - optional FAIL_* sub-classification (NULL if none)
  *   log_level      - NGINX log level (NGX_LOG_WARN or NGX_LOG_INFO)
@@ -167,9 +183,11 @@ ngx_http_markdown_is_failure_outcome(const ngx_str_t *reason_code)
  */
 static void
 ngx_http_markdown_log_decision_debug(ngx_http_request_t *r,
-    const ngx_http_markdown_conf_t *conf, const ngx_str_t *reason_code,
+    const ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_effective_conf_t *eff,
+    const ngx_str_t *reason_code,
     const ngx_str_t *error_category, ngx_uint_t log_level,
-    ngx_str_t *method_name, ngx_str_t *content_type)
+    ngx_http_markdown_decision_meta_t *meta)
 {
     ngx_str_t                     accept_value;
     ngx_str_t                     filter_value;
@@ -183,7 +201,9 @@ ngx_http_markdown_log_decision_debug(ngx_http_request_t *r,
      * header-phase result for dynamic variables.
      *
      * Fall back to evaluating conf->enabled_complex only when no
-     * cached decision exists (ctx is NULL).
+     * cached decision exists (ctx is NULL).  In that case, read
+     * enabled_source and enabled through the effective view to
+     * maintain request-level consistency.
      */
     ctx = ngx_http_get_module_ctx(r,
         ngx_http_markdown_filter_module);
@@ -194,7 +214,7 @@ ngx_http_markdown_log_decision_debug(ngx_http_request_t *r,
         } else {
             ngx_str_set(&filter_value, "off");
         }
-    } else if (conf->enabled_source
+    } else if (ngx_http_markdown_effective_enabled_source(eff, conf)
         == NGX_HTTP_MARKDOWN_ENABLED_COMPLEX
         && conf->enabled_complex != NULL)
     {
@@ -205,7 +225,7 @@ ngx_http_markdown_log_decision_debug(ngx_http_request_t *r,
             ngx_str_set(&filter_value,
                         "$variable(error)");
         }
-    } else if (conf->enabled) {
+    } else if (ngx_http_markdown_effective_enabled(eff, conf)) {
         ngx_str_set(&filter_value, "on");
     } else {
         ngx_str_set(&filter_value, "off");
@@ -245,8 +265,8 @@ ngx_http_markdown_log_decision_debug(ngx_http_request_t *r,
             "method=%V uri=%V content_type=%V "
             "filter_value=%V accept=%V status=%ui",
             reason_code, error_category,
-            method_name, &r->uri,
-            content_type, &filter_value,
+            meta->method_name, &r->uri,
+            meta->content_type, &filter_value,
             &accept_value,
             r->headers_out.status);
     } else {
@@ -254,8 +274,8 @@ ngx_http_markdown_log_decision_debug(ngx_http_request_t *r,
             "markdown decision: reason=%V "
             "method=%V uri=%V content_type=%V "
             "filter_value=%V accept=%V status=%ui",
-            reason_code, method_name, &r->uri,
-            content_type, &filter_value,
+            reason_code, meta->method_name, &r->uri,
+            meta->content_type, &filter_value,
             &accept_value,
             r->headers_out.status);
     }
@@ -290,12 +310,15 @@ ngx_http_markdown_log_decision_debug(ngx_http_request_t *r,
  * Parameters:
  *   r              - NGINX request structure
  *   conf           - module location configuration
+ *   eff            - effective configuration view for per-request log_verbosity
  *   reason_code    - the reason code string for this decision
  *   error_category - optional FAIL_* sub-classification (NULL if none)
  */
 static void
 ngx_http_markdown_log_decision_with_category(ngx_http_request_t *r,
-    const ngx_http_markdown_conf_t *conf, const ngx_str_t *reason_code,
+    const ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_effective_conf_t *eff,
+    const ngx_str_t *reason_code,
     const ngx_str_t *error_category)
 {
     ngx_uint_t       log_level;
@@ -311,7 +334,8 @@ ngx_http_markdown_log_decision_with_category(ngx_http_request_t *r,
 
     is_failure = ngx_http_markdown_is_failure_outcome(reason_code);
 
-    effective_verbosity = conf->log_verbosity;
+    effective_verbosity = ngx_http_markdown_effective_log_verbosity(
+        eff, conf);
 
     if (effective_verbosity > NGX_HTTP_MARKDOWN_LOG_DEBUG) {
         ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
@@ -345,10 +369,14 @@ ngx_http_markdown_log_decision_with_category(ngx_http_request_t *r,
     }
 
     /* Debug extended format (FR-03.3) — delegated to helper */
-    if (conf->log_verbosity == NGX_HTTP_MARKDOWN_LOG_DEBUG) {
-        ngx_http_markdown_log_decision_debug(r, conf,
+    if (effective_verbosity == NGX_HTTP_MARKDOWN_LOG_DEBUG) {
+        ngx_http_markdown_decision_meta_t  meta;
+
+        meta.method_name = &method_name;
+        meta.content_type = &content_type;
+        ngx_http_markdown_log_decision_debug(r, conf, eff,
             reason_code, error_category, log_level,
-            &method_name, &content_type);
+            &meta);
         return;
     }
 
@@ -376,10 +404,12 @@ ngx_http_markdown_log_decision_with_category(ngx_http_request_t *r,
  */
 static void
 ngx_http_markdown_log_decision(ngx_http_request_t *r,
-    const ngx_http_markdown_conf_t *conf, const ngx_str_t *reason_code)
+    const ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_effective_conf_t *eff,
+    const ngx_str_t *reason_code)
 {
     ngx_http_markdown_log_decision_with_category(
-        r, conf, reason_code, NULL);
+        r, conf, eff, reason_code, NULL);
 }
 
 #endif /* NGX_HTTP_MARKDOWN_DECISION_LOG_IMPL_H */

@@ -313,7 +313,8 @@ ngx_http_markdown_streaming_cleanup(void *data);
 static ngx_uint_t
 ngx_http_markdown_select_processing_path(
     ngx_http_request_t *r,
-    ngx_http_markdown_conf_t *conf);
+    const ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_effective_conf_t *eff);
 
 /*
  * Update response headers at the streaming commit boundary.
@@ -453,7 +454,7 @@ ngx_http_markdown_streaming_cleanup(void *data)
 static ngx_int_t
 ngx_http_markdown_is_excluded_stream_type(
     ngx_http_request_t *r,
-    ngx_http_markdown_conf_t *conf)
+    const ngx_http_markdown_conf_t *conf)
 {
     ngx_str_t   *types;
     ngx_uint_t   i;
@@ -495,7 +496,7 @@ ngx_http_markdown_is_excluded_stream_type(
 static void
 ngx_http_markdown_log_conditional_streaming(
     ngx_http_request_t *r,
-    ngx_http_markdown_conf_t *conf)
+    const ngx_http_markdown_conf_t *conf)
 {
     if (conf->conditional_requests
         == NGX_HTTP_MARKDOWN_CONDITIONAL_IF_MODIFIED_SINCE)
@@ -540,7 +541,8 @@ ngx_http_markdown_log_conditional_streaming(
 static ngx_uint_t
 ngx_http_markdown_select_processing_path(
     ngx_http_request_t *r,
-    ngx_http_markdown_conf_t *conf)
+    const ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_effective_conf_t *eff)
 {
     ngx_str_t    val;
     ngx_uint_t   engine_mode;
@@ -651,7 +653,7 @@ common_checks:
                (u_char *) "text/event-stream",
                17) == 0)
     {
-        ngx_http_markdown_log_decision(r, conf,
+        ngx_http_markdown_log_decision(r, conf, eff,
             ngx_http_markdown_reason_streaming_skip_unsupported());
         return NGX_HTTP_MARKDOWN_PATH_FULLBUFFER;
     }
@@ -660,7 +662,7 @@ common_checks:
     if (ngx_http_markdown_is_excluded_stream_type(
             r, conf))
     {
-        ngx_http_markdown_log_decision(r, conf,
+        ngx_http_markdown_log_decision(r, conf, eff,
             ngx_http_markdown_reason_streaming_skip_unsupported());
         return NGX_HTTP_MARKDOWN_PATH_FULLBUFFER;
     }
@@ -678,13 +680,13 @@ common_checks:
            < conf->streaming_auto_threshold)
     {
         /* CL < auto_threshold: use full-buffer */
-        ngx_http_markdown_log_decision(r, conf,
+        ngx_http_markdown_log_decision(r, conf, eff,
             ngx_http_markdown_reason_eligible_fullbuffer_auto());
         return NGX_HTTP_MARKDOWN_PATH_FULLBUFFER;
     }
 
     /* auto + CL >= auto_threshold or chunked (no CL) */
-    ngx_http_markdown_log_decision(r, conf,
+    ngx_http_markdown_log_decision(r, conf, eff,
         ngx_http_markdown_reason_eligible_streaming_auto());
     return NGX_HTTP_MARKDOWN_PATH_STREAMING;
 }
@@ -935,7 +937,7 @@ ngx_http_markdown_streaming_record_postcommit_failure(
         ctx->streaming.failure_recorded = 1;
     }
 
-    ngx_http_markdown_log_decision(r, conf,
+    ngx_http_markdown_log_decision(r, conf, ctx->effective_conf,
         ngx_http_markdown_reason_streaming_fail_postcommit());
 }
 
@@ -990,7 +992,7 @@ ngx_http_markdown_streaming_send_deferred_lastbuf(
         NGX_HTTP_MARKDOWN_METRIC_INC(streaming.succeeded_total);
         NGX_HTTP_MARKDOWN_METRIC_INC(conversions_succeeded);
 
-        ngx_http_markdown_log_decision(r, conf,
+        ngx_http_markdown_log_decision(r, conf, ctx->effective_conf,
             ngx_http_markdown_reason_streaming_convert());
 
         ngx_http_markdown_record_per_path_metrics(r, conf, 0);
@@ -1129,7 +1131,7 @@ ngx_http_markdown_streaming_resume_pending(
         NGX_HTTP_MARKDOWN_METRIC_INC(streaming.succeeded_total);
         NGX_HTTP_MARKDOWN_METRIC_INC(conversions_succeeded);
 
-        ngx_http_markdown_log_decision(r, conf,
+        ngx_http_markdown_log_decision(r, conf, ctx->effective_conf,
             ngx_http_markdown_reason_streaming_convert());
 
         ngx_http_markdown_record_per_path_metrics(r, conf, 0);
@@ -1224,7 +1226,7 @@ ngx_http_markdown_streaming_fallback_to_fullbuffer(
     NGX_HTTP_MARKDOWN_METRIC_INC(path_hits.fullbuffer);
     NGX_HTTP_MARKDOWN_METRIC_INC(streaming.fallback_total);
 
-    ngx_http_markdown_log_decision(r, conf,
+    ngx_http_markdown_log_decision(r, conf, ctx->effective_conf,
         ngx_http_markdown_reason_streaming_fallback());
 
     /*
@@ -1296,7 +1298,7 @@ ngx_http_markdown_streaming_handle_postcommit_error(
     {
         NGX_HTTP_MARKDOWN_METRIC_INC(
             streaming.budget_exceeded_total);
-        ngx_http_markdown_log_decision(r, conf,
+        ngx_http_markdown_log_decision(r, conf, ctx->effective_conf,
             ngx_http_markdown_reason_streaming_budget_exceeded());
     }
 
@@ -1383,7 +1385,7 @@ ngx_http_markdown_streaming_precommit_error(
     {
         NGX_HTTP_MARKDOWN_METRIC_INC(
             streaming.budget_exceeded_total);
-        ngx_http_markdown_log_decision(r, conf,
+        ngx_http_markdown_log_decision(r, conf, ctx->effective_conf,
             ngx_http_markdown_reason_streaming_budget_exceeded());
         ngx_log_debug1(NGX_LOG_DEBUG_HTTP,
             r->connection->log, 0,
@@ -1400,7 +1402,7 @@ ngx_http_markdown_streaming_precommit_error(
         /* Fail-closed: record reject metrics and reason */
         NGX_HTTP_MARKDOWN_METRIC_INC(
             streaming.precommit_reject_total);
-        ngx_http_markdown_log_decision(r, conf,
+        ngx_http_markdown_log_decision(r, conf, ctx->effective_conf,
             ngx_http_markdown_reason_streaming_precommit_reject());
         return NGX_ERROR;
     }
@@ -1410,7 +1412,7 @@ ngx_http_markdown_streaming_precommit_error(
     NGX_HTTP_MARKDOWN_METRIC_INC(
         streaming.precommit_failopen_total);
     NGX_HTTP_MARKDOWN_METRIC_INC(results.failopen_count);
-    ngx_http_markdown_log_decision(r, conf,
+    ngx_http_markdown_log_decision(r, conf, ctx->effective_conf,
         ngx_http_markdown_reason_streaming_precommit_failopen());
     return NGX_DECLINED;
 }
@@ -2106,7 +2108,7 @@ ngx_http_markdown_streaming_finalize_request(
         NGX_HTTP_MARKDOWN_METRIC_INC(streaming.succeeded_total);
         NGX_HTTP_MARKDOWN_METRIC_INC(conversions_succeeded);
 
-        ngx_http_markdown_log_decision(r, conf,
+        ngx_http_markdown_log_decision(r, conf, ctx->effective_conf,
             ngx_http_markdown_reason_streaming_convert());
 
         ngx_http_markdown_record_per_path_metrics(r, conf, 0);
@@ -2173,7 +2175,7 @@ ngx_http_markdown_streaming_init_handle(
     ngx_memzero(&options, sizeof(struct MarkdownOptions));
 
     rc = ngx_http_markdown_prepare_conversion_options(
-        r, conf, &options);
+        r, conf, ctx->effective_conf, &options);
     if (rc != NGX_OK) {
         ngx_log_error(NGX_LOG_ERR,
             r->connection->log, 0,
@@ -2241,7 +2243,8 @@ ngx_http_markdown_streaming_init_handle(
 
     /* Initialize prebuffer for fallback */
     ctx->streaming.prebuffer_limit =
-        conf->streaming_budget;
+        ngx_http_markdown_effective_streaming_budget(
+            ctx->effective_conf, conf);
     rc = ngx_http_markdown_buffer_init(
         &ctx->streaming.prebuffer,
         ctx->streaming.prebuffer_limit,

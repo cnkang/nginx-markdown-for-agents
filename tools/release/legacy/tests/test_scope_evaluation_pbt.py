@@ -93,7 +93,7 @@ def evaluate_scope(
 
 def _extract_non_goals_from_scope_doc() -> tuple[str, ...]:
     """Extract bullet items from the Non-Goals section of the scope doc."""
-    repo_root = Path(__file__).resolve().parents[3]
+    repo_root = Path(__file__).resolve().parents[4]
     doc_path = repo_root / "docs/project/release-gates/scope-evaluation-process.md"
     lines = doc_path.read_text(encoding="utf-8").splitlines()
 

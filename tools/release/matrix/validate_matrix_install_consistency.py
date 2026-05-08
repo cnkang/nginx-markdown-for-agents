@@ -18,6 +18,9 @@ import re
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from lib.path_validation import validate_read_path
+
 # Paths relative to the repository root
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent.parent.parent
@@ -48,7 +51,8 @@ def load_matrix(path: Path) -> list[dict]:
         ValueError: If the parsed JSON is not an object, the "matrix" key is missing,
         the "matrix" value is not a list, or any item in the list is not a dict.
     """
-    with open(path, "r", encoding="utf-8") as f:
+    validated = validate_read_path(path, purpose="install matrix")
+    with open(validated, "r", encoding="utf-8") as f:
         data = json.load(f)
 
     if not isinstance(data, dict):

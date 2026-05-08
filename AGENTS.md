@@ -919,6 +919,121 @@ Verification:
 - `make test-nginx-unit` after any change touching `components/nginx-module/`
 - `make test-rust` after any change touching `components/rust-converter/`
 
+### 32. Integer overflow in ssize_t→size_t and narrowing conversions (CWE-190)
+Historical issues: Snyk SNYK-CWE-190 (dynconf size parsing overflow).
+
+Required:
+- Every conversion from `ssize_t` or `ngx_int_t` to `size_t` or `ngx_uint_t`
+  must be preceded by an explicit non-negative check.  The pattern
+  `if (parsed < 0) return NGX_ERROR;` must appear before any `(size_t) parsed`
+  assignment.
+- Every narrowing conversion (e.g. `size_t → uInt`, `ngx_uint_t → uint8_t`,
+  `ngx_uint_t → uint32_t`) must be preceded by an explicit upper-bound check
+  against the destination type's maximum value, with an error/clamp path.
+- Size-value parsing via `ngx_parse_size()` must go through
+  `ngx_http_markdown_dynconf_parse_size_safe()` (or an equivalent
+  parse→validate→safe-cast helper).  Direct calls to `ngx_parse_size()` with
+  immediate `(size_t)` cast are forbidden in new code.
+- In Rust, `as usize` casts from `u64` or `i64` must include a runtime bounds
+  check on 32-bit targets or a `#[cfg(target_pointer_width = "64")]` guard.
+  `as u32` / `as u8` narrowing casts must include a bounds check or clamp.
+- Addition of two `size_t` values that will be used for memory allocation or
+  buffer sizing must include an overflow guard:
+  `if (a > (size_t)-1 - b) { /* saturate or error */ }`.
+
+Verification:
+- `tools/harness/detect_cwe190_casts.sh components/nginx-module/src/`
+- `make harness-security-checks`
+- Regression tests for each new size-parsing path
+
+### 33. Path traversal in Python tooling scripts (CWE-22)
+Historical issues: Snyk SNYK-CWE-22 (unvalidated path inputs in CLI tooling).
+
+Required:
+- Every `open(path, ...)` call in `tools/` Python scripts where `path` comes
+  from CLI arguments, function parameters, or environment variables must
+  pass through `validate_read_path()` (from `tools/lib/path_validation.py`)
+  before the `open()` call.  Hard-coded paths within the repo (e.g.
+  `REPO_ROOT / "known-file"`) are exempt.
+- Every write-path construction (`Path(path)`) where `path` comes from CLI
+  arguments must call `.resolve()` before `.mkdir(parents=True)` or `open()`
+  to prevent symlink traversal.
+- `Path(path).parent.mkdir(parents=True)` must use a resolved path:
+  `resolved = Path(path).resolve()` then `resolved.parent.mkdir(...)`.
+- New Python tooling scripts that accept file paths as CLI arguments must
+  import and use `path_validation` helpers.  Scripts that intentionally accept
+  arbitrary paths must document "trusted input only" in their `--help` text.
+- Subprocess calls with path arguments from CLI must use list form (not
+  string interpolation with shell=True) and validate executability.
+
+Verification:
+- `tools/harness/detect_cwe22_paths.py tools/`
+- `make harness-security-checks`
+
+### 34. Request-path code must read dynconf-mutable fields through effective_conf, not live conf
+Historical issues: P0 request-level consistency gap (snapshot bound but not consumed);
+P0 snapshot race (active_snapshot read twice in header_filter).
+
+Required:
+- In request-path code (body filter, conversion, logging, budget, streaming),
+  dynconf-mutable fields (`enabled`, `enabled_source`, `prune_noise`,
+  `log_verbosity`, `memory_budget`, `streaming_budget`) must be read through
+  `ctx->effective_conf` via the `ngx_http_markdown_effective_*()` helpers,
+  not directly from `conf->`.
+- Direct `conf->` reads of mutable fields are only allowed in:
+  - Configuration/initialization/merge code (`config_core_impl.h`,
+    `config_handlers_impl.h`)
+  - Dynconf snapshot construction/apply helpers (`dynconf_impl.h`)
+  - Fallback paths where `eff` is NULL (early header filter, allocation
+    failure) — these must be documented with a comment explaining why
+    `eff` is unavailable.
+- When adding a new dynconf-mutable field, the following must be updated in
+  the same changeset:
+  1. `ngx_http_markdown_dynconf_snapshot_t` — add the field
+  2. `ngx_http_markdown_effective_conf_t` — add the field
+  3. `ngx_http_markdown_dynconf_snapshot_from_conf()` — copy the field
+  4. `ngx_http_markdown_dynconf_apply_snapshot()` — apply the field
+  5. `ngx_http_markdown_build_effective_conf()` — populate from snapshot or conf
+  6. A new `ngx_http_markdown_effective_<field>()` helper function
+  7. All request-path reads of the field — switch to the helper
+  8. At least one regression test proving snapshot consistency
+
+Snapshot race elimination (v0.6.2):
+- In `ngx_http_markdown_header_filter()`, the global
+  `ngx_http_markdown_dynconf_watcher.active_snapshot` must be read exactly
+  once, at function entry, into a function-lifetime `snap_copy` variable.
+  `early_eff` is derived from that `snap_copy` once via
+  `ngx_http_markdown_build_effective_conf()`, also at function entry.
+- Both `snap_copy` and `early_eff` must have function-lifetime scope (not
+  block scope), so they remain valid through ctx binding.
+- When binding the snapshot and effective view into the request context,
+  copy directly from the function-level variables:
+  `*ctx->dynconf_snapshot = snap_copy` and `*ctx->effective_conf = early_eff`.
+  Do NOT re-read `ngx_http_markdown_dynconf_watcher.active_snapshot` or
+  re-invoke `ngx_http_markdown_build_effective_conf()` — either creates a
+  race window where a concurrent timer reload can swap the global snapshot
+  between the initial capture and the ctx bind, causing the request to see
+  inconsistent configuration.
+- The binding must be performed by
+  `ngx_http_markdown_bind_request_snapshot()`, which encapsulates the
+  allocation + copy + degraded-mode logging in one place.
+- `ngx_http_markdown_handle_ctx_alloc_failure()` must accept an `eff`
+  parameter and pass it to `log_decision_with_category()`.  Passing NULL
+  causes the log path to fall back to live conf, violating the effective-conf
+  model.  The caller in `header_filter` passes `&early_eff`.
+
+dynconf_path_configured lifecycle (v0.6.2):
+- The `dynconf_path_configured` flag must live in
+  `ngx_http_markdown_main_conf_t` (config-parse scope), not as a
+  file-scope static variable.  A file-scope static survives across
+  NGINX reloads, leaving stale state that prevents re-configuration.
+- `ngx_http_markdown_set_dynconf_path()` reads and writes the flag through
+  `ngx_http_conf_get_module_main_conf()`, providing per-reload isolation.
+
+Verification:
+- `tools/harness/detect_live_conf_reads.sh components/nginx-module/src/`
+- `make harness-security-checks`
+
 ## Required Agent Workflow
 
 ### Before coding
@@ -964,6 +1079,7 @@ For each code change you are about to produce, mentally (or explicitly in a thin
 24. Flag clearing ordering: flags gating operations must be cleared **after** the gated operation succeeds, not before. Pattern: `if (flag) { rc = op(); if (rc == NGX_OK) flag = 0; }`. Doc comments must state the clearing contract. (Rule 29)
 25. NUL-termination of `ngx_str_t`: before passing `ngx_str_t.data` to C APIs requiring NUL-terminated input (`ngx_strcasecmp`, `stat()`, `ngx_file_info()`, `opendir()`, `strstr()`), copy to a stack/pool buffer and append `'\0'`. Prefer length-bounded NGINX APIs (`ngx_strncasecmp`, `ngx_strlchr`) when possible. For directive matching, require exact length equality first. (Rule 30)
 26. Residual code integrity: after merge or >500-line change in a single file, verify compilation, `git diff --check`, function count, and no duplicate adjacent blocks. For >30-line changes, verify the file is not truncated (closing brace present). (Rule 31)
+27. Snapshot race elimination: in `header_filter`, `ngx_http_markdown_dynconf_watcher.active_snapshot` must be read exactly once at function entry into a function-lifetime `snap_copy`; `early_eff` is built from that once. Both variables must have function-lifetime scope. ctx binding must copy from these function-level variables (via `ngx_http_markdown_bind_request_snapshot()`), never re-read the global `active_snapshot` or re-invoke `build_effective_conf()`. `handle_ctx_alloc_failure()` must receive `eff` (not NULL). (Rule 34)
 
 #### C test code (`components/nginx-module/tests/unit/`)
 1. No dead stores — simulation-style tests set the final value directly; initial state documented in comments only. (Rule 16)
@@ -1166,3 +1282,39 @@ remediation:
 | 0.5.5 | 2026-04-24 | Codex | Added recent Git analysis remediation closeout rule |
 | 0.6.0 | 2026-05-02 | Kang | Comment/doc audit: Rust module docs, C function comments, Python docstrings, shell script headers; version 0.6.0 consistency fixes |
 | 0.6.1 | 2026-05-06 | Kang | Rules 27–31: Markdown escaping/injection prevention, full ngx_list_part_t iteration, flag clearing ordering, NUL-termination/EOF boundary, merge residual integrity; output-safety risk pack |
+### 35. Dynconf snapshot isolation and reload retry contract
+
+Required:
+- When a location has `dynconf_enabled=0`, `header_filter` must pass NULL
+  snapshot to `ngx_http_markdown_build_effective_conf()`, and
+  `ngx_http_markdown_bind_request_snapshot()` must not allocate
+  `ctx->dynconf_snapshot`.  The global snapshot must never influence
+  non-dynconf locations.
+- `ngx_http_markdown_dynconf_watcher_t` must maintain separate
+  `last_mtime` (observed) and `applied_mtime` (confirmed after
+  successful reload).  `applied_mtime` must be updated only after
+  reload returns `RELOAD_APPLIED` or `RELOAD_NO_CHANGE`.
+- When `last_mtime != applied_mtime`, the timer handler must retry
+  the reload on the next poll cycle, regardless of whether
+  `dynconf_check()` detects a new mtime change.
+- Unknown dynconf keys must cause `NGX_ERROR` (atomic reload
+  rejection), not `NGX_DECLINED` (silent ignore).  The entire file
+  is rejected on any unrecognized key.
+- `dynconf_start` must parse and apply the existing dynconf file
+  immediately at startup if it exists.  If the initial parse fails,
+  `applied_mtime` must be set to 0 so the timer retries on the
+  next poll cycle.  This ensures runtime overrides persist across
+  NGINX restart/reload.
+- `harness-check-full` must include `harness-security-checks`.
+
+Verification:
+- `tools/harness/detect_live_conf_reads.sh` — checks dynconf_enabled
+  gate on build_effective_conf, applied_mtime guard, and retry logic.
+- `make test-nginx-unit` — effective_conf_test includes
+  test_dynconf_snapshot_not_consumed_when_dynconf_disabled;
+  dynconf_impl_test includes
+  test_start_applies_existing_file_on_startup and
+  test_start_invalid_file_leaves_applied_mtime_zero.
+- `make harness-check-full` — now includes harness-security-checks.
+
+| 0.6.2 | 2026-05-07 | Kang | Rule 35: dynconf snapshot isolation (dynconf_enabled gate), reload retry contract (applied_mtime separation), unknown key atomic rejection, startup apply of existing dynconf file, harness-check-full includes harness-security-checks |

@@ -7,7 +7,7 @@
  * staging snapshot.  Only if the entire file parses successfully
  * is the active snapshot replaced, guaranteeing atomicity.
  *
- * Architecture (v0.6.1 two-phase model):
+ * Architecture (v0.6.2 effective-conf model):
  *   - Dedicated file watcher per worker process
  *   - Coarse-grained polling (1s interval via ngx_event_t timer)
  *   - On mtime change, the timer handler reads and parses the
@@ -15,15 +15,15 @@
  *     and applies successfully, the staging snapshot atomically
  *     replaces the active snapshot.  On any parse error the
  *     staging is discarded and the active snapshot is preserved.
- *   - The request path NEVER performs file I/O.  It reads only
- *     the active snapshot.  The header_filter binds the active
- *     snapshot pointer into the request context so that the
+ *   - The request path NEVER performs file I/O.  The header_filter
+ *     copies the active snapshot into request-pool memory and
+ *     builds an effective_conf view from that copy, so that the
  *     entire request lifecycle uses a consistent configuration
- *     even if a concurrent reload swaps the active snapshot.
+ *     even if a concurrent reload swaps the global active_snapshot.
  *   - Grace-period drain for in-flight requests is handled by
- *     request-bound snapshot pointers: each request holds a
- *     pointer to the snapshot that was active when it entered
- *     the header filter.
+ *     request-owned snapshot copies: each request holds its own
+ *     copy of the snapshot that was active when it entered the
+ *     header filter.
  *
  * Requirements: v0.6.0 P2-10, v0.6.1 P0-1, P0-2, P1-2
  */
@@ -57,11 +57,14 @@
 static void ngx_http_markdown_dynconf_timer_handler(ngx_event_t *ev);
 
 /*
- * Dynamic configuration snapshot.
+ * Dynconf snapshot — a point-in-time copy of all runtime-modifiable
+ * configuration fields.  Captured once per request at header_filter
+ * time and stored in ctx->dynconf_snapshot.  The effective_conf view
+ * is derived from this snapshot (or live conf as fallback).
  *
- * Contains only the fields that dynconf can modify at runtime.
- * This is the unit of atomicity: a reload either replaces the
- * entire snapshot or leaves it unchanged.
+ * The snapshot guarantees that a request sees a consistent set of
+ * values even if a concurrent timer reload swaps the global
+ * active_snapshot mid-request.
  */
 typedef struct ngx_http_markdown_dynconf_snapshot_s {
     ngx_flag_t   enabled;
@@ -77,15 +80,39 @@ typedef struct ngx_http_markdown_dynconf_snapshot_s {
 } ngx_http_markdown_dynconf_snapshot_t;
 
 /*
+ * Effective configuration view for per-request consistency.
+ *
+ * Contains only the fields that dynconf can modify at runtime.
+ * Built once at header_filter time from the dynconf snapshot (if valid)
+ * or from the live static conf.  Request-lifetime code reads mutable
+ * fields through this struct to guarantee mid-request consistency even
+ * when a concurrent timer reload swaps the global active_snapshot.
+ *
+ * Struct definition is in ngx_http_markdown_filter_module.h so that
+ * all translation units (including test binaries) can access fields
+ * without depending on this impl header's NGINX API requirements.
+ */
+
+/*
  * Dynamic configuration file watcher and runtime.
  *
  * Holds the file path, last modification time, a periodic
  * timer event that polls for changes, and the two-phase
  * snapshot state (active + staging).
+ *
+ * last_mtime tracks the most recently observed file mtime
+ * (updated on stat, even if the subsequent reload fails).
+ * applied_mtime tracks the mtime of the last successfully
+ * applied reload.  When last_mtime != applied_mtime, a
+ * reload attempt is needed (either for the first time or
+ * as a retry after a previous failure).  This separation
+ * ensures that a failed reload does not prevent the timer
+ * from retrying on the next poll cycle.
  */
 typedef struct {
     ngx_str_t     path;
     time_t        last_mtime;
+    time_t        applied_mtime;
     ngx_event_t  *timer;
     ngx_uint_t    active;
 
@@ -162,6 +189,145 @@ ngx_http_markdown_dynconf_apply_snapshot(
 }
 
 
+/**
+ * Build the effective configuration view from a dynconf snapshot and live conf.
+ *
+ * If the snapshot is non-NULL and valid, its values take precedence.
+ * Otherwise, the corresponding fields from the live conf are used.
+ * The resulting view is stored in the caller-provided struct (typically
+ * allocated from the request pool and hung off ctx->effective_conf).
+ *
+ * @param eff  Target effective config view to populate; must be non-NULL.
+ * @param snap Dynconf snapshot bound to this request; may be NULL.
+ * @param conf Live module configuration for fallback; must be non-NULL.
+ */
+static void
+ngx_http_markdown_build_effective_conf(
+    ngx_http_markdown_effective_conf_t *eff,
+    const ngx_http_markdown_dynconf_snapshot_t *snap,
+    const ngx_http_markdown_conf_t *conf)
+{
+    if (eff == NULL || conf == NULL) {
+        return;
+    }
+
+    if (snap != NULL && snap->valid) {
+        eff->enabled        = snap->enabled;
+        eff->enabled_source = snap->enabled_source;
+        eff->prune_noise    = snap->prune_noise;
+        eff->log_verbosity  = snap->log_verbosity;
+        eff->memory_budget  = snap->memory_budget;
+#ifdef MARKDOWN_STREAMING_ENABLED
+        eff->streaming_budget = snap->streaming_budget;
+#endif
+    } else {
+        eff->enabled        = conf->enabled;
+        eff->enabled_source = conf->enabled_source;
+        eff->prune_noise    = conf->prune_noise;
+        eff->log_verbosity  = conf->log_verbosity;
+        eff->memory_budget  = conf->memory_budget;
+#ifdef MARKDOWN_STREAMING_ENABLED
+        eff->streaming_budget = conf->streaming_budget;
+#endif
+    }
+}
+
+
+/**
+ * Read effective log_verbosity for a request.
+ *
+ * Prefers the effective_conf view bound to ctx; falls back to live conf
+ * if the view is unavailable.
+ */
+static ngx_uint_t
+ngx_http_markdown_effective_log_verbosity(
+    const ngx_http_markdown_effective_conf_t *eff,
+    const ngx_http_markdown_conf_t *conf)
+{
+    if (eff != NULL) {
+        return eff->log_verbosity;
+    }
+    return conf->log_verbosity;
+}
+
+
+/**
+ * Read effective prune_noise for a request.
+ */
+static ngx_flag_t
+ngx_http_markdown_effective_prune_noise(
+    const ngx_http_markdown_effective_conf_t *eff,
+    const ngx_http_markdown_conf_t *conf)
+{
+    if (eff != NULL) {
+        return eff->prune_noise;
+    }
+    return conf->prune_noise;
+}
+
+
+/**
+ * Read effective memory_budget for a request.
+ */
+static size_t
+ngx_http_markdown_effective_memory_budget(
+    const ngx_http_markdown_effective_conf_t *eff,
+    const ngx_http_markdown_conf_t *conf)
+{
+    if (eff != NULL) {
+        return eff->memory_budget;
+    }
+    return conf->memory_budget;
+}
+
+
+#ifdef MARKDOWN_STREAMING_ENABLED
+/**
+ * Read effective streaming_budget for a request.
+ */
+static size_t
+ngx_http_markdown_effective_streaming_budget(
+    const ngx_http_markdown_effective_conf_t *eff,
+    const ngx_http_markdown_conf_t *conf)
+{
+    if (eff != NULL) {
+        return eff->streaming_budget;
+    }
+    return conf->streaming_budget;
+}
+#endif
+
+
+/**
+ * Read effective enabled flag for a request.
+ */
+static ngx_flag_t
+ngx_http_markdown_effective_enabled(
+    const ngx_http_markdown_effective_conf_t *eff,
+    const ngx_http_markdown_conf_t *conf)
+{
+    if (eff != NULL) {
+        return eff->enabled;
+    }
+    return conf->enabled;
+}
+
+
+/**
+ * Read effective enabled_source for a request.
+ */
+static ngx_uint_t
+ngx_http_markdown_effective_enabled_source(
+    const ngx_http_markdown_effective_conf_t *eff,
+    const ngx_http_markdown_conf_t *conf)
+{
+    if (eff != NULL) {
+        return eff->enabled_source;
+    }
+    return conf->enabled_source;
+}
+
+
 /*
  * Check if the watched configuration file has changed.
  *
@@ -225,18 +391,35 @@ ngx_http_markdown_dynconf_check(ngx_http_markdown_dynconf_watcher_t *watcher,
  * informational message if a change is observed, and re-arms the watch timer
  * for the next polling interval.
  *
+ * After a file change is detected (dynconf_check returns 1), a two-phase
+ * reload is attempted.  If the reload succeeds (RELOAD_APPLIED or
+ * RELOAD_NO_CHANGE), applied_mtime is updated to last_mtime, confirming
+ * the reload.  If the reload fails (INVALID_FILE or IO_ERROR),
+ * applied_mtime is NOT updated, so the next timer cycle will see
+ * last_mtime != applied_mtime and retry the reload — matching the
+ * failure-retry contract described in
+ * docs/harness/risk-packs/dynamic-config-hot-reload.md.
+ *
+ * Additionally, even when no new file change is detected (dynconf_check
+ * returns 0), if last_mtime != applied_mtime (indicating a previous
+ * failed reload), a retry is attempted.  This covers the case where
+ * the file content was invalid but the mtime has not changed since.
+ *
  * @param ev Timer event whose `data` field points to the watcher; may be NULL.
  */
 static void
 ngx_http_markdown_dynconf_timer_handler(ngx_event_t *ev)
 {
     ngx_http_markdown_dynconf_watcher_t  *watcher;
+    ngx_int_t                            reload_rc;
 
     watcher = ev->data;
 
     if (watcher == NULL || !watcher->active) {
         return;
     }
+
+    reload_rc = NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_NO_CHANGE;
 
     if (ngx_http_markdown_dynconf_check(watcher, ev->log)) {
         ngx_log_error(NGX_LOG_INFO, ev->log, 0,
@@ -245,9 +428,42 @@ ngx_http_markdown_dynconf_timer_handler(ngx_event_t *ev)
                       &watcher->path);
 
         if (watcher->conf != NULL) {
-            ngx_http_markdown_dynconf_reload(watcher, watcher->conf,
-                                             ev->log);
+            reload_rc = ngx_http_markdown_dynconf_reload(watcher,
+                                                          watcher->conf,
+                                                          ev->log);
         }
+    } else if (watcher->last_mtime != watcher->applied_mtime) {
+        /*
+         * No new mtime change detected, but a previous reload failed
+         * (last_mtime advanced but applied_mtime did not).  Retry the
+         * reload so that transient errors (e.g. briefly invalid file
+         * content) are eventually resolved without operator intervention.
+         */
+        ngx_log_error(NGX_LOG_INFO, ev->log, 0,
+                      "markdown dynconf: retrying failed reload on \"%V\" "
+                      "(last_mtime=%T, applied_mtime=%T)",
+                      &watcher->path,
+                      watcher->last_mtime, watcher->applied_mtime);
+
+        if (watcher->conf != NULL) {
+            reload_rc = ngx_http_markdown_dynconf_reload(watcher,
+                                                          watcher->conf,
+                                                          ev->log);
+        }
+    }
+
+    /*
+     * Update applied_mtime only after a successful reload.
+     * RELOAD_APPLIED: new settings committed.
+     * RELOAD_NO_CHANGE: file parsed successfully but contained no
+     *   effective keys — still a successful parse, so confirm.
+     * INVALID_FILE / IO_ERROR: reload failed; applied_mtime stays
+     *   at its previous value so the next timer cycle will retry.
+     */
+    if (reload_rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_APPLIED
+        || reload_rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_NO_CHANGE)
+    {
+        watcher->applied_mtime = watcher->last_mtime;
     }
 
     /* Re-arm the timer for the next poll cycle. */
@@ -264,6 +480,11 @@ ngx_http_markdown_dynconf_timer_handler(ngx_event_t *ev)
  * into pool-owned memory, records an initial file modification time (if stat succeeds),
  * initializes the active snapshot from the given configuration, and arms the periodic
  * watch timer.
+ *
+ * If the dynconf file already exists at startup, its contents are parsed and applied
+ * immediately so that runtime overrides persist across NGINX restart/reload.  If the
+ * initial parse fails, the watcher still starts (using static conf as the baseline)
+ * but applied_mtime is set to 0 so the timer will retry the reload on the next cycle.
  *
  * @param watcher Pre-allocated watcher structure to initialize (caller-owned storage).
  * @param cycle NGINX cycle used for pool allocations and timer registration.
@@ -282,20 +503,25 @@ ngx_http_markdown_dynconf_start(ngx_http_markdown_dynconf_watcher_t *watcher,
 {
     ngx_file_info_t  fi;
     u_char           path_buf[NGX_MAX_PATH + 1];
+    ngx_int_t        initial_rc;
 
     /* Scope guard: dynconf supports only a single global watcher.
      * If the watcher is already active (started by a previous
      * location block), reject this attempt to prevent ambiguous
-     * multi-location configurations.  The operator must use the
-     * same dynconf_path at the http/server level or ensure only
-     * one location enables dynconf. */
+     * multi-location configurations.
+     *
+     * Primary enforcement is at config-parse time via
+     * ngx_http_markdown_set_dynconf_path(), which returns
+     * NGX_CONF_ERROR on duplicate.  This runtime check is a
+     * defensive fallback in case a code path bypasses the
+     * config handler. */
     if (watcher != NULL && watcher->active) {
-        ngx_log_error(NGX_LOG_WARN, log, 0,
+        ngx_log_error(NGX_LOG_ERR, log, 0,
                       "markdown dynconf: watcher already active; "
                       "dynconf supports only a single global instance. "
-                      "Ignoring markdown_dynamic_config_path \"%V\"",
+                      "Rejecting duplicate markdown_dynamic_config_path \"%V\"",
                       path);
-        return NGX_OK;
+        return NGX_ERROR;
     }
 
     if (watcher == NULL || path == NULL || path->len == 0) {
@@ -328,8 +554,10 @@ ngx_http_markdown_dynconf_start(ngx_http_markdown_dynconf_watcher_t *watcher,
                       "will retry on timer",
                       path);
         watcher->last_mtime = 0;
+        watcher->applied_mtime = 0;
     } else {
         watcher->last_mtime = ngx_file_mtime(&fi);
+        watcher->applied_mtime = watcher->last_mtime;
     }
 
     /* Allocate the timer event from the cycle pool. */
@@ -349,6 +577,34 @@ ngx_http_markdown_dynconf_start(ngx_http_markdown_dynconf_watcher_t *watcher,
     /* Initialize active snapshot from current configuration. */
     ngx_http_markdown_dynconf_snapshot_from_conf(&watcher->active_snapshot,
                                                   conf);
+
+    /*
+     * Apply the dynconf file immediately at startup so that runtime
+     * overrides persist across NGINX restart/reload.  If the file
+     * exists and parses successfully, the active snapshot and live
+     * conf are updated before any request arrives.  If the initial
+     * parse fails, the watcher still starts with the static conf
+     * baseline but applied_mtime is set to 0 so the timer will
+     * retry on the next poll cycle.
+     */
+    if (watcher->last_mtime != 0) {
+        initial_rc = ngx_http_markdown_dynconf_reload(watcher, conf, log);
+        if (initial_rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_APPLIED
+            || initial_rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_NO_CHANGE)
+        {
+            watcher->applied_mtime = watcher->last_mtime;
+            ngx_log_error(NGX_LOG_INFO, log, 0,
+                          "markdown dynconf: applied existing file on startup "
+                          "(rc=%i, version=%ui)",
+                          initial_rc, watcher->version);
+        } else {
+            watcher->applied_mtime = 0;
+            ngx_log_error(NGX_LOG_WARN, log, 0,
+                          "markdown dynconf: initial reload of \"%V\" failed "
+                          "(rc=%i); starting from static conf, will retry on timer",
+                          &watcher->path, initial_rc);
+        }
+    }
 
     ngx_add_timer(watcher->timer, NGX_HTTP_MARKDOWN_DYNCONF_WATCH_MS);
 
@@ -418,7 +674,7 @@ ngx_http_markdown_dynconf_stop(ngx_http_markdown_dynconf_watcher_t *watcher,
  *   key - [out] matched key enum value
  *
  * Returns:
- *   NGX_OK on match, NGX_DECLINED if unrecognized
+ *   NGX_OK on match, NGX_ERROR if unrecognized
  */
 static ngx_int_t
 ngx_http_markdown_dynconf_match_key(u_char *p, const u_char *eq,
@@ -444,7 +700,7 @@ ngx_http_markdown_dynconf_match_key(u_char *p, const u_char *eq,
     } else if (len == 13 && ngx_strncasecmp(p, memory_budget_key, 13) == 0) {
         *key = NGX_HTTP_MARKDOWN_DYNCONF_KEY_MEMORY_BUDGET;
     } else {
-        return NGX_DECLINED;
+        return NGX_ERROR;
     }
 
     return NGX_OK;
@@ -471,7 +727,7 @@ ngx_http_markdown_dynconf_match_key(u_char *p, const u_char *eq,
  *
  * Returns:
  *   NGX_OK on successful parse, NGX_DECLINED if comment/blank,
- *   NGX_ERROR on parse error
+ *   NGX_ERROR on parse error or unrecognized key
  */
 static ngx_int_t
 ngx_http_markdown_dynconf_parse_line(u_char *line, size_t line_len,
@@ -507,7 +763,7 @@ ngx_http_markdown_dynconf_parse_line(u_char *line, size_t line_len,
 
     /* Match key. */
     if (ngx_http_markdown_dynconf_match_key(p, eq, key) != NGX_OK) {
-        return NGX_DECLINED;
+        return NGX_ERROR;
     }
 
     /* Skip to '=' sign. */
@@ -547,6 +803,85 @@ ngx_http_markdown_dynconf_parse_line(u_char *line, size_t line_len,
 
 
 /*
+ * Fallback definition for NGX_MAX_SIZE_T_VALUE when building
+ * outside the NGINX compilation environment (e.g. unit tests).
+ * NGINX core defines this in ngx_config.h.
+ */
+#ifndef NGX_MAX_SIZE_T_VALUE
+#define NGX_MAX_SIZE_T_VALUE  ((size_t) -1)
+#endif
+
+/**
+ * Safely parse a size value string and validate for assignment to a size_t field.
+ *
+ * Performs the complete "parse + validate + safe-cast" sequence to prevent
+ * CWE-190 integer overflow when converting ssize_t (signed) results from
+ * ngx_parse_size() to size_t (unsigned) snapshot fields.
+ *
+ * Validation checks:
+ *   1. ngx_parse_size() must succeed (not return NGX_ERROR)
+ *   2. Result must be non-negative (no negative ssize_t values)
+ *   3. Result must not exceed max_size_t (caller-specified upper bound;
+ *      pass SIZE_MAX to allow any non-negative value)
+ *
+ * On failure, logs a diagnostic with the key name, raw input, and rejection
+ * reason, and does NOT modify the snapshot field.
+ *
+ * @param value      Value string (not NUL-terminated)
+ * @param value_len  Length of value string
+ * @param key_name   Human-readable key name for error messages
+ * @param max_size_t Maximum allowed value (e.g. NGX_MAX_SIZE_T_VALUE or SIZE_MAX)
+ * @param log        NGINX log for error messages
+ * @param[out] out   Output size_t value; only written on NGX_OK return
+ *
+ * @returns NGX_OK on success (out populated), NGX_ERROR on any validation failure
+ */
+static ngx_int_t
+ngx_http_markdown_dynconf_parse_size_safe(const u_char *value, size_t value_len,
+                                           const char *key_name,
+                                           size_t max_size_t,
+                                           ngx_log_t *log,
+                                           size_t *out)
+{
+    ngx_str_t   val;
+    ssize_t     parsed;
+
+    val.data = (u_char *) value; /* NOSONAR: ngx_str_t.data is non-const u_char* by NGINX API contract; value is const at caller level */
+    val.len = value_len;
+
+    parsed = ngx_parse_size(&val);
+
+    if (parsed == NGX_ERROR) {
+        ngx_log_error(NGX_LOG_WARN, log, 0,
+                      "markdown dynconf: invalid %s value \"%*s\" "
+                      "(parse error)", key_name,
+                      (int) value_len, value);
+        return NGX_ERROR;
+    }
+
+    if (parsed < 0) {
+        ngx_log_error(NGX_LOG_WARN, log, 0,
+                      "markdown dynconf: invalid %s value \"%*s\" "
+                      "(negative result: %z)", key_name,
+                      (int) value_len, value, parsed);
+        return NGX_ERROR;
+    }
+
+    if ((size_t) parsed > max_size_t) {
+        ngx_log_error(NGX_LOG_WARN, log, 0,
+                      "markdown dynconf: invalid %s value \"%*s\" "
+                      "(exceeds maximum: %z > %z)", key_name,
+                      (int) value_len, value,
+                      (size_t) parsed, max_size_t);
+        return NGX_ERROR;
+    }
+
+    *out = (size_t) parsed;
+    return NGX_OK;
+}
+
+
+/*
  * Apply a single parsed key=value pair to a staging snapshot.
  *
  * Only runtime-safe fields are modified.  Fields that require
@@ -562,8 +897,8 @@ ngx_http_markdown_dynconf_parse_line(u_char *line, size_t line_len,
  *   log       - NGINX log
  *
  * Returns:
- *   NGX_OK on success, NGX_ERROR on invalid value,
- *   NGX_DECLINED for unrecognized key
+ *   NGX_OK on success, NGX_ERROR on invalid value or unrecognized key
+ *   (atomic reload rejection)
  */
 static ngx_int_t
 ngx_http_markdown_dynconf_apply(ngx_http_markdown_dynconf_snapshot_t *snapshot,
@@ -648,50 +983,44 @@ ngx_http_markdown_dynconf_apply(ngx_http_markdown_dynconf_snapshot_t *snapshot,
     case NGX_HTTP_MARKDOWN_DYNCONF_KEY_STREAMING_BUDGET:
 #ifdef MARKDOWN_STREAMING_ENABLED
         {
-            ngx_str_t   val;
-            ssize_t     parsed;
+            size_t  budget;
 
-            val.data = value;
-            val.len = value_len;
-            parsed = ngx_parse_size(&val);
-            if (parsed == NGX_ERROR) {
-                ngx_log_error(NGX_LOG_WARN, log, 0,
-                              "markdown dynconf: invalid streaming_budget value \"%*s\"",
-                              (int) value_len, value);
+            if (ngx_http_markdown_dynconf_parse_size_safe(
+                    value, value_len, "streaming_budget",
+                    NGX_MAX_SIZE_T_VALUE, log, &budget) != NGX_OK)
+            {
                 return NGX_ERROR;
             }
-            snapshot->streaming_budget = (size_t) parsed;
+            snapshot->streaming_budget = budget;
         }
 #else
-        /* Streaming not compiled in; reject with a diagnostic. */
         ngx_log_error(NGX_LOG_WARN, log, 0,
                       "markdown dynconf: streaming_budget not supported "
                       "(streaming not compiled)");
+        return NGX_ERROR;
 #endif
         break;
 
     /* Set the total memory budget for full-buffer conversion (size value). */
     case NGX_HTTP_MARKDOWN_DYNCONF_KEY_MEMORY_BUDGET:
         {
-            ngx_str_t   val;
-            ssize_t     parsed;
+            size_t  budget;
 
-            val.data = value;
-            val.len = value_len;
-            parsed = ngx_parse_size(&val);
-            if (parsed == NGX_ERROR) {
-                ngx_log_error(NGX_LOG_WARN, log, 0,
-                              "markdown dynconf: invalid memory_budget value \"%*s\"",
-                              (int) value_len, value);
+            if (ngx_http_markdown_dynconf_parse_size_safe(
+                    value, value_len, "memory_budget",
+                    NGX_MAX_SIZE_T_VALUE, log, &budget) != NGX_OK)
+            {
                 return NGX_ERROR;
             }
-            snapshot->memory_budget = (size_t) parsed;
+            snapshot->memory_budget = budget;
         }
         break;
 
-    /* Unrecognized key — caller decides how to handle. */
+    /* Unrecognized key — should not reach here because match_key
+     * rejects unknown keys before apply is called.  Return error
+     * as a defensive fallback. */
     default:
-        return NGX_DECLINED;
+        return NGX_ERROR;
     }
 
     return NGX_OK;
@@ -761,10 +1090,6 @@ ngx_http_markdown_dynconf_try_line(ngx_http_markdown_dynconf_snapshot_t *snapsho
                                                 value_len, log);
     if (apply_rc == NGX_OK) {
         (*applied)++;
-        return NGX_OK;
-    }
-
-    if (apply_rc == NGX_DECLINED) {
         return NGX_OK;
     }
 

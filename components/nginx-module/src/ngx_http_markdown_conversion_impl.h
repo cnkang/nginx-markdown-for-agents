@@ -596,12 +596,16 @@ ngx_http_markdown_resolve_conditional_result(ngx_http_request_t *r,
  *
  * @param r The current ngx HTTP request used to read response headers and URI.
  * @param conf The location configuration providing default option values.
+ * @param eff The effective configuration view for per-request consistency;
+ *            mutable fields (prune_noise, memory_budget, streaming_budget)
+ *            are read from here when non-NULL, falling back to conf otherwise.
  * @param options Pointer to a MarkdownOptions struct that will be initialized and populated.
  * @returns NGX_OK on completion (options populated, possibly without a base_url).
  */
 ngx_int_t
 ngx_http_markdown_prepare_conversion_options(ngx_http_request_t *r,
                                              const ngx_http_markdown_conf_t *conf,
+                                             const ngx_http_markdown_effective_conf_t *eff,
                                              struct MarkdownOptions *options)
 {
     ngx_str_t base_url;
@@ -633,12 +637,14 @@ ngx_http_markdown_prepare_conversion_options(ngx_http_request_t *r,
     options->base_url = NULL;
     options->base_url_len = 0;
 #ifdef MARKDOWN_STREAMING_ENABLED
-    options->streaming_budget = conf->streaming_budget;
+    options->streaming_budget =
+        ngx_http_markdown_effective_streaming_budget(eff, conf);
 #else
     options->streaming_budget = 0;
 #endif
 
-    options->prune_noise = conf->prune_noise ? 1U : 0U;
+    options->prune_noise =
+        ngx_http_markdown_effective_prune_noise(eff, conf) ? 1U : 0U;
     options->prune_selectors = NULL;
     options->prune_selector_len = 0;
     options->prune_protection_selectors = NULL;
@@ -664,8 +670,11 @@ ngx_http_markdown_prepare_conversion_options(ngx_http_request_t *r,
      * set, use it; else streaming_budget keeps its merge default.
      * For max_size: same priority chain applies.
      */
-    options->memory_budget = (conf->memory_budget != NGX_CONF_UNSET_SIZE)
-        ? conf->memory_budget : 0;
+    options->memory_budget =
+        ngx_http_markdown_effective_memory_budget(eff, conf);
+    if (options->memory_budget == NGX_CONF_UNSET_SIZE) {
+        options->memory_budget = 0;
+    }
 
     if (conf->llm_provider > UINT8_MAX) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
@@ -695,10 +704,14 @@ ngx_http_markdown_prepare_conversion_options(ngx_http_request_t *r,
      * this or any parent configuration level.
      */
 #ifdef MARKDOWN_STREAMING_ENABLED
-    if (conf->memory_budget != NGX_CONF_UNSET_SIZE
-        && !conf->streaming_budget_explicit)
+    if (ngx_http_markdown_effective_memory_budget(eff, conf)
+            != NGX_CONF_UNSET_SIZE
+        && !conf->streaming_budget_explicit
+        && ngx_http_markdown_effective_streaming_budget(eff, conf)
+            == NGX_CONF_UNSET_SIZE)
     {
-        options->streaming_budget = conf->memory_budget;
+        options->streaming_budget =
+            ngx_http_markdown_effective_memory_budget(eff, conf);
     }
 #endif
 
@@ -1209,7 +1222,8 @@ ngx_http_markdown_shadow_compare(
     ngx_msec_t                        shadow_start;
     ngx_msec_t                        shadow_elapsed;
 
-    ngx_http_markdown_prepare_conversion_options(r, conf, &options);
+    ngx_http_markdown_prepare_conversion_options(
+        r, conf, ctx->effective_conf, &options);
 
     /*
      * Record shadow attempt unconditionally at entry so
@@ -1219,7 +1233,7 @@ ngx_http_markdown_shadow_compare(
      * when the streaming engine fails to initialize.
      */
     NGX_HTTP_MARKDOWN_METRIC_INC(streaming.shadow_total);
-    ngx_http_markdown_log_decision(r, conf,
+    ngx_http_markdown_log_decision(r, conf, ctx->effective_conf,
         ngx_http_markdown_reason_streaming_shadow());
 
     tp = ngx_timeofday();
@@ -1449,7 +1463,8 @@ ngx_http_markdown_execute_conversion(ngx_http_request_t *r,
         }
     }
 
-    rc = ngx_http_markdown_prepare_conversion_options(r, conf, &options);
+    rc = ngx_http_markdown_prepare_conversion_options(
+        r, conf, ctx->effective_conf, &options);
     if (rc != NGX_OK) {
         ngx_http_markdown_otel_teardown_span(r, ctx, ctx->buffer.size, 0,
                                              ERROR_INVALID_INPUT);

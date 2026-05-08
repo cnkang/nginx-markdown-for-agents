@@ -998,7 +998,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
     {
         ngx_string("markdown_dynamic_config_path"),
         NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
-        ngx_conf_set_str_slot,
+        ngx_http_markdown_set_dynconf_path,
         NGX_HTTP_LOC_CONF_OFFSET,
         offsetof(ngx_http_markdown_conf_t, dynconf_path),
         NULL

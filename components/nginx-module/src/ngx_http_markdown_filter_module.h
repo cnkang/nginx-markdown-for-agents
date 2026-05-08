@@ -22,6 +22,43 @@ typedef struct ngx_http_markdown_dynconf_snapshot_s
     ngx_http_markdown_dynconf_snapshot_t;
 
 /*
+ * Effective configuration view for per-request consistency.
+ *
+ * Constructed once at header_filter time from the dynconf snapshot (if
+ * dynconf is enabled and the snapshot is valid) or from the live static
+ * conf otherwise.  All request-lifetime code reads mutable fields through
+ * this view rather than directly from ngx_http_markdown_conf_t, so that
+ * a mid-request dynconf reload cannot change behaviour for in-flight
+ * requests.
+ *
+ * Dynconf-mutable fields that MUST be read through this struct
+ * (via ngx_http_markdown_effective_*() helpers) in all request-path
+ * code (body filter, conversion, logging, budget, streaming):
+ *   - enabled, enabled_source
+ *   - prune_noise
+ *   - log_verbosity
+ *   - memory_budget
+ *   - streaming_budget
+ *
+ * Direct conf-> reads of these fields in request-path code are
+ * violations of AGENTS.md Rule 34 and will be flagged by
+ * tools/harness/detect_live_conf_reads.sh.
+ */
+struct ngx_http_markdown_effective_conf_s {
+    ngx_flag_t   enabled;
+    ngx_uint_t   enabled_source;
+    ngx_flag_t   prune_noise;
+    ngx_uint_t   log_verbosity;
+    size_t       memory_budget;
+#ifdef MARKDOWN_STREAMING_ENABLED
+    size_t       streaming_budget;
+#endif
+};
+
+typedef struct ngx_http_markdown_effective_conf_s
+    ngx_http_markdown_effective_conf_t;
+
+/*
  * Forward declaration for OTel span type.
  * Full definition is in ngx_http_markdown_otel_impl.h.
  */
@@ -259,10 +296,19 @@ typedef struct { /* NOSONAR: c:S1820, module config shape mirrors directive surf
  *
  * Holds process-wide shared state that is initialized once during
  * configuration parsing and then reused by all worker processes.
+ *
+ * dynconf_path_configured and dynconf_first_path track whether a
+ * markdown_dynamic_config_path directive has already been set in
+ * any configuration context, so duplicate detection lives in
+ * config-parse scope (per nginx -t / reload) rather than in a
+ * process-lifetime file-scope static variable that survives across
+ * reloads.
  */
 typedef struct {
     ngx_shm_zone_t *metrics_shm_zone;  /* Shared-memory zone for cross-worker metrics */
     size_t          metrics_shm_size;  /* Configured metrics SHM size (default: 8 pages) */
+    ngx_flag_t      dynconf_path_configured; /* 1 after first markdown_dynamic_config_path directive */
+    ngx_str_t       dynconf_first_path;      /* Path value from the first directive (for diagnostics) */
 } ngx_http_markdown_main_conf_t;
 
 /*
@@ -339,11 +385,18 @@ typedef struct {
     /* Threshold router path selection (NGX_HTTP_MARKDOWN_PATH_FULLBUFFER or NGX_HTTP_MARKDOWN_PATH_INCREMENTAL) */
     ngx_uint_t                   processing_path;
 
-    /* Pointer to the active dynconf snapshot bound at header_filter time.
-     * This guarantees request-level consistency: body/conversion/logging
-     * read the same snapshot even if a concurrent timer reload swaps the
-     * global active snapshot.  NULL if dynconf is not enabled. */
+    /* Copy of the active dynconf snapshot into request pool at header_filter
+     * time.  NULL if dynconf is not enabled or pool allocation failed.
+     * Prefer reading through effective_conf below rather than dereferencing
+     * this directly. */
     ngx_http_markdown_dynconf_snapshot_t *dynconf_snapshot;
+
+    /* Effective configuration view built at header_filter time.
+     * Provides request-consistent values for all dynconf-mutable fields.
+     * All body/conversion/logging/budget code should read mutable fields
+     * through this view instead of directly from ngx_http_markdown_conf_t.
+     * NULL only on pool allocation failure (falls back to live conf). */
+    ngx_http_markdown_effective_conf_t *effective_conf;
 
     /*
      * Decompression state.
@@ -693,7 +746,8 @@ ngx_int_t ngx_http_markdown_should_convert(ngx_http_request_t *r,
 
 /* Resolve markdown_filter on/off state for the current request */
 ngx_flag_t ngx_http_markdown_is_enabled(ngx_http_request_t *r,
-    ngx_http_markdown_conf_t *conf);
+    const ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_effective_conf_t *eff);
 
 /*
  * Response buffer functions
@@ -834,7 +888,9 @@ ngx_int_t ngx_http_markdown_modify_cache_control_for_auth(
 ngx_int_t ngx_http_markdown_construct_base_url(ngx_http_request_t *r,
     ngx_pool_t *pool, ngx_str_t *base_url);
 ngx_int_t ngx_http_markdown_prepare_conversion_options(ngx_http_request_t *r,
-    const ngx_http_markdown_conf_t *conf, struct MarkdownOptions *options);
+    const ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_effective_conf_t *eff,
+    struct MarkdownOptions *options);
 
 /*
  * Conditional request handling functions
