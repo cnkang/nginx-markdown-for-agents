@@ -16,6 +16,9 @@ import json
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+from lib.path_validation import validate_read_path
+
 # Paths relative to the repository root
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent.parent.parent
@@ -43,7 +46,8 @@ def load_matrix_entries(path: Path) -> list[tuple[str, str, str, str]]:
     Returns:
         list[tuple[str, str, str, str]]: Sorted list of (nginx, os_type, arch, tier) tuples where `tier` has been normalized (lowercased, spaces/hyphens replaced with underscores).
     """
-    with open(path, "r", encoding="utf-8") as f:
+    validated = validate_read_path(path, purpose="doc matrix")
+    with open(validated, "r", encoding="utf-8") as f:
         data = json.load(f)
 
     if not isinstance(data, dict) or not isinstance(data.get("matrix"), list):

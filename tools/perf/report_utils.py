@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from lib.path_validation import validate_read_path
+from lib.path_validation import validate_read_path, validate_write_path_within_root
 
 CORE_METRICS = [
     "p50_ms",
@@ -51,8 +51,11 @@ def write_json(data: dict, path: str | Path) -> None:
         path (str | Path): Destination file path; parent directories will be created if missing.
     """
     output_path = Path(path).resolve()
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(output_path, "w", encoding="utf-8") as fh:
+    validated_output = validate_write_path_within_root(
+        output_path, output_path.parent, purpose="report output",
+    )
+    validated_output.parent.mkdir(parents=True, exist_ok=True)
+    with open(validated_output, "w", encoding="utf-8") as fh:
         json.dump(data, fh, indent=2, ensure_ascii=False)
         fh.write("\n")
 
