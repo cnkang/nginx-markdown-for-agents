@@ -28,6 +28,8 @@ import time
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
 
+_E2E_SAFE_BIN_DIRS = ("/usr/local/bin", "/usr/bin", "/opt/homebrew/bin")
+
 import pytest
 
 WORKSPACE_ROOT = os.path.abspath(
@@ -44,7 +46,13 @@ UPSTREAM_PORT = 19877
 
 
 def _nginx_bin():
-    return os.environ.get("NGINX_BIN", "")
+    raw = os.environ.get("NGINX_BIN", "")
+    if not raw:
+        return ""
+    resolved = shutil.which(raw)
+    if resolved is None:
+        return ""
+    return resolved
 
 
 def _check_prerequisites():

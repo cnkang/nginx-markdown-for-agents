@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from lib.path_validation import validate_read_path
+from lib.path_validation import validate_read_path, validate_write_path_within_root
 
 # ---------------------------------------------------------------------------
 # Default thresholds used when the thresholds config file is missing or a
@@ -352,7 +352,9 @@ def _write_json(data, path):
     """
     if path is None:
         return
-    resolved = Path(path).resolve()
+    resolved = validate_write_path_within_root(
+        Path(path).resolve(), Path(path).resolve().parent, purpose="threshold output",
+    )
     resolved.parent.mkdir(parents=True, exist_ok=True)
     with open(resolved, "w", encoding="utf-8") as fh:
         json.dump(data, fh, indent=2, ensure_ascii=False)
