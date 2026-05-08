@@ -624,12 +624,10 @@ resolve_include_dir() {
 backup_file_once() {
   local file="$1"
   local backup_file="${file}.bak.nginx-markdown-for-agents"
-  if [[ ! -f "$backup_file" ]]; then
-    if ! cp "$file" "$backup_file"; then
-      die_with_error "$CATEGORY_FILESYSTEM" \
-        "Failed to create backup file: ${backup_file}" \
-        "$MSG_CHECK_PERMS_DISK"
-    fi
+  if [[ ! -f "$backup_file" ]] && ! cp "$file" "$backup_file"; then
+    die_with_error "$CATEGORY_FILESYSTEM" \
+      "Failed to create backup file: ${backup_file}" \
+      "$MSG_CHECK_PERMS_DISK"
   fi
 }
 
