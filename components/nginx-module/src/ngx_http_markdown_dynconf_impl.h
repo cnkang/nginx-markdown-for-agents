@@ -838,15 +838,15 @@ ngx_http_markdown_dynconf_parse_line(u_char *line, size_t line_len,
  */
 static ngx_int_t
 ngx_http_markdown_dynconf_parse_size_safe(const u_char *value, size_t value_len,
-                                          const char *key_name,
-                                          size_t max_size_t,
-                                          ngx_log_t *log,
-                                          size_t *out)
+                                           const char *key_name,
+                                           size_t max_size_t,
+                                           ngx_log_t *log,
+                                           size_t *out)
 {
     ngx_str_t   val;
     ssize_t     parsed;
 
-    val.data = (u_char *) value;
+    val.data = (u_char *) value; /* NOSONAR: ngx_str_t.data is non-const u_char* by NGINX API contract; value is const at caller level */
     val.len = value_len;
 
     parsed = ngx_parse_size(&val);

@@ -851,7 +851,7 @@ ngx_http_markdown_streaming_engine(ngx_conf_t *cf,
  * @return NGX_CONF_OK on success, NGX_CONF_ERROR on duplicate.
  */
 static char *
-ngx_http_markdown_set_dynconf_path(ngx_conf_t *cf, ngx_command_t *cmd,
+ngx_http_markdown_set_dynconf_path(ngx_conf_t *cf, ngx_command_t *cmd, /* NOSONAR: nginx directive callback signature requires non-const */
     void *conf)
 {
     ngx_str_t                      *value;

@@ -87,6 +87,69 @@ def _display_path(path: Path) -> str:
         return str(path)
 
 
+def _classify_open_call(
+    first_arg: str,
+    line: str,
+    has_validation_import: bool,
+    validated_vars: set[str],
+    filepath: Path,
+    lineno: int,
+    rel: str,
+    strict: bool,
+) -> tuple[list[str], list[str]]:
+    """Classify a single open() call and return (errors, warnings)."""
+    errors: list[str] = []
+    warnings: list[str] = []
+
+    if FD_VAR_RE.match(first_arg):
+        return errors, warnings
+
+    if first_arg in validated_vars:
+        return errors, warnings
+
+    if first_arg == "resolved":
+        return errors, warnings
+
+    if HARDCODED_PATH_RE.search(line):
+        return errors, warnings
+
+    if "test_" in filepath.name:
+        warnings.append(
+            f"  WARNING {rel}:{lineno} — open({first_arg}) in test file; "
+            f"verify path source is controlled"
+        )
+        return errors, warnings
+
+    if not has_validation_import:
+        msg = (
+            f"  ERROR   {rel}:{lineno} — open({first_arg}) without "
+            f"path_validation import; variable '{first_arg}' not validated"
+        )
+        if strict:
+            errors.append(msg)
+        else:
+            warnings.append(
+                f"  WARNING {rel}:{lineno} — open({first_arg}) without "
+                f"path_validation import; variable '{first_arg}' not validated "
+                f"(use --strict to promote to error)"
+            )
+    elif first_arg not in validated_vars:
+        msg = (
+            f"  ERROR   {rel}:{lineno} — open({first_arg}) but "
+            f"'{first_arg}' not passed through validate_read_path()"
+        )
+        if strict:
+            errors.append(msg)
+        else:
+            warnings.append(
+                f"  WARNING {rel}:{lineno} — open({first_arg}) but "
+                f"'{first_arg}' not passed through validate_read_path() "
+                f"(use --strict to promote to error)"
+            )
+
+    return errors, warnings
+
+
 def check_file(
     filepath: Path, *, strict: bool = False,
 ) -> tuple[list[str], list[str]]:
@@ -126,7 +189,6 @@ def check_file(
         if not OPEN_CALL_RE.search(line):
             continue
 
-        # Skip non-file open calls (urlopen, webbrowser.open, etc.)
         if NON_FILE_OPEN_RE.search(line):
             continue
 
@@ -136,56 +198,12 @@ def check_file(
 
         first_arg = m.group(1)
 
-        # Skip if the argument is a file descriptor (int), not a path
-        if FD_VAR_RE.match(first_arg):
-            continue
-
-        # Skip if the argument is a validated variable
-        if first_arg in validated_vars:
-            continue
-
-        # Skip if the argument is 'resolved' (common pattern after resolve())
-        if first_arg == "resolved":
-            continue
-
-        # Skip hardcoded path patterns
-        if HARDCODED_PATH_RE.search(line):
-            continue
-
-        # Skip test files that open tempdir/fixtures
-        if "test_" in filepath.name:
-            warnings.append(
-                f"  WARNING {rel}:{lineno} — open({first_arg}) in test file; "
-                f"verify path source is controlled"
-            )
-            continue
-
-        if not has_validation_import:
-            msg = (
-                f"  ERROR   {rel}:{lineno} — open({first_arg}) without "
-                f"path_validation import; variable '{first_arg}' not validated"
-            )
-            if strict:
-                errors.append(msg)
-            else:
-                warnings.append(
-                    f"  WARNING {rel}:{lineno} — open({first_arg}) without "
-                    f"path_validation import; variable '{first_arg}' not validated "
-                    f"(use --strict to promote to error)"
-                )
-        elif first_arg not in validated_vars:
-            msg = (
-                f"  ERROR   {rel}:{lineno} — open({first_arg}) but "
-                f"'{first_arg}' not passed through validate_read_path()"
-            )
-            if strict:
-                errors.append(msg)
-            else:
-                warnings.append(
-                    f"  WARNING {rel}:{lineno} — open({first_arg}) but "
-                    f"'{first_arg}' not passed through validate_read_path() "
-                    f"(use --strict to promote to error)"
-                )
+        call_errors, call_warnings = _classify_open_call(
+            first_arg, line, has_validation_import,
+            validated_vars, filepath, lineno, rel, strict,
+        )
+        errors.extend(call_errors)
+        warnings.extend(call_warnings)
 
     return errors, warnings
 
