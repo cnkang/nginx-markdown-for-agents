@@ -454,7 +454,7 @@ ngx_http_markdown_streaming_cleanup(void *data)
 static ngx_int_t
 ngx_http_markdown_is_excluded_stream_type(
     ngx_http_request_t *r,
-    ngx_http_markdown_conf_t *conf)
+    const ngx_http_markdown_conf_t *conf)
 {
     ngx_str_t   *types;
     ngx_uint_t   i;
@@ -496,7 +496,7 @@ ngx_http_markdown_is_excluded_stream_type(
 static void
 ngx_http_markdown_log_conditional_streaming(
     ngx_http_request_t *r,
-    ngx_http_markdown_conf_t *conf)
+    const ngx_http_markdown_conf_t *conf)
 {
     if (conf->conditional_requests
         == NGX_HTTP_MARKDOWN_CONDITIONAL_IF_MODIFIED_SINCE)
