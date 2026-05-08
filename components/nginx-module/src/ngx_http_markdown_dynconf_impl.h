@@ -994,10 +994,10 @@ ngx_http_markdown_dynconf_apply(ngx_http_markdown_dynconf_snapshot_t *snapshot,
             snapshot->streaming_budget = budget;
         }
 #else
-        /* Streaming not compiled in; reject with a diagnostic. */
         ngx_log_error(NGX_LOG_WARN, log, 0,
                       "markdown dynconf: streaming_budget not supported "
                       "(streaming not compiled)");
+        return NGX_ERROR;
 #endif
         break;
 

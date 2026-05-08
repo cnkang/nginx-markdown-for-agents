@@ -547,14 +547,15 @@ static void
 test_build_effective_conf_null_inputs(void)
 {
     ngx_http_markdown_effective_conf_t eff;
+    ngx_http_markdown_conf_t           conf;
 
     TEST_SUBSECTION("build_effective_conf with NULL inputs does not crash");
 
     ngx_memzero(&eff, sizeof(eff));
+    ngx_memzero(&conf, sizeof(conf));
 
     ngx_http_markdown_build_effective_conf(NULL, NULL, NULL);
-    ngx_http_markdown_build_effective_conf(NULL, NULL,
-        (const ngx_http_markdown_conf_t *) &eff);
+    ngx_http_markdown_build_effective_conf(NULL, NULL, &conf);
     ngx_http_markdown_build_effective_conf(&eff, NULL, NULL);
 
     TEST_PASS("build_effective_conf with NULL inputs does not crash");
@@ -643,9 +644,9 @@ test_bind_request_snapshot(
     if (conf->dynconf_enabled) {
         ctx->dynconf_snapshot =
             ngx_pcalloc(r->pool, sizeof(ngx_http_markdown_dynconf_snapshot_t));
-        if (ctx->dynconf_snapshot != NULL) {
+        if (ctx->dynconf_snapshot != NULL && snap_copy != NULL) {
             *ctx->dynconf_snapshot = *snap_copy;
-        } else {
+        } else if (ctx->dynconf_snapshot == NULL) {
             ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
                           "markdown filter: failed to allocate dynconf snapshot "
                           "from request pool; request will use live conf values");

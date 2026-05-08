@@ -746,7 +746,7 @@ ngx_int_t ngx_http_markdown_should_convert(ngx_http_request_t *r,
 
 /* Resolve markdown_filter on/off state for the current request */
 ngx_flag_t ngx_http_markdown_is_enabled(ngx_http_request_t *r,
-    ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_conf_t *conf,
     const ngx_http_markdown_effective_conf_t *eff);
 
 /*

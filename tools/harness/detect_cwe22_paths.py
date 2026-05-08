@@ -48,6 +48,11 @@ VALIDATED_VAR_RE = re.compile(
     r"|validate_write_path_within_root\s*\(\s*(\w+)",
 )
 
+VALIDATED_ASSIGN_RE = re.compile(
+    r"(\w+)\s*=\s*validate_read_path\s*\("
+    r"|(\w+)\s*=\s*validate_write_path_within_root\s*\(",
+)
+
 OPEN_CALL_RE = re.compile(
     r"open\s*\(",
 )
@@ -105,9 +110,6 @@ def _classify_open_call(
         return errors, warnings
 
     if first_arg in validated_vars:
-        return errors, warnings
-
-    if first_arg == "resolved":
         return errors, warnings
 
     if HARDCODED_PATH_RE.search(line):
@@ -184,6 +186,11 @@ def check_file(
                 var_name = m.group(group_idx)
                 if var_name:
                     validated_vars.add(var_name)
+        for m in VALIDATED_ASSIGN_RE.finditer(line):
+            for group_idx in range(1, len(m.groups()) + 1):
+                lhs_name = m.group(group_idx)
+                if lhs_name:
+                    validated_vars.add(lhs_name)
 
     for lineno, line in enumerate(lines, start=1):
         if not OPEN_CALL_RE.search(line):
@@ -221,7 +228,7 @@ def main() -> int:
         "directory",
         nargs="?",
         default="tools",
-        help="Directory to scan (default: tools/)",
+        help="Directory to scan (default: tools/); trusted input only",
     )
     parser.add_argument(
         "--strict",
@@ -232,6 +239,16 @@ def main() -> int:
     strict = args.strict
 
     scan_dir = Path(args.directory)
+    if args.directory != "tools":
+        try:
+            sys.path.insert(0, str(REPO_ROOT))
+            from tools.lib import path_validation
+            scan_dir = Path(path_validation.validate_read_path(
+                args.directory, purpose="scan directory",
+            ))
+        except (ImportError, FileNotFoundError, ValueError) as exc:
+            print(f"ERROR: directory validation failed: {exc}", file=sys.stderr)
+            return 1
     if not scan_dir.is_dir():
         print(f"ERROR: {scan_dir} is not a directory", file=sys.stderr)
         return 1

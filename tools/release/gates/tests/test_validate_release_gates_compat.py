@@ -89,7 +89,19 @@ def test_single_classification_column_rejects_missing_state_cell():
 
 
 def test_framework_mode_does_not_require_optional_kiro_specs(monkeypatch, tmp_path):
-    """Default framework gate should validate repo-owned artifacts only."""
+    """Default framework gate should validate repo-owned artifacts only.
+
+    NOTE: validate_release_gates.main() runs multiple framework checks
+    (check_compatibility_matrix, check_checklist_verification, etc.)
+    against PROJECT_ROOT paths.  This test asserts that framework mode
+    succeeds when only the kiro-spec directory is missing; if any
+    framework doc is also missing or invalid, this test will fail for
+    an unrelated reason.  This coupling is fragile — a more robust
+    approach would stub the check_* functions to isolate kiro-spec
+    behavior, but that introduces tight coupling to internal function
+    names that may change.  The current assertion is valid as long as
+    all framework docs are present in the repo.
+    """
     from tools.release.gates import validate_release_gates
 
     missing_specs_dir = tmp_path / "missing-specs"
