@@ -152,6 +152,58 @@ def _classify_open_call(
     return errors, warnings
 
 
+def _collect_validated_vars(lines: list[str]) -> set[str]:
+    """Extract variable names that are validated or assigned from validation calls."""
+    validated_vars: set[str] = set()
+    for line in lines:
+        for m in VALIDATED_VAR_RE.finditer(line):
+            for group_idx in range(1, len(m.groups()) + 1):
+                var_name = m.group(group_idx)
+                if var_name:
+                    validated_vars.add(var_name)
+        for m in VALIDATED_ASSIGN_RE.finditer(line):
+            for group_idx in range(1, len(m.groups()) + 1):
+                lhs_name = m.group(group_idx)
+                if lhs_name:
+                    validated_vars.add(lhs_name)
+    return validated_vars
+
+
+def _scan_open_calls(
+    lines: list[str],
+    has_validation_import: bool,
+    validated_vars: set[str],
+    filepath: Path,
+    rel: str,
+    strict: bool,
+) -> tuple[list[str], list[str]]:
+    """Scan lines for open() calls and classify each."""
+    errors: list[str] = []
+    warnings: list[str] = []
+
+    for lineno, line in enumerate(lines, start=1):
+        if not OPEN_CALL_RE.search(line):
+            continue
+
+        if NON_FILE_OPEN_RE.search(line):
+            continue
+
+        m = OPEN_ARG_RE.search(line)
+        if not m:
+            continue
+
+        first_arg = m.group(1)
+
+        call_errors, call_warnings = _classify_open_call(
+            first_arg, line, has_validation_import,
+            validated_vars, filepath, lineno, rel, strict,
+        )
+        errors.extend(call_errors)
+        warnings.extend(call_warnings)
+
+    return errors, warnings
+
+
 def check_file(
     filepath: Path, *, strict: bool = False,
 ) -> tuple[list[str], list[str]]:
@@ -179,38 +231,14 @@ def check_file(
 
     has_validation_import = any(VALIDATION_IMPORT_RE.search(line) for line in lines)
 
-    validated_vars: set[str] = set()
-    for line in lines:
-        for m in VALIDATED_VAR_RE.finditer(line):
-            for group_idx in range(1, len(m.groups()) + 1):
-                var_name = m.group(group_idx)
-                if var_name:
-                    validated_vars.add(var_name)
-        for m in VALIDATED_ASSIGN_RE.finditer(line):
-            for group_idx in range(1, len(m.groups()) + 1):
-                lhs_name = m.group(group_idx)
-                if lhs_name:
-                    validated_vars.add(lhs_name)
+    validated_vars = _collect_validated_vars(lines)
 
-    for lineno, line in enumerate(lines, start=1):
-        if not OPEN_CALL_RE.search(line):
-            continue
-
-        if NON_FILE_OPEN_RE.search(line):
-            continue
-
-        m = OPEN_ARG_RE.search(line)
-        if not m:
-            continue
-
-        first_arg = m.group(1)
-
-        call_errors, call_warnings = _classify_open_call(
-            first_arg, line, has_validation_import,
-            validated_vars, filepath, lineno, rel, strict,
-        )
-        errors.extend(call_errors)
-        warnings.extend(call_warnings)
+    call_errors, call_warnings = _scan_open_calls(
+        lines, has_validation_import, validated_vars,
+        filepath, rel, strict,
+    )
+    errors.extend(call_errors)
+    warnings.extend(call_warnings)
 
     return errors, warnings
 
