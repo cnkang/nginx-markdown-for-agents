@@ -15,6 +15,9 @@ import re
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from lib.path_validation import validate_read_path
+
 KEBAB_CASE_RE = re.compile(r"^[a-z][a-z0-9]*(-[a-z0-9]+)*$")
 
 VALID_PAGE_TYPES = {
@@ -142,8 +145,9 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     report_path = Path(argv[0])
+    validated_path = validate_read_path(report_path, purpose="report input")
     try:
-        with open(report_path, "r", encoding="utf-8") as f:
+        with open(validated_path, "r", encoding="utf-8") as f:
             report = json.load(f)
     except Exception as e:
         print(f"ERROR: failed to load report: {e}", file=sys.stderr)

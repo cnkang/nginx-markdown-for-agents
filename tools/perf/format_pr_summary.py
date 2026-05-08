@@ -15,6 +15,9 @@ import argparse
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from lib.path_validation import validate_write_path_within_root
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from report_utils import load_json  # noqa: E402
@@ -126,8 +129,12 @@ def main(argv: list[str] | None = None) -> int:
     md = format_summary(report)
 
     if args.output:
-        Path(args.output).parent.mkdir(parents=True, exist_ok=True)
-        with open(args.output, "w", encoding="utf-8") as f:
+        output_path = Path(args.output)
+        validated_output = validate_write_path_within_root(
+            output_path, output_path.parent, purpose="PR summary output",
+        )
+        validated_output.parent.mkdir(parents=True, exist_ok=True)
+        with open(validated_output, "w", encoding="utf-8") as f:
             f.write(md)
         print(f"PR summary written to {args.output}")
     else:

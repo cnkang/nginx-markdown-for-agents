@@ -59,6 +59,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from lib.path_validation import validate_read_path, validate_write_path_within_root
+
 # ---------------------------------------------------------------------------
 # Tier classification constants
 # ---------------------------------------------------------------------------
@@ -534,7 +537,8 @@ def _load_json(path: str | Path | None) -> dict | None:
     p = Path(path)
     if not p.exists():
         return None
-    with open(p, "r", encoding="utf-8") as f:
+    validated_p = validate_read_path(p, purpose="streaming report", must_exist=False)
+    with open(validated_p, "r", encoding="utf-8") as f:
         return json.load(f)
 
 
@@ -1070,8 +1074,11 @@ def main(argv: list[str] | None = None) -> int:
     # Write output JSON (unless summary-only mode)
     if not args.summary_only:
         output_path = Path(args.output)
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(output_path, "w", encoding="utf-8") as f:
+        validated_output = validate_write_path_within_root(
+            output_path, output_path.parent, purpose="evidence pack output",
+        )
+        validated_output.parent.mkdir(parents=True, exist_ok=True)
+        with open(validated_output, "w", encoding="utf-8") as f:
             json.dump(evidence_pack, f, indent=2, ensure_ascii=False)
             f.write("\n")
         print(f"Evidence pack written to {output_path}", file=sys.stderr)

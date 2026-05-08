@@ -73,7 +73,8 @@ static ngx_uint_t ngx_http_markdown_is_ascii_space(u_char ch);
 static ngx_int_t ngx_http_markdown_parse_filter_flag(ngx_str_t *value, ngx_flag_t *enabled);
 /* Resolve runtime markdown_filter state for the current request. */
 ngx_flag_t ngx_http_markdown_is_enabled(ngx_http_request_t *r,
-    ngx_http_markdown_conf_t *conf);
+    const ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_effective_conf_t *eff);
 /* Emit merged-config summary for observability and debugging. */
 static void ngx_http_markdown_log_merged_conf(ngx_conf_t *cf,
     const ngx_http_markdown_conf_t *conf);
