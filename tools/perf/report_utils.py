@@ -6,9 +6,14 @@ from __future__ import annotations
 import argparse
 import copy
 import json
+import os
 import platform as python_platform
 import statistics
+import sys
 from pathlib import Path
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from lib.path_validation import validate_read_path, validate_write_path_within_root
 
 CORE_METRICS = [
     "p50_ms",
@@ -29,8 +34,9 @@ STAGE_KEYS = ["parse_pct", "convert_pct", "etag_pct", "token_pct"]
 
 
 def load_json(path: str | Path) -> dict:
-    """Load and return JSON data from *path*."""
-    with open(path, "r", encoding="utf-8") as fh:
+    """Load and return JSON data from *path* after path validation."""
+    resolved = validate_read_path(path, purpose="report input")
+    with open(resolved, "r", encoding="utf-8") as fh:
         return json.load(fh)
 
 
@@ -44,9 +50,12 @@ def write_json(data: dict, path: str | Path) -> None:
         data (dict): Mapping to serialize to JSON.
         path (str | Path): Destination file path; parent directories will be created if missing.
     """
-    output_path = Path(path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(output_path, "w", encoding="utf-8") as fh:
+    output_path = Path(path).resolve()
+    validated_output = validate_write_path_within_root(
+        output_path, output_path.parent, purpose="report output",
+    )
+    validated_output.parent.mkdir(parents=True, exist_ok=True)
+    with open(validated_output, "w", encoding="utf-8") as fh:
         json.dump(data, fh, indent=2, ensure_ascii=False)
         fh.write("\n")
 

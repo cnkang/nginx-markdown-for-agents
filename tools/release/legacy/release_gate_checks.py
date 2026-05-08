@@ -5,7 +5,12 @@ Each function returns a tuple of (passed: bool, messages: list[str]).
 
 import os
 import re
+import sys
+from pathlib import Path
 from typing import Iterator, Optional, Tuple, List
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from lib.path_validation import validate_read_path
 
 from tools.release.legacy.release_constants import SUBSPECS_KEYWORDS
 
@@ -121,7 +126,8 @@ def _find_missing_terms(content_lower: str, required_terms: List[str]) -> List[s
 def _read_utf8_file(path: str) -> Tuple[Optional[str], Optional[str]]:
     """Read UTF-8 text file and return (content, error_message)."""
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        validated = validate_read_path(path, purpose="gate check file")
+        with open(validated, "r", encoding="utf-8") as f:
             return f.read(), None
     except (OSError, UnicodeDecodeError) as exc:
         return None, str(exc)

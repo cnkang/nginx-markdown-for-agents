@@ -11,6 +11,34 @@
 #include "../../src/ngx_http_markdown_filter_module.h"
 
 /*
+ * Stub effective-conf helpers required by conversion_impl.h.
+ * These return the live conf value (eff is NULL in these tests).
+ */
+static ngx_flag_t
+ngx_http_markdown_effective_prune_noise(
+    const ngx_http_markdown_effective_conf_t *eff,
+    const ngx_http_markdown_conf_t *conf)
+{
+    return (eff != NULL) ? eff->prune_noise : conf->prune_noise;
+}
+
+static size_t
+ngx_http_markdown_effective_memory_budget(
+    const ngx_http_markdown_effective_conf_t *eff,
+    const ngx_http_markdown_conf_t *conf)
+{
+    return (eff != NULL) ? eff->memory_budget : conf->memory_budget;
+}
+
+static ngx_uint_t
+ngx_http_markdown_effective_log_verbosity(
+    const ngx_http_markdown_effective_conf_t *eff,
+    const ngx_http_markdown_conf_t *conf)
+{
+    return (eff != NULL) ? eff->log_verbosity : conf->log_verbosity;
+}
+
+/*
  * Local definition of MarkdownOptions matching the Rust FFI ABI layout.
  * This avoids depending on the cbindgen-generated markdown_converter.h
  * which only exists after building the Rust library (not available in
@@ -1019,7 +1047,7 @@ test_prepare_conversion_options_basic(void)
     conf.token_estimate = 1;
     conf.front_matter = 1;
 
-    TEST_ASSERT(ngx_http_markdown_prepare_conversion_options(&r, &conf, &options) == NGX_OK,
+    TEST_ASSERT(ngx_http_markdown_prepare_conversion_options(&r, &conf, NULL, &options) == NGX_OK,
                 "prepare_conversion_options should succeed");
     TEST_ASSERT(options.flavor == 0, "flavor should be CommonMark (0)");
     TEST_ASSERT(options.timeout_ms == 5000, "timeout should be 5000");
@@ -1064,7 +1092,7 @@ test_prepare_conversion_options_gfm(void)
     conf.flavor = 1;  /* GFM */
     conf.timeout = 3000;
 
-    TEST_ASSERT(ngx_http_markdown_prepare_conversion_options(&r, &conf, &options) == NGX_OK,
+    TEST_ASSERT(ngx_http_markdown_prepare_conversion_options(&r, &conf, NULL, &options) == NGX_OK,
                 "prepare_conversion_options should succeed for GFM");
     TEST_ASSERT(options.flavor == 1, "flavor should be GFM (1)");
     TEST_ASSERT(options.timeout_ms == 3000, "timeout should be 3000");
@@ -1099,7 +1127,7 @@ test_prepare_conversion_options_no_content_type(void)
     r.headers_out.content_type.data = NULL;
     r.loc_conf = &conf;
 
-    TEST_ASSERT(ngx_http_markdown_prepare_conversion_options(&r, &conf, &options) == NGX_OK,
+    TEST_ASSERT(ngx_http_markdown_prepare_conversion_options(&r, &conf, NULL, &options) == NGX_OK,
                 "prepare_conversion_options should succeed without content_type");
     TEST_ASSERT(options.content_type == NULL, "content_type should be NULL");
     TEST_ASSERT(options.content_type_len == 0, "content_type_len should be 0");
@@ -1137,7 +1165,7 @@ test_prepare_conversion_options_no_base_url(void)
     r.loc_conf = &conf;
     r.srv_conf = &cscf;
 
-    TEST_ASSERT(ngx_http_markdown_prepare_conversion_options(&r, &conf, &options) == NGX_OK,
+    TEST_ASSERT(ngx_http_markdown_prepare_conversion_options(&r, &conf, NULL, &options) == NGX_OK,
                 "prepare_conversion_options should succeed even without base_url");
     TEST_ASSERT(options.base_url == NULL, "base_url should be NULL on failure");
     TEST_ASSERT(options.base_url_len == 0, "base_url_len should be 0 on failure");
@@ -1168,7 +1196,7 @@ test_prepare_conversion_options_flavor_clamp(void)
 
     conf.flavor = (ngx_uint_t) UINT32_MAX + 1;
 
-    TEST_ASSERT(ngx_http_markdown_prepare_conversion_options(&r, &conf, &options) == NGX_OK,
+    TEST_ASSERT(ngx_http_markdown_prepare_conversion_options(&r, &conf, NULL, &options) == NGX_OK,
                 "prepare_conversion_options should succeed with clamped flavor");
     TEST_ASSERT(options.flavor == UINT32_MAX, "flavor should be clamped to UINT32_MAX");
 
@@ -1202,7 +1230,7 @@ test_prepare_conversion_options_timeout_clamp(void)
 
     conf.timeout = (ngx_msec_t) UINT32_MAX + 1;
 
-    TEST_ASSERT(ngx_http_markdown_prepare_conversion_options(&r, &conf, &options) == NGX_OK,
+    TEST_ASSERT(ngx_http_markdown_prepare_conversion_options(&r, &conf, NULL, &options) == NGX_OK,
                 "prepare_conversion_options should succeed with clamped timeout");
     TEST_ASSERT(options.timeout_ms == UINT32_MAX, "timeout should be clamped to UINT32_MAX");
 
@@ -1239,7 +1267,7 @@ test_prepare_conversion_options_prune_selectors(void)
     conf.prune_selectors = &selectors;
     conf.prune_noise = 1;
 
-    TEST_ASSERT(ngx_http_markdown_prepare_conversion_options(&r, &conf, &options) == NGX_OK,
+    TEST_ASSERT(ngx_http_markdown_prepare_conversion_options(&r, &conf, NULL, &options) == NGX_OK,
                 "prepare_conversion_options should succeed with prune_selectors");
     TEST_ASSERT(options.prune_selectors != NULL, "prune_selectors should be set");
     TEST_ASSERT(options.prune_selector_len > 0, "prune_selector_len should be > 0");
@@ -1277,7 +1305,7 @@ test_prepare_conversion_options_prune_protection_selectors(void)
     conf.prune_protection_selectors = &protection;
     conf.prune_noise = 1;
 
-    TEST_ASSERT(ngx_http_markdown_prepare_conversion_options(&r, &conf, &options) == NGX_OK,
+    TEST_ASSERT(ngx_http_markdown_prepare_conversion_options(&r, &conf, NULL, &options) == NGX_OK,
                 "prepare_conversion_options should succeed with prune_protection_selectors");
     TEST_ASSERT(options.prune_protection_selectors != NULL,
                 "prune_protection_selectors should be set");
@@ -1320,7 +1348,7 @@ test_prepare_conversion_options_schema_server_fallback(void)
     conf.flavor = 0;
     conf.timeout = 5000;
 
-    TEST_ASSERT(ngx_http_markdown_prepare_conversion_options(&r, &conf, &options) == NGX_OK,
+    TEST_ASSERT(ngx_http_markdown_prepare_conversion_options(&r, &conf, NULL, &options) == NGX_OK,
                 "prepare_conversion_options should succeed with cscf fallback");
     TEST_ASSERT(options.base_url != NULL, "base_url should be constructed");
     TEST_ASSERT(options.base_url_len > 0, "base_url_len should be > 0");
