@@ -86,3 +86,23 @@ def test_single_classification_column_rejects_missing_state_cell():
     assert result.has_failures
     fail_detail = next(d for s, _, d in result.results if s == "FAIL")
     assert "missing classification" in fail_detail
+
+
+def test_framework_mode_does_not_require_optional_kiro_specs(monkeypatch, tmp_path):
+    """Default framework gate should validate repo-owned artifacts only."""
+    from tools.release.gates import validate_release_gates
+
+    missing_specs_dir = tmp_path / "missing-specs"
+
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "validate_release_gates.py",
+            "--mode",
+            "framework",
+            "--specs-dir",
+            str(missing_specs_dir),
+        ],
+    )
+
+    assert validate_release_gates.main() == 0
