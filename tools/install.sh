@@ -186,19 +186,30 @@ semver_lt() {
   l1="${l1:-0}"; l2="${l2:-0}"; l3="${l3:-0}"
   r1="${r1:-0}"; r2="${r2:-0}"; r3="${r3:-0}"
 
-  if ((10#$l1 < 10#$r1)); then
+  # Strip leading zeros for arithmetic comparison to avoid
+  # octal interpretation; sed removes leading zeros then falls
+  # back to 0 for empty strings.  This avoids the 10# prefix
+  # which SonarCloud's shell parser cannot handle.
+  l1=$(echo "$l1" | sed 's/^0*//'); l1=${l1:-0}
+  l2=$(echo "$l2" | sed 's/^0*//'); l2=${l2:-0}
+  l3=$(echo "$l3" | sed 's/^0*//'); l3=${l3:-0}
+  r1=$(echo "$r1" | sed 's/^0*//'); r1=${r1:-0}
+  r2=$(echo "$r2" | sed 's/^0*//'); r2=${r2:-0}
+  r3=$(echo "$r3" | sed 's/^0*//'); r3=${r3:-0}
+
+  if ((l1 < r1)); then
     return 0
-  elif ((10#$l1 > 10#$r1)); then
+  elif ((l1 > r1)); then
     return 1
   fi
 
-  if ((10#$l2 < 10#$r2)); then
+  if ((l2 < r2)); then
     return 0
-  elif ((10#$l2 > 10#$r2)); then
+  elif ((l2 > r2)); then
     return 1
   fi
 
-  if ((10#$l3 < 10#$r3)); then
+  if ((l3 < r3)); then
     return 0
   fi
 
