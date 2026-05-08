@@ -193,3 +193,4 @@ curl -s -H "Accept: text/markdown" http://localhost/page | head -50
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 0.6.0 | 2026-04-28 | v060-prod | Initial migration guide |
+| 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |

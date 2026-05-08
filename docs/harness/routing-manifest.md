@@ -69,3 +69,4 @@ Plan-only targets (for example `*-plan`) are documentation aids, not evidence.
 | 0.6.0 | 2026-05-03 | Codex | Aligned coverage-gate overlay command with machine manifest |
 | 0.6.0 | 2026-05-03 | Codex | Added dynamic-config-hot-reload pack and tightened protocol/release routes from two-week branch scan |
 | 0.6.1 | 2026-05-06 | Kang | Added output-safety pack (Rule 27) and sync points for Rules 28–31 |
+| 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |

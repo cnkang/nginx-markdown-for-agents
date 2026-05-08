@@ -92,3 +92,4 @@ repo-owned truth surfaces (`AGENTS.md`, `docs/harness/`, `tools/harness/`,
 | 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |
 | 0.5.5 | 2026-04-24 | Codex | Added harness-remediation entrypoint |
 | 0.5.5 | 2026-04-24 | Codex | Added nginx-protocol-safety (auth/cache/conditional safety) and release-governance entrypoints |
+| 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
