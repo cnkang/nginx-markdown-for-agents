@@ -48,3 +48,4 @@ make coverage-sonar-xml
 |---------|------|--------|---------|
 | 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |
 | 0.5.5 | 2026-04-25 | Codex | Added shell helper explicit-return drift guardrail |
+| 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |

@@ -85,3 +85,4 @@ matching the platform's `uname`-style identifier (`<os>-<arch>`, e.g.,
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |
+| 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |

@@ -155,3 +155,4 @@ All project-specific C preprocessor constants must use the `NGX_HTTP_MARKDOWN_` 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |
+| 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |

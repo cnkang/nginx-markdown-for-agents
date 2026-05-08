@@ -77,3 +77,4 @@ absence instead of treating legacy validation as default evidence.
 | 0.5.5 | 2026-04-25 | Codex | Added SonarCloud quality sync points for release-gate validators |
 | 0.6.0 | 2026-05-03 | Codex | Added install-verify/update-matrix regression sync points |
 | 0.6.1 | 2026-05-06 | Kang | Added merge-integrity and residual-code sync points (Rule 31) |
+| 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |

@@ -11,16 +11,16 @@ steering files.
 
 ## Current Assessment
 
-As of the **current release line (0.5.0)**, the project includes a dual-engine
-conversion model (full-buffer default plus opt-in streaming), streaming
+As of the **current release line (0.6.2)**, the project includes a dual-engine
+conversion model (streaming default with full-buffer fallback), streaming
 failure semantics aligned to commit boundaries, parity and diff validation for
 streaming behavior, rollout observability with shadow-mode checks, benchmark
-evidence for release gates, and a repo-owned harness for agent workflow
-governance. Core features are implemented and tested. The codebase includes
-unit, integration, E2E, fuzz-oriented validation entrypoints, and
-harness-specific validation entrypoints, along with documentation covering
-installation, configuration, operations, architecture, and contributor-facing
-harness maintenance.
+evidence for release gates, dynamic configuration hot-reload, and a repo-owned
+harness for agent workflow governance. Core features are implemented and
+tested. The codebase includes unit, integration, E2E, fuzz-oriented validation
+entrypoints, and harness-specific validation entrypoints, along with
+documentation covering installation, configuration, operations, architecture,
+and contributor-facing harness maintenance.
 
 ### Repository Harness Updates
 
@@ -33,6 +33,46 @@ harness maintenance.
   validation no longer depends on private local assets being present.
 - The harness now records short-lived execution memory in a user-local state
   carrier instead of tracked repository docs.
+
+### Release 0.6.2 Updates
+
+- Dynamic configuration hot-reload:
+  - `markdown_dynamic_config` directive for runtime configuration reload without
+    NGINX restart, with snapshot isolation and reload retry contract.
+  - Dynconf snapshot isolation: `dynconf_enabled=0` locations are never
+    influenced by the global snapshot; `header_filter` reads the snapshot
+    exactly once to eliminate race windows.
+  - Unknown dynconf keys cause atomic reload rejection (entire file rejected).
+- Snapshot race elimination (v0.6.2):
+  - `active_snapshot` read once at `header_filter` entry into function-lifetime
+    `snap_copy`; effective conf built once from that copy.
+  - Deferred-state latches cleared on both success and failure resume paths.
+- dynconf_path_configured lifecycle:
+  - Flag lives in `main_conf_t` (per-reload isolation), not file-scope static.
+
+### Release 0.6.1 Updates
+
+- Hardening release:
+  - Rules 27–31: Markdown output escaping and injection prevention, full
+    `ngx_list_part_t` chain iteration, flag clearing ordering, NUL-termination
+    of `ngx_str_t` before C API calls, merge residual code integrity checks.
+  - Output-safety risk pack added under `docs/harness/risk-packs/`.
+
+### Release 0.6.0 Updates
+
+- Production readiness release:
+  - Streaming engine as default (`markdown_streaming_engine auto`).
+  - Noise pruning default enabled (`markdown_prune_noise on`).
+  - Unified memory budget (`markdown_memory_budget`) superseding dual
+    `markdown_max_size` + `markdown_streaming_budget`.
+  - OpenTelemetry tracing integration (self-implemented OTLP HTTP/protobuf).
+  - Per-path metrics with cardinality control.
+  - OS package manager distribution (APT, YUM/DNF, Homebrew).
+  - Helm chart with Ingress annotation support.
+  - Coverage gate as CI merge requirement.
+  - MDX and Org-mode flavor support.
+  - Dynamic configuration hot-reload (`markdown_dynamic_config`).
+  - ADR-0006 (OTel), ADR-0007 (Streaming Default), ADR-0008 (Noise Pruning Default).
 
 ### Release 0.5.0 Updates
 
@@ -262,17 +302,21 @@ See [DEPLOYMENT_EXAMPLES.md](../guides/DEPLOYMENT_EXAMPLES.md) for configuration
 
 ## Current Focus and Roadmap
 
-### Current Release (0.5.0)
-- Dual-engine conversion architecture: full-buffer default plus opt-in
-  streaming path
+### Current Release (0.6.2)
+- Dual-engine conversion architecture: streaming default with full-buffer
+  fallback
+- Dynamic configuration hot-reload with snapshot isolation and retry contract
 - Streaming failure semantics and fallback controls aligned to commit
   boundaries
 - Streaming parity and differential validation across chunk boundaries and
   failure paths
 - Streaming rollout observability, including shadow-mode verification support
-- Benchmark corpus and evidence-based release-gate validation for 0.5.0
+- Benchmark corpus and evidence-based release-gate validation
 - Repo-owned harness governance (`AGENTS.md`, `docs/harness/`, `tools/harness/`)
 - Prometheus-compatible metrics endpoint for operational monitoring
+- OpenTelemetry tracing integration (self-implemented OTLP HTTP/protobuf)
+- Per-path metrics with cardinality control
+- OS package manager distribution (APT, YUM/DNF, Homebrew)
 - Rollout and rollback guides with executable operator procedures
 - Performance baseline gating system and hardened CI/CD validation
 
@@ -291,8 +335,8 @@ See [DEPLOYMENT_EXAMPLES.md](../guides/DEPLOYMENT_EXAMPLES.md) for configuration
 
 The following limitations are documented:
 
-1. **Streaming Is Opt-In**: Full-buffer remains the default path; streaming is
-   enabled deliberately per rollout strategy
+1. **Streaming Is Default**: Streaming is the default engine; full-buffer is
+   the fallback for explicit opt-out or engine-selection override
 2. **HTML Input**: Requires HTML input (uncompressed or automatically decompressed)
 3. **Conversion Fidelity**: Some complex HTML structures may not convert perfectly to Markdown
 4. **Performance Overhead**: Large documents incur conversion overhead (mitigated by caching)
@@ -384,14 +428,15 @@ See `examples/docker/` for Docker build examples.
 
 ## Summary
 
-**NGINX Markdown for Agents** is at version 0.5.0. The project provides
+**NGINX Markdown for Agents** is at version 0.6.2. The project provides
 HTML-to-Markdown conversion through NGINX content negotiation with a
-dual-engine model, adding bounded-memory streaming as an opt-in path while
-keeping full-buffer conversion as the default baseline. It includes
-Prometheus-compatible metrics, decision reason codes, rollout and rollback
-guides, parity and evidence workflows for streaming rollout safety, release
-automation, performance baseline gating, runtime validation reuse, fuzzing
-workflows, and shared metrics aggregation for observability.
+dual-engine model, with bounded-memory streaming as the default path and
+full-buffer conversion as the fallback. It includes Prometheus-compatible
+metrics, decision reason codes, rollout and rollback guides, parity and
+evidence workflows for streaming rollout safety, dynamic configuration
+hot-reload, OpenTelemetry tracing, per-path metrics, OS package distribution,
+release automation, performance baseline gating, runtime validation reuse,
+fuzzing workflows, and shared metrics aggregation for observability.
 
 ### Key Components
 - Core feature implementation
@@ -418,3 +463,4 @@ For questions, issues, or feature requests, use the [GitHub issue tracker](https
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |
+| 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |

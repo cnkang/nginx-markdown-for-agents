@@ -85,7 +85,7 @@ The strategic review implies the following documentation posture:
 
 ## 0.6.0 Production Readiness Release
 
-> **Current status (as of 2026-05-02)**: v0.6.0 full scope implemented. All P0, P1, and P2 items are complete. Release gates 13/13 PASS.
+> **Current status (as of 2026-05-08)**: v0.6.2 released. All P0, P1, and P2 items from 0.6.0 are complete, plus dynconf snapshot isolation and reload retry contract. Release gates 13/13 PASS.
 
 `0.6.0` delivers the **P0 production-readiness subset**: default behavior changes that make the system production-optimal out-of-the-box, with full backward compatibility and operator rollback controls. P1/P2 capabilities are tracked in the spec but not blocking for this release.
 
@@ -182,3 +182,4 @@ An operator can:
 |---------|------|--------|---------|
 | 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |
 | 0.6.0 | 2026-04-28 | v0.6.0-planning | Added 0.6.0 Production Readiness release scope, cut line, and compatibility contract |
+| 0.6.2 | 2026-05-08 | Kang | Updated current status to v0.6.2 released |

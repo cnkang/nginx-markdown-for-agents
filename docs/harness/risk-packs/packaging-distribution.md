@@ -51,3 +51,4 @@ make release-gates-check
 |---------|------|--------|---------|
 | 0.6.0 | 2026-04-28 | v0.6.0-planning | Initial pack definition |
 | 0.6.0 | 2026-05-03 | Codex | Covered Homebrew workflows/formula, package metadata, and release-gate docs |
+| 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
