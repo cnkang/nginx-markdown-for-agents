@@ -106,3 +106,23 @@ def test_framework_mode_does_not_require_optional_kiro_specs(monkeypatch, tmp_pa
     )
 
     assert validate_release_gates.main() == 0
+
+
+def test_strict_mode_requires_optional_kiro_specs(monkeypatch, tmp_path):
+    """Strict mode should still fail when the specs tree is absent."""
+    from tools.release.gates import validate_release_gates
+
+    missing_specs_dir = tmp_path / "missing-specs"
+
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "validate_release_gates.py",
+            "--mode",
+            "strict",
+            "--specs-dir",
+            str(missing_specs_dir),
+        ],
+    )
+
+    assert validate_release_gates.main() == 1
