@@ -73,7 +73,7 @@ echo "--- Direct conf-><mutable_field> reads ---" >&2
 
 hits=0
 while IFS= read -r match; do
-    if [ -z "$match" ]; then
+    if [[ -z "$match" ]]; then
         continue
     fi
     file="$(echo "$match" | cut -d: -f1)"
@@ -83,7 +83,7 @@ while IFS= read -r match; do
 
     # Skip allowlisted files
     for allowed in "${ALLOWED_FILES[@]}"; do
-        if [ "$basename" = "$allowed" ]; then
+        if [[ "$basename" == "$allowed" ]]; then
             continue 2
         fi
     done
@@ -106,7 +106,7 @@ while IFS= read -r match; do
     # through eff parameter (fixed in v0.6.2).  Any future regression
     # to direct conf-> reads will be caught here.
     func_start=$((line - 50))
-    if [ "$func_start" -lt 1 ]; then
+    if [[ "$func_start" -lt 1 ]]; then
         func_start=1
     fi
     context_lines="$(sed -n "${func_start},${line}p" "$file" 2>/dev/null)"
@@ -141,7 +141,7 @@ while IFS= read -r match; do
     hits=$((hits + 1))
 done < <(grep -rnE "conf->(enabled|enabled_source|prune_noise|log_verbosity|memory_budget|streaming_budget)[^_a-zA-Z]" "$SRC_DIR" --include='*.c' --include='*.h' 2>/dev/null || true)
 
-if [ "$hits" -eq 0 ]; then
+if [[ "$hits" -eq 0 ]]; then
     echo "  (none found)" >&2
 fi
 echo "" >&2
@@ -155,19 +155,19 @@ echo "" >&2
 echo "--- Regression guard: is_enabled() must use effective view ---" >&2
 
 is_enabled_file="${SRC_DIR}/ngx_http_markdown_config_core_impl.h"
-if [ -f "$is_enabled_file" ]; then
+if [[ -f "$is_enabled_file" ]]; then
     # Find the function body range of ngx_http_markdown_is_enabled
     is_enabled_start="$(grep -n '^ngx_http_markdown_is_enabled(' "$is_enabled_file" 2>/dev/null | head -1 | cut -d: -f1)"
-    if [ -n "$is_enabled_start" ]; then
+    if [[ -n "$is_enabled_start" ]]; then
         # Find the closing brace (simple heuristic: next ^} after function start)
         is_enabled_end="$(sed -n "$((is_enabled_start + 1)),\$p" "$is_enabled_file" 2>/dev/null \
             | grep -n '^}' | head -1 | cut -d: -f1)"
-        if [ -n "$is_enabled_end" ]; then
+        if [[ -n "$is_enabled_end" ]]; then
             is_enabled_end=$((is_enabled_start + is_enabled_end))
             # Check for direct conf->enabled or conf->enabled_source reads
             # (excluding the ternary fallback pattern "eff != NULL ? eff->... : conf->...")
             while IFS= read -r match; do
-                if [ -z "$match" ]; then
+                if [[ -z "$match" ]]; then
                     continue
                 fi
                 iline="$(echo "$match" | cut -d: -f1)"
@@ -205,27 +205,27 @@ echo "" >&2
 echo "--- Regression guard: active_snapshot read-once in header_filter ---" >&2
 
 request_impl="${SRC_DIR}/ngx_http_markdown_request_impl.h"
-if [ -f "$request_impl" ]; then
+if [[ -f "$request_impl" ]]; then
     # Find the header_filter function body
     hf_start="$(grep -n 'ngx_http_markdown_header_filter(' "$request_impl" 2>/dev/null \
         | grep -v 'static' | head -1 | cut -d: -f1)"
-    if [ -z "$hf_start" ]; then
+    if [[ -z "$hf_start" ]]; then
         hf_start="$(grep -n 'ngx_http_markdown_header_filter(' "$request_impl" 2>/dev/null \
             | head -1 | cut -d: -f1)"
     fi
-    if [ -n "$hf_start" ]; then
+    if [[ -n "$hf_start" ]]; then
         # Find closing brace (next ^} at column 1 after start)
         hf_end="$(sed -n "$((hf_start + 1)),\$p" "$request_impl" 2>/dev/null \
             | grep -n '^}' | head -1 | cut -d: -f1)"
-        if [ -n "$hf_end" ]; then
+        if [[ -n "$hf_end" ]]; then
             hf_end=$((hf_start + hf_end))
             # Count active_snapshot reads (excluding comments) in the function body
             snap_reads="$(sed -n "${hf_start},${hf_end}p" "$request_impl" 2>/dev/null \
                 | grep -vE '^\s*/\*|^\s*\*' \
                 | grep -c 'ngx_http_markdown_dynconf_watcher\.active_snapshot' || true)"
-            if [ "$snap_reads" -eq 1 ]; then
+            if [[ "$snap_reads" -eq 1 ]]; then
                 echo "  OK      single active_snapshot read in header_filter (correct)" >&2
-            elif [ "$snap_reads" -eq 0 ]; then
+            elif [[ "$snap_reads" -eq 0 ]]; then
                 echo "  WARNING no active_snapshot read in header_filter — dynconf may not be initialized" >&2
                 warnings=$((warnings + 1))
             else
@@ -252,10 +252,10 @@ echo "" >&2
 # NULL (or omitting eff) is a regression.
 echo "--- Regression guard: handle_ctx_alloc_failure must receive eff ---" >&2
 
-if [ -f "$request_impl" ]; then
+if [[ -f "$request_impl" ]]; then
     # Find calls to handle_ctx_alloc_failure
     while IFS= read -r call_match; do
-        if [ -z "$call_match" ]; then
+        if [[ -z "$call_match" ]]; then
             continue
         fi
         call_line="$(echo "$call_match" | cut -d: -f1)"
@@ -285,13 +285,13 @@ echo "" >&2
 # header_filter after the initial build is a regression.
 echo "--- Regression guard: no build_effective_conf re-invocation in header_filter ---" >&2
 
-if [ -f "$request_impl" ]; then
-    if [ -n "$hf_start" ] && [ -n "$hf_end" ]; then
+if [[ -f "$request_impl" ]]; then
+    if [[ -n "$hf_start" ]] && [[ -n "$hf_end" ]]; then
         # Count build_effective_conf calls in header_filter body
         # (the initial build at the top is allowed; any after the snap_copy line are not)
         rebuild_count="$(sed -n "${hf_start},${hf_end}p" "$request_impl" 2>/dev/null \
             | grep -c 'ngx_http_markdown_build_effective_conf' || true)"
-        if [ "$rebuild_count" -le 1 ]; then
+        if [[ "$rebuild_count" -le 1 ]]; then
             echo "  OK      at most 1 build_effective_conf call in header_filter (correct)" >&2
         else
             echo "  ERROR   ${rebuild_count} build_effective_conf calls in header_filter — must call at most once to avoid race" >&2
@@ -314,8 +314,8 @@ echo "" >&2
 # Pattern: build_effective_conf(..., conf->dynconf_enabled ? &snap_copy : NULL, ...)
 echo "--- Regression guard: build_effective_conf snapshot gated by dynconf_enabled ---" >&2
 
-if [ -f "$request_impl" ]; then
-    if [ -n "$hf_start" ] && [ -n "$hf_end" ]; then
+if [[ -f "$request_impl" ]]; then
+    if [[ -n "$hf_start" ]] && [[ -n "$hf_end" ]]; then
         # Check that build_effective_conf call includes dynconf_enabled guard.
         # The call may span multiple lines, so extract the entire function
         # body and search for dynconf_enabled near build_effective_conf.
@@ -342,7 +342,7 @@ echo "" >&2
 echo "--- Regression guard: applied_mtime updated only on successful reload ---" >&2
 
 dynconf_impl="${SRC_DIR}/ngx_http_markdown_dynconf_impl.h"
-if [ -f "$dynconf_impl" ]; then
+if [[ -f "$dynconf_impl" ]]; then
     # Check that timer_handler contains applied_mtime assignment
     # guarded by success return codes
     if grep -q 'applied_mtime.*=.*last_mtime' "$dynconf_impl" 2>/dev/null; then
@@ -378,12 +378,12 @@ echo "  Errors:   ${errors}" >&2
 echo "  Warnings: ${warnings}" >&2
 echo "" >&2
 
-if [ "$errors" -gt 0 ]; then
+if [[ "$errors" -gt 0 ]]; then
     echo "FAIL: ${errors} error(s) found — fix before merge" >&2
     exit 1
 fi
 
-if [ "$warnings" -gt 0 ]; then
+if [[ "$warnings" -gt 0 ]]; then
     echo "PASS with warnings: ${warnings} warning(s) — review recommended" >&2
     exit 0
 fi

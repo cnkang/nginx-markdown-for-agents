@@ -40,12 +40,23 @@ static void ngx_http_markdown_log_decision_with_category(
     const ngx_http_markdown_effective_conf_t *eff,
     const ngx_str_t *reason_code,
     const ngx_str_t *error_category);
-static void ngx_http_markdown_log_decision_debug(
-    ngx_http_request_t *r, const ngx_http_markdown_conf_t *conf,
+
+/*
+ * Resolved request metadata for decision log emission.
+ * Groups method name and content-type to keep log_decision_debug
+ * parameter count within the 7-parameter limit (c:S107).
+ */
+typedef struct {
+    ngx_str_t *method_name;
+    ngx_str_t *content_type;
+} ngx_http_markdown_decision_meta_t;
+
+static void ngx_http_markdown_log_decision_debug(ngx_http_request_t *r,
+    const ngx_http_markdown_conf_t *conf,
     const ngx_http_markdown_effective_conf_t *eff,
-    const ngx_str_t *reason_code, const ngx_str_t *error_category,
-    ngx_uint_t log_level, ngx_str_t *method_name,
-    ngx_str_t *content_type);
+    const ngx_str_t *reason_code,
+    const ngx_str_t *error_category, ngx_uint_t log_level,
+    ngx_http_markdown_decision_meta_t *meta);
 
 
 /*
@@ -176,7 +187,7 @@ ngx_http_markdown_log_decision_debug(ngx_http_request_t *r,
     const ngx_http_markdown_effective_conf_t *eff,
     const ngx_str_t *reason_code,
     const ngx_str_t *error_category, ngx_uint_t log_level,
-    ngx_str_t *method_name, ngx_str_t *content_type)
+    ngx_http_markdown_decision_meta_t *meta)
 {
     ngx_str_t                     accept_value;
     ngx_str_t                     filter_value;
@@ -254,8 +265,8 @@ ngx_http_markdown_log_decision_debug(ngx_http_request_t *r,
             "method=%V uri=%V content_type=%V "
             "filter_value=%V accept=%V status=%ui",
             reason_code, error_category,
-            method_name, &r->uri,
-            content_type, &filter_value,
+            meta->method_name, &r->uri,
+            meta->content_type, &filter_value,
             &accept_value,
             r->headers_out.status);
     } else {
@@ -263,8 +274,8 @@ ngx_http_markdown_log_decision_debug(ngx_http_request_t *r,
             "markdown decision: reason=%V "
             "method=%V uri=%V content_type=%V "
             "filter_value=%V accept=%V status=%ui",
-            reason_code, method_name, &r->uri,
-            content_type, &filter_value,
+            reason_code, meta->method_name, &r->uri,
+            meta->content_type, &filter_value,
             &accept_value,
             r->headers_out.status);
     }
@@ -359,9 +370,13 @@ ngx_http_markdown_log_decision_with_category(ngx_http_request_t *r,
 
     /* Debug extended format (FR-03.3) — delegated to helper */
     if (effective_verbosity == NGX_HTTP_MARKDOWN_LOG_DEBUG) {
+        ngx_http_markdown_decision_meta_t  meta;
+
+        meta.method_name = &method_name;
+        meta.content_type = &content_type;
         ngx_http_markdown_log_decision_debug(r, conf, eff,
             reason_code, error_category, log_level,
-            &method_name, &content_type);
+            &meta);
         return;
     }
 
