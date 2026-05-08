@@ -1315,10 +1315,11 @@ test_parse_size_edge_cases(void)
         "zero length should return NGX_ERROR");
 
     {
-        u_char long_buf[128];
-        line.data = long_buf;
-        line.len = sizeof(long_buf);
-        memset(long_buf, '1', sizeof(long_buf));
+        volatile u_char long_buf[128];
+        line.data = (u_char *) long_buf;
+        line.len = sizeof(long_buf) - 1;
+        memset((u_char *) long_buf, '1', sizeof(long_buf) - 1);
+        ((u_char *) long_buf)[sizeof(long_buf) - 1] = '\0';
         result = ngx_http_markdown_parse_size(&line);
         TEST_ASSERT(result == (size_t) NGX_ERROR,
             "oversized input should return NGX_ERROR");

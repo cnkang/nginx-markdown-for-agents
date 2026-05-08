@@ -1131,6 +1131,12 @@ ngx_http_markdown_dynconf_process_buffer(
 
         if (i >= *pos) {
             /* No complete line; shift remaining data. */
+            /* Defensive: line_start must not exceed pos (invariant from
+             * the loop above where i starts at *line_start and advances
+             * to *pos), but guard explicitly for static analysis. */
+            if (*line_start > *pos) {
+                return NGX_ERROR;
+            }
             ngx_memmove(buf, buf + *line_start, *pos - *line_start);
             *pos -= *line_start;
             *line_start = 0;
@@ -1209,6 +1215,15 @@ ngx_http_markdown_dynconf_reload(
     pos = 0;
 
     for ( ;; ) {
+        /* Defensive: pos must not exceed buffer size before read. */
+        if (pos > sizeof(buf)) {
+            ngx_log_error(NGX_LOG_WARN, log, 0,
+                          "markdown dynconf: buffer position overflow in \"%V\"",
+                          &watcher->path);
+            ngx_close_file(fd);
+            return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_INVALID_FILE;
+        }
+
         n = ngx_read_fd(fd, buf + pos, sizeof(buf) - pos);
         if (n == 0) {
             break;
@@ -1217,6 +1232,15 @@ ngx_http_markdown_dynconf_reload(
         if (n == -1) {
             ngx_log_error(NGX_LOG_WARN, log, 0,
                           "markdown dynconf: read error on \"%V\"",
+                          &watcher->path);
+            ngx_close_file(fd);
+            return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_IO_ERROR;
+        }
+
+        /* n > 0 here; check for overflow before adding to pos. */
+        if ((size_t) n > sizeof(buf) - pos) {
+            ngx_log_error(NGX_LOG_WARN, log, 0,
+                          "markdown dynconf: read overflow in \"%V\"",
                           &watcher->path);
             ngx_close_file(fd);
             return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_IO_ERROR;
