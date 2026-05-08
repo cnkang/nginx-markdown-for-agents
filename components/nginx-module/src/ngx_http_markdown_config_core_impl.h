@@ -814,7 +814,7 @@ ngx_http_markdown_parse_filter_flag(ngx_str_t *value, ngx_flag_t *enabled)
  */
 ngx_flag_t
 ngx_http_markdown_is_enabled(ngx_http_request_t *r,
-    ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_conf_t *conf,
     const ngx_http_markdown_effective_conf_t *eff)
 {
     ngx_str_t    evaluated;
