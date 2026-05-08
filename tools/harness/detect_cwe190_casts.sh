@@ -66,7 +66,7 @@ echo "--- Pattern (c): direct ngx_parse_size() + (size_t) cast ---" >&2
 # without ngx_http_markdown_dynconf_parse_size_safe in between.
 parse_size_hits=0
 while IFS= read -r match; do
-    if [ -z "$match" ]; then
+    if [[ -z "$match" ]]; then
         continue
     fi
     file="$(echo "$match" | cut -d: -f1)"
@@ -82,7 +82,7 @@ while IFS= read -r match; do
     parse_size_hits=$((parse_size_hits + 1))
 done < <(grep -rn 'ngx_parse_size' "$SRC_DIR" --include='*.c' --include='*.h' 2>/dev/null || true)
 
-if [ "$parse_size_hits" -eq 0 ]; then
+if [[ "$parse_size_hits" -eq 0 ]]; then
     echo "  (none found)" >&2
 fi
 echo "" >&2
@@ -94,7 +94,7 @@ narrow_hits=0
 # Match (uint32_t), (uint8_t), (uInt) casts of expressions that look
 # like they hold size_t-range values
 while IFS= read -r match; do
-    if [ -z "$match" ]; then
+    if [[ -z "$match" ]]; then
         continue
     fi
     file="$(echo "$match" | cut -d: -f1)"
@@ -102,14 +102,14 @@ while IFS= read -r match; do
     content="$(echo "$match" | cut -d: -f3-)"
     # Check for upper-bound guard in the same line or 3 preceding lines
     context_start=$((line - 3))
-    if [ "$context_start" -lt 1 ]; then
+    if [[ "$context_start" -lt 1 ]]; then
         context_start=1
     fi
     has_guard=0
     if sed -n "${context_start},${line}p" "$file" 2>/dev/null | grep -qiE 'UINT_MAX|UINT32_MAX|INT_MAX|>.*max|>.*limit|>.*bound'; then
         has_guard=1
     fi
-    if [ "$has_guard" -eq 1 ]; then
+    if [[ "$has_guard" -eq 1 ]]; then
         echo "  OK      ${file}:${line} — narrowing cast with guard" >&2
     else
         echo "  WARNING ${file}:${line} — narrowing cast without visible upper-bound guard: ${content}" >&2
@@ -120,7 +120,7 @@ done < <(grep -rnE '\((uint32_t|uint8_t|uInt|int)\)[[:space:]]*\(' "$SRC_DIR" --
 
 # Also check specific known-dangerous patterns: (size_t) NGX_ERROR
 while IFS= read -r match; do
-    if [ -z "$match" ]; then
+    if [[ -z "$match" ]]; then
         continue
     fi
     file="$(echo "$match" | cut -d: -f1)"
@@ -129,12 +129,12 @@ while IFS= read -r match; do
     # Skip allowlisted files where (size_t) NGX_ERROR is an intentional sentinel
     skip=0
     for allowed in "${ALLOWED_SIZE_T_NGX_ERROR_FILES[@]}"; do
-        if [ "$basename" = "$allowed" ]; then
+        if [[ "$basename" == "$allowed" ]]; then
             skip=1
             break
         fi
     done
-    if [ "$skip" -eq 1 ]; then
+    if [[ "$skip" -eq 1 ]]; then
         echo "  OK      ${file}:${line} — (size_t) NGX_ERROR in allowlisted config handler" >&2
         narrow_hits=$((narrow_hits + 1))
         continue
@@ -144,7 +144,7 @@ while IFS= read -r match; do
     narrow_hits=$((narrow_hits + 1))
 done < <(grep -rn '(size_t) NGX_ERROR' "$SRC_DIR" --include='*.c' --include='*.h' 2>/dev/null || true)
 
-if [ "$narrow_hits" -eq 0 ]; then
+if [[ "$narrow_hits" -eq 0 ]]; then
     echo "  (none found)" >&2
 fi
 echo "" >&2
@@ -158,21 +158,21 @@ ssize_hits=0
 # This is heuristic; we flag the most dangerous common pattern:
 # (size_t) applied to a variable immediately after ngx_parse_size
 while IFS= read -r match; do
-    if [ -z "$match" ]; then
+    if [[ -z "$match" ]]; then
         continue
     fi
     file="$(echo "$match" | cut -d: -f1)"
     line="$(echo "$match" | cut -d: -f2)"
     # Check if there is a "< 0" or "NGX_ERROR" guard in preceding 5 lines
     context_start=$((line - 5))
-    if [ "$context_start" -lt 1 ]; then
+    if [[ "$context_start" -lt 1 ]]; then
         context_start=1
     fi
     has_guard=0
     if sed -n "${context_start},${line}p" "$file" 2>/dev/null | grep -qiE '< 0|>= 0|!= NGX_ERROR|== NGX_ERROR|NGX_OK'; then
         has_guard=1
     fi
-    if [ "$has_guard" -eq 1 ]; then
+    if [[ "$has_guard" -eq 1 ]]; then
         echo "  OK      ${file}:${line} — ssize_t→size_t cast with guard" >&2
     else
         echo "  WARNING ${file}:${line} — ssize_t→size_t cast without visible guard" >&2
@@ -181,7 +181,7 @@ while IFS= read -r match; do
     ssize_hits=$((ssize_hits + 1))
 done < <(grep -rnE '=\s*ngx_parse_size' "$SRC_DIR" --include='*.c' --include='*.h' 2>/dev/null || true)
 
-if [ "$ssize_hits" -eq 0 ]; then
+if [[ "$ssize_hits" -eq 0 ]]; then
     echo "  (none found)" >&2
 fi
 echo "" >&2
@@ -192,12 +192,12 @@ echo "  Errors:   ${errors}" >&2
 echo "  Warnings: ${warnings}" >&2
 echo "" >&2
 
-if [ "$errors" -gt 0 ]; then
+if [[ "$errors" -gt 0 ]]; then
     echo "FAIL: ${errors} error(s) found — fix before merge" >&2
     exit 1
 fi
 
-if [ "$warnings" -gt 0 ]; then
+if [[ "$warnings" -gt 0 ]]; then
     echo "PASS with warnings: ${warnings} warning(s) — review recommended" >&2
     exit 0
 fi
