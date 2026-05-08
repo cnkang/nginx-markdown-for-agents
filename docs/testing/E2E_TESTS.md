@@ -212,3 +212,4 @@ That helper owns:
 |---------|------|--------|---------|
 | 0.6.0 | 2026-05-02 | v060-prod | Added new E2E scripts (metrics, conditional requests, config merge, auth/cache, status codes); listed shared helpers |
 | 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |
+| 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |

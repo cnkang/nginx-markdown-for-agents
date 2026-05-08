@@ -2047,3 +2047,4 @@ tail -f /var/log/nginx/error.log | grep "conversion time"
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 0.5.0 | 2026-04-21 | docs-standardization | Added `markdown_streaming_engine`, `markdown_streaming_budget`, `markdown_metrics_format`, and `markdown_metrics_shm_size` directive documentation previously missing from this guide; added update tracking section |
+| 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
