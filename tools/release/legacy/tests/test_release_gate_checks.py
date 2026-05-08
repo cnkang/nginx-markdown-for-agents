@@ -239,3 +239,25 @@ def test_dod_evaluation_skips_fenced_code_blocks(tmp_path: Path):
     # Should NOT detect the fenced DoD table — vacuous pass with no PASS messages.
     assert passed
     assert not any("PASS" in msg and "notes.md" in msg for msg in messages)
+
+
+def test_legacy_release_gate_runner_skips_absent_optional_specs(tmp_path: Path):
+    """Legacy gate target should not require the optional local .kiro tree."""
+    from tools.release.legacy.validate_release_gates import _run_checks
+
+    release_dir = tmp_path / "release-gates"
+    release_dir.mkdir()
+    (release_dir / "release-checklist.md").write_text(
+        "- [ ] make release-gates-check-legacy\n",
+        encoding="utf-8",
+    )
+
+    results = _run_checks(str(tmp_path / "missing-specs"), str(release_dir))
+
+    assert all(passed for _, passed, _ in results)
+    assert any(
+        "SKIP_NOT_PRESENT" in message
+        for check_name, _, messages in results
+        if check_name == "Document Existence (Property 2)"
+        for message in messages
+    )
