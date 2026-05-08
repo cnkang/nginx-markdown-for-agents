@@ -44,6 +44,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from statistics import median
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from lib.path_validation import validate_read_path, validate_write_path_within_root
+
 # ---------------------------------------------------------------------------
 # Make sibling modules importable when invoked directly
 # ---------------------------------------------------------------------------
@@ -78,7 +81,8 @@ def discover_fixtures(corpus_dir: Path) -> list[dict]:
         if not html_path.exists():
             print(f"WARNING: no HTML for {meta_path}, skipping", file=sys.stderr)
             continue
-        with open(meta_path, "r", encoding="utf-8") as f:
+        validated_meta = validate_read_path(meta_path, purpose="corpus meta")
+        with open(validated_meta, "r", encoding="utf-8") as f:
             meta = json.load(f)
         meta["_html_path"] = str(html_path)
         meta["_meta_path"] = str(meta_path)
@@ -89,7 +93,8 @@ def discover_fixtures(corpus_dir: Path) -> list[dict]:
 def load_corpus_version(corpus_dir: Path) -> str:
     """Read corpus-version.json and return the version string."""
     version_file = corpus_dir / "corpus-version.json"
-    with open(version_file, "r", encoding="utf-8") as f:
+    validated_version = validate_read_path(version_file, purpose="corpus version")
+    with open(validated_version, "r", encoding="utf-8") as f:
         data = json.load(f)
     return data["version"]
 
@@ -384,7 +389,10 @@ def write_examples(
 
         # Run converter for the .md output
         output, _, _ = run_converter(converter_bin, html_path)
-        with open(md_dest, "w", encoding="utf-8") as f:
+        validated_md = validate_write_path_within_root(
+            md_dest, Path(md_dest).parent, purpose="markdown output",
+        )
+        with open(validated_md, "w", encoding="utf-8") as f:
             f.write(output)
 
 
