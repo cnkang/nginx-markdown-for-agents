@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 from typing import Iterator, Optional, Tuple, List
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from lib.path_validation import validate_read_path
 
 from tools.release.legacy.release_constants import SUBSPECS_KEYWORDS
