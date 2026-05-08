@@ -19,6 +19,13 @@ AUTO_DISABLE_STALE_MODULE="${AUTO_DISABLE_STALE_MODULE:-0}"
 MIN_SUPPORTED_NGINX_VERSION="1.24.0"
 SOURCE_BUILD_URL="https://github.com/cnkang/nginx-markdown-for-agents/tree/main/docs/guides/INSTALLATION.md#6-secondary-manual-source-build"
 SUPPORTED_ARCHITECTURES="x86_64, aarch64"
+readonly SED_STRIP_LEADING_ZEROS='s/^0*//'
+readonly CATEGORY_FILESYSTEM="$CATEGORY_FILESYSTEM"
+readonly MSG_CHECK_PERMS_DISK="$MSG_CHECK_PERMS_DISK"
+readonly MSG_CHECK_PERMS_TMP_DISK="$MSG_CHECK_PERMS_TMP_DISK"
+readonly CONF_GLOB='*.conf'
+readonly SEPARATOR_LINE='=================================================================================='
+readonly CATEGORY_CONFIG="config"
 
 # --json flag: when set, output structured JSON to stdout at exit
 JSON_OUTPUT=0
@@ -178,10 +185,9 @@ semver_lt() {
   local lhs="$1"
   local rhs="$2"
   local l1 l2 l3 r1 r2 r3
-  local IFS='.'
 
-  read -r l1 l2 l3 <<<"$lhs"
-  read -r r1 r2 r3 <<<"$rhs"
+  IFS='.' read -r l1 l2 l3 <<<"$lhs"
+  IFS='.' read -r r1 r2 r3 <<<"$rhs"
 
   l1="${l1:-0}"; l2="${l2:-0}"; l3="${l3:-0}"
   r1="${r1:-0}"; r2="${r2:-0}"; r3="${r3:-0}"
@@ -190,12 +196,12 @@ semver_lt() {
   # octal interpretation; sed removes leading zeros then falls
   # back to 0 for empty strings.  This avoids the 10# prefix
   # which SonarCloud's shell parser cannot handle.
-  l1=$(echo "$l1" | sed 's/^0*//'); l1=${l1:-0}
-  l2=$(echo "$l2" | sed 's/^0*//'); l2=${l2:-0}
-  l3=$(echo "$l3" | sed 's/^0*//'); l3=${l3:-0}
-  r1=$(echo "$r1" | sed 's/^0*//'); r1=${r1:-0}
-  r2=$(echo "$r2" | sed 's/^0*//'); r2=${r2:-0}
-  r3=$(echo "$r3" | sed 's/^0*//'); r3=${r3:-0}
+  l1=$(echo "$l1" | sed "$SED_STRIP_LEADING_ZEROS"); l1=${l1:-0}
+  l2=$(echo "$l2" | sed "$SED_STRIP_LEADING_ZEROS"); l2=${l2:-0}
+  l3=$(echo "$l3" | sed "$SED_STRIP_LEADING_ZEROS"); l3=${l3:-0}
+  r1=$(echo "$r1" | sed "$SED_STRIP_LEADING_ZEROS"); r1=${r1:-0}
+  r2=$(echo "$r2" | sed "$SED_STRIP_LEADING_ZEROS"); r2=${r2:-0}
+  r3=$(echo "$r3" | sed "$SED_STRIP_LEADING_ZEROS"); r3=${r3:-0}
 
   if ((l1 < r1)); then
     return 0
@@ -261,7 +267,7 @@ fetch_release_json() {
   local release_api=""
   local response=""
 
-  if [ -z "$RELEASE_VERSION" ]; then
+  if [[ -z "$RELEASE_VERSION" ]]; then
     release_api="https://api.github.com/repos/${REPO}/releases/latest"
   else
     release_api="https://api.github.com/repos/${REPO}/releases/tags/${RELEASE_VERSION}"
@@ -299,13 +305,13 @@ resolve_download_info() {
   local dist_index_json="${7:-}"
   local parse_result=""
 
-  if [ -n "$DOWNLOAD_URL_OVERRIDE" ]; then
+  if [[ -n "$DOWNLOAD_URL_OVERRIDE" ]]; then
     printf '%s\n%s\n%s\n' "$DOWNLOAD_URL_OVERRIDE" "$DOWNLOAD_SHA256" ""
     return 0
   fi
 
   if ! command -v python3 >/dev/null 2>&1; then
-    _json_error_category="config"
+    _json_error_category="$CATEGORY_CONFIG"
     _json_error_message="python3 is required by the installer but was not found."
     _json_suggestions=("Install python3: apt-get install python3 / apk add python3")
     return 1
@@ -409,7 +415,7 @@ print(" ".join(sorted_versions))
 PY
   )"
 
-  if [ -n "$parse_result" ]; then
+  if [[ -n "$parse_result" ]]; then
     printf '%s\n' "$parse_result"
   else
     printf '\n\n\n'
@@ -430,7 +436,7 @@ PY
 format_versions_by_series() {
   local versions="$1"
 
-  if [ -z "$versions" ]; then
+  if [[ -z "$versions" ]]; then
     return 0
   fi
 
@@ -469,15 +475,15 @@ collect_stale_module_suggestions() {
   local test_log=""
   local -a hints=()
 
-  if [ -z "$nginx_conf_dir" ] || [ -z "$module_so" ]; then
+  if [[ -z "$nginx_conf_dir" ]] || [[ -z "$module_so" ]]; then
     return 0
   fi
 
-  if [ ! -d "$nginx_conf_dir" ]; then
+  if [[ ! -d "$nginx_conf_dir" ]]; then
     return 0
   fi
 
-  if ! grep -R --include='*.conf' -Eq "^[[:space:]]*load_module[[:space:]]+.*${module_so}[[:space:]]*;" "$nginx_conf_dir"; then
+  if ! grep -R --include="$CONF_GLOB" -Eq "^[[:space:]]*load_module[[:space:]]+.*${module_so}[[:space:]]*;" "$nginx_conf_dir"; then
     return 0
   fi
 
@@ -492,13 +498,13 @@ collect_stale_module_suggestions() {
 
   if grep -Eq "module \".*${module_so}\" version [0-9]+ instead of [0-9]+" "$test_log"; then
     hints+=("Detected an already-enabled stale ${module_so} that does not match current NGINX ABI.")
-    hints+=("List loader snippets: sudo find ${nginx_conf_dir} -type f -name '*.conf' -exec grep -l '${module_so}' {} +")
+    hints+=("List loader snippets: sudo find ${nginx_conf_dir} -type f -name '${CONF_GLOB}' -exec grep -l '${module_so}' {} +")
     hints+=("Disable each matched snippet by renaming it to *.disabled (or comment out its load_module line), then run: sudo nginx -t")
     hints+=("After cleanup, build from source for this NGINX version: ${SOURCE_BUILD_URL}")
   fi
 
   rm -f "$test_log" || true
-  if [ "${#hints[@]}" -gt 0 ]; then
+  if [[ "${#hints[@]}" -gt 0 ]]; then
     eval "$out_var=(\"\${hints[@]}\")"
   fi
   return 0
@@ -512,16 +518,16 @@ auto_disable_stale_module_loaders() {
   local disabled_count=0
   local file=""
 
-  if [ "$AUTO_DISABLE_STALE_MODULE" != "1" ]; then
+  if [[ "$AUTO_DISABLE_STALE_MODULE" != "1" ]]; then
     return 0
   fi
 
-  if [ ! -d "$nginx_conf_dir" ]; then
+  if [[ ! -d "$nginx_conf_dir" ]]; then
     return 0
   fi
 
   while IFS= read -r file; do
-    if [ -z "$file" ]; then
+    if [[ -z "$file" ]]; then
       continue
     fi
     if [[ "$file" == *.disabled ]]; then
@@ -534,11 +540,11 @@ auto_disable_stale_module_loaders() {
       echo "[!] Failed to disable stale module snippet: ${file}" >&2
     fi
   done < <(
-    find "$nginx_conf_dir" -type f -name '*.conf' -print0 2>/dev/null \
+    find "$nginx_conf_dir" -type f -name "$CONF_GLOB" -print0 2>/dev/null \
       | xargs -0 grep -l "load_module .*${module_so}" 2>/dev/null || true
   )
 
-  if [ "$disabled_count" -gt 0 ]; then
+  if [[ "$disabled_count" -gt 0 ]]; then
     if nginx -t >/dev/null 2>&1; then
       echo "[+] nginx -t passed after disabling stale module snippets"
     else
@@ -581,7 +587,7 @@ resolve_path_with_prefix() {
   local candidate="$1"
   local prefix="$2"
 
-  if [ -z "$candidate" ]; then
+  if [[ -z "$candidate" ]]; then
     printf '\n'
     return 0
   fi
@@ -591,7 +597,7 @@ resolve_path_with_prefix() {
     return 0
   fi
 
-  if [ -n "$prefix" ]; then
+  if [[ -n "$prefix" ]]; then
     printf '%s/%s\n' "${prefix%/}" "$candidate"
   else
     printf '%s\n' "$candidate"
@@ -604,7 +610,7 @@ resolve_include_dir() {
   local include_dir
 
   include_dir="$(dirname "$include_pattern")"
-  if [ "$include_dir" = "." ]; then
+  if [[ "$include_dir" = "." ]]; then
     include_dir="$conf_dir"
   fi
 
@@ -618,11 +624,11 @@ resolve_include_dir() {
 backup_file_once() {
   local file="$1"
   local backup_file="${file}.bak.nginx-markdown-for-agents"
-  if [ ! -f "$backup_file" ]; then
+  if [[ ! -f "$backup_file" ]]; then
     if ! cp "$file" "$backup_file"; then
-      die_with_error "filesystem" \
+      die_with_error "$CATEGORY_FILESYSTEM" \
         "Failed to create backup file: ${backup_file}" \
-        "Check filesystem permissions and disk space."
+        "$MSG_CHECK_PERMS_DISK"
     fi
   fi
 }
@@ -640,9 +646,9 @@ ensure_main_include_directive() {
 
   local tmp_file
   if ! tmp_file="$(mktemp)"; then
-    die_with_error "filesystem" \
+    die_with_error "$CATEGORY_FILESYSTEM" \
       "Failed to create a temporary file while updating ${conf_file}" \
-      "Check filesystem permissions and available temporary disk space."
+      "$MSG_CHECK_PERMS_TMP_DISK"
   fi
 
   if ! awk -v include_line="$include_directive" '
@@ -659,16 +665,16 @@ ensure_main_include_directive() {
     }
   ' "$conf_file" > "$tmp_file"; then
     rm -f "$tmp_file" || true
-    die_with_error "filesystem" \
+    die_with_error "$CATEGORY_FILESYSTEM" \
       "Failed to update nginx config contents for ${conf_file}" \
-      "Check filesystem permissions and disk space."
+      "$MSG_CHECK_PERMS_DISK"
   fi
 
   if ! cat "$tmp_file" > "$conf_file"; then
     rm -f "$tmp_file" || true
-    die_with_error "filesystem" \
+    die_with_error "$CATEGORY_FILESYSTEM" \
       "Failed to write updated nginx config: ${conf_file}" \
-      "Check filesystem permissions and disk space."
+      "$MSG_CHECK_PERMS_DISK"
   fi
   rm -f "$tmp_file" || true
 }
@@ -680,9 +686,9 @@ insert_markdown_filter_into_http_block() {
 
   local tmp_file
   if ! tmp_file="$(mktemp)"; then
-    die_with_error "filesystem" \
+    die_with_error "$CATEGORY_FILESYSTEM" \
       "Failed to create a temporary file while updating ${conf_file}" \
-      "Check filesystem permissions and available temporary disk space."
+      "$MSG_CHECK_PERMS_TMP_DISK"
   fi
 
   if ! awk '
@@ -707,9 +713,9 @@ insert_markdown_filter_into_http_block() {
   backup_file_once "$conf_file"
   if ! cat "$tmp_file" > "$conf_file"; then
     rm -f "$tmp_file" || true
-    die_with_error "filesystem" \
+    die_with_error "$CATEGORY_FILESYSTEM" \
       "Failed to write updated nginx config: ${conf_file}" \
-      "Check filesystem permissions and disk space."
+      "$MSG_CHECK_PERMS_DISK"
   fi
   rm -f "$tmp_file" || true
   return 0
@@ -724,27 +730,27 @@ else
   exec 3>&1
 fi
 
-echo "=================================================================================="
+echo "$SEPARATOR_LINE"
 echo " NGINX Markdown for Agents - Binary Module Installer"
-echo "=================================================================================="
+echo "$SEPARATOR_LINE"
 
-if [ "${SKIP_ROOT_CHECK:-0}" != "1" ] && [ "$EUID" -ne 0 ]; then
-  die_with_error "config" "This script must be run as root." \
+if [[ "${SKIP_ROOT_CHECK:-0}" != "1" ]] && [[ "$EUID" -ne 0 ]]; then
+  die_with_error "$CATEGORY_CONFIG" "This script must be run as root." \
     "Re-run with: sudo bash install.sh" \
     "Or set SKIP_ROOT_CHECK=1 if running inside a container."
 fi
 
 # Detect Nginx runtime/build metadata
 if ! command -v nginx > /dev/null 2>&1; then
-  die_with_error "config" "nginx is not installed or not in PATH." \
+  die_with_error "$CATEGORY_CONFIG" "nginx is not installed or not in PATH." \
     "Install NGINX first: https://nginx.org/en/linux_packages.html" \
     "Ensure the nginx binary is in your PATH."
 fi
 
 NGINX_V_OUTPUT="$(nginx -V 2>&1)"
 NGINX_VERSION="$(printf '%s\n' "$NGINX_V_OUTPUT" | grep -oE 'nginx/[0-9]+\.[0-9]+\.[0-9]+' | cut -d/ -f2)"
-if [ -z "$NGINX_VERSION" ]; then
-  die_with_error "config" "Could not determine NGINX version from 'nginx -V' output." \
+if [[ -z "$NGINX_VERSION" ]]; then
+  die_with_error "$CATEGORY_CONFIG" "Could not determine NGINX version from 'nginx -V' output." \
     "Verify NGINX is installed correctly: nginx -V" \
     "Ensure the nginx binary is the expected version."
 fi
@@ -759,13 +765,13 @@ NGINX_PREFIX="$(resolve_path_with_prefix "$NGINX_PREFIX_RAW" "")"
 NGINX_MODULES_PATH="$(resolve_path_with_prefix "$NGINX_MODULES_PATH_RAW" "$NGINX_PREFIX")"
 NGINX_CONF_PATH="$(resolve_path_with_prefix "$NGINX_CONF_PATH_RAW" "$NGINX_PREFIX")"
 
-if [ -z "$NGINX_CONF_PATH" ]; then
+if [[ -z "$NGINX_CONF_PATH" ]]; then
   NGINX_CONF_PATH="/etc/nginx/nginx.conf"
 fi
 NGINX_CONF_DIR="$(dirname "$NGINX_CONF_PATH")"
 
 echo "[+] NGINX conf path: $NGINX_CONF_PATH"
-if [ -n "$NGINX_MODULES_PATH_RAW" ]; then
+if [[ -n "$NGINX_MODULES_PATH_RAW" ]]; then
   echo "[+] NGINX modules path from build: $NGINX_MODULES_PATH_RAW"
 fi
 
@@ -780,7 +786,7 @@ fi
 OS_TYPE="glibc"
 if command -v ldd >/dev/null 2>&1 && ldd /bin/sh 2>&1 | grep -iq musl; then
   OS_TYPE="musl"
-elif [ -f /etc/alpine-release ]; then
+elif [[ -f /etc/alpine-release ]]; then
   OS_TYPE="musl"
 fi
 echo "[+] Detected OS family: $OS_TYPE"
@@ -788,9 +794,9 @@ _json_os_type="$OS_TYPE"
 
 # Detect Architecture
 ARCH="$(uname -m)"
-if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then
+if [[ "$ARCH" = "aarch64" ]] || [[ "$ARCH" = "arm64" ]]; then
   ARCH="aarch64"
-elif [ "$ARCH" = "x86_64" ] || [ "$ARCH" = "amd64" ]; then
+elif [[ "$ARCH" = "x86_64" ]] || [[ "$ARCH" = "amd64" ]]; then
   ARCH="x86_64"
 else
   die_with_error "arch_unsupported" \
@@ -803,32 +809,26 @@ echo "[+] Detected Architecture: $ARCH"
 
 release_api_hint="latest"
 source_ref="main"
-if [ -n "$RELEASE_VERSION" ]; then
+if [[ -n "$RELEASE_VERSION" ]]; then
   release_api_hint="$RELEASE_VERSION"
   source_ref="$RELEASE_VERSION"
 fi
 
-if [ -n "$DOWNLOAD_URL_OVERRIDE" ] && [ -z "$DOWNLOAD_SHA256" ]; then
-  if [ "${ALLOW_INSECURE_NO_CHECKSUM}" != "1" ]; then
-    die_with_error "checksum" \
-      "DOWNLOAD_URL_OVERRIDE requires DOWNLOAD_SHA256 unless ALLOW_INSECURE_NO_CHECKSUM=1 is set." \
-      "Set DOWNLOAD_SHA256 to the trusted SHA-256 digest of the override artifact." \
-      "Or set ALLOW_INSECURE_NO_CHECKSUM=1 only in trusted, controlled environments."
-  fi
+if [[ -n "$DOWNLOAD_URL_OVERRIDE" ]] && [[ -z "$DOWNLOAD_SHA256" ]] && [[ "${ALLOW_INSECURE_NO_CHECKSUM}" != "1" ]]; then
+  die_with_error "checksum" \
+    "DOWNLOAD_URL_OVERRIDE requires DOWNLOAD_SHA256 unless ALLOW_INSECURE_NO_CHECKSUM=1 is set." \
+    "Set DOWNLOAD_SHA256 to the trusted SHA-256 digest of the override artifact." \
+    "Or set ALLOW_INSECURE_NO_CHECKSUM=1 only in trusted, controlled environments."
 fi
 
 RELEASE_JSON=""
-if [ -z "$DOWNLOAD_URL_OVERRIDE" ]; then
-  if ! RELEASE_JSON="$(fetch_release_json)"; then
-    echo "[!] Warning: Failed to query GitHub release metadata (${release_api_hint}); falling back to repository dist index."
-  fi
+if [[ -z "$DOWNLOAD_URL_OVERRIDE" ]] && ! RELEASE_JSON="$(fetch_release_json)"; then
+  echo "[!] Warning: Failed to query GitHub release metadata (${release_api_hint}); falling back to repository dist index."
 fi
 
 DIST_INDEX_JSON=""
-if [ -z "$DOWNLOAD_URL_OVERRIDE" ]; then
-  if ! DIST_INDEX_JSON="$(fetch_dist_index_json "$source_ref")"; then
-    echo "[!] Warning: Failed to query repository dist index (${source_ref})."
-  fi
+if [[ -z "$DOWNLOAD_URL_OVERRIDE" ]] && ! DIST_INDEX_JSON="$(fetch_dist_index_json "$source_ref")"; then
+  echo "[!] Warning: Failed to query repository dist index (${source_ref})."
 fi
 
 # Determine target asset name
@@ -838,9 +838,9 @@ echo "--------------------------------------------------------------------------
 echo "Looking for binary: $ASSET_NAME"
 
 if ! RELEASE_INFO_FILE="$(mktemp)"; then
-  die_with_error "filesystem" \
+  die_with_error "$CATEGORY_FILESYSTEM" \
     "Failed to create a temporary file for release metadata." \
-    "Check filesystem permissions and available temporary disk space."
+    "$MSG_CHECK_PERMS_TMP_DISK"
 fi
 
 if ! resolve_download_info "$ASSET_NAME" "$OS_TYPE" "$ARCH" "$NGINX_VERSION" "$source_ref" "$RELEASE_JSON" "$DIST_INDEX_JSON" > "$RELEASE_INFO_FILE"; then
@@ -856,19 +856,19 @@ DOWNLOAD_URL="${RELEASE_INFO[0]:-}"
 EXPECTED_SHA256="${RELEASE_INFO[1]:-}"
 AVAILABLE_VERSIONS="${RELEASE_INFO[2]:-}"
 
-if [ -z "$DOWNLOAD_URL" ]; then
+if [[ -z "$DOWNLOAD_URL" ]]; then
   _json_available_versions="$AVAILABLE_VERSIONS"
   _version_suggestions=("NGINX dynamic modules require an exact version match.")
   _stale_module_suggestions=()
   collect_stale_module_suggestions _stale_module_suggestions "$NGINX_CONF_DIR" "ngx_http_markdown_filter_module.so"
-  if [ "${#_stale_module_suggestions[@]}" -gt 0 ]; then
+  if [[ "${#_stale_module_suggestions[@]}" -gt 0 ]]; then
     auto_disable_stale_module_loaders "$NGINX_CONF_DIR" "ngx_http_markdown_filter_module.so"
     _version_suggestions+=("${_stale_module_suggestions[@]}")
-    if [ "$AUTO_DISABLE_STALE_MODULE" = "1" ]; then
+    if [[ "$AUTO_DISABLE_STALE_MODULE" = "1" ]]; then
       _version_suggestions+=("AUTO_DISABLE_STALE_MODULE=1 enabled: attempted automatic disable of stale loader snippets.")
     fi
   fi
-  if [ -n "$AVAILABLE_VERSIONS" ]; then
+  if [[ -n "$AVAILABLE_VERSIONS" ]]; then
     echo "Available pre-built versions for ${OS_TYPE}/${ARCH} (grouped by major.minor):" >&2
     format_versions_by_series "$AVAILABLE_VERSIONS" >&2
     _version_suggestions+=("Switch NGINX to one of the available versions listed above.")
@@ -883,15 +883,15 @@ fi
 
 echo "[+] Downloading $DOWNLOAD_URL ..."
 if ! TMP_DIR="$(mktemp -d)"; then
-  die_with_error "filesystem" \
+  die_with_error "$CATEGORY_FILESYSTEM" \
     "Failed to create a temporary working directory." \
-    "Check filesystem permissions and available temporary disk space."
+    "$MSG_CHECK_PERMS_TMP_DISK"
 fi
 trap 'rm -rf "$TMP_DIR"' EXIT
 
 if ! curl -fsSL -o "$TMP_DIR/$ASSET_NAME" "$DOWNLOAD_URL"; then
   _json_available_versions="$AVAILABLE_VERSIONS"
-  if [ -n "$AVAILABLE_VERSIONS" ]; then
+  if [[ -n "$AVAILABLE_VERSIONS" ]]; then
     echo "Available pre-built versions for ${OS_TYPE}/${ARCH} (grouped by major.minor):" >&2
     format_versions_by_series "$AVAILABLE_VERSIONS" >&2
   fi
@@ -902,9 +902,9 @@ if ! curl -fsSL -o "$TMP_DIR/$ASSET_NAME" "$DOWNLOAD_URL"; then
     "See ${SOURCE_BUILD_URL}"
 fi
 
-if [ -n "$EXPECTED_SHA256" ]; then
+if [[ -n "$EXPECTED_SHA256" ]]; then
   ACTUAL_SHA256="$(sha256_file "$TMP_DIR/$ASSET_NAME")"
-  if [ "$ACTUAL_SHA256" != "$EXPECTED_SHA256" ]; then
+  if [[ "$ACTUAL_SHA256" != "$EXPECTED_SHA256" ]]; then
     die_with_error "checksum" \
       "Checksum verification failed for ${ASSET_NAME}. Expected: ${EXPECTED_SHA256}, Actual: ${ACTUAL_SHA256}." \
       "Re-download the file and try again." \
@@ -912,7 +912,7 @@ if [ -n "$EXPECTED_SHA256" ]; then
   fi
   echo "[+] SHA256 checksum verified"
 else
-  if [ "${ALLOW_INSECURE_NO_CHECKSUM}" = "1" ]; then
+  if [[ "${ALLOW_INSECURE_NO_CHECKSUM}" = "1" ]]; then
     echo "[!] Release asset does not provide a SHA256 digest; proceeding because ALLOW_INSECURE_NO_CHECKSUM=1"
   else
     die_with_error "checksum" \
@@ -931,8 +931,8 @@ if ! tar -xzf "$ASSET_NAME"; then
 fi
 
 MODULE_SO="ngx_http_markdown_filter_module.so"
-if [ ! -f "$MODULE_SO" ]; then
-  die_with_error "config" \
+if [[ ! -f "$MODULE_SO" ]]; then
+  die_with_error "$CATEGORY_CONFIG" \
     "Extraction failed: ${MODULE_SO} not found in the downloaded archive." \
     "The archive may be corrupted. Re-download and try again." \
     "Report at https://github.com/${REPO}/issues if the problem persists."
@@ -941,39 +941,39 @@ fi
 # Determine NGINX modules directory
 # Prefer the build-time path from nginx -V when available.
 MODULES_DIR=""
-if [ -n "$NGINX_MODULES_PATH" ]; then
+if [[ -n "$NGINX_MODULES_PATH" ]]; then
   MODULES_DIR="$NGINX_MODULES_PATH"
-elif [ -d "/etc/nginx/modules" ]; then
+elif [[ -d "/etc/nginx/modules" ]]; then
   MODULES_DIR="/etc/nginx/modules"
-elif [ -d "/usr/lib/nginx/modules" ]; then
+elif [[ -d "/usr/lib/nginx/modules" ]]; then
   MODULES_DIR="/usr/lib/nginx/modules"
-elif [ -d "/usr/share/nginx/modules" ]; then
+elif [[ -d "/usr/share/nginx/modules" ]]; then
   MODULES_DIR="/usr/share/nginx/modules"
-elif [ -d "/usr/local/nginx/modules" ]; then
+elif [[ -d "/usr/local/nginx/modules" ]]; then
   MODULES_DIR="/usr/local/nginx/modules"
 else
   MODULES_DIR="/etc/nginx/modules"
 fi
 if ! mkdir -p "$MODULES_DIR"; then
-  die_with_error "filesystem" \
+  die_with_error "$CATEGORY_FILESYSTEM" \
     "Failed to create modules directory: ${MODULES_DIR}" \
-    "Check filesystem permissions and disk space."
+    "$MSG_CHECK_PERMS_DISK"
 fi
 
 echo "[+] Installing module to $MODULES_DIR/"
 if ! cp "$MODULE_SO" "$MODULES_DIR/"; then
-  die_with_error "filesystem" \
+  die_with_error "$CATEGORY_FILESYSTEM" \
     "Failed to copy ${MODULE_SO} to ${MODULES_DIR}/" \
-    "Check filesystem permissions and disk space."
+    "$MSG_CHECK_PERMS_DISK"
 fi
 if ! chmod 644 "$MODULES_DIR/$MODULE_SO"; then
-  die_with_error "filesystem" \
+  die_with_error "$CATEGORY_FILESYSTEM" \
     "Failed to set permissions on ${MODULES_DIR}/${MODULE_SO}" \
     "Check filesystem permissions."
 fi
 
 MODULE_LOAD_PATH="${MODULES_DIR%/}/${MODULE_SO}"
-if [ -n "$NGINX_MODULES_PATH_RAW" ]; then
+if [[ -n "$NGINX_MODULES_PATH_RAW" ]]; then
   MODULE_LOAD_PATH="${NGINX_MODULES_PATH_RAW%/}/${MODULE_SO}"
 fi
 
@@ -984,24 +984,24 @@ MARKDOWN_ALREADY_CONFIGURED=0
 MARKDOWN_INSERTED_IN_MAIN=0
 MANUAL_ACTIONS=()
 
-if [ -f "$NGINX_CONF_PATH" ]; then
-  if [ -d "$NGINX_CONF_DIR" ] && grep -R --include='*.conf' -Eq "^[[:space:]]*load_module[[:space:]]+.*${MODULE_SO}[[:space:]]*;" "$NGINX_CONF_DIR"; then
+if [[ -f "$NGINX_CONF_PATH" ]]; then
+  if [[ -d "$NGINX_CONF_DIR" ]] && grep -R --include="$CONF_GLOB" -Eq "^[[:space:]]*load_module[[:space:]]+.*${MODULE_SO}[[:space:]]*;" "$NGINX_CONF_DIR"; then
     MODULE_ALREADY_CONFIGURED=1
   fi
 
   MODULE_INCLUDE_PATTERN="$(grep -E '^[[:space:]]*include[[:space:]]+[^;]*(modules|modules-enabled)[^;]*\.conf[[:space:]]*;' "$NGINX_CONF_PATH" | sed -E 's/^[[:space:]]*include[[:space:]]+([^;]+);/\1/' | head -n1 || true)"
-  if [ -z "$MODULE_INCLUDE_PATTERN" ]; then
+  if [[ -z "$MODULE_INCLUDE_PATTERN" ]]; then
     MODULE_INCLUDE_PATTERN="${NGINX_CONF_DIR%/}/modules-enabled/*.conf"
     ensure_main_include_directive "$NGINX_CONF_PATH" "include ${MODULE_INCLUDE_PATTERN};"
     echo "[+] Added main-context include: include ${MODULE_INCLUDE_PATTERN};"
   fi
 
-  if [ "$MODULE_ALREADY_CONFIGURED" -eq 0 ]; then
+  if [[ "$MODULE_ALREADY_CONFIGURED" -eq 0 ]]; then
     MODULE_INCLUDE_DIR="$(resolve_include_dir "$MODULE_INCLUDE_PATTERN" "$NGINX_CONF_DIR")"
     if ! mkdir -p "$MODULE_INCLUDE_DIR"; then
-      die_with_error "filesystem" \
+      die_with_error "$CATEGORY_FILESYSTEM" \
         "Failed to create module include directory: ${MODULE_INCLUDE_DIR}" \
-        "Check filesystem permissions and disk space."
+        "$MSG_CHECK_PERMS_DISK"
     fi
     MODULE_CONF_SNIPPET="${MODULE_INCLUDE_DIR%/}/50-ngx-http-markdown-filter-module.conf"
     if ! cat > "$MODULE_CONF_SNIPPET" <<EOF
@@ -1009,12 +1009,12 @@ if [ -f "$NGINX_CONF_PATH" ]; then
 load_module ${MODULE_LOAD_PATH};
 EOF
     then
-      die_with_error "filesystem" \
+      die_with_error "$CATEGORY_FILESYSTEM" \
         "Failed to write module loader snippet: ${MODULE_CONF_SNIPPET}" \
-        "Check filesystem permissions and disk space."
+        "$MSG_CHECK_PERMS_DISK"
     fi
     if ! chmod 644 "$MODULE_CONF_SNIPPET"; then
-      die_with_error "filesystem" \
+      die_with_error "$CATEGORY_FILESYSTEM" \
         "Failed to set permissions on ${MODULE_CONF_SNIPPET}" \
         "Check filesystem permissions."
     fi
@@ -1023,18 +1023,18 @@ EOF
     echo "[+] Existing load_module directive found for ${MODULE_SO}, skipping snippet creation"
   fi
 
-  if [ -d "$NGINX_CONF_DIR" ] && grep -R --include='*.conf' -Eq "^[[:space:]]*markdown_filter[[:space:]]+on[[:space:]]*;" "$NGINX_CONF_DIR"; then
+  if [[ -d "$NGINX_CONF_DIR" ]] && grep -R --include="$CONF_GLOB" -Eq "^[[:space:]]*markdown_filter[[:space:]]+on[[:space:]]*;" "$NGINX_CONF_DIR"; then
     MARKDOWN_ALREADY_CONFIGURED=1
   fi
 
-  if [ "$MARKDOWN_ALREADY_CONFIGURED" -eq 0 ]; then
+  if [[ "$MARKDOWN_ALREADY_CONFIGURED" -eq 0 ]]; then
     HTTP_INCLUDE_PATTERN="$(grep -E '^[[:space:]]*include[[:space:]]+[^;]*conf\.d/[^;]*\.conf[[:space:]]*;' "$NGINX_CONF_PATH" | sed -E 's/^[[:space:]]*include[[:space:]]+([^;]+);/\1/' | head -n1 || true)"
-    if [ -n "$HTTP_INCLUDE_PATTERN" ]; then
+    if [[ -n "$HTTP_INCLUDE_PATTERN" ]]; then
       HTTP_INCLUDE_DIR="$(resolve_include_dir "$HTTP_INCLUDE_PATTERN" "$NGINX_CONF_DIR")"
       if ! mkdir -p "$HTTP_INCLUDE_DIR"; then
-        die_with_error "filesystem" \
+        die_with_error "$CATEGORY_FILESYSTEM" \
           "Failed to create markdown include directory: ${HTTP_INCLUDE_DIR}" \
-          "Check filesystem permissions and disk space."
+          "$MSG_CHECK_PERMS_DISK"
       fi
       MARKDOWN_CONF_SNIPPET="${HTTP_INCLUDE_DIR%/}/90-markdown-filter-enable.conf"
       if ! cat > "$MARKDOWN_CONF_SNIPPET" <<'EOF'
@@ -1046,12 +1046,12 @@ markdown_filter on;
 # markdown_on_error pass;
 EOF
       then
-        die_with_error "filesystem" \
+        die_with_error "$CATEGORY_FILESYSTEM" \
           "Failed to write markdown enable snippet: ${MARKDOWN_CONF_SNIPPET}" \
-          "Check filesystem permissions and disk space."
+          "$MSG_CHECK_PERMS_DISK"
       fi
       if ! chmod 644 "$MARKDOWN_CONF_SNIPPET"; then
-        die_with_error "filesystem" \
+        die_with_error "$CATEGORY_FILESYSTEM" \
           "Failed to set permissions on ${MARKDOWN_CONF_SNIPPET}" \
           "Check filesystem permissions."
       fi
@@ -1073,9 +1073,9 @@ fi
 
 NGINX_TEST_RESULT="not-run"
 if ! NGINX_TEST_LOG="$(mktemp)"; then
-  die_with_error "filesystem" \
+  die_with_error "$CATEGORY_FILESYSTEM" \
     "Failed to create a temporary file for nginx -t output." \
-    "Check filesystem permissions and available temporary disk space."
+    "$MSG_CHECK_PERMS_TMP_DISK"
 fi
 if nginx -t >"$NGINX_TEST_LOG" 2>&1; then
   NGINX_TEST_RESULT="ok"
@@ -1083,31 +1083,31 @@ else
   NGINX_TEST_RESULT="failed"
 fi
 
-echo "=================================================================================="
+echo "$SEPARATOR_LINE"
 echo " Installation Complete!"
-echo "=================================================================================="
+echo "$SEPARATOR_LINE"
 echo "Auto-generated configuration:"
-if [ -n "$MODULE_CONF_SNIPPET" ]; then
+if [[ -n "$MODULE_CONF_SNIPPET" ]]; then
   echo "1. Module loader snippet: $MODULE_CONF_SNIPPET"
   echo "   -> load_module ${MODULE_LOAD_PATH};"
-elif [ "$MODULE_ALREADY_CONFIGURED" -eq 1 ]; then
+elif [[ "$MODULE_ALREADY_CONFIGURED" -eq 1 ]]; then
   echo "1. Module loader already exists in current nginx config."
 else
   echo "1. Module loader snippet was not created automatically."
 fi
 
-if [ -n "$MARKDOWN_CONF_SNIPPET" ]; then
+if [[ -n "$MARKDOWN_CONF_SNIPPET" ]]; then
   echo "2. Markdown enable snippet: $MARKDOWN_CONF_SNIPPET"
   echo "   -> markdown_filter on;"
-elif [ "$MARKDOWN_ALREADY_CONFIGURED" -eq 1 ]; then
+elif [[ "$MARKDOWN_ALREADY_CONFIGURED" -eq 1 ]]; then
   echo "2. markdown_filter is already enabled in current nginx config."
-elif [ "$MARKDOWN_INSERTED_IN_MAIN" -eq 1 ]; then
+elif [[ "$MARKDOWN_INSERTED_IN_MAIN" -eq 1 ]]; then
   echo "2. Added 'markdown_filter on;' directly into $NGINX_CONF_PATH (http block)."
 else
   echo "2. markdown_filter was not auto-enabled."
 fi
 
-if [ "${#MANUAL_ACTIONS[@]}" -gt 0 ]; then
+if [[ "${#MANUAL_ACTIONS[@]}" -gt 0 ]]; then
   echo ""
   echo "Manual actions required:"
   for action in "${MANUAL_ACTIONS[@]}"; do
@@ -1116,7 +1116,7 @@ if [ "${#MANUAL_ACTIONS[@]}" -gt 0 ]; then
 fi
 
 echo ""
-if [ "$NGINX_TEST_RESULT" = "ok" ]; then
+if [[ "$NGINX_TEST_RESULT" = "ok" ]]; then
   echo "[+] nginx -t passed"
   echo "Run: nginx -s reload"
 else
@@ -1130,10 +1130,10 @@ echo ""
 echo "You can continue fine-tuning later (recommended):"
 echo "- Scope rollout with server/location-level markdown_filter on/off"
 echo "- Adjust markdown_max_size / markdown_on_error by workload"
-echo "=================================================================================="
+echo "$SEPARATOR_LINE"
 
 # Emit JSON output if --json was requested
-if [ "$NGINX_TEST_RESULT" = "failed" ]; then
+if [[ "$NGINX_TEST_RESULT" = "failed" ]]; then
   json_output false
 else
   json_output true
