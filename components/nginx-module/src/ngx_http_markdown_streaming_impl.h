@@ -313,7 +313,7 @@ ngx_http_markdown_streaming_cleanup(void *data);
 static ngx_uint_t
 ngx_http_markdown_select_processing_path(
     ngx_http_request_t *r,
-    ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_conf_t *conf,
     const ngx_http_markdown_effective_conf_t *eff);
 
 /*
@@ -541,7 +541,7 @@ ngx_http_markdown_log_conditional_streaming(
 static ngx_uint_t
 ngx_http_markdown_select_processing_path(
     ngx_http_request_t *r,
-    ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_conf_t *conf,
     const ngx_http_markdown_effective_conf_t *eff)
 {
     ngx_str_t    val;
