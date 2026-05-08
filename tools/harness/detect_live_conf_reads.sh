@@ -253,7 +253,8 @@ echo "" >&2
 echo "--- Regression guard: handle_ctx_alloc_failure must receive eff ---" >&2
 
 if [[ -f "$request_impl" ]]; then
-    # Find calls to handle_ctx_alloc_failure
+    # Find calls to handle_ctx_alloc_failure, spanning multiline invocations.
+    # awk collects lines from the function name through the closing paren.
     while IFS= read -r call_match; do
         if [[ -z "$call_match" ]]; then
             continue
@@ -269,8 +270,17 @@ if [[ -f "$request_impl" ]]; then
         else
             echo "  OK      ${request_impl}:${call_line} — handle_ctx_alloc_failure receives eff: ${call_content}" >&2
         fi
-    done < <(grep -n 'ngx_http_markdown_handle_ctx_alloc_failure' "$request_impl" 2>/dev/null \
-        | grep -vE '^\s*/\*|^\s*\*|^.*static.*ngx_int_t' || true)
+    done < <(awk '
+        /ngx_http_markdown_handle_ctx_alloc_failure/ && !/^\s*\/\*/ && !/^\s*\*/ && !/static.*ngx_int_t/ {
+            line = NR
+            text = $0
+            while (index(text, ")") == 0) {
+                getline
+                text = text " " $0
+            }
+            print line ":" text
+        }
+    ' "$request_impl" 2>/dev/null || true)
 else
     echo "  WARNING ${request_impl} not found — skipping handle_ctx_alloc_failure check" >&2
     warnings=$((warnings + 1))

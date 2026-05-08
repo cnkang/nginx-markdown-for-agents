@@ -1652,7 +1652,7 @@ test_parse_size_safe_valid_values(void)
 
     u_char val_128k[] = "128k";
     rc = ngx_http_markdown_dynconf_parse_size_safe(
-            val_128k, 5, "memory_budget",
+            val_128k, 4, "memory_budget",
             NGX_MAX_SIZE_T_VALUE, &g_log, &result);
     TEST_ASSERT(rc == NGX_OK, "128k parses OK");
     TEST_ASSERT(result == 128 * 1024, "128k == 131072");

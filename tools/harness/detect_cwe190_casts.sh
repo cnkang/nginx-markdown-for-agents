@@ -71,16 +71,24 @@ while IFS= read -r match; do
     fi
     file="$(echo "$match" | cut -d: -f1)"
     line="$(echo "$match" | cut -d: -f2)"
-    # Check if the same file uses the safe wrapper nearby
-    if grep -qn 'dynconf_parse_size_safe' "$file" 2>/dev/null; then
-        echo "  WARNING ${file}:${line} — ngx_parse_size used; safe wrapper exists in file, verify this callsite uses it" >&2
+    # Check if the same file uses the safe wrapper near this callsite (±10 lines)
+    # or if this line is inside the safe wrapper implementation itself
+    ctx_start=$((line - 10))
+    if [[ "$ctx_start" -lt 1 ]]; then
+        ctx_start=1
+    fi
+    ctx_end=$((line + 10))
+    if sed -n "${ctx_start},${ctx_end}p" "$file" 2>/dev/null | grep -q 'dynconf_parse_size_safe'; then
+        echo "  WARNING ${file}:${line} — ngx_parse_size used; safe wrapper exists nearby, verify this callsite uses it" >&2
         warnings=$((warnings + 1))
+    elif sed -n "$((line - 30)),${line}p" "$file" 2>/dev/null | grep -qE 'ngx_http_markdown_dynconf_parse_size_safe\b'; then
+        echo "  OK      ${file}:${line} — ngx_parse_size inside dynconf_parse_size_safe implementation" >&2
     else
         echo "  ERROR   ${file}:${line} — ngx_parse_size without dynconf_parse_size_safe wrapper" >&2
         errors=$((errors + 1))
     fi
     parse_size_hits=$((parse_size_hits + 1))
-done < <(grep -rn 'ngx_parse_size' "$SRC_DIR" --include='*.c' --include='*.h' 2>/dev/null || true)
+done < <(grep -rn 'ngx_parse_size' "$SRC_DIR" --include='*.c' --include='*.h' 2>/dev/null | grep -vE ':\s*/\*|:\s*\*|:\s*//' || true)
 
 if [[ "$parse_size_hits" -eq 0 ]]; then
     echo "  (none found)" >&2
@@ -153,10 +161,8 @@ echo "" >&2
 echo "--- Pattern (a): ssize_t/ngx_int_t → (size_t) without guard ---" >&2
 
 ssize_hits=0
-# Look for (size_t) casts of variables that are ssize_t-typed
-# (common names: parsed, raw, result, n, rc, len when assigned from ssize_t funcs)
-# This is heuristic; we flag the most dangerous common pattern:
-# (size_t) applied to a variable immediately after ngx_parse_size
+# Detect (size_t) explicit casts of ssize_t-typed variables
+# (common names: parsed, raw, rc, n) and also = ngx_parse_size assignments
 while IFS= read -r match; do
     if [[ -z "$match" ]]; then
         continue
@@ -179,7 +185,7 @@ while IFS= read -r match; do
         warnings=$((warnings + 1))
     fi
     ssize_hits=$((ssize_hits + 1))
-done < <(grep -rnE '=\s*ngx_parse_size' "$SRC_DIR" --include='*.c' --include='*.h' 2>/dev/null || true)
+done < <(grep -rnE '\(size_t\)[[:space:]]*(parsed|raw|rc|n)[^a-zA-Z]|=\s*ngx_parse_size' "$SRC_DIR" --include='*.c' --include='*.h' 2>/dev/null || true)
 
 if [[ "$ssize_hits" -eq 0 ]]; then
     echo "  (none found)" >&2

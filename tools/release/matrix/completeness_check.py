@@ -117,7 +117,8 @@ def collect_artifacts(artifacts_path: str) -> Set[str]:
         }
 
     # Treat as a file list (one filename per line)
-    with open(path, "r", encoding="utf-8") as f:
+    resolved = validate_read_path(str(path), purpose="artifacts list")
+    with open(resolved, "r", encoding="utf-8") as f:
         return {
             line.strip() for line in f if line.strip()
         }
