@@ -59,7 +59,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from lib.path_validation import validate_read_path, validate_write_path_within_root
 
 # ---------------------------------------------------------------------------
