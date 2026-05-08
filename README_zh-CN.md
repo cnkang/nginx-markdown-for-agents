@@ -391,7 +391,7 @@ Makefile               顶层构建与测试入口
 
 ## 路线方向
 
-当前版本 (0.6.1)：
+当前版本 (0.6.2)：
 
 - 双引擎架构：streaming auto 模式默认，小响应使用 full-buffer
 - Streaming 失败语义与 commit boundary 对齐，支持可控 fallback 策略
@@ -422,4 +422,5 @@ BSD 2-Clause "Simplified" License。详见 [LICENSE](LICENSE)。
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.6.2 | 2026-05-08 | Kang | 版本号更新至 0.6.2 以配合发布 |
 | 0.5.0 | 2026-04-21 | docs-standardization | Synchronized Quick Start steps between English and Chinese versions; added update tracking section |
