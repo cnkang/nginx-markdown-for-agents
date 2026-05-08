@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.2] - 2026-05-08
+
+This release hardens dynamic-configuration safety with snapshot isolation,
+reload retry contract, and unknown-key atomic rejection, and updates all
+version-bearing surfaces to 0.6.2.
+
+### Added
+- **Harness Rule 35** in AGENTS.md:
+  - Dynconf snapshot isolation: `dynconf_enabled=0` locations must not consume
+    the global snapshot; `header_filter` passes NULL snapshot to
+    `ngx_http_markdown_build_effective_conf()`.
+  - Reload retry contract: `applied_mtime` separated from `last_mtime`; retry
+    on next poll cycle when they differ, regardless of mtime change detection.
+  - Unknown-key atomic rejection: unrecognized dynconf keys cause `NGX_ERROR`,
+    rejecting the entire file atomically (not `NGX_DECLINED` silent skip).
+  - Startup apply: `dynconf_start` parses and applies the existing dynconf file
+    immediately at startup; failed parse leaves `applied_mtime=0` for retry.
+  - `harness-check-full` now includes `harness-security-checks`.
+- Snapshot race elimination in `header_filter`: global `active_snapshot` read
+  exactly once at function entry into function-lifetime `snap_copy`; ctx binding
+  copies from function-level variables via
+  `ngx_http_markdown_bind_request_snapshot()`.
+- `dynconf_path_configured` flag moved from file-scope static to
+  `ngx_http_markdown_main_conf_t` for per-reload isolation.
+
+### Changed
+- Updated all version-bearing surfaces (Cargo.toml, Chart.yaml, values.yaml,
+  README, INSTALLATION, CI workflows, Homebrew release docs) to 0.6.2.
+
 ## [0.6.1] - 2026-05-06
 
 This release hardens the harness rule surface with five new defect-prevention
@@ -679,6 +708,22 @@ This project uses Semantic Versioning:
 - PATCH version for backwards-compatible bug fixes
 
 ### Upgrade Notes
+
+#### Upgrading to 0.6.2
+
+- **Dynconf snapshot isolation**: locations with `markdown_dynamic_config off`
+  no longer consume the global dynconf snapshot. No configuration change is
+  required; behavior is more isolated for non-dynconf locations.
+- **Reload retry contract**: if a dynconf file change was detected but the
+  reload failed, the watcher now retries on the next poll cycle regardless
+  of mtime change detection. No configuration change is required.
+- **Unknown-key atomic rejection**: unrecognized keys in the dynconf file
+  now cause `NGX_ERROR` (entire file rejected) instead of `NGX_DECLINED`
+  (silent ignore). Previously-accepted files with unknown keys will now be
+  rejected; remove any non-standard keys from your dynconf files.
+- **Startup apply of existing dynconf file**: if a dynconf file exists at
+  startup, it is now parsed and applied immediately. Previously the first
+  apply was deferred to the first timer poll cycle.
 
 #### Upgrading to 0.5.0
 

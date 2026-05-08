@@ -394,7 +394,7 @@ add the harness workflow to your default path:
 
 ## Roadmap
 
-Current release (0.6.1):
+Current release (0.6.2):
 
 - Dual-engine architecture: streaming auto mode default, full-buffer for small responses
 - Streaming failure semantics and fallback controls aligned with commit boundaries
@@ -425,4 +425,5 @@ BSD 2-Clause "Simplified" License. See [LICENSE](LICENSE).
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.6.2 | 2026-05-08 | Kang | Version bump to 0.6.2 for release |
 | 0.5.0 | 2026-04-21 | docs-standardization | Synchronized Quick Start steps between English and Chinese versions; added update tracking section |
