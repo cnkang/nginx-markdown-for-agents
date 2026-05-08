@@ -28,6 +28,9 @@ import shutil
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+from lib.path_validation import validate_read_path
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -577,7 +580,8 @@ def _load_known_difference_entries(result: ValidationResult) -> list[dict[str, o
             return None
 
     try:
-        with open(KNOWN_DIFF_PATH, "rb") as f:
+        validated_path = validate_read_path(KNOWN_DIFF_PATH, purpose="known differences")
+        with open(validated_path, "rb") as f:
             data = tomllib.load(f)
     except (tomllib.TOMLDecodeError, OSError) as exc:
         result.failed("known-diffs:parse", f"TOML parse error: {exc}")

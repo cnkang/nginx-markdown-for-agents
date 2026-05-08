@@ -14,6 +14,10 @@ import argparse
 import os
 import sys
 import xml.etree.ElementTree as ET
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from lib.path_validation import validate_read_path
 
 
 def _parse_da_line(
@@ -39,7 +43,8 @@ def parse_lcov(path: str) -> dict[str, dict[int, int]]:
     result: dict[str, dict[int, int]] = {}
     current_file: str | None = None
 
-    with open(path, encoding="utf-8", errors="replace") as fh:
+    validated = validate_read_path(path, purpose="lcov input")
+    with open(validated, encoding="utf-8", errors="replace") as fh:
         for raw_line in fh:
             line = raw_line.rstrip("\n")
             if line.startswith("SF:"):
