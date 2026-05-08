@@ -22,7 +22,7 @@
 static ngx_uint_t
 ngx_http_markdown_select_processing_path(
     ngx_http_request_t *r,
-    ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_conf_t *conf,
     const ngx_http_markdown_effective_conf_t *eff);
 static ngx_int_t
 ngx_http_markdown_streaming_body_filter(
