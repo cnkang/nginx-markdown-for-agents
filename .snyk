@@ -1,0 +1,23 @@
+# Snyk configuration for nginx-markdown-for-agents
+#
+# Snyk Code findings (all NOTE/LOW, guarded by custom validation):
+#
+# - python/PT (path traversal): All open() calls in tools/ are guarded by
+#   tools/lib/path_validation.py (validate_read_path,
+#   validate_write_path_within_root). Snyk static analysis does not
+#   recognize these custom validation functions.
+#
+# - python/CommandInjection: e2e test subprocess.Popen uses list form
+#   (not shell=True) and binary paths are validated via shutil.which().
+#
+# - cpp/IntegerOverflow: Fixed in dynconf_impl.h with explicit guards
+#   for buffer position overflow, subtraction underflow, and addition
+#   overflow before size_t casts.
+#
+# - cpp/MemsetMayBeOptimizedAway: Fixed in test code with volatile
+#   qualifier to prevent compiler optimization removing the memset.
+#
+# To suppress NOTE/LOW findings in the Snyk Web UI, visit:
+# https://app.snyk.io/org/cnkang/project/57b16de3-d863-4abb-ae5e-29fa2796c9c9
+
+version: "1.0.0"
