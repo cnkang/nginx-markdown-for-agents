@@ -92,6 +92,17 @@ def _display_path(path: Path) -> str:
         return str(path)
 
 
+def _emit_finding(
+    strict: bool, errors: list[str], warnings: list[str],
+    error_msg: str, warning_msg: str,
+) -> None:
+    """Append a finding as error (strict) or warning."""
+    if strict:
+        errors.append(error_msg)
+    else:
+        warnings.append(warning_msg)
+
+
 def _classify_open_call(
     first_arg: str,
     line: str,
@@ -123,33 +134,31 @@ def _classify_open_call(
         return errors, warnings
 
     if not has_validation_import:
-        msg = (
+        _emit_finding(strict, errors, warnings,
             f"  ERROR   {rel}:{lineno} — open({first_arg}) without "
-            f"path_validation import; variable '{first_arg}' not validated"
+            f"path_validation import; variable '{first_arg}' not validated",
+            f"  WARNING {rel}:{lineno} — open({first_arg}) without "
+            f"path_validation import; variable '{first_arg}' not validated "
+            f"(use --strict to promote to error)",
         )
-        if strict:
-            errors.append(msg)
-        else:
-            warnings.append(
-                f"  WARNING {rel}:{lineno} — open({first_arg}) without "
-                f"path_validation import; variable '{first_arg}' not validated "
-                f"(use --strict to promote to error)"
-            )
     elif first_arg not in validated_vars:
-        msg = (
+        _emit_finding(strict, errors, warnings,
             f"  ERROR   {rel}:{lineno} — open({first_arg}) but "
-            f"'{first_arg}' not passed through validate_read_path()"
+            f"'{first_arg}' not passed through validate_read_path()",
+            f"  WARNING {rel}:{lineno} — open({first_arg}) but "
+            f"'{first_arg}' not passed through validate_read_path() "
+            f"(use --strict to promote to error)",
         )
-        if strict:
-            errors.append(msg)
-        else:
-            warnings.append(
-                f"  WARNING {rel}:{lineno} — open({first_arg}) but "
-                f"'{first_arg}' not passed through validate_read_path() "
-                f"(use --strict to promote to error)"
-            )
 
     return errors, warnings
+
+
+def _extract_regex_groups(match: re.Match, target: set[str]) -> None:
+    """Add all non-None groups from a regex match to the target set."""
+    for group_idx in range(1, len(match.groups()) + 1):
+        value = match.group(group_idx)
+        if value:
+            target.add(value)
 
 
 def _collect_validated_vars(lines: list[str]) -> set[str]:
@@ -157,15 +166,9 @@ def _collect_validated_vars(lines: list[str]) -> set[str]:
     validated_vars: set[str] = set()
     for line in lines:
         for m in VALIDATED_VAR_RE.finditer(line):
-            for group_idx in range(1, len(m.groups()) + 1):
-                var_name = m.group(group_idx)
-                if var_name:
-                    validated_vars.add(var_name)
+            _extract_regex_groups(m, validated_vars)
         for m in VALIDATED_ASSIGN_RE.finditer(line):
-            for group_idx in range(1, len(m.groups()) + 1):
-                lhs_name = m.group(group_idx)
-                if lhs_name:
-                    validated_vars.add(lhs_name)
+            _extract_regex_groups(m, validated_vars)
     return validated_vars
 
 
