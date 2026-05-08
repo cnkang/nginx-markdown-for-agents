@@ -162,11 +162,9 @@ def _extract_regex_groups(match: re.Match, target: set[str]) -> None:
 
 
 def _collect_validated_vars(lines: list[str]) -> set[str]:
-    """Extract variable names that are validated or assigned from validation calls."""
+    """Extract variable names assigned from validation calls (LHS only)."""
     validated_vars: set[str] = set()
     for line in lines:
-        for m in VALIDATED_VAR_RE.finditer(line):
-            _extract_regex_groups(m, validated_vars)
         for m in VALIDATED_ASSIGN_RE.finditer(line):
             _extract_regex_groups(m, validated_vars)
     return validated_vars
@@ -269,17 +267,15 @@ def main() -> int:
     args = parser.parse_args()
     strict = args.strict
 
-    scan_dir = Path(args.directory)
-    if args.directory != "tools":
-        try:
-            sys.path.insert(0, str(REPO_ROOT))
-            from tools.lib import path_validation
-            scan_dir = Path(path_validation.validate_read_path(
-                args.directory, purpose="scan directory",
-            ))
-        except (ImportError, FileNotFoundError, ValueError) as exc:
-            print(f"ERROR: directory validation failed: {exc}", file=sys.stderr)
-            return 1
+    try:
+        sys.path.insert(0, str(REPO_ROOT))
+        from tools.lib import path_validation
+        scan_dir = Path(path_validation.validate_read_path(
+            args.directory, purpose="scan directory",
+        ))
+    except (ImportError, FileNotFoundError, ValueError) as exc:
+        print(f"ERROR: directory validation failed: {exc}", file=sys.stderr)
+        return 1
     if not scan_dir.is_dir():
         print(f"ERROR: {scan_dir} is not a directory", file=sys.stderr)
         return 1

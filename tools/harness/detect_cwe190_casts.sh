@@ -81,14 +81,20 @@ while IFS= read -r match; do
     if sed -n "${ctx_start},${ctx_end}p" "$file" 2>/dev/null | grep -q 'dynconf_parse_size_safe'; then
         echo "  WARNING ${file}:${line} — ngx_parse_size used; safe wrapper exists nearby, verify this callsite uses it" >&2
         warnings=$((warnings + 1))
-    elif sed -n "$((line - 30)),${line}p" "$file" 2>/dev/null | grep -qE 'ngx_http_markdown_dynconf_parse_size_safe\b'; then
-        echo "  OK      ${file}:${line} — ngx_parse_size inside dynconf_parse_size_safe implementation" >&2
     else
-        echo "  ERROR   ${file}:${line} — ngx_parse_size without dynconf_parse_size_safe wrapper" >&2
-        errors=$((errors + 1))
+        impl_start=$((line - 30))
+        if [[ "$impl_start" -lt 1 ]]; then
+            impl_start=1
+        fi
+        if sed -n "${impl_start},${line}p" "$file" 2>/dev/null | grep -qE 'ngx_http_markdown_dynconf_parse_size_safe\b'; then
+            echo "  OK      ${file}:${line} — ngx_parse_size inside dynconf_parse_size_safe implementation" >&2
+        else
+            echo "  ERROR   ${file}:${line} — ngx_parse_size without dynconf_parse_size_safe wrapper" >&2
+            errors=$((errors + 1))
+        fi
     fi
     parse_size_hits=$((parse_size_hits + 1))
-done < <(grep -rn 'ngx_parse_size' "$SRC_DIR" --include='*.c' --include='*.h' 2>/dev/null | grep -vE ':\s*/\*|:\s*\*|:\s*//' || true)
+done < <(grep -rnE 'ngx_parse_size.*\(size_t|\(size_t.*ngx_parse_size' "$SRC_DIR" --include='*.c' --include='*.h' 2>/dev/null | grep -vE ':\s*/\*|:\s*\*|:\s*//' || true)
 
 if [[ "$parse_size_hits" -eq 0 ]]; then
     echo "  (none found)" >&2
@@ -185,7 +191,7 @@ while IFS= read -r match; do
         warnings=$((warnings + 1))
     fi
     ssize_hits=$((ssize_hits + 1))
-done < <(grep -rnE '\(size_t\)[[:space:]]*(parsed|raw|rc|n)[^a-zA-Z]|=\s*ngx_parse_size' "$SRC_DIR" --include='*.c' --include='*.h' 2>/dev/null || true)
+done < <(grep -rnE '\(size_t\)[[:space:]]*[A-Za-z_]' "$SRC_DIR" --include='*.c' --include='*.h' 2>/dev/null || true)
 
 if [[ "$ssize_hits" -eq 0 ]]; then
     echo "  (none found)" >&2
