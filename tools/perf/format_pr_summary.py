@@ -16,7 +16,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from lib.path_validation import validate_write_path_within_root
+from lib.path_validation import validate_read_path, validate_write_path_within_root
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -119,9 +119,10 @@ def build_cli_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_cli_parser().parse_args(argv)
+    report_path = validate_read_path(args.report, purpose="unified report")
 
     try:
-        report = load_json(args.report)
+        report = load_json(str(report_path))
     except Exception as e:
         print(f"ERROR: failed to load report: {e}", file=sys.stderr)
         return 1
@@ -129,11 +130,7 @@ def main(argv: list[str] | None = None) -> int:
     md = format_summary(report)
 
     if args.output:
-        output_path = Path(args.output)
-        if ".." in str(output_path).replace("\\", "/").split("/"):
-            raise ValueError(
-                f"Refusing write path with '..' traversal component: {output_path!r}"
-            )
+        output_path = Path(args.output).resolve()
         validated_output = validate_write_path_within_root(
             output_path, output_path.parent, purpose="PR summary output",
         )

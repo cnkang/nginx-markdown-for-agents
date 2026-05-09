@@ -534,11 +534,10 @@ def _load_json(path: str | Path | None) -> dict | None:
     """Load and return JSON data from *path*, or None if path is None or file doesn't exist."""
     if path is None:
         return None
-    p = Path(path)
-    if not p.exists():
+    resolved = validate_read_path(path, purpose="streaming report", must_exist=False)
+    if not resolved.exists():
         return None
-    validated_p = validate_read_path(p, purpose="streaming report", must_exist=False)
-    with open(validated_p, "r", encoding="utf-8") as f:
+    with open(resolved, "r", encoding="utf-8") as f:
         return json.load(f)
 
 
@@ -1073,11 +1072,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # Write output JSON (unless summary-only mode)
     if not args.summary_only:
-        output_path = Path(args.output)
-        if ".." in str(output_path).replace("\\", "/").split("/"):
-            raise ValueError(
-                f"Refusing write path with '..' traversal component: {output_path!r}"
-            )
+        output_path = Path(args.output).resolve()
         validated_output = validate_write_path_within_root(
             output_path, output_path.parent, purpose="evidence pack output",
         )
