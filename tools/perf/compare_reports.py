@@ -310,8 +310,9 @@ def main(argv: list[str] | None = None) -> int:
     baseline_path = validate_read_path(args.baseline, purpose="baseline report")
     current_path = validate_read_path(args.current, purpose="current report")
     thresholds_path = validate_read_path(args.thresholds, purpose="thresholds json")
+    output_path = Path(args.output).resolve()
     output_path = validate_write_path_within_root(
-        args.output, args.output, purpose="verdict output root",
+        output_path, output_path.parent, purpose="verdict output root",
     )
 
     try:

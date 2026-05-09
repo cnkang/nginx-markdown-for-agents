@@ -374,28 +374,21 @@ def write_examples(
             continue
         validated_html = validate_read_path(html_path, purpose="fixture html")
 
-        # Validate output paths stay within examples_dir
         html_dest = (examples_dir / f"{base_name}.html").resolve()
         md_dest = (examples_dir / f"{base_name}.md").resolve()
-        if not (
-            str(html_dest).startswith(str(resolved_examples_dir))
-            and str(md_dest).startswith(str(resolved_examples_dir))
-        ):
-            continue
+        validated_html_dest = validate_write_path_within_root(
+            html_dest, resolved_examples_dir, purpose="example html output",
+        )
+        validated_md_dest = validate_write_path_within_root(
+            md_dest, resolved_examples_dir, purpose="markdown output",
+        )
 
         # Copy HTML input without passing tainted paths into high-level copy helpers.
-        html_dest.write_bytes(validated_html.read_bytes())
+        validated_html_dest.write_bytes(validated_html.read_bytes())
 
         # Run converter for the .md output
         output, _, _ = run_converter(converter_bin, str(validated_html))
-        if ".." in str(md_dest).replace("\\", "/").split("/"):
-            raise ValueError(
-                f"Refusing write path with '..' traversal component: {md_dest!r}"
-            )
-        validated_md = validate_write_path_within_root(
-            md_dest, Path(md_dest).parent, purpose="markdown output",
-        )
-        validated_md.write_text(output, encoding="utf-8")
+        validated_md_dest.write_text(output, encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------
