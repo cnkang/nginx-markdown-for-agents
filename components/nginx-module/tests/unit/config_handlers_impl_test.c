@@ -1329,9 +1329,9 @@ test_parse_size_edge_cases(void)
         u_char max_valid_buf[64];
         line.data = max_valid_buf;
         line.len = sizeof(max_valid_buf) - 1;
-        memset(max_valid_buf, ' ', sizeof(max_valid_buf) - 2);
-        max_valid_buf[sizeof(max_valid_buf) - 2] = '1';
-        max_valid_buf[sizeof(max_valid_buf) - 1] = 'k';
+        memset(max_valid_buf, ' ', sizeof(max_valid_buf) - 3);
+        max_valid_buf[sizeof(max_valid_buf) - 3] = '1';
+        max_valid_buf[sizeof(max_valid_buf) - 2] = 'k';
         result = ngx_http_markdown_parse_size(&line);
         TEST_ASSERT(result == 1024,
             "max valid length input (63 bytes, leading spaces + \"1k\") should parse as 1024");
