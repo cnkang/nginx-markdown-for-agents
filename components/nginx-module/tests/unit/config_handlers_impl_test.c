@@ -1325,6 +1325,17 @@ test_parse_size_edge_cases(void)
             "oversized input should return NGX_ERROR");
     }
 
+    {
+        u_char max_valid_buf[64];
+        line.data = max_valid_buf;
+        line.len = sizeof(max_valid_buf) - 1;
+        memset(max_valid_buf, '1', sizeof(max_valid_buf) - 1);
+        max_valid_buf[sizeof(max_valid_buf) - 1] = '\0';
+        result = ngx_http_markdown_parse_size(&line);
+        TEST_ASSERT(result != (size_t) NGX_ERROR,
+            "max valid length input (63 bytes) should succeed");
+    }
+
     set_arg(&line, "2048");
     result = ngx_http_markdown_parse_size(&line);
     TEST_ASSERT(result == 2048,

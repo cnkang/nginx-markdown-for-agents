@@ -52,7 +52,7 @@ def write_json(data: dict, path: str | Path) -> None:
     """
     output_path = Path(path).resolve()
     validated_output = validate_write_path_within_root(
-        output_path, output_path.parent, purpose="report output",
+        output_path, Path.cwd(), purpose="report output",
     )
     validated_output.parent.mkdir(parents=True, exist_ok=True)
     with open(validated_output, "w", encoding="utf-8") as fh:
