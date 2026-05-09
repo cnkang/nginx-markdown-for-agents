@@ -106,15 +106,18 @@ http {{
 
 def _start_upstream(port, doc_root):
     """Start a simple HTTP server serving doc_root on port."""
-    script = f"""
-import http.server, os, socketserver
-os.chdir("{doc_root}")
-handler = http.server.SimpleHTTPRequestHandler
-with socketserver.TCPServer(("", {port}), handler) as httpd:
-    httpd.serve_forever()
-"""
+    resolved_doc_root = os.path.realpath(doc_root)
     proc = subprocess.Popen(
-        [sys.executable, "-c", script],
+        [
+            sys.executable,
+            "-m",
+            "http.server",
+            str(port),
+            "--bind",
+            "127.0.0.1",
+            "--directory",
+            resolved_doc_root,
+        ],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
@@ -136,6 +139,18 @@ def _fetch(path="/", accept="text/markdown"):
         return 0, b"", {}
 
 
+def _start_nginx(nginx_bin, conf_path):
+    """Start nginx with a validated binary path."""
+    real_nginx_bin = os.path.realpath(nginx_bin)
+    if not os.path.isabs(real_nginx_bin):
+        raise ValueError(f"NGINX binary path must be absolute: {nginx_bin}")
+    return subprocess.Popen(
+        [real_nginx_bin, "-c", conf_path],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+
 @pytest.mark.skipif(not _check_prerequisites(), reason=_SKIP_REASON)
 def test_16_1_streaming_conversion_success():
     """16.1 Streaming conversion success (small/medium/large responses)."""
@@ -149,11 +164,7 @@ def test_16_1_streaming_conversion_success():
         upstream = _start_upstream(UPSTREAM_PORT, doc_root)
         try:
             conf_path = _write_nginx_conf(td, nginx_bin)
-            nginx = subprocess.Popen(
-                [nginx_bin, "-c", conf_path],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
+            nginx = _start_nginx(nginx_bin, conf_path)
             time.sleep(1.0)
             try:
                 status, body, headers = _fetch("/")
@@ -193,11 +204,7 @@ def test_16_4_streaming_fallback():
         upstream = _start_upstream(UPSTREAM_PORT, doc_root)
         try:
             conf_path = _write_nginx_conf(td, nginx_bin)
-            nginx = subprocess.Popen(
-                [nginx_bin, "-c", conf_path],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
+            nginx = _start_nginx(nginx_bin, conf_path)
             time.sleep(1.0)
             try:
                 status, body, headers = _fetch("/table.html")
@@ -241,11 +248,7 @@ def test_16_8_head_request_no_streaming():
         upstream = _start_upstream(UPSTREAM_PORT, doc_root)
         try:
             conf_path = _write_nginx_conf(td, nginx_bin)
-            nginx = subprocess.Popen(
-                [nginx_bin, "-c", conf_path],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
+            nginx = _start_nginx(nginx_bin, conf_path)
             time.sleep(1.0)
             try:
                 url = f"http://127.0.0.1:{NGINX_PORT}/"

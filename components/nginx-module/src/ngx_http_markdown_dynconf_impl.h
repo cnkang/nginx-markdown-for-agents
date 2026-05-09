@@ -1226,7 +1226,12 @@ ngx_http_markdown_dynconf_reload(
             return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_INVALID_FILE;
         }
 
-        n = ngx_read_fd(fd, buf + pos, sizeof(buf) - pos);
+        {
+            size_t avail;
+
+            avail = sizeof(buf) - pos;
+            n = ngx_read_fd(fd, buf + pos, avail);
+        }
         if (n == 0) {
             break;
         }

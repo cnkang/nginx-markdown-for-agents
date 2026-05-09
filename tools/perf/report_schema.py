@@ -144,8 +144,7 @@ def main(argv: list[str] | None = None) -> int:
         print("Usage: report_schema.py <report.json>", file=sys.stderr)
         return 1
 
-    report_path = Path(argv[0])
-    validated_path = validate_read_path(report_path, purpose="report input")
+    validated_path = validate_read_path(argv[0], purpose="report input")
     try:
         with open(validated_path, "r", encoding="utf-8") as f:
             report = json.load(f)

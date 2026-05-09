@@ -60,8 +60,7 @@ def load_matrix(matrix_path: str) -> List[dict]:
         List[dict]: Matrix entries from the file whose `support_tier` equals "full".
     """
     resolved = validate_read_path(matrix_path, purpose="release matrix")
-    with open(resolved, "r", encoding="utf-8") as f:
-        data = json.load(f)
+    data = json.loads(resolved.read_text(encoding="utf-8"))
 
     if not isinstance(data, dict) or not isinstance(data.get("matrix"), list):
         return []
