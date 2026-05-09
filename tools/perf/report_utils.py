@@ -51,6 +51,10 @@ def write_json(data: dict, path: str | Path) -> None:
         path (str | Path): Destination file path; parent directories will be created if missing.
     """
     output_path = Path(path).resolve()
+    if ".." in str(path).replace("\\", "/").split("/"):
+        raise ValueError(
+            f"Refusing write path with '..' traversal component: {path!r}"
+        )
     validated_output = validate_write_path_within_root(
         output_path, output_path.parent, purpose="report output",
     )
