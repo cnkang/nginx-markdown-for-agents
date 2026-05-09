@@ -5,11 +5,15 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
 from fnmatch import fnmatch
 from pathlib import Path
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "tools", "lib"))
+from path_validation import validate_read_path  # noqa: E402
 
 
 def _find_repo_root(start: Path) -> Path:
@@ -36,8 +40,9 @@ PHASE_ORDER = {"cheap-blocker": 0, "focused-semantic": 1, "umbrella": 2}
 
 
 def _load_manifest(path: Path) -> dict:
+    validated = validate_read_path(path, purpose="routing manifest")
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(validated.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise SystemExit(f"failed to load manifest {path}: {exc}") from exc
 

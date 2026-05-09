@@ -130,6 +130,10 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.output:
         output_path = Path(args.output)
+        if ".." in str(output_path).replace("\\", "/").split("/"):
+            raise ValueError(
+                f"Refusing write path with '..' traversal component: {output_path!r}"
+            )
         validated_output = validate_write_path_within_root(
             output_path, output_path.parent, purpose="PR summary output",
         )

@@ -389,6 +389,10 @@ def write_examples(
 
         # Run converter for the .md output
         output, _, _ = run_converter(converter_bin, html_path)
+        if ".." in str(md_dest).replace("\\", "/").split("/"):
+            raise ValueError(
+                f"Refusing write path with '..' traversal component: {md_dest!r}"
+            )
         validated_md = validate_write_path_within_root(
             md_dest, Path(md_dest).parent, purpose="markdown output",
         )

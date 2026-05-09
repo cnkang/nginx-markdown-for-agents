@@ -1315,13 +1315,26 @@ test_parse_size_edge_cases(void)
         "zero length should return NGX_ERROR");
 
     {
-        u_char long_buf[128];
-        line.data = long_buf;
-        line.len = sizeof(long_buf);
-        memset(long_buf, '1', sizeof(long_buf));
+        volatile u_char long_buf[128];
+        line.data = (u_char *) long_buf;
+        line.len = sizeof(long_buf) - 1;
+        memset((u_char *) long_buf, '1', sizeof(long_buf) - 1);
+        ((u_char *) long_buf)[sizeof(long_buf) - 1] = '\0';
         result = ngx_http_markdown_parse_size(&line);
         TEST_ASSERT(result == (size_t) NGX_ERROR,
             "oversized input should return NGX_ERROR");
+    }
+
+    {
+        u_char max_valid_buf[64];
+        line.data = max_valid_buf;
+        line.len = sizeof(max_valid_buf) - 1;
+        memset(max_valid_buf, ' ', sizeof(max_valid_buf) - 3);
+        max_valid_buf[sizeof(max_valid_buf) - 3] = '1';
+        max_valid_buf[sizeof(max_valid_buf) - 2] = 'k';
+        result = ngx_http_markdown_parse_size(&line);
+        TEST_ASSERT(result == 1024,
+            "max valid length input (63 bytes, leading spaces + \"1k\") should parse as 1024");
     }
 
     set_arg(&line, "2048");
