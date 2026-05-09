@@ -537,8 +537,7 @@ def _load_json(path: str | Path | None) -> dict | None:
     resolved = validate_read_path(path, purpose="streaming report", must_exist=False)
     if not resolved.exists():
         return None
-    with open(resolved, "r", encoding="utf-8") as f:
-        return json.load(f)
+    return json.loads(resolved.read_text(encoding="utf-8"))
 
 
 def _build_streaming_report_subset(streaming_report: dict) -> dict:
@@ -1077,9 +1076,10 @@ def main(argv: list[str] | None = None) -> int:
             output_path, output_path.parent, purpose="evidence pack output",
         )
         validated_output.parent.mkdir(parents=True, exist_ok=True)
-        with open(validated_output, "w", encoding="utf-8") as f:
-            json.dump(evidence_pack, f, indent=2, ensure_ascii=False)
-            f.write("\n")
+        validated_output.write_text(
+            json.dumps(evidence_pack, indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
         print(f"Evidence pack written to {output_path}", file=sys.stderr)
 
     # Print human-readable summary

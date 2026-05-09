@@ -135,8 +135,7 @@ def main(argv: list[str] | None = None) -> int:
             output_path, output_path.parent, purpose="PR summary output",
         )
         validated_output.parent.mkdir(parents=True, exist_ok=True)
-        with open(validated_output, "w", encoding="utf-8") as f:
-            f.write(md)
+        validated_output.write_text(md, encoding="utf-8")
         print(f"PR summary written to {args.output}")
     else:
         print(md)

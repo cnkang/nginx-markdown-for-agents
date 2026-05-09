@@ -15,6 +15,8 @@ from pathlib import Path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from lib.path_validation import validate_read_path, validate_write_path_within_root
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
 CORE_METRICS = [
     "p50_ms",
     "p95_ms",
@@ -36,8 +38,13 @@ STAGE_KEYS = ["parse_pct", "convert_pct", "etag_pct", "token_pct"]
 def load_json(path: str | Path) -> dict:
     """Load and return JSON data from *path* after path validation."""
     resolved = validate_read_path(path, purpose="report input")
-    with open(resolved, "r", encoding="utf-8") as fh:
-        return json.load(fh)
+    try:
+        resolved.relative_to(REPO_ROOT)
+    except ValueError:
+        raise ValueError(
+            f"Refusing read path outside repository root: {resolved}"
+        )
+    return json.loads(resolved.read_text(encoding="utf-8"))
 
 
 def write_json(data: dict, path: str | Path) -> None:
@@ -58,10 +65,16 @@ def write_json(data: dict, path: str | Path) -> None:
     validated_output = validate_write_path_within_root(
         output_path, output_path.parent, purpose="report output",
     )
+    try:
+        validated_output.relative_to(REPO_ROOT)
+    except ValueError:
+        raise ValueError(
+            f"Refusing write path outside repository root: {validated_output}"
+        )
     validated_output.parent.mkdir(parents=True, exist_ok=True)
-    with open(validated_output, "w", encoding="utf-8") as fh:
-        json.dump(data, fh, indent=2, ensure_ascii=False)
-        fh.write("\n")
+    validated_output.write_text(
+        json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
 
 
 def normalize_platform(os_name: str, arch: str) -> str:

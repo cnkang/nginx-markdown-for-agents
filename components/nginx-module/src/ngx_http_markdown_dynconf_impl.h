@@ -1227,10 +1227,33 @@ ngx_http_markdown_dynconf_reload(
         }
 
         {
-            size_t avail;
+            u_char  read_buf[NGX_HTTP_MARKDOWN_DYNCONF_MAX_LINE];
+            size_t  avail;
+            size_t  cursor;
+            size_t  i;
 
-            avail = sizeof(buf) - pos;
-            n = ngx_read_fd(fd, buf + pos, avail);
+            avail = 0;
+            for (cursor = pos; cursor < sizeof(buf); cursor++) {
+                avail++;
+            }
+
+            n = ngx_read_fd(fd, read_buf,
+                            avail < sizeof(read_buf) ? avail : sizeof(read_buf));
+
+            if (n > 0) {
+                if ((size_t) n > avail) {
+                    ngx_log_error(NGX_LOG_WARN, log, 0,
+                                  "markdown dynconf: read overflow in \"%V\"",
+                                  &watcher->path);
+                    ngx_close_file(fd);
+                    return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_IO_ERROR;
+                }
+
+                for (i = 0; i < (size_t) n; i++) {
+                    buf[pos] = read_buf[i];
+                    pos++;
+                }
+            }
         }
         if (n == 0) {
             break;
@@ -1243,17 +1266,6 @@ ngx_http_markdown_dynconf_reload(
             ngx_close_file(fd);
             return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_IO_ERROR;
         }
-
-        /* n > 0 here; check for overflow before adding to pos. */
-        if ((size_t) n > sizeof(buf) - pos) {
-            ngx_log_error(NGX_LOG_WARN, log, 0,
-                          "markdown dynconf: read overflow in \"%V\"",
-                          &watcher->path);
-            ngx_close_file(fd);
-            return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_IO_ERROR;
-        }
-
-        pos += (size_t) n;
 
         if (ngx_http_markdown_dynconf_process_buffer(
                 &watcher->staging_snapshot, buf, &pos, &line_start,
