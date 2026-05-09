@@ -45,16 +45,17 @@ UPSTREAM_PORT = 19877
 
 
 def _nginx_bin():
-    resolved = shutil.which("nginx")
-    if resolved is None:
-        return ""
-    realpath = os.path.realpath(resolved)
-    base = os.path.basename(realpath)
-    if base not in {"nginx", "nginx-debug"}:
-        return ""
-    if not any(realpath.startswith(d + os.sep) or realpath == d for d in _E2E_SAFE_BIN_DIRS):
-        return ""
-    return resolved
+    for bin_name in ("nginx", "nginx-debug"):
+        resolved = shutil.which(bin_name)
+        if resolved is None:
+            continue
+        realpath = os.path.realpath(resolved)
+        base = os.path.basename(realpath)
+        if base not in {"nginx", "nginx-debug"}:
+            continue
+        if any(os.path.commonpath([realpath, d]) == d for d in _E2E_SAFE_BIN_DIRS):
+            return resolved
+    return ""
 
 
 def _check_prerequisites():
