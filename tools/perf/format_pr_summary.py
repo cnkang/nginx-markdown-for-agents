@@ -131,7 +131,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.output:
         output_path = Path(args.output)
         validated_output = validate_write_path_within_root(
-            output_path, output_path.parent, purpose="PR summary output",
+            output_path, Path.cwd(), purpose="PR summary output",
         )
         validated_output.parent.mkdir(parents=True, exist_ok=True)
         with open(validated_output, "w", encoding="utf-8") as f:

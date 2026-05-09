@@ -1215,8 +1215,10 @@ ngx_http_markdown_dynconf_reload(
     pos = 0;
 
     for ( ;; ) {
-        /* Defensive: pos must not exceed buffer size before read. */
-        if (pos > sizeof(buf)) {
+        /* Defensive: pos must not reach or exceed buffer size before read.
+         * CodeQL: use >= (not >) because the addition guard and post-add
+         * check constrain pos <= sizeof(buf), making > always false. */
+        if (pos >= sizeof(buf)) {
             ngx_log_error(NGX_LOG_WARN, log, 0,
                           "markdown dynconf: buffer position overflow in \"%V\"",
                           &watcher->path);
