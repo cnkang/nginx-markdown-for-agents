@@ -54,8 +54,7 @@ COMPARABLE_METRICS = [
 def load_json(path):
     """Load and return parsed JSON from *path* after path validation."""
     resolved = validate_read_path(path, purpose="threshold engine input")
-    with open(resolved, "r", encoding="utf-8") as fh:
-        return json.load(fh)
+    return json.loads(resolved.read_text(encoding="utf-8"))
 
 
 def build_direction_map(metrics_schema):
@@ -357,9 +356,9 @@ def _write_json(data, path):
         resolved_path, resolved_path.parent, purpose="threshold output",
     )
     resolved.parent.mkdir(parents=True, exist_ok=True)
-    with open(resolved, "w", encoding="utf-8") as fh:
-        json.dump(data, fh, indent=2, ensure_ascii=False)
-        fh.write("\n")
+    resolved.write_text(
+        json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
 
 
 def _stderr(msg):

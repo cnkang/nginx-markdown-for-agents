@@ -37,8 +37,7 @@ WORKSPACE_ROOT = os.path.abspath(
 )
 
 _SKIP_REASON = (
-    "Streaming E2E requires NGINX_BIN environment variable "
-    "pointing to a streaming-enabled NGINX binary"
+    "Streaming E2E requires a streaming-enabled nginx binary on PATH"
 )
 
 NGINX_PORT = 19876
@@ -46,13 +45,13 @@ UPSTREAM_PORT = 19877
 
 
 def _nginx_bin():
-    raw = os.environ.get("NGINX_BIN", "")
-    if not raw:
-        return ""
-    resolved = shutil.which(raw)
+    resolved = shutil.which("nginx")
     if resolved is None:
         return ""
     realpath = os.path.realpath(resolved)
+    base = os.path.basename(realpath)
+    if base not in {"nginx", "nginx-debug"}:
+        return ""
     if not any(realpath.startswith(d + os.sep) or realpath == d for d in _E2E_SAFE_BIN_DIRS):
         return ""
     return resolved

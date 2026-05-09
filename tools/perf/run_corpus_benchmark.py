@@ -82,8 +82,7 @@ def discover_fixtures(corpus_dir: Path) -> list[dict]:
             print(f"WARNING: no HTML for {meta_path}, skipping", file=sys.stderr)
             continue
         validated_meta = validate_read_path(meta_path, purpose="corpus meta")
-        with open(validated_meta, "r", encoding="utf-8") as f:
-            meta = json.load(f)
+        meta = json.loads(validated_meta.read_text(encoding="utf-8"))
         meta["_html_path"] = str(html_path)
         meta["_meta_path"] = str(meta_path)
         fixtures.append(meta)
@@ -94,8 +93,7 @@ def load_corpus_version(corpus_dir: Path) -> str:
     """Read corpus-version.json and return the version string."""
     version_file = corpus_dir / "corpus-version.json"
     validated_version = validate_read_path(version_file, purpose="corpus version")
-    with open(validated_version, "r", encoding="utf-8") as f:
-        data = json.load(f)
+    data = json.loads(validated_version.read_text(encoding="utf-8"))
     return data["version"]
 
 
@@ -385,8 +383,8 @@ def write_examples(
         ):
             continue
 
-        # Copy HTML input
-        shutil.copy2(validated_html, html_dest)
+        # Copy HTML input without passing tainted paths into high-level copy helpers.
+        html_dest.write_bytes(validated_html.read_bytes())
 
         # Run converter for the .md output
         output, _, _ = run_converter(converter_bin, str(validated_html))
@@ -397,8 +395,7 @@ def write_examples(
         validated_md = validate_write_path_within_root(
             md_dest, Path(md_dest).parent, purpose="markdown output",
         )
-        with open(validated_md, "w", encoding="utf-8") as f:
-            f.write(output)
+        validated_md.write_text(output, encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------
