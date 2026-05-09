@@ -374,6 +374,7 @@ def write_examples(
         html_path = meta.get("_html_path", "")
         if not html_path or not Path(html_path).exists():
             continue
+        validated_html = validate_read_path(html_path, purpose="fixture html")
 
         # Validate output paths stay within examples_dir
         html_dest = (examples_dir / f"{base_name}.html").resolve()
@@ -385,10 +386,10 @@ def write_examples(
             continue
 
         # Copy HTML input
-        shutil.copy2(html_path, html_dest)
+        shutil.copy2(validated_html, html_dest)
 
         # Run converter for the .md output
-        output, _, _ = run_converter(converter_bin, html_path)
+        output, _, _ = run_converter(converter_bin, str(validated_html))
         if ".." in str(md_dest).replace("\\", "/").split("/"):
             raise ValueError(
                 f"Refusing write path with '..' traversal component: {md_dest!r}"
@@ -526,9 +527,12 @@ def main(argv: list[str] | None = None) -> int:
 
     # Generate examples if requested
     if args.examples_dir:
+        validated_examples_dir = validate_write_path_within_root(
+            args.examples_dir, args.examples_dir, purpose="examples output root",
+        )
         examples = select_examples(fixture_results, fixtures_meta)
         write_examples(
-            examples, fixtures_meta, converter_bin, Path(args.examples_dir)
+            examples, fixtures_meta, converter_bin, validated_examples_dir
         )
         print(f"Examples written to {args.examples_dir}")
 

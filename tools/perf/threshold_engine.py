@@ -353,10 +353,6 @@ def _write_json(data, path):
     if path is None:
         return
     resolved_path = Path(path).resolve()
-    if ".." in str(path).replace("\\", "/").split("/"):
-        raise ValueError(
-            f"Refusing write path with '..' traversal component: {path!r}"
-        )
     resolved = validate_write_path_within_root(
         resolved_path, resolved_path.parent, purpose="threshold output",
     )
