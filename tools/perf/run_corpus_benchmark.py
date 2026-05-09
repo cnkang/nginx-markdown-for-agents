@@ -390,7 +390,7 @@ def write_examples(
         # Run converter for the .md output
         output, _, _ = run_converter(converter_bin, html_path)
         validated_md = validate_write_path_within_root(
-            md_dest, Path(md_dest).parent, purpose="markdown output",
+            md_dest, Path.cwd(), purpose="markdown output",
         )
         with open(validated_md, "w", encoding="utf-8") as f:
             f.write(output)

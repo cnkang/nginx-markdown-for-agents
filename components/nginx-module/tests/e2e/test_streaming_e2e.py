@@ -52,6 +52,9 @@ def _nginx_bin():
     resolved = shutil.which(raw)
     if resolved is None:
         return ""
+    realpath = os.path.realpath(resolved)
+    if not any(realpath.startswith(d + os.sep) or realpath == d for d in _E2E_SAFE_BIN_DIRS):
+        return ""
     return resolved
 
 

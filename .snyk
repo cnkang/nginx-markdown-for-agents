@@ -4,8 +4,9 @@
 #
 # - python/PT (path traversal): All open() calls in tools/ are guarded by
 #   tools/lib/path_validation.py (validate_read_path,
-#   validate_write_path_within_root). Snyk static analysis does not
-#   recognize these custom validation functions.
+#   validate_write_path_within_root). Write-path validation uses Path.cwd()
+#   as the root directory, ensuring output stays within the working tree.
+#   Snyk static analysis does not recognize these custom validation functions.
 #
 # - python/CommandInjection: e2e test subprocess.Popen uses list form
 #   (not shell=True) and binary paths are validated via shutil.which().
