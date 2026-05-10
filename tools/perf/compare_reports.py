@@ -26,6 +26,7 @@ Exit codes:
 from __future__ import annotations
 
 import argparse
+import json
 import math
 import sys
 from datetime import datetime, timezone
@@ -37,7 +38,7 @@ from lib.path_validation import validate_read_path, validate_write_path_within_r
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from report_schema import validate_report  # noqa: E402
-from report_utils import load_json, write_json  # noqa: E402
+from report_utils import load_json  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -363,7 +364,11 @@ def main(argv: list[str] | None = None) -> int:
     verdict_report = compare_reports(
         baseline, current, thresholds, skip_metrics=skip_metrics
     )
-    write_json(verdict_report, str(output_path))
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(
+        json.dumps(verdict_report, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
 
     overall = verdict_report["overall-verdict"]
     print(f"Verdict: {overall}")
