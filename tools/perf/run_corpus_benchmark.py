@@ -84,8 +84,9 @@ def discover_fixtures(corpus_dir: Path) -> list[dict]:
             print(f"WARNING: no HTML for {meta_path}, skipping", file=sys.stderr)
             continue
         validated_meta = validate_read_path(meta_path, purpose="corpus meta")
+        validated_html = validate_read_path(html_path, purpose="fixture html")
         meta = json.loads(validated_meta.read_text(encoding="utf-8"))
-        meta["_html_path"] = str(html_path)
+        meta["_html_path"] = str(validated_html)
         meta["_meta_path"] = str(meta_path)
         fixtures.append(meta)
     return fixtures

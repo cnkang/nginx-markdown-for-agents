@@ -141,14 +141,20 @@ def _fetch(path="/", accept="text/markdown"):
 
 def _start_nginx(nginx_bin, conf_path):
     """Start nginx with a validated binary path."""
-    real_nginx_bin = os.path.realpath(nginx_bin)
-    if not os.path.isabs(real_nginx_bin):
+    if not os.path.isabs(nginx_bin):
         raise ValueError(f"NGINX binary path must be absolute: {nginx_bin}")
+    real_nginx_bin = os.path.realpath(nginx_bin)
     return subprocess.Popen(
         [real_nginx_bin, "-c", conf_path],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
+
+
+def test_start_nginx_rejects_relative_binary_path():
+    """_start_nginx should reject relative binary paths before resolution."""
+    with pytest.raises(ValueError, match="must be absolute"):
+        _start_nginx("nginx", "/tmp/nginx.conf")
 
 
 @pytest.mark.skipif(not _check_prerequisites(), reason=_SKIP_REASON)
