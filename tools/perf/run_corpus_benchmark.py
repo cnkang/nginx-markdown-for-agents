@@ -390,7 +390,7 @@ def write_examples(
             raise ValueError(
                 "Example output path escapes examples directory root; "
                 "refusing to write outside the intended directory tree"
-            )
+            ) from None
 
         # Copy HTML input after explicit root-bound checks on both paths.
         validated_html_dest.write_bytes(validated_html.read_bytes())

@@ -13,6 +13,7 @@ from report_utils import (
     _build_aggregated_tier,
     build_baseline_report,
     detect_platform,
+    main,
     merge_measurement_reports,
     write_json,
 )
@@ -122,3 +123,27 @@ def test_write_json_rejects_unsafe_characters(monkeypatch, tmp_path):
     monkeypatch.setattr("report_utils.REPO_ROOT", tmp_path)
     with pytest.raises(ValueError, match="unsafe characters"):
         write_json({"ok": True}, "reports/bad path.json")
+
+
+def test_main_returns_2_for_invalid_read_path(capsys):
+    exit_code = main([
+        "extract-baseline",
+        "--measurement", "../escape.json",
+        "--output", "reports/out.json",
+    ])
+    assert exit_code == 2
+    assert "invalid path argument" in capsys.readouterr().err
+
+
+def test_main_returns_2_for_invalid_write_path(tmp_path, capsys):
+    measurement = tmp_path / "measurement.json"
+    measurement.write_text(
+        json.dumps({"schema_version": "1.0.0", "tiers": {}}), encoding="utf-8",
+    )
+    exit_code = main([
+        "extract-baseline",
+        "--measurement", str(measurement),
+        "--output", "../escape.json",
+    ])
+    assert exit_code == 2
+    assert "invalid path argument" in capsys.readouterr().err
