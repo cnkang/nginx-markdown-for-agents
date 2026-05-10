@@ -351,21 +351,6 @@ def select_examples(
     return examples
 
 
-def _sanitize_path_component(name: str) -> str:
-    """Sanitize a string for safe use as a path component.
-
-    Strips directory separators and path traversal sequences to prevent
-    path-traversal attacks when constructing file paths from metadata.
-    """
-    # Remove any directory separators and path traversal components
-    name = name.replace("/", "-").replace("\\", "-")
-    # Collapse any ".." sequences
-    name = name.replace("..", "_")
-    # Strip leading/trailing dots and whitespace
-    name = name.strip(". \t")
-    return name or "unknown"
-
-
 def write_examples(
     examples: list[dict],
     fixtures_meta: list[dict],
@@ -377,15 +362,15 @@ def write_examples(
     examples_dir.mkdir(parents=True, exist_ok=True)
     resolved_examples_dir = examples_dir.resolve()
 
-    for ex in examples:
+    for idx, ex in enumerate(examples, start=1):
         fid = ex["fixture-id"]
         meta = meta_lookup.get(fid, {})
-        pt = ex.get("page-type", "unknown")
         is_failure = meta.get("failure-corpus", False)
 
-        prefix = "failure" if is_failure else _sanitize_path_component(pt)
-        safe_id = _sanitize_path_component(fid)
-        base_name = f"{prefix}--{safe_id}"
+        # Do not derive output filenames from metadata values; keep file names
+        # deterministic and non-user-controlled to avoid path-injection sinks.
+        prefix = "failure" if is_failure else "example"
+        base_name = f"{prefix}-{idx:03d}"
 
         meta_path = meta.get("_meta_path", "")
         if not meta_path:
@@ -396,22 +381,22 @@ def write_examples(
             continue
         validated_html = validate_read_path(html_path, purpose="fixture html")
 
-        html_dest = (examples_dir / f"{base_name}.html").resolve()
-        md_dest = (examples_dir / f"{base_name}.md").resolve()
-        validated_html_dest = validate_write_path_within_root(
-            html_dest, resolved_examples_dir, purpose="example html output",
-        )
-        validated_md_dest = validate_write_path_within_root(
-            md_dest, resolved_examples_dir, purpose="markdown output",
-        )
+        validated_html_dest = (resolved_examples_dir / f"{base_name}.html").resolve()
+        validated_md_dest = (resolved_examples_dir / f"{base_name}.md").resolve()
+        try:
+            validated_html_dest.relative_to(resolved_examples_dir)
+            validated_md_dest.relative_to(resolved_examples_dir)
+        except ValueError:
+            raise ValueError(
+                "Example output path escapes examples directory root; "
+                "refusing to write outside the intended directory tree"
+            )
 
-        # Copy HTML input without passing tainted paths into high-level copy helpers.
-        # NOSONAR: both paths are validated (input exists, output constrained to examples root).
+        # Copy HTML input after explicit root-bound checks on both paths.
         validated_html_dest.write_bytes(validated_html.read_bytes())
 
         # Run converter for the .md output
         output, _, _ = run_converter(converter_bin, str(validated_html))
-        # NOSONAR: validated_md_dest is constrained to the validated examples root.
         validated_md_dest.write_text(output, encoding="utf-8")
 
 

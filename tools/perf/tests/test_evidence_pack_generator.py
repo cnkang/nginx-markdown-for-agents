@@ -1048,3 +1048,21 @@ class TestCLI:
         # No new JSON files should have been created
         after_json_files = {p.name for p in tmp_path.glob("*.json")}
         assert after_json_files == before_json_files
+
+    def test_main_rejects_output_path_with_unsafe_characters(
+        self, tmp_path, monkeypatch,
+    ):
+        monkeypatch.setattr(epg, "REPO_ROOT", tmp_path)
+        fullbuffer_path = _write_tmp_json(_make_fullbuffer_report())
+        streaming_path = _write_tmp_json(_make_streaming_report())
+        targets_path = _write_tmp_json(_make_evidence_targets())
+
+        exit_code = main([
+            "--fullbuffer-report", fullbuffer_path,
+            "--streaming-report", streaming_path,
+            "--evidence-targets", targets_path,
+            "--output", "reports/bad path.json",
+        ])
+
+        assert exit_code == 2
+        assert not (tmp_path / "reports" / "bad path.json").exists()

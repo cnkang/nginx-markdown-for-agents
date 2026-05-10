@@ -116,3 +116,9 @@ def test_write_json_allows_path_within_repo_root(monkeypatch, tmp_path):
     output_file = tmp_path / output
     assert output_file.exists()
     assert json.loads(output_file.read_text(encoding="utf-8")) == {"ok": True}
+
+
+def test_write_json_rejects_unsafe_characters(monkeypatch, tmp_path):
+    monkeypatch.setattr("report_utils.REPO_ROOT", tmp_path)
+    with pytest.raises(ValueError, match="unsafe characters"):
+        write_json({"ok": True}, "reports/bad path.json")

@@ -8,12 +8,13 @@ import copy
 import json
 import os
 import platform as python_platform
+import re
 import statistics
 import sys
 from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from lib.path_validation import validate_read_path, validate_write_path_within_root
+from lib.path_validation import validate_read_path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -51,7 +52,12 @@ def write_json(data: dict, path: str | Path) -> None:
         data (dict): Mapping to serialize to JSON.
         path (str | Path): Destination file path; parent directories will be created if missing.
     """
-    raw_output = Path(str(path))
+    raw_output_str = str(path)
+    if not re.fullmatch(r"[A-Za-z0-9._/\-]+", raw_output_str):
+        raise ValueError(
+            f"Refusing write path with unsafe characters: {path!r}"
+        )
+    raw_output = Path(raw_output_str)
     if raw_output.is_absolute():
         raise ValueError(
             f"Refusing absolute write path outside repository contract: {path!r}"
@@ -60,14 +66,20 @@ def write_json(data: dict, path: str | Path) -> None:
         raise ValueError(
             f"Refusing write path with '..' traversal component: {path!r}"
         )
-    validated_output = validate_write_path_within_root(
-        REPO_ROOT / raw_output, REPO_ROOT, purpose="report output",
-    )
+    resolved_root = REPO_ROOT.resolve()
+    validated_output = (resolved_root / raw_output).resolve()
+    try:
+        validated_output.relative_to(resolved_root)
+    except ValueError:
+        raise ValueError(
+            f"Write report output path {validated_output} escapes root "
+            f"{resolved_root}; refusing to write outside the intended "
+            "directory tree"
+        )
     validated_output.parent.mkdir(parents=True, exist_ok=True)
-    # NOSONAR: validated_output is constrained to REPO_ROOT by validate_write_path_within_root.
-    validated_output.write_text(
-        json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
-    )
+    with validated_output.open("w", encoding="utf-8") as handle:
+        json.dump(data, handle, indent=2, ensure_ascii=False)
+        handle.write("\n")
 
 
 def normalize_platform(os_name: str, arch: str) -> str:

@@ -53,6 +53,7 @@ import argparse
 import json
 import math
 import os
+import re
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -60,24 +61,9 @@ from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from lib.path_validation import validate_read_path, validate_write_path_within_root
+from lib.path_validation import validate_read_path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-
-
-def _resolve_repo_output_path(path: str, *, purpose: str) -> Path:
-    raw_output = Path(path)
-    if raw_output.is_absolute():
-        raise ValueError(
-            f"Refusing absolute write path outside repository contract: {path!r}"
-        )
-    if ".." in raw_output.parts:
-        raise ValueError(
-            f"Refusing write path with '..' traversal component: {path!r}"
-        )
-    return validate_write_path_within_root(
-        REPO_ROOT / raw_output, REPO_ROOT, purpose=purpose,
-    )
 
 # ---------------------------------------------------------------------------
 # Tier classification constants
@@ -1088,15 +1074,33 @@ def main(argv: list[str] | None = None) -> int:
 
     # Write output JSON (unless summary-only mode)
     if not args.summary_only:
-        validated_output = _resolve_repo_output_path(
-            args.output, purpose="evidence pack output",
-        )
+        try:
+            raw_output = args.output
+            if not re.fullmatch(r"[A-Za-z0-9._/\-]+", raw_output):
+                raise ValueError(
+                    f"Refusing write path with unsafe characters: {raw_output!r}"
+                )
+            raw_output_path = Path(raw_output)
+            if raw_output_path.is_absolute():
+                raise ValueError(
+                    "Refusing absolute write path outside repository contract: "
+                    f"{raw_output!r}"
+                )
+            if ".." in raw_output_path.parts:
+                raise ValueError(
+                    "Refusing write path with '..' traversal component: "
+                    f"{raw_output!r}"
+                )
+            resolved_root = REPO_ROOT.resolve()
+            validated_output = (resolved_root / raw_output_path).resolve()
+            validated_output.relative_to(resolved_root)
+        except ValueError:
+            print("ERROR: invalid --output path", file=sys.stderr)
+            return 2
         validated_output.parent.mkdir(parents=True, exist_ok=True)
-        # NOSONAR: validated_output is constrained to REPO_ROOT by _resolve_repo_output_path.
-        validated_output.write_text(
-            json.dumps(evidence_pack, indent=2, ensure_ascii=False) + "\n",
-            encoding="utf-8",
-        )
+        with validated_output.open("w", encoding="utf-8") as handle:
+            json.dump(evidence_pack, handle, indent=2, ensure_ascii=False)
+            handle.write("\n")
         print(f"Evidence pack written to {validated_output}", file=sys.stderr)
 
     # Print human-readable summary
