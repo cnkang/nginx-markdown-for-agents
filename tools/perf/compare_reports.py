@@ -39,6 +39,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from report_schema import validate_report  # noqa: E402
 from report_utils import load_json, write_json  # noqa: E402
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
 
 # ---------------------------------------------------------------------------
 # Threshold evaluation
@@ -312,7 +314,7 @@ def main(argv: list[str] | None = None) -> int:
     thresholds_path = validate_read_path(args.thresholds, purpose="thresholds json")
     output_path = Path(args.output).resolve()
     output_path = validate_write_path_within_root(
-        output_path, output_path.parent, purpose="verdict output root",
+        output_path, REPO_ROOT, purpose="verdict output root",
     )
 
     try:

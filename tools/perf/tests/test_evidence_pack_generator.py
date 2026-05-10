@@ -27,6 +27,7 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+import evidence_pack_generator as epg
 
 from evidence_pack_generator import (  # noqa: E402
     _PARITY_EPSILON,
@@ -912,8 +913,9 @@ class TestPrintHumanSummary:
 class TestCLI:
     """Tests for the CLI entry point."""
 
-    def test_main_succeeds_with_valid_inputs(self, tmp_path, capsys):
+    def test_main_succeeds_with_valid_inputs(self, tmp_path, capsys, monkeypatch):
         """CLI should succeed with valid input files."""
+        monkeypatch.setattr(epg, "REPO_ROOT", tmp_path)
         fullbuffer_path = _write_tmp_json(_make_fullbuffer_report())
         streaming_path = _write_tmp_json(_make_streaming_report())
         targets_path = _write_tmp_json(_make_evidence_targets())
@@ -934,8 +936,9 @@ class TestCLI:
         assert pack["schema_version"] == "1.0.0"
         assert pack["type"] == "evidence-pack"
 
-    def test_main_fails_with_missing_fullbuffer(self, tmp_path, capsys):
+    def test_main_fails_with_missing_fullbuffer(self, tmp_path, capsys, monkeypatch):
         """CLI should return exit code 2 when full-buffer report is missing."""
+        monkeypatch.setattr(epg, "REPO_ROOT", tmp_path)
         streaming_path = _write_tmp_json(_make_streaming_report())
         targets_path = _write_tmp_json(_make_evidence_targets())
         output_path = str(tmp_path / "output.json")
@@ -948,8 +951,9 @@ class TestCLI:
         ])
         assert exit_code == 2
 
-    def test_main_fails_with_missing_streaming(self, tmp_path, capsys):
+    def test_main_fails_with_missing_streaming(self, tmp_path, capsys, monkeypatch):
         """CLI should return exit code 2 when streaming report is missing."""
+        monkeypatch.setattr(epg, "REPO_ROOT", tmp_path)
         fullbuffer_path = _write_tmp_json(_make_fullbuffer_report())
         targets_path = _write_tmp_json(_make_evidence_targets())
         output_path = str(tmp_path / "output.json")
@@ -962,8 +966,9 @@ class TestCLI:
         ])
         assert exit_code == 2
 
-    def test_main_fails_with_missing_targets(self, tmp_path, capsys):
+    def test_main_fails_with_missing_targets(self, tmp_path, capsys, monkeypatch):
         """CLI should return exit code 2 when evidence targets are missing."""
+        monkeypatch.setattr(epg, "REPO_ROOT", tmp_path)
         fullbuffer_path = _write_tmp_json(_make_fullbuffer_report())
         streaming_path = _write_tmp_json(_make_streaming_report())
         output_path = str(tmp_path / "output.json")
@@ -976,8 +981,9 @@ class TestCLI:
         ])
         assert exit_code == 2
 
-    def test_main_handles_malformed_json(self, tmp_path, capsys):
+    def test_main_handles_malformed_json(self, tmp_path, capsys, monkeypatch):
         """CLI should return exit code 2 with malformed JSON."""
+        monkeypatch.setattr(epg, "REPO_ROOT", tmp_path)
         bad_json = tmp_path / "bad.json"
         bad_json.write_text('{"invalid": json}', encoding="utf-8")
 
@@ -993,8 +999,9 @@ class TestCLI:
         ])
         assert exit_code == 2
 
-    def test_summary_only_mode(self, tmp_path, capsys):
+    def test_summary_only_mode(self, tmp_path, capsys, monkeypatch):
         """--summary-only should print summary but not write JSON."""
+        monkeypatch.setattr(epg, "REPO_ROOT", tmp_path)
         fullbuffer_path = _write_tmp_json(_make_fullbuffer_report())
         streaming_path = _write_tmp_json(_make_streaming_report())
         targets_path = _write_tmp_json(_make_evidence_targets())
@@ -1011,8 +1018,9 @@ class TestCLI:
         # Output file should not exist
         assert not Path(output_path).exists()
 
-    def test_summary_only_without_output(self, tmp_path, capsys):
+    def test_summary_only_without_output(self, tmp_path, capsys, monkeypatch):
         """--summary-only without --output should succeed and not write JSON."""
+        monkeypatch.setattr(epg, "REPO_ROOT", tmp_path)
         fullbuffer_path = tmp_path / "fullbuffer.json"
         streaming_path = tmp_path / "streaming.json"
         targets_path = tmp_path / "targets.json"

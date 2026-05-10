@@ -28,7 +28,7 @@ import time
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
 
-_E2E_SAFE_BIN_DIRS = ("/usr/local/bin", "/usr/bin", "/opt/homebrew/bin")
+_E2E_SAFE_BIN_DIRS = ("/usr/local/bin", "/usr/bin", "/usr/sbin", "/opt/homebrew/bin")
 
 import pytest
 

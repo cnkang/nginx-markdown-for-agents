@@ -1229,13 +1229,9 @@ ngx_http_markdown_dynconf_reload(
         {
             u_char  read_buf[NGX_HTTP_MARKDOWN_DYNCONF_MAX_LINE];
             size_t  avail;
-            size_t  cursor;
             size_t  i;
 
-            avail = 0;
-            for (cursor = pos; cursor < sizeof(buf); cursor++) {
-                avail++;
-            }
+            avail = sizeof(buf) - pos;
 
             n = ngx_read_fd(fd, read_buf,
                             avail < sizeof(read_buf) ? avail : sizeof(read_buf));

@@ -62,6 +62,8 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from lib.path_validation import validate_read_path, validate_write_path_within_root
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
 # ---------------------------------------------------------------------------
 # Tier classification constants
 # ---------------------------------------------------------------------------
@@ -1073,7 +1075,7 @@ def main(argv: list[str] | None = None) -> int:
     if not args.summary_only:
         output_path = Path(args.output).resolve()
         validated_output = validate_write_path_within_root(
-            output_path, output_path.parent, purpose="evidence pack output",
+            output_path, REPO_ROOT, purpose="evidence pack output",
         )
         validated_output.parent.mkdir(parents=True, exist_ok=True)
         validated_output.write_text(

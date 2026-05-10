@@ -14,6 +14,7 @@ from report_utils import (
     build_baseline_report,
     detect_platform,
     merge_measurement_reports,
+    write_json,
 )
 
 
@@ -99,3 +100,18 @@ def test_merge_measurement_reports_combines_tiers():
 def test_build_aggregated_tier_rejects_empty_reports():
     with pytest.raises(ValueError, match="tier_reports cannot be empty"):
         _build_aggregated_tier([])
+
+
+def test_write_json_rejects_path_outside_repo_root(monkeypatch, tmp_path):
+    monkeypatch.setattr("report_utils.REPO_ROOT", tmp_path)
+    outside = tmp_path.parent / "escape.json"
+    with pytest.raises(ValueError, match="escapes root"):
+        write_json({"ok": True}, outside)
+
+
+def test_write_json_allows_path_within_repo_root(monkeypatch, tmp_path):
+    monkeypatch.setattr("report_utils.REPO_ROOT", tmp_path)
+    output = tmp_path / "reports" / "ok.json"
+    write_json({"ok": True}, output)
+    assert output.exists()
+    assert json.loads(output.read_text(encoding="utf-8")) == {"ok": True}
