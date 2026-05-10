@@ -458,7 +458,11 @@ def main(argv: list[str] | None = None) -> int:
         int: Exit code returned by the invoked subcommand.
     """
     args = build_parser().parse_args(argv)
-    return args.func(args)
+    try:
+        return args.func(args)
+    except ValueError as exc:
+        print(f"ERROR: invalid path argument: {exc}", file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":

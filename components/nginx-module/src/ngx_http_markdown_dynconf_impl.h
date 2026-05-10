@@ -1192,9 +1192,12 @@ ngx_http_markdown_dynconf_read_chunk(
         return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_IO_ERROR;
     }
 
-    for (size_t i = 0; i < (size_t) *n; i++) {
-        buf[*pos] = read_buf[i];
-        (*pos)++;
+    {
+        size_t  len;
+
+        len = (size_t) *n;
+        ngx_memcpy(buf + *pos, read_buf, len);
+        *pos += len;
     }
 
     return NGX_OK;

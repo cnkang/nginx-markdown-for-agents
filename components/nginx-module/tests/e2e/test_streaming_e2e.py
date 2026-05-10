@@ -54,7 +54,7 @@ def _nginx_bin():
         if base not in {"nginx", "nginx-debug"}:
             continue
         if any(os.path.commonpath([realpath, d]) == d for d in _E2E_SAFE_BIN_DIRS):
-            return resolved
+            return realpath
     return ""
 
 
@@ -155,6 +155,13 @@ def test_start_nginx_rejects_relative_binary_path():
     """_start_nginx should reject relative binary paths before resolution."""
     with pytest.raises(ValueError, match="must be absolute"):
         _start_nginx("nginx", "/tmp/nginx.conf")
+
+
+def test_nginx_bin_returns_canonical_absolute_path(monkeypatch):
+    """_nginx_bin should return the canonical absolute path after validation."""
+    monkeypatch.setattr(shutil, "which", lambda name: "nginx" if name == "nginx" else None)
+    monkeypatch.setattr(os.path, "realpath", lambda _p: "/usr/sbin/nginx")
+    assert _nginx_bin() == "/usr/sbin/nginx"
 
 
 @pytest.mark.skipif(not _check_prerequisites(), reason=_SKIP_REASON)
