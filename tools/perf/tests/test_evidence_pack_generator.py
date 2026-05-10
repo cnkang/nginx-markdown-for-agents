@@ -919,7 +919,7 @@ class TestCLI:
         fullbuffer_path = _write_tmp_json(_make_fullbuffer_report())
         streaming_path = _write_tmp_json(_make_streaming_report())
         targets_path = _write_tmp_json(_make_evidence_targets())
-        output_path = str(tmp_path / "output.json")
+        output_path = "output.json"
 
         exit_code = main([
             "--fullbuffer-report", fullbuffer_path,
@@ -931,7 +931,7 @@ class TestCLI:
         assert exit_code in (0, 1)
 
         # Verify output was written
-        with open(output_path) as f:
+        with open(tmp_path / output_path) as f:
             pack = json.load(f)
         assert pack["schema_version"] == "1.0.0"
         assert pack["type"] == "evidence-pack"
@@ -941,7 +941,7 @@ class TestCLI:
         monkeypatch.setattr(epg, "REPO_ROOT", tmp_path)
         streaming_path = _write_tmp_json(_make_streaming_report())
         targets_path = _write_tmp_json(_make_evidence_targets())
-        output_path = str(tmp_path / "output.json")
+        output_path = "output.json"
 
         exit_code = main([
             "--fullbuffer-report", "/nonexistent/fullbuffer.json",
@@ -956,7 +956,7 @@ class TestCLI:
         monkeypatch.setattr(epg, "REPO_ROOT", tmp_path)
         fullbuffer_path = _write_tmp_json(_make_fullbuffer_report())
         targets_path = _write_tmp_json(_make_evidence_targets())
-        output_path = str(tmp_path / "output.json")
+        output_path = "output.json"
 
         exit_code = main([
             "--fullbuffer-report", fullbuffer_path,
@@ -971,7 +971,7 @@ class TestCLI:
         monkeypatch.setattr(epg, "REPO_ROOT", tmp_path)
         fullbuffer_path = _write_tmp_json(_make_fullbuffer_report())
         streaming_path = _write_tmp_json(_make_streaming_report())
-        output_path = str(tmp_path / "output.json")
+        output_path = "output.json"
 
         exit_code = main([
             "--fullbuffer-report", fullbuffer_path,
@@ -989,7 +989,7 @@ class TestCLI:
 
         streaming_path = _write_tmp_json(_make_streaming_report())
         targets_path = _write_tmp_json(_make_evidence_targets())
-        output_path = str(tmp_path / "output.json")
+        output_path = "output.json"
 
         exit_code = main([
             "--fullbuffer-report", str(bad_json),
@@ -1005,7 +1005,7 @@ class TestCLI:
         fullbuffer_path = _write_tmp_json(_make_fullbuffer_report())
         streaming_path = _write_tmp_json(_make_streaming_report())
         targets_path = _write_tmp_json(_make_evidence_targets())
-        output_path = str(tmp_path / "output.json")
+        output_path = "output.json"
 
         exit_code = main([
             "--fullbuffer-report", fullbuffer_path,
@@ -1016,7 +1016,7 @@ class TestCLI:
         ])
         assert exit_code in (0, 1)
         # Output file should not exist
-        assert not Path(output_path).exists()
+        assert not (tmp_path / output_path).exists()
 
     def test_summary_only_without_output(self, tmp_path, capsys, monkeypatch):
         """--summary-only without --output should succeed and not write JSON."""

@@ -51,8 +51,17 @@ def write_json(data: dict, path: str | Path) -> None:
         data (dict): Mapping to serialize to JSON.
         path (str | Path): Destination file path; parent directories will be created if missing.
     """
+    raw_output = Path(str(path))
+    if raw_output.is_absolute():
+        raise ValueError(
+            f"Refusing absolute write path outside repository contract: {path!r}"
+        )
+    if ".." in raw_output.parts:
+        raise ValueError(
+            f"Refusing write path with '..' traversal component: {path!r}"
+        )
     validated_output = validate_write_path_within_root(
-        path, REPO_ROOT, purpose="report output",
+        REPO_ROOT / raw_output, REPO_ROOT, purpose="report output",
     )
     validated_output.parent.mkdir(parents=True, exist_ok=True)
     validated_output.write_text(

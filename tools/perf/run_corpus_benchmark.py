@@ -61,6 +61,21 @@ from report_utils import detect_platform, write_json  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
+def _resolve_repo_output_path(path: str, *, purpose: str) -> Path:
+    raw_output = Path(path)
+    if raw_output.is_absolute():
+        raise ValueError(
+            f"Refusing absolute write path outside repository contract: {path!r}"
+        )
+    if ".." in raw_output.parts:
+        raise ValueError(
+            f"Refusing write path with '..' traversal component: {path!r}"
+        )
+    return validate_write_path_within_root(
+        REPO_ROOT / raw_output, REPO_ROOT, purpose=purpose,
+    )
+
+
 # Exit code used by the converter to signal "skipped" (ineligible input).
 # The test-corpus-conversion binary currently only exits with 0 (success)
 # or 1 (error).  Exit code 2 is reserved for a future converter version
@@ -524,9 +539,8 @@ def main(argv: list[str] | None = None) -> int:
 
     # Generate examples if requested
     if args.examples_dir:
-        examples_root = Path(args.examples_dir).resolve()
-        validated_examples_dir = validate_write_path_within_root(
-            examples_root, REPO_ROOT, purpose="examples output root",
+        validated_examples_dir = _resolve_repo_output_path(
+            args.examples_dir, purpose="examples output root",
         )
         examples = select_examples(fixture_results, fixtures_meta)
         write_examples(

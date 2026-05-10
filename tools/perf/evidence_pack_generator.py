@@ -64,6 +64,21 @@ from lib.path_validation import validate_read_path, validate_write_path_within_r
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
+
+def _resolve_repo_output_path(path: str, *, purpose: str) -> Path:
+    raw_output = Path(path)
+    if raw_output.is_absolute():
+        raise ValueError(
+            f"Refusing absolute write path outside repository contract: {path!r}"
+        )
+    if ".." in raw_output.parts:
+        raise ValueError(
+            f"Refusing write path with '..' traversal component: {path!r}"
+        )
+    return validate_write_path_within_root(
+        REPO_ROOT / raw_output, REPO_ROOT, purpose=purpose,
+    )
+
 # ---------------------------------------------------------------------------
 # Tier classification constants
 # ---------------------------------------------------------------------------
@@ -1073,8 +1088,8 @@ def main(argv: list[str] | None = None) -> int:
 
     # Write output JSON (unless summary-only mode)
     if not args.summary_only:
-        validated_output = validate_write_path_within_root(
-            args.output, REPO_ROOT, purpose="evidence pack output",
+        validated_output = _resolve_repo_output_path(
+            args.output, purpose="evidence pack output",
         )
         validated_output.parent.mkdir(parents=True, exist_ok=True)
         validated_output.write_text(

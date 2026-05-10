@@ -104,14 +104,15 @@ def test_build_aggregated_tier_rejects_empty_reports():
 
 def test_write_json_rejects_path_outside_repo_root(monkeypatch, tmp_path):
     monkeypatch.setattr("report_utils.REPO_ROOT", tmp_path)
-    outside = tmp_path.parent / "escape.json"
-    with pytest.raises(ValueError, match="escapes root"):
+    outside = str((tmp_path.parent / "escape.json").resolve())
+    with pytest.raises(ValueError, match="absolute write path"):
         write_json({"ok": True}, outside)
 
 
 def test_write_json_allows_path_within_repo_root(monkeypatch, tmp_path):
     monkeypatch.setattr("report_utils.REPO_ROOT", tmp_path)
-    output = tmp_path / "reports" / "ok.json"
+    output = Path("reports/ok.json")
     write_json({"ok": True}, output)
-    assert output.exists()
-    assert json.loads(output.read_text(encoding="utf-8")) == {"ok": True}
+    output_file = tmp_path / output
+    assert output_file.exists()
+    assert json.loads(output_file.read_text(encoding="utf-8")) == {"ok": True}
