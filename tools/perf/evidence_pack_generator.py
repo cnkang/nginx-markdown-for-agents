@@ -1055,6 +1055,9 @@ def main(argv: list[str] | None = None) -> int:
     except OSError as exc:
         print(f"ERROR: file I/O error: {exc}", file=sys.stderr)
         return 2
+    except ValueError as exc:
+        print(f"ERROR: invalid input path: {exc}", file=sys.stderr)
+        return 2
 
     # Validate output path requirement
     if not args.summary_only and not args.output:

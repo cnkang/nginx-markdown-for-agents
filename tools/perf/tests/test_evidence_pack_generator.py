@@ -1066,3 +1066,19 @@ class TestCLI:
 
         assert exit_code == 2
         assert not (tmp_path / "reports" / "bad path.json").exists()
+
+    def test_main_rejects_input_path_with_traversal_component(
+        self, tmp_path, monkeypatch,
+    ):
+        monkeypatch.setattr(epg, "REPO_ROOT", tmp_path)
+        streaming_path = _write_tmp_json(_make_streaming_report())
+        targets_path = _write_tmp_json(_make_evidence_targets())
+
+        exit_code = main([
+            "--fullbuffer-report", "../escape.json",
+            "--streaming-report", streaming_path,
+            "--evidence-targets", targets_path,
+            "--output", "output.json",
+        ])
+
+        assert exit_code == 2
