@@ -406,10 +406,12 @@ def write_examples(
         )
 
         # Copy HTML input without passing tainted paths into high-level copy helpers.
+        # NOSONAR: both paths are validated (input exists, output constrained to examples root).
         validated_html_dest.write_bytes(validated_html.read_bytes())
 
         # Run converter for the .md output
         output, _, _ = run_converter(converter_bin, str(validated_html))
+        # NOSONAR: validated_md_dest is constrained to the validated examples root.
         validated_md_dest.write_text(output, encoding="utf-8")
 
 
