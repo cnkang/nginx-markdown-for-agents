@@ -22,6 +22,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from report_utils import load_json  # noqa: E402
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
 TOKEN_DISCLAIMER = (
     "Token reduction values are estimates derived from byte-size ratios, "
     "not precise token counts or LLM billing data."
@@ -132,7 +134,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.output:
         output_path = Path(args.output).resolve()
         validated_output = validate_write_path_within_root(
-            output_path, output_path.parent, purpose="PR summary output",
+            output_path, REPO_ROOT, purpose="PR summary output",
         )
         validated_output.parent.mkdir(parents=True, exist_ok=True)
         validated_output.write_text(md, encoding="utf-8")

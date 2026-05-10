@@ -59,6 +59,8 @@ from report_schema import (  # noqa: E402
 )
 from report_utils import detect_platform, write_json  # noqa: E402
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
 # Exit code used by the converter to signal "skipped" (ineligible input).
 # The test-corpus-conversion binary currently only exits with 0 (success)
 # or 1 (error).  Exit code 2 is reserved for a future converter version
@@ -517,8 +519,9 @@ def main(argv: list[str] | None = None) -> int:
 
     # Generate examples if requested
     if args.examples_dir:
+        examples_root = Path(args.examples_dir).resolve()
         validated_examples_dir = validate_write_path_within_root(
-            args.examples_dir, args.examples_dir, purpose="examples output root",
+            examples_root, REPO_ROOT, purpose="examples output root",
         )
         examples = select_examples(fixture_results, fixtures_meta)
         write_examples(
