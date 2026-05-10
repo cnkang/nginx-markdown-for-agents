@@ -53,7 +53,6 @@ import argparse
 import json
 import math
 import os
-import re
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -62,6 +61,7 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from lib.path_validation import validate_read_path
+import report_utils
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -1075,33 +1075,12 @@ def main(argv: list[str] | None = None) -> int:
     # Write output JSON (unless summary-only mode)
     if not args.summary_only:
         try:
-            raw_output = args.output
-            if not re.fullmatch(r"[A-Za-z0-9._/\-]+", raw_output):
-                raise ValueError(
-                    f"Refusing write path with unsafe characters: {raw_output!r}"
-                )
-            raw_output_path = Path(raw_output)
-            if raw_output_path.is_absolute():
-                raise ValueError(
-                    "Refusing absolute write path outside repository contract: "
-                    f"{raw_output!r}"
-                )
-            if ".." in raw_output_path.parts:
-                raise ValueError(
-                    "Refusing write path with '..' traversal component: "
-                    f"{raw_output!r}"
-                )
-            resolved_root = REPO_ROOT.resolve()
-            validated_output = (resolved_root / raw_output_path).resolve()
-            validated_output.relative_to(resolved_root)
-        except ValueError:
-            print("ERROR: invalid --output path", file=sys.stderr)
+            report_utils.REPO_ROOT = REPO_ROOT
+            report_utils.write_json(evidence_pack, args.output)
+        except ValueError as exc:
+            print(f"ERROR: invalid --output path: {exc}", file=sys.stderr)
             return 2
-        validated_output.parent.mkdir(parents=True, exist_ok=True)
-        with validated_output.open("w", encoding="utf-8") as handle:
-            json.dump(evidence_pack, handle, indent=2, ensure_ascii=False)
-            handle.write("\n")
-        print(f"Evidence pack written to {validated_output}", file=sys.stderr)
+        print(f"Evidence pack written to {args.output}", file=sys.stderr)
 
     # Print human-readable summary
     print_human_summary(evidence_pack)
