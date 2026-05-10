@@ -1092,6 +1092,7 @@ def main(argv: list[str] | None = None) -> int:
             args.output, purpose="evidence pack output",
         )
         validated_output.parent.mkdir(parents=True, exist_ok=True)
+        # NOSONAR: validated_output is constrained to REPO_ROOT by _resolve_repo_output_path.
         validated_output.write_text(
             json.dumps(evidence_pack, indent=2, ensure_ascii=False) + "\n",
             encoding="utf-8",

@@ -64,6 +64,7 @@ def write_json(data: dict, path: str | Path) -> None:
         REPO_ROOT / raw_output, REPO_ROOT, purpose="report output",
     )
     validated_output.parent.mkdir(parents=True, exist_ok=True)
+    # NOSONAR: validated_output is constrained to REPO_ROOT by validate_write_path_within_root.
     validated_output.write_text(
         json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
     )
