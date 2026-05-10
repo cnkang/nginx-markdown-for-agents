@@ -372,8 +372,12 @@ def write_examples(
         safe_id = _sanitize_path_component(fid)
         base_name = f"{prefix}--{safe_id}"
 
-        html_path = meta.get("_html_path", "")
-        if not html_path or not Path(html_path).exists():
+        meta_path = meta.get("_meta_path", "")
+        if not meta_path:
+            continue
+        validated_meta_path = validate_read_path(meta_path, purpose="corpus meta")
+        html_path = validated_meta_path.with_suffix("").with_suffix(".html")
+        if not html_path.exists():
             continue
         validated_html = validate_read_path(html_path, purpose="fixture html")
 

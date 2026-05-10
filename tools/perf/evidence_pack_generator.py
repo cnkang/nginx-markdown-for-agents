@@ -1073,16 +1073,15 @@ def main(argv: list[str] | None = None) -> int:
 
     # Write output JSON (unless summary-only mode)
     if not args.summary_only:
-        output_path = Path(args.output).resolve()
         validated_output = validate_write_path_within_root(
-            output_path, REPO_ROOT, purpose="evidence pack output",
+            args.output, REPO_ROOT, purpose="evidence pack output",
         )
         validated_output.parent.mkdir(parents=True, exist_ok=True)
         validated_output.write_text(
             json.dumps(evidence_pack, indent=2, ensure_ascii=False) + "\n",
             encoding="utf-8",
         )
-        print(f"Evidence pack written to {output_path}", file=sys.stderr)
+        print(f"Evidence pack written to {validated_output}", file=sys.stderr)
 
     # Print human-readable summary
     print_human_summary(evidence_pack)
