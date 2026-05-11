@@ -58,16 +58,15 @@ def write_json(data: dict, path: str | Path) -> None:
             f"Refusing write path with unsafe characters: {path!r}"
         )
     raw_output = Path(raw_output_str)
-    if raw_output.is_absolute():
-        raise ValueError(
-            f"Refusing absolute write path outside repository contract: {path!r}"
-        )
     if ".." in raw_output.parts:
         raise ValueError(
             f"Refusing write path with '..' traversal component: {path!r}"
         )
     resolved_root = REPO_ROOT.resolve()
-    validated_output = (resolved_root / raw_output).resolve()
+    if raw_output.is_absolute():
+        validated_output = raw_output.resolve()
+    else:
+        validated_output = (resolved_root / raw_output).resolve()
     try:
         validated_output.relative_to(resolved_root)
     except ValueError:
