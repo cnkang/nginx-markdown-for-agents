@@ -1164,7 +1164,7 @@ ngx_http_markdown_dynconf_process_buffer(
 static ngx_int_t
 ngx_http_markdown_dynconf_read_chunk(
     ngx_fd_t fd, u_char *buf, size_t *pos, size_t buf_cap,
-    ngx_str_t *path, ngx_log_t *log, ssize_t *n)
+    const ngx_str_t *path, ngx_log_t *log, ssize_t *n)
 {
     u_char  read_buf[NGX_HTTP_MARKDOWN_DYNCONF_MAX_LINE];
     size_t  avail;
@@ -1172,7 +1172,7 @@ ngx_http_markdown_dynconf_read_chunk(
     if (*pos >= buf_cap) {
         ngx_log_error(NGX_LOG_WARN, log, 0,
                       "markdown dynconf: buffer position overflow in \"%V\"",
-                      path);
+                      (ngx_str_t *) path);
         return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_INVALID_FILE;
     }
 
@@ -1188,7 +1188,7 @@ ngx_http_markdown_dynconf_read_chunk(
     if ((size_t) *n > avail) {
         ngx_log_error(NGX_LOG_WARN, log, 0,
                       "markdown dynconf: read overflow in \"%V\"",
-                      path);
+                      (ngx_str_t *) path);
         return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_IO_ERROR;
     }
 
