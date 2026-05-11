@@ -1155,6 +1155,85 @@ ngx_http_markdown_dynconf_process_buffer(
     }
 }
 
+/*
+ * Read one chunk from fd into buf at *pos with bounds checks.
+ *
+ * Returns NGX_OK on successful read attempt (including EOF/error status in
+ * *n), or a reload status code on hard failure.
+ */
+static ngx_int_t
+ngx_http_markdown_dynconf_read_chunk(
+    ngx_fd_t fd, u_char *buf, size_t *pos, size_t buf_cap,
+    const ngx_str_t *path, ngx_log_t *log, ssize_t *n)
+{
+    u_char  read_buf[NGX_HTTP_MARKDOWN_DYNCONF_MAX_LINE];
+    size_t  avail;
+
+    if (*pos >= buf_cap) {
+        ngx_log_error(NGX_LOG_WARN, log, 0,
+                      "markdown dynconf: buffer position overflow in \"%V\"",
+                      (ngx_str_t *) path);
+        return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_INVALID_FILE;
+    }
+
+    avail = buf_cap - *pos;
+
+    *n = ngx_read_fd(fd, read_buf,
+                     avail < sizeof(read_buf) ? avail : sizeof(read_buf));
+
+    if (*n <= 0) {
+        return NGX_OK;
+    }
+
+    if ((size_t) *n > avail) {
+        ngx_log_error(NGX_LOG_WARN, log, 0,
+                      "markdown dynconf: read overflow in \"%V\"",
+                      (ngx_str_t *) path);
+        return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_IO_ERROR;
+    }
+
+    {
+        size_t  len;
+
+        len = (size_t) *n;
+        ngx_memcpy(buf + *pos, read_buf, len);
+        *pos += len;
+    }
+
+    return NGX_OK;
+}
+
+/*
+ * Process complete lines currently present in buf and enforce line-length cap.
+ */
+static ngx_int_t
+ngx_http_markdown_dynconf_process_chunk(
+    ngx_http_markdown_dynconf_watcher_t *watcher,
+    u_char *buf, size_t *pos, size_t *line_start,
+    ngx_log_t *log, ngx_uint_t *applied)
+{
+    if (ngx_http_markdown_dynconf_process_buffer(
+            &watcher->staging_snapshot, buf, pos, line_start,
+            log, applied) != NGX_OK)
+    {
+        ngx_log_error(NGX_LOG_WARN, log, 0,
+                      "markdown dynconf: parse error in \"%V\", "
+                      "discarding staging; active config unchanged",
+                      &watcher->path);
+        return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_INVALID_FILE;
+    }
+
+    if (*pos >= NGX_HTTP_MARKDOWN_DYNCONF_MAX_LINE) {
+        ngx_log_error(NGX_LOG_WARN, log, 0,
+                      "markdown dynconf: line too long in \"%V\", "
+                      "discarding staging; active config unchanged",
+                      &watcher->path);
+        return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_INVALID_FILE;
+    }
+
+    return NGX_OK;
+}
+
 /**
  * Perform a two-phase reload of dynamic configuration from the watcher's file.
  *
@@ -1215,18 +1294,13 @@ ngx_http_markdown_dynconf_reload(
     pos = 0;
 
     for ( ;; ) {
-        /* Defensive: pos must not reach or exceed buffer size before read.
-         * CodeQL: use >= (not >) because the addition guard and post-add
-         * check constrain pos <= sizeof(buf), making > always false. */
-        if (pos >= sizeof(buf)) {
-            ngx_log_error(NGX_LOG_WARN, log, 0,
-                          "markdown dynconf: buffer position overflow in \"%V\"",
-                          &watcher->path);
+        line_rc = ngx_http_markdown_dynconf_read_chunk(
+            fd, buf, &pos, sizeof(buf), &watcher->path, log, &n);
+        if (line_rc != NGX_OK) {
             ngx_close_file(fd);
-            return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_INVALID_FILE;
+            return line_rc;
         }
 
-        n = ngx_read_fd(fd, buf + pos, sizeof(buf) - pos);
         if (n == 0) {
             break;
         }
@@ -1239,36 +1313,11 @@ ngx_http_markdown_dynconf_reload(
             return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_IO_ERROR;
         }
 
-        /* n > 0 here; check for overflow before adding to pos. */
-        if ((size_t) n > sizeof(buf) - pos) {
-            ngx_log_error(NGX_LOG_WARN, log, 0,
-                          "markdown dynconf: read overflow in \"%V\"",
-                          &watcher->path);
+        line_rc = ngx_http_markdown_dynconf_process_chunk(
+            watcher, buf, &pos, &line_start, log, &applied);
+        if (line_rc != NGX_OK) {
             ngx_close_file(fd);
-            return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_IO_ERROR;
-        }
-
-        pos += (size_t) n;
-
-        if (ngx_http_markdown_dynconf_process_buffer(
-                &watcher->staging_snapshot, buf, &pos, &line_start,
-                log, &applied) != NGX_OK)
-        {
-            ngx_log_error(NGX_LOG_WARN, log, 0,
-                          "markdown dynconf: parse error in \"%V\", "
-                          "discarding staging; active config unchanged",
-                          &watcher->path);
-            ngx_close_file(fd);
-            return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_INVALID_FILE;
-        }
-
-        if (pos >= sizeof(buf)) {
-            ngx_log_error(NGX_LOG_WARN, log, 0,
-                          "markdown dynconf: line too long in \"%V\", "
-                          "discarding staging; active config unchanged",
-                          &watcher->path);
-            ngx_close_file(fd);
-            return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_INVALID_FILE;
+            return line_rc;
         }
     }
 

@@ -177,8 +177,7 @@ def _analyze_shell_lines(lines: list[str], line_types: list[str]) -> list[str]:
 
 def main(filepath: str) -> int:
     resolved = validate_read_path(filepath, purpose="install script")
-    with open(resolved, encoding="utf-8") as fh:
-        lines = fh.readlines()
+    lines = resolved.read_text(encoding="utf-8").splitlines(keepends=True)
 
     line_types = _classify_lines(lines)
     issues = _analyze_shell_lines(lines, line_types)
