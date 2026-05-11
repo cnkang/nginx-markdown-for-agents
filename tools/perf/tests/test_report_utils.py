@@ -13,7 +13,9 @@ from report_utils import (
     _build_aggregated_tier,
     build_baseline_report,
     detect_platform,
+    main,
     merge_measurement_reports,
+    write_json,
 )
 
 
@@ -99,3 +101,57 @@ def test_merge_measurement_reports_combines_tiers():
 def test_build_aggregated_tier_rejects_empty_reports():
     with pytest.raises(ValueError, match="tier_reports cannot be empty"):
         _build_aggregated_tier([])
+
+
+def test_write_json_rejects_path_outside_repo_root(monkeypatch, tmp_path):
+    monkeypatch.setattr("report_utils.REPO_ROOT", tmp_path)
+    outside = str((tmp_path.parent / "escape.json").resolve())
+    with pytest.raises(ValueError, match="escapes root"):
+        write_json({"ok": True}, outside)
+
+
+def test_write_json_allows_path_within_repo_root(monkeypatch, tmp_path):
+    monkeypatch.setattr("report_utils.REPO_ROOT", tmp_path)
+    output = Path("reports/ok.json")
+    write_json({"ok": True}, output)
+    output_file = tmp_path / output
+    assert output_file.exists()
+    assert json.loads(output_file.read_text(encoding="utf-8")) == {"ok": True}
+
+
+def test_write_json_allows_absolute_path_within_repo_root(monkeypatch, tmp_path):
+    monkeypatch.setattr("report_utils.REPO_ROOT", tmp_path)
+    output_file = (tmp_path / "reports" / "abs-ok.json").resolve()
+    write_json({"ok": True}, output_file)
+    assert output_file.exists()
+    assert json.loads(output_file.read_text(encoding="utf-8")) == {"ok": True}
+
+
+def test_write_json_rejects_unsafe_characters(monkeypatch, tmp_path):
+    monkeypatch.setattr("report_utils.REPO_ROOT", tmp_path)
+    with pytest.raises(ValueError, match="unsafe characters"):
+        write_json({"ok": True}, "reports/bad path.json")
+
+
+def test_main_returns_2_for_invalid_read_path(capsys):
+    exit_code = main([
+        "extract-baseline",
+        "--measurement", "../escape.json",
+        "--output", "reports/out.json",
+    ])
+    assert exit_code == 2
+    assert "invalid path argument" in capsys.readouterr().err
+
+
+def test_main_returns_2_for_invalid_write_path(tmp_path, capsys):
+    measurement = tmp_path / "measurement.json"
+    measurement.write_text(
+        json.dumps({"schema_version": "1.0.0", "tiers": {}}), encoding="utf-8",
+    )
+    exit_code = main([
+        "extract-baseline",
+        "--measurement", str(measurement),
+        "--output", "../escape.json",
+    ])
+    assert exit_code == 2
+    assert "invalid path argument" in capsys.readouterr().err

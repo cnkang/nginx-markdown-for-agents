@@ -18,6 +18,7 @@ runtime semantics from canonical docs. They answer four practical questions:
 | [docs-tooling-drift.md](docs-tooling-drift.md) | docs, validators, release-gate commands, CI path filters | `AGENTS.md`, `docs/DOCUMENTATION_DUPLICATION_POLICY.md` |
 | [nginx-protocol-safety.md](nginx-protocol-safety.md) | auth/cache-control, conditional requests, statuses, headers | `AGENTS.md`, `docs/architecture/REQUEST_LIFECYCLE.md` |
 | [release-governance.md](release-governance.md) | release gates, source-build CI, scope governance, matrix tooling | `AGENTS.md`, `docs/project/release-gates/README.md` |
+| [tooling-path-security.md](tooling-path-security.md) | tooling path validation, safe file I/O, subprocess argument safety | `AGENTS.md`, `tools/lib/path_validation.py` |
 | [harness-remediation.md](harness-remediation.md) | recent Git analysis, harness rules, steering adapters, remediation closeout | `AGENTS.md`, `docs/harness/core.md` |
 | [otel-integration.md](otel-integration.md) | OTel tracing, OTel metrics, OTLP export, span attributes | `AGENTS.md`, `docs/features/otel-tracing.md` |
 | [packaging-distribution.md](packaging-distribution.md) | APT/YUM repos, Homebrew tap, Helm chart, K8s Ingress | `AGENTS.md`, `docs/guides/INSTALLATION.md` |
@@ -33,3 +34,4 @@ runtime semantics from canonical docs. They answer four practical questions:
 | 0.6.0 | 2026-04-28 | v0.6.0-planning | Added otel-integration and packaging-distribution packs |
 | 0.6.0 | 2026-05-03 | Codex | Added dynamic-config-hot-reload pack from two-week branch scan |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
+| 0.6.2 | 2026-05-11 | Kang | Added tooling-path-security pack to generalize repeated tooling path-safety fixes |

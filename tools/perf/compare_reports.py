@@ -26,15 +26,21 @@ Exit codes:
 from __future__ import annotations
 
 import argparse
+import json
 import math
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from lib.path_validation import validate_read_path, validate_write_path_within_root
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from report_schema import validate_report  # noqa: E402
-from report_utils import load_json, write_json  # noqa: E402
+from report_utils import load_json  # noqa: E402
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 # ---------------------------------------------------------------------------
@@ -304,11 +310,18 @@ def build_cli_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_cli_parser().parse_args(argv)
+    baseline_path = validate_read_path(args.baseline, purpose="baseline report")
+    current_path = validate_read_path(args.current, purpose="current report")
+    thresholds_path = validate_read_path(args.thresholds, purpose="thresholds json")
+    output_path = Path(args.output).resolve()
+    output_path = validate_write_path_within_root(
+        output_path, REPO_ROOT, purpose="verdict output root",
+    )
 
     try:
-        baseline = load_json(args.baseline)
-        current = load_json(args.current)
-        thresholds = load_json(args.thresholds)
+        baseline = load_json(str(baseline_path))
+        current = load_json(str(current_path))
+        thresholds = load_json(str(thresholds_path))
     except Exception as e:
         print(f"ERROR: failed to load input files: {e}", file=sys.stderr)
         return 1
@@ -351,7 +364,11 @@ def main(argv: list[str] | None = None) -> int:
     verdict_report = compare_reports(
         baseline, current, thresholds, skip_metrics=skip_metrics
     )
-    write_json(verdict_report, args.output)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(
+        json.dumps(verdict_report, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
 
     overall = verdict_report["overall-verdict"]
     print(f"Verdict: {overall}")

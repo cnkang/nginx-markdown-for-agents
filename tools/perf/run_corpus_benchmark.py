@@ -59,6 +59,23 @@ from report_schema import (  # noqa: E402
 )
 from report_utils import detect_platform, write_json  # noqa: E402
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
+def _resolve_repo_output_path(path: str, *, purpose: str) -> Path:
+    raw_output = Path(path)
+    if raw_output.is_absolute():
+        raise ValueError(
+            f"Refusing absolute write path outside repository contract: {path!r}"
+        )
+    if ".." in raw_output.parts:
+        raise ValueError(
+            f"Refusing write path with '..' traversal component: {path!r}"
+        )
+    return validate_write_path_within_root(
+        REPO_ROOT / raw_output, REPO_ROOT, purpose=purpose,
+    )
+
+
 # Exit code used by the converter to signal "skipped" (ineligible input).
 # The test-corpus-conversion binary currently only exits with 0 (success)
 # or 1 (error).  Exit code 2 is reserved for a future converter version
@@ -82,9 +99,9 @@ def discover_fixtures(corpus_dir: Path) -> list[dict]:
             print(f"WARNING: no HTML for {meta_path}, skipping", file=sys.stderr)
             continue
         validated_meta = validate_read_path(meta_path, purpose="corpus meta")
-        with open(validated_meta, "r", encoding="utf-8") as f:
-            meta = json.load(f)
-        meta["_html_path"] = str(html_path)
+        validated_html = validate_read_path(html_path, purpose="fixture html")
+        meta = json.loads(validated_meta.read_text(encoding="utf-8"))
+        meta["_html_path"] = str(validated_html)
         meta["_meta_path"] = str(meta_path)
         fixtures.append(meta)
     return fixtures
@@ -94,8 +111,7 @@ def load_corpus_version(corpus_dir: Path) -> str:
     """Read corpus-version.json and return the version string."""
     version_file = corpus_dir / "corpus-version.json"
     validated_version = validate_read_path(version_file, purpose="corpus version")
-    with open(validated_version, "r", encoding="utf-8") as f:
-        data = json.load(f)
+    data = json.loads(validated_version.read_text(encoding="utf-8"))
     return data["version"]
 
 
@@ -335,21 +351,6 @@ def select_examples(
     return examples
 
 
-def _sanitize_path_component(name: str) -> str:
-    """Sanitize a string for safe use as a path component.
-
-    Strips directory separators and path traversal sequences to prevent
-    path-traversal attacks when constructing file paths from metadata.
-    """
-    # Remove any directory separators and path traversal components
-    name = name.replace("/", "-").replace("\\", "-")
-    # Collapse any ".." sequences
-    name = name.replace("..", "_")
-    # Strip leading/trailing dots and whitespace
-    name = name.strip(". \t")
-    return name or "unknown"
-
-
 def write_examples(
     examples: list[dict],
     fixtures_meta: list[dict],
@@ -361,43 +362,42 @@ def write_examples(
     examples_dir.mkdir(parents=True, exist_ok=True)
     resolved_examples_dir = examples_dir.resolve()
 
-    for ex in examples:
+    for idx, ex in enumerate(examples, start=1):
         fid = ex["fixture-id"]
         meta = meta_lookup.get(fid, {})
-        pt = ex.get("page-type", "unknown")
         is_failure = meta.get("failure-corpus", False)
 
-        prefix = "failure" if is_failure else _sanitize_path_component(pt)
-        safe_id = _sanitize_path_component(fid)
-        base_name = f"{prefix}--{safe_id}"
+        # Do not derive output filenames from metadata values; keep file names
+        # deterministic and non-user-controlled to avoid path-injection sinks.
+        prefix = "failure" if is_failure else "example"
+        base_name = f"{prefix}-{idx:03d}"
 
-        html_path = meta.get("_html_path", "")
-        if not html_path or not Path(html_path).exists():
+        meta_path = meta.get("_meta_path", "")
+        if not meta_path:
             continue
-
-        # Validate output paths stay within examples_dir
-        html_dest = (examples_dir / f"{base_name}.html").resolve()
-        md_dest = (examples_dir / f"{base_name}.md").resolve()
-        if not (
-            str(html_dest).startswith(str(resolved_examples_dir))
-            and str(md_dest).startswith(str(resolved_examples_dir))
-        ):
+        validated_meta_path = validate_read_path(meta_path, purpose="corpus meta")
+        html_path = validated_meta_path.with_suffix("").with_suffix(".html")
+        if not html_path.exists():
             continue
+        validated_html = validate_read_path(html_path, purpose="fixture html")
 
-        # Copy HTML input
-        shutil.copy2(html_path, html_dest)
+        validated_html_dest = (resolved_examples_dir / f"{base_name}.html").resolve()
+        validated_md_dest = (resolved_examples_dir / f"{base_name}.md").resolve()
+        try:
+            validated_html_dest.relative_to(resolved_examples_dir)
+            validated_md_dest.relative_to(resolved_examples_dir)
+        except ValueError:
+            raise ValueError(
+                "Example output path escapes examples directory root; "
+                "refusing to write outside the intended directory tree"
+            ) from None
+
+        # Copy HTML input after explicit root-bound checks on both paths.
+        validated_html_dest.write_bytes(validated_html.read_bytes())
 
         # Run converter for the .md output
-        output, _, _ = run_converter(converter_bin, html_path)
-        if ".." in str(md_dest).replace("\\", "/").split("/"):
-            raise ValueError(
-                f"Refusing write path with '..' traversal component: {md_dest!r}"
-            )
-        validated_md = validate_write_path_within_root(
-            md_dest, Path(md_dest).parent, purpose="markdown output",
-        )
-        with open(validated_md, "w", encoding="utf-8") as f:
-            f.write(output)
+        output, _, _ = run_converter(converter_bin, str(validated_html))
+        validated_md_dest.write_text(output, encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------
@@ -526,9 +526,12 @@ def main(argv: list[str] | None = None) -> int:
 
     # Generate examples if requested
     if args.examples_dir:
+        validated_examples_dir = _resolve_repo_output_path(
+            args.examples_dir, purpose="examples output root",
+        )
         examples = select_examples(fixture_results, fixtures_meta)
         write_examples(
-            examples, fixtures_meta, converter_bin, Path(args.examples_dir)
+            examples, fixtures_meta, converter_bin, validated_examples_dir
         )
         print(f"Examples written to {args.examples_dir}")
 

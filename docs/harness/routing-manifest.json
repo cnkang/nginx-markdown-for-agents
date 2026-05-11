@@ -57,6 +57,13 @@
         "make docs-check"
       ]
     },
+    "harness-security": {
+      "phase": "focused-semantic",
+      "commands": [
+        "make harness-security-checks",
+        "PYTHONPATH=. pytest -q tools/perf/tests"
+      ]
+    },
     "rust-streaming": {
       "phase": "focused-semantic",
       "commands": [
@@ -302,6 +309,41 @@
         "harness-sync",
         "nginx-protocol",
         "runtime-e2e",
+        "release-quality"
+      ]
+    },
+    {
+      "id": "tooling-path-security",
+      "doc": "docs/harness/risk-packs/tooling-path-security.md",
+      "primary_surfaces": [
+        "tooling-path-validation",
+        "safe-path-io",
+        "subprocess-argument-safety"
+      ],
+      "supporting_surfaces": [
+        "docs-tooling",
+        "release-governance"
+      ],
+      "paths": [
+        "tools/perf/**",
+        "tools/tests/**",
+        "tools/lib/path_validation.py",
+        "skills/nginx-markdown-harness-maintenance/scripts/**"
+      ],
+      "keywords": [
+        "path validation",
+        "path traversal",
+        "cwe-22",
+        "command injection",
+        "repo-relative",
+        "validate_read_path",
+        "validate_write_path_within_root",
+        "trusted input only",
+        "shell=False"
+      ],
+      "verification_families": [
+        "harness-sync",
+        "harness-security",
         "release-quality"
       ]
     },
