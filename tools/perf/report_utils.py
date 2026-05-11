@@ -8,12 +8,15 @@ import copy
 import json
 import os
 import platform as python_platform
+import re
 import statistics
 import sys
 from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from lib.path_validation import validate_read_path, validate_write_path_within_root
+from lib.path_validation import validate_read_path
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 CORE_METRICS = [
     "p50_ms",
@@ -36,8 +39,7 @@ STAGE_KEYS = ["parse_pct", "convert_pct", "etag_pct", "token_pct"]
 def load_json(path: str | Path) -> dict:
     """Load and return JSON data from *path* after path validation."""
     resolved = validate_read_path(path, purpose="report input")
-    with open(resolved, "r", encoding="utf-8") as fh:
-        return json.load(fh)
+    return json.loads(resolved.read_text(encoding="utf-8"))
 
 
 def write_json(data: dict, path: str | Path) -> None:
@@ -50,18 +52,33 @@ def write_json(data: dict, path: str | Path) -> None:
         data (dict): Mapping to serialize to JSON.
         path (str | Path): Destination file path; parent directories will be created if missing.
     """
-    output_path = Path(path).resolve()
-    if ".." in str(path).replace("\\", "/").split("/"):
+    raw_output_str = str(path)
+    if not re.fullmatch(r"[A-Za-z0-9._/\-]+", raw_output_str):
+        raise ValueError(
+            f"Refusing write path with unsafe characters: {path!r}"
+        )
+    raw_output = Path(raw_output_str)
+    if ".." in raw_output.parts:
         raise ValueError(
             f"Refusing write path with '..' traversal component: {path!r}"
         )
-    validated_output = validate_write_path_within_root(
-        output_path, output_path.parent, purpose="report output",
-    )
+    resolved_root = REPO_ROOT.resolve()
+    if raw_output.is_absolute():
+        validated_output = raw_output.resolve()
+    else:
+        validated_output = (resolved_root / raw_output).resolve()
+    try:
+        validated_output.relative_to(resolved_root)
+    except ValueError:
+        raise ValueError(
+            f"Write report output path {validated_output} escapes root "
+            f"{resolved_root}; refusing to write outside the intended "
+            "directory tree"
+        )
     validated_output.parent.mkdir(parents=True, exist_ok=True)
-    with open(validated_output, "w", encoding="utf-8") as fh:
-        json.dump(data, fh, indent=2, ensure_ascii=False)
-        fh.write("\n")
+    with validated_output.open("w", encoding="utf-8") as handle:
+        json.dump(data, handle, indent=2, ensure_ascii=False)
+        handle.write("\n")
 
 
 def normalize_platform(os_name: str, arch: str) -> str:
@@ -440,7 +457,11 @@ def main(argv: list[str] | None = None) -> int:
         int: Exit code returned by the invoked subcommand.
     """
     args = build_parser().parse_args(argv)
-    return args.func(args)
+    try:
+        return args.func(args)
+    except ValueError as exc:
+        print(f"ERROR: invalid path argument: {exc}", file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":

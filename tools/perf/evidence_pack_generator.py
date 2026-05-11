@@ -60,7 +60,10 @@ from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from lib.path_validation import validate_read_path, validate_write_path_within_root
+from lib.path_validation import validate_read_path
+import report_utils
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 # ---------------------------------------------------------------------------
 # Tier classification constants
@@ -534,12 +537,10 @@ def _load_json(path: str | Path | None) -> dict | None:
     """Load and return JSON data from *path*, or None if path is None or file doesn't exist."""
     if path is None:
         return None
-    p = Path(path)
-    if not p.exists():
+    resolved = validate_read_path(path, purpose="streaming report", must_exist=False)
+    if not resolved.exists():
         return None
-    validated_p = validate_read_path(p, purpose="streaming report", must_exist=False)
-    with open(validated_p, "r", encoding="utf-8") as f:
-        return json.load(f)
+    return json.loads(resolved.read_text(encoding="utf-8"))
 
 
 def _build_streaming_report_subset(streaming_report: dict) -> dict:
@@ -1054,6 +1055,9 @@ def main(argv: list[str] | None = None) -> int:
     except OSError as exc:
         print(f"ERROR: file I/O error: {exc}", file=sys.stderr)
         return 2
+    except ValueError as exc:
+        print(f"ERROR: invalid input path: {exc}", file=sys.stderr)
+        return 2
 
     # Validate output path requirement
     if not args.summary_only and not args.output:
@@ -1073,19 +1077,13 @@ def main(argv: list[str] | None = None) -> int:
 
     # Write output JSON (unless summary-only mode)
     if not args.summary_only:
-        output_path = Path(args.output)
-        if ".." in str(output_path).replace("\\", "/").split("/"):
-            raise ValueError(
-                f"Refusing write path with '..' traversal component: {output_path!r}"
-            )
-        validated_output = validate_write_path_within_root(
-            output_path, output_path.parent, purpose="evidence pack output",
-        )
-        validated_output.parent.mkdir(parents=True, exist_ok=True)
-        with open(validated_output, "w", encoding="utf-8") as f:
-            json.dump(evidence_pack, f, indent=2, ensure_ascii=False)
-            f.write("\n")
-        print(f"Evidence pack written to {output_path}", file=sys.stderr)
+        try:
+            report_utils.REPO_ROOT = REPO_ROOT
+            report_utils.write_json(evidence_pack, args.output)
+        except ValueError as exc:
+            print(f"ERROR: invalid --output path: {exc}", file=sys.stderr)
+            return 2
+        print(f"Evidence pack written to {args.output}", file=sys.stderr)
 
     # Print human-readable summary
     print_human_summary(evidence_pack)

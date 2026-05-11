@@ -16,11 +16,13 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from lib.path_validation import validate_write_path_within_root
+from lib.path_validation import validate_read_path, validate_write_path_within_root
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from report_utils import load_json  # noqa: E402
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 TOKEN_DISCLAIMER = (
     "Token reduction values are estimates derived from byte-size ratios, "
@@ -119,9 +121,10 @@ def build_cli_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_cli_parser().parse_args(argv)
+    report_path = validate_read_path(args.report, purpose="unified report")
 
     try:
-        report = load_json(args.report)
+        report = load_json(str(report_path))
     except Exception as e:
         print(f"ERROR: failed to load report: {e}", file=sys.stderr)
         return 1
@@ -129,17 +132,12 @@ def main(argv: list[str] | None = None) -> int:
     md = format_summary(report)
 
     if args.output:
-        output_path = Path(args.output)
-        if ".." in str(output_path).replace("\\", "/").split("/"):
-            raise ValueError(
-                f"Refusing write path with '..' traversal component: {output_path!r}"
-            )
+        output_path = Path(args.output).resolve()
         validated_output = validate_write_path_within_root(
-            output_path, output_path.parent, purpose="PR summary output",
+            output_path, REPO_ROOT, purpose="PR summary output",
         )
         validated_output.parent.mkdir(parents=True, exist_ok=True)
-        with open(validated_output, "w", encoding="utf-8") as f:
-            f.write(md)
+        validated_output.write_text(md, encoding="utf-8")
         print(f"PR summary written to {args.output}")
     else:
         print(md)

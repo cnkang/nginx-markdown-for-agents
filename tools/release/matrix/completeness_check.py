@@ -60,8 +60,7 @@ def load_matrix(matrix_path: str) -> List[dict]:
         List[dict]: Matrix entries from the file whose `support_tier` equals "full".
     """
     resolved = validate_read_path(matrix_path, purpose="release matrix")
-    with open(resolved, "r", encoding="utf-8") as f:
-        data = json.load(f)
+    data = json.loads(resolved.read_text(encoding="utf-8"))
 
     if not isinstance(data, dict) or not isinstance(data.get("matrix"), list):
         return []
@@ -108,7 +107,8 @@ def collect_artifacts(artifacts_path: str) -> Set[str]:
     Returns:
         Set[str]: A set of artifact filenames found.
     """
-    path = Path(artifacts_path)
+    resolved = validate_read_path(str(Path(artifacts_path)), purpose="artifacts list")
+    path = Path(resolved)
 
     if path.is_dir():
         return {
@@ -117,8 +117,7 @@ def collect_artifacts(artifacts_path: str) -> Set[str]:
         }
 
     # Treat as a file list (one filename per line)
-    resolved = validate_read_path(str(path), purpose="artifacts list")
-    with open(resolved, "r", encoding="utf-8") as f:
+    with open(path, "r", encoding="utf-8") as f:
         return {
             line.strip() for line in f if line.strip()
         }

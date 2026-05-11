@@ -28,7 +28,7 @@ import time
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
 
-_E2E_SAFE_BIN_DIRS = ("/usr/local/bin", "/usr/bin", "/opt/homebrew/bin")
+_E2E_SAFE_BIN_DIRS = ("/usr/local/bin", "/usr/bin", "/usr/sbin", "/opt/homebrew/bin")
 
 import pytest
 
@@ -37,8 +37,7 @@ WORKSPACE_ROOT = os.path.abspath(
 )
 
 _SKIP_REASON = (
-    "Streaming E2E requires NGINX_BIN environment variable "
-    "pointing to a streaming-enabled NGINX binary"
+    "Streaming E2E requires a streaming-enabled nginx binary on PATH"
 )
 
 NGINX_PORT = 19876
@@ -46,16 +45,17 @@ UPSTREAM_PORT = 19877
 
 
 def _nginx_bin():
-    raw = os.environ.get("NGINX_BIN", "")
-    if not raw:
-        return ""
-    resolved = shutil.which(raw)
-    if resolved is None:
-        return ""
-    realpath = os.path.realpath(resolved)
-    if not any(realpath.startswith(d + os.sep) or realpath == d for d in _E2E_SAFE_BIN_DIRS):
-        return ""
-    return resolved
+    for bin_name in ("nginx", "nginx-debug"):
+        resolved = shutil.which(bin_name)
+        if resolved is None:
+            continue
+        realpath = os.path.realpath(resolved)
+        base = os.path.basename(realpath)
+        if base not in {"nginx", "nginx-debug"}:
+            continue
+        if any(os.path.commonpath([realpath, d]) == d for d in _E2E_SAFE_BIN_DIRS):
+            return realpath
+    return ""
 
 
 def _check_prerequisites():
@@ -106,15 +106,18 @@ http {{
 
 def _start_upstream(port, doc_root):
     """Start a simple HTTP server serving doc_root on port."""
-    script = f"""
-import http.server, os, socketserver
-os.chdir("{doc_root}")
-handler = http.server.SimpleHTTPRequestHandler
-with socketserver.TCPServer(("", {port}), handler) as httpd:
-    httpd.serve_forever()
-"""
+    resolved_doc_root = os.path.realpath(doc_root)
     proc = subprocess.Popen(
-        [sys.executable, "-c", script],
+        [
+            sys.executable,
+            "-m",
+            "http.server",
+            str(port),
+            "--bind",
+            "127.0.0.1",
+            "--directory",
+            resolved_doc_root,
+        ],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
@@ -136,6 +139,45 @@ def _fetch(path="/", accept="text/markdown"):
         return 0, b"", {}
 
 
+def _start_nginx(nginx_bin, conf_path):
+    """Start nginx with a validated binary path."""
+    if not os.path.isabs(nginx_bin):
+        raise ValueError(f"NGINX binary path must be absolute: {nginx_bin}")
+    real_nginx_bin = os.path.realpath(nginx_bin)
+    return subprocess.Popen(
+        [real_nginx_bin, "-c", conf_path],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+
+def test_start_nginx_rejects_relative_binary_path():
+    """_start_nginx should reject relative binary paths before resolution."""
+    with pytest.raises(ValueError, match="must be absolute"):
+        _start_nginx("nginx", "/tmp/nginx.conf")
+
+
+def test_nginx_bin_returns_canonical_absolute_path(monkeypatch):
+    """_nginx_bin should return the canonical absolute path after validation."""
+    monkeypatch.setattr(shutil, "which", lambda name: "nginx" if name == "nginx" else None)
+    monkeypatch.setattr(os.path, "realpath", lambda _p: "/usr/sbin/nginx")
+    assert _nginx_bin() == "/usr/sbin/nginx"
+
+
+def test_nginx_bin_rejects_path_outside_allowlist(monkeypatch):
+    """_nginx_bin should reject binaries outside trusted directories."""
+    monkeypatch.setattr(shutil, "which", lambda name: "/tmp/nginx" if name == "nginx" else None)
+    monkeypatch.setattr(os.path, "realpath", lambda _p: "/tmp/nginx")
+    assert _nginx_bin() == ""
+
+
+def test_nginx_bin_rejects_unexpected_basename(monkeypatch):
+    """_nginx_bin should reject binaries whose basename is not allowlisted."""
+    monkeypatch.setattr(shutil, "which", lambda name: "/usr/sbin/nginx-custom" if name == "nginx" else None)
+    monkeypatch.setattr(os.path, "realpath", lambda _p: "/usr/sbin/nginx-custom")
+    assert _nginx_bin() == ""
+
+
 @pytest.mark.skipif(not _check_prerequisites(), reason=_SKIP_REASON)
 def test_16_1_streaming_conversion_success():
     """16.1 Streaming conversion success (small/medium/large responses)."""
@@ -149,11 +191,7 @@ def test_16_1_streaming_conversion_success():
         upstream = _start_upstream(UPSTREAM_PORT, doc_root)
         try:
             conf_path = _write_nginx_conf(td, nginx_bin)
-            nginx = subprocess.Popen(
-                [nginx_bin, "-c", conf_path],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
+            nginx = _start_nginx(nginx_bin, conf_path)
             time.sleep(1.0)
             try:
                 status, body, headers = _fetch("/")
@@ -193,11 +231,7 @@ def test_16_4_streaming_fallback():
         upstream = _start_upstream(UPSTREAM_PORT, doc_root)
         try:
             conf_path = _write_nginx_conf(td, nginx_bin)
-            nginx = subprocess.Popen(
-                [nginx_bin, "-c", conf_path],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
+            nginx = _start_nginx(nginx_bin, conf_path)
             time.sleep(1.0)
             try:
                 status, body, headers = _fetch("/table.html")
@@ -241,11 +275,7 @@ def test_16_8_head_request_no_streaming():
         upstream = _start_upstream(UPSTREAM_PORT, doc_root)
         try:
             conf_path = _write_nginx_conf(td, nginx_bin)
-            nginx = subprocess.Popen(
-                [nginx_bin, "-c", conf_path],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
+            nginx = _start_nginx(nginx_bin, conf_path)
             time.sleep(1.0)
             try:
                 url = f"http://127.0.0.1:{NGINX_PORT}/"
@@ -278,12 +308,14 @@ def main():
     print()
 
     if not _check_prerequisites():
-        print("NGINX_BIN not set or not found.")
-        print("  NGINX_BIN=/path/to/nginx python3 test_streaming_e2e.py")
+        print("No streaming-enabled nginx binary found on PATH.")
+        print("Ensure nginx or nginx-debug is installed in a trusted PATH directory:")
+        print("  /usr/local/bin, /usr/bin, /usr/sbin, or /opt/homebrew/bin")
+        print("If needed, add the install directory to PATH before running this script.")
         return 1
 
     print("Prerequisites met. Run with pytest:")
-    print(f"  NGINX_BIN={_nginx_bin()} pytest {__file__}")
+    print(f"  pytest {__file__}")
     return 0
 
 
