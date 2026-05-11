@@ -1034,6 +1034,29 @@ Verification:
 - `tools/harness/detect_live_conf_reads.sh components/nginx-module/src/`
 - `make harness-security-checks`
 
+### 36. Harness routing coverage for tooling security surfaces
+Historical issues: repeated branch fixes around CWE-22/S2083 in tooling paths
+that were not routed to focused security verification families.
+
+Required:
+- When `main...HEAD` shows repeated fixes in tooling path-safety classes
+  (path traversal, write-path validation, command-injection guardrails),
+  update `docs/harness/routing-manifest.json` in the same changeset so touched
+  path patterns map to at least one focused security verification family.
+- Security detection commands must remain callable as focused routing families
+  (for example `harness-security`), not only as transitive umbrella checks.
+- If a new tooling area accepts CLI path inputs, add both path patterns and
+  keywords to routing-manifest so `harness_route.py` can match by either
+  changed files or task hints.
+- Every routing-manifest update must be mirrored in
+  `docs/harness/routing-manifest.md` and the corresponding risk-pack docs in
+  the same changeset.
+
+Verification:
+- `python3 skills/nginx-markdown-harness-maintenance/scripts/harness_route.py --from-git --base main`
+- `make harness-security-checks`
+- `PYTHONPATH=. pytest -q tools/perf/tests`
+
 ## Required Agent Workflow
 
 ### Before coding
@@ -1151,6 +1174,10 @@ For each code change you are about to produce, mentally (or explicitly in a thin
    threshold; extract independent validation steps before adding branches.
    (Rule 17)
 7. Repeated gate/check ID strings are module-level constants. (Rule 19)
+8. When tooling path-safety behavior changes, confirm
+   `harness_route.py --from-git --base main` maps the touched files to a
+   focused security verification family (for example `harness-security`).
+   (Rule 36)
 
 #### Documentation and tooling
 1. Canonical docs in `docs/` updated; no mirrored copies created. (Rule 9)
@@ -1318,3 +1345,4 @@ Verification:
 - `make harness-check-full` — now includes harness-security-checks.
 
 | 0.6.2 | 2026-05-07 | Kang | Rule 35: dynconf snapshot isolation (dynconf_enabled gate), reload retry contract (applied_mtime separation), unknown key atomic rejection, startup apply of existing dynconf file, harness-check-full includes harness-security-checks |
+| 0.6.2 | 2026-05-11 | Kang | Rule 36: require routing-manifest coverage and focused security family routing for recurring tooling path-safety fixes |
