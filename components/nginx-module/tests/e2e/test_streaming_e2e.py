@@ -164,6 +164,20 @@ def test_nginx_bin_returns_canonical_absolute_path(monkeypatch):
     assert _nginx_bin() == "/usr/sbin/nginx"
 
 
+def test_nginx_bin_rejects_path_outside_allowlist(monkeypatch):
+    """_nginx_bin should reject binaries outside trusted directories."""
+    monkeypatch.setattr(shutil, "which", lambda name: "/tmp/nginx" if name == "nginx" else None)
+    monkeypatch.setattr(os.path, "realpath", lambda _p: "/tmp/nginx")
+    assert _nginx_bin() == ""
+
+
+def test_nginx_bin_rejects_unexpected_basename(monkeypatch):
+    """_nginx_bin should reject binaries whose basename is not allowlisted."""
+    monkeypatch.setattr(shutil, "which", lambda name: "/usr/sbin/nginx-custom" if name == "nginx" else None)
+    monkeypatch.setattr(os.path, "realpath", lambda _p: "/usr/sbin/nginx-custom")
+    assert _nginx_bin() == ""
+
+
 @pytest.mark.skipif(not _check_prerequisites(), reason=_SKIP_REASON)
 def test_16_1_streaming_conversion_success():
     """16.1 Streaming conversion success (small/medium/large responses)."""
@@ -294,12 +308,14 @@ def main():
     print()
 
     if not _check_prerequisites():
-        print("NGINX_BIN not set or not found.")
-        print("  NGINX_BIN=/path/to/nginx python3 test_streaming_e2e.py")
+        print("No streaming-enabled nginx binary found on PATH.")
+        print("Ensure nginx or nginx-debug is installed in a trusted PATH directory:")
+        print("  /usr/local/bin, /usr/bin, /usr/sbin, or /opt/homebrew/bin")
+        print("If needed, add the install directory to PATH before running this script.")
         return 1
 
     print("Prerequisites met. Run with pytest:")
-    print(f"  NGINX_BIN={_nginx_bin()} pytest {__file__}")
+    print(f"  pytest {__file__}")
     return 0
 
 
