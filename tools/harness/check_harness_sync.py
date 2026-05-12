@@ -28,6 +28,8 @@ except ModuleNotFoundError:
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MANIFEST_PATH = REPO_ROOT / "docs" / "harness" / "routing-manifest.json"
+E2E_HARNESS_DIR = REPO_ROOT / "tools" / "e2e-harness"
+E2E_HARNESS_CARGO = E2E_HARNESS_DIR / "Cargo.toml"
 README_PATH = REPO_ROOT / "docs" / "harness" / "README.md"
 CORE_PATH = REPO_ROOT / "docs" / "harness" / "core.md"
 SUMMARY_PATH = REPO_ROOT / "docs" / "harness" / "routing-manifest.md"
@@ -372,6 +374,50 @@ def _check_agents_map() -> CheckResult:
     return _result("agents-map", PASS, "AGENTS.md points at the harness entrypoints")
 
 
+def _check_e2e_harness_contract() -> CheckResult:
+    """Validate the Rust E2E harness presence and binary contract."""
+    missing: list[str] = []
+    if not E2E_HARNESS_DIR.exists():
+        missing.append(_display_path(E2E_HARNESS_DIR))
+    if not E2E_HARNESS_CARGO.exists():
+        missing.append(_display_path(E2E_HARNESS_CARGO))
+    if missing:
+        return _result(
+            "e2e-harness-contract",
+            FAIL,
+            f"missing required harness paths: {', '.join(missing)}",
+        )
+
+    cargo_text = E2E_HARNESS_CARGO.read_text(encoding="utf-8")
+    has_bin_decl = bool(
+        re.search(
+            r"\[\[bin\]\]\s*name\s*=\s*\"e2e-harness\"",
+            cargo_text,
+            flags=re.MULTILINE | re.DOTALL,
+        )
+    )
+    if not has_bin_decl:
+        return _result(
+            "e2e-harness-contract",
+            FAIL,
+            "Cargo.toml missing [[bin]] name = \"e2e-harness\" declaration",
+        )
+
+    main_rs = E2E_HARNESS_DIR / "src" / "main.rs"
+    if not main_rs.exists():
+        return _result(
+            "e2e-harness-contract",
+            FAIL,
+            f"missing harness entrypoint: {_display_path(main_rs)}",
+        )
+
+    return _result(
+        "e2e-harness-contract",
+        PASS,
+        "Rust e2e-harness directory and binary contract are present",
+    )
+
+
 def _check_optional_kiro(manifest: dict, full: bool) -> CheckResult:
     """Check optional .kiro/steering adapters for drift against harness truth surfaces.
 
@@ -535,6 +581,7 @@ def collect_results(full: bool = False) -> list[CheckResult]:
         _check_risk_pack_docs(manifest),
         _check_harness_docs(manifest),
         _check_agents_map(),
+        _check_e2e_harness_contract(),
         _check_recent_analysis_reports(),
         _check_optional_kiro(manifest, full=full),
     ]

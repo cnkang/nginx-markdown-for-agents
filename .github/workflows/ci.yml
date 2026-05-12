@@ -82,6 +82,7 @@ jobs:
               - 'components/rust-converter/**'
               - 'tests/corpus/**'
               - 'tools/e2e/**'
+              - 'tools/e2e-harness/**'
               - 'Makefile'
             perf:
               - 'components/rust-converter/**'

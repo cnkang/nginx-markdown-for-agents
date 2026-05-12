@@ -21,6 +21,7 @@ This page is the readable overlay, not the machine-owned truth.
 | `coverage-gate` | focused semantic | `make coverage-gate` |
 | `release-governance-060` | focused semantic | `make release-gates-check-060` |
 | `packaging-e2e` | umbrella | `dpkg-deb --info`, `rpm -qip`, `helm lint` |
+| `e2e-harness-rust` | focused semantic | `make test-e2e-rust` |
 
 `runtime-e2e` requires at least one executing runtime target each session.
 Plan-only targets (for example `*-plan`) are documentation aids, not evidence.
@@ -41,6 +42,7 @@ Plan-only targets (for example `*-plan`) are documentation aids, not evidence.
 | `packaging-distribution` | APT/YUM repos, Homebrew tap, Helm chart, K8s Ingress | docs-tooling, release-governance | [risk-packs/packaging-distribution.md](risk-packs/packaging-distribution.md) |
 | `dynamic-config-hot-reload` | dynamic config parser, reload lifecycle, runtime apply | nginx-protocol, observability, docs-tooling | [risk-packs/dynamic-config-hot-reload.md](risk-packs/dynamic-config-hot-reload.md) |
 | `output-safety` | Markdown escaping, link/URL emission, injection prevention | nginx-protocol, docs-tooling | [risk-packs/output-safety.md](risk-packs/output-safety.md) |
+| `e2e-migration` | e2e-harness, scenario migration, shell-to-rust parity | docs-tooling, nginx-protocol | [risk-packs/e2e-migration.md](risk-packs/e2e-migration.md) |
 
 ## Task Entry Points
 
@@ -73,3 +75,4 @@ Plan-only targets (for example `*-plan`) are documentation aids, not evidence.
 | 0.6.1 | 2026-05-06 | Kang | Added output-safety pack (Rule 27) and sync points for Rules 28–31 |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
 | 0.6.3 | 2026-05-11 | Kang | Added harness-security verification family and tooling-path-security risk pack to route repeated tooling path-safety fixes |
+| 0.6.3 | 2026-05-12 | Kang | Added e2e-harness-rust verification family, e2e-migration risk pack, and tools/e2e-harness/** paths to runtime-streaming and nginx-protocol-safety packs |

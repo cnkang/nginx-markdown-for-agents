@@ -6,14 +6,17 @@
 #   2. chunked native smoke verification
 #   3. large-response native verification
 #   4. streaming failure cache verification
-#   5. accept negotiation verification
+#   5. accept negotiation verification (e2e-harness)
 #   6. security verification
 #   7. error handling verification
-#   8. metrics endpoint verification
-#   9. conditional requests verification
+#   8. metrics endpoint verification (e2e-harness)
+#   9. conditional requests verification (e2e-harness)
 #  10. config merge verification
-#  11. auth cache verification
-#  12. status codes verification
+#  11. auth cache verification (e2e-harness)
+#  12. status codes verification (e2e-harness)
+#
+# Migrated scenarios (5-9, 11-12) are delegated to the Rust e2e-harness binary.
+# Non-migrated scenarios remain on their canonical shell paths.
 #
 # Options:
 #   --keep-artifacts  Preserve build artifacts after the suite completes.
@@ -28,14 +31,11 @@ PROXY_TLS_SCRIPT="${WORKSPACE_ROOT}/tools/e2e/verify_proxy_tls_backend_e2e.sh"
 CHUNKED_SCRIPT="${WORKSPACE_ROOT}/tools/e2e/verify_chunked_streaming_native_e2e.sh"
 LARGE_SCRIPT="${WORKSPACE_ROOT}/tools/e2e/verify_large_markdown_response_e2e.sh"
 STREAMING_FAILURE_CACHE_SCRIPT="${WORKSPACE_ROOT}/tools/e2e/verify_streaming_failure_cache_e2e.sh"
-ACCEPT_NEGOTIATION_SCRIPT="${WORKSPACE_ROOT}/tools/e2e/verify_accept_negotiation_e2e.sh"
 SECURITY_SCRIPT="${WORKSPACE_ROOT}/tools/e2e/verify_security_e2e.sh"
 ERROR_HANDLING_SCRIPT="${WORKSPACE_ROOT}/tools/e2e/verify_error_handling_e2e.sh"
-METRICS_SCRIPT="${WORKSPACE_ROOT}/tools/e2e/verify_metrics_endpoint_e2e.sh"
-CONDITIONAL_SCRIPT="${WORKSPACE_ROOT}/tools/e2e/verify_conditional_requests_e2e.sh"
 CONFIG_MERGE_SCRIPT="${WORKSPACE_ROOT}/tools/e2e/verify_config_merge_e2e.sh"
-AUTH_CACHE_SCRIPT="${WORKSPACE_ROOT}/tools/e2e/verify_auth_cache_e2e.sh"
-STATUS_CODES_SCRIPT="${WORKSPACE_ROOT}/tools/e2e/verify_status_codes_e2e.sh"
+E2E_HARNESS_BIN="${WORKSPACE_ROOT}/tools/e2e-harness/target/debug/e2e-harness"
+E2E_HARNESS_MANIFEST="${WORKSPACE_ROOT}/tools/e2e-harness/Cargo.toml"
 SUITE_BUILDROOT=""
 SUITE_NGINX_BIN=""
 NGINX_BIN_OUTPUT_FILE=""
@@ -66,6 +66,11 @@ EOF
   return 0
 }
 
+build_e2e_harness() {
+  cargo build --manifest-path "${E2E_HARNESS_MANIFEST}" >/dev/null
+  return 0
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --keep-artifacts)
@@ -83,6 +88,12 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+build_e2e_harness
+[[ -x "${E2E_HARNESS_BIN}" ]] || {
+  echo "Failed to build e2e-harness binary at ${E2E_HARNESS_BIN}" >&2
+  exit 1
+}
 
 # cleanup - Remove temporary build artifacts on exit.
 #
@@ -142,32 +153,28 @@ if [[ "${KEEP_ARTIFACTS}" -eq 1 ]]; then
 fi
 env NGINX_BIN="${SUITE_NGINX_BIN}" bash "${STREAMING_FAILURE_CACHE_SCRIPT}" "${streaming_fc_args[@]}"
 
-accept_args=()
 security_args=()
 error_args=()
-metrics_args=()
-conditional_args=()
 config_merge_args=()
-auth_cache_args=()
-status_codes_args=()
 if [[ "${KEEP_ARTIFACTS}" -eq 1 ]]; then
-  accept_args=(--keep-artifacts)
   security_args=(--keep-artifacts)
   error_args=(--keep-artifacts)
-  metrics_args=(--keep-artifacts)
-  conditional_args=(--keep-artifacts)
   config_merge_args=(--keep-artifacts)
-  auth_cache_args=(--keep-artifacts)
-  status_codes_args=(--keep-artifacts)
 fi
-env NGINX_BIN="${SUITE_NGINX_BIN}" bash "${ACCEPT_NEGOTIATION_SCRIPT}" "${accept_args[@]}"
+
+# --- Migrated scenarios: delegate to e2e-harness ---
+e2e_harness_args=(--nginx-bin "${SUITE_NGINX_BIN}")
+if [[ "${KEEP_ARTIFACTS}" -eq 1 ]]; then
+  e2e_harness_args=(--keep-artifacts "${e2e_harness_args[@]}")
+fi
+"${E2E_HARNESS_BIN}" scenario accept-negotiation "${e2e_harness_args[@]}"
 env NGINX_BIN="${SUITE_NGINX_BIN}" bash "${SECURITY_SCRIPT}" "${security_args[@]}"
 env NGINX_BIN="${SUITE_NGINX_BIN}" bash "${ERROR_HANDLING_SCRIPT}" "${error_args[@]}"
-env NGINX_BIN="${SUITE_NGINX_BIN}" bash "${METRICS_SCRIPT}" "${metrics_args[@]}"
-env NGINX_BIN="${SUITE_NGINX_BIN}" bash "${CONDITIONAL_SCRIPT}" "${conditional_args[@]}"
+"${E2E_HARNESS_BIN}" scenario metrics-endpoint "${e2e_harness_args[@]}"
+"${E2E_HARNESS_BIN}" scenario conditional-requests "${e2e_harness_args[@]}"
 env NGINX_BIN="${SUITE_NGINX_BIN}" bash "${CONFIG_MERGE_SCRIPT}" "${config_merge_args[@]}"
-env NGINX_BIN="${SUITE_NGINX_BIN}" bash "${AUTH_CACHE_SCRIPT}" "${auth_cache_args[@]}"
-env NGINX_BIN="${SUITE_NGINX_BIN}" bash "${STATUS_CODES_SCRIPT}" "${status_codes_args[@]}"
+"${E2E_HARNESS_BIN}" scenario auth-cache "${e2e_harness_args[@]}"
+"${E2E_HARNESS_BIN}" scenario status-codes "${e2e_harness_args[@]}"
 
 echo "Canonical E2E suite summary:"
 echo "  proxy_tls_backend=passed"

@@ -51,7 +51,7 @@ NGINX_HEADER := $(NGINX_MODULE_DIR)/src/markdown_converter.h
 
 .PHONY: all build rust-lib rust-lib-debug copy-headers check-headers \
         test test-rust test-rust-doc test-nginx-unit test-nginx-unit-streaming test-nginx-unit-clang-smoke test-nginx-unit-sanitize-smoke \
-        test-nginx-integration test-e2e test-all test-rust-fuzz-smoke sonar-compile-db \
+        test-nginx-integration test-e2e test-e2e-rust test-all test-rust-fuzz-smoke sonar-compile-db \
         test-benchmark test-benchmark-compare test-benchmark-summary \
         harness-check harness-check-full harness-security-checks \
         docs-check license-check release-gates-check release-gates-check-055 release-gates-check-060 release-gates-check-legacy release-gates-check-strict \
@@ -130,6 +130,14 @@ test-nginx-integration:
 
 test-e2e:
 	$(MAKE) -C $(NGINX_TEST_DIR) e2e
+
+E2E_HARNESS_DIR := tools/e2e-harness
+
+test-e2e-rust:
+	@echo "Building e2e-harness..."
+	cd $(E2E_HARNESS_DIR) && cargo build
+	@echo "Running e2e-harness migrated scenarios..."
+	cd $(E2E_HARNESS_DIR) && cargo run -- suite --profile smoke
 
 test-all: build test-rust test-nginx-unit
 
@@ -330,6 +338,7 @@ help:
 	@echo "  test-nginx-unit-sanitize-smoke - Run nginx C smoke tests with ASan/UBSan"
 	@echo "  test-nginx-integration   - Run integration tests"
 	@echo "  test-e2e                 - Run end-to-end tests"
+	@echo "  test-e2e-rust            - Build and run Rust e2e-harness migrated scenarios"
 	@echo "  verify-streaming-failure-cache-e2e - Run streaming failure/cache e2e tests"
 	@echo "  verify-streaming-failure-cache-e2e-plan - Print test plan only (no NGINX_BIN required)"
 	@echo "  verify-metrics-endpoint-e2e  - Run metrics endpoint e2e tests (JSON/text/Prometheus)"

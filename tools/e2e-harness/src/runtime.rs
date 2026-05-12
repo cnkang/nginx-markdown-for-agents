@@ -1,0 +1,171 @@
+//! Runtime directory preparation and scenario environment handles.
+//!
+//! Responsible for:
+//! - creating an isolated runtime directory per scenario invocation;
+//! - writing scenario-specific `nginx.conf`;
+//! - creating log paths;
+//! - exposing the scenario base URL and runtime handles.
+//!
+//! The module deliberately does not assume a single `load_module` layout.
+//! In Reuse_Mode the harness adapts to the supplied binary; in Bootstrap_Mode
+//! the harness prepares the layout through `bootstrap.rs`.
+
+use anyhow::Result;
+use std::path::{Path, PathBuf};
+
+/// Execution mode for the harness.
+#[derive(Clone, Debug)]
+pub enum RuntimeMode {
+    /// Reuse a prebuilt module-enabled NGINX binary.
+    Reuse(PathBuf),
+    /// Prepare a runnable runtime (directly or via compatibility bridge).
+    Bootstrap,
+}
+
+impl RuntimeMode {
+    /// Determine the runtime mode from an optional binary path.
+    ///
+    /// # Arguments
+    ///
+    /// * `nginx_bin` - Path supplied via `--nginx-bin` or `NGINX_BIN`.
+    ///
+    /// # Returns
+    ///
+    /// `Reuse` when a path is provided; `Bootstrap` otherwise.
+    pub fn from_cli(nginx_bin: Option<PathBuf>) -> Self {
+        match nginx_bin {
+            Some(path) => RuntimeMode::Reuse(path),
+            None => RuntimeMode::Bootstrap,
+        }
+    }
+
+    /// Return the NGINX binary path if this is Reuse_Mode.
+    pub fn nginx_bin(&self) -> Option<&Path> {
+        match self {
+            RuntimeMode::Reuse(p) => Some(p.as_path()),
+            RuntimeMode::Bootstrap => None,
+        }
+    }
+
+    /// Return `true` when operating in Reuse_Mode.
+    pub fn is_reuse(&self) -> bool {
+        matches!(self, RuntimeMode::Reuse(_))
+    }
+}
+
+/// A prepared scenario runtime environment.
+///
+/// Holds paths and handles needed by scenario code without requiring
+/// scenarios to rediscover global paths or reconstruct URLs ad hoc.
+#[derive(Debug)]
+pub struct ScenarioRuntime {
+    /// Root directory for this scenario's runtime files.
+    pub runtime_dir: PathBuf,
+    /// Directory for scenario artifacts (logs, captures, reports).
+    pub artifact_dir: PathBuf,
+    /// Per-scenario artifact subdirectory.
+    pub scenario_artifact_dir: PathBuf,
+    /// Base URL for the NGINX listener (e.g. `http://127.0.0.1:8080`).
+    pub base_url: String,
+    /// Port the NGINX listener is bound to.
+    pub port: u16,
+    /// Port the upstream fixture backend is bound to.
+    pub upstream_port: u16,
+    /// Path to the NGINX binary (resolved from mode).
+    pub nginx_bin: PathBuf,
+}
+
+impl ScenarioRuntime {
+    /// Prepare a scenario runtime under `base_dir`.
+    ///
+    /// Creates the runtime directory tree and writes a minimal `nginx.conf`
+    /// stub.  Actual NGINX startup is handled by `process.rs`.
+    ///
+    /// # Arguments
+    ///
+    /// * `scenario_name` - Used to name the scenario artifact subdirectory.
+    /// * `base_dir` - Parent directory for the runtime tree.
+    /// * `nginx_bin` - Resolved NGINX binary path.
+    /// * `port` - NGINX listener port.
+    /// * `upstream_port` - Upstream fixture port.
+    ///
+    /// # Returns
+    ///
+    /// A fully prepared `ScenarioRuntime` on success.
+    pub fn prepare(
+        scenario_name: &str,
+        base_dir: &Path,
+        nginx_bin: PathBuf,
+        port: u16,
+        upstream_port: u16,
+    ) -> Result<Self> {
+        let runtime_dir = base_dir.join("runtime");
+        let artifact_dir = base_dir.join("artifacts");
+        let scenario_artifact_dir = artifact_dir.join("scenarios").join(scenario_name);
+
+        std::fs::create_dir_all(&runtime_dir)?;
+        std::fs::create_dir_all(&scenario_artifact_dir)?;
+
+        // Write a minimal nginx.conf stub; scenarios may override this.
+        let conf_path = runtime_dir.join("nginx.conf");
+        write_nginx_conf_stub(&conf_path, port, upstream_port)?;
+
+        let base_url = format!("http://127.0.0.1:{port}");
+
+        Ok(ScenarioRuntime {
+            runtime_dir,
+            artifact_dir,
+            scenario_artifact_dir,
+            base_url,
+            port,
+            upstream_port,
+            nginx_bin,
+        })
+    }
+
+    /// Path to the generated `nginx.conf`.
+    pub fn nginx_conf(&self) -> PathBuf {
+        self.runtime_dir.join("nginx.conf")
+    }
+
+    /// Path to the NGINX error log.
+    pub fn error_log(&self) -> PathBuf {
+        self.runtime_dir.join("nginx-error.log")
+    }
+
+    /// Path to the NGINX access log.
+    pub fn access_log(&self) -> PathBuf {
+        self.runtime_dir.join("nginx-access.log")
+    }
+}
+
+/// Write a minimal `nginx.conf` stub to `path`.
+///
+/// The stub is intentionally minimal; scenario-specific configuration is
+/// layered on top by the scenario setup code.
+///
+/// # Arguments
+///
+/// * `path` - Destination path for the config file.
+/// * `port` - NGINX listener port.
+/// * `upstream_port` - Upstream fixture port.
+fn write_nginx_conf_stub(path: &Path, port: u16, upstream_port: u16) -> Result<()> {
+    let content = format!(
+        "# Generated by e2e-harness — do not edit manually\n\
+worker_processes 1;\n\
+events {{ worker_connections 64; }}\n\
+http {{\n\
+    upstream fixture_backend {{\n\
+        server 127.0.0.1:{upstream_port};\n\
+    }}\n\
+    server {{\n\
+        listen {port};\n\
+        location / {{\n\
+            proxy_pass http://fixture_backend;\n\
+        }}\n\
+    }}\n\
+}}\n"
+    );
+    std::fs::write(path, content)?;
+    Ok(())
+}

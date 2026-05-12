@@ -130,6 +130,12 @@
         "make release-gates-check-060"
       ]
     },
+    "e2e-harness-rust": {
+      "phase": "focused-semantic",
+      "commands": [
+        "make test-e2e-rust"
+      ]
+    },
     "packaging-e2e": {
       "phase": "umbrella",
       "commands": [
@@ -156,7 +162,8 @@
         "components/nginx-module/**",
         "components/rust-converter/src/incremental.rs",
         "components/rust-converter/src/charset.rs",
-        "tools/e2e/**"
+        "tools/e2e/**",
+        "tools/e2e-harness/**"
       ],
       "keywords": [
         "streaming",
@@ -169,7 +176,8 @@
         "harness-sync",
         "rust-streaming",
         "nginx-streaming",
-        "runtime-e2e"
+        "runtime-e2e",
+        "e2e-harness-rust"
       ]
     },
     {
@@ -290,6 +298,7 @@
         "examples/nginx-configs/**",
         "components/nginx-module/tests/**",
         "tools/e2e/**",
+        "tools/e2e-harness/**",
         "tools/ci/verify_real_nginx_ims.sh",
         "tools/sonar/collect_nginx_coverage.sh"
       ],
@@ -549,6 +558,44 @@
         "harness-sync",
         "docs-tooling",
         "nginx-protocol",
+        "release-quality"
+      ]
+    },
+    {
+      "id": "e2e-migration",
+      "doc": "docs/harness/risk-packs/e2e-migration.md",
+      "primary_surfaces": [
+        "e2e-harness",
+        "scenario-migration",
+        "shell-to-rust-parity"
+      ],
+      "supporting_surfaces": [
+        "docs-tooling",
+        "nginx-protocol"
+      ],
+      "paths": [
+        "tools/e2e-harness/**",
+        "tools/e2e/run_e2e_suite.sh",
+        "tools/e2e/verify_conditional_requests_e2e.sh",
+        "tools/e2e/verify_metrics_endpoint_e2e.sh",
+        "tools/e2e/verify_status_codes_e2e.sh",
+        "tools/e2e/verify_auth_cache_e2e.sh",
+        "tools/e2e/verify_accept_negotiation_e2e.sh",
+        "docs/project/0.6.3-e2e-parity.md",
+        "docs/project/0.6.3-test-surface-audit.md",
+        "docs/testing/E2E_TESTS.md"
+      ],
+      "keywords": [
+        "e2e-harness",
+        "scenario",
+        "migration",
+        "parity",
+        "test-e2e-rust"
+      ],
+      "verification_families": [
+        "harness-sync",
+        "e2e-harness-rust",
+        "docs-tooling",
         "release-quality"
       ]
     },
