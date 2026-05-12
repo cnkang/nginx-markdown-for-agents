@@ -40,11 +40,15 @@ converter test suite).
 
 ## Python E2E Files
 
-The Python E2E spec files under `components/nginx-module/tests/e2e/` are
-**retained** in 0.6.3. They are classified as Remove in the test surface audit
-but removal is deferred until the Rust harness covers streaming scenarios that
-currently rely on shell paths. No new Python pytest files may be added under
-that directory (AGENTS.md Rule 37).
+The stale Python E2E spec files under `components/nginx-module/tests/e2e/`
+have been removed in 0.6.3:
+
+- `test_streaming_e2e.py`
+- `test_streaming_failure_cache_e2e.py`
+
+Their runtime coverage is replaced by retained canonical shell E2E paths for
+streaming behavior, and migrated product-level HTTP scenarios now run through
+the Rust harness.
 
 ## C Test Boundary Clarification
 
