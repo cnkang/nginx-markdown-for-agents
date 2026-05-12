@@ -11,7 +11,7 @@ steering files.
 
 ## Current Assessment
 
-As of the **current release line (0.6.2)**, the project includes a dual-engine
+As of the **current release line (0.6.3)**, the project includes a dual-engine
 conversion model (streaming default with full-buffer fallback), streaming
 failure semantics aligned to commit boundaries, parity and diff validation for
 streaming behavior, rollout observability with shadow-mode checks, benchmark
@@ -21,6 +21,24 @@ tested. The codebase includes unit, integration, E2E, fuzz-oriented validation
 entrypoints, and harness-specific validation entrypoints, along with
 documentation covering installation, configuration, operations, architecture,
 and contributor-facing harness maintenance.
+
+### Release 0.6.3 Updates
+
+- Rust-first E2E migration closure:
+  - `tools/e2e-harness/` is now a first-class migrated-scenario runner for:
+    `accept-negotiation`, `metrics-endpoint`, `conditional-requests`,
+    `auth-cache`, and `status-codes`.
+  - `make test-e2e` delegates migrated scenarios to the Rust harness while
+    retaining non-migrated canonical shell scenarios.
+  - `make test-e2e-rust` provides a direct migrated-scenario entrypoint.
+- Python E2E cleanup:
+  - removed stale spec-only files:
+    `components/nginx-module/tests/e2e/test_streaming_e2e.py` and
+    `components/nginx-module/tests/e2e/test_streaming_failure_cache_e2e.py`.
+- Harness rule/governance alignment:
+  - routing manifest includes Rust harness ownership surfaces;
+  - harness checks enforce Rust harness contract and migration-policy guards for
+    migrated shell wrappers and removed Python E2E surfaces.
 
 ### Repository Harness Updates
 
