@@ -37,7 +37,7 @@ NGINX_BIN_ARG=""
 # Returns:
 #   0 always.
 usage() {
-  cat <<USAGE
+  cat <<USAGE >&2
 Usage: $(basename "$0") [--keep-artifacts] [--port PORT] [--upstream-port PORT] [--nginx-bin PATH] [--nginx-version VERSION] [--metrics-port PORT]
 
 Thin compatibility wrapper for migrated scenario '${SCENARIO_NAME}'.
