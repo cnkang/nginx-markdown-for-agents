@@ -7,7 +7,7 @@
 //! - cleaning up artifacts on success unless `--keep-artifacts` is set.
 
 use crate::scenarios::ScenarioReport;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
@@ -68,7 +68,12 @@ impl SuiteReport {
 pub fn append_report(path: &Path, report: &ScenarioReport) -> Result<()> {
     let mut suite = if path.exists() {
         let content = std::fs::read_to_string(path)?;
-        serde_json::from_str::<SuiteReport>(&content).unwrap_or_default()
+        serde_json::from_str::<SuiteReport>(&content).with_context(|| {
+            format!(
+                "failed to parse existing suite report JSON at {}",
+                path.display()
+            )
+        })?
     } else {
         SuiteReport::new()
     };

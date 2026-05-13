@@ -17,8 +17,9 @@
 
 
 /*
- * Verify all FFI-defined error codes are classified correctly by the
- * production ngx_http_markdown_classify_error() function.
+ * Verify all base (non-streaming) FFI-defined error codes are
+ * classified correctly by the production
+ * ngx_http_markdown_classify_error() function.
  *
  * Expected: ERROR_PARSE/ENCODING/INVALID_INPUT -> CONVERSION,
  * ERROR_TIMEOUT/MEMORY_LIMIT -> RESOURCE_LIMIT, ERROR_INTERNAL -> SYSTEM.

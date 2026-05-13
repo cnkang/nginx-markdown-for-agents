@@ -283,6 +283,19 @@ test_effective_conf_helpers_smoke(void)
     TEST_ASSERT(ngx_http_markdown_effective_enabled_source(&eff, &conf)
                     == NGX_HTTP_MARKDOWN_ENABLED_STATIC,
                 "enabled_source should fall back to conf");
+    TEST_ASSERT(ngx_http_markdown_effective_prune_noise(&eff, &conf) == 0,
+                "prune_noise should fall back to conf");
+    TEST_ASSERT(ngx_http_markdown_effective_log_verbosity(&eff, &conf)
+                    == NGX_HTTP_MARKDOWN_LOG_WARN,
+                "log_verbosity should fall back to conf");
+    TEST_ASSERT(ngx_http_markdown_effective_memory_budget(&eff, &conf)
+                    == 8 * 1024 * 1024,
+                "memory_budget should fall back to conf");
+#ifdef MARKDOWN_STREAMING_ENABLED
+    TEST_ASSERT(ngx_http_markdown_effective_streaming_budget(&eff, &conf)
+                    == 4 * 1024 * 1024,
+                "streaming_budget should fall back to conf");
+#endif
 
     TEST_PASS("effective_conf helper symbols exercised");
 }

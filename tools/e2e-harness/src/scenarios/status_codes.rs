@@ -32,7 +32,7 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
     let mut headers = HashMap::new();
     headers.insert("Accept".to_string(), "text/markdown".to_string());
 
-    // Cases 1-6,8: Error status code passthrough — no conversion, HTML content type
+    // Cases 1-5,8: Error status code passthrough — no conversion, HTML content type
     let error_codes: &[(u16, &str)] = &[
         (403, "403"),
         (404, "404"),
@@ -64,17 +64,17 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
         }
     }
 
-    // Case 7: 301 redirect handling
+    // Case 6: 301 redirect handling
     let url_301 = format!("{base_url}/md/301");
     if let Some(resp) = common::try_get_with_headers(
         &url_301,
         &headers,
         &mut assertions,
-        "case7_301_redirect_200",
+        "case6_301_redirect_200",
     ) {
         let redirected_to_200 = resp.status == 200;
         assertions.push(AssertionResult {
-            name: "case7_301_redirect_200".to_string(),
+            name: "case6_301_redirect_200".to_string(),
             passed: redirected_to_200,
             expected: "200 (after following redirect)".to_string(),
             actual: resp.status.to_string(),
@@ -82,24 +82,24 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
                 None
             } else {
                 Some(format!(
-                    "[FAIL] assertion=case7_301_redirect_200 expected=200 actual={}",
+                    "[FAIL] assertion=case6_301_redirect_200 expected=200 actual={}",
                     resp.status
                 ))
             },
         });
     }
 
-    // Case 8 (302 in the shell is case 8): 302 redirect handling
+    // Case 7: 302 redirect handling
     let url_302 = format!("{base_url}/md/302");
     if let Some(resp) = common::try_get_with_headers(
         &url_302,
         &headers,
         &mut assertions,
-        "case8_302_redirect_200",
+        "case7_302_redirect_200",
     ) {
         let redirected_to_200 = resp.status == 200;
         assertions.push(AssertionResult {
-            name: "case8_302_redirect_200".to_string(),
+            name: "case7_302_redirect_200".to_string(),
             passed: redirected_to_200,
             expected: "200 (after following redirect)".to_string(),
             actual: resp.status.to_string(),
@@ -107,7 +107,7 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
                 None
             } else {
                 Some(format!(
-                    "[FAIL] assertion=case8_302_redirect_200 expected=200 actual={}",
+                    "[FAIL] assertion=case7_302_redirect_200 expected=200 actual={}",
                     resp.status
                 ))
             },

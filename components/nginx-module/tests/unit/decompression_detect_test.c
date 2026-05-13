@@ -23,6 +23,11 @@ typedef enum {
 /*
  * Case-insensitive string equality check (ASCII only).
  *
+ * DIVERGENCE RISK: test-side reimplementation of production
+ * case-insensitive equality semantics for Content-Encoding tokens.
+ * Keep this aligned with module logic; E2E coverage exercises the
+ * runtime production path.
+ *
  * Parameters:
  *   a - first string
  *   b - second string
@@ -50,6 +55,10 @@ str_case_eq(const char *a, const char *b)
 
 /*
  * Detect compression type from a Content-Encoding header value.
+ *
+ * DIVERGENCE RISK: this mirrors production compression detection.
+ * If production detection semantics change, update this helper and
+ * associated assertions in the same change.
  *
  * Parameters:
  *   content_encoding - the Content-Encoding header value

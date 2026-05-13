@@ -41,7 +41,7 @@ fn shared_client() -> &'static reqwest::blocking::Client {
 /// An `HttpResponse` on success.
 pub fn get(url: &str) -> Result<HttpResponse> {
     let resp = shared_client().get(url).send()?;
-    Ok(to_http_response(resp))
+    to_http_response(resp)
 }
 
 /// Send a HEAD request and return the response.
@@ -55,7 +55,7 @@ pub fn get(url: &str) -> Result<HttpResponse> {
 /// An `HttpResponse` with an empty body on success.
 pub fn head(url: &str) -> Result<HttpResponse> {
     let resp = shared_client().head(url).send()?;
-    Ok(to_http_response(resp))
+    to_http_response(resp)
 }
 
 /// Send a GET request with custom headers and return the response.
@@ -74,17 +74,17 @@ pub fn get_with_headers(url: &str, headers: &HashMap<String, String>) -> Result<
         req = req.header(key.as_str(), value.as_str());
     }
     let resp = req.send()?;
-    Ok(to_http_response(resp))
+    to_http_response(resp)
 }
 
 /// Convert a `reqwest::blocking::Response` into our `HttpResponse`.
-fn to_http_response(resp: reqwest::blocking::Response) -> HttpResponse {
+fn to_http_response(resp: reqwest::blocking::Response) -> Result<HttpResponse> {
     let status = resp.status().as_u16();
     let headers = resp.headers().clone();
-    let body = resp.text().unwrap_or_default();
-    HttpResponse {
+    let body = resp.text()?;
+    Ok(HttpResponse {
         status,
         headers,
         body,
-    }
+    })
 }
