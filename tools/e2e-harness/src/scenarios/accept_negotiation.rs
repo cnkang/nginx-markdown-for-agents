@@ -43,8 +43,7 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
     let mut wildcard_headers = HashMap::new();
     wildcard_headers.insert("Accept".to_string(), "*/*".to_string());
 
-    let mut no_accept_headers = HashMap::new();
-    no_accept_headers.insert("Accept".to_string(), String::new());
+    let no_accept_headers = HashMap::new();
 
     // Case 1: Accept: text/markdown triggers conversion
     let resp1 = match http::get_with_headers(&md_html_url, &markdown_headers) {
@@ -80,7 +79,7 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
         &md_html_url,
         &html_headers,
         &mut assertions,
-        "case2_html_accept_ct",
+        "case2_html_accept_conn_error",
     ) {
         assertions.push(assertions::assert_status(
             "case2_html_accept_status_200",
@@ -105,7 +104,7 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
         &md_html_url,
         &no_accept_headers,
         &mut assertions,
-        "case3_no_accept_ct_html",
+        "case3_no_accept_conn_error",
     ) {
         assertions.push(assertions::assert_status(
             "case3_no_accept_status_200",
@@ -125,7 +124,7 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
         &md_html_url,
         &wildcard_headers,
         &mut assertions,
-        "case4_wildcard_on_ct_markdown",
+        "case4_wildcard_on_conn_error",
     ) {
         assertions.push(assertions::assert_status(
             "case4_wildcard_on_status_200",
@@ -145,7 +144,7 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
         &no_wildcard_html_url,
         &wildcard_headers,
         &mut assertions,
-        "case5_wildcard_off_ct_html",
+        "case5_wildcard_off_conn_error",
     ) {
         assertions.push(assertions::assert_status(
             "case5_wildcard_off_status_200",
@@ -161,21 +160,23 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
     }
 
     // Case 6: Vary: Accept header present in converted responses (reuse case 1 resp)
-    let vary_present = resp1.headers.get("Vary").is_some();
     let vary_has_accept = resp1
         .headers
         .get("Vary")
         .and_then(|v| v.to_str().ok())
-        .map(|s| s.contains("Accept"))
+        .map(|s| {
+            s.split(',')
+                .any(|token| token.trim().eq_ignore_ascii_case("Accept"))
+        })
         .unwrap_or(false);
     assertions.push(AssertionResult {
         name: "case6_vary_accept_present".to_string(),
-        passed: vary_has_accept || vary_present,
+        passed: vary_has_accept,
         expected: "Vary header contains Accept".to_string(),
-        actual: if vary_present {
-            "Vary present".to_string()
+        actual: if vary_has_accept {
+            "contains Accept".to_string()
         } else {
-            "Vary absent".to_string()
+            "does not contain Accept".to_string()
         },
         message: None,
     });
@@ -185,7 +186,7 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
         &md_json_url,
         &markdown_headers,
         &mut assertions,
-        "case7_json_ct_preserved",
+        "case7_json_conn_error",
     ) {
         assertions.push(assertions::assert_status(
             "case7_json_not_converted_status_200",
@@ -205,7 +206,7 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
         &md_plain_url,
         &markdown_headers,
         &mut assertions,
-        "case8_plain_ct_preserved",
+        "case8_plain_conn_error",
     ) {
         assertions.push(assertions::assert_status(
             "case8_plain_not_converted_status_200",

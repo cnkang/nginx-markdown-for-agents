@@ -14,6 +14,7 @@ set -euo pipefail
 #
 # Exit codes:
 #   0 - all tests passed
+#   1 - one or more tests failed (propagated from make/test command)
 #   2 - invalid mode argument
 
 MODE="${1:-all}"

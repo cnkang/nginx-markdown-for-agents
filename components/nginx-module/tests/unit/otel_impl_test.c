@@ -524,6 +524,7 @@ test_otel_helper_functions(void)
     ngx_current_msec = 1234;
     g_fake_time.sec = 10;
     g_fake_time.msec = 500;
+    span.exported = 1;
     ngx_http_markdown_otel_span_end(&span);
 
     ngx_http_markdown_otel_span_export(NULL, NULL, NULL);

@@ -395,8 +395,6 @@ ngx_http_markdown_base_url_add_len(ngx_http_request_t *r,
                                    size_t delta,
                                    const char *segment)
 {
-    (void) segment;  /* Unused in this implementation */
-
     if (*total > ((size_t) -1) - delta) {
         ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
                      "markdown filter: base_url length overflow (%s)",

@@ -83,11 +83,13 @@ pub fn assert_header_value(
     expected: &str,
     headers: &reqwest::header::HeaderMap,
 ) -> AssertionResult {
-    let actual_value = headers
-        .get(header_name)
-        .and_then(|v: &reqwest::header::HeaderValue| v.to_str().ok())
-        .unwrap_or("")
-        .to_string();
+    let actual_value = match headers.get(header_name) {
+        None => "(header missing)".to_string(),
+        Some(v) => match v.to_str() {
+            Ok(s) => s.to_string(),
+            Err(_) => "(invalid UTF-8)".to_string(),
+        },
+    };
     let passed = actual_value == expected;
     AssertionResult {
         name: name.to_string(),
@@ -123,8 +125,10 @@ pub fn assert_header_pattern(
         .and_then(|v: &reqwest::header::HeaderValue| v.to_str().ok())
         .unwrap_or("")
         .to_string();
-    let re = Regex::new(pattern).unwrap_or_else(|_| Regex::new("$^").unwrap());
-    let passed = re.is_match(&actual_value);
+    let (passed, regex_error) = match Regex::new(pattern) {
+        Ok(re) => (re.is_match(&actual_value), None),
+        Err(e) => (false, Some(e.to_string())),
+    };
     AssertionResult {
         name: name.to_string(),
         passed,
@@ -133,9 +137,14 @@ pub fn assert_header_pattern(
         message: if passed {
             None
         } else {
-            Some(format!(
-                "[FAIL] assertion={name} header={header_name} pattern=/{pattern}/ actual='{actual_value}'"
-            ))
+            Some(match regex_error {
+                Some(err) => format!(
+                    "[FAIL] assertion={name} header={header_name} invalid_regex=/{pattern}/ error='{err}'"
+                ),
+                None => format!(
+                    "[FAIL] assertion={name} header={header_name} pattern=/{pattern}/ actual='{actual_value}'"
+                ),
+            })
         },
     }
 }
@@ -176,8 +185,10 @@ pub fn assert_body_contains(name: &str, needle: &str, body: &str) -> AssertionRe
 /// * `pattern` - Regex pattern string.
 /// * `body` - Response body text.
 pub fn assert_body_matches(name: &str, pattern: &str, body: &str) -> AssertionResult {
-    let re = Regex::new(pattern).unwrap_or_else(|_| Regex::new("$^").unwrap());
-    let passed = re.is_match(body);
+    let (passed, regex_error) = match Regex::new(pattern) {
+        Ok(re) => (re.is_match(body), None),
+        Err(e) => (false, Some(e.to_string())),
+    };
     AssertionResult {
         name: name.to_string(),
         passed,
@@ -190,9 +201,12 @@ pub fn assert_body_matches(name: &str, pattern: &str, body: &str) -> AssertionRe
         message: if passed {
             None
         } else {
-            Some(format!(
-                "[FAIL] assertion={name} pattern=/{pattern}/ not matched in body"
-            ))
+            Some(match regex_error {
+                Some(err) => {
+                    format!("[FAIL] assertion={name} invalid_regex=/{pattern}/ error='{err}'")
+                }
+                None => format!("[FAIL] assertion={name} pattern=/{pattern}/ not matched in body"),
+            })
         },
     }
 }

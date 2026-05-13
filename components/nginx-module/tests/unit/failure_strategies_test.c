@@ -21,6 +21,10 @@ typedef struct {
 /*
  * Simulate handling a conversion failure based on the on_error strategy.
  *
+ * DIVERGENCE RISK: this test-side helper mirrors production
+ * fail-open/fail-closed strategy routing. Keep it aligned when
+ * on_error behavior changes in module code.
+ *
  * Parameters:
  *   on_error       - ON_ERROR_PASS (fail-open) or ON_ERROR_REJECT (fail-closed)
  *   upstream_status - the original upstream response status

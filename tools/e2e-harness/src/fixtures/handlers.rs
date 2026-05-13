@@ -39,6 +39,19 @@ pub fn conditional_handler(
                 body: String::new(),
             };
         }
+
+        // RFC 7232 Section 6: If-None-Match takes precedence over
+        // If-Modified-Since. If INM is present and does not match,
+        // ignore IMS and return full content.
+        return FixtureResponse {
+            status: 200,
+            headers: vec![
+                ("ETag".to_string(), etag.to_string()),
+                ("Last-Modified".to_string(), last_modified.to_string()),
+                ("Content-Type".to_string(), "text/html".to_string()),
+            ],
+            body: body.to_string(),
+        };
     }
 
     if let Some(ims) = if_modified_since
@@ -207,6 +220,19 @@ mod tests {
             "<html>content</html>",
         );
         assert_eq!(resp.status, 200);
+    }
+
+    #[test]
+    fn test_conditional_handler_if_none_match_precedence() {
+        let resp = conditional_handler(
+            "\"new-etag\"",
+            Some("\"old-etag\""),
+            Some("Tue, 01 Jan 2030 00:00:00 GMT"),
+            "Wed, 01 Jan 2025 00:00:00 GMT",
+            "content",
+        );
+        assert_eq!(resp.status, 200);
+        assert_eq!(resp.body, "content");
     }
 
     #[test]
