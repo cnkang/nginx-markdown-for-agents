@@ -1,6 +1,5 @@
 /*
  * Test: decompression_detect
- * Description: compression type detection
  *
  * Validates Content-Encoding header parsing: recognizes gzip, deflate,
  * and brotli (case-insensitive), returns NONE for NULL/empty, and

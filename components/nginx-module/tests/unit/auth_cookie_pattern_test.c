@@ -1,6 +1,5 @@
 /*
  * Test: auth_cookie_pattern
- * Description: Cookie pattern matching for authentication detection
  *
  * Validates: Requirements 9.3
  *

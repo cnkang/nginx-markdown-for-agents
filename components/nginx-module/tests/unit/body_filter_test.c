@@ -1,6 +1,5 @@
 /*
  * Test: body_filter
- * Description: body filter functionality
  *
  * Validates the body filter's chunk buffering, decompression hook,
  * HEAD request handling, and ineligible-request passthrough behavior.

@@ -1,6 +1,5 @@
 /*
  * Test: fast_path
- * Description: fast path optimization
  *
  * Validates the decompression state initialization logic: when
  * auto_decompress is enabled and a compressed encoding is detected,

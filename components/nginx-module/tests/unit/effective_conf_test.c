@@ -1,16 +1,5 @@
 /*
  * Test: effective_conf consistency
- * Description: Verify that ngx_http_markdown_effective_conf_t provides
- *              per-request consistency for dynconf-mutable fields.
- *              Tests cover:
- *              - build_effective_conf from valid snapshot
- *              - build_effective_conf with NULL/invalid snapshot (fallback)
- *              - effective_* helpers read from effective_conf when present
- *              - effective_* helpers fall back to live conf when eff is NULL
- *              - Request-level snapshot consistency:
- *                snapshot captured at time A remains effective even after
- *                live conf is changed to values B (simulating mid-request
- *                dynconf reload).
  */
 
 #include "../include/test_common.h"
@@ -106,7 +95,21 @@ ngx_strncasecmp(u_char *s1, u_char *s2, size_t n)
 }
 
 #undef ngx_log_error
-#define ngx_log_error(level, log, err, fmt, ...) do { UNUSED(log); } while(0)
+static void
+test_effective_conf_log_ignore(const char *fmt, ...)
+{
+    UNUSED(fmt);
+}
+
+#define ngx_log_error(level, log, err, fmt, ...)                                     \
+    do {                                                                              \
+        UNUSED(level);                                                                \
+        UNUSED(log);                                                                  \
+        UNUSED(err);                                                                  \
+        if (0) {                                                                      \
+            test_effective_conf_log_ignore((fmt), ##__VA_ARGS__);                    \
+        }                                                                             \
+    } while (0)
 
 #define NGX_MAX_PATH 1024
 
@@ -213,8 +216,6 @@ ngx_del_timer(ngx_event_t *ev)
 
 static ngx_pool_t  g_pool;
 static ngx_log_t   g_log;
-static ngx_cycle_t g_cycle = { &g_pool, &g_log };
-static ngx_connection_t g_conn = { &g_log };
 
 
 static void
@@ -836,6 +837,32 @@ test_dynconf_snapshot_not_consumed_when_dynconf_disabled(void)
     TEST_PASS("dynconf snapshot not consumed when dynconf_enabled=0");
 }
 
+static void
+test_dynconf_start_stop_symbols(void)
+{
+    ngx_cycle_t                          cycle;
+    ngx_http_markdown_dynconf_watcher_t  watcher;
+    ngx_http_markdown_conf_t             conf;
+    ngx_str_t                            path;
+    ngx_int_t                            rc;
+
+    TEST_SUBSECTION("dynconf start/stop symbol coverage");
+
+    ngx_memzero(&cycle, sizeof(cycle));
+    ngx_memzero(&watcher, sizeof(watcher));
+    ngx_memzero(&conf, sizeof(conf));
+    ngx_memzero(&path, sizeof(path));
+
+    cycle.pool = &g_pool;
+    cycle.log = &g_log;
+
+    rc = ngx_http_markdown_dynconf_start(NULL, &cycle, &path, &conf, &g_log);
+    TEST_ASSERT(rc == NGX_OK, "NULL watcher should return NGX_OK");
+
+    ngx_http_markdown_dynconf_stop(NULL, &g_log);
+    TEST_PASS("dynconf start/stop symbols exercised");
+}
+
 
 int
 main(void)
@@ -853,6 +880,7 @@ main(void)
     test_effective_helpers_edge_values();
     test_bind_request_snapshot_preserves_captured_snapshot();
     test_dynconf_snapshot_not_consumed_when_dynconf_disabled();
+    test_dynconf_start_stop_symbols();
 
     printf("\nAll effective_conf consistency tests passed.\n");
     return 0;

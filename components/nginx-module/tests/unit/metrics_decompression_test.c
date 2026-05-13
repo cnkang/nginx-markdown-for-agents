@@ -1,6 +1,5 @@
 /*
  * Test: metrics_decompression
- * Description: decompression metrics
  *
  * Validates decompression metrics recording: attempted/succeeded/failed
  * counters and per-format counters (gzip, deflate, brotli).

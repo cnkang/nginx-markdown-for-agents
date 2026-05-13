@@ -1,6 +1,5 @@
 /*
  * Test: passthrough
- * Description: passthrough behavior
  *
  * Validates that ineligible requests (wrong method, non-HTML content,
  * non-200 status) pass through the filter unchanged: original status,

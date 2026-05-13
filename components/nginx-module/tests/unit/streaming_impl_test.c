@@ -1,6 +1,5 @@
 /*
  * Test: streaming_impl
- * Description: streaming implementation
  *
  * Validates the streaming conversion pipeline: chunk feeding, output
  * accumulation, budget enforcement, error handling, and finalization
@@ -909,33 +908,6 @@ ngx_http_markdown_prepare_conversion_options(ngx_http_request_t *r,
     return g_prepare_options_rc;
 }
 
-/*
- * Stub effective-conf helpers required by streaming_impl.h.
- */
-static ngx_flag_t
-ngx_http_markdown_effective_prune_noise(
-    const ngx_http_markdown_effective_conf_t *eff,
-    const ngx_http_markdown_conf_t *conf)
-{
-    return (eff != NULL) ? eff->prune_noise : conf->prune_noise;
-}
-
-static size_t
-ngx_http_markdown_effective_memory_budget(
-    const ngx_http_markdown_effective_conf_t *eff,
-    const ngx_http_markdown_conf_t *conf)
-{
-    return (eff != NULL) ? eff->memory_budget : conf->memory_budget;
-}
-
-static ngx_uint_t
-ngx_http_markdown_effective_log_verbosity(
-    const ngx_http_markdown_effective_conf_t *eff,
-    const ngx_http_markdown_conf_t *conf)
-{
-    return (eff != NULL) ? eff->log_verbosity : conf->log_verbosity;
-}
-
 #ifdef MARKDOWN_STREAMING_ENABLED
 static size_t
 ngx_http_markdown_effective_streaming_budget(
@@ -1066,50 +1038,6 @@ ngx_shm_zone_t *ngx_http_markdown_metrics_shm_zone = NULL;
 #ifndef ngx_atomic_fetch_add
 #define ngx_atomic_fetch_add(p, v)  (*(p) += (v), *(p))
 #endif
-
-static ngx_inline void
-ngx_shmtx_lock(ngx_shmtx_t *mtx)
-{
-    (void) mtx;
-}
-
-static ngx_inline void
-ngx_shmtx_unlock(ngx_shmtx_t *mtx)
-{
-    (void) mtx;
-}
-
-static ngx_inline ngx_uint_t
-ngx_hash_key(u_char *data, size_t len)
-{
-    ngx_uint_t  hash;
-    hash = 0;
-    for (size_t i = 0; i < len; i++) {
-        hash = hash * 31 + data[i];
-    }
-    return hash;
-}
-
-static ngx_inline void *
-ngx_slab_alloc_locked(ngx_slab_pool_t *pool, size_t size)
-{
-    (void) pool;
-    return calloc(1, size);
-}
-
-static ngx_inline void
-ngx_slab_free_locked(ngx_slab_pool_t *pool, void *p)
-{
-    (void) pool;
-    free(p);
-}
-
-static ngx_inline void
-ngx_rbtree_insert(ngx_rbtree_t *tree, ngx_rbtree_node_t *node)
-{
-    (void) tree;
-    (void) node;
-}
 
 static ngx_inline ngx_http_markdown_otel_span_t *
 ngx_http_markdown_otel_span_start(ngx_http_request_t *r,

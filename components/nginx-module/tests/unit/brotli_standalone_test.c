@@ -1,6 +1,5 @@
 /*
  * Test: brotli_standalone
- * Description: standalone brotli decompression
  *
  * Validates the standalone brotli decompression helper's behavior:
  * fallback return code when brotli is not compiled in, error handling

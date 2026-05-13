@@ -1,6 +1,5 @@
 /*
  * Test: decompression_logging
- * Description: decompression logging
  *
  * Validates log message format and severity levels for decompression
  * detection (DEBUG), success (INFO with ratio), and failure (ERROR

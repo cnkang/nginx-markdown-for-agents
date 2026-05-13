@@ -1,6 +1,5 @@
 /*
  * Test: prometheus_format
- * Description: Prometheus text exposition format renderer
  *
  * Uses a standalone test pattern (no NGINX dependencies).
  * Mirrors the renderer logic using snprintf() and unsigned long.

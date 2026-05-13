@@ -1,6 +1,5 @@
 /*
  * Test: metrics_format_select
- * Description: Content negotiation for metrics output format
  *
  * Uses a standalone test pattern (no NGINX dependencies).
  * Tests all 8 rows of the content negotiation state machine

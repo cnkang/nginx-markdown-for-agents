@@ -25,6 +25,10 @@
     ngx_sprintf((buf), "%ui", (token_count))
 #endif
 
+#ifndef ngx_tolower
+#define ngx_tolower(c) ((u_char) ((c) >= 'A' && (c) <= 'Z' ? ((c) | 0x20) : (c)))
+#endif
+
 static u_char ngx_http_markdown_hdr_vary[] = "Vary";
 static u_char ngx_http_markdown_hdr_accept[] = "Accept";
 static u_char ngx_http_markdown_hdr_etag[] = "ETag";
@@ -33,28 +37,6 @@ static u_char ngx_http_markdown_hdr_accept_ranges[] = "Accept-Ranges";
 static u_char ngx_http_markdown_hdr_token_count[] = "X-Markdown-Tokens";
 u_char ngx_http_markdown_content_type[] = NGX_HTTP_MARKDOWN_CONTENT_TYPE_LITERAL;
 static u_char ngx_http_markdown_vary_suffix[] = ", Accept";
-
-/*
- * Convert an ASCII uppercase letter to lowercase.
- *
- * Only affects A-Z; all other byte values are returned unchanged.
- * Used for case-insensitive HTTP header name and token matching.
- *
- * Parameters:
- *   c - byte value to convert
- *
- * Returns:
- *   lowercase equivalent if c is A-Z, otherwise c unchanged
- */
-static ngx_uint_t
-ngx_http_markdown_tolower_ascii(ngx_uint_t c)
-{
-    if (c >= 'A' && c <= 'Z') {
-        return c | 0x20;
-    }
-
-    return c;
-}
 
 /*
  * Case-insensitive comparison of exactly n bytes from two byte strings.
@@ -79,8 +61,10 @@ ngx_http_markdown_strncasecmp_const(const u_char *s1, const u_char *s2, size_t n
     ngx_uint_t c2;
 
     while (n != 0) {
-        c1 = ngx_http_markdown_tolower_ascii((ngx_uint_t) *s1++);
-        c2 = ngx_http_markdown_tolower_ascii((ngx_uint_t) *s2++);
+        c1 = (ngx_uint_t) *s1++;
+        c2 = (ngx_uint_t) *s2++;
+        c1 = ngx_tolower(c1);
+        c2 = ngx_tolower(c2);
 
         if (c1 == c2) {
             if (c1 == 0) {

@@ -1,6 +1,5 @@
 /*
  * Test: gzip_deflate_decompression
- * Description: gzip and deflate decompression
  *
  * Validates zlib-based gzip and deflate decompression: round-trip
  * correctness for both formats, corruption detection, output size

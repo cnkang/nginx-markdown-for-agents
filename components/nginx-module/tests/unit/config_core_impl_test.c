@@ -1,6 +1,5 @@
 /*
  * Test: config_core_impl
- * Description: direct branch coverage for config core helpers.
  */
 
 #include "../include/test_common.h"

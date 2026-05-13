@@ -1,6 +1,5 @@
 /*
  * Test: error_impl
- * Description: direct coverage for production error classification code.
  *
  * Includes the actual production source file so coverage instruments
  * the real code paths.

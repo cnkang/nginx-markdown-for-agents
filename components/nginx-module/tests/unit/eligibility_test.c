@@ -1,6 +1,5 @@
 /*
  * Test: eligibility
- * Description: request eligibility checking
  *
  * Validates the request eligibility decision logic: method (GET/HEAD only),
  * status (200 only, 206 treated as range), content-type (text/html only,

@@ -1,6 +1,5 @@
 /*
  * Test: conversion_impl_base_url
- * Description: direct coverage for base_url helper paths and overflow guards
  */
 
 #include "../include/test_common.h"
@@ -28,14 +27,6 @@ ngx_http_markdown_effective_memory_budget(
     const ngx_http_markdown_conf_t *conf)
 {
     return (eff != NULL) ? eff->memory_budget : conf->memory_budget;
-}
-
-static ngx_uint_t
-ngx_http_markdown_effective_log_verbosity(
-    const ngx_http_markdown_effective_conf_t *eff,
-    const ngx_http_markdown_conf_t *conf)
-{
-    return (eff != NULL) ? eff->log_verbosity : conf->log_verbosity;
 }
 
 /*
@@ -271,10 +262,17 @@ struct ngx_http_request_s {
 #ifndef NGX_LOG_DEBUG_HTTP
 #define NGX_LOG_DEBUG_HTTP 0
 #endif
+#ifndef NGX_LOG_CRIT
+#define NGX_LOG_CRIT 1
+#endif
 static volatile int g_metric_inc_sink;
 static volatile int g_metric_add_sink;
 #ifndef NGX_HTTP_MARKDOWN_METRIC_ADD
-#define NGX_HTTP_MARKDOWN_METRIC_ADD(name, value) (g_metric_add_sink = 1)
+#define NGX_HTTP_MARKDOWN_METRIC_ADD(name, value)                                     \
+    do {                                                                              \
+        g_metric_add_sink = 1;                                                       \
+        UNUSED(value);                                                                \
+    } while (0)
 #endif
 #ifndef NGX_HTTP_MARKDOWN_METRIC_INC
 #define NGX_HTTP_MARKDOWN_METRIC_INC(name) (g_metric_inc_sink = 1)
@@ -437,7 +435,7 @@ struct ngx_shm_zone_s {
 ngx_shm_zone_t *ngx_http_markdown_metrics_shm_zone = NULL;
 
 #ifndef ngx_atomic_fetch_add
-#define ngx_atomic_fetch_add(p, v)  (*(p) += (v), *(p))
+#define ngx_atomic_fetch_add(p, v)  ((void)(*(p) += (v)), *(p))
 #endif
 
 static ngx_inline void
@@ -662,64 +660,6 @@ ngx_http_markdown_otel_span_export(ngx_http_markdown_otel_span_t *span,
     UNUSED(span);
     UNUSED(log);
     UNUSED(r);
-}
-
-static ngx_inline void
-ngx_http_markdown_log_decision(ngx_http_request_t *r,
-    const ngx_http_markdown_conf_t *conf,
-    const ngx_http_markdown_ctx_t *ctx,
-    const char *reason)
-{
-    UNUSED(r);
-    UNUSED(conf);
-    UNUSED(ctx);
-    UNUSED(reason);
-}
-
-typedef int StreamingConverterHandle;
-
-static ngx_inline int
-markdown_streaming_new_with_code(const struct MarkdownOptions *opts,
-    StreamingConverterHandle **handle)
-{
-    UNUSED(opts);
-    UNUSED(handle);
-    return 0;
-}
-
-static ngx_inline int
-markdown_streaming_feed(StreamingConverterHandle *handle,
-    const uint8_t *data, size_t len,
-    uint8_t **out_data, size_t *out_len)
-{
-    UNUSED(handle);
-    UNUSED(data);
-    UNUSED(len);
-    UNUSED(out_data);
-    UNUSED(out_len);
-    return 0;
-}
-
-static ngx_inline void
-markdown_streaming_abort(StreamingConverterHandle *handle)
-{
-    UNUSED(handle);
-}
-
-static ngx_inline void
-markdown_streaming_output_free(uint8_t *data, size_t len)
-{
-    UNUSED(data);
-    UNUSED(len);
-}
-
-static ngx_inline int
-markdown_streaming_finalize(StreamingConverterHandle *handle,
-    struct MarkdownResult *result)
-{
-    UNUSED(handle);
-    UNUSED(result);
-    return 0;
 }
 
 #include "../../src/ngx_http_markdown_conversion_impl.h" /* NOSONAR: must follow stub definitions */
@@ -1596,6 +1536,9 @@ test_converter_not_initialized_path(void)
     ngx_http_request_t        r;
     ngx_http_markdown_ctx_t   ctx;
     ngx_http_markdown_conf_t  conf;
+    struct MarkdownResult     result;
+    ngx_msec_t                elapsed_ms;
+    ngx_flag_t                has_result;
     ngx_int_t                 rc;
 
     TEST_SUBSECTION("converter_not_initialized path");
@@ -1604,6 +1547,7 @@ test_converter_not_initialized_path(void)
     init_request(&r);
     memset(&ctx, 0, sizeof(ctx));
     memset(&conf, 0, sizeof(conf));
+    memset(&result, 0, sizeof(result));
     g_failopen_rc = NGX_DECLINED;
 
     rc = ngx_http_markdown_handle_converter_not_initialized(
@@ -1612,6 +1556,20 @@ test_converter_not_initialized_path(void)
                 "converter_not_initialized should follow fail-open strategy");
     TEST_ASSERT(ctx.has_error_category == 1,
                 "system failure should set error category flag");
+
+    elapsed_ms = 0;
+    rc = ngx_http_markdown_execute_conversion(&r, &ctx, &conf, &result, &elapsed_ms);
+    TEST_ASSERT(rc == NGX_DECLINED,
+                "execute_conversion should follow fail-open when converter is NULL");
+
+    has_result = 0;
+    elapsed_ms = 0;
+    rc = ngx_http_markdown_resolve_conditional_result(
+        &r, &ctx, &conf, &result, &elapsed_ms, &has_result);
+    TEST_ASSERT(rc == NGX_OK,
+                "conditional resolver should continue when no conditional match");
+    TEST_ASSERT(has_result == 0,
+                "conditional resolver should not set has_result on DECLINED path");
 
     TEST_PASS("converter_not_initialized covered");
 }

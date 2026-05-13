@@ -1,6 +1,5 @@
 /*
  * Test: unsupported_format_fallback
- * Description: unsupported format fallback
  *
  * Validates that unsupported compression formats (e.g. compress,
  * unknown encodings) fall back to passthrough behavior: the response

@@ -1,6 +1,5 @@
 /*
  * Test: error_classification
- * Description: error classification
  *
  * Validates FFI error code classification into semantic categories:
  * CONVERSION (parse/encoding/invalid_input), RESOURCE_LIMIT (timeout/

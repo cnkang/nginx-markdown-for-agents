@@ -1,6 +1,5 @@
 /*
  * Test: config_handlers_impl
- * Description: direct branch coverage for config directive handlers.
  */
 
 #include "../include/test_common.h"
@@ -287,29 +286,6 @@ ngx_strlchr(u_char *p, u_char *last, u_char c)
 }
 
 /*
- * Thin wrapper around strchr(3) with u_char* return type.
- *
- * Test-local reimplementation of the NGINX primitive because the
- * production symbol cannot be linked in the unit harness.
- *
- * Divergence risk: low — one-line wrapper; any change to the
- * production signature would require an update here.
- *
- * Parameters:
- *   s - null-terminated byte string to search.
- *   c - character value to find.
- *
- * Return: pointer to the first occurrence of c, or NULL.
- *
- * Side effects: none.
- */
-static u_char *
-ngx_strchr(const u_char *s, int c)
-{
-    return (u_char *) strchr((const char *) s, c);
-}
-
-/*
  * Zero-fill wrapper delegating to memset(3).
  *
  * Mirrors production ngx_memzero; test-local reimplementation
@@ -362,31 +338,6 @@ ngx_palloc(ngx_pool_t *pool, size_t size)
         return NULL;
     }
     return malloc(size);
-}
-
-/*
- * Pool allocator stub delegating to calloc(3).
- *
- * Always zero-initializes.  The pool argument is ignored; the unit
- * harness does not simulate pool ownership or cleanup.
- *
- * Divergence risk: medium — production ngx_pcalloc may return
- * previously-freed pool memory; this stub always calls calloc,
- * so allocation patterns differ.
- *
- * Parameters:
- *   pool - memory pool (unused).
- *   size - number of bytes to allocate.
- *
- * Return: pointer to zero-initialized memory, or NULL on failure.
- *
- * Side effects: allocates heap memory via calloc(3).
- */
-static void *
-ngx_pcalloc(ngx_pool_t *pool, size_t size)
-{
-    UNUSED(pool);
-    return calloc(1, size);
 }
 
 /*
@@ -662,6 +613,7 @@ init_conf(ngx_http_markdown_conf_t *mcf)
     mcf->flavor = NGX_CONF_UNSET_UINT;
     mcf->auth_policy = NGX_CONF_UNSET_UINT;
     mcf->auth_cookies = NGX_CONF_UNSET_PTR;
+    mcf->content_types = NGX_CONF_UNSET_PTR;
     mcf->conditional_requests = NGX_CONF_UNSET_UINT;
     mcf->log_verbosity = NGX_CONF_UNSET_UINT;
     mcf->stream_types = NGX_CONF_UNSET_PTR;
@@ -1451,6 +1403,49 @@ test_set_dynconf_path(void)
     TEST_PASS("set_dynconf_path branches covered");
 }
 
+static void
+test_markdown_content_types_handler(void)
+{
+    ngx_conf_t               cf;
+    ngx_array_t              args;
+    ngx_str_t                values[3];
+    ngx_command_t            cmd;
+    ngx_http_markdown_conf_t mcf;
+    ngx_str_t               *types;
+    char                    *rc;
+
+    TEST_SUBSECTION("markdown_content_types handler");
+
+    init_conf(&mcf);
+    setup_cf(&cf, &args, values, 3);
+    set_arg(&cmd.name, "markdown_content_types");
+    set_arg(&values[0], "markdown_content_types");
+    set_arg(&values[1], "text/html");
+    set_arg(&values[2], "application/xhtml+xml");
+
+    rc = ngx_http_markdown_content_types(&cf, &cmd, &mcf);
+    TEST_ASSERT(rc == NGX_CONF_OK, "valid content types should parse");
+    TEST_ASSERT(mcf.content_types != NULL, "content_types array allocated");
+    TEST_ASSERT(mcf.content_types->nelts == 2, "two content types stored");
+
+    types = mcf.content_types->elts;
+    TEST_ASSERT(types != NULL, "content_types entries should be available");
+    TEST_ASSERT(types[0].len == strlen("text/html"),
+                "first content type length should match");
+    TEST_ASSERT(memcmp(types[0].data, "text/html", types[0].len) == 0,
+                "first content type value should match");
+    TEST_ASSERT(types[1].len == strlen("application/xhtml+xml"),
+                "second content type length should match");
+    TEST_ASSERT(memcmp(types[1].data, "application/xhtml+xml", types[1].len) == 0,
+                "second content type value should match");
+
+    rc = ngx_http_markdown_content_types(&cf, &cmd, &mcf);
+    TEST_ASSERT(strcmp(rc, "is duplicate") == 0,
+                "duplicate content_types should be rejected");
+
+    TEST_PASS("content_types branches covered");
+}
+
 /*
  * Entry point: run all config_handlers_impl unit tests.
  *
@@ -1480,6 +1475,7 @@ main(void)
     test_parse_size_edge_cases();
     test_markdown_filter_palloc_failure();
     test_set_dynconf_path();
+    test_markdown_content_types_handler();
 
     printf("\n========================================\n");
     printf("All tests passed!\n");
