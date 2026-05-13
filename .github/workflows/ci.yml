@@ -51,6 +51,7 @@ jobs:
       nginx: ${{ steps.filter.outputs.nginx }}
       e2e: ${{ steps.filter.outputs.e2e }}
       perf: ${{ steps.filter.outputs.perf }}
+      matrix_release: ${{ steps.filter.outputs.matrix_release }}
       corpus_tools: ${{ steps.filter.outputs.corpus_tools }}
       workflows: ${{ steps.filter.outputs.workflows }}
     steps:
@@ -88,6 +89,9 @@ jobs:
               - 'components/rust-converter/**'
               - 'perf/**'
               - 'tools/perf/**'
+            matrix_release:
+              - 'tools/release/matrix/**'
+              - 'tools/release-matrix.json'
             corpus_tools:
               - 'tools/corpus/**'
             workflows:
@@ -430,6 +434,29 @@ jobs:
         with:
           name: perf-verdict-${{ steps.platform.outputs.name }}.json
           path: perf/reports/perf-verdict-${{ steps.platform.outputs.name }}.json
+
+  matrix-release-tests:
+    name: Matrix Release Tests
+    needs: changes
+    if: needs.changes.outputs.matrix_release == 'true' || needs.changes.outputs.workflows == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+        with:
+          python-version: '3.14.3'
+
+      - name: Install Python test dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Run release-matrix Python tests
+        run: PYTHONPATH=. python3 -m pytest -q tools/release/matrix/tests/
 
   coverage-gate:
     name: Coverage Gate (80%)
