@@ -10,7 +10,9 @@
 #include "../include/test_common.h"
 
 #include <ctype.h>
+#include <fcntl.h>
 #include <time.h>
+#include <unistd.h>
 
 typedef unsigned char u_char;
 typedef intptr_t      ngx_int_t;
@@ -110,11 +112,13 @@ static ngx_time_t g_fake_time = {0, 0};
 static ngx_http_markdown_conf_t g_fake_conf;
 
 #define NGX_OK 0
+#define NGX_ERROR -1
 #define NGX_DECLINED -5
 #define NGX_HTTP_POST 2
 #define NGX_HTTP_SUBREQUEST_IN_MEMORY 0
 #define NGX_LOG_INFO 3
 #define NGX_LOG_WARN 2
+#define NGX_LOG_ALERT 1
 
 #define ngx_memcpy(dst, src, n) memcpy((dst), (src), (n))
 #define ngx_string(str) { sizeof(str) - 1, (u_char *) (str) }
@@ -139,6 +143,13 @@ ngx_palloc(ngx_pool_t *pool, size_t size)
 {
     UNUSED(pool);
     return malloc(size);
+}
+
+static void
+ngx_pfree(ngx_pool_t *pool, void *p)
+{
+    UNUSED(pool);
+    free(p);
 }
 
 static ngx_buf_t *
