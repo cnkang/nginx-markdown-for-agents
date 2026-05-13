@@ -1852,9 +1852,7 @@ test_dynconf_start_watcher_already_active(void)
     const char                          *path_a = "/tmp/dynconf_start_a.conf";
     const char                          *path_b = "/tmp/dynconf_start_b.conf";
     u_char                               path_buf_a[256];
-    u_char                               path_buf_b[256];
     size_t                               len_a;
-    size_t                               len_b;
 
     {
         FILE *f = fopen(path_a, "w");
