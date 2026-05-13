@@ -276,6 +276,7 @@ dependencies = [
  "anyhow",
  "axum",
  "clap",
+ "httpdate",
  "proptest",
  "regex",
  "reqwest",

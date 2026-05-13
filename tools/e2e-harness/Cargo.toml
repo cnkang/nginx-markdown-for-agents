@@ -27,6 +27,8 @@ serde_json = "1.0"
 anyhow = "1.0"
 # Regex for body assertion helpers
 regex = "1.10"
+# HTTP date parsing for conditional fixture behavior.
+httpdate = "1.0"
 
 [dev-dependencies]
 # Property-based testing

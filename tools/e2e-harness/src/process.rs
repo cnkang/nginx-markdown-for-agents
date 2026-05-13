@@ -46,7 +46,7 @@ impl NginxProcess {
             .spawn()?;
 
         let pid = child.id();
-        wait_ready_with_child(&mut child, base_url, timeout)?;
+        wait_ready_with_child(Some(&mut child), base_url, timeout)?;
         Ok(NginxProcess {
             child: Some(child),
             pid,
@@ -65,19 +65,24 @@ impl NginxProcess {
     /// * `timeout` - Maximum wait duration.
     pub fn wait_ready(&self, base_url: &str, timeout: Duration) -> Result<()> {
         // Keep the method for external callers and tests.
-        let mut no_child = Command::new("true").spawn()?;
-        wait_ready_with_child(&mut no_child, base_url, timeout)
+        wait_ready_with_child(None, base_url, timeout)
     }
 }
 
-fn wait_ready_with_child(child: &mut Child, base_url: &str, timeout: Duration) -> Result<()> {
+fn wait_ready_with_child(
+    mut child: Option<&mut Child>,
+    base_url: &str,
+    timeout: Duration,
+) -> Result<()> {
     let start = Instant::now();
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(2))
         .build()?;
 
     loop {
-        if let Ok(Some(status)) = child.try_wait() {
+        if let Some(ref mut c) = child
+            && let Ok(Some(status)) = c.try_wait()
+        {
             bail!("NGINX exited before readiness (status: {status}) while probing {base_url}");
         }
         match client.get(base_url).send() {

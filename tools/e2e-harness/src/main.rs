@@ -11,8 +11,6 @@
 //!
 //! See `cli.rs` for the full flag surface and dispatch logic.
 
-#![allow(dead_code)]
-
 mod artifacts;
 mod assertions;
 mod bootstrap;

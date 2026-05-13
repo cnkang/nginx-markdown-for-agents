@@ -4,6 +4,7 @@
 //! in production: conditional requests, caching, and authentication.
 
 use crate::fixtures::FixtureResponse;
+use httpdate::parse_http_date;
 
 /// Handler for conditional request behavior (ETag / If-Modified-Since / If-None-Match).
 ///
@@ -26,10 +27,11 @@ pub fn conditional_handler(
     body: &str,
 ) -> FixtureResponse {
     if let Some(inm) = if_none_match {
+        let normalized_etag = normalize_etag(etag);
         let matches_etag = inm == "*"
             || inm
                 .split(',')
-                .any(|v| v.trim() == etag || v.trim() == format!("\"{etag}\""));
+                .any(|v| normalize_etag(v.trim()) == normalized_etag);
         if matches_etag {
             return FixtureResponse {
                 status: 304,
@@ -39,7 +41,11 @@ pub fn conditional_handler(
         }
     }
 
-    if let Some(_ims) = if_modified_since {
+    if let Some(ims) = if_modified_since
+        && let (Ok(ims_time), Ok(last_modified_time)) =
+            (parse_http_date(ims), parse_http_date(last_modified))
+        && ims_time >= last_modified_time
+    {
         return FixtureResponse {
             status: 304,
             headers: vec![
@@ -59,6 +65,13 @@ pub fn conditional_handler(
         ],
         body: body.to_string(),
     }
+}
+
+fn normalize_etag(tag: &str) -> &str {
+    tag.trim()
+        .strip_prefix("W/")
+        .unwrap_or(tag.trim())
+        .trim_matches('"')
 }
 
 /// Handler for cache behavior simulation.
@@ -158,6 +171,42 @@ mod tests {
             "<html>content</html>",
         );
         assert_eq!(resp.status, 304);
+    }
+
+    #[test]
+    fn test_conditional_handler_weak_if_none_match() {
+        let resp = conditional_handler(
+            "\"abc123\"",
+            Some("W/\"abc123\""),
+            None,
+            "Wed, 01 Jan 2025 00:00:00 GMT",
+            "<html>content</html>",
+        );
+        assert_eq!(resp.status, 304);
+    }
+
+    #[test]
+    fn test_conditional_handler_ims_future_not_modified() {
+        let resp = conditional_handler(
+            "\"abc123\"",
+            None,
+            Some("Tue, 01 Jan 2030 00:00:00 GMT"),
+            "Wed, 01 Jan 2025 00:00:00 GMT",
+            "<html>content</html>",
+        );
+        assert_eq!(resp.status, 304);
+    }
+
+    #[test]
+    fn test_conditional_handler_ims_past_modified() {
+        let resp = conditional_handler(
+            "\"abc123\"",
+            None,
+            Some("Wed, 01 Jan 2020 00:00:00 GMT"),
+            "Wed, 01 Jan 2025 00:00:00 GMT",
+            "<html>content</html>",
+        );
+        assert_eq!(resp.status, 200);
     }
 
     #[test]

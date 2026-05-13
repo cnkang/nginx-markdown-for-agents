@@ -6,6 +6,8 @@
 
 use anyhow::Result;
 use std::collections::HashMap;
+use std::sync::OnceLock;
+use std::time::Duration;
 
 /// Captured HTTP response for scenario assertions.
 #[derive(Debug)]
@@ -18,6 +20,16 @@ pub struct HttpResponse {
     pub body: String,
 }
 
+fn shared_client() -> &'static reqwest::blocking::Client {
+    static CLIENT: OnceLock<reqwest::blocking::Client> = OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::blocking::Client::builder()
+            .timeout(Duration::from_secs(10))
+            .build()
+            .expect("failed to build shared reqwest blocking client")
+    })
+}
+
 /// Send a GET request and return the response.
 ///
 /// # Arguments
@@ -28,10 +40,7 @@ pub struct HttpResponse {
 ///
 /// An `HttpResponse` on success.
 pub fn get(url: &str) -> Result<HttpResponse> {
-    let resp = reqwest::blocking::Client::new()
-        .get(url)
-        .timeout(std::time::Duration::from_secs(10))
-        .send()?;
+    let resp = shared_client().get(url).send()?;
     Ok(to_http_response(resp))
 }
 
@@ -45,10 +54,7 @@ pub fn get(url: &str) -> Result<HttpResponse> {
 ///
 /// An `HttpResponse` with an empty body on success.
 pub fn head(url: &str) -> Result<HttpResponse> {
-    let resp = reqwest::blocking::Client::new()
-        .head(url)
-        .timeout(std::time::Duration::from_secs(10))
-        .send()?;
+    let resp = shared_client().head(url).send()?;
     Ok(to_http_response(resp))
 }
 
@@ -63,9 +69,7 @@ pub fn head(url: &str) -> Result<HttpResponse> {
 ///
 /// An `HttpResponse` on success.
 pub fn get_with_headers(url: &str, headers: &HashMap<String, String>) -> Result<HttpResponse> {
-    let mut req = reqwest::blocking::Client::new()
-        .get(url)
-        .timeout(std::time::Duration::from_secs(10));
+    let mut req = shared_client().get(url);
     for (key, value) in headers {
         req = req.header(key.as_str(), value.as_str());
     }
