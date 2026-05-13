@@ -24,7 +24,9 @@
  *
  * Parameters:
  *   arg          - argument to compare
- *   expected     - expected string bytes
+ *   expected     - expected string bytes (u_char * to match
+ *                  ngx_strncasecmp signature; callers pass
+ *                  static u_char[] literals)
  *   expected_len - length of expected string
  *
  * Returns:
@@ -33,7 +35,7 @@
 static ngx_int_t
 ngx_http_markdown_arg_equals(
     const ngx_str_t *arg,
-    const u_char *expected,
+    u_char *expected,
     size_t expected_len)
 {
     if (arg == NULL || arg->data == NULL) {
