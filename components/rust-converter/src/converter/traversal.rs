@@ -409,11 +409,15 @@ impl MarkdownConverter {
     ///
     /// Centralizes the label-escape and URL-destination-escape logic shared
     /// by the embedded-content, media, source, track, and area emit sites.
+    /// Both label and destination are escaped to prevent Markdown injection
+    /// (see [`escape_link_label`] and [`escape_link_destination`]).
     ///
     /// # Arguments
     ///
     /// * `label_candidates` - Ordered slice of optional label strings; the
-    ///   first non-empty trimmed value is used.
+    ///   first non-empty trimmed value is used. This allows callers to
+    ///   express a priority chain (e.g., `alt` text before `title` text
+    ///   before a URL-derived fallback).
     /// * `fallback_label` - Fallback label when all candidates are empty.
     /// * `safe_url` - Already-sanitized URL from `SecurityValidator`.
     /// * `output` - The output buffer to append to.
@@ -436,6 +440,11 @@ impl MarkdownConverter {
 
     /// Extract `src` and `poster` URLs from `<video>` / `<audio>` elements
     /// as Markdown links so AI agents know what media was referenced.
+    ///
+    /// For `<video>` elements, both the `src` URL (as a `[title](url)` link)
+    /// and the `poster` thumbnail URL (as a `![](url)` image) are emitted.
+    /// For `<audio>` elements, only the `src` URL is emitted. All URLs pass
+    /// through `SecurityValidator::sanitize_url` before emission.
     fn extract_media_urls(&self, node: &Handle, tag_name: &str, output: &mut String) {
         if let NodeData::Element { ref attrs, .. } = node.data {
             let attrs_borrowed = attrs.borrow();

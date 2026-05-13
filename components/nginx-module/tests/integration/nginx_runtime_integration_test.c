@@ -1,12 +1,22 @@
 /*
  * Test: integration
  * Description: integration testing
+ *
+ * Validates the end-to-end request processing pipeline: Accept header
+ * content negotiation, eligibility checking, HTML-to-Markdown conversion,
+ * HEAD request handling, and Range request bypass.
+ *
+ * This test reimplements the core decision chain using standard C to
+ * verify the integration contract without requiring a running NGINX instance.
  */
 
 #include "test_common.h"
 #include <ctype.h>
 #include <strings.h>
 
+/*
+ * Simulated HTTP request/response pair for integration testing.
+ */
 typedef struct {
     const char *method;
     const char *accept;
@@ -16,6 +26,9 @@ typedef struct {
     int has_range;
 } request_response_t;
 
+/*
+ * Simulated output after processing through the conversion pipeline.
+ */
 typedef struct {
     int status;
     const char *content_type;
@@ -23,12 +36,31 @@ typedef struct {
     int converted;
 } output_t;
 
+/*
+ * Check if the Accept header contains text/markdown.
+ *
+ * Parameters:
+ *   accept - the Accept header value
+ *
+ * Returns:
+ *   1 if text/markdown is present, 0 otherwise.
+ */
 static int
 contains_markdown_accept(const char *accept)
 {
     return accept != NULL && strstr(accept, "text/markdown") != NULL;
 }
 
+/*
+ * Check if a request is eligible for Markdown conversion.
+ * Requires: GET/HEAD method, 200 status, no range, text/html content-type.
+ *
+ * Parameters:
+ *   rr - request/response pair to check
+ *
+ * Returns:
+ *   1 if eligible, 0 otherwise.
+ */
 static int
 eligible_for_conversion(const request_response_t *rr)
 {
@@ -39,6 +71,14 @@ eligible_for_conversion(const request_response_t *rr)
     return 1;
 }
 
+/*
+ * Simulate HTML-to-Markdown conversion (stub that adds a header).
+ *
+ * Parameters:
+ *   html     - input HTML string
+ *   out      - output buffer for converted markdown
+ *   out_len  - capacity of the output buffer
+ */
 static void
 convert_html_to_markdown(const char *html, char *out, size_t out_len)
 {
@@ -49,6 +89,16 @@ convert_html_to_markdown(const char *html, char *out, size_t out_len)
     snprintf(out, out_len, "# Converted\n\n%s", html);
 }
 
+/*
+ * Process a request through the conversion pipeline.
+ * Checks Accept header, eligibility, and applies conversion if appropriate.
+ *
+ * Parameters:
+ *   rr - request/response pair to process
+ *
+ * Returns:
+ *   output_t with the final response state.
+ */
 static output_t
 process_request(const request_response_t *rr)
 {
@@ -78,6 +128,12 @@ process_request(const request_response_t *rr)
     return out;
 }
 
+/*
+ * Create a baseline eligible request/response pair.
+ *
+ * Returns:
+ *   A request_response_t that qualifies for Markdown conversion.
+ */
 static request_response_t
 base_case(void)
 {
@@ -91,6 +147,12 @@ base_case(void)
     return rr;
 }
 
+/*
+ * Verify basic conversion flow: Accept: text/markdown triggers conversion,
+ * Content-Type becomes markdown, body is converted.
+ *
+ * Expected: converted=1, markdown content-type, body contains "Converted".
+ */
 static void
 test_basic_conversion_flow(void)
 {
@@ -105,6 +167,12 @@ test_basic_conversion_flow(void)
     TEST_PASS("Basic conversion flow works");
 }
 
+/*
+ * Verify passthrough when Accept is not text/markdown: no conversion,
+ * original Content-Type and body preserved.
+ *
+ * Expected: converted=0, original content-type, original body.
+ */
 static void
 test_passthrough_when_not_markdown_accept(void)
 {
@@ -120,6 +188,12 @@ test_passthrough_when_not_markdown_accept(void)
     TEST_PASS("Accept-based passthrough works");
 }
 
+/*
+ * Verify HEAD request handling: conversion pipeline runs (to update
+ * headers) but response body is empty.
+ *
+ * Expected: converted=1, markdown content-type, empty body.
+ */
 static void
 test_head_request_no_body(void)
 {
@@ -135,6 +209,12 @@ test_head_request_no_body(void)
     TEST_PASS("HEAD semantics work");
 }
 
+/*
+ * Verify Range request bypass: 206 status with range header bypasses
+ * conversion entirely.
+ *
+ * Expected: converted=0, status remains 206.
+ */
 static void
 test_range_bypass(void)
 {

@@ -1,11 +1,18 @@
 /*
  * Test: decompression_detect
  * Description: compression type detection
+ *
+ * Validates Content-Encoding header parsing: recognizes gzip, deflate,
+ * and brotli (case-insensitive), returns NONE for NULL/empty, and
+ * UNKNOWN for unrecognized encodings.
  */
 
 #include "test_common.h"
 #include <ctype.h>
 
+/*
+ * Compression type enumeration matching the module's internal types.
+ */
 typedef enum {
     COMPRESSION_NONE = 0,
     COMPRESSION_GZIP,
@@ -14,6 +21,16 @@ typedef enum {
     COMPRESSION_UNKNOWN
 } compression_type_t;
 
+/*
+ * Case-insensitive string equality check (ASCII only).
+ *
+ * Parameters:
+ *   a - first string
+ *   b - second string
+ *
+ * Returns:
+ *   1 if equal ignoring case, 0 otherwise or if either is NULL.
+ */
 static int
 str_case_eq(const char *a, const char *b)
 {
@@ -32,6 +49,16 @@ str_case_eq(const char *a, const char *b)
     return *a == '\0' && *b == '\0';
 }
 
+/*
+ * Detect compression type from a Content-Encoding header value.
+ *
+ * Parameters:
+ *   content_encoding - the Content-Encoding header value
+ *
+ * Returns:
+ *   COMPRESSION_GZIP, COMPRESSION_DEFLATE, COMPRESSION_BROTLI for known
+ *   encodings; COMPRESSION_NONE for NULL/empty; COMPRESSION_UNKNOWN otherwise.
+ */
 static compression_type_t
 detect_compression(const char *content_encoding)
 {
@@ -51,6 +78,12 @@ detect_compression(const char *content_encoding)
     return COMPRESSION_UNKNOWN;
 }
 
+/*
+ * Verify detection of known compression formats (gzip, deflate, brotli)
+ * with case-insensitive matching.
+ *
+ * Expected: all case variants map to the correct compression type.
+ */
 static void
 test_known_formats(void)
 {
@@ -69,6 +102,12 @@ test_known_formats(void)
     TEST_PASS("Known formats detection works");
 }
 
+/*
+ * Verify NONE detection for NULL/empty and UNKNOWN detection for
+ * unrecognized encodings (compress, identity, combined values, whitespace).
+ *
+ * Expected: NULL/empty return NONE; unrecognized return UNKNOWN.
+ */
 static void
 test_none_and_unknown_formats(void)
 {

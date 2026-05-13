@@ -1,6 +1,11 @@
 /*
  * Test: brotli_function
  * Description: brotli decompression function
+ *
+ * Validates the brotli decompression helper's contract: input
+ * validation, fallback behavior when brotli is not compiled in
+ * (returns NGX_DECLINED), and correct error reporting for invalid
+ * streams when brotli is available.
  */
 
 #include "test_common.h"
@@ -13,6 +18,19 @@
 #include <brotli/decode.h>
 #endif
 
+/*
+ * Decompress a brotli-compressed buffer.
+ *
+ * Parameters:
+ *   in     - compressed input data
+ *   in_len - length of input in bytes
+ *   out    - output buffer for decompressed data
+ *   out_len - [in] capacity of output buffer, [out] actual decompressed size
+ *
+ * Returns:
+ *   NGX_OK on success, NGX_ERROR on invalid input or decompression failure,
+ *   NGX_DECLINED when brotli support is not compiled in.
+ */
 static int
 decompress_brotli(const unsigned char *in, size_t in_len,
                   unsigned char *out, size_t *out_len)
@@ -35,6 +53,13 @@ decompress_brotli(const unsigned char *in, size_t in_len,
 #endif
 }
 
+/*
+ * Verify the function's return code contract: with brotli compiled in,
+ * invalid input returns NGX_ERROR; without brotli, returns NGX_DECLINED.
+ * Also validates all NULL/zero input guard clauses.
+ *
+ * Expected: correct return codes for each branch.
+ */
 static void
 test_function_contract(void)
 {
@@ -57,6 +82,12 @@ test_function_contract(void)
     TEST_PASS("Function contract is correct");
 }
 
+/*
+ * Verify input validation: NULL input, zero-length input, NULL output
+ * buffer, and zero output capacity must all return NGX_ERROR.
+ *
+ * Expected: all four guard clauses return NGX_ERROR.
+ */
 static void
 test_input_validation(void)
 {

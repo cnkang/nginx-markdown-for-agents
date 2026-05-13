@@ -1,4 +1,26 @@
 #!/usr/bin/env bash
+# verify_proxy_tls_backend_e2e.sh — E2E validation for proxy and TLS backend behaviour.
+#
+# Builds a local NGINX from source with the markdown module (or reuses
+# an existing binary), starts a TLS backend server, and validates:
+#   1. Markdown conversion through a proxy_pass location
+#   2. HTTPS upstream proxying with Accept negotiation
+#   3. Proxy response header forwarding (Vary, Content-Type)
+#   4. Backend connection failure handling
+#
+# Usage:
+#   tools/e2e/verify_proxy_tls_backend_e2e.sh [--keep-artifacts] [--port PORT]
+#                                              [--nginx-bin-output FILE] [--buildroot-output FILE]
+#
+# Environment variables:
+#   NGINX_VERSION   NGINX version to build (default: 1.28.2)
+#   PORT            Listen port (default: 18089)
+#   BACKEND_PORT    Backend server port (default: 19089)
+#   NGINX_BIN       Optional reusable module-enabled nginx binary
+#
+# Exit behaviour:
+#   0 if all proxy/TLS validation checks pass.
+#   1 if any check fails or prerequisites are missing.
 set -euo pipefail
 
 NGINX_VERSION="${NGINX_VERSION:-1.28.2}"

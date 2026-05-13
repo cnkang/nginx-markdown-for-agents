@@ -1,17 +1,10 @@
 /*
  * Test: streaming_impl
+ * Description: streaming implementation
  *
- * Unit tests for the NGINX markdown filter module's streaming implementation
- * helpers (ngx_http_markdown_streaming_impl.h).  Provides direct branch
- * coverage for path selection, header updates, output sending, backpressure,
- * commit/finalize lifecycle, fail-open passthrough, and cleanup paths.
- *
- * When MARKDOWN_STREAMING_ENABLED is not defined, the test binary compiles
- * to a skip stub that reports the missing feature and exits successfully.
- *
- * Otherwise, the file reimplements a minimal subset of NGINX runtime types
- * and API stubs so the streaming implementation header can be included and
- * exercised without linking against the full NGINX core library.
+ * Validates the streaming conversion pipeline: chunk feeding, output
+ * accumulation, budget enforcement, error handling, and finalization
+ * semantics for the streaming engine path.
  */
 
 #include "../include/test_common.h"

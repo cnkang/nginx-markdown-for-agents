@@ -134,7 +134,7 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
     })
 }
 
-/// Create a skipped scenario report.
+/// Create a skipped scenario report with a reason message.
 fn skipped_report(start: std::time::Instant, reason: &str) -> ScenarioReport {
     ScenarioReport {
         name: "status-codes".to_string(),
@@ -145,7 +145,7 @@ fn skipped_report(start: std::time::Instant, reason: &str) -> ScenarioReport {
     }
 }
 
-/// Create a failed assertion result for a request error.
+/// Create a failed assertion result for an HTTP request error.
 fn failed_assertion(name: &str, reason: &str) -> AssertionResult {
     AssertionResult {
         name: name.to_string(),

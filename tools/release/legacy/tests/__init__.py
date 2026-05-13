@@ -1,1 +1,1 @@
-# tools/release/legacy/tests
+"""Tests for legacy release gate tools."""

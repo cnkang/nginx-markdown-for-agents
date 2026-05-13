@@ -1,6 +1,11 @@
 /*
  * Test: failure_strategies
  * Description: failure strategy handling
+ *
+ * Validates the on_error directive's two strategies: PASS (fail-open,
+ * returns upstream response unchanged) and REJECT (fail-closed, returns
+ * 502 Bad Gateway).  Verifies the correct status code and strategy
+ * flag are set for each mode.
  */
 
 #include "test_common.h"
@@ -14,6 +19,16 @@ typedef struct {
     int used_fail_closed;
 } failure_result_t;
 
+/*
+ * Simulate handling a conversion failure based on the on_error strategy.
+ *
+ * Parameters:
+ *   on_error       - ON_ERROR_PASS (fail-open) or ON_ERROR_REJECT (fail-closed)
+ *   upstream_status - the original upstream response status
+ *
+ * Returns:
+ *   failure_result_t with status, used_fail_open, and used_fail_closed flags.
+ */
 static failure_result_t
 handle_conversion_failure(int on_error, int upstream_status)
 {
@@ -33,6 +48,12 @@ handle_conversion_failure(int on_error, int upstream_status)
     return out;
 }
 
+/*
+ * Verify fail-open strategy: returns original upstream status, sets
+ * fail_open flag, clears fail_closed flag.
+ *
+ * Expected: status preserved, used_fail_open=1, used_fail_closed=0.
+ */
 static void
 test_fail_open_strategy(void)
 {
@@ -45,6 +66,12 @@ test_fail_open_strategy(void)
     TEST_PASS("Fail-open behavior is correct");
 }
 
+/*
+ * Verify fail-closed strategy: returns 502 Bad Gateway, sets
+ * fail_closed flag, clears fail_open flag.
+ *
+ * Expected: status=502, used_fail_closed=1, used_fail_open=0.
+ */
 static void
 test_fail_closed_strategy(void)
 {
@@ -57,6 +84,11 @@ test_fail_closed_strategy(void)
     TEST_PASS("Fail-closed behavior is correct");
 }
 
+/*
+ * Verify unknown on_error mode defaults to fail-open behavior.
+ *
+ * Expected: upstream status preserved, used_fail_open=1.
+ */
 static void
 test_unknown_mode_defaults_to_fail_open(void)
 {
