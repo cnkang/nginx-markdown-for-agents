@@ -48,8 +48,6 @@ pub(crate) fn escape_markdown_destination(url: &str) -> std::borrow::Cow<'_, str
     std::borrow::Cow::Owned(out)
 }
 
-/// Block-level tags whose closing triggers a flush point.
-///
 /// Selected block-level tags whose closing triggers a flush point.
 ///
 /// When the emitter encounters the closing of one of these elements,
