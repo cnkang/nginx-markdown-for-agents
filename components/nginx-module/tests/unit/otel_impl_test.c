@@ -161,6 +161,14 @@ ngx_palloc(ngx_pool_t *pool, size_t size)
 static void
 ngx_pfree(ngx_pool_t *pool, void *p)
 {
+    /*
+     * Test stub for ngx_pfree.
+     *
+     * In nginx production builds, ngx_pfree releases pool-managed memory.
+     * This unit harness mocks that behavior for heap allocations created
+     * by test stubs: `pool` is intentionally unused and `p` is freed via
+     * free(p). This helper returns no value and may release heap memory.
+     */
     UNUSED(pool);
     free(p);
 }

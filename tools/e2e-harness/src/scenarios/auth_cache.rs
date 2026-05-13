@@ -44,19 +44,31 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
     nonmatching_cookie_headers.insert("Accept".to_string(), "text/markdown".to_string());
     nonmatching_cookie_headers.insert("Cookie".to_string(), "preferences=dark".to_string());
 
-    // Case 1: Auth request with Cookie gets Cache-Control: private
-    if let Some(resp1) = common::try_get_with_headers(
-        &md_url,
-        &auth_headers,
-        &mut assertions,
-        "case1_cache_control_private",
-    ) {
+    case1_auth_private(&md_url, &auth_headers, &mut assertions);
+    case2_noauth_public(&md_url, &markdown_headers, &mut assertions);
+    case3_deny_policy(&md_deny_url, &auth_headers, &mut assertions);
+    case4_nonmatching_cookie(&md_url, &nonmatching_cookie_headers, &mut assertions);
+    case5_auth_fail_open_cache_control(&md_url, &auth_headers, &mut assertions);
+    case6_nonauth_etag_replacement(&md_url, &markdown_headers, &mut assertions);
+    case7_vary_cookie(&md_url, &auth_headers, &mut assertions);
+
+    Ok(common::finalize_report(SCENARIO, start, assertions))
+}
+
+fn case1_auth_private(
+    url: &str,
+    headers: &HashMap<String, String>,
+    assertions: &mut Vec<AssertionResult>,
+) {
+    if let Some(resp) =
+        common::try_get_with_headers(url, headers, assertions, "case1_cache_control_private")
+    {
         assertions.push(assertions::assert_status(
             "case1_auth_status_200",
-            resp1.status,
+            resp.status,
             200,
         ));
-        let cc_value = common::header_value(&resp1.headers, "Cache-Control");
+        let cc_value = common::header_value(&resp.headers, "Cache-Control");
         let has_private = cc_value.contains("private");
         assertions.push(AssertionResult {
             name: "case1_cache_control_private".to_string(),
@@ -66,20 +78,22 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
             message: None,
         });
     }
+}
 
-    // Case 2: Non-auth request retains Cache-Control: public
-    if let Some(resp2) = common::try_get_with_headers(
-        &md_url,
-        &markdown_headers,
-        &mut assertions,
-        "case2_cache_control_public",
-    ) {
+fn case2_noauth_public(
+    url: &str,
+    headers: &HashMap<String, String>,
+    assertions: &mut Vec<AssertionResult>,
+) {
+    if let Some(resp) =
+        common::try_get_with_headers(url, headers, assertions, "case2_cache_control_public")
+    {
         assertions.push(assertions::assert_status(
             "case2_noauth_status_200",
-            resp2.status,
+            resp.status,
             200,
         ));
-        let cc_value = common::header_value(&resp2.headers, "Cache-Control");
+        let cc_value = common::header_value(&resp.headers, "Cache-Control");
         let has_public = cc_value.contains("public");
         assertions.push(AssertionResult {
             name: "case2_cache_control_public".to_string(),
@@ -89,55 +103,70 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
             message: None,
         });
     }
+}
 
-    // Case 3: auth_policy deny rejects conversion for auth requests
-    if let Some(resp3) = common::try_get_with_headers(
-        &md_deny_url,
-        &auth_headers,
-        &mut assertions,
+fn case3_deny_policy(
+    deny_url: &str,
+    auth_headers: &HashMap<String, String>,
+    assertions: &mut Vec<AssertionResult>,
+) {
+    if let Some(resp) = common::try_get_with_headers(
+        deny_url,
+        auth_headers,
+        assertions,
         "case3_deny_content_type_html",
     ) {
         assertions.push(assertions::assert_status(
             "case3_deny_status_200",
-            resp3.status,
+            resp.status,
             200,
         ));
         assertions.push(assertions::assert_header_pattern(
             "case3_deny_content_type_html",
             "Content-Type",
             "text/html",
-            &resp3.headers,
+            &resp.headers,
         ));
     }
+}
 
-    // Case 4: auth_cookies pattern matching — non-matching cookie
-    if let Some(resp4) = common::try_get_with_headers(
-        &md_url,
-        &nonmatching_cookie_headers,
-        &mut assertions,
+fn case4_nonmatching_cookie(
+    url: &str,
+    headers: &HashMap<String, String>,
+    assertions: &mut Vec<AssertionResult>,
+) {
+    if let Some(resp) = common::try_get_with_headers(
+        url,
+        headers,
+        assertions,
         "case4_nonmatch_cookie_markdown_ct",
     ) {
         assertions.push(assertions::assert_status(
             "case4_nonmatch_cookie_status_200",
-            resp4.status,
+            resp.status,
             200,
         ));
         assertions.push(assertions::assert_header_pattern(
             "case4_nonmatch_cookie_markdown_ct",
             "Content-Type",
             "text/markdown",
-            &resp4.headers,
+            &resp.headers,
         ));
     }
+}
 
-    // Case 5: Auth fail-open preserves upstream Cache-Control
-    if let Some(resp5) = common::try_get_with_headers(
-        &md_url,
-        &auth_headers,
-        &mut assertions,
+fn case5_auth_fail_open_cache_control(
+    url: &str,
+    auth_headers: &HashMap<String, String>,
+    assertions: &mut Vec<AssertionResult>,
+) {
+    if let Some(resp) = common::try_get_with_headers(
+        url,
+        auth_headers,
+        assertions,
         "case5_auth_preserves_cache_control",
     ) {
-        let auth_cc = common::header_value(&resp5.headers, "Cache-Control");
+        let auth_cc = common::header_value(&resp.headers, "Cache-Control");
         let has_cc = !auth_cc.is_empty();
         assertions.push(AssertionResult {
             name: "case5_auth_preserves_cache_control".to_string(),
@@ -151,15 +180,17 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
             message: None,
         });
     }
+}
 
-    // Case 6: Non-auth ETag replacement
-    if let Some(resp6) = common::try_get_with_headers(
-        &md_url,
-        &markdown_headers,
-        &mut assertions,
-        "case6_etag_differs_from_upstream",
-    ) {
-        let md_etag = common::header_value(&resp6.headers, "ETag");
+fn case6_nonauth_etag_replacement(
+    url: &str,
+    headers: &HashMap<String, String>,
+    assertions: &mut Vec<AssertionResult>,
+) {
+    if let Some(resp) =
+        common::try_get_with_headers(url, headers, assertions, "case6_etag_differs_from_upstream")
+    {
+        let md_etag = common::header_value(&resp.headers, "ETag");
         let etag_present = !md_etag.is_empty();
         assertions.push(AssertionResult {
             name: "case6_etag_present".to_string(),
@@ -181,12 +212,17 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
             message: None,
         });
     }
+}
 
-    // Case 7: Vary: Cookie in auth response
-    if let Some(resp7) =
-        common::try_get_with_headers(&md_url, &auth_headers, &mut assertions, "case7_vary_cookie")
+fn case7_vary_cookie(
+    url: &str,
+    auth_headers: &HashMap<String, String>,
+    assertions: &mut Vec<AssertionResult>,
+) {
+    if let Some(resp) =
+        common::try_get_with_headers(url, auth_headers, assertions, "case7_vary_cookie")
     {
-        let vary_value = common::header_value(&resp7.headers, "Vary");
+        let vary_value = common::header_value(&resp.headers, "Vary");
         let has_vary_cookie = vary_value.contains("Cookie");
         assertions.push(AssertionResult {
             name: "case7_vary_cookie".to_string(),
@@ -200,6 +236,4 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
             message: None,
         });
     }
-
-    Ok(common::finalize_report(SCENARIO, start, assertions))
 }

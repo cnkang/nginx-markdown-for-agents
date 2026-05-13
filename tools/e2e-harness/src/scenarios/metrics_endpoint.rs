@@ -12,7 +12,7 @@
 //! 8. Invalid Accept header returns plain-text fallback
 
 use crate::assertions;
-use crate::http;
+use crate::http::{self, HttpResponse};
 use crate::scenarios::common;
 use crate::scenarios::{AssertionResult, ScenarioContext, ScenarioReport};
 use anyhow::Result;
@@ -44,30 +44,110 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
     let mut invalid_accept_headers = HashMap::new();
     invalid_accept_headers.insert("Accept".to_string(), "application/xml".to_string());
 
-    // Case 1: JSON format via Accept: application/json
-    let resp1 = match http::get_with_headers(&metrics_url, &json_headers) {
-        Ok(r) => r,
-        Err(e) => {
-            return Ok(ScenarioReport::failing(
-                SCENARIO,
-                assertions,
-                start.elapsed().as_millis() as u64,
-                format!("Case 1: failed to connect to metrics endpoint: {e}"),
-            ));
-        }
+    let resp1 = match required_get_with_headers(
+        &metrics_url,
+        &json_headers,
+        SCENARIO,
+        "Case 1: failed to connect to metrics endpoint",
+        start,
+        &assertions,
+    ) {
+        Ok(resp) => resp,
+        Err(report) => return Ok(report),
     };
+    assert_case1_json(&resp1, &mut assertions);
+
+    let resp2 = match required_get(
+        &metrics_url,
+        SCENARIO,
+        "Case 2: failed to connect to metrics endpoint",
+        start,
+        &assertions,
+    ) {
+        Ok(resp) => resp,
+        Err(report) => return Ok(report),
+    };
+    assert_case2_plaintext(&resp2, &mut assertions);
+
+    let resp3 = match required_get_with_headers(
+        &metrics_url,
+        &prometheus_headers,
+        SCENARIO,
+        "Case 3: failed to connect to metrics endpoint",
+        start,
+        &assertions,
+    ) {
+        Ok(resp) => resp,
+        Err(report) => return Ok(report),
+    };
+    let (has_prometheus_help, has_prometheus_type) =
+        assert_case3_prometheus(&resp3, &mut assertions);
+
+    assert_case4_nonempty(&resp1, &resp2, &resp3, &mut assertions);
+    assert_case5_json_keys(&resp1, &mut assertions);
+    assert_case6_prometheus_prefix(has_prometheus_help, has_prometheus_type, &mut assertions);
+    assert_case7_counters(
+        &app_url,
+        &metrics_url,
+        &markdown_headers,
+        &json_headers,
+        &mut assertions,
+    );
+    assert_case8_invalid_accept(&metrics_url, &invalid_accept_headers, &mut assertions);
+
+    Ok(common::finalize_report(SCENARIO, start, assertions))
+}
+
+fn required_get_with_headers(
+    url: &str,
+    headers: &HashMap<String, String>,
+    scenario: &str,
+    error_prefix: &str,
+    start: std::time::Instant,
+    assertions: &[AssertionResult],
+) -> std::result::Result<HttpResponse, ScenarioReport> {
+    match http::get_with_headers(url, headers) {
+        Ok(resp) => Ok(resp),
+        Err(e) => Err(ScenarioReport::failing(
+            scenario,
+            assertions.to_vec(),
+            start.elapsed().as_millis() as u64,
+            format!("{error_prefix}: {e}"),
+        )),
+    }
+}
+
+fn required_get(
+    url: &str,
+    scenario: &str,
+    error_prefix: &str,
+    start: std::time::Instant,
+    assertions: &[AssertionResult],
+) -> std::result::Result<HttpResponse, ScenarioReport> {
+    match http::get(url) {
+        Ok(resp) => Ok(resp),
+        Err(e) => Err(ScenarioReport::failing(
+            scenario,
+            assertions.to_vec(),
+            start.elapsed().as_millis() as u64,
+            format!("{error_prefix}: {e}"),
+        )),
+    }
+}
+
+fn assert_case1_json(resp: &HttpResponse, assertions: &mut Vec<AssertionResult>) {
     assertions.push(assertions::assert_status(
         "case1_json_status_200",
-        resp1.status,
+        resp.status,
         200,
     ));
     assertions.push(assertions::assert_header_pattern(
         "case1_json_content_type",
         "Content-Type",
         "application/json",
-        &resp1.headers,
+        &resp.headers,
     ));
-    let json_valid = serde_json::from_str::<serde_json::Value>(&resp1.body).is_ok();
+    let json_valid = serde_json::from_str::<serde_json::Value>(&resp.body).is_ok();
     assertions.push(AssertionResult {
         name: "case1_json_valid".to_string(),
         passed: json_valid,
@@ -83,40 +163,30 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
             Some("[FAIL] assertion=case1_json_valid metrics body is not valid JSON".to_string())
         },
     });
+}
 
-    // Case 2: Plain-text format (default, no Accept override)
-    let resp2 = match http::get(&metrics_url) {
-        Ok(r) => r,
-        Err(e) => {
-            return Ok(ScenarioReport::failing(
-                SCENARIO,
-                assertions,
-                start.elapsed().as_millis() as u64,
-                format!("Case 2: failed to connect to metrics endpoint: {e}"),
-            ));
-        }
-    };
+fn assert_case2_plaintext(resp: &HttpResponse, assertions: &mut Vec<AssertionResult>) {
     assertions.push(assertions::assert_status(
         "case2_plaintext_status_200",
-        resp2.status,
+        resp.status,
         200,
     ));
     assertions.push(assertions::assert_header_pattern(
         "case2_plaintext_content_type",
         "Content-Type",
         "text/plain",
-        &resp2.headers,
+        &resp.headers,
     ));
     assertions.push(AssertionResult {
         name: "case2_plaintext_nonempty_body".to_string(),
-        passed: !resp2.body.is_empty(),
+        passed: !resp.body.is_empty(),
         expected: "non-empty body".to_string(),
-        actual: if resp2.body.is_empty() {
+        actual: if resp.body.is_empty() {
             "empty body".to_string()
         } else {
             "non-empty body".to_string()
         },
-        message: if resp2.body.is_empty() {
+        message: if resp.body.is_empty() {
             Some(
                 "[FAIL] assertion=case2_plaintext_nonempty_body response body is empty".to_string(),
             )
@@ -124,26 +194,19 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
             None
         },
     });
+}
 
-    // Case 3: Prometheus exposition format
-    let resp3 = match http::get_with_headers(&metrics_url, &prometheus_headers) {
-        Ok(r) => r,
-        Err(e) => {
-            return Ok(ScenarioReport::failing(
-                SCENARIO,
-                assertions,
-                start.elapsed().as_millis() as u64,
-                format!("Case 3: failed to connect to metrics endpoint: {e}"),
-            ));
-        }
-    };
+fn assert_case3_prometheus(
+    resp: &HttpResponse,
+    assertions: &mut Vec<AssertionResult>,
+) -> (bool, bool) {
     assertions.push(assertions::assert_status(
         "case3_prometheus_status_200",
-        resp3.status,
+        resp.status,
         200,
     ));
-    let has_prometheus_help = resp3.body.contains("# HELP nginx_markdown");
-    let has_prometheus_type = resp3.body.contains("# TYPE nginx_markdown");
+    let has_prometheus_help = resp.body.contains("# HELP nginx_markdown");
+    let has_prometheus_type = resp.body.contains("# TYPE nginx_markdown");
     assertions.push(AssertionResult {
         name: "case3_prometheus_help_prefix".to_string(),
         passed: has_prometheus_help,
@@ -166,8 +229,15 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
         },
         message: None,
     });
+    (has_prometheus_help, has_prometheus_type)
+}
 
-    // Case 4: Non-empty metrics body for all formats
+fn assert_case4_nonempty(
+    resp1: &HttpResponse,
+    resp2: &HttpResponse,
+    resp3: &HttpResponse,
+    assertions: &mut Vec<AssertionResult>,
+) {
     assertions.push(AssertionResult {
         name: "case4_json_nonempty".to_string(),
         passed: !resp1.body.is_empty(),
@@ -201,9 +271,10 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
         },
         message: None,
     });
+}
 
-    // Case 5: JSON metrics contain required top-level keys
-    if let Ok(data) = serde_json::from_str::<serde_json::Value>(&resp1.body) {
+fn assert_case5_json_keys(resp: &HttpResponse, assertions: &mut Vec<AssertionResult>) {
+    if let Ok(data) = serde_json::from_str::<serde_json::Value>(&resp.body) {
         let required_keys = ["total_requests", "converted_total", "skipped_total"];
         for key in &required_keys {
             let has_key = data.get(key).is_some();
@@ -225,8 +296,13 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
             "JSON parse failed",
         ));
     }
+}
 
-    // Case 6: Prometheus metrics contain expected metric family prefixes
+fn assert_case6_prometheus_prefix(
+    has_prometheus_help: bool,
+    has_prometheus_type: bool,
+    assertions: &mut Vec<AssertionResult>,
+) {
     assertions.push(AssertionResult {
         name: "case6_prometheus_help_lines".to_string(),
         passed: has_prometheus_help,
@@ -249,18 +325,25 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
         },
         message: None,
     });
+}
 
-    // Case 7: After a conversion, request counters are non-zero
+fn assert_case7_counters(
+    app_url: &str,
+    metrics_url: &str,
+    markdown_headers: &HashMap<String, String>,
+    json_headers: &HashMap<String, String>,
+    assertions: &mut Vec<AssertionResult>,
+) {
     if let Some(_conv_resp) = common::try_get_with_headers(
-        &app_url,
-        &markdown_headers,
-        &mut assertions,
+        app_url,
+        markdown_headers,
+        assertions,
         "case7_conversion_request",
     ) {
         if let Some(resp7) = common::try_get_with_headers(
-            &metrics_url,
-            &json_headers,
-            &mut assertions,
+            metrics_url,
+            json_headers,
+            assertions,
             "case7_metrics_fetch",
         ) {
             if let Ok(data7) = serde_json::from_str::<serde_json::Value>(&resp7.body) {
@@ -294,12 +377,17 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
             }
         }
     }
+}
 
-    // Case 8: Invalid Accept header returns plain-text fallback
+fn assert_case8_invalid_accept(
+    metrics_url: &str,
+    invalid_accept_headers: &HashMap<String, String>,
+    assertions: &mut Vec<AssertionResult>,
+) {
     if let Some(resp8) = common::try_get_with_headers(
-        &metrics_url,
-        &invalid_accept_headers,
-        &mut assertions,
+        metrics_url,
+        invalid_accept_headers,
+        assertions,
         "case8_invalid_accept",
     ) {
         assertions.push(assertions::assert_status(
@@ -314,6 +402,4 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
             &resp8.headers,
         ));
     }
-
-    Ok(common::finalize_report(SCENARIO, start, assertions))
 }

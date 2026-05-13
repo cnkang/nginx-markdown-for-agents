@@ -430,42 +430,59 @@ def _check_e2e_harness_contract() -> CheckResult:
     )
 
 
-def _check_e2e_migration_policy() -> CheckResult:
-    """Validate Rust-first E2E migration policy for Python and shell paths."""
+def _wrapper_invokes_expected_scenario(text: str, scenario_name: str) -> bool:
+    """Return True when a migrated shell wrapper calls the expected scenario."""
+    literal_call_pattern = rf"\bscenario\s+{re.escape(scenario_name)}\b"
+    scenario_decl_pattern = rf"SCENARIO_NAME=\"{re.escape(scenario_name)}\""
+    has_literal_call = re.search(literal_call_pattern, text) is not None
+    has_variable_call = (
+        "args=(scenario \"${SCENARIO_NAME}\")" in text
+        and re.search(scenario_decl_pattern, text) is not None
+    )
+    return has_literal_call or has_variable_call
+
+
+def _wrapper_contains_stale_runtime_logic(text: str) -> bool:
+    """Return True when wrapper text still contains migrated assertion/runtime logic."""
+    forbidden_tokens = (
+        "markdown_build_with_nginx",
+        "markdown_prepare_runtime_reuse",
+        "curl -sS",
+        "curl -fsS",
+        "curl -X",
+    )
+    return any(token in text for token in forbidden_tokens)
+
+
+def _collect_migrated_wrapper_findings() -> tuple[list[str], list[str]]:
+    """Collect missing wrappers and stale wrapper logic violations."""
     missing_wrappers: list[str] = []
     stale_shell_logic: list[str] = []
-    removed_python_present: list[str] = []
-    stale_execution_refs: list[str] = []
-
     for rel_path, scenario_name in MIGRATED_SCENARIO_WRAPPERS.items():
         script_path = REPO_ROOT / rel_path
         if not script_path.exists():
             missing_wrappers.append(rel_path)
             continue
         text = script_path.read_text(encoding="utf-8")
-        literal_call_pattern = rf"\bscenario\s+{re.escape(scenario_name)}\b"
-        scenario_decl_pattern = rf"SCENARIO_NAME=\"{re.escape(scenario_name)}\""
-        has_literal_call = re.search(literal_call_pattern, text) is not None
-        has_variable_call = (
-            "args=(scenario \"${SCENARIO_NAME}\")" in text
-            and re.search(scenario_decl_pattern, text) is not None
-        )
-        if not has_literal_call and not has_variable_call:
+        if not _wrapper_invokes_expected_scenario(text, scenario_name):
             stale_shell_logic.append(f"{rel_path}:missing scenario wrapper call")
-        forbidden_tokens = (
-            "markdown_build_with_nginx",
-            "markdown_prepare_runtime_reuse",
-            "curl -sS",
-            "curl -fsS",
-            "curl -X",
-        )
-        if any(token in text for token in forbidden_tokens):
+        if _wrapper_contains_stale_runtime_logic(text):
             stale_shell_logic.append(f"{rel_path}:contains scenario assertion/runtime logic")
+    return missing_wrappers, stale_shell_logic
 
-    for filename in REMOVED_PYTHON_E2E_FILES:
-        if (E2E_PYTHON_DIR / filename).exists():
-            removed_python_present.append(str(E2E_PYTHON_DIR / filename))
 
+def _collect_removed_python_e2e_paths() -> list[str]:
+    """Return removed Python E2E file paths that still exist on disk."""
+    return [
+        str(E2E_PYTHON_DIR / filename)
+        for filename in REMOVED_PYTHON_E2E_FILES
+        if (E2E_PYTHON_DIR / filename).exists()
+    ]
+
+
+def _collect_stale_execution_surface_refs() -> list[str]:
+    """Return execution-surface references that still mention removed E2E files."""
+    refs: list[str] = []
     execution_surfaces = (
         REPO_ROOT / "Makefile",
         REPO_ROOT / "tools" / "e2e" / "run_e2e_suite.sh",
@@ -474,9 +491,19 @@ def _check_e2e_migration_policy() -> CheckResult:
     )
     for surface in execution_surfaces:
         text = surface.read_text(encoding="utf-8")
-        for filename in REMOVED_PYTHON_E2E_FILES:
-            if filename in text:
-                stale_execution_refs.append(f"{_display_path(surface)}::{filename}")
+        refs.extend(
+            f"{_display_path(surface)}::{filename}"
+            for filename in REMOVED_PYTHON_E2E_FILES
+            if filename in text
+        )
+    return refs
+
+
+def _check_e2e_migration_policy() -> CheckResult:
+    """Validate Rust-first E2E migration policy for Python and shell paths."""
+    missing_wrappers, stale_shell_logic = _collect_migrated_wrapper_findings()
+    removed_python_present = _collect_removed_python_e2e_paths()
+    stale_execution_refs = _collect_stale_execution_surface_refs()
 
     if missing_wrappers or stale_shell_logic or removed_python_present or stale_execution_refs:
         details: list[str] = []
