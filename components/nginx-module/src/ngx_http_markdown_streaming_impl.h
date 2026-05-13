@@ -706,6 +706,8 @@ ngx_http_markdown_streaming_update_headers(
 {
     ngx_int_t  rc;
 
+    (void) conf;
+
     /* Set Content-Type: text/markdown; charset=utf-8 */
     r->headers_out.content_type.data =
         ngx_http_markdown_content_type;
@@ -904,6 +906,8 @@ ngx_http_markdown_streaming_handle_backpressure(
     ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx)
 {
+    (void) ctx;
+
     r->buffered |= NGX_HTTP_MARKDOWN_BUFFERED;
 
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP,

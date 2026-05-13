@@ -1,6 +1,5 @@
 /*
  * Test: markdown_filter_runtime
- * Description: markdown_filter runtime parsing and resolution behavior
  *
  * NOTE:
  * This file uses a lightweight behavioral model (not direct linkage against

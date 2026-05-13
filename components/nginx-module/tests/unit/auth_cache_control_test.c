@@ -1,6 +1,5 @@
 /*
  * Test: auth_cache_control
- * Description: authentication and cache control
  */
 
 #include "../include/test_common.h"

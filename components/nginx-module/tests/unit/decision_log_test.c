@@ -1,7 +1,5 @@
 /*
  * Test: decision_log
- * Description: decision log emission helper — failure classification
- *              and verbosity gating logic
  *
  * Validates: Requirements 3.1, 3.2, 3.3, 3.4, 3.5, 3.6
  *

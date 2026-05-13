@@ -1,6 +1,5 @@
 /*
  * Test: brotli_function
- * Description: brotli decompression function
  *
  * Validates the brotli decompression helper's contract: input
  * validation, fallback behavior when brotli is not compiled in

@@ -1,6 +1,5 @@
 /*
  * Test: streaming_prometheus_metric_family
- * Description: streaming Prometheus metric family
  *
  * Validates that streaming-specific metrics are rendered in the correct
  * Prometheus metric family with proper labels, avoiding double-counting

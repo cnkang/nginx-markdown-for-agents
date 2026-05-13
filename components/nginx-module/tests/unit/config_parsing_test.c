@@ -1,6 +1,5 @@
 /*
  * Test: config_parsing
- * Description: configuration parsing
  *
  * Validates directive value validation (on_error, flavor, auth_policy,
  * conditional_requests, stream_types, cookie patterns, metrics_format),

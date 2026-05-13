@@ -1,6 +1,5 @@
 /*
  * Test: metrics_collection
- * Description: metrics collection
  *
  * Validates metrics counter increments for conversions (attempted,
  * succeeded, failed, bypassed), failure category tracking (conversion,

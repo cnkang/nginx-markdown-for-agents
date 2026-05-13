@@ -1,6 +1,5 @@
 /*
  * Test: metrics_snapshot_new_fields
- * Description: snapshot collection of new Prometheus counter fields
  *
  * Validates that new metric fields (conversions_bypassed, failure
  * category counters, input/output bytes) are correctly copied from

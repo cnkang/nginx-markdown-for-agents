@@ -1,6 +1,5 @@
 /*
  * Test: otel_impl
- * Description: regression coverage for OTel JSON rendering path.
  *
  * Validates OpenTelemetry span JSON rendering: correct trace/span ID
  * formatting, attribute serialization, timestamp handling, and edge
@@ -122,7 +121,21 @@ static ngx_http_markdown_conf_t g_fake_conf;
 
 #define ngx_memcpy(dst, src, n) memcpy((dst), (src), (n))
 #define ngx_string(str) { sizeof(str) - 1, (u_char *) (str) }
-#define ngx_log_error(level, log, err, fmt, ...) ((void) (level), (void) (log), (void) (err))
+static void
+test_otel_log_ignore(const char *fmt, ...)
+{
+    UNUSED(fmt);
+}
+
+#define ngx_log_error(level, log, err, fmt, ...)                                     \
+    do {                                                                              \
+        UNUSED(level);                                                                \
+        UNUSED(log);                                                                  \
+        UNUSED(err);                                                                  \
+        if (0) {                                                                      \
+            test_otel_log_ignore((fmt), ##__VA_ARGS__);                              \
+        }                                                                             \
+    } while (0)
 #define ngx_random() rand()
 
 static ngx_time_t *
@@ -479,6 +492,41 @@ test_otel_span_start_disabled(void)
     TEST_PASS("disabled otel returns NULL");
 }
 
+static void
+test_otel_helper_functions(void)
+{
+    ngx_http_markdown_otel_span_t span;
+
+    TEST_SUBSECTION("OTel helper functions smoke");
+
+    memset(&span, 0, sizeof(span));
+
+    ngx_http_markdown_otel_set_str_attr(
+        &span,
+        (const u_char *) "key",
+        3,
+        (const u_char *) "value",
+        5);
+    ngx_http_markdown_otel_set_int_attr(
+        &span,
+        (const u_char *) "code",
+        4,
+        200);
+
+    ngx_current_msec = 1234;
+    g_fake_time.sec = 10;
+    g_fake_time.msec = 500;
+    ngx_http_markdown_otel_span_end(&span);
+
+    ngx_http_markdown_otel_span_export(NULL, NULL, NULL);
+
+    TEST_ASSERT(span.attr_count == 2, "helper attrs should be appended");
+    TEST_ASSERT(span.end_ms == 1234, "span_end should record current msec");
+    TEST_ASSERT(span.exported == 0, "span_end should clear exported flag");
+
+    TEST_PASS("OTel helper functions covered");
+}
+
 int
 main(void)
 {
@@ -489,6 +537,7 @@ main(void)
     test_otel_parse_traceparent_missing_flags_separator();
     test_otel_parse_traceparent_lowercase_flags();
     test_otel_span_start_disabled();
+    test_otel_helper_functions();
     printf("\nAll otel_impl tests passed!\n");
     return 0;
 }

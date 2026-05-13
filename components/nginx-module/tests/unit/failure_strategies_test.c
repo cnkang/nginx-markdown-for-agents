@@ -1,6 +1,5 @@
 /*
  * Test: failure_strategies
- * Description: failure strategy handling
  *
  * Validates the on_error directive's two strategies: PASS (fail-open,
  * returns upstream response unchanged) and REJECT (fail-closed, returns

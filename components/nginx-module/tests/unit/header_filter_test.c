@@ -1,6 +1,5 @@
 /*
  * Test: header_filter
- * Description: header filter functionality
  *
  * Validates NGINX header filter chain registration (markdown filter
  * inserts itself at the top and calls the next filter) and compression

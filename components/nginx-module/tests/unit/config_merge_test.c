@@ -1,6 +1,5 @@
 /*
  * Test: config_merge
- * Description: configuration merging
  *
  * Validates the NGINX-style configuration merge semantics: child
  * inherits from parent when unset, child override wins over parent,
