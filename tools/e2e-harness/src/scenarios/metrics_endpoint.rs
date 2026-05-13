@@ -98,6 +98,9 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
     Ok(common::finalize_report(SCENARIO, start, assertions))
 }
 
+/// Send required GET-with-headers request; on failure, return a failing scenario report.
+///
+/// Uses `url`, `headers`, `start`, and existing `assertions` to build contextual failure output.
 fn required_get_with_headers(
     url: &str,
     headers: &HashMap<String, String>,
@@ -117,6 +120,9 @@ fn required_get_with_headers(
     }
 }
 
+/// Send required GET request; on failure, return a failing scenario report.
+///
+/// Uses `url`, `start`, and existing `assertions` to build contextual failure output.
 fn required_get(
     url: &str,
     scenario: &str,
@@ -135,6 +141,9 @@ fn required_get(
     }
 }
 
+/// Case 1 assertions for JSON metrics response.
+///
+/// Appends status/content-type checks and JSON-validity assertion into `assertions`.
 fn assert_case1_json(resp: &HttpResponse, assertions: &mut Vec<AssertionResult>) {
     assertions.push(assertions::assert_status(
         "case1_json_status_200",
@@ -165,6 +174,9 @@ fn assert_case1_json(resp: &HttpResponse, assertions: &mut Vec<AssertionResult>)
     });
 }
 
+/// Case 2 assertions for default plain-text metrics response.
+///
+/// Appends status/content-type checks and non-empty body assertion into `assertions`.
 fn assert_case2_plaintext(resp: &HttpResponse, assertions: &mut Vec<AssertionResult>) {
     assertions.push(assertions::assert_status(
         "case2_plaintext_status_200",
@@ -196,6 +208,9 @@ fn assert_case2_plaintext(resp: &HttpResponse, assertions: &mut Vec<AssertionRes
     });
 }
 
+/// Case 3 assertions for Prometheus exposition response.
+///
+/// Appends status/prefix assertions and returns `(has_help, has_type)` flags.
 fn assert_case3_prometheus(
     resp: &HttpResponse,
     assertions: &mut Vec<AssertionResult>,
@@ -232,6 +247,9 @@ fn assert_case3_prometheus(
     (has_prometheus_help, has_prometheus_type)
 }
 
+/// Case 4 assertions that all previously fetched format bodies are non-empty.
+///
+/// Appends non-empty checks for JSON, plain-text, and Prometheus responses.
 fn assert_case4_nonempty(
     resp1: &HttpResponse,
     resp2: &HttpResponse,
@@ -273,6 +291,9 @@ fn assert_case4_nonempty(
     });
 }
 
+/// Case 5 assertions for required JSON top-level metric keys.
+///
+/// Appends key-presence assertions; adds parse-failure assertion when JSON decoding fails.
 fn assert_case5_json_keys(resp: &HttpResponse, assertions: &mut Vec<AssertionResult>) {
     if let Ok(data) = serde_json::from_str::<serde_json::Value>(&resp.body) {
         let required_keys = ["total_requests", "converted_total", "skipped_total"];
@@ -298,6 +319,9 @@ fn assert_case5_json_keys(resp: &HttpResponse, assertions: &mut Vec<AssertionRes
     }
 }
 
+/// Case 6 assertions for Prometheus HELP/TYPE metric-family prefixes.
+///
+/// Appends assertion results based on previously computed prefix flags.
 fn assert_case6_prometheus_prefix(
     has_prometheus_help: bool,
     has_prometheus_type: bool,
@@ -327,6 +351,9 @@ fn assert_case6_prometheus_prefix(
     });
 }
 
+/// Case 7 assertions after issuing a markdown conversion request.
+///
+/// Uses `app_url`/`metrics_url` and headers to append counter and parse/fetch failure assertions.
 fn assert_case7_counters(
     app_url: &str,
     metrics_url: &str,
@@ -379,6 +406,9 @@ fn assert_case7_counters(
     }
 }
 
+/// Case 8 assertions for invalid `Accept` fallback behavior.
+///
+/// Appends status and `text/plain` content-type checks into `assertions`.
 fn assert_case8_invalid_accept(
     metrics_url: &str,
     invalid_accept_headers: &HashMap<String, String>,
