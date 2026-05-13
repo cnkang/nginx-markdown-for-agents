@@ -1,14 +1,127 @@
 /*
- * Skip optional whitespace characters in the Accept header value.
+ * NGINX Markdown Filter Module - Accept Header Parser
  *
- * Advances *p past any space or tab characters, stopping at the
- * first non-whitespace byte or when *p reaches end.  Per RFC 9110,
- * optional whitespace (OWS) is allowed around media type separators.
+ * This file implements Accept header parsing with RFC 9110 tie-break rules.
+ * The parser handles media types with q-values and wildcards, applying
+ * proper precedence rules when multiple media types match.
  *
- * Parameters:
- *   p   - pointer to current parse position; advanced in-place
- *   end - pointer one past the last byte of the header value
+ * Tie-Break Rules (RFC 9110):
+ * 1. Exact match (text/markdown) > subtype wildcard (text slash star) > all wildcard (star slash star)
+ * 2. Higher q-value wins
+ * 3. Equal q-value: more specific media type wins
+ * 4. Equal specificity: preserve header order
+ *
+ * Examples:
+ *   "text/markdown, text/html" -> Convert (both q=1.0, exact match for markdown)
+ *   "text/html;q=0.9, text/markdown;q=0.8" -> No conversion (html has higher q)
+ *   "text slash star;q=0.9, text/markdown;q=0.8" -> No conversion (text slash star has higher q)
+ *   "text/markdown;q=0.9, text/html;q=0.9" -> Convert (equal q, markdown first)
+ *   "star slash star, text/markdown" -> Convert (both q=1.0, markdown more specific)
  */
+
+#include "ngx_http_markdown_filter_module.h"
+
+/* Media type specificity levels for tie-breaking */
+typedef enum {
+    NGX_HTTP_MARKDOWN_SPECIFICITY_EXACT = 3,      /* text/markdown */
+    NGX_HTTP_MARKDOWN_SPECIFICITY_SUBTYPE = 2,    /* text slash star */
+    NGX_HTTP_MARKDOWN_SPECIFICITY_ALL = 1         /* star slash star */
+} ngx_http_markdown_specificity_t;
+
+/* Parsed Accept header entry */
+typedef struct {
+    ngx_str_t                          type;        /* e.g., "text" */
+    ngx_str_t                          subtype;     /* e.g., "markdown" */
+    float                              q_value;     /* Quality value (0.0-1.0) */
+    ngx_http_markdown_specificity_t    specificity; /* Specificity level */
+    ngx_uint_t                         order;       /* Original order in header */
+} ngx_http_markdown_accept_entry_t;
+
+/* Static string constants for media type comparisons */
+static u_char  ngx_http_markdown_str_text[] = "text";
+static u_char  ngx_http_markdown_str_markdown[] = "markdown";
+static u_char  ngx_http_markdown_hdr_accept[] = "Accept";
+
+/* Forward declarations */
+static ngx_int_t ngx_http_markdown_parse_accept_entry(ngx_str_t *entry_str,
+    ngx_http_markdown_accept_entry_t *entry, ngx_uint_t order);
+static ngx_int_t ngx_http_markdown_parse_accept_segment(ngx_http_request_t *r,
+    u_char *start, const u_char *end, ngx_array_t *entries, ngx_uint_t *order);
+static void ngx_http_markdown_skip_accept_spaces(u_char **p,
+    const u_char *end);
+static void ngx_http_markdown_skip_accept_comma(u_char **p,
+    const u_char *end);
+static float ngx_http_markdown_parse_q_value(ngx_str_t *params);
+static float ngx_http_markdown_extract_q_param(u_char *start,
+    const u_char *end);
+static ngx_http_markdown_specificity_t ngx_http_markdown_get_specificity(
+    const ngx_str_t *type, const ngx_str_t *subtype);
+static int ngx_http_markdown_compare_entries(const void *a, const void *b);
+static ngx_int_t ngx_http_markdown_matches_markdown(
+    ngx_http_markdown_accept_entry_t *entry, ngx_flag_t on_wildcard);
+static ngx_int_t ngx_http_markdown_const_strncasecmp(const u_char *left,
+    const u_char *right, size_t len);
+static ngx_table_elt_t *ngx_http_markdown_get_accept_header(ngx_http_request_t *r);
+static ngx_table_elt_t *ngx_http_markdown_find_request_header(ngx_http_request_t *r,
+    const u_char *name, size_t name_len);
+
+/*
+ * Parse Accept header into structured entries
+ *
+ * Parses the Accept header value into an array of media type entries,
+ * each with type, subtype, q-value, and specificity information.
+ *
+ * @param r        The request structure
+ * @param accept   The Accept header value to parse
+ * @param entries  Output array of parsed entries (allocated by caller)
+ * @return         NGX_OK on success, NGX_ERROR on parse error
+ */
+ngx_int_t
+ngx_http_markdown_parse_accept(ngx_http_request_t *r, ngx_str_t *accept,
+    ngx_array_t *entries)
+{
+    u_char            *p;
+    u_char            *start;
+    const u_char      *end;
+    ngx_uint_t         order;
+    ngx_int_t          rc;
+    
+    if (accept == NULL || accept->len == 0) {
+        return NGX_ERROR;
+    }
+    
+    p = accept->data;
+    end = accept->data + accept->len;
+    order = 0;
+    
+    /*
+     * Parse comma-separated media types
+     * Example: "text/markdown, text/html;q=0.9, star/slash-star;q=0.8"
+     */
+    while (p < end) {
+        ngx_http_markdown_skip_accept_spaces(&p, end);
+        
+        if (p >= end) {
+            break;
+        }
+        
+        /* Find end of this entry (comma or end of string) */
+        start = p;
+        while (p < end && *p != ',') {
+            p++;
+        }
+        
+        rc = ngx_http_markdown_parse_accept_segment(r, start, p, entries, &order);
+        if (rc != NGX_OK) {
+            return NGX_ERROR;
+        }
+        
+        ngx_http_markdown_skip_accept_comma(&p, end);
+    }
+    
+    return NGX_OK;
+}
+
 static void
 ngx_http_markdown_skip_accept_spaces(u_char **p, const u_char *end)
 {
