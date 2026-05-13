@@ -64,6 +64,9 @@ SUPPORT_TIER = "full"
 DOC_MARKER_BEGIN = "<!-- BEGIN AUTO-GENERATED MATRIX -->"
 DOC_MARKER_END = "<!-- END AUTO-GENERATED MATRIX -->"
 REQUIRED_MATRIX_ENTRY_KEYS = ("nginx", "os_type", "arch")
+_CONTROL_CHARS_RE = re.compile(
+    r"[\x00-\x1f\x7f]|%(?:0[0-9a-fA-F]|1[0-9a-fA-F]|7[fF])"
+)
 
 
 @dataclass
@@ -260,6 +263,9 @@ def fetch_release_json(url: str | None = None) -> str:
 
 def _validate_https_url(url: str, *, allowed_hosts: set[str]) -> str:
     """Allow only https URLs targeting explicit hosts."""
+    if _CONTROL_CHARS_RE.search(url):
+        raise ValueError(f"URL contains control characters: {url!r}")
+
     parsed = urlparse(url)
     scheme = parsed.scheme.lower()
     host = (parsed.hostname or "").lower()
