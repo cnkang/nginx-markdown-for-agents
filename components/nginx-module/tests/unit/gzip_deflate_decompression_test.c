@@ -1,6 +1,10 @@
 /*
  * Test: gzip_deflate_decompression
  * Description: gzip and deflate decompression
+ *
+ * Validates zlib-based gzip and deflate decompression: round-trip
+ * correctness for both formats, corruption detection, output size
+ * limit enforcement, and empty input validation.
  */
 
 #include "test_common.h"
@@ -9,11 +13,27 @@
 #define NGX_OK 0
 #define NGX_ERROR -1
 
+/*
+ * Compression format enumeration.
+ */
 typedef enum {
     TYPE_GZIP = 1,
     TYPE_DEFLATE = 2
 } compression_kind_t;
 
+/*
+ * Compress a payload using zlib deflate.
+ *
+ * Parameters:
+ *   in      - input data
+ *   in_len  - input length in bytes
+ *   type    - compression format (TYPE_GZIP or TYPE_DEFLATE)
+ *   out     - [out] allocated compressed buffer (caller must free)
+ *   out_len - [out] compressed size in bytes
+ *
+ * Returns:
+ *   NGX_OK on success, NGX_ERROR on failure.
+ */
 static int
 compress_payload(const unsigned char *in, size_t in_len, compression_kind_t type,
                  unsigned char **out, size_t *out_len)
@@ -70,6 +90,20 @@ compress_payload(const unsigned char *in, size_t in_len, compression_kind_t type
     return NGX_OK;
 }
 
+/*
+ * Decompress a payload using zlib inflate with size limit enforcement.
+ *
+ * Parameters:
+ *   in       - compressed input data
+ *   in_len   - compressed length in bytes
+ *   type     - compression format (TYPE_GZIP or TYPE_DEFLATE)
+ *   out      - [out] allocated decompressed buffer (caller must free)
+ *   out_len  - [out] decompressed size in bytes
+ *   max_size - maximum allowed decompressed size
+ *
+ * Returns:
+ *   NGX_OK on success, NGX_ERROR on failure or size limit exceeded.
+ */
 static int
 decompress_payload(const unsigned char *in, size_t in_len, compression_kind_t type,
                    unsigned char **out, size_t *out_len, size_t max_size)
@@ -124,6 +158,16 @@ decompress_payload(const unsigned char *in, size_t in_len, compression_kind_t ty
     return NGX_OK;
 }
 
+/*
+ * Verify compress/decompress round-trip preserves original data.
+ * Parameterized by compression type (gzip or deflate).
+ *
+ * Parameters:
+ *   type  - compression format to test
+ *   label - test section label
+ *
+ * Expected: decompressed output matches original input byte-for-byte.
+ */
 static void
 test_valid_roundtrip(compression_kind_t type, const char *label)
 {
@@ -155,6 +199,12 @@ test_valid_roundtrip(compression_kind_t type, const char *label)
     TEST_PASS("Round-trip succeeded");
 }
 
+/*
+ * Verify corrupted compressed data is detected and returns error.
+ * Mutates a byte in the compressed payload and verifies decompression fails.
+ *
+ * Expected: decompression of corrupted data returns NGX_ERROR.
+ */
 static void
 test_corrupted_data(void)
 {
@@ -185,6 +235,12 @@ test_corrupted_data(void)
     TEST_PASS("Corrupted data detected");
 }
 
+/*
+ * Verify output size limit enforcement: decompression fails when the
+ * decompressed output would exceed the specified max_size.
+ *
+ * Expected: decompression returns NGX_ERROR when output exceeds 128 bytes.
+ */
 static void
 test_size_limit_enforcement(void)
 {
@@ -211,6 +267,11 @@ test_size_limit_enforcement(void)
     TEST_PASS("Size limit enforcement works");
 }
 
+/*
+ * Verify empty input validation: zero-length input returns error.
+ *
+ * Expected: decompression of empty input returns NGX_ERROR.
+ */
 static void
 test_empty_input_validation(void)
 {

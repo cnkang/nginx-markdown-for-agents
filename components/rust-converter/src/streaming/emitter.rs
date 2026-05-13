@@ -49,6 +49,12 @@ pub(crate) fn escape_markdown_destination(url: &str) -> std::borrow::Cow<'_, str
 }
 
 /// Block-level tags whose closing triggers a flush point.
+///
+/// When the emitter encounters the closing of one of these elements,
+/// it moves all pending bytes to the ready (flushed) buffer so the
+/// caller can deliver a syntactically complete Markdown fragment.
+/// Inline elements (e.g., `a`, `strong`, `em`) are intentionally
+/// excluded — their content is flushed at the next block boundary.
 const FLUSH_TAGS: &[&str] = &[
     "h1",
     "h2",
@@ -900,6 +906,12 @@ impl IncrementalEmitter {
 /// - Internal runs of one or more whitespace characters are replaced by a single space.
 /// - If the original text starts with any whitespace, the result begins with a single space.
 /// - If the original text ends with any whitespace, the result ends with a single space.
+///
+/// Unlike the full-buffer path's `MarkdownConverter::normalize_text` which collapses
+/// all whitespace (including leading/trailing) via `split_whitespace().join(" ")`,
+/// this streaming variant preserves boundary whitespace markers. This is essential
+/// for correct inter-token spacing when text is split across chunk boundaries
+/// (Property 2: chunk split invariance).
 ///
 /// # Examples
 ///

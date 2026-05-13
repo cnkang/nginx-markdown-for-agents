@@ -1,4 +1,18 @@
 #!/usr/bin/env bash
+# generate-large-fixtures.sh — Generate large HTML fixtures for streaming parity tests.
+#
+# Creates deterministic large HTML files (1 MB, 10 MB, 64 MB) with
+# corresponding .meta.json sidecars in the tests/corpus/large/ directory.
+# Each fixture uses a repeating section block to fill to the target size.
+#
+# Usage:
+#   tests/corpus/large/generate-large-fixtures.sh
+#
+# Prerequisites:
+#   python3
+#
+# Exit behaviour:
+#   0 on success; non-zero if the Python generator fails.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

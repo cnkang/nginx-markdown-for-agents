@@ -93,6 +93,16 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# Verify that a required command is available in PATH.
+#
+# Arguments:
+#   $1 - command name to check
+#
+# Outputs:
+#   None on success; error message to stderr on failure.
+#
+# Returns:
+#   0 when the command is found; exits with status 1 otherwise.
 need_cmd() {
   local cmd_name="$1"
   command -v "${cmd_name}" >/dev/null 2>&1 || {
@@ -102,6 +112,19 @@ need_cmd() {
   return 0
 }
 
+# Build the Docker image from the official NGINX source-build Dockerfile.
+#
+# Uses docker buildx when available for consistent multi-platform builds,
+# falling back to plain docker build otherwise.
+#
+# Arguments:
+#   (none; uses global NGINX_TAG, MODULE_REPO, MODULE_REF, MODULE_SHA, IMAGE_NAME)
+#
+# Outputs:
+#   Docker build progress to stderr.
+#
+# Returns:
+#   0 on success; non-zero if the build fails.
 build_image() {
   local -a build_cmd
 
@@ -123,6 +146,19 @@ build_image() {
   return 0
 }
 
+# Sanitize a Docker tag string for safe use as an image name component.
+#
+# Replaces all non-alphanumeric characters (except . : _ -) with hyphens
+# using C locale for deterministic behaviour across platforms.
+#
+# Arguments:
+#   $1 - raw tag string (e.g. "mainline", "stable-alpine")
+#
+# Outputs:
+#   Writes the sanitized tag to stdout.
+#
+# Returns:
+#   0 always.
 sanitize_tag() {
   local raw_tag="$1"
   # Force C collation and keep "-" last so tag normalization is locale-stable.
@@ -131,6 +167,19 @@ sanitize_tag() {
   return 0
 }
 
+# Append a GitHub Actions step summary with validation results.
+#
+# Only writes when GITHUB_STEP_SUMMARY is set.  Includes tag, image,
+# module ref, nginx -t status, and content negotiation results.
+#
+# Arguments:
+#   $1 - status string ("passed" or "failed")
+#
+# Outputs:
+#   Appends Markdown to GITHUB_STEP_SUMMARY if set.
+#
+# Returns:
+#   0 always.
 append_step_summary() {
   local status="$1"
   [[ -n "${GITHUB_STEP_SUMMARY:-}" ]] || return 0
@@ -163,6 +212,19 @@ append_step_summary() {
   } >> "${GITHUB_STEP_SUMMARY}"
 }
 
+# Capture container logs, inspect data, and temp files into ARTIFACT_DIR.
+#
+# Only runs when ARTIFACT_DIR is set.  Collects docker logs, nginx -T
+# output, nginx -t output, and copies temporary header/body files.
+#
+# Arguments:
+#   (none; uses global CONTAINER_NAME, TMP_DIR, ARTIFACT_DIR)
+#
+# Outputs:
+#   Writes diagnostic files into ARTIFACT_DIR.
+#
+# Returns:
+#   0 always (errors are tolerated).
 capture_failure_artifacts() {
   [[ -n "${ARTIFACT_DIR}" ]] || return 0
 

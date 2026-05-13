@@ -1,6 +1,10 @@
 /*
  * Test: config_parsing
  * Description: configuration parsing
+ *
+ * Validates directive value validation (on_error, flavor, auth_policy,
+ * conditional_requests, stream_types, cookie patterns, metrics_format),
+ * default configuration values, and metrics_format directive parsing.
  */
 
 #include "test_common.h"
@@ -34,14 +38,44 @@ typedef struct {
     int markdown_metrics_format;
 } default_conf_t;
 
+/*
+ * Validate an on_error directive value.
+ *
+ * Returns: 1 if the value is "pass" or "reject", 0 otherwise.
+ */
 static int valid_on_error(const char *v) { return STR_EQ(v, "pass") || STR_EQ(v, "reject"); }
+
+/*
+ * Validate a flavor directive value.
+ *
+ * Returns: 1 if the value is "commonmark" or "gfm", 0 otherwise.
+ */
 static int valid_flavor(const char *v) { return STR_EQ(v, "commonmark") || STR_EQ(v, "gfm"); }
+
+/*
+ * Validate an auth_policy directive value.
+ *
+ * Returns: 1 if the value is "allow" or "deny", 0 otherwise.
+ */
 static int valid_auth_policy(const char *v) { return STR_EQ(v, "allow") || STR_EQ(v, "deny"); }
+
+/*
+ * Check whether a character is a valid NGINX variable name start character
+ * (underscore or ASCII letter).
+ *
+ * Returns: 1 if valid, 0 otherwise.
+ */
 static int valid_var_start_char(char c)
 {
     return c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
 }
 
+/*
+ * Validate a complex markdown_filter directive value containing
+ * NGINX variables (e.g. "$convert", "${convert}", "pre_$var_post").
+ *
+ * Returns: 1 if at least one valid variable reference is found, 0 otherwise.
+ */
 static int valid_markdown_filter_complex(const char *v)
 {
     const char *p;
@@ -66,16 +100,55 @@ static int valid_markdown_filter_complex(const char *v)
     return 0;
 }
 
+/*
+ * Validate a markdown_filter directive value: "on", "off", or a
+ * complex expression containing NGINX variables.
+ *
+ * Returns: 1 if valid, 0 otherwise.
+ */
 static int valid_markdown_filter(const char *v) {
     return STR_EQ(v, "on") || STR_EQ(v, "off") || valid_markdown_filter_complex(v);
 }
+
+/*
+ * Validate a conditional_requests directive value.
+ *
+ * Returns: 1 if "full_support", "if_modified_since_only", or "disabled", 0 otherwise.
+ */
 static int valid_conditional(const char *v) {
     return STR_EQ(v, "full_support") || STR_EQ(v, "if_modified_since_only") || STR_EQ(v, "disabled");
 }
+
+/*
+ * Validate a cookie pattern: must be non-NULL and non-empty.
+ *
+ * Returns: 1 if valid, 0 otherwise.
+ */
 static int valid_cookie_pattern(const char *v) { return v != NULL && *v != '\0'; }
+
+/*
+ * Validate a content type token: must contain a slash (type/subtype format).
+ *
+ * Returns: 1 if valid, 0 otherwise.
+ */
 static int valid_content_type_token(const char *v) { return v != NULL && strchr(v, '/') != NULL; }
+
+/*
+ * Validate a metrics_format directive value.
+ *
+ * Returns: 1 if "auto" or "prometheus", 0 otherwise.
+ */
 static int valid_metrics_format(const char *v) { return STR_EQ(v, "auto") || STR_EQ(v, "prometheus"); }
 
+/*
+ * Parse a metrics_format directive value into its enum constant.
+ *
+ * Parameters:
+ *   v - directive value string ("auto" or "prometheus")
+ *
+ * Returns:
+ *   METRICS_FORMAT_AUTO (0), METRICS_FORMAT_PROMETHEUS (1), or -1 for invalid.
+ */
 static int
 parse_metrics_format(const char *v)
 {
@@ -88,6 +161,12 @@ parse_metrics_format(const char *v)
     return -1;
 }
 
+/*
+ * Create a default_conf_t with the module's documented default values.
+ *
+ * Returns:
+ *   A default_conf_t with all fields initialized to their defaults.
+ */
 static default_conf_t
 module_defaults(void)
 {
@@ -109,6 +188,12 @@ module_defaults(void)
     return c;
 }
 
+/*
+ * Verify directive value validation for all supported directives.
+ * Tests accepted values, rejected values, and case sensitivity.
+ *
+ * Expected: valid_* functions return 1 for accepted values, 0 for rejected.
+ */
 static void
 test_value_validation(void)
 {
@@ -147,6 +232,12 @@ test_value_validation(void)
     TEST_PASS("Directive validation passed");
 }
 
+/*
+ * Verify that module_defaults() returns the documented default values
+ * for all configuration directives.
+ *
+ * Expected: each default matches the module's documented specification.
+ */
 static void
 test_default_values(void)
 {
@@ -166,6 +257,13 @@ test_default_values(void)
     TEST_PASS("Default values verified");
 }
 
+/*
+ * Verify metrics_format directive parsing: "auto" and "prometheus"
+ * map to their enum constants, while invalid values are rejected.
+ * Also verifies the enum constant values match the design specification.
+ *
+ * Expected: correct enum mapping and rejection of invalid values.
+ */
 static void
 test_metrics_format_parsing(void)
 {

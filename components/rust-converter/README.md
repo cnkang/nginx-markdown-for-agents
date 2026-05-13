@@ -88,7 +88,7 @@ Existing FFI function signatures are not modified.
 
 This API buffers all fed data internally and performs a single full
 parse-and-convert pass during `finalize`. The separate `streaming`
-module owns the true streaming engine path used by the 0.6.2 release
+module owns the true streaming engine path used by the 0.6.3 release
 line.
 
 ### Equivalence Guarantee
@@ -140,3 +140,4 @@ fuzz/
 |---------|------|--------|---------|
 | 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, verified directive accuracy against code |
 | 0.6.2 | 2026-05-08 | Kang | Updated version reference to current release line |
+| 0.6.3 | 2026-05-13 | Kang | Version bump to 0.6.3 for release |

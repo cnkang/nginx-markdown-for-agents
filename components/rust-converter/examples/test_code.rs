@@ -1,3 +1,11 @@
+//! Example demonstrating code block and inline code conversion.
+//!
+//! Shows how HTML `<pre><code>` blocks with language classes and inline
+//! `<code>` elements are converted to fenced code blocks and backtick
+//! spans in Markdown.
+//!
+//! Run with: `cargo run --example test_code`.
+
 use nginx_markdown_converter::converter::MarkdownConverter;
 use nginx_markdown_converter::parser::parse_html;
 

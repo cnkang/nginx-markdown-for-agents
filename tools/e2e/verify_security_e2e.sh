@@ -32,6 +32,16 @@ readonly PATTERN_CT_MARKDOWN='^Content-Type: text/markdown'
 # shellcheck disable=SC1090
 source "${NATIVE_BUILD_HELPER}"
 
+# usage — Print command-line help text to stderr.
+#
+# Arguments:
+#   (none)
+#
+# Outputs:
+#   Writes usage text to stderr.
+#
+# Returns:
+#   0 always.
 usage() {
   cat <<EOF
 Usage: $(basename "$0") [--keep-artifacts] [--nginx-version VERSION] [--port PORT] [--upstream-port PORT]
@@ -43,6 +53,20 @@ EOF
   return 0
 }
 
+# cleanup — Remove temporary artifacts and stop processes on exit.
+#
+# Stops the upstream server and NGINX if running.  On success with
+# --keep-artifacts disabled, removes BUILDROOT.  On failure, retains
+# BUILDROOT for debugging.
+#
+# Arguments:
+#   (none; reads $? for exit status)
+#
+# Outputs:
+#   Diagnostic message to stderr on failure.
+#
+# Returns:
+#   0 always.
 cleanup() {
   local rc=$?
   if [[ -n "${UPSTREAM_PID}" ]]; then

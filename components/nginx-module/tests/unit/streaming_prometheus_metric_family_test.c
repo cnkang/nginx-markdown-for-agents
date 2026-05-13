@@ -1,6 +1,10 @@
 /*
  * Test: streaming_prometheus_metric_family
- * Description: verify streaming Prometheus outcome family separation
+ * Description: streaming Prometheus metric family
+ *
+ * Validates that streaming-specific metrics are rendered in the correct
+ * Prometheus metric family with proper labels, avoiding double-counting
+ * with full-buffer outcome metrics.
  */
 
 #include "../include/test_common.h"

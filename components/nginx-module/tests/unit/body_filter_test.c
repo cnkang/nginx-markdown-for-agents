@@ -1,10 +1,32 @@
 /*
  * Test: body_filter
  * Description: body filter functionality
+ *
+ * Validates the body filter's chunk buffering, decompression hook,
+ * HEAD request handling, and ineligible-request passthrough behavior.
+ *
+ * This test reimplements the body filter decision logic in standard C
+ * (no NGINX dependencies) to verify the ordering contract: chunks are
+ * buffered until last_buf, decompression runs before conversion when
+ * needed, HEAD requests omit the response body, and ineligible
+ * requests bypass conversion entirely.
  */
 
 #include "test_common.h"
 
+/*
+ * Simulated body filter context tracking buffered data and state flags.
+ *
+ * Fields:
+ *   buffer              - accumulated response body chunks
+ *   size                - current buffer occupancy in bytes
+ *   eligible            - whether the request qualifies for conversion
+ *   is_head_request     - whether the original request was HEAD
+ *   decompression_needed - whether the upstream response is compressed
+ *   decompression_done  - whether decompression has already run
+ *   conversion_called   - whether the conversion step was invoked
+ *   decompression_called - whether the decompression step was invoked
+ */
 typedef struct {
     char buffer[4096];
     size_t size;
@@ -16,6 +38,15 @@ typedef struct {
     int decompression_called;
 } body_ctx_t;
 
+/*
+ * Append a chunk to the body context buffer.
+ *
+ * Parameters:
+ *   ctx   - body filter context to append to
+ *   chunk - NUL-terminated string to append
+ *
+ * Aborts via TEST_ASSERT if the buffer would overflow.
+ */
 static void
 append_chunk(body_ctx_t *ctx, const char *chunk)
 {
@@ -29,6 +60,18 @@ append_chunk(body_ctx_t *ctx, const char *chunk)
     ctx->size += len;
 }
 
+/*
+ * Simulate a single body filter invocation.
+ *
+ * Accumulates the chunk, then on last_buf: triggers decompression
+ * if needed but not yet done, marks conversion as called, and for
+ * HEAD requests clears the body buffer.
+ *
+ * Parameters:
+ *   ctx      - body filter context
+ *   chunk    - response body chunk to process
+ *   last_buf - 1 if this is the final buffer in the chain, 0 otherwise
+ */
 static void
 run_body_filter(body_ctx_t *ctx, const char *chunk, int last_buf)
 {
@@ -53,6 +96,12 @@ run_body_filter(body_ctx_t *ctx, const char *chunk, int last_buf)
     }
 }
 
+/*
+ * Create a fresh body context with eligible=1 and all other fields zeroed.
+ *
+ * Returns:
+ *   Zero-initialized body_ctx_t with conversion eligibility enabled.
+ */
 static body_ctx_t
 new_ctx(void)
 {
@@ -62,6 +111,13 @@ new_ctx(void)
     return c;
 }
 
+/*
+ * Verify that chunks are buffered without triggering conversion until
+ * the last buffer arrives.  This ensures the full response body is
+ * available before the conversion pipeline runs.
+ *
+ * Expected: conversion_called is 0 after intermediate chunks, 1 after last_buf.
+ */
 static void
 test_buffer_then_convert(void)
 {
@@ -77,6 +133,13 @@ test_buffer_then_convert(void)
     TEST_PASS("Chunk buffering behavior works");
 }
 
+/*
+ * Verify that decompression runs before conversion when the upstream
+ * response is compressed.  The body filter must decompress first,
+ * then pass the decompressed content to the conversion pipeline.
+ *
+ * Expected: both decompression_called and conversion_called are 1.
+ */
 static void
 test_decompression_hook(void)
 {
@@ -91,6 +154,12 @@ test_decompression_hook(void)
     TEST_PASS("Decompression hook works");
 }
 
+/*
+ * Verify that HEAD requests still run the conversion pipeline
+ * (to update Content-Type, ETag, etc.) but produce an empty body.
+ *
+ * Expected: conversion_called is 1, body size is 0.
+ */
 static void
 test_head_request_omits_body(void)
 {
@@ -104,6 +173,13 @@ test_head_request_omits_body(void)
     TEST_PASS("HEAD behavior works");
 }
 
+/*
+ * Verify that ineligible requests (wrong method, content-type, etc.)
+ * bypass both decompression and conversion.  The body passes through
+ * unchanged to the next filter in the chain.
+ *
+ * Expected: conversion_called and decompression_called are both 0.
+ */
 static void
 test_ineligible_passthrough(void)
 {

@@ -1,4 +1,24 @@
 #!/usr/bin/env bash
+# verify_real_nginx_ims.sh — Validate If-Modified-Since behaviour for Markdown responses.
+#
+# Builds a local NGINX from source with the markdown module (or reuses
+# an existing binary), starts it with conditional-request support enabled,
+# and verifies that:
+#   1. A Markdown-negotiated response returns 200 with correct Content-Type.
+#   2. A subsequent request with the returned Last-Modified value yields 304.
+#   3. A request with an older If-Modified-Since value yields 200.
+#
+# Usage:
+#   tools/ci/verify_real_nginx_ims.sh [--keep-artifacts] [--nginx-version VER] [--port PORT]
+#
+# Environment variables:
+#   NGINX_BIN       Optional reusable module-enabled nginx binary
+#   NGINX_VERSION   NGINX version (default: stable)
+#   PORT            Listen port (default: 18088)
+#
+# Exit behaviour:
+#   0 if all IMS validation checks pass.
+#   1 if any check fails or prerequisites are missing.
 set -euo pipefail
 
 NGINX_VERSION="${NGINX_VERSION:-stable}"

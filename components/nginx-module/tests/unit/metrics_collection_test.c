@@ -1,6 +1,10 @@
 /*
  * Test: metrics_collection
  * Description: metrics collection
+ *
+ * Validates metrics counter increments for conversions (attempted,
+ * succeeded, failed, bypassed), failure category tracking (conversion,
+ * resource_limit, system), latency bucket assignment, and byte counters.
  */
 
 #include "test_common.h"

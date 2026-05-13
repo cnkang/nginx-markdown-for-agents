@@ -1,11 +1,19 @@
 /*
  * Test: error_classification
  * Description: error classification
+ *
+ * Validates FFI error code classification into semantic categories:
+ * CONVERSION (parse/encoding/invalid_input), RESOURCE_LIMIT (timeout/
+ * memory_limit), SYSTEM (internal/unknown).  Also tests category string
+ * mapping and ERROR_SUCCESS handling.
  */
 
 #include "../include/test_common.h"
 #include <limits.h>
 
+/*
+ * FFI error code constants matching the Rust converter ABI.
+ */
 enum {
     ERROR_SUCCESS = 0,
     ERROR_PARSE = 1,
@@ -16,12 +24,26 @@ enum {
     ERROR_INTERNAL = 99
 };
 
+/*
+ * Error category enumeration for classification.
+ */
 typedef enum {
     CAT_CONVERSION = 0,
     CAT_RESOURCE_LIMIT,
     CAT_SYSTEM
 } error_category_t;
 
+/*
+ * Classify an FFI error code into a semantic category.
+ *
+ * Parameters:
+ *   error_code - FFI error code from the Rust converter
+ *
+ * Returns:
+ *   CAT_CONVERSION for parse/encoding/input errors,
+ *   CAT_RESOURCE_LIMIT for timeout/memory errors,
+ *   CAT_SYSTEM for internal and unknown codes.
+ */
 static error_category_t
 classify_error(unsigned int error_code)
 {
@@ -39,6 +61,15 @@ classify_error(unsigned int error_code)
     }
 }
 
+/*
+ * Return a human-readable string for an error category.
+ *
+ * Parameters:
+ *   category - error category enum value
+ *
+ * Returns:
+ *   "conversion", "resource_limit", "system", or "unknown".
+ */
 static const char *
 category_string(error_category_t category)
 {
@@ -50,6 +81,12 @@ category_string(error_category_t category)
     }
 }
 
+/*
+ * Verify conversion error classification: ERROR_PARSE, ERROR_ENCODING,
+ * and ERROR_INVALID_INPUT all map to CAT_CONVERSION.
+ *
+ * Expected: all three codes return CAT_CONVERSION.
+ */
 static void
 test_conversion_errors(void)
 {
@@ -60,6 +97,12 @@ test_conversion_errors(void)
     TEST_PASS("Conversion classification works");
 }
 
+/*
+ * Verify resource limit error classification: ERROR_TIMEOUT and
+ * ERROR_MEMORY_LIMIT both map to CAT_RESOURCE_LIMIT.
+ *
+ * Expected: both codes return CAT_RESOURCE_LIMIT.
+ */
 static void
 test_resource_limit_errors(void)
 {
@@ -69,6 +112,13 @@ test_resource_limit_errors(void)
     TEST_PASS("Resource limit classification works");
 }
 
+/*
+ * Verify system error fallback: ERROR_INTERNAL and unknown codes map
+ * to CAT_SYSTEM.  Also verify category_string returns correct strings
+ * for all three categories.
+ *
+ * Expected: fallback to CAT_SYSTEM for unknown codes; correct strings.
+ */
 static void
 test_system_errors_and_strings(void)
 {
@@ -83,6 +133,11 @@ test_system_errors_and_strings(void)
 
 /* Task 5.1: ERROR_SUCCESS mapping and unknown category string */
 
+/*
+ * Verify ERROR_SUCCESS (code 0) maps to CAT_SYSTEM via the default branch.
+ *
+ * Expected: ERROR_SUCCESS returns CAT_SYSTEM.
+ */
 static void
 test_error_success_mapping(void)
 {
@@ -92,6 +147,11 @@ test_error_success_mapping(void)
     TEST_PASS("ERROR_SUCCESS mapping correct");
 }
 
+/*
+ * Verify unknown category enum values return "unknown" from category_string.
+ *
+ * Expected: out-of-range category values return "unknown".
+ */
 static void
 test_unknown_category_string(void)
 {
@@ -105,6 +165,14 @@ test_unknown_category_string(void)
 
 /* Feature: improve-test-coverage, Property 1: Error code classification completeness */
 
+/*
+ * Verify error code classification completeness: every defined error
+ * code maps to the correct category, and unknown codes default to
+ * CAT_SYSTEM.  Includes boundary value testing (UINT_MAX).
+ *
+ * Expected: all defined codes match expected categories; unknown codes
+ * including UINT_MAX map to CAT_SYSTEM.
+ */
 static void
 test_error_code_classification_completeness(void)
 {

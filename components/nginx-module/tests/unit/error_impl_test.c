@@ -17,6 +17,13 @@
 #include "../src/ngx_http_markdown_error.c"
 
 
+/*
+ * Verify all FFI-defined error codes are classified correctly by the
+ * production ngx_http_markdown_classify_error() function.
+ *
+ * Expected: ERROR_PARSE/ENCODING/INVALID_INPUT -> CONVERSION,
+ * ERROR_TIMEOUT/MEMORY_LIMIT -> RESOURCE_LIMIT, ERROR_INTERNAL -> SYSTEM.
+ */
 static void
 test_classify_all_defined_codes(void)
 {
@@ -47,6 +54,14 @@ test_classify_all_defined_codes(void)
 }
 
 
+/*
+ * Verify streaming-specific FFI error codes are classified correctly.
+ * Tests ERROR_BUDGET_EXCEEDED (6), ERROR_STREAMING_FALLBACK (7),
+ * and ERROR_POST_COMMIT (8).
+ *
+ * Expected: BUDGET_EXCEEDED -> RESOURCE_LIMIT, STREAMING_FALLBACK -> SYSTEM,
+ * POST_COMMIT -> CONVERSION.
+ */
 static void
 test_classify_streaming_specific_codes(void)
 {
@@ -68,6 +83,12 @@ test_classify_streaming_specific_codes(void)
 }
 
 
+/*
+ * Verify unknown and boundary error codes fall through to SYSTEM.
+ * Tests ERROR_SUCCESS (0), arbitrary code 42, and UINT32_MAX.
+ *
+ * Expected: all three map to NGX_HTTP_MARKDOWN_ERROR_SYSTEM.
+ */
 static void
 test_classify_unknown_and_boundary(void)
 {
@@ -89,6 +110,12 @@ test_classify_unknown_and_boundary(void)
 }
 
 
+/*
+ * Verify error_category_string returns correct strings for all three
+ * categories plus unknown.  Checks non-NULL, non-empty, and correct length.
+ *
+ * Expected: each category maps to its documented string representation.
+ */
 static void
 test_category_string_all_values(void)
 {

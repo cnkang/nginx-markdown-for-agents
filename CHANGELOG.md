@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.6.3] - 2026-05-12
+## [0.6.3] - 2026-05-13
 
 This release closes the Rust-first E2E migration scope for the first scenario
 batch, aligns harness governance with migrated execution surfaces, and removes
@@ -19,7 +19,8 @@ stale Python E2E spec files.
   - `docs/project/0.6.3-test-surface-audit.md`,
     `docs/project/0.6.3-e2e-parity.md`,
     `docs/testing/C_TEST_BOUNDARY.md`,
-    `docs/project/release-notes-0-6-3.md`.
+    `docs/project/release-notes-0-6-3.md`,
+    `docs/architecture/ADR/0009-rust-first-e2e-test-architecture.md`.
 - Harness risk pack for E2E migration:
   `docs/harness/risk-packs/e2e-migration.md`.
 - Harness validation contract for Rust E2E migration policy in
@@ -37,6 +38,18 @@ stale Python E2E spec files.
 - Stale Python E2E spec files from `components/nginx-module/tests/e2e/`:
   - `test_streaming_e2e.py`
   - `test_streaming_failure_cache_e2e.py`
+
+#### Upgrading to 0.6.3
+
+- `make test-e2e` remains the canonical entrypoint and now delegates migrated
+  scenarios to `e2e-harness`; no caller-side command change is required.
+- For migrated scenarios, thin shell wrappers under `tools/e2e/` are
+  compatibility delegates. New product-level HTTP scenario logic should be
+  implemented in `tools/e2e-harness/src/scenarios/` rather than as new
+  independent shell assertions.
+- Python E2E spec-only files under
+  `components/nginx-module/tests/e2e/` are removed from this release line.
+  Use Rust harness scenarios and retained canonical shell runtime paths.
 
 ## [0.6.2] - 2026-05-08
 

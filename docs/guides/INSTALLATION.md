@@ -1025,7 +1025,7 @@ The system cannot reach GitHub to download the pre-built binary or checksum file
    Manual download is intended only for air-gapped or troubleshooting scenarios — prefer the [install script](#4-primary-install-script) for normal installations.
    ```bash
    # On a connected machine — substitute <release_tag>, <nginx_version>, <os_type>, and <arch>
-   # <release_tag> must match the current release (e.g. v0.6.2)
+   # <release_tag> must match the current release (e.g. v0.6.3)
    wget https://github.com/cnkang/nginx-markdown-for-agents/releases/download/<release_tag>/ngx_http_markdown_filter_module-<nginx_version>-<os_type>-<arch>.tar.gz
    wget https://github.com/cnkang/nginx-markdown-for-agents/releases/download/<release_tag>/ngx_http_markdown_filter_module-<nginx_version>-<os_type>-<arch>.tar.gz.sha256
    ```
@@ -1063,7 +1063,7 @@ The SHA-256 hash of the downloaded binary does not match the expected checksum f
    Manual download is intended only for troubleshooting — prefer the [install script](#4-primary-install-script) for normal installations.
    ```bash
    # Download the binary and checksum file — substitute <release_tag>, <nginx_version>, <os_type>, <arch>
-   # <release_tag> must match the current release (e.g. v0.6.2)
+   # <release_tag> must match the current release (e.g. v0.6.3)
    wget https://github.com/cnkang/nginx-markdown-for-agents/releases/download/<release_tag>/ngx_http_markdown_filter_module-<nginx_version>-<os_type>-<arch>.tar.gz
    wget https://github.com/cnkang/nginx-markdown-for-agents/releases/download/<release_tag>/ngx_http_markdown_filter_module-<nginx_version>-<os_type>-<arch>.tar.gz.sha256
 
@@ -1464,3 +1464,4 @@ If you encounter issues not covered in this guide:
 |---------|------|--------|---------|
 | 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
+| 0.6.3 | 2026-05-13 | Kang | Version bump to 0.6.3 for release |

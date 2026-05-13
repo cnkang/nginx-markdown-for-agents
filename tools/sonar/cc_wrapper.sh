@@ -1,4 +1,22 @@
 #!/usr/bin/env bash
+# cc_wrapper.sh — Compiler wrapper for capturing compile commands.
+#
+# Wraps the real C compiler to intercept compilation invocations and
+# append each compile command as a JSON entry to a capture file.  Used
+# by generate_compile_commands.sh to build a compile_commands.json
+# database for SonarQube / VS Code C/C++ analysis.
+#
+# Environment variables:
+#   SONAR_REAL_CC          Path to the real C compiler (default: cc)
+#   SONAR_CC_CAPTURE_FILE  Path to the JSONL capture file (default: none,
+#                          meaning no capture is performed)
+#
+# The wrapper passes all arguments through to the real compiler unchanged.
+# It only records commands that include -c (compile-only) and a .c source
+# file argument.
+#
+# Exit behaviour:
+#   Delegates to the real compiler; exits with its return code.
 set -euo pipefail
 
 REAL_CC="${SONAR_REAL_CC:-}"

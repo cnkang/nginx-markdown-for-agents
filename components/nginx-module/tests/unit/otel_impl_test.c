@@ -1,6 +1,10 @@
 /*
  * Test: otel_impl
  * Description: regression coverage for OTel JSON rendering path.
+ *
+ * Validates OpenTelemetry span JSON rendering: correct trace/span ID
+ * formatting, attribute serialization, timestamp handling, and edge
+ * cases in the JSON output generator.
  */
 
 #include "../include/test_common.h"

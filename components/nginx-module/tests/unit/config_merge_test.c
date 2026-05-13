@@ -1,6 +1,11 @@
 /*
  * Test: config_merge
  * Description: configuration merging
+ *
+ * Validates the NGINX-style configuration merge semantics: child
+ * inherits from parent when unset, child override wins over parent,
+ * defaults are applied when both are unset, and enabled_source
+ * merge behavior (UNSET, STATIC, COMPLEX) is correct.
  */
 
 #include "test_common.h"
@@ -24,6 +29,17 @@ typedef struct {
     const char *auth_cookie_patterns;
 } conf_t;
 
+/*
+ * Simulate NGINX-style configuration merge from parent to child.
+ *
+ * For each field: if the child is unset, inherit from parent (or apply
+ * default if parent is also unset).  For enabled_source, handles the
+ * UNSET/STATIC/COMPLEX tristate with complex pointer clearing on STATIC.
+ *
+ * Parameters:
+ *   child  - location-level configuration to merge into
+ *   parent - server-level configuration to inherit from
+ */
 static void
 merge_conf(conf_t *child, const conf_t *parent)
 {
@@ -48,6 +64,13 @@ merge_conf(conf_t *child, const conf_t *parent)
     if (child->auth_cookie_patterns == NULL) child->auth_cookie_patterns = parent->auth_cookie_patterns;
 }
 
+/*
+ * Create a configuration with all fields at their unset sentinels.
+ *
+ * Returns:
+ *   A conf_t with all integer fields set to UNSET_INT, size fields
+ *   to UNSET_SIZE, and pointers to NULL.
+ */
 static conf_t
 unset_conf(void)
 {
@@ -64,6 +87,11 @@ unset_conf(void)
     return c;
 }
 
+/*
+ * Verify that unset child fields inherit values from the parent.
+ *
+ * Expected: all child fields match parent values after merge.
+ */
 static void
 test_inherit_from_parent(void)
 {
@@ -94,6 +122,11 @@ test_inherit_from_parent(void)
     TEST_PASS("Inheritance works");
 }
 
+/*
+ * Verify that explicitly set child values override parent values.
+ *
+ * Expected: child values are preserved, not overwritten by parent.
+ */
 static void
 test_child_override(void)
 {
@@ -121,6 +154,12 @@ test_child_override(void)
     TEST_PASS("Override precedence works");
 }
 
+/*
+ * Verify that default values are applied when both parent and child
+ * have unset fields.
+ *
+ * Expected: defaults match the module's documented default values.
+ */
 static void
 test_defaults_when_both_unset(void)
 {
@@ -139,6 +178,15 @@ test_defaults_when_both_unset(void)
     TEST_PASS("Defaults are correct");
 }
 
+/*
+ * Verify the enabled_source merge behavior for all UNSET/STATIC/COMPLEX
+ * combinations.  Tests: inherit complex from parent, child complex
+ * overrides parent static, and child static clears parent complex
+ * expression pointer.
+ *
+ * Expected: enabled_source and enabled_complex are correctly merged
+ * for each combination.
+ */
 static void
 test_enabled_source_merge_behavior(void)
 {

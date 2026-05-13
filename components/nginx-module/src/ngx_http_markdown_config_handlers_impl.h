@@ -15,6 +15,21 @@
 #include <errno.h>
 #include <stdlib.h>
 
+/*
+ * Case-insensitive comparison of an ngx_str_t argument against a
+ * known NUL-terminated expected string.
+ *
+ * Returns 1 if arg has the same length and case-insensitive content
+ * as expected, 0 otherwise.  NULL or empty arguments return 0.
+ *
+ * Parameters:
+ *   arg          - argument to compare
+ *   expected     - expected string bytes
+ *   expected_len - length of expected string
+ *
+ * Returns:
+ *   1 if equal (case-insensitive), 0 otherwise
+ */
 static ngx_int_t
 ngx_http_markdown_arg_equals(
     const ngx_str_t *arg,

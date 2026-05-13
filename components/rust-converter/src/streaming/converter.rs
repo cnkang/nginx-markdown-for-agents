@@ -1075,6 +1075,11 @@ impl StreamingConverter {
 /// - in the fallback case (interior invalid byte sequence that cannot be
 ///   isolated to an incomplete tail), returns `(bytes, &[])` so the caller
 ///   can handle invalid bytes via lossy conversion in the next stage.
+///
+/// This function is critical for preserving multi-byte characters (e.g.
+/// CJK, emoji) that span chunk boundaries. Without it, a 3-byte UTF-8
+/// character split across two `feed_chunk` calls would be replaced with
+/// U+FFFD replacement characters, corrupting the output.
 fn split_utf8_tail(bytes: &[u8]) -> (&[u8], &[u8]) {
     // Fast path: if the entire slice is valid UTF-8, no split needed.
     if std::str::from_utf8(bytes).is_ok() {

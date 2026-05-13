@@ -66,8 +66,19 @@ ngx_module_t ngx_http_markdown_filter_module = {
  */
 #if !(NGX_HTTP_HEADERS)
 /*
- * Fallback header lookup for builds without typed header shortcuts in
- * `ngx_http_headers_in_t`.
+ * Find a request header by name using the generic linked-list storage.
+ *
+ * This fallback is used when NGINX is compiled without typed header
+ * convenience pointers (e.g., r->headers_in.accept).  It traverses
+ * the full ngx_list_part_t chain to locate the first matching header
+ * by case-insensitive name comparison.
+ *
+ * Parameters:
+ *   r    - HTTP request whose incoming headers are searched
+ *   name - header name to find (need not be NUL-terminated)
+ *
+ * Returns:
+ *   pointer to the matching ngx_table_elt_t, or NULL if not found
  */
 static ngx_table_elt_t *
 ngx_http_markdown_find_request_header(ngx_http_request_t *r,

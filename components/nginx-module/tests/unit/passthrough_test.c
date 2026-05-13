@@ -1,6 +1,10 @@
 /*
  * Test: passthrough
  * Description: passthrough behavior
+ *
+ * Validates that ineligible requests (wrong method, non-HTML content,
+ * non-200 status) pass through the filter unchanged: original status,
+ * content-type, body, and content-encoding are preserved.
  */
 
 #include "test_common.h"
