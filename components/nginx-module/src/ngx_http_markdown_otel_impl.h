@@ -146,6 +146,7 @@ ngx_http_markdown_otel_random_hex(u_char *dst, size_t byte_count,
     }
 
 #if (NGX_HAVE_ARC4RANDOM)
+    (void) log;
     arc4random_buf(raw, byte_count);
 #else
     {
