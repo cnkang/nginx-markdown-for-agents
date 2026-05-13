@@ -11,7 +11,7 @@
 //! 7. Vary: Cookie in auth response
 
 use crate::assertions;
-use crate::http;
+use crate::scenarios::common;
 use crate::scenarios::{AssertionResult, ScenarioContext, ScenarioReport};
 use anyhow::Result;
 use std::collections::HashMap;
@@ -21,23 +21,12 @@ const UPSTREAM_ETAG: &str = "\"upstream-auth-etag-001\"";
 
 /// Run the auth-cache scenario.
 pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
+    const SCENARIO: &str = "auth-cache";
     let start = std::time::Instant::now();
     let mut assertions = Vec::new();
 
-    let nginx_bin = match &ctx.mode {
-        crate::runtime::RuntimeMode::Reuse(path) => path.clone(),
-        crate::runtime::RuntimeMode::Bootstrap => {
-            return Ok(ScenarioReport::failing(
-                "auth-cache",
-                assertions,
-                start.elapsed().as_millis() as u64,
-                "Bootstrap mode not yet supported".to_string(),
-            ));
-        }
-    };
-
-    if !nginx_bin.exists() {
-        return Ok(skipped_report(start, "NGINX binary not found"));
+    if let Err(report) = common::ensure_reuse_nginx_binary(&ctx, SCENARIO, start) {
+        return Ok(report);
     }
 
     let base_url = format!("http://127.0.0.1:{}", ctx.port);
@@ -56,13 +45,18 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
     nonmatching_cookie_headers.insert("Cookie".to_string(), "preferences=dark".to_string());
 
     // Case 1: Auth request with Cookie gets Cache-Control: private
-    if let Ok(resp1) = http::get_with_headers(&md_url, &auth_headers) {
+    if let Some(resp1) = common::try_get_with_headers(
+        &md_url,
+        &auth_headers,
+        &mut assertions,
+        "case1_cache_control_private",
+    ) {
         assertions.push(assertions::assert_status(
             "case1_auth_status_200",
             resp1.status,
             200,
         ));
-        let cc_value = header_value(&resp1.headers, "Cache-Control");
+        let cc_value = common::header_value(&resp1.headers, "Cache-Control");
         let has_private = cc_value.contains("private");
         assertions.push(AssertionResult {
             name: "case1_cache_control_private".to_string(),
@@ -71,21 +65,21 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
             actual: cc_value,
             message: None,
         });
-    } else {
-        assertions.push(failed_assertion(
-            "case1_cache_control_private",
-            "request failed",
-        ));
     }
 
     // Case 2: Non-auth request retains Cache-Control: public
-    if let Ok(resp2) = http::get_with_headers(&md_url, &markdown_headers) {
+    if let Some(resp2) = common::try_get_with_headers(
+        &md_url,
+        &markdown_headers,
+        &mut assertions,
+        "case2_cache_control_public",
+    ) {
         assertions.push(assertions::assert_status(
             "case2_noauth_status_200",
             resp2.status,
             200,
         ));
-        let cc_value = header_value(&resp2.headers, "Cache-Control");
+        let cc_value = common::header_value(&resp2.headers, "Cache-Control");
         let has_public = cc_value.contains("public");
         assertions.push(AssertionResult {
             name: "case2_cache_control_public".to_string(),
@@ -94,15 +88,15 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
             actual: cc_value,
             message: None,
         });
-    } else {
-        assertions.push(failed_assertion(
-            "case2_cache_control_public",
-            "request failed",
-        ));
     }
 
     // Case 3: auth_policy deny rejects conversion for auth requests
-    if let Ok(resp3) = http::get_with_headers(&md_deny_url, &auth_headers) {
+    if let Some(resp3) = common::try_get_with_headers(
+        &md_deny_url,
+        &auth_headers,
+        &mut assertions,
+        "case3_deny_content_type_html",
+    ) {
         assertions.push(assertions::assert_status(
             "case3_deny_status_200",
             resp3.status,
@@ -114,15 +108,15 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
             "text/html",
             &resp3.headers,
         ));
-    } else {
-        assertions.push(failed_assertion(
-            "case3_deny_content_type_html",
-            "request failed",
-        ));
     }
 
     // Case 4: auth_cookies pattern matching — non-matching cookie
-    if let Ok(resp4) = http::get_with_headers(&md_url, &nonmatching_cookie_headers) {
+    if let Some(resp4) = common::try_get_with_headers(
+        &md_url,
+        &nonmatching_cookie_headers,
+        &mut assertions,
+        "case4_nonmatch_cookie_markdown_ct",
+    ) {
         assertions.push(assertions::assert_status(
             "case4_nonmatch_cookie_status_200",
             resp4.status,
@@ -134,16 +128,16 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
             "text/markdown",
             &resp4.headers,
         ));
-    } else {
-        assertions.push(failed_assertion(
-            "case4_nonmatch_cookie_markdown_ct",
-            "request failed",
-        ));
     }
 
     // Case 5: Auth fail-open preserves upstream Cache-Control
-    if let Ok(resp5) = http::get_with_headers(&md_url, &auth_headers) {
-        let auth_cc = header_value(&resp5.headers, "Cache-Control");
+    if let Some(resp5) = common::try_get_with_headers(
+        &md_url,
+        &auth_headers,
+        &mut assertions,
+        "case5_auth_preserves_cache_control",
+    ) {
+        let auth_cc = common::header_value(&resp5.headers, "Cache-Control");
         let has_cc = !auth_cc.is_empty();
         assertions.push(AssertionResult {
             name: "case5_auth_preserves_cache_control".to_string(),
@@ -156,16 +150,16 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
             },
             message: None,
         });
-    } else {
-        assertions.push(failed_assertion(
-            "case5_auth_preserves_cache_control",
-            "request failed",
-        ));
     }
 
     // Case 6: Non-auth ETag replacement
-    if let Ok(resp6) = http::get_with_headers(&md_url, &markdown_headers) {
-        let md_etag = header_value(&resp6.headers, "ETag");
+    if let Some(resp6) = common::try_get_with_headers(
+        &md_url,
+        &markdown_headers,
+        &mut assertions,
+        "case6_etag_differs_from_upstream",
+    ) {
+        let md_etag = common::header_value(&resp6.headers, "ETag");
         let etag_present = !md_etag.is_empty();
         assertions.push(AssertionResult {
             name: "case6_etag_present".to_string(),
@@ -186,16 +180,13 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
             actual: md_etag,
             message: None,
         });
-    } else {
-        assertions.push(failed_assertion(
-            "case6_etag_differs_from_upstream",
-            "request failed",
-        ));
     }
 
     // Case 7: Vary: Cookie in auth response
-    if let Ok(resp7) = http::get_with_headers(&md_url, &auth_headers) {
-        let vary_value = header_value(&resp7.headers, "Vary");
+    if let Some(resp7) =
+        common::try_get_with_headers(&md_url, &auth_headers, &mut assertions, "case7_vary_cookie")
+    {
+        let vary_value = common::header_value(&resp7.headers, "Vary");
         let has_vary_cookie = vary_value.contains("Cookie");
         assertions.push(AssertionResult {
             name: "case7_vary_cookie".to_string(),
@@ -208,52 +199,7 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
             },
             message: None,
         });
-    } else {
-        assertions.push(failed_assertion("case7_vary_cookie", "request failed"));
     }
 
-    let elapsed = start.elapsed().as_millis() as u64;
-    let passed = assertions.iter().all(|a| a.passed);
-    Ok(ScenarioReport {
-        name: "auth-cache".to_string(),
-        passed,
-        assertions,
-        elapsed_ms: elapsed,
-        failure_message: if passed {
-            None
-        } else {
-            Some("auth-cache failed".to_string())
-        },
-    })
-}
-
-/// Extract a header value as a string, returning empty string if absent.
-fn header_value(headers: &reqwest::header::HeaderMap, name: &str) -> String {
-    headers
-        .get(name)
-        .and_then(|v: &reqwest::header::HeaderValue| v.to_str().ok())
-        .unwrap_or("")
-        .to_string()
-}
-
-/// Create a skipped scenario report.
-fn skipped_report(start: std::time::Instant, reason: &str) -> ScenarioReport {
-    ScenarioReport {
-        name: "auth-cache".to_string(),
-        passed: false,
-        assertions: vec![],
-        elapsed_ms: start.elapsed().as_millis() as u64,
-        failure_message: Some(format!("SKIPPED: {reason}")),
-    }
-}
-
-/// Create a failed assertion result for a request error.
-fn failed_assertion(name: &str, reason: &str) -> AssertionResult {
-    AssertionResult {
-        name: name.to_string(),
-        passed: false,
-        expected: "request succeeds".to_string(),
-        actual: format!("request failed: {reason}"),
-        message: Some(format!("[FAIL] assertion={name} {reason}")),
-    }
+    Ok(common::finalize_report(SCENARIO, start, assertions))
 }
