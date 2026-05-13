@@ -509,7 +509,7 @@ def test_property3_matrix_cross_product_completeness(versions):
     """Verifies the release matrix contains the complete cross-product of provided
     versions, OS types, and architectures.
 
-    Asserts the matrix has exactly len(versions) × 2 × 2 entries for the two
+    Asserts the matrix has exactly len(versions) * 2 * 2 entries for the two
     OS types and two architectures used in the test, each
     (nginx, os_type, arch) tuple appears exactly once, and every entry has
     support_tier "full".
