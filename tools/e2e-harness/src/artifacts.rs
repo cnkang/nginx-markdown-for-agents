@@ -127,7 +127,7 @@ pub fn write_invocation_json(
         nginx_bin: nginx_bin.to_string_lossy().to_string(),
         port,
         upstream_port,
-        timestamp: chrono_now_iso8601(),
+        timestamp: epoch_secs_string(),
     };
 
     let json = serde_json::to_string_pretty(&invocation)?;
@@ -152,15 +152,13 @@ pub fn cleanup_artifacts(artifact_dir: &Path, keep_artifacts: bool, passed: bool
     Ok(())
 }
 
-/// Return the current time as an ISO 8601 string.
-///
-/// Uses `std::time::SystemTime` to avoid pulling in a full chrono dependency.
-fn chrono_now_iso8601() -> String {
+/// Return the current time as epoch seconds (UTC) encoded as a string.
+fn epoch_secs_string() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
     let duration = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default();
-    format!("{}s since epoch", duration.as_secs())
+    duration.as_secs().to_string()
 }
 
 #[cfg(test)]
