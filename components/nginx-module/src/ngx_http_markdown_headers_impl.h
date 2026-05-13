@@ -39,12 +39,17 @@ u_char ngx_http_markdown_content_type[] = NGX_HTTP_MARKDOWN_CONTENT_TYPE_LITERAL
 static u_char ngx_http_markdown_vary_suffix[] = ", Accept";
 
 /*
- * Case-insensitive comparison of exactly n bytes from two byte strings.
+ * Case-insensitive comparison of up to n bytes from two byte strings.
  *
- * Unlike ngx_strncasecmp, this function compares raw byte pointers
- * without relying on NUL termination.  Returns 0 when the first n
- * bytes match (case-insensitively), or the difference of the first
- * mismatching lowercase byte pair.
+ * Like ngx_strncasecmp, this function compares raw byte pointers and
+ * returns early when both characters are NUL (treating it as a match
+ * boundary).  Unlike a strict n-byte comparison, encountering NUL in
+ * both strings before n bytes yields 0 even if the strings differ
+ * beyond the NUL.  This mirrors strncasecmp semantics.
+ *
+ * Returns 0 when the compared bytes match (case-insensitively) or
+ * both bytes are NUL, or the difference of the first mismatching
+ * lowercase byte pair.
  *
  * Parameters:
  *   s1 - first byte string

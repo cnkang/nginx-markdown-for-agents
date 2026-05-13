@@ -20,6 +20,14 @@
 #define NGX_HTTP_MARKDOWN_OTEL_IMPL_H
 
 /*
+ * Include dependency: this header requires NGINX core definitions
+ * (NGX_OK, NGX_ERROR, NGX_DECLINED, NGX_LOG_ALERT, ngx_log_error,
+ * ngx_pcalloc, ngx_timeofday, etc.) to be visible before inclusion.
+ * In production builds, include after <ngx_core.h> and <ngx_http.h>.
+ * In test builds, provide stubs/defines before including this header.
+ */
+
+/*
  * Platform detection for secure random byte source.
  *
  * arc4random_buf() is the preferred CSPRNG on BSD/macOS and
@@ -345,7 +353,6 @@ ngx_http_markdown_otel_span_start(ngx_http_request_t *r,
         if (ngx_http_markdown_otel_random_hex(span->span_id, 8,
                                                r->connection->log) != NGX_OK)
         {
-            ngx_pfree(r->pool, span);
             return NULL;
         }
     } else {
@@ -353,9 +360,8 @@ ngx_http_markdown_otel_span_start(ngx_http_request_t *r,
         if (ngx_http_markdown_otel_random_hex(span->trace_id, 16,
                                                r->connection->log) != NGX_OK
             || ngx_http_markdown_otel_random_hex(span->span_id, 8,
-                                                  r->connection->log) != NGX_OK)
+                                                   r->connection->log) != NGX_OK)
         {
-            ngx_pfree(r->pool, span);
             return NULL;
         }
     }
