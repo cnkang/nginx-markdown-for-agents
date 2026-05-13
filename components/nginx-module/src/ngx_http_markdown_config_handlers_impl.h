@@ -33,7 +33,7 @@
 static ngx_int_t
 ngx_http_markdown_arg_equals(
     const ngx_str_t *arg,
-    u_char *expected,
+    const u_char *expected,
     size_t expected_len)
 {
     if (arg == NULL || arg->data == NULL) {
