@@ -7,7 +7,6 @@
  */
 
 #include "test_common.h"
-#include <ctype.h>
 
 /*
  * HTTP method constants for the test harness.
@@ -54,6 +53,15 @@ typedef struct {
 /*
  * Case-insensitive string comparison (ASCII only).
  *
+ * Uses explicit A-Z→a-z mapping to avoid locale-dependent tolower().
+ *
+ * DIVERGENCE RISK: this helper mirrors production logic in
+ * ngx_http_markdown_strncasecmp_const (headers_impl.h) and the
+ * eligibility decision chain in the module body filter.  Changes
+ * to production eligibility ordering or content-type matching
+ * must be reflected here.  Runtime E2E tests remain the source
+ * of truth.
+ *
  * Parameters:
  *   a - first string
  *   b - second string
@@ -68,8 +76,10 @@ strncasecmp_ascii(const char *a, const char *b, size_t n)
     for (size_t i = 0; i < n; i++) {
         unsigned char ca = (unsigned char) a[i];
         unsigned char cb = (unsigned char) b[i];
-        if (tolower(ca) != tolower(cb)) {
-            return tolower(ca) - tolower(cb);
+        unsigned char la = (ca >= 'A' && ca <= 'Z') ? (ca | 0x20) : ca;
+        unsigned char lb = (cb >= 'A' && cb <= 'Z') ? (cb | 0x20) : cb;
+        if (la != lb) {
+            return (int) la - (int) lb;
         }
         if (ca == '\0' || cb == '\0') {
             break;
@@ -163,6 +173,12 @@ is_streaming_type(const char *content_type, const conf_t *conf)
  *
  * Evaluates: config enabled, HTTP method, status code, range headers,
  * streaming content type, HTML content type, and content size.
+ *
+ * DIVERGENCE RISK: reimplements production eligibility logic from
+ * the NGINX module body filter.  Changes to production eligibility
+ * ordering, new ineligibility reasons, or content-type matching
+ * rules must be reflected here.  Runtime E2E tests remain the
+ * source of truth for end-to-end behavior.
  *
  * Parameters:
  *   r    - request to check
