@@ -50,9 +50,13 @@ pub(crate) fn escape_markdown_destination(url: &str) -> std::borrow::Cow<'_, str
 
 /// Block-level tags whose closing triggers a flush point.
 ///
+/// Selected block-level tags whose closing triggers a flush point.
+///
 /// When the emitter encounters the closing of one of these elements,
 /// it moves all pending bytes to the ready (flushed) buffer so the
 /// caller can deliver a syntactically complete Markdown fragment.
+/// Table elements (`table`, `tr`, `td`, `th`) are intentionally
+/// excluded here because they are handled by table-specific emission.
 /// Inline elements (e.g., `a`, `strong`, `em`) are intentionally
 /// excluded — their content is flushed at the next block boundary.
 const FLUSH_TAGS: &[&str] = &[
@@ -911,7 +915,7 @@ impl IncrementalEmitter {
 /// all whitespace (including leading/trailing) via `split_whitespace().join(" ")`,
 /// this streaming variant preserves boundary whitespace markers. This is essential
 /// for correct inter-token spacing when text is split across chunk boundaries
-/// (Property 2: chunk split invariance).
+/// (Property 2: chunk split invariance; see `streaming_properties` tests).
 ///
 /// # Examples
 ///
