@@ -66,6 +66,14 @@ EOF
   return 0
 }
 
+# Build the Rust e2e-harness binary.
+#
+# Uses E2E_HARNESS_MANIFEST (set earlier in this script) to locate
+# the Cargo.toml manifest for the harness crate.
+#
+# Arguments: none
+# Outputs: none (cargo output suppressed)
+# Returns: 0 on success, non-zero on cargo build failure
 build_e2e_harness() {
   cargo build --manifest-path "${E2E_HARNESS_MANIFEST}" >/dev/null
   return 0
