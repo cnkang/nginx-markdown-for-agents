@@ -129,9 +129,9 @@ test_otel_log_ignore(const char *fmt, ...)
 
 #define ngx_log_error(level, log, err, fmt, ...)                                     \
     do {                                                                              \
-        UNUSED(level);                                                                \
-        UNUSED(log);                                                                  \
-        UNUSED(err);                                                                  \
+        (void)(level);                                                                \
+        (void)(log);                                                                  \
+        (void)(err);                                                                  \
         if (0) {                                                                      \
             test_otel_log_ignore((fmt), ##__VA_ARGS__);                              \
         }                                                                             \
@@ -158,19 +158,18 @@ ngx_palloc(ngx_pool_t *pool, size_t size)
     return malloc(size);
 }
 
-static void
+/*
+ * Test stub for ngx_pfree (currently unused after otel_impl.h removed
+ * ngx_pfree calls in favor of NGINX pool semantics).  Retained for
+ * ABI compatibility should future tests need it.
+ */
+__attribute__((unused))
+static ngx_int_t
 ngx_pfree(ngx_pool_t *pool, void *p)
 {
-    /*
-     * Test stub for ngx_pfree.
-     *
-     * In nginx production builds, ngx_pfree releases pool-managed memory.
-     * This unit harness mocks that behavior for heap allocations created
-     * by test stubs: `pool` is intentionally unused and `p` is freed via
-     * free(p). This helper returns no value and may release heap memory.
-     */
     UNUSED(pool);
     free(p);
+    return NGX_OK;
 }
 
 static ngx_buf_t *
@@ -501,6 +500,35 @@ test_otel_span_start_disabled(void)
 }
 
 static void
+test_otel_random_hex_format(void)
+{
+    u_char     buf[33];
+    ngx_int_t  rc;
+
+    TEST_SUBSECTION("OTel random_hex: format and length");
+
+    rc = ngx_http_markdown_otel_random_hex(buf, 16, NULL);
+    TEST_ASSERT(rc == NGX_OK, "random_hex(16) should succeed");
+    TEST_ASSERT(buf[32] == '\0', "trace_id should be NUL-terminated at 32");
+    for (size_t i = 0; i < 32; i++) {
+        TEST_ASSERT(
+            (buf[i] >= '0' && buf[i] <= '9') || (buf[i] >= 'a' && buf[i] <= 'f'),
+            "trace_id byte should be lowercase hex");
+    }
+
+    rc = ngx_http_markdown_otel_random_hex(buf, 8, NULL);
+    TEST_ASSERT(rc == NGX_OK, "random_hex(8) should succeed");
+    TEST_ASSERT(buf[16] == '\0', "span_id should be NUL-terminated at 16");
+    for (size_t i = 0; i < 16; i++) {
+        TEST_ASSERT(
+            (buf[i] >= '0' && buf[i] <= '9') || (buf[i] >= 'a' && buf[i] <= 'f'),
+            "span_id byte should be lowercase hex");
+    }
+
+    TEST_PASS("random_hex format and length correct");
+}
+
+static void
 test_otel_helper_functions(void)
 {
     ngx_http_markdown_otel_span_t span;
@@ -547,6 +575,7 @@ main(void)
     test_otel_parse_traceparent_lowercase_flags();
     test_otel_span_start_disabled();
     test_otel_helper_functions();
+    test_otel_random_hex_format();
     printf("\nAll otel_impl tests passed!\n");
     return 0;
 }

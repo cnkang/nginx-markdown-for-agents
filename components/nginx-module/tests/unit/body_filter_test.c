@@ -9,6 +9,11 @@
  * buffered until last_buf, decompression runs before conversion when
  * needed, HEAD requests omit the response body, and ineligible
  * requests bypass conversion entirely.
+ *
+ * DIVERGENCE RISK: this reimplementation may drift from production
+ * body filter logic in ordering, edge-case handling, or new feature
+ * gates.  Synchronize with production when body filter semantics
+ * change.  Runtime E2E tests remain the source of truth.
  */
 
 #include "test_common.h"
