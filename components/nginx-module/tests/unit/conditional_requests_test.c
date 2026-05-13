@@ -1,6 +1,10 @@
 /*
  * Test: conditional_requests
  *
+ * DIVERGENCE RISK: this test reimplements production conditional
+ * request parsing/matching logic. Keep this file synchronized with
+ * If-None-Match handling changes in production code.
+ *
  * Validates If-None-Match ETag matching, including quoted/unquoted
  * tokens, weak validators, wildcard matching, malformed headers,
  * and the three conditional request modes (full_support,

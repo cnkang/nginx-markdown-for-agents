@@ -841,7 +841,6 @@ static void
 test_dynconf_start_stop_symbols(void)
 {
     ngx_cycle_t                          cycle;
-    ngx_http_markdown_dynconf_watcher_t  watcher;
     ngx_http_markdown_conf_t             conf;
     ngx_str_t                            path;
     ngx_int_t                            rc;
@@ -849,7 +848,6 @@ test_dynconf_start_stop_symbols(void)
     TEST_SUBSECTION("dynconf start/stop symbol coverage");
 
     ngx_memzero(&cycle, sizeof(cycle));
-    ngx_memzero(&watcher, sizeof(watcher));
     ngx_memzero(&conf, sizeof(conf));
     ngx_memzero(&path, sizeof(path));
 

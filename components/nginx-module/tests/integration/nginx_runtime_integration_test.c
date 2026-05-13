@@ -2,6 +2,11 @@
  * Test: integration
  * Description: integration testing
  *
+ * DIVERGENCE RISK: this file reimplements the module decision chain in
+ * standalone C (Accept parsing, eligibility checks, conversion routing,
+ * HEAD handling, range bypass). Keep semantics synchronized with
+ * production logic; runtime E2E tests remain the source of truth.
+ *
  * Validates the end-to-end request processing pipeline: Accept header
  * content negotiation, eligibility checking, HTML-to-Markdown conversion,
  * HEAD request handling, and Range request bypass.

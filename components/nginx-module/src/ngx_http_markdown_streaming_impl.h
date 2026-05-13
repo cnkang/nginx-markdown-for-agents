@@ -706,8 +706,6 @@ ngx_http_markdown_streaming_update_headers(
 {
     ngx_int_t  rc;
 
-    (void) conf;
-
     /* Set Content-Type: text/markdown; charset=utf-8 */
     r->headers_out.content_type.data =
         ngx_http_markdown_content_type;
@@ -771,6 +769,8 @@ ngx_http_markdown_streaming_update_headers(
             return rc;
         }
     }
+#else
+    (void) conf;
 #endif
 
     return NGX_OK;

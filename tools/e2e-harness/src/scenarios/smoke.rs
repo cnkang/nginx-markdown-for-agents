@@ -25,12 +25,17 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
         crate::runtime::RuntimeMode::Reuse(path) => path.clone(),
         crate::runtime::RuntimeMode::Bootstrap => unreachable!(),
     };
+    let exists = nginx_bin.exists();
 
     assertions.push(AssertionResult {
         name: "nginx_binary_exists".to_string(),
-        passed: true,
+        passed: exists,
         expected: "binary exists".to_string(),
-        actual: format!("binary at {}", nginx_bin.display()),
+        actual: if exists {
+            format!("binary exists at {}", nginx_bin.display())
+        } else {
+            format!("binary missing at {}", nginx_bin.display())
+        },
         message: None,
     });
 

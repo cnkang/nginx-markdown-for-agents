@@ -21,9 +21,9 @@ typedef enum {
  * Decompression state context.
  */
 typedef struct {
-    compression_t compression_type;
-    int decompression_needed;
-    int decompression_done;
+    compression_t compression_type;  /* Detected compression type. */
+    int decompression_needed;        /* 1 when decompression is required. */
+    int decompression_done;          /* 1 after decompression has run. */
 } ctx_t;
 
 /*
@@ -52,6 +52,9 @@ init_decompression_state(ctx_t *ctx, int auto_decompress, compression_t detected
 
 /*
  * Check whether decompression should run based on needed and done flags.
+ *
+ * DIVERGENCE RISK: this helper mirrors the production decompression
+ * gating decision. Keep it synchronized with runtime logic changes.
  *
  * Parameters:
  *   ctx - decompression state context
