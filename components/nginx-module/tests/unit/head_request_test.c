@@ -1,10 +1,17 @@
 /*
  * Test: head_request
  * Description: HEAD request handling
+ *
+ * Validates that HEAD requests run the conversion pipeline (to update
+ * Content-Type and Content-Length) but produce an empty response body.
+ * Also verifies ineligible HEAD requests pass through unchanged.
  */
 
 #include "test_common.h"
 
+/*
+ * Simulated response state for HEAD request testing.
+ */
 typedef struct {
     const char *content_type;
     size_t content_length;
@@ -12,6 +19,16 @@ typedef struct {
     int converted;
 } response_t;
 
+/*
+ * Simulate handling a HEAD request through the conversion pipeline.
+ *
+ * Parameters:
+ *   eligible_for_conversion - whether the request qualifies for conversion
+ *   markdown_len            - length of the converted markdown output
+ *
+ * Returns:
+ *   response_t with appropriate Content-Type, Content-Length, and body flags.
+ */
 static response_t
 handle_head_request(int eligible_for_conversion, size_t markdown_len)
 {
@@ -31,6 +48,12 @@ handle_head_request(int eligible_for_conversion, size_t markdown_len)
     return r;
 }
 
+/*
+ * Verify eligible HEAD request: Content-Type becomes markdown,
+ * Content-Length reflects markdown size, body is empty, converted flag set.
+ *
+ * Expected: markdown content-type, correct length, no body, converted=1.
+ */
 static void
 test_head_converted_response(void)
 {
@@ -45,6 +68,12 @@ test_head_converted_response(void)
     TEST_PASS("Converted HEAD behavior is correct");
 }
 
+/*
+ * Verify ineligible HEAD request: Content-Type remains HTML, body is
+ * empty, converted flag is clear.
+ *
+ * Expected: HTML content-type, no body, converted=0.
+ */
 static void
 test_head_passthrough_response(void)
 {

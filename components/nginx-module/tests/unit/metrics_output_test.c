@@ -1,6 +1,9 @@
 /*
  * Test: metrics_output
  * Description: metrics output formatting
+ *
+ * Validates JSON and plain-text metrics output formatting: correct
+ * field names, values, structure, and handling of zero/non-zero counters.
  */
 
 #include "test_common.h"

@@ -28,6 +28,14 @@ ALLOWED_LINK_LIBS = {"pthread", "dl", "m"}
 
 
 def scan_c_sources() -> list[str]:
+    """Scan C source and header files for strong copyleft license markers.
+
+    Checks all .c and .h files under components/nginx-module/src/ against
+    GPL, AGPL, LGPL, and SSPL patterns.
+
+    Returns:
+        List of violation description strings. Empty if all files pass.
+    """
     violations: list[str] = []
     for path in sorted(SRC_DIR.rglob("*")):
         if path.suffix not in {".c", ".h"}:
@@ -41,6 +49,15 @@ def scan_c_sources() -> list[str]:
 
 
 def check_module_link_libs() -> list[str]:
+    """Verify that the module config only links against allowed libraries.
+
+    Parses ngx_module_libs= directives from the NGINX module config file
+    and checks that all explicit -l flags reference libraries in the
+    ALLOWED_LINK_LIBS set.
+
+    Returns:
+        List of violation description strings. Empty if all libs pass.
+    """
     violations: list[str] = []
     cfg = MODULE_CONFIG.read_text(encoding="utf-8", errors="ignore")
     libs: set[str] = set()
@@ -70,6 +87,11 @@ def check_module_link_libs() -> list[str]:
 
 
 def main() -> int:
+    """Run all C license policy checks and report results.
+
+    Returns:
+        Exit code: 0 if all checks pass, 1 if any violations found.
+    """
     violations = []
     violations.extend(scan_c_sources())
     violations.extend(check_module_link_libs())

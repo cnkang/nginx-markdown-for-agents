@@ -34,7 +34,18 @@ static u_char ngx_http_markdown_hdr_token_count[] = "X-Markdown-Tokens";
 u_char ngx_http_markdown_content_type[] = NGX_HTTP_MARKDOWN_CONTENT_TYPE_LITERAL;
 static u_char ngx_http_markdown_vary_suffix[] = ", Accept";
 
-/* ASCII-only lowercase helper used for case-insensitive HTTP token matching. */
+/*
+ * Convert an ASCII uppercase letter to lowercase.
+ *
+ * Only affects A-Z; all other byte values are returned unchanged.
+ * Used for case-insensitive HTTP header name and token matching.
+ *
+ * Parameters:
+ *   c - byte value to convert
+ *
+ * Returns:
+ *   lowercase equivalent if c is A-Z, otherwise c unchanged
+ */
 static ngx_uint_t
 ngx_http_markdown_tolower_ascii(ngx_uint_t c)
 {
@@ -45,6 +56,22 @@ ngx_http_markdown_tolower_ascii(ngx_uint_t c)
     return c;
 }
 
+/*
+ * Case-insensitive comparison of exactly n bytes from two byte strings.
+ *
+ * Unlike ngx_strncasecmp, this function compares raw byte pointers
+ * without relying on NUL termination.  Returns 0 when the first n
+ * bytes match (case-insensitively), or the difference of the first
+ * mismatching lowercase byte pair.
+ *
+ * Parameters:
+ *   s1 - first byte string
+ *   s2 - second byte string
+ *   n  - number of bytes to compare
+ *
+ * Returns:
+ *   0 if equal, negative if s1 < s2, positive if s1 > s2
+ */
 static ngx_int_t
 ngx_http_markdown_strncasecmp_const(const u_char *s1, const u_char *s2, size_t n)
 {

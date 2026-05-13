@@ -1,4 +1,20 @@
 #!/usr/bin/env bash
+# verify_status_codes_e2e.sh — Thin wrapper for the status-codes E2E scenario.
+#
+# Delegates execution to the Rust e2e-harness binary which validates
+# upstream HTTP status-code passthrough behaviour (200, 301, 404, 500,
+# 206, etc.) to ensure the module does not interfere with non-200
+# responses that should not be converted.
+#
+# This script is a backward-compatible entry point retained for CI and
+# Makefile compatibility.  All assertion logic lives in the Rust harness.
+#
+# Usage:
+#   tools/e2e/verify_status_codes_e2e.sh [--keep-artifacts] [--port PORT] [--nginx-bin PATH]
+#
+# Exit behaviour:
+#   0 if the scenario passes.
+#   1 if the harness binary cannot be built or the scenario fails.
 set -euo pipefail
 
 SCENARIO_NAME="status-codes"
@@ -11,6 +27,16 @@ PORT_ARG=""
 UPSTREAM_PORT_ARG=""
 NGINX_BIN_ARG=""
 
+# usage — Print command-line help text to stderr.
+#
+# Arguments:
+#   (none)
+#
+# Outputs:
+#   Writes usage text to stderr.
+#
+# Returns:
+#   0 always.
 usage() {
   cat <<USAGE
 Usage: $(basename "$0") [--keep-artifacts] [--port PORT] [--upstream-port PORT] [--nginx-bin PATH] [--nginx-version VERSION] [--metrics-port PORT]

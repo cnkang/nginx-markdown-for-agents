@@ -28,6 +28,7 @@ fn convert_table_html_with_options(html: &[u8], options: ConversionOptions) -> S
     converter.convert(&dom).expect("Conversion failed")
 }
 
+/// Verifies basic GFM table layout with headers and a data row.
 #[test]
 fn table_should_convert_basic_gfm_layout() {
     let result = convert_table_html(
@@ -40,6 +41,8 @@ fn table_should_convert_basic_gfm_layout() {
     assert!(result.contains("| Cell 1 | Cell 2 |"));
 }
 
+/// Confirms that CommonMark mode falls back to plain text instead of emitting
+/// GFM table syntax.
 #[test]
 fn table_should_fall_back_to_text_in_commonmark_mode() {
     let result = convert_table_html(
@@ -52,6 +55,8 @@ fn table_should_fall_back_to_text_in_commonmark_mode() {
     assert!(result.contains("Cell"));
 }
 
+/// Verifies that left alignment via the `align` attribute produces the correct
+/// GFM separator row.
 #[test]
 fn table_should_emit_left_alignment_separator() {
     let result = convert_table_html(
@@ -63,6 +68,8 @@ fn table_should_emit_left_alignment_separator() {
     assert!(result.contains("| Left |"));
 }
 
+/// Verifies that center alignment via the `align` attribute produces the correct
+/// GFM separator row with colons on both sides.
 #[test]
 fn table_should_emit_center_alignment_separator() {
     let result = convert_table_html(
@@ -74,6 +81,8 @@ fn table_should_emit_center_alignment_separator() {
     assert!(result.contains("| Center |"));
 }
 
+/// Verifies that right alignment via the `align` attribute produces the correct
+/// GFM separator row with a trailing colon.
 #[test]
 fn table_should_emit_right_alignment_separator() {
     let result = convert_table_html(
@@ -85,6 +94,8 @@ fn table_should_emit_right_alignment_separator() {
     assert!(result.contains("| Right |"));
 }
 
+/// Verifies that mixed column alignments (left, center, right) are preserved
+/// correctly in the GFM separator row.
 #[test]
 fn table_should_preserve_mixed_alignments() {
     let result = convert_table_html(
@@ -97,6 +108,8 @@ fn table_should_preserve_mixed_alignments() {
     assert!(result.contains("| A | B | C |"));
 }
 
+/// Verifies that CSS `text-align` style attributes on `<th>` elements are
+/// detected and used for column alignment.
 #[test]
 fn table_should_detect_style_based_alignment() {
     let result = convert_table_html(
@@ -107,6 +120,8 @@ fn table_should_detect_style_based_alignment() {
     assert!(result.contains("| :---: |"));
 }
 
+/// Verifies that tables without an explicit `<thead>` element still convert
+/// correctly, using the first `<tr>` as the header row.
 #[test]
 fn table_should_convert_without_thead() {
     let result = convert_table_html(
@@ -119,6 +134,7 @@ fn table_should_convert_without_thead() {
     assert!(result.contains("| Cell 1 | Cell 2 |"));
 }
 
+/// Verifies that multiple data rows are all included in the table output.
 #[test]
 fn table_should_include_multiple_rows() {
     let result = convert_table_html(
@@ -132,6 +148,7 @@ fn table_should_include_multiple_rows() {
     assert!(result.contains("| Charlie | 35 |"));
 }
 
+/// Verifies that empty table cells are preserved as empty pipe-delimited fields.
 #[test]
 fn table_should_preserve_empty_cells() {
     let result = convert_table_html(
@@ -144,6 +161,8 @@ fn table_should_preserve_empty_cells() {
     assert!(result.contains("| | Data |"));
 }
 
+/// Verifies that rows with fewer columns than the header are padded with empty
+/// cells to maintain consistent column count.
 #[test]
 fn table_should_pad_uneven_rows() {
     let result = convert_table_html(
@@ -156,6 +175,8 @@ fn table_should_pad_uneven_rows() {
     assert!(result.contains("| 3 | | |"));
 }
 
+/// Verifies that inline Markdown formatting (bold, italic) inside table cells
+/// is preserved in the output.
 #[test]
 fn table_should_preserve_inline_formatting() {
     let result = convert_table_html(
@@ -167,6 +188,7 @@ fn table_should_preserve_inline_formatting() {
     assert!(result.contains("| **Bold** | *Italic* |"));
 }
 
+/// Verifies that Markdown links inside table cells are preserved correctly.
 #[test]
 fn table_should_preserve_links() {
     let result = convert_table_html(
@@ -178,6 +200,7 @@ fn table_should_preserve_links() {
     assert!(result.contains("| [Example](https://example.com) |"));
 }
 
+/// Verifies that inline code spans inside table cells are preserved correctly.
 #[test]
 fn table_should_preserve_inline_code() {
     let result = convert_table_html(
@@ -189,6 +212,8 @@ fn table_should_preserve_inline_code() {
     assert!(result.contains("| `print()` |"));
 }
 
+/// Verifies that blank lines are emitted before and after the table block to
+/// satisfy Markdown block element separation requirements.
 #[test]
 fn table_should_keep_blank_lines_around_block() {
     let result = convert_table_html(
@@ -200,6 +225,7 @@ fn table_should_keep_blank_lines_around_block() {
     assert!(result.contains("|\n\nAfter table"));
 }
 
+/// Verifies that a table with only a `<thead>` (no `<tbody>`) renders correctly.
 #[test]
 fn table_should_render_thead_only_tables() {
     let result = convert_table_html(
@@ -211,6 +237,8 @@ fn table_should_render_thead_only_tables() {
     assert!(result.contains("| --- |"));
 }
 
+/// Verifies that a table with `<td>` elements in the first row (no `<th>`)
+/// still treats that row as the header.
 #[test]
 fn table_should_treat_first_td_row_as_header() {
     let result = convert_table_html(
@@ -223,6 +251,7 @@ fn table_should_treat_first_td_row_as_header() {
     assert!(result.contains("| Cell 1 | Cell 2 |"));
 }
 
+/// Verifies that an empty `<table></table>` element produces no Markdown output.
 #[test]
 fn table_should_skip_empty_table_markup() {
     let result = convert_table_html(b"<table></table>", MarkdownFlavor::GitHubFlavoredMarkdown);
@@ -230,6 +259,8 @@ fn table_should_skip_empty_table_markup() {
     assert!(!result.contains("|"));
 }
 
+/// Verifies that leading/trailing whitespace in table cells is normalized and
+/// internal multi-space runs are collapsed to single spaces.
 #[test]
 fn table_should_normalize_cell_whitespace() {
     let result = convert_table_html(
@@ -241,6 +272,8 @@ fn table_should_normalize_cell_whitespace() {
     assert!(result.contains("| Data with spaces |"));
 }
 
+/// Verifies that when `preserve_tables` is disabled, table content is flattened
+/// to plain text without pipe-delimited table syntax.
 #[test]
 fn table_should_flatten_when_preserve_tables_is_disabled() {
     let result = convert_table_html_with_options(
@@ -257,6 +290,8 @@ fn table_should_flatten_when_preserve_tables_is_disabled() {
     assert!(result.contains("Cell"));
 }
 
+/// Verifies that non-`text-align` CSS properties in the `style` attribute are
+/// ignored and do not affect column alignment.
 #[test]
 fn table_should_ignore_non_text_align_style_tokens() {
     let result = convert_table_html(
@@ -268,6 +303,8 @@ fn table_should_ignore_non_text_align_style_tokens() {
     assert!(!result.contains("| ---: |"));
 }
 
+/// Verifies that pipe characters and newlines inside table cells are properly
+/// escaped to prevent breaking the Markdown table structure.
 #[test]
 fn table_should_escape_cell_delimiters_and_newlines() {
     let result = convert_table_html(

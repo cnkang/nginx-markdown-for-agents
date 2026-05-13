@@ -320,7 +320,7 @@ See [DEPLOYMENT_EXAMPLES.md](../guides/DEPLOYMENT_EXAMPLES.md) for configuration
 
 ## Current Focus and Roadmap
 
-### Current Release (0.6.2)
+### Current Release (0.6.3)
 - Dual-engine conversion architecture: streaming default with full-buffer
   fallback
 - Dynamic configuration hot-reload with snapshot isolation and retry contract
@@ -446,7 +446,7 @@ See `examples/docker/` for Docker build examples.
 
 ## Summary
 
-**NGINX Markdown for Agents** is at version 0.6.2. The project provides
+**NGINX Markdown for Agents** is at version 0.6.3. The project provides
 HTML-to-Markdown conversion through NGINX content negotiation with a
 dual-engine model, with bounded-memory streaming as the default path and
 full-buffer conversion as the fallback. It includes Prometheus-compatible
@@ -482,3 +482,4 @@ For questions, issues, or feature requests, use the [GitHub issue tracker](https
 |---------|------|--------|---------|
 | 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
+| 0.6.3 | 2026-05-13 | Kang | Version bump to 0.6.3 for release |

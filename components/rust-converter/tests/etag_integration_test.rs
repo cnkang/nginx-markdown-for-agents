@@ -7,6 +7,8 @@ use nginx_markdown_converter::converter::MarkdownConverter;
 use nginx_markdown_converter::etag_generator::ETagGenerator;
 use nginx_markdown_converter::parser::parse_html;
 
+/// Verifies that identical HTML input produces identical ETags across multiple
+/// conversions, ensuring deterministic ETag generation.
 #[test]
 fn test_etag_consistency_with_conversion() {
     let html = b"<html><body><h1>Hello World</h1><p>Test content</p></body></html>";
@@ -38,6 +40,8 @@ fn test_etag_consistency_with_conversion() {
     );
 }
 
+/// Verifies that different HTML input produces different ETags, ensuring ETag
+/// uniqueness for distinct content.
 #[test]
 fn test_etag_differentiation_with_different_html() {
     let html1 = b"<html><body><h1>Hello World</h1></body></html>";
@@ -69,6 +73,8 @@ fn test_etag_differentiation_with_different_html() {
     );
 }
 
+/// Verifies that the generated ETag conforms to the HTTP specification: wrapped
+/// in double quotes, 32 hex characters, total length 34.
 #[test]
 fn test_etag_format_compliance() {
     let html = b"<html><body><p>Test</p></body></html>";
@@ -93,6 +99,8 @@ fn test_etag_format_compliance() {
     );
 }
 
+/// Verifies ETag generation for complex HTML with multiple element types
+/// (headings, paragraphs, lists, code blocks, links).
 #[test]
 fn test_etag_with_complex_html() {
     let html = br#"
@@ -128,6 +136,8 @@ fn test_etag_with_complex_html() {
     assert_eq!(etag, etag2);
 }
 
+/// Verifies that ETag generation works correctly with Unicode content,
+/// including CJK characters and emoji.
 #[test]
 fn test_etag_with_unicode_html() {
     let html = "<html><body><p>Hello 世界 🌍</p></body></html>".as_bytes();

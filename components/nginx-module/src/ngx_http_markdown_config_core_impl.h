@@ -149,6 +149,19 @@ ngx_http_markdown_init_metrics_zone(ngx_shm_zone_t *shm_zone, void *data)
     return NGX_OK;
 }
 
+/*
+ * Allocate and zero-initialize the main-level configuration structure.
+ *
+ * Called once during configuration parsing to create the process-wide
+ * shared state for metrics SHM zone settings and dynconf duplicate
+ * detection.
+ *
+ * Parameters:
+ *   cf - NGINX configuration context (provides the memory pool)
+ *
+ * Returns:
+ *   pointer to the allocated ngx_http_markdown_main_conf_t, or NULL on failure
+ */
 static void *
 ngx_http_markdown_create_main_conf(ngx_conf_t *cf)
 {
@@ -168,6 +181,20 @@ ngx_http_markdown_create_main_conf(ngx_conf_t *cf)
     return conf;
 }
 
+/*
+ * Finalize main-level defaults and register the shared-memory zone.
+ *
+ * Sets the default metrics SHM size (8 pages) if not explicitly configured,
+ * registers the shared memory zone with ngx_shared_memory_add(), and stores
+ * the zone pointer in both the main conf and the module-global variable.
+ *
+ * Parameters:
+ *   cf   - NGINX configuration context
+ *   conf - pointer to ngx_http_markdown_main_conf_t
+ *
+ * Returns:
+ *   NGX_CONF_OK on success, NGX_CONF_ERROR on failure
+ */
 static char *
 ngx_http_markdown_init_main_conf(ngx_conf_t *cf, void *conf)
 {
@@ -513,6 +540,18 @@ ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
     return NGX_CONF_OK;
 }
 
+/*
+ * Map module log verbosity enum to NGINX native log level.
+ *
+ * Converts the module-local NGX_HTTP_MARKDOWN_LOG_* constant to the
+ * corresponding NGX_LOG_* value used by ngx_log_error().
+ *
+ * Parameters:
+ *   verbosity - module log verbosity constant
+ *
+ * Returns:
+ *   NGX_LOG_ERR, NGX_LOG_WARN, NGX_LOG_INFO, or NGX_LOG_DEBUG
+ */
 static ngx_uint_t
 ngx_http_markdown_log_verbosity_to_ngx_level(ngx_uint_t verbosity)
 {
@@ -529,6 +568,15 @@ ngx_http_markdown_log_verbosity_to_ngx_level(ngx_uint_t verbosity)
     }
 }
 
+/*
+ * Return human-readable name for on_error directive value.
+ *
+ * Parameters:
+ *   value - NGX_HTTP_MARKDOWN_ON_ERROR_PASS or _REJECT
+ *
+ * Returns:
+ *   Static ngx_str_t with "pass", "reject", or "unknown"
+ */
 static const ngx_str_t *
 ngx_http_markdown_on_error_name(ngx_uint_t value)
 {
@@ -546,6 +594,15 @@ ngx_http_markdown_on_error_name(ngx_uint_t value)
     }
 }
 
+/*
+ * Return human-readable name for markdown_flavor directive value.
+ *
+ * Parameters:
+ *   value - flavor constant (COMMONMARK, GFM, MDX, ORG_MODE)
+ *
+ * Returns:
+ *   Static ngx_str_t with the flavor name or "unknown"
+ */
 static const ngx_str_t *
 ngx_http_markdown_flavor_name(ngx_uint_t value)
 {
@@ -569,6 +626,15 @@ ngx_http_markdown_flavor_name(ngx_uint_t value)
     }
 }
 
+/*
+ * Return human-readable name for auth_policy directive value.
+ *
+ * Parameters:
+ *   value - NGX_HTTP_MARKDOWN_AUTH_POLICY_ALLOW or _DENY
+ *
+ * Returns:
+ *   Static ngx_str_t with "allow", "deny", or "unknown"
+ */
 static const ngx_str_t *
 ngx_http_markdown_auth_policy_name(ngx_uint_t value)
 {
@@ -586,6 +652,15 @@ ngx_http_markdown_auth_policy_name(ngx_uint_t value)
     }
 }
 
+/*
+ * Return human-readable name for conditional_requests directive value.
+ *
+ * Parameters:
+ *   value - conditional mode constant (FULL, IMS_ONLY, DISABLED)
+ *
+ * Returns:
+ *   Static ngx_str_t with the mode name or "unknown"
+ */
 static const ngx_str_t *
 ngx_http_markdown_conditional_requests_name(ngx_uint_t value)
 {
@@ -606,6 +681,15 @@ ngx_http_markdown_conditional_requests_name(ngx_uint_t value)
     }
 }
 
+/*
+ * Return human-readable name for log_verbosity directive value.
+ *
+ * Parameters:
+ *   value - NGX_HTTP_MARKDOWN_LOG_* constant
+ *
+ * Returns:
+ *   Static ngx_str_t with "error", "warn", "info", "debug", or "unknown"
+ */
 static const ngx_str_t *
 ngx_http_markdown_log_verbosity_name(ngx_uint_t value)
 {
@@ -629,6 +713,15 @@ ngx_http_markdown_log_verbosity_name(ngx_uint_t value)
     }
 }
 
+/*
+ * Return human-readable name for metrics_format directive value.
+ *
+ * Parameters:
+ *   value - NGX_HTTP_MARKDOWN_METRICS_FORMAT_AUTO or _PROMETHEUS
+ *
+ * Returns:
+ *   Static ngx_str_t with "auto", "prometheus", or "unknown"
+ */
 static const ngx_str_t *
 ngx_http_markdown_metrics_format_name(ngx_uint_t value)
 {
@@ -646,6 +739,16 @@ ngx_http_markdown_metrics_format_name(ngx_uint_t value)
     }
 }
 
+/*
+ * Return human-readable name for a compression type enum value.
+ *
+ * Parameters:
+ *   compression_type - ngx_http_markdown_compression_type_e value
+ *
+ * Returns:
+ *   Static ngx_str_t with "none", "gzip", "deflate", "brotli",
+ *   "unknown", or "invalid"
+ */
 static const ngx_str_t *
 ngx_http_markdown_compression_name(ngx_http_markdown_compression_type_e compression_type)
 {
@@ -672,6 +775,15 @@ ngx_http_markdown_compression_name(ngx_http_markdown_compression_type_e compress
     }
 }
 
+/*
+ * Return human-readable name for markdown_filter enabled_source value.
+ *
+ * Parameters:
+ *   value - NGX_HTTP_MARKDOWN_ENABLED_UNSET, _STATIC, or _COMPLEX
+ *
+ * Returns:
+ *   Static ngx_str_t with "unset", "static", "complex", or "unknown"
+ */
 static const ngx_str_t *
 ngx_http_markdown_enabled_source_name(ngx_uint_t value)
 {
@@ -692,6 +804,19 @@ ngx_http_markdown_enabled_source_name(ngx_uint_t value)
     }
 }
 
+/*
+ * Check if a byte is an ASCII whitespace character.
+ *
+ * Recognizes space, tab, carriage return, newline, form feed, and
+ * vertical tab.  Used in directive parser hot paths where a fast,
+ * dependency-free whitespace check is needed.
+ *
+ * Parameters:
+ *   ch - byte to test
+ *
+ * Returns:
+ *   1 if ch is whitespace, 0 otherwise
+ */
 static ngx_uint_t
 ngx_http_markdown_is_ascii_space(u_char ch)
 {

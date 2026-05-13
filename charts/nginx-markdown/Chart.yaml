@@ -2,9 +2,9 @@ apiVersion: v2
 name: nginx-markdown
 description: NGINX module that converts HTML responses to Markdown for AI agents
 type: application
-version: 0.6.2
-appVersion: "0.6.2"
-home: https://github.com/user/nginx-markdown-for-agents
+version: 0.6.3
+appVersion: "0.6.3"
+home: https://github.com/cnkang/nginx-markdown-for-agents
 keywords:
   - nginx
   - markdown
@@ -13,6 +13,6 @@ keywords:
   - ai
   - agents
 maintainers:
-  - name: nginx-markdown-maintainers
+  - name: Kang Liu
 sources:
-  - https://github.com/user/nginx-markdown-for-agents
+  - https://github.com/cnkang/nginx-markdown-for-agents

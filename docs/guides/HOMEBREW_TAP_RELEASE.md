@@ -20,7 +20,7 @@ Set these in this repository before running the workflows:
 
 ## Publish Flow
 
-1. Push your release tag (for example `v0.6.2`).
+1. Push your release tag (for example `v0.6.3`).
 2. Publish a GitHub release for that tag.
 3. Workflow `Publish Homebrew Formula to Tap` will:
    - Download `https://github.com/<owner>/<repo>/archive/refs/tags/<tag>.tar.gz`

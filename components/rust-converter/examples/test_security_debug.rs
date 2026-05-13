@@ -1,3 +1,11 @@
+//! Debug example for security sanitization behavior.
+//!
+//! Demonstrates how the converter handles dangerous HTML elements like
+//! `<script>` and `<iframe>`, verifying that XSS payloads are stripped
+//! from the Markdown output.
+//!
+//! Run with: `cargo run --example test_security_debug`.
+
 use nginx_markdown_converter::converter::MarkdownConverter;
 use nginx_markdown_converter::parser::parse_html;
 
