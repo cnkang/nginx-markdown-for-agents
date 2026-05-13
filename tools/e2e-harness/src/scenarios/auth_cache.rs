@@ -244,7 +244,9 @@ fn case7_vary_cookie(
         common::try_get_with_headers(url, auth_headers, assertions, "case7_vary_cookie")
     {
         let vary_value = common::header_value(&resp.headers, "Vary");
-        let has_vary_cookie = vary_value.contains("Cookie");
+        let has_vary_cookie = vary_value
+            .split(',')
+            .any(|token| token.trim().eq_ignore_ascii_case("Cookie"));
         assertions.push(AssertionResult {
             name: "case7_vary_cookie".to_string(),
             passed: has_vary_cookie,

@@ -233,6 +233,25 @@ fn scenario_response(
     plain_response(method, 404, "text/plain", "not found")
 }
 
+/// Conditional/cache-aware response for `/md/html`.
+///
+/// ETag / If-None-Match logic:
+/// - INM `*` matches any entity (returns 304).
+/// - Strong ETag match (exact string) returns 304.
+/// - Weak ETag match (`W/"<etag>"`) returns 304.
+///
+/// If-Modified-Since: a sentinel date containing "2030" triggers 304.
+///
+/// 304 early return: sends headers (ETag, Vary) but no body,
+/// preserving cache metadata for downstream.
+///
+/// Auth-based cache policy:
+/// - Authenticated (Cookie contains `session_user=`): Cache-Control `private, max-age=0`, Vary `Cookie`.
+/// - Unauthenticated: Cache-Control `public, max-age=60`, Vary `Accept`.
+///
+/// Conversion happens before cache metadata is applied: the
+/// `html_or_markdown_by_accept` call produces the response body,
+/// then `into_response_with_cache` appends Cache-Control/ETag/Vary.
 fn md_html_response(
     state: Arc<FixtureState>,
     method: Method,
@@ -309,6 +328,26 @@ impl IntoResponseWithCache for axum::response::Response {
     }
 }
 
+/// Content-negotiation response: return Markdown or HTML based on Accept header.
+///
+/// Expected Accept formats:
+/// - `text/markdown` → converted Markdown response
+/// - `text/html` or empty → original HTML response
+/// - `*/*` → depends on `wildcard_converts` flag
+///
+/// `wildcard_requested` is true when Accept contains `*/*`.
+/// `wildcard_converts` controls whether `*/*` triggers conversion.
+/// Their interaction: conversion happens only when both are true.
+///
+/// HTML precedence: explicit `text/html` or empty Accept always
+/// returns HTML, even if `text/markdown` is also present.
+///
+/// `should_convert` invariant: conversion occurs when
+///   `!force_html && (markdown_requested || (wildcard_requested && wildcard_converts)) && !html_requested`
+///
+/// Vary header selection: `Cookie` when `is_auth`, else `Accept`.
+/// Cookie is used for Vary in auth contexts because the auth state
+/// (presence of session cookie) varies independently of Accept.
 fn html_or_markdown_by_accept(
     state: &Arc<FixtureState>,
     method: Method,

@@ -47,7 +47,11 @@ fn try_direct_prepare() -> Result<Option<BootstrapResult>> {
             let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
             let nginx_bin = PathBuf::from(&path);
             if nginx_bin.exists() {
-                let module_path = nginx_bin.parent().unwrap_or(Path::new("")).to_path_buf();
+                let module_path = nginx_bin
+                    .parent()
+                    .and_then(|p| p.parent())
+                    .map(|p| p.join("modules"))
+                    .unwrap_or_else(|| PathBuf::from(""));
                 return Ok(Some(BootstrapResult {
                     nginx_bin,
                     module_path,

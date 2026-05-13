@@ -80,7 +80,11 @@ impl ScenarioContext {
 /// Allocate an ephemeral port by binding to port 0 and reading the assigned port.
 ///
 /// The socket is immediately closed so the port is available for reuse.
-/// This carries a small TOCTOU race before NGINX binds the same port.
+/// This carries a small TOCTOU race between close and NGINX bind: another
+/// process may grab the same port in that window.  Accepted risk because
+/// (1) the race window is sub-millisecond on modern kernels, (2) the
+/// fallback base+pid+jitter strategy reduces collision probability, and
+/// (3) CI runs in isolated environments with low port contention.
 fn allocate_ephemeral_port_or_fallback(base: u16) -> u16 {
     use std::net::TcpListener;
     match TcpListener::bind("127.0.0.1:0") {

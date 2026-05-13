@@ -263,7 +263,14 @@ fn resolve_cli_nginx_bin(cli: &Cli) -> Result<Cli> {
         return Ok(cli.clone());
     }
 
-    let bootstrap_dir = std::env::temp_dir().join("e2e-harness-bootstrap");
+    let bootstrap_dir = std::env::temp_dir().join(format!(
+        "e2e-harness-bootstrap-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis()
+    ));
     std::fs::create_dir_all(&bootstrap_dir)
         .with_context(|| format!("failed to create bootstrap dir {}", bootstrap_dir.display()))?;
     let prepared = crate::bootstrap::prepare(&bootstrap_dir).with_context(
