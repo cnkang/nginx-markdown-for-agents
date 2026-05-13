@@ -13,29 +13,19 @@
 
 use crate::assertions;
 use crate::http;
+use crate::scenarios::common;
 use crate::scenarios::{AssertionResult, ScenarioContext, ScenarioReport};
 use anyhow::Result;
 use std::collections::HashMap;
 
 /// Run the accept-negotiation scenario.
 pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
+    const SCENARIO: &str = "accept-negotiation";
     let start = std::time::Instant::now();
     let mut assertions = Vec::new();
 
-    let nginx_bin = match &ctx.mode {
-        crate::runtime::RuntimeMode::Reuse(path) => path.clone(),
-        crate::runtime::RuntimeMode::Bootstrap => {
-            return Ok(ScenarioReport::failing(
-                "accept-negotiation",
-                assertions,
-                start.elapsed().as_millis() as u64,
-                "Bootstrap mode not yet supported".to_string(),
-            ));
-        }
-    };
-
-    if !nginx_bin.exists() {
-        return Ok(skipped_report(start, "NGINX binary not found"));
+    if let Err(report) = common::ensure_reuse_nginx_binary(&ctx, SCENARIO, start) {
+        return Ok(report);
     }
 
     let base_url = format!("http://127.0.0.1:{}", ctx.port);
@@ -61,7 +51,7 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
         Ok(r) => r,
         Err(e) => {
             return Ok(ScenarioReport::failing(
-                "accept-negotiation",
+                SCENARIO,
                 assertions,
                 start.elapsed().as_millis() as u64,
                 format!("Case 1: failed to connect: {e}"),
@@ -86,7 +76,12 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
     ));
 
     // Case 2: Accept: text/html returns original HTML
-    if let Ok(resp2) = http::get_with_headers(&md_html_url, &html_headers) {
+    if let Some(resp2) = common::try_get_with_headers(
+        &md_html_url,
+        &html_headers,
+        &mut assertions,
+        "case2_html_accept_ct",
+    ) {
         assertions.push(assertions::assert_status(
             "case2_html_accept_status_200",
             resp2.status,
@@ -103,12 +98,15 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
             "<h1>",
             &resp2.body,
         ));
-    } else {
-        assertions.push(failed_assertion("case2_html_accept_ct", "request failed"));
     }
 
     // Case 3: No Accept header returns original HTML (default)
-    if let Ok(resp3) = http::get_with_headers(&md_html_url, &no_accept_headers) {
+    if let Some(resp3) = common::try_get_with_headers(
+        &md_html_url,
+        &no_accept_headers,
+        &mut assertions,
+        "case3_no_accept_ct_html",
+    ) {
         assertions.push(assertions::assert_status(
             "case3_no_accept_status_200",
             resp3.status,
@@ -120,15 +118,15 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
             "text/html",
             &resp3.headers,
         ));
-    } else {
-        assertions.push(failed_assertion(
-            "case3_no_accept_ct_html",
-            "request failed",
-        ));
     }
 
     // Case 4: Accept: */* with markdown_on_wildcard on triggers conversion
-    if let Ok(resp4) = http::get_with_headers(&md_html_url, &wildcard_headers) {
+    if let Some(resp4) = common::try_get_with_headers(
+        &md_html_url,
+        &wildcard_headers,
+        &mut assertions,
+        "case4_wildcard_on_ct_markdown",
+    ) {
         assertions.push(assertions::assert_status(
             "case4_wildcard_on_status_200",
             resp4.status,
@@ -140,15 +138,15 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
             "text/markdown",
             &resp4.headers,
         ));
-    } else {
-        assertions.push(failed_assertion(
-            "case4_wildcard_on_ct_markdown",
-            "request failed",
-        ));
     }
 
     // Case 5: Accept: */* with markdown_on_wildcard off does NOT convert
-    if let Ok(resp5) = http::get_with_headers(&no_wildcard_html_url, &wildcard_headers) {
+    if let Some(resp5) = common::try_get_with_headers(
+        &no_wildcard_html_url,
+        &wildcard_headers,
+        &mut assertions,
+        "case5_wildcard_off_ct_html",
+    ) {
         assertions.push(assertions::assert_status(
             "case5_wildcard_off_status_200",
             resp5.status,
@@ -159,11 +157,6 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
             "Content-Type",
             "text/html",
             &resp5.headers,
-        ));
-    } else {
-        assertions.push(failed_assertion(
-            "case5_wildcard_off_ct_html",
-            "request failed",
         ));
     }
 
@@ -188,7 +181,12 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
     });
 
     // Case 7: Non-HTML Content-Type (application/json) is not converted
-    if let Ok(resp7) = http::get_with_headers(&md_json_url, &markdown_headers) {
+    if let Some(resp7) = common::try_get_with_headers(
+        &md_json_url,
+        &markdown_headers,
+        &mut assertions,
+        "case7_json_ct_preserved",
+    ) {
         assertions.push(assertions::assert_status(
             "case7_json_not_converted_status_200",
             resp7.status,
@@ -200,15 +198,15 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
             "application/json",
             &resp7.headers,
         ));
-    } else {
-        assertions.push(failed_assertion(
-            "case7_json_ct_preserved",
-            "request failed",
-        ));
     }
 
     // Case 8: text/plain Content-Type is not converted
-    if let Ok(resp8) = http::get_with_headers(&md_plain_url, &markdown_headers) {
+    if let Some(resp8) = common::try_get_with_headers(
+        &md_plain_url,
+        &markdown_headers,
+        &mut assertions,
+        "case8_plain_ct_preserved",
+    ) {
         assertions.push(assertions::assert_status(
             "case8_plain_not_converted_status_200",
             resp8.status,
@@ -220,46 +218,7 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
             "text/plain",
             &resp8.headers,
         ));
-    } else {
-        assertions.push(failed_assertion(
-            "case8_plain_ct_preserved",
-            "request failed",
-        ));
     }
 
-    let elapsed = start.elapsed().as_millis() as u64;
-    let passed = assertions.iter().all(|a| a.passed);
-    Ok(ScenarioReport {
-        name: "accept-negotiation".to_string(),
-        passed,
-        assertions,
-        elapsed_ms: elapsed,
-        failure_message: if passed {
-            None
-        } else {
-            Some("accept-negotiation failed".to_string())
-        },
-    })
-}
-
-/// Create a skipped scenario report.
-fn skipped_report(start: std::time::Instant, reason: &str) -> ScenarioReport {
-    ScenarioReport {
-        name: "accept-negotiation".to_string(),
-        passed: false,
-        assertions: vec![],
-        elapsed_ms: start.elapsed().as_millis() as u64,
-        failure_message: Some(format!("SKIPPED: {reason}")),
-    }
-}
-
-/// Create a failed assertion result for a request error.
-fn failed_assertion(name: &str, reason: &str) -> AssertionResult {
-    AssertionResult {
-        name: name.to_string(),
-        passed: false,
-        expected: "request succeeds".to_string(),
-        actual: format!("request failed: {reason}"),
-        message: Some(format!("[FAIL] assertion={name} {reason}")),
-    }
+    Ok(common::finalize_report(SCENARIO, start, assertions))
 }

@@ -5,6 +5,7 @@
 
 pub mod accept_negotiation;
 pub mod auth_cache;
+pub mod common;
 pub mod conditional_requests;
 pub mod metrics_endpoint;
 pub mod smoke;

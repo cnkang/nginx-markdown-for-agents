@@ -13,29 +13,19 @@
 
 use crate::assertions;
 use crate::http;
+use crate::scenarios::common;
 use crate::scenarios::{AssertionResult, ScenarioContext, ScenarioReport};
 use anyhow::Result;
 use std::collections::HashMap;
 
 /// Run the metrics-endpoint scenario.
 pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
+    const SCENARIO: &str = "metrics-endpoint";
     let start = std::time::Instant::now();
     let mut assertions = Vec::new();
 
-    let nginx_bin = match &ctx.mode {
-        crate::runtime::RuntimeMode::Reuse(path) => path.clone(),
-        crate::runtime::RuntimeMode::Bootstrap => {
-            return Ok(ScenarioReport::failing(
-                "metrics-endpoint",
-                assertions,
-                start.elapsed().as_millis() as u64,
-                "Bootstrap mode not yet supported".to_string(),
-            ));
-        }
-    };
-
-    if !nginx_bin.exists() {
-        return Ok(skipped_report(start, "NGINX binary not found"));
+    if let Err(report) = common::ensure_reuse_nginx_binary(&ctx, SCENARIO, start) {
+        return Ok(report);
     }
 
     let metrics_port = ctx.upstream_port;
@@ -59,7 +49,7 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
         Ok(r) => r,
         Err(e) => {
             return Ok(ScenarioReport::failing(
-                "metrics-endpoint",
+                SCENARIO,
                 assertions,
                 start.elapsed().as_millis() as u64,
                 format!("Case 1: failed to connect to metrics endpoint: {e}"),
@@ -99,7 +89,7 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
         Ok(r) => r,
         Err(e) => {
             return Ok(ScenarioReport::failing(
-                "metrics-endpoint",
+                SCENARIO,
                 assertions,
                 start.elapsed().as_millis() as u64,
                 format!("Case 2: failed to connect to metrics endpoint: {e}"),
@@ -140,7 +130,7 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
         Ok(r) => r,
         Err(e) => {
             return Ok(ScenarioReport::failing(
-                "metrics-endpoint",
+                SCENARIO,
                 assertions,
                 start.elapsed().as_millis() as u64,
                 format!("Case 3: failed to connect to metrics endpoint: {e}"),
@@ -230,7 +220,10 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
             });
         }
     } else {
-        assertions.push(failed_assertion("case5_json_parse", "JSON parse failed"));
+        assertions.push(common::failed_request_assertion(
+            "case5_json_parse",
+            "JSON parse failed",
+        ));
     }
 
     // Case 6: Prometheus metrics contain expected metric family prefixes
@@ -258,8 +251,18 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
     });
 
     // Case 7: After a conversion, request counters are non-zero
-    if let Ok(_conv_resp) = http::get_with_headers(&app_url, &markdown_headers) {
-        if let Ok(resp7) = http::get_with_headers(&metrics_url, &json_headers) {
+    if let Some(_conv_resp) = common::try_get_with_headers(
+        &app_url,
+        &markdown_headers,
+        &mut assertions,
+        "case7_conversion_request",
+    ) {
+        if let Some(resp7) = common::try_get_with_headers(
+            &metrics_url,
+            &json_headers,
+            &mut assertions,
+            "case7_metrics_fetch",
+        ) {
             if let Ok(data7) = serde_json::from_str::<serde_json::Value>(&resp7.body) {
                 let total_req = data7
                     .get("total_requests")
@@ -284,20 +287,21 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
                     message: None,
                 });
             } else {
-                assertions.push(failed_assertion("case7_json_parse", "JSON parse failed"));
+                assertions.push(common::failed_request_assertion(
+                    "case7_json_parse",
+                    "JSON parse failed",
+                ));
             }
-        } else {
-            assertions.push(failed_assertion("case7_metrics_fetch", "request failed"));
         }
-    } else {
-        assertions.push(failed_assertion(
-            "case7_conversion_request",
-            "conversion request failed",
-        ));
     }
 
     // Case 8: Invalid Accept header returns plain-text fallback
-    if let Ok(resp8) = http::get_with_headers(&metrics_url, &invalid_accept_headers) {
+    if let Some(resp8) = common::try_get_with_headers(
+        &metrics_url,
+        &invalid_accept_headers,
+        &mut assertions,
+        "case8_invalid_accept",
+    ) {
         assertions.push(assertions::assert_status(
             "case8_invalid_accept_status_200",
             resp8.status,
@@ -309,43 +313,7 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
             "text/plain",
             &resp8.headers,
         ));
-    } else {
-        assertions.push(failed_assertion("case8_invalid_accept", "request failed"));
     }
 
-    let elapsed = start.elapsed().as_millis() as u64;
-    let passed = assertions.iter().all(|a| a.passed);
-    Ok(ScenarioReport {
-        name: "metrics-endpoint".to_string(),
-        passed,
-        assertions,
-        elapsed_ms: elapsed,
-        failure_message: if passed {
-            None
-        } else {
-            Some("metrics-endpoint failed".to_string())
-        },
-    })
-}
-
-/// Create a skipped scenario report.
-fn skipped_report(start: std::time::Instant, reason: &str) -> ScenarioReport {
-    ScenarioReport {
-        name: "metrics-endpoint".to_string(),
-        passed: false,
-        assertions: vec![],
-        elapsed_ms: start.elapsed().as_millis() as u64,
-        failure_message: Some(format!("SKIPPED: {reason}")),
-    }
-}
-
-/// Create a failed assertion result for a request error.
-fn failed_assertion(name: &str, reason: &str) -> AssertionResult {
-    AssertionResult {
-        name: name.to_string(),
-        passed: false,
-        expected: "request succeeds".to_string(),
-        actual: format!("request failed: {reason}"),
-        message: Some(format!("[FAIL] assertion={name} {reason}")),
-    }
+    Ok(common::finalize_report(SCENARIO, start, assertions))
 }
