@@ -172,6 +172,14 @@ sanitize_tag() {
 # Only writes when GITHUB_STEP_SUMMARY is set.  Includes tag, image,
 # module ref, nginx -t status, and content negotiation results.
 #
+# Globals read:
+#   GITHUB_STEP_SUMMARY  - GitHub Actions step summary file path
+#   TMP_DIR              - temporary directory for build artifacts
+#   IMAGE_NAME           - Docker image name
+#   MODULE_GIT_REF       - module Git reference
+#   markdown_code        - exit code from markdown content negotiation
+#   html_code            - exit code from HTML content negotiation
+#
 # Arguments:
 #   $1 - status string ("passed" or "failed")
 #
@@ -242,6 +250,23 @@ capture_failure_artifacts() {
   fi
 }
 
+# Cleanup handler: capture failure artifacts, append step summary,
+# remove Docker container and image, and delete temp directory.
+#
+# Globals read:
+#   CONTAINER_NAME  - Docker container name to remove
+#   KEEP_IMAGE      - if 1, skip image removal
+#   IMAGE_NAME      - Docker image name to remove
+#   TMP_DIR         - temporary directory to delete
+#   ARTIFACT_DIR    - directory to copy artifacts into on failure
+#
+# Side effects:
+#   Calls capture_failure_artifacts and append_step_summary on failure.
+#   Removes Docker container and optionally the image.
+#   Removes TMP_DIR.
+#
+# Returns:
+#   0 always.
 cleanup() {
   local rc=$?
 
