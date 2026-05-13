@@ -79,6 +79,7 @@ impl ScenarioContext {
 /// Allocate an ephemeral port by binding to port 0 and reading the assigned port.
 ///
 /// The socket is immediately closed so the port is available for reuse.
+/// This carries a small TOCTOU race before NGINX binds the same port.
 fn allocate_ephemeral_port_or_fallback(base: u16) -> u16 {
     use std::net::TcpListener;
     match TcpListener::bind("127.0.0.1:0") {
@@ -88,7 +89,12 @@ fn allocate_ephemeral_port_or_fallback(base: u16) -> u16 {
             .unwrap_or(base),
         Err(_) => {
             let pid_offset = (std::process::id() % 1000) as u16;
-            base.saturating_add(pid_offset)
+            let jitter = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .subsec_nanos() as u16
+                % 1000;
+            base.saturating_add(pid_offset.saturating_add(jitter))
         }
     }
 }
