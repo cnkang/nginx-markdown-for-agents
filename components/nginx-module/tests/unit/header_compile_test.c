@@ -1,6 +1,5 @@
 /*
  * Test: header_compile
- * Description: compile-time smoke test for typedef ordering
  *
  * This test provides a compile-time smoke check for a critical
  * typedef/struct dependency chain used by the module header.

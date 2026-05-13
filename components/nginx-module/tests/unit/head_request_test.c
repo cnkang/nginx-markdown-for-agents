@@ -1,6 +1,5 @@
 /*
  * Test: head_request
- * Description: HEAD request handling
  *
  * Validates that HEAD requests run the conversion pipeline (to update
  * Content-Type and Content-Length) but produce an empty response body.

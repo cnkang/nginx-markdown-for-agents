@@ -1,6 +1,5 @@
 /*
  * Test: conditional_requests
- * Description: conditional request handling
  *
  * Validates If-None-Match ETag matching, including quoted/unquoted
  * tokens, weak validators, wildcard matching, malformed headers,
