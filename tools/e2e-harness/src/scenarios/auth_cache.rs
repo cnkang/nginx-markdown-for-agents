@@ -55,6 +55,9 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
     Ok(common::finalize_report(SCENARIO, start, assertions))
 }
 
+/// Case 1: authenticated request and assert `Cache-Control` contains `private`.
+///
+/// Uses `url`, `headers`, and `assertions` to append status and cache-control checks.
 fn case1_auth_private(
     url: &str,
     headers: &HashMap<String, String>,
@@ -80,6 +83,9 @@ fn case1_auth_private(
     }
 }
 
+/// Case 2: request without auth cookie and assert `Cache-Control` contains `public`.
+///
+/// Uses `url`, `headers`, and `assertions` to append status and header assertions.
 fn case2_noauth_public(
     url: &str,
     headers: &HashMap<String, String>,
@@ -105,6 +111,9 @@ fn case2_noauth_public(
     }
 }
 
+/// Case 3: request deny-policy location and assert passthrough `text/html` response.
+///
+/// Uses `deny_url`, `auth_headers`, and appends status/content-type assertions.
 fn case3_deny_policy(
     deny_url: &str,
     auth_headers: &HashMap<String, String>,
@@ -130,6 +139,9 @@ fn case3_deny_policy(
     }
 }
 
+/// Case 4: request with non-matching cookie and assert markdown conversion remains enabled.
+///
+/// Uses `url`, `headers`, and appends status and `Content-Type: text/markdown` checks.
 fn case4_nonmatching_cookie(
     url: &str,
     headers: &HashMap<String, String>,
@@ -155,6 +167,9 @@ fn case4_nonmatching_cookie(
     }
 }
 
+/// Case 5: auth fail-open behavior, asserting `Cache-Control` header is still present.
+///
+/// Uses `url`, `auth_headers`, and appends header-presence assertion details.
 fn case5_auth_fail_open_cache_control(
     url: &str,
     auth_headers: &HashMap<String, String>,
@@ -182,6 +197,9 @@ fn case5_auth_fail_open_cache_control(
     }
 }
 
+/// Case 6: non-auth ETag behavior, asserting ETag presence and replacement from upstream.
+///
+/// Uses `url`, `headers`, and appends ETag presence/difference assertions.
 fn case6_nonauth_etag_replacement(
     url: &str,
     headers: &HashMap<String, String>,
@@ -214,6 +232,9 @@ fn case6_nonauth_etag_replacement(
     }
 }
 
+/// Case 7: auth response Vary behavior, asserting `Vary` contains `Cookie`.
+///
+/// Uses `url`, `auth_headers`, and appends the Vary-token assertion result.
 fn case7_vary_cookie(
     url: &str,
     auth_headers: &HashMap<String, String>,

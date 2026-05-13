@@ -136,7 +136,7 @@ typedef struct ngx_http_markdown_otel_span_s {
  */
 static ngx_int_t
 ngx_http_markdown_otel_random_hex(u_char *dst, size_t byte_count,
-                                  ngx_log_t *log)
+                                  const ngx_log_t *log)
 {
     static const u_char  hex[] = "0123456789abcdef";
     u_char               raw[32];
@@ -155,7 +155,7 @@ ngx_http_markdown_otel_random_hex(u_char *dst, size_t byte_count,
 
         fd = open("/dev/urandom", O_RDONLY);
         if (fd == -1) {
-            ngx_log_error(NGX_LOG_ALERT, log, 0,
+            ngx_log_error(NGX_LOG_ALERT, (ngx_log_t *) log, 0,
                           "markdown otel: open(/dev/urandom) failed");
             return NGX_ERROR;
         }
@@ -164,7 +164,7 @@ ngx_http_markdown_otel_random_hex(u_char *dst, size_t byte_count,
         (void) close(fd);
 
         if (n != (ssize_t) byte_count) {
-            ngx_log_error(NGX_LOG_ALERT, log, 0,
+            ngx_log_error(NGX_LOG_ALERT, (ngx_log_t *) log, 0,
                           "markdown otel: read(/dev/urandom) returned %z "
                           "expected %uz", n, byte_count);
             return NGX_ERROR;

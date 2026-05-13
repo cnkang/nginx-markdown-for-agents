@@ -25,6 +25,21 @@ use std::collections::HashMap;
 /// Upstream ETag value used in the fixture server.
 const UPSTREAM_ETAG: &str = "\"upstream-original-etag-12345\"";
 
+fn header_contains_token_case_insensitive(
+    headers: &reqwest::header::HeaderMap,
+    header_name: &str,
+    token: &str,
+) -> bool {
+    headers
+        .get(header_name)
+        .and_then(|v| v.to_str().ok())
+        .map(|s| {
+            s.split(',')
+                .any(|part| part.trim().eq_ignore_ascii_case(token))
+        })
+        .unwrap_or(false)
+}
+
 /// Run the conditional-requests scenario.
 pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
     const SCENARIO: &str = "conditional-requests";
@@ -100,15 +115,15 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
             304,
         ));
         // Case 9: 304 response contains Vary: Accept
-        let vary_check = resp3.headers.get("Vary").is_some();
+        let vary_check = header_contains_token_case_insensitive(&resp3.headers, "Vary", "Accept");
         assertions.push(AssertionResult {
             name: "case9_vary_accept_in_304".to_string(),
             passed: vary_check,
-            expected: "Vary header present".to_string(),
+            expected: "Vary contains Accept".to_string(),
             actual: if vary_check {
-                "present".to_string()
+                "contains Accept".to_string()
             } else {
-                "absent".to_string()
+                "does not contain Accept".to_string()
             },
             message: None,
         });
