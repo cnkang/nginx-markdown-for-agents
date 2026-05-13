@@ -73,6 +73,17 @@ else
     ngx_module_libs="$ngx_markdown_rust_lib -lpthread -ldl -lm"
 fi
 
+# Detect arc4random_buf() for cryptographically secure random bytes.
+# Available on BSD/macOS natively and Linux glibc >= 2.36.
+# When available, prefer it over /dev/urandom (no fd management).
+if echo "#include <stdlib.h>" | ${CC:-cc} -x c - -E >/dev/null 2>&1; then
+    if echo '#include <stdlib.h>
+int main(void) { unsigned char buf[1]; arc4random_buf(buf, 1); return 0; }' \
+       | ${CC:-cc} -x c - -o /dev/null >/dev/null 2>&1; then
+        CFLAGS="$CFLAGS -DNGX_HAVE_ARC4RANDOM=1"
+    fi
+fi
+
 # Detect whether the Rust library was built with the `incremental` feature.
 # If the symbol is present, define MARKDOWN_INCREMENTAL_ENABLED so the C
 # header exposes the incremental API declarations.
