@@ -280,7 +280,7 @@ def _build_mock_html(versions: list[str]) -> str:
     return f"<html><body><h4>Mainline version</h4>{links}</body></html>"
 
 
-# Strategy: 1–3 unique supported versions >= 1.24.0 so they pass
+# Strategy: 1-3 unique supported versions >= 1.24.0 so they pass
 # the MIN_SUPPORTED filter. We keep the set small to keep file I/O fast.
 _supported_version_for_p9 = st.builds(
     lambda minor, patch: f"1.{minor}.{patch}",
@@ -473,7 +473,7 @@ def _setup_cli_env(
 
     Creates these files under tmp_path:
     - release-matrix.json with auto-managed matrix entries for each version in
-      versions_in_matrix (glibc/musl × x86_64/aarch64).
+      versions_in_matrix (glibc/musl x x86_64/aarch64).
     - INSTALLATION.md containing document markers and a table that matches the matrix entries.
     - install.sh containing MIN_SUPPORTED_NGINX_VERSION="1.24.0".
     - matrix-diff.json is not created by default (path is returned for tests that expect it).
