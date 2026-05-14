@@ -173,7 +173,7 @@ def _git_diff_files(base: str | None) -> list[str]:
     """
     cmd = ["git", "diff", "--name-only", "--diff-filter=d"]
     if base:
-        cmd.append(f"{_validate_git_ref(base)}...HEAD")
+        cmd.append(f"{base}...HEAD")
     try:
         # shell=False (the default) is the primary injection barrier; the
         # argv list is never interpreted by a shell regardless of its content.
@@ -426,7 +426,11 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest", default=str(DEFAULT_MANIFEST))
     parser.add_argument("--from-git", action="store_true")
-    parser.add_argument("--base", help="Optional git base for --from-git.")
+    parser.add_argument(
+        "--base",
+        type=_validate_git_ref,
+        help="Optional git base for --from-git.",
+    )
     parser.add_argument(
         "--file",
         action="append",
