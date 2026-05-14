@@ -235,6 +235,13 @@ and a unified memory budget simplifies configuration.
 - Updated installation documentation and READMEs with Homebrew tap install
   path and release-tag checksum guidance.
 
+#### Upgrading to 0.6.0
+
+- **Streaming is now the default engine.** The `markdown_streaming_engine` directive defaults to `auto`, which selects the streaming path for eligible responses. To retain the previous full-buffer-only behavior, set `markdown_streaming_engine off;` in your nginx configuration.
+- **Noise pruning is now enabled by default.** The `markdown_prune_noise` directive defaults to `on`. To disable it, set `markdown_prune_noise off;`.
+- **Unified memory budget.** The `markdown_memory_budget` directive supersedes the dual `markdown_max_size` + `markdown_streaming_budget` pattern. Existing configurations using the old directives continue to work but `markdown_memory_budget` is recommended for new deployments.
+- **OpenTelemetry tracing.** If you enable OTLP tracing, ensure your collector endpoint accepts HTTP/protobuf on the configured port.
+
 ### Fixed
 - Homebrew source builds now install `cbindgen` as an explicit build
   dependency before running `make build`.
@@ -736,10 +743,10 @@ This release expands runtime configurability, tightens module internals and vali
 - macOS (Apple Silicon and Intel)
 - Linux (x86_64 and aarch64)
 - NGINX 1.24.0+
-- Rust 1.85.0+
+- Rust 1.91.0+
 
 ### Known Limitations
-- Full buffering required (no streaming conversion)
+- Streaming is the default engine; full-buffer is the fallback
 - Requires uncompressed or automatically decompressed HTML input
 - Some complex HTML structures may not convert perfectly
 - Performance overhead for large documents
