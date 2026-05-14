@@ -3,6 +3,8 @@
 //! Uses `axum` to serve deterministic upstream responses with real
 //! status/header/body semantics.
 
+#![allow(dead_code)]
+
 use crate::fixtures::{FixtureResponse, FixtureSpec, RouteBehavior};
 use anyhow::{Context, Result};
 use axum::Router;
