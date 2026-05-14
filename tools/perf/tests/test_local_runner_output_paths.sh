@@ -13,7 +13,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 RUNNER="$REPO_ROOT/tools/perf/run_perf_baseline.sh"
 REPORT_UTILS="$REPO_ROOT/tools/perf/report_utils.py"
 
-TMPDIR_BASE="$(mktemp -d)"
+TMPDIR_BASE="$(mktemp -d "$REPO_ROOT/.test-tmp.local-runner.XXXXXX")"
 trap 'rm -rf "$TMPDIR_BASE"; rm -f "perf/reports/latest-measurement-"*".json" "perf/reports/latest-verdict-"*".json"' EXIT
 
 PASS=0
