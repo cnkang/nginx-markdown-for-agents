@@ -33,6 +33,8 @@ readonly PATTERN_CT_HTML='^Content-Type: text/html'
 
 # shellcheck source=tools/lib/nginx_markdown_native_build.sh
 source "${NATIVE_BUILD_HELPER}"
+# shellcheck disable=SC1090
+source "$(dirname "${BASH_SOURCE[0]}")/e2e_common.sh"
 
 #
 # Fetch URL, store headers/body, assert HTTP status matches pattern.
