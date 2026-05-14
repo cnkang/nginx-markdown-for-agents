@@ -1,6 +1,9 @@
 /*
  * Test: metrics_endpoint
- * Description: metrics endpoint
+ *
+ * Validates the /metrics endpoint: localhost access control, JSON
+ * response format, correct metric values, and error handling for
+ * non-localhost requests.
  */
 
 #include "test_common.h"

@@ -33,7 +33,7 @@ flowchart LR
     end
 
     subgraph BodyPhase["Body Filter Phase"]
-        MS["markdown_max_size"]
+        MS["markdown_memory_budget"]
         TO["markdown_timeout"]
         OE["markdown_on_error"]
         FL["markdown_flavor"]
@@ -78,7 +78,7 @@ flowchart LR
 
 ## Resource and Failure Controls
 
-### `markdown_max_size`
+### `markdown_memory_budget`
 
 | Aspect | Detail |
 |--------|--------|
@@ -251,7 +251,7 @@ Then move to [REQUEST_LIFECYCLE.md](REQUEST_LIFECYCLE.md) and trace header-phase
 Start with:
 
 - `markdown_on_error`
-- `markdown_max_size`
+- `markdown_memory_budget`
 - `markdown_timeout`
 - `markdown_conditional_requests`
 

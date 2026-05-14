@@ -40,6 +40,18 @@ PHASE_ORDER = {"cheap-blocker": 0, "focused-semantic": 1, "umbrella": 2}
 
 
 def _load_manifest(path: Path) -> dict:
+    """Load and validate the routing manifest JSON file.
+
+    Performs path validation, JSON parsing, and schema checks for
+    required keys and types.  Exits with an error message if the
+    manifest is malformed.
+
+    Args:
+        path: Path to the routing-manifest.json file.
+
+    Returns:
+        Parsed manifest as a dictionary.
+    """
     validated = validate_read_path(path, purpose="routing manifest")
     try:
         data = json.loads(validated.read_text(encoding="utf-8"))
@@ -125,6 +137,14 @@ def _load_manifest(path: Path) -> dict:
 
 
 def _git_diff_files(base: str | None) -> list[str]:
+    """Get the list of changed files from git diff.
+
+    Args:
+        base: Base branch/commit for the diff. If None, uses staged changes.
+
+    Returns:
+        Sorted list of changed file paths relative to repo root.
+    """
     cmd = ["git", "diff", "--name-only", "--diff-filter=d"]
     if base:
         cmd.append(f"{base}...HEAD")
@@ -144,6 +164,13 @@ def _git_diff_files(base: str | None) -> list[str]:
 
 
 def _git_status_files() -> list[str]:
+    """Get the list of working-tree files from git status.
+
+    Expands directory entries by listing their tracked contents.
+
+    Returns:
+        Sorted list of file paths relative to repo root.
+    """
     cmd = ["git", "status", "--porcelain"]
     try:
         out = subprocess.check_output(
@@ -182,6 +209,17 @@ def _git_status_files() -> list[str]:
 
 
 def _normalize_files(raw: list[str]) -> list[str]:
+    """Normalize and deduplicate a list of file paths.
+
+    Splits comma-separated entries, normalizes backslashes to forward
+    slashes, and removes duplicates.
+
+    Args:
+        raw: Raw file path strings (may be comma-separated).
+
+    Returns:
+        Sorted list of unique normalized file paths.
+    """
     files: list[str] = []
     for value in raw:
         for part in value.split(","):
@@ -192,6 +230,17 @@ def _normalize_files(raw: list[str]) -> list[str]:
 
 
 def _parse_status_output(output: str) -> list[str]:
+    """Parse git status --porcelain output into file paths.
+
+    Handles renamed files (old -> new), deleted files (skipped),
+    and directory entries.
+
+    Args:
+        output: Raw output from git status --porcelain.
+
+    Returns:
+        List of file paths extracted from the status output.
+    """
     parsed: list[str] = []
     for line in output.splitlines():
         if len(line) < 4:
@@ -217,6 +266,17 @@ def _parse_status_output(output: str) -> list[str]:
 
 
 def _match_path(path: str, pattern: str) -> bool:
+    """Check whether a file path matches a glob pattern.
+
+    Supports ** recursive patterns and standard fnmatch syntax.
+
+    Args:
+        path: File path to test (backslashes are normalized).
+        pattern: Glob pattern to match against.
+
+    Returns:
+        True if the path matches the pattern.
+    """
     path = path.replace("\\", "/")
     pattern = pattern.replace("\\", "/")
     if pattern.endswith("/**"):
@@ -226,6 +286,19 @@ def _match_path(path: str, pattern: str) -> bool:
 
 
 def _pack_matches(pack: dict, files: list[str], hint_text: str) -> dict | None:
+    """Check whether a risk pack matches the given files and hint text.
+
+    A pack matches if any of its path patterns match the changed files
+    or any of its keywords appear in the hint text or file paths.
+
+    Args:
+        pack: Risk pack dictionary from the manifest.
+        files: List of changed file paths.
+        hint_text: Additional text to search for keyword matches.
+
+    Returns:
+        Match result dictionary with hits and score, or None if no match.
+    """
     path_hits: list[str] = []
     for file_path in files:
         if any(_match_path(file_path, pattern) for pattern in pack.get("paths", [])):
@@ -255,11 +328,36 @@ def _pack_matches(pack: dict, files: list[str], hint_text: str) -> dict | None:
 
 
 def _keyword_matches_haystack(needle: str, haystack: str) -> bool:
+    """Check whether a keyword appears as a whole word in the haystack.
+
+    Uses word-boundary matching to avoid partial matches within
+    identifiers or compound words.
+
+    Args:
+        needle: Keyword to search for.
+        haystack: Text to search in (should be lowercase).
+
+    Returns:
+        True if the keyword appears as a whole word.
+    """
     pattern = rf"(?<![0-9a-z_]){re.escape(needle)}(?![0-9a-z_])"
     return re.search(pattern, haystack) is not None
 
 
 def _verification_plan(manifest: dict, families: list[str]) -> dict[str, list]:
+    """Build a phased verification plan from matched verification families.
+
+    Groups families by their phase (cheap-blocker, focused-semantic,
+    umbrella) and sorts them in execution order.
+
+    Args:
+        manifest: Parsed routing manifest dictionary.
+        families: List of verification family names to plan for.
+
+    Returns:
+        Dictionary with 'plan' (sorted list of family entries) and
+        'unknown_verification_families' (families not in manifest).
+    """
     family_map = manifest.get("verification_families", {})
     seen = set()
     plan: list[dict] = []
@@ -292,6 +390,11 @@ def _verification_plan(manifest: dict, families: list[str]) -> dict[str, list]:
 
 
 def _parse_args() -> argparse.Namespace:
+    """Parse command-line arguments for the harness route tool.
+
+    Returns:
+        Parsed namespace with manifest, from_git, base, file, hint, and json fields.
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest", default=str(DEFAULT_MANIFEST))
     parser.add_argument("--from-git", action="store_true")
@@ -313,6 +416,15 @@ def _parse_args() -> argparse.Namespace:
 
 
 def main() -> int:
+    """Entry point for the harness route CLI.
+
+    Loads the manifest, collects changed files (from git or explicit args),
+    matches them against risk packs, builds a verification plan, and
+    outputs the routing result as human-readable text or JSON.
+
+    Returns:
+        Exit code: 0 always (routing is informational).
+    """
     args = _parse_args()
     manifest = _load_manifest(Path(args.manifest))
 

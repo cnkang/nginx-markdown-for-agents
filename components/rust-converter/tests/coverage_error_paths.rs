@@ -27,6 +27,7 @@ fn convert_html(html: &str) -> String {
  * error.rs coverage — all non-streaming variants
  * ================================================================ */
 
+/// Verifies that `ParseError` produces the correct error code and Display output.
 #[test]
 fn test_error_code_parse_error() {
     let err = ConversionError::ParseError("bad html".into());
@@ -34,6 +35,7 @@ fn test_error_code_parse_error() {
     assert_eq!(format!("{}", err), "Parse error: bad html");
 }
 
+/// Verifies that `EncodingError` produces the correct error code and Display output.
 #[test]
 fn test_error_code_encoding_error() {
     let err = ConversionError::EncodingError("invalid utf-8".into());
@@ -41,6 +43,7 @@ fn test_error_code_encoding_error() {
     assert_eq!(format!("{}", err), "Encoding error: invalid utf-8");
 }
 
+/// Verifies that `Timeout` produces the correct error code and Display output.
 #[test]
 fn test_error_code_timeout() {
     let err = ConversionError::Timeout;
@@ -48,6 +51,7 @@ fn test_error_code_timeout() {
     assert_eq!(format!("{}", err), "Conversion timeout exceeded");
 }
 
+/// Verifies that `MemoryLimit` produces the correct error code and Display output.
 #[test]
 fn test_error_code_memory_limit() {
     let err = ConversionError::MemoryLimit("exceeded 1MB".into());
@@ -55,6 +59,7 @@ fn test_error_code_memory_limit() {
     assert_eq!(format!("{}", err), "Memory limit exceeded: exceeded 1MB");
 }
 
+/// Verifies that `InvalidInput` produces the correct error code and Display output.
 #[test]
 fn test_error_code_invalid_input() {
     let err = ConversionError::InvalidInput("empty".into());
@@ -62,6 +67,7 @@ fn test_error_code_invalid_input() {
     assert_eq!(format!("{}", err), "Invalid input: empty");
 }
 
+/// Verifies that `InternalError` produces the correct error code and Display output.
 #[test]
 fn test_error_code_internal_error() {
     let err = ConversionError::InternalError("unexpected".into());
@@ -69,6 +75,7 @@ fn test_error_code_internal_error() {
     assert_eq!(format!("{}", err), "Internal error: unexpected");
 }
 
+/// Verifies that `ConversionError` implements `std::error::Error`.
 #[test]
 fn test_error_is_std_error() {
     let err = ConversionError::Timeout;
@@ -76,6 +83,7 @@ fn test_error_is_std_error() {
     let _: &dyn std::error::Error = &err;
 }
 
+/// Verifies that `ConversionError` Debug format includes the variant name.
 #[test]
 fn test_error_debug_format() {
     let err = ConversionError::ParseError("test".into());
@@ -83,6 +91,8 @@ fn test_error_debug_format() {
     assert!(debug.contains("ParseError"));
 }
 
+/// Verifies that `ConversionError` can be cloned and the clone produces
+/// identical error codes and Display output.
 #[test]
 fn test_error_clone() {
     let err = ConversionError::MemoryLimit("clone test".into());
@@ -96,6 +106,8 @@ fn test_error_clone() {
  * These require html5ever Attribute types, so we test via conversion
  * ================================================================ */
 
+/// Verifies that all known dangerous HTML elements are classified as `Remove`
+/// by the security validator.
 #[test]
 fn test_security_check_element_all_dangerous() {
     let validator = SecurityValidator::new();
@@ -111,6 +123,8 @@ fn test_security_check_element_all_dangerous() {
     }
 }
 
+/// Verifies that all form-related elements are classified as `StripElement`
+/// by the security validator.
 #[test]
 fn test_security_check_element_all_form_elements() {
     let validator = SecurityValidator::new();
@@ -128,6 +142,8 @@ fn test_security_check_element_all_form_elements() {
     }
 }
 
+/// Verifies that embedded content elements (iframe, object, embed) are classified
+/// as `StripElement` and recognized as embedded content.
 #[test]
 fn test_security_check_element_all_embedded() {
     let validator = SecurityValidator::new();
@@ -147,6 +163,8 @@ fn test_security_check_element_all_embedded() {
     }
 }
 
+/// Verifies that void form controls (input) are correctly identified versus
+/// non-void form controls (textarea, select).
 #[test]
 fn test_security_void_form_control() {
     let validator = SecurityValidator::new();
@@ -156,6 +174,8 @@ fn test_security_void_form_control() {
     assert!(!validator.is_void_form_control("div"));
 }
 
+/// Verifies edge cases in event handler detection: bare "on", single char after
+/// "on", empty string, and single "o".
 #[test]
 fn test_security_event_handler_edge_cases() {
     let validator = SecurityValidator::new();
@@ -170,6 +190,8 @@ fn test_security_event_handler_edge_cases() {
     assert!(!validator.is_event_handler("o"));
 }
 
+/// Verifies edge cases in dangerous URL detection: whitespace-padded schemes,
+/// control characters, `about:` scheme, and safe URLs.
 #[test]
 fn test_security_dangerous_url_edge_cases() {
     let validator = SecurityValidator::new();
@@ -192,6 +214,8 @@ fn test_security_dangerous_url_edge_cases() {
     assert!(!validator.is_dangerous_url(""));
 }
 
+/// Verifies URL sanitization edge cases: empty URL, safe URL, javascript: URL,
+/// and data: URL.
 #[test]
 fn test_security_sanitize_url_edge_cases() {
     let validator = SecurityValidator::new();
@@ -205,6 +229,8 @@ fn test_security_sanitize_url_edge_cases() {
     assert_eq!(validator.sanitize_url("data:,"), None);
 }
 
+/// Verifies that depth validation accepts values at and below the limit and
+/// rejects values above the limit with a descriptive error message.
 #[test]
 fn test_security_depth_validation_boundary() {
     let validator = SecurityValidator::with_max_depth(10);
@@ -218,6 +244,8 @@ fn test_security_depth_validation_boundary() {
     assert!(err.contains("10"));
 }
 
+/// Verifies that `SecurityValidator::default()` allows safe elements and has
+/// a max depth of 1000.
 #[test]
 fn test_security_default_trait() {
     let validator = SecurityValidator::default();
@@ -269,6 +297,8 @@ fn ffi_test_empty_result() -> MarkdownResult {
     }
 }
 
+/// Verifies that passing a NULL converter handle to `markdown_convert` produces
+/// an error rather than crashing.
 #[test]
 fn test_ffi_convert_null_handle() {
     let html = b"<p>test</p>";
@@ -289,6 +319,8 @@ fn test_ffi_convert_null_handle() {
     unsafe { markdown_result_free(&mut result) };
 }
 
+/// Verifies that passing NULL options to `markdown_convert` produces an error
+/// rather than crashing.
 #[test]
 fn test_ffi_convert_null_options() {
     let converter = markdown_converter_new();
@@ -312,6 +344,8 @@ fn test_ffi_convert_null_options() {
     unsafe { markdown_converter_free(converter) };
 }
 
+/// Verifies that passing a NULL result pointer to `markdown_convert` is a safe
+/// no-op that does not crash.
 #[test]
 fn test_ffi_convert_null_result() {
     let converter = markdown_converter_new();
@@ -334,6 +368,7 @@ fn test_ffi_convert_null_result() {
     unsafe { markdown_converter_free(converter) };
 }
 
+/// Verifies that passing NULL HTML with non-zero length produces an error.
 #[test]
 fn test_ffi_convert_null_html_with_nonzero_len() {
     let converter = markdown_converter_new();
@@ -354,6 +389,8 @@ fn test_ffi_convert_null_html_with_nonzero_len() {
     unsafe { markdown_converter_free(converter) };
 }
 
+/// Verifies that empty HTML (NULL pointer, zero length) produces a successful
+/// empty result.
 #[test]
 fn test_ffi_convert_empty_html() {
     let converter = markdown_converter_new();
@@ -371,6 +408,7 @@ fn test_ffi_convert_empty_html() {
     unsafe { markdown_converter_free(converter) };
 }
 
+/// Verifies that ETag and token estimation are generated when enabled via FFI options.
 #[test]
 fn test_ffi_convert_with_etag_and_tokens() {
     let converter = markdown_converter_new();
@@ -397,6 +435,8 @@ fn test_ffi_convert_with_etag_and_tokens() {
     unsafe { markdown_converter_free(converter) };
 }
 
+/// Verifies that ETag is generated even for empty HTML input when ETag generation
+/// is enabled.
 #[test]
 fn test_ffi_convert_empty_html_with_etag_and_tokens() {
     let converter = markdown_converter_new();
@@ -421,6 +461,7 @@ fn test_ffi_convert_empty_html_with_etag_and_tokens() {
     unsafe { markdown_converter_free(converter) };
 }
 
+/// Verifies that GFM flavor conversion works correctly via the FFI.
 #[test]
 fn test_ffi_convert_with_gfm_flavor() {
     let converter = markdown_converter_new();
@@ -444,6 +485,7 @@ fn test_ffi_convert_with_gfm_flavor() {
     unsafe { markdown_converter_free(converter) };
 }
 
+/// Verifies that base URL resolution works correctly via the FFI.
 #[test]
 fn test_ffi_convert_with_base_url() {
     let converter = markdown_converter_new();
@@ -468,6 +510,7 @@ fn test_ffi_convert_with_base_url() {
     unsafe { markdown_converter_free(converter) };
 }
 
+/// Verifies that content-type charset detection works correctly via the FFI.
 #[test]
 fn test_ffi_convert_with_content_type() {
     let converter = markdown_converter_new();
@@ -495,6 +538,7 @@ fn test_ffi_convert_with_content_type() {
     unsafe { markdown_converter_free(converter) };
 }
 
+/// Verifies that front matter extraction works correctly via the FFI.
 #[test]
 fn test_ffi_convert_with_front_matter() {
     let converter = markdown_converter_new();
@@ -520,12 +564,14 @@ fn test_ffi_convert_with_front_matter() {
     unsafe { markdown_converter_free(converter) };
 }
 
+/// Verifies that `markdown_result_free` is a safe no-op when passed a NULL pointer.
 #[test]
 fn test_ffi_result_free_null() {
     /* NULL result free should be a no-op */
     unsafe { markdown_result_free(ptr::null_mut()) };
 }
 
+/// Verifies that `markdown_converter_free` is a safe no-op when passed a NULL pointer.
 #[test]
 fn test_ffi_converter_free_null() {
     /* NULL converter free should be a no-op */
@@ -536,6 +582,8 @@ fn test_ffi_converter_free_null() {
  * Converter edge cases for blocks and tables
  * ================================================================ */
 
+/// Verifies that code blocks containing backtick sequences use a longer fence
+/// to avoid content conflicts.
 #[test]
 fn test_converter_code_block_with_backticks_in_content() {
     let md = convert_html("<pre><code>```\nsome code\n```</code></pre>");
@@ -543,6 +591,7 @@ fn test_converter_code_block_with_backticks_in_content() {
     assert!(md.contains("````") || md.contains("~~~"));
 }
 
+/// Verifies that deeply nested lists produce correctly indented Markdown output.
 #[test]
 fn test_converter_nested_lists() {
     let md = convert_html("<ul><li>A<ul><li>B<ul><li>C</li></ul></li></ul></li></ul>");
@@ -551,6 +600,8 @@ fn test_converter_nested_lists() {
     assert!(md.contains("C"));
 }
 
+/// Verifies that table alignment is correctly detected from CSS `text-align`
+/// style attributes.
 #[test]
 fn test_converter_table_with_alignment() {
     let md = convert_html(
@@ -562,6 +613,8 @@ fn test_converter_table_with_alignment() {
     assert!(md.contains("Left"));
 }
 
+/// Verifies that pipe characters inside table cells are preserved (escaped or
+/// literal) in the Markdown output.
 #[test]
 fn test_converter_table_with_pipe_in_cell() {
     let md = convert_html("<table><tr><th>Header</th></tr><tr><td>a | b</td></tr></table>");
@@ -573,6 +626,7 @@ fn test_converter_table_with_pipe_in_cell() {
     );
 }
 
+/// Verifies that an empty `<table>` element produces no Markdown output.
 #[test]
 fn test_converter_empty_table() {
     let md = convert_html("<table></table>");
@@ -584,6 +638,7 @@ fn test_converter_empty_table() {
     );
 }
 
+/// Verifies that tables without `<th>` elements still produce readable output.
 #[test]
 fn test_converter_table_no_header() {
     let md =
@@ -595,6 +650,8 @@ fn test_converter_table_no_header() {
  * URL resolution edge cases (metadata/resolve.rs)
  * ================================================================ */
 
+/// Verifies URL resolution through the full FFI conversion path with various
+/// URL forms: relative, absolute path, protocol-relative, and already-absolute.
 #[test]
 fn test_url_resolution_via_converter() {
     let converter = markdown_converter_new();
@@ -650,6 +707,7 @@ fn test_url_resolution_via_converter() {
  * Conversion with security-relevant HTML
  * ================================================================ */
 
+/// Verifies that event handler attributes (`onclick`) are stripped during conversion.
 #[test]
 fn test_conversion_strips_event_handlers() {
     let md = convert_html(r#"<a href="https://safe.com" onclick="alert('xss')">Click</a>"#);
@@ -658,6 +716,7 @@ fn test_conversion_strips_event_handlers() {
     assert!(!md.contains("alert"));
 }
 
+/// Verifies that `style` attributes are stripped during conversion.
 #[test]
 fn test_conversion_strips_style_attributes() {
     let md = convert_html(r#"<p style="color:red;background:url(javascript:void(0))">Text</p>"#);
@@ -665,6 +724,8 @@ fn test_conversion_strips_style_attributes() {
     assert!(!md.contains("style"));
 }
 
+/// Verifies that deeply nested HTML (50 levels of `<div>`) is handled without
+/// panicking and the inner content is preserved.
 #[test]
 fn test_conversion_handles_deeply_nested_html() {
     let mut html = String::new();
@@ -683,6 +744,8 @@ fn test_conversion_handles_deeply_nested_html() {
  * Heading edge cases
  * ================================================================ */
 
+/// Verifies that all six heading levels (h1-h6) produce the correct Markdown
+/// prefix (one to six `#` characters).
 #[test]
 fn test_converter_heading_levels() {
     for level in 1..=6 {
@@ -698,12 +761,16 @@ fn test_converter_heading_levels() {
     }
 }
 
+/// Verifies that blockquotes produce readable Markdown output with the quoted
+/// text preserved.
 #[test]
 fn test_converter_blockquote() {
     let md = convert_html("<blockquote><p>Quoted text</p></blockquote>");
     assert!(md.contains("Quoted text"));
 }
 
+/// Verifies that horizontal rules (`<hr>`) are handled and surrounding content
+/// is preserved.
 #[test]
 fn test_converter_horizontal_rule() {
     let md = convert_html("<p>Before</p><hr><p>After</p>");
@@ -711,12 +778,15 @@ fn test_converter_horizontal_rule() {
     assert!(md.contains("After"));
 }
 
+/// Verifies that images with `alt` text produce Markdown image syntax with
+/// the alt text preserved.
 #[test]
 fn test_converter_image_with_alt() {
     let md = convert_html(r#"<img src="https://example.com/img.png" alt="Alt text">"#);
     assert!(md.contains("Alt text"));
 }
 
+/// Verifies that video source elements produce a Markdown link or empty output.
 #[test]
 fn test_converter_video_source() {
     let md = convert_html(r#"<video><source src="https://example.com/video.mp4"></video>"#);
@@ -727,6 +797,8 @@ fn test_converter_video_source() {
     );
 }
 
+/// Verifies that audio elements preserve fallback text and/or extract the
+/// source URL as a Markdown link.
 #[test]
 fn test_converter_audio_source() {
     let md = convert_html(r#"<audio src="https://example.com/audio.mp3">Audio</audio>"#);

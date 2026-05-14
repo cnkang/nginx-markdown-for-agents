@@ -1068,7 +1068,7 @@ ngx_http_markdown_record_per_path_metrics(
         return;
     }
 
-    if (metrics->per_path.path_entries
+    if ((ngx_uint_t) metrics->per_path.path_entries
         >= metrics->per_path.cardinality_limit)
     {
         ngx_atomic_fetch_add(&metrics->per_path.overflow_count, 1);

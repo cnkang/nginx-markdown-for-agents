@@ -6,5 +6,6 @@
 #          pytest tools/release/matrix/tests/
 #          pytest tools/release/legacy/tests/
 #          pytest tests/property/
-hypothesis>=6.0
-pytest>=7.0
+hypothesis==6.135.2
+pytest==8.4.1
+pyyaml==6.0.2

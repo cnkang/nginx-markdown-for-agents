@@ -115,7 +115,7 @@ For the canonical directive behavior, see [Configuration Guide](guides/CONFIGURA
 Use these directives:
 
 ```nginx
-markdown_max_size 10m;    # Maximum response size
+markdown_memory_budget 10m;    # Maximum response size
 markdown_timeout 5s;      # Maximum conversion time
 ```
 
@@ -139,7 +139,7 @@ The current design buffers the full eligible response before conversion, so larg
 ### How can I improve performance?
 
 1. **Enable caching**: Cache converted responses
-2. **Reduce limits**: Lower `markdown_max_size` and `markdown_timeout`
+2. **Reduce limits**: Lower `markdown_memory_budget` and `markdown_timeout`
 3. **Disable optional features**: Turn off token estimation and front matter if not needed
 4. **Use CommonMark**: Faster than GFM flavor
 
@@ -147,7 +147,7 @@ See [Performance Tuning](guides/OPERATIONS.md#performance-tuning) for details.
 
 ### Does it support streaming?
 
-The current design requires full buffering for eligible responses before conversion. Chunked transfer responses can still be buffered and converted when `markdown_buffer_chunked on;` is enabled, but the module does not yet provide true streaming Markdown generation.
+Yes. Since 0.6.0, the streaming engine is the default conversion path (`markdown_streaming_engine auto`). It performs bounded-memory incremental Markdown generation for eligible responses. Full-buffer conversion remains available as a fallback when explicitly selected or when the streaming path cannot handle a response. Chunked transfer responses are supported by both engines.
 
 See [Request Lifecycle](architecture/REQUEST_LIFECYCLE.md) and [ADR-0002](architecture/ADR/0002-full-buffering-approach.md) for the reasoning behind this design.
 
@@ -214,7 +214,7 @@ Common causes:
    - Prefer `$uri` over `$request_uri` for extension checks (query strings can break matches)
    - If map includes `text/*`, enable `markdown_on_wildcard on;`
 4. **Response not eligible**: Must be 200 status with `text/html` content type
-5. **Size limit exceeded**: Response larger than `markdown_max_size`
+5. **Size limit exceeded**: Response larger than `markdown_memory_budget`
 
 If you need to trace the decision path rather than just the checklist, use [Request Lifecycle](architecture/REQUEST_LIFECYCLE.md) and [Configuration to Behavior Map](architecture/CONFIG_BEHAVIOR_MAP.md).
 
@@ -240,7 +240,7 @@ Common issues:
 
 2. **Check metrics**:
    ```bash
-   curl http://localhost/markdown-metrics
+   curl -H "Accept: text/plain" http://localhost/markdown-metrics
    ```
 
 3. **Test with curl**:

@@ -61,7 +61,22 @@ typedef struct ngx_http_markdown_otel_span_s {
 #define ngx_string(str)     { sizeof(str) - 1, (u_char *) str }
 #define NGX_LOG_ERR         1
 #define NGX_LOG_WARN        2
-#define ngx_log_error(level, log, err, fmt, ...) (void)(log)
+
+static ngx_inline void
+ngx_test_log_ignore(const char *fmt, ...)
+{
+    (void) fmt;
+}
+
+#define ngx_log_error(level, log, err, fmt, ...)                                     \
+    do {                                                                              \
+        (void) (level);                                                               \
+        (void) (log);                                                                 \
+        (void) (err);                                                                 \
+        if (0) {                                                                      \
+            ngx_test_log_ignore((fmt), ##__VA_ARGS__);                               \
+        }                                                                             \
+    } while (0)
 
 #define ngx_memcmp(s1, s2, n)  memcmp(s1, s2, n)
 #define ngx_random()           rand()

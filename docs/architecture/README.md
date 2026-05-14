@@ -18,6 +18,7 @@ Use it when you need more than deployment guidance but less than source-level im
 | Why v1 uses full buffering | [ADR/0002-full-buffering-approach.md](ADR/0002-full-buffering-approach.md) |
 | Why conversion runs at the origin-near layer | [ADR/0003-inline-origin-near-conversion.md](ADR/0003-inline-origin-near-conversion.md) |
 | Why the harness became a repo-owned system | [ADR/0005-repo-owned-harness.md](ADR/0005-repo-owned-harness.md) |
+| Why 0.6.3 E2E testing moved to a Rust-first hybrid architecture | [ADR/0009-rust-first-e2e-test-architecture.md](ADR/0009-rust-first-e2e-test-architecture.md) |
 | The full ADR index | [ADR/README.md](ADR/README.md) |
 
 ## Scope

@@ -1,6 +1,5 @@
 /*
  * Test: threshold_router
- * Description: threshold router path selection, config parsing, and metrics
  *
  * Validates: Requirements 16.3, 16.4, 16.6
  *

@@ -35,16 +35,39 @@ spec:
             - name: nginx-config
               mountPath: /etc/nginx/nginx.conf
               subPath: nginx.conf
+            {{- if .Values.markdown.loadModule }}
+            - name: modules
+              mountPath: {{ dir .Values.markdown.loadModule }}
+              readOnly: true
+            {{- end }}
           ports:
             - name: http
               containerPort: 80
               protocol: TCP
+          {{- with .Values.livenessProbe }}
+          livenessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.readinessProbe }}
+          readinessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.startupProbe }}
+          startupProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
       volumes:
         - name: nginx-config
           configMap:
             name: {{ include "nginx-markdown.fullname" . }}-config
+        {{- if .Values.markdown.loadModule }}
+        - name: modules
+          hostPath:
+            path: {{ dir .Values.markdown.loadModule }}
+            type: DirectoryOrCreate
+        {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

@@ -1,6 +1,10 @@
 /*
  * Test: brotli_standalone
- * Description: standalone brotli decompression
+ *
+ * Validates the standalone brotli decompression helper's behavior:
+ * fallback return code when brotli is not compiled in, error handling
+ * for invalid streams when brotli is available, and NULL/zero input
+ * guard clauses.
  */
 
 #include "test_common.h"
@@ -13,6 +17,19 @@
 #include <brotli/decode.h>
 #endif
 
+/*
+ * Decompress a brotli-compressed buffer (standalone variant).
+ *
+ * Parameters:
+ *   in     - compressed input data
+ *   in_len - length of input in bytes
+ *   out    - output buffer for decompressed data
+ *   out_len - [in] capacity of output buffer, [out] actual decompressed size
+ *
+ * Returns:
+ *   NGX_OK on success, NGX_ERROR on invalid input or decompression failure,
+ *   NGX_DECLINED when brotli support is not compiled in.
+ */
 static int
 decompress_brotli_standalone(const unsigned char *in, size_t in_len,
                              unsigned char *out, size_t *out_len)
@@ -35,6 +52,12 @@ decompress_brotli_standalone(const unsigned char *in, size_t in_len,
 #endif
 }
 
+/*
+ * Verify brotli availability behavior: with brotli compiled in, invalid
+ * input returns NGX_ERROR; without brotli, returns NGX_DECLINED.
+ *
+ * Expected: correct fallback or decode error based on compile-time flag.
+ */
 static void
 test_fallback_or_decode(void)
 {
@@ -56,6 +79,12 @@ test_fallback_or_decode(void)
     TEST_PASS("Brotli availability behavior is correct");
 }
 
+/*
+ * Verify invalid argument handling: NULL input and zero-length input
+ * must both return NGX_ERROR.
+ *
+ * Expected: both guard clauses return NGX_ERROR.
+ */
 static void
 test_invalid_arguments(void)
 {

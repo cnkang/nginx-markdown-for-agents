@@ -46,6 +46,8 @@ readonly PATTERN_CONTENT_LENGTH='^Content-Length:'
 readonly PATTERN_CONTENT_ENCODING='^Content-Encoding:'
 # shellcheck disable=SC1090
 source "${NATIVE_BUILD_HELPER}"
+# shellcheck disable=SC1090
+source "$(dirname "${BASH_SOURCE[0]}")/e2e_common.sh"
 
 usage() {
   cat <<EOF

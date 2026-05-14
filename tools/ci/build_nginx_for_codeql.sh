@@ -1,4 +1,24 @@
 #!/usr/bin/env bash
+# build_nginx_for_codeql.sh — Build NGINX with the markdown module for CodeQL analysis.
+#
+# Downloads the requested NGINX version, builds the Rust converter static
+# library, configures NGINX with the markdown module as a dynamic module,
+# and compiles the modules target so CodeQL can extract C source analysis.
+#
+# Usage:
+#   tools/ci/build_nginx_for_codeql.sh
+#
+# Environment variables:
+#   NGINX_VERSION   NGINX version channel or explicit version (default: stable)
+#   KEEP_ARTIFACTS  Set to 1 to preserve the build directory on success (default: 0)
+#
+# Prerequisites:
+#   curl, tar, make, cargo, python3
+#
+# Exit behaviour:
+#   0 if the module compiles successfully.
+#   1 if any prerequisite is missing, the version cannot be resolved, or
+#     the build fails.
 set -euo pipefail
 
 NGINX_VERSION="${NGINX_VERSION:-stable}"
@@ -10,6 +30,17 @@ RUST_TARGET=""
 # shellcheck disable=SC1090
 source "${NATIVE_BUILD_HELPER}"
 
+# Resolve an NGINX version string from a channel name or pass through.
+#
+# Arguments:
+#   $1 - requested version: "stable", "mainline", or a literal version
+#
+# Outputs:
+#   Prints the resolved version number (e.g. "1.28.2") to stdout.
+#
+# Returns:
+#   0 on success; exits with status 1 if the channel page cannot be
+#   fetched or the version pattern is not found.
 resolve_nginx_version() {
   local requested="$1"
   local page
@@ -56,6 +87,19 @@ PY
   return 0
 }
 
+# cleanup — Remove temporary build artifacts on exit.
+#
+# On success with KEEP_ARTIFACTS disabled, removes BUILDROOT.
+# On failure, retains BUILDROOT and prints its path for debugging.
+#
+# Arguments:
+#   (none; reads $? for exit status)
+#
+# Outputs:
+#   Diagnostic message to stderr on failure.
+#
+# Returns:
+#   0 always.
 cleanup() {
   local rc=$?
   if [[ $rc -eq 0 && "${KEEP_ARTIFACTS}" -eq 0 && -n "${BUILDROOT}" && -d "${BUILDROOT}" ]]; then

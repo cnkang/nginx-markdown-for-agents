@@ -134,16 +134,19 @@
 #define ARRAY_SIZE(arr) (sizeof(arr) / sizeof((arr)[0]))
 
 /*
- * String equality check macro
- * 
+ * String equality helper.
+ *
  * Compares two strings and returns true if equal.
  * Handles NULL pointers safely.
- * 
- * Example:
- *   if (STR_EQ(result, "expected")) { ... }
  */
+static ngx_inline int
+test_str_eq(const char *a, const char *b)
+{
+    return (a != NULL && b != NULL && strcmp(a, b) == 0);
+}
+
 #define STR_EQ(a, b) \
-    ((a) && (b) && strcmp((a), (b)) == 0)
+    test_str_eq((a), (b))
 
 /*
  * Memory comparison macro

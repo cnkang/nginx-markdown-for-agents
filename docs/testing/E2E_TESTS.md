@@ -24,23 +24,37 @@ Use this page to answer three questions:
 tools/e2e/run_e2e_suite.sh
 ```
 
-That suite currently runs focused checks across all E2E scenarios:
+That suite currently runs focused checks across all E2E scenarios.
+
+### Migrated scenarios (Rust e2e-harness)
+
+The following scenarios have been migrated to the Rust e2e-harness and are
+executed via `e2e-harness scenario <name>`:
+
+| Scenario | Rust module | Former shell source |
+|----------|-------------|---------------------|
+| `accept-negotiation` | `tools/e2e-harness/src/scenarios/accept_negotiation.rs` | `tools/e2e/verify_accept_negotiation_e2e.sh` |
+| `metrics-endpoint` | `tools/e2e-harness/src/scenarios/metrics_endpoint.rs` | `tools/e2e/verify_metrics_endpoint_e2e.sh` |
+| `conditional-requests` | `tools/e2e-harness/src/scenarios/conditional_requests.rs` | `tools/e2e/verify_conditional_requests_e2e.sh` |
+| `auth-cache` | `tools/e2e-harness/src/scenarios/auth_cache.rs` | `tools/e2e/verify_auth_cache_e2e.sh` |
+| `status-codes` | `tools/e2e-harness/src/scenarios/status_codes.rs` | `tools/e2e/verify_status_codes_e2e.sh` |
+
+Run the migrated suite directly:
+
+```bash
+make test-e2e-rust
+```
+
+### Non-migrated scenarios (retained shell paths)
 
 | Script | Purpose |
 |--------|---------|
 | `tools/e2e/verify_proxy_tls_backend_e2e.sh` | Real proxy-chain validation against a local TLS backend |
 | `tools/e2e/verify_chunked_streaming_native_e2e.sh --profile smoke` | Chunked buffering and oversized fail-open smoke coverage |
 | `tools/e2e/verify_large_markdown_response_e2e.sh` | Large-response buffering and conversion validation |
-| `tools/e2e/verify_metrics_endpoint_e2e.sh` | Metrics endpoint format negotiation (JSON, text, Prometheus) |
-| `tools/e2e/verify_conditional_requests_e2e.sh` | ETag, If-None-Match, If-Modified-Since, 304, HEAD parity |
 | `tools/e2e/verify_config_merge_e2e.sh` | Directive merge precedence and override behavior |
-| `tools/e2e/verify_auth_cache_e2e.sh` | Auth cookie detection, Cache-Control, ETag replacement, Vary |
-| `tools/e2e/verify_status_codes_e2e.sh` | Non-2xx passthrough and redirect handling |
-| `tools/e2e/verify_accept_negotiation_e2e.sh` | Accept header content negotiation and wildcard behavior |
 | `tools/e2e/verify_error_handling_e2e.sh` | Error passthrough, fail-open, 206 skip, max-size boundary |
 | `tools/e2e/verify_security_e2e.sh` | Security header and sanitizer behavior |
-| `tools/e2e/verify_huge_body_allowed_native_e2e.sh` | Huge body within max-size converts successfully |
-| `tools/e2e/verify_huge_body_native_e2e.sh` | Huge body exceeding max-size fail-opens |
 | `tools/e2e/verify_streaming_failure_cache_e2e.sh` | Streaming failure cache and retry behavior |
 
 The suite keeps the public command stable:
@@ -154,11 +168,17 @@ This keeps the runtime path canonical without rebuilding native NGINX for every 
 Recommended entrypoints:
 
 ```bash
-# Full canonical E2E suite
+# Full canonical E2E suite (shell + Rust harness)
 make test-e2e
+
+# Rust e2e-harness migrated scenarios only
+make test-e2e-rust
 
 # Run one focused proxy/TLS scenario directly
 tools/e2e/verify_proxy_tls_backend_e2e.sh
+
+# Run a single migrated scenario via e2e-harness
+cargo run --manifest-path tools/e2e-harness/Cargo.toml -- scenario conditional-requests --nginx-bin /path/to/nginx
 
 # Reuse a specific nginx runtime
 NGINX_BIN=/absolute/path/to/nginx make test-e2e
@@ -213,3 +233,4 @@ That helper owns:
 | 0.6.0 | 2026-05-02 | v060-prod | Added new E2E scripts (metrics, conditional requests, config merge, auth/cache, status codes); listed shared helpers |
 | 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
+| 0.6.3 | 2026-05-12 | Kang | Added Rust e2e-harness migrated scenarios section, make test-e2e-rust, separated migrated vs non-migrated scenarios |

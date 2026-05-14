@@ -1,1 +1,1 @@
-# tools/release/matrix/tests
+"""Tests for release matrix tools."""

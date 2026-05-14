@@ -244,7 +244,7 @@ class TestCheckContentNegotiationSop:
         text = (
             "#### SOP 7: Content Negotiation Not Triggering\n"
             "Status 200, Content-Type text/html, Accept text/markdown, "
-            "markdown_max_size limit\n"
+            "markdown_memory_budget limit\n"
         )
         assert check_content_negotiation_sop(text) == []
 
@@ -254,7 +254,7 @@ class TestCheckContentNegotiationSop:
             "Status 200, Content-Type text/html, Accept text/markdown\n"
         )
         errors = check_content_negotiation_sop(text)
-        assert any("markdown_max_size" in e for e in errors)
+        assert any("markdown_memory_budget" in e for e in errors)
 
     def test_missing_sop_section(self):
         errors = check_content_negotiation_sop("No SOP here\n")

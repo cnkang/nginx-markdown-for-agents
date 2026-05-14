@@ -28,6 +28,8 @@ except ModuleNotFoundError:
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MANIFEST_PATH = REPO_ROOT / "docs" / "harness" / "routing-manifest.json"
+E2E_HARNESS_DIR = REPO_ROOT / "tools" / "e2e-harness"
+E2E_HARNESS_CARGO = E2E_HARNESS_DIR / "Cargo.toml"
 README_PATH = REPO_ROOT / "docs" / "harness" / "README.md"
 CORE_PATH = REPO_ROOT / "docs" / "harness" / "core.md"
 SUMMARY_PATH = REPO_ROOT / "docs" / "harness" / "routing-manifest.md"
@@ -37,6 +39,18 @@ REMEDIATION_STATUSES = {
     "fixed",
     "intentionally deferred",
     "not applicable after review",
+}
+E2E_PYTHON_DIR = REPO_ROOT / "components" / "nginx-module" / "tests" / "e2e"
+REMOVED_PYTHON_E2E_FILES = (
+    "test_streaming_e2e.py",
+    "test_streaming_failure_cache_e2e.py",
+)
+MIGRATED_SCENARIO_WRAPPERS = {
+    "tools/e2e/verify_accept_negotiation_e2e.sh": "accept-negotiation",
+    "tools/e2e/verify_metrics_endpoint_e2e.sh": "metrics-endpoint",
+    "tools/e2e/verify_conditional_requests_e2e.sh": "conditional-requests",
+    "tools/e2e/verify_auth_cache_e2e.sh": "auth-cache",
+    "tools/e2e/verify_status_codes_e2e.sh": "status-codes",
 }
 
 
@@ -372,6 +386,145 @@ def _check_agents_map() -> CheckResult:
     return _result("agents-map", PASS, "AGENTS.md points at the harness entrypoints")
 
 
+def _check_e2e_harness_contract() -> CheckResult:
+    """Validate the Rust E2E harness presence and binary contract."""
+    missing: list[str] = []
+    if not E2E_HARNESS_DIR.exists():
+        missing.append(_display_path(E2E_HARNESS_DIR))
+    if not E2E_HARNESS_CARGO.exists():
+        missing.append(_display_path(E2E_HARNESS_CARGO))
+    if missing:
+        return _result(
+            "e2e-harness-contract",
+            FAIL,
+            f"missing required harness paths: {', '.join(missing)}",
+        )
+
+    cargo_text = E2E_HARNESS_CARGO.read_text(encoding="utf-8")
+    has_bin_decl = bool(
+        re.search(
+            r"\[\[bin\]\]\s*name\s*=\s*\"e2e-harness\"",
+            cargo_text,
+            flags=re.MULTILINE | re.DOTALL,
+        )
+    )
+    if not has_bin_decl:
+        return _result(
+            "e2e-harness-contract",
+            FAIL,
+            "Cargo.toml missing [[bin]] name = \"e2e-harness\" declaration",
+        )
+
+    main_rs = E2E_HARNESS_DIR / "src" / "main.rs"
+    if not main_rs.exists():
+        return _result(
+            "e2e-harness-contract",
+            FAIL,
+            f"missing harness entrypoint: {_display_path(main_rs)}",
+        )
+
+    return _result(
+        "e2e-harness-contract",
+        PASS,
+        "Rust e2e-harness directory and binary contract are present",
+    )
+
+
+def _wrapper_invokes_expected_scenario(text: str, scenario_name: str) -> bool:
+    """Return True when a migrated shell wrapper calls the expected scenario."""
+    literal_call_pattern = rf"\bscenario\s+{re.escape(scenario_name)}\b"
+    scenario_decl_pattern = rf"SCENARIO_NAME=\"{re.escape(scenario_name)}\""
+    has_literal_call = re.search(literal_call_pattern, text) is not None
+    has_variable_call = (
+        "args=(scenario \"${SCENARIO_NAME}\")" in text
+        and re.search(scenario_decl_pattern, text) is not None
+    )
+    return has_literal_call or has_variable_call
+
+
+def _wrapper_contains_stale_runtime_logic(text: str) -> bool:
+    """Return True when wrapper text still contains migrated assertion/runtime logic."""
+    forbidden_tokens = (
+        "markdown_build_with_nginx",
+        "markdown_prepare_runtime_reuse",
+        "curl -sS",
+        "curl -fsS",
+        "curl -X",
+    )
+    return any(token in text for token in forbidden_tokens)
+
+
+def _collect_migrated_wrapper_findings() -> tuple[list[str], list[str]]:
+    """Collect missing wrappers and stale wrapper logic violations."""
+    missing_wrappers: list[str] = []
+    stale_shell_logic: list[str] = []
+    for rel_path, scenario_name in MIGRATED_SCENARIO_WRAPPERS.items():
+        script_path = REPO_ROOT / rel_path
+        if not script_path.exists():
+            missing_wrappers.append(rel_path)
+            continue
+        text = script_path.read_text(encoding="utf-8")
+        if not _wrapper_invokes_expected_scenario(text, scenario_name):
+            stale_shell_logic.append(f"{rel_path}:missing scenario wrapper call")
+        if _wrapper_contains_stale_runtime_logic(text):
+            stale_shell_logic.append(f"{rel_path}:contains scenario assertion/runtime logic")
+    return missing_wrappers, stale_shell_logic
+
+
+def _collect_removed_python_e2e_paths() -> list[str]:
+    """Return removed Python E2E file paths that still exist on disk."""
+    return [
+        str(E2E_PYTHON_DIR / filename)
+        for filename in REMOVED_PYTHON_E2E_FILES
+        if (E2E_PYTHON_DIR / filename).exists()
+    ]
+
+
+def _collect_stale_execution_surface_refs() -> list[str]:
+    """Return execution-surface references that still mention removed E2E files."""
+    refs: list[str] = []
+    execution_surfaces = (
+        REPO_ROOT / "Makefile",
+        REPO_ROOT / "tools" / "e2e" / "run_e2e_suite.sh",
+        REPO_ROOT / ".github" / "workflows" / "ci.yml",
+        REPO_ROOT / "docs" / "testing" / "E2E_TESTS.md",
+    )
+    for surface in execution_surfaces:
+        text = surface.read_text(encoding="utf-8")
+        refs.extend(
+            f"{_display_path(surface)}::{filename}"
+            for filename in REMOVED_PYTHON_E2E_FILES
+            if filename in text
+        )
+    return refs
+
+
+def _check_e2e_migration_policy() -> CheckResult:
+    """Validate Rust-first E2E migration policy for Python and shell paths."""
+    missing_wrappers, stale_shell_logic = _collect_migrated_wrapper_findings()
+    removed_python_present = _collect_removed_python_e2e_paths()
+    stale_execution_refs = _collect_stale_execution_surface_refs()
+
+    if missing_wrappers or stale_shell_logic or removed_python_present or stale_execution_refs:
+        details: list[str] = []
+        if missing_wrappers:
+            details.append(f"missing migrated wrappers: {', '.join(missing_wrappers)}")
+        if stale_shell_logic:
+            details.append(f"non-wrapper migrated shell logic: {', '.join(stale_shell_logic)}")
+        if removed_python_present:
+            display = ", ".join(_display_path(Path(p)) for p in removed_python_present)
+            details.append(f"removed Python E2E files still present: {display}")
+        if stale_execution_refs:
+            details.append(f"stale execution-surface refs: {', '.join(stale_execution_refs)}")
+        return _result("e2e-migration-policy", FAIL, "; ".join(details))
+
+    return _result(
+        "e2e-migration-policy",
+        PASS,
+        "migrated shell paths are thin wrappers and removed Python E2E files are absent",
+    )
+
+
 def _check_optional_kiro(manifest: dict, full: bool) -> CheckResult:
     """Check optional .kiro/steering adapters for drift against harness truth surfaces.
 
@@ -535,6 +688,8 @@ def collect_results(full: bool = False) -> list[CheckResult]:
         _check_risk_pack_docs(manifest),
         _check_harness_docs(manifest),
         _check_agents_map(),
+        _check_e2e_harness_contract(),
+        _check_e2e_migration_policy(),
         _check_recent_analysis_reports(),
         _check_optional_kiro(manifest, full=full),
     ]
