@@ -218,6 +218,8 @@ append_step_summary() {
     fi
     echo
   } >> "${GITHUB_STEP_SUMMARY}"
+
+  return 0
 }
 
 # Capture container logs, inspect data, and temp files into ARTIFACT_DIR.
@@ -248,6 +250,8 @@ capture_failure_artifacts() {
   if [[ -n "${TMP_DIR}" && -d "${TMP_DIR}" ]]; then
     cp -R "${TMP_DIR}/." "${ARTIFACT_DIR}/" 2>/dev/null || true
   fi
+
+  return 0
 }
 
 # Cleanup handler: capture failure artifacts, append step summary,

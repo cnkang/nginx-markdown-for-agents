@@ -31,6 +31,8 @@ readonly PATTERN_CT_MARKDOWN='^Content-Type: text/markdown'
 
 # shellcheck disable=SC1090
 source "${NATIVE_BUILD_HELPER}"
+# shellcheck disable=SC1090
+source "$(dirname "${BASH_SOURCE[0]}")/e2e_common.sh"
 
 # usage — Print command-line help text to stderr.
 #
@@ -378,7 +380,7 @@ grep -qi "${PATTERN_CT_MARKDOWN}" "${RAW_DIR}/case6.hdr" || {
   exit 1
 }
 grep -q "deep content" "${RAW_DIR}/case6.body" || {
-  echo "  WARN: Case 6 - deep content may have been pruned (acceptable)"
+  echo "  WARN: Case 6 - deep content may have been pruned (acceptable)" >&2
 }
 echo "  PASS: Deep nesting handled without crash"
 

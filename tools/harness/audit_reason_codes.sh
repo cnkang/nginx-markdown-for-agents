@@ -206,6 +206,7 @@ check_direct_emission() {
     fi
 
     _grep_pair_in_src_files "$accessor" "$LOG_DECISION_SYMBOL" "*.c" "$IMPL_HEADER_GLOB"
+    return $?
 }
 
 #
