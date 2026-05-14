@@ -78,7 +78,7 @@ sudo tail -20 /var/log/nginx/error.log | grep markdown
 Confirm the metrics endpoint responds:
 
 ```bash
-curl -s http://localhost/markdown-metrics | head -5
+curl -s -H "Accept: text/plain" http://localhost/markdown-metrics | head -5
 ```
 
 ### Record Baseline Metrics
@@ -130,7 +130,7 @@ http {
     markdown_on_error pass;
     markdown_on_wildcard off;
     markdown_log_verbosity info;
-    markdown_max_size 10m;
+    markdown_memory_budget 10m;
     markdown_timeout 5s;
 
     server {
@@ -161,7 +161,7 @@ Wait at least 30 minutes, then verify:
 
 ```bash
 # Check for conversion activity
-curl -s http://localhost/markdown-metrics | \
+curl -s -H "Accept: text/plain" http://localhost/markdown-metrics | \
   grep -E "conversions_(succeeded|failed|bypassed)"
 
 # Check decision log entries
@@ -208,7 +208,7 @@ http {
     markdown_on_error pass;
     markdown_on_wildcard off;
     markdown_log_verbosity info;
-    markdown_max_size 10m;
+    markdown_memory_budget 10m;
     markdown_timeout 5s;
 
     server {
@@ -293,7 +293,7 @@ http {
     markdown_on_error pass;
     markdown_on_wildcard off;
     markdown_log_verbosity info;
-    markdown_max_size 10m;
+    markdown_memory_budget 10m;
     markdown_timeout 5s;
 
     # Staging server (already enabled from Stage 2)
@@ -350,7 +350,7 @@ Wait at least 24 hours to cover a full traffic cycle, then verify:
 
 ```bash
 # Check production conversion metrics
-curl -s http://localhost/markdown-metrics | \
+curl -s -H "Accept: text/plain" http://localhost/markdown-metrics | \
   grep -E "conversions_(succeeded|failed|bypassed)"
 
 # Check for failure reason codes in the last 24 hours
@@ -416,7 +416,7 @@ http {
     markdown_on_error pass;
     markdown_on_wildcard off;
     markdown_log_verbosity info;
-    markdown_max_size 10m;
+    markdown_memory_budget 10m;
     markdown_timeout 5s;
 
     server {
@@ -936,7 +936,7 @@ These page types share common traits that make them ideal first candidates:
 - HTML structure is simple and predictable
 - Pages are not personalized or authenticated
 - Content-Type is consistently `text/html`
-- Response sizes are within typical `markdown_max_size` limits
+- Response sizes are within typical `markdown_memory_budget` limits
 
 Once these paths are stable (conversion success rate > 95%, no `FAIL_SYSTEM` codes, latency within `markdown_timeout`), expand to additional content paths following the [Rollout Stages](#rollout-stages) sequence.
 
@@ -1286,7 +1286,7 @@ grep "markdown decision:" /var/log/nginx/error.log | \
 
 ```bash
 # Show failure counters from the metrics endpoint
-curl -s http://localhost/markdown-metrics | \
+curl -s -H "Accept: text/plain" http://localhost/markdown-metrics | \
   grep -E "failures_(conversion|resource_limit|system)"
 ```
 
@@ -1294,7 +1294,7 @@ curl -s http://localhost/markdown-metrics | \
 
 ```bash
 # Show latency distribution from the metrics endpoint
-curl -s http://localhost/markdown-metrics | \
+curl -s -H "Accept: text/plain" http://localhost/markdown-metrics | \
   grep "conversion_latency"
 ```
 
@@ -1355,7 +1355,7 @@ Stop expanding rollout scope and investigate if any of the following occur:
 | Upstream error rate increase | The module may be causing upstream issues (unlikely but possible with decompression or buffering interactions) | Compare upstream 5xx rates before and after enablement |
 | Unexpected `Content-Type` in responses | Converted responses have wrong Content-Type, or non-HTML responses are being processed | `curl -sD - -H "Accept: text/markdown" http://localhost/your-path/ \| grep Content-Type` |
 | One path failing significantly more than others | Path-specific issue — the HTML structure on that path may not convert cleanly | Per-URI failure check: `grep "reason=ELIGIBLE_FAILED" \| grep -oP 'uri=\K[^ ]+' \| sort \| uniq -c` |
-| `SKIP_CONTENT_TYPE` or `SKIP_SIZE` for paths you expect to convert | Upstream responses changed — content type is no longer `text/html` or response size exceeds `markdown_max_size` | Check skip reason distribution filtered by URI |
+| `SKIP_CONTENT_TYPE` or `SKIP_SIZE` for paths you expect to convert | Upstream responses changed — content type is no longer `text/html` or response size exceeds `markdown_memory_budget` | Check skip reason distribution filtered by URI |
 
 When a trigger fires:
 

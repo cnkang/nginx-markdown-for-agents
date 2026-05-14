@@ -36,6 +36,34 @@ nodeSelector: {}
 tolerations: []
 affinity: {}
 
+# Health check probes
+livenessProbe:
+  httpGet:
+    path: /
+    port: http
+  initialDelaySeconds: 10
+  periodSeconds: 30
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /
+    port: http
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  timeoutSeconds: 3
+  failureThreshold: 3
+
+startupProbe:
+  httpGet:
+    path: /
+    port: http
+  initialDelaySeconds: 0
+  periodSeconds: 5
+  timeoutSeconds: 3
+  failureThreshold: 30
+
 # NGINX Markdown module configuration
 markdown:
   enabled: true
@@ -49,6 +77,9 @@ markdown:
   logVerbosity: "info"
   bufferChunked: true
   autoDecompress: true
+
+  # load_module path for the shared object
+  loadModule: "/usr/lib/nginx/modules/ngx_http_markdown_filter_module.so"
 
   # Streaming configuration
   streaming:

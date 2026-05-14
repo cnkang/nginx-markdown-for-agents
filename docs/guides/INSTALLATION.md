@@ -542,7 +542,7 @@ http {
     markdown_filter on;
 
     # Safe defaults
-    markdown_max_size 10m;
+    markdown_memory_budget 10m;
     markdown_timeout 5s;
     markdown_on_error pass;  # Fail-open: return original HTML on conversion error
 
@@ -751,7 +751,7 @@ If a metrics endpoint location is configured, confirm conversion counters are in
 
 ```bash
 # Plain text
-curl http://localhost/markdown-metrics
+curl -H "Accept: text/plain" http://localhost/markdown-metrics
 
 # JSON
 curl -H "Accept: application/json" http://localhost/markdown-metrics
@@ -1089,7 +1089,7 @@ The eligibility requirements are:
 1. **HTTP status 200** — the upstream response must have status code `200 OK`. Redirects (3xx), client errors (4xx), and server errors (5xx) are not eligible.
 2. **Upstream `Content-Type: text/html`** — the upstream response must have `Content-Type: text/html` (with any charset parameter). Other content types (e.g., `application/json`, `text/plain`) are not eligible.
 3. **Request `Accept` includes `text/markdown`** — the client request must include `text/markdown` in the `Accept` header. Without this, the module does not activate.
-4. **Response size within `markdown_max_size`** — the upstream response body must not exceed the configured `markdown_max_size` limit (default: `10m`). Responses larger than this limit are passed through unchanged.
+4. **Response size within `markdown_memory_budget`** — the upstream response body must not exceed the configured `markdown_memory_budget` limit (default: `10m`). Responses larger than this limit are passed through unchanged.
 
 **Resolution Steps:**
 
@@ -1107,7 +1107,7 @@ The eligibility requirements are:
    curl -sD - -o /dev/null http://localhost/
    ```
    Confirm the status is `200` and `Content-Type` is `text/html`.
-4. Check the response size against `markdown_max_size`:
+4. Check the response size against `markdown_memory_budget`:
    ```bash
    curl -sI http://localhost/ | grep -i content-length
    ```
@@ -1344,7 +1344,7 @@ sudo nginx -s reload
 
 1. Module disabled — ensure `markdown_filter on;` is set.
 2. `Accept` header missing — ensure the request includes `Accept: text/markdown`.
-3. Response not eligible — status code must be 200, `Content-Type` must be `text/html`, response size must be within `markdown_max_size`.
+3. Response not eligible — status code must be 200, `Content-Type` must be `text/html`, response size must be within `markdown_memory_budget`.
 4. Check NGINX error log for details:
    ```bash
    sudo tail -f /var/log/nginx/error.log
@@ -1360,7 +1360,7 @@ sudo nginx -s reload
 markdown_timeout 10s;  # Increase from default 5s
 
 # Or increase max size if large pages are timing out
-markdown_max_size 20m;  # Increase from default 10m
+markdown_memory_budget 20m;  # Increase from default 10m
 ```
 
 ### Issue: High Memory Usage
@@ -1370,7 +1370,7 @@ markdown_max_size 20m;  # Increase from default 10m
 **Solution:**
 ```nginx
 # Reduce max response size
-markdown_max_size 5m;
+markdown_memory_budget 5m;
 
 # Disable conversion for large pages
 location /large-content {
@@ -1417,7 +1417,7 @@ sudo tail -50 /var/log/nginx/error.log
 
 1. Optimize resource limits:
    ```nginx
-   markdown_max_size 5m;
+   markdown_memory_budget 5m;
    markdown_timeout 3s;
    ```
 
