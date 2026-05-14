@@ -33,6 +33,8 @@ readonly AWK_HTTP_STATUS="{print \$2}"
 
 # shellcheck disable=SC1090
 source "${NATIVE_BUILD_HELPER}"
+# shellcheck disable=SC1090
+source "$(dirname "${BASH_SOURCE[0]}")/e2e_common.sh"
 
 #
 # Print command-line usage for this E2E script.

@@ -62,6 +62,8 @@ readonly MSG_MISSING_CONVERTED_HEADING='missing converted heading in body'
 
 # shellcheck source=tools/lib/nginx_markdown_native_build.sh
 source "${NATIVE_BUILD_HELPER}"
+# shellcheck disable=SC1090
+source "$(dirname "${BASH_SOURCE[0]}")/e2e_common.sh"
 
 usage() {
     cat <<EOF
