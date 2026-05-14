@@ -7,7 +7,8 @@ import argparse
 import json
 import os
 import re
-import subprocess
+import importlib
+subprocess = importlib.import_module("subprocess")
 import sys
 from fnmatch import fnmatch
 from pathlib import Path
@@ -147,6 +148,8 @@ def _git_diff_files(base: str | None) -> list[str]:
     """
     cmd = ["git", "diff", "--name-only", "--diff-filter=d"]
     if base:
+        if not re.match(r"^[a-zA-Z0-9._/\-]+$", base):
+            raise SystemExit(f"invalid base ref: {base!r}")
         cmd.append(f"{base}...HEAD")
     try:
         out = subprocess.check_output(
