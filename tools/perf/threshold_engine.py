@@ -353,9 +353,8 @@ def _write_json(data, path):
     """
     if path is None:
         return
-    resolved_path = Path(path).resolve()
     resolved = validate_write_path_within_root(
-        resolved_path, REPO_ROOT, purpose="threshold output",
+        path, REPO_ROOT, purpose="threshold output",
     )
     resolved.parent.mkdir(parents=True, exist_ok=True)
     resolved.write_text(

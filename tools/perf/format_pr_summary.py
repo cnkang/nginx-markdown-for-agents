@@ -132,12 +132,11 @@ def main(argv: list[str] | None = None) -> int:
     md = format_summary(report)
 
     if args.output:
-        output_path = Path(args.output).resolve()
         validated_output = validate_write_path_within_root(
-            output_path, REPO_ROOT, purpose="PR summary output",
+            args.output, REPO_ROOT, purpose="PR summary output",
         )
         validated_output.parent.mkdir(parents=True, exist_ok=True)
-        validated_output.write_text(md, encoding="utf-8")  # nosec S2083 — path validated by validate_write_path_within_root()
+        validated_output.write_text(md, encoding="utf-8")  # NOSONAR — path validated by validate_write_path_within_root()
         print(f"PR summary written to {args.output}")
     else:
         print(md)
