@@ -89,8 +89,8 @@ The strategic review implies the following documentation posture:
 > items from 0.6.0 are complete, dynconf hardening from 0.6.2 is complete, and
 > the first Rust-first E2E migration batch is closed in 0.6.3 (five migrated
 > scenarios plus harness-governance alignment). Final mainline hardening for
-> repository-root path validation and release/performance tooling is included
-> before the v0.6.3 tag.
+> repository-root path validation, release/performance tooling, and the release
+> binary matrix is included before the v0.6.3 tag.
 
 `0.6.0` delivers the **P0 production-readiness subset**: default behavior changes that make the system production-optimal out-of-the-box, with full backward compatibility and operator rollback controls. P1/P2 capabilities are tracked in the spec but not blocking for this release.
 
@@ -188,4 +188,4 @@ An operator can:
 | 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |
 | 0.6.0 | 2026-04-28 | v0.6.0-planning | Added 0.6.0 Production Readiness release scope, cut line, and compatibility contract |
 | 0.6.2 | 2026-05-08 | Kang | Updated current status to v0.6.2 released |
-| 0.6.3 | 2026-05-14 | Kang | Updated current status to v0.6.3 released and added Rust-first E2E migration closure and final hardening notes |
+| 0.6.3 | 2026-05-14 | Kang | Updated current status to v0.6.3 released and added Rust-first E2E migration closure, release-matrix refresh, and final hardening notes |
