@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import tempfile
 from pathlib import Path
+import sys
 
 import pytest
 
@@ -248,6 +249,27 @@ def test_git_diff_files_uses_delete_filter(monkeypatch: pytest.MonkeyPatch) -> N
     assert "--diff-filter=d" in captured["cmd"]
 
 
+def test_parse_args_validates_base_at_cli_boundary(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["harness_route.py", "--from-git", "--base", "HEAD~3"],
+    )
+    args = harness_route._parse_args()
+    assert args.base == "HEAD~3"
+    assert args.from_git is True
+
+
+def test_parse_args_rejects_invalid_base_before_main(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["harness_route.py", "--from-git", "--base", "main; rm -rf /"],
+    )
+    with pytest.raises(SystemExit):
+        harness_route._parse_args()
+
+
 def test_git_status_files_expands_directory_with_nested_files(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -455,19 +477,6 @@ def test_validate_git_ref_accepts_valid_refs(ref: str) -> None:
 def test_validate_git_ref_rejects_invalid_refs(ref: str) -> None:
     with pytest.raises(SystemExit, match="invalid base ref"):
         _validate_git_ref(ref)
-
-
-def test_git_diff_files_rejects_invalid_base(monkeypatch: pytest.MonkeyPatch) -> None:
-    call_count = {"n": 0}
-
-    def fake_check_output(cmd, cwd, stderr, text):
-        call_count["n"] += 1
-        return ""
-
-    monkeypatch.setattr(harness_route.subprocess, "check_output", fake_check_output)
-    with pytest.raises(SystemExit, match="invalid base ref"):
-        _git_diff_files("main; rm -rf /")
-    assert call_count["n"] == 0
 
 
 def test_git_diff_files_accepts_tilde_ref(monkeypatch: pytest.MonkeyPatch) -> None:
