@@ -10,6 +10,8 @@
 //! In Reuse_Mode the harness adapts to the supplied binary; in Bootstrap_Mode
 //! the harness prepares the layout through `bootstrap.rs`.
 
+#![allow(dead_code)]
+
 use anyhow::Result;
 use std::path::{Path, PathBuf};
 

@@ -6,6 +6,8 @@
 //! - appending scenario reports to a JSON report file;
 //! - cleaning up artifacts on success unless `--keep-artifacts` is set.
 
+#![allow(dead_code)]
+
 use crate::scenarios::ScenarioReport;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};

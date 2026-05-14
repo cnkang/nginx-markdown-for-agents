@@ -3,6 +3,8 @@
 //! Handles starting, monitoring, and stopping NGINX child processes.
 //! The `Drop` implementation ensures no orphan processes remain.
 
+#![allow(dead_code)]
+
 use anyhow::{Result, bail};
 use std::path::Path;
 use std::process::{Child, Command};

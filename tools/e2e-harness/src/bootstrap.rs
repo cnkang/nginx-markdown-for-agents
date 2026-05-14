@@ -4,6 +4,8 @@
 //! binary either directly or by bridging to
 //! `tools/lib/nginx_markdown_native_build.sh`.
 
+#![allow(dead_code)]
+
 use anyhow::{Context, Result, bail};
 use regex::Regex;
 use std::fs;
