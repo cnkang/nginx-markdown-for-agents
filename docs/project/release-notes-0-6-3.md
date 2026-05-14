@@ -81,6 +81,15 @@ an `e2e-migration` risk pack.
   stale `1.29.8` and `1.30.0` entries.
 - The development pytest baseline was refreshed for this release line.
 
+## Release Automation
+
+- `release-binaries.yml` runs the release matrix updater before resolving binary
+  build targets, so a newly published NGINX version is picked up before module
+  binaries are built.
+- `update-matrix.yml` validates generated matrix changes, creates the release
+  matrix PR, and then attempts automatic approval and squash merge when GitHub
+  repository policy allows it.
+
 ## 0.6.3 Non-Goals
 
 1. Does not remove C unit tests or integration tests

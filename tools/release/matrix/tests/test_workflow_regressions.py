@@ -33,11 +33,28 @@ def _step_by_name(steps: list[dict[str, object]], name: str) -> dict[str, object
     raise AssertionError(f"Missing workflow step: {name}")
 
 
-def test_release_binaries_checks_matrix_freshness_on_release_and_manual_dispatch() -> None:
-    """Release binaries must gate published artifacts on nginx.org freshness."""
-    text = _workflow_text("release-binaries.yml")
-    assert "if: github.event_name == 'release'" in text
-    assert "if: github.event_name == 'workflow_dispatch' && inputs.matrix_freshness != 'off'" in text
+def test_release_binaries_updates_matrix_before_resolving_builds() -> None:
+    """Release binaries must refresh nginx.org matrix data before building."""
+    workflow = _workflow_data("release-binaries.yml")
+    steps = workflow["jobs"]["prepare"]["steps"]
+    step_names = [step["name"] for step in steps if "name" in step]
+
+    update_step = _step_by_name(steps, "Update Release Matrix")
+    validate_step = _step_by_name(steps, "Validate updated release matrix")
+
+    assert "python3 tools/release/matrix/update_matrix.py" in update_step["run"]
+    assert "tools/matrix-diff.json" in update_step["run"]
+    assert "python3 tools/release/matrix/validate_doc_matrix_sync.py" in validate_step["run"]
+    assert (
+        "python3 tools/release/matrix/validate_matrix_install_consistency.py"
+        in validate_step["run"]
+    )
+    assert step_names.index("Update Release Matrix") < step_names.index(
+        "Extract build matrix from release-matrix.json"
+    )
+    assert step_names.index("Validate updated release matrix") < step_names.index(
+        "Extract build matrix from release-matrix.json"
+    )
 
 
 def test_update_matrix_pr_creation_is_non_blocking_when_repo_disallows_actions_prs() -> None:
@@ -45,6 +62,10 @@ def test_update_matrix_pr_creation_is_non_blocking_when_repo_disallows_actions_p
     text = _workflow_text("update-matrix.yml")
     assert "continue-on-error: true" in text
     assert "Source: nginx.org download page." in text
+    assert "Auto-approve release matrix PR" in text
+    assert 'gh pr review "$PR_NUMBER" --approve' in text
+    assert "Auto-merge release matrix PR" in text
+    assert 'gh pr merge "$PR_NUMBER" --squash --delete-branch --auto' in text
     assert "Matrix update branch pushed, but automatic PR creation is blocked." in text
 
 

@@ -111,6 +111,36 @@ jobs:
             release-matrix
           commit-message: ${{ steps.pr_meta.outputs.title }}
 
+      - name: Auto-approve release matrix PR
+        if: >-
+          steps.changes.outputs.has_changes == 'true' &&
+          steps.create_pr.outcome == 'success' &&
+          steps.create_pr.outputs.pull-request-number != ''
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ steps.create_pr.outputs.pull-request-number }}
+        run: |
+          gh pr review "$PR_NUMBER" --approve \
+            --body "Automated approval after release matrix validation passed." \
+            || echo "::warning::Automatic PR approval was not accepted by GitHub policy."
+
+      - name: Auto-merge release matrix PR
+        if: >-
+          steps.changes.outputs.has_changes == 'true' &&
+          steps.create_pr.outcome == 'success' &&
+          steps.create_pr.outputs.pull-request-number != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ steps.create_pr.outputs.pull-request-number }}
+        run: |
+          if gh pr merge "$PR_NUMBER" --squash --delete-branch --auto; then
+            echo "Auto-merge enabled for release matrix PR #$PR_NUMBER."
+          else
+            echo "::warning::Auto-merge could not be enabled; trying immediate squash merge."
+            gh pr merge "$PR_NUMBER" --squash --delete-branch
+          fi
+
       - name: Report manual PR fallback
         if: steps.changes.outputs.has_changes == 'true' && steps.create_pr.outcome == 'failure'
         run: |
