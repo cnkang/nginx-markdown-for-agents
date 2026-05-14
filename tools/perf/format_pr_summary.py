@@ -137,7 +137,7 @@ def main(argv: list[str] | None = None) -> int:
             output_path, REPO_ROOT, purpose="PR summary output",
         )
         validated_output.parent.mkdir(parents=True, exist_ok=True)
-        validated_output.write_text(md, encoding="utf-8")
+        validated_output.write_text(md, encoding="utf-8")  # nosec S2083 — path validated by validate_write_path_within_root()
         print(f"PR summary written to {args.output}")
     else:
         print(md)
