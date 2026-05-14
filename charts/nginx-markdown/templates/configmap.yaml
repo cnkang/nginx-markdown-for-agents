@@ -6,6 +6,9 @@ metadata:
     {{- include "nginx-markdown.labels" . | nindent 4 }}
 data:
   nginx.conf: |
+    {{- if and .Values.markdown.enabled .Values.markdown.loadModule }}
+    load_module {{ .Values.markdown.loadModule }};
+    {{- end }}
     worker_processes auto;
     events { worker_connections 1024; }
     http {
@@ -13,7 +16,7 @@ data:
         listen 80;
         {{- if .Values.markdown.enabled }}
         markdown_filter on;
-        markdown_max_size {{ .Values.markdown.maxSize }};
+        markdown_memory_budget {{ .Values.markdown.maxSize }};
         markdown_timeout {{ .Values.markdown.timeout }};
         markdown_on_error {{ .Values.markdown.onError }};
         markdown_flavor {{ .Values.markdown.flavor }};

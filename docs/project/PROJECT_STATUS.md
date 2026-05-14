@@ -88,7 +88,7 @@ and contributor-facing harness maintenance.
   - OS package manager distribution (APT, YUM/DNF, Homebrew).
   - Helm chart with Ingress annotation support.
   - Coverage gate as CI merge requirement.
-  - MDX and Org-mode flavor support.
+  - MDX and Org-mode flavor support (experimental, subject to change).
   - Dynamic configuration hot-reload (`markdown_dynamic_config`).
   - ADR-0006 (OTel), ADR-0007 (Streaming Default), ADR-0008 (Noise Pruning Default).
 
@@ -311,7 +311,7 @@ When deploying:
 
 1. **Start incrementally**: Enable on one location or path first
 2. **Monitor behavior**: Use the metrics endpoint to track conversions
-3. **Set appropriate limits**: Configure `markdown_max_size` and `markdown_timeout`
+3. **Set appropriate limits**: Configure `markdown_memory_budget` and `markdown_timeout`
 4. **Choose failure mode**: Select `markdown_on_error` based on requirements
 5. **Test caching**: Verify cache behavior with your CDN or caching layer
 6. **Review security**: Ensure authentication policies match your security model
@@ -344,10 +344,8 @@ See [DEPLOYMENT_EXAMPLES.md](../guides/DEPLOYMENT_EXAMPLES.md) for configuration
 - Continue operator-facing diagnostics hardening for drift/degradation cases
 
 ### Future Exploration
-- OpenTelemetry tracing integration
 - Additional Markdown flavors and output formats
-- Expanded observability integrations beyond built-in shared metrics
-- Packaging and distribution expansion (apt/yum/brew and ingress-oriented bundles)
+- Expanded observability integrations beyond built-in shared metrics and OTel tracing
 
 ## Known Limitations
 

@@ -125,8 +125,8 @@ decompression_success_rate = (decompressions_succeeded / decompressions_attempte
 # Optional: override if your metrics endpoint uses a different path
 export METRICS_URL="${METRICS_URL:-http://localhost/markdown-metrics}"
 
-# Plain text format
-curl "$METRICS_URL"
+# Plain text format (default when no Accept header is sent)
+curl -H "Accept: text/plain" "$METRICS_URL"
 
 # JSON format
 curl -H "Accept: application/json" "$METRICS_URL"
@@ -320,7 +320,7 @@ fi
 # check_markdown_filter.sh
 #!/bin/bash
 
-METRICS=$(curl -s "${METRICS_URL:-http://localhost/markdown-metrics}")
+METRICS=$(curl -s -H "Accept: text/plain" "${METRICS_URL:-http://localhost/markdown-metrics}")
 FAILED=$(echo "$METRICS" | grep conversions_failed | awk '{print $2}')
 ATTEMPTED=$(echo "$METRICS" | grep conversions_attempted | awk '{print $2}')
 
@@ -395,7 +395,7 @@ tail -100 /var/log/nginx/error.log | grep markdown
 - Extension/path map uses `$request_uri` and fails when query strings are present
 - `text/*` path in map enabled but `markdown_on_wildcard` is still `off`
 - Response not eligible (non-200 status, non-HTML content)
-- Response exceeds `markdown_max_size` limit
+- Response exceeds `markdown_memory_budget` limit
 
 **Solutions:**
 - Enable filter: `markdown_filter on;`
@@ -403,7 +403,7 @@ tail -100 /var/log/nginx/error.log | grep markdown
 - For map-based config, use regex for `Accept` matching and prefer `$uri` for extension checks
 - Enable wildcard support when required: `markdown_on_wildcard on;`
 - Check backend returns 200 with `Content-Type: text/html`
-- Increase size limit if needed: `markdown_max_size 20m;`
+- Increase size limit if needed: `markdown_memory_budget 20m;`
 
 ---
 
@@ -417,7 +417,7 @@ tail -100 /var/log/nginx/error.log | grep markdown
 
 1. **Check failure categories:**
 ```bash
-curl "${METRICS_URL:-http://localhost/markdown-metrics}" | grep failures
+curl -H "Accept: text/plain" "${METRICS_URL:-http://localhost/markdown-metrics}" | grep failures
 ```
 
 2. **Analyze error logs:**
@@ -452,7 +452,7 @@ grep "conversion failed" /var/log/nginx/error.log | \
   - Report bug if HTML is valid but conversion fails
 
 - **For resource_limit:**
-  - Increase limits: `markdown_max_size 20m; markdown_timeout 10s;`
+  - Increase limits: `markdown_memory_budget 20m; markdown_timeout 10s;`
   - Optimize content: Reduce HTML size at source
   - Use fail-open: `markdown_on_error pass;`
 
@@ -474,625 +474,17 @@ grep "conversion failed" /var/log/nginx/error.log | \
 
 1. **Check average conversion time:**
 ```bash
-curl "${METRICS_URL:-http://localhost/markdown-metrics}"
+curl -H "Accept: text/plain" "${METRICS_URL:-http://localhost/markdown-metrics}"
 # Calculate only when conversion_completed > 0:
 #   conversion_time_sum_ms / conversion_completed
 # Otherwise record 0 (or null in your dashboard) to avoid Inf/NaN.
 ```
 
-2. **Identify slow conversions:**
-```bash
-grep "conversion succeeded" /var/log/nginx/error.log | \
-  grep -o 'time=[0-9]*ms' | \
-  sed 's/time=//;s/ms//' | \
-  sort -n | tail -20
-```
-
-3. **Profile specific URLs:**
-```bash
-# Time a specific request
-time curl -H "Accept: text/markdown" http://localhost/slow-page
-```
-
-4. **Check system load:**
-```bash
-top
-iostat -x 1 10
-vmstat 1 10
-```
-
-**Common Causes:**
-- Large HTML documents
-- Complex HTML structure (deeply nested)
-- High system load
-- Insufficient resources
-
-**Solutions:**
-
-1. **Optimize configuration:**
-```nginx
-# Reduce timeout for faster failure
-markdown_timeout 2s;
-
-# Reduce size limit
-markdown_max_size 5m;
-
-# Disable optional features
-markdown_token_estimate off;
-markdown_front_matter off;
-
-# Use simpler Markdown flavor
-markdown_flavor commonmark;
-```
-
-2. **Enable caching:**
-```nginx
-proxy_cache_path /var/cache/nginx/markdown keys_zone=markdown_cache:10m;
-
-location / {
-    proxy_cache markdown_cache;
-    proxy_cache_valid 200 10m;
-    proxy_cache_key "$scheme$request_method$host$request_uri$http_accept";
-}
-```
-
-3. **Optimize content at source:**
-- Reduce HTML size
-- Simplify HTML structure
-- Remove unnecessary elements
-
-4. **Scale horizontally:**
-- Add more NGINX workers: `worker_processes auto;`
-- Add more backend servers
-- Use load balancing
-
----
-
-#### Issue 4: Memory Issues
-
-**Symptoms:**
-- NGINX worker crashes
-- Out of memory errors in logs
-- System memory exhaustion
-
 **Diagnostic Steps:**
 
-1. **Check memory usage:**
+1. **Check average conversion time:**
 ```bash
-# Overall system memory
-free -h
-
-# NGINX worker memory
-ps aux | grep nginx | awk '{sum+=$6} END {print sum/1024 " MB"}'
-
-# Per-worker memory
-ps aux | grep "nginx: worker" | awk '{print $6/1024 " MB"}'
-```
-
-2. **Monitor memory over time:**
-```bash
-# Watch memory usage
-watch -n 5 'ps aux | grep "nginx: worker" | awk "{print \$6/1024 \" MB\"}"'
-```
-
-3. **Check for memory leaks:**
-```bash
-# Compare memory before and after load test
-ps aux | grep "nginx: worker" | awk '{print $6}'
-# Run load test
-ab -n 10000 -c 10 -H "Accept: text/markdown" http://localhost/
-# Check memory again
-ps aux | grep "nginx: worker" | awk '{print $6}'
-```
-
-**Common Causes:**
-- Memory leak in module
-- Large responses buffered in memory
-- Too many concurrent conversions
-- Insufficient system memory
-
-**Solutions:**
-
-1. **Reduce memory usage:**
-```nginx
-# Reduce max size
-markdown_max_size 5m;
-
-# Reduce buffer sizes
-client_body_buffer_size 64k;
-```
-
-2. **Limit concurrency:**
-```nginx
-# Reduce worker connections
-events {
-    worker_connections 1024;
-}
-
-# Add rate limiting
-limit_req_zone $binary_remote_addr zone=markdown:10m rate=10r/s;
-limit_req zone=markdown burst=20;
-```
-
-3. **Restart workers periodically:**
-```bash
-# Graceful reload
-nginx -s reload
-
-# Or use systemd timer for periodic restart
-```
-
-4. **Upgrade system resources:**
-- Add more RAM
-- Use swap (not recommended for production)
-
-
-#### Issue 5: Incorrect Cache Behavior
-
-**Symptoms:**
-- Clients receive wrong variant (HTML when expecting Markdown)
-- Cache serving stale content
-- Vary header missing
-
-**Diagnostic Steps:**
-
-1. **Check response headers (GET-based):**
-```bash
-curl -sD - -o /dev/null -H "Accept: text/markdown" http://localhost/test
-# Verify: Vary: Accept header present
-```
-
-2. **Test cache behavior:**
-```bash
-# Request Markdown
-curl -sD - -o /dev/null -H "Accept: text/markdown" http://localhost/test
-# Request HTML
-curl -sD - -o /dev/null -H "Accept: text/html" http://localhost/test
-# Both should return different Content-Type
-```
-
-3. **Check cache key:**
-```bash
-nginx -T | grep proxy_cache_key
-# Should include $http_accept
-```
-
-**Common Causes:**
-- Cache key doesn't include Accept header
-- Vary header not set
-- Upstream cache misconfigured
-
-**Solutions:**
-
-1. **Fix cache key:**
-```nginx
-proxy_cache_key "$scheme$request_method$host$request_uri$http_accept";
-```
-
-2. **Verify Vary header:**
-```nginx
-# Module automatically adds Vary: Accept
-# Verify in response headers
-```
-
-3. **Clear cache:**
-```bash
-# Clear NGINX cache
-rm -rf /var/cache/nginx/*
-nginx -s reload
-```
-
----
-
-#### Issue 6: Upstream/CDN Compression (Automatically Handled)
-
-**Note**: The module automatically detects and decompresses upstream compressed content. This issue should rarely occur with automatic decompression enabled.
-
-**Symptoms (if automatic decompression fails):**
-- `Accept: text/markdown` request returns HTML instead of Markdown
-- Error log shows decompression failures or invalid compression format
-- Responses include `Content-Encoding: gzip`, `br`, or `deflate` on paths that should be converted
-
-**Diagnostic Steps:**
-
-1. **Verify headers using GET (not HEAD):**
-```bash
-curl -sD - -o /dev/null -H "Accept: text/markdown" http://localhost/test
-# Check for Content-Type and Content-Encoding
-```
-
-2. **Check for decompression-related errors in log:**
-```bash
-grep -iE "markdown filter: (decompression|detected compression)" /var/log/nginx/error.log | tail -50
-```
-
-3. **Verify automatic decompression is working:**
-```bash
-# Should see log entries like:
-# "markdown filter: detected compression type: gzip"
-# "markdown filter: decompression succeeded, compressed=X bytes, decompressed=Y bytes"
-```
-
-4. **Optional optimization - disable upstream compression for Markdown requests:**
-```nginx
-map $http_accept $markdown_requested {
-    default 0;
-    "~*(^|,)\\s*text/markdown(\\s*;|,|$)" 1;
-}
-
-map $markdown_requested $upstream_accept_encoding {
-    0 $http_accept_encoding;
-    1 "";
-}
-
-location / {
-    proxy_set_header Accept-Encoding $upstream_accept_encoding;
-    proxy_pass http://backend;
-}
-```
-
-5. **If decompression consistently fails:**
-- Check if upstream is using an unsupported compression format
-- Verify the compressed data is not corrupted
-- Check error logs for specific decompression error messages
-- Consider disabling upstream compression as a workaround
-
-6. **Verify fix:**
-```bash
-curl -sD - -o /dev/null -H "Accept: text/markdown" http://localhost/test
-# Expect: Content-Type includes text/markdown
-# Expect: successful conversion even with upstream compression
-```
-
----
-
-### Diagnostic Tools
-
-#### Debug Logging
-
-Enable debug logging for detailed information:
-
-```nginx
-error_log /var/log/nginx/error.log debug;
-```
-
-**Warning:** Debug logging is very verbose. Use only for troubleshooting and disable after.
-
----
-
-#### Request Tracing
-
-Trace a specific request through the system:
-
-```bash
-# Add trace ID to request
-curl -v -H "Accept: text/markdown" -H "X-Trace-ID: test123" http://localhost/test
-
-# Search logs for trace ID
-grep "test123" /var/log/nginx/error.log
-```
-
----
-
-#### Performance Profiling
-
-Profile conversion performance:
-
-```bash
-# Time multiple requests
-for i in {1..10}; do
-    time curl -s -H "Accept: text/markdown" http://localhost/test > /dev/null
-done
-
-# Use Apache Bench for detailed stats
-ab -n 100 -c 10 -H "Accept: text/markdown" http://localhost/test
-```
-
----
-
-## Performance Tuning
-
-### Baseline Performance
-
-Establish baseline performance metrics before tuning:
-
-```bash
-# Run baseline test
-ab -n 1000 -c 10 -H "Accept: text/markdown" http://localhost/test
-
-# Record results
-# - Requests per second
-# - Time per request (mean)
-# - Time per request (95th percentile)
-# - Transfer rate
-```
-
-**Expected Baselines (reference):**
-- Latency overhead: < 50ms for typical pages
-- Throughput: > 100 req/s (single worker)
-- Token reduction: 70-85%
-- Memory per request: < 10MB
-
----
-
-### Optimization Strategies
-
-#### Strategy 1: Reduce Conversion Overhead
-
-**Goal:** Minimize time spent in conversion
-
-**Actions:**
-
-1. **Use CommonMark instead of GFM:**
-```nginx
-markdown_flavor commonmark;  # Faster than GFM
-```
-
-2. **Disable optional features:**
-```nginx
-markdown_token_estimate off;
-markdown_front_matter off;
-```
-
-3. **Reduce timeout:**
-```nginx
-markdown_timeout 1s;  # Fail fast
-```
-
-**Expected Impact:** 10-20% latency reduction
-
----
-
-#### Strategy 2: Aggressive Caching
-
-**Goal:** Avoid repeated conversions
-
-**Actions:**
-
-1. **Enable proxy caching:**
-```nginx
-proxy_cache_path /var/cache/nginx/markdown
-                 levels=1:2
-                 keys_zone=markdown_cache:100m
-                 max_size=10g
-                 inactive=60m;
-
-location / {
-    proxy_cache markdown_cache;
-    proxy_cache_valid 200 30m;
-    proxy_cache_key "$scheme$request_method$host$request_uri$http_accept";
-    proxy_cache_use_stale error timeout updating;
-}
-```
-
-2. **Monitor cache hit rate:**
-```bash
-# Add cache status header
-add_header X-Cache-Status $upstream_cache_status;
-
-# Check hit rate
-curl -I http://localhost/test | grep X-Cache-Status
-```
-
-**Expected Impact:** 80-95% cache hit rate, 10x throughput improvement
-
-
-#### Strategy 3: Resource Limits
-
-**Goal:** Prevent resource exhaustion
-
-**Actions:**
-
-1. **Set conservative limits:**
-```nginx
-markdown_max_size 2m;   # Smaller limit
-markdown_timeout 1s;    # Faster timeout
-```
-
-2. **Add rate limiting:**
-```nginx
-limit_req_zone $binary_remote_addr zone=markdown:10m rate=10r/s;
-
-location / {
-    limit_req zone=markdown burst=20 nodelay;
-}
-```
-
-**Expected Impact:** Prevent resource exhaustion, stable performance under load
-
----
-
-#### Strategy 4: Worker Tuning
-
-**Goal:** Optimize NGINX worker configuration
-
-**Actions:**
-
-1. **Match CPU cores:**
-```nginx
-worker_processes auto;  # Matches CPU cores
-```
-
-2. **Increase connections:**
-```nginx
-events {
-    worker_connections 2048;
-    use epoll;  # Linux
-}
-```
-
-3. **Optimize buffers:**
-```nginx
-client_body_buffer_size 128k;
-proxy_buffer_size 4k;
-proxy_buffers 8 4k;
-```
-
-**Expected Impact:** Better CPU utilization, higher throughput
-
----
-
-### Benchmarking
-
-#### Benchmark Procedure
-
-1. **Establish baseline:**
-```bash
-# HTML passthrough (baseline)
-ab -n 1000 -c 10 -H "Accept: text/html" http://localhost/test
-```
-
-2. **Test Markdown conversion:**
-```bash
-# Markdown conversion
-ab -n 1000 -c 10 -H "Accept: text/markdown" http://localhost/test
-```
-
-3. **Calculate overhead:**
-```
-overhead_ms = markdown_latency - html_latency
-overhead_pct = (overhead_ms / html_latency) * 100
-```
-
-4. **Test with caching:**
-```bash
-# First request (cache miss)
-curl -w "@curl-format.txt" -H "Accept: text/markdown" http://localhost/test
-
-# Second request (cache hit)
-curl -w "@curl-format.txt" -H "Accept: text/markdown" http://localhost/test
-```
-
-**curl-format.txt:**
-```
-time_namelookup:  %{time_namelookup}\n
-time_connect:     %{time_connect}\n
-time_starttransfer: %{time_starttransfer}\n
-time_total:       %{time_total}\n
-```
-
----
-
-#### Performance Targets
-
-| Metric | Target | Acceptable | Action Required |
-|--------|--------|------------|-----------------|
-| Latency overhead | < 50ms | < 100ms | > 100ms |
-| Throughput | > 100 req/s | > 50 req/s | < 50 req/s |
-| Cache hit rate | > 80% | > 60% | < 60% |
-| Failure rate | < 1% | < 5% | > 5% |
-| Memory per worker | < 100MB | < 200MB | > 200MB |
-
----
-
-## Upgrade Procedures
-
-### Pre-Upgrade Checklist
-
-- [ ] Review release notes and changelog
-- [ ] Check version compatibility (NGINX, Rust, dependencies)
-- [ ] Backup current configuration
-- [ ] Backup current binary and library
-- [ ] Test upgrade in staging environment
-- [ ] Schedule maintenance window
-- [ ] Notify stakeholders
-
----
-
-### Upgrade Steps
-
-#### Step 1: Backup Current Installation
-
-```bash
-# Backup NGINX binary
-cp /usr/local/nginx/sbin/nginx /usr/local/nginx/sbin/nginx.backup
-
-# Backup module library
-cp /usr/local/nginx/modules/ngx_http_markdown_filter_module.so \
-   /usr/local/nginx/modules/ngx_http_markdown_filter_module.so.backup
-
-# Backup Rust library
-cp /usr/local/lib/libnginx_markdown_converter.a \
-   /usr/local/lib/libnginx_markdown_converter.a.backup
-
-# Backup configuration
-cp -r /usr/local/nginx/conf /usr/local/nginx/conf.backup
-```
-
----
-
-#### Step 2: Build New Version
-
-```bash
-# Download new version
-git clone https://github.com/cnkang/nginx-markdown-for-agents.git
-cd nginx-markdown-for-agents
-git checkout v1.1.0  # New version
-
-# Build Rust library
-cd components/rust-converter
-cargo build --release
-cd ..
-
-# Build NGINX module
-cd /tmp/nginx-1.24.0
-./configure --add-dynamic-module=/path/to/nginx-markdown-for-agents/components/nginx-module
-make
-```
-
----
-
-#### Step 3: Test New Version
-
-```bash
-# Test configuration with new binary
-/tmp/nginx-1.24.0/objs/nginx -t -c /usr/local/nginx/conf/nginx.conf
-
-# Start test instance
-/tmp/nginx-1.24.0/objs/nginx -c /tmp/test-nginx.conf
-
-# Run smoke tests
-curl -H "Accept: text/markdown" http://localhost:8888/test
-
-# Run full test suite
-cd components/nginx-module/tests/integration
-./run_integration_tests.sh
-```
-
----
-
-#### Step 4: Deploy New Version
-
-```bash
-# Stop NGINX gracefully
-nginx -s quit
-
-# Wait for workers to finish
-sleep 5
-
-# Install new binary
-sudo make install
-
-# Start NGINX
-sudo nginx
-
-# Verify startup
-tail -f /var/log/nginx/error.log
-```
-
----
-
-#### Step 5: Verify Deployment
-
-```bash
-# Check version
-nginx -V
-
-# Test conversion
-curl -v -H "Accept: text/markdown" http://localhost/test
-
-# Check metrics
-curl "${METRICS_URL:-http://localhost/markdown-metrics}"
+curl -H "Accept: text/plain" "${METRICS_URL:-http://localhost/markdown-metrics}"
 
 # Monitor logs
 tail -f /var/log/nginx/error.log | grep markdown
@@ -1142,8 +534,8 @@ curl -H "Accept: text/markdown" http://localhost/test
 
 | Module Version | Rust Version | Status |
 |----------------|--------------|--------|
-| 0.3.x | 1.85.0+ | Supported (edition 2024) |
-| 0.3.x | < 1.85.0 | Not supported |
+| 0.3.x | 1.91.0+ | Supported (edition 2024) |
+| 0.3.x | < 1.91.0 | Not supported |
 
 ---
 
@@ -1240,7 +632,7 @@ Variable-driven `markdown_filter` support is new in 0.2.0. Existing static `on`/
 
 1. **Assess impact:**
 ```bash
-curl "${METRICS_URL:-http://localhost/markdown-metrics}"
+curl -H "Accept: text/plain" "${METRICS_URL:-http://localhost/markdown-metrics}"
 # Check: conversions_failed, failure categories
 ```
 
@@ -1258,7 +650,7 @@ grep "conversion failed" /var/log/nginx/error.log | tail -50
    - Report bug if needed
 
    **If resource_limit:**
-   - Increase limits temporarily: `markdown_max_size 20m; markdown_timeout 10s;`
+   - Increase limits temporarily: `markdown_memory_budget 20m; markdown_timeout 10s;`
    - Reload NGINX: `nginx -s reload`
    - Investigate root cause
 
@@ -1269,7 +661,7 @@ grep "conversion failed" /var/log/nginx/error.log | tail -50
 
 4. **Monitor for improvement:**
 ```bash
-watch -n 30 'curl -s "${METRICS_URL:-http://localhost/markdown-metrics}" | grep failed'
+watch -n 30 'curl -s -H "Accept: text/plain" "${METRICS_URL:-http://localhost/markdown-metrics}" | grep failed'
 ```
 
 5. **Document incident:**
@@ -1290,7 +682,7 @@ watch -n 30 'curl -s "${METRICS_URL:-http://localhost/markdown-metrics}" | grep 
 1. **Verify issue:**
 ```bash
 # Check average conversion time
-curl "${METRICS_URL:-http://localhost/markdown-metrics}"
+curl -H "Accept: text/plain" "${METRICS_URL:-http://localhost/markdown-metrics}"
 # Calculate only when conversion_completed > 0:
 #   conversion_time_sum_ms / conversion_completed
 # Otherwise record 0 (or null in your dashboard) to avoid Inf/NaN.
@@ -1363,7 +755,7 @@ dmesg | tail -50
 
    **If out of memory:**
    - Check memory usage: `free -h`
-   - Reduce `markdown_max_size`
+   - Reduce `markdown_memory_budget`
    - Add more RAM or swap
 
    **If segmentation fault:**
@@ -1383,7 +775,7 @@ systemctl restart nginx
 5. **Prevent recurrence:**
 ```nginx
 # Reduce resource limits
-markdown_max_size 5m;
+markdown_memory_budget 5m;
 markdown_timeout 3s;
 
 # Enable fail-open
@@ -1611,7 +1003,7 @@ The table below maps each reason code to its internal enum, error category, requ
 | `SKIP_RANGE` | `NGX_HTTP_MARKDOWN_INELIGIBLE_RANGE` | — | SKIPPED | Client sent a Range request header or upstream returned 206 Partial Content | Expected behavior — partial content cannot be converted. No action needed. |
 | `SKIP_STREAMING` | `NGX_HTTP_MARKDOWN_INELIGIBLE_STREAMING` | — | SKIPPED | Response matches `markdown_stream_types` (unbounded streaming) | Expected for SSE/streaming endpoints. If a static page triggers this, check your `markdown_stream_types` configuration. |
 | `SKIP_CONTENT_TYPE` | `NGX_HTTP_MARKDOWN_INELIGIBLE_CONTENT_TYPE` | — | SKIPPED | Upstream Content-Type is not `text/html` | Expected for JSON, XML, image, and other non-HTML responses. If an HTML page triggers this, check the upstream `Content-Type` header. |
-| `SKIP_SIZE` | `NGX_HTTP_MARKDOWN_INELIGIBLE_SIZE` | — | SKIPPED | Response body exceeds `markdown_max_size` | Increase `markdown_max_size` if the page should be converted, or exclude oversized pages from conversion scope. |
+| `SKIP_SIZE` | `NGX_HTTP_MARKDOWN_INELIGIBLE_SIZE` | — | SKIPPED | Response body exceeds `markdown_memory_budget` | Increase `markdown_memory_budget` if the page should be converted, or exclude oversized pages from conversion scope. |
 | `SKIP_AUTH` | `NGX_HTTP_MARKDOWN_INELIGIBLE_AUTH` | — | SKIPPED | Auth policy denies conversion for authenticated requests | Expected when `markdown_auth_policy deny` is configured. If you see it unexpectedly, check whether the request is authenticated and whether the location/server block should allow conversion. |
 | `SKIP_ACCEPT` | _(Accept negotiation)_ | — | SKIPPED | Accept header does not include `text/markdown` | Expected for normal browser traffic. If an AI agent triggers this, verify the client sends `Accept: text/markdown`. Check `markdown_on_wildcard` if using `*/*`. |
 | `ELIGIBLE_CONVERTED` | `NGX_HTTP_MARKDOWN_ELIGIBLE` | — | CONVERTED | All checks passed, conversion succeeded | No action needed — this is the success path. |
@@ -1648,7 +1040,7 @@ When conversion fails (`ELIGIBLE_FAILED_OPEN` or `ELIGIBLE_FAILED_CLOSED`), the 
 | Failure Code | Error Category Enum | Description | Suggested Operator Action |
 |---|---|---|---|
 | `FAIL_CONVERSION` | `NGX_HTTP_MARKDOWN_ERROR_CONVERSION` | HTML parse or conversion error | Inspect the failing HTML with `curl`. Check if the upstream changed its HTML structure. Report a bug if the HTML is valid. |
-| `FAIL_RESOURCE_LIMIT` | `NGX_HTTP_MARKDOWN_ERROR_RESOURCE_LIMIT` | Timeout (`markdown_timeout` exceeded) or memory limit reached | Increase `markdown_timeout` or `markdown_max_size`, or exclude large/complex pages from conversion scope. |
+| `FAIL_RESOURCE_LIMIT` | `NGX_HTTP_MARKDOWN_ERROR_RESOURCE_LIMIT` | Timeout (`markdown_timeout` exceeded) or memory limit reached | Increase `markdown_timeout` or `markdown_memory_budget`, or exclude large/complex pages from conversion scope. |
 | `FAIL_SYSTEM` | `NGX_HTTP_MARKDOWN_ERROR_SYSTEM` | Internal or system error | This should not occur in normal operation. Check system resources (`free -h`, `dmesg`). If persistent, report a bug with logs. |
 
 ### Request States
@@ -1701,7 +1093,7 @@ Example commands to check each state:
 
 ```bash
 # Check metrics endpoint
-curl -s http://localhost/markdown-metrics
+curl -s -H "Accept: text/plain" http://localhost/markdown-metrics
 
 # Count NOT_ENABLED from logs
 grep "markdown decision:" /var/log/nginx/error.log | grep -c "reason=SKIP_CONFIG"

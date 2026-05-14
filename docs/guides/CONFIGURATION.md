@@ -107,23 +107,25 @@ See [DEPLOYMENT_EXAMPLES.md](DEPLOYMENT_EXAMPLES.md#bot-targeted-conversion-user
 
 ---
 
-#### markdown_max_size
+#### markdown_memory_budget
 
-**Syntax:** `markdown_max_size <size>;`  
+**Syntax:** `markdown_memory_budget <size>;`  
 **Default:** `10m`  
 **Context:** http, server, location
 
 Maximum response size to attempt conversion. Responses larger than this limit will not be converted (fail-open behavior).
+
+> **Compatibility:** `markdown_memory_budget` supersedes `markdown_max_size` (deprecated in 0.6.0). `markdown_max_size` is still accepted with a deprecation warning at `info` verbosity.
 
 **Valid Units:** `k` (kilobytes), `m` (megabytes)
 
 **Example:**
 ```nginx
 # Limit to 5 megabytes
-markdown_max_size 5m;
+markdown_memory_budget 5m;
 
 # Limit to 512 kilobytes
-markdown_max_size 512k;
+markdown_memory_budget 512k;
 ```
 
 
@@ -512,7 +514,7 @@ markdown_streaming_budget 4m;
   parser state, sanitizer state, and output buffers.
 - When the budget is exceeded, the `nginx_markdown_streaming_budget_exceeded_total`
   Prometheus counter increments and the error is classified as a pre-commit failure.
-- The budget does not affect the full-buffer path, which uses `markdown_max_size` instead.
+- The budget does not affect the full-buffer path, which uses `markdown_memory_budget` instead.
 #### markdown_streaming_on_error
 
 **Syntax:** `markdown_streaming_on_error pass | reject;`
@@ -946,7 +948,7 @@ http {
     markdown_filter on;
     
     # Configure resource limits
-    markdown_max_size 10m;
+    markdown_memory_budget 10m;
     markdown_timeout 5s;
     
     # Use fail-open strategy (recommended)
@@ -989,7 +991,7 @@ http {
         # Enable for blog content
         location /blog {
             markdown_filter on;
-            markdown_max_size 5m;  # Smaller limit for blog posts
+            markdown_memory_budget 5m;  # Smaller limit for blog posts
             proxy_pass http://backend;
         }
         
@@ -1116,7 +1118,7 @@ http {
     markdown_auth_cookies session* auth_token PHPSESSID wordpress_logged_in_*;
     
     # Conservative resource limits
-    markdown_max_size 5m;
+    markdown_memory_budget 5m;
     markdown_timeout 3s;
     
     # Fail-closed for critical applications
@@ -1162,7 +1164,7 @@ http {
     markdown_filter on;
     
     # Aggressive resource limits
-    markdown_max_size 2m;
+    markdown_memory_budget 2m;
     markdown_timeout 1s;
     
     # Fail-open for availability
@@ -1209,7 +1211,7 @@ Configuration for multiple virtual hosts with different settings:
 http {
     # Global defaults
     markdown_filter on;
-    markdown_max_size 10m;
+    markdown_memory_budget 10m;
     markdown_timeout 5s;
     markdown_on_error pass;
     
@@ -1245,7 +1247,7 @@ http {
         server_name blog-c.example.com;
         
         location / {
-            markdown_max_size 5m;  # Smaller limit
+            markdown_memory_budget 5m;  # Smaller limit
             markdown_timeout 2s;   # Faster timeout
             markdown_conditional_requests if_modified_since_only;
             proxy_pass http://backend-c;
@@ -1286,17 +1288,17 @@ Configuration follows NGINX's standard inheritance model:
 ```nginx
 http {
     markdown_filter on;           # Inherited by all servers/locations
-    markdown_max_size 10m;        # Inherited by all servers/locations
+    markdown_memory_budget 10m;        # Inherited by all servers/locations
     
     server {
         location /docs {
-            # Inherits: markdown_filter on, markdown_max_size 10m
+            # Inherits: markdown_filter on, markdown_memory_budget 10m
         }
     }
 }
 ```
 
-**Result:** `/docs` has `markdown_filter on` and `markdown_max_size 10m`
+**Result:** `/docs` has `markdown_filter on` and `markdown_memory_budget 10m`
 
 ---
 
@@ -1305,18 +1307,18 @@ http {
 ```nginx
 http {
     markdown_filter on;
-    markdown_max_size 10m;
+    markdown_memory_budget 10m;
     
     server {
         location /docs {
-            markdown_max_size 5m;  # Override
+            markdown_memory_budget 5m;  # Override
             # Inherits: markdown_filter on
         }
     }
 }
 ```
 
-**Result:** `/docs` has `markdown_filter on` and `markdown_max_size 5m` (overridden)
+**Result:** `/docs` has `markdown_filter on` and `markdown_memory_budget 5m` (overridden)
 
 ---
 
@@ -1348,7 +1350,7 @@ http {
 ```nginx
 http {
     markdown_filter on;
-    markdown_max_size 10m;
+    markdown_memory_budget 10m;
     markdown_timeout 5s;
     
     server {
@@ -1367,7 +1369,7 @@ http {
         location / {
             # Inherits: markdown_filter on (from http)
             # Inherits: markdown_timeout 3s (from server)
-            # Inherits: markdown_max_size 10m (from http)
+            # Inherits: markdown_memory_budget 10m (from http)
         }
     }
 }
@@ -1380,16 +1382,16 @@ http {
 ```nginx
 http {
     markdown_filter on;
-    markdown_max_size 10m;
+    markdown_memory_budget 10m;
     markdown_timeout 5s;
     markdown_flavor commonmark;
     
     server {
         markdown_timeout 3s;  # Override
-        
+         
         location /docs {
             markdown_flavor gfm;  # Override
-            markdown_max_size 5m; # Override
+            markdown_memory_budget 5m; # Override
             # Inherits: markdown_filter on (from http)
             # Inherits: markdown_timeout 3s (from server)
         }
@@ -1421,7 +1423,7 @@ http {
 http {
     # Global defaults for all sites
     markdown_filter on;
-    markdown_max_size 10m;
+    markdown_memory_budget 10m;
     markdown_timeout 5s;
     markdown_on_error pass;
     
@@ -1440,7 +1442,7 @@ http {
         
         location /blog {
             # Blog posts are typically smaller
-            markdown_max_size 5m;
+            markdown_memory_budget 5m;
         }
     }
 }
@@ -1456,7 +1458,7 @@ Always configure resource limits to prevent resource exhaustion:
 
 ```nginx
 # Conservative limits for production
-markdown_max_size 5m;      # Limit response size
+markdown_memory_budget 5m;      # Limit response size
 markdown_timeout 3s;       # Limit conversion time
 ```
 
@@ -1578,7 +1580,7 @@ Balance between functionality and performance:
 
 ```nginx
 # Aggressive limits for high-traffic sites
-markdown_max_size 2m;      # Smaller limit
+markdown_memory_budget 2m;      # Smaller limit
 markdown_timeout 1s;       # Faster timeout
 ```
 
@@ -1680,7 +1682,7 @@ Establish performance baselines and monitor:
 ab -n 1000 -c 10 -H "Accept: text/markdown" http://localhost/
 
 # Monitor conversion metrics
-curl http://localhost/markdown-metrics
+curl -H "Accept: text/plain" http://localhost/markdown-metrics
 
 # Watch NGINX error log
 tail -f /var/log/nginx/error.log | grep markdown
@@ -1730,7 +1732,7 @@ http {
     
     # Markdown filter global settings
     markdown_filter on;
-    markdown_max_size 10m;
+    markdown_memory_budget 10m;
     markdown_timeout 5s;
     markdown_on_error pass;
     markdown_flavor commonmark;
@@ -1820,7 +1822,7 @@ http {
     
     # Markdown filter with verbose logging
     markdown_filter on;
-    markdown_max_size 10m;
+    markdown_memory_budget 10m;
     markdown_timeout 10s;  # Longer timeout for debugging
     markdown_on_error pass;
     markdown_flavor gfm;
@@ -1870,7 +1872,7 @@ http {
     
     # Aggressive markdown filter settings
     markdown_filter on;
-    markdown_max_size 2m;
+    markdown_memory_budget 2m;
     markdown_timeout 1s;
     markdown_on_error pass;
     markdown_flavor commonmark;
@@ -1950,7 +1952,7 @@ curl -v -H "Accept: text/markdown" http://localhost/
 curl -v -H "Accept: text/html" http://localhost/
 
 # Test metrics endpoint
-curl http://localhost/markdown-metrics
+curl -H "Accept: text/plain" http://localhost/markdown-metrics
 
 # Test with authentication
 curl -v -H "Accept: text/markdown" -H "Authorization: Bearer token" http://localhost/
@@ -1982,7 +1984,7 @@ ab -n 1000 -c 10 -H "Accept: text/html" http://localhost/
 1. `markdown_filter on` is set
 2. Request has `Accept: text/markdown` header
 3. Response is eligible (GET/HEAD, 200, text/html)
-4. Response size within `markdown_max_size` limit
+4. Response size within `markdown_memory_budget` limit
 
 **Debug:**
 ```bash
@@ -2016,14 +2018,14 @@ nginx -T | grep markdown
 ### Issue: Performance Degradation
 
 **Check:**
-1. `markdown_max_size` and `markdown_timeout` are appropriate
+1. `markdown_memory_budget` and `markdown_timeout` are appropriate
 2. Caching is enabled
 3. Optional features are disabled if not needed
 
 **Debug:**
 ```bash
 # Check metrics
-curl http://localhost/markdown-metrics
+curl -H "Accept: text/plain" http://localhost/markdown-metrics
 
 # Monitor conversion time
 tail -f /var/log/nginx/error.log | grep "conversion time"
