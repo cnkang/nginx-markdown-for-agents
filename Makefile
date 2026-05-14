@@ -79,7 +79,7 @@ rust-lib:
 
 rust-lib-debug:
 	@echo "Building Rust library (debug) for $(RUST_TARGET)..."
-	cd $(RUST_DIR) && cargo build --target $(RUST_TARGET)
+	cd $(RUST_DIR) && cargo build --locked --target $(RUST_TARGET)
 
 copy-headers:
 	@echo "Copying headers to nginx module source..."
@@ -94,16 +94,16 @@ test: build
 	@$(MAKE) -C $(NGINX_TEST_DIR) unit-smoke
 
 test-rust:
-	cd $(RUST_DIR) && cargo build --release --example perf_baseline
-	cd $(RUST_DIR) && cargo test --all
-	cd $(RUST_DIR) && cargo test --doc --all-features
+	cd $(RUST_DIR) && cargo build --locked --release --example perf_baseline
+	cd $(RUST_DIR) && cargo test --locked --all
+	cd $(RUST_DIR) && cargo test --locked --doc --all-features
 
 test-rust-streaming:
-	cd $(RUST_DIR) && cargo test --features streaming
+	cd $(RUST_DIR) && cargo test --locked --features streaming
 
 test-rust-doc:
 	@echo "Running Rust doctests (all features)..."
-	cd $(RUST_DIR) && cargo test --doc --all-features
+	cd $(RUST_DIR) && cargo test --locked --doc --all-features
 
 test-rust-fuzz-smoke:
 	cd $(RUST_DIR) && cargo +nightly fuzz run parser_html -- -max_total_time=5
@@ -135,9 +135,9 @@ E2E_HARNESS_DIR := tools/e2e-harness
 
 test-e2e-rust:
 	@echo "Building e2e-harness..."
-	cd $(E2E_HARNESS_DIR) && cargo build
+	cd $(E2E_HARNESS_DIR) && cargo build --locked
 	@echo "Running e2e-harness migrated scenarios..."
-	cd $(E2E_HARNESS_DIR) && cargo run -- suite --profile smoke
+	cd $(E2E_HARNESS_DIR) && cargo run --locked -- suite --profile smoke
 
 test-all: build test-rust test-nginx-unit
 
@@ -154,7 +154,7 @@ test-benchmark:
 	@echo "Validating corpus metadata..."
 	tools/corpus/validate_corpus.sh
 	@echo "Building test-corpus-conversion binary..."
-	cd tools/corpus/test-corpus-conversion && cargo build --release --quiet
+	cd tools/corpus/test-corpus-conversion && cargo build --locked --release --quiet
 	@echo "Running corpus benchmark..."
 	python3 tools/perf/run_corpus_benchmark.py \
 		--corpus-dir $(CORPUS_DIR) \
