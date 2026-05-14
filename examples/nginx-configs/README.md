@@ -38,7 +38,7 @@ This directory contains ready-to-use NGINX configuration templates for common de
 Before deploying to production:
 
 - [ ] Replace all placeholder values
-- [ ] Adjust resource limits (`markdown_max_size`, `markdown_timeout`)
+- [ ] Adjust resource limits (`markdown_memory_budget`, `markdown_timeout`)
 - [ ] Configure authentication cookie patterns if needed
 - [ ] Set up metrics endpoint with proper access controls
 - [ ] Enable caching with appropriate cache keys
