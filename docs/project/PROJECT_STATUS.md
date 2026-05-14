@@ -39,6 +39,12 @@ and contributor-facing harness maintenance.
   - routing manifest includes Rust harness ownership surfaces;
   - harness checks enforce Rust harness contract and migration-policy guards for
     migrated shell wrappers and removed Python E2E surfaces.
+- Final mainline hardening before the v0.6.3 tag:
+  - release/performance tooling path validation uses `REPO_ROOT` as the
+    repository-boundary source of truth;
+  - local runner path and round-trip temp-file tests keep artifacts under the
+    repository root;
+  - development test dependencies are aligned with the current CI baseline.
 
 ### Repository Harness Updates
 

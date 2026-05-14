@@ -1,11 +1,17 @@
 # Release Notes — 0.6.3
 
+Released: 2026-05-14
+
 ## Migration Summary
 
 Version 0.6.3 introduces the Rust-first E2E test harness (`tools/e2e-harness/`)
 and migrates five product-level HTTP E2E scenarios from shell scripts to native
 Rust scenario modules. This improves assertion diagnostics, enables structured
 JSON reporting, and provides a foundation for future E2E scenario development.
+
+The final release candidate also includes mainline hardening for repository-root
+path validation in release/performance tooling, local-runner temp path safety,
+and the development test dependency refresh required by the latest CI baseline.
 
 ## New Rust E2E Harness Entry Point
 
@@ -62,6 +68,15 @@ AGENTS.md Rule 37 (Rust-first E2E test runner) has been added, mandating that
 new product-level HTTP E2E scenarios must be implemented in `tools/e2e-harness/`.
 The routing manifest includes a new `e2e-harness-rust` verification family and
 an `e2e-migration` risk pack.
+
+## Final Mainline Hardening
+
+- Release/performance tooling now validates paths against `REPO_ROOT` before
+  use and avoids constructing paths from untrusted input before containment
+  checks.
+- Local performance-runner tests keep round-trip files under the repository
+  root, matching the security contract enforced by the tooling.
+- The development pytest baseline was refreshed for this release line.
 
 ## 0.6.3 Non-Goals
 

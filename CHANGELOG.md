@@ -5,11 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.6.3] - 2026-05-13
+## [0.6.3] - 2026-05-14
 
 This release closes the Rust-first E2E migration scope for the first scenario
-batch, aligns harness governance with migrated execution surfaces, and removes
-stale Python E2E spec files.
+batch, aligns harness governance with migrated execution surfaces, removes
+stale Python E2E spec files, and includes the final mainline security/test
+hardening fixes before the v0.6.3 tag.
 
 ### Added
 - Rust E2E harness migration artifacts and documentation for 0.6.3:
@@ -32,7 +33,19 @@ stale Python E2E spec files.
   `e2e-harness` while keeping deferred scenarios on canonical shell paths.
 - Migrated scenario shell entrypoints were reduced to thin compatibility
   wrappers that delegate to `e2e-harness scenario <name>`.
+- Release/test tooling now keeps performance runner paths and round-trip temp
+  files under the repository root, matching the hardened path-validation
+  contract used by local and CI checks.
+- Development test dependencies were refreshed for the 0.6.3 release line.
 - `PROJECT_STATUS.md` current release line advanced from 0.6.2 to 0.6.3.
+
+### Fixed
+- Hardened release/performance tooling path validation so untrusted or
+  user-derived path components are not materialized before containment checks.
+- Aligned threshold-engine validation with `REPO_ROOT` so security checks and
+  local runner behavior share the same repository-boundary source of truth.
+- Suppressed the validated-write-path static-analysis false positive without
+  weakening the underlying containment guard.
 
 ### Removed
 - Stale Python E2E spec files from `components/nginx-module/tests/e2e/`:

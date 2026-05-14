@@ -404,6 +404,7 @@ Current release (0.6.3):
 - Streaming performance evidence workflow and release-gate alignment
 - Rust-first E2E migration batch closed with hybrid suite contract (`make test-e2e` + `make test-e2e-rust`)
 - Repo-owned harness workflow (`docs/harness/`, `tools/harness/`, `make harness-check*`)
+- Release/performance tooling path validation hardened around the repository root
 - Prometheus-compatible metrics, rollout/rollback guides, and benchmark-driven regression checks
 - Installation and release docs aligned to Rust 1.91.0+ and current CI expectations
 
@@ -427,6 +428,6 @@ BSD 2-Clause "Simplified" License. See [LICENSE](LICENSE).
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 0.6.3 | 2026-05-13 | Kang | Version bump to 0.6.3 for release |
+| 0.6.3 | 2026-05-14 | Kang | Version bump to 0.6.3 for release and final hardening notes |
 | 0.6.2 | 2026-05-08 | Kang | Version bump to 0.6.2 for release |
 | 0.5.0 | 2026-04-21 | docs-standardization | Synchronized Quick Start steps between English and Chinese versions; added update tracking section |
