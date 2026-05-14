@@ -136,6 +136,32 @@ def _load_manifest(path: Path) -> dict:
     return data
 
 
+_GIT_REF_PATTERN = re.compile(r"^[a-zA-Z0-9._/\-~^@{}]+$")
+
+
+def _validate_git_ref(ref: str) -> str:
+    """Validate a git ref before use in a subprocess argv list (defense-in-depth).
+
+    The primary protection against command injection is that subprocess.check_output
+    is always called with an argument list and shell=False, so no shell interprets
+    the value.  This function is a secondary, defense-in-depth guard that rejects
+    obviously malformed input early and produces a clear error message.
+
+    Allowed characters (matches the vast majority of real-world git refs):
+      alphanumeric, ".", "_", "/", "-"  — branch/tag names and paths
+      "~", "^"                          — relative refs (HEAD~1, HEAD^2)
+      "@", "{", "}"                     — reflog syntax  (HEAD@{1})
+
+    Intentionally excluded: shell metacharacters (;, $, `, &, |, <, >, ",
+    space, etc.) and flag-like prefixes ("-").
+    """
+    if not ref or ref.startswith("-"):
+        raise SystemExit(f"invalid base ref: {ref!r}")
+    if not _GIT_REF_PATTERN.match(ref):
+        raise SystemExit(f"invalid base ref: {ref!r}")
+    return ref
+
+
 def _git_diff_files(base: str | None) -> list[str]:
     """Get the list of changed files from git diff.
 
@@ -147,8 +173,10 @@ def _git_diff_files(base: str | None) -> list[str]:
     """
     cmd = ["git", "diff", "--name-only", "--diff-filter=d"]
     if base:
-        cmd.append(f"{base}...HEAD")
+        cmd.append(f"{_validate_git_ref(base)}...HEAD")
     try:
+        # shell=False (the default) is the primary injection barrier; the
+        # argv list is never interpreted by a shell regardless of its content.
         out = subprocess.check_output(
             cmd,
             cwd=REPO_ROOT,

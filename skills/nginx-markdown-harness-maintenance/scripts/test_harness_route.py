@@ -19,6 +19,7 @@ from harness_route import (
     _normalize_files,
     _pack_matches,
     _parse_status_output,
+    _validate_git_ref,
     _verification_plan,
 )
 
@@ -407,3 +408,76 @@ def test_verification_plan_dedupes_and_sorts_by_phase() -> None:
         "release-quality",
     ]
     assert result["unknown_verification_families"] == ["unknown-family"]
+
+
+# --- _validate_git_ref tests ---
+
+
+@pytest.mark.parametrize(
+    "ref",
+    [
+        "main",
+        "origin/main",
+        "feature/my-branch",
+        "v1.2.3",
+        "HEAD~1",
+        "HEAD~3",
+        "HEAD^",
+        "HEAD^2",
+        "abc123def",
+        "refs/heads/main",
+        "HEAD@{1}",
+        "main@{upstream}",
+        "release/v2.0.0-rc.1",
+    ],
+)
+def test_validate_git_ref_accepts_valid_refs(ref: str) -> None:
+    assert _validate_git_ref(ref) == ref
+
+
+@pytest.mark.parametrize(
+    "ref",
+    [
+        "main; rm -rf /",
+        "$(whoami)",
+        "`id`",
+        "branch & echo pwned",
+        "ref with spaces",
+        "branch|cat /etc/passwd",
+        "ref$HOME",
+        'ref"quoted',
+        "branch<redirect",
+        "branch>redirect",
+        "-flag-injection",
+        "--exec=malicious",
+    ],
+)
+def test_validate_git_ref_rejects_invalid_refs(ref: str) -> None:
+    with pytest.raises(SystemExit, match="invalid base ref"):
+        _validate_git_ref(ref)
+
+
+def test_git_diff_files_rejects_invalid_base(monkeypatch: pytest.MonkeyPatch) -> None:
+    call_count = {"n": 0}
+
+    def fake_check_output(cmd, cwd, stderr, text):
+        call_count["n"] += 1
+        return ""
+
+    monkeypatch.setattr(harness_route.subprocess, "check_output", fake_check_output)
+    with pytest.raises(SystemExit, match="invalid base ref"):
+        _git_diff_files("main; rm -rf /")
+    assert call_count["n"] == 0
+
+
+def test_git_diff_files_accepts_tilde_ref(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, list[str]] = {}
+
+    def fake_check_output(cmd, cwd, stderr, text):
+        captured["cmd"] = cmd
+        return "some/file.py\n"
+
+    monkeypatch.setattr(harness_route.subprocess, "check_output", fake_check_output)
+    files = _git_diff_files("HEAD~3")
+    assert files == ["some/file.py"]
+    assert "HEAD~3...HEAD" in captured["cmd"]
