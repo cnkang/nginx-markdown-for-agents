@@ -23,6 +23,8 @@ from pathlib import Path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from lib.path_validation import validate_read_path, validate_write_path_within_root
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
 # ---------------------------------------------------------------------------
 # Default thresholds used when the thresholds config file is missing or a
 # metric/tier/platform entry is absent.
@@ -353,7 +355,7 @@ def _write_json(data, path):
         return
     resolved_path = Path(path).resolve()
     resolved = validate_write_path_within_root(
-        resolved_path, resolved_path.parent, purpose="threshold output",
+        resolved_path, REPO_ROOT, purpose="threshold output",
     )
     resolved.parent.mkdir(parents=True, exist_ok=True)
     resolved.write_text(

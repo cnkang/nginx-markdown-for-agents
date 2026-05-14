@@ -68,15 +68,18 @@ def _write_tmp_json(data, suffix=".json"):
 
 def _temp_output_path(suffix=".json"):
     """
-    Reserve a temporary output file path using the given filename suffix.
+    Reserve a temporary output file path within the repo root for testing.
     
     Parameters:
         suffix (str): File name suffix (for example, ".json") to append to the temporary file.
     
     Returns:
-        str: Filesystem path to the created temporary file. The file is created and left on disk (not deleted).
+        str: Filesystem path to the created temporary file within the repo's test temp directory.
     """
-    f = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
+    repo_root = Path(__file__).resolve().parents[3]
+    tmp_dir = repo_root / ".test-tmp"
+    tmp_dir.mkdir(exist_ok=True)
+    f = tempfile.NamedTemporaryFile(suffix=suffix, delete=False, dir=str(tmp_dir))
     path = f.name
     f.close()
     return path
