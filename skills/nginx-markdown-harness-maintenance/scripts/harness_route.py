@@ -7,8 +7,7 @@ import argparse
 import json
 import os
 import re
-import importlib
-subprocess = importlib.import_module("subprocess")
+import subprocess
 import sys
 from fnmatch import fnmatch
 from pathlib import Path
@@ -137,6 +136,18 @@ def _load_manifest(path: Path) -> dict:
     return data
 
 
+_GIT_REF_PATTERN = re.compile(r"^[a-zA-Z0-9._/\-~^@{}]+$")
+
+
+def _validate_git_ref(ref: str) -> str:
+    """Validate a git ref for safe use in subprocess commands (defense-in-depth)."""
+    if not ref or ref.startswith("-"):
+        raise SystemExit(f"invalid base ref: {ref!r}")
+    if not _GIT_REF_PATTERN.match(ref):
+        raise SystemExit(f"invalid base ref: {ref!r}")
+    return ref
+
+
 def _git_diff_files(base: str | None) -> list[str]:
     """Get the list of changed files from git diff.
 
@@ -148,9 +159,7 @@ def _git_diff_files(base: str | None) -> list[str]:
     """
     cmd = ["git", "diff", "--name-only", "--diff-filter=d"]
     if base:
-        if not re.match(r"^[a-zA-Z0-9._/\-]+$", base):
-            raise SystemExit(f"invalid base ref: {base!r}")
-        cmd.append(f"{base}...HEAD")
+        cmd.append(f"{_validate_git_ref(base)}...HEAD")
     try:
         out = subprocess.check_output(
             cmd,
