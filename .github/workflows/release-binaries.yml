@@ -9,15 +9,6 @@ on:
         description: 'Git ref to build (e.g. v1.0.0, main, or commit SHA)'
         required: false
         default: ''
-      matrix_freshness:
-        description: 'Matrix freshness check: off (skip), warn (log only), required (block on stale)'
-        required: false
-        default: 'off'
-        type: choice
-        options:
-          - 'off'
-          - 'warn'
-          - 'required'
 
 permissions: {}
 
@@ -41,35 +32,20 @@ jobs:
         with:
           python-version: '3.14.3'
 
-      - name: Check matrix freshness for release events
-        if: github.event_name == 'release'
-        run: python3 tools/release/matrix/update_matrix.py --check-only
-
-      - name: Check matrix freshness for manual dispatch
-        if: github.event_name == 'workflow_dispatch' && inputs.matrix_freshness != 'off'
-        env:
-          FRESHNESS_MODE: ${{ inputs.matrix_freshness }}
+      - name: Update Release Matrix
         run: |
-          set +e
-          python3 tools/release/matrix/update_matrix.py --check-only
-          exit_code=$?
-          set -e
-
-          if [ "$exit_code" -eq 0 ]; then
-            echo "Matrix is up to date."
-          elif [ "$exit_code" -eq 1 ]; then
-            echo "::warning::Matrix freshness check encountered a scraping/parsing error. Continuing anyway."
-          elif [ "$exit_code" -eq 2 ]; then
-            if [ "$FRESHNESS_MODE" = "required" ]; then
-              echo "::error::Matrix is stale. Run the update-matrix workflow to refresh it."
-              exit 1
-            else
-              echo "::warning::Matrix is stale. Consider running the update-matrix workflow."
-            fi
+          python3 tools/release/matrix/update_matrix.py
+          if [ -f tools/matrix-diff.json ]; then
+            echo "Release matrix was refreshed before resolving binaries:"
+            python3 -m json.tool tools/matrix-diff.json
           else
-            echo "::error::Matrix freshness check returned unexpected exit code: ${exit_code}"
-            exit 1
+            echo "Release matrix is already current."
           fi
+
+      - name: Validate updated release matrix
+        run: |
+          python3 tools/release/matrix/validate_doc_matrix_sync.py
+          python3 tools/release/matrix/validate_matrix_install_consistency.py
 
       - name: Extract build matrix from release-matrix.json
         id: resolve
