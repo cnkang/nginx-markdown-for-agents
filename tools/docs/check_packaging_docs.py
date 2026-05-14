@@ -289,7 +289,7 @@ _SOP7_REQUIRED_KEYWORDS: list[tuple[str, str]] = [
     ("200", "HTTP status 200"),
     ("text/html", "upstream Content-Type text/html"),
     ("text/markdown", "Accept header includes text/markdown"),
-    ("markdown_max_size", "response size within markdown_max_size"),
+    ("markdown_memory_budget", "response size within markdown_memory_budget"),
 ]
 
 
