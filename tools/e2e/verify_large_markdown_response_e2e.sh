@@ -19,6 +19,8 @@ LOAD_MODULE_LINE=""
 ORIG_ARGS=("$@")
 # shellcheck disable=SC1090
 source "${NATIVE_BUILD_HELPER}"
+# shellcheck disable=SC1090
+source "$(dirname "${BASH_SOURCE[0]}")/e2e_common.sh"
 
 usage() {
   cat <<EOF

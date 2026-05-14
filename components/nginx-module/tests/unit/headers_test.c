@@ -1,6 +1,9 @@
 /*
  * Test: headers
- * Description: HTTP header manipulation
+ *
+ * Validates header update logic: Content-Type setting, Vary header
+ * management, Content-Length clearing, Content-Encoding removal,
+ * ETag clearing, and Accept-Ranges handling.
  */
 
 #include "test_common.h"

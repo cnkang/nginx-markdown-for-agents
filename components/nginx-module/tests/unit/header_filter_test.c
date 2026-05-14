@@ -1,18 +1,33 @@
 /*
  * Test: header_filter
- * Description: header filter functionality
+ *
+ * Validates NGINX header filter chain registration (markdown filter
+ * inserts itself at the top and calls the next filter) and compression
+ * detection flags in the header filter context.
  */
 
 #include "test_common.h"
 
+/*
+ * Header filter function type.
+ */
 typedef int (*header_filter_pt)(void *req);
 
+/*
+ * Global filter chain pointers simulating NGINX's filter chain.
+ */
 static header_filter_pt ngx_http_top_header_filter;
 static header_filter_pt ngx_http_next_header_filter;
 
+/*
+ * Flags tracking filter invocations.
+ */
 static int dummy_next_filter_called;
 static int markdown_filter_called;
 
+/*
+ * Dummy next filter that increments invocation counter.
+ */
 static int
 next_filter(void *req)
 {
@@ -21,6 +36,10 @@ next_filter(void *req)
     return 0;
 }
 
+/*
+ * Simulated markdown header filter: increments counter and chains
+ * to the next filter in the chain.
+ */
 static int
 markdown_header_filter(void *req)
 {
@@ -32,6 +51,10 @@ markdown_header_filter(void *req)
     return 0;
 }
 
+/*
+ * Simulated filter module init: inserts markdown filter at the top
+ * of the header filter chain, saving the previous top filter as next.
+ */
 static int
 markdown_filter_init(void)
 {
@@ -40,12 +63,23 @@ markdown_filter_init(void)
     return 0;
 }
 
+/*
+ * Header filter context with compression detection state.
+ */
 typedef struct {
     int auto_decompress;
     int compression_type;
     int decompression_needed;
 } ctx_t;
 
+/*
+ * Detect compression from header filter context.
+ * Sets decompression_needed if auto_decompress is enabled and a
+ * supported compression type (1=gzip, 2=deflate, 3=brotli) is detected.
+ *
+ * Parameters:
+ *   ctx - header filter context with compression state
+ */
 static void
 header_filter_detect(ctx_t *ctx)
 {
@@ -60,6 +94,12 @@ header_filter_detect(ctx_t *ctx)
     }
 }
 
+/*
+ * Verify header filter chain registration: markdown filter replaces
+ * the top filter and still chains to the previous filter.
+ *
+ * Expected: top filter is markdown, both markdown and next filters called.
+ */
 static void
 test_filter_chain_registration(void)
 {
@@ -80,6 +120,13 @@ test_filter_chain_registration(void)
     TEST_PASS("Filter chain registration works");
 }
 
+/*
+ * Verify compression detection flags: supported compression sets
+ * decompression_needed, no compression clears it, auto_decompress=off
+ * disables detection entirely.
+ *
+ * Expected: correct flag state for each scenario.
+ */
 static void
 test_compression_detection_flags(void)
 {

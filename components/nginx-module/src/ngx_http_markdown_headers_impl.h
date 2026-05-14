@@ -25,6 +25,10 @@
     ngx_sprintf((buf), "%ui", (token_count))
 #endif
 
+#ifndef ngx_tolower
+#define ngx_tolower(c) ((u_char) ((c) >= 'A' && (c) <= 'Z' ? ((c) | 0x20) : (c)))
+#endif
+
 static u_char ngx_http_markdown_hdr_vary[] = "Vary";
 static u_char ngx_http_markdown_hdr_accept[] = "Accept";
 static u_char ngx_http_markdown_hdr_etag[] = "ETag";
@@ -34,17 +38,27 @@ static u_char ngx_http_markdown_hdr_token_count[] = "X-Markdown-Tokens";
 u_char ngx_http_markdown_content_type[] = NGX_HTTP_MARKDOWN_CONTENT_TYPE_LITERAL;
 static u_char ngx_http_markdown_vary_suffix[] = ", Accept";
 
-/* ASCII-only lowercase helper used for case-insensitive HTTP token matching. */
-static ngx_uint_t
-ngx_http_markdown_tolower_ascii(ngx_uint_t c)
-{
-    if (c >= 'A' && c <= 'Z') {
-        return c | 0x20;
-    }
-
-    return c;
-}
-
+/*
+ * Case-insensitive comparison of up to n bytes from two byte strings.
+ *
+ * Like ngx_strncasecmp, this function compares raw byte pointers and
+ * returns early when both characters are NUL (treating it as a match
+ * boundary).  Unlike a strict n-byte comparison, encountering NUL in
+ * both strings before n bytes yields 0 even if the strings differ
+ * beyond the NUL.  This mirrors strncasecmp semantics.
+ *
+ * Returns 0 when the compared bytes match (case-insensitively) or
+ * both bytes are NUL, or the difference of the first mismatching
+ * lowercase byte pair.
+ *
+ * Parameters:
+ *   s1 - first byte string
+ *   s2 - second byte string
+ *   n  - number of bytes to compare
+ *
+ * Returns:
+ *   0 if equal, negative if s1 < s2, positive if s1 > s2
+ */
 static ngx_int_t
 ngx_http_markdown_strncasecmp_const(const u_char *s1, const u_char *s2, size_t n)
 {
@@ -52,8 +66,10 @@ ngx_http_markdown_strncasecmp_const(const u_char *s1, const u_char *s2, size_t n
     ngx_uint_t c2;
 
     while (n != 0) {
-        c1 = ngx_http_markdown_tolower_ascii((ngx_uint_t) *s1++);
-        c2 = ngx_http_markdown_tolower_ascii((ngx_uint_t) *s2++);
+        c1 = (ngx_uint_t) *s1++;
+        c2 = (ngx_uint_t) *s2++;
+        c1 = ngx_tolower(c1);
+        c2 = ngx_tolower(c2);
 
         if (c1 == c2) {
             if (c1 == 0) {

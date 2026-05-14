@@ -194,6 +194,8 @@ fn parse_drift_severity(raw: Option<&str>) -> DriftSeverity {
     }
 }
 
+/// Verifies that the known-differences matcher correctly identifies entries by
+/// fixture name and snippet patterns, and rejects non-matching fixtures.
 #[test]
 fn known_differences_matches_by_fixture_and_snippet() {
     let known = KnownDifferences {
@@ -223,6 +225,8 @@ fn known_differences_matches_by_fixture_and_snippet() {
     assert!(known.matches("simple/example.html", &out).is_none());
 }
 
+/// Verifies that drift type and severity enum parsers handle all expected
+/// string values and default gracefully on unknown values.
 #[test]
 fn known_differences_parse_structured_fields() {
     assert_eq!(

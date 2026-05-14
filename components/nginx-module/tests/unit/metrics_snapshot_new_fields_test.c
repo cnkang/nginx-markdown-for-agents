@@ -1,6 +1,9 @@
 /*
  * Test: metrics_snapshot_new_fields
- * Description: snapshot collection of new Prometheus counter fields
+ *
+ * Validates that new metric fields (conversions_bypassed, failure
+ * category counters, input/output bytes) are correctly copied from
+ * the live metrics struct to the snapshot struct.
  */
 
 #include "test_common.h"
@@ -78,6 +81,18 @@ test_null_metrics_zeroes_new_fields(void)
 
     TEST_ASSERT(snap.requests_entered == 0,
                 "requests_entered should be zero");
+    TEST_ASSERT(snap.conversions_bypassed == 0,
+                "conversions_bypassed should be zero");
+    TEST_ASSERT(snap.failures_conversion == 0,
+                "failures_conversion should be zero");
+    TEST_ASSERT(snap.failures_resource_limit == 0,
+                "failures_resource_limit should be zero");
+    TEST_ASSERT(snap.failures_system == 0,
+                "failures_system should be zero");
+    TEST_ASSERT(snap.input_bytes == 0,
+                "input_bytes should be zero");
+    TEST_ASSERT(snap.output_bytes == 0,
+                "output_bytes should be zero");
     TEST_ASSERT(snap.skips.config == 0,
                 "skips.config should be zero");
     TEST_ASSERT(snap.skips.method == 0,
@@ -116,6 +131,12 @@ test_new_fields_copied_correctly(void)
 
     /* Set distinctive values for each new field */
     m.requests_entered = 42;
+    m.conversions_bypassed = 11;
+    m.failures_conversion = 12;
+    m.failures_resource_limit = 13;
+    m.failures_system = 14;
+    m.input_bytes = 1024;
+    m.output_bytes = 512;
     m.skips.config = 1;
     m.skips.method = 2;
     m.skips.status = 3;
@@ -138,6 +159,18 @@ test_new_fields_copied_correctly(void)
 
     TEST_ASSERT(snap.requests_entered == 42,
                 "requests_entered should be copied");
+    TEST_ASSERT(snap.conversions_bypassed == 11,
+                "conversions_bypassed should be copied");
+    TEST_ASSERT(snap.failures_conversion == 12,
+                "failures_conversion should be copied");
+    TEST_ASSERT(snap.failures_resource_limit == 13,
+                "failures_resource_limit should be copied");
+    TEST_ASSERT(snap.failures_system == 14,
+                "failures_system should be copied");
+    TEST_ASSERT(snap.input_bytes == 1024,
+                "input_bytes should be copied");
+    TEST_ASSERT(snap.output_bytes == 512,
+                "output_bytes should be copied");
     TEST_ASSERT(snap.skips.config == 1,
                 "skips.config should be copied");
     TEST_ASSERT(snap.skips.method == 2,

@@ -1,6 +1,9 @@
 /*
  * Test: decompression_logging
- * Description: decompression logging
+ *
+ * Validates log message format and severity levels for decompression
+ * detection (DEBUG), success (INFO with ratio), and failure (ERROR
+ * with category).
  */
 
 #include "test_common.h"
@@ -12,6 +15,13 @@
 static char g_log_msg[1024];
 static int g_log_level;
 
+/*
+ * Log compression detection event (simulates header filter detection).
+ * Sets g_log_level to LOG_DEBUG and formats the detection message.
+ *
+ * Parameters:
+ *   compression_type - detected compression type enum value
+ */
 static void
 log_detection(int compression_type)
 {
@@ -21,6 +31,16 @@ log_detection(int compression_type)
              compression_type);
 }
 
+/*
+ * Log decompression success (simulates body filter decompression).
+ * Sets g_log_level to LOG_INFO and formats message with compression
+ * ratio.
+ *
+ * Parameters:
+ *   compression_type - compression type enum value
+ *   compressed       - original compressed size in bytes
+ *   decompressed     - decompressed size in bytes
+ */
 static void
 log_success(int compression_type, size_t compressed, size_t decompressed)
 {
@@ -32,6 +52,14 @@ log_success(int compression_type, size_t compressed, size_t decompressed)
              compression_type, compressed, decompressed, ratio);
 }
 
+/*
+ * Log decompression failure (simulates body filter decompression error).
+ * Sets g_log_level to LOG_ERR and formats message with error category.
+ *
+ * Parameters:
+ *   compression_type - compression type enum value
+ *   category         - error category string (e.g. "conversion", "resource")
+ */
 static void
 log_failure(int compression_type, const char *category)
 {
@@ -42,12 +70,25 @@ log_failure(int compression_type, const char *category)
              compression_type, category);
 }
 
+/*
+ * Assert that the global log message contains a substring.
+ *
+ * Parameters:
+ *   needle   - substring to search for
+ *   message  - assertion failure message
+ */
 static void
 assert_contains(const char *needle, const char *message)
 {
     TEST_ASSERT(strstr(g_log_msg, needle) != NULL, message);
 }
 
+/*
+ * Verify detection log: level is DEBUG and message contains expected keywords.
+ *
+ * Expected: LOG_DEBUG level, message includes "detected compression type",
+ * "decompression" keyword present.
+ */
 static void
 test_detection_log(void)
 {
@@ -59,6 +100,12 @@ test_detection_log(void)
     TEST_PASS("Detection log format is correct");
 }
 
+/*
+ * Verify success log: level is INFO, message includes compression type,
+ * compressed/decompressed sizes, and ratio.
+ *
+ * Expected: LOG_INFO level, all fields present in formatted message.
+ */
 static void
 test_success_log(void)
 {
@@ -74,6 +121,12 @@ test_success_log(void)
     TEST_PASS("Success log format is correct");
 }
 
+/*
+ * Verify failure log: level is ERROR, message includes compression type,
+ * error field, and category.
+ *
+ * Expected: LOG_ERR level, all failure fields present in formatted message.
+ */
 static void
 test_failure_log(void)
 {

@@ -21,6 +21,8 @@ fn convert_html_with_options(html: &[u8], options: ConversionOptions) -> String 
     converter.convert(&dom).expect("Conversion failed")
 }
 
+/// Verifies that inline code containing triple backticks is fenced with a longer
+/// backtick sequence to avoid breaking the Markdown structure.
 #[test]
 fn inline_code_should_use_a_fence_longer_than_embedded_backticks() {
     let result = convert_html(b"<p><code>value ``` with ticks</code></p>");
@@ -28,6 +30,8 @@ fn inline_code_should_use_a_fence_longer_than_embedded_backticks() {
     assert!(result.trim().contains("````value ``` with ticks````"));
 }
 
+/// Ensures that whitespace-only text nodes between inline elements preserve
+/// word separation in the Markdown output instead of being silently dropped.
 #[test]
 fn whitespace_only_nodes_should_preserve_word_separation() {
     let result = convert_html(b"<p>Hello<span> </span>world</p>");
@@ -36,6 +40,9 @@ fn whitespace_only_nodes_should_preserve_word_separation() {
     assert!(!result.contains("Helloworld"));
 }
 
+/// Validates that removed children (e.g. `<script>`) inside a link's text are
+/// skipped during link text extraction, preventing XSS payloads from appearing
+/// in the Markdown link label.
 #[test]
 fn link_text_extraction_should_skip_removed_children() {
     let result = convert_html(
@@ -81,6 +88,8 @@ fn headings_inside_containers_preserve_level() {
     );
 }
 
+/// Checks that nested lists do not double-indent pre-rendered children when
+/// using GFM flavor, ensuring correct Markdown list nesting.
 #[test]
 fn nested_lists_should_not_double_indent_pre_rendered_children() {
     let result = convert_html_with_options(

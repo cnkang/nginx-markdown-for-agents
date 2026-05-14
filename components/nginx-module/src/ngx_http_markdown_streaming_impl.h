@@ -769,6 +769,8 @@ ngx_http_markdown_streaming_update_headers(
             return rc;
         }
     }
+#else
+    (void) conf;
 #endif
 
     return NGX_OK;
@@ -904,6 +906,8 @@ ngx_http_markdown_streaming_handle_backpressure(
     ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx)
 {
+    (void) ctx;
+
     r->buffered |= NGX_HTTP_MARKDOWN_BUFFERED;
 
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP,

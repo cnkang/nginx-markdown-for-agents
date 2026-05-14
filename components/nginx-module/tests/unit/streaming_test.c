@@ -1,6 +1,5 @@
 /*
  * Test: streaming
- * Description: Streaming runtime unit tests covering engine selection,
  *   decompression, body filter chunk processing, backpressure,
  *   Pre-Commit fallback, Post-Commit error handling, config parsing,
  *   output chain construction, size limit, and timeout.

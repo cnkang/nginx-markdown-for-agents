@@ -1,6 +1,9 @@
 /*
  * Test: passthrough
- * Description: passthrough behavior
+ *
+ * Validates passthrough behavior for ineligible conversion paths
+ * covered here (non-200 status and non-markdown Accept): original
+ * status, content-type, body, and content-encoding are preserved.
  */
 
 #include "test_common.h"

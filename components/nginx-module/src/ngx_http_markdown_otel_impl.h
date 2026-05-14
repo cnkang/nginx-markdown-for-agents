@@ -19,6 +19,34 @@
 #ifndef NGX_HTTP_MARKDOWN_OTEL_IMPL_H
 #define NGX_HTTP_MARKDOWN_OTEL_IMPL_H
 
+/*
+ * Include dependency: this header requires NGINX core definitions
+ * (NGX_OK, NGX_ERROR, NGX_DECLINED, NGX_LOG_ALERT, ngx_log_error,
+ * ngx_pcalloc, ngx_timeofday, etc.) to be visible before inclusion.
+ * In production builds, include after <ngx_core.h> and <ngx_http.h>.
+ * In test builds, provide stubs/defines before including this header.
+ */
+
+/*
+ * Platform detection for secure random byte source.
+ *
+ * arc4random_buf() is the preferred CSPRNG on BSD/macOS and
+ * modern Linux (glibc >= 2.36).  It draws from the kernel
+ * entropy pool without file-descriptor management and never
+ * blocks after initial seeding.
+ *
+ * On platforms without arc4random_buf(), fall back to
+ * /dev/urandom (non-blocking kernel CSPRNG on all Unix).
+ *
+ * NGX_HAVE_ARC4RANDOM is set by auto/feature in configure.
+ */
+#if (NGX_HAVE_ARC4RANDOM)
+#include <stdlib.h>
+#else
+#include <fcntl.h>
+#include <unistd.h>
+#endif
+
 
 /*
  * OTel integration configuration constants.
@@ -91,29 +119,75 @@ typedef struct ngx_http_markdown_otel_span_s {
 
 
 /*
- * Hex-encode random bytes into a destination buffer.
+ * Hex-encode cryptographically secure random bytes into a destination buffer.
  *
- * Generates `byte_count` random bytes and writes their
- * lowercase hex representation to `dst`.  `dst` must have
- * room for at least `byte_count * 2 + 1` bytes (including NUL).
+ * Generates `byte_count` random bytes from a CSPRNG and writes their
+ * lowercase hex representation to `dst`.  `dst` must have room for
+ * at least `byte_count * 2 + 1` bytes (including NUL).
+ *
+ * CSPRNG selection (compile-time via NGX_HAVE_ARC4RANDOM):
+ *   - arc4random_buf(): preferred on BSD/macOS/Linux-glibc2.36+;
+ *     no fd management, draws from kernel entropy, never blocks.
+ *   - /dev/urandom: fallback on older Linux/Unix; non-blocking
+ *     kernel CSPRNG available on all Unix-like systems.
+ *
+ * This replaces the previous ngx_random() (LCG) implementation to
+ * satisfy Coverity CID 1693897 (DC.WEAK_CRYPTO).
  *
  * Parameters:
  *   dst         - destination buffer
- *   byte_count  - number of random bytes to generate
+ *   byte_count  - number of random bytes to generate (max 32)
+ *   log         - NGINX log for error reporting
+ *
+ * Returns:
+ *   NGX_OK on success, NGX_ERROR on failure.
  */
-static void
-ngx_http_markdown_otel_random_hex(u_char *dst, size_t byte_count)
+static ngx_int_t
+ngx_http_markdown_otel_random_hex(u_char *dst, size_t byte_count,
+                                  const ngx_log_t *log)
 {
     static const u_char  hex[] = "0123456789abcdef";
-    u_char               byte;
+    u_char               raw[32];
+
+    if (byte_count > sizeof(raw)) {
+        return NGX_ERROR;
+    }
+
+#if (NGX_HAVE_ARC4RANDOM)
+    (void) log;
+    arc4random_buf(raw, byte_count);
+#else
+    {
+        int     fd;
+        ssize_t n;
+
+        fd = open("/dev/urandom", O_RDONLY);
+        if (fd == -1) {
+            ngx_log_error(NGX_LOG_ALERT, (ngx_log_t *) log, 0,
+                          "markdown otel: open(/dev/urandom) failed");
+            return NGX_ERROR;
+        }
+
+        n = read(fd, raw, byte_count);
+        (void) close(fd);
+
+        if (n != (ssize_t) byte_count) {
+            ngx_log_error(NGX_LOG_ALERT, (ngx_log_t *) log, 0,
+                          "markdown otel: read(/dev/urandom) returned %z "
+                          "expected %uz", n, byte_count);
+            return NGX_ERROR;
+        }
+    }
+#endif
 
     for (size_t i = 0; i < byte_count; i++) {
-        byte = (u_char) (ngx_random() & 0xFF);
-        dst[i * 2]     = hex[byte >> 4];
-        dst[i * 2 + 1] = hex[byte & 0x0F];
+        dst[i * 2]     = hex[raw[i] >> 4];
+        dst[i * 2 + 1] = hex[raw[i] & 0x0F];
     }
 
     dst[byte_count * 2] = '\0';
+
+    return NGX_OK;
 }
 
 
@@ -276,11 +350,20 @@ ngx_http_markdown_otel_span_start(ngx_http_request_t *r,
     /* Propagate W3C trace context from incoming request. */
     if (ngx_http_markdown_otel_parse_traceparent(r, span) == NGX_OK) {
         /* Child span: keep parent's trace_id, generate new span_id. */
-        ngx_http_markdown_otel_random_hex(span->span_id, 8);
+        if (ngx_http_markdown_otel_random_hex(span->span_id, 8,
+                                               r->connection->log) != NGX_OK)
+        {
+            return NULL;
+        }
     } else {
         /* Root span: generate both trace_id and span_id. */
-        ngx_http_markdown_otel_random_hex(span->trace_id, 16);
-        ngx_http_markdown_otel_random_hex(span->span_id, 8);
+        if (ngx_http_markdown_otel_random_hex(span->trace_id, 16,
+                                               r->connection->log) != NGX_OK
+            || ngx_http_markdown_otel_random_hex(span->span_id, 8,
+                                                   r->connection->log) != NGX_OK)
+        {
+            return NULL;
+        }
     }
 
     return span;

@@ -1,10 +1,12 @@
 /*
  * Test: metrics_format_select
- * Description: Content negotiation for metrics output format
  *
  * Uses a standalone test pattern (no NGINX dependencies).
  * Tests all 8 rows of the content negotiation state machine
  * from the design document.
+ *
+ * Validates: Accept header parsing, configured format override,
+ * auto-detection (Prometheus vs JSON), and fallback behavior.
  */
 
 #include "test_common.h"

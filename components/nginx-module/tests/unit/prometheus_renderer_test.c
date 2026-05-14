@@ -1,8 +1,5 @@
 /*
  * Test: prometheus_renderer
- * Description: exercises the real ngx_http_markdown_prometheus_impl.h
- *              renderer to provide unit-test coverage for the production
- *              Prometheus text exposition code path.
  *
  * This test includes the actual impl header with minimal stubs so that
  * gcov/lcov instruments the production renderer function.

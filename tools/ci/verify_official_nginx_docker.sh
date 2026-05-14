@@ -93,6 +93,16 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# Verify that a required command is available in PATH.
+#
+# Arguments:
+#   $1 - command name to check
+#
+# Outputs:
+#   None on success; error message to stderr on failure.
+#
+# Returns:
+#   0 when the command is found; exits with status 1 otherwise.
 need_cmd() {
   local cmd_name="$1"
   command -v "${cmd_name}" >/dev/null 2>&1 || {
@@ -102,6 +112,19 @@ need_cmd() {
   return 0
 }
 
+# Build the Docker image from the official NGINX source-build Dockerfile.
+#
+# Uses docker buildx when available for consistent multi-platform builds,
+# falling back to plain docker build otherwise.
+#
+# Arguments:
+#   (none; uses global NGINX_TAG, MODULE_REPO, MODULE_REF, MODULE_SHA, IMAGE_NAME)
+#
+# Outputs:
+#   Docker build progress to stderr.
+#
+# Returns:
+#   0 on success; non-zero if the build fails.
 build_image() {
   local -a build_cmd
 
@@ -123,6 +146,19 @@ build_image() {
   return 0
 }
 
+# Sanitize a Docker tag string for safe use as an image name component.
+#
+# Replaces all non-alphanumeric characters (except . : _ -) with hyphens
+# using C locale for deterministic behaviour across platforms.
+#
+# Arguments:
+#   $1 - raw tag string (e.g. "mainline", "stable-alpine")
+#
+# Outputs:
+#   Writes the sanitized tag to stdout.
+#
+# Returns:
+#   0 always.
 sanitize_tag() {
   local raw_tag="$1"
   # Force C collation and keep "-" last so tag normalization is locale-stable.
@@ -131,6 +167,27 @@ sanitize_tag() {
   return 0
 }
 
+# Append a GitHub Actions step summary with validation results.
+#
+# Only writes when GITHUB_STEP_SUMMARY is set.  Includes tag, image,
+# module ref, nginx -t status, and content negotiation results.
+#
+# Globals read:
+#   GITHUB_STEP_SUMMARY  - GitHub Actions step summary file path
+#   TMP_DIR              - temporary directory for build artifacts
+#   IMAGE_NAME           - Docker image name
+#   MODULE_GIT_REF       - module Git reference
+#   markdown_code        - exit code from markdown content negotiation
+#   html_code            - exit code from HTML content negotiation
+#
+# Arguments:
+#   $1 - status string ("passed" or "failed")
+#
+# Outputs:
+#   Appends Markdown to GITHUB_STEP_SUMMARY if set.
+#
+# Returns:
+#   0 always.
 append_step_summary() {
   local status="$1"
   [[ -n "${GITHUB_STEP_SUMMARY:-}" ]] || return 0
@@ -161,8 +218,23 @@ append_step_summary() {
     fi
     echo
   } >> "${GITHUB_STEP_SUMMARY}"
+
+  return 0
 }
 
+# Capture container logs, inspect data, and temp files into ARTIFACT_DIR.
+#
+# Only runs when ARTIFACT_DIR is set.  Collects docker logs, nginx -T
+# output, nginx -t output, and copies temporary header/body files.
+#
+# Arguments:
+#   (none; uses global CONTAINER_NAME, TMP_DIR, ARTIFACT_DIR)
+#
+# Outputs:
+#   Writes diagnostic files into ARTIFACT_DIR.
+#
+# Returns:
+#   0 always (errors are tolerated).
 capture_failure_artifacts() {
   [[ -n "${ARTIFACT_DIR}" ]] || return 0
 
@@ -178,8 +250,27 @@ capture_failure_artifacts() {
   if [[ -n "${TMP_DIR}" && -d "${TMP_DIR}" ]]; then
     cp -R "${TMP_DIR}/." "${ARTIFACT_DIR}/" 2>/dev/null || true
   fi
+
+  return 0
 }
 
+# Cleanup handler: capture failure artifacts, append step summary,
+# remove Docker container and image, and delete temp directory.
+#
+# Globals read:
+#   CONTAINER_NAME  - Docker container name to remove
+#   KEEP_IMAGE      - if 1, skip image removal
+#   IMAGE_NAME      - Docker image name to remove
+#   TMP_DIR         - temporary directory to delete
+#   ARTIFACT_DIR    - directory to copy artifacts into on failure
+#
+# Side effects:
+#   Calls capture_failure_artifacts and append_step_summary on failure.
+#   Removes Docker container and optionally the image.
+#   Removes TMP_DIR.
+#
+# Returns:
+#   0 always.
 cleanup() {
   local rc=$?
 

@@ -1,17 +1,9 @@
 /*
  * Test: streaming_impl
  *
- * Unit tests for the NGINX markdown filter module's streaming implementation
- * helpers (ngx_http_markdown_streaming_impl.h).  Provides direct branch
- * coverage for path selection, header updates, output sending, backpressure,
- * commit/finalize lifecycle, fail-open passthrough, and cleanup paths.
- *
- * When MARKDOWN_STREAMING_ENABLED is not defined, the test binary compiles
- * to a skip stub that reports the missing feature and exits successfully.
- *
- * Otherwise, the file reimplements a minimal subset of NGINX runtime types
- * and API stubs so the streaming implementation header can be included and
- * exercised without linking against the full NGINX core library.
+ * Validates the streaming conversion pipeline: chunk feeding, output
+ * accumulation, budget enforcement, error handling, and finalization
+ * semantics for the streaming engine path.
  */
 
 #include "../include/test_common.h"
@@ -916,33 +908,6 @@ ngx_http_markdown_prepare_conversion_options(ngx_http_request_t *r,
     return g_prepare_options_rc;
 }
 
-/*
- * Stub effective-conf helpers required by streaming_impl.h.
- */
-static ngx_flag_t
-ngx_http_markdown_effective_prune_noise(
-    const ngx_http_markdown_effective_conf_t *eff,
-    const ngx_http_markdown_conf_t *conf)
-{
-    return (eff != NULL) ? eff->prune_noise : conf->prune_noise;
-}
-
-static size_t
-ngx_http_markdown_effective_memory_budget(
-    const ngx_http_markdown_effective_conf_t *eff,
-    const ngx_http_markdown_conf_t *conf)
-{
-    return (eff != NULL) ? eff->memory_budget : conf->memory_budget;
-}
-
-static ngx_uint_t
-ngx_http_markdown_effective_log_verbosity(
-    const ngx_http_markdown_effective_conf_t *eff,
-    const ngx_http_markdown_conf_t *conf)
-{
-    return (eff != NULL) ? eff->log_verbosity : conf->log_verbosity;
-}
-
 #ifdef MARKDOWN_STREAMING_ENABLED
 static size_t
 ngx_http_markdown_effective_streaming_budget(
@@ -1073,50 +1038,6 @@ ngx_shm_zone_t *ngx_http_markdown_metrics_shm_zone = NULL;
 #ifndef ngx_atomic_fetch_add
 #define ngx_atomic_fetch_add(p, v)  (*(p) += (v), *(p))
 #endif
-
-static ngx_inline void
-ngx_shmtx_lock(ngx_shmtx_t *mtx)
-{
-    (void) mtx;
-}
-
-static ngx_inline void
-ngx_shmtx_unlock(ngx_shmtx_t *mtx)
-{
-    (void) mtx;
-}
-
-static ngx_inline ngx_uint_t
-ngx_hash_key(u_char *data, size_t len)
-{
-    ngx_uint_t  hash;
-    hash = 0;
-    for (size_t i = 0; i < len; i++) {
-        hash = hash * 31 + data[i];
-    }
-    return hash;
-}
-
-static ngx_inline void *
-ngx_slab_alloc_locked(ngx_slab_pool_t *pool, size_t size)
-{
-    (void) pool;
-    return calloc(1, size);
-}
-
-static ngx_inline void
-ngx_slab_free_locked(ngx_slab_pool_t *pool, void *p)
-{
-    (void) pool;
-    free(p);
-}
-
-static ngx_inline void
-ngx_rbtree_insert(ngx_rbtree_t *tree, ngx_rbtree_node_t *node)
-{
-    (void) tree;
-    (void) node;
-}
 
 static ngx_inline ngx_http_markdown_otel_span_t *
 ngx_http_markdown_otel_span_start(ngx_http_request_t *r,

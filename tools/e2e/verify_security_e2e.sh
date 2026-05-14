@@ -31,7 +31,19 @@ readonly PATTERN_CT_MARKDOWN='^Content-Type: text/markdown'
 
 # shellcheck disable=SC1090
 source "${NATIVE_BUILD_HELPER}"
+# shellcheck disable=SC1090
+source "$(dirname "${BASH_SOURCE[0]}")/e2e_common.sh"
 
+# usage — Print command-line help text to stderr.
+#
+# Arguments:
+#   (none)
+#
+# Outputs:
+#   Writes usage text to stderr.
+#
+# Returns:
+#   0 always.
 usage() {
   cat <<EOF
 Usage: $(basename "$0") [--keep-artifacts] [--nginx-version VERSION] [--port PORT] [--upstream-port PORT]
@@ -43,6 +55,20 @@ EOF
   return 0
 }
 
+# cleanup — Remove temporary artifacts and stop processes on exit.
+#
+# Stops the upstream server and NGINX if running.  On success with
+# --keep-artifacts disabled, removes BUILDROOT.  On failure, retains
+# BUILDROOT for debugging.
+#
+# Arguments:
+#   (none; reads $? for exit status)
+#
+# Outputs:
+#   Diagnostic message to stderr on failure.
+#
+# Returns:
+#   0 always.
 cleanup() {
   local rc=$?
   if [[ -n "${UPSTREAM_PID}" ]]; then
@@ -354,7 +380,7 @@ grep -qi "${PATTERN_CT_MARKDOWN}" "${RAW_DIR}/case6.hdr" || {
   exit 1
 }
 grep -q "deep content" "${RAW_DIR}/case6.body" || {
-  echo "  WARN: Case 6 - deep content may have been pruned (acceptable)"
+  echo "  WARN: Case 6 - deep content may have been pruned (acceptable)" >&2
 }
 echo "  PASS: Deep nesting handled without crash"
 

@@ -28,7 +28,7 @@ All 0.4.0 sub-specs must follow these conventions for any new operator-facing su
 | Directive                              | Purpose                              |
 |----------------------------------------|--------------------------------------|
 | `markdown_filter`                      | Enable/disable the filter            |
-| `markdown_max_size`                    | Maximum response size to convert     |
+| `markdown_memory_budget`               | Maximum response size to convert     |
 | `markdown_timeout`                     | Conversion timeout                   |
 | `markdown_on_error`                    | Failure policy (pass / reject)       |
 | `markdown_flavor`                      | Markdown output flavor               |
@@ -101,7 +101,7 @@ Labels must be low-cardinality.
 | Skip     | `SKIP_METHOD`             | Not GET/HEAD                                         |
 | Skip     | `SKIP_STATUS`             | Not 200/206                                          |
 | Skip     | `SKIP_CONTENT_TYPE`       | Not text/html                                        |
-| Skip     | `SKIP_SIZE`               | Exceeds `markdown_max_size`                          |
+| Skip     | `SKIP_SIZE`               | Exceeds `markdown_memory_budget`                     |
 | Skip     | `SKIP_STREAMING`          | Unbounded streaming response                         |
 | Skip     | `SKIP_AUTH`               | Auth policy denies                                   |
 | Skip     | `SKIP_RANGE`              | Range request                                        |

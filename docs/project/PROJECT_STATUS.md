@@ -11,7 +11,7 @@ steering files.
 
 ## Current Assessment
 
-As of the **current release line (0.6.2)**, the project includes a dual-engine
+As of the **current release line (0.6.3)**, the project includes a dual-engine
 conversion model (streaming default with full-buffer fallback), streaming
 failure semantics aligned to commit boundaries, parity and diff validation for
 streaming behavior, rollout observability with shadow-mode checks, benchmark
@@ -21,6 +21,24 @@ tested. The codebase includes unit, integration, E2E, fuzz-oriented validation
 entrypoints, and harness-specific validation entrypoints, along with
 documentation covering installation, configuration, operations, architecture,
 and contributor-facing harness maintenance.
+
+### Release 0.6.3 Updates
+
+- Rust-first E2E migration closure:
+  - `tools/e2e-harness/` is now a first-class migrated-scenario runner for:
+    `accept-negotiation`, `metrics-endpoint`, `conditional-requests`,
+    `auth-cache`, and `status-codes`.
+  - `make test-e2e` delegates migrated scenarios to the Rust harness while
+    retaining non-migrated canonical shell scenarios.
+  - `make test-e2e-rust` provides a direct migrated-scenario entrypoint.
+- Python E2E cleanup:
+  - removed stale spec-only files:
+    `components/nginx-module/tests/e2e/test_streaming_e2e.py` and
+    `components/nginx-module/tests/e2e/test_streaming_failure_cache_e2e.py`.
+- Harness rule/governance alignment:
+  - routing manifest includes Rust harness ownership surfaces;
+  - harness checks enforce Rust harness contract and migration-policy guards for
+    migrated shell wrappers and removed Python E2E surfaces.
 
 ### Repository Harness Updates
 
@@ -70,7 +88,7 @@ and contributor-facing harness maintenance.
   - OS package manager distribution (APT, YUM/DNF, Homebrew).
   - Helm chart with Ingress annotation support.
   - Coverage gate as CI merge requirement.
-  - MDX and Org-mode flavor support.
+  - MDX and Org-mode flavor support (experimental, subject to change).
   - Dynamic configuration hot-reload (`markdown_dynamic_config`).
   - ADR-0006 (OTel), ADR-0007 (Streaming Default), ADR-0008 (Noise Pruning Default).
 
@@ -293,7 +311,7 @@ When deploying:
 
 1. **Start incrementally**: Enable on one location or path first
 2. **Monitor behavior**: Use the metrics endpoint to track conversions
-3. **Set appropriate limits**: Configure `markdown_max_size` and `markdown_timeout`
+3. **Set appropriate limits**: Configure `markdown_memory_budget` and `markdown_timeout`
 4. **Choose failure mode**: Select `markdown_on_error` based on requirements
 5. **Test caching**: Verify cache behavior with your CDN or caching layer
 6. **Review security**: Ensure authentication policies match your security model
@@ -302,7 +320,7 @@ See [DEPLOYMENT_EXAMPLES.md](../guides/DEPLOYMENT_EXAMPLES.md) for configuration
 
 ## Current Focus and Roadmap
 
-### Current Release (0.6.2)
+### Current Release (0.6.3)
 - Dual-engine conversion architecture: streaming default with full-buffer
   fallback
 - Dynamic configuration hot-reload with snapshot isolation and retry contract
@@ -326,10 +344,8 @@ See [DEPLOYMENT_EXAMPLES.md](../guides/DEPLOYMENT_EXAMPLES.md) for configuration
 - Continue operator-facing diagnostics hardening for drift/degradation cases
 
 ### Future Exploration
-- OpenTelemetry tracing integration
 - Additional Markdown flavors and output formats
-- Expanded observability integrations beyond built-in shared metrics
-- Packaging and distribution expansion (apt/yum/brew and ingress-oriented bundles)
+- Expanded observability integrations beyond built-in shared metrics and OTel tracing
 
 ## Known Limitations
 
@@ -428,7 +444,7 @@ See `examples/docker/` for Docker build examples.
 
 ## Summary
 
-**NGINX Markdown for Agents** is at version 0.6.2. The project provides
+**NGINX Markdown for Agents** is at version 0.6.3. The project provides
 HTML-to-Markdown conversion through NGINX content negotiation with a
 dual-engine model, with bounded-memory streaming as the default path and
 full-buffer conversion as the fallback. It includes Prometheus-compatible
@@ -464,3 +480,4 @@ For questions, issues, or feature requests, use the [GitHub issue tracker](https
 |---------|------|--------|---------|
 | 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
+| 0.6.3 | 2026-05-13 | Kang | Version bump to 0.6.3 for release |

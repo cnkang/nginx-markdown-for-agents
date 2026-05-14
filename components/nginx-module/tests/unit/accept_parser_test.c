@@ -1,6 +1,5 @@
 /*
  * Test: accept_parser
- * Description: Accept header parsing and content negotiation logic.
  *
  * Validates: Requirements 9.4 (Accept header parsing), 6.1 (content negotiation)
  *
@@ -74,8 +73,8 @@ trim(char **start, char **end)
  *
  * Returns:
  *   3 for exact type match (e.g. text/markdown, text/html)
- *   2 for subtype wildcard (text/*)
- *   1 for full wildcard (* / *)
+ *   2 for subtype wildcard (text with any subtype)
+ *   1 for full wildcard (any type with any subtype)
  */
 static int
 specificity_for(const char *type, const char *subtype)
@@ -237,8 +236,8 @@ parse_accept(const char *header, accept_entry_t *entries, int max_entries)
 /*
  * Check whether a parsed Accept entry matches text/markdown.
  *
- * When on_wildcard is true, subtype wildcards (text/*) and full
- * wildcards (* / *) also count as a match.
+ * When on_wildcard is true, subtype wildcards (text with any subtype)
+ * and full wildcards (any type with any subtype) also count as a match.
  *
  * Returns:
  *   1 if the entry matches markdown, 0 otherwise.

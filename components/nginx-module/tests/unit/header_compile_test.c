@@ -1,6 +1,5 @@
 /*
  * Test: header_compile
- * Description: compile-time smoke test for typedef ordering
  *
  * This test provides a compile-time smoke check for a critical
  * typedef/struct dependency chain used by the module header.
@@ -46,6 +45,12 @@ test_eligibility_string(ngx_http_markdown_eligibility_t e)
 }
 
 
+/*
+ * Verify ctx_t stores and retrieves error_category_t values correctly.
+ * Tests CONVERSION, RESOURCE_LIMIT, and SYSTEM categories.
+ *
+ * Expected: all three category values round-trip through the struct field.
+ */
 static void
 test_ctx_uses_error_category(void)
 {
@@ -73,6 +78,12 @@ test_ctx_uses_error_category(void)
 }
 
 
+/*
+ * Verify ctx_t stores and retrieves compression type values correctly.
+ * Tests GZIP and UNKNOWN compression types.
+ *
+ * Expected: compression type values round-trip through the struct field.
+ */
 static void
 test_ctx_uses_compression_type(void)
 {
@@ -95,6 +106,12 @@ test_ctx_uses_compression_type(void)
 }
 
 
+/*
+ * Verify eligibility_t enum is usable in function prototypes before
+ * the enum definition (forward declaration compatibility).
+ *
+ * Expected: function prototype using eligibility_t compiles and works.
+ */
 static void
 test_eligibility_enum_before_prototypes(void)
 {

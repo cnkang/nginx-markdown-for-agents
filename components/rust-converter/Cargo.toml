@@ -1,6 +1,6 @@
 [package]
 name = "nginx-markdown-converter"
-version = "0.6.2"
+version = "0.6.3"
 edition = "2024"
 rust-version = "1.91"
 authors = ["NGINX Markdown for Agents Contributors"]

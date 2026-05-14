@@ -1,4 +1,22 @@
 #!/usr/bin/env bash
+# test_install_workflow.sh — End-to-end smoke test for the binary install script.
+#
+# Builds a release artifact, spins up a local HTTP server to simulate a
+# GitHub release download, then runs install.sh inside an official nginx
+# Docker container to verify the full install-and-load workflow.
+#
+# Usage:
+#   tools/test_install_workflow.sh
+#
+# Prerequisites:
+#   - docker (with buildx for multi-platform support)
+#   - python3 (for the mock HTTP server)
+#   - A pre-built release artifact (see tools/build_release.sh)
+#
+# Exit behaviour:
+#   0 if the install script succeeds and nginx -t passes inside the container.
+#   1 if any prerequisite is missing, the artifact is absent, or the
+#     containerised install/nginx validation fails.
 set -euo pipefail
 
 WORKSPACE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -14,6 +32,16 @@ ARTIFACT="${WORKSPACE_ROOT}/dist/1.28.2-glibc-${TEST_ARCH}/ngx_http_markdown_fil
 MOCK_DIR=""
 SERVER_PID=""
 
+# Compute the SHA-256 hash of a file using the best available tool.
+#
+# Arguments:
+#   $1 - path to the file to hash
+#
+# Outputs:
+#   Writes the hex SHA-256 digest to stdout
+#
+# Returns:
+#   0 always (falls back through sha256sum, shasum, openssl)
 sha256_file() {
   local file="$1"
   if command -v sha256sum >/dev/null 2>&1; then
@@ -27,6 +55,19 @@ sha256_file() {
   return 0
 }
 
+# cleanup — Remove temporary artifacts on script exit.
+#
+# Stops the mock HTTP server if it is still running and removes the
+# temporary directory used to host the release artifact.
+#
+# Arguments:
+#   (none)
+#
+# Outputs:
+#   None.
+#
+# Returns:
+#   0 always.
 cleanup() {
   if [[ -n "$SERVER_PID" ]] && kill -0 "$SERVER_PID" >/dev/null 2>&1; then
     kill "$SERVER_PID" >/dev/null 2>&1 || true

@@ -39,7 +39,7 @@ Before contributing, ensure you have:
 
 1. **Clone the repository:**
    ```bash
-   git clone https://github.com/your-org/nginx-markdown-for-agents.git
+   git clone https://github.com/cnkang/nginx-markdown-for-agents.git
    cd nginx-markdown-for-agents
    ```
 
@@ -249,7 +249,7 @@ cargo test --all
 cargo test test_name
 
 # Run with coverage
-cargo tarpaulin --out Html
+cargo llvm-cov --html
 ```
 
 ### NGINX Module Tests
@@ -439,3 +439,4 @@ Thank you for contributing to NGINX Markdown for Agents!
 |---------|------|--------|---------|
 | 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
+| 0.6.3 | 2026-05-14 | Codex | Fix repository URL placeholder, update coverage tool to cargo llvm-cov |

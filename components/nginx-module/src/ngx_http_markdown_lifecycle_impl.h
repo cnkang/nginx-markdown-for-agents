@@ -111,7 +111,16 @@ ngx_http_markdown_init_worker(ngx_cycle_t *cycle)
     return NGX_OK;
 }
 
-/* Release the per-worker converter handle on graceful shutdown. */
+/*
+ * Release per-worker resources on graceful shutdown.
+ *
+ * Stops the dynamic config watcher, frees the Rust converter handle,
+ * and clears global pointers.  Safe to call when the converter was
+ * never initialized (early-exit on NULL).
+ *
+ * Parameters:
+ *   cycle - NGINX cycle (used for logging)
+ */
 static void
 ngx_http_markdown_exit_worker(ngx_cycle_t *cycle)
 {
