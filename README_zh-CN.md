@@ -402,6 +402,7 @@ Makefile               顶层构建与测试入口
 - Rust-first E2E 迁移首批已收敛，形成混合套件契约（`make test-e2e` + `make test-e2e-rust`）
 - repo-owned harness 工作流（`docs/harness/`、`tools/harness/`、`make harness-check*`）
 - release/performance tooling 的路径校验已围绕 repository root 完成加固
+- release binary matrix 已刷新到当前 NGINX `1.30.1` 和 `1.31.0`
 - Prometheus 指标、rollout/rollback 手册与基准回归检测持续可用
 - 安装与发布文档已与 Rust 1.91.0+ 和当前 CI 基线对齐
 
@@ -425,6 +426,6 @@ BSD 2-Clause "Simplified" License。详见 [LICENSE](LICENSE)。
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 0.6.3 | 2026-05-14 | Kang | 版本号更新至 0.6.3，并补充发布前最终加固说明 |
+| 0.6.3 | 2026-05-14 | Kang | 版本号更新至 0.6.3，并补充 release matrix 与发布前最终加固说明 |
 | 0.6.2 | 2026-05-08 | Kang | 版本号更新至 0.6.2 以配合发布 |
 | 0.5.0 | 2026-04-21 | docs-standardization | Synchronized Quick Start steps between English and Chinese versions; added update tracking section |

@@ -36,6 +36,8 @@ hardening fixes before the v0.6.3 tag.
 - Release/test tooling now keeps performance runner paths and round-trip temp
   files under the repository root, matching the hardened path-validation
   contract used by local and CI checks.
+- Release binary matrix refreshed for current NGINX versions `1.30.1` and
+  `1.31.0`, replacing stale `1.29.8` and `1.30.0` entries.
 - Development test dependencies were refreshed for the 0.6.3 release line.
 - `PROJECT_STATUS.md` current release line advanced from 0.6.2 to 0.6.3.
 
