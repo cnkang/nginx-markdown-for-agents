@@ -60,6 +60,8 @@ EOF
 
 # shellcheck disable=SC1090
 source "${NATIVE_BUILD_HELPER}"
+# shellcheck disable=SC1090
+source "$(dirname "${BASH_SOURCE[0]}")/e2e_common.sh"
 
 nginx_supports_ssl_upstream() {
   local nginx_bin="$1"
@@ -159,6 +161,8 @@ path_is_within_dir() {
     "${abs_dir}"|"${abs_dir}"/*) return 0 ;;
     *) return 1 ;;
   esac
+
+  return 0
 }
 
 can_remove_buildroot() {

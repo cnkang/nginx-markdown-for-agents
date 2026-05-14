@@ -20,9 +20,9 @@ MIN_SUPPORTED_NGINX_VERSION="1.24.0"
 SOURCE_BUILD_URL="https://github.com/cnkang/nginx-markdown-for-agents/tree/main/docs/guides/INSTALLATION.md#6-secondary-manual-source-build"
 SUPPORTED_ARCHITECTURES="x86_64, aarch64"
 readonly SED_STRIP_LEADING_ZEROS='s/^0*//'
-readonly CATEGORY_FILESYSTEM="$CATEGORY_FILESYSTEM"
-readonly MSG_CHECK_PERMS_DISK="$MSG_CHECK_PERMS_DISK"
-readonly MSG_CHECK_PERMS_TMP_DISK="$MSG_CHECK_PERMS_TMP_DISK"
+readonly CATEGORY_FILESYSTEM="filesystem"
+readonly MSG_CHECK_PERMS_DISK="check filesystem permissions and disk space"
+readonly MSG_CHECK_PERMS_TMP_DISK="check temporary directory permissions and disk space"
 readonly CONF_GLOB='*.conf'
 readonly SEPARATOR_LINE='=================================================================================='
 readonly CATEGORY_CONFIG="config"
@@ -54,6 +54,7 @@ emit_error() {
   echo "[ERROR] ${category}: ${message}" >&2
   _json_error_category="$category"
   _json_error_message="$message"
+  return 0
 }
 
 # emit_suggest <suggestion>
@@ -62,6 +63,7 @@ emit_suggest() {
   local suggestion="$1"
   echo "[SUGGEST] ${suggestion}" >&2
   _json_suggestions+=("$suggestion")
+  return 0
 }
 
 # json_output <success>
@@ -159,9 +161,10 @@ json_output() {
     error_json="{\"category\":\"${_json_error_category}\",\"message\":\"${escaped_msg}\"}"
   fi
 
-  printf '{"success":%s,"nginx_version":"%s","os_type":"%s","arch":"%s","error":%s,"available_versions":%s,"suggestions":%s}\n' \
+    printf '{"success":%s,"nginx_version":"%s","os_type":"%s","arch":"%s","error":%s,"available_versions":%s,"suggestions":%s}\n' \
     "$json_success" "$json_nginx_version" "$json_os_type" "$json_arch" \
     "$error_json" "$versions_json" "$suggestions_json" >&3
+  return 0
 }
 
 # die_with_error <category> <message> <suggestion1> [suggestion2] ...
@@ -277,6 +280,7 @@ fetch_release_json() {
     return 1
   fi
   printf '%s\n' "$response"
+  return 0
 }
 
 # fetch_dist_index_json fetches the GitHub API JSON listing for the repository's `dist` directory at the specified ref and writes it to stdout.
@@ -288,6 +292,7 @@ fetch_dist_index_json() {
     return 1
   fi
   printf '%s\n' "$response"
+  return 0
 }
 
 # resolve_download_info determines the download URL, SHA-256 digest, and available prebuilt nginx versions for a requested asset and prints them as three newline-separated lines.
@@ -420,6 +425,7 @@ PY
   else
     printf '\n\n\n'
   fi
+  return 0
 }
 
 # Format a space-separated list of nginx versions grouped by major.minor series for display.
@@ -463,6 +469,7 @@ for version in sorted(set(versions), key=key):
 for series in sorted(groups.keys(), key=lambda s: tuple(int(p) for p in s.split("."))):
     print(f"  {series}.x: {' '.join(groups[series])}")
 PY
+  return 0
 }
 
 # collect_stale_module_suggestions inspects current nginx config for an already-loaded
@@ -505,7 +512,11 @@ collect_stale_module_suggestions() {
 
   rm -f "$test_log" || true
   if [[ "${#hints[@]}" -gt 0 ]]; then
-    eval "$out_var=(\"\${hints[@]}\")"
+    local i=0
+    while [[ $i -lt ${#hints[@]} ]]; do
+      printf -v "${out_var}[$i]" '%s' "${hints[$i]}"
+      i=$((i + 1))
+    done
   fi
   return 0
 }
@@ -569,6 +580,7 @@ extract_configure_arg() {
   local key="$1"
   local nginx_v_output="$2"
   printf '%s\n' "$nginx_v_output" | sed -n "s/.*--${key}=\\([^ ]*\\).*/\\1/p" | head -n1
+  return 0
 }
 
 # Resolve a path value by prepending a prefix if the candidate is relative.
@@ -602,6 +614,7 @@ resolve_path_with_prefix() {
   else
     printf '%s\n' "$candidate"
   fi
+  return 0
 }
 
 resolve_include_dir() {
@@ -619,6 +632,7 @@ resolve_include_dir() {
   fi
 
   printf '%s\n' "$include_dir"
+  return 0
 }
 
 backup_file_once() {
@@ -629,6 +643,7 @@ backup_file_once() {
       "Failed to create backup file: ${backup_file}" \
       "$MSG_CHECK_PERMS_DISK"
   fi
+  return 0
 }
 
 # ensure_main_include_directive ensures the given nginx main configuration file contains the specified include directive, inserting it before the first top-level block (events,http,stream,mail) or appending it if no such block is found and creating a backup via backup_file_once.
@@ -675,6 +690,7 @@ ensure_main_include_directive() {
       "$MSG_CHECK_PERMS_DISK"
   fi
   rm -f "$tmp_file" || true
+  return 0
 }
 
 # insert_markdown_filter_into_http_block inserts `markdown_filter on;` as the first line inside the top-level `http { ... }` block of the specified nginx configuration file.
@@ -821,12 +837,12 @@ fi
 
 RELEASE_JSON=""
 if [[ -z "$DOWNLOAD_URL_OVERRIDE" ]] && ! RELEASE_JSON="$(fetch_release_json)"; then
-  echo "[!] Warning: Failed to query GitHub release metadata (${release_api_hint}); falling back to repository dist index."
+  echo "[!] Warning: Failed to query GitHub release metadata (${release_api_hint}); falling back to repository dist index." >&2
 fi
 
 DIST_INDEX_JSON=""
 if [[ -z "$DOWNLOAD_URL_OVERRIDE" ]] && ! DIST_INDEX_JSON="$(fetch_dist_index_json "$source_ref")"; then
-  echo "[!] Warning: Failed to query repository dist index (${source_ref})."
+  echo "[!] Warning: Failed to query repository dist index (${source_ref})." >&2
 fi
 
 # Determine target asset name
@@ -887,7 +903,7 @@ if ! TMP_DIR="$(mktemp -d)"; then
 fi
 trap 'rm -rf "$TMP_DIR"' EXIT
 
-if ! curl -fsSL -o "$TMP_DIR/$ASSET_NAME" "$DOWNLOAD_URL"; then
+if ! curl --proto '=https' --tlsv1.2 -fsSL -o "$TMP_DIR/$ASSET_NAME" "$DOWNLOAD_URL"; then
   _json_available_versions="$AVAILABLE_VERSIONS"
   if [[ -n "$AVAILABLE_VERSIONS" ]]; then
     echo "Available pre-built versions for ${OS_TYPE}/${ARCH} (grouped by major.minor):" >&2
@@ -911,7 +927,7 @@ if [[ -n "$EXPECTED_SHA256" ]]; then
   echo "[+] SHA256 checksum verified"
 else
   if [[ "${ALLOW_INSECURE_NO_CHECKSUM}" = "1" ]]; then
-    echo "[!] Release asset does not provide a SHA256 digest; proceeding because ALLOW_INSECURE_NO_CHECKSUM=1"
+    echo "[!] Release asset does not provide a SHA256 digest; proceeding because ALLOW_INSECURE_NO_CHECKSUM=1" >&2
   else
     die_with_error "checksum" \
       "Release asset does not provide a SHA256 digest; refusing to install unsigned artifact by default." \
@@ -1118,7 +1134,7 @@ if [[ "$NGINX_TEST_RESULT" = "ok" ]]; then
   echo "[+] nginx -t passed"
   echo "Run: nginx -s reload"
 else
-  echo "[!] nginx -t failed. Review errors below:"
+  echo "[!] nginx -t failed. Review errors below:" >&2
   sed -n '1,20p' "$NGINX_TEST_LOG"
   echo "Fix config and run: nginx -t && nginx -s reload"
 fi
