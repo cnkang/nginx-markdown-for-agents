@@ -112,7 +112,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
         with:
-          python-version: '3.14'
+          python-version: '3.14.3'
 
       - name: Validate docs
         run: make docs-check
@@ -371,7 +371,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
         with:
-          python-version: '3.14'
+          python-version: '3.14.3'
 
       - name: Install Python test dependencies
         run: pip install -r requirements-dev.txt
@@ -450,7 +450,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
         with:
-          python-version: '3.14'
+          python-version: '3.14.3'
 
       - name: Install Python test dependencies
         run: pip install -r requirements-dev.txt
@@ -492,7 +492,7 @@ jobs:
             components/rust-converter -> target
 
       - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@db5fb34fa772531a3ece57ca434f579eb334e0fb # v2
         with:
           tool: cargo-llvm-cov
 
@@ -524,7 +524,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
         with:
-          python-version: '3.14'
+          python-version: '3.14.3'
 
       - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
