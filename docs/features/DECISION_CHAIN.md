@@ -47,7 +47,7 @@ The decision chain evaluates checks in a fixed order. The first check that fails
 | 4 | Range request | Is this a range request (`Range` header present)? Range requests are not eligible because partial content cannot be converted. | `SKIP_RANGE` |
 | 5 | Streaming content | Is the response a streaming content type (matching `markdown_stream_types`)? Streaming responses are not eligible. | `SKIP_STREAMING` |
 | 6 | Content-Type | Is the upstream `Content-Type` header `text/html` (with any charset parameter)? Non-HTML content types are not eligible. | `SKIP_CONTENT_TYPE` |
-| 7 | Response size | Is the response body size within the configured `markdown_max_size` limit? Oversized responses are not eligible. | `SKIP_SIZE` |
+| 7 | Response size | Is the response body size within the configured `markdown_memory_budget` limit? Oversized responses are not eligible. | `SKIP_SIZE` |
 | 8 | Auth policy | Is the request authenticated and `markdown_auth_policy` set to `deny`? Authenticated requests are detected through the existing `Authorization` header and auth-cookie checks. | `SKIP_AUTH` |
 | 9 | Accept negotiation | Does the `Accept` header contain `text/markdown`? When `markdown_on_wildcard` is `off` (default), only explicit `text/markdown` triggers conversion. When `on`, `text/*` and `*/*` also qualify. | `SKIP_ACCEPT` |
 | 10 | Conversion attempt | All checks passed. The module attempts HTML-to-Markdown conversion. | _(see outcome determination below)_ |
@@ -121,7 +121,7 @@ The complete mapping from reason codes to eligibility enums, error categories, r
 | `SKIP_RANGE` | `NGX_HTTP_MARKDOWN_INELIGIBLE_RANGE` | — | SKIPPED | Range request |
 | `SKIP_STREAMING` | `NGX_HTTP_MARKDOWN_INELIGIBLE_STREAMING` | — | SKIPPED | Unbounded streaming response |
 | `SKIP_CONTENT_TYPE` | `NGX_HTTP_MARKDOWN_INELIGIBLE_CONTENT_TYPE` | — | SKIPPED | Content-Type not text/html |
-| `SKIP_SIZE` | `NGX_HTTP_MARKDOWN_INELIGIBLE_SIZE` | — | SKIPPED | Response exceeds `markdown_max_size` |
+| `SKIP_SIZE` | `NGX_HTTP_MARKDOWN_INELIGIBLE_SIZE` | — | SKIPPED | Response exceeds `markdown_memory_budget` |
 | `SKIP_AUTH` | `NGX_HTTP_MARKDOWN_INELIGIBLE_AUTH` | — | SKIPPED | Auth policy denies conversion for authenticated requests |
 | `SKIP_ACCEPT` | _(Accept negotiation)_ | — | SKIPPED | Accept header does not request Markdown |
 | `ELIGIBLE_CONVERTED` | `NGX_HTTP_MARKDOWN_ELIGIBLE` | — | CONVERTED | Conversion succeeded |

@@ -51,7 +51,7 @@ NGINX_HEADER := $(NGINX_MODULE_DIR)/src/markdown_converter.h
 
 .PHONY: all build rust-lib rust-lib-debug copy-headers check-headers \
         test test-rust test-rust-doc test-nginx-unit test-nginx-unit-streaming test-nginx-unit-clang-smoke test-nginx-unit-sanitize-smoke \
-        test-nginx-integration test-e2e test-all test-rust-fuzz-smoke sonar-compile-db \
+        test-nginx-integration test-e2e test-e2e-rust test-all test-rust-fuzz-smoke sonar-compile-db \
         test-benchmark test-benchmark-compare test-benchmark-summary \
         harness-check harness-check-full harness-security-checks \
         docs-check license-check release-gates-check release-gates-check-055 release-gates-check-060 release-gates-check-legacy release-gates-check-strict \
@@ -79,7 +79,7 @@ rust-lib:
 
 rust-lib-debug:
 	@echo "Building Rust library (debug) for $(RUST_TARGET)..."
-	cd $(RUST_DIR) && cargo build --target $(RUST_TARGET)
+	cd $(RUST_DIR) && cargo build --locked --target $(RUST_TARGET)
 
 copy-headers:
 	@echo "Copying headers to nginx module source..."
@@ -94,16 +94,16 @@ test: build
 	@$(MAKE) -C $(NGINX_TEST_DIR) unit-smoke
 
 test-rust:
-	cd $(RUST_DIR) && cargo build --release --example perf_baseline
-	cd $(RUST_DIR) && cargo test --all
-	cd $(RUST_DIR) && cargo test --doc --all-features
+	cd $(RUST_DIR) && cargo build --locked --release --example perf_baseline
+	cd $(RUST_DIR) && cargo test --locked --all
+	cd $(RUST_DIR) && cargo test --locked --doc --all-features
 
 test-rust-streaming:
-	cd $(RUST_DIR) && cargo test --features streaming
+	cd $(RUST_DIR) && cargo test --locked --features streaming
 
 test-rust-doc:
 	@echo "Running Rust doctests (all features)..."
-	cd $(RUST_DIR) && cargo test --doc --all-features
+	cd $(RUST_DIR) && cargo test --locked --doc --all-features
 
 test-rust-fuzz-smoke:
 	cd $(RUST_DIR) && cargo +nightly fuzz run parser_html -- -max_total_time=5
@@ -131,6 +131,14 @@ test-nginx-integration:
 test-e2e:
 	$(MAKE) -C $(NGINX_TEST_DIR) e2e
 
+E2E_HARNESS_DIR := tools/e2e-harness
+
+test-e2e-rust:
+	@echo "Building e2e-harness..."
+	cd $(E2E_HARNESS_DIR) && cargo build --locked
+	@echo "Running e2e-harness migrated scenarios..."
+	cd $(E2E_HARNESS_DIR) && cargo run --locked -- suite --profile smoke
+
 test-all: build test-rust test-nginx-unit
 
 sonar-compile-db:
@@ -146,7 +154,7 @@ test-benchmark:
 	@echo "Validating corpus metadata..."
 	tools/corpus/validate_corpus.sh
 	@echo "Building test-corpus-conversion binary..."
-	cd tools/corpus/test-corpus-conversion && cargo build --release --quiet
+	cd tools/corpus/test-corpus-conversion && cargo build --locked --release --quiet
 	@echo "Running corpus benchmark..."
 	python3 tools/perf/run_corpus_benchmark.py \
 		--corpus-dir $(CORPUS_DIR) \
@@ -330,6 +338,7 @@ help:
 	@echo "  test-nginx-unit-sanitize-smoke - Run nginx C smoke tests with ASan/UBSan"
 	@echo "  test-nginx-integration   - Run integration tests"
 	@echo "  test-e2e                 - Run end-to-end tests"
+	@echo "  test-e2e-rust            - Build and run Rust e2e-harness migrated scenarios"
 	@echo "  verify-streaming-failure-cache-e2e - Run streaming failure/cache e2e tests"
 	@echo "  verify-streaming-failure-cache-e2e-plan - Print test plan only (no NGINX_BIN required)"
 	@echo "  verify-metrics-endpoint-e2e  - Run metrics endpoint e2e tests (JSON/text/Prometheus)"

@@ -1,6 +1,6 @@
 # NGINX Markdown for Agents
 
-[![Latest Release](https://img.shields.io/github/v/release/cnkang/nginx-markdown-for-agents?sort=semver)](https://github.com/cnkang/nginx-markdown-for-agents/releases) [![NGINX](https://img.shields.io/badge/NGINX-%3E%3D1.24.0-009639?logo=nginx&logoColor=white)](https://github.com/cnkang/nginx-markdown-for-agents/blob/main/docs/guides/INSTALLATION.md) [![CI](https://github.com/cnkang/nginx-markdown-for-agents/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/cnkang/nginx-markdown-for-agents/actions/workflows/ci.yml) [![Security Scanning](https://github.com/cnkang/nginx-markdown-for-agents/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/cnkang/nginx-markdown-for-agents/actions/workflows/codeql.yml) [![License](https://img.shields.io/github/license/cnkang/nginx-markdown-for-agents)](https://github.com/cnkang/nginx-markdown-for-agents/blob/main/LICENSE) [![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=cnkang_nginx-markdown-for-agents&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=cnkang_nginx-markdown-for-agents)
+[![Latest Release](https://img.shields.io/github/v/release/cnkang/nginx-markdown-for-agents?sort=semver)](https://github.com/cnkang/nginx-markdown-for-agents/releases) [![NGINX](https://img.shields.io/badge/NGINX-%3E%3D1.24.0-009639?logo=nginx&logoColor=white)](https://github.com/cnkang/nginx-markdown-for-agents/blob/main/docs/guides/INSTALLATION.md) [![CI](https://github.com/cnkang/nginx-markdown-for-agents/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/cnkang/nginx-markdown-for-agents/actions/workflows/ci.yml) [![Security Scanning](https://github.com/cnkang/nginx-markdown-for-agents/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/cnkang/nginx-markdown-for-agents/actions/workflows/codeql.yml) [![Coverity Scan Build Status](https://img.shields.io/coverity/scan/33094.svg)](https://scan.coverity.com/projects/cnkang-nginx-markdown-for-agents) [![License](https://img.shields.io/github/license/cnkang/nginx-markdown-for-agents)](https://github.com/cnkang/nginx-markdown-for-agents/blob/main/LICENSE) [![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=cnkang_nginx-markdown-for-agents&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=cnkang_nginx-markdown-for-agents)
 
 English | [Simplified Chinese](README_zh-CN.md)
 
@@ -278,7 +278,7 @@ The split follows the actual problem boundary.
 - Rust is used where the code must parse untrusted HTML, normalize output, and evolve safely over time.
 - The FFI boundary stays small so NGINX-facing HTTP logic and conversion logic can change with less coupling.
 
-If you want the full design rationale rather than the short version, read [docs/architecture/SYSTEM_ARCHITECTURE.md](docs/architecture/SYSTEM_ARCHITECTURE.md) and [docs/architecture/ADR/0001-use-rust-for-conversion.md](docs/architecture/ADR/0001-use-rust-for-conversion.md).
+If you want the full design rationale rather than the short version, read [docs/architecture/SYSTEM_ARCHITECTURE.md](docs/architecture/SYSTEM_ARCHITECTURE.md), [docs/architecture/ADR/0001-use-rust-for-conversion.md](docs/architecture/ADR/0001-use-rust-for-conversion.md), and [docs/architecture/ADR/0009-rust-first-e2e-test-architecture.md](docs/architecture/ADR/0009-rust-first-e2e-test-architecture.md).
 
 If you are trying to understand how specific directives change runtime behavior, use [docs/architecture/CONFIG_BEHAVIOR_MAP.md](docs/architecture/CONFIG_BEHAVIOR_MAP.md).
 
@@ -296,13 +296,14 @@ make test-nginx-unit
 
 # Runtime integration and canonical E2E checks
 make test-nginx-integration
+make test-e2e-rust
 make test-e2e
 make test-rust-fuzz-smoke
 ```
 
 `make test-nginx-integration` and `make test-e2e` require a real `nginx` runtime. If `nginx` is not on `PATH`, use `NGINX_BIN=/absolute/path/to/nginx`.
 
-See [docs/testing/README.md](docs/testing/README.md) for integration, E2E, and performance-oriented test references.
+See [docs/testing/README.md](docs/testing/README.md) and [docs/testing/E2E_TESTS.md](docs/testing/E2E_TESTS.md) for integration, E2E, and performance-oriented test references.
 
 If you are changing repo contracts, docs validators, or agent workflow rules,
 run the harness checks as well:
@@ -394,13 +395,14 @@ add the harness workflow to your default path:
 
 ## Roadmap
 
-Current release (0.6.2):
+Current release (0.6.3):
 
 - Dual-engine architecture: streaming auto mode default, full-buffer for small responses
 - Streaming failure semantics and fallback controls aligned with commit boundaries
 - Streaming parity and diff coverage across chunk boundaries and failure paths
 - Streaming rollout observability with shadow-mode validation and reason-code visibility
 - Streaming performance evidence workflow and release-gate alignment
+- Rust-first E2E migration batch closed with hybrid suite contract (`make test-e2e` + `make test-e2e-rust`)
 - Repo-owned harness workflow (`docs/harness/`, `tools/harness/`, `make harness-check*`)
 - Prometheus-compatible metrics, rollout/rollback guides, and benchmark-driven regression checks
 - Installation and release docs aligned to Rust 1.91.0+ and current CI expectations
@@ -425,5 +427,6 @@ BSD 2-Clause "Simplified" License. See [LICENSE](LICENSE).
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.6.3 | 2026-05-13 | Kang | Version bump to 0.6.3 for release |
 | 0.6.2 | 2026-05-08 | Kang | Version bump to 0.6.2 for release |
 | 0.5.0 | 2026-04-21 | docs-standardization | Synchronized Quick Start steps between English and Chinese versions; added update tracking section |

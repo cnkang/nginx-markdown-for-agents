@@ -36,6 +36,7 @@ assert_json() {
   fi
   echo "PASS [$label]: $file"
   PASS=$((PASS + 1))
+  return 0
 }
 
 PLATFORM="$(python3 "$REPORT_UTILS" detect-platform)"

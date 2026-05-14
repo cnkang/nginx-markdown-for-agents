@@ -5,6 +5,52 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.3] - 2026-05-13
+
+This release closes the Rust-first E2E migration scope for the first scenario
+batch, aligns harness governance with migrated execution surfaces, and removes
+stale Python E2E spec files.
+
+### Added
+- Rust E2E harness migration artifacts and documentation for 0.6.3:
+  - `tools/e2e-harness/` scenario modules for `accept-negotiation`,
+    `metrics-endpoint`, `conditional-requests`, `auth-cache`, and
+    `status-codes`.
+  - `docs/project/0.6.3-test-surface-audit.md`,
+    `docs/project/0.6.3-e2e-parity.md`,
+    `docs/testing/C_TEST_BOUNDARY.md`,
+    `docs/project/release-notes-0-6-3.md`,
+    `docs/architecture/ADR/0009-rust-first-e2e-test-architecture.md`.
+- Harness risk pack for E2E migration:
+  `docs/harness/risk-packs/e2e-migration.md`.
+- Harness validation contract for Rust E2E migration policy in
+  `tools/harness/check_harness_sync.py` (Rust harness binary contract, migrated
+  wrapper checks, and removed Python E2E guard).
+
+### Changed
+- `make test-e2e` canonical suite now delegates migrated scenarios through
+  `e2e-harness` while keeping deferred scenarios on canonical shell paths.
+- Migrated scenario shell entrypoints were reduced to thin compatibility
+  wrappers that delegate to `e2e-harness scenario <name>`.
+- `PROJECT_STATUS.md` current release line advanced from 0.6.2 to 0.6.3.
+
+### Removed
+- Stale Python E2E spec files from `components/nginx-module/tests/e2e/`:
+  - `test_streaming_e2e.py`
+  - `test_streaming_failure_cache_e2e.py`
+
+#### Upgrading to 0.6.3
+
+- `make test-e2e` remains the canonical entrypoint and now delegates migrated
+  scenarios to `e2e-harness`; no caller-side command change is required.
+- For migrated scenarios, thin shell wrappers under `tools/e2e/` are
+  compatibility delegates. New product-level HTTP scenario logic should be
+  implemented in `tools/e2e-harness/src/scenarios/` rather than as new
+  independent shell assertions.
+- Python E2E spec-only files under
+  `components/nginx-module/tests/e2e/` are removed from this release line.
+  Use Rust harness scenarios and retained canonical shell runtime paths.
+
 ## [0.6.2] - 2026-05-08
 
 This release hardens dynamic-configuration safety with snapshot isolation,
@@ -188,6 +234,13 @@ and a unified memory budget simplifies configuration.
   checks; fixed `verify_proxy_tls_backend_e2e.sh` source ordering.
 - Updated installation documentation and READMEs with Homebrew tap install
   path and release-tag checksum guidance.
+
+#### Upgrading to 0.6.0
+
+- **Streaming is now the default engine.** The `markdown_streaming_engine` directive defaults to `auto`, which selects the streaming path for eligible responses. To retain the previous full-buffer-only behavior, set `markdown_streaming_engine off;` in your nginx configuration.
+- **Noise pruning is now enabled by default.** The `markdown_prune_noise` directive defaults to `on`. To disable it, set `markdown_prune_noise off;`.
+- **Unified memory budget.** The `markdown_memory_budget` directive supersedes the dual `markdown_max_size` + `markdown_streaming_budget` pattern. Existing configurations using the old directives continue to work but `markdown_memory_budget` is recommended for new deployments.
+- **OpenTelemetry tracing.** If you enable OTLP tracing, ensure your collector endpoint accepts HTTP/protobuf on the configured port.
 
 ### Fixed
 - Homebrew source builds now install `cbindgen` as an explicit build
@@ -690,10 +743,10 @@ This release expands runtime configurability, tightens module internals and vali
 - macOS (Apple Silicon and Intel)
 - Linux (x86_64 and aarch64)
 - NGINX 1.24.0+
-- Rust 1.85.0+
+- Rust 1.91.0+
 
 ### Known Limitations
-- Full buffering required (no streaming conversion)
+- Streaming is the default engine; full-buffer is the fallback
 - Requires uncompressed or automatically decompressed HTML input
 - Some complex HTML structures may not convert perfectly
 - Performance overhead for large documents

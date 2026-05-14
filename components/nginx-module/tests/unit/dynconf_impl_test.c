@@ -1,8 +1,5 @@
 /*
  * Test: dynconf_impl
- * Description: branch and line coverage for dynamic config hot-reload
- *              helpers (parse_line, apply, check, start, stop,
- *              timer_handler, reload) with two-phase snapshot model.
  */
 
 #include "../include/test_common.h"
@@ -103,7 +100,21 @@ ngx_strncasecmp(u_char *s1, u_char *s2, size_t n)
 }
 
 #undef ngx_log_error
-#define ngx_log_error(level, log, err, fmt, ...) do { UNUSED(log); } while(0)
+static void
+test_dynconf_log_ignore(const char *fmt, ...)
+{
+    UNUSED(fmt);
+}
+
+#define ngx_log_error(level, log, err, fmt, ...)                                     \
+    do {                                                                              \
+        UNUSED(level);                                                                \
+        UNUSED(log);                                                                  \
+        UNUSED(err);                                                                  \
+        if (0) {                                                                      \
+            test_dynconf_log_ignore((fmt), ##__VA_ARGS__);                           \
+        }                                                                             \
+    } while (0)
 
 #define NGX_MAX_PATH 1024
 
@@ -206,13 +217,87 @@ ngx_del_timer(ngx_event_t *ev)
 static ngx_pool_t  g_pool;
 static ngx_log_t   g_log;
 static ngx_cycle_t g_cycle = { &g_pool, &g_log };
-static ngx_connection_t g_conn = { &g_log };
 
 static void
 set_ngx_str(ngx_str_t *dst, const char *src)
 {
     dst->data = (u_char *) src;
     dst->len = strlen(src);
+}
+
+static void
+test_effective_conf_helpers_smoke(void)
+{
+    ngx_http_markdown_conf_t            conf;
+    ngx_http_markdown_dynconf_snapshot_t snap;
+    ngx_http_markdown_effective_conf_t   eff;
+
+    TEST_SUBSECTION("effective_conf helpers smoke");
+
+    ngx_memzero(&conf, sizeof(conf));
+    ngx_memzero(&snap, sizeof(snap));
+    ngx_memzero(&eff, sizeof(eff));
+
+    conf.enabled = 0;
+    conf.enabled_source = NGX_HTTP_MARKDOWN_ENABLED_STATIC;
+    conf.prune_noise = 0;
+    conf.log_verbosity = NGX_HTTP_MARKDOWN_LOG_WARN;
+    conf.memory_budget = 8 * 1024 * 1024;
+#ifdef MARKDOWN_STREAMING_ENABLED
+    conf.streaming_budget = 4 * 1024 * 1024;
+#endif
+
+    snap.valid = 1;
+    snap.enabled = 1;
+    snap.enabled_source = NGX_HTTP_MARKDOWN_ENABLED_COMPLEX;
+    snap.prune_noise = 1;
+    snap.log_verbosity = NGX_HTTP_MARKDOWN_LOG_DEBUG;
+    snap.memory_budget = 16 * 1024 * 1024;
+#ifdef MARKDOWN_STREAMING_ENABLED
+    snap.streaming_budget = 12 * 1024 * 1024;
+#endif
+
+    ngx_http_markdown_build_effective_conf(&eff, &snap, &conf);
+    TEST_ASSERT(ngx_http_markdown_effective_enabled(&eff, &conf) == 1,
+                "enabled should come from snapshot");
+    TEST_ASSERT(ngx_http_markdown_effective_enabled_source(&eff, &conf)
+                    == NGX_HTTP_MARKDOWN_ENABLED_COMPLEX,
+                "enabled_source should come from snapshot");
+    TEST_ASSERT(ngx_http_markdown_effective_prune_noise(&eff, &conf) == 1,
+                "prune_noise should come from snapshot");
+    TEST_ASSERT(ngx_http_markdown_effective_log_verbosity(&eff, &conf)
+                    == NGX_HTTP_MARKDOWN_LOG_DEBUG,
+                "log_verbosity should come from snapshot");
+    TEST_ASSERT(ngx_http_markdown_effective_memory_budget(&eff, &conf)
+                    == 16 * 1024 * 1024,
+                "memory_budget should come from snapshot");
+#ifdef MARKDOWN_STREAMING_ENABLED
+    TEST_ASSERT(ngx_http_markdown_effective_streaming_budget(&eff, &conf)
+                    == 12 * 1024 * 1024,
+                "streaming_budget should come from snapshot");
+#endif
+
+    ngx_http_markdown_build_effective_conf(&eff, NULL, &conf);
+    TEST_ASSERT(ngx_http_markdown_effective_enabled(&eff, &conf) == 0,
+                "enabled should fall back to conf");
+    TEST_ASSERT(ngx_http_markdown_effective_enabled_source(&eff, &conf)
+                    == NGX_HTTP_MARKDOWN_ENABLED_STATIC,
+                "enabled_source should fall back to conf");
+    TEST_ASSERT(ngx_http_markdown_effective_prune_noise(&eff, &conf) == 0,
+                "prune_noise should fall back to conf");
+    TEST_ASSERT(ngx_http_markdown_effective_log_verbosity(&eff, &conf)
+                    == NGX_HTTP_MARKDOWN_LOG_WARN,
+                "log_verbosity should fall back to conf");
+    TEST_ASSERT(ngx_http_markdown_effective_memory_budget(&eff, &conf)
+                    == 8 * 1024 * 1024,
+                "memory_budget should fall back to conf");
+#ifdef MARKDOWN_STREAMING_ENABLED
+    TEST_ASSERT(ngx_http_markdown_effective_streaming_budget(&eff, &conf)
+                    == 4 * 1024 * 1024,
+                "streaming_budget should fall back to conf");
+#endif
+
+    TEST_PASS("effective_conf helper symbols exercised");
 }
 
 static void
@@ -1852,9 +1937,7 @@ test_dynconf_start_watcher_already_active(void)
     const char                          *path_a = "/tmp/dynconf_start_a.conf";
     const char                          *path_b = "/tmp/dynconf_start_b.conf";
     u_char                               path_buf_a[256];
-    u_char                               path_buf_b[256];
     size_t                               len_a;
-    size_t                               len_b;
 
     {
         FILE *f = fopen(path_a, "w");
@@ -1941,6 +2024,9 @@ test_reload_line_too_long(void)
 int
 main(void)
 {
+    TEST_SECTION("dynconf_impl: effective-conf helper smoke");
+    test_effective_conf_helpers_smoke();
+
     TEST_SECTION("dynconf_impl: parse_line tests");
 
     test_parse_line_blank();

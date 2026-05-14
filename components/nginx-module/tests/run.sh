@@ -1,6 +1,22 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Test runner script for the nginx-markdown module test suite.
+#
+# Usage: run.sh [unit|integration|e2e|smoke|all]
+#
+# Modes:
+#   unit        - Run unit tests only
+#   integration - Run both C and NGINX integration tests
+#   e2e         - Run end-to-end tests
+#   smoke       - Run unit smoke tests (quick subset)
+#   all         - Run unit and C integration tests (default)
+#
+# Exit codes:
+#   0 - all tests passed
+#   1 - one or more tests failed (propagated from make/test command)
+#   2 - invalid mode argument
+
 MODE="${1:-all}"
 case "$MODE" in
   unit)

@@ -254,6 +254,7 @@ if streaming_metrics:
 print('', file=sys.stderr)
 print(f'Measurement report: {json_file}', file=sys.stderr)
 PYEOF
+  return 0
 }
 
 print_summary "$JSON_OUTPUT"

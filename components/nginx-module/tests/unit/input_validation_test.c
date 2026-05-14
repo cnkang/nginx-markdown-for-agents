@@ -1,6 +1,9 @@
 /*
  * Test: input_validation
- * Description: input validation
+ *
+ * Validates decompression request validation (NULL input, zero length,
+ * oversized input, zero max_size) and inflate result validation
+ * (stream end, buffer errors, output size limits).
  */
 
 #include "test_common.h"

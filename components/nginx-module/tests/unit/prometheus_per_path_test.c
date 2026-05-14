@@ -1,9 +1,5 @@
 /*
  * Test: prometheus_per_path
- * Description: exercises the per-path RB-tree walk, label escaping,
- *              and __other__ overflow output paths in
- *              ngx_http_markdown_prometheus_impl.h to provide
- *              production-code gcov coverage for those branches.
  */
 
 #include "../include/test_common.h"

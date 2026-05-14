@@ -37,6 +37,16 @@ use super::*;
 
 impl MarkdownConverter {
     /// Emit one list item while preserving multi-line/nested-item indentation.
+    ///
+    /// Writes the list marker (`- ` or `1. `) prefixed by `depth * 2` spaces
+    /// of indentation. Continuation lines (lines after the first) are indented
+    /// to align with the marker's content column so wrapped text and nested
+    /// sub-lists render correctly in CommonMark.
+    ///
+    /// If the first line of content itself starts with a list marker (e.g. the
+    /// child was a nested `<ul>` that was already converted), the marker is
+    /// emitted on its own line and the content follows with appropriate
+    /// indentation to avoid double-marking.
     fn format_list_item_lines(
         &self,
         output: &mut String,
@@ -46,6 +56,7 @@ impl MarkdownConverter {
     ) {
         let base_indent = "  ".repeat(depth);
         let marker = if ordered { "1. " } else { "- " };
+        // Continuation indent aligns with content after the marker (e.g. "- " → 2 chars).
         let continuation_indent = format!("{base_indent}{}", " ".repeat(marker.len()));
 
         let trimmed = content.trim_matches('\n');
@@ -61,6 +72,10 @@ impl MarkdownConverter {
                 output.push_str(&base_indent);
                 output.push_str(marker);
                 let first_trimmed = line.trim_start();
+                // If the content already starts with a list marker (from a
+                // nested list that was converted earlier), emit a blank line
+                // after our marker and then the content with continuation
+                // indentation to avoid producing a malformed double-marker.
                 if first_trimmed.starts_with("- ")
                     || first_trimmed.starts_with("* ")
                     || first_trimmed.starts_with("1. ")
@@ -80,6 +95,8 @@ impl MarkdownConverter {
                     continue;
                 }
             } else if !line.is_empty() {
+                // Indent continuation lines unless they already carry
+                // indentation (from pre-formatted or nested content).
                 let already_indented = (!base_indent.is_empty() && line.starts_with(&base_indent))
                     || line.starts_with(' ')
                     || line.starts_with('\t');

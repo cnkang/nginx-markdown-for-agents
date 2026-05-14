@@ -1,5 +1,18 @@
 #!/bin/bash
-# Script to generate a huge HTML file (10MB+) for testing size limits
+# generate-huge-file.sh — Generate a huge HTML file (10MB+) for testing size limits.
+#
+# Produces a single HTML file with ~50,000 sections, each containing a
+# heading, paragraph, and unordered list.  The resulting file exceeds
+# 10 MB and is used to validate that the markdown filter correctly
+# enforces configured size limits.
+#
+# Usage:
+#   tests/corpus/edge-cases/generate-huge-file.sh
+#
+# The output file is written to the current working directory.
+#
+# Exit behaviour:
+#   0 on success.
 
 OUTPUT_FILE="huge-file.html"
 

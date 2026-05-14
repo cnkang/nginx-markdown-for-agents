@@ -1,6 +1,5 @@
 /*
  * Test: eligibility_impl
- * Description: direct coverage for production eligibility checking code.
  *
  * Includes the actual production source so coverage instruments
  * the real decision paths that gate all conversion.

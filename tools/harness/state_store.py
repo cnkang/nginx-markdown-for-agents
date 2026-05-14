@@ -19,6 +19,8 @@ DEFAULT_FILE = "events.jsonl"
 
 @dataclass(frozen=True)
 class StateEvent:
+    """A single harness state event with type, key, source, note, and timestamp."""
+
     event_type: str
     key: str
     source: str
@@ -27,6 +29,17 @@ class StateEvent:
 
 
 def state_dir(repo_root: Path | None = None) -> Path:
+    """Return the directory used to store harness state files.
+
+    Uses HARNESS_STATE_DIR environment variable if set, otherwise
+    defaults to ~/.gstack/projects/<repo-name>/harness-state/.
+
+    Args:
+        repo_root: Repository root path. Defaults to REPO_ROOT.
+
+    Returns:
+        Resolved state directory path.
+    """
     repo_root = repo_root or REPO_ROOT
     override = os.environ.get("HARNESS_STATE_DIR")
     if override:
@@ -35,10 +48,27 @@ def state_dir(repo_root: Path | None = None) -> Path:
 
 
 def state_file(repo_root: Path | None = None) -> Path:
+    """Return the path to the JSONL events file.
+
+    Args:
+        repo_root: Repository root path. Defaults to REPO_ROOT.
+
+    Returns:
+        Path to the events.jsonl file inside the state directory.
+    """
     return state_dir(repo_root) / DEFAULT_FILE
 
 
 def _as_event(payload: Any) -> dict[str, Any] | None:
+    """Validate that a parsed JSON payload is a well-formed state event.
+
+    Args:
+        payload: Parsed JSON object to validate.
+
+    Returns:
+        The payload dict if it has a non-empty string event_type,
+        None otherwise.
+    """
     if not isinstance(payload, dict):
         return None
     event_type = payload.get("event_type")
@@ -54,6 +84,20 @@ def append_event(
     note: str,
     repo_root: Path | None = None,
 ) -> Path:
+    """Append a new event to the JSONL state file.
+
+    Creates the state directory and file if they do not exist.
+
+    Args:
+        event_type: Category of the event (e.g. "spec-resolve", "check-run").
+        key: Identifier for the event subject.
+        source: Origin of the event (e.g. script name, CI job).
+        note: Human-readable description of the event.
+        repo_root: Repository root path. Defaults to REPO_ROOT.
+
+    Returns:
+        Path to the state file that was appended to.
+    """
     path = state_file(repo_root)
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
@@ -69,6 +113,16 @@ def append_event(
 
 
 def load_events(repo_root: Path | None = None) -> list[dict[str, Any]]:
+    """Load all valid state events from the JSONL file.
+
+    Skips malformed lines and lines that fail JSON parsing.
+
+    Args:
+        repo_root: Repository root path. Defaults to REPO_ROOT.
+
+    Returns:
+        List of validated event dictionaries, in file order.
+    """
     path = state_file(repo_root)
     if not path.exists():
         return []
@@ -90,6 +144,14 @@ def load_events(repo_root: Path | None = None) -> list[dict[str, Any]]:
 
 
 def summarize(repo_root: Path | None = None) -> str:
+    """Produce a one-line summary of recorded harness state events.
+
+    Args:
+        repo_root: Repository root path. Defaults to REPO_ROOT.
+
+    Returns:
+        Human-readable summary string with event counts by type.
+    """
     events = load_events(repo_root)
     if not events:
         return "No harness state recorded yet."
@@ -110,6 +172,14 @@ def summarize(repo_root: Path | None = None) -> str:
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """Parse command-line arguments for the state-store CLI.
+
+    Args:
+        argv: Argument strings to parse. Defaults to sys.argv[1:].
+
+    Returns:
+        Parsed namespace with the ``command`` sub-command.
+    """
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -126,6 +196,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Entry point for the state-store CLI.
+
+    Supports three sub-commands: path (print state file path), summary
+    (print event count summary), and append (add a new event).
+
+    Args:
+        argv: Command-line arguments. Defaults to sys.argv[1:].
+
+    Returns:
+        Exit code: 0 for success, 1 for unknown command.
+    """
     args = parse_args(argv)
     if args.command == "path":
         print(state_file())

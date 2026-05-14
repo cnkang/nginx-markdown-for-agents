@@ -1,6 +1,5 @@
 /*
  * Test: skip_counter
- * Description: skip-reason counter mapping from eligibility enum
  *
  * Verifies that ngx_http_markdown_metric_inc_skip() maps each
  * ngx_http_markdown_eligibility_t enum value to the correct

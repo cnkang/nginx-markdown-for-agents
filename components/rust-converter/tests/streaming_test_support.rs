@@ -23,6 +23,8 @@ use nginx_markdown_converter::streaming::{MemoryBudget, StreamingConverter, Stre
 #[cfg(feature = "incremental")]
 use nginx_markdown_converter::incremental::IncrementalConverter;
 
+/// Metadata extracted from a fixture's `.meta.json` sidecar file, used to
+/// configure expected behavior and known differences for streaming tests.
 #[derive(Debug, Clone, Default)]
 pub struct FixtureMeta {
     /// Whether the fixture is expected to trigger streaming fallback.
@@ -33,6 +35,8 @@ pub struct FixtureMeta {
     pub high_risk_structures: Vec<String>,
 }
 
+/// Result of a streaming conversion run, including the concatenated Markdown
+/// output, runtime statistics, and timing information.
 #[derive(Debug, Clone)]
 pub struct StreamingRun {
     /// Concatenated Markdown emitted by all feed calls plus finalize.
@@ -45,18 +49,22 @@ pub struct StreamingRun {
     pub elapsed: Duration,
 }
 
+/// Returns the path to the test corpus root directory.
 pub fn corpus_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/corpus")
 }
 
+/// Returns the path to the known-differences TOML file.
 pub fn known_differences_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/streaming/known-differences.toml")
 }
 
+/// Returns the path where streaming evidence JSON is written.
 pub fn evidence_output_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/streaming-evidence.json")
 }
 
+/// Recursively discover all `.html` fixture files under the given directory.
 pub fn discover_html_fixtures(dir: &Path) -> Vec<PathBuf> {
     let mut fixtures = Vec::new();
     discover_recursive(dir, &mut fixtures);
@@ -83,16 +91,20 @@ fn discover_recursive(dir: &Path, fixtures: &mut Vec<PathBuf>) {
     }
 }
 
+/// Returns the fixture path relative to the corpus root as a normalized string.
 pub fn fixture_relative_name(path: &Path) -> String {
     let root = corpus_root();
     let rel = path.strip_prefix(root).unwrap_or(path);
     rel.to_string_lossy().replace('\\', "/")
 }
 
+/// Read the raw bytes of a fixture file, panicking on I/O errors.
 pub fn read_fixture(path: &Path) -> Vec<u8> {
     fs::read(path).unwrap_or_else(|err| panic!("read fixture {}: {err}", path.display()))
 }
 
+/// Read and parse the `.meta.json` sidecar file for a fixture, returning
+/// default metadata if no sidecar exists.
 pub fn read_fixture_meta(path: &Path) -> FixtureMeta {
     let legacy_meta = PathBuf::from(format!("{}.meta.json", path.with_extension("").display()));
     let direct_meta = PathBuf::from(format!("{}.meta.json", path.display()));
@@ -149,10 +161,14 @@ pub fn read_fixture_meta(path: &Path) -> FixtureMeta {
     }
 }
 
+/// Normalize whitespace by splitting on whitespace and rejoining with single
+/// spaces, used for comparison when whitespace-only drift is tolerated.
 pub fn normalize_whitespace_tokens(input: &str) -> String {
     input.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
+/// Produce a human-readable summary of the first difference between two strings,
+/// or `"<identical>"` if they are equal.
 pub fn diff_summary(lhs: &str, rhs: &str) -> String {
     if lhs == rhs {
         return "<identical>".to_string();
@@ -180,6 +196,7 @@ pub fn diff_summary(lhs: &str, rhs: &str) -> String {
     )
 }
 
+/// Convert HTML to Markdown using the full-buffer (batch) conversion path.
 pub fn convert_full_buffer(
     html: &[u8],
     content_type: Option<&str>,
@@ -189,6 +206,7 @@ pub fn convert_full_buffer(
     MarkdownConverter::with_options(options).convert(&dom)
 }
 
+/// Convert HTML to Markdown using the incremental conversion path (single feed).
 #[cfg(feature = "incremental")]
 pub fn convert_incremental(
     html: &[u8],
@@ -203,6 +221,8 @@ pub fn convert_incremental(
     conv.finalize()
 }
 
+/// Convert HTML through the streaming path as a single chunk, delegating to
+/// `convert_streaming_chunked` with the full HTML length as the chunk size.
 pub fn convert_streaming_single(
     html: &[u8],
     content_type: Option<&str>,
@@ -289,6 +309,8 @@ pub fn convert_streaming_chunked(
     })
 }
 
+/// Generate chunk sizes that feed one byte at a time, exercising every byte
+/// boundary in the input.
 pub fn single_byte_chunks(len: usize) -> Vec<usize> {
     vec![1; len]
 }
@@ -357,10 +379,12 @@ pub fn utf8_mid_char_chunks(html: &[u8]) -> Vec<usize> {
     positions_to_sizes(html.len(), positions)
 }
 
+/// Return default conversion options for streaming tests.
 pub fn default_streaming_options() -> ConversionOptions {
     ConversionOptions::default()
 }
 
+/// Return default memory budget for streaming tests.
 pub fn default_streaming_budget() -> MemoryBudget {
     MemoryBudget::default()
 }

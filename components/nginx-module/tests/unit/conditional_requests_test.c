@@ -1,6 +1,14 @@
 /*
  * Test: conditional_requests
- * Description: conditional request handling
+ *
+ * DIVERGENCE RISK: this test reimplements production conditional
+ * request parsing/matching logic. Keep this file synchronized with
+ * If-None-Match handling changes in production code.
+ *
+ * Validates If-None-Match ETag matching, including quoted/unquoted
+ * tokens, weak validators, wildcard matching, malformed headers,
+ * and the three conditional request modes (full_support,
+ * if_modified_since_only, disabled).
  */
 
 #include "test_common.h"
@@ -14,6 +22,15 @@
 #define RC_ERROR -1
 #define TEST_ETAG_INPUT_MAX 1024
 
+/*
+ * Skip whitespace and comma separators in an If-None-Match header.
+ *
+ * Parameters:
+ *   p - current parse position
+ *
+ * Returns:
+ *   Pointer past any leading whitespace/commas.
+ */
 static const char *
 skip_if_none_match_separators(const char *p)
 {
@@ -23,6 +40,17 @@ skip_if_none_match_separators(const char *p)
     return p;
 }
 
+/*
+ * Parse a quoted ETag token (e.g. "abc") from the If-None-Match header.
+ *
+ * Parameters:
+ *   cursor   - [in/out] pointer to current parse position (after opening quote)
+ *   out      - output buffer for the token content
+ *   out_size - capacity of the output buffer
+ *
+ * Returns:
+ *   RC_MATCH on success, RC_ERROR if the closing quote is missing.
+ */
 static int
 parse_quoted_etag_token(const char **cursor, char *out, size_t out_size)
 {
@@ -44,6 +72,15 @@ parse_quoted_etag_token(const char **cursor, char *out, size_t out_size)
     return RC_MATCH;
 }
 
+/*
+ * Parse an unquoted ETag token from the If-None-Match header.
+ * Reads until a comma, space, tab, or NUL is encountered.
+ *
+ * Parameters:
+ *   cursor   - [in/out] pointer to current parse position
+ *   out      - output buffer for the token content
+ *   out_size - capacity of the output buffer
+ */
 static void
 parse_unquoted_etag_token(const char **cursor, char *out, size_t out_size)
 {
@@ -61,6 +98,18 @@ parse_unquoted_etag_token(const char **cursor, char *out, size_t out_size)
     *cursor = p;
 }
 
+/*
+ * Parse an If-None-Match header into an array of ETag tokens.
+ * Handles both quoted and unquoted tokens separated by commas.
+ *
+ * Parameters:
+ *   header     - the If-None-Match header value
+ *   tokens     - output array of token strings
+ *   max_tokens - maximum number of tokens to parse
+ *
+ * Returns:
+ *   Number of tokens parsed (0 if header is NULL or empty).
+ */
 static size_t
 parse_if_none_match(const char *header, char tokens[][128], size_t max_tokens)
 {
@@ -101,6 +150,15 @@ parse_if_none_match(const char *header, char tokens[][128], size_t max_tokens)
     return n;
 }
 
+/*
+ * Normalize an ETag token by stripping weak prefix (W/) and surrounding
+ * quotes.  Produces a bare opaque-tag suitable for comparison.
+ *
+ * Parameters:
+ *   input   - raw ETag token (may be quoted, weak, or bare)
+ *   out     - output buffer for normalized token
+ *   out_len - capacity of the output buffer
+ */
 static void
 normalize_etag_token(const char *input, char *out, size_t out_len)
 {
@@ -138,24 +196,61 @@ normalize_etag_token(const char *input, char *out, size_t out_len)
     out[len < out_len ? len : out_len - 1] = '\0';
 }
 
+/*
+ * Normalize the server-generated ETag for comparison.
+ *
+ * Parameters:
+ *   generated - raw generated ETag string
+ *   out       - output buffer for normalized token
+ *   out_len   - capacity of the output buffer
+ */
 static void
 normalize_generated_etag(const char *generated, char *out, size_t out_len)
 {
     normalize_etag_token(generated, out, out_len);
 }
 
+/*
+ * Normalize a client-supplied ETag token for comparison.
+ *
+ * Parameters:
+ *   token   - raw client ETag token
+ *   out     - output buffer for normalized token
+ *   out_len - capacity of the output buffer
+ */
 static void
 normalize_client_token(const char *token, char *out, size_t out_len)
 {
     normalize_etag_token(token, out, out_len);
 }
 
+/*
+ * Check whether an ETag token is the wildcard "*".
+ *
+ * Parameters:
+ *   token - ETag token to check
+ *
+ * Returns:
+ *   1 if the token is "*", 0 otherwise.
+ */
 static int
 is_wildcard_token(const char *token)
 {
     return token != NULL && STR_EQ(token, "*");
 }
 
+/*
+ * Check whether a client token matches the generated ETag, either by
+ * direct string comparison or after normalization.
+ *
+ * Parameters:
+ *   token         - client-supplied ETag token
+ *   generated_raw - raw generated ETag string
+ *   generated_norm - normalized generated ETag
+ *
+ * Returns:
+ *   1 if the token matches, 0 otherwise.
+ */
 static int
 token_matches_generated(const char *token, const char *generated_raw, const char *generated_norm)
 {
@@ -173,6 +268,19 @@ token_matches_generated(const char *token, const char *generated_raw, const char
     return STR_EQ(token_norm, generated_norm);
 }
 
+/*
+ * Perform ETag matching against an If-None-Match header value.
+ *
+ * Parses the header into tokens, checks for wildcard, and compares
+ * each token against the generated ETag (direct and normalized).
+ *
+ * Parameters:
+ *   if_none_match  - the If-None-Match header value
+ *   generated_etag - the server-generated ETag
+ *
+ * Returns:
+ *   RC_MATCH (304) if any token matches, RC_DECLINED otherwise.
+ */
 static int
 etag_matches(const char *if_none_match, const char *generated_etag)
 {
@@ -197,6 +305,20 @@ etag_matches(const char *if_none_match, const char *generated_etag)
     return RC_DECLINED;
 }
 
+/*
+ * Handle an If-None-Match request based on the conditional mode.
+ *
+ * In MODE_DISABLED or MODE_IF_MODIFIED_SINCE_ONLY, always declines.
+ * In MODE_FULL_SUPPORT, performs ETag matching.
+ *
+ * Parameters:
+ *   mode          - conditional request mode
+ *   if_none_match - the If-None-Match header value
+ *   generated_etag - the server-generated ETag
+ *
+ * Returns:
+ *   RC_MATCH (304) if matched, RC_DECLINED otherwise.
+ */
 static int
 handle_if_none_match(int mode, const char *if_none_match, const char *generated_etag)
 {
@@ -206,6 +328,12 @@ handle_if_none_match(int mode, const char *if_none_match, const char *generated_
     return etag_matches(if_none_match, generated_etag);
 }
 
+/*
+ * Verify conditional mode handling: disabled and if_modified_since_only
+ * modes must always decline, regardless of ETag values.
+ *
+ * Expected: both modes return RC_DECLINED for matching ETags.
+ */
 static void
 test_mode_handling(void)
 {
@@ -216,6 +344,12 @@ test_mode_handling(void)
     TEST_PASS("Mode handling passed");
 }
 
+/*
+ * Verify ETag matching behavior: exact match, quoted vs unquoted,
+ * weak validators, wildcard, multiple tokens, and non-match.
+ *
+ * Expected: matching ETags return RC_MATCH (304), non-matching return RC_DECLINED.
+ */
 static void
 test_etag_matching(void)
 {
@@ -230,6 +364,12 @@ test_etag_matching(void)
     TEST_PASS("ETag matching passed");
 }
 
+/*
+ * Verify that malformed If-None-Match headers (e.g. unclosed quotes)
+ * are gracefully ignored rather than causing parse errors.
+ *
+ * Expected: malformed header returns RC_DECLINED.
+ */
 static void
 test_malformed_header(void)
 {
