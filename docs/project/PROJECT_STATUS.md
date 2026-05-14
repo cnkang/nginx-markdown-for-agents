@@ -42,6 +42,8 @@ and contributor-facing harness maintenance.
 - Final mainline hardening before the v0.6.3 tag:
   - release/performance tooling path validation uses `REPO_ROOT` as the
     repository-boundary source of truth;
+  - release binary matrix targets current NGINX versions `1.30.1` and
+    `1.31.0`;
   - local runner path and round-trip temp-file tests keep artifacts under the
     repository root;
   - development test dependencies are aligned with the current CI baseline.

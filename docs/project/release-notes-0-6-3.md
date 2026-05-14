@@ -11,7 +11,8 @@ JSON reporting, and provides a foundation for future E2E scenario development.
 
 The final release candidate also includes mainline hardening for repository-root
 path validation in release/performance tooling, local-runner temp path safety,
-and the development test dependency refresh required by the latest CI baseline.
+release binary matrix freshness for current NGINX versions, and the development
+test dependency refresh required by the latest CI baseline.
 
 ## New Rust E2E Harness Entry Point
 
@@ -76,6 +77,8 @@ an `e2e-migration` risk pack.
   checks.
 - Local performance-runner tests keep round-trip files under the repository
   root, matching the security contract enforced by the tooling.
+- The release binary matrix now targets NGINX `1.30.1` and `1.31.0` instead of
+  stale `1.29.8` and `1.30.0` entries.
 - The development pytest baseline was refreshed for this release line.
 
 ## 0.6.3 Non-Goals
