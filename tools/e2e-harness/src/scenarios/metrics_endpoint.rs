@@ -366,42 +366,37 @@ fn assert_case7_counters(
         markdown_headers,
         assertions,
         "case7_conversion_request",
-    ) {
-        if let Some(resp7) = common::try_get_with_headers(
-            metrics_url,
-            json_headers,
-            assertions,
-            "case7_metrics_fetch",
-        ) {
-            if let Ok(data7) = serde_json::from_str::<serde_json::Value>(&resp7.body) {
-                let total_req = data7
-                    .get("total_requests")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0);
-                let converted = data7
-                    .get("converted_total")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0);
-                assertions.push(AssertionResult {
-                    name: "case7_total_requests_nonzero".to_string(),
-                    passed: total_req >= 1,
-                    expected: ">= 1".to_string(),
-                    actual: total_req.to_string(),
-                    message: None,
-                });
-                assertions.push(AssertionResult {
-                    name: "case7_converted_total_nonzero".to_string(),
-                    passed: converted >= 1,
-                    expected: ">= 1".to_string(),
-                    actual: converted.to_string(),
-                    message: None,
-                });
-            } else {
-                assertions.push(common::failed_request_assertion(
-                    "case7_json_parse",
-                    "JSON parse failed",
-                ));
-            }
+    ) && let Some(resp7) =
+        common::try_get_with_headers(metrics_url, json_headers, assertions, "case7_metrics_fetch")
+    {
+        if let Ok(data7) = serde_json::from_str::<serde_json::Value>(&resp7.body) {
+            let total_req = data7
+                .get("total_requests")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            let converted = data7
+                .get("converted_total")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            assertions.push(AssertionResult {
+                name: "case7_total_requests_nonzero".to_string(),
+                passed: total_req >= 1,
+                expected: ">= 1".to_string(),
+                actual: total_req.to_string(),
+                message: None,
+            });
+            assertions.push(AssertionResult {
+                name: "case7_converted_total_nonzero".to_string(),
+                passed: converted >= 1,
+                expected: ">= 1".to_string(),
+                actual: converted.to_string(),
+                message: None,
+            });
+        } else {
+            assertions.push(common::failed_request_assertion(
+                "case7_json_parse",
+                "JSON parse failed",
+            ));
         }
     }
 }

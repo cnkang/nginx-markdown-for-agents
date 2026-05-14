@@ -10,6 +10,8 @@
 //! - `assert_body_contains` — Body substring check
 //! - `assert_body_matches` — Body regex match
 
+#![allow(dead_code)]
+
 use crate::scenarios::AssertionResult;
 use regex::Regex;
 

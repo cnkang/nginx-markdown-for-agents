@@ -3,6 +3,8 @@
 //! Provides `ScenarioContext`, `ScenarioReport`, `AssertionResult`, and the
 //! global scenario registry used by `cli.rs` for dispatch.
 
+#![allow(dead_code)]
+
 pub mod accept_negotiation;
 pub mod auth_cache;
 pub mod common;
