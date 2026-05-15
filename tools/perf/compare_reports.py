@@ -214,6 +214,15 @@ def _is_regression(baseline_result: str, current_result: str) -> bool:
 LATENCY_METRICS = {"p50-latency-ms", "p95-latency-ms", "p99-latency-ms"}
 
 
+def _write_verdict_json(output_path: Path, payload: dict) -> None:
+    """Write verdict JSON to an already-validated output path."""
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(
+        json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+
+
 def compare_reports(
     baseline: dict,
     current: dict,
@@ -363,11 +372,7 @@ def main(argv: list[str] | None = None) -> int:
     verdict_report = compare_reports(
         baseline, current, thresholds, skip_metrics=skip_metrics
     )
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(
-        json.dumps(verdict_report, indent=2, ensure_ascii=False) + "\n",
-        encoding="utf-8",
-    )  # NOSONAR(S6553): path sanitized by validate_write_path_within_root()
+    _write_verdict_json(output_path, verdict_report)
 
     overall = verdict_report["overall-verdict"]
     print(f"Verdict: {overall}")
