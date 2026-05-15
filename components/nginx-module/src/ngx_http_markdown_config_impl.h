@@ -35,7 +35,7 @@ static char *ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *ch
 /* Initialize or attach cross-worker metrics memory zone. */
 static ngx_int_t ngx_http_markdown_init_metrics_zone(ngx_shm_zone_t *shm_zone, void *data);
 /* Parse markdown_filter (on/off or complex value) directive payload. */
-static char *ngx_http_markdown_filter(ngx_conf_t *cf, const ngx_command_t *cmd, void *conf);
+static char *ngx_http_markdown_filter(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 /* Parse markdown_on_error enum and validate accepted values. */
 static char *ngx_http_markdown_on_error(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 /* Parse markdown_flavor enum for converter output dialect selection. */
@@ -53,7 +53,7 @@ static char *ngx_http_markdown_stream_types(ngx_conf_t *cf, ngx_command_t *cmd, 
 /* Parse content types eligible for Markdown conversion (positive allowlist). */
 static char *ngx_http_markdown_content_types(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 /* Parse large body threshold for incremental path routing. */
-static char *ngx_http_markdown_large_body_threshold(ngx_conf_t *cf, const ngx_command_t *cmd, void *conf);
+static char *ngx_http_markdown_large_body_threshold(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 /* Parse metrics endpoint enablement and URI settings. */
 static char *ngx_http_markdown_metrics_directive(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 /* Map module verbosity enum to nginx native log level constants. */

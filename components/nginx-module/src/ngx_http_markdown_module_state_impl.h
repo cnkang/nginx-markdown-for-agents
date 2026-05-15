@@ -197,7 +197,7 @@ ngx_http_markdown_metric_inc_failopen(
  * - init_worker prepares per-worker converter + metrics pointers.
  * - exit_worker releases per-worker converter resources.
  */
-static ngx_int_t ngx_http_markdown_filter_init(const ngx_conf_t *cf);
+static ngx_int_t ngx_http_markdown_filter_init(ngx_conf_t *cf);
 static ngx_int_t ngx_http_markdown_init_worker(ngx_cycle_t *cycle);
 static void ngx_http_markdown_exit_worker(ngx_cycle_t *cycle);
 
