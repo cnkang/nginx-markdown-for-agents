@@ -367,7 +367,7 @@ def main(argv: list[str] | None = None) -> int:
     output_path.write_text(
         json.dumps(verdict_report, indent=2, ensure_ascii=False) + "\n",
         encoding="utf-8",
-    )
+    )  # NOSONAR(S6553): path sanitized by validate_write_path_within_root()
 
     overall = verdict_report["overall-verdict"]
     print(f"Verdict: {overall}")

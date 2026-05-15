@@ -359,7 +359,7 @@ def _write_json(data, path):
     resolved.parent.mkdir(parents=True, exist_ok=True)
     resolved.write_text(
         json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
-    )
+    )  # NOSONAR(S6553): path sanitized by validate_write_path_within_root()
 
 
 def _stderr(msg):
