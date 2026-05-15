@@ -58,7 +58,7 @@ static ngx_http_markdown_specificity_t ngx_http_markdown_get_specificity(
     const ngx_str_t *type, const ngx_str_t *subtype);
 static int ngx_http_markdown_compare_entries(const void *a, const void *b);
 static ngx_int_t ngx_http_markdown_matches_markdown(
-    ngx_http_markdown_accept_entry_t *entry, ngx_flag_t on_wildcard);
+    const ngx_http_markdown_accept_entry_t *entry, ngx_flag_t on_wildcard);
 static ngx_int_t ngx_http_markdown_const_strncasecmp(const u_char *left,
     const u_char *right, size_t len);
 static ngx_table_elt_t *ngx_http_markdown_get_accept_header(ngx_http_request_t *r);
