@@ -22,6 +22,35 @@ WORKSPACE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 E2E_HARNESS_BIN="${WORKSPACE_ROOT}/tools/e2e-harness/target/debug/e2e-harness"
 E2E_HARNESS_MANIFEST="${WORKSPACE_ROOT}/tools/e2e-harness/Cargo.toml"
 
+# Cleanup ownership boundary:
+# Normal exits are handled by the Rust harness process lifecycle (Drop).
+# This trap provides best-effort cleanup for hard kills or signals that
+# prevent the Rust harness from running its own cleanup.  It removes
+# stale e2e-harness temp directories matching this scenario that are
+# older than 10 minutes (a running harness will hold files open and
+# thus be immune to removal).
+_wrapper_cleanup() {
+  if [[ "${KEEP_ARTIFACTS:-0}" -eq 1 ]]; then
+    return
+  fi
+  local tmpdir
+  tmpdir="$(mktemp -u -q)" 2>/dev/null || tmpdir="${TMPDIR:-/tmp}"
+  local base="${tmpdir%/*}"
+  local stale_sec=600
+  local now
+  now="$(date +%s)" 2>/dev/null || return
+  for d in "${base}"/e2e-harness-${SCENARIO_NAME}-*; do
+    [[ -d "$d" ]] || continue
+    local mtime
+    mtime="$(stat -f %m "$d" 2>/dev/null || stat -c %Y "$d" 2>/dev/null)" || continue
+    if [[ $(( now - mtime )) -gt stale_sec ]]; then
+      rm -rf "$d" 2>/dev/null || true
+    fi
+  done
+}
+trap _wrapper_cleanup EXIT
+trap 'trap - EXIT; _wrapper_cleanup; exit 130' INT TERM
+
 KEEP_ARTIFACTS=0
 PORT_ARG=""
 UPSTREAM_PORT_ARG=""
