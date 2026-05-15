@@ -31,6 +31,8 @@ RUST_MANIFEST_REL = "components/rust-converter/Cargo.toml"
 
 @dataclass
 class Token:
+    """A single SPDX expression token with kind and text value."""
+
     kind: str
     value: str
 
@@ -50,6 +52,7 @@ TOKEN_RE = re.compile(
 
 
 def tokenize(expr: str) -> list[Token]:
+    """Tokenize an SPDX license expression into a list of tokens."""
     tokens: list[Token] = []
     pos = 0
     while pos < len(expr):
@@ -78,14 +81,19 @@ def tokenize(expr: str) -> list[Token]:
 
 
 class Parser:
+    """Recursive descent parser for SPDX license expressions."""
+
     def __init__(self, tokens: list[Token]) -> None:
+        """Initialize parser with a token list."""
         self.tokens = tokens
         self.idx = 0
 
     def peek(self) -> Token | None:
+        """Return the current token without consuming it."""
         return None if self.idx >= len(self.tokens) else self.tokens[self.idx]
 
     def consume(self, kind: str) -> Token:
+        """Consume and return the current token, validating its kind."""
         tok = self.peek()
         if tok is None or tok.kind != kind:
             got = "EOF" if tok is None else tok.kind
@@ -94,6 +102,7 @@ class Parser:
         return tok
 
     def parse_expression(self) -> bool:
+        """Parse an OR-separated expression; strong-copyleft required if all branches require it."""
         # OR: strong-copyleft is required only if all OR branches require it.
         value = self.parse_term()
         while self.peek() is not None and self.peek().kind == "OR":
@@ -103,6 +112,7 @@ class Parser:
         return value
 
     def parse_term(self) -> bool:
+        """Parse an AND-separated term; strong-copyleft required if any part requires it."""
         # AND: strong-copyleft is required if any AND part requires it.
         value = self.parse_factor()
         while self.peek() is not None and self.peek().kind == "AND":
@@ -112,6 +122,7 @@ class Parser:
         return value
 
     def parse_factor(self) -> bool:
+        """Parse a single license identifier or parenthesized expression."""
         tok = self.peek()
         if tok is None:
             raise ValueError("Unexpected end of expression")
@@ -131,11 +142,13 @@ class Parser:
 
 
 def is_strong_copyleft_license(license_id: str) -> bool:
+    """Return True if the license ID indicates strong copyleft terms."""
     normalized = license_id.upper()
     return any(normalized.startswith(prefix) for prefix in STRONG_COPYLEFT_PREFIXES)
 
 
 def requires_strong_copyleft(expr: str) -> bool:
+    """Return True if the SPDX expression requires strong copyleft terms."""
     # Some crates still publish slash-separated legacy expressions like
     # "MIT/Apache-2.0". Treat "/" as OR.
     if "/" in expr:
@@ -149,6 +162,7 @@ def requires_strong_copyleft(expr: str) -> bool:
 
 
 def run_metadata(locked: bool) -> dict:
+    """Run cargo metadata and return parsed JSON output."""
     cmd = [
         "cargo",
         "metadata",
@@ -171,6 +185,7 @@ def run_metadata(locked: bool) -> dict:
 
 
 def parse_locked_flag(argv: list[str]) -> bool:
+    """Parse the --locked flag from CLI arguments."""
     valid = {"--locked"}
     if unknown := [arg for arg in argv if arg not in valid]:
         print(f"Unknown arguments: {' '.join(unknown)}", file=sys.stderr)
@@ -180,6 +195,7 @@ def parse_locked_flag(argv: list[str]) -> bool:
 
 
 def main() -> int:
+    """Run Rust license policy check and report results."""
     locked = parse_locked_flag(sys.argv[1:])
 
     manifest_path = (REPO_ROOT / RUST_MANIFEST_REL).resolve()
@@ -206,7 +222,10 @@ def main() -> int:
             if requires_strong_copyleft(license_expr):
                 violations.append(f"{name} {version}: {license_expr}")
         except ValueError as exc:
-            violations.append(f"{name} {version}: unparsable license expression '{license_expr}' ({exc})")
+            violations.append(
+                f"{name} {version}: unparsable license expression "
+                f"'{license_expr}' ({exc})"
+            )
 
     if violations:
         return report_violations_and_fail(violations)
