@@ -1981,7 +1981,7 @@ test_config_on_error_legal_values(void)
  * Verify that the default value is pass (ON_ERROR_PASS = 0).
  *
  * The merge logic uses:
- *   ngx_conf_merge_uint_value(conf->streaming_on_error,
+ *   ngx_conf_merge_uint_value(conf->streaming.on_error,
  *       prev->streaming_on_error,
  *       NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_PASS);
  *

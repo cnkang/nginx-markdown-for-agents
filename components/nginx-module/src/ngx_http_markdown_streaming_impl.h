@@ -498,7 +498,7 @@ ngx_http_markdown_log_conditional_streaming(
     ngx_http_request_t *r,
     const ngx_http_markdown_conf_t *conf)
 {
-    if (conf->conditional_requests
+    if (conf->policy.conditional_requests
         == NGX_HTTP_MARKDOWN_CONDITIONAL_IF_MODIFIED_SINCE)
     {
         ngx_log_debug0(NGX_LOG_DEBUG_HTTP,
@@ -506,7 +506,7 @@ ngx_http_markdown_log_conditional_streaming(
             "markdown filter: streaming allowed: "
             "conditional_requests "
             "if_modified_since_only");
-    } else if (conf->conditional_requests
+    } else if (conf->policy.conditional_requests
                == NGX_HTTP_MARKDOWN_CONDITIONAL_DISABLED)
     {
         ngx_log_debug0(NGX_LOG_DEBUG_HTTP,
@@ -557,13 +557,13 @@ ngx_http_markdown_select_processing_path(
      * Operators who need 0.5.x behavior set
      * markdown_streaming_engine off explicitly.
      */
-    if (conf->streaming_engine == NULL) {
+    if (conf->streaming.engine == NULL) {
         engine_mode = NGX_HTTP_MARKDOWN_STREAMING_ENGINE_AUTO;
         goto common_checks;
     }
 
     /* Evaluate the complex value */
-    if (ngx_http_complex_value(r, conf->streaming_engine,
+    if (ngx_http_complex_value(r, conf->streaming.engine,
                                &val) != NGX_OK)
     {
         ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
@@ -632,7 +632,7 @@ common_checks:
     }
 
     /* Rule 5: conditional_requests full_support */
-    if (conf->conditional_requests
+    if (conf->policy.conditional_requests
         == NGX_HTTP_MARKDOWN_CONDITIONAL_FULL_SUPPORT)
     {
         ngx_log_debug0(NGX_LOG_DEBUG_HTTP,
@@ -677,7 +677,7 @@ common_checks:
     /* Rules 9-11: engine == auto */
     if (r->headers_out.content_length_n >= 0
         && (size_t) r->headers_out.content_length_n
-           < conf->streaming_auto_threshold)
+           < conf->streaming.auto_threshold)
     {
         /* CL < auto_threshold: use full-buffer */
         ngx_http_markdown_log_decision(r, conf, eff,
@@ -1400,7 +1400,7 @@ ngx_http_markdown_streaming_precommit_error(
 
     NGX_HTTP_MARKDOWN_METRIC_INC(streaming.failed_total);
 
-    if (conf->streaming_on_error
+    if (conf->streaming.on_error
         == NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_REJECT)
     {
         /* Fail-closed: record reject metrics and reason */
