@@ -391,7 +391,7 @@ ngx_http_markdown_handle_if_none_match(ngx_http_request_t *r,
     struct MarkdownResult    *conv_result;
 
     /* Check configuration mode */
-    if (conf->conditional_requests == NGX_HTTP_MARKDOWN_CONDITIONAL_DISABLED) {
+    if (conf->policy.conditional_requests == NGX_HTTP_MARKDOWN_CONDITIONAL_DISABLED) {
         /* Conditional requests disabled - skip processing */
         ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                       "markdown filter: conditional requests disabled, "
@@ -399,7 +399,7 @@ ngx_http_markdown_handle_if_none_match(ngx_http_request_t *r,
         return NGX_DECLINED;
     }
 
-    if (conf->conditional_requests == NGX_HTTP_MARKDOWN_CONDITIONAL_IF_MODIFIED_SINCE) {
+    if (conf->policy.conditional_requests == NGX_HTTP_MARKDOWN_CONDITIONAL_IF_MODIFIED_SINCE) {
         /* If-Modified-Since only mode - skip If-None-Match processing */
         ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                       "markdown filter: if_modified_since_only mode, "
@@ -440,7 +440,7 @@ ngx_http_markdown_handle_if_none_match(ngx_http_request_t *r,
                   "to generate ETag for comparison (performance cost)");
 
     /* Check if ETag generation is enabled */
-    if (!conf->generate_etag) {
+    if (!conf->policy.generate_etag) {
         /* ETag generation disabled - cannot perform If-None-Match comparison */
         ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                       "markdown filter: ETag generation disabled, "

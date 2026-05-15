@@ -14,7 +14,7 @@
 
 /* Wire this module into the header and body filter chains. */
 static ngx_int_t
-ngx_http_markdown_filter_init(const ngx_conf_t *cf)
+ngx_http_markdown_filter_init(ngx_conf_t *cf)
 {
     (void) cf;
 
@@ -82,11 +82,11 @@ ngx_http_markdown_init_worker(ngx_cycle_t *cycle)
     if (http_ctx != NULL) {
         lcf = (ngx_http_markdown_conf_t *)
             http_ctx->loc_conf[ngx_http_markdown_filter_module.ctx_index];
-        if (lcf != NULL && lcf->dynconf_enabled
-            && lcf->dynconf_path.len > 0
+        if (lcf != NULL && lcf->advanced.dynconf_enabled
+            && lcf->advanced.dynconf_path.len > 0
             && ngx_http_markdown_dynconf_start(
                    &ngx_http_markdown_dynconf_watcher,
-                   cycle, &lcf->dynconf_path, lcf, cycle->log)
+                   cycle, &lcf->advanced.dynconf_path, lcf, cycle->log)
                != NGX_OK)
         {
             ngx_log_error(NGX_LOG_WARN, cycle->log, 0,

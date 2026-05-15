@@ -572,7 +572,7 @@ ngx_http_markdown_update_headers(ngx_http_request_t *r,
     NGX_HTTP_MARKDOWN_LOG_DEBUG1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                                  "markdown filter: set Content-Length: %uz", result->markdown_len);
 
-    if (conf->generate_etag && result->etag != NULL && result->etag_len > 0) {
+    if (conf->policy.generate_etag && result->etag != NULL && result->etag_len > 0) {
         rc = ngx_http_markdown_set_etag(r, result->etag, result->etag_len);
         if (rc != NGX_OK) {
             ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
