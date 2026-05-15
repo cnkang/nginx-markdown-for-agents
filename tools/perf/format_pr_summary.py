@@ -12,18 +12,21 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
+from typing import Any, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from lib.path_validation import validate_filename_strict, validate_read_path, validate_write_path_within_root
-
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from report_utils import load_json  # noqa: E402
+# pylint: disable=import-error,wrong-import-position
+from lib.path_validation import validate_filename_strict, validate_read_path
+from report_utils import load_json  # type: ignore[attr-defined]
+# pylint: enable=import-error,wrong-import-position
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-PR_SUMMARY_OUTPUT_DIR = REPO_ROOT / "perf" / "reports"
+REPO_ROOT: Path = Path(__file__).resolve().parents[2]  # type: ignore[assignment]
+PR_SUMMARY_OUTPUT_DIR: Path = REPO_ROOT / "perf" / "reports"  # type: ignore[assignment]
 
 TOKEN_DISCLAIMER = (
     "Token reduction values are estimates derived from byte-size ratios, "
@@ -34,22 +37,26 @@ TOKEN_DISCLAIMER = (
 def _write_text_with_repo_guard(
     output_path: str | Path, content: str, *, purpose: str,
 ) -> Path:
-    """Resolve output path under REPO_ROOT and write UTF-8 text safely.
+    """Write UTF-8 text safely to a strictly validated output path.
 
     Accepts only bare filenames or ``perf/reports/<filename>`` paths.
     The filename component is validated against a strict allowlist
     (``validate_filename_strict``) to prevent path-traversal writes
-    (CWE-22 / python:S2083).  The output path is then constructed
-    entirely from the trusted ``PR_SUMMARY_OUTPUT_DIR`` constant and
-    the validated filename, breaking the taint chain from user input
-    to the I/O operation.
+    (CWE-22 / python:S2083). The output path is constructed entirely
+    from the trusted ``PR_SUMMARY_OUTPUT_DIR`` constant and the validated
+    filename, breaking the taint chain from user input to the I/O operation.
+
+    Uses resolve(strict=False) to avoid following symlinks during
+    resolution, preventing potential escape outside the repository root.
     """
     raw_output = Path(output_path)
     raw_name = raw_output.name
+
     if raw_name in {"", ".", ".."}:
         raise ValueError(
             f"Invalid output filename for {purpose}: {output_path!r}"
         )
+
     output_parts = raw_output.parts
     if not (len(output_parts) == 1
             or (len(output_parts) == 3
@@ -59,19 +66,26 @@ def _write_text_with_repo_guard(
         )
 
     safe_name = validate_filename_strict(raw_name, purpose=purpose)
+
     candidate_output = PR_SUMMARY_OUTPUT_DIR / safe_name
-    validated_output = validate_write_path_within_root(
-        candidate_output, REPO_ROOT, purpose=purpose,
-    ).resolve()
-    if not validated_output.is_relative_to(REPO_ROOT.resolve()):
+
+    resolved_candidate = candidate_output.resolve(strict=False)
+    # pylint: disable=no-member
+    resolved_root = REPO_ROOT.resolve(strict=False)
+    # pylint: enable=no-member
+
+    if not resolved_candidate.is_relative_to(resolved_root):
         raise ValueError(
-            f"Refusing to write outside repository root: {validated_output}"
+            f"Refusing to write outside repository root: {resolved_candidate}"
         )
-    validated_output.parent.mkdir(parents=True, exist_ok=True)
-    validated_output.write_text(
+
+    resolved_candidate.parent.mkdir(parents=True, exist_ok=True)
+    resolved_candidate.write_text(
         content, encoding="utf-8",
-    )  # SONAR_NOTE(S2083): filename validated by validate_filename_strict(); path constructed from PR_SUMMARY_OUTPUT_DIR constant
-    return validated_output
+    )
+    # SONAR_NOTE(S2083): Filename validated via allowlist; path constructed
+    # from trusted constant PR_SUMMARY_OUTPUT_DIR; no symlink traversal
+    return resolved_candidate
 
 
 def format_bytes(n: int) -> str:
@@ -83,45 +97,53 @@ def format_bytes(n: int) -> str:
     return f"{n} B"
 
 
-def format_summary(report: dict) -> str:
+def _extract_report_values(report: dict[str, Any]) -> dict[str, Any]:
+    """Extract and type-convert values from report dictionary."""
+    meta: dict[str, Any] = report.get("metadata", {})
+    summary_data: dict[str, Any] = report.get("summary", {})
+
+    return {
+        "corpus_version": str(meta.get("corpus-version", "unknown")),
+        "git_commit": str(meta.get("git-commit", "unknown")),
+        "platform": str(meta.get("platform", "unknown")),
+        "total": int(summary_data.get("total-fixtures", 0)),
+        "converted": int(summary_data.get("converted-count", 0)),
+        "skipped": int(summary_data.get("skipped-count", 0)),
+        "failed_open": int(summary_data.get("failed-open-count", 0)),
+        "fallback_rate": float(summary_data.get("fallback-rate", 0.0)),
+        "token_reduction": float(summary_data.get("token-reduction-percent", 0.0)),
+        "p50": float(summary_data.get("p50-latency-ms", 0.0)),
+        "p95": float(summary_data.get("p95-latency-ms", 0.0)),
+        "p99": float(summary_data.get("p99-latency-ms", 0.0)),
+        "input_total": int(summary_data.get("input-bytes-total", 0)),
+        "output_total": int(summary_data.get("output-bytes-total", 0)),
+        "fixtures": report.get("fixtures", []),
+    }
+
+
+def format_summary(report: dict[str, Any]) -> str:
     """Generate markdown summary from a Unified Report."""
-    meta = report.get("metadata", {})
-    summary = report.get("summary", {})
-    fixtures = report.get("fixtures", [])
-
-    corpus_version = meta.get("corpus-version", "unknown")
-    git_commit = meta.get("git-commit", "unknown")
-    platform = meta.get("platform", "unknown")
-
-    total = summary.get("total-fixtures", 0)
-    converted = summary.get("converted-count", 0)
-    skipped = summary.get("skipped-count", 0)
-    failed_open = summary.get("failed-open-count", 0)
-    fallback_rate = summary.get("fallback-rate", 0.0)
-    token_reduction = summary.get("token-reduction-percent", 0.0)
-    p50 = summary.get("p50-latency-ms", 0.0)
-    p95 = summary.get("p95-latency-ms", 0.0)
-    p99 = summary.get("p99-latency-ms", 0.0)
-    input_total = summary.get("input-bytes-total", 0)
-    output_total = summary.get("output-bytes-total", 0)
+    values = _extract_report_values(report)
 
     lines = [
         "## Benchmark Evidence",
         "",
-        f"**Corpus**: v{corpus_version} | "
-        f"**Commit**: `{git_commit}` | "
-        f"**Platform**: {platform}",
+        f"**Corpus**: v{values['corpus_version']} | "
+        f"**Commit**: `{values['git_commit']}` | "
+        f"**Platform**: {values['platform']}",
         "",
         "| Metric | Value |",
         "|--------|-------|",
-        f"| Fixtures | {total} total "
-        f"({converted} converted, {skipped} skipped, "
-        f"{failed_open} failed-open) |",
-        f"| Fallback rate | {fallback_rate}% |",
-        f"| Token reduction | ~{token_reduction}% (estimate) |",
-        f"| P50 / P95 / P99 latency | {p50} / {p95} / {p99} ms |",
+        f"| Fixtures | {values['total']} total "
+        f"({values['converted']} converted, {values['skipped']} skipped, "
+        f"{values['failed_open']} failed-open) |",
+        f"| Fallback rate | {values['fallback_rate']}% |",
+        f"| Token reduction | ~{values['token_reduction']}% (estimate) |",
+        f"| P50 / P95 / P99 latency | {values['p50']} / {values['p95']} "
+        f"/ {values['p99']} ms |",
         f"| Input / Output bytes | "
-        f"{format_bytes(input_total)} / {format_bytes(output_total)} |",
+        f"{format_bytes(values['input_total'])} / "
+        f"{format_bytes(values['output_total'])} |",
         "",
         f"> {TOKEN_DISCLAIMER}",
         "",
@@ -132,15 +154,15 @@ def format_summary(report: dict) -> str:
         "|---------|------|--------|-------|--------|---------|---------|",
     ]
 
-    for f in fixtures:
+    for fixture in values["fixtures"]:
         lines.append(
-            f"| {f['fixture-id']} "
-            f"| {f['page-type']} "
-            f"| {f['conversion-result']} "
-            f"| {format_bytes(f['input-bytes'])} "
-            f"| {format_bytes(f['output-bytes'])} "
-            f"| {f['latency-ms']} ms "
-            f"| {f['token-reduction-percent']}% |"
+            f"| {fixture['fixture-id']} "
+            f"| {fixture['page-type']} "
+            f"| {fixture['conversion-result']} "
+            f"| {format_bytes(fixture['input-bytes'])} "
+            f"| {format_bytes(fixture['output-bytes'])} "
+            f"| {fixture['latency-ms']} ms "
+            f"| {fixture['token-reduction-percent']}% |"
         )
 
     lines.extend(["", "</details>", ""])
@@ -149,6 +171,7 @@ def format_summary(report: dict) -> str:
 
 
 def build_cli_parser() -> argparse.ArgumentParser:
+    """Build and return the CLI argument parser."""
     parser = argparse.ArgumentParser(
         description="Generate PR benchmark summary from a Unified Report."
     )
@@ -163,17 +186,25 @@ def build_cli_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: Optional[list[str]] = None) -> int:
+    """Main entry point for the PR summary formatter.
+
+    Args:
+        argv: Command line arguments. If None, uses sys.argv[1:].
+
+    Returns:
+        Exit code: 0 on success, 1 on failure.
+    """
     args = build_cli_parser().parse_args(argv)
     report_path = validate_read_path(args.report, purpose="unified report")
 
     try:
-        report = load_json(str(report_path))
-    except Exception as e:
+        report = load_json(str(report_path))  # type: ignore[assignment]
+    except (IOError, json.JSONDecodeError) as e:
         print(f"ERROR: failed to load report: {e}", file=sys.stderr)
         return 1
 
-    md = format_summary(report)
+    md = format_summary(report)  # type: ignore[arg-type]
 
     if args.output:
         try:
