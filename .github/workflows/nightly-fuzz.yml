@@ -36,6 +36,7 @@ jobs:
         with:
           workspaces: |
             components/rust-converter -> target
+          cache-bin: false
 
       - name: Install cargo-fuzz
         run: cargo +nightly install cargo-fuzz

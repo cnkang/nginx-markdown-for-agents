@@ -45,6 +45,17 @@ jobs:
         with:
           workspaces: |
             components/rust-converter -> target
+          cache-bin: false
+
+      - name: Verify Rust toolchain wiring
+        run: |
+          set -euo pipefail
+          command -v cargo
+          command -v rustc
+          command -v rustup
+          cargo --version
+          rustc --version
+          rustup --version
 
       - name: Install cbindgen
         run: |

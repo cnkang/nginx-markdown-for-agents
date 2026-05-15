@@ -62,6 +62,7 @@ jobs:
         with:
           workspaces: |
             components/rust-converter -> target
+          cache-bin: false
 
       - name: Sanity check required commands
         run: |

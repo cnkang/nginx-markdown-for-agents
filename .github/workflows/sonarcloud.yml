@@ -106,6 +106,7 @@ jobs:
         with:
           workspaces: |
             components/rust-converter -> target
+          cache-bin: false
 
       - name: Generate Rust test coverage
         if: steps.token.outputs.enabled == 'true'

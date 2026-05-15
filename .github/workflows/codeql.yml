@@ -71,6 +71,7 @@ jobs:
         with:
           workspaces: |
             components/rust-converter -> target
+          cache-bin: false
 
       - name: C copyleft license policy check
         run: python3 tools/ci/check_c_licenses.py
