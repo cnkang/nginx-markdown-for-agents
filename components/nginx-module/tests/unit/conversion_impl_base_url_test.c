@@ -18,7 +18,7 @@ ngx_http_markdown_effective_prune_noise(
     const ngx_http_markdown_effective_conf_t *eff,
     const ngx_http_markdown_conf_t *conf)
 {
-    return (eff != NULL) ? eff->prune_noise : conf->prune_noise;
+    return (eff != NULL) ? eff->prune_noise : conf->advanced.prune_noise;
 }
 
 static size_t
@@ -26,7 +26,7 @@ ngx_http_markdown_effective_memory_budget(
     const ngx_http_markdown_effective_conf_t *eff,
     const ngx_http_markdown_conf_t *conf)
 {
-    return (eff != NULL) ? eff->memory_budget : conf->memory_budget;
+    return (eff != NULL) ? eff->memory_budget : conf->advanced.memory_budget;
 }
 
 /*
@@ -987,7 +987,7 @@ test_prepare_conversion_options_basic(void)
 
     conf.flavor = 0;  /* CommonMark */
     conf.timeout = 5000;
-    conf.generate_etag = 1;
+    conf.policy.generate_etag = 1;
     conf.token_estimate = 1;
     conf.front_matter = 1;
 
@@ -1208,8 +1208,8 @@ test_prepare_conversion_options_prune_selectors(void)
     r.loc_conf = &conf;
 
     set_str(&selectors, "nav,footer,aside");
-    conf.prune_selectors = &selectors;
-    conf.prune_noise = 1;
+    conf.advanced.prune_selectors = &selectors;
+    conf.advanced.prune_noise = 1;
 
     TEST_ASSERT(ngx_http_markdown_prepare_conversion_options(&r, &conf, NULL, &options) == NGX_OK,
                 "prepare_conversion_options should succeed with prune_selectors");
@@ -1246,8 +1246,8 @@ test_prepare_conversion_options_prune_protection_selectors(void)
     r.loc_conf = &conf;
 
     set_str(&protection, "main,article");
-    conf.prune_protection_selectors = &protection;
-    conf.prune_noise = 1;
+    conf.advanced.prune_protection_selectors = &protection;
+    conf.advanced.prune_noise = 1;
 
     TEST_ASSERT(ngx_http_markdown_prepare_conversion_options(&r, &conf, NULL, &options) == NGX_OK,
                 "prepare_conversion_options should succeed with prune_protection_selectors");

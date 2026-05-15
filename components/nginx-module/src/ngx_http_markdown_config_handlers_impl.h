@@ -253,19 +253,19 @@ ngx_http_markdown_auth_policy(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 
     value = cf->args->elts;
 
-    if (mcf->auth_policy != NGX_CONF_UNSET_UINT) {
+    if (mcf->policy.auth_policy != NGX_CONF_UNSET_UINT) {
         return "is duplicate";
     }
 
     if (ngx_http_markdown_arg_equals(&value[1], allow_str,
                                      sizeof(allow_str) - 1))
     {
-        mcf->auth_policy = NGX_HTTP_MARKDOWN_AUTH_POLICY_ALLOW;
+        mcf->policy.auth_policy = NGX_HTTP_MARKDOWN_AUTH_POLICY_ALLOW;
     } else if (ngx_http_markdown_arg_equals(
                    &value[1], deny_str,
                    sizeof(deny_str) - 1))
     {
-        mcf->auth_policy = NGX_HTTP_MARKDOWN_AUTH_POLICY_DENY;
+        mcf->policy.auth_policy = NGX_HTTP_MARKDOWN_AUTH_POLICY_DENY;
     } else {
         ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
                            "invalid value \"%V\" in \"%V\" directive, "
@@ -287,12 +287,12 @@ ngx_http_markdown_auth_cookies(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 
     value = cf->args->elts;
 
-    if (mcf->auth_cookies != NGX_CONF_UNSET_PTR) {
+    if (mcf->policy.auth_cookies != NGX_CONF_UNSET_PTR) {
         return "is duplicate";
     }
 
-    mcf->auth_cookies = ngx_array_create(cf->pool, cf->args->nelts - 1, sizeof(ngx_str_t));
-    if (mcf->auth_cookies == NULL) {
+    mcf->policy.auth_cookies = ngx_array_create(cf->pool, cf->args->nelts - 1, sizeof(ngx_str_t));
+    if (mcf->policy.auth_cookies == NULL) {
         return NGX_CONF_ERROR;
     }
 
@@ -304,7 +304,7 @@ ngx_http_markdown_auth_cookies(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
             return NGX_CONF_ERROR;
         }
 
-        pattern = ngx_array_push(mcf->auth_cookies);
+        pattern = ngx_array_push(mcf->policy.auth_cookies);
         if (pattern == NULL) {
             return NGX_CONF_ERROR;
         }
@@ -332,26 +332,26 @@ ngx_http_markdown_conditional_requests(ngx_conf_t *cf, ngx_command_t *cmd, void 
 
     value = cf->args->elts;
 
-    if (mcf->conditional_requests != NGX_CONF_UNSET_UINT) {
+    if (mcf->policy.conditional_requests != NGX_CONF_UNSET_UINT) {
         return "is duplicate";
     }
 
     if (ngx_http_markdown_arg_equals(&value[1], full_str,
                                      sizeof(full_str) - 1))
     {
-        mcf->conditional_requests =
+        mcf->policy.conditional_requests =
             NGX_HTTP_MARKDOWN_CONDITIONAL_FULL_SUPPORT;
     } else if (ngx_http_markdown_arg_equals(
                    &value[1], ims_str,
                    sizeof(ims_str) - 1))
     {
-        mcf->conditional_requests =
+        mcf->policy.conditional_requests =
             NGX_HTTP_MARKDOWN_CONDITIONAL_IF_MODIFIED_SINCE;
     } else if (ngx_http_markdown_arg_equals(
                    &value[1], dis_str,
                    sizeof(dis_str) - 1))
     {
-        mcf->conditional_requests = NGX_HTTP_MARKDOWN_CONDITIONAL_DISABLED;
+        mcf->policy.conditional_requests = NGX_HTTP_MARKDOWN_CONDITIONAL_DISABLED;
     } else {
         ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
                            "invalid value \"%V\" in \"%V\" directive, "
@@ -376,29 +376,29 @@ ngx_http_markdown_log_verbosity(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 
     value = cf->args->elts;
 
-    if (mcf->log_verbosity != NGX_CONF_UNSET_UINT) {
+    if (mcf->policy.log_verbosity != NGX_CONF_UNSET_UINT) {
         return "is duplicate";
     }
 
     if (ngx_http_markdown_arg_equals(&value[1], err_str,
                                      sizeof(err_str) - 1))
     {
-        mcf->log_verbosity = NGX_HTTP_MARKDOWN_LOG_ERROR;
+        mcf->policy.log_verbosity = NGX_HTTP_MARKDOWN_LOG_ERROR;
     } else if (ngx_http_markdown_arg_equals(
                    &value[1], warn_str,
                    sizeof(warn_str) - 1))
     {
-        mcf->log_verbosity = NGX_HTTP_MARKDOWN_LOG_WARN;
+        mcf->policy.log_verbosity = NGX_HTTP_MARKDOWN_LOG_WARN;
     } else if (ngx_http_markdown_arg_equals(
                    &value[1], info_str,
                    sizeof(info_str) - 1))
     {
-        mcf->log_verbosity = NGX_HTTP_MARKDOWN_LOG_INFO;
+        mcf->policy.log_verbosity = NGX_HTTP_MARKDOWN_LOG_INFO;
     } else if (ngx_http_markdown_arg_equals(
                    &value[1], debug_str,
                    sizeof(debug_str) - 1))
     {
-        mcf->log_verbosity = NGX_HTTP_MARKDOWN_LOG_DEBUG;
+        mcf->policy.log_verbosity = NGX_HTTP_MARKDOWN_LOG_DEBUG;
     } else {
         ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
                            "invalid value \"%V\" in \"%V\" directive, "
@@ -792,7 +792,7 @@ ngx_http_markdown_streaming_engine(ngx_conf_t *cf,
     ngx_str_t                         *value;
     u_char                            *var_marker;
 
-    if (mcf->streaming_engine != NULL) {
+    if (mcf->streaming.engine != NULL) {
         return "is duplicate";
     }
 
@@ -841,7 +841,7 @@ ngx_http_markdown_streaming_engine(ngx_conf_t *cf,
         return NGX_CONF_ERROR;
     }
 
-    mcf->streaming_engine = cv;
+    mcf->streaming.engine = cv;
     return NGX_CONF_OK;
 }
 #endif /* MARKDOWN_STREAMING_ENABLED */
@@ -910,7 +910,7 @@ ngx_http_markdown_set_dynconf_path(ngx_conf_t *cf, const ngx_command_t *cmd,
         return NGX_CONF_ERROR;
     }
 
-    mcf->dynconf_path = value[1];
+    mcf->advanced.dynconf_path = value[1];
     mmcf->dynconf_path_configured = 1;
     mmcf->dynconf_first_path = value[1];
 

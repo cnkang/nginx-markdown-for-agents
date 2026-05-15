@@ -611,15 +611,15 @@ init_conf(ngx_http_markdown_conf_t *mcf)
     mcf->enabled_complex = NULL;
     mcf->on_error = NGX_CONF_UNSET_UINT;
     mcf->flavor = NGX_CONF_UNSET_UINT;
-    mcf->auth_policy = NGX_CONF_UNSET_UINT;
-    mcf->auth_cookies = NGX_CONF_UNSET_PTR;
+    mcf->policy.auth_policy = NGX_CONF_UNSET_UINT;
+    mcf->policy.auth_cookies = NGX_CONF_UNSET_PTR;
     mcf->content_types = NGX_CONF_UNSET_PTR;
-    mcf->conditional_requests = NGX_CONF_UNSET_UINT;
-    mcf->log_verbosity = NGX_CONF_UNSET_UINT;
+    mcf->policy.conditional_requests = NGX_CONF_UNSET_UINT;
+    mcf->policy.log_verbosity = NGX_CONF_UNSET_UINT;
     mcf->stream_types = NGX_CONF_UNSET_PTR;
     mcf->large_body_threshold = NGX_CONF_UNSET_SIZE;
     mcf->ops.metrics_format = NGX_CONF_UNSET_UINT;
-    mcf->streaming_engine = NULL;
+    mcf->streaming.engine = NULL;
 }
 
 /*
@@ -797,7 +797,7 @@ test_simple_enum_handlers(void)
     set_arg(&values[1], "deny");
     rc = ngx_http_markdown_auth_policy(&cf, &cmd, &mcf);
     TEST_ASSERT(rc == NGX_CONF_OK, "deny should parse");
-    TEST_ASSERT(mcf.auth_policy == NGX_HTTP_MARKDOWN_AUTH_POLICY_DENY,
+    TEST_ASSERT(mcf.policy.auth_policy == NGX_HTTP_MARKDOWN_AUTH_POLICY_DENY,
         "auth_policy should be deny");
 
     init_conf(&mcf);
@@ -815,11 +815,11 @@ test_simple_enum_handlers(void)
  *
  * Semantic contract mirrored: ngx_http_markdown_auth_cookies
  * collects one or more glob patterns into an ngx_array_t stored in
- * mcf->auth_cookies; it rejects duplicates and empty patterns.
+ * mcf->policy.policy.auth_cookies; it rejects duplicates and empty patterns.
  *
  * Return: void.
  *
- * Side effects: asserts on mcf.auth_cookies array contents.
+ * Side effects: asserts on mcf.policy.auth_cookies array contents.
  */
 static void
 test_auth_cookies_handler(void)
@@ -845,10 +845,10 @@ test_auth_cookies_handler(void)
 
     rc = ngx_http_markdown_auth_cookies(&cf, &cmd, &mcf);
     TEST_ASSERT(rc == NGX_CONF_OK, "cookie patterns should parse");
-    TEST_ASSERT(mcf.auth_cookies != NULL, "cookie array should be created");
-    TEST_ASSERT(mcf.auth_cookies->nelts == 3, "three patterns expected");
+    TEST_ASSERT(mcf.policy.auth_cookies != NULL, "cookie array should be created");
+    TEST_ASSERT(mcf.policy.auth_cookies->nelts == 3, "three patterns expected");
 
-    elts = mcf.auth_cookies->elts;
+    elts = mcf.policy.auth_cookies->elts;
     TEST_ASSERT(elts[0].len == strlen("session*"), "pattern 0 length");
     TEST_ASSERT(elts[1].len == strlen("*token"), "pattern 1 length");
     TEST_ASSERT(elts[2].len == strlen("auth"), "pattern 2 length");
@@ -898,7 +898,7 @@ test_conditional_and_log_verbosity_handlers(void)
     set_arg(&values[1], "if_modified_since_only");
     rc = ngx_http_markdown_conditional_requests(&cf, &cmd, &mcf);
     TEST_ASSERT(rc == NGX_CONF_OK, "ims_only should parse");
-    TEST_ASSERT(mcf.conditional_requests
+    TEST_ASSERT(mcf.policy.conditional_requests
         == NGX_HTTP_MARKDOWN_CONDITIONAL_IF_MODIFIED_SINCE,
         "conditional mode should match");
 
@@ -918,7 +918,7 @@ test_conditional_and_log_verbosity_handlers(void)
     set_arg(&values[1], "debug");
     rc = ngx_http_markdown_log_verbosity(&cf, &cmd, &mcf);
     TEST_ASSERT(rc == NGX_CONF_OK, "debug should parse");
-    TEST_ASSERT(mcf.log_verbosity == NGX_HTTP_MARKDOWN_LOG_DEBUG,
+    TEST_ASSERT(mcf.policy.log_verbosity == NGX_HTTP_MARKDOWN_LOG_DEBUG,
         "log verbosity should be debug");
 
     init_conf(&mcf);
@@ -1173,14 +1173,14 @@ test_metrics_handlers(void)
  *
  * Semantic contract mirrored: ngx_http_markdown_streaming_engine
  * accepts static tokens or NGINX variable expressions, stores the
- * compiled complex value in mcf->streaming_engine, rejects
+ * compiled complex value in mcf->streaming.engine, rejects
  * duplicates, and returns NGX_CONF_ERROR for invalid tokens or
  * compilation failures.
  *
  * Return: void.
  *
  * Side effects: modifies g_compile_complex_rc; asserts on
- *               mcf.streaming_engine.
+ *               mcf.streaming.engine.
  */
 static void
 test_streaming_engine_handler(void)
@@ -1202,7 +1202,7 @@ test_streaming_engine_handler(void)
     set_arg(&values[1], "auto");
     rc = ngx_http_markdown_streaming_engine(&cf, &cmd, &mcf);
     TEST_ASSERT(rc == NGX_CONF_OK, "auto should parse");
-    TEST_ASSERT(mcf.streaming_engine != NULL,
+    TEST_ASSERT(mcf.streaming.engine != NULL,
         "compiled streaming engine value should be set");
 
     rc = ngx_http_markdown_streaming_engine(&cf, &cmd, &mcf);
@@ -1345,7 +1345,7 @@ test_markdown_filter_palloc_failure(void)
  * Verify ngx_http_markdown_set_dynconf_path: normal path,
  * empty value, duplicate rejection, and NULL conf.
  *
- * Semantic contract mirrored: set_dynconf_path sets mcf->dynconf_path,
+ * Semantic contract mirrored: set_dynconf_path sets mcf->advanced.advanced.dynconf_path,
  * records the path in main_conf for duplicate detection, and returns
  * NGX_CONF_ERROR on duplicate or invalid inputs.
  *
@@ -1374,7 +1374,7 @@ test_set_dynconf_path(void)
 
     rc = ngx_http_markdown_set_dynconf_path(&cf, &cmd, &mcf);
     TEST_ASSERT(rc == NGX_CONF_OK, "valid path should parse");
-    TEST_ASSERT(mcf.dynconf_path.len == strlen("/etc/nginx/dynconf.conf"),
+    TEST_ASSERT(mcf.advanced.dynconf_path.len == strlen("/etc/nginx/dynconf.conf"),
                 "dynconf_path stored in loc conf");
     TEST_ASSERT(g_main_conf.dynconf_path_configured == 1,
                 "main conf marked as configured");
