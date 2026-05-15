@@ -16,7 +16,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from lib.path_validation import sanitize_path_component, validate_read_path, validate_write_path_within_root
+from lib.path_validation import validate_filename_strict, validate_read_path, validate_write_path_within_root
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -37,8 +37,12 @@ def _write_text_with_repo_guard(
     """Resolve output path under REPO_ROOT and write UTF-8 text safely.
 
     Accepts only bare filenames or ``perf/reports/<filename>`` paths.
-    The filename component is sanitized to prevent path-traversal writes
-    (CWE-22 / pythonsecurity:S2083).
+    The filename component is validated against a strict allowlist
+    (``validate_filename_strict``) to prevent path-traversal writes
+    (CWE-22 / python:S2083).  The output path is then constructed
+    entirely from the trusted ``PR_SUMMARY_OUTPUT_DIR`` constant and
+    the validated filename, breaking the taint chain from user input
+    to the I/O operation.
     """
     raw_output = Path(output_path)
     raw_name = raw_output.name
@@ -54,7 +58,7 @@ def _write_text_with_repo_guard(
             "Output path must be '<filename>' or 'perf/reports/<filename>'"
         )
 
-    safe_name = sanitize_path_component(raw_name)
+    safe_name = validate_filename_strict(raw_name, purpose=purpose)
     candidate_output = PR_SUMMARY_OUTPUT_DIR / safe_name
     validated_output = validate_write_path_within_root(
         candidate_output, REPO_ROOT, purpose=purpose,
@@ -64,7 +68,9 @@ def _write_text_with_repo_guard(
             f"Refusing to write outside repository root: {validated_output}"
         )
     validated_output.parent.mkdir(parents=True, exist_ok=True)
-    validated_output.write_text(content, encoding="utf-8")
+    validated_output.write_text(
+        content, encoding="utf-8",
+    )  # SONAR_NOTE(S2083): filename validated by validate_filename_strict(); path constructed from PR_SUMMARY_OUTPUT_DIR constant
     return validated_output
 
 
