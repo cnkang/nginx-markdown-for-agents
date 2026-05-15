@@ -43,7 +43,14 @@ echo "" >&2
 #
 # Look for (size_t) casts of variables that commonly hold ssize_t values
 # (parsed, raw, result from ngx_parse_size, etc.) and flag lines that
-# lack a nearby "< 0" or "NGX_ERROR" guard within 5 preceding lines.
+# lack a nearby guard within 8 preceding lines.
+#
+# Recognized guard patterns:
+#   - Non-negative check: < 0, >= 0, != NGX_ERROR, == NGX_ERROR
+#   - Upper-bound check: > NGX_MAX_SIZE_T_VALUE, > max_size_t,
+#     > SIZE_MAX, > UINT_MAX, > ..._MAX, > ..._LIMIT
+#   - Range check: NGX_OK return from validation helper
+#   - Explicit allowlist annotations: /* CWE-190:guarded */
 
 readonly PATTERN_SSIZE_TO_SIZE='\(size_t\)[[:space:]]*(parsed|raw|rc|len|n)[^a-zA-Z]'
 
@@ -54,6 +61,41 @@ readonly PATTERN_SSIZE_TO_SIZE='\(size_t\)[[:space:]]*(parsed|raw|rc|len|n)[^a-z
 
 readonly NARROW_TYPES='uint32_t|uint8_t|uInt|int'
 readonly WIDE_TYPES='size_t|ngx_uint_t|off_t|ngx_int_t'
+
+# ── Known guarded cast patterns (file:line → guard description) ──
+#
+# These are casts that ARE guarded but whose guard relationship is
+# too complex for the simple line-proximity heuristic to detect.
+# Format: "basename:line_number:guard_description"
+readonly GUARDED_CAST_ALLOWLIST=(
+    "ngx_http_markdown_config_handlers_impl.h:107:raw>NGX_MAX_SIZE_T_VALUE before value=(size_t)raw"
+    "ngx_http_markdown_dynconf_impl.h:879:(size_t)parsed>max_size_t before *out=(size_t)parsed"
+)
+
+# ── Known safe cast patterns (file:line → safety reason) ──
+#
+# These are casts that are safe for reasons the detector cannot
+# infer from local context alone.  Common reasons:
+#   - Cast of a compile-time constant (no runtime overflow possible)
+#   - Cast of a value that is already size_t/uintptr_t (identity cast)
+#   - Cast used in a guard comparison itself (not a data conversion)
+#   - Cast with a guard on the same line (ternary / inline check)
+readonly SAFE_CAST_ALLOWLIST=(
+    "ngx_http_markdown_otel_impl.h:853:compile-time constant NGX_HTTP_MARKDOWN_OTEL_TRACE_ID_LEN"
+    "ngx_http_markdown_otel_impl.h:855:compile-time constant NGX_HTTP_MARKDOWN_OTEL_SPAN_ID_LEN"
+    "ngx_http_markdown_config_handlers_impl.h:71:NGX_ERROR sentinel return (not a data cast)"
+    "ngx_http_markdown_config_handlers_impl.h:76:NGX_ERROR sentinel return (not a data cast)"
+    "ngx_http_markdown_config_handlers_impl.h:104:NGX_ERROR sentinel return (not a data cast)"
+    "ngx_http_markdown_config_handlers_impl.h:678:NGX_ERROR sentinel comparison (not a data cast)"
+    "ngx_http_markdown_decompression.c:213:UINT_MAX constant clamp guard itself"
+    "ngx_http_markdown_decompression.c:214:UINT_MAX constant clamp assignment"
+    "ngx_http_markdown_streaming_decomp_impl.h:34:guard comparison val>(size_t)UINT_MAX"
+    "ngx_http_markdown_conversion_impl.h:770:guarded by INT_MAX ternary on same line"
+    "ngx_http_markdown_conversion_impl.h:1164:size_t+size_t identity cast (feed_len+markdown_len)"
+    "ngx_http_markdown_conversion_impl.h:1336:size_t identity cast for debug log format"
+    "ngx_http_markdown_conversion_impl.h:1352:size_t+size_t identity cast (out_len+markdown_len)"
+    "ngx_http_markdown_conversion_impl.h:1363:size_t identity cast for debug log format"
+)
 
 # ── Pattern (c): direct ngx_parse_size() + (size_t) ──
 # This is the most critical pattern: calling ngx_parse_size() and
@@ -175,13 +217,56 @@ while IFS= read -r match; do
     fi
     file="$(echo "$match" | cut -d: -f1)"
     line="$(echo "$match" | cut -d: -f2)"
-    # Check if there is a "< 0" or "NGX_ERROR" guard in preceding 5 lines
-    context_start=$((line - 5))
+    basename="$(basename "$file")"
+
+    # Check explicit allowlist for known guarded patterns
+    allowlisted=0
+    for entry in "${GUARDED_CAST_ALLOWLIST[@]}"; do
+        entry_file="$(echo "$entry" | cut -d: -f1)"
+        entry_line="$(echo "$entry" | cut -d: -f2)"
+        entry_desc="$(echo "$entry" | cut -d: -f3-)"
+        if [[ "$basename" == "$entry_file" && "$line" == "$entry_line" ]]; then
+            echo "  OK      ${file}:${line} — ssize_t→size_t cast in allowlisted guarded pattern (${entry_desc})" >&2
+            allowlisted=1
+            break
+        fi
+    done
+    if [[ "$allowlisted" -eq 1 ]]; then
+        ssize_hits=$((ssize_hits + 1))
+        continue
+    fi
+
+    # Check safe-cast allowlist for known safe patterns
+    for entry in "${SAFE_CAST_ALLOWLIST[@]}"; do
+        entry_file="$(echo "$entry" | cut -d: -f1)"
+        entry_line="$(echo "$entry" | cut -d: -f2)"
+        entry_desc="$(echo "$entry" | cut -d: -f3-)"
+        if [[ "$basename" == "$entry_file" && "$line" == "$entry_line" ]]; then
+            echo "  OK      ${file}:${line} — safe cast (${entry_desc})" >&2
+            allowlisted=1
+            break
+        fi
+    done
+    if [[ "$allowlisted" -eq 1 ]]; then
+        ssize_hits=$((ssize_hits + 1))
+        continue
+    fi
+
+    # Check for guard in preceding 8 lines (expanded from 5 to capture
+    # more complex guard-to-cast relationships like upper-bound checks)
+    context_start=$((line - 8))
     if [[ "$context_start" -lt 1 ]]; then
         context_start=1
     fi
     has_guard=0
-    if sed -n "${context_start},${line}p" "$file" 2>/dev/null | grep -qiE '< 0|>= 0|!= NGX_ERROR|== NGX_ERROR|NGX_OK'; then
+    context_block="$(sed -n "${context_start},${line}p" "$file" 2>/dev/null)"
+    if echo "$context_block" | grep -qiE '< 0|>= 0|!= NGX_ERROR|== NGX_ERROR|NGX_OK'; then
+        has_guard=1
+    fi
+    if echo "$context_block" | grep -qiE '> NGX_MAX_SIZE_T_VALUE|> max_size_t|> SIZE_MAX|> UINT_MAX|> [A-Z_]+_MAX|> [A-Z_]+_LIMIT|\(size_t\)[[:space:]]*\w+[[:space:]]*>[[:space:]]*max'; then
+        has_guard=1
+    fi
+    if echo "$context_block" | grep -qiE '/\* CWE-190:guarded \*/'; then
         has_guard=1
     fi
     if [[ "$has_guard" -eq 1 ]]; then
