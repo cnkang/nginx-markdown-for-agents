@@ -194,6 +194,8 @@ harness-security-checks:
 	bash tools/harness/detect_cwe190_casts.sh
 	python3 tools/harness/detect_cwe22_paths.py tools/
 	bash tools/harness/detect_live_conf_reads.sh
+	bash tools/harness/detect_shell_hygiene.sh tools/
+	python3 tools/harness/detect_const_correctness.py components/nginx-module/src
 
 license-check:
 	python3 tools/ci/check_c_licenses.py
@@ -353,7 +355,7 @@ help:
 	@echo "  test-benchmark-summary   - Generate PR benchmark summary from latest report"
 	@echo "  harness-check            - Validate harness truth surfaces and optional local adapters"
 	@echo "  harness-check-full       - Run full harness validation plus docs/release checks"
-	@echo "  harness-security-checks  - Run CWE-190/CWE-22/effective-conf security detection scripts"
+	@echo "  harness-security-checks  - Run CWE-190/CWE-22/effective-conf/shell-hygiene/const-correctness detection"
 	@echo "  docs-check               - Validate documentation links/style"
 	@echo "  license-check            - Verify license policy and THIRD-PARTY-NOTICES coverage"
 	@echo "  release-gates-check      - Validate release gate framework (0.5.0 + 0.5.5)"

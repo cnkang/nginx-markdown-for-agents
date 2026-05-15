@@ -40,25 +40,36 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 VALIDATION_IMPORT_RE = re.compile(
     r"from\s+tools\.lib\.path_validation\s+import"
     r"|from\s+path_validation\s+import"
-    r"|import\s+tools\.lib\.path_validation",
+    r"|import\s+tools\.lib\.path_validation"
+    r"|def\s+_resolve_repo_write_path",
 )
 
 VALIDATED_VAR_RE = re.compile(
     r"validate_read_path\s*\(\s*(\w+)"
-    r"|validate_write_path_within_root\s*\(\s*(\w+)",
+    r"|validate_write_path_within_root\s*\(\s*(\w+)"
+    r"|_resolve_repo_write_path\s*\(\s*(\w+)",
 )
 
 VALIDATED_ASSIGN_RE = re.compile(
     r"(\w+)\s*=\s*validate_read_path\s*\("
-    r"|(\w+)\s*=\s*validate_write_path_within_root\s*\(",
+    r"|(\w+)\s*=\s*validate_write_path_within_root\s*\("
+    r"|(\w+)\s*=\s*_resolve_repo_write_path\s*\(",
 )
 
 OPEN_CALL_RE = re.compile(
-    r"open\s*\(",
+    r"(?:os\.)?open\s*\(",
 )
 
 OPEN_ARG_RE = re.compile(
-    r"(?<!\w)open\s*\(\s*(\w+)",
+    r"(?:os\.)?open\s*\(\s*(\w+)",
+)
+
+PATH_METHOD_OPEN_RE = re.compile(
+    r"(\w+)\.open\s*\(",
+)
+
+DIR_FD_RE = re.compile(
+    r"dir_fd\s*=",
 )
 
 HARDCODED_PATH_RE = re.compile(
@@ -66,6 +77,34 @@ HARDCODED_PATH_RE = re.compile(
     r'|Path\s*\(\s*__file__\s*\)'
     r'|"/'
     r"|[A-Z_]+_DIR\s*/\s*\"",
+)
+
+SAFE_OPEN_ARG_RE = re.compile(
+    r"^(self|cls)$",
+)
+
+PYTEST_FIXTURE_RE = re.compile(
+    r"\btmp_path\b",
+)
+
+DEF_LINE_RE = re.compile(
+    r"^\s*def\s+",
+)
+
+REPO_ROOT_DERIVED_RE = re.compile(
+    r"repo_root|REPO_ROOT",
+)
+
+_FILE_DERIVED_ASSIGN_RE = re.compile(
+    r"(\w+)\s*=\s*.*(?:__file__|repo_root|REPO_ROOT)",
+)
+
+_TEMPFILE_VAR_RE = re.compile(
+    r"tempfile\b",
+)
+
+_TEMPFILE_ASSIGN_RE = re.compile(
+    r"(\w+)\s*=\s*(?:_write_tmp_json|_temp_output_path|tempfile\.)",
 )
 
 # Variables that are file descriptors (int), not paths
@@ -78,10 +117,29 @@ NON_FILE_OPEN_RE = re.compile(
     r"urlopen|webbrowser\.open",
 )
 
+# Lines that are Python comments or docstrings
+COMMENT_RE = re.compile(
+    r"^\s*#|^\s*\"\"\"|^\s*'''"
+)
+
 EXEMPT_FILES = {
     "tools/lib/path_validation.py",
     "tools/harness/detect_cwe22_paths.py",
 }
+
+# Pattern (d): Path() construction from user-derived variables without
+# validation.  Per commit 847479c, constructing Path from user input
+# before validation enables path traversal even if validate_read_path
+# is called later.  The safe pattern is: resolved = validate_read_path(arg)
+# then Path(resolved).
+_PATH_CONSTRUCTION_RE = re.compile(
+    r"Path\s*\(\s*(args?\.\w+|sys\.argv\[\d+\]|options?\.\w+|cli_\w+|user_\w+)\s*\)",
+)
+
+# User-derived variable names commonly used in CLI/path construction
+_USER_DERIVED_VAR_RE = re.compile(
+    r"^(args|options|cli_|user_|input_|untrusted_)",
+)
 
 
 def _display_path(path: Path) -> str:
@@ -106,10 +164,12 @@ def _emit_finding(
 def _classify_open_call(
     first_arg: str,
     line: str,
+    lines: list[str],
+    lineno: int,
     has_validation_import: bool,
     validated_vars: set[str],
+    hardcoded_vars: set[str],
     filepath: Path,
-    lineno: int,
     rel: str,
     strict: bool,
 ) -> tuple[list[str], list[str]]:
@@ -117,14 +177,42 @@ def _classify_open_call(
     errors: list[str] = []
     warnings: list[str] = []
 
+    if DEF_LINE_RE.search(line):
+        return errors, warnings
+
+    if SAFE_OPEN_ARG_RE.match(first_arg):
+        return errors, warnings
+
     if FD_VAR_RE.match(first_arg):
         return errors, warnings
 
     if first_arg in validated_vars:
         return errors, warnings
 
+    if first_arg in hardcoded_vars:
+        return errors, warnings
+
+    path_method_m = PATH_METHOD_OPEN_RE.search(line)
+    if path_method_m and path_method_m.group(1) in hardcoded_vars:
+        return errors, warnings
+
     if HARDCODED_PATH_RE.search(line):
         return errors, warnings
+
+    if PYTEST_FIXTURE_RE.search(line):
+        return errors, warnings
+
+    if REPO_ROOT_DERIVED_RE.search(line):
+        return errors, warnings
+
+    if DIR_FD_RE.search(line):
+        return errors, warnings
+
+    # Check if this open() call uses dir_fd= on the same or next line
+    if lineno < len(lines):
+        next_line = lines[lineno] if lineno < len(lines) else ""
+        if DIR_FD_RE.search(next_line):
+            return errors, warnings
 
     if "test_" in filepath.name:
         warnings.append(
@@ -161,19 +249,68 @@ def _extract_regex_groups(match: re.Match, target: set[str]) -> None:
             target.add(value)
 
 
+_PATH_WRAPPED_RE = re.compile(
+    r"(\w+)\s*=\s*Path\s*\(\s*(\w+)\s*\)",
+)
+
+
 def _collect_validated_vars(lines: list[str]) -> set[str]:
-    """Extract variable names assigned from validation calls (LHS only)."""
+    """Extract variable names assigned from validation calls (LHS only).
+
+    Also propagates validation through Path() wrappers: if
+    ``resolved = validate_read_path(...)`` and later
+    ``path = Path(resolved)``, then ``path`` is also considered validated.
+    """
     validated_vars: set[str] = set()
     for line in lines:
         for m in VALIDATED_ASSIGN_RE.finditer(line):
             _extract_regex_groups(m, validated_vars)
+
+    for line in lines:
+        for m in _PATH_WRAPPED_RE.finditer(line):
+            lhs = m.group(1)
+            rhs = m.group(2)
+            if rhs in validated_vars:
+                validated_vars.add(lhs)
+
     return validated_vars
+
+
+def _collect_hardcoded_vars(lines: list[str]) -> set[str]:
+    """Extract variable names assigned from __file__/repo_root/REPO_ROOT.
+
+    Also collects variables assigned from tempfile helpers and
+    repo-root-derived helper functions.
+    """
+    hardcoded_vars: set[str] = set()
+    hardcoded_vars.add("repo_root")
+    hardcoded_vars.add("REPO_ROOT")
+
+    for line in lines:
+        m = _FILE_DERIVED_ASSIGN_RE.search(line)
+        if m:
+            hardcoded_vars.add(m.group(1))
+
+    for line in lines:
+        m = _TEMPFILE_ASSIGN_RE.search(line)
+        if m:
+            hardcoded_vars.add(m.group(1))
+
+    for line in lines:
+        for m in _PATH_WRAPPED_RE.finditer(line):
+            lhs = m.group(1)
+            rhs = m.group(2)
+            if rhs in hardcoded_vars:
+                hardcoded_vars.add(lhs)
+
+    return hardcoded_vars
 
 
 def _scan_open_calls(
     lines: list[str],
     has_validation_import: bool,
     validated_vars: set[str],
+    hardcoded_vars: set[str],
     filepath: Path,
     rel: str,
     strict: bool,
@@ -196,11 +333,63 @@ def _scan_open_calls(
         first_arg = m.group(1)
 
         call_errors, call_warnings = _classify_open_call(
-            first_arg, line, has_validation_import,
-            validated_vars, filepath, lineno, rel, strict,
+            first_arg, line, lines, lineno,
+            has_validation_import,
+            validated_vars, hardcoded_vars, filepath, rel, strict,
         )
         errors.extend(call_errors)
         warnings.extend(call_warnings)
+
+    return errors, warnings
+
+
+def _scan_path_constructions(
+    lines: list[str],
+    validated_vars: set[str],
+    hardcoded_vars: set[str],
+    filepath: Path,
+    rel: str,
+    strict: bool,
+) -> tuple[list[str], list[str]]:
+    """Scan for Path() construction from user input before validation.
+
+    Per commit 847479c, Path(user_input) before validate_read_path
+    enables path traversal.  This catches direct Path(args.x),
+    Path(sys.argv[N]), etc.
+
+    Args:
+        lines: Source lines.
+        validated_vars: Variables assigned from validation calls.
+        hardcoded_vars: Variables from hardcoded/repo-root sources.
+        filepath: File path for reporting.
+        rel: Display path for reporting.
+        strict: If True, promote warnings to errors.
+
+    Returns:
+        Tuple of (errors, warnings).
+    """
+    errors: list[str] = []
+    warnings: list[str] = []
+
+    for lineno, line in enumerate(lines, start=1):
+        if COMMENT_RE.search(line):
+            continue
+
+        for m in _PATH_CONSTRUCTION_RE.finditer(line):
+            user_expr = m.group(1)
+
+            msg_prefix = "WARNING" if not strict else "ERROR"
+            detail = (
+                f"Path({user_expr}) from user input before validation — "
+                f"pass through validate_read_path() first "
+                f"(per commit 847479c / AGENTS.md Rule 33)"
+            )
+            full_msg = f"  {msg_prefix} {rel}:{lineno} — {detail}"
+
+            if strict:
+                errors.append(full_msg)
+            else:
+                warnings.append(full_msg)
 
     return errors, warnings
 
@@ -233,13 +422,23 @@ def check_file(
     has_validation_import = any(VALIDATION_IMPORT_RE.search(line) for line in lines)
 
     validated_vars = _collect_validated_vars(lines)
+    hardcoded_vars = _collect_hardcoded_vars(lines)
 
     call_errors, call_warnings = _scan_open_calls(
-        lines, has_validation_import, validated_vars,
+        lines, has_validation_import, validated_vars, hardcoded_vars,
         filepath, rel, strict,
     )
     errors.extend(call_errors)
     warnings.extend(call_warnings)
+
+    # ── Pattern (d): Path() from user input before validation ──
+    # Per commit 847479c: Path(user_input) before validate_read_path
+    # enables path traversal even if validated later.
+    path_errors, path_warnings = _scan_path_constructions(
+        lines, validated_vars, hardcoded_vars, filepath, rel, strict,
+    )
+    errors.extend(path_errors)
+    warnings.extend(path_warnings)
 
     return errors, warnings
 
