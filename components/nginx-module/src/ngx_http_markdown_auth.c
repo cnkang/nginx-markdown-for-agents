@@ -414,9 +414,9 @@ ngx_http_markdown_get_auth_patterns(const ngx_http_markdown_conf_t *conf,
         ngx_null_string
     };
 
-    if (conf != NULL && conf->auth_cookies != NULL && conf->auth_cookies->nelts > 0) {
-        *patterns = conf->auth_cookies->elts;
-        *pattern_count = conf->auth_cookies->nelts;
+    if (conf != NULL && conf->policy.auth_cookies != NULL && conf->policy.auth_cookies->nelts > 0) {
+        *patterns = conf->policy.auth_cookies->elts;
+        *pattern_count = conf->policy.auth_cookies->nelts;
         return;
     }
 

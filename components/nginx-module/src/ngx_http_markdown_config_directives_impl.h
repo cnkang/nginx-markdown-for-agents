@@ -587,8 +587,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
             |NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
         ngx_conf_set_size_slot,
         NGX_HTTP_LOC_CONF_OFFSET,
-        offsetof(ngx_http_markdown_conf_t,
-                 streaming_budget),
+        offsetof(ngx_http_markdown_conf_t, streaming.budget),
         NULL
     },
 
@@ -615,8 +614,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
             |NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
         ngx_conf_set_enum_slot,
         NGX_HTTP_LOC_CONF_OFFSET,
-        offsetof(ngx_http_markdown_conf_t,
-                 streaming_on_error),
+        offsetof(ngx_http_markdown_conf_t, streaming.on_error),
         &ngx_http_markdown_streaming_on_error_enum
     },
 
@@ -639,8 +637,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
             |NGX_HTTP_LOC_CONF|NGX_CONF_FLAG,
         ngx_conf_set_flag_slot,
         NGX_HTTP_LOC_CONF_OFFSET,
-        offsetof(ngx_http_markdown_conf_t,
-                 streaming_shadow),
+        offsetof(ngx_http_markdown_conf_t, streaming.shadow),
         NULL
     },
 
@@ -665,8 +662,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
             |NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
         ngx_conf_set_size_slot,
         NGX_HTTP_LOC_CONF_OFFSET,
-        offsetof(ngx_http_markdown_conf_t,
-                 streaming_auto_threshold),
+        offsetof(ngx_http_markdown_conf_t, streaming.auto_threshold),
         NULL
     },
 #endif /* MARKDOWN_STREAMING_ENABLED */
@@ -690,8 +686,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
             |NGX_HTTP_LOC_CONF|NGX_CONF_FLAG,
         ngx_conf_set_flag_slot,
         NGX_HTTP_LOC_CONF_OFFSET,
-        offsetof(ngx_http_markdown_conf_t,
-                 prune_noise),
+        offsetof(ngx_http_markdown_conf_t, advanced.prune_noise),
         NULL
     },
 
@@ -714,8 +709,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
             |NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
         ngx_conf_set_str_slot,
         NGX_HTTP_LOC_CONF_OFFSET,
-        offsetof(ngx_http_markdown_conf_t,
-                 prune_selectors),
+        offsetof(ngx_http_markdown_conf_t, advanced.prune_selectors),
         NULL
     },
 
@@ -738,8 +732,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
             |NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
         ngx_conf_set_str_slot,
         NGX_HTTP_LOC_CONF_OFFSET,
-        offsetof(ngx_http_markdown_conf_t,
-                 prune_protection_selectors),
+        offsetof(ngx_http_markdown_conf_t, advanced.prune_protection_selectors),
         NULL
     },
 
@@ -766,8 +759,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
             |NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
         ngx_conf_set_size_slot,
         NGX_HTTP_LOC_CONF_OFFSET,
-        offsetof(ngx_http_markdown_conf_t,
-                 memory_budget),
+        offsetof(ngx_http_markdown_conf_t, advanced.memory_budget),
         NULL
     },
 

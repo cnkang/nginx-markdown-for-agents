@@ -110,10 +110,12 @@ typedef struct {
     ngx_flag_t token_estimate;
     ngx_flag_t front_matter;
     ngx_flag_t on_wildcard;
-    ngx_uint_t auth_policy;
-    void *auth_cookies;
-    ngx_flag_t generate_etag;
-    ngx_uint_t conditional_requests;
+    struct {
+        ngx_uint_t auth_policy;
+        void *auth_cookies;
+        ngx_flag_t generate_etag;
+        ngx_uint_t conditional_requests;
+    } policy;
     ngx_flag_t buffer_chunked;
     void *stream_types;
 } ngx_http_markdown_conf_t;
@@ -600,7 +602,7 @@ test_upstream_etag_replaced_when_enabled(void)
     TEST_SUBSECTION("Task 2.5: Upstream ETag replaced when ETag generation enabled");
 
     memset(&conf, 0, sizeof(conf));
-    conf.generate_etag = 1;
+    conf.policy.generate_etag = 1;
     memset(&result, 0, sizeof(result));
     result.markdown_len = 100;
     result.etag = etag_val;
@@ -628,7 +630,7 @@ test_upstream_etag_removed_when_disabled(void)
     TEST_SUBSECTION("Task 2.6: Upstream ETag removed when ETag generation disabled");
 
     memset(&conf, 0, sizeof(conf));
-    conf.generate_etag = 0;
+    conf.policy.generate_etag = 0;
     memset(&result, 0, sizeof(result));
     result.markdown_len = 50;
 
@@ -717,7 +719,7 @@ test_304_response_properties(void)
     TEST_SUBSECTION("Task 4.4-4.6: 304 response properties");
 
     memset(&conf, 0, sizeof(conf));
-    conf.generate_etag = 1;
+    conf.policy.generate_etag = 1;
     memset(&result, 0, sizeof(result));
     result.markdown_len = 100;
     result.etag = etag_val;
@@ -898,7 +900,7 @@ test_head_response_parity(void)
     TEST_SUBSECTION("Task 6.7: HEAD response header parity with GET");
 
     memset(&conf, 0, sizeof(conf));
-    conf.generate_etag = 1;
+    conf.policy.generate_etag = 1;
     conf.token_estimate = 1;
     memset(&result, 0, sizeof(result));
     result.markdown_len = 1234;
@@ -1057,7 +1059,7 @@ test_upstream_etag_all_invalidated(void)
     TEST_SUBSECTION("Task 9.1/9.3: All upstream ETags invalidated on replacement");
 
     memset(&conf, 0, sizeof(conf));
-    conf.generate_etag = 1;
+    conf.policy.generate_etag = 1;
     memset(&result, 0, sizeof(result));
     result.markdown_len = 100;
     result.etag = etag_val;
@@ -1122,7 +1124,7 @@ test_upstream_etag_preserved_failopen(void)
     r_control.headers_out.etag = etag_h_control;
 
     memset(&conf, 0, sizeof(conf));
-    conf.generate_etag = 1;
+    conf.policy.generate_etag = 1;
     conf.token_estimate = 1;
     memset(&result, 0, sizeof(result));
     result.markdown_len = 100;
@@ -1360,7 +1362,7 @@ test_parity_exceptions(void)
     TEST_SUBSECTION("Task 12.2: Parity exceptions documented");
 
     memset(&conf, 0, sizeof(conf));
-    conf.generate_etag = 1;
+    conf.policy.generate_etag = 1;
     conf.token_estimate = 1;
     memset(&result, 0, sizeof(result));
     result.markdown_len = 200;

@@ -86,10 +86,12 @@ typedef struct {
     ngx_flag_t token_estimate;
     ngx_flag_t front_matter;
     ngx_flag_t on_wildcard;
-    ngx_uint_t auth_policy;
-    void *auth_cookies;
-    ngx_flag_t generate_etag;
-    ngx_uint_t conditional_requests;
+    struct {
+        ngx_uint_t auth_policy;
+        void *auth_cookies;
+        ngx_flag_t generate_etag;
+        ngx_uint_t conditional_requests;
+    } policy;
     ngx_flag_t buffer_chunked;
     void *stream_types;
 } ngx_http_markdown_conf_t;
@@ -343,7 +345,7 @@ test_update_headers_full_path(void)
     TEST_SUBSECTION("Update headers with ETag and token estimation enabled");
 
     memset(&conf, 0, sizeof(conf));
-    conf.generate_etag = 1;
+    conf.policy.generate_etag = 1;
     conf.token_estimate = 1;
 
     memset(&result, 0, sizeof(result));
@@ -390,7 +392,7 @@ test_update_headers_without_optional_fields(void)
     TEST_SUBSECTION("Update headers without ETag/token output");
 
     memset(&conf, 0, sizeof(conf));
-    conf.generate_etag = 0;
+    conf.policy.generate_etag = 0;
     conf.token_estimate = 0;
 
     memset(&result, 0, sizeof(result));
@@ -444,7 +446,7 @@ test_update_headers_etag_no_existing(void)
     TEST_SUBSECTION("Update headers with ETag but no existing Vary header");
 
     memset(&conf, 0, sizeof(conf));
-    conf.generate_etag = 1;
+    conf.policy.generate_etag = 1;
     conf.token_estimate = 0;
 
     memset(&result, 0, sizeof(result));
@@ -478,7 +480,7 @@ test_update_headers_etag_existing_vary_accept(void)
     TEST_SUBSECTION("Update headers with ETag and existing Vary: Accept");
 
     memset(&conf, 0, sizeof(conf));
-    conf.generate_etag = 1;
+    conf.policy.generate_etag = 1;
     conf.token_estimate = 0;
 
     memset(&result, 0, sizeof(result));
@@ -512,7 +514,7 @@ test_update_headers_token_zero(void)
     TEST_SUBSECTION("Update headers with token_estimate enabled but zero count");
 
     memset(&conf, 0, sizeof(conf));
-    conf.generate_etag = 0;
+    conf.policy.generate_etag = 0;
     conf.token_estimate = 1;
 
     memset(&result, 0, sizeof(result));
