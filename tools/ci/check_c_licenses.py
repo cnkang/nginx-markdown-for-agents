@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import re
 import shlex
-import sys
 from pathlib import Path
 
 
@@ -78,9 +77,10 @@ def check_module_link_libs() -> list[str]:
             if token.startswith("-l") and len(token) > 2:
                 libs.add(token[2:])
 
-    unexpected = [lib for lib in libs if lib not in ALLOWED_LINK_LIBS]
+        unexpected = [lib for lib in libs if lib not in ALLOWED_LINK_LIBS]
     violations.extend(
-        f"{MODULE_CONFIG}: unexpected linker library '-l{lib}' (allowed: {sorted(ALLOWED_LINK_LIBS)})"
+        f"{MODULE_CONFIG}: unexpected linker library '-l{lib}' "
+        f"(allowed: {sorted(ALLOWED_LINK_LIBS)})"
         for lib in unexpected
     )
     return violations
