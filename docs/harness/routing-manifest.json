@@ -337,18 +337,27 @@
         "tools/perf/**",
         "tools/tests/**",
         "tools/lib/path_validation.py",
+        "tools/harness/detect_cwe22_paths.py",
+        "tools/harness/detect_cwe190_casts.sh",
+        "tools/harness/detect_shell_hygiene.sh",
+        "tools/harness/detect_const_correctness.py",
         "skills/nginx-markdown-harness-maintenance/scripts/**"
       ],
       "keywords": [
         "path validation",
         "path traversal",
         "cwe-22",
+        "cwe-190",
         "command injection",
         "repo-relative",
         "validate_read_path",
         "validate_write_path_within_root",
         "trusted input only",
-        "shell=False"
+        "shell=False",
+        "shell hygiene",
+        "return statement",
+        "stderr redirect",
+        "const correctness"
       ],
       "verification_families": [
         "harness-sync",
