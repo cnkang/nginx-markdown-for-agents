@@ -16,6 +16,7 @@ def _workflow_data(name: str) -> dict[str, object]:
     """
     repo_root = Path(__file__).resolve().parents[4]
     path = repo_root / ".github" / "workflows" / name
+    # Path is constructed from trusted repo root and test-controlled name parameter
     with path.open(encoding="utf-8") as f:
         return yaml.load(f, Loader=yaml.BaseLoader)  # noqa: S506
 

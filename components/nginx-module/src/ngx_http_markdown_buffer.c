@@ -13,7 +13,7 @@
 #define NGX_HTTP_MARKDOWN_BUFFER_INITIAL_CAPACITY (64 * 1024)
 
 static void ngx_http_markdown_buffer_cleanup(void *data);
-static ngx_int_t ngx_http_markdown_buffer_ensure_capacity(ngx_http_markdown_buffer_t *buf,
+static ngx_int_t ngx_http_markdown_buffer_ensure_capacity(const ngx_http_markdown_buffer_t *buf,
     size_t required);
 
 /*
@@ -146,7 +146,7 @@ ngx_http_markdown_buffer_append(ngx_http_markdown_buffer_t *buf,
  * callers can estimate body size, but it never raises the configured max_size.
  */
 ngx_int_t
-ngx_http_markdown_buffer_reserve(ngx_http_markdown_buffer_t *buf, size_t capacity_hint)
+ngx_http_markdown_buffer_reserve(const ngx_http_markdown_buffer_t *buf, size_t capacity_hint)
 {
     if (buf == NULL) {
         return NGX_ERROR;
@@ -170,7 +170,7 @@ ngx_http_markdown_buffer_reserve(ngx_http_markdown_buffer_t *buf, size_t capacit
  * complexity to O(1) while maintaining a strict upper bound for safety.
  */
 static ngx_int_t
-ngx_http_markdown_buffer_ensure_capacity(ngx_http_markdown_buffer_t *buf, size_t required)
+ngx_http_markdown_buffer_ensure_capacity(const ngx_http_markdown_buffer_t *buf, size_t required)
 {
     u_char *new_data;
     size_t  new_capacity;

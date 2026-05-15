@@ -779,7 +779,7 @@ ngx_int_t ngx_http_markdown_buffer_init(ngx_http_markdown_buffer_t *buf,
     size_t max_size, ngx_pool_t *pool);
 
 /* Pre-reserve buffer capacity (bounded by max_size) when size hints are available */
-ngx_int_t ngx_http_markdown_buffer_reserve(ngx_http_markdown_buffer_t *buf,
+ngx_int_t ngx_http_markdown_buffer_reserve(const ngx_http_markdown_buffer_t *buf,
     size_t capacity_hint);
 
 /* Append data to buffer with size limit checking */

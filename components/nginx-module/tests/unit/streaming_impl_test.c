@@ -1049,7 +1049,7 @@ ngx_http_markdown_otel_span_start(ngx_http_request_t *r,
 }
 
 static ngx_inline void
-ngx_http_markdown_otel_set_str_attr(ngx_http_markdown_otel_span_t *span,
+ngx_http_markdown_otel_set_str_attr(const ngx_http_markdown_otel_span_t *span,
     const u_char *key, size_t key_len,
     const u_char *val, size_t val_len)
 {
@@ -1061,7 +1061,7 @@ ngx_http_markdown_otel_set_str_attr(ngx_http_markdown_otel_span_t *span,
 }
 
 static ngx_inline void
-ngx_http_markdown_otel_set_int_attr(ngx_http_markdown_otel_span_t *span,
+ngx_http_markdown_otel_set_int_attr(const ngx_http_markdown_otel_span_t *span,
     const u_char *key, size_t key_len,
     int64_t val)
 {
@@ -1072,7 +1072,7 @@ ngx_http_markdown_otel_set_int_attr(ngx_http_markdown_otel_span_t *span,
 }
 
 static ngx_inline void
-ngx_http_markdown_otel_span_end(ngx_http_markdown_otel_span_t *span)
+ngx_http_markdown_otel_span_end(const ngx_http_markdown_otel_span_t *span)
 {
     (void) span;
 }
