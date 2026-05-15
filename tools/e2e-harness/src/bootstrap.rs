@@ -40,28 +40,43 @@ pub fn prepare(base_dir: &Path) -> Result<BootstrapResult> {
 }
 
 /// Attempt to find an existing NGINX binary on PATH.
+///
+/// Resolves PATH entries in Rust instead of shelling out to `which`,
+/// which is more portable and avoids depending on a POSIX-specific
+/// external command.
 fn try_direct_prepare() -> Result<Option<BootstrapResult>> {
     let candidates = ["nginx", "nginx-debug"];
     for name in candidates {
-        if let Ok(output) = std::process::Command::new("which").arg(name).output()
-            && output.status.success()
-        {
-            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            let nginx_bin = PathBuf::from(&path);
-            if nginx_bin.exists() {
-                let module_path = nginx_bin
-                    .parent()
-                    .and_then(|p| p.parent())
-                    .map(|p| p.join("modules"))
-                    .unwrap_or_else(|| PathBuf::from(""));
-                return Ok(Some(BootstrapResult {
-                    nginx_bin,
-                    module_path,
-                }));
-            }
+        if let Some(nginx_bin) = find_on_path(name) {
+            let module_path = nginx_bin
+                .parent()
+                .and_then(|p| p.parent())
+                .map(|p| p.join("modules"))
+                .unwrap_or_else(|| PathBuf::from(""));
+            return Ok(Some(BootstrapResult {
+                nginx_bin,
+                module_path,
+            }));
         }
     }
     Ok(None)
+}
+
+/// Search PATH directories for an executable with the given name.
+///
+/// On Unix-like systems, checks for the name directly.  This is
+/// sufficient for macOS and Linux where executables typically lack
+/// a file extension.  Returns the first match that exists and is
+/// executable, or `None` if not found.
+fn find_on_path(name: &str) -> Option<PathBuf> {
+    let path_var = std::env::var_os("PATH")?;
+    for dir in std::env::split_paths(&path_var) {
+        let candidate = dir.join(name);
+        if candidate.exists() {
+            return Some(candidate);
+        }
+    }
+    None
 }
 
 /// Bridge to `tools/lib/nginx_markdown_native_build.sh` for preparation.
