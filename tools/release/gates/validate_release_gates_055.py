@@ -28,7 +28,7 @@ import shutil
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # noqa: E402
 from lib.path_validation import validate_read_path
 
 # ---------------------------------------------------------------------------
@@ -185,7 +185,7 @@ def check_release_checklist(result: ValidationResult) -> None:
     content = RELEASE_CHECKLIST_PATH.read_text(encoding="utf-8")
 
     for section in ["Phase 1: Cheap Blockers", "Phase 2: Focused Semantic", "Phase 3: Umbrella"]:
-        check_id = section.split(':')[0].strip().lower().replace(' ', '-')
+        check_id = section.split(':', maxsplit=1)[0].strip().lower().replace(' ', '-')
         if section in content:
             result.passed(f"release-checklist:{check_id}")
         else:
@@ -300,18 +300,19 @@ def validate_required_fields(data: dict[str, object], result: ValidationResult) 
             f"missing: {', '.join(missing_fields)}",
         )
         return False
-    elif wrong_type_fields:
+
+    if wrong_type_fields:
         result.failed(
             EVIDENCE_ARTIFACT_REQUIRED_FIELDS,
             f"type mismatches: {'; '.join(wrong_type_fields)}",
         )
         return False
-    else:
-        result.passed(
-            EVIDENCE_ARTIFACT_REQUIRED_FIELDS,
-            "all required fields present with correct types",
-        )
-        return True
+
+    result.passed(
+        EVIDENCE_ARTIFACT_REQUIRED_FIELDS,
+        "all required fields present with correct types",
+    )
+    return True
 
 
 def evidence_field_has_type(value: object, expected_type: type) -> bool:
@@ -499,7 +500,8 @@ def validate_entries_consistency(data: dict[str, object], result: ValidationResu
     if drift_sum == entries_total and severity_sum == entries_total:
         result.passed(
             EVIDENCE_ARTIFACT_ENTRIES_CONSISTENCY,
-            f"drift_type({drift_sum}) = severity({severity_sum}) = registry_entries({entries_total})",
+            f"drift_type({drift_sum}) = severity({severity_sum}) = "
+            f"registry_entries({entries_total})",
         )
     else:
         result.failed(
@@ -553,25 +555,32 @@ def check_known_differences_metadata(result: ValidationResult) -> None:
     if unscoped_without_justification:
         result.failed(
             KNOWN_DIFFS_SUPPRESSOR_SCOPE,
-            f"entries without fixture_contains or global_suppressor_justification: {', '.join(unscoped_without_justification)}",
+            f"entries without fixture_contains or "
+            f"global_suppressor_justification: "
+            f"{', '.join(unscoped_without_justification)}",
         )
     else:
         result.passed(KNOWN_DIFFS_SUPPRESSOR_SCOPE, "all entries scoped or justified")
 
 
-def _load_known_difference_entries(result: ValidationResult) -> list[dict[str, object]] | None:
+def _load_known_difference_entries(
+    result: ValidationResult,
+) -> list[dict[str, object]] | None:
     """Load known-difference entries, reporting gate status on failure."""
     if not KNOWN_DIFF_PATH.is_file():
-        result.failed(KNOWN_DIFFS_EXISTS, "tests/streaming/known-differences.toml not found")
+        result.failed(
+            KNOWN_DIFFS_EXISTS,
+            "tests/streaming/known-differences.toml not found",
+        )
         return None
 
     result.passed(KNOWN_DIFFS_EXISTS)
 
     try:
-        import tomllib
+        import tomllib  # noqa: PLC0415
     except ModuleNotFoundError:
         try:
-            import tomli as tomllib  # type: ignore[no-redef]
+            import tomli as tomllib  # type: ignore[no-redef]  # noqa: PLC0415
         except ModuleNotFoundError:
             result.failed(
                 KNOWN_DIFFS_METADATA,
@@ -604,11 +613,14 @@ def check_changelog_entry(result: ValidationResult) -> None:
 
 def check_reason_code_audit(result: ValidationResult) -> None:
     """Run the reason-code lifecycle audit script and report its status."""
-    import subprocess
+    import subprocess  # noqa: PLC0415
 
     audit_script = PROJECT_ROOT / "tools" / "harness" / "audit_reason_codes.sh"
     if not audit_script.is_file():
-        result.failed(REASON_CODE_AUDIT_SCRIPT, "tools/harness/audit_reason_codes.sh not found")
+        result.failed(
+            REASON_CODE_AUDIT_SCRIPT,
+            "tools/harness/audit_reason_codes.sh not found",
+        )
         return
 
     bash_path = shutil.which("bash")
@@ -623,6 +635,7 @@ def check_reason_code_audit(result: ValidationResult) -> None:
             text=True,
             cwd=str(PROJECT_ROOT),
             timeout=60,
+            check=False,
         )
     except (subprocess.TimeoutExpired, OSError) as exc:
         result.failed(REASON_CODES_AUDIT, f"audit_reason_codes.sh execution error: {exc}")
@@ -631,7 +644,11 @@ def check_reason_code_audit(result: ValidationResult) -> None:
     if proc.returncode == 0:
         result.passed(REASON_CODES_AUDIT, "all reason codes have complete lifecycles")
     else:
-        detail = proc.stderr.strip().split("\n")[-1] if proc.stderr.strip() else "exit code non-zero"
+        detail = (
+            proc.stderr.strip().split("\n")[-1]
+            if proc.stderr.strip()
+            else "exit code non-zero"
+        )
         result.failed(REASON_CODES_AUDIT, detail)
 
 
