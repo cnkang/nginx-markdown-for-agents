@@ -889,7 +889,7 @@ ngx_http_markdown_dynconf_parse_size_safe(const u_char *value, size_t value_len,
         return NGX_ERROR;
     }
 
-    *out = (size_t) parsed;
+    *out = (size_t) parsed;  /* guarded by parsed >= 0 check above */
     return NGX_OK;
 }
 
