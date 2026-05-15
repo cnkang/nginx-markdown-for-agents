@@ -40,6 +40,7 @@ jobs:
         with:
           workspaces: |
             components/rust-converter -> target
+          cache-bin: false
 
       - name: Build release binary
         working-directory: components/rust-converter
