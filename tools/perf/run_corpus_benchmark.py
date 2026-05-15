@@ -450,7 +450,7 @@ def main(argv: list[str] | None = None) -> int:
     """Entry point for the corpus benchmark runner."""
     args = build_cli_parser().parse_args(argv)
 
-    corpus_dir = Path(args.corpus_dir)
+    corpus_dir = validate_read_path(args.corpus_dir, purpose="corpus directory")
     converter_bin = args.converter_bin
     output_path = args.output
     factor = args.token_approx_factor

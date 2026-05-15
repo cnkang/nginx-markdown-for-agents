@@ -498,7 +498,7 @@ def main(argv=None):
     direction_map = build_direction_map(metrics_schema)
 
     # ---- Load baseline (missing → skipped) ----
-    baseline_path = Path(args.baseline)
+    baseline_path = validate_read_path(args.baseline, purpose="baseline report", must_exist=False)
     if not baseline_path.exists():
         platform_label = args.platform
         build_skipped_verdict(
@@ -523,7 +523,7 @@ def main(argv=None):
 
     # ---- Load thresholds config (missing → use defaults with warning) ----
     thresholds_cfg = {"platforms": {}}
-    thresholds_path = Path(args.thresholds)
+    thresholds_path = validate_read_path(args.thresholds, purpose="thresholds config", must_exist=False)
     if not thresholds_path.exists():
         _stderr("Using default thresholds")
     else:

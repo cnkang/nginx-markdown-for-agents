@@ -46,6 +46,7 @@ _wrapper_cleanup() {
       rm -rf "$d" 2>/dev/null || true
     fi
   done
+  return 0
 }
 trap _wrapper_cleanup EXIT
 trap 'trap - EXIT; _wrapper_cleanup; exit 130' INT TERM
