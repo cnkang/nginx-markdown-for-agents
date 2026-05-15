@@ -31,9 +31,6 @@ components/rust-converter/fuzz/target/
 # Proptest old-style regression files (superseded by proptest-regressions/ dirs)
 **/*.proptest-regressions
 
-# Generated C header mirror (copy from Rust include)
-components/nginx-module/src/markdown_converter.h
-
 # NGINX module test artifacts
 components/nginx-module/tests/build/
 components/nginx-module/tests/**/*.dSYM/

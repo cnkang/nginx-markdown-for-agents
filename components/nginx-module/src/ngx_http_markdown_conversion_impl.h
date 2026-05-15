@@ -300,6 +300,64 @@ ngx_http_markdown_extract_forwarded_host(const ngx_str_t *xfh,
     return NGX_OK;
 }
 
+
+/*
+ * Validate a single Host value (not comma-separated).
+ *
+ * Unlike extract_forwarded_host(), this rejects any value containing
+ * a comma — a plain Host header should never be comma-separated.
+ * Used for r->headers_in.server before it enters base_url
+ * construction.
+ *
+ * @param host             The host string to validate.
+ * @param validated_host   Output: the validated host (same pointers).
+ * @returns NGX_OK on success, NGX_ERROR on invalid host.
+ */
+static ngx_int_t
+ngx_http_markdown_validate_single_host(const ngx_str_t *host,
+                                       ngx_str_t *validated_host)
+{
+    u_char    *host_data;
+    size_t     host_len;
+    ngx_flag_t is_ipv6;
+
+    host_data = host->data;
+    host_len = host->len;
+
+    if (host_len == 0) {
+        return NGX_ERROR;
+    }
+
+    /*
+     * Reject comma-separated values.  A plain Host header
+     * must contain exactly one host; commas indicate either
+     * a malformed value or X-Forwarded-Host leakage.
+     */
+    for (size_t i = 0; i < host_len; i++) {
+        if (host_data[i] == ',') {
+            return NGX_ERROR;
+        }
+    }
+
+    is_ipv6 = (host_len >= 2 && host_data[0] == '[') ? 1 : 0;
+
+    if (!ngx_http_markdown_validate_host_chars(host_data, host_len,
+                                               is_ipv6))
+    {
+        return NGX_ERROR;
+    }
+
+    if (is_ipv6
+        && !ngx_http_markdown_validate_ipv6_brackets(host_data, host_len))
+    {
+        return NGX_ERROR;
+    }
+
+    validated_host->data = host_data;
+    validated_host->len = host_len;
+    return NGX_OK;
+}
+
 /**
  * Selects the URL scheme and host to use when constructing a base URL for the request.
  *
@@ -370,15 +428,16 @@ ngx_http_markdown_select_base_url_parts(ngx_http_request_t *r,
         *scheme = r->schema;
 
         /*
-         * Validate the request Host with the same logic used
-         * for X-Forwarded-Host to prevent control-character
-         * injection or malformed host values from reaching
-         * the base_url construction.
+         * Validate the request Host with strict single-host
+         * semantics: reject comma-separated values (unlike
+         * X-Forwarded-Host which allows comma-delimited chains),
+         * control characters, and path separators to prevent
+         * injection into base_url construction.
          *
          * On validation failure, fall back to the core
          * server_name which is operator-controlled.
          */
-        if (ngx_http_markdown_extract_forwarded_host(
+        if (ngx_http_markdown_validate_single_host(
                 &r->headers_in.server, &validated_server) == NGX_OK)
         {
             *host = validated_server;
