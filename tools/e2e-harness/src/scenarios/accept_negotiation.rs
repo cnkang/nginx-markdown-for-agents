@@ -4,7 +4,7 @@
 //! Validates critical content-negotiation paths:
 //! 1. Accept: text/markdown triggers conversion (text/markdown response)
 //! 2. Accept: text/html returns original HTML (no conversion)
-//! 3. No Accept header returns original HTML (default behavior)
+//! 3. Empty Accept value returns original HTML (default non-convert behavior)
 //! 4. Accept: */* with markdown_on_wildcard on triggers conversion
 //! 5. Accept: */* with markdown_on_wildcard off does NOT trigger conversion
 //! 6. Vary: Accept header present in converted responses
@@ -43,7 +43,8 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
     let mut wildcard_headers = HashMap::new();
     wildcard_headers.insert("Accept".to_string(), "*/*".to_string());
 
-    let no_accept_headers = HashMap::new();
+    let mut no_accept_headers = HashMap::new();
+    no_accept_headers.insert("Accept".to_string(), "".to_string());
 
     // Case 1: Accept: text/markdown triggers conversion
     let resp1 = match http::get_with_headers(&md_html_url, &markdown_headers) {
@@ -99,7 +100,7 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
         ));
     }
 
-    // Case 3: No Accept header returns original HTML (default)
+    // Case 3: Empty Accept value returns original HTML (default non-convert)
     if let Some(resp3) = common::try_get_with_headers(
         &md_html_url,
         &no_accept_headers,
