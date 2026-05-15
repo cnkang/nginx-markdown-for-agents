@@ -112,10 +112,8 @@ typedef struct MarkdownOptions {
   /**
    * Markdown flavor selector.
    *
-   * `0` selects CommonMark-compatible output, `1` selects the GFM
-   * extension set, `2` selects MDX (experimental), `3` selects
-   * Org-mode (experimental). Values outside 0-3 are rejected
-   * during option decoding with `ConversionError::InvalidInput`.
+   * `0` selects CommonMark-compatible output and `1` selects the GFM
+   * extension set. Other values are rejected during option decoding.
    */
   uint32_t flavor;
   /**
@@ -207,14 +205,9 @@ typedef struct MarkdownOptions {
   /**
    * Unified memory budget in bytes (0 = use per-engine defaults).
    *
-   * Currently enforced only by the streaming and incremental
-   * conversion paths.  The full-buffer path relies on the
-   * NGINX-side `max_size` limit for input bounding; the Rust
-   * full-buffer converter does not check this budget internally.
-   *
-   * When non-zero and no per-engine explicit budget is set, this
-   * value overrides the default budget for streaming/incremental
-   * engines. Priority: per-engine explicit > unified > default.
+   * When non-zero, this value overrides the default budget for both
+   * streaming and full-buffer engines, unless a per-engine explicit
+   * budget is set. Priority: per-engine explicit > unified > default.
    * Populated from the `markdown_memory_budget` NGINX directive.
    */
   uint64_t memory_budget;
