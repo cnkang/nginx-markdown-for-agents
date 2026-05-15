@@ -17,8 +17,11 @@ Usage:
 from __future__ import annotations
 
 import os
+import re
 import sys
 from pathlib import Path
+
+_SAFE_FILENAME_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]*$")
 
 
 def validate_read_path(
@@ -121,3 +124,37 @@ def sanitize_path_component(name: str) -> str:
     """
     result = name.replace("/", "_").replace("\\", "_").replace("..", "_")
     return result
+
+
+def validate_filename_strict(name: str, *, purpose: str = "filename") -> str:
+    """
+    Validate a filename against a strict allowlist pattern (CWE-22 / S2083).
+
+    Only allows alphanumeric characters, underscores, hyphens, and dots.
+    Must start with an alphanumeric or underscore character.  Rejects
+    empty strings, path separators, traversal markers, and any
+    characters outside the allowlist.
+
+    Unlike ``sanitize_path_component`` (blocklist), this function uses
+    an allowlist approach that is recognized by static-analysis taint
+    trackers as a proper sanitization boundary.
+
+    Parameters:
+        name: Raw filename string to validate.
+        purpose: Human-readable label for error messages.
+
+    Returns:
+        The validated filename string (unchanged if valid).
+
+    Raises:
+        ValueError: If the filename contains disallowed characters
+                    or is empty.
+    """
+    if not name or not _SAFE_FILENAME_RE.match(name):
+        raise ValueError(
+            f"Invalid {purpose}: {name!r}. "
+            f"Only alphanumeric characters, underscores, hyphens, "
+            f"and dots are allowed.  Must start with an alphanumeric "
+            f"or underscore character."
+        )
+    return name
