@@ -6,7 +6,11 @@ import json
 import socketserver
 import ssl
 
-SIMPLE_HTML = """<html><head><title>Simple</title></head><body><h1>Simple Test Page</h1><p>Visit <a href=\"https://example.com\">Example</a>.</p></body></html>"""
+SIMPLE_HTML = (
+    "<html><head><title>Simple</title></head>"
+    "<body><h1>Simple Test Page</h1>"
+    '<p>Visit <a href="https://example.com">Example</a>.</p></body></html>'
+)
 ERROR_HTML = """<html><body><h1>Backend Error</h1></body></html>"""
 
 HTTP_STATUS_MESSAGES = {
@@ -18,11 +22,13 @@ HTTP_STATUS_MESSAGES = {
 
 
 def status_line(status: int) -> bytes:
+    """Format an HTTP/1.1 status line for the given status code."""
     message = HTTP_STATUS_MESSAGES.get(status, "Unknown")
     return f"HTTP/1.1 {status} {message}\r\n".encode("ascii")
 
 
 class TLSBackendHandler(socketserver.StreamRequestHandler):
+    """Simple HTTP request handler for TLS backend E2E tests."""
     def handle(self) -> None:
         request_line = self.rfile.readline(65537)
         if not request_line:
@@ -90,6 +96,7 @@ class TLSBackendHandler(socketserver.StreamRequestHandler):
 
 
 class ThreadingTLSServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
+    """A threading TCP server that wraps connections with TLS."""
     allow_reuse_address = True
     daemon_threads = True
 
@@ -104,6 +111,7 @@ class ThreadingTLSServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
 
 
 def main() -> None:
+    """Launch a TLS backend server for E2E testing."""
     parser = argparse.ArgumentParser(description="TLS backend for markdown proxy E2E checks")
     parser.add_argument("--port", type=int, default=9999)
     parser.add_argument("--tls-cert", required=True)
