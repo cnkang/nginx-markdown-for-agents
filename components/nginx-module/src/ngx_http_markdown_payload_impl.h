@@ -715,8 +715,8 @@ ngx_http_markdown_forward_headers(ngx_http_request_t *r, ngx_http_markdown_ctx_t
         return NGX_OK;
     }
 
-    if (ctx->has_last_modified_time) {
-        r->headers_out.last_modified_time = ctx->source_last_modified_time;
+    if (ctx->last_modified.has_last_modified_time) {
+        r->headers_out.last_modified_time = ctx->last_modified.source_last_modified_time;
     }
 
     rc = ngx_http_next_header_filter(r);

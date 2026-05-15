@@ -34,10 +34,13 @@ def _write_text_with_repo_guard(
     output_path: str | Path, content: str, *, purpose: str,
 ) -> Path:
     """Resolve output path under REPO_ROOT and write UTF-8 text safely."""
+    candidate_output = Path(output_path)
+    if not candidate_output.is_absolute():
+        candidate_output = REPO_ROOT / candidate_output
     validated_output = validate_write_path_within_root(
-        output_path, REPO_ROOT, purpose=purpose,
-    )
-    if not validated_output.is_relative_to(REPO_ROOT):
+        candidate_output, REPO_ROOT, purpose=purpose,
+    ).resolve()
+    if not validated_output.is_relative_to(REPO_ROOT.resolve()):
         raise ValueError(
             f"Refusing to write outside repository root: {validated_output}"
         )

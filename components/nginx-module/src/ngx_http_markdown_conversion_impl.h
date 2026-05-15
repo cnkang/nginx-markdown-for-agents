@@ -524,8 +524,8 @@ ngx_http_markdown_resolve_conditional_result(ngx_http_request_t *r,
         ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                       "markdown filter: If-None-Match matched, sending 304 Not Modified");
 
-        if (ctx != NULL && ctx->has_last_modified_time) {
-            r->headers_out.last_modified_time = ctx->source_last_modified_time;
+        if (ctx != NULL && ctx->last_modified.has_last_modified_time) {
+            r->headers_out.last_modified_time = ctx->last_modified.source_last_modified_time;
         }
 
         rc = ngx_http_markdown_send_304(r, conditional_result);

@@ -382,6 +382,11 @@ typedef enum {
  * This structure maintains per-request state for the Markdown filter.
  */
 typedef struct {
+    time_t      source_last_modified_time; /* Preserved upstream Last-Modified */
+    ngx_flag_t  has_last_modified_time;    /* Whether Last-Modified was present */
+} ngx_http_markdown_last_modified_state_t;
+
+typedef struct {
     ngx_http_request_t          *request;
     ngx_chain_t                 *in;           /* Input chain */
     ngx_chain_t                 *out;          /* Output chain */
@@ -390,8 +395,8 @@ typedef struct {
     ngx_flag_t                   buffer_initialized;
     ngx_flag_t                   eligible;     /* Eligible for conversion */
     ngx_flag_t                   headers_forwarded; /* Whether downstream headers were sent */
-    time_t                       source_last_modified_time; /* Preserved upstream Last-Modified */
-    ngx_flag_t                   has_last_modified_time;     /* Whether Last-Modified was present */
+    ngx_http_markdown_last_modified_state_t
+                                last_modified;
     ngx_flag_t                   conversion_attempted;
     ngx_flag_t                   conversion_succeeded;
     ngx_flag_t                   bypass_counted; /* Whether conversions_bypassed was incremented */
