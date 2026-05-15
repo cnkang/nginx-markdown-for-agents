@@ -17,6 +17,8 @@ import sys
 
 @dataclass(frozen=True)
 class Pair:
+    """A canonical/mirror documentation pair to compare."""
+
     canonical: str
     mirror: str
 
@@ -31,6 +33,7 @@ MIRROR_NOTE_PATTERNS = [
 
 
 def normalize_markdown(text: str) -> list[str]:
+    """Normalize markdown text for comparison by removing mirror notes and extra blanks."""
     # Normalize line endings and remove intentional mirror-copy notes.
     lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
     kept: list[str] = []
@@ -60,6 +63,7 @@ def normalize_markdown(text: str) -> list[str]:
 
 
 def main() -> int:
+    """Check all configured duplicate pairs and report drift."""
     root = Path(__file__).resolve().parents[2]
     failures = 0
 

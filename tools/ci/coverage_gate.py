@@ -46,7 +46,10 @@ class CoverageSummary:
 
     @property
     def function_pct(self) -> float:
-        """Function coverage as a percentage (0.0–100.0). Returns 0.0 when no functions are found."""
+        """Function coverage as a percentage (0.0-100.0).
+
+        Returns 0.0 when no functions are found.
+        """
         if self.functions_found == 0:
             return 0.0
         return (self.functions_hit / self.functions_found) * 100.0

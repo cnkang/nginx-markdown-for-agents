@@ -14,7 +14,6 @@ the final binary.
 from __future__ import annotations
 
 import re
-import sys
 from pathlib import Path
 
 
@@ -76,6 +75,7 @@ def check_dep_in_notices(patterns: list[str], notices: str) -> bool:
 
 
 def main() -> int:
+    """Run THIRD-PARTY-NOTICES coverage check and report results."""
     # --- Existence check ---
     if not NOTICES_PATH.is_file():
         print(f"THIRD-PARTY-NOTICES file not found at: {NOTICES_PATH}")
