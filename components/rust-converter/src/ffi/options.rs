@@ -46,11 +46,14 @@ pub(crate) struct DecodedOptions<'a> {
     pub(crate) prune_selectors: Option<&'a str>,
     #[allow(dead_code)]
     pub(crate) prune_protection_selectors: Option<&'a str>,
+    /// Unified memory budget (bytes).  Currently enforced only by the
+    /// streaming and incremental paths.  The full-buffer path relies
+    /// on the NGINX-side `max_size` limit instead; see the FFI
+    /// header contract for details.
     #[allow(dead_code)]
     pub(crate) memory_budget: u64,
     #[allow(dead_code)]
     pub(crate) llm_provider: LlmProvider,
-    #[allow(dead_code)]
     pub(crate) chars_per_token: f32,
 }
 
@@ -175,10 +178,16 @@ pub(crate) fn decode_options(
         optional_utf8(options.base_url, options.base_url_len, "base_url")?.map(ToOwned::to_owned);
 
     let flavor = match options.flavor {
+        0 => MarkdownFlavor::CommonMark,
         1 => MarkdownFlavor::GitHubFlavoredMarkdown,
         2 => MarkdownFlavor::Mdx,
         3 => MarkdownFlavor::OrgMode,
-        _ => MarkdownFlavor::CommonMark,
+        _ => {
+            return Err(ConversionError::InvalidInput(format!(
+                "invalid markdown flavor: {} (must be 0-3)",
+                options.flavor
+            )));
+        }
     };
 
     let include_front_matter = options.front_matter != 0;

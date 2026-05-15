@@ -365,9 +365,31 @@ ngx_http_markdown_select_base_url_parts(ngx_http_request_t *r,
     }
 
     if (r->schema.len > 0 && r->headers_in.server.len > 0) {
+        ngx_str_t  validated_server;
+
         *scheme = r->schema;
-        *host = r->headers_in.server;
-        return NGX_OK;
+
+        /*
+         * Validate the request Host with the same logic used
+         * for X-Forwarded-Host to prevent control-character
+         * injection or malformed host values from reaching
+         * the base_url construction.
+         *
+         * On validation failure, fall back to the core
+         * server_name which is operator-controlled.
+         */
+        if (ngx_http_markdown_extract_forwarded_host(
+                &r->headers_in.server, &validated_server) == NGX_OK)
+        {
+            *host = validated_server;
+            return NGX_OK;
+        }
+
+        ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
+                      "markdown filter: request Host "
+                      "\"%V\" rejected (invalid host), "
+                      "falling back to server_name",
+                      &r->headers_in.server);
     }
 
     cscf = ngx_http_get_module_srv_conf(r, ngx_http_core_module);
@@ -702,13 +724,18 @@ ngx_http_markdown_prepare_conversion_options(ngx_http_request_t *r,
      * streaming_budget_explicit is set during merge_conf when the
      * operator explicitly configured markdown_streaming_budget at
      * this or any parent configuration level.
+     *
+     * After merge_conf, streaming_budget is always resolved to a
+     * concrete default value (never NGX_CONF_UNSET_SIZE), so the
+     * previous check for effective_streaming_budget == UNSET was
+     * always false.  Simplify: apply memory_budget override
+     * whenever memory_budget is configured and the operator did
+     * not explicitly set streaming_budget.
      */
 #ifdef MARKDOWN_STREAMING_ENABLED
     if (ngx_http_markdown_effective_memory_budget(eff, conf)
             != NGX_CONF_UNSET_SIZE
-        && !conf->streaming.budget_explicit
-        && ngx_http_markdown_effective_streaming_budget(eff, conf)
-            == NGX_CONF_UNSET_SIZE)
+        && !conf->streaming.budget_explicit)
     {
         options->streaming_budget =
             ngx_http_markdown_effective_memory_budget(eff, conf);
@@ -782,8 +809,6 @@ ngx_http_markdown_handle_conversion_failure(ngx_http_request_t *r,
                  elapsed_ms);
 
     markdown_result_free(result);
-
-    ngx_http_markdown_metric_inc_failopen(conf);
 
     return ngx_http_markdown_reject_or_fail_open_buffered_response(
         r, ctx, conf,
@@ -1142,8 +1167,6 @@ ngx_http_markdown_handle_converter_not_initialized(
                  "initialized, category=system");
     ngx_http_markdown_record_system_failure(ctx);
 
-    ngx_http_markdown_metric_inc_failopen(conf);
-
     return ngx_http_markdown_reject_or_fail_open_buffered_response(
         r, ctx, conf,
         "markdown filter: fail-open strategy "
@@ -1214,6 +1237,7 @@ ngx_http_markdown_shadow_compare(
     struct StreamingConverterHandle  *handle;
     struct MarkdownOptions            options;
     struct MarkdownResult             st_result;
+    ngx_memzero(&st_result, sizeof(st_result));
     uint8_t                          *out_data;
     uintptr_t                         out_len;
     uint32_t                          init_rc;

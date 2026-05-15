@@ -20,6 +20,7 @@
 use crate::converter::{ConversionContext, MarkdownConverter};
 use crate::error::ConversionError;
 use crate::parser::parse_html_with_charset;
+use crate::token_estimator::TokenEstimator;
 
 use super::abi::{ConversionOutput, MarkdownConverterHandle, MarkdownOptions};
 use super::options::decode_options;
@@ -44,7 +45,7 @@ pub(crate) fn convert_inner(
     if html_slice.is_empty() {
         let markdown = Box::<[u8]>::default();
         let token_estimate = if decoded.estimate_tokens {
-            handle_ref.token_estimator.estimate("")
+            TokenEstimator::with_chars_per_token(decoded.chars_per_token).estimate("")
         } else {
             0
         };
@@ -75,7 +76,7 @@ pub(crate) fn convert_inner(
     let markdown = converter.convert_with_context(&dom, &mut ctx)?;
 
     let token_estimate = if decoded.estimate_tokens {
-        handle_ref.token_estimator.estimate(&markdown)
+        TokenEstimator::with_chars_per_token(decoded.chars_per_token).estimate(&markdown)
     } else {
         0
     };

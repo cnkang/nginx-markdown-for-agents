@@ -81,9 +81,13 @@ pub struct StreamingConverter {
     etag_hasher: Option<blake3::Hasher>,
     /// Incremental token estimate: accumulated character count.
     /// The final token count is computed once in `finalize` as
-    /// `ceil(total_markdown_chars / 4.0)` to match the one-shot
-    /// `TokenEstimator` exactly.
+    /// `ceil(total_markdown_chars / chars_per_token)` to match the
+    /// configured `TokenEstimator` ratio.
     total_markdown_chars: u64,
+    /// Characters-per-token ratio for token estimation.
+    /// Defaults to 4.0 (English text); can be overridden via FFI
+    /// options for CJK, code-heavy, or other LLM profiles.
+    chars_per_token: f32,
     /// Commit state (PreCommit / PostCommit).
     commit_state: CommitState,
     /// Cooperative timeout deadline.
@@ -149,6 +153,15 @@ impl StreamingConverter {
     /// assert!(!result.final_markdown.is_empty());
     /// ```
     pub fn new(options: ConversionOptions, budget: MemoryBudget) -> Self {
+        Self::with_chars_per_token(options, budget, 4.0)
+    }
+
+    /// Create a new streaming converter with a custom chars-per-token ratio.
+    pub fn with_chars_per_token(
+        options: ConversionOptions,
+        budget: MemoryBudget,
+        chars_per_token: f32,
+    ) -> Self {
         let etag_hasher = if options.extract_metadata {
             Some(blake3::Hasher::new())
         } else {
@@ -165,6 +178,11 @@ impl StreamingConverter {
             budget,
             etag_hasher,
             total_markdown_chars: 0,
+            chars_per_token: if chars_per_token > 0.0 {
+                chars_per_token
+            } else {
+                4.0
+            },
             commit_state: CommitState::PreCommit,
             deadline: None,
             stats: StreamingStats::default(),
@@ -443,11 +461,13 @@ impl StreamingConverter {
         });
 
         // 8. Compute final token estimate from accumulated character count.
-        // Uses the same ceil(chars / 4.0) formula as TokenEstimator,
-        // computed once over the total to avoid per-flush rounding drift.
-        // Saturates to u32::MAX for documents exceeding ~17 billion chars.
+        // Uses ceil(total_chars / chars_per_token) to match the configured
+        // TokenEstimator ratio, computed once over the total to avoid
+        // per-flush rounding drift.
+        // Saturates to u32::MAX for documents exceeding representable range.
         let token_estimate = {
-            let est = self.total_markdown_chars.div_ceil(4);
+            let ratio = self.chars_per_token as f64;
+            let est = (self.total_markdown_chars as f64 / ratio).ceil() as u64;
             Some(u32::try_from(est).unwrap_or(u32::MAX))
         };
 

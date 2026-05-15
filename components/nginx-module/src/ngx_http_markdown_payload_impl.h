@@ -115,6 +115,15 @@ ngx_http_markdown_reject_or_fail_open_buffered_response(
         return NGX_ERROR;
     }
 
+    /*
+     * Record fail-open outcome: the original HTML response will
+     * be sent to the client.  This metric is recorded here
+     * (inside the fail-open decision point) rather than at
+     * caller sites, so it cannot be accidentally skipped or
+     * misattributed to the reject path.
+     */
+    NGX_HTTP_MARKDOWN_METRIC_INC(results.failopen_count);
+
     rc = ngx_http_markdown_fail_open_buffered_response(
         r, ctx, debug_message);
     if (rc != NGX_OK) {
@@ -188,8 +197,6 @@ ngx_http_markdown_handle_decompression_alloc_error(
         r, conf, ctx->effective_conf, reason,
         ngx_http_markdown_reason_from_error_category(
             category, r->connection->log));
-
-    ngx_http_markdown_metric_inc_failopen(conf);
 
     return ngx_http_markdown_reject_or_fail_open_buffered_response(
         r, ctx, conf, debug_message);

@@ -117,6 +117,19 @@ jobs:
       - name: Validate docs
         run: make docs-check
 
+  header-sync:
+    name: FFI Header Sync
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Check header synchronization
+        run: make check-headers
+
   rust-quality:
     name: Rust Quality Gate
     needs: changes
