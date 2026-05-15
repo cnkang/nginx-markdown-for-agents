@@ -269,7 +269,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
         NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_FLAG,
         ngx_conf_set_flag_slot,
         NGX_HTTP_LOC_CONF_OFFSET,
-        offsetof(ngx_http_markdown_conf_t, generate_etag),
+        offsetof(ngx_http_markdown_conf_t, policy.generate_etag),
         NULL
     },
 
@@ -789,7 +789,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
         NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
         ngx_conf_set_enum_slot,
         NGX_HTTP_LOC_CONF_OFFSET,
-        offsetof(ngx_http_markdown_conf_t, llm_provider),
+        offsetof(ngx_http_markdown_conf_t, advanced.llm_provider),
         &ngx_http_markdown_llm_provider_values
     },
 
@@ -814,7 +814,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
         NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
         ngx_conf_set_num_slot,
         NGX_HTTP_LOC_CONF_OFFSET,
-        offsetof(ngx_http_markdown_conf_t, chars_per_token_fixed),
+        offsetof(ngx_http_markdown_conf_t, advanced.chars_per_token_fixed),
         NULL
     },
 
@@ -979,7 +979,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
         NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_FLAG,
         ngx_conf_set_flag_slot,
         NGX_HTTP_LOC_CONF_OFFSET,
-        offsetof(ngx_http_markdown_conf_t, dynconf_enabled),
+        offsetof(ngx_http_markdown_conf_t, advanced.dynconf_enabled),
         NULL
     },
 
@@ -1000,7 +1000,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
         NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
         ngx_http_markdown_set_dynconf_path,
         NGX_HTTP_LOC_CONF_OFFSET,
-        offsetof(ngx_http_markdown_conf_t, dynconf_path),
+        offsetof(ngx_http_markdown_conf_t, advanced.dynconf_path),
         NULL
     },
 

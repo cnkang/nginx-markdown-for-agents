@@ -435,7 +435,11 @@ struct ngx_shm_zone_s {
 ngx_shm_zone_t *ngx_http_markdown_metrics_shm_zone = NULL;
 
 #ifndef ngx_atomic_fetch_add
-#define ngx_atomic_fetch_add(p, v)  ((void)(*(p) += (v)), *(p))
+#define ngx_atomic_fetch_add(p, v)                                           \
+    ({                                                                        \
+        *(p) += (v);                                                          \
+        *(p);                                                                 \
+    })
 #endif
 
 static ngx_inline void

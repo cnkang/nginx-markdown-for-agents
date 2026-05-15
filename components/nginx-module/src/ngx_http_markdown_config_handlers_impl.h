@@ -140,7 +140,7 @@ ngx_http_markdown_parse_size(const ngx_str_t *line)
  */
 static char *
 ngx_http_markdown_filter(ngx_conf_t *cf,
-    ngx_command_t *cmd, /* SONAR_NOTE: nginx directive callback signature */
+    const ngx_command_t *cmd,
     void *conf)
 {
     static u_char                      on_str[]  = "on";
@@ -652,7 +652,7 @@ ngx_http_markdown_stream_types(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
  */
 static char *
 ngx_http_markdown_large_body_threshold(ngx_conf_t *cf,
-    ngx_command_t *cmd, /* SONAR_NOTE: nginx directive callback signature */
+    const ngx_command_t *cmd,
     void *conf)
 {
     static u_char             off_str[] = "off";
@@ -868,7 +868,7 @@ ngx_http_markdown_streaming_engine(ngx_conf_t *cf,
  * @return NGX_CONF_OK on success, NGX_CONF_ERROR on duplicate.
  */
 static char *
-ngx_http_markdown_set_dynconf_path(ngx_conf_t *cf, ngx_command_t *cmd, /* SONAR_NOTE: nginx directive callback signature requires non-const */
+ngx_http_markdown_set_dynconf_path(ngx_conf_t *cf, const ngx_command_t *cmd,
     void *conf)
 {
     ngx_str_t                      *value;

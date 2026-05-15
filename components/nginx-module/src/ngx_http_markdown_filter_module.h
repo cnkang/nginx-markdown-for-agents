@@ -225,7 +225,37 @@ typedef enum {
  * eligibility checks, conversion paths, tests) for no semantic benefit and
  * significant regression risk.  The field count reflects NGINX module
  * configuration breadth, not poor structure design. */
-typedef struct { /* SONAR_NOTE: c:S1820, module config shape mirrors directive surface */
+typedef struct {
+    ngx_uint_t   auth_policy;          /* markdown_auth_policy allow|deny (default: allow) */
+    ngx_array_t *auth_cookies;         /* markdown_auth_cookies patterns (default: NULL) */
+    ngx_flag_t   generate_etag;        /* markdown_etag on|off (default: on) */
+    ngx_uint_t   conditional_requests; /* markdown_conditional_requests mode (default: full_support) */
+    ngx_uint_t   log_verbosity;        /* markdown_log_verbosity error|warn|info|debug (default: info) */
+} ngx_http_markdown_policy_cfg_t;
+
+typedef struct {
+    ngx_flag_t   prune_noise;               /* markdown_prune_noise on|off (default: on) */
+    ngx_str_t   *prune_selectors;           /* markdown_prune_selectors (default: built-in list) */
+    ngx_str_t   *prune_protection_selectors; /* markdown_prune_protection_selectors (default: empty) */
+    size_t       memory_budget;             /* markdown_memory_budget (default: NGX_CONF_UNSET_SIZE) */
+    ngx_uint_t   llm_provider;              /* markdown_llm_provider (default: 0=default) */
+    ngx_uint_t   chars_per_token_fixed;     /* markdown_chars_per_token (default: 0=use provider) */
+    ngx_flag_t   dynconf_enabled;           /* markdown_dynamic_config on|off (default: off) */
+    ngx_str_t    dynconf_path;              /* markdown_dynamic_config_path (default: empty) */
+} ngx_http_markdown_advanced_cfg_t;
+
+#ifdef MARKDOWN_STREAMING_ENABLED
+typedef struct {
+    ngx_http_complex_value_t  *engine;          /* markdown_streaming_engine (complex value) */
+    size_t                     budget;          /* markdown_streaming_budget (default: 2m) */
+    ngx_flag_t                 budget_explicit; /* 1 if operator set markdown_streaming_budget */
+    ngx_uint_t                 on_error;        /* markdown_streaming_on_error pass|reject */
+    ngx_flag_t                 shadow;          /* markdown_streaming_shadow on|off */
+    size_t                     auto_threshold;  /* markdown_streaming_auto_threshold (default: 32k) */
+} ngx_http_markdown_streaming_cfg_t;
+#endif
+
+typedef struct {
     ngx_flag_t   enabled;              /* markdown_filter static resolved value */
     ngx_uint_t   enabled_source;       /* markdown_filter source (static|complex|unset) */
     ngx_http_complex_value_t *enabled_complex; /* markdown_filter variable/complex expression */
@@ -237,11 +267,7 @@ typedef struct { /* SONAR_NOTE: c:S1820, module config shape mirrors directive s
     ngx_flag_t   token_estimate;       /* markdown_token_estimate on|off (default: off) */
     ngx_flag_t   front_matter;         /* markdown_front_matter on|off (default: off) */
     ngx_flag_t   on_wildcard;          /* markdown_on_wildcard on|off (default: off) */
-    ngx_uint_t   auth_policy;          /* markdown_auth_policy allow|deny (default: allow) */
-    ngx_array_t *auth_cookies;         /* markdown_auth_cookies patterns (default: NULL) */
-    ngx_flag_t   generate_etag;        /* markdown_etag on|off (default: on) */
-    ngx_uint_t   conditional_requests; /* markdown_conditional_requests mode (default: full_support) */
-    ngx_uint_t   log_verbosity;        /* markdown_log_verbosity error|warn|info|debug (default: info) */
+    ngx_http_markdown_policy_cfg_t policy;
     ngx_flag_t   buffer_chunked;       /* markdown_buffer_chunked on|off (default: on) */
     ngx_array_t *stream_types;         /* markdown_stream_types exclusion list (default: NULL) */
     ngx_array_t *content_types;        /* markdown_content_types allowlist (default: text/html) */
@@ -270,25 +296,13 @@ typedef struct { /* SONAR_NOTE: c:S1820, module config shape mirrors directive s
     } ops;
 
 #ifdef MARKDOWN_STREAMING_ENABLED
-    ngx_http_complex_value_t  *streaming_engine;  /* markdown_streaming_engine (complex value) */
-    size_t                     streaming_budget;   /* markdown_streaming_budget (default: 2m) */
-    ngx_flag_t                 streaming_budget_explicit; /* 1 if operator set markdown_streaming_budget */
-    ngx_uint_t                 streaming_on_error; /* markdown_streaming_on_error pass|reject */
-    ngx_flag_t                 streaming_shadow;   /* markdown_streaming_shadow on|off */
-    size_t                     streaming_auto_threshold; /* markdown_streaming_auto_threshold (default: 32k) */
+    ngx_http_markdown_streaming_cfg_t streaming;
 #endif
 
     /*
      * Noise pruning configuration (v0.6.0).
      */
-    ngx_flag_t                 prune_noise;               /* markdown_prune_noise on|off (default: on) */
-    ngx_str_t                 *prune_selectors;           /* markdown_prune_selectors (default: built-in list) */
-    ngx_str_t                 *prune_protection_selectors; /* markdown_prune_protection_selectors (default: empty) */
-    size_t                     memory_budget;             /* markdown_memory_budget (default: NGX_CONF_UNSET_SIZE) */
-    ngx_uint_t                 llm_provider;              /* markdown_llm_provider (default: 0=default) */
-    ngx_uint_t                 chars_per_token_fixed;     /* markdown_chars_per_token (default: 0=use provider) */
-    ngx_flag_t                 dynconf_enabled;           /* markdown_dynamic_config on|off (default: off) */
-    ngx_str_t                  dynconf_path;              /* markdown_dynamic_config_path (default: empty) */
+    ngx_http_markdown_advanced_cfg_t advanced;
 } ngx_http_markdown_conf_t;
 
 /*

@@ -34,6 +34,7 @@ import argparse
 import re
 import sys
 from pathlib import Path
+from typing import Callable
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -322,17 +323,12 @@ def _collect_hardcoded_vars(lines: list[str]) -> set[str]:
     hardcoded_vars.add("repo_root")
     hardcoded_vars.add("REPO_ROOT")
 
-    for line in lines:
-        if _is_file_derived_assignment(line):
-            lhs = _extract_assignment_lhs(line)
-            if lhs:
-                hardcoded_vars.add(lhs)
-
-    for line in lines:
-        if _is_tempfile_assignment(line):
-            lhs = _extract_assignment_lhs(line)
-            if lhs:
-                hardcoded_vars.add(lhs)
+    _add_assignment_lhs_by_predicate(
+        lines, _is_file_derived_assignment, hardcoded_vars,
+    )
+    _add_assignment_lhs_by_predicate(
+        lines, _is_tempfile_assignment, hardcoded_vars,
+    )
 
     for line in lines:
         for m in _PATH_WRAPPED_RE.finditer(line):
@@ -342,6 +338,20 @@ def _collect_hardcoded_vars(lines: list[str]) -> set[str]:
                 hardcoded_vars.add(lhs)
 
     return hardcoded_vars
+
+
+def _add_assignment_lhs_by_predicate(
+    lines: list[str],
+    predicate: Callable[[str], bool],
+    target: set[str],
+) -> None:
+    """Add assignment LHS names for lines matching a predicate."""
+    for line in lines:
+        if not predicate(line):
+            continue
+        lhs = _extract_assignment_lhs(line)
+        if lhs:
+            target.add(lhs)
 
 
 def _scan_open_calls(
@@ -383,8 +393,6 @@ def _scan_open_calls(
 
 def _scan_path_constructions(
     lines: list[str],
-    hardcoded_vars: set[str],
-    filepath: Path,
     rel: str,
     strict: bool,
 ) -> tuple[list[str], list[str]]:
@@ -396,8 +404,6 @@ def _scan_path_constructions(
 
     Args:
         lines: Source lines.
-        hardcoded_vars: Variables from hardcoded/repo-root sources.
-        filepath: File path for reporting.
         rel: Display path for reporting.
         strict: If True, promote warnings to errors.
 
@@ -471,7 +477,7 @@ def check_file(
     # Per commit 847479c: Path(user_input) before validate_read_path
     # enables path traversal even if validated later.
     path_errors, path_warnings = _scan_path_constructions(
-        lines, hardcoded_vars, filepath, rel, strict,
+        lines, rel, strict,
     )
     errors.extend(path_errors)
     warnings.extend(path_warnings)
