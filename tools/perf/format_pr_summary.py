@@ -16,7 +16,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from lib.path_validation import validate_read_path, validate_write_path_within_root
+from lib.path_validation import sanitize_path_component, validate_read_path, validate_write_path_within_root
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -34,24 +34,28 @@ TOKEN_DISCLAIMER = (
 def _write_text_with_repo_guard(
     output_path: str | Path, content: str, *, purpose: str,
 ) -> Path:
-    """Resolve output path under REPO_ROOT and write UTF-8 text safely."""
+    """Resolve output path under REPO_ROOT and write UTF-8 text safely.
+
+    Accepts only bare filenames or ``perf/reports/<filename>`` paths.
+    The filename component is sanitized to prevent path-traversal writes
+    (CWE-22 / pythonsecurity:S2083).
+    """
     raw_output = Path(output_path)
-    output_name = raw_output.name
-    if output_name in {"", ".", ".."}:
+    raw_name = raw_output.name
+    if raw_name in {"", ".", ".."}:
         raise ValueError(
             f"Invalid output filename for {purpose}: {output_path!r}"
         )
     output_parts = raw_output.parts
-    if len(output_parts) == 1:
-        pass
-    elif len(output_parts) == 3 and output_parts[:2] == ("perf", "reports"):
-        pass
-    else:
+    if not (len(output_parts) == 1
+            or (len(output_parts) == 3
+                and output_parts[:2] == ("perf", "reports"))):
         raise ValueError(
             "Output path must be '<filename>' or 'perf/reports/<filename>'"
         )
 
-    candidate_output = PR_SUMMARY_OUTPUT_DIR / output_name
+    safe_name = sanitize_path_component(raw_name)
+    candidate_output = PR_SUMMARY_OUTPUT_DIR / safe_name
     validated_output = validate_write_path_within_root(
         candidate_output, REPO_ROOT, purpose=purpose,
     ).resolve()
