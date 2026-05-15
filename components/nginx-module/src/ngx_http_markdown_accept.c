@@ -468,7 +468,7 @@ ngx_http_markdown_compare_entries(const void *a, const void *b)
  * @return             1 if matches, 0 if not
  */
 static ngx_int_t
-ngx_http_markdown_matches_markdown(ngx_http_markdown_accept_entry_t *entry,
+ngx_http_markdown_matches_markdown(const ngx_http_markdown_accept_entry_t *entry,
     ngx_flag_t on_wildcard)
 {
     /* Check for explicit text/markdown */

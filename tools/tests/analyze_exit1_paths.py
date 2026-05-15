@@ -15,7 +15,7 @@ import re
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from lib.path_validation import validate_read_path
+from lib.path_validation import validate_read_path  # noqa: E402
 
 HELPER_FUNCS_RE = re.compile(
     r"^(die_with_error|emit_error|emit_suggest|json_output|semver_lt|sha256_file)\s*\(\)"
@@ -164,13 +164,12 @@ def _analyze_shell_lines(lines: list[str], line_types: list[str]) -> list[str]:
 
         errexit_active = _update_errexit(stripped, errexit_active)
 
-        for checker in (
-            lambda: _check_exit1_path(lines, i, stripped),
-            lambda: _check_risky_command(lines, i, stripped, errexit_active=errexit_active),
-        ):
-            issue = checker()
-            if issue:
-                issues.append(issue)
+        issue = _check_exit1_path(lines, i, stripped)
+        if issue:
+            issues.append(issue)
+        issue = _check_risky_command(lines, i, stripped, errexit_active=errexit_active)
+        if issue:
+            issues.append(issue)
 
     return issues
 
