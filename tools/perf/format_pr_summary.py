@@ -138,7 +138,7 @@ def main(argv: list[str] | None = None) -> int:
             args.output, REPO_ROOT, purpose="PR summary output",
         )
         validated_output.parent.mkdir(parents=True, exist_ok=True)
-        validated_output.write_text(md, encoding="utf-8")
+        validated_output.write_text(md, encoding="utf-8")  # NOSONAR(S6553): path sanitized by validate_write_path_within_root() — rejects escapes outside REPO_ROOT
         print(f"PR summary written to {validated_output}")
     else:
         print(md)
