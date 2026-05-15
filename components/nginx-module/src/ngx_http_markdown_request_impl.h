@@ -401,7 +401,7 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
      * the early read and the ctx bind — we copy snap_copy into ctx,
      * never re-read the global active_snapshot.
      */
-     ngx_memzero(&snap_copy, sizeof(snap_copy));
+    ngx_memzero(&snap_copy, sizeof(snap_copy));
     snap_copy = ngx_http_markdown_dynconf_watcher.active_snapshot;
 
     /*
