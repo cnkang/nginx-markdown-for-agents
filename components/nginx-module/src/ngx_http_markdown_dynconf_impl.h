@@ -679,7 +679,7 @@ ngx_http_markdown_dynconf_stop(ngx_http_markdown_dynconf_watcher_t *watcher,
  *   NGX_OK on match, NGX_ERROR if unrecognized
  */
 static ngx_int_t
-ngx_http_markdown_dynconf_match_key(u_char *p, const u_char *eq,
+ngx_http_markdown_dynconf_match_key(const u_char *p, const u_char *eq,
                                     ngx_uint_t *key)
 {
     static u_char  markdown_filter_key[] = "markdown_filter";

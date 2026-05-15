@@ -1195,7 +1195,8 @@ curl -sS "http://127.0.0.1:${PORT}/metrics" -o /dev/null -w "  metrics default: 
 # - Transport: clear-text HTTP is intentional for local e2e coverage and is
 #   not reused by production configs or deployment scripts.
 if [[ -n "${IPV6_LISTEN}" ]]; then
-    curl -sS -6 "http://[::1]:${BACKEND_PORT}/" -o /dev/null -w "  IPv6 backend: HTTP %{http_code}\n" 2>/dev/null || true  # SONAR_NOTE — localhost-only coverage test
+    curl -sS -6 "http://[::1]:${BACKEND_PORT}/" -o /dev/null \
+      -w "  IPv6 backend: HTTP %{http_code}\n" >&2 || true  # SONAR_NOTE — localhost-only coverage test
 fi
 
 echo "==> Stopping NGINX (flush gcov data)"
