@@ -240,11 +240,11 @@ test_effective_conf_helpers_smoke(void)
 
     conf.enabled = 0;
     conf.enabled_source = NGX_HTTP_MARKDOWN_ENABLED_STATIC;
-    conf.prune_noise = 0;
-    conf.log_verbosity = NGX_HTTP_MARKDOWN_LOG_WARN;
-    conf.memory_budget = 8 * 1024 * 1024;
+    conf.advanced.prune_noise = 0;
+    conf.policy.log_verbosity = NGX_HTTP_MARKDOWN_LOG_WARN;
+    conf.advanced.memory_budget = 8 * 1024 * 1024;
 #ifdef MARKDOWN_STREAMING_ENABLED
-    conf.streaming_budget = 4 * 1024 * 1024;
+    conf.streaming.budget = 4 * 1024 * 1024;
 #endif
 
     snap.valid = 1;
@@ -1113,8 +1113,8 @@ test_start_applies_existing_file_on_startup(void)
     memset(&watcher, 0, sizeof(watcher));
     memset(&conf, 0, sizeof(conf));
     conf.enabled = 1;
-    conf.prune_noise = 1;
-    conf.log_verbosity = NGX_HTTP_MARKDOWN_LOG_ERROR;
+    conf.advanced.prune_noise = 1;
+    conf.policy.log_verbosity = NGX_HTTP_MARKDOWN_LOG_ERROR;
     set_ngx_str(&path, tmpfile);
 
     rc = ngx_http_markdown_dynconf_start(&watcher, &g_cycle, &path, &conf, &g_log);
@@ -1134,9 +1134,9 @@ test_start_applies_existing_file_on_startup(void)
                 "version incremented after startup reload");
 
     /* live conf should also reflect the applied values */
-    TEST_ASSERT(conf.prune_noise == 0,
+    TEST_ASSERT(conf.advanced.prune_noise == 0,
                 "live conf prune_noise overridden by startup reload");
-    TEST_ASSERT(conf.log_verbosity == NGX_HTTP_MARKDOWN_LOG_DEBUG,
+    TEST_ASSERT(conf.policy.log_verbosity == NGX_HTTP_MARKDOWN_LOG_DEBUG,
                 "live conf log_verbosity overridden by startup reload");
 
     free(watcher.path.data);
@@ -1173,7 +1173,7 @@ test_start_invalid_file_leaves_applied_mtime_zero(void)
     memset(&watcher, 0, sizeof(watcher));
     memset(&conf, 0, sizeof(conf));
     conf.enabled = 1;
-    conf.prune_noise = 1;
+    conf.advanced.prune_noise = 1;
     set_ngx_str(&path, tmpfile);
 
     rc = ngx_http_markdown_dynconf_start(&watcher, &g_cycle, &path, &conf, &g_log);
@@ -1191,7 +1191,7 @@ test_start_invalid_file_leaves_applied_mtime_zero(void)
                 "last_mtime != applied_mtime triggers retry on next timer cycle");
 
     /* live conf unchanged */
-    TEST_ASSERT(conf.prune_noise == 1,
+    TEST_ASSERT(conf.advanced.prune_noise == 1,
                 "live conf prune_noise unchanged after failed startup reload");
 
     free(watcher.path.data);
@@ -1417,7 +1417,7 @@ test_reload_valid_file(void)
     TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_APPLIED,
                 "reload valid file returns APPLIED");
     TEST_ASSERT(conf.enabled == 1, "enabled applied");
-    TEST_ASSERT(conf.prune_noise == 0, "prune_noise applied");
+    TEST_ASSERT(conf.advanced.prune_noise == 0, "prune_noise applied");
     TEST_ASSERT(watcher.version == 1, "version incremented");
 
     unlink(tmpfile);
@@ -1476,7 +1476,7 @@ test_reload_comments_and_blanks(void)
     rc = ngx_http_markdown_dynconf_reload(&watcher, &conf, &g_log);
     TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_APPLIED,
                 "reload file with comments returns APPLIED");
-    TEST_ASSERT(conf.log_verbosity == NGX_HTTP_MARKDOWN_LOG_WARN,
+    TEST_ASSERT(conf.policy.log_verbosity == NGX_HTTP_MARKDOWN_LOG_WARN,
                 "log_verbosity applied");
 
     unlink(tmpfile);
@@ -1507,7 +1507,7 @@ test_reload_no_newline_at_eof(void)
     rc = ngx_http_markdown_dynconf_reload(&watcher, &conf, &g_log);
     TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_APPLIED,
                 "reload file without trailing NL returns APPLIED");
-    TEST_ASSERT(conf.memory_budget == 64 * 1024, "memory_budget applied");
+    TEST_ASSERT(conf.advanced.memory_budget == 64 * 1024, "memory_budget applied");
 
     unlink(tmpfile);
     TEST_PASS("reload: no newline at EOF");
@@ -1564,12 +1564,12 @@ test_reload_all_keys(void)
     TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_APPLIED,
                 "reload all keys returns APPLIED");
     TEST_ASSERT(conf.enabled == 0, "enabled=off applied");
-    TEST_ASSERT(conf.prune_noise == 1, "prune_noise=on applied");
-    TEST_ASSERT(conf.log_verbosity == NGX_HTTP_MARKDOWN_LOG_ERROR,
+    TEST_ASSERT(conf.advanced.prune_noise == 1, "prune_noise=on applied");
+    TEST_ASSERT(conf.policy.log_verbosity == NGX_HTTP_MARKDOWN_LOG_ERROR,
                 "log_verbosity=error applied");
-    TEST_ASSERT(conf.streaming_budget == 8 * 1024 * 1024,
+    TEST_ASSERT(conf.streaming.budget == 8 * 1024 * 1024,
                 "streaming_budget=8m applied");
-    TEST_ASSERT(conf.memory_budget == 256 * 1024,
+    TEST_ASSERT(conf.advanced.memory_budget == 256 * 1024,
                 "memory_budget=256k applied");
 
     unlink(tmpfile);
@@ -1640,7 +1640,7 @@ test_reload_verbosity_module_enum(void)
     rc = ngx_http_markdown_dynconf_reload(&watcher, &conf, &g_log);
     TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_APPLIED,
                 "reload verbosity=debug returns APPLIED");
-    TEST_ASSERT(conf.log_verbosity == NGX_HTTP_MARKDOWN_LOG_DEBUG,
+    TEST_ASSERT(conf.policy.log_verbosity == NGX_HTTP_MARKDOWN_LOG_DEBUG,
                 "log_verbosity is module enum DEBUG (3), not NGX_LOG_DEBUG (4)");
 
     unlink(tmpfile);
@@ -1668,7 +1668,7 @@ test_reload_invalid_line_rejects_all(void)
 
     memset(&watcher, 0, sizeof(watcher));
     memset(&conf, 0, sizeof(conf));
-    conf.prune_noise = 0;
+    conf.advanced.prune_noise = 0;
     set_ngx_str(&watcher.path, tmpfile);
     watcher.active_snapshot.valid = 1;
     watcher.active_snapshot.prune_noise = 0;
@@ -1680,7 +1680,7 @@ test_reload_invalid_line_rejects_all(void)
                 "reload with invalid line returns INVALID_FILE");
     TEST_ASSERT(watcher.version == orig_version,
                 "version NOT incremented on invalid file");
-    TEST_ASSERT(conf.prune_noise == 0,
+    TEST_ASSERT(conf.advanced.prune_noise == 0,
                 "conf unchanged after invalid file (staged commit)");
 
     unlink(tmpfile);
@@ -1696,10 +1696,10 @@ test_snapshot_from_conf_and_apply(void)
     memset(&conf, 0, sizeof(conf));
     conf.enabled = 1;
     conf.enabled_source = NGX_HTTP_MARKDOWN_ENABLED_STATIC;
-    conf.prune_noise = 1;
-    conf.log_verbosity = NGX_HTTP_MARKDOWN_LOG_WARN;
-    conf.streaming_budget = 4 * 1024 * 1024;
-    conf.memory_budget = 128 * 1024;
+    conf.advanced.prune_noise = 1;
+    conf.policy.log_verbosity = NGX_HTTP_MARKDOWN_LOG_WARN;
+    conf.streaming.budget = 4 * 1024 * 1024;
+    conf.advanced.memory_budget = 128 * 1024;
 
     ngx_http_markdown_dynconf_snapshot_from_conf(&snapshot, &conf);
     TEST_ASSERT(snapshot.valid == 1, "snapshot marked valid");
@@ -1715,12 +1715,12 @@ test_snapshot_from_conf_and_apply(void)
     memset(&conf, 0, sizeof(conf));
     ngx_http_markdown_dynconf_apply_snapshot(&conf, &snapshot);
     TEST_ASSERT(conf.enabled == 1, "apply snapshot: enabled=1");
-    TEST_ASSERT(conf.prune_noise == 1, "apply snapshot: prune_noise=1");
-    TEST_ASSERT(conf.log_verbosity == NGX_HTTP_MARKDOWN_LOG_WARN,
+    TEST_ASSERT(conf.advanced.prune_noise == 1, "apply snapshot: prune_noise=1");
+    TEST_ASSERT(conf.policy.log_verbosity == NGX_HTTP_MARKDOWN_LOG_WARN,
                 "apply snapshot: log_verbosity=WARN");
-    TEST_ASSERT(conf.streaming_budget == 4 * 1024 * 1024,
+    TEST_ASSERT(conf.streaming.budget == 4 * 1024 * 1024,
                 "apply snapshot: streaming_budget=4MiB");
-    TEST_ASSERT(conf.memory_budget == 128 * 1024,
+    TEST_ASSERT(conf.advanced.memory_budget == 128 * 1024,
                 "apply snapshot: memory_budget=128KiB");
 
     TEST_PASS("snapshot: from_conf and apply_snapshot round-trip");
@@ -1960,10 +1960,10 @@ test_dynconf_start_watcher_already_active(void)
     watcher.path.len = len_a;
     watcher.active = 1;
 
-    set_ngx_str(&conf.dynconf_path, path_b);
+    set_ngx_str(&conf.advanced.dynconf_path, path_b);
 
     rc = ngx_http_markdown_dynconf_start(&watcher, NULL,
-                                          (const ngx_str_t *) &conf.dynconf_path,
+                                          (const ngx_str_t *) &conf.advanced.dynconf_path,
                                           &conf, &g_log);
     TEST_ASSERT(rc == NGX_ERROR,
                 "start with already-active watcher returns NGX_ERROR (duplicate rejected)");

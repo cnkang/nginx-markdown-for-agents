@@ -629,7 +629,7 @@ ngx_http_markdown_prepare_conversion_options(ngx_http_request_t *r,
         options->timeout_ms = (uint32_t) conf->timeout;
     }
 
-    options->generate_etag = conf->generate_etag ? 1U : 0U;
+    options->generate_etag = conf->policy.generate_etag ? 1U : 0U;
     options->estimate_tokens = conf->token_estimate ? 1U : 0U;
     options->front_matter = conf->front_matter ? 1U : 0U;
     options->content_type = NULL;
@@ -650,16 +650,16 @@ ngx_http_markdown_prepare_conversion_options(ngx_http_request_t *r,
     options->prune_protection_selectors = NULL;
     options->prune_protection_selector_len = 0;
 
-    if (conf->prune_selectors != NULL) {
-        options->prune_selectors = conf->prune_selectors->data;
-        options->prune_selector_len = conf->prune_selectors->len;
+    if (conf->advanced.prune_selectors != NULL) {
+        options->prune_selectors = conf->advanced.prune_selectors->data;
+        options->prune_selector_len = conf->advanced.prune_selectors->len;
     }
 
-    if (conf->prune_protection_selectors != NULL) {
+    if (conf->advanced.prune_protection_selectors != NULL) {
         options->prune_protection_selectors =
-            conf->prune_protection_selectors->data;
+            conf->advanced.prune_protection_selectors->data;
         options->prune_protection_selector_len =
-            conf->prune_protection_selectors->len;
+            conf->advanced.prune_protection_selectors->len;
     }
 
     /*
@@ -676,22 +676,22 @@ ngx_http_markdown_prepare_conversion_options(ngx_http_request_t *r,
         options->memory_budget = 0;
     }
 
-    if (conf->llm_provider > UINT8_MAX) {
+    if (conf->advanced.llm_provider > UINT8_MAX) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                       "markdown filter: llm_provider=%ui exceeds uint8 range",
-                      conf->llm_provider);
+                      conf->advanced.llm_provider);
         return NGX_ERROR;
     }
-    if (conf->chars_per_token_fixed > UINT8_MAX) {
+    if (conf->advanced.chars_per_token_fixed > UINT8_MAX) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                       "markdown filter: chars_per_token_fixed=%ui exceeds "
                       "uint8 range",
-                      conf->chars_per_token_fixed);
+                      conf->advanced.chars_per_token_fixed);
         return NGX_ERROR;
     }
 
-    options->llm_provider = (uint8_t) conf->llm_provider;
-    options->chars_per_token_fixed = (uint8_t) conf->chars_per_token_fixed;
+    options->llm_provider = (uint8_t) conf->advanced.llm_provider;
+    options->chars_per_token_fixed = (uint8_t) conf->advanced.chars_per_token_fixed;
 
     /*
      * Apply unified budget to streaming_budget when it was not

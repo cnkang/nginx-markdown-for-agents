@@ -254,11 +254,11 @@ ngx_http_markdown_create_conf(ngx_conf_t *cf)
     conf->token_estimate = NGX_CONF_UNSET;
     conf->front_matter = NGX_CONF_UNSET;
     conf->on_wildcard = NGX_CONF_UNSET;
-    conf->auth_policy = NGX_CONF_UNSET_UINT;
-    conf->auth_cookies = NGX_CONF_UNSET_PTR;
-    conf->generate_etag = NGX_CONF_UNSET;
-    conf->conditional_requests = NGX_CONF_UNSET_UINT;
-    conf->log_verbosity = NGX_CONF_UNSET_UINT;
+    conf->policy.auth_policy = NGX_CONF_UNSET_UINT;
+    conf->policy.auth_cookies = NGX_CONF_UNSET_PTR;
+    conf->policy.generate_etag = NGX_CONF_UNSET;
+    conf->policy.conditional_requests = NGX_CONF_UNSET_UINT;
+    conf->policy.log_verbosity = NGX_CONF_UNSET_UINT;
     conf->buffer_chunked = NGX_CONF_UNSET;
     conf->stream_types = NGX_CONF_UNSET_PTR;
     conf->content_types = NGX_CONF_UNSET_PTR;
@@ -279,23 +279,23 @@ ngx_http_markdown_create_conf(ngx_conf_t *cf)
     conf->ops.otel_export_timeout = NGX_CONF_UNSET_MSEC;
 
 #ifdef MARKDOWN_STREAMING_ENABLED
-    conf->streaming_engine = NULL;
-    conf->streaming_budget = NGX_CONF_UNSET_SIZE;
-    conf->streaming_budget_explicit = 0;
-    conf->streaming_on_error = NGX_CONF_UNSET_UINT;
-    conf->streaming_shadow = NGX_CONF_UNSET;
-    conf->streaming_auto_threshold = NGX_CONF_UNSET_SIZE;
+    conf->streaming.engine = NULL;
+    conf->streaming.budget = NGX_CONF_UNSET_SIZE;
+    conf->streaming.budget_explicit = 0;
+    conf->streaming.on_error = NGX_CONF_UNSET_UINT;
+    conf->streaming.shadow = NGX_CONF_UNSET;
+    conf->streaming.auto_threshold = NGX_CONF_UNSET_SIZE;
 #endif
 
-    conf->prune_noise = NGX_CONF_UNSET;
-    conf->prune_selectors = NGX_CONF_UNSET_PTR;
-    conf->prune_protection_selectors = NGX_CONF_UNSET_PTR;
-    conf->memory_budget = NGX_CONF_UNSET_SIZE;
-    conf->llm_provider = NGX_CONF_UNSET_UINT;
-    conf->chars_per_token_fixed = NGX_CONF_UNSET_UINT;
-    conf->dynconf_enabled = NGX_CONF_UNSET;
-    conf->dynconf_path.len = 0;
-    conf->dynconf_path.data = NULL;
+    conf->advanced.prune_noise = NGX_CONF_UNSET;
+    conf->advanced.prune_selectors = NGX_CONF_UNSET_PTR;
+    conf->advanced.prune_protection_selectors = NGX_CONF_UNSET_PTR;
+    conf->advanced.memory_budget = NGX_CONF_UNSET_SIZE;
+    conf->advanced.llm_provider = NGX_CONF_UNSET_UINT;
+    conf->advanced.chars_per_token_fixed = NGX_CONF_UNSET_UINT;
+    conf->advanced.dynconf_enabled = NGX_CONF_UNSET;
+    conf->advanced.dynconf_path.len = 0;
+    conf->advanced.dynconf_path.data = NULL;
 
     return conf;
 }
@@ -353,10 +353,10 @@ ngx_http_markdown_apply_memory_budget_override(ngx_http_markdown_conf_t *conf,
 {
     conf->max_size_explicit = max_size_set || prev->max_size_explicit;
 
-    if (conf->memory_budget != NGX_CONF_UNSET_SIZE
+    if (conf->advanced.memory_budget != NGX_CONF_UNSET_SIZE
         && !conf->max_size_explicit)
     {
-        conf->max_size = conf->memory_budget;
+        conf->max_size = conf->advanced.memory_budget;
     }
 }
 
@@ -376,12 +376,12 @@ ngx_http_markdown_merge_core_base_values(ngx_http_markdown_conf_t *conf,
     ngx_conf_merge_value(conf->token_estimate, prev->token_estimate, 0);
     ngx_conf_merge_value(conf->front_matter, prev->front_matter, 0);
     ngx_conf_merge_value(conf->on_wildcard, prev->on_wildcard, 0);
-    ngx_conf_merge_uint_value(conf->auth_policy, prev->auth_policy,
+    ngx_conf_merge_uint_value(conf->policy.auth_policy, prev->policy.auth_policy,
                               NGX_HTTP_MARKDOWN_AUTH_POLICY_ALLOW);
-    ngx_conf_merge_value(conf->generate_etag, prev->generate_etag, 1);
-    ngx_conf_merge_uint_value(conf->conditional_requests, prev->conditional_requests,
+    ngx_conf_merge_value(conf->policy.generate_etag, prev->policy.generate_etag, 1);
+    ngx_conf_merge_uint_value(conf->policy.conditional_requests, prev->policy.conditional_requests,
                               NGX_HTTP_MARKDOWN_CONDITIONAL_FULL_SUPPORT);
-    ngx_conf_merge_uint_value(conf->log_verbosity, prev->log_verbosity,
+    ngx_conf_merge_uint_value(conf->policy.log_verbosity, prev->policy.log_verbosity,
                               NGX_HTTP_MARKDOWN_LOG_INFO);
     ngx_conf_merge_value(conf->buffer_chunked, prev->buffer_chunked, 1);
     ngx_conf_merge_value(conf->auto_decompress, prev->auto_decompress, 1);
@@ -430,7 +430,7 @@ ngx_http_markdown_merge_core_ptr_values(ngx_http_markdown_conf_t *conf,
     ngx_conf_merge_size_value(conf->large_body_threshold,
                               prev->large_body_threshold,
                               NGX_HTTP_MARKDOWN_THRESHOLD_OFF);
-    ngx_conf_merge_ptr_value(conf->auth_cookies, prev->auth_cookies, NULL);
+    ngx_conf_merge_ptr_value(conf->policy.auth_cookies, prev->policy.auth_cookies, NULL);
     ngx_conf_merge_ptr_value(conf->stream_types, prev->stream_types, NULL);
     ngx_conf_merge_ptr_value(conf->content_types, prev->content_types, NULL);
 }
@@ -455,20 +455,20 @@ static void
 ngx_http_markdown_merge_streaming_values(ngx_http_markdown_conf_t *conf,
     const ngx_http_markdown_conf_t *prev, ngx_flag_t streaming_budget_set)
 {
-    if (conf->streaming_engine == NULL) {
-        conf->streaming_engine = prev->streaming_engine;
+    if (conf->streaming.engine == NULL) {
+        conf->streaming.engine = prev->streaming.engine;
     }
-    ngx_conf_merge_size_value(conf->streaming_budget,
-                              prev->streaming_budget,
+    ngx_conf_merge_size_value(conf->streaming.budget,
+                              prev->streaming.budget,
                               NGX_HTTP_MARKDOWN_STREAMING_BUDGET_DEFAULT);
-    conf->streaming_budget_explicit = streaming_budget_set
-        || prev->streaming_budget_explicit;
-    ngx_conf_merge_uint_value(conf->streaming_on_error,
-                              prev->streaming_on_error,
+    conf->streaming.budget_explicit = streaming_budget_set
+        || prev->streaming.budget_explicit;
+    ngx_conf_merge_uint_value(conf->streaming.on_error,
+                              prev->streaming.on_error,
                               NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_PASS);
-    ngx_conf_merge_value(conf->streaming_shadow, prev->streaming_shadow, 0);
-    ngx_conf_merge_size_value(conf->streaming_auto_threshold,
-                              prev->streaming_auto_threshold,
+    ngx_conf_merge_value(conf->streaming.shadow, prev->streaming.shadow, 0);
+    ngx_conf_merge_size_value(conf->streaming.auto_threshold,
+                              prev->streaming.auto_threshold,
                               NGX_HTTP_MARKDOWN_STREAMING_AUTO_THRESHOLD_DEFAULT);
 }
 #endif
@@ -480,18 +480,18 @@ static void
 ngx_http_markdown_merge_v060_values(ngx_http_markdown_conf_t *conf,
     const ngx_http_markdown_conf_t *prev)
 {
-    ngx_conf_merge_value(conf->prune_noise, prev->prune_noise, 1);
-    ngx_conf_merge_ptr_value(conf->prune_selectors, prev->prune_selectors, NULL);
-    ngx_conf_merge_ptr_value(conf->prune_protection_selectors,
-                             prev->prune_protection_selectors, NULL);
-    ngx_conf_merge_size_value(conf->memory_budget,
-                              prev->memory_budget,
+    ngx_conf_merge_value(conf->advanced.prune_noise, prev->advanced.prune_noise, 1);
+    ngx_conf_merge_ptr_value(conf->advanced.prune_selectors, prev->advanced.prune_selectors, NULL);
+    ngx_conf_merge_ptr_value(conf->advanced.prune_protection_selectors,
+                             prev->advanced.prune_protection_selectors, NULL);
+    ngx_conf_merge_size_value(conf->advanced.memory_budget,
+                              prev->advanced.memory_budget,
                               NGX_CONF_UNSET_SIZE);
-    ngx_conf_merge_uint_value(conf->llm_provider, prev->llm_provider, 0);
-    ngx_conf_merge_uint_value(conf->chars_per_token_fixed,
-                              prev->chars_per_token_fixed, 0);
-    ngx_conf_merge_value(conf->dynconf_enabled, prev->dynconf_enabled, 0);
-    ngx_http_markdown_merge_str_if_unset(&conf->dynconf_path, &prev->dynconf_path);
+    ngx_conf_merge_uint_value(conf->advanced.llm_provider, prev->advanced.llm_provider, 0);
+    ngx_conf_merge_uint_value(conf->advanced.chars_per_token_fixed,
+                              prev->advanced.chars_per_token_fixed, 0);
+    ngx_conf_merge_value(conf->advanced.dynconf_enabled, prev->advanced.dynconf_enabled, 0);
+    ngx_http_markdown_merge_str_if_unset(&conf->advanced.dynconf_path, &prev->advanced.dynconf_path);
 }
 
 /**
@@ -522,7 +522,7 @@ ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
      */
     ngx_flag_t  max_size_set = (conf->max_size != NGX_CONF_UNSET_SIZE);
 #ifdef MARKDOWN_STREAMING_ENABLED
-    ngx_flag_t  streaming_budget_set = (conf->streaming_budget != NGX_CONF_UNSET_SIZE);
+    ngx_flag_t  streaming_budget_set = (conf->streaming.budget != NGX_CONF_UNSET_SIZE);
 #endif
 
     ngx_http_markdown_merge_core_values(conf, prev);
@@ -994,7 +994,7 @@ ngx_http_markdown_is_enabled(ngx_http_request_t *r,
  * Log the merged markdown filter configuration for a configuration context.
  *
  * Emits a single formatted entry describing the merged `conf` fields to the
- * nginx error log using the log level derived from `conf->log_verbosity`.
+ * nginx error log using the log level derived from `conf->policy.log_verbosity`.
  * If `cf` is NULL, the function returns without logging.
  *
  * @param cf   Configuration context used for emitting the log entry.
@@ -1005,7 +1005,7 @@ ngx_http_markdown_log_merged_conf(ngx_conf_t *cf,
     const ngx_http_markdown_conf_t *conf)
 {
     ngx_uint_t log_level;
-    ngx_uint_t auth_cookie_count = (conf->auth_cookies != NULL) ? conf->auth_cookies->nelts : 0;
+    ngx_uint_t auth_cookie_count = (conf->policy.auth_cookies != NULL) ? conf->policy.auth_cookies->nelts : 0;
     ngx_uint_t stream_type_count = (conf->stream_types != NULL) ? conf->stream_types->nelts : 0;
     ngx_uint_t content_type_count = (conf->content_types != NULL) ? conf->content_types->nelts : 0;
 
@@ -1013,7 +1013,7 @@ ngx_http_markdown_log_merged_conf(ngx_conf_t *cf,
         return;
     }
 
-    log_level = ngx_http_markdown_log_verbosity_to_ngx_level(conf->log_verbosity);
+    log_level = ngx_http_markdown_log_verbosity_to_ngx_level(conf->policy.log_verbosity);
 
     ngx_conf_log_error(log_level, cf, 0,
                        "markdown filter config: enabled=%ui "
@@ -1046,11 +1046,11 @@ ngx_http_markdown_log_merged_conf(ngx_conf_t *cf,
                        (ngx_uint_t) conf->token_estimate,
                        (ngx_uint_t) conf->front_matter,
                        (ngx_uint_t) conf->on_wildcard,
-                       ngx_http_markdown_auth_policy_name(conf->auth_policy),
+                       ngx_http_markdown_auth_policy_name(conf->policy.auth_policy),
                        auth_cookie_count,
-                       (ngx_uint_t) conf->generate_etag,
-                       ngx_http_markdown_conditional_requests_name(conf->conditional_requests),
-                       ngx_http_markdown_log_verbosity_name(conf->log_verbosity),
+                       (ngx_uint_t) conf->policy.generate_etag,
+                       ngx_http_markdown_conditional_requests_name(conf->policy.conditional_requests),
+                       ngx_http_markdown_log_verbosity_name(conf->policy.log_verbosity),
                        (ngx_uint_t) conf->buffer_chunked,
                         stream_type_count,
                         content_type_count,
@@ -1061,13 +1061,13 @@ ngx_http_markdown_log_merged_conf(ngx_conf_t *cf,
                         , (ngx_int_t) conf->ops.metrics_per_path
                         , (ngx_int_t) conf->ops.otel_enabled
 #ifdef MARKDOWN_STREAMING_ENABLED
-                        , conf->streaming_engine != NULL
+                        , conf->streaming.engine != NULL
                             ? "configured" : "auto (default)"
-                       , conf->streaming_budget
+                       , conf->streaming.budget
                        , ngx_http_markdown_on_error_name(
-                             conf->streaming_on_error)
-                        , (ngx_int_t) conf->streaming_shadow
-                        , conf->streaming_auto_threshold
+                             conf->streaming.on_error)
+                        , (ngx_int_t) conf->streaming.shadow
+                        , conf->streaming.auto_threshold
 #endif
                        );
 }

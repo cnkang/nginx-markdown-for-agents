@@ -233,10 +233,10 @@ test_build_effective_conf_from_valid_snapshot(void)
 
     conf.enabled = 1;
     conf.enabled_source = 2;
-    conf.prune_noise = 1;
-    conf.log_verbosity = NGX_HTTP_MARKDOWN_LOG_DEBUG;
-    conf.memory_budget = 4 * 1024 * 1024;
-    conf.streaming_budget = 2 * 1024 * 1024;
+    conf.advanced.prune_noise = 1;
+    conf.policy.log_verbosity = NGX_HTTP_MARKDOWN_LOG_DEBUG;
+    conf.advanced.memory_budget = 4 * 1024 * 1024;
+    conf.streaming.budget = 2 * 1024 * 1024;
 
     ngx_http_markdown_dynconf_snapshot_from_conf(&snap, &conf);
 
@@ -272,10 +272,10 @@ test_build_effective_conf_null_snapshot_falls_back_to_conf(void)
 
     conf.enabled = 1;
     conf.enabled_source = 3;
-    conf.prune_noise = 0;
-    conf.log_verbosity = NGX_HTTP_MARKDOWN_LOG_WARN;
-    conf.memory_budget = 8 * 1024 * 1024;
-    conf.streaming_budget = 4 * 1024 * 1024;
+    conf.advanced.prune_noise = 0;
+    conf.policy.log_verbosity = NGX_HTTP_MARKDOWN_LOG_WARN;
+    conf.advanced.memory_budget = 8 * 1024 * 1024;
+    conf.streaming.budget = 4 * 1024 * 1024;
 
     ngx_http_markdown_build_effective_conf(&eff, NULL, &conf);
 
@@ -310,9 +310,9 @@ test_build_effective_conf_invalid_snapshot_falls_back(void)
     ngx_memzero(&eff, sizeof(eff));
 
     conf.enabled = 1;
-    conf.log_verbosity = NGX_HTTP_MARKDOWN_LOG_INFO;
-    conf.memory_budget = 16 * 1024 * 1024;
-    conf.streaming_budget = 8 * 1024 * 1024;
+    conf.policy.log_verbosity = NGX_HTTP_MARKDOWN_LOG_INFO;
+    conf.advanced.memory_budget = 16 * 1024 * 1024;
+    conf.streaming.budget = 8 * 1024 * 1024;
 
     snap.valid = 0;
 
@@ -340,10 +340,10 @@ test_effective_helpers_read_from_eff_when_present(void)
     ngx_memzero(&conf, sizeof(conf));
     ngx_memzero(&eff, sizeof(eff));
 
-    conf.log_verbosity = NGX_HTTP_MARKDOWN_LOG_ERROR;
-    conf.prune_noise = 0;
-    conf.memory_budget = 1024;
-    conf.streaming_budget = 512;
+    conf.policy.log_verbosity = NGX_HTTP_MARKDOWN_LOG_ERROR;
+    conf.advanced.prune_noise = 0;
+    conf.advanced.memory_budget = 1024;
+    conf.streaming.budget = 512;
 
     eff.log_verbosity = NGX_HTTP_MARKDOWN_LOG_DEBUG;
     eff.prune_noise = 1;
@@ -386,10 +386,10 @@ test_effective_helpers_fall_back_when_eff_null(void)
 
     conf.enabled = 1;
     conf.enabled_source = 5;
-    conf.log_verbosity = NGX_HTTP_MARKDOWN_LOG_WARN;
-    conf.prune_noise = 1;
-    conf.memory_budget = 4096;
-    conf.streaming_budget = 2048;
+    conf.policy.log_verbosity = NGX_HTTP_MARKDOWN_LOG_WARN;
+    conf.advanced.prune_noise = 1;
+    conf.advanced.memory_budget = 4096;
+    conf.streaming.budget = 2048;
 
     TEST_ASSERT(
         ngx_http_markdown_effective_log_verbosity(NULL, &conf)
@@ -429,10 +429,10 @@ test_request_snapshot_consistency_after_conf_change(void)
     ngx_memzero(&eff, sizeof(eff));
 
     conf.enabled = 1;
-    conf.prune_noise = 1;
-    conf.log_verbosity = NGX_HTTP_MARKDOWN_LOG_DEBUG;
-    conf.memory_budget = 4 * 1024 * 1024;
-    conf.streaming_budget = 2 * 1024 * 1024;
+    conf.advanced.prune_noise = 1;
+    conf.policy.log_verbosity = NGX_HTTP_MARKDOWN_LOG_DEBUG;
+    conf.advanced.memory_budget = 4 * 1024 * 1024;
+    conf.streaming.budget = 2 * 1024 * 1024;
 
     ngx_http_markdown_dynconf_snapshot_from_conf(&snap_at_request_start, &conf);
 
@@ -448,10 +448,10 @@ test_request_snapshot_consistency_after_conf_change(void)
     TEST_ASSERT(eff.streaming_budget == 2 * 1024 * 1024,
                 "before reload: streaming_budget is 2M");
 
-    conf.prune_noise = 0;
-    conf.log_verbosity = NGX_HTTP_MARKDOWN_LOG_ERROR;
-    conf.memory_budget = 16 * 1024 * 1024;
-    conf.streaming_budget = 8 * 1024 * 1024;
+    conf.advanced.prune_noise = 0;
+    conf.policy.log_verbosity = NGX_HTTP_MARKDOWN_LOG_ERROR;
+    conf.advanced.memory_budget = 16 * 1024 * 1024;
+    conf.streaming.budget = 8 * 1024 * 1024;
 
     TEST_ASSERT(eff.prune_noise == 1,
                 "after conf change: effective prune_noise still 1");
@@ -498,10 +498,10 @@ test_request_snapshot_consistency_with_dynconf_apply_snapshot(void)
     ngx_memzero(&eff, sizeof(eff));
 
     conf.enabled = 1;
-    conf.prune_noise = 1;
-    conf.log_verbosity = NGX_HTTP_MARKDOWN_LOG_INFO;
-    conf.memory_budget = 4 * 1024 * 1024;
-    conf.streaming_budget = 2 * 1024 * 1024;
+    conf.advanced.prune_noise = 1;
+    conf.policy.log_verbosity = NGX_HTTP_MARKDOWN_LOG_INFO;
+    conf.advanced.memory_budget = 4 * 1024 * 1024;
+    conf.streaming.budget = 2 * 1024 * 1024;
 
     ngx_http_markdown_dynconf_snapshot_from_conf(&snap_at_request_start, &conf);
 
@@ -517,11 +517,11 @@ test_request_snapshot_consistency_with_dynconf_apply_snapshot(void)
 
     ngx_http_markdown_dynconf_apply_snapshot(&conf, &reload_snapshot);
 
-    TEST_ASSERT(conf.prune_noise == 0,
+    TEST_ASSERT(conf.advanced.prune_noise == 0,
                 "live conf prune_noise changed by apply_snapshot");
-    TEST_ASSERT(conf.log_verbosity == NGX_HTTP_MARKDOWN_LOG_ERROR,
+    TEST_ASSERT(conf.policy.log_verbosity == NGX_HTTP_MARKDOWN_LOG_ERROR,
                 "live conf log_verbosity changed by apply_snapshot");
-    TEST_ASSERT(conf.memory_budget == 32 * 1024 * 1024,
+    TEST_ASSERT(conf.advanced.memory_budget == 32 * 1024 * 1024,
                 "live conf memory_budget changed by apply_snapshot");
 
     TEST_ASSERT(
@@ -574,9 +574,9 @@ test_effective_helpers_edge_values(void)
     ngx_memzero(&conf, sizeof(conf));
     ngx_memzero(&eff, sizeof(eff));
 
-    conf.log_verbosity = 0;
-    conf.memory_budget = 0;
-    conf.streaming_budget = 0;
+    conf.policy.log_verbosity = 0;
+    conf.advanced.memory_budget = 0;
+    conf.streaming.budget = 0;
 
     eff.log_verbosity = NGX_HTTP_MARKDOWN_LOG_DEBUG;
     eff.memory_budget = SIZE_MAX;
@@ -642,7 +642,7 @@ test_bind_request_snapshot(
     const ngx_http_markdown_effective_conf_t *early_eff,
     const ngx_http_markdown_conf_t *conf)
 {
-    if (conf->dynconf_enabled) {
+    if (conf->advanced.dynconf_enabled) {
         ctx->dynconf_snapshot =
             ngx_pcalloc(r->pool, sizeof(ngx_http_markdown_dynconf_snapshot_t));
         if (ctx->dynconf_snapshot != NULL && snap_copy != NULL) {
@@ -697,11 +697,11 @@ test_bind_request_snapshot_preserves_captured_snapshot(void)
     conn.log = &log;
 
     conf.enabled = 1;
-    conf.prune_noise = 1;
-    conf.log_verbosity = NGX_HTTP_MARKDOWN_LOG_INFO;
-    conf.memory_budget = 4 * 1024 * 1024;
-    conf.streaming_budget = 2 * 1024 * 1024;
-    conf.dynconf_enabled = 1;
+    conf.advanced.prune_noise = 1;
+    conf.policy.log_verbosity = NGX_HTTP_MARKDOWN_LOG_INFO;
+    conf.advanced.memory_budget = 4 * 1024 * 1024;
+    conf.streaming.budget = 2 * 1024 * 1024;
+    conf.advanced.dynconf_enabled = 1;
 
     ngx_http_markdown_dynconf_snapshot_from_conf(&snap_a, &conf);
     ngx_http_markdown_build_effective_conf(&early_eff_a, &snap_a, &conf);
@@ -792,11 +792,11 @@ test_dynconf_snapshot_not_consumed_when_dynconf_disabled(void)
 
     /* Location config: dynconf disabled, different static values */
     conf.enabled = 1;
-    conf.prune_noise = 0;
-    conf.log_verbosity = NGX_HTTP_MARKDOWN_LOG_ERROR;
-    conf.memory_budget = 1 * 1024 * 1024;
-    conf.streaming_budget = 512 * 1024;
-    conf.dynconf_enabled = 0;
+    conf.advanced.prune_noise = 0;
+    conf.policy.log_verbosity = NGX_HTTP_MARKDOWN_LOG_ERROR;
+    conf.advanced.memory_budget = 1 * 1024 * 1024;
+    conf.streaming.budget = 512 * 1024;
+    conf.advanced.dynconf_enabled = 0;
 
     /* Global snapshot has DIFFERENT values (from another location's reload) */
     global_snap.enabled = 1;

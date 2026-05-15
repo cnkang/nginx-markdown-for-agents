@@ -150,12 +150,12 @@ ngx_http_markdown_dynconf_snapshot_from_conf(
     snapshot->enabled = conf->enabled;
     snapshot->enabled_source = conf->enabled_source;
     snapshot->enabled_complex = conf->enabled_complex;
-    snapshot->prune_noise = conf->prune_noise;
-    snapshot->log_verbosity = conf->log_verbosity;
+    snapshot->prune_noise = conf->advanced.prune_noise;
+    snapshot->log_verbosity = conf->policy.log_verbosity;
 #ifdef MARKDOWN_STREAMING_ENABLED
-    snapshot->streaming_budget = conf->streaming_budget;
+    snapshot->streaming_budget = conf->streaming.budget;
 #endif
-    snapshot->memory_budget = conf->memory_budget;
+    snapshot->memory_budget = conf->advanced.memory_budget;
     snapshot->valid = 1;
 }
 
@@ -182,12 +182,12 @@ ngx_http_markdown_dynconf_apply_snapshot(
     conf->enabled = snapshot->enabled;
     conf->enabled_source = snapshot->enabled_source;
     conf->enabled_complex = snapshot->enabled_complex;
-    conf->prune_noise = snapshot->prune_noise;
-    conf->log_verbosity = snapshot->log_verbosity;
+    conf->advanced.prune_noise = snapshot->prune_noise;
+    conf->policy.log_verbosity = snapshot->log_verbosity;
 #ifdef MARKDOWN_STREAMING_ENABLED
-    conf->streaming_budget = snapshot->streaming_budget;
+    conf->streaming.budget = snapshot->streaming_budget;
 #endif
-    conf->memory_budget = snapshot->memory_budget;
+    conf->advanced.memory_budget = snapshot->memory_budget;
 }
 
 
@@ -225,11 +225,11 @@ ngx_http_markdown_build_effective_conf(
     } else {
         eff->enabled        = conf->enabled;
         eff->enabled_source = conf->enabled_source;
-        eff->prune_noise    = conf->prune_noise;
-        eff->log_verbosity  = conf->log_verbosity;
-        eff->memory_budget  = conf->memory_budget;
+        eff->prune_noise    = conf->advanced.prune_noise;
+        eff->log_verbosity  = conf->policy.log_verbosity;
+        eff->memory_budget  = conf->advanced.memory_budget;
 #ifdef MARKDOWN_STREAMING_ENABLED
-        eff->streaming_budget = conf->streaming_budget;
+        eff->streaming_budget = conf->streaming.budget;
 #endif
     }
 }
@@ -249,7 +249,7 @@ ngx_http_markdown_effective_log_verbosity(
     if (eff != NULL) {
         return eff->log_verbosity;
     }
-    return conf->log_verbosity;
+    return conf->policy.log_verbosity;
 }
 
 
@@ -264,7 +264,7 @@ ngx_http_markdown_effective_prune_noise(
     if (eff != NULL) {
         return eff->prune_noise;
     }
-    return conf->prune_noise;
+    return conf->advanced.prune_noise;
 }
 
 
@@ -279,7 +279,7 @@ ngx_http_markdown_effective_memory_budget(
     if (eff != NULL) {
         return eff->memory_budget;
     }
-    return conf->memory_budget;
+    return conf->advanced.memory_budget;
 }
 
 
@@ -295,7 +295,7 @@ ngx_http_markdown_effective_streaming_budget(
     if (eff != NULL) {
         return eff->streaming_budget;
     }
-    return conf->streaming_budget;
+    return conf->streaming.budget;
 }
 #endif
 
