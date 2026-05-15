@@ -706,7 +706,7 @@ ngx_http_markdown_prepare_conversion_options(ngx_http_request_t *r,
 #ifdef MARKDOWN_STREAMING_ENABLED
     if (ngx_http_markdown_effective_memory_budget(eff, conf)
             != NGX_CONF_UNSET_SIZE
-        && !conf->streaming_budget_explicit
+        && !conf->streaming.budget_explicit
         && ngx_http_markdown_effective_streaming_budget(eff, conf)
             == NGX_CONF_UNSET_SIZE)
     {
@@ -1574,7 +1574,7 @@ ngx_http_markdown_execute_conversion(ngx_http_request_t *r,
      * conversions use a different pipeline and should not
      * be compared against the streaming engine.
      */
-    if (conf->streaming_shadow
+    if (conf->streaming.shadow
         && ctx->processing_path != NGX_HTTP_MARKDOWN_PATH_INCREMENTAL)
     {
         ngx_http_markdown_shadow_compare(

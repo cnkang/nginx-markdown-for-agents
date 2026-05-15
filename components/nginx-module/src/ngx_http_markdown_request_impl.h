@@ -99,10 +99,10 @@ ngx_http_markdown_log_failure_decision(ngx_http_request_t *r,
  * timer reload between the initial header-phase read and the ctx bind.
  *
  * After this call:
- *   - When conf->dynconf_enabled is true: ctx->dynconf_snapshot holds
+ *   - When conf->advanced.dynconf_enabled is true: ctx->dynconf_snapshot holds
  *     a pool-owned copy of snap_copy, and ctx->effective_conf holds a
  *     pool-owned copy of early_eff (derived from the snapshot).
- *   - When conf->dynconf_enabled is false: ctx->dynconf_snapshot is
+ *   - When conf->advanced.dynconf_enabled is false: ctx->dynconf_snapshot is
  *     NULL (no snapshot bound — this location uses static/inherited
  *     config only), and ctx->effective_conf holds a pool-owned copy
  *     of early_eff (derived from live conf, since header_filter
@@ -136,7 +136,7 @@ ngx_http_markdown_bind_request_snapshot(
      * ctx->dynconf_snapshot remains NULL for non-dynconf
      * locations, which is the correct state.
      */
-    if (conf->dynconf_enabled) {
+    if (conf->advanced.dynconf_enabled) {
         if (snap_copy == NULL) {
             ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
                           "markdown filter: dynconf_enabled is true but "
@@ -417,7 +417,7 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
     ngx_memzero(&early_eff, sizeof(early_eff));
     ngx_http_markdown_build_effective_conf(
         &early_eff,
-        conf->dynconf_enabled ? &snap_copy : NULL,
+        conf->advanced.dynconf_enabled ? &snap_copy : NULL,
         conf);
 
     /*
@@ -477,7 +477,7 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
      * Auth policy check happens after the core eligibility checks and before
      * Accept negotiation, matching the documented decision chain order.
      */
-    if (conf->auth_policy == NGX_HTTP_MARKDOWN_AUTH_POLICY_DENY
+    if (conf->policy.auth_policy == NGX_HTTP_MARKDOWN_AUTH_POLICY_DENY
         && ngx_http_markdown_is_authenticated(r, conf))
     {
         ngx_http_markdown_metric_inc_skip(

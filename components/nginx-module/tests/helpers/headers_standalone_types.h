@@ -85,10 +85,12 @@ typedef struct {
     ngx_flag_t token_estimate;
     ngx_flag_t front_matter;
     ngx_flag_t on_wildcard;
-    ngx_uint_t auth_policy;
-    void *auth_cookies;
-    ngx_flag_t generate_etag;
-    ngx_uint_t conditional_requests;
+    struct {
+        ngx_uint_t auth_policy;
+        void *auth_cookies;
+        ngx_flag_t generate_etag;
+        ngx_uint_t conditional_requests;
+    } policy;
     ngx_flag_t buffer_chunked;
     void *stream_types;
 } ngx_http_markdown_conf_t;
