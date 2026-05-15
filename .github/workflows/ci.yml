@@ -139,6 +139,7 @@ jobs:
         with:
           workspaces: |
             components/rust-converter -> target
+          cache-bin: false
 
       - name: Check formatting
         working-directory: components/rust-converter
@@ -262,6 +263,7 @@ jobs:
         with:
           workspaces: |
             components/rust-converter -> target
+          cache-bin: false
 
       - name: Run delegated If-Modified-Since runtime validation
         id: ims_runtime
@@ -330,6 +332,7 @@ jobs:
         with:
           workspaces: |
             components/rust-converter -> target
+          cache-bin: false
 
       - name: Collect performance baselines
         run: |
@@ -381,6 +384,7 @@ jobs:
         with:
           workspaces: |
             components/rust-converter -> target
+          cache-bin: false
 
       - name: Build release binary
         working-directory: components/rust-converter
@@ -490,6 +494,7 @@ jobs:
         with:
           workspaces: |
             components/rust-converter -> target
+          cache-bin: false
 
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@db5fb34fa772531a3ece57ca434f579eb334e0fb # v2
@@ -532,6 +537,7 @@ jobs:
           workspaces: |
             components/rust-converter -> target
             tools/corpus/test-corpus-conversion -> target
+          cache-bin: false
 
       - name: Run corpus benchmark
         run: make test-benchmark
