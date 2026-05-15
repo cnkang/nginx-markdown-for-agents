@@ -24,7 +24,11 @@ ARCHIVE_SEGMENT = "docs/archive/"
 MAINTAINED_ROOT_DOCS = {"AGENTS.md", "README.md", "README_zh-CN.md"}
 LINK_RE = re.compile(r"(!?\[[^\]]+\]\(([^)]+)\))")
 HAN_RE = re.compile(r"[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF]")
-SPEC_INDEX_RE = re.compile(r"\bspecs?\s*(?:1[2-9]|[2-9]\d)(?:\s*[-–]\s*(?:1[2-9]|[2-9]\d))?\b", re.IGNORECASE)
+SPEC_INDEX_RE = re.compile(
+    r"\bspecs?\s*(?:1[2-9]|[2-9]\d)"
+    r"(?:\s*[-–]\s*(?:1[2-9]|[2-9]\d))?\b",
+    re.IGNORECASE,
+)
 KIRO_PATH_RE = re.compile(r"(?P<path>\.kiro/[A-Za-z0-9._/*-]+)")
 ALLOWED_KIRO_PATHS = {".kiro/nginx-development-guide.md"}
 
@@ -49,6 +53,7 @@ def iter_markdown_files() -> list[Path]:
             cwd=ROOT,
             text=True,
             capture_output=True,
+            check=False,
         )
         if proc.returncode == 0:
             candidates = {
@@ -196,6 +201,7 @@ def check_duplicate_sync() -> list[str]:
         cwd=ROOT,
         text=True,
         capture_output=True,
+        check=False,
     )
     if proc.returncode == 0:
         return []

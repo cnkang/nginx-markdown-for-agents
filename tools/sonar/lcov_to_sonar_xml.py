@@ -16,7 +16,7 @@ import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # noqa: E402
 from lib.path_validation import validate_read_path
 
 
@@ -132,6 +132,7 @@ def to_sonar_xml(
 
 
 def main() -> int:
+    """Parse CLI arguments, merge lcov files, and write SonarQube XML."""
     parser = argparse.ArgumentParser(
         description="Convert lcov files to SonarQube Generic Coverage XML",
     )
