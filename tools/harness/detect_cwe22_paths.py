@@ -96,7 +96,7 @@ REPO_ROOT_DERIVED_RE = re.compile(
 )
 
 _FILE_DERIVED_ASSIGN_RE = re.compile(
-    r"(\w+)\s*=\s*.*(?:__file__|repo_root|REPO_ROOT)",
+    r"(\w+)\s*=\s*[^\n]*(?:__file__|repo_root|REPO_ROOT)",
 )
 
 _TEMPFILE_VAR_RE = re.compile(
@@ -133,7 +133,7 @@ EXEMPT_FILES = {
 # is called later.  The safe pattern is: resolved = validate_read_path(arg)
 # then Path(resolved).
 _PATH_CONSTRUCTION_RE = re.compile(
-    r"Path\s*\(\s*(args?\.\w+|sys\.argv\[\d+\]|options?\.\w+|cli_\w+|user_\w+)\s*\)",
+    r"Path\s*\(\s*(args?\.\w+|sys\.argv\[\d+\]|options?\.\w+|(?:cli_|user_)\w+)\s*\)",
 )
 
 # User-derived variable names commonly used in CLI/path construction
@@ -161,6 +161,39 @@ def _emit_finding(
         warnings.append(warning_msg)
 
 
+def _is_safe_open_context(
+    first_arg: str,
+    line: str,
+    lines: list[str],
+    lineno: int,
+    validated_vars: set[str],
+    hardcoded_vars: set[str],
+) -> bool:
+    """Return True if this open() call is in a known-safe context."""
+    if DEF_LINE_RE.search(line):
+        return True
+    if SAFE_OPEN_ARG_RE.match(first_arg):
+        return True
+    if FD_VAR_RE.match(first_arg):
+        return True
+    if first_arg in validated_vars or first_arg in hardcoded_vars:
+        return True
+    path_method_m = PATH_METHOD_OPEN_RE.search(line)
+    if path_method_m and path_method_m.group(1) in hardcoded_vars:
+        return True
+    if HARDCODED_PATH_RE.search(line):
+        return True
+    if PYTEST_FIXTURE_RE.search(line):
+        return True
+    if REPO_ROOT_DERIVED_RE.search(line):
+        return True
+    if DIR_FD_RE.search(line):
+        return True
+    if lineno < len(lines) and DIR_FD_RE.search(lines[lineno]):
+        return True
+    return False
+
+
 def _classify_open_call(
     first_arg: str,
     line: str,
@@ -177,42 +210,10 @@ def _classify_open_call(
     errors: list[str] = []
     warnings: list[str] = []
 
-    if DEF_LINE_RE.search(line):
+    if _is_safe_open_context(
+        first_arg, line, lines, lineno, validated_vars, hardcoded_vars,
+    ):
         return errors, warnings
-
-    if SAFE_OPEN_ARG_RE.match(first_arg):
-        return errors, warnings
-
-    if FD_VAR_RE.match(first_arg):
-        return errors, warnings
-
-    if first_arg in validated_vars:
-        return errors, warnings
-
-    if first_arg in hardcoded_vars:
-        return errors, warnings
-
-    path_method_m = PATH_METHOD_OPEN_RE.search(line)
-    if path_method_m and path_method_m.group(1) in hardcoded_vars:
-        return errors, warnings
-
-    if HARDCODED_PATH_RE.search(line):
-        return errors, warnings
-
-    if PYTEST_FIXTURE_RE.search(line):
-        return errors, warnings
-
-    if REPO_ROOT_DERIVED_RE.search(line):
-        return errors, warnings
-
-    if DIR_FD_RE.search(line):
-        return errors, warnings
-
-    # Check if this open() call uses dir_fd= on the same or next line
-    if lineno < len(lines):
-        next_line = lines[lineno] if lineno < len(lines) else ""
-        if DIR_FD_RE.search(next_line):
-            return errors, warnings
 
     if "test_" in filepath.name:
         warnings.append(
@@ -345,7 +346,6 @@ def _scan_open_calls(
 
 def _scan_path_constructions(
     lines: list[str],
-    validated_vars: set[str],
     hardcoded_vars: set[str],
     filepath: Path,
     rel: str,
@@ -359,7 +359,6 @@ def _scan_path_constructions(
 
     Args:
         lines: Source lines.
-        validated_vars: Variables assigned from validation calls.
         hardcoded_vars: Variables from hardcoded/repo-root sources.
         filepath: File path for reporting.
         rel: Display path for reporting.
@@ -435,7 +434,7 @@ def check_file(
     # Per commit 847479c: Path(user_input) before validate_read_path
     # enables path traversal even if validated later.
     path_errors, path_warnings = _scan_path_constructions(
-        lines, validated_vars, hardcoded_vars, filepath, rel, strict,
+        lines, hardcoded_vars, filepath, rel, strict,
     )
     errors.extend(path_errors)
     warnings.extend(path_warnings)

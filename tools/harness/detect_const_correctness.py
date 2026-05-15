@@ -114,6 +114,53 @@ def _is_in_mutator_function(line: str, match_start: int) -> bool:
     return bool(func_match and INTENTIONAL_MUTATOR_RE.search(func_match.group(1)))
 
 
+def _check_line_for_const_violations(
+    line: str, lineno: int, rel: str, strict: bool,
+) -> tuple[list[str], list[str]]:
+    """Check a single line for non-const pointer parameters.
+
+    Args:
+        line: Source line to check.
+        lineno: Line number (1-indexed).
+        rel: Repo-relative file path for reporting.
+        strict: If True, promote warnings to errors.
+
+    Returns:
+        Tuple of (errors, warnings).
+    """
+    errors: list[str] = []
+    warnings: list[str] = []
+
+    if COMMENT_RE.search(line):
+        return errors, warnings
+    if "(" not in line:
+        return errors, warnings
+    if INTENTIONAL_MUTATOR_RE.search(line):
+        return errors, warnings
+
+    for m in NON_CONST_PARAM_RE.finditer(line):
+        type_name = m.group(1)
+        param_name = m.group(2)
+
+        if _has_const_prefix(line, m.start(), type_name, param_name):
+            continue
+        if _is_in_mutator_function(line, m.start()):
+            continue
+
+        msg = (
+            f"  WARNING {rel}:{lineno} — non-const pointer parameter "
+            f"'{type_name} *{param_name}' in read-only context "
+            f"(consider const-qualification per AGENTS.md Rule 24)"
+        )
+        if strict:
+            msg = msg.replace("WARNING", "ERROR", 1)
+            errors.append(msg)
+        else:
+            warnings.append(msg)
+
+    return errors, warnings
+
+
 def check_file(
     filepath: Path, *, strict: bool = False,
 ) -> tuple[list[str], list[str]]:
@@ -143,32 +190,11 @@ def check_file(
     lines = source.splitlines()
 
     for lineno, line in enumerate(lines, start=1):
-        if COMMENT_RE.search(line):
-            continue
-        if "(" not in line:
-            continue
-        if INTENTIONAL_MUTATOR_RE.search(line):
-            continue
-
-        for m in NON_CONST_PARAM_RE.finditer(line):
-            type_name = m.group(1)
-            param_name = m.group(2)
-
-            if _has_const_prefix(line, m.start(), type_name, param_name):
-                continue
-            if _is_in_mutator_function(line, m.start()):
-                continue
-
-            msg = (
-                f"  WARNING {rel}:{lineno} — non-const pointer parameter "
-                f"'{type_name} *{param_name}' in read-only context "
-                f"(consider const-qualification per AGENTS.md Rule 24)"
-            )
-            if strict:
-                msg = msg.replace("WARNING", "ERROR", 1)
-                errors.append(msg)
-            else:
-                warnings.append(msg)
+        line_errors, line_warnings = _check_line_for_const_violations(
+            line, lineno, rel, strict,
+        )
+        errors.extend(line_errors)
+        warnings.extend(line_warnings)
 
     return errors, warnings
 
