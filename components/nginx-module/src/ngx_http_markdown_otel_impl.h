@@ -553,7 +553,7 @@ ngx_http_markdown_otel_escape_json_string(u_char *dst, u_char *last,
  *   Number of bytes written, or 0 on overflow.
  */
 static size_t
-ngx_http_markdown_otel_render_json(ngx_http_markdown_otel_span_t *span,
+ngx_http_markdown_otel_render_json(const ngx_http_markdown_otel_span_t *span,
                                    u_char *buf, size_t len,
                                    const ngx_str_t *otel_endpoint)
 {

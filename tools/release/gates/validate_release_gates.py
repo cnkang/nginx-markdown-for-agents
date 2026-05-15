@@ -411,8 +411,7 @@ def _is_skippable_row(line: str, cells: list[str]) -> bool:
             if _is_template_placeholder(non_empty)
             else "高" not in line and "High" not in line
         )
-    else:
-        return True
+    return True
 
 
 def _row_missing_mitigation(cells: list[str], mitigation_idx: int) -> bool:
@@ -656,7 +655,8 @@ def check_compat_states(
     if len(state_columns) != len(VALID_STATES):
         result.failed(
             CHECK_COMPAT_STATES,
-            f"expected {len(VALID_STATES)} state columns, found {len(state_columns)}: {state_columns}",
+            f"expected {len(VALID_STATES)} state columns, found "
+            f"{len(state_columns)}: {state_columns}",
         )
         return [], capability_idx
     if extra_columns:
@@ -1084,13 +1084,13 @@ def main() -> int:
 
     # Framework-level checks (always run, independent of mode)
     framework_checks: dict[str, object] = {
-        "compat-matrix": lambda r: check_compatibility_matrix(r),
-        "checklist": lambda r: check_checklist_verification(r),
-        "test-matrix": lambda r: check_test_matrix(r),
-        "non-goals": lambda r: check_non_goals(r),
-        "naming-doc": lambda r: check_naming_conventions_doc(r),
-        "arch-status": lambda r: check_architecture_status(r),
-        "gate-failures": lambda r: check_gate_failure_handling(r),
+        "compat-matrix": check_compatibility_matrix,
+        "checklist": check_checklist_verification,
+        "test-matrix": check_test_matrix,
+        "non-goals": check_non_goals,
+        "naming-doc": check_naming_conventions_doc,
+        "arch-status": check_architecture_status,
+        "gate-failures": check_gate_failure_handling,
     }
 
     all_checks = per_spec_checks | framework_checks

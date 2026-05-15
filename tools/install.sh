@@ -179,7 +179,7 @@ die_with_error() {
     emit_suggest "$suggestion"
   done
   json_output false
-  exit 1
+  exit 1  # Intentional exit; no return needed as this is a terminal function
 }
 
 # semver_lt compares two semantic version strings in MAJOR.MINOR.PATCH form and exits with status 0 when the first is less than the second.
