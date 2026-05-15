@@ -1205,6 +1205,17 @@ sleep 2
 # avoiding redundant rebuilds inside each sub-script.
 REUSE_NGINX_BIN="${RUNTIME}/sbin/nginx"
 
+run_wrapper_with_nginx_bin_fallback() {
+  local label="$1"
+  shift
+  if env NGINX_BIN="${REUSE_NGINX_BIN}" bash "$@"; then
+    return 0
+  fi
+  echo "  WARNING: ${label} failed with reused nginx binary; retrying with self-build" >&2
+  bash "$@"
+  return $?
+}
+
 echo "==> Running extended streaming failure/cache e2e coverage"
 if ! env NGINX_BIN="${REUSE_NGINX_BIN}" \
   bash "${WORKSPACE_ROOT}/tools/e2e/verify_streaming_failure_cache_e2e.sh" \
@@ -1247,6 +1258,45 @@ if ! env NGINX_BIN="${REUSE_NGINX_BIN}" \
     --port 18289 \
     --backend-port 19289; then
     echo "  WARNING: proxy TLS backend e2e coverage run failed; continuing" >&2
+fi
+
+echo "==> Running auth-cache e2e coverage"
+if ! run_wrapper_with_nginx_bin_fallback "auth-cache e2e coverage" \
+    "${WORKSPACE_ROOT}/tools/e2e/verify_auth_cache_e2e.sh" \
+    --port 18285 \
+    --upstream-port 19285; then
+    echo "  WARNING: auth-cache e2e coverage run failed; continuing" >&2
+fi
+
+echo "==> Running conditional-requests e2e coverage"
+if ! run_wrapper_with_nginx_bin_fallback "conditional-requests e2e coverage" \
+    "${WORKSPACE_ROOT}/tools/e2e/verify_conditional_requests_e2e.sh" \
+    --port 18286 \
+    --upstream-port 19286; then
+    echo "  WARNING: conditional-requests e2e coverage run failed; continuing" >&2
+fi
+
+echo "==> Running metrics-endpoint e2e coverage"
+if ! run_wrapper_with_nginx_bin_fallback "metrics-endpoint e2e coverage" \
+    "${WORKSPACE_ROOT}/tools/e2e/verify_metrics_endpoint_e2e.sh" \
+    --port 18287 \
+    --upstream-port 19287; then
+    echo "  WARNING: metrics-endpoint e2e coverage run failed; continuing" >&2
+fi
+
+echo "==> Running status-codes e2e coverage"
+if ! run_wrapper_with_nginx_bin_fallback "status-codes e2e coverage" \
+    "${WORKSPACE_ROOT}/tools/e2e/verify_status_codes_e2e.sh" \
+    --port 18288 \
+    --upstream-port 19288; then
+    echo "  WARNING: status-codes e2e coverage run failed; continuing" >&2
+fi
+
+echo "==> Running error-handling e2e coverage"
+if ! run_wrapper_with_nginx_bin_fallback "error-handling e2e coverage" \
+    "${WORKSPACE_ROOT}/tools/e2e/verify_error_handling_e2e.sh" \
+    --port 18283; then
+    echo "  WARNING: error-handling e2e coverage run failed; continuing" >&2
 fi
 
 echo "==> Running huge-body native e2e coverage (skip 1GB GET)"
