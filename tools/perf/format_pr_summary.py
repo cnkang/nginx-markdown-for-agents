@@ -23,6 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from report_utils import load_json  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+PR_SUMMARY_OUTPUT_DIR = REPO_ROOT / "perf" / "reports"
 
 TOKEN_DISCLAIMER = (
     "Token reduction values are estimates derived from byte-size ratios, "
@@ -34,9 +35,23 @@ def _write_text_with_repo_guard(
     output_path: str | Path, content: str, *, purpose: str,
 ) -> Path:
     """Resolve output path under REPO_ROOT and write UTF-8 text safely."""
-    candidate_output = Path(output_path)
-    if not candidate_output.is_absolute():
-        candidate_output = REPO_ROOT / candidate_output
+    raw_output = Path(output_path)
+    output_name = raw_output.name
+    if output_name in {"", ".", ".."}:
+        raise ValueError(
+            f"Invalid output filename for {purpose}: {output_path!r}"
+        )
+    output_parts = raw_output.parts
+    if len(output_parts) == 1:
+        pass
+    elif len(output_parts) == 3 and output_parts[:2] == ("perf", "reports"):
+        pass
+    else:
+        raise ValueError(
+            "Output path must be '<filename>' or 'perf/reports/<filename>'"
+        )
+
+    candidate_output = PR_SUMMARY_OUTPUT_DIR / output_name
     validated_output = validate_write_path_within_root(
         candidate_output, REPO_ROOT, purpose=purpose,
     ).resolve()
@@ -151,9 +166,13 @@ def main(argv: list[str] | None = None) -> int:
     md = format_summary(report)
 
     if args.output:
-        validated_output = _write_text_with_repo_guard(
-            args.output, md, purpose="PR summary output",
-        )
+        try:
+            validated_output = _write_text_with_repo_guard(
+                args.output, md, purpose="PR summary output",
+            )
+        except ValueError as e:
+            print(f"ERROR: {e}", file=sys.stderr)
+            return 1
         print(f"PR summary written to {validated_output}")
     else:
         print(md)
