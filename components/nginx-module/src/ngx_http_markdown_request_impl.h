@@ -305,9 +305,9 @@ ngx_http_markdown_init_ctx(ngx_http_request_t *r,
     ctx->eligible = 1;
     ctx->buffer_initialized = 0;
     ctx->headers_forwarded = 0;
-    ctx->source_last_modified_time =
+    ctx->last_modified.source_last_modified_time =
         r->headers_out.last_modified_time;
-    ctx->has_last_modified_time =
+    ctx->last_modified.has_last_modified_time =
         (r->headers_out.last_modified_time != (time_t) -1);
     ctx->conversion_attempted = 0;
     ctx->conversion_succeeded = 0;

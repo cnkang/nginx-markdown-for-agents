@@ -162,16 +162,30 @@ def _is_safe_open_context(
     hardcoded_vars: set[str],
 ) -> bool:
     """Return True if this open() call is in a known-safe context."""
-    if DEF_LINE_RE.search(line):
+    if _is_safe_open_arg(first_arg, validated_vars, hardcoded_vars):
         return True
+    path_open_receiver = _extract_path_open_receiver(line)
+    if path_open_receiver and path_open_receiver in hardcoded_vars:
+        return True
+    return _is_safe_open_line_context(line, lines, lineno)
+
+
+def _is_safe_open_arg(
+    first_arg: str, validated_vars: set[str], hardcoded_vars: set[str],
+) -> bool:
+    """Return True when the open() first argument is already trusted."""
     if SAFE_OPEN_ARG_RE.match(first_arg):
         return True
     if FD_VAR_RE.match(first_arg):
         return True
-    if first_arg in validated_vars or first_arg in hardcoded_vars:
-        return True
-    path_open_receiver = _extract_path_open_receiver(line)
-    if path_open_receiver and path_open_receiver in hardcoded_vars:
+    return first_arg in validated_vars or first_arg in hardcoded_vars
+
+
+def _is_safe_open_line_context(
+    line: str, lines: list[str], lineno: int,
+) -> bool:
+    """Return True when open() appears in a known-safe source context."""
+    if DEF_LINE_RE.search(line):
         return True
     if HARDCODED_PATH_RE.search(line):
         return True
