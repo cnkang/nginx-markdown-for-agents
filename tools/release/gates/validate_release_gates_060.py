@@ -175,11 +175,15 @@ def check_routing_manifest(result: ValidationResult) -> None:
         result.fail(GATE_ROUTING_MANIFEST, "routing-manifest.json missing")
         return
     try:
-        import json
+        import json  # noqa: PLC0415
         content = ROUTING_MANIFEST_PATH.read_text(encoding="utf-8")
         manifest = json.loads(content)
         families = manifest.get("verification_families", {})
-        required_families = ["coverage-gate", "release-governance-060", "packaging-e2e"]
+        required_families = [
+            "coverage-gate",
+            "release-governance-060",
+            "packaging-e2e",
+        ]
         found = 0
         for family in required_families:
             if family in families:
@@ -268,11 +272,20 @@ def check_coverage_gate_script(result: ValidationResult) -> None:
     if COVERAGE_GATE_SCRIPT.is_file():
         content = COVERAGE_GATE_SCRIPT.read_text(encoding="utf-8")
         if "coverage_gate" in content and "parse_lcov_summary" in content:
-            result.pass_(GATE_COVERAGE_GATE_SCRIPT, "coverage_gate.py exists with required functions")
+            result.pass_(
+                GATE_COVERAGE_GATE_SCRIPT,
+                "coverage_gate.py exists with required functions",
+            )
         else:
-            result.fail(GATE_COVERAGE_GATE_SCRIPT, "coverage_gate.py missing required functions")
+            result.fail(
+                GATE_COVERAGE_GATE_SCRIPT,
+                "coverage_gate.py missing required functions",
+            )
     else:
-        result.fail(GATE_COVERAGE_GATE_SCRIPT, f"coverage_gate.py missing at {COVERAGE_GATE_SCRIPT}")
+        result.fail(
+            GATE_COVERAGE_GATE_SCRIPT,
+            f"coverage_gate.py missing at {COVERAGE_GATE_SCRIPT}",
+        )
 
 
 def main() -> int:

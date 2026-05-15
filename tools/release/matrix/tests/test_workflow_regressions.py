@@ -58,14 +58,21 @@ def test_release_binaries_updates_matrix_before_resolving_builds() -> None:
 
 
 def test_update_matrix_pr_creation_is_non_blocking_when_repo_disallows_actions_prs() -> None:
-    """Scheduled matrix refreshes should succeed even if PR creation is policy-blocked."""
+    """Scheduled matrix refreshes should succeed even if PR creation is policy-blocked.
+
+    The workflow must NOT auto-approve or immediately merge its own PR.
+    It may enable auto-merge (which requires branch-protection review),
+    but must never bypass human review for release-matrix changes.
+    """
     text = _workflow_text("update-matrix.yml")
     assert "continue-on-error: true" in text
     assert "Source: nginx.org download page." in text
-    assert "Auto-approve release matrix PR" in text
-    assert 'gh pr review "$PR_NUMBER" --approve' in text
-    assert "Auto-merge release matrix PR" in text
-    assert 'gh pr merge "$PR_NUMBER" --squash --delete-branch --auto' in text
+    assert "Auto-approve release matrix PR" not in text
+    assert 'gh pr review "$PR_NUMBER" --approve' not in text
+    assert "Auto-merge release matrix PR" not in text
+    assert "Enable auto-merge for release matrix PR" not in text
+    assert 'gh pr merge "$PR_NUMBER"' not in text
+    assert "Remind maintainer review for release matrix PR" in text
     assert "Matrix update branch pushed, but automatic PR creation is blocked." in text
 
 
