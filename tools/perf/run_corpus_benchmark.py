@@ -167,10 +167,12 @@ def run_converter(converter_bin: str, html_path: str) -> tuple[str, int, float]:
         elapsed_ms = (time.perf_counter() - start) * 1000.0
         return result.stdout, result.returncode, elapsed_ms
     except subprocess.TimeoutExpired:
-        elapsed_ms = (time.perf_counter() - start) * 1000.0  # SONAR_NOTE — parens required: without them `start * 1000` binds first
+        elapsed_ms = time.perf_counter() - start
+        elapsed_ms *= 1000.0
         return "", 1, elapsed_ms
     except Exception:
-        elapsed_ms = (time.perf_counter() - start) * 1000.0  # SONAR_NOTE — parens required: without them `start * 1000` binds first
+        elapsed_ms = time.perf_counter() - start
+        elapsed_ms *= 1000.0
         return "", 1, elapsed_ms
 
 
