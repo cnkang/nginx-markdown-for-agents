@@ -63,7 +63,7 @@ static ngx_http_output_body_filter_pt ngx_http_next_body_filter;
  * decrement guard avoids underflow after counter resets or partial tests.
  */
 static void
-ngx_http_markdown_reclassify_fail_open_path(const ngx_http_markdown_ctx_t *ctx)
+ngx_http_markdown_reclassify_fail_open_path(ngx_http_markdown_ctx_t *ctx)
 {
     if (ctx == NULL
         || ctx->processing_path != NGX_HTTP_MARKDOWN_PATH_INCREMENTAL)
@@ -707,7 +707,7 @@ ngx_http_markdown_body_filter_decompress_if_needed(ngx_http_request_t *r,
  * filter accepts the headers.
  */
 static ngx_int_t
-ngx_http_markdown_forward_headers(ngx_http_request_t *r, const ngx_http_markdown_ctx_t *ctx)
+ngx_http_markdown_forward_headers(ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx)
 {
     ngx_int_t rc;
 

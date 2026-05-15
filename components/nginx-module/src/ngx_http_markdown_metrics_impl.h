@@ -197,7 +197,7 @@ ngx_http_markdown_metrics_send_response(
  *                 the global metrics instance is unavailable).
  */
 static void
-ngx_http_markdown_collect_metrics_snapshot(const ngx_http_markdown_metrics_snapshot_t *snapshot)
+ngx_http_markdown_collect_metrics_snapshot(ngx_http_markdown_metrics_snapshot_t *snapshot)
 {
     const ngx_http_markdown_metrics_t *metrics;
 
