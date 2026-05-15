@@ -107,7 +107,7 @@ static ngx_uint_t g_alloc_chain_fail_once = 0;
 #endif
 
 static void
-markdown_convert(struct MarkdownConverterHandle *handle, /* NOSONAR: must match FFI signature */
+markdown_convert(struct MarkdownConverterHandle *handle, /* SONAR_NOTE: must match FFI signature */
     const uint8_t *html, uintptr_t html_len,
     const struct MarkdownOptions *options,
     struct MarkdownResult *result)
@@ -129,7 +129,7 @@ markdown_convert(struct MarkdownConverterHandle *handle, /* NOSONAR: must match 
  * can mask stale-state regressions, so every field is zeroed.
  */
 static void
-markdown_result_free(struct MarkdownResult *result) /* NOSONAR: must match FFI signature */
+markdown_result_free(struct MarkdownResult *result) /* SONAR_NOTE: must match FFI signature */
 {
     g_markdown_result_free_calls++;
     if (result != NULL) {
@@ -488,8 +488,8 @@ ngx_rbtree_insert(ngx_rbtree_t *tree, ngx_rbtree_node_t *node)
  */
 static ngx_int_t
 ngx_http_markdown_forward_headers(
-    ngx_http_request_t *r,     /* NOSONAR c:S995 — must match production signature */
-    ngx_http_markdown_ctx_t *ctx)  /* NOSONAR c:S995 — must match production signature */
+    ngx_http_request_t *r,     /* SONAR_NOTE c:S995 — must match production signature */
+    ngx_http_markdown_ctx_t *ctx)  /* SONAR_NOTE c:S995 — must match production signature */
 {
     UNUSED(r);
     UNUSED(ctx);
@@ -510,8 +510,8 @@ ngx_http_markdown_metric_inc_failopen(
  */
 static ngx_int_t
 ngx_http_markdown_reject_or_fail_open_buffered_response(
-    ngx_http_request_t *r,     /* NOSONAR c:S995 — must match impl forward decl */
-    ngx_http_markdown_ctx_t *ctx,  /* NOSONAR c:S995 — must match impl forward decl */
+    ngx_http_request_t *r,     /* SONAR_NOTE c:S995 — must match impl forward decl */
+    ngx_http_markdown_ctx_t *ctx,  /* SONAR_NOTE c:S995 — must match impl forward decl */
     const ngx_http_markdown_conf_t *conf, const char *debug_message)
 {
     UNUSED(r);
@@ -579,7 +579,7 @@ ngx_http_markdown_error_category_string(
  */
 ngx_int_t
 ngx_http_markdown_update_headers(
-    ngx_http_request_t *r,     /* NOSONAR c:S995 — must match module header decl */
+    ngx_http_request_t *r,     /* SONAR_NOTE c:S995 — must match module header decl */
     const struct MarkdownResult *result,
     const ngx_http_markdown_conf_t *conf)
 {
@@ -591,10 +591,10 @@ ngx_http_markdown_update_headers(
 
 ngx_int_t
 ngx_http_markdown_handle_if_none_match(
-    ngx_http_request_t *r,     /* NOSONAR c:S995 — must match module header decl */
+    ngx_http_request_t *r,     /* SONAR_NOTE c:S995 — must match module header decl */
     const ngx_http_markdown_conf_t *conf,
     const ngx_http_markdown_ctx_t *ctx,
-    struct MarkdownConverterHandle *converter,  /* NOSONAR c:S995 — must match module header decl */
+    struct MarkdownConverterHandle *converter,  /* SONAR_NOTE c:S995 — must match module header decl */
     struct MarkdownResult **result)
 {
     UNUSED(r);
@@ -607,7 +607,7 @@ ngx_http_markdown_handle_if_none_match(
 
 ngx_int_t
 ngx_http_markdown_send_304(
-    ngx_http_request_t *r,     /* NOSONAR c:S995 — must match module header decl */
+    ngx_http_request_t *r,     /* SONAR_NOTE c:S995 — must match module header decl */
     const struct MarkdownResult *result)
 {
     UNUSED(r);
@@ -662,7 +662,7 @@ ngx_http_markdown_otel_span_export(ngx_http_markdown_otel_span_t *span,
     UNUSED(r);
 }
 
-#include "../../src/ngx_http_markdown_conversion_impl.h" /* NOSONAR: must follow stub definitions */
+#include "../../src/ngx_http_markdown_conversion_impl.h" /* SONAR_NOTE: must follow stub definitions */
 
 static ngx_connection_t g_connection = { 0 };
 static ngx_log_t g_log = { 0 };

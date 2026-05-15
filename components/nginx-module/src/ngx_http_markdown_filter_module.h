@@ -225,7 +225,7 @@ typedef enum {
  * eligibility checks, conversion paths, tests) for no semantic benefit and
  * significant regression risk.  The field count reflects NGINX module
  * configuration breadth, not poor structure design. */
-typedef struct { /* NOSONAR: c:S1820, module config shape mirrors directive surface */
+typedef struct { /* SONAR_NOTE: c:S1820, module config shape mirrors directive surface */
     ngx_flag_t   enabled;              /* markdown_filter static resolved value */
     ngx_uint_t   enabled_source;       /* markdown_filter source (static|complex|unset) */
     ngx_http_complex_value_t *enabled_complex; /* markdown_filter variable/complex expression */

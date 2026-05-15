@@ -34,6 +34,9 @@ import re
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from lib.path_validation import validate_read_path
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 # NGINX types commonly passed as non-const pointers that should be const
@@ -107,11 +110,42 @@ def _has_const_prefix(line: str, match_start: int, type_name: str, param_name: s
 
 def _is_in_mutator_function(line: str, match_start: int) -> bool:
     """Check whether the enclosing function name suggests intentional mutation."""
-    func_match = re.search(
-        r"(\w+)\s*\(",
-        line[:match_start] if match_start > 0 else line,
+    context = line[:match_start] if match_start > 0 else line
+    func_name = _extract_func_name(context)
+    if not func_name:
+        return False
+    return bool(INTENTIONAL_MUTATOR_RE.search(func_name))
+
+
+def _extract_func_name(context: str) -> str | None:
+    """Extract the function token before '(' with bounded string parsing."""
+    idx = context.find("(")
+    if idx <= 0:
+        return None
+    head = context[:idx].strip()
+    if not head:
+        return None
+    token = head.split()[-1]
+    return token if token.isidentifier() else None
+
+
+def _should_skip_line(line: str) -> bool:
+    if COMMENT_RE.search(line):
+        return True
+    if "(" not in line:
+        return True
+    return bool(INTENTIONAL_MUTATOR_RE.search(line))
+
+
+def _build_finding_message(
+    rel: str, lineno: int, type_name: str, param_name: str, strict: bool,
+) -> str:
+    level = "ERROR" if strict else "WARNING"
+    return (
+        f"  {level} {rel}:{lineno} — non-const pointer parameter "
+        f"'{type_name} *{param_name}' in read-only context "
+        f"(consider const-qualification per AGENTS.md Rule 24)"
     )
-    return bool(func_match and INTENTIONAL_MUTATOR_RE.search(func_match.group(1)))
 
 
 def _check_line_for_const_violations(
@@ -131,11 +165,7 @@ def _check_line_for_const_violations(
     errors: list[str] = []
     warnings: list[str] = []
 
-    if COMMENT_RE.search(line):
-        return errors, warnings
-    if "(" not in line:
-        return errors, warnings
-    if INTENTIONAL_MUTATOR_RE.search(line):
+    if _should_skip_line(line):
         return errors, warnings
 
     for m in NON_CONST_PARAM_RE.finditer(line):
@@ -147,13 +177,10 @@ def _check_line_for_const_violations(
         if _is_in_mutator_function(line, m.start()):
             continue
 
-        msg = (
-            f"  WARNING {rel}:{lineno} — non-const pointer parameter "
-            f"'{type_name} *{param_name}' in read-only context "
-            f"(consider const-qualification per AGENTS.md Rule 24)"
+        msg = _build_finding_message(
+            rel, lineno, type_name, param_name, strict,
         )
         if strict:
-            msg = msg.replace("WARNING", "ERROR", 1)
             errors.append(msg)
         else:
             warnings.append(msg)
@@ -222,7 +249,7 @@ def main() -> int:
     args = parser.parse_args()
     strict = args.strict
 
-    scan_dir = Path(args.directory)
+    scan_dir = validate_read_path(args.directory, purpose="scan directory")
     if not scan_dir.is_dir():
         print(f"ERROR: {scan_dir} is not a directory", file=sys.stderr)
         return 1

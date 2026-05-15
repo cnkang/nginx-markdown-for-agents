@@ -846,7 +846,7 @@ ngx_http_markdown_dynconf_parse_size_safe(const u_char *value, size_t value_len,
     ngx_str_t   val;
     ssize_t     parsed;
 
-    val.data = (u_char *) value; /* NOSONAR: ngx_str_t.data is non-const u_char* by NGINX API contract; value is const at caller level */
+    val.data = (u_char *) value; /* SONAR_NOTE: ngx_str_t.data is non-const u_char* by NGINX API contract; value is const at caller level */
     val.len = value_len;
 
     parsed = ngx_parse_size(&val);

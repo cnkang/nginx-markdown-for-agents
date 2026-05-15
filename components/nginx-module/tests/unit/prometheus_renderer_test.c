@@ -33,10 +33,10 @@ typedef unsigned long ngx_atomic_uint_t;
  * used by ngx_http_markdown_metrics_write_prometheus() are correct.
  * Any change to the production struct requires updating this local copy.
  *
- * NOSONAR c:S1820 — field count mirrors production struct; grouping
+ * SONAR_NOTE c:S1820 — field count mirrors production struct; grouping
  * into sub-structs would break ABI compatibility with the impl header.
  */
-typedef struct { /* NOSONAR */
+typedef struct { /* SONAR_NOTE */
     ngx_atomic_t  conversions_attempted;
     ngx_atomic_t  conversions_succeeded;
     ngx_atomic_t  conversions_failed;
@@ -113,10 +113,10 @@ typedef struct { /* NOSONAR */
  * (%uA for ngx_atomic_uint_t).  In this test stub we map %uA to
  * %d since ngx_atomic_t is int.
  *
- * NOSONAR c:S923 — variadic signature must match production ngx_slprintf.
+ * SONAR_NOTE c:S923 — variadic signature must match production ngx_slprintf.
  */
 static u_char *
-ngx_slprintf(u_char *buf, u_char *last, const char *fmt, ...) /* NOSONAR */
+ngx_slprintf(u_char *buf, u_char *last, const char *fmt, ...) /* SONAR_NOTE */
 {
     va_list      args;
     int          n;
@@ -189,10 +189,10 @@ ngx_slprintf(u_char *buf, u_char *last, const char *fmt, ...) /* NOSONAR */
 #define NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED 0
 
 /*
- * NOSONAR c:S954 — the impl header must follow type definitions and
+ * SONAR_NOTE c:S954 — the impl header must follow type definitions and
  * stubs above; it cannot be moved to the top of the file.
  */
-#include "../../src/ngx_http_markdown_prometheus_impl.h" /* NOSONAR */
+#include "../../src/ngx_http_markdown_prometheus_impl.h" /* SONAR_NOTE */
 
 /* ── Helpers ──────────────────────────────────────────────────────── */
 

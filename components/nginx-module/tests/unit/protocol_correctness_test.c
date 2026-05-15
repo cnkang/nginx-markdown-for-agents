@@ -264,7 +264,7 @@ ngx_http_markdown_sprintf_token(u_char *buf, ngx_uint_t token_count)
  * headers_impl.h depends on all of them being visible. Moving it
  * to the top of the file would break compilation.
  */
-#include "../../src/ngx_http_markdown_headers_impl.h" /* NOSONAR: must follow stubs */
+#include "../../src/ngx_http_markdown_headers_impl.h" /* SONAR_NOTE: must follow stubs */
 
 /* ── Test helpers ──────────────────────────────────────────────── */
 

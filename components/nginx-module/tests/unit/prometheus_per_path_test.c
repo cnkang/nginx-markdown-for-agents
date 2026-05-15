@@ -20,7 +20,7 @@ typedef unsigned long ngx_atomic_uint_t;
 
 #define ngx_string(str) { sizeof(str) - 1, (u_char *) str }
 
-typedef struct { /* NOSONAR: mirrors production snapshot */
+typedef struct { /* SONAR_NOTE: mirrors production snapshot */
     ngx_atomic_t  conversions_attempted;
     ngx_atomic_t  conversions_succeeded;
     ngx_atomic_t  conversions_failed;
@@ -144,7 +144,7 @@ typedef struct {
 } ngx_http_markdown_metrics_t;
 
 static u_char *
-ngx_slprintf(u_char *buf, u_char *last, const char *fmt, ...) /* NOSONAR */
+ngx_slprintf(u_char *buf, u_char *last, const char *fmt, ...) /* SONAR_NOTE */
 {
     va_list      args;
     int          n;
@@ -197,7 +197,7 @@ ngx_slprintf(u_char *buf, u_char *last, const char *fmt, ...) /* NOSONAR */
 }
 
 static u_char *
-ngx_snprintf(u_char *buf, size_t size, const char *fmt, ...) /* NOSONAR */
+ngx_snprintf(u_char *buf, size_t size, const char *fmt, ...) /* SONAR_NOTE */
 {
     va_list  args;
     int      n;
@@ -239,7 +239,7 @@ ngx_shm_zone_t *ngx_http_markdown_metrics_shm_zone = &g_shm_zone;
 #define MARKDOWN_STREAMING_ENABLED 1
 #define NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED 1
 
-#include "../../src/ngx_http_markdown_prometheus_impl.h" /* NOSONAR */
+#include "../../src/ngx_http_markdown_prometheus_impl.h" /* SONAR_NOTE */
 
 static int
 contains(const char *haystack, const char *needle)
