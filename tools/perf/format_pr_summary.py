@@ -37,6 +37,10 @@ def _write_text_with_repo_guard(
     validated_output = validate_write_path_within_root(
         output_path, REPO_ROOT, purpose=purpose,
     )
+    if not validated_output.is_relative_to(REPO_ROOT):
+        raise ValueError(
+            f"Refusing to write outside repository root: {validated_output}"
+        )
     validated_output.parent.mkdir(parents=True, exist_ok=True)
     validated_output.write_text(content, encoding="utf-8")
     return validated_output

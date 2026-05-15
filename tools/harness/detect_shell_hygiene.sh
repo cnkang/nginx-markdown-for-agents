@@ -171,10 +171,10 @@ while IFS= read -r match; do
     # contains a marker, it may be inside a here-doc.  Skip if
     # the preceding line contains << or <<-.
     prev_line=$((line - 1))
-    if [[ "$prev_line" -gt 0 ]]; then
-        if sed -n "${prev_line}p" "$file" 2>/dev/null | grep -qE '<<-?[[:space:]]*(EOF|HEREDOC)'; then
-            continue
-        fi
+    if [[ "$prev_line" -gt 0 ]] && \
+       sed -n "${prev_line}p" "$file" 2>/dev/null | \
+       grep -qE '<<-?[[:space:]]*(EOF|HEREDOC)'; then
+        continue
     fi
     echo "  WARNING ${file}:${line} — diagnostic message on stdout, add >&2: ${content}" >&2
     warnings=$((warnings + 1))

@@ -31,6 +31,8 @@
 #ifndef NGX_HTTP_MARKDOWN_DYNCONF_IMPL_H
 #define NGX_HTTP_MARKDOWN_DYNCONF_IMPL_H
 
+#include <stdlib.h>
+
 
 /*
  * Dynamic config state constants.
@@ -844,12 +846,23 @@ ngx_http_markdown_dynconf_parse_size_safe(const u_char *value, size_t value_len,
                                            size_t *out)
 {
     ngx_str_t   val;
+    u_char     *scratch;
     ssize_t     parsed;
 
-    val.data = (u_char *) value; /* SONAR_NOTE: ngx_str_t.data is non-const u_char* by NGINX API contract; value is const at caller level */
+    scratch = malloc(value_len);
+    if (scratch == NULL) {
+        ngx_log_error(NGX_LOG_WARN, log, 0,
+                      "markdown dynconf: invalid %s value \"%*s\" "
+                      "(allocation failure)", key_name,
+                      (int) value_len, value);
+        return NGX_ERROR;
+    }
+    ngx_memcpy(scratch, value, value_len);
+    val.data = scratch;
     val.len = value_len;
 
     parsed = ngx_parse_size(&val);
+    free(scratch);
 
     if (parsed == NGX_ERROR) {
         ngx_log_error(NGX_LOG_WARN, log, 0,

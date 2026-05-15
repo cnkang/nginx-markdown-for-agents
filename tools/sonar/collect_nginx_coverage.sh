@@ -1188,10 +1188,12 @@ curl -sS -H 'Accept: application/json' "http://127.0.0.1:${PORT}/metrics-auto" -
 # Default metrics endpoint
 curl -sS "http://127.0.0.1:${PORT}/metrics" -o /dev/null -w "  metrics default: HTTP %{http_code}\n"
 
-# IPv6 metrics request (exercises sockaddr_in6 branch in metrics_impl.h)
-# Only attempt when IPv6 loopback is available on this host.
-# Clear-text HTTP to localhost is intentional — this is a local coverage
-# test, not a production data path.
+# IPv6 loopback probe (coverage-only):
+# - Purpose: exercise sockaddr_in6 branch in metrics_impl.h.
+# - Scope: ::1 loopback only; no remote host or routable interface.
+# - Data sensitivity: test fixture traffic only, no credentials/tokens/secrets.
+# - Transport: clear-text HTTP is intentional for local e2e coverage and is
+#   not reused by production configs or deployment scripts.
 if [[ -n "${IPV6_LISTEN}" ]]; then
     curl -sS -6 "http://[::1]:${BACKEND_PORT}/" -o /dev/null -w "  IPv6 backend: HTTP %{http_code}\n" 2>/dev/null || true  # SONAR_NOTE — localhost-only coverage test
 fi
@@ -1292,7 +1294,7 @@ if ! run_wrapper_with_nginx_bin_fallback "status-codes e2e coverage" \
     echo "  WARNING: status-codes e2e coverage run failed; continuing" >&2
 fi
 
-echo "==> Running error-handling e2e coverage"
+echo "==> Running error-handling e2e coverage" >&2
 if ! run_wrapper_with_nginx_bin_fallback "error-handling e2e coverage" \
     "${WORKSPACE_ROOT}/tools/e2e/verify_error_handling_e2e.sh" \
     --port 18283; then
