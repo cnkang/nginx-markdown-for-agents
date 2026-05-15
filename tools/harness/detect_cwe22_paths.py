@@ -64,9 +64,6 @@ OPEN_ARG_RE = re.compile(
     r"(?:os\.)?open\s*\(\s*(\w+)",
 )
 
-PATH_METHOD_OPEN_RE = re.compile(
-    r"(\w+)\.open\s*\(",
-)
 
 DIR_FD_RE = re.compile(
     r"dir_fd\s*=",
@@ -95,17 +92,11 @@ REPO_ROOT_DERIVED_RE = re.compile(
     r"repo_root|REPO_ROOT",
 )
 
-_FILE_DERIVED_ASSIGN_RE = re.compile(
-    r"(\w+)\s*=\s*[^\n]*(?:__file__|repo_root|REPO_ROOT)",
-)
 
 _TEMPFILE_VAR_RE = re.compile(
     r"tempfile\b",
 )
 
-_TEMPFILE_ASSIGN_RE = re.compile(
-    r"(\w+)\s*=\s*(?:_write_tmp_json|_temp_output_path|tempfile\.)",
-)
 
 # Variables that are file descriptors (int), not paths
 FD_VAR_RE = re.compile(
@@ -178,8 +169,8 @@ def _is_safe_open_context(
         return True
     if first_arg in validated_vars or first_arg in hardcoded_vars:
         return True
-    path_method_m = PATH_METHOD_OPEN_RE.search(line)
-    if path_method_m and path_method_m.group(1) in hardcoded_vars:
+    path_open_receiver = _extract_path_open_receiver(line)
+    if path_open_receiver and path_open_receiver in hardcoded_vars:
         return True
     if HARDCODED_PATH_RE.search(line):
         return True
@@ -192,6 +183,50 @@ def _is_safe_open_context(
     if lineno < len(lines) and DIR_FD_RE.search(lines[lineno]):
         return True
     return False
+
+
+def _extract_assignment_lhs(line: str) -> str | None:
+    """Extract assignment variable on the left side of '='."""
+    if "=" not in line:
+        return None
+    lhs = line.split("=", 1)[0].strip()
+    if lhs.isidentifier():
+        return lhs
+    return None
+
+
+def _extract_path_open_receiver(line: str) -> str | None:
+    """Extract `foo` from `foo.open(` using deterministic parsing."""
+    needle = ".open("
+    idx = line.find(needle)
+    if idx <= 0:
+        return None
+    receiver = line[:idx].strip()
+    if receiver.isidentifier():
+        return receiver
+    return None
+
+
+def _is_file_derived_assignment(line: str) -> bool:
+    if "=" not in line:
+        return False
+    rhs = line.split("=", 1)[1]
+    return (
+        "__file__" in rhs
+        or "repo_root" in rhs
+        or "REPO_ROOT" in rhs
+    )
+
+
+def _is_tempfile_assignment(line: str) -> bool:
+    if "=" not in line:
+        return False
+    rhs = line.split("=", 1)[1]
+    return (
+        "_write_tmp_json" in rhs
+        or "_temp_output_path" in rhs
+        or "tempfile." in rhs
+    )
 
 
 def _classify_open_call(
@@ -288,14 +323,16 @@ def _collect_hardcoded_vars(lines: list[str]) -> set[str]:
     hardcoded_vars.add("REPO_ROOT")
 
     for line in lines:
-        m = _FILE_DERIVED_ASSIGN_RE.search(line)
-        if m:
-            hardcoded_vars.add(m.group(1))
+        if _is_file_derived_assignment(line):
+            lhs = _extract_assignment_lhs(line)
+            if lhs:
+                hardcoded_vars.add(lhs)
 
     for line in lines:
-        m = _TEMPFILE_ASSIGN_RE.search(line)
-        if m:
-            hardcoded_vars.add(m.group(1))
+        if _is_tempfile_assignment(line):
+            lhs = _extract_assignment_lhs(line)
+            if lhs:
+                hardcoded_vars.add(lhs)
 
     for line in lines:
         for m in _PATH_WRAPPED_RE.finditer(line):

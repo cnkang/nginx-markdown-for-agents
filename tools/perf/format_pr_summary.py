@@ -30,6 +30,18 @@ TOKEN_DISCLAIMER = (
 )
 
 
+def _write_text_with_repo_guard(
+    output_path: str | Path, content: str, *, purpose: str,
+) -> Path:
+    """Resolve output path under REPO_ROOT and write UTF-8 text safely."""
+    validated_output = validate_write_path_within_root(
+        output_path, REPO_ROOT, purpose=purpose,
+    )
+    validated_output.parent.mkdir(parents=True, exist_ok=True)
+    validated_output.write_text(content, encoding="utf-8")
+    return validated_output
+
+
 def format_bytes(n: int) -> str:
     """Format byte count as human-readable string."""
     if n >= 1024 * 1024:
@@ -132,13 +144,9 @@ def main(argv: list[str] | None = None) -> int:
     md = format_summary(report)
 
     if args.output:
-        # Path traversal guard: validate_write_path_within_root() resolves
-        # the user-supplied path and rejects any escape outside REPO_ROOT.
-        validated_output = validate_write_path_within_root(
-            args.output, REPO_ROOT, purpose="PR summary output",
+        validated_output = _write_text_with_repo_guard(
+            args.output, md, purpose="PR summary output",
         )
-        validated_output.parent.mkdir(parents=True, exist_ok=True)
-        validated_output.write_text(md, encoding="utf-8")  # NOSONAR(S6553): path sanitized by validate_write_path_within_root() — rejects escapes outside REPO_ROOT
         print(f"PR summary written to {validated_output}")
     else:
         print(md)
