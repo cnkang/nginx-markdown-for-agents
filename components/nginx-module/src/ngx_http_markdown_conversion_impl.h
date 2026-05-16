@@ -300,6 +300,64 @@ ngx_http_markdown_extract_forwarded_host(const ngx_str_t *xfh,
     return NGX_OK;
 }
 
+
+/*
+ * Validate a single Host value (not comma-separated).
+ *
+ * Unlike extract_forwarded_host(), this rejects any value containing
+ * a comma — a plain Host header should never be comma-separated.
+ * Used for r->headers_in.server before it enters base_url
+ * construction.
+ *
+ * @param host             The host string to validate.
+ * @param validated_host   Output: the validated host (same pointers).
+ * @returns NGX_OK on success, NGX_ERROR on invalid host.
+ */
+static ngx_int_t
+ngx_http_markdown_validate_single_host(const ngx_str_t *host,
+                                       ngx_str_t *validated_host)
+{
+    u_char    *host_data;
+    size_t     host_len;
+    ngx_flag_t is_ipv6;
+
+    host_data = host->data;
+    host_len = host->len;
+
+    if (host_len == 0) {
+        return NGX_ERROR;
+    }
+
+    /*
+     * Reject comma-separated values.  A plain Host header
+     * must contain exactly one host; commas indicate either
+     * a malformed value or X-Forwarded-Host leakage.
+     */
+    for (size_t i = 0; i < host_len; i++) {
+        if (host_data[i] == ',') {
+            return NGX_ERROR;
+        }
+    }
+
+    is_ipv6 = (host_len >= 2 && host_data[0] == '[') ? 1 : 0;
+
+    if (!ngx_http_markdown_validate_host_chars(host_data, host_len,
+                                               is_ipv6))
+    {
+        return NGX_ERROR;
+    }
+
+    if (is_ipv6
+        && !ngx_http_markdown_validate_ipv6_brackets(host_data, host_len))
+    {
+        return NGX_ERROR;
+    }
+
+    validated_host->data = host_data;
+    validated_host->len = host_len;
+    return NGX_OK;
+}
+
 /**
  * Selects the URL scheme and host to use when constructing a base URL for the request.
  *
@@ -365,9 +423,32 @@ ngx_http_markdown_select_base_url_parts(ngx_http_request_t *r,
     }
 
     if (r->schema.len > 0 && r->headers_in.server.len > 0) {
+        ngx_str_t  validated_server;
+
         *scheme = r->schema;
-        *host = r->headers_in.server;
-        return NGX_OK;
+
+        /*
+         * Validate the request Host with strict single-host
+         * semantics: reject comma-separated values (unlike
+         * X-Forwarded-Host which allows comma-delimited chains),
+         * control characters, and path separators to prevent
+         * injection into base_url construction.
+         *
+         * On validation failure, fall back to the core
+         * server_name which is operator-controlled.
+         */
+        if (ngx_http_markdown_validate_single_host(
+                &r->headers_in.server, &validated_server) == NGX_OK)
+        {
+            *host = validated_server;
+            return NGX_OK;
+        }
+
+        ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
+                      "markdown filter: request Host "
+                      "\"%V\" rejected (invalid host), "
+                      "falling back to server_name",
+                      &r->headers_in.server);
     }
 
     cscf = ngx_http_get_module_srv_conf(r, ngx_http_core_module);
@@ -702,13 +783,18 @@ ngx_http_markdown_prepare_conversion_options(ngx_http_request_t *r,
      * streaming_budget_explicit is set during merge_conf when the
      * operator explicitly configured markdown_streaming_budget at
      * this or any parent configuration level.
+     *
+     * After merge_conf, streaming_budget is always resolved to a
+     * concrete default value (never NGX_CONF_UNSET_SIZE), so the
+     * previous check for effective_streaming_budget == UNSET was
+     * always false.  Simplify: apply memory_budget override
+     * whenever memory_budget is configured and the operator did
+     * not explicitly set streaming_budget.
      */
 #ifdef MARKDOWN_STREAMING_ENABLED
     if (ngx_http_markdown_effective_memory_budget(eff, conf)
             != NGX_CONF_UNSET_SIZE
-        && !conf->streaming.budget_explicit
-        && ngx_http_markdown_effective_streaming_budget(eff, conf)
-            == NGX_CONF_UNSET_SIZE)
+        && !conf->streaming.budget_explicit)
     {
         options->streaming_budget =
             ngx_http_markdown_effective_memory_budget(eff, conf);
@@ -782,8 +868,6 @@ ngx_http_markdown_handle_conversion_failure(ngx_http_request_t *r,
                  elapsed_ms);
 
     markdown_result_free(result);
-
-    ngx_http_markdown_metric_inc_failopen(conf);
 
     return ngx_http_markdown_reject_or_fail_open_buffered_response(
         r, ctx, conf,
@@ -1142,8 +1226,6 @@ ngx_http_markdown_handle_converter_not_initialized(
                  "initialized, category=system");
     ngx_http_markdown_record_system_failure(ctx);
 
-    ngx_http_markdown_metric_inc_failopen(conf);
-
     return ngx_http_markdown_reject_or_fail_open_buffered_response(
         r, ctx, conf,
         "markdown filter: fail-open strategy "
@@ -1214,6 +1296,7 @@ ngx_http_markdown_shadow_compare(
     struct StreamingConverterHandle  *handle;
     struct MarkdownOptions            options;
     struct MarkdownResult             st_result;
+    ngx_memzero(&st_result, sizeof(st_result));
     uint8_t                          *out_data;
     uintptr_t                         out_len;
     uint32_t                          init_rc;

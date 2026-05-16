@@ -63,6 +63,9 @@ mod exports;
 mod memory;
 mod options;
 
+#[cfg(feature = "streaming")]
+pub(crate) use options::clamp_chars_per_token;
+
 #[cfg(feature = "incremental")]
 mod incremental;
 

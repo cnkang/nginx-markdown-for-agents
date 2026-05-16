@@ -117,7 +117,16 @@ ngx_http_markdown_reject_or_fail_open_buffered_response(
 
     rc = ngx_http_markdown_fail_open_buffered_response(
         r, ctx, debug_message);
-    if (rc != NGX_OK) {
+    if (rc == NGX_OK || rc == NGX_DONE) {
+        /*
+         * Record fail-open outcome only after the original response
+         * has been successfully sent downstream.  Do not count
+         * NGX_AGAIN (backpressure) or NGX_ERROR as fail-open
+         * completions — the response has not reached the client.
+         */
+        NGX_HTTP_MARKDOWN_METRIC_INC(results.failopen_count);
+    }
+    if (rc != NGX_OK && rc != NGX_DONE) {
         return rc;
     }
 
@@ -188,8 +197,6 @@ ngx_http_markdown_handle_decompression_alloc_error(
         r, conf, ctx->effective_conf, reason,
         ngx_http_markdown_reason_from_error_category(
             category, r->connection->log));
-
-    ngx_http_markdown_metric_inc_failopen(conf);
 
     return ngx_http_markdown_reject_or_fail_open_buffered_response(
         r, ctx, conf, debug_message);
