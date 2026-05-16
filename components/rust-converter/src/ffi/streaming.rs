@@ -72,7 +72,11 @@ fn markdown_streaming_new_impl(
 
     let budget = budget_from_streaming_total(decoded.streaming_budget);
 
-    let mut converter = StreamingConverter::new(decoded.conversion, budget);
+    let mut converter = StreamingConverter::with_chars_per_token(
+        decoded.conversion,
+        budget,
+        decoded.chars_per_token,
+    );
     converter.set_content_type(decoded.content_type.map(ToOwned::to_owned));
     if !decoded.timeout.is_zero() {
         converter.set_timeout(decoded.timeout);

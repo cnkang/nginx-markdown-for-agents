@@ -802,15 +802,25 @@ ngx_http_markdown_streaming_send_output(
 
     if (data != NULL && len > 0) {
         /*
-         * Copy Rust-allocated data into pool memory so we
-         * can free the Rust buffer immediately.
+         * Copy Rust-allocated data into pool memory.
+         *
+         * Ownership model: the caller retains ownership of
+         * `data` and must call markdown_streaming_output_free()
+         * (or markdown_result_free() for finalize-path buffers)
+         * after this function returns, regardless of the return
+         * code.  This function does NOT free `data`.
          *
          * Trade-off: this introduces a transient double-buffer
          * window (Rust buffer + pool copy) up to `len` bytes
-         * for this chunk.
+         * for this chunk.  The caller frees the Rust buffer
+         * immediately after this call, closing the window.
          */
         b->pos = ngx_palloc(r->pool, len);
         if (b->pos == NULL) {
+            /*
+             * Pool allocation failed.  The caller still owns
+             * `data` and must free it on seeing NGX_ERROR.
+             */
             return NGX_ERROR;
         }
         ngx_memcpy(b->pos, data, len);
@@ -1883,6 +1893,7 @@ ngx_http_markdown_streaming_finalize_request(
     ngx_http_markdown_conf_t *conf)
 {
     struct MarkdownResult  result;
+    ngx_memzero(&result, sizeof(result));
     uint32_t               rc_ffi;
     ngx_int_t              rc;
     ngx_int_t              final_send_rc;

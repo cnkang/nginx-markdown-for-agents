@@ -770,6 +770,119 @@ fn test_gfm_flavor() {
     ffi_markdown_converter_free(converter);
 }
 
+#[test]
+fn test_invalid_flavor_rejected() {
+    let converter = markdown_converter_new();
+    assert!(!converter.is_null());
+
+    let html = b"<p>hello</p>";
+
+    let mut options = ffi_test_default_options();
+    options.flavor = 99;
+
+    let mut result = MarkdownResult {
+        markdown: ptr::null_mut(),
+        markdown_len: 0,
+        etag: ptr::null_mut(),
+        etag_len: 0,
+        token_estimate: 0,
+        error_code: 0,
+        error_message: ptr::null_mut(),
+        error_len: 0,
+        peak_memory_estimate: 0,
+    };
+
+    ffi_markdown_convert(converter, html.as_ptr(), html.len(), &options, &mut result);
+
+    assert_eq!(
+        result.error_code, ERROR_INVALID_INPUT,
+        "flavor=99 should be rejected with ERROR_INVALID_INPUT"
+    );
+    assert!(
+        result.markdown.is_null(),
+        "No markdown output on invalid flavor"
+    );
+
+    ffi_markdown_result_free(&mut result);
+    ffi_markdown_converter_free(converter);
+}
+
+#[test]
+fn test_chars_per_token_affects_estimate() {
+    let converter = markdown_converter_new();
+    assert!(!converter.is_null());
+
+    let html = b"<p>This is a test paragraph with some content.</p>";
+
+    let mut options_20 = ffi_test_default_options();
+    options_20.estimate_tokens = 1;
+    options_20.chars_per_token_fixed = 20;
+
+    let mut options_40 = ffi_test_default_options();
+    options_40.estimate_tokens = 1;
+    options_40.chars_per_token_fixed = 40;
+
+    let mut result_20 = MarkdownResult {
+        markdown: ptr::null_mut(),
+        markdown_len: 0,
+        etag: ptr::null_mut(),
+        etag_len: 0,
+        token_estimate: 0,
+        error_code: 0,
+        error_message: ptr::null_mut(),
+        error_len: 0,
+        peak_memory_estimate: 0,
+    };
+
+    let mut result_40 = MarkdownResult {
+        markdown: ptr::null_mut(),
+        markdown_len: 0,
+        etag: ptr::null_mut(),
+        etag_len: 0,
+        token_estimate: 0,
+        error_code: 0,
+        error_message: ptr::null_mut(),
+        error_len: 0,
+        peak_memory_estimate: 0,
+    };
+
+    ffi_markdown_convert(
+        converter,
+        html.as_ptr(),
+        html.len(),
+        &options_20,
+        &mut result_20,
+    );
+    ffi_markdown_convert(
+        converter,
+        html.as_ptr(),
+        html.len(),
+        &options_40,
+        &mut result_40,
+    );
+
+    assert_eq!(
+        result_20.error_code, 0,
+        "chars_per_token=2.0 should succeed"
+    );
+    assert_eq!(
+        result_40.error_code, 0,
+        "chars_per_token=4.0 should succeed"
+    );
+
+    assert!(
+        result_20.token_estimate > result_40.token_estimate,
+        "chars_per_token_fixed=20 (ratio=2.0) should estimate more tokens than \
+         chars_per_token_fixed=40 (ratio=4.0), got {} vs {}",
+        result_20.token_estimate,
+        result_40.token_estimate,
+    );
+
+    ffi_markdown_result_free(&mut result_20);
+    ffi_markdown_result_free(&mut result_40);
+    ffi_markdown_converter_free(converter);
+}
+
 // ============================================================================
 // Additional Tests for Task 9.3: FFI Null Pointer Handling
 // ============================================================================
