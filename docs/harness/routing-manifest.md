@@ -30,7 +30,7 @@ Plan-only targets (for example `*-plan`) are documentation aids, not evidence.
 
 | Pack | Primary surfaces | Supporting surfaces | Doc |
 |------|------------------|---------------------|-----|
-| `runtime-streaming` | request/response streaming, pending chains, fail-open behavior | observability | [risk-packs/runtime-streaming.md](risk-packs/runtime-streaming.md) |
+| `runtime-streaming` | request/response streaming, pending chains, fail-open behavior, replay buffer integrity | observability | [risk-packs/runtime-streaming.md](risk-packs/runtime-streaming.md) |
 | `ffi-boundary` | Rust/C ABI, header sync, option and error-code drift | observability | [risk-packs/ffi-boundary.md](risk-packs/ffi-boundary.md) |
 | `observability-metrics` | metrics schema, output semantics, release visibility | docs-tooling | [risk-packs/observability-metrics.md](risk-packs/observability-metrics.md) |
 | `docs-tooling-drift` | docs, validators, CI path filters, operator commands | observability | [risk-packs/docs-tooling-drift.md](risk-packs/docs-tooling-drift.md) |
@@ -77,3 +77,4 @@ Plan-only targets (for example `*-plan`) are documentation aids, not evidence.
 | 0.6.3 | 2026-05-11 | Kang | Added harness-security verification family and tooling-path-security risk pack to route repeated tooling path-safety fixes |
 | 0.6.3 | 2026-05-12 | Kang | Added e2e-harness-rust verification family, e2e-migration risk pack, and tools/e2e-harness/** paths to runtime-streaming and nginx-protocol-safety packs |
 | 0.6.3 | 2026-05-14 | Kang | Added shell-hygiene (S7682/S1066/Rule 18) and const-correctness detection scripts; extended tooling-path-security pack paths and keywords; updated harness-security family description |
+| 0.6.6 | 2026-05-16 | Kang | Added replay buffer keywords (replay buffer, failopen_completed, precommit_error) to runtime-streaming risk pack; updated primary surfaces to include replay buffer integrity |
