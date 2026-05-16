@@ -30,7 +30,6 @@
 //!   borrowed from the C caller for the duration of the FFI call only.
 
 use crate::etag_generator::ETagGenerator;
-use crate::token_estimator::TokenEstimator;
 
 /// Success - no error occurred.
 pub const ERROR_SUCCESS: u32 = 0;
@@ -196,7 +195,6 @@ pub struct MarkdownResult {
 /// when using a handle across multiple FFI calls.
 pub struct MarkdownConverterHandle {
     pub(crate) etag_generator: ETagGenerator,
-    pub(crate) token_estimator: TokenEstimator,
 }
 
 impl MarkdownConverterHandle {
@@ -204,7 +202,6 @@ impl MarkdownConverterHandle {
     pub(crate) fn new() -> Self {
         Self {
             etag_generator: ETagGenerator::new(),
-            token_estimator: TokenEstimator::new(),
         }
     }
 }

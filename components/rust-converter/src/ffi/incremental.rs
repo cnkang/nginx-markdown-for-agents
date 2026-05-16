@@ -43,10 +43,34 @@ use super::memory::{free_buffer, reset_result, set_error_result};
 use super::options::decode_options;
 
 /// Opaque handle wrapping an [`IncrementalConverter`] for the C ABI.
+///
+/// The handle is produced by [`markdown_incremental_new`] and consumed by
+/// either [`markdown_incremental_finalize`] (which produces output) or
+/// [`markdown_incremental_free`] (which drops without output).  The C caller
+/// owns the handle for its entire lifetime.
+///
+/// # Fields (FFI boundary semantics)
+///
+/// * `inner` — The [`IncrementalConverter`] instance that accumulates input
+///   chunks and performs the conversion.  Owned by the handle; moved into
+///   on construction and consumed on finalization.
+/// * `generate_etag` — Whether to compute and emit a BLAKE3-based ETag in
+///   the final result.  Set once at construction from `MarkdownOptions`;
+///   immutable thereafter.
+/// * `estimate_tokens` — Whether to run LLM token-count estimation in the
+///   final result.  Set once at construction from `MarkdownOptions`.
+/// * `chars_per_token` — The average characters-per-token ratio used by
+///   [`TokenEstimator`] when `estimate_tokens` is true.  Stored as `f32`
+///   with typical values 1.0–4.0 (CJK–English).  This value is the
+///   **normalized** form (clamped to `[1.0, 100.0]` by
+///   [`clamp_chars_per_token`](super::options::clamp_chars_per_token))
+///   rather than the raw FFI input, so all token-estimation paths behave
+///   consistently.
 pub struct IncrementalConverterHandle {
     inner: IncrementalConverter,
     generate_etag: bool,
     estimate_tokens: bool,
+    chars_per_token: f32,
 }
 
 /// Create a new incremental converter handle for incremental Markdown processing.
@@ -117,6 +141,7 @@ pub unsafe extern "C" fn markdown_incremental_new(
             inner: converter,
             generate_etag: decoded.generate_etag,
             estimate_tokens: decoded.estimate_tokens,
+            chars_per_token: decoded.effective_chars_per_token,
         })))
     });
 
@@ -238,23 +263,25 @@ pub unsafe extern "C" fn markdown_incremental_finalize(
         return ERROR_INVALID_INPUT;
     }
 
-    let panic_result = panic::catch_unwind(|| -> Result<(String, bool, bool), ConversionError> {
-        // SAFETY: caller guarantees `handle` is a live, unconsumed pointer.
-        // `Box::from_raw` takes ownership here — if the closure panics after
-        // this point, the Box is dropped during unwinding, so the handle is
-        // always freed regardless of success or panic.  The C caller must NOT
-        // call `markdown_incremental_free` after this function returns.
-        let boxed = unsafe { Box::from_raw(handle) };
-        let generate_etag = boxed.generate_etag;
-        let estimate_tokens = boxed.estimate_tokens;
-        let markdown = boxed.inner.finalize()?;
-        Ok((markdown, generate_etag, estimate_tokens))
-    });
+    let panic_result =
+        panic::catch_unwind(|| -> Result<(String, bool, bool, f32), ConversionError> {
+            // SAFETY: caller guarantees `handle` is a live, unconsumed pointer.
+            // `Box::from_raw` takes ownership here — if the closure panics after
+            // this point, the Box is dropped during unwinding, so the handle is
+            // always freed regardless of success or panic.  The C caller must NOT
+            // call `markdown_incremental_free` after this function returns.
+            let boxed = unsafe { Box::from_raw(handle) };
+            let generate_etag = boxed.generate_etag;
+            let estimate_tokens = boxed.estimate_tokens;
+            let chars_per_token = boxed.chars_per_token;
+            let markdown = boxed.inner.finalize()?;
+            Ok((markdown, generate_etag, estimate_tokens, chars_per_token))
+        });
 
     match panic_result {
-        Ok(Ok((markdown, generate_etag, estimate_tokens))) => {
+        Ok(Ok((markdown, generate_etag, estimate_tokens, chars_per_token))) => {
             let token_estimate = if estimate_tokens {
-                TokenEstimator::new().estimate(&markdown)
+                TokenEstimator::with_chars_per_token(chars_per_token).estimate(&markdown)
             } else {
                 0
             };

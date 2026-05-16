@@ -153,13 +153,21 @@ if [[ "${KEEP_ARTIFACTS}" -eq 1 ]]; then
 fi
 
 env NGINX_BIN="${SUITE_NGINX_BIN}" bash "${CHUNKED_SCRIPT}" "${chunked_args[@]}"
-env NGINX_BIN="${SUITE_NGINX_BIN}" bash "${LARGE_SCRIPT}" "${large_args[@]}"
+if [[ ${#large_args[@]} -gt 0 ]]; then
+  env NGINX_BIN="${SUITE_NGINX_BIN}" bash "${LARGE_SCRIPT}" "${large_args[@]}"
+else
+  env NGINX_BIN="${SUITE_NGINX_BIN}" bash "${LARGE_SCRIPT}"
+fi
 
 streaming_fc_args=()
 if [[ "${KEEP_ARTIFACTS}" -eq 1 ]]; then
   streaming_fc_args=(--keep-artifacts)
 fi
-env NGINX_BIN="${SUITE_NGINX_BIN}" bash "${STREAMING_FAILURE_CACHE_SCRIPT}" "${streaming_fc_args[@]}"
+if [[ ${#streaming_fc_args[@]} -gt 0 ]]; then
+  env NGINX_BIN="${SUITE_NGINX_BIN}" bash "${STREAMING_FAILURE_CACHE_SCRIPT}" "${streaming_fc_args[@]}"
+else
+  env NGINX_BIN="${SUITE_NGINX_BIN}" bash "${STREAMING_FAILURE_CACHE_SCRIPT}"
+fi
 
 security_args=()
 error_args=()
@@ -176,11 +184,23 @@ if [[ "${KEEP_ARTIFACTS}" -eq 1 ]]; then
   e2e_harness_args=(--keep-artifacts "${e2e_harness_args[@]}")
 fi
 "${E2E_HARNESS_BIN}" scenario accept-negotiation "${e2e_harness_args[@]}"
-env NGINX_BIN="${SUITE_NGINX_BIN}" bash "${SECURITY_SCRIPT}" "${security_args[@]}"
-env NGINX_BIN="${SUITE_NGINX_BIN}" bash "${ERROR_HANDLING_SCRIPT}" "${error_args[@]}"
+if [[ ${#security_args[@]} -gt 0 ]]; then
+  env NGINX_BIN="${SUITE_NGINX_BIN}" bash "${SECURITY_SCRIPT}" "${security_args[@]}"
+else
+  env NGINX_BIN="${SUITE_NGINX_BIN}" bash "${SECURITY_SCRIPT}"
+fi
+if [[ ${#error_args[@]} -gt 0 ]]; then
+  env NGINX_BIN="${SUITE_NGINX_BIN}" bash "${ERROR_HANDLING_SCRIPT}" "${error_args[@]}"
+else
+  env NGINX_BIN="${SUITE_NGINX_BIN}" bash "${ERROR_HANDLING_SCRIPT}"
+fi
 "${E2E_HARNESS_BIN}" scenario metrics-endpoint "${e2e_harness_args[@]}"
 "${E2E_HARNESS_BIN}" scenario conditional-requests "${e2e_harness_args[@]}"
-env NGINX_BIN="${SUITE_NGINX_BIN}" bash "${CONFIG_MERGE_SCRIPT}" "${config_merge_args[@]}"
+if [[ ${#config_merge_args[@]} -gt 0 ]]; then
+  env NGINX_BIN="${SUITE_NGINX_BIN}" bash "${CONFIG_MERGE_SCRIPT}" "${config_merge_args[@]}"
+else
+  env NGINX_BIN="${SUITE_NGINX_BIN}" bash "${CONFIG_MERGE_SCRIPT}"
+fi
 "${E2E_HARNESS_BIN}" scenario auth-cache "${e2e_harness_args[@]}"
 "${E2E_HARNESS_BIN}" scenario status-codes "${e2e_harness_args[@]}"
 

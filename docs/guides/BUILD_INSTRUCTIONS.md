@@ -133,26 +133,6 @@ Required repository secret:
 
 If `SONAR_TOKEN` is not set (for example fork PRs), the Sonar job is skipped.
 
-### CI-based Coverity Scan analysis
-
-The repository also includes a dedicated Coverity workflow:
-
-- `.github/workflows/coverity.yml`
-
-This workflow:
-
-- triggers on `workflow_dispatch` and on pushes to `main`, `dev/*`, and
-  `codex/*` when NGINX module/build paths change
-- captures a production NGINX C module build with `cov-build`
-  (via `tools/ci/build_nginx_for_codeql.sh`)
-- uploads the captured archive to Coverity Scan
-
-Required repository secrets:
-
-- `COVERITY_SCAN_PROJECT`
-- `COVERITY_SCAN_TOKEN`
-- `COVERITY_SCAN_EMAIL`
-
 Optional script flags:
 
 ```bash

@@ -914,6 +914,37 @@ test_server_name_fallback_path(void)
 }
 
 static void
+test_host_with_comma_falls_back(void)
+{
+    ngx_http_request_t r;
+    ngx_http_markdown_conf_t conf;
+    ngx_http_core_srv_conf_t cscf;
+    ngx_str_t scheme;
+    ngx_str_t host;
+
+    TEST_SUBSECTION("Request Host containing comma falls back to server_name");
+
+    init_request(&r);
+    memset(&conf, 0, sizeof(conf));
+    memset(&cscf, 0, sizeof(cscf));
+
+    set_str(&r.schema, "https");
+    set_str(&r.headers_in.server, "good.example,evil.example");
+    set_str(&cscf.server_name, "fallback.example.org");
+
+    r.loc_conf = &conf;
+    r.srv_conf = &cscf;
+
+    TEST_ASSERT(ngx_http_markdown_select_base_url_parts(&r, &scheme, &host) == NGX_OK,
+                "select_base_url_parts should succeed (via fallback)");
+    assert_str_eq(&scheme, "https", "scheme from request");
+    assert_str_eq(&host, "fallback.example.org",
+                  "comma-containing Host should fall back to server_name");
+
+    TEST_PASS("Comma-containing Host falls back to server_name");
+}
+
+static void
 test_missing_base_url_inputs_fail(void)
 {
     ngx_http_request_t r;
@@ -1743,6 +1774,7 @@ main(void)
     test_untrusted_forwarded_headers_ignored();
     test_direct_request_path();
     test_server_name_fallback_path();
+    test_host_with_comma_falls_back();
     test_missing_base_url_inputs_fail();
     test_base_url_add_len_overflow_guard();
     test_prepare_conversion_options_basic();
