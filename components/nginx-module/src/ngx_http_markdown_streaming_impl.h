@@ -2681,14 +2681,14 @@ ngx_http_markdown_streaming_handle_null_input(
 
 
 /*
- * Ensure the fail-open replay buffer is available for Pre-Commit tracking.
+ * Skip fail-open replay tracking after Post-Commit.
  *
- * The replay buffer is initialized once in streaming_init_handle().
- * This function is a no-op after Post-Commit (replay is no longer possible
- * because bytes may already have reached the client).
+ * The replay buffer is initialized once in streaming_init_handle()
+ * (init failure triggers precommit_error there).  After Post-Commit,
+ * replay is no longer possible because bytes may already have reached
+ * the client, so this function is a no-op.
  *
- * Returns NGX_OK always (the buffer is already initialized or
- * init failure was handled at handle-creation time).
+ * Returns NGX_OK always.
  */
 static ngx_int_t
 ngx_http_markdown_streaming_prepare_failopen_tracking(
@@ -2784,10 +2784,35 @@ ngx_http_markdown_streaming_process_chain(
                         "markdown streaming: replay buffer "
                         "limit exceeded, aborting streaming "
                         "to preserve fail-open data integrity");
-                    return
+                    rc =
                         ngx_http_markdown_streaming_precommit_error(
                             r, ctx, conf,
                             ERROR_BUDGET_EXCEEDED);
+
+                    /*
+                     * If the on_error policy is pass, precommit_error
+                     * sets eligible=0 and returns NGX_DECLINED.
+                     * We must now invoke failopen_passthrough so the
+                     * original upstream bytes (replay buffer prefix
+                     * + current unconsumed chain) are actually
+                     * forwarded downstream.  Without this, body_filter
+                     * would just return NGX_DECLINED without sending
+                     * any data, because this code path is after
+                     * handle_chunk_result which normally bridges
+                     * fail-open.
+                     *
+                     * Pass 'cl' (not 'in') to avoid re-sending
+                     * chain nodes whose buffers were already
+                     * consumed in earlier loop iterations; the
+                     * replay buffer already holds their prefix.
+                     */
+                    if (rc == NGX_DECLINED && !ctx->eligible) {
+                        return
+                            ngx_http_markdown_streaming_failopen_passthrough(
+                                r, ctx, cl);
+                    }
+
+                    return rc;
                 }
             }
         }

@@ -2480,8 +2480,6 @@ test_process_chain_and_body_filter_deep_paths(void)
     ngx_chain_t            *fallback_cl = NULL;
     ngx_flag_t              last_buf = 0;
     ngx_int_t               rc;
-    ngx_buf_t              *saved_bufs[2] = { NULL, NULL };
-    u_char                 *saved_pos[2] = { NULL, NULL };
     u_char                  prebuf_data[16];
     u_char                  chunk_data[] = "chunk";
 
@@ -2635,6 +2633,41 @@ test_process_chain_and_body_filter_deep_paths(void)
         &r, &ctx, &conf, &in, &last_buf, &fallback_cl);
     TEST_ASSERT(rc == NGX_ERROR,
         "replay append failure with reject policy should return NGX_ERROR");
+    g_buffer_append_rc = NGX_OK;
+
+    /*
+     * Replay append failure with pass policy: precommit_error sets
+     * eligible=0 and returns NGX_DECLINED, then failopen_passthrough
+     * must be called to forward the original chain downstream.
+     * The result should be whatever ngx_http_next_body_filter returns
+     * (NGX_OK by default).
+     */
+    ctx.processing_path = NGX_HTTP_MARKDOWN_PATH_STREAMING;
+    ctx.eligible = 1;
+    ctx.streaming.handle = (struct StreamingConverterHandle *)
+        (uintptr_t) 0x26;
+    ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_PRE;
+    ctx.streaming.failopen_replay_initialized = 1;
+    ctx.streaming.failopen_replay_buf.data = prebuf_data;
+    ctx.streaming.failopen_replay_buf.size = 3;
+    ctx.streaming.failopen_replay_buf.capacity = sizeof(prebuf_data);
+    ctx.streaming.failopen_replay_buf.max_size = sizeof(prebuf_data);
+    in_buf.pos = chunk_data;
+    in_buf.last = chunk_data + 5;
+    in_buf.last_buf = 0;
+    g_streaming_feed_rc = ERROR_SUCCESS;
+    g_streaming_feed_out_data = NULL;
+    g_streaming_feed_out_len = 0;
+    conf.streaming.on_error = NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_PASS;
+    g_next_body_filter_rc = NGX_OK;
+    g_buffer_append_rc = NGX_ERROR;
+    rc = ngx_http_markdown_streaming_process_chain(
+        &r, &ctx, &conf, &in, &last_buf, &fallback_cl);
+    TEST_ASSERT(rc == NGX_OK,
+        "replay append failure with pass policy should fail-open "
+        "passthrough (forward chain downstream)");
+    TEST_ASSERT(ctx.eligible == 0,
+        "replay append failure with pass policy should set eligible=0");
     g_buffer_append_rc = NGX_OK;
     conf.streaming.on_error = NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_PASS;
 
