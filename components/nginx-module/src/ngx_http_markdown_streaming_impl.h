@@ -2680,30 +2680,6 @@ ngx_http_markdown_streaming_handle_null_input(
 }
 
 
-/*
- * Skip fail-open replay tracking after Post-Commit.
- *
- * The replay buffer is initialized once in streaming_init_handle()
- * (init failure triggers precommit_error there).  After Post-Commit,
- * replay is no longer possible because bytes may already have reached
- * the client, so this function is a no-op.
- *
- * Returns NGX_OK always.
- */
-static ngx_int_t
-ngx_http_markdown_streaming_prepare_failopen_tracking(
-    ngx_http_request_t *r,
-    ngx_http_markdown_ctx_t *ctx,
-    ngx_chain_t *in)
-{
-    if (ctx->streaming.commit_state
-        == NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST)
-    {
-        return NGX_OK;
-    }
-
-    return NGX_OK;
-}
 
 
 /*
@@ -2805,11 +2781,21 @@ ngx_http_markdown_streaming_process_chain(
                      * chain nodes whose buffers were already
                      * consumed in earlier loop iterations; the
                      * replay buffer already holds their prefix.
+                     *
+                     * Clear *last_buf after successful fail-open
+                     * passthrough so body_filter does not enter
+                     * finalize_request and send a duplicate empty
+                     * terminal buffer.  The original terminal
+                     * chain has already been forwarded by
+                     * failopen_passthrough.
                      */
                     if (rc == NGX_DECLINED && !ctx->eligible) {
-                        return
-                            ngx_http_markdown_streaming_failopen_passthrough(
+                        rc = ngx_http_markdown_streaming_failopen_passthrough(
                                 r, ctx, cl);
+                        if (rc == NGX_OK || rc == NGX_AGAIN) {
+                            *last_buf = 0;
+                        }
+                        return rc;
                     }
 
                     return rc;
@@ -2877,12 +2863,6 @@ ngx_http_markdown_streaming_body_filter(
     if (!ctx->eligible || ctx->streaming.handle == NULL) {
         return ngx_http_markdown_streaming_passthrough(
             r, ctx, in);
-    }
-
-    rc = ngx_http_markdown_streaming_prepare_failopen_tracking(
-        r, ctx, in);
-    if (rc != NGX_OK) {
-        return rc;
     }
 
     rc = ngx_http_markdown_streaming_process_chain(
