@@ -32,6 +32,25 @@ use crate::llm_adapter::LlmProvider;
 
 use super::abi::MarkdownOptions;
 
+/// Minimum allowed chars-per-token ratio.
+/// Values below this produce misleadingly large token estimates.
+const CHARS_PER_TOKEN_MIN: f32 = 1.0;
+/// Maximum allowed chars-per-token ratio.
+/// Values above this produce misleadingly small token estimates.
+const CHARS_PER_TOKEN_MAX: f32 = 100.0;
+
+/// Clamp a chars-per-token value to the allowed range.
+///
+/// Non-positive inputs default to 4.0 (English text heuristic).
+/// Positive inputs are clamped to [CHARS_PER_TOKEN_MIN, CHARS_PER_TOKEN_MAX].
+pub(crate) fn clamp_chars_per_token(raw: f32) -> f32 {
+    if raw <= 0.0 {
+        4.0
+    } else {
+        raw.clamp(CHARS_PER_TOKEN_MIN, CHARS_PER_TOKEN_MAX)
+    }
+}
+
 pub(crate) struct DecodedOptions<'a> {
     pub(crate) content_type: Option<&'a str>,
     pub(crate) timeout: Duration,
@@ -54,7 +73,17 @@ pub(crate) struct DecodedOptions<'a> {
     pub(crate) memory_budget: u64,
     #[allow(dead_code)]
     pub(crate) llm_provider: LlmProvider,
+    /// Raw chars-per-token from FFI options (before normalization).
+    /// Retained for diagnostics/logging; all estimation paths use
+    /// [`effective_chars_per_token`](Self::effective_chars_per_token).
+    #[allow(dead_code)]
     pub(crate) chars_per_token: f32,
+    /// Normalized chars-per-token clamped to a sane range [1.0, 100.0].
+    /// All token estimation paths (full-buffer, streaming, incremental)
+    /// must use this value to avoid divergent behavior when the raw
+    /// FFI `chars_per_token_fixed` decodes to a non-positive or
+    /// pathological value.
+    pub(crate) effective_chars_per_token: f32,
 }
 
 /// Convert a required raw pointer from C into a Rust reference.
@@ -211,6 +240,12 @@ pub(crate) fn decode_options(
         "prune_protection_selectors",
     )?;
 
+    let raw_cpt = if options.chars_per_token_fixed > 0 {
+        options.chars_per_token_fixed as f32 / 10.0
+    } else {
+        LlmProvider::from_ffi(options.llm_provider).chars_per_token()
+    };
+
     Ok(DecodedOptions {
         content_type,
         timeout,
@@ -222,11 +257,8 @@ pub(crate) fn decode_options(
         prune_protection_selectors,
         memory_budget: options.memory_budget,
         llm_provider: LlmProvider::from_ffi(options.llm_provider),
-        chars_per_token: if options.chars_per_token_fixed > 0 {
-            options.chars_per_token_fixed as f32 / 10.0
-        } else {
-            LlmProvider::from_ffi(options.llm_provider).chars_per_token()
-        },
+        chars_per_token: raw_cpt,
+        effective_chars_per_token: clamp_chars_per_token(raw_cpt),
         conversion: ConversionOptions {
             flavor,
             include_front_matter,

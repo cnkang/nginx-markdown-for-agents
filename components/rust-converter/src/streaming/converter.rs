@@ -30,6 +30,7 @@ use std::time::{Duration, Instant};
 
 use crate::converter::ConversionOptions;
 use crate::error::ConversionError;
+use crate::ffi::clamp_chars_per_token;
 use crate::metadata::PageMetadata;
 use crate::streaming::budget::MemoryBudget;
 use crate::streaming::charset::CharsetState;
@@ -157,6 +158,39 @@ impl StreamingConverter {
     }
 
     /// Create a new streaming converter with a custom chars-per-token ratio.
+    ///
+    /// The `chars_per_token` parameter controls how many Markdown characters
+    /// correspond to one estimated LLM token.  The final token count is
+    /// computed in [`finalize`](Self::finalize) as
+    /// `ceil(total_markdown_chars / chars_per_token)`.
+    ///
+    /// # Arguments
+    ///
+    /// * `options` - [`ConversionOptions`] controlling features such as
+    ///   metadata extraction, URL resolution, and pruning.
+    /// * `budget` - [`MemoryBudget`] bounding working-set usage of pipeline
+    ///   components during streaming processing.
+    /// * `chars_per_token` - Average characters per token for estimation.
+    ///   Must be positive; non-positive values are clamped to 4.0.
+    ///   Values outside `[1.0, 100.0]` are clamped to that range to avoid
+    ///   pathological estimates.  Typical values: English text ≈ 4.0,
+    ///   CJK text ≈ 1.5–2.0, code-heavy content ≈ 1.5–2.0.
+    ///
+    /// # Returns
+    ///
+    /// A new `StreamingConverter` initialized to accept input via
+    /// [`feed_chunk`](Self::feed_chunk) and finalized with
+    /// [`finalize`](Self::finalize).
+    ///
+    /// # Side Effects
+    ///
+    /// None.  The converter is fully constructed and ready for use.
+    ///
+    /// # See Also
+    ///
+    /// * [`new`](Self::new) — constructs with the default 4.0 chars/token ratio.
+    /// * [`TokenEstimator::with_chars_per_token`](crate::token_estimator::TokenEstimator::with_chars_per_token) —
+    ///   the full-buffer/incremental equivalent.
     pub fn with_chars_per_token(
         options: ConversionOptions,
         budget: MemoryBudget,
@@ -178,11 +212,7 @@ impl StreamingConverter {
             budget,
             etag_hasher,
             total_markdown_chars: 0,
-            chars_per_token: if chars_per_token > 0.0 {
-                chars_per_token
-            } else {
-                4.0
-            },
+            chars_per_token: clamp_chars_per_token(chars_per_token),
             commit_state: CommitState::PreCommit,
             deadline: None,
             stats: StreamingStats::default(),
@@ -643,7 +673,9 @@ impl StreamingConverter {
 
         // Accumulate character count for token estimation.
         // The final token count is computed once in finalize() as
-        // ceil(total_chars / 4.0) to match the one-shot TokenEstimator.
+        // ceil(total_chars / chars_per_token) to match the configured
+        // ratio.  See StreamingConverter::chars_per_token field and
+        // the finalize() token_estimate block for the computation.
         let char_count = match std::str::from_utf8(flushed) {
             Ok(text) => text.chars().count() as u64,
             Err(_) => String::from_utf8_lossy(flushed).chars().count() as u64,

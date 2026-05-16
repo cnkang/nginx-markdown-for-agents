@@ -115,18 +115,18 @@ ngx_http_markdown_reject_or_fail_open_buffered_response(
         return NGX_ERROR;
     }
 
-    /*
-     * Record fail-open outcome: the original HTML response will
-     * be sent to the client.  This metric is recorded here
-     * (inside the fail-open decision point) rather than at
-     * caller sites, so it cannot be accidentally skipped or
-     * misattributed to the reject path.
-     */
-    NGX_HTTP_MARKDOWN_METRIC_INC(results.failopen_count);
-
     rc = ngx_http_markdown_fail_open_buffered_response(
         r, ctx, debug_message);
-    if (rc != NGX_OK) {
+    if (rc == NGX_OK || rc == NGX_DONE) {
+        /*
+         * Record fail-open outcome only after the original response
+         * has been successfully sent downstream.  Do not count
+         * NGX_AGAIN (backpressure) or NGX_ERROR as fail-open
+         * completions — the response has not reached the client.
+         */
+        NGX_HTTP_MARKDOWN_METRIC_INC(results.failopen_count);
+    }
+    if (rc != NGX_OK && rc != NGX_DONE) {
         return rc;
     }
 

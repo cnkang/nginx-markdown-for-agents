@@ -119,6 +119,8 @@ jobs:
 
   header-sync:
     name: FFI Header Generation Smoke
+    needs: changes
+    if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.workflows == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

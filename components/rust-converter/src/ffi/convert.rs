@@ -45,7 +45,7 @@ pub(crate) fn convert_inner(
     if html_slice.is_empty() {
         let markdown = Box::<[u8]>::default();
         let token_estimate = if decoded.estimate_tokens {
-            TokenEstimator::with_chars_per_token(decoded.chars_per_token).estimate("")
+            TokenEstimator::with_chars_per_token(decoded.effective_chars_per_token).estimate("")
         } else {
             0
         };
@@ -76,7 +76,7 @@ pub(crate) fn convert_inner(
     let markdown = converter.convert_with_context(&dom, &mut ctx)?;
 
     let token_estimate = if decoded.estimate_tokens {
-        TokenEstimator::with_chars_per_token(decoded.chars_per_token).estimate(&markdown)
+        TokenEstimator::with_chars_per_token(decoded.effective_chars_per_token).estimate(&markdown)
     } else {
         0
     };

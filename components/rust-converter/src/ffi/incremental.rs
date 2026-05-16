@@ -43,6 +43,29 @@ use super::memory::{free_buffer, reset_result, set_error_result};
 use super::options::decode_options;
 
 /// Opaque handle wrapping an [`IncrementalConverter`] for the C ABI.
+///
+/// The handle is produced by [`markdown_incremental_new`] and consumed by
+/// either [`markdown_incremental_finalize`] (which produces output) or
+/// [`markdown_incremental_free`] (which drops without output).  The C caller
+/// owns the handle for its entire lifetime.
+///
+/// # Fields (FFI boundary semantics)
+///
+/// * `inner` — The [`IncrementalConverter`] instance that accumulates input
+///   chunks and performs the conversion.  Owned by the handle; moved into
+///   on construction and consumed on finalization.
+/// * `generate_etag` — Whether to compute and emit a BLAKE3-based ETag in
+///   the final result.  Set once at construction from `MarkdownOptions`;
+///   immutable thereafter.
+/// * `estimate_tokens` — Whether to run LLM token-count estimation in the
+///   final result.  Set once at construction from `MarkdownOptions`.
+/// * `chars_per_token` — The average characters-per-token ratio used by
+///   [`TokenEstimator`] when `estimate_tokens` is true.  Stored as `f32`
+///   with typical values 1.0–4.0 (CJK–English).  This value is the
+///   **normalized** form (clamped to `[1.0, 100.0]` by
+///   [`clamp_chars_per_token`](super::options::clamp_chars_per_token))
+///   rather than the raw FFI input, so all token-estimation paths behave
+///   consistently.
 pub struct IncrementalConverterHandle {
     inner: IncrementalConverter,
     generate_etag: bool,
@@ -118,7 +141,7 @@ pub unsafe extern "C" fn markdown_incremental_new(
             inner: converter,
             generate_etag: decoded.generate_etag,
             estimate_tokens: decoded.estimate_tokens,
-            chars_per_token: decoded.chars_per_token,
+            chars_per_token: decoded.effective_chars_per_token,
         })))
     });
 
