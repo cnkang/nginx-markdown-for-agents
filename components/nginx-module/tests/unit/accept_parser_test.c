@@ -411,16 +411,18 @@ test_q_value_malformed(void)
     /* NOTE: The test stub uses atof() which returns 0.0 for non-numeric
        input, causing q=abc and q= to reject. The production code uses
        ngx_atofp() which returns NGX_ERROR for non-numeric input, causing
-       parse_q_value() to default to 1.0 (convert). These tests verify
-       the stub's behavior; production behavior is validated by e2e tests. */
+       parse_q_value() to return 0.0 (treat as lowest priority) so
+       invalid entries are ignored during content negotiation.
+       These tests verify the stub's behavior; production behavior
+       is validated by e2e tests. */
 
     /* q=abc (non-numeric) — atof returns 0.0, clamped to 0.0, should reject */
     TEST_ASSERT(should_convert("text/markdown;q=abc", 0) == 0,
-                "q=abc should reject in stub (atof returns 0)");
+                "q=abc should reject (invalid q defaults to 0.0)");
 
     /* q= (empty value) — atof returns 0.0, clamped to 0.0, should reject */
     TEST_ASSERT(should_convert("text/markdown;q=", 0) == 0,
-                "q= (empty) should reject in stub (atof returns 0)");
+                "q= (empty) should reject (invalid q defaults to 0.0)");
 
     /* q=2.0 (out of range) — clamped to 1.0, should convert */
     TEST_ASSERT(should_convert("text/markdown;q=2.0", 0) == 1,

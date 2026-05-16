@@ -419,6 +419,45 @@ void markdown_converter_free(struct MarkdownConverterHandle *handle);
  * // Either finalize to produce output or free when done without producing output.
  * unsafe { markdown_incremental_free(handle) };
  * ```
+ * Create a new incremental converter handle and return an explicit status code.
+ *
+ * This API is the recommended constructor for C callers that need actionable
+ * failure classification. On success, `*out_handle` receives a non-NULL handle.
+ * On error, `*out_handle` is set to NULL and the function returns an error code.
+ *
+ * Unlike [`markdown_incremental_new`], this function does not write to stderr,
+ * making it suitable for use as a library function within NGINX where all
+ * diagnostics should go through `ngx_log_error()`.
+ *
+ * # Safety
+ *
+ * - `out_handle` must be a valid, writable pointer to
+ *   `*mut IncrementalConverterHandle`.
+ * - `options` must point to a valid, properly aligned `MarkdownOptions` that
+ *   remains readable for the duration of this call.
+ *
+ * # Returns
+ *
+ * - `ERROR_SUCCESS` (0) on success
+ * - `ERROR_INVALID_INPUT` (5) for NULL pointers or invalid options
+ * - `ERROR_INTERNAL` (99) for caught panics
+ */
+uint32_t markdown_incremental_new_with_code(const struct MarkdownOptions *options,
+                                            struct IncrementalConverterHandle **out_handle);
+#endif
+
+#if defined(MARKDOWN_INCREMENTAL_ENABLED)
+/**
+ * Convenience wrapper around [`markdown_incremental_new_with_code`] that
+ * returns only the handle pointer.
+ *
+ * On failure, returns NULL. For actionable error classification, prefer
+ * [`markdown_incremental_new_with_code`].
+ *
+ * # Safety
+ *
+ * - `options` must point to a valid, properly aligned `MarkdownOptions` that
+ *   remains readable for the duration of this call, or be NULL.
  */
 struct IncrementalConverterHandle *markdown_incremental_new(const struct MarkdownOptions *options);
 #endif

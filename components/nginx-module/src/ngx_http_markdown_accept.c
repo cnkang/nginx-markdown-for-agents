@@ -314,7 +314,10 @@ ngx_http_markdown_extract_q_param(u_char *start, const u_char *end)
  * Parse q-value from parameters
  *
  * Extracts the q-value from parameter string like "q=0.9".
- * Returns 1.0 if no q-value is found or if parsing fails.
+ * Returns 1.0 if no q-value is found (default per RFC 7231).
+ * Returns 0.0 for invalid q-values (e.g. "q=abc", "q=") so
+ * that malformed entries are effectively ignored during content
+ * negotiation rather than being given highest priority.
  *
  * @param params  The parameter string
  * @return        The q-value (0.0-1.0)
@@ -346,7 +349,14 @@ ngx_http_markdown_parse_q_value(ngx_str_t *params)
 
             result = ngx_http_markdown_extract_q_param(p, end);
             if (result < 0.0f) {
-                return 1.0f; /* Invalid q-value, use default */
+                /*
+                 * Invalid q-value (e.g. "q=abc", "q=").
+                 * Treat as q=0.0 so this media range is effectively
+                 * ignored during content negotiation, rather than
+                 * defaulting to 1.0 which would give invalid entries
+                 * the highest priority.
+                 */
+                return 0.0f;
             }
 
             return result;

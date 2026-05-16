@@ -60,7 +60,7 @@ jobs:
       - name: Install cbindgen
         run: |
           if ! command -v cbindgen >/dev/null 2>&1; then
-            cargo install cbindgen --locked
+            cargo install cbindgen --version 0.28.0 --locked
           fi
 
       - name: Build Rust converter

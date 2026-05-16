@@ -177,6 +177,7 @@ ngx_http_markdown_create_main_conf(ngx_conf_t *cf)
     conf->dynconf_path_configured = 0;
     conf->dynconf_first_path.data = NULL;
     conf->dynconf_first_path.len = 0;
+    conf->metrics_per_path_cardinality = NGX_CONF_UNSET_UINT;
 
     return conf;
 }
@@ -206,6 +207,8 @@ ngx_http_markdown_init_main_conf(ngx_conf_t *cf, void *conf)
      * struct plus allocator metadata without oversizing small deployments.
      */
     ngx_conf_init_size_value(mcf->metrics_shm_size, 8 * ngx_pagesize);
+    ngx_conf_init_uint_value(mcf->metrics_per_path_cardinality,
+                             NGX_HTTP_MARKDOWN_PER_PATH_CARDINALITY_DEFAULT);
 
     zone = ngx_shared_memory_add(
         cf,
@@ -267,7 +270,6 @@ ngx_http_markdown_create_conf(ngx_conf_t *cf)
     conf->ops.trust_forwarded_headers = NGX_CONF_UNSET;
     conf->ops.metrics_format = NGX_CONF_UNSET_UINT;
     conf->ops.metrics_per_path = NGX_CONF_UNSET;
-    conf->ops.metrics_per_path_cardinality = NGX_CONF_UNSET_UINT;
     conf->ops.otel_enabled = NGX_CONF_UNSET;
     conf->ops.otel_tracing = NGX_CONF_UNSET;
     conf->ops.otel_metrics = NGX_CONF_UNSET;
@@ -399,9 +401,6 @@ ngx_http_markdown_merge_core_ops_values(ngx_http_markdown_conf_t *conf,
     ngx_conf_merge_uint_value(conf->ops.metrics_format, prev->ops.metrics_format,
                               NGX_HTTP_MARKDOWN_METRICS_FORMAT_AUTO);
     ngx_conf_merge_value(conf->ops.metrics_per_path, prev->ops.metrics_per_path, 0);
-    ngx_conf_merge_uint_value(conf->ops.metrics_per_path_cardinality,
-                              prev->ops.metrics_per_path_cardinality,
-                              NGX_HTTP_MARKDOWN_PER_PATH_CARDINALITY_DEFAULT);
     ngx_conf_merge_value(conf->ops.otel_enabled, prev->ops.otel_enabled, 0);
     ngx_conf_merge_value(conf->ops.otel_tracing, prev->ops.otel_tracing, 0);
     ngx_conf_merge_value(conf->ops.otel_metrics, prev->ops.otel_metrics, 0);

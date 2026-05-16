@@ -121,19 +121,49 @@ pub struct IncrementalConverterHandle {
 /// // Either finalize to produce output or free when done without producing output.
 /// unsafe { markdown_incremental_free(handle) };
 /// ```
+/// Create a new incremental converter handle and return an explicit status code.
+///
+/// This API is the recommended constructor for C callers that need actionable
+/// failure classification. On success, `*out_handle` receives a non-NULL handle.
+/// On error, `*out_handle` is set to NULL and the function returns an error code.
+///
+/// Unlike [`markdown_incremental_new`], this function does not write to stderr,
+/// making it suitable for use as a library function within NGINX where all
+/// diagnostics should go through `ngx_log_error()`.
+///
+/// # Safety
+///
+/// - `out_handle` must be a valid, writable pointer to
+///   `*mut IncrementalConverterHandle`.
+/// - `options` must point to a valid, properly aligned `MarkdownOptions` that
+///   remains readable for the duration of this call.
+///
+/// # Returns
+///
+/// - `ERROR_SUCCESS` (0) on success
+/// - `ERROR_INVALID_INPUT` (5) for NULL pointers or invalid options
+/// - `ERROR_INTERNAL` (99) for caught panics
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn markdown_incremental_new(
+pub unsafe extern "C" fn markdown_incremental_new_with_code(
     options: *const MarkdownOptions,
-) -> *mut IncrementalConverterHandle {
-    let result = panic::catch_unwind(|| -> Result<*mut IncrementalConverterHandle, ()> {
+    out_handle: *mut *mut IncrementalConverterHandle,
+) -> u32 {
+    if out_handle.is_null() {
+        return ERROR_INVALID_INPUT;
+    }
+
+    // SAFETY: validated as non-NULL above.
+    unsafe { *out_handle = ptr::null_mut() };
+
+    let result = panic::catch_unwind(|| {
         if options.is_null() {
-            return Err(());
+            return Err(ERROR_INVALID_INPUT);
         }
+
         // SAFETY: caller guarantees `options` is valid and aligned.
         let opts_ref = unsafe { &*options };
-        let decoded = decode_options(opts_ref).map_err(|e| {
-            eprintln!("markdown_incremental_new: failed to decode options: {e}");
-        })?;
+        let decoded = decode_options(opts_ref).map_err(|err| err.code())?;
+
         let mut converter = IncrementalConverter::new(decoded.conversion);
         converter.set_content_type(decoded.content_type.map(ToOwned::to_owned));
         converter.set_timeout(decoded.timeout);
@@ -146,9 +176,33 @@ pub unsafe extern "C" fn markdown_incremental_new(
     });
 
     match result {
-        Ok(Ok(ptr)) => ptr,
-        _ => ptr::null_mut(),
+        Ok(Ok(handle)) => {
+            // SAFETY: validated as non-NULL above.
+            unsafe { *out_handle = handle };
+            ERROR_SUCCESS
+        }
+        Ok(Err(code)) => code,
+        Err(_) => ERROR_INTERNAL,
     }
+}
+
+/// Convenience wrapper around [`markdown_incremental_new_with_code`] that
+/// returns only the handle pointer.
+///
+/// On failure, returns NULL. For actionable error classification, prefer
+/// [`markdown_incremental_new_with_code`].
+///
+/// # Safety
+///
+/// - `options` must point to a valid, properly aligned `MarkdownOptions` that
+///   remains readable for the duration of this call, or be NULL.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn markdown_incremental_new(
+    options: *const MarkdownOptions,
+) -> *mut IncrementalConverterHandle {
+    let mut handle: *mut IncrementalConverterHandle = ptr::null_mut();
+    let _rc = unsafe { markdown_incremental_new_with_code(options, &mut handle) };
+    handle
 }
 
 /// Buffers a provided input chunk for later conversion.
