@@ -80,6 +80,7 @@ Required:
 - Use semantically correct return codes in fail-open branches (`NGX_DECLINED` where needed), so caller behavior matches control intent.
 - Do not advance buffer positions for unconsumed data when handing chain to next filter unchanged.
 - If a fail-open branch invokes next header filter, mark header-forwarded state before the call to avoid double header emission.
+- When fail-open involves replay-buffer data integrity (init/append failure, passthrough after `precommit_error`, duplicate finalize on terminal buffer), apply Rule 38 in addition to this rule. Rule 38 subsumes the streaming-specific replay buffer contract; this rule covers the general fail-open return-code and pointer-advancement discipline.
 
 ### 3. Memory leaks and budget bypass in streaming/decompression
 Historical issues: `23165d9`, `2c7d6a9`, `0eae34b`, `1b0df51`.
@@ -204,6 +205,14 @@ Required:
   (b) add a comment explicitly documenting the approximation and its
   limitations, or (c) defer the metric to a future release when the proper
   data source is available.
+- **Counter metrics that track delivery outcomes (for example `results.failopen_count`)
+  must be incremented only after the delivery operation succeeds (downstream filter
+  returns `NGX_OK`), not at the decision point that initiates the delivery.**
+  Separate "decision" counters (for example `streaming.precommit_failopen_total`)
+  from "delivery" counters (for example `results.failopen_count`) to prevent
+  inflating the delivery count when the downstream send later fails (header
+  forwarding error, allocation failure, backpressure).  This principle applies
+  to any counter where the decision and the outcome can diverge.
 
 ### 8b. Configuration–code alignment for tooling
 Historical issues: evidence targets nested under `targets` key but code read
@@ -654,6 +663,13 @@ Required:
   writes) must be recorded **after** the event they describe succeeds, not
   before the attempt.  If both "attempt" and "completion" semantics are
   needed, use separate counters with unambiguous names.
+- **Delivery counters must be distinct from decision counters.** A decision
+  counter (for example `precommit_failopen_total`) records the control-flow
+  choice; a delivery counter (for example `results.failopen_count`) records
+  successful downstream transmission.  Incrementing the delivery counter at
+  the decision point inflates the count when the downstream send fails.  See
+  Rule 8 for the concrete `failopen_count` contract and Rule 38 for the
+  replay-buffer integrity requirements that motivated the separation.
 - **When a secondary code path (shadow mode, fallback, retry, diagnostic)
   invokes the same FFI call or receives the same result struct as the
   primary path, it must consume all spec-required fields from that result,
@@ -1057,6 +1073,48 @@ Verification:
 - `make harness-security-checks`
 - `PYTHONPATH=. pytest -q tools/perf/tests`
 
+### 38. Fail-open replay buffer data integrity
+Historical issues: dev/wip-0.6.6 commits 2138760–2283428 (silent data loss
+on replay buffer init/append failure, duplicate finalize on terminal buffer).
+
+Required:
+- Any buffer used to store original upstream bytes for fail-open replay
+  (for example `failopen_replay_buf`) must be initialized before streaming
+  enters Pre-Commit.  Initialization failure must abort the streaming
+  handle and route through `precommit_error` — never silently continue
+  streaming without a fail-open recovery path.
+- Append failure to the replay buffer (budget exceeded, capacity limit)
+  must immediately invoke `precommit_error`.  Continuing streaming with
+  an incomplete replay buffer would cause fail-open to silently drop
+  prefix bytes on pre-commit error, corrupting the response.
+- When `precommit_error` returns `NGX_DECLINED` with `ctx->eligible == 0`
+  (pass policy), the caller must invoke `failopen_passthrough` to forward
+  the original response downstream.  Returning `NGX_DECLINED` directly
+  without passthrough causes body_filter to skip sending any data.
+- After fail-open passthrough on a terminal buffer, the caller must set
+  an explicit `failopen_completed` flag (or equivalent) so body_filter
+  skips `finalize_request`.  Without this, finalize sends a duplicate
+  empty `last_buf` (since `handle` is NULL after precommit_error abort).
+- Never use `*last_buf = 0` side-effects to suppress finalize; prefer
+  explicit output flags that document the control-flow contract.
+- `results.failopen_count` must be incremented only after fail-open
+  passthrough succeeds (downstream filter returns `NGX_OK`), not at the
+  precommit_error decision point.  `streaming.precommit_failopen_total`
+  tracks decisions; `results.failopen_count` tracks successful deliveries.
+  This separation prevents inflating the delivery count when passthrough
+  later fails (for example header forwarding error, allocation failure).
+
+Verification:
+- `grep -rn 'failopen_replay_buf\|failopen_replay_initialized' components/nginx-module/src/`
+- For each init site, verify failure triggers `precommit_error`.
+- For each append site, verify failure triggers `precommit_error`, not
+  just a warning log.
+- `grep -rn 'failopen_completed' components/nginx-module/src/`
+- Verify body_filter checks `failopen_completed` before finalize.
+- `grep -rn 'results\.failopen_count' components/nginx-module/src/`
+- Verify the increment is in `failopen_passthrough` after downstream
+  success, not in `precommit_error`.
+
 ## Required Agent Workflow
 
 ### Before coding
@@ -1103,6 +1161,7 @@ For each code change you are about to produce, mentally (or explicitly in a thin
 25. NUL-termination of `ngx_str_t`: before passing `ngx_str_t.data` to C APIs requiring NUL-terminated input (`ngx_strcasecmp`, `stat()`, `ngx_file_info()`, `opendir()`, `strstr()`), copy to a stack/pool buffer and append `'\0'`. Prefer length-bounded NGINX APIs (`ngx_strncasecmp`, `ngx_strlchr`) when possible. For directive matching, require exact length equality first. (Rule 30)
 26. Residual code integrity: after merge or >500-line change in a single file, verify compilation, `git diff --check`, function count, and no duplicate adjacent blocks. For >30-line changes, verify the file is not truncated (closing brace present). (Rule 31)
 27. Snapshot race elimination: in `header_filter`, `ngx_http_markdown_dynconf_watcher.active_snapshot` must be read exactly once at function entry into a function-lifetime `snap_copy`; `early_eff` is built from that once. Both variables must have function-lifetime scope. ctx binding must copy from these function-level variables (via `ngx_http_markdown_bind_request_snapshot()`), never re-read the global `active_snapshot` or re-invoke `build_effective_conf()`. `handle_ctx_alloc_failure()` must receive `eff` (not NULL). (Rule 34)
+28. Fail-open replay buffer integrity: if the change touches fail-open or streaming pre-commit paths, verify (a) replay buffer init failure triggers `precommit_error`, (b) replay buffer append failure triggers `precommit_error` (not just a warning), (c) `failopen_completed` flag prevents duplicate `finalize_request` after terminal-buffer passthrough, (d) `results.failopen_count` is incremented only after downstream `NGX_OK` (not at decision point). (Rule 38)
 
 #### C test code (`components/nginx-module/tests/unit/`)
 1. No dead stores — simulation-style tests set the final value directly; initial state documented in comments only. (Rule 16)
@@ -1346,6 +1405,7 @@ Verification:
 
 | 0.6.2 | 2026-05-07 | Kang | Rule 35: dynconf snapshot isolation (dynconf_enabled gate), reload retry contract (applied_mtime separation), unknown key atomic rejection, startup apply of existing dynconf file, harness-check-full includes harness-security-checks |
 | 0.6.2 | 2026-05-11 | Kang | Rule 36: require routing-manifest coverage and focused security family routing for recurring tooling path-safety fixes |
+| 0.6.6 | 2026-05-16 | Kang | Rule 38: fail-open replay buffer data integrity (init/append failure → precommit_error, failopen_completed state, delivery vs decision counter separation); Rule 2 cross-reference to Rule 38; Rule 8 delivery counter semantics; Rule 23 delivery vs decision counter guidance; C module checklist item 28 |
 
 ### 37. Rust-first E2E test runner (e2e-harness)
 
