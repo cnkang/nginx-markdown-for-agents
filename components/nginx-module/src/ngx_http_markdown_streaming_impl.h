@@ -1424,7 +1424,6 @@ ngx_http_markdown_streaming_precommit_error(
     ctx->eligible = 0;
     NGX_HTTP_MARKDOWN_METRIC_INC(
         streaming.precommit_failopen_total);
-    NGX_HTTP_MARKDOWN_METRIC_INC(results.failopen_count);
     ngx_http_markdown_log_decision(r, conf, ctx->effective_conf,
         ngx_http_markdown_reason_streaming_precommit_failopen());
     return NGX_DECLINED;
@@ -2403,6 +2402,7 @@ ngx_http_markdown_streaming_failopen_passthrough(
     ngx_chain_t  **tail;
     ngx_chain_t  *cl;
     ngx_buf_t    *b;
+    ngx_int_t     rc;
 
     if (!ctx->headers_forwarded) {
         if (ngx_http_markdown_forward_headers(r, ctx) != NGX_OK) {
@@ -2413,7 +2413,11 @@ ngx_http_markdown_streaming_failopen_passthrough(
     if (!ctx->streaming.failopen_replay_initialized
         || ctx->streaming.failopen_replay_buf.size == 0)
     {
-        return ngx_http_next_body_filter(r, in);
+        rc = ngx_http_next_body_filter(r, in);
+        if (rc == NGX_OK && !ctx->eligible) {
+            NGX_HTTP_MARKDOWN_METRIC_INC(results.failopen_count);
+        }
+        return rc;
     }
 
     /*
@@ -2446,7 +2450,11 @@ ngx_http_markdown_streaming_failopen_passthrough(
 
     *tail = in;
 
-    return ngx_http_next_body_filter(r, head);
+    rc = ngx_http_next_body_filter(r, head);
+    if (rc == NGX_OK && !ctx->eligible) {
+        NGX_HTTP_MARKDOWN_METRIC_INC(results.failopen_count);
+    }
+    return rc;
 }
 
 
@@ -2689,6 +2697,16 @@ ngx_http_markdown_streaming_handle_null_input(
  * replay, and reports the chain link that triggered fallback so callers can
  * re-enter the full-buffer path at the correct point.  NGX_AGAIN is propagated
  * immediately to honor downstream backpressure.
+ *
+ * Output parameters:
+ *   last_buf         - set to 1 if a terminal buffer was observed (unless
+ *                      failopen_completed is set, in which case the terminal
+ *                      buffer has already been forwarded downstream)
+ *   failopen_completed - set to 1 if fail-open passthrough has already
+ *                        forwarded the original response downstream (including
+ *                        any terminal buffer), so the caller must not enter
+ *                        finalize_request
+ *   fallback_cl      - set to the chain link that triggered fallback
  */
 static ngx_int_t
 ngx_http_markdown_streaming_process_chain(
@@ -2697,12 +2715,14 @@ ngx_http_markdown_streaming_process_chain(
     ngx_http_markdown_conf_t *conf,
     ngx_chain_t *in,
     ngx_flag_t *last_buf,
+    ngx_flag_t *failopen_completed,
     ngx_chain_t **fallback_cl)
 {
     ngx_chain_t  *cl;
     ngx_int_t     rc;
 
     *last_buf = 0;
+    *failopen_completed = 0;
     *fallback_cl = NULL;
 
     for (cl = in; cl != NULL; cl = cl->next) {
@@ -2782,18 +2802,16 @@ ngx_http_markdown_streaming_process_chain(
                      * consumed in earlier loop iterations; the
                      * replay buffer already holds their prefix.
                      *
-                     * Clear *last_buf after successful fail-open
-                     * passthrough so body_filter does not enter
-                     * finalize_request and send a duplicate empty
-                     * terminal buffer.  The original terminal
-                     * chain has already been forwarded by
-                     * failopen_passthrough.
+                     * If fail-open passthrough succeeded, mark
+                     * failopen_completed so body_filter skips
+                     * finalize_request (the terminal chain has
+                     * already been forwarded downstream).
                      */
                     if (rc == NGX_DECLINED && !ctx->eligible) {
                         rc = ngx_http_markdown_streaming_failopen_passthrough(
                                 r, ctx, cl);
                         if (rc == NGX_OK || rc == NGX_AGAIN) {
-                            *last_buf = 0;
+                            *failopen_completed = 1;
                         }
                         return rc;
                     }
@@ -2827,6 +2845,7 @@ ngx_http_markdown_streaming_body_filter(
     ngx_chain_t               *fallback_cl;
     ngx_int_t                  rc;
     ngx_flag_t                 last_buf;
+    ngx_flag_t                 failopen_completed;
 
     ctx = ngx_http_get_module_ctx(r,
         ngx_http_markdown_filter_module);
@@ -2866,7 +2885,7 @@ ngx_http_markdown_streaming_body_filter(
     }
 
     rc = ngx_http_markdown_streaming_process_chain(
-        r, ctx, conf, in, &last_buf,
+        r, ctx, conf, in, &last_buf, &failopen_completed,
         &fallback_cl);
     if (rc == NGX_DONE) {
         return ngx_http_markdown_streaming_reenter_fullbuffer_after_fallback(
@@ -2874,6 +2893,15 @@ ngx_http_markdown_streaming_body_filter(
     }
     if (rc != NGX_OK) {
         return rc;
+    }
+
+    /*
+     * If fail-open passthrough already forwarded the original
+     * response (including any terminal buffer), skip finalize
+     * to avoid sending a duplicate empty last_buf.
+     */
+    if (failopen_completed) {
+        return NGX_OK;
     }
 
     /* Handle last_buf: finalize */

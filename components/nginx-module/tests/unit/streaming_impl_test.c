@@ -1953,6 +1953,7 @@ test_null_input_tracking_and_body_filter_entry(void)
     ngx_buf_t               pending_buf;
     ngx_int_t               rc;
     ngx_flag_t              last_buf = 0;
+    ngx_flag_t              failopen_completed = 0;
     ngx_chain_t            *fallback_cl = NULL;
 
     TEST_SUBSECTION("null-input, failopen tracking, and body_filter entry");
@@ -1998,11 +1999,12 @@ test_null_input_tracking_and_body_filter_entry(void)
         "null-input handler should finalize when pending drain completes");
 
     last_buf = 0;
+    failopen_completed = 0;
     fallback_cl = NULL;
     c1.buf = NULL;
     c1.next = NULL;
     rc = ngx_http_markdown_streaming_process_chain(
-        &r, &ctx, &conf, &c1, &last_buf, &fallback_cl);
+        &r, &ctx, &conf, &c1, &last_buf, &failopen_completed, &fallback_cl);
     TEST_ASSERT(rc == NGX_OK,
         "process_chain should skip NULL buffers safely");
 
@@ -2471,6 +2473,7 @@ test_process_chain_and_body_filter_deep_paths(void)
     ngx_buf_t               in_buf;
     ngx_chain_t            *fallback_cl = NULL;
     ngx_flag_t              last_buf = 0;
+    ngx_flag_t              failopen_completed = 0;
     ngx_int_t               rc;
     u_char                  prebuf_data[16];
     u_char                  chunk_data[] = "chunk";
@@ -2527,7 +2530,7 @@ test_process_chain_and_body_filter_deep_paths(void)
     g_streaming_feed_out_data = NULL;
     g_streaming_feed_out_len = 0;
     rc = ngx_http_markdown_streaming_process_chain(
-        &r, &ctx, &conf, &in, &last_buf, &fallback_cl);
+        &r, &ctx, &conf, &in, &last_buf, &failopen_completed, &fallback_cl);
     TEST_ASSERT(rc == NGX_OK,
         "process_chain should pass through when already in fail-open "
         "path regardless of reject policy (reject only applies at "
@@ -2549,7 +2552,7 @@ test_process_chain_and_body_filter_deep_paths(void)
     in_buf.pos = chunk_data;
     in_buf.last = chunk_data + 5;
     rc = ngx_http_markdown_streaming_process_chain(
-        &r, &ctx, &conf, &in, &last_buf, &fallback_cl);
+        &r, &ctx, &conf, &in, &last_buf, &failopen_completed, &fallback_cl);
     TEST_ASSERT(rc == NGX_DONE,
         "process_chain should return NGX_DONE when fallback switches path");
     TEST_ASSERT(fallback_cl == &in,
@@ -2622,7 +2625,7 @@ test_process_chain_and_body_filter_deep_paths(void)
     conf.streaming.on_error = NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_REJECT;
     g_buffer_append_rc = NGX_ERROR;
     rc = ngx_http_markdown_streaming_process_chain(
-        &r, &ctx, &conf, &in, &last_buf, &fallback_cl);
+        &r, &ctx, &conf, &in, &last_buf, &failopen_completed, &fallback_cl);
     TEST_ASSERT(rc == NGX_ERROR,
         "replay append failure with reject policy should return NGX_ERROR");
     g_buffer_append_rc = NGX_OK;
@@ -2654,12 +2657,15 @@ test_process_chain_and_body_filter_deep_paths(void)
     g_next_body_filter_rc = NGX_OK;
     g_buffer_append_rc = NGX_ERROR;
     rc = ngx_http_markdown_streaming_process_chain(
-        &r, &ctx, &conf, &in, &last_buf, &fallback_cl);
+        &r, &ctx, &conf, &in, &last_buf, &failopen_completed, &fallback_cl);
     TEST_ASSERT(rc == NGX_OK,
         "replay append failure with pass policy should fail-open "
         "passthrough (forward chain downstream)");
     TEST_ASSERT(ctx.eligible == 0,
         "replay append failure with pass policy should set eligible=0");
+    TEST_ASSERT(failopen_completed == 1,
+        "replay append failure with pass policy should set "
+        "failopen_completed=1");
     g_buffer_append_rc = NGX_OK;
     conf.streaming.on_error = NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_PASS;
 
