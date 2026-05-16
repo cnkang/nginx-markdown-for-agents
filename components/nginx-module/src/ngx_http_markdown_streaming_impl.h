@@ -2296,14 +2296,34 @@ ngx_http_markdown_streaming_init_handle(
      * module-owned memory, rather than relying on upstream ngx_buf_t*
      * pointer stability across filter chain invocations.
      */
-    ctx->streaming.failopen_replay_initialized = 0;
+     ctx->streaming.failopen_replay_initialized = 0;
     rc = ngx_http_markdown_buffer_init(
         &ctx->streaming.failopen_replay_buf,
         ctx->streaming.prebuffer_limit,
         r->pool);
-    if (rc == NGX_OK) {
-        ctx->streaming.failopen_replay_initialized = 1;
+    if (rc != NGX_OK) {
+        /*
+         * Replay buffer initialization failed (pool exhaustion or
+         * zero budget).  Without a working replay buffer, fail-open
+         * cannot reconstruct the original upstream prefix data on
+         * pre-commit error, so continuing streaming would silently
+         * lose data.  Treat this identically to prebuffer init
+         * failure: abort the handle and apply the configured
+         * streaming_on_error policy.
+         */
+        ngx_log_error(NGX_LOG_ERR,
+            r->connection->log, 0,
+            "markdown streaming: replay buffer init "
+            "failed (pool exhaustion or zero budget), "
+            "cannot guarantee fail-open data integrity");
+        markdown_streaming_abort(
+            ctx->streaming.handle);
+        ctx->streaming.handle = NULL;
+        return ngx_http_markdown_streaming_precommit_error(
+            r, ctx, conf, ERROR_MEMORY_LIMIT);
     }
+
+    ctx->streaming.failopen_replay_initialized = 1;
 
     ctx->conversion_attempted = 1;
     NGX_HTTP_MARKDOWN_METRIC_INC(
@@ -2746,11 +2766,28 @@ ngx_http_markdown_streaming_process_chain(
                     &ctx->streaming.failopen_replay_buf,
                     cl->buf->pos, chunk_len);
                 if (rc != NGX_OK) {
-                    ngx_log_error(NGX_LOG_WARN,
+                    /*
+                     * Replay buffer cannot accept more data.  The
+                     * fail-open replay is now incomplete: if a
+                     * pre-commit error occurs later, fail-open
+                     * would reconstruct the original response
+                     * without these prefix bytes, silently
+                     * corrupting the output.  The only safe
+                     * action is to abort streaming immediately
+                     * and apply the configured pre-commit error
+                     * policy.  The current buffer's pos has NOT
+                     * been advanced yet, so fail-open can still
+                     * forward the full original chain.
+                     */
+                    ngx_log_error(NGX_LOG_ERR,
                         r->connection->log, 0,
-                        "markdown streaming: failopen replay "
-                        "buffer limit exceeded, fail-open may "
-                        "lose prefix data");
+                        "markdown streaming: replay buffer "
+                        "limit exceeded, aborting streaming "
+                        "to preserve fail-open data integrity");
+                    return
+                        ngx_http_markdown_streaming_precommit_error(
+                            r, ctx, conf,
+                            ERROR_BUDGET_EXCEEDED);
                 }
             }
         }
