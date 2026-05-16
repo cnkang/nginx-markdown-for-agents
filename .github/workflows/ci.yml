@@ -118,7 +118,7 @@ jobs:
         run: make docs-check
 
   header-sync:
-    name: FFI Header Sync
+    name: FFI Header Generation Smoke
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -137,11 +137,18 @@ jobs:
             components/rust-converter -> target
           cache-bin: false
 
-      - name: Generate FFI header and verify sync
+      - name: Install cbindgen
+        run: |
+          if ! command -v cbindgen >/dev/null 2>&1; then
+            cargo install cbindgen --locked
+          fi
+
+      - name: Generate header and verify no drift
         run: |
           make rust-lib
           make copy-headers
           make check-headers
+          git diff --exit-code -- components/rust-converter/include/markdown_converter.h
 
   rust-quality:
     name: Rust Quality Gate
