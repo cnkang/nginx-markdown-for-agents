@@ -939,10 +939,10 @@ ngx_http_markdown_record_conversion_success(ngx_http_markdown_ctx_t *ctx,
 static const ngx_str_t *
 ngx_http_markdown_otel_flavor_name(ngx_uint_t flavor)
 {
-    static ngx_str_t gfm_name = ngx_string("gfm");
-    static ngx_str_t mdx_name = ngx_string("mdx");
-    static ngx_str_t org_mode_name = ngx_string("org-mode");
-    static ngx_str_t commonmark_name = ngx_string("commonmark");
+    static ngx_str_t  gfm_name = ngx_string("gfm");
+    static ngx_str_t  mdx_name = ngx_string("mdx");
+    static ngx_str_t  org_mode_name = ngx_string("org-mode");
+    static ngx_str_t  commonmark_name = ngx_string("commonmark");
 
     switch (flavor) {
     case NGX_HTTP_MARKDOWN_FLAVOR_GFM:
@@ -1563,28 +1563,24 @@ ngx_http_markdown_execute_conversion(ngx_http_request_t *r,
 #ifdef MARKDOWN_INCREMENTAL_ENABLED
     if (ctx->processing_path == NGX_HTTP_MARKDOWN_PATH_INCREMENTAL) {
         struct IncrementalConverterHandle *inc_handle;
+        uint32_t                          init_rc;
         uint32_t                          feed_rc;
         uint32_t                          fin_rc;
 
-        inc_handle = markdown_incremental_new(&options);
-        if (inc_handle == NULL) {
+        inc_handle = NULL;
+        init_rc = markdown_incremental_new_with_code(
+            &options, &inc_handle);
+        if (init_rc != ERROR_SUCCESS || inc_handle == NULL) {
             tp = ngx_timeofday();
             end_time = (ngx_msec_t) (tp->sec * 1000 + tp->msec);
             *elapsed_ms = (end_time >= start_time) ? end_time - start_time : 0;
 
-            /*
-             * markdown_incremental_new() returns NULL on option-decoding
-             * failures or internal panics.  The Rust FFI does not expose
-             * a separate error channel from this function, so we cannot
-             * retrieve the library's error message.  Use
-             * ERROR_INVALID_INPUT as the most likely cause (bad options);
-             * the Rust layer logs the real reason to stderr.
-             */
             ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                         "markdown filter: markdown_incremental_new() "
-                         "returned NULL (option decoding or internal error)");
+                         "markdown filter: "
+                         "markdown_incremental_new_with_code() "
+                         "failed rc=%ud", (ngx_uint_t) init_rc);
 
-            result->error_code = ERROR_INVALID_INPUT;
+            result->error_code = init_rc ? init_rc : ERROR_INVALID_INPUT;
             result->error_message = NULL;
             result->error_len = 0;
             return ngx_http_markdown_handle_conversion_failure(

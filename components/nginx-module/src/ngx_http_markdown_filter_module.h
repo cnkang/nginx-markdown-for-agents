@@ -285,7 +285,6 @@ typedef struct {
         ngx_flag_t   trust_forwarded_headers; /* markdown_trust_forwarded_headers on|off (default: off) */
         ngx_uint_t   metrics_format;       /* markdown_metrics_format auto|prometheus (default: auto) */
         ngx_flag_t   metrics_per_path;    /* markdown_metrics_per_path on|off (default: off) */
-        ngx_uint_t   metrics_per_path_cardinality; /* markdown_metrics_per_path_cardinality (default: 100) */
         ngx_flag_t   otel_enabled;       /* markdown_otel on|off (default: off) */
         ngx_flag_t   otel_tracing;      /* markdown_otel_tracing on|off (default: off) */
         ngx_flag_t   otel_metrics;      /* markdown_otel_metrics on|off (default: off) */
@@ -323,6 +322,7 @@ typedef struct {
     size_t          metrics_shm_size;  /* Configured metrics SHM size (default: 8 pages) */
     ngx_flag_t      dynconf_path_configured; /* 1 after first markdown_dynamic_config_path directive */
     ngx_str_t       dynconf_first_path;      /* Path value from the first directive (for diagnostics) */
+    ngx_uint_t      metrics_per_path_cardinality; /* markdown_metrics_per_path_cardinality (default: 100, global) */
 } ngx_http_markdown_main_conf_t;
 
 /*
@@ -477,11 +477,15 @@ typedef struct {
         size_t                            prebuffer_limit;
         ngx_flag_t                        prebuffer_initialized;
 
-        /* Reused fail-open restoration slots (avoid per-call allocations) */
-        ngx_buf_t                       **failopen_consumed_bufs;
-        u_char                          **failopen_consumed_pos;
-        ngx_uint_t                        failopen_consumed_capacity;
-        ngx_uint_t                        failopen_consumed_count;
+        /*
+         * Fail-open replay buffer: a request-owned copy of original upstream
+         * bytes consumed during Pre-Commit.  On fail-open, we rebuild the
+         * output chain from this buffer rather than restoring upstream
+         * ngx_buf_t* positions, which is fragile across filter chain
+         * invocations, temporary buffers, and subrequest scenarios.
+         */
+        ngx_http_markdown_buffer_t        failopen_replay_buf;
+        ngx_flag_t                        failopen_replay_initialized;
 
         /* Deferred terminal last_buf (backpressure during finalize) */
         ngx_flag_t                        finalize_pending_lastbuf;

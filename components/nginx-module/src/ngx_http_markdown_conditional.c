@@ -488,14 +488,18 @@ ngx_http_markdown_handle_if_none_match(ngx_http_request_t *r,
 #ifdef MARKDOWN_INCREMENTAL_ENABLED
     if (ctx->processing_path == NGX_HTTP_MARKDOWN_PATH_INCREMENTAL) {
         struct IncrementalConverterHandle *inc_handle;
+        uint32_t                          init_rc;
         uint32_t                          feed_rc;
         uint32_t                          fin_rc;
 
-        inc_handle = markdown_incremental_new(&options);
-        if (inc_handle == NULL) {
+        inc_handle = NULL;
+        init_rc = markdown_incremental_new_with_code(
+            &options, &inc_handle);
+        if (init_rc != ERROR_SUCCESS || inc_handle == NULL) {
             ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                         "markdown filter: incremental converter init failed "
-                         "during If-None-Match check");
+                         "markdown filter: incremental converter init "
+                         "failed during If-None-Match check, "
+                         "error_code=%ud", (ngx_uint_t) init_rc);
             ngx_pfree(r->pool, conv_result);
             return NGX_ERROR;
         }
