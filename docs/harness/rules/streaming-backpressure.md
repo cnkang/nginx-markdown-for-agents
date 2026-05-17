@@ -88,7 +88,7 @@ Verification:
 
 **Do NOT write code first and fix later. Validate BEFORE every file write/edit.**
 
-For each code change you are about to produce, mentally (or explicitly in a thinking step) walk through the applicable rules from the "Frequent Error Patterns" list above and confirm the output will not violate them. The checklist is organized by file type:
+For each code change you are about to produce, mentally (or explicitly in a thinking step) walk through the applicable rules from the checklist above and confirm the output will not violate them. The checklist is organized by file type:
 
 #### C module code (`components/nginx-module/src/`)
 1. No dead stores — every assignment is read before the next write to the same variable. (Rule 16)
