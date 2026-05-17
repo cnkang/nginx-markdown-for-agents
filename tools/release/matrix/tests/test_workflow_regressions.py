@@ -100,7 +100,8 @@ def test_install_verify_workflow_avoids_js_actions_on_alpine_arm64_and_uses_bash
     assert "nginx.org/en/download.html" in resolve_run
     assert "sorted(set(upstream_versions), key=version_tuple)[-1]" in resolve_run
     assert '"variant": "upstream-upper"' in resolve_run
-    assert '"expected_install_success": False' in resolve_run
+    assert "upstream_in_matrix = upstream_upper in full_nginx_versions" in resolve_run
+    assert '"expected_install_success": upstream_in_matrix,' in resolve_run
     assert '"latest upstream"' in resolve_run
 
     assert steps["Checkout repository"]["if"] == (
