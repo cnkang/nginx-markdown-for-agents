@@ -16,7 +16,7 @@ Required:
   first `ngx_list_part_t` silently drops headers on requests with more than
   `NGX_LIST_PART_SIZE` (typically 8) headers.
 - Use the canonical NGINX iteration pattern:
-  ```
+  ```c
   part = &list->part;
   while (part) {
       h = part->elts;

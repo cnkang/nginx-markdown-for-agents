@@ -534,9 +534,11 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      *
      * This is a global (http-level) setting because the per-path
      * limit is stored in shared memory and applies across all
-     * server and location blocks.  Configuring it at server or
-     * location level would be silently ignored since only the
-     * http-level value is wired into the SHM metrics struct.
+     * server and location blocks.  The directive is defined with
+     * the NGX_HTTP_MAIN_CONF flag, so it is http-only: attempting
+     * to place it in a server or location context will produce a
+     * configuration parsing error at load time rather than being
+     * silently ignored.
      *
      * Default: 100
      * Context: http
