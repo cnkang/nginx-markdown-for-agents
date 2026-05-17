@@ -5,6 +5,65 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-05-17
+
+P0 runtime correctness fixes, Rust-first architecture modules, independent
+decompression budget, Accept header negotiation, parse timeout/budget,
+and FFI ABI layout verification.
+
+### Added
+
+- **P0 Runtime Correctness**
+  - Full-buffer pending chain on NGX_AGAIN with resume (Rule 1).
+  - `failopen_completed` flag prevents duplicate finalize (Rule 38).
+  - Safe output ordering: alloc→copy→chain→headers→body filter.
+  - `markdown_decompress_max_size` directive: independent decompression
+    budget decoupled from `max_size` (default: inherits max_size).
+  - `markdown_parse_timeout` directive (default: 30s).
+  - `markdown_parser_budget` directive (default: 64m).
+  - Rust `DecompressionBudgetExceeded` error (code 9), `ParseTimeout`
+    (code 10), `ParseBudgetExceeded` (code 11) with FFI mapping.
+  - C-side error classification updated for new error codes.
+
+- **Rust-first Architecture**
+  - `negotiator` module: RFC 7231 Accept header q-value negotiation
+    with `FFIAcceptResult` struct and `markdown_negotiate_accept` FFI
+    export. 22 unit tests.
+  - `conditional` module: If-None-Match / If-Modified-Since conditional
+    request handling. 15 unit tests.
+  - `decision` module: pure decision engine with reason codes
+    (CONVERT, SKIP_ACCEPT, SKIP_NO_ACCEPT, etc.). 11 unit tests.
+  - `header_plan` module: declarative header mutation plan for atomic
+    application. 5 unit tests.
+  - `security` module extensions: `url_contains_control_chars`,
+    `validate_link_url`, `parse_forwarded_headers`,
+    `escape_link_label`, `escape_link_destination`. 10 unit tests.
+  - `docs/architecture/FFI_MIGRATION_CONTRACT.md`: FFI function/struct
+    registry, error code registry, migration priority, compatibility rules.
+
+- **FFI ABI Verification**
+  - Rust layout tests: `MarkdownResult` size/offset validation,
+    `FFIAcceptResult` layout, error code uniqueness, reason code uniqueness.
+  - `check-headers` integrated into `harness-check-full`.
+
+- **Documentation**
+  - `docs/guides/PACKAGE_DISTRIBUTION.md`: distribution strategy.
+  - `docs/guides/PACKAGE_INSTALLATION.md`: DEB/RPM install guide.
+  - `docs/guides/KUBERNETES_DEPLOYMENT.md`: K8s reference examples.
+  - `docs/guides/F5_INGRESS_FEASIBILITY.md`: F5 Ingress feasibility.
+  - `docs/FAQ.md`: decompression architecture recommendations.
+  - `packaging/matrix.yaml`: build matrix definition.
+  - `examples/kubernetes/manifest/markdown-configmap.yaml`.
+  - `docs/guides/CONFIGURATION.md`: new directive documentation.
+
+### Changed
+
+- Decompression budget now uses `conf->decompress_max_size` instead of
+  `conf->max_size` in `calc_output_size`, `decompress_gzip`,
+  `decompress_brotli`, and streaming `decomp_create`.
+- `harness-check-full` now includes `check-headers`.
+- Cargo.toml version bumped to 0.7.0.
+
 ## [0.6.3] - 2026-05-14
 
 This release closes the Rust-first E2E migration scope for the first scenario

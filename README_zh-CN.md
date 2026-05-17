@@ -392,19 +392,18 @@ Makefile               顶层构建与测试入口
 
 ## 路线方向
 
-当前版本 (0.6.3)：
+当前版本 (0.7.0)：
 
-- 双引擎架构：streaming auto 模式默认，小响应使用 full-buffer
-- Streaming 失败语义与 commit boundary 对齐，支持可控 fallback 策略
-- 覆盖 chunk 边界与失败路径的 streaming parity/diff 测试体系
-- 带 shadow mode 的 streaming rollout 可观测性与 reason-code 可见性
-- 面向发布门禁的 streaming 性能证据与 evidence 工作流
-- Rust-first E2E 迁移首批已收敛，形成混合套件契约（`make test-e2e` + `make test-e2e-rust`）
-- repo-owned harness 工作流（`docs/harness/`、`tools/harness/`、`make harness-check*`）
-- release/performance tooling 的路径校验已围绕 repository root 完成加固
-- release binary matrix 已刷新到当前 NGINX `1.30.1` 和 `1.31.0`
-- Prometheus 指标、rollout/rollback 手册与基准回归检测持续可用
-- 安装与发布文档已与 Rust 1.91.0+ 和当前 CI 基线对齐
+- P0 运行时正确性：NGX_AGAIN pending chain、fail-open 去重、安全输出排序
+- 独立解压预算（`markdown_decompress_max_size`）
+- 解析超时与解析器预算指令
+- Rust Accept 头协商模块（RFC 7231 q-value 比较）
+- Rust 条件请求模块（If-None-Match、If-Modified-Since）
+- Rust 决策引擎与 reason code
+- Rust 响应头计划模块
+- Rust URL 控制字符验证与 link 转义
+- FFI ABI 布局验证与 header 漂移检测
+- 新错误码：DecompressionBudgetExceeded(9)、ParseTimeout(10)、ParseBudgetExceeded(11)
 
 近期重点：
 

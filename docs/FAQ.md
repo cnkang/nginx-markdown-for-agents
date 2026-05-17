@@ -195,9 +195,35 @@ Yes, but you may need to:
 
 ### What about compressed responses?
 
-The module automatically detects and decompresses supported upstream compressed content (`gzip`, `br`, `deflate`) as part of the conversion path.
+The module automatically detects and decompresses supported upstream compressed content (`gzip`, `br`, `deflate`) as part of the conversion path via the `markdown_auto_decompress` directive (default: on). The decompression budget is independently controlled by `markdown_decompress_max_size` (default: same as `markdown_max_size`).
 
-For operational guidance, see [Operations Guide](guides/OPERATIONS.md). For implementation details, see [Automatic Decompression](features/AUTOMATIC_DECOMPRESSION.md).
+**Recommended decompression strategies** (in order of preference):
+
+1. **Strip `Accept-Encoding` at the proxy** (zero decompression cost):
+   ```nginx
+   proxy_set_header Accept-Encoding "";
+   ```
+   Prevents upstream from compressing at all. Best for internal networks where bandwidth is not a concern.
+
+2. **Use NGINX's `gunzip` module** (gzip only, lower overhead):
+   ```nginx
+   gunzip on;
+   proxy_set_header Accept-Encoding gzip;  # only request gzip
+   markdown_filter on;
+   ```
+   The `gunzip` filter runs in the NGINX filter chain before the markdown module. Only supports gzip; does not handle `deflate` or `br`.
+
+3. **Module's built-in `auto_decompress`** (gzip + deflate + brotli):
+   ```nginx
+   markdown_filter on;
+   markdown_auto_decompress on;           # default
+   markdown_decompress_max_size 20m;      # independent budget
+   ```
+   Fallback for cases where upstream forces compression and you cannot or do not want to modify proxy configuration. Handles all three formats. Slightly higher overhead than `gunzip` because it operates inside the module's conversion path.
+
+**When to prefer `gunzip` over built-in decompression**: If you only need gzip support and `gunzip` is already compiled into your NGINX build, prefer `gunzip on` + `markdown_auto_decompress off` for lower per-request overhead. The built-in decompression exists primarily for brotli and for zero-config deployments where operators do not want to manage filter chain ordering.
+
+For operational guidance, see [Operations Guide](guides/OPERATIONS.md).
 
 ---
 

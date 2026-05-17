@@ -128,6 +128,53 @@ markdown_memory_budget 5m;
 markdown_memory_budget 512k;
 ```
 
+#### markdown_decompress_max_size
+
+**Syntax:** `markdown_decompress_max_size <size>;`
+**Default:** same as `markdown_memory_budget`
+**Context:** http, server, location
+
+Independent budget for decompressed output size. When upstream content is
+compressed (gzip/deflate/brotli), this directive caps the maximum
+decompressed byte count, separate from `markdown_memory_budget` which
+also limits the final Markdown output.
+
+**Example:**
+```nginx
+# Allow up to 20MB of decompressed content
+markdown_decompress_max_size 20m;
+```
+
+#### markdown_parse_timeout
+
+**Syntax:** `markdown_parse_timeout <time>;`
+**Default:** `30s`
+**Context:** http, server, location
+
+Maximum time for the HTML parsing phase. If parsing exceeds this
+deadline, it is terminated and the request proceeds according to the
+`markdown_on_error` policy.
+
+**Example:**
+```nginx
+markdown_parse_timeout 10s;
+```
+
+#### markdown_parser_budget
+
+**Syntax:** `markdown_parser_budget <size>;`
+**Default:** `64m`
+**Context:** http, server, location
+
+Maximum memory the HTML parser may allocate. If the parser exceeds
+this budget, parsing is terminated and the request proceeds according
+to the `markdown_on_error` policy.
+
+**Example:**
+```nginx
+markdown_parser_budget 32m;
+```
+
 
 #### markdown_timeout
 
