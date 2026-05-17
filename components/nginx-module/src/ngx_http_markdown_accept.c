@@ -351,12 +351,14 @@ ngx_http_markdown_parse_q_value(ngx_str_t *params)
             if (result < 0.0f) {
                 /*
                  * Invalid q-value (e.g. "q=abc", "q=").
-                 * Treat as q=0.0 so this media range is effectively
-                 * ignored during content negotiation, rather than
-                 * defaulting to 1.0 which would give invalid entries
-                 * the highest priority.
+                 * Return -1.0f sentinel so the caller can
+                 * distinguish syntactic errors from an explicit
+                 * q=0 rejection.  Entries with q=-1.0 are
+                 * ignored during content negotiation (not
+                 * counted as explicit rejection and not
+                 * competing for best match).
                  */
-                return 0.0f;
+                return -1.0f;
             }
 
             return result;
@@ -576,11 +578,12 @@ ngx_http_markdown_should_convert(ngx_http_request_t *r,
      */
     entry = entries->elts;
     for (ngx_uint_t i = 0; i < entries->nelts; i++) {
-        if (entry[i].q_value == 0.0f &&
-            entry[i].type.len == 4 &&
-            ngx_strncasecmp(entry[i].type.data, ngx_http_markdown_str_text, 4) == 0 &&
-            entry[i].subtype.len == 8 &&
-            ngx_strncasecmp(entry[i].subtype.data, ngx_http_markdown_str_markdown, 8) == 0)
+        if (entry[i].q_value == 0.0f
+            && entry[i].q_value != -1.0f
+            && entry[i].type.len == 4
+            && ngx_strncasecmp(entry[i].type.data, ngx_http_markdown_str_text, 4) == 0
+            && entry[i].subtype.len == 8
+            && ngx_strncasecmp(entry[i].subtype.data, ngx_http_markdown_str_markdown, 8) == 0)
         {
             ngx_log_error(NGX_LOG_DEBUG, r->connection->log, 0,
                          "markdown: text/markdown explicitly rejected (q=0)");

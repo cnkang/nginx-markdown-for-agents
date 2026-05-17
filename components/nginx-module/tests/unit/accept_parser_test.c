@@ -118,6 +118,8 @@ static void
 parse_q_param(accept_entry_t *entry, const char *params)
 {
     const char *q;
+    const char *val_start;
+    double      parsed;
 
     if (entry == NULL || params == NULL) {
         return;
@@ -128,7 +130,33 @@ parse_q_param(accept_entry_t *entry, const char *params)
         return;
     }
 
-    entry->q = (float) atof(q + 2);
+    val_start = q + 2;
+
+    /*
+     * Detect empty or non-numeric q-values (matching production
+     * ngx_atofp behavior which returns NGX_ERROR for these).
+     * Set -1.0f sentinel so the entry is ignored during
+     * content negotiation rather than treated as explicit q=0.
+     */
+    if (*val_start == '\0' || *val_start == ';' || *val_start == ',') {
+        entry->q = -1.0f;
+        return;
+    }
+
+    parsed = atof(val_start);
+    if (parsed == 0.0) {
+        /*
+         * atof returns 0.0 for both "0" and non-numeric like "abc".
+         * Distinguish: if the first char is not '0' (or '.'), it is
+         * non-numeric — use -1.0f sentinel.
+         */
+        if (*val_start != '0' && *val_start != '.' && *val_start != '-') {
+            entry->q = -1.0f;
+            return;
+        }
+    }
+
+    entry->q = (float) parsed;
     clamp_q_value(&entry->q);
 }
 
@@ -286,7 +314,8 @@ should_convert(const char *accept_header, int on_wildcard)
     for (int i = 0; i < n; i++) {
         if (str_case_eq(entries[i].type, "text") &&
             str_case_eq(entries[i].subtype, "markdown") &&
-            entries[i].q == 0.0f)
+            entries[i].q == 0.0f &&
+            entries[i].q != -1.0f)
         {
             explicit_reject_markdown = 1;
         }
@@ -408,21 +437,19 @@ test_q_value_malformed(void)
 {
     TEST_SUBSECTION("Malformed q-values");
 
-    /* NOTE: The test stub uses atof() which returns 0.0 for non-numeric
-       input, causing q=abc and q= to reject. The production code uses
-       ngx_atofp() which returns NGX_ERROR for non-numeric input, causing
-       parse_q_value() to return 0.0 (treat as lowest priority) so
-       invalid entries are ignored during content negotiation.
-       These tests verify the stub's behavior; production behavior
-       is validated by e2e tests. */
+    /* NOTE: The test stub now returns -1.0f sentinel for non-numeric
+       q-values (matching production ngx_atofp NGX_ERROR behavior).
+       Entries with q=-1.0f are ignored during content negotiation
+       (not counted as explicit rejection and not competing for
+       best match), so wildcard fallback can still permit conversion. */
 
-    /* q=abc (non-numeric) — atof returns 0.0, clamped to 0.0, should reject */
+    /* q=abc (non-numeric) — sentinel -1.0f, entry ignored */
     TEST_ASSERT(should_convert("text/markdown;q=abc", 0) == 0,
-                "q=abc should reject (invalid q defaults to 0.0)");
+                "q=abc should reject (invalid q, no other match)");
 
-    /* q= (empty value) — atof returns 0.0, clamped to 0.0, should reject */
+    /* q= (empty value) — sentinel -1.0f, entry ignored */
     TEST_ASSERT(should_convert("text/markdown;q=", 0) == 0,
-                "q= (empty) should reject (invalid q defaults to 0.0)");
+                "q= (empty) should reject (invalid q, no other match)");
 
     /* q=2.0 (out of range) — clamped to 1.0, should convert */
     TEST_ASSERT(should_convert("text/markdown;q=2.0", 0) == 1,
@@ -431,6 +458,17 @@ test_q_value_malformed(void)
     /* Missing q parameter — defaults to 1.0 */
     TEST_ASSERT(should_convert("text/markdown", 0) == 1,
                 "Missing q parameter defaults to 1.0");
+
+    /*
+     * Malformed markdown q-values with wildcard fallback:
+     * when text/markdown has an invalid q-value, it should
+     * be ignored (not treated as explicit rejection), so
+     * a wildcard fallback can still permit conversion.
+     */
+    TEST_ASSERT(should_convert("*/*;q=1, text/markdown;q=abc", 1) != 0,
+                "wildcard fallback should allow conversion when markdown q=abc is invalid");
+    TEST_ASSERT(should_convert("*/*;q=1, text/markdown;q=", 1) != 0,
+                "wildcard fallback should allow conversion when markdown q= is invalid");
 
     TEST_PASS("Malformed q-values passed");
 }
