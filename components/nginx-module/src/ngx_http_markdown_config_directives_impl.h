@@ -961,6 +961,74 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
     },
 
     /*
+     * markdown_parse_timeout <time>
+     *
+     * Maximum time to spend on HTML parsing phase (e.g., 30s, 5000ms).
+     * Parsing that exceeds this deadline is terminated and the request
+     * proceeds according to the on_error policy.
+     *
+     * Default: 30s
+     * Context: http, server, location
+     *
+     * Example:
+     *   markdown_parse_timeout 10s;
+     */
+    {
+        ngx_string("markdown_parse_timeout"),
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+        ngx_conf_set_msec_slot,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        offsetof(ngx_http_markdown_conf_t, parse_timeout),
+        NULL
+    },
+
+    /*
+     * markdown_parser_budget <size>
+     *
+     * Maximum memory the HTML parser may allocate (e.g., 64m, 128m).
+     * If the parser exceeds this budget, parsing is terminated and the
+     * request proceeds according to the on_error policy.
+     *
+     * Default: 64m (64 megabytes)
+     * Context: http, server, location
+     *
+     * Example:
+     *   markdown_parser_budget 32m;
+     */
+    {
+        ngx_string("markdown_parser_budget"),
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+        ngx_conf_set_size_slot,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        offsetof(ngx_http_markdown_conf_t, parser_budget),
+        NULL
+    },
+
+    /*
+     * markdown_decompress_max_size <size>
+     *
+     * Independent budget for decompressed output size.  When upstream
+     * content is compressed (gzip/deflate/brotli), this directive caps
+     * the maximum decompressed byte count, separate from markdown_max_size
+     * which also limits the final Markdown output.
+     *
+     * Default: same as markdown_max_size (inherited after memory_budget
+     * override resolution).
+     * Context: http, server, location
+     *
+     * Example:
+     *   markdown_decompress_max_size 20m;
+     */
+    {
+        ngx_string("markdown_decompress_max_size"),
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+        ngx_conf_set_size_slot,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        offsetof(ngx_http_markdown_conf_t, decompress_max_size),
+        NULL
+    },
+
+    /*
      * markdown_dynamic_config on|off
      *
      * Enable runtime configuration hot-reload without NGINX restart.

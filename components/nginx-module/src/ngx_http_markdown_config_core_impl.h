@@ -266,6 +266,9 @@ ngx_http_markdown_create_conf(ngx_conf_t *cf)
     conf->stream_types = NGX_CONF_UNSET_PTR;
     conf->content_types = NGX_CONF_UNSET_PTR;
     conf->auto_decompress = NGX_CONF_UNSET;
+    conf->decompress_max_size = NGX_CONF_UNSET_SIZE;
+    conf->parse_timeout = NGX_CONF_UNSET_MSEC;
+    conf->parser_budget = NGX_CONF_UNSET_SIZE;
     conf->large_body_threshold = NGX_CONF_UNSET_SIZE;
     conf->ops.trust_forwarded_headers = NGX_CONF_UNSET;
     conf->ops.metrics_format = NGX_CONF_UNSET_UINT;
@@ -387,6 +390,21 @@ ngx_http_markdown_merge_core_base_values(ngx_http_markdown_conf_t *conf,
                               NGX_HTTP_MARKDOWN_LOG_INFO);
     ngx_conf_merge_value(conf->buffer_chunked, prev->buffer_chunked, 1);
     ngx_conf_merge_value(conf->auto_decompress, prev->auto_decompress, 1);
+
+    /*
+     * Merge decompress_max_size: inherit from parent if not explicitly set.
+     * After merge, if still NGX_CONF_UNSET_SIZE, resolve to max_size at
+     * post-merge time (ngx_http_markdown_apply_decompress_max_size_default)
+     * so the default tracks max_size even when max_size comes from
+     * memory_budget override.
+     */
+    ngx_conf_merge_size_value(conf->decompress_max_size,
+                              prev->decompress_max_size,
+                              NGX_CONF_UNSET_SIZE);
+
+    ngx_conf_merge_msec_value(conf->parse_timeout, prev->parse_timeout, 30000);
+    ngx_conf_merge_size_value(conf->parser_budget, prev->parser_budget,
+                              64 * 1024 * 1024);
 }
 
 /*
@@ -533,6 +551,15 @@ ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
     ngx_http_markdown_merge_v060_values(conf, prev);
 
     ngx_http_markdown_apply_memory_budget_override(conf, prev, max_size_set);
+
+    /*
+     * Resolve decompress_max_size default: if not explicitly set at any
+     * level, inherit max_size.  This must run after memory_budget override
+     * so the default tracks the effective max_size.
+     */
+    if (conf->decompress_max_size == NGX_CONF_UNSET_SIZE) {
+        conf->decompress_max_size = conf->max_size;
+    }
 
     ngx_http_markdown_log_merged_conf(cf, conf);
 

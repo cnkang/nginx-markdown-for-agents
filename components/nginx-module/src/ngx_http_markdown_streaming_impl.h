@@ -2259,7 +2259,7 @@ ngx_http_markdown_streaming_init_handle(
             ngx_http_markdown_streaming_decomp_create(
                 r->pool,
                 ctx->decompression.type,
-                conf->max_size);
+                conf->decompress_max_size);
         if (ctx->streaming.decompressor == NULL) {
             ngx_log_error(NGX_LOG_ERR,
                 r->connection->log, 0,
