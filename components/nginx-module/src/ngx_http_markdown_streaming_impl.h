@@ -1085,6 +1085,14 @@ ngx_http_markdown_streaming_resume_pending(
     r->buffered &= ~NGX_HTTP_MARKDOWN_BUFFERED;
 
     /*
+     * Pending output drained (or downstream returned an error after
+     * accepting the chain).  Clear pending_has_data so future
+     * re-entry does not observe a stale flag from a prior
+     * send_output NGX_AGAIN or send_failopen_chain NGX_AGAIN.
+     */
+    ctx->streaming.pending_has_data = 0;
+
+    /*
      * Pending output drained successfully.  If TTFB was not
      * yet recorded (send_output returned NGX_AGAIN on the
      * first non-empty output), record it now — but only when:
