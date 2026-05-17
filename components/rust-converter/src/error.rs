@@ -60,6 +60,30 @@ pub enum ConversionError {
         /// downstream consumers can categorise the failure correctly.
         original_code: u32,
     },
+
+    /// Decompression budget exceeded: the decompressed output size
+    /// exceeds the configured decompress_max_size limit.
+    /// Distinct from BudgetExceeded (streaming working-set) to
+    /// separate decompression-layer limits from streaming-layer limits.
+    DecompressionBudgetExceeded {
+        /// Decompressed bytes when the breach was detected.
+        used: usize,
+        /// Configured decompression budget in bytes.
+        limit: usize,
+    },
+
+    /// Parse timeout: the HTML parsing phase exceeded the
+    /// configured parse_timeout deadline.
+    ParseTimeout,
+
+    /// Parse budget exceeded: the parser memory allocation
+    /// exceeded the configured parser_memory_budget.
+    ParseBudgetExceeded {
+        /// Bytes allocated when the breach was detected.
+        used: usize,
+        /// Configured parser budget in bytes.
+        limit: usize,
+    },
 }
 
 impl ConversionError {
@@ -77,6 +101,13 @@ impl ConversionError {
     /// - `BudgetExceeded { .. }` -> `6`
     /// - `StreamingFallback { .. }` -> `7`
     /// - `PostCommitError { .. }` -> `8`
+    ///
+    /// Decompression-specific errors:
+    /// - `DecompressionBudgetExceeded { .. }` -> `9`
+    ///
+    /// Parse-specific errors:
+    /// - `ParseTimeout` -> `10`
+    /// - `ParseBudgetExceeded { .. }` -> `11`
     ///
     /// # Examples
     ///
@@ -99,6 +130,9 @@ impl ConversionError {
             ConversionError::StreamingFallback { .. } => 7,
             #[cfg(feature = "streaming")]
             ConversionError::PostCommitError { .. } => 8,
+            ConversionError::DecompressionBudgetExceeded { .. } => 9,
+            ConversionError::ParseTimeout => 10,
+            ConversionError::ParseBudgetExceeded { .. } => 11,
             ConversionError::InternalError(_) => 99,
         }
     }
@@ -145,6 +179,23 @@ impl fmt::Display for ConversionError {
                     f,
                     "Post-commit error (original_code={}) after {} bytes emitted: {}",
                     original_code, bytes_emitted, reason
+                )
+            }
+            ConversionError::DecompressionBudgetExceeded { used, limit } => {
+                write!(
+                    f,
+                    "Decompression budget exceeded: used {} bytes, limit {} bytes",
+                    used, limit
+                )
+            }
+            ConversionError::ParseTimeout => {
+                write!(f, "Parse timeout exceeded")
+            }
+            ConversionError::ParseBudgetExceeded { used, limit } => {
+                write!(
+                    f,
+                    "Parse budget exceeded: used {} bytes, limit {} bytes",
+                    used, limit
                 )
             }
         }

@@ -207,6 +207,9 @@ typedef enum {
  * - buffer_chunked: 1 (on by default)
  * - stream_types: NULL (no exclusions by default)
  * - auto_decompress: 1 (on by default)
+ * - decompress_max_size: same as max_size (inherited after memory_budget override)
+ * - parse_timeout: 30000ms (30 seconds)
+ * - parser_budget: 64MB (64 * 1024 * 1024 bytes)
  * - large_body_threshold: NGX_HTTP_MARKDOWN_THRESHOLD_OFF
  * - ops.trust_forwarded_headers: 0 (off by default)
  * - ops.metrics_format: NGX_HTTP_MARKDOWN_METRICS_FORMAT_AUTO
@@ -272,6 +275,9 @@ typedef struct {
     ngx_array_t *stream_types;         /* markdown_stream_types exclusion list (default: NULL) */
     ngx_array_t *content_types;        /* markdown_content_types allowlist (default: text/html) */
     ngx_flag_t   auto_decompress;      /* markdown_auto_decompress on|off (default: on) */
+    size_t       decompress_max_size;  /* markdown_decompress_max_size (default: same as max_size) */
+    ngx_msec_t   parse_timeout;        /* markdown_parse_timeout (default: 30000ms) */
+    size_t       parser_budget;        /* markdown_parser_budget (default: 64MB) */
     size_t       large_body_threshold; /* markdown_large_body_threshold (NGX_HTTP_MARKDOWN_THRESHOLD_OFF = off) */
 
     /*
@@ -400,6 +406,18 @@ typedef struct {
     ngx_flag_t                   conversion_attempted;
     ngx_flag_t                   conversion_succeeded;
     ngx_flag_t                   bypass_counted; /* Whether conversions_bypassed was incremented */
+
+    /* Fail-open completed flag: prevents duplicate ngx_http_finalize_request
+     * calls when fail-open path has already finalized the request.
+     * Rule 38: set once, never cleared within a request lifetime. */
+    ngx_flag_t                   failopen_completed;
+
+    /* Full-buffer pending output chain for NGX_AGAIN backpressure.
+     * Saved when ngx_http_next_body_filter returns NGX_AGAIN in
+     * the full-buffer conversion output path.  Rule 1: pending chain
+     * must be preserved and replayed on resume. */
+    ngx_chain_t                 *fullbuffer_pending_output;
+    ngx_flag_t                   fullbuffer_pending_has_data;
     
     /* Threshold router path selection (NGX_HTTP_MARKDOWN_PATH_FULLBUFFER or NGX_HTTP_MARKDOWN_PATH_INCREMENTAL) */
     ngx_uint_t                   processing_path;

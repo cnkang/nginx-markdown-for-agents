@@ -52,6 +52,12 @@ pub const ERROR_STREAMING_FALLBACK: u32 = 7;
 /// Error after the streaming engine has already emitted partial output (Post-Commit).
 #[cfg(feature = "streaming")]
 pub const ERROR_POST_COMMIT: u32 = 8;
+/// Decompression budget exceeded (decompressed output exceeds decompress_max_size).
+pub const ERROR_DECOMPRESSION_BUDGET_EXCEEDED: u32 = 9;
+/// Parse timeout: HTML parsing exceeded the configured deadline.
+pub const ERROR_PARSE_TIMEOUT: u32 = 10;
+/// Parse budget exceeded: parser memory allocation exceeded parser_memory_budget.
+pub const ERROR_PARSE_BUDGET_EXCEEDED: u32 = 11;
 /// Internal error (unexpected condition, panic caught).
 pub const ERROR_INTERNAL: u32 = 99;
 
@@ -221,4 +227,107 @@ pub(crate) struct ConversionOutput {
     pub(crate) etag: Option<Box<[u8]>>,
     /// Heuristic token count estimate for LLM context-window budgeting.
     pub(crate) token_estimate: u32,
+}
+
+/// Result of Accept header content negotiation.
+///
+/// Returned by `markdown_negotiate_accept()` for the C caller to decide
+/// whether to proceed with HTML-to-Markdown conversion.
+///
+/// # Fields
+///
+/// - `should_convert`: 1 if the client prefers text/markdown, 0 otherwise.
+/// - `reason`: Numeric reason code for the decision.
+///   - 0: Convert (text/markdown preferred)
+///   - 1: No Accept header present
+///   - 2: text/markdown has lower q-value than text/html
+///   - 3: text/markdown;q=0 explicit reject
+///   - 4: Malformed Accept header
+#[repr(C)]
+pub struct FFIAcceptResult {
+    /// 1 if conversion should proceed, 0 otherwise.
+    pub should_convert: u8,
+    /// Reason code for the negotiation decision.
+    pub reason: u8,
+}
+
+/// Reason code: client prefers text/markdown, proceed with conversion.
+pub const NEGOTIATE_REASON_CONVERT: u8 = 0;
+/// Reason code: no Accept header was present.
+pub const NEGOTIATE_REASON_NO_ACCEPT: u8 = 1;
+/// Reason code: text/markdown has lower q-value than text/html.
+pub const NEGOTIATE_REASON_LOWER_Q: u8 = 2;
+/// Reason code: client explicitly set text/markdown;q=0.
+pub const NEGOTIATE_REASON_EXPLICIT_REJECT: u8 = 3;
+/// Reason code: Accept header is malformed.
+pub const NEGOTIATE_REASON_MALFORMED: u8 = 4;
+
+#[cfg(test)]
+mod layout_tests {
+    use super::*;
+
+    #[test]
+    fn test_markdown_result_layout() {
+        use std::mem::{align_of, offset_of, size_of};
+
+        assert_eq!(size_of::<MarkdownResult>(), 64);
+        assert_eq!(align_of::<MarkdownResult>(), 8);
+
+        assert_eq!(offset_of!(MarkdownResult, markdown), 0);
+        assert_eq!(offset_of!(MarkdownResult, markdown_len), 8);
+        assert_eq!(offset_of!(MarkdownResult, etag), 16);
+        assert_eq!(offset_of!(MarkdownResult, etag_len), 24);
+        assert_eq!(offset_of!(MarkdownResult, token_estimate), 32);
+        assert_eq!(offset_of!(MarkdownResult, error_code), 36);
+        assert_eq!(offset_of!(MarkdownResult, error_message), 40);
+        assert_eq!(offset_of!(MarkdownResult, error_len), 48);
+        assert_eq!(offset_of!(MarkdownResult, peak_memory_estimate), 56);
+    }
+
+    #[test]
+    fn test_ffi_accept_result_layout() {
+        use std::mem::{size_of, align_of};
+
+        assert_eq!(size_of::<FFIAcceptResult>(), 2);
+        assert_eq!(align_of::<FFIAcceptResult>(), 1);
+    }
+
+    #[test]
+    fn test_error_codes_distinct() {
+        let codes = [
+            ERROR_SUCCESS,
+            ERROR_PARSE,
+            ERROR_ENCODING,
+            ERROR_TIMEOUT,
+            ERROR_MEMORY_LIMIT,
+            ERROR_INVALID_INPUT,
+            ERROR_DECOMPRESSION_BUDGET_EXCEEDED,
+            ERROR_PARSE_TIMEOUT,
+            ERROR_PARSE_BUDGET_EXCEEDED,
+            ERROR_INTERNAL,
+        ];
+
+        for i in 0..codes.len() {
+            for j in (i + 1)..codes.len() {
+                assert_ne!(codes[i], codes[j], "Error codes {} and {} collide", codes[i], codes[j]);
+            }
+        }
+    }
+
+    #[test]
+    fn test_negotiate_reason_codes_distinct() {
+        let reasons = [
+            NEGOTIATE_REASON_CONVERT,
+            NEGOTIATE_REASON_NO_ACCEPT,
+            NEGOTIATE_REASON_LOWER_Q,
+            NEGOTIATE_REASON_EXPLICIT_REJECT,
+            NEGOTIATE_REASON_MALFORMED,
+        ];
+
+        for i in 0..reasons.len() {
+            for j in (i + 1)..reasons.len() {
+                assert_ne!(reasons[i], reasons[j], "Reason codes {} and {} collide", reasons[i], reasons[j]);
+            }
+        }
+    }
 }

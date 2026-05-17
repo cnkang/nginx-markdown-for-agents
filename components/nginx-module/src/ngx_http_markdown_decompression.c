@@ -171,7 +171,7 @@ ngx_http_markdown_chain_to_buffer(const ngx_chain_t *in, u_char *dest,
  *
  * Strategy:
  *   - Start with a heuristic expansion factor (input * 10)
- *   - Cap at configured markdown_max_size
+ *   - Cap at configured decompress_max_size (independent from max_size)
  *   - Clamp to UINT_MAX for decoder APIs that use unsigned-int counters
  *
  * This keeps allocation bounded while still allowing common compressed
@@ -179,36 +179,30 @@ ngx_http_markdown_chain_to_buffer(const ngx_chain_t *in, u_char *dest,
  */
 static ngx_int_t
 ngx_http_markdown_calc_output_size(ngx_http_request_t *r, size_t input_size,
-                                   size_t max_size, size_t *output_size)
+                                   size_t decompress_max_size, size_t *output_size)
 {
     size_t estimated;
 
-    if (max_size == 0) {
+    if (decompress_max_size == 0) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                     "markdown filter: invalid max_size=0 for decompression");
+                     "markdown filter: invalid decompress_max_size=0 for decompression");
         return NGX_ERROR;
     }
 
     /* Guard multiplication overflow before applying 10x heuristic. */
     if (input_size > ((size_t) -1) / 10) {
-        estimated = max_size;
+        estimated = decompress_max_size;
     } else {
         estimated = input_size * 10;
     }
 
-    if (estimated > max_size) {
-        estimated = max_size;
+    if (estimated > decompress_max_size) {
+        estimated = decompress_max_size;
     }
 
     /*
      * zlib/brotli decoder output counters use unsigned int/size_t combinations.
      * Clamp to UINT_MAX to avoid truncation when assigning `avail_out`.
-     *
-     * NOTE (I-03): The decompression output buffer is bounded by both the 10x
-     * heuristic and `markdown_max_size`. If operators set a very large max_size
-     * (e.g., 1GB), a large compressed input could trigger a proportionally large
-     * allocation. Consider using a separate `markdown_decompress_max_size`
-     * directive if finer control is needed.
      */
     if (estimated > (size_t) UINT_MAX) {
         estimated = (size_t) UINT_MAX;
@@ -218,10 +212,10 @@ ngx_http_markdown_calc_output_size(ngx_http_request_t *r, size_t input_size,
     if (estimated > 50 * 1024 * 1024) {
         ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
                      "markdown filter: large decompression buffer estimated=%uz "
-                     "from input_size=%uz (ratio=%uz:1), capped by max_size=%uz",
+                     "from input_size=%uz (ratio=%uz:1), capped by decompress_max_size=%uz",
                      estimated, input_size,
                      (input_size > 0) ? estimated / input_size : 0,
-                     max_size);
+                     decompress_max_size);
     }
 
     if (estimated == 0) {
@@ -347,8 +341,8 @@ ngx_http_markdown_decompress_gzip(ngx_http_request_t *r,
         return NGX_ERROR;
     }
     
-    /* Estimate output size (typically input_size * 10) with overflow protection. */
-    if (ngx_http_markdown_calc_output_size(r, input_size, conf->max_size, &output_size)
+    /* Estimate output size with independent decompression budget. */
+    if (ngx_http_markdown_calc_output_size(r, input_size, conf->decompress_max_size, &output_size)
         != NGX_OK)
     {
         inflateEnd(&stream);
@@ -375,12 +369,12 @@ ngx_http_markdown_decompress_gzip(ngx_http_request_t *r,
     /* Check for Z_STREAM_END (Requirement 6.5) */
     if (zrc != Z_STREAM_END) {
         /* Check if failure was due to insufficient output buffer space */
-        if (zrc == Z_BUF_ERROR && stream.total_out >= conf->max_size) {
+        if (zrc == Z_BUF_ERROR && stream.total_out >= conf->decompress_max_size) {
             /* Decompressed size would exceed limit (Requirement 9.3, 9.4) */
             ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                         "markdown filter: decompressed size exceeds limit (%uz), "
+                         "markdown filter: decompressed size exceeds decompression budget (%uz), "
                          "category=resource_limit",
-                         conf->max_size);
+                         conf->decompress_max_size);
             inflateEnd(&stream);
             return NGX_ERROR;
         }
@@ -393,12 +387,12 @@ ngx_http_markdown_decompress_gzip(ngx_http_request_t *r,
         return NGX_ERROR;
     }
     
-    /* Check if decompressed size exceeds limit (Requirement 9.3, 9.4) */
-    if (stream.total_out > conf->max_size) {
+    /* Check if decompressed size exceeds decompression budget (Requirement 9.3, 9.4) */
+    if (stream.total_out > conf->decompress_max_size) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                     "markdown filter: decompressed size (%uz) exceeds limit (%uz), "
+                     "markdown filter: decompressed size (%uz) exceeds decompression budget (%uz), "
                      "category=resource_limit",
-                     stream.total_out, conf->max_size);
+                     stream.total_out, conf->decompress_max_size);
         inflateEnd(&stream);
         return NGX_ERROR;
     }
@@ -539,8 +533,8 @@ ngx_http_markdown_decompress_brotli(ngx_http_request_t *r,
         return NGX_ERROR;
     }
     
-    /* Estimate output size (typically input_size * 10) with overflow protection. */
-    if (ngx_http_markdown_calc_output_size(r, input_size, conf->max_size, &output_size)
+    /* Estimate output size with independent decompression budget. */
+    if (ngx_http_markdown_calc_output_size(r, input_size, conf->decompress_max_size, &output_size)
         != NGX_OK)
     {
         BrotliDecoderDestroyInstance(decoder);
@@ -597,9 +591,9 @@ ngx_http_markdown_decompress_brotli(ngx_http_request_t *r,
             
             /* Decompressed size would exceed limit (Requirement 9.3, 9.4) */
             ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                         "markdown filter: decompressed size exceeds limit (%uz), "
+                         "markdown filter: decompressed size exceeds decompression budget (%uz), "
                          "category=resource_limit",
-                         conf->max_size);
+                         conf->decompress_max_size);
             BrotliDecoderDestroyInstance(decoder);
             return NGX_ERROR;
         }
@@ -616,12 +610,12 @@ ngx_http_markdown_decompress_brotli(ngx_http_request_t *r,
     /* Calculate actual decompressed size */
     total_out = output_size - available_out;
     
-    /* Check if decompressed size exceeds limit */
-    if (total_out > conf->max_size) {
+    /* Check if decompressed size exceeds decompression budget */
+    if (total_out > conf->decompress_max_size) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                     "markdown filter: decompressed size (%uz) exceeds limit (%uz), "
+                     "markdown filter: decompressed size (%uz) exceeds decompression budget (%uz), "
                      "category=resource_limit",
-                     total_out, conf->max_size);
+                     total_out, conf->decompress_max_size);
         BrotliDecoderDestroyInstance(decoder);
         return NGX_ERROR;
     }

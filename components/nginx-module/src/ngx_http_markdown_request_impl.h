@@ -848,6 +848,31 @@ ngx_http_markdown_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
         return ngx_http_next_body_filter(r, in);
     }
 
+    /*
+     * Rule 1 / Rule 38: resume full-buffer pending chain.
+     * If the full-buffer path previously returned NGX_AGAIN from
+     * send_conversion_output, the pending output must be drained
+     * before accepting new input.  This is triggered by NGINX
+     * re-invoking the body filter (typically with in == NULL)
+     * after the downstream filter becomes writable again.
+     */
+    if (ctx->fullbuffer_pending_has_data) {
+        rc = ngx_http_next_body_filter(r, ctx->fullbuffer_pending_output);
+        if (rc == NGX_AGAIN) {
+            /* Still backpressured, keep pending chain */
+            return NGX_AGAIN;
+        }
+        /* Downstream consumed the pending output */
+        ctx->fullbuffer_pending_output = NULL;
+        ctx->fullbuffer_pending_has_data = 0;
+        r->buffered &= ~NGX_HTTP_MARKDOWN_BUFFERED;
+
+        if (rc != NGX_OK && rc != NGX_DONE) {
+            return rc;
+        }
+        /* Pending chain drained successfully; continue processing */
+    }
+
     /* If not eligible for conversion, pass through */
     if (!ctx->eligible) {
         r->buffered &= ~NGX_HTTP_MARKDOWN_BUFFERED;
@@ -879,7 +904,9 @@ ngx_http_markdown_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
 
     /* If conversion already attempted, pass through */
     if (ctx->conversion_attempted) {
-        r->buffered &= ~NGX_HTTP_MARKDOWN_BUFFERED;
+        if (!ctx->fullbuffer_pending_has_data) {
+            r->buffered &= ~NGX_HTTP_MARKDOWN_BUFFERED;
+        }
         return ngx_http_next_body_filter(r, in);
     }
 

@@ -1716,7 +1716,13 @@ ngx_http_markdown_prepare_body_output_buffer(ngx_http_request_t *r,
     return NGX_OK;
 }
 
-/* Update response headers and emit the converted Markdown downstream. */
+/* Update response headers and emit the converted Markdown downstream.
+ *
+ * Rule: alloc-before-send.  All output resources (body buffer, pool copy,
+ * chain link) are allocated BEFORE header forwarding.  If any allocation
+ * fails, headers have NOT been sent, so the downstream connection does not
+ * receive a partial headers-sent-but-no-body response.
+ */
 static ngx_int_t
 ngx_http_markdown_send_conversion_output(ngx_http_request_t *r,
                                          ngx_http_markdown_ctx_t *ctx,
@@ -1735,20 +1741,10 @@ ngx_http_markdown_send_conversion_output(ngx_http_request_t *r,
                   "input: %uz bytes, output: %uz bytes, elapsed: %M ms",
                   ctx->buffer.size, result->markdown_len, elapsed_ms);
 
-    rc = ngx_http_markdown_update_headers(r, result, conf);
-    if (rc != NGX_OK) {
-        ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0,
-                     "markdown filter: failed to update response headers, category=system");
-        markdown_result_free(result);
-        return NGX_ERROR;
-    }
-
-    rc = ngx_http_markdown_forward_headers(r, ctx);
-    if (rc != NGX_OK) {
-        markdown_result_free(result);
-        return rc;
-    }
-
+    /*
+     * Step 1: Allocate body buffer BEFORE header forwarding.
+     * If this fails, headers have not been sent (safe to return NGX_ERROR).
+     */
     b = ngx_pcalloc(r->pool, sizeof(ngx_buf_t));
     if (b == NULL) {
         ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0,
@@ -1757,25 +1753,93 @@ ngx_http_markdown_send_conversion_output(ngx_http_request_t *r,
         return NGX_ERROR;
     }
 
+    /*
+     * Step 2: Copy Rust output into NGINX pool memory BEFORE header
+     * forwarding.  prepare_body_output_buffer copies result->markdown
+     * into pool memory but we must NOT free result yet — update_headers
+     * still needs result->etag and result->markdown_len.
+     *
+     * We do NOT call markdown_result_free inside prepare_body_output_buffer;
+     * instead we defer it until after update_headers + forward_headers.
+     */
     if (r->method == NGX_HTTP_HEAD) {
         ngx_http_markdown_prepare_head_output_buffer(r, b, result);
+        /* head output buffer does not need result data after this point,
+         * but we still defer free for consistency */
     } else {
-        rc = ngx_http_markdown_prepare_body_output_buffer(r, b, result);
-        if (rc != NGX_OK) {
-            return rc;
+        if (result->markdown_len > 0) {
+            b->pos = ngx_pnalloc(r->pool, result->markdown_len);
+            if (b->pos == NULL) {
+                ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0,
+                             "markdown filter: failed to allocate output memory, category=system");
+                markdown_result_free(result);
+                return NGX_ERROR;
+            }
+
+            ngx_memcpy(b->pos, result->markdown, result->markdown_len);
+            b->last = b->pos + result->markdown_len;
+            b->memory = 1;
+        } else {
+            b->pos = NULL;
+            b->last = NULL;
+            b->memory = 0;
         }
+
+        b->last_buf = (r == r->main) ? 1 : 0;
+        b->last_in_chain = 1;
     }
 
+    /*
+     * Step 3: Allocate chain link BEFORE header forwarding.
+     */
     out = ngx_alloc_chain_link(r->pool);
     if (out == NULL) {
         ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0,
                      "markdown filter: failed to allocate output chain, category=system");
+        markdown_result_free(result);
         return NGX_ERROR;
     }
     out->buf = b;
     out->next = NULL;
 
-    return ngx_http_next_body_filter(r, out);
+    /*
+     * Step 4: Now all output resources are ready.
+     * Mutate headers (uses result->etag and result->markdown_len).
+     */
+    rc = ngx_http_markdown_update_headers(r, result, conf);
+    if (rc != NGX_OK) {
+        ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0,
+                     "markdown filter: failed to update response headers, category=system");
+        markdown_result_free(result);
+        return NGX_ERROR;
+    }
+
+    /*
+     * Step 5: Release Rust-owned memory now that update_headers
+     * has consumed result->etag.  After this, result is invalid.
+     */
+    markdown_result_free(result);
+
+    /*
+     * Step 6: Forward headers downstream (idempotent via headers_forwarded).
+     */
+    rc = ngx_http_markdown_forward_headers(r, ctx);
+    if (rc != NGX_OK) {
+        return rc;
+    }
+
+    /*
+     * Step 7: Emit body downstream.
+     */
+    rc = ngx_http_next_body_filter(r, out);
+
+    if (rc == NGX_AGAIN) {
+        ctx->fullbuffer_pending_output = out;
+        ctx->fullbuffer_pending_has_data = 1;
+        r->buffered |= NGX_HTTP_MARKDOWN_BUFFERED;
+    }
+
+    return rc;
 }
 
 #endif /* NGX_HTTP_MARKDOWN_CONVERSION_IMPL_H */
