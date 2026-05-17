@@ -7,7 +7,7 @@ paths:
   - "tests/**"
 ---
 
-# Testing & Coverage Discipline
+## Testing & Coverage Discipline
 
 ### 14. Regression-test coverage discipline
 Historical issues: `48edb7c`, `0a08d08`, `3a9f3cd`, `dcbf923`, `2a23415`, `253431c`.

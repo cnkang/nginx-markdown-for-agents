@@ -6,7 +6,7 @@ paths:
   - "tools/e2e/**"
 ---
 
-# E2E Test Runner
+## E2E Test Runner
 
 ### 37. Rust-first E2E test runner (e2e-harness)
 

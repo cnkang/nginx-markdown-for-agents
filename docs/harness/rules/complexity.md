@@ -6,7 +6,7 @@ paths:
   - "tools/**"
 ---
 
-# Cognitive Complexity
+## Cognitive Complexity
 
 ### 17. Cognitive complexity in C and Python functions
 SonarCloud rules: `c:S3776`, `python:S3776`.

@@ -6,7 +6,7 @@ paths:
   - "tools/harness/**"
 ---
 
-# Harness Routing Coverage
+## Harness Routing Coverage
 
 ### 36. Harness routing coverage for tooling security surfaces
 Historical issues: repeated branch fixes around CWE-22/S2083 in tooling paths

@@ -6,7 +6,7 @@ paths:
   - "Makefile"
 ---
 
-# CI Gating
+## CI Gating
 
 ### 13. CI gating blind spots
 Historical issues: `7bf22a0`, `090c5a5`, `034e42f`, `7018a3c`, `08f18fa`.

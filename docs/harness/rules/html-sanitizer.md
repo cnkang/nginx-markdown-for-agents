@@ -7,7 +7,7 @@ paths:
   - "components/nginx-module/src/**"
 ---
 
-# HTML Sanitizer & Output Safety
+## HTML Sanitizer & Output Safety
 
 ### 5. Sanitizer and HTML semantics mismatches
 Historical issues: `8440ac3`, `dbcdad8`, `77a46d6`.

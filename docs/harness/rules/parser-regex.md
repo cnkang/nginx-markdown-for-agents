@@ -6,7 +6,7 @@ paths:
   - "components/rust-converter/src/**"
 ---
 
-# Parser & Regex Safety
+## Parser & Regex Safety
 
 ### 10. Regex ReDoS and parser fragility in tooling
 Historical issues: `19875fe`, `10ea6ac`, `163f3e2`, `ea982d7`, `2103658`.

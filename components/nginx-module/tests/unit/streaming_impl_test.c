@@ -3142,6 +3142,36 @@ test_failopen_passthrough_again_pending(void)
             "no-replay: failopen_count must increment on NGX_OK");
     }
 
+    if (ngx_http_markdown_metrics != NULL) {
+        ngx_http_markdown_metrics->results.failopen_count = 0;
+    }
+    ctx.streaming.failopen_replay_initialized = 1;
+    ctx.streaming.failopen_replay_buf.size = 3;
+    g_next_body_filter_rc = NGX_DONE;
+    rc = ngx_http_markdown_streaming_failopen_passthrough(
+        &r, &ctx, &in);
+    TEST_ASSERT(rc == NGX_DONE,
+        "replay failopen_passthrough should return NGX_DONE on downstream NGX_DONE");
+    if (ngx_http_markdown_metrics != NULL) {
+        TEST_ASSERT(ngx_http_markdown_metrics->results.failopen_count == 1,
+            "replay: failopen_count must increment on NGX_DONE (delivery success)");
+    }
+
+    if (ngx_http_markdown_metrics != NULL) {
+        ngx_http_markdown_metrics->results.failopen_count = 0;
+    }
+    ctx.streaming.failopen_replay_initialized = 0;
+    ctx.streaming.failopen_replay_buf.size = 0;
+    g_next_body_filter_rc = NGX_DONE;
+    rc = ngx_http_markdown_streaming_failopen_passthrough(
+        &r, &ctx, &in);
+    TEST_ASSERT(rc == NGX_DONE,
+        "no-replay failopen_passthrough should return NGX_DONE on downstream NGX_DONE");
+    if (ngx_http_markdown_metrics != NULL) {
+        TEST_ASSERT(ngx_http_markdown_metrics->results.failopen_count == 1,
+            "no-replay: failopen_count must increment on NGX_DONE (delivery success)");
+    }
+
     TEST_PASS("failopen_passthrough NGX_AGAIN pending/resume");
 }
 
