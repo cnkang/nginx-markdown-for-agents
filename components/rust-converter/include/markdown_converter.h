@@ -228,9 +228,10 @@ typedef struct MarkdownOptions {
   /**
    * Unified memory budget in bytes (0 = use per-engine defaults).
    *
-   * When non-zero, this value overrides the default budget for both
-   * streaming and full-buffer engines, unless a per-engine explicit
-   * budget is set. Priority: per-engine explicit > unified > default.
+   * When non-zero, NGINX may use this value to derive full-buffer
+   * max_size when no explicit markdown_max_size is set. Rust
+   * currently enforces this budget only for streaming/incremental
+   * paths; full-buffer relies on NGINX-side buffering limits.
    * Populated from the `markdown_memory_budget` NGINX directive.
    */
   uint64_t memory_budget;
@@ -419,6 +420,45 @@ void markdown_converter_free(struct MarkdownConverterHandle *handle);
  * // Either finalize to produce output or free when done without producing output.
  * unsafe { markdown_incremental_free(handle) };
  * ```
+ * Create a new incremental converter handle and return an explicit status code.
+ *
+ * This API is the recommended constructor for C callers that need actionable
+ * failure classification. On success, `*out_handle` receives a non-NULL handle.
+ * On error, `*out_handle` is set to NULL and the function returns an error code.
+ *
+ * Unlike [`markdown_incremental_new`], this function does not write to stderr,
+ * making it suitable for use as a library function within NGINX where all
+ * diagnostics should go through `ngx_log_error()`.
+ *
+ * # Safety
+ *
+ * - `out_handle` must be a valid, writable pointer to
+ *   `*mut IncrementalConverterHandle`.
+ * - `options` must point to a valid, properly aligned `MarkdownOptions` that
+ *   remains readable for the duration of this call.
+ *
+ * # Returns
+ *
+ * - `ERROR_SUCCESS` (0) on success
+ * - `ERROR_INVALID_INPUT` (5) for NULL pointers or invalid options
+ * - `ERROR_INTERNAL` (99) for caught panics
+ */
+uint32_t markdown_incremental_new_with_code(const struct MarkdownOptions *options,
+                                            struct IncrementalConverterHandle **out_handle);
+#endif
+
+#if defined(MARKDOWN_INCREMENTAL_ENABLED)
+/**
+ * Convenience wrapper around [`markdown_incremental_new_with_code`] that
+ * returns only the handle pointer.
+ *
+ * On failure, returns NULL. For actionable error classification, prefer
+ * [`markdown_incremental_new_with_code`].
+ *
+ * # Safety
+ *
+ * - `options` must point to a valid, properly aligned `MarkdownOptions` that
+ *   remains readable for the duration of this call, or be NULL.
  */
 struct IncrementalConverterHandle *markdown_incremental_new(const struct MarkdownOptions *options);
 #endif

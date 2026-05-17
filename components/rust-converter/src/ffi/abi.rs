@@ -123,9 +123,10 @@ pub struct MarkdownOptions {
     pub prune_protection_selector_len: usize,
     /// Unified memory budget in bytes (0 = use per-engine defaults).
     ///
-    /// When non-zero, this value overrides the default budget for both
-    /// streaming and full-buffer engines, unless a per-engine explicit
-    /// budget is set. Priority: per-engine explicit > unified > default.
+    /// When non-zero, NGINX may use this value to derive full-buffer
+    /// max_size when no explicit markdown_max_size is set. Rust
+    /// currently enforces this budget only for streaming/incremental
+    /// paths; full-buffer relies on NGINX-side buffering limits.
     /// Populated from the `markdown_memory_budget` NGINX directive.
     pub memory_budget: u64,
     /// LLM provider for token estimation (0=default, 1=openai-gpt, 2=anthropic-claude,
