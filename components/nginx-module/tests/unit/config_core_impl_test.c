@@ -126,6 +126,11 @@ static ngx_int_t g_slab_alloc_fail;
         (conf) = (default_value);                      \
     }
 
+#define ngx_conf_init_uint_value(conf, default_value) \
+    if ((conf) == NGX_CONF_UNSET_UINT) {               \
+        (conf) = (default_value);                       \
+    }
+
 #define ngx_conf_merge_size_value(conf, prev, default_value) \
     if ((conf) == NGX_CONF_UNSET_SIZE) {                      \
         (conf) = ((prev) == NGX_CONF_UNSET_SIZE)              \

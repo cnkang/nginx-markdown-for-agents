@@ -9,7 +9,7 @@ The test matrix defines the key dimensions that 0.4.0 testing must cover across 
 | Dimension | Values |
 |-----------|--------|
 | Platform | Ubuntu (primary), macOS (secondary) |
-| NGINX Version | 1.24.x (LTS), 1.26.x (stable), 1.27.x (mainline) |
+| NGINX Version | 1.24.x (LTS), 1.26.x (stable), 1.28.x (stable), 1.30.x (stable), 1.31.x (mainline) |
 | Response Size | Small (<10KB), Medium (10KB–1MB), Large (>1MB) |
 | Conversion Path | Convert (eligible, success), Skip (ineligible), Fallback/Fail-open (eligible, failure) |
 

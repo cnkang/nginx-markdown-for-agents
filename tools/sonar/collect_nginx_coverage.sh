@@ -1336,6 +1336,7 @@ lcov --capture \
   --directory "${BUILDROOT}/objs" \
   --output-file "${OUTPUT_DIR}/c-e2e-raw.lcov" \
   --rc branch_coverage=1 \
+  --rc geninfo_unexecuted_blocks=1 \
   ${LCOV_IGNORE}
 
 # Extract only our module source files; NGINX core files are discarded.

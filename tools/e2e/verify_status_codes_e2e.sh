@@ -42,7 +42,11 @@ _wrapper_cleanup() {
   for d in "${base}"/e2e-harness-${SCENARIO_NAME}-*; do
     [[ -d "$d" ]] || continue
     local mtime
-    mtime="$(stat -f %m "$d" 2>/dev/null || stat -c %Y "$d" 2>/dev/null)" || continue
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+      mtime="$(stat -f %m "$d" 2>/dev/null)" || continue
+    else
+      mtime="$(stat -c %Y "$d" 2>/dev/null)" || continue
+    fi
     if [[ $(( now - mtime )) -gt stale_sec ]]; then
       rm -rf "$d" 2>/dev/null || true
     fi
