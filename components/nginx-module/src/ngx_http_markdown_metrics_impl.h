@@ -58,6 +58,7 @@ typedef struct {
         ngx_atomic_uint_t gzip;
         ngx_atomic_uint_t deflate;
         ngx_atomic_uint_t brotli;
+        ngx_atomic_uint_t budget_exceeded_total;
     } decompressions;
 
     /* Path hit metrics (threshold router, grouped to keep field count <= 20) */
@@ -88,8 +89,16 @@ typedef struct {
     /* Conversion result counters */
     struct {
         ngx_atomic_uint_t failopen_count;
+        ngx_atomic_uint_t delivery_count;
+        ngx_atomic_uint_t decision_count;
         ngx_atomic_uint_t estimated_token_savings;
     } results;
+
+    /* Parse interrupt metrics (v0.7.0) */
+    struct {
+        ngx_atomic_uint_t parse_timeouts_total;
+        ngx_atomic_uint_t parse_budget_exceeded_total;
+    } parse_interrupts;
 
 #ifdef MARKDOWN_STREAMING_ENABLED
     /* Streaming metrics */
@@ -255,6 +264,8 @@ ngx_http_markdown_collect_metrics_snapshot(ngx_http_markdown_metrics_snapshot_t 
     snapshot->skips.range = metrics->skips.range;
     snapshot->skips.accept = metrics->skips.accept;
     snapshot->results.failopen_count = metrics->results.failopen_count;
+    snapshot->results.delivery_count = metrics->results.delivery_count;
+    snapshot->results.decision_count = metrics->results.decision_count;
 #ifdef MARKDOWN_STREAMING_ENABLED
     snapshot->streaming.requests_total =
         metrics->streaming.requests_total;
@@ -282,6 +293,14 @@ ngx_http_markdown_collect_metrics_snapshot(ngx_http_markdown_metrics_snapshot_t 
         metrics->streaming.last_peak_memory_bytes;
 #endif
     snapshot->results.estimated_token_savings = metrics->results.estimated_token_savings;
+
+    snapshot->parse_interrupts.parse_timeouts_total =
+        metrics->parse_interrupts.parse_timeouts_total;
+    snapshot->parse_interrupts.parse_budget_exceeded_total =
+        metrics->parse_interrupts.parse_budget_exceeded_total;
+
+    snapshot->decompressions.budget_exceeded_total =
+        metrics->decompressions.budget_exceeded_total;
 
     snapshot->per_path.path_entries =
         metrics->per_path.path_entries;
@@ -672,6 +691,7 @@ ngx_http_markdown_metrics_write_json(
         "  \"decompressions_gzip\": %uA,\n"
         "  \"decompressions_deflate\": %uA,\n"
         "  \"decompressions_brotli\": %uA,\n"
+        "  \"decompression_budget_exceeded_total\": %uA,\n"
 
         /* Threshold-router path hit counters */
         "  \"fullbuffer_path_hits\": %uA,\n"
@@ -712,7 +732,11 @@ ngx_http_markdown_metrics_write_json(
 
         /* Operational totals and per-path aggregate counters */
         "  \"failopen_count\": %uA,\n"
+        "  \"delivery_count\": %uA,\n"
+        "  \"decision_count\": %uA,\n"
         "  \"estimated_token_savings\": %uA,\n"
+        "  \"parse_timeouts_total\": %uA,\n"
+        "  \"parse_budget_exceeded_total\": %uA,\n"
         "  \"per_path\": {\n"
         "    \"path_entries\": %uA,\n"
         "    \"path_conversions\": %uA,\n"
@@ -753,6 +777,7 @@ ngx_http_markdown_metrics_write_json(
         snapshot->decompressions.gzip,
         snapshot->decompressions.deflate,
         snapshot->decompressions.brotli,
+        snapshot->decompressions.budget_exceeded_total,
 
         /* Path routing */
         snapshot->path_hits.fullbuffer,
@@ -787,7 +812,11 @@ ngx_http_markdown_metrics_write_json(
         snapshot->skips.range,
         snapshot->skips.accept,
         snapshot->results.failopen_count,
+        snapshot->results.delivery_count,
+        snapshot->results.decision_count,
         snapshot->results.estimated_token_savings,
+        snapshot->parse_interrupts.parse_timeouts_total,
+        snapshot->parse_interrupts.parse_budget_exceeded_total,
         snapshot->per_path.path_entries,
         snapshot->per_path.path_conversions,
         snapshot->per_path.path_conversion_time_sum_ms,
@@ -1029,6 +1058,7 @@ ngx_http_markdown_metrics_write_text(
         snapshot->decompressions.gzip,
         snapshot->decompressions.deflate,
         snapshot->decompressions.brotli,
+        snapshot->decompressions.budget_exceeded_total,
 
         /* Path routing */
         snapshot->path_hits.fullbuffer,
@@ -1063,7 +1093,11 @@ ngx_http_markdown_metrics_write_text(
         snapshot->skips.range,
         snapshot->skips.accept,
         snapshot->results.failopen_count,
+        snapshot->results.delivery_count,
+        snapshot->results.decision_count,
         snapshot->results.estimated_token_savings,
+        snapshot->parse_interrupts.parse_timeouts_total,
+        snapshot->parse_interrupts.parse_budget_exceeded_total,
         snapshot->per_path.path_entries,
         snapshot->per_path.path_conversions,
         snapshot->per_path.path_conversion_time_sum_ms,
