@@ -195,9 +195,59 @@ This decision is documented in [ADR-0003](ADR/0003-inline-origin-near-conversion
 - Operator-facing behavior: [../guides/CONFIGURATION.md](../guides/CONFIGURATION.md)
 
 
+## v0.7.0 Subsystems
+
+The following Rust-first subsystems were introduced in v0.7.0 to move
+pure-logic decisions from C into Rust, improving testability and safety:
+
+### Accept Negotiator (`negotiator.rs`)
+
+Parses `Accept` headers per RFC 9110, performs q-value comparison between
+`text/markdown` and `text/html`, and determines whether conversion should
+proceed. Exposed via `FFIAcceptResult` and `markdown_negotiate_accept` FFI.
+
+### Conditional Request Handler (`conditional.rs`)
+
+Implements `If-None-Match` (ETag strong/weak comparison) and
+`If-Modified-Since` (HTTP-date parsing and time comparison) for 304 Not
+Modified responses. Used internally by the C conditional-request path.
+
+### Decision Engine (`decision.rs`)
+
+Pure function `make_decision(DecisionContext) -> (Decision, SkipReason)`
+that centralizes the conversion/skip/fail decision logic. Each decision
+path produces a reason code for logging and metrics.
+
+### Header Plan (`header_plan.rs`)
+
+Builder for response header mutations (Content-Type, Content-Length, ETag,
+Vary). Generates an operation list that can be applied atomically by the
+C module.
+
+### Security Extensions (`security.rs` additions)
+
+URL control-character rejection, X-Forwarded-Host/Proto parsing with host
+validation, and Markdown link label/destination escaping for injection
+prevention.
+
+### Bounded Decompression
+
+`markdown_decompress_max_size` directive limits decompressed output
+independently from `markdown_max_size`, preventing zip-bomb attacks.
+`DecompressionBudgetExceeded` (FFI code 9) is classified as
+`RESOURCE_LIMIT` in C.
+
+### Parser Timeout and Budget
+
+`markdown_parse_timeout` (default 30s) and `markdown_parser_budget`
+(default 64m) directives limit parsing time and memory. New error codes
+`ParseTimeout` (10) and `ParseBudgetExceeded` (11) map to
+`RESOURCE_LIMIT`.
+
 ## Document Updates
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
+| 0.7.0 | 2026-05-17 | Kang | Added v0.7.0 subsystems section (negotiator, conditional, decision, header_plan, security extensions, bounded decompression, parser timeout/budget) |

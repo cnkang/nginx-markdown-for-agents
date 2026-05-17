@@ -501,6 +501,31 @@ These metrics are added in 0.5.0 and are only emitted when `MARKDOWN_STREAMING_E
 | `nginx_markdown_streaming_ttfb_seconds` | gauge | — | Stable |
 | `nginx_markdown_streaming_peak_memory_bytes` | gauge | — | Stable |
 
+### Published Metrics (0.7.0, Runtime Correctness)
+
+These metrics are added in 0.7.0. Their names, types, and label key sets
+are covered by the stability policy above.
+
+| Metric Name | Type | Label Keys | Stability |
+|---|---|---|---|
+| `nginx_markdown_decompression_budget_exceeded_total` | counter | — | Stable |
+| `nginx_markdown_parse_timeouts_total` | counter | — | Stable |
+| `nginx_markdown_parse_budget_exceeded_total` | counter | — | Stable |
+| `nginx_markdown_replay_buffer_errors_total` | counter | — | Stable |
+
+### Delivery vs Decision Counter Semantics (v0.7.0)
+
+The `failopen_count` metric tracks **delivery** events: it increments only
+after the downstream filter returns `NGX_OK`, confirming the client received
+the original HTML. The **decision** to fail-open is recorded separately in
+the decision log at the time the decision is made. This separation ensures
+that metrics reflect actual delivery to clients, not just internal module
+state transitions.
+
+In backpressure scenarios (downstream returns `NGX_AGAIN`), the decision is
+recorded immediately but `failopen_count` is deferred until the pending
+chain drains successfully. This prevents overcounting during retries.
+
 
 ## Document Updates
 
@@ -508,3 +533,4 @@ These metrics are added in 0.5.0 and are only emitted when `MARKDOWN_STREAMING_E
 |---------|------|--------|---------|
 | 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
+| 0.7.0 | 2026-05-17 | Kang | Added v0.7.0 metrics (decompression_budget_exceeded, parse_timeouts, parse_budget_exceeded, replay_buffer_errors) and delivery/decision counter semantics |

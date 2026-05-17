@@ -99,6 +99,14 @@
         "make release-gates-check"
       ]
     },
+    "v070-gates": {
+      "phase": "focused-semantic",
+      "commands": [
+        "make release-gates-check-070",
+        "make test-rust",
+        "make check-headers"
+      ]
+    },
     "release-governance": {
       "phase": "focused-semantic",
       "commands": [
