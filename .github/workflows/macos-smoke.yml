@@ -59,7 +59,9 @@ jobs:
 
       - name: Install cbindgen
         run: |
-          if ! command -v cbindgen >/dev/null 2>&1; then
+          if command -v cbindgen >/dev/null 2>&1 && [ "$(cbindgen --version)" = "cbindgen 0.28.0" ]; then
+            echo "cbindgen 0.28.0 already installed"
+          else
             cargo install cbindgen --version 0.28.0 --locked
           fi
 
