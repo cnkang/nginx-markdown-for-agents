@@ -24,7 +24,7 @@ Requirements references: 10.1, 10.2, 10.3, 10.4, 10.5.
 
 - [x] `make test-all` passes on Ubuntu
 - [x] `make test-all` passes on macOS
-- [x] CI passes on NGINX 1.24.x, 1.26.x, 1.27.x
+- [x] CI passes on NGINX 1.24.x, 1.26.x, 1.28.x, 1.30.x, 1.31.x
 - [x] Benchmark corpus runs reproducibly (`make test-benchmark` or equivalent)
 - [x] Evidence pack generated and archived
 - [x] Metrics endpoint has unit test coverage (`metrics_test.c`)

@@ -272,11 +272,11 @@ coverage-c:
 	lcov --add-tracefile $(COVERAGE_DIR)/tmp/c-e2e-coverage.lcov \
 		--add-tracefile $(COVERAGE_DIR)/tmp/c-unit/c-coverage.lcov \
 		--output-file $(COVERAGE_DIR)/tmp/c-combined-raw.lcov \
-		--rc branch_coverage=1 --ignore-errors inconsistent
+		--rc branch_coverage=1 --rc geninfo_unexecuted_blocks=1 --ignore-errors inconsistent
 	lcov --extract $(COVERAGE_DIR)/tmp/c-combined-raw.lcov \
 		"*/components/nginx-module/src/*" \
 		--output-file $(COVERAGE_DIR)/c-coverage.lcov \
-		--rc branch_coverage=1 --ignore-errors unused --ignore-errors inconsistent
+		--rc branch_coverage=1 --rc geninfo_unexecuted_blocks=1 --ignore-errors unused --ignore-errors inconsistent
 	@echo "==> Combined C coverage report: $(COVERAGE_DIR)/c-coverage.lcov"
 	lcov --summary $(COVERAGE_DIR)/c-coverage.lcov --rc branch_coverage=1 \
 		--ignore-errors inconsistent

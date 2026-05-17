@@ -304,12 +304,17 @@ struct ngx_time_s {
  * and then auto-clears, simulating a transient allocation failure.
  */
 static ngx_int_t g_next_body_filter_rc = NGX_OK;
+static ngx_uint_t g_next_body_filter_calls = 0;
 static ngx_int_t g_next_header_filter_rc = NGX_OK;
 static ngx_int_t g_complex_value_rc = NGX_OK;
 static ngx_int_t g_add_vary_rc = NGX_OK;
 static ngx_int_t g_set_etag_rc = NGX_OK;
 static ngx_int_t g_buffer_init_rc = NGX_OK;
+static ngx_uint_t g_buffer_init_fail_after = 0;
+static ngx_uint_t g_buffer_init_call_count = 0;
 static ngx_int_t g_buffer_append_rc = NGX_OK;
+static ngx_uint_t g_buffer_append_fail_after = 0;
+static ngx_uint_t g_buffer_append_call_count = 0;
 static ngx_int_t g_forward_headers_rc = NGX_OK;
 static ngx_int_t g_body_filter_rc = NGX_OK;
 static ngx_int_t g_prepare_options_rc = NGX_OK;
@@ -424,6 +429,7 @@ ngx_http_next_body_filter_stub(ngx_http_request_t *r, ngx_chain_t *in)
 {
     UNUSED(r);
     UNUSED(in);
+    g_next_body_filter_calls++;
     if (g_next_body_filter_seq_idx < g_next_body_filter_seq_len) {
         return g_next_body_filter_seq[g_next_body_filter_seq_idx++];
     }
@@ -458,6 +464,28 @@ ngx_int_t (*ngx_http_next_body_filter)(ngx_http_request_t *r, ngx_chain_t *in) =
     ngx_http_next_body_filter_stub;
 ngx_int_t (*ngx_http_next_header_filter)(ngx_http_request_t *r) =
     ngx_http_next_header_filter_stub;
+
+/*
+ * Local helper: count non-NULL buffers in an input chain.
+ * Removed from production streaming_impl.h after the replay buffer
+ * refactor (prepare_failopen_tracking no longer needs it).  Kept
+ * here for test coverage of the counting logic itself.
+ */
+static ngx_uint_t
+test_count_chain_bufs(ngx_chain_t *in)
+{
+    ngx_chain_t *cl;
+    ngx_uint_t   count;
+
+    count = 0;
+    for (cl = in; cl != NULL; cl = cl->next) {
+        if (cl->buf != NULL) {
+            count++;
+        }
+    }
+
+    return count;
+}
 
 /*
  * Stub for ngx_palloc.  Delegates to malloc(3).  If g_palloc_fail_once is
@@ -854,8 +882,14 @@ ngx_http_markdown_buffer_init(ngx_http_markdown_buffer_t *buf, size_t max_size,
     ngx_pool_t *pool)
 {
     UNUSED(pool);
+    g_buffer_init_call_count++;
     if (g_buffer_init_rc != NGX_OK) {
         return g_buffer_init_rc;
+    }
+    if (g_buffer_init_fail_after > 0
+        && g_buffer_init_call_count > g_buffer_init_fail_after)
+    {
+        return NGX_ERROR;
     }
     buf->data = malloc(max_size ? max_size : 64);
     if (buf->data == NULL) {
@@ -878,8 +912,14 @@ ngx_int_t
 ngx_http_markdown_buffer_append(ngx_http_markdown_buffer_t *buf,
     const u_char *data, size_t len)
 {
+    g_buffer_append_call_count++;
     if (g_buffer_append_rc != NGX_OK) {
         return g_buffer_append_rc;
+    }
+    if (g_buffer_append_fail_after > 0
+        && g_buffer_append_call_count > g_buffer_append_fail_after)
+    {
+        return NGX_ERROR;
     }
     if (buf->data == NULL || buf->capacity < len) {
         return NGX_ERROR;
@@ -1115,12 +1155,17 @@ static void
 reset_globals(void)
 {
     g_next_body_filter_rc = NGX_OK;
+    g_next_body_filter_calls = 0;
     g_next_header_filter_rc = NGX_OK;
     g_complex_value_rc = NGX_OK;
     g_add_vary_rc = NGX_OK;
     g_set_etag_rc = NGX_OK;
     g_buffer_init_rc = NGX_OK;
+    g_buffer_init_fail_after = 0;
+    g_buffer_init_call_count = 0;
     g_buffer_append_rc = NGX_OK;
+    g_buffer_append_fail_after = 0;
+    g_buffer_append_call_count = 0;
     g_forward_headers_rc = NGX_OK;
     g_body_filter_rc = NGX_OK;
     g_prepare_options_rc = NGX_OK;
@@ -1538,6 +1583,8 @@ test_send_output_and_resume_paths(void)
     TEST_ASSERT(rc == NGX_OK, "resume_pending should drain pending chain");
     TEST_ASSERT(ctx.streaming.pending_output == NULL,
         "resume should clear pending chain");
+    TEST_ASSERT(ctx.streaming.pending_has_data == 0,
+        "resume should clear pending_has_data on successful drain");
     TEST_ASSERT((r.buffered & NGX_HTTP_MARKDOWN_BUFFERED) == 0,
         "resume should clear buffered flag");
 
@@ -1560,6 +1607,8 @@ test_send_output_and_resume_paths(void)
     g_next_body_filter_rc = NGX_ERROR;
     rc = ngx_http_markdown_streaming_resume_pending(&r, &ctx, &conf);
     TEST_ASSERT(rc == NGX_ERROR, "resume should propagate downstream error");
+    TEST_ASSERT(ctx.streaming.pending_has_data == 0,
+        "resume error should clear pending_has_data");
     TEST_ASSERT(ctx.streaming.failure_recorded == 1,
         "resume error should record post-commit failure");
 
@@ -1885,8 +1934,7 @@ test_abort_passthrough_and_reentry_helpers(void)
  * - body_filter stops on client abort
  * - ineligible ctx passthroughs body filter
  * - body_filter surfaces failopen tracking allocation errors
- * Covers: ngx_http_markdown_streaming_count_chain_bufs,
- *         ngx_http_markdown_streaming_prepare_failopen_tracking,
+ * Covers: test_count_chain_bufs (local helper mirroring removed production code),
  *         ngx_http_markdown_streaming_handle_null_input,
  *         ngx_http_markdown_streaming_process_chain,
  *         ngx_http_markdown_streaming_body_filter
@@ -1909,6 +1957,7 @@ test_null_input_tracking_and_body_filter_entry(void)
     ngx_buf_t               pending_buf;
     ngx_int_t               rc;
     ngx_flag_t              last_buf = 0;
+    ngx_flag_t              failopen_completed = 0;
     ngx_chain_t            *fallback_cl = NULL;
 
     TEST_SUBSECTION("null-input, failopen tracking, and body_filter entry");
@@ -1932,40 +1981,8 @@ test_null_input_tracking_and_body_filter_entry(void)
     b2.pos = (u_char *) "b";
     b2.last = b2.pos + 1;
 
-    rc = ngx_http_markdown_streaming_count_chain_bufs(&c1);
+    rc = test_count_chain_bufs(&c1);
     TEST_ASSERT(rc == 2, "count_chain_bufs should count only non-NULL buffers");
-
-    ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
-    rc = ngx_http_markdown_streaming_prepare_failopen_tracking(
-        &r, &ctx, &c1);
-    TEST_ASSERT(rc == NGX_OK,
-        "post-commit tracking should short-circuit");
-
-    ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_PRE;
-    ctx.streaming.failopen_consumed_count = 0;
-    ctx.streaming.failopen_consumed_capacity = 0;
-    g_palloc_fail_once = 1;
-    rc = ngx_http_markdown_streaming_prepare_failopen_tracking(
-        &r, &ctx, &c1);
-    TEST_ASSERT(rc == NGX_ERROR,
-        "tracking allocation failure should return NGX_ERROR");
-
-    {
-        ngx_buf_t *old_bufs[1];
-        u_char    *old_pos[1];
-
-        old_bufs[0] = &b1;
-        old_pos[0] = b1.pos;
-        ctx.streaming.failopen_consumed_bufs = old_bufs;
-        ctx.streaming.failopen_consumed_pos = old_pos;
-        ctx.streaming.failopen_consumed_count = 1;
-        ctx.streaming.failopen_consumed_capacity = 1;
-
-        rc = ngx_http_markdown_streaming_prepare_failopen_tracking(
-            &r, &ctx, &c1);
-        TEST_ASSERT(rc == NGX_OK,
-            "tracking should grow storage and copy prior consumed slots");
-    }
 
     pending.buf = &pending_buf;
     pending.next = NULL;
@@ -1986,11 +2003,12 @@ test_null_input_tracking_and_body_filter_entry(void)
         "null-input handler should finalize when pending drain completes");
 
     last_buf = 0;
+    failopen_completed = 0;
     fallback_cl = NULL;
     c1.buf = NULL;
     c1.next = NULL;
     rc = ngx_http_markdown_streaming_process_chain(
-        &r, &ctx, &conf, &c1, &last_buf, 0, &fallback_cl);
+        &r, &ctx, &conf, &c1, &last_buf, &failopen_completed, &fallback_cl);
     TEST_ASSERT(rc == NGX_OK,
         "process_chain should skip NULL buffers safely");
 
@@ -2019,17 +2037,16 @@ test_null_input_tracking_and_body_filter_entry(void)
     ctx.eligible = 1;
 
     ctx.streaming.handle = (struct StreamingConverterHandle *) (uintptr_t) 0x6;
-    ctx.streaming.failopen_consumed_count = 0;
-    ctx.streaming.failopen_consumed_capacity = 0;
+    ctx.streaming.failopen_replay_initialized = 0;
+    ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
     c1.buf = &b1;
     b1.pos = (u_char *) "x";
     b1.last = b1.pos + 1;
     b1.last_buf = 0;
     c1.next = NULL;
-    g_palloc_fail_once = 1;
     rc = ngx_http_markdown_streaming_body_filter(&r, &c1);
-    TEST_ASSERT(rc == NGX_ERROR,
-        "body_filter should surface failopen tracking allocation errors");
+    TEST_ASSERT(rc == g_next_body_filter_rc,
+        "Post-Commit passthrough with no replay data should forward chain");
 
     TEST_PASS("null-input/tracking/body-filter entry branches covered");
 }
@@ -2122,17 +2139,17 @@ test_init_handle_and_chunk_result_helpers(void)
     in.next = NULL;
 
     rc = ngx_http_markdown_streaming_handle_chunk_result(
-        &r, &ctx, &in, NGX_AGAIN, 0);
+        &r, &ctx, &in, NGX_AGAIN);
     TEST_ASSERT(rc == NGX_AGAIN,
         "chunk_result should propagate NGX_AGAIN");
 
     rc = ngx_http_markdown_streaming_handle_chunk_result(
-        &r, &ctx, &in, NGX_OK, 0);
+        &r, &ctx, &in, NGX_OK);
     TEST_ASSERT(rc == NGX_OK, "chunk_result should keep NGX_OK");
 
     ctx.processing_path = NGX_HTTP_MARKDOWN_PATH_FULLBUFFER;
     rc = ngx_http_markdown_streaming_handle_chunk_result(
-        &r, &ctx, &in, NGX_ERROR, 0);
+        &r, &ctx, &in, NGX_ERROR);
     TEST_ASSERT(rc == NGX_DONE,
         "chunk_result should return NGX_DONE after fallback switch");
 
@@ -2140,15 +2157,53 @@ test_init_handle_and_chunk_result_helpers(void)
     ctx.eligible = 0;
     g_forward_headers_rc = NGX_ERROR;
     rc = ngx_http_markdown_streaming_handle_chunk_result(
-        &r, &ctx, &in, NGX_ERROR, 0);
+        &r, &ctx, &in, NGX_ERROR);
     TEST_ASSERT(rc == NGX_ERROR,
         "chunk_result fail-open should surface header-forward errors");
 
     ctx.eligible = 1;
     rc = ngx_http_markdown_streaming_handle_chunk_result(
-        &r, &ctx, &in, NGX_ERROR, 0);
+        &r, &ctx, &in, NGX_ERROR);
     TEST_ASSERT(rc == NGX_ERROR,
         "chunk_result should propagate non-special errors");
+
+    /*
+     * Replay buffer init failure (second buffer_init call in
+     * init_handle after prebuffer succeeds) must route through
+     * precommit_error, not silently continue streaming.
+     */
+    ctx.streaming.handle = NULL;
+    ctx.streaming.prebuffer_initialized = 0;
+    ctx.streaming.failopen_replay_initialized = 0;
+    ctx.processing_path = NGX_HTTP_MARKDOWN_PATH_STREAMING;
+    ctx.conversion_attempted = 0;
+    conf.streaming.on_error = NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_REJECT;
+    g_buffer_init_fail_after = 1;
+    g_buffer_init_call_count = 0;
+    rc = ngx_http_markdown_streaming_init_handle(&r, &ctx, &conf);
+    TEST_ASSERT(rc == NGX_ERROR,
+        "replay buffer init failure with reject policy should return NGX_ERROR");
+    TEST_ASSERT(ctx.streaming.handle == NULL,
+        "replay buffer init failure should abort handle");
+    g_buffer_init_fail_after = 0;
+    g_buffer_init_call_count = 0;
+
+    ctx.streaming.handle = NULL;
+    ctx.streaming.prebuffer_initialized = 0;
+    ctx.streaming.failopen_replay_initialized = 0;
+    ctx.processing_path = NGX_HTTP_MARKDOWN_PATH_STREAMING;
+    ctx.conversion_attempted = 0;
+    conf.streaming.on_error = NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_PASS;
+    g_buffer_init_fail_after = 1;
+    g_buffer_init_call_count = 0;
+    rc = ngx_http_markdown_streaming_init_handle(&r, &ctx, &conf);
+    TEST_ASSERT(rc == NGX_DECLINED,
+        "replay buffer init failure with pass policy should route fail-open (NGX_DECLINED)");
+    TEST_ASSERT(ctx.eligible == 0,
+        "replay buffer init failure with pass policy should set eligible=0");
+    g_buffer_init_fail_after = 0;
+    g_buffer_init_call_count = 0;
+    conf.streaming.on_error = NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_PASS;
 
     TEST_PASS("init_handle/chunk_result branches covered");
 }
@@ -2400,7 +2455,7 @@ test_commit_feed_and_finalize_core_paths(void)
  * - failopen passthrough passes current chain for first invocation
  * - failopen passthrough fails on prefix chain allocation errors
  * - failopen passthrough rebuilds prefix chain on reentry
- * - process_chain fails when failopen tracking capacity is exhausted
+ * - process_chain fails when reject policy applies
  * - process_chain returns NGX_DONE when fallback switches path
  * - body_filter reenters full-buffer path after fallback
  * - body_filter fail-open passthrough when finalize declines
@@ -2422,9 +2477,8 @@ test_process_chain_and_body_filter_deep_paths(void)
     ngx_buf_t               in_buf;
     ngx_chain_t            *fallback_cl = NULL;
     ngx_flag_t              last_buf = 0;
+    ngx_flag_t              failopen_completed = 0;
     ngx_int_t               rc;
-    ngx_buf_t              *saved_bufs[2] = { NULL, NULL };
-    u_char                 *saved_pos[2] = { NULL, NULL };
     u_char                  prebuf_data[16];
     u_char                  chunk_data[] = "chunk";
 
@@ -2450,38 +2504,42 @@ test_process_chain_and_body_filter_deep_paths(void)
     ctx.streaming.prebuffer.capacity = sizeof(prebuf_data);
     ctx.streaming.prebuffer.max_size = sizeof(prebuf_data);
 
-    saved_bufs[0] = &in_buf;
-    saved_pos[0] = in_buf.pos;
-    ctx.streaming.failopen_consumed_bufs = saved_bufs;
-    ctx.streaming.failopen_consumed_pos = saved_pos;
-    ctx.streaming.failopen_consumed_count = 1;
+    ctx.streaming.failopen_replay_initialized = 1;
+    ctx.streaming.failopen_replay_buf.data = prebuf_data;
+    ctx.streaming.failopen_replay_buf.size = 3;
+    ctx.streaming.failopen_replay_buf.capacity = sizeof(prebuf_data);
+    ctx.streaming.failopen_replay_buf.max_size = sizeof(prebuf_data);
+    ngx_memcpy(prebuf_data, "abc", 3);
 
     rc = ngx_http_markdown_streaming_failopen_passthrough(
-        &r, &ctx, &in, 0);
+        &r, &ctx, &in);
     TEST_ASSERT(rc == NGX_OK,
-        "failopen passthrough should pass current chain for first invocation");
+        "failopen passthrough should rebuild prefix chain from replay buffer");
 
     g_alloc_chain_fail_once = 1;
     rc = ngx_http_markdown_streaming_failopen_passthrough(
-        &r, &ctx, &in, 1);
+        &r, &ctx, &in);
     TEST_ASSERT(rc == NGX_ERROR,
         "failopen passthrough should fail on prefix chain allocation errors");
 
     rc = ngx_http_markdown_streaming_failopen_passthrough(
-        &r, &ctx, &in, 1);
+        &r, &ctx, &in);
     TEST_ASSERT(rc == NGX_OK,
         "failopen passthrough should rebuild prefix chain on reentry");
 
-    ctx.streaming.failopen_consumed_count = 0;
-    ctx.streaming.failopen_consumed_capacity = 0;
+    ctx.streaming.failopen_replay_initialized = 0;
+    ctx.eligible = 0;
     conf.streaming.on_error = NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_REJECT;
     g_streaming_feed_rc = ERROR_SUCCESS;
     g_streaming_feed_out_data = NULL;
     g_streaming_feed_out_len = 0;
     rc = ngx_http_markdown_streaming_process_chain(
-        &r, &ctx, &conf, &in, &last_buf, 0, &fallback_cl);
-    TEST_ASSERT(rc == NGX_ERROR,
-        "process_chain should fail when failopen tracking capacity is exhausted");
+        &r, &ctx, &conf, &in, &last_buf, &failopen_completed, &fallback_cl);
+    TEST_ASSERT(rc == NGX_OK,
+        "process_chain should pass through when already in fail-open "
+        "path regardless of reject policy (reject only applies at "
+        "precommit_error decision point)");
+    ctx.eligible = 1;
 
     conf.streaming.on_error = NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_PASS;
     ctx.processing_path = NGX_HTTP_MARKDOWN_PATH_STREAMING;
@@ -2493,15 +2551,12 @@ test_process_chain_and_body_filter_deep_paths(void)
     ctx.streaming.prebuffer.capacity = sizeof(prebuf_data);
     ctx.streaming.prebuffer.max_size = sizeof(prebuf_data);
     ctx.streaming.prebuffer.size = 3;
-    ctx.streaming.failopen_consumed_count = 0;
-    ctx.streaming.failopen_consumed_capacity = 2;
-    saved_bufs[0] = &in_buf;
-    saved_pos[0] = in_buf.pos;
-    ctx.streaming.failopen_consumed_bufs = saved_bufs;
-    ctx.streaming.failopen_consumed_pos = saved_pos;
+    ctx.streaming.failopen_replay_initialized = 0;
     g_streaming_feed_rc = ERROR_STREAMING_FALLBACK;
+    in_buf.pos = chunk_data;
+    in_buf.last = chunk_data + 5;
     rc = ngx_http_markdown_streaming_process_chain(
-        &r, &ctx, &conf, &in, &last_buf, 0, &fallback_cl);
+        &r, &ctx, &conf, &in, &last_buf, &failopen_completed, &fallback_cl);
     TEST_ASSERT(rc == NGX_DONE,
         "process_chain should return NGX_DONE when fallback switches path");
     TEST_ASSERT(fallback_cl == &in,
@@ -2518,12 +2573,11 @@ test_process_chain_and_body_filter_deep_paths(void)
     ctx.streaming.prebuffer.capacity = sizeof(prebuf_data);
     ctx.streaming.prebuffer.max_size = sizeof(prebuf_data);
     ctx.streaming.prebuffer.size = 3;
-    ctx.streaming.failopen_consumed_count = 0;
-    ctx.streaming.failopen_consumed_capacity = 2;
-    ctx.streaming.failopen_consumed_bufs = saved_bufs;
-    ctx.streaming.failopen_consumed_pos = saved_pos;
+    ctx.streaming.failopen_replay_initialized = 0;
     g_streaming_feed_rc = ERROR_STREAMING_FALLBACK;
     g_body_filter_rc = NGX_OK;
+    in_buf.pos = chunk_data;
+    in_buf.last = chunk_data + 5;
     rc = ngx_http_markdown_streaming_body_filter(&r, &in);
     TEST_ASSERT(rc == NGX_OK,
         "body_filter should reenter full-buffer path after fallback");
@@ -2538,10 +2592,7 @@ test_process_chain_and_body_filter_deep_paths(void)
     ctx.streaming.prebuffer.capacity = sizeof(prebuf_data);
     ctx.streaming.prebuffer.max_size = sizeof(prebuf_data);
     ctx.streaming.prebuffer.size = 1;
-    ctx.streaming.failopen_consumed_count = 0;
-    ctx.streaming.failopen_consumed_capacity = 2;
-    ctx.streaming.failopen_consumed_bufs = saved_bufs;
-    ctx.streaming.failopen_consumed_pos = saved_pos;
+    ctx.streaming.failopen_replay_initialized = 0;
     g_streaming_feed_rc = ERROR_SUCCESS;
     g_streaming_feed_out_data = NULL;
     g_streaming_feed_out_len = 0;
@@ -2553,6 +2604,127 @@ test_process_chain_and_body_filter_deep_paths(void)
     rc = ngx_http_markdown_streaming_body_filter(&r, &in);
     TEST_ASSERT(rc == NGX_OK,
         "body_filter should fail-open passthrough when finalize declines");
+
+    /*
+     * Replay buffer append failure during Pre-Commit must trigger
+     * precommit_error immediately rather than continuing streaming
+     * with an incomplete replay buffer.
+     */
+    ctx.processing_path = NGX_HTTP_MARKDOWN_PATH_STREAMING;
+    ctx.eligible = 1;
+    ctx.streaming.handle = (struct StreamingConverterHandle *)
+        (uintptr_t) 0x25;
+    ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_PRE;
+    ctx.streaming.failopen_replay_initialized = 1;
+    ctx.streaming.failopen_replay_buf.data = prebuf_data;
+    ctx.streaming.failopen_replay_buf.size = 3;
+    ctx.streaming.failopen_replay_buf.capacity = sizeof(prebuf_data);
+    ctx.streaming.failopen_replay_buf.max_size = sizeof(prebuf_data);
+    in_buf.pos = chunk_data;
+    in_buf.last = chunk_data + 5;
+    in_buf.last_buf = 0;
+    g_streaming_feed_rc = ERROR_SUCCESS;
+    g_streaming_feed_out_data = NULL;
+    g_streaming_feed_out_len = 0;
+    conf.streaming.on_error = NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_REJECT;
+    g_buffer_append_rc = NGX_ERROR;
+    rc = ngx_http_markdown_streaming_process_chain(
+        &r, &ctx, &conf, &in, &last_buf, &failopen_completed, &fallback_cl);
+    TEST_ASSERT(rc == NGX_ERROR,
+        "replay append failure with reject policy should return NGX_ERROR");
+    g_buffer_append_rc = NGX_OK;
+
+    /*
+     * Replay append failure with pass policy: precommit_error sets
+     * eligible=0 and returns NGX_DECLINED, then failopen_passthrough
+     * must be called to forward the original chain downstream.
+     * The result should be whatever ngx_http_next_body_filter returns
+     * (NGX_OK by default).
+     */
+    ctx.processing_path = NGX_HTTP_MARKDOWN_PATH_STREAMING;
+    ctx.eligible = 1;
+    ctx.streaming.handle = (struct StreamingConverterHandle *)
+        (uintptr_t) 0x26;
+    ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_PRE;
+    ctx.streaming.failopen_replay_initialized = 1;
+    ctx.streaming.failopen_replay_buf.data = prebuf_data;
+    ctx.streaming.failopen_replay_buf.size = 3;
+    ctx.streaming.failopen_replay_buf.capacity = sizeof(prebuf_data);
+    ctx.streaming.failopen_replay_buf.max_size = sizeof(prebuf_data);
+    in_buf.pos = chunk_data;
+    in_buf.last = chunk_data + 5;
+    in_buf.last_buf = 0;
+    g_streaming_feed_rc = ERROR_SUCCESS;
+    g_streaming_feed_out_data = NULL;
+    g_streaming_feed_out_len = 0;
+    conf.streaming.on_error = NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_PASS;
+    g_next_body_filter_rc = NGX_OK;
+    g_buffer_append_rc = NGX_ERROR;
+    rc = ngx_http_markdown_streaming_process_chain(
+        &r, &ctx, &conf, &in, &last_buf, &failopen_completed, &fallback_cl);
+    TEST_ASSERT(rc == NGX_OK,
+        "replay append failure with pass policy should fail-open "
+        "passthrough (forward chain downstream)");
+    TEST_ASSERT(ctx.eligible == 0,
+        "replay append failure with pass policy should set eligible=0");
+    TEST_ASSERT(failopen_completed == 1,
+        "replay append failure with pass policy should set "
+        "failopen_completed=1");
+    g_buffer_append_rc = NGX_OK;
+    conf.streaming.on_error = NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_PASS;
+
+    /*
+     * Precise test: prebuffer append succeeds, replay append fails,
+     * buffer has last_buf=1.  Use g_buffer_append_fail_after=1
+     * so only the first append (prebuffer) succeeds and the second
+     * (replay) fails.  body_filter should fail-open passthrough
+     * and NOT enter finalize_request (which would send a duplicate
+     * empty last_buf since handle is NULL).
+     *
+     * Verify by counting next_body_filter calls: should be exactly
+     * 1 (the fail-open passthrough), not 2 (passthrough + finalize
+     * empty terminal).
+     */
+    ctx.processing_path = NGX_HTTP_MARKDOWN_PATH_STREAMING;
+    ctx.eligible = 1;
+    ctx.streaming.handle = (struct StreamingConverterHandle *)
+        (uintptr_t) 0x27;
+    ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_PRE;
+    ctx.streaming.failopen_replay_initialized = 1;
+    ctx.streaming.failopen_replay_buf.data = prebuf_data;
+    ctx.streaming.failopen_replay_buf.size = 3;
+    ctx.streaming.failopen_replay_buf.capacity = sizeof(prebuf_data);
+    ctx.streaming.failopen_replay_buf.max_size = sizeof(prebuf_data);
+    ctx.streaming.prebuffer_initialized = 1;
+    ctx.streaming.prebuffer.data = prebuf_data;
+    ctx.streaming.prebuffer.capacity = sizeof(prebuf_data);
+    ctx.streaming.prebuffer.max_size = sizeof(prebuf_data);
+    ctx.streaming.prebuffer.size = 3;
+    in_buf.pos = chunk_data;
+    in_buf.last = chunk_data + 5;
+    in_buf.last_buf = 1;
+    g_streaming_feed_rc = ERROR_SUCCESS;
+    g_streaming_feed_out_data = NULL;
+    g_streaming_feed_out_len = 0;
+    conf.streaming.on_error = NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_PASS;
+    g_next_body_filter_rc = NGX_OK;
+    g_next_body_filter_calls = 0;
+    g_buffer_append_fail_after = 1;
+    g_buffer_append_call_count = 0;
+    rc = ngx_http_markdown_streaming_body_filter(&r, &in);
+    TEST_ASSERT(rc == NGX_OK,
+        "terminal replay append failure with pass policy should "
+        "fail-open passthrough via body_filter");
+    TEST_ASSERT(ctx.eligible == 0,
+        "terminal replay append failure should set eligible=0");
+    TEST_ASSERT(g_next_body_filter_calls == 1,
+        "terminal replay append failure should call next_body_filter "
+        "exactly once (fail-open passthrough only, no finalize empty "
+        "last_buf)");
+    g_buffer_append_fail_after = 0;
+    g_buffer_append_call_count = 0;
+    g_buffer_append_rc = NGX_OK;
+    conf.streaming.on_error = NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_PASS;
 
     TEST_PASS("process-chain/failopen/body-filter deep branches covered");
 }
@@ -2805,8 +2977,7 @@ test_streaming_gap_branches(void)
     ctx.streaming.handle = (struct StreamingConverterHandle *)
         (uintptr_t) 0x36;
     ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
-    ctx.streaming.failopen_consumed_count = 0;
-    ctx.streaming.failopen_consumed_capacity = 2;
+    ctx.streaming.failopen_replay_initialized = 0;
     in_buf.last_buf = 0;
     g_streaming_feed_rc = ERROR_SUCCESS;
     g_streaming_feed_out_data = NULL;
@@ -2819,8 +2990,7 @@ test_streaming_gap_branches(void)
     ctx.streaming.handle = (struct StreamingConverterHandle *)
         (uintptr_t) 0x37;
     ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
-    ctx.streaming.failopen_consumed_count = 0;
-    ctx.streaming.failopen_consumed_capacity = 2;
+    ctx.streaming.failopen_replay_initialized = 0;
     in_buf.last_buf = 1;
     g_streaming_finalize_rc = ERROR_SUCCESS;
     g_streaming_finalize_result.markdown = NULL;
@@ -2850,6 +3020,202 @@ test_streaming_gap_branches(void)
 }
 
 /*
+ * Verifies failopen_passthrough NGX_AGAIN backpressure contract:
+ * - On NGX_AGAIN from downstream, pending_output is set, buffered flag is set
+ * - failopen_count is NOT incremented on NGX_AGAIN
+ * - On subsequent NGX_OK (resume), failopen_count is incremented
+ * - Works for both replay-buffer and no-replay-buffer paths
+ *
+ * Covers: Rule 1 (pending chain preserved on NGX_AGAIN),
+ *         Rule 38 (failopen_count after downstream OK)
+ */
+static void
+test_failopen_passthrough_again_pending(void)
+{
+    ngx_http_request_t      r;
+    ngx_http_markdown_ctx_t ctx;
+    ngx_http_markdown_conf_t conf;
+    ngx_pool_t              pool;
+    ngx_connection_t        conn;
+    ngx_log_t               log;
+    ngx_event_t             read_event;
+    ngx_chain_t             in;
+    ngx_buf_t               in_buf;
+    ngx_int_t               rc;
+    u_char                  prebuf_data[16];
+    u_char                  chunk_data[] = "chunk";
+    ngx_http_markdown_metrics_t metrics;
+
+    TEST_SUBSECTION("failopen_passthrough NGX_AGAIN pending/resume");
+    reset_globals();
+    init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &read_event);
+    ngx_memzero(&metrics, sizeof(metrics));
+    ngx_http_markdown_metrics = &metrics;
+    conf.max_size = 0;
+    conf.streaming.on_error = NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_PASS;
+
+    ngx_memzero(&in, sizeof(in));
+    ngx_memzero(&in_buf, sizeof(in_buf));
+    in.buf = &in_buf;
+    in.next = NULL;
+    in_buf.pos = chunk_data;
+    in_buf.last = chunk_data + 5;
+    in_buf.last_buf = 0;
+
+    ctx.streaming.handle = (struct StreamingConverterHandle *)
+        (uintptr_t) 0x39;
+    ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_PRE;
+    ctx.streaming.prebuffer_initialized = 1;
+    ctx.streaming.prebuffer.data = prebuf_data;
+    ctx.streaming.prebuffer.capacity = sizeof(prebuf_data);
+    ctx.streaming.prebuffer.max_size = sizeof(prebuf_data);
+    ctx.eligible = 0;
+
+    ctx.streaming.failopen_replay_initialized = 1;
+    ctx.streaming.failopen_replay_buf.data = prebuf_data;
+    ctx.streaming.failopen_replay_buf.size = 3;
+    ctx.streaming.failopen_replay_buf.capacity = sizeof(prebuf_data);
+    ctx.streaming.failopen_replay_buf.max_size = sizeof(prebuf_data);
+    ngx_memcpy(prebuf_data, "abc", 3);
+
+    if (ngx_http_markdown_metrics != NULL) {
+        ngx_http_markdown_metrics->results.failopen_count = 0;
+    }
+
+    g_next_body_filter_rc = NGX_AGAIN;
+    rc = ngx_http_markdown_streaming_failopen_passthrough(
+        &r, &ctx, &in);
+    TEST_ASSERT(rc == NGX_AGAIN,
+        "replay: failopen_passthrough should return NGX_AGAIN on backpressure");
+    TEST_ASSERT(ctx.streaming.pending_output != NULL,
+        "replay: pending_output must be set on NGX_AGAIN");
+    TEST_ASSERT(ctx.streaming.pending_has_data == 1,
+        "replay: pending_has_data must be 1 on NGX_AGAIN");
+    TEST_ASSERT(ctx.streaming.pending_failopen_delivery == 1,
+        "replay: pending_failopen_delivery latch must be set on NGX_AGAIN");
+    TEST_ASSERT((r.buffered & NGX_HTTP_MARKDOWN_BUFFERED) != 0,
+        "replay: request buffered flag must be set on NGX_AGAIN");
+    if (ngx_http_markdown_metrics != NULL) {
+        TEST_ASSERT(ngx_http_markdown_metrics->results.failopen_count == 0,
+            "replay: failopen_count must NOT increment on NGX_AGAIN");
+    }
+
+    g_next_body_filter_rc = NGX_OK;
+    rc = ngx_http_markdown_streaming_resume_pending(&r, &ctx, &conf);
+    TEST_ASSERT(rc == NGX_OK,
+        "replay: resume_pending should return NGX_OK on downstream success");
+    TEST_ASSERT(ctx.streaming.pending_output == NULL,
+        "replay: pending_output must be NULL after successful resume");
+    TEST_ASSERT(ctx.streaming.pending_has_data == 0,
+        "replay: pending_has_data must be 0 after successful resume");
+    TEST_ASSERT(ctx.streaming.pending_failopen_delivery == 0,
+        "replay: pending_failopen_delivery latch must be cleared after resume");
+    TEST_ASSERT((r.buffered & NGX_HTTP_MARKDOWN_BUFFERED) == 0,
+        "replay: buffered flag must be cleared after successful resume");
+    if (ngx_http_markdown_metrics != NULL) {
+        TEST_ASSERT(ngx_http_markdown_metrics->results.failopen_count == 1,
+            "replay: failopen_count must increment after resume succeeds");
+    }
+
+    if (ngx_http_markdown_metrics != NULL) {
+        ngx_http_markdown_metrics->results.failopen_count = 0;
+    }
+    ctx.streaming.failopen_replay_initialized = 1;
+    ctx.streaming.failopen_replay_buf.size = 3;
+
+    g_next_body_filter_rc = NGX_AGAIN;
+    rc = ngx_http_markdown_streaming_failopen_passthrough(
+        &r, &ctx, &in);
+    TEST_ASSERT(rc == NGX_AGAIN,
+        "replay: second NGX_AGAIN setup");
+
+    g_next_body_filter_rc = NGX_DONE;
+    rc = ngx_http_markdown_streaming_resume_pending(&r, &ctx, &conf);
+    TEST_ASSERT(rc == NGX_DONE,
+        "replay: resume_pending should return NGX_DONE on downstream NGX_DONE");
+    TEST_ASSERT(ctx.streaming.pending_has_data == 0,
+        "replay: pending_has_data must be 0 after NGX_DONE resume");
+    if (ngx_http_markdown_metrics != NULL) {
+        TEST_ASSERT(ngx_http_markdown_metrics->results.failopen_count == 1,
+            "replay: failopen_count must increment on NGX_DONE resume");
+    }
+
+    if (ngx_http_markdown_metrics != NULL) {
+        ngx_http_markdown_metrics->results.failopen_count = 0;
+    }
+    ctx.streaming.failopen_replay_initialized = 0;
+    ctx.streaming.failopen_replay_buf.size = 0;
+
+    g_next_body_filter_rc = NGX_AGAIN;
+    rc = ngx_http_markdown_streaming_failopen_passthrough(
+        &r, &ctx, &in);
+    TEST_ASSERT(rc == NGX_AGAIN,
+        "no-replay: failopen_passthrough should return NGX_AGAIN");
+    TEST_ASSERT(ctx.streaming.pending_output != NULL,
+        "no-replay: pending_output must be set on NGX_AGAIN");
+    TEST_ASSERT(ctx.streaming.pending_failopen_delivery == 1,
+        "no-replay: pending_failopen_delivery latch must be set on NGX_AGAIN");
+    if (ngx_http_markdown_metrics != NULL) {
+        TEST_ASSERT(ngx_http_markdown_metrics->results.failopen_count == 0,
+            "no-replay: failopen_count must NOT increment on NGX_AGAIN");
+    }
+
+    g_next_body_filter_rc = NGX_OK;
+    rc = ngx_http_markdown_streaming_resume_pending(&r, &ctx, &conf);
+    TEST_ASSERT(rc == NGX_OK,
+        "no-replay: resume_pending should return NGX_OK on success");
+    TEST_ASSERT(ctx.streaming.pending_has_data == 0,
+        "no-replay: pending_has_data must be 0 after successful resume");
+    if (ngx_http_markdown_metrics != NULL) {
+        TEST_ASSERT(ngx_http_markdown_metrics->results.failopen_count == 1,
+            "no-replay: failopen_count must increment after resume succeeds");
+    }
+
+    if (ngx_http_markdown_metrics != NULL) {
+        ngx_http_markdown_metrics->results.failopen_count = 0;
+    }
+    ctx.streaming.failopen_replay_initialized = 0;
+    ctx.streaming.failopen_replay_buf.size = 0;
+
+    g_next_body_filter_rc = NGX_DONE;
+    rc = ngx_http_markdown_streaming_failopen_passthrough(
+        &r, &ctx, &in);
+    TEST_ASSERT(rc == NGX_DONE,
+        "no-replay: failopen_passthrough should return NGX_DONE on downstream NGX_DONE");
+    if (ngx_http_markdown_metrics != NULL) {
+        TEST_ASSERT(ngx_http_markdown_metrics->results.failopen_count == 1,
+            "no-replay: failopen_count must increment on NGX_DONE (delivery success)");
+    }
+
+    if (ngx_http_markdown_metrics != NULL) {
+        ngx_http_markdown_metrics->results.failopen_count = 0;
+    }
+    ctx.streaming.failopen_replay_initialized = 1;
+    ctx.streaming.failopen_replay_buf.size = 3;
+
+    g_next_body_filter_rc = NGX_AGAIN;
+    rc = ngx_http_markdown_streaming_failopen_passthrough(
+        &r, &ctx, &in);
+    TEST_ASSERT(rc == NGX_AGAIN,
+        "resume-failure: setup NGX_AGAIN");
+
+    g_next_body_filter_rc = NGX_ERROR;
+    rc = ngx_http_markdown_streaming_resume_pending(&r, &ctx, &conf);
+    TEST_ASSERT(rc == NGX_ERROR,
+        "resume-failure: resume_pending should return NGX_ERROR on downstream error");
+    TEST_ASSERT(ctx.streaming.pending_has_data == 0,
+        "resume-failure: pending_has_data must be 0 after resume failure");
+    TEST_ASSERT(ctx.streaming.pending_failopen_delivery == 0,
+        "resume-failure: pending_failopen_delivery latch must be cleared on failure");
+    if (ngx_http_markdown_metrics != NULL) {
+        TEST_ASSERT(ngx_http_markdown_metrics->results.failopen_count == 0,
+            "resume-failure: failopen_count must NOT increment on resume failure");
+    }
+
+    TEST_PASS("failopen_passthrough NGX_AGAIN pending/resume");
+}
+
+/*
  * Test entry point.  Runs all streaming_impl unit test functions in
  * sequence.  Prints a banner before and after the test run.  Returns 0
  * on success; individual test assertions abort via TEST_ASSERT on failure.
@@ -2874,6 +3240,7 @@ main(void)
     test_commit_feed_and_finalize_core_paths();
     test_process_chain_and_body_filter_deep_paths();
     test_streaming_gap_branches();
+    test_failopen_passthrough_again_pending();
 
     printf("\n========================================\n");
     printf("All tests passed!\n");

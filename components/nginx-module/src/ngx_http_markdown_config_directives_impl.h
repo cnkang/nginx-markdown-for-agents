@@ -532,18 +532,26 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      * unique paths are counted in the overflow_count aggregate
      * and appear under the "__other__" pseudo-path in output.
      *
+     * This is a global (http-level) setting because the per-path
+     * limit is stored in shared memory and applies across all
+     * server and location blocks.  The directive is defined with
+     * the NGX_HTTP_MAIN_CONF flag, so it is http-only: attempting
+     * to place it in a server or location context will produce a
+     * configuration parsing error at load time rather than being
+     * silently ignored.
+     *
      * Default: 100
-     * Context: http, server, location
+     * Context: http
      *
      * Example:
      *   markdown_metrics_per_path_cardinality 200;
      */
     {
         ngx_string("markdown_metrics_per_path_cardinality"),
-        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+        NGX_HTTP_MAIN_CONF|NGX_CONF_TAKE1,
         ngx_conf_set_num_slot,
-        NGX_HTTP_LOC_CONF_OFFSET,
-        offsetof(ngx_http_markdown_conf_t, ops.metrics_per_path_cardinality),
+        NGX_HTTP_MAIN_CONF_OFFSET,
+        offsetof(ngx_http_markdown_main_conf_t, metrics_per_path_cardinality),
         NULL
     },
 

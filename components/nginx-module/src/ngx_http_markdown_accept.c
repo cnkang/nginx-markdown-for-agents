@@ -314,7 +314,10 @@ ngx_http_markdown_extract_q_param(u_char *start, const u_char *end)
  * Parse q-value from parameters
  *
  * Extracts the q-value from parameter string like "q=0.9".
- * Returns 1.0 if no q-value is found or if parsing fails.
+ * Returns 1.0 if no q-value is found (default per RFC 7231).
+ * Returns 0.0 for invalid q-values (e.g. "q=abc", "q=") so
+ * that malformed entries are effectively ignored during content
+ * negotiation rather than being given highest priority.
  *
  * @param params  The parameter string
  * @return        The q-value (0.0-1.0)
@@ -346,7 +349,16 @@ ngx_http_markdown_parse_q_value(ngx_str_t *params)
 
             result = ngx_http_markdown_extract_q_param(p, end);
             if (result < 0.0f) {
-                return 1.0f; /* Invalid q-value, use default */
+                /*
+                 * Invalid q-value (e.g. "q=abc", "q=").
+                 * Return -1.0f sentinel so the caller can
+                 * distinguish syntactic errors from an explicit
+                 * q=0 rejection.  Entries with q=-1.0 are
+                 * ignored during content negotiation (not
+                 * counted as explicit rejection and not
+                 * competing for best match).
+                 */
+                return -1.0f;
             }
 
             return result;
@@ -566,11 +578,12 @@ ngx_http_markdown_should_convert(ngx_http_request_t *r,
      */
     entry = entries->elts;
     for (ngx_uint_t i = 0; i < entries->nelts; i++) {
-        if (entry[i].q_value == 0.0f &&
-            entry[i].type.len == 4 &&
-            ngx_strncasecmp(entry[i].type.data, ngx_http_markdown_str_text, 4) == 0 &&
-            entry[i].subtype.len == 8 &&
-            ngx_strncasecmp(entry[i].subtype.data, ngx_http_markdown_str_markdown, 8) == 0)
+        if (entry[i].q_value == 0.0f
+            && entry[i].q_value != -1.0f
+            && entry[i].type.len == 4
+            && ngx_strncasecmp(entry[i].type.data, ngx_http_markdown_str_text, 4) == 0
+            && entry[i].subtype.len == 8
+            && ngx_strncasecmp(entry[i].subtype.data, ngx_http_markdown_str_markdown, 8) == 0)
         {
             ngx_log_error(NGX_LOG_DEBUG, r->connection->log, 0,
                          "markdown: text/markdown explicitly rejected (q=0)");
