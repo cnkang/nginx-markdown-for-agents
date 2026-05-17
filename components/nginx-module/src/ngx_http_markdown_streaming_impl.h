@@ -1125,14 +1125,26 @@ ngx_http_markdown_streaming_resume_pending(
     if (rc != NGX_OK && rc != NGX_DONE) {
         /*
          * Resume failed after draining pending output.
-         * Clear any pending terminal metrics latch to avoid
-         * stale state on re-entry, then record failure metrics.
+         * Clear any pending terminal metrics latch and failopen
+         * delivery latch to avoid stale state on re-entry, then
+         * record failure metrics.
          */
         ctx->streaming.pending_terminal_metrics = 0;
+        ctx->streaming.pending_failopen_delivery = 0;
         ngx_http_markdown_streaming_record_postcommit_failure(
             r, ctx, conf);
 
         return rc;
+    }
+
+    /*
+     * Pending output drained successfully. If this was a
+     * fail-open delivery that was deferred by backpressure,
+     * increment the delivery counter now (Rule 38).
+     */
+    if (ctx->streaming.pending_failopen_delivery) {
+        NGX_HTTP_MARKDOWN_METRIC_INC(results.failopen_count);
+        ctx->streaming.pending_failopen_delivery = 0;
     }
 
     /*
@@ -2400,10 +2412,46 @@ ngx_http_markdown_streaming_init_handle(
 
 
 /*
+ * Clone chain link structures into request pool memory.
+ *
+ * Each link is newly allocated; the buf pointer is copied (shared)
+ * so the caller must ensure the underlying ngx_buf_t and its data
+ * remain valid for the request lifetime.  The chain topology
+ * (->next pointers) is replicated.
+ *
+ * Returns the head of the cloned chain, or NULL on allocation failure.
+ */
+static ngx_chain_t *
+ngx_http_markdown_streaming_clone_chain_links(
+    ngx_http_request_t *r,
+    ngx_chain_t *in)
+{
+    ngx_chain_t  *head = NULL;
+    ngx_chain_t  **tail = &head;
+    ngx_chain_t  *cl;
+
+    for (; in != NULL; in = in->next) {
+        cl = ngx_alloc_chain_link(r->pool);
+        if (cl == NULL) {
+            return NULL;
+        }
+        cl->buf = in->buf;
+        cl->next = NULL;
+        *tail = cl;
+        tail = &cl->next;
+    }
+
+    return head;
+}
+
+
+/*
  * Send a fail-open output chain downstream with backpressure and
  * delivery-metric semantics matching send_output()'s contract.
  *
- * On NGX_AGAIN: saves pending_output, sets buffered flag (Rule 1).
+ * On NGX_AGAIN: saves pending_output, sets buffered flag (Rule 1),
+ * and sets pending_failopen_delivery latch so resume_pending can
+ * increment failopen_count after successful drain (Rule 38).
  * On NGX_OK or NGX_DONE: increments failopen_count if !ctx->eligible
  * (Rule 38: delivery counter after downstream success).
  *
@@ -2422,6 +2470,7 @@ ngx_http_markdown_streaming_send_failopen_chain(
     if (rc == NGX_AGAIN) {
         ctx->streaming.pending_output = out;
         ctx->streaming.pending_has_data = 1;
+        ctx->streaming.pending_failopen_delivery = (!ctx->eligible) ? 1 : 0;
         r->buffered |= NGX_HTTP_MARKDOWN_BUFFERED;
         return NGX_AGAIN;
     }
@@ -2454,7 +2503,13 @@ ngx_http_markdown_streaming_failopen_passthrough(
     if (!ctx->streaming.failopen_replay_initialized
         || ctx->streaming.failopen_replay_buf.size == 0)
     {
-        return ngx_http_markdown_streaming_send_failopen_chain(r, ctx, in);
+        ngx_chain_t  *cloned;
+
+        cloned = ngx_http_markdown_streaming_clone_chain_links(r, in);
+        if (cloned == NULL && in != NULL) {
+            return NGX_ERROR;
+        }
+        return ngx_http_markdown_streaming_send_failopen_chain(r, ctx, cloned);
     }
 
     /*
@@ -2485,7 +2540,15 @@ ngx_http_markdown_streaming_failopen_passthrough(
     *tail = cl;
     tail = &cl->next;
 
-    *tail = in;
+    {
+        ngx_chain_t  *cloned;
+
+        cloned = ngx_http_markdown_streaming_clone_chain_links(r, in);
+        if (cloned == NULL && in != NULL) {
+            return NGX_ERROR;
+        }
+        *tail = cloned;
+    }
 
     return ngx_http_markdown_streaming_send_failopen_chain(r, ctx, head);
 }

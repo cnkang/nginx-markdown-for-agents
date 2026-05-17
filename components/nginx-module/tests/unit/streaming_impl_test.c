@@ -3079,67 +3079,33 @@ test_failopen_passthrough_again_pending(void)
     rc = ngx_http_markdown_streaming_failopen_passthrough(
         &r, &ctx, &in);
     TEST_ASSERT(rc == NGX_AGAIN,
-        "failopen_passthrough should return NGX_AGAIN on downstream backpressure");
+        "replay: failopen_passthrough should return NGX_AGAIN on backpressure");
     TEST_ASSERT(ctx.streaming.pending_output != NULL,
-        "pending_output must be set on NGX_AGAIN");
+        "replay: pending_output must be set on NGX_AGAIN");
     TEST_ASSERT(ctx.streaming.pending_has_data == 1,
-        "pending_has_data must be 1 on NGX_AGAIN");
+        "replay: pending_has_data must be 1 on NGX_AGAIN");
+    TEST_ASSERT(ctx.streaming.pending_failopen_delivery == 1,
+        "replay: pending_failopen_delivery latch must be set on NGX_AGAIN");
     TEST_ASSERT((r.buffered & NGX_HTTP_MARKDOWN_BUFFERED) != 0,
-        "request buffered flag must be set on NGX_AGAIN");
-
+        "replay: request buffered flag must be set on NGX_AGAIN");
     if (ngx_http_markdown_metrics != NULL) {
         TEST_ASSERT(ngx_http_markdown_metrics->results.failopen_count == 0,
-            "failopen_count must NOT increment on NGX_AGAIN");
+            "replay: failopen_count must NOT increment on NGX_AGAIN");
     }
 
     g_next_body_filter_rc = NGX_OK;
-    ctx.streaming.pending_output = NULL;
-    ctx.streaming.pending_has_data = 0;
-    r.buffered &= ~NGX_HTTP_MARKDOWN_BUFFERED;
-
-    rc = ngx_http_markdown_streaming_failopen_passthrough(
-        &r, &ctx, &in);
+    rc = ngx_http_markdown_streaming_resume_pending(&r, &ctx, &conf);
     TEST_ASSERT(rc == NGX_OK,
-        "failopen_passthrough should return NGX_OK on downstream success");
+        "replay: resume_pending should return NGX_OK on downstream success");
+    TEST_ASSERT(ctx.streaming.pending_output == NULL,
+        "replay: pending_output must be NULL after successful resume");
+    TEST_ASSERT(ctx.streaming.pending_failopen_delivery == 0,
+        "replay: pending_failopen_delivery latch must be cleared after resume");
+    TEST_ASSERT((r.buffered & NGX_HTTP_MARKDOWN_BUFFERED) == 0,
+        "replay: buffered flag must be cleared after successful resume");
     if (ngx_http_markdown_metrics != NULL) {
         TEST_ASSERT(ngx_http_markdown_metrics->results.failopen_count == 1,
-            "failopen_count must increment on downstream NGX_OK");
-    }
-
-    ctx.streaming.failopen_replay_initialized = 0;
-    ctx.streaming.failopen_replay_buf.size = 0;
-    if (ngx_http_markdown_metrics != NULL) {
-        ngx_http_markdown_metrics->results.failopen_count = 0;
-    }
-
-    g_next_body_filter_rc = NGX_AGAIN;
-    rc = ngx_http_markdown_streaming_failopen_passthrough(
-        &r, &ctx, &in);
-    TEST_ASSERT(rc == NGX_AGAIN,
-        "no-replay failopen_passthrough should return NGX_AGAIN");
-    TEST_ASSERT(ctx.streaming.pending_output != NULL,
-        "no-replay: pending_output must be set on NGX_AGAIN");
-    TEST_ASSERT(ctx.streaming.pending_has_data == 1,
-        "no-replay: pending_has_data must be 1 on NGX_AGAIN");
-    TEST_ASSERT((r.buffered & NGX_HTTP_MARKDOWN_BUFFERED) != 0,
-        "no-replay: buffered flag must be set on NGX_AGAIN");
-    if (ngx_http_markdown_metrics != NULL) {
-        TEST_ASSERT(ngx_http_markdown_metrics->results.failopen_count == 0,
-            "no-replay: failopen_count must NOT increment on NGX_AGAIN");
-    }
-
-    g_next_body_filter_rc = NGX_OK;
-    ctx.streaming.pending_output = NULL;
-    ctx.streaming.pending_has_data = 0;
-    r.buffered &= ~NGX_HTTP_MARKDOWN_BUFFERED;
-
-    rc = ngx_http_markdown_streaming_failopen_passthrough(
-        &r, &ctx, &in);
-    TEST_ASSERT(rc == NGX_OK,
-        "no-replay failopen_passthrough should return NGX_OK on success");
-    if (ngx_http_markdown_metrics != NULL) {
-        TEST_ASSERT(ngx_http_markdown_metrics->results.failopen_count == 1,
-            "no-replay: failopen_count must increment on NGX_OK");
+            "replay: failopen_count must increment after resume succeeds");
     }
 
     if (ngx_http_markdown_metrics != NULL) {
@@ -3147,14 +3113,20 @@ test_failopen_passthrough_again_pending(void)
     }
     ctx.streaming.failopen_replay_initialized = 1;
     ctx.streaming.failopen_replay_buf.size = 3;
-    g_next_body_filter_rc = NGX_DONE;
+
+    g_next_body_filter_rc = NGX_AGAIN;
     rc = ngx_http_markdown_streaming_failopen_passthrough(
         &r, &ctx, &in);
+    TEST_ASSERT(rc == NGX_AGAIN,
+        "replay: second NGX_AGAIN setup");
+
+    g_next_body_filter_rc = NGX_DONE;
+    rc = ngx_http_markdown_streaming_resume_pending(&r, &ctx, &conf);
     TEST_ASSERT(rc == NGX_DONE,
-        "replay failopen_passthrough should return NGX_DONE on downstream NGX_DONE");
+        "replay: resume_pending should return NGX_DONE on downstream NGX_DONE");
     if (ngx_http_markdown_metrics != NULL) {
         TEST_ASSERT(ngx_http_markdown_metrics->results.failopen_count == 1,
-            "replay: failopen_count must increment on NGX_DONE (delivery success)");
+            "replay: failopen_count must increment on NGX_DONE resume");
     }
 
     if (ngx_http_markdown_metrics != NULL) {
@@ -3162,14 +3134,67 @@ test_failopen_passthrough_again_pending(void)
     }
     ctx.streaming.failopen_replay_initialized = 0;
     ctx.streaming.failopen_replay_buf.size = 0;
+
+    g_next_body_filter_rc = NGX_AGAIN;
+    rc = ngx_http_markdown_streaming_failopen_passthrough(
+        &r, &ctx, &in);
+    TEST_ASSERT(rc == NGX_AGAIN,
+        "no-replay: failopen_passthrough should return NGX_AGAIN");
+    TEST_ASSERT(ctx.streaming.pending_output != NULL,
+        "no-replay: pending_output must be set on NGX_AGAIN");
+    TEST_ASSERT(ctx.streaming.pending_failopen_delivery == 1,
+        "no-replay: pending_failopen_delivery latch must be set on NGX_AGAIN");
+    if (ngx_http_markdown_metrics != NULL) {
+        TEST_ASSERT(ngx_http_markdown_metrics->results.failopen_count == 0,
+            "no-replay: failopen_count must NOT increment on NGX_AGAIN");
+    }
+
+    g_next_body_filter_rc = NGX_OK;
+    rc = ngx_http_markdown_streaming_resume_pending(&r, &ctx, &conf);
+    TEST_ASSERT(rc == NGX_OK,
+        "no-replay: resume_pending should return NGX_OK on success");
+    if (ngx_http_markdown_metrics != NULL) {
+        TEST_ASSERT(ngx_http_markdown_metrics->results.failopen_count == 1,
+            "no-replay: failopen_count must increment after resume succeeds");
+    }
+
+    if (ngx_http_markdown_metrics != NULL) {
+        ngx_http_markdown_metrics->results.failopen_count = 0;
+    }
+    ctx.streaming.failopen_replay_initialized = 0;
+    ctx.streaming.failopen_replay_buf.size = 0;
+
     g_next_body_filter_rc = NGX_DONE;
     rc = ngx_http_markdown_streaming_failopen_passthrough(
         &r, &ctx, &in);
     TEST_ASSERT(rc == NGX_DONE,
-        "no-replay failopen_passthrough should return NGX_DONE on downstream NGX_DONE");
+        "no-replay: failopen_passthrough should return NGX_DONE on downstream NGX_DONE");
     if (ngx_http_markdown_metrics != NULL) {
         TEST_ASSERT(ngx_http_markdown_metrics->results.failopen_count == 1,
             "no-replay: failopen_count must increment on NGX_DONE (delivery success)");
+    }
+
+    if (ngx_http_markdown_metrics != NULL) {
+        ngx_http_markdown_metrics->results.failopen_count = 0;
+    }
+    ctx.streaming.failopen_replay_initialized = 1;
+    ctx.streaming.failopen_replay_buf.size = 3;
+
+    g_next_body_filter_rc = NGX_AGAIN;
+    rc = ngx_http_markdown_streaming_failopen_passthrough(
+        &r, &ctx, &in);
+    TEST_ASSERT(rc == NGX_AGAIN,
+        "resume-failure: setup NGX_AGAIN");
+
+    g_next_body_filter_rc = NGX_ERROR;
+    rc = ngx_http_markdown_streaming_resume_pending(&r, &ctx, &conf);
+    TEST_ASSERT(rc == NGX_ERROR,
+        "resume-failure: resume_pending should return NGX_ERROR on downstream error");
+    TEST_ASSERT(ctx.streaming.pending_failopen_delivery == 0,
+        "resume-failure: pending_failopen_delivery latch must be cleared on failure");
+    if (ngx_http_markdown_metrics != NULL) {
+        TEST_ASSERT(ngx_http_markdown_metrics->results.failopen_count == 0,
+            "resume-failure: failopen_count must NOT increment on resume failure");
     }
 
     TEST_PASS("failopen_passthrough NGX_AGAIN pending/resume");

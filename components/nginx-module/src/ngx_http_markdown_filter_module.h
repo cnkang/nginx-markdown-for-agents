@@ -472,6 +472,10 @@ typedef struct {
         /* Pending output chain has non-empty data (for TTFB resume path) */
         ngx_flag_t                        pending_has_data;
 
+        /* Pending output is a fail-open delivery; resume_pending should
+           increment results.failopen_count on downstream success. */
+        ngx_flag_t                        pending_failopen_delivery;
+
         /* Pre-Commit prebuffer for fallback */
         ngx_http_markdown_buffer_t        prebuffer;
         size_t                            prebuffer_limit;
