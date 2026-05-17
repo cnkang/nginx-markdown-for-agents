@@ -100,9 +100,9 @@ ngx_http_markdown_init_worker(ngx_cycle_t *cycle)
          * setting because the SHM metrics struct is process-wide.
          */
         if (ngx_http_markdown_metrics != NULL) {
-            ngx_http_markdown_main_conf_t  *mcf;
+            const ngx_http_markdown_main_conf_t  *mcf;
 
-            mcf = (ngx_http_markdown_main_conf_t *)
+            mcf = (const ngx_http_markdown_main_conf_t *)
                 http_ctx->main_conf[
                     ngx_http_markdown_filter_module.ctx_index];
 
