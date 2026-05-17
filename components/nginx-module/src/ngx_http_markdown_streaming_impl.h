@@ -2419,6 +2419,16 @@ ngx_http_markdown_streaming_init_handle(
  * remain valid for the request lifetime.  The chain topology
  * (->next pointers) is replicated.
  *
+ * For fail-open pending chains saved across NGX_AGAIN, this is
+ * safer than holding the original chain links (which belong to the
+ * body filter's transient input), but still shares the underlying
+ * ngx_buf_t.  In the NGINX filter chain, the buf data is typically
+ * stable within a request (pool-allocated by upstream or copy
+ * filter), making shared bufs safe for pending chains.  If a future
+ * filter chain configuration introduces transient buf data that is
+ * invalidated between body_filter invocations, upgrade this to
+ * clone_chain_deep() which also copies buf data into request pool.
+ *
  * Returns the head of the cloned chain, or NULL on allocation failure.
  */
 static ngx_chain_t *
