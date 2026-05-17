@@ -247,6 +247,9 @@ struct ngx_http_request_s {
 #ifndef NGX_DONE
 #define NGX_DONE (-4)
 #endif
+#ifndef NGX_AGAIN
+#define NGX_AGAIN (-2)
+#endif
 #ifndef NGX_DECLINED
 #define NGX_DECLINED (-5)
 #endif
