@@ -619,6 +619,7 @@ static void
 test_null_inputs(void)
 {
     ngx_str_t empty = ngx_null_string;
+    ngx_str_t reason = ngx_string("SKIP_CONFIG");
 
     TEST_SUBSECTION("NULL and empty input handling");
 
@@ -626,6 +627,14 @@ test_null_inputs(void)
                 "NULL reason_code -> not failure");
     TEST_ASSERT(is_failure_outcome(&empty) == 0,
                 "Empty reason_code -> not failure");
+
+    TEST_ASSERT(should_emit(NGX_HTTP_MARKDOWN_LOG_INFO, NULL) == 1,
+                "should_emit with NULL reason_code -> emit (safe default)");
+    TEST_ASSERT(should_emit(NGX_HTTP_MARKDOWN_LOG_WARN, &reason) == 0,
+                "should_emit warn verbosity + non-failure -> suppress");
+
+    TEST_ASSERT(expected_log_level(NULL) == NGX_LOG_INFO,
+                "expected_log_level NULL -> INFO (safe default)");
 
     TEST_PASS("NULL/empty inputs handled safely");
 }
