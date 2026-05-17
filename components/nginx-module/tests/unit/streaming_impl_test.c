@@ -3040,10 +3040,13 @@ test_failopen_passthrough_again_pending(void)
     ngx_int_t               rc;
     u_char                  prebuf_data[16];
     u_char                  chunk_data[] = "chunk";
+    ngx_http_markdown_metrics_t metrics;
 
     TEST_SUBSECTION("failopen_passthrough NGX_AGAIN pending/resume");
     reset_globals();
     init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &read_event);
+    ngx_memzero(&metrics, sizeof(metrics));
+    ngx_http_markdown_metrics = &metrics;
     conf.max_size = 0;
     conf.streaming.on_error = NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_PASS;
 
