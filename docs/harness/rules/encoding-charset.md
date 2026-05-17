@@ -6,7 +6,7 @@ paths:
   - "components/nginx-module/src/**"
 ---
 
-# Encoding & Charset
+## Encoding & Charset
 
 ### 4. UTF-8/charset cross-chunk corruption
 Historical issues: `0eae34b`, `1b0df51`, `77a46d6`.

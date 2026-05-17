@@ -6,7 +6,7 @@ paths:
   - "tools/e2e/**"
 ---
 
-# Shell Script Hygiene & Portability
+## Shell Script Hygiene & Portability
 
 ### 11. Shell portability and environment assumptions
 Historical issues: `f0a98fc`, `55b9170`, `5a8b5ee`, `092f04f`.

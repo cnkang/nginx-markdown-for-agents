@@ -6,7 +6,7 @@ paths:
   - "components/rust-converter/src/streaming/**"
 ---
 
-# Streaming & Backpressure
+## Streaming & Backpressure
 
 ### 1. Streaming backpressure and pending-chain handling
 Historical issues: `5649890`, `23165d9`, `cfd4bd8`, `f97be3f`.

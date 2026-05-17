@@ -6,7 +6,7 @@ paths:
   - "components/nginx-module/include/**"
 ---
 
-# C99 Declaration & Type Safety
+## C99 Declaration & Type Safety
 
 ### 24. C99 declaration/type safety and integer conversion hardening
 Historical issues: Sonar `c:S819`, `c:S5276`, `c:S859`, `c:S995`, `c:S5350`.

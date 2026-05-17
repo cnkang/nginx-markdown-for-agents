@@ -7,7 +7,7 @@ paths:
   - "docs/**"
 ---
 
-# Observability & Metrics
+## Observability & Metrics
 
 ### 7. Eligibility/reason-code drift and status handling bugs
 Historical issues: `d2d836f`, `5288c1b`, `19c896c`, `bc35a1f`.

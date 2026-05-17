@@ -5,7 +5,7 @@ paths:
   - "components/nginx-module/src/**"
 ---
 
-# NGINX Idioms & API Correctness
+## NGINX Idioms & API Correctness
 
 ### 28. Full ngx_list_part_t chain iteration and multi-value HTTP header semantics
 Historical issues: `4c2b8d9`, `e7a1f03`, `b3d9c52`, `f1a8e64`.

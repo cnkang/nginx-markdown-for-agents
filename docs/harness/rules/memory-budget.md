@@ -6,7 +6,7 @@ paths:
   - "components/rust-converter/src/**"
 ---
 
-# Memory Budget
+## Memory Budget
 
 ### 3. Memory leaks and budget bypass in streaming/decompression
 Historical issues: `23165d9`, `2c7d6a9`, `0eae34b`, `1b0df51`.

@@ -2394,9 +2394,46 @@ ngx_http_markdown_streaming_init_handle(
  * resume_pending() will re-submit the chain when downstream is writable.
  *
  * Returns:
- *   NGX_OK/NGX_AGAIN - status from the downstream body filter
- *   NGX_ERROR        - allocation or header-forwarding failure
+ *   NGX_OK/NGX_AGAIN/NGX_DONE - status from the downstream body filter
+ *   NGX_ERROR                  - allocation or header-forwarding failure
  */
+
+
+/*
+ * Send a fail-open output chain downstream with backpressure and
+ * delivery-metric semantics matching send_output()'s contract.
+ *
+ * On NGX_AGAIN: saves pending_output, sets buffered flag (Rule 1).
+ * On NGX_OK or NGX_DONE: increments failopen_count if !ctx->eligible
+ * (Rule 38: delivery counter after downstream success).
+ *
+ * Returns the downstream filter return code.
+ */
+static ngx_int_t
+ngx_http_markdown_streaming_send_failopen_chain(
+    ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx,
+    ngx_chain_t *out)
+{
+    ngx_int_t  rc;
+
+    rc = ngx_http_next_body_filter(r, out);
+
+    if (rc == NGX_AGAIN) {
+        ctx->streaming.pending_output = out;
+        ctx->streaming.pending_has_data = 1;
+        r->buffered |= NGX_HTTP_MARKDOWN_BUFFERED;
+        return NGX_AGAIN;
+    }
+
+    if ((rc == NGX_OK || rc == NGX_DONE) && !ctx->eligible) {
+        NGX_HTTP_MARKDOWN_METRIC_INC(results.failopen_count);
+    }
+
+    return rc;
+}
+
+
 static ngx_int_t
 ngx_http_markdown_streaming_failopen_passthrough(
     ngx_http_request_t *r,
@@ -2407,7 +2444,6 @@ ngx_http_markdown_streaming_failopen_passthrough(
     ngx_chain_t  **tail;
     ngx_chain_t  *cl;
     ngx_buf_t    *b;
-    ngx_int_t     rc;
 
     if (!ctx->headers_forwarded) {
         if (ngx_http_markdown_forward_headers(r, ctx) != NGX_OK) {
@@ -2418,17 +2454,7 @@ ngx_http_markdown_streaming_failopen_passthrough(
     if (!ctx->streaming.failopen_replay_initialized
         || ctx->streaming.failopen_replay_buf.size == 0)
     {
-        rc = ngx_http_next_body_filter(r, in);
-        if (rc == NGX_AGAIN) {
-            ctx->streaming.pending_output = in;
-            ctx->streaming.pending_has_data = 1;
-            r->buffered |= NGX_HTTP_MARKDOWN_BUFFERED;
-            return NGX_AGAIN;
-        }
-        if (rc == NGX_OK && !ctx->eligible) {
-            NGX_HTTP_MARKDOWN_METRIC_INC(results.failopen_count);
-        }
-        return rc;
+        return ngx_http_markdown_streaming_send_failopen_chain(r, ctx, in);
     }
 
     /*
@@ -2461,19 +2487,7 @@ ngx_http_markdown_streaming_failopen_passthrough(
 
     *tail = in;
 
-    rc = ngx_http_next_body_filter(r, head);
-
-    if (rc == NGX_AGAIN) {
-        ctx->streaming.pending_output = head;
-        ctx->streaming.pending_has_data = 1;
-        r->buffered |= NGX_HTTP_MARKDOWN_BUFFERED;
-        return NGX_AGAIN;
-    }
-
-    if (rc == NGX_OK && !ctx->eligible) {
-        NGX_HTTP_MARKDOWN_METRIC_INC(results.failopen_count);
-    }
-    return rc;
+    return ngx_http_markdown_streaming_send_failopen_chain(r, ctx, head);
 }
 
 

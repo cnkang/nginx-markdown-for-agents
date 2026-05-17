@@ -6,7 +6,7 @@ paths:
   - "components/nginx-module/**"
 ---
 
-# Warnings Triage
+## Warnings Triage
 
 ### 21. Warning triage and command reproducibility guardrails
 

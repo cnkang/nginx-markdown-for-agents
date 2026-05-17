@@ -7,7 +7,7 @@ paths:
   - "components/rust-converter/src/**"
 ---
 
-# Security (CWE)
+## Security (CWE)
 
 ### 12. Security hardening for file paths and code injection
 Historical issues: `13c47c2`, `702c39d`.

@@ -7,7 +7,7 @@ paths:
   - "components/nginx-module/src/**"
 ---
 
-# FFI & Cross-Language Interface
+## FFI & Cross-Language Interface
 
 ### 15. Cross-language interface and FFI synchronization
 Historical issues: `dbb5722`, `dfeffc4`, `ceeaf38`, `5970807`.

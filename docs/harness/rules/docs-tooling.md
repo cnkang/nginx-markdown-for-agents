@@ -8,7 +8,7 @@ paths:
   - "INSTALLATION.md"
 ---
 
-# Docs & Tooling Drift
+## Docs & Tooling Drift
 
 ### 9. Docs/tooling drift (README vs INSTALLATION vs validators)
 Historical issues: `726865e`, `2b0bd5d`, `83eca29`, `18dfb8c`, `4b2b761`, `09f5d1d`.

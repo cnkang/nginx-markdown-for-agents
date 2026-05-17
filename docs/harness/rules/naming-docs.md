@@ -7,7 +7,7 @@ paths:
   - "tools/**"
 ---
 
-# Naming & Documentation Discipline
+## Naming & Documentation Discipline
 
 ### 26. Naming and documentation discipline
 
