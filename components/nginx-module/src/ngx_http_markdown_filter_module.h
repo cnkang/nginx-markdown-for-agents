@@ -629,6 +629,7 @@ typedef struct {
         ngx_atomic_t  gzip;        /* Gzip decompressions */
         ngx_atomic_t  deflate;     /* Deflate decompressions */
         ngx_atomic_t  brotli;      /* Brotli decompressions */
+        ngx_atomic_t  budget_exceeded_total;  /* Decompression budget exceeded */
     } decompressions;
 
     /*
@@ -709,19 +710,16 @@ typedef struct {
      * — keys are still emitted as flat names.
      */
     struct {
-        /*
-         * Fail-open counter: conversion failed but original HTML
-         * served due to markdown_on_error pass.
-         */
         ngx_atomic_t  failopen_count;
-
-        /*
-         * Estimated cumulative token savings across all successful
-         * conversions.  Only non-zero when markdown_token_estimate
-         * is enabled.  Value is an approximation.
-         */
+        ngx_atomic_t  delivery_count;
+        ngx_atomic_t  decision_count;
         ngx_atomic_t  estimated_token_savings;
     } results;
+
+    struct {
+        ngx_atomic_t  parse_timeouts_total;
+        ngx_atomic_t  parse_budget_exceeded_total;
+    } parse_interrupts;
 
     /*
      * Per-path metrics (v0.6.0 P1-2).
