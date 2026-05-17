@@ -65,9 +65,49 @@
 #endif
 
 /**
+ * Decompression budget exceeded (decompressed output exceeds decompress_max_size).
+ */
+#define ERROR_DECOMPRESSION_BUDGET_EXCEEDED 9
+
+/**
+ * Parse timeout: HTML parsing exceeded the configured deadline.
+ */
+#define ERROR_PARSE_TIMEOUT 10
+
+/**
+ * Parse budget exceeded: parser memory allocation exceeded parser_memory_budget.
+ */
+#define ERROR_PARSE_BUDGET_EXCEEDED 11
+
+/**
  * Internal error (unexpected condition, panic caught).
  */
 #define ERROR_INTERNAL 99
+
+/**
+ * Reason code: client prefers text/markdown, proceed with conversion.
+ */
+#define NEGOTIATE_REASON_CONVERT 0
+
+/**
+ * Reason code: no Accept header was present.
+ */
+#define NEGOTIATE_REASON_NO_ACCEPT 1
+
+/**
+ * Reason code: text/markdown has lower q-value than text/html.
+ */
+#define NEGOTIATE_REASON_LOWER_Q 2
+
+/**
+ * Reason code: client explicitly set text/markdown;q=0.
+ */
+#define NEGOTIATE_REASON_EXPLICIT_REJECT 3
+
+/**
+ * Reason code: Accept header is malformed.
+ */
+#define NEGOTIATE_REASON_MALFORMED 4
 
 #if defined(MARKDOWN_INCREMENTAL_ENABLED)
 /**
@@ -313,6 +353,33 @@ typedef struct MarkdownResult {
 } MarkdownResult;
 
 /**
+ * Result of Accept header content negotiation.
+ *
+ * Returned by `markdown_negotiate_accept()` for the C caller to decide
+ * whether to proceed with HTML-to-Markdown conversion.
+ *
+ * # Fields
+ *
+ * - `should_convert`: 1 if the client prefers text/markdown, 0 otherwise.
+ * - `reason`: Numeric reason code for the decision.
+ *   - 0: Convert (text/markdown preferred)
+ *   - 1: No Accept header present
+ *   - 2: text/markdown has lower q-value than text/html
+ *   - 3: text/markdown;q=0 explicit reject
+ *   - 4: Malformed Accept header
+ */
+typedef struct FFIAcceptResult {
+  /**
+   * 1 if conversion should proceed, 0 otherwise.
+   */
+  uint8_t should_convert;
+  /**
+   * Reason code for the negotiation decision.
+   */
+  uint8_t reason;
+} FFIAcceptResult;
+
+/**
  * Allocate a new converter handle for use across multiple FFI calls.
  *
  * # Safety
@@ -369,6 +436,25 @@ void markdown_result_free(struct MarkdownResult *result);
  * not be used after this call returns.
  */
 void markdown_converter_free(struct MarkdownConverterHandle *handle);
+
+/**
+ * Perform Accept header content negotiation.
+ *
+ * Parses the client `Accept` header and determines whether the client
+ * prefers `text/markdown` over `text/html`, using RFC 7231 §5.3.2
+ * q-value comparison.
+ *
+ * # Safety
+ *
+ * The caller must ensure that:
+ * - `accept_header` either points to `accept_header_len` readable bytes
+ *   or is NULL when `accept_header_len == 0`
+ * - `result` points to writable storage for a `FFIAcceptResult`
+ */
+void markdown_negotiate_accept(const uint8_t *accept_header,
+                               uintptr_t accept_header_len,
+                               uint8_t on_wildcard,
+                               struct FFIAcceptResult *result);
 
 #if defined(MARKDOWN_INCREMENTAL_ENABLED)
 /**

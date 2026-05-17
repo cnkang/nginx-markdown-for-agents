@@ -697,12 +697,175 @@ mod tests {
                     validator.is_dangerous_url(&candidate),
                     "Dangerous scheme should be detected regardless of case/leading whitespace: {candidate}"
                 );
-                prop_assert_eq!(
-                    validator.sanitize_url(&candidate),
-                    None,
-                    "Dangerous scheme should be removed by sanitize_url"
-                );
+                 prop_assert_eq!(
+                     validator.sanitize_url(&candidate),
+                     None,
+                     "Dangerous scheme should be removed by sanitize_url"
+                 );
+             }
+         }
+     }
+ }
+
+/// Reject URLs containing C0 control characters (U+0000–U+001F)
+/// except HT (U+0009), LF (U+000A), CR (U+000D) which are
+/// permitted in HTTP header values per RFC 7230 §3.2.
+///
+/// Returns true if the URL contains disallowed control characters.
+pub fn url_contains_control_chars(url: &str) -> bool {
+    url.bytes().any(|b| {
+        b != b'\t' && b != b'\n' && b != b'\r' && b < 0x20
+    })
+}
+
+/// Validate a URL for use in Markdown link destinations.
+///
+/// Returns Ok(()) if the URL is safe, Err(reason) if it contains
+/// control characters or other dangerous content.
+pub fn validate_link_url(url: &str) -> Result<(), &'static str> {
+    if url_contains_control_chars(url) {
+        return Err("URL contains control characters");
+    }
+
+    let validator = SecurityValidator::new();
+    if validator.sanitize_url(url).is_none() {
+        return Err("URL has dangerous scheme");
+    }
+
+    Ok(())
+}
+
+/// Parse X-Forwarded-Host and X-Forwarded-Proto headers to
+/// construct an effective base URL.
+///
+/// Returns (scheme, host) or None if headers are absent/empty.
+pub fn parse_forwarded_headers(
+    x_forwarded_host: Option<&str>,
+    x_forwarded_proto: Option<&str>,
+) -> Option<(String, String)> {
+    let host = x_forwarded_host?.trim();
+    if host.is_empty() {
+        return None;
+    }
+
+    if url_contains_control_chars(host) {
+        return None;
+    }
+
+    let scheme = match x_forwarded_proto {
+        Some(p) => {
+            let p = p.trim();
+            if p.is_empty() || url_contains_control_chars(p) {
+                "https".to_string()
+            } else {
+                p.to_ascii_lowercase()
             }
         }
+        None => "https".to_string(),
+    };
+
+    if scheme != "http" && scheme != "https" {
+        return None;
+    }
+
+    Some((scheme, host.to_string()))
+}
+
+/// Escape a string for safe use as a Markdown link label.
+///
+/// Per CommonMark §4.7, link labels may contain backslash escapes.
+/// Escape: `[`, `]`, `\`.
+pub fn escape_link_label(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 8);
+    for ch in s.chars() {
+        match ch {
+            '[' | ']' | '\\' => {
+                out.push('\\');
+                out.push(ch);
+            }
+            _ => out.push(ch),
+        }
+    }
+    out
+}
+
+/// Escape a string for safe use as a Markdown link destination.
+///
+/// Per CommonMark §4.7, link destinations may contain backslash escapes.
+/// Escape: `[`, `]`, `\`, `(`, `)`.
+pub fn escape_link_destination(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 8);
+    for ch in s.chars() {
+        match ch {
+            '[' | ']' | '\\' | '(' | ')' => {
+                out.push('\\');
+                out.push(ch);
+            }
+            _ => out.push(ch),
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod url_validation_tests {
+    use super::*;
+
+    #[test]
+    fn test_url_no_control_chars() {
+        assert!(!url_contains_control_chars("https://example.com/path"));
+    }
+
+    #[test]
+    fn test_url_with_null_byte() {
+        assert!(url_contains_control_chars("https://example.com/\0path"));
+    }
+
+    #[test]
+    fn test_url_with_ctrl_char() {
+        assert!(url_contains_control_chars("https://example.com/\x01path"));
+    }
+
+    #[test]
+    fn test_url_with_tab_allowed() {
+        assert!(!url_contains_control_chars("https://example.com/\tpath"));
+    }
+
+    #[test]
+    fn test_validate_link_url_safe() {
+        assert!(validate_link_url("https://example.com/path").is_ok());
+    }
+
+    #[test]
+    fn test_validate_link_url_control_chars() {
+        assert!(validate_link_url("https://example.com/\0path").is_err());
+    }
+
+    #[test]
+    fn test_parse_forwarded_headers_both() {
+        let r = parse_forwarded_headers(Some("api.example.com"), Some("https"));
+        assert_eq!(r, Some(("https".to_string(), "api.example.com".to_string())));
+    }
+
+    #[test]
+    fn test_parse_forwarded_headers_no_host() {
+        let r = parse_forwarded_headers(None, Some("https"));
+        assert!(r.is_none());
+    }
+
+    #[test]
+    fn test_parse_forwarded_headers_default_proto() {
+        let r = parse_forwarded_headers(Some("host"), None);
+        assert_eq!(r, Some(("https".to_string(), "host".to_string())));
+    }
+
+    #[test]
+    fn test_escape_link_label() {
+        assert_eq!(escape_link_label("foo [bar] baz"), r"foo \[bar\] baz");
+    }
+
+    #[test]
+    fn test_escape_link_destination() {
+        assert_eq!(escape_link_destination("url?q=(1)"), r"url?q=\(1\)");
     }
 }

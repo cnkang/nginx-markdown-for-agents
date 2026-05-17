@@ -39,7 +39,11 @@ use std::ptr;
 
 use crate::error::ConversionError;
 
-use super::abi::{ERROR_INTERNAL, MarkdownConverterHandle, MarkdownOptions, MarkdownResult};
+use super::abi::{
+    ERROR_INTERNAL, FFIAcceptResult, MarkdownConverterHandle, MarkdownOptions, MarkdownResult,
+    NEGOTIATE_REASON_CONVERT, NEGOTIATE_REASON_EXPLICIT_REJECT, NEGOTIATE_REASON_LOWER_Q,
+    NEGOTIATE_REASON_MALFORMED, NEGOTIATE_REASON_NO_ACCEPT,
+};
 use super::convert::convert_inner;
 use super::memory::{free_buffer, reset_result, set_error_result, set_success_result};
 use super::options::{required_bytes, required_ref};
@@ -154,4 +158,62 @@ pub unsafe extern "C" fn markdown_converter_free(handle: *mut MarkdownConverterH
 
     // SAFETY: `handle` was validated as non-NULL above and originated from `Box::into_raw`.
     unsafe { drop(Box::from_raw(handle)) };
+}
+
+/// Perform Accept header content negotiation.
+///
+/// Parses the client `Accept` header and determines whether the client
+/// prefers `text/markdown` over `text/html`, using RFC 7231 §5.3.2
+/// q-value comparison.
+///
+/// # Safety
+///
+/// The caller must ensure that:
+/// - `accept_header` either points to `accept_header_len` readable bytes
+///   or is NULL when `accept_header_len == 0`
+/// - `result` points to writable storage for a `FFIAcceptResult`
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn markdown_negotiate_accept(
+    accept_header: *const u8,
+    accept_header_len: usize,
+    on_wildcard: u8,
+    result: *mut FFIAcceptResult,
+) {
+    if result.is_null() {
+        return;
+    }
+
+    let result_ref = unsafe { &mut *result };
+
+    let header_str = if accept_header.is_null() || accept_header_len == 0 {
+        ""
+    } else {
+        match std::str::from_utf8(unsafe { std::slice::from_raw_parts(accept_header, accept_header_len) }) {
+            Ok(s) => s,
+            Err(_) => {
+                result_ref.should_convert = 0;
+                result_ref.reason = NEGOTIATE_REASON_MALFORMED;
+                return;
+            }
+        }
+    };
+
+    let wildcard = on_wildcard != 0;
+
+    use crate::negotiator::{negotiate, NegotiationResult, PassthroughReason};
+    match negotiate(header_str, wildcard) {
+        NegotiationResult::Convert => {
+            result_ref.should_convert = 1;
+            result_ref.reason = NEGOTIATE_REASON_CONVERT;
+        }
+        NegotiationResult::Passthrough { reason } => {
+            result_ref.should_convert = 0;
+            result_ref.reason = match reason {
+                PassthroughReason::NoAcceptHeader => NEGOTIATE_REASON_NO_ACCEPT,
+                PassthroughReason::LowerQValue => NEGOTIATE_REASON_LOWER_Q,
+                PassthroughReason::ExplicitReject => NEGOTIATE_REASON_EXPLICIT_REJECT,
+                PassthroughReason::MalformedHeader => NEGOTIATE_REASON_MALFORMED,
+            };
+        }
+    }
 }
