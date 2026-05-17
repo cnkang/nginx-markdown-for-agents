@@ -53,6 +53,19 @@ Plan-only targets (for example `*-plan`) are documentation aids, not evidence.
 | `fix-static-quality` | keep correctness/safety bar above green checks |
 | `sync-docs-or-contract` | run cheap blockers first, then release-quality if risk rises |
 
+## Spec Resolver Priority
+
+| Priority | Source | Semantics |
+|----------|--------|-----------|
+| 1 (highest) | `agents-baseline` | NGINX Baseline + Rules — cannot be overridden by user-task |
+| 2 | `user-task` | Task scope and implementation intent — overrides workflow/guidance |
+| 3 | `active-spec-pointer` | Active spec file (if present) |
+| 4 | `agents-workflow` | Agent workflow guidance — can be overridden by user-task |
+| 5 | `harness-core` | Harness execution loop and status semantics |
+| 6 (lowest) | `replay-calibration` | Replay calibration data |
+
+Safety/engineering invariants always win; user-task controls scope and approach.
+
 ## Adaptive Checks
 
 - Public truth surfaces always check.

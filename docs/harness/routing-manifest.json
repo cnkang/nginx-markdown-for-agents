@@ -31,12 +31,14 @@
   ],
   "spec_resolver": {
     "priority": [
+      "agents-baseline",
       "user-task",
       "active-spec-pointer",
-      "agents-contract",
+      "agents-workflow",
       "harness-core",
       "replay-calibration"
     ],
+    "priority_semantics": "agents-baseline (NGINX Baseline, Rules) cannot be overridden by user-task. user-task has priority over agents-workflow and harness-core for task scope and implementation intent.",
     "pointer_candidates": [
       ".kiro/active-spec.json",
       ".kiro/active-spec.txt"
