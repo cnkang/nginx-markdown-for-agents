@@ -11,10 +11,15 @@ Goal: prevent repeated classes of mistakes that previously caused regressions.
 
 ## Rule Priority
 1. Kiro local development guide, when present (highest priority)
-2. This `AGENTS.md`
+2. This `AGENTS.md` (non-negotiable baseline + rules)
 3. Task-specific user instructions
 
-If two rules conflict, follow the higher-priority source.
+Hard safety and engineering invariants (NGINX Baseline, Rules) from Kiro
+and this file take precedence when conflicts exist with user-task
+instructions.  For task scope and implementation intent, user-task has
+priority over generic harness workflow guidance.  See
+`docs/harness/routing-manifest.json` spec_resolver for the structured
+priority chain.
 
 ## Harness Map
 - `AGENTS.md` remains the Codex-first contract and engineering rule map.

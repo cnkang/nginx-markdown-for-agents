@@ -2388,6 +2388,11 @@ ngx_http_markdown_streaming_init_handle(
  * across filter chain invocations, which is fragile in complex filter
  * chains, temporary buffer, compression, or subrequest scenarios.
  *
+ * On NGX_AGAIN from the downstream filter, the output chain is saved as
+ * ctx->streaming.pending_output and the request buffered flag is set,
+ * consistent with send_output()'s backpressure contract (Rule 1).
+ * resume_pending() will re-submit the chain when downstream is writable.
+ *
  * Returns:
  *   NGX_OK/NGX_AGAIN - status from the downstream body filter
  *   NGX_ERROR        - allocation or header-forwarding failure
@@ -2414,6 +2419,12 @@ ngx_http_markdown_streaming_failopen_passthrough(
         || ctx->streaming.failopen_replay_buf.size == 0)
     {
         rc = ngx_http_next_body_filter(r, in);
+        if (rc == NGX_AGAIN) {
+            ctx->streaming.pending_output = in;
+            ctx->streaming.pending_has_data = 1;
+            r->buffered |= NGX_HTTP_MARKDOWN_BUFFERED;
+            return NGX_AGAIN;
+        }
         if (rc == NGX_OK && !ctx->eligible) {
             NGX_HTTP_MARKDOWN_METRIC_INC(results.failopen_count);
         }
@@ -2451,6 +2462,14 @@ ngx_http_markdown_streaming_failopen_passthrough(
     *tail = in;
 
     rc = ngx_http_next_body_filter(r, head);
+
+    if (rc == NGX_AGAIN) {
+        ctx->streaming.pending_output = head;
+        ctx->streaming.pending_has_data = 1;
+        r->buffered |= NGX_HTTP_MARKDOWN_BUFFERED;
+        return NGX_AGAIN;
+    }
+
     if (rc == NGX_OK && !ctx->eligible) {
         NGX_HTTP_MARKDOWN_METRIC_INC(results.failopen_count);
     }
