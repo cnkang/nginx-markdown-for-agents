@@ -500,6 +500,7 @@ ngx_http_markdown_forward_headers(
     return g_forward_headers_rc;
 }
 
+__attribute__((unused))
 static void
 ngx_http_markdown_metric_inc_failopen(
     const ngx_http_markdown_conf_t *conf)
