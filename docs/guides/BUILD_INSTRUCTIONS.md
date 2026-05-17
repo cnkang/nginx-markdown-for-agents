@@ -45,7 +45,7 @@ rustup target add x86_64-apple-darwin
 `cbindgen` is required to generate the C header used by the NGINX module.
 
 ```bash
-cargo install cbindgen
+cargo install cbindgen --version 0.29.2 --locked
 cbindgen --version
 ```
 
@@ -269,7 +269,7 @@ cbindgen: command not found
 Fix:
 
 ```bash
-cargo install cbindgen
+cargo install cbindgen --version 0.29.2 --locked
 ```
 
 ### Architecture Mismatch at Link Time
