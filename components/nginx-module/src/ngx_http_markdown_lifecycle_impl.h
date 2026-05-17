@@ -107,7 +107,7 @@ ngx_http_markdown_init_worker(ngx_cycle_t *cycle)
                     ngx_http_markdown_filter_module.ctx_index];
 
             if (mcf != NULL
-                && mcf->metrics_per_path_cardinality > 0)
+                && mcf->metrics_per_path_cardinality >= 0)
             {
                 ngx_http_markdown_metrics->per_path.cardinality_limit =
                     mcf->metrics_per_path_cardinality;
