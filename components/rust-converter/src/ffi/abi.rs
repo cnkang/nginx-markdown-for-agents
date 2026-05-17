@@ -262,6 +262,71 @@ pub const NEGOTIATE_REASON_EXPLICIT_REJECT: u8 = 3;
 /// Reason code: Accept header is malformed.
 pub const NEGOTIATE_REASON_MALFORMED: u8 = 4;
 
+/// Result of a conditional request check (If-None-Match / If-Modified-Since).
+///
+/// Returned by `markdown_check_conditional` FFI function.
+///
+/// Fields:
+/// - `result_code`: 0 = not modified (send 304), 1 = modified (proceed with conversion), 2 = no conditional headers present
+/// - `matched_etag_len`: Length of the matched ETag value (0 if no match)
+#[repr(C)]
+pub struct FFIConditionalResult {
+    /// 0 = not_modified, 1 = modified, 2 = no_conditional_headers
+    pub result_code: u8,
+    /// Length of matched ETag value (0 if no match or no conditional headers).
+    pub matched_etag_len: u32,
+}
+
+/// Result of a decision engine evaluation.
+///
+/// Returned by `markdown_make_decision` FFI function.
+///
+/// Fields:
+/// - `decision`: 0 = convert, 1 = skip, 2 = fail
+/// - `reason_code`: Numeric reason code (matches SkipReason::code() values)
+#[repr(C)]
+pub struct FFIDecisionResult {
+    /// 0 = convert, 1 = skip, 2 = fail
+    pub decision: u8,
+    /// Reason code for the decision (0 if convert).
+    pub reason_code: u8,
+}
+
+/// A single header operation in a header plan.
+///
+/// Fields:
+/// - `op_type`: 0 = set, 1 = delete
+/// - `key`: Pointer to header name (NUL-terminated, borrowed from plan)
+/// - `key_len`: Length of header name
+/// - `value`: Pointer to header value (NUL-terminated, borrowed from plan; NULL for delete)
+/// - `value_len`: Length of header value
+#[repr(C)]
+pub struct FFIHeaderEntry {
+    /// 0 = set, 1 = delete
+    pub op_type: u8,
+    /// Pointer to header name (borrowed).
+    pub key: *const u8,
+    /// Length of header name.
+    pub key_len: usize,
+    /// Pointer to header value (NULL for delete).
+    pub value: *const u8,
+    /// Length of header value.
+    pub value_len: usize,
+}
+
+/// Header plan: an ordered list of header operations for atomic application.
+///
+/// Fields:
+/// - `entries`: Pointer to array of FFIHeaderEntry
+/// - `count`: Number of entries in the plan
+#[repr(C)]
+pub struct FFIHeaderPlan {
+    /// Pointer to header entry array.
+    pub entries: *const FFIHeaderEntry,
+    /// Number of entries.
+    pub count: usize,
+}
+
 #[cfg(test)]
 mod layout_tests {
     use super::*;
@@ -290,6 +355,38 @@ mod layout_tests {
 
         assert_eq!(size_of::<FFIAcceptResult>(), 2);
         assert_eq!(align_of::<FFIAcceptResult>(), 1);
+    }
+
+    #[test]
+    fn test_ffi_conditional_result_layout() {
+        use std::mem::{size_of, align_of};
+
+        assert_eq!(size_of::<FFIConditionalResult>(), 8);
+        assert_eq!(align_of::<FFIConditionalResult>(), 4);
+    }
+
+    #[test]
+    fn test_ffi_decision_result_layout() {
+        use std::mem::{size_of, align_of};
+
+        assert_eq!(size_of::<FFIDecisionResult>(), 2);
+        assert_eq!(align_of::<FFIDecisionResult>(), 1);
+    }
+
+    #[test]
+    fn test_ffi_header_entry_layout() {
+        use std::mem::{size_of, align_of};
+
+        assert!(size_of::<FFIHeaderEntry>() > 0);
+        assert!(align_of::<FFIHeaderEntry>() > 0);
+    }
+
+    #[test]
+    fn test_ffi_header_plan_layout() {
+        use std::mem::{size_of, align_of};
+
+        assert!(size_of::<FFIHeaderPlan>() > 0);
+        assert!(align_of::<FFIHeaderPlan>() > 0);
     }
 
     #[test]
@@ -329,5 +426,58 @@ mod layout_tests {
                 assert_ne!(reasons[i], reasons[j], "Reason codes {} and {} collide", reasons[i], reasons[j]);
             }
         }
+    }
+
+    #[test]
+    fn test_error_code_count_matches_c_defines() {
+        let rust_error_count = 10;
+        let codes = [
+            ERROR_SUCCESS,
+            ERROR_PARSE,
+            ERROR_ENCODING,
+            ERROR_TIMEOUT,
+            ERROR_MEMORY_LIMIT,
+            ERROR_INVALID_INPUT,
+            ERROR_DECOMPRESSION_BUDGET_EXCEEDED,
+            ERROR_PARSE_TIMEOUT,
+            ERROR_PARSE_BUDGET_EXCEEDED,
+            ERROR_INTERNAL,
+        ];
+        assert_eq!(codes.len(), rust_error_count,
+            "Rust error code count ({}) must match C #define count ({})",
+            codes.len(), rust_error_count);
+    }
+
+    #[test]
+    fn test_negotiate_reason_count_matches_c_defines() {
+        let rust_reason_count = 5;
+        let reasons = [
+            NEGOTIATE_REASON_CONVERT,
+            NEGOTIATE_REASON_NO_ACCEPT,
+            NEGOTIATE_REASON_LOWER_Q,
+            NEGOTIATE_REASON_EXPLICIT_REJECT,
+            NEGOTIATE_REASON_MALFORMED,
+        ];
+        assert_eq!(reasons.len(), rust_reason_count,
+            "Rust negotiate reason count ({}) must match C #define count ({})",
+            reasons.len(), rust_reason_count);
+    }
+
+    #[test]
+    fn test_skip_reason_count_matches_decision_export() {
+        use crate::decision::SkipReason;
+        let skip_reasons = [
+            SkipReason::SkipAccept,
+            SkipReason::SkipNoAccept,
+            SkipReason::SkipConditional,
+            SkipReason::FailDecompression,
+            SkipReason::ParseTimeout,
+            SkipReason::ParseBudgetExceeded,
+            SkipReason::NotEligible,
+            SkipReason::Disabled,
+        ];
+        assert_eq!(skip_reasons.len(), 8,
+            "SkipReason variant count ({}) must match FFI export reason_code range (1..=8)",
+            skip_reasons.len());
     }
 }

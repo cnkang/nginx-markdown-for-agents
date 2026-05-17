@@ -57,9 +57,6 @@ clean = false
 extra_bindings = []
 
 [parse.expand]
-# Expand macros with the incremental feature enabled so cbindgen can see all
-# cfg-gated items and emit the correct #if defined(MARKDOWN_INCREMENTAL_ENABLED)
-# guards in the generated header.
 crates = []
 all_features = false
 default_features = true
