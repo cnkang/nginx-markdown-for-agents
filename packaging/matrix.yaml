@@ -1,0 +1,43 @@
+# Build Matrix
+# Format: os × arch × nginx_channel × libc
+
+matrix:
+  - os: ubuntu
+    versions: ["22.04", "24.04"]
+    arch: [amd64, arm64]
+    nginx_channel: [stable, mainline]
+    libc: glibc
+
+  - os: debian
+    versions: ["11", "12"]
+    arch: [amd64, arm64]
+    nginx_channel: [stable, mainline]
+    libc: glibc
+
+  - os: el
+    versions: ["8", "9"]
+    arch: [amd64, arm64]
+    nginx_channel: [stable, mainline]
+    libc: glibc
+
+  - os: amazon-linux
+    versions: ["2023"]
+    arch: [amd64, arm64]
+    nginx_channel: [stable, mainline]
+    libc: glibc
+
+nginx_versions:
+  stable: "1.26.2"
+  mainline: "1.27.3"
+
+package_metadata:
+  name: nginx-markdown-module
+  vendor: NGINX Markdown for Agents Contributors
+  license: BSD-2-Clause
+  summary: HTML-to-Markdown conversion filter module for NGINX
+  description: >
+    An NGINX dynamic module that converts HTML responses to Markdown
+    format for AI agent consumption. Supports streaming conversion,
+    content negotiation via Accept headers, and automatic decompression.
+  category: web
+  requires: nginx (>= 1.26.0)
