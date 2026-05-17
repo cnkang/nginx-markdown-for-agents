@@ -110,10 +110,10 @@ unit-coverage:
 		LDFLAGS_COMMON="--coverage"
 	@mkdir -p $(COV_DIR)
 	lcov --capture --directory build/unit --output-file $(COV_DIR)/raw.lcov \
-		--rc branch_coverage=1 --ignore-errors inconsistent
+		--rc branch_coverage=1 --rc geninfo_unexecuted_blocks=1 --ignore-errors inconsistent
 	lcov --remove $(COV_DIR)/raw.lcov '*/tests/*' '/usr/*' \
 		--output-file $(COV_DIR)/c-coverage.lcov \
-		--rc branch_coverage=1 --ignore-errors unused --ignore-errors inconsistent
+		--rc branch_coverage=1 --rc geninfo_unexecuted_blocks=1 --ignore-errors unused --ignore-errors inconsistent
 	@rm -f $(COV_DIR)/raw.lcov
 	@echo "C coverage report: $(COV_DIR)/c-coverage.lcov"
 
