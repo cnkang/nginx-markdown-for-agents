@@ -2606,8 +2606,20 @@ ngx_http_markdown_streaming_handle_chunk_result(
     }
 
     if (!ctx->eligible) {
-        return ngx_http_markdown_streaming_failopen_passthrough(
+        rc = ngx_http_markdown_streaming_failopen_passthrough(
             r, ctx, in);
+        if (rc == NGX_DONE) {
+            /*
+             * A downstream NGX_DONE from a successful fail-open
+             * send (ngx_http_next_body_filter completing a
+             * subrequest) must not be misinterpreted as the
+             * internal "fallback to full-buffer" sentinel.
+             * Normalize to NGX_OK so body_filter() and
+             * fallback_cl logic stay consistent.
+             */
+            rc = NGX_OK;
+        }
+        return rc;
     }
 
     return rc;
@@ -2704,7 +2716,9 @@ ngx_http_markdown_streaming_ensure_handle(
         /*
          * Fail-open: headers were deferred in the header
          * filter, so forward them before passing the body
-         * chain downstream.
+         * chain downstream.  Route through the shared
+         * fail-open send path so results.failopen_count
+         * is incremented consistently.
          */
         if (!ctx->headers_forwarded) {
             rc = ngx_http_markdown_forward_headers(
@@ -2714,7 +2728,8 @@ ngx_http_markdown_streaming_ensure_handle(
             }
         }
 
-        return ngx_http_next_body_filter(r, in);
+        return ngx_http_markdown_streaming_send_failopen_chain(
+            r, ctx, in);
     }
 
     return NGX_OK;
