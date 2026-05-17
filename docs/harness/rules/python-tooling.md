@@ -6,7 +6,7 @@ paths:
   - "tests/e2e/**/*.py"
 ---
 
-# Python Tooling Guardrails
+## Python Tooling Guardrails
 
 ### 19. Python e2e/tooling harness guardrails
 

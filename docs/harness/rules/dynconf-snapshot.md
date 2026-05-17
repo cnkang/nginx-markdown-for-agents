@@ -6,7 +6,7 @@ paths:
   - "components/nginx-module/src/config/**"
 ---
 
-# Dynconf Snapshot Isolation
+## Dynconf Snapshot Isolation
 
 ### 34. Request-path code must read dynconf-mutable fields through effective_conf, not live conf
 Historical issues: P0 request-level consistency gap (snapshot bound but not consumed);
