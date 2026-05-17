@@ -73,7 +73,7 @@ return_hits=0
 while IFS= read -r script_file; do
     # Skip exempt files
     skip=0
-    for exempt in "${RETURN_EXEMPT_FILES[@]}"; do
+    for exempt in ${RETURN_EXEMPT_FILES[@]+"${RETURN_EXEMPT_FILES[@]}"}; do
         if [[ "$script_file" == *"$exempt"* ]]; then
             skip=1
             break
