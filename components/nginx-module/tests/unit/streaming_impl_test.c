@@ -1583,6 +1583,8 @@ test_send_output_and_resume_paths(void)
     TEST_ASSERT(rc == NGX_OK, "resume_pending should drain pending chain");
     TEST_ASSERT(ctx.streaming.pending_output == NULL,
         "resume should clear pending chain");
+    TEST_ASSERT(ctx.streaming.pending_has_data == 0,
+        "resume should clear pending_has_data on successful drain");
     TEST_ASSERT((r.buffered & NGX_HTTP_MARKDOWN_BUFFERED) == 0,
         "resume should clear buffered flag");
 
@@ -1605,6 +1607,8 @@ test_send_output_and_resume_paths(void)
     g_next_body_filter_rc = NGX_ERROR;
     rc = ngx_http_markdown_streaming_resume_pending(&r, &ctx, &conf);
     TEST_ASSERT(rc == NGX_ERROR, "resume should propagate downstream error");
+    TEST_ASSERT(ctx.streaming.pending_has_data == 0,
+        "resume error should clear pending_has_data");
     TEST_ASSERT(ctx.streaming.failure_recorded == 1,
         "resume error should record post-commit failure");
 
@@ -3102,6 +3106,8 @@ test_failopen_passthrough_again_pending(void)
         "replay: resume_pending should return NGX_OK on downstream success");
     TEST_ASSERT(ctx.streaming.pending_output == NULL,
         "replay: pending_output must be NULL after successful resume");
+    TEST_ASSERT(ctx.streaming.pending_has_data == 0,
+        "replay: pending_has_data must be 0 after successful resume");
     TEST_ASSERT(ctx.streaming.pending_failopen_delivery == 0,
         "replay: pending_failopen_delivery latch must be cleared after resume");
     TEST_ASSERT((r.buffered & NGX_HTTP_MARKDOWN_BUFFERED) == 0,
@@ -3127,6 +3133,8 @@ test_failopen_passthrough_again_pending(void)
     rc = ngx_http_markdown_streaming_resume_pending(&r, &ctx, &conf);
     TEST_ASSERT(rc == NGX_DONE,
         "replay: resume_pending should return NGX_DONE on downstream NGX_DONE");
+    TEST_ASSERT(ctx.streaming.pending_has_data == 0,
+        "replay: pending_has_data must be 0 after NGX_DONE resume");
     if (ngx_http_markdown_metrics != NULL) {
         TEST_ASSERT(ngx_http_markdown_metrics->results.failopen_count == 1,
             "replay: failopen_count must increment on NGX_DONE resume");
@@ -3156,6 +3164,8 @@ test_failopen_passthrough_again_pending(void)
     rc = ngx_http_markdown_streaming_resume_pending(&r, &ctx, &conf);
     TEST_ASSERT(rc == NGX_OK,
         "no-replay: resume_pending should return NGX_OK on success");
+    TEST_ASSERT(ctx.streaming.pending_has_data == 0,
+        "no-replay: pending_has_data must be 0 after successful resume");
     if (ngx_http_markdown_metrics != NULL) {
         TEST_ASSERT(ngx_http_markdown_metrics->results.failopen_count == 1,
             "no-replay: failopen_count must increment after resume succeeds");
@@ -3193,6 +3203,8 @@ test_failopen_passthrough_again_pending(void)
     rc = ngx_http_markdown_streaming_resume_pending(&r, &ctx, &conf);
     TEST_ASSERT(rc == NGX_ERROR,
         "resume-failure: resume_pending should return NGX_ERROR on downstream error");
+    TEST_ASSERT(ctx.streaming.pending_has_data == 0,
+        "resume-failure: pending_has_data must be 0 after resume failure");
     TEST_ASSERT(ctx.streaming.pending_failopen_delivery == 0,
         "resume-failure: pending_failopen_delivery latch must be cleared on failure");
     if (ngx_http_markdown_metrics != NULL) {
