@@ -214,7 +214,7 @@ release-gates-check-060:
 	python3 tools/release/gates/validate_release_gates_060.py
 
 release-gates-check-070:
-	python3 tools/release/gates/validate_release_gates_070.py
+	python3 tools/release/gates/validate_release_gates_070.py --mode strict
 
 release-gates-check-legacy:
 	python3 tools/release/legacy/validate_release_gates.py
