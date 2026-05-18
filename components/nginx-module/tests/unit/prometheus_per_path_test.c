@@ -44,7 +44,12 @@ typedef struct { /* SONAR_NOTE: mirrors production snapshot */
         ngx_atomic_t  gzip;
         ngx_atomic_t  deflate;
         ngx_atomic_t  brotli;
+        ngx_atomic_t  budget_exceeded_total;
     } decompressions;
+    struct {
+        ngx_atomic_t  parse_timeouts_total;
+        ngx_atomic_t  parse_budget_exceeded_total;
+    } parse_interrupts;
     struct {
         ngx_atomic_t  fullbuffer;
         ngx_atomic_t  incremental;
@@ -78,6 +83,8 @@ typedef struct { /* SONAR_NOTE: mirrors production snapshot */
     } skips;
     struct {
         ngx_atomic_t  failopen_count;
+        ngx_atomic_t  delivery_count;
+        ngx_atomic_t  decision_count;
         ngx_atomic_t  estimated_token_savings;
     } results;
     struct {

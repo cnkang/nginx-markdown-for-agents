@@ -20,6 +20,7 @@ typedef struct {
     int headers_sent;
     int body_started;
     int header_send_count;
+    int pending_chain;
 } filter_state_t;
 
 
@@ -30,19 +31,28 @@ send_headers(filter_state_t *state)
         return NGX_ERROR;
     }
 
-    state->header_send_count++;
-    state->headers_sent = 1;
+    if (!state->headers_sent) {
+        state->header_send_count++;
+        state->headers_sent = 1;
+    }
     return NGX_OK;
 }
 
-
 static int
-send_body_chunk(filter_state_t *state)
+send_body_chunk(filter_state_t *state, int downstream_rc)
 {
     if (!state->headers_sent) {
         return NGX_ERROR;
     }
 
+    if (downstream_rc == -11) {
+        state->pending_chain = 1;
+        return -11;
+    }
+    if (downstream_rc != NGX_OK) {
+        return NGX_ERROR;
+    }
+    state->pending_chain = 0;
     state->body_started = 1;
     return NGX_OK;
 }
@@ -54,7 +64,7 @@ test_headers_before_body(void)
     filter_state_t state;
     memset(&state, 0, sizeof(state));
 
-    int rc = send_body_chunk(&state);
+    int rc = send_body_chunk(&state, NGX_OK);
     TEST_ASSERT(rc == NGX_ERROR, "body before headers must fail");
     TEST_ASSERT(state.body_started == 0, "body_started must remain 0");
 
@@ -62,7 +72,7 @@ test_headers_before_body(void)
     TEST_ASSERT(rc == NGX_OK, "headers must succeed");
     TEST_ASSERT(state.headers_sent == 1, "headers_sent must be 1");
 
-    rc = send_body_chunk(&state);
+    rc = send_body_chunk(&state, NGX_OK);
     TEST_ASSERT(rc == NGX_OK, "body after headers must succeed");
     TEST_ASSERT(state.body_started == 1, "body_started must be 1");
 }
@@ -80,7 +90,7 @@ test_header_send_idempotent(void)
 
     int rc2 = send_headers(&state);
     TEST_ASSERT(rc2 == NGX_OK, "second header send succeeds (idempotent)");
-    TEST_ASSERT(state.header_send_count == 2, "header_send_count is 2 (but NGINX guards prevent duplicate)");
+    TEST_ASSERT(state.header_send_count == 1, "header send remains idempotent");
 }
 
 
@@ -91,10 +101,13 @@ test_header_body_ordering_robust(void)
     memset(&state, 0, sizeof(state));
 
     send_headers(&state);
-    send_body_chunk(&state);
+    TEST_ASSERT(send_body_chunk(&state, -11) == -11, "NGX_AGAIN should defer body");
+    TEST_ASSERT(state.pending_chain == 1, "pending chain should be set on NGX_AGAIN");
 
-    int rc = send_body_chunk(&state);
-    TEST_ASSERT(rc == NGX_OK, "subsequent body chunks succeed after header+first body");
+    int rc = send_body_chunk(&state, NGX_OK);
+    TEST_ASSERT(rc == NGX_OK, "resume should succeed after pending NGX_AGAIN");
+    TEST_ASSERT(state.pending_chain == 0, "pending chain cleared on resume");
+    TEST_ASSERT(state.body_started == 1, "body_started must be set after resume");
 }
 
 

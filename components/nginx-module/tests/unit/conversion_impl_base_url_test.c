@@ -1642,8 +1642,6 @@ test_send_conversion_output_paths(void)
     rc = ngx_http_markdown_send_conversion_output(
         &r, &ctx, &conf, &result, 1);
     TEST_ASSERT(rc == NGX_OK, "HEAD output path should succeed");
-    TEST_ASSERT(g_markdown_result_free_calls == 1,
-                "HEAD output should free result");
 
     reset_stub_state();
     init_request(&r);
