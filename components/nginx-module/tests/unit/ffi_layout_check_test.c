@@ -21,7 +21,7 @@ static void
 test_markdown_result_field_access(void)
 {
     MarkdownResult r;
-    ngx_memzero(&r, sizeof(r));
+    memset(&r, 0, sizeof(r));
 
     r.markdown = NULL;
     r.markdown_len = 0;
@@ -42,7 +42,7 @@ static void
 test_ffi_accept_result_field_access(void)
 {
     FFIAcceptResult r;
-    ngx_memzero(&r, sizeof(r));
+    memset(&r, 0, sizeof(r));
 
     r.should_convert = 1;
     r.reason = NEGOTIATE_REASON_CONVERT;
@@ -56,7 +56,7 @@ static void
 test_ffi_conditional_result_field_access(void)
 {
     FFIConditionalResult r;
-    ngx_memzero(&r, sizeof(r));
+    memset(&r, 0, sizeof(r));
 
     r.result_code = 0;
     r.matched_etag_len = 0;
@@ -69,7 +69,7 @@ static void
 test_ffi_decision_result_field_access(void)
 {
     FFIDecisionResult r;
-    ngx_memzero(&r, sizeof(r));
+    memset(&r, 0, sizeof(r));
 
     r.decision = 0;
     r.reason_code = 0;
@@ -103,6 +103,6 @@ main(void)
     test_ffi_decision_result_field_access();
     test_error_codes_compile();
 
-    TEST_LOG("ffi_layout_check: all tests passed");
+    TEST_PASS("ffi_layout_check: all tests passed");
     return 0;
 }
