@@ -1712,7 +1712,6 @@ ngx_http_markdown_prepare_body_output_buffer(ngx_http_request_t *r,
 
     b->last_buf = (r == r->main) ? 1 : 0;
     b->last_in_chain = 1;
-    markdown_result_free(result);
     return NGX_OK;
 }
 
