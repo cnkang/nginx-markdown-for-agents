@@ -16,6 +16,13 @@ pub enum HeaderOp {
     Delete {
         name: String,
     },
+    /// Set ETag to a value provided by the C caller at apply time.
+    ///
+    /// This avoids the fragile empty-string placeholder contract:
+    /// the C caller recognizes `op_type == 2` and substitutes the
+    /// actual ETag from `MarkdownResult.etag` instead of relying
+    /// on an empty string sentinel.
+    SetEtagPlaceholder,
 }
 
 /// A plan of header mutations to apply atomically.
@@ -57,7 +64,7 @@ impl HeaderPlan {
         plan.set("Vary", "Accept");
 
         if has_etag {
-            plan.set("ETag", ""); // Placeholder; actual value set by C caller
+            plan.ops.push(HeaderOp::SetEtagPlaceholder);
         }
 
         plan
@@ -109,7 +116,8 @@ mod tests {
     #[test]
     fn test_for_markdown_conversion() {
         let plan = HeaderPlan::for_markdown_conversion("text/markdown; charset=utf-8", true);
-        assert_eq!(plan.len(), 4); // Content-Type, delete Content-Encoding, Vary, ETag
+        assert_eq!(plan.len(), 4);
+        assert_eq!(plan.ops[3], HeaderOp::SetEtagPlaceholder);
     }
 
     #[test]

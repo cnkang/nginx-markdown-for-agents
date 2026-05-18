@@ -430,15 +430,20 @@ typedef struct FFIHeaderPlanHandle {
  * A single header operation in a header plan.
  *
  * Fields:
- * - `op_type`: 0 = set, 1 = delete
- * - `key`: Pointer to header name (NUL-terminated, borrowed from plan)
+ * - `op_type`: 0 = set, 1 = delete, 2 = set-etag-placeholder
+ * - `key`: Pointer to header name (NUL-terminated, borrowed from plan; NULL for set-etag-placeholder)
  * - `key_len`: Length of header name
- * - `value`: Pointer to header value (NUL-terminated, borrowed from plan; NULL for delete)
+ * - `value`: Pointer to header value (NUL-terminated, borrowed from plan; NULL for delete and set-etag-placeholder)
  * - `value_len`: Length of header value
+ *
+ * For op_type == 2 (set-etag-placeholder), the C caller must substitute
+ * the actual ETag value from MarkdownResult.etag instead of reading
+ * key/value from the entry. This avoids the fragile empty-string
+ * placeholder contract.
  */
 typedef struct FFIHeaderEntry {
   /**
-   * 0 = set, 1 = delete
+   * 0 = set, 1 = delete, 2 = set-etag-placeholder
    */
   uint8_t op_type;
   /**
