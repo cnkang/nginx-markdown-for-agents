@@ -1326,7 +1326,10 @@ ngx_http_markdown_streaming_handle_postcommit_error(
     /* Track budget exceeded as auxiliary classification */
     if (!ctx->streaming.failure_recorded
         && (error_code == ERROR_MEMORY_LIMIT
-        || error_code == ERROR_BUDGET_EXCEEDED)
+        || error_code == ERROR_BUDGET_EXCEEDED
+        || error_code == ERROR_DECOMPRESSION_BUDGET_EXCEEDED
+        || error_code == ERROR_PARSE_TIMEOUT
+        || error_code == ERROR_PARSE_BUDGET_EXCEEDED)
     )
     {
         NGX_HTTP_MARKDOWN_METRIC_INC(
@@ -1409,12 +1412,19 @@ ngx_http_markdown_streaming_precommit_error(
      * Track budget exceeded as auxiliary classification.
      * Covers both Rust FFI budget exceeded (ERROR_BUDGET_EXCEEDED = 6,
      * from markdown_streaming_feed/finalize) and C-side size-limit
-     * overflow (ERROR_MEMORY_LIMIT = 4, from cumulative input checks).
+     * overflow (ERROR_MEMORY_LIMIT = 4, from cumulative input checks),
+     * as well as v0.7.0 resource-limit codes:
+     *   ERROR_DECOMPRESSION_BUDGET_EXCEEDED (9),
+     *   ERROR_PARSE_TIMEOUT (10),
+     *   ERROR_PARSE_BUDGET_EXCEEDED (11).
      * The terminal state is determined by streaming_on_error
      * policy below.
      */
     if (error_code == ERROR_MEMORY_LIMIT
-        || error_code == ERROR_BUDGET_EXCEEDED)
+        || error_code == ERROR_BUDGET_EXCEEDED
+        || error_code == ERROR_DECOMPRESSION_BUDGET_EXCEEDED
+        || error_code == ERROR_PARSE_TIMEOUT
+        || error_code == ERROR_PARSE_BUDGET_EXCEEDED)
     {
         NGX_HTTP_MARKDOWN_METRIC_INC(
             streaming.budget_exceeded_total);
@@ -2580,8 +2590,15 @@ ngx_http_markdown_streaming_failopen_passthrough(
  * chain. NGX_AGAIN is preserved as backpressure and must not be treated as
  * success.
  *
+ * Side effects:
+ *   Sets ctx->failopen_completed to 1 if fail-open passthrough has already
+ *   forwarded the original response downstream (including any terminal
+ *   buffer), so the caller must not enter finalize_request and must stop
+ *   processing remaining chain links.
+ *
  * Returns:
- *   NGX_OK       - continue processing next buffer
+ *   NGX_OK       - continue processing next buffer (or stop if
+ *                  ctx->failopen_completed is set)
  *   NGX_AGAIN    - backpressure, return immediately
  *   NGX_DONE     - streaming fell back; caller should re-enter full-buffer path
  *   NGX_ERROR    - fatal error
@@ -2617,15 +2634,10 @@ ngx_http_markdown_streaming_handle_chunk_result(
         rc = ngx_http_markdown_streaming_failopen_passthrough(
             r, ctx, in);
         if (rc == NGX_DONE) {
-            /*
-             * A downstream NGX_DONE from a successful fail-open
-             * send (ngx_http_next_body_filter completing a
-             * subrequest) must not be misinterpreted as the
-             * internal "fallback to full-buffer" sentinel.
-             * Normalize to NGX_OK so body_filter() and
-             * fallback_cl logic stay consistent.
-             */
             rc = NGX_OK;
+        }
+        if (rc == NGX_OK || rc == NGX_AGAIN) {
+            ctx->failopen_completed = 1;
         }
         return rc;
     }
@@ -2831,11 +2843,11 @@ ngx_http_markdown_streaming_handle_null_input(
  *   last_buf         - set to 1 if a terminal buffer was observed (unless
  *                      failopen_completed is set, in which case the terminal
  *                      buffer has already been forwarded downstream)
- *   failopen_completed - set to 1 if fail-open passthrough has already
- *                        forwarded the original response downstream (including
- *                        any terminal buffer), so the caller must not enter
- *                        finalize_request
  *   fallback_cl      - set to the chain link that triggered fallback
+ *
+ * Side effects:
+ *   Sets ctx->failopen_completed to 1 if fail-open passthrough has already
+ *   forwarded the original response downstream.
  */
 static ngx_int_t
 ngx_http_markdown_streaming_process_chain(
@@ -2844,14 +2856,12 @@ ngx_http_markdown_streaming_process_chain(
     ngx_http_markdown_conf_t *conf,
     ngx_chain_t *in,
     ngx_flag_t *last_buf,
-    ngx_flag_t *failopen_completed,
     ngx_chain_t **fallback_cl)
 {
     ngx_chain_t  *cl;
     ngx_int_t     rc;
 
     *last_buf = 0;
-    *failopen_completed = 0;
     *fallback_cl = NULL;
 
     for (cl = in; cl != NULL; cl = cl->next) {
@@ -2876,6 +2886,10 @@ ngx_http_markdown_streaming_process_chain(
                 *fallback_cl = cl;
             }
             return rc;
+        }
+
+        if (ctx->failopen_completed) {
+            return NGX_OK;
         }
 
         if (ctx->streaming.commit_state
@@ -2940,7 +2954,7 @@ ngx_http_markdown_streaming_process_chain(
                         rc = ngx_http_markdown_streaming_failopen_passthrough(
                                 r, ctx, cl);
                         if (rc == NGX_OK || rc == NGX_AGAIN) {
-                            *failopen_completed = 1;
+                            ctx->failopen_completed = 1;
                         }
                         return rc;
                     }
@@ -2974,7 +2988,6 @@ ngx_http_markdown_streaming_body_filter(
     ngx_chain_t               *fallback_cl;
     ngx_int_t                  rc;
     ngx_flag_t                 last_buf;
-    ngx_flag_t                 failopen_completed;
 
     ctx = ngx_http_get_module_ctx(r,
         ngx_http_markdown_filter_module);
@@ -3014,8 +3027,7 @@ ngx_http_markdown_streaming_body_filter(
     }
 
     rc = ngx_http_markdown_streaming_process_chain(
-        r, ctx, conf, in, &last_buf, &failopen_completed,
-        &fallback_cl);
+        r, ctx, conf, in, &last_buf, &fallback_cl);
     if (rc == NGX_DONE) {
         return ngx_http_markdown_streaming_reenter_fullbuffer_after_fallback(
             r, fallback_cl, last_buf);
@@ -3028,8 +3040,10 @@ ngx_http_markdown_streaming_body_filter(
      * If fail-open passthrough already forwarded the original
      * response (including any terminal buffer), skip finalize
      * to avoid sending a duplicate empty last_buf.
+     * Uses ctx->failopen_completed (request-lifetime flag)
+     * rather than the local variable, so re-entries also skip.
      */
-    if (failopen_completed) {
+    if (ctx->failopen_completed) {
         return NGX_OK;
     }
 
@@ -3039,6 +3053,13 @@ ngx_http_markdown_streaming_body_filter(
             r, ctx, conf);
 
         if (rc == NGX_DECLINED && !ctx->eligible) {
+            /*
+             * Mark failopen_completed on the context before
+             * forwarding, so any re-entry of body_filter
+             * (e.g. backpressure resume) skips duplicate
+             * finalize or passthrough.
+             */
+            ctx->failopen_completed = 1;
             return ngx_http_markdown_streaming_failopen_passthrough(
                 r, ctx, in);
         }
