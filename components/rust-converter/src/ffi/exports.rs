@@ -41,13 +41,19 @@ use crate::error::ConversionError;
 
 use super::abi::{
     ERROR_INTERNAL, FFIAcceptResult, FFIConditionalResult, FFIDecisionResult, FFIHeaderEntry,
-    FFIHeaderPlan, MarkdownConverterHandle, MarkdownOptions, MarkdownResult,
+    FFIHeaderPlan, FFIHeaderPlanHandle, MarkdownConverterHandle, MarkdownOptions, MarkdownResult,
     NEGOTIATE_REASON_CONVERT, NEGOTIATE_REASON_EXPLICIT_REJECT, NEGOTIATE_REASON_LOWER_Q,
     NEGOTIATE_REASON_MALFORMED, NEGOTIATE_REASON_NO_ACCEPT,
 };
 use super::convert::convert_inner;
 use super::memory::{free_buffer, reset_result, set_error_result, set_success_result};
 use super::options::{required_bytes, required_ref};
+
+struct HeaderPlanOwned {
+    entries: Vec<FFIHeaderEntry>,
+    key_storage: Vec<Box<[u8]>>,
+    value_storage: Vec<Box<[u8]>>,
+}
 
 /// Allocate a new converter handle for use across multiple FFI calls.
 ///
@@ -326,9 +332,8 @@ pub unsafe extern "C" fn markdown_make_decision(
 
 /// Build a header plan for a successful Markdown conversion.
 ///
-/// The returned plan contains borrowed pointers into Rust-managed memory.
-/// The plan is valid only until the next FFI call that modifies the
-/// converter state. The C caller must copy any values it needs to retain.
+/// The returned plan contains Rust-owned buffers. The C caller must release
+/// the plan via `markdown_header_plan_free`.
 ///
 /// # Safety
 ///
@@ -347,6 +352,7 @@ pub unsafe extern "C" fn markdown_build_header_plan(
     }
 
     let result_ref = unsafe { &mut *result };
+    unsafe { ptr::write(result_ref, std::mem::zeroed()) };
 
     let ct = if content_type.is_null() || content_type_len == 0 {
         "text/markdown; charset=utf-8"
@@ -360,36 +366,50 @@ pub unsafe extern "C" fn markdown_build_header_plan(
     use crate::header_plan::{HeaderOp, HeaderPlan};
     let plan = HeaderPlan::for_markdown_conversion(ct, has_etag != 0);
 
-    let entries: Vec<_> = plan
-        .ops
-        .iter()
-        .map(|op| match op {
-            HeaderOp::Set { name, value } => FFIHeaderEntry {
-                op_type: 0,
-                key: name.as_ptr(),
-                key_len: name.len(),
-                value: value.as_ptr(),
-                value_len: value.len(),
-            },
-            HeaderOp::Delete { name } => FFIHeaderEntry {
-                op_type: 1,
-                key: name.as_ptr(),
-                key_len: name.len(),
-                value: std::ptr::null(),
-                value_len: 0,
-            },
-        })
-        .collect();
+    let mut owned = HeaderPlanOwned {
+        entries: Vec::with_capacity(plan.ops.len()),
+        key_storage: Vec::with_capacity(plan.ops.len()),
+        value_storage: Vec::with_capacity(plan.ops.len()),
+    };
 
-    if entries.is_empty() {
+    for op in &plan.ops {
+        match op {
+            HeaderOp::Set { name, value } => {
+                owned.key_storage.push(name.as_bytes().to_vec().into_boxed_slice());
+                owned.value_storage.push(value.as_bytes().to_vec().into_boxed_slice());
+                let key = &owned.key_storage[owned.key_storage.len() - 1];
+                let val = &owned.value_storage[owned.value_storage.len() - 1];
+                owned.entries.push(FFIHeaderEntry {
+                    op_type: 0,
+                    key: key.as_ptr(),
+                    key_len: key.len(),
+                    value: val.as_ptr(),
+                    value_len: val.len(),
+                });
+            }
+            HeaderOp::Delete { name } => {
+                owned.key_storage.push(name.as_bytes().to_vec().into_boxed_slice());
+                let key = &owned.key_storage[owned.key_storage.len() - 1];
+                owned.entries.push(FFIHeaderEntry {
+                    op_type: 1,
+                    key: key.as_ptr(),
+                    key_len: key.len(),
+                    value: std::ptr::null(),
+                    value_len: 0,
+                });
+            }
+        }
+    }
+
+    if owned.entries.is_empty() {
+        result_ref.handle = std::ptr::null_mut();
         result_ref.entries = std::ptr::null();
         result_ref.count = 0;
     } else {
-        result_ref.entries = entries.as_ptr();
-        result_ref.count = entries.len();
+        result_ref.entries = owned.entries.as_ptr();
+        result_ref.count = owned.entries.len();
+        result_ref.handle = Box::into_raw(Box::new(owned)) as *mut FFIHeaderPlanHandle;
     }
-
-    std::mem::forget(entries);
 }
 
 /// Validate a URL for use in Markdown link destinations.
@@ -466,17 +486,13 @@ pub unsafe extern "C" fn markdown_header_plan_free(plan: *mut FFIHeaderPlan) {
         return;
     }
 
-    let plan_ref = unsafe { &*plan };
-    if !plan_ref.entries.is_null() && plan_ref.count > 0 {
-        let entries_vec = unsafe {
-            Vec::from_raw_parts(
-                plan_ref.entries as *mut FFIHeaderEntry,
-                plan_ref.count,
-                plan_ref.count,
-            )
-        };
-        drop(entries_vec);
+    let plan_ref = unsafe { &mut *plan };
+    if !plan_ref.handle.is_null() {
+        unsafe { drop(Box::from_raw(plan_ref.handle as *mut HeaderPlanOwned)) };
     }
+    plan_ref.handle = std::ptr::null_mut();
+    plan_ref.entries = std::ptr::null();
+    plan_ref.count = 0;
 }
 
 unsafe fn optional_str(ptr: *const u8, len: usize) -> Option<&'static str> {
@@ -564,4 +580,49 @@ pub unsafe extern "C" fn markdown_header_plan_init(result: *mut FFIHeaderPlan) {
         return;
     }
     unsafe { ptr::write(result, std::mem::zeroed()) };
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn header_plan_build_and_free_empty_content_type() {
+        let mut plan: FFIHeaderPlan = unsafe { std::mem::zeroed() };
+        unsafe {
+            markdown_build_header_plan(std::ptr::null(), 0, 0, &mut plan);
+        }
+        assert!(plan.count > 0);
+        assert!(!plan.handle.is_null());
+        assert!(!plan.entries.is_null());
+        unsafe { markdown_header_plan_free(&mut plan) };
+        assert!(plan.handle.is_null());
+        assert!(plan.entries.is_null());
+        assert_eq!(plan.count, 0);
+    }
+
+    #[test]
+    fn header_plan_build_multiple_entries() {
+        let ct = b"text/html; charset=utf-8";
+        let mut plan: FFIHeaderPlan = unsafe { std::mem::zeroed() };
+        unsafe {
+            markdown_build_header_plan(ct.as_ptr(), ct.len(), 1, &mut plan);
+        }
+        assert!(plan.count >= 2);
+        let first = unsafe { &*plan.entries };
+        assert!(first.key_len > 0);
+        assert!(!first.key.is_null());
+        unsafe { markdown_header_plan_free(&mut plan) };
+    }
+
+    #[test]
+    fn header_plan_invalid_utf8_fallback() {
+        let invalid = [0xff, 0xfe, 0xfd];
+        let mut plan: FFIHeaderPlan = unsafe { std::mem::zeroed() };
+        unsafe {
+            markdown_build_header_plan(invalid.as_ptr(), invalid.len(), 0, &mut plan);
+        }
+        assert!(plan.count > 0);
+        unsafe { markdown_header_plan_free(&mut plan) };
+    }
 }

@@ -420,6 +420,13 @@ typedef struct FFIDecisionResult {
 } FFIDecisionResult;
 
 /**
+ * Opaque Rust-owned handle that keeps header-plan backing storage alive.
+ */
+typedef struct FFIHeaderPlanHandle {
+  uint8_t _private[0];
+} FFIHeaderPlanHandle;
+
+/**
  * A single header operation in a header plan.
  *
  * Fields:
@@ -456,10 +463,15 @@ typedef struct FFIHeaderEntry {
  * Header plan: an ordered list of header operations for atomic application.
  *
  * Fields:
+ * - `handle`: Opaque plan handle owned by Rust
  * - `entries`: Pointer to array of FFIHeaderEntry
  * - `count`: Number of entries in the plan
  */
 typedef struct FFIHeaderPlan {
+  /**
+   * Opaque Rust-owned handle. Free with `markdown_header_plan_free`.
+   */
+  struct FFIHeaderPlanHandle *handle;
   /**
    * Pointer to header entry array.
    */
@@ -592,9 +604,8 @@ void markdown_make_decision(uint8_t enabled,
 /**
  * Build a header plan for a successful Markdown conversion.
  *
- * The returned plan contains borrowed pointers into Rust-managed memory.
- * The plan is valid only until the next FFI call that modifies the
- * converter state. The C caller must copy any values it needs to retain.
+ * The returned plan contains Rust-owned buffers. The C caller must release
+ * the plan via `markdown_header_plan_free`.
  *
  * # Safety
  *
