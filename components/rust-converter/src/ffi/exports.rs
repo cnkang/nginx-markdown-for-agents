@@ -398,6 +398,15 @@ pub unsafe extern "C" fn markdown_build_header_plan(
                     value_len: 0,
                 });
             }
+            HeaderOp::SetEtagPlaceholder => {
+                owned.entries.push(FFIHeaderEntry {
+                    op_type: 2,
+                    key: std::ptr::null(),
+                    key_len: 0,
+                    value: std::ptr::null(),
+                    value_len: 0,
+                });
+            }
         }
     }
 
@@ -495,7 +504,7 @@ pub unsafe extern "C" fn markdown_header_plan_free(plan: *mut FFIHeaderPlan) {
     plan_ref.count = 0;
 }
 
-unsafe fn optional_str(ptr: *const u8, len: usize) -> Option<&'static str> {
+unsafe fn optional_str<'a>(ptr: *const u8, len: usize) -> Option<&'a str> {
     if ptr.is_null() || len == 0 {
         return None;
     }
