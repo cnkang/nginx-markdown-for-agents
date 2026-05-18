@@ -37,6 +37,7 @@ by default. Stack-allocated FFI structs must use `ngx_memzero` explicitly.
 |--------|-----------------|-------|
 | `MarkdownResult` | All pointer/length fields NULL/0 | Existing; v0.7.0 adds no new fields (tail-append only in future) |
 | `FFIAcceptResult` | `should_convert=0, reason=0` | New in v0.7.0; 2 bytes total |
+| `FFIHeaderPlan` | `handle=NULL, entries=NULL, count=0` | New in v0.7.0; must be released with `markdown_header_plan_free` after successful build |
 | `MarkdownOptions` | All pointer/length fields NULL/0 | Existing; v0.7.0 adds no breaking changes |
 
 ## Safety Invariant
@@ -51,3 +52,4 @@ pointer fields may be NULL.
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 0.7.0 | 2026-05-17 | Kang | Initial zero/default initialization strategy document |
+| 0.7.0-impl | 2026-05-18 | codex | Add FFIHeaderPlan zero-init and free lifecycle rule |
