@@ -1697,7 +1697,6 @@ ngx_http_markdown_prepare_body_output_buffer(ngx_http_request_t *r,
         if (b->pos == NULL) {
             ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0,
                          "markdown filter: failed to allocate output memory, category=system");
-            markdown_result_free(result);
             return NGX_ERROR;
         }
 
