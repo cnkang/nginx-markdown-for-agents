@@ -1683,7 +1683,7 @@ ngx_http_markdown_prepare_head_output_buffer(const ngx_http_request_t *r,
     b->memory = 0;
     b->last_buf = (r == r->main) ? 1 : 0;
     b->last_in_chain = 1;
-    markdown_result_free(result);
+    (void) result;
 }
 
 /* Copy converted Markdown into a pool-allocated output buffer. */
@@ -1764,29 +1764,11 @@ ngx_http_markdown_send_conversion_output(ngx_http_request_t *r,
      */
     if (r->method == NGX_HTTP_HEAD) {
         ngx_http_markdown_prepare_head_output_buffer(r, b, result);
-        /* head output buffer does not need result data after this point,
-         * but we still defer free for consistency */
     } else {
-        if (result->markdown_len > 0) {
-            b->pos = ngx_pnalloc(r->pool, result->markdown_len);
-            if (b->pos == NULL) {
-                ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0,
-                             "markdown filter: failed to allocate output memory, category=system");
-                markdown_result_free(result);
-                return NGX_ERROR;
-            }
-
-            ngx_memcpy(b->pos, result->markdown, result->markdown_len);
-            b->last = b->pos + result->markdown_len;
-            b->memory = 1;
-        } else {
-            b->pos = NULL;
-            b->last = NULL;
-            b->memory = 0;
+        rc = ngx_http_markdown_prepare_body_output_buffer(r, b, result);
+        if (rc != NGX_OK) {
+            return NGX_ERROR;
         }
-
-        b->last_buf = (r == r->main) ? 1 : 0;
-        b->last_in_chain = 1;
     }
 
     /*
