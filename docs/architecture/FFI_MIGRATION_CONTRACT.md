@@ -24,6 +24,8 @@ The FFI boundary is implemented in:
 | `markdown_converter_free` | Rust | C | **Stable** | Releases handle |
 | `markdown_result_free` | Rust | C | **Stable** | Releases result buffers |
 | `markdown_negotiate_accept` | Rust | C | **v0.7.0 NEW** | Accept header negotiation |
+| `markdown_build_header_plan` | Rust | C | **v0.7.0 NEW** | Returns Rust-owned plan + opaque handle |
+| `markdown_header_plan_free` | Rust | C | **v0.7.0 NEW** | Releases plan handle and owned buffers |
 | `markdown_streaming_create` | Rust | C | **Stable** | Streaming converter handle |
 | `markdown_streaming_feed` | Rust | C | **Stable** | Incremental input |
 | `markdown_streaming_finalize` | Rust | C | **Stable** | End-of-stream |
@@ -38,10 +40,15 @@ The FFI boundary is implemented in:
 | `MarkdownOptions` | Rust→C (input) | — | `repr(C)`, tail-append only | **Stable** |
 | `MarkdownResult` | Rust→C (output) | 64 | `repr(C)`, tail-append only | **Stable** |
 | `FFIAcceptResult` | Rust→C (output) | 2 | `repr(C)` | **v0.7.0 NEW** |
+| `FFIHeaderPlan` | Rust→C (output) | ABI-defined | `repr(C)` + opaque handle | **v0.7.0 NEW** |
 | `StreamingConverterHandle` | Rust (opaque) | — | Opaque pointer | **Stable** |
 | `MarkdownConverterHandle` | Rust (opaque) | — | Opaque pointer | **Stable** |
 
 ## Error Code Registry
+
+Reason code ownership follows the same single-source contract: Rust defines the
+canonical reason-code values and C consumes/mirrors without introducing
+independent semantic forks.
 
 | Code | Constant | Category | Owner | Since |
 |------|----------|----------|-------|-------|
@@ -75,9 +82,11 @@ Functions ordered by migration risk and complexity (highest first):
 3. **Header sync**: Both copies of `markdown_converter.h` MUST be byte-identical. `make check-headers` enforces this.
 4. **Error code uniqueness**: Every `ERROR_*` constant MUST have a unique value. The Rust `layout_tests::test_error_codes_distinct` test enforces this.
 5. **Opaque pointers**: `MarkdownConverterHandle` and `StreamingConverterHandle` are opaque to C. C never dereferences them.
+6. **Header plan lifetime**: `FFIHeaderPlan.entries` remains valid until `markdown_header_plan_free()`; C must not retain pointers after free.
 
 ## Document Updates
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 0.7.0-draft | 2026-05-17 | agent | Initial FFI migration contract for v0.7.0 |
+| 0.7.0-impl | 2026-05-18 | codex | Add header-plan ownership/lifecycle contract |
