@@ -15,6 +15,7 @@
  * struct is modified.
  */
 
+#include <stddef.h>
 #include "markdown_converter.h"
 
 /*
