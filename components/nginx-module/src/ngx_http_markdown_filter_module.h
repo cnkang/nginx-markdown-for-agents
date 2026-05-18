@@ -771,17 +771,12 @@ struct MarkdownConverterHandle;
 struct MarkdownResult;
 
 /*
- * Accept header parser functions
+ * Accept header negotiation
  *
- * These functions implement RFC 9110 content negotiation with tie-break rules.
+ * Delegates to Rust FFI markdown_negotiate_accept for RFC 7231 / 9110
+ * content negotiation. The C side extracts the Accept header from the
+ * request and maps the FFI result to skip metrics.
  */
-
-/* Parse Accept header into structured entries */
-ngx_int_t ngx_http_markdown_parse_accept(ngx_http_request_t *r, ngx_str_t *accept,
-    ngx_array_t *entries);
-
-/* Sort Accept entries by precedence (q-value, specificity, order) */
-void ngx_http_markdown_sort_accept_entries(ngx_array_t *entries);
 
 /* Determine if request should be converted based on Accept header */
 ngx_int_t ngx_http_markdown_should_convert(ngx_http_request_t *r,
