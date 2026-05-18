@@ -314,13 +314,22 @@ pub struct FFIHeaderEntry {
     pub value_len: usize,
 }
 
+/// Opaque Rust-owned handle that keeps header-plan backing storage alive.
+#[repr(C)]
+pub struct FFIHeaderPlanHandle {
+    _private: [u8; 0],
+}
+
 /// Header plan: an ordered list of header operations for atomic application.
 ///
 /// Fields:
+/// - `handle`: Opaque plan handle owned by Rust
 /// - `entries`: Pointer to array of FFIHeaderEntry
 /// - `count`: Number of entries in the plan
 #[repr(C)]
 pub struct FFIHeaderPlan {
+    /// Opaque Rust-owned handle. Free with `markdown_header_plan_free`.
+    pub handle: *mut FFIHeaderPlanHandle,
     /// Pointer to header entry array.
     pub entries: *const FFIHeaderEntry,
     /// Number of entries.
