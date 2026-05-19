@@ -674,6 +674,16 @@ ngx_http_markdown_body_filter_decompress_if_needed(ngx_http_request_t *r,
             "content after unsupported decompression");
     }
 
+    if (decompress_rc == NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED) {
+        NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.budget_exceeded_total);
+        return ngx_http_markdown_handle_decompression_alloc_error(
+            r, ctx, conf,
+            NGX_HTTP_MARKDOWN_ERROR_RESOURCE_LIMIT,
+            "markdown filter: fail-open strategy "
+            "- returning original content after "
+            "decompression budget exceeded");
+    }
+
     if (decompress_rc != NGX_OK) {
         const ngx_str_t *compression_name;
 

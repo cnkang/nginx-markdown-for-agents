@@ -1005,6 +1005,7 @@ ngx_http_markdown_streaming_send_deferred_lastbuf(
     if (rc == NGX_OK || rc == NGX_DONE) {
         NGX_HTTP_MARKDOWN_METRIC_INC(streaming.succeeded_total);
         NGX_HTTP_MARKDOWN_METRIC_INC(conversions_succeeded);
+        NGX_HTTP_MARKDOWN_METRIC_INC(results.delivery_count);
 
         ngx_http_markdown_log_decision(r, conf, ctx->effective_conf,
             ngx_http_markdown_reason_streaming_convert());
@@ -1164,6 +1165,7 @@ ngx_http_markdown_streaming_resume_pending(
     if (ctx->streaming.pending_terminal_metrics) {
         NGX_HTTP_MARKDOWN_METRIC_INC(streaming.succeeded_total);
         NGX_HTTP_MARKDOWN_METRIC_INC(conversions_succeeded);
+        NGX_HTTP_MARKDOWN_METRIC_INC(results.delivery_count);
 
         ngx_http_markdown_log_decision(r, conf, ctx->effective_conf,
             ngx_http_markdown_reason_streaming_convert());
@@ -2149,6 +2151,7 @@ ngx_http_markdown_streaming_finalize_request(
     if (rc == NGX_OK || rc == NGX_DONE) {
         NGX_HTTP_MARKDOWN_METRIC_INC(streaming.succeeded_total);
         NGX_HTTP_MARKDOWN_METRIC_INC(conversions_succeeded);
+        NGX_HTTP_MARKDOWN_METRIC_INC(results.delivery_count);
 
         ngx_http_markdown_log_decision(r, conf, ctx->effective_conf,
             ngx_http_markdown_reason_streaming_convert());
