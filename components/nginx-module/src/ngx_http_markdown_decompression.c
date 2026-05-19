@@ -376,7 +376,7 @@ ngx_http_markdown_decompress_gzip(ngx_http_request_t *r,
                          "category=resource_limit",
                          conf->decompress_max_size);
             inflateEnd(&stream);
-            return NGX_ERROR;
+            return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
         }
         
         /* Other decompression error */
@@ -394,7 +394,7 @@ ngx_http_markdown_decompress_gzip(ngx_http_request_t *r,
                      "category=resource_limit",
                      stream.total_out, conf->decompress_max_size);
         inflateEnd(&stream);
-        return NGX_ERROR;
+        return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
     }
     
     /* Create output chain with decompressed data (Requirement 2.3) */
@@ -595,7 +595,7 @@ ngx_http_markdown_decompress_brotli(ngx_http_request_t *r,
                          "category=resource_limit",
                          conf->decompress_max_size);
             BrotliDecoderDestroyInstance(decoder);
-            return NGX_ERROR;
+            return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
         }
         
         /* Other decompression error */
@@ -617,7 +617,7 @@ ngx_http_markdown_decompress_brotli(ngx_http_request_t *r,
                      "category=resource_limit",
                      total_out, conf->decompress_max_size);
         BrotliDecoderDestroyInstance(decoder);
-        return NGX_ERROR;
+        return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
     }
     
     /* Create output chain with decompressed data (Requirement 3.2) */
@@ -709,6 +709,13 @@ ngx_http_markdown_decompress(ngx_http_request_t *r,
         case NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE:
             /* Use zlib for gzip/deflate decompression (Requirement 2.3) */
             rc = ngx_http_markdown_decompress_gzip(r, type, in, out);
+
+            if (rc == NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED) {
+                ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                             "markdown filter: gzip/deflate decompressed "
+                             "size exceeds budget, category=resource_limit");
+            }
+
             return rc;
             
         case NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI:
@@ -720,6 +727,12 @@ ngx_http_markdown_decompress(ngx_http_request_t *r,
                 ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
                              "markdown filter: brotli compression detected but "
                              "brotli module not available, returning original content");
+            }
+
+            if (rc == NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED) {
+                ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                             "markdown filter: brotli decompressed "
+                             "size exceeds budget, category=resource_limit");
             }
             
             return rc;

@@ -39,17 +39,11 @@ ngx_http_markdown_streaming_decomp_size_to_uint(
 }
 
 /*
- * Module-local sentinel: decompressed size budget exceeded.
- *
- * Returned by decomp_feed/decomp_finish when the cumulative
- * decompressed output exceeds max_decompressed_size. The caller
- * maps this to ERROR_BUDGET_EXCEEDED for proper metrics/reason-code
- * classification, distinguishing it from ERROR_INTERNAL.
- *
- * Value chosen to avoid collision with NGX_OK (0), NGX_ERROR (-1),
- * NGX_AGAIN (-2), NGX_DECLINED (-5), NGX_DONE (-4).
+ * NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED is defined in
+ * ngx_http_markdown_filter_module.h (shared by buffered and streaming
+ * decompression paths).  The streaming decomp implementation relies
+ * on the shared definition included via filter_module.h.
  */
-#define NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED  -100
 
 /*
  * Streaming decompressor state.
