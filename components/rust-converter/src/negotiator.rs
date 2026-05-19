@@ -455,7 +455,10 @@ mod tests {
 
     #[test]
     fn test_unrelated_mime_types_ignored() {
-        let r = negotiate("application/json;q=1.0, text/markdown;q=0.5, text/html;q=0.9", true);
+        let r = negotiate(
+            "application/json;q=1.0, text/markdown;q=0.5, text/html;q=0.9",
+            true,
+        );
         assert_eq!(
             r,
             NegotiationResult::Passthrough {
@@ -466,7 +469,10 @@ mod tests {
 
     #[test]
     fn test_multiple_markdown_entries_takes_highest() {
-        let r = negotiate("text/markdown;q=0.3, text/markdown;q=0.9, text/html;q=0.8", true);
+        let r = negotiate(
+            "text/markdown;q=0.3, text/markdown;q=0.9, text/html;q=0.8",
+            true,
+        );
         assert_eq!(r, NegotiationResult::Convert);
     }
 

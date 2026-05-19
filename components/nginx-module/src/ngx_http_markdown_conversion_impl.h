@@ -1777,6 +1777,7 @@ ngx_http_markdown_send_conversion_output(ngx_http_request_t *r,
     } else {
         rc = ngx_http_markdown_prepare_body_output_buffer(r, b, result);
         if (rc != NGX_OK) {
+            markdown_result_free(result);
             return NGX_ERROR;
         }
     }

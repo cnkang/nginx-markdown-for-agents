@@ -122,10 +122,7 @@ pub fn evaluate_conditional(
             if let Some((etag_weak, etag_val)) = parse_etag(etag_str) {
                 // If-None-Match uses weak comparison for GET/HEAD
                 for (inm_weak, inm_val) in &inm_etags {
-                    if etag_weak_match(
-                        (*inm_weak, inm_val.as_str()),
-                        (etag_weak, etag_val),
-                    ) {
+                    if etag_weak_match((*inm_weak, inm_val.as_str()), (etag_weak, etag_val)) {
                         return ConditionalResult::NotModified;
                     }
                 }
@@ -194,17 +191,32 @@ fn parse_http_date(date: &str) -> Option<i64> {
     let sec: i64 = sec_str.parse().ok()?;
 
     let month: i64 = match month_str {
-        "Jan" => 1, "Feb" => 2, "Mar" => 3, "Apr" => 4,
-        "May" => 5, "Jun" => 6, "Jul" => 7, "Aug" => 8,
-        "Sep" => 9, "Oct" => 10, "Nov" => 11, "Dec" => 12,
+        "Jan" => 1,
+        "Feb" => 2,
+        "Mar" => 3,
+        "Apr" => 4,
+        "May" => 5,
+        "Jun" => 6,
+        "Jul" => 7,
+        "Aug" => 8,
+        "Sep" => 9,
+        "Oct" => 10,
+        "Nov" => 11,
+        "Dec" => 12,
         _ => return None,
     };
 
     // Convert to Unix timestamp using simplified formula
     // (valid for 1970-2100, sufficient for HTTP date ranges)
-    if year < 1970 || year > 2100 || day < 1 || day > 31
-        || month < 1 || month > 12
-        || hour > 23 || min > 59 || sec > 60
+    if year < 1970
+        || year > 2100
+        || day < 1
+        || day > 31
+        || month < 1
+        || month > 12
+        || hour > 23
+        || min > 59
+        || sec > 60
     {
         return None;
     }
@@ -279,23 +291,13 @@ mod tests {
 
     #[test]
     fn test_if_none_match_match() {
-        let r = evaluate_conditional(
-            Some("\"abc\""),
-            Some("\"abc\""),
-            None,
-            None,
-        );
+        let r = evaluate_conditional(Some("\"abc\""), Some("\"abc\""), None, None);
         assert_eq!(r, ConditionalResult::NotModified);
     }
 
     #[test]
     fn test_if_none_match_no_match() {
-        let r = evaluate_conditional(
-            Some("\"def\""),
-            Some("\"abc\""),
-            None,
-            None,
-        );
+        let r = evaluate_conditional(Some("\"def\""), Some("\"abc\""), None, None);
         assert_eq!(r, ConditionalResult::Proceed);
     }
 
@@ -307,12 +309,7 @@ mod tests {
 
     #[test]
     fn test_if_none_match_weak_match() {
-        let r = evaluate_conditional(
-            Some("W/\"abc\""),
-            Some("W/\"abc\""),
-            None,
-            None,
-        );
+        let r = evaluate_conditional(Some("W/\"abc\""), Some("W/\"abc\""), None, None);
         assert_eq!(r, ConditionalResult::NotModified);
     }
 

@@ -195,7 +195,9 @@ pub unsafe extern "C" fn markdown_negotiate_accept(
     let header_str = if accept_header.is_null() || accept_header_len == 0 {
         ""
     } else {
-        match std::str::from_utf8(unsafe { std::slice::from_raw_parts(accept_header, accept_header_len) }) {
+        match std::str::from_utf8(unsafe {
+            std::slice::from_raw_parts(accept_header, accept_header_len)
+        }) {
             Ok(s) => s,
             Err(_) => {
                 result_ref.should_convert = 0;
@@ -207,7 +209,7 @@ pub unsafe extern "C" fn markdown_negotiate_accept(
 
     let wildcard = on_wildcard != 0;
 
-    use crate::negotiator::{negotiate, NegotiationResult, PassthroughReason};
+    use crate::negotiator::{NegotiationResult, PassthroughReason, negotiate};
     match negotiate(header_str, wildcard) {
         NegotiationResult::Convert => {
             result_ref.should_convert = 1;
@@ -258,7 +260,7 @@ pub unsafe extern "C" fn markdown_check_conditional(
     let ims = unsafe { optional_str(if_modified_since, if_modified_since_len) };
     let lm = unsafe { optional_str(last_modified, last_modified_len) };
 
-    use crate::conditional::{evaluate_conditional, ConditionalResult};
+    use crate::conditional::{ConditionalResult, evaluate_conditional};
     match evaluate_conditional(inm, etag, ims, lm) {
         ConditionalResult::NotModified => {
             result_ref.result_code = 0;
@@ -297,7 +299,7 @@ pub unsafe extern "C" fn markdown_make_decision(
 
     let result_ref = unsafe { &mut *result };
 
-    use crate::decision::{make_decision, Decision, DecisionContext, SkipReason};
+    use crate::decision::{Decision, DecisionContext, SkipReason, make_decision};
     let ctx = DecisionContext {
         enabled: enabled != 0,
         eligible: eligible != 0,
@@ -357,7 +359,9 @@ pub unsafe extern "C" fn markdown_build_header_plan(
     let ct = if content_type.is_null() || content_type_len == 0 {
         "text/markdown; charset=utf-8"
     } else {
-        match std::str::from_utf8(unsafe { std::slice::from_raw_parts(content_type, content_type_len) }) {
+        match std::str::from_utf8(unsafe {
+            std::slice::from_raw_parts(content_type, content_type_len)
+        }) {
             Ok(s) => s,
             Err(_) => "text/markdown; charset=utf-8",
         }
@@ -375,8 +379,12 @@ pub unsafe extern "C" fn markdown_build_header_plan(
     for op in &plan.ops {
         match op {
             HeaderOp::Set { name, value } => {
-                owned.key_storage.push(name.as_bytes().to_vec().into_boxed_slice());
-                owned.value_storage.push(value.as_bytes().to_vec().into_boxed_slice());
+                owned
+                    .key_storage
+                    .push(name.as_bytes().to_vec().into_boxed_slice());
+                owned
+                    .value_storage
+                    .push(value.as_bytes().to_vec().into_boxed_slice());
                 let key = &owned.key_storage[owned.key_storage.len() - 1];
                 let val = &owned.value_storage[owned.value_storage.len() - 1];
                 owned.entries.push(FFIHeaderEntry {
@@ -388,7 +396,9 @@ pub unsafe extern "C" fn markdown_build_header_plan(
                 });
             }
             HeaderOp::Delete { name } => {
-                owned.key_storage.push(name.as_bytes().to_vec().into_boxed_slice());
+                owned
+                    .key_storage
+                    .push(name.as_bytes().to_vec().into_boxed_slice());
                 let key = &owned.key_storage[owned.key_storage.len() - 1];
                 owned.entries.push(FFIHeaderEntry {
                     op_type: 1,
@@ -431,10 +441,7 @@ pub unsafe extern "C" fn markdown_build_header_plan(
 /// The caller must ensure that `url` either points to `url_len` readable
 /// bytes or is NULL when `url_len == 0`.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn markdown_validate_url(
-    url: *const u8,
-    url_len: usize,
-) -> u8 {
+pub unsafe extern "C" fn markdown_validate_url(url: *const u8, url_len: usize) -> u8 {
     let url_str = if url.is_null() || url_len == 0 {
         return 1;
     } else {
@@ -461,10 +468,7 @@ pub unsafe extern "C" fn markdown_validate_url(
 /// The caller must ensure that `url` either points to `url_len` readable
 /// bytes or is NULL when `url_len == 0`.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn markdown_is_dangerous_url(
-    url: *const u8,
-    url_len: usize,
-) -> u8 {
+pub unsafe extern "C" fn markdown_is_dangerous_url(url: *const u8, url_len: usize) -> u8 {
     let url_str = if url.is_null() || url_len == 0 {
         return 0;
     } else {

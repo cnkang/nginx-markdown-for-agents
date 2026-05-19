@@ -674,38 +674,38 @@ mod tests {
     }
 
     proptest! {
-        /// Property 30: Input Validation (dangerous URL schemes are rejected)
-        /// Validates: NFR-03.4
-        #[test]
-        fn prop_dangerous_url_schemes_are_rejected(
-            leading_ws in "[ \\t\\n\\r]{0,3}",
-            payload in "[A-Za-z0-9_/?=&:%#.-]{0,64}",
-            uppercase in any::<bool>(),
-        ) {
-            let validator = SecurityValidator::new();
-            let schemes = ["javascript:", "data:", "vbscript:", "file:", "about:"];
+       /// Property 30: Input Validation (dangerous URL schemes are rejected)
+       /// Validates: NFR-03.4
+       #[test]
+       fn prop_dangerous_url_schemes_are_rejected(
+           leading_ws in "[ \\t\\n\\r]{0,3}",
+           payload in "[A-Za-z0-9_/?=&:%#.-]{0,64}",
+           uppercase in any::<bool>(),
+       ) {
+           let validator = SecurityValidator::new();
+           let schemes = ["javascript:", "data:", "vbscript:", "file:", "about:"];
 
-            for scheme in schemes {
-                let scheme_variant = if uppercase {
-                    scheme.to_uppercase()
-                } else {
-                    scheme.to_string()
-                };
-                let candidate = format!("{leading_ws}{scheme_variant}{payload}");
+           for scheme in schemes {
+               let scheme_variant = if uppercase {
+                   scheme.to_uppercase()
+               } else {
+                   scheme.to_string()
+               };
+               let candidate = format!("{leading_ws}{scheme_variant}{payload}");
 
-                prop_assert!(
-                    validator.is_dangerous_url(&candidate),
-                    "Dangerous scheme should be detected regardless of case/leading whitespace: {candidate}"
+               prop_assert!(
+                   validator.is_dangerous_url(&candidate),
+                   "Dangerous scheme should be detected regardless of case/leading whitespace: {candidate}"
+               );
+                prop_assert_eq!(
+                    validator.sanitize_url(&candidate),
+                    None,
+                    "Dangerous scheme should be removed by sanitize_url"
                 );
-                 prop_assert_eq!(
-                     validator.sanitize_url(&candidate),
-                     None,
-                     "Dangerous scheme should be removed by sanitize_url"
-                 );
-             }
-         }
-     }
- }
+            }
+        }
+    }
+}
 
 /// Reject URLs containing C0 control characters (U+0000–U+001F)
 /// except HT (U+0009), LF (U+000A), CR (U+000D) which are
@@ -713,9 +713,8 @@ mod tests {
 ///
 /// Returns true if the URL contains disallowed control characters.
 pub fn url_contains_control_chars(url: &str) -> bool {
-    url.bytes().any(|b| {
-        b != b'\t' && b != b'\n' && b != b'\r' && b < 0x20
-    })
+    url.bytes()
+        .any(|b| b != b'\t' && b != b'\n' && b != b'\r' && b < 0x20)
 }
 
 /// Reject URLs containing any C0 control characters (U+0000–U+001F)
@@ -737,14 +736,8 @@ pub fn link_url_contains_control_chars(url: &str) -> bool {
 ///
 /// Returns true if the host contains invalid characters.
 pub fn host_contains_invalid_chars(host: &str) -> bool {
-    host.bytes().any(|b| {
-        b < 0x20
-            || b == 0x7F
-            || b == b'/'
-            || b == b'\\'
-            || b == b' '
-            || b == b','
-    })
+    host.bytes()
+        .any(|b| b < 0x20 || b == 0x7F || b == b'/' || b == b'\\' || b == b' ' || b == b',')
 }
 
 /// Validate a URL for use in Markdown link destinations.
@@ -879,17 +872,23 @@ mod url_validation_tests {
 
     #[test]
     fn test_link_url_tab_rejected() {
-        assert!(link_url_contains_control_chars("https://example.com/\tpath"));
+        assert!(link_url_contains_control_chars(
+            "https://example.com/\tpath"
+        ));
     }
 
     #[test]
     fn test_link_url_newline_rejected() {
-        assert!(link_url_contains_control_chars("https://example.com/\npath"));
+        assert!(link_url_contains_control_chars(
+            "https://example.com/\npath"
+        ));
     }
 
     #[test]
     fn test_link_url_cr_rejected() {
-        assert!(link_url_contains_control_chars("https://example.com/\rpath"));
+        assert!(link_url_contains_control_chars(
+            "https://example.com/\rpath"
+        ));
     }
 
     #[test]
@@ -925,7 +924,10 @@ mod url_validation_tests {
     #[test]
     fn test_parse_forwarded_headers_both() {
         let r = parse_forwarded_headers(Some("api.example.com"), Some("https"));
-        assert_eq!(r, Some(("https".to_string(), "api.example.com".to_string())));
+        assert_eq!(
+            r,
+            Some(("https".to_string(), "api.example.com".to_string()))
+        );
     }
 
     #[test]
@@ -1006,7 +1008,10 @@ mod url_validation_tests {
     #[test]
     fn test_parse_forwarded_headers_valid_host_with_port() {
         let r = parse_forwarded_headers(Some("api.example.com:8080"), Some("https"));
-        assert_eq!(r, Some(("https".to_string(), "api.example.com:8080".to_string())));
+        assert_eq!(
+            r,
+            Some(("https".to_string(), "api.example.com:8080".to_string()))
+        );
     }
 
     #[test]

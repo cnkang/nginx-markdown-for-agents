@@ -270,7 +270,11 @@ mod tests {
         let codes: Vec<&str> = reasons.iter().map(|r| r.code()).collect();
         for i in 0..codes.len() {
             for j in (i + 1)..codes.len() {
-                assert_ne!(codes[i], codes[j], "Codes '{}' and '{}' collide", codes[i], codes[j]);
+                assert_ne!(
+                    codes[i], codes[j],
+                    "Codes '{}' and '{}' collide",
+                    codes[i], codes[j]
+                );
             }
         }
     }
