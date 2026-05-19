@@ -499,12 +499,13 @@ Check the repository for sponsorship information (if available).
 
 ---
 
-*Last updated: March 11, 2026*
+*Last updated: May 19, 2026*
 
 
 ## Document Updates
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.7.0 | 2026-05-19 | Kang | Added decompression budget guidance, v0.7.0 error codes and directives |
 | 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |

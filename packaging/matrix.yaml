@@ -27,8 +27,8 @@ matrix:
     libc: glibc
 
 nginx_versions:
-  stable: "1.26.2"
-  mainline: "1.27.3"
+  stable: "1.30.0"
+  mainline: "1.31.0"
 
 package_metadata:
   name: nginx-markdown-module

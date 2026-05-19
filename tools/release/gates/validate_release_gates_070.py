@@ -55,7 +55,7 @@ def check_structure(result: ValidationResult) -> None:
     if not gates:
         result.fail("release-gates:070-doc", "missing release gate doc")
         return
-    if "Gate 1" in gates and "Gate 5" in gates:
+    if "Gate 1" in gates and "Gate 2" in gates and "Gate 3" in gates and "Gate 4" in gates and "Gate 5" in gates:
         result.pass_("release-gates:070-doc", "gate doc includes Gate 1..5")
     else:
         result.fail("release-gates:070-doc", "gate definitions incomplete")

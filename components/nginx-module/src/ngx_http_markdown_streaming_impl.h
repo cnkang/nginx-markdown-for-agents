@@ -1665,12 +1665,12 @@ ngx_http_markdown_streaming_process_chunk(
 
             /*
              * Map decompressor return codes to FFI error codes:
-             * budget exceeded → ERROR_BUDGET_EXCEEDED for proper
-             * metrics/reason-code classification; all other errors
-             * → ERROR_INTERNAL.
+             * budget exceeded → ERROR_DECOMPRESSION_BUDGET_EXCEEDED
+             * for proper metrics/reason-code classification; all
+             * other errors → ERROR_INTERNAL.
              */
             if (rc == NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED) {
-                decomp_error_code = ERROR_BUDGET_EXCEEDED;
+                decomp_error_code = ERROR_DECOMPRESSION_BUDGET_EXCEEDED;
             } else {
                 decomp_error_code = ERROR_INTERNAL;
             }
@@ -1832,12 +1832,12 @@ ngx_http_markdown_streaming_finalize_decomp(
 
         /*
          * Map decompressor return codes to FFI error codes:
-         * budget exceeded → ERROR_BUDGET_EXCEEDED for proper
-         * metrics/reason-code classification; all other errors
-         * → ERROR_INTERNAL (pre-commit) or ERROR_POST_COMMIT.
+         * budget exceeded → ERROR_DECOMPRESSION_BUDGET_EXCEEDED
+         * for proper metrics/reason-code classification; all other
+         * errors → ERROR_INTERNAL (pre-commit) or ERROR_POST_COMMIT.
          */
         if (rc == NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED) {
-            finish_error_code = ERROR_BUDGET_EXCEEDED;
+            finish_error_code = ERROR_DECOMPRESSION_BUDGET_EXCEEDED;
         } else if (ctx->streaming.commit_state
                    == NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST)
         {

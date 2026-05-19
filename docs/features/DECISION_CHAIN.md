@@ -135,7 +135,7 @@ The complete mapping from reason codes to eligibility enums, error categories, r
 
 | Reason Code / Behavior | Description |
 |------------------------|-------------|
-| `REPLAY_BUFFER_ERROR` | Fail-open replay buffer init or append failure; sets `precommit_error` flag (Rule 38) |
+| `REPLAY_BUFFER_ERROR` | Fail-open replay buffer init or append failure; sets `precommit_error` flag (prevents duplicate finalize calls) |
 | `failopen_completed` | Once-then-skip flag preventing duplicate `ngx_http_finalize_request` calls within a request lifetime |
 | `DECOMP_BUDGET_EXCEEDED` | Decompression budget (`markdown_decompress_max_size`) exceeded; classified as `FAIL_RESOURCE_LIMIT` |
 | `PARSE_TIMEOUT` | Parser execution exceeded `markdown_parse_timeout` (default 30s); classified as `FAIL_RESOURCE_LIMIT` |

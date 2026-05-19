@@ -12,7 +12,7 @@
 
 enum {
     NGX_OK = 0,
-    NGX_AGAIN = -11,
+    NGX_AGAIN = -2,
     NGX_ERROR = -1
 };
 

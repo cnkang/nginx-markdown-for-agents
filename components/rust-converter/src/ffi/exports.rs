@@ -379,31 +379,34 @@ pub unsafe extern "C" fn markdown_build_header_plan(
     for op in &plan.ops {
         match op {
             HeaderOp::Set { name, value } => {
-                owned
-                    .key_storage
-                    .push(name.as_bytes().to_vec().into_boxed_slice());
-                owned
-                    .value_storage
-                    .push(value.as_bytes().to_vec().into_boxed_slice());
+                let mut key_vec = name.as_bytes().to_vec();
+                key_vec.push(0); /* NUL-terminate per FFI contract */
+                let mut val_vec = value.as_bytes().to_vec();
+                val_vec.push(0); /* NUL-terminate per FFI contract */
+                let key_len = key_vec.len() - 1; /* exclude NUL from len */
+                let val_len = val_vec.len() - 1;
+                owned.key_storage.push(key_vec.into_boxed_slice());
+                owned.value_storage.push(val_vec.into_boxed_slice());
                 let key = &owned.key_storage[owned.key_storage.len() - 1];
                 let val = &owned.value_storage[owned.value_storage.len() - 1];
                 owned.entries.push(FFIHeaderEntry {
                     op_type: 0,
                     key: key.as_ptr(),
-                    key_len: key.len(),
+                    key_len,
                     value: val.as_ptr(),
-                    value_len: val.len(),
+                    value_len: val_len,
                 });
             }
             HeaderOp::Delete { name } => {
-                owned
-                    .key_storage
-                    .push(name.as_bytes().to_vec().into_boxed_slice());
+                let mut key_vec = name.as_bytes().to_vec();
+                key_vec.push(0); /* NUL-terminate per FFI contract */
+                let key_len = key_vec.len() - 1;
+                owned.key_storage.push(key_vec.into_boxed_slice());
                 let key = &owned.key_storage[owned.key_storage.len() - 1];
                 owned.entries.push(FFIHeaderEntry {
                     op_type: 1,
                     key: key.as_ptr(),
-                    key_len: key.len(),
+                    key_len,
                     value: std::ptr::null(),
                     value_len: 0,
                 });
