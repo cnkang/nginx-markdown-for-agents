@@ -982,4 +982,18 @@ ngx_http_markdown_decompress(ngx_http_request_t *r,
                               const ngx_chain_t *in,
                               ngx_chain_t **out);
 
+/*
+ * Sentinel return code: decompressed size budget exceeded.
+ *
+ * Returned by decompress functions (both buffered and streaming) when
+ * the cumulative decompressed output exceeds decompress_max_size.
+ * Callers must map this to ERROR_DECOMPRESSION_BUDGET_EXCEEDED for
+ * proper metrics/reason-code classification, distinguishing it from
+ * a generic NGX_ERROR (which callers would classify as conversion).
+ *
+ * Value -100 avoids collision with NGX_OK (0), NGX_ERROR (-1),
+ * NGX_AGAIN (-2), NGX_DONE (-4), NGX_DECLINED (-5).
+ */
+#define NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED  -100
+
 #endif /* NGX_HTTP_MARKDOWN_FILTER_MODULE_H */
