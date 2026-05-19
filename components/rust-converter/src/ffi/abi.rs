@@ -295,14 +295,19 @@ pub struct FFIDecisionResult {
 /// A single header operation in a header plan.
 ///
 /// Fields:
-/// - `op_type`: 0 = set, 1 = delete
-/// - `key`: Pointer to header name (NUL-terminated, borrowed from plan)
+/// - `op_type`: 0 = set, 1 = delete, 2 = set-etag-placeholder
+/// - `key`: Pointer to header name (NUL-terminated, borrowed from plan; NULL for set-etag-placeholder)
 /// - `key_len`: Length of header name
-/// - `value`: Pointer to header value (NUL-terminated, borrowed from plan; NULL for delete)
+/// - `value`: Pointer to header value (NUL-terminated, borrowed from plan; NULL for delete and set-etag-placeholder)
 /// - `value_len`: Length of header value
+///
+/// For op_type == 2 (set-etag-placeholder), the C caller must substitute
+/// the actual ETag value from MarkdownResult.etag instead of reading
+/// key/value from the entry. This avoids the fragile empty-string
+/// placeholder contract.
 #[repr(C)]
 pub struct FFIHeaderEntry {
-    /// 0 = set, 1 = delete
+    /// 0 = set, 1 = delete, 2 = set-etag-placeholder
     pub op_type: u8,
     /// Pointer to header name (borrowed).
     pub key: *const u8,
@@ -360,7 +365,7 @@ mod layout_tests {
 
     #[test]
     fn test_ffi_accept_result_layout() {
-        use std::mem::{size_of, align_of};
+        use std::mem::{align_of, size_of};
 
         assert_eq!(size_of::<FFIAcceptResult>(), 2);
         assert_eq!(align_of::<FFIAcceptResult>(), 1);
@@ -368,7 +373,7 @@ mod layout_tests {
 
     #[test]
     fn test_ffi_conditional_result_layout() {
-        use std::mem::{size_of, align_of};
+        use std::mem::{align_of, size_of};
 
         assert_eq!(size_of::<FFIConditionalResult>(), 8);
         assert_eq!(align_of::<FFIConditionalResult>(), 4);
@@ -376,7 +381,7 @@ mod layout_tests {
 
     #[test]
     fn test_ffi_decision_result_layout() {
-        use std::mem::{size_of, align_of};
+        use std::mem::{align_of, size_of};
 
         assert_eq!(size_of::<FFIDecisionResult>(), 2);
         assert_eq!(align_of::<FFIDecisionResult>(), 1);
@@ -384,7 +389,7 @@ mod layout_tests {
 
     #[test]
     fn test_ffi_header_entry_layout() {
-        use std::mem::{size_of, align_of};
+        use std::mem::{align_of, size_of};
 
         assert!(size_of::<FFIHeaderEntry>() > 0);
         assert!(align_of::<FFIHeaderEntry>() > 0);
@@ -392,7 +397,7 @@ mod layout_tests {
 
     #[test]
     fn test_ffi_header_plan_layout() {
-        use std::mem::{size_of, align_of};
+        use std::mem::{align_of, size_of};
 
         assert!(size_of::<FFIHeaderPlan>() > 0);
         assert!(align_of::<FFIHeaderPlan>() > 0);
@@ -415,7 +420,11 @@ mod layout_tests {
 
         for i in 0..codes.len() {
             for j in (i + 1)..codes.len() {
-                assert_ne!(codes[i], codes[j], "Error codes {} and {} collide", codes[i], codes[j]);
+                assert_ne!(
+                    codes[i], codes[j],
+                    "Error codes {} and {} collide",
+                    codes[i], codes[j]
+                );
             }
         }
     }
@@ -432,7 +441,11 @@ mod layout_tests {
 
         for i in 0..reasons.len() {
             for j in (i + 1)..reasons.len() {
-                assert_ne!(reasons[i], reasons[j], "Reason codes {} and {} collide", reasons[i], reasons[j]);
+                assert_ne!(
+                    reasons[i], reasons[j],
+                    "Reason codes {} and {} collide",
+                    reasons[i], reasons[j]
+                );
             }
         }
     }
@@ -452,9 +465,13 @@ mod layout_tests {
             ERROR_PARSE_BUDGET_EXCEEDED,
             ERROR_INTERNAL,
         ];
-        assert_eq!(codes.len(), rust_error_count,
+        assert_eq!(
+            codes.len(),
+            rust_error_count,
             "Rust error code count ({}) must match C #define count ({})",
-            codes.len(), rust_error_count);
+            codes.len(),
+            rust_error_count
+        );
     }
 
     #[test]
@@ -467,9 +484,13 @@ mod layout_tests {
             NEGOTIATE_REASON_EXPLICIT_REJECT,
             NEGOTIATE_REASON_MALFORMED,
         ];
-        assert_eq!(reasons.len(), rust_reason_count,
+        assert_eq!(
+            reasons.len(),
+            rust_reason_count,
             "Rust negotiate reason count ({}) must match C #define count ({})",
-            reasons.len(), rust_reason_count);
+            reasons.len(),
+            rust_reason_count
+        );
     }
 
     #[test]
@@ -485,8 +506,11 @@ mod layout_tests {
             SkipReason::NotEligible,
             SkipReason::Disabled,
         ];
-        assert_eq!(skip_reasons.len(), 8,
+        assert_eq!(
+            skip_reasons.len(),
+            8,
             "SkipReason variant count ({}) must match FFI export reason_code range (1..=8)",
-            skip_reasons.len());
+            skip_reasons.len()
+        );
     }
 }

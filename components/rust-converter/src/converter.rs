@@ -3286,11 +3286,22 @@ mod tests {
 
         let dom = parse_html(html.as_bytes()).expect("Parse failed for heavy input");
         let converter = MarkdownConverter::new();
-        let result = converter.convert(&dom).expect("Conversion failed for heavy input");
+        let result = converter
+            .convert(&dom)
+            .expect("Conversion failed for heavy input");
 
-        assert!(!result.is_empty(), "Heavy input must produce non-empty output");
-        assert!(result.contains("bold"), "Heavy input must preserve semantic content");
-        assert!(result.contains("italic"), "Heavy input must preserve semantic content");
+        assert!(
+            !result.is_empty(),
+            "Heavy input must produce non-empty output"
+        );
+        assert!(
+            result.contains("bold"),
+            "Heavy input must preserve semantic content"
+        );
+        assert!(
+            result.contains("italic"),
+            "Heavy input must preserve semantic content"
+        );
     }
 
     /// Heavy input test: deeply nested structure.
@@ -3308,9 +3319,14 @@ mod tests {
 
         let dom = parse_html(html.as_bytes()).expect("Parse failed for deeply nested input");
         let converter = MarkdownConverter::new();
-        let result = converter.convert(&dom).expect("Conversion failed for deeply nested input");
+        let result = converter
+            .convert(&dom)
+            .expect("Conversion failed for deeply nested input");
 
-        assert!(result.contains("innermost"), "Deeply nested content must be preserved");
+        assert!(
+            result.contains("innermost"),
+            "Deeply nested content must be preserved"
+        );
     }
 
     /// Heavy input test: many attributes per element.
@@ -3324,8 +3340,13 @@ mod tests {
 
         let dom = parse_html(html.as_bytes()).expect("Parse failed for many-attribute input");
         let converter = MarkdownConverter::new();
-        let result = converter.convert(&dom).expect("Conversion failed for many-attribute input");
+        let result = converter
+            .convert(&dom)
+            .expect("Conversion failed for many-attribute input");
 
-        assert!(result.contains("content"), "Content must be preserved despite many attributes");
+        assert!(
+            result.contains("content"),
+            "Content must be preserved despite many attributes"
+        );
     }
 }
