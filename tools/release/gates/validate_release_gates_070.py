@@ -18,6 +18,12 @@ ABI_RS = PROJECT_ROOT / "components" / "rust-converter" / "src" / "ffi" / "abi.r
 EXPORTS_RS = PROJECT_ROOT / "components" / "rust-converter" / "src" / "ffi" / "exports.rs"
 RELEASE_GATES_MD = PROJECT_ROOT / "docs" / "project" / "release-gates" / "0.7.0-release-gates.md"
 VALIDATION_MATRIX_MD = PROJECT_ROOT / "docs" / "project" / "0.7.0-validation-matrix.md"
+PAYLOAD_IMPL_H = PROJECT_ROOT / "components" / "nginx-module" / "src" / "ngx_http_markdown_payload_impl.h"
+CONVERSION_IMPL_H = PROJECT_ROOT / "components" / "nginx-module" / "src" / "ngx_http_markdown_conversion_impl.h"
+DECISION_LOG_IMPL_H = PROJECT_ROOT / "components" / "nginx-module" / "src" / "ngx_http_markdown_decision_log_impl.h"
+HEADERS_IMPL_H = PROJECT_ROOT / "components" / "nginx-module" / "src" / "ngx_http_markdown_headers_impl.h"
+DECOMPRESSION_C = PROJECT_ROOT / "components" / "nginx-module" / "src" / "ngx_http_markdown_decompression.c"
+FILTER_MODULE_H = PROJECT_ROOT / "components" / "nginx-module" / "src" / "ngx_http_markdown_filter_module.h"
 
 GATE_FUTURE = {"Gate 3", "Gate 4"}
 
@@ -82,6 +88,12 @@ def check_blocking_items(result: ValidationResult, mode: str) -> None:
     err = read(ERROR_RS)
     abi = read(ABI_RS)
     exports = read(EXPORTS_RS)
+    payload = read(PAYLOAD_IMPL_H)
+    conversion = read(CONVERSION_IMPL_H)
+    decision_log = read(DECISION_LOG_IMPL_H)
+    headers = read(HEADERS_IMPL_H)
+    decomp = read(DECOMPRESSION_C)
+    filter_h = read(FILTER_MODULE_H)
 
     blocking_items = {
         "Gate 1": [
@@ -90,12 +102,20 @@ def check_blocking_items(result: ValidationResult, mode: str) -> None:
             ("make build && make check-headers", "check-headers" in mk and "make check-headers" in docs),
             ("bounded decompression", "markdown_decompress_max_size" in cfg and "DecompressionBudgetExceeded" in err),
             ("accept negotiation", "FFIAcceptResult" in abi and "markdown_negotiate_accept" in exports),
+            ("decomp budget exceeded metric write", "NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.budget_exceeded_total)" in payload),
+            ("decomp budget exceeded return code", "NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED" in filter_h and "NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED" in decomp),
+            ("decomp budget exceeded resource_limit path", "NGX_HTTP_MARKDOWN_ERROR_RESOURCE_LIMIT" in payload and "DECOMP_BUDGET_EXCEEDED" in payload),
         ],
         "Gate 2": [
             ("ffi boundary tests", "make test-nginx-unit" in docs and "make test-rust" in docs),
             ("layout tests", "test_ffi_header_plan_layout" in abi and "test_ffi_accept_result_layout" in abi),
             ("reason code source", "reason code" in read(FFI_CONTRACT_PATH).lower()),
             ("delivery semantics tests", "delivery_counter_test.c" in "\n".join(str(p) for p in (PROJECT_ROOT / "components" / "nginx-module" / "tests" / "unit").glob("*.c"))),
+            ("delivery_count metric write", "NGX_HTTP_MARKDOWN_METRIC_INC(results.delivery_count)" in conversion or "NGX_HTTP_MARKDOWN_METRIC_INC(results.delivery_count)" in payload),
+            ("decision_count metric write", "NGX_HTTP_MARKDOWN_METRIC_INC(results.decision_count)" in decision_log),
+            ("parse_timeouts_total metric write", "parse_interrupts.parse_timeouts_total" in conversion),
+            ("parse_budget_exceeded_total metric write", "parse_interrupts.parse_budget_exceeded_total" in conversion),
+            ("header plan ffi integration", "markdown_build_header_plan" in headers and "markdown_header_plan_free" in headers),
         ],
         "Gate 5": [
             ("make harness-check-full", "harness-check-full" in mk and "make harness-check-full" in gates),
