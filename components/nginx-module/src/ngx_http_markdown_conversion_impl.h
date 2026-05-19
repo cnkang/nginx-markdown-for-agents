@@ -851,6 +851,18 @@ ngx_http_markdown_handle_conversion_failure(ngx_http_request_t *r,
             break;
     }
 
+    switch (result->error_code) {
+        case ERROR_DECOMPRESSION_BUDGET_EXCEEDED:
+            NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.budget_exceeded_total);
+            break;
+        case ERROR_PARSE_TIMEOUT:
+            NGX_HTTP_MARKDOWN_METRIC_INC(parse_interrupts.parse_timeouts_total);
+            break;
+        case ERROR_PARSE_BUDGET_EXCEEDED:
+            NGX_HTTP_MARKDOWN_METRIC_INC(parse_interrupts.parse_budget_exceeded_total);
+            break;
+    }
+
     err_len = 0;
     if (result->error_message != NULL) {
         err_len = (result->error_len > (size_t) INT_MAX)
@@ -1812,6 +1824,10 @@ ngx_http_markdown_send_conversion_output(ngx_http_request_t *r,
      * Step 7: Emit body downstream.
      */
     rc = ngx_http_next_body_filter(r, out);
+
+    if (rc == NGX_OK || rc == NGX_DONE) {
+        NGX_HTTP_MARKDOWN_METRIC_INC(results.delivery_count);
+    }
 
     if (rc == NGX_AGAIN) {
         ctx->fullbuffer_pending_output = out;

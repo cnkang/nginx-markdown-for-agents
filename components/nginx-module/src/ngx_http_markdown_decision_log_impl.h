@@ -332,6 +332,8 @@ ngx_http_markdown_log_decision_with_category(ngx_http_request_t *r,
         return;
     }
 
+    NGX_HTTP_MARKDOWN_METRIC_INC(results.decision_count);
+
     is_failure = ngx_http_markdown_is_failure_outcome(reason_code);
 
     effective_verbosity = ngx_http_markdown_effective_log_verbosity(
