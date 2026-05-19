@@ -544,49 +544,152 @@ ngx_http_markdown_update_headers(ngx_http_request_t *r,
                                  const struct MarkdownResult *result,
                                  const ngx_http_markdown_conf_t *conf)
 {
-    ngx_int_t rc;
+    ngx_int_t              rc;
+    struct FFIHeaderPlan   plan;
+    uintptr_t              i;
+    const struct FFIHeaderEntry *entry;
 
     if (r == NULL || result == NULL || conf == NULL) {
         return NGX_ERROR;
     }
 
-    r->headers_out.content_type.data = ngx_http_markdown_content_type;
-    r->headers_out.content_type.len = NGX_HTTP_MARKDOWN_CONTENT_TYPE_LEN;
-    r->headers_out.content_type_len = r->headers_out.content_type.len;
-    r->headers_out.charset.len = 0;
-    r->headers_out.charset.data = NULL;
+    /*
+     * Build header plan from Rust FFI and apply each entry.
+     *
+     * The plan covers: Content-Type (set), Content-Encoding (delete),
+     * Vary (set), and ETag (set-etag-placeholder or omit).
+     * C-side operations not in the plan: Content-Length, X-Markdown-Tokens,
+     * Accept-Ranges (delete), auth Cache-Control.
+     */
+    markdown_header_plan_init(&plan);
+    markdown_build_header_plan(
+        ngx_http_markdown_content_type,
+        NGX_HTTP_MARKDOWN_CONTENT_TYPE_LEN,
+        (conf->policy.generate_etag
+         && result->etag != NULL
+         && result->etag_len > 0) ? 1 : 0,
+        &plan);
 
-    ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                  "markdown filter: set Content-Type: text/markdown; charset=utf-8");
+    for (i = 0; i < plan.count; i++) {
+        entry = &plan.entries[i];
 
-    rc = ngx_http_markdown_add_vary_accept(r);
-    if (rc != NGX_OK) {
-        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                     "markdown filter: failed to add Vary header");
-        return NGX_ERROR;
+        switch (entry->op_type) {
+        case 0: {
+            ngx_str_t  key;
+            ngx_str_t  value;
+
+            key.data = (u_char *) entry->key;
+            key.len = entry->key_len;
+            value.data = (u_char *) entry->value;
+            value.len = entry->value_len;
+
+            if (key.len == sizeof("Content-Type") - 1
+                && ngx_strncasecmp(key.data,
+                    (u_char *) "Content-Type",
+                    key.len) == 0)
+            {
+                r->headers_out.content_type.data = value.data;
+                r->headers_out.content_type.len = value.len;
+                r->headers_out.content_type_len = value.len;
+                r->headers_out.charset.len = 0;
+                r->headers_out.charset.data = NULL;
+
+                ngx_log_debug0(NGX_LOG_DEBUG_HTTP,
+                    r->connection->log, 0,
+                    "markdown filter: set Content-Type "
+                    "via header plan");
+            }
+            else if (key.len == sizeof("Vary") - 1
+                     && ngx_strncasecmp(key.data,
+                         (u_char *) "Vary",
+                         key.len) == 0)
+            {
+                rc = ngx_http_markdown_add_vary_accept(r);
+                if (rc != NGX_OK) {
+                    ngx_log_error(NGX_LOG_ERR,
+                        r->connection->log, 0,
+                        "markdown filter: failed to add "
+                        "Vary header via plan");
+                    markdown_header_plan_free(&plan);
+                    return NGX_ERROR;
+                }
+            }
+            else
+            {
+                ngx_table_elt_t *h;
+
+                h = ngx_list_push(&r->headers_out.headers);
+                if (h == NULL) {
+                    markdown_header_plan_free(&plan);
+                    return NGX_ERROR;
+                }
+
+                h->hash = 1;
+                h->key.data = key.data;
+                h->key.len = key.len;
+                h->value.data = value.data;
+                h->value.len = value.len;
+            }
+            break;
+        }
+
+        case 1: {
+            if (entry->key_len == sizeof("Content-Encoding") - 1
+                && ngx_strncasecmp((u_char *) entry->key,
+                    (u_char *) "Content-Encoding",
+                    entry->key_len) == 0)
+            {
+                ngx_http_markdown_remove_content_encoding(r);
+            }
+            else if (entry->key_len == sizeof("Accept-Ranges") - 1
+                     && ngx_strncasecmp((u_char *) entry->key,
+                         (u_char *) "Accept-Ranges",
+                         entry->key_len) == 0)
+            {
+                ngx_http_markdown_remove_accept_ranges(r);
+            }
+            break;
+        }
+
+        case 2:
+            if (conf->policy.generate_etag
+                && result->etag != NULL
+                && result->etag_len > 0)
+            {
+                rc = ngx_http_markdown_set_etag(r,
+                    result->etag, result->etag_len);
+                if (rc != NGX_OK) {
+                    ngx_log_error(NGX_LOG_ERR,
+                        r->connection->log, 0,
+                        "markdown filter: failed to set "
+                        "ETag header via plan");
+                    markdown_header_plan_free(&plan);
+                    return NGX_ERROR;
+                }
+            }
+            else
+            {
+                rc = ngx_http_markdown_set_etag(r, NULL, 0);
+                if (rc != NGX_OK) {
+                    ngx_log_error(NGX_LOG_ERR,
+                        r->connection->log, 0,
+                        "markdown filter: failed to clear "
+                        "ETag header via plan");
+                    markdown_header_plan_free(&plan);
+                    return NGX_ERROR;
+                }
+            }
+            break;
+        }
     }
+
+    markdown_header_plan_free(&plan);
 
     ngx_http_clear_content_length(r);
     r->headers_out.content_length_n = result->markdown_len;
 
     NGX_HTTP_MARKDOWN_LOG_DEBUG1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                                  "markdown filter: set Content-Length: %uz", result->markdown_len);
-
-    if (conf->policy.generate_etag && result->etag != NULL && result->etag_len > 0) {
-        rc = ngx_http_markdown_set_etag(r, result->etag, result->etag_len);
-        if (rc != NGX_OK) {
-            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                         "markdown filter: failed to set ETag header");
-            return NGX_ERROR;
-        }
-    } else {
-        rc = ngx_http_markdown_set_etag(r, NULL, 0);
-        if (rc != NGX_OK) {
-            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                         "markdown filter: failed to clear ETag header");
-            return NGX_ERROR;
-        }
-    }
 
     if (conf->token_estimate && result->token_estimate > 0) {
         rc = ngx_http_markdown_add_token_header(r, result->token_estimate);
@@ -596,7 +699,6 @@ ngx_http_markdown_update_headers(ngx_http_request_t *r,
         }
     }
 
-    ngx_http_markdown_remove_content_encoding(r);
     ngx_http_markdown_remove_accept_ranges(r);
 
 #if NGX_HTTP_MARKDOWN_ENABLE_AUTH_CACHE_CONTROL
