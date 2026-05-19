@@ -979,6 +979,7 @@ ngx_http_markdown_metrics_write_text(
         "- Gzip Decompressions: %uA\n"
         "- Deflate Decompressions: %uA\n"
         "- Brotli Decompressions: %uA\n"
+        "- Decompression Budget Exceeded: %uA\n"
         "\n"
 
         /* Threshold-router path hit counters */
@@ -1019,7 +1020,11 @@ ngx_http_markdown_metrics_write_text(
         "- Skips (Range): %uA\n"
         "- Skips (Accept): %uA\n"
         "- Fail-Open Count: %uA\n"
+        "- Delivery Count: %uA\n"
+        "- Decision Count: %uA\n"
         "- Estimated Token Savings: %uA\n"
+        "- Parse Timeouts Total: %uA\n"
+        "- Parse Budget Exceeded Total: %uA\n"
         "- Per-Path Entries: %uA\n"
         "- Per-Path Conversions: %uA\n"
         "- Per-Path Conversion Time (ms): %uA\n"

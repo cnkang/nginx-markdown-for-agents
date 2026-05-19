@@ -32,7 +32,7 @@ Module binary packages (DEB and RPM).
 The dynamic module ABI changes between NGINX major/minor versions. Package
 names encode the target NGINX version:
 
-```
+```text
 nginx-markdown-module_<version>~nginx<nginx_ver>+<distro><distro_ver>_<arch>.deb
 ```
 

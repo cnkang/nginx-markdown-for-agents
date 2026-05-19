@@ -6,7 +6,7 @@
 //! (fallback requests and post-commit errors).
 //!
 //! The [`ConversionError::code`] method maps each variant to a stable numeric
-//! FFI error code (1–8, 99) that is shared across the Rust↔C boundary via
+//! FFI error code (1–11, 99) that is shared across the Rust↔C boundary via
 //! `markdown_converter.h`.  Adding a new variant requires updating both this
 //! mapping and the C-side classification in `ngx_http_markdown_error.c`.
 
