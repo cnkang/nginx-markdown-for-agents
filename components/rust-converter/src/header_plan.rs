@@ -8,14 +8,9 @@
 #[derive(Debug, Clone, PartialEq)]
 pub enum HeaderOp {
     /// Set a header to a specific value (adds or replaces).
-    Set {
-        name: String,
-        value: String,
-    },
+    Set { name: String, value: String },
     /// Delete a header by name.
-    Delete {
-        name: String,
-    },
+    Delete { name: String },
     /// Set ETag to a value provided by the C caller at apply time.
     ///
     /// This avoids the fragile empty-string placeholder contract:
@@ -104,13 +99,19 @@ mod tests {
         plan.set("Content-Type", "text/markdown");
         plan.delete("Content-Encoding");
         assert_eq!(plan.len(), 2);
-        assert_eq!(plan.ops[0], HeaderOp::Set {
-            name: "Content-Type".to_string(),
-            value: "text/markdown".to_string(),
-        });
-        assert_eq!(plan.ops[1], HeaderOp::Delete {
-            name: "Content-Encoding".to_string(),
-        });
+        assert_eq!(
+            plan.ops[0],
+            HeaderOp::Set {
+                name: "Content-Type".to_string(),
+                value: "text/markdown".to_string(),
+            }
+        );
+        assert_eq!(
+            plan.ops[1],
+            HeaderOp::Delete {
+                name: "Content-Encoding".to_string(),
+            }
+        );
     }
 
     #[test]

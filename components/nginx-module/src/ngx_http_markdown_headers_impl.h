@@ -588,9 +588,18 @@ ngx_http_markdown_update_headers(ngx_http_request_t *r,
                     (u_char *) "Content-Type",
                     key.len) == 0)
             {
-                r->headers_out.content_type.data = value.data;
-                r->headers_out.content_type.len = value.len;
-                r->headers_out.content_type_len = value.len;
+                /*
+                 * Use the static content-type buffer directly.
+                 * The plan entry borrows from Rust-owned storage
+                 * that is freed by markdown_header_plan_free(),
+                 * so we must not retain plan pointers.
+                 */
+                r->headers_out.content_type.data =
+                    ngx_http_markdown_content_type;
+                r->headers_out.content_type.len =
+                    NGX_HTTP_MARKDOWN_CONTENT_TYPE_LEN;
+                r->headers_out.content_type_len =
+                    NGX_HTTP_MARKDOWN_CONTENT_TYPE_LEN;
                 r->headers_out.charset.len = 0;
                 r->headers_out.charset.data = NULL;
 
@@ -617,6 +626,8 @@ ngx_http_markdown_update_headers(ngx_http_request_t *r,
             else
             {
                 ngx_table_elt_t *h;
+                u_char          *pool_key;
+                u_char          *pool_val;
 
                 h = ngx_list_push(&r->headers_out.headers);
                 if (h == NULL) {
@@ -624,10 +635,29 @@ ngx_http_markdown_update_headers(ngx_http_request_t *r,
                     return NGX_ERROR;
                 }
 
+                /*
+                 * Copy key and value into pool memory.
+                 * Plan-owned storage is freed by
+                 * markdown_header_plan_free() below.
+                 */
+                pool_key = ngx_pnalloc(r->pool, key.len);
+                if (pool_key == NULL) {
+                    markdown_header_plan_free(&plan);
+                    return NGX_ERROR;
+                }
+                ngx_memcpy(pool_key, key.data, key.len);
+
+                pool_val = ngx_pnalloc(r->pool, value.len);
+                if (pool_val == NULL) {
+                    markdown_header_plan_free(&plan);
+                    return NGX_ERROR;
+                }
+                ngx_memcpy(pool_val, value.data, value.len);
+
                 h->hash = 1;
-                h->key.data = key.data;
+                h->key.data = pool_key;
                 h->key.len = key.len;
-                h->value.data = value.data;
+                h->value.data = pool_val;
                 h->value.len = value.len;
             }
             break;
