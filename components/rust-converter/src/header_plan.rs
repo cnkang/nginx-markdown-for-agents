@@ -50,13 +50,23 @@ impl HeaderPlan {
 
     /// Build the standard header plan for a successful Markdown conversion.
     ///
-    /// Sets Content-Type to text/markdown, deletes Content-Encoding
-    /// (since the response is no longer compressed), and sets Vary.
+    /// Operations included:
+    /// - Set Content-Type to the Markdown content type
+    /// - Delete Content-Encoding (response is no longer compressed)
+    /// - Delete Content-Length (original length is invalid after conversion;
+    ///   the C caller sets the new Content-Length after atomic plan application)
+    /// - Set Vary: Accept
+    /// - Optionally set ETag placeholder (resolved by C caller)
+    ///
+    /// The plan is applied atomically: all operations succeed or all are
+    /// rolled back.  Content-Length is deleted here to invalidate the stale
+    /// original value; the correct post-conversion length is set by the C
+    /// caller immediately after successful plan application.
     pub fn for_markdown_conversion(content_type: &str, has_etag: bool) -> Self {
         let mut plan = Self::new();
         plan.set("Content-Type", content_type);
         plan.delete("Content-Encoding");
-        plan.set("Vary", "Accept");
+        plan.delete("Content-Length");
 
         if has_etag {
             plan.ops.push(HeaderOp::SetEtagPlaceholder);
@@ -124,7 +134,7 @@ mod tests {
     #[test]
     fn test_for_markdown_conversion_no_etag() {
         let plan = HeaderPlan::for_markdown_conversion("text/markdown", false);
-        assert_eq!(plan.len(), 3); // Content-Type, delete Content-Encoding, Vary
+        assert_eq!(plan.len(), 3); // CT, del CE, del CL
     }
 
     #[test]

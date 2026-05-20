@@ -40,10 +40,10 @@ use std::ptr;
 use crate::error::ConversionError;
 
 use super::abi::{
-    ERROR_INTERNAL, FFIAcceptResult, FFIConditionalResult, FFIDecisionResult, FFIHeaderEntry,
-    FFIHeaderPlan, FFIHeaderPlanHandle, MarkdownConverterHandle, MarkdownOptions, MarkdownResult,
-    NEGOTIATE_REASON_CONVERT, NEGOTIATE_REASON_EXPLICIT_REJECT, NEGOTIATE_REASON_LOWER_Q,
-    NEGOTIATE_REASON_MALFORMED, NEGOTIATE_REASON_NO_ACCEPT,
+    ERROR_INTERNAL, FFIAcceptResult, FFIConditionalResult, FFIDecompResult, FFIDecisionResult,
+    FFIHeaderEntry, FFIHeaderPlan, FFIHeaderPlanHandle, MarkdownConverterHandle, MarkdownOptions,
+    MarkdownResult, NEGOTIATE_REASON_CONVERT, NEGOTIATE_REASON_EXPLICIT_REJECT,
+    NEGOTIATE_REASON_LOWER_Q, NEGOTIATE_REASON_MALFORMED, NEGOTIATE_REASON_NO_ACCEPT,
 };
 use super::convert::convert_inner;
 use super::memory::{free_buffer, reset_result, set_error_result, set_success_result};
@@ -490,6 +490,60 @@ pub unsafe extern "C" fn markdown_is_dangerous_url(url: *const u8, url_len: usiz
     }
 }
 
+/// Build a base URL from X-Forwarded-Host and X-Forwarded-Proto headers.
+///
+/// Parses the forwarded headers and constructs a validated base URL
+/// (e.g., "https://api.example.com"). The result is written into the
+/// caller-provided buffer. Returns the number of bytes written, or 0
+/// if the headers are absent, empty, or contain invalid characters.
+///
+/// # Safety
+///
+/// The caller must ensure that:
+/// - `x_forwarded_host` either points to `host_len` readable bytes or is NULL
+/// - `x_forwarded_proto` either points to `proto_len` readable bytes or is NULL
+/// - `out_buf` points to at least `out_buf_cap` writable bytes
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn markdown_build_base_url(
+    x_forwarded_host: *const u8,
+    host_len: usize,
+    x_forwarded_proto: *const u8,
+    proto_len: usize,
+    out_buf: *mut u8,
+    out_buf_cap: usize,
+) -> usize {
+    if out_buf.is_null() || out_buf_cap == 0 {
+        return 0;
+    }
+
+    let host_str = if x_forwarded_host.is_null() || host_len == 0 {
+        None
+    } else {
+        std::str::from_utf8(unsafe { std::slice::from_raw_parts(x_forwarded_host, host_len) }).ok()
+    };
+
+    let proto_str = if x_forwarded_proto.is_null() || proto_len == 0 {
+        None
+    } else {
+        std::str::from_utf8(unsafe { std::slice::from_raw_parts(x_forwarded_proto, proto_len) })
+            .ok()
+    };
+
+    use crate::security::parse_forwarded_headers;
+    match parse_forwarded_headers(host_str, proto_str) {
+        Some((scheme, host)) => {
+            let url = format!("{scheme}://{host}");
+            let bytes = url.as_bytes();
+            if bytes.len() > out_buf_cap {
+                return 0;
+            }
+            unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), out_buf, bytes.len()) };
+            bytes.len()
+        }
+        None => 0,
+    }
+}
+
 /// Release a header plan previously returned by `markdown_build_header_plan`.
 ///
 /// # Safety
@@ -522,6 +576,44 @@ unsafe fn optional_str<'a>(ptr: *const u8, len: usize) -> Option<&'a str> {
             let len = s.len();
             unsafe { std::str::from_utf8_unchecked(std::slice::from_raw_parts(ptr, len)) }
         })
+}
+
+/// Initialize a `MarkdownOptions` struct with sensible defaults.
+///
+/// C callers **MUST** use this function instead of `memset(&opts, 0, sizeof(opts))`
+/// or literal struct initialization (`MarkdownOptions opts = {0}`). The helper
+/// guarantees that all fields — including any future tail-appended fields — are
+/// set to valid defaults. After calling this function, the caller may override
+/// individual fields as needed.
+///
+/// Default values:
+/// - `flavor`: 0 (CommonMark)
+/// - `timeout_ms`: 5000 (5 seconds)
+/// - `generate_etag`: 1 (enabled)
+/// - `estimate_tokens`: 0 (disabled)
+/// - `front_matter`: 0 (disabled)
+/// - `content_type` / `base_url` / selectors: NULL/0
+/// - `streaming_budget`: 0 (use engine default)
+/// - `prune_noise`: 0 (disabled)
+/// - `memory_budget`: 0 (use per-engine defaults)
+/// - `llm_provider`: 0 (default)
+/// - `chars_per_token_fixed`: 0 (use default ratio)
+///
+/// # Safety
+///
+/// The caller must ensure that `result` points to writable storage
+/// for a `MarkdownOptions`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn markdown_options_init(result: *mut MarkdownOptions) {
+    if result.is_null() {
+        return;
+    }
+    /* Zero all fields first to ensure a clean baseline */
+    unsafe { ptr::write(result, std::mem::zeroed()) };
+    /* Set sensible non-zero defaults */
+    let opts = unsafe { &mut *result };
+    opts.timeout_ms = 5000;
+    opts.generate_etag = 1;
 }
 
 /// Zero-initialize a MarkdownResult struct.
@@ -598,9 +690,176 @@ pub unsafe extern "C" fn markdown_header_plan_init(result: *mut FFIHeaderPlan) {
     unsafe { ptr::write(result, std::mem::zeroed()) };
 }
 
+/// Perform bounded decompression of compressed input data.
+///
+/// Decompresses the input using the specified format (gzip, deflate, or brotli)
+/// with a hard budget limit on the output size. If the decompressed output
+/// would exceed `budget` bytes, decompression is terminated immediately and
+/// `BudgetExceeded` is returned.
+///
+/// On success, the `result` struct is populated with a Rust-owned output buffer.
+/// The C caller **must** free this buffer via [`markdown_decompress_free`].
+///
+/// # Format Codes
+///
+/// - `0` = gzip (RFC 1952)
+/// - `1` = deflate (RFC 1951)
+/// - `2` = brotli (RFC 7932)
+///
+/// # Return Value
+///
+/// Returns `0` on success. On failure, returns the error category code:
+/// - `5` = budget_exceeded
+/// - `6` = format_error
+/// - `7` = truncated_input
+/// - `8` = io_error
+/// - `9` = invalid arguments (NULL pointers, unknown format)
+///
+/// # Safety
+///
+/// The caller must ensure that:
+/// - `input` points to at least `input_len` readable bytes, or is NULL when
+///   `input_len == 0`
+/// - `result` points to writable storage for an `FFIDecompResult`
+/// - The output buffer in `result` is freed via `markdown_decompress_free`
+///   after use (only when return value is 0)
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn markdown_decompress_bounded(
+    input: *const u8,
+    input_len: usize,
+    format: u8,
+    budget: usize,
+    result: *mut FFIDecompResult,
+) -> u32 {
+    if result.is_null() {
+        return 9;
+    }
+
+    let result_ref = unsafe { &mut *result };
+    // Initialize result to safe defaults
+    result_ref.output = ptr::null_mut();
+    result_ref.output_len = 0;
+    result_ref.error_category = 0;
+
+    // Validate format
+    let fmt = match crate::decompress::Format::from_u8(format) {
+        Some(f) => f,
+        None => {
+            result_ref.error_category = 6; // format_error for unknown format
+            return 6;
+        }
+    };
+
+    // Build input slice
+    let input_slice = if input.is_null() || input_len == 0 {
+        &[]
+    } else {
+        unsafe { std::slice::from_raw_parts(input, input_len) }
+    };
+
+    // Perform bounded decompression
+    match crate::decompress::decompress_bounded(input_slice, fmt, budget) {
+        Ok(decomp_result) => {
+            let mut boxed = decomp_result.output.into_boxed_slice();
+            result_ref.output_len = boxed.len();
+            result_ref.output = boxed.as_mut_ptr();
+            result_ref.error_category = 0;
+            // Prevent deallocation — C caller owns via markdown_decompress_free
+            std::mem::forget(boxed);
+            0
+        }
+        Err(e) => {
+            let code = e.error_category();
+            result_ref.error_category = code;
+            code
+        }
+    }
+}
+
+/// Release the output buffer from a successful `markdown_decompress_bounded` call.
+///
+/// After calling this function, the `result` struct is reset to a safe zero
+/// state. Calling this on a result with a NULL output pointer is a no-op.
+///
+/// # Safety
+///
+/// The caller must ensure that:
+/// - `result` either is NULL or points to a valid `FFIDecompResult` previously
+///   populated by `markdown_decompress_bounded`
+/// - The same result is not freed twice (the function resets pointers to NULL
+///   after freeing, so double-free is safe but wasteful)
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn markdown_decompress_free(result: *mut FFIDecompResult) {
+    if result.is_null() {
+        return;
+    }
+
+    let result_ref = unsafe { &mut *result };
+    if !result_ref.output.is_null() && result_ref.output_len > 0 {
+        // Reconstruct the Box<[u8]> from the raw parts and drop it
+        let slice = unsafe {
+            std::slice::from_raw_parts_mut(result_ref.output, result_ref.output_len)
+        };
+        unsafe { drop(Box::from_raw(slice)) };
+    }
+    result_ref.output = ptr::null_mut();
+    result_ref.output_len = 0;
+    result_ref.error_category = 0;
+}
+
+/// Zero-initialize an FFIDecompResult struct.
+///
+/// # Safety
+///
+/// The caller must ensure that `result` points to writable storage
+/// for an `FFIDecompResult`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn markdown_decomp_result_init(result: *mut FFIDecompResult) {
+    if result.is_null() {
+        return;
+    }
+    unsafe { ptr::write(result, std::mem::zeroed()) };
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn options_init_sets_defaults() {
+        let mut opts: MarkdownOptions = unsafe { std::mem::zeroed() };
+        unsafe { markdown_options_init(&mut opts) };
+
+        /* Verify zeroed fields */
+        assert_eq!(opts.flavor, 0);
+        assert_eq!(opts.estimate_tokens, 0);
+        assert_eq!(opts.front_matter, 0);
+        assert!(opts.content_type.is_null());
+        assert_eq!(opts.content_type_len, 0);
+        assert!(opts.base_url.is_null());
+        assert_eq!(opts.base_url_len, 0);
+        assert_eq!(opts.streaming_budget, 0);
+        assert_eq!(opts.prune_noise, 0);
+        assert!(opts.prune_selectors.is_null());
+        assert_eq!(opts.prune_selector_len, 0);
+        assert!(opts.prune_protection_selectors.is_null());
+        assert_eq!(opts.prune_protection_selector_len, 0);
+        assert_eq!(opts.memory_budget, 0);
+        assert_eq!(opts.llm_provider, 0);
+        assert_eq!(opts.chars_per_token_fixed, 0);
+        assert_eq!(opts.parse_timeout_ms, 0);
+        assert_eq!(opts.parser_memory_budget, 0);
+
+        /* Verify non-zero defaults */
+        assert_eq!(opts.timeout_ms, 5000);
+        assert_eq!(opts.generate_etag, 1);
+    }
+
+    #[test]
+    fn options_init_null_is_safe() {
+        /* Should not panic or crash */
+        unsafe { markdown_options_init(std::ptr::null_mut()) };
+    }
 
     #[test]
     fn header_plan_build_and_free_empty_content_type() {
@@ -640,5 +899,204 @@ mod tests {
         }
         assert!(plan.count > 0);
         unsafe { markdown_header_plan_free(&mut plan) };
+    }
+
+    #[test]
+    fn build_base_url_from_forwarded_headers() {
+        let host = b"api.example.com";
+        let proto = b"https";
+        let mut buf = [0u8; 256];
+        let len = unsafe {
+            markdown_build_base_url(
+                host.as_ptr(),
+                host.len(),
+                proto.as_ptr(),
+                proto.len(),
+                buf.as_mut_ptr(),
+                buf.len(),
+            )
+        };
+        assert!(len > 0);
+        let url = std::str::from_utf8(&buf[..len]).unwrap();
+        assert_eq!(url, "https://api.example.com");
+    }
+
+    #[test]
+    fn build_base_url_null_host_returns_zero() {
+        let proto = b"https";
+        let mut buf = [0u8; 256];
+        let len = unsafe {
+            markdown_build_base_url(
+                std::ptr::null(),
+                0,
+                proto.as_ptr(),
+                proto.len(),
+                buf.as_mut_ptr(),
+                buf.len(),
+            )
+        };
+        assert_eq!(len, 0);
+    }
+
+    #[test]
+    fn build_base_url_control_chars_rejected() {
+        let host = b"evil.com\r\ninjection";
+        let proto = b"https";
+        let mut buf = [0u8; 256];
+        let len = unsafe {
+            markdown_build_base_url(
+                host.as_ptr(),
+                host.len(),
+                proto.as_ptr(),
+                proto.len(),
+                buf.as_mut_ptr(),
+                buf.len(),
+            )
+        };
+        assert_eq!(len, 0, "Control characters in host should be rejected");
+    }
+
+    #[test]
+    fn build_base_url_default_proto() {
+        let host = b"example.com";
+        let mut buf = [0u8; 256];
+        let len = unsafe {
+            markdown_build_base_url(
+                host.as_ptr(),
+                host.len(),
+                std::ptr::null(),
+                0,
+                buf.as_mut_ptr(),
+                buf.len(),
+            )
+        };
+        assert!(len > 0);
+        let url = std::str::from_utf8(&buf[..len]).unwrap();
+        assert_eq!(url, "https://example.com");
+    }
+
+    #[test]
+    fn decompress_bounded_gzip_success() {
+        use flate2::Compression;
+        use flate2::write::GzEncoder;
+        use std::io::Write;
+
+        let original = b"Hello from FFI decompression test!";
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(original).unwrap();
+        let compressed = encoder.finish().unwrap();
+
+        let mut result: FFIDecompResult = unsafe { std::mem::zeroed() };
+        let rc = unsafe {
+            markdown_decompress_bounded(
+                compressed.as_ptr(),
+                compressed.len(),
+                0, // gzip
+                1024,
+                &mut result,
+            )
+        };
+        assert_eq!(rc, 0, "Expected success (0), got {rc}");
+        assert_eq!(result.error_category, 0);
+        assert!(!result.output.is_null());
+        assert_eq!(result.output_len, original.len());
+
+        let output = unsafe { std::slice::from_raw_parts(result.output, result.output_len) };
+        assert_eq!(output, original);
+
+        // Free the result
+        unsafe { markdown_decompress_free(&mut result) };
+        assert!(result.output.is_null());
+        assert_eq!(result.output_len, 0);
+    }
+
+    #[test]
+    fn decompress_bounded_budget_exceeded() {
+        use flate2::Compression;
+        use flate2::write::GzEncoder;
+        use std::io::Write;
+
+        let original = vec![b'X'; 10_000];
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(&original).unwrap();
+        let compressed = encoder.finish().unwrap();
+
+        let mut result: FFIDecompResult = unsafe { std::mem::zeroed() };
+        let rc = unsafe {
+            markdown_decompress_bounded(
+                compressed.as_ptr(),
+                compressed.len(),
+                0, // gzip
+                100, // budget too small
+                &mut result,
+            )
+        };
+        assert_eq!(rc, 5, "Expected budget_exceeded (5), got {rc}");
+        assert_eq!(result.error_category, 5);
+        assert!(result.output.is_null());
+        assert_eq!(result.output_len, 0);
+    }
+
+    #[test]
+    fn decompress_bounded_invalid_format() {
+        let data = b"some data";
+        let mut result: FFIDecompResult = unsafe { std::mem::zeroed() };
+        let rc = unsafe {
+            markdown_decompress_bounded(
+                data.as_ptr(),
+                data.len(),
+                99, // invalid format
+                1024,
+                &mut result,
+            )
+        };
+        assert_eq!(rc, 6, "Expected format_error (6) for unknown format, got {rc}");
+        assert_eq!(result.error_category, 6);
+    }
+
+    #[test]
+    fn decompress_bounded_null_result_returns_9() {
+        let data = b"some data";
+        let rc = unsafe {
+            markdown_decompress_bounded(data.as_ptr(), data.len(), 0, 1024, std::ptr::null_mut())
+        };
+        assert_eq!(rc, 9);
+    }
+
+    #[test]
+    fn decompress_bounded_empty_input_returns_truncated() {
+        let mut result: FFIDecompResult = unsafe { std::mem::zeroed() };
+        let rc = unsafe {
+            markdown_decompress_bounded(std::ptr::null(), 0, 0, 1024, &mut result)
+        };
+        assert_eq!(rc, 7, "Expected truncated_input (7) for empty input, got {rc}");
+        assert_eq!(result.error_category, 7);
+    }
+
+    #[test]
+    fn decompress_free_null_is_safe() {
+        // Should not panic or crash
+        unsafe { markdown_decompress_free(std::ptr::null_mut()) };
+    }
+
+    #[test]
+    fn decompress_free_zeroed_result_is_safe() {
+        let mut result: FFIDecompResult = unsafe { std::mem::zeroed() };
+        // Freeing a zeroed result (output is NULL) should be a no-op
+        unsafe { markdown_decompress_free(&mut result) };
+        assert!(result.output.is_null());
+    }
+
+    #[test]
+    fn decomp_result_init_zeroes_all_fields() {
+        let mut result = FFIDecompResult {
+            output: 0x1234 as *mut u8,
+            output_len: 999,
+            error_category: 42,
+        };
+        unsafe { markdown_decomp_result_init(&mut result) };
+        assert!(result.output.is_null());
+        assert_eq!(result.output_len, 0);
+        assert_eq!(result.error_category, 0);
     }
 }

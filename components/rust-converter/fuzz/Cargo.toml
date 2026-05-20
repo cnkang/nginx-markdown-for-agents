@@ -8,6 +8,7 @@ edition = "2024"
 cargo-fuzz = true
 
 [dependencies]
+flate2 = "1.0"
 libfuzzer-sys = "0.4"
 markup5ever_rcdom = "0.38"
 nginx-markdown-converter = { path = "..", features = ["streaming"] }
@@ -53,6 +54,20 @@ bench = false
 [[bin]]
 name = "fuzz_streaming_malformed"
 path = "fuzz_targets/fuzz_streaming_malformed.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_decompression"
+path = "fuzz_targets/fuzz_decompression.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_url_validation"
+path = "fuzz_targets/fuzz_url_validation.rs"
 test = false
 doc = false
 bench = false
