@@ -1,0 +1,56 @@
+#!/bin/sh
+# postinst script for nginx-module-markdown
+#
+# Installs a load_module snippet (commented out by default) and prints
+# instructions for enabling the module. Does NOT automatically enable
+# the module (security: default-off per design.md §11.4).
+
+set -e
+
+MODULE_SNIPPET_DIR="/etc/nginx/modules-available"
+MODULE_SNIPPET="${MODULE_SNIPPET_DIR}/mod-markdown.conf"
+MODULE_SO_PATH="/usr/lib/nginx/modules/ngx_http_markdown_module.so"
+
+case "$1" in
+    configure)
+        # Create modules-available directory if it does not exist
+        if [ ! -d "${MODULE_SNIPPET_DIR}" ]; then
+            mkdir -p "${MODULE_SNIPPET_DIR}"
+        fi
+
+        # Install load_module snippet (commented out for conservative enable)
+        cat > "${MODULE_SNIPPET}" <<'SNIPPET'
+# nginx-module-markdown: Uncomment the line below to enable the module.
+# After enabling, run: nginx -t && systemctl reload nginx
+#load_module modules/ngx_http_markdown_module.so;
+SNIPPET
+
+        echo "--------------------------------------------------------------"
+        echo " nginx-module-markdown installed successfully."
+        echo ""
+        echo " The module is NOT enabled by default."
+        echo " To enable it:"
+        echo ""
+        echo "   1. Edit ${MODULE_SNIPPET}"
+        echo "      Uncomment the load_module line."
+        echo ""
+        echo "   2. Or add to /etc/nginx/nginx.conf (top-level):"
+        echo "      load_module modules/ngx_http_markdown_module.so;"
+        echo ""
+        echo "   3. Test and reload:"
+        echo "      nginx -t && systemctl reload nginx"
+        echo ""
+        echo " Module binary: ${MODULE_SO_PATH}"
+        echo "--------------------------------------------------------------"
+        ;;
+
+    abort-upgrade|abort-remove|abort-deconfigure)
+        ;;
+
+    *)
+        echo "postinst called with unknown argument: $1" >&2
+        exit 1
+        ;;
+esac
+
+exit 0

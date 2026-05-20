@@ -1,15 +1,29 @@
-Source: nginx-markdown-module
-Section: httpd
+Source: nginx-module-markdown
+Section: web
 Priority: optional
-Maintainer: cnkang <liukang@noreply.github.com>
-Build-Depends: debhelper (>= 10), cargo, rustc, libpcre3-dev, zlib1g-dev, libssl-dev, nginx-dev (>= 1.18.0)
-Standards-Version: 4.1.4
+Maintainer: Kang Liu <liukang@noreply.github.com>
+Build-Depends: debhelper (>= 10), cargo, rustc (>= 1.91), libpcre3-dev, zlib1g-dev, libssl-dev, nginx-dev (>= 1.24.0)
+Standards-Version: 4.6.2
 Homepage: https://github.com/cnkang/nginx-markdown-for-agents
+Vcs-Git: https://github.com/cnkang/nginx-markdown-for-agents.git
+Vcs-Browser: https://github.com/cnkang/nginx-markdown-for-agents
 
-Package: nginx-markdown-module
-Architecture: any
-Depends: nginx (>= 1.18.0), ${misc:Depends}, ${shlibs:Depends}
-Description: NGINX module for HTML-to-Markdown conversion
- NGINX filter module that converts HTML responses to Markdown
- for AI agent consumption. Supports streaming, GFM/MDX flavors,
- noise pruning, token estimation, and conditional requests.
+Package: nginx-module-markdown
+Architecture: amd64 arm64
+Depends: nginx (>= 1.24.0), nginx-abi-1.24, ${misc:Depends}, ${shlibs:Depends}
+Description: NGINX module for serving Markdown to AI agents
+ An NGINX dynamic filter module that converts HTML responses to Markdown
+ format for AI agent consumption. Features include:
+ .
+  * Streaming and full-buffer conversion engines
+  * Content negotiation via Accept headers (q-value based)
+  * Automatic decompression with bounded budget
+  * GFM/MDX flavor support
+  * Noise pruning and token estimation
+  * Conditional request support (ETag, If-Modified-Since)
+  * Prometheus metrics endpoint
+ .
+ The module is installed as a dynamic module (.so) and must be explicitly
+ enabled via load_module directive in nginx.conf.
+ .
+ License: BSD-2-Clause

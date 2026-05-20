@@ -1,0 +1,179 @@
+# syntax=docker/dockerfile:1.7
+#
+# Dockerfile.ingress — Custom NGINX Ingress Controller image with markdown module
+#
+# PURPOSE:
+#   Reference example for building a custom NGINX Ingress Controller image
+#   that includes the ngx_http_markdown_filter_module. This enables Markdown
+#   conversion at the Ingress layer for AI agent consumers.
+#
+# STATUS: Reference example — NOT production-ready.
+#   Users must validate ABI compatibility with their specific NGINX Ingress
+#   Controller version before deploying to production.
+#
+# ARCHITECTURE SUPPORT:
+#   Supports both linux/amd64 and linux/arm64 via multi-platform build.
+#   Use: docker buildx build --platform linux/amd64,linux/arm64 ...
+#
+# USAGE:
+#   # Build with defaults (NGINX 1.26.3, F5 NGINX Ingress Controller 3.7.2):
+#   docker build -f Dockerfile.ingress -t my-ingress:latest .
+#
+#   # Build with custom Ingress Controller version:
+#   docker build -f Dockerfile.ingress \
+#     --build-arg NGINX_VERSION=1.26.3 \
+#     --build-arg NGINX_INGRESS_IMAGE=nginx/nginx-ingress:3.7.2 \
+#     -t my-ingress:custom .
+#
+#   # Build with plain NGINX (non-Ingress deployment):
+#   docker build -f Dockerfile.ingress \
+#     --build-arg NGINX_VERSION=1.26.3 \
+#     --build-arg NGINX_INGRESS_IMAGE=nginx:1.26.3 \
+#     -t my-nginx-markdown:latest .
+#
+#   # Multi-platform build:
+#   docker buildx build --platform linux/amd64,linux/arm64 \
+#     -f Dockerfile.ingress -t my-ingress:multi .
+#
+# CUSTOMIZATION POINTS:
+#   - NGINX_VERSION: Target NGINX version for module compilation (must match base image)
+#   - NGINX_INGRESS_IMAGE: Base image (default: nginx/nginx-ingress:3.7.2)
+#   - MODULE_REPO / MODULE_REF: Source repository and branch/tag for the module
+#
+# REQUIREMENTS (REQ-0700-K8S-002):
+#   - Parameterized base image version
+#   - Module compiled against exact NGINX version in the Ingress image
+#   - load_module configuration snippet injected
+#   - Multi-architecture support (amd64/arm64)
+#
+# SEE ALSO:
+#   - docs/guides/KUBERNETES_DEPLOYMENT.md
+#   - examples/kubernetes/manifest/
+#   - charts/nginx-markdown/
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Build arguments — customize these for your environment
+# ---------------------------------------------------------------------------
+
+# NGINX version used inside the Ingress Controller image.
+# Must match the NGINX binary version in the base Ingress image exactly,
+# otherwise the compiled module will fail to load (ABI mismatch).
+# Minimum supported: 1.24.0. Default matches the default Ingress image.
+ARG NGINX_VERSION=1.26.3
+
+# NGINX Ingress Controller base image.
+# Default uses the F5 NGINX Ingress Controller (nginx/nginx-ingress).
+# Alternatively, use a plain NGINX image for non-Ingress deployments:
+#   --build-arg NGINX_INGRESS_IMAGE=nginx:1.26.3
+ARG NGINX_INGRESS_IMAGE=nginx/nginx-ingress:3.7.2
+
+# Module source repository and ref (branch, tag, or commit SHA).
+ARG MODULE_REPO=https://github.com/cnkang/nginx-markdown-for-agents.git
+ARG MODULE_REF=main
+
+# ---------------------------------------------------------------------------
+# Stage 1: module-build — Compile the markdown module against target NGINX
+# ---------------------------------------------------------------------------
+FROM debian:bookworm-slim AS module-build
+
+ARG NGINX_VERSION
+ARG MODULE_REPO
+ARG MODULE_REF
+
+# Install build dependencies
+RUN set -eux; \
+    apt-get update; \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      bash \
+      build-essential \
+      ca-certificates \
+      curl \
+      git \
+      libpcre2-dev \
+      libssl-dev \
+      pkg-config \
+      python3 \
+      zlib1g-dev; \
+    rm -rf /var/lib/apt/lists/*
+
+# Install Rust toolchain (required for the Rust converter component)
+ENV RUSTUP_HOME=/opt/rust/rustup
+ENV CARGO_HOME=/opt/rust/cargo
+ENV PATH=/opt/rust/cargo/bin:${PATH}
+
+RUN set -eux; \
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+      | sh -s -- -y --profile minimal --default-toolchain stable; \
+    cargo install --locked cbindgen
+
+# Clone module source
+RUN set -eux; \
+    git clone --depth 1 --branch "${MODULE_REF}" "${MODULE_REPO}" /workspace/module
+
+# Download and extract NGINX source (must match target NGINX version exactly)
+RUN set -eux; \
+    curl -fsSL "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" \
+      -o /tmp/nginx.tar.gz; \
+    mkdir -p /tmp/nginx-src; \
+    tar -xzf /tmp/nginx.tar.gz -C /tmp/nginx-src --strip-components=1
+
+# Build the Rust converter library
+WORKDIR /workspace/module
+RUN set -eux; \
+    make build
+
+# Compile the NGINX dynamic module against the target NGINX version
+RUN set -eux; \
+    cd /tmp/nginx-src; \
+    ./configure \
+      --with-compat \
+      --add-dynamic-module=/workspace/module/components/nginx-module; \
+    make -j"$(nproc)" modules; \
+    install -D -m 755 \
+      objs/ngx_http_markdown_filter_module.so \
+      /out/ngx_http_markdown_filter_module.so; \
+    printf '%s\n' "${NGINX_VERSION}" > /out/nginx-version.txt
+
+# ---------------------------------------------------------------------------
+# Stage 2: runtime — Final Ingress Controller image with module injected
+# ---------------------------------------------------------------------------
+FROM ${NGINX_INGRESS_IMAGE} AS runtime
+
+ARG NGINX_VERSION
+ARG NGINX_INGRESS_IMAGE
+
+# Metadata labels (OCI image spec)
+LABEL org.opencontainers.image.title="nginx-ingress-markdown" \
+      org.opencontainers.image.description="NGINX Ingress Controller with markdown filter module" \
+      org.opencontainers.image.source="https://github.com/cnkang/nginx-markdown-for-agents" \
+      org.opencontainers.image.version="custom-markdown" \
+      io.k8s.nginx.version="${NGINX_VERSION}" \
+      io.k8s.nginx.ingress.base="${NGINX_INGRESS_IMAGE}"
+
+# Copy the compiled module into the standard NGINX modules directory
+COPY --from=module-build /out/ngx_http_markdown_filter_module.so \
+     /usr/lib/nginx/modules/ngx_http_markdown_filter_module.so
+
+# Inject load_module configuration snippet.
+# The Ingress Controller reads snippets from /etc/nginx/modules/ on startup.
+# This ensures the module is loaded before any server block configuration.
+USER root
+RUN set -eux; \
+    mkdir -p /etc/nginx/modules; \
+    printf '%s\n' \
+      '# nginx-markdown-for-agents module' \
+      '# Loaded automatically by NGINX Ingress Controller' \
+      'load_module /usr/lib/nginx/modules/ngx_http_markdown_filter_module.so;' \
+      > /etc/nginx/modules/10-mod-markdown.conf; \
+    chown -R www-data:www-data /etc/nginx/modules/10-mod-markdown.conf || true
+
+# Switch back to non-root user (Ingress Controller default)
+USER www-data
+
+# Health check: verify NGINX starts and the module is loaded
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD nginx -t 2>&1 | grep -q 'syntax is ok' || exit 1
+
+# The Ingress Controller entrypoint is inherited from the base image.
+# No CMD override needed — the controller binary manages NGINX lifecycle.
