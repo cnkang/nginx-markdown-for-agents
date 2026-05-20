@@ -20,6 +20,14 @@
 
 #include "ngx_http_markdown_exports.h"
 
+/*
+ * Include the header plan header for the atomic apply function.
+ * In standalone test mode, the test harness provides its own stub.
+ */
+#ifndef NGX_HTTP_MARKDOWN_HEADERS_STANDALONE_TYPES_H
+#include "ngx_http_markdown_header_plan.h"
+#endif
+
 #ifndef NGX_HTTP_MARKDOWN_SPRINTF_TOKEN
 #define NGX_HTTP_MARKDOWN_SPRINTF_TOKEN(buf, token_count) \
     ngx_sprintf((buf), "%ui", (token_count))
@@ -531,13 +539,37 @@ ngx_http_markdown_remove_accept_ranges(ngx_http_request_t *r)
  * removes Content-Encoding and Accept-Ranges, and adjusts Cache-Control
  * for authenticated content when auth cache control is enabled.
  *
+ * Atomic plan application with post-plan Content-Length:
+ *
+ *   The header plan (built by Rust) is applied atomically via
+ *   ngx_http_markdown_apply_header_plan().  All plan operations
+ *   succeed or all are rolled back.  The plan includes:
+ *
+ *   - Content-Type (set to text/markdown; charset=utf-8)
+ *   - Content-Encoding (delete)
+ *   - Content-Length (delete — invalidates the stale original)
+ *   - Vary (set to Accept)
+ *   - ETag (set-etag-placeholder, if configured)
+ *
+ *   After successful atomic plan application, the C side sets:
+ *
+ *   - Content-Length (new value from result->markdown_len)
+ *   - X-Markdown-Tokens (if enabled)
+ *   - Accept-Ranges (delete)
+ *   - Cache-Control (auth modification, if applicable)
+ *
+ *   This is safe because the plan already committed — if the plan
+ *   had failed, we would not reach the post-plan operations.
+ *   The post-plan Content-Length set is guaranteed to execute only
+ *   after successful plan application.
+ *
  * r      - current HTTP request
  * result - completed MarkdownResult from the Rust converter
  * conf   - location configuration
  *
  * Returns:
  *   NGX_OK    on success
- *   NGX_ERROR on any header manipulation failure or NULL arguments
+ *   NGX_ERROR on NULL arguments or atomic plan failure
  */
 ngx_int_t
 ngx_http_markdown_update_headers(ngx_http_request_t *r,
@@ -546,20 +578,21 @@ ngx_http_markdown_update_headers(ngx_http_request_t *r,
 {
     ngx_int_t              rc;
     struct FFIHeaderPlan   plan;
-    uintptr_t              i;
-    const struct FFIHeaderEntry *entry;
 
     if (r == NULL || result == NULL || conf == NULL) {
         return NGX_ERROR;
     }
 
     /*
-     * Build header plan from Rust FFI and apply each entry.
+     * Build header plan from Rust FFI.
      *
      * The plan covers: Content-Type (set), Content-Encoding (delete),
-     * Vary (set), and ETag (set-etag-placeholder or omit).
-     * C-side operations not in the plan: Content-Length, X-Markdown-Tokens,
-     * Accept-Ranges (delete), auth Cache-Control.
+     * Content-Length (delete), Vary (set), and ETag (set-etag-placeholder
+     * or omit).
+     *
+     * Content-Length deletion invalidates the stale original value.
+     * The correct post-conversion length is set below after the plan
+     * commits successfully.
      */
     markdown_header_plan_init(&plan);
     markdown_build_header_plan(
@@ -570,162 +603,92 @@ ngx_http_markdown_update_headers(ngx_http_request_t *r,
          && result->etag_len > 0) ? 1 : 0,
         &plan);
 
-    for (i = 0; i < plan.count; i++) {
-        entry = &plan.entries[i];
+    /*
+     * Apply the plan atomically.  On failure, all changes are
+     * rolled back and we return NGX_ERROR.  The plan is freed
+     * by ngx_http_markdown_apply_header_plan() in both success
+     * and failure paths.
+     */
+    rc = ngx_http_markdown_apply_header_plan(r, &plan);
+    if (rc != NGX_OK) {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+            "markdown filter: atomic header plan application "
+            "failed; all changes rolled back");
+        return NGX_ERROR;
+    }
 
-        switch (entry->op_type) {
-        case 0: {
-            ngx_str_t  key;
-            ngx_str_t  value;
+    /*
+     * Post-plan operations.  These execute only after the atomic
+     * plan has committed successfully.
+     *
+     * Content-Type was set by the plan via the generic SET path.
+     * Override with the static buffer for efficiency (the plan
+     * entry used pool-copied data which is correct but we prefer
+     * the static buffer for the well-known content type).
+     */
+    r->headers_out.content_type.data = ngx_http_markdown_content_type;
+    r->headers_out.content_type.len = NGX_HTTP_MARKDOWN_CONTENT_TYPE_LEN;
+    r->headers_out.content_type_len = NGX_HTTP_MARKDOWN_CONTENT_TYPE_LEN;
+    r->headers_out.charset.len = 0;
+    r->headers_out.charset.data = NULL;
 
-            key.data = (u_char *) entry->key;
-            key.len = entry->key_len;
-            value.data = (u_char *) entry->value;
-            value.len = entry->value_len;
-
-            if (key.len == sizeof("Content-Type") - 1
-                && ngx_strncasecmp(key.data,
-                    (u_char *) "Content-Type",
-                    key.len) == 0)
-            {
-                /*
-                 * Use the static content-type buffer directly.
-                 * The plan entry borrows from Rust-owned storage
-                 * that is freed by markdown_header_plan_free(),
-                 * so we must not retain plan pointers.
-                 */
-                r->headers_out.content_type.data =
-                    ngx_http_markdown_content_type;
-                r->headers_out.content_type.len =
-                    NGX_HTTP_MARKDOWN_CONTENT_TYPE_LEN;
-                r->headers_out.content_type_len =
-                    NGX_HTTP_MARKDOWN_CONTENT_TYPE_LEN;
-                r->headers_out.charset.len = 0;
-                r->headers_out.charset.data = NULL;
-
-                ngx_log_debug0(NGX_LOG_DEBUG_HTTP,
-                    r->connection->log, 0,
-                    "markdown filter: set Content-Type "
-                    "via header plan");
-            }
-            else if (key.len == sizeof("Vary") - 1
-                     && ngx_strncasecmp(key.data,
-                         (u_char *) "Vary",
-                         key.len) == 0)
-            {
-                rc = ngx_http_markdown_add_vary_accept(r);
-                if (rc != NGX_OK) {
-                    ngx_log_error(NGX_LOG_ERR,
-                        r->connection->log, 0,
-                        "markdown filter: failed to add "
-                        "Vary header via plan");
-                    markdown_header_plan_free(&plan);
-                    return NGX_ERROR;
-                }
-            }
-            else
-            {
-                ngx_table_elt_t *h;
-                u_char          *pool_key;
-                u_char          *pool_val;
-
-                h = ngx_list_push(&r->headers_out.headers);
-                if (h == NULL) {
-                    markdown_header_plan_free(&plan);
-                    return NGX_ERROR;
-                }
-
-                /*
-                 * Copy key and value into pool memory.
-                 * Plan-owned storage is freed by
-                 * markdown_header_plan_free() below.
-                 */
-                pool_key = ngx_pnalloc(r->pool, key.len);
-                if (pool_key == NULL) {
-                    markdown_header_plan_free(&plan);
-                    return NGX_ERROR;
-                }
-                ngx_memcpy(pool_key, key.data, key.len);
-
-                pool_val = ngx_pnalloc(r->pool, value.len);
-                if (pool_val == NULL) {
-                    markdown_header_plan_free(&plan);
-                    return NGX_ERROR;
-                }
-                ngx_memcpy(pool_val, value.data, value.len);
-
-                h->hash = 1;
-                h->key.data = pool_key;
-                h->key.len = key.len;
-                h->value.data = pool_val;
-                h->value.len = value.len;
-            }
-            break;
+    /*
+     * ETag: if the plan included a SetEtagPlaceholder entry, the
+     * atomic applier treated it as a generic SET with empty value.
+     * Apply the real ETag value now.
+     */
+    if (conf->policy.generate_etag
+        && result->etag != NULL
+        && result->etag_len > 0)
+    {
+        rc = ngx_http_markdown_set_etag(r,
+            result->etag, result->etag_len);
+        if (rc != NGX_OK) {
+            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                "markdown filter: failed to set ETag "
+                "after plan commit");
         }
-
-        case 1: {
-            if (entry->key_len == sizeof("Content-Encoding") - 1
-                && ngx_strncasecmp((u_char *) entry->key,
-                    (u_char *) "Content-Encoding",
-                    entry->key_len) == 0)
-            {
-                ngx_http_markdown_remove_content_encoding(r);
-            }
-            else if (entry->key_len == sizeof("Accept-Ranges") - 1
-                     && ngx_strncasecmp((u_char *) entry->key,
-                         (u_char *) "Accept-Ranges",
-                         entry->key_len) == 0)
-            {
-                ngx_http_markdown_remove_accept_ranges(r);
-            }
-            break;
-        }
-
-        case 2:
-            if (conf->policy.generate_etag
-                && result->etag != NULL
-                && result->etag_len > 0)
-            {
-                rc = ngx_http_markdown_set_etag(r,
-                    result->etag, result->etag_len);
-                if (rc != NGX_OK) {
-                    ngx_log_error(NGX_LOG_ERR,
-                        r->connection->log, 0,
-                        "markdown filter: failed to set "
-                        "ETag header via plan");
-                    markdown_header_plan_free(&plan);
-                    return NGX_ERROR;
-                }
-            }
-            else
-            {
-                rc = ngx_http_markdown_set_etag(r, NULL, 0);
-                if (rc != NGX_OK) {
-                    ngx_log_error(NGX_LOG_ERR,
-                        r->connection->log, 0,
-                        "markdown filter: failed to clear "
-                        "ETag header via plan");
-                    markdown_header_plan_free(&plan);
-                    return NGX_ERROR;
-                }
-            }
-            break;
+    } else {
+        rc = ngx_http_markdown_set_etag(r, NULL, 0);
+        if (rc != NGX_OK) {
+            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                "markdown filter: failed to clear ETag "
+                "after plan commit");
         }
     }
 
-    markdown_header_plan_free(&plan);
+    /*
+     * Add Vary: Accept header.  This is a post-plan operation
+     * because it uses ngx_list_push which is NGINX-specific
+     * and not part of the Rust plan.
+     */
+    rc = ngx_http_markdown_add_vary_accept(r);
+    if (rc != NGX_OK) {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+            "markdown filter: failed to add Vary header");
+    }
 
+    /*
+     * Set the new Content-Length.  The plan deleted the stale
+     * original; now we set the correct post-conversion value.
+     * This is guaranteed to execute only after successful plan
+     * application.
+     */
     ngx_http_clear_content_length(r);
     r->headers_out.content_length_n = result->markdown_len;
 
-    NGX_HTTP_MARKDOWN_LOG_DEBUG1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                                 "markdown filter: set Content-Length: %uz", result->markdown_len);
+    NGX_HTTP_MARKDOWN_LOG_DEBUG1(NGX_LOG_DEBUG_HTTP,
+        r->connection->log, 0,
+        "markdown filter: set Content-Length: %uz",
+        result->markdown_len);
 
     if (conf->token_estimate && result->token_estimate > 0) {
-        rc = ngx_http_markdown_add_token_header(r, result->token_estimate);
+        rc = ngx_http_markdown_add_token_header(r,
+            result->token_estimate);
         if (rc != NGX_OK) {
             ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                         "markdown filter: failed to add X-Markdown-Tokens header");
+                "markdown filter: failed to add "
+                "X-Markdown-Tokens header");
         }
     }
 
@@ -736,13 +699,15 @@ ngx_http_markdown_update_headers(ngx_http_request_t *r,
         rc = ngx_http_markdown_modify_cache_control_for_auth(r);
         if (rc != NGX_OK) {
             ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                         "markdown filter: failed to modify Cache-Control for authenticated content");
+                "markdown filter: failed to modify "
+                "Cache-Control for authenticated "
+                "content");
         }
     }
 #endif
 
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                  "markdown filter: headers updated successfully");
+        "markdown filter: headers updated successfully");
 
     return NGX_OK;
 }

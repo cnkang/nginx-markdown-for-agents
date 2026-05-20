@@ -10,6 +10,8 @@
 
 #include "ngx_http_markdown_filter_module.h"
 #include "markdown_converter.h"
+#include "ngx_http_markdown_ffi_layout_check.h"
+#include "ngx_http_markdown_diagnostics.h"
 #include "ngx_http_markdown_dynconf_impl.h"
 #include "ngx_http_markdown_otel_impl.h"
 #include "ngx_http_markdown_module_state_impl.h"
@@ -19,6 +21,7 @@
 #include "ngx_http_markdown_request_impl.h"
 #include "ngx_http_markdown_metrics_impl.h"
 #include "ngx_http_markdown_prometheus_impl.h"
+#include "ngx_http_markdown_diagnostics_accessors_impl.h"
 
 #ifdef MARKDOWN_STREAMING_ENABLED
 #include "ngx_http_markdown_streaming_impl.h"

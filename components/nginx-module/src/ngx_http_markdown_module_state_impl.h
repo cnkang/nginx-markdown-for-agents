@@ -46,7 +46,8 @@ static u_char ngx_http_markdown_empty_string[] = "";
 
 /* Global dynamic config watcher for this worker process.
  * active_snapshot holds the currently effective configuration;
- * staging_snapshot is used during two-phase reload. */
+ * staging_snapshot is used during two-phase reload;
+ * last_known_good holds the previous active snapshot for rollback. */
 static ngx_http_markdown_dynconf_watcher_t ngx_http_markdown_dynconf_watcher = {
     .path            = { 0, NULL },
     .last_mtime      = 0,
@@ -63,6 +64,12 @@ static ngx_http_markdown_dynconf_watcher_t ngx_http_markdown_dynconf_watcher = {
                           0,
 #endif
                           0, 0 },
+    .last_known_good = { 0, 0, NULL, 0, 0,
+#ifdef MARKDOWN_STREAMING_ENABLED
+                         0,
+#endif
+                         0, 0 },
+    .lkg_valid       = 0,
     .version         = 0,
     .conf            = NULL
 };
