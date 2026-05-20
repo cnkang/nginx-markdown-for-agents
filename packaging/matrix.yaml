@@ -40,4 +40,4 @@ package_metadata:
     format for AI agent consumption. Supports streaming conversion,
     content negotiation via Accept headers, and automatic decompression.
   category: web
-  requires: nginx (>= 1.26.0)
+  requires: nginx (>= 1.24.0)
