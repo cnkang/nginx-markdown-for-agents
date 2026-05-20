@@ -65,10 +65,7 @@ def check_structure(result: ValidationResult) -> None:
     else:
         result.fail("ffi-contract:exists", "missing FFI migration contract")
 
-    cargo_txt = read(CARGO_TOML_PATH)
-    if not cargo_txt:
-        result.fail("cargo:version-070", "Cargo.toml missing")
-    else:
+    if cargo_txt := read(CARGO_TOML_PATH):
         try:
             version = tomllib.loads(cargo_txt).get("package", {}).get("version", "")
         except tomllib.TOMLDecodeError as exc:
@@ -78,6 +75,9 @@ def check_structure(result: ValidationResult) -> None:
                 result.pass_("cargo:version-070", "Cargo version is 0.7.0")
             else:
                 result.fail("cargo:version-070", f"version is {version}")
+
+    else:
+        result.fail("cargo:version-070", "Cargo.toml missing")
 
 
 def check_blocking_items(result: ValidationResult, mode: str) -> None:
@@ -115,7 +115,7 @@ def check_blocking_items(result: ValidationResult, mode: str) -> None:
             ("decision_count metric write", "NGX_HTTP_MARKDOWN_METRIC_INC(results.decision_count)" in decision_log),
             ("parse_timeouts_total metric write", "parse_interrupts.parse_timeouts_total" in conversion),
             ("parse_budget_exceeded_total metric write", "parse_interrupts.parse_budget_exceeded_total" in conversion),
-            ("header plan ffi integration", "markdown_build_header_plan" in headers and "markdown_header_plan_free" in headers),
+            ("header plan ffi integration", "markdown_build_header_plan" in headers and "ngx_http_markdown_apply_header_plan" in headers),
         ],
         "Gate 5": [
             ("make harness-check-full", "harness-check-full" in mk and "make harness-check-full" in gates),

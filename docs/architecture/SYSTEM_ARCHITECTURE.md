@@ -244,10 +244,44 @@ independently from `markdown_max_size`, preventing zip-bomb attacks.
 `ParseTimeout` (10) and `ParseBudgetExceeded` (11) map to
 `RESOURCE_LIMIT`.
 
+### Diagnostics Endpoint (`ngx_http_markdown_diagnostics.c`)
+
+A dedicated HTTP handler exposes runtime state at
+`/nginx-markdown/diagnostics` when `markdown_diagnostics on` is
+configured. Returns JSON containing the current config snapshot, recent
+decision summaries (reason codes, durations), and a metrics snapshot.
+Access is restricted by `allow` CIDR configuration; external access is
+denied by default.
+
+### Dynconf Dry-run and Last-Known-Good (`ngx_http_markdown_dynconf.c`)
+
+`markdown_dynconf_dry_run on` validates a new configuration file on HUP
+without replacing the active snapshot. Validation results include line
+numbers, field names, and error reasons. On successful reload, the
+previous active snapshot is preserved as last-known-good (LKG). Manual
+rollback restores `active_snapshot` from LKG. `applied_mtime` updates
+only after successful application (Rule 35).
+
+### Reason Code FFI Accessor (`reason_code.rs` + FFI)
+
+Reason codes are defined as a Rust enum (single source of truth). C
+accesses reason code values and display strings through
+`get_reason_code_string()` FFI. C-side independent `#define` constants
+are removed; all consumers go through the FFI accessor. This ensures
+Rust enum, C usage, docs, and metrics labels stay aligned.
+
+### Header Plan Atomic Application (`ngx_http_markdown_ffi_helpers.c`)
+
+The C module applies `FFIHeaderPlan` operations (set, delete, modify)
+atomically: all header mutations succeed or all are rolled back. This
+prevents partial header state when an allocation failure occurs mid-plan.
+The plan is built by Rust and returned as a single FFI struct; C iterates
+the operation list and applies changes to `r->headers_out`.
+
 ## Document Updates
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
-| 0.7.0 | 2026-05-17 | Kang | Added v0.7.0 subsystems section (negotiator, conditional, decision, header_plan, security extensions, bounded decompression, parser timeout/budget) |
+| 0.7.0 | 2026-05-17 | Kang | Added v0.7.0 subsystems section (negotiator, conditional, decision, header_plan, security extensions, bounded decompression, parser timeout/budget, diagnostics endpoint, dynconf dry-run/LKG, reason code FFI accessor, header plan atomic application) |

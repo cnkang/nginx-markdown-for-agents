@@ -75,7 +75,7 @@ rust-lib:
 	@echo "Building Rust library for $(RUST_TARGET)..."
 	cd $(RUST_DIR) && cargo build --locked --target $(RUST_TARGET) --release
 	@echo "Generating C header with cbindgen..."
-	cd $(RUST_DIR) && mkdir -p include && cbindgen --config cbindgen.toml --crate nginx-markdown-converter --output include/markdown_converter.h
+	cd $(RUST_DIR) && mkdir -p include && cbindgen --quiet --config cbindgen.toml --crate nginx-markdown-converter --output include/markdown_converter.h
 
 rust-lib-debug:
 	@echo "Building Rust library (debug) for $(RUST_TARGET)..."
@@ -214,7 +214,19 @@ release-gates-check-060:
 	python3 tools/release/gates/validate_release_gates_060.py
 
 release-gates-check-070:
+	$(MAKE) build
+	$(MAKE) check-headers
+	$(MAKE) test-rust
+	$(MAKE) test-nginx-unit
+	$(MAKE) test-rust-fuzz-smoke
+	$(MAKE) verify-chunked-native-e2e-smoke
+	$(MAKE) test-e2e-rust
 	python3 tools/release/gates/validate_release_gates_070.py --mode strict
+	python3 tools/release/gates/validate_config_directives_070.py
+	python3 tools/release/gates/validate_metrics_070.py
+	python3 tools/release/gates/validate_reason_codes_070.py
+	python3 tools/release/gates/validate_package_metadata_070.py
+	python3 tools/release/gates/validate_k8s_manifests_070.py
 
 release-gates-check-legacy:
 	python3 tools/release/legacy/validate_release_gates.py

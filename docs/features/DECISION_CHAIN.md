@@ -138,6 +138,9 @@ The complete mapping from reason codes to eligibility enums, error categories, r
 | `REPLAY_BUFFER_ERROR` | Fail-open replay buffer init or append failure; sets `precommit_error` flag (prevents duplicate finalize calls) |
 | `failopen_completed` | Once-then-skip flag preventing duplicate `ngx_http_finalize_request` calls within a request lifetime |
 | `DECOMP_BUDGET_EXCEEDED` | Decompression budget (`markdown_decompress_max_size`) exceeded; classified as `FAIL_RESOURCE_LIMIT` |
+| `DECOMPRESSION_FORMAT_ERROR` | Compressed input has invalid format (not valid gzip/deflate/brotli); classified as `FAIL_CONVERSION` |
+| `DECOMPRESSION_TRUNCATED_INPUT` | Compressed input was truncated (incomplete stream); classified as `FAIL_CONVERSION` |
+| `DECOMPRESSION_IO_ERROR` | I/O error during decompression operation; classified as `FAIL_SYSTEM` |
 | `PARSE_TIMEOUT` | Parser execution exceeded `markdown_parse_timeout` (default 30s); classified as `FAIL_RESOURCE_LIMIT` |
 | `PARSE_BUDGET_EXCEEDED` | Parser memory exceeded `markdown_parser_budget` (default 64m); classified as `FAIL_RESOURCE_LIMIT` |
 | `SKIP_NO_ACCEPT` | No Accept header present and `markdown_on_wildcard` is off |
