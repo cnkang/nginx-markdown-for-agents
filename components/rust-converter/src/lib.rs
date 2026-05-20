@@ -26,6 +26,7 @@ pub mod charset;
 pub mod conditional;
 pub mod converter;
 pub mod decision;
+pub mod decompress;
 pub mod error;
 pub mod etag_generator;
 pub mod ffi;

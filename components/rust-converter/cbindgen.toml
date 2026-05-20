@@ -9,7 +9,11 @@ pragma_once = false
 include_version = true
 
 [export]
-# Export only items explicitly marked with #[unsafe(no_mangle)] (Rust 2024)
+# Export only items explicitly marked with #[unsafe(no_mangle)] (Rust 2024).
+# cbindgen emits WARN for non-pub constants it encounters but correctly
+# skips — these are informational and do not affect the generated header.
+# Internal constants (DEFAULT_CHARSET, META_SCAN_LIMIT, etc.) are
+# intentionally not pub and should NOT be exported to C.
 include = []
 exclude = []
 

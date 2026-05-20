@@ -446,6 +446,8 @@ mod tests {
             memory_budget: 0,
             llm_provider: 0,
             chars_per_token_fixed: 0,
+            parse_timeout_ms: 0,
+            parser_memory_budget: 0,
         }
     }
 

@@ -118,22 +118,34 @@ impl ConversionError {
     /// assert_eq!(err.code(), 3);
     /// ```
     pub fn code(&self) -> u32 {
+        use crate::ffi::{
+            ERROR_DECOMPRESSION_BUDGET_EXCEEDED, ERROR_ENCODING, ERROR_INTERNAL,
+            ERROR_INVALID_INPUT, ERROR_MEMORY_LIMIT, ERROR_PARSE,
+            ERROR_PARSE_BUDGET_EXCEEDED, ERROR_PARSE_TIMEOUT, ERROR_TIMEOUT,
+        };
+        #[cfg(feature = "streaming")]
+        use crate::ffi::{
+            ERROR_BUDGET_EXCEEDED, ERROR_POST_COMMIT, ERROR_STREAMING_FALLBACK,
+        };
+
         match self {
-            ConversionError::ParseError(_) => 1,
-            ConversionError::EncodingError(_) => 2,
-            ConversionError::Timeout => 3,
-            ConversionError::MemoryLimit(_) => 4,
-            ConversionError::InvalidInput(_) => 5,
+            ConversionError::ParseError(_) => ERROR_PARSE,
+            ConversionError::EncodingError(_) => ERROR_ENCODING,
+            ConversionError::Timeout => ERROR_TIMEOUT,
+            ConversionError::MemoryLimit(_) => ERROR_MEMORY_LIMIT,
+            ConversionError::InvalidInput(_) => ERROR_INVALID_INPUT,
             #[cfg(feature = "streaming")]
-            ConversionError::BudgetExceeded { .. } => 6,
+            ConversionError::BudgetExceeded { .. } => ERROR_BUDGET_EXCEEDED,
             #[cfg(feature = "streaming")]
-            ConversionError::StreamingFallback { .. } => 7,
+            ConversionError::StreamingFallback { .. } => ERROR_STREAMING_FALLBACK,
             #[cfg(feature = "streaming")]
-            ConversionError::PostCommitError { .. } => 8,
-            ConversionError::DecompressionBudgetExceeded { .. } => 9,
-            ConversionError::ParseTimeout => 10,
-            ConversionError::ParseBudgetExceeded { .. } => 11,
-            ConversionError::InternalError(_) => 99,
+            ConversionError::PostCommitError { .. } => ERROR_POST_COMMIT,
+            ConversionError::DecompressionBudgetExceeded { .. } => {
+                ERROR_DECOMPRESSION_BUDGET_EXCEEDED
+            }
+            ConversionError::ParseTimeout => ERROR_PARSE_TIMEOUT,
+            ConversionError::ParseBudgetExceeded { .. } => ERROR_PARSE_BUDGET_EXCEEDED,
+            ConversionError::InternalError(_) => ERROR_INTERNAL,
         }
     }
 }

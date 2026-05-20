@@ -14,6 +14,14 @@
 #include <stdlib.h>
 
 /**
+ * Total number of reason code variants.
+ *
+ * This constant is used by the closure test to verify that all variants
+ * are accounted for in the `ALL` array. Update this when adding variants.
+ */
+#define REASON_CODE_COUNT 18
+
+/**
  * Success - no error occurred.
  */
 #define ERROR_SUCCESS 0
@@ -293,6 +301,24 @@ typedef struct MarkdownOptions {
    * Populated from the `markdown_chars_per_token` NGINX directive.
    */
   uint8_t chars_per_token_fixed;
+  /**
+   * Parse-specific timeout in milliseconds (0 = use `timeout_ms` fallback).
+   *
+   * When non-zero, the HTML parser uses this deadline instead of the
+   * general `timeout_ms` field.  This allows operators to set a tighter
+   * parse-phase budget while keeping a longer overall conversion timeout.
+   * Populated from the `markdown_parse_timeout` NGINX directive.
+   */
+  uint32_t parse_timeout_ms;
+  /**
+   * Parser memory budget in bytes (0 = unlimited).
+   *
+   * When non-zero, the HTML parser is constrained to this memory
+   * allocation ceiling.  Exceeding the budget produces
+   * `ERROR_PARSE_BUDGET_EXCEEDED`.
+   * Populated from the `markdown_parser_budget` NGINX directive.
+   */
+  uint64_t parser_memory_budget;
 } MarkdownOptions;
 
 /**
@@ -488,6 +514,75 @@ typedef struct FFIHeaderPlan {
 } FFIHeaderPlan;
 
 /**
+ * Result of a bounded decompression operation.
+ *
+ * Returned by decompression FFI functions to communicate the output buffer,
+ * its length, and any error category to the C caller.
+ *
+ * # Error Categories
+ *
+ * - `0` = success (output is valid decompressed data)
+ * - `5` = budget_exceeded (decompressed output exceeded the configured limit)
+ * - `6` = format_error (input is not valid gzip/deflate)
+ * - `7` = truncated (input stream ended prematurely)
+ * - `8` = io_error (I/O error during decompression)
+ *
+ * # Memory Ownership
+ *
+ * When `error_category == 0`, the `output` pointer is Rust-owned and must be
+ * freed via the corresponding cleanup function. When `error_category != 0`,
+ * `output` is NULL and `output_len` is 0.
+ */
+typedef struct FFIDecompResult {
+  /**
+   * Pointer to decompressed output buffer (Rust-owned, NULL on error).
+   */
+  uint8_t *output;
+  /**
+   * Length of decompressed output in bytes (0 on error).
+   */
+  uintptr_t output_len;
+  /**
+   * Error category: 0=success, 5=budget_exceeded, 6=format_error,
+   * 7=truncated, 8=io_error.
+   */
+  uint32_t error_category;
+} FFIDecompResult;
+
+/**
+ * Get the string representation of a reason code by its numeric value.
+ *
+ * Returns a pointer to a static string and writes the length to `out_len`.
+ * Returns NULL if the discriminant is invalid.
+ *
+ * # Safety
+ *
+ * The caller must ensure that `out_len` either is NULL or points to
+ * writable storage for a `usize`.
+ */
+const uint8_t *markdown_reason_code_str(uint32_t code, uintptr_t *out_len);
+
+/**
+ * Get the Prometheus metric key for a reason code by its numeric value.
+ *
+ * Returns a pointer to a static string and writes the length to `out_len`.
+ * Returns NULL if the discriminant is invalid.
+ *
+ * # Safety
+ *
+ * The caller must ensure that `out_len` either is NULL or points to
+ * writable storage for a `usize`.
+ */
+const uint8_t *markdown_reason_code_metric_key(uint32_t code, uintptr_t *out_len);
+
+/**
+ * Return the total number of defined reason codes.
+ *
+ * C callers can use this to verify they handle all variants.
+ */
+uint32_t markdown_reason_code_count(void);
+
+/**
  * Allocate a new converter handle for use across multiple FFI calls.
  *
  * # Safety
@@ -649,6 +744,28 @@ uint8_t markdown_validate_url(const uint8_t *url, uintptr_t url_len);
 uint8_t markdown_is_dangerous_url(const uint8_t *url, uintptr_t url_len);
 
 /**
+ * Build a base URL from X-Forwarded-Host and X-Forwarded-Proto headers.
+ *
+ * Parses the forwarded headers and constructs a validated base URL
+ * (e.g., "https://api.example.com"). The result is written into the
+ * caller-provided buffer. Returns the number of bytes written, or 0
+ * if the headers are absent, empty, or contain invalid characters.
+ *
+ * # Safety
+ *
+ * The caller must ensure that:
+ * - `x_forwarded_host` either points to `host_len` readable bytes or is NULL
+ * - `x_forwarded_proto` either points to `proto_len` readable bytes or is NULL
+ * - `out_buf` points to at least `out_buf_cap` writable bytes
+ */
+uintptr_t markdown_build_base_url(const uint8_t *x_forwarded_host,
+                                  uintptr_t host_len,
+                                  const uint8_t *x_forwarded_proto,
+                                  uintptr_t proto_len,
+                                  uint8_t *out_buf,
+                                  uintptr_t out_buf_cap);
+
+/**
  * Release a header plan previously returned by `markdown_build_header_plan`.
  *
  * # Safety
@@ -657,6 +774,35 @@ uint8_t markdown_is_dangerous_url(const uint8_t *url, uintptr_t url_len);
  * `FFIHeaderPlan` previously returned by `markdown_build_header_plan`.
  */
 void markdown_header_plan_free(struct FFIHeaderPlan *plan);
+
+/**
+ * Initialize a `MarkdownOptions` struct with sensible defaults.
+ *
+ * C callers **MUST** use this function instead of `memset(&opts, 0, sizeof(opts))`
+ * or literal struct initialization (`MarkdownOptions opts = {0}`). The helper
+ * guarantees that all fields — including any future tail-appended fields — are
+ * set to valid defaults. After calling this function, the caller may override
+ * individual fields as needed.
+ *
+ * Default values:
+ * - `flavor`: 0 (CommonMark)
+ * - `timeout_ms`: 5000 (5 seconds)
+ * - `generate_etag`: 1 (enabled)
+ * - `estimate_tokens`: 0 (disabled)
+ * - `front_matter`: 0 (disabled)
+ * - `content_type` / `base_url` / selectors: NULL/0
+ * - `streaming_budget`: 0 (use engine default)
+ * - `prune_noise`: 0 (disabled)
+ * - `memory_budget`: 0 (use per-engine defaults)
+ * - `llm_provider`: 0 (default)
+ * - `chars_per_token_fixed`: 0 (use default ratio)
+ *
+ * # Safety
+ *
+ * The caller must ensure that `result` points to writable storage
+ * for a `MarkdownOptions`.
+ */
+void markdown_options_init(struct MarkdownOptions *result);
 
 /**
  * Zero-initialize a MarkdownResult struct.
@@ -712,6 +858,73 @@ void markdown_decision_result_init(struct FFIDecisionResult *result);
  */
 void markdown_header_plan_init(struct FFIHeaderPlan *result);
 
+/**
+ * Perform bounded decompression of compressed input data.
+ *
+ * Decompresses the input using the specified format (gzip, deflate, or brotli)
+ * with a hard budget limit on the output size. If the decompressed output
+ * would exceed `budget` bytes, decompression is terminated immediately and
+ * `BudgetExceeded` is returned.
+ *
+ * On success, the `result` struct is populated with a Rust-owned output buffer.
+ * The C caller **must** free this buffer via [`markdown_decompress_free`].
+ *
+ * # Format Codes
+ *
+ * - `0` = gzip (RFC 1952)
+ * - `1` = deflate (RFC 1951)
+ * - `2` = brotli (RFC 7932)
+ *
+ * # Return Value
+ *
+ * Returns `0` on success. On failure, returns the error category code:
+ * - `5` = budget_exceeded
+ * - `6` = format_error
+ * - `7` = truncated_input
+ * - `8` = io_error
+ * - `9` = invalid arguments (NULL pointers, unknown format)
+ *
+ * # Safety
+ *
+ * The caller must ensure that:
+ * - `input` points to at least `input_len` readable bytes, or is NULL when
+ *   `input_len == 0`
+ * - `result` points to writable storage for an `FFIDecompResult`
+ * - The output buffer in `result` is freed via `markdown_decompress_free`
+ *   after use (only when return value is 0)
+ */
+uint32_t markdown_decompress_bounded(const uint8_t *input,
+                                     uintptr_t input_len,
+                                     uint8_t format,
+                                     uintptr_t budget,
+                                     struct FFIDecompResult *result);
+
+/**
+ * Release the output buffer from a successful `markdown_decompress_bounded` call.
+ *
+ * After calling this function, the `result` struct is reset to a safe zero
+ * state. Calling this on a result with a NULL output pointer is a no-op.
+ *
+ * # Safety
+ *
+ * The caller must ensure that:
+ * - `result` either is NULL or points to a valid `FFIDecompResult` previously
+ *   populated by `markdown_decompress_bounded`
+ * - The same result is not freed twice (the function resets pointers to NULL
+ *   after freeing, so double-free is safe but wasteful)
+ */
+void markdown_decompress_free(struct FFIDecompResult *result);
+
+/**
+ * Zero-initialize an FFIDecompResult struct.
+ *
+ * # Safety
+ *
+ * The caller must ensure that `result` points to writable storage
+ * for an `FFIDecompResult`.
+ */
+void markdown_decomp_result_init(struct FFIDecompResult *result);
+
 #if defined(MARKDOWN_INCREMENTAL_ENABLED)
 /**
  * Create a new incremental converter handle for incremental Markdown processing.
@@ -756,6 +969,8 @@ void markdown_header_plan_init(struct FFIHeaderPlan *result);
  *     memory_budget: 0,
  *     llm_provider: 0,
  *     chars_per_token_fixed: 0,
+ *     parse_timeout_ms: 0,
+ *     parser_memory_budget: 0,
  * };
  * let handle = unsafe { markdown_incremental_new(&opts) };
  * assert!(!handle.is_null());

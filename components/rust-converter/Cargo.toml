@@ -25,6 +25,10 @@ hex = "0.4"
 regex = "1.10"
 # Character encoding transcoding for non-UTF-8 HTML inputs
 encoding_rs = "0.8"
+# Gzip/deflate decompression for bounded decompression FFI
+flate2 = "1.0"
+# Brotli decompression for bounded decompression FFI
+brotli = "8.0"
 
 [dev-dependencies]
 # Property-based testing framework
@@ -37,9 +41,6 @@ serde_json = "1.0"
 libc = "0.2"
 # Parse known-difference registry for streaming parity harness
 toml = "1.1"
-# Compression regression fixtures for streaming parity tests
-flate2 = "1.0"
-brotli = "8.0"
 
 [features]
 default = ["prune_noise_regions"]

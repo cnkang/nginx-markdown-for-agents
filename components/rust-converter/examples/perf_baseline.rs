@@ -463,6 +463,8 @@ fn run_ffi_baseline(sample: &Sample, cfg: RunConfig) -> FfiSummary {
         memory_budget: 0,
         llm_provider: 0,
         chars_per_token_fixed: 0,
+        parse_timeout_ms: 0,
+        parser_memory_budget: 0,
     };
 
     let handle: *mut MarkdownConverterHandle = markdown_converter_new();
