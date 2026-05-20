@@ -1,0 +1,213 @@
+name: Sign and Publish Packages
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version tag (e.g. v0.7.0)'
+        required: true
+      dry_run:
+        description: 'Dry run (sign but do not publish)'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
+  workflow_call:
+    inputs:
+      version:
+        description: 'Release version tag'
+        required: true
+        type: string
+      dry_run:
+        description: 'Dry run mode'
+        required: false
+        default: 'false'
+        type: string
+    secrets:
+      GPG_PRIVATE_KEY:
+        required: true
+      GPG_PASSPHRASE:
+        required: true
+      GPG_KEY_ID:
+        required: true
+
+permissions: {}
+
+env:
+  GPG_KEY_ID: ${{ secrets.GPG_KEY_ID || inputs.GPG_KEY_ID || '' }}
+
+jobs:
+  sign-packages:
+    name: Sign DEB/RPM Packages
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ inputs.version }}
+
+      - name: Download package artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          path: dist
+          pattern: 'pkg-*'
+          merge-multiple: true
+
+      - name: Import GPG private key
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          echo "${GPG_PRIVATE_KEY}" | gpg --batch --import
+          # Trust the imported key ultimately
+          KEY_FP=$(gpg --list-keys --with-colons "${GPG_KEY_ID}" \
+            | grep '^fpr' | head -1 | cut -d: -f10)
+          echo "${KEY_FP}:6:" | gpg --import-ownertrust
+          # Configure gpg-agent for non-interactive signing
+          mkdir -p ~/.gnupg
+          printf 'allow-preset-passphrase\n' > ~/.gnupg/gpg-agent.conf
+          gpgconf --kill gpg-agent
+          gpgconf --launch gpg-agent
+          # Preset passphrase for the key
+          KEYGRIP=$(gpg --list-keys --with-colons --with-keygrip "${GPG_KEY_ID}" \
+            | grep '^grp' | head -1 | cut -d: -f10)
+          if [ -n "${KEYGRIP}" ] && [ -n "${GPG_PASSPHRASE}" ]; then
+            echo "${GPG_PASSPHRASE}" \
+              | /usr/lib/gnupg/gpg-preset-passphrase --preset "${KEYGRIP}"
+          fi
+
+      - name: Install signing tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends dpkg-sig rpm
+
+      - name: Sign packages
+        env:
+          GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}
+        run: |
+          chmod +x packaging/scripts/sign-packages.sh
+          packaging/scripts/sign-packages.sh -k "${GPG_KEY_ID}" -d dist
+
+      - name: Upload signed packages
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: signed-packages
+          path: dist/
+
+  sign-repo-metadata:
+    name: Sign Repository Metadata
+    needs: sign-packages
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ inputs.version }}
+
+      - name: Download signed packages
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: signed-packages
+          path: dist
+
+      - name: Import GPG private key
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          echo "${GPG_PRIVATE_KEY}" | gpg --batch --import
+          KEY_FP=$(gpg --list-keys --with-colons "${GPG_KEY_ID}" \
+            | grep '^fpr' | head -1 | cut -d: -f10)
+          echo "${KEY_FP}:6:" | gpg --import-ownertrust
+          mkdir -p ~/.gnupg
+          printf 'allow-preset-passphrase\n' > ~/.gnupg/gpg-agent.conf
+          gpgconf --kill gpg-agent
+          gpgconf --launch gpg-agent
+          KEYGRIP=$(gpg --list-keys --with-colons --with-keygrip "${GPG_KEY_ID}" \
+            | grep '^grp' | head -1 | cut -d: -f10)
+          if [ -n "${KEYGRIP}" ] && [ -n "${GPG_PASSPHRASE}" ]; then
+            echo "${GPG_PASSPHRASE}" \
+              | /usr/lib/gnupg/gpg-preset-passphrase --preset "${KEYGRIP}"
+          fi
+
+      - name: Install repository tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            dpkg-dev apt-utils createrepo-c
+
+      - name: Build APT repository structure
+        run: |
+          # Create APT repo structure if packages exist
+          if ls dist/*.deb 1>/dev/null 2>&1; then
+            mkdir -p repo/apt/dists/stable/main/binary-amd64
+            mkdir -p repo/apt/dists/stable/main/binary-arm64
+            mkdir -p repo/apt/pool/main
+            cp dist/*.deb repo/apt/pool/main/ 2>/dev/null || true
+            cd repo/apt
+            dpkg-scanpackages pool/main > dists/stable/main/binary-amd64/Packages
+            gzip -k dists/stable/main/binary-amd64/Packages
+            apt-ftparchive release dists/stable > dists/stable/Release
+            cd ../..
+          fi
+
+      - name: Build YUM repository structure
+        run: |
+          # Create YUM repo structure if packages exist
+          if ls dist/*.rpm 1>/dev/null 2>&1; then
+            mkdir -p repo/yum/packages
+            cp dist/*.rpm repo/yum/packages/ 2>/dev/null || true
+            createrepo_c repo/yum
+          fi
+
+      - name: Sign repository metadata
+        env:
+          GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}
+        run: |
+          chmod +x packaging/scripts/sign-repo-metadata.sh
+          packaging/scripts/sign-repo-metadata.sh \
+            -k "${GPG_KEY_ID}" \
+            -a repo/apt \
+            -y repo/yum
+
+      - name: Upload signed repository
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: signed-repository
+          path: repo/
+
+  publish:
+    name: Publish Signed Artifacts
+    needs: sign-repo-metadata
+    if: inputs.dry_run != 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download signed packages
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: signed-packages
+          path: dist
+
+      - name: Download signed repository
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: signed-repository
+          path: repo
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3
+        with:
+          tag_name: ${{ inputs.version }}
+          files: |
+            dist/*.deb
+            dist/*.rpm
+            repo/apt/dists/stable/Release.gpg
+            repo/apt/dists/stable/InRelease
