@@ -61,6 +61,9 @@ typedef struct { /* SONAR_NOTE */
         ngx_atomic_t  deflate;
         ngx_atomic_t  brotli;
         ngx_atomic_t  budget_exceeded_total;
+        ngx_atomic_t  format_error_total;
+        ngx_atomic_t  truncated_input_total;
+        ngx_atomic_t  io_error_total;
     } decompressions;
     struct {
         ngx_atomic_t  parse_timeouts_total;
@@ -102,6 +105,7 @@ typedef struct { /* SONAR_NOTE */
         ngx_atomic_t  delivery_count;
         ngx_atomic_t  decision_count;
         ngx_atomic_t  estimated_token_savings;
+        ngx_atomic_t  replay_buffer_errors_total;
     } results;
     struct {
         ngx_atomic_t  path_entries;

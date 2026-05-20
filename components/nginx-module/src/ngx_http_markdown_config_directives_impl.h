@@ -47,6 +47,69 @@ static ngx_conf_enum_t
     { ngx_null_string, 0 }
 };
 
+
+/*
+ * Custom directive handler for markdown_diagnostics_allow.
+ *
+ * Parses a CIDR notation address and adds it to the location
+ * configuration's diagnostics allow list.  Uses NGINX's built-in
+ * ngx_ptocidr() for CIDR parsing.
+ *
+ * Parameters:
+ *   cf  - configuration context
+ *   cmd - directive definition
+ *   conf - location configuration pointer
+ *
+ * Returns:
+ *   NGX_CONF_OK on success, error string on failure
+ */
+static char *
+ngx_http_markdown_diagnostics_allow(ngx_conf_t *cf,
+    ngx_command_t *cmd, void *conf)
+{
+    ngx_http_markdown_conf_t  *mcf = conf;
+    ngx_str_t                 *value;
+    ngx_cidr_t                *cidr;
+    ngx_int_t                  rc;
+
+    (void) cmd;
+
+    value = cf->args->elts;
+
+    /* Lazy-initialize the allow array on first use. */
+    if (mcf->ops.diagnostics_allow == NULL) {
+        mcf->ops.diagnostics_allow = ngx_array_create(cf->pool, 4,
+            sizeof(ngx_cidr_t));
+        if (mcf->ops.diagnostics_allow == NULL) {
+            return NGX_CONF_ERROR;
+        }
+    }
+
+    cidr = ngx_array_push(mcf->ops.diagnostics_allow);
+    if (cidr == NULL) {
+        return NGX_CONF_ERROR;
+    }
+
+    ngx_memzero(cidr, sizeof(ngx_cidr_t));
+
+    rc = ngx_ptocidr(&value[1], cidr);
+
+    if (rc == NGX_ERROR) {
+        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+            "invalid CIDR address \"%V\"", &value[1]);
+        mcf->ops.diagnostics_allow->nelts--;
+        return NGX_CONF_ERROR;
+    }
+
+    if (rc == NGX_DONE) {
+        ngx_conf_log_error(NGX_LOG_WARN, cf, 0,
+            "low bits of \"%V\" are meaningless", &value[1]);
+    }
+
+    return NGX_CONF_OK;
+}
+
+
 static ngx_command_t ngx_http_markdown_filter_commands[] = {
     /*
      * markdown_filter on|off|$variable
@@ -1069,6 +1132,92 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
         ngx_http_markdown_set_dynconf_path,
         NGX_HTTP_LOC_CONF_OFFSET,
         offsetof(ngx_http_markdown_conf_t, advanced.dynconf_path),
+        NULL
+    },
+
+    /*
+     * markdown_dynconf_dry_run on|off
+     *
+     * Enable dry-run mode for dynamic configuration validation.
+     * When enabled, configuration changes are validated but NOT
+     * applied to the active snapshot.  This allows operators to
+     * verify a new dynconf file without affecting live traffic.
+     *
+     * Default: off
+     * Context: http, server, location
+     *
+     * Example:
+     *   markdown_dynconf_dry_run on;
+     */
+    {
+        ngx_string("markdown_dynconf_dry_run"),
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF
+            |NGX_CONF_FLAG,
+        ngx_conf_set_flag_slot,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        offsetof(ngx_http_markdown_conf_t, advanced.dynconf_dry_run),
+        NULL
+    },
+
+    /*
+     * markdown_diagnostics on|off
+     *
+     * Enable or disable the runtime diagnostics endpoint
+     * (/nginx-markdown/diagnostics).  When enabled, the endpoint
+     * exposes config_snapshot, recent_decisions, and metrics_snapshot
+     * for operational introspection.
+     *
+     * Access control: use markdown_diagnostics_allow to specify
+     * CIDR addresses permitted to access the endpoint.  When no
+     * allow rules are configured, only loopback (127.0.0.1/::1)
+     * is permitted.
+     *
+     * Default: off
+     * Context: http, server, location
+     *
+     * Example:
+     *   location /nginx-markdown/diagnostics {
+     *       markdown_diagnostics on;
+     *       markdown_diagnostics_allow 10.0.0.0/8;
+     *       allow ::1;
+     *       deny all;
+     *   }
+     */
+    {
+        ngx_string("markdown_diagnostics"),
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF
+            |NGX_CONF_FLAG,
+        ngx_conf_set_flag_slot,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        offsetof(ngx_http_markdown_conf_t, ops.diagnostics_enabled),
+        NULL
+    },
+
+    /*
+     * markdown_diagnostics_allow
+     *
+     * Multi-value directive accepting CIDR notation addresses that
+     * are permitted to access the diagnostics endpoint.  When the
+     * allow list is empty (default), only loopback addresses are
+     * permitted.  When one or more CIDRs are configured, only
+     * matching client addresses are allowed.
+     *
+     * Example:
+     *   location /nginx-markdown/diagnostics {
+     *       markdown_diagnostics on;
+     *       markdown_diagnostics_allow 10.0.0.0/8;
+     *       markdown_diagnostics_allow 172.16.0.0/12;
+     *       markdown_diagnostics_allow 127.0.0.1;
+     *       markdown_diagnostics_allow ::1;
+     *   }
+     */
+    {
+        ngx_string("markdown_diagnostics_allow"),
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF
+            |NGX_CONF_TAKE1,
+        ngx_http_markdown_diagnostics_allow,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        0,
         NULL
     },
 

@@ -59,6 +59,9 @@ typedef struct {
         ngx_atomic_uint_t deflate;
         ngx_atomic_uint_t brotli;
         ngx_atomic_uint_t budget_exceeded_total;
+        ngx_atomic_uint_t format_error_total;
+        ngx_atomic_uint_t truncated_input_total;
+        ngx_atomic_uint_t io_error_total;
     } decompressions;
 
     /* Path hit metrics (threshold router, grouped to keep field count <= 20) */
@@ -92,6 +95,7 @@ typedef struct {
         ngx_atomic_uint_t delivery_count;
         ngx_atomic_uint_t decision_count;
         ngx_atomic_uint_t estimated_token_savings;
+        ngx_atomic_uint_t replay_buffer_errors_total;
     } results;
 
     /* Parse interrupt metrics (v0.7.0) */
@@ -301,6 +305,15 @@ ngx_http_markdown_collect_metrics_snapshot(ngx_http_markdown_metrics_snapshot_t 
 
     snapshot->decompressions.budget_exceeded_total =
         metrics->decompressions.budget_exceeded_total;
+    snapshot->decompressions.format_error_total =
+        metrics->decompressions.format_error_total;
+    snapshot->decompressions.truncated_input_total =
+        metrics->decompressions.truncated_input_total;
+    snapshot->decompressions.io_error_total =
+        metrics->decompressions.io_error_total;
+
+    snapshot->results.replay_buffer_errors_total =
+        metrics->results.replay_buffer_errors_total;
 
     snapshot->per_path.path_entries =
         metrics->per_path.path_entries;

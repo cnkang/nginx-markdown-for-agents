@@ -213,6 +213,8 @@ typedef enum {
  * - large_body_threshold: NGX_HTTP_MARKDOWN_THRESHOLD_OFF
  * - ops.trust_forwarded_headers: 0 (off by default)
  * - ops.metrics_format: NGX_HTTP_MARKDOWN_METRICS_FORMAT_AUTO
+ * - ops.diagnostics_enabled: 0 (off by default)
+ * - advanced.dynconf_dry_run: 0 (off by default)
  *
  * Streaming defaults when MARKDOWN_STREAMING_ENABLED is compiled in:
  * - streaming_engine: NULL (auto mode in v0.6.0; was off in 0.5.x)
@@ -245,6 +247,7 @@ typedef struct {
     ngx_uint_t   chars_per_token_fixed;     /* markdown_chars_per_token (default: 0=use provider) */
     ngx_flag_t   dynconf_enabled;           /* markdown_dynamic_config on|off (default: off) */
     ngx_str_t    dynconf_path;              /* markdown_dynamic_config_path (default: empty) */
+    ngx_flag_t   dynconf_dry_run;           /* markdown_dynconf_dry_run on|off (default: off) */
 } ngx_http_markdown_advanced_cfg_t;
 
 #ifdef MARKDOWN_STREAMING_ENABLED
@@ -291,6 +294,8 @@ typedef struct {
         ngx_flag_t   trust_forwarded_headers; /* markdown_trust_forwarded_headers on|off (default: off) */
         ngx_uint_t   metrics_format;       /* markdown_metrics_format auto|prometheus (default: auto) */
         ngx_flag_t   metrics_per_path;    /* markdown_metrics_per_path on|off (default: off) */
+        ngx_flag_t   diagnostics_enabled; /* markdown_diagnostics on|off (default: off) */
+        ngx_array_t *diagnostics_allow;   /* markdown_diagnostics_allow CIDR list (default: NULL = loopback only) */
         ngx_flag_t   otel_enabled;       /* markdown_otel on|off (default: off) */
         ngx_flag_t   otel_tracing;      /* markdown_otel_tracing on|off (default: off) */
         ngx_flag_t   otel_metrics;      /* markdown_otel_metrics on|off (default: off) */
@@ -630,6 +635,9 @@ typedef struct {
         ngx_atomic_t  deflate;     /* Deflate decompressions */
         ngx_atomic_t  brotli;      /* Brotli decompressions */
         ngx_atomic_t  budget_exceeded_total;  /* Decompression budget exceeded */
+        ngx_atomic_t  format_error_total;     /* Invalid compression format */
+        ngx_atomic_t  truncated_input_total;  /* Truncated compressed input */
+        ngx_atomic_t  io_error_total;         /* Decompression I/O error */
     } decompressions;
 
     /*
@@ -714,6 +722,7 @@ typedef struct {
         ngx_atomic_t  delivery_count;
         ngx_atomic_t  decision_count;
         ngx_atomic_t  estimated_token_savings;
+        ngx_atomic_t  replay_buffer_errors_total;
     } results;
 
     struct {
@@ -780,7 +789,7 @@ struct MarkdownResult;
 
 /* Determine if request should be converted based on Accept header */
 ngx_int_t ngx_http_markdown_should_convert(ngx_http_request_t *r,
-    const ngx_http_markdown_conf_t *conf);
+    const ngx_http_markdown_conf_t *conf, ngx_uint_t *out_reason);
 
 /* Resolve markdown_filter on/off state for the current request */
 ngx_flag_t ngx_http_markdown_is_enabled(ngx_http_request_t *r,
@@ -865,6 +874,15 @@ const ngx_str_t *ngx_http_markdown_reason_failed_closed(void);
 /* Return the SKIP_ACCEPT reason code (not in eligibility enum) */
 const ngx_str_t *ngx_http_markdown_reason_skip_accept(void);
 
+/* Return the SKIPPED_NO_ACCEPT reason code (no Accept header) */
+const ngx_str_t *ngx_http_markdown_reason_skip_no_accept(void);
+
+/* Return the SKIPPED_ACCEPT_REJECT reason code (q=0 explicit reject) */
+const ngx_str_t *ngx_http_markdown_reason_skip_accept_reject(void);
+
+/* Return the SKIPPED_CONDITIONAL reason code (304 Not Modified) */
+const ngx_str_t *ngx_http_markdown_reason_skip_conditional(void);
+
 #ifdef MARKDOWN_STREAMING_ENABLED
 /* Streaming reason code accessors */
 const ngx_str_t *ngx_http_markdown_reason_engine_streaming(void);
@@ -882,6 +900,32 @@ const ngx_str_t *ngx_http_markdown_reason_eligible_fullbuffer_auto(void);
 
 const ngx_str_t *ngx_http_markdown_reason_ct_route_default(void);
 const ngx_str_t *ngx_http_markdown_reason_ct_route_configured(void);
+
+/*
+ * Rust FFI reason code accessors (v0.7.0+)
+ *
+ * These functions access reason code strings from the Rust-defined enum
+ * via FFI.  The Rust enum (decision/reason_code.rs) is the SINGLE SOURCE
+ * OF TRUTH for all reason codes.
+ *
+ * New code should prefer these accessors over the legacy C-side string
+ * literals defined above.  The legacy functions remain for backward
+ * compatibility during the migration period.
+ *
+ * DO NOT define new reason code constants in C.  All reason codes must
+ * come from the Rust enum via these FFI accessors.
+ */
+
+/* Get reason code string from Rust enum (returns NGX_OK/NGX_DECLINED) */
+ngx_int_t ngx_http_markdown_get_reason_code_str(uint32_t code,
+    ngx_str_t *out_str);
+
+/* Get Prometheus metric key from Rust enum (returns NGX_OK/NGX_DECLINED) */
+ngx_int_t ngx_http_markdown_get_reason_code_metric_key(uint32_t code,
+    ngx_str_t *out_str);
+
+/* Get total number of reason codes defined in Rust */
+uint32_t ngx_http_markdown_reason_code_total_count(void);
 
 /*
  * Header management functions
@@ -995,5 +1039,8 @@ ngx_http_markdown_decompress(ngx_http_request_t *r,
  * NGX_AGAIN (-2), NGX_DONE (-4), NGX_DECLINED (-5).
  */
 #define NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED  -100
+#define NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR     -101
+#define NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT  -102
+#define NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR         -103
 
 #endif /* NGX_HTTP_MARKDOWN_FILTER_MODULE_H */

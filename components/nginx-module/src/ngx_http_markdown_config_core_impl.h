@@ -273,6 +273,8 @@ ngx_http_markdown_create_conf(ngx_conf_t *cf)
     conf->ops.trust_forwarded_headers = NGX_CONF_UNSET;
     conf->ops.metrics_format = NGX_CONF_UNSET_UINT;
     conf->ops.metrics_per_path = NGX_CONF_UNSET;
+    conf->ops.diagnostics_enabled = NGX_CONF_UNSET;
+    conf->ops.diagnostics_allow = NULL;
     conf->ops.otel_enabled = NGX_CONF_UNSET;
     conf->ops.otel_tracing = NGX_CONF_UNSET;
     conf->ops.otel_metrics = NGX_CONF_UNSET;
@@ -301,6 +303,7 @@ ngx_http_markdown_create_conf(ngx_conf_t *cf)
     conf->advanced.dynconf_enabled = NGX_CONF_UNSET;
     conf->advanced.dynconf_path.len = 0;
     conf->advanced.dynconf_path.data = NULL;
+    conf->advanced.dynconf_dry_run = NGX_CONF_UNSET;
 
     return conf;
 }
@@ -419,6 +422,13 @@ ngx_http_markdown_merge_core_ops_values(ngx_http_markdown_conf_t *conf,
     ngx_conf_merge_uint_value(conf->ops.metrics_format, prev->ops.metrics_format,
                               NGX_HTTP_MARKDOWN_METRICS_FORMAT_AUTO);
     ngx_conf_merge_value(conf->ops.metrics_per_path, prev->ops.metrics_per_path, 0);
+    ngx_conf_merge_value(conf->ops.diagnostics_enabled,
+                         prev->ops.diagnostics_enabled, 0);
+
+    if (conf->ops.diagnostics_allow == NULL) {
+        conf->ops.diagnostics_allow = prev->ops.diagnostics_allow;
+    }
+
     ngx_conf_merge_value(conf->ops.otel_enabled, prev->ops.otel_enabled, 0);
     ngx_conf_merge_value(conf->ops.otel_tracing, prev->ops.otel_tracing, 0);
     ngx_conf_merge_value(conf->ops.otel_metrics, prev->ops.otel_metrics, 0);
@@ -509,6 +519,7 @@ ngx_http_markdown_merge_v060_values(ngx_http_markdown_conf_t *conf,
                               prev->advanced.chars_per_token_fixed, 0);
     ngx_conf_merge_value(conf->advanced.dynconf_enabled, prev->advanced.dynconf_enabled, 0);
     ngx_http_markdown_merge_str_if_unset(&conf->advanced.dynconf_path, &prev->advanced.dynconf_path);
+    ngx_conf_merge_value(conf->advanced.dynconf_dry_run, prev->advanced.dynconf_dry_run, 0);
 }
 
 /**

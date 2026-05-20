@@ -1668,11 +1668,25 @@ ngx_http_markdown_streaming_process_chunk(
              * budget exceeded → ERROR_DECOMPRESSION_BUDGET_EXCEEDED
              * for proper metrics/reason-code classification; all
              * other errors → ERROR_INTERNAL.
+             *
+             * Also increment per-category decompression metrics.
              */
             if (rc == NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED) {
                 decomp_error_code = ERROR_DECOMPRESSION_BUDGET_EXCEEDED;
+                NGX_HTTP_MARKDOWN_METRIC_INC(
+                    decompressions.budget_exceeded_total);
+            } else if (rc == NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR) {
+                decomp_error_code = ERROR_INTERNAL;
+                NGX_HTTP_MARKDOWN_METRIC_INC(
+                    decompressions.format_error_total);
+            } else if (rc == NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT) {
+                decomp_error_code = ERROR_INTERNAL;
+                NGX_HTTP_MARKDOWN_METRIC_INC(
+                    decompressions.truncated_input_total);
             } else {
                 decomp_error_code = ERROR_INTERNAL;
+                NGX_HTTP_MARKDOWN_METRIC_INC(
+                    decompressions.io_error_total);
             }
 
             ngx_log_error(NGX_LOG_ERR,
@@ -1835,15 +1849,43 @@ ngx_http_markdown_streaming_finalize_decomp(
          * budget exceeded → ERROR_DECOMPRESSION_BUDGET_EXCEEDED
          * for proper metrics/reason-code classification; all other
          * errors → ERROR_INTERNAL (pre-commit) or ERROR_POST_COMMIT.
+         *
+         * Also increment per-category decompression metrics.
          */
         if (rc == NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED) {
             finish_error_code = ERROR_DECOMPRESSION_BUDGET_EXCEEDED;
-        } else if (ctx->streaming.commit_state
-                   == NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST)
-        {
-            finish_error_code = ERROR_POST_COMMIT;
+            NGX_HTTP_MARKDOWN_METRIC_INC(
+                decompressions.budget_exceeded_total);
+        } else if (rc == NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR) {
+            NGX_HTTP_MARKDOWN_METRIC_INC(
+                decompressions.format_error_total);
+            if (ctx->streaming.commit_state
+                == NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST)
+            {
+                finish_error_code = ERROR_POST_COMMIT;
+            } else {
+                finish_error_code = ERROR_INTERNAL;
+            }
+        } else if (rc == NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT) {
+            NGX_HTTP_MARKDOWN_METRIC_INC(
+                decompressions.truncated_input_total);
+            if (ctx->streaming.commit_state
+                == NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST)
+            {
+                finish_error_code = ERROR_POST_COMMIT;
+            } else {
+                finish_error_code = ERROR_INTERNAL;
+            }
         } else {
-            finish_error_code = ERROR_INTERNAL;
+            NGX_HTTP_MARKDOWN_METRIC_INC(
+                decompressions.io_error_total);
+            if (ctx->streaming.commit_state
+                == NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST)
+            {
+                finish_error_code = ERROR_POST_COMMIT;
+            } else {
+                finish_error_code = ERROR_INTERNAL;
+            }
         }
 
         ngx_log_error(NGX_LOG_ERR,
@@ -2342,6 +2384,8 @@ ngx_http_markdown_streaming_init_handle(
          * failure: abort the handle and apply the configured
          * streaming_on_error policy.
          */
+        NGX_HTTP_MARKDOWN_METRIC_INC(
+            results.replay_buffer_errors_total);
         ngx_log_error(NGX_LOG_ERR,
             r->connection->log, 0,
             "markdown streaming: replay buffer init "
@@ -2920,6 +2964,8 @@ ngx_http_markdown_streaming_process_chain(
                      * been advanced yet, so fail-open can still
                      * forward the full original chain.
                      */
+                    NGX_HTTP_MARKDOWN_METRIC_INC(
+                        results.replay_buffer_errors_total);
                     ngx_log_error(NGX_LOG_ERR,
                         r->connection->log, 0,
                         "markdown streaming: replay buffer "

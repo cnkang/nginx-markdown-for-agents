@@ -94,6 +94,75 @@ test_error_codes_compile(void)
 }
 
 
+static void
+test_markdown_options_field_access(void)
+{
+    MarkdownOptions opts;
+    memset(&opts, 0, sizeof(opts));
+
+    opts.flavor = 0;
+    opts.timeout_ms = 5000;
+    opts.generate_etag = 1;
+    opts.estimate_tokens = 0;
+    opts.front_matter = 0;
+    opts.content_type = NULL;
+    opts.content_type_len = 0;
+    opts.base_url = NULL;
+    opts.base_url_len = 0;
+    opts.streaming_budget = 0;
+    opts.prune_noise = 0;
+    opts.prune_selectors = NULL;
+    opts.prune_selector_len = 0;
+    opts.prune_protection_selectors = NULL;
+    opts.prune_protection_selector_len = 0;
+    opts.memory_budget = 0;
+    opts.llm_provider = 0;
+    opts.chars_per_token_fixed = 0;
+    opts.parse_timeout_ms = 0;
+    opts.parser_memory_budget = 0;
+
+    TEST_ASSERT(opts.flavor == 0, "flavor must be 0 after init");
+    TEST_ASSERT(opts.timeout_ms == 5000, "timeout_ms must be 5000");
+    TEST_ASSERT(opts.generate_etag == 1, "generate_etag must be 1");
+    TEST_ASSERT(opts.content_type == NULL, "content_type must be NULL");
+    TEST_ASSERT(opts.parse_timeout_ms == 0, "parse_timeout_ms must be 0");
+    TEST_ASSERT(opts.parser_memory_budget == 0,
+        "parser_memory_budget must be 0");
+}
+
+
+static void
+test_ffi_header_entry_field_access(void)
+{
+    FFIHeaderEntry entry;
+    memset(&entry, 0, sizeof(entry));
+
+    entry.op_type = 0;
+    entry.key = NULL;
+    entry.key_len = 0;
+    entry.value = NULL;
+    entry.value_len = 0;
+
+    TEST_ASSERT(entry.op_type == 0, "op_type must be 0 for set");
+    TEST_ASSERT(entry.key == NULL, "key must be NULL after init");
+}
+
+
+static void
+test_ffi_header_plan_field_access(void)
+{
+    FFIHeaderPlan plan;
+    memset(&plan, 0, sizeof(plan));
+
+    plan.handle = NULL;
+    plan.entries = NULL;
+    plan.count = 0;
+
+    TEST_ASSERT(plan.handle == NULL, "handle must be NULL after init");
+    TEST_ASSERT(plan.count == 0, "count must be 0 after init");
+}
+
+
 int
 main(void)
 {
@@ -102,6 +171,9 @@ main(void)
     test_ffi_conditional_result_field_access();
     test_ffi_decision_result_field_access();
     test_error_codes_compile();
+    test_markdown_options_field_access();
+    test_ffi_header_entry_field_access();
+    test_ffi_header_plan_field_access();
 
     TEST_PASS("ffi_layout_check: all tests passed");
     return 0;

@@ -54,6 +54,8 @@ struct MarkdownOptions {
     uint64_t       memory_budget;
     uint8_t        llm_provider;
     uint8_t        chars_per_token_fixed;
+    uint32_t       parse_timeout_ms;
+    uint64_t       parser_memory_budget;
 };
 
 struct MarkdownResult {
@@ -104,6 +106,15 @@ static ngx_uint_t g_alloc_chain_fail_once = 0;
 #endif
 #ifndef ERROR_INTERNAL
 #define ERROR_INTERNAL 99
+#endif
+#ifndef ERROR_DECOMPRESSION_BUDGET_EXCEEDED
+#define ERROR_DECOMPRESSION_BUDGET_EXCEEDED 9
+#endif
+#ifndef ERROR_PARSE_TIMEOUT
+#define ERROR_PARSE_TIMEOUT 10
+#endif
+#ifndef ERROR_PARSE_BUDGET_EXCEEDED
+#define ERROR_PARSE_BUDGET_EXCEEDED 11
 #endif
 
 static void
