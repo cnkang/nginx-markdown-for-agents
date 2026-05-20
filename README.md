@@ -393,6 +393,27 @@ add the harness workflow to your default path:
 2. Run `make harness-check`
 3. Run `make harness-check-full` before closing broader docs or release-gate work
 
+## What's New in v0.7.0
+
+v0.7.0 is a correctness, distribution, and operability release:
+
+- **Bounded decompression** — `markdown_decompress_max_size` limits decompressed output independently, preventing zip-bomb attacks (error code 9: DecompressionBudgetExceeded)
+- **Accept negotiation** — Rust-side RFC 9110 q-value comparison between `text/markdown` and `text/html` determines conversion eligibility
+- **Parse timeout and budget** — `markdown_parse_timeout` (default 30s) and `markdown_parser_budget` (default 64m) prevent runaway parsing (error codes 10, 11)
+- **DEB/RPM packaging** — Pre-built packages for Ubuntu 22.04/24.04, Debian 12, AlmaLinux 9, Amazon Linux 2023 across amd64/arm64
+- **Kubernetes deployment examples** — Helm chart, manifests, and Ingress Controller custom image build path
+- **Runtime diagnostics** — `/nginx-markdown/diagnostics` endpoint exposes config snapshot, recent decisions, and metrics
+- **Dynconf dry-run and rollback** — Validate configuration changes without applying them; roll back to last-known-good on failure
+
+Additional changes:
+
+- P0 runtime correctness: pending chain on NGX_AGAIN, fail-open dedup, safe output ordering
+- Rust conditional request module (If-None-Match, If-Modified-Since)
+- Rust decision engine with reason codes
+- Rust header mutation plan module
+- Rust URL control character validation and link escaping
+- FFI ABI layout verification and header drift detection
+
 ## Roadmap
 
 Current release (0.7.0):
@@ -407,6 +428,10 @@ Current release (0.7.0):
 - Rust URL control character validation and link escaping
 - FFI ABI layout verification and header drift detection
 - New error codes: DecompressionBudgetExceeded(9), ParseTimeout(10), ParseBudgetExceeded(11)
+- DEB/RPM packaging with APT/YUM repository support
+- Kubernetes deployment examples and Helm chart
+- Runtime diagnostics endpoint
+- Dynconf dry-run validation and last-known-good rollback
 - Installation and release docs aligned to Rust 1.91.0+ and current CI expectations
 
 Near-term focus:
@@ -429,7 +454,7 @@ BSD 2-Clause "Simplified" License. See [LICENSE](LICENSE).
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 0.7.0 | 2026-05-17 | Kang | P0 correctness, Rust-first architecture, independent decompression budget, Accept negotiation, parse timeout/budget |
+| 0.7.0 | 2026-05-17 | Kang | P0 correctness, Rust-first architecture, independent decompression budget, Accept negotiation, parse timeout/budget, DEB/RPM packaging, K8s examples, runtime diagnostics, dynconf dry-run/rollback |
 | 0.6.3 | 2026-05-14 | Kang | Version bump to 0.6.3, release-matrix refresh, and final hardening notes |
 | 0.6.2 | 2026-05-08 | Kang | Version bump to 0.6.2 for release |
 | 0.5.0 | 2026-04-21 | docs-standardization | Synchronized Quick Start steps between English and Chinese versions; added update tracking section |

@@ -9,7 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 P0 runtime correctness fixes, Rust-first architecture modules, independent
 decompression budget, Accept header negotiation, parse timeout/budget,
-and FFI ABI layout verification.
+FFI ABI layout verification, DEB/RPM packaging, Kubernetes deployment,
+dynconf dry-run/rollback, and runtime diagnostics.
 
 ### Added
 
@@ -19,6 +20,8 @@ and FFI ABI layout verification.
   - Safe output ordering: alloc→copy→chain→headers→body filter.
   - `markdown_decompress_max_size` directive: independent decompression
     budget decoupled from `max_size` (default: inherits max_size).
+  - Bounded decompression with budget enforcement: output terminated
+    when decompressed size exceeds the configured budget.
   - `markdown_parse_timeout` directive (default: 30s).
   - `markdown_parser_budget` directive (default: 64m).
   - Rust `DecompressionBudgetExceeded` error (code 9), `ParseTimeout`
@@ -28,9 +31,9 @@ and FFI ABI layout verification.
 - **Rust-first Architecture**
   - `negotiator` module: RFC 7231 Accept header q-value negotiation
     with `FFIAcceptResult` struct and `markdown_negotiate_accept` FFI
-    export. 22 unit tests.
+    export. Accept negotiation fully in Rust. 22 unit tests.
   - `conditional` module: If-None-Match / If-Modified-Since conditional
-    request handling. 15 unit tests.
+    request and ETag handling in Rust. 15 unit tests.
   - `decision` module: pure decision engine with reason codes
     (CONVERT, SKIP_ACCEPT, SKIP_NO_ACCEPT, etc.). 11 unit tests.
   - `header_plan` module: declarative header mutation plan for atomic
@@ -44,17 +47,52 @@ and FFI ABI layout verification.
 - **FFI ABI Verification**
   - Rust layout tests: `MarkdownResult` size/offset validation,
     `FFIAcceptResult` layout, error code uniqueness, reason code uniqueness.
+  - C `static_assert` for critical struct sizeof and offsetof.
   - `check-headers` integrated into `harness-check-full`.
+
+- **DEB/RPM Packaging Pipeline**
+  - `packaging/debian/` directory with control, postinst, postrm, conffiles.
+  - `packaging/rpm/` directory with SPEC file and build scripts.
+  - NGINX ABI dependency declarations for both package formats.
+  - GPG signing pipeline for packages and repository metadata.
+  - APT repository structure (`dists/<codename>/...`).
+  - YUM repository structure (`repodata/repomd.xml`).
+
+- **Kubernetes Deployment Examples**
+  - `examples/kubernetes/Dockerfile.ingress`: parameterized Ingress
+    Controller image build.
+  - `examples/kubernetes/manifest/`: Deployment, ConfigMap, Service,
+    Ingress manifests.
+  - `charts/nginx-markdown/` Helm chart updates.
+  - K8s smoke and E2E test scripts.
+
+- **Runtime Diagnostics Endpoint**
+  - `/nginx-markdown/diagnostics` endpoint with config snapshot,
+    recent decisions, and metrics snapshot.
+  - `markdown_diagnostics` directive (on/off + allow CIDR).
+
+- **Dynconf Dry-Run and Last-Known-Good Rollback**
+  - `markdown_dynconf_dry_run` directive: validates configuration
+    changes without applying them.
+  - Last-known-good (LKG) snapshot preserved on successful reload.
+  - Manual rollback restores LKG as active configuration.
+  - `applied_mtime` only updates on successful reload.
 
 - **Documentation**
   - `docs/guides/PACKAGE_DISTRIBUTION.md`: distribution strategy.
   - `docs/guides/PACKAGE_INSTALLATION.md`: DEB/RPM install guide.
   - `docs/guides/KUBERNETES_DEPLOYMENT.md`: K8s reference examples.
   - `docs/guides/F5_INGRESS_FEASIBILITY.md`: F5 Ingress feasibility.
+  - `docs/guides/DYNAMIC_CONFIG.md`: dynconf operational guide with
+    LKG/rollback semantics and dry-run workflow.
   - `docs/FAQ.md`: decompression architecture recommendations.
   - `packaging/matrix.yaml`: build matrix definition.
   - `examples/kubernetes/manifest/markdown-configmap.yaml`.
-  - `docs/guides/CONFIGURATION.md`: new directive documentation.
+  - `docs/guides/CONFIGURATION.md`: new directive documentation
+    (`markdown_dynconf_dry_run`, parse timeout/budget directives).
+  - `docs/guides/prometheus-metrics.md`: v0.7.0 metrics
+    (`delivery_total`, `decision_total`, `decompression_budget_exceeded_total`,
+    `parse_timeouts_total`, `parse_budget_exceeded_total`).
 
 ### Changed
 
