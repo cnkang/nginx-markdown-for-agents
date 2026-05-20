@@ -97,23 +97,36 @@ ngx_http_markdown_get_accept_header(ngx_http_request_t *r)
  *   3: text/markdown;q=0 explicit reject
  *   4: Malformed Accept header
  *
- * @param r     The request structure
- * @param conf  Module configuration
- * @return      1 if should convert, 0 if not
+ * Parameters:
+ *   r          - The request structure
+ *   conf       - Module configuration
+ *   out_reason - Output: FFI reason code (NEGOTIATE_REASON_*)
+ *                Set to NEGOTIATE_REASON_NO_ACCEPT when Accept
+ *                header is absent.  May be NULL if caller does
+ *                not need the reason.
+ *
+ * Returns:
+ *   1 if should convert, 0 if not
  */
 ngx_int_t
 ngx_http_markdown_should_convert(ngx_http_request_t *r,
-    const ngx_http_markdown_conf_t *conf)
+    const ngx_http_markdown_conf_t *conf, ngx_uint_t *out_reason)
 {
     ngx_table_elt_t         *accept_header;
     struct FFIAcceptResult   result;
 
     if (conf == NULL) {
+        if (out_reason != NULL) {
+            *out_reason = NEGOTIATE_REASON_NO_ACCEPT;
+        }
         return 0;
     }
 
     accept_header = ngx_http_markdown_get_accept_header(r);
     if (accept_header == NULL || accept_header->value.len == 0) {
+        if (out_reason != NULL) {
+            *out_reason = NEGOTIATE_REASON_NO_ACCEPT;
+        }
         return 0;
     }
 
@@ -122,6 +135,10 @@ ngx_http_markdown_should_convert(ngx_http_request_t *r,
         accept_header->value.len,
         conf->on_wildcard,
         &result);
+
+    if (out_reason != NULL) {
+        *out_reason = (ngx_uint_t) result.reason;
+    }
 
     if (result.should_convert) {
         ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,

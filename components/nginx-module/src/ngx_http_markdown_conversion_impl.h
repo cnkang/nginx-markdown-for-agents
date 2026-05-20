@@ -775,6 +775,18 @@ ngx_http_markdown_prepare_conversion_options(ngx_http_request_t *r,
     options->chars_per_token_fixed = (uint8_t) conf->advanced.chars_per_token_fixed;
 
     /*
+     * Parse-specific timeout and memory budget.
+     * parse_timeout_ms: populated from conf->parse_timeout (ngx_msec_t).
+     * parser_memory_budget: populated from conf->parser_budget (size_t).
+     */
+    if (conf->parse_timeout > UINT32_MAX) {
+        options->parse_timeout_ms = UINT32_MAX;
+    } else {
+        options->parse_timeout_ms = (uint32_t) conf->parse_timeout;
+    }
+    options->parser_memory_budget = (uint64_t) conf->parser_budget;
+
+    /*
      * Apply unified budget to streaming_budget when it was not
      * explicitly set by the operator.
      *

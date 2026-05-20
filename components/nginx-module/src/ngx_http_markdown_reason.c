@@ -1,5 +1,5 @@
 /*
- * NGINX Markdown Filter Module - Reason Code Lookup
+ * NGINX Markdown Filter Module - Reason Code Lookup (Legacy)
  *
  * This file maps existing eligibility enum values and error categories
  * to stable uppercase snake_case reason code strings.  These strings
@@ -7,12 +7,37 @@
  * so that operators can correlate logs with metric counters without
  * translating between different vocabularies.
  *
+ * DEPRECATION NOTICE (v0.7.0):
+ *   The reason code string literals defined in this file are LEGACY
+ *   constants retained for backward compatibility.  The single source
+ *   of truth for reason codes is now the Rust enum in
+ *   components/rust-converter/src/decision/reason_code.rs.
+ *
+ *   New code should use the FFI accessors in ngx_http_markdown_reason_ffi.c:
+ *     - ngx_http_markdown_get_reason_code_str(code, &str)
+ *     - ngx_http_markdown_get_reason_code_metric_key(code, &str)
+ *     - ngx_http_markdown_reason_code_total_count()
+ *
+ *   DO NOT add new reason code constants to this file.  All new reason
+ *   codes must be added to the Rust enum and accessed via FFI.
+ *
  * Requirements: FR-01.1, FR-01.2, FR-01.3, FR-01.4, FR-01.5,
  *               FR-13.3, FR-13.4
  */
 
 #include "ngx_http_markdown_filter_module.h"
 
+
+/*
+ * Legacy skip reason codes — DEPRECATED (v0.7.0)
+ *
+ * These C-side string literals are retained for backward compatibility
+ * with the eligibility-based decision path.  New code should use the
+ * Rust FFI accessors instead:
+ *   ngx_http_markdown_get_reason_code_str(code, &str)
+ *
+ * See: components/rust-converter/src/decision/reason_code.rs
+ */
 
 /* Skip reason codes */
 
@@ -34,6 +59,12 @@ static ngx_str_t ngx_http_markdown_reason_skip_range_str =
     ngx_string("SKIP_RANGE");
 static ngx_str_t ngx_http_markdown_reason_skip_accept_str =
     ngx_string("SKIP_ACCEPT");
+static ngx_str_t ngx_http_markdown_reason_skip_no_accept_str =
+    ngx_string("SKIPPED_NO_ACCEPT");
+static ngx_str_t ngx_http_markdown_reason_skip_accept_reject_str =
+    ngx_string("SKIPPED_ACCEPT_REJECT");
+static ngx_str_t ngx_http_markdown_reason_skip_conditional_str =
+    ngx_string("SKIPPED_CONDITIONAL");
 
 /* Content-type routing reason codes (v0.6.0 P1-3) */
 
@@ -222,6 +253,53 @@ const ngx_str_t *
 ngx_http_markdown_reason_skip_accept(void)
 {
     return &ngx_http_markdown_reason_skip_accept_str;
+}
+
+
+/*
+ * Return the SKIPPED_NO_ACCEPT reason code.
+ *
+ * Used when no Accept header is present in the request.
+ *
+ * Returns:
+ *   Pointer to static ngx_str_t "SKIPPED_NO_ACCEPT"
+ */
+const ngx_str_t *
+ngx_http_markdown_reason_skip_no_accept(void)
+{
+    return &ngx_http_markdown_reason_skip_no_accept_str;
+}
+
+
+/*
+ * Return the SKIPPED_ACCEPT_REJECT reason code.
+ *
+ * Used when the client explicitly rejects text/markdown (q=0).
+ *
+ * Returns:
+ *   Pointer to static ngx_str_t "SKIPPED_ACCEPT_REJECT"
+ */
+const ngx_str_t *
+ngx_http_markdown_reason_skip_accept_reject(void)
+{
+    return &ngx_http_markdown_reason_skip_accept_reject_str;
+}
+
+
+/*
+ * Return the SKIPPED_CONDITIONAL reason code.
+ *
+ * Used when a conditional request matches (304 Not Modified).
+ * The conversion was eligible but skipped because the client
+ * already has the current version.
+ *
+ * Returns:
+ *   Pointer to static ngx_str_t "SKIPPED_CONDITIONAL"
+ */
+const ngx_str_t *
+ngx_http_markdown_reason_skip_conditional(void)
+{
+    return &ngx_http_markdown_reason_skip_conditional_str;
 }
 
 

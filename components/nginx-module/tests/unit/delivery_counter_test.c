@@ -2,106 +2,216 @@
  * Test: delivery_counter_semantics
  *
  * Validates that the delivery counter is incremented only after
- * NGX_OK from downstream, never on NGX_AGAIN (suspend-and-resume).
+ * NGX_OK from downstream, never on NGX_AGAIN or NGX_ERROR.
+ * Also validates that the decision counter increments regardless
+ * of downstream return code.
  *
  * Corresponds to task A01.12.
+ *
+ * Rules: 38 (delivery after downstream OK), 8 (delivery counters
+ * after success), 23 (delivery != decision counters).
  */
 
 #include "../include/test_common.h"
 
 
 enum {
-    NGX_OK = 0,
-    NGX_AGAIN = -2,
-    NGX_ERROR = -1
+    NGX_OK    =  0,
+    NGX_ERROR = -1,
+    NGX_AGAIN = -2
 };
 
 typedef struct {
     unsigned int delivery_count;
+    unsigned int decision_count;
     unsigned int again_count;
     unsigned int error_count;
-    unsigned int pending_replay_count;
     unsigned int pending;
-} delivery_stats_t;
+} delivery_ctx_t;
 
 
+/*
+ * Models the production behavior where:
+ *   - decision_count always increments (decision was made)
+ *   - delivery_count increments only on NGX_OK from downstream
+ *   - pending flag tracks NGX_AGAIN state for resume
+ */
 static void
-record_delivery(int rc, delivery_stats_t *stats)
+record_decision_and_delivery(int downstream_rc, delivery_ctx_t *ctx)
 {
-    if (rc == NGX_OK) {
-        stats->delivery_count++;
-        if (stats->pending > 0) {
-            stats->pending_replay_count++;
-            stats->pending = 0;
-        }
-    } else if (rc == NGX_AGAIN) {
-        stats->again_count++;
-        stats->pending = 1;
+    ctx->decision_count++;
+
+    if (downstream_rc == NGX_OK) {
+        ctx->delivery_count++;
+        ctx->pending = 0;
+    } else if (downstream_rc == NGX_AGAIN) {
+        ctx->again_count++;
+        ctx->pending = 1;
     } else {
-        stats->error_count++;
+        ctx->error_count++;
     }
 }
 
 
+/*
+ * Test 1: NGX_OK increments both delivery and decision counters.
+ */
 static void
-test_delivery_only_on_ok(void)
+test_ngx_ok_increments_delivery(void)
 {
-    delivery_stats_t stats;
-    memset(&stats, 0, sizeof(stats));
+    delivery_ctx_t ctx;
 
-    record_delivery(NGX_OK, &stats);
-    TEST_ASSERT(stats.delivery_count == 1, "first NGX_OK increments delivery");
-    TEST_ASSERT(stats.again_count == 0, "no NGX_AGAIN yet");
-    TEST_ASSERT(stats.error_count == 0, "no errors yet");
+    memset(&ctx, 0, sizeof(ctx));
 
-    record_delivery(NGX_AGAIN, &stats);
-    TEST_ASSERT(stats.delivery_count == 1, "NGX_AGAIN does NOT increment delivery");
-    TEST_ASSERT(stats.again_count == 1, "NGX_AGAIN increments again_count");
+    record_decision_and_delivery(NGX_OK, &ctx);
+    TEST_ASSERT(ctx.delivery_count == 1,
+        "NGX_OK increments delivery_count");
+    TEST_ASSERT(ctx.decision_count == 1,
+        "NGX_OK also increments decision_count");
+    TEST_ASSERT(ctx.again_count == 0,
+        "no NGX_AGAIN recorded");
+    TEST_ASSERT(ctx.error_count == 0,
+        "no errors recorded");
 
-    record_delivery(NGX_AGAIN, &stats);
-    TEST_ASSERT(stats.delivery_count == 1, "second NGX_AGAIN still no delivery increment");
-    TEST_ASSERT(stats.again_count == 2, "second NGX_AGAIN increments again_count");
-
-    record_delivery(NGX_OK, &stats);
-    TEST_ASSERT(stats.delivery_count == 2, "NGX_OK after NGX_AGAIN increments delivery");
-    TEST_ASSERT(stats.again_count == 2, "again_count unchanged after NGX_OK");
-    TEST_ASSERT(stats.pending_replay_count == 1, "resume from pending should be recorded once");
+    TEST_PASS("NGX_OK increments delivery_count");
 }
 
 
+/*
+ * Test 2: NGX_AGAIN does NOT increment delivery_count.
+ */
 static void
-test_error_does_not_increment_delivery(void)
+test_ngx_again_does_not_increment_delivery(void)
 {
-    delivery_stats_t stats;
-    memset(&stats, 0, sizeof(stats));
+    delivery_ctx_t ctx;
 
-    record_delivery(NGX_ERROR, &stats);
-    TEST_ASSERT(stats.delivery_count == 0, "NGX_ERROR does not increment delivery");
-    TEST_ASSERT(stats.error_count == 1, "NGX_ERROR increments error_count");
-    TEST_ASSERT(stats.pending_replay_count == 0, "error path should not be replay success");
+    memset(&ctx, 0, sizeof(ctx));
+
+    record_decision_and_delivery(NGX_AGAIN, &ctx);
+    TEST_ASSERT(ctx.delivery_count == 0,
+        "NGX_AGAIN does NOT increment delivery_count");
+    TEST_ASSERT(ctx.decision_count == 1,
+        "NGX_AGAIN still increments decision_count");
+    TEST_ASSERT(ctx.again_count == 1,
+        "NGX_AGAIN increments again_count");
+    TEST_ASSERT(ctx.pending == 1,
+        "NGX_AGAIN sets pending flag");
+
+    record_decision_and_delivery(NGX_AGAIN, &ctx);
+    TEST_ASSERT(ctx.delivery_count == 0,
+        "second NGX_AGAIN still no delivery increment");
+    TEST_ASSERT(ctx.decision_count == 2,
+        "second NGX_AGAIN increments decision_count");
+    TEST_ASSERT(ctx.again_count == 2,
+        "second NGX_AGAIN increments again_count");
+
+    TEST_PASS("NGX_AGAIN does NOT increment delivery_count");
 }
 
 
+/*
+ * Test 3: NGX_ERROR does NOT increment delivery_count.
+ */
 static void
-test_fail_open_replay_semantics(void)
+test_ngx_error_does_not_increment_delivery(void)
 {
-    delivery_stats_t stats;
-    memset(&stats, 0, sizeof(stats));
+    delivery_ctx_t ctx;
 
-    record_delivery(NGX_AGAIN, &stats);
-    TEST_ASSERT(stats.pending == 1, "NGX_AGAIN should mark pending");
-    record_delivery(NGX_OK, &stats);
-    TEST_ASSERT(stats.delivery_count == 1, "successful replay increments delivery once");
-    TEST_ASSERT(stats.pending_replay_count == 1, "replay counter increments on resumed success");
+    memset(&ctx, 0, sizeof(ctx));
+
+    record_decision_and_delivery(NGX_ERROR, &ctx);
+    TEST_ASSERT(ctx.delivery_count == 0,
+        "NGX_ERROR does NOT increment delivery_count");
+    TEST_ASSERT(ctx.decision_count == 1,
+        "NGX_ERROR still increments decision_count");
+    TEST_ASSERT(ctx.error_count == 1,
+        "NGX_ERROR increments error_count");
+
+    TEST_PASS("NGX_ERROR does NOT increment delivery_count");
+}
+
+
+/*
+ * Test 4: Decision counter increments regardless of downstream rc.
+ */
+static void
+test_decision_counter_always_increments(void)
+{
+    delivery_ctx_t ctx;
+
+    memset(&ctx, 0, sizeof(ctx));
+
+    record_decision_and_delivery(NGX_OK, &ctx);
+    TEST_ASSERT(ctx.decision_count == 1,
+        "decision_count is 1 after NGX_OK");
+
+    record_decision_and_delivery(NGX_AGAIN, &ctx);
+    TEST_ASSERT(ctx.decision_count == 2,
+        "decision_count is 2 after NGX_AGAIN");
+
+    record_decision_and_delivery(NGX_ERROR, &ctx);
+    TEST_ASSERT(ctx.decision_count == 3,
+        "decision_count is 3 after NGX_ERROR");
+
+    record_decision_and_delivery(NGX_OK, &ctx);
+    TEST_ASSERT(ctx.decision_count == 4,
+        "decision_count is 4 after second NGX_OK");
+
+    /* delivery_count only incremented for the two NGX_OK calls */
+    TEST_ASSERT(ctx.delivery_count == 2,
+        "delivery_count is 2 (only NGX_OK calls)");
+
+    /* difference represents pending/failed deliveries */
+    TEST_ASSERT(ctx.decision_count - ctx.delivery_count == 2,
+        "decision - delivery == 2 (pending + error)");
+
+    TEST_PASS("decision counter increments regardless of rc");
+}
+
+
+/*
+ * Test 5: After NGX_AGAIN followed by successful resume (NGX_OK),
+ * delivery_count increments.
+ */
+static void
+test_again_then_ok_increments_delivery(void)
+{
+    delivery_ctx_t ctx;
+
+    memset(&ctx, 0, sizeof(ctx));
+
+    /* First call: downstream suspends */
+    record_decision_and_delivery(NGX_AGAIN, &ctx);
+    TEST_ASSERT(ctx.delivery_count == 0,
+        "no delivery after NGX_AGAIN");
+    TEST_ASSERT(ctx.decision_count == 1,
+        "decision recorded for NGX_AGAIN");
+    TEST_ASSERT(ctx.pending == 1,
+        "pending flag set after NGX_AGAIN");
+
+    /* Resume: downstream accepts */
+    record_decision_and_delivery(NGX_OK, &ctx);
+    TEST_ASSERT(ctx.delivery_count == 1,
+        "delivery increments on resume NGX_OK");
+    TEST_ASSERT(ctx.decision_count == 2,
+        "decision increments on resume");
+    TEST_ASSERT(ctx.pending == 0,
+        "pending flag cleared after NGX_OK");
+
+    TEST_PASS("NGX_AGAIN then NGX_OK increments delivery");
 }
 
 
 int
 main(void)
 {
-    test_delivery_only_on_ok();
-    test_error_does_not_increment_delivery();
-    test_fail_open_replay_semantics();
+    TEST_SECTION("delivery_counter_semantics");
+
+    test_ngx_ok_increments_delivery();
+    test_ngx_again_does_not_increment_delivery();
+    test_ngx_error_does_not_increment_delivery();
+    test_decision_counter_always_increments();
+    test_again_then_ok_increments_delivery();
 
     TEST_PASS("delivery_counter_semantics: all tests passed");
     return 0;

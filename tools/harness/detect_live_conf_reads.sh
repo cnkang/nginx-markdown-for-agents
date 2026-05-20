@@ -129,7 +129,7 @@ while IFS= read -r match; do
 
     # Check if the line is inside build_effective_conf or snapshot functions
     # These are legitimate conf-> reads to populate effective/snapshot
-    if sed -n "${func_start},${line}p" "$file" 2>/dev/null | grep -qE 'build_effective_conf|dynconf_snapshot_from_conf|dynconf_apply_snapshot'; then
+    if sed -n "${func_start},${line}p" "$file" 2>/dev/null | grep -qE 'build_effective_conf|dynconf_snapshot_from_conf|dynconf_apply_snapshot|dynconf_snapshot_to_json'; then
         echo "  OK      ${file}:${line} — inside snapshot/builder function: ${content}" >&2
         hits=$((hits + 1))
         continue

@@ -378,13 +378,34 @@ ngx_http_markdown_decompress_gzip(ngx_http_request_t *r,
             inflateEnd(&stream);
             return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
         }
-        
-        /* Other decompression error */
-        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                     "markdown filter: decompression failed, "
-                     "inflate error: %d, category=conversion", zrc);
-        inflateEnd(&stream);
-        return NGX_ERROR;
+
+        /*
+         * Classify zlib error into bounded decompression categories:
+         *   Z_DATA_ERROR → format_error (invalid compressed data)
+         *   Z_BUF_ERROR with incomplete input → truncated_input
+         *   Other errors → io_error
+         */
+        if (zrc == Z_DATA_ERROR) {
+            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                         "markdown filter: decompression failed, "
+                         "inflate format error (Z_DATA_ERROR), "
+                         "category=conversion");
+            inflateEnd(&stream);
+            return NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR;
+        } else if (zrc == Z_BUF_ERROR && stream.avail_in > 0) {
+            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                         "markdown filter: decompression failed, "
+                         "truncated input (Z_BUF_ERROR with remaining "
+                         "input), category=conversion");
+            inflateEnd(&stream);
+            return NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT;
+        } else {
+            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                         "markdown filter: decompression failed, "
+                         "inflate error: %d, category=conversion", zrc);
+            inflateEnd(&stream);
+            return NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR;
+        }
     }
     
     /* Check if decompressed size exceeds decompression budget (Requirement 9.3, 9.4) */
@@ -574,12 +595,17 @@ ngx_http_markdown_decompress_brotli(ngx_http_request_t *r,
         BrotliDecoderErrorCode error_code = BrotliDecoderGetErrorCode(decoder);
         const char *error_str = BrotliDecoderErrorString(error_code);
         
+        /*
+         * Classify brotli error into bounded decompression categories:
+         *   BROTLI_DECODER_RESULT_ERROR → format_error
+         *   (all brotli decode errors indicate invalid format)
+         */
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                      "markdown filter: brotli decompression failed, "
                      "error: %s, category=conversion",
                      error_str);
         BrotliDecoderDestroyInstance(decoder);
-        return NGX_ERROR;
+        return NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR;
     }
     
     /* Check if decompression is complete */
@@ -598,13 +624,25 @@ ngx_http_markdown_decompress_brotli(ngx_http_request_t *r,
             return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
         }
         
-        /* Other decompression error */
-        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                     "markdown filter: brotli decompression incomplete, "
-                     "result=%d, category=conversion",
-                     result);
-        BrotliDecoderDestroyInstance(decoder);
-        return NGX_ERROR;
+        /*
+         * BROTLI_DECODER_RESULT_NEEDS_MORE_INPUT → truncated input.
+         * Other unexpected result codes → io_error.
+         */
+        if (result == BROTLI_DECODER_RESULT_NEEDS_MORE_INPUT) {
+            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                         "markdown filter: brotli decompression "
+                         "incomplete, truncated input, "
+                         "category=conversion");
+            BrotliDecoderDestroyInstance(decoder);
+            return NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT;
+        } else {
+            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                         "markdown filter: brotli decompression "
+                         "incomplete, result=%d, category=conversion",
+                         result);
+            BrotliDecoderDestroyInstance(decoder);
+            return NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR;
+        }
     }
     
     /* Calculate actual decompressed size */

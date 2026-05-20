@@ -22,6 +22,7 @@ typedef uintptr_t ngx_msec_t;
 #define NGX_ERROR -1
 #define NGX_LOG_DEBUG_HTTP 0
 #define NGX_LOG_ERR 1
+#define NGX_LOG_WARN 2
 #define NGX_INT32_LEN 11
 
 typedef struct {
@@ -107,10 +108,40 @@ typedef struct MarkdownResult {
     uintptr_t peak_memory_estimate;
 } MarkdownResult;
 
+/*
+ * FFI header plan types needed by ngx_http_markdown_headers_impl.h.
+ */
+typedef struct FFIHeaderPlanHandle {
+    uint8_t _private[0];
+} FFIHeaderPlanHandle;
+
+typedef struct FFIHeaderEntry {
+    uint8_t    op_type;
+    const uint8_t *key;
+    uintptr_t  key_len;
+    const uint8_t *value;
+    uintptr_t  value_len;
+} FFIHeaderEntry;
+
+typedef struct FFIHeaderPlan {
+    struct FFIHeaderPlanHandle *handle;
+    const struct FFIHeaderEntry *entries;
+    uintptr_t  count;
+} FFIHeaderPlan;
+
+extern void markdown_header_plan_init(struct FFIHeaderPlan *result);
+extern void markdown_build_header_plan(const uint8_t *content_type,
+    uintptr_t content_type_len, uint8_t has_etag,
+    struct FFIHeaderPlan *result);
+extern void markdown_header_plan_free(struct FFIHeaderPlan *plan);
+extern ngx_int_t ngx_http_markdown_apply_header_plan(
+    ngx_http_request_t *r, struct FFIHeaderPlan *plan);
+
 extern void *ngx_pnalloc(const ngx_pool_t *pool, size_t size);
 extern ngx_table_elt_t *ngx_list_push(ngx_list_t *list);
 extern void ngx_http_clear_content_length(ngx_http_request_t *r);
-extern void ngx_log_error(int level, void *log, int err, const char *fmt);
+extern void ngx_log_error(int level, void *log, int err,
+                          const char *fmt, ...);
 extern void ngx_log_debug0(int level, void *log, int err, const char *fmt);
 extern void ngx_http_markdown_log_debug1(int level, void *log, int err,
                                          const char *fmt, uintptr_t arg);
