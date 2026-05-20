@@ -149,6 +149,20 @@ pub struct MarkdownOptions {
     /// ratio = `chars_per_token_fixed / 10.0` (e.g., 38 = 3.8 chars/token).
     /// Populated from the `markdown_chars_per_token` NGINX directive.
     pub chars_per_token_fixed: u8,
+    /// Parse-specific timeout in milliseconds (0 = use `timeout_ms` fallback).
+    ///
+    /// When non-zero, the HTML parser uses this deadline instead of the
+    /// general `timeout_ms` field.  This allows operators to set a tighter
+    /// parse-phase budget while keeping a longer overall conversion timeout.
+    /// Populated from the `markdown_parse_timeout` NGINX directive.
+    pub parse_timeout_ms: u32,
+    /// Parser memory budget in bytes (0 = unlimited).
+    ///
+    /// When non-zero, the HTML parser is constrained to this memory
+    /// allocation ceiling.  Exceeding the budget produces
+    /// `ERROR_PARSE_BUDGET_EXCEEDED`.
+    /// Populated from the `markdown_parser_budget` NGINX directive.
+    pub parser_memory_budget: u64,
 }
 
 /// Conversion result returned from Rust to C.
@@ -319,6 +333,35 @@ pub struct FFIHeaderEntry {
     pub value_len: usize,
 }
 
+/// Result of a bounded decompression operation.
+///
+/// Returned by decompression FFI functions to communicate the output buffer,
+/// its length, and any error category to the C caller.
+///
+/// # Error Categories
+///
+/// - `0` = success (output is valid decompressed data)
+/// - `5` = budget_exceeded (decompressed output exceeded the configured limit)
+/// - `6` = format_error (input is not valid gzip/deflate)
+/// - `7` = truncated (input stream ended prematurely)
+/// - `8` = io_error (I/O error during decompression)
+///
+/// # Memory Ownership
+///
+/// When `error_category == 0`, the `output` pointer is Rust-owned and must be
+/// freed via the corresponding cleanup function. When `error_category != 0`,
+/// `output` is NULL and `output_len` is 0.
+#[repr(C)]
+pub struct FFIDecompResult {
+    /// Pointer to decompressed output buffer (Rust-owned, NULL on error).
+    pub output: *mut u8,
+    /// Length of decompressed output in bytes (0 on error).
+    pub output_len: usize,
+    /// Error category: 0=success, 5=budget_exceeded, 6=format_error,
+    /// 7=truncated, 8=io_error.
+    pub error_category: u32,
+}
+
 /// Opaque Rust-owned handle that keeps header-plan backing storage alive.
 #[repr(C)]
 pub struct FFIHeaderPlanHandle {
@@ -344,6 +387,35 @@ pub struct FFIHeaderPlan {
 #[cfg(test)]
 mod layout_tests {
     use super::*;
+
+    #[test]
+    fn test_markdown_options_layout() {
+        use std::mem::{align_of, offset_of, size_of};
+
+        assert_eq!(size_of::<MarkdownOptions>(), 120);
+        assert_eq!(align_of::<MarkdownOptions>(), 8);
+
+        assert_eq!(offset_of!(MarkdownOptions, flavor), 0);
+        assert_eq!(offset_of!(MarkdownOptions, timeout_ms), 4);
+        assert_eq!(offset_of!(MarkdownOptions, generate_etag), 8);
+        assert_eq!(offset_of!(MarkdownOptions, estimate_tokens), 9);
+        assert_eq!(offset_of!(MarkdownOptions, front_matter), 10);
+        assert_eq!(offset_of!(MarkdownOptions, content_type), 16);
+        assert_eq!(offset_of!(MarkdownOptions, content_type_len), 24);
+        assert_eq!(offset_of!(MarkdownOptions, base_url), 32);
+        assert_eq!(offset_of!(MarkdownOptions, base_url_len), 40);
+        assert_eq!(offset_of!(MarkdownOptions, streaming_budget), 48);
+        assert_eq!(offset_of!(MarkdownOptions, prune_noise), 56);
+        assert_eq!(offset_of!(MarkdownOptions, prune_selectors), 64);
+        assert_eq!(offset_of!(MarkdownOptions, prune_selector_len), 72);
+        assert_eq!(offset_of!(MarkdownOptions, prune_protection_selectors), 80);
+        assert_eq!(offset_of!(MarkdownOptions, prune_protection_selector_len), 88);
+        assert_eq!(offset_of!(MarkdownOptions, memory_budget), 96);
+        assert_eq!(offset_of!(MarkdownOptions, llm_provider), 104);
+        assert_eq!(offset_of!(MarkdownOptions, chars_per_token_fixed), 105);
+        assert_eq!(offset_of!(MarkdownOptions, parse_timeout_ms), 108);
+        assert_eq!(offset_of!(MarkdownOptions, parser_memory_budget), 112);
+    }
 
     #[test]
     fn test_markdown_result_layout() {
@@ -389,18 +461,40 @@ mod layout_tests {
 
     #[test]
     fn test_ffi_header_entry_layout() {
-        use std::mem::{align_of, size_of};
+        use std::mem::{align_of, offset_of, size_of};
 
-        assert!(size_of::<FFIHeaderEntry>() > 0);
-        assert!(align_of::<FFIHeaderEntry>() > 0);
+        assert_eq!(size_of::<FFIHeaderEntry>(), 40);
+        assert_eq!(align_of::<FFIHeaderEntry>(), 8);
+
+        assert_eq!(offset_of!(FFIHeaderEntry, op_type), 0);
+        assert_eq!(offset_of!(FFIHeaderEntry, key), 8);
+        assert_eq!(offset_of!(FFIHeaderEntry, key_len), 16);
+        assert_eq!(offset_of!(FFIHeaderEntry, value), 24);
+        assert_eq!(offset_of!(FFIHeaderEntry, value_len), 32);
     }
 
     #[test]
     fn test_ffi_header_plan_layout() {
-        use std::mem::{align_of, size_of};
+        use std::mem::{align_of, offset_of, size_of};
 
-        assert!(size_of::<FFIHeaderPlan>() > 0);
-        assert!(align_of::<FFIHeaderPlan>() > 0);
+        assert_eq!(size_of::<FFIHeaderPlan>(), 24);
+        assert_eq!(align_of::<FFIHeaderPlan>(), 8);
+
+        assert_eq!(offset_of!(FFIHeaderPlan, handle), 0);
+        assert_eq!(offset_of!(FFIHeaderPlan, entries), 8);
+        assert_eq!(offset_of!(FFIHeaderPlan, count), 16);
+    }
+
+    #[test]
+    fn test_ffi_decomp_result_layout() {
+        use std::mem::{align_of, offset_of, size_of};
+
+        assert_eq!(size_of::<FFIDecompResult>(), 24);
+        assert_eq!(align_of::<FFIDecompResult>(), 8);
+
+        assert_eq!(offset_of!(FFIDecompResult, output), 0);
+        assert_eq!(offset_of!(FFIDecompResult, output_len), 8);
+        assert_eq!(offset_of!(FFIDecompResult, error_category), 16);
     }
 
     #[test]
@@ -450,10 +544,15 @@ mod layout_tests {
         }
     }
 
+    /// [A04.7] FFI mapping closure test: Rust ERROR_* constant count == C define count.
+    ///
+    /// Ensures no Rust error variant is missing a C-side define.
+    /// The expected count (10 for non-streaming, 13 with streaming) must be
+    /// updated whenever a new error code is added to either side.
     #[test]
     fn test_error_code_count_matches_c_defines() {
-        let rust_error_count = 10;
-        let codes = [
+        // Non-streaming error codes defined in this module
+        let base_codes: &[u32] = &[
             ERROR_SUCCESS,
             ERROR_PARSE,
             ERROR_ENCODING,
@@ -465,13 +564,33 @@ mod layout_tests {
             ERROR_PARSE_BUDGET_EXCEEDED,
             ERROR_INTERNAL,
         ];
+
+        // Expected count of non-streaming ERROR_* constants in ffi/abi.rs
+        let expected_base_count: usize = 10;
         assert_eq!(
-            codes.len(),
-            rust_error_count,
-            "Rust error code count ({}) must match C #define count ({})",
-            codes.len(),
-            rust_error_count
+            base_codes.len(),
+            expected_base_count,
+            "Rust base error code count ({}) must match C #define count ({}). \
+             If you added a new error code, update both this array and the C header.",
+            base_codes.len(),
+            expected_base_count
         );
+
+        // With streaming feature, 3 additional codes exist (6, 7, 8)
+        #[cfg(feature = "streaming")]
+        {
+            let streaming_codes: &[u32] = &[
+                ERROR_BUDGET_EXCEEDED,
+                ERROR_STREAMING_FALLBACK,
+                ERROR_POST_COMMIT,
+            ];
+            let total = base_codes.len() + streaming_codes.len();
+            let expected_total: usize = 13;
+            assert_eq!(
+                total, expected_total,
+                "Total error code count with streaming ({total}) must match expected ({expected_total})"
+            );
+        }
     }
 
     #[test]

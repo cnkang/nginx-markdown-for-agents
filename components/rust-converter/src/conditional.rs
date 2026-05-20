@@ -75,6 +75,11 @@ fn parse_if_none_match(header: &str) -> Vec<(bool, String)> {
 ///
 /// Strong comparison: both must be strong and values match.
 /// Weak comparison: values match regardless of strength.
+///
+/// Note: strong comparison is used for If-Match (PUT/DELETE) which
+/// this module does not yet implement. Kept in test scope for
+/// completeness and future use.
+#[cfg(test)]
 fn etag_strong_match(a: (bool, &str), b: (bool, &str)) -> bool {
     !a.0 && !b.0 && a.1 == b.1
 }

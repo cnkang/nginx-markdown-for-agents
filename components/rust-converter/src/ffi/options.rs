@@ -53,6 +53,9 @@ pub(crate) fn clamp_chars_per_token(raw: f32) -> f32 {
 
 pub(crate) struct DecodedOptions<'a> {
     pub(crate) content_type: Option<&'a str>,
+    /// General timeout used by streaming/incremental paths.
+    /// The full-buffer path uses `parse_timeout` instead.
+    #[allow(dead_code)]
     pub(crate) timeout: Duration,
     pub(crate) generate_etag: bool,
     pub(crate) estimate_tokens: bool,
@@ -84,6 +87,12 @@ pub(crate) struct DecodedOptions<'a> {
     /// FFI `chars_per_token_fixed` decodes to a non-positive or
     /// pathological value.
     pub(crate) effective_chars_per_token: f32,
+    /// Parse-specific timeout.  When non-zero, the parser uses this
+    /// deadline instead of the general `timeout`.  Falls back to
+    /// `timeout` when zero.
+    pub(crate) parse_timeout: Duration,
+    /// Parser memory budget in bytes (0 = unlimited).
+    pub(crate) parser_memory_budget: u64,
 }
 
 /// Convert a required raw pointer from C into a Rust reference.
@@ -190,6 +199,8 @@ fn optional_utf8<'a>(
 ///     memory_budget: 0,
 ///     llm_provider: 0,
 ///     chars_per_token_fixed: 0,
+///     parse_timeout_ms: 0,
+///     parser_memory_budget: 0,
 /// };
 ///
 /// let decoded = decode_options(&opts).unwrap();
@@ -246,6 +257,13 @@ pub(crate) fn decode_options(
         LlmProvider::from_ffi(options.llm_provider).chars_per_token()
     };
 
+    /* Resolve parse_timeout: prefer parse_timeout_ms, fall back to timeout_ms */
+    let parse_timeout = if options.parse_timeout_ms > 0 {
+        Duration::from_millis(u64::from(options.parse_timeout_ms))
+    } else {
+        timeout
+    };
+
     Ok(DecodedOptions {
         content_type,
         timeout,
@@ -259,6 +277,8 @@ pub(crate) fn decode_options(
         llm_provider: LlmProvider::from_ffi(options.llm_provider),
         chars_per_token: raw_cpt,
         effective_chars_per_token: clamp_chars_per_token(raw_cpt),
+        parse_timeout,
+        parser_memory_budget: options.parser_memory_budget,
         conversion: ConversionOptions {
             flavor,
             include_front_matter,
