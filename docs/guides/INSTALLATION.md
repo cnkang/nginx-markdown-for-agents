@@ -7,6 +7,7 @@
 3. [Install Path Tiers](#3-install-path-tiers)
 4. [Primary: Install Script](#4-primary-install-script)
 4.1 [Convenience: Homebrew Tap (macOS)](#41-convenience-homebrew-tap-macos)
+4.2 [Package Manager Installation (Linux)](#42-package-manager-installation-linux)
 5. [Secondary: Docker Source Build](#5-secondary-docker-source-build)
 6. [Secondary: Manual Source Build](#6-secondary-manual-source-build)
 7. [Compatibility Matrix](#7-compatibility-matrix)
@@ -161,6 +162,45 @@ Notes:
 - Tap publish and macOS post-release verification automation are documented in [`docs/guides/HOMEBREW_TAP_RELEASE.md`](./HOMEBREW_TAP_RELEASE.md).
 
 If you need deterministic control over compiler flags or local patching, use [Manual Source Build](#6-secondary-manual-source-build).
+
+---
+
+## 4.2 Package Manager Installation (Linux)
+
+**Tier: Primary** (v0.7.0+)
+
+Pre-built DEB and RPM packages are available for supported Linux distributions. These packages install the module binary and provide a `load_module` snippet.
+
+### APT (Ubuntu / Debian)
+
+```bash
+sudo apt-get install nginx-module-markdown
+```
+
+### YUM (AlmaLinux / Amazon Linux / RHEL)
+
+```bash
+sudo yum install nginx-module-markdown
+```
+
+### After Installation
+
+After installing via package manager, reload NGINX:
+
+```bash
+sudo nginx -t && sudo nginx -s reload
+```
+
+### Supported Distributions
+
+- Ubuntu 22.04, 24.04
+- Debian 12
+- AlmaLinux 9
+- Amazon Linux 2023
+
+Packages are built for both `amd64` and `arm64` architectures, targeting NGINX stable and mainline channels.
+
+For full details on repository setup, GPG key import, version pinning, upgrade, rollback, and troubleshooting, see [Package Installation Guide](PACKAGE_INSTALLATION.md).
 
 ---
 
