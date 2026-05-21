@@ -118,14 +118,12 @@ impl ConversionError {
     /// assert_eq!(err.code(), 3);
     /// ```
     pub fn code(&self) -> u32 {
+        #[cfg(feature = "streaming")]
+        use crate::ffi::{ERROR_BUDGET_EXCEEDED, ERROR_POST_COMMIT, ERROR_STREAMING_FALLBACK};
         use crate::ffi::{
             ERROR_DECOMPRESSION_BUDGET_EXCEEDED, ERROR_ENCODING, ERROR_INTERNAL,
-            ERROR_INVALID_INPUT, ERROR_MEMORY_LIMIT, ERROR_PARSE,
-            ERROR_PARSE_BUDGET_EXCEEDED, ERROR_PARSE_TIMEOUT, ERROR_TIMEOUT,
-        };
-        #[cfg(feature = "streaming")]
-        use crate::ffi::{
-            ERROR_BUDGET_EXCEEDED, ERROR_POST_COMMIT, ERROR_STREAMING_FALLBACK,
+            ERROR_INVALID_INPUT, ERROR_MEMORY_LIMIT, ERROR_PARSE, ERROR_PARSE_BUDGET_EXCEEDED,
+            ERROR_PARSE_TIMEOUT, ERROR_TIMEOUT,
         };
 
         match self {

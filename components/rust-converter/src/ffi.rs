@@ -82,9 +82,8 @@ pub use abi::{
 #[cfg(feature = "streaming")]
 pub use abi::{ERROR_BUDGET_EXCEEDED, ERROR_POST_COMMIT, ERROR_STREAMING_FALLBACK};
 pub use exports::{
-    markdown_convert, markdown_converter_free, markdown_converter_new,
-    markdown_decomp_result_init, markdown_decompress_bounded, markdown_decompress_free,
-    markdown_result_free,
+    markdown_convert, markdown_converter_free, markdown_converter_new, markdown_decomp_result_init,
+    markdown_decompress_bounded, markdown_decompress_free, markdown_result_free,
 };
 
 #[cfg(feature = "incremental")]

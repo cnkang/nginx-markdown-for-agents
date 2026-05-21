@@ -249,8 +249,7 @@ mod tests {
     /// Helper: compress data with brotli.
     fn brotli_compress(data: &[u8]) -> Vec<u8> {
         let mut output = Vec::new();
-        let mut writer =
-            brotli::CompressorWriter::new(&mut output, 4096, 6, 22);
+        let mut writer = brotli::CompressorWriter::new(&mut output, 4096, 6, 22);
         std::io::Write::write_all(&mut writer, data).unwrap();
         drop(writer);
         output

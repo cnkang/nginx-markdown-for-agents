@@ -40,7 +40,7 @@ use std::ptr;
 use crate::error::ConversionError;
 
 use super::abi::{
-    ERROR_INTERNAL, FFIAcceptResult, FFIConditionalResult, FFIDecompResult, FFIDecisionResult,
+    ERROR_INTERNAL, FFIAcceptResult, FFIConditionalResult, FFIDecisionResult, FFIDecompResult,
     FFIHeaderEntry, FFIHeaderPlan, FFIHeaderPlanHandle, MarkdownConverterHandle, MarkdownOptions,
     MarkdownResult, NEGOTIATE_REASON_CONVERT, NEGOTIATE_REASON_EXPLICIT_REJECT,
     NEGOTIATE_REASON_LOWER_Q, NEGOTIATE_REASON_MALFORMED, NEGOTIATE_REASON_NO_ACCEPT,
@@ -354,17 +354,18 @@ pub unsafe extern "C" fn markdown_build_header_plan(
     }
 
     let result_ref = unsafe { &mut *result };
+
+    /* Free any previously-held plan to avoid leaking the old handle */
+    if !result_ref.handle.is_null() {
+        unsafe { drop(Box::from_raw(result_ref.handle as *mut HeaderPlanOwned)) };
+    }
     unsafe { ptr::write(result_ref, std::mem::zeroed()) };
 
     let ct = if content_type.is_null() || content_type_len == 0 {
         "text/markdown; charset=utf-8"
     } else {
-        match std::str::from_utf8(unsafe {
-            std::slice::from_raw_parts(content_type, content_type_len)
-        }) {
-            Ok(s) => s,
-            Err(_) => "text/markdown; charset=utf-8",
-        }
+        std::str::from_utf8(unsafe { std::slice::from_raw_parts(content_type, content_type_len) })
+            .unwrap_or("text/markdown; charset=utf-8")
     };
 
     use crate::header_plan::{HeaderOp, HeaderPlan};
@@ -797,9 +798,8 @@ pub unsafe extern "C" fn markdown_decompress_free(result: *mut FFIDecompResult) 
     let result_ref = unsafe { &mut *result };
     if !result_ref.output.is_null() && result_ref.output_len > 0 {
         // Reconstruct the Box<[u8]> from the raw parts and drop it
-        let slice = unsafe {
-            std::slice::from_raw_parts_mut(result_ref.output, result_ref.output_len)
-        };
+        let slice =
+            unsafe { std::slice::from_raw_parts_mut(result_ref.output, result_ref.output_len) };
         unsafe { drop(Box::from_raw(slice)) };
     }
     result_ref.output = ptr::null_mut();
@@ -1026,7 +1026,7 @@ mod tests {
             markdown_decompress_bounded(
                 compressed.as_ptr(),
                 compressed.len(),
-                0, // gzip
+                0,   // gzip
                 100, // budget too small
                 &mut result,
             )
@@ -1050,7 +1050,10 @@ mod tests {
                 &mut result,
             )
         };
-        assert_eq!(rc, 6, "Expected format_error (6) for unknown format, got {rc}");
+        assert_eq!(
+            rc, 6,
+            "Expected format_error (6) for unknown format, got {rc}"
+        );
         assert_eq!(result.error_category, 6);
     }
 
@@ -1066,10 +1069,11 @@ mod tests {
     #[test]
     fn decompress_bounded_empty_input_returns_truncated() {
         let mut result: FFIDecompResult = unsafe { std::mem::zeroed() };
-        let rc = unsafe {
-            markdown_decompress_bounded(std::ptr::null(), 0, 0, 1024, &mut result)
-        };
-        assert_eq!(rc, 7, "Expected truncated_input (7) for empty input, got {rc}");
+        let rc = unsafe { markdown_decompress_bounded(std::ptr::null(), 0, 0, 1024, &mut result) };
+        assert_eq!(
+            rc, 7,
+            "Expected truncated_input (7) for empty input, got {rc}"
+        );
         assert_eq!(result.error_category, 7);
     }
 

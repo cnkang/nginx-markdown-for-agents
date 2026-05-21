@@ -24,8 +24,7 @@ static const uint8_t stub_ct_val[] =
     "text/markdown; charset=utf-8";
 static const uint8_t stub_ce_key[] = "Content-Encoding";
 static const uint8_t stub_cl_key[] = "Content-Length";
-static const uint8_t stub_vary_key[] = "Vary";
-static const uint8_t stub_vary_val[] = "Accept";
+/* stub_vary_key/stub_vary_val removed: Vary is handled post-plan */
 
 void
 markdown_header_plan_init(struct FFIHeaderPlan *result)
@@ -144,8 +143,9 @@ ngx_http_markdown_apply_header_plan(ngx_http_request_t *r,
         case 0: {
             /* SET: handle known headers directly */
             if (entry->key_len == sizeof("Content-Type") - 1
-                && strncasecmp((const char *) entry->key,
-                    "Content-Type", entry->key_len) == 0)
+                && ngx_strncasecmp((u_char *) entry->key,
+                    (u_char *) "Content-Type",
+                    entry->key_len) == 0)
             {
                 /* Content-Type: set directly on headers_out */
                 r->headers_out.content_type.data =
@@ -200,8 +200,8 @@ ngx_http_markdown_apply_header_plan(ngx_http_request_t *r,
             /* DELETE: clear the header pointer */
             if (entry->key_len
                 == sizeof("Content-Encoding") - 1
-                && strncasecmp((const char *) entry->key,
-                    "Content-Encoding",
+                && ngx_strncasecmp((u_char *) entry->key,
+                    (u_char *) "Content-Encoding",
                     entry->key_len) == 0)
             {
                 r->headers_out.content_encoding = NULL;
