@@ -705,6 +705,10 @@ ngx_http_markdown_metrics_write_json(
         "  \"decompressions_deflate\": %uA,\n"
         "  \"decompressions_brotli\": %uA,\n"
         "  \"decompression_budget_exceeded_total\": %uA,\n"
+        "  \"decompression_format_error_total\": %uA,\n"
+        "  \"decompression_truncated_input_total\": %uA,\n"
+        "  \"decompression_io_error_total\": %uA,\n"
+        "  \"replay_buffer_errors_total\": %uA,\n"
 
         /* Threshold-router path hit counters */
         "  \"fullbuffer_path_hits\": %uA,\n"
@@ -791,6 +795,10 @@ ngx_http_markdown_metrics_write_json(
         snapshot->decompressions.deflate,
         snapshot->decompressions.brotli,
         snapshot->decompressions.budget_exceeded_total,
+        snapshot->decompressions.format_error_total,
+        snapshot->decompressions.truncated_input_total,
+        snapshot->decompressions.io_error_total,
+        snapshot->results.replay_buffer_errors_total,
 
         /* Path routing */
         snapshot->path_hits.fullbuffer,
@@ -993,6 +1001,10 @@ ngx_http_markdown_metrics_write_text(
         "- Deflate Decompressions: %uA\n"
         "- Brotli Decompressions: %uA\n"
         "- Decompression Budget Exceeded: %uA\n"
+        "- Decompression Format Errors: %uA\n"
+        "- Decompression Truncated Input: %uA\n"
+        "- Decompression I/O Errors: %uA\n"
+        "- Replay Buffer Errors: %uA\n"
         "\n"
 
         /* Threshold-router path hit counters */
@@ -1077,6 +1089,10 @@ ngx_http_markdown_metrics_write_text(
         snapshot->decompressions.deflate,
         snapshot->decompressions.brotli,
         snapshot->decompressions.budget_exceeded_total,
+        snapshot->decompressions.format_error_total,
+        snapshot->decompressions.truncated_input_total,
+        snapshot->decompressions.io_error_total,
+        snapshot->results.replay_buffer_errors_total,
 
         /* Path routing */
         snapshot->path_hits.fullbuffer,

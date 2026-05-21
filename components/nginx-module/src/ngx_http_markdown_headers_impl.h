@@ -647,6 +647,7 @@ ngx_http_markdown_update_headers(ngx_http_request_t *r,
             ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                 "markdown filter: failed to set ETag "
                 "after plan commit");
+            return NGX_ERROR;
         }
     } else {
         rc = ngx_http_markdown_set_etag(r, NULL, 0);
@@ -654,6 +655,7 @@ ngx_http_markdown_update_headers(ngx_http_request_t *r,
             ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                 "markdown filter: failed to clear ETag "
                 "after plan commit");
+            return NGX_ERROR;
         }
     }
 
@@ -666,6 +668,7 @@ ngx_http_markdown_update_headers(ngx_http_request_t *r,
     if (rc != NGX_OK) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
             "markdown filter: failed to add Vary header");
+        return NGX_ERROR;
     }
 
     /*
@@ -689,6 +692,7 @@ ngx_http_markdown_update_headers(ngx_http_request_t *r,
             ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                 "markdown filter: failed to add "
                 "X-Markdown-Tokens header");
+            return NGX_ERROR;
         }
     }
 
@@ -702,6 +706,7 @@ ngx_http_markdown_update_headers(ngx_http_request_t *r,
                 "markdown filter: failed to modify "
                 "Cache-Control for authenticated "
                 "content");
+            return NGX_ERROR;
         }
     }
 #endif

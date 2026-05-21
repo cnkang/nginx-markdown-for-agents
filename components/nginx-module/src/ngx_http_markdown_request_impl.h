@@ -1033,6 +1033,11 @@ ngx_http_markdown_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
         if (rc != NGX_OK && rc != NGX_DONE) {
             return rc;
         }
+
+        if (rc == NGX_DONE) {
+            return NGX_DONE;
+        }
+
         /* Pending chain drained successfully; continue processing */
     }
 
