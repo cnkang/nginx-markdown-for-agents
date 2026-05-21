@@ -1226,6 +1226,59 @@ test_memory_budget_priority_chain(void)
     }
 }
 
+/*
+ * Negative test: decompress_max_size == 0 with auto_decompress enabled
+ * must be rejected by merge_conf.
+ */
+static void
+test_decompress_max_size_zero_rejected(void)
+{
+    ngx_conf_t cf;
+    ngx_http_markdown_conf_t parent;
+    ngx_http_markdown_conf_t child;
+    char *rc;
+
+    TEST_SUBSECTION("decompress_max_size=0 rejected");
+
+    memset(&cf, 0, sizeof(cf));
+    cf.pool = &g_pool;
+
+    memset(&parent, 0, sizeof(parent));
+    parent.decompress_max_size = NGX_CONF_UNSET_SIZE;
+    parent.parse_timeout = 30000;
+    parent.parser_budget = 64 * 1024 * 1024;
+    parent.max_size = 10 * 1024 * 1024;
+    parent.advanced.memory_budget = NGX_CONF_UNSET_SIZE;
+
+    memset(&child, 0, sizeof(child));
+    child.decompress_max_size = NGX_CONF_UNSET_SIZE;
+    child.parse_timeout = NGX_CONF_UNSET_MSEC;
+    child.parser_budget = NGX_CONF_UNSET_SIZE;
+    child.enabled_source = NGX_HTTP_MARKDOWN_ENABLED_UNSET;
+    child.max_size = NGX_CONF_UNSET_SIZE;
+    child.timeout = NGX_CONF_UNSET_MSEC;
+    child.on_error = NGX_CONF_UNSET_UINT;
+    child.flavor = NGX_CONF_UNSET_UINT;
+    child.auto_decompress = 1;
+    child.advanced.memory_budget = NGX_CONF_UNSET_SIZE;
+    child.streaming.budget = NGX_CONF_UNSET_SIZE;
+    child.streaming.auto_threshold = NGX_CONF_UNSET_SIZE;
+    child.advanced.prune_noise = NGX_CONF_UNSET;
+    child.advanced.prune_selectors = NGX_CONF_UNSET_PTR;
+    child.advanced.prune_protection_selectors = NGX_CONF_UNSET_PTR;
+    child.advanced.dynconf_enabled = NGX_CONF_UNSET;
+    child.advanced.dynconf_dry_run = NGX_CONF_UNSET;
+
+    /* Force decompress_max_size to 0 after merge by setting explicit 0 */
+    child.decompress_max_size = 0;
+
+    rc = ngx_http_markdown_merge_conf(&cf, &parent, &child);
+    TEST_ASSERT(rc == NGX_CONF_ERROR,
+        "decompress_max_size=0 with auto_decompress=1 should fail");
+
+    printf("  \xe2\x9c\x93 decompress_max_size=0 correctly rejected\n");
+}
+
 int
 main(void)
 {
@@ -1244,6 +1297,7 @@ main(void)
     test_filter_flag_additional_branches();
     test_log_merged_conf();
     test_memory_budget_priority_chain();
+    test_decompress_max_size_zero_rejected();
 
     printf("\n========================================\n");
     printf("All tests passed!\n");
