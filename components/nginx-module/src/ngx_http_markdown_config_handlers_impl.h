@@ -312,7 +312,7 @@ ngx_http_markdown_auth_cookies(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         *pattern = value[i];
 
         ngx_conf_log_error(NGX_LOG_DEBUG, cf, 0,
-                           "markdown_auth_cookies: added pattern \"%V\"",
+                           "markdown: added pattern \"%V\"",
                            pattern);
     }
 
@@ -485,7 +485,7 @@ ngx_http_markdown_content_types(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         *type = value[i];
 
         ngx_conf_log_error(NGX_LOG_DEBUG, cf, 0,
-                           "markdown_content_types: added type \"%V\"",
+                           "markdown: added type \"%V\"",
                            type);
     }
 
@@ -628,7 +628,7 @@ ngx_http_markdown_stream_types(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         *type = value[i];
 
         ngx_conf_log_error(NGX_LOG_DEBUG, cf, 0,
-                           "markdown_stream_types: added type \"%V\"",
+                           "markdown: added type \"%V\"",
                            type);
     }
 
@@ -762,7 +762,7 @@ ngx_http_markdown_metrics_directive(ngx_conf_t *cf, ngx_command_t *cmd, void *co
     clcf->handler = ngx_http_markdown_metrics_handler;
 
     ngx_conf_log_error(NGX_LOG_INFO, cf, 0,
-                       "markdown_metrics: endpoint enabled at this location");
+                       "markdown: endpoint enabled at this location");
 
     return NGX_CONF_OK;
 }
@@ -896,13 +896,13 @@ ngx_http_markdown_set_dynconf_path(ngx_conf_t *cf, ngx_command_t *cmd,
         cf, ngx_http_markdown_filter_module);
     if (mmcf == NULL) {
         ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
-            "markdown_dynamic_config_path: failed to get main conf");
+            "markdown: failed to get main conf");
         return NGX_CONF_ERROR;
     }
 
     if (mmcf->dynconf_path_configured) {
         ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
-            "markdown_dynamic_config_path: duplicate configuration; "
+            "markdown: duplicate configuration; "
             "dynconf supports only a single global instance. "
             "First path: \"%V\", this path: \"%V\". "
             "Place the directive at http/server level or in only one location",

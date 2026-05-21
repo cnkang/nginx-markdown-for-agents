@@ -220,18 +220,18 @@ ngx_http_markdown_prepare_compressed_chain(ngx_http_request_t *r,
     compressed_buf = ngx_create_temp_buf(r->pool, ctx->buffer.size);
     if (compressed_buf == NULL) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                     "markdown filter: failed to create "
+                     "markdown: failed to create "
                      "compressed buffer, category=system");
         return ngx_http_markdown_handle_decompression_alloc_error(
             r, ctx, conf, NGX_HTTP_MARKDOWN_ERROR_SYSTEM,
-            "markdown filter: fail-open strategy "
+            "markdown: fail-open strategy "
             "- returning original content");
     }
 
     if (ctx->buffer.size > 0) {
         if (ctx->buffer.data == NULL) {
             ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                         "markdown filter: buffered payload "
+                         "markdown: buffered payload "
                          "pointer is NULL with non-zero "
                          "size, size=%uz, category=system",
                          ctx->buffer.size);
@@ -248,7 +248,7 @@ ngx_http_markdown_prepare_compressed_chain(ngx_http_request_t *r,
     *compressed_chain = ngx_alloc_chain_link(r->pool);
     if (*compressed_chain == NULL) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                     "markdown filter: failed to allocate "
+                     "markdown: failed to allocate "
                      "chain link, category=system");
         return ngx_http_markdown_handle_decompression_alloc_error(
             r, ctx, conf,
@@ -277,7 +277,7 @@ ngx_http_markdown_apply_decompressed_payload(ngx_http_request_t *r,
             ctx->decompression.type);
 
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                     "markdown filter: decompression "
+                     "markdown: decompression "
                      "returned NULL chain, "
                      "compression=%V, category=system",
                      compression_name);
@@ -300,7 +300,7 @@ ngx_http_markdown_apply_decompressed_payload(ngx_http_request_t *r,
                 ctx->decompression.type);
 
             ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                         "markdown filter: failed to "
+                         "markdown: failed to "
                          "allocate decompressed buffer, "
                          "compression=%V, size=%uz, "
                          "category=system",
@@ -360,7 +360,7 @@ ngx_http_markdown_record_decompression_success(ngx_http_request_t *r,
         : 0.0f;
 
     ngx_log_error(NGX_LOG_INFO, r->connection->log, 0,
-                 "markdown filter: decompression succeeded, "
+                 "markdown: decompression succeeded, "
                  "compression=%d, compressed=%uz bytes, decompressed=%uz bytes, ratio=%.1fx",
                  ctx->decompression.type, ctx->decompression.compressed_size,
                  ctx->decompression.decompressed_size,
@@ -368,7 +368,7 @@ ngx_http_markdown_record_decompression_success(ngx_http_request_t *r,
 
     ngx_http_markdown_remove_content_encoding(r);
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                  "markdown filter: removed Content-Encoding header after decompression");
+                  "markdown: removed Content-Encoding header after decompression");
 }
 
 
@@ -419,7 +419,7 @@ ngx_http_markdown_handle_buffer_init_failure(ngx_http_request_t *r,
     ngx_int_t  rc;
 
     ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0,
-                 "markdown filter: failed to initialize "
+                 "markdown: failed to initialize "
                  "buffer, category=system");
 
     ngx_http_markdown_record_system_failure(ctx);
@@ -434,7 +434,7 @@ ngx_http_markdown_handle_buffer_init_failure(ngx_http_request_t *r,
     ngx_http_markdown_metric_inc_failopen(conf);
 
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                  "markdown filter: fail-open strategy - returning original HTML");
+                  "markdown: fail-open strategy - returning original HTML");
     ngx_http_markdown_reclassify_fail_open_path(ctx);
     ctx->eligible = 0;
     r->buffered &= ~NGX_HTTP_MARKDOWN_BUFFERED;
@@ -473,7 +473,7 @@ ngx_http_markdown_handle_buffer_append_failure(ngx_http_request_t *r,
         : ctx->buffer.size + chunk_size;
 
     ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-                 "markdown filter: response size exceeds limit, "
+                 "markdown: response size exceeds limit, "
                  "size=%uz bytes, max=%uz bytes, category=resource_limit",
                  attempted_size, conf->max_size);
 
@@ -492,7 +492,7 @@ ngx_http_markdown_handle_buffer_append_failure(ngx_http_request_t *r,
     ngx_http_markdown_metric_inc_failopen(conf);
 
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                  "markdown filter: fail-open strategy - returning original HTML");
+                  "markdown: fail-open strategy - returning original HTML");
     ctx->eligible = 0;
     r->buffered &= ~NGX_HTTP_MARKDOWN_BUFFERED;
     if (ngx_http_markdown_forward_headers(r, ctx) != NGX_OK) {
@@ -576,7 +576,7 @@ ngx_http_markdown_body_filter_buffer_input(ngx_http_request_t *r,
 
             if (ngx_http_markdown_buffer_reserve(&ctx->buffer, reserve_hint) != NGX_OK) {
                 ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-                             "markdown filter: failed to pre-reserve %uz bytes buffer capacity",
+                             "markdown: failed to pre-reserve %uz bytes buffer capacity",
                              reserve_hint);
             }
         }
@@ -720,7 +720,7 @@ ngx_http_markdown_decompress_via_rust(
 
     if (input_size == 0) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                     "markdown filter: rust decompress "
+                     "markdown: rust decompress "
                      "called with empty input");
         return NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT;
     }
@@ -749,7 +749,7 @@ ngx_http_markdown_decompress_via_rust(
     markdown_decomp_result_init(&result);
 
     ngx_log_debug3(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                  "markdown filter: calling rust "
+                  "markdown: calling rust "
                   "decompress, format=%d, input=%uz, "
                   "budget=%uz",
                   (int) format, input_size,
@@ -772,7 +772,7 @@ ngx_http_markdown_decompress_via_rust(
          *   105 = DECOMP_CATEGORY_INVALID_ARGS
          */
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                     "markdown filter: rust decompress "
+                     "markdown: rust decompress "
                      "failed, rc=%ud, error_category=%ud",
                      ffi_rc, result.error_category);
 
@@ -799,7 +799,7 @@ ngx_http_markdown_decompress_via_rust(
     if (result.output == NULL || result.output_len == 0) {
         markdown_decompress_free(&result);
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                     "markdown filter: rust decompress "
+                     "markdown: rust decompress "
                      "returned empty output");
         return NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR;
     }
@@ -842,7 +842,7 @@ ngx_http_markdown_decompress_via_rust(
         *decompressed_chain = cl;
 
         ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                      "markdown filter: rust decompress "
+                      "markdown: rust decompress "
                       "succeeded, input=%uz, output=%uz",
                       input_size, output_len);
     }
@@ -867,7 +867,7 @@ ngx_http_markdown_body_filter_decompress_if_needed(ngx_http_request_t *r,
     }
 
     ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                  "markdown filter: starting decompression, "
+                  "markdown: starting decompression, "
                   "type=%d, size=%uz bytes",
                   ctx->decompression.type, ctx->buffer.size);
 
@@ -886,11 +886,11 @@ ngx_http_markdown_body_filter_decompress_if_needed(ngx_http_request_t *r,
     if (decompress_rc == NGX_DECLINED) {
         ngx_log_debug0(NGX_LOG_DEBUG_HTTP,
                       r->connection->log, 0,
-                      "markdown filter: decompression "
+                      "markdown: decompression "
                       "not supported");
         return ngx_http_markdown_handle_decompression_conversion_error(
             r, ctx, conf,
-            "markdown filter: returning original "
+            "markdown: returning original "
             "content after unsupported decompression");
     }
 
@@ -899,7 +899,7 @@ ngx_http_markdown_body_filter_decompress_if_needed(ngx_http_request_t *r,
         return ngx_http_markdown_handle_decompression_alloc_error(
             r, ctx, conf,
             NGX_HTTP_MARKDOWN_ERROR_RESOURCE_LIMIT,
-            "markdown filter: fail-open strategy "
+            "markdown: fail-open strategy "
             "- returning original content after "
             "decompression budget exceeded");
     }
@@ -908,7 +908,7 @@ ngx_http_markdown_body_filter_decompress_if_needed(ngx_http_request_t *r,
         NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.format_error_total);
         return ngx_http_markdown_handle_decompression_conversion_error(
             r, ctx, conf,
-            "markdown filter: fail-open strategy "
+            "markdown: fail-open strategy "
             "- returning original content after "
             "decompression format error");
     }
@@ -918,7 +918,7 @@ ngx_http_markdown_body_filter_decompress_if_needed(ngx_http_request_t *r,
             decompressions.truncated_input_total);
         return ngx_http_markdown_handle_decompression_conversion_error(
             r, ctx, conf,
-            "markdown filter: fail-open strategy "
+            "markdown: fail-open strategy "
             "- returning original content after "
             "truncated compressed input");
     }
@@ -927,7 +927,7 @@ ngx_http_markdown_body_filter_decompress_if_needed(ngx_http_request_t *r,
         NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.io_error_total);
         return ngx_http_markdown_handle_decompression_conversion_error(
             r, ctx, conf,
-            "markdown filter: fail-open strategy "
+            "markdown: fail-open strategy "
             "- returning original content after "
             "decompression I/O error");
     }
@@ -941,14 +941,14 @@ ngx_http_markdown_body_filter_decompress_if_needed(ngx_http_request_t *r,
         NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.io_error_total);
         ngx_log_error(NGX_LOG_ERR,
                      r->connection->log, 0,
-                     "markdown filter: decompression "
+                     "markdown: decompression "
                      "failed, compression=%V, "
                      "error=\"decompression error\", "
                      "category=conversion",
                      compression_name);
         return ngx_http_markdown_handle_decompression_conversion_error(
             r, ctx, conf,
-            "markdown filter: fail-open strategy "
+            "markdown: fail-open strategy "
             "- returning original content");
     }
 

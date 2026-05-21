@@ -503,7 +503,7 @@ ngx_http_markdown_log_conditional_streaming(
     {
         ngx_log_debug0(NGX_LOG_DEBUG_HTTP,
             r->connection->log, 0,
-            "markdown filter: streaming allowed: "
+            "markdown: streaming allowed: "
             "conditional_requests "
             "if_modified_since_only");
     } else if (conf->policy.conditional_requests
@@ -511,7 +511,7 @@ ngx_http_markdown_log_conditional_streaming(
     {
         ngx_log_debug0(NGX_LOG_DEBUG_HTTP,
             r->connection->log, 0,
-            "markdown filter: streaming allowed: "
+            "markdown: streaming allowed: "
             "conditional_requests disabled");
     }
 }
@@ -567,7 +567,7 @@ ngx_http_markdown_select_processing_path(
                                &val) != NGX_OK)
     {
         ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-            "markdown filter: failed to evaluate "
+            "markdown: failed to evaluate "
             "markdown_streaming_engine, "
             "falling back to full-buffer");
         return NGX_HTTP_MARKDOWN_PATH_FULLBUFFER;
@@ -604,7 +604,7 @@ ngx_http_markdown_select_processing_path(
         } else {
             ngx_log_error(NGX_LOG_WARN,
                 r->connection->log, 0,
-                "markdown filter: invalid "
+                "markdown: invalid "
                 "markdown_streaming_engine value "
                 "\"%V\", falling back to off", &val);
             return NGX_HTTP_MARKDOWN_PATH_FULLBUFFER;
@@ -617,7 +617,7 @@ common_checks:
     if (r->method == NGX_HTTP_HEAD) {
         ngx_log_debug0(NGX_LOG_DEBUG_HTTP,
             r->connection->log, 0,
-            "markdown filter: streaming skip: "
+            "markdown: streaming skip: "
             "HEAD request");
         return NGX_HTTP_MARKDOWN_PATH_FULLBUFFER;
     }
@@ -626,7 +626,7 @@ common_checks:
     if (r->headers_out.status == NGX_HTTP_NOT_MODIFIED) {
         ngx_log_debug0(NGX_LOG_DEBUG_HTTP,
             r->connection->log, 0,
-            "markdown filter: streaming skip: "
+            "markdown: streaming skip: "
             "304 response");
         return NGX_HTTP_MARKDOWN_PATH_FULLBUFFER;
     }
@@ -637,7 +637,7 @@ common_checks:
     {
         ngx_log_debug0(NGX_LOG_DEBUG_HTTP,
             r->connection->log, 0,
-            "markdown filter: streaming skip: "
+            "markdown: streaming skip: "
             "conditional_requests full_support "
             "requires full ETag before headers");
         return NGX_HTTP_MARKDOWN_PATH_FULLBUFFER;
@@ -764,7 +764,7 @@ ngx_http_markdown_streaming_update_headers(
         rc = ngx_http_markdown_modify_cache_control_for_auth(r);
         if (rc != NGX_OK) {
             ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                "markdown streaming: failed to modify "
+                "markdown: failed to modify "
                 "Cache-Control for authenticated content");
             return rc;
         }
@@ -922,7 +922,7 @@ ngx_http_markdown_streaming_handle_backpressure(
 
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP,
         r->connection->log, 0,
-        "markdown streaming: backpressure detected, "
+        "markdown: backpressure detected, "
         "pausing output");
 
     return NGX_AGAIN;
@@ -1216,7 +1216,7 @@ ngx_http_markdown_streaming_fallback_to_fullbuffer(
     ngx_http_markdown_conf_t *conf)
 {
     ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-        "markdown streaming: Pre-Commit fallback "
+        "markdown: Pre-Commit fallback "
         "to full-buffer path");
 
     /* Release the streaming handle */
@@ -1314,7 +1314,7 @@ ngx_http_markdown_streaming_handle_postcommit_error(
     uint32_t error_code)
 {
     ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-        "markdown streaming: Post-Commit error, "
+        "markdown: Post-Commit error, "
         "code=%ui, terminating response",
         (ngx_uint_t) error_code);
 
@@ -1349,7 +1349,7 @@ ngx_http_markdown_streaming_handle_postcommit_error(
      */
     ngx_log_debug3(NGX_LOG_DEBUG_HTTP,
         r->connection->log, 0,
-        "markdown streaming: post-commit error, "
+        "markdown: post-commit error, "
         "bytes_sent=%uz, error_code=%ui, chunks=%ui",
         ctx->streaming.total_output_bytes,
         (ngx_uint_t) error_code,
@@ -1433,7 +1433,7 @@ ngx_http_markdown_streaming_precommit_error(
             ngx_http_markdown_reason_streaming_budget_exceeded());
         ngx_log_debug1(NGX_LOG_DEBUG_HTTP,
             r->connection->log, 0,
-            "markdown streaming: budget exceeded "
+            "markdown: budget exceeded "
             "(auxiliary classification, code=%ui)",
             (ngx_uint_t) error_code);
     }
@@ -1496,7 +1496,7 @@ ngx_http_markdown_streaming_commit(
 
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP,
         r->connection->log, 0,
-        "markdown streaming: commit "
+        "markdown: commit "
         "boundary reached, headers sent");
 
     return NGX_OK;
@@ -1550,7 +1550,7 @@ ngx_http_markdown_streaming_handle_feed_result(
 
         ngx_log_error(NGX_LOG_ERR,
             r->connection->log, 0,
-            "markdown streaming: feed error "
+            "markdown: feed error "
             "code=%ui in Pre-Commit",
             (ngx_uint_t) rc_ffi);
 
@@ -1689,7 +1689,7 @@ ngx_http_markdown_streaming_process_chunk(
 
             ngx_log_error(NGX_LOG_ERR,
                 r->connection->log, 0,
-                "markdown streaming: "
+                "markdown: "
                 "decompression failed (rc=%i)",
                 rc);
 
@@ -1719,7 +1719,7 @@ ngx_http_markdown_streaming_process_chunk(
     {
         ngx_log_error(NGX_LOG_ERR,
             r->connection->log, 0,
-            "markdown streaming: input size "
+            "markdown: input size "
             "overflow detected");
 
         if (ctx->streaming.commit_state
@@ -1741,7 +1741,7 @@ ngx_http_markdown_streaming_process_chunk(
     {
         ngx_log_error(NGX_LOG_WARN,
             r->connection->log, 0,
-            "markdown streaming: size limit "
+            "markdown: size limit "
             "exceeded, total=%uz, max=%uz",
             ctx->streaming.total_input_bytes,
             conf->max_size);
@@ -1769,7 +1769,7 @@ ngx_http_markdown_streaming_process_chunk(
         if (rc != NGX_OK) {
             ngx_log_error(NGX_LOG_WARN,
                 r->connection->log, 0,
-                "markdown streaming: prebuffer "
+                "markdown: prebuffer "
                 "limit exceeded");
 
             return ngx_http_markdown_streaming_precommit_error(
@@ -1888,7 +1888,7 @@ ngx_http_markdown_streaming_finalize_decomp(
 
         ngx_log_error(NGX_LOG_ERR,
             r->connection->log, 0,
-            "markdown streaming: decomp_finish "
+            "markdown: decomp_finish "
             "failed in finalize (rc=%i)",
             rc);
 
@@ -1996,7 +1996,7 @@ ngx_http_markdown_streaming_finalize_request(
     if (rc_ffi != ERROR_SUCCESS) {
         ngx_log_error(NGX_LOG_ERR,
             r->connection->log, 0,
-            "markdown streaming: finalize error "
+            "markdown: finalize error "
             "code=%ui", (ngx_uint_t) rc_ffi);
 
         if (ctx->otel_span != NULL) {
@@ -2080,7 +2080,7 @@ ngx_http_markdown_streaming_finalize_request(
     if (result.etag != NULL && result.etag_len > 0) {
         ngx_log_debug3(NGX_LOG_DEBUG_HTTP,
             r->connection->log, 0,
-            "markdown streaming: finalize ETag "
+            "markdown: finalize ETag "
             "value=\"%*s\", len=%uz",
             result.etag_len, result.etag,
             result.etag_len);
@@ -2095,7 +2095,7 @@ ngx_http_markdown_streaming_finalize_request(
          */
         ngx_log_error(NGX_LOG_INFO,
             r->connection->log, 0,
-            "markdown streaming: etag=%*s "
+            "markdown: etag=%*s "
             "uri=%V "
             "out_bytes=%uz tokens=%ui",
             result.etag_len, result.etag,
@@ -2118,7 +2118,7 @@ ngx_http_markdown_streaming_finalize_request(
     /* Log streaming conversion statistics */
     ngx_log_debug4(NGX_LOG_DEBUG_HTTP,
         r->connection->log, 0,
-        "markdown streaming: completed "
+        "markdown: completed "
         "chunks=%ui flushes=%ui "
         "in_bytes=%uz out_bytes=%uz",
         ctx->streaming.chunks_processed,
@@ -2263,7 +2263,7 @@ ngx_http_markdown_streaming_init_handle(
     if (rc != NGX_OK) {
         ngx_log_error(NGX_LOG_ERR,
             r->connection->log, 0,
-            "markdown streaming: failed to "
+            "markdown: failed to "
             "prepare conversion options");
         return ngx_http_markdown_streaming_precommit_error(
             r, ctx, conf, 0);
@@ -2276,7 +2276,7 @@ ngx_http_markdown_streaming_init_handle(
     {
         ngx_log_error(NGX_LOG_ERR,
             r->connection->log, 0,
-            "markdown streaming: failed to "
+            "markdown: failed to "
             "create streaming handle rc=%ui",
             (ngx_uint_t) init_rc);
         return ngx_http_markdown_streaming_precommit_error(
@@ -2315,7 +2315,7 @@ ngx_http_markdown_streaming_init_handle(
         if (ctx->streaming.decompressor == NULL) {
             ngx_log_error(NGX_LOG_ERR,
                 r->connection->log, 0,
-                "markdown streaming: failed to "
+                "markdown: failed to "
                 "create decompressor");
             markdown_streaming_abort(
                 ctx->streaming.handle);
@@ -2347,7 +2347,7 @@ ngx_http_markdown_streaming_init_handle(
          */
         ngx_log_error(NGX_LOG_ERR,
             r->connection->log, 0,
-            "markdown streaming: prebuffer init "
+            "markdown: prebuffer init "
             "failed (pool exhaustion or zero budget), "
             "cannot guarantee fallback data integrity");
         markdown_streaming_abort(
@@ -2386,7 +2386,7 @@ ngx_http_markdown_streaming_init_handle(
             results.replay_buffer_errors_total);
         ngx_log_error(NGX_LOG_ERR,
             r->connection->log, 0,
-            "markdown streaming: replay buffer init "
+            "markdown: replay buffer init "
             "failed (pool exhaustion or zero budget), "
             "cannot guarantee fail-open data integrity");
         markdown_streaming_abort(
@@ -2443,7 +2443,7 @@ ngx_http_markdown_streaming_init_handle(
 
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP,
         r->connection->log, 0,
-        "markdown streaming: handle created, "
+        "markdown: handle created, "
         "entering Pre-Commit phase");
 
     return NGX_OK;
@@ -2708,7 +2708,7 @@ ngx_http_markdown_streaming_check_client_abort(
 
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP,
         r->connection->log, 0,
-        "markdown streaming: client abort "
+        "markdown: client abort "
         "detected");
 
     if (ctx->streaming.handle != NULL) {
@@ -2966,7 +2966,7 @@ ngx_http_markdown_streaming_process_chain(
                         results.replay_buffer_errors_total);
                     ngx_log_error(NGX_LOG_ERR,
                         r->connection->log, 0,
-                        "markdown streaming: replay buffer "
+                        "markdown: replay buffer "
                         "limit exceeded, aborting streaming "
                         "to preserve fail-open data integrity");
                     rc =

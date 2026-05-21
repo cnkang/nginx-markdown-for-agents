@@ -320,7 +320,7 @@ ngx_http_markdown_diagnostics_check_access(ngx_http_request_t *r)
 
     if (sa == NULL) {
         ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-            "markdown diagnostics: no client address, "
+            "markdown: no client address, "
             "denying access");
         return NGX_HTTP_FORBIDDEN;
     }
@@ -393,7 +393,7 @@ ngx_http_markdown_diagnostics_check_access(ngx_http_request_t *r)
         }
 
         ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-            "markdown diagnostics: client address not in "
+            "markdown: client address not in "
             "diagnostics_allow list, denying access");
         return NGX_HTTP_FORBIDDEN;
     }
@@ -430,7 +430,7 @@ ngx_http_markdown_diagnostics_check_access(ngx_http_request_t *r)
     }
 
     ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-        "markdown diagnostics: access denied for "
+        "markdown: access denied for "
         "non-loopback client; configure "
         "markdown_diagnostics_allow for granular control");
 
@@ -751,7 +751,7 @@ ngx_http_markdown_log_decision_path(ngx_http_request_t *r,
      * or pre-formatted constants.
      */
     ngx_log_error(log_level, r->connection->log, 0,
-        "markdown decision_path: "
+        "markdown: "
         "accept_result=%s "
         "conditional_result=%s "
         "conversion_status=%s "

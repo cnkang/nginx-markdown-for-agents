@@ -102,7 +102,7 @@ ngx_http_markdown_add_private_cache_control_header(ngx_http_request_t *r)
     h->value.len = sizeof(ngx_http_markdown_cc_private) - 1;
 
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                  "markdown filter: added Cache-Control: private for authenticated content");
+                  "markdown: added Cache-Control: private for authenticated content");
 
     return NGX_OK;
 }
@@ -154,7 +154,7 @@ ngx_http_markdown_append_private_directive(ngx_http_request_t *r,
     cache_control->value.len = new_len;
 
     ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                  "markdown filter: added private to Cache-Control: \"%V\"",
+                  "markdown: added private to Cache-Control: \"%V\"",
                   &cache_control->value);
 
     return NGX_OK;
@@ -237,7 +237,7 @@ ngx_http_markdown_strip_public_and_append_private(ngx_http_request_t *r,
     cache_control->value.len = (size_t) (dst - new_value);
 
     ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                  "markdown filter: upgraded Cache-Control from public to private: \"%V\"",
+                  "markdown: upgraded Cache-Control from public to private: \"%V\"",
                   &cache_control->value);
 
     return NGX_OK;
@@ -565,7 +565,7 @@ ngx_http_markdown_has_authorization_header(const ngx_http_request_t *r)
     }
 
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                  "markdown filter: detected Authorization header");
+                  "markdown: detected Authorization header");
 
     return 1;
 }
@@ -695,7 +695,7 @@ ngx_http_markdown_has_auth_cookies(ngx_http_request_t *r,
                                                              &matched_pattern))
             {
                 ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                              "markdown filter: detected auth cookie \"%V\" "
+                              "markdown: detected auth cookie \"%V\" "
                               "matching pattern \"%V\"",
                               &cookie_name, matched_pattern);
                 return 1;
@@ -1001,7 +1001,7 @@ ngx_http_markdown_modify_cache_control_for_auth(ngx_http_request_t *r)
      */
     if (scan.has_no_store) {
         ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                      "markdown filter: preserving Cache-Control with no-store");
+                      "markdown: preserving Cache-Control with no-store");
         return NGX_OK;
     }
 
@@ -1020,7 +1020,7 @@ ngx_http_markdown_modify_cache_control_for_auth(ngx_http_request_t *r)
 
     if (scan.has_private) {
         ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                      "markdown filter: Cache-Control already has private: \"%V\"",
+                      "markdown: Cache-Control already has private: \"%V\"",
                       &scan.first_entry->value);
         return NGX_OK;
     }

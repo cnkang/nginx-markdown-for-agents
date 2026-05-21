@@ -278,7 +278,7 @@ ngx_http_markdown_streaming_decomp_expand_buf(
     /* Guard against size_t overflow: old_size * 2 */
     if (old_size > (size_t) -1 / 2) {
         ngx_log_error(NGX_LOG_ERR, log, 0,
-            "markdown streaming decomp: "
+            "markdown: "
             "expand_buf size overflow, old_size=%uz",
             old_size);
         if (*heap_buf_ptr != NULL) {
@@ -374,7 +374,7 @@ ngx_http_markdown_streaming_decomp_inflate_step(
         && zrc != Z_BUF_ERROR)
     {
         ngx_log_error(NGX_LOG_ERR, log, 0,
-            "markdown streaming decomp: "
+            "markdown: "
             "inflate error %d", zrc);
         if (*heap_buf_ptr != NULL) {
             ngx_free(*heap_buf_ptr);
@@ -389,7 +389,7 @@ ngx_http_markdown_streaming_decomp_inflate_step(
             decomp, *out_produced))
     {
         ngx_log_error(NGX_LOG_WARN, log, 0,
-            "markdown streaming decomp: "
+            "markdown: "
             "decompressed size %uz exceeds limit %uz",
             decomp->total_decompressed + *out_produced,
             decomp->max_decompressed_size);
@@ -427,7 +427,7 @@ ngx_http_markdown_streaming_decomp_inflate_step(
                     *buf_size_ptr / 2, &half_out))
             {
                 ngx_log_error(NGX_LOG_ERR, log, 0,
-                    "markdown streaming decomp: "
+                    "markdown: "
                     "expanded buffer half %uz exceeds "
                     "zlib uInt max",
                     *buf_size_ptr / 2);
@@ -559,7 +559,7 @@ ngx_http_markdown_streaming_decomp_brotli_step(
 
     if (brc == BROTLI_DECODER_RESULT_ERROR) {
         ngx_log_error(NGX_LOG_ERR, log, 0,
-            "markdown streaming decomp: "
+            "markdown: "
             "brotli decode error");
         if (*heap_buf_ptr != NULL) {
             ngx_free(*heap_buf_ptr);
@@ -573,7 +573,7 @@ ngx_http_markdown_streaming_decomp_brotli_step(
             decomp, *out_produced))
     {
         ngx_log_error(NGX_LOG_WARN, log, 0,
-            "markdown streaming decomp: "
+            "markdown: "
             "decompressed size %uz exceeds limit %uz",
             decomp->total_decompressed + *out_produced,
             decomp->max_decompressed_size);
@@ -763,7 +763,7 @@ ngx_http_markdown_streaming_decomp_feed(
                 in_len, &decomp->state.zlib.avail_in))
         {
             ngx_log_error(NGX_LOG_ERR, log, 0,
-                "markdown streaming decomp: "
+                "markdown: "
                 "input length %uz exceeds zlib uInt max",
                 in_len);
             return NGX_ERROR;
@@ -773,7 +773,7 @@ ngx_http_markdown_streaming_decomp_feed(
                 buf_size, &decomp->state.zlib.avail_out))
         {
             ngx_log_error(NGX_LOG_ERR, log, 0,
-                "markdown streaming decomp: "
+                "markdown: "
                 "buffer size %uz exceeds zlib uInt max",
                 buf_size);
             return NGX_ERROR;
@@ -818,7 +818,7 @@ ngx_http_markdown_streaming_decomp_feed(
     /* Check size limit and protect against integer overflow. */
     if (decomp->total_decompressed > NGX_MAX_SIZE_T_VALUE - produced) {
         ngx_log_error(NGX_LOG_WARN, log, 0,
-            "markdown streaming decomp: "
+            "markdown: "
             "decompressed size overflow, total=%uz produced=%uz",
             decomp->total_decompressed,
             produced);
@@ -831,7 +831,7 @@ ngx_http_markdown_streaming_decomp_feed(
            > decomp->max_decompressed_size)
     {
         ngx_log_error(NGX_LOG_WARN, log, 0,
-            "markdown streaming decomp: "
+            "markdown: "
             "decompressed size %uz exceeds limit %uz",
             decomp->total_decompressed,
             decomp->max_decompressed_size);
@@ -878,7 +878,7 @@ ngx_http_markdown_streaming_decomp_finish_zlib(
             *buf_size_ptr, &decomp->state.zlib.avail_out))
     {
         ngx_log_error(NGX_LOG_ERR, log, 0,
-            "markdown streaming decomp: "
+            "markdown: "
             "finish buffer %uz exceeds zlib uInt max",
             *buf_size_ptr);
         return NGX_ERROR;
@@ -891,7 +891,7 @@ ngx_http_markdown_streaming_decomp_finish_zlib(
             && zrc != Z_BUF_ERROR)
         {
             ngx_log_error(NGX_LOG_ERR, log, 0,
-                "markdown streaming decomp: "
+                "markdown: "
                 "finish inflate error %d", zrc);
             ngx_http_markdown_streaming_decomp_finish_free_heap(
                 &heap_buf);
@@ -905,7 +905,7 @@ ngx_http_markdown_streaming_decomp_finish_zlib(
                 decomp, *produced_ptr))
         {
             ngx_log_error(NGX_LOG_WARN, log, 0,
-                "markdown streaming decomp: "
+                "markdown: "
                 "decompressed size %uz exceeds limit %uz",
                 decomp->total_decompressed + *produced_ptr,
                 decomp->max_decompressed_size);
@@ -923,7 +923,7 @@ ngx_http_markdown_streaming_decomp_finish_zlib(
             && decomp->state.zlib.avail_out != 0)
         {
             ngx_log_error(NGX_LOG_ERR, log, 0,
-                "markdown streaming decomp: "
+                "markdown: "
                 "finish inflate incomplete stream");
             ngx_http_markdown_streaming_decomp_finish_free_heap(
                 &heap_buf);
@@ -958,7 +958,7 @@ ngx_http_markdown_streaming_decomp_finish_zlib(
                         *buf_size_ptr - old_size, &expand_out))
                 {
                     ngx_log_error(NGX_LOG_ERR, log, 0,
-                        "markdown streaming decomp: "
+                        "markdown: "
                         "finish expand %uz exceeds "
                         "zlib uInt max",
                         *buf_size_ptr - old_size);
@@ -1053,7 +1053,7 @@ ngx_http_markdown_streaming_decomp_finish(
                 decomp->state.brotli))
         {
             ngx_log_error(NGX_LOG_WARN, log, 0,
-                "markdown streaming decomp: "
+                "markdown: "
                 "brotli stream not finished");
         }
         decomp->finished = 1;

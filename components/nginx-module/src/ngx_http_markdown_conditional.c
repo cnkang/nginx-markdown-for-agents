@@ -93,14 +93,14 @@ ngx_http_markdown_handle_if_none_match(ngx_http_request_t *r,
 
     if (conf->policy.conditional_requests == NGX_HTTP_MARKDOWN_CONDITIONAL_DISABLED) {
         ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                      "markdown filter: conditional requests disabled, "
+                      "markdown: conditional requests disabled, "
                       "skipping If-None-Match");
         return NGX_DECLINED;
     }
 
     if (conf->policy.conditional_requests == NGX_HTTP_MARKDOWN_CONDITIONAL_IF_MODIFIED_SINCE) {
         ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                      "markdown filter: if_modified_since_only mode, "
+                      "markdown: if_modified_since_only mode, "
                       "skipping If-None-Match");
         return NGX_DECLINED;
     }
@@ -115,30 +115,30 @@ ngx_http_markdown_handle_if_none_match(ngx_http_request_t *r,
 
     if (inm_header == NULL) {
         ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                      "markdown filter: no If-None-Match header");
+                      "markdown: no If-None-Match header");
         return NGX_DECLINED;
     }
 
     if (!conf->policy.generate_etag) {
         ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                      "markdown filter: ETag generation disabled, "
+                      "markdown: ETag generation disabled, "
                       "cannot perform If-None-Match comparison");
         return NGX_DECLINED;
     }
 
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                  "markdown filter: If-None-Match present, performing conversion "
+                  "markdown: If-None-Match present, performing conversion "
                   "to generate ETag for comparison (performance cost)");
 
     if (!ctx->buffer_initialized || ctx->buffer.size == 0) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                     "markdown filter: buffer not initialized for If-None-Match check");
+                     "markdown: buffer not initialized for If-None-Match check");
         return NGX_ERROR;
     }
 
     if (converter == NULL) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                     "markdown filter: converter handle is NULL during If-None-Match check");
+                     "markdown: converter handle is NULL during If-None-Match check");
         return NGX_ERROR;
     }
 
@@ -154,7 +154,7 @@ ngx_http_markdown_handle_if_none_match(ngx_http_request_t *r,
     conv_result = ngx_pcalloc(r->pool, sizeof(struct MarkdownResult));
     if (conv_result == NULL) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                     "markdown filter: failed to allocate conversion result");
+                     "markdown: failed to allocate conversion result");
         return NGX_ERROR;
     }
 
@@ -170,7 +170,7 @@ ngx_http_markdown_handle_if_none_match(ngx_http_request_t *r,
             &options, &inc_handle);
         if (init_rc != ERROR_SUCCESS || inc_handle == NULL) {
             ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                         "markdown filter: incremental converter init "
+                         "markdown: incremental converter init "
                          "failed during If-None-Match check, "
                          "error_code=%ud", (ngx_uint_t) init_rc);
             ngx_pfree(r->pool, conv_result);
@@ -182,7 +182,7 @@ ngx_http_markdown_handle_if_none_match(ngx_http_request_t *r,
         if (feed_rc != 0) {
             markdown_incremental_free(inc_handle);
             ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-                         "markdown filter: incremental feed failed during "
+                         "markdown: incremental feed failed during "
                          "If-None-Match check, error_code=%ud", feed_rc);
             ngx_pfree(r->pool, conv_result);
             return NGX_ERROR;
@@ -199,7 +199,7 @@ ngx_http_markdown_handle_if_none_match(ngx_http_request_t *r,
 
     if (conv_result->error_code != 0) {
         ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-                     "markdown filter: conversion failed during If-None-Match check: "
+                     "markdown: conversion failed during If-None-Match check: "
                      "error_code=%ud message=\"%*s\"",
                      conv_result->error_code,
                      (conv_result->error_message != NULL) ? (ngx_int_t) conv_result->error_len : 0,
@@ -244,7 +244,7 @@ ngx_http_markdown_handle_if_none_match(ngx_http_request_t *r,
 
     if (cond_result.result_code == 0) {
         ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                      "markdown filter: ETag match, returning 304 Not Modified");
+                      "markdown: ETag match, returning 304 Not Modified");
 
         *result = conv_result;
 
@@ -252,7 +252,7 @@ ngx_http_markdown_handle_if_none_match(ngx_http_request_t *r,
     }
 
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                  "markdown filter: ETag mismatch, returning 200 with content");
+                  "markdown: ETag mismatch, returning 200 with content");
 
     *result = conv_result;
 
@@ -308,7 +308,7 @@ ngx_http_markdown_send_304(ngx_http_request_t *r,
         r->headers_out.etag = h;
 
         ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                      "markdown filter: 304 response with ETag: \"%V\"", &h->value);
+                      "markdown: 304 response with ETag: \"%V\"", &h->value);
     }
 
     h = ngx_list_push(&r->headers_out.headers);
@@ -321,7 +321,7 @@ ngx_http_markdown_send_304(ngx_http_request_t *r,
     ngx_str_set(&h->value, "Accept");
 
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                  "markdown filter: 304 response with Vary: Accept");
+                  "markdown: 304 response with Vary: Accept");
 
     rc = ngx_http_send_header(r);
     if (rc == NGX_ERROR || rc > NGX_OK) {
@@ -331,7 +331,7 @@ ngx_http_markdown_send_304(ngx_http_request_t *r,
     ngx_http_finalize_request(r, NGX_HTTP_NOT_MODIFIED);
 
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                  "markdown filter: 304 Not Modified response sent");
+                  "markdown: 304 Not Modified response sent");
 
     return NGX_OK;
 }
