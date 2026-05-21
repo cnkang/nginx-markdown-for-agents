@@ -1960,10 +1960,12 @@ ngx_http_markdown_dynconf_rollback(
     }
 
     if (!watcher->lkg_valid) {
-        ngx_log_error(NGX_LOG_WARN, log, 0,
-                      "markdown dynconf rollback: "
-                      "no last-known-good available "
-                      "(no successful reload has occurred)");
+        if (log != NULL) {
+            ngx_log_error(NGX_LOG_WARN, log, 0,
+                          "markdown dynconf rollback: "
+                          "no last-known-good available "
+                          "(no successful reload has occurred)");
+        }
         return NGX_HTTP_MARKDOWN_DYNCONF_ROLLBACK_NO_LKG;
     }
 
@@ -1981,11 +1983,13 @@ ngx_http_markdown_dynconf_rollback(
     ngx_http_markdown_dynconf_apply_snapshot(watcher->conf,
                                               &watcher->active_snapshot);
 
-    ngx_log_error(NGX_LOG_WARN, log, 0,
-                  "markdown dynconf rollback: "
-                  "restored last-known-good configuration "
-                  "(version=%ui)",
-                  watcher->version);
+    if (log != NULL) {
+        ngx_log_error(NGX_LOG_WARN, log, 0,
+                      "markdown dynconf rollback: "
+                      "restored last-known-good configuration "
+                      "(version=%ui)",
+                      watcher->version);
+    }
 
     return NGX_HTTP_MARKDOWN_DYNCONF_ROLLBACK_OK;
 }
