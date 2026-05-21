@@ -332,13 +332,13 @@ extracted into Rust while the NGINX glue remains in C:
 3. **Reason codes (#10–#17, #30)**: REQ-0700-RUST-006 mandates Rust as single
    source. The C-side reason code accessors should be replaced by FFI calls to
    `get_reason_code_string()` once the decision engine is fully integrated.
-   
+
    **v0.7.0 status (B06.2)**: C-side FFI accessor wrappers are now available in
    `ngx_http_markdown_reason_ffi.c`:
    - `ngx_http_markdown_get_reason_code_str(code, &str)` — wraps `markdown_reason_code_str()`
    - `ngx_http_markdown_get_reason_code_metric_key(code, &str)` — wraps `markdown_reason_code_metric_key()`
    - `ngx_http_markdown_reason_code_total_count()` — wraps `markdown_reason_code_count()`
-   
+
    The legacy C-side string literals in `ngx_http_markdown_reason.c` are marked
    deprecated.  New code must use the FFI accessors.  Full migration of existing
    callsites will happen when the decision engine integration is complete.
