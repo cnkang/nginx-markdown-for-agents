@@ -116,6 +116,15 @@ static ngx_uint_t g_alloc_chain_fail_once = 0;
 #ifndef ERROR_PARSE_BUDGET_EXCEEDED
 #define ERROR_PARSE_BUDGET_EXCEEDED 11
 #endif
+#ifndef ERROR_DECOMPRESSION_FORMAT_ERROR
+#define ERROR_DECOMPRESSION_FORMAT_ERROR 12
+#endif
+#ifndef ERROR_DECOMPRESSION_TRUNCATED_INPUT
+#define ERROR_DECOMPRESSION_TRUNCATED_INPUT 13
+#endif
+#ifndef ERROR_DECOMPRESSION_IO_ERROR
+#define ERROR_DECOMPRESSION_IO_ERROR 14
+#endif
 
 static void
 markdown_convert(struct MarkdownConverterHandle *handle, /* SONAR_NOTE: must match FFI signature */
