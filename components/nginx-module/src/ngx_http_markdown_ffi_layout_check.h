@@ -20,7 +20,21 @@
  */
 
 #include <stddef.h>
+#include <limits.h>
 #include "markdown_converter.h"
+
+/*
+ * Guard: these layout checks are only valid on LP64 platforms
+ * (64-bit pointers, 64-bit size_t). Fail explicitly on other
+ * data models (ILP32, LLP64, etc.) to prevent silent misuse.
+ */
+#if ULONG_MAX != 18446744073709551615UL
+#error "FFI layout checks require LP64 targets (64-bit unsigned long)"
+#endif
+_Static_assert(sizeof(void *) == 8,
+    "FFI layout checks require 64-bit pointers (LP64)");
+_Static_assert(sizeof(size_t) == 8,
+    "FFI layout checks require 64-bit size_t (LP64)");
 
 /* ----------------------------------------------------------------
  * MarkdownOptions layout (120 bytes on LP64).
@@ -230,7 +244,13 @@ _Static_assert(ERROR_DECOMPRESSION_BUDGET_EXCEEDED != ERROR_PARSE_TIMEOUT,
     "error codes must be distinct");
 _Static_assert(ERROR_PARSE_TIMEOUT != ERROR_PARSE_BUDGET_EXCEEDED,
     "error codes must be distinct");
-_Static_assert(ERROR_PARSE_BUDGET_EXCEEDED != ERROR_INTERNAL,
+_Static_assert(ERROR_PARSE_BUDGET_EXCEEDED != ERROR_DECOMPRESSION_FORMAT_ERROR,
+    "error codes must be distinct");
+_Static_assert(ERROR_DECOMPRESSION_FORMAT_ERROR != ERROR_DECOMPRESSION_TRUNCATED_INPUT,
+    "error codes must be distinct");
+_Static_assert(ERROR_DECOMPRESSION_TRUNCATED_INPUT != ERROR_DECOMPRESSION_IO_ERROR,
+    "error codes must be distinct");
+_Static_assert(ERROR_DECOMPRESSION_IO_ERROR != ERROR_INTERNAL,
     "error codes must be distinct");
 
 /* ----------------------------------------------------------------
