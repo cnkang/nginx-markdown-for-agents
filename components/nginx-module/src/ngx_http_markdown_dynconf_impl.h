@@ -432,7 +432,7 @@ ngx_http_markdown_dynconf_check(ngx_http_markdown_dynconf_watcher_t *watcher,
 
         if (watcher->path.len > NGX_MAX_PATH) {
             ngx_log_error(NGX_LOG_WARN, log, 0,
-                          "markdown dynconf: path too long (%uz bytes)",
+                          "markdown: path too long (%uz bytes)",
                           watcher->path.len);
             return 0;
         }
@@ -442,7 +442,7 @@ ngx_http_markdown_dynconf_check(ngx_http_markdown_dynconf_watcher_t *watcher,
 
         if (ngx_file_info(path_buf, &fi) == NGX_FILE_ERROR) {
             ngx_log_error(NGX_LOG_WARN, log, 0,
-                          "markdown dynconf: stat(\"%V\") failed",
+                          "markdown: stat(\"%V\") failed",
                           &watcher->path);
             return 0;
         }
@@ -498,7 +498,7 @@ ngx_http_markdown_dynconf_timer_handler(ngx_event_t *ev)
 
     if (ngx_http_markdown_dynconf_check(watcher, ev->log)) {
         ngx_log_error(NGX_LOG_INFO, ev->log, 0,
-                      "markdown dynconf: change detected on \"%V\", "
+                      "markdown: change detected on \"%V\", "
                       "performing two-phase reload",
                       &watcher->path);
 
@@ -515,7 +515,7 @@ ngx_http_markdown_dynconf_timer_handler(ngx_event_t *ev)
          * content) are eventually resolved without operator intervention.
          */
         ngx_log_error(NGX_LOG_INFO, ev->log, 0,
-                      "markdown dynconf: retrying failed reload on \"%V\" "
+                      "markdown: retrying failed reload on \"%V\" "
                       "(last_mtime=%T, applied_mtime=%T)",
                       &watcher->path,
                       watcher->last_mtime, watcher->applied_mtime);
@@ -611,7 +611,7 @@ ngx_http_markdown_dynconf_start(ngx_http_markdown_dynconf_watcher_t *watcher,
      * config handler. */
     if (watcher != NULL && watcher->active) {
         ngx_log_error(NGX_LOG_ERR, log, 0,
-                      "markdown dynconf: watcher already active; "
+                      "markdown: watcher already active; "
                       "dynconf supports only a single global instance. "
                       "Rejecting duplicate markdown_dynamic_config_path \"%V\"",
                       path);
@@ -624,7 +624,7 @@ ngx_http_markdown_dynconf_start(ngx_http_markdown_dynconf_watcher_t *watcher,
 
     if (path->len > NGX_MAX_PATH) {
         ngx_log_error(NGX_LOG_ERR, log, 0,
-                      "markdown dynconf: path too long (%uz bytes)",
+                      "markdown: path too long (%uz bytes)",
                       path->len);
         return NGX_ERROR;
     }
@@ -644,7 +644,7 @@ ngx_http_markdown_dynconf_start(ngx_http_markdown_dynconf_watcher_t *watcher,
 
     if (ngx_file_info(path_buf, &fi) == NGX_FILE_ERROR) {
         ngx_log_error(NGX_LOG_WARN, log, 0,
-                      "markdown dynconf: initial stat(\"%V\") failed, "
+                      "markdown: initial stat(\"%V\") failed, "
                       "will retry on timer",
                       path);
         watcher->last_mtime = 0;
@@ -689,7 +689,7 @@ ngx_http_markdown_dynconf_start(ngx_http_markdown_dynconf_watcher_t *watcher,
         {
             watcher->applied_mtime = watcher->last_mtime;
             ngx_log_error(NGX_LOG_INFO, log, 0,
-                          "markdown dynconf: applied existing file on startup "
+                          "markdown: applied existing file on startup "
                           "(rc=%i, version=%ui)",
                           initial_rc, watcher->version);
         } else if (initial_rc
@@ -697,7 +697,7 @@ ngx_http_markdown_dynconf_start(ngx_http_markdown_dynconf_watcher_t *watcher,
         {
             watcher->applied_mtime = watcher->last_mtime;
             ngx_log_error(NGX_LOG_INFO, log, 0,
-                          "markdown dynconf: dry-run validation passed "
+                          "markdown: dry-run validation passed "
                           "on startup (rc=%i, not applied)",
                           initial_rc);
         } else if (initial_rc
@@ -705,14 +705,14 @@ ngx_http_markdown_dynconf_start(ngx_http_markdown_dynconf_watcher_t *watcher,
         {
             watcher->applied_mtime = watcher->last_mtime;
             ngx_log_error(NGX_LOG_WARN, log, 0,
-                          "markdown dynconf: dry-run validation failed "
+                          "markdown: dry-run validation failed "
                           "on startup (rc=%i, %ui errors found)",
                           initial_rc,
                           watcher->last_validation.total_errors);
         } else {
             watcher->applied_mtime = 0;
             ngx_log_error(NGX_LOG_WARN, log, 0,
-                          "markdown dynconf: initial reload of \"%V\" failed "
+                          "markdown: initial reload of \"%V\" failed "
                           "(rc=%i); starting from static conf, will retry on timer",
                           &watcher->path, initial_rc);
         }
@@ -721,7 +721,7 @@ ngx_http_markdown_dynconf_start(ngx_http_markdown_dynconf_watcher_t *watcher,
     ngx_add_timer(watcher->timer, NGX_HTTP_MARKDOWN_DYNCONF_WATCH_MS);
 
     ngx_log_error(NGX_LOG_INFO, log, 0,
-                  "markdown dynconf: watching \"%V\" "
+                  "markdown: watching \"%V\" "
                   "(interval=%dms)",
                   &watcher->path, NGX_HTTP_MARKDOWN_DYNCONF_WATCH_MS);
 
@@ -755,7 +755,7 @@ ngx_http_markdown_dynconf_stop(ngx_http_markdown_dynconf_watcher_t *watcher,
     watcher->active = 0;
 
     ngx_log_error(NGX_LOG_INFO, log, 0,
-                  "markdown dynconf: stopped watching \"%V\"",
+                  "markdown: stopped watching \"%V\"",
                   &watcher->path);
 }
 
@@ -962,7 +962,7 @@ ngx_http_markdown_dynconf_parse_size_safe(const u_char *value, size_t value_len,
     scratch = malloc(value_len);
     if (scratch == NULL) {
         ngx_log_error(NGX_LOG_WARN, log, 0,
-                      "markdown dynconf: invalid %s value \"%*s\" "
+                      "markdown: invalid %s value \"%*s\" "
                       "(allocation failure)", key_name,
                       (int) value_len, value);
         return NGX_ERROR;
@@ -976,7 +976,7 @@ ngx_http_markdown_dynconf_parse_size_safe(const u_char *value, size_t value_len,
 
     if (parsed == NGX_ERROR) {
         ngx_log_error(NGX_LOG_WARN, log, 0,
-                      "markdown dynconf: invalid %s value \"%*s\" "
+                      "markdown: invalid %s value \"%*s\" "
                       "(parse error)", key_name,
                       (int) value_len, value);
         return NGX_ERROR;
@@ -984,7 +984,7 @@ ngx_http_markdown_dynconf_parse_size_safe(const u_char *value, size_t value_len,
 
     if (parsed < 0) {
         ngx_log_error(NGX_LOG_WARN, log, 0,
-                      "markdown dynconf: invalid %s value \"%*s\" "
+                      "markdown: invalid %s value \"%*s\" "
                       "(negative result: %z)", key_name,
                       (int) value_len, value, parsed);
         return NGX_ERROR;
@@ -992,7 +992,7 @@ ngx_http_markdown_dynconf_parse_size_safe(const u_char *value, size_t value_len,
 
     if ((size_t) parsed > max_size_t) {
         ngx_log_error(NGX_LOG_WARN, log, 0,
-                      "markdown dynconf: invalid %s value \"%*s\" "
+                      "markdown: invalid %s value \"%*s\" "
                       "(exceeds maximum: %z > %z)", key_name,
                       (int) value_len, value,
                       (size_t) parsed, max_size_t);
@@ -1059,7 +1059,7 @@ ngx_http_markdown_dynconf_apply(ngx_http_markdown_dynconf_snapshot_t *snapshot,
             snapshot->enabled_complex = NULL;
         } else {
             ngx_log_error(NGX_LOG_WARN, log, 0,
-                          "markdown dynconf: invalid markdown_filter value \"%*s\"",
+                          "markdown: invalid markdown_filter value \"%*s\"",
                           (int) value_len, value);
             return NGX_ERROR;
         }
@@ -1073,7 +1073,7 @@ ngx_http_markdown_dynconf_apply(ngx_http_markdown_dynconf_snapshot_t *snapshot,
             snapshot->prune_noise = 0;
         } else {
             ngx_log_error(NGX_LOG_WARN, log, 0,
-                          "markdown dynconf: invalid prune_noise value \"%*s\"",
+                          "markdown: invalid prune_noise value \"%*s\"",
                           (int) value_len, value);
             return NGX_ERROR;
         }
@@ -1095,7 +1095,7 @@ ngx_http_markdown_dynconf_apply(ngx_http_markdown_dynconf_snapshot_t *snapshot,
             snapshot->log_verbosity = NGX_HTTP_MARKDOWN_LOG_DEBUG;
         } else {
             ngx_log_error(NGX_LOG_WARN, log, 0,
-                          "markdown dynconf: invalid log_verbosity value \"%*s\"",
+                          "markdown: invalid log_verbosity value \"%*s\"",
                           (int) value_len, value);
             return NGX_ERROR;
         }
@@ -1118,7 +1118,7 @@ ngx_http_markdown_dynconf_apply(ngx_http_markdown_dynconf_snapshot_t *snapshot,
         }
 #else
         ngx_log_error(NGX_LOG_WARN, log, 0,
-                      "markdown dynconf: streaming_budget not supported "
+                      "markdown: streaming_budget not supported "
                       "(streaming not compiled)");
         return NGX_ERROR;
 #endif
@@ -1294,7 +1294,7 @@ ngx_http_markdown_dynconf_read_chunk(
 
     if (*pos >= buf_cap) {
         ngx_log_error(NGX_LOG_WARN, log, 0,
-                      "markdown dynconf: buffer position overflow in \"%V\"",
+                      "markdown: buffer position overflow in \"%V\"",
                       (ngx_str_t *) path);
         return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_INVALID_FILE;
     }
@@ -1310,7 +1310,7 @@ ngx_http_markdown_dynconf_read_chunk(
 
     if ((size_t) *n > avail) {
         ngx_log_error(NGX_LOG_WARN, log, 0,
-                      "markdown dynconf: read overflow in \"%V\"",
+                      "markdown: read overflow in \"%V\"",
                       (ngx_str_t *) path);
         return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_IO_ERROR;
     }
@@ -1340,7 +1340,7 @@ ngx_http_markdown_dynconf_process_chunk(
             log, applied) != NGX_OK)
     {
         ngx_log_error(NGX_LOG_WARN, log, 0,
-                      "markdown dynconf: parse error in \"%V\", "
+                      "markdown: parse error in \"%V\", "
                       "discarding staging; active config unchanged",
                       &watcher->path);
         return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_INVALID_FILE;
@@ -1348,7 +1348,7 @@ ngx_http_markdown_dynconf_process_chunk(
 
     if (*pos >= NGX_HTTP_MARKDOWN_DYNCONF_MAX_LINE) {
         ngx_log_error(NGX_LOG_WARN, log, 0,
-                      "markdown dynconf: line too long in \"%V\", "
+                      "markdown: line too long in \"%V\", "
                       "discarding staging; active config unchanged",
                       &watcher->path);
         return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_INVALID_FILE;
@@ -1452,7 +1452,7 @@ ngx_http_markdown_dynconf_log_validation_errors(
     for (i = 0; i < result->count; i++) {
         entry = &result->errors[i];
         ngx_log_error(NGX_LOG_WARN, log, 0,
-                      "markdown dynconf dry-run: error in \"%V\" "
+                      "markdown: error in \"%V\" "
                       "line %ui, field \"%*s\", reason: %*s",
                       path,
                       entry->line,
@@ -1462,7 +1462,7 @@ ngx_http_markdown_dynconf_log_validation_errors(
 
     if (result->total_errors > result->count) {
         ngx_log_error(NGX_LOG_WARN, log, 0,
-                      "markdown dynconf dry-run: %ui total errors in "
+                      "markdown: %ui total errors in "
                       "\"%V\" (%ui shown, %ui truncated)",
                       result->total_errors, path,
                       result->count,
@@ -1470,7 +1470,7 @@ ngx_http_markdown_dynconf_log_validation_errors(
     }
 
     ngx_log_error(NGX_LOG_WARN, log, 0,
-                  "markdown dynconf dry-run: validation failed for "
+                  "markdown: validation failed for "
                   "\"%V\" with %ui error(s)",
                   path, result->total_errors);
 }
@@ -1732,7 +1732,7 @@ ngx_http_markdown_dynconf_reload(
     fd = ngx_open_file(path_buf, NGX_FILE_RDONLY, NGX_FILE_OPEN, 0);
     if (fd == NGX_INVALID_FILE) {
         ngx_log_error(NGX_LOG_WARN, log, 0,
-                      "markdown dynconf: failed to open \"%V\" for reload",
+                      "markdown: failed to open \"%V\" for reload",
                       &watcher->path);
         return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_IO_ERROR;
     }
@@ -1776,7 +1776,7 @@ ngx_http_markdown_dynconf_reload(
 
             if (n == -1) {
                 ngx_log_error(NGX_LOG_WARN, log, 0,
-                              "markdown dynconf: read error on \"%V\"",
+                              "markdown: read error on \"%V\"",
                               &watcher->path);
                 ngx_close_file(fd);
                 return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_IO_ERROR;
@@ -1821,13 +1821,13 @@ dryrun_finish:
 
         if (applied > 0) {
             ngx_log_error(NGX_LOG_INFO, log, 0,
-                          "markdown dynconf: dry-run validation passed "
+                          "markdown: dry-run validation passed "
                           "for \"%V\" (%ui settings validated, "
                           "not applied)",
                           &watcher->path, applied);
         } else {
             ngx_log_error(NGX_LOG_INFO, log, 0,
-                          "markdown dynconf: dry-run validation passed "
+                          "markdown: dry-run validation passed "
                           "for \"%V\" (0 effective keys, not applied)",
                           &watcher->path);
         }
@@ -1852,7 +1852,7 @@ dryrun_finish:
 
         if (n == -1) {
             ngx_log_error(NGX_LOG_WARN, log, 0,
-                          "markdown dynconf: read error on \"%V\"",
+                          "markdown: read error on \"%V\"",
                           &watcher->path);
             ngx_close_file(fd);
             return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_IO_ERROR;
@@ -1881,7 +1881,7 @@ dryrun_finish:
 
         if (line_rc != NGX_OK) {
             ngx_log_error(NGX_LOG_WARN, log, 0,
-                          "markdown dynconf: parse error on final line "
+                          "markdown: parse error on final line "
                           "in \"%V\", discarding staging",
                           &watcher->path);
             return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_INVALID_FILE;
@@ -1904,7 +1904,7 @@ dryrun_finish:
                                                   &watcher->active_snapshot);
 
         ngx_log_error(NGX_LOG_INFO, log, 0,
-                      "markdown dynconf: applied %ui settings from \"%V\" "
+                      "markdown: applied %ui settings from \"%V\" "
                       "(version=%ui, lkg preserved)",
                       applied, &watcher->path, watcher->version);
         return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_APPLIED;
@@ -1953,7 +1953,7 @@ ngx_http_markdown_dynconf_rollback(
     if (watcher == NULL || watcher->conf == NULL) {
         if (log != NULL) {
             ngx_log_error(NGX_LOG_ERR, log, 0,
-                          "markdown dynconf rollback: "
+                          "markdown: "
                           "invalid watcher or conf pointer");
         }
         return NGX_HTTP_MARKDOWN_DYNCONF_ROLLBACK_APPLY_ERR;
@@ -1962,7 +1962,7 @@ ngx_http_markdown_dynconf_rollback(
     if (!watcher->lkg_valid) {
         if (log != NULL) {
             ngx_log_error(NGX_LOG_WARN, log, 0,
-                          "markdown dynconf rollback: "
+                          "markdown: "
                           "no last-known-good available "
                           "(no successful reload has occurred)");
         }
@@ -1985,7 +1985,7 @@ ngx_http_markdown_dynconf_rollback(
 
     if (log != NULL) {
         ngx_log_error(NGX_LOG_WARN, log, 0,
-                      "markdown dynconf rollback: "
+                      "markdown: "
                       "restored last-known-good configuration "
                       "(version=%ui)",
                       watcher->version);

@@ -363,7 +363,7 @@ ngx_http_markdown_apply_header_plan(ngx_http_request_t *r,
     /* Reject plans that exceed the rollback array bound. */
     if (plan->count > NGX_HTTP_MARKDOWN_PLAN_MAX_ENTRIES) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-            "markdown header plan: entry count %uz exceeds "
+            "markdown: entry count %uz exceeds "
             "maximum %d",
             (size_t) plan->count,
             NGX_HTTP_MARKDOWN_PLAN_MAX_ENTRIES);
@@ -376,7 +376,7 @@ ngx_http_markdown_apply_header_plan(ngx_http_request_t *r,
         plan->count * sizeof(ngx_http_markdown_plan_undo_t));
     if (undo == NULL) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-            "markdown header plan: failed to allocate "
+            "markdown: failed to allocate "
             "undo array for %uz entries",
             (size_t) plan->count);
         markdown_header_plan_free(plan);
@@ -405,7 +405,7 @@ ngx_http_markdown_apply_header_plan(ngx_http_request_t *r,
 
         default:
             ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                "markdown header plan: unknown op_type %d "
+                "markdown: unknown op_type %d "
                 "at index %uz",
                 (int) entry->op_type, (size_t) i);
             rc = NGX_ERROR;
@@ -414,7 +414,7 @@ ngx_http_markdown_apply_header_plan(ngx_http_request_t *r,
 
         if (rc != NGX_OK) {
             ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                "markdown header plan: operation %d failed "
+                "markdown: operation %d failed "
                 "at index %uz, rolling back %uz entries",
                 (int) entry->op_type, (size_t) i, (size_t) i);
 
@@ -425,7 +425,7 @@ ngx_http_markdown_apply_header_plan(ngx_http_request_t *r,
     }
 
     ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-        "markdown header plan: applied %uz entries "
+        "markdown: applied %uz entries "
         "successfully",
         (size_t) plan->count);
 

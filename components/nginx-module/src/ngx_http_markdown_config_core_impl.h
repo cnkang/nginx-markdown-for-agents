@@ -1024,14 +1024,14 @@ ngx_http_markdown_is_enabled(ngx_http_request_t *r,
 
     if (ngx_http_complex_value(r, conf->enabled_complex, &evaluated) != NGX_OK) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                      "markdown filter: failed to evaluate markdown_filter variable");
+                      "markdown: failed to evaluate markdown_filter variable");
         return 0;
     }
 
     rc = ngx_http_markdown_parse_filter_flag(&evaluated, &enabled);
     if (rc != NGX_OK) {
         ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-                      "markdown filter: markdown_filter variable resolved to invalid value "
+                      "markdown: markdown_filter variable resolved to invalid value "
                       "\"%V\", treating as off", &evaluated);
         return 0;
     }
@@ -1065,7 +1065,7 @@ ngx_http_markdown_log_merged_conf(ngx_conf_t *cf,
     log_level = ngx_http_markdown_log_verbosity_to_ngx_level(conf->policy.log_verbosity);
 
     ngx_conf_log_error(log_level, cf, 0,
-                       "markdown filter config: enabled=%ui "
+                       "markdown: enabled=%ui "
                        "enabled_source=%V max_size=%uz "
                        "timeout_ms=%M on_error=%V flavor=%V "
                        "token_estimate=%ui front_matter=%ui "

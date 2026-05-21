@@ -355,7 +355,7 @@ ngx_http_markdown_metrics_validate_request(ngx_http_request_t *r)
             (const struct sockaddr_in *) r->connection->sockaddr;
         if (ntohl(sin->sin_addr.s_addr) != INADDR_LOOPBACK) {
             ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-                         "markdown_metrics: access denied from non-localhost IPv4 address");
+                         "markdown: access denied from non-localhost IPv4 address");
             return NGX_HTTP_FORBIDDEN;
         }
     }
@@ -365,20 +365,20 @@ ngx_http_markdown_metrics_validate_request(ngx_http_request_t *r)
             (const struct sockaddr_in6 *) r->connection->sockaddr;
         if (!IN6_IS_ADDR_LOOPBACK(&sin6->sin6_addr)) {
             ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-                         "markdown_metrics: access denied from non-localhost IPv6 address");
+                         "markdown: access denied from non-localhost IPv6 address");
             return NGX_HTTP_FORBIDDEN;
         }
     }
 #endif
     else {
         ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-                     "markdown_metrics: access denied from unknown address family");
+                     "markdown: access denied from unknown address family");
         return NGX_HTTP_FORBIDDEN;
     }
 
     if (ngx_http_markdown_metrics == NULL) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                     "markdown_metrics: shared metrics state unavailable");
+                     "markdown: shared metrics state unavailable");
         return NGX_HTTP_INTERNAL_SERVER_ERROR;
     }
 
@@ -1407,7 +1407,7 @@ ngx_http_markdown_metrics_render_response_body(
         if (p >= b->end) {
             ngx_log_error(NGX_LOG_ERR,
                 r->connection->log, 0,
-                "markdown_metrics: JSON output "
+                "markdown: JSON output "
                 "truncated, buffer too small");
             return NULL;
         }
@@ -1422,7 +1422,7 @@ ngx_http_markdown_metrics_render_response_body(
         if (p == NULL) {
             ngx_log_error(NGX_LOG_ERR,
                 r->connection->log, 0,
-                "markdown_metrics: Prometheus output "
+                "markdown: Prometheus output "
                 "truncated, buffer too small");
             return NULL;
         }
@@ -1447,7 +1447,7 @@ ngx_http_markdown_metrics_render_response_body(
         if (p >= b->end) {
             ngx_log_error(NGX_LOG_ERR,
                 r->connection->log, 0,
-                "markdown_metrics: plain-text output "
+                "markdown: plain-text output "
                 "truncated, buffer too small");
             return NULL;
         }
@@ -1543,7 +1543,7 @@ ngx_http_markdown_metrics_handler(ngx_http_request_t *r)
             NGX_HTTP_MARKDOWN_METRICS_BUF_SIZE);
     if (b == NULL) {
         ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0,
-            "markdown_metrics: failed to allocate "
+            "markdown: failed to allocate "
             "response buffer");
         return NGX_HTTP_INTERNAL_SERVER_ERROR;
     }

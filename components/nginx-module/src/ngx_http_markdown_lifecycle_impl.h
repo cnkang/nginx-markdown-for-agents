@@ -50,7 +50,7 @@ ngx_http_markdown_init_worker(ngx_cycle_t *cycle)
         || ngx_http_markdown_metrics_shm_zone->data == NULL)
     {
         ngx_log_error(NGX_LOG_CRIT, cycle->log, 0,
-                      "markdown filter: metrics shared-memory zone unavailable");
+                      "markdown: metrics shared-memory zone unavailable");
         return NGX_ERROR;
     }
 
@@ -59,21 +59,21 @@ ngx_http_markdown_init_worker(ngx_cycle_t *cycle)
     ngx_http_markdown_converter = markdown_converter_new();
     if (ngx_http_markdown_converter == NULL) {
         ngx_log_error(NGX_LOG_CRIT, cycle->log, 0,
-                      "markdown filter: failed to initialize converter in worker process, "
+                      "markdown: failed to initialize converter in worker process, "
                       "category=system");
         return NGX_ERROR;
     }
 
     ngx_log_error(NGX_LOG_INFO, cycle->log, 0,
-                  "markdown filter: converter initialized in worker process (pid: %P)",
+                  "markdown: converter initialized in worker process (pid: %P)",
                   ngx_pid);
 
 #ifdef NGX_HTTP_BROTLI
     ngx_log_error(NGX_LOG_INFO, cycle->log, 0,
-                  "markdown filter: decompression support: gzip=yes, deflate=yes, brotli=yes");
+                  "markdown: decompression support: gzip=yes, deflate=yes, brotli=yes");
 #else
     ngx_log_error(NGX_LOG_INFO, cycle->log, 0,
-                  "markdown filter: decompression support: gzip=yes, deflate=yes, brotli=no");
+                  "markdown: decompression support: gzip=yes, deflate=yes, brotli=no");
 #endif
 
     /* Start dynamic config watcher if configured. */
@@ -90,7 +90,7 @@ ngx_http_markdown_init_worker(ngx_cycle_t *cycle)
                != NGX_OK)
         {
             ngx_log_error(NGX_LOG_WARN, cycle->log, 0,
-                          "markdown dynconf: failed to start watcher");
+                          "markdown: failed to start watcher");
             /* Non-fatal: worker continues without hot-reload. */
         }
 
@@ -135,7 +135,7 @@ ngx_http_markdown_exit_worker(ngx_cycle_t *cycle)
 
     if (ngx_http_markdown_converter == NULL) {
         ngx_log_debug0(NGX_LOG_DEBUG_HTTP, cycle->log, 0,
-                       "markdown filter: no converter to clean up in worker process");
+                       "markdown: no converter to clean up in worker process");
         return;
     }
 
@@ -144,7 +144,7 @@ ngx_http_markdown_exit_worker(ngx_cycle_t *cycle)
     ngx_http_markdown_metrics = NULL;
 
     ngx_log_error(NGX_LOG_INFO, cycle->log, 0,
-                  "markdown filter: converter cleaned up in worker process (pid: %P)",
+                  "markdown: converter cleaned up in worker process (pid: %P)",
                   ngx_pid);
 }
 

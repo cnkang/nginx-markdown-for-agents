@@ -8,7 +8,7 @@
  * unit (ngx_http_markdown_filter_module.c).  It must NOT be included from
  * any other .c file or used as a standalone compilation unit.
  *
- * Emits a structured "markdown decision:" log entry once per request,
+ * Emits a structured "markdown:" log entry once per request,
  * gated by the configured markdown_log_verbosity level.
  *
  * Requirements: FR-03.1, FR-03.2, FR-03.3, FR-03.4, FR-03.5, FR-03.6
@@ -260,7 +260,7 @@ ngx_http_markdown_log_decision_debug(ngx_http_request_t *r,
         && error_category->len > 0)
     {
         ngx_log_error(log_level, r->connection->log, 0,
-            "markdown decision: reason=%V "
+            "markdown: reason=%V "
             "category=%V "
             "method=%V uri=%V content_type=%V "
             "filter_value=%V accept=%V status=%ui",
@@ -271,7 +271,7 @@ ngx_http_markdown_log_decision_debug(ngx_http_request_t *r,
             r->headers_out.status);
     } else {
         ngx_log_error(log_level, r->connection->log, 0,
-            "markdown decision: reason=%V "
+            "markdown: reason=%V "
             "method=%V uri=%V content_type=%V "
             "filter_value=%V accept=%V status=%ui",
             reason_code, meta->method_name, &r->uri,
@@ -339,7 +339,7 @@ ngx_http_markdown_log_decision_with_category(ngx_http_request_t *r,
 
     if (effective_verbosity > NGX_HTTP_MARKDOWN_LOG_DEBUG) {
         ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-                      "markdown decision: invalid log_verbosity=%ui, "
+                      "markdown: invalid log_verbosity=%ui, "
                       "falling back to INFO",
                       effective_verbosity);
         effective_verbosity = NGX_HTTP_MARKDOWN_LOG_INFO;
@@ -385,7 +385,7 @@ ngx_http_markdown_log_decision_with_category(ngx_http_request_t *r,
     /* Base format (FR-03.2, FR-03.6) */
     if (error_category != NULL && error_category->len > 0) {
         ngx_log_error(log_level, r->connection->log, 0,
-            "markdown decision: reason=%V "
+            "markdown: reason=%V "
             "category=%V "
             "method=%V uri=%V content_type=%V",
             reason_code, error_category,
@@ -393,7 +393,7 @@ ngx_http_markdown_log_decision_with_category(ngx_http_request_t *r,
             &content_type);
     } else {
         ngx_log_error(log_level, r->connection->log, 0,
-            "markdown decision: reason=%V "
+            "markdown: reason=%V "
             "method=%V uri=%V content_type=%V",
             reason_code, &method_name, &r->uri,
             &content_type);
