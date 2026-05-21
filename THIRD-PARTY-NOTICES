@@ -165,13 +165,32 @@ Section B: Rust Conversion Engine Dependencies
     Licensed under the Apache License, Version 2.0 or the MIT license, at your
     option.
 
+--------------------------------------------------------------------------------
+
+11. flate2 1.1.9
+    https://github.com/rust-lang/flate2-rs
+    License: MIT OR Apache-2.0
+    Copyright (c) 2014 Alex Crichton
+
+    Licensed under the Apache License, Version 2.0 or the MIT license, at your
+    option.
+
+--------------------------------------------------------------------------------
+
+12. brotli 8.0.2 (Rust crate)
+    https://github.com/dropbox/rust-brotli
+    License: BSD-3-Clause OR MIT
+    Copyright (c) 2016 Dropbox, Inc.
+
+    Licensed under the BSD 3-Clause License or the MIT license, at your option.
+
 ================================================================================
 
 Section C: Build-Time Tool Dependencies (not distributed in binary)
 
 ================================================================================
 
-11. cbindgen 0.29.2
+13. cbindgen 0.29.2
     https://github.com/mozilla/cbindgen
     License: MPL-2.0
     Copyright (c) Mozilla Corporation

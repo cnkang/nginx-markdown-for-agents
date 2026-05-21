@@ -57,6 +57,12 @@
 #define NGX_CONF_UNSET_PTR ((void *) -1)
 #endif
 
+#ifndef NGX_LOG_EMERG
+#define NGX_LOG_EMERG 0
+#endif
+#ifndef NGX_LOG_ERR
+#define NGX_LOG_ERR 1
+#endif
 #ifndef NGX_LOG_WARN
 #define NGX_LOG_WARN 2
 #endif
