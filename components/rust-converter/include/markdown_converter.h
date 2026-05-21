@@ -110,9 +110,9 @@
 /**
  * Decompression error category: budget exceeded.
  *
- * These constants are used in FFIDecompResult.error_category and as
- * the return value of markdown_decompress_bounded. They occupy a
- * separate namespace from ERROR_* (which are for MarkdownResult.error_code).
+ * These constants are used in `FFIDecompResult.error_category` and as
+ * the return value of `markdown_decompress_bounded`. They occupy a
+ * separate namespace from `ERROR_*` (which are for `MarkdownResult.error_code`).
  * Values start at 101 to avoid numeric overlap with the ERROR_* range (0-99).
  */
 #define DECOMP_CATEGORY_BUDGET_EXCEEDED 101
@@ -163,12 +163,12 @@
 #define NEGOTIATE_REASON_MALFORMED 4
 
 /**
- * Wildcard mode: strict -- wildcard MIME type does NOT match text/markdown.
+ * Wildcard mode: strict — wildcard MIME type does NOT match text/markdown.
  */
 #define NEGOTIATE_WILDCARD_STRICT 0
 
 /**
- * Wildcard mode: allow -- wildcard MIME type matches text/markdown.
+ * Wildcard mode: allow — wildcard MIME type matches text/markdown.
  */
 #define NEGOTIATE_WILDCARD_ALLOW 1
 
