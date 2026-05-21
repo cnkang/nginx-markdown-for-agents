@@ -572,6 +572,18 @@ ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
         conf->decompress_max_size = conf->max_size;
     }
 
+    /*
+     * Reject zero decompress_max_size when auto_decompress is enabled:
+     * a budget of 0 would reject all decompression unconditionally,
+     * which is almost certainly a misconfiguration.
+     */
+    if (conf->auto_decompress && conf->decompress_max_size == 0) {
+        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+            "\"markdown_decompress_max_size\" must be greater "
+            "than 0 when auto_decompress is enabled");
+        return NGX_CONF_ERROR;
+    }
+
     ngx_http_markdown_log_merged_conf(cf, conf);
 
     return NGX_CONF_OK;

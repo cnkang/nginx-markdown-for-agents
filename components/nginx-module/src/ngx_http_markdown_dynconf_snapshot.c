@@ -425,6 +425,15 @@ ngx_http_markdown_dynconf_snapshot_to_json(ngx_pool_t *pool,
         conf->streaming.auto_threshold, 0);
 #endif /* MARKDOWN_STREAMING_ENABLED */
 
+    /*
+     * Detect truncation: if p reached last, the buffer was too small
+     * and the JSON output is incomplete.  Return NGX_ERROR so the
+     * caller does not serve a partial snapshot.
+     */
+    if (p >= last) {
+        return NGX_ERROR;
+    }
+
     *out_buf = buf;
     *out_len = p - buf;
 
