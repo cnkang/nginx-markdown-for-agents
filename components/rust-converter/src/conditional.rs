@@ -179,6 +179,30 @@ fn parse_http_date(date: &str) -> Option<i64> {
         return None;
     }
 
+    let bytes = date.as_bytes();
+
+    // Validate weekday (positions 0..3)
+    let weekday = &date[0..3];
+    match weekday {
+        "Mon" | "Tue" | "Wed" | "Thu" | "Fri" | "Sat" | "Sun" => {}
+        _ => return None,
+    }
+
+    // Validate fixed separators: ", " at pos 3..5, spaces at 7,11,16, colons at 19,22
+    if bytes[3] != b',' || bytes[4] != b' ' {
+        return None;
+    }
+    if bytes[7] != b' ' || bytes[11] != b' ' || bytes[16] != b' ' {
+        return None;
+    }
+    if bytes[19] != b':' || bytes[22] != b':' {
+        return None;
+    }
+    // Space before "GMT" at position 25
+    if bytes[25] != b' ' {
+        return None;
+    }
+
     // Extract components
     let day_str = &date[5..7];
     let month_str = &date[8..11];
@@ -378,6 +402,36 @@ mod tests {
     fn test_parse_http_date_invalid() {
         assert!(parse_http_date("not a date").is_none());
         assert!(parse_http_date("").is_none());
+    }
+
+    #[test]
+    fn test_parse_http_date_invalid_weekday() {
+        // Invalid weekday token
+        assert!(parse_http_date("Foo, 06 Nov 1994 08:49:37 GMT").is_none());
+        // Missing comma after weekday
+        assert!(parse_http_date("Sun  06 Nov 1994 08:49:37 GMT").is_none());
+        // Missing space after comma
+        assert!(parse_http_date("Sun,X06 Nov 1994 08:49:37 GMT").is_none());
+    }
+
+    #[test]
+    fn test_parse_http_date_invalid_separators() {
+        // Colon replaced with space in time
+        assert!(parse_http_date("Sun, 06 Nov 1994 08 49 37 GMT").is_none());
+        // Feb 30 (invalid day for month)
+        assert!(parse_http_date("Sun, 30 Feb 1994 08:49:37 GMT").is_none());
+    }
+
+    #[test]
+    fn test_invalid_weekday_does_not_match_conditional() {
+        // Malformed date should cause Proceed (conservatively assume modified)
+        let r = evaluate_conditional(
+            None,
+            None,
+            Some("Foo, 06 Nov 1994 08:49:37 GMT"),
+            Some("Sun, 04 Nov 1994 08:49:37 GMT"),
+        );
+        assert_eq!(r, ConditionalResult::Proceed);
     }
 
     #[test]

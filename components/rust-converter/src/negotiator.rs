@@ -173,33 +173,19 @@ fn extract_q_values(entries: &[AcceptEntry], on_wildcard: bool) -> (u16, u16) {
     for entry in entries {
         match entry.mime_type.as_str() {
             "text/markdown" => {
-                if entry.q_value > markdown_q {
-                    markdown_q = entry.q_value;
-                }
+                markdown_q = markdown_q.max(entry.q_value);
             }
             "text/html" => {
-                if entry.q_value > html_q {
-                    html_q = entry.q_value;
-                }
+                html_q = html_q.max(entry.q_value);
             }
-            "*/*" => {
-                if on_wildcard {
-                    if entry.q_value > markdown_q {
-                        markdown_q = entry.q_value;
-                    }
-                    if entry.q_value > html_q {
-                        html_q = entry.q_value;
-                    }
-                }
+            "*/*" if on_wildcard => {
+                markdown_q = markdown_q.max(entry.q_value);
+                html_q = html_q.max(entry.q_value);
             }
             "text/*" => {
                 // text/* matches both text/markdown and text/html
-                if entry.q_value > markdown_q {
-                    markdown_q = entry.q_value;
-                }
-                if entry.q_value > html_q {
-                    html_q = entry.q_value;
-                }
+                markdown_q = markdown_q.max(entry.q_value);
+                html_q = html_q.max(entry.q_value);
             }
             _ => {}
         }
