@@ -286,33 +286,21 @@ impl ReasonCode {
                 "header_filter: Accept negotiation determined text/html preferred"
             }
             ReasonCode::SkippedNoAccept => "header_filter: no Accept header present",
-            ReasonCode::SkippedConditional => {
-                "header_filter: conditional request matched (304)"
-            }
+            ReasonCode::SkippedConditional => "header_filter: conditional request matched (304)",
             ReasonCode::FailedDecompression => "body_filter: decompression failed (generic)",
             ReasonCode::DecompressionBudgetExceeded => {
                 "body_filter: decompression output exceeded budget"
             }
-            ReasonCode::DecompressionFormatError => {
-                "body_filter: invalid compression format"
-            }
-            ReasonCode::DecompressionTruncatedInput => {
-                "body_filter: truncated compressed input"
-            }
+            ReasonCode::DecompressionFormatError => "body_filter: invalid compression format",
+            ReasonCode::DecompressionTruncatedInput => "body_filter: truncated compressed input",
             ReasonCode::DecompressionIoError => "body_filter: decompression I/O error",
             ReasonCode::ParseTimeout => "body_filter: parse timeout exceeded",
-            ReasonCode::ParseBudgetExceeded => {
-                "body_filter: parser memory budget exceeded"
-            }
-            ReasonCode::ReplayBufferError => {
-                "body_filter: replay buffer init/append failure"
-            }
+            ReasonCode::ParseBudgetExceeded => "body_filter: parser memory budget exceeded",
+            ReasonCode::ReplayBufferError => "body_filter: replay buffer init/append failure",
             ReasonCode::SkippedAcceptReject => {
                 "header_filter: Accept explicitly rejects text/markdown (q=0)"
             }
-            ReasonCode::FfiCallError => {
-                "body_filter: FFI function returned unexpected error"
-            }
+            ReasonCode::FfiCallError => "body_filter: FFI function returned unexpected error",
             ReasonCode::NotEligible => {
                 "header_filter: response not eligible (method/status/content-type)"
             }

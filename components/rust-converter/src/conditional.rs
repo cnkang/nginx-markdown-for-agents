@@ -123,13 +123,11 @@ pub fn evaluate_conditional(
             return ConditionalResult::NotModified;
         }
 
-        if let Some(etag_str) = entity_etag {
-            if let Some((etag_weak, etag_val)) = parse_etag(etag_str) {
-                // If-None-Match uses weak comparison for GET/HEAD
-                for (inm_weak, inm_val) in &inm_etags {
-                    if etag_weak_match((*inm_weak, inm_val.as_str()), (etag_weak, etag_val)) {
-                        return ConditionalResult::NotModified;
-                    }
+        if let Some((etag_weak, etag_val)) = entity_etag.and_then(parse_etag) {
+            // If-None-Match uses weak comparison for GET/HEAD
+            for (inm_weak, inm_val) in &inm_etags {
+                if etag_weak_match((*inm_weak, inm_val.as_str()), (etag_weak, etag_val)) {
+                    return ConditionalResult::NotModified;
                 }
             }
         }
@@ -139,10 +137,10 @@ pub fn evaluate_conditional(
     }
 
     // Step 2: If-Modified-Since (only if If-None-Match is absent)
-    if let (Some(ims), Some(lm)) = (if_modified_since, last_modified) {
-        if !is_modified_since(ims, lm) {
-            return ConditionalResult::NotModified;
-        }
+    if let (Some(ims), Some(lm)) = (if_modified_since, last_modified)
+        && !is_modified_since(ims, lm)
+    {
+        return ConditionalResult::NotModified;
     }
 
     ConditionalResult::Proceed
@@ -213,16 +211,27 @@ fn parse_http_date(date: &str) -> Option<i64> {
 
     // Convert to Unix timestamp using simplified formula
     // (valid for 1970-2100, sufficient for HTTP date ranges)
-    if year < 1970
-        || year > 2100
+    if !(1970..=2100).contains(&year)
+        || !(1..=12).contains(&month)
         || day < 1
-        || day > 31
-        || month < 1
-        || month > 12
         || hour > 23
         || min > 59
         || sec > 60
     {
+        return None;
+    }
+
+    // Per-month day validation
+    let max_day = match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 => {
+            let leap = (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0);
+            if leap { 29 } else { 28 }
+        }
+        _ => return None,
+    };
+    if day > max_day {
         return None;
     }
 

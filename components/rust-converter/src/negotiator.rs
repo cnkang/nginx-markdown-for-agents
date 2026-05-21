@@ -96,13 +96,13 @@ fn parse_q_value(param: &str) -> Option<u16> {
 
     // Parse the decimal q-value.
     // Supported formats: "1", "1.0", "0.9", "0.123", "0", "0.0"
-    if let Ok(v) = value_str.parse::<f32>() {
-        if v >= 0.0 && v <= 1.0 {
-            // Round to 3 decimal places (RFC 7231 limit).
-            let scaled = (v * 1000.0).round() as u16;
-            if scaled <= 1000 {
-                return Some(scaled);
-            }
+    if let Ok(v) = value_str.parse::<f32>()
+        && (0.0..=1.0).contains(&v)
+    {
+        // Round to 3 decimal places (RFC 7231 limit).
+        let scaled = (v * 1000.0).round() as u16;
+        if scaled <= 1000 {
+            return Some(scaled);
         }
     }
 

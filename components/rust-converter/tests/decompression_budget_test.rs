@@ -25,7 +25,9 @@ fn decompress_bounded(compressed: &[u8], budget: usize) -> Result<Vec<u8>, &'sta
     let mut buf = [0u8; 4096];
 
     loop {
-        let n = decoder.read(&mut buf).map_err(|_| "decompression I/O error")?;
+        let n = decoder
+            .read(&mut buf)
+            .map_err(|_| "decompression I/O error")?;
         if n == 0 {
             break;
         }
