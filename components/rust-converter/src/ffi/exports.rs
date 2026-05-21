@@ -176,11 +176,11 @@ pub unsafe extern "C" fn markdown_converter_free(handle: *mut MarkdownConverterH
 ///
 /// # Parameters
 ///
-/// - `on_wildcard`: Controls wildcard (`*/*`) handling.
+/// - `on_wildcard`: Controls wildcard (all-types MIME) handling.
 ///   - `0` (NEGOTIATE_WILDCARD_STRICT): wildcards do NOT match text/markdown;
 ///     only explicit `text/markdown` triggers conversion.
 ///   - `1` (NEGOTIATE_WILDCARD_ALLOW): wildcards match text/markdown,
-///     so `Accept: */*` will trigger conversion.
+///     so a wildcard Accept header will trigger conversion.
 ///
 /// # Safety
 ///
@@ -1040,8 +1040,8 @@ mod tests {
                 &mut result,
             )
         };
-        assert_eq!(rc, 5, "Expected budget_exceeded (5), got {rc}");
-        assert_eq!(result.error_category, 5);
+        assert_eq!(rc, 101, "Expected budget_exceeded (101), got {rc}");
+        assert_eq!(result.error_category, 101);
         assert!(result.output.is_null());
         assert_eq!(result.output_len, 0);
     }
@@ -1060,19 +1060,19 @@ mod tests {
             )
         };
         assert_eq!(
-            rc, 6,
-            "Expected format_error (6) for unknown format, got {rc}"
+            rc, 102,
+            "Expected format_error (102) for unknown format, got {rc}"
         );
-        assert_eq!(result.error_category, 6);
+        assert_eq!(result.error_category, 102);
     }
 
     #[test]
-    fn decompress_bounded_null_result_returns_9() {
+    fn decompress_bounded_null_result_returns_invalid_args() {
         let data = b"some data";
         let rc = unsafe {
             markdown_decompress_bounded(data.as_ptr(), data.len(), 0, 1024, std::ptr::null_mut())
         };
-        assert_eq!(rc, 9);
+        assert_eq!(rc, 105);
     }
 
     #[test]
@@ -1080,10 +1080,10 @@ mod tests {
         let mut result: FFIDecompResult = unsafe { std::mem::zeroed() };
         let rc = unsafe { markdown_decompress_bounded(std::ptr::null(), 0, 0, 1024, &mut result) };
         assert_eq!(
-            rc, 7,
-            "Expected truncated_input (7) for empty input, got {rc}"
+            rc, 103,
+            "Expected truncated_input (103) for empty input, got {rc}"
         );
-        assert_eq!(result.error_category, 7);
+        assert_eq!(result.error_category, 103);
     }
 
     #[test]
