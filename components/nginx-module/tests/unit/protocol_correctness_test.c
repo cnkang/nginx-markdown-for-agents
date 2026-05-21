@@ -304,7 +304,7 @@ markdown_build_header_plan(const uint8_t *ct,
     uintptr_t ct_len, uint8_t has_etag,
     struct FFIHeaderPlan *result)
 {
-    (void) ct; (void) ct_len; (void) has_etag;
+    (void) ct; (void) ct_len;
     if (result == NULL) { return; }
     g_pc_stub_count = 0;
     g_pc_stub_entries[0].op_type = 0;
@@ -325,13 +325,15 @@ markdown_build_header_plan(const uint8_t *ct,
     g_pc_stub_entries[2].value = NULL;
     g_pc_stub_entries[2].value_len = 0;
     g_pc_stub_count++;
-    /* Entry 3: MODIFY ETag (op_type=2) */
-    g_pc_stub_entries[3].op_type = 2;
-    g_pc_stub_entries[3].key = (const uint8_t *) "ETag";
-    g_pc_stub_entries[3].key_len = 4;
-    g_pc_stub_entries[3].value = NULL;
-    g_pc_stub_entries[3].value_len = 0;
-    g_pc_stub_count++;
+    /* Entry 3: MODIFY ETag (op_type=2) — only when has_etag */
+    if (has_etag) {
+        g_pc_stub_entries[3].op_type = 2;
+        g_pc_stub_entries[3].key = (const uint8_t *) "ETag";
+        g_pc_stub_entries[3].key_len = 4;
+        g_pc_stub_entries[3].value = NULL;
+        g_pc_stub_entries[3].value_len = 0;
+        g_pc_stub_count++;
+    }
     result->handle = NULL;
     result->entries =
         (const struct FFIHeaderEntry *) g_pc_stub_entries;
@@ -423,6 +425,14 @@ ngx_http_markdown_apply_header_plan(ngx_http_request_t *r,
                     entry->key_len) == 0)
             {
                 ngx_http_markdown_remove_content_encoding(r);
+            }
+            else if (entry->key_len
+                == sizeof("Content-Length") - 1
+                && ngx_strncasecmp((u_char *) entry->key,
+                    (u_char *) "Content-Length",
+                    entry->key_len) == 0)
+            {
+                r->headers_out.content_length_n = -1;
             }
             break;
         case 2: /* MODIFY (ETag placeholder) */

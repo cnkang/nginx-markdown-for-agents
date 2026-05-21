@@ -2602,6 +2602,8 @@ test_process_chain_and_body_filter_deep_paths(void)
     rc = ngx_http_markdown_streaming_body_filter(&r, &in);
     TEST_ASSERT(rc == NGX_OK,
         "body_filter should reenter full-buffer path after fallback");
+    g_buffer_append_fail_after = 0;
+    g_buffer_append_call_count = 0;
 
     ctx.processing_path = NGX_HTTP_MARKDOWN_PATH_STREAMING;
     ctx.eligible = 1;
