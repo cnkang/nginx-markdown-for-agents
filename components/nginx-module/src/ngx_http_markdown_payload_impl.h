@@ -764,12 +764,12 @@ ngx_http_markdown_decompress_via_rust(
 
     if (ffi_rc != 0) {
         /*
-         * Map Rust error categories to NGINX decomp error codes:
-         *   5 = budget_exceeded
-         *   6 = format_error
-         *   7 = truncated_input
-         *   8 = io_error
-         *   9 = invalid arguments
+         * Map Rust DECOMP_CATEGORY_* error codes to NGINX decomp error codes:
+         *   101 = DECOMP_CATEGORY_BUDGET_EXCEEDED
+         *   102 = DECOMP_CATEGORY_FORMAT_ERROR
+         *   103 = DECOMP_CATEGORY_TRUNCATED_INPUT
+         *   104 = DECOMP_CATEGORY_IO_ERROR
+         *   105 = DECOMP_CATEGORY_INVALID_ARGS
          */
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                      "markdown filter: rust decompress "
