@@ -777,13 +777,15 @@ ngx_http_markdown_decompress_via_rust(
                      ffi_rc, result.error_category);
 
         switch (ffi_rc) {
-        case 5:
+        case 101:
             return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
-        case 6:
+        case 102:
             return NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR;
-        case 7:
+        case 103:
             return NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT;
-        case 8:
+        case 104:
+            return NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR;
+        case 105:
             return NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR;
         default:
             return NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR;

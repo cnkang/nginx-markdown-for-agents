@@ -58,6 +58,15 @@ pub const ERROR_DECOMPRESSION_BUDGET_EXCEEDED: u32 = 9;
 pub const ERROR_PARSE_TIMEOUT: u32 = 10;
 /// Parse budget exceeded: parser memory allocation exceeded parser_memory_budget.
 pub const ERROR_PARSE_BUDGET_EXCEEDED: u32 = 11;
+/// Decompression format error (invalid or corrupt compressed data).
+#[allow(dead_code)]
+pub const ERROR_DECOMPRESSION_FORMAT_ERROR: u32 = 12;
+/// Decompression truncated input (incomplete compressed stream).
+#[allow(dead_code)]
+pub const ERROR_DECOMPRESSION_TRUNCATED_INPUT: u32 = 13;
+/// Decompression I/O error (unexpected failure during decompression).
+#[allow(dead_code)]
+pub const ERROR_DECOMPRESSION_IO_ERROR: u32 = 14;
 /// Internal error (unexpected condition, panic caught).
 pub const ERROR_INTERNAL: u32 = 99;
 
@@ -66,18 +75,19 @@ pub const ERROR_INTERNAL: u32 = 99;
 /// These constants are used in `FFIDecompResult.error_category` and as
 /// the return value of `markdown_decompress_bounded`. They occupy a
 /// separate namespace from `ERROR_*` (which are for `MarkdownResult.error_code`).
+/// Values start at 101 to avoid numeric overlap with the ERROR_* range (0-99).
 #[allow(dead_code)]
-pub const DECOMP_CATEGORY_BUDGET_EXCEEDED: u32 = 5;
+pub const DECOMP_CATEGORY_BUDGET_EXCEEDED: u32 = 101;
 /// Decompression error category: invalid compression format.
-pub const DECOMP_CATEGORY_FORMAT_ERROR: u32 = 6;
+pub const DECOMP_CATEGORY_FORMAT_ERROR: u32 = 102;
 /// Decompression error category: truncated input stream.
 #[allow(dead_code)]
-pub const DECOMP_CATEGORY_TRUNCATED_INPUT: u32 = 7;
+pub const DECOMP_CATEGORY_TRUNCATED_INPUT: u32 = 103;
 /// Decompression error category: I/O error during decompression.
 #[allow(dead_code)]
-pub const DECOMP_CATEGORY_IO_ERROR: u32 = 8;
+pub const DECOMP_CATEGORY_IO_ERROR: u32 = 104;
 /// Decompression error category: invalid arguments (NULL pointers, unknown format).
-pub const DECOMP_CATEGORY_INVALID_ARGS: u32 = 9;
+pub const DECOMP_CATEGORY_INVALID_ARGS: u32 = 105;
 
 /// Conversion options passed from C to Rust.
 #[repr(C)]
@@ -294,10 +304,10 @@ pub const NEGOTIATE_REASON_EXPLICIT_REJECT: u8 = 3;
 /// Reason code: Accept header is malformed.
 pub const NEGOTIATE_REASON_MALFORMED: u8 = 4;
 
-/// Wildcard mode: strict — `*/*` does NOT match text/markdown.
+/// Wildcard mode: strict — wildcard MIME type does NOT match text/markdown.
 #[allow(dead_code)]
 pub const NEGOTIATE_WILDCARD_STRICT: u8 = 0;
-/// Wildcard mode: allow — `*/*` matches text/markdown.
+/// Wildcard mode: allow — wildcard MIME type matches text/markdown.
 #[allow(dead_code)]
 pub const NEGOTIATE_WILDCARD_ALLOW: u8 = 1;
 
@@ -537,6 +547,9 @@ mod layout_tests {
             ERROR_DECOMPRESSION_BUDGET_EXCEEDED,
             ERROR_PARSE_TIMEOUT,
             ERROR_PARSE_BUDGET_EXCEEDED,
+            ERROR_DECOMPRESSION_FORMAT_ERROR,
+            ERROR_DECOMPRESSION_TRUNCATED_INPUT,
+            ERROR_DECOMPRESSION_IO_ERROR,
             ERROR_INTERNAL,
         ];
 
