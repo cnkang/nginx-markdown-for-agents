@@ -27,6 +27,13 @@
 /*
  * Static global diagnostics state for this worker process.
  *
+ * IMPORTANT: Per-worker semantics.  NGINX uses a multi-process model
+ * where each worker has its own address space.  This diagnostics state
+ * is local to the worker that handles the diagnostics request.  If
+ * multiple workers are configured, each worker reports only its own
+ * decisions and metrics.  Operators should aggregate externally (e.g.
+ * via Prometheus scraping all workers) for a global view.
+ *
  * Initialized once during module postconfiguration (or worker init)
  * and shared across all requests in this worker.  The ring buffer
  * is written by ngx_http_markdown_diagnostics_record() from the
