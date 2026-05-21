@@ -88,6 +88,21 @@
 #define ERROR_PARSE_BUDGET_EXCEEDED 11
 
 /**
+ * Decompression format error (invalid or corrupt compressed data).
+ */
+#define ERROR_DECOMPRESSION_FORMAT_ERROR 12
+
+/**
+ * Decompression truncated input (incomplete compressed stream).
+ */
+#define ERROR_DECOMPRESSION_TRUNCATED_INPUT 13
+
+/**
+ * Decompression I/O error (unexpected failure during decompression).
+ */
+#define ERROR_DECOMPRESSION_IO_ERROR 14
+
+/**
  * Internal error (unexpected condition, panic caught).
  */
 #define ERROR_INTERNAL 99
@@ -95,31 +110,32 @@
 /**
  * Decompression error category: budget exceeded.
  *
- * These constants are used in `FFIDecompResult.error_category` and as
- * the return value of `markdown_decompress_bounded`. They occupy a
- * separate namespace from `ERROR_*` (which are for `MarkdownResult.error_code`).
+ * These constants are used in FFIDecompResult.error_category and as
+ * the return value of markdown_decompress_bounded. They occupy a
+ * separate namespace from ERROR_* (which are for MarkdownResult.error_code).
+ * Values start at 101 to avoid numeric overlap with the ERROR_* range (0-99).
  */
-#define DECOMP_CATEGORY_BUDGET_EXCEEDED 5
+#define DECOMP_CATEGORY_BUDGET_EXCEEDED 101
 
 /**
  * Decompression error category: invalid compression format.
  */
-#define DECOMP_CATEGORY_FORMAT_ERROR 6
+#define DECOMP_CATEGORY_FORMAT_ERROR 102
 
 /**
  * Decompression error category: truncated input stream.
  */
-#define DECOMP_CATEGORY_TRUNCATED_INPUT 7
+#define DECOMP_CATEGORY_TRUNCATED_INPUT 103
 
 /**
  * Decompression error category: I/O error during decompression.
  */
-#define DECOMP_CATEGORY_IO_ERROR 8
+#define DECOMP_CATEGORY_IO_ERROR 104
 
 /**
  * Decompression error category: invalid arguments (NULL pointers, unknown format).
  */
-#define DECOMP_CATEGORY_INVALID_ARGS 9
+#define DECOMP_CATEGORY_INVALID_ARGS 105
 
 /**
  * Reason code: client prefers text/markdown, proceed with conversion.
@@ -147,12 +163,12 @@
 #define NEGOTIATE_REASON_MALFORMED 4
 
 /**
- * Wildcard mode: strict — `*/*` does NOT match text/markdown.
+ * Wildcard mode: strict -- wildcard MIME type does NOT match text/markdown.
  */
 #define NEGOTIATE_WILDCARD_STRICT 0
 
 /**
- * Wildcard mode: allow — `*/*` matches text/markdown.
+ * Wildcard mode: allow -- wildcard MIME type matches text/markdown.
  */
 #define NEGOTIATE_WILDCARD_ALLOW 1
 
@@ -688,11 +704,11 @@ void markdown_converter_free(struct MarkdownConverterHandle *handle);
  *
  * # Parameters
  *
- * - `on_wildcard`: Controls wildcard (`*/*`) handling.
+ * - `on_wildcard`: Controls wildcard (all-types MIME) handling.
  *   - `0` (NEGOTIATE_WILDCARD_STRICT): wildcards do NOT match text/markdown;
  *     only explicit `text/markdown` triggers conversion.
  *   - `1` (NEGOTIATE_WILDCARD_ALLOW): wildcards match text/markdown,
- *     so `Accept: */*` will trigger conversion.
+ *     so a wildcard Accept header will trigger conversion.
  *
  * # Safety
  *

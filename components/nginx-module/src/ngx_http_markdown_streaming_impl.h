@@ -1664,10 +1664,8 @@ ngx_http_markdown_streaming_process_chunk(
             uint32_t  decomp_error_code;
 
             /*
-             * Map decompressor return codes to FFI error codes:
-             * budget exceeded → ERROR_DECOMPRESSION_BUDGET_EXCEEDED
-             * for proper metrics/reason-code classification; all
-             * other errors → ERROR_INTERNAL.
+             * Map decompressor return codes to FFI error codes
+             * for proper metrics/reason-code classification.
              *
              * Also increment per-category decompression metrics.
              */
@@ -1676,15 +1674,15 @@ ngx_http_markdown_streaming_process_chunk(
                 NGX_HTTP_MARKDOWN_METRIC_INC(
                     decompressions.budget_exceeded_total);
             } else if (rc == NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR) {
-                decomp_error_code = ERROR_INTERNAL;
+                decomp_error_code = ERROR_DECOMPRESSION_FORMAT_ERROR;
                 NGX_HTTP_MARKDOWN_METRIC_INC(
                     decompressions.format_error_total);
             } else if (rc == NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT) {
-                decomp_error_code = ERROR_INTERNAL;
+                decomp_error_code = ERROR_DECOMPRESSION_TRUNCATED_INPUT;
                 NGX_HTTP_MARKDOWN_METRIC_INC(
                     decompressions.truncated_input_total);
             } else {
-                decomp_error_code = ERROR_INTERNAL;
+                decomp_error_code = ERROR_DECOMPRESSION_IO_ERROR;
                 NGX_HTTP_MARKDOWN_METRIC_INC(
                     decompressions.io_error_total);
             }
@@ -1845,10 +1843,10 @@ ngx_http_markdown_streaming_finalize_decomp(
         uint32_t  finish_error_code;
 
         /*
-         * Map decompressor return codes to FFI error codes:
-         * budget exceeded → ERROR_DECOMPRESSION_BUDGET_EXCEEDED
-         * for proper metrics/reason-code classification; all other
-         * errors → ERROR_INTERNAL (pre-commit) or ERROR_POST_COMMIT.
+         * Map decompressor return codes to FFI error codes
+         * for proper metrics/reason-code classification.
+         * Post-commit errors use ERROR_POST_COMMIT to signal
+         * that partial output was already emitted.
          *
          * Also increment per-category decompression metrics.
          */
@@ -1864,7 +1862,7 @@ ngx_http_markdown_streaming_finalize_decomp(
             {
                 finish_error_code = ERROR_POST_COMMIT;
             } else {
-                finish_error_code = ERROR_INTERNAL;
+                finish_error_code = ERROR_DECOMPRESSION_FORMAT_ERROR;
             }
         } else if (rc == NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT) {
             NGX_HTTP_MARKDOWN_METRIC_INC(
@@ -1874,7 +1872,7 @@ ngx_http_markdown_streaming_finalize_decomp(
             {
                 finish_error_code = ERROR_POST_COMMIT;
             } else {
-                finish_error_code = ERROR_INTERNAL;
+                finish_error_code = ERROR_DECOMPRESSION_TRUNCATED_INPUT;
             }
         } else {
             NGX_HTTP_MARKDOWN_METRIC_INC(
@@ -1884,7 +1882,7 @@ ngx_http_markdown_streaming_finalize_decomp(
             {
                 finish_error_code = ERROR_POST_COMMIT;
             } else {
-                finish_error_code = ERROR_INTERNAL;
+                finish_error_code = ERROR_DECOMPRESSION_IO_ERROR;
             }
         }
 

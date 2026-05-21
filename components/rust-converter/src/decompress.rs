@@ -69,17 +69,18 @@ pub enum DecompError {
 impl DecompError {
     /// Return the FFI error category code for this error.
     ///
-    /// These codes match the `FFIDecompResult.error_category` field:
-    /// - 5 = budget_exceeded
-    /// - 6 = format_error
-    /// - 7 = truncated_input
-    /// - 8 = io_error
+    /// These codes match the `FFIDecompResult.error_category` field and
+    /// the DECOMP_CATEGORY_* constants in the C header:
+    /// - 101 = budget_exceeded
+    /// - 102 = format_error
+    /// - 103 = truncated_input
+    /// - 104 = io_error
     pub fn error_category(&self) -> u32 {
         match self {
-            Self::BudgetExceeded => 5,
-            Self::FormatError(_) => 6,
-            Self::TruncatedInput(_) => 7,
-            Self::IoError(_) => 8,
+            Self::BudgetExceeded => 101,
+            Self::FormatError(_) => 102,
+            Self::TruncatedInput(_) => 103,
+            Self::IoError(_) => 104,
         }
     }
 }
@@ -288,7 +289,7 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert_eq!(err, DecompError::BudgetExceeded);
-        assert_eq!(err.error_category(), 5);
+        assert_eq!(err.error_category(), 101);
     }
 
     #[test]
@@ -317,8 +318,8 @@ mod tests {
         let err = result.unwrap_err();
         // Should be FormatError or TruncatedInput depending on how flate2 reports it
         assert!(
-            err.error_category() == 6 || err.error_category() == 7,
-            "Expected format_error(6) or truncated(7), got {}",
+            err.error_category() == 102 || err.error_category() == 103,
+            "Expected format_error(102) or truncated(103), got {}",
             err.error_category()
         );
     }
@@ -330,8 +331,8 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(
-            err.error_category() == 6 || err.error_category() == 7,
-            "Expected format_error(6) or truncated(7), got {}",
+            err.error_category() == 102 || err.error_category() == 103,
+            "Expected format_error(102) or truncated(103), got {}",
             err.error_category()
         );
     }
@@ -343,7 +344,9 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(
-            err.error_category() == 6 || err.error_category() == 7 || err.error_category() == 8,
+            err.error_category() == 102
+                || err.error_category() == 103
+                || err.error_category() == 104,
             "Expected format/truncated/io error, got {}",
             err.error_category()
         );
@@ -359,8 +362,8 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(
-            err.error_category() == 6 || err.error_category() == 7,
-            "Expected format_error(6) or truncated(7), got {}",
+            err.error_category() == 102 || err.error_category() == 103,
+            "Expected format_error(102) or truncated(103), got {}",
             err.error_category()
         );
     }
@@ -369,15 +372,15 @@ mod tests {
     fn empty_input_returns_truncated() {
         let result = decompress_bounded(&[], Format::Gzip, 1024);
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err().error_category(), 7);
+        assert_eq!(result.unwrap_err().error_category(), 103);
 
         let result = decompress_bounded(&[], Format::Deflate, 1024);
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err().error_category(), 7);
+        assert_eq!(result.unwrap_err().error_category(), 103);
 
         let result = decompress_bounded(&[], Format::Brotli, 1024);
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err().error_category(), 7);
+        assert_eq!(result.unwrap_err().error_category(), 103);
     }
 
     #[test]
@@ -428,15 +431,18 @@ mod tests {
 
     #[test]
     fn error_category_codes_are_distinct() {
-        assert_eq!(DecompError::BudgetExceeded.error_category(), 5);
+        assert_eq!(DecompError::BudgetExceeded.error_category(), 101);
         assert_eq!(
             DecompError::FormatError("test".to_string()).error_category(),
-            6
+            102
         );
         assert_eq!(
             DecompError::TruncatedInput("test".to_string()).error_category(),
-            7
+            103
         );
-        assert_eq!(DecompError::IoError("test".to_string()).error_category(), 8);
+        assert_eq!(
+            DecompError::IoError("test".to_string()).error_category(),
+            104
+        );
     }
 }

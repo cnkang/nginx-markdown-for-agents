@@ -867,6 +867,15 @@ ngx_http_markdown_handle_conversion_failure(ngx_http_request_t *r,
         case ERROR_DECOMPRESSION_BUDGET_EXCEEDED:
             NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.budget_exceeded_total);
             break;
+        case ERROR_DECOMPRESSION_FORMAT_ERROR:
+            NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.format_error_total);
+            break;
+        case ERROR_DECOMPRESSION_TRUNCATED_INPUT:
+            NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.truncated_input_total);
+            break;
+        case ERROR_DECOMPRESSION_IO_ERROR:
+            NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.io_error_total);
+            break;
         case ERROR_PARSE_TIMEOUT:
             NGX_HTTP_MARKDOWN_METRIC_INC(parse_interrupts.parse_timeouts_total);
             break;
