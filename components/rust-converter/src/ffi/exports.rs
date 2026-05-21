@@ -40,10 +40,11 @@ use std::ptr;
 use crate::error::ConversionError;
 
 use super::abi::{
-    ERROR_INTERNAL, FFIAcceptResult, FFIConditionalResult, FFIDecisionResult, FFIDecompResult,
-    FFIHeaderEntry, FFIHeaderPlan, FFIHeaderPlanHandle, MarkdownConverterHandle, MarkdownOptions,
-    MarkdownResult, NEGOTIATE_REASON_CONVERT, NEGOTIATE_REASON_EXPLICIT_REJECT,
-    NEGOTIATE_REASON_LOWER_Q, NEGOTIATE_REASON_MALFORMED, NEGOTIATE_REASON_NO_ACCEPT,
+    DECOMP_CATEGORY_FORMAT_ERROR, DECOMP_CATEGORY_INVALID_ARGS, ERROR_INTERNAL, FFIAcceptResult,
+    FFIConditionalResult, FFIDecisionResult, FFIDecompResult, FFIHeaderEntry, FFIHeaderPlan,
+    FFIHeaderPlanHandle, MarkdownConverterHandle, MarkdownOptions, MarkdownResult,
+    NEGOTIATE_REASON_CONVERT, NEGOTIATE_REASON_EXPLICIT_REJECT, NEGOTIATE_REASON_LOWER_Q,
+    NEGOTIATE_REASON_MALFORMED, NEGOTIATE_REASON_NO_ACCEPT,
 };
 use super::convert::convert_inner;
 use super::memory::{free_buffer, reset_result, set_error_result, set_success_result};
@@ -172,6 +173,14 @@ pub unsafe extern "C" fn markdown_converter_free(handle: *mut MarkdownConverterH
 /// Parses the client `Accept` header and determines whether the client
 /// prefers `text/markdown` over `text/html`, using RFC 7231 §5.3.2
 /// q-value comparison.
+///
+/// # Parameters
+///
+/// - `on_wildcard`: Controls wildcard (`*/*`) handling.
+///   - `0` (NEGOTIATE_WILDCARD_STRICT): wildcards do NOT match text/markdown;
+///     only explicit `text/markdown` triggers conversion.
+///   - `1` (NEGOTIATE_WILDCARD_ALLOW): wildcards match text/markdown,
+///     so `Accept: */*` will trigger conversion.
 ///
 /// # Safety
 ///
@@ -733,7 +742,7 @@ pub unsafe extern "C" fn markdown_decompress_bounded(
     result: *mut FFIDecompResult,
 ) -> u32 {
     if result.is_null() {
-        return 9;
+        return DECOMP_CATEGORY_INVALID_ARGS;
     }
 
     let result_ref = unsafe { &mut *result };
@@ -746,8 +755,8 @@ pub unsafe extern "C" fn markdown_decompress_bounded(
     let fmt = match crate::decompress::Format::from_u8(format) {
         Some(f) => f,
         None => {
-            result_ref.error_category = 6; // format_error for unknown format
-            return 6;
+            result_ref.error_category = DECOMP_CATEGORY_FORMAT_ERROR;
+            return DECOMP_CATEGORY_FORMAT_ERROR;
         }
     };
 

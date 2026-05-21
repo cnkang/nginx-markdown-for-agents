@@ -61,6 +61,24 @@ pub const ERROR_PARSE_BUDGET_EXCEEDED: u32 = 11;
 /// Internal error (unexpected condition, panic caught).
 pub const ERROR_INTERNAL: u32 = 99;
 
+/// Decompression error category: budget exceeded.
+///
+/// These constants are used in `FFIDecompResult.error_category` and as
+/// the return value of `markdown_decompress_bounded`. They occupy a
+/// separate namespace from `ERROR_*` (which are for `MarkdownResult.error_code`).
+#[allow(dead_code)]
+pub const DECOMP_CATEGORY_BUDGET_EXCEEDED: u32 = 5;
+/// Decompression error category: invalid compression format.
+pub const DECOMP_CATEGORY_FORMAT_ERROR: u32 = 6;
+/// Decompression error category: truncated input stream.
+#[allow(dead_code)]
+pub const DECOMP_CATEGORY_TRUNCATED_INPUT: u32 = 7;
+/// Decompression error category: I/O error during decompression.
+#[allow(dead_code)]
+pub const DECOMP_CATEGORY_IO_ERROR: u32 = 8;
+/// Decompression error category: invalid arguments (NULL pointers, unknown format).
+pub const DECOMP_CATEGORY_INVALID_ARGS: u32 = 9;
+
 /// Conversion options passed from C to Rust.
 #[repr(C)]
 pub struct MarkdownOptions {
@@ -275,6 +293,13 @@ pub const NEGOTIATE_REASON_LOWER_Q: u8 = 2;
 pub const NEGOTIATE_REASON_EXPLICIT_REJECT: u8 = 3;
 /// Reason code: Accept header is malformed.
 pub const NEGOTIATE_REASON_MALFORMED: u8 = 4;
+
+/// Wildcard mode: strict — `*/*` does NOT match text/markdown.
+#[allow(dead_code)]
+pub const NEGOTIATE_WILDCARD_STRICT: u8 = 0;
+/// Wildcard mode: allow — `*/*` matches text/markdown.
+#[allow(dead_code)]
+pub const NEGOTIATE_WILDCARD_ALLOW: u8 = 1;
 
 /// Result of a conditional request check (If-None-Match / If-Modified-Since).
 ///
