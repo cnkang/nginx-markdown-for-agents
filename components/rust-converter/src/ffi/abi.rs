@@ -376,10 +376,11 @@ pub struct FFIHeaderEntry {
 /// # Error Categories
 ///
 /// - `0` = success (output is valid decompressed data)
-/// - `5` = budget_exceeded (decompressed output exceeded the configured limit)
-/// - `6` = format_error (input is not valid gzip/deflate)
-/// - `7` = truncated (input stream ended prematurely)
-/// - `8` = io_error (I/O error during decompression)
+/// - `DECOMP_CATEGORY_BUDGET_EXCEEDED` (101) = decompressed output exceeded the configured limit
+/// - `DECOMP_CATEGORY_FORMAT_ERROR` (102) = input is not valid gzip/deflate
+/// - `DECOMP_CATEGORY_TRUNCATED_INPUT` (103) = input stream ended prematurely
+/// - `DECOMP_CATEGORY_IO_ERROR` (104) = I/O error during decompression
+/// - `DECOMP_CATEGORY_INVALID_ARGS` (105) = invalid arguments (NULL pointers, unknown format)
 ///
 /// # Memory Ownership
 ///
@@ -392,8 +393,8 @@ pub struct FFIDecompResult {
     pub output: *mut u8,
     /// Length of decompressed output in bytes (0 on error).
     pub output_len: usize,
-    /// Error category: 0=success, 5=budget_exceeded, 6=format_error,
-    /// 7=truncated, 8=io_error.
+    /// Error category: 0=success, 101..105 for DECOMP_CATEGORY_* errors.
+    /// See DECOMP_CATEGORY_BUDGET_EXCEEDED through DECOMP_CATEGORY_INVALID_ARGS.
     pub error_category: u32,
 }
 
