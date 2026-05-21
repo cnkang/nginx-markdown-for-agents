@@ -411,16 +411,16 @@ typedef struct FFIAcceptResult {
  * Returned by `markdown_check_conditional` FFI function.
  *
  * Fields:
- * - `result_code`: 0 = not modified (send 304), 1 = modified (proceed with conversion), 2 = no conditional headers present
- * - `matched_etag_len`: Length of the matched ETag value (0 if no match)
+ * - `result_code`: 0 = not modified (send 304), 1 = proceed (no match or no conditional headers)
+ * - `matched_etag_len`: Length of the matched ETag value (reserved, currently always 0)
  */
 typedef struct FFIConditionalResult {
   /**
-   * 0 = not_modified, 1 = modified, 2 = no_conditional_headers
+   * 0 = not_modified (send 304), 1 = proceed (modified or no conditional headers)
    */
   uint8_t result_code;
   /**
-   * Length of matched ETag value (0 if no match or no conditional headers).
+   * Length of matched ETag value (reserved for future use, currently 0).
    */
   uint32_t matched_etag_len;
 } FFIConditionalResult;
@@ -431,12 +431,12 @@ typedef struct FFIConditionalResult {
  * Returned by `markdown_make_decision` FFI function.
  *
  * Fields:
- * - `decision`: 0 = convert, 1 = skip, 2 = fail
- * - `reason_code`: Numeric reason code (matches SkipReason::code() values)
+ * - `decision`: 0 = convert, 1 = skip
+ * - `reason_code`: Numeric reason code (matches SkipReason::code() values; 0 if convert)
  */
 typedef struct FFIDecisionResult {
   /**
-   * 0 = convert, 1 = skip, 2 = fail
+   * 0 = convert, 1 = skip
    */
   uint8_t decision;
   /**
