@@ -41,14 +41,8 @@ Gates 3 and 4 are tracked as future/feasibility unless explicitly promoted.
 | 1.2 | Rust full test suite | `make test-rust` | Exit 0 |
 | 1.3 | Rust fuzz smoke | `make test-rust-fuzz-smoke` | Exit 0, no crashes |
 | 1.4 | Chunked E2E smoke | `make verify-chunked-native-e2e-smoke` | Exit 0 |
-| 1.5 | Coverage aggregate ≥ 75% | `make coverage-c && make coverage-rust` | C ≥ 75%, Rust ≥ 80% |
-| 1.6 | Coverage critical paths ≥ 90% | Coverage report review | Critical paths ≥ 90% (advisory) |
-
-> **Note (v0.7.0):** C coverage threshold lowered from 80% to 75% for this
-> release due to significant new production code (diagnostics, header_plan,
-> dynconf_snapshot, decompression_via_rust, reason_ffi) that is covered by
-> integration and E2E tests but not yet by dedicated C unit tests. Target
-> 80% to be restored in v0.8.0 after unit test coverage catches up.
+| 1.5 | Coverage aggregate ≥ 80% | `make coverage-c && make coverage-rust` | C ≥ 80%, Rust ≥ 80% |
+| 1.6 | Coverage critical paths ≥ 90% | Coverage report review | Critical paths ≥ 90% (required) |
 
 **Fail action**: Block release. Fix runtime correctness issues before proceeding.
 
@@ -122,7 +116,7 @@ Gates 3 and 4 are tracked as future/feasibility unless explicitly promoted.
 |-------------|---------------|------|
 | `decompression_budget` config | config validator | Gate 5 |
 | `parse_timeout` config | config validator | Gate 5 |
-| `parser_memory_budget` config | config validator | Gate 5 |
+| `markdown_parser_budget` config | config validator | Gate 5 |
 | `markdown_diagnostics` config | config validator | Gate 5 |
 | `markdown_dynconf_dry_run` config | config validator | Gate 5 |
 | `decompression_*_total` metrics | metric validator | Gate 5 |
