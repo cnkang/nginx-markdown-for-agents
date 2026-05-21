@@ -93,6 +93,35 @@
 #define ERROR_INTERNAL 99
 
 /**
+ * Decompression error category: budget exceeded.
+ *
+ * These constants are used in `FFIDecompResult.error_category` and as
+ * the return value of `markdown_decompress_bounded`. They occupy a
+ * separate namespace from `ERROR_*` (which are for `MarkdownResult.error_code`).
+ */
+#define DECOMP_CATEGORY_BUDGET_EXCEEDED 5
+
+/**
+ * Decompression error category: invalid compression format.
+ */
+#define DECOMP_CATEGORY_FORMAT_ERROR 6
+
+/**
+ * Decompression error category: truncated input stream.
+ */
+#define DECOMP_CATEGORY_TRUNCATED_INPUT 7
+
+/**
+ * Decompression error category: I/O error during decompression.
+ */
+#define DECOMP_CATEGORY_IO_ERROR 8
+
+/**
+ * Decompression error category: invalid arguments (NULL pointers, unknown format).
+ */
+#define DECOMP_CATEGORY_INVALID_ARGS 9
+
+/**
  * Reason code: client prefers text/markdown, proceed with conversion.
  */
 #define NEGOTIATE_REASON_CONVERT 0
@@ -116,6 +145,16 @@
  * Reason code: Accept header is malformed.
  */
 #define NEGOTIATE_REASON_MALFORMED 4
+
+/**
+ * Wildcard mode: strict — `*/*` does NOT match text/markdown.
+ */
+#define NEGOTIATE_WILDCARD_STRICT 0
+
+/**
+ * Wildcard mode: allow — `*/*` matches text/markdown.
+ */
+#define NEGOTIATE_WILDCARD_ALLOW 1
 
 #if defined(MARKDOWN_INCREMENTAL_ENABLED)
 /**
@@ -646,6 +685,14 @@ void markdown_converter_free(struct MarkdownConverterHandle *handle);
  * Parses the client `Accept` header and determines whether the client
  * prefers `text/markdown` over `text/html`, using RFC 7231 §5.3.2
  * q-value comparison.
+ *
+ * # Parameters
+ *
+ * - `on_wildcard`: Controls wildcard (`*/*`) handling.
+ *   - `0` (NEGOTIATE_WILDCARD_STRICT): wildcards do NOT match text/markdown;
+ *     only explicit `text/markdown` triggers conversion.
+ *   - `1` (NEGOTIATE_WILDCARD_ALLOW): wildcards match text/markdown,
+ *     so `Accept: */*` will trigger conversion.
  *
  * # Safety
  *
