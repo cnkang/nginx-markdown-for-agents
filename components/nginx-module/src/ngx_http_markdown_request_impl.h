@@ -140,7 +140,7 @@ ngx_http_markdown_bind_request_snapshot(
     if (conf->advanced.dynconf_enabled) {
         if (snap_copy == NULL) {
             ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-                          "markdown filter: dynconf_enabled is true but "
+                          "markdown: dynconf_enabled is true but "
                           "snap_copy is NULL; skipping dynconf snapshot binding, "
                           "request will use live conf values");
         } else {
@@ -150,7 +150,7 @@ ngx_http_markdown_bind_request_snapshot(
                 *ctx->dynconf_snapshot = *snap_copy;
             } else {
                 ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-                              "markdown filter: failed to allocate dynconf snapshot "
+                              "markdown: failed to allocate dynconf snapshot "
                               "from request pool; request will use live conf values");
             }
         }
@@ -162,7 +162,7 @@ ngx_http_markdown_bind_request_snapshot(
         *ctx->effective_conf = *early_eff;
     } else {
         ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-                      "markdown filter: failed to allocate effective conf "
+                      "markdown: failed to allocate effective conf "
                       "from request pool; request will use live conf values");
     }
 }
@@ -203,7 +203,7 @@ ngx_http_markdown_handle_unsupported_compression(
     {
         ngx_log_error(NGX_LOG_WARN,
             r->connection->log, 0,
-            "markdown filter: unsupported "
+            "markdown: unsupported "
             "compression format, "
             "rejecting (fail-closed)");
         ngx_http_markdown_log_failure_decision(
@@ -215,7 +215,7 @@ ngx_http_markdown_handle_unsupported_compression(
 
     ngx_log_error(NGX_LOG_WARN,
         r->connection->log, 0,
-        "markdown filter: unsupported "
+        "markdown: unsupported "
         "compression format, "
         "returning original content "
         "(fail-open)");
@@ -249,7 +249,7 @@ ngx_http_markdown_handle_ctx_alloc_failure(ngx_http_request_t *r,
     const ngx_http_markdown_effective_conf_t *eff)
 {
     ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0,
-                 "markdown filter: failed to allocate "
+                 "markdown: failed to allocate "
                  "context, category=system");
 
     NGX_HTTP_MARKDOWN_METRIC_INC(conversions_attempted);
@@ -261,7 +261,7 @@ ngx_http_markdown_handle_ctx_alloc_failure(ngx_http_request_t *r,
     {
         ngx_log_error(NGX_LOG_ERR,
             r->connection->log, 0,
-            "markdown filter: context allocation "
+            "markdown: context allocation "
             "failed, rejecting (fail-closed)");
         ngx_http_markdown_log_decision_with_category(
             r, conf, eff,
@@ -275,7 +275,7 @@ ngx_http_markdown_handle_ctx_alloc_failure(ngx_http_request_t *r,
     ngx_http_markdown_metric_inc_failopen(conf);
 
     ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                 "markdown filter: context allocation "
+                 "markdown: context allocation "
                  "failed, returning original content "
                  "(fail-open)");
     ngx_http_markdown_log_decision_with_category(
@@ -471,7 +471,7 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
         /* Not eligible, pass through */
         ngx_log_debug1(NGX_LOG_DEBUG_HTTP,
                       r->connection->log, 0,
-                      "markdown filter: response not eligible: %V",
+                      "markdown: response not eligible: %V",
                       ngx_http_markdown_eligibility_string(
                           eligibility));
         ngx_http_markdown_metric_inc_skip(eligibility);
@@ -645,7 +645,7 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
             ctx->decompression.needed = 1;
             
             ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                          "markdown filter: decompression detected compression type: %d",
+                          "markdown: decompression detected compression type: %d",
                           ctx->decompression.type);
         }
     }
@@ -686,7 +686,7 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
     {
         ngx_log_debug0(NGX_LOG_DEBUG_HTTP,
             r->connection->log, 0,
-            "markdown filter: streaming path "
+            "markdown: streaming path "
             "selected by engine selector");
 
         ngx_http_markdown_log_decision(r, conf, ctx->effective_conf,
@@ -711,7 +711,7 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
         /* else: no CL — deferred to body filter */
 #else
         ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-                     "markdown filter: markdown_large_body_threshold is set, "
+                     "markdown: markdown_large_body_threshold is set, "
                      "but incremental support was not compiled in; using "
                      "full-buffer path");
 #endif
@@ -750,7 +750,7 @@ path_selected:
     r->filter_need_in_memory = 1;
 
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                  "markdown filter: response eligible for conversion, "
+                  "markdown: response eligible for conversion, "
                   "context initialized");
 
     /*
@@ -824,7 +824,7 @@ ngx_http_markdown_body_filter_convert_and_output(ngx_http_request_t *r,
     elapsed_ms = 0;
 
     ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                  "markdown filter: buffered complete response, size: %uz bytes",
+                  "markdown: buffered complete response, size: %uz bytes",
                   ctx->buffer.size);
 
     rc = ngx_http_markdown_resolve_conditional_result(

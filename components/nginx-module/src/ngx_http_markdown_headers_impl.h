@@ -344,7 +344,7 @@ ngx_http_markdown_add_vary_accept(ngx_http_request_t *r)
         h->value.len = sizeof(ngx_http_markdown_hdr_accept) - 1;
 
         ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                      "markdown filter: added Vary: Accept header");
+                      "markdown: added Vary: Accept header");
         return NGX_OK;
     }
 
@@ -353,7 +353,7 @@ ngx_http_markdown_add_vary_accept(ngx_http_request_t *r)
                                              sizeof(ngx_http_markdown_hdr_accept) - 1))
     {
         NGX_HTTP_MARKDOWN_LOG_DEBUG1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                                     "markdown filter: Vary header already contains Accept: \"%V\"",
+                                     "markdown: Vary header already contains Accept: \"%V\"",
                                      &vary->value);
         return NGX_OK;
     }
@@ -377,7 +377,7 @@ ngx_http_markdown_add_vary_accept(ngx_http_request_t *r)
     vary->value.len = len;
 
     NGX_HTTP_MARKDOWN_LOG_DEBUG1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                                 "markdown filter: updated Vary header: \"%V\"",
+                                 "markdown: updated Vary header: \"%V\"",
                                  &vary->value);
 
     return NGX_OK;
@@ -434,7 +434,7 @@ ngx_http_markdown_set_etag(ngx_http_request_t *r, const u_char *etag, size_t eta
     r->headers_out.etag = h;
 
     NGX_HTTP_MARKDOWN_LOG_DEBUG1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                                 "markdown filter: set ETag: \"%V\"", &h->value);
+                                 "markdown: set ETag: \"%V\"", &h->value);
 
     return NGX_OK;
 }
@@ -480,7 +480,7 @@ ngx_http_markdown_add_token_header(ngx_http_request_t *r, uint32_t token_count)
     h->value.len = p - h->value.data;
 
     NGX_HTTP_MARKDOWN_LOG_DEBUG1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                                 "markdown filter: added X-Markdown-Tokens: %ui", token_count);
+                                 "markdown: added X-Markdown-Tokens: %ui", token_count);
 
     return NGX_OK;
 }
@@ -504,7 +504,7 @@ ngx_http_markdown_remove_content_encoding(ngx_http_request_t *r)
                                          ngx_http_markdown_hdr_content_encoding,
                                          sizeof(ngx_http_markdown_hdr_content_encoding) - 1,
                                          1,
-                                         "markdown filter: removed Content-Encoding header");
+                                         "markdown: removed Content-Encoding header");
 }
 
 /*
@@ -527,7 +527,7 @@ ngx_http_markdown_remove_accept_ranges(ngx_http_request_t *r)
                                          ngx_http_markdown_hdr_accept_ranges,
                                          sizeof(ngx_http_markdown_hdr_accept_ranges) - 1,
                                          1,
-                                         "markdown filter: removed Accept-Ranges header");
+                                         "markdown: removed Accept-Ranges header");
 }
 
 /*
@@ -612,7 +612,7 @@ ngx_http_markdown_update_headers(ngx_http_request_t *r,
     rc = ngx_http_markdown_apply_header_plan(r, &plan);
     if (rc != NGX_OK) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-            "markdown filter: atomic header plan application "
+            "markdown: atomic header plan application "
             "failed; all changes rolled back");
         return NGX_ERROR;
     }
@@ -645,7 +645,7 @@ ngx_http_markdown_update_headers(ngx_http_request_t *r,
             result->etag, result->etag_len);
         if (rc != NGX_OK) {
             ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                "markdown filter: failed to set ETag "
+                "markdown: failed to set ETag "
                 "after plan commit");
             return NGX_ERROR;
         }
@@ -653,7 +653,7 @@ ngx_http_markdown_update_headers(ngx_http_request_t *r,
         rc = ngx_http_markdown_set_etag(r, NULL, 0);
         if (rc != NGX_OK) {
             ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                "markdown filter: failed to clear ETag "
+                "markdown: failed to clear ETag "
                 "after plan commit");
             return NGX_ERROR;
         }
@@ -667,7 +667,7 @@ ngx_http_markdown_update_headers(ngx_http_request_t *r,
     rc = ngx_http_markdown_add_vary_accept(r);
     if (rc != NGX_OK) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-            "markdown filter: failed to add Vary header");
+            "markdown: failed to add Vary header");
         return NGX_ERROR;
     }
 
@@ -682,7 +682,7 @@ ngx_http_markdown_update_headers(ngx_http_request_t *r,
 
     NGX_HTTP_MARKDOWN_LOG_DEBUG1(NGX_LOG_DEBUG_HTTP,
         r->connection->log, 0,
-        "markdown filter: set Content-Length: %uz",
+        "markdown: set Content-Length: %uz",
         result->markdown_len);
 
     if (conf->token_estimate && result->token_estimate > 0) {
@@ -690,7 +690,7 @@ ngx_http_markdown_update_headers(ngx_http_request_t *r,
             result->token_estimate);
         if (rc != NGX_OK) {
             ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                "markdown filter: failed to add "
+                "markdown: failed to add "
                 "X-Markdown-Tokens header");
             return NGX_ERROR;
         }
@@ -703,7 +703,7 @@ ngx_http_markdown_update_headers(ngx_http_request_t *r,
         rc = ngx_http_markdown_modify_cache_control_for_auth(r);
         if (rc != NGX_OK) {
             ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                "markdown filter: failed to modify "
+                "markdown: failed to modify "
                 "Cache-Control for authenticated "
                 "content");
             return NGX_ERROR;
@@ -712,7 +712,7 @@ ngx_http_markdown_update_headers(ngx_http_request_t *r,
 #endif
 
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-        "markdown filter: headers updated successfully");
+        "markdown: headers updated successfully");
 
     return NGX_OK;
 }
