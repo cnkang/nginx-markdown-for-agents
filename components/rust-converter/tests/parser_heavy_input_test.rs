@@ -89,10 +89,7 @@ fn test_parser_many_nodes_10000_elements() {
     html.push_str("</body></html>");
 
     let result = parse_html(html.as_bytes());
-    assert!(
-        result.is_ok(),
-        "Parser should handle {node_count} elements"
-    );
+    assert!(result.is_ok(), "Parser should handle {node_count} elements");
 
     let dom = result.unwrap();
     let converter = MarkdownConverter::new();
@@ -134,7 +131,9 @@ fn test_parser_many_nodes_mixed_structure() {
     }
 
     // Add a large table
-    html.push_str("<table><thead><tr><th>Col1</th><th>Col2</th><th>Col3</th></tr></thead><tbody>\n");
+    html.push_str(
+        "<table><thead><tr><th>Col1</th><th>Col2</th><th>Col3</th></tr></thead><tbody>\n",
+    );
     for i in 0..500 {
         html.push_str(&format!(
             "<tr><td>Row {i}</td><td>Data</td><td>Value</td></tr>\n"
@@ -235,8 +234,5 @@ fn test_parser_large_document_over_1mb() {
     );
 
     let result = parse_html(html.as_bytes());
-    assert!(
-        result.is_ok(),
-        "Parser should handle documents >1MB"
-    );
+    assert!(result.is_ok(), "Parser should handle documents >1MB");
 }

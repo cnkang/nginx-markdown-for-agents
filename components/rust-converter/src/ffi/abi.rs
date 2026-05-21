@@ -281,13 +281,13 @@ pub const NEGOTIATE_REASON_MALFORMED: u8 = 4;
 /// Returned by `markdown_check_conditional` FFI function.
 ///
 /// Fields:
-/// - `result_code`: 0 = not modified (send 304), 1 = modified (proceed with conversion), 2 = no conditional headers present
-/// - `matched_etag_len`: Length of the matched ETag value (0 if no match)
+/// - `result_code`: 0 = not modified (send 304), 1 = proceed (no match or no conditional headers)
+/// - `matched_etag_len`: Length of the matched ETag value (reserved, currently always 0)
 #[repr(C)]
 pub struct FFIConditionalResult {
-    /// 0 = not_modified, 1 = modified, 2 = no_conditional_headers
+    /// 0 = not_modified (send 304), 1 = proceed (modified or no conditional headers)
     pub result_code: u8,
-    /// Length of matched ETag value (0 if no match or no conditional headers).
+    /// Length of matched ETag value (reserved for future use, currently 0).
     pub matched_etag_len: u32,
 }
 
@@ -296,11 +296,11 @@ pub struct FFIConditionalResult {
 /// Returned by `markdown_make_decision` FFI function.
 ///
 /// Fields:
-/// - `decision`: 0 = convert, 1 = skip, 2 = fail
-/// - `reason_code`: Numeric reason code (matches SkipReason::code() values)
+/// - `decision`: 0 = convert, 1 = skip
+/// - `reason_code`: Numeric reason code (matches SkipReason::code() values; 0 if convert)
 #[repr(C)]
 pub struct FFIDecisionResult {
-    /// 0 = convert, 1 = skip, 2 = fail
+    /// 0 = convert, 1 = skip
     pub decision: u8,
     /// Reason code for the decision (0 if convert).
     pub reason_code: u8,
@@ -409,7 +409,10 @@ mod layout_tests {
         assert_eq!(offset_of!(MarkdownOptions, prune_selectors), 64);
         assert_eq!(offset_of!(MarkdownOptions, prune_selector_len), 72);
         assert_eq!(offset_of!(MarkdownOptions, prune_protection_selectors), 80);
-        assert_eq!(offset_of!(MarkdownOptions, prune_protection_selector_len), 88);
+        assert_eq!(
+            offset_of!(MarkdownOptions, prune_protection_selector_len),
+            88
+        );
         assert_eq!(offset_of!(MarkdownOptions, memory_budget), 96);
         assert_eq!(offset_of!(MarkdownOptions, llm_provider), 104);
         assert_eq!(offset_of!(MarkdownOptions, chars_per_token_fixed), 105);
