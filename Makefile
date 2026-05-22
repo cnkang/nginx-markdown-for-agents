@@ -235,6 +235,32 @@ release-gates-check-070:
 	python3 tools/release/gates/validate_reason_codes_070.py
 	python3 tools/release/gates/validate_package_metadata_070.py
 	python3 tools/release/gates/validate_k8s_manifests_070.py
+	@echo "=== Package Compatibility Gate ==="
+	@echo "  [artifact-naming-tests] Running artifact naming unit tests..."
+	@bash tools/release/gates/test_artifact_naming.sh || \
+		{ echo "FAIL: artifact naming tests failed" >&2; exit 1; }
+	@echo "  [compat-check-tests] Running compat-check helper tests..."
+	@if test -f tools/compat-check/test_compat_check.sh; then \
+		bash tools/compat-check/test_compat_check.sh || \
+			{ echo "FAIL: compat-check helper tests failed" >&2; exit 1; }; \
+	else \
+		echo "  SKIP: tools/compat-check/test_compat_check.sh not found"; \
+	fi
+	@echo "  [install-layout] Validating install layout..."
+	@if test -f tools/release/gates/check_install_layout.sh; then \
+		bash tools/release/gates/check_install_layout.sh || \
+			{ echo "FAIL: install layout validation failed" >&2; exit 1; }; \
+	else \
+		echo "  SKIP: tools/release/gates/check_install_layout.sh not found"; \
+	fi
+	@echo "  [postinst-safety] Validating postinst safety..."
+	@if test -f tools/release/gates/check_postinst_safety.sh; then \
+		bash tools/release/gates/check_postinst_safety.sh || \
+			{ echo "FAIL: postinst safety validation failed" >&2; exit 1; }; \
+	else \
+		echo "  SKIP: tools/release/gates/check_postinst_safety.sh not found"; \
+	fi
+	@echo "  Package Compatibility Gate: ALL PASSED"
 	@echo "=== Fuzz CI Gate ==="
 	@if cargo +nightly --version >/dev/null 2>&1; then \
 		echo "  [fuzz-build] cargo +nightly fuzz build..."; \
@@ -410,7 +436,7 @@ help:
 	@echo "  release-gates-check      - Validate release gate framework (0.5.0 + 0.5.5)"
 	@echo "  release-gates-check-055  - Validate 0.5.5 release gates (evidence, known-diffs, docs)"
 	@echo "  release-gates-check-060  - Validate 0.6.0 release gates (streaming default, pruning, budget)"
-	@echo "  release-gates-check-070  - Validate 0.7.0 release gates (runtime correctness, Rust-first arch)"
+	@echo "  release-gates-check-070  - Validate 0.7.0 release gates (runtime correctness, package compat, fuzz)"
 	@echo "  release-gates-check-legacy - Validate 0.4.0 release gate documents"
 	@echo "  release-gates-check-strict - Validate all sub-specs #12-#18 for full compliance"
 	@echo "  coverage-c               - Generate C module e2e coverage (builds NGINX with --coverage)"

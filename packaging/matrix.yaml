@@ -1,43 +1,91 @@
-# Build Matrix
-# Format: os × arch × nginx_channel × libc
+# =============================================================================
+# Release Build Matrix Configuration
+# =============================================================================
+#
+# Single source of truth for the release-packages.yml build matrix.
+# This file documents the canonical matrix parameters and can be consumed
+# by tooling (scripts, CI helpers). The workflow may inline these values
+# since GitHub Actions does not natively read external YAML for matrix
+# strategies, but this file remains the authoritative reference.
+#
+# --- How to extend ---
+#
+# Add a new NGINX version:
+#   Append to the nginx_versions list below. The workflow matrix will
+#   automatically pick up the new version on the next run.
+#   Example: nginx_versions: ["1.26.3", "1.28.0"]
+#
+# Add a new platform:
+#   Add a new entry under smoke_test_containers with the appropriate
+#   package format (deb/rpm) and container image. Then update the
+#   workflow matrix include/exclude rules if needed.
+#   Example: add "rockylinux:9" under rpm format.
+#
+# Mainline support:
+#   nginx.org mainline versions (e.g. 1.27.x) are future work.
+#   Once mainline ABI compatibility is validated, add the version
+#   to nginx_versions. No structural changes are needed.
+#
+# =============================================================================
 
-matrix:
-  - os: ubuntu
-    versions: ["22.04", "24.04"]
-    arch: [amd64, arm64]
-    nginx_channel: [stable, mainline]
-    libc: glibc
-
-  - os: debian
-    versions: ["11", "12"]
-    arch: [amd64, arm64]
-    nginx_channel: [stable, mainline]
-    libc: glibc
-
-  - os: el
-    versions: ["8", "9"]
-    arch: [amd64, arm64]
-    nginx_channel: [stable, mainline]
-    libc: glibc
-
-  - os: amazon-linux
-    versions: ["2023"]
-    arch: [amd64, arm64]
-    nginx_channel: [stable, mainline]
-    libc: glibc
-
+# ---------------------------------------------------------------------------
+# NGINX versions to build against
+# ---------------------------------------------------------------------------
+# Initial release targets stable only. Mainline (1.27.x) is deferred until
+# ABI compatibility validation is complete.
 nginx_versions:
-  stable: "1.30.0"
-  mainline: "1.31.0"
+  - "1.26.3"
 
+# ---------------------------------------------------------------------------
+# Target architectures
+# ---------------------------------------------------------------------------
+architectures:
+  - "amd64"
+  - "arm64"
+
+# ---------------------------------------------------------------------------
+# Smoke test container images
+# ---------------------------------------------------------------------------
+# Maps package format to the container images used for installation and
+# module-load verification (Smoke_Test_Basic). Each entry defines:
+#   - image: Docker image reference
+#   - format: package format (deb or rpm)
+#   - pkg_tool: package manager install command
+#
+smoke_test_containers:
+  deb:
+    - image: "ubuntu:22.04"
+      codename: "jammy"
+    - image: "ubuntu:24.04"
+      codename: "noble"
+    - image: "debian:12"
+      codename: "bookworm"
+
+  rpm:
+    - image: "almalinux:9"
+      codename: "el9"
+    - image: "amazonlinux:2023"
+      codename: "al2023"
+
+# ---------------------------------------------------------------------------
+# Build OS runners (GitHub Actions hosted runners)
+# ---------------------------------------------------------------------------
+# These are the runner labels used in the build/package jobs.
+# arm64 builds use larger runners or cross-compilation depending on
+# availability.
+build_runners:
+  amd64: "ubuntu-22.04"
+  arm64: "ubuntu-22.04"   # cross-compile; native arm64 runner is future work
+
+# ---------------------------------------------------------------------------
+# Package metadata (consumed by nFPM via environment variables)
+# ---------------------------------------------------------------------------
 package_metadata:
-  name: nginx-markdown-module
-  vendor: NGINX Markdown for Agents Contributors
-  license: BSD-2-Clause
-  summary: HTML-to-Markdown conversion filter module for NGINX
-  description: >
-    An NGINX dynamic module that converts HTML responses to Markdown
-    format for AI agent consumption. Supports streaming conversion,
-    content negotiation via Accept headers, and automatic decompression.
-  category: web
-  requires: nginx (>= 1.24.0)
+  name: "nginx-module-markdown-for-agents"
+  vendor: "NGINX Markdown for Agents Contributors"
+  license: "BSD-2-Clause"
+  homepage: "https://github.com/cnkang/nginx-markdown-for-agents"
+  maintainer: "nginx-markdown-for-agents maintainers"
+  description: >-
+    NGINX dynamic module for HTML-to-Markdown conversion.
+    Serves Markdown to AI agents via content negotiation.

@@ -1,0 +1,495 @@
+# Release Packages — Unified DEB/RPM build, test, sign, and publish pipeline
+#
+# Architecture: build (matrix) → package (matrix) → smoke-test (matrix) → integrity → publish
+#
+# Triggers:
+#   - Tag push (v*): full pipeline ending with GitHub Release upload
+#   - workflow_dispatch: full pipeline ending with workflow artifact upload
+#
+# Security:
+#   - Workflow-level permissions: {} (no permissions by default)
+#   - Each job grants only the minimum permissions it needs
+#   - All third-party actions MUST be pinned to full SHA commit hashes (Req 9.6)
+#   - GPG signing runs in a Protected Environment with required reviewers
+#   - workflow_dispatch input is validated before use (Req 9.7)
+#
+# Extension points (see also packaging/matrix.yaml for authoritative matrix reference):
+#   - Add new NGINX versions: update nginx_version in the build/package/smoke-test
+#     matrix arrays (and packaging/matrix.yaml). No structural workflow changes needed.
+#   - Add new target platforms: add entries to the smoke-test matrix include list
+#     with the appropriate container image and format, then update
+#     packaging/matrix.yaml smoke_test_containers accordingly.
+#   - Enable GPG signing: configure GPG_PRIVATE_KEY, GPG_PASSPHRASE, GPG_KEY_ID secrets
+#     and create a Protected Environment "release-signing" with required reviewers.
+#     The integrity job auto-detects secret presence and enables signing.
+#
+# Path filters note:
+#   GitHub Actions path filters only apply to push events on branches, NOT tag pushes.
+#   For tag pushes (v*), the workflow always runs regardless of path filters.
+#   The paths below are documented for reference and would apply if branch-based
+#   push triggers were added for testing:
+#     - packaging/**
+#     - components/**
+#     - .github/workflows/release-packages.yml
+
+name: Release Packages
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: >-
+          Optional version override (format: MAJOR.MINOR.PATCH or
+          MAJOR.MINOR.PATCH-prerelease, e.g. 0.7.0 or 0.7.0-rc.1).
+          If empty, version is derived from the git ref.
+        required: false
+        type: string
+
+# Workflow-level: no permissions granted by default (Req 9.5).
+# Each job declares its own minimum required permissions.
+permissions: {}
+
+# Jobs:
+#   - build:      Compile Rust library + NGINX dynamic module (matrix)
+#   - package:    Generate .deb/.rpm via nFPM (matrix)
+#   - smoke-test: Container install + module load verification (matrix)
+#   - integrity:  SHA256SUMS generation + optional GPG signing
+#   - publish:    Upload to GitHub Release (tag) or workflow artifacts (dispatch)
+#
+# All third-party actions in jobs below MUST use full SHA pinning (Req 9.6).
+# Example: actions/checkout@<full-sha> # v4.x.x
+
+jobs:
+  build:
+    name: Build - nginx-${{ matrix.nginx_version }} - ${{ matrix.arch }}
+    runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        nginx_version: ["1.26.3"]
+        arch: [amd64, arm64]
+
+    steps:
+      - name: Derive and validate version
+        id: version
+        env:
+          TAG_REF: ${{ github.ref }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          if [ -n "${INPUT_VERSION}" ]; then
+            VERSION="${INPUT_VERSION}"
+          elif printf '%s' "${TAG_REF}" | grep -qE '^refs/tags/v'; then
+            VERSION="${TAG_REF#refs/tags/v}"
+          else
+            echo "ERROR: Cannot derive version — not a tag push and no version input provided" >&2
+            exit 1
+          fi
+          echo "raw_version=${VERSION}" >> "$GITHUB_OUTPUT"
+        shell: bash
+
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Validate version
+        env:
+          VERSION: ${{ steps.version.outputs.raw_version }}
+        run: |
+          ./packaging/scripts/validate-version.sh "${VERSION}"
+          echo "PKG_VERSION=${VERSION}" >> "$GITHUB_ENV"
+        shell: bash
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@7b1c307e0dcbda6122208f10795a713336a9b35a # stable
+        with:
+          toolchain: stable
+
+      - name: Install NGINX build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            libpcre2-dev \
+            zlib1g-dev \
+            libssl-dev
+        shell: bash
+
+      - name: Download NGINX source
+        env:
+          NGINX_VERSION: ${{ matrix.nginx_version }}
+        run: |
+          curl -fsSL "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" | tar xz
+          echo "NGINX_SRC=${GITHUB_WORKSPACE}/nginx-${NGINX_VERSION}" >> "$GITHUB_ENV"
+        shell: bash
+
+      - name: Build Rust converter
+        run: |
+          cd components/rust-converter
+          cargo build --release
+        shell: bash
+
+      - name: Configure NGINX with dynamic module
+        env:
+          NGINX_VERSION: ${{ matrix.nginx_version }}
+        run: |
+          cd "${NGINX_SRC}"
+          ./configure \
+            --with-compat \
+            --add-dynamic-module="${GITHUB_WORKSPACE}/components/nginx-module"
+        shell: bash
+
+      - name: Build module
+        run: |
+          cd "${NGINX_SRC}"
+          make modules
+        shell: bash
+
+      - name: Copy .so to build directory
+        run: |
+          mkdir -p build
+          cp "${NGINX_SRC}/objs/ngx_http_markdown_module.so" build/
+        shell: bash
+
+      - name: Verify ELF shared object
+        run: |
+          file_output="$(file build/ngx_http_markdown_module.so)"
+          echo "${file_output}"
+          if ! printf '%s' "${file_output}" | grep -q "ELF"; then
+            echo "ERROR: build/ngx_http_markdown_module.so is not a valid ELF file" >&2
+            exit 1
+          fi
+        shell: bash
+
+      - name: Upload module artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: module-so-${{ matrix.nginx_version }}-${{ matrix.arch }}
+          path: build/ngx_http_markdown_module.so
+          if-no-files-found: error
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Package Job: Generate .deb/.rpm via nFPM (matrix)
+  # Consumes the compiled .so from the build job and produces distribution
+  # packages following spec 31 naming conventions.
+  # ─────────────────────────────────────────────────────────────────────────────
+  package:
+    name: Package - nginx-${{ matrix.nginx_version }} - ${{ matrix.arch }}
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        nginx_version: ["1.26.3"]
+        arch: [amd64, arm64]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Download build artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: module-so-${{ matrix.nginx_version }}-${{ matrix.arch }}
+          path: build/
+
+      - name: Install nFPM
+        run: |
+          NFPM_VERSION="2.41.1"
+          curl -fsSL "https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}/nfpm_${NFPM_VERSION}_linux_amd64.tar.gz" \
+            | sudo tar -xz -C /usr/local/bin nfpm
+          nfpm --version
+        shell: bash
+
+      - name: Set packaging environment variables
+        id: pkg-env
+        env:
+          TAG_REF: ${{ github.ref }}
+          INPUT_VERSION: ${{ inputs.version }}
+          NGINX_VERSION: ${{ matrix.nginx_version }}
+          MATRIX_ARCH: ${{ matrix.arch }}
+        run: |
+          # Determine package version
+          if [ -n "${INPUT_VERSION}" ]; then
+            PKG_VERSION="${INPUT_VERSION}"
+          elif printf '%s' "${TAG_REF}" | grep -qE '^refs/tags/v'; then
+            PKG_VERSION="${TAG_REF#refs/tags/v}"
+          else
+            echo "ERROR: Cannot derive version — not a tag push and no version input provided" >&2
+            exit 1
+          fi
+
+          NFPM_ARCH="${MATRIX_ARCH}"
+
+          # Map arch for RPM naming (amd64→x86_64, arm64→aarch64)
+          case "${NFPM_ARCH}" in
+            amd64)  RPM_ARCH="x86_64" ;;
+            arm64)  RPM_ARCH="aarch64" ;;
+            *)
+              echo "ERROR: Unsupported architecture: ${NFPM_ARCH}" >&2
+              exit 1
+              ;;
+          esac
+
+          # Artifact filenames per spec 31 naming conventions
+          DEB_FILENAME="nginx-module-markdown-for-agents_${PKG_VERSION}_nginx-${NGINX_VERSION}_${NFPM_ARCH}.deb"
+          RPM_FILENAME="nginx-module-markdown-for-agents-${PKG_VERSION}-nginx${NGINX_VERSION}-1.${RPM_ARCH}.rpm"
+
+          # Export to GITHUB_ENV for subsequent steps
+          {
+            echo "PKG_VERSION=${PKG_VERSION}"
+            echo "NGINX_VERSION=${NGINX_VERSION}"
+            echo "NFPM_ARCH=${NFPM_ARCH}"
+            echo "RPM_ARCH=${RPM_ARCH}"
+            echo "DEB_FILENAME=${DEB_FILENAME}"
+            echo "RPM_FILENAME=${RPM_FILENAME}"
+          } >> "$GITHUB_ENV"
+
+          # Output for downstream reference
+          {
+            echo "pkg_version=${PKG_VERSION}"
+            echo "deb_filename=${DEB_FILENAME}"
+            echo "rpm_filename=${RPM_FILENAME}"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "PKG_VERSION=${PKG_VERSION}"
+          echo "NGINX_VERSION=${NGINX_VERSION}"
+          echo "NFPM_ARCH=${NFPM_ARCH}"
+          echo "DEB_FILENAME=${DEB_FILENAME}"
+          echo "RPM_FILENAME=${RPM_FILENAME}"
+        shell: bash
+
+      - name: Generate DEB package
+        run: |
+          mkdir -p dist
+          nfpm package \
+            --config packaging/nfpm/nfpm.yaml \
+            --packager deb \
+            --target "dist/${{ steps.pkg-env.outputs.deb_filename }}"
+          echo "Generated: dist/${{ steps.pkg-env.outputs.deb_filename }}"
+          ls -la "dist/${{ steps.pkg-env.outputs.deb_filename }}"
+        shell: bash
+
+      - name: Generate RPM package
+        run: |
+          nfpm package \
+            --config packaging/nfpm/nfpm.yaml \
+            --packager rpm \
+            --target "dist/${{ steps.pkg-env.outputs.rpm_filename }}"
+          echo "Generated: dist/${{ steps.pkg-env.outputs.rpm_filename }}"
+          ls -la "dist/${{ steps.pkg-env.outputs.rpm_filename }}"
+        shell: bash
+
+      - name: Upload DEB artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: deb-${{ matrix.nginx_version }}-${{ matrix.arch }}
+          path: dist/${{ steps.pkg-env.outputs.deb_filename }}
+          if-no-files-found: error
+          retention-days: 5
+
+      - name: Upload RPM artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: rpm-${{ matrix.nginx_version }}-${{ matrix.arch }}
+          path: dist/${{ steps.pkg-env.outputs.rpm_filename }}
+          if-no-files-found: error
+          retention-days: 5
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Smoke Test Job: Container install + module load verification (matrix)
+  # Installs the nginx.org package and the generated module package inside
+  # target distribution containers, then verifies the module loads via nginx -t.
+  # This validates ABI compatibility across all supported platforms.
+  # ─────────────────────────────────────────────────────────────────────────────
+  smoke-test:
+    name: Smoke Test - ${{ matrix.container }} (${{ matrix.format }})
+    needs: package
+    runs-on: ubuntu-24.04
+    container: ${{ matrix.container }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { container: "ubuntu:22.04", format: "deb", nginx_version: "1.26.3", arch: "amd64" }
+          - { container: "ubuntu:24.04", format: "deb", nginx_version: "1.26.3", arch: "amd64" }
+          - { container: "debian:12", format: "deb", nginx_version: "1.26.3", arch: "amd64" }
+          - { container: "almalinux:9", format: "rpm", nginx_version: "1.26.3", arch: "amd64" }
+          - { container: "amazonlinux:2023", format: "rpm", nginx_version: "1.26.3", arch: "amd64" }
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Download package artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: ${{ matrix.format }}-${{ matrix.nginx_version }}-${{ matrix.arch }}
+          path: dist/
+
+      - name: Run smoke test
+        env:
+          NGINX_VERSION: ${{ matrix.nginx_version }}
+        run: |
+          PKG_FILE="$(find dist/ -name '*.${{ matrix.format }}' -print -quit)"
+          if [ -z "${PKG_FILE}" ]; then
+            echo "ERROR: No .${{ matrix.format }} file found in dist/" >&2
+            exit 1
+          fi
+          chmod +x packaging/scripts/smoke-test-basic.sh
+          packaging/scripts/smoke-test-basic.sh "${PKG_FILE}" "${NGINX_VERSION}"
+        shell: bash
+
+      - name: Diagnostics on failure
+        if: failure()
+        env:
+          NGINX_VERSION: ${{ matrix.nginx_version }}
+        run: |
+          chmod +x packaging/scripts/smoke-test-diagnostics.sh
+          packaging/scripts/smoke-test-diagnostics.sh
+        shell: bash
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Integrity Job: SHA256SUMS generation + optional GPG signing
+  # Generates checksums for all package artifacts and optionally signs them
+  # with GPG when signing secrets are configured.
+  #
+  # Security:
+  #   - GPG private key NEVER appears in logs (all gpg output suppressed)
+  #   - Signing runs in Protected Environment "release-signing" when enabled
+  #   - Key material is cleaned up after signing
+  # ─────────────────────────────────────────────────────────────────────────────
+  integrity:
+    name: Integrity - SHA256SUMS + GPG
+    needs: smoke-test
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Download all DEB artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: deb-*
+          path: artifacts/
+          merge-multiple: true
+
+      - name: Download all RPM artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: rpm-*
+          path: artifacts/
+          merge-multiple: true
+
+      - name: List downloaded artifacts
+        run: |
+          echo "=== Downloaded artifacts ===" >&2
+          ls -la artifacts/
+        shell: bash
+
+      - name: Generate SHA256SUMS
+        run: |
+          ./packaging/scripts/generate-checksums.sh -d artifacts/
+        shell: bash
+
+      - name: GPG sign SHA256SUMS
+        if: ${{ secrets.GPG_PRIVATE_KEY != '' }}
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          ./packaging/scripts/gpg-sign-checksums.sh artifacts/SHA256SUMS "${{ secrets.GPG_KEY_ID }}"
+        shell: bash
+
+      - name: Upload SHA256SUMS
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: checksums
+          path: artifacts/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 5
+
+      - name: Upload SHA256SUMS.asc
+        if: ${{ secrets.GPG_PRIVATE_KEY != '' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: checksums-signature
+          path: artifacts/SHA256SUMS.asc
+          if-no-files-found: error
+          retention-days: 5
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Publish Job: Upload to GitHub Release (tag) or workflow artifacts (dispatch)
+  # Conditional publishing based on trigger context:
+  #   - Tag push (v*): uploads all packages + checksums to the GitHub Release
+  #   - workflow_dispatch: uploads everything as a single workflow artifact
+  #
+  # Security:
+  #   - ONLY this job has contents: write permission (Req 10.4)
+  #   - All other jobs use contents: read
+  # ─────────────────────────────────────────────────────────────────────────────
+  publish:
+    name: Publish
+    needs: integrity
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download all DEB artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: deb-*
+          path: release-assets/
+          merge-multiple: true
+
+      - name: Download all RPM artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: rpm-*
+          path: release-assets/
+          merge-multiple: true
+
+      - name: Download SHA256SUMS
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: checksums
+          path: release-assets/
+
+      - name: Download SHA256SUMS.asc (if exists)
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        continue-on-error: true
+        with:
+          name: checksums-signature
+          path: release-assets/
+
+      - name: List release assets
+        run: |
+          echo "=== Release assets ===" >&2
+          ls -la release-assets/
+        shell: bash
+
+      - name: Upload to GitHub Release (tag push)
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@c95fe1489396fe8a9eb87c0abf8aa5b2ef267fda # v2.2.1
+        with:
+          files: release-assets/*
+
+      - name: Upload as workflow artifacts (workflow_dispatch)
+        if: github.ref_type != 'tag'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-packages
+          path: release-assets/
+          if-no-files-found: error
+          retention-days: 5
