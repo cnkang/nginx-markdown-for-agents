@@ -17,11 +17,8 @@
 
 #include "../include/test_common.h"
 
-/* ── Minimal NGINX type stubs ─────────────────────────────────── */
-
-typedef intptr_t        ngx_int_t;
-typedef uintptr_t       ngx_uint_t;
-typedef unsigned char   u_char;
+#include <ngx_config.h>
+#include <ngx_core.h>
 
 #define NGX_OK         0
 #define NGX_ERROR     -1
@@ -30,19 +27,15 @@ typedef unsigned char   u_char;
 #define NGX_LOG_DEBUG  8
 #define NGX_LOG_DEBUG_HTTP  NGX_LOG_DEBUG
 
-typedef struct {
-    size_t      len;
-    u_char     *data;
-} ngx_str_t;
-
-/* Log stub */
-typedef struct {
+struct ngx_log_s {
     int dummy;
-} ngx_log_t;
+};
 
-typedef struct {
+typedef struct ngx_connection_s ngx_connection_t;
+
+struct ngx_connection_s {
     ngx_log_t  *log;
-} ngx_connection_t;
+};
 
 /* Pool stub */
 static u_char g_pool_buf[1024 * 256];
@@ -149,30 +142,7 @@ ngx_strncasecmp(u_char *s1, u_char *s2, size_t n)
 #define ngx_log_error(level, log, err, ...) (void)0
 #define ngx_log_debug1(level, log, err, fmt, arg) (void)0
 
-/* ── FFI types (matching production) ──────────────────────────── */
-
-#define NGX_HTTP_MARKDOWN_PLAN_OP_SET     0
-#define NGX_HTTP_MARKDOWN_PLAN_OP_DELETE  1
-#define NGX_HTTP_MARKDOWN_PLAN_OP_MODIFY  2
-#define NGX_HTTP_MARKDOWN_PLAN_MAX_ENTRIES  64
-
-typedef struct {
-    uint8_t      op_type;
-    const uint8_t *key;
-    size_t       key_len;
-    const uint8_t *value;
-    size_t       value_len;
-} FFIHeaderEntry;
-
-typedef struct FFIHeaderPlanHandle {
-    uint8_t _private[1];
-} FFIHeaderPlanHandle;
-
-typedef struct FFIHeaderPlan {
-    FFIHeaderPlanHandle  *handle;
-    const FFIHeaderEntry *entries;
-    size_t                count;
-} FFIHeaderPlan;
+#include "markdown_converter.h"
 
 static int g_plan_freed;
 
@@ -244,136 +214,8 @@ add_existing_header(const char *name, const char *value)
     g_request.headers_out.headers.part.nelts = g_header_count;
 }
 
-/* ── Simplified apply_header_plan (mirrors production logic) ──── */
-
-static ngx_int_t
-apply_header_plan(ngx_http_request_t *r, FFIHeaderPlan *plan)
-{
-    plan_undo_t     undo[NGX_HTTP_MARKDOWN_PLAN_MAX_ENTRIES];
-    size_t          i;
-    ngx_int_t       rc;
-
-    if (plan == NULL) {
-        return NGX_OK;
-    }
-
-    if (plan->count == 0) {
-        markdown_header_plan_free(plan);
-        return NGX_OK;
-    }
-
-    if (r == NULL) {
-        markdown_header_plan_free(plan);
-        return NGX_ERROR;
-    }
-
-    if (plan->count > NGX_HTTP_MARKDOWN_PLAN_MAX_ENTRIES) {
-        markdown_header_plan_free(plan);
-        return NGX_ERROR;
-    }
-
-    memset(undo, 0, sizeof(undo));
-
-    for (i = 0; i < plan->count; i++) {
-        const FFIHeaderEntry *entry = &plan->entries[i];
-        ngx_table_elt_t *h;
-
-        switch (entry->op_type) {
-
-        case NGX_HTTP_MARKDOWN_PLAN_OP_SET:
-            h = find_header(entry->key, entry->key_len);
-            if (h != NULL) {
-                /* Overwrite existing */
-                undo[i].op_type = NGX_HTTP_MARKDOWN_PLAN_OP_MODIFY;
-                undo[i].header = h;
-                undo[i].orig_hash = h->hash;
-                undo[i].orig_value = h->value;
-
-                u_char *pv = ngx_pnalloc(r->pool, entry->value_len);
-                if (pv == NULL) { rc = NGX_ERROR; goto rollback; }
-                memcpy(pv, entry->value, entry->value_len);
-                h->value.data = pv;
-                h->value.len = entry->value_len;
-            } else {
-                /* Push new */
-                h = ngx_list_push(&r->headers_out.headers);
-                if (h == NULL) { rc = NGX_ERROR; goto rollback; }
-
-                h->key.data = ngx_pnalloc(r->pool, entry->key_len);
-                if (h->key.data == NULL) { h->hash = 0; rc = NGX_ERROR; goto rollback; }
-                memcpy(h->key.data, entry->key, entry->key_len);
-                h->key.len = entry->key_len;
-
-                h->value.data = ngx_pnalloc(r->pool, entry->value_len);
-                if (h->value.data == NULL) { h->hash = 0; rc = NGX_ERROR; goto rollback; }
-                memcpy(h->value.data, entry->value, entry->value_len);
-                h->value.len = entry->value_len;
-                h->hash = 1;
-
-                undo[i].op_type = NGX_HTTP_MARKDOWN_PLAN_OP_SET;
-                undo[i].header = h;
-            }
-            break;
-
-        case NGX_HTTP_MARKDOWN_PLAN_OP_DELETE:
-            h = find_header(entry->key, entry->key_len);
-            undo[i].op_type = NGX_HTTP_MARKDOWN_PLAN_OP_DELETE;
-            if (h != NULL) {
-                undo[i].header = h;
-                undo[i].orig_hash = h->hash;
-                undo[i].orig_value = h->value;
-                h->hash = 0;
-            } else {
-                undo[i].header = NULL;
-            }
-            break;
-
-        case NGX_HTTP_MARKDOWN_PLAN_OP_MODIFY:
-            h = find_header(entry->key, entry->key_len);
-            undo[i].op_type = NGX_HTTP_MARKDOWN_PLAN_OP_MODIFY;
-            if (h != NULL) {
-                undo[i].header = h;
-                undo[i].orig_hash = h->hash;
-                undo[i].orig_value = h->value;
-
-                u_char *mv = ngx_pnalloc(r->pool, entry->value_len);
-                if (mv == NULL) { rc = NGX_ERROR; goto rollback; }
-                memcpy(mv, entry->value, entry->value_len);
-                h->value.data = mv;
-                h->value.len = entry->value_len;
-            } else {
-                undo[i].header = NULL;
-            }
-            break;
-
-        default:
-            rc = NGX_ERROR;
-            goto rollback;
-        }
-    }
-
-    markdown_header_plan_free(plan);
-    return NGX_OK;
-
-rollback:
-    /* Roll back in reverse */
-    while (i > 0) {
-        i--;
-        if (undo[i].header == NULL) continue;
-        switch (undo[i].op_type) {
-        case NGX_HTTP_MARKDOWN_PLAN_OP_SET:
-            undo[i].header->hash = 0;
-            break;
-        case NGX_HTTP_MARKDOWN_PLAN_OP_DELETE:
-        case NGX_HTTP_MARKDOWN_PLAN_OP_MODIFY:
-            undo[i].header->hash = undo[i].orig_hash;
-            undo[i].header->value = undo[i].orig_value;
-            break;
-        }
-    }
-    markdown_header_plan_free(plan);
-    return rc;
-}
+#define apply_header_plan ngx_http_markdown_apply_header_plan
+#include "ngx_http_markdown_header_plan.c"
 
 
 /* ── Tests ─────────────────────────────────────────────────────── */

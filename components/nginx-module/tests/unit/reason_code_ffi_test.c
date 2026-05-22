@@ -11,20 +11,8 @@
 
 #include "../include/test_common.h"
 
-/*
- * Minimal NGINX type stubs for ngx_int_t (needed by the wrapper).
- * The test_common.h already provides stdint.h and string.h.
- * We define the NGINX types that the production code expects.
- */
-
-typedef intptr_t        ngx_int_t;
-typedef uintptr_t       ngx_uint_t;
-typedef unsigned char   u_char;
-
-typedef struct {
-    size_t      len;
-    u_char     *data;
-} ngx_str_t;
+#include <ngx_config.h>
+#include <ngx_core.h>
 
 #define NGX_OK        0
 #define NGX_ERROR    -1
@@ -119,69 +107,7 @@ markdown_reason_code_count(void)
     return STUB_REASON_CODE_COUNT;
 }
 
-/*
- * Inline the production wrapper functions directly.
- * We cannot #include the .c file because it includes NGINX headers
- * that conflict with our stubs.  Instead we replicate the logic here
- * (it is trivial and the real integration is tested via make build).
- */
-
-ngx_int_t
-ngx_http_markdown_get_reason_code_str(uint32_t code, ngx_str_t *out_str)
-{
-    const uint8_t  *ptr;
-    uintptr_t       len;
-
-    if (out_str == NULL) {
-        return NGX_ERROR;
-    }
-
-    len = 0;
-    ptr = markdown_reason_code_str(code, &len);
-
-    if (ptr == NULL) {
-        out_str->len = 0;
-        out_str->data = NULL;
-        return NGX_DECLINED;
-    }
-
-    out_str->len = len;
-    out_str->data = (u_char *) ptr;
-
-    return NGX_OK;
-}
-
-ngx_int_t
-ngx_http_markdown_get_reason_code_metric_key(uint32_t code,
-    ngx_str_t *out_str)
-{
-    const uint8_t  *ptr;
-    uintptr_t       len;
-
-    if (out_str == NULL) {
-        return NGX_ERROR;
-    }
-
-    len = 0;
-    ptr = markdown_reason_code_metric_key(code, &len);
-
-    if (ptr == NULL) {
-        out_str->len = 0;
-        out_str->data = NULL;
-        return NGX_DECLINED;
-    }
-
-    out_str->len = len;
-    out_str->data = (u_char *) ptr;
-
-    return NGX_OK;
-}
-
-uint32_t
-ngx_http_markdown_reason_code_total_count(void)
-{
-    return markdown_reason_code_count();
-}
+#include "ngx_http_markdown_reason_ffi.c"
 
 
 /* ── Tests ─────────────────────────────────────────────────────── */
