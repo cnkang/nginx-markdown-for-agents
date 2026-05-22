@@ -507,23 +507,32 @@ def _check_e2e_migration_policy() -> CheckResult:
     stale_execution_refs = _collect_stale_execution_surface_refs()
 
     if missing_wrappers or stale_shell_logic or removed_python_present or stale_execution_refs:
-        details: list[str] = []
-        if missing_wrappers:
-            details.append(f"missing migrated wrappers: {', '.join(missing_wrappers)}")
-        if stale_shell_logic:
-            details.append(f"non-wrapper migrated shell logic: {', '.join(stale_shell_logic)}")
-        if removed_python_present:
-            display = ", ".join(_display_path(Path(p)) for p in removed_python_present)
-            details.append(f"removed Python E2E files still present: {display}")
-        if stale_execution_refs:
-            details.append(f"stale execution-surface refs: {', '.join(stale_execution_refs)}")
-        return _result("e2e-migration-policy", FAIL, "; ".join(details))
-
+        return _extracted_from__check_e2e_migration_policy_8(
+            missing_wrappers,
+            stale_shell_logic,
+            removed_python_present,
+            stale_execution_refs,
+        )
     return _result(
         "e2e-migration-policy",
         PASS,
         "migrated shell paths are thin wrappers and removed Python E2E files are absent",
     )
+
+
+# TODO Rename this here and in `_check_e2e_migration_policy`
+def _extracted_from__check_e2e_migration_policy_8(missing_wrappers, stale_shell_logic, removed_python_present, stale_execution_refs):
+    details: list[str] = []
+    if missing_wrappers:
+        details.append(f"missing migrated wrappers: {', '.join(missing_wrappers)}")
+    if stale_shell_logic:
+        details.append(f"non-wrapper migrated shell logic: {', '.join(stale_shell_logic)}")
+    if removed_python_present:
+        display = ", ".join(_display_path(Path(p)) for p in removed_python_present)
+        details.append(f"removed Python E2E files still present: {display}")
+    if stale_execution_refs:
+        details.append(f"stale execution-surface refs: {', '.join(stale_execution_refs)}")
+    return _result("e2e-migration-policy", FAIL, "; ".join(details))
 
 
 def check_batch_prune_pairing() -> CheckResult:
@@ -581,10 +590,9 @@ def check_cfl_workflows() -> CheckResult:
     ]
 
     missing: list[str] = []
-    for rel in required_workflows:
-        if not (REPO_ROOT / rel).exists():
-            missing.append(rel)
-
+    missing.extend(
+        rel for rel in required_workflows if not (REPO_ROOT / rel).exists()
+    )
     if missing:
         return _result(
             "cfl-workflows",
@@ -758,8 +766,8 @@ def _missing_recent_finding_closeout(
     if not row_match:
         return [f"{_display_path(report)}::{finding_id} remediation row"]
 
-    row = row_match.group(0).lower()
-    if not any(status in row for status in REMEDIATION_STATUSES):
+    row = row_match[0].lower()
+    if all(status not in row for status in REMEDIATION_STATUSES):
         return [f"{_display_path(report)}::{finding_id} final status"]
     return []
 
@@ -781,10 +789,9 @@ def check_clusterfuzzlite_build_config() -> CheckResult:
         ".clusterfuzzlite/Dockerfile",
         ".clusterfuzzlite/build.sh",
     ]
-    missing = [
+    if missing := [
         rel for rel in required_files if not (REPO_ROOT / rel).exists()
-    ]
-    if missing:
+    ]:
         return _result(
             "clusterfuzzlite-build-config",
             FAIL,
@@ -830,6 +837,72 @@ def check_clusterfuzzlite_build_config() -> CheckResult:
     )
 
 
+def check_fuzz_target_determinism() -> CheckResult:
+    """Verify fuzz targets do not use non-deterministic APIs (FUZZ-003).
+
+    Scans all fuzz target source files for forbidden API patterns that would
+    violate the deterministic execution requirement: network I/O, filesystem
+    writes, system time for logic branches, external random sources, environment
+    variable reads, and process/thread creation.
+
+    Returns:
+        CheckResult with PASS if no forbidden patterns are found, or FAIL
+        listing the violations.
+    """
+    fuzz_targets_dir = (
+        REPO_ROOT / "components" / "rust-converter" / "fuzz" / "fuzz_targets"
+    )
+    if not fuzz_targets_dir.exists():
+        return _result(
+            "fuzz-target-determinism",
+            FAIL,
+            "FUZZ-003: fuzz targets directory not found",
+        )
+
+    # Forbidden API patterns that indicate non-deterministic behavior.
+    # Each tuple is (pattern_regex, description).
+    forbidden_patterns: list[tuple[str, str]] = [
+        (r"\bstd::net\b", "network I/O (std::net)"),
+        (r"\bTcpStream\b", "network I/O (TcpStream)"),
+        (r"\bUdpSocket\b", "network I/O (UdpSocket)"),
+        (r"\bstd::fs::(?:write|create_dir|remove)", "filesystem write"),
+        (r"\bFile::create\b", "filesystem write (File::create)"),
+        (r"\bSystemTime::now\b", "system time"),
+        (r"\bInstant::now\b", "system time (Instant::now)"),
+        (r"\brand::thread_rng\b", "external random (thread_rng)"),
+        (r"\bOsRng\b", "external random (OsRng)"),
+        (r"\bstd::env::var\b", "environment variable read"),
+        (r"\bstd::process::Command\b", "process creation"),
+        (r"\bstd::thread::spawn\b", "thread creation"),
+    ]
+
+    violations: list[str] = []
+    for target_file in sorted(fuzz_targets_dir.glob("*.rs")):
+        try:
+            text = target_file.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            violations.append(f"{target_file.name}:unreadable")
+            continue
+
+        violations.extend(
+            f"{target_file.name}:{desc}"
+            for pattern, desc in forbidden_patterns
+            if re.search(pattern, text)
+        )
+    if violations:
+        return _result(
+            "fuzz-target-determinism",
+            FAIL,
+            f"FUZZ-003 violations: {'; '.join(violations)}",
+        )
+
+    return _result(
+        "fuzz-target-determinism",
+        PASS,
+        "fuzz targets are free of non-deterministic API usage (FUZZ-003 satisfied)",
+    )
+
+
 def check_fuzz_gitignore() -> CheckResult:
     """Verify that .gitignore excludes fuzz artifact and corpus paths.
 
@@ -863,19 +936,18 @@ def check_fuzz_gitignore() -> CheckResult:
         r"fuzz/artifacts",
         r"fuzz/corpus",
     ]
-    found = [pat for pat in fuzz_patterns if pat in text]
-    if not found:
+    if found := [pat for pat in fuzz_patterns if pat in text]:
+        return _result(
+            "fuzz-gitignore",
+            PASS,
+            "fuzz artifact/corpus paths excluded in .gitignore",
+        )
+    else:
         return _result(
             "fuzz-gitignore",
             WARN_NEEDS_AUTHOR_REVIEW,
             ".gitignore missing fuzz artifact/corpus exclusion entries",
         )
-
-    return _result(
-        "fuzz-gitignore",
-        PASS,
-        "fuzz artifact/corpus paths excluded in .gitignore",
-    )
 
 
 def check_fuzz_guide() -> CheckResult:
@@ -944,6 +1016,7 @@ def collect_results(full: bool = False) -> list[CheckResult]:
         check_clusterfuzzlite_build_config(),
         check_cfl_workflows(),
         check_batch_prune_pairing(),
+        check_fuzz_target_determinism(),
         check_fuzz_gitignore(),
         check_fuzz_guide(),
         _check_optional_kiro(manifest, full=full),
