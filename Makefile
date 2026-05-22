@@ -111,6 +111,9 @@ test-rust-fuzz-smoke:
 	cd $(RUST_DIR) && cargo +nightly fuzz run security_validator -- -max_total_time=5
 	cd $(RUST_DIR) && cargo +nightly fuzz run fuzz_streaming_no_panic -- -max_total_time=5
 	cd $(RUST_DIR) && cargo +nightly fuzz run fuzz_streaming_chunk_split -- -max_total_time=5
+	cd $(RUST_DIR) && cargo +nightly fuzz run fuzz_streaming_malformed -- -max_total_time=5
+	cd $(RUST_DIR) && cargo +nightly fuzz run fuzz_decompression -- -max_total_time=5
+	cd $(RUST_DIR) && cargo +nightly fuzz run fuzz_url_validation -- -max_total_time=5
 	cd $(RUST_DIR) && cargo +nightly fuzz run convert_html -- -max_total_time=5
 	cd $(RUST_DIR) && cargo +nightly fuzz run streaming_chunks -- -max_total_time=5
 	cd $(RUST_DIR) && cargo +nightly fuzz run negotiation_and_headers -- -max_total_time=5
@@ -251,17 +254,39 @@ release-gates-check-070:
 	else \
 		echo "  SKIP: tools/compat-check/test_compat_check.sh not found"; \
 	fi
-	@echo "  [install-layout] Validating install layout..."
-	@if test -f tools/release/gates/check_install_layout.sh; then \
-		if ls dist/*.deb dist/*.rpm >/dev/null 2>&1; then \
-			bash tools/release/gates/check_install_layout.sh dist/*.deb dist/*.rpm || \
-				{ echo "FAIL: install layout validation failed" >&2; exit 1; }; \
+		@echo "  [install-layout] Validating install layout..."
+		@if test -f tools/release/gates/check_install_layout.sh; then \
+			if ! ls dist/*.deb dist/*.rpm >/dev/null 2>&1; then \
+				if [ "$${RELEASE_GATE_REQUIRE_PACKAGES:-1}" = "0" ]; then \
+					echo "  SKIP: no package files in dist/ (RELEASE_GATE_REQUIRE_PACKAGES=0)"; \
+					exit 0; \
+				fi; \
+				if command -v nfpm >/dev/null 2>&1; then \
+					echo "  [install-layout] No packages found; building local amd64 DEB/RPM with nFPM..."; \
+					mkdir -p dist; \
+					test -f build/ngx_http_markdown_module.so || \
+						{ echo "FAIL: build/ngx_http_markdown_module.so not found" >&2; exit 1; }; \
+					PKG_VERSION=$${PKG_VERSION:-0.7.0} NGINX_VERSION=$${NGINX_VERSION:-1.26.3} NFPM_ARCH=amd64 \
+						nfpm package --config packaging/nfpm/nfpm.yaml --packager deb \
+						--target dist/nginx-module-markdown-for-agents_$${PKG_VERSION:-0.7.0}_nginx-$${NGINX_VERSION:-1.26.3}_amd64.deb; \
+					PKG_VERSION=$${PKG_VERSION:-0.7.0} NGINX_VERSION=$${NGINX_VERSION:-1.26.3} NFPM_ARCH=amd64 \
+						nfpm package --config packaging/nfpm/nfpm.yaml --packager rpm \
+						--target dist/nginx-module-markdown-for-agents-$${PKG_VERSION:-0.7.0}-nginx$${NGINX_VERSION:-1.26.3}-1.x86_64.rpm; \
+				else \
+					echo "FAIL: no package files in dist/ and nfpm is unavailable" >&2; \
+					exit 1; \
+				fi; \
+			fi; \
+			if ls dist/*.deb dist/*.rpm >/dev/null 2>&1; then \
+				bash tools/release/gates/check_install_layout.sh dist/*.deb dist/*.rpm || \
+					{ echo "FAIL: install layout validation failed" >&2; exit 1; }; \
+			else \
+				echo "FAIL: no package files in dist/" >&2; \
+				exit 1; \
+			fi; \
 		else \
-			echo "  SKIP: no package files in dist/ (build packages first)"; \
-		fi; \
-	else \
-		echo "  SKIP: tools/release/gates/check_install_layout.sh not found"; \
-	fi
+			echo "  SKIP: tools/release/gates/check_install_layout.sh not found"; \
+		fi
 	@echo "  [postinst-safety] Validating postinst safety..."
 	@if test -f tools/release/gates/check_postinst_safety.sh; then \
 		bash tools/release/gates/check_postinst_safety.sh || \
@@ -269,7 +294,7 @@ release-gates-check-070:
 	else \
 		echo "  SKIP: tools/release/gates/check_postinst_safety.sh not found"; \
 	fi
-	@echo "  Package Compatibility Gate: ALL PASSED"
+		@echo "  Package Compatibility Gate: ALL PASSED"
 	@echo "=== Fuzz CI Gate ==="
 	@if cargo +nightly --version >/dev/null 2>&1; then \
 		echo "  [fuzz-build] cargo +nightly fuzz build..."; \
