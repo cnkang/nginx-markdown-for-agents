@@ -592,7 +592,7 @@ jobs:
       - name: Install nightly fuzz tooling
         run: |
           rustup toolchain install nightly --profile minimal
-          cargo +nightly install cargo-fuzz --locked
+          cargo install cargo-fuzz --locked
           cargo install cbindgen --locked
 
       - name: Run v0.7.0 release gates
