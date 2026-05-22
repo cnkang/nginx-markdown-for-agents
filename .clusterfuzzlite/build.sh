@@ -9,23 +9,36 @@
 
 set -o pipefail
 
+if [ -z "${OUT:-}" ]; then
+    echo "ERROR: OUT is not set" >&2
+    exit 1
+fi
+
 cd components/rust-converter
 
-# Auto-discover all fuzz targets by globbing fuzz_targets/*.rs.
-# New targets are picked up automatically — no hardcoded list required.
-for target_file in fuzz/fuzz_targets/*.rs; do
-    target_name=$(basename "${target_file}" .rs)
+# Auto-discover registered fuzz targets, not every helper .rs file.
+# Helper modules such as streaming_utils.rs are intentionally not binaries.
+cargo +nightly fuzz list | while IFS= read -r target_name; do
+    if [ -z "${target_name}" ]; then
+        continue
+    fi
 
     # Build the fuzz target with cargo-fuzz (requires nightly)
     cargo +nightly fuzz build "${target_name}"
 
     # Copy the compiled binary to $OUT/
-    cp "fuzz/target/x86_64-unknown-linux-gnu/release/${target_name}" "${OUT}/"
+    binary=$(find fuzz/target -type f -name "${target_name}" | grep '/release/' | head -n 1 || true)
+    if [ -z "${binary}" ] || [ ! -f "${binary}" ]; then
+        echo "ERROR: built fuzz target not found: ${target_name}" >&2
+        exit 1
+    fi
+
+    cp "${binary}" "${OUT}/"
     chmod +x "${OUT}/${target_name}"
 
     # Package seed corpus if the directory exists
     corpus_dir="fuzz/corpus/${target_name}"
-    if [ -d "${corpus_dir}" ]; then
-        zip -j "${OUT}/${target_name}_seed_corpus.zip" "${corpus_dir}"/*
+    if [ -d "${corpus_dir}" ] && [ -n "$(find "${corpus_dir}" -type f -print -quit)" ]; then
+        (cd "${corpus_dir}" && zip -qr "${OUT}/${target_name}_seed_corpus.zip" .)
     fi
 done
