@@ -2,11 +2,10 @@
 """
 Package metadata validator for v0.7.0 release gates.
 
-Validates that DEB and RPM package metadata files exist and contain
-required fields/sections:
+Validates that the package metadata files used by the v0.7.0 workflow exist
+and contain required fields/paths:
 
-1. packaging/debian/control - Required fields: Package, Version,
-   Architecture, Depends
+1. packaging/nfpm/nfpm.yaml - Required nFPM metadata and install layout paths
 2. packaging/rpm/SPECS/nginx-module-markdown.spec - Required sections:
    Name, Version, Requires, %post, %changelog
 
@@ -26,7 +25,7 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 
-DEB_CONTROL = PROJECT_ROOT / "packaging" / "debian" / "control"
+NFPM_CONFIG = PROJECT_ROOT / "packaging" / "nfpm" / "nfpm.yaml"
 RPM_SPEC = (
     PROJECT_ROOT
     / "packaging"
@@ -35,7 +34,17 @@ RPM_SPEC = (
     / "nginx-module-markdown.spec"
 )
 
-DEB_REQUIRED_FIELDS = ["Package", "Architecture", "Depends"]
+NFPM_REQUIRED_SNIPPETS = [
+    'name: "nginx-module-markdown-for-agents"',
+    'version: "${PKG_VERSION}"',
+    'arch: "${NFPM_ARCH}"',
+    'nginx (>= ${NGINX_VERSION})',
+    "/usr/lib/nginx/modules/ngx_http_markdown_module.so",
+    "/usr/share/doc/nginx-markdown-for-agents/README.md",
+    "/usr/share/doc/nginx-markdown-for-agents/INSTALL.md",
+    "/usr/share/doc/nginx-markdown-for-agents/COMPATIBILITY.md",
+    "/usr/share/licenses/nginx-markdown-for-agents/LICENSE",
+]
 RPM_REQUIRED_FIELDS = ["Name", "Version", "Requires"]
 RPM_REQUIRED_SECTIONS = ["%post", "%changelog"]
 
@@ -65,22 +74,21 @@ def read_safe(path: Path) -> str:
     return resolved.read_text(encoding="utf-8") if resolved.is_file() else ""
 
 
-def validate_deb_control(result: ValidationResult) -> None:
-    """Validate the Debian control file exists and has required fields."""
-    check_id = "deb:exists"
-    content = read_safe(DEB_CONTROL)
+def validate_nfpm_config(result: ValidationResult) -> None:
+    """Validate the nFPM config used by release-packages.yml."""
+    check_id = "nfpm:exists"
+    content = read_safe(NFPM_CONFIG)
     if not content:
-        result.fail(check_id, "packaging/debian/control not found")
+        result.fail(check_id, "packaging/nfpm/nfpm.yaml not found")
         return
-    result.pass_(check_id, "packaging/debian/control exists")
+    result.pass_(check_id, "packaging/nfpm/nfpm.yaml exists")
 
-    for field in DEB_REQUIRED_FIELDS:
-        fid = f"deb:field:{field}"
-        pattern = rf"^{re.escape(field)}:"
-        if re.search(pattern, content, re.MULTILINE):
-            result.pass_(fid, f"{field} field present")
+    for snippet in NFPM_REQUIRED_SNIPPETS:
+        sid = f"nfpm:contains:{snippet[:24]}"
+        if snippet in content:
+            result.pass_(sid, f"nFPM config contains {snippet}")
         else:
-            result.fail(fid, f"{field} field missing from debian/control")
+            result.fail(sid, f"nFPM config missing {snippet}")
 
 
 def validate_rpm_spec(result: ValidationResult) -> None:
@@ -123,7 +131,7 @@ def print_report(result: ValidationResult) -> None:
 def main() -> int:
     """CLI entry point for package metadata validation."""
     result = ValidationResult()
-    validate_deb_control(result)
+    validate_nfpm_config(result)
     validate_rpm_spec(result)
     print_report(result)
     return 1 if result.has_failures else 0

@@ -38,10 +38,16 @@ contents:
     type: config|noreplace
 
   - src: "./LICENSE"
-    dst: "/usr/share/doc/nginx-module-markdown-for-agents/copyright"
+    dst: "/usr/share/licenses/nginx-markdown-for-agents/LICENSE"
 
   - src: "./README.md"
-    dst: "/usr/share/doc/nginx-module-markdown-for-agents/README.md"
+    dst: "/usr/share/doc/nginx-markdown-for-agents/README.md"
+
+  - src: "./docs/guides/INSTALL.md"
+    dst: "/usr/share/doc/nginx-markdown-for-agents/INSTALL.md"
+
+  - src: "./docs/COMPATIBILITY.md"
+    dst: "/usr/share/doc/nginx-markdown-for-agents/COMPATIBILITY.md"
 
 scripts:
   postinstall: "./packaging/nfpm/scripts/postinstall.sh"

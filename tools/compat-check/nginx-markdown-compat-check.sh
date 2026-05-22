@@ -53,7 +53,7 @@ SCRIPT_NAME="$(basename "$0")"
 PROJECT_VERSION="0.7.0"
 
 # Supported NGINX versions (nginx.org stable)
-SUPPORTED_NGINX_VERSIONS="1.26.2 1.26.3"
+SUPPORTED_NGINX_VERSIONS="1.26.3"
 
 # Supported architectures
 SUPPORTED_ARCHS="x86_64 aarch64"

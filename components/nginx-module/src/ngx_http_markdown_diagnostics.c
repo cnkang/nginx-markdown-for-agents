@@ -650,9 +650,9 @@ ngx_http_markdown_decision_path_is_failure(const char *status)
  *
  * Emits a single structured log line in key=value format:
  *
- *   markdown decision_path: accept_result=CONVERT
+ *   markdown: accept_result=CONVERT
  *       conditional_result=PROCEED conversion_status=SUCCESS
- *       reason_code=ELIGIBLE_CONVERTED duration_ms=12
+ *       reason_code=CONVERTED duration_ms=12
  *
  * This function uses only stack-local variables and does NOT
  * allocate from the pool or heap.  It is safe to call from

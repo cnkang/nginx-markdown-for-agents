@@ -210,7 +210,7 @@ REPO
         nginx -V 2>&1 >&2 || die "nginx -V failed"
 
         # --- RPM: Verify .so exists ---
-        MODULE_PATH="/usr/lib64/nginx/modules/ngx_http_markdown_module.so"
+        MODULE_PATH="/usr/lib/nginx/modules/ngx_http_markdown_module.so"
         info "Verifying module .so at: ${MODULE_PATH}"
         if [ ! -f "${MODULE_PATH}" ]; then
             die "Module .so not found at expected path: ${MODULE_PATH}"
