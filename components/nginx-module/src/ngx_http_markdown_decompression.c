@@ -380,6 +380,25 @@ ngx_http_markdown_decompress_gzip(ngx_http_request_t *r,
         }
 
         /*
+         * Z_BUF_ERROR with avail_out == 0 but total_out < budget means
+         * the initial output estimate was too small.  Classify as
+         * budget_exceeded since the true decompressed size is unknown
+         * and likely exceeds the budget.
+         */
+        if (zrc == Z_BUF_ERROR && stream.avail_out == 0
+            && stream.avail_in > 0)
+        {
+            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                         "markdown: decompression output buffer "
+                         "exhausted with remaining input, "
+                         "likely exceeds budget (%uz), "
+                         "category=resource_limit",
+                         conf->decompress_max_size);
+            inflateEnd(&stream);
+            return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
+        }
+
+        /*
          * Classify zlib error into bounded decompression categories:
          *   Z_DATA_ERROR → format_error (invalid compressed data)
          *   Z_BUF_ERROR with incomplete input → truncated_input
@@ -418,8 +437,9 @@ ngx_http_markdown_decompress_gzip(ngx_http_request_t *r,
         return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
     }
     
-    /* Create output chain with decompressed data (Requirement 2.3) */
-    b = ngx_create_temp_buf(r->pool, stream.total_out);
+    /* Create output chain wrapping the decompressed data directly
+     * (avoids a second allocation + memcpy). */
+    b = ngx_calloc_buf(r->pool);
     if (b == NULL) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                      "markdown: failed to create output buffer, "
@@ -428,8 +448,11 @@ ngx_http_markdown_decompress_gzip(ngx_http_request_t *r,
         return NGX_ERROR;
     }
     
-    ngx_memcpy(b->pos, output_data, stream.total_out);
-    b->last = b->pos + stream.total_out;
+    b->pos = output_data;
+    b->last = output_data + stream.total_out;
+    b->start = output_data;
+    b->end = output_data + output_size;
+    b->temporary = 1;
     b->last_buf = 1;
     
     cl = ngx_alloc_chain_link(r->pool);
@@ -658,8 +681,9 @@ ngx_http_markdown_decompress_brotli(ngx_http_request_t *r,
         return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
     }
     
-    /* Create output chain with decompressed data (Requirement 3.2) */
-    b = ngx_create_temp_buf(r->pool, total_out);
+    /* Create output chain wrapping the decompressed data directly
+     * (avoids a second allocation + memcpy). */
+    b = ngx_calloc_buf(r->pool);
     if (b == NULL) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                      "markdown: failed to create output buffer, "
@@ -668,8 +692,11 @@ ngx_http_markdown_decompress_brotli(ngx_http_request_t *r,
         return NGX_ERROR;
     }
     
-    ngx_memcpy(b->pos, output_data, total_out);
-    b->last = b->pos + total_out;
+    b->pos = output_data;
+    b->last = output_data + total_out;
+    b->start = output_data;
+    b->end = output_data + output_size;
+    b->temporary = 1;
     b->last_buf = 1;
     
     cl = ngx_alloc_chain_link(r->pool);

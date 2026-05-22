@@ -100,6 +100,9 @@ ngx_http_markdown_find_request_header(ngx_http_request_t *r,
 
     for ( ;; ) {
         for (i = 0; i < part->nelts; i++) {
+            if (headers[i].hash == 0) {
+                continue;
+            }
             if (headers[i].key.len == name->len
                 && ngx_strncasecmp(headers[i].key.data,
                                    name->data, name->len) == 0)

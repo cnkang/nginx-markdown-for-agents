@@ -45,6 +45,9 @@ ngx_http_markdown_find_request_header(ngx_http_request_t *r, u_char *name, size_
 
         headers = part->elts;
         for (ngx_uint_t i = 0; i < part->nelts; i++) {
+            if (headers[i].hash == 0) {
+                continue;
+            }
             if (headers[i].key.len == name_len
                 && ngx_strncasecmp(headers[i].key.data, name, name_len) == 0)
             {
@@ -189,7 +192,18 @@ ngx_http_markdown_handle_if_none_match(ngx_http_request_t *r,
         }
 
         fin_rc = markdown_incremental_finalize(inc_handle, conv_result);
-        (void) fin_rc;
+        if (fin_rc != ERROR_SUCCESS) {
+            ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
+                         "markdown: incremental finalize failed during "
+                         "If-None-Match check, error_code=%ud", fin_rc);
+            /*
+             * finalize consumes the handle regardless of success/failure,
+             * so do NOT call markdown_incremental_free().  Clean up the
+             * result struct (which may hold partial Rust-owned fields).
+             */
+            markdown_result_free(conv_result);
+            return NGX_ERROR;
+        }
     } else
 #endif
     {
@@ -333,5 +347,5 @@ ngx_http_markdown_send_304(ngx_http_request_t *r,
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                   "markdown: 304 Not Modified response sent");
 
-    return NGX_OK;
+    return NGX_DONE;
 }

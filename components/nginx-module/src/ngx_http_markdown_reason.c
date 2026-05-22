@@ -113,7 +113,7 @@ static ngx_str_t ngx_http_markdown_reason_fail_system_str =
  */
 const ngx_str_t *
 ngx_http_markdown_reason_from_eligibility(
-    ngx_http_markdown_eligibility_t eligibility, const ngx_log_t *log)
+    ngx_http_markdown_eligibility_t eligibility, ngx_log_t *log)
 {
     switch (eligibility) {
 
@@ -142,14 +142,14 @@ ngx_http_markdown_reason_from_eligibility(
         return &ngx_http_markdown_reason_skip_range_str;
 
     case NGX_HTTP_MARKDOWN_ELIGIBLE:
-        ngx_log_error(NGX_LOG_ERR, (ngx_log_t *) log, 0,
+        ngx_log_error(NGX_LOG_ERR, log, 0,
                       "markdown: NGX_HTTP_MARKDOWN_ELIGIBLE "
                       "passed to mapper, callers must pick explicit "
                       "outcome reason (converted/failed)");
         break;
 
     default:
-        ngx_log_error(NGX_LOG_WARN, (ngx_log_t *) log, 0,
+        ngx_log_error(NGX_LOG_WARN, log, 0,
                       "markdown: unknown eligibility "
                       "value %d, returning FAIL_SYSTEM",
                       (int) eligibility);
@@ -177,7 +177,7 @@ ngx_http_markdown_reason_from_eligibility(
  */
 const ngx_str_t *
 ngx_http_markdown_reason_from_error_category(
-    ngx_http_markdown_error_category_t category, const ngx_log_t *log)
+    ngx_http_markdown_error_category_t category, ngx_log_t *log)
 {
     switch (category) {
 
@@ -191,7 +191,7 @@ ngx_http_markdown_reason_from_error_category(
         return &ngx_http_markdown_reason_fail_system_str;
 
     default:
-        ngx_log_error(NGX_LOG_WARN, (ngx_log_t *) log, 0,
+        ngx_log_error(NGX_LOG_WARN, log, 0,
                       "markdown: unknown error "
                       "category %d, returning FAIL_SYSTEM",
                       (int) category);

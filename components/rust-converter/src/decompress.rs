@@ -145,6 +145,17 @@ fn read_bounded<R: Read>(mut reader: R, budget: usize) -> Result<Vec<u8>, Decomp
                 if output.len() + n > budget {
                     return Err(DecompError::BudgetExceeded);
                 }
+                /* Reserve exactly the needed capacity to prevent Vec
+                 * growth strategy from allocating beyond the budget. */
+                let needed = output.len() + n;
+                if output.capacity() < needed {
+                    let additional = needed - output.len();
+                    let max_reserve = budget.saturating_sub(output.len());
+                    let reserve_amount = additional.min(max_reserve);
+                    output
+                        .try_reserve_exact(reserve_amount)
+                        .map_err(|_| DecompError::BudgetExceeded)?;
+                }
                 output.extend_from_slice(&buf[..n]);
             }
             Err(e) => {

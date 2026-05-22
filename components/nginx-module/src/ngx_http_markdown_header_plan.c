@@ -125,6 +125,21 @@ ngx_http_markdown_plan_apply_set(ngx_http_request_t *r,
     ngx_table_elt_t  *h;
     u_char           *pool_val;
 
+    /* Defensive: validate key and value pointers from FFI. */
+    if (entry->key == NULL || entry->key_len == 0) {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+            "markdown: SET entry has NULL/empty key");
+        return NGX_ERROR;
+    }
+
+    if (entry->value == NULL && entry->value_len > 0) {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+            "markdown: SET entry has NULL value "
+            "with non-zero length %uz",
+            (size_t) entry->value_len);
+        return NGX_ERROR;
+    }
+
     h = ngx_http_markdown_plan_find_header(r,
         (const u_char *) entry->key, entry->key_len);
 
@@ -209,6 +224,13 @@ ngx_http_markdown_plan_apply_delete(ngx_http_request_t *r,
 {
     ngx_table_elt_t  *h;
 
+    /* Defensive: validate key pointer from FFI. */
+    if (entry->key == NULL || entry->key_len == 0) {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+            "markdown: DELETE entry has NULL/empty key");
+        return NGX_ERROR;
+    }
+
     h = ngx_http_markdown_plan_find_header(r,
         (const u_char *) entry->key, entry->key_len);
 
@@ -254,6 +276,21 @@ ngx_http_markdown_plan_apply_modify(ngx_http_request_t *r,
 {
     ngx_table_elt_t  *h;
     u_char           *pool_val;
+
+    /* Defensive: validate key and value pointers from FFI. */
+    if (entry->key == NULL || entry->key_len == 0) {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+            "markdown: MODIFY entry has NULL/empty key");
+        return NGX_ERROR;
+    }
+
+    if (entry->value == NULL && entry->value_len > 0) {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+            "markdown: MODIFY entry has NULL value "
+            "with non-zero length %uz",
+            (size_t) entry->value_len);
+        return NGX_ERROR;
+    }
 
     h = ngx_http_markdown_plan_find_header(r,
         (const u_char *) entry->key, entry->key_len);
@@ -367,6 +404,16 @@ ngx_http_markdown_apply_header_plan(ngx_http_request_t *r,
             "maximum %d",
             (size_t) plan->count,
             NGX_HTTP_MARKDOWN_PLAN_MAX_ENTRIES);
+        markdown_header_plan_free(plan);
+        return NGX_ERROR;
+    }
+
+    /* Defensive check: entries pointer must be valid when count > 0. */
+    if (plan->entries == NULL) {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+            "markdown: plan has %uz entries "
+            "but entries pointer is NULL",
+            (size_t) plan->count);
         markdown_header_plan_free(plan);
         return NGX_ERROR;
     }
