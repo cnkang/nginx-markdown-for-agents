@@ -71,3 +71,24 @@ path = "fuzz_targets/fuzz_url_validation.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "convert_html"
+path = "fuzz_targets/convert_html.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "streaming_chunks"
+path = "fuzz_targets/streaming_chunks.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "negotiation_and_headers"
+path = "fuzz_targets/negotiation_and_headers.rs"
+test = false
+doc = false
+bench = false
