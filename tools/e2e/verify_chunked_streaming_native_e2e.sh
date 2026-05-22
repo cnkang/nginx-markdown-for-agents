@@ -429,7 +429,7 @@ else
     "${WORKSPACE_ROOT}" "${RUST_TARGET}" --features streaming >/dev/null
 
   echo "==> Downloading/building NGINX ${NGINX_VERSION}"
-  curl --proto '=https' --tlsv1.2 -fsSL "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" -o "${BUILDROOT}/nginx.tar.gz"
+  curl --proto '=https' --tlsv1.2 --max-time 600 --connect-timeout 30 -fsSL "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" -o "${BUILDROOT}/nginx.tar.gz"
   mkdir -p "${BUILDROOT}/src"
   tar -xzf "${BUILDROOT}/nginx.tar.gz" -C "${BUILDROOT}/src" --strip-components=1
   (

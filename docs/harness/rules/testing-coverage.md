@@ -196,7 +196,7 @@ Required:
 
 ## Fuzz Harness Rules (FUZZ-001 to FUZZ-007)
 
-Canonical definitions live in [`fuzz/README.md`](../../../fuzz/README.md).
+Canonical definitions live in [`fuzz-infrastructure.md`](./fuzz-infrastructure.md).
 
 | Rule ID  | Summary | Level |
 |----------|---------|-------|
