@@ -202,7 +202,7 @@ echo "==> Configuring NGINX with --coverage"
     --with-http_ssl_module \
     --prefix="${RUNTIME}" \
     --add-module="${WORKSPACE_ROOT}/components/nginx-module" \
-    --with-cc-opt="--coverage -O0 -g" \
+    --with-cc-opt="--coverage -O0 -g -DNGX_HTTP_MARKDOWN_NO_RUST_DECOMPRESS" \
     --with-ld-opt="--coverage"
 )
 
@@ -246,6 +246,7 @@ http {
     default_type  application/octet-stream;
     sendfile      on;
     keepalive_timeout  5;
+    gzip_http_version 1.0;
 
     # ── Primary server: full feature set ────────────────────────────
     server {
@@ -347,6 +348,18 @@ http {
 
         location /metrics {
             markdown_metrics;
+        }
+
+        location /diagnostics {
+            markdown_diagnostics on;
+            markdown_diagnostics_allow 127.0.0.1;
+            markdown_diagnostics_allow 127.0.0.1/24;
+            markdown_diagnostics_allow ::1;
+        }
+
+        location /diagnostics-forbidden {
+            markdown_diagnostics on;
+            markdown_diagnostics_allow 10.0.0.0/8;
         }
 
         location /metrics-prometheus {
@@ -1187,6 +1200,20 @@ curl -sS -H 'Accept: application/json' "http://127.0.0.1:${PORT}/metrics-auto" -
 
 # Default metrics endpoint
 curl -sS "http://127.0.0.1:${PORT}/metrics" -o /dev/null -w "  metrics default: HTTP %{http_code}\n"
+
+# ── Diagnostics scenarios ───────────────────────────────────────────
+curl -sS "http://127.0.0.1:${PORT}/diagnostics" -o /dev/null -w "  diagnostics endpoint: HTTP %{http_code}\n"
+curl -sS "http://127.0.0.1:${PORT}/diagnostics-forbidden" -o /dev/null -w "  diagnostics forbidden: HTTP %{http_code}\n"
+curl -sS -X POST "http://127.0.0.1:${PORT}/diagnostics" -o /dev/null -w "  diagnostics POST method: HTTP %{http_code}\n"
+
+# Multi-part request headers (exercises ngx_http_markdown_find_request_header multi-part traversal)
+curl -sS -H "${ACCEPT_MARKDOWN}" \
+  -H "X-H1: 1" -H "X-H2: 2" -H "X-H3: 3" -H "X-H4: 4" -H "X-H5: 5" \
+  -H "X-H6: 6" -H "X-H7: 7" -H "X-H8: 8" -H "X-H9: 9" -H "X-H10: 10" \
+  -H "X-H11: 11" -H "X-H12: 12" -H "X-H13: 13" -H "X-H14: 14" -H "X-H15: 15" \
+  -H "X-H16: 16" -H "X-H17: 17" -H "X-H18: 18" -H "X-H19: 19" -H "X-H20: 20" \
+  -H "X-H21: 21" -H "X-H22: 22" -H "X-H23: 23" -H "X-H24: 24" -H "X-H25: 25" \
+  "http://127.0.0.1:${PORT}/index.html" -o /dev/null -w "  multi-part headers: HTTP %{http_code}\n"
 
 # IPv6 loopback probe (coverage-only):
 # - Purpose: exercise sockaddr_in6 branch in metrics_impl.h.

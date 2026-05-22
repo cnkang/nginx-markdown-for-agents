@@ -12,26 +12,17 @@
  */
 
 #include "../include/test_common.h"
+#include <ngx_config.h>
+#include <ngx_core.h>
 
-/* ── Minimal NGINX type stubs ─────────────────────────────────── */
-
-typedef intptr_t        ngx_int_t;
-typedef uintptr_t       ngx_uint_t;
-typedef unsigned char   u_char;
-typedef int             ngx_flag_t;
-typedef uintptr_t       ngx_atomic_uint_t;
-typedef long            time_t;
-typedef uintptr_t       ngx_atomic_t;
+struct ngx_log_s {
+    int dummy;
+};
 
 #define NGX_OK         0
 #define NGX_ERROR     -1
 
 #define ngx_memzero(buf, n) memset(buf, 0, n)
-
-/* Log stub */
-typedef struct {
-    int dummy;
-} ngx_log_t;
 
 static ngx_log_t g_log;
 
@@ -62,21 +53,12 @@ typedef struct {
 
 static ngx_http_markdown_dynconf_watcher_t ngx_http_markdown_dynconf_watcher;
 
-/* ── Diagnostics output types ─────────────────────────────────── */
+ngx_int_t ngx_http_markdown_dynconf_rollback(
+    ngx_http_markdown_dynconf_watcher_t *watcher, ngx_log_t *log);
 
-typedef struct {
-    ngx_atomic_uint_t  conversions_total;
-    ngx_atomic_uint_t  delivery_total;
-    ngx_atomic_uint_t  requests_total;
-    ngx_atomic_uint_t  failopen_total;
-} ngx_http_markdown_diag_metrics_t;
+/* ── Production function headers and implementation ───────────── */
 
-typedef struct {
-    time_t      active_mtime;
-    ngx_uint_t  config_version;
-    time_t      last_known_good_mtime;
-    ngx_flag_t  lkg_valid;
-} ngx_http_markdown_diag_dynconf_t;
+#include "ngx_http_markdown_diagnostics_accessors_impl.h"
 
 /* ── Rollback return codes ────────────────────────────────────── */
 
@@ -96,60 +78,6 @@ ngx_http_markdown_dynconf_rollback(
     g_rollback_called = 1;
     return g_rollback_result;
 }
-
-/* ── Production function reimplementations ────────────────────── */
-
-void
-ngx_http_markdown_diagnostics_collect_metrics(
-    ngx_http_markdown_diag_metrics_t *out)
-{
-    if (out == NULL) {
-        return;
-    }
-
-    ngx_memzero(out, sizeof(ngx_http_markdown_diag_metrics_t));
-
-    if (ngx_http_markdown_metrics == NULL) {
-        return;
-    }
-
-    out->conversions_total =
-        (ngx_atomic_uint_t) ngx_http_markdown_metrics->conversions_succeeded;
-    out->delivery_total =
-        (ngx_atomic_uint_t) ngx_http_markdown_metrics->results.delivery_count;
-    out->requests_total =
-        (ngx_atomic_uint_t) ngx_http_markdown_metrics->requests_entered;
-    out->failopen_total =
-        (ngx_atomic_uint_t) ngx_http_markdown_metrics->results.failopen_count;
-}
-
-void
-ngx_http_markdown_diagnostics_get_dynconf_state(
-    ngx_http_markdown_diag_dynconf_t *out)
-{
-    if (out == NULL) {
-        return;
-    }
-
-    ngx_memzero(out, sizeof(ngx_http_markdown_diag_dynconf_t));
-
-    if (!ngx_http_markdown_dynconf_watcher.active) {
-        return;
-    }
-
-    out->active_mtime = ngx_http_markdown_dynconf_watcher.applied_mtime;
-    out->config_version = ngx_http_markdown_dynconf_watcher.version;
-    out->last_known_good_mtime = ngx_http_markdown_dynconf_watcher.last_mtime;
-    out->lkg_valid = ngx_http_markdown_dynconf_watcher.lkg_valid ? 1 : 0;
-}
-
-ngx_int_t
-ngx_http_markdown_diagnostics_trigger_rollback(ngx_log_t *log)
-{
-    return ngx_http_markdown_dynconf_rollback(
-        &ngx_http_markdown_dynconf_watcher, log);
-}
-
 
 /* ── Tests ─────────────────────────────────────────────────────── */
 

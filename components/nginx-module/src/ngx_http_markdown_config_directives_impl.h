@@ -1187,7 +1187,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
         ngx_string("markdown_diagnostics"),
         NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF
             |NGX_CONF_FLAG,
-        ngx_conf_set_flag_slot,
+        ngx_http_markdown_diagnostics_directive,
         NGX_HTTP_LOC_CONF_OFFSET,
         offsetof(ngx_http_markdown_conf_t, ops.diagnostics_enabled),
         NULL
