@@ -51,7 +51,7 @@ NGINX_HEADER := $(NGINX_MODULE_DIR)/src/markdown_converter.h
 
 .PHONY: all build rust-lib rust-lib-debug copy-headers check-headers \
         test test-rust test-rust-doc test-nginx-unit test-nginx-unit-streaming test-nginx-unit-clang-smoke test-nginx-unit-sanitize-smoke \
-        test-nginx-integration test-e2e test-e2e-rust test-all test-rust-fuzz-smoke sonar-compile-db \
+        test-nginx-integration test-e2e test-e2e-rust test-all test-rust-fuzz-smoke fuzz-smoke sonar-compile-db \
         test-benchmark test-benchmark-compare test-benchmark-summary \
         harness-check harness-check-full harness-security-checks \
 	docs-check license-check release-gates-check release-gates-check-055 release-gates-check-060 release-gates-check-070 release-gates-check-legacy release-gates-check-strict \
@@ -111,6 +111,14 @@ test-rust-fuzz-smoke:
 	cd $(RUST_DIR) && cargo +nightly fuzz run security_validator -- -max_total_time=5
 	cd $(RUST_DIR) && cargo +nightly fuzz run fuzz_streaming_no_panic -- -max_total_time=5
 	cd $(RUST_DIR) && cargo +nightly fuzz run fuzz_streaming_chunk_split -- -max_total_time=5
+	cd $(RUST_DIR) && cargo +nightly fuzz run convert_html -- -max_total_time=5
+	cd $(RUST_DIR) && cargo +nightly fuzz run streaming_chunks -- -max_total_time=5
+	cd $(RUST_DIR) && cargo +nightly fuzz run negotiation_and_headers -- -max_total_time=5
+
+fuzz-smoke:
+	cd $(RUST_DIR) && cargo +nightly fuzz run convert_html -- -max_total_time=30
+	cd $(RUST_DIR) && cargo +nightly fuzz run streaming_chunks -- -max_total_time=30
+	cd $(RUST_DIR) && cargo +nightly fuzz run negotiation_and_headers -- -max_total_time=30
 
 test-nginx-unit:
 	$(MAKE) -C $(NGINX_TEST_DIR) unit
@@ -227,6 +235,31 @@ release-gates-check-070:
 	python3 tools/release/gates/validate_reason_codes_070.py
 	python3 tools/release/gates/validate_package_metadata_070.py
 	python3 tools/release/gates/validate_k8s_manifests_070.py
+	@echo "=== Fuzz CI Gate ==="
+	@if cargo +nightly --version >/dev/null 2>&1; then \
+		echo "  [fuzz-build] cargo +nightly fuzz build..."; \
+		cd $(RUST_DIR) && cargo +nightly fuzz build; \
+	else \
+		echo "  [fuzz-build] SKIP: cargo nightly not available"; \
+	fi
+	@if cargo +nightly --version >/dev/null 2>&1; then \
+		echo "  [fuzz-smoke] Running fuzz smoke (30s per target)..."; \
+		cd $(RUST_DIR) && for target in $$(cargo +nightly fuzz list); do \
+			echo "    fuzzing $$target (30s)..."; \
+			cargo +nightly fuzz run "$$target" -- -max_total_time=30; \
+		done; \
+	else \
+		echo "  [fuzz-smoke] SKIP: cargo nightly not available"; \
+	fi
+	@echo "  [cflite-workflows] Checking ClusterFuzzLite workflow files..."
+	@test -f .github/workflows/cflite_pr.yml || { echo "FAIL: .github/workflows/cflite_pr.yml not found" >&2; exit 1; }
+	@test -f .github/workflows/cflite_batch.yml || { echo "FAIL: .github/workflows/cflite_batch.yml not found" >&2; exit 1; }
+	@test -f .github/workflows/cflite_cron.yml || { echo "FAIL: .github/workflows/cflite_cron.yml not found" >&2; exit 1; }
+	@echo "  [fuzz-guide] Checking fuzz README completeness..."
+	@test -f fuzz/README.md || { echo "FAIL: fuzz/README.md not found" >&2; exit 1; }
+	@grep -q "语料库分类" fuzz/README.md || { echo "FAIL: fuzz/README.md missing section: 语料库分类" >&2; exit 1; }
+	@grep -q "FUZZ-001" fuzz/README.md || { echo "FAIL: fuzz/README.md missing section: FUZZ-001" >&2; exit 1; }
+	@echo "  Fuzz CI Gate: ALL PASSED"
 
 release-gates-check-legacy:
 	python3 tools/release/legacy/validate_release_gates.py
