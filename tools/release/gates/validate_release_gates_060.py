@@ -175,25 +175,30 @@ def check_routing_manifest(result: ValidationResult) -> None:
         result.fail(GATE_ROUTING_MANIFEST, "routing-manifest.json missing")
         return
     try:
-        import json  # noqa: PLC0415
-        content = ROUTING_MANIFEST_PATH.read_text(encoding="utf-8")
-        manifest = json.loads(content)
-        families = manifest.get("verification_families", {})
-        required_families = [
-            "coverage-gate",
-            "release-governance-060",
-            "packaging-e2e",
-        ]
-        found = 0
-        for family in required_families:
-            if family in families:
-                found += 1
-            else:
-                result.fail(GATE_ROUTING_MANIFEST, f"verification family '{family}' missing")
-        if found == len(required_families):
-            result.pass_(GATE_ROUTING_MANIFEST, "All v0.6.0 verification families present")
+        _extracted_from_check_routing_manifest_7(result)
     except (json.JSONDecodeError, KeyError) as exc:
         result.fail(GATE_ROUTING_MANIFEST, f"Parse error: {exc}")
+
+
+# TODO Rename this here and in `check_routing_manifest`
+def _extracted_from_check_routing_manifest_7(result):
+    import json  # noqa: PLC0415
+    content = ROUTING_MANIFEST_PATH.read_text(encoding="utf-8")
+    manifest = json.loads(content)
+    families = manifest.get("verification_families", {})
+    required_families = [
+        "coverage-gate",
+        "release-governance-060",
+        "packaging-e2e",
+    ]
+    found = 0
+    for family in required_families:
+        if family in families:
+            found += 1
+        else:
+            result.fail(GATE_ROUTING_MANIFEST, f"verification family '{family}' missing")
+    if found == len(required_families):
+        result.pass_(GATE_ROUTING_MANIFEST, "All v0.6.0 verification families present")
 
 
 def check_cargo_default_feature(result: ValidationResult) -> None:
