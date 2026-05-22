@@ -262,9 +262,9 @@ typedef struct {
  * Emits a single structured log line containing the complete
  * decision chain in key=value format for easy parsing:
  *
- *   markdown decision_path: accept_result=CONVERT
+ *   markdown: accept_result=CONVERT
  *       conditional_result=PROCEED conversion_status=SUCCESS
- *       reason_code=ELIGIBLE_CONVERTED duration_ms=12
+ *       reason_code=CONVERTED duration_ms=12
  *
  * The log level is determined by the effective log_verbosity:
  *   - NGX_HTTP_MARKDOWN_LOG_DEBUG: NGX_LOG_DEBUG

@@ -50,8 +50,8 @@ FAIL_COUNT=0
 # Patterns (POSIX ERE compatible, macOS bash 3.2 safe via grep -E)
 # ---------------------------------------------------------------------------
 
-# Semver: major.minor.patch (digits only)
-VERSION_RE='[0-9]+\.[0-9]+\.[0-9]+'
+# Semver: major.minor.patch with optional prerelease suffix.
+VERSION_RE='[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?'
 
 # NGINX version: major.minor.patch
 NGINX_VERSION_RE='[0-9]+\.[0-9]+\.[0-9]+'
