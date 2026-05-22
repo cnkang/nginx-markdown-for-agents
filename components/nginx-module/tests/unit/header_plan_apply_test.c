@@ -620,6 +620,33 @@ test_modify_nonexistent(void)
     TEST_PASS("MODIFY non-existent is no-op");
 }
 
+
+static void
+test_set_etag_placeholder_noop(void)
+{
+    FFIHeaderPlan plan;
+    FFIHeaderPlanHandle handle;
+    FFIHeaderEntry entry = { NGX_HTTP_MARKDOWN_PLAN_OP_MODIFY,
+        NULL, 0, NULL, 0 };
+
+    TEST_SUBSECTION("set-etag-placeholder no-op");
+
+    setup_request();
+
+    plan.handle = &handle;
+    plan.entries = &entry;
+    plan.count = 1;
+
+    TEST_ASSERT(apply_header_plan(&g_request, &plan) == NGX_OK,
+                "set-etag-placeholder should be accepted as no-op");
+    TEST_ASSERT(g_header_count == 0,
+                "set-etag-placeholder should not mutate headers");
+    TEST_ASSERT(g_plan_freed == 1,
+                "plan should be freed after placeholder no-op");
+
+    TEST_PASS("Set-ETag placeholder no-op accepted");
+}
+
 static void
 test_unknown_op_type_rollback(void)
 {
@@ -716,6 +743,7 @@ main(void)
     test_delete_nonexistent();
     test_modify_existing();
     test_modify_nonexistent();
+    test_set_etag_placeholder_noop();
     test_unknown_op_type_rollback();
     test_multi_op_plan();
 
