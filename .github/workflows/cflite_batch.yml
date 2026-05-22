@@ -1,0 +1,41 @@
+name: ClusterFuzzLite Batch Fuzz
+
+on:
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  batch-fuzz:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: google/clusterfuzzlite/actions/build_fuzzers@v1
+        with:
+          language: rust
+          sanitizer: address
+
+      - uses: google/clusterfuzzlite/actions/run_fuzzers@v1
+        with:
+          mode: batch
+          fuzz-seconds: 3600
+          sanitizer: address
+          storage-repo: ${{ github.repository }}-corpus
+          storage-repo-branch: main
+          storage-repo-branch-coverage: coverage
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: batch-fuzz-crashes
+          path: ./out/artifacts
+
+      - uses: github/codeql-action/upload-sarif@v3
+        if: always() && hashFiles('./out/*.sarif') != ''
+        with:
+          sarif_file: ./out/
