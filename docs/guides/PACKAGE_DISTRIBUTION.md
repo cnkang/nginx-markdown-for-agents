@@ -3,7 +3,8 @@
 ## Overview
 
 This document defines the distribution strategy for the NGINX Markdown Filter
-Module binary packages (DEB and RPM).
+Module binary packages (DEB and RPM), including artifact naming conventions,
+integrity verification via SHA256SUMS, and GPG signature verification.
 
 ## Distribution Channels
 
@@ -27,16 +28,179 @@ Module binary packages (DEB and RPM).
    explicitly add `load_module` directives. This prevents accidental conversion
    of all HTML responses.
 
-## NGINX ABI Sensitivity
+## Artifact Naming Conventions
 
-The dynamic module ABI changes between NGINX major/minor versions. Package
-names encode the target NGINX version:
+Package filenames encode the module version, target NGINX version, and
+architecture to prevent ABI mismatch at install time.
+
+### DEB Package Naming
+
+Format:
 
 ```text
-nginx-markdown-module_<version>~nginx<nginx_ver>+<distro><distro_ver>_<arch>.deb
+nginx-module-markdown-for-agents_<VERSION>_nginx-<NGINX_VERSION>_<ARCH>.deb
 ```
 
-Example: `nginx-markdown-module_0.7.0~nginx1.26.2+ubuntu22.04_amd64.deb`
+Components:
+
+| Field | Description | Example |
+|-------|-------------|---------|
+| VERSION | Module semantic version | 0.7.0 |
+| NGINX_VERSION | Target NGINX version (major.minor.patch) | 1.26.3 |
+| ARCH | CPU architecture (amd64, arm64) | amd64 |
+
+Example:
+
+```text
+nginx-module-markdown-for-agents_0.7.0_nginx-1.26.3_amd64.deb
+```
+
+### RPM Package Naming
+
+Format:
+
+```text
+nginx-module-markdown-for-agents-<VERSION>-nginx<NGINX_VERSION>-1.<ARCH>.rpm
+```
+
+Components:
+
+| Field | Description | Example |
+|-------|-------------|---------|
+| VERSION | Module semantic version | 0.7.0 |
+| NGINX_VERSION | Target NGINX version (major.minor.patch) | 1.26.3 |
+| ARCH | CPU architecture (x86_64, aarch64) | x86_64 |
+
+Example:
+
+```text
+nginx-module-markdown-for-agents-0.7.0-nginx1.26.3-1.x86_64.rpm
+```
+
+### Architecture Mapping
+
+| Source Arch | DEB Arch | RPM Arch |
+|-------------|----------|----------|
+| amd64 | amd64 | x86_64 |
+| arm64 | arm64 | aarch64 |
+
+## NGINX ABI Sensitivity
+
+The dynamic module ABI changes between NGINX major/minor versions. Always
+install the package that matches your installed NGINX version exactly. A
+version mismatch will cause a module load failure at runtime with an error
+such as:
+
+```text
+nginx: [emerg] module is not binary compatible
+```
+
+## SHA256SUMS Verification
+
+Every release includes a `SHA256SUMS` file containing SHA-256 checksums for
+all distributed artifacts. Use this file to verify download integrity before
+installation.
+
+### Downloading the Checksum File
+
+Download `SHA256SUMS` from the same GitHub Release page as the package:
+
+```bash
+curl -fsSLO https://github.com/<org>/nginx-markdown-for-agents/releases/download/v0.7.0/SHA256SUMS
+```
+
+### Verifying a Downloaded Package
+
+After downloading both the package and `SHA256SUMS`:
+
+```bash
+# Verify a specific package against the checksum file
+sha256sum --check --ignore-missing SHA256SUMS
+```
+
+Or verify manually:
+
+```bash
+# Compute the checksum of the downloaded file
+sha256sum nginx-module-markdown-for-agents_0.7.0_nginx-1.26.3_amd64.deb
+
+# Compare the output against the corresponding line in SHA256SUMS
+grep "nginx-module-markdown-for-agents_0.7.0_nginx-1.26.3_amd64.deb" SHA256SUMS
+```
+
+Both values must match exactly. If they differ, do not install the package
+and re-download from the official release page.
+
+### Checksum File Format
+
+Each line in `SHA256SUMS` follows the standard format:
+
+```text
+<64-hex-char-hash>  <filename>
+```
+
+Example:
+
+```text
+a1b2c3d4...  nginx-module-markdown-for-agents_0.7.0_nginx-1.26.3_amd64.deb
+e5f6a7b8...  nginx-module-markdown-for-agents-0.7.0-nginx1.26.3-1.x86_64.rpm
+```
+
+## GPG Signature Verification
+
+When GPG signing is enabled for a release, a detached ASCII-armored signature
+file (`SHA256SUMS.asc`) is published alongside `SHA256SUMS`. This allows
+verification that the checksums were produced by the project maintainers.
+
+### Importing the Project Public Key
+
+Before verifying signatures, import the project signing public key:
+
+```bash
+# Import from a keyserver (replace KEY_ID with the actual project key ID)
+gpg --keyserver hkps://keys.openpgp.org --recv-keys <KEY_ID>
+
+# Or import from a local file if provided
+gpg --import project-signing-key.asc
+```
+
+### Verifying the Signature
+
+Download both `SHA256SUMS` and `SHA256SUMS.asc`, then verify:
+
+```bash
+gpg --verify SHA256SUMS.asc SHA256SUMS
+```
+
+A successful verification produces output similar to:
+
+```text
+gpg: Signature made Mon 01 Jan 2026 12:00:00 AM UTC
+gpg:                using RSA key <KEY_ID>
+gpg: Good signature from "nginx-markdown-for-agents release signing key"
+```
+
+If verification fails with `BAD signature`, do not trust the checksums or
+the associated packages.
+
+### Full Verification Workflow
+
+The recommended verification sequence:
+
+```bash
+# 1. Download the package, checksums, and signature
+curl -fsSLO https://github.com/<org>/nginx-markdown-for-agents/releases/download/v0.7.0/SHA256SUMS
+curl -fsSLO https://github.com/<org>/nginx-markdown-for-agents/releases/download/v0.7.0/SHA256SUMS.asc
+curl -fsSLO https://github.com/<org>/nginx-markdown-for-agents/releases/download/v0.7.0/<package-file>
+
+# 2. Verify GPG signature on the checksum file
+gpg --verify SHA256SUMS.asc SHA256SUMS
+
+# 3. Verify the package checksum
+sha256sum --check --ignore-missing SHA256SUMS
+```
+
+If both steps succeed, the package is authentic and intact.
 
 ## Security Policy
 
