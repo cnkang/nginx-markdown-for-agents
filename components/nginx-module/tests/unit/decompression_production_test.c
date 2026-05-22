@@ -93,6 +93,10 @@ ngx_chain_t *ngx_alloc_chain_link(ngx_pool_t *pool);
 
 ngx_module_t ngx_http_markdown_filter_module;
 
+static int g_pnalloc_fail_count;
+static int g_calloc_buf_fail_once;
+static int g_chain_link_fail_once;
+
 ngx_http_markdown_conf_t *
 ngx_http_get_module_loc_conf(ngx_http_request_t *r, ngx_module_t module)
 {
@@ -104,6 +108,12 @@ void *
 ngx_pnalloc(ngx_pool_t *pool, size_t size)
 {
     (void) pool;
+    if (g_pnalloc_fail_count > 0) {
+        g_pnalloc_fail_count--;
+        if (g_pnalloc_fail_count == 0) {
+            return NULL;
+        }
+    }
     return malloc(size);
 }
 
@@ -123,12 +133,20 @@ ngx_pcalloc(ngx_pool_t *pool, size_t size)
 ngx_buf_t *
 ngx_calloc_buf(ngx_pool_t *pool)
 {
+    if (g_calloc_buf_fail_once) {
+        g_calloc_buf_fail_once = 0;
+        return NULL;
+    }
     return ngx_pcalloc(pool, sizeof(ngx_buf_t));
 }
 
 ngx_chain_t *
 ngx_alloc_chain_link(ngx_pool_t *pool)
 {
+    if (g_chain_link_fail_once) {
+        g_chain_link_fail_once = 0;
+        return NULL;
+    }
     return ngx_pcalloc(pool, sizeof(ngx_chain_t));
 }
 
@@ -144,6 +162,9 @@ init_request(ngx_http_request_t *r)
 {
     memset(&g_conf, 0, sizeof(g_conf));
     g_conf.decompress_max_size = 1024 * 1024;
+    g_pnalloc_fail_count = 0;
+    g_calloc_buf_fail_once = 0;
+    g_chain_link_fail_once = 0;
 
     memset(r, 0, sizeof(*r));
     r->pool = &g_pool;
@@ -208,6 +229,100 @@ gzip_compress(const u_char *input, size_t input_len, u_char *out,
     out_cap = stream.total_out;
     deflateEnd(&stream);
     return out_cap;
+}
+
+static size_t
+zlib_compress(const u_char *input, size_t input_len, u_char *out,
+    size_t out_cap)
+{
+    z_stream stream;
+    int rc;
+
+    memset(&stream, 0, sizeof(stream));
+
+    rc = deflateInit2(&stream, Z_DEFAULT_COMPRESSION, Z_DEFLATED,
+                      MAX_WBITS, 8, Z_DEFAULT_STRATEGY);
+    TEST_ASSERT(rc == Z_OK, "deflateInit2 should initialize zlib stream");
+
+    stream.next_in = (Bytef *) input;
+    stream.avail_in = (uInt) input_len;
+    stream.next_out = out;
+    stream.avail_out = (uInt) out_cap;
+
+    rc = deflate(&stream, Z_FINISH);
+    TEST_ASSERT(rc == Z_STREAM_END, "zlib compression should finish");
+
+    out_cap = stream.total_out;
+    deflateEnd(&stream);
+    return out_cap;
+}
+
+static void
+test_chain_helpers_boundaries(void)
+{
+    u_char d1[] = "ab";
+    u_char d2[] = "cd";
+    ngx_buf_t b1;
+    ngx_buf_t b2;
+    ngx_chain_t c1;
+    ngx_chain_t c2;
+    ngx_chain_t null_buf;
+    u_char dest[4];
+
+    memset(dest, 0, sizeof(dest));
+    c1 = make_chain(d1, sizeof(d1) - 1, &b1);
+    c2 = make_chain(d2, sizeof(d2) - 1, &b2);
+    c1.next = &null_buf;
+    null_buf.buf = NULL;
+    null_buf.next = &c2;
+
+    TEST_ASSERT(ngx_http_markdown_chain_size(NULL) == 0,
+                "NULL chain should have size 0");
+    TEST_ASSERT(ngx_http_markdown_chain_size(&c1) == 4,
+                "chain_size should skip NULL buffers");
+    TEST_ASSERT(ngx_http_markdown_chain_to_buffer(&c1, dest, 4) == NGX_OK,
+                "chain_to_buffer should copy complete chain");
+    TEST_ASSERT(memcmp(dest, "abcd", 4) == 0,
+                "chain_to_buffer should preserve byte order");
+    TEST_ASSERT(ngx_http_markdown_chain_to_buffer(&c1, dest, 3) == NGX_ERROR,
+                "chain_to_buffer should reject insufficient destination");
+}
+
+static void
+test_calc_output_size_boundaries(void)
+{
+    ngx_http_request_t r;
+    size_t output_size;
+
+    init_request(&r);
+
+    TEST_ASSERT(ngx_http_markdown_calc_output_size(&r, 10, 0,
+                &output_size) == NGX_ERROR,
+                "zero decompression budget should be rejected");
+    TEST_ASSERT(ngx_http_markdown_calc_output_size(&r, 0, 1024,
+                &output_size) == NGX_ERROR,
+                "zero estimated output should be rejected");
+    TEST_ASSERT(ngx_http_markdown_calc_output_size(&r, 20, 1024,
+                &output_size) == NGX_OK && output_size == 200,
+                "normal estimate should use 10x heuristic");
+    TEST_ASSERT(ngx_http_markdown_calc_output_size(&r, 200, 1024,
+                &output_size) == NGX_OK && output_size == 1024,
+                "estimate should be capped by decompression budget");
+    TEST_ASSERT(ngx_http_markdown_calc_output_size(&r, ((size_t) -1), 4096,
+                &output_size) == NGX_OK && output_size == 4096,
+                "multiplication overflow guard should use budget cap");
+    TEST_ASSERT(ngx_http_markdown_calc_output_size(&r,
+                ((size_t) UINT_MAX / 10) + 100,
+                (size_t) UINT_MAX + 100, &output_size) == NGX_OK
+                && output_size == (size_t) UINT_MAX,
+                "large estimate should be clamped to UINT_MAX");
+    TEST_ASSERT(ngx_http_markdown_calc_output_size(&r, 6 * 1024 * 1024,
+                100 * 1024 * 1024, &output_size) == NGX_OK
+                && output_size == 60 * 1024 * 1024,
+                "large estimate warning path should still succeed");
+    TEST_ASSERT(ngx_http_markdown_calc_output_size(&r, 16, (size_t) UINT_MAX + 1,
+                &output_size) == NGX_OK && output_size == 160,
+                "large budget should still allow small estimates");
 }
 
 static void
@@ -305,6 +420,120 @@ test_gzip_success(void)
 }
 
 static void
+test_deflate_success(void)
+{
+    static const u_char plain[] = "<html><p>deflate</p></html>";
+    u_char compressed[256];
+    size_t compressed_len;
+    ngx_buf_t in_buf;
+    ngx_chain_t in;
+    ngx_chain_t *out;
+    ngx_http_request_t r;
+    ngx_int_t rc;
+
+    init_request(&r);
+    compressed_len = zlib_compress(plain, sizeof(plain) - 1,
+                                   compressed, sizeof(compressed));
+    in = make_chain(compressed, compressed_len, &in_buf);
+    out = NULL;
+
+    rc = ngx_http_markdown_decompress(&r,
+        NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE, &in, &out);
+
+    TEST_ASSERT(rc == NGX_OK, "valid deflate should decompress");
+    TEST_ASSERT(out != NULL && out->buf != NULL,
+                "deflate should create output chain");
+    TEST_ASSERT((size_t) (out->buf->last - out->buf->pos) == sizeof(plain) - 1,
+                "deflate decompressed length should match plain input");
+    TEST_ASSERT(memcmp(out->buf->pos, plain, sizeof(plain) - 1) == 0,
+                "deflate decompressed bytes should match plain input");
+}
+
+static void
+test_gzip_empty_input_error(void)
+{
+    ngx_chain_t *out;
+    ngx_http_request_t r;
+
+    init_request(&r);
+    out = NULL;
+
+    TEST_ASSERT(ngx_http_markdown_decompress(&r,
+                NGX_HTTP_MARKDOWN_COMPRESSION_GZIP, NULL, &out) == NGX_ERROR,
+                "empty gzip input should return generic error");
+}
+
+static void
+test_gzip_allocation_and_budget_setup_errors(void)
+{
+    static const u_char plain[] = "<html><p>allocation</p></html>";
+    u_char compressed[256];
+    size_t compressed_len;
+    ngx_buf_t in_buf;
+    ngx_chain_t in;
+    ngx_chain_t *out;
+    ngx_http_request_t r;
+
+    compressed_len = gzip_compress(plain, sizeof(plain) - 1,
+                                   compressed, sizeof(compressed));
+
+    init_request(&r);
+    in = make_chain(compressed, compressed_len, &in_buf);
+    out = NULL;
+    g_pnalloc_fail_count = 1;
+    TEST_ASSERT(ngx_http_markdown_decompress(&r,
+                NGX_HTTP_MARKDOWN_COMPRESSION_GZIP, &in, &out) == NGX_ERROR,
+                "input buffer allocation failure should error");
+
+    init_request(&r);
+    in = make_chain(compressed, compressed_len, &in_buf);
+    out = NULL;
+    g_conf.decompress_max_size = 0;
+    TEST_ASSERT(ngx_http_markdown_decompress(&r,
+                NGX_HTTP_MARKDOWN_COMPRESSION_GZIP, &in, &out) == NGX_ERROR,
+                "invalid decompression budget should error after inflate init");
+
+    init_request(&r);
+    in = make_chain(compressed, compressed_len, &in_buf);
+    out = NULL;
+    g_pnalloc_fail_count = 2;
+    TEST_ASSERT(ngx_http_markdown_decompress(&r,
+                NGX_HTTP_MARKDOWN_COMPRESSION_GZIP, &in, &out) == NGX_ERROR,
+                "output buffer allocation failure should error");
+}
+
+static void
+test_gzip_output_chain_allocation_errors(void)
+{
+    static const u_char plain[] = "<html><p>chain</p></html>";
+    u_char compressed[256];
+    size_t compressed_len;
+    ngx_buf_t in_buf;
+    ngx_chain_t in;
+    ngx_chain_t *out;
+    ngx_http_request_t r;
+
+    compressed_len = gzip_compress(plain, sizeof(plain) - 1,
+                                   compressed, sizeof(compressed));
+
+    init_request(&r);
+    in = make_chain(compressed, compressed_len, &in_buf);
+    out = NULL;
+    g_calloc_buf_fail_once = 1;
+    TEST_ASSERT(ngx_http_markdown_decompress(&r,
+                NGX_HTTP_MARKDOWN_COMPRESSION_GZIP, &in, &out) == NGX_ERROR,
+                "output ngx_buf_t allocation failure should error");
+
+    init_request(&r);
+    in = make_chain(compressed, compressed_len, &in_buf);
+    out = NULL;
+    g_chain_link_fail_once = 1;
+    TEST_ASSERT(ngx_http_markdown_decompress(&r,
+                NGX_HTTP_MARKDOWN_COMPRESSION_GZIP, &in, &out) == NGX_ERROR,
+                "output chain link allocation failure should error");
+}
+
+static void
 test_gzip_format_error(void)
 {
     u_char invalid[] = "not gzip data";
@@ -352,9 +581,15 @@ test_gzip_budget_exceeded(void)
 int
 main(void)
 {
+    test_chain_helpers_boundaries();
+    test_calc_output_size_boundaries();
     test_detect_compression_variants();
     test_dispatch_non_decompressing_cases();
     test_gzip_success();
+    test_deflate_success();
+    test_gzip_empty_input_error();
+    test_gzip_allocation_and_budget_setup_errors();
+    test_gzip_output_chain_allocation_errors();
     test_gzip_format_error();
     test_gzip_budget_exceeded();
 
