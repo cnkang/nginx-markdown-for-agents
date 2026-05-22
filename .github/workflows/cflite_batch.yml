@@ -19,9 +19,11 @@ jobs:
         with:
           language: rust
           sanitizer: address
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: google/clusterfuzzlite/actions/run_fuzzers@v1
         with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
           mode: batch
           fuzz-seconds: 3600
           sanitizer: address
