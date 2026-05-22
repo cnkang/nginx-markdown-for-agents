@@ -1,0 +1,25 @@
+Package: nginx-module-markdown-for-agents
+Version: @VERSION@
+Architecture: @ARCH@
+Maintainer: nginx-markdown-for-agents maintainers <liukang@noreply.github.com>
+Description: NGINX Markdown filter module for AI agents
+ Converts HTML responses to Markdown when clients request text/markdown.
+ Built against nginx.org stable @NGINX_VERSION@.
+ .
+ WARNING: This module is ONLY compatible with nginx.org @NGINX_VERSION@.
+ It will NOT work with distro-provided, vendor-patched, OpenResty, Tengine,
+ or custom-built NGINX binaries. NGINX validates module binary compatibility
+ signature at load time; mismatched versions will fail to load.
+ .
+ Features include:
+  * Streaming and full-buffer conversion engines
+  * Content negotiation via Accept headers (q-value based)
+  * Automatic decompression with bounded budget
+  * GFM/MDX flavor support
+  * Noise pruning and token estimation
+ .
+ The module is installed as a dynamic module (.so) and must be explicitly
+ enabled via load_module directive in nginx.conf.
+Depends: nginx (>= @NGINX_VERSION@)
+Section: httpd
+Priority: optional

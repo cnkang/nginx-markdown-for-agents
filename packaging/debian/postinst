@@ -1,52 +1,35 @@
 #!/bin/sh
-# postinst script for nginx-module-markdown
+# postinst script for nginx-module-markdown-for-agents
 #
-# Installs a load_module snippet (commented out by default) and prints
-# instructions for enabling the module. Does NOT automatically enable
-# the module (security: default-off per design.md §11.4).
+# Displays post-install instructions only. Does NOT modify any system
+# state: no nginx.conf edits, no reload/restart, no snippet enablement,
+# no writes to /etc/nginx/.
 
 set -e
 
-MODULE_SNIPPET_DIR="/etc/nginx/modules-available"
-MODULE_SNIPPET="${MODULE_SNIPPET_DIR}/mod-markdown.conf"
-MODULE_SO_PATH="/usr/lib/nginx/modules/ngx_http_markdown_module.so"
-
 case "$1" in
     configure)
-        # Create modules-available directory if it does not exist
-        if [ ! -d "${MODULE_SNIPPET_DIR}" ]; then
-            mkdir -p "${MODULE_SNIPPET_DIR}"
-        fi
+        cat >&2 <<'EOF'
+======================================================================
+nginx-markdown-for-agents module installed successfully.
 
-        # Install load_module snippet (commented out for conservative enable)
-        cat > "${MODULE_SNIPPET}" <<'SNIPPET'
-# nginx-module-markdown: Uncomment the line below to enable the module.
-# After enabling, run: nginx -t && systemctl reload nginx
-#load_module modules/ngx_http_markdown_module.so;
-SNIPPET
+To enable the module:
+  1. Add to nginx.conf (top-level, before http block):
+     load_module modules/ngx_http_markdown_module.so;
 
-        echo "--------------------------------------------------------------"
-        echo " nginx-module-markdown installed successfully."
-        echo ""
-        echo " The module is NOT enabled by default."
-        echo " To enable it:"
-        echo ""
-        echo "   1. Edit ${MODULE_SNIPPET}"
-        echo "      Uncomment the load_module line."
-        echo ""
-        echo "   2. Or add to /etc/nginx/nginx.conf (top-level):"
-        echo "      load_module modules/ngx_http_markdown_module.so;"
-        echo ""
-        echo "   3. Test and reload:"
-        echo "      nginx -t && systemctl reload nginx"
-        echo ""
-        echo " Module binary: ${MODULE_SO_PATH}"
-        echo "--------------------------------------------------------------"
+  2. Verify configuration:
+     sudo nginx -t
+
+  3. Reload NGINX:
+     sudo systemctl reload nginx
+
+For compatibility information, see:
+  /usr/share/doc/nginx-markdown-for-agents/COMPATIBILITY.md
+======================================================================
+EOF
         ;;
-
     abort-upgrade|abort-remove|abort-deconfigure)
         ;;
-
     *)
         echo "postinst called with unknown argument: $1" >&2
         exit 1
