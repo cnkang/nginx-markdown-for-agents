@@ -1038,7 +1038,12 @@ ngx_http_markdown_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
             return NGX_DONE;
         }
 
-        /* Pending chain drained successfully; continue processing */
+        /*
+         * Pending converted output drained successfully.  The original input
+         * chain was already consumed when conversion_attempted was set, so do
+         * not forward a re-delivered input chain after the converted response.
+         */
+        return NGX_OK;
     }
 
     /* If not eligible for conversion, pass through */
@@ -1070,12 +1075,12 @@ ngx_http_markdown_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
     }
 #endif
 
-    /* If conversion already attempted, pass through */
+    /* If conversion already completed, do not pass original input through. */
     if (ctx->conversion_attempted) {
         if (!ctx->fullbuffer_pending_has_data) {
             r->buffered &= ~NGX_HTTP_MARKDOWN_BUFFERED;
         }
-        return ngx_http_next_body_filter(r, in);
+        return NGX_OK;
     }
 
     rc = ngx_http_markdown_body_filter_buffer_input(r, in, ctx, conf);
