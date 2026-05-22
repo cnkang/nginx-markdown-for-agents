@@ -21,7 +21,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [parser_html, ffi_convert, security_validator]
+        target: [parser_html, ffi_convert, security_validator, convert_html, streaming_chunks, negotiation_and_headers]
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
