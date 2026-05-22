@@ -62,9 +62,7 @@ def read_safe(path: Path) -> str:
     resolved = path.resolve()
     if not str(resolved).startswith(str(PROJECT_ROOT)):
         return ""
-    if resolved.is_file():
-        return resolved.read_text(encoding="utf-8")
-    return ""
+    return resolved.read_text(encoding="utf-8") if resolved.is_file() else ""
 
 
 def validate_deb_control(result: ValidationResult) -> None:
