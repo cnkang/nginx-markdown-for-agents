@@ -14,6 +14,7 @@
 
 #include <errno.h>
 #include <stdlib.h>
+#include "ngx_http_markdown_diagnostics.h"
 
 /*
  * Case-insensitive comparison of an ngx_str_t argument against a
@@ -763,6 +764,50 @@ ngx_http_markdown_metrics_directive(ngx_conf_t *cf, ngx_command_t *cmd, void *co
 
     ngx_conf_log_error(NGX_LOG_INFO, cf, 0,
                        "markdown: endpoint enabled at this location");
+
+    return NGX_CONF_OK;
+}
+
+
+/**
+ * Register the markdown_diagnostics content handler for the current location.
+ *
+ * @param cf The configuration parsing context.
+ * @param cmd The directive being processed.
+ * @param conf Module configuration pointer.
+ * @returns `NGX_CONF_OK` on success, `NGX_CONF_ERROR` on failure.
+ */
+static char *
+ngx_http_markdown_diagnostics_directive(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
+{
+    ngx_http_markdown_conf_t *mcf = conf;
+    ngx_http_core_loc_conf_t *clcf;
+    ngx_str_t                *value;
+
+    (void) cmd;
+
+    value = cf->args->elts;
+
+    if (value[1].len == 2 && strncasecmp((const char *) value[1].data, "on", 2) == 0) {
+        mcf->ops.diagnostics_enabled = 1;
+    } else if (value[1].len == 3 && strncasecmp((const char *) value[1].data, "off", 3) == 0) {
+        mcf->ops.diagnostics_enabled = 0;
+    } else {
+        return "invalid value";
+    }
+
+    clcf = ngx_http_conf_get_module_loc_conf(cf, ngx_http_core_module);
+    if (clcf == NULL) {
+        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+                           "failed to get core location configuration for \"%V\" directive",
+                           &cmd->name);
+        return NGX_CONF_ERROR;
+    }
+
+    clcf->handler = ngx_http_markdown_diagnostics_handler;
+
+    ngx_conf_log_error(NGX_LOG_INFO, cf, 0,
+                       "markdown: diagnostics endpoint enabled at this location");
 
     return NGX_CONF_OK;
 }
