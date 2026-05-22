@@ -1,7 +1,7 @@
-Name:           nginx-module-markdown
-Version:        0.7.0
-Release:        1%{?dist}
-Summary:        NGINX module for serving Markdown to AI agents
+Name:           nginx-module-markdown-for-agents
+Version:        %{version}
+Release:        nginx%{nginx_version}.1%{?dist}
+Summary:        NGINX Markdown filter module for AI agents
 
 License:        BSD-2-Clause
 URL:            https://github.com/cnkang/nginx-markdown-for-agents
@@ -12,14 +12,19 @@ BuildRequires:  rustc >= 1.91
 BuildRequires:  pcre-devel
 BuildRequires:  zlib-devel
 BuildRequires:  openssl-devel
-BuildRequires:  nginx-devel >= 1.24.0
 
-Requires:       nginx >= 1.24.0
-Requires:       nginx-abi-1.24
+Requires:       nginx >= %{nginx_version}
 
 %description
 NGINX dynamic filter module that converts HTML responses to Markdown
 format for AI agent consumption.
+
+Built against nginx.org stable %{nginx_version}.
+
+WARNING: This module is ONLY compatible with nginx.org %{nginx_version}.
+It will NOT work with distro-provided, vendor-patched, OpenResty, Tengine,
+or custom-built NGINX binaries. NGINX validates module binary compatibility
+signature at load time; mismatched versions will fail to load.
 
 Features:
 - Streaming and full-buffer conversion engines
@@ -42,62 +47,55 @@ make build
 
 %install
 rm -rf %{buildroot}
-install -d %{buildroot}%{_libdir}/nginx/modules
-install -m 0755 build/ngx_http_markdown_module.so \
-    %{buildroot}%{_libdir}/nginx/modules/ngx_http_markdown_module.so
 
-install -d %{buildroot}%{_sysconfdir}/nginx/modules-available
-cat > %{buildroot}%{_sysconfdir}/nginx/modules-available/mod-markdown.conf <<'SNIPPET'
-# nginx-module-markdown: Uncomment the line below to enable the module.
-# After enabling, run: nginx -t && systemctl reload nginx
-#load_module modules/ngx_http_markdown_module.so;
-SNIPPET
+install -d %{buildroot}/usr/lib/nginx/modules
+install -m 0644 build/ngx_http_markdown_module.so \
+    %{buildroot}/usr/lib/nginx/modules/ngx_http_markdown_module.so
+
+install -d %{buildroot}/usr/share/doc/nginx-markdown-for-agents
+install -m 0644 packaging/docs/README.md \
+    %{buildroot}/usr/share/doc/nginx-markdown-for-agents/README.md
+install -m 0644 docs/guides/INSTALL.md \
+    %{buildroot}/usr/share/doc/nginx-markdown-for-agents/INSTALL.md
+install -m 0644 docs/COMPATIBILITY.md \
+    %{buildroot}/usr/share/doc/nginx-markdown-for-agents/COMPATIBILITY.md
+
+install -d %{buildroot}/usr/share/licenses/nginx-markdown-for-agents
+install -m 0644 LICENSE \
+    %{buildroot}/usr/share/licenses/nginx-markdown-for-agents/LICENSE
 
 %post
-# Post-install: print instructions for enabling the module.
-# The module is NOT enabled by default (conservative enable per design.md).
-SNIPPET_FILE="%{_sysconfdir}/nginx/modules-available/mod-markdown.conf"
+cat >&2 <<'EOF'
+======================================================================
+nginx-markdown-for-agents module installed successfully.
 
-if [ -f "${SNIPPET_FILE}" ]; then
-    echo "--------------------------------------------------------------"
-    echo " nginx-module-markdown installed successfully."
-    echo ""
-    echo " The module is NOT enabled by default."
-    echo " To enable it:"
-    echo ""
-    echo "   1. Edit ${SNIPPET_FILE}"
-    echo "      Uncomment the load_module line."
-    echo ""
-    echo "   2. Or add to /etc/nginx/nginx.conf (top-level):"
-    echo "      load_module modules/ngx_http_markdown_module.so;"
-    echo ""
-    echo "   3. Test and reload:"
-    echo "      nginx -t && systemctl reload nginx"
-    echo ""
-    echo " Module binary: %{_libdir}/nginx/modules/ngx_http_markdown_module.so"
-    echo "--------------------------------------------------------------"
-fi
+To enable the module:
+  1. Add to nginx.conf (top-level, before http block):
+     load_module modules/ngx_http_markdown_module.so;
 
-%postun
-# Post-uninstall: remove the snippet file on full removal (not upgrade).
-if [ "$1" -eq 0 ]; then
-    SNIPPET_FILE="%{_sysconfdir}/nginx/modules-available/mod-markdown.conf"
-    if [ -f "${SNIPPET_FILE}" ]; then
-        rm -f "${SNIPPET_FILE}"
-    fi
-    if [ -d "%{_sysconfdir}/nginx/modules-available" ]; then
-        rmdir "%{_sysconfdir}/nginx/modules-available" 2>/dev/null || true
-    fi
-    echo "nginx-module-markdown: module snippet removed."
-fi
+  2. Verify configuration:
+     sudo nginx -t
+
+  3. Reload NGINX:
+     sudo systemctl reload nginx
+
+For compatibility information, see:
+  /usr/share/doc/nginx-markdown-for-agents/COMPATIBILITY.md
+======================================================================
+EOF
 
 %files
-%doc README.md
-%license LICENSE
-%{_libdir}/nginx/modules/ngx_http_markdown_module.so
-%config(noreplace) %{_sysconfdir}/nginx/modules-available/mod-markdown.conf
+/usr/lib/nginx/modules/ngx_http_markdown_module.so
+/usr/share/doc/nginx-markdown-for-agents/README.md
+/usr/share/doc/nginx-markdown-for-agents/INSTALL.md
+/usr/share/doc/nginx-markdown-for-agents/COMPATIBILITY.md
+%license /usr/share/licenses/nginx-markdown-for-agents/LICENSE
 
 %changelog
+* Sat May 18 2026 cnkang <liukang@noreply.github.com> - 0.7.0-nginx1.26.3.1
+- v0.7.0: Package redesign per spec 31 — correct naming, nginx version
+  binding in Release tag, minimum version constraint, safe %post script
+
 * Sat May 17 2026 cnkang <liukang@noreply.github.com> - 0.7.0-1
 - v0.7.0: Rust-first architecture, bounded decompression, Accept negotiation,
   conditional requests, decision engine, DEB/RPM packaging, K8s deployment
