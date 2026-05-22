@@ -224,6 +224,8 @@ jobs:
             exit 1
           fi
 
+          ./packaging/scripts/validate-version.sh "${PKG_VERSION}"
+
           NFPM_ARCH="${MATRIX_ARCH}"
 
           # Map arch for RPM naming (amd64→x86_64, arm64→aarch64)
@@ -285,6 +287,13 @@ jobs:
           ls -la "dist/${{ steps.pkg-env.outputs.rpm_filename }}"
         shell: bash
 
+      - name: Validate install layout
+        run: |
+          bash tools/release/gates/check_install_layout.sh \
+            "dist/${{ steps.pkg-env.outputs.deb_filename }}" \
+            "dist/${{ steps.pkg-env.outputs.rpm_filename }}"
+        shell: bash
+
       - name: Upload DEB artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -323,6 +332,8 @@ jobs:
           - { container: "debian:12", format: "deb", nginx_version: "1.26.3", arch: "amd64" }
           - { container: "almalinux:9", format: "rpm", nginx_version: "1.26.3", arch: "amd64" }
           - { container: "amazonlinux:2023", format: "rpm", nginx_version: "1.26.3", arch: "amd64" }
+          - { container: "ubuntu:24.04", format: "deb", nginx_version: "1.26.3", arch: "arm64" }
+          - { container: "almalinux:9", format: "rpm", nginx_version: "1.26.3", arch: "arm64" }
 
     steps:
       - name: Checkout
