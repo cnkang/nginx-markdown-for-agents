@@ -190,3 +190,20 @@ Required:
   The advisory per-file thresholds logged by `collect_nginx_coverage.sh` are
   informational warnings only — the binding gate is the 80% aggregate bar
   (90% for critical paths).
+
+
+---
+
+## Fuzz Harness Rules (FUZZ-001 to FUZZ-007)
+
+Canonical definitions live in [`fuzz/README.md`](../../../fuzz/README.md).
+
+| Rule ID  | Summary | Level |
+|----------|---------|-------|
+| FUZZ-001 | Converter adjacent-change impact assessment | Advisory |
+| FUZZ-002 | New logic must have fuzz coverage | Advisory |
+| FUZZ-003 | Target deterministic execution | Mandatory |
+| FUZZ-004 | Crash minimization workflow | Mandatory |
+| FUZZ-005 | Batch requires paired pruning | Mandatory |
+| FUZZ-006 | Doc-only changes skip fuzz | Mandatory |
+| FUZZ-007 | Infrastructure passes harness-check | Mandatory |
