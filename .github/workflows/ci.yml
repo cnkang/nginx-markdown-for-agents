@@ -581,8 +581,8 @@ jobs:
             zip \
             zlib1g-dev
 
-          NFPM_VERSION="2.41.1"
-          curl -fsSL "https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}/nfpm_${NFPM_VERSION}_linux_amd64.tar.gz" \
+          NFPM_VERSION="2.46.3"
+          curl -fsSL "https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}/nfpm_${NFPM_VERSION}_Linux_x86_64.tar.gz" \
             | sudo tar -xz -C /usr/local/bin nfpm
           nfpm --version
 
