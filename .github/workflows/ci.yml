@@ -558,6 +558,46 @@ jobs:
           name: coverage-reports
           path: coverage/
 
+  release-gates-070:
+    name: v0.7.0 Release Gates
+    needs: changes
+    if: needs.changes.outputs.nginx == 'true' || needs.changes.outputs.rust == 'true' || needs.changes.outputs.workflows == 'true' || needs.changes.outputs.docs == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Install release gate deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            curl \
+            pkg-config \
+            python3 \
+            zip \
+            zlib1g-dev
+
+          NFPM_VERSION="2.41.1"
+          curl -fsSL "https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}/nfpm_${NFPM_VERSION}_linux_amd64.tar.gz" \
+            | sudo tar -xz -C /usr/local/bin nfpm
+          nfpm --version
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+
+      - name: Install nightly fuzz tooling
+        run: |
+          rustup toolchain install nightly --profile minimal
+          cargo +nightly install cargo-fuzz --locked
+          cargo install cbindgen --locked
+
+      - name: Run v0.7.0 release gates
+        run: RELEASE_GATE_REQUIRE_PACKAGES=0 make release-gates-check-070
+
   corpus-benchmark:
     name: Corpus Benchmark Gate
     needs: changes
