@@ -446,8 +446,23 @@ ngx_http_markdown_apply_header_plan(ngx_http_request_t *r,
             break;
 
         case NGX_HTTP_MARKDOWN_PLAN_OP_MODIFY:
-            rc = ngx_http_markdown_plan_apply_modify(r, entry,
-                &undo[i]);
+            if (entry->key == NULL && entry->key_len == 0
+                && entry->value == NULL && entry->value_len == 0)
+            {
+                /*
+                 * Rust uses op_type 2 for set-etag-placeholder.  The real
+                 * ETag is written by the caller after the plan commits.
+                 */
+                undo[i].op_type = NGX_HTTP_MARKDOWN_PLAN_OP_MODIFY;
+                undo[i].header = NULL;
+                undo[i].orig_hash = 0;
+                undo[i].orig_value.data = NULL;
+                undo[i].orig_value.len = 0;
+                rc = NGX_OK;
+                break;
+            }
+
+            rc = ngx_http_markdown_plan_apply_modify(r, entry, &undo[i]);
             break;
 
         default:
