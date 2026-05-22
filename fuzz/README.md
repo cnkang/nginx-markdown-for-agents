@@ -1,253 +1,288 @@
 # Fuzz Testing Guide
 
-本文档描述 `nginx-markdown-for-agents` 项目的 fuzz testing 基础设施、语料库管理策略和 harness 规则体系。
+This document describes the fuzz testing infrastructure, corpus management
+strategy, and harness rules for the `nginx-markdown-for-agents` project.
 
 ---
 
-## Harness 规则
+## Local Fuzz Running
 
-本节定义 fuzz harness 规则体系（FUZZ-001 至 FUZZ-007），为团队在开发过程中提供一致的 fuzzing 实践指导。
+### Prerequisites
 
-### 规则总览
+1. **Rust nightly toolchain** (required by cargo-fuzz / libFuzzer):
 
-| 规则 ID | 名称 | 强制级别 | 验证方式 |
-|---------|------|----------|----------|
-| FUZZ-001 | Converter 相邻变更评估 | Advisory（PR review） | 人工审查 |
-| FUZZ-002 | 新逻辑必须有 fuzz 覆盖 | Advisory（PR review） | 人工审查 |
-| FUZZ-003 | Target 确定性执行 | Mandatory | 代码审查 + harness-check |
-| FUZZ-004 | Crash minimization 流程 | Mandatory（issue 关闭前） | 人工验证 |
-| FUZZ-005 | Batch 配套 pruning | Mandatory | harness-check 自动验证 |
-| FUZZ-006 | 纯文档变更跳过 fuzz | Mandatory | 路径过滤器 |
-| FUZZ-007 | 基础设施通过 harness-check | Mandatory | `make harness-check` |
+   ```bash
+   rustup toolchain install nightly
+   ```
 
-### FUZZ-001: Converter 相邻变更评估
+2. **cargo-fuzz CLI**:
 
-| 属性 | 值 |
-|------|-----|
-| 规则 ID | FUZZ-001 |
-| 名称 | Converter 相邻变更评估 |
-| 强制级别 | Advisory（PR review） |
-| 验证方式 | 人工审查 |
+   ```bash
+   cargo +nightly install cargo-fuzz
+   ```
 
-**详细说明：**
+3. Verify installation:
 
-当开发者修改 `components/rust-converter/src/` 下的 parser、sanitizer、emitter
-模块时，必须评估变更是否影响现有 fuzz target 的覆盖范围。如果变更引入了新的
-解析路径、新的输入处理分支、或修改了现有行为的边界条件，应考虑更新对应的
-fuzz target 以覆盖新行为。
+   ```bash
+   cargo +nightly fuzz --version
+   ```
 
-**适用场景：**
-- 修改 HTML parser 的标签处理逻辑
-- 修改 sanitizer 的过滤规则
-- 修改 emitter 的输出格式化逻辑
-- 修改 streaming chunk 处理边界
+### Build all targets
 
-**PR Review Checklist 项：**
-- [ ] 已评估 fuzz target 是否需要更新以覆盖本次变更
+From the `components/rust-converter` directory:
 
----
-
-### FUZZ-002: 新逻辑必须有 fuzz 覆盖
-
-| 属性 | 值 |
-|------|-----|
-| 规则 ID | FUZZ-002 |
-| 名称 | 新逻辑必须有 fuzz 覆盖 |
-| 强制级别 | Advisory（PR review） |
-| 验证方式 | 人工审查 |
-
-**详细说明：**
-
-新增 parser、header 解析、negotiation、streaming 逻辑时，开发者必须确保对应的
-fuzz target 覆盖新逻辑，或创建新的 fuzz target。这确保所有面向不可信输入的
-代码路径都有持续的 fuzzing 覆盖。
-
-**适用场景：**
-- 新增 HTML 标签或属性的解析支持
-- 新增 Accept header negotiation 逻辑
-- 新增 streaming 分块处理路径
-- 新增 FFI 边界的输入处理函数
-
-**要求：**
-- 新增逻辑的 PR 必须包含 fuzz target 更新或新增
-- 如果新逻辑无法被现有 target 覆盖，需创建新 target 并添加种子语料库
-
----
-
-### FUZZ-003: Target 确定性执行
-
-| 属性 | 值 |
-|------|-----|
-| 规则 ID | FUZZ-003 |
-| 名称 | Target 确定性执行 |
-| 强制级别 | Mandatory |
-| 验证方式 | 代码审查 + harness-check |
-
-**详细说明：**
-
-所有 fuzz target 必须满足确定性执行和副作用受限约束：相同输入必须产生相同行为。
-这是 fuzzing 引擎正确工作的前提——非确定性行为会导致覆盖引导失效、crash 不可复现。
-
-**禁止的操作：**
-- 网络 I/O（TCP/UDP 连接、HTTP 请求）
-- 文件系统写入（创建/修改/删除文件）
-- 依赖系统时间（`SystemTime::now()`、`Instant::now()` 用于逻辑分支）
-- 外部随机源（`rand` crate 的非确定性 RNG）
-- 环境变量读取用于逻辑分支
-- 进程/线程创建
-
-**允许的操作：**
-- 纯内存计算
-- 堆分配（fuzzer 会监控）
-- 读取编译时常量
-- 使用 `libFuzzer` 提供的确定性 API
-
-**验证方法：**
-- 代码审查确认无禁止操作
-- `harness-check` 静态扫描 fuzz target 源码中的禁止 API 调用（未来扩展）
-
----
-
-### FUZZ-004: Crash minimization 流程
-
-| 属性 | 值 |
-|------|-----|
-| 规则 ID | FUZZ-004 |
-| 名称 | Crash minimization 流程 |
-| 强制级别 | Mandatory（issue 关闭前） |
-| 验证方式 | 人工验证 |
-
-**详细说明：**
-
-当 fuzzing 发现 crash 时，在关闭相关 issue 前必须完成以下流程：
-
-1. **Minimize**：使用 `cargo fuzz tmin <target> <crash_file>` 将 crash 输入精简到最小复现集
-2. **归档**：将 minimized input 添加到 `fuzz/corpus/<target>/` 作为回归测试输入
-3. **修复验证**：确认修复后 target 对该输入不再 crash
-4. **回归保护**：minimized input 签入主仓库，确保未来 CI fuzzing 持续验证
-
-**流程：**
 ```bash
-# 1. 下载 crash artifact
-# 2. Minimize
-cargo +nightly fuzz tmin <target> <crash_file>
-
-# 3. 复制 minimized input 到 regression corpus
-cp minimized_input fuzz/corpus/<target>/regression_<issue_id>
-
-# 4. 验证修复
-cargo +nightly fuzz run <target> fuzz/corpus/<target>/regression_<issue_id>
-
-# 5. 签入主仓库
-git add fuzz/corpus/<target>/regression_<issue_id>
+cargo +nightly fuzz build
 ```
 
-**Issue 关闭条件：**
-- Minimized regression input 已签入主仓库
-- 修复后 target 对该输入不再 crash
-- CI fuzzing 包含该 regression input
+### Smoke run (30 seconds per target)
 
----
-
-### FUZZ-005: Batch 配套 pruning
-
-| 属性 | 值 |
-|------|-----|
-| 规则 ID | FUZZ-005 |
-| 名称 | Batch 配套 pruning |
-| 强制级别 | Mandatory |
-| 验证方式 | harness-check 自动验证 |
-
-**详细说明：**
-
-当 batch fuzzing 工作流（`cflite_batch.yml`）存在时，必须有对应的 corpus pruning
-机制（`cflite_cron.yml` 或等效工作流）。这防止生成语料库无限增长导致：
-- 存储空间消耗过大
-- Batch fuzzing 启动时间过长
-- 冗余输入降低 fuzzing 效率
-
-**验证方法：**
-- `make harness-check` 自动检查：如果 `cflite_batch.yml` 存在，则 `cflite_cron.yml`
-  （或包含 prune mode 的工作流）必须存在
-- 检查失败时 harness-check 报告 FAIL（非 WARNING）
-
-**Pruning 要求：**
-- Pruning 频率不低于每周一次
-- Pruning 使用与 batch 相同的 corpus 存储仓库/分支
-- Pruning 失败时工作流标记为 failure（触发通知）
-
----
-
-### FUZZ-006: 纯文档变更跳过 fuzz
-
-| 属性 | 值 |
-|------|-----|
-| 规则 ID | FUZZ-006 |
-| 名称 | 纯文档变更跳过 fuzz |
-| 强制级别 | Mandatory |
-| 验证方式 | 路径过滤器 |
-
-**详细说明：**
-
-Fuzz CI 工作流不得为无关的纯文档变更运行（除非显式请求）。这通过 GitHub Actions
-的路径过滤器（`paths` 触发条件）实现，确保仅在以下路径变更时触发 PR fuzzing：
-
-- `components/rust-converter/**`
-- `fuzz/**`
-- `.clusterfuzzlite/**`
-- `.github/workflows/cflite_*.yml`
-- `Makefile`
-- `Cargo.lock`
-- `components/rust-converter/Cargo.toml`
-- `docs/harness/**`
-- `tools/release/gates/**`
-
-**排除的路径（不触发 fuzz）：**
-- `docs/guides/**`、`docs/features/**`、`docs/architecture/**` 等纯文档目录
-- `README.md`、`CHANGELOG.md` 等顶层文档
-- `.kiro/`、`.codeartsdoer/` 等工具配置
-
-**验证方法：**
-- PR 工作流（`cflite_pr.yml`）的 `on.pull_request.paths` 配置实现此过滤
-- `harness-check` 验证 PR 工作流包含路径过滤器
-
----
-
-### FUZZ-007: 基础设施通过 harness-check
-
-| 属性 | 值 |
-|------|-----|
-| 规则 ID | FUZZ-007 |
-| 名称 | 基础设施通过 harness-check |
-| 强制级别 | Mandatory |
-| 验证方式 | `make harness-check` |
-
-**详细说明：**
-
-所有 fuzz 基础设施必须通过 `make harness-check` 验证。这包括：
-
-1. **构建配置完整性**：`.clusterfuzzlite/` 目录下 project.yaml、Dockerfile、build.sh 存在且配置正确
-2. **工作流完整性**：PR/batch/prune 工作流文件存在
-3. **Sanitizer 配置**：工作流使用 address sanitizer
-4. **路径过滤器**：PR 工作流有路径过滤器（FUZZ-006）
-5. **Batch-Prune 配对**：batch 工作流存在时 prune 工作流必须存在（FUZZ-005）
-6. **文档完整性**：`fuzz/README.md` 存在
-7. **Gitignore 配置**：`.gitignore` 排除生成语料库路径
-
-**验证命令：**
 ```bash
-make harness-check
+cargo +nightly fuzz run convert_html            -- -max_total_time=30
+cargo +nightly fuzz run streaming_chunks        -- -max_total_time=30
+cargo +nightly fuzz run negotiation_and_headers -- -max_total_time=30
 ```
 
-**失败处理：**
-- 任一检查项失败时 harness-check 返回非零退出码
-- 失败信息明确指出缺失或错误的配置项
-- CI 中 harness-check 失败阻塞合并
+### Deep run (5 minutes)
+
+```bash
+cargo +nightly fuzz run convert_html            -- -max_total_time=300
+cargo +nightly fuzz run streaming_chunks        -- -max_total_time=300
+cargo +nightly fuzz run negotiation_and_headers -- -max_total_time=300
+```
+
+### Recommended parameters
+
+| Parameter | Default | Purpose |
+|-----------|---------|---------|
+| `-max_total_time=N` | unlimited | Wall-clock budget in seconds |
+| `-max_len=65536` | 4096 | Maximum input size (bytes) |
+| `-timeout=60` | 1200 | Per-input timeout (seconds) |
+| `-jobs=N` | 1 | Parallel fuzzer processes |
+| `-workers=N` | 1 | Parallel workers per job |
+
+Example with all recommended settings:
+
+```bash
+cargo +nightly fuzz run convert_html -- \
+  -max_total_time=300 \
+  -max_len=65536 \
+  -timeout=60 \
+  -jobs=4 \
+  -workers=4
+```
+
+### Makefile shortcuts
+
+From the repository root:
+
+```bash
+make fuzz-smoke              # 30s smoke for new targets
+make test-rust-fuzz-smoke    # 5s quick check for all targets
+```
 
 ---
 
-## 参考
+## Crash Analysis
 
-- [AGENTS.md](../AGENTS.md) — 仓库工程规则
-- [docs/harness/rules/testing-coverage.md](../docs/harness/rules/testing-coverage.md) — 测试覆盖规则索引
-- [ClusterFuzzLite 文档](https://google.github.io/clusterfuzzlite/) — 官方文档
+When a target crashes, cargo-fuzz saves the triggering input to
+`fuzz/artifacts/<target>/crash-<hash>`.
+
+### Reproduce a crash
+
+```bash
+cargo +nightly fuzz run <target> fuzz/artifacts/<target>/crash-<hash>
+```
+
+### View backtrace
+
+```bash
+RUST_BACKTRACE=1 cargo +nightly fuzz run <target> fuzz/artifacts/<target>/crash-<hash>
+```
+
+For full symbol information:
+
+```bash
+RUST_BACKTRACE=full cargo +nightly fuzz run <target> fuzz/artifacts/<target>/crash-<hash>
+```
+
+### Artifact types
+
+| File prefix | Meaning |
+|-------------|---------|
+| `crash-*` | Input triggered a panic or sanitizer report |
+| `timeout-*` | Input exceeded the per-input timeout |
+| `oom-*` | Input caused out-of-memory |
+| `leak-*` | Input triggered a memory leak (LSan) |
+
+### Minimization
+
+Use `cargo fuzz tmin` to reduce a crash artifact to the smallest input that
+still triggers the same failure:
+
+```bash
+cargo +nightly fuzz tmin <target> fuzz/artifacts/<target>/crash-<hash>
+```
+
+The minimized input is written to `fuzz/artifacts/<target>/minimized-from-<hash>`.
+
+### Security classification
+
+Any finding reported by a sanitizer (ASan, UBSan, MSan) is classified as a
+**security defect** and must follow the project's security vulnerability
+reporting process. Do NOT commit crash artifacts that trigger sanitizer reports
+to public branches. Report via the project's private security channel or GitHub
+Security Advisory.
+
+---
+
+## Contribution Workflow
+
+### Adding a new fuzz target
+
+1. Create a new target file in `fuzz/fuzz_targets/<target_name>.rs`
+2. Add the target to `fuzz/Cargo.toml` under `[[bin]]`
+3. Create a seed corpus directory at `fuzz/corpus/<target_name>/`
+4. Add representative seed inputs (valid and edge-case samples)
+5. Verify the target builds: `cargo +nightly fuzz build`
+6. Run a smoke test: `cargo +nightly fuzz run <target_name> -- -max_total_time=30`
+7. Update this README's Target Summary table
+
+### Updating an existing target
+
+When modifying converter logic that affects a fuzz target:
+
+1. Verify the target still builds: `cargo +nightly fuzz build`
+2. Run a smoke test to confirm no regressions: `make test-rust-fuzz-smoke`
+3. If new code paths are introduced, add seed corpus inputs that exercise them
+4. Update the target's input model documentation if the byte layout changes
+
+### Handling crashes found by CI
+
+1. Download the crash artifact from the GitHub Actions workflow run
+2. Reproduce locally: `cargo +nightly fuzz run <target> <crash_file>`
+3. Minimize: `cargo +nightly fuzz tmin <target> <crash_file>`
+4. Assess security impact (sanitizer report = security defect)
+5. Fix the underlying bug
+6. Add minimized input to regression corpus:
+   ```bash
+   cp fuzz/artifacts/<target>/minimized-from-<hash> \
+      fuzz/corpus/<target>/regression_<descriptive_name>.bin
+   git add -f fuzz/corpus/<target>/regression_<descriptive_name>.bin
+   ```
+7. Verify the fix: `cargo +nightly fuzz run <target> -- -max_total_time=30`
+8. Close the issue only after regression input is committed and CI passes
+
+### PR checklist for fuzz-related changes
+
+- [ ] `cargo +nightly fuzz build` succeeds
+- [ ] `make test-rust-fuzz-smoke` passes
+- [ ] New code paths have corresponding seed corpus inputs
+- [ ] Fuzz target documentation updated if input model changed
+- [ ] No crash artifacts committed to public branches
+
+---
+
+## Seed Corpus Structure
+
+The seed corpus provides meaningful starting inputs for the fuzzer. Each target
+has its own corpus directory under `fuzz/corpus/<target>/`.
+
+### Directory layout
+
+```
+fuzz/corpus/
+├── convert_html/
+│   ├── basic_heading.html          # Simple heading
+│   ├── nested_lists.html           # Nested list structures
+│   ├── code_blocks.html            # Code block variations
+│   ├── mixed_content.html          # Mixed inline/block elements
+│   └── regression_*.bin            # Minimized crash regressions
+├── streaming_chunks/
+│   ├── single_chunk.bin            # Complete input in one chunk
+│   ├── multi_chunk.bin             # Input split across chunks
+│   ├── empty_chunks.bin            # Zero-length chunk boundaries
+│   └── regression_*.bin            # Minimized crash regressions
+└── negotiation_and_headers/
+    ├── accept_markdown.bin         # Valid Accept: text/markdown
+    ├── accept_html.bin             # Valid Accept: text/html
+    ├── malformed_accept.bin        # Malformed Accept header
+    └── regression_*.bin            # Minimized crash regressions
+```
+
+### Seed corpus guidelines
+
+- Include both valid and edge-case inputs
+- Keep individual files small (under 1KB preferred for fast iteration)
+- Use descriptive filenames that indicate the input's purpose
+- Regression files use the `regression_<description>.bin` naming convention
+- Seed corpus files are committed via `git add -f` (the directory may be
+  partially gitignored for generated content)
+
+> For detailed corpus classification (seed, generated, crash, regression,
+> coverage), see the [Corpus Classification](#corpus-classification) section
+> below.
+
+---
+
+## Corpus Classification
+
+The project's fuzz corpus is divided into five categories, each with different
+storage locations, version control strategies, and lifecycle management.
+
+### Classification Overview
+
+| Category | Storage Location | Committed to Main Repo | Lifecycle |
+|----------|-----------------|------------------------|-----------|
+| Seed Corpus | `fuzz/corpus/<target>/` | ✅ | Permanent (manually maintained) |
+| Generated Corpus | `<repo>-corpus` repo main branch | ❌ | Auto-managed (pruned periodically) |
+| Crash Artifacts | Workflow Artifacts | ❌ | 90 days (GitHub default) |
+| Minimized Regression Corpus | `fuzz/corpus/<target>/` | ✅ | Permanent (fix verification) |
+| Coverage Corpus | `<repo>-corpus` repo coverage branch | ❌ | Auto-managed |
+
+### Category Descriptions
+
+- **Seed Corpus**: Manually written initial input sets that provide meaningful
+  starting coverage for the fuzzer. Stored in `fuzz/corpus/<target>/`, committed
+  to the main repository, and maintained by developers.
+- **Generated Corpus**: Coverage-expanding inputs automatically generated by CI
+  batch fuzzing. Stored in the independent `<repo>-corpus` repository on the
+  main branch, periodically pruned by the corpus pruning workflow.
+- **Crash Artifacts**: Input files that triggered crashes, automatically
+  uploaded by CI workflows as GitHub Actions Workflow Artifacts. Retained for
+  90 days.
+- **Minimized Regression Corpus**: Crash inputs reduced via `cargo fuzz tmin`,
+  committed to the main repository as permanent regression tests. Named using
+  the `regression_<description>.bin` convention.
+- **Coverage Corpus**: Coverage-guided corpus generated by CI, stored in the
+  `<repo>-corpus` repository on the coverage branch, automatically maintained
+  by ClusterFuzzLite.
+
+> For component-specific details, see
+> [components/rust-converter/fuzz/README.md](../components/rust-converter/fuzz/README.md#corpus-classification).
+
+---
+
+## Applicable Harness Rules
+
+Canonical rule definitions live in
+[`docs/harness/rules/fuzz-infrastructure.md`](../docs/harness/rules/fuzz-infrastructure.md).
+
+| Rule ID | Name | Level | Summary |
+|---------|------|-------|---------|
+| FUZZ-001 | Converter Adjacent-Change Impact Assessment | Advisory | Assess fuzz target coverage when modifying converter modules |
+| FUZZ-002 | New Logic Must Have Fuzz Coverage | Advisory | New untrusted-input code paths require fuzz target coverage |
+| FUZZ-003 | Target Deterministic Execution | Mandatory | Fuzz targets must be deterministic with no side effects |
+| FUZZ-004 | Crash Minimization Workflow | Mandatory | Minimize, archive, and verify before closing crash issues |
+| FUZZ-005 | Batch Requires Paired Pruning | Mandatory | Batch fuzzing workflow requires a paired pruning workflow |
+| FUZZ-006 | Doc-Only Changes Skip Fuzz | Mandatory | Path filters prevent fuzz CI on documentation-only changes |
+| FUZZ-007 | Infrastructure Passes harness-check | Mandatory | All fuzz infrastructure must pass `make harness-check` |
+
+---
+
+## References
+
+- [AGENTS.md](../AGENTS.md) — Repository engineering rules
+- [docs/harness/rules/testing-coverage.md](../docs/harness/rules/testing-coverage.md) — Testing coverage rule index
+- [docs/harness/rules/fuzz-infrastructure.md](../docs/harness/rules/fuzz-infrastructure.md) — Full fuzz rule definitions
+- [ClusterFuzzLite documentation](https://google.github.io/clusterfuzzlite/) — Official docs
