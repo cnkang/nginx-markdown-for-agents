@@ -595,6 +595,16 @@ ngx_http_markdown_diagnostics_build_json(ngx_http_request_t *r,
     /* Closing brace */
     p = ngx_slprintf(p, last, "}\n");
 
+    /* Detect silent truncation: if we hit the buffer boundary, the JSON
+     * is incomplete and must not be served as valid output. */
+    if (p >= last) {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+            "markdown: diagnostics JSON truncated, "
+            "buffer size %uz insufficient",
+            buf_size);
+        return NGX_ERROR;
+    }
+
     b->pos = buf;
     b->last = p;
     b->start = buf;

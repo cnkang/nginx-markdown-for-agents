@@ -108,6 +108,9 @@ ngx_http_markdown_find_request_header_value(ngx_http_request_t *r,
 
         headers = part->elts;
         for (ngx_uint_t i = 0; i < part->nelts; i++) {
+            if (headers[i].hash == 0) {
+                continue;
+            }
             if (headers[i].key.len == name_len
                 && ngx_http_markdown_const_strncasecmp(headers[i].key.data,
                                                        name,
@@ -615,7 +618,7 @@ ngx_http_markdown_resolve_conditional_result(ngx_http_request_t *r,
         }
 
         r->buffered &= ~NGX_HTTP_MARKDOWN_BUFFERED;
-        if (rc != NGX_OK) {
+        if (rc != NGX_DONE) {
             ngx_http_markdown_record_system_failure(ctx);
             return rc;
         }

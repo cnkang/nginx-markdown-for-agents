@@ -38,6 +38,9 @@ ngx_http_markdown_find_request_header(ngx_http_request_t *r,
 
     for ( ;; ) {
         for (ngx_uint_t i = 0; i < part->nelts; i++) {
+            if (headers[i].hash == 0) {
+                continue;
+            }
             if (headers[i].key.len == name_len
                 && ngx_strncasecmp(headers[i].key.data, name, name_len) == 0)
             {
