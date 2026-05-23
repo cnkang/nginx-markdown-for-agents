@@ -58,6 +58,10 @@ SUPPORTED_NGINX_VERSIONS="1.26.3"
 # Supported architectures
 SUPPORTED_ARCHS="x86_64 aarch64"
 OPENRESTY_SOURCE="openresty"
+STATUS_UNKNOWN="unknown"
+STATUS_UNSUPPORTED="unsupported"
+STATUS_SUPPORTED="supported"
+NGINX_ORG_SOURCE="nginx.org"
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -231,12 +235,12 @@ detect_nginx_source() {
 
     # Check for nginx.org: plain nginx/X.Y.Z without distro suffix
     if printf '%s\n' "$version_output" | grep -qE '^nginx version: nginx/[0-9]+\.[0-9]+\.[0-9]+$'; then
-        NGINX_SOURCE="nginx.org"
-        log_info "NGINX source: nginx.org"
+        NGINX_SOURCE="$NGINX_ORG_SOURCE"
+        log_info "NGINX source: $NGINX_ORG_SOURCE"
         return 0
     fi
 
-    NGINX_SOURCE="unknown"
+    NGINX_SOURCE="$STATUS_UNKNOWN"
     log_warn "NGINX source: unknown (could not determine origin)"
     return 0
 }
@@ -302,8 +306,8 @@ evaluate_compatibility() {
     local deb_arch
 
     # If source is not nginx.org, unsupported
-    if [[ "$NGINX_SOURCE" != "nginx.org" ]]; then
-        STATUS="unsupported"
+    if [[ "$NGINX_SOURCE" != "$NGINX_ORG_SOURCE" ]]; then
+        STATUS="$STATUS_UNSUPPORTED"
         log_info "Status: UNSUPPORTED — prebuilt packages are only for nginx.org builds"
         if [[ "$NGINX_SOURCE" = "distro" ]]; then
             log_info "  Your NGINX appears to be from a Linux distribution package."
@@ -320,21 +324,21 @@ evaluate_compatibility() {
 
     # Check architecture
     if ! is_arch_supported "$ARCH"; then
-        STATUS="unsupported"
+        STATUS="$STATUS_UNSUPPORTED"
         log_info "Status: UNSUPPORTED — architecture $ARCH is not in the build matrix"
         return 1
     fi
 
     # Check version
     if ! is_version_supported "$NGINX_VERSION"; then
-        STATUS="unsupported"
+        STATUS="$STATUS_UNSUPPORTED"
         log_info "Status: UNSUPPORTED — NGINX version $NGINX_VERSION is not in the build matrix"
         log_info "  Supported versions: $SUPPORTED_NGINX_VERSIONS"
         return 1
     fi
 
     # All checks passed
-    STATUS="supported"
+    STATUS="$STATUS_SUPPORTED"
     deb_arch="$(arch_to_deb "$ARCH")"
     EXPECTED_PACKAGE="nginx-module-markdown-for-agents_${PROJECT_VERSION}_nginx-${NGINX_VERSION}_${deb_arch}.deb"
     log_info "Status: SUPPORTED — prebuilt package available"
@@ -407,14 +411,14 @@ main() {
 
     # Step 1: Detect nginx binary
     if ! detect_nginx_binary "$nginx_path"; then
-        STATUS="unknown"
+        STATUS="$STATUS_UNKNOWN"
         printf 'STATUS=%s\n' "$STATUS"
         return 2
     fi
 
     # Step 2: Detect NGINX version
     if ! detect_nginx_version; then
-        STATUS="unknown"
+        STATUS="$STATUS_UNKNOWN"
         ARCH="$(uname -m)"
         printf 'STATUS=%s\n' "$STATUS"
         printf 'ARCH=%s\n' "$ARCH"
