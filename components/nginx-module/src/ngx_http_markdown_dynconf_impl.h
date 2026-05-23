@@ -1442,14 +1442,13 @@ ngx_http_markdown_dynconf_log_validation_errors(
     const ngx_str_t *path,
     ngx_log_t *log)
 {
-    ngx_uint_t  i;
     const ngx_http_markdown_dynconf_validation_error_t  *entry;
 
     if (result == NULL || result->total_errors == 0) {
         return;
     }
 
-    for (i = 0; i < result->count; i++) {
+    for (ngx_uint_t i = 0; i < result->count; i++) {
         entry = &result->errors[i];
         ngx_log_error(NGX_LOG_WARN, log, 0,
                       "markdown: error in \"%V\" "
@@ -1511,7 +1510,7 @@ ngx_http_markdown_dynconf_try_line_dryrun(
     ngx_int_t   apply_rc;
     u_char     *p;
     const u_char *last;
-    u_char     *eq;
+    const u_char *eq;
     size_t      key_len;
 
     parse_rc = ngx_http_markdown_dynconf_parse_line(line, len,
@@ -1614,6 +1613,14 @@ ngx_http_markdown_dynconf_try_line_dryrun(
 }
 
 
+typedef struct {
+    u_char       *buf;
+    size_t       *pos;
+    size_t       *line_start;
+    ngx_uint_t   *line_num;
+    ngx_uint_t   *applied;
+} ngx_http_markdown_dynconf_buf_ctx_t;
+
 /**
  * Process complete lines from the read buffer in dry-run mode.
  *
@@ -1622,52 +1629,287 @@ ngx_http_markdown_dynconf_try_line_dryrun(
  * Tracks line numbers for error reporting.
  *
  * @param snapshot    Staging snapshot to apply valid lines to.
- * @param buf         Read buffer.
- * @param pos         [in/out] Current end of data in buf.
- * @param line_start  [in/out] Start of next unprocessed line.
- * @param line_num    [in/out] Current 1-based line number.
- * @param log         Logger.
- * @param applied     [in/out] Count of successfully applied entries.
- * @param result      Validation result to collect errors into.
+ * @param bctx       Buffer context bundling buf/pos/line_start/line_num/applied.
+ * @param log        Logger.
+ * @param result     Validation result to collect errors into.
  *
  * @returns NGX_OK always (errors are collected, not fatal).
  */
 static ngx_int_t
 ngx_http_markdown_dynconf_process_buffer_dryrun(
     ngx_http_markdown_dynconf_snapshot_t *snapshot,
-    u_char *buf, size_t *pos, size_t *line_start,
-    ngx_uint_t *line_num,
-    ngx_log_t *log, ngx_uint_t *applied,
+    ngx_http_markdown_dynconf_buf_ctx_t *bctx,
+    ngx_log_t *log,
     ngx_http_markdown_dynconf_validation_result_t *result)
 {
     for ( ;; ) {
         size_t  i;
 
         /* Find newline. */
-        i = *line_start;
-        while (i < *pos && buf[i] != '\n') {
+        i = *bctx->line_start;
+        while (i < *bctx->pos && bctx->buf[i] != '\n') {
             i++;
         }
 
-        if (i >= *pos) {
+        if (i >= *bctx->pos) {
             /* No complete line; shift remaining data. */
-            if (*line_start > *pos) {
+            if (*bctx->line_start > *bctx->pos) {
                 return NGX_ERROR;
             }
-            ngx_memmove(buf, buf + *line_start, *pos - *line_start);
-            *pos -= *line_start;
-            *line_start = 0;
+            ngx_memmove(bctx->buf, bctx->buf + *bctx->line_start,
+                        *bctx->pos - *bctx->line_start);
+            *bctx->pos -= *bctx->line_start;
+            *bctx->line_start = 0;
             return NGX_OK;
         }
 
         ngx_http_markdown_dynconf_try_line_dryrun(
-            snapshot, buf + *line_start,
-            ngx_http_markdown_dynconf_line_len(buf, *line_start, i),
-            *line_num, log, applied, result);
+            snapshot, bctx->buf + *bctx->line_start,
+            ngx_http_markdown_dynconf_line_len(bctx->buf, *bctx->line_start, i),
+            *bctx->line_num, log, bctx->applied, result);
 
-        (*line_num)++;
-        *line_start = i + 1;
+        (*bctx->line_num)++;
+        *bctx->line_start = i + 1;
     }
+}
+
+
+/**
+ * Dry-run helper for ngx_http_markdown_dynconf_reload.
+ *
+ * Parses all lines collecting errors instead of aborting at the first
+ * failure, providing operators with a complete list of issues to fix.
+ *
+ * @param watcher Dynamic config watcher containing the file path and snapshots.
+ * @param fd     Open file descriptor for the dynconf file.
+ * @param buf    Read buffer (NGX_HTTP_MARKDOWN_DYNCONF_MAX_LINE bytes).
+ * @param log    Logger for warnings and informational messages.
+ *
+ * @returns NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_DRY_RUN_OK   if validation passed
+ * @returns NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_DRY_RUN_FAIL if validation found errors
+ * @returns NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_IO_ERROR     on read error
+ * @returns NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_INVALID_FILE on read_chunk failure
+ */
+static ngx_int_t
+ngx_http_markdown_dynconf_reload_dryrun(
+    ngx_http_markdown_dynconf_watcher_t *watcher,
+    ngx_fd_t fd,
+    u_char *buf,
+    ngx_log_t *log)
+{
+    ssize_t    n;
+    size_t     line_start;
+    size_t     pos;
+    ngx_uint_t applied;
+    ngx_int_t  line_rc;
+    ngx_uint_t line_num;
+
+    applied = 0;
+    line_start = 0;
+    pos = 0;
+    line_num = 1;
+
+    for ( ;; ) {
+        line_rc = ngx_http_markdown_dynconf_read_chunk(
+            fd, buf, &pos, NGX_HTTP_MARKDOWN_DYNCONF_MAX_LINE,
+            &watcher->path, log, &n);
+        if (line_rc != NGX_OK) {
+            ngx_close_file(fd);
+            return line_rc;
+        }
+
+        if (n == 0) {
+            break;
+        }
+
+        if (n == -1) {
+            ngx_log_error(NGX_LOG_WARN, log, 0,
+                          "markdown: read error on \"%V\"",
+                          &watcher->path);
+            ngx_close_file(fd);
+            return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_IO_ERROR;
+        }
+
+        if (pos >= NGX_HTTP_MARKDOWN_DYNCONF_MAX_LINE) {
+            ngx_http_markdown_dynconf_record_error(
+                &watcher->last_validation, line_num,
+                (const u_char *) "(line)", sizeof("(line)") - 1,
+                (const u_char *) "line too long",
+                sizeof("line too long") - 1);
+            ngx_close_file(fd);
+
+            if (watcher->last_validation.total_errors > 0) {
+                watcher->last_validation.valid = 0;
+                ngx_http_markdown_dynconf_log_validation_errors(
+                    &watcher->last_validation, &watcher->path, log);
+                return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_DRY_RUN_FAIL;
+            }
+
+            watcher->last_validation.valid = 1;
+
+            if (applied > 0) {
+                ngx_log_error(NGX_LOG_INFO, log, 0,
+                              "markdown: dry-run validation passed "
+                              "for \"%V\" (%ui settings validated, "
+                              "not applied)",
+                              &watcher->path, applied);
+            } else {
+                ngx_log_error(NGX_LOG_INFO, log, 0,
+                              "markdown: dry-run validation passed "
+                              "for \"%V\" (0 effective keys, not applied)",
+                              &watcher->path);
+            }
+
+            return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_DRY_RUN_OK;
+        }
+
+        {
+            ngx_http_markdown_dynconf_buf_ctx_t  bctx;
+            bctx.buf = buf;
+            bctx.pos = &pos;
+            bctx.line_start = &line_start;
+            bctx.line_num = &line_num;
+            bctx.applied = &applied;
+            ngx_http_markdown_dynconf_process_buffer_dryrun(
+                &watcher->staging_snapshot, &bctx, log,
+                &watcher->last_validation);
+        }
+    }
+
+    ngx_close_file(fd);
+
+    if (line_start < pos) {
+        ngx_http_markdown_dynconf_try_line_dryrun(
+            &watcher->staging_snapshot, buf + line_start,
+            ngx_http_markdown_dynconf_line_len(buf, line_start, pos),
+            line_num, log, &applied, &watcher->last_validation);
+    }
+
+    if (watcher->last_validation.total_errors > 0) {
+        watcher->last_validation.valid = 0;
+        ngx_http_markdown_dynconf_log_validation_errors(
+            &watcher->last_validation, &watcher->path, log);
+        return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_DRY_RUN_FAIL;
+    }
+
+    watcher->last_validation.valid = 1;
+
+    if (applied > 0) {
+        ngx_log_error(NGX_LOG_INFO, log, 0,
+                      "markdown: dry-run validation passed "
+                      "for \"%V\" (%ui settings validated, "
+                      "not applied)",
+                      &watcher->path, applied);
+    } else {
+        ngx_log_error(NGX_LOG_INFO, log, 0,
+                      "markdown: dry-run validation passed "
+                      "for \"%V\" (0 effective keys, not applied)",
+                      &watcher->path);
+    }
+
+    return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_DRY_RUN_OK;
+}
+
+
+/**
+ * Normal (non-dry-run) helper for ngx_http_markdown_dynconf_reload.
+ *
+ * Parses all lines, aborting on first error.  On success, commits
+ * the staging snapshot to active and applies it to the live config.
+ *
+ * @param watcher Dynamic config watcher containing the file path and snapshots.
+ * @param conf   Current module location configuration to update on commit.
+ * @param fd     Open file descriptor for the dynconf file.
+ * @param buf    Read buffer (NGX_HTTP_MARKDOWN_DYNCONF_MAX_LINE bytes).
+ * @param log    Logger for warnings and informational messages.
+ *
+ * @returns NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_APPLIED      if settings were applied
+ * @returns NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_NO_CHANGE    if no effective keys found
+ * @returns NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_INVALID_FILE on parse error
+ * @returns NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_IO_ERROR     on read error
+ */
+static ngx_int_t
+ngx_http_markdown_dynconf_reload_normal(
+    ngx_http_markdown_dynconf_watcher_t *watcher,
+    ngx_http_markdown_conf_t *conf,
+    ngx_fd_t fd,
+    u_char *buf,
+    ngx_log_t *log)
+{
+    ssize_t    n;
+    size_t     line_start;
+    size_t     pos;
+    ngx_uint_t applied;
+    ngx_int_t  line_rc;
+
+    applied = 0;
+    line_start = 0;
+    pos = 0;
+
+    for ( ;; ) {
+        line_rc = ngx_http_markdown_dynconf_read_chunk(
+            fd, buf, &pos, NGX_HTTP_MARKDOWN_DYNCONF_MAX_LINE,
+            &watcher->path, log, &n);
+        if (line_rc != NGX_OK) {
+            ngx_close_file(fd);
+            return line_rc;
+        }
+
+        if (n == 0) {
+            break;
+        }
+
+        if (n == -1) {
+            ngx_log_error(NGX_LOG_WARN, log, 0,
+                          "markdown: read error on \"%V\"",
+                          &watcher->path);
+            ngx_close_file(fd);
+            return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_IO_ERROR;
+        }
+
+        line_rc = ngx_http_markdown_dynconf_process_chunk(
+            watcher, buf, &pos, &line_start, log, &applied);
+        if (line_rc != NGX_OK) {
+            ngx_close_file(fd);
+            return line_rc;
+        }
+    }
+
+    ngx_close_file(fd);
+
+    if (line_start < pos) {
+        line_rc = ngx_http_markdown_dynconf_try_line(
+            &watcher->staging_snapshot, buf + line_start,
+            ngx_http_markdown_dynconf_line_len(buf, line_start, pos),
+            log, &applied);
+
+        if (line_rc != NGX_OK) {
+            ngx_log_error(NGX_LOG_WARN, log, 0,
+                          "markdown: parse error on final line "
+                          "in \"%V\", discarding staging",
+                          &watcher->path);
+            return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_INVALID_FILE;
+        }
+    }
+
+    if (applied > 0) {
+        watcher->last_known_good = watcher->active_snapshot;
+        watcher->lkg_valid = 1;
+
+        watcher->active_snapshot = watcher->staging_snapshot;
+        watcher->version++;
+
+        ngx_http_markdown_dynconf_apply_snapshot(conf,
+                                                  &watcher->active_snapshot);
+
+        ngx_log_error(NGX_LOG_INFO, log, 0,
+                      "markdown: applied %ui settings from \"%V\" "
+                      "(version=%ui, lkg preserved)",
+                      applied, &watcher->path, watcher->version);
+        return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_APPLIED;
+    }
+
+    return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_NO_CHANGE;
 }
 
 
@@ -1705,16 +1947,10 @@ ngx_http_markdown_dynconf_reload(
     ngx_http_markdown_conf_t *conf,
     ngx_log_t *log)
 {
-    u_char       path_buf[NGX_MAX_PATH + 1];
-    ngx_fd_t     fd;
-    u_char       buf[NGX_HTTP_MARKDOWN_DYNCONF_MAX_LINE];
-    ssize_t      n;
-    size_t       line_start;
-    size_t       pos;
-    ngx_uint_t   applied;
-    ngx_int_t    line_rc;
-    ngx_uint_t   dry_run;
-    ngx_uint_t   line_num;
+    u_char     path_buf[NGX_MAX_PATH + 1];
+    ngx_fd_t   fd;
+    u_char     buf[NGX_HTTP_MARKDOWN_DYNCONF_MAX_LINE];
+    ngx_uint_t dry_run;
 
     if (watcher == NULL || conf == NULL || log == NULL) {
         return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_IO_ERROR;
@@ -1737,180 +1973,15 @@ ngx_http_markdown_dynconf_reload(
         return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_IO_ERROR;
     }
 
-    /* Initialize staging snapshot from current active snapshot.
-     * This ensures that keys not present in the dynconf file
-     * retain their current values (incremental override). */
     watcher->staging_snapshot = watcher->active_snapshot;
 
-    /*
-     * In dry-run mode, reset the validation result to collect
-     * errors from this reload attempt.
-     */
     if (dry_run) {
         ngx_memzero(&watcher->last_validation,
                     sizeof(ngx_http_markdown_dynconf_validation_result_t));
+        return ngx_http_markdown_dynconf_reload_dryrun(watcher, fd, buf, log);
     }
 
-    applied = 0;
-    line_start = 0;
-    pos = 0;
-    line_num = 1;
-
-    if (dry_run) {
-        /*
-         * Dry-run path: parse all lines, collecting errors instead
-         * of aborting at the first failure.  This provides operators
-         * with a complete list of issues to fix.
-         */
-        for ( ;; ) {
-            line_rc = ngx_http_markdown_dynconf_read_chunk(
-                fd, buf, &pos, sizeof(buf), &watcher->path, log, &n);
-            if (line_rc != NGX_OK) {
-                ngx_close_file(fd);
-                return line_rc;
-            }
-
-            if (n == 0) {
-                break;
-            }
-
-            if (n == -1) {
-                ngx_log_error(NGX_LOG_WARN, log, 0,
-                              "markdown: read error on \"%V\"",
-                              &watcher->path);
-                ngx_close_file(fd);
-                return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_IO_ERROR;
-            }
-
-            /* Check line length cap before processing. */
-            if (pos >= NGX_HTTP_MARKDOWN_DYNCONF_MAX_LINE) {
-                ngx_http_markdown_dynconf_record_error(
-                    &watcher->last_validation, line_num,
-                    (const u_char *) "(line)", sizeof("(line)") - 1,
-                    (const u_char *) "line too long",
-                    sizeof("line too long") - 1);
-                ngx_close_file(fd);
-                goto dryrun_finish;
-            }
-
-            ngx_http_markdown_dynconf_process_buffer_dryrun(
-                &watcher->staging_snapshot, buf, &pos, &line_start,
-                &line_num, log, &applied, &watcher->last_validation);
-        }
-
-        ngx_close_file(fd);
-
-        /* Process final line if file does not end with newline. */
-        if (line_start < pos) {
-            ngx_http_markdown_dynconf_try_line_dryrun(
-                &watcher->staging_snapshot, buf + line_start,
-                ngx_http_markdown_dynconf_line_len(buf, line_start, pos),
-                line_num, log, &applied, &watcher->last_validation);
-        }
-
-dryrun_finish:
-        if (watcher->last_validation.total_errors > 0) {
-            watcher->last_validation.valid = 0;
-            ngx_http_markdown_dynconf_log_validation_errors(
-                &watcher->last_validation, &watcher->path, log);
-            return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_DRY_RUN_FAIL;
-        }
-
-        /* Dry-run passed: mark validation as successful. */
-        watcher->last_validation.valid = 1;
-
-        if (applied > 0) {
-            ngx_log_error(NGX_LOG_INFO, log, 0,
-                          "markdown: dry-run validation passed "
-                          "for \"%V\" (%ui settings validated, "
-                          "not applied)",
-                          &watcher->path, applied);
-        } else {
-            ngx_log_error(NGX_LOG_INFO, log, 0,
-                          "markdown: dry-run validation passed "
-                          "for \"%V\" (0 effective keys, not applied)",
-                          &watcher->path);
-        }
-
-        return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_DRY_RUN_OK;
-    }
-
-    /*
-     * Normal (non-dry-run) path: abort on first error.
-     */
-    for ( ;; ) {
-        line_rc = ngx_http_markdown_dynconf_read_chunk(
-            fd, buf, &pos, sizeof(buf), &watcher->path, log, &n);
-        if (line_rc != NGX_OK) {
-            ngx_close_file(fd);
-            return line_rc;
-        }
-
-        if (n == 0) {
-            break;
-        }
-
-        if (n == -1) {
-            ngx_log_error(NGX_LOG_WARN, log, 0,
-                          "markdown: read error on \"%V\"",
-                          &watcher->path);
-            ngx_close_file(fd);
-            return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_IO_ERROR;
-        }
-
-        line_rc = ngx_http_markdown_dynconf_process_chunk(
-            watcher, buf, &pos, &line_start, log, &applied);
-        if (line_rc != NGX_OK) {
-            ngx_close_file(fd);
-            return line_rc;
-        }
-    }
-
-    ngx_close_file(fd);
-
-    /*
-     * Process final line if the file does not end with a newline.
-     * When EOF is reached with unprocessed data between line_start
-     * and pos, that data constitutes the final line.
-     */
-    if (line_start < pos) {
-        line_rc = ngx_http_markdown_dynconf_try_line(
-            &watcher->staging_snapshot, buf + line_start,
-            ngx_http_markdown_dynconf_line_len(buf, line_start, pos),
-            log, &applied);
-
-        if (line_rc != NGX_OK) {
-            ngx_log_error(NGX_LOG_WARN, log, 0,
-                          "markdown: parse error on final line "
-                          "in \"%V\", discarding staging",
-                          &watcher->path);
-            return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_INVALID_FILE;
-        }
-    }
-
-    if (applied > 0) {
-        /* All lines parsed successfully: commit staging to active.
-         * Preserve the current active snapshot as last-known-good
-         * before overwriting it with the new configuration.  This
-         * enables rollback to the previous working state (E04). */
-        watcher->last_known_good = watcher->active_snapshot;
-        watcher->lkg_valid = 1;
-
-        watcher->active_snapshot = watcher->staging_snapshot;
-        watcher->version++;
-
-        /* Apply the new active snapshot to the live conf. */
-        ngx_http_markdown_dynconf_apply_snapshot(conf,
-                                                  &watcher->active_snapshot);
-
-        ngx_log_error(NGX_LOG_INFO, log, 0,
-                      "markdown: applied %ui settings from \"%V\" "
-                      "(version=%ui, lkg preserved)",
-                      applied, &watcher->path, watcher->version);
-        return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_APPLIED;
-    }
-
-    return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_NO_CHANGE;
+    return ngx_http_markdown_dynconf_reload_normal(watcher, conf, fd, buf, log);
 }
 
 
