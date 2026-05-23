@@ -41,7 +41,7 @@ echo "--- Check 1: Space-separated non-canonical prefixes ---"
 SPACE_PREFIXES=$(grep -rn '"markdown [a-z]' "$SRCDIR" | grep -v '"markdown:"' || true)
 SPACE_COUNT=$(echo "$SPACE_PREFIXES" | grep -c . || true)
 
-if [ "$SPACE_COUNT" -gt 0 ]; then
+if [[ "$SPACE_COUNT" -gt 0 ]]; then
     echo "FAIL: Found $SPACE_COUNT log sites with space-separated non-canonical prefixes"
     echo ""
     # Group by prefix variant
@@ -67,7 +67,7 @@ UNDERSCORE_PREFIXES=$(grep -rn \
 
 UNDERSCORE_COUNT=$(echo "$UNDERSCORE_PREFIXES" | grep -c . || true)
 
-if [ "$UNDERSCORE_COUNT" -gt 0 ]; then
+if [[ "$UNDERSCORE_COUNT" -gt 0 ]]; then
     echo "FAIL: Found $UNDERSCORE_COUNT log sites with underscore-separated prefixes"
     echo ""
     echo "Breakdown by prefix variant:"
@@ -85,7 +85,7 @@ echo "=== SUMMARY ==="
 echo "Total non-canonical log prefix sites: $TOTAL_NON_CANONICAL"
 echo ""
 
-if [ "$FAIL" -eq 1 ]; then
+if [[ "$FAIL" -eq 1 ]]; then
     echo "RESULT: FAIL — Non-canonical log prefixes detected (bug confirmed)"
     echo ""
     echo "Expected: All log call sites use exactly \"markdown:\" as prefix"

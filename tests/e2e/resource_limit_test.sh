@@ -167,7 +167,7 @@ echo "Step 5: Checking metrics for resource limit events..." >&2
 
 METRICS=$(curl -sf "${NGINX_URL}${METRICS_PATH}" 2>/dev/null) || METRICS=""
 
-if [ -n "$METRICS" ]; then
+if [[ -n "$METRICS" ]]; then
     pass "metrics endpoint accessible"
 
     # Check for budget exceeded metric
@@ -205,7 +205,7 @@ echo "Step 6: Checking diagnostics for resource limit config..." >&2
 
 DIAG=$(curl -sf "${NGINX_URL}${DIAGNOSTICS_PATH}" 2>/dev/null) || DIAG=""
 
-if [ -n "$DIAG" ]; then
+if [[ -n "$DIAG" ]]; then
     pass "diagnostics endpoint accessible"
 
     # Check for resource limit config keys
@@ -226,7 +226,7 @@ echo "" >&2
 echo "=== Resource Limit E2E Results ===" >&2
 echo "Results: $PASS_COUNT passed, $FAIL_COUNT failed" >&2
 
-if [ "$FAIL_COUNT" -gt 0 ]; then
+if [[ "$FAIL_COUNT" -gt 0 ]]; then
     echo "FAIL" >&2
     exit 1
 fi

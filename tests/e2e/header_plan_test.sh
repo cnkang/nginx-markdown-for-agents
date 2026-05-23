@@ -70,7 +70,7 @@ HEADERS=$(curl -sf -D - -o /dev/null \
     -H "Accept: text/markdown" \
     "${NGINX_URL}${TEST_PATH}" 2>/dev/null) || HEADERS=""
 
-if [ -z "$HEADERS" ]; then
+if [[ -z "$HEADERS" ]]; then
     fail "no response from server"
     exit 1
 fi
@@ -79,7 +79,7 @@ pass "received response headers"
 
 # Check for Content-Type
 CT=$(echo "$HEADERS" | grep -i "^content-type:" | tr -d '\r') || true
-if [ -n "$CT" ]; then
+if [[ -n "$CT" ]]; then
     pass "Content-Type header present: $CT"
 else
     fail "no Content-Type header"
@@ -89,7 +89,7 @@ fi
 
 echo "Step 2: Checking Content-Type for markdown..." >&2
 
-if [ -n "$CT" ]; then
+if [[ -n "$CT" ]]; then
     case "$CT" in
         *text/markdown*)
             pass "Content-Type is text/markdown"
@@ -109,7 +109,7 @@ echo "Step 3: Checking Vary: Accept..." >&2
 
 VARY=$(echo "$HEADERS" | grep -i "^vary:" | tr -d '\r') || true
 
-if [ -n "$VARY" ]; then
+if [[ -n "$VARY" ]]; then
     if echo "$VARY" | grep -qi "accept"; then
         pass "Vary: Accept present (correct cache behavior)"
     else
@@ -125,7 +125,7 @@ echo "Step 4: Checking ETag header..." >&2
 
 ETAG=$(echo "$HEADERS" | grep -i "^etag:" | tr -d '\r') || true
 
-if [ -n "$ETAG" ]; then
+if [[ -n "$ETAG" ]]; then
     pass "ETag header present: $ETAG"
 
     # Verify ETag format (should be quoted)
@@ -153,11 +153,11 @@ HEADERS_HTML=$(curl -sf -D - -o /dev/null \
     -H "Accept: text/html" \
     "${NGINX_URL}${TEST_PATH}" 2>/dev/null) || HEADERS_HTML=""
 
-if [ -n "$HEADERS_HTML" ]; then
+if [[ -n "$HEADERS_HTML" ]]; then
     pass "received headers for text/html request"
 
     CT_HTML=$(echo "$HEADERS_HTML" | grep -i "^content-type:" | tr -d '\r') || true
-    if [ -n "$CT_HTML" ]; then
+    if [[ -n "$CT_HTML" ]]; then
         case "$CT_HTML" in
             *text/html*)
                 pass "non-converted Content-Type is text/html"
@@ -182,11 +182,11 @@ HEADERS2=$(curl -sf -D - -o /dev/null \
     -H "Accept: text/markdown" \
     "${NGINX_URL}${TEST_PATH}" 2>/dev/null) || HEADERS2=""
 
-if [ -n "$HEADERS" ] && [ -n "$HEADERS2" ]; then
+if [[ -n "$HEADERS" && -n "$HEADERS2" ]]; then
     ETAG1=$(echo "$HEADERS" | grep -i "^etag:" | tr -d '\r') || true
     ETAG2=$(echo "$HEADERS2" | grep -i "^etag:" | tr -d '\r') || true
 
-    if [ "$ETAG1" = "$ETAG2" ]; then
+    if [[ "$ETAG1" == "$ETAG2" ]]; then
         pass "ETag is consistent across requests"
     else
         pass "ETag differs (content may be dynamic)"
@@ -195,7 +195,7 @@ if [ -n "$HEADERS" ] && [ -n "$HEADERS2" ]; then
     CT1=$(echo "$HEADERS" | grep -i "^content-type:" | tr -d '\r') || true
     CT2=$(echo "$HEADERS2" | grep -i "^content-type:" | tr -d '\r') || true
 
-    if [ "$CT1" = "$CT2" ]; then
+    if [[ "$CT1" == "$CT2" ]]; then
         pass "Content-Type is consistent across requests"
     else
         fail "Content-Type differs across requests ($CT1 vs $CT2)"
@@ -210,7 +210,7 @@ echo "Step 7: Checking custom headers (if configured)..." >&2
 
 X_HEADERS=$(echo "$HEADERS" | grep -i "^x-" | tr -d '\r') || true
 
-if [ -n "$X_HEADERS" ]; then
+if [[ -n "$X_HEADERS" ]]; then
     pass "custom X- headers present:"
     echo "$X_HEADERS" | while IFS= read -r line; do
         pass "  $line"
@@ -225,7 +225,7 @@ echo "" >&2
 echo "=== Header Plan E2E Results ===" >&2
 echo "Results: $PASS_COUNT passed, $FAIL_COUNT failed" >&2
 
-if [ "$FAIL_COUNT" -gt 0 ]; then
+if [[ "$FAIL_COUNT" -gt 0 ]]; then
     echo "FAIL" >&2
     exit 1
 fi

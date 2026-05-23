@@ -32,13 +32,14 @@ CHECK_SCRIPT="$SCRIPT_DIR/check_postinst_safety.sh"
 PASS_COUNT=0
 FAIL_COUNT=0
 TMPDIR_TEST=""
+SEPARATOR='========================================================================'
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 # Colors (if terminal supports them)
-if [ -t 1 ]; then
+if [[ -t 1 ]]; then
     GREEN='\033[0;32m'
     RED='\033[0;31m'
     NC='\033[0m'
@@ -60,14 +61,14 @@ fail() {
     local detail="${2:-}"
     FAIL_COUNT=$((FAIL_COUNT + 1))
     printf "  ${RED}FAIL${NC}: %s\n" "$msg" >&2
-    if [ -n "$detail" ]; then
+    if [[ -n "$detail" ]]; then
         printf "        Detail: %s\n" "$detail" >&2
     fi
     return 0
 }
 
 cleanup() {
-    if [ -n "$TMPDIR_TEST" ] && [ -d "$TMPDIR_TEST" ]; then
+    if [[ -n "$TMPDIR_TEST" && -d "$TMPDIR_TEST" ]]; then
         rm -rf "$TMPDIR_TEST"
     fi
     return 0
@@ -79,7 +80,7 @@ trap cleanup EXIT
 # Pre-flight check
 # ---------------------------------------------------------------------------
 
-if [ ! -f "$CHECK_SCRIPT" ]; then
+if [[ ! -f "$CHECK_SCRIPT" ]]; then
     printf '[ERROR] check_postinst_safety.sh not found at: %s\n' "$CHECK_SCRIPT" >&2
     exit 1
 fi
@@ -235,10 +236,10 @@ FIXTURE
 # Tests
 # ---------------------------------------------------------------------------
 
-printf '========================================================================\n' >&2
+printf '%s\n' "$SEPARATOR" >&2
 printf ' Unit Tests: check_postinst_safety.sh (postinst safety checker)\n' >&2
 printf ' Validates: Requirements 11.4\n' >&2
-printf '========================================================================\n' >&2
+printf '%s\n' "$SEPARATOR" >&2
 printf '\n'
 
 # --- Safe scripts (should exit 0) ---
@@ -247,7 +248,7 @@ printf 'Test group: Safe scripts (expect exit 0)\n'
 
 local_exit=0
 bash "$CHECK_SCRIPT" "$TMPDIR_TEST/safe_postinst.sh" >/dev/null 2>/dev/null || local_exit=$?
-if [ "$local_exit" -eq 0 ]; then
+if [[ "$local_exit" -eq 0 ]]; then
     pass "safe postinst (only heredoc instructions) exits 0"
 else
     fail "safe postinst (only heredoc instructions) exits 0" "expected exit 0, got exit $local_exit"
@@ -255,7 +256,7 @@ fi
 
 local_exit=0
 bash "$CHECK_SCRIPT" "$TMPDIR_TEST/heredoc_safe.sh" >/dev/null 2>/dev/null || local_exit=$?
-if [ "$local_exit" -eq 0 ]; then
+if [[ "$local_exit" -eq 0 ]]; then
     pass "forbidden commands inside heredocs exits 0 (heredoc stripping works)"
 else
     fail "forbidden commands inside heredocs exits 0 (heredoc stripping works)" "expected exit 0, got exit $local_exit"
@@ -269,7 +270,7 @@ printf 'Test group: Unsafe scripts (expect exit 1)\n'
 
 local_exit=0
 bash "$CHECK_SCRIPT" "$TMPDIR_TEST/unsafe_reload.sh" >/dev/null 2>/dev/null || local_exit=$?
-if [ "$local_exit" -eq 1 ]; then
+if [[ "$local_exit" -eq 1 ]]; then
     pass "script with systemctl reload nginx exits 1"
 else
     fail "script with systemctl reload nginx exits 1" "expected exit 1, got exit $local_exit"
@@ -277,7 +278,7 @@ fi
 
 local_exit=0
 bash "$CHECK_SCRIPT" "$TMPDIR_TEST/unsafe_conf_modify.sh" >/dev/null 2>/dev/null || local_exit=$?
-if [ "$local_exit" -eq 1 ]; then
+if [[ "$local_exit" -eq 1 ]]; then
     pass "script with sed -i nginx.conf exits 1"
 else
     fail "script with sed -i nginx.conf exits 1" "expected exit 1, got exit $local_exit"
@@ -285,7 +286,7 @@ fi
 
 local_exit=0
 bash "$CHECK_SCRIPT" "$TMPDIR_TEST/unsafe_nginx_signal.sh" >/dev/null 2>/dev/null || local_exit=$?
-if [ "$local_exit" -eq 1 ]; then
+if [[ "$local_exit" -eq 1 ]]; then
     pass "script with nginx -s reload exits 1"
 else
     fail "script with nginx -s reload exits 1" "expected exit 1, got exit $local_exit"
@@ -293,7 +294,7 @@ fi
 
 local_exit=0
 bash "$CHECK_SCRIPT" "$TMPDIR_TEST/unsafe_etc_nginx.sh" >/dev/null 2>/dev/null || local_exit=$?
-if [ "$local_exit" -eq 1 ]; then
+if [[ "$local_exit" -eq 1 ]]; then
     pass "script writing to /etc/nginx/ exits 1"
 else
     fail "script writing to /etc/nginx/ exits 1" "expected exit 1, got exit $local_exit"
@@ -301,7 +302,7 @@ fi
 
 local_exit=0
 bash "$CHECK_SCRIPT" "$TMPDIR_TEST/unsafe_snippet_enable.sh" >/dev/null 2>/dev/null || local_exit=$?
-if [ "$local_exit" -eq 1 ]; then
+if [[ "$local_exit" -eq 1 ]]; then
     pass "script enabling snippet via symlink exits 1"
 else
     fail "script enabling snippet via symlink exits 1" "expected exit 1, got exit $local_exit"
@@ -315,7 +316,7 @@ printf 'Test group: Usage and help\n'
 
 local_exit=0
 bash "$CHECK_SCRIPT" --help >/dev/null 2>/dev/null || local_exit=$?
-if [ "$local_exit" -eq 0 ]; then
+if [[ "$local_exit" -eq 0 ]]; then
     pass "--help flag exits 0"
 else
     fail "--help flag exits 0" "expected exit 0, got exit $local_exit"
@@ -327,11 +328,11 @@ printf '\n'
 # Summary
 # ---------------------------------------------------------------------------
 
-printf '========================================================================\n'
+printf '%s\n' "$SEPARATOR"
 printf ' Results: %d passed, %d failed\n' "$PASS_COUNT" "$FAIL_COUNT"
-printf '========================================================================\n'
+printf '%s\n' "$SEPARATOR"
 
-if [ "$FAIL_COUNT" -gt 0 ]; then
+if [[ "$FAIL_COUNT" -gt 0 ]]; then
     exit 1
 fi
 

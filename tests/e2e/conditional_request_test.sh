@@ -73,7 +73,7 @@ HEADERS=$(curl -sf -D - -o /dev/null \
     -H "Accept: text/markdown" \
     "${NGINX_URL}${TEST_PATH}" 2>/dev/null) || HEADERS=""
 
-if [ -z "$HEADERS" ]; then
+if [[ -z "$HEADERS" ]]; then
     fail "no response from server"
     echo "Ensure markdown module is enabled with generate_etag on." >&2
     exit 1
@@ -82,13 +82,13 @@ fi
 ETAG=$(echo "$HEADERS" | grep -i "^etag:" | sed 's/^etag: //i' | tr -d '\r')
 LAST_MODIFIED=$(echo "$HEADERS" | grep -i "^last-modified:" | sed 's/^last-modified: //i' | tr -d '\r')
 
-if [ -n "$ETAG" ]; then
+if [[ -n "$ETAG" ]]; then
     pass "ETag header present: $ETAG"
 else
     pass "no ETag header (conditional_requests may be disabled or generate_etag off)"
 fi
 
-if [ -n "$LAST_MODIFIED" ]; then
+if [[ -n "$LAST_MODIFIED" ]]; then
     pass "Last-Modified header present: $LAST_MODIFIED"
 else
     pass "no Last-Modified header"
@@ -96,7 +96,7 @@ fi
 
 # --- Step 2: If-None-Match with current ETag → 304 ---
 
-if [ -n "$ETAG" ]; then
+if [[ -n "$ETAG" ]]; then
     echo "Step 2: Testing If-None-Match with current ETag..." >&2
 
     HTTP_CODE=$(curl -sf -o /dev/null -w "%{http_code}" \
@@ -124,7 +124,7 @@ fi
 
 # --- Step 3: If-Modified-Since with current Last-Modified → 304 ---
 
-if [ -n "$LAST_MODIFIED" ]; then
+if [[ -n "$LAST_MODIFIED" ]]; then
     echo "Step 3: Testing If-Modified-Since with current Last-Modified..." >&2
 
     HTTP_CODE=$(curl -sf -o /dev/null -w "%{http_code}" \
@@ -152,7 +152,7 @@ fi
 
 # --- Step 4: If-None-Match with stale ETag → 200 ---
 
-if [ -n "$ETAG" ]; then
+if [[ -n "$ETAG" ]]; then
     echo "Step 4: Testing If-None-Match with stale ETag..." >&2
 
     STALE_ETAG='"stale-etag-never-matches-12345"'
@@ -208,7 +208,7 @@ esac
 
 # --- Step 6: Multiple If-None-Match values ---
 
-if [ -n "$ETAG" ]; then
+if [[ -n "$ETAG" ]]; then
     echo "Step 6: Testing multiple If-None-Match values..." >&2
 
     HTTP_CODE=$(curl -sf -o /dev/null -w "%{http_code}" \
@@ -258,7 +258,7 @@ fi
 
 # --- Step 7: Verify Vary: Accept on 304 response ---
 
-if [ -n "$ETAG" ]; then
+if [[ -n "$ETAG" ]]; then
     echo "Step 7: Checking Vary header on 304 response..." >&2
 
     RESP_HEADERS=$(curl -sf -D - -o /dev/null \
@@ -268,7 +268,7 @@ if [ -n "$ETAG" ]; then
 
     VARY=$(echo "$RESP_HEADERS" | grep -i "^vary:" | tr -d '\r') || true
 
-    if [ -n "$VARY" ]; then
+    if [[ -n "$VARY" ]]; then
         if echo "$VARY" | grep -qi "accept"; then
             pass "Vary: Accept present on 304 response"
         else
@@ -283,7 +283,7 @@ fi
 
 # --- Step 8: Verify no body on 304 response ---
 
-if [ -n "$ETAG" ]; then
+if [[ -n "$ETAG" ]]; then
     echo "Step 8: Checking no body on 304 response..." >&2
 
     BODY=$(curl -sf \
@@ -291,11 +291,11 @@ if [ -n "$ETAG" ]; then
         -H "If-None-Match: ${ETAG}" \
         "${NGINX_URL}${TEST_PATH}" 2>/dev/null) || BODY=""
 
-    if [ -z "$BODY" ]; then
+    if [[ -z "$BODY" ]]; then
         pass "304 response has empty body"
     else
         BODY_LEN=${#BODY}
-        if [ "$BODY_LEN" -lt 10 ]; then
+        if [[ "$BODY_LEN" -lt 10 ]]; then
             pass "304 response body is minimal (${BODY_LEN} bytes)"
         else
             fail "304 response has body (${BODY_LEN} bytes)"
@@ -311,7 +311,7 @@ echo "" >&2
 echo "=== Conditional Request E2E Results ===" >&2
 echo "Results: $PASS_COUNT passed, $FAIL_COUNT failed" >&2
 
-if [ "$FAIL_COUNT" -gt 0 ]; then
+if [[ "$FAIL_COUNT" -gt 0 ]]; then
     echo "FAIL" >&2
     exit 1
 fi

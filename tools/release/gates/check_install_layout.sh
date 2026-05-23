@@ -78,19 +78,23 @@ usage() {
 }
 
 log_info() {
-    printf '[INFO]  %s\n' "$1" >&2
+    local msg="$1"
+    printf '[INFO]  %s\n' "$msg" >&2
 }
 
 log_pass() {
-    printf '[PASS]  %s\n' "$1" >&2
+    local msg="$1"
+    printf '[PASS]  %s\n' "$msg" >&2
 }
 
 log_fail() {
-    printf '[FAIL]  %s\n' "$1" >&2
+    local msg="$1"
+    printf '[FAIL]  %s\n' "$msg" >&2
 }
 
 log_error() {
-    printf '[ERROR] %s\n' "$1" >&2
+    local msg="$1"
+    printf '[ERROR] %s\n' "$msg" >&2
 }
 
 # ---------------------------------------------------------------------------
@@ -158,7 +162,7 @@ validate_package() {
     local missing_count=0
 
     # Validate file exists
-    if [ ! -f "$pkg_path" ]; then
+    if [[ ! -f "$pkg_path" ]]; then
         log_error "File not found: $pkg_path"
         printf 'FAIL %s (file not found)\n' "$pkg_path"
         FAIL_COUNT=$((FAIL_COUNT + 1))
@@ -209,7 +213,7 @@ validate_package() {
     IFS="$old_ifs"
 
     # Report result
-    if [ "$missing_count" -gt 0 ]; then
+    if [[ "$missing_count" -gt 0 ]]; then
         log_fail "$pkg_basename — $missing_count required path(s) missing"
         printf 'FAIL %s\n' "$pkg_basename"
         FAIL_COUNT=$((FAIL_COUNT + 1))
@@ -228,20 +232,21 @@ validate_package() {
 
 main() {
     # Handle no arguments
-    if [ $# -eq 0 ]; then
+    if [[ $# -eq 0 ]]; then
         log_error "No package files provided"
         usage
         return 2
     fi
 
     # Handle options
-    case "$1" in
+    local first_arg="$1"
+    case "$first_arg" in
         -h|--help)
             usage
             return 0
             ;;
         -*)
-            log_error "Unknown option: $1"
+            log_error "Unknown option: $first_arg"
             usage
             return 2
             ;;
@@ -259,7 +264,7 @@ main() {
     printf '\n' >&2
     log_info "Results: ${PASS_COUNT} passed, ${FAIL_COUNT} failed"
 
-    if [ "$had_failure" -eq 1 ]; then
+    if [[ "$had_failure" -eq 1 ]]; then
         return 1
     fi
 

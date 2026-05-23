@@ -168,7 +168,7 @@ validate_filename() {
 
 main() {
     # Handle no arguments or help flag
-    if [ $# -eq 0 ]; then
+    if [[ $# -eq 0 ]]; then
         log_error "No filenames provided"
         usage
         return 2
@@ -199,7 +199,7 @@ main() {
     printf '\n' >&2
     log_info "Results: ${PASS_COUNT} passed, ${FAIL_COUNT} failed"
 
-    if [ "$had_failure" -eq 1 ]; then
+    if [[ "$had_failure" -eq 1 ]]; then
         return 1
     fi
 

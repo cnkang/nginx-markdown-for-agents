@@ -74,7 +74,7 @@ RESPONSE=$(curl -sf \
     -D - \
     "${NGINX_URL}${TEST_PATH}" 2>/dev/null) || true
 
-if [ -n "$RESPONSE" ]; then
+if [[ -n "$RESPONSE" ]]; then
     pass "received response for chunked request"
 else
     fail "no response for chunked request (endpoint may not exist)"
@@ -131,7 +131,7 @@ echo "Step 4: Checking metrics..." >&2
 
 METRICS=$(curl -sf "${NGINX_URL}${METRICS_PATH}" 2>/dev/null) || METRICS=""
 
-if [ -n "$METRICS" ]; then
+if [[ -n "$METRICS" ]]; then
     pass "metrics endpoint accessible"
 
     # Check for relevant metric families
@@ -159,7 +159,7 @@ CONTENT_LENGTH=$(curl -sf -o /dev/null \
     -H "$ACCEPT_MARKDOWN" \
     "${NGINX_URL}${TEST_PATH}" 2>/dev/null) || CONTENT_LENGTH="0"
 
-if [ "$CONTENT_LENGTH" -gt 0 ] 2>/dev/null; then
+if [[ "$CONTENT_LENGTH" -gt 0 ]] 2>/dev/null; then
     pass "response has content (${CONTENT_LENGTH} bytes)"
 else
     fail "response has no content or endpoint unavailable"
@@ -171,7 +171,7 @@ echo "" >&2
 echo "=== Chunked Replay E2E Results ===" >&2
 echo "Results: $PASS_COUNT passed, $FAIL_COUNT failed" >&2
 
-if [ "$FAIL_COUNT" -gt 0 ]; then
+if [[ "$FAIL_COUNT" -gt 0 ]]; then
     echo "FAIL" >&2
     exit 1
 fi

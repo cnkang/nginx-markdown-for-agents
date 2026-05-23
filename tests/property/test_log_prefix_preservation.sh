@@ -46,7 +46,7 @@ BASELINE_LOG_SITES=278
 echo "--- Property 1: Log call site count remains constant ---"
 CURRENT_LOG_SITES=$(grep -crn 'ngx_log_error\|ngx_log_debug' "$SRCDIR" | awk -F: '{s+=$2}END{print s}')
 
-if [ "$CURRENT_LOG_SITES" -eq "$BASELINE_LOG_SITES" ]; then
+if [[ "$CURRENT_LOG_SITES" -eq "$BASELINE_LOG_SITES" ]]; then
     echo "PASS: Log call site count is $CURRENT_LOG_SITES (baseline: $BASELINE_LOG_SITES)"
 else
     echo "FAIL: Log call site count changed from $BASELINE_LOG_SITES to $CURRENT_LOG_SITES"
@@ -73,7 +73,7 @@ if make coverage-c > /tmp/coverage_c_output.txt 2>&1; then
     echo "PASS: make coverage-c exits 0"
     # Extract and display coverage percentage for reference
     COVERAGE_LINE=$(grep 'lines\.\.\.\.\.\.\.:' /tmp/coverage_c_output.txt || true)
-    if [ -n "$COVERAGE_LINE" ]; then
+    if [[ -n "$COVERAGE_LINE" ]]; then
         echo "  Coverage: $COVERAGE_LINE"
     fi
 else
@@ -89,7 +89,7 @@ echo "--- Property 4: git diff shows only prefix string changes ---"
 # Check if there are any uncommitted changes to analyze
 GIT_DIFF=$(git diff -- "$SRCDIR" 2>/dev/null || true)
 
-if [ -z "$GIT_DIFF" ]; then
+if [[ -z "$GIT_DIFF" ]]; then
     echo "PASS: No uncommitted changes in $SRCDIR (baseline state)"
     echo "  (After fix is applied, re-run to verify only prefix strings changed)"
 else
@@ -104,7 +104,7 @@ else
     NON_PREFIX_CHANGES=$(echo "$CHANGED_LINES" | grep -v '"markdown' | grep -v '^$' || true)
     NON_PREFIX_COUNT=$(echo "$NON_PREFIX_CHANGES" | grep -c . || true)
 
-    if [ "$NON_PREFIX_COUNT" -eq 0 ]; then
+    if [[ "$NON_PREFIX_COUNT" -eq 0 ]]; then
         echo "PASS: All changes are within markdown prefix string literals"
     else
         # Further filter: check if non-prefix lines are just context or whitespace
@@ -113,7 +113,7 @@ else
             grep -i 'NGX_LOG_\|->log\|->connection->log\|cycle->log\|ngx_errno\|NGX_LOG_DEBUG_HTTP' || true)
         VIOLATION_COUNT=$(echo "$REAL_VIOLATIONS" | grep -c . || true)
 
-        if [ "$VIOLATION_COUNT" -gt 0 ]; then
+        if [[ "$VIOLATION_COUNT" -gt 0 ]]; then
             echo "FAIL: Found $VIOLATION_COUNT changes to non-prefix log components"
             echo "  Violations:"
             echo "$REAL_VIOLATIONS" | head -10
@@ -131,7 +131,7 @@ echo "--- Property 5: No new compiler warnings introduced ---"
 COMPILE_OUTPUT=$(make test-nginx-unit 2>&1 || true)
 WARNING_COUNT=$(echo "$COMPILE_OUTPUT" | grep -ci 'warning:' || true)
 
-if [ "$WARNING_COUNT" -eq 0 ]; then
+if [[ "$WARNING_COUNT" -eq 0 ]]; then
     echo "PASS: No compiler warnings detected"
 else
     # Check if these are pre-existing warnings (not new ones from our changes)
@@ -151,7 +151,7 @@ echo "Property 4 (diff analysis):  PASS"
 echo "Property 5 (no new warnings): PASS"
 echo ""
 
-if [ "$FAIL" -eq 1 ]; then
+if [[ "$FAIL" -eq 1 ]]; then
     echo "RESULT: FAIL — One or more preservation properties violated"
     exit 1
 else

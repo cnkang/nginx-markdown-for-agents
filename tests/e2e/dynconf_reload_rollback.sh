@@ -35,13 +35,15 @@ PASS_COUNT=0
 FAIL_COUNT=0
 
 pass() {
+    local msg="$1"
     PASS_COUNT=$((PASS_COUNT + 1))
-    echo "PASS: $1" >&2
+    echo "PASS: $msg" >&2
 }
 
 fail() {
+    local msg="$1"
     FAIL_COUNT=$((FAIL_COUNT + 1))
-    echo "FAIL: $1" >&2
+    echo "FAIL: $msg" >&2
 }
 
 check_prerequisites() {
@@ -69,7 +71,7 @@ check_prerequisites
 # --- Step 1: Verify initial config snapshot ---
 
 DIAG=$(get_diagnostics)
-if [ -n "$DIAG" ]; then
+if [[ -n "$DIAG" ]]; then
     pass "diagnostics endpoint reachable"
 else
     fail "diagnostics endpoint not reachable"
@@ -79,7 +81,7 @@ fi
 
 # Extract applied_mtime from diagnostics (JSON field)
 INITIAL_MTIME=$(echo "$DIAG" | grep -o '"applied_mtime":[0-9]*' | head -1 | cut -d: -f2)
-if [ -n "$INITIAL_MTIME" ]; then
+if [[ -n "$INITIAL_MTIME" ]]; then
     pass "initial applied_mtime present: $INITIAL_MTIME"
 else
     # applied_mtime may not be present if dynconf was never loaded
@@ -102,7 +104,7 @@ echo "Wrote valid dynconf to $DYNCONF_FILE" >&2
 
 # Trigger reload (send SIGHUP to NGINX master)
 NGINX_PID=$(pgrep -f "nginx: master" 2>/dev/null | head -1)
-if [ -n "$NGINX_PID" ]; then
+if [[ -n "$NGINX_PID" ]]; then
     kill -HUP "$NGINX_PID" 2>/dev/null || true
     sleep 1
     pass "sent SIGHUP to NGINX master (pid $NGINX_PID)"
@@ -115,7 +117,7 @@ fi
 
 DIAG=$(get_diagnostics)
 NEW_MTIME=$(echo "$DIAG" | grep -o '"applied_mtime":[0-9]*' | head -1 | cut -d: -f2)
-if [ -n "$NEW_MTIME" ] && [ "$NEW_MTIME" != "$INITIAL_MTIME" ]; then
+if [[ -n "$NEW_MTIME" && "$NEW_MTIME" != "$INITIAL_MTIME" ]]; then
     pass "applied_mtime updated after valid reload: $NEW_MTIME"
 else
     fail "applied_mtime not updated after valid reload (got: ${NEW_MTIME:-empty})"
@@ -132,7 +134,7 @@ DYNCONF_INVALID
 
 echo "Wrote invalid dynconf to $DYNCONF_FILE" >&2
 
-if [ -n "$NGINX_PID" ]; then
+if [[ -n "$NGINX_PID" ]]; then
     kill -HUP "$NGINX_PID" 2>/dev/null || true
     sleep 1
     pass "sent SIGHUP for invalid config reload"
@@ -142,7 +144,7 @@ fi
 
 DIAG=$(get_diagnostics)
 POST_INVALID_MTIME=$(echo "$DIAG" | grep -o '"applied_mtime":[0-9]*' | head -1 | cut -d: -f2)
-if [ -n "$POST_INVALID_MTIME" ] && [ "$POST_INVALID_MTIME" = "$NEW_MTIME" ]; then
+if [[ -n "$POST_INVALID_MTIME" && "$POST_INVALID_MTIME" == "$NEW_MTIME" ]]; then
     pass "applied_mtime unchanged after invalid reload (rollback to LKG)"
 else
     fail "applied_mtime changed after invalid reload (expected: $NEW_MTIME, got: ${POST_INVALID_MTIME:-empty})"
@@ -158,7 +160,7 @@ DYNCONF_ROLLBACK
 
 echo "Wrote rollback dynconf to $DYNCONF_FILE" >&2
 
-if [ -n "$NGINX_PID" ]; then
+if [[ -n "$NGINX_PID" ]]; then
     kill -HUP "$NGINX_PID" 2>/dev/null || true
     sleep 1
     pass "sent SIGHUP for rollback reload"
@@ -168,7 +170,7 @@ fi
 
 DIAG=$(get_diagnostics)
 ROLLBACK_MTIME=$(echo "$DIAG" | grep -o '"applied_mtime":[0-9]*' | head -1 | cut -d: -f2)
-if [ -n "$ROLLBACK_MTIME" ] && [ "$ROLLBACK_MTIME" != "$POST_INVALID_MTIME" ]; then
+if [[ -n "$ROLLBACK_MTIME" && "$ROLLBACK_MTIME" != "$POST_INVALID_MTIME" ]]; then
     pass "applied_mtime updated after rollback reload: $ROLLBACK_MTIME"
 else
     fail "applied_mtime not updated after rollback (got: ${ROLLBACK_MTIME:-empty})"
@@ -184,7 +186,7 @@ echo "" >&2
 echo "=== Dynconf Reload/Rollback E2E Results ===" >&2
 echo "Results: $PASS_COUNT passed, $FAIL_COUNT failed" >&2
 
-if [ "$FAIL_COUNT" -gt 0 ]; then
+if [[ "$FAIL_COUNT" -gt 0 ]]; then
     echo "FAIL" >&2
     exit 1
 fi

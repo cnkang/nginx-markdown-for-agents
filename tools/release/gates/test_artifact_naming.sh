@@ -30,13 +30,14 @@ CHECK_SCRIPT="$SCRIPT_DIR/check_artifact_naming.sh"
 
 PASS_COUNT=0
 FAIL_COUNT=0
+SEPARATOR='========================================================================'
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 # Colors (if terminal supports them)
-if [ -t 1 ]; then
+if [[ -t 1 ]]; then
     GREEN='\033[0;32m'
     RED='\033[0;31m'
     NC='\033[0m'
@@ -58,7 +59,7 @@ fail() {
     local detail="${2:-}"
     FAIL_COUNT=$((FAIL_COUNT + 1))
     printf "  ${RED}FAIL${NC}: %s\n" "$msg" >&2
-    if [ -n "$detail" ]; then
+    if [[ -n "$detail" ]]; then
         printf "        Detail: %s\n" "$detail" >&2
     fi
     return 0
@@ -76,7 +77,7 @@ assert_exit_code() {
     bash "$CHECK_SCRIPT" "$filename" >/dev/null 2>/dev/null
     actual=$?
 
-    if [ "$actual" -eq "$expected" ]; then
+    if [[ "$actual" -eq "$expected" ]]; then
         pass "$test_name (exit $actual)"
     else
         fail "$test_name" "expected exit $expected, got exit $actual"
@@ -88,12 +89,12 @@ assert_exit_code() {
 # Pre-flight check
 # ---------------------------------------------------------------------------
 
-if [ ! -f "$CHECK_SCRIPT" ]; then
+if [[ ! -f "$CHECK_SCRIPT" ]]; then
     printf '[ERROR] check_artifact_naming.sh not found at: %s\n' "$CHECK_SCRIPT" >&2
     exit 1
 fi
 
-if [ ! -x "$CHECK_SCRIPT" ] && ! bash -n "$CHECK_SCRIPT" 2>/dev/null; then
+if [[ ! -x "$CHECK_SCRIPT" ]] && ! bash -n "$CHECK_SCRIPT" 2>/dev/null; then
     printf '[ERROR] check_artifact_naming.sh has syntax errors\n' >&2
     exit 1
 fi
@@ -102,10 +103,10 @@ fi
 # Tests
 # ---------------------------------------------------------------------------
 
-printf '========================================================================\n' >&2
+printf '%s\n' "$SEPARATOR" >&2
 printf ' Unit Tests: check_artifact_naming.sh (artifact naming validator)\n' >&2
 printf ' Validates: Requirements 4.5, 11.4\n' >&2
-printf '========================================================================\n' >&2
+printf '%s\n' "$SEPARATOR" >&2
 printf '\n'
 
 # --- Valid filenames (should exit 0) ---
@@ -207,7 +208,7 @@ assert_exit_code \
 # No arguments → exit 2
 local_exit=0
 bash "$CHECK_SCRIPT" >/dev/null 2>/dev/null || local_exit=$?
-if [ "$local_exit" -eq 2 ]; then
+if [[ "$local_exit" -eq 2 ]]; then
     pass "no arguments exits 2"
 else
     fail "no arguments exits 2" "expected exit 2, got exit $local_exit"
@@ -224,7 +225,7 @@ bash "$CHECK_SCRIPT" \
     "nginx-module-markdown-for-agents_0.7.0_nginx-1.26.3_amd64.deb" \
     "nginx-module-markdown-for-agents-0.7.0-nginx1.26.3-1.x86_64.rpm" \
     >/dev/null 2>/dev/null || local_exit=$?
-if [ "$local_exit" -eq 0 ]; then
+if [[ "$local_exit" -eq 0 ]]; then
     pass "multiple valid filenames exits 0"
 else
     fail "multiple valid filenames exits 0" "expected exit 0, got exit $local_exit"
@@ -235,7 +236,7 @@ bash "$CHECK_SCRIPT" \
     "nginx-module-markdown-for-agents_0.7.0_nginx-1.26.3_amd64.deb" \
     "bad-name.deb" \
     >/dev/null 2>/dev/null || local_exit=$?
-if [ "$local_exit" -eq 1 ]; then
+if [[ "$local_exit" -eq 1 ]]; then
     pass "mixed valid+invalid filenames exits 1"
 else
     fail "mixed valid+invalid filenames exits 1" "expected exit 1, got exit $local_exit"
@@ -247,11 +248,11 @@ printf '\n'
 # Summary
 # ---------------------------------------------------------------------------
 
-printf '========================================================================\n'
+printf '%s\n' "$SEPARATOR"
 printf ' Results: %d passed, %d failed\n' "$PASS_COUNT" "$FAIL_COUNT"
-printf '========================================================================\n'
+printf '%s\n' "$SEPARATOR"
 
-if [ "$FAIL_COUNT" -gt 0 ]; then
+if [[ "$FAIL_COUNT" -gt 0 ]]; then
     exit 1
 fi
 
