@@ -40,13 +40,13 @@ ngx_http_markdown_diagnostics_collect_metrics(
     }
 
     out->conversions_total =
-        (ngx_atomic_uint_t) ngx_http_markdown_metrics->conversions_succeeded;
+        ngx_http_markdown_metrics->conversions_succeeded;
     out->delivery_total =
-        (ngx_atomic_uint_t) ngx_http_markdown_metrics->results.delivery_count;
+        ngx_http_markdown_metrics->results.delivery_count;
     out->requests_total =
-        (ngx_atomic_uint_t) ngx_http_markdown_metrics->requests_entered;
+        ngx_http_markdown_metrics->requests_entered;
     out->failopen_total =
-        (ngx_atomic_uint_t) ngx_http_markdown_metrics->results.failopen_count;
+        ngx_http_markdown_metrics->results.failopen_count;
 }
 
 
