@@ -130,7 +130,7 @@ CONTENT_TYPE=$(curl -sf -o /dev/null -w "%{content_type}" \
     -H "Accept: text/markdown;q=0.9, text/html;q=1.0" \
     "${NGINX_URL}${TEST_PATH}" 2>/dev/null) || CONTENT_TYPE=""
 
-if [ -n "$CONTENT_TYPE" ]; then
+if [[ -n "$CONTENT_TYPE" ]]; then
     case "$CONTENT_TYPE" in
         text/html*)
             pass "content-type is text/html (no conversion)"
@@ -189,7 +189,7 @@ CONTENT_TYPE=$(curl -sf -o /dev/null -w "%{content_type}" \
     -H "Accept: text/markdown;q=0" \
     "${NGINX_URL}${TEST_PATH}" 2>/dev/null) || CONTENT_TYPE=""
 
-if [ -n "$CONTENT_TYPE" ]; then
+if [[ -n "$CONTENT_TYPE" ]]; then
     case "$CONTENT_TYPE" in
         text/markdown*)
             fail "q=0 still converted to markdown (should skip)"
@@ -251,7 +251,7 @@ ETAG=$(curl -sf -D - -o /dev/null \
     "${NGINX_URL}${TEST_PATH}" 2>/dev/null | \
     grep -i "^etag:" | tr -d '\r') || true
 
-if [ -n "$ETAG" ]; then
+if [[ -n "$ETAG" ]]; then
     pass "ETag header present: $ETAG"
 else
     pass "no ETag header (generate_etag may be off)"
@@ -283,7 +283,7 @@ echo "Step 10: Checking metrics for negotiation decisions..." >&2
 
 METRICS=$(curl -sf "${NGINX_URL}${METRICS_PATH}" 2>/dev/null) || METRICS=""
 
-if [ -n "$METRICS" ]; then
+if [[ -n "$METRICS" ]]; then
     pass "metrics endpoint accessible"
 
     if echo "$METRICS" | grep -q "nginx_markdown_skip_total"; then
