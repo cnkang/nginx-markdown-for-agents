@@ -190,9 +190,9 @@ ngx_http_markdown_handle_unsupported_compression(
     const ngx_http_markdown_conf_t *conf)
 {
     ctx->eligible = 0;
-    ctx->last_error_category =
+    ctx->error.last_category =
         NGX_HTTP_MARKDOWN_ERROR_CONVERSION;
-    ctx->has_error_category = 1;
+    ctx->error.has_category = 1;
 
     NGX_HTTP_MARKDOWN_METRIC_INC(conversions_attempted);
     NGX_HTTP_MARKDOWN_METRIC_INC(conversions_failed);
@@ -310,14 +310,14 @@ ngx_http_markdown_init_ctx(ngx_http_request_t *r,
         r->headers_out.last_modified_time;
     ctx->last_modified.has_last_modified_time =
         (r->headers_out.last_modified_time != (time_t) -1);
-    ctx->conversion_attempted = 0;
-    ctx->conversion_succeeded = 0;
-    ctx->bypass_counted = 0;
+    ctx->conversion.attempted = 0;
+    ctx->conversion.succeeded = 0;
+    ctx->conversion.bypass_counted = 0;
     ctx->processing_path =
         NGX_HTTP_MARKDOWN_PATH_FULLBUFFER;
-    ctx->last_error_category =
+    ctx->error.last_category =
         NGX_HTTP_MARKDOWN_ERROR_SYSTEM;
-    ctx->has_error_category = 0;
+    ctx->error.has_category = 0;
 
     /*
      * Initialize decompression state.
@@ -620,7 +620,7 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
      * 
      * Requirements: 1.1, 1.6, 4.2, 8.1, 10.3, 11.1, 11.5
      */
-    if (conf->auto_decompress) {
+    if (conf->decompress.auto_decompress) {
         ctx->decompression.type = ngx_http_markdown_detect_compression(r);
         
         if (ctx->decompression.type == NGX_HTTP_MARKDOWN_COMPRESSION_UNKNOWN) {
@@ -1019,15 +1019,15 @@ ngx_http_markdown_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
      * re-invoking the body filter (typically with in == NULL)
      * after the downstream filter becomes writable again.
      */
-    if (ctx->fullbuffer_pending_has_data) {
-        rc = ngx_http_next_body_filter(r, ctx->fullbuffer_pending_output);
+    if (ctx->fullbuffer.pending_has_data) {
+        rc = ngx_http_next_body_filter(r, ctx->fullbuffer.pending_output);
         if (rc == NGX_AGAIN) {
             /* Still backpressured, keep pending chain */
             return NGX_AGAIN;
         }
         /* Downstream consumed the pending output */
-        ctx->fullbuffer_pending_output = NULL;
-        ctx->fullbuffer_pending_has_data = 0;
+        ctx->fullbuffer.pending_output = NULL;
+        ctx->fullbuffer.pending_has_data = 0;
         r->buffered &= ~NGX_HTTP_MARKDOWN_BUFFERED;
 
         if (rc != NGX_OK && rc != NGX_DONE) {
@@ -1049,7 +1049,7 @@ ngx_http_markdown_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
     /* If not eligible for conversion, pass through */
     if (!ctx->eligible) {
         r->buffered &= ~NGX_HTTP_MARKDOWN_BUFFERED;
-        if (!ctx->bypass_counted && !ctx->has_error_category) {
+        if (!ctx->conversion.bypass_counted && !ctx->error.has_category) {
             /*
              * Track bypassed request once even if the body
              * arrives in chunks.  Do not count requests that
@@ -1057,7 +1057,7 @@ ngx_http_markdown_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
              * — those are accounted for by conversions_failed.
              */
             NGX_HTTP_MARKDOWN_METRIC_INC(conversions_bypassed);
-            ctx->bypass_counted = 1;
+            ctx->conversion.bypass_counted = 1;
         }
         if (ngx_http_markdown_forward_headers(r, ctx) != NGX_OK) {
             return NGX_ERROR;
@@ -1076,8 +1076,8 @@ ngx_http_markdown_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
 #endif
 
     /* If conversion already completed, do not pass original input through. */
-    if (ctx->conversion_attempted) {
-        if (!ctx->fullbuffer_pending_has_data) {
+    if (ctx->conversion.attempted) {
+        if (!ctx->fullbuffer.pending_has_data) {
             r->buffered &= ~NGX_HTTP_MARKDOWN_BUFFERED;
         }
         return NGX_OK;
@@ -1097,7 +1097,7 @@ ngx_http_markdown_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
      * preceded by a conversions_attempted increment.  This keeps
      * the two counters consistent (attempted >= failed).
      */
-    ctx->conversion_attempted = 1;
+    ctx->conversion.attempted = 1;
     NGX_HTTP_MARKDOWN_METRIC_INC(conversions_attempted);
 
     rc = ngx_http_markdown_body_filter_decompress_if_needed(r, ctx, conf);
