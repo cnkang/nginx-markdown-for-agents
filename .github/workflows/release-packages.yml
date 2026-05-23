@@ -414,12 +414,16 @@ jobs:
         shell: bash
 
       - name: GPG sign SHA256SUMS
-        if: ${{ secrets.GPG_PRIVATE_KEY != '' }}
         env:
           GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
           GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+          GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}
         run: |
-          ./packaging/scripts/gpg-sign-checksums.sh artifacts/SHA256SUMS "${{ secrets.GPG_KEY_ID }}"
+          if [ -z "${GPG_PRIVATE_KEY}" ]; then
+            echo "GPG signing skipped: GPG_PRIVATE_KEY secret not configured"
+            exit 0
+          fi
+          ./packaging/scripts/gpg-sign-checksums.sh artifacts/SHA256SUMS "${GPG_KEY_ID}"
         shell: bash
 
       - name: Upload SHA256SUMS
@@ -431,7 +435,7 @@ jobs:
           retention-days: 5
 
       - name: Upload SHA256SUMS.asc
-        if: ${{ secrets.GPG_PRIVATE_KEY != '' }}
+        continue-on-error: true
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: checksums-signature
