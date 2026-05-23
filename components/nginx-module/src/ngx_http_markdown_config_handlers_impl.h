@@ -698,7 +698,7 @@ ngx_http_markdown_metrics_format(ngx_conf_t *cf,
     static u_char              auto_str[] = "auto";
     static u_char              prom_str[] = "prometheus";
     ngx_http_markdown_conf_t  *mcf = conf;
-    const ngx_str_t         *value;
+    const ngx_str_t          *value;
 
     value = cf->args->elts;
 

@@ -46,6 +46,10 @@ static ngx_flag_t  ngx_http_markdown_g_diag_initialized = 0;
 /*
  * Forward declarations for static helper functions.
  */
+static ngx_int_t ngx_http_markdown_diagnostics_check_cidr(
+    const struct sockaddr *sa, const ngx_array_t *allow_list);
+static ngx_int_t ngx_http_markdown_diagnostics_check_loopback(
+    const struct sockaddr *sa);
 static ngx_int_t ngx_http_markdown_diagnostics_check_access(
     ngx_http_request_t *r);
 static ngx_int_t ngx_http_markdown_diagnostics_build_json(
@@ -302,105 +306,83 @@ ngx_http_markdown_diagnostics_get_state(void)
  *   NGX_HTTP_FORBIDDEN - access denied
  */
 static ngx_int_t
-ngx_http_markdown_diagnostics_check_access(ngx_http_request_t *r)
+ngx_http_markdown_diagnostics_check_cidr(const struct sockaddr *sa,
+    const ngx_array_t *allow_list)
 {
-    struct sockaddr              *sa;
-    ngx_http_markdown_conf_t    *conf;
-    ngx_array_t                 *allow_list;
-    const struct sockaddr_in    *sin;
+    const ngx_cidr_t           *cidrs;
+    const struct sockaddr_in   *sin;
 #if (NGX_HAVE_INET6)
-    const struct sockaddr_in6   *sin6;
+    const struct sockaddr_in6  *sin6;
+#endif
+
+    cidrs = allow_list->elts;
+
+    for (ngx_uint_t i = 0; i < allow_list->nelts; i++) {
+
+        switch (sa->sa_family) {
+
+        case AF_INET:
+            if (cidrs[i].family != AF_INET) {
+                continue;
+            }
+
+            sin = (const struct sockaddr_in *) sa;
+            if ((sin->sin_addr.s_addr & cidrs[i].u.in.mask)
+                == cidrs[i].u.in.addr)
+            {
+                return NGX_OK;
+            }
+            break;
+
+#if (NGX_HAVE_INET6)
+        case AF_INET6:
+            if (cidrs[i].family != AF_INET6) {
+                continue;
+            }
+
+            sin6 = (const struct sockaddr_in6 *) sa;
+            {
+                ngx_uint_t  match;
+
+                match = 1;
+                for (ngx_uint_t j = 0; j < 16; j++) {
+                    if ((sin6->sin6_addr.s6_addr[j]
+                         & cidrs[i].u.in6.mask.s6_addr[j])
+                        != cidrs[i].u.in6.addr.s6_addr[j])
+                    {
+                        match = 0;
+                        break;
+                    }
+                }
+
+                if (match) {
+                    return NGX_OK;
+                }
+            }
+            break;
+#endif
+
+        default:
+            break;
+        }
+    }
+
+    return NGX_DECLINED;
+}
+
+
+static ngx_int_t
+ngx_http_markdown_diagnostics_check_loopback(const struct sockaddr *sa)
+{
+    const struct sockaddr_in   *sin;
+#if (NGX_HAVE_INET6)
+    const struct sockaddr_in6  *sin6;
     static const uint8_t  ipv6_loopback[16] = {
         0, 0, 0, 0, 0, 0, 0, 0,
         0, 0, 0, 0, 0, 0, 0, 1
     };
 #endif
 
-    sa = r->connection->sockaddr;
-
-    if (sa == NULL) {
-        ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-            "markdown: no client address, "
-            "denying access");
-        return NGX_HTTP_FORBIDDEN;
-    }
-
-    /* Retrieve the location configuration for the allow list. */
-    conf = ngx_http_get_module_loc_conf(r,
-        ngx_http_markdown_filter_module);
-
-    allow_list = (conf != NULL) ? conf->ops.diagnostics_allow : NULL;
-
-    /*
-     * If a CIDR allow list is configured, check the client IP
-     * against it.  Only matching addresses are permitted.
-     */
-    if (allow_list != NULL && allow_list->nelts > 0) {
-        ngx_cidr_t  *cidrs;
-        ngx_uint_t   i;
-
-        cidrs = allow_list->elts;
-
-        for (i = 0; i < allow_list->nelts; i++) {
-
-            switch (sa->sa_family) {
-
-            case AF_INET:
-                if (cidrs[i].family != AF_INET) {
-                    continue;
-                }
-
-                sin = (const struct sockaddr_in *) sa;
-                if ((sin->sin_addr.s_addr & cidrs[i].u.in.mask)
-                    == cidrs[i].u.in.addr)
-                {
-                    return NGX_OK;
-                }
-                break;
-
-#if (NGX_HAVE_INET6)
-            case AF_INET6:
-                if (cidrs[i].family != AF_INET6) {
-                    continue;
-                }
-
-                sin6 = (const struct sockaddr_in6 *) sa;
-                {
-                    ngx_uint_t  j;
-                    ngx_uint_t  match;
-
-                    match = 1;
-                    for (j = 0; j < 16; j++) {
-                        if ((sin6->sin6_addr.s6_addr[j]
-                             & cidrs[i].u.in6.mask.s6_addr[j])
-                            != cidrs[i].u.in6.addr.s6_addr[j])
-                        {
-                            match = 0;
-                            break;
-                        }
-                    }
-
-                    if (match) {
-                        return NGX_OK;
-                    }
-                }
-                break;
-#endif
-
-            default:
-                break;
-            }
-        }
-
-        ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-            "markdown: client address not in "
-            "diagnostics_allow list, denying access");
-        return NGX_HTTP_FORBIDDEN;
-    }
-
-    /*
-     * No allow list configured: fall back to loopback-only.
-     */
     switch (sa->sa_family) {
 
     case AF_INET:
@@ -427,6 +409,56 @@ ngx_http_markdown_diagnostics_check_access(ngx_http_request_t *r)
 
     default:
         break;
+    }
+
+    return NGX_DECLINED;
+}
+
+
+static ngx_int_t
+ngx_http_markdown_diagnostics_check_access(ngx_http_request_t *r)
+{
+    const struct sockaddr        *sa;
+    ngx_http_markdown_conf_t    *conf;
+    ngx_array_t                 *allow_list;
+
+    sa = r->connection->sockaddr;
+
+    if (sa == NULL) {
+        ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
+            "markdown: no client address, "
+            "denying access");
+        return NGX_HTTP_FORBIDDEN;
+    }
+
+    /* Retrieve the location configuration for the allow list. */
+    conf = ngx_http_get_module_loc_conf(r,
+        ngx_http_markdown_filter_module);
+
+    allow_list = (conf != NULL) ? conf->ops.diagnostics_allow : NULL;
+
+    /*
+     * If a CIDR allow list is configured, check the client IP
+     * against it.  Only matching addresses are permitted.
+     */
+    if (allow_list != NULL && allow_list->nelts > 0) {
+        if (ngx_http_markdown_diagnostics_check_cidr(sa, allow_list)
+            == NGX_OK)
+        {
+            return NGX_OK;
+        }
+
+        ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
+            "markdown: client address not in "
+            "diagnostics_allow list, denying access");
+        return NGX_HTTP_FORBIDDEN;
+    }
+
+    /*
+     * No allow list configured: fall back to loopback-only.
+     */
+    if (ngx_http_markdown_diagnostics_check_loopback(sa) == NGX_OK) {
+        return NGX_OK;
     }
 
     ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
@@ -500,11 +532,11 @@ ngx_http_markdown_diagnostics_build_json(ngx_http_request_t *r,
         rc = ngx_http_markdown_dynconf_snapshot_to_json(r->pool, conf,
                                                          &snap_buf,
                                                          &snap_len);
-        if (rc == NGX_OK && snap_buf != NULL && snap_len > 0) {
-            if (p + snap_len < last) {
-                ngx_memcpy(p, snap_buf, snap_len);
-                p += snap_len;
-            }
+        if (rc == NGX_OK && snap_buf != NULL && snap_len > 0
+            && p + snap_len < last)
+        {
+            ngx_memcpy(p, snap_buf, snap_len);
+            p += snap_len;
         }
     }
 
@@ -518,7 +550,6 @@ ngx_http_markdown_diagnostics_build_json(ngx_http_request_t *r,
     if (state != NULL && state->ring.entries != NULL
         && state->ring.count > 0)
     {
-        ngx_uint_t                          i;
         ngx_uint_t                          idx;
         ngx_uint_t                          count;
         ngx_http_markdown_diag_decision_t  *entry;
@@ -530,7 +561,7 @@ ngx_http_markdown_diagnostics_build_json(ngx_http_request_t *r,
          * The newest entry is at (head - 1) mod capacity.
          * Walk backward through 'count' entries, wrapping around.
          */
-        for (i = 0; i < count; i++) {
+        for (ngx_uint_t i = 0; i < count; i++) {
             if (state->ring.head >= (i + 1)) {
                 idx = state->ring.head - (i + 1);
             } else {
