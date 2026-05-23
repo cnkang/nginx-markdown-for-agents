@@ -72,19 +72,25 @@ usage() {
 }
 
 log_info() {
-    printf '[INFO]  %s\n' "$1" >&2
+    local msg="$1"
+    printf '[INFO]  %s\n' "$msg" >&2
 }
 
 log_warn() {
-    printf '[WARN]  %s\n' "$1" >&2
+    local msg="$1"
+    printf '[WARN]  %s\n' "$msg" >&2
 }
 
 log_error() {
-    printf '[ERROR] %s\n' "$1" >&2
+    local msg="$1"
+    printf '[ERROR] %s\n' "$msg" >&2
 }
 
 log_violation() {
-    printf '[VIOLATION] %s:%s: %s\n' "$1" "$2" "$3" >&2
+    local file="$1"
+    local line="$2"
+    local desc="$3"
+    printf '[VIOLATION] %s:%s: %s\n' "$file" "$line" "$desc" >&2
 }
 
 # ---------------------------------------------------------------------------
@@ -103,12 +109,12 @@ strip_heredocs() {
     local heredoc_delim=""
     local line=""
 
-    while IFS= read -r line || [ -n "$line" ]; do
-        if [ "$in_heredoc" -eq 1 ]; then
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        if [[ "$in_heredoc" -eq 1 ]]; then
             # Check if this line ends the heredoc
             local trimmed
             trimmed="$(printf '%s' "$line" | sed 's/^[[:space:]]*//')"
-            if [ "$trimmed" = "$heredoc_delim" ]; then
+            if [[ "$trimmed" == "$heredoc_delim" ]]; then
                 in_heredoc=0
                 heredoc_delim=""
             fi
@@ -118,7 +124,7 @@ strip_heredocs() {
             # Detect heredoc start: <<'DELIM', <<"DELIM", <<DELIM, <<-'DELIM' etc.
             local delim_match
             delim_match="$(printf '%s' "$line" | sed -n "s/.*<<-*[[:space:]]*['\"]\\{0,1\\}\([A-Za-z_][A-Za-z_0-9]*\)['\"]\\{0,1\\}.*/\1/p")"
-            if [ -n "$delim_match" ]; then
+            if [[ -n "$delim_match" ]]; then
                 in_heredoc=1
                 heredoc_delim="$delim_match"
                 # Output the heredoc start line itself (it's a command, not content)
@@ -150,7 +156,7 @@ check_pattern() {
     # Use grep -nE on stripped content; suppress exit code since no-match is expected
     matches="$(grep -nE "$pattern" "$stripped_file" 2>/dev/null)" || true
 
-    if [ -n "$matches" ]; then
+    if [[ -n "$matches" ]]; then
         # Report each matching line
         printf '%s\n' "$matches" | while IFS= read -r match_line; do
             line_num="$(printf '%s\n' "$match_line" | cut -d: -f1)"
@@ -172,7 +178,7 @@ check_pattern() {
 check_file() {
     local file="$1"
 
-    if [ ! -f "$file" ]; then
+    if [[ ! -f "$file" ]]; then
         log_error "File not found: $file"
         return 2
     fi
@@ -302,13 +308,14 @@ extract_rpm_post() {
 
 main() {
     # Handle help flag
-    case "${1:-}" in
+    local first_arg="${1:-}"
+    case "$first_arg" in
         -h|--help)
             usage
             return 0
             ;;
         -*)
-            log_error "Unknown option: $1"
+            log_error "Unknown option: $first_arg"
             usage
             return 2
             ;;
@@ -319,21 +326,21 @@ main() {
     local files_to_check=""
     local had_error=0
 
-    if [ $# -eq 0 ]; then
+    if [[ $# -eq 0 ]]; then
         # Default: check known postinst locations
         log_info "No files specified; using defaults"
 
-        if [ -f "packaging/debian/postinst" ]; then
+        if [[ -f "packaging/debian/postinst" ]]; then
             files_to_check="packaging/debian/postinst"
         else
             log_warn "Default file not found: packaging/debian/postinst"
         fi
 
-        if [ -f "packaging/rpm/SPECS/nginx-module-markdown.spec" ]; then
+        if [[ -f "packaging/rpm/SPECS/nginx-module-markdown.spec" ]]; then
             # Extract %post section to a temp file for analysis
             local rpm_post_tmp
             rpm_post_tmp="$(extract_rpm_post "packaging/rpm/SPECS/nginx-module-markdown.spec")"
-            if [ -s "$rpm_post_tmp" ]; then
+            if [[ -s "$rpm_post_tmp" ]]; then
                 log_info "Extracted %%post section from RPM spec"
                 check_file "$rpm_post_tmp" || had_error=1
                 rm -f "$rpm_post_tmp"
@@ -346,7 +353,7 @@ main() {
         fi
 
         # Check the DEB postinst if found
-        if [ -n "$files_to_check" ]; then
+        if [[ -n "$files_to_check" ]]; then
             check_file "$files_to_check" || had_error=1
         fi
     else
@@ -361,11 +368,11 @@ main() {
     log_info "Files checked: ${FILE_COUNT}"
     log_info "Violations found: ${VIOLATION_COUNT}"
 
-    if [ "$had_error" -ne 0 ]; then
+    if [[ "$had_error" -ne 0 ]]; then
         return 2
     fi
 
-    if [ "$VIOLATION_COUNT" -gt 0 ]; then
+    if [[ "$VIOLATION_COUNT" -gt 0 ]]; then
         log_error "Safety check FAILED — postinst contains forbidden operations"
         return 1
     fi

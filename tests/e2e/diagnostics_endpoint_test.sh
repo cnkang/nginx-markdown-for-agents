@@ -119,7 +119,7 @@ echo "Step 3: Checking JSON structure..." >&2
 
 BODY=$(curl -sf "${NGINX_URL}${DIAGNOSTICS_PATH}" 2>/dev/null) || BODY=""
 
-if [ -z "$BODY" ]; then
+if [[ -z "$BODY" ]]; then
     fail "empty response body"
 else
     pass "non-empty response body received"
@@ -157,7 +157,7 @@ fi
 
 echo "Step 4: Checking config keys..." >&2
 
-if [ -n "$BODY" ]; then
+if [[ -n "$BODY" ]]; then
     for key in "markdown_enabled" "max_size" "decompression_budget" \
                "parse_timeout" "diagnostics_enabled"; do
         if echo "$BODY" | grep -q "\"$key\""; then
@@ -172,7 +172,7 @@ fi
 
 echo "Step 5: Checking metrics keys..." >&2
 
-if [ -n "$BODY" ]; then
+if [[ -n "$BODY" ]]; then
     for key in "conversions_total" "delivery_total" "requests_total" \
                "failopen_total"; do
         if echo "$BODY" | grep -q "\"$key\""; then
@@ -187,11 +187,11 @@ fi
 
 echo "Step 6: Basic JSON validity check..." >&2
 
-if [ -n "$BODY" ]; then
+if [[ -n "$BODY" ]]; then
     OPEN_BRACES=$(echo "$BODY" | tr -cd '{' | wc -c | tr -d ' ')
     CLOSE_BRACES=$(echo "$BODY" | tr -cd '}' | wc -c | tr -d ' ')
 
-    if [ "$OPEN_BRACES" = "$CLOSE_BRACES" ] && [ "$OPEN_BRACES" -gt 0 ]; then
+    if [[ "$OPEN_BRACES" == "$CLOSE_BRACES" && "$OPEN_BRACES" -gt 0 ]]; then
         pass "balanced braces ($OPEN_BRACES pairs)"
     else
         fail "unbalanced braces (open=$OPEN_BRACES, close=$CLOSE_BRACES)"
@@ -200,7 +200,7 @@ if [ -n "$BODY" ]; then
     OPEN_BRACKETS=$(echo "$BODY" | tr -cd '[' | wc -c | tr -d ' ')
     CLOSE_BRACKETS=$(echo "$BODY" | tr -cd ']' | wc -c | tr -d ' ')
 
-    if [ "$OPEN_BRACKETS" = "$CLOSE_BRACKETS" ]; then
+    if [[ "$OPEN_BRACKETS" == "$CLOSE_BRACKETS" ]]; then
         pass "balanced brackets ($OPEN_BRACKETS pairs)"
     else
         fail "unbalanced brackets (open=$OPEN_BRACKETS, close=$CLOSE_BRACKETS)"
@@ -241,7 +241,7 @@ echo "" >&2
 echo "=== Diagnostics Endpoint E2E Results ===" >&2
 echo "Results: $PASS_COUNT passed, $FAIL_COUNT failed" >&2
 
-if [ "$FAIL_COUNT" -gt 0 ]; then
+if [[ "$FAIL_COUNT" -gt 0 ]]; then
     echo "FAIL" >&2
     exit 1
 fi

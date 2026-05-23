@@ -30,13 +30,14 @@ CHECK_SCRIPT="$SCRIPT_DIR/check_install_layout.sh"
 
 PASS_COUNT=0
 FAIL_COUNT=0
+SEPARATOR='========================================================================'
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 # Colors (if terminal supports them)
-if [ -t 1 ]; then
+if [[ -t 1 ]]; then
     GREEN='\033[0;32m'
     RED='\033[0;31m'
     NC='\033[0m'
@@ -58,7 +59,7 @@ fail() {
     local detail="${2:-}"
     FAIL_COUNT=$((FAIL_COUNT + 1))
     printf "  ${RED}FAIL${NC}: %s\n" "$msg" >&2
-    if [ -n "$detail" ]; then
+    if [[ -n "$detail" ]]; then
         printf "        Detail: %s\n" "$detail" >&2
     fi
     return 0
@@ -68,7 +69,7 @@ fail() {
 # Pre-flight check
 # ---------------------------------------------------------------------------
 
-if [ ! -f "$CHECK_SCRIPT" ]; then
+if [[ ! -f "$CHECK_SCRIPT" ]]; then
     printf '[ERROR] check_install_layout.sh not found at: %s\n' "$CHECK_SCRIPT" >&2
     exit 1
 fi
@@ -77,10 +78,10 @@ fi
 # Tests
 # ---------------------------------------------------------------------------
 
-printf '========================================================================\n' >&2
+printf '%s\n' "$SEPARATOR" >&2
 printf ' Unit Tests: check_install_layout.sh (install layout validator)\n' >&2
 printf ' Validates: Requirements 11.4\n' >&2
-printf '========================================================================\n' >&2
+printf '%s\n' "$SEPARATOR" >&2
 printf '\n'
 
 # --- Test 1: Script has valid bash syntax ---
@@ -101,7 +102,7 @@ printf 'Test group: Usage and help\n'
 
 local_exit=0
 bash "$CHECK_SCRIPT" --help >/dev/null 2>/dev/null || local_exit=$?
-if [ "$local_exit" -eq 0 ]; then
+if [[ "$local_exit" -eq 0 ]]; then
     pass "--help flag exits 0"
 else
     fail "--help flag exits 0" "expected exit 0, got exit $local_exit"
@@ -111,7 +112,7 @@ fi
 
 local_exit=0
 bash "$CHECK_SCRIPT" >/dev/null 2>/dev/null || local_exit=$?
-if [ "$local_exit" -eq 2 ]; then
+if [[ "$local_exit" -eq 2 ]]; then
     pass "no arguments exits 2"
 else
     fail "no arguments exits 2" "expected exit 2, got exit $local_exit"
@@ -125,7 +126,7 @@ printf 'Test group: Invalid inputs\n'
 
 local_exit=0
 bash "$CHECK_SCRIPT" "/tmp/nonexistent-pkg-xyz123.deb" >/dev/null 2>/dev/null || local_exit=$?
-if [ "$local_exit" -eq 1 ]; then
+if [[ "$local_exit" -eq 1 ]]; then
     pass "non-existent .deb file exits 1"
 else
     fail "non-existent .deb file exits 1" "expected exit 1, got exit $local_exit"
@@ -136,9 +137,10 @@ fi
 # Create a temporary file with unsupported extension
 TMPFILE=""
 cleanup() {
-    if [ -n "$TMPFILE" ] && [ -f "$TMPFILE" ]; then
+    if [[ -n "$TMPFILE" && -f "$TMPFILE" ]]; then
         rm -f "$TMPFILE"
     fi
+    return 0
 }
 trap cleanup EXIT
 
@@ -146,7 +148,7 @@ TMPFILE="$(mktemp /tmp/test_layout_XXXXXX.tar.gz)"
 
 local_exit=0
 bash "$CHECK_SCRIPT" "$TMPFILE" >/dev/null 2>/dev/null || local_exit=$?
-if [ "$local_exit" -eq 1 ]; then
+if [[ "$local_exit" -eq 1 ]]; then
     pass "unsupported file type (.tar.gz) exits 1"
 else
     fail "unsupported file type (.tar.gz) exits 1" "expected exit 1, got exit $local_exit"
@@ -158,11 +160,11 @@ printf '\n'
 # Summary
 # ---------------------------------------------------------------------------
 
-printf '========================================================================\n'
+printf '%s\n' "$SEPARATOR"
 printf ' Results: %d passed, %d failed\n' "$PASS_COUNT" "$FAIL_COUNT"
-printf '========================================================================\n'
+printf '%s\n' "$SEPARATOR"
 
-if [ "$FAIL_COUNT" -gt 0 ]; then
+if [[ "$FAIL_COUNT" -gt 0 ]]; then
     exit 1
 fi
 
