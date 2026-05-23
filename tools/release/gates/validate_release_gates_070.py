@@ -26,6 +26,8 @@ DECOMPRESSION_C = PROJECT_ROOT / "components" / "nginx-module" / "src" / "ngx_ht
 FILTER_MODULE_H = PROJECT_ROOT / "components" / "nginx-module" / "src" / "ngx_http_markdown_filter_module.h"
 
 GATE_FUTURE = {"Gate 3", "Gate 4"}
+RELEASE_GATES_070_DOC_GATE = "release-gates:070-doc"
+CARGO_VERSION_070_GATE = "cargo:version-070"
 
 
 class ValidationResult:
@@ -50,15 +52,48 @@ def read(path: Path) -> str:
     return path.read_text(encoding="utf-8") if path.is_file() else ""
 
 
+def _record_blocking_item(
+    result: ValidationResult,
+    gate: str,
+    item: str,
+    ok: bool,
+    report: str | None,
+) -> None:
+    gate_item = f"{gate}:{item}"
+    if report is not None:
+        if ok and item in report:
+            result.pass_(gate_item, "evidence trace found in validation matrix")
+        elif ok:
+            result.fail(gate_item, "implementation exists but evidence trace missing in matrix")
+        else:
+            result.fail(gate_item, "blocking item validation failed")
+        return
+
+    if ok:
+        result.pass_(gate_item, "check passed")
+    else:
+        result.fail(gate_item, "check failed")
+
+
+def _record_blocking_items(
+    result: ValidationResult,
+    blocking_items: dict[str, list[tuple[str, bool]]],
+    report: str | None,
+) -> None:
+    for gate, checks in blocking_items.items():
+        for item, ok in checks:
+            _record_blocking_item(result, gate, item, ok, report)
+
+
 def check_structure(result: ValidationResult) -> None:
     gates = read(RELEASE_GATES_MD)
     if not gates:
-        result.fail("release-gates:070-doc", "missing release gate doc")
+        result.fail(RELEASE_GATES_070_DOC_GATE, "missing release gate doc")
         return
     if "Gate 1" in gates and "Gate 2" in gates and "Gate 3" in gates and "Gate 4" in gates and "Gate 5" in gates:
-        result.pass_("release-gates:070-doc", "gate doc includes Gate 1..5")
+        result.pass_(RELEASE_GATES_070_DOC_GATE, "gate doc includes Gate 1..5")
     else:
-        result.fail("release-gates:070-doc", "gate definitions incomplete")
+        result.fail(RELEASE_GATES_070_DOC_GATE, "gate definitions incomplete")
 
     if FFI_CONTRACT_PATH.is_file():
         result.pass_("ffi-contract:exists", "FFI migration contract exists")
@@ -69,15 +104,15 @@ def check_structure(result: ValidationResult) -> None:
         try:
             version = tomllib.loads(cargo_txt).get("package", {}).get("version", "")
         except tomllib.TOMLDecodeError as exc:
-            result.fail("cargo:version-070", f"Cargo.toml parse error: {exc}")
+            result.fail(CARGO_VERSION_070_GATE, f"Cargo.toml parse error: {exc}")
         else:
             if version == "0.7.0":
-                result.pass_("cargo:version-070", "Cargo version is 0.7.0")
+                result.pass_(CARGO_VERSION_070_GATE, "Cargo version is 0.7.0")
             else:
-                result.fail("cargo:version-070", f"version is {version}")
+                result.fail(CARGO_VERSION_070_GATE, f"version is {version}")
 
     else:
-        result.fail("cargo:version-070", "Cargo.toml missing")
+        result.fail(CARGO_VERSION_070_GATE, "Cargo.toml missing")
 
 
 def check_blocking_items(result: ValidationResult, mode: str) -> None:
@@ -124,23 +159,8 @@ def check_blocking_items(result: ValidationResult, mode: str) -> None:
         ],
     }
 
-    if mode == "evidence":
-        report = read(PROJECT_ROOT / "docs" / "project" / "0.7.0-validation-matrix.md")
-        for gate, checks in blocking_items.items():
-            for item, ok in checks:
-                if ok and item in report:
-                    result.pass_(f"{gate}:{item}", "evidence trace found in validation matrix")
-                elif ok:
-                    result.fail(f"{gate}:{item}", "implementation exists but evidence trace missing in matrix")
-                else:
-                    result.fail(f"{gate}:{item}", "blocking item validation failed")
-    else:
-        for gate, checks in blocking_items.items():
-            for item, ok in checks:
-                if ok:
-                    result.pass_(f"{gate}:{item}", "check passed")
-                else:
-                    result.fail(f"{gate}:{item}", "check failed")
+    report = read(VALIDATION_MATRIX_MD) if mode == "evidence" else None
+    _record_blocking_items(result, blocking_items, report)
 
     for gate in sorted(GATE_FUTURE):
         result.skip(f"{gate}:scope", "future/feasibility gate; non-blocking in 0.7.0")
