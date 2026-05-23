@@ -45,6 +45,8 @@ set -e
 SCRIPT_NAME="$(basename "$0")"
 PASS_COUNT=0
 FAIL_COUNT=0
+FMT_PASS='PASS %s\n'
+FMT_FAIL='FAIL %s\n'
 
 # ---------------------------------------------------------------------------
 # Patterns (POSIX ERE compatible, macOS bash 3.2 safe via grep -E)
@@ -88,19 +90,23 @@ usage() {
 }
 
 log_info() {
-    printf '[INFO]  %s\n' "$1" >&2
+    local msg="$1"
+    printf '[INFO]  %s\n' "$msg" >&2
 }
 
 log_pass() {
-    printf '[PASS]  %s\n' "$1" >&2
+    local msg="$1"
+    printf '[PASS]  %s\n' "$msg" >&2
 }
 
 log_fail() {
-    printf '[FAIL]  %s\n' "$1" >&2
+    local msg="$1"
+    printf '[FAIL]  %s\n' "$msg" >&2
 }
 
 log_error() {
-    printf '[ERROR] %s\n' "$1" >&2
+    local msg="$1"
+    printf '[ERROR] %s\n' "$msg" >&2
 }
 
 # ---------------------------------------------------------------------------
@@ -122,13 +128,13 @@ validate_filename() {
         *.deb)
             if printf '%s\n' "$basename_only" | grep -qE "$DEB_PATTERN"; then
                 log_pass "$basename_only"
-                printf 'PASS %s\n' "$basename_only"
+                printf "$FMT_PASS" "$basename_only"
                 PASS_COUNT=$((PASS_COUNT + 1))
                 return 0
             else
                 log_fail "$basename_only — does not match DEB pattern"
                 log_info "  Expected: nginx-module-markdown-for-agents_{version}_nginx-{nginx_version}_{amd64|arm64}.deb"
-                printf 'FAIL %s\n' "$basename_only"
+                printf "$FMT_FAIL" "$basename_only"
                 FAIL_COUNT=$((FAIL_COUNT + 1))
                 return 1
             fi
@@ -136,20 +142,20 @@ validate_filename() {
         *.rpm)
             if printf '%s\n' "$basename_only" | grep -qE "$RPM_PATTERN"; then
                 log_pass "$basename_only"
-                printf 'PASS %s\n' "$basename_only"
+                printf "$FMT_PASS" "$basename_only"
                 PASS_COUNT=$((PASS_COUNT + 1))
                 return 0
             else
                 log_fail "$basename_only — does not match RPM pattern"
                 log_info "  Expected: nginx-module-markdown-for-agents-{version}-nginx{nginx_version}-1.{x86_64|aarch64}.rpm"
-                printf 'FAIL %s\n' "$basename_only"
+                printf "$FMT_FAIL" "$basename_only"
                 FAIL_COUNT=$((FAIL_COUNT + 1))
                 return 1
             fi
             ;;
         *)
             log_fail "$basename_only — unrecognized package extension (expected .deb or .rpm)"
-            printf 'FAIL %s\n' "$basename_only"
+            printf "$FMT_FAIL" "$basename_only"
             FAIL_COUNT=$((FAIL_COUNT + 1))
             return 1
             ;;
@@ -168,13 +174,14 @@ main() {
         return 2
     fi
 
-    case "$1" in
+    local first_arg="$1"
+    case "$first_arg" in
         -h|--help)
             usage
             return 0
             ;;
         -*)
-            log_error "Unknown option: $1"
+            log_error "Unknown option: $first_arg"
             usage
             return 2
             ;;

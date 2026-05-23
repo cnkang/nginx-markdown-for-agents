@@ -41,13 +41,15 @@ PASS_COUNT=0
 FAIL_COUNT=0
 
 pass() {
+    local msg="$1"
     PASS_COUNT=$((PASS_COUNT + 1))
-    echo "PASS: $1" >&2
+    echo "PASS: $msg" >&2
 }
 
 fail() {
+    local msg="$1"
     FAIL_COUNT=$((FAIL_COUNT + 1))
-    echo "FAIL: $1" >&2
+    echo "FAIL: $msg" >&2
 }
 
 check_prerequisites() {
