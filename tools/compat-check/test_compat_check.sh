@@ -23,6 +23,9 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 HELPER_SCRIPT="$SCRIPT_DIR/nginx-markdown-compat-check.sh"
+X86_64_ARCH="x86_64"
+EXIT_CODE_DESC="exit code"
+STATUS_DESC="status"
 
 # Test counters
 TESTS_RUN=0
@@ -41,7 +44,7 @@ setup_mock_dir() {
 }
 
 cleanup_mock_dir() {
-    if [ -n "$MOCK_DIR" ] && [ -d "$MOCK_DIR" ]; then
+    if [[ -n "$MOCK_DIR" && -d "$MOCK_DIR" ]]; then
         rm -rf "$MOCK_DIR"
     fi
     MOCK_DIR=""
@@ -134,7 +137,7 @@ assert_exit_code() {
     local expected="$1"
     local desc="$2"
 
-    if [ "$HELPER_EXIT" -ne "$expected" ]; then
+    if [[ "$HELPER_EXIT" -ne "$expected" ]]; then
         printf '  FAIL: %s — expected exit code %d, got %d\n' "$desc" "$expected" "$HELPER_EXIT" >&2
         return 1
     fi
@@ -185,7 +188,7 @@ run_test() {
 
     cleanup_mock_dir
 
-    if [ "$result" -eq 0 ]; then
+    if [[ "$result" -eq 0 ]]; then
         TESTS_PASSED=$((TESTS_PASSED + 1))
         printf 'PASS\n' >&2
     else
@@ -208,15 +211,15 @@ TLS SNI support enabled
 configure arguments: --prefix=/etc/nginx --with-compat --with-http_ssl_module"
 
     create_mock_nginx "$version_line" "$config_output"
-    create_mock_uname "x86_64"
+    create_mock_uname "$X86_64_ARCH"
 
     run_helper
 
     local failed=0
-    assert_exit_code 0 "exit code" || failed=1
-    assert_stdout_contains "STATUS=supported" "status" || failed=1
+    assert_exit_code 0 "$EXIT_CODE_DESC" || failed=1
+    assert_stdout_contains "STATUS=supported" "$STATUS_DESC" || failed=1
     assert_stdout_contains "NGINX_VERSION=1.26.3" "version" || failed=1
-    assert_stdout_contains "ARCH=x86_64" "arch" || failed=1
+    assert_stdout_contains "ARCH=$X86_64_ARCH" "arch" || failed=1
     assert_stdout_contains "WITH_COMPAT=yes" "with-compat" || failed=1
     assert_stdout_contains "NGINX_SOURCE=nginx.org" "source" || failed=1
     assert_stdout_contains "EXPECTED_PACKAGE=nginx-module-markdown-for-agents_0.7.0_nginx-1.26.3_amd64.deb" "package name" || failed=1
@@ -232,13 +235,13 @@ built by gcc 12.2.0 (Debian 12.2.0-14)
 configure arguments: --prefix=/etc/nginx --with-compat --with-http_ssl_module"
 
     create_mock_nginx "$version_line" "$config_output"
-    create_mock_uname "x86_64"
+    create_mock_uname "$X86_64_ARCH"
 
     run_helper
 
     local failed=0
-    assert_exit_code 1 "exit code" || failed=1
-    assert_stdout_contains "STATUS=unsupported" "status" || failed=1
+    assert_exit_code 1 "$EXIT_CODE_DESC" || failed=1
+    assert_stdout_contains "STATUS=unsupported" "$STATUS_DESC" || failed=1
     assert_stdout_contains "NGINX_VERSION=1.25.0" "version" || failed=1
     assert_stderr_contains "UNSUPPORTED" "stderr guidance" || failed=1
 
@@ -248,7 +251,7 @@ configure arguments: --prefix=/etc/nginx --with-compat --with-http_ssl_module"
 # Test 3: nginx not found → error message, exit 2
 test_nginx_not_found() {
     # Do not create a mock nginx binary — leave MOCK_DIR empty
-    create_mock_uname "x86_64"
+    create_mock_uname "$X86_64_ARCH"
 
     # Remove any nginx from the mock PATH by ensuring MOCK_DIR has no nginx
     # and we override PATH to only include MOCK_DIR + minimal system paths
@@ -279,9 +282,9 @@ test_nginx_not_found() {
     export PATH
 
     local failed=0
-    assert_exit_code 2 "exit code" || failed=1
+    assert_exit_code 2 "$EXIT_CODE_DESC" || failed=1
     assert_stderr_contains "nginx not found" "error message" || failed=1
-    assert_stdout_contains "STATUS=unknown" "status" || failed=1
+    assert_stdout_contains "STATUS=unknown" "$STATUS_DESC" || failed=1
 
     return $failed
 }
@@ -295,13 +298,13 @@ built with OpenSSL 3.0.10 1 Aug 2023
 configure arguments: --prefix=/usr/share/nginx --with-cc-opt=-g -O2 -fstack-protector-strong --with-compat"
 
     create_mock_nginx "$version_line" "$config_output"
-    create_mock_uname "x86_64"
+    create_mock_uname "$X86_64_ARCH"
 
     run_helper
 
     local failed=0
-    assert_exit_code 1 "exit code" || failed=1
-    assert_stdout_contains "STATUS=unsupported" "status" || failed=1
+    assert_exit_code 1 "$EXIT_CODE_DESC" || failed=1
+    assert_stdout_contains "STATUS=unsupported" "$STATUS_DESC" || failed=1
     assert_stdout_contains "NGINX_SOURCE=distro" "source" || failed=1
     assert_stderr_contains "distribution package" "guidance" || failed=1
     assert_stderr_contains "build from source" "build guidance" || failed=1
@@ -322,8 +325,8 @@ configure arguments: --prefix=/etc/nginx --with-compat --with-http_ssl_module"
     run_helper
 
     local failed=0
-    assert_exit_code 0 "exit code" || failed=1
-    assert_stdout_contains "STATUS=supported" "status" || failed=1
+    assert_exit_code 0 "$EXIT_CODE_DESC" || failed=1
+    assert_stdout_contains "STATUS=supported" "$STATUS_DESC" || failed=1
     assert_stdout_contains "ARCH=aarch64" "arch" || failed=1
     assert_stdout_contains "EXPECTED_PACKAGE=nginx-module-markdown-for-agents_0.7.0_nginx-1.26.3_arm64.deb" "package name" || failed=1
 
@@ -348,7 +351,7 @@ main() {
     printf '=== Results: %d/%d passed, %d failed ===\n' \
         "$TESTS_PASSED" "$TESTS_RUN" "$TESTS_FAILED" >&2
 
-    if [ "$TESTS_FAILED" -gt 0 ]; then
+    if [[ "$TESTS_FAILED" -gt 0 ]]; then
         return 1
     fi
     return 0

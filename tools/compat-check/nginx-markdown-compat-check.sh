@@ -57,6 +57,7 @@ SUPPORTED_NGINX_VERSIONS="1.26.3"
 
 # Supported architectures
 SUPPORTED_ARCHS="x86_64 aarch64"
+OPENRESTY_SOURCE="openresty"
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -81,15 +82,21 @@ usage() {
 }
 
 log_info() {
-    printf '[INFO]  %s\n' "$1" >&2
+    local message="$1"
+
+    printf '[INFO]  %s\n' "$message" >&2
 }
 
 log_warn() {
-    printf '[WARN]  %s\n' "$1" >&2
+    local message="$1"
+
+    printf '[WARN]  %s\n' "$message" >&2
 }
 
 log_error() {
-    printf '[ERROR] %s\n' "$1" >&2
+    local message="$1"
+
+    printf '[ERROR] %s\n' "$message" >&2
 }
 
 # ---------------------------------------------------------------------------
@@ -103,7 +110,7 @@ log_error() {
 detect_nginx_binary() {
     local explicit_path="$1"
 
-    if [ -n "$explicit_path" ]; then
+    if [[ -n "$explicit_path" ]]; then
         # Validate the explicit path (Rule 12: no unsanitized interpolation)
         case "$explicit_path" in
             *[!a-zA-Z0-9_./-]*)
@@ -113,14 +120,14 @@ detect_nginx_binary() {
             *)
                 ;;
         esac
-        if [ ! -x "$explicit_path" ]; then
+        if [[ ! -x "$explicit_path" ]]; then
             log_error "nginx binary not found or not executable: $explicit_path"
             return 1
         fi
         NGINX_BIN="$explicit_path"
     else
         NGINX_BIN="$(command -v nginx 2>/dev/null || true)"
-        if [ -z "$NGINX_BIN" ]; then
+        if [[ -z "$NGINX_BIN" ]]; then
             log_error "nginx not found in PATH"
             return 1
         fi
@@ -135,7 +142,7 @@ detect_nginx_version() {
     local version_output
     version_output="$("$NGINX_BIN" -v 2>&1 || true)"
 
-    if [ -z "$version_output" ]; then
+    if [[ -z "$version_output" ]]; then
         log_error "Failed to execute nginx -v"
         return 1
     fi
@@ -145,7 +152,7 @@ detect_nginx_version() {
         sed -n 's/.*nginx\/\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p' | \
         head -1)"
 
-    if [ -z "$NGINX_VERSION" ]; then
+    if [[ -z "$NGINX_VERSION" ]]; then
         log_warn "Could not parse NGINX version from: $version_output"
         return 1
     fi
@@ -191,13 +198,13 @@ detect_nginx_source() {
     config_output="$("$NGINX_BIN" -V 2>&1 || true)"
 
     # Check for OpenResty
-    if printf '%s\n' "$version_output" | grep -qi 'openresty'; then
-        NGINX_SOURCE="openresty"
+    if printf '%s\n' "$version_output" | grep -qi "$OPENRESTY_SOURCE"; then
+        NGINX_SOURCE="$OPENRESTY_SOURCE"
         log_info "NGINX source: OpenResty"
         return 0
     fi
     if printf '%s\n' "$config_output" | grep -q -- '--with-luajit'; then
-        NGINX_SOURCE="openresty"
+        NGINX_SOURCE="$OPENRESTY_SOURCE"
         log_info "NGINX source: OpenResty (detected via --with-luajit)"
         return 0
     fi
@@ -242,7 +249,9 @@ detect_nginx_source() {
 # Arguments: $1 = uname -m output
 # Prints: DEB arch name or empty string
 arch_to_deb() {
-    case "$1" in
+    local arch="$1"
+
+    case "$arch" in
         x86_64)
             printf 'amd64'
             ;;
@@ -264,7 +273,7 @@ is_version_supported() {
     local supported
 
     for supported in $SUPPORTED_NGINX_VERSIONS; do
-        if [ "$version" = "$supported" ]; then
+        if [[ "$version" = "$supported" ]]; then
             return 0
         fi
     done
@@ -279,7 +288,7 @@ is_arch_supported() {
     local supported
 
     for supported in $SUPPORTED_ARCHS; do
-        if [ "$arch" = "$supported" ]; then
+        if [[ "$arch" = "$supported" ]]; then
             return 0
         fi
     done
@@ -293,15 +302,15 @@ evaluate_compatibility() {
     local deb_arch
 
     # If source is not nginx.org, unsupported
-    if [ "$NGINX_SOURCE" != "nginx.org" ]; then
+    if [[ "$NGINX_SOURCE" != "nginx.org" ]]; then
         STATUS="unsupported"
         log_info "Status: UNSUPPORTED — prebuilt packages are only for nginx.org builds"
-        if [ "$NGINX_SOURCE" = "distro" ]; then
+        if [[ "$NGINX_SOURCE" = "distro" ]]; then
             log_info "  Your NGINX appears to be from a Linux distribution package."
             log_info "  Please build from source or install nginx.org packages."
-        elif [ "$NGINX_SOURCE" = "openresty" ]; then
+        elif [[ "$NGINX_SOURCE" = "$OPENRESTY_SOURCE" ]]; then
             log_info "  OpenResty is not supported. Please build from source."
-        elif [ "$NGINX_SOURCE" = "tengine" ]; then
+        elif [[ "$NGINX_SOURCE" = "tengine" ]]; then
             log_info "  Tengine is not supported. Please build from source."
         else
             log_info "  Could not determine NGINX origin. Please verify your installation."
@@ -343,7 +352,7 @@ emit_results() {
     printf 'ARCH=%s\n' "$ARCH"
     printf 'WITH_COMPAT=%s\n' "$WITH_COMPAT"
     printf 'NGINX_SOURCE=%s\n' "$NGINX_SOURCE"
-    if [ -n "$EXPECTED_PACKAGE" ]; then
+    if [[ -n "$EXPECTED_PACKAGE" ]]; then
         printf 'EXPECTED_PACKAGE=%s\n' "$EXPECTED_PACKAGE"
     fi
     return 0
@@ -355,16 +364,18 @@ emit_results() {
 
 main() {
     local nginx_path=""
+    local current_arg
 
     # Parse arguments
-    while [ $# -gt 0 ]; do
-        case "$1" in
+    while [[ $# -gt 0 ]]; do
+        current_arg="$1"
+        case "$current_arg" in
             -h|--help)
                 usage
                 return 0
                 ;;
             --nginx)
-                if [ $# -lt 2 ]; then
+                if [[ $# -lt 2 ]]; then
                     log_error "--nginx requires a path argument"
                     usage
                     return 2
@@ -373,12 +384,12 @@ main() {
                 shift 2
                 ;;
             -*)
-                log_error "Unknown option: $1"
+                log_error "Unknown option: $current_arg"
                 usage
                 return 2
                 ;;
             *)
-                log_error "Unexpected argument: $1"
+                log_error "Unexpected argument: $current_arg"
                 usage
                 return 2
                 ;;

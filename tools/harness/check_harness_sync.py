@@ -34,6 +34,9 @@ RISK_PACKS_README = f"risk-packs/{README_FILENAME}"
 FUZZ_README_REL = f"fuzz/{README_FILENAME}"
 COMPONENT_FUZZ_README_REL = f"components/rust-converter/fuzz/{README_FILENAME}"
 GITHUB_WORKFLOWS_DIR = REPO_ROOT / ".github" / "workflows"
+CFLITE_PR_WORKFLOW = "cflite_pr.yml"
+CFLITE_BATCH_WORKFLOW = "cflite_batch.yml"
+CFLITE_CRON_WORKFLOW = "cflite_cron.yml"
 MANIFEST_PATH = REPO_ROOT / "docs" / "harness" / "routing-manifest.json"
 E2E_HARNESS_DIR = REPO_ROOT / "tools" / "e2e-harness"
 E2E_HARNESS_CARGO = E2E_HARNESS_DIR / "Cargo.toml"
@@ -556,8 +559,8 @@ def check_batch_prune_pairing() -> CheckResult:
         CheckResult with PASS if pairing is satisfied or batch is absent,
         or FAIL if batch exists without a corresponding prune workflow.
     """
-    batch_path = GITHUB_WORKFLOWS_DIR / "cflite_batch.yml"
-    prune_path = GITHUB_WORKFLOWS_DIR / "cflite_cron.yml"
+    batch_path = GITHUB_WORKFLOWS_DIR / CFLITE_BATCH_WORKFLOW
+    prune_path = GITHUB_WORKFLOWS_DIR / CFLITE_CRON_WORKFLOW
 
     if not batch_path.exists():
         return _result(
@@ -585,7 +588,7 @@ def check_cfl_workflows() -> CheckResult:
     """Verify ClusterFuzzLite CI workflow files exist and are correctly configured.
 
     Checks:
-    - cflite_pr.yml, cflite_batch.yml, cflite_cron.yml all exist
+    - ClusterFuzzLite PR, batch, and cron workflows all exist
     - PR workflow uses address sanitizer
     - PR workflow has path filters under pull_request trigger
     - Batch workflow has corpus storage-repo configuration
@@ -594,9 +597,9 @@ def check_cfl_workflows() -> CheckResult:
         CheckResult with PASS if all checks pass, or FAIL listing issues.
     """
     required_workflows = [
-        str((GITHUB_WORKFLOWS_DIR / "cflite_pr.yml").relative_to(REPO_ROOT)),
-        str((GITHUB_WORKFLOWS_DIR / "cflite_batch.yml").relative_to(REPO_ROOT)),
-        str((GITHUB_WORKFLOWS_DIR / "cflite_cron.yml").relative_to(REPO_ROOT)),
+        str((GITHUB_WORKFLOWS_DIR / CFLITE_PR_WORKFLOW).relative_to(REPO_ROOT)),
+        str((GITHUB_WORKFLOWS_DIR / CFLITE_BATCH_WORKFLOW).relative_to(REPO_ROOT)),
+        str((GITHUB_WORKFLOWS_DIR / CFLITE_CRON_WORKFLOW).relative_to(REPO_ROOT)),
     ]
 
     missing: list[str] = []
@@ -613,13 +616,13 @@ def check_cfl_workflows() -> CheckResult:
     issues: list[str] = []
 
     # Verify PR workflow uses address sanitizer
-    pr_workflow = GITHUB_WORKFLOWS_DIR / "cflite_pr.yml"
+    pr_workflow = GITHUB_WORKFLOWS_DIR / CFLITE_PR_WORKFLOW
     pr_missing = _required_patterns(
         pr_workflow,
         {"sanitizer: address": r"sanitizer:\s*address"},
     )
     if pr_missing:
-        issues.append("cflite_pr.yml missing address sanitizer configuration")
+        issues.append(f"{CFLITE_PR_WORKFLOW} missing address sanitizer configuration")
 
     # Verify PR workflow has path filters under pull_request trigger
     pr_path_missing = _required_patterns(
@@ -627,16 +630,16 @@ def check_cfl_workflows() -> CheckResult:
         {"pull_request paths filter": r"pull_request:\s*\n\s+paths:"},
     )
     if pr_path_missing:
-        issues.append("cflite_pr.yml missing path filter for pull_request trigger")
+        issues.append(f"{CFLITE_PR_WORKFLOW} missing path filter for pull_request trigger")
 
     # Verify batch workflow has corpus storage-repo configuration
-    batch_workflow = GITHUB_WORKFLOWS_DIR / "cflite_batch.yml"
+    batch_workflow = GITHUB_WORKFLOWS_DIR / CFLITE_BATCH_WORKFLOW
     batch_missing = _required_patterns(
         batch_workflow,
         {"storage-repo": r"storage-repo:"},
     )
     if batch_missing:
-        issues.append("cflite_batch.yml missing storage-repo configuration")
+        issues.append(f"{CFLITE_BATCH_WORKFLOW} missing storage-repo configuration")
 
     if issues:
         return _result("cfl-workflows", FAIL, "; ".join(issues))

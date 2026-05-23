@@ -30,6 +30,20 @@
 #define NGX_HTTP_MARKDOWN_PLAN_MAX_ENTRIES  64
 
 
+static ngx_int_t
+ngx_http_markdown_plan_name_eq(const u_char *left, const u_char *right,
+    size_t len)
+{
+    for (size_t i = 0; i < len; i++) {
+        if (ngx_tolower(left[i]) != ngx_tolower(right[i])) {
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
+
 /*
  * Saved state for a single header modification (for rollback).
  *
@@ -74,22 +88,21 @@ ngx_http_markdown_plan_find_header(ngx_http_request_t *r,
 {
     ngx_list_part_t  *part;
     ngx_table_elt_t  *headers;
-    ngx_uint_t        i;
 
     part = &r->headers_out.headers.part;
 
     while (part != NULL) {
         headers = part->elts;
 
-        for (i = 0; i < part->nelts; i++) {
+        for (ngx_uint_t i = 0; i < part->nelts; i++) {
             if (headers[i].hash == 0) {
                 continue;
             }
 
             if (headers[i].key.len == name_len
-                && ngx_strncasecmp(headers[i].key.data,
-                                   (u_char *) name,
-                                   name_len) == 0)
+                && ngx_http_markdown_plan_name_eq(headers[i].key.data,
+                                                  name,
+                                                  name_len))
             {
                 return &headers[i];
             }
@@ -379,7 +392,6 @@ ngx_http_markdown_apply_header_plan(ngx_http_request_t *r,
 {
     ngx_http_markdown_plan_undo_t  *undo;
     const FFIHeaderEntry           *entry;
-    uintptr_t                       i;
     ngx_int_t                       rc;
 
     /* NULL plan or empty plan is a no-op. */
@@ -431,7 +443,7 @@ ngx_http_markdown_apply_header_plan(ngx_http_request_t *r,
     }
 
     /* Apply each entry, recording undo state. */
-    for (i = 0; i < plan->count; i++) {
+    for (uintptr_t i = 0; i < plan->count; i++) {
         entry = &plan->entries[i];
 
         switch (entry->op_type) {
