@@ -1247,7 +1247,7 @@ ngx_http_markdown_streaming_fallback_to_fullbuffer(
      * short-circuits to ngx_http_next_body_filter,
      * forwarding unconverted HTML.
      */
-    ctx->conversion_attempted = 0;
+    ctx->conversion.attempted = 0;
 
     /* Correct path hit metrics */
     if (ngx_http_markdown_metrics != NULL
@@ -2311,7 +2311,7 @@ ngx_http_markdown_streaming_init_handle(
             ngx_http_markdown_streaming_decomp_create(
                 r->pool,
                 ctx->decompression.type,
-                conf->decompress_max_size);
+                conf->decompress.max_size);
         if (ctx->streaming.decompressor == NULL) {
             ngx_log_error(NGX_LOG_ERR,
                 r->connection->log, 0,
@@ -2398,7 +2398,7 @@ ngx_http_markdown_streaming_init_handle(
 
     ctx->streaming.failopen_replay_initialized = 1;
 
-    ctx->conversion_attempted = 1;
+    ctx->conversion.attempted = 1;
     NGX_HTTP_MARKDOWN_METRIC_INC(
         conversions_attempted);
     NGX_HTTP_MARKDOWN_METRIC_INC(

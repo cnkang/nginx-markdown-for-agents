@@ -65,7 +65,7 @@ static ngx_conf_enum_t
  */
 static char *
 ngx_http_markdown_diagnostics_allow(ngx_conf_t *cf,
-    ngx_command_t *cmd, void *conf)
+    const ngx_command_t *cmd, void *conf)
 {
     ngx_http_markdown_conf_t  *mcf = conf;
     ngx_str_t                 *value;
@@ -1041,7 +1041,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
         NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
         ngx_conf_set_msec_slot,
         NGX_HTTP_LOC_CONF_OFFSET,
-        offsetof(ngx_http_markdown_conf_t, parse_timeout),
+        offsetof(ngx_http_markdown_conf_t, decompress.parse_timeout),
         NULL
     },
 
@@ -1063,7 +1063,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
         NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
         ngx_conf_set_size_slot,
         NGX_HTTP_LOC_CONF_OFFSET,
-        offsetof(ngx_http_markdown_conf_t, parser_budget),
+        offsetof(ngx_http_markdown_conf_t, decompress.parser_budget),
         NULL
     },
 
@@ -1087,7 +1087,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
         NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
         ngx_conf_set_size_slot,
         NGX_HTTP_LOC_CONF_OFFSET,
-        offsetof(ngx_http_markdown_conf_t, decompress_max_size),
+        offsetof(ngx_http_markdown_conf_t, decompress.max_size),
         NULL
     },
 

@@ -277,11 +277,21 @@ typedef struct {
     ngx_flag_t   buffer_chunked;       /* markdown_buffer_chunked on|off (default: on) */
     ngx_array_t *stream_types;         /* markdown_stream_types exclusion list (default: NULL) */
     ngx_array_t *content_types;        /* markdown_content_types allowlist (default: text/html) */
-    ngx_flag_t   auto_decompress;      /* markdown_auto_decompress on|off (default: on) */
-    size_t       decompress_max_size;  /* markdown_decompress_max_size (default: same as max_size) */
-    ngx_msec_t   parse_timeout;        /* markdown_parse_timeout (default: 30000ms) */
-    size_t       parser_budget;        /* markdown_parser_budget (default: 64MB) */
     size_t       large_body_threshold; /* markdown_large_body_threshold (NGX_HTTP_MARKDOWN_THRESHOLD_OFF = off) */
+
+    /*
+     * Decompression/parsing limits.
+     *
+     * Grouped into a sub-struct so that the parent
+     * ngx_http_markdown_conf_t stays within the 20-field limit
+     * enforced by static analysis (SonarCloud rule c:S1820).
+     */
+    struct {
+        ngx_flag_t   auto_decompress;      /* markdown_auto_decompress on|off (default: on) */
+        size_t       max_size;             /* markdown_decompress_max_size (default: same as max_size) */
+        ngx_msec_t   parse_timeout;        /* markdown_parse_timeout (default: 30000ms) */
+        size_t       parser_budget;        /* markdown_parser_budget (default: 64MB) */
+    } decompress;
 
     /*
      * Operational settings.
@@ -408,21 +418,36 @@ typedef struct {
     ngx_flag_t                   headers_forwarded; /* Whether downstream headers were sent */
     ngx_http_markdown_last_modified_state_t
                                 last_modified;
-    ngx_flag_t                   conversion_attempted;
-    ngx_flag_t                   conversion_succeeded;
-    ngx_flag_t                   bypass_counted; /* Whether conversions_bypassed was incremented */
+
+    /*
+     * Conversion tracking state.
+     *
+     * Grouped into a sub-struct so that the parent
+     * ngx_http_markdown_ctx_t stays within the 20-field limit
+     * enforced by static analysis (SonarCloud rule c:S1820).
+     */
+    struct {
+        ngx_flag_t                   attempted;
+        ngx_flag_t                   succeeded;
+        ngx_flag_t                   bypass_counted;
+    } conversion;
 
     /* Fail-open completed flag: prevents duplicate ngx_http_finalize_request
      * calls when fail-open path has already finalized the request.
      * Rule 38: set once, never cleared within a request lifetime. */
     ngx_flag_t                   failopen_completed;
 
-    /* Full-buffer pending output chain for NGX_AGAIN backpressure.
-     * Saved when ngx_http_next_body_filter returns NGX_AGAIN in
-     * the full-buffer conversion output path.  Rule 1: pending chain
-     * must be preserved and replayed on resume. */
-    ngx_chain_t                 *fullbuffer_pending_output;
-    ngx_flag_t                   fullbuffer_pending_has_data;
+    /*
+     * Full-buffer backpressure state.
+     *
+     * Grouped into a sub-struct so that the parent
+     * ngx_http_markdown_ctx_t stays within the 20-field limit
+     * enforced by static analysis (SonarCloud rule c:S1820).
+     */
+    struct {
+        ngx_chain_t             *pending_output;
+        ngx_flag_t               pending_has_data;
+    } fullbuffer;
     
     /* Threshold router path selection (NGX_HTTP_MARKDOWN_PATH_FULLBUFFER or NGX_HTTP_MARKDOWN_PATH_INCREMENTAL) */
     ngx_uint_t                   processing_path;
@@ -455,9 +480,17 @@ typedef struct {
         size_t                                decompressed_size; /* Size after decompression */
     } decompression;
 
-    /* Last error category from conversion failure (for decision log) */
-    ngx_http_markdown_error_category_t    last_error_category;
-    ngx_flag_t                            has_error_category;
+    /*
+     * Error state.
+     *
+     * Grouped into a sub-struct so that the parent
+     * ngx_http_markdown_ctx_t stays within the 20-field limit
+     * enforced by static analysis (SonarCloud rule c:S1820).
+     */
+    struct {
+        ngx_http_markdown_error_category_t    last_category;
+        ngx_flag_t                           has_category;
+    } error;
 
     /* OpenTelemetry span for per-request conversion tracing */
     ngx_http_markdown_otel_span_t        *otel_span;

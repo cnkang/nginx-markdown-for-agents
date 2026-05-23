@@ -87,8 +87,8 @@ ngx_http_markdown_handle_if_none_match(ngx_http_request_t *r,
     struct MarkdownOptions    options;
     struct MarkdownResult    *conv_result;
     struct FFIConditionalResult cond_result;
-    ngx_table_elt_t         *inm_header;
-    ngx_table_elt_t         *ims_header;
+    const ngx_table_elt_t   *inm_header;
+    const ngx_table_elt_t   *ims_header;
     const u_char            *inm_data;
     size_t                   inm_len;
     const u_char            *ims_data;

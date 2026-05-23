@@ -342,7 +342,7 @@ ngx_http_markdown_decompress_gzip(ngx_http_request_t *r,
     }
     
     /* Estimate output size with independent decompression budget. */
-    if (ngx_http_markdown_calc_output_size(r, input_size, conf->decompress_max_size, &output_size)
+    if (ngx_http_markdown_calc_output_size(r, input_size, conf->decompress.max_size, &output_size)
         != NGX_OK)
     {
         inflateEnd(&stream);
@@ -369,12 +369,12 @@ ngx_http_markdown_decompress_gzip(ngx_http_request_t *r,
     /* Check for Z_STREAM_END (Requirement 6.5) */
     if (zrc != Z_STREAM_END) {
         /* Check if failure was due to insufficient output buffer space */
-        if (zrc == Z_BUF_ERROR && stream.total_out >= conf->decompress_max_size) {
+        if (zrc == Z_BUF_ERROR && stream.total_out >= conf->decompress.max_size) {
             /* Decompressed size would exceed limit (Requirement 9.3, 9.4) */
             ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                          "markdown: decompressed size exceeds decompression budget (%uz), "
                          "category=resource_limit",
-                         conf->decompress_max_size);
+                         conf->decompress.max_size);
             inflateEnd(&stream);
             return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
         }
@@ -393,7 +393,7 @@ ngx_http_markdown_decompress_gzip(ngx_http_request_t *r,
                          "exhausted with remaining input, "
                          "likely exceeds budget (%uz), "
                          "category=resource_limit",
-                         conf->decompress_max_size);
+                         conf->decompress.max_size);
             inflateEnd(&stream);
             return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
         }
@@ -428,11 +428,11 @@ ngx_http_markdown_decompress_gzip(ngx_http_request_t *r,
     }
     
     /* Check if decompressed size exceeds decompression budget (Requirement 9.3, 9.4) */
-    if (stream.total_out > conf->decompress_max_size) {
+    if (stream.total_out > conf->decompress.max_size) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                      "markdown: decompressed size (%uz) exceeds decompression budget (%uz), "
                      "category=resource_limit",
-                     stream.total_out, conf->decompress_max_size);
+                     stream.total_out, conf->decompress.max_size);
         inflateEnd(&stream);
         return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
     }
@@ -578,7 +578,7 @@ ngx_http_markdown_decompress_brotli(ngx_http_request_t *r,
     }
     
     /* Estimate output size with independent decompression budget. */
-    if (ngx_http_markdown_calc_output_size(r, input_size, conf->decompress_max_size, &output_size)
+    if (ngx_http_markdown_calc_output_size(r, input_size, conf->decompress.max_size, &output_size)
         != NGX_OK)
     {
         BrotliDecoderDestroyInstance(decoder);
@@ -642,7 +642,7 @@ ngx_http_markdown_decompress_brotli(ngx_http_request_t *r,
             ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                          "markdown: decompressed size exceeds decompression budget (%uz), "
                          "category=resource_limit",
-                         conf->decompress_max_size);
+                         conf->decompress.max_size);
             BrotliDecoderDestroyInstance(decoder);
             return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
         }
@@ -672,11 +672,11 @@ ngx_http_markdown_decompress_brotli(ngx_http_request_t *r,
     total_out = output_size - available_out;
     
     /* Check if decompressed size exceeds decompression budget */
-    if (total_out > conf->decompress_max_size) {
+    if (total_out > conf->decompress.max_size) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                      "markdown: decompressed size (%uz) exceeds decompression budget (%uz), "
                      "category=resource_limit",
-                     total_out, conf->decompress_max_size);
+                     total_out, conf->decompress.max_size);
         BrotliDecoderDestroyInstance(decoder);
         return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
     }
