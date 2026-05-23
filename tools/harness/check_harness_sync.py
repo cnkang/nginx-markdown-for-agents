@@ -28,10 +28,16 @@ except ModuleNotFoundError:
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+README_FILENAME = "README.md"
+DOCS_HARNESS_README = f"docs/harness/{README_FILENAME}"
+RISK_PACKS_README = f"risk-packs/{README_FILENAME}"
+FUZZ_README_REL = f"fuzz/{README_FILENAME}"
+COMPONENT_FUZZ_README_REL = f"components/rust-converter/fuzz/{README_FILENAME}"
+GITHUB_WORKFLOWS_DIR = REPO_ROOT / ".github" / "workflows"
 MANIFEST_PATH = REPO_ROOT / "docs" / "harness" / "routing-manifest.json"
 E2E_HARNESS_DIR = REPO_ROOT / "tools" / "e2e-harness"
 E2E_HARNESS_CARGO = E2E_HARNESS_DIR / "Cargo.toml"
-README_PATH = REPO_ROOT / "docs" / "harness" / "README.md"
+README_PATH = REPO_ROOT / "docs" / "harness" / README_FILENAME
 CORE_PATH = REPO_ROOT / "docs" / "harness" / "core.md"
 SUMMARY_PATH = REPO_ROOT / "docs" / "harness" / "routing-manifest.md"
 AGENTS_PATH = REPO_ROOT / "AGENTS.md"
@@ -296,7 +302,7 @@ def _check_risk_pack_docs(manifest: dict) -> CheckResult:
 def _check_harness_docs(manifest: dict) -> CheckResult:
     """Verify that harness documentation files contain required links, phrases, and patterns.
 
-    Checks README.md for navigation links, routing-manifest.md for
+    Checks the harness entrypoint for navigation links, routing-manifest.md for
     risk-pack identifiers, and core.md for status labels and key phrases.
 
     Args:
@@ -315,8 +321,8 @@ def _check_harness_docs(manifest: dict) -> CheckResult:
                 r"\[[^\]]+\]\(routing-manifest\.json\)"
             ),
             "routing-manifest.md link": r"\[[^\]]+\]\(routing-manifest\.md\)",
-            "risk-packs/README.md link": (
-                r"\[[^\]]+\]\(risk-packs/README\.md\)"
+            "risk-pack index link": (
+                rf"\[[^\]]+\]\({re.escape(RISK_PACKS_README)}\)"
             ),
         },
     ))
@@ -370,7 +376,7 @@ def _check_agents_map() -> CheckResult:
     missing = _required_patterns(
         AGENTS_PATH,
         {
-            "docs/harness/README.md": r"`docs/harness/README\.md`",
+            DOCS_HARNESS_README: rf"`{re.escape(DOCS_HARNESS_README)}`",
             "docs/harness/core.md": r"`docs/harness/core\.md`",
             "docs/harness/routing-manifest.json": (
                 r"`docs/harness/routing-manifest\.json`"
@@ -487,7 +493,7 @@ def _collect_stale_execution_surface_refs() -> list[str]:
     execution_surfaces = (
         REPO_ROOT / "Makefile",
         REPO_ROOT / "tools" / "e2e" / "run_e2e_suite.sh",
-        REPO_ROOT / ".github" / "workflows" / "ci.yml",
+        GITHUB_WORKFLOWS_DIR / "ci.yml",
         REPO_ROOT / "docs" / "testing" / "E2E_TESTS.md",
     )
     for surface in execution_surfaces:
@@ -507,7 +513,7 @@ def _check_e2e_migration_policy() -> CheckResult:
     stale_execution_refs = _collect_stale_execution_surface_refs()
 
     if missing_wrappers or stale_shell_logic or removed_python_present or stale_execution_refs:
-        return _extracted_from__check_e2e_migration_policy_8(
+        return _format_e2e_migration_failure(
             missing_wrappers,
             stale_shell_logic,
             removed_python_present,
@@ -520,8 +526,12 @@ def _check_e2e_migration_policy() -> CheckResult:
     )
 
 
-# TODO Rename this here and in `_check_e2e_migration_policy`
-def _extracted_from__check_e2e_migration_policy_8(missing_wrappers, stale_shell_logic, removed_python_present, stale_execution_refs):
+def _format_e2e_migration_failure(
+    missing_wrappers,
+    stale_shell_logic,
+    removed_python_present,
+    stale_execution_refs,
+) -> CheckResult:
     details: list[str] = []
     if missing_wrappers:
         details.append(f"missing migrated wrappers: {', '.join(missing_wrappers)}")
@@ -546,8 +556,8 @@ def check_batch_prune_pairing() -> CheckResult:
         CheckResult with PASS if pairing is satisfied or batch is absent,
         or FAIL if batch exists without a corresponding prune workflow.
     """
-    batch_path = REPO_ROOT / ".github" / "workflows" / "cflite_batch.yml"
-    prune_path = REPO_ROOT / ".github" / "workflows" / "cflite_cron.yml"
+    batch_path = GITHUB_WORKFLOWS_DIR / "cflite_batch.yml"
+    prune_path = GITHUB_WORKFLOWS_DIR / "cflite_cron.yml"
 
     if not batch_path.exists():
         return _result(
@@ -584,9 +594,9 @@ def check_cfl_workflows() -> CheckResult:
         CheckResult with PASS if all checks pass, or FAIL listing issues.
     """
     required_workflows = [
-        ".github/workflows/cflite_pr.yml",
-        ".github/workflows/cflite_batch.yml",
-        ".github/workflows/cflite_cron.yml",
+        str((GITHUB_WORKFLOWS_DIR / "cflite_pr.yml").relative_to(REPO_ROOT)),
+        str((GITHUB_WORKFLOWS_DIR / "cflite_batch.yml").relative_to(REPO_ROOT)),
+        str((GITHUB_WORKFLOWS_DIR / "cflite_cron.yml").relative_to(REPO_ROOT)),
     ]
 
     missing: list[str] = []
@@ -603,7 +613,7 @@ def check_cfl_workflows() -> CheckResult:
     issues: list[str] = []
 
     # Verify PR workflow uses address sanitizer
-    pr_workflow = REPO_ROOT / ".github" / "workflows" / "cflite_pr.yml"
+    pr_workflow = GITHUB_WORKFLOWS_DIR / "cflite_pr.yml"
     pr_missing = _required_patterns(
         pr_workflow,
         {"sanitizer: address": r"sanitizer:\s*address"},
@@ -620,7 +630,7 @@ def check_cfl_workflows() -> CheckResult:
         issues.append("cflite_pr.yml missing path filter for pull_request trigger")
 
     # Verify batch workflow has corpus storage-repo configuration
-    batch_workflow = REPO_ROOT / ".github" / "workflows" / "cflite_batch.yml"
+    batch_workflow = GITHUB_WORKFLOWS_DIR / "cflite_batch.yml"
     batch_missing = _required_patterns(
         batch_workflow,
         {"storage-repo": r"storage-repo:"},
@@ -669,7 +679,7 @@ def _check_optional_kiro(manifest: dict, full: bool) -> CheckResult:
             for needle in _required_text(
                 path,
                 [
-                    "docs/harness/README.md",
+                    DOCS_HARNESS_README,
                     "docs/harness/core.md",
                 ],
             )
@@ -936,7 +946,7 @@ def check_fuzz_gitignore() -> CheckResult:
         r"fuzz/artifacts",
         r"fuzz/corpus",
     ]
-    if found := [pat for pat in fuzz_patterns if pat in text]:
+    if any(pat in text for pat in fuzz_patterns):
         return _result(
             "fuzz-gitignore",
             PASS,
@@ -953,8 +963,7 @@ def check_fuzz_gitignore() -> CheckResult:
 def check_fuzz_guide() -> CheckResult:
     """Verify that a fuzz README guide exists.
 
-    Checks for the fuzz guide at both the top-level ``fuzz/README.md``
-    and the component-level ``components/rust-converter/fuzz/README.md``.
+    Checks for the fuzz guide at both the top-level and component-level paths.
     At least one must exist.
 
     Returns:
@@ -962,15 +971,15 @@ def check_fuzz_guide() -> CheckResult:
         FAIL if neither location has a README.
     """
     candidates = [
-        REPO_ROOT / "fuzz" / "README.md",
-        REPO_ROOT / "components" / "rust-converter" / "fuzz" / "README.md",
+        REPO_ROOT / FUZZ_README_REL,
+        REPO_ROOT / COMPONENT_FUZZ_README_REL,
     ]
     existing = [p for p in candidates if p.exists()]
     if not existing:
         return _result(
             "fuzz-guide",
             FAIL,
-            "fuzz/README.md not found (checked fuzz/ and components/rust-converter/fuzz/)",
+            f"{FUZZ_README_REL} not found (checked both fuzz guide locations)",
         )
 
     locations = ", ".join(_display_path(p) for p in existing)
