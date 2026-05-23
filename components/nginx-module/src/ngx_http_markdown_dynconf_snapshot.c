@@ -341,19 +341,19 @@ ngx_http_markdown_dynconf_snapshot_to_json(ngx_pool_t *pool,
 
     /* markdown_auto_decompress (on/off) */
     p = ngx_http_markdown_snapshot_flag(p, last,
-        "markdown_auto_decompress", conf->auto_decompress, 1);
+        "markdown_auto_decompress", conf->decompress.auto_decompress, 1);
 
-    /* markdown_decompression_budget (decompress_max_size) */
+    /* markdown_decompression_budget (decompress.max_size) */
     p = ngx_http_markdown_snapshot_size(p, last,
-        "markdown_decompression_budget", conf->decompress_max_size, 1);
+        "markdown_decompression_budget", conf->decompress.max_size, 1);
 
     /* markdown_parse_timeout */
     p = ngx_http_markdown_snapshot_msec(p, last,
-        "markdown_parse_timeout", conf->parse_timeout, 1);
+        "markdown_parse_timeout", conf->decompress.parse_timeout, 1);
 
     /* markdown_parser_budget */
     p = ngx_http_markdown_snapshot_size(p, last,
-        "markdown_parser_budget", conf->parser_budget, 1);
+        "markdown_parser_budget", conf->decompress.parser_budget, 1);
 
     /* markdown_prune_noise (on/off) */
     p = ngx_http_markdown_snapshot_flag(p, last,

@@ -265,10 +265,10 @@ ngx_http_markdown_create_conf(ngx_conf_t *cf)
     conf->buffer_chunked = NGX_CONF_UNSET;
     conf->stream_types = NGX_CONF_UNSET_PTR;
     conf->content_types = NGX_CONF_UNSET_PTR;
-    conf->auto_decompress = NGX_CONF_UNSET;
-    conf->decompress_max_size = NGX_CONF_UNSET_SIZE;
-    conf->parse_timeout = NGX_CONF_UNSET_MSEC;
-    conf->parser_budget = NGX_CONF_UNSET_SIZE;
+    conf->decompress.auto_decompress = NGX_CONF_UNSET;
+    conf->decompress.max_size = NGX_CONF_UNSET_SIZE;
+    conf->decompress.parse_timeout = NGX_CONF_UNSET_MSEC;
+    conf->decompress.parser_budget = NGX_CONF_UNSET_SIZE;
     conf->large_body_threshold = NGX_CONF_UNSET_SIZE;
     conf->ops.trust_forwarded_headers = NGX_CONF_UNSET;
     conf->ops.metrics_format = NGX_CONF_UNSET_UINT;
@@ -392,21 +392,24 @@ ngx_http_markdown_merge_core_base_values(ngx_http_markdown_conf_t *conf,
     ngx_conf_merge_uint_value(conf->policy.log_verbosity, prev->policy.log_verbosity,
                               NGX_HTTP_MARKDOWN_LOG_INFO);
     ngx_conf_merge_value(conf->buffer_chunked, prev->buffer_chunked, 1);
-    ngx_conf_merge_value(conf->auto_decompress, prev->auto_decompress, 1);
+    ngx_conf_merge_value(conf->decompress.auto_decompress,
+                         prev->decompress.auto_decompress, 1);
 
     /*
-     * Merge decompress_max_size: inherit from parent if not explicitly set.
+     * Merge decompress.max_size: inherit from parent if not explicitly set.
      * After merge, if still NGX_CONF_UNSET_SIZE, resolve to max_size at
      * post-merge time (ngx_http_markdown_apply_decompress_max_size_default)
      * so the default tracks max_size even when max_size comes from
      * memory_budget override.
      */
-    ngx_conf_merge_size_value(conf->decompress_max_size,
-                              prev->decompress_max_size,
+    ngx_conf_merge_size_value(conf->decompress.max_size,
+                              prev->decompress.max_size,
                               NGX_CONF_UNSET_SIZE);
 
-    ngx_conf_merge_msec_value(conf->parse_timeout, prev->parse_timeout, 30000);
-    ngx_conf_merge_size_value(conf->parser_budget, prev->parser_budget,
+    ngx_conf_merge_msec_value(conf->decompress.parse_timeout,
+                              prev->decompress.parse_timeout, 30000);
+    ngx_conf_merge_size_value(conf->decompress.parser_budget,
+                              prev->decompress.parser_budget,
                               64 * 1024 * 1024);
 }
 
@@ -568,16 +571,16 @@ ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
      * level, inherit max_size.  This must run after memory_budget override
      * so the default tracks the effective max_size.
      */
-    if (conf->decompress_max_size == NGX_CONF_UNSET_SIZE) {
-        conf->decompress_max_size = conf->max_size;
+    if (conf->decompress.max_size == NGX_CONF_UNSET_SIZE) {
+        conf->decompress.max_size = conf->max_size;
     }
 
     /*
-     * Reject zero decompress_max_size when auto_decompress is enabled:
+     * Reject zero decompress.max_size when auto_decompress is enabled:
      * a budget of 0 would reject all decompression unconditionally,
      * which is almost certainly a misconfiguration.
      */
-    if (conf->auto_decompress && conf->decompress_max_size == 0) {
+    if (conf->decompress.auto_decompress && conf->decompress.max_size == 0) {
         ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
             "\"markdown_decompress_max_size\" must be greater "
             "than 0 when auto_decompress is enabled");

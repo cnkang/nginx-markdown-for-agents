@@ -779,15 +779,15 @@ ngx_http_markdown_prepare_conversion_options(ngx_http_request_t *r,
 
     /*
      * Parse-specific timeout and memory budget.
-     * parse_timeout_ms: populated from conf->parse_timeout (ngx_msec_t).
-     * parser_memory_budget: populated from conf->parser_budget (size_t).
+     * parse_timeout_ms: populated from conf->decompress.parse_timeout (ngx_msec_t).
+     * parser_memory_budget: populated from conf->decompress.parser_budget (size_t).
      */
-    if (conf->parse_timeout > UINT32_MAX) {
+    if (conf->decompress.parse_timeout > UINT32_MAX) {
         options->parse_timeout_ms = UINT32_MAX;
     } else {
-        options->parse_timeout_ms = (uint32_t) conf->parse_timeout;
+        options->parse_timeout_ms = (uint32_t) conf->decompress.parse_timeout;
     }
-    options->parser_memory_budget = (uint64_t) conf->parser_budget;
+    options->parser_memory_budget = (uint64_t) conf->decompress.parser_budget;
 
     /*
      * Apply unified budget to streaming_budget when it was not
@@ -848,8 +848,8 @@ ngx_http_markdown_handle_conversion_failure(ngx_http_request_t *r,
     category_str = ngx_http_markdown_error_category_string(error_category);
 
     /* Store error category in context for decision log emission */
-    ctx->last_error_category = error_category;
-    ctx->has_error_category = 1;
+    ctx->error.last_category = error_category;
+    ctx->error.has_category = 1;
 
     ngx_http_markdown_record_conversion_latency(elapsed_ms);
     NGX_HTTP_MARKDOWN_METRIC_INC(conversions_failed);
@@ -885,9 +885,9 @@ ngx_http_markdown_handle_conversion_failure(ngx_http_request_t *r,
         case ERROR_PARSE_BUDGET_EXCEEDED:
             NGX_HTTP_MARKDOWN_METRIC_INC(parse_interrupts.parse_budget_exceeded_total);
             break;
+        default:
+            break;
     }
-
-    err_len = 0;
     if (result->error_message != NULL) {
         err_len = (result->error_len > (size_t) INT_MAX)
             ? INT_MAX
@@ -923,9 +923,9 @@ static void
 ngx_http_markdown_record_system_failure(
     ngx_http_markdown_ctx_t *ctx)
 {
-    ctx->last_error_category =
+    ctx->error.last_category =
         NGX_HTTP_MARKDOWN_ERROR_SYSTEM;
-    ctx->has_error_category = 1;
+    ctx->error.has_category = 1;
     NGX_HTTP_MARKDOWN_METRIC_INC(conversions_failed);
     NGX_HTTP_MARKDOWN_METRIC_INC(failures_system);
 }
@@ -965,7 +965,7 @@ ngx_http_markdown_record_conversion_success(ngx_http_markdown_ctx_t *ctx,
                                             const struct MarkdownResult *result,
                                             ngx_msec_t elapsed_ms)
 {
-    ctx->conversion_succeeded = 1;
+    ctx->conversion.succeeded = 1;
     ngx_http_markdown_record_conversion_latency(elapsed_ms);
     NGX_HTTP_MARKDOWN_METRIC_INC(conversions_succeeded);
     NGX_HTTP_MARKDOWN_METRIC_ADD(input_bytes, ctx->buffer.size);
@@ -1709,7 +1709,7 @@ ngx_http_markdown_execute_conversion(ngx_http_request_t *r,
 static void
 ngx_http_markdown_prepare_head_output_buffer(const ngx_http_request_t *r,
                                              ngx_buf_t *b,
-                                             struct MarkdownResult *result)
+                                             const struct MarkdownResult *result)
 {
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                   "markdown: HEAD request - omitting response body");
@@ -1726,7 +1726,7 @@ ngx_http_markdown_prepare_head_output_buffer(const ngx_http_request_t *r,
 static ngx_int_t
 ngx_http_markdown_prepare_body_output_buffer(ngx_http_request_t *r,
                                              ngx_buf_t *b,
-                                             struct MarkdownResult *result)
+                                             const struct MarkdownResult *result)
 {
     if (result->markdown_len > 0) {
         b->pos = ngx_pnalloc(r->pool, result->markdown_len);
@@ -1855,8 +1855,8 @@ ngx_http_markdown_send_conversion_output(ngx_http_request_t *r,
     }
 
     if (rc == NGX_AGAIN) {
-        ctx->fullbuffer_pending_output = out;
-        ctx->fullbuffer_pending_has_data = 1;
+        ctx->fullbuffer.pending_output = out;
+        ctx->fullbuffer.pending_has_data = 1;
         r->buffered |= NGX_HTTP_MARKDOWN_BUFFERED;
     }
 

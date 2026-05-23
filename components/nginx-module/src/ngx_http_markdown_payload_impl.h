@@ -43,7 +43,7 @@ ngx_int_t ngx_http_markdown_decompress(ngx_http_request_t *r,
     ngx_http_markdown_compression_type_e type, const ngx_chain_t *in,
     ngx_chain_t **out);
 static ngx_int_t ngx_http_markdown_decompress_via_rust(
-    ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx,
+    ngx_http_request_t *r, const ngx_http_markdown_ctx_t *ctx,
     const ngx_http_markdown_conf_t *conf,
     const ngx_chain_t *compressed_chain,
     ngx_chain_t **decompressed_chain);
@@ -172,8 +172,8 @@ ngx_http_markdown_handle_decompression_alloc_error(
 {
     const ngx_str_t *reason;
 
-    ctx->last_error_category = category;
-    ctx->has_error_category = 1;
+    ctx->error.last_category = category;
+    ctx->error.has_category = 1;
 
     NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.failed);
     NGX_HTTP_MARKDOWN_METRIC_INC(conversions_failed);
@@ -398,9 +398,9 @@ ngx_http_markdown_emit_failure_decision(ngx_http_request_t *r,
         ? ngx_http_markdown_reason_failed_closed()
         : ngx_http_markdown_reason_failed_open();
 
-    fail_category = ctx->has_error_category
+    fail_category = ctx->error.has_category
         ? ngx_http_markdown_reason_from_error_category(
-              ctx->last_error_category,
+              ctx->error.last_category,
               r->connection->log)
         : NULL;
 
@@ -477,8 +477,8 @@ ngx_http_markdown_handle_buffer_append_failure(ngx_http_request_t *r,
                  "size=%uz bytes, max=%uz bytes, category=resource_limit",
                  attempted_size, conf->max_size);
 
-    ctx->last_error_category = NGX_HTTP_MARKDOWN_ERROR_RESOURCE_LIMIT;
-    ctx->has_error_category = 1;
+    ctx->error.last_category = NGX_HTTP_MARKDOWN_ERROR_RESOURCE_LIMIT;
+    ctx->error.has_category = 1;
     NGX_HTTP_MARKDOWN_METRIC_INC(conversions_attempted);
     NGX_HTTP_MARKDOWN_METRIC_INC(conversions_failed);
     NGX_HTTP_MARKDOWN_METRIC_INC(failures_resource_limit);
@@ -667,7 +667,7 @@ ngx_http_markdown_handle_decompression_conversion_error(
 static ngx_int_t
 ngx_http_markdown_decompress_via_rust(
     ngx_http_request_t *r,
-    ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_ctx_t *ctx,
     const ngx_http_markdown_conf_t *conf,
     const ngx_chain_t *compressed_chain,
     ngx_chain_t **decompressed_chain)
@@ -753,13 +753,13 @@ ngx_http_markdown_decompress_via_rust(
                   "decompress, format=%d, input=%uz, "
                   "budget=%uz",
                   (int) format, input_size,
-                  conf->decompress_max_size);
+                  conf->decompress.max_size);
 
     ffi_rc = markdown_decompress_bounded(
         (const uint8_t *) input_buf,
         (uintptr_t) input_size,
         format,
-        (uintptr_t) conf->decompress_max_size,
+        (uintptr_t) conf->decompress.max_size,
         &result);
 
     if (ffi_rc != 0) {

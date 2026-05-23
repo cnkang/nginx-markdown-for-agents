@@ -134,7 +134,7 @@ ngx_http_markdown_should_convert(ngx_http_request_t *r,
         return 0;
     }
 
-    on_wildcard = (conf->on_wildcard != 0) ? 1 : 0;
+    on_wildcard = (uint8_t) ((conf->on_wildcard != 0) ? 1 : 0);
 
     markdown_negotiate_accept(
         accept_header->value.data,
