@@ -767,6 +767,9 @@ ngx_http_markdown_dynconf_stop(ngx_http_markdown_dynconf_watcher_t *watcher,
 
 /*
  * Supported dynamic config keys and their enum values.
+ * These are used as a dispatch table index in apply() and
+ * as identifiers in validation error entries.  Values start
+ * at 1 (0 is unused/invalid).
  */
 #define NGX_HTTP_MARKDOWN_DYNCONF_KEY_FILTER          1
 #define NGX_HTTP_MARKDOWN_DYNCONF_KEY_PRUNE_NOISE     2
@@ -801,6 +804,9 @@ ngx_http_markdown_dynconf_match_key(u_char *p, const u_char *eq,
 
     len = eq - p;
 
+    /* Length-first comparison avoids string comparisons on mismatched
+     * lengths.  All key names are ASCII; ngx_strncasecmp is safe
+     * without NUL-termination because len is bounded by (eq - p). */
     if (len == 15 && ngx_strncasecmp(p, markdown_filter_key, 15) == 0) {
         *key = NGX_HTTP_MARKDOWN_DYNCONF_KEY_FILTER;
     } else if (len == 11 && ngx_strncasecmp(p, prune_noise_key, 11) == 0) {
@@ -1581,6 +1587,9 @@ ngx_http_markdown_dynconf_try_line_dryrun(
     /*
      * Apply failed: the value is invalid for this key.
      * Extract the key name for the error entry.
+     *
+     * key_names is indexed by (key - 1) where key is the
+     * NGX_HTTP_MARKDOWN_DYNCONF_KEY_* enum (1..5).
      */
     {
         static u_char  key_names[][20] = {
@@ -1613,12 +1622,23 @@ ngx_http_markdown_dynconf_try_line_dryrun(
 }
 
 
+/*
+ * Buffer context for dry-run line processing.
+ *
+ * Bundles the mutable scan state (buffer pointer, current position,
+ * line start offset, line counter, and applied-key counter) into a
+ * single struct so that ngx_http_markdown_dynconf_process_buffer_dryrun
+ * can pass them to try_line_dryrun without an excessive parameter list.
+ *
+ * All pointers are borrowed from the caller's stack frame; this struct
+ * does not own any memory.
+ */
 typedef struct {
-    u_char       *buf;
-    size_t       *pos;
-    size_t       *line_start;
-    ngx_uint_t   *line_num;
-    ngx_uint_t   *applied;
+    u_char       *buf;        /* read buffer (caller-owned) */
+    size_t       *pos;        /* [in/out] current end of valid data in buf */
+    size_t       *line_start; /* [in/out] byte offset of next unprocessed line */
+    ngx_uint_t   *line_num;   /* [in/out] 1-based line counter for error reporting */
+    ngx_uint_t   *applied;    /* [in/out] count of successfully applied entries */
 } ngx_http_markdown_dynconf_buf_ctx_t;
 
 /**
@@ -1704,25 +1724,33 @@ ngx_http_markdown_dynconf_reload_dryrun(
     ngx_int_t  line_rc;
     ngx_uint_t line_num;
 
+    /* Initialize parse state: applied counts valid key=value pairs,
+       pos tracks the current read position, line_start marks the
+       beginning of the current line within buf, line_num is 1-based. */
     applied = 0;
     line_start = 0;
     pos = 0;
     line_num = 1;
 
+    /* Read and process the file in chunks until EOF or error. */
     for ( ;; ) {
+        /* Fill buf from fd; read_chunk updates pos with the new end. */
         line_rc = ngx_http_markdown_dynconf_read_chunk(
             fd, buf, &pos, NGX_HTTP_MARKDOWN_DYNCONF_MAX_LINE,
             &watcher->path, log, &n);
         if (line_rc != NGX_OK) {
+            /* Propagate read_chunk failure (INVALID_FILE or similar). */
             ngx_close_file(fd);
             return line_rc;
         }
 
         if (n == 0) {
+            /* EOF reached: exit the read loop to process the tail. */
             break;
         }
 
         if (n == -1) {
+            /* I/O error on read: log and abort. */
             ngx_log_error(NGX_LOG_WARN, log, 0,
                           "markdown: read error on \"%V\"",
                           &watcher->path);
@@ -1730,6 +1758,9 @@ ngx_http_markdown_dynconf_reload_dryrun(
             return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_IO_ERROR;
         }
 
+        /* Line-length overflow: the buffer filled before a newline
+           was found, meaning the line exceeds MAX_LINE.  Record the
+           error, then report final validation status and return. */
         if (pos >= NGX_HTTP_MARKDOWN_DYNCONF_MAX_LINE) {
             ngx_http_markdown_dynconf_record_error(
                 &watcher->last_validation, line_num,
@@ -1739,12 +1770,15 @@ ngx_http_markdown_dynconf_reload_dryrun(
             ngx_close_file(fd);
 
             if (watcher->last_validation.total_errors > 0) {
+                /* At least the overflow error was recorded. */
                 watcher->last_validation.valid = 0;
                 ngx_http_markdown_dynconf_log_validation_errors(
                     &watcher->last_validation, &watcher->path, log);
                 return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_DRY_RUN_FAIL;
             }
 
+            /* No errors recorded (overflow was the only issue but
+               record_error may not have incremented); mark valid. */
             watcher->last_validation.valid = 1;
 
             if (applied > 0) {
@@ -1763,6 +1797,9 @@ ngx_http_markdown_dynconf_reload_dryrun(
             return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_DRY_RUN_OK;
         }
 
+        /* Process complete lines within the chunk: parse each
+           key=value pair in dry-run mode, recording errors rather
+           than aborting on the first failure. */
         {
             ngx_http_markdown_dynconf_buf_ctx_t  bctx;
             bctx.buf = buf;
@@ -1776,8 +1813,11 @@ ngx_http_markdown_dynconf_reload_dryrun(
         }
     }
 
+    /* Close the file descriptor now that all reads are complete. */
     ngx_close_file(fd);
 
+    /* Handle a trailing line without a terminating newline: process
+       the remaining bytes from line_start to pos as the last line. */
     if (line_start < pos) {
         ngx_http_markdown_dynconf_try_line_dryrun(
             &watcher->staging_snapshot, buf + line_start,
@@ -1785,6 +1825,8 @@ ngx_http_markdown_dynconf_reload_dryrun(
             line_num, log, &applied, &watcher->last_validation);
     }
 
+    /* Final validation: if any errors were accumulated across all
+       lines, mark invalid and report; otherwise mark valid. */
     if (watcher->last_validation.total_errors > 0) {
         watcher->last_validation.valid = 0;
         ngx_http_markdown_dynconf_log_validation_errors(
