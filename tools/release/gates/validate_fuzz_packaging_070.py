@@ -5,17 +5,17 @@ Fuzz and packaging infrastructure validator for v0.7.0 release gates.
 Validates the 12-item checklist from spec 33 requirements (Requirement 2):
 
 1. Fuzz targets exist (fuzz/Cargo.toml lists targets)
-2. ClusterFuzzLite PR workflow exists (.github/workflows/cflite_pr.yml)
-3. Nightly batch fuzz workflow exists (.github/workflows/cflite_batch.yml)
-4. Corpus pruning mechanism exists (.github/workflows/cflite_cron.yml)
-5. Fuzz guide document is complete (fuzz/README.md has required sections)
-6. Release package workflow exists (.github/workflows/release-packages.yml)
+2. ClusterFuzzLite PR workflow exists
+3. Nightly batch fuzz workflow exists
+4. Corpus pruning mechanism exists
+5. Fuzz guide document is complete
+6. Release package workflow exists
 7. .deb/.rpm artifact naming includes NGINX target version (nFPM config +
    workflow both reference NGINX_VERSION in filename construction)
 8. SHA256SUMS generation logic exists in release workflow
 9. Install/compatibility documentation exists
 10. Package smoke test job exists in release workflow
-11. Harness rules FUZZ-001 through FUZZ-007 defined in fuzz/README.md
+11. Harness rules FUZZ-001 through FUZZ-007 defined in the fuzz guide
 
 Exit codes:
   0 - All checks passed
@@ -32,17 +32,27 @@ import sys
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
+GITHUB_DIR = ".github"
+WORKFLOWS_DIR = "workflows"
+README_FILENAME = "README.md"
+FUZZ_README_REL = f"fuzz/{README_FILENAME}"
+
+FUZZ_TARGETS_GATE = "fuzz:targets-exist"
+FUZZ_CORPUS_PRUNING_GATE = "fuzz:corpus-pruning"
+PKG_NFPM_CONFIG_GATE = "pkg:nfpm-config"
+PKG_ARTIFACT_NAMING_WORKFLOW_GATE = "pkg:artifact-naming-workflow"
+DOCS_COMPATIBILITY_GATE = "docs:compatibility"
 
 # Workflow paths
-CFLITE_PR_WORKFLOW = PROJECT_ROOT / ".github" / "workflows" / "cflite_pr.yml"
-CFLITE_BATCH_WORKFLOW = PROJECT_ROOT / ".github" / "workflows" / "cflite_batch.yml"
-CFLITE_CRON_WORKFLOW = PROJECT_ROOT / ".github" / "workflows" / "cflite_cron.yml"
+CFLITE_PR_WORKFLOW = PROJECT_ROOT / GITHUB_DIR / WORKFLOWS_DIR / "cflite_pr.yml"
+CFLITE_BATCH_WORKFLOW = PROJECT_ROOT / GITHUB_DIR / WORKFLOWS_DIR / "cflite_batch.yml"
+CFLITE_CRON_WORKFLOW = PROJECT_ROOT / GITHUB_DIR / WORKFLOWS_DIR / "cflite_cron.yml"
 RELEASE_PACKAGES_WORKFLOW = (
-    PROJECT_ROOT / ".github" / "workflows" / "release-packages.yml"
+    PROJECT_ROOT / GITHUB_DIR / WORKFLOWS_DIR / "release-packages.yml"
 )
 
 # Fuzz paths
-FUZZ_README = PROJECT_ROOT / "fuzz" / "README.md"
+FUZZ_README = PROJECT_ROOT / "fuzz" / README_FILENAME
 FUZZ_CARGO_TOML = PROJECT_ROOT / "components" / "rust-converter" / "fuzz" / "Cargo.toml"
 
 # Packaging paths
@@ -103,7 +113,7 @@ def check_fuzz_targets(result: ValidationResult) -> None:
     """Validate that fuzz targets are defined in fuzz/Cargo.toml."""
     content = read_safe(FUZZ_CARGO_TOML)
     if not content:
-        result.fail("fuzz:targets-exist", "fuzz/Cargo.toml not found")
+        result.fail(FUZZ_TARGETS_GATE, "fuzz/Cargo.toml not found")
         return
 
     # Check for [[bin]] sections which define fuzz targets
@@ -111,11 +121,11 @@ def check_fuzz_targets(result: ValidationResult) -> None:
         # Count targets
         target_count = content.count("[[bin]]")
         result.pass_(
-            "fuzz:targets-exist",
+            FUZZ_TARGETS_GATE,
             f"fuzz/Cargo.toml defines {target_count} fuzz target(s)",
         )
     else:
-        result.fail("fuzz:targets-exist", "no [[bin]] targets in fuzz/Cargo.toml")
+        result.fail(FUZZ_TARGETS_GATE, "no [[bin]] targets in fuzz/Cargo.toml")
 
 
 def check_cflite_workflows(result: ValidationResult) -> None:
@@ -137,25 +147,25 @@ def check_cflite_workflows(result: ValidationResult) -> None:
         content = read_safe(CFLITE_CRON_WORKFLOW)
         if "prune" in content.lower():
             result.pass_(
-                "fuzz:corpus-pruning",
+                FUZZ_CORPUS_PRUNING_GATE,
                 "cflite_cron.yml exists with pruning mode",
             )
         else:
             result.fail(
-                "fuzz:corpus-pruning",
+                FUZZ_CORPUS_PRUNING_GATE,
                 "cflite_cron.yml exists but missing prune mode",
             )
     else:
-        result.fail("fuzz:corpus-pruning", "cflite_cron.yml not found")
+        result.fail(FUZZ_CORPUS_PRUNING_GATE, "cflite_cron.yml not found")
 
 
 def check_fuzz_guide(result: ValidationResult) -> None:
     """Validate fuzz guide document completeness (Req 2.6)."""
     content = read_safe(FUZZ_README)
     if not content:
-        result.fail("fuzz:guide-exists", "fuzz/README.md not found")
+        result.fail("fuzz:guide-exists", f"{FUZZ_README_REL} not found")
         return
-    result.pass_("fuzz:guide-exists", "fuzz/README.md exists")
+    result.pass_("fuzz:guide-exists", f"{FUZZ_README_REL} exists")
 
     # Check for required harness rule references
     missing_rules = []
@@ -166,12 +176,12 @@ def check_fuzz_guide(result: ValidationResult) -> None:
     if missing_rules:
         result.fail(
             "fuzz:guide-rules",
-            f"fuzz/README.md missing rules: {', '.join(missing_rules)}",
+            f"{FUZZ_README_REL} missing rules: {', '.join(missing_rules)}",
         )
     else:
         result.pass_(
             "fuzz:guide-rules",
-            "fuzz/README.md contains all FUZZ-001..007 rules",
+            f"{FUZZ_README_REL} contains all FUZZ-001..007 rules",
         )
 
 
@@ -205,16 +215,16 @@ def check_artifact_naming(result: ValidationResult) -> None:
     # Check nFPM config references NGINX_VERSION
     nfpm_content = read_safe(NFPM_CONFIG)
     if not nfpm_content:
-        result.fail("pkg:nfpm-config", "packaging/nfpm/nfpm.yaml not found")
+        result.fail(PKG_NFPM_CONFIG_GATE, "packaging/nfpm/nfpm.yaml not found")
     else:
         if "NGINX_VERSION" in nfpm_content or "nginx_version" in nfpm_content:
             result.pass_(
-                "pkg:nfpm-config",
+                PKG_NFPM_CONFIG_GATE,
                 "nFPM config references NGINX_VERSION",
             )
         else:
             result.fail(
-                "pkg:nfpm-config",
+                PKG_NFPM_CONFIG_GATE,
                 "nFPM config does not reference NGINX_VERSION",
             )
 
@@ -222,7 +232,7 @@ def check_artifact_naming(result: ValidationResult) -> None:
     wf_content = read_safe(RELEASE_PACKAGES_WORKFLOW)
     if not wf_content:
         result.skip(
-            "pkg:artifact-naming-workflow",
+            PKG_ARTIFACT_NAMING_WORKFLOW_GATE,
             "release-packages.yml not found (checked separately)",
         )
         return
@@ -239,17 +249,17 @@ def check_artifact_naming(result: ValidationResult) -> None:
 
     if has_deb_naming and has_rpm_naming:
         result.pass_(
-            "pkg:artifact-naming-workflow",
+            PKG_ARTIFACT_NAMING_WORKFLOW_GATE,
             "workflow constructs .deb/.rpm filenames with NGINX version",
         )
     elif has_deb_naming or has_rpm_naming:
         result.pass_(
-            "pkg:artifact-naming-workflow",
+            PKG_ARTIFACT_NAMING_WORKFLOW_GATE,
             "workflow includes NGINX version in artifact naming",
         )
     else:
         result.fail(
-            "pkg:artifact-naming-workflow",
+            PKG_ARTIFACT_NAMING_WORKFLOW_GATE,
             "workflow does not include NGINX version in artifact filenames",
         )
 
@@ -267,7 +277,7 @@ def check_install_docs(result: ValidationResult) -> None:
 
     compat_found = any(p.is_file() for p in COMPAT_DOCS)
     if compat_found:
-        result.pass_("docs:compatibility", "compatibility documentation exists")
+        result.pass_(DOCS_COMPATIBILITY_GATE, "compatibility documentation exists")
     else:
         # Check if compatibility info is in the install doc
         for p in INSTALL_DOCS:
@@ -276,12 +286,12 @@ def check_install_docs(result: ValidationResult) -> None:
                 r"compat|nginx.*version|--with-compat", content, re.IGNORECASE
             ):
                 result.pass_(
-                    "docs:compatibility",
+                    DOCS_COMPATIBILITY_GATE,
                     "compatibility info found in installation docs",
                 )
                 return
         result.fail(
-            "docs:compatibility",
+            DOCS_COMPATIBILITY_GATE,
             "no compatibility documentation found",
         )
 
