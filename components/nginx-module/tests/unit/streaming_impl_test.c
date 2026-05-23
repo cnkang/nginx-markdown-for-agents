@@ -1729,7 +1729,7 @@ test_fallback_to_fullbuffer_paths(void)
     ngx_http_markdown_metrics = &metrics;
 
     conf.max_size = 64;
-    ctx.conversion_attempted = 1;
+    ctx.conversion.attempted = 1;
     ctx.streaming.handle = (struct StreamingConverterHandle *) (uintptr_t) 0x2;
     ctx.streaming.prebuffer_initialized = 1;
     ctx.streaming.prebuffer.data = prebuf;
@@ -1741,7 +1741,7 @@ test_fallback_to_fullbuffer_paths(void)
     TEST_ASSERT(rc == NGX_DECLINED, "fallback should return NGX_DECLINED");
     TEST_ASSERT(ctx.processing_path == NGX_HTTP_MARKDOWN_PATH_FULLBUFFER,
         "fallback should switch to full-buffer path");
-    TEST_ASSERT(ctx.conversion_attempted == 0,
+    TEST_ASSERT(ctx.conversion.attempted == 0,
         "fallback should clear conversion_attempted");
     TEST_ASSERT(ctx.buffer_initialized == 1,
         "fallback should initialize main buffer");
@@ -2094,7 +2094,7 @@ test_init_handle_and_chunk_result_helpers(void)
         "init_handle should set streaming handle");
     TEST_ASSERT(ctx.streaming.commit_state == NGX_HTTP_MARKDOWN_STREAMING_COMMIT_PRE,
         "init_handle should enter pre-commit state");
-    TEST_ASSERT(ctx.conversion_attempted == 1,
+    TEST_ASSERT(ctx.conversion.attempted == 1,
         "init_handle should mark conversion attempted");
 
     ctx.streaming.handle = NULL;
@@ -2186,7 +2186,7 @@ test_init_handle_and_chunk_result_helpers(void)
     ctx.streaming.prebuffer_initialized = 0;
     ctx.streaming.failopen_replay_initialized = 0;
     ctx.processing_path = NGX_HTTP_MARKDOWN_PATH_STREAMING;
-    ctx.conversion_attempted = 0;
+    ctx.conversion.attempted = 0;
     conf.streaming.on_error = NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_REJECT;
     g_buffer_init_fail_after = 1;
     g_buffer_init_call_count = 0;
@@ -2202,7 +2202,7 @@ test_init_handle_and_chunk_result_helpers(void)
     ctx.streaming.prebuffer_initialized = 0;
     ctx.streaming.failopen_replay_initialized = 0;
     ctx.processing_path = NGX_HTTP_MARKDOWN_PATH_STREAMING;
-    ctx.conversion_attempted = 0;
+    ctx.conversion.attempted = 0;
     conf.streaming.on_error = NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_PASS;
     g_buffer_init_fail_after = 1;
     g_buffer_init_call_count = 0;

@@ -65,7 +65,7 @@ static ngx_conf_enum_t
  */
 static char *
 ngx_http_markdown_diagnostics_allow(ngx_conf_t *cf,
-    const ngx_command_t *cmd, void *conf)
+    ngx_command_t *cmd, void *conf)
 {
     ngx_http_markdown_conf_t  *mcf = conf;
     ngx_str_t                 *value;

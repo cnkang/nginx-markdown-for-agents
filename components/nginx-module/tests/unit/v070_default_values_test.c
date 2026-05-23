@@ -276,11 +276,11 @@ test_v070_defaults_both_unset(void)
     TEST_ASSERT(child != NULL, "child conf allocation");
 
     /* Verify initial unset state */
-    TEST_ASSERT(child->decompress_max_size == NGX_CONF_UNSET_SIZE,
+    TEST_ASSERT(child->decompress.max_size == NGX_CONF_UNSET_SIZE,
         "decompress_max_size should start as NGX_CONF_UNSET_SIZE");
-    TEST_ASSERT(child->parse_timeout == NGX_CONF_UNSET_MSEC,
+    TEST_ASSERT(child->decompress.parse_timeout == NGX_CONF_UNSET_MSEC,
         "parse_timeout should start as NGX_CONF_UNSET_MSEC");
-    TEST_ASSERT(child->parser_budget == NGX_CONF_UNSET_SIZE,
+    TEST_ASSERT(child->decompress.parser_budget == NGX_CONF_UNSET_SIZE,
         "parser_budget should start as NGX_CONF_UNSET_SIZE");
     TEST_ASSERT(child->advanced.dynconf_dry_run == NGX_CONF_UNSET,
         "dynconf_dry_run should start as NGX_CONF_UNSET");
@@ -296,7 +296,7 @@ test_v070_defaults_both_unset(void)
      * This ensures decompression budget tracks the conversion size limit,
      * preventing zip bombs without requiring explicit configuration.
      */
-    TEST_ASSERT(child->decompress_max_size == 10 * 1024 * 1024,
+    TEST_ASSERT(child->decompress.max_size == 10 * 1024 * 1024,
         "decompress_max_size should default to max_size (10MB)");
 
     /*
@@ -304,7 +304,7 @@ test_v070_defaults_both_unset(void)
      * Generous enough for large documents, strict enough to prevent
      * worker stalls from pathological inputs.
      */
-    TEST_ASSERT(child->parse_timeout == 30000,
+    TEST_ASSERT(child->decompress.parse_timeout == 30000,
         "parse_timeout should default to 30000ms (30s)");
 
     /*
@@ -312,7 +312,7 @@ test_v070_defaults_both_unset(void)
      * Allows parsing of large documents while preventing OOM from
      * adversarial inputs with deep nesting or excessive node counts.
      */
-    TEST_ASSERT(child->parser_budget == 64 * 1024 * 1024,
+    TEST_ASSERT(child->decompress.parser_budget == 64 * 1024 * 1024,
         "parser_budget should default to 64MB");
 
     /*
@@ -365,7 +365,7 @@ test_decompress_max_size_tracks_memory_budget(void)
         "max_size should be overridden by memory_budget (20MB)");
 
     /* decompress_max_size should track the effective max_size */
-    TEST_ASSERT(child->decompress_max_size == 20 * 1024 * 1024,
+    TEST_ASSERT(child->decompress.max_size == 20 * 1024 * 1024,
         "decompress_max_size should track memory_budget-overridden max_size");
 
     TEST_PASS("decompress_max_size correctly tracks memory_budget");
@@ -398,13 +398,13 @@ test_explicit_decompress_max_size_preserved(void)
     TEST_ASSERT(child != NULL, "child conf allocation");
 
     /* Explicitly set decompress_max_size (simulates markdown_decompress_max_size 20m) */
-    child->decompress_max_size = 20 * 1024 * 1024;
+    child->decompress.max_size = 20 * 1024 * 1024;
 
     rc = ngx_http_markdown_merge_conf(&cf, parent, child);
     TEST_ASSERT(rc == NGX_CONF_OK, "merge_conf should succeed");
 
     /* Explicit value should be preserved, not overridden */
-    TEST_ASSERT(child->decompress_max_size == 20 * 1024 * 1024,
+    TEST_ASSERT(child->decompress.max_size == 20 * 1024 * 1024,
         "explicit decompress_max_size (20MB) should be preserved");
 
     /* max_size should still be at its default (10MB) */
@@ -440,17 +440,17 @@ test_v070_directives_inherit_from_parent(void)
     TEST_ASSERT(child != NULL, "child conf allocation");
 
     /* Set parent values (simulates http-level config) */
-    parent->parse_timeout = 10000;              /* 10s */
-    parent->parser_budget = 32 * 1024 * 1024;   /* 32MB */
+    parent->decompress.parse_timeout = 10000;              /* 10s */
+    parent->decompress.parser_budget = 32 * 1024 * 1024;   /* 32MB */
     parent->advanced.dynconf_dry_run = 1;       /* on */
 
     rc = ngx_http_markdown_merge_conf(&cf, parent, child);
     TEST_ASSERT(rc == NGX_CONF_OK, "merge_conf should succeed");
 
     /* Child should inherit parent values */
-    TEST_ASSERT(child->parse_timeout == 10000,
+    TEST_ASSERT(child->decompress.parse_timeout == 10000,
         "parse_timeout should inherit from parent (10s)");
-    TEST_ASSERT(child->parser_budget == 32 * 1024 * 1024,
+    TEST_ASSERT(child->decompress.parser_budget == 32 * 1024 * 1024,
         "parser_budget should inherit from parent (32MB)");
     TEST_ASSERT(child->advanced.dynconf_dry_run == 1,
         "dynconf_dry_run should inherit from parent (on)");
@@ -485,22 +485,22 @@ test_v070_directives_child_override(void)
     TEST_ASSERT(child != NULL, "child conf allocation");
 
     /* Set parent values */
-    parent->parse_timeout = 10000;
-    parent->parser_budget = 32 * 1024 * 1024;
+    parent->decompress.parse_timeout = 10000;
+    parent->decompress.parser_budget = 32 * 1024 * 1024;
     parent->advanced.dynconf_dry_run = 1;
 
     /* Set child overrides */
-    child->parse_timeout = 5000;                /* 5s */
-    child->parser_budget = 16 * 1024 * 1024;    /* 16MB */
+    child->decompress.parse_timeout = 5000;                /* 5s */
+    child->decompress.parser_budget = 16 * 1024 * 1024;    /* 16MB */
     child->advanced.dynconf_dry_run = 0;        /* off */
 
     rc = ngx_http_markdown_merge_conf(&cf, parent, child);
     TEST_ASSERT(rc == NGX_CONF_OK, "merge_conf should succeed");
 
     /* Child explicit values should win */
-    TEST_ASSERT(child->parse_timeout == 5000,
+    TEST_ASSERT(child->decompress.parse_timeout == 5000,
         "child parse_timeout override (5s) should win");
-    TEST_ASSERT(child->parser_budget == 16 * 1024 * 1024,
+    TEST_ASSERT(child->decompress.parser_budget == 16 * 1024 * 1024,
         "child parser_budget override (16MB) should win");
     TEST_ASSERT(child->advanced.dynconf_dry_run == 0,
         "child dynconf_dry_run override (off) should win");
@@ -557,7 +557,7 @@ test_06x_defaults_unchanged(void)
         "on_wildcard should default to off (0.6.x compat)");
     TEST_ASSERT(child->buffer_chunked == 1,
         "buffer_chunked should default to on (0.6.x compat)");
-    TEST_ASSERT(child->auto_decompress == 1,
+    TEST_ASSERT(child->decompress.auto_decompress == 1,
         "auto_decompress should default to on (0.6.x compat)");
     TEST_ASSERT(child->policy.generate_etag == 1,
         "generate_etag should default to on (0.6.x compat)");
