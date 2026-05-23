@@ -45,7 +45,6 @@
 ngx_int_t
 ngx_http_markdown_get_reason_code_str(uint32_t code, ngx_str_t *out_str)
 {
-    const uint8_t  *ptr;
     uintptr_t       len;
 
     if (out_str == NULL) {
@@ -53,16 +52,14 @@ ngx_http_markdown_get_reason_code_str(uint32_t code, ngx_str_t *out_str)
     }
 
     len = 0;
-    ptr = markdown_reason_code_str(code, &len);
+    out_str->data = (u_char *) markdown_reason_code_str(code, &len);
 
-    if (ptr == NULL) {
+    if (out_str->data == NULL) {
         out_str->len = 0;
-        out_str->data = NULL;
         return NGX_DECLINED;
     }
 
     out_str->len = len;
-    out_str->data = (u_char *) ptr;
 
     return NGX_OK;
 }
@@ -90,7 +87,6 @@ ngx_int_t
 ngx_http_markdown_get_reason_code_metric_key(uint32_t code,
     ngx_str_t *out_str)
 {
-    const uint8_t  *ptr;
     uintptr_t       len;
 
     if (out_str == NULL) {
@@ -98,16 +94,14 @@ ngx_http_markdown_get_reason_code_metric_key(uint32_t code,
     }
 
     len = 0;
-    ptr = markdown_reason_code_metric_key(code, &len);
+    out_str->data = (u_char *) markdown_reason_code_metric_key(code, &len);
 
-    if (ptr == NULL) {
+    if (out_str->data == NULL) {
         out_str->len = 0;
-        out_str->data = NULL;
         return NGX_DECLINED;
     }
 
     out_str->len = len;
-    out_str->data = (u_char *) ptr;
 
     return NGX_OK;
 }
