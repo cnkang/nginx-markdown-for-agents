@@ -1550,8 +1550,8 @@ test_handle_conversion_failure_paths(void)
     rc = ngx_http_markdown_handle_conversion_failure(
         &r, &ctx, &conf, &result, 12);
     TEST_ASSERT(rc == NGX_DONE, "conversion category should propagate fail-open return");
-    TEST_ASSERT(ctx.has_error_category == 1, "error category should be recorded");
-    TEST_ASSERT(ctx.last_error_category == NGX_HTTP_MARKDOWN_ERROR_CONVERSION,
+    TEST_ASSERT(ctx.error.has_category == 1, "error category should be recorded");
+    TEST_ASSERT(ctx.error.last_category == NGX_HTTP_MARKDOWN_ERROR_CONVERSION,
                 "conversion category expected");
 
     reset_stub_state();
@@ -1567,7 +1567,7 @@ test_handle_conversion_failure_paths(void)
     rc = ngx_http_markdown_handle_conversion_failure(
         &r, &ctx, &conf, &result, 99);
     TEST_ASSERT(rc == NGX_OK, "resource category should use default fail-open");
-    TEST_ASSERT(ctx.last_error_category == NGX_HTTP_MARKDOWN_ERROR_RESOURCE_LIMIT,
+    TEST_ASSERT(ctx.error.last_category == NGX_HTTP_MARKDOWN_ERROR_RESOURCE_LIMIT,
                 "resource category expected");
 
     reset_stub_state();
@@ -1579,7 +1579,7 @@ test_handle_conversion_failure_paths(void)
     rc = ngx_http_markdown_handle_conversion_failure(
         &r, &ctx, &conf, &result, 1);
     TEST_ASSERT(rc == NGX_OK, "system category should route through fail-open");
-    TEST_ASSERT(ctx.last_error_category == NGX_HTTP_MARKDOWN_ERROR_SYSTEM,
+    TEST_ASSERT(ctx.error.last_category == NGX_HTTP_MARKDOWN_ERROR_SYSTEM,
                 "system category expected");
 
     TEST_PASS("handle_conversion_failure branches covered");
@@ -1613,7 +1613,7 @@ test_converter_not_initialized_path(void)
         &r, &ctx, &conf);
     TEST_ASSERT(rc == NGX_DECLINED,
                 "converter_not_initialized should follow fail-open strategy");
-    TEST_ASSERT(ctx.has_error_category == 1,
+    TEST_ASSERT(ctx.error.has_category == 1,
                 "system failure should set error category flag");
 
     elapsed_ms = 0;
@@ -1764,7 +1764,7 @@ test_misc_conversion_helpers(void)
     ngx_http_markdown_record_conversion_latency(5000);
 
     ngx_http_markdown_record_system_failure(&ctx);
-    TEST_ASSERT(ctx.has_error_category == 1,
+    TEST_ASSERT(ctx.error.has_category == 1,
                 "record_system_failure should set context flag");
 
     ctx.buffer.size = 400;

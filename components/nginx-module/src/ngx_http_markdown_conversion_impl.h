@@ -842,7 +842,7 @@ ngx_http_markdown_handle_conversion_failure(ngx_http_request_t *r,
 {
     ngx_http_markdown_error_category_t error_category;
     const ngx_str_t                  *category_str;
-    int                               err_len;
+    int                               err_len = 0;
 
     error_category = ngx_http_markdown_classify_error(result->error_code);
     category_str = ngx_http_markdown_error_category_string(error_category);

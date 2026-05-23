@@ -161,7 +161,7 @@ static void
 init_request(ngx_http_request_t *r)
 {
     memset(&g_conf, 0, sizeof(g_conf));
-    g_conf.decompress_max_size = 1024 * 1024;
+    g_conf.decompress.max_size = 1024 * 1024;
     g_pnalloc_fail_count = 0;
     g_calloc_buf_fail_once = 0;
     g_chain_link_fail_once = 0;
@@ -488,7 +488,7 @@ test_gzip_allocation_and_budget_setup_errors(void)
     init_request(&r);
     in = make_chain(compressed, compressed_len, &in_buf);
     out = NULL;
-    g_conf.decompress_max_size = 0;
+    g_conf.decompress.max_size = 0;
     TEST_ASSERT(ngx_http_markdown_decompress(&r,
                 NGX_HTTP_MARKDOWN_COMPRESSION_GZIP, &in, &out) == NGX_ERROR,
                 "invalid decompression budget should error after inflate init");
@@ -566,7 +566,7 @@ test_gzip_budget_exceeded(void)
     memset(plain, 'A', sizeof(plain));
 
     init_request(&r);
-    g_conf.decompress_max_size = 64;
+    g_conf.decompress.max_size = 64;
     compressed_len = gzip_compress(plain, sizeof(plain),
                                    compressed, sizeof(compressed));
     in = make_chain(compressed, compressed_len, &in_buf);
