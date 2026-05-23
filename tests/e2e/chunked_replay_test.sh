@@ -31,17 +31,20 @@ set -e
 NGINX_URL="${NGINX_URL:-http://localhost:8080}"
 METRICS_PATH="${METRICS_PATH:-/nginx-markdown/metrics}"
 TEST_PATH="${TEST_PATH:-/chunked-test}"
+ACCEPT_MARKDOWN="Accept: text/markdown"
 PASS_COUNT=0
 FAIL_COUNT=0
 
 pass() {
+    local msg="$1"
     PASS_COUNT=$((PASS_COUNT + 1))
-    echo "PASS: $1" >&2
+    echo "PASS: $msg" >&2
 }
 
 fail() {
+    local msg="$1"
     FAIL_COUNT=$((FAIL_COUNT + 1))
-    echo "FAIL: $1" >&2
+    echo "FAIL: $msg" >&2
 }
 
 check_prerequisites() {
@@ -66,7 +69,7 @@ check_prerequisites
 echo "Step 1: Testing chunked transfer encoding handling..." >&2
 
 RESPONSE=$(curl -sf \
-    -H "Accept: text/markdown" \
+    -H "$ACCEPT_MARKDOWN" \
     -H "Transfer-Encoding: chunked" \
     -D - \
     "${NGINX_URL}${TEST_PATH}" 2>/dev/null) || true
@@ -82,7 +85,7 @@ fi
 echo "Step 2: Verifying response completeness..." >&2
 
 HTTP_CODE=$(curl -sf -o /dev/null -w "%{http_code}" \
-    -H "Accept: text/markdown" \
+    -H "$ACCEPT_MARKDOWN" \
     "${NGINX_URL}${TEST_PATH}" 2>/dev/null) || HTTP_CODE="000"
 
 case "$HTTP_CODE" in
@@ -106,7 +109,7 @@ echo "Step 3: Testing fail-open for oversized chunked content..." >&2
 
 # Generate a large request body to trigger max-size failure
 LARGE_ACCEPT_RESPONSE=$(curl -sf -o /dev/null -w "%{http_code}" \
-    -H "Accept: text/markdown" \
+    -H "$ACCEPT_MARKDOWN" \
     "${NGINX_URL}${TEST_PATH}?size=large" 2>/dev/null) || LARGE_ACCEPT_RESPONSE="000"
 
 case "$LARGE_ACCEPT_RESPONSE" in
@@ -153,7 +156,7 @@ echo "Step 5: Verifying no truncation on replay..." >&2
 
 CONTENT_LENGTH=$(curl -sf -o /dev/null \
     -w "%{size_download}" \
-    -H "Accept: text/markdown" \
+    -H "$ACCEPT_MARKDOWN" \
     "${NGINX_URL}${TEST_PATH}" 2>/dev/null) || CONTENT_LENGTH="0"
 
 if [ "$CONTENT_LENGTH" -gt 0 ] 2>/dev/null; then
