@@ -215,7 +215,7 @@ ngx_http_markdown_on_error(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     static u_char             pass_str[]   = "pass";
     static u_char             reject_str[] = "reject";
     ngx_http_markdown_conf_t *mcf = conf;
-    ngx_str_t                *value;
+    const ngx_str_t          *value;
 
     value = cf->args->elts;
 

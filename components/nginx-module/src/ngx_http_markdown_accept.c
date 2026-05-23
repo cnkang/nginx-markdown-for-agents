@@ -115,8 +115,9 @@ ngx_int_t
 ngx_http_markdown_should_convert(ngx_http_request_t *r,
     const ngx_http_markdown_conf_t *conf, ngx_uint_t *out_reason)
 {
-    ngx_table_elt_t         *accept_header;
+    const ngx_table_elt_t   *accept_header;
     struct FFIAcceptResult   result;
+    uint8_t                  on_wildcard;
 
     if (conf == NULL) {
         if (out_reason != NULL) {
@@ -133,10 +134,12 @@ ngx_http_markdown_should_convert(ngx_http_request_t *r,
         return 0;
     }
 
+    on_wildcard = (conf->on_wildcard != 0) ? 1 : 0;
+
     markdown_negotiate_accept(
         accept_header->value.data,
         accept_header->value.len,
-        conf->on_wildcard,
+        on_wildcard,
         &result);
 
     if (out_reason != NULL) {
