@@ -23,6 +23,7 @@
 #define NGX_HTTP_INTERNAL_SERVER_ERROR 500
 #define NGX_ERROR                    -1
 #define NGX_OK                       0
+#define NGX_DECLINED                 -5
 #define NGX_LOG_DEBUG                8
 #define NGX_LOG_INFO                 4
 

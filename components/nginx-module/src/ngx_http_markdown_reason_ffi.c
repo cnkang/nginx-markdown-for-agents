@@ -54,7 +54,7 @@ ngx_http_markdown_get_reason_code_str(uint32_t code, ngx_str_t *out_str)
 
     len = 0;
     p = (const u_char *) markdown_reason_code_str(code, &len);
-    out_str->data = (u_char *) p;
+    out_str->data = (u_char *) p; /* NOSONAR: ngx_str_t.data is u_char* per NGINX API */
 
     if (out_str->data == NULL) {
         out_str->len = 0;
@@ -98,7 +98,7 @@ ngx_http_markdown_get_reason_code_metric_key(uint32_t code,
 
     len = 0;
     p = (const u_char *) markdown_reason_code_metric_key(code, &len);
-    out_str->data = (u_char *) p;
+    out_str->data = (u_char *) p; /* NOSONAR: ngx_str_t.data is u_char* per NGINX API */
 
     if (out_str->data == NULL) {
         out_str->len = 0;
