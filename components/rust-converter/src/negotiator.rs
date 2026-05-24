@@ -182,8 +182,7 @@ fn extract_q_values(entries: &[AcceptEntry], on_wildcard: bool) -> (u16, u16) {
                 markdown_q = markdown_q.max(entry.q_value);
                 html_q = html_q.max(entry.q_value);
             }
-            "text/*" => {
-                // text/* matches both text/markdown and text/html
+            "text/*" if on_wildcard => {
                 markdown_q = markdown_q.max(entry.q_value);
                 html_q = html_q.max(entry.q_value);
             }

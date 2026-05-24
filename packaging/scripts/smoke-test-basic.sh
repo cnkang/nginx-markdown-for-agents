@@ -106,7 +106,7 @@ info "Target NGINX version: ${NGINX_VERSION}"
 # Install log setup
 ##############################################################################
 
-INSTALL_LOG="$(mktemp /tmp/smoke-test-install-XXXXXX.log)"
+INSTALL_LOG="$(mktemp -t smoke-test-install.XXXXXX)"
 
 ##############################################################################
 # Package-format-specific installation and verification

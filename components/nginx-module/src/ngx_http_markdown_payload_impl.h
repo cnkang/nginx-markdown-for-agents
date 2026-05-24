@@ -97,11 +97,12 @@ ngx_http_markdown_fail_open_buffered_response(ngx_http_request_t *r,
 
     ngx_http_markdown_reclassify_fail_open_path(ctx);
     ctx->eligible = 0;
-    r->buffered &= ~NGX_HTTP_MARKDOWN_BUFFERED;
 
     if (ngx_http_markdown_forward_headers(r, ctx) != NGX_OK) {
         return NGX_ERROR;
     }
+
+    r->buffered &= ~NGX_HTTP_MARKDOWN_BUFFERED;
 
     return ngx_http_markdown_send_buffered_original_response(r, ctx);
 }

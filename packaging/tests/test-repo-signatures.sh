@@ -236,7 +236,7 @@ if [ -n "$APT_REPO_URL" ]; then
         pass "apt-get update skipped (not root)"
     else
         # Create temporary sources list
-        TMPLIST=$(mktemp /tmp/nginx-markdown-test-XXXXXX.list)
+        TMPLIST=$(mktemp -t nginx-markdown-test.XXXXXX)
         trap 'rm -f "$TMPLIST"' EXIT
 
         echo "deb [signed-by=/usr/share/keyrings/nginx-markdown.gpg] ${APT_REPO_URL} stable main" \
@@ -273,7 +273,7 @@ if [ -n "$YUM_REPO_URL" ]; then
         pass "yum makecache skipped (not root)"
     else
         # Create temporary repo file
-        TMPREPO=$(mktemp /tmp/nginx-markdown-test-XXXXXX.repo)
+        TMPREPO=$(mktemp -t nginx-markdown-test.XXXXXX)
         trap 'rm -f "$TMPREPO"' EXIT
 
         cat > "$TMPREPO" <<REPOEOF
