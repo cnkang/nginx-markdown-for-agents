@@ -345,13 +345,13 @@ ngx_http_markdown_log_decision_with_category(ngx_http_request_t *r,
         effective_verbosity = NGX_HTTP_MARKDOWN_LOG_INFO;
     }
 
+    NGX_HTTP_MARKDOWN_METRIC_INC(results.decision_count);
+
     if (effective_verbosity <= NGX_HTTP_MARKDOWN_LOG_WARN
         && !is_failure)
     {
         return;
     }
-
-    NGX_HTTP_MARKDOWN_METRIC_INC(results.decision_count);
 
     /* Select NGINX log level based on outcome type (FR-03.5) */
     log_level = is_failure ? NGX_LOG_WARN : NGX_LOG_INFO;

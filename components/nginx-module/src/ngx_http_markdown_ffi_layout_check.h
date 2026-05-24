@@ -265,4 +265,21 @@ _Static_assert(NEGOTIATE_REASON_LOWER_Q != NEGOTIATE_REASON_EXPLICIT_REJECT,
 _Static_assert(NEGOTIATE_REASON_EXPLICIT_REJECT != NEGOTIATE_REASON_MALFORMED,
     "negotiate reason codes must be distinct");
 
+/* ----------------------------------------------------------------
+ * FFIDecompResult layout (24 bytes on LP64).
+ *   output        : *mut u8    offset  0, size 8
+ *   output_len    : usize      offset  8, size 8
+ *   error_category : u32       offset 16, size 4
+ *   (padding)                  offset 20..23
+ * Total: 24 bytes, align 8
+ * ---------------------------------------------------------------- */
+_Static_assert(sizeof(FFIDecompResult) == 24,
+    "FFIDecompResult size must match Rust (24 bytes on 64-bit)");
+_Static_assert(offsetof(FFIDecompResult, output) == 0,
+    "FFIDecompResult.output offset must be 0");
+_Static_assert(offsetof(FFIDecompResult, output_len) == 8,
+    "FFIDecompResult.output_len offset must be 8");
+_Static_assert(offsetof(FFIDecompResult, error_category) == 16,
+    "FFIDecompResult.error_category offset must be 16");
+
 #endif /* NGX_HTTP_MARKDOWN_FFI_LAYOUT_CHECK_H */
