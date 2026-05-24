@@ -782,7 +782,7 @@ ngx_http_markdown_diagnostics_directive(ngx_conf_t *cf, ngx_command_t *cmd, void
 {
     ngx_http_markdown_conf_t *mcf = conf;
     ngx_http_core_loc_conf_t *clcf;
-    ngx_str_t                *value;
+    const ngx_str_t          *value;
 
     (void) cmd;
 
