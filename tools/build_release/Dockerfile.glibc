@@ -35,6 +35,7 @@ ENV PATH="/root/.cargo/bin:${PATH}"
 ARG NGINX_VERSION=1.28.2
 
 WORKDIR /build
+COPY packaging/nginx-checksums.yaml /src/packaging/nginx-checksums.yaml
 RUN set -eux; \
     retry() { \
         attempts="$1"; \
@@ -51,7 +52,25 @@ RUN set -eux; \
         done; \
     }; \
     retry 5 curl --proto '=https' --tlsv1.2 -fsSL \
-        "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" | tar xz
+        -o /tmp/nginx.tar.gz \
+        "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz"; \
+    CHECKSUM_FILE="/src/packaging/nginx-checksums.yaml"; \
+    if [ -f "$${CHECKSUM_FILE}" ]; then \
+        EXPECTED_SHA256=$$(python3 -c "import yaml; data=yaml.safe_load(open('$${CHECKSUM_FILE}')); print(data['checksums']['${NGINX_VERSION}'])" 2>/dev/null || echo ""); \
+        if [ -n "$${EXPECTED_SHA256}" ] && [ "$${EXPECTED_SHA256##*PLACEHOLDER*}" = "" ]; then \
+            echo "WARNING: SHA256 for nginx ${NGINX_VERSION} is a placeholder, skipping verification"; \
+        elif [ -n "$${EXPECTED_SHA256}" ]; then \
+            ACTUAL_SHA256=$$(sha256sum /tmp/nginx.tar.gz | cut -d' ' -f1); \
+            if [ "$${ACTUAL_SHA256}" != "$${EXPECTED_SHA256}" ]; then \
+                echo "ERROR: SHA256 mismatch for nginx tarball" >&2; exit 1; \
+            fi; \
+            echo "SHA256 verified for nginx tarball"; \
+        fi; \
+    else \
+        echo "WARNING: packaging/nginx-checksums.yaml not found, skipping SHA256 verification"; \
+    fi; \
+    tar xzf /tmp/nginx.tar.gz; \
+    rm -f /tmp/nginx.tar.gz
 
 # Copy only files required for module build.
 COPY Makefile /src/Makefile
