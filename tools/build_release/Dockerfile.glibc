@@ -1,5 +1,5 @@
 # tools/build_release/Dockerfile.glibc
-ARG OS_BASE=debian:bookworm-slim
+ARG OS_BASE=ubuntu:22.04
 FROM ${OS_BASE}
 
 RUN set -eux; \
