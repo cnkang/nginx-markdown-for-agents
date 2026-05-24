@@ -2,12 +2,13 @@
 # sign-packages.sh — Sign .deb and .rpm packages using GPG.
 #
 # Usage:
-#   sign-packages.sh [-k KEY_ID] [-d DIR] [-h]
+#   sign-packages.sh [-k KEY_ID] [-d DIR] [--require-packages] [-h]
 #
 # Options:
-#   -k KEY_ID   GPG key ID to use for signing (default: $GPG_KEY_ID env var)
-#   -d DIR      Directory containing packages to sign (default: ./dist)
-#   -h          Show this help message
+#   -k KEY_ID          GPG key ID to use for signing (default: $GPG_KEY_ID env var)
+#   -d DIR             Directory containing packages to sign (default: ./dist)
+#   --require-packages  Exit with error if no packages found (instead of warning)
+#   -h                 Show this help message
 #
 # Environment:
 #   GPG_KEY_ID  GPG key ID (used if -k not provided)
@@ -42,11 +43,18 @@ info() {
 
 KEY_ID="${GPG_KEY_ID:-}"
 PKG_DIR="./dist"
+REQUIRE_PACKAGES=0
 
-while getopts "k:d:h" opt; do
+while getopts "k:d:h-:" opt; do
     case "$opt" in
         k) KEY_ID="$OPTARG" ;;
         d) PKG_DIR="$OPTARG" ;;
+        -)
+            case "${OPTARG}" in
+                require-packages) REQUIRE_PACKAGES=1 ;;
+                *) usage; exit 1 ;;
+            esac
+            ;;
         h) usage; exit 0 ;;
         *) usage; exit 1 ;;
     esac
@@ -153,6 +161,9 @@ if [ "$FAIL_COUNT" -gt 0 ]; then
 fi
 
 if [ "$SUCCESS_COUNT" -eq 0 ]; then
+    if [ "$REQUIRE_PACKAGES" -eq 1 ]; then
+        die "No packages found in '$PKG_DIR' (--require-packages mode)"
+    fi
     info "WARNING: No packages found in '$PKG_DIR'"
 fi
 

@@ -14,13 +14,13 @@ and documented across the required surfaces:
    _total suffix for counters, snake_case)
 
 New metrics validated:
-- markdown_decompression_budget_exceeded_total
-- markdown_decompression_format_error_total
-- markdown_decompression_truncated_input_total
-- markdown_decompression_io_error_total
-- markdown_parse_timeouts_total
-- markdown_parse_budget_exceeded_total
-- markdown_replay_buffer_errors_total
+- nginx_markdown_decompression_budget_exceeded_total
+- nginx_markdown_decompression_format_error_total
+- nginx_markdown_decompression_truncated_input_total
+- nginx_markdown_decompression_io_error_total
+- nginx_markdown_parse_timeouts_total
+- nginx_markdown_parse_budget_exceeded_total
+- nginx_markdown_replay_buffer_errors_total
 
 Exit codes:
   0 - All checks passed

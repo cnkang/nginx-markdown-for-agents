@@ -42,6 +42,7 @@ jobs:
   sign-packages:
     name: Sign DEB/RPM Packages
     runs-on: ubuntu-latest
+    environment: release-signing
     permissions:
       contents: read
     steps:
@@ -102,6 +103,7 @@ jobs:
     name: Sign Repository Metadata
     needs: sign-packages
     runs-on: ubuntu-latest
+    environment: release-signing
     permissions:
       contents: read
     steps:

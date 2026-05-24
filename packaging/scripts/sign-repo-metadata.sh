@@ -2,13 +2,14 @@
 # sign-repo-metadata.sh — Sign APT and YUM repository metadata using GPG.
 #
 # Usage:
-#   sign-repo-metadata.sh [-k KEY_ID] [-a APT_DIR] [-y YUM_DIR] [-h]
+#   sign-repo-metadata.sh [-k KEY_ID] [-a APT_DIR] [-y YUM_DIR] [--require-metadata] [-h]
 #
 # Options:
-#   -k KEY_ID   GPG key ID to use for signing (default: $GPG_KEY_ID env var)
-#   -a APT_DIR  APT repository root (containing dists/) (default: ./repo/apt)
-#   -y YUM_DIR  YUM repository root (containing repodata/) (default: ./repo/yum)
-#   -h          Show this help message
+#   -k KEY_ID           GPG key ID to use for signing (default: $GPG_KEY_ID env var)
+#   -a APT_DIR          APT repository root (containing dists/) (default: ./repo/apt)
+#   -y YUM_DIR          YUM repository root (containing repodata/) (default: ./repo/yum)
+#   --require-metadata   Exit with error if no metadata found (instead of warning)
+#   -h                  Show this help message
 #
 # Environment:
 #   GPG_KEY_ID  GPG key ID (used if -k not provided)
@@ -44,12 +45,19 @@ info() {
 KEY_ID="${GPG_KEY_ID:-}"
 APT_DIR="./repo/apt"
 YUM_DIR="./repo/yum"
+REQUIRE_METADATA=0
 
-while getopts "k:a:y:h" opt; do
+while getopts "k:a:y:h-:" opt; do
     case "$opt" in
         k) KEY_ID="$OPTARG" ;;
         a) APT_DIR="$OPTARG" ;;
         y) YUM_DIR="$OPTARG" ;;
+        -)
+            case "${OPTARG}" in
+                require-metadata) REQUIRE_METADATA=1 ;;
+                *) usage; exit 1 ;;
+            esac
+            ;;
         h) usage; exit 0 ;;
         *) usage; exit 1 ;;
     esac
@@ -132,6 +140,9 @@ $(find "$APT_DIR/dists" -name "Release" -not -name "InRelease" 2>/dev/null || tr
 EOF
 
     if [ "$found" -eq 0 ]; then
+        if [ "$REQUIRE_METADATA" -eq 1 ]; then
+            die "No Release files found under $APT_DIR/dists/ (--require-metadata mode)"
+        fi
         info "WARNING: No Release files found under $APT_DIR/dists/"
     else
         info "APT signing complete: $found Release file(s) signed"
@@ -186,6 +197,9 @@ $(find "$YUM_DIR" -path "*/repodata/repomd.xml" 2>/dev/null || true)
 EOF
 
     if [ "$found" -eq 0 ]; then
+        if [ "$REQUIRE_METADATA" -eq 1 ]; then
+            die "No repomd.xml files found under $YUM_DIR (--require-metadata mode)"
+        fi
         info "WARNING: No repomd.xml files found under $YUM_DIR"
     else
         info "YUM signing complete: $found repomd.xml file(s) signed"
