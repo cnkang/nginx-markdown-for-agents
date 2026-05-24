@@ -327,6 +327,15 @@ pub unsafe extern "C" fn markdown_make_decision(
         }
         Decision::Skip(reason) => {
             result_ref.decision = 1;
+            /* Legacy SkipReason (1-8) maps to ReasonCode (1-8) in the
+             * FFIDecisionResult.reason_code field. The new ReasonCode
+             * range (0-17) extends beyond this for streaming and
+             * decompression errors (9-17), but those are reported
+             * through separate FFI paths (streaming result codes,
+             * FFIDecompResult.error_category) rather than through
+             * this decision result. The SkipReason→reason_code
+             * mapping here covers only the pre-conversion decision
+             * outcomes, not post-conversion failure categories. */
             result_ref.reason_code = match reason {
                 SkipReason::SkipAccept => 1,
                 SkipReason::SkipNoAccept => 2,
@@ -579,13 +588,7 @@ unsafe fn optional_str<'a>(ptr: *const u8, len: usize) -> Option<&'a str> {
     if ptr.is_null() || len == 0 {
         return None;
     }
-    std::str::from_utf8(unsafe { std::slice::from_raw_parts(ptr, len) })
-        .ok()
-        .map(|s| {
-            let ptr = s.as_ptr();
-            let len = s.len();
-            unsafe { std::str::from_utf8_unchecked(std::slice::from_raw_parts(ptr, len)) }
-        })
+    std::str::from_utf8(unsafe { std::slice::from_raw_parts(ptr, len) }).ok()
 }
 
 /// Initialize a `MarkdownOptions` struct with sensible defaults.
