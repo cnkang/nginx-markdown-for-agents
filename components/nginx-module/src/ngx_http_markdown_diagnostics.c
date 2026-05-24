@@ -425,8 +425,8 @@ static ngx_int_t
 ngx_http_markdown_diagnostics_check_access(ngx_http_request_t *r)
 {
     const struct sockaddr        *sa;
-    ngx_http_markdown_conf_t    *conf;
-    const ngx_array_t           *allow_list;
+    const ngx_http_markdown_conf_t    *conf;
+    const ngx_array_t                 *allow_list;
 
     sa = r->connection->sockaddr;
 
@@ -506,7 +506,7 @@ ngx_http_markdown_diagnostics_build_json(ngx_http_request_t *r,
     u_char                              *snap_buf;
     size_t                               snap_len;
     ngx_int_t                            rc;
-    ngx_http_markdown_diag_state_t      *state;
+    const ngx_http_markdown_diag_state_t      *state;
     ngx_http_markdown_diag_metrics_t     metrics;
     ngx_http_markdown_diag_dynconf_t     dynconf;
 
