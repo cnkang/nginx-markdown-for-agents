@@ -154,10 +154,6 @@ ngx_http_markdown_find_header_in_part(ngx_list_part_t *part,
 static ngx_table_elt_t *
 ngx_http_markdown_find_header(ngx_http_request_t *r, const u_char *name, size_t name_len)
 {
-    if (r->headers_out.headers.part.nelts == 0) {
-        return NULL;
-    }
-
     return ngx_http_markdown_find_header_in_part(&r->headers_out.headers.part,
                                                  name, name_len);
 }
@@ -238,10 +234,6 @@ ngx_http_markdown_invalidate_headers(ngx_http_request_t *r,
                                      ngx_flag_t stop_after_first,
                                      const char *log_message)
 {
-    if (r->headers_out.headers.part.nelts == 0) {
-        return;
-    }
-
     ngx_http_markdown_invalidate_headers_in_part(r, &r->headers_out.headers.part,
                                                  name, name_len, stop_after_first,
                                                  log_message);
