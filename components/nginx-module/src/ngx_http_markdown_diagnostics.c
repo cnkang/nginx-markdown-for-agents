@@ -305,6 +305,25 @@ ngx_http_markdown_diagnostics_get_state(void)
  *   NGX_OK             - access permitted
  *   NGX_HTTP_FORBIDDEN - access denied
  */
+#if (NGX_HAVE_INET6)
+static ngx_int_t
+ngx_http_markdown_diagnostics_match_ipv6_cidr(
+    const struct sockaddr_in6 *sin6, const ngx_cidr_t *cidr)
+{
+    for (ngx_uint_t j = 0; j < 16; j++) {
+        if ((sin6->sin6_addr.s6_addr[j]
+             & cidr->u.in6.mask.s6_addr[j])
+            != cidr->u.in6.addr.s6_addr[j])
+        {
+            return NGX_DECLINED;
+        }
+    }
+
+    return NGX_OK;
+}
+#endif
+
+
 static ngx_int_t
 ngx_http_markdown_diagnostics_check_cidr(const struct sockaddr *sa,
     const ngx_array_t *allow_list)
@@ -341,23 +360,10 @@ ngx_http_markdown_diagnostics_check_cidr(const struct sockaddr *sa,
             }
 
             sin6 = (const struct sockaddr_in6 *) sa;
+            if (ngx_http_markdown_diagnostics_match_ipv6_cidr(
+                    sin6, &cidrs[i]) == NGX_OK)
             {
-                ngx_uint_t  match;
-
-                match = 1;
-                for (ngx_uint_t j = 0; j < 16; j++) {
-                    if ((sin6->sin6_addr.s6_addr[j]
-                         & cidrs[i].u.in6.mask.s6_addr[j])
-                        != cidrs[i].u.in6.addr.s6_addr[j])
-                    {
-                        match = 0;
-                        break;
-                    }
-                }
-
-                if (match) {
-                    return NGX_OK;
-                }
+                return NGX_OK;
             }
             break;
 #endif
@@ -420,7 +426,7 @@ ngx_http_markdown_diagnostics_check_access(ngx_http_request_t *r)
 {
     const struct sockaddr        *sa;
     ngx_http_markdown_conf_t    *conf;
-    ngx_array_t                 *allow_list;
+    const ngx_array_t           *allow_list;
 
     sa = r->connection->sockaddr;
 
@@ -496,7 +502,7 @@ ngx_http_markdown_diagnostics_build_json(ngx_http_request_t *r,
     u_char                              *p;
     u_char                              *last;
     size_t                               buf_size;
-    ngx_http_markdown_conf_t            *conf;
+    const ngx_http_markdown_conf_t  *conf;
     u_char                              *snap_buf;
     size_t                               snap_len;
     ngx_int_t                            rc;
@@ -552,7 +558,7 @@ ngx_http_markdown_diagnostics_build_json(ngx_http_request_t *r,
     {
         ngx_uint_t                          idx;
         ngx_uint_t                          count;
-        ngx_http_markdown_diag_decision_t  *entry;
+        const ngx_http_markdown_diag_decision_t  *entry;
 
         count = state->ring.count;
 
