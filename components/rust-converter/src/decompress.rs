@@ -77,10 +77,10 @@ impl DecompError {
     /// - 104 = io_error
     pub fn error_category(&self) -> u32 {
         match self {
-            Self::BudgetExceeded => 101,
-            Self::FormatError(_) => 102,
-            Self::TruncatedInput(_) => 103,
-            Self::IoError(_) => 104,
+            Self::BudgetExceeded => crate::ffi::abi::DECOMP_CATEGORY_BUDGET_EXCEEDED,
+            Self::FormatError(_) => crate::ffi::abi::DECOMP_CATEGORY_FORMAT_ERROR,
+            Self::TruncatedInput(_) => crate::ffi::abi::DECOMP_CATEGORY_TRUNCATED_INPUT,
+            Self::IoError(_) => crate::ffi::abi::DECOMP_CATEGORY_IO_ERROR,
         }
     }
 }

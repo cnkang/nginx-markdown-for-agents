@@ -57,7 +57,7 @@
 //! - Concurrent calls to `markdown_convert()` on the same handle are unsafe
 //! - Multiple converter instances can be used concurrently
 
-mod abi;
+pub(crate) mod abi;
 mod convert;
 mod exports;
 mod memory;

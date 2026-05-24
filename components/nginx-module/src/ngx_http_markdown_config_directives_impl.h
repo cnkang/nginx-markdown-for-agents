@@ -1027,8 +1027,11 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      * markdown_parse_timeout <time>
      *
      * Maximum time to spend on HTML parsing phase (e.g., 30s, 5000ms).
-     * Parsing that exceeds this deadline is terminated and the request
-     * proceeds according to the on_error policy.
+     * The parse phase deadline is checked before and after parsing; the HTML
+     * parser itself is not preemptively interrupted. If the deadline expires,
+     * parsing is aborted and the request proceeds according to the on_error
+     * policy. Combine with markdown_max_size, markdown_decompress_max_size, and
+     * markdown_parser_budget for comprehensive resource control.
      *
      * Default: 30s
      * Context: http, server, location
