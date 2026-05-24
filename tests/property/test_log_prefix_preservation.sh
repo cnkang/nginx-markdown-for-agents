@@ -144,7 +144,7 @@ echo ""
 
 # --- Summary ---
 echo "=== SUMMARY ==="
-echo "Property 1 (log site count): $([ "$CURRENT_LOG_SITES" -eq "$BASELINE_LOG_SITES" ] && echo 'PASS' || echo 'FAIL')"
+echo "Property 1 (log site count): $([[ "$CURRENT_LOG_SITES" -eq "$BASELINE_LOG_SITES" ]] && echo 'PASS' || echo 'FAIL')"
 echo "Property 2 (unit tests):     PASS"
 echo "Property 3 (coverage bar):   PASS"
 echo "Property 4 (diff analysis):  PASS"

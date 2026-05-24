@@ -151,7 +151,8 @@ log_fail() {
 validate_config() {
   local test_id="$1"
   local description="$2"
-  local http_directives="$3" # NOSONAR: used in heredoc below
+  local http_directives="$3"
+  : "${http_directives}"
 
   local conf_file="${TMPDIR_BASE}/test_${test_id}.conf"
   local log_file="${TMPDIR_BASE}/test_${test_id}.log"
