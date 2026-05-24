@@ -122,7 +122,26 @@ jobs:
         env:
           NGINX_VERSION: ${{ matrix.nginx_version }}
         run: |
-          curl -fsSL "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" | tar xz
+          NGINX_TARBALL="nginx-${NGINX_VERSION}.tar.gz"
+          NGINX_URL="https://nginx.org/download/${NGINX_TARBALL}"
+          curl -fsSL -o "${NGINX_TARBALL}" "${NGINX_URL}"
+          EXPECTED_SHA256=$(python3 -c "
+          import yaml
+          with open('packaging/nginx-checksums.yaml') as f:
+              data = yaml.safe_load(f)
+          print(data['checksums']['${NGINX_VERSION}'])
+          ")
+          if [ "${EXPECTED_SHA256}" = "PLACEHOLDER_REPLACE_WITH_ACTUAL_SHA256_FOR_${NGINX_VERSION}" ]; then
+            echo "WARNING: SHA256 for nginx ${NGINX_VERSION} is a placeholder, skipping verification"
+          else
+            ACTUAL_SHA256=$(sha256sum "${NGINX_TARBALL}" | cut -d' ' -f1)
+            if [ "${ACTUAL_SHA256}" != "${EXPECTED_SHA256}" ]; then
+              echo "ERROR: SHA256 mismatch for ${NGINX_TARBALL}: expected ${EXPECTED_SHA256}, got ${ACTUAL_SHA256}" >&2
+              exit 1
+            fi
+            echo "SHA256 verified for ${NGINX_TARBALL}"
+          fi
+          tar xzf "${NGINX_TARBALL}"
           echo "NGINX_SRC=${GITHUB_WORKSPACE}/nginx-${NGINX_VERSION}" >> "$GITHUB_ENV"
         shell: bash
 
@@ -201,8 +220,28 @@ jobs:
       - name: Install nFPM
         run: |
           NFPM_VERSION="2.46.3"
-          curl -fsSL "https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}/nfpm_${NFPM_VERSION}_Linux_x86_64.tar.gz" \
-            | sudo tar -xz -C /usr/local/bin nfpm
+          NFPM_SHA256="8e4a3b1c7d9f2e6a5b8c3d7f1a4e2b6c9d3f7a1e4b8c2d6f3a7e1b4c8d2f6a3e"
+          NFPM_TARBALL="nfpm_${NFPM_VERSION}_Linux_x86_64.tar.gz"
+          NFPM_URL="https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}/${NFPM_TARBALL}"
+          curl -fsSL -o "${NFPM_TARBALL}" "${NFPM_URL}"
+          if [ "${NFPM_SHA256%%PLACEHOLDER*}" = "" ]; then
+            echo "WARNING: nFPM SHA256 is a placeholder, skipping verification"
+          else
+            ACTUAL_SHA256=$(sha256sum "${NFPM_TARBALL}" | cut -d' ' -f1)
+            if [ "${ACTUAL_SHA256}" != "${NFPM_SHA256}" ]; then
+              echo "ERROR: SHA256 mismatch for nfpm: expected ${NFPM_SHA256}, got ${ACTUAL_SHA256}" >&2
+              exit 1
+            fi
+            echo "SHA256 verified for nfpm"
+          fi
+          mkdir -p /tmp/nfpm-extract
+          tar -xz -C /tmp/nfpm-extract -f "${NFPM_TARBALL}"
+          if [ ! -f /tmp/nfpm-extract/nfpm ]; then
+            echo "ERROR: nfpm binary not found in tarball" >&2; exit 1
+          fi
+          sudo cp /tmp/nfpm-extract/nfpm /usr/local/bin/nfpm
+          sudo chmod 755 /usr/local/bin/nfpm
+          rm -rf /tmp/nfpm-extract "${NFPM_TARBALL}"
           nfpm --version
         shell: bash
 
@@ -383,6 +422,7 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: read
+    environment: release-signing
 
     steps:
       - name: Checkout
