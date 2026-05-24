@@ -604,11 +604,14 @@ mod layout_tests {
             ERROR_DECOMPRESSION_BUDGET_EXCEEDED,
             ERROR_PARSE_TIMEOUT,
             ERROR_PARSE_BUDGET_EXCEEDED,
+            ERROR_DECOMPRESSION_FORMAT_ERROR,
+            ERROR_DECOMPRESSION_TRUNCATED_INPUT,
+            ERROR_DECOMPRESSION_IO_ERROR,
             ERROR_INTERNAL,
         ];
 
         // Expected count of non-streaming ERROR_* constants in ffi/abi.rs
-        let expected_base_count: usize = 10;
+        let expected_base_count: usize = 13;
         assert_eq!(
             base_codes.len(),
             expected_base_count,
@@ -627,7 +630,7 @@ mod layout_tests {
                 ERROR_POST_COMMIT,
             ];
             let total = base_codes.len() + streaming_codes.len();
-            let expected_total: usize = 13;
+            let expected_total: usize = 16;
             assert_eq!(
                 total, expected_total,
                 "Total error code count with streaming ({total}) must match expected ({expected_total})"
