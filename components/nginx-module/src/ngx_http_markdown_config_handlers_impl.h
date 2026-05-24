@@ -790,24 +790,32 @@ ngx_http_markdown_diagnostics_directive(ngx_conf_t *cf, ngx_command_t *cmd, void
 
     if (value[1].len == 2 && strncasecmp((const char *) value[1].data, "on", 2) == 0) {
         mcf->ops.diagnostics_enabled = 1;
+
+        clcf = ngx_http_conf_get_module_loc_conf(cf, ngx_http_core_module);
+        if (clcf == NULL) {
+            ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+                               "failed to get core location configuration for \"%V\" directive",
+                               &cmd->name);
+            return NGX_CONF_ERROR;
+        }
+
+        if (clcf->handler != NULL) {
+            ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+                               "\"%V\" cannot be combined with another content handler "
+                               "in the same location",
+                               &cmd->name);
+            return NGX_CONF_ERROR;
+        }
+
+        clcf->handler = ngx_http_markdown_diagnostics_handler;
+
+        ngx_conf_log_error(NGX_LOG_INFO, cf, 0,
+                           "markdown: diagnostics endpoint enabled at this location");
     } else if (value[1].len == 3 && strncasecmp((const char *) value[1].data, "off", 3) == 0) {
         mcf->ops.diagnostics_enabled = 0;
     } else {
         return "invalid value";
     }
-
-    clcf = ngx_http_conf_get_module_loc_conf(cf, ngx_http_core_module);
-    if (clcf == NULL) {
-        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
-                           "failed to get core location configuration for \"%V\" directive",
-                           &cmd->name);
-        return NGX_CONF_ERROR;
-    }
-
-    clcf->handler = ngx_http_markdown_diagnostics_handler;
-
-    ngx_conf_log_error(NGX_LOG_INFO, cf, 0,
-                       "markdown: diagnostics endpoint enabled at this location");
 
     return NGX_CONF_OK;
 }
