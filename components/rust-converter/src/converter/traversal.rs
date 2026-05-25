@@ -402,7 +402,7 @@ impl MarkdownConverter {
             .replace('\\', "\\\\")
             .replace('[', "\\[")
             .replace(']', "\\]")
-            .replace('\n', " ")
+            .replace(['\n', '\r'], " ")
     }
 
     /// Emit a Markdown link `[label](url)\n` into `output`.

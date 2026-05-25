@@ -335,6 +335,109 @@ ngx_http_markdown_metrics_write_prometheus(
         "\n",
         snapshot->decompressions.failed);
 
+    /* decompression_budget_exceeded_total */
+    p = ngx_slprintf(p, end,
+        "# HELP "
+        "nginx_markdown_decompression_budget_exceeded_total "
+        "Decompression operations that exceeded the configured budget.\n"
+        "# TYPE "
+        "nginx_markdown_decompression_budget_exceeded_total "
+        "counter\n"
+        "nginx_markdown_decompression_budget_exceeded_total"
+        " %uA\n"
+        "\n",
+        snapshot->decompressions.budget_exceeded_total);
+
+    /* decompression_format_error_total */
+    p = ngx_slprintf(p, end,
+        "# HELP "
+        "nginx_markdown_decompression_format_error_total "
+        "Decompression operations that failed due to "
+        "invalid format.\n"
+        "# TYPE "
+        "nginx_markdown_decompression_format_error_total "
+        "counter\n"
+        "nginx_markdown_decompression_format_error_total"
+        " %uA\n"
+        "\n",
+        snapshot->decompressions.format_error_total);
+
+    /* decompression_truncated_input_total */
+    p = ngx_slprintf(p, end,
+        "# HELP "
+        "nginx_markdown_decompression_truncated_input_total "
+        "Decompression operations that failed due to "
+        "truncated input.\n"
+        "# TYPE "
+        "nginx_markdown_decompression_truncated_input_total "
+        "counter\n"
+        "nginx_markdown_decompression_truncated_input_total"
+        " %uA\n"
+        "\n",
+        snapshot->decompressions.truncated_input_total);
+
+    /* decompression_io_error_total */
+    p = ngx_slprintf(p, end,
+        "# HELP "
+        "nginx_markdown_decompression_io_error_total "
+        "Decompression I/O errors.\n"
+        "# TYPE "
+        "nginx_markdown_decompression_io_error_total "
+        "counter\n"
+        "nginx_markdown_decompression_io_error_total"
+        " %uA\n"
+        "\n",
+        snapshot->decompressions.io_error_total);
+
+    /* replay_buffer_errors_total */
+    p = ngx_slprintf(p, end,
+        "# HELP "
+        "nginx_markdown_replay_buffer_errors_total "
+        "Replay buffer init or append failures.\n"
+        "# TYPE "
+        "nginx_markdown_replay_buffer_errors_total "
+        "counter\n"
+        "nginx_markdown_replay_buffer_errors_total"
+        " %uA\n"
+        "\n",
+        snapshot->results.replay_buffer_errors_total);
+
+    /* parse_timeouts_total */
+    p = ngx_slprintf(p, end,
+        "# HELP nginx_markdown_parse_timeouts_total "
+        "HTML parsing operations that exceeded the configured deadline.\n"
+        "# TYPE nginx_markdown_parse_timeouts_total counter\n"
+        "nginx_markdown_parse_timeouts_total %uA\n"
+        "\n",
+        snapshot->parse_interrupts.parse_timeouts_total);
+
+    /* parse_budget_exceeded_total */
+    p = ngx_slprintf(p, end,
+        "# HELP nginx_markdown_parse_budget_exceeded_total "
+        "HTML parsing operations that exceeded the parser memory budget.\n"
+        "# TYPE nginx_markdown_parse_budget_exceeded_total counter\n"
+        "nginx_markdown_parse_budget_exceeded_total %uA\n"
+        "\n",
+        snapshot->parse_interrupts.parse_budget_exceeded_total);
+
+    /* delivery_total (separate from decision_total) */
+    p = ngx_slprintf(p, end,
+        "# HELP nginx_markdown_delivery_total "
+        "Successful response deliveries after downstream NGX_OK.\n"
+        "# TYPE nginx_markdown_delivery_total counter\n"
+        "nginx_markdown_delivery_total %uA\n"
+        "\n",
+        snapshot->results.delivery_count);
+
+    /* decision_total (includes skips and fail-opens) */
+    p = ngx_slprintf(p, end,
+        "# HELP nginx_markdown_decision_total "
+        "Decision engine evaluations (includes skips and fail-opens).\n"
+        "# TYPE nginx_markdown_decision_total counter\n"
+        "nginx_markdown_decision_total %uA\n"
+        "\n",
+        snapshot->results.decision_count);
+
     /*
      * conversion_duration_seconds{le=...}
      *

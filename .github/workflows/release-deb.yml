@@ -1,0 +1,202 @@
+name: Release DEB
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Module version to build (e.g. 0.7.0)'
+        required: true
+        type: string
+  workflow_call:
+    inputs:
+      version:
+        description: 'Module version to build'
+        required: true
+        type: string
+
+permissions: {}
+
+jobs:
+  build-deb:
+    name: DEB - ${{ matrix.os }} - ${{ matrix.arch }} - nginx-${{ matrix.nginx_channel }}
+    runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04, debian-12]
+        arch: [amd64, arm64]
+        nginx_channel: [stable, mainline]
+    container:
+      image: ${{ matrix.os == 'ubuntu-22.04' && 'ubuntu:22.04' || matrix.os == 'ubuntu-24.04' && 'ubuntu:24.04' || 'debian:12' }}
+
+    steps:
+      - name: Install system dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            build-essential \
+            libpcre3-dev \
+            zlib1g-dev \
+            libssl-dev \
+            dpkg-dev \
+            fakeroot \
+            git \
+            curl \
+            ca-certificates \
+            tar \
+            gzip
+
+      - name: Install Rust toolchain
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          . "$HOME/.cargo/env"
+          rustc --version
+          cargo --version
+
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Resolve NGINX version
+        id: nginx_version
+        run: |
+          . "$HOME/.cargo/env"
+          CHANNEL="${{ matrix.nginx_channel }}"
+          if [ "${CHANNEL}" = "stable" ]; then
+            NGINX_VERSION="1.26.3"
+          else
+            NGINX_VERSION="1.27.4"
+          fi
+          echo "version=${NGINX_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Building for NGINX ${NGINX_VERSION} (${CHANNEL} channel)"
+
+      - name: Download and prepare NGINX source
+        env:
+          NGINX_VERSION: ${{ steps.nginx_version.outputs.version }}
+        run: |
+          . "$HOME/.cargo/env"
+          mkdir -p /tmp/nginx-build
+          cd /tmp/nginx-build
+          curl -sSfL "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" -o nginx.tar.gz
+          chmod +x "${GITHUB_WORKSPACE}/packaging/scripts/verify-checksum.sh"
+          "${GITHUB_WORKSPACE}/packaging/scripts/verify-checksum.sh" \
+            -f nginx.tar.gz \
+            -i "nginx-${NGINX_VERSION}" \
+            -c "${GITHUB_WORKSPACE}/packaging/checksums.sha256"
+          tar xzf nginx.tar.gz
+          echo "NGINX_SRC=/tmp/nginx-build/nginx-${NGINX_VERSION}" >> "$GITHUB_ENV"
+
+      - name: Build Rust library
+        run: |
+          . "$HOME/.cargo/env"
+          cd components/rust-converter
+          cargo build --release
+          echo "RUST_LIB_DIR=$(pwd)/target/release" >> "$GITHUB_ENV"
+
+      - name: Compile NGINX module
+        env:
+          NGINX_VERSION: ${{ steps.nginx_version.outputs.version }}
+        run: |
+          . "$HOME/.cargo/env"
+          mkdir -p "$GITHUB_WORKSPACE/build"
+          cd "${NGINX_SRC}"
+          ./configure \
+            --with-compat \
+            --add-dynamic-module="$GITHUB_WORKSPACE/components/nginx-module"
+          make modules
+          cp objs/ngx_http_markdown_module.so "$GITHUB_WORKSPACE/build/"
+        shell: bash
+
+      - name: Build DEB package
+        env:
+          PKG_VERSION: ${{ inputs.version }}
+          NGINX_VERSION: ${{ steps.nginx_version.outputs.version }}
+        run: |
+          if [ ! -f "build/ngx_http_markdown_module.so" ]; then
+            echo "ERROR: Module .so not found in build/" >&2
+            exit 1
+          fi
+
+          PKG_NAME="nginx-module-markdown"
+          PKG_ARCH="${{ matrix.arch }}"
+          PKG_DIR="/tmp/${PKG_NAME}_${PKG_VERSION}_${PKG_ARCH}"
+
+          # Create package directory structure
+          mkdir -p "${PKG_DIR}/DEBIAN"
+          mkdir -p "${PKG_DIR}/usr/lib/nginx/modules"
+          mkdir -p "${PKG_DIR}/usr/share/nginx/modules-available"
+          mkdir -p "${PKG_DIR}/usr/share/doc/${PKG_NAME}"
+
+          # Install module binary
+          cp build/ngx_http_markdown_module.so \
+            "${PKG_DIR}/usr/lib/nginx/modules/"
+
+          # Install load_module snippet (commented out by default)
+          cat > "${PKG_DIR}/usr/share/nginx/modules-available/mod-markdown.conf" <<'SNIPPET'
+          # Uncomment to enable the markdown filter module:
+          # load_module modules/ngx_http_markdown_module.so;
+          SNIPPET
+
+          # Install docs
+          cp README.md "${PKG_DIR}/usr/share/doc/${PKG_NAME}/" 2>/dev/null || true
+          cp LICENSE "${PKG_DIR}/usr/share/doc/${PKG_NAME}/copyright" 2>/dev/null || true
+
+          # Generate control file from template
+          sed \
+            -e "s/@VERSION@/${PKG_VERSION}/g" \
+            -e "s/@ARCH@/${PKG_ARCH}/g" \
+            -e "s/@NGINX_VERSION@/${NGINX_VERSION}/g" \
+            packaging/debian/control.in > "${PKG_DIR}/DEBIAN/control" 2>/dev/null || \
+          cat > "${PKG_DIR}/DEBIAN/control" <<EOF
+          Package: ${PKG_NAME}
+          Version: ${PKG_VERSION}
+          Architecture: ${PKG_ARCH}
+          Maintainer: nginx-markdown-for-agents maintainers
+          Description: NGINX Markdown filter module for AI agents
+           Converts HTML responses to Markdown when clients request text/markdown.
+           Implements content negotiation, bounded decompression, and fail-open safety.
+          Depends: nginx (>= ${NGINX_VERSION})
+          Section: httpd
+          Priority: optional
+          Homepage: https://github.com/cnkang/nginx-markdown-for-agents
+          EOF
+
+          # Install postinst/postrm scripts if available
+          for script in postinst postrm; do
+            if [ -f "packaging/debian/${script}" ]; then
+              cp "packaging/debian/${script}" "${PKG_DIR}/DEBIAN/"
+              chmod 755 "${PKG_DIR}/DEBIAN/${script}"
+            fi
+          done
+
+          # Generate md5sums
+          cd "${PKG_DIR}"
+          find . -type f ! -path './DEBIAN/*' -exec md5sum {} + | \
+            sed 's| \./| |' > DEBIAN/md5sums
+          cd -
+
+          # Build the package
+          mkdir -p dist
+          fakeroot dpkg-deb --build "${PKG_DIR}" \
+            "dist/${PKG_NAME}_${PKG_VERSION}_${PKG_ARCH}.deb"
+
+      - name: Verify DEB package
+        run: |
+          echo "Built DEB packages:"
+          ls -la dist/*.deb
+          for deb_file in dist/*.deb; do
+            echo "--- ${deb_file} ---"
+            dpkg-deb --info "${deb_file}"
+            echo ""
+            echo "Contents:"
+            dpkg-deb --contents "${deb_file}"
+          done
+
+      - name: Upload DEB artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: pkg-deb-${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.nginx_channel }}
+          path: dist/*.deb
+          if-no-files-found: error

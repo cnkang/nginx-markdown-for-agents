@@ -77,6 +77,8 @@ fn ffi_test_default_options() -> MarkdownOptions {
         memory_budget: 0,
         llm_provider: 0,
         chars_per_token_fixed: 0,
+        parse_timeout_ms: 0,
+        parser_memory_budget: 0,
     }
 }
 
@@ -159,6 +161,8 @@ fn test_basic_conversion() {
         memory_budget: 0,
         llm_provider: 0,
         chars_per_token_fixed: 0,
+        parse_timeout_ms: 0,
+        parser_memory_budget: 0,
     };
 
     // Perform conversion
@@ -459,6 +463,8 @@ fn test_null_pointer_handling() {
         memory_budget: 0,
         llm_provider: 0,
         chars_per_token_fixed: 0,
+        parse_timeout_ms: 0,
+        parser_memory_budget: 0,
     };
 
     let mut result = MarkdownResult {
@@ -564,6 +570,8 @@ fn test_multiple_conversions() {
         memory_budget: 0,
         llm_provider: 0,
         chars_per_token_fixed: 0,
+        parse_timeout_ms: 0,
+        parser_memory_budget: 0,
     };
 
     // Perform multiple conversions
@@ -622,6 +630,8 @@ fn test_idempotent_free() {
         memory_budget: 0,
         llm_provider: 0,
         chars_per_token_fixed: 0,
+        parse_timeout_ms: 0,
+        parser_memory_budget: 0,
     };
 
     let mut result = MarkdownResult {
@@ -677,6 +687,8 @@ fn test_content_type_charset_detection() {
         memory_budget: 0,
         llm_provider: 0,
         chars_per_token_fixed: 0,
+        parse_timeout_ms: 0,
+        parser_memory_budget: 0,
     };
 
     let mut result = MarkdownResult {
@@ -733,6 +745,8 @@ fn test_gfm_flavor() {
         memory_budget: 0,
         llm_provider: 0,
         chars_per_token_fixed: 0,
+        parse_timeout_ms: 0,
+        parser_memory_budget: 0,
     };
 
     let mut result = MarkdownResult {
@@ -914,6 +928,8 @@ fn test_null_result_pointer() {
         memory_budget: 0,
         llm_provider: 0,
         chars_per_token_fixed: 0,
+        parse_timeout_ms: 0,
+        parser_memory_budget: 0,
     };
 
     // Call with NULL result pointer - should not crash
@@ -994,6 +1010,8 @@ fn test_memory_cleanup_with_all_fields() {
         memory_budget: 0,
         llm_provider: 0,
         chars_per_token_fixed: 0,
+        parse_timeout_ms: 0,
+        parser_memory_budget: 0,
     };
 
     let mut result = MarkdownResult {
@@ -1058,6 +1076,8 @@ fn test_memory_cleanup_error_case() {
         memory_budget: 0,
         llm_provider: 0,
         chars_per_token_fixed: 0,
+        parse_timeout_ms: 0,
+        parser_memory_budget: 0,
     };
 
     let mut result = MarkdownResult {
@@ -1123,6 +1143,8 @@ fn test_panic_catching_invalid_utf8() {
         memory_budget: 0,
         llm_provider: 0,
         chars_per_token_fixed: 0,
+        parse_timeout_ms: 0,
+        parser_memory_budget: 0,
     };
 
     let mut result = MarkdownResult {
@@ -1191,6 +1213,8 @@ fn test_zero_length_html() {
         memory_budget: 0,
         llm_provider: 0,
         chars_per_token_fixed: 0,
+        parse_timeout_ms: 0,
+        parser_memory_budget: 0,
     };
 
     let mut result = MarkdownResult {
@@ -1242,6 +1266,8 @@ fn test_zero_length_html_with_null_pointer() {
         memory_budget: 0,
         llm_provider: 0,
         chars_per_token_fixed: 0,
+        parse_timeout_ms: 0,
+        parser_memory_budget: 0,
     };
 
     let mut result = ffi_test_empty_result();
@@ -1287,6 +1313,8 @@ fn test_null_content_type_with_zero_length() {
         memory_budget: 0,
         llm_provider: 0,
         chars_per_token_fixed: 0,
+        parse_timeout_ms: 0,
+        parser_memory_budget: 0,
     };
 
     let mut result = MarkdownResult {
@@ -1345,6 +1373,8 @@ fn test_error_state_consistency() {
         memory_budget: 0,
         llm_provider: 0,
         chars_per_token_fixed: 0,
+        parse_timeout_ms: 0,
+        parser_memory_budget: 0,
     };
 
     let mut result = MarkdownResult {

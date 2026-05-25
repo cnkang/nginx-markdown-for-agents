@@ -674,29 +674,29 @@ mod tests {
     }
 
     proptest! {
-        /// Property 30: Input Validation (dangerous URL schemes are rejected)
-        /// Validates: NFR-03.4
-        #[test]
-        fn prop_dangerous_url_schemes_are_rejected(
-            leading_ws in "[ \\t\\n\\r]{0,3}",
-            payload in "[A-Za-z0-9_/?=&:%#.-]{0,64}",
-            uppercase in any::<bool>(),
-        ) {
-            let validator = SecurityValidator::new();
-            let schemes = ["javascript:", "data:", "vbscript:", "file:", "about:"];
+       /// Property 30: Input Validation (dangerous URL schemes are rejected)
+       /// Validates: NFR-03.4
+       #[test]
+       fn prop_dangerous_url_schemes_are_rejected(
+           leading_ws in "[ \\t\\n\\r]{0,3}",
+           payload in "[A-Za-z0-9_/?=&:%#.-]{0,64}",
+           uppercase in any::<bool>(),
+       ) {
+           let validator = SecurityValidator::new();
+           let schemes = ["javascript:", "data:", "vbscript:", "file:", "about:"];
 
-            for scheme in schemes {
-                let scheme_variant = if uppercase {
-                    scheme.to_uppercase()
-                } else {
-                    scheme.to_string()
-                };
-                let candidate = format!("{leading_ws}{scheme_variant}{payload}");
+           for scheme in schemes {
+               let scheme_variant = if uppercase {
+                   scheme.to_uppercase()
+               } else {
+                   scheme.to_string()
+               };
+               let candidate = format!("{leading_ws}{scheme_variant}{payload}");
 
-                prop_assert!(
-                    validator.is_dangerous_url(&candidate),
-                    "Dangerous scheme should be detected regardless of case/leading whitespace: {candidate}"
-                );
+               prop_assert!(
+                   validator.is_dangerous_url(&candidate),
+                   "Dangerous scheme should be detected regardless of case/leading whitespace: {candidate}"
+               );
                 prop_assert_eq!(
                     validator.sanitize_url(&candidate),
                     None,
@@ -704,5 +704,341 @@ mod tests {
                 );
             }
         }
+    }
+}
+
+/// Reject URLs containing C0 control characters (U+0000–U+001F)
+/// except HT (U+0009), LF (U+000A), CR (U+000D) which are
+/// permitted in HTTP header values per RFC 7230 §3.2.
+///
+/// Returns true if the URL contains disallowed control characters.
+pub fn url_contains_control_chars(url: &str) -> bool {
+    url.bytes()
+        .any(|b| b != b'\t' && b != b'\n' && b != b'\r' && b < 0x20)
+}
+
+/// Reject URLs containing any C0 control characters (U+0000–U+001F)
+/// for Markdown link destinations. Unlike `url_contains_control_chars`,
+/// this also rejects HT, LF, CR which are valid in HTTP headers but
+/// enable Markdown injection (line breaking, header smuggling) when
+/// embedded in link destinations.
+///
+/// Returns true if the URL contains any C0 control character.
+pub fn link_url_contains_control_chars(url: &str) -> bool {
+    url.bytes().any(|b| b < 0x20)
+}
+
+/// Reject host values containing characters invalid for HTTP Host
+/// headers.  Per RFC 7230 §5.4, a host must not contain path
+/// separators, backslashes, spaces, commas, or control characters.
+/// This prevents path-traversal injection (e.g. `../`) and header
+/// smuggling through the X-Forwarded-Host value.
+///
+/// Returns true if the host contains invalid characters.
+pub fn host_contains_invalid_chars(host: &str) -> bool {
+    host.bytes()
+        .any(|b| b < 0x20 || b == 0x7F || b == b'/' || b == b'\\' || b == b' ' || b == b',')
+}
+
+/// Validate a URL for use in Markdown link destinations.
+///
+/// Returns Ok(()) if the URL is safe, Err(reason) if it contains
+/// control characters or other dangerous content.
+pub fn validate_link_url(url: &str) -> Result<(), &'static str> {
+    if link_url_contains_control_chars(url) {
+        return Err("URL contains control characters");
+    }
+
+    let validator = SecurityValidator::new();
+    if validator.sanitize_url(url).is_none() {
+        return Err("URL has dangerous scheme");
+    }
+
+    Ok(())
+}
+
+/// Parse X-Forwarded-Host and X-Forwarded-Proto headers to
+/// construct an effective base URL.
+///
+/// Returns (scheme, host) or None if headers are absent/empty.
+pub fn parse_forwarded_headers(
+    x_forwarded_host: Option<&str>,
+    x_forwarded_proto: Option<&str>,
+) -> Option<(String, String)> {
+    let host = x_forwarded_host?.trim();
+    if host.is_empty() {
+        return None;
+    }
+
+    if host_contains_invalid_chars(host) {
+        return None;
+    }
+
+    /* Additional defense: reject C0 control characters (including HT/LF/CR)
+     * in the host value using the same check applied to link URLs.
+     * host_contains_invalid_chars already rejects b < 0x20, but
+     * link_url_contains_control_chars is called explicitly here so that
+     * any future divergence between the two checks cannot silently
+     * allow control characters through the forwarded-host path.
+     *
+     * HT/LF/CR are valid in HTTP header field values (RFC 7230 §3.2)
+     * but are rejected in link destinations because they enable
+     * Markdown injection (line breaking, header smuggling) and
+     * URL scheme obfuscation.  The forwarded host is used to
+     * construct link URLs, so it must meet the stricter link
+     * destination character set. */
+    if link_url_contains_control_chars(host) {
+        return None;
+    }
+
+    let scheme = match x_forwarded_proto {
+        Some(p) => {
+            let p = p.trim();
+            if p.is_empty() || link_url_contains_control_chars(p) {
+                "https".to_string()
+            } else {
+                p.to_ascii_lowercase()
+            }
+        }
+        None => "https".to_string(),
+    };
+
+    if scheme != "http" && scheme != "https" {
+        return None;
+    }
+
+    Some((scheme, host.to_string()))
+}
+
+/// Escape a string for safe use as a Markdown link label.
+///
+/// Per CommonMark §4.7, link labels may contain backslash escapes.
+/// Escape: `[`, `]`, `\`. Newlines are replaced with spaces to prevent
+/// injection via line breaks within link labels.
+pub fn escape_link_label(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 8);
+    for ch in s.chars() {
+        match ch {
+            '[' | ']' | '\\' => {
+                out.push('\\');
+                out.push(ch);
+            }
+            '\n' | '\r' => out.push(' '),
+            _ => out.push(ch),
+        }
+    }
+    out
+}
+
+/// Escape a string for safe use as a Markdown link destination.
+///
+/// Per CommonMark §4.7, link destinations may contain backslash escapes.
+/// Escape: `[`, `]`, `\`, `(`, `)`.
+pub fn escape_link_destination(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 8);
+    for ch in s.chars() {
+        match ch {
+            '[' | ']' | '\\' | '(' | ')' => {
+                out.push('\\');
+                out.push(ch);
+            }
+            _ => out.push(ch),
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod url_validation_tests {
+    use super::*;
+
+    #[test]
+    fn test_url_no_control_chars() {
+        assert!(!url_contains_control_chars("https://example.com/path"));
+    }
+
+    #[test]
+    fn test_url_with_null_byte() {
+        assert!(url_contains_control_chars("https://example.com/\0path"));
+    }
+
+    #[test]
+    fn test_url_with_ctrl_char() {
+        assert!(url_contains_control_chars("https://example.com/\x01path"));
+    }
+
+    #[test]
+    fn test_url_with_tab_allowed() {
+        assert!(!url_contains_control_chars("https://example.com/\tpath"));
+    }
+
+    #[test]
+    fn test_link_url_tab_rejected() {
+        assert!(link_url_contains_control_chars(
+            "https://example.com/\tpath"
+        ));
+    }
+
+    #[test]
+    fn test_link_url_newline_rejected() {
+        assert!(link_url_contains_control_chars(
+            "https://example.com/\npath"
+        ));
+    }
+
+    #[test]
+    fn test_link_url_cr_rejected() {
+        assert!(link_url_contains_control_chars(
+            "https://example.com/\rpath"
+        ));
+    }
+
+    #[test]
+    fn test_link_url_no_control_chars() {
+        assert!(!link_url_contains_control_chars("https://example.com/path"));
+    }
+
+    #[test]
+    fn test_validate_link_url_safe() {
+        assert!(validate_link_url("https://example.com/path").is_ok());
+    }
+
+    #[test]
+    fn test_validate_link_url_control_chars() {
+        assert!(validate_link_url("https://example.com/\0path").is_err());
+    }
+
+    #[test]
+    fn test_validate_link_url_tab_rejected() {
+        assert!(validate_link_url("https://example.com/\tpath").is_err());
+    }
+
+    #[test]
+    fn test_validate_link_url_newline_rejected() {
+        assert!(validate_link_url("https://example.com/\npath").is_err());
+    }
+
+    #[test]
+    fn test_validate_link_url_cr_rejected() {
+        assert!(validate_link_url("https://example.com/\rpath").is_err());
+    }
+
+    #[test]
+    fn test_parse_forwarded_headers_both() {
+        let r = parse_forwarded_headers(Some("api.example.com"), Some("https"));
+        assert_eq!(
+            r,
+            Some(("https".to_string(), "api.example.com".to_string()))
+        );
+    }
+
+    #[test]
+    fn test_parse_forwarded_headers_no_host() {
+        let r = parse_forwarded_headers(None, Some("https"));
+        assert!(r.is_none());
+    }
+
+    #[test]
+    fn test_parse_forwarded_headers_default_proto() {
+        let r = parse_forwarded_headers(Some("host"), None);
+        assert_eq!(r, Some(("https".to_string(), "host".to_string())));
+    }
+
+    #[test]
+    fn test_parse_forwarded_headers_host_with_newline_rejected() {
+        let r = parse_forwarded_headers(Some("host\r\nX-Malicious: injected"), Some("https"));
+        assert!(r.is_none());
+    }
+
+    #[test]
+    fn test_parse_forwarded_headers_host_with_tab_rejected() {
+        let r = parse_forwarded_headers(Some("host\tmalicious"), Some("https"));
+        assert!(r.is_none());
+    }
+
+    #[test]
+    fn test_parse_forwarded_headers_host_link_url_control_char_tab() {
+        assert!(link_url_contains_control_chars("host\tmalicious"));
+        let r = parse_forwarded_headers(Some("host\tmalicious"), Some("https"));
+        assert!(r.is_none());
+    }
+
+    #[test]
+    fn test_parse_forwarded_headers_host_link_url_control_char_newline() {
+        assert!(link_url_contains_control_chars("host\nmalicious"));
+        let r = parse_forwarded_headers(Some("host\nmalicious"), Some("https"));
+        assert!(r.is_none());
+    }
+
+    #[test]
+    fn test_parse_forwarded_headers_host_link_url_control_char_cr() {
+        assert!(link_url_contains_control_chars("host\rmalicious"));
+        let r = parse_forwarded_headers(Some("host\rmalicious"), Some("https"));
+        assert!(r.is_none());
+    }
+
+    #[test]
+    fn test_parse_forwarded_headers_proto_with_control_rejected() {
+        let r = parse_forwarded_headers(Some("host"), Some("http\nsinjection"));
+        assert_eq!(r, Some(("https".to_string(), "host".to_string())));
+    }
+
+    #[test]
+    fn test_parse_forwarded_headers_path_traversal_rejected() {
+        let r = parse_forwarded_headers(Some("evil.com/../etc/passwd"), Some("https"));
+        assert!(r.is_none());
+    }
+
+    #[test]
+    fn test_parse_forwarded_headers_backslash_rejected() {
+        let r = parse_forwarded_headers(Some("evil.com\\@good.com"), Some("https"));
+        assert!(r.is_none());
+    }
+
+    #[test]
+    fn test_parse_forwarded_headers_space_rejected() {
+        let r = parse_forwarded_headers(Some("evil.com malicious.com"), Some("https"));
+        assert!(r.is_none());
+    }
+
+    #[test]
+    fn test_parse_forwarded_headers_comma_first_hop() {
+        let r = parse_forwarded_headers(Some("first-hop, second-hop"), Some("https"));
+        assert!(r.is_none());
+    }
+
+    #[test]
+    fn test_parse_forwarded_headers_valid_host_with_port() {
+        let r = parse_forwarded_headers(Some("api.example.com:8080"), Some("https"));
+        assert_eq!(
+            r,
+            Some(("https".to_string(), "api.example.com:8080".to_string()))
+        );
+    }
+
+    #[test]
+    fn test_host_contains_invalid_chars() {
+        assert!(host_contains_invalid_chars("evil.com/../etc"));
+        assert!(host_contains_invalid_chars("host\\slash"));
+        assert!(host_contains_invalid_chars("host space"));
+        assert!(host_contains_invalid_chars("first,second"));
+        assert!(host_contains_invalid_chars("host\x00null"));
+        assert!(host_contains_invalid_chars("host\x7Fdel"));
+        assert!(!host_contains_invalid_chars("api.example.com"));
+        assert!(!host_contains_invalid_chars("api.example.com:8080"));
+        assert!(!host_contains_invalid_chars("[::1]"));
+        assert!(!host_contains_invalid_chars("[::1]:8080"));
+    }
+
+    #[test]
+    fn test_escape_link_label() {
+        assert_eq!(escape_link_label("foo [bar] baz"), r"foo \[bar\] baz");
+        assert_eq!(escape_link_label("a\nb"), "a b");
+        assert_eq!(escape_link_label("a\rb"), "a b");
+    }
+
+    #[test]
+    fn test_escape_link_destination() {
+        assert_eq!(escape_link_destination("url?q=(1)"), r"url?q=\(1\)");
     }
 }

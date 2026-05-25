@@ -81,25 +81,25 @@ Full rule text, historical issues, and verification commands: `docs/harness/rule
 | 5 | html-sanitizer | Void elements self-closing; skip-mode name-aware; nesting-depth saturation-safe |
 | 6 | html-sanitizer | In-link markers accumulated; code-block raw preserved; blockquote consistent; URL extraction includes media elements |
 | 7 | observability-metrics | Explicit skip-reason mapping; reason-code tests aligned; new reason codes need log_decision() callsite |
-| 8 | observability-metrics | Fail on truncation; SHM layout version; non-overlapping Prometheus families; every metric has runtime write; delivery counters after success |
+| 8 | observability-metrics | Fail on truncation; SHM layout version; non-overlapping Prometheus families; every metric has runtime write; delivery counters after success; format string argument matching |
 | 8b | observability-metrics | Config nesting matches code; consumer accepts both key names; combined report reads streaming_metrics first |
 | 8c | observability-metrics | Same denominator for all averages; same inclusion predicate for numerator and sample count |
 | 9 | docs-tooling | Keep Quick Start/validators consistent; metric names match emitted keys; Accept header in verification commands |
 | 10 | parser-regex | No overlapping quantifiers; prefer deterministic parsing |
-| 11 | shell | macOS bash 3.2 compatible; no GNU-only flags; null-delimited traversal |
+| 11 | shell | macOS bash 3.2 compatible; no GNU-only flags; null-delimited traversal; empty array expansion under set -u |
 | 12 | security-cwe | Sanitize metadata-derived paths; never interpolate untrusted values |
-| 13 | ci-gating | Update workflow path filters; no redundant CI steps |
+| 13 | ci-gating | Update workflow path filters; no redundant CI steps; pin Actions to SHA; verify download checksums; sync validator regex with struct layout |
 | 14 | testing-coverage | Every bug fix needs regression test; cross-boundary and malformed-input cases; parameterized tests must consume inputs |
 | 15 | ffi-crosslang | Rust FFI changes → update all boundaries; prefer helpers over literal init; read before free |
 | 16 | testing-coverage | No dead stores; loop vars in for; every var consumed by TEST_ASSERT |
 | 17 | complexity | Keep function complexity at/below threshold; extract helpers; prefer early-return |
-| 18 | shell | case has default; messages to stderr; explicit return; usage matches flags |
+| 18 | shell | case has default; `[[` over `[`; messages to stderr; explicit return; merge nested if; usage matches flags |
 | 19 | python-tooling | Binary prerequisites validate executability; harness checks affect pass/fail |
 | 20 | testing-coverage | Don't mark tasks complete without verification; generate artifacts and verify shape |
 | 21 | warnings-triage | Treat warnings as triage items; prefer fixing over blanket allow |
 | 22 | testing-coverage | No unused helpers; #[cfg(feature)] import safety; doc comments no blank lines; doctests by visibility |
 | 23 | observability-metrics | Complete metric lifecycle; gauge at correct event; delivery ≠ decision counters; cross-boundary chain; symmetric exit paths |
-| 24 | c-safety | No implicit declarations; narrowing needs bounds check; const-correctness; no macro-shadow |
+| 24 | c-safety | No implicit declarations; narrowing needs bounds check; const-correctness; no macro-shadow; NGINX callback const exception |
 | 25 | testing-coverage | 80% aggregate coverage; 90% for critical paths |
 | 26 | naming-docs | Meaningful names; block comments; inline comments explain why |
 | 27 | html-sanitizer | Escape link labels/destinations; reject control chars in URLs; validate forwarded headers |
@@ -114,6 +114,8 @@ Full rule text, historical issues, and verification commands: `docs/harness/rule
 | 36 | harness-routing | Route recurring tooling fixes to focused security family |
 | 37 | e2e-runner | Rust-first E2E; no new Python e2e files; parity entries required |
 | 38 | streaming-backpressure | Replay buffer init/append failure → precommit_error; failopen_completed flag; delivery after downstream OK |
+| 39 | nginx-idioms | NGX_DONE terminal semantics; return immediately after finalize; multi-step header atomicity |
+| 40 | nginx-idioms | Filter hash==0 (invalidated) headers in all lookup/iteration functions |
 
 ## Required Agent Workflow
 
@@ -150,6 +152,7 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
 - Cross-boundary metrics: verify complete producer→consumer chain [23]
 - Multi-path exit: symmetric success/failure metrics on every path [23]
 - Metric names match actual semantics; unit suffix matches resolution [8]
+- Format string specifiers match argument list in all renderers (count and type) [8]
 
 **FFI & Cross-Language** (C, R)
 - Rust struct changes → both C headers + all init sites + cleanup helpers [15]
@@ -168,6 +171,9 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
 - Flag clearing after gated op succeeds [29]
 - NUL-terminate ngx_str_t before C API calls; length-bounded matching [30]
 - Snapshot race: read active_snapshot once at header_filter entry; bind via helper [34]
+- NGX_DONE terminal: return immediately after finalize_request; callers check NGX_DONE [39]
+- Multi-step header modification atomic: abort on first failure, no partial apply [39]
+- Header lookup/iteration filters hash==0 (invalidated) entries [40]
 
 **HTML Sanitizer & Output Safety** (C, R, D)
 - Void elements self-closing; skip-mode name-aware [5]
@@ -182,9 +188,14 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
 - Coverage: 80% aggregate (90% critical paths) [25]
 
 **Shell** (S)
-- case has default; messages to stderr; explicit return; usage matches flags [18]
-- macOS bash 3.2 compatible; no GNU-only flags [11]
+- Use `[[` for all conditional tests (not `[`); case has default `*)`; messages to stderr; explicit return; usage matches flags [18]
+- macOS bash 3.2 compatible; no GNU-only flags; empty array expansion safe under set -u [11]
+- Merge nested `if` without `else` into compound `&&` conditions [18]
 - No unsanitized path interpolation [12]
+
+**CI/Workflows** (CI)
+- GitHub Actions pinned to immutable SHA; download checksums verified [13]
+- Validator/gate regex patterns match actual struct field paths [13]
 
 **Python** (P)
 - Binary prerequisites validate executability [19]
@@ -319,3 +330,5 @@ remediation:
 | 0.6.2 | 2026-05-11 | Kang | Rule 36: require routing-manifest coverage and focused security family routing for recurring tooling path-safety fixes |
 | 0.6.6 | 2026-05-16 | Kang | Rule 38: fail-open replay buffer data integrity (init/append failure → precommit_error, failopen_completed state, delivery vs decision counter separation); Rule 2 cross-reference to Rule 38; Rule 8 delivery counter semantics; Rule 23 delivery vs decision counter guidance; C module checklist item 28 |
 | 0.6.7 | 2026-05-17 | Kang | Extract detailed rules to docs/harness/rules/ domain files; AGENTS.md slimmed to index+workflow (~300 lines) |
+| 0.7.0 | 2026-05-17 | Kang | v0.7.0 scope: decompress_max_size/parse_timeout/parser_budget directives (A03/A06); DecompressionBudgetExceeded(9)/ParseTimeout(10)/ParseBudgetExceeded(11) error codes (A04/A06); FFIAcceptResult + negotiate_accept FFI (A05); Rust conditional/decision/header_plan/negotiator modules (B02-B05); release-gates-check-070 target; DECISION_CHAIN.md v0.7.0 reason codes |
+| 0.7.1 | 2026-05-25 | Kang | Rules 39–40: NGX_DONE terminal semantics/double-finalize prevention, invalidated header hash==0 filtering; Rule 8 format string argument matching; Rule 11 bash 3.2 empty array expansion; Rule 13 supply chain hardening (SHA pinning, checksum verification, validator regex sync); Rule 24 NGINX callback const exception; new tools: detect_ci_supply_chain.sh, detect_header_hash_filter.sh, detect_finalize_return.sh |

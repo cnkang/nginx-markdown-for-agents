@@ -129,6 +129,8 @@ fn convert_with_feature_toggles(
         memory_budget: 0,
         llm_provider: 0,
         chars_per_token_fixed: 0,
+        parse_timeout_ms: 0,
+        parser_memory_budget: 0,
     };
 
     let mut result = empty_result();
@@ -202,6 +204,8 @@ fn test_both_features_enabled() {
         memory_budget: 0,
         llm_provider: 0,
         chars_per_token_fixed: 0,
+        parse_timeout_ms: 0,
+        parser_memory_budget: 0,
     };
 
     let mut result = MarkdownResult {
@@ -289,6 +293,8 @@ fn test_token_estimation_only() {
         memory_budget: 0,
         llm_provider: 0,
         chars_per_token_fixed: 0,
+        parse_timeout_ms: 0,
+        parser_memory_budget: 0,
     };
 
     let mut result = MarkdownResult {
@@ -373,6 +379,8 @@ fn test_front_matter_only() {
         memory_budget: 0,
         llm_provider: 0,
         chars_per_token_fixed: 0,
+        parse_timeout_ms: 0,
+        parser_memory_budget: 0,
     };
 
     let mut result = MarkdownResult {
@@ -457,6 +465,8 @@ fn test_both_features_disabled() {
         memory_budget: 0,
         llm_provider: 0,
         chars_per_token_fixed: 0,
+        parse_timeout_ms: 0,
+        parser_memory_budget: 0,
     };
 
     let mut result = MarkdownResult {
@@ -556,6 +566,8 @@ fn test_feature_independence_comprehensive() {
             memory_budget: 0,
             llm_provider: 0,
             chars_per_token_fixed: 0,
+            parse_timeout_ms: 0,
+            parser_memory_budget: 0,
         };
 
         let mut result = empty_result();
@@ -653,6 +665,8 @@ fn test_no_hidden_dependencies() {
         memory_budget: 0,
         llm_provider: 0,
         chars_per_token_fixed: 0,
+        parse_timeout_ms: 0,
+        parser_memory_budget: 0,
     };
 
     let mut result1 = empty_result();
@@ -698,6 +712,8 @@ fn test_no_hidden_dependencies() {
         memory_budget: 0,
         llm_provider: 0,
         chars_per_token_fixed: 0,
+        parse_timeout_ms: 0,
+        parser_memory_budget: 0,
     };
 
     let mut result2 = empty_result();

@@ -94,9 +94,43 @@ For operational troubleshooting:
 - `docs/guides/OPERATIONS.md`
 
 
+## Resource Budgets (v0.7.0)
+
+The `markdown_decompress_max_size` directive controls the maximum decompressed
+output size independently from `markdown_max_size`. This prevents memory
+exhaustion from highly compressible (zip-bomb) upstream content.
+
+- **Default**: inherits `markdown_max_size` when not explicitly set
+- **Directive**: `markdown_decompress_max_size <size>;`
+- **Error code**: `ERROR_DECOMPRESSION_BUDGET_EXCEEDED` (9)
+- **Error category**: `NGX_HTTP_MARKDOWN_ERROR_RESOURCE_LIMIT`
+- **Metric**: `decompressions_failed` (incremented on budget exceeded)
+
+When decompressed output exceeds the budget, decompression terminates
+immediately. All auxiliary buffers are freed on every exit path.
+The `markdown_on_error` policy determines whether the original compressed
+response is served (fail-open) or an error is returned (fail-closed).
+
+## Decompression Error Categories (v0.7.0)
+
+Decompression failures are classified into specific error codes that map
+to the `ConversionError` enum in Rust and are categorized in C:
+
+| Rust Error Variant | FFI Code | C Error Category | Description |
+|--------------------|----------|-------------------|-------------|
+| `DecompressionBudgetExceeded` | 9 | `RESOURCE_LIMIT` | Decompressed output exceeds `decompress_max_size` |
+| `ConversionError::Timeout` | 3 | `RESOURCE_LIMIT` | Decompression timed out |
+| `ConversionError::MemoryLimit` | 4 | `RESOURCE_LIMIT` | Memory allocation during decompression exceeded limit |
+| `ConversionError::Parse` | 1 | `CONVERSION` | Invalid compressed data (corrupt gzip/deflate/brotli) |
+
+The `ngx_http_markdown_classify_error()` function maps FFI error codes to
+the three-level error category enum (`CONVERSION`, `RESOURCE_LIMIT`,
+`SYSTEM`), ensuring correct Prometheus counter routing and log annotation.
+
 ## Document Updates
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
+| 0.7.0 | 2026-05-17 | Kang | Added Resource Budgets and Error Categories sections for v0.7.0 |

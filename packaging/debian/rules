@@ -9,7 +9,7 @@ override_dh_auto_build:
 	$(MAKE) build
 
 override_dh_auto_install:
-	$(MAKE) install DESTDIR=$(CURDIR)/debian/nginx-markdown-module
+	$(MAKE) install DESTDIR=$(CURDIR)/debian/nginx-module-markdown
 
 override_dh_auto_test:
 	$(MAKE) test-rust

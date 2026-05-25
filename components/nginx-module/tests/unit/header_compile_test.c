@@ -59,19 +59,19 @@ test_ctx_uses_error_category(void)
     TEST_SUBSECTION("ctx_t uses error_category_t field");
 
     memset(&ctx, 0, sizeof(ctx));
-    ctx.last_error_category = NGX_HTTP_MARKDOWN_ERROR_CONVERSION;
-    ctx.has_error_category = 1;
+    ctx.error.last_category = NGX_HTTP_MARKDOWN_ERROR_CONVERSION;
+    ctx.error.has_category = 1;
 
-    TEST_ASSERT(ctx.last_error_category == NGX_HTTP_MARKDOWN_ERROR_CONVERSION,
+    TEST_ASSERT(ctx.error.last_category == NGX_HTTP_MARKDOWN_ERROR_CONVERSION,
                 "error category field stores CONVERSION");
 
-    ctx.last_error_category = NGX_HTTP_MARKDOWN_ERROR_RESOURCE_LIMIT;
-    TEST_ASSERT(ctx.last_error_category
+    ctx.error.last_category = NGX_HTTP_MARKDOWN_ERROR_RESOURCE_LIMIT;
+    TEST_ASSERT(ctx.error.last_category
                 == NGX_HTTP_MARKDOWN_ERROR_RESOURCE_LIMIT,
                 "error category field stores RESOURCE_LIMIT");
 
-    ctx.last_error_category = NGX_HTTP_MARKDOWN_ERROR_SYSTEM;
-    TEST_ASSERT(ctx.last_error_category == NGX_HTTP_MARKDOWN_ERROR_SYSTEM,
+    ctx.error.last_category = NGX_HTTP_MARKDOWN_ERROR_SYSTEM;
+    TEST_ASSERT(ctx.error.last_category == NGX_HTTP_MARKDOWN_ERROR_SYSTEM,
                 "error category field stores SYSTEM");
 
     TEST_PASS("ctx_t error_category field compiles and works");

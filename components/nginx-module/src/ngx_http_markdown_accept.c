@@ -1,614 +1,62 @@
 /*
- * NGINX Markdown Filter Module - Accept Header Parser
+ * NGINX Markdown Filter Module - Accept Header Negotiation
  *
- * This file implements Accept header parsing with RFC 9110 tie-break rules.
- * The parser handles media types with q-values and wildcards, applying
- * proper precedence rules when multiple media types match.
+ * Delegates Accept header content negotiation to the Rust FFI
+ * (markdown_negotiate_accept) which implements RFC 7231 §5.3.2
+ * q-value comparison and RFC 9110 tie-break rules.
  *
- * Tie-Break Rules (RFC 9110):
- * 1. Exact match (text/markdown) > subtype wildcard (text slash star) > all wildcard (star slash star)
- * 2. Higher q-value wins
- * 3. Equal q-value: more specific media type wins
- * 4. Equal specificity: preserve header order
- *
- * Examples:
- *   "text/markdown, text/html" -> Convert (both q=1.0, exact match for markdown)
- *   "text/html;q=0.9, text/markdown;q=0.8" -> No conversion (html has higher q)
- *   "text slash star;q=0.9, text/markdown;q=0.8" -> No conversion (text slash star has higher q)
- *   "text/markdown;q=0.9, text/html;q=0.9" -> Convert (equal q, markdown first)
- *   "star slash star, text/markdown" -> Convert (both q=1.0, markdown more specific)
+ * The C side retains only the NGINX request-level glue:
+ * extracting the Accept header from ngx_http_request_t and
+ * mapping the FFIAcceptResult.reason code to metrics counters
+ * and decision-log reason codes.
  */
 
 #include "ngx_http_markdown_filter_module.h"
+#include "markdown_converter.h"
 
-/* Media type specificity levels for tie-breaking */
-typedef enum {
-    NGX_HTTP_MARKDOWN_SPECIFICITY_EXACT = 3,      /* text/markdown */
-    NGX_HTTP_MARKDOWN_SPECIFICITY_SUBTYPE = 2,    /* text slash star */
-    NGX_HTTP_MARKDOWN_SPECIFICITY_ALL = 1         /* star slash star */
-} ngx_http_markdown_specificity_t;
-
-/* Parsed Accept header entry */
-typedef struct {
-    ngx_str_t                          type;        /* e.g., "text" */
-    ngx_str_t                          subtype;     /* e.g., "markdown" */
-    float                              q_value;     /* Quality value (0.0-1.0) */
-    ngx_http_markdown_specificity_t    specificity; /* Specificity level */
-    ngx_uint_t                         order;       /* Original order in header */
-} ngx_http_markdown_accept_entry_t;
-
-/* Static string constants for media type comparisons */
-static u_char  ngx_http_markdown_str_text[] = "text";
-static u_char  ngx_http_markdown_str_markdown[] = "markdown";
 static u_char  ngx_http_markdown_hdr_accept[] = "Accept";
 
-/* Forward declarations */
-static ngx_int_t ngx_http_markdown_parse_accept_entry(ngx_str_t *entry_str,
-    ngx_http_markdown_accept_entry_t *entry, ngx_uint_t order);
-static ngx_int_t ngx_http_markdown_parse_accept_segment(ngx_http_request_t *r,
-    u_char *start, const u_char *end, ngx_array_t *entries, ngx_uint_t *order);
-static void ngx_http_markdown_skip_accept_spaces(u_char **p,
-    const u_char *end);
-static void ngx_http_markdown_skip_accept_comma(u_char **p,
-    const u_char *end);
-static float ngx_http_markdown_parse_q_value(ngx_str_t *params);
-static float ngx_http_markdown_extract_q_param(u_char *start,
-    const u_char *end);
-static ngx_http_markdown_specificity_t ngx_http_markdown_get_specificity(
-    const ngx_str_t *type, const ngx_str_t *subtype);
-static int ngx_http_markdown_compare_entries(const void *a, const void *b);
-static ngx_int_t ngx_http_markdown_matches_markdown(
-    const ngx_http_markdown_accept_entry_t *entry, ngx_flag_t on_wildcard);
-static ngx_int_t ngx_http_markdown_const_strncasecmp(const u_char *left,
-    const u_char *right, size_t len);
-static ngx_table_elt_t *ngx_http_markdown_get_accept_header(ngx_http_request_t *r);
-static ngx_table_elt_t *ngx_http_markdown_find_request_header(ngx_http_request_t *r,
-    const u_char *name, size_t name_len);
-
 /*
- * Parse Accept header into structured entries
+ * Find a request header by name in nginx's generic linked-list container.
  *
- * Parses the Accept header value into an array of media type entries,
- * each with type, subtype, q-value, and specificity information.
- *
- * @param r        The request structure
- * @param accept   The Accept header value to parse
- * @param entries  Output array of parsed entries (allocated by caller)
- * @return         NGX_OK on success, NGX_ERROR on parse error
+ * Complexity is O(n) over all request headers, which is acceptable because
+ * request header counts are typically small and this runs once per decision.
  */
-ngx_int_t
-ngx_http_markdown_parse_accept(ngx_http_request_t *r, ngx_str_t *accept,
-    ngx_array_t *entries)
+static ngx_table_elt_t *
+ngx_http_markdown_find_request_header(ngx_http_request_t *r,
+    u_char *name, size_t name_len)
 {
-    u_char            *p;
-    u_char            *start;
-    const u_char      *end;
-    ngx_uint_t         order;
-    ngx_int_t          rc;
-    
-    if (accept == NULL || accept->len == 0) {
-        return NGX_ERROR;
-    }
-    
-    p = accept->data;
-    end = accept->data + accept->len;
-    order = 0;
-    
-    /*
-     * Parse comma-separated media types
-     * Example: "text/markdown, text/html;q=0.9, star/slash-star;q=0.8"
-     */
-    while (p < end) {
-        ngx_http_markdown_skip_accept_spaces(&p, end);
-        
-        if (p >= end) {
-            break;
-        }
-        
-        /* Find end of this entry (comma or end of string) */
-        start = p;
-        while (p < end && *p != ',') {
-            p++;
-        }
-        
-        rc = ngx_http_markdown_parse_accept_segment(r, start, p, entries, &order);
-        if (rc != NGX_OK) {
-            return NGX_ERROR;
-        }
-        
-        ngx_http_markdown_skip_accept_comma(&p, end);
-    }
-    
-    return NGX_OK;
-}
+    ngx_list_part_t  *part;
+    ngx_table_elt_t  *headers;
 
-static void
-ngx_http_markdown_skip_accept_spaces(u_char **p, const u_char *end)
-{
-    /* RFC 9110 allows optional whitespace around separators and parameters. */
-    while (*p < end && (**p == ' ' || **p == '\t')) {
-        (*p)++;
-    }
-}
-
-static void
-ngx_http_markdown_skip_accept_comma(u_char **p, const u_char *end)
-{
-    /* Caller already consumed one segment; skip a trailing comma if present. */
-    if (*p < end && **p == ',') {
-        (*p)++;
-    }
-}
-
-/*
- * Parse one comma-delimited media-range segment.
- *
- * Invalid segments are dropped (with warning) instead of failing the entire
- * header parse so we keep best-effort behavior for partially malformed input.
- */
-static ngx_int_t
-ngx_http_markdown_parse_accept_segment(ngx_http_request_t *r,
-    u_char *start, const u_char *end, ngx_array_t *entries, ngx_uint_t *order)
-{
-    ngx_str_t                            entry_str;
-    ngx_http_markdown_accept_entry_t    *entry;
-
-    entry_str.data = start;
-    entry_str.len = end - start;
-
-    while (entry_str.len > 0
-           && (entry_str.data[entry_str.len - 1] == ' '
-               || entry_str.data[entry_str.len - 1] == '\t'))
-    {
-        entry_str.len--;
+    if (r == NULL || name == NULL || name_len == 0) {
+        return NULL;
     }
 
-    if (entry_str.len == 0) {
-        return NGX_OK;
-    }
+    part = &r->headers_in.headers.part;
+    headers = part->elts;
 
-    entry = ngx_array_push(entries);
-    if (entry == NULL) {
-        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                     "markdown: failed to allocate Accept entry");
-        return NGX_ERROR;
-    }
-
-    if (ngx_http_markdown_parse_accept_entry(&entry_str, entry, *order) != NGX_OK) {
-        ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-                     "markdown: failed to parse Accept entry: \"%V\"",
-                     &entry_str);
-        entries->nelts--;
-        return NGX_OK;
-    }
-
-    (*order)++;
-    return NGX_OK;
-}
-
-/*
- * Parse a single Accept header entry
- *
- * Parses a media type entry like "text/markdown;q=0.9" into its components.
- *
- * @param entry_str  The entry string to parse
- * @param entry      Output structure to fill
- * @param order      Original order in header
- * @return           NGX_OK on success, NGX_ERROR on parse error
- */
-static ngx_int_t
-ngx_http_markdown_parse_accept_entry(ngx_str_t *entry_str,
-    ngx_http_markdown_accept_entry_t *entry, ngx_uint_t order)
-{
-    u_char      *p;
-    u_char      *slash;
-    u_char      *semicolon;
-    ngx_str_t    params;
-    
-    p = entry_str->data;
-    
-    /* Find slash separator between type and subtype */
-    slash = ngx_strlchr(p, p + entry_str->len, '/');
-    if (slash == NULL) {
-        return NGX_ERROR;
-    }
-    
-    /* Find semicolon (start of parameters) */
-    semicolon = ngx_strlchr(p, p + entry_str->len, ';');
-    
-    /* Extract type */
-    entry->type.data = p;
-    entry->type.len = slash - p;
-    
-    /* Trim whitespace from type */
-    while (entry->type.len > 0 && 
-           (entry->type.data[entry->type.len - 1] == ' ' ||
-            entry->type.data[entry->type.len - 1] == '\t')) {
-        entry->type.len--;
-    }
-    
-    /* Extract subtype */
-    if (semicolon != NULL) {
-        entry->subtype.data = slash + 1;
-        entry->subtype.len = semicolon - (slash + 1);
-    } else {
-        entry->subtype.data = slash + 1;
-        entry->subtype.len = (p + entry_str->len) - (slash + 1);
-    }
-    
-    /* Trim whitespace from subtype */
-    while (entry->subtype.len > 0 && 
-           (entry->subtype.data[0] == ' ' || entry->subtype.data[0] == '\t')) {
-        entry->subtype.data++;
-        entry->subtype.len--;
-    }
-    while (entry->subtype.len > 0 && 
-           (entry->subtype.data[entry->subtype.len - 1] == ' ' ||
-            entry->subtype.data[entry->subtype.len - 1] == '\t')) {
-        entry->subtype.len--;
-    }
-    
-    /* Validate type and subtype are not empty */
-    if (entry->type.len == 0 || entry->subtype.len == 0) {
-        return NGX_ERROR;
-    }
-    
-    /* Parse parameters (q-value) */
-    if (semicolon != NULL) {
-        params.data = semicolon + 1;
-        params.len = (p + entry_str->len) - (semicolon + 1);
-        entry->q_value = ngx_http_markdown_parse_q_value(&params);
-    } else {
-        entry->q_value = 1.0f; /* Default q-value */
-    }
-    
-    /* Determine specificity */
-    entry->specificity = ngx_http_markdown_get_specificity(&entry->type, &entry->subtype);
-    
-    /* Store original order */
-    entry->order = order;
-    
-    return NGX_OK;
-}
-
-/*
- * Extract and parse a numeric q-value from a "q=<value>" token.
- *
- * @param start  Pointer to the first character after "q="
- * @param end    Pointer past the end of the parameter region
- * @return       Parsed q-value clamped to [0.0, 1.0], or -1.0f on error
- */
-static float
-ngx_http_markdown_extract_q_param(u_char *start, const u_char *end)
-{
-    const u_char  *p;
-    float          q_value;
-    ngx_int_t      n;
-
-    p = start;
-
-    /* Find end of q-value (semicolon, comma, or end) */
-    while (p < end && *p != ';' && *p != ',') {
-        p++;
-    }
-
-    /* Parse q-value */
-    n = ngx_atofp(start, p - start, 3);
-    if (n == NGX_ERROR) {
-        return -1.0f;
-    }
-
-    q_value = (float) n / 1000.0f;
-
-    /* Clamp to valid range [0.0, 1.0] */
-    if (q_value < 0.0f) {
-        q_value = 0.0f;
-    } else if (q_value > 1.0f) {
-        q_value = 1.0f;
-    }
-
-    return q_value;
-}
-
-/*
- * Parse q-value from parameters
- *
- * Extracts the q-value from parameter string like "q=0.9".
- * Returns 1.0 if no q-value is found (default per RFC 7231).
- * Returns 0.0 for invalid q-values (e.g. "q=abc", "q=") so
- * that malformed entries are effectively ignored during content
- * negotiation rather than being given highest priority.
- *
- * @param params  The parameter string
- * @return        The q-value (0.0-1.0)
- */
-static float
-ngx_http_markdown_parse_q_value(ngx_str_t *params)
-{
-    u_char        *p;
-    const u_char  *end;
-    float          result;
-    
-    p = params->data;
-    end = params->data + params->len;
-    
-    /* Find "q=" parameter */
-    while (p < end) {
-        /* Skip whitespace */
-        while (p < end && (*p == ' ' || *p == '\t')) {
-            p++;
-        }
-        
-        if (p >= end) {
-            break;
-        }
-        
-        /* Check for "q=" */
-        if (p + 2 <= end && *p == 'q' && *(p + 1) == '=') {
-            p += 2;
-
-            result = ngx_http_markdown_extract_q_param(p, end);
-            if (result < 0.0f) {
-                /*
-                 * Invalid q-value (e.g. "q=abc", "q=").
-                 * Return -1.0f sentinel so the caller can
-                 * distinguish syntactic errors from an explicit
-                 * q=0 rejection.  Entries with q=-1.0 are
-                 * ignored during content negotiation (not
-                 * counted as explicit rejection and not
-                 * competing for best match).
-                 */
-                return -1.0f;
+    for ( ;; ) {
+        for (ngx_uint_t i = 0; i < part->nelts; i++) {
+            if (headers[i].hash == 0) {
+                continue;
             }
-
-            return result;
+            if (headers[i].key.len == name_len
+                && ngx_strncasecmp(headers[i].key.data, name, name_len) == 0)
+            {
+                return &headers[i];
+            }
         }
-        
-        /* Skip to next parameter */
-        while (p < end && *p != ';') {
-            p++;
+
+        if (part->next == NULL) {
+            break;
         }
-        if (p < end && *p == ';') {
-            p++;
-        }
-    }
-    
-    return 1.0f; /* No q-value found, use default */
-}
 
-/*
- * Determine specificity level of a media type
- *
- * Returns the specificity level based on wildcards:
- * - text/markdown: EXACT (3)
- * - text slash star: SUBTYPE (2)
- * - star/slash-star: ALL (1)
- *
- * @param type     The type part (e.g., "text")
- * @param subtype  The subtype part (e.g., "markdown")
- * @return         The specificity level
- */
-static ngx_http_markdown_specificity_t
-ngx_http_markdown_get_specificity(const ngx_str_t *type,
-    const ngx_str_t *subtype)
-{
-    /* Check for star/slash-star */
-    if (type->len == 1 && type->data[0] == '*' &&
-        subtype->len == 1 && subtype->data[0] == '*') {
-        return NGX_HTTP_MARKDOWN_SPECIFICITY_ALL;
-    }
-    
-    /* Check for type slash star */
-    if (subtype->len == 1 && subtype->data[0] == '*') {
-        return NGX_HTTP_MARKDOWN_SPECIFICITY_SUBTYPE;
-    }
-    
-    /* Exact type/subtype */
-    return NGX_HTTP_MARKDOWN_SPECIFICITY_EXACT;
-}
-
-/*
- * Sort Accept entries by precedence
- *
- * Sorts entries according to RFC 9110 tie-break rules:
- * 1. Higher q-value wins
- * 2. Equal q-value: more specific media type wins
- * 3. Equal specificity: preserve header order
- *
- * @param entries  Array of entries to sort
- */
-void
-ngx_http_markdown_sort_accept_entries(ngx_array_t *entries)
-{
-    if (entries == NULL || entries->nelts <= 1) {
-        return;
-    }
-    
-    ngx_qsort(entries->elts, entries->nelts, 
-              sizeof(ngx_http_markdown_accept_entry_t),
-              ngx_http_markdown_compare_entries);
-}
-
-/*
- * Compare two Accept entries for sorting
- *
- * Comparison function for qsort that implements RFC 9110 tie-break rules.
- * Returns negative if a should come before b, positive if b should come before a.
- *
- * @param a  First entry
- * @param b  Second entry
- * @return   Comparison result
- */
-static int
-ngx_http_markdown_compare_entries(const void *a, const void *b)
-{
-    const ngx_http_markdown_accept_entry_t *entry_a = a;
-    const ngx_http_markdown_accept_entry_t *entry_b = b;
-    
-    /* Rule 1: Higher q-value wins (sort descending) */
-    if (entry_a->q_value > entry_b->q_value) {
-        return -1;
-    } else if (entry_a->q_value < entry_b->q_value) {
-        return 1;
-    }
-    
-    /* Rule 2: Equal q-value, more specific wins (sort descending) */
-    if (entry_a->specificity > entry_b->specificity) {
-        return -1;
-    } else if (entry_a->specificity < entry_b->specificity) {
-        return 1;
-    }
-    
-    /* Rule 3: Equal specificity, preserve header order (sort ascending) */
-    if (entry_a->order < entry_b->order) {
-        return -1;
-    } else if (entry_a->order > entry_b->order) {
-        return 1;
-    }
-    
-    return 0;
-}
-
-/*
- * Check if an entry matches text/markdown
- *
- * Determines if a media type entry matches text/markdown, considering
- * wildcards based on configuration.
- *
- * @param entry        The entry to check
- * @param on_wildcard  Whether to match wildcards (star/slash-star or text slash star)
- * @return             1 if matches, 0 if not
- */
-static ngx_int_t
-ngx_http_markdown_matches_markdown(const ngx_http_markdown_accept_entry_t *entry,
-    ngx_flag_t on_wildcard)
-{
-    /* Check for explicit text/markdown */
-    if (entry->type.len == 4 && ngx_strncasecmp(entry->type.data, ngx_http_markdown_str_text, 4) == 0 &&
-        entry->subtype.len == 8 && ngx_strncasecmp(entry->subtype.data, ngx_http_markdown_str_markdown, 8) == 0) {
-        return 1;
-    }
-    
-    /* Check wildcards if configured */
-    if (on_wildcard) {
-        /* Check for text slash star */
-        if (entry->type.len == 4 && ngx_strncasecmp(entry->type.data, ngx_http_markdown_str_text, 4) == 0 &&
-            entry->subtype.len == 1 && entry->subtype.data[0] == '*') {
-            return 1;
-        }
-        
-        /* Check for star/slash-star */
-        if (entry->type.len == 1 && entry->type.data[0] == '*' &&
-            entry->subtype.len == 1 && entry->subtype.data[0] == '*') {
-            return 1;
-        }
-    }
-    
-    return 0;
-}
-
-/*
- * Determine if request should be converted to Markdown
- *
- * Applies complete Accept header evaluation with tie-break rules:
- * 1. Parse Accept header into entries
- * 2. Sort entries by precedence (q-value, specificity, order)
- * 3. Check if highest-precedence entry matches text/markdown
- * 4. Verify q-value > 0 (not explicitly rejected)
- *
- * @param r     The request structure
- * @param conf  Module configuration
- * @return      1 if should convert, 0 if not
- */
-ngx_int_t
-ngx_http_markdown_should_convert(ngx_http_request_t *r,
-    const ngx_http_markdown_conf_t *conf)
-{
-    ngx_str_t                            *accept;
-    ngx_table_elt_t                      *accept_header;
-    ngx_array_t                          *entries;
-    ngx_http_markdown_accept_entry_t     *entry;
-    
-    /*
-     * markdown_filter is resolved once in header filter and cached in request
-     * context for phase consistency. Keep this function focused on Accept
-     * matching only.
-     */
-    if (conf == NULL) {
-        return 0;
-    }
-    
-    /* Get Accept header */
-    accept_header = ngx_http_markdown_get_accept_header(r);
-    if (accept_header == NULL) {
-        return 0;
+        part = part->next;
+        headers = part->elts;
     }
 
-    accept = &accept_header->value;
-    if (accept->len == 0) {
-        return 0;
-    }
-    
-    /* Create array for parsed entries */
-    entries = ngx_array_create(r->pool, 8, sizeof(ngx_http_markdown_accept_entry_t));
-    if (entries == NULL) {
-        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                     "markdown: failed to allocate Accept entries array");
-        return 0;
-    }
-    
-    /* Parse Accept header */
-    if (ngx_http_markdown_parse_accept(r, accept, entries) != NGX_OK) {
-        ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-                     "markdown: failed to parse Accept header: \"%V\"", accept);
-        return 0;
-    }
-    
-    if (entries->nelts == 0) {
-        return 0;
-    }
-    
-    /* Sort entries by precedence */
-    ngx_http_markdown_sort_accept_entries(entries);
-    
-    /*
-     * Honor explicit rejection before wildcard matching.
-     * A client can explicitly deny text/markdown with q=0 even if it also
-     * sends a wildcard (for example "star/slash-star;q=1, text/markdown;q=0").
-     */
-    entry = entries->elts;
-    for (ngx_uint_t i = 0; i < entries->nelts; i++) {
-        if (entry[i].q_value == 0.0f
-            && entry[i].q_value != -1.0f
-            && entry[i].type.len == 4
-            && ngx_strncasecmp(entry[i].type.data, ngx_http_markdown_str_text, 4) == 0
-            && entry[i].subtype.len == 8
-            && ngx_strncasecmp(entry[i].subtype.data, ngx_http_markdown_str_markdown, 8) == 0)
-        {
-            ngx_log_error(NGX_LOG_DEBUG, r->connection->log, 0,
-                         "markdown: text/markdown explicitly rejected (q=0)");
-            return 0;
-        }
-    }
-
-    /*
-     * After sorting, the first entry is the highest-precedence media range.
-     * Convert only if that top entry matches markdown (or allowed wildcard)
-     * and is not explicitly rejected.
-     */
-    if (ngx_http_markdown_matches_markdown(&entry[0], conf->on_wildcard)
-        && entry[0].q_value > 0.0f)
-    {
-        ngx_log_error(NGX_LOG_DEBUG, r->connection->log, 0,
-                     "markdown: top Accept entry matches text/markdown "
-                     "(q=%f, specificity=%d, order=%ui)",
-                     entry[0].q_value, entry[0].specificity, entry[0].order);
-        return 1;
-    }
-
-    ngx_log_error(NGX_LOG_DEBUG, r->connection->log, 0,
-                 "markdown: highest-precedence Accept entry does not permit markdown");
-    return 0;
+    return NULL;
 }
 
 /*
@@ -635,82 +83,80 @@ ngx_http_markdown_get_accept_header(ngx_http_request_t *r)
 
     return ngx_http_markdown_find_request_header(
         r,
-        ngx_http_markdown_hdr_accept,
+        (u_char *) ngx_http_markdown_hdr_accept,
         sizeof(ngx_http_markdown_hdr_accept) - 1);
 }
 
 /*
- * Case-insensitive comparison of exactly `len` bytes.
+ * Determine if request should be converted to Markdown.
  *
- * Unlike ngx_strncasecmp, this function compares exactly `len` bytes
- * without relying on NUL termination.  Returns 0 on match, or the
- * difference of the first mismatching lowercase byte pair.
+ * Delegates to markdown_negotiate_accept FFI for RFC 7231 §5.3.2
+ * q-value comparison with RFC 9110 tie-break rules.
+ *
+ * The FFIAcceptResult.reason field maps to skip metrics:
+ *   0: Convert (text/markdown preferred)
+ *   1: No Accept header present
+ *   2: text/markdown has lower q-value than text/html
+ *   3: text/markdown;q=0 explicit reject
+ *   4: Malformed Accept header
  *
  * Parameters:
- *   left  - first byte string
- *   right - second byte string
- *   len   - number of bytes to compare
+ *   r          - The request structure
+ *   conf       - Module configuration
+ *   out_reason - Output: FFI reason code (NEGOTIATE_REASON_*)
+ *                Set to NEGOTIATE_REASON_NO_ACCEPT when Accept
+ *                header is absent.  May be NULL if caller does
+ *                not need the reason.
  *
  * Returns:
- *   0 if equal, negative if left < right, positive if left > right.
+ *   1 if should convert, 0 if not
  */
-static ngx_int_t
-ngx_http_markdown_const_strncasecmp(const u_char *left, const u_char *right,
-    size_t len)
+ngx_int_t
+ngx_http_markdown_should_convert(ngx_http_request_t *r,
+    const ngx_http_markdown_conf_t *conf, ngx_uint_t *out_reason)
 {
-    for (size_t i = 0; i < len; i++) {
-        u_char left_c;
-        u_char right_c;
+    const ngx_table_elt_t   *accept_header;
+    struct FFIAcceptResult   result;
+    uint8_t                  on_wildcard;
 
-        left_c = ngx_tolower(left[i]);
-        right_c = ngx_tolower(right[i]);
-        if (left_c != right_c) {
-            return (ngx_int_t) left_c - (ngx_int_t) right_c;
+    if (conf == NULL) {
+        if (out_reason != NULL) {
+            *out_reason = NEGOTIATE_REASON_NO_ACCEPT;
         }
+        return 0;
     }
 
+    accept_header = ngx_http_markdown_get_accept_header(r);
+    if (accept_header == NULL || accept_header->value.len == 0) {
+        if (out_reason != NULL) {
+            *out_reason = NEGOTIATE_REASON_NO_ACCEPT;
+        }
+        return 0;
+    }
+
+    on_wildcard = (uint8_t) ((conf->on_wildcard != 0) ? 1 : 0);
+
+    markdown_negotiate_accept(
+        accept_header->value.data,
+        accept_header->value.len,
+        on_wildcard,
+        &result);
+
+    if (out_reason != NULL) {
+        *out_reason = (ngx_uint_t) result.reason;
+    }
+
+    if (result.should_convert) {
+        ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                     "markdown: Accept negotiation: convert, "
+                     "reason=%ud, on_wildcard=%ud",
+                     (ngx_uint_t) result.reason,
+                     (ngx_uint_t) conf->on_wildcard);
+        return 1;
+    }
+
+    ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                 "markdown: Accept negotiation: skip, reason=%ud",
+                 (ngx_uint_t) result.reason);
     return 0;
-}
-
-/*
- * Find a request header in nginx's linked-list header storage.
- *
- * Complexity is O(n) over all request headers, which is acceptable because
- * request header counts are typically small and this runs once per decision.
- */
-static ngx_table_elt_t *
-ngx_http_markdown_find_request_header(ngx_http_request_t *r,
-    const u_char *name,
-    size_t name_len)
-{
-    ngx_list_part_t *part;
-    ngx_table_elt_t *headers;
-
-    if (r == NULL || name == NULL || name_len == 0) {
-        return NULL;
-    }
-
-    part = &r->headers_in.headers.part;
-    headers = part->elts;
-
-    for ( ;; ) {
-        for (ngx_uint_t i = 0; i < part->nelts; i++) {
-            if (headers[i].key.len == name_len
-                && ngx_http_markdown_const_strncasecmp(headers[i].key.data,
-                                                       name,
-                                                       name_len) == 0)
-            {
-                return &headers[i];
-            }
-        }
-
-        if (part->next == NULL) {
-            break;
-        }
-
-        part = part->next;
-        headers = part->elts;
-    }
-
-    return NULL;
 }
