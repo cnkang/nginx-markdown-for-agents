@@ -128,6 +128,53 @@ markdown_memory_budget 5m;
 markdown_memory_budget 512k;
 ```
 
+#### markdown_decompress_max_size
+
+**Syntax:** `markdown_decompress_max_size <size>;`
+**Default:** same as `markdown_memory_budget`
+**Context:** http, server, location
+
+Independent budget for decompressed output size. When upstream content is
+compressed (gzip/deflate/brotli), this directive caps the maximum
+decompressed byte count, separate from `markdown_memory_budget` which
+also limits the final Markdown output.
+
+**Example:**
+```nginx
+# Allow up to 20MB of decompressed content
+markdown_decompress_max_size 20m;
+```
+
+#### markdown_parse_timeout
+
+**Syntax:** `markdown_parse_timeout <time>;`
+**Default:** `30s`
+**Context:** http, server, location
+
+Maximum time for the HTML parsing phase. If parsing exceeds this
+deadline, it is terminated and the request proceeds according to the
+`markdown_on_error` policy.
+
+**Example:**
+```nginx
+markdown_parse_timeout 10s;
+```
+
+#### markdown_parser_budget
+
+**Syntax:** `markdown_parser_budget <size>;`
+**Default:** `64m`
+**Context:** http, server, location
+
+Maximum memory the HTML parser may allocate. If the parser exceeds
+this budget, parsing is terminated and the request proceeds according
+to the `markdown_on_error` policy.
+
+**Example:**
+```nginx
+markdown_parser_budget 32m;
+```
+
 
 #### markdown_timeout
 
@@ -775,6 +822,35 @@ memory_budget=128k
   in multiple location blocks; the global single-watcher constraint
   means only one will take effect.
 
+#### markdown_dynconf_dry_run
+
+**Syntax:** `markdown_dynconf_dry_run on | off;`
+**Default:** `off`
+**Context:** http, server, location
+
+Validates a pending dynconf change without applying it to the active
+snapshot. When enabled, the dynconf timer parses and validates the
+configuration file normally but does not promote the staging snapshot
+to active. Validation results (success or per-line errors) are logged
+at `info` level.
+
+Use dry-run mode to pre-flight configuration changes in production
+before committing them.
+
+**Example:**
+```nginx
+# Enable dry-run validation (changes are checked but not applied)
+markdown_dynconf_dry_run on;
+```
+
+**Workflow:**
+1. Set `markdown_dynconf_dry_run on;` and reload NGINX.
+2. Write the new dynconf file.
+3. Wait for the timer cycle (1s) and check the error log for
+   validation results.
+4. If validation passes, set `markdown_dynconf_dry_run off;` and
+   reload to apply the change.
+
 ---
 
 ### Large Response Processing
@@ -934,6 +1010,57 @@ http {
 - When the SHM-backed metrics struct layout changes between releases, the module
   bumps the SHM zone name to prevent hot-reload layout mismatch. A full restart
   is recommended after upgrading.
+
+#### markdown_diagnostics
+
+**Syntax:** `markdown_diagnostics on | off;`
+**Default:** `off`
+**Context:** http, server, location
+
+Enables the runtime diagnostics endpoint at `/nginx-markdown/diagnostics`.
+When enabled, the endpoint exposes a JSON object containing:
+
+- `config_snapshot`: current active dynconf values
+- `recent_decisions`: ring buffer of recent request decision summaries
+  (reason code, duration)
+- `metrics_snapshot`: key counters (conversions, deliveries, errors)
+- `dynconf_state`: active mtime, config version, LKG mtime
+
+Access is restricted by default: only loopback addresses (127.0.0.1, ::1)
+are permitted unless `markdown_diagnostics_allow` is configured.
+
+#### markdown_diagnostics_allow
+
+**Syntax:** `markdown_diagnostics_allow <CIDR>;`
+**Default:** none (loopback-only when empty)
+**Context:** http, server, location
+
+Adds a CIDR address to the diagnostics endpoint allow list. Multiple
+directives can be specified to allow multiple networks. When at least one
+`markdown_diagnostics_allow` directive is present, only matching client
+addresses are permitted; the loopback fallback is replaced by the explicit
+list.
+
+**Example:**
+```nginx
+location /nginx-markdown/diagnostics {
+    markdown_diagnostics on;
+    markdown_diagnostics_allow 127.0.0.1/32;
+    markdown_diagnostics_allow ::1/128;
+    markdown_diagnostics_allow 10.0.0.0/8;
+}
+```
+
+**Notes:**
+- The diagnostics endpoint is read-only and does not modify module state.
+- The `recent_decisions` ring buffer holds up to 100 entries by default.
+- When no `markdown_diagnostics_allow` is configured, only loopback
+  addresses are permitted (built-in default-deny).
+- For additional access control, NGINX's native `allow`/`deny` directives
+  can be used alongside `markdown_diagnostics_allow`.
+- Disable in production if the endpoint is not needed to avoid exposing
+  internal state.
+
 ---
 
 ## Configuration Examples
@@ -2050,3 +2177,5 @@ tail -f /var/log/nginx/error.log | grep "conversion time"
 |---------|------|--------|---------|
 | 0.5.0 | 2026-04-21 | docs-standardization | Added `markdown_streaming_engine`, `markdown_streaming_budget`, `markdown_metrics_format`, and `markdown_metrics_shm_size` directive documentation previously missing from this guide; added update tracking section |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
+| 0.7.0 | 2026-05-17 | Kang | Added `markdown_dynconf_dry_run` directive documentation |
+| 0.7.0 | 2026-05-18 | Kang | Added `markdown_diagnostics` directive documentation |

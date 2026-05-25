@@ -1,0 +1,20 @@
+nginx-module-markdown (0.7.0-1) unstable; urgency=medium
+
+  * v0.7.0 release: DEB packaging pipeline
+  * Add NGINX ABI dependency declaration
+  * Add postinst/postrm scripts with conservative module enable
+  * Add bounded decompression, Accept negotiation, parse budget
+  * Add Rust decision engine, conditional requests, header plan
+  * Add Kubernetes deployment examples and Helm chart
+
+ -- Kang Liu <liukang@noreply.github.com>  Sat, 17 May 2026 12:00:00 +0800
+
+nginx-module-markdown (0.6.0-1) unstable; urgency=medium
+
+  * Initial DEB packaging structure
+  * HTML-to-Markdown conversion filter module
+  * Streaming and full-buffer engines
+  * Content negotiation via Accept headers
+  * Prometheus metrics endpoint
+
+ -- Kang Liu <liukang@noreply.github.com>  Fri, 02 May 2026 10:00:00 +0800

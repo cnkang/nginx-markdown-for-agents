@@ -131,6 +131,22 @@ The complete mapping from reason codes to eligibility enums, error categories, r
 | `FAIL_RESOURCE_LIMIT` | — | `NGX_HTTP_MARKDOWN_ERROR_RESOURCE_LIMIT` | — | Timeout or memory limit |
 | `FAIL_SYSTEM` | — | `NGX_HTTP_MARKDOWN_ERROR_SYSTEM` | — | Internal/system error |
 
+### v0.7.0 Additional Reason Codes and Behavior
+
+| Reason Code / Behavior | Description |
+|------------------------|-------------|
+| `REPLAY_BUFFER_ERROR` | Fail-open replay buffer init or append failure; sets `precommit_error` flag (prevents duplicate finalize calls) |
+| `failopen_completed` | Once-then-skip flag preventing duplicate `ngx_http_finalize_request` calls within a request lifetime |
+| `DECOMP_BUDGET_EXCEEDED` | Decompression budget (`markdown_decompress_max_size`) exceeded; classified as `FAIL_RESOURCE_LIMIT` |
+| `DECOMPRESSION_FORMAT_ERROR` | Compressed input has invalid format (not valid gzip/deflate/brotli); classified as `FAIL_CONVERSION` |
+| `DECOMPRESSION_TRUNCATED_INPUT` | Compressed input was truncated (incomplete stream); classified as `FAIL_CONVERSION` |
+| `DECOMPRESSION_IO_ERROR` | I/O error during decompression operation; classified as `FAIL_SYSTEM` |
+| `PARSE_TIMEOUT` | Parser execution exceeded `markdown_parse_timeout` (default 30s); classified as `FAIL_RESOURCE_LIMIT` |
+| `PARSE_BUDGET_EXCEEDED` | Parser memory exceeded `markdown_parser_budget` (default 64m); classified as `FAIL_RESOURCE_LIMIT` |
+| `SKIP_NO_ACCEPT` | No Accept header present and `markdown_on_wildcard` is off |
+| `SKIP_CONDITIONAL` | Conditional request matched (If-None-Match / If-Modified-Since) → 304 Not Modified |
+| Delivery vs Decision counter separation | `failopen_count` (delivery) increments only after downstream NGX_OK; decision counter increments on decision regardless of downstream status |
+
 All reason codes use uppercase snake_case format. The same strings appear in both decision log entries and Prometheus metrics labels, so operators can correlate log entries with metric counters without translation.
 
 ## Implementation Details
@@ -158,3 +174,4 @@ The reason code lookup functions are implemented in `components/nginx-module/src
 |---------|------|--------|---------|
 | 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
+| 0.7.0 | 2026-05-17 | Kang | Added v0.7.0 reason codes (REPLAY_BUFFER_ERROR, DECOMP_BUDGET_EXCEEDED, PARSE_TIMEOUT, PARSE_BUDGET_EXCEEDED, SKIP_NO_ACCEPT, SKIP_CONDITIONAL) and delivery/decision counter separation |

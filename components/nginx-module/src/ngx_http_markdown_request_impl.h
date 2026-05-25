@@ -32,6 +32,7 @@ ngx_http_markdown_streaming_body_filter(
 #include "ngx_http_markdown_payload_impl.h"
 #include "ngx_http_markdown_conversion_impl.h"
 #include "ngx_http_markdown_exports.h"
+#include "ngx_http_markdown_diagnostics.h"
 
 /* Forward declarations for helpers defined in this file */
 static void ngx_http_markdown_bind_request_snapshot(
@@ -66,7 +67,7 @@ static ngx_http_output_body_filter_pt ngx_http_next_body_filter;
 const ngx_str_t *ngx_http_markdown_reason_failed_closed(void);
 const ngx_str_t *ngx_http_markdown_reason_failed_open(void);
 const ngx_str_t *ngx_http_markdown_reason_from_error_category(
-    ngx_http_markdown_error_category_t category, const ngx_log_t *log);
+    ngx_http_markdown_error_category_t category, ngx_log_t *log);
 const ngx_str_t *ngx_http_markdown_reason_converted(void);
 const ngx_str_t *ngx_http_markdown_eligibility_string(
     ngx_http_markdown_eligibility_t eligibility);
@@ -139,7 +140,7 @@ ngx_http_markdown_bind_request_snapshot(
     if (conf->advanced.dynconf_enabled) {
         if (snap_copy == NULL) {
             ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-                          "markdown filter: dynconf_enabled is true but "
+                          "markdown: dynconf_enabled is true but "
                           "snap_copy is NULL; skipping dynconf snapshot binding, "
                           "request will use live conf values");
         } else {
@@ -149,7 +150,7 @@ ngx_http_markdown_bind_request_snapshot(
                 *ctx->dynconf_snapshot = *snap_copy;
             } else {
                 ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-                              "markdown filter: failed to allocate dynconf snapshot "
+                              "markdown: failed to allocate dynconf snapshot "
                               "from request pool; request will use live conf values");
             }
         }
@@ -161,7 +162,7 @@ ngx_http_markdown_bind_request_snapshot(
         *ctx->effective_conf = *early_eff;
     } else {
         ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-                      "markdown filter: failed to allocate effective conf "
+                      "markdown: failed to allocate effective conf "
                       "from request pool; request will use live conf values");
     }
 }
@@ -189,9 +190,9 @@ ngx_http_markdown_handle_unsupported_compression(
     const ngx_http_markdown_conf_t *conf)
 {
     ctx->eligible = 0;
-    ctx->last_error_category =
+    ctx->error.last_category =
         NGX_HTTP_MARKDOWN_ERROR_CONVERSION;
-    ctx->has_error_category = 1;
+    ctx->error.has_category = 1;
 
     NGX_HTTP_MARKDOWN_METRIC_INC(conversions_attempted);
     NGX_HTTP_MARKDOWN_METRIC_INC(conversions_failed);
@@ -202,7 +203,7 @@ ngx_http_markdown_handle_unsupported_compression(
     {
         ngx_log_error(NGX_LOG_WARN,
             r->connection->log, 0,
-            "markdown filter: unsupported "
+            "markdown: unsupported "
             "compression format, "
             "rejecting (fail-closed)");
         ngx_http_markdown_log_failure_decision(
@@ -214,7 +215,7 @@ ngx_http_markdown_handle_unsupported_compression(
 
     ngx_log_error(NGX_LOG_WARN,
         r->connection->log, 0,
-        "markdown filter: unsupported "
+        "markdown: unsupported "
         "compression format, "
         "returning original content "
         "(fail-open)");
@@ -248,7 +249,7 @@ ngx_http_markdown_handle_ctx_alloc_failure(ngx_http_request_t *r,
     const ngx_http_markdown_effective_conf_t *eff)
 {
     ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0,
-                 "markdown filter: failed to allocate "
+                 "markdown: failed to allocate "
                  "context, category=system");
 
     NGX_HTTP_MARKDOWN_METRIC_INC(conversions_attempted);
@@ -260,7 +261,7 @@ ngx_http_markdown_handle_ctx_alloc_failure(ngx_http_request_t *r,
     {
         ngx_log_error(NGX_LOG_ERR,
             r->connection->log, 0,
-            "markdown filter: context allocation "
+            "markdown: context allocation "
             "failed, rejecting (fail-closed)");
         ngx_http_markdown_log_decision_with_category(
             r, conf, eff,
@@ -274,7 +275,7 @@ ngx_http_markdown_handle_ctx_alloc_failure(ngx_http_request_t *r,
     ngx_http_markdown_metric_inc_failopen(conf);
 
     ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                 "markdown filter: context allocation "
+                 "markdown: context allocation "
                  "failed, returning original content "
                  "(fail-open)");
     ngx_http_markdown_log_decision_with_category(
@@ -309,14 +310,14 @@ ngx_http_markdown_init_ctx(ngx_http_request_t *r,
         r->headers_out.last_modified_time;
     ctx->last_modified.has_last_modified_time =
         (r->headers_out.last_modified_time != (time_t) -1);
-    ctx->conversion_attempted = 0;
-    ctx->conversion_succeeded = 0;
-    ctx->bypass_counted = 0;
+    ctx->conversion.attempted = 0;
+    ctx->conversion.succeeded = 0;
+    ctx->conversion.bypass_counted = 0;
     ctx->processing_path =
         NGX_HTTP_MARKDOWN_PATH_FULLBUFFER;
-    ctx->last_error_category =
+    ctx->error.last_category =
         NGX_HTTP_MARKDOWN_ERROR_SYSTEM;
-    ctx->has_error_category = 0;
+    ctx->error.has_category = 0;
 
     /*
      * Initialize decompression state.
@@ -364,6 +365,7 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
     ngx_http_markdown_eligibility_t  eligibility;
     ngx_flag_t                       filter_enabled;
     ngx_int_t                        should_convert;
+    ngx_uint_t                       accept_reason;
     ngx_http_markdown_dynconf_snapshot_t  snap_copy;
     ngx_http_markdown_effective_conf_t    early_eff;
 
@@ -377,6 +379,13 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
      * A concurrent reload may swap the global active_snapshot,
      * but this request continues using its own copy and derived
      * effective view, guaranteeing request-level consistency.
+     *
+     * [Rule 34 / E03.2 audit] Bind-once semantic verified:
+     *   - active_snapshot read exactly once (snap_copy below)
+     *   - build_effective_conf called once from snap_copy
+     *   - ctx->effective_conf bound via bind_request_snapshot
+     *   - body_filter, streaming, conversion paths all read
+     *     from ctx->effective_conf — never re-read global
      */
 
     /* Get module configuration */
@@ -462,7 +471,7 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
         /* Not eligible, pass through */
         ngx_log_debug1(NGX_LOG_DEBUG_HTTP,
                       r->connection->log, 0,
-                      "markdown filter: response not eligible: %V",
+                      "markdown: response not eligible: %V",
                       ngx_http_markdown_eligibility_string(
                           eligibility));
         ngx_http_markdown_metric_inc_skip(eligibility);
@@ -491,13 +500,82 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
     }
 
     /* Check if client wants Markdown (Accept header) */
-    should_convert = ngx_http_markdown_should_convert(r, conf);
+    should_convert = ngx_http_markdown_should_convert(
+        r, conf, &accept_reason);
     if (!should_convert) {
         /* Client doesn't want Markdown, pass through */
         NGX_HTTP_MARKDOWN_METRIC_INC(skips.accept);
         NGX_HTTP_MARKDOWN_METRIC_INC(conversions_bypassed);
-        ngx_http_markdown_log_decision(r, conf, &early_eff,
-            ngx_http_markdown_reason_skip_accept());
+
+        /*
+         * Map FFI reason to normalized reason code and accept_result.
+         *
+         * NEGOTIATE_REASON_NO_ACCEPT (1) → SKIPPED_NO_ACCEPT, NONE
+         * NEGOTIATE_REASON_LOWER_Q   (2) → SKIPPED_ACCEPT, SKIP
+         * NEGOTIATE_REASON_EXPLICIT_REJECT (3) → SKIPPED_ACCEPT_REJECT, REJECT
+         * NEGOTIATE_REASON_MALFORMED (4) → SKIPPED_ACCEPT, SKIP
+         */
+        switch (accept_reason) {
+
+        case NEGOTIATE_REASON_NO_ACCEPT:
+            ngx_http_markdown_log_decision(r, conf, &early_eff,
+                ngx_http_markdown_reason_skip_no_accept());
+            {
+                ngx_http_markdown_decision_path_t  dp;
+
+                dp.accept_result =
+                    NGX_HTTP_MARKDOWN_ACCEPT_NONE;
+                dp.conditional_result =
+                    NGX_HTTP_MARKDOWN_COND_SKIPPED;
+                dp.conversion_status =
+                    NGX_HTTP_MARKDOWN_CONV_SKIPPED;
+                dp.reason_code = "SKIPPED_NO_ACCEPT";
+                dp.duration_ms = 0;
+                ngx_http_markdown_log_decision_path(
+                    r, conf, &early_eff, &dp);
+            }
+            break;
+
+        case NEGOTIATE_REASON_EXPLICIT_REJECT:
+            ngx_http_markdown_log_decision(r, conf, &early_eff,
+                ngx_http_markdown_reason_skip_accept_reject());
+            {
+                ngx_http_markdown_decision_path_t  dp;
+
+                dp.accept_result =
+                    NGX_HTTP_MARKDOWN_ACCEPT_REJECT;
+                dp.conditional_result =
+                    NGX_HTTP_MARKDOWN_COND_SKIPPED;
+                dp.conversion_status =
+                    NGX_HTTP_MARKDOWN_CONV_SKIPPED;
+                dp.reason_code = "SKIPPED_ACCEPT_REJECT";
+                dp.duration_ms = 0;
+                ngx_http_markdown_log_decision_path(
+                    r, conf, &early_eff, &dp);
+            }
+            break;
+
+        default:
+            /* NEGOTIATE_REASON_LOWER_Q or MALFORMED */
+            ngx_http_markdown_log_decision(r, conf, &early_eff,
+                ngx_http_markdown_reason_skip_accept());
+            {
+                ngx_http_markdown_decision_path_t  dp;
+
+                dp.accept_result =
+                    NGX_HTTP_MARKDOWN_ACCEPT_SKIP;
+                dp.conditional_result =
+                    NGX_HTTP_MARKDOWN_COND_SKIPPED;
+                dp.conversion_status =
+                    NGX_HTTP_MARKDOWN_CONV_SKIPPED;
+                dp.reason_code = "SKIPPED_ACCEPT";
+                dp.duration_ms = 0;
+                ngx_http_markdown_log_decision_path(
+                    r, conf, &early_eff, &dp);
+            }
+            break;
+        }
+
         return ngx_http_next_header_filter(r);
     }
 
@@ -542,7 +620,7 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
      * 
      * Requirements: 1.1, 1.6, 4.2, 8.1, 10.3, 11.1, 11.5
      */
-    if (conf->auto_decompress) {
+    if (conf->decompress.auto_decompress) {
         ctx->decompression.type = ngx_http_markdown_detect_compression(r);
         
         if (ctx->decompression.type == NGX_HTTP_MARKDOWN_COMPRESSION_UNKNOWN) {
@@ -567,7 +645,7 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
             ctx->decompression.needed = 1;
             
             ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                          "markdown filter: decompression detected compression type: %d",
+                          "markdown: decompression detected compression type: %d",
                           ctx->decompression.type);
         }
     }
@@ -608,7 +686,7 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
     {
         ngx_log_debug0(NGX_LOG_DEBUG_HTTP,
             r->connection->log, 0,
-            "markdown filter: streaming path "
+            "markdown: streaming path "
             "selected by engine selector");
 
         ngx_http_markdown_log_decision(r, conf, ctx->effective_conf,
@@ -633,7 +711,7 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
         /* else: no CL — deferred to body filter */
 #else
         ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-                     "markdown filter: markdown_large_body_threshold is set, "
+                     "markdown: markdown_large_body_threshold is set, "
                      "but incremental support was not compiled in; using "
                      "full-buffer path");
 #endif
@@ -672,7 +750,7 @@ path_selected:
     r->filter_need_in_memory = 1;
 
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                  "markdown filter: response eligible for conversion, "
+                  "markdown: response eligible for conversion, "
                   "context initialized");
 
     /*
@@ -746,20 +824,53 @@ ngx_http_markdown_body_filter_convert_and_output(ngx_http_request_t *r,
     elapsed_ms = 0;
 
     ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                  "markdown filter: buffered complete response, size: %uz bytes",
+                  "markdown: buffered complete response, size: %uz bytes",
                   ctx->buffer.size);
 
     rc = ngx_http_markdown_resolve_conditional_result(
         r, ctx, conf, &result, &elapsed_ms, &has_result);
     if (rc == NGX_HTTP_NOT_MODIFIED) {
-        /* 304 Not Modified — conversion matched, log as converted */
+        /* 304 Not Modified — skip conversion, client has current */
         ngx_http_markdown_log_decision(r, conf, ctx->effective_conf,
-            ngx_http_markdown_reason_converted());
+            ngx_http_markdown_reason_skip_conditional());
+
+        {
+            ngx_http_markdown_decision_path_t  dp;
+
+            dp.accept_result = NGX_HTTP_MARKDOWN_ACCEPT_CONVERT;
+            dp.conditional_result =
+                NGX_HTTP_MARKDOWN_COND_NOT_MODIFIED;
+            dp.conversion_status =
+                NGX_HTTP_MARKDOWN_CONV_SKIPPED;
+            dp.reason_code = "SKIPPED_CONDITIONAL";
+            dp.duration_ms = elapsed_ms;
+            ngx_http_markdown_log_decision_path(
+                r, conf, ctx->effective_conf, &dp);
+        }
+
         return NGX_OK;
     }
     if (rc != NGX_OK) {
         /* Conditional processing failed — log failure outcome */
         ngx_http_markdown_log_failure_decision(r, ctx, conf);
+
+        {
+            ngx_http_markdown_decision_path_t  dp;
+
+            dp.accept_result = NGX_HTTP_MARKDOWN_ACCEPT_CONVERT;
+            dp.conditional_result =
+                NGX_HTTP_MARKDOWN_COND_PROCEED;
+            dp.conversion_status =
+                NGX_HTTP_MARKDOWN_CONV_FAILED;
+            dp.reason_code = (conf->on_error
+                == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT)
+                ? "ELIGIBLE_FAILED_CLOSED"
+                : "ELIGIBLE_FAILED_OPEN";
+            dp.duration_ms = elapsed_ms;
+            ngx_http_markdown_log_decision_path(
+                r, conf, ctx->effective_conf, &dp);
+        }
+
         return rc;
     }
 
@@ -768,6 +879,25 @@ ngx_http_markdown_body_filter_convert_and_output(ngx_http_request_t *r,
         if (rc != NGX_OK) {
             /* Conversion failed — log failure outcome */
             ngx_http_markdown_log_failure_decision(r, ctx, conf);
+
+            {
+                ngx_http_markdown_decision_path_t  dp;
+
+                dp.accept_result =
+                    NGX_HTTP_MARKDOWN_ACCEPT_CONVERT;
+                dp.conditional_result =
+                    NGX_HTTP_MARKDOWN_COND_PROCEED;
+                dp.conversion_status =
+                    NGX_HTTP_MARKDOWN_CONV_FAILED;
+                dp.reason_code = (conf->on_error
+                    == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT)
+                    ? "ELIGIBLE_FAILED_CLOSED"
+                    : "ELIGIBLE_FAILED_OPEN";
+                dp.duration_ms = elapsed_ms;
+                ngx_http_markdown_log_decision_path(
+                    r, conf, ctx->effective_conf, &dp);
+            }
+
             return rc;
         }
     }
@@ -782,6 +912,21 @@ ngx_http_markdown_body_filter_convert_and_output(ngx_http_request_t *r,
          */
         ngx_http_markdown_log_decision(r, conf, ctx->effective_conf,
             ngx_http_markdown_reason_converted());
+
+        {
+            ngx_http_markdown_decision_path_t  dp;
+
+            dp.accept_result = NGX_HTTP_MARKDOWN_ACCEPT_CONVERT;
+            dp.conditional_result =
+                NGX_HTTP_MARKDOWN_COND_PROCEED;
+            dp.conversion_status =
+                NGX_HTTP_MARKDOWN_CONV_SUCCESS;
+            dp.reason_code = "ELIGIBLE_CONVERTED";
+            dp.duration_ms = elapsed_ms;
+            ngx_http_markdown_log_decision_path(
+                r, conf, ctx->effective_conf, &dp);
+        }
+
     } else {
         /*
          * Output emission failed after conversion succeeded.
@@ -790,6 +935,24 @@ ngx_http_markdown_body_filter_convert_and_output(ngx_http_request_t *r,
          * in ngx_http_markdown_execute_conversion().
          */
         ngx_http_markdown_log_failure_decision(r, ctx, conf);
+
+        {
+            ngx_http_markdown_decision_path_t  dp;
+
+            dp.accept_result = NGX_HTTP_MARKDOWN_ACCEPT_CONVERT;
+            dp.conditional_result =
+                NGX_HTTP_MARKDOWN_COND_PROCEED;
+            dp.conversion_status =
+                NGX_HTTP_MARKDOWN_CONV_FAILED;
+            dp.reason_code = (conf->on_error
+                == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT)
+                ? "ELIGIBLE_FAILED_CLOSED"
+                : "ELIGIBLE_FAILED_OPEN";
+            dp.duration_ms = elapsed_ms;
+            ngx_http_markdown_log_decision_path(
+                r, conf, ctx->effective_conf, &dp);
+        }
+
     }
 
     return rc;
@@ -848,10 +1011,45 @@ ngx_http_markdown_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
         return ngx_http_next_body_filter(r, in);
     }
 
+    /*
+     * Rule 1 / Rule 38: resume full-buffer pending chain.
+     * If the full-buffer path previously returned NGX_AGAIN from
+     * send_conversion_output, the pending output must be drained
+     * before accepting new input.  This is triggered by NGINX
+     * re-invoking the body filter (typically with in == NULL)
+     * after the downstream filter becomes writable again.
+     */
+    if (ctx->fullbuffer.pending_has_data) {
+        rc = ngx_http_next_body_filter(r, ctx->fullbuffer.pending_output);
+        if (rc == NGX_AGAIN) {
+            /* Still backpressured, keep pending chain */
+            return NGX_AGAIN;
+        }
+        /* Downstream consumed the pending output */
+        ctx->fullbuffer.pending_output = NULL;
+        ctx->fullbuffer.pending_has_data = 0;
+        r->buffered &= ~NGX_HTTP_MARKDOWN_BUFFERED;
+
+        if (rc != NGX_OK && rc != NGX_DONE) {
+            return rc;
+        }
+
+        if (rc == NGX_DONE) {
+            return NGX_DONE;
+        }
+
+        /*
+         * Pending converted output drained successfully.  The original input
+         * chain was already consumed when conversion_attempted was set, so do
+         * not forward a re-delivered input chain after the converted response.
+         */
+        return NGX_OK;
+    }
+
     /* If not eligible for conversion, pass through */
     if (!ctx->eligible) {
         r->buffered &= ~NGX_HTTP_MARKDOWN_BUFFERED;
-        if (!ctx->bypass_counted && !ctx->has_error_category) {
+        if (!ctx->conversion.bypass_counted && !ctx->error.has_category) {
             /*
              * Track bypassed request once even if the body
              * arrives in chunks.  Do not count requests that
@@ -859,7 +1057,7 @@ ngx_http_markdown_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
              * — those are accounted for by conversions_failed.
              */
             NGX_HTTP_MARKDOWN_METRIC_INC(conversions_bypassed);
-            ctx->bypass_counted = 1;
+            ctx->conversion.bypass_counted = 1;
         }
         if (ngx_http_markdown_forward_headers(r, ctx) != NGX_OK) {
             return NGX_ERROR;
@@ -877,10 +1075,12 @@ ngx_http_markdown_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
     }
 #endif
 
-    /* If conversion already attempted, pass through */
-    if (ctx->conversion_attempted) {
-        r->buffered &= ~NGX_HTTP_MARKDOWN_BUFFERED;
-        return ngx_http_next_body_filter(r, in);
+    /* If conversion already completed, do not pass original input through. */
+    if (ctx->conversion.attempted) {
+        if (!ctx->fullbuffer.pending_has_data) {
+            r->buffered &= ~NGX_HTTP_MARKDOWN_BUFFERED;
+        }
+        return NGX_OK;
     }
 
     rc = ngx_http_markdown_body_filter_buffer_input(r, in, ctx, conf);
@@ -897,7 +1097,7 @@ ngx_http_markdown_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
      * preceded by a conversions_attempted increment.  This keeps
      * the two counters consistent (attempted >= failed).
      */
-    ctx->conversion_attempted = 1;
+    ctx->conversion.attempted = 1;
     NGX_HTTP_MARKDOWN_METRIC_INC(conversions_attempted);
 
     rc = ngx_http_markdown_body_filter_decompress_if_needed(r, ctx, conf);

@@ -2021,6 +2021,741 @@ test_reload_line_too_long(void)
     TEST_PASS("reload: line too long returns INVALID_FILE");
 }
 
+static void
+test_reload_lkg_preserved_on_success(void)
+{
+    const char                          *tmpfile;
+    ngx_http_markdown_dynconf_watcher_t  watcher;
+    ngx_http_markdown_conf_t             conf;
+    ngx_int_t                            rc;
+
+    tmpfile = "/tmp/dynconf_test_lkg_preserve.conf";
+    {
+        FILE *f = fopen(tmpfile, "w");
+        TEST_ASSERT(f != NULL, "create temp file for LKG test");
+        fprintf(f, "markdown_filter=off\n");
+        fclose(f);
+    }
+
+    memset(&watcher, 0, sizeof(watcher));
+    memset(&conf, 0, sizeof(conf));
+    set_ngx_str(&watcher.path, tmpfile);
+
+    /* Set up initial active snapshot: enabled=1, prune_noise=1 */
+    watcher.active_snapshot.valid = 1;
+    watcher.active_snapshot.enabled = 1;
+    watcher.active_snapshot.enabled_source = NGX_HTTP_MARKDOWN_ENABLED_STATIC;
+    watcher.active_snapshot.prune_noise = 1;
+    watcher.active_snapshot.log_verbosity = NGX_HTTP_MARKDOWN_LOG_INFO;
+    watcher.active_snapshot.memory_budget = 64 * 1024;
+    watcher.lkg_valid = 0;
+
+    rc = ngx_http_markdown_dynconf_reload(&watcher, &conf, &g_log);
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_APPLIED,
+                "reload returns APPLIED");
+
+    /* LKG should now hold the previous active snapshot values */
+    TEST_ASSERT(watcher.lkg_valid == 1,
+                "lkg_valid set to 1 after successful reload");
+    TEST_ASSERT(watcher.last_known_good.valid == 1,
+                "LKG snapshot marked valid");
+    TEST_ASSERT(watcher.last_known_good.enabled == 1,
+                "LKG preserved previous enabled=1");
+    TEST_ASSERT(watcher.last_known_good.prune_noise == 1,
+                "LKG preserved previous prune_noise=1");
+    TEST_ASSERT(watcher.last_known_good.log_verbosity
+                == NGX_HTTP_MARKDOWN_LOG_INFO,
+                "LKG preserved previous log_verbosity=INFO");
+    TEST_ASSERT(watcher.last_known_good.memory_budget == 64 * 1024,
+                "LKG preserved previous memory_budget=64k");
+
+    /* Active snapshot should have the new value */
+    TEST_ASSERT(watcher.active_snapshot.enabled == 0,
+                "active_snapshot updated to enabled=0");
+
+    unlink(tmpfile);
+    TEST_PASS("reload: LKG preserved on successful reload");
+}
+
+static void
+test_reload_lkg_not_updated_on_failure(void)
+{
+    const char                          *tmpfile;
+    ngx_http_markdown_dynconf_watcher_t  watcher;
+    ngx_http_markdown_conf_t             conf;
+    ngx_int_t                            rc;
+
+    tmpfile = "/tmp/dynconf_test_lkg_no_update.conf";
+    {
+        FILE *f = fopen(tmpfile, "w");
+        TEST_ASSERT(f != NULL, "create temp file for LKG failure test");
+        fprintf(f, "unknown_key=bad\n");
+        fclose(f);
+    }
+
+    memset(&watcher, 0, sizeof(watcher));
+    memset(&conf, 0, sizeof(conf));
+    set_ngx_str(&watcher.path, tmpfile);
+
+    /* Set up initial active snapshot */
+    watcher.active_snapshot.valid = 1;
+    watcher.active_snapshot.enabled = 1;
+    watcher.active_snapshot.prune_noise = 1;
+    watcher.lkg_valid = 0;
+
+    rc = ngx_http_markdown_dynconf_reload(&watcher, &conf, &g_log);
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_INVALID_FILE,
+                "reload with unknown key returns INVALID_FILE");
+
+    /* LKG should NOT be updated on failure */
+    TEST_ASSERT(watcher.lkg_valid == 0,
+                "lkg_valid remains 0 after failed reload");
+
+    /* Active snapshot should be unchanged */
+    TEST_ASSERT(watcher.active_snapshot.enabled == 1,
+                "active_snapshot unchanged after failed reload");
+    TEST_ASSERT(watcher.active_snapshot.prune_noise == 1,
+                "active_snapshot prune_noise unchanged after failed reload");
+
+    unlink(tmpfile);
+    TEST_PASS("reload: LKG not updated on validation failure");
+}
+
+static void
+test_reload_lkg_successive_reloads(void)
+{
+    const char                          *tmpfile;
+    ngx_http_markdown_dynconf_watcher_t  watcher;
+    ngx_http_markdown_conf_t             conf;
+    ngx_int_t                            rc;
+
+    tmpfile = "/tmp/dynconf_test_lkg_successive.conf";
+
+    memset(&watcher, 0, sizeof(watcher));
+    memset(&conf, 0, sizeof(conf));
+    set_ngx_str(&watcher.path, tmpfile);
+
+    /* Initial state: enabled=1, prune_noise=0 */
+    watcher.active_snapshot.valid = 1;
+    watcher.active_snapshot.enabled = 1;
+    watcher.active_snapshot.prune_noise = 0;
+    watcher.active_snapshot.log_verbosity = NGX_HTTP_MARKDOWN_LOG_ERROR;
+    watcher.lkg_valid = 0;
+
+    /* First reload: set prune_noise=on */
+    {
+        FILE *f = fopen(tmpfile, "w");
+        TEST_ASSERT(f != NULL, "create file for first reload");
+        fprintf(f, "prune_noise=on\n");
+        fclose(f);
+    }
+
+    rc = ngx_http_markdown_dynconf_reload(&watcher, &conf, &g_log);
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_APPLIED,
+                "first reload APPLIED");
+    TEST_ASSERT(watcher.lkg_valid == 1,
+                "lkg_valid=1 after first reload");
+    TEST_ASSERT(watcher.last_known_good.prune_noise == 0,
+                "LKG has prune_noise=0 (previous state)");
+    TEST_ASSERT(watcher.active_snapshot.prune_noise == 1,
+                "active has prune_noise=1 (new state)");
+
+    /* Second reload: set log_verbosity=debug */
+    {
+        FILE *f = fopen(tmpfile, "w");
+        TEST_ASSERT(f != NULL, "create file for second reload");
+        fprintf(f, "log_verbosity=debug\n");
+        fclose(f);
+    }
+
+    rc = ngx_http_markdown_dynconf_reload(&watcher, &conf, &g_log);
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_APPLIED,
+                "second reload APPLIED");
+
+    /* LKG should now hold the state from AFTER first reload
+     * (prune_noise=1, log_verbosity=ERROR from first active) */
+    TEST_ASSERT(watcher.lkg_valid == 1,
+                "lkg_valid still 1 after second reload");
+    TEST_ASSERT(watcher.last_known_good.prune_noise == 1,
+                "LKG has prune_noise=1 (state after first reload)");
+    TEST_ASSERT(watcher.last_known_good.log_verbosity
+                == NGX_HTTP_MARKDOWN_LOG_ERROR,
+                "LKG has log_verbosity=ERROR (from first active)");
+    TEST_ASSERT(watcher.active_snapshot.log_verbosity
+                == NGX_HTTP_MARKDOWN_LOG_DEBUG,
+                "active has log_verbosity=DEBUG (new state)");
+
+    unlink(tmpfile);
+    TEST_PASS("reload: successive reloads update LKG correctly");
+}
+
+static void
+test_reload_lkg_preserved_after_failed_reload(void)
+{
+    const char                          *tmpfile;
+    ngx_http_markdown_dynconf_watcher_t  watcher;
+    ngx_http_markdown_conf_t             conf;
+    ngx_int_t                            rc;
+
+    tmpfile = "/tmp/dynconf_test_lkg_after_fail.conf";
+
+    memset(&watcher, 0, sizeof(watcher));
+    memset(&conf, 0, sizeof(conf));
+    set_ngx_str(&watcher.path, tmpfile);
+
+    /* Initial state */
+    watcher.active_snapshot.valid = 1;
+    watcher.active_snapshot.enabled = 1;
+    watcher.active_snapshot.prune_noise = 0;
+    watcher.lkg_valid = 0;
+
+    /* First reload: success → LKG populated */
+    {
+        FILE *f = fopen(tmpfile, "w");
+        TEST_ASSERT(f != NULL, "create file for success reload");
+        fprintf(f, "prune_noise=on\n");
+        fclose(f);
+    }
+
+    rc = ngx_http_markdown_dynconf_reload(&watcher, &conf, &g_log);
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_APPLIED,
+                "first reload APPLIED");
+    TEST_ASSERT(watcher.lkg_valid == 1, "lkg_valid=1");
+    TEST_ASSERT(watcher.last_known_good.prune_noise == 0,
+                "LKG has original prune_noise=0");
+
+    /* Second reload: failure → LKG must NOT change */
+    {
+        FILE *f = fopen(tmpfile, "w");
+        TEST_ASSERT(f != NULL, "create file for failed reload");
+        fprintf(f, "invalid_key=bad\n");
+        fclose(f);
+    }
+
+    rc = ngx_http_markdown_dynconf_reload(&watcher, &conf, &g_log);
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_INVALID_FILE,
+                "second reload INVALID_FILE");
+
+    /* LKG should still hold the state from before first reload */
+    TEST_ASSERT(watcher.lkg_valid == 1,
+                "lkg_valid still 1 after failed reload");
+    TEST_ASSERT(watcher.last_known_good.prune_noise == 0,
+                "LKG prune_noise unchanged after failed reload");
+
+    /* Active should still be the state from first reload */
+    TEST_ASSERT(watcher.active_snapshot.prune_noise == 1,
+                "active prune_noise unchanged after failed reload");
+
+    unlink(tmpfile);
+    TEST_PASS("reload: LKG preserved unchanged after failed reload");
+}
+
+
+/*
+ * Rollback tests (E04.2)
+ */
+
+static void
+test_rollback_null_watcher(void)
+{
+    ngx_int_t  rc;
+
+    rc = ngx_http_markdown_dynconf_rollback(NULL, &g_log);
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DYNCONF_ROLLBACK_APPLY_ERR,
+                "rollback NULL watcher returns APPLY_ERR");
+    TEST_PASS("rollback: NULL watcher");
+}
+
+static void
+test_rollback_null_conf(void)
+{
+    ngx_http_markdown_dynconf_watcher_t  watcher;
+    ngx_int_t                            rc;
+
+    memset(&watcher, 0, sizeof(watcher));
+    watcher.conf = NULL;
+
+    rc = ngx_http_markdown_dynconf_rollback(&watcher, &g_log);
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DYNCONF_ROLLBACK_APPLY_ERR,
+                "rollback NULL conf returns APPLY_ERR");
+    TEST_PASS("rollback: NULL conf pointer");
+}
+
+static void
+test_rollback_no_lkg(void)
+{
+    ngx_http_markdown_dynconf_watcher_t  watcher;
+    ngx_http_markdown_conf_t             conf;
+    ngx_int_t                            rc;
+
+    memset(&watcher, 0, sizeof(watcher));
+    memset(&conf, 0, sizeof(conf));
+    watcher.conf = &conf;
+    watcher.lkg_valid = 0;
+
+    rc = ngx_http_markdown_dynconf_rollback(&watcher, &g_log);
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DYNCONF_ROLLBACK_NO_LKG,
+                "rollback with no LKG returns NO_LKG");
+    TEST_PASS("rollback: no LKG available");
+}
+
+static void
+test_rollback_success(void)
+{
+    ngx_http_markdown_dynconf_watcher_t  watcher;
+    ngx_http_markdown_conf_t             conf;
+    ngx_int_t                            rc;
+
+    memset(&watcher, 0, sizeof(watcher));
+    memset(&conf, 0, sizeof(conf));
+    watcher.conf = &conf;
+
+    /* Set up active snapshot (version N+1) */
+    watcher.active_snapshot.valid = 1;
+    watcher.active_snapshot.enabled = 0;
+    watcher.active_snapshot.prune_noise = 1;
+    watcher.active_snapshot.log_verbosity = NGX_HTTP_MARKDOWN_LOG_DEBUG;
+
+    /* Set up LKG (version N) */
+    watcher.last_known_good.valid = 1;
+    watcher.last_known_good.enabled = 1;
+    watcher.last_known_good.prune_noise = 0;
+    watcher.last_known_good.log_verbosity = NGX_HTTP_MARKDOWN_LOG_ERROR;
+    watcher.lkg_valid = 1;
+    watcher.version = 5;
+
+    rc = ngx_http_markdown_dynconf_rollback(&watcher, &g_log);
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DYNCONF_ROLLBACK_OK,
+                "rollback returns OK");
+
+    /* Active snapshot should now match LKG */
+    TEST_ASSERT(watcher.active_snapshot.enabled == 1,
+                "active enabled restored from LKG");
+    TEST_ASSERT(watcher.active_snapshot.prune_noise == 0,
+                "active prune_noise restored from LKG");
+    TEST_ASSERT(watcher.active_snapshot.log_verbosity
+                == NGX_HTTP_MARKDOWN_LOG_ERROR,
+                "active log_verbosity restored from LKG");
+
+    /* Version should be incremented */
+    TEST_ASSERT(watcher.version == 6,
+                "version incremented after rollback");
+
+    /* LKG should remain valid (idempotent rollback) */
+    TEST_ASSERT(watcher.lkg_valid == 1,
+                "lkg_valid remains 1 after rollback");
+
+    /* Live conf should reflect the restored snapshot */
+    TEST_ASSERT(conf.enabled == 1,
+                "live conf enabled updated from rollback");
+    TEST_ASSERT(conf.advanced.prune_noise == 0,
+                "live conf prune_noise updated from rollback");
+    TEST_ASSERT(conf.policy.log_verbosity
+                == NGX_HTTP_MARKDOWN_LOG_ERROR,
+                "live conf log_verbosity updated from rollback");
+
+    TEST_PASS("rollback: success restores LKG to active and conf");
+}
+
+static void
+test_rollback_idempotent(void)
+{
+    ngx_http_markdown_dynconf_watcher_t  watcher;
+    ngx_http_markdown_conf_t             conf;
+    ngx_int_t                            rc;
+
+    memset(&watcher, 0, sizeof(watcher));
+    memset(&conf, 0, sizeof(conf));
+    watcher.conf = &conf;
+
+    /* Set up LKG */
+    watcher.last_known_good.valid = 1;
+    watcher.last_known_good.enabled = 1;
+    watcher.last_known_good.prune_noise = 1;
+    watcher.last_known_good.log_verbosity = NGX_HTTP_MARKDOWN_LOG_WARN;
+    watcher.lkg_valid = 1;
+
+    /* Active differs from LKG */
+    watcher.active_snapshot.valid = 1;
+    watcher.active_snapshot.enabled = 0;
+    watcher.active_snapshot.prune_noise = 0;
+    watcher.active_snapshot.log_verbosity = NGX_HTTP_MARKDOWN_LOG_DEBUG;
+    watcher.version = 10;
+
+    /* First rollback */
+    rc = ngx_http_markdown_dynconf_rollback(&watcher, &g_log);
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DYNCONF_ROLLBACK_OK,
+                "first rollback OK");
+    TEST_ASSERT(watcher.version == 11, "version=11 after first rollback");
+
+    /* Second rollback (idempotent) */
+    rc = ngx_http_markdown_dynconf_rollback(&watcher, &g_log);
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DYNCONF_ROLLBACK_OK,
+                "second rollback OK (idempotent)");
+    TEST_ASSERT(watcher.version == 12, "version=12 after second rollback");
+
+    /* Active should still match LKG */
+    TEST_ASSERT(watcher.active_snapshot.enabled == 1,
+                "active enabled still matches LKG");
+    TEST_ASSERT(watcher.active_snapshot.prune_noise == 1,
+                "active prune_noise still matches LKG");
+
+    TEST_PASS("rollback: repeated rollback is idempotent");
+}
+
+static void
+test_rollback_null_log(void)
+{
+    ngx_http_markdown_dynconf_watcher_t  watcher;
+    ngx_http_markdown_conf_t             conf;
+    ngx_int_t                            rc;
+
+    memset(&watcher, 0, sizeof(watcher));
+    memset(&conf, 0, sizeof(conf));
+    watcher.conf = &conf;
+    watcher.lkg_valid = 1;
+    watcher.last_known_good.valid = 1;
+    watcher.last_known_good.enabled = 1;
+    watcher.active_snapshot.valid = 1;
+    watcher.active_snapshot.enabled = 0;
+    watcher.version = 3;
+
+    /* NULL log should not crash */
+    rc = ngx_http_markdown_dynconf_rollback(&watcher, NULL);
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DYNCONF_ROLLBACK_OK,
+                "rollback with NULL log still succeeds");
+    TEST_ASSERT(watcher.active_snapshot.enabled == 1,
+                "active restored even with NULL log");
+    TEST_ASSERT(watcher.version == 4, "version incremented");
+
+    TEST_PASS("rollback: NULL log does not crash");
+}
+
+
+/*
+ * Dry-run tests (E02.4)
+ */
+
+static void
+test_dry_run_valid_file_returns_ok(void)
+{
+    const char                          *tmpfile;
+    ngx_http_markdown_dynconf_watcher_t  watcher;
+    ngx_http_markdown_conf_t             conf;
+    ngx_int_t                            rc;
+    ngx_uint_t                           orig_version;
+
+    TEST_SUBSECTION("dry-run: valid file returns DRY_RUN_OK");
+
+    tmpfile = "/tmp/dynconf_test_dryrun_valid.conf";
+    {
+        FILE *f = fopen(tmpfile, "w");
+        TEST_ASSERT(f != NULL, "create temp file for dry-run valid test");
+        fprintf(f, "markdown_filter=on\nprune_noise=off\n");
+        fclose(f);
+    }
+
+    memset(&watcher, 0, sizeof(watcher));
+    memset(&conf, 0, sizeof(conf));
+    conf.advanced.dynconf_dry_run = 1;
+    set_ngx_str(&watcher.path, tmpfile);
+    watcher.active_snapshot.valid = 1;
+    watcher.active_snapshot.enabled = 0;
+    watcher.active_snapshot.prune_noise = 1;
+    watcher.version = 3;
+    orig_version = watcher.version;
+    watcher.lkg_valid = 0;
+
+    rc = ngx_http_markdown_dynconf_reload(&watcher, &conf, &g_log);
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_DRY_RUN_OK,
+                "reload returns DRY_RUN_OK for valid file in dry-run mode");
+
+    /* active_snapshot must NOT be modified */
+    TEST_ASSERT(watcher.active_snapshot.enabled == 0,
+                "active_snapshot.enabled unchanged (still 0)");
+    TEST_ASSERT(watcher.active_snapshot.prune_noise == 1,
+                "active_snapshot.prune_noise unchanged (still 1)");
+
+    /* last_known_good must NOT be updated */
+    TEST_ASSERT(watcher.lkg_valid == 0,
+                "lkg_valid remains 0 (not updated in dry-run)");
+
+    /* version must NOT be incremented */
+    TEST_ASSERT(watcher.version == orig_version,
+                "version not incremented in dry-run mode");
+
+    /* live conf must NOT be modified */
+    TEST_ASSERT(conf.enabled == 0,
+                "live conf.enabled unchanged");
+    TEST_ASSERT(conf.advanced.prune_noise == 0,
+                "live conf.prune_noise unchanged");
+
+    unlink(tmpfile);
+    TEST_PASS("dry-run: valid file returns DRY_RUN_OK without side effects");
+}
+
+static void
+test_dry_run_invalid_file_returns_fail(void)
+{
+    const char                          *tmpfile;
+    ngx_http_markdown_dynconf_watcher_t  watcher;
+    ngx_http_markdown_conf_t             conf;
+    ngx_int_t                            rc;
+    ngx_uint_t                           orig_version;
+
+    TEST_SUBSECTION("dry-run: invalid file returns DRY_RUN_FAIL");
+
+    tmpfile = "/tmp/dynconf_test_dryrun_invalid.conf";
+    {
+        FILE *f = fopen(tmpfile, "w");
+        TEST_ASSERT(f != NULL, "create temp file for dry-run invalid test");
+        fprintf(f, "unknown_key=bad\n");
+        fprintf(f, "another_bad_key=value\n");
+        fclose(f);
+    }
+
+    memset(&watcher, 0, sizeof(watcher));
+    memset(&conf, 0, sizeof(conf));
+    conf.advanced.dynconf_dry_run = 1;
+    set_ngx_str(&watcher.path, tmpfile);
+    watcher.active_snapshot.valid = 1;
+    watcher.active_snapshot.enabled = 1;
+    watcher.active_snapshot.prune_noise = 1;
+    watcher.version = 5;
+    orig_version = watcher.version;
+    watcher.lkg_valid = 0;
+
+    rc = ngx_http_markdown_dynconf_reload(&watcher, &conf, &g_log);
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_DRY_RUN_FAIL,
+                "reload returns DRY_RUN_FAIL for invalid file in dry-run mode");
+
+    /* active_snapshot must NOT be modified */
+    TEST_ASSERT(watcher.active_snapshot.enabled == 1,
+                "active_snapshot.enabled unchanged (still 1)");
+    TEST_ASSERT(watcher.active_snapshot.prune_noise == 1,
+                "active_snapshot.prune_noise unchanged (still 1)");
+
+    /* last_known_good must NOT be updated */
+    TEST_ASSERT(watcher.lkg_valid == 0,
+                "lkg_valid remains 0 (not updated in dry-run)");
+
+    /* version must NOT be incremented */
+    TEST_ASSERT(watcher.version == orig_version,
+                "version not incremented on dry-run failure");
+
+    /* validation result should have errors */
+    TEST_ASSERT(watcher.last_validation.total_errors > 0,
+                "last_validation.total_errors > 0");
+    TEST_ASSERT(watcher.last_validation.count > 0,
+                "last_validation.count > 0");
+
+    unlink(tmpfile);
+    TEST_PASS("dry-run: invalid file returns DRY_RUN_FAIL with errors recorded");
+}
+
+static void
+test_dry_run_off_applies_normally(void)
+{
+    const char                          *tmpfile;
+    ngx_http_markdown_dynconf_watcher_t  watcher;
+    ngx_http_markdown_conf_t             conf;
+    ngx_int_t                            rc;
+
+    TEST_SUBSECTION("dry-run off: normal mode applies changes");
+
+    tmpfile = "/tmp/dynconf_test_dryrun_off.conf";
+    {
+        FILE *f = fopen(tmpfile, "w");
+        TEST_ASSERT(f != NULL, "create temp file for dry-run off test");
+        fprintf(f, "markdown_filter=on\nprune_noise=off\n");
+        fclose(f);
+    }
+
+    memset(&watcher, 0, sizeof(watcher));
+    memset(&conf, 0, sizeof(conf));
+    conf.advanced.dynconf_dry_run = 0;
+    set_ngx_str(&watcher.path, tmpfile);
+    watcher.active_snapshot.valid = 1;
+    watcher.active_snapshot.enabled = 0;
+    watcher.active_snapshot.prune_noise = 1;
+    watcher.version = 0;
+
+    rc = ngx_http_markdown_dynconf_reload(&watcher, &conf, &g_log);
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_APPLIED,
+                "reload returns APPLIED (not DRY_RUN_OK) when dry-run is off");
+
+    /* active_snapshot IS modified in normal mode */
+    TEST_ASSERT(watcher.active_snapshot.enabled == 1,
+                "active_snapshot.enabled updated to 1");
+    TEST_ASSERT(watcher.active_snapshot.prune_noise == 0,
+                "active_snapshot.prune_noise updated to 0");
+
+    /* version IS incremented */
+    TEST_ASSERT(watcher.version == 1,
+                "version incremented in normal mode");
+
+    unlink(tmpfile);
+    TEST_PASS("dry-run off: normal mode applies changes as expected");
+}
+
+
+static void
+test_reload_concurrent_request_snapshot_consistency(void)
+{
+    const char                              *tmpfile_v1;
+    const char                              *tmpfile_v2;
+    ngx_http_markdown_dynconf_watcher_t      watcher;
+    ngx_http_markdown_conf_t                 conf;
+    ngx_http_markdown_dynconf_snapshot_t     bound_snapshot;
+    ngx_http_markdown_effective_conf_t       eff;
+    ngx_int_t                                rc;
+
+    TEST_SUBSECTION("reload vs request: snapshot consistency (Rule 34)");
+
+    /*
+     * Step 1: Set up initial dynconf file (v1) and reload to establish
+     * the active_snapshot with known values.
+     */
+    tmpfile_v1 = "/tmp/dynconf_test_concurrent_v1.conf";
+    {
+        FILE *f = fopen(tmpfile_v1, "w");
+        TEST_ASSERT(f != NULL, "create v1 config file");
+        fprintf(f, "markdown_filter=on\n");
+        fprintf(f, "prune_noise=off\n");
+        fprintf(f, "log_verbosity=warn\n");
+        fprintf(f, "memory_budget=128k\n");
+        fclose(f);
+    }
+
+    memset(&watcher, 0, sizeof(watcher));
+    memset(&conf, 0, sizeof(conf));
+    set_ngx_str(&watcher.path, tmpfile_v1);
+    watcher.active_snapshot.valid = 1;
+
+    rc = ngx_http_markdown_dynconf_reload(&watcher, &conf, &g_log);
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_APPLIED,
+                "v1 reload applied successfully");
+    TEST_ASSERT(watcher.active_snapshot.enabled == 1,
+                "v1: active_snapshot.enabled == 1");
+    TEST_ASSERT(watcher.active_snapshot.prune_noise == 0,
+                "v1: active_snapshot.prune_noise == 0");
+    TEST_ASSERT(watcher.active_snapshot.log_verbosity
+                    == NGX_HTTP_MARKDOWN_LOG_WARN,
+                "v1: active_snapshot.log_verbosity == WARN");
+    TEST_ASSERT(watcher.active_snapshot.memory_budget == 128 * 1024,
+                "v1: active_snapshot.memory_budget == 128KiB");
+
+    /*
+     * Step 2: Simulate a request binding its effective_conf.
+     * In production, header_filter copies active_snapshot into
+     * ctx->dynconf_snapshot (bind-once).  We simulate this by
+     * copying the snapshot struct (memcpy).
+     */
+    memcpy(&bound_snapshot, &watcher.active_snapshot,
+           sizeof(ngx_http_markdown_dynconf_snapshot_t));
+
+    /* Build effective_conf from the bound snapshot */
+    memset(&eff, 0, sizeof(eff));
+    ngx_http_markdown_build_effective_conf(&eff, &bound_snapshot, &conf);
+
+    TEST_ASSERT(eff.enabled == 1,
+                "bound eff.enabled == 1 (from v1 snapshot)");
+    TEST_ASSERT(eff.prune_noise == 0,
+                "bound eff.prune_noise == 0 (from v1 snapshot)");
+    TEST_ASSERT(eff.log_verbosity == NGX_HTTP_MARKDOWN_LOG_WARN,
+                "bound eff.log_verbosity == WARN (from v1 snapshot)");
+    TEST_ASSERT(eff.memory_budget == 128 * 1024,
+                "bound eff.memory_budget == 128KiB (from v1 snapshot)");
+
+    /*
+     * Step 3: Simulate a concurrent reload that changes the global
+     * active_snapshot to new values (v2).
+     */
+    tmpfile_v2 = "/tmp/dynconf_test_concurrent_v2.conf";
+    {
+        FILE *f = fopen(tmpfile_v2, "w");
+        TEST_ASSERT(f != NULL, "create v2 config file");
+        fprintf(f, "markdown_filter=off\n");
+        fprintf(f, "prune_noise=on\n");
+        fprintf(f, "log_verbosity=debug\n");
+        fprintf(f, "memory_budget=256k\n");
+        fclose(f);
+    }
+
+    set_ngx_str(&watcher.path, tmpfile_v2);
+    rc = ngx_http_markdown_dynconf_reload(&watcher, &conf, &g_log);
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_APPLIED,
+                "v2 reload applied successfully");
+
+    /*
+     * Step 4: Verify the global active_snapshot now has v2 values.
+     */
+    TEST_ASSERT(watcher.active_snapshot.enabled == 0,
+                "v2: active_snapshot.enabled == 0 (new value)");
+    TEST_ASSERT(watcher.active_snapshot.prune_noise == 1,
+                "v2: active_snapshot.prune_noise == 1 (new value)");
+    TEST_ASSERT(watcher.active_snapshot.log_verbosity
+                    == NGX_HTTP_MARKDOWN_LOG_DEBUG,
+                "v2: active_snapshot.log_verbosity == DEBUG (new value)");
+    TEST_ASSERT(watcher.active_snapshot.memory_budget == 256 * 1024,
+                "v2: active_snapshot.memory_budget == 256KiB (new value)");
+
+    /*
+     * Step 5: Verify the request's bound snapshot still has v1 values.
+     * This demonstrates the bind-once semantic: the request's copy is
+     * independent of the global state.
+     */
+    TEST_ASSERT(bound_snapshot.enabled == 1,
+                "bound snapshot still has v1 enabled == 1");
+    TEST_ASSERT(bound_snapshot.prune_noise == 0,
+                "bound snapshot still has v1 prune_noise == 0");
+    TEST_ASSERT(bound_snapshot.log_verbosity == NGX_HTTP_MARKDOWN_LOG_WARN,
+                "bound snapshot still has v1 log_verbosity == WARN");
+    TEST_ASSERT(bound_snapshot.memory_budget == 128 * 1024,
+                "bound snapshot still has v1 memory_budget == 128KiB");
+
+    /*
+     * Step 6: Verify the effective_conf built from the bound snapshot
+     * still returns v1 values (not affected by the reload).
+     */
+    TEST_ASSERT(eff.enabled == 1,
+                "eff.enabled still 1 after reload (bound to v1)");
+    TEST_ASSERT(eff.prune_noise == 0,
+                "eff.prune_noise still 0 after reload (bound to v1)");
+    TEST_ASSERT(eff.log_verbosity == NGX_HTTP_MARKDOWN_LOG_WARN,
+                "eff.log_verbosity still WARN after reload (bound to v1)");
+    TEST_ASSERT(eff.memory_budget == 128 * 1024,
+                "eff.memory_budget still 128KiB after reload (bound to v1)");
+
+    /*
+     * Step 7: A new request binding AFTER the reload would see v2.
+     * Verify this to confirm the global state did change.
+     */
+    {
+        ngx_http_markdown_dynconf_snapshot_t  new_bound;
+        ngx_http_markdown_effective_conf_t    new_eff;
+
+        memcpy(&new_bound, &watcher.active_snapshot,
+               sizeof(ngx_http_markdown_dynconf_snapshot_t));
+        memset(&new_eff, 0, sizeof(new_eff));
+        ngx_http_markdown_build_effective_conf(&new_eff, &new_bound, &conf);
+
+        TEST_ASSERT(new_eff.enabled == 0,
+                    "new request sees v2 enabled == 0");
+        TEST_ASSERT(new_eff.prune_noise == 1,
+                    "new request sees v2 prune_noise == 1");
+        TEST_ASSERT(new_eff.log_verbosity == NGX_HTTP_MARKDOWN_LOG_DEBUG,
+                    "new request sees v2 log_verbosity == DEBUG");
+        TEST_ASSERT(new_eff.memory_budget == 256 * 1024,
+                    "new request sees v2 memory_budget == 256KiB");
+    }
+
+    unlink(tmpfile_v1);
+    unlink(tmpfile_v2);
+    TEST_PASS("reload vs request: bound snapshot independent of global state");
+}
+
+
 int
 main(void)
 {
@@ -2130,6 +2865,32 @@ main(void)
     test_apply_streaming_budget_does_not_mutate_on_error();
     test_apply_memory_budget_large_valid();
     test_apply_streaming_budget_large_valid();
+
+    TEST_SECTION("dynconf_impl: last-known-good (LKG) tests");
+
+    test_reload_lkg_preserved_on_success();
+    test_reload_lkg_not_updated_on_failure();
+    test_reload_lkg_successive_reloads();
+    test_reload_lkg_preserved_after_failed_reload();
+
+    TEST_SECTION("dynconf_impl: rollback tests (E04.2)");
+
+    test_rollback_null_watcher();
+    test_rollback_null_conf();
+    test_rollback_no_lkg();
+    test_rollback_success();
+    test_rollback_idempotent();
+    test_rollback_null_log();
+
+    TEST_SECTION("dynconf_impl: dry-run tests (E02.4)");
+
+    test_dry_run_valid_file_returns_ok();
+    test_dry_run_invalid_file_returns_fail();
+    test_dry_run_off_applies_normally();
+
+    TEST_SECTION("dynconf_impl: reload-request concurrency (E03.4)");
+
+    test_reload_concurrent_request_snapshot_consistency();
 
     printf("\nAll dynconf_impl tests passed!\n");
     return 0;

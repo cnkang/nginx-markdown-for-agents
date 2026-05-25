@@ -84,6 +84,34 @@ test_classify_streaming_specific_codes(void)
 
 
 /*
+ * Verify v0.7.0 FFI error codes are classified correctly.
+ * Tests ERROR_DECOMPRESSION_BUDGET_EXCEEDED (9), ERROR_PARSE_TIMEOUT (10),
+ * and ERROR_PARSE_BUDGET_EXCEEDED (11).
+ *
+ * Expected: all three map to RESOURCE_LIMIT (budget/timeout resource limits).
+ */
+static void
+test_classify_v070_codes(void)
+{
+    TEST_SUBSECTION("classify_error: v0.7.0 FFI codes (Rule 7/15)");
+
+    TEST_ASSERT(
+        ngx_http_markdown_classify_error(ERROR_DECOMPRESSION_BUDGET_EXCEEDED) == NGX_HTTP_MARKDOWN_ERROR_RESOURCE_LIMIT,
+        "ERROR_DECOMPRESSION_BUDGET_EXCEEDED (9) -> RESOURCE_LIMIT");
+
+    TEST_ASSERT(
+        ngx_http_markdown_classify_error(ERROR_PARSE_TIMEOUT) == NGX_HTTP_MARKDOWN_ERROR_RESOURCE_LIMIT,
+        "ERROR_PARSE_TIMEOUT (10) -> RESOURCE_LIMIT");
+
+    TEST_ASSERT(
+        ngx_http_markdown_classify_error(ERROR_PARSE_BUDGET_EXCEEDED) == NGX_HTTP_MARKDOWN_ERROR_RESOURCE_LIMIT,
+        "ERROR_PARSE_BUDGET_EXCEEDED (11) -> RESOURCE_LIMIT");
+
+    TEST_PASS("v0.7.0 error codes classified correctly");
+}
+
+
+/*
  * Verify unknown and boundary error codes fall through to SYSTEM.
  * Tests ERROR_SUCCESS (0), arbitrary code 42, and UINT32_MAX.
  *
@@ -152,6 +180,7 @@ main(void)
 
     test_classify_all_defined_codes();
     test_classify_streaming_specific_codes();
+    test_classify_v070_codes();
     test_classify_unknown_and_boundary();
     test_category_string_all_values();
 

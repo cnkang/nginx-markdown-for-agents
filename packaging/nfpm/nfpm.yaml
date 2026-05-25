@@ -1,0 +1,54 @@
+# packaging/nfpm/nfpm.yaml
+#
+# nFPM declarative packaging configuration for nginx-module-markdown-for-agents.
+# Generates both .deb and .rpm packages from pre-built Module_SO artifacts.
+#
+# Environment variables (injected by workflow matrix):
+#   PKG_VERSION    - Project version (e.g. 0.7.0)
+#   NGINX_VERSION  - Target NGINX version (e.g. 1.26.3)
+#   NFPM_ARCH      - Target architecture (e.g. amd64, arm64)
+#
+# Usage:
+#   nfpm package --packager deb --target "dist/${DEB_FILENAME}"
+#   nfpm package --packager rpm --target "dist/${RPM_FILENAME}"
+
+name: "nginx-module-markdown-for-agents"
+arch: "${NFPM_ARCH}"
+platform: "linux"
+version: "${PKG_VERSION}"
+maintainer: "nginx-markdown-for-agents maintainers"
+description: |
+  NGINX dynamic module for HTML-to-Markdown conversion.
+  Serves Markdown to AI agents via content negotiation.
+vendor: "NGINX Markdown for Agents Contributors"
+homepage: "https://github.com/cnkang/nginx-markdown-for-agents"
+license: "BSD-2-Clause"
+
+depends:
+  - "nginx (>= ${NGINX_VERSION})"
+
+contents:
+  - src: "./build/ngx_http_markdown_module.so"
+    dst: "/usr/lib/nginx/modules/ngx_http_markdown_module.so"
+    file_info:
+      mode: 0644
+
+  - src: "./packaging/nfpm/modules-available/mod-markdown.conf"
+    dst: "/usr/share/nginx/modules-available/mod-markdown.conf"
+    type: config|noreplace
+
+  - src: "./LICENSE"
+    dst: "/usr/share/licenses/nginx-markdown-for-agents/LICENSE"
+
+  - src: "./README.md"
+    dst: "/usr/share/doc/nginx-markdown-for-agents/README.md"
+
+  - src: "./docs/guides/INSTALL.md"
+    dst: "/usr/share/doc/nginx-markdown-for-agents/INSTALL.md"
+
+  - src: "./docs/COMPATIBILITY.md"
+    dst: "/usr/share/doc/nginx-markdown-for-agents/COMPATIBILITY.md"
+
+scripts:
+  postinstall: "./packaging/nfpm/scripts/postinstall.sh"
+  preremove: "./packaging/nfpm/scripts/preremove.sh"

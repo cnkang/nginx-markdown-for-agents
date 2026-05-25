@@ -865,6 +865,9 @@ test_dynconf_start_stop_symbols(void)
 int
 main(void)
 {
+    /* Suppress -Wunused-function for functions not exercised by this test */
+    (void) ngx_http_markdown_dynconf_rollback;
+
     TEST_SECTION("Effective Configuration View Tests");
 
     test_build_effective_conf_from_valid_snapshot();

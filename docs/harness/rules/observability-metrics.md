@@ -270,3 +270,12 @@ Required:
   exercise each newly covered value individually.  Without per-value test
   coverage, the fix can silently regress when the branch condition is later
   modified.
+- **Format string argument matching**: when adding new metric fields to text
+  or JSON renderers that use `ngx_snprintf` or `ngx_slprintf`, manually verify
+  that the number and types of format specifiers (`%V`, `%uA`, `%uz`, `%O`,
+  `%i`, `%T`, etc.) exactly match the argument list.  `ngx_snprintf` does not
+  perform compile-time type checking — a mismatch silently produces corrupted
+  output or reads garbage from the stack.  After adding fields, count
+  specifiers and arguments side-by-side.  Prefer extracting per-metric
+  `ngx_snprintf` calls over monolithic format strings when the argument list
+  exceeds 10 items.

@@ -1,0 +1,39 @@
+#!/bin/sh
+# postinst script for nginx-module-markdown-for-agents
+#
+# Displays post-install instructions only. Does NOT modify any system
+# state: no nginx.conf edits, no reload/restart, no snippet enablement,
+# no writes to /etc/nginx/.
+
+set -e
+
+case "$1" in
+    configure)
+        cat >&2 <<'EOF'
+======================================================================
+nginx-markdown-for-agents module installed successfully.
+
+To enable the module:
+  1. Add to nginx.conf (top-level, before http block):
+     load_module modules/ngx_http_markdown_module.so;
+
+  2. Verify configuration:
+     sudo nginx -t
+
+  3. Reload NGINX:
+     sudo systemctl reload nginx
+
+For compatibility information, see:
+  /usr/share/doc/nginx-markdown-for-agents/COMPATIBILITY.md
+======================================================================
+EOF
+        ;;
+    abort-upgrade|abort-remove|abort-deconfigure)
+        ;;
+    *)
+        echo "postinst called with unknown argument: $1" >&2
+        exit 1
+        ;;
+esac
+
+exit 0

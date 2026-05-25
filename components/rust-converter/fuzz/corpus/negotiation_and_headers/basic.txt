@@ -1,0 +1,1 @@
+Accept: text/markdown, text/html;q=0.8

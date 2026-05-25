@@ -195,9 +195,93 @@ This decision is documented in [ADR-0003](ADR/0003-inline-origin-near-conversion
 - Operator-facing behavior: [../guides/CONFIGURATION.md](../guides/CONFIGURATION.md)
 
 
+## v0.7.0 Subsystems
+
+The following Rust-first subsystems were introduced in v0.7.0 to move
+pure-logic decisions from C into Rust, improving testability and safety:
+
+### Accept Negotiator (`negotiator.rs`)
+
+Parses `Accept` headers per RFC 9110, performs q-value comparison between
+`text/markdown` and `text/html`, and determines whether conversion should
+proceed. Exposed via `FFIAcceptResult` and `markdown_negotiate_accept` FFI.
+
+### Conditional Request Handler (`conditional.rs`)
+
+Implements `If-None-Match` (ETag strong/weak comparison) and
+`If-Modified-Since` (HTTP-date parsing and time comparison) for 304 Not
+Modified responses. Used internally by the C conditional-request path.
+
+### Decision Engine (`decision.rs`)
+
+Pure function `make_decision(DecisionContext) -> (Decision, SkipReason)`
+that centralizes the conversion/skip/fail decision logic. Each decision
+path produces a reason code for logging and metrics.
+
+### Header Plan (`header_plan.rs`)
+
+Builder for response header mutations (Content-Type, Content-Length, ETag,
+Vary). Generates an operation list that can be applied atomically by the
+C module.
+
+### Security Extensions (`security.rs` additions)
+
+URL control-character rejection, X-Forwarded-Host/Proto parsing with host
+validation, and Markdown link label/destination escaping for injection
+prevention.
+
+### Bounded Decompression
+
+`markdown_decompress_max_size` directive limits decompressed output
+independently from `markdown_max_size`, preventing zip-bomb attacks.
+`DecompressionBudgetExceeded` (FFI code 9) is classified as
+`RESOURCE_LIMIT` in C.
+
+### Parser Timeout and Budget
+
+`markdown_parse_timeout` (default 30s) and `markdown_parser_budget`
+(default 64m) directives limit parsing time and memory. New error codes
+`ParseTimeout` (10) and `ParseBudgetExceeded` (11) map to
+`RESOURCE_LIMIT`.
+
+### Diagnostics Endpoint (`ngx_http_markdown_diagnostics.c`)
+
+A dedicated HTTP handler exposes runtime state at
+`/nginx-markdown/diagnostics` when `markdown_diagnostics on` is
+configured. Returns JSON containing the current config snapshot, recent
+decision summaries (reason codes, durations), and a metrics snapshot.
+Access is restricted by `allow` CIDR configuration; external access is
+denied by default.
+
+### Dynconf Dry-run and Last-Known-Good (`ngx_http_markdown_dynconf.c`)
+
+`markdown_dynconf_dry_run on` validates a new configuration file on HUP
+without replacing the active snapshot. Validation results include line
+numbers, field names, and error reasons. On successful reload, the
+previous active snapshot is preserved as last-known-good (LKG). Manual
+rollback restores `active_snapshot` from LKG. `applied_mtime` updates
+only after successful application (Rule 35).
+
+### Reason Code FFI Accessor (`reason_code.rs` + FFI)
+
+Reason codes are defined as a Rust enum (single source of truth). C
+accesses reason code values and display strings through
+`get_reason_code_string()` FFI. C-side independent `#define` constants
+are removed; all consumers go through the FFI accessor. This ensures
+Rust enum, C usage, docs, and metrics labels stay aligned.
+
+### Header Plan Atomic Application (`ngx_http_markdown_ffi_helpers.c`)
+
+The C module applies `FFIHeaderPlan` operations (set, delete, modify)
+atomically: all header mutations succeed or all are rolled back. This
+prevents partial header state when an allocation failure occurs mid-plan.
+The plan is built by Rust and returned as a single FFI struct; C iterates
+the operation list and applies changes to `r->headers_out`.
+
 ## Document Updates
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
+| 0.7.0 | 2026-05-17 | Kang | Added v0.7.0 subsystems section (negotiator, conditional, decision, header_plan, security extensions, bounded decompression, parser timeout/budget, diagnostics endpoint, dynconf dry-run/LKG, reason code FFI accessor, header plan atomic application) |

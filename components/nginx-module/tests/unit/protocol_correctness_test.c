@@ -44,6 +44,7 @@ typedef struct ngx_list_part_s ngx_list_part_t;
 #define NGX_HTTP_GET 2
 #define NGX_LOG_DEBUG_HTTP 0
 #define NGX_LOG_ERR 1
+#define NGX_LOG_WARN 2
 #define NGX_INT32_LEN 11
 
 typedef struct {
@@ -259,6 +260,94 @@ ngx_http_markdown_sprintf_token(u_char *buf, ngx_uint_t token_count)
 #define NGX_HTTP_MARKDOWN_ENABLE_AUTH_CACHE_CONTROL 0
 
 /*
+ * FFI header plan types and stub implementations.
+ * Required by ngx_http_markdown_headers_impl.h.
+ */
+typedef struct FFIHeaderPlanHandle {
+    uint8_t _private[0];
+} FFIHeaderPlanHandle;
+
+typedef struct FFIHeaderEntry {
+    uint8_t    op_type;
+    const uint8_t *key;
+    uintptr_t  key_len;
+    const uint8_t *value;
+    uintptr_t  value_len;
+} FFIHeaderEntry;
+
+typedef struct FFIHeaderPlan {
+    struct FFIHeaderPlanHandle *handle;
+    const struct FFIHeaderEntry *entries;
+    uintptr_t  count;
+} FFIHeaderPlan;
+
+static struct FFIHeaderEntry g_pc_stub_entries[4];
+static uintptr_t g_pc_stub_count = 0;
+
+static const uint8_t pc_ct_key[] = "Content-Type";
+static const uint8_t pc_ct_val[] =
+    "text/markdown; charset=utf-8";
+static const uint8_t pc_ce_key[] = "Content-Encoding";
+static const uint8_t pc_cl_key[] = "Content-Length";
+
+static void
+markdown_header_plan_init(struct FFIHeaderPlan *result)
+{
+    if (result == NULL) { return; }
+    memset(result, 0, sizeof(*result));
+}
+
+static void
+markdown_build_header_plan(const uint8_t *ct,
+    uintptr_t ct_len, uint8_t has_etag,
+    struct FFIHeaderPlan *result)
+{
+    (void) ct; (void) ct_len;
+    if (result == NULL) { return; }
+    g_pc_stub_count = 0;
+    g_pc_stub_entries[0].op_type = 0;
+    g_pc_stub_entries[0].key = pc_ct_key;
+    g_pc_stub_entries[0].key_len = sizeof(pc_ct_key) - 1;
+    g_pc_stub_entries[0].value = pc_ct_val;
+    g_pc_stub_entries[0].value_len = sizeof(pc_ct_val) - 1;
+    g_pc_stub_count++;
+    g_pc_stub_entries[1].op_type = 1;
+    g_pc_stub_entries[1].key = pc_ce_key;
+    g_pc_stub_entries[1].key_len = sizeof(pc_ce_key) - 1;
+    g_pc_stub_entries[1].value = NULL;
+    g_pc_stub_entries[1].value_len = 0;
+    g_pc_stub_count++;
+    g_pc_stub_entries[2].op_type = 1;
+    g_pc_stub_entries[2].key = pc_cl_key;
+    g_pc_stub_entries[2].key_len = sizeof(pc_cl_key) - 1;
+    g_pc_stub_entries[2].value = NULL;
+    g_pc_stub_entries[2].value_len = 0;
+    g_pc_stub_count++;
+    /* Entry 3: MODIFY ETag (op_type=2) — only when has_etag */
+    if (has_etag) {
+        g_pc_stub_entries[3].op_type = 2;
+        g_pc_stub_entries[3].key = (const uint8_t *) "ETag";
+        g_pc_stub_entries[3].key_len = 4;
+        g_pc_stub_entries[3].value = NULL;
+        g_pc_stub_entries[3].value_len = 0;
+        g_pc_stub_count++;
+    }
+    result->handle = NULL;
+    result->entries =
+        (const struct FFIHeaderEntry *) g_pc_stub_entries;
+    result->count = g_pc_stub_count;
+}
+
+static void
+markdown_header_plan_free(struct FFIHeaderPlan *plan)
+{
+    if (plan == NULL) { return; }
+    plan->handle = NULL;
+    plan->entries = NULL;
+    plan->count = 0;
+}
+
+/*
  * Include the production header implementation directly.
  *
  * This #include is intentionally placed after the type definitions,
@@ -266,7 +355,93 @@ ngx_http_markdown_sprintf_token(u_char *buf, ngx_uint_t token_count)
  * headers_impl.h depends on all of them being visible. Moving it
  * to the top of the file would break compilation.
  */
+#define NGX_HTTP_MARKDOWN_HEADERS_STANDALONE_TYPES_H
+
+/* Forward declaration for the stub defined after the include. */
+static ngx_int_t
+ngx_http_markdown_apply_header_plan(ngx_http_request_t *r,
+    struct FFIHeaderPlan *plan);
+
 #include "../../src/ngx_http_markdown_headers_impl.h" /* SONAR_NOTE: must follow stubs */
+
+/*
+ * Stub for ngx_http_markdown_apply_header_plan.
+ * Defined AFTER headers_impl.h so it can call helper functions
+ * defined therein (remove_content_encoding, set_etag, etc.).
+ *
+ * This stub applies plan entries directly without rollback
+ * (sufficient for unit test verification).
+ */
+static ngx_int_t
+ngx_http_markdown_apply_header_plan(ngx_http_request_t *r,
+    struct FFIHeaderPlan *plan)
+{
+    const struct FFIHeaderEntry *entry;
+
+    if (plan == NULL || plan->count == 0) {
+        return NGX_OK;
+    }
+
+    if (r == NULL) {
+        if (plan != NULL) {
+            markdown_header_plan_free(plan);
+        }
+        return NGX_ERROR;
+    }
+
+    for (uintptr_t i = 0; i < plan->count; i++) {
+        entry = &plan->entries[i];
+
+        switch (entry->op_type) {
+        case 0: /* SET */
+            if (entry->key_len == sizeof("Content-Type") - 1
+                && ngx_strncasecmp((u_char *) entry->key,
+                    (u_char *) "Content-Type",
+                    entry->key_len) == 0)
+            {
+                r->headers_out.content_type.data =
+                    (u_char *) entry->value;
+                r->headers_out.content_type.len =
+                    entry->value_len;
+                r->headers_out.content_type_len =
+                    entry->value_len;
+            }
+            else if (entry->key_len == sizeof("Vary") - 1
+                     && ngx_strncasecmp((u_char *) entry->key,
+                         (u_char *) "Vary",
+                         entry->key_len) == 0)
+            {
+                ngx_http_markdown_add_vary_accept(r);
+            }
+            break;
+        case 1: /* DELETE */
+            if (entry->key_len
+                == sizeof("Content-Encoding") - 1
+                && ngx_strncasecmp((u_char *) entry->key,
+                    (u_char *) "Content-Encoding",
+                    entry->key_len) == 0)
+            {
+                ngx_http_markdown_remove_content_encoding(r);
+            }
+            else if (entry->key_len
+                == sizeof("Content-Length") - 1
+                && ngx_strncasecmp((u_char *) entry->key,
+                    (u_char *) "Content-Length",
+                    entry->key_len) == 0)
+            {
+                r->headers_out.content_length_n = -1;
+            }
+            break;
+        case 2: /* MODIFY (ETag placeholder) */
+            break;
+        default:
+            break;
+        }
+    }
+
+    markdown_header_plan_free(plan);
+    return NGX_OK;
+}
 
 /* ── Test helpers ──────────────────────────────────────────────── */
 
@@ -1316,7 +1491,8 @@ test_parity_content_type(void)
     ngx_http_request_t r_stream = new_request();
     ngx_http_markdown_conf_t conf;
     MarkdownResult result;
-    ngx_table_elt_t *vary_fb, *vary_st;
+    const ngx_table_elt_t *vary_fb;
+    const ngx_table_elt_t *vary_st;
 
     TEST_SUBSECTION("Task 12.1/12.4: Content-Type parity");
 

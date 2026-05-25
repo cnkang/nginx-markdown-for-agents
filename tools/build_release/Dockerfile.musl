@@ -37,6 +37,8 @@ RUN update-ca-certificates
 ARG NGINX_VERSION=1.28.2
 
 WORKDIR /build
+COPY packaging/checksums.sha256 /src/packaging/checksums.sha256
+COPY packaging/scripts/verify-checksum.sh /src/packaging/scripts/verify-checksum.sh
 RUN set -eux; \
     retry() { \
         attempts="$1"; \
@@ -53,7 +55,15 @@ RUN set -eux; \
         done; \
     }; \
     retry 5 curl --proto '=https' --tlsv1.2 -fsSL \
-        "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" | tar xz
+        -o /tmp/nginx.tar.gz \
+        "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz"; \
+    chmod +x /src/packaging/scripts/verify-checksum.sh; \
+    /src/packaging/scripts/verify-checksum.sh \
+        -f /tmp/nginx.tar.gz \
+        -i "nginx-${NGINX_VERSION}" \
+        -c /src/packaging/checksums.sha256; \
+    tar xzf /tmp/nginx.tar.gz; \
+    rm -f /tmp/nginx.tar.gz
 
 COPY Makefile /src/Makefile
 COPY components/rust-converter /src/components/rust-converter

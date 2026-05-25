@@ -23,12 +23,17 @@
 
 // Module declarations
 pub mod charset;
+pub mod conditional;
 pub mod converter;
+pub mod decision;
+pub mod decompress;
 pub mod error;
 pub mod etag_generator;
 pub mod ffi;
+pub mod header_plan;
 pub mod llm_adapter;
 pub mod metadata;
+pub mod negotiator;
 pub mod parser;
 pub mod security;
 pub mod token_estimator;

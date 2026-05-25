@@ -1,6 +1,6 @@
 ---
 domain: nginx-idioms
-rules: [28, 29, 30, 31]
+rules: [28, 29, 30, 31, 39, 40]
 paths:
   - "components/nginx-module/src/**"
 ---
@@ -113,3 +113,76 @@ Verification:
 - `git diff --check` after merge/rebase
 - `make test-nginx-unit` after any change touching `components/nginx-module/`
 - `make test-rust` after any change touching `components/rust-converter/`
+
+
+---
+
+### 39. NGX_DONE terminal semantics and double-finalize prevention
+Historical issues: `90aafbae`, `ebcf7a3c` (H-02).
+
+Required:
+- After calling `ngx_http_finalize_request(r, rc)`, the function must return
+  immediately.  The typical return value is `NGX_DONE` to signal callers that
+  the request lifecycle is complete.
+- Callers receiving `NGX_DONE` from a subroutine must treat it as terminal
+  success: do not invoke further downstream filters, do not send additional
+  body data, and do not call `ngx_http_finalize_request` again.
+- Correct pattern:
+  ```c
+  rc = send_304_response(r);
+  if (rc == NGX_DONE) {
+      return NGX_OK;  /* request already finalized */
+  }
+  /* continue only if rc != NGX_DONE */
+  ```
+- Incorrect pattern:
+  ```c
+  send_304_response(r);  /* ignores return value */
+  rc = ngx_http_output_filter(r, &out);  /* double-send after finalize */
+  ```
+- When a helper function calls `ngx_http_finalize_request`, its doc comment
+  must state "Returns NGX_DONE after finalizing the request; caller must not
+  continue processing."
+- Multi-step header/response modification operations (for example header plan
+  apply with ETag set, Vary append, custom header add) must be atomic: if any
+  step fails (allocation failure, header set failure), abort the entire
+  operation and return `NGX_ERROR`.  Do not log the error and continue with
+  partially applied headers — downstream consumers will see inconsistent state.
+
+Verification:
+- `grep -rn 'ngx_http_finalize_request' components/nginx-module/src/`
+- For each hit, verify the function returns immediately after the call.
+- For each caller of a function that may finalize, verify it checks for
+  `NGX_DONE` before continuing.
+- `grep -rn 'header_plan\|update_headers' components/nginx-module/src/`
+- Verify multi-step header operations abort on first failure.
+
+---
+
+### 40. Invalidated header filtering in header lookup functions
+Historical issues: `ebcf7a3c` (L-01).
+
+Required:
+- All header lookup/iteration functions must skip entries where `hash == 0`.
+  NGINX marks deleted or invalidated headers by zeroing the hash field; reading
+  such entries returns stale or garbage data.
+- The filter must appear inside the iteration loop, before any field access:
+  ```c
+  for (i = 0; i < part->nelts; i++) {
+      if (h[i].hash == 0) {
+          continue;
+      }
+      /* safe to access h[i].key, h[i].value */
+  }
+  ```
+- This applies to all variants: `find_request_header`, `find_output_header`,
+  custom header iteration in `conditional.c`, `accept.c`, `filter_module.c`,
+  `conversion_impl.h`, and any new header lookup code.
+- When adding a new header lookup function, copy the `hash == 0` guard from
+  an existing function rather than writing from scratch.
+
+Verification:
+- `grep -rn 'part->nelts\|part.nelts' components/nginx-module/src/`
+- For each header iteration loop, verify `hash == 0` is checked before
+  accessing header fields.
+- `bash tools/harness/detect_header_hash_filter.sh`

@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-markdown-config
+  namespace: ingress-nginx
+data:
+  markdown-snippet: |
+    load_module modules/ngx_http_markdown_filter_module.so;
+  markdown-filter: |
+    markdown_filter on;
+    markdown_flavor gfm;
+    markdown_auto_decompress on;
+    markdown_decompress_max_size 20m;
+    markdown_streaming_engine auto;

@@ -1,0 +1,40 @@
+#!/bin/sh
+# postrm script for nginx-module-markdown
+#
+# Removes the load_module snippet file on purge.
+
+set -e
+
+MODULE_SNIPPET="/etc/nginx/modules-available/mod-markdown.conf"
+
+case "$1" in
+    purge)
+        # Remove the snippet file
+        if [ -f "${MODULE_SNIPPET}" ]; then
+            rm -f "${MODULE_SNIPPET}"
+        fi
+
+        # Remove modules-available dir if empty
+        if [ -d "/etc/nginx/modules-available" ]; then
+            rmdir /etc/nginx/modules-available 2>/dev/null || true
+        fi
+
+        echo "nginx-module-markdown: module snippet removed."
+        ;;
+
+    remove)
+        echo "nginx-module-markdown: package removed."
+        echo "  Note: ${MODULE_SNIPPET} is preserved."
+        echo "  Run 'dpkg --purge nginx-module-markdown' to remove it."
+        ;;
+
+    upgrade|failed-upgrade|abort-install|abort-upgrade|disappear)
+        ;;
+
+    *)
+        echo "postrm called with unknown argument: $1" >&2
+        exit 1
+        ;;
+esac
+
+exit 0

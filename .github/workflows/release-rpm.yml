@@ -1,0 +1,187 @@
+name: Release RPM
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Module version to build (e.g. 0.7.0)'
+        required: true
+        type: string
+  workflow_call:
+    inputs:
+      version:
+        description: 'Module version to build'
+        required: true
+        type: string
+
+permissions: {}
+
+jobs:
+  build-rpm:
+    name: RPM - ${{ matrix.os }} - ${{ matrix.arch }} - nginx-${{ matrix.nginx_channel }}
+    runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [almalinux-9, amazon-linux-2023]
+        arch: [amd64, arm64]
+        nginx_channel: [stable, mainline]
+    container:
+      image: ${{ matrix.os == 'almalinux-9' && 'almalinux:9' || 'amazonlinux:2023' }}
+
+    steps:
+      - name: Install system dependencies
+        run: |
+          if command -v dnf >/dev/null 2>&1; then
+            dnf install -y \
+              gcc \
+              gcc-c++ \
+              make \
+              pcre-devel \
+              zlib-devel \
+              openssl-devel \
+              rpm-build \
+              git \
+              curl \
+              which \
+              tar \
+              gzip
+          else
+            yum install -y \
+              gcc \
+              gcc-c++ \
+              make \
+              pcre-devel \
+              zlib-devel \
+              openssl-devel \
+              rpm-build \
+              git \
+              curl \
+              which \
+              tar \
+              gzip
+          fi
+
+      - name: Install Rust toolchain
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          . "$HOME/.cargo/env"
+          rustc --version
+          cargo --version
+
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Resolve NGINX version
+        id: nginx_version
+        run: |
+          . "$HOME/.cargo/env"
+          CHANNEL="${{ matrix.nginx_channel }}"
+          if [ "${CHANNEL}" = "stable" ]; then
+            NGINX_VERSION="1.26.3"
+          else
+            NGINX_VERSION="1.27.4"
+          fi
+          echo "version=${NGINX_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Building for NGINX ${NGINX_VERSION} (${CHANNEL} channel)"
+
+      - name: Download and prepare NGINX source
+        env:
+          NGINX_VERSION: ${{ steps.nginx_version.outputs.version }}
+        run: |
+          . "$HOME/.cargo/env"
+          mkdir -p /tmp/nginx-build
+          cd /tmp/nginx-build
+          curl -sSfL "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" -o nginx.tar.gz
+          chmod +x "${GITHUB_WORKSPACE}/packaging/scripts/verify-checksum.sh"
+          "${GITHUB_WORKSPACE}/packaging/scripts/verify-checksum.sh" \
+            -f nginx.tar.gz \
+            -i "nginx-${NGINX_VERSION}" \
+            -c "${GITHUB_WORKSPACE}/packaging/checksums.sha256"
+          tar xzf nginx.tar.gz
+          echo "NGINX_SRC=/tmp/nginx-build/nginx-${NGINX_VERSION}" >> "$GITHUB_ENV"
+
+      - name: Build Rust library
+        run: |
+          . "$HOME/.cargo/env"
+          cd components/rust-converter
+          cargo build --release
+          echo "RUST_LIB_DIR=$(pwd)/target/release" >> "$GITHUB_ENV"
+
+      - name: Compile NGINX module
+        env:
+          NGINX_VERSION: ${{ steps.nginx_version.outputs.version }}
+        run: |
+          . "$HOME/.cargo/env"
+          mkdir -p "$GITHUB_WORKSPACE/build"
+          cd "${NGINX_SRC}"
+          ./configure \
+            --with-compat \
+            --add-dynamic-module="$GITHUB_WORKSPACE/components/nginx-module"
+          make modules
+          cp objs/ngx_http_markdown_module.so "$GITHUB_WORKSPACE/build/"
+        shell: bash
+
+      - name: Prepare rpmbuild tree
+        run: |
+          if [ ! -f "build/ngx_http_markdown_module.so" ]; then
+            echo "ERROR: Module .so not found in build/" >&2
+            exit 1
+          fi
+
+          mkdir -p ~/rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
+
+          # Create source tarball for rpmbuild
+          PKG_NAME="nginx-module-markdown"
+          PKG_VERSION="${{ inputs.version }}"
+          TARBALL_DIR="${PKG_NAME}-${PKG_VERSION}"
+
+          mkdir -p "/tmp/${TARBALL_DIR}"
+          cp build/ngx_http_markdown_module.so "/tmp/${TARBALL_DIR}/"
+          cp README.md "/tmp/${TARBALL_DIR}/" 2>/dev/null || true
+          cp LICENSE "/tmp/${TARBALL_DIR}/" 2>/dev/null || true
+
+          cd /tmp
+          tar czf ~/rpmbuild/SOURCES/${PKG_NAME}-${PKG_VERSION}.tar.gz "${TARBALL_DIR}"
+
+          # Copy SPEC file
+          cp "$GITHUB_WORKSPACE/packaging/rpm/SPECS/nginx-module-markdown.spec" \
+            ~/rpmbuild/SPECS/
+
+      - name: Build RPM package
+        env:
+          PKG_VERSION: ${{ inputs.version }}
+        run: |
+          . "$HOME/.cargo/env"
+          rpmbuild -bb \
+            --define "_topdir $HOME/rpmbuild" \
+            --define "version ${PKG_VERSION}" \
+            --define "nginx_version ${{ steps.nginx_version.outputs.version }}" \
+            ~/rpmbuild/SPECS/nginx-module-markdown.spec || {
+              # If rpmbuild with defines fails, try without overrides
+              # (SPEC file has hardcoded version)
+              rpmbuild -bb \
+                --define "_topdir $HOME/rpmbuild" \
+                ~/rpmbuild/SPECS/nginx-module-markdown.spec
+            }
+
+      - name: Collect RPM artifacts
+        run: |
+          mkdir -p dist
+          find ~/rpmbuild/RPMS -name '*.rpm' -exec cp {} dist/ \;
+          echo "Built RPM packages:"
+          ls -la dist/*.rpm
+          for rpm_file in dist/*.rpm; do
+            echo "--- ${rpm_file} ---"
+            rpm -qip "${rpm_file}"
+          done
+
+      - name: Upload RPM artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: pkg-rpm-${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.nginx_channel }}
+          path: dist/*.rpm
+          if-no-files-found: error

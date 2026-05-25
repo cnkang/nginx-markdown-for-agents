@@ -85,7 +85,7 @@ tap 发布与 GitHub macOS 发布后校验流程见 [docs/guides/HOMEBREW_TAP_RE
 ### 2. 在一个路由上开启 Markdown
 
 ```nginx
-load_module modules/ngx_http_markdown_filter_module.so;
+load_module modules/ngx_http_markdown_module.so;
 
 http {
     upstream backend {
@@ -128,7 +128,7 @@ curl -sD - -o /dev/null -H "Accept: text/html" http://localhost/docs/
 大多数 AI 爬虫不会发送 `Accept: text/markdown`，它们使用和浏览器类似的 Accept 头。你可以用 NGINX 的 `map` 指令根据 User-Agent 改写 Accept 头，让匹配的 bot 自动收到 Markdown，而不需要 bot 自身做任何改变。
 
 ```nginx
-load_module modules/ngx_http_markdown_filter_module.so;
+load_module modules/ngx_http_markdown_module.so;
 
 http {
     # 为已知 AI bot 改写 Accept 头
@@ -390,21 +390,45 @@ Makefile               顶层构建与测试入口
 2. 运行 `make harness-check`
 3. 在结束更广义的文档或 release-gate 改动前，运行 `make harness-check-full`
 
+## v0.7.0 新特性
+
+v0.7.0 是一个正确性、分发和可运维性版本：
+
+- **有界解压** — `markdown_decompress_max_size` 独立限制解压输出大小，防止 zip bomb 攻击（错误码 9: DecompressionBudgetExceeded）
+- **Accept 协商** — Rust 侧 RFC 9110 q-value 比较，在 `text/markdown` 和 `text/html` 之间决定是否转换
+- **解析超时与预算** — `markdown_parse_timeout`（默认 30s）和 `markdown_parser_budget`（默认 64m）防止解析失控（错误码 10、11）
+- **DEB/RPM 包分发** — 预构建包覆盖 Ubuntu 22.04/24.04、Debian 12、AlmaLinux 9、Amazon Linux 2023，支持 amd64/arm64
+- **Kubernetes 部署示例** — Helm chart、manifest 和 Ingress Controller 自定义镜像构建路径
+- **运行时诊断** — `/nginx-markdown/diagnostics` 端点暴露配置快照、最近决策和指标
+- **Dynconf dry-run 与回滚** — 验证配置变更但不应用；失败时回滚到 last-known-good
+
+其他变更：
+
+- P0 运行时正确性：NGX_AGAIN pending chain、fail-open 去重、安全输出排序
+- Rust 条件请求模块（If-None-Match、If-Modified-Since）
+- Rust 决策引擎与 reason code
+- Rust 响应头计划模块
+- Rust URL 控制字符验证与 link 转义
+- FFI ABI 布局验证与 header 漂移检测
+
 ## 路线方向
 
-当前版本 (0.6.3)：
+当前版本 (0.7.0)：
 
-- 双引擎架构：streaming auto 模式默认，小响应使用 full-buffer
-- Streaming 失败语义与 commit boundary 对齐，支持可控 fallback 策略
-- 覆盖 chunk 边界与失败路径的 streaming parity/diff 测试体系
-- 带 shadow mode 的 streaming rollout 可观测性与 reason-code 可见性
-- 面向发布门禁的 streaming 性能证据与 evidence 工作流
-- Rust-first E2E 迁移首批已收敛，形成混合套件契约（`make test-e2e` + `make test-e2e-rust`）
-- repo-owned harness 工作流（`docs/harness/`、`tools/harness/`、`make harness-check*`）
-- release/performance tooling 的路径校验已围绕 repository root 完成加固
-- release binary matrix 已刷新到当前 NGINX `1.30.1` 和 `1.31.0`
-- Prometheus 指标、rollout/rollback 手册与基准回归检测持续可用
-- 安装与发布文档已与 Rust 1.91.0+ 和当前 CI 基线对齐
+- P0 运行时正确性：NGX_AGAIN pending chain、fail-open 去重、安全输出排序
+- 独立解压预算（`markdown_decompress_max_size`）
+- 解析超时与解析器预算指令
+- Rust Accept 头协商模块（RFC 7231 q-value 比较）
+- Rust 条件请求模块（If-None-Match、If-Modified-Since）
+- Rust 决策引擎与 reason code
+- Rust 响应头计划模块
+- Rust URL 控制字符验证与 link 转义
+- FFI ABI 布局验证与 header 漂移检测
+- 新错误码：DecompressionBudgetExceeded(9)、ParseTimeout(10)、ParseBudgetExceeded(11)
+- DEB/RPM 包分发与 APT/YUM 仓库支持
+- Kubernetes 部署示例与 Helm chart
+- 运行时诊断端点
+- Dynconf dry-run 验证与 last-known-good 回滚
 
 近期重点：
 
@@ -426,6 +450,7 @@ BSD 2-Clause "Simplified" License。详见 [LICENSE](LICENSE)。
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.7.0 | 2026-05-17 | Kang | P0 正确性修复、Rust-first 架构、独立解压预算、Accept 协商、解析超时/预算、DEB/RPM 包分发、K8s 示例、运行时诊断、dynconf dry-run/回滚 |
 | 0.6.3 | 2026-05-14 | Kang | 版本号更新至 0.6.3，并补充 release matrix 与发布前最终加固说明 |
 | 0.6.2 | 2026-05-08 | Kang | 版本号更新至 0.6.2 以配合发布 |
 | 0.5.0 | 2026-04-21 | docs-standardization | Synchronized Quick Start steps between English and Chinese versions; added update tracking section |

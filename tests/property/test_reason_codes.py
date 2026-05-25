@@ -877,17 +877,17 @@ def format_decision_log_entry(
     """Format a decision log entry string matching the design specification.
 
     Base format:
-        markdown decision: reason=<CODE> method=<METHOD> uri=<URI>
+        markdown: reason=<CODE> method=<METHOD> uri=<URI>
             content_type=<TYPE>
 
     Base format with error category (failure outcomes):
-        markdown decision: reason=<CODE> category=<FAIL_*>
+        markdown: reason=<CODE> category=<FAIL_*>
             method=<METHOD> uri=<URI> content_type=<TYPE>
 
     Debug extended format adds:
         filter_value=<VALUE> accept=<ACCEPT> status=<STATUS>
     """
-    entry = f"markdown decision: reason={reason_code}"
+    entry = f"markdown: reason={reason_code}"
     if error_category is not None:
         entry += f" category={error_category}"
     entry += (
@@ -904,8 +904,8 @@ def format_decision_log_entry(
 
 def parse_log_fields(entry):
     """Parse a decision log entry string into a dict of field names."""
-    # Strip the "markdown decision: " prefix
-    prefix = "markdown decision: "
+    # Strip the "markdown: " prefix
+    prefix = "markdown: "
     if entry.startswith(prefix):
         entry = entry[len(prefix):]
     fields = {}

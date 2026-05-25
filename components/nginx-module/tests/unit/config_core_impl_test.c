@@ -40,6 +40,12 @@
 #define NGX_CONF_UNSET_PTR ((void *) -1)
 #endif
 
+#ifndef NGX_LOG_EMERG
+#define NGX_LOG_EMERG 0
+#endif
+#ifndef NGX_LOG_ERR
+#define NGX_LOG_ERR 1
+#endif
 #ifndef NGX_LOG_WARN
 #define NGX_LOG_WARN 2
 #endif
@@ -542,7 +548,10 @@ test_merge_conf(void)
     parent.policy.conditional_requests = NGX_HTTP_MARKDOWN_CONDITIONAL_DISABLED;
     parent.policy.log_verbosity = NGX_HTTP_MARKDOWN_LOG_DEBUG;
     parent.buffer_chunked = 0;
-    parent.auto_decompress = 0;
+    parent.decompress.auto_decompress = 0;
+    parent.decompress.max_size = 2048;
+    parent.decompress.parse_timeout = 30000;
+    parent.decompress.parser_budget = 64 * 1024 * 1024;
     parent.large_body_threshold = 4096;
     parent.ops.trust_forwarded_headers = 1;
     parent.ops.metrics_format = NGX_HTTP_MARKDOWN_METRICS_FORMAT_PROMETHEUS;
@@ -578,7 +587,10 @@ test_merge_conf(void)
     child.buffer_chunked = NGX_CONF_UNSET;
     child.stream_types = NGX_CONF_UNSET_PTR;
     child.content_types = NGX_CONF_UNSET_PTR;
-    child.auto_decompress = NGX_CONF_UNSET;
+    child.decompress.auto_decompress = NGX_CONF_UNSET;
+    child.decompress.max_size = NGX_CONF_UNSET_SIZE;
+    child.decompress.parse_timeout = NGX_CONF_UNSET_MSEC;
+    child.decompress.parser_budget = NGX_CONF_UNSET_SIZE;
     child.large_body_threshold = NGX_CONF_UNSET_SIZE;
     child.ops.trust_forwarded_headers = NGX_CONF_UNSET;
     child.ops.metrics_format = NGX_CONF_UNSET_UINT;
@@ -632,7 +644,10 @@ test_merge_conf(void)
     child.buffer_chunked = NGX_CONF_UNSET;
     child.stream_types = NGX_CONF_UNSET_PTR;
     child.content_types = NGX_CONF_UNSET_PTR;
-    child.auto_decompress = NGX_CONF_UNSET;
+    child.decompress.auto_decompress = NGX_CONF_UNSET;
+    child.decompress.max_size = NGX_CONF_UNSET_SIZE;
+    child.decompress.parse_timeout = NGX_CONF_UNSET_MSEC;
+    child.decompress.parser_budget = NGX_CONF_UNSET_SIZE;
     child.large_body_threshold = NGX_CONF_UNSET_SIZE;
     child.ops.trust_forwarded_headers = NGX_CONF_UNSET;
     child.ops.metrics_format = NGX_CONF_UNSET_UINT;
@@ -968,6 +983,9 @@ test_merge_conf_double_unset(void)
     /* Both parent and child have UNSET enabled_source */
     parent.enabled_source = NGX_HTTP_MARKDOWN_ENABLED_UNSET;
     parent.max_size = 4096;
+    parent.decompress.max_size = NGX_CONF_UNSET_SIZE;
+    parent.decompress.parse_timeout = 30000;
+    parent.decompress.parser_budget = 64 * 1024 * 1024;
     parent.timeout = 100;
     parent.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
     parent.flavor = NGX_HTTP_MARKDOWN_FLAVOR_COMMONMARK;
@@ -978,6 +996,7 @@ test_merge_conf_double_unset(void)
     parent.ops.metrics_per_path = 0;
     parent.ops.otel_enabled = 0;
     parent.advanced.dynconf_enabled = NGX_CONF_UNSET;
+    parent.advanced.memory_budget = NGX_CONF_UNSET_SIZE;
     parent.advanced.dynconf_path.len = 0;
     parent.advanced.dynconf_path.data = NULL;
 
@@ -997,7 +1016,10 @@ test_merge_conf_double_unset(void)
     child.buffer_chunked = NGX_CONF_UNSET;
     child.stream_types = NGX_CONF_UNSET_PTR;
     child.content_types = NGX_CONF_UNSET_PTR;
-    child.auto_decompress = NGX_CONF_UNSET;
+    child.decompress.auto_decompress = NGX_CONF_UNSET;
+    child.decompress.max_size = NGX_CONF_UNSET_SIZE;
+    child.decompress.parse_timeout = NGX_CONF_UNSET_MSEC;
+    child.decompress.parser_budget = NGX_CONF_UNSET_SIZE;
     child.large_body_threshold = NGX_CONF_UNSET_SIZE;
     child.ops.trust_forwarded_headers = NGX_CONF_UNSET;
     child.ops.metrics_format = NGX_CONF_UNSET_UINT;
@@ -1007,6 +1029,15 @@ test_merge_conf_double_unset(void)
     child.streaming.budget_explicit = 0;
     child.streaming.on_error = NGX_CONF_UNSET_UINT;
     child.streaming.shadow = NGX_CONF_UNSET;
+    child.streaming.auto_threshold = NGX_CONF_UNSET_SIZE;
+    child.advanced.prune_noise = NGX_CONF_UNSET;
+    child.advanced.prune_selectors = NGX_CONF_UNSET_PTR;
+    child.advanced.prune_protection_selectors = NGX_CONF_UNSET_PTR;
+    child.advanced.memory_budget = NGX_CONF_UNSET_SIZE;
+    child.advanced.llm_provider = NGX_CONF_UNSET_UINT;
+    child.advanced.chars_per_token_fixed = NGX_CONF_UNSET_UINT;
+    child.advanced.dynconf_enabled = NGX_CONF_UNSET;
+    child.advanced.dynconf_dry_run = NGX_CONF_UNSET;
 
     rc = ngx_http_markdown_merge_conf(&cf, &parent, &child);
     TEST_ASSERT(rc == NGX_CONF_OK,
@@ -1137,7 +1168,13 @@ test_memory_budget_priority_chain(void)
 
         memset(&merge_cf, 0, sizeof(merge_cf));
         memset(&parent_conf, 0, sizeof(parent_conf));
+        parent_conf.decompress.max_size = NGX_CONF_UNSET_SIZE;
+        parent_conf.decompress.parse_timeout = 30000;
+        parent_conf.decompress.parser_budget = 64 * 1024 * 1024;
         memset(&child_conf, 0, sizeof(child_conf));
+        child_conf.decompress.max_size = NGX_CONF_UNSET_SIZE;
+        child_conf.decompress.parse_timeout = NGX_CONF_UNSET_MSEC;
+        child_conf.decompress.parser_budget = NGX_CONF_UNSET_SIZE;
 
         /* Case 5: memory_budget only -> overrides default max_size */
         parent_conf.enabled_source = NGX_HTTP_MARKDOWN_ENABLED_STATIC;
@@ -1167,6 +1204,9 @@ test_memory_budget_priority_chain(void)
 
         /* Case 6: explicit max_size + memory_budget -> max_size wins */
         memset(&child_conf, 0, sizeof(child_conf));
+        child_conf.decompress.max_size = NGX_CONF_UNSET_SIZE;
+        child_conf.decompress.parse_timeout = NGX_CONF_UNSET_MSEC;
+        child_conf.decompress.parser_budget = NGX_CONF_UNSET_SIZE;
         child_conf.enabled_source = NGX_HTTP_MARKDOWN_ENABLED_STATIC;
         child_conf.enabled = 1;
         child_conf.max_size = 5 * 1024 * 1024;
@@ -1184,6 +1224,59 @@ test_memory_budget_priority_chain(void)
         TEST_ASSERT(child_conf.max_size == 5 * 1024 * 1024,
                     "explicit max_size wins over memory_budget via merge");
     }
+}
+
+/*
+ * Negative test: decompress_max_size == 0 with auto_decompress enabled
+ * must be rejected by merge_conf.
+ */
+static void
+test_decompress_max_size_zero_rejected(void)
+{
+    ngx_conf_t cf;
+    ngx_http_markdown_conf_t parent;
+    ngx_http_markdown_conf_t child;
+    char *rc;
+
+    TEST_SUBSECTION("decompress_max_size=0 rejected");
+
+    memset(&cf, 0, sizeof(cf));
+    cf.pool = &g_pool;
+
+    memset(&parent, 0, sizeof(parent));
+    parent.decompress.max_size = NGX_CONF_UNSET_SIZE;
+    parent.decompress.parse_timeout = 30000;
+    parent.decompress.parser_budget = 64 * 1024 * 1024;
+    parent.max_size = 10 * 1024 * 1024;
+    parent.advanced.memory_budget = NGX_CONF_UNSET_SIZE;
+
+    memset(&child, 0, sizeof(child));
+    child.decompress.max_size = NGX_CONF_UNSET_SIZE;
+    child.decompress.parse_timeout = NGX_CONF_UNSET_MSEC;
+    child.decompress.parser_budget = NGX_CONF_UNSET_SIZE;
+    child.enabled_source = NGX_HTTP_MARKDOWN_ENABLED_UNSET;
+    child.max_size = NGX_CONF_UNSET_SIZE;
+    child.timeout = NGX_CONF_UNSET_MSEC;
+    child.on_error = NGX_CONF_UNSET_UINT;
+    child.flavor = NGX_CONF_UNSET_UINT;
+    child.decompress.auto_decompress = 1;
+    child.advanced.memory_budget = NGX_CONF_UNSET_SIZE;
+    child.streaming.budget = NGX_CONF_UNSET_SIZE;
+    child.streaming.auto_threshold = NGX_CONF_UNSET_SIZE;
+    child.advanced.prune_noise = NGX_CONF_UNSET;
+    child.advanced.prune_selectors = NGX_CONF_UNSET_PTR;
+    child.advanced.prune_protection_selectors = NGX_CONF_UNSET_PTR;
+    child.advanced.dynconf_enabled = NGX_CONF_UNSET;
+    child.advanced.dynconf_dry_run = NGX_CONF_UNSET;
+
+    /* Force decompress_max_size to 0 after merge by setting explicit 0 */
+    child.decompress.max_size = 0;
+
+    rc = ngx_http_markdown_merge_conf(&cf, &parent, &child);
+    TEST_ASSERT(rc == NGX_CONF_ERROR,
+        "decompress_max_size=0 with auto_decompress=1 should fail");
+
+    printf("  \xe2\x9c\x93 decompress_max_size=0 correctly rejected\n");
 }
 
 int
@@ -1204,6 +1297,7 @@ main(void)
     test_filter_flag_additional_branches();
     test_log_merged_conf();
     test_memory_budget_priority_chain();
+    test_decompress_max_size_zero_rejected();
 
     printf("\n========================================\n");
     printf("All tests passed!\n");

@@ -3272,4 +3272,81 @@ mod tests {
 
         assert_eq!(result, "\n");
     }
+
+    /// Heavy input test: verify parser and converter handle large inputs
+    /// without panicking, producing incorrect results, or exhausting memory.
+    /// Validates: A06.9 — parser must remain stable under high load.
+    #[test]
+    fn test_heavy_input_large_repeated_document() {
+        let paragraph = "<p>This is a test paragraph with some <strong>bold</strong> and <em>italic</em> text for stress testing.</p>";
+        let mut html = String::with_capacity(paragraph.len() * 10000);
+        for _ in 0..10000 {
+            html.push_str(paragraph);
+        }
+
+        let dom = parse_html(html.as_bytes()).expect("Parse failed for heavy input");
+        let converter = MarkdownConverter::new();
+        let result = converter
+            .convert(&dom)
+            .expect("Conversion failed for heavy input");
+
+        assert!(
+            !result.is_empty(),
+            "Heavy input must produce non-empty output"
+        );
+        assert!(
+            result.contains("bold"),
+            "Heavy input must preserve semantic content"
+        );
+        assert!(
+            result.contains("italic"),
+            "Heavy input must preserve semantic content"
+        );
+    }
+
+    /// Heavy input test: deeply nested structure.
+    #[test]
+    fn test_heavy_input_deeply_nested() {
+        let depth = 200;
+        let mut html = String::with_capacity(depth * 8);
+        for _ in 0..depth {
+            html.push_str("<div>");
+        }
+        html.push_str("<p>innermost</p>");
+        for _ in 0..depth {
+            html.push_str("</div>");
+        }
+
+        let dom = parse_html(html.as_bytes()).expect("Parse failed for deeply nested input");
+        let converter = MarkdownConverter::new();
+        let result = converter
+            .convert(&dom)
+            .expect("Conversion failed for deeply nested input");
+
+        assert!(
+            result.contains("innermost"),
+            "Deeply nested content must be preserved"
+        );
+    }
+
+    /// Heavy input test: many attributes per element.
+    #[test]
+    fn test_heavy_input_many_attributes() {
+        let mut html = String::from("<div");
+        for i in 0..1000 {
+            html.push_str(&format!(" data-attr{}=\"value{}\"", i, i));
+        }
+        html.push_str(">content</div>");
+
+        let dom = parse_html(html.as_bytes()).expect("Parse failed for many-attribute input");
+        let converter = MarkdownConverter::new();
+        let result = converter
+            .convert(&dom)
+            .expect("Conversion failed for many-attribute input");
+
+        assert!(
+            result.contains("content"),
+            "Content must be preserved despite many attributes"
+        );
+    }
 }

@@ -1,0 +1,29 @@
+name: ClusterFuzzLite Corpus Prune
+
+on:
+  schedule:
+    - cron: '0 6 * * 0'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  prune:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+
+      - uses: google/clusterfuzzlite/actions/build_fuzzers@82652fb49e77bc29c35da1167bb286e93c6bcc05  # v1
+        with:
+          language: rust
+          sanitizer: address
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: google/clusterfuzzlite/actions/run_fuzzers@82652fb49e77bc29c35da1167bb286e93c6bcc05  # v1
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          mode: prune
+          sanitizer: address
+          storage-repo: ${{ github.repository }}-corpus
+          storage-repo-branch: main

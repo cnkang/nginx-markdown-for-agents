@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 from dataclasses import dataclass
@@ -27,10 +28,19 @@ except ModuleNotFoundError:
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+README_FILENAME = "README.md"
+DOCS_HARNESS_README = f"docs/harness/{README_FILENAME}"
+RISK_PACKS_README = f"risk-packs/{README_FILENAME}"
+FUZZ_README_REL = f"fuzz/{README_FILENAME}"
+COMPONENT_FUZZ_README_REL = f"components/rust-converter/fuzz/{README_FILENAME}"
+GITHUB_WORKFLOWS_DIR = REPO_ROOT / ".github" / "workflows"
+CFLITE_PR_WORKFLOW = "cflite_pr.yml"
+CFLITE_BATCH_WORKFLOW = "cflite_batch.yml"
+CFLITE_CRON_WORKFLOW = "cflite_cron.yml"
 MANIFEST_PATH = REPO_ROOT / "docs" / "harness" / "routing-manifest.json"
 E2E_HARNESS_DIR = REPO_ROOT / "tools" / "e2e-harness"
 E2E_HARNESS_CARGO = E2E_HARNESS_DIR / "Cargo.toml"
-README_PATH = REPO_ROOT / "docs" / "harness" / "README.md"
+README_PATH = REPO_ROOT / "docs" / "harness" / README_FILENAME
 CORE_PATH = REPO_ROOT / "docs" / "harness" / "core.md"
 SUMMARY_PATH = REPO_ROOT / "docs" / "harness" / "routing-manifest.md"
 AGENTS_PATH = REPO_ROOT / "AGENTS.md"
@@ -295,7 +305,7 @@ def _check_risk_pack_docs(manifest: dict) -> CheckResult:
 def _check_harness_docs(manifest: dict) -> CheckResult:
     """Verify that harness documentation files contain required links, phrases, and patterns.
 
-    Checks README.md for navigation links, routing-manifest.md for
+    Checks the harness entrypoint for navigation links, routing-manifest.md for
     risk-pack identifiers, and core.md for status labels and key phrases.
 
     Args:
@@ -314,8 +324,8 @@ def _check_harness_docs(manifest: dict) -> CheckResult:
                 r"\[[^\]]+\]\(routing-manifest\.json\)"
             ),
             "routing-manifest.md link": r"\[[^\]]+\]\(routing-manifest\.md\)",
-            "risk-packs/README.md link": (
-                r"\[[^\]]+\]\(risk-packs/README\.md\)"
+            "risk-pack index link": (
+                rf"\[[^\]]+\]\({re.escape(RISK_PACKS_README)}\)"
             ),
         },
     ))
@@ -369,7 +379,7 @@ def _check_agents_map() -> CheckResult:
     missing = _required_patterns(
         AGENTS_PATH,
         {
-            "docs/harness/README.md": r"`docs/harness/README\.md`",
+            DOCS_HARNESS_README: rf"`{re.escape(DOCS_HARNESS_README)}`",
             "docs/harness/core.md": r"`docs/harness/core\.md`",
             "docs/harness/routing-manifest.json": (
                 r"`docs/harness/routing-manifest\.json`"
@@ -486,7 +496,7 @@ def _collect_stale_execution_surface_refs() -> list[str]:
     execution_surfaces = (
         REPO_ROOT / "Makefile",
         REPO_ROOT / "tools" / "e2e" / "run_e2e_suite.sh",
-        REPO_ROOT / ".github" / "workflows" / "ci.yml",
+        GITHUB_WORKFLOWS_DIR / "ci.yml",
         REPO_ROOT / "docs" / "testing" / "E2E_TESTS.md",
     )
     for surface in execution_surfaces:
@@ -506,22 +516,138 @@ def _check_e2e_migration_policy() -> CheckResult:
     stale_execution_refs = _collect_stale_execution_surface_refs()
 
     if missing_wrappers or stale_shell_logic or removed_python_present or stale_execution_refs:
-        details: list[str] = []
-        if missing_wrappers:
-            details.append(f"missing migrated wrappers: {', '.join(missing_wrappers)}")
-        if stale_shell_logic:
-            details.append(f"non-wrapper migrated shell logic: {', '.join(stale_shell_logic)}")
-        if removed_python_present:
-            display = ", ".join(_display_path(Path(p)) for p in removed_python_present)
-            details.append(f"removed Python E2E files still present: {display}")
-        if stale_execution_refs:
-            details.append(f"stale execution-surface refs: {', '.join(stale_execution_refs)}")
-        return _result("e2e-migration-policy", FAIL, "; ".join(details))
-
+        return _format_e2e_migration_failure(
+            missing_wrappers,
+            stale_shell_logic,
+            removed_python_present,
+            stale_execution_refs,
+        )
     return _result(
         "e2e-migration-policy",
         PASS,
         "migrated shell paths are thin wrappers and removed Python E2E files are absent",
+    )
+
+
+def _format_e2e_migration_failure(
+    missing_wrappers,
+    stale_shell_logic,
+    removed_python_present,
+    stale_execution_refs,
+) -> CheckResult:
+    details: list[str] = []
+    if missing_wrappers:
+        details.append(f"missing migrated wrappers: {', '.join(missing_wrappers)}")
+    if stale_shell_logic:
+        details.append(f"non-wrapper migrated shell logic: {', '.join(stale_shell_logic)}")
+    if removed_python_present:
+        display = ", ".join(_display_path(Path(p)) for p in removed_python_present)
+        details.append(f"removed Python E2E files still present: {display}")
+    if stale_execution_refs:
+        details.append(f"stale execution-surface refs: {', '.join(stale_execution_refs)}")
+    return _result("e2e-migration-policy", FAIL, "; ".join(details))
+
+
+def check_batch_prune_pairing() -> CheckResult:
+    """Verify batch → prune workflow pairing (FUZZ-005).
+
+    If the batch fuzzing workflow exists, the corresponding corpus pruning
+    workflow must also exist.  If batch is absent, this check passes
+    unconditionally (no requirement for prune without batch).
+
+    Returns:
+        CheckResult with PASS if pairing is satisfied or batch is absent,
+        or FAIL if batch exists without a corresponding prune workflow.
+    """
+    batch_path = GITHUB_WORKFLOWS_DIR / CFLITE_BATCH_WORKFLOW
+    prune_path = GITHUB_WORKFLOWS_DIR / CFLITE_CRON_WORKFLOW
+
+    if not batch_path.exists():
+        return _result(
+            "batch-prune-pairing",
+            PASS,
+            "batch workflow absent; pairing check not applicable",
+        )
+
+    if not prune_path.exists():
+        return _result(
+            "batch-prune-pairing",
+            FAIL,
+            "FUZZ-005: batch workflow exists but prune workflow "
+            f"({_display_path(prune_path)}) is missing",
+        )
+
+    return _result(
+        "batch-prune-pairing",
+        PASS,
+        "batch and prune workflows both present (FUZZ-005 satisfied)",
+    )
+
+
+def check_cfl_workflows() -> CheckResult:
+    """Verify ClusterFuzzLite CI workflow files exist and are correctly configured.
+
+    Checks:
+    - ClusterFuzzLite PR, batch, and cron workflows all exist
+    - PR workflow uses address sanitizer
+    - PR workflow has path filters under pull_request trigger
+    - Batch workflow has corpus storage-repo configuration
+
+    Returns:
+        CheckResult with PASS if all checks pass, or FAIL listing issues.
+    """
+    required_workflows = [
+        str((GITHUB_WORKFLOWS_DIR / CFLITE_PR_WORKFLOW).relative_to(REPO_ROOT)),
+        str((GITHUB_WORKFLOWS_DIR / CFLITE_BATCH_WORKFLOW).relative_to(REPO_ROOT)),
+        str((GITHUB_WORKFLOWS_DIR / CFLITE_CRON_WORKFLOW).relative_to(REPO_ROOT)),
+    ]
+
+    missing: list[str] = []
+    missing.extend(
+        rel for rel in required_workflows if not (REPO_ROOT / rel).exists()
+    )
+    if missing:
+        return _result(
+            "cfl-workflows",
+            FAIL,
+            f"missing ClusterFuzzLite workflow files: {', '.join(missing)}",
+        )
+
+    issues: list[str] = []
+
+    # Verify PR workflow uses address sanitizer
+    pr_workflow = GITHUB_WORKFLOWS_DIR / CFLITE_PR_WORKFLOW
+    pr_missing = _required_patterns(
+        pr_workflow,
+        {"sanitizer: address": r"sanitizer:\s*address"},
+    )
+    if pr_missing:
+        issues.append(f"{CFLITE_PR_WORKFLOW} missing address sanitizer configuration")
+
+    # Verify PR workflow has path filters under pull_request trigger
+    pr_path_missing = _required_patterns(
+        pr_workflow,
+        {"pull_request paths filter": r"pull_request:\s*\n\s+paths:"},
+    )
+    if pr_path_missing:
+        issues.append(f"{CFLITE_PR_WORKFLOW} missing path filter for pull_request trigger")
+
+    # Verify batch workflow has corpus storage-repo configuration
+    batch_workflow = GITHUB_WORKFLOWS_DIR / CFLITE_BATCH_WORKFLOW
+    batch_missing = _required_patterns(
+        batch_workflow,
+        {"storage-repo": r"storage-repo:"},
+    )
+    if batch_missing:
+        issues.append(f"{CFLITE_BATCH_WORKFLOW} missing storage-repo configuration")
+
+    if issues:
+        return _result("cfl-workflows", FAIL, "; ".join(issues))
+
+    return _result(
+        "cfl-workflows",
+        PASS,
+        "ClusterFuzzLite workflows present and correctly configured",
     )
 
 
@@ -556,7 +682,7 @@ def _check_optional_kiro(manifest: dict, full: bool) -> CheckResult:
             for needle in _required_text(
                 path,
                 [
-                    "docs/harness/README.md",
+                    DOCS_HARNESS_README,
                     "docs/harness/core.md",
                 ],
             )
@@ -653,10 +779,218 @@ def _missing_recent_finding_closeout(
     if not row_match:
         return [f"{_display_path(report)}::{finding_id} remediation row"]
 
-    row = row_match.group(0).lower()
-    if not any(status in row for status in REMEDIATION_STATUSES):
+    row = row_match[0].lower()
+    if all(status not in row for status in REMEDIATION_STATUSES):
         return [f"{_display_path(report)}::{finding_id} final status"]
     return []
+
+
+def check_clusterfuzzlite_build_config() -> CheckResult:
+    """Verify .clusterfuzzlite/ directory completeness and content correctness.
+
+    Checks that the three required ClusterFuzzLite build configuration files
+    exist (project.yaml, Dockerfile, build.sh), that project.yaml declares
+    language as rust with address sanitizer, and that build.sh has executable
+    permission.
+
+    Returns:
+        CheckResult with PASS if all checks pass, or FAIL with details of
+        the first failing condition.
+    """
+    required_files = [
+        ".clusterfuzzlite/project.yaml",
+        ".clusterfuzzlite/Dockerfile",
+        ".clusterfuzzlite/build.sh",
+    ]
+    if missing := [
+        rel for rel in required_files if not (REPO_ROOT / rel).exists()
+    ]:
+        return _result(
+            "clusterfuzzlite-build-config",
+            FAIL,
+            f"missing ClusterFuzzLite build files: {', '.join(missing)}",
+        )
+
+    # Validate project.yaml content
+    project_yaml_path = REPO_ROOT / ".clusterfuzzlite" / "project.yaml"
+    try:
+        project_yaml_text = project_yaml_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        return _result(
+            "clusterfuzzlite-build-config",
+            FAIL,
+            f".clusterfuzzlite/project.yaml unreadable: {exc}",
+        )
+
+    content_issues: list[str] = []
+    if "language: rust" not in project_yaml_text:
+        content_issues.append("project.yaml missing 'language: rust'")
+    if "address" not in project_yaml_text:
+        content_issues.append("project.yaml missing address sanitizer")
+    if content_issues:
+        return _result(
+            "clusterfuzzlite-build-config",
+            FAIL,
+            "; ".join(content_issues),
+        )
+
+    # Validate build.sh has executable permission
+    build_sh_path = REPO_ROOT / ".clusterfuzzlite" / "build.sh"
+    if not os.access(build_sh_path, os.X_OK):
+        return _result(
+            "clusterfuzzlite-build-config",
+            FAIL,
+            ".clusterfuzzlite/build.sh is not executable",
+        )
+
+    return _result(
+        "clusterfuzzlite-build-config",
+        PASS,
+        "ClusterFuzzLite build config is complete and valid",
+    )
+
+
+def check_fuzz_target_determinism() -> CheckResult:
+    """Verify fuzz targets do not use non-deterministic APIs (FUZZ-003).
+
+    Scans all fuzz target source files for forbidden API patterns that would
+    violate the deterministic execution requirement: network I/O, filesystem
+    writes, system time for logic branches, external random sources, environment
+    variable reads, and process/thread creation.
+
+    Returns:
+        CheckResult with PASS if no forbidden patterns are found, or FAIL
+        listing the violations.
+    """
+    fuzz_targets_dir = (
+        REPO_ROOT / "components" / "rust-converter" / "fuzz" / "fuzz_targets"
+    )
+    if not fuzz_targets_dir.exists():
+        return _result(
+            "fuzz-target-determinism",
+            FAIL,
+            "FUZZ-003: fuzz targets directory not found",
+        )
+
+    # Forbidden API patterns that indicate non-deterministic behavior.
+    # Each tuple is (pattern_regex, description).
+    forbidden_patterns: list[tuple[str, str]] = [
+        (r"\bstd::net\b", "network I/O (std::net)"),
+        (r"\bTcpStream\b", "network I/O (TcpStream)"),
+        (r"\bUdpSocket\b", "network I/O (UdpSocket)"),
+        (r"\bstd::fs::(?:write|create_dir|remove)", "filesystem write"),
+        (r"\bFile::create\b", "filesystem write (File::create)"),
+        (r"\bSystemTime::now\b", "system time"),
+        (r"\bInstant::now\b", "system time (Instant::now)"),
+        (r"\brand::thread_rng\b", "external random (thread_rng)"),
+        (r"\bOsRng\b", "external random (OsRng)"),
+        (r"\bstd::env::var\b", "environment variable read"),
+        (r"\bstd::process::Command\b", "process creation"),
+        (r"\bstd::thread::spawn\b", "thread creation"),
+    ]
+
+    violations: list[str] = []
+    for target_file in sorted(fuzz_targets_dir.glob("*.rs")):
+        try:
+            text = target_file.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            violations.append(f"{target_file.name}:unreadable")
+            continue
+
+        violations.extend(
+            f"{target_file.name}:{desc}"
+            for pattern, desc in forbidden_patterns
+            if re.search(pattern, text)
+        )
+    if violations:
+        return _result(
+            "fuzz-target-determinism",
+            FAIL,
+            f"FUZZ-003 violations: {'; '.join(violations)}",
+        )
+
+    return _result(
+        "fuzz-target-determinism",
+        PASS,
+        "fuzz targets are free of non-deterministic API usage (FUZZ-003 satisfied)",
+    )
+
+
+def check_fuzz_gitignore() -> CheckResult:
+    """Verify that .gitignore excludes fuzz artifact and corpus paths.
+
+    Checks that the root .gitignore contains entries for fuzz artifacts
+    and corpus directories to prevent generated fuzzing outputs from
+    being accidentally committed.
+
+    Returns:
+        CheckResult with PASS if exclusion entries are found, or
+        WARN_NEEDS_AUTHOR_REVIEW if expected patterns are missing.
+    """
+    gitignore_path = REPO_ROOT / ".gitignore"
+    if not gitignore_path.exists():
+        return _result(
+            "fuzz-gitignore",
+            WARN_NEEDS_AUTHOR_REVIEW,
+            ".gitignore not found; cannot verify fuzz exclusion entries",
+        )
+
+    try:
+        text = gitignore_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return _result(
+            "fuzz-gitignore",
+            WARN_NEEDS_AUTHOR_REVIEW,
+            ".gitignore unreadable",
+        )
+
+    # Check for fuzz artifact/corpus exclusion patterns
+    fuzz_patterns = [
+        r"fuzz/artifacts",
+        r"fuzz/corpus",
+    ]
+    if any(pat in text for pat in fuzz_patterns):
+        return _result(
+            "fuzz-gitignore",
+            PASS,
+            "fuzz artifact/corpus paths excluded in .gitignore",
+        )
+    else:
+        return _result(
+            "fuzz-gitignore",
+            WARN_NEEDS_AUTHOR_REVIEW,
+            ".gitignore missing fuzz artifact/corpus exclusion entries",
+        )
+
+
+def check_fuzz_guide() -> CheckResult:
+    """Verify that a fuzz README guide exists.
+
+    Checks for the fuzz guide at both the top-level and component-level paths.
+    At least one must exist.
+
+    Returns:
+        CheckResult with PASS if at least one fuzz guide exists, or
+        FAIL if neither location has a README.
+    """
+    candidates = [
+        REPO_ROOT / FUZZ_README_REL,
+        REPO_ROOT / COMPONENT_FUZZ_README_REL,
+    ]
+    existing = [p for p in candidates if p.exists()]
+    if not existing:
+        return _result(
+            "fuzz-guide",
+            FAIL,
+            f"{FUZZ_README_REL} not found (checked both fuzz guide locations)",
+        )
+
+    locations = ", ".join(_display_path(p) for p in existing)
+    return _result(
+        "fuzz-guide",
+        PASS,
+        f"fuzz guide present: {locations}",
+    )
 
 
 def collect_results(full: bool = False) -> list[CheckResult]:
@@ -691,6 +1025,12 @@ def collect_results(full: bool = False) -> list[CheckResult]:
         _check_e2e_harness_contract(),
         _check_e2e_migration_policy(),
         _check_recent_analysis_reports(),
+        check_clusterfuzzlite_build_config(),
+        check_cfl_workflows(),
+        check_batch_prune_pairing(),
+        check_fuzz_target_determinism(),
+        check_fuzz_gitignore(),
+        check_fuzz_guide(),
         _check_optional_kiro(manifest, full=full),
     ]
 

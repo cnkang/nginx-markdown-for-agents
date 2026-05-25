@@ -1,5 +1,5 @@
 # tools/build_release/Dockerfile.glibc
-ARG OS_BASE=debian:bookworm-slim
+ARG OS_BASE=ubuntu:22.04
 FROM ${OS_BASE}
 
 RUN set -eux; \
@@ -35,6 +35,8 @@ ENV PATH="/root/.cargo/bin:${PATH}"
 ARG NGINX_VERSION=1.28.2
 
 WORKDIR /build
+COPY packaging/checksums.sha256 /src/packaging/checksums.sha256
+COPY packaging/scripts/verify-checksum.sh /src/packaging/scripts/verify-checksum.sh
 RUN set -eux; \
     retry() { \
         attempts="$1"; \
@@ -51,7 +53,15 @@ RUN set -eux; \
         done; \
     }; \
     retry 5 curl --proto '=https' --tlsv1.2 -fsSL \
-        "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" | tar xz
+        -o /tmp/nginx.tar.gz \
+        "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz"; \
+    chmod +x /src/packaging/scripts/verify-checksum.sh; \
+    /src/packaging/scripts/verify-checksum.sh \
+        -f /tmp/nginx.tar.gz \
+        -i "nginx-${NGINX_VERSION}" \
+        -c /src/packaging/checksums.sha256; \
+    tar xzf /tmp/nginx.tar.gz; \
+    rm -f /tmp/nginx.tar.gz
 
 # Copy only files required for module build.
 COPY Makefile /src/Makefile

@@ -36,6 +36,12 @@ static ngx_str_t ngx_http_markdown_error_unknown_str = ngx_string("unknown");
  * - ERROR_BUDGET_EXCEEDED (6): Streaming working-set budget exceeded
  * - ERROR_STREAMING_FALLBACK (7): Streaming engine fallback to full-buffer
  * - ERROR_POST_COMMIT (8): Post-commit failure after partial output
+ * - ERROR_DECOMPRESSION_BUDGET_EXCEEDED (9): Decompression budget exceeded
+ * - ERROR_PARSE_TIMEOUT (10): Parse timeout exceeded
+ * - ERROR_PARSE_BUDGET_EXCEEDED (11): Parse budget exceeded
+ * - ERROR_DECOMPRESSION_FORMAT_ERROR (12): Decompression format error
+ * - ERROR_DECOMPRESSION_TRUNCATED_INPUT (13): Decompression truncated input
+ * - ERROR_DECOMPRESSION_IO_ERROR (14): Decompression I/O error
  * - ERROR_INTERNAL (99): Internal error (unexpected condition, panic caught)
  *
  * Parameters:
@@ -49,19 +55,27 @@ ngx_http_markdown_classify_error(uint32_t error_code)
 {
     switch (error_code) {
         /* Conversion errors: HTML parsing, encoding, invalid input,
-         * post-commit failure (partial output after streaming commit) */
+         * post-commit failure (partial output after streaming commit),
+         * decompression format/truncated/IO errors */
         case ERROR_PARSE:
         case ERROR_ENCODING:
         case ERROR_INVALID_INPUT:
+        case ERROR_DECOMPRESSION_FORMAT_ERROR:
+        case ERROR_DECOMPRESSION_TRUNCATED_INPUT:
+        case ERROR_DECOMPRESSION_IO_ERROR:
 #if defined(MARKDOWN_STREAMING_ENABLED)
         case ERROR_POST_COMMIT:
 #endif
             return NGX_HTTP_MARKDOWN_ERROR_CONVERSION;
 
         /* Resource limit errors: timeout, memory limit,
-         * budget exceeded (streaming working-set limit) */
+         * budget exceeded (streaming working-set limit),
+         * decompression budget exceeded (decompress_max_size) */
         case ERROR_TIMEOUT:
         case ERROR_MEMORY_LIMIT:
+        case ERROR_DECOMPRESSION_BUDGET_EXCEEDED:
+        case ERROR_PARSE_TIMEOUT:
+        case ERROR_PARSE_BUDGET_EXCEEDED:
 #if defined(MARKDOWN_STREAMING_ENABLED)
         case ERROR_BUDGET_EXCEEDED:
 #endif

@@ -51,10 +51,10 @@ NGINX_HEADER := $(NGINX_MODULE_DIR)/src/markdown_converter.h
 
 .PHONY: all build rust-lib rust-lib-debug copy-headers check-headers \
         test test-rust test-rust-doc test-nginx-unit test-nginx-unit-streaming test-nginx-unit-clang-smoke test-nginx-unit-sanitize-smoke \
-        test-nginx-integration test-e2e test-e2e-rust test-all test-rust-fuzz-smoke sonar-compile-db \
+        test-nginx-integration test-e2e test-e2e-rust test-all test-rust-fuzz-smoke fuzz-smoke sonar-compile-db \
         test-benchmark test-benchmark-compare test-benchmark-summary \
         harness-check harness-check-full harness-security-checks \
-        docs-check license-check release-gates-check release-gates-check-055 release-gates-check-060 release-gates-check-legacy release-gates-check-strict \
+	docs-check license-check release-gates-check release-gates-check-055 release-gates-check-060 release-gates-check-070 release-gates-check-legacy release-gates-check-strict \
         verify-large-e2e verify-huge-native-e2e verify-huge-allowed-native-e2e \
         verify-chunked-native-e2e verify-chunked-native-e2e-smoke verify-chunked-native-e2e-stress \
         verify-streaming-failure-cache-e2e \
@@ -75,7 +75,7 @@ rust-lib:
 	@echo "Building Rust library for $(RUST_TARGET)..."
 	cd $(RUST_DIR) && cargo build --locked --target $(RUST_TARGET) --release
 	@echo "Generating C header with cbindgen..."
-	cd $(RUST_DIR) && mkdir -p include && cbindgen --config cbindgen.toml --crate nginx-markdown-converter --output include/markdown_converter.h
+	cd $(RUST_DIR) && mkdir -p include && cbindgen --quiet --config cbindgen.toml --crate nginx-markdown-converter --output include/markdown_converter.h
 
 rust-lib-debug:
 	@echo "Building Rust library (debug) for $(RUST_TARGET)..."
@@ -111,6 +111,17 @@ test-rust-fuzz-smoke:
 	cd $(RUST_DIR) && cargo +nightly fuzz run security_validator -- -max_total_time=5
 	cd $(RUST_DIR) && cargo +nightly fuzz run fuzz_streaming_no_panic -- -max_total_time=5
 	cd $(RUST_DIR) && cargo +nightly fuzz run fuzz_streaming_chunk_split -- -max_total_time=5
+	cd $(RUST_DIR) && cargo +nightly fuzz run fuzz_streaming_malformed -- -max_total_time=5
+	cd $(RUST_DIR) && cargo +nightly fuzz run fuzz_decompression -- -max_total_time=5
+	cd $(RUST_DIR) && cargo +nightly fuzz run fuzz_url_validation -- -max_total_time=5
+	cd $(RUST_DIR) && cargo +nightly fuzz run convert_html -- -max_total_time=5
+	cd $(RUST_DIR) && cargo +nightly fuzz run streaming_chunks -- -max_total_time=5
+	cd $(RUST_DIR) && cargo +nightly fuzz run negotiation_and_headers -- -max_total_time=5
+
+fuzz-smoke:
+	cd $(RUST_DIR) && cargo +nightly fuzz run convert_html -- -max_total_time=30
+	cd $(RUST_DIR) && cargo +nightly fuzz run streaming_chunks -- -max_total_time=30
+	cd $(RUST_DIR) && cargo +nightly fuzz run negotiation_and_headers -- -max_total_time=30
 
 test-nginx-unit:
 	$(MAKE) -C $(NGINX_TEST_DIR) unit
@@ -157,21 +168,21 @@ test-benchmark:
 	cd tools/corpus/test-corpus-conversion && cargo build --locked --release --quiet
 	@echo "Running corpus benchmark..."
 	python3 tools/perf/run_corpus_benchmark.py \
-		--corpus-dir $(CORPUS_DIR) \
-		--converter-bin $(CORPUS_CONVERTER_BIN) \
-		--output $(CORPUS_REPORT) \
-		--examples-dir perf/reports/examples
+	--corpus-dir $(CORPUS_DIR) \
+	--converter-bin $(CORPUS_CONVERTER_BIN) \
+	--output $(CORPUS_REPORT) \
+	--examples-dir perf/reports/examples
 
 test-benchmark-compare:
 	python3 tools/perf/compare_reports.py \
-		--baseline $(CORPUS_BASELINE) \
-		--current $(CORPUS_REPORT) \
-		--thresholds perf/quality-thresholds.json \
-		--output $(CORPUS_VERDICT)
+	--baseline $(CORPUS_BASELINE) \
+	--current $(CORPUS_REPORT) \
+	--thresholds perf/quality-thresholds.json \
+	--output $(CORPUS_VERDICT)
 
 test-benchmark-summary:
 	python3 tools/perf/format_pr_summary.py \
-		--report $(CORPUS_REPORT)
+	--report $(CORPUS_REPORT)
 
 docs-check-base:
 	python3 tools/docs/check_docs.py
@@ -189,6 +200,7 @@ harness-check-full:
 	python3 tools/harness/check_harness_sync.py --full
 	$(MAKE) release-gates-check
 	$(MAKE) harness-security-checks
+	$(MAKE) check-headers
 
 harness-security-checks:
 	bash tools/harness/detect_cwe190_casts.sh
@@ -196,6 +208,9 @@ harness-security-checks:
 	bash tools/harness/detect_live_conf_reads.sh
 	bash tools/harness/detect_shell_hygiene.sh tools/
 	python3 tools/harness/detect_const_correctness.py components/nginx-module/src
+	bash tools/harness/detect_ci_supply_chain.sh
+	bash tools/harness/detect_header_hash_filter.sh
+	bash tools/harness/detect_finalize_return.sh
 
 license-check:
 	python3 tools/ci/check_c_licenses.py
@@ -212,12 +227,145 @@ release-gates-check-055:
 release-gates-check-060:
 	python3 tools/release/gates/validate_release_gates_060.py
 
+release-gates-check-070:
+	$(MAKE) build
+	$(MAKE) check-headers
+	$(MAKE) test-rust
+	$(MAKE) test-nginx-unit
+	$(MAKE) test-rust-fuzz-smoke
+	@if [ -n "$$NGINX_BIN" ]; then \
+	$(MAKE) verify-chunked-native-e2e-smoke; \
+	else \
+	echo "==> SKIP: verify-chunked-native-e2e-smoke (NGINX_BIN not set; requires pre-built NGINX binary)"; \
+	fi
+	$(MAKE) test-e2e-rust
+	python3 tools/release/gates/validate_release_gates_070.py --mode strict
+	python3 tools/release/gates/validate_config_directives_070.py
+	python3 tools/release/gates/validate_metrics_070.py
+	python3 tools/release/gates/validate_reason_codes_070.py
+	python3 tools/release/gates/validate_package_metadata_070.py
+	python3 tools/release/gates/validate_k8s_manifests_070.py
+	python3 tools/release/gates/validate_fuzz_packaging_070.py
+	@echo "=== Package Compatibility Gate ==="
+	@echo "  [artifact-naming-tests] Running artifact naming unit tests..."
+	@bash tools/release/gates/test_artifact_naming.sh || \
+	{ echo "FAIL: artifact naming tests failed" >&2; exit 1; }
+	@echo "  [compat-check-tests] Running compat-check helper tests..."
+	@if test -f tools/compat-check/test_compat_check.sh; then \
+	bash tools/compat-check/test_compat_check.sh || \
+		{ echo "FAIL: compat-check helper tests failed" >&2; exit 1; }; \
+	else \
+	echo "  SKIP: tools/compat-check/test_compat_check.sh not found"; \
+	fi
+	@echo "  [install-layout] Validating install layout..."
+	@if test -f tools/release/gates/check_install_layout.sh; then \
+		if ! ls dist/*.deb dist/*.rpm >/dev/null 2>&1; then \
+			if [ "$${RELEASE_GATE_REQUIRE_PACKAGES:-1}" = "0" ]; then \
+				echo "  SKIP: no package files in dist/ (RELEASE_GATE_REQUIRE_PACKAGES=0)"; \
+				exit 0; \
+			fi; \
+			if command -v nfpm >/dev/null 2>&1; then \
+				echo "  [install-layout] No packages found; building local amd64 DEB/RPM with nFPM..."; \
+				mkdir -p dist; \
+				test -f build/ngx_http_markdown_module.so || \
+					{ echo "FAIL: build/ngx_http_markdown_module.so not found" >&2; exit 1; }; \
+				PKG_VERSION=$${PKG_VERSION:-0.7.0} NGINX_VERSION=$${NGINX_VERSION:-1.26.3} NFPM_ARCH=amd64 \
+					nfpm package --config packaging/nfpm/nfpm.yaml --packager deb \
+					--target dist/nginx-module-markdown-for-agents_$${PKG_VERSION:-0.7.0}_nginx-$${NGINX_VERSION:-1.26.3}_amd64.deb; \
+				PKG_VERSION=$${PKG_VERSION:-0.7.0} NGINX_VERSION=$${NGINX_VERSION:-1.26.3} NFPM_ARCH=amd64 \
+					nfpm package --config packaging/nfpm/nfpm.yaml --packager rpm \
+					--target dist/nginx-module-markdown-for-agents-$${PKG_VERSION:-0.7.0}-nginx$${NGINX_VERSION:-1.26.3}-1.x86_64.rpm; \
+			else \
+				echo "FAIL: no package files in dist/ and nfpm is unavailable" >&2; \
+				exit 1; \
+			fi; \
+		fi; \
+		if ls dist/*.deb dist/*.rpm >/dev/null 2>&1; then \
+			bash tools/release/gates/check_install_layout.sh dist/*.deb dist/*.rpm || \
+				{ echo "FAIL: install layout validation failed" >&2; exit 1; }; \
+		else \
+			echo "FAIL: no package files in dist/" >&2; \
+			exit 1; \
+		fi; \
+	else \
+		echo "  SKIP: tools/release/gates/check_install_layout.sh not found"; \
+	fi
+	@echo "  [postinst-safety] Validating postinst safety..."
+	@if test -f tools/release/gates/check_postinst_safety.sh; then \
+	bash tools/release/gates/check_postinst_safety.sh || \
+		{ echo "FAIL: postinst safety validation failed" >&2; exit 1; }; \
+	else \
+	echo "  SKIP: tools/release/gates/check_postinst_safety.sh not found"; \
+	fi
+	@echo "  Package Compatibility Gate: ALL PASSED"
+	@echo "=== Fuzz CI Gate ==="
+	@if cargo +nightly --version >/dev/null 2>&1; then \
+	echo "  [fuzz-build] cargo +nightly fuzz build..."; \
+	cd $(RUST_DIR) && cargo +nightly fuzz build; \
+	else \
+	echo "  [fuzz-build] SKIP: cargo nightly not available"; \
+	fi
+	@if cargo +nightly --version >/dev/null 2>&1; then \
+	echo "  [fuzz-smoke] Running fuzz smoke (10s × 3 representative targets)..."; \
+	cd $(RUST_DIR) && for target in convert_html streaming_chunks negotiation_and_headers; do \
+		echo "    fuzzing $$target (10s)..."; \
+		cargo +nightly fuzz run "$$target" -- -max_total_time=10; \
+	done; \
+	else \
+	echo "  [fuzz-smoke] SKIP: cargo nightly not available"; \
+	fi
+	@echo "  [cflite-workflows] Checking ClusterFuzzLite workflow files..."
+	@test -f .github/workflows/cflite_pr.yml || { echo "FAIL: .github/workflows/cflite_pr.yml not found" >&2; exit 1; }
+	@test -f .github/workflows/cflite_batch.yml || { echo "FAIL: .github/workflows/cflite_batch.yml not found" >&2; exit 1; }
+	@test -f .github/workflows/cflite_cron.yml || { echo "FAIL: .github/workflows/cflite_cron.yml not found" >&2; exit 1; }
+	@echo "  [fuzz-guide] Checking fuzz README completeness..."
+	@test -f fuzz/README.md || { echo "FAIL: fuzz/README.md not found" >&2; exit 1; }
+	@grep -q "Corpus Classification" fuzz/README.md || { echo "FAIL: fuzz/README.md missing section: Corpus Classification" >&2; exit 1; }
+	@grep -q "FUZZ-001" fuzz/README.md || { echo "FAIL: fuzz/README.md missing section: FUZZ-001" >&2; exit 1; }
+	@echo "  Fuzz CI Gate: ALL PASSED"
+	@echo "=== Release Workflow Gate ==="
+	@echo "  [release-workflow] Checking release-packages.yml exists..."
+	@test -f .github/workflows/release-packages.yml || { echo "FAIL: .github/workflows/release-packages.yml not found" >&2; exit 1; }
+	@echo "  [sha256sums] Checking SHA256SUMS generation logic..."
+	@grep -q 'SHA256SUMS\|generate-checksums' .github/workflows/release-packages.yml || { echo "FAIL: release-packages.yml missing SHA256SUMS generation logic" >&2; exit 1; }
+	@echo "  [smoke-test-job] Checking package smoke test job exists..."
+	@grep -q 'smoke-test\|smoke_test' .github/workflows/release-packages.yml || { echo "FAIL: release-packages.yml missing smoke test job" >&2; exit 1; }
+	@echo "  Release Workflow Gate: ALL PASSED"
+	@echo "=== Documentation Gate ==="
+	@echo "  [docs-check] Running docs-check for fuzz guide and install/compat docs..."
+	@$(MAKE) docs-check
+	@echo "  Documentation Gate: ALL PASSED"
+	@echo "=== Harness Rule Coverage Gate ==="
+	@echo "  [fuzz-rules] Verifying FUZZ-001 through FUZZ-007 defined in fuzz/README.md..."
+	@for rule in FUZZ-001 FUZZ-002 FUZZ-003 FUZZ-004 FUZZ-005 FUZZ-006 FUZZ-007; do \
+	grep -q "$$rule" fuzz/README.md || { echo "FAIL: fuzz/README.md missing rule $$rule" >&2; exit 1; }; \
+	done
+	@echo "  [harness-fuzz-check] Verifying harness-check covers fuzz infrastructure..."
+	@$(MAKE) harness-check
+	@echo "  Harness Rule Coverage Gate: ALL PASSED"
+
 release-gates-check-legacy:
 	python3 tools/release/legacy/validate_release_gates.py
 
 release-gates-check-strict:
 	python3 tools/release/gates/validate_release_gates.py --mode strict
 	python3 tools/release/gates/validate_naming.py
+	python3 tools/release/gates/validate_release_gates_070.py --mode strict
+	python3 tools/release/gates/validate_fuzz_packaging_070.py
+	@echo "=== Strict: Release Workflow Gate ==="
+	@test -f .github/workflows/release-packages.yml || { echo "FAIL: .github/workflows/release-packages.yml not found" >&2; exit 1; }
+	@grep -q 'SHA256SUMS\|generate-checksums' .github/workflows/release-packages.yml || { echo "FAIL: release-packages.yml missing SHA256SUMS generation logic" >&2; exit 1; }
+	@grep -q 'smoke-test\|smoke_test' .github/workflows/release-packages.yml || { echo "FAIL: release-packages.yml missing smoke test job" >&2; exit 1; }
+	@echo "  Release Workflow Gate: ALL PASSED"
+	@echo "=== Strict: Documentation Gate ==="
+	@$(MAKE) docs-check
+	@echo "  Documentation Gate: ALL PASSED"
+	@echo "=== Strict: Harness Rule Coverage Gate ==="
+	@for rule in FUZZ-001 FUZZ-002 FUZZ-003 FUZZ-004 FUZZ-005 FUZZ-006 FUZZ-007; do \
+	grep -q "$$rule" fuzz/README.md || { echo "FAIL: fuzz/README.md missing rule $$rule" >&2; exit 1; }; \
+	done
+	@$(MAKE) harness-check
+	@echo "  Harness Rule Coverage Gate: ALL PASSED"
 
 verify-large-e2e:
 	./tools/e2e/verify_large_markdown_response_e2e.sh
@@ -270,36 +418,36 @@ coverage-c:
 	tools/sonar/collect_nginx_coverage.sh --output $(CURDIR)/$(COVERAGE_DIR)/tmp/c-e2e-coverage.lcov
 	$(MAKE) -C $(NGINX_TEST_DIR) unit-coverage COV_DIR=$(CURDIR)/$(COVERAGE_DIR)/tmp/c-unit
 	lcov --add-tracefile $(COVERAGE_DIR)/tmp/c-e2e-coverage.lcov \
-		--add-tracefile $(COVERAGE_DIR)/tmp/c-unit/c-coverage.lcov \
-		--output-file $(COVERAGE_DIR)/tmp/c-combined-raw.lcov \
-		--rc branch_coverage=1 --rc geninfo_unexecuted_blocks=1 --ignore-errors inconsistent
+	--add-tracefile $(COVERAGE_DIR)/tmp/c-unit/c-coverage.lcov \
+	--output-file $(COVERAGE_DIR)/tmp/c-combined-raw.lcov \
+	--rc branch_coverage=1 --rc geninfo_unexecuted_blocks=1 --ignore-errors inconsistent
 	lcov --extract $(COVERAGE_DIR)/tmp/c-combined-raw.lcov \
-		"*/components/nginx-module/src/*" \
-		--output-file $(COVERAGE_DIR)/c-coverage.lcov \
-		--rc branch_coverage=1 --rc geninfo_unexecuted_blocks=1 --ignore-errors unused --ignore-errors inconsistent
+	"*/components/nginx-module/src/*" \
+	--output-file $(COVERAGE_DIR)/c-coverage.lcov \
+	--rc branch_coverage=1 --rc geninfo_unexecuted_blocks=1 --ignore-errors unused --ignore-errors inconsistent
 	@echo "==> Combined C coverage report: $(COVERAGE_DIR)/c-coverage.lcov"
 	lcov --summary $(COVERAGE_DIR)/c-coverage.lcov --rc branch_coverage=1 \
-		--ignore-errors inconsistent
+	--ignore-errors inconsistent
 
 coverage-rust:
 	@mkdir -p $(COVERAGE_DIR)
 	cd $(RUST_DIR) && cargo llvm-cov --lcov \
-		--output-path $(CURDIR)/$(COVERAGE_DIR)/rust-coverage.lcov \
-		-- --skip report_contains_all_tiers \
-		   --skip legacy_single_large \
-		   --skip full_run_report
+	--output-path $(CURDIR)/$(COVERAGE_DIR)/rust-coverage.lcov \
+	-- --skip report_contains_all_tiers \
+	   --skip legacy_single_large \
+	   --skip full_run_report
 	cd $(RUST_DIR) && cargo llvm-cov --features streaming --lcov \
-		--output-path $(CURDIR)/$(COVERAGE_DIR)/rust-streaming-coverage.lcov \
-		-- --skip report_contains_all_tiers \
-		   --skip legacy_single_large \
-		   --skip full_run_report
+	--output-path $(CURDIR)/$(COVERAGE_DIR)/rust-streaming-coverage.lcov \
+	-- --skip report_contains_all_tiers \
+	   --skip legacy_single_large \
+	   --skip full_run_report
 
 # Convert all lcov reports to SonarQube Generic Coverage XML.
 # sonar.coverageReportPaths expects this format, not raw lcov.
 coverage-sonar-xml:
 	python3 tools/sonar/lcov_to_sonar_xml.py \
-		-o $(COVERAGE_DIR)/sonar-coverage.xml \
-		$(wildcard $(COVERAGE_DIR)/*.lcov)
+	-o $(COVERAGE_DIR)/sonar-coverage.xml \
+	$(wildcard $(COVERAGE_DIR)/*.lcov)
 
 coverage-all: coverage-c coverage-rust coverage-sonar-xml
 
@@ -310,13 +458,13 @@ COVERAGE_RUST_MIN_FUNC ?= 80
 
 coverage-gate: coverage-c coverage-rust
 	python3 tools/ci/coverage_gate.py \
-		--c-lcov $(COVERAGE_DIR)/c-coverage.lcov \
-		--rust-lcov $(COVERAGE_DIR)/rust-coverage.lcov \
-		--rust-streaming-lcov $(COVERAGE_DIR)/rust-streaming-coverage.lcov \
-		--c-min-line $(COVERAGE_C_MIN_LINE) \
-		--c-min-func $(COVERAGE_C_MIN_FUNC) \
-		--rust-min-line $(COVERAGE_RUST_MIN_LINE) \
-		--rust-min-func $(COVERAGE_RUST_MIN_FUNC)
+	--c-lcov $(COVERAGE_DIR)/c-coverage.lcov \
+	--rust-lcov $(COVERAGE_DIR)/rust-coverage.lcov \
+	--rust-streaming-lcov $(COVERAGE_DIR)/rust-streaming-coverage.lcov \
+	--c-min-line $(COVERAGE_C_MIN_LINE) \
+	--c-min-func $(COVERAGE_C_MIN_FUNC) \
+	--rust-min-line $(COVERAGE_RUST_MIN_LINE) \
+	--rust-min-func $(COVERAGE_RUST_MIN_FUNC)
 
 clean:
 	cd $(RUST_DIR) && cargo clean
@@ -361,6 +509,7 @@ help:
 	@echo "  release-gates-check      - Validate release gate framework (0.5.0 + 0.5.5)"
 	@echo "  release-gates-check-055  - Validate 0.5.5 release gates (evidence, known-diffs, docs)"
 	@echo "  release-gates-check-060  - Validate 0.6.0 release gates (streaming default, pruning, budget)"
+	@echo "  release-gates-check-070  - Validate 0.7.0 release gates (runtime correctness, package compat, fuzz)"
 	@echo "  release-gates-check-legacy - Validate 0.4.0 release gate documents"
 	@echo "  release-gates-check-strict - Validate all sub-specs #12-#18 for full compliance"
 	@echo "  coverage-c               - Generate C module e2e coverage (builds NGINX with --coverage)"

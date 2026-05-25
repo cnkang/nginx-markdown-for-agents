@@ -19,6 +19,43 @@ use crate::streaming::budget::MemoryBudget;
 use crate::streaming::sanitizer::is_dangerous_url;
 use crate::streaming::state_machine::{StateMachineAction, StructuralContext};
 
+/// Escape a link label for safe Markdown output.
+/// Mirrors [`crate::security::escape_link_label`] — keeps the logic local to
+/// the streaming emitter so the hot path avoids a cross-module call.
+pub(crate) fn escape_link_label(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 8);
+    for ch in s.chars() {
+        match ch {
+            '[' | ']' | '\\' => {
+                out.push('\\');
+                out.push(ch);
+            }
+            '\n' | '\r' => out.push(' '),
+            _ => out.push(ch),
+        }
+    }
+    out
+}
+
+fn longest_backtick_run(content: &str) -> usize {
+    let mut max_run = 0;
+    let mut current_run = 0;
+    for ch in content.chars() {
+        if ch == '`' {
+            current_run += 1;
+        } else {
+            if current_run > max_run {
+                max_run = current_run;
+            }
+            current_run = 0;
+        }
+    }
+    if current_run > max_run {
+        max_run = current_run;
+    }
+    max_run
+}
+
 /// Escape a URL for use as a Markdown link/image destination.
 ///
 /// CommonMark requires that link destinations containing spaces, parentheses,
@@ -112,6 +149,13 @@ pub struct IncrementalEmitter {
     code_fence_lang: Option<String>,
     /// Whether the opening code fence has been emitted.
     code_fence_emitted: bool,
+    /// Longest backtick run seen in the current code block content.
+    code_block_backtick_max: usize,
+    /// Length of the opening code fence (number of backticks).
+    code_fence_len: usize,
+    /// Buffered code block content, accumulated until block ends so fence
+    /// length can be chosen after seeing all backtick runs.
+    code_block_buffer: Vec<u8>,
 }
 
 impl IncrementalEmitter {
@@ -150,6 +194,9 @@ impl IncrementalEmitter {
             flush_count: 0,
             code_fence_lang: None,
             code_fence_emitted: false,
+            code_block_backtick_max: 0,
+            code_fence_len: 3,
+            code_block_buffer: Vec::new(),
         }
     }
 
@@ -245,15 +292,24 @@ impl IncrementalEmitter {
     /// }
     /// ```
     pub fn finalize(&mut self) -> Result<Vec<u8>, ConversionError> {
-        // Close any open code block
         if self.in_code_block {
-            if !self.code_fence_emitted {
-                self.write_raw(b"```\n")?;
+            let fence_len = (3usize).max(self.code_block_backtick_max + 1);
+            self.code_fence_len = fence_len;
+            let fence_str = "`".repeat(fence_len);
+            let lang = self.code_fence_lang.clone();
+            let opening_fence = match lang {
+                Some(l) => format!("{}{}\n", fence_str, l),
+                None => format!("{}\n", fence_str),
+            };
+            self.write_str(&opening_fence)?;
+            if !self.code_block_buffer.is_empty() {
+                self.check_buffer_budget(self.code_block_buffer.len())?;
+                self.buffer.extend_from_slice(&self.code_block_buffer);
             }
-            if !self.last_was_newline {
+            if !self.last_was_newline && !self.code_block_buffer.is_empty() {
                 self.write_raw(b"\n")?;
             }
-            self.write_raw(b"```\n")?;
+            self.write_str(&format!("{}\n", fence_str))?;
             self.in_code_block = false;
         }
         // Move pending buffer to flushed (checked — bounded-memory contract
@@ -331,6 +387,9 @@ impl IncrementalEmitter {
                 self.in_code_block = true;
                 self.code_fence_lang = lang.clone();
                 self.code_fence_emitted = false;
+                self.code_block_backtick_max = 0;
+                self.code_fence_len = 3;
+                self.code_block_buffer.clear();
             }
             StructuralContext::InlineCode => {
                 if self.in_link {
@@ -351,7 +410,8 @@ impl IncrementalEmitter {
             }
             StructuralContext::Image { src, alt } => {
                 let escaped = escape_markdown_destination(src);
-                self.write_str(&format!("![{}]({})", alt, escaped))?;
+                let escaped_alt = escape_link_label(alt);
+                self.write_str(&format!("![{}]({})", escaped_alt, escaped))?;
             }
             StructuralContext::Bold => {
                 if self.in_link {
@@ -417,17 +477,30 @@ impl IncrementalEmitter {
                 self.write_str("\n")?;
                 self.last_was_newline = true;
             }
-            StructuralContext::CodeBlock(_) => {
-                // Emit deferred code fence if not yet emitted (empty code block)
-                self.emit_code_fence_if_needed(sm)?;
-                // Ensure newline before closing fence
-                if !self.last_was_newline {
+            StructuralContext::CodeBlock(lang) => {
+                let fence_len = (3usize).max(self.code_block_backtick_max + 1);
+                self.code_fence_len = fence_len;
+                let fence_str = "`".repeat(fence_len);
+                let effective_lang = lang.clone().or_else(|| self.code_fence_lang.clone());
+                let opening_fence = match effective_lang {
+                    Some(l) => format!("{}{}\n", fence_str, l),
+                    None => format!("{}\n", fence_str),
+                };
+                self.write_str(&opening_fence)?;
+                if !self.code_block_buffer.is_empty() {
+                    self.check_buffer_budget(self.code_block_buffer.len())?;
+                    self.buffer.extend_from_slice(&self.code_block_buffer);
+                }
+                if !self.last_was_newline && !self.code_block_buffer.is_empty() {
                     self.write_str("\n")?;
                 }
-                self.write_str("```\n")?;
+                self.write_str(&format!("{}\n", fence_str))?;
                 self.in_code_block = false;
                 self.code_fence_emitted = false;
                 self.code_fence_lang = None;
+                self.code_block_backtick_max = 0;
+                self.code_fence_len = 3;
+                self.code_block_buffer.clear();
                 self.last_was_newline = true;
                 self.needs_block_separator = true;
             }
@@ -446,11 +519,12 @@ impl IncrementalEmitter {
                 self.in_link = false;
                 let text = std::mem::take(&mut self.link_text);
                 if !text.trim().is_empty() {
+                    let escaped_text = escape_link_label(&text);
                     if href.trim().is_empty() || is_dangerous_url(href) {
-                        self.write_str(&text)?;
+                        self.write_str(&escaped_text)?;
                     } else {
                         let escaped = escape_markdown_destination(href);
-                        self.write_str(&format!("[{}]({})", text, escaped))?;
+                        self.write_str(&format!("[{}]({})", escaped_text, escaped))?;
                     }
                 }
             }
@@ -517,22 +591,34 @@ impl IncrementalEmitter {
         text: &str,
         sm: &mut super::state_machine::StructuralStateMachine,
     ) -> Result<(), ConversionError> {
+        let _ = sm;
         if self.in_link {
             self.append_link_text(text);
             return Ok(());
         }
 
         if self.in_code_block {
-            // Emit deferred code fence if not yet emitted
-            self.emit_code_fence_if_needed(sm)?;
-            // Preserve content inside code blocks verbatim (no
-            // blank-line collapsing or whitespace normalization).
-            // When inside a blockquote, prepend "> " prefix to each
-            // line so the code block renders correctly in Markdown.
+            let backtick_run = longest_backtick_run(text);
+            if backtick_run > self.code_block_backtick_max {
+                self.code_block_backtick_max = backtick_run;
+            }
             if self.blockquote_depth > 0 {
-                self.write_raw_with_blockquote_prefix(text.as_bytes())?;
+                let mut prefixed = Vec::new();
+                for &b in text.as_bytes() {
+                    prefixed.push(b);
+                    if b == b'\n' {
+                        for _ in 0..self.blockquote_depth {
+                            prefixed.extend_from_slice(b"> ");
+                        }
+                    }
+                }
+                /* Budget check: combined pending buffer + code_block_buffer
+                 * + new bytes + fence overhead must stay within budget. */
+                self.check_code_block_budget(prefixed.len())?;
+                self.code_block_buffer.extend_from_slice(&prefixed);
             } else {
-                self.write_raw(text.as_bytes())?;
+                self.check_code_block_budget(text.len())?;
+                self.code_block_buffer.extend_from_slice(text.as_bytes());
             }
             self.last_was_newline = text.ends_with('\n');
             return Ok(());
@@ -577,6 +663,7 @@ impl IncrementalEmitter {
     /// let out = String::from_utf8(emitter.take_flushed()).unwrap();
     /// assert_eq!(out, "```rust\n");
     /// ```
+    #[allow(dead_code)]
     fn emit_code_fence_if_needed(
         &mut self,
         sm: &super::state_machine::StructuralStateMachine,
@@ -596,9 +683,13 @@ impl IncrementalEmitter {
             })
             .or_else(|| self.code_fence_lang.clone());
 
+        let fence_len = (3usize).max(self.code_block_backtick_max + 1);
+        self.code_fence_len = fence_len;
+        let fence_str = "`".repeat(fence_len);
+
         let fence = match lang {
-            Some(l) => format!("```{}\n", l),
-            None => "```\n".to_string(),
+            Some(l) => format!("{}{}\n", fence_str, l),
+            None => format!("{}\n", fence_str),
         };
         self.write_str(&fence)?;
         self.code_fence_emitted = true;
@@ -811,6 +902,7 @@ impl IncrementalEmitter {
     ///
     /// Used for code block content inside blockquotes so each line
     /// gets the correct `> ` prefix per nesting depth.
+    #[allow(dead_code)]
     fn write_raw_with_blockquote_prefix(&mut self, bytes: &[u8]) -> Result<(), ConversionError> {
         let prefix_per_line = 2 * self.blockquote_depth;
         /* Worst case: every byte is a newline, each needing a prefix */
@@ -833,6 +925,28 @@ impl IncrementalEmitter {
     fn check_buffer_budget(&self, additional: usize) -> Result<(), ConversionError> {
         self.budget
             .check_output_buffer(self.buffer.len(), additional)
+    }
+
+    /// Check that adding `additional` bytes to the code block buffer won't
+    /// exceed the output budget when the full code block is eventually flushed.
+    ///
+    /// The effective usage is: pending buffer + existing code_block_buffer +
+    /// new bytes + fence overhead (opening fence + closing fence + newlines).
+    /// This ensures that an oversized `<pre><code>` block triggers
+    /// `BudgetExceeded` incrementally during accumulation rather than only
+    /// at code block exit.
+    fn check_code_block_budget(&self, additional: usize) -> Result<(), ConversionError> {
+        /* Fence overhead: opening fence (backticks + lang + newline) +
+         * closing fence (backticks + newline). Conservative upper bound:
+         * max fence length 10 + lang 32 + 2 newlines + closing fence 10 + 1 = ~55 bytes. */
+        const FENCE_OVERHEAD: usize = 64;
+        let effective_current = self
+            .buffer
+            .len()
+            .saturating_add(self.code_block_buffer.len())
+            .saturating_add(FENCE_OVERHEAD);
+        self.budget
+            .check_output_buffer(effective_current, additional)
     }
 
     /// Flushes pending output into the ready/flushed buffer and records a flush point.
@@ -1958,6 +2072,155 @@ mod tests {
             output.contains("multiple spaces inside"),
             "internal whitespace runs must collapse to single space: {:?}",
             output
+        );
+    }
+
+    #[test]
+    fn test_link_label_escaping_brackets() {
+        let output = emit_html(&[
+            start_tag("p"),
+            start_tag_with_attrs("a", vec![("href", "https://example.com")]),
+            text("click [here]"),
+            end_tag("a"),
+            end_tag("p"),
+        ]);
+        assert!(
+            output.contains(r"[click \[here\]](https://example.com)"),
+            "link label brackets must be escaped, got: {}",
+            output
+        );
+    }
+
+    #[test]
+    fn test_image_alt_escaping_brackets() {
+        let output = emit_html(&[
+            start_tag("p"),
+            self_closing_tag("img", vec![("src", "pic.png"), ("alt", "alt [0]")]),
+            end_tag("p"),
+        ]);
+        assert!(
+            output.contains(r"![alt \[0\]](pic.png)"),
+            "image alt brackets must be escaped, got: {}",
+            output
+        );
+    }
+
+    #[test]
+    fn test_link_label_escaping_backslash() {
+        let output = emit_html(&[
+            start_tag("p"),
+            start_tag_with_attrs("a", vec![("href", "https://example.com")]),
+            text(r"path\to\file"),
+            end_tag("a"),
+            end_tag("p"),
+        ]);
+        assert!(
+            output.contains(r"[path\\to\\file](https://example.com)"),
+            "link label backslashes must be escaped, got: {}",
+            output
+        );
+    }
+
+    #[test]
+    fn test_link_label_escaping_newline() {
+        let output = emit_html(&[
+            start_tag("p"),
+            start_tag_with_attrs("a", vec![("href", "https://example.com")]),
+            text("line1\nline2"),
+            end_tag("a"),
+            end_tag("p"),
+        ]);
+        assert!(
+            output.contains("[line1 line2]"),
+            "link label newlines must become spaces, got: {}",
+            output
+        );
+    }
+
+    #[test]
+    fn test_code_fence_dynamic_backtick() {
+        let output = emit_html(&[
+            start_tag("pre"),
+            start_tag("code"),
+            text("some ``` code"),
+            end_tag("code"),
+            end_tag("pre"),
+        ]);
+        assert!(
+            output.contains("````\n"),
+            "opening fence must be longer than content backtick run, got: {}",
+            output
+        );
+        assert!(
+            output.contains("````\n") && output.matches("````").count() >= 2,
+            "closing fence must match opening fence length, got: {}",
+            output
+        );
+    }
+
+    #[test]
+    fn test_escape_link_label_no_escape_needed() {
+        assert_eq!(escape_link_label("hello"), "hello");
+    }
+
+    #[test]
+    fn test_escape_link_label_with_brackets() {
+        assert_eq!(escape_link_label("a[b]c"), r"a\[b\]c");
+    }
+
+    #[test]
+    fn test_escape_link_label_with_newline() {
+        assert_eq!(escape_link_label("a\nb"), "a b");
+    }
+
+    #[test]
+    fn test_code_block_budget_exceeded_during_accumulation() {
+        /* Verify that an oversized <pre><code> block triggers BudgetExceeded
+         * incrementally during text accumulation, not only at code block exit.
+         * This is the regression test for the streaming code block buffering
+         * budget enforcement fix. */
+        let budget = MemoryBudget {
+            output_buffer: 256, // very small budget
+            ..MemoryBudget::default()
+        };
+        let mut emitter = IncrementalEmitter::new(&budget);
+        let mut sm = StructuralStateMachine::new(&budget);
+
+        // Enter code block
+        let action = sm
+            .process_event(&StreamEvent::StartTag {
+                name: "pre".to_string(),
+                attrs: vec![],
+                self_closing: false,
+            })
+            .unwrap();
+        emitter.process_action(&action, &mut sm).unwrap();
+
+        let action = sm
+            .process_event(&StreamEvent::StartTag {
+                name: "code".to_string(),
+                attrs: vec![],
+                self_closing: false,
+            })
+            .unwrap();
+        emitter.process_action(&action, &mut sm).unwrap();
+
+        // Feed text chunks that exceed the budget (256 bytes)
+        let chunk = "x".repeat(100);
+        let mut budget_exceeded = false;
+        for _ in 0..10 {
+            let action = sm.process_event(&StreamEvent::Text(chunk.clone())).unwrap();
+            if let Err(ConversionError::BudgetExceeded { .. }) =
+                emitter.process_action(&action, &mut sm)
+            {
+                budget_exceeded = true;
+                break;
+            }
+        }
+        assert!(
+            budget_exceeded,
+            "Expected BudgetExceeded during code block text accumulation, \
+             but all 1000 bytes were accepted into a 256-byte budget"
         );
     }
 }
