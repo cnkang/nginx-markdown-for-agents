@@ -17,7 +17,7 @@ set -euo pipefail
 SRC_DIR="components/nginx-module/src"
 VIOLATIONS=0
 
-if [ ! -d "$SRC_DIR" ]; then
+if [[ ! -d "$SRC_DIR" ]]; then
     echo "  [finalize-return] Source directory not found: $SRC_DIR" >&2
     exit 0
 fi
@@ -31,6 +31,7 @@ while IFS= read -r file; do
         stripped="${content#"${content%%[![:space:]]*}"}"
         case "$stripped" in
             "/*"*|"*"*|"//"*) continue ;;
+            *) ;;
         esac
         # Skip lines that don't actually call the function (e.g., just mention it)
         case "$content" in
@@ -51,6 +52,7 @@ while IFS= read -r file; do
                 "*"*) continue ;;
                 "///"*) continue ;;
                 "//"*) continue ;;
+                *) ;;
             esac
             next_meaningful="$stripped"
             break
@@ -73,7 +75,7 @@ while IFS= read -r file; do
     done < <(grep -n 'ngx_http_finalize_request' "$file" 2>/dev/null | grep -v '^\s*/\*\|^\s*\*\|^\s*//' || true)
 done < <(grep -rl 'ngx_http_finalize_request' "$SRC_DIR" 2>/dev/null || true)
 
-if [ "$VIOLATIONS" -gt 0 ]; then
+if [[ "$VIOLATIONS" -gt 0 ]]; then
     echo "  [finalize-return] $VIOLATIONS call(s) to ngx_http_finalize_request not followed by return" >&2
     echo "  [finalize-return] Risk of double-finalize — manual review required" >&2
     exit 1

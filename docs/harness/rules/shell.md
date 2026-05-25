@@ -30,10 +30,15 @@ Required:
 ---
 
 ### 18. Shell script hygiene in e2e/tooling scripts
-SonarCloud rules: `shelldre:S131`, `shelldre:S7677`, `shelldre:S1066`, `shelldre:S1192`, `shelldre:S7682`.
+SonarCloud rules: `shelldre:S131`, `shelldre:S7677`, `shelldre:S1066`, `shelldre:S1192`, `shelldre:S7682`, `shelldre:S7688`.
 
 Required:
 - Every `case` statement must include a default `*)` clause, even if it only logs an error to stderr.
+- **Use `[[` instead of `[` for conditional tests in bash scripts.** The `[[`
+  construct is safer (no word splitting, no pathname expansion on variables)
+  and more feature-rich (regex matching, pattern globbing).  Since all project
+  scripts use `#!/usr/bin/env bash`, `[[` is always available and preferred.
+  Reserve `[` (or `test`) only for POSIX sh scripts (none exist in this repo).
 - Every shell function must end with an explicit `return` statement
   (`return 0` on success, or the appropriate status on failure), so static
   analysis and callers do not inherit an accidental exit status from the last
