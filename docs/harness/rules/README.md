@@ -28,6 +28,7 @@ related rules by domain with YAML frontmatter for path-scoped loading.
 | 34, 35 | Dynconf & Snapshot | [dynconf-snapshot.md](dynconf-snapshot.md) | effective_conf, reload retry |
 | 36 | Harness Routing | [harness-routing.md](harness-routing.md) | routing-manifest coverage |
 | 37 | E2E Runner | [e2e-runner.md](e2e-runner.md) | Rust-first E2E, parity |
+| FUZZ-001..007 | Fuzz Infrastructure | [fuzz-infrastructure.md](fuzz-infrastructure.md) | fuzz targets, CI fuzzing, corpus management |
 
 ## Usage
 

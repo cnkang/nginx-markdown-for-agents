@@ -1,0 +1,88 @@
+# =============================================================================
+# Release Build Matrix Configuration
+# =============================================================================
+#
+# Reference copy of the release-packages.yml build matrix.
+# Keep this file synchronized with the workflow when matrix values change.
+# GitHub Actions does not read this file automatically.
+#
+# --- How to extend ---
+#
+# Add a new NGINX version:
+#   Append to the nginx_versions list below and update release-packages.yml.
+#   Example: nginx_versions: ["1.26.3", "1.28.0"]
+#
+# Add a new platform:
+#   Add a new entry under smoke_test_containers with the appropriate
+#   package format (deb/rpm) and container image. Then update the
+#   workflow matrix include/exclude rules if needed.
+#   Example: add "rockylinux:9" under rpm format.
+#
+# Mainline support:
+#   nginx.org mainline versions (e.g. 1.27.x) are future work.
+#   Once mainline ABI compatibility is validated, add the version
+#   to nginx_versions. No structural changes are needed.
+#
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# NGINX versions to build against
+# ---------------------------------------------------------------------------
+# Initial release targets stable only. Mainline (1.27.x) is deferred until
+# ABI compatibility validation is complete.
+nginx_versions:
+  - "1.26.3"
+
+# ---------------------------------------------------------------------------
+# Target architectures
+# ---------------------------------------------------------------------------
+architectures:
+  - "amd64"
+  - "arm64"
+
+# ---------------------------------------------------------------------------
+# Smoke test container images
+# ---------------------------------------------------------------------------
+# Maps package format to the container images used for installation and
+# module-load verification (Smoke_Test_Basic). Each entry defines:
+#   - image: Docker image reference
+#   - format: package format (deb or rpm)
+#   - pkg_tool: package manager install command
+#
+smoke_test_containers:
+  deb:
+    - image: "ubuntu:22.04"
+      codename: "jammy"
+    - image: "ubuntu:24.04"
+      codename: "noble"
+    - image: "debian:12"
+      codename: "bookworm"
+
+  rpm:
+    - image: "almalinux:9"
+      codename: "el9"
+    - image: "amazonlinux:2023"
+      codename: "al2023"
+
+# ---------------------------------------------------------------------------
+# Build OS runners (GitHub Actions hosted runners)
+# ---------------------------------------------------------------------------
+# These are the runner labels used in the build/package jobs.
+# arm64 builds use larger runners or cross-compilation depending on
+# availability.
+build_runners:
+  amd64: "ubuntu-24.04"
+  arm64: "ubuntu-24.04-arm"
+
+# ---------------------------------------------------------------------------
+# Package metadata (consumed by nFPM via environment variables)
+# ---------------------------------------------------------------------------
+package_metadata:
+  name: "nginx-module-markdown-for-agents"
+  vendor: "NGINX Markdown for Agents Contributors"
+  license: "BSD-2-Clause"
+  homepage: "https://github.com/cnkang/nginx-markdown-for-agents"
+  maintainer: "nginx-markdown-for-agents maintainers"
+  description: >-
+    NGINX dynamic module for HTML-to-Markdown conversion.
+    Serves Markdown to AI agents via content negotiation.

@@ -85,7 +85,7 @@ Tap publication and macOS post-release verification workflows are documented in 
 ### 2. Enable Markdown on a location
 
 ```nginx
-load_module modules/ngx_http_markdown_filter_module.so;
+load_module modules/ngx_http_markdown_module.so;
 
 http {
     upstream backend {
@@ -130,7 +130,7 @@ If you want a practical production-oriented configuration next, go straight to [
 Most AI crawlers do not send `Accept: text/markdown`. They use standard browser-like Accept headers. You can use NGINX's `map` directive to rewrite the Accept header for specific User-Agent strings, so matching bots receive Markdown without any changes on their side.
 
 ```nginx
-load_module modules/ngx_http_markdown_filter_module.so;
+load_module modules/ngx_http_markdown_module.so;
 
 http {
     # Rewrite Accept for known AI bots
@@ -393,20 +393,45 @@ add the harness workflow to your default path:
 2. Run `make harness-check`
 3. Run `make harness-check-full` before closing broader docs or release-gate work
 
+## What's New in v0.7.0
+
+v0.7.0 is a correctness, distribution, and operability release:
+
+- **Bounded decompression** — `markdown_decompress_max_size` limits decompressed output independently, preventing zip-bomb attacks (error code 9: DecompressionBudgetExceeded)
+- **Accept negotiation** — Rust-side RFC 9110 q-value comparison between `text/markdown` and `text/html` determines conversion eligibility
+- **Parse timeout and budget** — `markdown_parse_timeout` (default 30s) and `markdown_parser_budget` (default 64m) prevent runaway parsing (error codes 10, 11)
+- **DEB/RPM packaging** — Pre-built packages for Ubuntu 22.04/24.04, Debian 12, AlmaLinux 9, Amazon Linux 2023 across amd64/arm64
+- **Kubernetes deployment examples** — Helm chart, manifests, and Ingress Controller custom image build path
+- **Runtime diagnostics** — `/nginx-markdown/diagnostics` endpoint exposes config snapshot, recent decisions, and metrics
+- **Dynconf dry-run and rollback** — Validate configuration changes without applying them; roll back to last-known-good on failure
+
+Additional changes:
+
+- P0 runtime correctness: pending chain on NGX_AGAIN, fail-open dedup, safe output ordering
+- Rust conditional request module (If-None-Match, If-Modified-Since)
+- Rust decision engine with reason codes
+- Rust header mutation plan module
+- Rust URL control character validation and link escaping
+- FFI ABI layout verification and header drift detection
+
 ## Roadmap
 
-Current release (0.6.3):
+Current release (0.7.0):
 
-- Dual-engine architecture: streaming auto mode default, full-buffer for small responses
-- Streaming failure semantics and fallback controls aligned with commit boundaries
-- Streaming parity and diff coverage across chunk boundaries and failure paths
-- Streaming rollout observability with shadow-mode validation and reason-code visibility
-- Streaming performance evidence workflow and release-gate alignment
-- Rust-first E2E migration batch closed with hybrid suite contract (`make test-e2e` + `make test-e2e-rust`)
-- Repo-owned harness workflow (`docs/harness/`, `tools/harness/`, `make harness-check*`)
-- Release/performance tooling path validation hardened around the repository root
-- Release binary matrix refreshed for current NGINX `1.30.1` and `1.31.0`
-- Prometheus-compatible metrics, rollout/rollback guides, and benchmark-driven regression checks
+- P0 runtime correctness: pending chain on NGX_AGAIN, fail-open dedup, safe output ordering
+- Independent decompression budget (`markdown_decompress_max_size`)
+- Parse timeout and parser budget directives
+- Rust Accept header negotiation module (RFC 7231 q-value)
+- Rust conditional request module (If-None-Match, If-Modified-Since)
+- Rust decision engine with reason codes
+- Rust header mutation plan module
+- Rust URL control character validation and link escaping
+- FFI ABI layout verification and header drift detection
+- New error codes: DecompressionBudgetExceeded(9), ParseTimeout(10), ParseBudgetExceeded(11)
+- DEB/RPM packaging with APT/YUM repository support
+- Kubernetes deployment examples and Helm chart
+- Runtime diagnostics endpoint
+- Dynconf dry-run validation and last-known-good rollback
 - Installation and release docs aligned to Rust 1.91.0+ and current CI expectations
 
 Near-term focus:
@@ -429,6 +454,7 @@ BSD 2-Clause "Simplified" License. See [LICENSE](LICENSE).
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.7.0 | 2026-05-17 | Kang | P0 correctness, Rust-first architecture, independent decompression budget, Accept negotiation, parse timeout/budget, DEB/RPM packaging, K8s examples, runtime diagnostics, dynconf dry-run/rollback |
 | 0.6.3 | 2026-05-14 | Kang | Version bump to 0.6.3, release-matrix refresh, and final hardening notes |
 | 0.6.2 | 2026-05-08 | Kang | Version bump to 0.6.2 for release |
 | 0.5.0 | 2026-04-21 | docs-standardization | Synchronized Quick Start steps between English and Chinese versions; added update tracking section |

@@ -108,6 +108,9 @@ ngx_http_markdown_find_request_header_value(ngx_http_request_t *r,
 
         headers = part->elts;
         for (ngx_uint_t i = 0; i < part->nelts; i++) {
+            if (headers[i].hash == 0) {
+                continue;
+            }
             if (headers[i].key.len == name_len
                 && ngx_http_markdown_const_strncasecmp(headers[i].key.data,
                                                        name,
@@ -415,7 +418,7 @@ ngx_http_markdown_select_base_url_parts(ngx_http_request_t *r,
             }
 
             ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-                          "markdown filter: X-Forwarded-Host "
+                          "markdown: X-Forwarded-Host "
                           "value \"%V\" rejected (invalid host), "
                           "falling back to server name",
                           x_forwarded_host);
@@ -445,7 +448,7 @@ ngx_http_markdown_select_base_url_parts(ngx_http_request_t *r,
         }
 
         ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-                      "markdown filter: request Host "
+                      "markdown: request Host "
                       "\"%V\" rejected (invalid host), "
                       "falling back to server_name",
                       &r->headers_in.server);
@@ -464,7 +467,7 @@ ngx_http_markdown_select_base_url_parts(ngx_http_request_t *r,
     }
 
     ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-                 "markdown filter: unable to construct base_url, "
+                 "markdown: unable to construct base_url, "
                  "no valid scheme/host available");
     return NGX_ERROR;
 }
@@ -478,7 +481,7 @@ ngx_http_markdown_base_url_add_len(ngx_http_request_t *r,
 {
     if (*total > ((size_t) -1) - delta) {
         ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-                     "markdown filter: base_url length overflow (%s)",
+                     "markdown: base_url length overflow (%s)",
                      segment);
         return NGX_ERROR;
     }
@@ -526,7 +529,7 @@ ngx_http_markdown_construct_base_url(ngx_http_request_t *r, ngx_pool_t *pool,
          * Requirements: FR-09.5, FR-09.6, FR-09.7
          */
         ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0,
-                     "markdown filter: failed to allocate memory for base_url, category=system");
+                     "markdown: failed to allocate memory for base_url, category=system");
         return NGX_ERROR;
     }
 
@@ -549,7 +552,7 @@ ngx_http_markdown_construct_base_url(ngx_http_request_t *r, ngx_pool_t *pool,
     base_url->len = p - base_url->data;
 
     ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                  "markdown filter: constructed base_url: \"%V\"", base_url);
+                  "markdown: constructed base_url: \"%V\"", base_url);
 
     return NGX_OK;
 }
@@ -603,7 +606,7 @@ ngx_http_markdown_resolve_conditional_result(ngx_http_request_t *r,
 
     if (rc == NGX_HTTP_NOT_MODIFIED) {
         ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                      "markdown filter: If-None-Match matched, sending 304 Not Modified");
+                      "markdown: If-None-Match matched, sending 304 Not Modified");
 
         if (ctx != NULL && ctx->last_modified.has_last_modified_time) {
             r->headers_out.last_modified_time = ctx->last_modified.source_last_modified_time;
@@ -615,7 +618,7 @@ ngx_http_markdown_resolve_conditional_result(ngx_http_request_t *r,
         }
 
         r->buffered &= ~NGX_HTTP_MARKDOWN_BUFFERED;
-        if (rc != NGX_OK) {
+        if (rc != NGX_DONE) {
             ngx_http_markdown_record_system_failure(ctx);
             return rc;
         }
@@ -625,7 +628,7 @@ ngx_http_markdown_resolve_conditional_result(ngx_http_request_t *r,
 
     if (rc == NGX_ERROR) {
         ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-                     "markdown filter: error during If-None-Match processing");
+                     "markdown: error during If-None-Match processing");
 
         if (conditional_result != NULL) {
             markdown_result_free(conditional_result);
@@ -635,12 +638,12 @@ ngx_http_markdown_resolve_conditional_result(ngx_http_request_t *r,
 
         return ngx_http_markdown_reject_or_fail_open_buffered_response(
             r, ctx, conf,
-            "markdown filter: fail-open strategy - returning original HTML");
+            "markdown: fail-open strategy - returning original HTML");
     }
 
     if (rc == NGX_DECLINED && conditional_result != NULL) {
         ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                      "markdown filter: If-None-Match did not match, using existing conversion");
+                      "markdown: If-None-Match did not match, using existing conversion");
 
         /*
          * Transfer ownership of the Rust-allocated buffers from
@@ -694,7 +697,7 @@ ngx_http_markdown_prepare_conversion_options(ngx_http_request_t *r,
     ngx_memzero(options, sizeof(struct MarkdownOptions));
     if (conf->flavor > UINT32_MAX) {
         ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-                     "markdown filter: flavor=%ui exceeds uint32 max, clamping",
+                     "markdown: flavor=%ui exceeds uint32 max, clamping",
                      conf->flavor);
         options->flavor = UINT32_MAX;
     } else {
@@ -703,7 +706,7 @@ ngx_http_markdown_prepare_conversion_options(ngx_http_request_t *r,
 
     if (conf->timeout > UINT32_MAX) {
         ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-                     "markdown filter: timeout=%M exceeds uint32 max, clamping",
+                     "markdown: timeout=%M exceeds uint32 max, clamping",
                      conf->timeout);
         options->timeout_ms = UINT32_MAX;
     } else {
@@ -759,13 +762,13 @@ ngx_http_markdown_prepare_conversion_options(ngx_http_request_t *r,
 
     if (conf->advanced.llm_provider > UINT8_MAX) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                      "markdown filter: llm_provider=%ui exceeds uint8 range",
+                      "markdown: llm_provider=%ui exceeds uint8 range",
                       conf->advanced.llm_provider);
         return NGX_ERROR;
     }
     if (conf->advanced.chars_per_token_fixed > UINT8_MAX) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                      "markdown filter: chars_per_token_fixed=%ui exceeds "
+                      "markdown: chars_per_token_fixed=%ui exceeds "
                       "uint8 range",
                       conf->advanced.chars_per_token_fixed);
         return NGX_ERROR;
@@ -773,6 +776,18 @@ ngx_http_markdown_prepare_conversion_options(ngx_http_request_t *r,
 
     options->llm_provider = (uint8_t) conf->advanced.llm_provider;
     options->chars_per_token_fixed = (uint8_t) conf->advanced.chars_per_token_fixed;
+
+    /*
+     * Parse-specific timeout and memory budget.
+     * parse_timeout_ms: populated from conf->decompress.parse_timeout (ngx_msec_t).
+     * parser_memory_budget: populated from conf->decompress.parser_budget (size_t).
+     */
+    if (conf->decompress.parse_timeout > UINT32_MAX) {
+        options->parse_timeout_ms = UINT32_MAX;
+    } else {
+        options->parse_timeout_ms = (uint32_t) conf->decompress.parse_timeout;
+    }
+    options->parser_memory_budget = (uint64_t) conf->decompress.parser_budget;
 
     /*
      * Apply unified budget to streaming_budget when it was not
@@ -811,7 +826,7 @@ ngx_http_markdown_prepare_conversion_options(ngx_http_request_t *r,
         options->base_url_len = base_url.len;
     } else {
         ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                      "markdown filter: continuing conversion without base_url");
+                      "markdown: continuing conversion without base_url");
     }
 
     return NGX_OK;
@@ -827,14 +842,14 @@ ngx_http_markdown_handle_conversion_failure(ngx_http_request_t *r,
 {
     ngx_http_markdown_error_category_t error_category;
     const ngx_str_t                  *category_str;
-    int                               err_len;
+    int                               err_len = 0;
 
     error_category = ngx_http_markdown_classify_error(result->error_code);
     category_str = ngx_http_markdown_error_category_string(error_category);
 
     /* Store error category in context for decision log emission */
-    ctx->last_error_category = error_category;
-    ctx->has_error_category = 1;
+    ctx->error.last_category = error_category;
+    ctx->error.has_category = 1;
 
     ngx_http_markdown_record_conversion_latency(elapsed_ms);
     NGX_HTTP_MARKDOWN_METRIC_INC(conversions_failed);
@@ -851,7 +866,28 @@ ngx_http_markdown_handle_conversion_failure(ngx_http_request_t *r,
             break;
     }
 
-    err_len = 0;
+    switch (result->error_code) {
+        case ERROR_DECOMPRESSION_BUDGET_EXCEEDED:
+            NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.budget_exceeded_total);
+            break;
+        case ERROR_DECOMPRESSION_FORMAT_ERROR:
+            NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.format_error_total);
+            break;
+        case ERROR_DECOMPRESSION_TRUNCATED_INPUT:
+            NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.truncated_input_total);
+            break;
+        case ERROR_DECOMPRESSION_IO_ERROR:
+            NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.io_error_total);
+            break;
+        case ERROR_PARSE_TIMEOUT:
+            NGX_HTTP_MARKDOWN_METRIC_INC(parse_interrupts.parse_timeouts_total);
+            break;
+        case ERROR_PARSE_BUDGET_EXCEEDED:
+            NGX_HTTP_MARKDOWN_METRIC_INC(parse_interrupts.parse_budget_exceeded_total);
+            break;
+        default:
+            break;
+    }
     if (result->error_message != NULL) {
         err_len = (result->error_len > (size_t) INT_MAX)
             ? INT_MAX
@@ -859,7 +895,7 @@ ngx_http_markdown_handle_conversion_failure(ngx_http_request_t *r,
     }
 
     ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-                 "markdown filter: conversion failed, "
+                 "markdown: conversion failed, "
                  "error_code=%ud, category=%V, message=\"%*s\", elapsed_ms=%M",
                  result->error_code,
                  category_str,
@@ -871,7 +907,7 @@ ngx_http_markdown_handle_conversion_failure(ngx_http_request_t *r,
 
     return ngx_http_markdown_reject_or_fail_open_buffered_response(
         r, ctx, conf,
-        "markdown filter: fail-open strategy - returning original HTML");
+        "markdown: fail-open strategy - returning original HTML");
 }
 
 /*
@@ -887,9 +923,9 @@ static void
 ngx_http_markdown_record_system_failure(
     ngx_http_markdown_ctx_t *ctx)
 {
-    ctx->last_error_category =
+    ctx->error.last_category =
         NGX_HTTP_MARKDOWN_ERROR_SYSTEM;
-    ctx->has_error_category = 1;
+    ctx->error.has_category = 1;
     NGX_HTTP_MARKDOWN_METRIC_INC(conversions_failed);
     NGX_HTTP_MARKDOWN_METRIC_INC(failures_system);
 }
@@ -906,7 +942,7 @@ ngx_http_markdown_validate_conversion_result(ngx_http_request_t *r,
         || (result->etag == NULL && result->etag_len > 0))
     {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                     "markdown filter: invalid FFI result "
+                     "markdown: invalid FFI result "
                      "invariants: "
                      "markdown=%p markdown_len=%uz "
                      "etag=%p etag_len=%uz "
@@ -929,7 +965,7 @@ ngx_http_markdown_record_conversion_success(ngx_http_markdown_ctx_t *ctx,
                                             const struct MarkdownResult *result,
                                             ngx_msec_t elapsed_ms)
 {
-    ctx->conversion_succeeded = 1;
+    ctx->conversion.succeeded = 1;
     ngx_http_markdown_record_conversion_latency(elapsed_ms);
     NGX_HTTP_MARKDOWN_METRIC_INC(conversions_succeeded);
     NGX_HTTP_MARKDOWN_METRIC_ADD(input_bytes, ctx->buffer.size);
@@ -1222,13 +1258,13 @@ ngx_http_markdown_handle_converter_not_initialized(
     const ngx_http_markdown_conf_t *conf)
 {
     ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0,
-                 "markdown filter: converter not "
+                 "markdown: converter not "
                  "initialized, category=system");
     ngx_http_markdown_record_system_failure(ctx);
 
     return ngx_http_markdown_reject_or_fail_open_buffered_response(
         r, ctx, conf,
-        "markdown filter: fail-open strategy "
+        "markdown: fail-open strategy "
         "- returning original HTML");
 }
 
@@ -1327,7 +1363,7 @@ ngx_http_markdown_shadow_compare(
     if (init_rc != ERROR_SUCCESS || handle == NULL) {
         ngx_log_debug1(NGX_LOG_DEBUG_HTTP,
             r->connection->log, 0,
-            "markdown shadow: streaming engine "
+            "markdown: streaming engine "
             "init failed rc=%ui",
             (ngx_uint_t) init_rc);
         return;
@@ -1343,7 +1379,7 @@ ngx_http_markdown_shadow_compare(
     if (rc != ERROR_SUCCESS) {
         ngx_log_debug1(NGX_LOG_DEBUG_HTTP,
             r->connection->log, 0,
-            "markdown shadow: streaming feed "
+            "markdown: streaming feed "
             "error %ui", (ngx_uint_t) rc);
         markdown_streaming_abort(handle);
         if (out_data != NULL) {
@@ -1373,7 +1409,7 @@ ngx_http_markdown_shadow_compare(
 
     ngx_log_debug2(NGX_LOG_DEBUG_HTTP,
         r->connection->log, 0,
-        "markdown shadow: "
+        "markdown: "
         "shadow_streaming_latency_ms=%M "
         "shadow_fullbuffer_latency_ms=%M",
         shadow_elapsed, fb_elapsed_ms);
@@ -1381,7 +1417,7 @@ ngx_http_markdown_shadow_compare(
     if (rc != ERROR_SUCCESS) {
         ngx_log_debug1(NGX_LOG_DEBUG_HTTP,
             r->connection->log, 0,
-            "markdown shadow: streaming finalize "
+            "markdown: streaming finalize "
             "error %ui", (ngx_uint_t) rc);
         if (out_data != NULL) {
             markdown_streaming_output_free(
@@ -1415,7 +1451,7 @@ ngx_http_markdown_shadow_compare(
     if (st_result.peak_memory_estimate > 0) {
         ngx_log_debug1(NGX_LOG_DEBUG_HTTP,
             r->connection->log, 0,
-            "markdown shadow: peak_memory_bytes=%uz",
+            "markdown: peak_memory_bytes=%uz",
             (size_t) st_result.peak_memory_estimate);
     }
 
@@ -1440,7 +1476,7 @@ ngx_http_markdown_shadow_compare(
                 streaming.shadow_diff_total);
             ngx_log_debug2(NGX_LOG_DEBUG_HTTP,
                 r->connection->log, 0,
-                "markdown shadow: output diff "
+                "markdown: output diff "
                 "detected, fullbuffer_len=%uz "
                 "streaming_len=%uz",
                 (size_t) fb_result->markdown_len,
@@ -1576,7 +1612,7 @@ ngx_http_markdown_execute_conversion(ngx_http_request_t *r,
             *elapsed_ms = (end_time >= start_time) ? end_time - start_time : 0;
 
             ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                         "markdown filter: "
+                         "markdown: "
                          "markdown_incremental_new_with_code() "
                          "failed rc=%ud", (ngx_uint_t) init_rc);
 
@@ -1673,31 +1709,30 @@ ngx_http_markdown_execute_conversion(ngx_http_request_t *r,
 static void
 ngx_http_markdown_prepare_head_output_buffer(const ngx_http_request_t *r,
                                              ngx_buf_t *b,
-                                             struct MarkdownResult *result)
+                                             const struct MarkdownResult *result)
 {
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                  "markdown filter: HEAD request - omitting response body");
+                  "markdown: HEAD request - omitting response body");
 
     b->pos = NULL;
     b->last = NULL;
     b->memory = 0;
     b->last_buf = (r == r->main) ? 1 : 0;
     b->last_in_chain = 1;
-    markdown_result_free(result);
+    (void) result;
 }
 
 /* Copy converted Markdown into a pool-allocated output buffer. */
 static ngx_int_t
 ngx_http_markdown_prepare_body_output_buffer(ngx_http_request_t *r,
                                              ngx_buf_t *b,
-                                             struct MarkdownResult *result)
+                                             const struct MarkdownResult *result)
 {
     if (result->markdown_len > 0) {
         b->pos = ngx_pnalloc(r->pool, result->markdown_len);
         if (b->pos == NULL) {
             ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0,
-                         "markdown filter: failed to allocate output memory, category=system");
-            markdown_result_free(result);
+                         "markdown: failed to allocate output memory, category=system");
             return NGX_ERROR;
         }
 
@@ -1712,11 +1747,16 @@ ngx_http_markdown_prepare_body_output_buffer(ngx_http_request_t *r,
 
     b->last_buf = (r == r->main) ? 1 : 0;
     b->last_in_chain = 1;
-    markdown_result_free(result);
     return NGX_OK;
 }
 
-/* Update response headers and emit the converted Markdown downstream. */
+/* Update response headers and emit the converted Markdown downstream.
+ *
+ * Rule: alloc-before-send.  All output resources (body buffer, pool copy,
+ * chain link) are allocated BEFORE header forwarding.  If any allocation
+ * fails, headers have NOT been sent, so the downstream connection does not
+ * receive a partial headers-sent-but-no-body response.
+ */
 static ngx_int_t
 ngx_http_markdown_send_conversion_output(ngx_http_request_t *r,
                                          ngx_http_markdown_ctx_t *ctx,
@@ -1731,51 +1771,96 @@ ngx_http_markdown_send_conversion_output(ngx_http_request_t *r,
     (void) elapsed_ms;
 
     ngx_log_debug3(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                  "markdown filter: conversion succeeded, "
+                  "markdown: conversion succeeded, "
                   "input: %uz bytes, output: %uz bytes, elapsed: %M ms",
                   ctx->buffer.size, result->markdown_len, elapsed_ms);
 
-    rc = ngx_http_markdown_update_headers(r, result, conf);
-    if (rc != NGX_OK) {
-        ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0,
-                     "markdown filter: failed to update response headers, category=system");
-        markdown_result_free(result);
-        return NGX_ERROR;
-    }
-
-    rc = ngx_http_markdown_forward_headers(r, ctx);
-    if (rc != NGX_OK) {
-        markdown_result_free(result);
-        return rc;
-    }
-
+    /*
+     * Step 1: Allocate body buffer BEFORE header forwarding.
+     * If this fails, headers have not been sent (safe to return NGX_ERROR).
+     */
     b = ngx_pcalloc(r->pool, sizeof(ngx_buf_t));
     if (b == NULL) {
         ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0,
-                     "markdown filter: failed to allocate output buffer, category=system");
+                     "markdown: failed to allocate output buffer, category=system");
         markdown_result_free(result);
         return NGX_ERROR;
     }
 
+    /*
+     * Step 2: Copy Rust output into NGINX pool memory BEFORE header
+     * forwarding.  prepare_body_output_buffer copies result->markdown
+     * into pool memory but we must NOT free result yet — update_headers
+     * still needs result->etag and result->markdown_len.
+     *
+     * We do NOT call markdown_result_free inside prepare_body_output_buffer;
+     * instead we defer it until after update_headers + forward_headers.
+     */
     if (r->method == NGX_HTTP_HEAD) {
         ngx_http_markdown_prepare_head_output_buffer(r, b, result);
     } else {
         rc = ngx_http_markdown_prepare_body_output_buffer(r, b, result);
         if (rc != NGX_OK) {
-            return rc;
+            markdown_result_free(result);
+            return NGX_ERROR;
         }
     }
 
+    /*
+     * Step 3: Allocate chain link BEFORE header forwarding.
+     */
     out = ngx_alloc_chain_link(r->pool);
     if (out == NULL) {
         ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0,
-                     "markdown filter: failed to allocate output chain, category=system");
+                     "markdown: failed to allocate output chain, category=system");
+        markdown_result_free(result);
         return NGX_ERROR;
     }
     out->buf = b;
     out->next = NULL;
 
-    return ngx_http_next_body_filter(r, out);
+    /*
+     * Step 4: Now all output resources are ready.
+     * Mutate headers (uses result->etag and result->markdown_len).
+     */
+    rc = ngx_http_markdown_update_headers(r, result, conf);
+    if (rc != NGX_OK) {
+        ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0,
+                     "markdown: failed to update response headers, category=system");
+        markdown_result_free(result);
+        return NGX_ERROR;
+    }
+
+    /*
+     * Step 5: Release Rust-owned memory now that update_headers
+     * has consumed result->etag.  After this, result is invalid.
+     */
+    markdown_result_free(result);
+
+    /*
+     * Step 6: Forward headers downstream (idempotent via headers_forwarded).
+     */
+    rc = ngx_http_markdown_forward_headers(r, ctx);
+    if (rc != NGX_OK) {
+        return rc;
+    }
+
+    /*
+     * Step 7: Emit body downstream.
+     */
+    rc = ngx_http_next_body_filter(r, out);
+
+    if (rc == NGX_OK || rc == NGX_DONE) {
+        NGX_HTTP_MARKDOWN_METRIC_INC(results.delivery_count);
+    }
+
+    if (rc == NGX_AGAIN) {
+        ctx->fullbuffer.pending_output = out;
+        ctx->fullbuffer.pending_has_data = 1;
+        r->buffered |= NGX_HTTP_MARKDOWN_BUFFERED;
+    }
+
+    return rc;
 }
 
 #endif /* NGX_HTTP_MARKDOWN_CONVERSION_IMPL_H */

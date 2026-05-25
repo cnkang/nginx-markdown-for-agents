@@ -207,9 +207,14 @@ typedef enum {
  * - buffer_chunked: 1 (on by default)
  * - stream_types: NULL (no exclusions by default)
  * - auto_decompress: 1 (on by default)
+ * - decompress_max_size: same as max_size (inherited after memory_budget override)
+ * - parse_timeout: 30000ms (30 seconds)
+ * - parser_budget: 64MB (64 * 1024 * 1024 bytes)
  * - large_body_threshold: NGX_HTTP_MARKDOWN_THRESHOLD_OFF
  * - ops.trust_forwarded_headers: 0 (off by default)
  * - ops.metrics_format: NGX_HTTP_MARKDOWN_METRICS_FORMAT_AUTO
+ * - ops.diagnostics_enabled: 0 (off by default)
+ * - advanced.dynconf_dry_run: 0 (off by default)
  *
  * Streaming defaults when MARKDOWN_STREAMING_ENABLED is compiled in:
  * - streaming_engine: NULL (auto mode in v0.6.0; was off in 0.5.x)
@@ -242,6 +247,7 @@ typedef struct {
     ngx_uint_t   chars_per_token_fixed;     /* markdown_chars_per_token (default: 0=use provider) */
     ngx_flag_t   dynconf_enabled;           /* markdown_dynamic_config on|off (default: off) */
     ngx_str_t    dynconf_path;              /* markdown_dynamic_config_path (default: empty) */
+    ngx_flag_t   dynconf_dry_run;           /* markdown_dynconf_dry_run on|off (default: off) */
 } ngx_http_markdown_advanced_cfg_t;
 
 #ifdef MARKDOWN_STREAMING_ENABLED
@@ -271,8 +277,21 @@ typedef struct {
     ngx_flag_t   buffer_chunked;       /* markdown_buffer_chunked on|off (default: on) */
     ngx_array_t *stream_types;         /* markdown_stream_types exclusion list (default: NULL) */
     ngx_array_t *content_types;        /* markdown_content_types allowlist (default: text/html) */
-    ngx_flag_t   auto_decompress;      /* markdown_auto_decompress on|off (default: on) */
     size_t       large_body_threshold; /* markdown_large_body_threshold (NGX_HTTP_MARKDOWN_THRESHOLD_OFF = off) */
+
+    /*
+     * Decompression/parsing limits.
+     *
+     * Grouped into a sub-struct so that the parent
+     * ngx_http_markdown_conf_t stays within the 20-field limit
+     * enforced by static analysis (SonarCloud rule c:S1820).
+     */
+    struct {
+        ngx_flag_t   auto_decompress;      /* markdown_auto_decompress on|off (default: on) */
+        size_t       max_size;             /* markdown_decompress_max_size (default: same as max_size) */
+        ngx_msec_t   parse_timeout;        /* markdown_parse_timeout (default: 30000ms) */
+        size_t       parser_budget;        /* markdown_parser_budget (default: 64MB) */
+    } decompress;
 
     /*
      * Operational settings.
@@ -285,6 +304,8 @@ typedef struct {
         ngx_flag_t   trust_forwarded_headers; /* markdown_trust_forwarded_headers on|off (default: off) */
         ngx_uint_t   metrics_format;       /* markdown_metrics_format auto|prometheus (default: auto) */
         ngx_flag_t   metrics_per_path;    /* markdown_metrics_per_path on|off (default: off) */
+        ngx_flag_t   diagnostics_enabled; /* markdown_diagnostics on|off (default: off) */
+        ngx_array_t *diagnostics_allow;   /* markdown_diagnostics_allow CIDR list (default: NULL = loopback only) */
         ngx_flag_t   otel_enabled;       /* markdown_otel on|off (default: off) */
         ngx_flag_t   otel_tracing;      /* markdown_otel_tracing on|off (default: off) */
         ngx_flag_t   otel_metrics;      /* markdown_otel_metrics on|off (default: off) */
@@ -397,9 +418,36 @@ typedef struct {
     ngx_flag_t                   headers_forwarded; /* Whether downstream headers were sent */
     ngx_http_markdown_last_modified_state_t
                                 last_modified;
-    ngx_flag_t                   conversion_attempted;
-    ngx_flag_t                   conversion_succeeded;
-    ngx_flag_t                   bypass_counted; /* Whether conversions_bypassed was incremented */
+
+    /*
+     * Conversion tracking state.
+     *
+     * Grouped into a sub-struct so that the parent
+     * ngx_http_markdown_ctx_t stays within the 20-field limit
+     * enforced by static analysis (SonarCloud rule c:S1820).
+     */
+    struct {
+        ngx_flag_t                   attempted;
+        ngx_flag_t                   succeeded;
+        ngx_flag_t                   bypass_counted;
+    } conversion;
+
+    /* Fail-open completed flag: prevents duplicate ngx_http_finalize_request
+     * calls when fail-open path has already finalized the request.
+     * Rule 38: set once, never cleared within a request lifetime. */
+    ngx_flag_t                   failopen_completed;
+
+    /*
+     * Full-buffer backpressure state.
+     *
+     * Grouped into a sub-struct so that the parent
+     * ngx_http_markdown_ctx_t stays within the 20-field limit
+     * enforced by static analysis (SonarCloud rule c:S1820).
+     */
+    struct {
+        ngx_chain_t             *pending_output;
+        ngx_flag_t               pending_has_data;
+    } fullbuffer;
     
     /* Threshold router path selection (NGX_HTTP_MARKDOWN_PATH_FULLBUFFER or NGX_HTTP_MARKDOWN_PATH_INCREMENTAL) */
     ngx_uint_t                   processing_path;
@@ -432,9 +480,17 @@ typedef struct {
         size_t                                decompressed_size; /* Size after decompression */
     } decompression;
 
-    /* Last error category from conversion failure (for decision log) */
-    ngx_http_markdown_error_category_t    last_error_category;
-    ngx_flag_t                            has_error_category;
+    /*
+     * Error state.
+     *
+     * Grouped into a sub-struct so that the parent
+     * ngx_http_markdown_ctx_t stays within the 20-field limit
+     * enforced by static analysis (SonarCloud rule c:S1820).
+     */
+    struct {
+        ngx_http_markdown_error_category_t    last_category;
+        ngx_flag_t                           has_category;
+    } error;
 
     /* OpenTelemetry span for per-request conversion tracing */
     ngx_http_markdown_otel_span_t        *otel_span;
@@ -611,6 +667,10 @@ typedef struct {
         ngx_atomic_t  gzip;        /* Gzip decompressions */
         ngx_atomic_t  deflate;     /* Deflate decompressions */
         ngx_atomic_t  brotli;      /* Brotli decompressions */
+        ngx_atomic_t  budget_exceeded_total;  /* Decompression budget exceeded */
+        ngx_atomic_t  format_error_total;     /* Invalid compression format */
+        ngx_atomic_t  truncated_input_total;  /* Truncated compressed input */
+        ngx_atomic_t  io_error_total;         /* Decompression I/O error */
     } decompressions;
 
     /*
@@ -691,19 +751,17 @@ typedef struct {
      * — keys are still emitted as flat names.
      */
     struct {
-        /*
-         * Fail-open counter: conversion failed but original HTML
-         * served due to markdown_on_error pass.
-         */
         ngx_atomic_t  failopen_count;
-
-        /*
-         * Estimated cumulative token savings across all successful
-         * conversions.  Only non-zero when markdown_token_estimate
-         * is enabled.  Value is an approximation.
-         */
+        ngx_atomic_t  delivery_count;
+        ngx_atomic_t  decision_count;
         ngx_atomic_t  estimated_token_savings;
+        ngx_atomic_t  replay_buffer_errors_total;
     } results;
+
+    struct {
+        ngx_atomic_t  parse_timeouts_total;
+        ngx_atomic_t  parse_budget_exceeded_total;
+    } parse_interrupts;
 
     /*
      * Per-path metrics (v0.6.0 P1-2).
@@ -755,21 +813,16 @@ struct MarkdownConverterHandle;
 struct MarkdownResult;
 
 /*
- * Accept header parser functions
+ * Accept header negotiation
  *
- * These functions implement RFC 9110 content negotiation with tie-break rules.
+ * Delegates to Rust FFI markdown_negotiate_accept for RFC 7231 / 9110
+ * content negotiation. The C side extracts the Accept header from the
+ * request and maps the FFI result to skip metrics.
  */
-
-/* Parse Accept header into structured entries */
-ngx_int_t ngx_http_markdown_parse_accept(ngx_http_request_t *r, ngx_str_t *accept,
-    ngx_array_t *entries);
-
-/* Sort Accept entries by precedence (q-value, specificity, order) */
-void ngx_http_markdown_sort_accept_entries(ngx_array_t *entries);
 
 /* Determine if request should be converted based on Accept header */
 ngx_int_t ngx_http_markdown_should_convert(ngx_http_request_t *r,
-    const ngx_http_markdown_conf_t *conf);
+    const ngx_http_markdown_conf_t *conf, ngx_uint_t *out_reason);
 
 /* Resolve markdown_filter on/off state for the current request */
 ngx_flag_t ngx_http_markdown_is_enabled(ngx_http_request_t *r,
@@ -836,11 +889,11 @@ const ngx_str_t *ngx_http_markdown_eligibility_string(
 
 /* Map eligibility enum to reason code string */
 const ngx_str_t *ngx_http_markdown_reason_from_eligibility(
-    ngx_http_markdown_eligibility_t eligibility, const ngx_log_t *log);
+    ngx_http_markdown_eligibility_t eligibility, ngx_log_t *log);
 
 /* Map error category enum to failure reason code string */
 const ngx_str_t *ngx_http_markdown_reason_from_error_category(
-    ngx_http_markdown_error_category_t category, const ngx_log_t *log);
+    ngx_http_markdown_error_category_t category, ngx_log_t *log);
 
 /* Return the ELIGIBLE_CONVERTED reason code */
 const ngx_str_t *ngx_http_markdown_reason_converted(void);
@@ -853,6 +906,15 @@ const ngx_str_t *ngx_http_markdown_reason_failed_closed(void);
 
 /* Return the SKIP_ACCEPT reason code (not in eligibility enum) */
 const ngx_str_t *ngx_http_markdown_reason_skip_accept(void);
+
+/* Return the SKIPPED_NO_ACCEPT reason code (no Accept header) */
+const ngx_str_t *ngx_http_markdown_reason_skip_no_accept(void);
+
+/* Return the SKIPPED_ACCEPT_REJECT reason code (q=0 explicit reject) */
+const ngx_str_t *ngx_http_markdown_reason_skip_accept_reject(void);
+
+/* Return the SKIPPED_CONDITIONAL reason code (304 Not Modified) */
+const ngx_str_t *ngx_http_markdown_reason_skip_conditional(void);
 
 #ifdef MARKDOWN_STREAMING_ENABLED
 /* Streaming reason code accessors */
@@ -871,6 +933,32 @@ const ngx_str_t *ngx_http_markdown_reason_eligible_fullbuffer_auto(void);
 
 const ngx_str_t *ngx_http_markdown_reason_ct_route_default(void);
 const ngx_str_t *ngx_http_markdown_reason_ct_route_configured(void);
+
+/*
+ * Rust FFI reason code accessors (v0.7.0+)
+ *
+ * These functions access reason code strings from the Rust-defined enum
+ * via FFI.  The Rust enum (decision/reason_code.rs) is the SINGLE SOURCE
+ * OF TRUTH for all reason codes.
+ *
+ * New code should prefer these accessors over the legacy C-side string
+ * literals defined above.  The legacy functions remain for backward
+ * compatibility during the migration period.
+ *
+ * DO NOT define new reason code constants in C.  All reason codes must
+ * come from the Rust enum via these FFI accessors.
+ */
+
+/* Get reason code string from Rust enum (returns NGX_OK/NGX_DECLINED) */
+ngx_int_t ngx_http_markdown_get_reason_code_str(uint32_t code,
+    ngx_str_t *out_str);
+
+/* Get Prometheus metric key from Rust enum (returns NGX_OK/NGX_DECLINED) */
+ngx_int_t ngx_http_markdown_get_reason_code_metric_key(uint32_t code,
+    ngx_str_t *out_str);
+
+/* Get total number of reason codes defined in Rust */
+uint32_t ngx_http_markdown_reason_code_total_count(void);
 
 /*
  * Header management functions
@@ -970,5 +1058,22 @@ ngx_http_markdown_decompress(ngx_http_request_t *r,
                               ngx_http_markdown_compression_type_e type,
                               const ngx_chain_t *in,
                               ngx_chain_t **out);
+
+/*
+ * Sentinel return code: decompressed size budget exceeded.
+ *
+ * Returned by decompress functions (both buffered and streaming) when
+ * the cumulative decompressed output exceeds decompress_max_size.
+ * Callers must map this to ERROR_DECOMPRESSION_BUDGET_EXCEEDED for
+ * proper metrics/reason-code classification, distinguishing it from
+ * a generic NGX_ERROR (which callers would classify as conversion).
+ *
+ * Value -100 avoids collision with NGX_OK (0), NGX_ERROR (-1),
+ * NGX_AGAIN (-2), NGX_DONE (-4), NGX_DECLINED (-5).
+ */
+#define NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED  -100
+#define NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR     -101
+#define NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT  -102
+#define NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR         -103
 
 #endif /* NGX_HTTP_MARKDOWN_FILTER_MODULE_H */

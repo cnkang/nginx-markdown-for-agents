@@ -110,10 +110,17 @@ if test -n "$ngx_module_link"; then
                      $ngx_addon_dir/src/ngx_http_markdown_eligibility.c \
                      $ngx_addon_dir/src/ngx_http_markdown_error.c \
                      $ngx_addon_dir/src/ngx_http_markdown_headers.c \
+                     $ngx_addon_dir/src/ngx_http_markdown_header_plan.c \
                      $ngx_addon_dir/src/ngx_http_markdown_conditional.c \
                      $ngx_addon_dir/src/ngx_http_markdown_decompression.c \
-                     $ngx_addon_dir/src/ngx_http_markdown_reason.c"
-    ngx_module_deps="$ngx_addon_dir/src/ngx_http_markdown_filter_module.h"
+                     $ngx_addon_dir/src/ngx_http_markdown_reason.c \
+                     $ngx_addon_dir/src/ngx_http_markdown_reason_ffi.c \
+                     $ngx_addon_dir/src/ngx_http_markdown_diagnostics.c \
+                     $ngx_addon_dir/src/ngx_http_markdown_dynconf_snapshot.c"
+    ngx_module_deps="$ngx_addon_dir/src/ngx_http_markdown_filter_module.h \
+                     $ngx_addon_dir/src/ngx_http_markdown_header_plan.h \
+                     $ngx_addon_dir/src/ngx_http_markdown_diagnostics.h \
+                     $ngx_addon_dir/src/ngx_http_markdown_dynconf_snapshot.h"
     
     . auto/module
 else
@@ -127,10 +134,15 @@ else
                     $ngx_addon_dir/src/ngx_http_markdown_eligibility.c \
                     $ngx_addon_dir/src/ngx_http_markdown_error.c \
                     $ngx_addon_dir/src/ngx_http_markdown_headers.c \
+                    $ngx_addon_dir/src/ngx_http_markdown_header_plan.c \
                     $ngx_addon_dir/src/ngx_http_markdown_conditional.c \
                     $ngx_addon_dir/src/ngx_http_markdown_decompression.c \
-                    $ngx_addon_dir/src/ngx_http_markdown_reason.c"
-    NGX_ADDON_DEPS="$NGX_ADDON_DEPS $ngx_addon_dir/src/ngx_http_markdown_filter_module.h"
+                    $ngx_addon_dir/src/ngx_http_markdown_reason.c \
+                    $ngx_addon_dir/src/ngx_http_markdown_reason_ffi.c \
+                    $ngx_addon_dir/src/ngx_http_markdown_diagnostics.c \
+                    $ngx_addon_dir/src/ngx_http_markdown_dynconf_snapshot.c"
+    NGX_ADDON_DEPS="$NGX_ADDON_DEPS $ngx_addon_dir/src/ngx_http_markdown_filter_module.h \
+                    $ngx_addon_dir/src/ngx_http_markdown_header_plan.h"
 fi
 
 # Note: ngx_module_libs is consumed by NGINX's auto/module logic for both

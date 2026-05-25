@@ -164,7 +164,7 @@ ngx_http_markdown_otel_random_hex(u_char *dst, size_t byte_count,
         fd = open("/dev/urandom", O_RDONLY);
         if (fd == -1) {
             ngx_log_error(NGX_LOG_ALERT, (ngx_log_t *) log, 0,
-                          "markdown otel: open(/dev/urandom) failed");
+                          "markdown: open(/dev/urandom) failed");
             return NGX_ERROR;
         }
 
@@ -173,7 +173,7 @@ ngx_http_markdown_otel_random_hex(u_char *dst, size_t byte_count,
 
         if (n != (ssize_t) byte_count) {
             ngx_log_error(NGX_LOG_ALERT, (ngx_log_t *) log, 0,
-                          "markdown otel: read(/dev/urandom) returned %z "
+                          "markdown: read(/dev/urandom) returned %z "
                           "expected %uz", n, byte_count);
             return NGX_ERROR;
         }
@@ -729,7 +729,7 @@ ngx_http_markdown_otel_export_via_subrequest(ngx_http_request_t *r,
     psr = ngx_palloc(r->pool, sizeof(ngx_http_post_subrequest_t));
     if (psr == NULL) {
         ngx_log_error(NGX_LOG_INFO, log, 0,
-                      "markdown otel: export endpoint=%V %*s",
+                      "markdown: export endpoint=%V %*s",
                       endpoint, json_len, json_buf);
         return;
     }
@@ -742,11 +742,11 @@ ngx_http_markdown_otel_export_via_subrequest(ngx_http_request_t *r,
         != NGX_OK)
     {
         ngx_log_error(NGX_LOG_WARN, log, 0,
-                      "markdown otel: subrequest to %V failed, "
+                      "markdown: subrequest to %V failed, "
                       "falling back to log export",
                       endpoint);
         ngx_log_error(NGX_LOG_INFO, log, 0,
-                      "markdown otel: export %*s",
+                      "markdown: export %*s",
                       json_len, json_buf);
         return;
     }
@@ -761,7 +761,7 @@ ngx_http_markdown_otel_export_via_subrequest(ngx_http_request_t *r,
     ngx_http_markdown_otel_set_subrequest_body(sr, json_buf, json_len);
 
     ngx_log_error(NGX_LOG_INFO, log, 0,
-                  "markdown otel: OTLP POST subrequest to %V "
+                  "markdown: OTLP POST subrequest to %V "
                   "(%uz bytes)",
                   endpoint, json_len);
 }
@@ -781,13 +781,13 @@ ngx_http_markdown_otel_log_span_attrs(const ngx_http_markdown_otel_span_t *span,
     for (ngx_uint_t i = 0; i < span->attr_count; i++) {
         if (span->attrs[i].is_int) {
             ngx_log_error(NGX_LOG_INFO, log, 0,
-                         "markdown otel: attr %*s=%L",
+                         "markdown: attr %*s=%L",
                          span->attrs[i].key_len,
                          span->attrs[i].key,
                          span->attrs[i].int_value);
         } else {
             ngx_log_error(NGX_LOG_INFO, log, 0,
-                         "markdown otel: attr %*s=%*s",
+                         "markdown: attr %*s=%*s",
                          span->attrs[i].key_len,
                          span->attrs[i].key,
                          span->attrs[i].str_value_len,
@@ -840,13 +840,13 @@ ngx_http_markdown_otel_span_export(ngx_http_markdown_otel_span_t *span,
             r, endpoint, log, json_buf, json_len);
     } else if (json_len > 0) {
         ngx_log_error(NGX_LOG_INFO, log, 0,
-                      "markdown otel: export %*s",
+                      "markdown: export %*s",
                       json_len, json_buf);
     }
 
     /* Diagnostic log: always emit human-readable span summary. */
     ngx_log_error(NGX_LOG_INFO, log, 0,
-                 "markdown otel: span %s "
+                 "markdown: span %s "
                  "trace_id=%*s span_id=%*s "
                  "duration_ms=%M attrs=%ui",
                  NGX_HTTP_MARKDOWN_OTEL_SPAN_NAME,

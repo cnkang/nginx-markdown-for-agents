@@ -58,6 +58,10 @@ typedef struct {
         ngx_atomic_uint_t gzip;
         ngx_atomic_uint_t deflate;
         ngx_atomic_uint_t brotli;
+        ngx_atomic_uint_t budget_exceeded_total;
+        ngx_atomic_uint_t format_error_total;
+        ngx_atomic_uint_t truncated_input_total;
+        ngx_atomic_uint_t io_error_total;
     } decompressions;
 
     /* Path hit metrics (threshold router, grouped to keep field count <= 20) */
@@ -88,8 +92,17 @@ typedef struct {
     /* Conversion result counters */
     struct {
         ngx_atomic_uint_t failopen_count;
+        ngx_atomic_uint_t delivery_count;
+        ngx_atomic_uint_t decision_count;
         ngx_atomic_uint_t estimated_token_savings;
+        ngx_atomic_uint_t replay_buffer_errors_total;
     } results;
+
+    /* Parse interrupt metrics (v0.7.0) */
+    struct {
+        ngx_atomic_uint_t parse_timeouts_total;
+        ngx_atomic_uint_t parse_budget_exceeded_total;
+    } parse_interrupts;
 
 #ifdef MARKDOWN_STREAMING_ENABLED
     /* Streaming metrics */
@@ -255,6 +268,8 @@ ngx_http_markdown_collect_metrics_snapshot(ngx_http_markdown_metrics_snapshot_t 
     snapshot->skips.range = metrics->skips.range;
     snapshot->skips.accept = metrics->skips.accept;
     snapshot->results.failopen_count = metrics->results.failopen_count;
+    snapshot->results.delivery_count = metrics->results.delivery_count;
+    snapshot->results.decision_count = metrics->results.decision_count;
 #ifdef MARKDOWN_STREAMING_ENABLED
     snapshot->streaming.requests_total =
         metrics->streaming.requests_total;
@@ -282,6 +297,23 @@ ngx_http_markdown_collect_metrics_snapshot(ngx_http_markdown_metrics_snapshot_t 
         metrics->streaming.last_peak_memory_bytes;
 #endif
     snapshot->results.estimated_token_savings = metrics->results.estimated_token_savings;
+
+    snapshot->parse_interrupts.parse_timeouts_total =
+        metrics->parse_interrupts.parse_timeouts_total;
+    snapshot->parse_interrupts.parse_budget_exceeded_total =
+        metrics->parse_interrupts.parse_budget_exceeded_total;
+
+    snapshot->decompressions.budget_exceeded_total =
+        metrics->decompressions.budget_exceeded_total;
+    snapshot->decompressions.format_error_total =
+        metrics->decompressions.format_error_total;
+    snapshot->decompressions.truncated_input_total =
+        metrics->decompressions.truncated_input_total;
+    snapshot->decompressions.io_error_total =
+        metrics->decompressions.io_error_total;
+
+    snapshot->results.replay_buffer_errors_total =
+        metrics->results.replay_buffer_errors_total;
 
     snapshot->per_path.path_entries =
         metrics->per_path.path_entries;
@@ -323,7 +355,7 @@ ngx_http_markdown_metrics_validate_request(ngx_http_request_t *r)
             (const struct sockaddr_in *) r->connection->sockaddr;
         if (ntohl(sin->sin_addr.s_addr) != INADDR_LOOPBACK) {
             ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-                         "markdown_metrics: access denied from non-localhost IPv4 address");
+                         "markdown: access denied from non-localhost IPv4 address");
             return NGX_HTTP_FORBIDDEN;
         }
     }
@@ -333,20 +365,20 @@ ngx_http_markdown_metrics_validate_request(ngx_http_request_t *r)
             (const struct sockaddr_in6 *) r->connection->sockaddr;
         if (!IN6_IS_ADDR_LOOPBACK(&sin6->sin6_addr)) {
             ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-                         "markdown_metrics: access denied from non-localhost IPv6 address");
+                         "markdown: access denied from non-localhost IPv6 address");
             return NGX_HTTP_FORBIDDEN;
         }
     }
 #endif
     else {
         ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-                     "markdown_metrics: access denied from unknown address family");
+                     "markdown: access denied from unknown address family");
         return NGX_HTTP_FORBIDDEN;
     }
 
     if (ngx_http_markdown_metrics == NULL) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                     "markdown_metrics: shared metrics state unavailable");
+                     "markdown: shared metrics state unavailable");
         return NGX_HTTP_INTERNAL_SERVER_ERROR;
     }
 
@@ -672,6 +704,11 @@ ngx_http_markdown_metrics_write_json(
         "  \"decompressions_gzip\": %uA,\n"
         "  \"decompressions_deflate\": %uA,\n"
         "  \"decompressions_brotli\": %uA,\n"
+        "  \"decompression_budget_exceeded_total\": %uA,\n"
+        "  \"decompression_format_error_total\": %uA,\n"
+        "  \"decompression_truncated_input_total\": %uA,\n"
+        "  \"decompression_io_error_total\": %uA,\n"
+        "  \"replay_buffer_errors_total\": %uA,\n"
 
         /* Threshold-router path hit counters */
         "  \"fullbuffer_path_hits\": %uA,\n"
@@ -712,7 +749,11 @@ ngx_http_markdown_metrics_write_json(
 
         /* Operational totals and per-path aggregate counters */
         "  \"failopen_count\": %uA,\n"
+        "  \"delivery_count\": %uA,\n"
+        "  \"decision_count\": %uA,\n"
         "  \"estimated_token_savings\": %uA,\n"
+        "  \"parse_timeouts_total\": %uA,\n"
+        "  \"parse_budget_exceeded_total\": %uA,\n"
         "  \"per_path\": {\n"
         "    \"path_entries\": %uA,\n"
         "    \"path_conversions\": %uA,\n"
@@ -753,6 +794,11 @@ ngx_http_markdown_metrics_write_json(
         snapshot->decompressions.gzip,
         snapshot->decompressions.deflate,
         snapshot->decompressions.brotli,
+        snapshot->decompressions.budget_exceeded_total,
+        snapshot->decompressions.format_error_total,
+        snapshot->decompressions.truncated_input_total,
+        snapshot->decompressions.io_error_total,
+        snapshot->results.replay_buffer_errors_total,
 
         /* Path routing */
         snapshot->path_hits.fullbuffer,
@@ -787,7 +833,11 @@ ngx_http_markdown_metrics_write_json(
         snapshot->skips.range,
         snapshot->skips.accept,
         snapshot->results.failopen_count,
+        snapshot->results.delivery_count,
+        snapshot->results.decision_count,
         snapshot->results.estimated_token_savings,
+        snapshot->parse_interrupts.parse_timeouts_total,
+        snapshot->parse_interrupts.parse_budget_exceeded_total,
         snapshot->per_path.path_entries,
         snapshot->per_path.path_conversions,
         snapshot->per_path.path_conversion_time_sum_ms,
@@ -950,6 +1000,11 @@ ngx_http_markdown_metrics_write_text(
         "- Gzip Decompressions: %uA\n"
         "- Deflate Decompressions: %uA\n"
         "- Brotli Decompressions: %uA\n"
+        "- Decompression Budget Exceeded: %uA\n"
+        "- Decompression Format Errors: %uA\n"
+        "- Decompression Truncated Input: %uA\n"
+        "- Decompression I/O Errors: %uA\n"
+        "- Replay Buffer Errors: %uA\n"
         "\n"
 
         /* Threshold-router path hit counters */
@@ -990,7 +1045,11 @@ ngx_http_markdown_metrics_write_text(
         "- Skips (Range): %uA\n"
         "- Skips (Accept): %uA\n"
         "- Fail-Open Count: %uA\n"
+        "- Delivery Count: %uA\n"
+        "- Decision Count: %uA\n"
         "- Estimated Token Savings: %uA\n"
+        "- Parse Timeouts Total: %uA\n"
+        "- Parse Budget Exceeded Total: %uA\n"
         "- Per-Path Entries: %uA\n"
         "- Per-Path Conversions: %uA\n"
         "- Per-Path Conversion Time (ms): %uA\n"
@@ -1029,6 +1088,11 @@ ngx_http_markdown_metrics_write_text(
         snapshot->decompressions.gzip,
         snapshot->decompressions.deflate,
         snapshot->decompressions.brotli,
+        snapshot->decompressions.budget_exceeded_total,
+        snapshot->decompressions.format_error_total,
+        snapshot->decompressions.truncated_input_total,
+        snapshot->decompressions.io_error_total,
+        snapshot->results.replay_buffer_errors_total,
 
         /* Path routing */
         snapshot->path_hits.fullbuffer,
@@ -1063,7 +1127,11 @@ ngx_http_markdown_metrics_write_text(
         snapshot->skips.range,
         snapshot->skips.accept,
         snapshot->results.failopen_count,
+        snapshot->results.delivery_count,
+        snapshot->results.decision_count,
         snapshot->results.estimated_token_savings,
+        snapshot->parse_interrupts.parse_timeouts_total,
+        snapshot->parse_interrupts.parse_budget_exceeded_total,
         snapshot->per_path.path_entries,
         snapshot->per_path.path_conversions,
         snapshot->per_path.path_conversion_time_sum_ms,
@@ -1339,7 +1407,7 @@ ngx_http_markdown_metrics_render_response_body(
         if (p >= b->end) {
             ngx_log_error(NGX_LOG_ERR,
                 r->connection->log, 0,
-                "markdown_metrics: JSON output "
+                "markdown: JSON output "
                 "truncated, buffer too small");
             return NULL;
         }
@@ -1354,7 +1422,7 @@ ngx_http_markdown_metrics_render_response_body(
         if (p == NULL) {
             ngx_log_error(NGX_LOG_ERR,
                 r->connection->log, 0,
-                "markdown_metrics: Prometheus output "
+                "markdown: Prometheus output "
                 "truncated, buffer too small");
             return NULL;
         }
@@ -1379,7 +1447,7 @@ ngx_http_markdown_metrics_render_response_body(
         if (p >= b->end) {
             ngx_log_error(NGX_LOG_ERR,
                 r->connection->log, 0,
-                "markdown_metrics: plain-text output "
+                "markdown: plain-text output "
                 "truncated, buffer too small");
             return NULL;
         }
@@ -1475,7 +1543,7 @@ ngx_http_markdown_metrics_handler(ngx_http_request_t *r)
             NGX_HTTP_MARKDOWN_METRICS_BUF_SIZE);
     if (b == NULL) {
         ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0,
-            "markdown_metrics: failed to allocate "
+            "markdown: failed to allocate "
             "response buffer");
         return NGX_HTTP_INTERNAL_SERVER_ERROR;
     }

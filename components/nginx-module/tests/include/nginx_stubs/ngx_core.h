@@ -78,6 +78,8 @@ ngx_test_log_ignore(const char *fmt, ...)
         }                                                                             \
     } while (0)
 
+#define ngx_tolower(c)  (u_char) (((c) >= 'A' && (c) <= 'Z') ? ((c) | 0x20) : (c))
+#define ngx_toupper(c)  (u_char) (((c) >= 'a' && (c) <= 'z') ? ((c) & ~0x20) : (c))
 #define ngx_memcmp(s1, s2, n)  memcmp(s1, s2, n)
 #define ngx_random()           rand()
 #define ngx_rbt_red(node)      ((node)->color = 1)
