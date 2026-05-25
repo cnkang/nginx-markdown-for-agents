@@ -2,11 +2,12 @@
 
 ## Supported Versions
 
-This project is currently maintained on the `0.6.x` line.
+This project is currently maintained on the `0.7.x` line.
 
 | Version | Supported |
 |---------|-----------|
-| `0.6.x` | Yes |
+| `0.7.x` | Yes |
+| `0.6.x` | No |
 | `0.5.x` | No |
 | `0.4.x` | No |
 | `0.3.x` | No |
@@ -113,3 +114,4 @@ Nightly GitHub Actions coverage is defined in `.github/workflows/nightly-fuzz.ym
 |---------|------|--------|---------|
 | 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |
 | 0.6.3 | 2026-05-14 | Kang | Update supported version line to 0.6.x |
+| 0.7.0 | 2026-05-25 | Kang | Update supported version line to 0.7.x |
