@@ -1,8 +1,8 @@
 #!/bin/bash
 #
-# Shell Hygiene Detection Script (SonarCloud S7682, S1066, Rule 18)
+# Shell Hygiene Detection Script (SonarCloud S7682, S7688, S131, S1066, Rule 18)
 #
-# Scans shell scripts for three common hygiene violations that repeatedly
+# Scans shell scripts for common hygiene violations that repeatedly
 # caused fix commits in the 2026-04 to 2026-05 window:
 #
 #   (a) Functions missing explicit return statements (S7682)
@@ -16,7 +16,16 @@
 #       INFO/WARN/DEBUG/ERROR/SUGGEST markers that lack >&2 redirection
 #       pollute stdout when scripts are piped or output is captured.
 #
-#   (c) curl -X HEAD instead of curl --head (Rule 18 / e0f3948)
+#   (c) Single-bracket [ ] instead of [[ ]] (S7688)
+#       In bash scripts, [[ ]] is safer (no word splitting, no pathname
+#       expansion) and more feature-rich.  Per AGENTS.md Rule 18, all
+#       conditional tests in bash scripts must use [[ ]].
+#
+#   (d) case statements without default *) clause (S131)
+#       Every case statement must include a default *) clause, even if
+#       it only contains a comment or no-op.  Per AGENTS.md Rule 18.
+#
+#   (e) curl -X HEAD instead of curl --head (Rule 18 / e0f3948)
 #       -X HEAD sends a method override that may not behave identically
 #       to --head across all HTTP servers.  Per AGENTS.md Rule 18,
 #       prefer --head (-I) for HTTP HEAD validation.
@@ -37,6 +46,7 @@ set -euo pipefail
 
 readonly SCAN_DIR="${1:-tools}"
 readonly SCRIPT_NAME="$(basename "$0")"
+readonly MSG_NONE_FOUND="  (none found)"
 
 errors=0
 warnings=0
@@ -56,7 +66,7 @@ readonly RETURN_EXEMPT_FILES=(
 # trivial functions.  Still flag them as warnings per AGENTS.md
 # Rule 18 strict requirement.
 
-echo "=== Shell Hygiene Detection (S7682 / S1066 / Rule 18) ===" >&2
+echo "=== Shell Hygiene Detection (S7682 / S7688 / S131 / S1066 / Rule 18) ===" >&2
 echo "Scanning: ${SCAN_DIR}" >&2
 echo "" >&2
 
@@ -73,7 +83,7 @@ return_hits=0
 while IFS= read -r script_file; do
     # Skip exempt files
     skip=0
-    for exempt in "${RETURN_EXEMPT_FILES[@]}"; do
+    for exempt in ${RETURN_EXEMPT_FILES[@]+"${RETURN_EXEMPT_FILES[@]}"}; do
         if [[ "$script_file" == *"$exempt"* ]]; then
             skip=1
             break
@@ -132,7 +142,7 @@ while IFS= read -r script_file; do
 done < <(find "$SCAN_DIR" -name '*.sh' -type f 2>/dev/null | sort)
 
 if [[ "$return_hits" -eq 0 ]]; then
-    echo "  (none found)" >&2
+    echo "$MSG_NONE_FOUND" >&2
 fi
 echo "" >&2
 
@@ -182,16 +192,116 @@ while IFS= read -r match; do
 done < <(grep -rnE '(echo|printf)[[:space:]].*\b(INFO|WARN|WARNING|DEBUG|ERROR|SUGGEST)\b' "$SCAN_DIR" --include='*.sh' 2>/dev/null | grep -vE '>&2' || true)
 
 if [[ "$stderr_hits" -eq 0 ]]; then
-    echo "  (none found)" >&2
+    echo "$MSG_NONE_FOUND" >&2
 fi
 echo "" >&2
 
-# ── Pattern (c): curl -X HEAD instead of --head / -I ──
+# ── Pattern (c): Single-bracket [ ] instead of [[ ]] (S7688) ──
+#
+# In bash scripts, [[ ]] is safer (no word splitting, no pathname
+# expansion) and more feature-rich.  Per AGENTS.md Rule 18, all
+# conditional tests in bash scripts must use [[ ]].
+echo "--- Pattern (c): Single-bracket [ ] instead of [[ ]] (S7688) ---" >&2
+
+bracket_hits=0
+while IFS= read -r match; do
+    if [[ -z "$match" ]]; then
+        continue
+    fi
+    file="$(echo "$match" | cut -d: -f1)"
+    line="$(echo "$match" | cut -d: -f2)"
+    content="$(echo "$match" | cut -d: -f3-)"
+    # Skip comment lines
+    if echo "$content" | grep -qE '^\s*#'; then
+        continue
+    fi
+    # Skip lines inside echo/printf (reporting the pattern itself)
+    if echo "$content" | grep -qE '^\s*(echo|printf)'; then
+        continue
+    fi
+    # Skip test assertions that grep for bracket patterns
+    if echo "$content" | grep -qE 'grep|awk|sed'; then
+        continue
+    fi
+    # Skip lines inside heredocs (embedded POSIX sh scripts use [ ] legitimately)
+    # Check if this line falls between a <<'EOF' and EOF marker
+    local_line="$line"
+    in_heredoc=0
+    heredoc_start=$(awk -v target="$local_line" '
+        /<<-?[[:space:]]*'\''?EOF'\''?/ || /<<-?[[:space:]]*'\''?SCRIPT'\''?/ {
+            hd_start = NR
+        }
+        /^EOF$/ || /^SCRIPT$/ {
+            if (hd_start > 0 && NR >= target) {
+                if (target > hd_start && target < NR) {
+                    print "yes"
+                    exit
+                }
+            }
+            hd_start = 0
+        }
+    ' "$file" 2>/dev/null)
+    if [[ "$heredoc_start" == "yes" ]]; then
+        continue
+    fi
+    echo "  ERROR   ${file}:${line} — use '[[ ]]' instead of '[ ]': ${content}" >&2
+    errors=$((errors + 1))
+    bracket_hits=$((bracket_hits + 1))
+done < <(grep -rnE '(^|[[:space:];])(if|while|until|elif)[[:space:]]+\[[[:space:]][^[]' "$SCAN_DIR" --include='*.sh' 2>/dev/null || true)
+
+if [[ "$bracket_hits" -eq 0 ]]; then
+    echo "$MSG_NONE_FOUND" >&2
+fi
+echo "" >&2
+
+# ── Pattern (d): case statements without default *) clause (S131) ──
+#
+# Every case statement must include a default *) clause, even if it
+# only contains a comment or no-op.  Per AGENTS.md Rule 18.
+echo "--- Pattern (d): case statements without default *) clause (S131) ---" >&2
+
+case_hits=0
+while IFS= read -r script_file; do
+    # Use awk to find case/esac blocks and check for *) default
+    while IFS=: read -r case_line has_default; do
+        if [[ -z "$case_line" ]]; then
+            continue
+        fi
+        if [[ "$has_default" == "0" ]]; then
+            echo "  ERROR   ${script_file}:${case_line} — case statement missing default *) clause" >&2
+            errors=$((errors + 1))
+            case_hits=$((case_hits + 1))
+        fi
+    done < <(awk '
+        /^[[:space:]]*case[[:space:]]/ {
+            case_line = NR
+            has_default = 0
+            depth = 1
+            while (depth > 0) {
+                if ((getline) <= 0) break
+                if ($0 ~ /^[[:space:]]*case[[:space:]]/) depth++
+                if ($0 ~ /^[[:space:]]*esac/) {
+                    depth--
+                    if (depth == 0) break
+                }
+                if (depth == 1 && $0 ~ /^[[:space:]]*\*\)/) has_default = 1
+            }
+            print case_line ":" has_default
+        }
+    ' "$script_file" 2>/dev/null || true)
+done < <(find "$SCAN_DIR" -name '*.sh' -type f 2>/dev/null | sort)
+
+if [[ "$case_hits" -eq 0 ]]; then
+    echo "$MSG_NONE_FOUND" >&2
+fi
+echo "" >&2
+
+# ── Pattern (e): curl -X HEAD instead of --head / -I ──
 #
 # -X HEAD sends a method override; --head (-I) is the standard way
 # to perform an HTTP HEAD request.  Per AGENTS.md Rule 18 and the
 # fix in commit e0f3948, prefer --head.
-echo "--- Pattern (c): curl -X HEAD instead of --head / -I ---" >&2
+echo "--- Pattern (e): curl -X HEAD instead of --head / -I ---" >&2
 
 curl_head_hits=0
 while IFS= read -r match; do
@@ -219,7 +329,7 @@ while IFS= read -r match; do
 done < <(grep -rnE 'curl[[:space:]].*-X[[:space:]]+HEAD' "$SCAN_DIR" --include='*.sh' 2>/dev/null || true)
 
 if [[ "$curl_head_hits" -eq 0 ]]; then
-    echo "  (none found)" >&2
+    echo "$MSG_NONE_FOUND" >&2
 fi
 echo "" >&2
 

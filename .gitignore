@@ -24,9 +24,18 @@ components/rust-converter/target/
 
 # Rust fuzzing local state and generated outputs
 components/rust-converter/fuzz/artifacts/
-components/rust-converter/fuzz/corpus/
+components/rust-converter/fuzz/corpus/*
+!components/rust-converter/fuzz/corpus/.gitkeep
+!components/rust-converter/fuzz/corpus/*/
+components/rust-converter/fuzz/corpus/*/*
+!components/rust-converter/fuzz/corpus/*/.gitkeep
+!components/rust-converter/fuzz/corpus/*/basic.*
 components/rust-converter/fuzz/coverage/
 components/rust-converter/fuzz/target/
+
+# ClusterFuzzLite local build products (CI output lands in ./out/ already covered below)
+.clusterfuzzlite/build/
+.clusterfuzzlite/out/
 
 # Proptest old-style regression files (superseded by proptest-regressions/ dirs)
 **/*.proptest-regressions

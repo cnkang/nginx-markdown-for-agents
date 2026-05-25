@@ -1,0 +1,50 @@
+name: ClusterFuzzLite PR Fuzz
+
+on:
+  pull_request:
+    paths:
+      - 'components/rust-converter/**'
+      - 'fuzz/**'
+      - '.clusterfuzzlite/**'
+      - '.github/workflows/cflite_*.yml'
+      - 'Makefile'
+      - 'Cargo.lock'
+      - 'components/rust-converter/Cargo.toml'
+      - 'docs/harness/**'
+      - 'tools/release/gates/**'
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  pr-fuzz:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+
+      - uses: google/clusterfuzzlite/actions/build_fuzzers@82652fb49e77bc29c35da1167bb286e93c6bcc05  # v1
+        id: build
+        with:
+          language: rust
+          sanitizer: address
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: google/clusterfuzzlite/actions/run_fuzzers@82652fb49e77bc29c35da1167bb286e93c6bcc05  # v1
+        id: fuzz
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          mode: code-change
+          fuzz-seconds: 600
+          sanitizer: address
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        if: failure()
+        with:
+          name: pr-fuzz-crashes
+          path: ./out/artifacts
+
+      - uses: github/codeql-action/upload-sarif@84498526a009a99c875e83ef4821a8ba52de7c22  # codeql-bundle-v2.25.5
+        if: always() && hashFiles('./out/*.sarif') != ''
+        with:
+          sarif_file: ./out/

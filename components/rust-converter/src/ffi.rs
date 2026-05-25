@@ -57,7 +57,7 @@
 //! - Concurrent calls to `markdown_convert()` on the same handle are unsafe
 //! - Multiple converter instances can be used concurrently
 
-mod abi;
+pub(crate) mod abi;
 mod convert;
 mod exports;
 mod memory;
@@ -73,14 +73,17 @@ mod incremental;
 mod streaming;
 
 pub use abi::{
-    ERROR_ENCODING, ERROR_INTERNAL, ERROR_INVALID_INPUT, ERROR_MEMORY_LIMIT, ERROR_PARSE,
-    ERROR_SUCCESS, ERROR_TIMEOUT, MarkdownConverterHandle, MarkdownOptions, MarkdownResult,
+    ERROR_DECOMPRESSION_BUDGET_EXCEEDED, ERROR_ENCODING, ERROR_INTERNAL, ERROR_INVALID_INPUT,
+    ERROR_MEMORY_LIMIT, ERROR_PARSE, ERROR_PARSE_BUDGET_EXCEEDED, ERROR_PARSE_TIMEOUT,
+    ERROR_SUCCESS, ERROR_TIMEOUT, FFIDecompResult, MarkdownConverterHandle, MarkdownOptions,
+    MarkdownResult,
 };
 
 #[cfg(feature = "streaming")]
 pub use abi::{ERROR_BUDGET_EXCEEDED, ERROR_POST_COMMIT, ERROR_STREAMING_FALLBACK};
 pub use exports::{
-    markdown_convert, markdown_converter_free, markdown_converter_new, markdown_result_free,
+    markdown_convert, markdown_converter_free, markdown_converter_new, markdown_decomp_result_init,
+    markdown_decompress_bounded, markdown_decompress_free, markdown_result_free,
 };
 
 #[cfg(feature = "incremental")]

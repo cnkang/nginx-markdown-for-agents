@@ -193,6 +193,26 @@ These metrics are only emitted when the module is compiled with `MARKDOWN_STREAM
 | `nginx_markdown_streaming_ttfb_seconds` | gauge | Last streaming time-to-first-byte in seconds (millisecond resolution). Recorded on the first successful non-empty downstream send; may be updated even if the request later fails post-commit. |
 | `nginx_markdown_streaming_peak_memory_bytes` | gauge | Last streaming conversion peak memory estimate (bytes). Updated on each successful streaming conversion (primary path or shadow mode). |
 
+### Runtime Correctness Metrics (0.7.0+)
+
+These metrics are added in v0.7.0 to provide visibility into the decision
+engine, delivery confirmation, decompression budget enforcement, and parse
+resource limits.
+
+#### Runtime Correctness Counter Metrics (no labels)
+
+| Metric Name | Type | Description |
+|---|---|---|
+| `nginx_markdown_delivery_total` | counter | Successful deliveries confirmed after the downstream filter returns `NGX_OK`. Increments only when the client actually receives the response. |
+| `nginx_markdown_decision_total` | counter | Decision engine evaluations. Increments each time the decision engine runs, regardless of outcome. Use with `delivery_total` to identify backpressure gaps. |
+| `nginx_markdown_decompression_budget_exceeded_total` | counter | Decompression terminated because the output exceeded `markdown_decompress_max_size`. |
+| `nginx_markdown_decompression_format_error_total` | counter | Decompression failed due to invalid compressed format (corrupted or misidentified content). |
+| `nginx_markdown_decompression_truncated_input_total` | counter | Decompression failed due to truncated/incomplete compressed input. |
+| `nginx_markdown_decompression_io_error_total` | counter | Decompression failed due to an I/O error during the decompression operation. |
+| `nginx_markdown_replay_buffer_errors_total` | counter | Replay buffer init or append failures (fail-open path triggered). |
+| `nginx_markdown_parse_timeouts_total` | counter | Parse operations terminated because `markdown_parse_timeout` was exceeded. |
+| `nginx_markdown_parse_budget_exceeded_total` | counter | Parse operations terminated because `markdown_parser_budget` was exceeded. |
+
 ### Total Time Series
 
 The endpoint produces exactly 28 base time series (always present):
@@ -214,7 +234,15 @@ When `MARKDOWN_STREAMING_ENABLED` is compiled in, an additional 12 streaming tim
 - 1 TTFB gauge
 - 1 peak memory gauge
 
-**Total with streaming: 40 time series.** This count is deterministic and bounded. No request-specific or high-cardinality labels are used.
+v0.7.0 adds 5 runtime correctness counters:
+
+- 1 delivery counter
+- 1 decision counter
+- 1 decompression budget exceeded counter
+- 1 parse timeouts counter
+- 1 parse budget exceeded counter
+
+**Total with streaming + v0.7.0: 45 time series.** This count is deterministic and bounded. No request-specific or high-cardinality labels are used.
 
 ---
 
@@ -501,6 +529,37 @@ These metrics are added in 0.5.0 and are only emitted when `MARKDOWN_STREAMING_E
 | `nginx_markdown_streaming_ttfb_seconds` | gauge | — | Stable |
 | `nginx_markdown_streaming_peak_memory_bytes` | gauge | — | Stable |
 
+### Published Metrics (0.7.0, Runtime Correctness)
+
+These metrics are added in 0.7.0. Their names, types, and label key sets
+are covered by the stability policy above.
+
+| Metric Name | Type | Label Keys | Stability |
+|---|---|---|---|
+| `nginx_markdown_delivery_total` | counter | — | Stable |
+| `nginx_markdown_decision_total` | counter | — | Stable |
+| `nginx_markdown_decompression_budget_exceeded_total` | counter | — | Stable |
+| `nginx_markdown_decompression_format_error_total` | counter | — | Stable |
+| `nginx_markdown_decompression_truncated_input_total` | counter | — | Stable |
+| `nginx_markdown_decompression_io_error_total` | counter | — | Stable |
+| `nginx_markdown_replay_buffer_errors_total` | counter | — | Stable |
+| `nginx_markdown_parse_timeouts_total` | counter | — | Stable |
+| `nginx_markdown_parse_budget_exceeded_total` | counter | — | Stable |
+| `nginx_markdown_replay_buffer_errors_total` | counter | — | Stable |
+
+### Delivery vs Decision Counter Semantics (v0.7.0)
+
+The `failopen_count` metric tracks **delivery** events: it increments only
+after the downstream filter returns `NGX_OK`, confirming the client received
+the original HTML. The **decision** to fail-open is recorded separately in
+the decision log at the time the decision is made. This separation ensures
+that metrics reflect actual delivery to clients, not just internal module
+state transitions.
+
+In backpressure scenarios (downstream returns `NGX_AGAIN`), the decision is
+recorded immediately but `failopen_count` is deferred until the pending
+chain drains successfully. This prevents overcounting during retries.
+
 
 ## Document Updates
 
@@ -508,3 +567,4 @@ These metrics are added in 0.5.0 and are only emitted when `MARKDOWN_STREAMING_E
 |---------|------|--------|---------|
 | 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
+| 0.7.0 | 2026-05-17 | Kang | Added v0.7.0 metrics (delivery_total, decision_total, decompression_budget_exceeded, parse_timeouts, parse_budget_exceeded, replay_buffer_errors) and delivery/decision counter semantics |

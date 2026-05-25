@@ -30,6 +30,9 @@ const ngx_str_t *ngx_http_markdown_reason_converted(void);
 const ngx_str_t *ngx_http_markdown_reason_failed_open(void);
 const ngx_str_t *ngx_http_markdown_reason_failed_closed(void);
 const ngx_str_t *ngx_http_markdown_reason_skip_accept(void);
+const ngx_str_t *ngx_http_markdown_reason_skip_no_accept(void);
+const ngx_str_t *ngx_http_markdown_reason_skip_accept_reject(void);
+const ngx_str_t *ngx_http_markdown_reason_skip_conditional(void);
 
 
 /*
@@ -218,6 +221,63 @@ test_skip_accept_code(void)
 }
 
 
+/*
+ * Test: SKIPPED_NO_ACCEPT reason code for missing Accept header
+ */
+static void
+test_skip_no_accept_code(void)
+{
+    const ngx_str_t *rc;
+
+    TEST_SUBSECTION("No-Accept skip reason code");
+
+    rc = ngx_http_markdown_reason_skip_no_accept();
+    TEST_ASSERT(ngx_str_eq(rc, "SKIPPED_NO_ACCEPT"),
+                "ngx_http_markdown_reason_skip_no_accept() "
+                "-> SKIPPED_NO_ACCEPT");
+
+    TEST_PASS("SKIPPED_NO_ACCEPT code correct");
+}
+
+
+/*
+ * Test: SKIPPED_ACCEPT_REJECT reason code for explicit q=0 reject
+ */
+static void
+test_skip_accept_reject_code(void)
+{
+    const ngx_str_t *rc;
+
+    TEST_SUBSECTION("Accept reject reason code");
+
+    rc = ngx_http_markdown_reason_skip_accept_reject();
+    TEST_ASSERT(ngx_str_eq(rc, "SKIPPED_ACCEPT_REJECT"),
+                "ngx_http_markdown_reason_skip_accept_reject() "
+                "-> SKIPPED_ACCEPT_REJECT");
+
+    TEST_PASS("SKIPPED_ACCEPT_REJECT code correct");
+}
+
+
+/*
+ * Test: SKIPPED_CONDITIONAL reason code for 304 Not Modified
+ */
+static void
+test_skip_conditional_code(void)
+{
+    const ngx_str_t *rc;
+
+    TEST_SUBSECTION("Conditional skip reason code");
+
+    rc = ngx_http_markdown_reason_skip_conditional();
+    TEST_ASSERT(ngx_str_eq(rc, "SKIPPED_CONDITIONAL"),
+                "ngx_http_markdown_reason_skip_conditional() "
+                "-> SKIPPED_CONDITIONAL");
+
+    TEST_PASS("SKIPPED_CONDITIONAL code correct");
+}
+
+
 #ifdef MARKDOWN_STREAMING_ENABLED
 /*
  * Test: streaming reason code accessor functions return
@@ -283,6 +343,9 @@ static const ngx_str_t *codes[] = {
     &ngx_http_markdown_reason_skip_auth_str,
     &ngx_http_markdown_reason_skip_range_str,
     &ngx_http_markdown_reason_skip_accept_str,
+    &ngx_http_markdown_reason_skip_no_accept_str,
+    &ngx_http_markdown_reason_skip_accept_reject_str,
+    &ngx_http_markdown_reason_skip_conditional_str,
     &ngx_http_markdown_reason_converted_str,
     &ngx_http_markdown_reason_failed_open_str,
     &ngx_http_markdown_reason_failed_closed_str,
@@ -333,6 +396,9 @@ main(void)
     test_error_category_reason_codes();
     test_eligible_outcome_codes();
     test_skip_accept_code();
+    test_skip_no_accept_code();
+    test_skip_accept_reject_code();
+    test_skip_conditional_code();
 #ifdef MARKDOWN_STREAMING_ENABLED
     test_streaming_reason_codes();
 #endif

@@ -166,8 +166,7 @@ def check_release_spec(result: ValidationResult) -> None:
         "Acceptance Model",
         "Sub-Spec Index",
     ]
-    missing = [s for s in required_sections if s not in content]
-    if missing:
+    if missing := [s for s in required_sections if s not in content]:
         result.failed(RELEASE_SPEC_SECTIONS, f"missing sections: {', '.join(missing)}")
     else:
         result.passed(
@@ -217,8 +216,7 @@ def check_test_matrix(result: ValidationResult) -> None:
         "Operator Diagnostics",
         "Release Gate",
     ]
-    missing = [w for w in workstreams if w not in content]
-    if missing:
+    if missing := [w for w in workstreams if w not in content]:
         result.failed(TEST_MATRIX_WORKSTREAMS, f"missing workstreams: {', '.join(missing)}")
     else:
         result.passed(TEST_MATRIX_WORKSTREAMS, f"all {len(workstreams)} workstreams covered")
@@ -340,11 +338,15 @@ def validate_non_negative_counts(data: dict[str, object], result: ValidationResu
         "total_comparisons", "identical_count", "known_difference_count",
         "unknown_difference_count", "error_parity_mismatch_count",
     ]
-    negative_fields = [
-        f for f in count_fields
-        if f in data and (isinstance(data[f], bool) or (isinstance(data[f], int) and data[f] < 0))
-    ]
-    if negative_fields:
+    if negative_fields := [
+        f
+        for f in count_fields
+        if f in data
+        and (
+            isinstance(data[f], bool)
+            or (isinstance(data[f], int) and data[f] < 0)
+        )
+    ]:
         result.failed(
             EVIDENCE_ARTIFACT_NON_NEGATIVE,
             f"negative values: {', '.join(negative_fields)}",

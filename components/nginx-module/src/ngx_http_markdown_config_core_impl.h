@@ -265,11 +265,16 @@ ngx_http_markdown_create_conf(ngx_conf_t *cf)
     conf->buffer_chunked = NGX_CONF_UNSET;
     conf->stream_types = NGX_CONF_UNSET_PTR;
     conf->content_types = NGX_CONF_UNSET_PTR;
-    conf->auto_decompress = NGX_CONF_UNSET;
+    conf->decompress.auto_decompress = NGX_CONF_UNSET;
+    conf->decompress.max_size = NGX_CONF_UNSET_SIZE;
+    conf->decompress.parse_timeout = NGX_CONF_UNSET_MSEC;
+    conf->decompress.parser_budget = NGX_CONF_UNSET_SIZE;
     conf->large_body_threshold = NGX_CONF_UNSET_SIZE;
     conf->ops.trust_forwarded_headers = NGX_CONF_UNSET;
     conf->ops.metrics_format = NGX_CONF_UNSET_UINT;
     conf->ops.metrics_per_path = NGX_CONF_UNSET;
+    conf->ops.diagnostics_enabled = NGX_CONF_UNSET;
+    conf->ops.diagnostics_allow = NULL;
     conf->ops.otel_enabled = NGX_CONF_UNSET;
     conf->ops.otel_tracing = NGX_CONF_UNSET;
     conf->ops.otel_metrics = NGX_CONF_UNSET;
@@ -298,6 +303,7 @@ ngx_http_markdown_create_conf(ngx_conf_t *cf)
     conf->advanced.dynconf_enabled = NGX_CONF_UNSET;
     conf->advanced.dynconf_path.len = 0;
     conf->advanced.dynconf_path.data = NULL;
+    conf->advanced.dynconf_dry_run = NGX_CONF_UNSET;
 
     return conf;
 }
@@ -386,7 +392,25 @@ ngx_http_markdown_merge_core_base_values(ngx_http_markdown_conf_t *conf,
     ngx_conf_merge_uint_value(conf->policy.log_verbosity, prev->policy.log_verbosity,
                               NGX_HTTP_MARKDOWN_LOG_INFO);
     ngx_conf_merge_value(conf->buffer_chunked, prev->buffer_chunked, 1);
-    ngx_conf_merge_value(conf->auto_decompress, prev->auto_decompress, 1);
+    ngx_conf_merge_value(conf->decompress.auto_decompress,
+                         prev->decompress.auto_decompress, 1);
+
+    /*
+     * Merge decompress.max_size: inherit from parent if not explicitly set.
+     * After merge, if still NGX_CONF_UNSET_SIZE, resolve to max_size at
+     * post-merge time (ngx_http_markdown_apply_decompress_max_size_default)
+     * so the default tracks max_size even when max_size comes from
+     * memory_budget override.
+     */
+    ngx_conf_merge_size_value(conf->decompress.max_size,
+                              prev->decompress.max_size,
+                              NGX_CONF_UNSET_SIZE);
+
+    ngx_conf_merge_msec_value(conf->decompress.parse_timeout,
+                              prev->decompress.parse_timeout, 30000);
+    ngx_conf_merge_size_value(conf->decompress.parser_budget,
+                              prev->decompress.parser_budget,
+                              64 * 1024 * 1024);
 }
 
 /*
@@ -401,6 +425,13 @@ ngx_http_markdown_merge_core_ops_values(ngx_http_markdown_conf_t *conf,
     ngx_conf_merge_uint_value(conf->ops.metrics_format, prev->ops.metrics_format,
                               NGX_HTTP_MARKDOWN_METRICS_FORMAT_AUTO);
     ngx_conf_merge_value(conf->ops.metrics_per_path, prev->ops.metrics_per_path, 0);
+    ngx_conf_merge_value(conf->ops.diagnostics_enabled,
+                         prev->ops.diagnostics_enabled, 0);
+
+    if (conf->ops.diagnostics_allow == NULL) {
+        conf->ops.diagnostics_allow = prev->ops.diagnostics_allow;
+    }
+
     ngx_conf_merge_value(conf->ops.otel_enabled, prev->ops.otel_enabled, 0);
     ngx_conf_merge_value(conf->ops.otel_tracing, prev->ops.otel_tracing, 0);
     ngx_conf_merge_value(conf->ops.otel_metrics, prev->ops.otel_metrics, 0);
@@ -491,6 +522,7 @@ ngx_http_markdown_merge_v060_values(ngx_http_markdown_conf_t *conf,
                               prev->advanced.chars_per_token_fixed, 0);
     ngx_conf_merge_value(conf->advanced.dynconf_enabled, prev->advanced.dynconf_enabled, 0);
     ngx_http_markdown_merge_str_if_unset(&conf->advanced.dynconf_path, &prev->advanced.dynconf_path);
+    ngx_conf_merge_value(conf->advanced.dynconf_dry_run, prev->advanced.dynconf_dry_run, 0);
 }
 
 /**
@@ -533,6 +565,27 @@ ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
     ngx_http_markdown_merge_v060_values(conf, prev);
 
     ngx_http_markdown_apply_memory_budget_override(conf, prev, max_size_set);
+
+    /*
+     * Resolve decompress_max_size default: if not explicitly set at any
+     * level, inherit max_size.  This must run after memory_budget override
+     * so the default tracks the effective max_size.
+     */
+    if (conf->decompress.max_size == NGX_CONF_UNSET_SIZE) {
+        conf->decompress.max_size = conf->max_size;
+    }
+
+    /*
+     * Reject zero decompress.max_size when auto_decompress is enabled:
+     * a budget of 0 would reject all decompression unconditionally,
+     * which is almost certainly a misconfiguration.
+     */
+    if (conf->decompress.auto_decompress && conf->decompress.max_size == 0) {
+        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+            "\"markdown_decompress_max_size\" must be greater "
+            "than 0 when auto_decompress is enabled");
+        return NGX_CONF_ERROR;
+    }
 
     ngx_http_markdown_log_merged_conf(cf, conf);
 
@@ -974,14 +1027,14 @@ ngx_http_markdown_is_enabled(ngx_http_request_t *r,
 
     if (ngx_http_complex_value(r, conf->enabled_complex, &evaluated) != NGX_OK) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                      "markdown filter: failed to evaluate markdown_filter variable");
+                      "markdown: failed to evaluate markdown_filter variable");
         return 0;
     }
 
     rc = ngx_http_markdown_parse_filter_flag(&evaluated, &enabled);
     if (rc != NGX_OK) {
         ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-                      "markdown filter: markdown_filter variable resolved to invalid value "
+                      "markdown: markdown_filter variable resolved to invalid value "
                       "\"%V\", treating as off", &evaluated);
         return 0;
     }
@@ -1015,7 +1068,7 @@ ngx_http_markdown_log_merged_conf(ngx_conf_t *cf,
     log_level = ngx_http_markdown_log_verbosity_to_ngx_level(conf->policy.log_verbosity);
 
     ngx_conf_log_error(log_level, cf, 0,
-                       "markdown filter config: enabled=%ui "
+                       "markdown: enabled=%ui "
                        "enabled_source=%V max_size=%uz "
                        "timeout_ms=%M on_error=%V flavor=%V "
                        "token_estimate=%ui front_matter=%ui "

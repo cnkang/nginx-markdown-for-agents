@@ -52,8 +52,42 @@ pub const ERROR_STREAMING_FALLBACK: u32 = 7;
 /// Error after the streaming engine has already emitted partial output (Post-Commit).
 #[cfg(feature = "streaming")]
 pub const ERROR_POST_COMMIT: u32 = 8;
+/// Decompression budget exceeded (decompressed output exceeds decompress_max_size).
+pub const ERROR_DECOMPRESSION_BUDGET_EXCEEDED: u32 = 9;
+/// Parse timeout: HTML parsing exceeded the configured deadline.
+pub const ERROR_PARSE_TIMEOUT: u32 = 10;
+/// Parse budget exceeded: parser memory allocation exceeded parser_memory_budget.
+pub const ERROR_PARSE_BUDGET_EXCEEDED: u32 = 11;
+/// Decompression format error (invalid or corrupt compressed data).
+#[allow(dead_code)]
+pub const ERROR_DECOMPRESSION_FORMAT_ERROR: u32 = 12;
+/// Decompression truncated input (incomplete compressed stream).
+#[allow(dead_code)]
+pub const ERROR_DECOMPRESSION_TRUNCATED_INPUT: u32 = 13;
+/// Decompression I/O error (unexpected failure during decompression).
+#[allow(dead_code)]
+pub const ERROR_DECOMPRESSION_IO_ERROR: u32 = 14;
 /// Internal error (unexpected condition, panic caught).
 pub const ERROR_INTERNAL: u32 = 99;
+
+/// Decompression error category: budget exceeded.
+///
+/// These constants are used in `FFIDecompResult.error_category` and as
+/// the return value of `markdown_decompress_bounded`. They occupy a
+/// separate namespace from `ERROR_*` (which are for `MarkdownResult.error_code`).
+/// Values start at 101 to avoid numeric overlap with the ERROR_* range (0-99).
+#[allow(dead_code)]
+pub const DECOMP_CATEGORY_BUDGET_EXCEEDED: u32 = 101;
+/// Decompression error category: invalid compression format.
+pub const DECOMP_CATEGORY_FORMAT_ERROR: u32 = 102;
+/// Decompression error category: truncated input stream.
+#[allow(dead_code)]
+pub const DECOMP_CATEGORY_TRUNCATED_INPUT: u32 = 103;
+/// Decompression error category: I/O error during decompression.
+#[allow(dead_code)]
+pub const DECOMP_CATEGORY_IO_ERROR: u32 = 104;
+/// Decompression error category: invalid arguments (NULL pointers, unknown format).
+pub const DECOMP_CATEGORY_INVALID_ARGS: u32 = 105;
 
 /// Conversion options passed from C to Rust.
 #[repr(C)]
@@ -143,6 +177,20 @@ pub struct MarkdownOptions {
     /// ratio = `chars_per_token_fixed / 10.0` (e.g., 38 = 3.8 chars/token).
     /// Populated from the `markdown_chars_per_token` NGINX directive.
     pub chars_per_token_fixed: u8,
+    /// Parse-specific timeout in milliseconds (0 = use `timeout_ms` fallback).
+    ///
+    /// When non-zero, the HTML parser uses this deadline instead of the
+    /// general `timeout_ms` field.  This allows operators to set a tighter
+    /// parse-phase budget while keeping a longer overall conversion timeout.
+    /// Populated from the `markdown_parse_timeout` NGINX directive.
+    pub parse_timeout_ms: u32,
+    /// Parser memory budget in bytes (0 = unlimited).
+    ///
+    /// When non-zero, the HTML parser is constrained to this memory
+    /// allocation ceiling.  Exceeding the budget produces
+    /// `ERROR_PARSE_BUDGET_EXCEEDED`.
+    /// Populated from the `markdown_parser_budget` NGINX directive.
+    pub parser_memory_budget: u64,
 }
 
 /// Conversion result returned from Rust to C.
@@ -221,4 +269,412 @@ pub(crate) struct ConversionOutput {
     pub(crate) etag: Option<Box<[u8]>>,
     /// Heuristic token count estimate for LLM context-window budgeting.
     pub(crate) token_estimate: u32,
+}
+
+/// Result of Accept header content negotiation.
+///
+/// Returned by `markdown_negotiate_accept()` for the C caller to decide
+/// whether to proceed with HTML-to-Markdown conversion.
+///
+/// # Fields
+///
+/// - `should_convert`: 1 if the client prefers text/markdown, 0 otherwise.
+/// - `reason`: Numeric reason code for the decision.
+///   - 0: Convert (text/markdown preferred)
+///   - 1: No Accept header present
+///   - 2: text/markdown has lower q-value than text/html
+///   - 3: text/markdown;q=0 explicit reject
+///   - 4: Malformed Accept header
+#[repr(C)]
+pub struct FFIAcceptResult {
+    /// 1 if conversion should proceed, 0 otherwise.
+    pub should_convert: u8,
+    /// Reason code for the negotiation decision.
+    pub reason: u8,
+}
+
+/// Reason code: client prefers text/markdown, proceed with conversion.
+pub const NEGOTIATE_REASON_CONVERT: u8 = 0;
+/// Reason code: no Accept header was present.
+pub const NEGOTIATE_REASON_NO_ACCEPT: u8 = 1;
+/// Reason code: text/markdown has lower q-value than text/html.
+pub const NEGOTIATE_REASON_LOWER_Q: u8 = 2;
+/// Reason code: client explicitly set text/markdown;q=0.
+pub const NEGOTIATE_REASON_EXPLICIT_REJECT: u8 = 3;
+/// Reason code: Accept header is malformed.
+pub const NEGOTIATE_REASON_MALFORMED: u8 = 4;
+
+/// Wildcard mode: strict — wildcard MIME type does NOT match text/markdown.
+#[allow(dead_code)]
+pub const NEGOTIATE_WILDCARD_STRICT: u8 = 0;
+/// Wildcard mode: allow — wildcard MIME type matches text/markdown.
+#[allow(dead_code)]
+pub const NEGOTIATE_WILDCARD_ALLOW: u8 = 1;
+
+/// Result of a conditional request check (If-None-Match / If-Modified-Since).
+///
+/// Returned by `markdown_check_conditional` FFI function.
+///
+/// Fields:
+/// - `result_code`: 0 = not modified (send 304), 1 = proceed (no match or no conditional headers)
+/// - `matched_etag_len`: Length of the matched ETag value (reserved, currently always 0)
+#[repr(C)]
+pub struct FFIConditionalResult {
+    /// 0 = not_modified (send 304), 1 = proceed (modified or no conditional headers)
+    pub result_code: u8,
+    /// Length of matched ETag value (reserved for future use, currently 0).
+    pub matched_etag_len: u32,
+}
+
+/// Result of a decision engine evaluation.
+///
+/// Returned by `markdown_make_decision` FFI function.
+///
+/// Fields:
+/// - `decision`: 0 = convert, 1 = skip
+/// - `reason_code`: Numeric reason code (matches SkipReason::code() values; 0 if convert)
+#[repr(C)]
+pub struct FFIDecisionResult {
+    /// 0 = convert, 1 = skip
+    pub decision: u8,
+    /// Reason code for the decision (0 if convert).
+    pub reason_code: u8,
+}
+
+/// A single header operation in a header plan.
+///
+/// Fields:
+/// - `op_type`: 0 = set, 1 = delete, 2 = set-etag-placeholder
+/// - `key`: Pointer to header name (NUL-terminated, borrowed from plan; NULL for set-etag-placeholder)
+/// - `key_len`: Length of header name
+/// - `value`: Pointer to header value (NUL-terminated, borrowed from plan; NULL for delete and set-etag-placeholder)
+/// - `value_len`: Length of header value
+///
+/// For op_type == 2 (set-etag-placeholder), the C caller must substitute
+/// the actual ETag value from MarkdownResult.etag instead of reading
+/// key/value from the entry. This avoids the fragile empty-string
+/// placeholder contract.
+#[repr(C)]
+pub struct FFIHeaderEntry {
+    /// 0 = set, 1 = delete, 2 = set-etag-placeholder
+    pub op_type: u8,
+    /// Pointer to header name (borrowed).
+    pub key: *const u8,
+    /// Length of header name.
+    pub key_len: usize,
+    /// Pointer to header value (NULL for delete).
+    pub value: *const u8,
+    /// Length of header value.
+    pub value_len: usize,
+}
+
+/// Result of a bounded decompression operation.
+///
+/// Returned by decompression FFI functions to communicate the output buffer,
+/// its length, and any error category to the C caller.
+///
+/// # Error Categories
+///
+/// - `0` = success (output is valid decompressed data)
+/// - `DECOMP_CATEGORY_BUDGET_EXCEEDED` (101) = decompressed output exceeded the configured limit
+/// - `DECOMP_CATEGORY_FORMAT_ERROR` (102) = input is not valid gzip/deflate
+/// - `DECOMP_CATEGORY_TRUNCATED_INPUT` (103) = input stream ended prematurely
+/// - `DECOMP_CATEGORY_IO_ERROR` (104) = I/O error during decompression
+/// - `DECOMP_CATEGORY_INVALID_ARGS` (105) = invalid arguments (NULL pointers, unknown format)
+///
+/// # Memory Ownership
+///
+/// When `error_category == 0`, the `output` pointer is Rust-owned and must be
+/// freed via the corresponding cleanup function. When `error_category != 0`,
+/// `output` is NULL and `output_len` is 0.
+#[repr(C)]
+pub struct FFIDecompResult {
+    /// Pointer to decompressed output buffer (Rust-owned, NULL on error).
+    pub output: *mut u8,
+    /// Length of decompressed output in bytes (0 on error).
+    pub output_len: usize,
+    /// Error category: 0=success, 101..105 for DECOMP_CATEGORY_* errors.
+    /// See DECOMP_CATEGORY_BUDGET_EXCEEDED through DECOMP_CATEGORY_INVALID_ARGS.
+    pub error_category: u32,
+}
+
+/// Opaque Rust-owned handle that keeps header-plan backing storage alive.
+#[repr(C)]
+pub struct FFIHeaderPlanHandle {
+    _private: [u8; 0],
+}
+
+/// Header plan: an ordered list of header operations for atomic application.
+///
+/// Fields:
+/// - `handle`: Opaque plan handle owned by Rust
+/// - `entries`: Pointer to array of FFIHeaderEntry
+/// - `count`: Number of entries in the plan
+#[repr(C)]
+pub struct FFIHeaderPlan {
+    /// Opaque Rust-owned handle. Free with `markdown_header_plan_free`.
+    pub handle: *mut FFIHeaderPlanHandle,
+    /// Pointer to header entry array.
+    pub entries: *const FFIHeaderEntry,
+    /// Number of entries.
+    pub count: usize,
+}
+
+#[cfg(test)]
+mod layout_tests {
+    use super::*;
+
+    #[test]
+    fn test_markdown_options_layout() {
+        use std::mem::{align_of, offset_of, size_of};
+
+        assert_eq!(size_of::<MarkdownOptions>(), 120);
+        assert_eq!(align_of::<MarkdownOptions>(), 8);
+
+        assert_eq!(offset_of!(MarkdownOptions, flavor), 0);
+        assert_eq!(offset_of!(MarkdownOptions, timeout_ms), 4);
+        assert_eq!(offset_of!(MarkdownOptions, generate_etag), 8);
+        assert_eq!(offset_of!(MarkdownOptions, estimate_tokens), 9);
+        assert_eq!(offset_of!(MarkdownOptions, front_matter), 10);
+        assert_eq!(offset_of!(MarkdownOptions, content_type), 16);
+        assert_eq!(offset_of!(MarkdownOptions, content_type_len), 24);
+        assert_eq!(offset_of!(MarkdownOptions, base_url), 32);
+        assert_eq!(offset_of!(MarkdownOptions, base_url_len), 40);
+        assert_eq!(offset_of!(MarkdownOptions, streaming_budget), 48);
+        assert_eq!(offset_of!(MarkdownOptions, prune_noise), 56);
+        assert_eq!(offset_of!(MarkdownOptions, prune_selectors), 64);
+        assert_eq!(offset_of!(MarkdownOptions, prune_selector_len), 72);
+        assert_eq!(offset_of!(MarkdownOptions, prune_protection_selectors), 80);
+        assert_eq!(
+            offset_of!(MarkdownOptions, prune_protection_selector_len),
+            88
+        );
+        assert_eq!(offset_of!(MarkdownOptions, memory_budget), 96);
+        assert_eq!(offset_of!(MarkdownOptions, llm_provider), 104);
+        assert_eq!(offset_of!(MarkdownOptions, chars_per_token_fixed), 105);
+        assert_eq!(offset_of!(MarkdownOptions, parse_timeout_ms), 108);
+        assert_eq!(offset_of!(MarkdownOptions, parser_memory_budget), 112);
+    }
+
+    #[test]
+    fn test_markdown_result_layout() {
+        use std::mem::{align_of, offset_of, size_of};
+
+        assert_eq!(size_of::<MarkdownResult>(), 64);
+        assert_eq!(align_of::<MarkdownResult>(), 8);
+
+        assert_eq!(offset_of!(MarkdownResult, markdown), 0);
+        assert_eq!(offset_of!(MarkdownResult, markdown_len), 8);
+        assert_eq!(offset_of!(MarkdownResult, etag), 16);
+        assert_eq!(offset_of!(MarkdownResult, etag_len), 24);
+        assert_eq!(offset_of!(MarkdownResult, token_estimate), 32);
+        assert_eq!(offset_of!(MarkdownResult, error_code), 36);
+        assert_eq!(offset_of!(MarkdownResult, error_message), 40);
+        assert_eq!(offset_of!(MarkdownResult, error_len), 48);
+        assert_eq!(offset_of!(MarkdownResult, peak_memory_estimate), 56);
+    }
+
+    #[test]
+    fn test_ffi_accept_result_layout() {
+        use std::mem::{align_of, size_of};
+
+        assert_eq!(size_of::<FFIAcceptResult>(), 2);
+        assert_eq!(align_of::<FFIAcceptResult>(), 1);
+    }
+
+    #[test]
+    fn test_ffi_conditional_result_layout() {
+        use std::mem::{align_of, size_of};
+
+        assert_eq!(size_of::<FFIConditionalResult>(), 8);
+        assert_eq!(align_of::<FFIConditionalResult>(), 4);
+    }
+
+    #[test]
+    fn test_ffi_decision_result_layout() {
+        use std::mem::{align_of, size_of};
+
+        assert_eq!(size_of::<FFIDecisionResult>(), 2);
+        assert_eq!(align_of::<FFIDecisionResult>(), 1);
+    }
+
+    #[test]
+    fn test_ffi_header_entry_layout() {
+        use std::mem::{align_of, offset_of, size_of};
+
+        assert_eq!(size_of::<FFIHeaderEntry>(), 40);
+        assert_eq!(align_of::<FFIHeaderEntry>(), 8);
+
+        assert_eq!(offset_of!(FFIHeaderEntry, op_type), 0);
+        assert_eq!(offset_of!(FFIHeaderEntry, key), 8);
+        assert_eq!(offset_of!(FFIHeaderEntry, key_len), 16);
+        assert_eq!(offset_of!(FFIHeaderEntry, value), 24);
+        assert_eq!(offset_of!(FFIHeaderEntry, value_len), 32);
+    }
+
+    #[test]
+    fn test_ffi_header_plan_layout() {
+        use std::mem::{align_of, offset_of, size_of};
+
+        assert_eq!(size_of::<FFIHeaderPlan>(), 24);
+        assert_eq!(align_of::<FFIHeaderPlan>(), 8);
+
+        assert_eq!(offset_of!(FFIHeaderPlan, handle), 0);
+        assert_eq!(offset_of!(FFIHeaderPlan, entries), 8);
+        assert_eq!(offset_of!(FFIHeaderPlan, count), 16);
+    }
+
+    #[test]
+    fn test_ffi_decomp_result_layout() {
+        use std::mem::{align_of, offset_of, size_of};
+
+        assert_eq!(size_of::<FFIDecompResult>(), 24);
+        assert_eq!(align_of::<FFIDecompResult>(), 8);
+
+        assert_eq!(offset_of!(FFIDecompResult, output), 0);
+        assert_eq!(offset_of!(FFIDecompResult, output_len), 8);
+        assert_eq!(offset_of!(FFIDecompResult, error_category), 16);
+    }
+
+    #[test]
+    fn test_error_codes_distinct() {
+        let codes = [
+            ERROR_SUCCESS,
+            ERROR_PARSE,
+            ERROR_ENCODING,
+            ERROR_TIMEOUT,
+            ERROR_MEMORY_LIMIT,
+            ERROR_INVALID_INPUT,
+            ERROR_DECOMPRESSION_BUDGET_EXCEEDED,
+            ERROR_PARSE_TIMEOUT,
+            ERROR_PARSE_BUDGET_EXCEEDED,
+            ERROR_DECOMPRESSION_FORMAT_ERROR,
+            ERROR_DECOMPRESSION_TRUNCATED_INPUT,
+            ERROR_DECOMPRESSION_IO_ERROR,
+            ERROR_INTERNAL,
+        ];
+
+        for i in 0..codes.len() {
+            for j in (i + 1)..codes.len() {
+                assert_ne!(
+                    codes[i], codes[j],
+                    "Error codes {} and {} collide",
+                    codes[i], codes[j]
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_negotiate_reason_codes_distinct() {
+        let reasons = [
+            NEGOTIATE_REASON_CONVERT,
+            NEGOTIATE_REASON_NO_ACCEPT,
+            NEGOTIATE_REASON_LOWER_Q,
+            NEGOTIATE_REASON_EXPLICIT_REJECT,
+            NEGOTIATE_REASON_MALFORMED,
+        ];
+
+        for i in 0..reasons.len() {
+            for j in (i + 1)..reasons.len() {
+                assert_ne!(
+                    reasons[i], reasons[j],
+                    "Reason codes {} and {} collide",
+                    reasons[i], reasons[j]
+                );
+            }
+        }
+    }
+
+    /// [A04.7] FFI mapping closure test: Rust ERROR_* constant count == C define count.
+    ///
+    /// Ensures no Rust error variant is missing a C-side define.
+    /// The expected count (10 for non-streaming, 13 with streaming) must be
+    /// updated whenever a new error code is added to either side.
+    #[test]
+    fn test_error_code_count_matches_c_defines() {
+        // Non-streaming error codes defined in this module
+        let base_codes: &[u32] = &[
+            ERROR_SUCCESS,
+            ERROR_PARSE,
+            ERROR_ENCODING,
+            ERROR_TIMEOUT,
+            ERROR_MEMORY_LIMIT,
+            ERROR_INVALID_INPUT,
+            ERROR_DECOMPRESSION_BUDGET_EXCEEDED,
+            ERROR_PARSE_TIMEOUT,
+            ERROR_PARSE_BUDGET_EXCEEDED,
+            ERROR_DECOMPRESSION_FORMAT_ERROR,
+            ERROR_DECOMPRESSION_TRUNCATED_INPUT,
+            ERROR_DECOMPRESSION_IO_ERROR,
+            ERROR_INTERNAL,
+        ];
+
+        // Expected count of non-streaming ERROR_* constants in ffi/abi.rs
+        let expected_base_count: usize = 13;
+        assert_eq!(
+            base_codes.len(),
+            expected_base_count,
+            "Rust base error code count ({}) must match C #define count ({}). \
+             If you added a new error code, update both this array and the C header.",
+            base_codes.len(),
+            expected_base_count
+        );
+
+        // With streaming feature, 3 additional codes exist (6, 7, 8)
+        #[cfg(feature = "streaming")]
+        {
+            let streaming_codes: &[u32] = &[
+                ERROR_BUDGET_EXCEEDED,
+                ERROR_STREAMING_FALLBACK,
+                ERROR_POST_COMMIT,
+            ];
+            let total = base_codes.len() + streaming_codes.len();
+            let expected_total: usize = 16;
+            assert_eq!(
+                total, expected_total,
+                "Total error code count with streaming ({total}) must match expected ({expected_total})"
+            );
+        }
+    }
+
+    #[test]
+    fn test_negotiate_reason_count_matches_c_defines() {
+        let rust_reason_count = 5;
+        let reasons = [
+            NEGOTIATE_REASON_CONVERT,
+            NEGOTIATE_REASON_NO_ACCEPT,
+            NEGOTIATE_REASON_LOWER_Q,
+            NEGOTIATE_REASON_EXPLICIT_REJECT,
+            NEGOTIATE_REASON_MALFORMED,
+        ];
+        assert_eq!(
+            reasons.len(),
+            rust_reason_count,
+            "Rust negotiate reason count ({}) must match C #define count ({})",
+            reasons.len(),
+            rust_reason_count
+        );
+    }
+
+    #[test]
+    fn test_skip_reason_count_matches_decision_export() {
+        use crate::decision::SkipReason;
+        let skip_reasons = [
+            SkipReason::SkipAccept,
+            SkipReason::SkipNoAccept,
+            SkipReason::SkipConditional,
+            SkipReason::FailDecompression,
+            SkipReason::ParseTimeout,
+            SkipReason::ParseBudgetExceeded,
+            SkipReason::NotEligible,
+            SkipReason::Disabled,
+        ];
+        assert_eq!(
+            skip_reasons.len(),
+            8,
+            "SkipReason variant count ({}) must match FFI export reason_code range (1..=8)",
+            skip_reasons.len()
+        );
+    }
 }
