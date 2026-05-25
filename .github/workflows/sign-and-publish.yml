@@ -91,7 +91,7 @@ jobs:
           GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}
         run: |
           chmod +x packaging/scripts/sign-packages.sh
-          packaging/scripts/sign-packages.sh -k "${GPG_KEY_ID}" -d dist
+          packaging/scripts/sign-packages.sh --require-packages -k "${GPG_KEY_ID}" -d dist
 
       - name: Upload signed packages
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -173,7 +173,7 @@ jobs:
           GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}
         run: |
           chmod +x packaging/scripts/sign-repo-metadata.sh
-          packaging/scripts/sign-repo-metadata.sh \
+          packaging/scripts/sign-repo-metadata.sh --require-metadata \
             -k "${GPG_KEY_ID}" \
             -a repo/apt \
             -y repo/yum
