@@ -31,7 +31,7 @@ Required:
   - Downloaded binaries and source tarballs in CI workflows and Dockerfiles
     must be verified against a known-good checksum (SHA256 minimum).
   - Maintain checksums in a version-controlled file (for example
-    `packaging/nginx-checksums.yaml`) and reference it in download scripts.
+    `packaging/checksums.sha256`) and reference it in download scripts.
   - Forbid the `curl URL | sudo tar` pattern.  Use download→verify→extract
     as separate steps.
   - When a new version of an external dependency is adopted, update the

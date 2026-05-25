@@ -1,11 +1,11 @@
 # NGINX source tarball SHA256 checksums for supply-chain verification.
 # Update when adding new NGINX_VERSION to the release matrix.
 #
-# IMPORTANT: The checksum values below are PLACEHOLDERS.
-# Replace with actual SHA256 values obtained from:
+# NOTE: This file is DEPRECATED in favor of packaging/checksums.sha256
+# which is consumed by packaging/scripts/verify-checksum.sh (no Python/PyYAML
+# dependency). Kept temporarily for backward compatibility.
+#
+# To obtain checksums:
 #   curl -fsSL https://nginx.org/download/nginx-VERSION.tar.gz | sha256sum
-# or verify against the official NGINX signing key and checksums file.
 checksums:
   "1.26.3": "69ee2b237744036e61d24b836668aad3040dda461fe6f570f1787eab570c75aa"
-  "1.27.4": "7f11f00e7c7b25e6b3c7f8c1b6f3e8d7a7b7f3a6e8d7a7b7f3a6e8d7a7b7f3a6e"
-  "1.28.2": "a3c5d3d8b6f2e7c4a9d1e8f3b6c5d2a7e4f1b8d3c6a9e2f5b8d1c4a7e3f6b9d2c5a"

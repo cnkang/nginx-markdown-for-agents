@@ -37,7 +37,8 @@ RUN update-ca-certificates
 ARG NGINX_VERSION=1.28.2
 
 WORKDIR /build
-COPY packaging/nginx-checksums.yaml /src/packaging/nginx-checksums.yaml
+COPY packaging/checksums.sha256 /src/packaging/checksums.sha256
+COPY packaging/scripts/verify-checksum.sh /src/packaging/scripts/verify-checksum.sh
 RUN set -eux; \
     retry() { \
         attempts="$1"; \
@@ -56,37 +57,11 @@ RUN set -eux; \
     retry 5 curl --proto '=https' --tlsv1.2 -fsSL \
         -o /tmp/nginx.tar.gz \
         "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz"; \
-    CHECKSUM_FILE="/src/packaging/nginx-checksums.yaml"; \
-    if [ -f "$${CHECKSUM_FILE}" ]; then \
-        printf '%s\n' \
-            'import sys, yaml' \
-            'data = yaml.safe_load(open(sys.argv[1]))' \
-            'print(data["checksums"][sys.argv[2]])' \
-            > /tmp/get_checksum.py; \
-        EXPECTED_SHA256="$$(python3 /tmp/get_checksum.py \
-            "$${CHECKSUM_FILE}" "${NGINX_VERSION}" \
-            2>/dev/null || echo "")"; \
-        rm -f /tmp/get_checksum.py; \
-        if [ -n "$${EXPECTED_SHA256}" ] && \
-           [ "$${EXPECTED_SHA256##*PLACEHOLDER*}" = "" ]; \
-        then \
-            echo "WARNING: SHA256 for nginx" \
-                "${NGINX_VERSION} is a placeholder," \
-                "skipping verification"; \
-        elif [ -n "$${EXPECTED_SHA256}" ]; then \
-            ACTUAL_SHA256="$$(sha256sum \
-                /tmp/nginx.tar.gz | cut -d' ' -f1)"; \
-            if [ "$${ACTUAL_SHA256}" != \
-                 "$${EXPECTED_SHA256}" ]; then \
-                echo "ERROR: SHA256 mismatch" >&2; \
-                exit 1; \
-            fi; \
-            echo "SHA256 verified for nginx tarball"; \
-        fi; \
-    else \
-        echo "WARNING: checksums.yaml not found," \
-            "skipping SHA256 verification"; \
-    fi; \
+    chmod +x /src/packaging/scripts/verify-checksum.sh; \
+    /src/packaging/scripts/verify-checksum.sh \
+        -f /tmp/nginx.tar.gz \
+        -i "nginx-${NGINX_VERSION}" \
+        -c /src/packaging/checksums.sha256; \
     tar xzf /tmp/nginx.tar.gz; \
     rm -f /tmp/nginx.tar.gz
 
