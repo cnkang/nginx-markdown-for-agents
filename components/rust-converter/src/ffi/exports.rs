@@ -40,7 +40,7 @@ use std::ptr;
 use crate::error::ConversionError;
 
 use super::abi::{
-    DECOMP_CATEGORY_FORMAT_ERROR, DECOMP_CATEGORY_INVALID_ARGS, ERROR_INTERNAL, FFIAcceptResult,
+    DECOMP_CATEGORY_INVALID_ARGS, ERROR_INTERNAL, FFIAcceptResult,
     FFIConditionalResult, FFIDecisionResult, FFIDecompResult, FFIHeaderEntry, FFIHeaderPlan,
     FFIHeaderPlanHandle, MarkdownConverterHandle, MarkdownOptions, MarkdownResult,
     NEGOTIATE_REASON_CONVERT, NEGOTIATE_REASON_EXPLICIT_REJECT, NEGOTIATE_REASON_LOWER_Q,
@@ -373,11 +373,14 @@ pub unsafe extern "C" fn markdown_build_header_plan(
 
     let result_ref = unsafe { &mut *result };
 
-    /* Free any previously-held plan to avoid leaking the old handle */
-    if !result_ref.handle.is_null() {
-        unsafe { drop(Box::from_raw(result_ref.handle as *mut HeaderPlanOwned)) };
-    }
+    /* Save and release any previously-held plan to avoid leaking the old handle.
+     * Zero the result struct BEFORE dropping the old handle so that no field
+     * ever points into freed memory (eliminates dangling-pointer window). */
+    let old_handle = result_ref.handle;
     unsafe { ptr::write(result_ref, std::mem::zeroed()) };
+    if !old_handle.is_null() {
+        unsafe { drop(Box::from_raw(old_handle as *mut HeaderPlanOwned)) };
+    }
 
     let ct = if content_type.is_null() || content_type_len == 0 {
         "text/markdown; charset=utf-8"
@@ -758,8 +761,8 @@ pub unsafe extern "C" fn markdown_decompress_bounded(
     let fmt = match crate::decompress::Format::from_u8(format) {
         Some(f) => f,
         None => {
-            result_ref.error_category = DECOMP_CATEGORY_FORMAT_ERROR;
-            return DECOMP_CATEGORY_FORMAT_ERROR;
+            result_ref.error_category = DECOMP_CATEGORY_INVALID_ARGS;
+            return DECOMP_CATEGORY_INVALID_ARGS;
         }
     };
 
@@ -1063,10 +1066,10 @@ mod tests {
             )
         };
         assert_eq!(
-            rc, 102,
-            "Expected format_error (102) for unknown format, got {rc}"
+            rc, 105,
+            "Expected invalid_args (105) for unknown format, got {rc}"
         );
-        assert_eq!(result.error_category, 102);
+        assert_eq!(result.error_category, 105);
     }
 
     #[test]
