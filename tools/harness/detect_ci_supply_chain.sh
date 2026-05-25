@@ -17,7 +17,7 @@ set -euo pipefail
 WORKFLOW_DIR=".github/workflows"
 VIOLATIONS=0
 
-if [ ! -d "$WORKFLOW_DIR" ]; then
+if [[ ! -d "$WORKFLOW_DIR" ]]; then
     echo "  [supply-chain] No workflow directory found at $WORKFLOW_DIR" >&2
     exit 0
 fi
@@ -31,6 +31,7 @@ while IFS= read -r line; do
     # Skip comments
     case "$content" in
         *"#"*uses:*) continue ;;
+        *) ;;
     esac
 
     # Check if the ref after @ is a 40-char hex string
@@ -40,7 +41,7 @@ while IFS= read -r line; do
     ref="${ref%% *}"
     ref="$(echo "$ref" | tr -d '[:space:]')"
 
-    if [ ${#ref} -ne 40 ]; then
+    if [[ ${#ref} -ne 40 ]]; then
         echo "  [FAIL] Mutable tag reference: $file: $content" >&2
         VIOLATIONS=$((VIOLATIONS + 1))
     else
@@ -50,11 +51,14 @@ while IFS= read -r line; do
                 echo "  [FAIL] Non-SHA reference: $file: $content" >&2
                 VIOLATIONS=$((VIOLATIONS + 1))
                 ;;
+            *)
+                # Valid 40-char hex SHA — no action needed
+                ;;
         esac
     fi
 done < <(grep -rn 'uses:.*@' "$WORKFLOW_DIR" 2>/dev/null | grep -v '^\s*#' || true)
 
-if [ "$VIOLATIONS" -gt 0 ]; then
+if [[ "$VIOLATIONS" -gt 0 ]]; then
     echo "  [supply-chain] $VIOLATIONS action(s) not pinned to SHA" >&2
     exit 1
 fi
