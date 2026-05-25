@@ -5,26 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
-
-### Added
-
-- Production-path unit tests for Accept negotiation, auth/cache-control, and
-  conditional request handling (`accept_production_test.c`,
-  `auth_production_test.c`, `conditional_production_test.c`).
-
-### Changed
-
-- Resolve actionable SonarQube findings in C unit tests: const-qualify
-  read-only locals (S5350), move loop variables into for-statements (S5955),
-  split multi-variable declarations (S1659), add NULL guard to
-  `ngx_strncasecmp` stub (S3807).
-- Bump `serde_json` from 1.0.149 to 1.0.150.
-- Bump `openssl` from 0.10.79 to 0.10.80.
-- Bump `taiki-e/install-action` from 2.75.30 to 2.79.7.
-- Bump `SonarSource/sonarqube-scan-action` from 8.0.0 to 8.1.0.
-
-## [0.7.0] - 2026-05-17
+## [0.7.0] - 2026-05-25
 
 P0 runtime correctness fixes, Rust-first architecture modules, independent
 decompression budget, Accept header negotiation, parse timeout/budget,
@@ -120,6 +101,19 @@ dynconf dry-run/rollback, and runtime diagnostics.
   `decompress_brotli`, and streaming `decomp_create`.
 - `harness-check-full` now includes `check-headers`.
 - Cargo.toml version bumped to 0.7.0.
+- Helm chart version and appVersion bumped to 0.7.0.
+- SECURITY.md supported version updated to 0.7.x.
+- Resolve actionable SonarQube findings in C unit tests: const-qualify
+  read-only locals (S5350), move loop variables into for-statements (S5955),
+  split multi-variable declarations (S1659), add NULL guard to
+  `ngx_strncasecmp` stub (S3807).
+- Production-path unit tests for Accept negotiation, auth/cache-control, and
+  conditional request handling (`accept_production_test.c`,
+  `auth_production_test.c`, `conditional_production_test.c`).
+- Bump `serde_json` from 1.0.149 to 1.0.150.
+- Bump `openssl` from 0.10.79 to 0.10.80.
+- Bump `taiki-e/install-action` from 2.75.30 to 2.79.7.
+- Bump `SonarSource/sonarqube-scan-action` from 8.0.0 to 8.1.0.
 
 ## [0.6.3] - 2026-05-14
 
