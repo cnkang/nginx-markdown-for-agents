@@ -289,8 +289,6 @@ static const uint8_t pc_ct_val[] =
     "text/markdown; charset=utf-8";
 static const uint8_t pc_ce_key[] = "Content-Encoding";
 static const uint8_t pc_cl_key[] = "Content-Length";
-static const uint8_t pc_vary_key[] = "Vary";
-static const uint8_t pc_vary_val[] = "Accept";
 
 static void
 markdown_header_plan_init(struct FFIHeaderPlan *result)
@@ -378,7 +376,6 @@ static ngx_int_t
 ngx_http_markdown_apply_header_plan(ngx_http_request_t *r,
     struct FFIHeaderPlan *plan)
 {
-    uintptr_t                    i;
     const struct FFIHeaderEntry *entry;
 
     if (plan == NULL || plan->count == 0) {
@@ -392,7 +389,7 @@ ngx_http_markdown_apply_header_plan(ngx_http_request_t *r,
         return NGX_ERROR;
     }
 
-    for (i = 0; i < plan->count; i++) {
+    for (uintptr_t i = 0; i < plan->count; i++) {
         entry = &plan->entries[i];
 
         switch (entry->op_type) {
@@ -1494,7 +1491,8 @@ test_parity_content_type(void)
     ngx_http_request_t r_stream = new_request();
     ngx_http_markdown_conf_t conf;
     MarkdownResult result;
-    ngx_table_elt_t *vary_fb, *vary_st;
+    const ngx_table_elt_t *vary_fb;
+    const ngx_table_elt_t *vary_st;
 
     TEST_SUBSECTION("Task 12.1/12.4: Content-Type parity");
 
