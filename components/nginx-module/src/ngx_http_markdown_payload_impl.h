@@ -852,7 +852,37 @@ ngx_http_markdown_decompress_via_rust(
 #endif /* NGX_HTTP_MARKDOWN_NO_RUST_DECOMPRESS */
 }
 
-/* Decompress the buffered payload if compression was detected. */
+/*
+ * Decompress the buffered payload if compression was detected.
+ *
+ * This is the top-level decompression entry point for the buffered body
+ * filter path.  It orchestrates three phases:
+ *   1. Prepare a contiguous compressed chain from ctx->buffer.
+ *   2. Invoke the Rust FFI bounded decompressor (or C fallback).
+ *   3. Apply the decompressed output back into ctx->buffer.
+ *
+ * On every failure class the function follows a fail-open strategy:
+ * it logs the error, increments the appropriate metrics, and returns
+ * the original (still-compressed) content to the downstream filter
+ * chain rather than rejecting the request.  This is intentional --
+ * the caller (body filter) must not block or abort the request when
+ * decompression is unavailable or fails; the content is forwarded
+ * as-is so the client can still receive a response.
+ *
+ * Parameters:
+ *   r    - NGINX request (used for pool allocation and logging)
+ *   ctx  - module context holding the buffered payload and
+ *          decompression state
+ *   conf - location configuration (decompression budget, on_error
+ *          policy, compression settings)
+ *
+ * Returns:
+ *   NGX_OK   - decompression succeeded or was not needed; caller
+ *              should continue normal processing
+ *   NGX_ERROR - unrecoverable system error (buffer/chain allocation
+ *               failure); the error handler has already logged and
+ *               incremented failure metrics
+ */
 static ngx_int_t
 ngx_http_markdown_body_filter_decompress_if_needed(ngx_http_request_t *r,
                                                    ngx_http_markdown_ctx_t *ctx,
@@ -863,6 +893,12 @@ ngx_http_markdown_body_filter_decompress_if_needed(ngx_http_request_t *r,
     ngx_int_t     decompress_rc;
     ngx_int_t     rc;
 
+    /*
+     * Skip decompression entirely when no compressed content was
+     * detected (needed == 0) or when decompression already ran
+     * (done == 1).  The latter guards against double invocation
+     * if the body filter is re-entered.
+     */
     if (!ctx->decompression.needed || ctx->decompression.done) {
         return NGX_OK;
     }
@@ -872,18 +908,41 @@ ngx_http_markdown_body_filter_decompress_if_needed(ngx_http_request_t *r,
                   "type=%d, size=%uz bytes",
                   ctx->decompression.type, ctx->buffer.size);
 
+    /*
+     * Record the attempt metric and snapshot the compressed size
+     * before the decompressor consumes the buffer, because the
+     * decompressor may reallocate or replace ctx->buffer.data.
+     */
     NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.attempted);
     ctx->decompression.compressed_size = ctx->buffer.size;
 
+    /*
+     * Phase 1: wrap ctx->buffer into a single-element chain that
+     * the Rust decompressor can consume.  The helper copies the
+     * buffer contents into a temporary pool buffer so the
+     * decompressor owns a stable snapshot.
+     */
     rc = ngx_http_markdown_prepare_compressed_chain(
         r, ctx, conf, &compressed_chain);
     if (rc != NGX_OK) {
         return rc;
     }
 
+    /*
+     * Phase 2: invoke the bounded Rust FFI decompressor.
+     * The decompressor returns domain-specific error codes that
+     * classify the failure mode rather than mapping everything
+     * to NGX_ERROR, which allows us to pick the correct metric
+     * and error category for each failure path.
+     */
     decompress_rc = ngx_http_markdown_decompress_via_rust(
         r, ctx, conf, compressed_chain, &decompressed_chain);
 
+    /*
+     * NGX_DECLINED means the compression type is not supported
+     * by the linked decompressor library.  Treat as a conversion
+     * error (fail-open: return original content).
+     */
     if (decompress_rc == NGX_DECLINED) {
         ngx_log_debug0(NGX_LOG_DEBUG_HTTP,
                       r->connection->log, 0,
@@ -895,6 +954,12 @@ ngx_http_markdown_body_filter_decompress_if_needed(ngx_http_request_t *r,
             "content after unsupported decompression");
     }
 
+    /*
+     * Budget exceeded: the decompressed output would surpass the
+     * configured decompress_max_size limit.  This is a resource-
+     * limit category error, not a conversion error, because the
+     * input is structurally valid but the output is too large.
+     */
     if (decompress_rc == NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED) {
         NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.budget_exceeded_total);
         return ngx_http_markdown_handle_decompression_alloc_error(
@@ -933,6 +998,11 @@ ngx_http_markdown_body_filter_decompress_if_needed(ngx_http_request_t *r,
             "decompression I/O error");
     }
 
+    /*
+     * Catch-all for any unexpected error code not explicitly
+     * classified above.  Logs the compression type for
+     * post-mortem debugging and falls back to fail-open.
+     */
     if (decompress_rc != NGX_OK) {
         const ngx_str_t *compression_name;
 
@@ -953,6 +1023,12 @@ ngx_http_markdown_body_filter_decompress_if_needed(ngx_http_request_t *r,
             "- returning original content");
     }
 
+    /*
+     * Phase 3: success path -- copy the decompressed output back
+     * into ctx->buffer (replacing the compressed data) and record
+     * success metrics.  Both helpers log on failure and the caller
+     * propagates the return code directly.
+     */
     rc = ngx_http_markdown_apply_decompressed_payload(
         r, ctx, conf, decompressed_chain);
     if (rc != NGX_OK) {
