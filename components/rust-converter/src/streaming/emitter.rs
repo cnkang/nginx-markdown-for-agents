@@ -2206,9 +2206,7 @@ mod tests {
         let chunk = "x".repeat(100);
         let mut budget_exceeded = false;
         for _ in 0..10 {
-            let action = sm
-                .process_event(&StreamEvent::Text(chunk.clone()))
-                .unwrap();
+            let action = sm.process_event(&StreamEvent::Text(chunk.clone())).unwrap();
             if let Err(ConversionError::BudgetExceeded { .. }) =
                 emitter.process_action(&action, &mut sm)
             {
