@@ -11,16 +11,52 @@ steering files.
 
 ## Current Assessment
 
-As of the **current release line (0.6.3)**, the project includes a dual-engine
-conversion model (streaming default with full-buffer fallback), streaming
-failure semantics aligned to commit boundaries, parity and diff validation for
-streaming behavior, rollout observability with shadow-mode checks, benchmark
-evidence for release gates, dynamic configuration hot-reload, and a repo-owned
-harness for agent workflow governance. Core features are implemented and
-tested. The codebase includes unit, integration, E2E, fuzz-oriented validation
-entrypoints, and harness-specific validation entrypoints, along with
-documentation covering installation, configuration, operations, architecture,
-and contributor-facing harness maintenance.
+As of the **current release line (0.7.0)**, the project includes a dual-engine
+conversion model (streaming default with full-buffer fallback), Rust-first
+architecture modules for Accept negotiation, conditional requests, decision
+logic, and header plan application, independent decompression budget with parse
+timeout and parser budget directives, runtime diagnostics endpoint, dynconf
+dry-run and last-known-good rollback, DEB/RPM packaging pipeline, Kubernetes
+deployment examples, FFI ABI layout verification, CI supply-chain hardening,
+and a repo-owned harness for agent workflow governance. Core features are
+implemented and tested. The codebase includes unit, integration, E2E,
+fuzz-oriented validation entrypoints, and harness-specific validation
+entrypoints, along with documentation covering installation, configuration,
+operations, architecture, and contributor-facing harness maintenance.
+
+### Release 0.7.0 Updates
+
+- P0 runtime correctness:
+  - Full-buffer pending chain on NGX_AGAIN with resume (Rule 1).
+  - `failopen_completed` flag prevents duplicate finalize (Rule 38).
+  - Safe output ordering: alloc→copy→chain→headers→body filter.
+  - `markdown_decompress_max_size` directive: independent decompression
+    budget decoupled from `max_size`.
+  - `markdown_parse_timeout` directive (default: 30s).
+  - `markdown_parser_budget` directive (default: 64m).
+  - Rust error codes: `DecompressionBudgetExceeded` (9), `ParseTimeout` (10),
+    `ParseBudgetExceeded` (11).
+- Rust-first architecture modules:
+  - `negotiator`: RFC 7231 Accept header q-value negotiation with
+    `FFIAcceptResult` struct and `markdown_negotiate_accept` FFI export.
+  - `conditional`: If-None-Match / If-Modified-Since handling in Rust.
+  - `decision`: pure decision engine with reason codes.
+  - `header_plan`: declarative header mutation plan for atomic application.
+  - `security` extensions: URL control-char rejection, link escaping,
+    forwarded header parsing.
+- FFI ABI verification:
+  - Rust layout tests for `MarkdownResult`, `FFIAcceptResult`, error/reason
+    code uniqueness.
+  - C `static_assert` for critical struct sizeof and offsetof.
+- DEB/RPM packaging pipeline with GPG signing and repository metadata.
+- Kubernetes deployment examples (Ingress Controller, Helm chart, manifests).
+- Runtime diagnostics endpoint (`/nginx-markdown/diagnostics`).
+- Dynconf dry-run and last-known-good rollback.
+- Rules 39–40: NGX_DONE terminal semantics, invalidated header hash==0
+  filtering.
+- CI supply-chain hardening: SHA-pinned Actions, checksum verification,
+  ClusterFuzzLite integration.
+- Streaming memory budget enforcement during code block accumulation.
 
 ### Release 0.6.3 Updates
 
@@ -328,15 +364,23 @@ See [DEPLOYMENT_EXAMPLES.md](../guides/DEPLOYMENT_EXAMPLES.md) for configuration
 
 ## Current Focus and Roadmap
 
-### Current Release (0.6.3)
+### Current Release (0.7.0)
 - Dual-engine conversion architecture: streaming default with full-buffer
   fallback
-- Dynamic configuration hot-reload with snapshot isolation and retry contract
+- Rust-first architecture: Accept negotiation, conditional requests, decision
+  engine, and header plan modules implemented in Rust with narrow FFI boundary
+- Independent decompression budget, parse timeout, and parser budget directives
+- Runtime diagnostics endpoint with config snapshot and recent decisions
+- Dynamic configuration hot-reload with dry-run validation and LKG rollback
+- DEB/RPM packaging pipeline with GPG signing
+- Kubernetes deployment examples and Helm chart
+- FFI ABI layout verification (Rust layout tests + C static_assert)
+- CI supply-chain hardening (SHA-pinned Actions, checksum verification)
+- ClusterFuzzLite integration for continuous fuzz testing
 - Streaming failure semantics and fallback controls aligned to commit
   boundaries
 - Streaming parity and differential validation across chunk boundaries and
   failure paths
-- Streaming rollout observability, including shadow-mode verification support
 - Benchmark corpus and evidence-based release-gate validation
 - Repo-owned harness governance (`AGENTS.md`, `docs/harness/`, `tools/harness/`)
 - Prometheus-compatible metrics endpoint for operational monitoring
@@ -452,15 +496,21 @@ See `examples/docker/` for Docker build examples.
 
 ## Summary
 
-**NGINX Markdown for Agents** is at version 0.6.3. The project provides
+**NGINX Markdown for Agents** is at version 0.7.0. The project provides
 HTML-to-Markdown conversion through NGINX content negotiation with a
 dual-engine model, with bounded-memory streaming as the default path and
-full-buffer conversion as the fallback. It includes Prometheus-compatible
-metrics, decision reason codes, rollout and rollback guides, parity and
-evidence workflows for streaming rollout safety, dynamic configuration
-hot-reload, OpenTelemetry tracing, per-path metrics, OS package distribution,
-release automation, performance baseline gating, runtime validation reuse,
-fuzzing workflows, and shared metrics aggregation for observability.
+full-buffer conversion as the fallback. Version 0.7.0 introduces Rust-first
+architecture modules (Accept negotiation, conditional requests, decision
+engine, header plan), independent decompression budget with parse timeout and
+parser budget directives, a runtime diagnostics endpoint, dynconf dry-run with
+last-known-good rollback, DEB/RPM packaging, Kubernetes deployment examples,
+FFI ABI layout verification, and CI supply-chain hardening. It also includes
+Prometheus-compatible metrics, decision reason codes, rollout and rollback
+guides, parity and evidence workflows for streaming rollout safety, dynamic
+configuration hot-reload, OpenTelemetry tracing, per-path metrics, OS package
+distribution, release automation, performance baseline gating, runtime
+validation reuse, fuzzing workflows, and shared metrics aggregation for
+observability.
 
 ### Key Components
 - Core feature implementation
@@ -489,3 +539,4 @@ For questions, issues, or feature requests, use the [GitHub issue tracker](https
 | 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
 | 0.6.3 | 2026-05-13 | Kang | Version bump to 0.6.3 for release |
+| 0.7.0 | 2026-05-25 | Kang | Version bump to 0.7.0; add Rust-first architecture, decompression budget, diagnostics, dynconf dry-run, DEB/RPM, K8s, FFI ABI verification, CI supply-chain hardening |
