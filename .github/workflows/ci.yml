@@ -583,18 +583,12 @@ jobs:
             zlib1g-dev
 
           NFPM_VERSION="2.46.3"
-          NFPM_SHA256="PLACEHOLDER_REPLACE_WITH_ACTUAL_NFPM_SHA256"
           NFPM_TARBALL="nfpm_${NFPM_VERSION}_Linux_x86_64.tar.gz"
           curl -fsSL -o "${NFPM_TARBALL}" "https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}/${NFPM_TARBALL}"
-          if [ "${NFPM_SHA256}" != "PLACEHOLDER_REPLACE_WITH_ACTUAL_NFPM_SHA256" ]; then
-            ACTUAL_SHA256=$(sha256sum "${NFPM_TARBALL}" | cut -d' ' -f1)
-            if [ "${ACTUAL_SHA256}" != "${NFPM_SHA256}" ]; then
-              echo "ERROR: SHA256 mismatch for nfpm" >&2; exit 1
-            fi
-            echo "SHA256 verified for nfpm"
-          else
-            echo "WARNING: nFPM SHA256 is a placeholder, skipping verification"
-          fi
+          chmod +x packaging/scripts/verify-checksum.sh
+          packaging/scripts/verify-checksum.sh \
+            -f "${NFPM_TARBALL}" \
+            -i "nfpm-${NFPM_VERSION}-linux-x86_64"
           sudo tar -xz -C /usr/local/bin nfpm -f "${NFPM_TARBALL}"
           nfpm --version
 

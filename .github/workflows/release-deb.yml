@@ -80,21 +80,11 @@ jobs:
           mkdir -p /tmp/nginx-build
           cd /tmp/nginx-build
           curl -sSfL "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" -o nginx.tar.gz
-          EXPECTED_SHA256=$(python3 -c "
-          import yaml
-          with open('packaging/nginx-checksums.yaml') as f:
-              data = yaml.safe_load(f)
-          print(data['checksums']['${NGINX_VERSION}'])
-          " 2>/dev/null || echo "PLACEHOLDER")
-          if [ "${EXPECTED_SHA256}" != "PLACEHOLDER" ] && [ "${EXPECTED_SHA256%%PLACEHOLDER*}" = "" ]; then
-            echo "WARNING: SHA256 for nginx ${NGINX_VERSION} is a placeholder, skipping verification"
-          elif [ "${EXPECTED_SHA256}" != "PLACEHOLDER" ]; then
-            ACTUAL_SHA256=$(sha256sum nginx.tar.gz | cut -d' ' -f1)
-            if [ "${ACTUAL_SHA256}" != "${EXPECTED_SHA256}" ]; then
-              echo "ERROR: SHA256 mismatch for nginx tarball" >&2; exit 1
-            fi
-            echo "SHA256 verified for nginx tarball"
-          fi
+          chmod +x "${GITHUB_WORKSPACE}/packaging/scripts/verify-checksum.sh"
+          "${GITHUB_WORKSPACE}/packaging/scripts/verify-checksum.sh" \
+            -f nginx.tar.gz \
+            -i "nginx-${NGINX_VERSION}" \
+            -c "${GITHUB_WORKSPACE}/packaging/checksums.sha256"
           tar xzf nginx.tar.gz
           echo "NGINX_SRC=/tmp/nginx-build/nginx-${NGINX_VERSION}" >> "$GITHUB_ENV"
 
