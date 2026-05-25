@@ -9,13 +9,23 @@ paths:
 ## Shell Script Hygiene & Portability
 
 ### 11. Shell portability and environment assumptions
-Historical issues: `f0a98fc`, `55b9170`, `5a8b5ee`, `092f04f`.
+Historical issues: `f0a98fc`, `55b9170`, `5a8b5ee`, `092f04f`, `fe8b8cdd`.
 
 Required:
 - Assume macOS bash 3.2 compatibility unless script is explicitly version-pinned.
 - Avoid GNU/PCRE-only flags (for example `grep -P`) in portable SOP/scripts.
 - Use null-delimited file traversal for file-path safety.
 - Ensure temporary directories are traversable by unprivileged worker processes when runtime depends on them.
+- **Empty array expansion under `set -u`**: bash 3.2 treats `${arr[@]}` as an
+  unbound variable error when the array is empty.  Use the conditional
+  expansion pattern `${arr[@]+"${arr[@]}"}` (or `${arr[@]:+"${arr[@]}"}`
+  with the colon variant) to safely expand potentially-empty arrays.
+  This applies to all scripts that use `set -u` or `set -euo pipefail`.
+- **Heredoc variable references**: variables referenced inside heredocs
+  (`<<EOF ... $var ... EOF`) must be defined before the heredoc.  Under
+  `set -u`, an undefined variable inside a heredoc causes immediate script
+  termination without a clear error message.  Use `[[ -n "${var:-}" ]]`
+  guards or default values for optional heredoc variables.
 
 ---
 

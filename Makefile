@@ -208,6 +208,9 @@ harness-security-checks:
 	bash tools/harness/detect_live_conf_reads.sh
 	bash tools/harness/detect_shell_hygiene.sh tools/
 	python3 tools/harness/detect_const_correctness.py components/nginx-module/src
+	bash tools/harness/detect_ci_supply_chain.sh
+	bash tools/harness/detect_header_hash_filter.sh
+	bash tools/harness/detect_finalize_return.sh
 
 license-check:
 	python3 tools/ci/check_c_licenses.py
