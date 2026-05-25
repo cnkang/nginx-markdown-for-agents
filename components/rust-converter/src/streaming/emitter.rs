@@ -19,6 +19,9 @@ use crate::streaming::budget::MemoryBudget;
 use crate::streaming::sanitizer::is_dangerous_url;
 use crate::streaming::state_machine::{StateMachineAction, StructuralContext};
 
+/// Escape a link label for safe Markdown output.
+/// Mirrors [`crate::security::escape_link_label`] — keeps the logic local to
+/// the streaming emitter so the hot path avoids a cross-module call.
 pub(crate) fn escape_link_label(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 8);
     for ch in s.chars() {
