@@ -167,9 +167,8 @@ ngx_http_markdown_metrics_handler(ngx_http_request_t *r)
 static ngx_int_t
 ngx_ascii_strncasecmp(const u_char *s1, const u_char *s2, size_t n)
 {
-    size_t i;
 
-    for (i = 0; i < n; i++) {
+    for (size_t i = 0; i < n; i++) {
         u_char c1;
         u_char c2;
 
@@ -207,12 +206,12 @@ ngx_ascii_strncasecmp(const u_char *s1, const u_char *s2, size_t n)
 static ngx_int_t
 ngx_strcasecmp(u_char *s1, u_char *s2)
 {
-    size_t i;
 
     if (s1 == NULL || s2 == NULL) {
         return NGX_ERROR;
     }
 
+    size_t i;
     i = 0;
     while (s1[i] != '\0' && s2[i] != '\0') {
         ngx_int_t diff;
@@ -678,7 +677,7 @@ test_markdown_filter_handler(void)
     ngx_str_t                values[2];
     ngx_command_t            cmd;
     ngx_http_markdown_conf_t mcf;
-    char                    *rc;
+    const char              *rc;
 
     TEST_SUBSECTION("markdown_filter handler");
 
@@ -752,7 +751,7 @@ test_simple_enum_handlers(void)
     ngx_str_t                values[2];
     ngx_command_t            cmd;
     ngx_http_markdown_conf_t mcf;
-    char                    *rc;
+    const char              *rc;
 
     TEST_SUBSECTION("on_error/flavor/auth_policy handlers");
 
@@ -829,8 +828,8 @@ test_auth_cookies_handler(void)
     ngx_str_t                values[4];
     ngx_command_t            cmd;
     ngx_http_markdown_conf_t mcf;
-    ngx_str_t               *elts;
-    char                    *rc;
+    const ngx_str_t         *elts;
+    const char              *rc;
 
     TEST_SUBSECTION("auth_cookies handler");
 
@@ -886,7 +885,7 @@ test_conditional_and_log_verbosity_handlers(void)
     ngx_str_t                values[2];
     ngx_command_t            cmd;
     ngx_http_markdown_conf_t mcf;
-    char                    *rc;
+    const char              *rc;
 
     TEST_SUBSECTION("conditional_requests/log_verbosity handlers");
 
@@ -957,7 +956,7 @@ test_stream_types_handler(void)
     ngx_str_t                values[3];
     ngx_command_t            cmd;
     ngx_http_markdown_conf_t mcf;
-    char                    *rc;
+    const char              *rc;
 
     TEST_SUBSECTION("stream_types handler");
 
@@ -1026,7 +1025,7 @@ test_large_body_threshold_handler(void)
     ngx_str_t                values[2];
     ngx_command_t            cmd;
     ngx_http_markdown_conf_t mcf;
-    char                    *rc;
+    const char              *rc;
 
     TEST_SUBSECTION("large_body_threshold handler");
 
@@ -1116,7 +1115,7 @@ test_metrics_handlers(void)
     ngx_command_t              cmd;
     ngx_http_markdown_conf_t   mcf;
     ngx_http_core_loc_conf_t   clcf;
-    char                      *rc;
+    const char                *rc;
 
     TEST_SUBSECTION("metrics handlers");
 
@@ -1190,7 +1189,7 @@ test_streaming_engine_handler(void)
     ngx_str_t                values[2];
     ngx_command_t            cmd;
     ngx_http_markdown_conf_t mcf;
-    char                    *rc;
+    const char              *rc;
 
     TEST_SUBSECTION("streaming_engine handler");
 
@@ -1321,7 +1320,7 @@ test_markdown_filter_palloc_failure(void)
     ngx_str_t                values[2];
     ngx_command_t            cmd;
     ngx_http_markdown_conf_t mcf;
-    char                    *rc;
+    const char              *rc;
 
     TEST_SUBSECTION("markdown_filter palloc failure");
 
@@ -1361,7 +1360,7 @@ test_set_dynconf_path(void)
     ngx_str_t                  values[2];
     ngx_command_t              cmd;
     ngx_http_markdown_conf_t   mcf;
-    char                      *rc;
+    const char                *rc;
 
     TEST_SUBSECTION("set_dynconf_path handler");
 
@@ -1411,8 +1410,8 @@ test_markdown_content_types_handler(void)
     ngx_str_t                values[3];
     ngx_command_t            cmd;
     ngx_http_markdown_conf_t mcf;
-    ngx_str_t               *types;
-    char                    *rc;
+    const ngx_str_t         *types;
+    const char              *rc;
 
     TEST_SUBSECTION("markdown_content_types handler");
 
@@ -1456,6 +1455,9 @@ test_markdown_content_types_handler(void)
 int
 main(void)
 {
+    /* Suppress -Wunused-function for functions not exercised by this test */
+    (void) ngx_http_markdown_diagnostics_directive;
+
     printf("\n========================================\n");
     printf("config_handlers_impl Tests\n");
     printf("========================================\n");

@@ -262,7 +262,7 @@ test_v070_defaults_both_unset(void)
     ngx_conf_t cf;
     ngx_http_markdown_conf_t *parent;
     ngx_http_markdown_conf_t *child;
-    char *rc;
+    const char *rc;
 
     TEST_SUBSECTION("v0.7.0 defaults: both parent and child unset (0.6.x compat)");
 
@@ -341,7 +341,7 @@ test_decompress_max_size_tracks_memory_budget(void)
     ngx_conf_t cf;
     ngx_http_markdown_conf_t *parent;
     ngx_http_markdown_conf_t *child;
-    char *rc;
+    const char *rc;
 
     TEST_SUBSECTION("decompress_max_size tracks memory_budget override");
 
@@ -384,7 +384,7 @@ test_explicit_decompress_max_size_preserved(void)
     ngx_conf_t cf;
     ngx_http_markdown_conf_t *parent;
     ngx_http_markdown_conf_t *child;
-    char *rc;
+    const char *rc;
 
     TEST_SUBSECTION("explicit decompress_max_size preserved");
 
@@ -426,7 +426,7 @@ test_v070_directives_inherit_from_parent(void)
     ngx_conf_t cf;
     ngx_http_markdown_conf_t *parent;
     ngx_http_markdown_conf_t *child;
-    char *rc;
+    const char *rc;
 
     TEST_SUBSECTION("v0.7.0 directives inherit from parent");
 
@@ -471,7 +471,7 @@ test_v070_directives_child_override(void)
     ngx_conf_t cf;
     ngx_http_markdown_conf_t *parent;
     ngx_http_markdown_conf_t *child;
-    char *rc;
+    const char *rc;
 
     TEST_SUBSECTION("v0.7.0 directives child override");
 
@@ -522,7 +522,7 @@ test_06x_defaults_unchanged(void)
     ngx_conf_t cf;
     ngx_http_markdown_conf_t *parent;
     ngx_http_markdown_conf_t *child;
-    char *rc;
+    const char *rc;
 
     TEST_SUBSECTION("0.6.x defaults unchanged in 0.7.0");
 
@@ -577,6 +577,11 @@ test_06x_defaults_unchanged(void)
 int
 main(void)
 {
+    /* Suppress -Wunused-function for functions not exercised by this test */
+    (void) ngx_http_markdown_compression_name;
+    (void) ngx_http_markdown_init_main_conf;
+    (void) ngx_http_markdown_create_main_conf;
+
     ngx_shm_zone_t zone;
 
     memset(&zone, 0, sizeof(zone));

@@ -23,6 +23,7 @@
 #define NGX_OK         0
 #define NGX_ERROR     -1
 
+#undef NGX_LOG_ERR
 #define NGX_LOG_ERR    4
 #define NGX_LOG_DEBUG  8
 #define NGX_LOG_DEBUG_HTTP  NGX_LOG_DEBUG
@@ -139,6 +140,7 @@ ngx_strncasecmp(u_char *s1, u_char *s2, size_t n)
 #define ngx_memcpy memcpy
 
 /* Stub ngx_log_error / ngx_log_debug1 */
+#undef ngx_log_error
 #define ngx_log_error(level, log, err, ...) (void)0
 #define ngx_log_debug1(level, log, err, fmt, arg) (void)0
 
@@ -167,9 +169,8 @@ typedef struct {
 static ngx_table_elt_t *
 find_header(const u_char *name, size_t name_len)
 {
-    ngx_uint_t i;
 
-    for (i = 0; i < g_header_count; i++) {
+    for (ngx_uint_t i = 0; i < g_header_count; i++) {
         if (g_headers[i].hash == 0) {
             continue;
         }
