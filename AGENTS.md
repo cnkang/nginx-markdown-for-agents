@@ -93,7 +93,7 @@ Full rule text, historical issues, and verification commands: `docs/harness/rule
 | 15 | ffi-crosslang | Rust FFI changes → update all boundaries; prefer helpers over literal init; read before free |
 | 16 | testing-coverage | No dead stores; loop vars in for; every var consumed by TEST_ASSERT |
 | 17 | complexity | Keep function complexity at/below threshold; extract helpers; prefer early-return |
-| 18 | shell | case has default; messages to stderr; explicit return; usage matches flags |
+| 18 | shell | case has default; `[[` over `[`; messages to stderr; explicit return; merge nested if; usage matches flags |
 | 19 | python-tooling | Binary prerequisites validate executability; harness checks affect pass/fail |
 | 20 | testing-coverage | Don't mark tasks complete without verification; generate artifacts and verify shape |
 | 21 | warnings-triage | Treat warnings as triage items; prefer fixing over blanket allow |
@@ -188,8 +188,9 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
 - Coverage: 80% aggregate (90% critical paths) [25]
 
 **Shell** (S)
-- case has default; messages to stderr; explicit return; usage matches flags [18]
+- Use `[[` for all conditional tests (not `[`); case has default `*)`; messages to stderr; explicit return; usage matches flags [18]
 - macOS bash 3.2 compatible; no GNU-only flags; empty array expansion safe under set -u [11]
+- Merge nested `if` without `else` into compound `&&` conditions [18]
 - No unsanitized path interpolation [12]
 
 **CI/Workflows** (CI)
