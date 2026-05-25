@@ -609,8 +609,12 @@ impl IncrementalEmitter {
                         }
                     }
                 }
+                /* Budget check: combined pending buffer + code_block_buffer
+                 * + new bytes + fence overhead must stay within budget. */
+                self.check_code_block_budget(prefixed.len())?;
                 self.code_block_buffer.extend_from_slice(&prefixed);
             } else {
+                self.check_code_block_budget(text.len())?;
                 self.code_block_buffer.extend_from_slice(text.as_bytes());
             }
             self.last_was_newline = text.ends_with('\n');
@@ -918,6 +922,28 @@ impl IncrementalEmitter {
     fn check_buffer_budget(&self, additional: usize) -> Result<(), ConversionError> {
         self.budget
             .check_output_buffer(self.buffer.len(), additional)
+    }
+
+    /// Check that adding `additional` bytes to the code block buffer won't
+    /// exceed the output budget when the full code block is eventually flushed.
+    ///
+    /// The effective usage is: pending buffer + existing code_block_buffer +
+    /// new bytes + fence overhead (opening fence + closing fence + newlines).
+    /// This ensures that an oversized `<pre><code>` block triggers
+    /// `BudgetExceeded` incrementally during accumulation rather than only
+    /// at code block exit.
+    fn check_code_block_budget(&self, additional: usize) -> Result<(), ConversionError> {
+        /* Fence overhead: opening fence (backticks + lang + newline) +
+         * closing fence (backticks + newline). Conservative upper bound:
+         * max fence length 10 + lang 32 + 2 newlines + closing fence 10 + 1 = ~55 bytes. */
+        const FENCE_OVERHEAD: usize = 64;
+        let effective_current = self
+            .buffer
+            .len()
+            .saturating_add(self.code_block_buffer.len())
+            .saturating_add(FENCE_OVERHEAD);
+        self.budget
+            .check_output_buffer(effective_current, additional)
     }
 
     /// Flushes pending output into the ready/flushed buffer and records a flush point.
@@ -2142,5 +2168,58 @@ mod tests {
     #[test]
     fn test_escape_link_label_with_newline() {
         assert_eq!(escape_link_label("a\nb"), "a b");
+    }
+
+    #[test]
+    fn test_code_block_budget_exceeded_during_accumulation() {
+        /* Verify that an oversized <pre><code> block triggers BudgetExceeded
+         * incrementally during text accumulation, not only at code block exit.
+         * This is the regression test for the streaming code block buffering
+         * budget enforcement fix. */
+        let budget = MemoryBudget {
+            output_buffer: 256, // very small budget
+            ..MemoryBudget::default()
+        };
+        let mut emitter = IncrementalEmitter::new(&budget);
+        let mut sm = StructuralStateMachine::new(&budget);
+
+        // Enter code block
+        let action = sm
+            .process_event(&StreamEvent::StartTag {
+                name: "pre".to_string(),
+                attrs: vec![],
+                self_closing: false,
+            })
+            .unwrap();
+        emitter.process_action(&action, &mut sm).unwrap();
+
+        let action = sm
+            .process_event(&StreamEvent::StartTag {
+                name: "code".to_string(),
+                attrs: vec![],
+                self_closing: false,
+            })
+            .unwrap();
+        emitter.process_action(&action, &mut sm).unwrap();
+
+        // Feed text chunks that exceed the budget (256 bytes)
+        let chunk = "x".repeat(100);
+        let mut budget_exceeded = false;
+        for _ in 0..10 {
+            let action = sm
+                .process_event(&StreamEvent::Text(chunk.clone()))
+                .unwrap();
+            if let Err(ConversionError::BudgetExceeded { .. }) =
+                emitter.process_action(&action, &mut sm)
+            {
+                budget_exceeded = true;
+                break;
+            }
+        }
+        assert!(
+            budget_exceeded,
+            "Expected BudgetExceeded during code block text accumulation, \
+             but all 1000 bytes were accepted into a 256-byte budget"
+        );
     }
 }
