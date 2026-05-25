@@ -36,6 +36,20 @@ Required:
   When changing a parameter from non-const to const (or vice versa), update
   all call sites, forward declarations, and header prototypes in the same
   change set.
+- **NGINX callback signature exception**: do not add `const` to parameters
+  whose type is dictated by NGINX framework callback signatures.  Key
+  examples:
+  - `ngx_command_t.set` handler: `ngx_command_t *cmd` must remain non-const
+    (the NGINX `ngx_command_s` struct defines `set` as
+    `char *(*set)(ngx_conf_t *, ngx_command_t *, void *)`)
+  - `ngx_http_handler_pt`: `ngx_http_request_t *r` must remain non-const
+  - `ngx_http_output_header_filter_pt` / `ngx_http_output_body_filter_pt`:
+    parameters must match the NGINX-defined function pointer types exactly
+  
+  Adding `const` to these parameters causes function-pointer type mismatches
+  that may compile with warnings but produce undefined behavior at runtime.
+  Before adding `const` to any callback parameter, verify the parameter type
+  against the NGINX header that defines the callback signature.
 - Forward declarations must not shadow or redeclare NGINX macro identifiers
   (for example `ngx_log_error`, `ngx_memzero`, `ngx_str_set`). Before adding a
   declaration in impl headers, confirm the symbol is not a macro in NGINX
