@@ -46,6 +46,7 @@ set -euo pipefail
 
 readonly SCAN_DIR="${1:-tools}"
 readonly SCRIPT_NAME="$(basename "$0")"
+readonly MSG_NONE_FOUND="  (none found)"
 
 errors=0
 warnings=0
@@ -141,7 +142,7 @@ while IFS= read -r script_file; do
 done < <(find "$SCAN_DIR" -name '*.sh' -type f 2>/dev/null | sort)
 
 if [[ "$return_hits" -eq 0 ]]; then
-    echo "  (none found)" >&2
+    echo "$MSG_NONE_FOUND" >&2
 fi
 echo "" >&2
 
@@ -191,7 +192,7 @@ while IFS= read -r match; do
 done < <(grep -rnE '(echo|printf)[[:space:]].*\b(INFO|WARN|WARNING|DEBUG|ERROR|SUGGEST)\b' "$SCAN_DIR" --include='*.sh' 2>/dev/null | grep -vE '>&2' || true)
 
 if [[ "$stderr_hits" -eq 0 ]]; then
-    echo "  (none found)" >&2
+    echo "$MSG_NONE_FOUND" >&2
 fi
 echo "" >&2
 
@@ -249,7 +250,7 @@ while IFS= read -r match; do
 done < <(grep -rnE '(^|[[:space:];])(if|while|until|elif)[[:space:]]+\[[[:space:]][^[]' "$SCAN_DIR" --include='*.sh' 2>/dev/null || true)
 
 if [[ "$bracket_hits" -eq 0 ]]; then
-    echo "  (none found)" >&2
+    echo "$MSG_NONE_FOUND" >&2
 fi
 echo "" >&2
 
@@ -291,7 +292,7 @@ while IFS= read -r script_file; do
 done < <(find "$SCAN_DIR" -name '*.sh' -type f 2>/dev/null | sort)
 
 if [[ "$case_hits" -eq 0 ]]; then
-    echo "  (none found)" >&2
+    echo "$MSG_NONE_FOUND" >&2
 fi
 echo "" >&2
 
@@ -328,7 +329,7 @@ while IFS= read -r match; do
 done < <(grep -rnE 'curl[[:space:]].*-X[[:space:]]+HEAD' "$SCAN_DIR" --include='*.sh' 2>/dev/null || true)
 
 if [[ "$curl_head_hits" -eq 0 ]]; then
-    echo "  (none found)" >&2
+    echo "$MSG_NONE_FOUND" >&2
 fi
 echo "" >&2
 
