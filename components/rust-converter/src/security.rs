@@ -813,7 +813,8 @@ pub fn parse_forwarded_headers(
 /// Escape a string for safe use as a Markdown link label.
 ///
 /// Per CommonMark §4.7, link labels may contain backslash escapes.
-/// Escape: `[`, `]`, `\`.
+/// Escape: `[`, `]`, `\`. Newlines are replaced with spaces to prevent
+/// injection via line breaks within link labels.
 pub fn escape_link_label(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 8);
     for ch in s.chars() {
@@ -822,6 +823,7 @@ pub fn escape_link_label(s: &str) -> String {
                 out.push('\\');
                 out.push(ch);
             }
+            '\n' | '\r' => out.push(' '),
             _ => out.push(ch),
         }
     }
@@ -1031,6 +1033,8 @@ mod url_validation_tests {
     #[test]
     fn test_escape_link_label() {
         assert_eq!(escape_link_label("foo [bar] baz"), r"foo \[bar\] baz");
+        assert_eq!(escape_link_label("a\nb"), "a b");
+        assert_eq!(escape_link_label("a\rb"), "a b");
     }
 
     #[test]
