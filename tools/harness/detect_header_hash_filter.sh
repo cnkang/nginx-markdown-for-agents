@@ -26,13 +26,12 @@ fi
 # and check if they also contain hash == 0 filtering nearby
 while IFS= read -r file; do
     # Check if this file has header iteration patterns combined with header types
+    # and lacks hash == 0 filtering
     if grep -q 'part->nelts\|part\.nelts' "$file" 2>/dev/null \
-        && grep -q 'headers\|ngx_table_elt_t' "$file" 2>/dev/null; then
-        # Check if hash == 0 or hash==0 or .hash == 0 filtering exists
-        if ! grep -q 'hash == 0\|hash==0\|\.hash\s*==\s*0\|->hash\s*==\s*0' "$file" 2>/dev/null; then
-            echo "  [WARN] Header iteration without hash==0 filter: $file" >&2
-            VIOLATIONS=$((VIOLATIONS + 1))
-        fi
+        && grep -q 'headers\|ngx_table_elt_t' "$file" 2>/dev/null \
+        && ! grep -q 'hash == 0\|hash==0\|\.hash\s*==\s*0\|->hash\s*==\s*0' "$file" 2>/dev/null; then
+        echo "  [WARN] Header iteration without hash==0 filter: $file" >&2
+        VIOLATIONS=$((VIOLATIONS + 1))
     fi
 done < <(find "$SRC_DIR" -name '*.c' -o -name '*.h' 2>/dev/null)
 
