@@ -137,6 +137,16 @@ list_rpm_contents() {
 # Validation
 # ---------------------------------------------------------------------------
 
+# normalize_path — normalize paths for comparison
+# Strips leading "./" prefix (dpkg-deb style) and ensures leading "/",
+# then collapses repeated slashes.
+# Arguments: reads from stdin
+# Outputs: normalized paths to stdout
+normalize_path() {
+    sed 's#^\./##' | sed 's#^[^/]#/&#' | sed 's#//*#/#g'
+    return 0
+}
+
 # check_path_present — check if a required path is present in content listing
 # Arguments: $1 = required path, $2 = content listing (newline-separated)
 # Returns: 0 if found, 1 if not found
@@ -144,8 +154,8 @@ check_path_present() {
     local required="$1"
     local contents="$2"
 
-    # Match with or without leading "./" prefix (dpkg-deb uses ./ prefix)
-    if printf '%s\n' "$contents" | grep -qF "$required"; then
+    # Exact line match after normalizing ./ prefixes and repeated slashes
+    if printf '%s\n' "$contents" | normalize_path | grep -qxF "$required"; then
         return 0
     fi
 
@@ -198,19 +208,18 @@ validate_package() {
             ;;
     esac
 
-    # Check each required path
-    local old_ifs="$IFS"
-    IFS='
-'
-    for required_path in $REQUIRED_PATHS; do
+    # Check each required path using a while-read loop (newline-safe)
+    while IFS= read -r required_path; do
+        [[ -n "$required_path" ]] || continue
         if check_path_present "$required_path" "$contents"; then
             log_info "  found: $required_path"
         else
             log_fail "  missing: $required_path"
             missing_count=$((missing_count + 1))
         fi
-    done
-    IFS="$old_ifs"
+    done <<EOF_PATHS
+$REQUIRED_PATHS
+EOF_PATHS
 
     # Report result
     if [[ "$missing_count" -gt 0 ]]; then
