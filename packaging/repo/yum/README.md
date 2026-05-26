@@ -57,16 +57,22 @@ sudo dnf install nginx-module-markdown
 
 ### 4. Enable the module
 
-After installation, enable the module in your NGINX configuration:
+After installation, add the `load_module` directive to the **main context**
+(top-level) of your NGINX configuration — it must appear before any `http`
+block:
 
 ```bash
-# Add load_module directive to nginx.conf (top-level, before http block):
-echo 'load_module modules/ngx_http_markdown_filter_module.so;' | \
-    sudo tee /etc/nginx/conf.d/mod-markdown.conf
+# Add load_module directive to the main context of nginx.conf:
+sudo sed -i '1i load_module modules/ngx_http_markdown_filter_module.so;' \
+    /etc/nginx/nginx.conf
 
 # Test and reload
 sudo nginx -t && sudo systemctl reload nginx
 ```
+
+> **Note:** The `load_module` directive is only valid in the main context.
+> Placing it inside a `conf.d/` fragment that is included within the `http`
+> block will cause an NGINX configuration error.
 
 ### 5. Verify
 

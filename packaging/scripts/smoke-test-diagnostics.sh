@@ -36,7 +36,7 @@ section() {
 ##############################################################################
 
 MODULE_PATH_DEB="/usr/lib/nginx/modules/ngx_http_markdown_filter_module.so"
-MODULE_PATH_RPM="/usr/lib64/nginx/modules/ngx_http_markdown_filter_module.so"
+MODULE_PATH_RPM="/usr/lib/nginx/modules/ngx_http_markdown_filter_module.so"
 
 ##############################################################################
 # Diagnostics collection

@@ -219,10 +219,16 @@ REPO
 
         # --- RPM: Add load_module to nginx.conf top ---
         info "Adding load_module directive to top of nginx.conf..."
-        if [ -f /etc/nginx/nginx.conf ]; then
-            sed -i '1i load_module modules/ngx_http_markdown_filter_module.so;' \
-                /etc/nginx/nginx.conf \
-                || die "Failed to add load_module to nginx.conf"
+        if [[ -f /etc/nginx/nginx.conf ]]; then
+            _tmp="$(mktemp /etc/nginx/nginx.conf.XXXXXX)" \
+                || die "Failed to create temp file for nginx.conf prepend"
+            printf '%s\n' 'load_module modules/ngx_http_markdown_filter_module.so;' \
+                > "$_tmp" \
+                || die "Failed to write load_module line to temp file"
+            cat /etc/nginx/nginx.conf >> "$_tmp" \
+                || die "Failed to append original nginx.conf to temp file"
+            mv -f "$_tmp" /etc/nginx/nginx.conf \
+                || die "Failed to move temp file over nginx.conf"
         else
             die "/etc/nginx/nginx.conf not found"
         fi
