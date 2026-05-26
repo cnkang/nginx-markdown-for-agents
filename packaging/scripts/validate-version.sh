@@ -9,10 +9,11 @@
 #   version    Semantic version string to validate
 #
 # Valid examples:
-#   0.7.0, 1.0.0, 0.7.0-beta.1, 1.2.3-rc1
+#   0.7.0, 1.0.0, 1.2.3
 #
 # Invalid examples:
-#   v0.7.0 (no 'v' prefix allowed), 0.7 (missing patch), 0.7.0- (trailing dash)
+#   v0.7.0 (no 'v' prefix allowed), 0.7 (missing patch), 0.7.0- (trailing dash),
+#   0.7.0-rc.1 (prerelease suffixes not allowed for package releases)
 #
 # On valid input:
 #   Outputs the validated version to stdout, exits 0
@@ -39,7 +40,7 @@ set -euo pipefail
 # Constants
 ##############################################################################
 
-readonly VERSION_REGEX='^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$'
+readonly VERSION_REGEX='^[0-9]+\.[0-9]+\.[0-9]+$'
 readonly SCRIPT_NAME="${0##*/}"
 
 ##############################################################################
@@ -49,7 +50,7 @@ readonly SCRIPT_NAME="${0##*/}"
 usage() {
     printf 'Usage: %s <version>\n' "${SCRIPT_NAME}" >&2
     printf 'Example: %s 0.7.0\n' "${SCRIPT_NAME}" >&2
-    printf 'Example: %s 1.2.3-beta.1\n' "${SCRIPT_NAME}" >&2
+    printf 'Example: %s 1.2.3\n' "${SCRIPT_NAME}" >&2
     return 1
 }
 
@@ -77,7 +78,7 @@ main() {
 
             if ! printf '%s' "${version}" | grep -qE "${VERSION_REGEX}"; then
                 err "Invalid version format: '${version}'"
-                printf 'Expected: MAJOR.MINOR.PATCH[-prerelease]\n' >&2
+                printf 'Expected: MAJOR.MINOR.PATCH (no prerelease suffix)\n' >&2
                 printf 'Pattern: %s\n' "${VERSION_REGEX}" >&2
                 return 1
             fi

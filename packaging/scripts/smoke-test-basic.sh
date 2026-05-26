@@ -125,13 +125,22 @@ case "$PKG_FORMAT" in
             | gpg --dearmor -o /usr/share/keyrings/nginx-archive-keyring.gpg \
             2>>"${INSTALL_LOG}" || die "Failed to import nginx.org signing key"
 
-        # Add nginx.org stable repository
-        printf 'deb [signed-by=/usr/share/keyrings/nginx-archive-keyring.gpg] http://nginx.org/packages/debian %s nginx\n' \
-            "$(. /etc/os-release && echo "$VERSION_CODENAME")" \
-            > /etc/apt/sources.list.d/nginx.list 2>>"${INSTALL_LOG}" \
-            || printf 'deb [signed-by=/usr/share/keyrings/nginx-archive-keyring.gpg] http://nginx.org/packages/ubuntu %s nginx\n' \
-                "$(. /etc/os-release && echo "$VERSION_CODENAME")" \
-                > /etc/apt/sources.list.d/nginx.list 2>>"${INSTALL_LOG}" \
+        # Add nginx.org stable repository — select path based on distro ID
+        . /etc/os-release
+        case "${ID:-}" in
+            ubuntu)
+                NGINX_REPO_DIST="ubuntu"
+                ;;
+            debian)
+                NGINX_REPO_DIST="debian"
+                ;;
+            *)
+                die "Unsupported DEB smoke-test distribution: ID=${ID:-unknown}"
+                ;;
+        esac
+        printf 'deb [signed-by=/usr/share/keyrings/nginx-archive-keyring.gpg] https://nginx.org/packages/%s %s nginx\n' \
+            "$NGINX_REPO_DIST" "$VERSION_CODENAME" \
+            > /etc/apt/sources.list.d/nginx.list \
             || die "Failed to add nginx.org repository"
 
         apt-get update -qq >>"${INSTALL_LOG}" 2>&1 || die "apt-get update (post-repo) failed"
@@ -186,19 +195,28 @@ gpgkey=https://nginx.org/keys/nginx_signing.key
 module_hotfixes=true
 REPO
 
-        # Try to install NGINX; fall back to Amazon Linux repo path if needed
+        # Try to install NGINX — no fallback to unversioned package (F-03)
         info "Installing nginx-${NGINX_VERSION} from nginx.org..."
         if command -v dnf >/dev/null 2>&1; then
             dnf install -y "nginx-${NGINX_VERSION}" >"${INSTALL_LOG}" 2>&1 \
-                || dnf install -y nginx >"${INSTALL_LOG}" 2>&1 \
                 || die "Failed to install nginx-${NGINX_VERSION} via dnf"
         elif command -v yum >/dev/null 2>&1; then
             yum install -y "nginx-${NGINX_VERSION}" >"${INSTALL_LOG}" 2>&1 \
-                || yum install -y nginx >"${INSTALL_LOG}" 2>&1 \
                 || die "Failed to install nginx-${NGINX_VERSION} via yum"
         else
             die "Neither dnf nor yum found"
         fi
+
+        # Verify installed NGINX version matches the target
+        installed_version="$(nginx -v 2>&1 || true)"
+        case "$installed_version" in
+            *"nginx/${NGINX_VERSION}"*)
+                info "Verified installed NGINX version: ${installed_version}"
+                ;;
+            *)
+                die "Installed NGINX version does not match ${NGINX_VERSION}: ${installed_version}"
+                ;;
+        esac
 
         # --- RPM: Install module package ---
         info "Installing module package: ${PACKAGE_FILE}"
