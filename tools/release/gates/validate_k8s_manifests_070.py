@@ -36,6 +36,9 @@ CONFIGMAP_TEMPLATE = (
     PROJECT_ROOT / "charts" / "nginx-markdown" / "templates" / "configmap.yaml"
 )
 K8S_MANIFEST_DIR = PROJECT_ROOT / "examples" / "kubernetes" / "manifest"
+GATE4_LOCAL_SCRIPT = PROJECT_ROOT / "tools" / "release" / "gates" / (
+    "gate4_local_k8s_smoke.sh"
+)
 
 CHART_REQUIRED_FIELDS = ["apiVersion", "name", "version", "appVersion"]
 HELM_VALUES_REQUIRED_SNIPPETS = [
@@ -70,6 +73,14 @@ HELM_RENDER_REQUIRED_SNIPPETS = [
     "mountPath: /var/cache/nginx",
     "mountPath: /var/run",
     "mountPath: /tmp",
+]
+GATE4_LOCAL_REQUIRED_SNIPPETS = [
+    "--set markdown.enabled=false",
+    "--kube-context \"$kube_context\"",
+    "kubectl --context \"$kube_context\"",
+    "for volume_name in nginx-cache nginx-run nginx-tmp; do",
+    "CREATED_CLUSTER=1",
+    "Not deleting pre-existing cluster",
 ]
 
 _CHECK_HELM_LINT = "helm:lint"
@@ -252,6 +263,14 @@ def validate_helm_secure_defaults(result: ValidationResult) -> None:
     _validate_helm_deployment(result)
 
 
+def validate_gate4_local_smoke(result: ValidationResult) -> None:
+    """Validate local Gate 4 smoke does not deploy stock NGINX with module config."""
+    _check_file_snippets(
+        GATE4_LOCAL_SCRIPT, GATE4_LOCAL_REQUIRED_SNIPPETS,
+        "gate4:local", "gate4_local_k8s_smoke.sh", result,
+    )
+
+
 _MAX_HELM_OUTPUT = 2048  # Truncate helm output in failure messages
 
 
@@ -345,6 +364,7 @@ def main() -> int:
     validate_chart_yaml(result)
     validate_k8s_manifests(result)
     validate_helm_secure_defaults(result)
+    validate_gate4_local_smoke(result)
     validate_helm_render(result)
     print_report(result)
     return 1 if result.has_failures else 0
