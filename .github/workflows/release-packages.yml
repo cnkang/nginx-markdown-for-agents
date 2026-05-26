@@ -158,15 +158,15 @@ jobs:
       - name: Copy .so to build directory
         run: |
           mkdir -p build
-          cp "${NGINX_SRC}/objs/ngx_http_markdown_module.so" build/
+          cp "${NGINX_SRC}/objs/ngx_http_markdown_filter_module.so" build/
         shell: bash
 
       - name: Verify ELF shared object
         run: |
-          file_output="$(file build/ngx_http_markdown_module.so)"
+          file_output="$(file build/ngx_http_markdown_filter_module.so)"
           echo "${file_output}"
           if ! printf '%s' "${file_output}" | grep -q "ELF"; then
-            echo "ERROR: build/ngx_http_markdown_module.so is not a valid ELF file" >&2
+            echo "ERROR: build/ngx_http_markdown_filter_module.so is not a valid ELF file" >&2
             exit 1
           fi
         shell: bash
@@ -175,7 +175,7 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: module-so-${{ matrix.nginx_version }}-${{ matrix.arch }}
-          path: build/ngx_http_markdown_module.so
+          path: build/ngx_http_markdown_filter_module.so
           if-no-files-found: error
 
   # ─────────────────────────────────────────────────────────────────────────────
@@ -317,7 +317,7 @@ jobs:
       - name: Upload DEB artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: deb-${{ matrix.nginx_version }}-${{ matrix.arch }}
+          name: pkg-deb-${{ matrix.nginx_version }}-${{ matrix.arch }}
           path: dist/${{ steps.pkg-env.outputs.deb_filename }}
           if-no-files-found: error
           retention-days: 5
@@ -325,7 +325,7 @@ jobs:
       - name: Upload RPM artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: rpm-${{ matrix.nginx_version }}-${{ matrix.arch }}
+          name: pkg-rpm-${{ matrix.nginx_version }}-${{ matrix.arch }}
           path: dist/${{ steps.pkg-env.outputs.rpm_filename }}
           if-no-files-found: error
           retention-days: 5
@@ -339,7 +339,7 @@ jobs:
   smoke-test:
     name: Smoke Test - ${{ matrix.container }} (${{ matrix.format }})
     needs: package
-    runs-on: ubuntu-24.04
+    runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
     container: ${{ matrix.container }}
     permissions:
       contents: read
@@ -362,7 +362,7 @@ jobs:
       - name: Download package artifact
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          name: ${{ matrix.format }}-${{ matrix.nginx_version }}-${{ matrix.arch }}
+          name: pkg-${{ matrix.format }}-${{ matrix.nginx_version }}-${{ matrix.arch }}
           path: dist/
 
       - name: Run smoke test

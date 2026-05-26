@@ -61,7 +61,7 @@ After installation, enable the module in your NGINX configuration:
 
 ```bash
 # Add load_module directive to nginx.conf (top-level, before http block):
-echo 'load_module modules/ngx_http_markdown_module.so;' | \
+echo 'load_module modules/ngx_http_markdown_filter_module.so;' | \
     sudo tee /etc/nginx/conf.d/mod-markdown.conf
 
 # Test and reload

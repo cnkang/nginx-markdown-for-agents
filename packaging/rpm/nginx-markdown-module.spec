@@ -34,7 +34,7 @@ make install DESTDIR=%{buildroot}
 %files
 %doc README.md
 %license LICENSE
-%{_libdir}/nginx/modules/ngx_http_markdown_module.so
+%{_libdir}/nginx/modules/ngx_http_markdown_filter_module.so
 
 %changelog
 * Wed May 06 2026 cnkang <liukang@noreply.github.com> - 0.6.1-1
