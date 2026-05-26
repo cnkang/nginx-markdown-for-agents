@@ -47,6 +47,7 @@ RELEASE_DOCKERFILES = [
 CANONICAL_MODULE_SO = "ngx_http_markdown_filter_module.so"
 LEGACY_MODULE_SO = "ngx_http_markdown_module.so"
 CANONICAL_PACKAGE_NAME = "nginx-module-markdown-for-agents"
+_NGINX_VERSION_ASSIGNMENT = "NGINX_VERSION="
 
 NFPM_REQUIRED_SNIPPETS = [
     'name: "nginx-module-markdown-for-agents"',
@@ -268,19 +269,146 @@ def checksum_identifiers() -> set[str]:
     return identifiers
 
 
+def _iter_quote_aware(text: str):
+    """Yield (index, char) for non-quote characters, tracking escape state.
+
+    Quote characters themselves are consumed but never yielded, so callers
+    see only the literal content between matching quotes.
+    """
+    quote: str | None = None
+    escaped = False
+
+    for index, char in enumerate(text):
+        if escaped:
+            yield index, char
+            escaped = False
+            continue
+
+        if quote:
+            if quote == '"' and char == "\\":
+                escaped = True
+                continue
+            if char == quote:
+                quote = None
+                continue
+            yield index, char
+            continue
+
+        if char in {"'", '"'}:
+            quote = char
+            continue
+
+        yield index, char
+
+
+def _strip_unquoted_comment(line: str) -> str:
+    """Strip inline comments while preserving # inside quoted strings."""
+    quote: str | None = None
+    escaped = False
+
+    for index, char in enumerate(line):
+        if escaped:
+            escaped = False
+            continue
+
+        if quote:
+            if quote == '"' and char == "\\":
+                escaped = True
+            elif char == quote:
+                quote = None
+            continue
+
+        if char in {"'", '"'}:
+            quote = char
+            continue
+
+        if char == "#":
+            return line[:index]
+
+    return line
+
+
+def _unquote(value: str) -> str:
+    """Trim whitespace, an optional trailing comma, and matching quotes."""
+    value = value.strip().rstrip(",").strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+        return value[1:-1]
+    return value
+
+
+def _is_nginx_version(value: str) -> bool:
+    """Return True for strict number.number.number versions."""
+    parts = value.split(".")
+    return len(parts) == 3 and all(part.isdigit() for part in parts)
+
+
+def _split_inline_list(value: str) -> list[str]:
+    """Split a one-line YAML-style list without regex."""
+    items: list[str] = []
+    current: list[str] = []
+
+    for _index, char in _iter_quote_aware(value):
+        if char == ",":
+            items.append("".join(current).strip())
+            current = []
+        else:
+            current.append(char)
+
+    if current:
+        items.append("".join(current).strip())
+
+    return items
+
+
+def _extract_nginx_assignment_value(line: str) -> str | None:
+    """Extract shell/Dockerfile-style NGINX_VERSION assignment value."""
+    prefix = _NGINX_VERSION_ASSIGNMENT
+
+    if line.startswith(prefix):
+        return line[len(prefix):].strip()
+
+    if line.startswith("ARG "):
+        parts = line.split(None, 1)
+        if len(parts) == 2 and parts[1].startswith(prefix):
+            return parts[1][len(prefix):].strip()
+
+    return None
+
+
+def _extract_yaml_array_versions(value: str) -> set[str]:
+    """Extract versions from a YAML-style inline array value."""
+    versions: set[str] = set()
+    closing_bracket = value.find("]")
+    if closing_bracket == -1:
+        return versions
+    for item in _split_inline_list(value[1:closing_bracket]):
+        version = _unquote(item)
+        if _is_nginx_version(version):
+            versions.add(version)
+    return versions
+
+
 def extract_nginx_versions(content: str) -> set[str]:
     """Extract NGINX source versions from active release configuration."""
     versions: set[str] = set()
-    # Handle matrix-style arrays: nginx_version: ["1.25.5", "1.26.1"]
-    for match in re.findall(r'nginx_version:\s{0,20}\[([^\]]+)\]', content):
-        versions.update(re.findall(r'(\d+\.\d+\.\d+)', match))
-    # Handle shell/Dockerfile-style declarations
-    patterns = [
-        r'NGINX_VERSION="(\d+\.\d+\.\d+)"',
-        r"ARG\s+NGINX_VERSION=(\d+\.\d+\.\d+)",
-    ]
-    for pattern in patterns:
-        versions.update(re.findall(pattern, content))
+
+    for raw_line in content.splitlines():
+        line = _strip_unquoted_comment(raw_line).strip()
+        if not line:
+            continue
+
+        if line.startswith("nginx_version:"):
+            value = line[len("nginx_version:"):].strip()
+            if value.startswith("["):
+                versions.update(_extract_yaml_array_versions(value))
+            continue
+
+        assignment_value = _extract_nginx_assignment_value(line)
+        if assignment_value is not None:
+            version = _unquote(assignment_value)
+            if _is_nginx_version(version):
+                versions.add(version)
+
     return versions
 
 
