@@ -2,7 +2,10 @@
 from __future__ import annotations
 
 import argparse
+import os
 import re
+import shutil
+import subprocess
 import sys
 import tomllib
 from pathlib import Path
@@ -26,6 +29,10 @@ DECOMPRESSION_C = PROJECT_ROOT / "components" / "nginx-module" / "src" / "ngx_ht
 FILTER_MODULE_H = PROJECT_ROOT / "components" / "nginx-module" / "src" / "ngx_http_markdown_filter_module.h"
 
 GATE_FUTURE = {"Gate 3", "Gate 4"}
+GATE_LOCAL_SCRIPTS = {
+    "Gate 3": "gate3_local_package_smoke.sh",
+    "Gate 4": "gate4_local_k8s_smoke.sh",
+}
 RELEASE_GATES_070_DOC_GATE = "release-gates:070-doc"
 CARGO_VERSION_070_GATE = "cargo:version-070"
 
@@ -50,6 +57,77 @@ class ValidationResult:
 
 def read(path: Path) -> str:
     return path.read_text(encoding="utf-8") if path.is_file() else ""
+
+
+def _run_local_gate(result: ValidationResult, gate: str) -> None:
+    """Run a local Docker-based gate script if prerequisites are available."""
+    script_name = GATE_LOCAL_SCRIPTS.get(gate)
+    if not script_name:
+        result.skip(f"{gate}:scope", "no local script configured")
+        return
+
+    script_path = Path(__file__).resolve().parent / script_name
+    if not script_path.is_file():
+        result.skip(f"{gate}:scope", f"{script_name} not found")
+        return
+
+    # Check if Docker/Podman is available
+    docker_bin = shutil.which("docker") or shutil.which("podman")
+    if not docker_bin:
+        result.skip(
+            f"{gate}:scope",
+            f"Docker/Podman not found; install to run {gate} locally",
+        )
+        return
+
+    # For Gate 4, also check kind/kubectl/helm
+    if gate == "Gate 4":
+        missing = [
+            t for t in ("kind", "kubectl", "helm")
+            if not shutil.which(t)
+        ]
+        if missing:
+            result.skip(
+                f"{gate}:scope",
+                f"missing tools for {gate}: {', '.join(missing)}; "
+                f"install via: brew install {' '.join(missing)}",
+            )
+            return
+
+    # Run the script
+    timeout = 900 if gate == "Gate 3" else 300  # 15 min for builds, 5 min for K8s
+    try:
+        proc = subprocess.run(
+            ["bash", str(script_path)],
+            cwd=PROJECT_ROOT,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        result.fail(f"{gate}:local", f"{gate} local validation timed out")
+        return
+
+    if proc.returncode == 0:
+        result.pass_(f"{gate}:local", f"{gate} local Docker validation passed")
+    elif proc.returncode == 3:
+        # Exit code 3 = prerequisites missing (script prints install instructions)
+        result.skip(
+            f"{gate}:scope",
+            f"{gate} prerequisites not met (see output above for install instructions)",
+        )
+        # Print the script's output so user sees install instructions
+        if proc.stdout:
+            sys.stderr.write(proc.stdout)
+    else:
+        result.fail(f"{gate}:local", f"{gate} local validation failed (rc={proc.returncode})")
+        if proc.stdout:
+            # Print last 30 lines of output for diagnostics
+            lines = proc.stdout.splitlines()
+            for line in lines[-30:]:
+                sys.stderr.write(f"  {line}\n")
 
 
 def _record_blocking_item(
@@ -163,7 +241,13 @@ def check_blocking_items(result: ValidationResult, mode: str) -> None:
     _record_blocking_items(result, blocking_items, report)
 
     for gate in sorted(GATE_FUTURE):
-        result.skip(f"{gate}:scope", "future/feasibility gate; non-blocking in 0.7.0")
+        if os.environ.get("RELEASE_GATE_LOCAL_DOCKER") == "1":
+            _run_local_gate(result, gate)
+        else:
+            result.skip(
+                f"{gate}:scope",
+                "future/feasibility gate; set RELEASE_GATE_LOCAL_DOCKER=1 to run locally via Docker",
+            )
 
 
 def print_report(result: ValidationResult) -> None:
