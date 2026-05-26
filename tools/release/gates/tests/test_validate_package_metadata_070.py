@@ -14,6 +14,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent.parent))
 
 from tools.release.gates.validate_package_metadata_070 import (  # noqa: E402
     FORBIDDEN_NAKED_EXACT_NGINX_DEPS,
+    GATE3_LOCAL_ARCH_SNIPPETS,
+    NFPM_DEB_ONLY_MODULES_AVAILABLE_PATTERN,
+    NFPM_POSTINSTALL_FORBIDDEN_SNIPPETS,
     NFPM_REQUIRED_SNIPPETS,
     NFPM_POSTINSTALL_SNIPPETS,
     SMOKE_RPM_REPO_SNIPPETS,
@@ -313,6 +316,7 @@ class TestReleaseGateSnippetExpectations:
         assert 'nginx (>= ${NGINX_VERSION})' in NFPM_REQUIRED_SNIPPETS
         assert 'nginx (= ${NGINX_VERSION})' not in NFPM_REQUIRED_SNIPPETS
         assert "/usr/lib64/nginx/modules/ngx_http_markdown_filter_module.so" in NFPM_REQUIRED_SNIPPETS
+        assert "packager: deb" in NFPM_DEB_ONLY_MODULES_AVAILABLE_PATTERN
 
     def test_rpm_spec_dependency_uses_non_exact_floor(self) -> None:
         assert "Requires:       nginx >= %{nginx_version}" in STANDALONE_RPM_SPEC_SNIPPETS
@@ -323,6 +327,17 @@ class TestReleaseGateSnippetExpectations:
         validator = './packaging/scripts/validate-version.sh "${{ inputs.version }}"'
         assert validator in STANDALONE_DEB_SNIPPETS
         assert validator in STANDALONE_RPM_WORKFLOW_SNIPPETS
+
+    def test_nfpm_postinstall_doc_path_matches_installed_layout(self) -> None:
+        assert "/usr/share/doc/nginx-markdown-for-agents/README.md" in NFPM_POSTINSTALL_SNIPPETS
+        assert (
+            "/usr/share/doc/nginx-module-markdown-for-agents/README.md"
+            in NFPM_POSTINSTALL_FORBIDDEN_SNIPPETS
+        )
+
+    def test_gate3_local_smoke_selects_arch_specific_packages(self) -> None:
+        assert 'pkg_pattern="*_${ARCH}.deb"' in GATE3_LOCAL_ARCH_SNIPPETS
+        assert 'pkg_pattern="*-1.${RPM_ARCH}.rpm"' in GATE3_LOCAL_ARCH_SNIPPETS
 
     def test_rpm_smoke_repo_selection_covers_amazon_linux(self) -> None:
         assert "amzn)" in SMOKE_RPM_REPO_SNIPPETS

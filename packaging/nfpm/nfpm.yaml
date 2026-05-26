@@ -43,6 +43,7 @@ contents:
   - src: "./packaging/nfpm/modules-available/mod-markdown.conf"
     dst: "/usr/share/nginx/modules-available/mod-markdown.conf"
     type: config|noreplace
+    packager: deb
 
   - src: "./LICENSE"
     dst: "/usr/share/licenses/nginx-markdown-for-agents/LICENSE"

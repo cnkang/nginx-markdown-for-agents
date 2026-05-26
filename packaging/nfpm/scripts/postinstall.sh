@@ -58,7 +58,7 @@ To enable the module:
        sudo systemctl reload nginx
 
 For more information, see:
-  /usr/share/doc/nginx-module-markdown-for-agents/README.md
+  /usr/share/doc/nginx-markdown-for-agents/README.md
 ======================================================================
 EOF
         ;;

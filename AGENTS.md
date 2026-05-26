@@ -233,6 +233,11 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
   NGINX directives, use an explicit kind kube-context for every Helm/kubectl
   operation, count structured pod fields without collapsed one-line jsonpath
   output, and avoid deleting clusters that existed before the test [13]
+- Helm charts that support optional dynamic modules must keep stock-image
+  defaults renderable without module directives, require an explicit in-image
+  module path when module directives are enabled, and must not derive implicit
+  `hostPath` mounts from module paths. Use explicit opt-in extra volume values
+  for custom mounts instead [13]
 
 **Python** (P)
 - Binary prerequisites validate executability [19]
@@ -373,3 +378,4 @@ remediation:
 | 0.7.3 | 2026-05-26 | Codex | Strengthened Rule 13 for standalone DEB/RPM package-name, canonical install layout, and prebuilt RPM source/SPEC consistency |
 | 0.7.4 | 2026-05-26 | Codex | Strengthened Rule 13 for GitHub Actions container jobs using Bash-only syntax |
 | 0.7.5 | 2026-05-26 | Codex | Strengthened Rule 13 for distro-resolvable package dependencies, standalone version validation, distro-specific smoke repos, package script lifecycle args, package module path/glibc runtime compatibility, and local K8s smoke context/module safety |
+| 0.7.6 | 2026-05-26 | Codex | Strengthened Rule 13 for stock-image-safe Helm defaults, explicit module-enabled Helm configuration, and no implicit module-derived hostPath mounts |
