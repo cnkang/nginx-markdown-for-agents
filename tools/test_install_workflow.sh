@@ -83,8 +83,8 @@ cleanup() {
 trap cleanup EXIT
 
 if [[ ! -f "$ARTIFACT" ]]; then
-  echo "Missing artifact: $ARTIFACT"
-  echo "Build it first: ./tools/build_release.sh 1.26.3 glibc ${TEST_ARCH}"
+  echo "Missing artifact: $ARTIFACT" >&2
+  echo "Build it first: ./tools/build_release.sh 1.26.3 glibc ${TEST_ARCH}" >&2
   exit 1
 fi
 
