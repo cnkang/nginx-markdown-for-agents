@@ -67,7 +67,7 @@ sudo rpm -i nginx-module-markdown-for-agents-0.7.0-nginx1.26.3-1.x86_64.rpm
 
 The package installs:
 
-- Module binary: `/usr/lib/nginx/modules/ngx_http_markdown_module.so`
+- Module binary: `/usr/lib/nginx/modules/ngx_http_markdown_filter_module.so`
 - Documentation: `/usr/share/doc/nginx-markdown-for-agents/`
 - License: `/usr/share/licenses/nginx-markdown-for-agents/LICENSE`
 
@@ -84,7 +84,7 @@ Edit your `nginx.conf` and add the following line at the **top level** (before
 the `http {}` block):
 
 ```nginx
-load_module modules/ngx_http_markdown_module.so;
+load_module modules/ngx_http_markdown_filter_module.so;
 ```
 
 ### Step 2: Verify Configuration
@@ -144,7 +144,7 @@ converting HTML to Markdown for agent clients.
 **Symptom:**
 
 ```text
-nginx: [emerg] module "/usr/lib/nginx/modules/ngx_http_markdown_module.so" is not binary compatible
+nginx: [emerg] module "/usr/lib/nginx/modules/ngx_http_markdown_filter_module.so" is not binary compatible
 ```
 
 **Cause:** The installed package was built for a different NGINX version than
@@ -161,14 +161,14 @@ the one running on your system.
 **Symptom:**
 
 ```text
-nginx: [emerg] dlopen() "/usr/lib/nginx/modules/ngx_http_markdown_module.so" failed
+nginx: [emerg] dlopen() "/usr/lib/nginx/modules/ngx_http_markdown_filter_module.so" failed
 ```
 
 **Cause:** The module file is missing or the path is incorrect.
 
 **Resolution:**
 
-1. Verify the file exists: `ls -l /usr/lib/nginx/modules/ngx_http_markdown_module.so`
+1. Verify the file exists: `ls -l /usr/lib/nginx/modules/ngx_http_markdown_filter_module.so`
 2. If missing, reinstall the package
 3. If your NGINX uses a non-standard modules path, use the full path in the
    `load_module` directive

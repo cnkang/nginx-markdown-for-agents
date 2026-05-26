@@ -33,13 +33,29 @@ RPM_SPEC = (
     / "SPECS"
     / "nginx-module-markdown.spec"
 )
+RELEASE_PACKAGES_WORKFLOW = (
+    PROJECT_ROOT / ".github" / "workflows" / "release-packages.yml"
+)
+RELEASE_DEB_WORKFLOW = PROJECT_ROOT / ".github" / "workflows" / "release-deb.yml"
+RELEASE_RPM_WORKFLOW = PROJECT_ROOT / ".github" / "workflows" / "release-rpm.yml"
+SIGN_AND_PUBLISH_WORKFLOW = (
+    PROJECT_ROOT / ".github" / "workflows" / "sign-and-publish.yml"
+)
+CHECKSUMS_FILE = PROJECT_ROOT / "packaging" / "checksums.sha256"
+RELEASE_DOCKERFILES = [
+    PROJECT_ROOT / "tools" / "build_release" / "Dockerfile.glibc",
+    PROJECT_ROOT / "tools" / "build_release" / "Dockerfile.musl",
+    PROJECT_ROOT / "tools" / "build_release" / "Dockerfile.install-example",
+]
+CANONICAL_MODULE_SO = "ngx_http_markdown_filter_module.so"
+LEGACY_MODULE_SO = "ngx_http_markdown_module.so"
 
 NFPM_REQUIRED_SNIPPETS = [
     'name: "nginx-module-markdown-for-agents"',
     'version: "${PKG_VERSION}"',
     'arch: "${NFPM_ARCH}"',
     'nginx (>= ${NGINX_VERSION})',
-    "/usr/lib/nginx/modules/ngx_http_markdown_module.so",
+    "/usr/lib/nginx/modules/ngx_http_markdown_filter_module.so",
     "/usr/share/doc/nginx-markdown-for-agents/README.md",
     "/usr/share/doc/nginx-markdown-for-agents/INSTALL.md",
     "/usr/share/doc/nginx-markdown-for-agents/COMPATIBILITY.md",
@@ -47,6 +63,50 @@ NFPM_REQUIRED_SNIPPETS = [
 ]
 RPM_REQUIRED_FIELDS = ["Name", "Version", "Requires"]
 RPM_REQUIRED_SECTIONS = ["%post", "%changelog"]
+MODULE_NAME_SURFACES = [
+    NFPM_CONFIG,
+    RPM_SPEC,
+    PROJECT_ROOT / "packaging" / "rpm" / "nginx-markdown-module.spec",
+    PROJECT_ROOT / "packaging" / "debian" / "postinst",
+    PROJECT_ROOT / "packaging" / "snippets" / "mod-markdown-for-agents.conf",
+    PROJECT_ROOT / "packaging" / "nfpm" / "modules-available" / "mod-markdown.conf",
+    PROJECT_ROOT / "packaging" / "nfpm" / "scripts" / "postinstall.sh",
+    PROJECT_ROOT / "packaging" / "scripts" / "build-deb.sh",
+    PROJECT_ROOT / "packaging" / "scripts" / "smoke-test-basic.sh",
+    PROJECT_ROOT / "packaging" / "scripts" / "smoke-test-diagnostics.sh",
+    PROJECT_ROOT / "tools" / "release" / "gates" / "check_install_layout.sh",
+    PROJECT_ROOT / "README.md",
+    PROJECT_ROOT / "README_zh-CN.md",
+    PROJECT_ROOT / "docs" / "COMPATIBILITY.md",
+    PROJECT_ROOT / "docs" / "guides" / "INSTALL.md",
+    RELEASE_PACKAGES_WORKFLOW,
+    RELEASE_DEB_WORKFLOW,
+    RELEASE_RPM_WORKFLOW,
+]
+RELEASE_VERSION_SURFACES = [
+    RELEASE_PACKAGES_WORKFLOW,
+    RELEASE_DEB_WORKFLOW,
+    RELEASE_RPM_WORKFLOW,
+    *RELEASE_DOCKERFILES,
+]
+RELEASE_ARTIFACT_SNIPPETS = {
+    RELEASE_PACKAGES_WORKFLOW: [
+        "name: pkg-deb-${{ matrix.nginx_version }}-${{ matrix.arch }}",
+        "name: pkg-rpm-${{ matrix.nginx_version }}-${{ matrix.arch }}",
+        "name: pkg-${{ matrix.format }}-${{ matrix.nginx_version }}-${{ matrix.arch }}",
+    ],
+    RELEASE_DEB_WORKFLOW: [
+        "name: pkg-deb-${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.nginx_channel }}",
+    ],
+    RELEASE_RPM_WORKFLOW: [
+        "name: pkg-rpm-${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.nginx_channel }}",
+    ],
+    SIGN_AND_PUBLISH_WORKFLOW: ["pattern: 'pkg-*'"],
+}
+ARCH_RUNNER_SNIPPET = (
+    "runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || "
+    "'ubuntu-24.04' }}"
+)
 
 
 class ValidationResult:
@@ -116,6 +176,110 @@ def validate_rpm_spec(result: ValidationResult) -> None:
             result.fail(sid, f"{section} section missing from RPM spec")
 
 
+def validate_module_filename_consistency(result: ValidationResult) -> None:
+    """Ensure active package surfaces use the canonical NGINX module filename."""
+    for path in MODULE_NAME_SURFACES:
+        rel = path.relative_to(PROJECT_ROOT)
+        content = read_safe(path)
+        if not content:
+            result.fail(f"module-name:exists:{rel}", f"{rel} not found")
+            continue
+        if LEGACY_MODULE_SO in content:
+            result.fail(
+                f"module-name:legacy:{rel}",
+                f"{rel} still references {LEGACY_MODULE_SO}",
+            )
+        elif CANONICAL_MODULE_SO in content:
+            result.pass_(
+                f"module-name:canonical:{rel}",
+                f"{rel} uses {CANONICAL_MODULE_SO}",
+            )
+        else:
+            result.fail(
+                f"module-name:missing:{rel}",
+                f"{rel} does not reference {CANONICAL_MODULE_SO}",
+            )
+
+
+def checksum_identifiers() -> set[str]:
+    """Return checked-in checksum identifiers from packaging/checksums.sha256."""
+    content = read_safe(CHECKSUMS_FILE)
+    identifiers: set[str] = set()
+    for line in content.splitlines():
+        match = re.match(r"^[0-9a-f]{64}\s+(\S+)$", line.strip())
+        if match:
+            identifiers.add(match.group(1))
+    return identifiers
+
+
+def extract_nginx_versions(content: str) -> set[str]:
+    """Extract NGINX source versions from active release configuration."""
+    versions: set[str] = set()
+    patterns = [
+        r'nginx_version:\s*\[\s*"([0-9]+\.[0-9]+\.[0-9]+)"\s*\]',
+        r'NGINX_VERSION="([0-9]+\.[0-9]+\.[0-9]+)"',
+        r"ARG\s+NGINX_VERSION=([0-9]+\.[0-9]+\.[0-9]+)",
+    ]
+    for pattern in patterns:
+        versions.update(re.findall(pattern, content))
+    return versions
+
+
+def validate_release_versions_have_checksums(result: ValidationResult) -> None:
+    """Verify active release source versions are present in checksum metadata."""
+    identifiers = checksum_identifiers()
+    if not identifiers:
+        result.fail("checksums:exists", "packaging/checksums.sha256 has no entries")
+        return
+    result.pass_("checksums:exists", "packaging/checksums.sha256 has checksum entries")
+
+    for path in RELEASE_VERSION_SURFACES:
+        rel = path.relative_to(PROJECT_ROOT)
+        content = read_safe(path)
+        if not content:
+            result.fail(f"nginx-version:exists:{rel}", f"{rel} not found")
+            continue
+        versions = extract_nginx_versions(content)
+        if not versions:
+            result.fail(f"nginx-version:present:{rel}", f"{rel} has no NGINX version")
+            continue
+        for version in sorted(versions):
+            identifier = f"nginx-{version}"
+            sid = f"nginx-version:checksum:{rel}:{version}"
+            if identifier in identifiers:
+                result.pass_(sid, f"{identifier} has a checked-in checksum")
+            else:
+                result.fail(sid, f"{identifier} missing from packaging/checksums.sha256")
+
+
+def validate_release_artifact_flow(result: ValidationResult) -> None:
+    """Ensure package artifact producers and consumers share one name contract."""
+    for path, snippets in RELEASE_ARTIFACT_SNIPPETS.items():
+        rel = path.relative_to(PROJECT_ROOT)
+        content = read_safe(path)
+        if not content:
+            result.fail(f"artifact-flow:exists:{rel}", f"{rel} not found")
+            continue
+        for snippet in snippets:
+            sid = f"artifact-flow:{rel}:{snippet[:18]}"
+            if snippet in content:
+                result.pass_(sid, f"{rel} contains {snippet}")
+            else:
+                result.fail(sid, f"{rel} missing {snippet}")
+
+    release_packages = read_safe(RELEASE_PACKAGES_WORKFLOW)
+    if ARCH_RUNNER_SNIPPET in release_packages:
+        result.pass_(
+            "smoke-runner:arch",
+            "release-packages smoke tests select runner from matrix.arch",
+        )
+    else:
+        result.fail(
+            "smoke-runner:arch",
+            "release-packages smoke tests must use arch-matched runners",
+        )
+
+
 def print_report(result: ValidationResult) -> None:
     """Print a formatted validation report."""
     print("v0.7.0 Package Metadata Validation Report")
@@ -133,6 +297,9 @@ def main() -> int:
     result = ValidationResult()
     validate_nfpm_config(result)
     validate_rpm_spec(result)
+    validate_module_filename_consistency(result)
+    validate_release_versions_have_checksums(result)
+    validate_release_artifact_flow(result)
     print_report(result)
     return 1 if result.has_failures else 0
 
