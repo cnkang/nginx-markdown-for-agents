@@ -198,7 +198,9 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
 - Validator/gate regex patterns match actual struct field paths [13]
 - Release/package workflows preserve one canonical module `.so` filename across
   NGINX build output, packaging metadata, load snippets, smoke tests, docs, and
-  install-layout gates [13]
+  install-layout gates. Package-format-specific module directories must match
+  the target nginx.org package `--modules-path` (for example RPM `/usr/lib64`
+  versus DEB `/usr/lib`) [13]
 - Every NGINX source version requested by release workflows or release
   Dockerfiles has a checked-in checksum, package artifact producer/consumer
   names match exactly, and architecture-specific smoke tests run on matching
@@ -209,6 +211,28 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
   payload [13]
 - Container jobs with Bash-only syntax set `defaults.run.shell: bash` or
   equivalent step-level `shell: bash` before relying on bashisms [13]
+- Package dependency constraints must either use distro-resolvable package
+  versions/EVRs or non-exact version floors. Do not exact-match a naked
+  upstream NGINX source version when distro packages append release suffixes
+  or epochs [13]
+- Standalone package workflows must validate user-supplied package versions
+  before using them in paths, package metadata, RPM macros, or artifact names
+  [13]
+- Package smoke tests must select external package repositories from the
+  detected target distro family; do not route Amazon Linux through CentOS
+  repository paths [13]
+- Release package build environments must not require a newer glibc than any
+  supported smoke-test/runtime distro for the same artifact family; build Linux
+  module artifacts on the oldest supported glibc baseline or split artifacts by
+  distro family [13]
+- Package maintainer scripts must accept the lifecycle arguments passed by each
+  target package manager, including RPM numeric `%post` arguments, and must not
+  fail an install only because an advisory post-install script received an
+  unfamiliar lifecycle argument [13]
+- Local K8s smoke tests that deploy stock images must disable module-specific
+  NGINX directives, use an explicit kind kube-context for every Helm/kubectl
+  operation, count structured pod fields without collapsed one-line jsonpath
+  output, and avoid deleting clusters that existed before the test [13]
 
 **Python** (P)
 - Binary prerequisites validate executability [19]
@@ -348,3 +372,4 @@ remediation:
 | 0.7.2 | 2026-05-25 | Codex | Strengthened Rule 13 release package chain invariants: canonical module filename, checksum coverage, artifact producer/consumer names, architecture-matched smoke runners, and Helm secure-default runtime checks |
 | 0.7.3 | 2026-05-26 | Codex | Strengthened Rule 13 for standalone DEB/RPM package-name, canonical install layout, and prebuilt RPM source/SPEC consistency |
 | 0.7.4 | 2026-05-26 | Codex | Strengthened Rule 13 for GitHub Actions container jobs using Bash-only syntax |
+| 0.7.5 | 2026-05-26 | Codex | Strengthened Rule 13 for distro-resolvable package dependencies, standalone version validation, distro-specific smoke repos, package script lifecycle args, package module path/glibc runtime compatibility, and local K8s smoke context/module safety |
