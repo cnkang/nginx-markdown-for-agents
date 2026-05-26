@@ -63,7 +63,7 @@ LICENSE_INSTALL_DIR := $(PREFIX)/share/licenses/nginx-markdown-for-agents
         test-nginx-integration test-e2e test-e2e-rust test-all test-rust-fuzz-smoke fuzz-smoke sonar-compile-db \
         test-benchmark test-benchmark-compare test-benchmark-summary \
         harness-check harness-check-full harness-security-checks \
-	docs-check license-check release-gates-check release-gates-check-055 release-gates-check-060 release-gates-check-070 release-gates-check-legacy release-gates-check-strict \
+	docs-check license-check release-gates-check release-gates-check-055 release-gates-check-060 release-gates-check-070 release-gates-check-070-docker release-gates-check-legacy release-gates-check-strict \
         verify-large-e2e verify-huge-native-e2e verify-huge-allowed-native-e2e \
         verify-chunked-native-e2e verify-chunked-native-e2e-smoke verify-chunked-native-e2e-stress \
         verify-streaming-failure-cache-e2e \
@@ -368,6 +368,11 @@ release-gates-check-070:
 
 release-gates-check-legacy:
 	python3 tools/release/legacy/validate_release_gates.py
+
+release-gates-check-070-docker:
+	@echo "=== Gate 3/4 Local Docker Validation ==="
+	@echo "  Running Gate 3 (Package Distribution) and Gate 4 (K8s) locally via Docker..."
+	RELEASE_GATE_LOCAL_DOCKER=1 python3 tools/release/gates/validate_release_gates_070.py --mode strict
 
 release-gates-check-strict:
 	python3 tools/release/gates/validate_release_gates.py --mode strict
