@@ -177,54 +177,61 @@ def validate_k8s_manifests(result: ValidationResult) -> None:
             result.fail(sid, f"{fname} YAML error: {err}")
 
 
-def validate_helm_secure_defaults(result: ValidationResult) -> None:
-    """Validate Helm defaults can run under the default restricted pod context."""
-    values = read_safe(VALUES_YAML)
-    if not values:
-        result.fail("helm:values_exists", "charts/nginx-markdown/values.yaml not found")
-    else:
-        result.pass_("helm:values_exists", "values.yaml exists")
-        for snippet in HELM_VALUES_REQUIRED_SNIPPETS:
-            sid = f"helm:values:{snippet[:24]}"
-            if snippet in values:
-                result.pass_(sid, f"values.yaml contains {snippet}")
-            else:
-                result.fail(sid, f"values.yaml missing {snippet}")
+def _check_file_snippets(
+    path: Path, snippets: list[str], prefix: str, label: str,
+    result: ValidationResult,
+) -> None:
+    """Read a file and check that it contains all required snippets."""
+    content = read_safe(path)
+    if not content:
+        result.fail(f"{prefix}_exists", f"{label} not found")
+        return
+    result.pass_(f"{prefix}_exists", f"{label} exists")
+    for snippet in snippets:
+        sid = f"{prefix}:{snippet[:24]}"
+        if snippet in content:
+            result.pass_(sid, f"{label} contains {snippet}")
+        else:
+            result.fail(sid, f"{label} missing {snippet}")
 
-    configmap = read_safe(CONFIGMAP_TEMPLATE)
-    if not configmap:
-        result.fail("helm:configmap_exists", "templates/configmap.yaml not found")
-    else:
-        result.pass_("helm:configmap_exists", "configmap template exists")
-        for snippet in HELM_CONFIG_REQUIRED_SNIPPETS:
-            sid = f"helm:config:{snippet[:24]}"
-            if snippet in configmap:
-                result.pass_(sid, f"configmap template contains {snippet}")
-            else:
-                result.fail(sid, f"configmap template missing {snippet}")
 
+def _validate_helm_deployment(result: ValidationResult) -> None:
+    """Validate Helm deployment template has required security/mount snippets."""
     deployment = read_safe(DEPLOYMENT_TEMPLATE)
     if not deployment:
         result.fail("helm:deployment_exists", "templates/deployment.yaml not found")
-    else:
-        result.pass_("helm:deployment_exists", "deployment template exists")
-        for snippet in HELM_DEPLOYMENT_REQUIRED_SNIPPETS:
-            sid = f"helm:deployment:{snippet[:24]}"
-            if snippet in deployment:
-                result.pass_(sid, f"deployment template contains {snippet}")
-            else:
-                result.fail(sid, f"deployment template missing {snippet}")
-        empty_dir_count = deployment.count("emptyDir: {}")
-        if empty_dir_count >= 3:
-            result.pass_(
-                "helm:deployment:emptydir-count",
-                "deployment has writable runtime/temp emptyDir mounts",
-            )
+        return
+    result.pass_("helm:deployment_exists", "deployment template exists")
+    for snippet in HELM_DEPLOYMENT_REQUIRED_SNIPPETS:
+        sid = f"helm:deployment:{snippet[:24]}"
+        if snippet in deployment:
+            result.pass_(sid, f"deployment template contains {snippet}")
         else:
-            result.fail(
-                "helm:deployment:emptydir-count",
-                "deployment must mount writable emptyDir volumes for runtime/temp paths",
-            )
+            result.fail(sid, f"deployment template missing {snippet}")
+    empty_dir_count = deployment.count("emptyDir: {}")
+    if empty_dir_count >= 3:
+        result.pass_(
+            "helm:deployment:emptydir-count",
+            "deployment has writable runtime/temp emptyDir mounts",
+        )
+    else:
+        result.fail(
+            "helm:deployment:emptydir-count",
+            "deployment must mount writable emptyDir volumes for runtime/temp paths",
+        )
+
+
+def validate_helm_secure_defaults(result: ValidationResult) -> None:
+    """Validate Helm defaults can run under the default restricted pod context."""
+    _check_file_snippets(
+        VALUES_YAML, HELM_VALUES_REQUIRED_SNIPPETS,
+        "helm:values", "values.yaml", result,
+    )
+    _check_file_snippets(
+        CONFIGMAP_TEMPLATE, HELM_CONFIG_REQUIRED_SNIPPETS,
+        "helm:configmap", "configmap template", result,
+    )
+    _validate_helm_deployment(result)
 
 
 def validate_helm_render(result: ValidationResult) -> None:
