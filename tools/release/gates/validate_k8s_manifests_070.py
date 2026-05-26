@@ -93,14 +93,21 @@ class ValidationResult:
         return any(s == "FAIL" for s, _, _ in self.results)
 
 
+def _is_within_project(path: Path) -> bool:
+    """Return True if resolved path is within PROJECT_ROOT."""
+    try:
+        path.resolve().relative_to(PROJECT_ROOT.resolve())
+        return True
+    except ValueError:
+        return False
+
+
 def read_safe(path: Path) -> str:
     """Read file content safely, returning empty string if missing."""
     resolved = path.resolve()
-    if not str(resolved).startswith(str(PROJECT_ROOT)):
+    if not _is_within_project(path):
         return ""
-    if resolved.is_file():
-        return resolved.read_text(encoding="utf-8")
-    return ""
+    return resolved.read_text(encoding="utf-8") if resolved.is_file() else ""
 
 
 def try_parse_yaml(content: str) -> tuple[bool, str]:
@@ -111,12 +118,14 @@ def try_parse_yaml(content: str) -> tuple[bool, str]:
         list(yaml.safe_load_all(content))
         return True, ""
     except ImportError:
-        # PyYAML not available; fall back to basic syntax check
-        # Verify no obvious syntax errors (tabs in indentation)
-        for i, line in enumerate(content.splitlines(), 1):
-            if line.startswith("\t"):
-                return False, f"line {i}: tab indentation (YAML requires spaces)"
-        return True, ""
+        return next(
+            (
+                (False, f"line {i}: tab indentation (YAML requires spaces)")
+                for i, line in enumerate(content.splitlines(), 1)
+                if line.startswith("\t")
+            ),
+            (True, ""),
+        )
     except Exception as exc:
         return False, str(exc)
 
@@ -153,7 +162,7 @@ def validate_k8s_manifests(result: ValidationResult) -> None:
     """Validate the K8s manifest directory exists with YAML files."""
     check_id = "k8s:dir_exists"
     resolved = K8S_MANIFEST_DIR.resolve()
-    if not str(resolved).startswith(str(PROJECT_ROOT)):
+    if not _is_within_project(K8S_MANIFEST_DIR):
         result.fail(check_id, "manifest directory path outside project")
         return
     if not resolved.is_dir():
@@ -242,9 +251,7 @@ _MAX_HELM_OUTPUT = 2048  # Truncate helm output in failure messages
 
 def _truncate_output(text: str, limit: int = _MAX_HELM_OUTPUT) -> str:
     """Truncate text to limit characters, appending a marker if truncated."""
-    if len(text) <= limit:
-        return text
-    return text[:limit] + "\n[output truncated]"
+    return text if len(text) <= limit else text[:limit] + "\n[output truncated]"
 
 
 def validate_helm_render(result: ValidationResult) -> None:

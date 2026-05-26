@@ -53,7 +53,7 @@ NFPM_REQUIRED_SNIPPETS = [
     'name: "nginx-module-markdown-for-agents"',
     'version: "${PKG_VERSION}"',
     'arch: "${NFPM_ARCH}"',
-    'nginx (>= ${NGINX_VERSION})',
+    'nginx (= ${NGINX_VERSION})',
     "/usr/lib/nginx/modules/ngx_http_markdown_filter_module.so",
     "/usr/share/doc/nginx-markdown-for-agents/README.md",
     "/usr/share/doc/nginx-markdown-for-agents/INSTALL.md",
@@ -150,10 +150,19 @@ class ValidationResult:
         return any(s == "FAIL" for s, _, _ in self.results)
 
 
+def _is_within_project(path: Path) -> bool:
+    """Return True if resolved path is within PROJECT_ROOT."""
+    try:
+        path.resolve().relative_to(PROJECT_ROOT.resolve())
+        return True
+    except ValueError:
+        return False
+
+
 def read_safe(path: Path) -> str:
     """Read file content safely, returning empty string if missing."""
     resolved = path.resolve()
-    if not str(resolved).startswith(str(PROJECT_ROOT)):
+    if not _is_within_project(path):
         return ""
     return resolved.read_text(encoding="utf-8") if resolved.is_file() else ""
 
