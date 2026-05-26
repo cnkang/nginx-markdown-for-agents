@@ -7,7 +7,7 @@
 #   defined by the nginx-markdown-for-agents install layout specification.
 #
 # REQUIRED PATHS:
-#   /usr/lib/nginx/modules/ngx_http_markdown_module.so
+#   /usr/lib/nginx/modules/ngx_http_markdown_filter_module.so
 #   /usr/share/doc/nginx-markdown-for-agents/README.md
 #   /usr/share/doc/nginx-markdown-for-agents/INSTALL.md
 #   /usr/share/doc/nginx-markdown-for-agents/COMPATIBILITY.md
@@ -52,7 +52,7 @@ FAIL_COUNT=0
 # ---------------------------------------------------------------------------
 # Required paths (install layout specification)
 # ---------------------------------------------------------------------------
-REQUIRED_PATHS="/usr/lib/nginx/modules/ngx_http_markdown_module.so
+REQUIRED_PATHS="/usr/lib/nginx/modules/ngx_http_markdown_filter_module.so
 /usr/share/doc/nginx-markdown-for-agents/README.md
 /usr/share/doc/nginx-markdown-for-agents/INSTALL.md
 /usr/share/doc/nginx-markdown-for-agents/COMPATIBILITY.md

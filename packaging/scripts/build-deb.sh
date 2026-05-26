@@ -164,8 +164,8 @@ info "Build directory structure created"
 ##############################################################################
 
 info "Installing module: $(basename "$MODULE_SO")"
-cp "$MODULE_SO" "${BUILD_DIR}/usr/lib/nginx/modules/ngx_http_markdown_module.so"
-chmod 0644 "${BUILD_DIR}/usr/lib/nginx/modules/ngx_http_markdown_module.so"
+cp "$MODULE_SO" "${BUILD_DIR}/usr/lib/nginx/modules/ngx_http_markdown_filter_module.so"
+chmod 0644 "${BUILD_DIR}/usr/lib/nginx/modules/ngx_http_markdown_filter_module.so"
 
 ##############################################################################
 # Install configuration snippet
@@ -175,7 +175,7 @@ info "Installing module configuration snippet"
 cat > "${BUILD_DIR}/etc/nginx/modules-available/mod-markdown.conf" <<'CONF'
 # nginx-module-markdown: Uncomment the line below to enable the module.
 # After enabling, run: nginx -t && systemctl reload nginx
-#load_module modules/ngx_http_markdown_module.so;
+#load_module modules/ngx_http_markdown_filter_module.so;
 CONF
 chmod 0644 "${BUILD_DIR}/etc/nginx/modules-available/mod-markdown.conf"
 

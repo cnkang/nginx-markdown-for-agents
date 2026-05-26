@@ -49,8 +49,8 @@ make build
 rm -rf %{buildroot}
 
 install -d %{buildroot}/usr/lib/nginx/modules
-install -m 0644 build/ngx_http_markdown_module.so \
-    %{buildroot}/usr/lib/nginx/modules/ngx_http_markdown_module.so
+install -m 0644 build/ngx_http_markdown_filter_module.so \
+    %{buildroot}/usr/lib/nginx/modules/ngx_http_markdown_filter_module.so
 
 install -d %{buildroot}/usr/share/doc/nginx-markdown-for-agents
 install -m 0644 packaging/docs/README.md \
@@ -71,7 +71,7 @@ nginx-markdown-for-agents module installed successfully.
 
 To enable the module:
   1. Add to nginx.conf (top-level, before http block):
-     load_module modules/ngx_http_markdown_module.so;
+     load_module modules/ngx_http_markdown_filter_module.so;
 
   2. Verify configuration:
      sudo nginx -t
@@ -85,7 +85,7 @@ For compatibility information, see:
 EOF
 
 %files
-/usr/lib/nginx/modules/ngx_http_markdown_module.so
+/usr/lib/nginx/modules/ngx_http_markdown_filter_module.so
 /usr/share/doc/nginx-markdown-for-agents/README.md
 /usr/share/doc/nginx-markdown-for-agents/INSTALL.md
 /usr/share/doc/nginx-markdown-for-agents/COMPATIBILITY.md

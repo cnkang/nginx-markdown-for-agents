@@ -26,7 +26,7 @@ After installing this package:
 1. Add to `nginx.conf` (top-level, before the `http` block):
 
    ```nginx
-   load_module modules/ngx_http_markdown_module.so;
+   load_module modules/ngx_http_markdown_filter_module.so;
    ```
 
 2. Verify configuration:

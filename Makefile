@@ -48,8 +48,16 @@ CORPUS_DIR := tests/corpus
 RUST_LIB := $(RUST_DIR)/target/$(RUST_TARGET)/release/libnginx_markdown_converter.a
 RUST_HEADER := $(RUST_DIR)/include/markdown_converter.h
 NGINX_HEADER := $(NGINX_MODULE_DIR)/src/markdown_converter.h
+MODULE_SO ?= build/ngx_http_markdown_filter_module.so
+PREFIX ?= /usr
+DESTDIR ?=
+MODULE_INSTALL_DIR := $(PREFIX)/lib/nginx/modules
+NGINX_MODULES_AVAILABLE_DIR := $(PREFIX)/share/nginx/modules-available
+DOC_INSTALL_DIR := $(PREFIX)/share/doc/nginx-markdown-for-agents
+LICENSE_INSTALL_DIR := $(PREFIX)/share/licenses/nginx-markdown-for-agents
 
 .PHONY: all build rust-lib rust-lib-debug copy-headers check-headers \
+        install \
         test test-rust test-rust-doc test-nginx-unit test-nginx-unit-streaming test-nginx-unit-clang-smoke test-nginx-unit-sanitize-smoke \
         test-nginx-integration test-e2e test-e2e-rust test-all test-rust-fuzz-smoke fuzz-smoke sonar-compile-db \
         test-benchmark test-benchmark-compare test-benchmark-summary \
@@ -87,6 +95,19 @@ copy-headers:
 
 check-headers:
 	@cmp -s $(RUST_HEADER) $(NGINX_HEADER) && echo "Headers are in sync" || (echo "Header mismatch: run 'make copy-headers'" && exit 1)
+
+install:
+	@test -f "$(MODULE_SO)" || { echo "FAIL: $(MODULE_SO) not found" >&2; exit 1; }
+	install -d "$(DESTDIR)$(MODULE_INSTALL_DIR)"
+	install -d "$(DESTDIR)$(NGINX_MODULES_AVAILABLE_DIR)"
+	install -d "$(DESTDIR)$(DOC_INSTALL_DIR)"
+	install -d "$(DESTDIR)$(LICENSE_INSTALL_DIR)"
+	install -m 0644 "$(MODULE_SO)" "$(DESTDIR)$(MODULE_INSTALL_DIR)/ngx_http_markdown_filter_module.so"
+	install -m 0644 packaging/nfpm/modules-available/mod-markdown.conf "$(DESTDIR)$(NGINX_MODULES_AVAILABLE_DIR)/mod-markdown.conf"
+	install -m 0644 README.md "$(DESTDIR)$(DOC_INSTALL_DIR)/README.md"
+	install -m 0644 docs/guides/INSTALL.md "$(DESTDIR)$(DOC_INSTALL_DIR)/INSTALL.md"
+	install -m 0644 docs/COMPATIBILITY.md "$(DESTDIR)$(DOC_INSTALL_DIR)/COMPATIBILITY.md"
+	install -m 0644 LICENSE "$(DESTDIR)$(LICENSE_INSTALL_DIR)/LICENSE"
 
 # Default smoke test
 # keeps feedback fast for local development
@@ -267,8 +288,8 @@ release-gates-check-070:
 			if command -v nfpm >/dev/null 2>&1; then \
 				echo "  [install-layout] No packages found; building local amd64 DEB/RPM with nFPM..."; \
 				mkdir -p dist; \
-				test -f build/ngx_http_markdown_module.so || \
-					{ echo "FAIL: build/ngx_http_markdown_module.so not found" >&2; exit 1; }; \
+					test -f build/ngx_http_markdown_filter_module.so || \
+						{ echo "FAIL: build/ngx_http_markdown_filter_module.so not found" >&2; exit 1; }; \
 				PKG_VERSION=$${PKG_VERSION:-0.7.0} NGINX_VERSION=$${NGINX_VERSION:-1.26.3} NFPM_ARCH=amd64 \
 					nfpm package --config packaging/nfpm/nfpm.yaml --packager deb \
 					--target dist/nginx-module-markdown-for-agents_$${PKG_VERSION:-0.7.0}_nginx-$${NGINX_VERSION:-1.26.3}_amd64.deb; \

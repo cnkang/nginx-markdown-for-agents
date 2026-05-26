@@ -33,7 +33,7 @@ Compatibility Signature**. This signature is derived from:
 2. The set of `./configure` options used to build NGINX.
 3. Internal ABI markers that reflect struct layouts and API contracts.
 
-When you add `load_module modules/ngx_http_markdown_module.so;` to your
+When you add `load_module modules/ngx_http_markdown_filter_module.so;` to your
 `nginx.conf` and run `nginx -t`, NGINX compares the module's compiled
 signature against its own. If they do not match, NGINX refuses to load the
 module and logs an error.
@@ -135,12 +135,12 @@ When the module's binary compatibility signature does not match the running
 NGINX binary, you will see errors like:
 
 ```
-nginx: [emerg] module "/usr/lib/nginx/modules/ngx_http_markdown_module.so"
+nginx: [emerg] module "/usr/lib/nginx/modules/ngx_http_markdown_filter_module.so"
   version 1026003 instead of 1024000 in /etc/nginx/nginx.conf:1
 ```
 
 ```
-nginx: [emerg] module "/usr/lib/nginx/modules/ngx_http_markdown_module.so"
+nginx: [emerg] module "/usr/lib/nginx/modules/ngx_http_markdown_filter_module.so"
   is not binary compatible in /etc/nginx/nginx.conf:1
 ```
 
@@ -241,7 +241,7 @@ the module from source against your local NGINX installation.
 5. **Install the module**:
 
    ```bash
-   sudo cp objs/ngx_http_markdown_module.so /usr/lib/nginx/modules/
+   sudo cp objs/ngx_http_markdown_filter_module.so /usr/lib/nginx/modules/
    ```
 
 6. **Enable and verify**:
@@ -249,7 +249,7 @@ the module from source against your local NGINX installation.
    Add to `nginx.conf` (top-level, before the `http` block):
 
    ```nginx
-   load_module modules/ngx_http_markdown_module.so;
+   load_module modules/ngx_http_markdown_filter_module.so;
    ```
 
    Then verify and reload:

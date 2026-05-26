@@ -28,7 +28,7 @@ if [[ "$HOST_ARCH" == "aarch64" ]] || [[ "$HOST_ARCH" == "arm64" ]]; then
   DOCKER_PLATFORM="linux/arm64"
 fi
 
-ARTIFACT="${WORKSPACE_ROOT}/dist/1.28.2-glibc-${TEST_ARCH}/ngx_http_markdown_filter_module-1.28.2-glibc-${TEST_ARCH}.tar.gz"
+ARTIFACT="${WORKSPACE_ROOT}/dist/1.26.3-glibc-${TEST_ARCH}/ngx_http_markdown_filter_module-1.26.3-glibc-${TEST_ARCH}.tar.gz"
 MOCK_DIR=""
 SERVER_PID=""
 
@@ -84,7 +84,7 @@ trap cleanup EXIT
 
 if [[ ! -f "$ARTIFACT" ]]; then
   echo "Missing artifact: $ARTIFACT"
-  echo "Build it first: ./tools/build_release.sh 1.28.2 glibc ${TEST_ARCH}"
+  echo "Build it first: ./tools/build_release.sh 1.26.3 glibc ${TEST_ARCH}"
   exit 1
 fi
 
@@ -108,5 +108,5 @@ docker run --rm \
   --add-host host.docker.internal:host-gateway \
   -e DOWNLOAD_URL_OVERRIDE="http://host.docker.internal:8000/${ASSET_NAME}" \
   -e DOWNLOAD_SHA256="${ASSET_SHA256}" \
-  nginx:1.28.2 \
+  nginx:1.26.3 \
   bash -c "apt-get update && apt-get install -y --no-install-recommends curl python3 && /install.sh && printf '%s\n' 'load_module /etc/nginx/modules/ngx_http_markdown_filter_module.so;' 'worker_processes 1;' 'events {}' 'http {}' > /tmp/nginx-test.conf && nginx -t -c /tmp/nginx-test.conf"

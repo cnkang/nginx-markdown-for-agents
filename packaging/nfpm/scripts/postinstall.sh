@@ -49,7 +49,7 @@ To enable the module:
 
   --- RHEL/AlmaLinux/Amazon Linux (RPM) ---
   1. Add to /etc/nginx/nginx.conf (top-level, before http block):
-       load_module modules/ngx_http_markdown_module.so;
+       load_module modules/ngx_http_markdown_filter_module.so;
 
   2. Verify configuration:
        sudo nginx -t

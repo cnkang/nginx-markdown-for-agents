@@ -151,7 +151,7 @@ case "$PKG_FORMAT" in
         nginx -V 2>&1 >&2 || die "nginx -V failed"
 
         # --- DEB: Verify .so exists ---
-        MODULE_PATH="/usr/lib/nginx/modules/ngx_http_markdown_module.so"
+        MODULE_PATH="/usr/lib/nginx/modules/ngx_http_markdown_filter_module.so"
         info "Verifying module .so at: ${MODULE_PATH}"
         if [ ! -f "${MODULE_PATH}" ]; then
             die "Module .so not found at expected path: ${MODULE_PATH}"
@@ -161,7 +161,7 @@ case "$PKG_FORMAT" in
         # --- DEB: Create load_module config snippet ---
         info "Creating load_module configuration in modules-enabled/..."
         mkdir -p /etc/nginx/modules-enabled
-        printf 'load_module modules/ngx_http_markdown_module.so;\n' \
+        printf 'load_module modules/ngx_http_markdown_filter_module.so;\n' \
             > /etc/nginx/modules-enabled/50-mod-markdown.conf \
             || die "Failed to create modules-enabled config"
 
@@ -210,7 +210,7 @@ REPO
         nginx -V 2>&1 >&2 || die "nginx -V failed"
 
         # --- RPM: Verify .so exists ---
-        MODULE_PATH="/usr/lib/nginx/modules/ngx_http_markdown_module.so"
+        MODULE_PATH="/usr/lib/nginx/modules/ngx_http_markdown_filter_module.so"
         info "Verifying module .so at: ${MODULE_PATH}"
         if [ ! -f "${MODULE_PATH}" ]; then
             die "Module .so not found at expected path: ${MODULE_PATH}"
@@ -220,7 +220,7 @@ REPO
         # --- RPM: Add load_module to nginx.conf top ---
         info "Adding load_module directive to top of nginx.conf..."
         if [ -f /etc/nginx/nginx.conf ]; then
-            sed -i '1i load_module modules/ngx_http_markdown_module.so;' \
+            sed -i '1i load_module modules/ngx_http_markdown_filter_module.so;' \
                 /etc/nginx/nginx.conf \
                 || die "Failed to add load_module to nginx.conf"
         else

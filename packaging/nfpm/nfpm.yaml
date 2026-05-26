@@ -28,8 +28,8 @@ depends:
   - "nginx (>= ${NGINX_VERSION})"
 
 contents:
-  - src: "./build/ngx_http_markdown_module.so"
-    dst: "/usr/lib/nginx/modules/ngx_http_markdown_module.so"
+  - src: "./build/ngx_http_markdown_filter_module.so"
+    dst: "/usr/lib/nginx/modules/ngx_http_markdown_filter_module.so"
     file_info:
       mode: 0644
 

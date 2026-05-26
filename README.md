@@ -85,7 +85,7 @@ Tap publication and macOS post-release verification workflows are documented in 
 ### 2. Enable Markdown on a location
 
 ```nginx
-load_module modules/ngx_http_markdown_module.so;
+load_module modules/ngx_http_markdown_filter_module.so;
 
 http {
     upstream backend {
@@ -130,7 +130,7 @@ If you want a practical production-oriented configuration next, go straight to [
 Most AI crawlers do not send `Accept: text/markdown`. They use standard browser-like Accept headers. You can use NGINX's `map` directive to rewrite the Accept header for specific User-Agent strings, so matching bots receive Markdown without any changes on their side.
 
 ```nginx
-load_module modules/ngx_http_markdown_module.so;
+load_module modules/ngx_http_markdown_filter_module.so;
 
 http {
     # Rewrite Accept for known AI bots
