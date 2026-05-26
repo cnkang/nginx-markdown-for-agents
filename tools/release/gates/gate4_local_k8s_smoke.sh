@@ -60,22 +60,26 @@ readonly POD_WAIT_TIMEOUT="120s"
 ##############################################################################
 
 info() {
-    printf '[gate4] %s\n' "$1" >&2
+    local msg="$1"
+    printf '[gate4] %s\n' "$msg" >&2
     return 0
 }
 
 pass() {
-    printf '[PASS]  %s\n' "$1" >&2
+    local msg="$1"
+    printf '[PASS]  %s\n' "$msg" >&2
     return 0
 }
 
 fail() {
-    printf '[FAIL]  %s\n' "$1" >&2
+    local msg="$1"
+    printf '[FAIL]  %s\n' "$msg" >&2
     return 0
 }
 
 die() {
-    printf '[FATAL] %s\n' "$1" >&2
+    local msg="$1"
+    printf '[FATAL] %s\n' "$msg" >&2
     exit 1
 }
 
@@ -91,11 +95,11 @@ usage() {
 MISSING_TOOLS=""
 
 check_tool() {
-    local tool="$1"
+    local tool_name="$1"
     local install_hint="$2"
 
-    if ! command -v "$tool" >/dev/null 2>&1; then
-        MISSING_TOOLS="${MISSING_TOOLS}  - ${tool}: ${install_hint}\n"
+    if ! command -v "$tool_name" >/dev/null 2>&1; then
+        MISSING_TOOLS="${MISSING_TOOLS}  - ${tool_name}: ${install_hint}\n"
     fi
     return 0
 }
@@ -153,7 +157,8 @@ CLUSTER_NAME="${DEFAULT_CLUSTER_NAME}"
 
 parse_args() {
     while [[ $# -gt 0 ]]; do
-        case "$1" in
+        local arg="$1"
+        case "$arg" in
             --keep-cluster)
                 KEEP_CLUSTER=1
                 shift
@@ -168,7 +173,7 @@ parse_args() {
                 exit 0
                 ;;
             *)
-                die "Unknown option: $1"
+                die "Unknown option: $arg"
                 ;;
         esac
     done
