@@ -46,6 +46,10 @@ nodeSelector: {}
 tolerations: []
 affinity: {}
 
+# Optional user-managed volumes for custom images or deployments.
+extraVolumes: []
+extraVolumeMounts: []
+
 # Health check probes
 livenessProbe:
   httpGet:
@@ -76,7 +80,10 @@ startupProbe:
 
 # NGINX Markdown module configuration
 markdown:
-  enabled: true
+  # Disabled by default so the chart can run with a stock NGINX image.
+  # To enable the module, use an image that already contains
+  # ngx_http_markdown_filter_module.so and set loadModule to its path.
+  enabled: false
   maxSize: "10m"
   timeout: "5s"
   onError: "pass"
@@ -88,8 +95,9 @@ markdown:
   bufferChunked: true
   autoDecompress: true
 
-  # load_module path for the shared object
-  loadModule: null
+  # Absolute load_module path inside the container, for example:
+  # /usr/lib/nginx/modules/ngx_http_markdown_filter_module.so
+  loadModule: ""
 
   # Streaming configuration
   streaming:
