@@ -601,6 +601,11 @@ jobs:
           cargo install cargo-fuzz --locked
           cargo install cbindgen --locked
 
+      - name: Set up Helm
+        uses: Azure/setup-helm@dda3372f752e03dde6b3237bc9431cdc2f7a02a2 # v5.0.0
+        with:
+          version: '4.2.0'
+
       - name: Run v0.7.0 release gates
         run: RELEASE_GATE_REQUIRE_PACKAGES=0 make release-gates-check-070
 
