@@ -10,10 +10,16 @@ data:
     load_module {{ .Values.markdown.loadModule }};
     {{- end }}
     worker_processes auto;
+    pid /var/run/nginx.pid;
     events { worker_connections 1024; }
     http {
+      client_body_temp_path /var/cache/nginx/client_body_temp;
+      proxy_temp_path /var/cache/nginx/proxy_temp;
+      fastcgi_temp_path /var/cache/nginx/fastcgi_temp;
+      uwsgi_temp_path /var/cache/nginx/uwsgi_temp;
+      scgi_temp_path /var/cache/nginx/scgi_temp;
       server {
-        listen 80;
+        listen 8080;
         {{- if .Values.markdown.enabled }}
         markdown_filter on;
         markdown_memory_budget {{ .Values.markdown.maxSize }};

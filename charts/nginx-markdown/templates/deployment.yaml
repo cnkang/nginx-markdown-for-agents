@@ -35,6 +35,12 @@ spec:
             - name: nginx-config
               mountPath: /etc/nginx/nginx.conf
               subPath: nginx.conf
+            - name: nginx-cache
+              mountPath: /var/cache/nginx
+            - name: nginx-run
+              mountPath: /var/run
+            - name: nginx-tmp
+              mountPath: /tmp
             {{- if .Values.markdown.loadModule }}
             - name: modules
               mountPath: {{ dir .Values.markdown.loadModule }}
@@ -42,7 +48,7 @@ spec:
             {{- end }}
           ports:
             - name: http
-              containerPort: 80
+              containerPort: 8080
               protocol: TCP
           {{- with .Values.livenessProbe }}
           livenessProbe:
@@ -62,6 +68,12 @@ spec:
         - name: nginx-config
           configMap:
             name: {{ include "nginx-markdown.fullname" . }}-config
+        - name: nginx-cache
+          emptyDir: {}
+        - name: nginx-run
+          emptyDir: {}
+        - name: nginx-tmp
+          emptyDir: {}
         {{- if .Values.markdown.loadModule }}
         - name: modules
           hostPath:
