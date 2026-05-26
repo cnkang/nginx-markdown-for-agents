@@ -42,9 +42,29 @@ Required:
     patterns that reference the old field paths in the same change set.
   - `make release-gates-check` must catch regex/pattern drift; if it does
     not, the gate validator itself has a bug.
+- **Release/package chain invariants**:
+  - Use exactly one canonical dynamic module filename across NGINX build
+    outputs, nFPM config, Debian/RPM specs, load-module snippets, install
+    docs, smoke tests, and install-layout gates.  If the addon output changes,
+    update all of those surfaces and the validator in the same change set.
+  - Every NGINX source version requested by release workflows or release
+    Dockerfiles must have a matching entry in `packaging/checksums.sha256`.
+    Do not introduce active release paths that rely on unchecked source
+    versions.
+  - Artifact producer names and consumer patterns must match exactly across
+    release package upload, smoke-test download, and signing workflows.
+    Fail-closed signing is correct, but mismatched artifact names are still a
+    release integration bug.
+  - Package smoke tests for architecture-specific artifacts must run on a
+    matching runner architecture or an explicit emulation path.
+  - Helm charts with `runAsNonRoot`, dropped capabilities, and
+    `readOnlyRootFilesystem` defaults must use an unprivileged listen port and
+    writable runtime/temp mounts in the rendered pod spec.
 
 Verification:
 - `bash tools/harness/detect_ci_supply_chain.sh`
 - `grep -rn 'uses:' .github/workflows/ | grep -v '@[0-9a-f]\{40\}'` — should
   return no results (all actions pinned to SHA).
+- `python3 tools/release/gates/validate_package_metadata_070.py`
+- `python3 tools/release/gates/validate_k8s_manifests_070.py`
 - `make release-gates-check`
