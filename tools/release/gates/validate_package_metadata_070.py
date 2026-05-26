@@ -33,14 +33,11 @@ RPM_SPEC = (
     / "SPECS"
     / "nginx-module-markdown.spec"
 )
-RELEASE_PACKAGES_WORKFLOW = (
-    PROJECT_ROOT / ".github" / "workflows" / "release-packages.yml"
-)
-RELEASE_DEB_WORKFLOW = PROJECT_ROOT / ".github" / "workflows" / "release-deb.yml"
-RELEASE_RPM_WORKFLOW = PROJECT_ROOT / ".github" / "workflows" / "release-rpm.yml"
-SIGN_AND_PUBLISH_WORKFLOW = (
-    PROJECT_ROOT / ".github" / "workflows" / "sign-and-publish.yml"
-)
+GITHUB_WORKFLOWS_DIR = PROJECT_ROOT / ".github" / "workflows"
+RELEASE_PACKAGES_WORKFLOW = GITHUB_WORKFLOWS_DIR / "release-packages.yml"
+RELEASE_DEB_WORKFLOW = GITHUB_WORKFLOWS_DIR / "release-deb.yml"
+RELEASE_RPM_WORKFLOW = GITHUB_WORKFLOWS_DIR / "release-rpm.yml"
+SIGN_AND_PUBLISH_WORKFLOW = GITHUB_WORKFLOWS_DIR / "sign-and-publish.yml"
 CHECKSUMS_FILE = PROJECT_ROOT / "packaging" / "checksums.sha256"
 RELEASE_DOCKERFILES = [
     PROJECT_ROOT / "tools" / "build_release" / "Dockerfile.glibc",
@@ -156,6 +153,38 @@ def read_safe(path: Path) -> str:
     if not str(resolved).startswith(str(PROJECT_ROOT)):
         return ""
     return resolved.read_text(encoding="utf-8") if resolved.is_file() else ""
+
+
+def _check_snippets(
+    content: str, snippets: list[str], prefix: str, label: str,
+    result: ValidationResult,
+) -> None:
+    """Check that content contains all required snippets."""
+    for snippet in snippets:
+        sid = f"{prefix}:{snippet[:24]}"
+        if snippet in content:
+            result.pass_(sid, f"{label} contains {snippet}")
+        else:
+            result.fail(sid, f"{label} missing {snippet}")
+
+
+def _check_container_bash_shell(
+    content: str, prefix: str, result: ValidationResult
+) -> None:
+    """Check that a container job with bashisms sets defaults.run.shell: bash."""
+    has_bashism = "[[" in content or "{BUILD,RPMS,SOURCES,SPECS,SRPMS}" in content
+    if "container:" not in content or not has_bashism:
+        return
+    if STANDALONE_CONTAINER_BASH_SHELL in content:
+        result.pass_(
+            f"{prefix}:container-shell",
+            "container job uses bash for run steps",
+        )
+    else:
+        result.fail(
+            f"{prefix}:container-shell",
+            "container job with bashisms must set defaults.run.shell: bash",
+        )
 
 
 def validate_nfpm_config(result: ValidationResult) -> None:
@@ -304,65 +333,42 @@ def validate_release_artifact_flow(result: ValidationResult) -> None:
         )
 
 
-def validate_standalone_workflow_packaging(result: ValidationResult) -> None:
-    """Validate standalone DEB/RPM workflows match canonical package layout."""
+def _validate_standalone_deb(result: ValidationResult) -> None:
+    """Validate standalone DEB workflow matches canonical package layout."""
     deb_workflow = read_safe(RELEASE_DEB_WORKFLOW)
     if not deb_workflow:
         result.fail("standalone-deb:exists", "release-deb.yml not found")
-    else:
-        if "container:" in deb_workflow and "[[" in deb_workflow:
-            if STANDALONE_CONTAINER_BASH_SHELL in deb_workflow:
-                result.pass_(
-                    "standalone-deb:container-shell",
-                    "container job uses bash for run steps",
-                )
-            else:
-                result.fail(
-                    "standalone-deb:container-shell",
-                    "container job with bashisms must set defaults.run.shell: bash",
-                )
-        for snippet in STANDALONE_DEB_SNIPPETS:
-            sid = f"standalone-deb:{snippet[:24]}"
-            if snippet in deb_workflow:
-                result.pass_(sid, f"release-deb.yml contains {snippet}")
-            else:
-                result.fail(sid, f"release-deb.yml missing {snippet}")
+        return
+    _check_container_bash_shell(deb_workflow, "standalone-deb", result)
+    _check_snippets(
+        deb_workflow, STANDALONE_DEB_SNIPPETS, "standalone-deb",
+        "release-deb.yml", result,
+    )
 
+
+def _validate_standalone_rpm_workflow(result: ValidationResult) -> None:
+    """Validate standalone RPM workflow matches canonical package layout."""
     rpm_workflow = read_safe(RELEASE_RPM_WORKFLOW)
     if not rpm_workflow:
         result.fail("standalone-rpm:exists", "release-rpm.yml not found")
-    else:
-        has_bashism = "[[" in rpm_workflow or "{BUILD,RPMS,SOURCES,SPECS,SRPMS}" in rpm_workflow
-        if "container:" in rpm_workflow and has_bashism:
-            if STANDALONE_CONTAINER_BASH_SHELL in rpm_workflow:
-                result.pass_(
-                    "standalone-rpm:container-shell",
-                    "container job uses bash for run steps",
-                )
-            else:
-                result.fail(
-                    "standalone-rpm:container-shell",
-                    "container job with bashisms must set defaults.run.shell: bash",
-                )
-        for snippet in STANDALONE_RPM_WORKFLOW_SNIPPETS:
-            sid = f"standalone-rpm-workflow:{snippet[:18]}"
-            if snippet in rpm_workflow:
-                result.pass_(sid, f"release-rpm.yml contains {snippet}")
-            else:
-                result.fail(sid, f"release-rpm.yml missing {snippet}")
+        return
+    _check_container_bash_shell(rpm_workflow, "standalone-rpm", result)
+    _check_snippets(
+        rpm_workflow, STANDALONE_RPM_WORKFLOW_SNIPPETS, "standalone-rpm-workflow",
+        "release-rpm.yml", result,
+    )
 
+
+def _validate_standalone_rpm_spec(result: ValidationResult) -> None:
+    """Validate standalone RPM spec matches canonical package layout."""
     rpm_spec = read_safe(RPM_SPEC)
     if not rpm_spec:
         result.fail("standalone-rpm-spec:exists", "RPM spec not found")
         return
-
-    for snippet in STANDALONE_RPM_SPEC_SNIPPETS:
-        sid = f"standalone-rpm-spec:{snippet[:18]}"
-        if snippet in rpm_spec:
-            result.pass_(sid, f"RPM spec contains {snippet}")
-        else:
-            result.fail(sid, f"RPM spec missing {snippet}")
-
+    _check_snippets(
+        rpm_spec, STANDALONE_RPM_SPEC_SNIPPETS, "standalone-rpm-spec",
+        "RPM spec", result,
+    )
     if re.search(r"^make\s+build\s*$", rpm_spec, re.MULTILINE):
         result.fail(
             "standalone-rpm-spec:no-make-build",
@@ -373,6 +379,13 @@ def validate_standalone_workflow_packaging(result: ValidationResult) -> None:
             "standalone-rpm-spec:no-make-build",
             "prebuilt standalone RPM spec does not run make build",
         )
+
+
+def validate_standalone_workflow_packaging(result: ValidationResult) -> None:
+    """Validate standalone DEB/RPM workflows match canonical package layout."""
+    _validate_standalone_deb(result)
+    _validate_standalone_rpm_workflow(result)
+    _validate_standalone_rpm_spec(result)
 
 
 def print_report(result: ValidationResult) -> None:
