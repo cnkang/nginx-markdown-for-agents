@@ -27,7 +27,9 @@ jobs:
       matrix:
         os: [ubuntu-22.04, ubuntu-24.04, debian-12]
         arch: [amd64, arm64]
-        nginx_channel: [stable, mainline]
+        # Stable-only by design. Add channels only with checksum coverage,
+        # package artifact flow, smoke matrix, and release-gate updates.
+        nginx_channel: [stable]
     container:
       image: ${{ matrix.os == 'ubuntu-22.04' && 'ubuntu:22.04' || matrix.os == 'ubuntu-24.04' && 'ubuntu:24.04' || 'debian:12' }}
 
@@ -64,11 +66,15 @@ jobs:
         run: |
           . "$HOME/.cargo/env"
           CHANNEL="${{ matrix.nginx_channel }}"
-          if [ "${CHANNEL}" = "stable" ]; then
-            NGINX_VERSION="1.26.3"
-          else
-            NGINX_VERSION="1.27.4"
-          fi
+          case "${CHANNEL}" in
+            stable)
+              NGINX_VERSION="1.26.3"
+              ;;
+            *)
+              echo "ERROR: Unsupported NGINX channel: ${CHANNEL}" >&2
+              exit 1
+              ;;
+          esac
           echo "version=${NGINX_VERSION}" >> "$GITHUB_OUTPUT"
           echo "Building for NGINX ${NGINX_VERSION} (${CHANNEL} channel)"
 
@@ -106,7 +112,7 @@ jobs:
             --with-compat \
             --add-dynamic-module="$GITHUB_WORKSPACE/components/nginx-module"
           make modules
-          cp objs/ngx_http_markdown_module.so "$GITHUB_WORKSPACE/build/"
+          cp objs/ngx_http_markdown_filter_module.so "$GITHUB_WORKSPACE/build/"
         shell: bash
 
       - name: Build DEB package
@@ -114,7 +120,7 @@ jobs:
           PKG_VERSION: ${{ inputs.version }}
           NGINX_VERSION: ${{ steps.nginx_version.outputs.version }}
         run: |
-          if [ ! -f "build/ngx_http_markdown_module.so" ]; then
+          if [ ! -f "build/ngx_http_markdown_filter_module.so" ]; then
             echo "ERROR: Module .so not found in build/" >&2
             exit 1
           fi
@@ -130,13 +136,13 @@ jobs:
           mkdir -p "${PKG_DIR}/usr/share/doc/${PKG_NAME}"
 
           # Install module binary
-          cp build/ngx_http_markdown_module.so \
+          cp build/ngx_http_markdown_filter_module.so \
             "${PKG_DIR}/usr/lib/nginx/modules/"
 
           # Install load_module snippet (commented out by default)
           cat > "${PKG_DIR}/usr/share/nginx/modules-available/mod-markdown.conf" <<'SNIPPET'
           # Uncomment to enable the markdown filter module:
-          # load_module modules/ngx_http_markdown_module.so;
+          # load_module modules/ngx_http_markdown_filter_module.so;
           SNIPPET
 
           # Install docs

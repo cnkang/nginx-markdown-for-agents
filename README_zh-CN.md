@@ -85,7 +85,7 @@ tap 发布与 GitHub macOS 发布后校验流程见 [docs/guides/HOMEBREW_TAP_RE
 ### 2. 在一个路由上开启 Markdown
 
 ```nginx
-load_module modules/ngx_http_markdown_module.so;
+load_module modules/ngx_http_markdown_filter_module.so;
 
 http {
     upstream backend {
@@ -128,7 +128,7 @@ curl -sD - -o /dev/null -H "Accept: text/html" http://localhost/docs/
 大多数 AI 爬虫不会发送 `Accept: text/markdown`，它们使用和浏览器类似的 Accept 头。你可以用 NGINX 的 `map` 指令根据 User-Agent 改写 Accept 头，让匹配的 bot 自动收到 Markdown，而不需要 bot 自身做任何改变。
 
 ```nginx
-load_module modules/ngx_http_markdown_module.so;
+load_module modules/ngx_http_markdown_filter_module.so;
 
 http {
     # 为已知 AI bot 改写 Accept 头

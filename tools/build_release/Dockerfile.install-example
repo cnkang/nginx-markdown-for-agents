@@ -1,7 +1,7 @@
 # Example Dockerfile showing optimized installation
 # This demonstrates how to use the install script efficiently in Docker builds
 
-ARG NGINX_VERSION=1.28.2
+ARG NGINX_VERSION=1.26.3
 ARG MODULE_REF=v0.1.0
 ARG INSTALL_SHA256
 FROM nginx:${NGINX_VERSION}-alpine

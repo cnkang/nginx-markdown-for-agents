@@ -34,7 +34,7 @@ ENV PATH="/root/.cargo/bin:${PATH}"
 
 RUN update-ca-certificates
 
-ARG NGINX_VERSION=1.28.2
+ARG NGINX_VERSION=1.26.3
 
 WORKDIR /build
 COPY packaging/checksums.sha256 /src/packaging/checksums.sha256

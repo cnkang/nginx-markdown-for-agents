@@ -109,7 +109,7 @@ nginx-markdown-for-agents module installed successfully.
 
 To enable the module:
   1. Add to nginx.conf (top-level, before http block):
-     load_module modules/ngx_http_markdown_module.so;
+     load_module modules/ngx_http_markdown_filter_module.so;
 
   2. Verify configuration:
      sudo nginx -t
