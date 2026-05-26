@@ -509,7 +509,7 @@ def _validate_standalone_rpm_spec(result: ValidationResult) -> None:
         rpm_spec, STANDALONE_RPM_SPEC_SNIPPETS, "standalone-rpm-spec",
         "RPM spec", result,
     )
-    if re.search(r"^\s*make\s+build\s*$", rpm_spec, re.MULTILINE):
+    if re.search(r"^\s*make\s+build(?:\s+.*)?$", rpm_spec, re.MULTILINE):
         result.fail(
             "standalone-rpm-spec:no-make-build",
             "prebuilt standalone RPM spec must not run make build",
