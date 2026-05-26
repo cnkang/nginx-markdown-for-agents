@@ -2,7 +2,7 @@
 # postinstall.sh — nFPM post-installation script for nginx-module-markdown-for-agents.
 #
 # Usage:
-#   postinstall.sh [configure]
+#   postinstall.sh [configure|1|2]
 #
 # This script is invoked by the package manager after successful installation.
 # It displays instructions for enabling the module. It does NOT modify any
@@ -10,7 +10,7 @@
 #
 # Exit codes:
 #   0  Success
-#   1  Error (unknown argument)
+#   0  Success
 
 set -e
 
@@ -29,7 +29,7 @@ info() {
 ACTION="${1:-configure}"
 
 case "$ACTION" in
-    configure)
+    configure|1|2)
         cat >&2 <<'EOF'
 ======================================================================
 nginx-module-markdown-for-agents module installed successfully.
@@ -49,7 +49,7 @@ To enable the module:
 
   --- RHEL/AlmaLinux/Amazon Linux (RPM) ---
   1. Add to /etc/nginx/nginx.conf (top-level, before http block):
-       load_module modules/ngx_http_markdown_filter_module.so;
+       load_module /usr/lib64/nginx/modules/ngx_http_markdown_filter_module.so;
 
   2. Verify configuration:
        sudo nginx -t
@@ -67,7 +67,6 @@ EOF
         ;;
     *)
         info "postinstall called with unknown argument: $ACTION"
-        exit 1
         ;;
 esac
 
