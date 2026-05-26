@@ -21,10 +21,19 @@ or packaging documentation.
   install layout, or prebuilt-module packaging contract
 - Containerized package jobs using Bash-only syntax under GitHub Actions'
   default container `sh` shell
+- User-supplied package versions flowing into standalone package paths,
+  metadata, RPM macros, or artifact names without validation
+- Exact package dependencies using only upstream NGINX source versions when
+  target distro package versions include release suffixes or epochs
+- RPM smoke tests selecting the wrong nginx.org repository family for the
+  target distribution
 - Architecture-specific package smoke tests running on the wrong runner
   architecture
 - Secure-by-default Helm chart settings that prevent NGINX from binding or
   writing runtime/temp files
+- Local K8s smoke tests deploying stock NGINX images while rendering
+  module-specific directives, using the wrong kube-context, or deleting
+  pre-existing kind clusters
 - Homebrew formula checksums generated from a different source archive than
   the release/tag that the formula installs
 - Tap publish/verification workflows drifting from the repo-owned release-gate
@@ -48,14 +57,30 @@ or packaging documentation.
   by active release workflows and release Dockerfiles.
 - `packaging/nfpm/nfpm.yaml`, Debian/RPM specs, load snippets, smoke tests,
   install-layout gates, and public install docs must use the same module `.so`
-  filename as the NGINX dynamic module build output.
+  filename as the NGINX dynamic module build output.  Their package-specific
+  module directories must match the target nginx.org package `--modules-path`.
 - Standalone package workflows must install the same canonical doc/license
   paths as nFPM packages and must run `check_install_layout.sh` against their
-  generated packages before upload.
+  generated packages before upload.  They must validate package version inputs
+  before using them in generated paths or metadata.
+- Package dependencies must be satisfiable by the target package manager; exact
+  constraints must use distro-resolvable EVRs, not naked upstream source
+  versions when release suffixes or epochs are expected.
+- RPM smoke tests must derive nginx.org repository family from the target
+  distribution instead of assuming CentOS-compatible paths for every RPM image.
+- Release package build environments must use a glibc baseline compatible with
+  every smoke-test/runtime distro for the generated artifact family, or the
+  artifact set must be split by distro family.
+- Package maintainer scripts must accept target package manager lifecycle
+  arguments, including RPM numeric `%post` arguments, without failing an
+  otherwise successful install for advisory output.
 - Containerized package workflows that use Bash syntax must set
   `defaults.run.shell: bash` or equivalent step-level shells.
 - Helm chart defaults must render a pod that can start under the chart's
-  default security context.
+  default security context.  Local K8s smoke tests that use stock NGINX images
+  must disable module directives, run Helm/kubectl against the intended kind
+  context, count structured pod fields without collapsed jsonpath output, and
+  preserve pre-existing clusters.
 - Homebrew formula repository and repo-owned formula template must stay in sync
   with release artifacts, tag timing, checksums, and post-release verification.
 - `docs/guides/INSTALLATION.md` must document all installation methods
@@ -85,3 +110,4 @@ make release-gates-check
 | 0.7.2 | 2026-05-25 | Codex | Added release package chain invariants for module names, checksum coverage, artifact naming, architecture-matched smoke tests, and Helm secure defaults |
 | 0.7.3 | 2026-05-26 | Codex | Added standalone DEB/RPM package-name, layout, and prebuilt-module contract coverage |
 | 0.7.4 | 2026-05-26 | Codex | Added GitHub Actions container shell coverage for standalone package workflows |
+| 0.7.5 | 2026-05-26 | Codex | Added package dependency satisfiability, version-input validation, distro-specific RPM repo selection, package script lifecycle args, module path/glibc runtime compatibility, and local K8s smoke context/module safety coverage |
