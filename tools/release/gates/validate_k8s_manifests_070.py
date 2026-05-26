@@ -20,6 +20,8 @@ No user-supplied patterns are compiled at runtime.
 
 from __future__ import annotations
 
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -57,6 +59,17 @@ HELM_DEPLOYMENT_REQUIRED_SNIPPETS = [
     "mountPath: /var/run",
     "mountPath: /tmp",
     "emptyDir: {}",
+]
+HELM_RENDER_REQUIRED_SNIPPETS = [
+    "listen 8080;",
+    "pid /var/run/nginx.pid;",
+    "client_body_temp_path /var/cache/nginx/client_body_temp;",
+    "readOnlyRootFilesystem: true",
+    "runAsNonRoot: true",
+    "containerPort: 8080",
+    "mountPath: /var/cache/nginx",
+    "mountPath: /var/run",
+    "mountPath: /tmp",
 ]
 
 
@@ -214,6 +227,57 @@ def validate_helm_secure_defaults(result: ValidationResult) -> None:
             )
 
 
+def validate_helm_render(result: ValidationResult) -> None:
+    """Run Helm render checks when helm is available in the local environment."""
+    helm = shutil.which("helm")
+    if not helm:
+        result.pass_(
+            "helm:render:skipped",
+            "helm not found; render smoke skipped after template-source checks",
+        )
+        return
+
+    chart_dir = PROJECT_ROOT / "charts" / "nginx-markdown"
+    lint = subprocess.run(
+        [helm, "lint", str(chart_dir)],
+        cwd=PROJECT_ROOT,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=False,
+    )
+    if lint.returncode != 0:
+        result.fail("helm:lint", f"helm lint failed: {lint.stdout.strip()}")
+        return
+    result.pass_("helm:lint", "helm lint passed")
+
+    rendered = subprocess.run(
+        [helm, "template", "test", str(chart_dir)],
+        cwd=PROJECT_ROOT,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=False,
+    )
+    if rendered.returncode != 0:
+        result.fail("helm:template", f"helm template failed: {rendered.stdout.strip()}")
+        return
+    result.pass_("helm:template", "helm template rendered successfully")
+
+    ok, err = try_parse_yaml(rendered.stdout)
+    if ok:
+        result.pass_("helm:render:yaml", "rendered Helm output is valid YAML")
+    else:
+        result.fail("helm:render:yaml", f"rendered Helm YAML error: {err}")
+
+    for snippet in HELM_RENDER_REQUIRED_SNIPPETS:
+        sid = f"helm:render:{snippet[:24]}"
+        if snippet in rendered.stdout:
+            result.pass_(sid, f"rendered Helm output contains {snippet}")
+        else:
+            result.fail(sid, f"rendered Helm output missing {snippet}")
+
+
 def print_report(result: ValidationResult) -> None:
     """Print a formatted validation report."""
     print("v0.7.0 K8s Manifest & Helm Chart Validation Report")
@@ -232,6 +296,7 @@ def main() -> int:
     validate_chart_yaml(result)
     validate_k8s_manifests(result)
     validate_helm_secure_defaults(result)
+    validate_helm_render(result)
     print_report(result)
     return 1 if result.has_failures else 0
 
