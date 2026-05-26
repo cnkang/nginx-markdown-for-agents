@@ -180,6 +180,12 @@ def validate_k8s_manifests(result: ValidationResult) -> None:
     # Validate each YAML file syntax
     for yf in sorted(yaml_files):
         fname = yf.name
+        if not _is_within_project(yf):
+            result.fail(
+                f"k8s:path:{fname}",
+                "manifest file path outside project",
+            )
+            continue
         content = yf.read_text(encoding="utf-8")
         ok, err = try_parse_yaml(content)
         sid = f"k8s:syntax:{fname}"
