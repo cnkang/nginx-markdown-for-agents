@@ -338,15 +338,61 @@ def _strip_unquoted_comment(line: str) -> str:
 
 
 def _contains_make_build_command(content: str) -> bool:
-    """Return True when content contains an active ``make build`` command line."""
+    """Return True when content contains an active ``make build`` command line.
+
+    Detects common variants:
+      - ``make build``
+      - ``make -j4 build``
+      - ``cd src && make build``
+      - ``gmake build``
+      - ``%make_build build`` (RPM macro style)
+
+    Does not match when make appears as an argument to another command
+    (e.g. ``echo make build``).
+    """
+    shell_operators = {"&&", "||", ";", "|"}
+
+    def _is_make_token(token: str) -> bool:
+        """Return True if token looks like a make invocation."""
+        return token in {"make", "gmake"} or "make" in token.lower()
+
     for raw_line in content.splitlines():
         line = _strip_unquoted_comment(raw_line).strip()
         if not line:
             continue
 
-        parts = line.split()
-        if len(parts) >= 2 and parts[0] == "make" and parts[1] == "build":
-            return True
+        # Split on shell operators to get individual command segments
+        segments: list[list[str]] = [[]]
+        for token in line.split():
+            if token in shell_operators:
+                segments.append([])
+            else:
+                segments[-1].append(token)
+
+        for segment in segments:
+            if not segment:
+                continue
+            # The make invocation must be in command position (first token)
+            # or after a simple prefix like 'cd dir' (skip non-make leading tokens
+            # only if they are known shell builtins that change directory)
+            cmd_token = segment[0]
+            make_idx: int | None = None
+            if _is_make_token(cmd_token):
+                make_idx = 0
+            elif cmd_token == "cd" and len(segment) >= 3:
+                # Pattern: cd <dir> make ... (unusual but handle cd without &&)
+                # Actually cd without && is invalid; skip this segment
+                pass
+            else:
+                # Not a make command — skip (avoids matching 'echo make build')
+                continue
+
+            if make_idx is None:
+                continue
+            # Check if any subsequent token (ignoring flags) is "build"
+            for token in segment[make_idx + 1:]:
+                if token == "build":
+                    return True
 
     return False
 
