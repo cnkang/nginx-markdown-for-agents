@@ -81,6 +81,10 @@ or packaging documentation.
   must disable module directives, run Helm/kubectl against the intended kind
   context, count structured pod fields without collapsed jsonpath output, and
   preserve pre-existing clusters.
+- Helm chart defaults must also remain renderable with stock images and no
+  module directives. Module-enabled renders must require an explicit
+  in-container module path and must not auto-create node `hostPath` mounts from
+  that path; custom mounts belong behind explicit opt-in values.
 - Homebrew formula repository and repo-owned formula template must stay in sync
   with release artifacts, tag timing, checksums, and post-release verification.
 - `docs/guides/INSTALLATION.md` must document all installation methods

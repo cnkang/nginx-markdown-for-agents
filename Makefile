@@ -287,16 +287,26 @@ release-gates-check-070:
 				exit 0; \
 			fi; \
 			if command -v nfpm >/dev/null 2>&1; then \
-				echo "  [install-layout] No packages found; building local amd64 DEB/RPM with nFPM..."; \
+				host_arch="$$(uname -m)"; \
+				if test "$$(uname -s)" = "Darwin" && \
+					test "$$(sysctl -n hw.optional.arm64 2>/dev/null || echo 0)" = "1"; then \
+					host_arch="arm64"; \
+				fi; \
+				case "$$host_arch" in \
+					x86_64) nfpm_arch="amd64"; rpm_arch="x86_64" ;; \
+					arm64|aarch64) nfpm_arch="arm64"; rpm_arch="aarch64" ;; \
+					*) echo "FAIL: unsupported package build architecture: $$host_arch" >&2; exit 1 ;; \
+				esac; \
+				echo "  [install-layout] No packages found; building local $$nfpm_arch DEB/RPM with nFPM..."; \
 				mkdir -p dist; \
 					test -f build/ngx_http_markdown_filter_module.so || \
 						{ echo "FAIL: build/ngx_http_markdown_filter_module.so not found" >&2; exit 1; }; \
-				PKG_VERSION=$${PKG_VERSION:-0.7.0} NGINX_VERSION=$${NGINX_VERSION:-1.26.3} NFPM_ARCH=amd64 \
+				PKG_VERSION=$${PKG_VERSION:-0.7.0} NGINX_VERSION=$${NGINX_VERSION:-1.26.3} NFPM_ARCH=$$nfpm_arch \
 					nfpm package --config packaging/nfpm/nfpm.yaml --packager deb \
-					--target dist/nginx-module-markdown-for-agents_$${PKG_VERSION:-0.7.0}_nginx-$${NGINX_VERSION:-1.26.3}_amd64.deb; \
-				PKG_VERSION=$${PKG_VERSION:-0.7.0} NGINX_VERSION=$${NGINX_VERSION:-1.26.3} NFPM_ARCH=amd64 \
+					--target dist/nginx-module-markdown-for-agents_$${PKG_VERSION:-0.7.0}_nginx-$${NGINX_VERSION:-1.26.3}_$${nfpm_arch}.deb; \
+				PKG_VERSION=$${PKG_VERSION:-0.7.0} NGINX_VERSION=$${NGINX_VERSION:-1.26.3} NFPM_ARCH=$$nfpm_arch \
 					nfpm package --config packaging/nfpm/nfpm.yaml --packager rpm \
-					--target dist/nginx-module-markdown-for-agents-$${PKG_VERSION:-0.7.0}-nginx$${NGINX_VERSION:-1.26.3}-1.x86_64.rpm; \
+					--target dist/nginx-module-markdown-for-agents-$${PKG_VERSION:-0.7.0}-nginx$${NGINX_VERSION:-1.26.3}-1.$${rpm_arch}.rpm; \
 			else \
 				echo "FAIL: no package files in dist/ and nfpm is unavailable" >&2; \
 				exit 1; \

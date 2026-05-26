@@ -88,6 +88,12 @@ Required:
   - Helm charts with `runAsNonRoot`, dropped capabilities, and
     `readOnlyRootFilesystem` defaults must use an unprivileged listen port and
     writable runtime/temp mounts in the rendered pod spec.
+  - Helm charts that support optional dynamic modules must keep default renders
+    compatible with stock images, must fail clearly when module-specific
+    directives are enabled without an explicit in-image module path, and must
+    not create implicit `hostPath` mounts from module path values.  Custom
+    volumes must be explicit opt-in values such as `extraVolumes` and
+    `extraVolumeMounts`.
   - Local K8s smoke tests must use an explicit kind kube-context for every
     Helm/kubectl operation.  If a test deploys a stock NGINX image without the
     module, it must disable module-specific directives; if it reuses a
