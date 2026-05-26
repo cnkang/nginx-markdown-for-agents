@@ -398,9 +398,21 @@ run_smoke_tests() {
         esac
 
         local pkg_file
-        pkg_file="$(find "$dist_dir" -name "*.${pkg_format}" -print -quit 2>/dev/null || true)"
+        local pkg_pattern
+        case "$pkg_format" in
+            deb)
+                pkg_pattern="*_${ARCH}.deb"
+                ;;
+            rpm)
+                pkg_pattern="*-1.${RPM_ARCH}.rpm"
+                ;;
+            *)
+                die "Unsupported package format: $pkg_format"
+                ;;
+        esac
+        pkg_file="$(find "$dist_dir" -name "$pkg_pattern" -print -quit 2>/dev/null || true)"
         if [[ -z "$pkg_file" ]]; then
-            fail "No .${pkg_format} package found for ${image}"
+            fail "No ${pkg_pattern} package found for ${image}"
             had_failure=1
             continue
         fi
