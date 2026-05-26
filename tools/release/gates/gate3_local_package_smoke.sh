@@ -282,14 +282,21 @@ validate_layout() {
         chmod +x "$layout_script"
     fi
 
-    info "Running install layout validation..."
-    if bash "$layout_script" "$dist_dir"/*.deb "$dist_dir"/*.rpm; then
+    info "Running install layout validation (in container for rpm support)..."
+
+    # Run layout check inside a container that has both dpkg-deb and rpm
+    if "$DOCKER" run --rm \
+        -v "${dist_dir}:/dist:ro" \
+        -v "${layout_script}:/check_install_layout.sh:ro" \
+        "${BUILD_IMAGE_TAG}" \
+        bash /check_install_layout.sh /dist/*.deb /dist/*.rpm \
+        >&2 2>&1; then
         pass "Install layout validation passed"
         return 0
-    else
-        fail "Install layout validation failed"
-        return 1
     fi
+
+    fail "Install layout validation failed"
+    return 1
 }
 
 ##############################################################################
