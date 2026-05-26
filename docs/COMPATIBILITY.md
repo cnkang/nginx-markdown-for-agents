@@ -134,12 +134,12 @@ nginx -V 2>&1 | head -5
 When the module's binary compatibility signature does not match the running
 NGINX binary, you will see errors like:
 
-```
+```text
 nginx: [emerg] module "/usr/lib/nginx/modules/ngx_http_markdown_filter_module.so"
   version 1026003 instead of 1024000 in /etc/nginx/nginx.conf:1
 ```
 
-```
+```text
 nginx: [emerg] module "/usr/lib/nginx/modules/ngx_http_markdown_filter_module.so"
   is not binary compatible in /etc/nginx/nginx.conf:1
 ```
