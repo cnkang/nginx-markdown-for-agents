@@ -36,7 +36,8 @@ section() {
 ##############################################################################
 
 MODULE_PATH_DEB="/usr/lib/nginx/modules/ngx_http_markdown_filter_module.so"
-MODULE_PATH_RPM="/usr/lib/nginx/modules/ngx_http_markdown_filter_module.so"
+MODULE_PATH_RPM="/usr/lib64/nginx/modules/ngx_http_markdown_filter_module.so"
+MODULE_PATH_LEGACY_RPM="/usr/lib/nginx/modules/ngx_http_markdown_filter_module.so"
 
 ##############################################################################
 # Diagnostics collection
@@ -79,6 +80,14 @@ if [ -f "${MODULE_PATH_RPM}" ]; then
     diag "  File EXISTS"
     ls -la "${MODULE_PATH_RPM}" >&2
     MODULE_FOUND="${MODULE_PATH_RPM}"
+else
+    diag "  File NOT FOUND"
+fi
+
+diag "Checking legacy RPM path: ${MODULE_PATH_LEGACY_RPM}"
+if [ -f "${MODULE_PATH_LEGACY_RPM}" ]; then
+    diag "  File EXISTS"
+    ls -la "${MODULE_PATH_LEGACY_RPM}" >&2
 else
     diag "  File NOT FOUND"
 fi

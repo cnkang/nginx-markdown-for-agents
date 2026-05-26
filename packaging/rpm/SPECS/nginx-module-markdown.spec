@@ -7,7 +7,7 @@ License:        BSD-2-Clause
 URL:            https://github.com/cnkang/nginx-markdown-for-agents
 Source0:        %{name}-%{version}.tar.gz
 
-Requires:       nginx = %{nginx_version}
+Requires:       nginx >= %{nginx_version}
 
 %description
 NGINX dynamic filter module that converts HTML responses to Markdown
@@ -42,9 +42,9 @@ enabled via load_module directive in nginx.conf.
 %install
 rm -rf %{buildroot}
 
-install -d %{buildroot}/usr/lib/nginx/modules
+install -d %{buildroot}/usr/lib64/nginx/modules
 install -m 0644 ngx_http_markdown_filter_module.so \
-    %{buildroot}/usr/lib/nginx/modules/ngx_http_markdown_filter_module.so
+    %{buildroot}/usr/lib64/nginx/modules/ngx_http_markdown_filter_module.so
 
 install -d %{buildroot}/usr/share/doc/nginx-markdown-for-agents
 install -m 0644 README.md \
@@ -65,7 +65,7 @@ nginx-markdown-for-agents module installed successfully.
 
 To enable the module:
   1. Add to nginx.conf (top-level, before http block):
-     load_module modules/ngx_http_markdown_filter_module.so;
+     load_module /usr/lib64/nginx/modules/ngx_http_markdown_filter_module.so;
 
   2. Verify configuration:
      sudo nginx -t
@@ -79,7 +79,7 @@ For compatibility information, see:
 EOF
 
 %files
-/usr/lib/nginx/modules/ngx_http_markdown_filter_module.so
+/usr/lib64/nginx/modules/ngx_http_markdown_filter_module.so
 /usr/share/doc/nginx-markdown-for-agents/README.md
 /usr/share/doc/nginx-markdown-for-agents/INSTALL.md
 /usr/share/doc/nginx-markdown-for-agents/COMPATIBILITY.md

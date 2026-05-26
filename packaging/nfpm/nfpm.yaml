@@ -25,11 +25,18 @@ homepage: "https://github.com/cnkang/nginx-markdown-for-agents"
 license: "BSD-2-Clause"
 
 depends:
-  - "nginx (= ${NGINX_VERSION})"
+  - "nginx (>= ${NGINX_VERSION})"
 
 contents:
   - src: "./build/ngx_http_markdown_filter_module.so"
     dst: "/usr/lib/nginx/modules/ngx_http_markdown_filter_module.so"
+    packager: deb
+    file_info:
+      mode: 0644
+
+  - src: "./build/ngx_http_markdown_filter_module.so"
+    dst: "/usr/lib64/nginx/modules/ngx_http_markdown_filter_module.so"
+    packager: rpm
     file_info:
       mode: 0644
 
