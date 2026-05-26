@@ -234,40 +234,66 @@ def validate_helm_secure_defaults(result: ValidationResult) -> None:
     _validate_helm_deployment(result)
 
 
+_MAX_HELM_OUTPUT = 2048  # Truncate helm output in failure messages
+
+
+def _truncate_output(text: str, limit: int = _MAX_HELM_OUTPUT) -> str:
+    """Truncate text to limit characters, appending a marker if truncated."""
+    if len(text) <= limit:
+        return text
+    return text[:limit] + "\n[output truncated]"
+
+
 def validate_helm_render(result: ValidationResult) -> None:
     """Run Helm render checks when helm is available in the local environment."""
     helm = shutil.which("helm")
     if not helm:
-        result.pass_(
-            "helm:render:skipped",
-            "helm not found; render smoke skipped after template-source checks",
+        result.fail(
+            "helm:render:missing",
+            "helm not found; install helm to run render checks",
         )
         return
 
     chart_dir = PROJECT_ROOT / "charts" / "nginx-markdown"
-    lint = subprocess.run(
-        [helm, "lint", str(chart_dir)],
-        cwd=PROJECT_ROOT,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        check=False,
-    )
+    try:
+        lint = subprocess.run(
+            [helm, "lint", str(chart_dir)],
+            cwd=PROJECT_ROOT,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+            timeout=30,
+        )
+    except subprocess.TimeoutExpired as exc:
+        result.fail("helm:lint", f"helm lint timed out: {exc}")
+        return
     if lint.returncode != 0:
-        result.fail("helm:lint", f"helm lint failed: {lint.stdout.strip()}")
+        result.fail(
+            "helm:lint",
+            f"helm lint failed: {_truncate_output(lint.stdout.strip())}",
+        )
         return
     result.pass_("helm:lint", "helm lint passed")
 
-    rendered = subprocess.run(
-        [helm, "template", "test", str(chart_dir)],
-        cwd=PROJECT_ROOT,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        check=False,
-    )
+    try:
+        rendered = subprocess.run(
+            [helm, "template", "test", str(chart_dir)],
+            cwd=PROJECT_ROOT,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+            timeout=30,
+        )
+    except subprocess.TimeoutExpired as exc:
+        result.fail("helm:template", f"helm template timed out: {exc}")
+        return
     if rendered.returncode != 0:
-        result.fail("helm:template", f"helm template failed: {rendered.stdout.strip()}")
+        result.fail(
+            "helm:template",
+            f"helm template failed: {_truncate_output(rendered.stdout.strip())}",
+        )
         return
     result.pass_("helm:template", "helm template rendered successfully")
 
