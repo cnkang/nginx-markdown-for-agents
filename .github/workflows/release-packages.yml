@@ -500,7 +500,11 @@ jobs:
   publish:
     name: Publish
     needs: [integrity-checksums, integrity-signing]
-    if: always() && needs.integrity-checksums.result == 'success'
+    if: >-
+      always()
+      && needs.integrity-checksums.result == 'success'
+      && (needs.integrity-signing.result == 'success'
+          || needs.integrity-signing.result == 'skipped')
     runs-on: ubuntu-24.04
     permissions:
       contents: write
