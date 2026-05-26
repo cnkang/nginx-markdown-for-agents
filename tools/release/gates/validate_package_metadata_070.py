@@ -256,6 +256,8 @@ def validate_module_filename_consistency(result: ValidationResult) -> None:
 
 def checksum_identifiers() -> set[str]:
     """Return checked-in checksum identifiers from packaging/checksums.sha256."""
+    if not CHECKSUMS_FILE.exists():
+        return set()
     content = read_safe(CHECKSUMS_FILE)
     identifiers: set[str] = set()
     for line in content.splitlines():
@@ -268,8 +270,11 @@ def checksum_identifiers() -> set[str]:
 def extract_nginx_versions(content: str) -> set[str]:
     """Extract NGINX source versions from active release configuration."""
     versions: set[str] = set()
+    # Handle matrix-style arrays: nginx_version: ["1.25.5", "1.26.1"]
+    for match in re.findall(r'nginx_version:\s*\[([^\]]+)\]', content):
+        versions.update(re.findall(r'([0-9]+\.[0-9]+\.[0-9]+)', match))
+    # Handle shell/Dockerfile-style declarations
     patterns = [
-        r'nginx_version:\s*\[\s*"([0-9]+\.[0-9]+\.[0-9]+)"\s*\]',
         r'NGINX_VERSION="([0-9]+\.[0-9]+\.[0-9]+)"',
         r"ARG\s+NGINX_VERSION=([0-9]+\.[0-9]+\.[0-9]+)",
     ]
@@ -280,6 +285,12 @@ def extract_nginx_versions(content: str) -> set[str]:
 
 def validate_release_versions_have_checksums(result: ValidationResult) -> None:
     """Verify active release source versions are present in checksum metadata."""
+    if not CHECKSUMS_FILE.exists():
+        result.fail(
+            "checksums:exists",
+            "packaging/checksums.sha256 not found",
+        )
+        return
     identifiers = checksum_identifiers()
     if not identifiers:
         result.fail("checksums:exists", "packaging/checksums.sha256 has no entries")
@@ -369,7 +380,7 @@ def _validate_standalone_rpm_spec(result: ValidationResult) -> None:
         rpm_spec, STANDALONE_RPM_SPEC_SNIPPETS, "standalone-rpm-spec",
         "RPM spec", result,
     )
-    if re.search(r"^make\s+build\s*$", rpm_spec, re.MULTILINE):
+    if re.search(r"^\s*make\s+build\s*$", rpm_spec, re.MULTILINE):
         result.fail(
             "standalone-rpm-spec:no-make-build",
             "prebuilt standalone RPM spec must not run make build",
