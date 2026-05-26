@@ -13,6 +13,14 @@ or packaging documentation.
 - Helm chart values not mapping to all markdown configuration directives
 - Ingress annotation parsing errors causing silent misconfiguration
 - Package dependency conflicts across NGINX versions (1.24.x/1.26.x/1.29.x/1.30.x)
+- Dynamic module filename drift between the actual NGINX addon output,
+  package payloads, load snippets, install docs, and release gates
+- Release workflow/Dockerfile NGINX versions missing from the checksum table
+- Artifact upload/download/signing name drift between release jobs
+- Architecture-specific package smoke tests running on the wrong runner
+  architecture
+- Secure-by-default Helm chart settings that prevent NGINX from binding or
+  writing runtime/temp files
 - Homebrew formula checksums generated from a different source archive than
   the release/tag that the formula installs
 - Tap publish/verification workflows drifting from the repo-owned release-gate
@@ -28,6 +36,17 @@ or packaging documentation.
 - `tools/install.sh` must stay consistent with new package formats
 - `tools/release-matrix.json` must include all supported platforms
 - `tools/release/matrix/` tooling must stay consistent with matrix schema
+- `.github/workflows/release-packages.yml`,
+  `.github/workflows/release-deb.yml`, `.github/workflows/release-rpm.yml`,
+  and `.github/workflows/sign-and-publish.yml` must agree on package artifact
+  names, supported NGINX versions, and architecture-specific runner labels.
+- `packaging/checksums.sha256` must cover every NGINX source version requested
+  by active release workflows and release Dockerfiles.
+- `packaging/nfpm/nfpm.yaml`, Debian/RPM specs, load snippets, smoke tests,
+  install-layout gates, and public install docs must use the same module `.so`
+  filename as the NGINX dynamic module build output.
+- Helm chart defaults must render a pod that can start under the chart's
+  default security context.
 - Homebrew formula repository and repo-owned formula template must stay in sync
   with release artifacts, tag timing, checksums, and post-release verification.
 - `docs/guides/INSTALLATION.md` must document all installation methods
@@ -41,6 +60,8 @@ or packaging documentation.
 ```bash
 helm lint charts/nginx-markdown
 helm template test charts/nginx-markdown
+python3 tools/release/gates/validate_package_metadata_070.py
+python3 tools/release/gates/validate_k8s_manifests_070.py
 make docs-check
 make release-gates-check
 ```
@@ -52,3 +73,4 @@ make release-gates-check
 | 0.6.0 | 2026-04-28 | v0.6.0-planning | Initial pack definition |
 | 0.6.0 | 2026-05-03 | Codex | Covered Homebrew workflows/formula, package metadata, and release-gate docs |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
+| 0.7.2 | 2026-05-25 | Codex | Added release package chain invariants for module names, checksum coverage, artifact naming, architecture-matched smoke tests, and Helm secure defaults |
