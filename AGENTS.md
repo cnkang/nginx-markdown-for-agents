@@ -88,7 +88,7 @@ Full rule text, historical issues, and verification commands: `docs/harness/rule
 | 10 | parser-regex | No overlapping quantifiers; prefer deterministic parsing |
 | 11 | shell | macOS bash 3.2 compatible; no GNU-only flags; null-delimited traversal; empty array expansion under set -u |
 | 12 | security-cwe | Sanitize metadata-derived paths; never interpolate untrusted values |
-| 13 | ci-gating | Update workflow path filters; no redundant CI steps; pin Actions to SHA; verify download checksums; sync validator regex with struct layout |
+| 13 | ci-gating | Update workflow path filters; no redundant CI steps; pin Actions to SHA; verify download checksums; sync validator regex and release package chain gates |
 | 14 | testing-coverage | Every bug fix needs regression test; cross-boundary and malformed-input cases; parameterized tests must consume inputs |
 | 15 | ffi-crosslang | Rust FFI changes → update all boundaries; prefer helpers over literal init; read before free |
 | 16 | testing-coverage | No dead stores; loop vars in for; every var consumed by TEST_ASSERT |
@@ -196,6 +196,13 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
 **CI/Workflows** (CI)
 - GitHub Actions pinned to immutable SHA; download checksums verified [13]
 - Validator/gate regex patterns match actual struct field paths [13]
+- Release/package workflows preserve one canonical module `.so` filename across
+  NGINX build output, packaging metadata, load snippets, smoke tests, docs, and
+  install-layout gates [13]
+- Every NGINX source version requested by release workflows or release
+  Dockerfiles has a checked-in checksum, package artifact producer/consumer
+  names match exactly, and architecture-specific smoke tests run on matching
+  runner architecture [13]
 
 **Python** (P)
 - Binary prerequisites validate executability [19]
@@ -332,3 +339,4 @@ remediation:
 | 0.6.7 | 2026-05-17 | Kang | Extract detailed rules to docs/harness/rules/ domain files; AGENTS.md slimmed to index+workflow (~300 lines) |
 | 0.7.0 | 2026-05-17 | Kang | v0.7.0 scope: decompress_max_size/parse_timeout/parser_budget directives (A03/A06); DecompressionBudgetExceeded(9)/ParseTimeout(10)/ParseBudgetExceeded(11) error codes (A04/A06); FFIAcceptResult + negotiate_accept FFI (A05); Rust conditional/decision/header_plan/negotiator modules (B02-B05); release-gates-check-070 target; DECISION_CHAIN.md v0.7.0 reason codes |
 | 0.7.1 | 2026-05-25 | Kang | Rules 39–40: NGX_DONE terminal semantics/double-finalize prevention, invalidated header hash==0 filtering; Rule 8 format string argument matching; Rule 11 bash 3.2 empty array expansion; Rule 13 supply chain hardening (SHA pinning, checksum verification, validator regex sync); Rule 24 NGINX callback const exception; new tools: detect_ci_supply_chain.sh, detect_header_hash_filter.sh, detect_finalize_return.sh |
+| 0.7.2 | 2026-05-25 | Codex | Strengthened Rule 13 release package chain invariants: canonical module filename, checksum coverage, artifact producer/consumer names, architecture-matched smoke runners, and Helm secure-default runtime checks |
