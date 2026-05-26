@@ -46,8 +46,13 @@ HELM_VALUES_REQUIRED_SNIPPETS = [
     "runAsNonRoot: true",
     "readOnlyRootFilesystem: true",
     'drop: ["ALL"]',
+    "extraVolumes: []",
+    "extraVolumeMounts: []",
+    "enabled: false",
+    'loadModule: ""',
 ]
 HELM_CONFIG_REQUIRED_SNIPPETS = [
+    "markdown.loadModule is required when markdown.enabled=true",
     "pid /var/run/nginx.pid;",
     "client_body_temp_path /var/cache/nginx/client_body_temp;",
     "proxy_temp_path /var/cache/nginx/proxy_temp;",
@@ -62,6 +67,13 @@ HELM_DEPLOYMENT_REQUIRED_SNIPPETS = [
     "mountPath: /var/run",
     "mountPath: /tmp",
     "emptyDir: {}",
+    "with .Values.extraVolumes",
+    "with .Values.extraVolumeMounts",
+]
+HELM_DEPLOYMENT_FORBIDDEN_SNIPPETS = [
+    "hostPath:",
+    "mountPath: {{ dir .Values.markdown.loadModule }}",
+    "path: {{ dir .Values.markdown.loadModule }}",
 ]
 HELM_RENDER_REQUIRED_SNIPPETS = [
     "listen 8080;",
@@ -74,6 +86,11 @@ HELM_RENDER_REQUIRED_SNIPPETS = [
     "mountPath: /var/run",
     "mountPath: /tmp",
 ]
+HELM_RENDER_FORBIDDEN_DEFAULT_SNIPPETS = [
+    "load_module",
+    "markdown_filter on;",
+]
+HELM_MODULE_LOAD_PATH = "/usr/lib/nginx/modules/ngx_http_markdown_filter_module.so"
 GATE4_LOCAL_REQUIRED_SNIPPETS = [
     "--set markdown.enabled=false",
     "--kube-context \"$kube_context\"",
@@ -81,6 +98,7 @@ GATE4_LOCAL_REQUIRED_SNIPPETS = [
     "for volume_name in nginx-cache nginx-run nginx-tmp; do",
     "CREATED_CLUSTER=1",
     "Not deleting pre-existing cluster",
+    "stock-nginx chart deployment path",
 ]
 
 _CHECK_HELM_LINT = "helm:lint"
@@ -237,6 +255,12 @@ def _validate_helm_deployment(result: ValidationResult) -> None:
             result.pass_(sid, f"deployment template contains {snippet}")
         else:
             result.fail(sid, f"deployment template missing {snippet}")
+    for snippet in HELM_DEPLOYMENT_FORBIDDEN_SNIPPETS:
+        sid = f"helm:deployment-forbidden:{snippet[:24]}"
+        if snippet in deployment:
+            result.fail(sid, f"deployment template must not contain {snippet}")
+        else:
+            result.pass_(sid, f"deployment template omits {snippet}")
     empty_dir_count = deployment.count("emptyDir: {}")
     if empty_dir_count >= 3:
         result.pass_(
@@ -344,6 +368,80 @@ def validate_helm_render(result: ValidationResult) -> None:
             result.pass_(sid, f"rendered Helm output contains {snippet}")
         else:
             result.fail(sid, f"rendered Helm output missing {snippet}")
+    for snippet in HELM_RENDER_FORBIDDEN_DEFAULT_SNIPPETS:
+        sid = f"helm:render-default-forbidden:{snippet[:24]}"
+        if snippet in rendered.stdout:
+            result.fail(sid, f"default Helm render must not contain {snippet}")
+        else:
+            result.pass_(sid, f"default Helm render omits {snippet}")
+
+    try:
+        missing_module = subprocess.run(
+            [
+                helm, "template", "test", str(chart_dir),
+                "--set", "markdown.enabled=true",
+            ],
+            cwd=PROJECT_ROOT,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+            timeout=30,
+        )
+    except subprocess.TimeoutExpired as exc:
+        result.fail("helm:render-module-missing", f"helm template timed out: {exc}")
+        return
+    if (
+        missing_module.returncode != 0
+        and "markdown.loadModule is required when markdown.enabled=true"
+        in missing_module.stdout
+    ):
+        result.pass_(
+            "helm:render-module-missing",
+            "markdown.enabled=true without loadModule fails clearly",
+        )
+    else:
+        result.fail(
+            "helm:render-module-missing",
+            "markdown.enabled=true without loadModule must fail clearly",
+        )
+
+    try:
+        module_render = subprocess.run(
+            [
+                helm, "template", "test", str(chart_dir),
+                "--set", "markdown.enabled=true",
+                "--set-string", f"markdown.loadModule={HELM_MODULE_LOAD_PATH}",
+            ],
+            cwd=PROJECT_ROOT,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+            timeout=30,
+        )
+    except subprocess.TimeoutExpired as exc:
+        result.fail("helm:render-module-enabled", f"helm template timed out: {exc}")
+        return
+    if module_render.returncode != 0:
+        result.fail(
+            "helm:render-module-enabled",
+            "module-enabled Helm template failed: "
+            f"{_truncate_output(module_render.stdout.strip())}",
+        )
+    elif (
+        f"load_module {HELM_MODULE_LOAD_PATH};" in module_render.stdout
+        and "markdown_filter on;" in module_render.stdout
+    ):
+        result.pass_(
+            "helm:render-module-enabled",
+            "module-enabled Helm render includes load_module and markdown directives",
+        )
+    else:
+        result.fail(
+            "helm:render-module-enabled",
+            "module-enabled Helm render missing load_module or markdown directives",
+        )
 
 
 def print_report(result: ValidationResult) -> None:

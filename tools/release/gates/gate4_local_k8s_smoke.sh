@@ -292,8 +292,9 @@ deploy_and_verify() {
         --dry-run=client -o yaml \
         | kubectl --context "$kube_context" apply -f - >&2
 
-    # Install chart with a known-good nginx image. Disable markdown directives
-    # because the stock image does not include the dynamic module.
+    # Validate the stock-nginx chart deployment path, security context,
+    # writable runtime paths, and Helm installability. This smoke test does
+    # not validate a module-enabled image, so markdown directives stay off.
     if ! helm install "${HELM_RELEASE_NAME}" "${CHART_DIR}" \
         --kube-context "$kube_context" \
         --namespace "${HELM_NAMESPACE}" \
