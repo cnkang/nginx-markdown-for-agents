@@ -398,7 +398,7 @@ v0.7.0 是一个正确性、分发和可运维性版本：
 - **Accept 协商** — Rust 侧 RFC 9110 q-value 比较，在 `text/markdown` 和 `text/html` 之间决定是否转换
 - **解析超时与预算** — `markdown_parse_timeout`（默认 30s）和 `markdown_parser_budget`（默认 64m）防止解析失控（错误码 10、11）
 - **DEB/RPM 包分发** — 预构建包覆盖 Ubuntu 22.04/24.04、Debian 12、AlmaLinux 9、Amazon Linux 2023，支持 amd64/arm64，并校验 canonical install layout
-- **Kubernetes 部署示例** — Helm chart、manifest 和 Ingress Controller 自定义镜像构建路径，并包含安全运行时默认值
+- **Kubernetes 部署示例** — Helm chart、manifest 和 Ingress Controller 自定义镜像构建路径；默认适配 stock NGINX 镜像，启用模块时需要包含模块的镜像和显式 `markdown.loadModule`
 - **运行时诊断** — `/nginx-markdown/diagnostics` 端点暴露配置快照、最近决策和指标
 - **Dynconf dry-run 与回滚** — 验证配置变更但不应用；失败时回滚到 last-known-good
 
@@ -427,7 +427,7 @@ v0.7.0 是一个正确性、分发和可运维性版本：
 - 新错误码：DecompressionBudgetExceeded(9)、ParseTimeout(10)、ParseBudgetExceeded(11)
 - DEB/RPM 包分发与 APT/YUM 仓库支持
 - Package release gate 覆盖 canonical module path、artifact name、checksum 与架构匹配的 smoke test
-- Kubernetes 部署示例与包含安全运行时默认值的 Helm chart
+- Kubernetes 部署示例与默认适配 stock NGINX、显式支持模块启用配置的 Helm chart
 - 运行时诊断端点
 - Dynconf dry-run 验证与 last-known-good 回滚
 

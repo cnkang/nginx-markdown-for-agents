@@ -189,3 +189,8 @@ options:
 
 For the full list of supported versions and architectures, see the
 [Compatibility Matrix](./INSTALLATION.md#7-compatibility-matrix).
+
+For Kubernetes and Helm deployments, see
+[`KUBERNETES_DEPLOYMENT.md`](./KUBERNETES_DEPLOYMENT.md); the Helm chart runs
+with stock NGINX by default and requires an explicit module-enabled image plus
+`markdown.loadModule` when markdown directives are enabled.

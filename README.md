@@ -401,7 +401,7 @@ v0.7.0 is a correctness, distribution, and operability release:
 - **Accept negotiation** — Rust-side RFC 9110 q-value comparison between `text/markdown` and `text/html` determines conversion eligibility
 - **Parse timeout and budget** — `markdown_parse_timeout` (default 30s) and `markdown_parser_budget` (default 64m) prevent runaway parsing (error codes 10, 11)
 - **DEB/RPM packaging** — Pre-built packages for Ubuntu 22.04/24.04, Debian 12, AlmaLinux 9, Amazon Linux 2023 across amd64/arm64, with canonical install layout checks
-- **Kubernetes deployment examples** — Helm chart, manifests, and Ingress Controller custom image build path with secure runtime defaults
+- **Kubernetes deployment examples** — Helm chart, manifests, and Ingress Controller custom image build path with secure stock-image defaults; module-enabled Helm installs require an image containing the module and an explicit `markdown.loadModule`
 - **Runtime diagnostics** — `/nginx-markdown/diagnostics` endpoint exposes config snapshot, recent decisions, and metrics
 - **Dynconf dry-run and rollback** — Validate configuration changes without applying them; roll back to last-known-good on failure
 
@@ -430,7 +430,7 @@ Current release (0.7.0):
 - New error codes: DecompressionBudgetExceeded(9), ParseTimeout(10), ParseBudgetExceeded(11)
 - DEB/RPM packaging with APT/YUM repository support
 - Package release gates for canonical module paths, artifact names, checksums, and architecture-matched smoke tests
-- Kubernetes deployment examples and Helm chart with secure runtime defaults
+- Kubernetes deployment examples and Helm chart with secure stock-image defaults plus explicit module-enabled configuration
 - Runtime diagnostics endpoint
 - Dynconf dry-run validation and last-known-good rollback
 - Installation and release docs aligned to Rust 1.91.0+ and current CI expectations

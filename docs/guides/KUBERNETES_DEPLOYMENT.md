@@ -274,6 +274,31 @@ destination accordingly.
 
 ---
 
+## Helm Chart
+
+The chart is installable by default with a stock `nginx` image. The default
+`markdown.enabled=false` keeps `load_module` and `markdown_*` directives out of
+the rendered `nginx.conf`, which is the path used by the local stock-nginx
+smoke test.
+
+To enable the markdown module, use an image that already contains
+`ngx_http_markdown_filter_module.so`, then set both values:
+
+```bash
+helm install nginx-markdown charts/nginx-markdown \
+  --set image.repository=<your-nginx-markdown-image> \
+  --set image.tag=<tag> \
+  --set markdown.enabled=true \
+  --set-string markdown.loadModule=/usr/lib/nginx/modules/ngx_http_markdown_filter_module.so
+```
+
+When `markdown.enabled=true`, `markdown.loadModule` is required. The chart does
+not create a `hostPath` mount from that value. If a deployment needs additional
+volumes or mounts, use the explicit opt-in `extraVolumes` and
+`extraVolumeMounts` values.
+
+---
+
 ## Testing
 
 This section documents how to run the Kubernetes smoke test, E2E scenario
