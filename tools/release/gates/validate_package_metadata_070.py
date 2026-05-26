@@ -39,6 +39,8 @@ RELEASE_DEB_WORKFLOW = GITHUB_WORKFLOWS_DIR / "release-deb.yml"
 RELEASE_RPM_WORKFLOW = GITHUB_WORKFLOWS_DIR / "release-rpm.yml"
 SIGN_AND_PUBLISH_WORKFLOW = GITHUB_WORKFLOWS_DIR / "sign-and-publish.yml"
 CHECKSUMS_FILE = PROJECT_ROOT / "packaging" / "checksums.sha256"
+SMOKE_TEST_BASIC = PROJECT_ROOT / "packaging" / "scripts" / "smoke-test-basic.sh"
+NFPM_POSTINSTALL = PROJECT_ROOT / "packaging" / "nfpm" / "scripts" / "postinstall.sh"
 RELEASE_DOCKERFILES = [
     PROJECT_ROOT / "tools" / "build_release" / "Dockerfile.glibc",
     PROJECT_ROOT / "tools" / "build_release" / "Dockerfile.musl",
@@ -53,8 +55,11 @@ NFPM_REQUIRED_SNIPPETS = [
     'name: "nginx-module-markdown-for-agents"',
     'version: "${PKG_VERSION}"',
     'arch: "${NFPM_ARCH}"',
-    'nginx (= ${NGINX_VERSION})',
+    'nginx (>= ${NGINX_VERSION})',
     "/usr/lib/nginx/modules/ngx_http_markdown_filter_module.so",
+    "packager: deb",
+    "/usr/lib64/nginx/modules/ngx_http_markdown_filter_module.so",
+    "packager: rpm",
     "/usr/share/doc/nginx-markdown-for-agents/README.md",
     "/usr/share/doc/nginx-markdown-for-agents/INSTALL.md",
     "/usr/share/doc/nginx-markdown-for-agents/COMPATIBILITY.md",
@@ -108,6 +113,7 @@ ARCH_RUNNER_SNIPPET = (
 )
 STANDALONE_CONTAINER_BASH_SHELL = "defaults:\n      run:\n        shell: bash"
 STANDALONE_DEB_SNIPPETS = [
+    './packaging/scripts/validate-version.sh "${{ inputs.version }}"',
     f'PKG_NAME="{CANONICAL_PACKAGE_NAME}"',
     "/usr/share/doc/nginx-markdown-for-agents",
     "/usr/share/licenses/nginx-markdown-for-agents",
@@ -117,6 +123,7 @@ STANDALONE_DEB_SNIPPETS = [
     '"dist/${PKG_NAME}_${PKG_VERSION}_nginx-${NGINX_VERSION}_${PKG_ARCH}.deb"',
 ]
 STANDALONE_RPM_WORKFLOW_SNIPPETS = [
+    './packaging/scripts/validate-version.sh "${{ inputs.version }}"',
     f'PKG_NAME="{CANONICAL_PACKAGE_NAME}"',
     "docs/guides/INSTALL.md",
     "docs/COMPATIBILITY.md",
@@ -124,11 +131,37 @@ STANDALONE_RPM_WORKFLOW_SNIPPETS = [
 ]
 STANDALONE_RPM_SPEC_SNIPPETS = [
     f"Name:           {CANONICAL_PACKAGE_NAME}",
+    "Requires:       nginx >= %{nginx_version}",
     "Source0:        %{name}-%{version}.tar.gz",
     f"%setup -q -n {CANONICAL_PACKAGE_NAME}-%{{version}}",
     "# No-op: release-rpm.yml packages a prebuilt dynamic module.",
     "install -m 0644 ngx_http_markdown_filter_module.so",
+    "/usr/lib64/nginx/modules/ngx_http_markdown_filter_module.so",
 ]
+FORBIDDEN_NAKED_EXACT_NGINX_DEPS = [
+    "nginx (= ${NGINX_VERSION})",
+    "Requires:       nginx = %{nginx_version}",
+]
+SMOKE_RPM_REPO_SNIPPETS = [
+    "detect_rpm_repo_baseurl()",
+    "amzn)",
+    "packages/amzn/",
+    "almalinux|centos|rocky|rhel)",
+    "packages/centos/",
+]
+NFPM_POSTINSTALL_SNIPPETS = [
+    "configure|1|2)",
+    "abort-upgrade|abort-remove|abort-deconfigure)",
+    'info "postinstall called with unknown argument: $ACTION"',
+    "exit 0",
+]
+RELEASE_BUILD_GLIBC_SNIPPETS = {
+    RELEASE_PACKAGES_WORKFLOW: ["container: almalinux:9"],
+    PROJECT_ROOT / "tools" / "build_release" / "Dockerfile.glibc": [
+        "ARG OS_BASE=almalinux:9",
+        "dnf install -y",
+    ],
+}
 
 _CHECK_CHECKSUMS_EXISTS = "checksums:exists"
 
@@ -239,6 +272,28 @@ def validate_rpm_spec(result: ValidationResult) -> None:
             result.pass_(sid, f"{section} section present")
         else:
             result.fail(sid, f"{section} section missing from RPM spec")
+
+
+def validate_nginx_dependency_constraints(result: ValidationResult) -> None:
+    """Reject exact dependencies that use only the upstream source version."""
+    for path in (NFPM_CONFIG, RPM_SPEC):
+        rel = path.relative_to(PROJECT_ROOT)
+        content = read_safe(path)
+        if not content:
+            result.fail(f"nginx-dep:exists:{rel}", f"{rel} not found")
+            continue
+        for snippet in FORBIDDEN_NAKED_EXACT_NGINX_DEPS:
+            sid = f"nginx-dep:not-exact:{rel}:{snippet[:12]}"
+            if snippet in content:
+                result.fail(
+                    sid,
+                    f"{rel} uses naked exact dependency {snippet}",
+                )
+            else:
+                result.pass_(
+                    sid,
+                    f"{rel} does not use naked exact dependency {snippet}",
+                )
 
 
 def validate_module_filename_consistency(result: ValidationResult) -> None:
@@ -591,6 +646,44 @@ def validate_standalone_workflow_packaging(result: ValidationResult) -> None:
     _validate_standalone_rpm_spec(result)
 
 
+def validate_smoke_test_repo_selection(result: ValidationResult) -> None:
+    """Validate RPM smoke tests select nginx.org repos by distro family."""
+    content = read_safe(SMOKE_TEST_BASIC)
+    if not content:
+        result.fail("smoke-repo:exists", "smoke-test-basic.sh not found")
+        return
+    _check_snippets(
+        content, SMOKE_RPM_REPO_SNIPPETS, "smoke-repo",
+        "smoke-test-basic.sh", result,
+    )
+
+
+def validate_nfpm_postinstall_lifecycle(result: ValidationResult) -> None:
+    """Validate nFPM postinstall accepts DEB and RPM lifecycle arguments."""
+    content = read_safe(NFPM_POSTINSTALL)
+    if not content:
+        result.fail("nfpm-postinstall:exists", "postinstall.sh not found")
+        return
+    _check_snippets(
+        content, NFPM_POSTINSTALL_SNIPPETS, "nfpm-postinstall",
+        "postinstall.sh", result,
+    )
+
+
+def validate_release_build_glibc_baseline(result: ValidationResult) -> None:
+    """Validate release builds use the supported RPM glibc baseline."""
+    for path, snippets in RELEASE_BUILD_GLIBC_SNIPPETS.items():
+        content = read_safe(path)
+        rel = path.relative_to(PROJECT_ROOT)
+        if not content:
+            result.fail(f"glibc-baseline:exists:{rel}", f"{rel} not found")
+            continue
+        _check_snippets(
+            content, snippets, "glibc-baseline",
+            str(rel), result,
+        )
+
+
 def print_report(result: ValidationResult) -> None:
     """Print a formatted validation report."""
     print("v0.7.0 Package Metadata Validation Report")
@@ -608,10 +701,14 @@ def main() -> int:
     result = ValidationResult()
     validate_nfpm_config(result)
     validate_rpm_spec(result)
+    validate_nginx_dependency_constraints(result)
     validate_module_filename_consistency(result)
     validate_release_versions_have_checksums(result)
     validate_release_artifact_flow(result)
     validate_standalone_workflow_packaging(result)
+    validate_smoke_test_repo_selection(result)
+    validate_nfpm_postinstall_lifecycle(result)
+    validate_release_build_glibc_baseline(result)
     print_report(result)
     return 1 if result.has_failures else 0
 

@@ -13,6 +13,14 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent.parent))
 
 from tools.release.gates.validate_package_metadata_070 import (  # noqa: E402
+    FORBIDDEN_NAKED_EXACT_NGINX_DEPS,
+    NFPM_REQUIRED_SNIPPETS,
+    NFPM_POSTINSTALL_SNIPPETS,
+    SMOKE_RPM_REPO_SNIPPETS,
+    RELEASE_BUILD_GLIBC_SNIPPETS,
+    STANDALONE_DEB_SNIPPETS,
+    STANDALONE_RPM_SPEC_SNIPPETS,
+    STANDALONE_RPM_WORKFLOW_SNIPPETS,
     _contains_make_build_command,
     _is_nginx_version,
     _split_inline_list,
@@ -291,3 +299,45 @@ class TestContainsMakeBuildCommand:
 
     def test_empty_content(self) -> None:
         assert _contains_make_build_command("") is False
+
+
+# ---------------------------------------------------------------------------
+# Release gate regression expectations
+# ---------------------------------------------------------------------------
+
+
+class TestReleaseGateSnippetExpectations:
+    """Validate regression guard snippets for release/package review findings."""
+
+    def test_nfpm_dependency_uses_non_exact_floor(self) -> None:
+        assert 'nginx (>= ${NGINX_VERSION})' in NFPM_REQUIRED_SNIPPETS
+        assert 'nginx (= ${NGINX_VERSION})' not in NFPM_REQUIRED_SNIPPETS
+        assert "/usr/lib64/nginx/modules/ngx_http_markdown_filter_module.so" in NFPM_REQUIRED_SNIPPETS
+
+    def test_rpm_spec_dependency_uses_non_exact_floor(self) -> None:
+        assert "Requires:       nginx >= %{nginx_version}" in STANDALONE_RPM_SPEC_SNIPPETS
+        assert "Requires:       nginx = %{nginx_version}" in FORBIDDEN_NAKED_EXACT_NGINX_DEPS
+        assert "/usr/lib64/nginx/modules/ngx_http_markdown_filter_module.so" in STANDALONE_RPM_SPEC_SNIPPETS
+
+    def test_standalone_workflows_validate_input_version(self) -> None:
+        validator = './packaging/scripts/validate-version.sh "${{ inputs.version }}"'
+        assert validator in STANDALONE_DEB_SNIPPETS
+        assert validator in STANDALONE_RPM_WORKFLOW_SNIPPETS
+
+    def test_rpm_smoke_repo_selection_covers_amazon_linux(self) -> None:
+        assert "amzn)" in SMOKE_RPM_REPO_SNIPPETS
+        assert "packages/amzn/" in SMOKE_RPM_REPO_SNIPPETS
+        assert "packages/centos/" in SMOKE_RPM_REPO_SNIPPETS
+
+    def test_nfpm_postinstall_accepts_rpm_lifecycle_args(self) -> None:
+        assert "configure|1|2)" in NFPM_POSTINSTALL_SNIPPETS
+        assert "abort-upgrade|abort-remove|abort-deconfigure)" in NFPM_POSTINSTALL_SNIPPETS
+
+    def test_release_build_uses_rpm_glibc_baseline(self) -> None:
+        snippets = "\n".join(
+            snippet
+            for snippet_list in RELEASE_BUILD_GLIBC_SNIPPETS.values()
+            for snippet in snippet_list
+        )
+        assert "container: almalinux:9" in snippets
+        assert "ARG OS_BASE=almalinux:9" in snippets
