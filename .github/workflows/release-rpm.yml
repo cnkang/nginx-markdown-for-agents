@@ -32,6 +32,9 @@ jobs:
         nginx_channel: [stable]
     container:
       image: ${{ matrix.os == 'almalinux-9' && 'almalinux:9' || 'amazonlinux:2023' }}
+    defaults:
+      run:
+        shell: bash
 
     steps:
       - name: Install system dependencies

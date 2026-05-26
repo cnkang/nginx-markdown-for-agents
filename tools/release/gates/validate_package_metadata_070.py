@@ -108,6 +108,7 @@ ARCH_RUNNER_SNIPPET = (
     "runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || "
     "'ubuntu-24.04' }}"
 )
+STANDALONE_CONTAINER_BASH_SHELL = "defaults:\n      run:\n        shell: bash"
 STANDALONE_DEB_SNIPPETS = [
     f'PKG_NAME="{CANONICAL_PACKAGE_NAME}"',
     "/usr/share/doc/nginx-markdown-for-agents",
@@ -309,6 +310,17 @@ def validate_standalone_workflow_packaging(result: ValidationResult) -> None:
     if not deb_workflow:
         result.fail("standalone-deb:exists", "release-deb.yml not found")
     else:
+        if "container:" in deb_workflow and "[[" in deb_workflow:
+            if STANDALONE_CONTAINER_BASH_SHELL in deb_workflow:
+                result.pass_(
+                    "standalone-deb:container-shell",
+                    "container job uses bash for run steps",
+                )
+            else:
+                result.fail(
+                    "standalone-deb:container-shell",
+                    "container job with bashisms must set defaults.run.shell: bash",
+                )
         for snippet in STANDALONE_DEB_SNIPPETS:
             sid = f"standalone-deb:{snippet[:24]}"
             if snippet in deb_workflow:
@@ -320,6 +332,18 @@ def validate_standalone_workflow_packaging(result: ValidationResult) -> None:
     if not rpm_workflow:
         result.fail("standalone-rpm:exists", "release-rpm.yml not found")
     else:
+        has_bashism = "[[" in rpm_workflow or "{BUILD,RPMS,SOURCES,SPECS,SRPMS}" in rpm_workflow
+        if "container:" in rpm_workflow and has_bashism:
+            if STANDALONE_CONTAINER_BASH_SHELL in rpm_workflow:
+                result.pass_(
+                    "standalone-rpm:container-shell",
+                    "container job uses bash for run steps",
+                )
+            else:
+                result.fail(
+                    "standalone-rpm:container-shell",
+                    "container job with bashisms must set defaults.run.shell: bash",
+                )
         for snippet in STANDALONE_RPM_WORKFLOW_SNIPPETS:
             sid = f"standalone-rpm-workflow:{snippet[:18]}"
             if snippet in rpm_workflow:
