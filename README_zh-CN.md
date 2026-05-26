@@ -397,8 +397,8 @@ v0.7.0 是一个正确性、分发和可运维性版本：
 - **有界解压** — `markdown_decompress_max_size` 独立限制解压输出大小，防止 zip bomb 攻击（错误码 9: DecompressionBudgetExceeded）
 - **Accept 协商** — Rust 侧 RFC 9110 q-value 比较，在 `text/markdown` 和 `text/html` 之间决定是否转换
 - **解析超时与预算** — `markdown_parse_timeout`（默认 30s）和 `markdown_parser_budget`（默认 64m）防止解析失控（错误码 10、11）
-- **DEB/RPM 包分发** — 预构建包覆盖 Ubuntu 22.04/24.04、Debian 12、AlmaLinux 9、Amazon Linux 2023，支持 amd64/arm64
-- **Kubernetes 部署示例** — Helm chart、manifest 和 Ingress Controller 自定义镜像构建路径
+- **DEB/RPM 包分发** — 预构建包覆盖 Ubuntu 22.04/24.04、Debian 12、AlmaLinux 9、Amazon Linux 2023，支持 amd64/arm64，并校验 canonical install layout
+- **Kubernetes 部署示例** — Helm chart、manifest 和 Ingress Controller 自定义镜像构建路径，并包含安全运行时默认值
 - **运行时诊断** — `/nginx-markdown/diagnostics` 端点暴露配置快照、最近决策和指标
 - **Dynconf dry-run 与回滚** — 验证配置变更但不应用；失败时回滚到 last-known-good
 
@@ -426,7 +426,8 @@ v0.7.0 是一个正确性、分发和可运维性版本：
 - FFI ABI 布局验证与 header 漂移检测
 - 新错误码：DecompressionBudgetExceeded(9)、ParseTimeout(10)、ParseBudgetExceeded(11)
 - DEB/RPM 包分发与 APT/YUM 仓库支持
-- Kubernetes 部署示例与 Helm chart
+- Package release gate 覆盖 canonical module path、artifact name、checksum 与架构匹配的 smoke test
+- Kubernetes 部署示例与包含安全运行时默认值的 Helm chart
 - 运行时诊断端点
 - Dynconf dry-run 验证与 last-known-good 回滚
 
