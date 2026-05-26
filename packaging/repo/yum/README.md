@@ -63,7 +63,7 @@ block:
 
 ```bash
 # Add load_module directive to the main context of nginx.conf:
-sudo sed -i '1i load_module modules/ngx_http_markdown_filter_module.so;' \
+sudo sed -i '1i load_module /usr/lib64/nginx/modules/ngx_http_markdown_filter_module.so;' \
     /etc/nginx/nginx.conf
 
 # Test and reload

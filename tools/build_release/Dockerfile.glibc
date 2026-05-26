@@ -1,5 +1,5 @@
 # tools/build_release/Dockerfile.glibc
-ARG OS_BASE=ubuntu:22.04
+ARG OS_BASE=almalinux:9
 FROM ${OS_BASE}
 
 RUN set -eux; \
@@ -17,19 +17,23 @@ RUN set -eux; \
             count=$((count + 1)); \
         done; \
     }; \
-    apt-get update && apt-get install -y --no-install-recommends \
-        build-essential \
+    dnf install -y \
+        gcc \
+        make \
         ca-certificates \
-        curl \
-        libpcre3-dev \
-        libssl-dev \
+        curl-minimal \
+        pcre2-devel \
+        openssl-devel \
         python3 \
-        zlib1g-dev; \
+        zlib-devel \
+        tar \
+        gzip \
+        findutils; \
+    dnf clean all; \
     retry 5 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o /tmp/rustup-init.sh; \
     retry 5 sh /tmp/rustup-init.sh -y; \
     rm -f /tmp/rustup-init.sh; \
-    retry 5 /root/.cargo/bin/cargo install cbindgen; \
-    rm -rf /var/lib/apt/lists/*
+    retry 5 /root/.cargo/bin/cargo install cbindgen
 ENV PATH="/root/.cargo/bin:${PATH}"
 
 ARG NGINX_VERSION=1.26.3

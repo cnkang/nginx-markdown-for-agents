@@ -235,11 +235,11 @@ build_module() {
     dockerfile="$(mktemp "${TMPDIR:-/tmp}/gate3-dockerfile.XXXXXX")"
 
     cat > "$dockerfile" <<DOCKERFILE
-FROM ubuntu:24.04 AS builder
-ENV DEBIAN_FRONTEND=noninteractive
-RUN apt-get update && apt-get install -y --no-install-recommends \\
-    build-essential curl ca-certificates libpcre2-dev zlib1g-dev libssl-dev \\
-    && rm -rf /var/lib/apt/lists/*
+FROM almalinux:9 AS builder
+RUN dnf install -y \\
+    gcc make ca-certificates curl-minimal pcre2-devel zlib-devel openssl-devel \\
+    tar gzip findutils which \\
+    && dnf clean all
 
 # Install Rust
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
