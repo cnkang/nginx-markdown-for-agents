@@ -51,16 +51,19 @@ Required:
     Dockerfiles must have a matching entry in `packaging/checksums.sha256`.
     Do not introduce active release paths that rely on unchecked source
     versions.
-	  - Artifact producer names and consumer patterns must match exactly across
-	    release package upload, smoke-test download, and signing workflows.
-	    Fail-closed signing is correct, but mismatched artifact names are still a
-	    release integration bug.
-	  - Standalone package workflows must use the same package name and install
-	    layout as the canonical nFPM path.  If a workflow packages a prebuilt
-	    `.so`, its SPEC/control metadata must not try to rebuild from missing
-	    source files, and it must run the install-layout gate against its output.
-	  - Package smoke tests for architecture-specific artifacts must run on a
-	    matching runner architecture or an explicit emulation path.
+  - Artifact producer names and consumer patterns must match exactly across
+    release package upload, smoke-test download, and signing workflows.
+    Fail-closed signing is correct, but mismatched artifact names are still a
+    release integration bug.
+  - Standalone package workflows must use the same package name and install
+    layout as the canonical nFPM path.  If a workflow packages a prebuilt
+    `.so`, its SPEC/control metadata must not try to rebuild from missing
+    source files, and it must run the install-layout gate against its output.
+  - Container jobs that use Bash-only syntax (`[[ ... ]]`, brace expansion,
+    arrays, `source`, or `set -o pipefail`) must set `defaults.run.shell:
+    bash` at the job level or `shell: bash` on every affected run step.
+  - Package smoke tests for architecture-specific artifacts must run on a
+    matching runner architecture or an explicit emulation path.
   - Helm charts with `runAsNonRoot`, dropped capabilities, and
     `readOnlyRootFilesystem` defaults must use an unprivileged listen port and
     writable runtime/temp mounts in the rendered pod spec.

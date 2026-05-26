@@ -19,6 +19,8 @@ or packaging documentation.
 - Artifact upload/download/signing name drift between release jobs
 - Standalone DEB/RPM workflows drifting from the canonical package name,
   install layout, or prebuilt-module packaging contract
+- Containerized package jobs using Bash-only syntax under GitHub Actions'
+  default container `sh` shell
 - Architecture-specific package smoke tests running on the wrong runner
   architecture
 - Secure-by-default Helm chart settings that prevent NGINX from binding or
@@ -50,6 +52,8 @@ or packaging documentation.
 - Standalone package workflows must install the same canonical doc/license
   paths as nFPM packages and must run `check_install_layout.sh` against their
   generated packages before upload.
+- Containerized package workflows that use Bash syntax must set
+  `defaults.run.shell: bash` or equivalent step-level shells.
 - Helm chart defaults must render a pod that can start under the chart's
   default security context.
 - Homebrew formula repository and repo-owned formula template must stay in sync
@@ -80,3 +84,4 @@ make release-gates-check
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
 | 0.7.2 | 2026-05-25 | Codex | Added release package chain invariants for module names, checksum coverage, artifact naming, architecture-matched smoke tests, and Helm secure defaults |
 | 0.7.3 | 2026-05-26 | Codex | Added standalone DEB/RPM package-name, layout, and prebuilt-module contract coverage |
+| 0.7.4 | 2026-05-26 | Codex | Added GitHub Actions container shell coverage for standalone package workflows |
