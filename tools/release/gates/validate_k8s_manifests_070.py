@@ -26,9 +26,38 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 
 CHART_YAML = PROJECT_ROOT / "charts" / "nginx-markdown" / "Chart.yaml"
+VALUES_YAML = PROJECT_ROOT / "charts" / "nginx-markdown" / "values.yaml"
+DEPLOYMENT_TEMPLATE = (
+    PROJECT_ROOT / "charts" / "nginx-markdown" / "templates" / "deployment.yaml"
+)
+CONFIGMAP_TEMPLATE = (
+    PROJECT_ROOT / "charts" / "nginx-markdown" / "templates" / "configmap.yaml"
+)
 K8S_MANIFEST_DIR = PROJECT_ROOT / "examples" / "kubernetes" / "manifest"
 
 CHART_REQUIRED_FIELDS = ["apiVersion", "name", "version", "appVersion"]
+HELM_VALUES_REQUIRED_SNIPPETS = [
+    'tag: ""',
+    "runAsNonRoot: true",
+    "readOnlyRootFilesystem: true",
+    'drop: ["ALL"]',
+]
+HELM_CONFIG_REQUIRED_SNIPPETS = [
+    "pid /var/run/nginx.pid;",
+    "client_body_temp_path /var/cache/nginx/client_body_temp;",
+    "proxy_temp_path /var/cache/nginx/proxy_temp;",
+    "fastcgi_temp_path /var/cache/nginx/fastcgi_temp;",
+    "uwsgi_temp_path /var/cache/nginx/uwsgi_temp;",
+    "scgi_temp_path /var/cache/nginx/scgi_temp;",
+    "listen 8080;",
+]
+HELM_DEPLOYMENT_REQUIRED_SNIPPETS = [
+    "containerPort: 8080",
+    "mountPath: /var/cache/nginx",
+    "mountPath: /var/run",
+    "mountPath: /tmp",
+    "emptyDir: {}",
+]
 
 
 class ValidationResult:
@@ -135,6 +164,56 @@ def validate_k8s_manifests(result: ValidationResult) -> None:
             result.fail(sid, f"{fname} YAML error: {err}")
 
 
+def validate_helm_secure_defaults(result: ValidationResult) -> None:
+    """Validate Helm defaults can run under the default restricted pod context."""
+    values = read_safe(VALUES_YAML)
+    if not values:
+        result.fail("helm:values_exists", "charts/nginx-markdown/values.yaml not found")
+    else:
+        result.pass_("helm:values_exists", "values.yaml exists")
+        for snippet in HELM_VALUES_REQUIRED_SNIPPETS:
+            sid = f"helm:values:{snippet[:24]}"
+            if snippet in values:
+                result.pass_(sid, f"values.yaml contains {snippet}")
+            else:
+                result.fail(sid, f"values.yaml missing {snippet}")
+
+    configmap = read_safe(CONFIGMAP_TEMPLATE)
+    if not configmap:
+        result.fail("helm:configmap_exists", "templates/configmap.yaml not found")
+    else:
+        result.pass_("helm:configmap_exists", "configmap template exists")
+        for snippet in HELM_CONFIG_REQUIRED_SNIPPETS:
+            sid = f"helm:config:{snippet[:24]}"
+            if snippet in configmap:
+                result.pass_(sid, f"configmap template contains {snippet}")
+            else:
+                result.fail(sid, f"configmap template missing {snippet}")
+
+    deployment = read_safe(DEPLOYMENT_TEMPLATE)
+    if not deployment:
+        result.fail("helm:deployment_exists", "templates/deployment.yaml not found")
+    else:
+        result.pass_("helm:deployment_exists", "deployment template exists")
+        for snippet in HELM_DEPLOYMENT_REQUIRED_SNIPPETS:
+            sid = f"helm:deployment:{snippet[:24]}"
+            if snippet in deployment:
+                result.pass_(sid, f"deployment template contains {snippet}")
+            else:
+                result.fail(sid, f"deployment template missing {snippet}")
+        empty_dir_count = deployment.count("emptyDir: {}")
+        if empty_dir_count >= 3:
+            result.pass_(
+                "helm:deployment:emptydir-count",
+                "deployment has writable runtime/temp emptyDir mounts",
+            )
+        else:
+            result.fail(
+                "helm:deployment:emptydir-count",
+                "deployment must mount writable emptyDir volumes for runtime/temp paths",
+            )
+
+
 def print_report(result: ValidationResult) -> None:
     """Print a formatted validation report."""
     print("v0.7.0 K8s Manifest & Helm Chart Validation Report")
@@ -152,6 +231,7 @@ def main() -> int:
     result = ValidationResult()
     validate_chart_yaml(result)
     validate_k8s_manifests(result)
+    validate_helm_secure_defaults(result)
     print_report(result)
     return 1 if result.has_failures else 0
 
