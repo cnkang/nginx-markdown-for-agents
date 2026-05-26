@@ -1,0 +1,236 @@
+"""Tests for release gate validator: NGINX version extraction.
+
+Run:
+    python3 -m pytest tools/release/gates/tests/test_validate_package_metadata_070.py -v
+"""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+# Ensure the tools package is importable.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent.parent))
+
+from tools.release.gates.validate_package_metadata_070 import (  # noqa: E402
+    _is_nginx_version,
+    _split_inline_list,
+    _strip_unquoted_comment,
+    _unquote,
+    extract_nginx_versions,
+)
+
+
+# ---------------------------------------------------------------------------
+# _is_nginx_version
+# ---------------------------------------------------------------------------
+
+
+class TestIsNginxVersion:
+    """Validate strict three-part numeric version detection."""
+
+    def test_valid_version(self) -> None:
+        assert _is_nginx_version("1.25.5") is True
+
+    def test_two_parts_rejected(self) -> None:
+        assert _is_nginx_version("1.25") is False
+
+    def test_four_parts_rejected(self) -> None:
+        assert _is_nginx_version("1.25.5.1") is False
+
+    def test_non_numeric_rejected(self) -> None:
+        assert _is_nginx_version("mainline") is False
+
+    def test_mixed_rejected(self) -> None:
+        assert _is_nginx_version("1.25.x") is False
+
+    def test_empty_string_rejected(self) -> None:
+        assert _is_nginx_version("") is False
+
+
+# ---------------------------------------------------------------------------
+# _strip_unquoted_comment
+# ---------------------------------------------------------------------------
+
+
+class TestStripUnquotedComment:
+    """Validate comment stripping preserves quoted content."""
+
+    def test_no_comment(self) -> None:
+        assert _strip_unquoted_comment("NGINX_VERSION=1.25.5") == "NGINX_VERSION=1.25.5"
+
+    def test_simple_comment(self) -> None:
+        assert _strip_unquoted_comment("NGINX_VERSION=1.25.5 # active") == "NGINX_VERSION=1.25.5 "
+
+    def test_hash_inside_double_quotes_preserved(self) -> None:
+        assert _strip_unquoted_comment('"value#with#hash" # comment') == '"value#with#hash" '
+
+    def test_hash_inside_single_quotes_preserved(self) -> None:
+        assert _strip_unquoted_comment("'value#hash' # comment") == "'value#hash' "
+
+    def test_escaped_quote_inside_double_quotes(self) -> None:
+        assert _strip_unquoted_comment('"value\\"#still" # comment') == '"value\\"#still" '
+
+
+# ---------------------------------------------------------------------------
+# _unquote
+# ---------------------------------------------------------------------------
+
+
+class TestUnquote:
+    """Validate quote and comma stripping."""
+
+    def test_double_quoted(self) -> None:
+        assert _unquote('"1.25.5"') == "1.25.5"
+
+    def test_single_quoted(self) -> None:
+        assert _unquote("'1.25.5'") == "1.25.5"
+
+    def test_trailing_comma(self) -> None:
+        assert _unquote('"1.25.5",') == "1.25.5"
+
+    def test_whitespace_stripped(self) -> None:
+        assert _unquote('  "1.25.5"  ') == "1.25.5"
+
+    def test_unquoted_value(self) -> None:
+        assert _unquote("1.25.5") == "1.25.5"
+
+
+# ---------------------------------------------------------------------------
+# _split_inline_list
+# ---------------------------------------------------------------------------
+
+
+class TestSplitInlineList:
+    """Validate YAML-style inline list splitting."""
+
+    def test_double_quoted_items(self) -> None:
+        assert _split_inline_list('"1.25.5", "1.26.1"') == ["1.25.5", "1.26.1"]
+
+    def test_single_quoted_items(self) -> None:
+        assert _split_inline_list("'1.25.5', '1.26.1'") == ["1.25.5", "1.26.1"]
+
+    def test_unquoted_items(self) -> None:
+        assert _split_inline_list("1.25.5, 1.26.1") == ["1.25.5", "1.26.1"]
+
+    def test_mixed_quoting(self) -> None:
+        assert _split_inline_list('"1.25.5", 1.26.1') == ["1.25.5", "1.26.1"]
+
+    def test_single_item(self) -> None:
+        assert _split_inline_list('"1.25.5"') == ["1.25.5"]
+
+    def test_empty_string(self) -> None:
+        assert _split_inline_list("") == []
+
+
+# ---------------------------------------------------------------------------
+# extract_nginx_versions — supported formats
+# ---------------------------------------------------------------------------
+
+
+class TestExtractNginxVersions:
+    """Validate NGINX version extraction from all supported formats."""
+
+    def test_yaml_array_double_quoted(self) -> None:
+        content = 'nginx_version: ["1.25.5", "1.26.1"]'
+        assert extract_nginx_versions(content) == {"1.25.5", "1.26.1"}
+
+    def test_yaml_array_single_quoted(self) -> None:
+        content = "nginx_version: ['1.25.5', '1.26.1']"
+        assert extract_nginx_versions(content) == {"1.25.5", "1.26.1"}
+
+    def test_shell_double_quoted(self) -> None:
+        content = 'NGINX_VERSION="1.27.4"'
+        assert extract_nginx_versions(content) == {"1.27.4"}
+
+    def test_shell_single_quoted(self) -> None:
+        content = "NGINX_VERSION='1.29.1'"
+        assert extract_nginx_versions(content) == {"1.29.1"}
+
+    def test_dockerfile_arg(self) -> None:
+        content = "ARG NGINX_VERSION=1.28.0"
+        assert extract_nginx_versions(content) == {"1.28.0"}
+
+    def test_all_supported_formats_combined(self) -> None:
+        content = '''
+nginx_version: ["1.25.5", "1.26.1"]
+NGINX_VERSION="1.27.4"
+ARG NGINX_VERSION=1.28.0
+NGINX_VERSION='1.29.1'
+'''
+        assert extract_nginx_versions(content) == {
+            "1.25.5",
+            "1.26.1",
+            "1.27.4",
+            "1.28.0",
+            "1.29.1",
+        }
+
+    def test_ignores_comments(self) -> None:
+        content = '''
+# nginx_version: ["9.9.9"]
+NGINX_VERSION="1.27.4" # active version
+'''
+        assert extract_nginx_versions(content) == {"1.27.4"}
+
+    def test_rejects_invalid_versions(self) -> None:
+        content = '''
+nginx_version: ["1.25", "mainline", "1.26.1"]
+NGINX_VERSION="latest"
+ARG NGINX_VERSION=1.28
+'''
+        assert extract_nginx_versions(content) == {"1.26.1"}
+
+    def test_empty_content(self) -> None:
+        assert extract_nginx_versions("") == set()
+
+    def test_no_versions(self) -> None:
+        content = "some random content without versions"
+        assert extract_nginx_versions(content) == set()
+
+    def test_yaml_array_with_spaces(self) -> None:
+        content = 'nginx_version:   [  "1.25.5"  ,  "1.26.1"  ]'
+        assert extract_nginx_versions(content) == {"1.25.5", "1.26.1"}
+
+    def test_deduplication(self) -> None:
+        content = '''
+NGINX_VERSION="1.25.5"
+ARG NGINX_VERSION=1.25.5
+'''
+        assert extract_nginx_versions(content) == {"1.25.5"}
+
+    def test_yaml_no_closing_bracket(self) -> None:
+        content = 'nginx_version: ["1.25.5", "1.26.1"'
+        assert extract_nginx_versions(content) == set()
+
+    def test_arg_without_space_prefix(self) -> None:
+        content = "ARGNGINX_VERSION=1.25.5"
+        assert extract_nginx_versions(content) == set()
+
+    def test_version_with_inline_comment(self) -> None:
+        content = 'NGINX_VERSION="1.25.5" # pinned to stable'
+        assert extract_nginx_versions(content) == {"1.25.5"}
+
+
+# ---------------------------------------------------------------------------
+# Large adversarial input
+# ---------------------------------------------------------------------------
+
+
+class TestLargeInputSafety:
+    """Ensure linear-time parsing on adversarial input."""
+
+    def test_large_noisy_yaml_array(self) -> None:
+        noisy_line = (
+            "nginx_version: ["
+            + ",".join(["not-a-version"] * 10_000)
+            + "]"
+        )
+        content = noisy_line + '\nNGINX_VERSION="1.27.4"\n'
+        assert extract_nginx_versions(content) == {"1.27.4"}
+
+    def test_large_noisy_shell_declarations(self) -> None:
+        lines = [f'NOT_NGINX_VERSION="val{i}"' for i in range(5_000)]
+        lines.append('NGINX_VERSION="1.27.4"')
+        content = "\n".join(lines)
+        assert extract_nginx_versions(content) == {"1.27.4"}
