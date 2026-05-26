@@ -16,7 +16,7 @@
 #
 # OPTIONS:
 #   --skip-smoke    Skip container smoke tests (only build + layout check)
-#   --arch ARCH     Target architecture (default: amd64)
+#   --arch ARCH     Target architecture (default: auto-detect from host)
 #   -h, --help      Show this help message
 #
 # EXIT CODES:
@@ -49,7 +49,6 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 readonly SCRIPT_DIR PROJECT_ROOT
 
 readonly DEFAULT_NGINX_VERSION="1.26.3"
-readonly DEFAULT_ARCH="amd64"
 readonly DEFAULT_SMOKE_IMAGES="debian:12,ubuntu:24.04,almalinux:9"
 readonly BUILD_IMAGE_TAG="nginx-markdown-gate3-build:local"
 readonly NFPM_VERSION="2.46.3"
@@ -59,27 +58,83 @@ readonly NFPM_VERSION="2.46.3"
 ##############################################################################
 
 info() {
-    printf '[gate3] %s\n' "$1" >&2
+    local msg="$1"
+    printf '[gate3] %s\n' "$msg" >&2
     return 0
 }
 
 pass() {
-    printf '[PASS]  %s\n' "$1" >&2
+    local msg="$1"
+    printf '[PASS]  %s\n' "$msg" >&2
     return 0
 }
 
 fail() {
-    printf '[FAIL]  %s\n' "$1" >&2
+    local msg="$1"
+    printf '[FAIL]  %s\n' "$msg" >&2
     return 0
 }
 
 die() {
-    printf '[FATAL] %s\n' "$1" >&2
+    local msg="$1"
+    printf '[FATAL] %s\n' "$msg" >&2
     exit 1
 }
 
 usage() {
     sed -n '3,30p' "$0" | sed 's/^#[[:space:]]\{0,1\}//' >&2
+    return 0
+}
+
+##############################################################################
+# Architecture detection
+##############################################################################
+
+# detect_arch — set ARCH, RPM_ARCH, DOCKER_PLATFORM, and NFPM_HOST_SUFFIX
+# based on the host machine architecture (uname -m).
+# Supports override via the --arch flag or ARCH env var.
+# On macOS under Rosetta, uname -m may report x86_64 even on Apple Silicon;
+# use sysctl hw.optional.arm64 to detect the true hardware.
+detect_arch() {
+    local host_arch
+
+    # Detect true hardware arch on macOS (Rosetta-proof)
+    if [[ "$(uname -s)" == "Darwin" ]] && [[ "$(sysctl -n hw.optional.arm64 2>/dev/null)" == "1" ]]; then
+        host_arch="arm64"
+    else
+        host_arch="$(uname -m)"
+    fi
+
+    case "$host_arch" in
+        x86_64)
+            ARCH="${ARCH:-amd64}"
+            ;;
+        arm64|aarch64)
+            ARCH="${ARCH:-arm64}"
+            ;;
+        *)
+            die "Unsupported host architecture: $host_arch"
+            ;;
+    esac
+
+    # Derived architecture names used by Docker, RPM, and nFPM download URLs
+    case "$ARCH" in
+        amd64)
+            DOCKER_PLATFORM="linux/amd64"
+            RPM_ARCH="x86_64"
+            NFPM_HOST_SUFFIX="Linux_x86_64"
+            ;;
+        arm64)
+            DOCKER_PLATFORM="linux/arm64"
+            RPM_ARCH="aarch64"
+            NFPM_HOST_SUFFIX="Linux_arm64"
+            ;;
+        *)
+            die "Unsupported target architecture: $ARCH"
+            ;;
+    esac
+
+    info "Target arch: ${ARCH} (docker=${DOCKER_PLATFORM}, rpm=${RPM_ARCH})"
     return 0
 }
 
@@ -132,11 +187,12 @@ check_docker() {
 ##############################################################################
 
 SKIP_SMOKE=0
-ARCH="${DEFAULT_ARCH}"
+ARCH=""
 
 parse_args() {
     while [[ $# -gt 0 ]]; do
-        case "$1" in
+        local arg="$1"
+        case "$arg" in
             --skip-smoke)
                 SKIP_SMOKE=1
                 shift
@@ -151,7 +207,7 @@ parse_args() {
                 exit 0
                 ;;
             *)
-                die "Unknown option: $1"
+                die "Unknown option: $arg"
                 ;;
         esac
     done
@@ -172,7 +228,7 @@ build_module() {
             | head -1 | sed 's/.*"\(.*\)".*/\1/')"
     fi
 
-    info "Building module: version=${pkg_version}, nginx=${nginx_version}, arch=${ARCH}"
+    info "Building module: version=${pkg_version}, nginx=${nginx_version}, arch=${ARCH} (${DOCKER_PLATFORM})"
 
     # Create build Dockerfile
     local dockerfile
@@ -223,8 +279,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certifi
 
 # Install nFPM
 ARG NFPM_VERSION=${NFPM_VERSION}
+ARG NFPM_HOST_SUFFIX=${NFPM_HOST_SUFFIX}
 RUN curl -fsSL -o /tmp/nfpm.tar.gz \\
-    "https://github.com/goreleaser/nfpm/releases/download/v\${NFPM_VERSION}/nfpm_\${NFPM_VERSION}_Linux_x86_64.tar.gz" \\
+    "https://github.com/goreleaser/nfpm/releases/download/v\${NFPM_VERSION}/nfpm_\${NFPM_VERSION}_\${NFPM_HOST_SUFFIX}.tar.gz" \\
     && tar xzf /tmp/nfpm.tar.gz -C /usr/local/bin nfpm \\
     && chmod 755 /usr/local/bin/nfpm
 
@@ -235,6 +292,7 @@ WORKDIR /src
 ARG PKG_VERSION=${pkg_version}
 ARG NGINX_VERSION=${nginx_version}
 ARG NFPM_ARCH=${ARCH}
+ARG RPM_ARCH=${RPM_ARCH}
 
 ENV PKG_VERSION=\${PKG_VERSION}
 ENV NGINX_VERSION=\${NGINX_VERSION}
@@ -244,11 +302,12 @@ RUN mkdir -p /dist \\
     && nfpm package --config packaging/nfpm/nfpm.yaml --packager deb \\
        --target "/dist/nginx-module-markdown-for-agents_\${PKG_VERSION}_nginx-\${NGINX_VERSION}_\${NFPM_ARCH}.deb" \\
     && nfpm package --config packaging/nfpm/nfpm.yaml --packager rpm \\
-       --target "/dist/nginx-module-markdown-for-agents-\${PKG_VERSION}-nginx\${NGINX_VERSION}-1.x86_64.rpm"
+       --target "/dist/nginx-module-markdown-for-agents-\${PKG_VERSION}-nginx\${NGINX_VERSION}-1.\${RPM_ARCH}.rpm"
 DOCKERFILE
 
     # Build
     "$DOCKER" build \
+        --platform "${DOCKER_PLATFORM}" \
         -f "$dockerfile" \
         -t "${BUILD_IMAGE_TAG}" \
         --target packager \
@@ -284,12 +343,15 @@ validate_layout() {
 
     info "Running install layout validation (in container for rpm support)..."
 
-    # Run layout check inside a container that has both dpkg-deb and rpm
+    # Run layout check inside a container that has both dpkg-deb and rpm.
+    # Globs must expand inside the container (where /dist is mounted), so
+    # wrap in bash -c with single quotes to prevent host-side expansion.
     if "$DOCKER" run --rm \
+        --platform "${DOCKER_PLATFORM}" \
         -v "${dist_dir}:/dist:ro" \
         -v "${layout_script}:/check_install_layout.sh:ro" \
         "${BUILD_IMAGE_TAG}" \
-        bash /check_install_layout.sh /dist/*.deb /dist/*.rpm \
+        bash -c 'bash /check_install_layout.sh /dist/*.deb /dist/*.rpm' \
         >&2 2>&1; then
         pass "Install layout validation passed"
         return 0
@@ -348,10 +410,11 @@ run_smoke_tests() {
         pkg_basename="$(basename "$pkg_file")"
 
         if "$DOCKER" run --rm \
+            --platform "${DOCKER_PLATFORM}" \
             -v "${PROJECT_ROOT}/packaging/scripts:/scripts:ro" \
             -v "${pkg_file}:/pkg/${pkg_basename}:ro" \
             "$image" \
-            bash -c "chmod +x /scripts/smoke-test-basic.sh /scripts/smoke-test-diagnostics.sh && /scripts/smoke-test-basic.sh '/pkg/${pkg_basename}' '${nginx_version}'" \
+            bash /scripts/smoke-test-basic.sh "/pkg/${pkg_basename}" "${nginx_version}" \
             >&2 2>&1; then
             pass "Smoke test passed: ${image}"
         else
@@ -370,6 +433,7 @@ run_smoke_tests() {
 main() {
     parse_args "$@"
     check_docker
+    detect_arch
 
     local had_failure=0
 
