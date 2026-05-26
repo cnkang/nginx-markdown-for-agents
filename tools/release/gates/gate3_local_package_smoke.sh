@@ -189,6 +189,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \\
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 ENV PATH="/root/.cargo/bin:\${PATH}"
 
+# Detect native target triple for Rust build
+RUN RUST_NATIVE_TARGET=\$(rustc -vV | grep '^host:' | awk '{print \$2}') \\
+    && echo "\${RUST_NATIVE_TARGET}" > /tmp/rust_target.txt
+
 # Download NGINX source
 ARG NGINX_VERSION=${nginx_version}
 RUN curl -fsSL -o /tmp/nginx.tar.gz "https://nginx.org/download/nginx-\${NGINX_VERSION}.tar.gz" \\
@@ -198,10 +202,12 @@ RUN curl -fsSL -o /tmp/nginx.tar.gz "https://nginx.org/download/nginx-\${NGINX_V
 COPY . /src
 WORKDIR /src
 
-# Build Rust converter
-RUN cd components/rust-converter && cargo build --release
+# Build Rust converter with explicit target so output path matches NGINX config detection
+RUN RUST_TARGET=\$(cat /tmp/rust_target.txt) \\
+    && cd components/rust-converter \\
+    && cargo build --release --target "\${RUST_TARGET}"
 
-# Build NGINX module
+# Build NGINX module (config auto-detects target triple from uname)
 RUN cd /tmp/nginx-\${NGINX_VERSION} \\
     && ./configure --with-compat --add-dynamic-module=/src/components/nginx-module \\
     && make modules
