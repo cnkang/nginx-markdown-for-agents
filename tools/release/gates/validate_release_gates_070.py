@@ -28,10 +28,12 @@ HEADERS_IMPL_H = PROJECT_ROOT / "components" / "nginx-module" / "src" / "ngx_htt
 DECOMPRESSION_C = PROJECT_ROOT / "components" / "nginx-module" / "src" / "ngx_http_markdown_decompression.c"
 FILTER_MODULE_H = PROJECT_ROOT / "components" / "nginx-module" / "src" / "ngx_http_markdown_filter_module.h"
 
-GATE_FUTURE = {"Gate 3", "Gate 4"}
+GATE_3 = "Gate 3"
+GATE_4 = "Gate 4"
+GATE_FUTURE = {GATE_3, GATE_4}
 GATE_LOCAL_SCRIPTS = {
-    "Gate 3": "gate3_local_package_smoke.sh",
-    "Gate 4": "gate4_local_k8s_smoke.sh",
+    GATE_3: "gate3_local_package_smoke.sh",
+    GATE_4: "gate4_local_k8s_smoke.sh",
 }
 RELEASE_GATES_070_DOC_GATE = "release-gates:070-doc"
 CARGO_VERSION_070_GATE = "cargo:version-070"
@@ -59,29 +61,33 @@ def read(path: Path) -> str:
     return path.read_text(encoding="utf-8") if path.is_file() else ""
 
 
-def _run_local_gate(result: ValidationResult, gate: str) -> None:
-    """Run a local Docker-based gate script if prerequisites are available."""
+def _check_gate_prerequisites(
+    result: ValidationResult, gate: str
+) -> tuple[Path | None, str | None]:
+    """Check prerequisites for running a local gate script.
+
+    Returns (script_path, docker_bin) if all prerequisites are met,
+    or (None, None) after recording a skip result.
+    """
     script_name = GATE_LOCAL_SCRIPTS.get(gate)
     if not script_name:
         result.skip(f"{gate}:scope", "no local script configured")
-        return
+        return None, None
 
     script_path = Path(__file__).resolve().parent / script_name
     if not script_path.is_file():
         result.skip(f"{gate}:scope", f"{script_name} not found")
-        return
+        return None, None
 
-    # Check if Docker/Podman is available
     docker_bin = shutil.which("docker") or shutil.which("podman")
     if not docker_bin:
         result.skip(
             f"{gate}:scope",
             f"Docker/Podman not found; install to run {gate} locally",
         )
-        return
+        return None, None
 
-    # For Gate 4, also check kind/kubectl/helm
-    if gate == "Gate 4":
+    if gate == GATE_4:
         missing = [
             t for t in ("kind", "kubectl", "helm")
             if not shutil.which(t)
@@ -92,10 +98,39 @@ def _run_local_gate(result: ValidationResult, gate: str) -> None:
                 f"missing tools for {gate}: {', '.join(missing)}; "
                 f"install via: brew install {' '.join(missing)}",
             )
-            return
+            return None, None
 
-    # Run the script
-    timeout = 900 if gate == "Gate 3" else 300  # 15 min for builds, 5 min for K8s
+    return script_path, docker_bin
+
+
+def _handle_gate_result(
+    result: ValidationResult, gate: str, proc: subprocess.CompletedProcess[str]
+) -> None:
+    """Record the result of a local gate script execution."""
+    if proc.returncode == 0:
+        result.pass_(f"{gate}:local", f"{gate} local Docker validation passed")
+    elif proc.returncode == 3:
+        result.skip(
+            f"{gate}:scope",
+            f"{gate} prerequisites not met (see output above for install instructions)",
+        )
+        if proc.stdout:
+            sys.stderr.write(proc.stdout)
+    else:
+        result.fail(f"{gate}:local", f"{gate} local validation failed (rc={proc.returncode})")
+        if proc.stdout:
+            lines = proc.stdout.splitlines()
+            for line in lines[-30:]:
+                sys.stderr.write(f"  {line}\n")
+
+
+def _run_local_gate(result: ValidationResult, gate: str) -> None:
+    """Run a local Docker-based gate script if prerequisites are available."""
+    script_path, _docker_bin = _check_gate_prerequisites(result, gate)
+    if script_path is None:
+        return
+
+    timeout = 900 if gate == GATE_3 else 300  # 15 min for builds, 5 min for K8s
     try:
         proc = subprocess.run(
             ["bash", str(script_path)],
@@ -110,24 +145,7 @@ def _run_local_gate(result: ValidationResult, gate: str) -> None:
         result.fail(f"{gate}:local", f"{gate} local validation timed out")
         return
 
-    if proc.returncode == 0:
-        result.pass_(f"{gate}:local", f"{gate} local Docker validation passed")
-    elif proc.returncode == 3:
-        # Exit code 3 = prerequisites missing (script prints install instructions)
-        result.skip(
-            f"{gate}:scope",
-            f"{gate} prerequisites not met (see output above for install instructions)",
-        )
-        # Print the script's output so user sees install instructions
-        if proc.stdout:
-            sys.stderr.write(proc.stdout)
-    else:
-        result.fail(f"{gate}:local", f"{gate} local validation failed (rc={proc.returncode})")
-        if proc.stdout:
-            # Print last 30 lines of output for diagnostics
-            lines = proc.stdout.splitlines()
-            for line in lines[-30:]:
-                sys.stderr.write(f"  {line}\n")
+    _handle_gate_result(result, gate, proc)
 
 
 def _record_blocking_item(
@@ -193,7 +211,8 @@ def check_structure(result: ValidationResult) -> None:
         result.fail(CARGO_VERSION_070_GATE, "Cargo.toml missing")
 
 
-def check_blocking_items(result: ValidationResult, mode: str) -> None:
+def _build_blocking_items() -> dict[str, list[tuple[str, bool]]]:
+    """Build the blocking items dictionary from source file contents."""
     gates = read(RELEASE_GATES_MD)
     mk = read(MAKEFILE)
     docs = read(VALIDATION_MATRIX_MD)
@@ -208,7 +227,11 @@ def check_blocking_items(result: ValidationResult, mode: str) -> None:
     decomp = read(DECOMPRESSION_C)
     filter_h = read(FILTER_MODULE_H)
 
-    blocking_items = {
+    unit_test_files = "\n".join(
+        str(p) for p in (PROJECT_ROOT / "components" / "nginx-module" / "tests" / "unit").glob("*.c")
+    )
+
+    return {
         "Gate 1": [
             ("make test-nginx-unit-streaming", "`make test-nginx-unit-streaming`" in gates and "test-nginx-unit-streaming" in mk),
             ("make test-rust", "`make test-rust`" in gates and re.search(r"\btest-rust:", mk) is not None),
@@ -223,7 +246,7 @@ def check_blocking_items(result: ValidationResult, mode: str) -> None:
             ("ffi boundary tests", "make test-nginx-unit" in docs and "make test-rust" in docs),
             ("layout tests", "test_ffi_header_plan_layout" in abi and "test_ffi_accept_result_layout" in abi),
             ("reason code source", "reason code" in read(FFI_CONTRACT_PATH).lower()),
-            ("delivery semantics tests", "delivery_counter_test.c" in "\n".join(str(p) for p in (PROJECT_ROOT / "components" / "nginx-module" / "tests" / "unit").glob("*.c"))),
+            ("delivery semantics tests", "delivery_counter_test.c" in unit_test_files),
             ("delivery_count metric write", "NGX_HTTP_MARKDOWN_METRIC_INC(results.delivery_count)" in conversion or "NGX_HTTP_MARKDOWN_METRIC_INC(results.delivery_count)" in payload),
             ("decision_count metric write", "NGX_HTTP_MARKDOWN_METRIC_INC(results.decision_count)" in decision_log),
             ("parse_timeouts_total metric write", "parse_interrupts.parse_timeouts_total" in conversion),
@@ -237,6 +260,9 @@ def check_blocking_items(result: ValidationResult, mode: str) -> None:
         ],
     }
 
+
+def check_blocking_items(result: ValidationResult, mode: str) -> None:
+    blocking_items = _build_blocking_items()
     report = read(VALIDATION_MATRIX_MD) if mode == "evidence" else None
     _record_blocking_items(result, blocking_items, report)
 
