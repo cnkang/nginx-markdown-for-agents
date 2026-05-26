@@ -261,9 +261,8 @@ def checksum_identifiers() -> set[str]:
     content = read_safe(CHECKSUMS_FILE)
     identifiers: set[str] = set()
     for line in content.splitlines():
-        match = re.match(r"^[0-9a-f]{64}\s+(\S+)$", line.strip())
-        if match:
-            identifiers.add(match.group(1))
+        if match := re.match(r"^[0-9a-f]{64}\s+(\S+)$", line.strip()):
+            identifiers.add(match[1])
     return identifiers
 
 
@@ -271,7 +270,7 @@ def extract_nginx_versions(content: str) -> set[str]:
     """Extract NGINX source versions from active release configuration."""
     versions: set[str] = set()
     # Handle matrix-style arrays: nginx_version: ["1.25.5", "1.26.1"]
-    for match in re.findall(r'nginx_version:\s*\[([^\]]+)\]', content):
+    for match in re.findall(r'nginx_version:\s{0,20}\[([^\]]+)\]', content):
         versions.update(re.findall(r'([0-9]+\.[0-9]+\.[0-9]+)', match))
     # Handle shell/Dockerfile-style declarations
     patterns = [
