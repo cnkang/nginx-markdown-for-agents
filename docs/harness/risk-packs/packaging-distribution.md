@@ -17,6 +17,8 @@ or packaging documentation.
   package payloads, load snippets, install docs, and release gates
 - Release workflow/Dockerfile NGINX versions missing from the checksum table
 - Artifact upload/download/signing name drift between release jobs
+- Standalone DEB/RPM workflows drifting from the canonical package name,
+  install layout, or prebuilt-module packaging contract
 - Architecture-specific package smoke tests running on the wrong runner
   architecture
 - Secure-by-default Helm chart settings that prevent NGINX from binding or
@@ -45,6 +47,9 @@ or packaging documentation.
 - `packaging/nfpm/nfpm.yaml`, Debian/RPM specs, load snippets, smoke tests,
   install-layout gates, and public install docs must use the same module `.so`
   filename as the NGINX dynamic module build output.
+- Standalone package workflows must install the same canonical doc/license
+  paths as nFPM packages and must run `check_install_layout.sh` against their
+  generated packages before upload.
 - Helm chart defaults must render a pod that can start under the chart's
   default security context.
 - Homebrew formula repository and repo-owned formula template must stay in sync
@@ -74,3 +79,4 @@ make release-gates-check
 | 0.6.0 | 2026-05-03 | Codex | Covered Homebrew workflows/formula, package metadata, and release-gate docs |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
 | 0.7.2 | 2026-05-25 | Codex | Added release package chain invariants for module names, checksum coverage, artifact naming, architecture-matched smoke tests, and Helm secure defaults |
+| 0.7.3 | 2026-05-26 | Codex | Added standalone DEB/RPM package-name, layout, and prebuilt-module contract coverage |

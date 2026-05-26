@@ -203,6 +203,10 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
   Dockerfiles has a checked-in checksum, package artifact producer/consumer
   names match exactly, and architecture-specific smoke tests run on matching
   runner architecture [13]
+- Standalone package workflows use the canonical package name and install
+  layout, run `check_install_layout.sh` before upload, and do not ask RPM SPECs
+  to rebuild when the workflow source tarball contains only a prebuilt module
+  payload [13]
 
 **Python** (P)
 - Binary prerequisites validate executability [19]
@@ -340,3 +344,4 @@ remediation:
 | 0.7.0 | 2026-05-17 | Kang | v0.7.0 scope: decompress_max_size/parse_timeout/parser_budget directives (A03/A06); DecompressionBudgetExceeded(9)/ParseTimeout(10)/ParseBudgetExceeded(11) error codes (A04/A06); FFIAcceptResult + negotiate_accept FFI (A05); Rust conditional/decision/header_plan/negotiator modules (B02-B05); release-gates-check-070 target; DECISION_CHAIN.md v0.7.0 reason codes |
 | 0.7.1 | 2026-05-25 | Kang | Rules 39–40: NGX_DONE terminal semantics/double-finalize prevention, invalidated header hash==0 filtering; Rule 8 format string argument matching; Rule 11 bash 3.2 empty array expansion; Rule 13 supply chain hardening (SHA pinning, checksum verification, validator regex sync); Rule 24 NGINX callback const exception; new tools: detect_ci_supply_chain.sh, detect_header_hash_filter.sh, detect_finalize_return.sh |
 | 0.7.2 | 2026-05-25 | Codex | Strengthened Rule 13 release package chain invariants: canonical module filename, checksum coverage, artifact producer/consumer names, architecture-matched smoke runners, and Helm secure-default runtime checks |
+| 0.7.3 | 2026-05-26 | Codex | Strengthened Rule 13 for standalone DEB/RPM package-name, canonical install layout, and prebuilt RPM source/SPEC consistency |
