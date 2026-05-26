@@ -40,6 +40,9 @@ RELEASE_RPM_WORKFLOW = GITHUB_WORKFLOWS_DIR / "release-rpm.yml"
 SIGN_AND_PUBLISH_WORKFLOW = GITHUB_WORKFLOWS_DIR / "sign-and-publish.yml"
 CHECKSUMS_FILE = PROJECT_ROOT / "packaging" / "checksums.sha256"
 SMOKE_TEST_BASIC = PROJECT_ROOT / "packaging" / "scripts" / "smoke-test-basic.sh"
+GATE3_LOCAL_PACKAGE_SMOKE = PROJECT_ROOT / "tools" / "release" / "gates" / (
+    "gate3_local_package_smoke.sh"
+)
 NFPM_POSTINSTALL = PROJECT_ROOT / "packaging" / "nfpm" / "scripts" / "postinstall.sh"
 RELEASE_DOCKERFILES = [
     PROJECT_ROOT / "tools" / "build_release" / "Dockerfile.glibc",
@@ -65,6 +68,12 @@ NFPM_REQUIRED_SNIPPETS = [
     "/usr/share/doc/nginx-markdown-for-agents/COMPATIBILITY.md",
     "/usr/share/licenses/nginx-markdown-for-agents/LICENSE",
 ]
+NFPM_DEB_ONLY_MODULES_AVAILABLE_PATTERN = (
+    r'src: "\./packaging/nfpm/modules-available/mod-markdown\.conf"\n'
+    r'\s+dst: "/usr/share/nginx/modules-available/mod-markdown\.conf"\n'
+    r"\s+type: config\|noreplace\n"
+    r"\s+packager: deb"
+)
 RPM_REQUIRED_FIELDS = ["Name", "Version", "Requires"]
 RPM_REQUIRED_SECTIONS = ["%post", "%changelog"]
 MODULE_NAME_SURFACES = [
@@ -149,11 +158,20 @@ SMOKE_RPM_REPO_SNIPPETS = [
     "almalinux|centos|rocky|rhel)",
     "packages/centos/",
 ]
+GATE3_LOCAL_ARCH_SNIPPETS = [
+    'pkg_pattern="*_${ARCH}.deb"',
+    'pkg_pattern="*-1.${RPM_ARCH}.rpm"',
+    'find "$dist_dir" -name "$pkg_pattern"',
+]
 NFPM_POSTINSTALL_SNIPPETS = [
     "configure|1|2)",
     "abort-upgrade|abort-remove|abort-deconfigure)",
     'info "postinstall called with unknown argument: $ACTION"',
+    "/usr/share/doc/nginx-markdown-for-agents/README.md",
     "exit 0",
+]
+NFPM_POSTINSTALL_FORBIDDEN_SNIPPETS = [
+    "/usr/share/doc/nginx-module-markdown-for-agents/README.md",
 ]
 RELEASE_BUILD_GLIBC_SNIPPETS = {
     RELEASE_PACKAGES_WORKFLOW: ["container: almalinux:9"],
@@ -247,6 +265,16 @@ def validate_nfpm_config(result: ValidationResult) -> None:
             result.pass_(sid, f"nFPM config contains {snippet}")
         else:
             result.fail(sid, f"nFPM config missing {snippet}")
+    if re.search(NFPM_DEB_ONLY_MODULES_AVAILABLE_PATTERN, content):
+        result.pass_(
+            "nfpm:modules-available:deb-only",
+            "modules-available snippet is packaged only for DEB",
+        )
+    else:
+        result.fail(
+            "nfpm:modules-available:deb-only",
+            "modules-available snippet must be limited to packager: deb",
+        )
 
 
 def validate_rpm_spec(result: ValidationResult) -> None:
@@ -658,6 +686,18 @@ def validate_smoke_test_repo_selection(result: ValidationResult) -> None:
     )
 
 
+def validate_gate3_local_arch_selection(result: ValidationResult) -> None:
+    """Validate local Gate 3 smoke selects architecture-matched packages."""
+    content = read_safe(GATE3_LOCAL_PACKAGE_SMOKE)
+    if not content:
+        result.fail("gate3-arch:exists", "gate3_local_package_smoke.sh not found")
+        return
+    _check_snippets(
+        content, GATE3_LOCAL_ARCH_SNIPPETS, "gate3-arch",
+        "gate3_local_package_smoke.sh", result,
+    )
+
+
 def validate_nfpm_postinstall_lifecycle(result: ValidationResult) -> None:
     """Validate nFPM postinstall accepts DEB and RPM lifecycle arguments."""
     content = read_safe(NFPM_POSTINSTALL)
@@ -668,6 +708,12 @@ def validate_nfpm_postinstall_lifecycle(result: ValidationResult) -> None:
         content, NFPM_POSTINSTALL_SNIPPETS, "nfpm-postinstall",
         "postinstall.sh", result,
     )
+    for snippet in NFPM_POSTINSTALL_FORBIDDEN_SNIPPETS:
+        sid = f"nfpm-postinstall-forbidden:{snippet[:24]}"
+        if snippet in content:
+            result.fail(sid, f"postinstall.sh must not contain {snippet}")
+        else:
+            result.pass_(sid, f"postinstall.sh omits {snippet}")
 
 
 def validate_release_build_glibc_baseline(result: ValidationResult) -> None:
@@ -707,6 +753,7 @@ def main() -> int:
     validate_release_artifact_flow(result)
     validate_standalone_workflow_packaging(result)
     validate_smoke_test_repo_selection(result)
+    validate_gate3_local_arch_selection(result)
     validate_nfpm_postinstall_lifecycle(result)
     validate_release_build_glibc_baseline(result)
     print_report(result)
