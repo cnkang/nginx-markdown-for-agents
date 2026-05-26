@@ -13,6 +13,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent.parent))
 
 from tools.release.gates.validate_package_metadata_070 import (  # noqa: E402
+    _contains_make_build_command,
     _is_nginx_version,
     _split_inline_list,
     _strip_unquoted_comment,
@@ -234,3 +235,59 @@ class TestLargeInputSafety:
         lines.append('NGINX_VERSION="1.27.4"')
         content = "\n".join(lines)
         assert extract_nginx_versions(content) == {"1.27.4"}
+
+
+# ---------------------------------------------------------------------------
+# _contains_make_build_command
+# ---------------------------------------------------------------------------
+
+
+class TestContainsMakeBuildCommand:
+    """Validate active make build command detection without regex."""
+
+    def test_detects_simple_make_build(self) -> None:
+        assert _contains_make_build_command("make build") is True
+
+    def test_detects_indented_make_build(self) -> None:
+        assert _contains_make_build_command("    make build") is True
+
+    def test_detects_multiple_spaces(self) -> None:
+        assert _contains_make_build_command("make     build") is True
+
+    def test_detects_make_build_with_args(self) -> None:
+        assert _contains_make_build_command("make build RELEASE=1") is True
+
+    def test_detects_make_build_with_multiple_args(self) -> None:
+        assert _contains_make_build_command("make build all") is True
+
+    def test_ignores_commented_make_build(self) -> None:
+        assert _contains_make_build_command("# make build") is False
+
+    def test_ignores_indented_commented_make_build(self) -> None:
+        assert _contains_make_build_command("    # make build") is False
+
+    def test_ignores_echo_make_build(self) -> None:
+        assert _contains_make_build_command('echo "make build"') is False
+
+    def test_ignores_percent_make_build(self) -> None:
+        assert _contains_make_build_command("%make_build") is False
+
+    def test_ignores_makebuild(self) -> None:
+        assert _contains_make_build_command("makebuild") is False
+
+    def test_ignores_make_builder(self) -> None:
+        assert _contains_make_build_command("make builder") is False
+
+    def test_ignores_make_test(self) -> None:
+        assert _contains_make_build_command("make test") is False
+
+    def test_detects_in_multiline_content(self) -> None:
+        content = "# comment\nmake build\nmore stuff"
+        assert _contains_make_build_command(content) is True
+
+    def test_ignores_all_comments_in_multiline(self) -> None:
+        content = "# make build\n  # make build\necho make build"
+        assert _contains_make_build_command(content) is False
+
+    def test_empty_content(self) -> None:
+        assert _contains_make_build_command("") is False
