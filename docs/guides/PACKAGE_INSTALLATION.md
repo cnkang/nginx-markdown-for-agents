@@ -106,3 +106,9 @@ sudo yum downgrade nginx-markdown-module
 | `nginx: [emerg] dlopen() failed` | Missing shared library | Check `ldd` on .so file |
 | GPG signature verification failed | Expired/rotated key | Re-import GPG key |
 | Module not loaded | Missing `load_module` | Add `load_module` directive |
+
+For Kubernetes and Helm deployments, see
+[`KUBERNETES_DEPLOYMENT.md`](./KUBERNETES_DEPLOYMENT.md). The Helm chart runs
+with stock NGINX by default; module-enabled installs require an image that
+contains `ngx_http_markdown_filter_module.so` and an explicit
+`markdown.loadModule` path.

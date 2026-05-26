@@ -6,6 +6,9 @@ metadata:
     {{- include "nginx-markdown.labels" . | nindent 4 }}
 data:
   nginx.conf: |
+    {{- if and .Values.markdown.enabled (not .Values.markdown.loadModule) }}
+    {{- fail "markdown.loadModule is required when markdown.enabled=true; use an image containing ngx_http_markdown_filter_module.so and set the in-container module path" }}
+    {{- end }}
     {{- if and .Values.markdown.enabled .Values.markdown.loadModule }}
     load_module {{ .Values.markdown.loadModule }};
     {{- end }}
