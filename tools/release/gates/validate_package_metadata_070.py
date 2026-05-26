@@ -350,51 +350,45 @@ def _contains_make_build_command(content: str) -> bool:
     Does not match when make appears as an argument to another command
     (e.g. ``echo make build``).
     """
-    shell_operators = {"&&", "||", ";", "|"}
-
-    def _is_make_token(token: str) -> bool:
-        """Return True if token looks like a make invocation."""
-        return token in {"make", "gmake"} or "make" in token.lower()
-
     for raw_line in content.splitlines():
         line = _strip_unquoted_comment(raw_line).strip()
         if not line:
             continue
-
-        # Split on shell operators to get individual command segments
-        segments: list[list[str]] = [[]]
-        for token in line.split():
-            if token in shell_operators:
-                segments.append([])
-            else:
-                segments[-1].append(token)
-
-        for segment in segments:
-            if not segment:
-                continue
-            # The make invocation must be in command position (first token)
-            # or after a simple prefix like 'cd dir' (skip non-make leading tokens
-            # only if they are known shell builtins that change directory)
-            cmd_token = segment[0]
-            make_idx: int | None = None
-            if _is_make_token(cmd_token):
-                make_idx = 0
-            elif cmd_token == "cd" and len(segment) >= 3:
-                # Pattern: cd <dir> make ... (unusual but handle cd without &&)
-                # Actually cd without && is invalid; skip this segment
-                pass
-            else:
-                # Not a make command — skip (avoids matching 'echo make build')
-                continue
-
-            if make_idx is None:
-                continue
-            # Check if any subsequent token (ignoring flags) is "build"
-            for token in segment[make_idx + 1:]:
-                if token == "build":
-                    return True
+        if _line_has_make_build(line):
+            return True
 
     return False
+
+
+def _line_has_make_build(line: str) -> bool:
+    """Check if a single line contains a make build command."""
+    shell_operators = {"&&", "||", ";", "|"}
+
+    segments: list[list[str]] = [[]]
+    for token in line.split():
+        if token in shell_operators:
+            segments.append([])
+        else:
+            segments[-1].append(token)
+
+    return any(
+        _segment_is_make_build(segment)
+        for segment in segments
+        if segment
+    )
+
+
+def _segment_is_make_build(segment: list[str]) -> bool:
+    """Return True if a command segment is a make invocation with 'build' target."""
+    cmd_token = segment[0]
+    if not _is_make_token(cmd_token):
+        return False
+    return "build" in segment[1:]
+
+
+def _is_make_token(token: str) -> bool:
+    """Return True if token looks like a make invocation."""
+    return token in {"make", "gmake"} or "make" in token.lower()
 
 
 def _unquote(value: str) -> str:
