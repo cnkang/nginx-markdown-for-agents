@@ -49,6 +49,7 @@ RELEASE_DOCKERFILES = [
 ]
 CANONICAL_MODULE_SO = "ngx_http_markdown_filter_module.so"
 LEGACY_MODULE_SO = "ngx_http_markdown_module.so"
+CANONICAL_PACKAGE_NAME = "nginx-module-markdown-for-agents"
 
 NFPM_REQUIRED_SNIPPETS = [
     'name: "nginx-module-markdown-for-agents"',
@@ -107,6 +108,28 @@ ARCH_RUNNER_SNIPPET = (
     "runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || "
     "'ubuntu-24.04' }}"
 )
+STANDALONE_DEB_SNIPPETS = [
+    f'PKG_NAME="{CANONICAL_PACKAGE_NAME}"',
+    "/usr/share/doc/nginx-markdown-for-agents",
+    "/usr/share/licenses/nginx-markdown-for-agents",
+    "docs/guides/INSTALL.md",
+    "docs/COMPATIBILITY.md",
+    "tools/release/gates/check_install_layout.sh dist/*.deb",
+    '"dist/${PKG_NAME}_${PKG_VERSION}_nginx-${NGINX_VERSION}_${PKG_ARCH}.deb"',
+]
+STANDALONE_RPM_WORKFLOW_SNIPPETS = [
+    f'PKG_NAME="{CANONICAL_PACKAGE_NAME}"',
+    "docs/guides/INSTALL.md",
+    "docs/COMPATIBILITY.md",
+    "tools/release/gates/check_install_layout.sh dist/*.rpm",
+]
+STANDALONE_RPM_SPEC_SNIPPETS = [
+    f"Name:           {CANONICAL_PACKAGE_NAME}",
+    "Source0:        %{name}-%{version}.tar.gz",
+    f"%setup -q -n {CANONICAL_PACKAGE_NAME}-%{{version}}",
+    "# No-op: release-rpm.yml packages a prebuilt dynamic module.",
+    "install -m 0644 ngx_http_markdown_filter_module.so",
+]
 
 
 class ValidationResult:
@@ -280,6 +303,54 @@ def validate_release_artifact_flow(result: ValidationResult) -> None:
         )
 
 
+def validate_standalone_workflow_packaging(result: ValidationResult) -> None:
+    """Validate standalone DEB/RPM workflows match canonical package layout."""
+    deb_workflow = read_safe(RELEASE_DEB_WORKFLOW)
+    if not deb_workflow:
+        result.fail("standalone-deb:exists", "release-deb.yml not found")
+    else:
+        for snippet in STANDALONE_DEB_SNIPPETS:
+            sid = f"standalone-deb:{snippet[:24]}"
+            if snippet in deb_workflow:
+                result.pass_(sid, f"release-deb.yml contains {snippet}")
+            else:
+                result.fail(sid, f"release-deb.yml missing {snippet}")
+
+    rpm_workflow = read_safe(RELEASE_RPM_WORKFLOW)
+    if not rpm_workflow:
+        result.fail("standalone-rpm:exists", "release-rpm.yml not found")
+    else:
+        for snippet in STANDALONE_RPM_WORKFLOW_SNIPPETS:
+            sid = f"standalone-rpm-workflow:{snippet[:18]}"
+            if snippet in rpm_workflow:
+                result.pass_(sid, f"release-rpm.yml contains {snippet}")
+            else:
+                result.fail(sid, f"release-rpm.yml missing {snippet}")
+
+    rpm_spec = read_safe(RPM_SPEC)
+    if not rpm_spec:
+        result.fail("standalone-rpm-spec:exists", "RPM spec not found")
+        return
+
+    for snippet in STANDALONE_RPM_SPEC_SNIPPETS:
+        sid = f"standalone-rpm-spec:{snippet[:18]}"
+        if snippet in rpm_spec:
+            result.pass_(sid, f"RPM spec contains {snippet}")
+        else:
+            result.fail(sid, f"RPM spec missing {snippet}")
+
+    if re.search(r"^make\s+build\s*$", rpm_spec, re.MULTILINE):
+        result.fail(
+            "standalone-rpm-spec:no-make-build",
+            "prebuilt standalone RPM spec must not run make build",
+        )
+    else:
+        result.pass_(
+            "standalone-rpm-spec:no-make-build",
+            "prebuilt standalone RPM spec does not run make build",
+        )
+
+
 def print_report(result: ValidationResult) -> None:
     """Print a formatted validation report."""
     print("v0.7.0 Package Metadata Validation Report")
@@ -300,6 +371,7 @@ def main() -> int:
     validate_module_filename_consistency(result)
     validate_release_versions_have_checksums(result)
     validate_release_artifact_flow(result)
+    validate_standalone_workflow_packaging(result)
     print_report(result)
     return 1 if result.has_failures else 0
 

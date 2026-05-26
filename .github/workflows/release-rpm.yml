@@ -133,7 +133,7 @@ jobs:
 
       - name: Prepare rpmbuild tree
         run: |
-          if [ ! -f "build/ngx_http_markdown_filter_module.so" ]; then
+          if [[ ! -f "build/ngx_http_markdown_filter_module.so" ]]; then
             echo "ERROR: Module .so not found in build/" >&2
             exit 1
           fi
@@ -141,14 +141,17 @@ jobs:
           mkdir -p ~/rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
 
           # Create source tarball for rpmbuild
-          PKG_NAME="nginx-module-markdown"
+          PKG_NAME="nginx-module-markdown-for-agents"
           PKG_VERSION="${{ inputs.version }}"
           TARBALL_DIR="${PKG_NAME}-${PKG_VERSION}"
 
           mkdir -p "/tmp/${TARBALL_DIR}"
+          mkdir -p "/tmp/${TARBALL_DIR}/docs/guides"
           cp build/ngx_http_markdown_filter_module.so "/tmp/${TARBALL_DIR}/"
-          cp README.md "/tmp/${TARBALL_DIR}/" 2>/dev/null || true
-          cp LICENSE "/tmp/${TARBALL_DIR}/" 2>/dev/null || true
+          cp README.md "/tmp/${TARBALL_DIR}/"
+          cp docs/guides/INSTALL.md "/tmp/${TARBALL_DIR}/docs/guides/"
+          cp docs/COMPATIBILITY.md "/tmp/${TARBALL_DIR}/docs/"
+          cp LICENSE "/tmp/${TARBALL_DIR}/"
 
           cd /tmp
           tar czf ~/rpmbuild/SOURCES/${PKG_NAME}-${PKG_VERSION}.tar.gz "${TARBALL_DIR}"
@@ -166,13 +169,7 @@ jobs:
             --define "_topdir $HOME/rpmbuild" \
             --define "version ${PKG_VERSION}" \
             --define "nginx_version ${{ steps.nginx_version.outputs.version }}" \
-            ~/rpmbuild/SPECS/nginx-module-markdown.spec || {
-              # If rpmbuild with defines fails, try without overrides
-              # (SPEC file has hardcoded version)
-              rpmbuild -bb \
-                --define "_topdir $HOME/rpmbuild" \
-                ~/rpmbuild/SPECS/nginx-module-markdown.spec
-            }
+            ~/rpmbuild/SPECS/nginx-module-markdown.spec
 
       - name: Collect RPM artifacts
         run: |
@@ -184,6 +181,7 @@ jobs:
             echo "--- ${rpm_file} ---"
             rpm -qip "${rpm_file}"
           done
+          bash tools/release/gates/check_install_layout.sh dist/*.rpm
 
       - name: Upload RPM artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7

@@ -7,12 +7,6 @@ License:        BSD-2-Clause
 URL:            https://github.com/cnkang/nginx-markdown-for-agents
 Source0:        %{name}-%{version}.tar.gz
 
-BuildRequires:  cargo
-BuildRequires:  rustc >= 1.91
-BuildRequires:  pcre-devel
-BuildRequires:  zlib-devel
-BuildRequires:  openssl-devel
-
 Requires:       nginx >= %{nginx_version}
 
 %description
@@ -40,20 +34,20 @@ The module is installed as a dynamic module (.so) and must be explicitly
 enabled via load_module directive in nginx.conf.
 
 %prep
-%setup -q
+%setup -q -n nginx-module-markdown-for-agents-%{version}
 
 %build
-make build
+# No-op: release-rpm.yml packages a prebuilt dynamic module.
 
 %install
 rm -rf %{buildroot}
 
 install -d %{buildroot}/usr/lib/nginx/modules
-install -m 0644 build/ngx_http_markdown_filter_module.so \
+install -m 0644 ngx_http_markdown_filter_module.so \
     %{buildroot}/usr/lib/nginx/modules/ngx_http_markdown_filter_module.so
 
 install -d %{buildroot}/usr/share/doc/nginx-markdown-for-agents
-install -m 0644 packaging/docs/README.md \
+install -m 0644 README.md \
     %{buildroot}/usr/share/doc/nginx-markdown-for-agents/README.md
 install -m 0644 docs/guides/INSTALL.md \
     %{buildroot}/usr/share/doc/nginx-markdown-for-agents/INSTALL.md

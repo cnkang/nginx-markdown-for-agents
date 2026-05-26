@@ -120,12 +120,12 @@ jobs:
           PKG_VERSION: ${{ inputs.version }}
           NGINX_VERSION: ${{ steps.nginx_version.outputs.version }}
         run: |
-          if [ ! -f "build/ngx_http_markdown_filter_module.so" ]; then
+          if [[ ! -f "build/ngx_http_markdown_filter_module.so" ]]; then
             echo "ERROR: Module .so not found in build/" >&2
             exit 1
           fi
 
-          PKG_NAME="nginx-module-markdown"
+          PKG_NAME="nginx-module-markdown-for-agents"
           PKG_ARCH="${{ matrix.arch }}"
           PKG_DIR="/tmp/${PKG_NAME}_${PKG_VERSION}_${PKG_ARCH}"
 
@@ -133,7 +133,8 @@ jobs:
           mkdir -p "${PKG_DIR}/DEBIAN"
           mkdir -p "${PKG_DIR}/usr/lib/nginx/modules"
           mkdir -p "${PKG_DIR}/usr/share/nginx/modules-available"
-          mkdir -p "${PKG_DIR}/usr/share/doc/${PKG_NAME}"
+          mkdir -p "${PKG_DIR}/usr/share/doc/nginx-markdown-for-agents"
+          mkdir -p "${PKG_DIR}/usr/share/licenses/nginx-markdown-for-agents"
 
           # Install module binary
           cp build/ngx_http_markdown_filter_module.so \
@@ -146,8 +147,10 @@ jobs:
           SNIPPET
 
           # Install docs
-          cp README.md "${PKG_DIR}/usr/share/doc/${PKG_NAME}/" 2>/dev/null || true
-          cp LICENSE "${PKG_DIR}/usr/share/doc/${PKG_NAME}/copyright" 2>/dev/null || true
+          cp README.md "${PKG_DIR}/usr/share/doc/nginx-markdown-for-agents/README.md"
+          cp docs/guides/INSTALL.md "${PKG_DIR}/usr/share/doc/nginx-markdown-for-agents/INSTALL.md"
+          cp docs/COMPATIBILITY.md "${PKG_DIR}/usr/share/doc/nginx-markdown-for-agents/COMPATIBILITY.md"
+          cp LICENSE "${PKG_DIR}/usr/share/licenses/nginx-markdown-for-agents/LICENSE"
 
           # Generate control file from template
           sed \
@@ -186,7 +189,7 @@ jobs:
           # Build the package
           mkdir -p dist
           fakeroot dpkg-deb --build "${PKG_DIR}" \
-            "dist/${PKG_NAME}_${PKG_VERSION}_${PKG_ARCH}.deb"
+            "dist/${PKG_NAME}_${PKG_VERSION}_nginx-${NGINX_VERSION}_${PKG_ARCH}.deb"
 
       - name: Verify DEB package
         run: |
@@ -199,6 +202,7 @@ jobs:
             echo "Contents:"
             dpkg-deb --contents "${deb_file}"
           done
+          bash tools/release/gates/check_install_layout.sh dist/*.deb
 
       - name: Upload DEB artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
