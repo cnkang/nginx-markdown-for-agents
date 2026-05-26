@@ -154,6 +154,7 @@ check_prerequisites() {
 
 KEEP_CLUSTER=0
 CLUSTER_NAME="${DEFAULT_CLUSTER_NAME}"
+CREATED_CLUSTER=0
 
 parse_args() {
     while [[ $# -gt 0 ]]; do
@@ -195,6 +196,7 @@ create_cluster() {
     kind create cluster --name "${CLUSTER_NAME}" --wait 60s >&2 \
         || die "Failed to create kind cluster"
 
+    CREATED_CLUSTER=1
     info "Cluster created successfully"
     return 0
 }
@@ -203,6 +205,11 @@ delete_cluster() {
     if [[ "$KEEP_CLUSTER" -eq 1 ]]; then
         info "Keeping cluster ${CLUSTER_NAME} (--keep-cluster)"
         info "Delete manually: kind delete cluster --name ${CLUSTER_NAME}"
+        return 0
+    fi
+
+    if [[ "$CREATED_CLUSTER" -ne 1 ]]; then
+        info "Not deleting pre-existing cluster: ${CLUSTER_NAME}"
         return 0
     fi
 
@@ -278,25 +285,32 @@ validate_helm_template() {
 
 deploy_and_verify() {
     info "Deploying Helm chart to kind cluster..."
+    local kube_context="kind-${CLUSTER_NAME}"
 
     # Create namespace
-    kubectl create namespace "${HELM_NAMESPACE}" --dry-run=client -o yaml \
-        | kubectl apply -f - >&2
+    kubectl --context "$kube_context" create namespace "${HELM_NAMESPACE}" \
+        --dry-run=client -o yaml \
+        | kubectl --context "$kube_context" apply -f - >&2
 
-    # Install chart with a known-good nginx image (no module, just config validation)
+    # Install chart with a known-good nginx image. Disable markdown directives
+    # because the stock image does not include the dynamic module.
     if ! helm install "${HELM_RELEASE_NAME}" "${CHART_DIR}" \
+        --kube-context "$kube_context" \
         --namespace "${HELM_NAMESPACE}" \
         --set image.repository=nginx \
         --set image.tag=1.26.3 \
         --set image.pullPolicy=IfNotPresent \
+        --set markdown.enabled=false \
         --wait \
         --timeout "${POD_WAIT_TIMEOUT}" \
         >&2 2>&1; then
         fail "helm install failed"
         info "Pod status:"
-        kubectl get pods -n "${HELM_NAMESPACE}" >&2 || true
+        kubectl --context "$kube_context" get pods -n "${HELM_NAMESPACE}" \
+            >&2 || true
         info "Pod events:"
-        kubectl describe pods -n "${HELM_NAMESPACE}" >&2 || true
+        kubectl --context "$kube_context" describe pods -n "${HELM_NAMESPACE}" \
+            >&2 || true
         return 1
     fi
 
@@ -304,7 +318,7 @@ deploy_and_verify() {
 
     # Verify pod is running
     local pod_name
-    pod_name="$(kubectl get pods -n "${HELM_NAMESPACE}" \
+    pod_name="$(kubectl --context "$kube_context" get pods -n "${HELM_NAMESPACE}" \
         -l "app.kubernetes.io/instance=${HELM_RELEASE_NAME}" \
         -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
 
@@ -318,7 +332,8 @@ deploy_and_verify() {
 
     # Verify security context is applied
     local read_only
-    read_only="$(kubectl get pod "$pod_name" -n "${HELM_NAMESPACE}" \
+    read_only="$(kubectl --context "$kube_context" get pod "$pod_name" \
+        -n "${HELM_NAMESPACE}" \
         -o jsonpath='{.spec.containers[0].securityContext.readOnlyRootFilesystem}' 2>/dev/null || true)"
 
     if [[ "$read_only" == "true" ]]; then
@@ -330,8 +345,18 @@ deploy_and_verify() {
 
     # Verify writable volumes are mounted
     local volume_count
-    volume_count="$(kubectl get pod "$pod_name" -n "${HELM_NAMESPACE}" \
-        -o jsonpath='{.spec.volumes}' 2>/dev/null | grep -c "emptyDir" || true)"
+    volume_count=0
+    local volume_name
+    local empty_dir
+    for volume_name in nginx-cache nginx-run nginx-tmp; do
+        empty_dir="$(kubectl --context "$kube_context" get pod "$pod_name" \
+            -n "${HELM_NAMESPACE}" \
+            -o "jsonpath={.spec.volumes[?(@.name=='${volume_name}')].emptyDir}" \
+            2>/dev/null || true)"
+        if [[ -n "$empty_dir" ]]; then
+            volume_count=$((volume_count + 1))
+        fi
+    done
 
     if [[ "$volume_count" -ge 3 ]]; then
         pass "Pod has ${volume_count} emptyDir volumes for writable paths"
@@ -341,8 +366,10 @@ deploy_and_verify() {
     fi
 
     # Cleanup helm release
-    helm uninstall "${HELM_RELEASE_NAME}" --namespace "${HELM_NAMESPACE}" >/dev/null 2>&1 || true
-    kubectl delete namespace "${HELM_NAMESPACE}" --wait=false >/dev/null 2>&1 || true
+    helm uninstall "${HELM_RELEASE_NAME}" --kube-context "$kube_context" \
+        --namespace "${HELM_NAMESPACE}" >/dev/null 2>&1 || true
+    kubectl --context "$kube_context" delete namespace "${HELM_NAMESPACE}" \
+        --wait=false >/dev/null 2>&1 || true
 
     return "$had_failure"
 }
@@ -368,7 +395,7 @@ main() {
 
     if [[ "$had_failure" -eq 0 ]]; then
         # Use kind's kubeconfig context
-        kubectl cluster-info --context "kind-${CLUSTER_NAME}" >/dev/null 2>&1 \
+        kubectl --context "kind-${CLUSTER_NAME}" cluster-info >/dev/null 2>&1 \
             || die "Cannot connect to kind cluster"
 
         deploy_and_verify || had_failure=1

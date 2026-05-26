@@ -36,7 +36,11 @@ nginx -t
 Add to your NGINX configuration (top-level context, before `http`):
 
 ```nginx
-load_module modules/ngx_http_markdown_filter_module.so;
+# DEB packages:
+load_module /usr/lib/nginx/modules/ngx_http_markdown_filter_module.so;
+
+# RPM packages:
+load_module /usr/lib64/nginx/modules/ngx_http_markdown_filter_module.so;
 ```
 
 Then configure in `http`, `server`, or `location` context:

@@ -7,7 +7,8 @@
 #   defined by the nginx-markdown-for-agents install layout specification.
 #
 # REQUIRED PATHS:
-#   /usr/lib/nginx/modules/ngx_http_markdown_filter_module.so
+#   DEB: /usr/lib/nginx/modules/ngx_http_markdown_filter_module.so
+#   RPM: /usr/lib64/nginx/modules/ngx_http_markdown_filter_module.so
 #   /usr/share/doc/nginx-markdown-for-agents/README.md
 #   /usr/share/doc/nginx-markdown-for-agents/INSTALL.md
 #   /usr/share/doc/nginx-markdown-for-agents/COMPATIBILITY.md
@@ -52,8 +53,7 @@ FAIL_COUNT=0
 # ---------------------------------------------------------------------------
 # Required paths (install layout specification)
 # ---------------------------------------------------------------------------
-REQUIRED_PATHS="/usr/lib/nginx/modules/ngx_http_markdown_filter_module.so
-/usr/share/doc/nginx-markdown-for-agents/README.md
+COMMON_REQUIRED_PATHS="/usr/share/doc/nginx-markdown-for-agents/README.md
 /usr/share/doc/nginx-markdown-for-agents/INSTALL.md
 /usr/share/doc/nginx-markdown-for-agents/COMPATIBILITY.md
 /usr/share/licenses/nginx-markdown-for-agents/LICENSE"
@@ -162,6 +162,27 @@ check_path_present() {
     return 1
 }
 
+required_paths_for_package() {
+    local pkg_basename="$1"
+
+    case "$pkg_basename" in
+        *.deb)
+            printf '%s\n%s\n' \
+                "/usr/lib/nginx/modules/ngx_http_markdown_filter_module.so" \
+                "$COMMON_REQUIRED_PATHS"
+            ;;
+        *.rpm)
+            printf '%s\n%s\n' \
+                "/usr/lib64/nginx/modules/ngx_http_markdown_filter_module.so" \
+                "$COMMON_REQUIRED_PATHS"
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+    return 0
+}
+
 # validate_package — validate a single package file
 # Arguments: $1 = path to package file
 # Returns: 0 if all required paths present, 1 if any missing
@@ -169,6 +190,7 @@ validate_package() {
     local pkg_path="$1"
     local pkg_basename
     local contents
+    local required_paths
     local missing_count=0
 
     # Validate file exists
@@ -208,6 +230,13 @@ validate_package() {
             ;;
     esac
 
+    required_paths="$(required_paths_for_package "$pkg_basename")" || {
+        log_error "Unsupported package type: $pkg_basename (expected .deb or .rpm)"
+        printf 'FAIL %s (unsupported type)\n' "$pkg_basename"
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+        return 1
+    }
+
     # Check each required path using a while-read loop (newline-safe)
     while IFS= read -r required_path; do
         [[ -n "$required_path" ]] || continue
@@ -218,7 +247,7 @@ validate_package() {
             missing_count=$((missing_count + 1))
         fi
     done <<EOF_PATHS
-$REQUIRED_PATHS
+$required_paths
 EOF_PATHS
 
     # Report result

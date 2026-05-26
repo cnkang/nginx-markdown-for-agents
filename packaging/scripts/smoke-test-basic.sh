@@ -44,6 +44,44 @@ info() {
     printf '[smoke-test-basic] %s\n' "$1" >&2
 }
 
+detect_rpm_repo_baseurl() {
+    if [[ ! -f /etc/os-release ]]; then
+        die "/etc/os-release not found; cannot select nginx.org RPM repository"
+    fi
+
+    . /etc/os-release
+
+    case "${ID:-}" in
+        amzn)
+            printf 'http://nginx.org/packages/amzn/%s/$basearch/\n' \
+                "${VERSION_ID%%.*}"
+            ;;
+        almalinux|centos|rocky|rhel)
+            printf 'http://nginx.org/packages/centos/$releasever/$basearch/\n'
+            ;;
+        *)
+            die "Unsupported RPM smoke-test distribution: ID=${ID:-unknown}"
+            ;;
+    esac
+}
+
+detect_nginx_modules_path() {
+    local modules_path
+
+    modules_path="$(nginx -V 2>&1 \
+        | tr ' ' '\n' \
+        | sed -n 's/^--modules-path=//p' \
+        | head -n 1)"
+
+    if [[ -n "$modules_path" ]]; then
+        printf '%s\n' "$modules_path"
+        return 0
+    fi
+
+    printf '/usr/lib/nginx/modules\n'
+    return 0
+}
+
 run_diagnostics() {
     info "Running diagnostics..."
     export INSTALL_LOG
@@ -160,7 +198,7 @@ case "$PKG_FORMAT" in
         nginx -V 2>&1 >&2 || die "nginx -V failed"
 
         # --- DEB: Verify .so exists ---
-        MODULE_PATH="/usr/lib/nginx/modules/ngx_http_markdown_filter_module.so"
+        MODULE_PATH="$(detect_nginx_modules_path)/ngx_http_markdown_filter_module.so"
         info "Verifying module .so at: ${MODULE_PATH}"
         if [ ! -f "${MODULE_PATH}" ]; then
             die "Module .so not found at expected path: ${MODULE_PATH}"
@@ -170,7 +208,7 @@ case "$PKG_FORMAT" in
         # --- DEB: Create load_module config snippet ---
         info "Creating load_module configuration in modules-enabled/..."
         mkdir -p /etc/nginx/modules-enabled
-        printf 'load_module modules/ngx_http_markdown_filter_module.so;\n' \
+        printf 'load_module %s;\n' "${MODULE_PATH}" \
             > /etc/nginx/modules-enabled/50-mod-markdown.conf \
             || die "Failed to create modules-enabled config"
 
@@ -184,11 +222,12 @@ case "$PKG_FORMAT" in
     rpm)
         # --- RPM: Install nginx.org package ---
         info "Adding nginx.org yum repository..."
+        NGINX_REPO_BASEURL="$(detect_rpm_repo_baseurl)"
 
-        cat > /etc/yum.repos.d/nginx.repo <<'REPO'
+        cat > /etc/yum.repos.d/nginx.repo <<REPO
 [nginx-stable]
 name=nginx stable repo
-baseurl=http://nginx.org/packages/centos/$releasever/$basearch/
+baseurl=${NGINX_REPO_BASEURL}
 gpgcheck=1
 enabled=1
 gpgkey=https://nginx.org/keys/nginx_signing.key
@@ -228,7 +267,7 @@ REPO
         nginx -V 2>&1 >&2 || die "nginx -V failed"
 
         # --- RPM: Verify .so exists ---
-        MODULE_PATH="/usr/lib/nginx/modules/ngx_http_markdown_filter_module.so"
+        MODULE_PATH="$(detect_nginx_modules_path)/ngx_http_markdown_filter_module.so"
         info "Verifying module .so at: ${MODULE_PATH}"
         if [ ! -f "${MODULE_PATH}" ]; then
             die "Module .so not found at expected path: ${MODULE_PATH}"
@@ -240,7 +279,7 @@ REPO
         if [[ -f /etc/nginx/nginx.conf ]]; then
             _tmp="$(mktemp /etc/nginx/nginx.conf.XXXXXX)" \
                 || die "Failed to create temp file for nginx.conf prepend"
-            printf '%s\n' 'load_module modules/ngx_http_markdown_filter_module.so;' \
+            printf 'load_module %s;\n' "${MODULE_PATH}" \
                 > "$_tmp" \
                 || die "Failed to write load_module line to temp file"
             cat /etc/nginx/nginx.conf >> "$_tmp" \

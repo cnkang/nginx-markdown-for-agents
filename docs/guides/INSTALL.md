@@ -67,7 +67,8 @@ sudo rpm -i nginx-module-markdown-for-agents-0.7.0-nginx1.26.3-1.x86_64.rpm
 
 The package installs:
 
-- Module binary: `/usr/lib/nginx/modules/ngx_http_markdown_filter_module.so`
+- DEB module binary: `/usr/lib/nginx/modules/ngx_http_markdown_filter_module.so`
+- RPM module binary: `/usr/lib64/nginx/modules/ngx_http_markdown_filter_module.so`
 - Documentation: `/usr/share/doc/nginx-markdown-for-agents/`
 - License: `/usr/share/licenses/nginx-markdown-for-agents/LICENSE`
 
@@ -84,7 +85,11 @@ Edit your `nginx.conf` and add the following line at the **top level** (before
 the `http {}` block):
 
 ```nginx
-load_module modules/ngx_http_markdown_filter_module.so;
+# DEB packages:
+load_module /usr/lib/nginx/modules/ngx_http_markdown_filter_module.so;
+
+# RPM packages:
+load_module /usr/lib64/nginx/modules/ngx_http_markdown_filter_module.so;
 ```
 
 ### Step 2: Verify Configuration

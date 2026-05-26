@@ -68,6 +68,7 @@ jobs:
   build:
     name: Build - nginx-${{ matrix.nginx_version }} - ${{ matrix.arch }}
     runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
+    container: almalinux:9
     permissions:
       contents: read
     strategy:
@@ -77,6 +78,24 @@ jobs:
         arch: [amd64, arm64]
 
     steps:
+      - name: Install build dependencies
+        run: |
+          dnf install -y \
+            gcc \
+            make \
+            ca-certificates \
+            curl-minimal \
+            pcre2-devel \
+            zlib-devel \
+            openssl-devel \
+            tar \
+            gzip \
+            findutils \
+            file \
+            git
+          dnf clean all
+        shell: bash
+
       - name: Derive and validate version
         id: version
         env:
@@ -106,18 +125,12 @@ jobs:
         shell: bash
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@7b1c307e0dcbda6122208f10795a713336a9b35a # stable
-        with:
-          toolchain: stable
-
-      - name: Install NGINX build dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            build-essential \
-            libpcre2-dev \
-            zlib1g-dev \
-            libssl-dev
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+            | sh -s -- -y --profile minimal --default-toolchain stable
+          echo "${HOME}/.cargo/bin" >> "$GITHUB_PATH"
+          "${HOME}/.cargo/bin/rustc" --version
+          "${HOME}/.cargo/bin/cargo" --version
         shell: bash
 
       - name: Download NGINX source
