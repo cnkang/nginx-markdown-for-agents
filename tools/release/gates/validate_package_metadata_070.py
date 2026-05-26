@@ -129,6 +129,8 @@ STANDALONE_RPM_SPEC_SNIPPETS = [
     "install -m 0644 ngx_http_markdown_filter_module.so",
 ]
 
+_CHECK_CHECKSUMS_EXISTS = "checksums:exists"
+
 
 class ValidationResult:
     """Accumulates PASS/FAIL results for reporting."""
@@ -271,11 +273,11 @@ def extract_nginx_versions(content: str) -> set[str]:
     versions: set[str] = set()
     # Handle matrix-style arrays: nginx_version: ["1.25.5", "1.26.1"]
     for match in re.findall(r'nginx_version:\s{0,20}\[([^\]]+)\]', content):
-        versions.update(re.findall(r'([0-9]+\.[0-9]+\.[0-9]+)', match))
+        versions.update(re.findall(r'(\d+\.\d+\.\d+)', match))
     # Handle shell/Dockerfile-style declarations
     patterns = [
-        r'NGINX_VERSION="([0-9]+\.[0-9]+\.[0-9]+)"',
-        r"ARG\s+NGINX_VERSION=([0-9]+\.[0-9]+\.[0-9]+)",
+        r'NGINX_VERSION="(\d+\.\d+\.\d+)"',
+        r"ARG\s+NGINX_VERSION=(\d+\.\d+\.\d+)",
     ]
     for pattern in patterns:
         versions.update(re.findall(pattern, content))
@@ -286,15 +288,15 @@ def validate_release_versions_have_checksums(result: ValidationResult) -> None:
     """Verify active release source versions are present in checksum metadata."""
     if not CHECKSUMS_FILE.exists():
         result.fail(
-            "checksums:exists",
+            _CHECK_CHECKSUMS_EXISTS,
             "packaging/checksums.sha256 not found",
         )
         return
     identifiers = checksum_identifiers()
     if not identifiers:
-        result.fail("checksums:exists", "packaging/checksums.sha256 has no entries")
+        result.fail(_CHECK_CHECKSUMS_EXISTS, "packaging/checksums.sha256 has no entries")
         return
-    result.pass_("checksums:exists", "packaging/checksums.sha256 has checksum entries")
+    result.pass_(_CHECK_CHECKSUMS_EXISTS, "packaging/checksums.sha256 has checksum entries")
 
     for path in RELEASE_VERSION_SURFACES:
         rel = path.relative_to(PROJECT_ROOT)

@@ -72,6 +72,9 @@ HELM_RENDER_REQUIRED_SNIPPETS = [
     "mountPath: /tmp",
 ]
 
+_CHECK_HELM_LINT = "helm:lint"
+_CHECK_HELM_TEMPLATE = "helm:template"
+
 
 class ValidationResult:
     """Accumulates PASS/FAIL results for reporting."""
@@ -266,15 +269,15 @@ def validate_helm_render(result: ValidationResult) -> None:
             timeout=30,
         )
     except subprocess.TimeoutExpired as exc:
-        result.fail("helm:lint", f"helm lint timed out: {exc}")
+        result.fail(_CHECK_HELM_LINT, f"helm lint timed out: {exc}")
         return
     if lint.returncode != 0:
         result.fail(
-            "helm:lint",
+            _CHECK_HELM_LINT,
             f"helm lint failed: {_truncate_output(lint.stdout.strip())}",
         )
         return
-    result.pass_("helm:lint", "helm lint passed")
+    result.pass_(_CHECK_HELM_LINT, "helm lint passed")
 
     try:
         rendered = subprocess.run(
@@ -287,15 +290,15 @@ def validate_helm_render(result: ValidationResult) -> None:
             timeout=30,
         )
     except subprocess.TimeoutExpired as exc:
-        result.fail("helm:template", f"helm template timed out: {exc}")
+        result.fail(_CHECK_HELM_TEMPLATE, f"helm template timed out: {exc}")
         return
     if rendered.returncode != 0:
         result.fail(
-            "helm:template",
+            _CHECK_HELM_TEMPLATE,
             f"helm template failed: {_truncate_output(rendered.stdout.strip())}",
         )
         return
-    result.pass_("helm:template", "helm template rendered successfully")
+    result.pass_(_CHECK_HELM_TEMPLATE, "helm template rendered successfully")
 
     ok, err = try_parse_yaml(rendered.stdout)
     if ok:
