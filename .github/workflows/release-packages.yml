@@ -42,9 +42,10 @@ on:
     inputs:
       version:
         description: >-
-          Optional version override (format: MAJOR.MINOR.PATCH or
-          MAJOR.MINOR.PATCH-prerelease, e.g. 0.7.0 or 0.7.0-rc.1).
-          If empty, version is derived from the git ref.
+          Optional version override (format: MAJOR.MINOR.PATCH, e.g. 0.7.0).
+          Prerelease suffixes (e.g. 0.7.0-rc.1) are rejected because they are
+          incompatible with RPM versioning. If empty, version is derived from
+          the git ref.
         required: false
         type: string
 
@@ -53,11 +54,12 @@ on:
 permissions: {}
 
 # Jobs:
-#   - build:      Compile Rust library + NGINX dynamic module (matrix)
-#   - package:    Generate .deb/.rpm via nFPM (matrix)
-#   - smoke-test: Container install + module load verification (matrix)
-#   - integrity:  SHA256SUMS generation + optional GPG signing
-#   - publish:    Upload to GitHub Release (tag) or workflow artifacts (dispatch)
+#   - build:               Compile Rust library + NGINX dynamic module (matrix)
+#   - package:             Generate .deb/.rpm via nFPM (matrix)
+#   - smoke-test:          Container install + module load verification (matrix)
+#   - integrity-checksums: SHA256SUMS generation (no protected environment)
+#   - integrity-signing:   Optional GPG signing (protected environment, tag only)
+#   - publish:             Upload to GitHub Release (tag) or workflow artifacts (dispatch)
 #
 # All third-party actions in jobs below MUST use full SHA pinning (Req 9.6).
 # Example: actions/checkout@<full-sha> # v4.x.x
@@ -388,22 +390,16 @@ jobs:
         shell: bash
 
   # ─────────────────────────────────────────────────────────────────────────────
-  # Integrity Job: SHA256SUMS generation + optional GPG signing
-  # Generates checksums for all package artifacts and optionally signs them
-  # with GPG when signing secrets are configured.
-  #
-  # Security:
-  #   - GPG private key NEVER appears in logs (all gpg output suppressed)
-  #   - Signing runs in Protected Environment "release-signing" when enabled
-  #   - Key material is cleaned up after signing
+  # Integrity Checksums Job: SHA256SUMS generation (no protected environment)
+  # Generates checksums for all package artifacts. Does not require signing
+  # secrets or protected environment approval.
   # ─────────────────────────────────────────────────────────────────────────────
-  integrity:
-    name: Integrity - SHA256SUMS + GPG
+  integrity-checksums:
+    name: Integrity - SHA256SUMS
     needs: smoke-test
     runs-on: ubuntu-24.04
     permissions:
       contents: read
-    environment: release-signing
 
     steps:
       - name: Checkout
@@ -434,19 +430,6 @@ jobs:
           ./packaging/scripts/generate-checksums.sh -d artifacts/
         shell: bash
 
-      - name: GPG sign SHA256SUMS
-        env:
-          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
-          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
-          GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}
-        run: |
-          if [ -z "${GPG_PRIVATE_KEY}" ]; then
-            echo "GPG signing skipped: GPG_PRIVATE_KEY secret not configured"
-            exit 0
-          fi
-          ./packaging/scripts/gpg-sign-checksums.sh artifacts/SHA256SUMS "${GPG_KEY_ID}"
-        shell: bash
-
       - name: Upload SHA256SUMS
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -455,8 +438,48 @@ jobs:
           if-no-files-found: error
           retention-days: 5
 
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Integrity Signing Job: Optional GPG signing in protected environment
+  # Only runs when GPG signing is explicitly enabled via repository variable.
+  # Requires Protected Environment "release-signing" with required reviewers.
+  #
+  # Security:
+  #   - GPG private key NEVER appears in logs (all gpg output suppressed)
+  #   - Key material is cleaned up after signing
+  # ─────────────────────────────────────────────────────────────────────────────
+  integrity-signing:
+    name: Integrity - GPG Sign
+    needs: integrity-checksums
+    if: github.ref_type == 'tag' && vars.ENABLE_GPG_SIGNING == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    environment: release-signing
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Download SHA256SUMS
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: checksums
+          path: artifacts/
+
+      - name: GPG sign SHA256SUMS
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+          GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}
+        run: |
+          if [[ -z "${GPG_PRIVATE_KEY}" ]]; then
+            echo "ERROR: GPG_PRIVATE_KEY secret not configured in release-signing environment" >&2
+            exit 1
+          fi
+          ./packaging/scripts/gpg-sign-checksums.sh artifacts/SHA256SUMS "${GPG_KEY_ID}"
+        shell: bash
+
       - name: Upload SHA256SUMS.asc
-        continue-on-error: true
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: checksums-signature
@@ -476,7 +499,8 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────────────
   publish:
     name: Publish
-    needs: integrity
+    needs: [integrity-checksums, integrity-signing]
+    if: always() && needs.integrity-checksums.result == 'success'
     runs-on: ubuntu-24.04
     permissions:
       contents: write

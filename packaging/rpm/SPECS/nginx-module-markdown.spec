@@ -7,7 +7,7 @@ License:        BSD-2-Clause
 URL:            https://github.com/cnkang/nginx-markdown-for-agents
 Source0:        %{name}-%{version}.tar.gz
 
-Requires:       nginx >= %{nginx_version}
+Requires:       nginx = %{nginx_version}
 
 %description
 NGINX dynamic filter module that converts HTML responses to Markdown
