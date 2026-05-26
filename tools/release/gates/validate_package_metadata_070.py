@@ -328,6 +328,20 @@ def _strip_unquoted_comment(line: str) -> str:
     return line
 
 
+def _contains_make_build_command(content: str) -> bool:
+    """Return True when content contains an active ``make build`` command line."""
+    for raw_line in content.splitlines():
+        line = _strip_unquoted_comment(raw_line).strip()
+        if not line:
+            continue
+
+        parts = line.split()
+        if len(parts) >= 2 and parts[0] == "make" and parts[1] == "build":
+            return True
+
+    return False
+
+
 def _unquote(value: str) -> str:
     """Trim whitespace, an optional trailing comma, and matching quotes."""
     value = value.strip().rstrip(",").strip()
@@ -509,7 +523,7 @@ def _validate_standalone_rpm_spec(result: ValidationResult) -> None:
         rpm_spec, STANDALONE_RPM_SPEC_SNIPPETS, "standalone-rpm-spec",
         "RPM spec", result,
     )
-    if re.search(r"^\s*make\s+build(?:\s+.*)?$", rpm_spec, re.MULTILINE):
+    if _contains_make_build_command(rpm_spec):
         result.fail(
             "standalone-rpm-spec:no-make-build",
             "prebuilt standalone RPM spec must not run make build",
