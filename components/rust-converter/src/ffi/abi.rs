@@ -95,8 +95,9 @@ pub struct MarkdownOptions {
     /// Markdown flavor selector.
     ///
     /// `0` selects CommonMark-compatible output, `1` selects the GFM
-    /// extension set, `2` selects MDX, and `3` selects Org-mode. Other values
-    /// are rejected during option decoding.
+    /// extension set, `2` selects experimental MDX-oriented behavior, and `3`
+    /// selects experimental Org-mode-oriented behavior. Other values are
+    /// rejected during option decoding.
     pub flavor: u32,
     /// Cooperative conversion timeout in milliseconds.
     ///

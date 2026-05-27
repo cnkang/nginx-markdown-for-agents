@@ -138,9 +138,9 @@ pub enum MarkdownFlavor {
     CommonMark,
     /// GitHub Flavored Markdown
     GitHubFlavoredMarkdown,
-    /// MDX (Markdown + JSX): JSX components preserved as-is
+    /// Experimental MDX-oriented selector
     Mdx,
-    /// Org-mode: Emacs outline format
+    /// Experimental Org-mode-oriented selector
     OrgMode,
 }
 

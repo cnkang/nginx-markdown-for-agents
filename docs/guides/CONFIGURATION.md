@@ -135,13 +135,14 @@ markdown_memory_budget 512k;
 #### markdown_decompress_max_size
 
 **Syntax:** `markdown_decompress_max_size <size>;`
-**Default:** same as `markdown_memory_budget`
+**Default:** inherits the effective full-buffer size limit (`markdown_max_size`,
+after any `markdown_memory_budget` override resolution)
 **Context:** http, server, location
 
-Independent budget for decompressed output size. When upstream content is
-compressed (gzip/deflate/brotli), this directive caps the maximum
-decompressed byte count, separate from `markdown_memory_budget` which
-also limits the final Markdown output.
+Independent budget for decompressed output size. When unset, it follows the
+effective full-buffer conversion size limit. Set this explicitly when
+compressed upstream responses may expand much larger than the final Markdown
+output you are willing to process.
 
 **Example:**
 ```nginx
@@ -233,8 +234,10 @@ markdown_on_error reject;
 Markdown flavor to generate:
 - `commonmark`: CommonMark specification (standard)
 - `gfm`: GitHub Flavored Markdown (includes tables, strikethrough, task lists)
-- `mdx`: MDX-oriented output; JSX-like components are preserved as input text
-- `org-mode`: Org-mode-oriented output selector for converter integrations
+- `mdx`: experimental MDX-oriented selector; output fidelity depends on the
+  active converter integration
+- `org-mode`: experimental Org-mode-oriented selector; output fidelity depends
+  on the active converter integration
 
 **Example:**
 ```nginx

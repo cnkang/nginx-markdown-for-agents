@@ -497,7 +497,7 @@ ngx_http_markdown_content_types(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
  * Handle the "markdown_flavor" configuration directive.
  *
  * Accepts "commonmark", "gfm", "mdx", or "org-mode" and sets
- * the flavor enum.
+ * the flavor enum.  MDX and Org-mode are experimental selectors.
  *
  * Parameters:
  *   cf  - Configuration parsing context
