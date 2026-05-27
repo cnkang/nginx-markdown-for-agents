@@ -160,8 +160,8 @@ ngx_http_markdown_filter(ngx_conf_t *cf,
 
     value = cf->args->elts;
 
-    if (value[1].len == 2
-        && ngx_strcasecmp(value[1].data, on_str) == 0)
+    if (ngx_http_markdown_arg_equals(&value[1], on_str,
+                                     sizeof(on_str) - 1))
     {
         mcf->enabled = 1;
         mcf->enabled_source = NGX_HTTP_MARKDOWN_ENABLED_STATIC;
@@ -169,8 +169,8 @@ ngx_http_markdown_filter(ngx_conf_t *cf,
         return NGX_CONF_OK;
     }
 
-    if (value[1].len == 3
-        && ngx_strcasecmp(value[1].data, off_str) == 0)
+    if (ngx_http_markdown_arg_equals(&value[1], off_str,
+                                     sizeof(off_str) - 1))
     {
         mcf->enabled = 0;
         mcf->enabled_source = NGX_HTTP_MARKDOWN_ENABLED_STATIC;
