@@ -732,6 +732,95 @@ test_markdown_filter_handler(void)
 }
 
 /*
+ * Verify that ngx_http_markdown_filter correctly handles non-NUL-terminated
+ * ngx_str_t data for the "on" and "off" tokens.
+ *
+ * Regression test: the handler previously used ngx_strcasecmp which reads
+ * until a NUL byte, potentially reading past the valid length of the
+ * ngx_str_t.  The fix uses ngx_http_markdown_arg_equals (length-bounded
+ * comparison via ngx_strncasecmp).
+ *
+ * This test constructs buffers where the bytes immediately following the
+ * token are NOT NUL, proving that the comparison respects .len and does
+ * not rely on NUL termination.
+ *
+ * Return: void.
+ *
+ * Side effects: assertions only.
+ */
+static void
+test_markdown_filter_non_nul_terminated(void)
+{
+    ngx_conf_t               cf;
+    ngx_array_t              args;
+    ngx_str_t                values[2];
+    ngx_command_t            cmd;
+    ngx_http_markdown_conf_t mcf;
+    const char              *rc;
+
+    /*
+     * Buffer layout: "onXYZ" — the token "on" occupies bytes 0-1,
+     * but byte 2 is 'X' (not NUL).  If the comparison reads past
+     * len==2, it would see 'X' and potentially mismatch or read
+     * out of bounds.
+     */
+    static u_char on_buf[] = "onXYZ";
+    static u_char off_buf[] = "offABC";
+
+    TEST_SUBSECTION("markdown_filter non-NUL-terminated args");
+
+    setup_cf(&cf, &args, values, 2);
+    set_arg(&cmd.name, "markdown_filter");
+    set_arg(&values[0], "markdown_filter");
+
+    /* Test "on" with non-NUL-terminated data */
+    init_conf(&mcf);
+    values[1].data = on_buf;
+    values[1].len = 2;
+    rc = ngx_http_markdown_filter(&cf, &cmd, &mcf);
+    TEST_ASSERT(rc == NGX_CONF_OK,
+        "non-NUL-terminated 'on' should parse");
+    TEST_ASSERT(mcf.enabled == 1,
+        "enabled should be 1 for non-NUL-terminated 'on'");
+    TEST_ASSERT(mcf.enabled_source == NGX_HTTP_MARKDOWN_ENABLED_STATIC,
+        "source should be static for non-NUL-terminated 'on'");
+
+    /* Test "off" with non-NUL-terminated data */
+    init_conf(&mcf);
+    values[1].data = off_buf;
+    values[1].len = 3;
+    rc = ngx_http_markdown_filter(&cf, &cmd, &mcf);
+    TEST_ASSERT(rc == NGX_CONF_OK,
+        "non-NUL-terminated 'off' should parse");
+    TEST_ASSERT(mcf.enabled == 0,
+        "enabled should be 0 for non-NUL-terminated 'off'");
+    TEST_ASSERT(mcf.enabled_source == NGX_HTTP_MARKDOWN_ENABLED_STATIC,
+        "source should be static for non-NUL-terminated 'off'");
+
+    /* Test case-insensitive "ON" with non-NUL-terminated data */
+    init_conf(&mcf);
+    values[1].data = (u_char *) "ONgarbage";
+    values[1].len = 2;
+    rc = ngx_http_markdown_filter(&cf, &cmd, &mcf);
+    TEST_ASSERT(rc == NGX_CONF_OK,
+        "non-NUL-terminated 'ON' (uppercase) should parse");
+    TEST_ASSERT(mcf.enabled == 1,
+        "enabled should be 1 for uppercase 'ON'");
+
+    /* Test case-insensitive "Off" with non-NUL-terminated data */
+    init_conf(&mcf);
+    values[1].data = (u_char *) "Offmore";
+    values[1].len = 3;
+    rc = ngx_http_markdown_filter(&cf, &cmd, &mcf);
+    TEST_ASSERT(rc == NGX_CONF_OK,
+        "non-NUL-terminated 'Off' (mixed case) should parse");
+    TEST_ASSERT(mcf.enabled == 0,
+        "enabled should be 0 for mixed-case 'Off'");
+
+    TEST_PASS("non-NUL-terminated markdown_filter args handled safely");
+}
+
+/*
  * Verify on_error, flavor, and auth_policy handlers: valid values,
  * duplicate detection, and invalid values.
  *
@@ -1481,6 +1570,7 @@ main(void)
 
     test_arg_equals();
     test_markdown_filter_handler();
+    test_markdown_filter_non_nul_terminated();
     test_simple_enum_handlers();
     test_auth_cookies_handler();
     test_conditional_and_log_verbosity_handlers();
