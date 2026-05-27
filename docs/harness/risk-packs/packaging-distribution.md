@@ -89,6 +89,10 @@ or packaging documentation.
 - Homebrew formula repository and repo-owned formula template must stay in sync
   with release artifacts, tag timing, checksums, and post-release verification.
 - `docs/guides/INSTALLATION.md` must document all installation methods
+- Public package installation docs must distinguish active GitHub Release
+  artifacts from planned APT/YUM repositories. Do not show bare repository
+  install commands as available until the repository URL, signing key, and
+  release workflow are real and validated.
 - `docs/guides/HOMEBREW_TAP_RELEASE.md`, `README.md`, and `CHANGELOG.md`
   must stay consistent with Homebrew tap behavior when those surfaces exist.
 - `docs/guides/kubernetes-deployment.md` must document Helm chart usage
@@ -117,3 +121,4 @@ make release-gates-check
 | 0.7.4 | 2026-05-26 | Codex | Added GitHub Actions container shell coverage for standalone package workflows |
 | 0.7.5 | 2026-05-26 | Codex | Added package dependency satisfiability, version-input validation, distro-specific RPM repo selection, package script lifecycle args, module path/glibc runtime compatibility, and local K8s smoke context/module safety coverage |
 | 0.7.6 | 2026-05-27 | Codex | Added Helm metrics directive gating coverage for stock-image-safe chart renders |
+| 0.7.7 | 2026-05-27 | Codex | Added public package install docs channel-state coverage before APT/YUM repositories exist |

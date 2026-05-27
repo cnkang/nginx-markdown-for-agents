@@ -229,6 +229,11 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
   target package manager, including RPM numeric `%post` arguments, and must not
   fail an install only because an advisory post-install script received an
   unfamiliar lifecycle argument [13]
+- Public install docs must distinguish the currently published package channel
+  from planned channels. Do not present bare APT/YUM repository install commands
+  as available until the repository URL, signing key, and release workflow are
+  real and validated; when only GitHub Release DEB/RPM artifacts exist, document
+  artifact download plus checksum verification instead [13]
 - Local K8s smoke tests that deploy stock images must disable module-specific
   NGINX directives, use an explicit kind kube-context for every Helm/kubectl
   operation, count structured pod fields without collapsed one-line jsonpath
@@ -380,3 +385,4 @@ remediation:
 | 0.7.5 | 2026-05-26 | Codex | Strengthened Rule 13 for distro-resolvable package dependencies, standalone version validation, distro-specific smoke repos, package script lifecycle args, package module path/glibc runtime compatibility, and local K8s smoke context/module safety |
 | 0.7.6 | 2026-05-26 | Codex | Strengthened Rule 13 for stock-image-safe Helm defaults, explicit module-enabled Helm configuration, and no implicit module-derived hostPath mounts |
 | 0.7.7 | 2026-05-27 | Codex | Strengthened Rule 13 for gating Helm metrics directives behind module enablement |
+| 0.7.8 | 2026-05-27 | Codex | Strengthened Rule 13 for package-install docs matching the actually published GitHub Release artifact channel before APT/YUM repositories exist |
