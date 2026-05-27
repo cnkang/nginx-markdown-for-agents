@@ -808,6 +808,18 @@ markdown_result_free(struct MarkdownResult *result)
 }
 
 /*
+ * Stub for markdown_result_init.  Zeroes all fields to guarantee a
+ * clean baseline before FFI calls populate the struct.
+ */
+void
+markdown_result_init(struct MarkdownResult *result)
+{
+    if (result != NULL) {
+        ngx_memzero(result, sizeof(*result));
+    }
+}
+
+/*
  * Stub for ngx_http_markdown_add_vary_accept.  Returns g_add_vary_rc.
  * Ignores the request argument.
  */

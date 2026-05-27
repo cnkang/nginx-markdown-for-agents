@@ -1985,7 +1985,7 @@ ngx_http_markdown_streaming_finalize_request(
     }
 
     /* Finalize the streaming converter */
-    ngx_memzero(&result, sizeof(struct MarkdownResult));
+    markdown_result_init(&result);
 
     rc_ffi = markdown_streaming_finalize(
         ctx->streaming.handle, &result);
@@ -2255,8 +2255,6 @@ ngx_http_markdown_streaming_init_handle(
     ngx_pool_cleanup_t     *cln;
     uint32_t                init_rc;
     ngx_int_t               rc;
-
-    ngx_memzero(&options, sizeof(struct MarkdownOptions));
 
     rc = ngx_http_markdown_prepare_conversion_options(
         r, conf, ctx->effective_conf, &options);
