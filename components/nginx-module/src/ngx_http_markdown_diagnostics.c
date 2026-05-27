@@ -54,6 +54,8 @@ static ngx_int_t ngx_http_markdown_diagnostics_check_access(
     ngx_http_request_t *r);
 static ngx_int_t ngx_http_markdown_diagnostics_build_json(
     ngx_http_request_t *r, ngx_buf_t *b);
+static size_t ngx_http_markdown_diagnostics_json_size(
+    const ngx_http_markdown_diag_state_t *state);
 
 
 /*
@@ -510,12 +512,19 @@ ngx_http_markdown_diagnostics_build_json(ngx_http_request_t *r,
     ngx_http_markdown_diag_metrics_t     metrics;
     ngx_http_markdown_diag_dynconf_t     dynconf;
 
+    state = ngx_http_markdown_diagnostics_get_state();
+
     /*
-     * Pre-allocate a buffer large enough for the JSON response.
-     * 32KB accommodates the config snapshot, ring buffer entries
-     * (up to 100 decisions at ~60 bytes each), metrics, and dynconf.
+     * Pre-allocate a buffer sized from the actual ring contents.  The
+     * diagnostics capacity is configurable, so a fixed default-size buffer
+     * can turn a valid large ring into a 500 response.
      */
-    buf_size = 32768;
+    buf_size = ngx_http_markdown_diagnostics_json_size(state);
+    if (buf_size == 0) {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+            "markdown: diagnostics state has invalid ring capacity/count");
+        return NGX_ERROR;
+    }
 
     buf = ngx_palloc(r->pool, buf_size);
     if (buf == NULL) {
@@ -549,12 +558,10 @@ ngx_http_markdown_diagnostics_build_json(ngx_http_request_t *r,
     p = ngx_slprintf(p, last, "  },\n");
 
     /* --- recent_decisions section --- */
-    state = ngx_http_markdown_diagnostics_get_state();
-
     p = ngx_slprintf(p, last, "  \"recent_decisions\": [");
 
     if (state != NULL && state->ring.entries != NULL
-        && state->ring.count > 0)
+        && state->ring.capacity > 0 && state->ring.count > 0)
     {
         ngx_uint_t                          idx;
         ngx_uint_t                          count;
@@ -648,6 +655,30 @@ ngx_http_markdown_diagnostics_build_json(ngx_http_request_t *r,
     b->end = buf + buf_size;
 
     return NGX_OK;
+}
+
+
+static size_t
+ngx_http_markdown_diagnostics_json_size(
+    const ngx_http_markdown_diag_state_t *state)
+{
+    ngx_uint_t  decision_count;
+
+    decision_count = 0;
+
+    if (state != NULL && state->ring.entries != NULL) {
+        if (state->ring.count > state->ring.capacity
+            || state->ring.count > NGX_HTTP_MARKDOWN_DIAG_MAX_CAPACITY)
+        {
+            return 0;
+        }
+
+        decision_count = state->ring.count;
+    }
+
+    return NGX_HTTP_MARKDOWN_DIAG_JSON_BASE_SIZE
+           + ((size_t) decision_count
+              * NGX_HTTP_MARKDOWN_DIAG_JSON_DECISION_SIZE);
 }
 
 

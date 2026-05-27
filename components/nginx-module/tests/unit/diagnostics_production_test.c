@@ -441,6 +441,10 @@ test_access_and_json_builder(void)
     rc = ngx_http_markdown_diagnostics_build_json(&r, &b);
     TEST_ASSERT(rc == NGX_OK, "JSON builder should succeed");
     TEST_ASSERT(b.pos != NULL && b.last > b.pos, "buffer should be populated");
+    TEST_ASSERT((size_t) (b.end - b.start)
+                == NGX_HTTP_MARKDOWN_DIAG_JSON_BASE_SIZE
+                   + NGX_HTTP_MARKDOWN_DIAG_JSON_DECISION_SIZE,
+                "JSON buffer should account for recorded decisions");
 
     json = (const char *) b.pos;
     TEST_ASSERT(strstr(json, "\"config_snapshot\"") != NULL,
@@ -455,6 +459,47 @@ test_access_and_json_builder(void)
                 "JSON should include recorded reason");
 
     TEST_PASS("Access and JSON builder covered");
+}
+
+static void
+test_json_buffer_scales_with_ring_count(void)
+{
+    ngx_http_request_t r;
+    ngx_connection_t c;
+    ngx_http_markdown_conf_t conf;
+    struct sockaddr_in addr;
+    ngx_buf_t b;
+    ngx_int_t rc;
+    size_t expected_size;
+
+    TEST_SUBSECTION("diagnostics JSON buffer scales with ring count");
+
+    reset_test_state();
+    init_request(&r, &c, &conf, &addr);
+
+    rc = ngx_http_markdown_diagnostics_init(
+        &ngx_http_markdown_g_diag_state, r.pool, 150);
+    TEST_ASSERT(rc == NGX_OK, "global init should succeed");
+    ngx_http_markdown_g_diag_state.enabled = 1;
+
+    for (ngx_uint_t i = 0; i < 150; i++) {
+        ngx_current_msec = 3000 + i;
+        ngx_http_markdown_diagnostics_record(
+            &ngx_http_markdown_g_diag_state, (ngx_int_t) i, i);
+    }
+
+    memset(&b, 0, sizeof(b));
+    rc = ngx_http_markdown_diagnostics_build_json(&r, &b);
+    TEST_ASSERT(rc == NGX_OK, "large diagnostics JSON should succeed");
+
+    expected_size = NGX_HTTP_MARKDOWN_DIAG_JSON_BASE_SIZE
+                    + (150 * NGX_HTTP_MARKDOWN_DIAG_JSON_DECISION_SIZE);
+    TEST_ASSERT((size_t) (b.end - b.start) == expected_size,
+                "JSON buffer should scale with recorded decisions");
+    TEST_ASSERT(strstr((const char *) b.pos, "\"reason_code\": 149") != NULL,
+                "JSON should include newest high-count decision");
+
+    TEST_PASS("Diagnostics JSON buffer scaling covered");
 }
 
 static void
@@ -590,6 +635,7 @@ main(void)
     test_lifecycle_and_ring_wrap();
     test_lifecycle_failure_branches();
     test_access_and_json_builder();
+    test_json_buffer_scales_with_ring_count();
     test_access_json_and_logging_failure_branches();
     test_handler_get_head_and_denials();
     test_handler_failure_branches();
