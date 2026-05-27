@@ -165,6 +165,36 @@ markdown_result_free(struct MarkdownResult *result) /* SONAR_NOTE: must match FF
     }
 }
 
+/*
+ * FFI lifecycle stub for markdown_options_init.  Mirrors the Rust
+ * implementation: zeroes all fields, then sets non-zero defaults
+ * (timeout_ms=5000, generate_etag=1).  The production code must
+ * call this instead of ngx_memzero to honour the FFI contract.
+ */
+static void
+markdown_options_init(struct MarkdownOptions *result)
+{
+    if (result == NULL) {
+        return;
+    }
+    memset(result, 0, sizeof(*result));
+    result->timeout_ms = 5000;
+    result->generate_etag = 1;
+}
+
+/*
+ * FFI lifecycle stub for markdown_result_init.  Zeroes all fields
+ * to guarantee a clean baseline before FFI calls populate the struct.
+ */
+static void
+markdown_result_init(struct MarkdownResult *result)
+{
+    if (result == NULL) {
+        return;
+    }
+    memset(result, 0, sizeof(*result));
+}
+
 typedef struct ngx_list_part_s ngx_list_part_t;
 typedef struct ngx_table_elt_s ngx_table_elt_t;
 typedef struct ngx_http_headers_in_s ngx_http_headers_in_t;

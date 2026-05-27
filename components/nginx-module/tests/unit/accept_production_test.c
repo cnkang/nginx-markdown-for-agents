@@ -186,6 +186,8 @@ markdown_options_init(struct MarkdownOptions *result)
 {
     if (result != NULL) {
         memset(result, 0, sizeof(*result));
+        result->timeout_ms = 5000;
+        result->generate_etag = 1;
     }
 }
 
