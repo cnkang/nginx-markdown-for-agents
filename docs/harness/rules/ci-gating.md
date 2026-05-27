@@ -85,6 +85,11 @@ Required:
     each target package manager.  Advisory post-install scripts must recognize
     RPM numeric `%post` arguments and must not make an otherwise successful
     install fail only because an unfamiliar lifecycle argument was observed.
+  - Public install docs must match the currently published package channel.
+    Bare APT/YUM repository install commands are forbidden until the repository
+    URL, signing key, and release workflow are real and validated.  If only
+    GitHub Release DEB/RPM artifacts exist, docs must use artifact download
+    plus checksum verification.
   - Helm charts with `runAsNonRoot`, dropped capabilities, and
     `readOnlyRootFilesystem` defaults must use an unprivileged listen port and
     writable runtime/temp mounts in the rendered pod spec.
