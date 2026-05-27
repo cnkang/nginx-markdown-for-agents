@@ -6,14 +6,22 @@
 # Rule 15 (ffi-crosslang): Prefer helper functions over literal FFI struct init.
 #
 # Structs with Rust-provided init helpers:
-#   - MarkdownOptions      → markdown_options_init()
-#   - MarkdownResult       → markdown_result_init()
-#   - FFIAcceptResult      → markdown_accept_result_init()
-#   - FFIHeaderPlan        → markdown_header_plan_init()
-#   - FFIDecompResult      → markdown_decomp_result_init()
+#   - MarkdownOptions          → markdown_options_init()
+#   - MarkdownResult           → markdown_result_init()
+#   - FFIAcceptResult          → markdown_accept_result_init()
+#   - FFIConditionalResult     → markdown_conditional_result_init()
+#   - FFIDecisionResult        → markdown_decision_result_init()
+#   - FFIHeaderPlan            → markdown_header_plan_init()
+#   - FFIDecompResult          → markdown_decomp_result_init()
 #
-# This script scans C production source (not tests) for direct memset/
-# ngx_memzero calls on these struct types and reports violations.
+# Detection strategy (two phases):
+#   Phase 1: Direct struct-name match on the memzero/memset line
+#            e.g. ngx_memzero(&opts, sizeof(struct MarkdownOptions));
+#   Phase 2: Variable-name tracking — find declarations of guarded
+#            structs, collect variable names, then check if those
+#            variables appear in ngx_memzero/memset calls
+#            e.g. struct MarkdownResult result;
+#                 ngx_memzero(&result, sizeof(result));
 #
 # Exit codes:
 #   0 = no violations found
@@ -38,18 +46,55 @@ GUARDED_STRUCTS=(
 
 violations=0
 
+# ── Phase 1: Direct struct-name on memzero/memset line ──
 for struct in "${GUARDED_STRUCTS[@]}"; do
-    # Look for ngx_memzero(..., sizeof(struct <Name>)) or
-    # ngx_memzero(..., sizeof(<Name>)) patterns in production source
     matches=$(grep -rn "ngx_memzero\|memset" "${SRC_DIR}" 2>/dev/null \
         | grep -v "_test\\.c" \
         | grep -i "${struct}" || true)
     if [[ -n "${matches}" ]]; then
-        echo "VIOLATION: Direct memset/ngx_memzero on ${struct} (use init helper instead):" >&2
+        echo "VIOLATION [phase1]: Direct memset/ngx_memzero on ${struct}:" >&2
         echo "${matches}" >&2
         violations=$((violations + 1))
     fi
 done
+
+# ── Phase 2: Variable-name tracking ──
+# For each production source file, find declarations of guarded structs,
+# extract variable names, then check if those variables are passed to
+# ngx_memzero/memset anywhere in the same file.
+while IFS= read -r src_file; do
+    for struct in "${GUARDED_STRUCTS[@]}"; do
+        # Find variable declarations: "struct <Name> <varname>" or
+        # "struct <Name> *<varname>" (pointer declarations)
+        # Extract variable names from declarations
+        var_names=$(grep -n "struct ${struct}" "${src_file}" 2>/dev/null \
+            | grep -vE '^\s*/\*|^\s*\*|typedef|#include' \
+            | sed -n 's/.*struct '"${struct}"'[[:space:]]*\**[[:space:]]*\([a-zA-Z_][a-zA-Z0-9_]*\).*/\1/p' \
+            || true)
+        if [[ -z "${var_names}" ]]; then
+            continue
+        fi
+        # For each variable name, check if it appears in a memzero/memset call
+        while IFS= read -r varname; do
+            if [[ -z "${varname}" ]]; then
+                continue
+            fi
+            # Skip common false positives: function parameters, pointer types
+            # Look for: ngx_memzero(&varname, sizeof(varname)) or
+            #           ngx_memzero(&varname, sizeof(*varname)) or
+            #           memset(&varname, 0, sizeof(varname))
+            memzero_hits=$(grep -n "ngx_memzero\|memset" "${src_file}" 2>/dev/null \
+                | grep -v "_test\\.c" \
+                | grep "[&*]${varname}" \
+                | grep "sizeof" || true)
+            if [[ -n "${memzero_hits}" ]]; then
+                echo "VIOLATION [phase2]: ngx_memzero/memset on ${struct} variable '${varname}' in ${src_file}:" >&2
+                echo "${memzero_hits}" >&2
+                violations=$((violations + 1))
+            fi
+        done <<< "${var_names}"
+    done
+done < <(find "${SRC_DIR}" -name '*.c' -o -name '*.h' | grep -v "_test\\.c" | sort)
 
 if [[ ${violations} -gt 0 ]]; then
     echo >&2
