@@ -7,7 +7,7 @@
 3. [Install Path Tiers](#3-install-path-tiers)
 4. [Primary: Install Script](#4-primary-install-script)
 4.1 [Convenience: Homebrew Tap (macOS)](#41-convenience-homebrew-tap-macos)
-4.2 [Package Manager Installation (Linux)](#42-package-manager-installation-linux)
+4.2 [Linux Package Artifacts](#42-linux-package-artifacts)
 5. [Secondary: Docker Source Build](#5-secondary-docker-source-build)
 6. [Secondary: Manual Source Build](#6-secondary-manual-source-build)
 7. [Compatibility Matrix](#7-compatibility-matrix)
@@ -79,7 +79,7 @@ Each installation method is classified into a tier that sets expectations for fr
 | Tier | Meaning | CI-Verified | Example |
 |------|---------|-------------|---------|
 | **Primary** | Recommended, lowest friction | Yes | `tools/install.sh` |
-| **Secondary** | Supported, more steps required | Yes | Docker source build, manual source build |
+| **Secondary** | Supported, more steps required | Yes | Linux package artifacts, Docker source build, manual source build |
 | **Convenience** | Available, not officially recommended | Partial | Homebrew tap (macOS) |
 
 - **Primary** — Recommended for most users. Pre-built binary, automated configuration, CI-verified across the full platform matrix.
@@ -165,27 +165,45 @@ If you need deterministic control over compiler flags or local patching, use [Ma
 
 ---
 
-## 4.2 Package Manager Installation (Linux)
+## 4.2 Linux Package Artifacts
 
-**Tier: Primary** (v0.7.0+)
+**Tier: Secondary** (v0.7.0+)
 
-Pre-built DEB and RPM packages are available for supported Linux distributions. These packages install the module binary and provide a `load_module` snippet.
+Starting with v0.7.0, release workflows build DEB and RPM artifacts for
+supported Linux distributions and attach them to GitHub Releases. Public
+APT/YUM repository publishing is planned but is not available yet, so do not
+use `apt-get install nginx-module-markdown` or `yum install
+nginx-module-markdown` unless you operate your own package repository.
 
-### APT (Ubuntu / Debian)
+### DEB Artifacts (Ubuntu / Debian)
 
 ```bash
-sudo apt-get install nginx-module-markdown
+VERSION=0.7.0
+NGINX_VERSION=1.26.3
+ARCH=amd64
+
+curl -fSLO "https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}/SHA256SUMS"
+curl -fSLO "https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}/nginx-module-markdown-for-agents_${VERSION}_nginx-${NGINX_VERSION}_${ARCH}.deb"
+grep "nginx-module-markdown-for-agents_${VERSION}_nginx-${NGINX_VERSION}_${ARCH}.deb" SHA256SUMS | sha256sum -c -
+sudo apt install "./nginx-module-markdown-for-agents_${VERSION}_nginx-${NGINX_VERSION}_${ARCH}.deb"
 ```
 
-### YUM (AlmaLinux / Amazon Linux / RHEL)
+### RPM Artifacts (AlmaLinux / Amazon Linux / RHEL)
 
 ```bash
-sudo yum install nginx-module-markdown
+VERSION=0.7.0
+NGINX_VERSION=1.26.3
+ARCH=x86_64
+
+curl -fSLO "https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}/SHA256SUMS"
+curl -fSLO "https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}/nginx-module-markdown-for-agents-${VERSION}-nginx${NGINX_VERSION}-1.${ARCH}.rpm"
+grep "nginx-module-markdown-for-agents-${VERSION}-nginx${NGINX_VERSION}-1.${ARCH}.rpm" SHA256SUMS | sha256sum -c -
+sudo rpm -Uvh "./nginx-module-markdown-for-agents-${VERSION}-nginx${NGINX_VERSION}-1.${ARCH}.rpm"
 ```
 
 ### After Installation
 
-After installing via package manager, reload NGINX:
+After installing a package artifact, reload NGINX:
 
 ```bash
 sudo nginx -t && sudo nginx -s reload
@@ -198,9 +216,15 @@ sudo nginx -t && sudo nginx -s reload
 - AlmaLinux 9
 - Amazon Linux 2023
 
-Packages are built for both `amd64` and `arm64` architectures, targeting NGINX stable and mainline channels.
+Package artifacts are built for both `amd64`/`arm64` DEB architectures and
+`x86_64`/`aarch64` RPM architectures, targeting NGINX stable and mainline
+channels. Package filenames include the target NGINX version because NGINX
+dynamic module packages are ABI-sensitive.
 
-For full details on repository setup, GPG key import, version pinning, upgrade, rollback, and troubleshooting, see [Package Installation Guide](PACKAGE_INSTALLATION.md).
+For full details on artifact naming, checksum verification, upgrade, rollback,
+and the future repository-publishing model, see [Package Installation
+Guide](PACKAGE_INSTALLATION.md) and [Package Distribution
+Strategy](PACKAGE_DISTRIBUTION.md).
 
 ---
 
@@ -1129,7 +1153,11 @@ The eligibility requirements are:
 1. **HTTP status 200** — the upstream response must have status code `200 OK`. Redirects (3xx), client errors (4xx), and server errors (5xx) are not eligible.
 2. **Upstream `Content-Type: text/html`** — the upstream response must have `Content-Type: text/html` (with any charset parameter). Other content types (e.g., `application/json`, `text/plain`) are not eligible.
 3. **Request `Accept` includes `text/markdown`** — the client request must include `text/markdown` in the `Accept` header. Without this, the module does not activate.
-4. **Response size within `markdown_memory_budget`** — the upstream response body must not exceed the configured `markdown_memory_budget` limit (default: `10m`). Responses larger than this limit are passed through unchanged.
+4. **Response size within effective limits** — the upstream response body must
+   not exceed the effective full-buffer or streaming limit. If
+   `markdown_memory_budget` is set, it acts as a unified override unless a
+   path-specific directive such as `markdown_max_size` or
+   `markdown_streaming_budget` is explicitly set.
 
 **Resolution Steps:**
 
@@ -1147,7 +1175,7 @@ The eligibility requirements are:
    curl -sD - -o /dev/null http://localhost/
    ```
    Confirm the status is `200` and `Content-Type` is `text/html`.
-4. Check the response size against `markdown_memory_budget`:
+4. Check the response size against the effective response-size limits:
    ```bash
    curl -sI http://localhost/ | grep -i content-length
    ```
@@ -1400,7 +1428,7 @@ sudo nginx -s reload
 markdown_timeout 10s;  # Increase from default 5s
 
 # Or increase max size if large pages are timing out
-markdown_memory_budget 20m;  # Increase from default 10m
+markdown_memory_budget 20m;  # Unified override; path-specific limits still win
 ```
 
 ### Issue: High Memory Usage
