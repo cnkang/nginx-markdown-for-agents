@@ -80,12 +80,15 @@ EXEMPT_FILES = {
 }
 
 # Known function patterns where non-const is intentional
-# (init, merge, create, set, apply, write, free, update, reset)
+# (init, merge, create, set, apply, write, free, update, reset,
+#  append, record, reclassify, rollback, end, export, ensure, snapshot,
+#  otel_span, reserve, forward — these all mutate their pointer parameters)
 INTENTIONAL_MUTATOR_RE = re.compile(
     r"(?:create|merge|init|set|apply|free|update|reset|destroy|alloc|"
     r"cleanup|write|handle_ctx_alloc_failure|bind_request_snapshot|"
     r"dynconf_snapshot_from_conf|dynconf_apply_snapshot|"
-    r"build_effective_conf)"
+    r"build_effective_conf|append|record|reclassify|rollback|"
+    r"end|export|ensure|snapshot|otel_span|reserve|forward)"
 )
 
 
