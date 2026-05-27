@@ -22,25 +22,34 @@ from coverage_gate import (
 
 
 class TestCoverageSummary(unittest.TestCase):
+    """Tests for CoverageSummary computed percentage properties."""
+
     def test_line_pct_normal(self) -> None:
+        """Verify line_pct returns correct percentage with non-zero lines_found."""
         s = CoverageSummary(lines_found=100, lines_hit=80, functions_found=50, functions_hit=40)
         self.assertAlmostEqual(s.line_pct, 80.0)
 
     def test_line_pct_zero_found(self) -> None:
+        """Verify line_pct returns 0.0 when lines_found is zero."""
         s = CoverageSummary(lines_found=0, lines_hit=0, functions_found=0, functions_hit=0)
         self.assertAlmostEqual(s.line_pct, 0.0)
 
     def test_function_pct_normal(self) -> None:
+        """Verify function_pct returns correct percentage with non-zero functions_found."""
         s = CoverageSummary(lines_found=100, lines_hit=80, functions_found=50, functions_hit=45)
         self.assertAlmostEqual(s.function_pct, 90.0)
 
     def test_function_pct_zero_found(self) -> None:
+        """Verify function_pct returns 0.0 when functions_found is zero."""
         s = CoverageSummary(lines_found=100, lines_hit=80, functions_found=0, functions_hit=0)
         self.assertAlmostEqual(s.function_pct, 0.0)
 
 
 class TestParseLcovSummary(unittest.TestCase):
+    """Tests for parse_lcov_summary parsing various lcov record formats."""
+
     def test_parse_summary_header(self) -> None:
+        """Verify parsing of lcov summary header lines (LF/LH/FNF/FNH)."""
         content = textwrap.dedent("""\
             TN:
             SF:src/example.c
@@ -63,6 +72,7 @@ class TestParseLcovSummary(unittest.TestCase):
         self.assertEqual(result.functions_hit, 40)
 
     def test_parse_records_fallback(self) -> None:
+        """Verify fallback to counting DA/FNDA records when summary headers are absent."""
         content = textwrap.dedent("""\
             TN:
             SF:src/example.c
@@ -85,6 +95,7 @@ class TestParseLcovSummary(unittest.TestCase):
         self.assertEqual(result.functions_hit, 1)
 
     def test_parse_records_with_fna_format(self) -> None:
+        """Verify parsing of FNL/FNA function record format."""
         content = textwrap.dedent("""\
             TN:
             SF:src/example.c
@@ -108,17 +119,22 @@ class TestParseLcovSummary(unittest.TestCase):
         self.assertEqual(result.functions_hit, 1)
 
     def test_file_not_found(self) -> None:
+        """Verify FileNotFoundError is raised for a nonexistent path."""
         with self.assertRaises(FileNotFoundError):
             parse_lcov_summary(Path("/nonexistent/file.lcov"))
 
 
 class TestComputeFromRecords(unittest.TestCase):
+    """Tests for _compute_from_records low-level record parsing."""
+
     def test_empty(self) -> None:
+        """Verify empty input returns zero counts."""
         result = _compute_from_records("")
         self.assertEqual(result.lines_found, 0)
         self.assertEqual(result.lines_hit, 0)
 
     def test_single_file_da(self) -> None:
+        """Verify correct counts from a single-file lcov record with DA lines."""
         content = textwrap.dedent("""\
             TN:
             SF:src/foo.c
@@ -132,6 +148,7 @@ class TestComputeFromRecords(unittest.TestCase):
         self.assertEqual(result.lines_hit, 2)
 
     def test_multiple_files(self) -> None:
+        """Verify correct aggregation across multiple file records."""
         content = textwrap.dedent("""\
             TN:
             SF:src/a.c
@@ -148,18 +165,23 @@ class TestComputeFromRecords(unittest.TestCase):
 
 
 class TestCheckGate(unittest.TestCase):
+    """Tests for check_gate threshold evaluation logic."""
+
     def test_both_pass(self) -> None:
+        """Verify both line and function gates pass when above thresholds."""
         summary = CoverageSummary(lines_found=100, lines_hit=85, functions_found=50, functions_hit=42)
         results = check_gate("test", summary, 80.0, 80.0)
         self.assertTrue(all(r.passed for r in results))
 
     def test_line_fail(self) -> None:
+        """Verify line gate fails when line coverage is below threshold."""
         summary = CoverageSummary(lines_found=100, lines_hit=75, functions_found=50, functions_hit=42)
         results = check_gate("test", summary, 80.0, 80.0)
         line_result = [r for r in results if r.metric == "line"][0]
         self.assertFalse(line_result.passed)
 
     def test_func_fail(self) -> None:
+        """Verify function gate fails when function coverage is below threshold."""
         summary = CoverageSummary(lines_found=100, lines_hit=85, functions_found=50, functions_hit=35)
         results = check_gate("test", summary, 80.0, 80.0)
         func_result = [r for r in results if r.metric == "function"][0]
@@ -167,7 +189,10 @@ class TestCheckGate(unittest.TestCase):
 
 
 class TestFormatResults(unittest.TestCase):
+    """Tests for format_results human-readable output formatting."""
+
     def test_output_contains_pass(self) -> None:
+        """Verify formatted output includes PASS status and actual percentage."""
         results = [
             GateResult(label="C module", metric="line", actual=85.0, threshold=80.0, passed=True),
             GateResult(label="C module", metric="function", actual=82.0, threshold=80.0, passed=True),
@@ -177,6 +202,7 @@ class TestFormatResults(unittest.TestCase):
         self.assertIn("85.0%", output)
 
     def test_output_contains_fail(self) -> None:
+        """Verify formatted output includes FAIL status and actual percentage."""
         results = [
             GateResult(label="Rust", metric="line", actual=75.0, threshold=80.0, passed=False),
         ]
