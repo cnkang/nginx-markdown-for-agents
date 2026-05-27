@@ -110,10 +110,14 @@ See [DEPLOYMENT_EXAMPLES.md](DEPLOYMENT_EXAMPLES.md#bot-targeted-conversion-user
 #### markdown_memory_budget
 
 **Syntax:** `markdown_memory_budget <size>;`  
-**Default:** `10m`  
+**Default:** unset; path-specific defaults apply
 **Context:** http, server, location
 
-Maximum response size to attempt conversion. Responses larger than this limit will not be converted (fail-open behavior).
+Unified memory/resource budget override for conversion paths. If set, it is
+used by full-buffer and streaming paths unless a path-specific directive such
+as `markdown_max_size` or `markdown_streaming_budget` is explicitly set.
+Responses that exceed the effective path limit are not converted (fail-open
+behavior).
 
 > **Compatibility:** `markdown_memory_budget` supersedes `markdown_max_size` (deprecated in 0.6.0). `markdown_max_size` is still accepted with a deprecation warning at `info` verbosity.
 
@@ -151,9 +155,11 @@ markdown_decompress_max_size 20m;
 **Default:** `30s`
 **Context:** http, server, location
 
-Maximum time for the HTML parsing phase. If parsing exceeds this
-deadline, it is terminated and the request proceeds according to the
-`markdown_on_error` policy.
+Maximum time for the HTML parsing phase. The deadline is checked before and
+after parsing. The current parser path is not preemptively interrupted
+mid-parse; combine this directive with `markdown_parser_budget`,
+`markdown_memory_budget`, and `markdown_decompress_max_size` to bound resource
+exposure.
 
 **Example:**
 ```nginx
@@ -220,13 +226,15 @@ markdown_on_error reject;
 
 #### markdown_flavor
 
-**Syntax:** `markdown_flavor commonmark | gfm;`  
+**Syntax:** `markdown_flavor commonmark | gfm | mdx | org-mode;`
 **Default:** `commonmark`  
 **Context:** http, server, location
 
 Markdown flavor to generate:
 - `commonmark`: CommonMark specification (standard)
 - `gfm`: GitHub Flavored Markdown (includes tables, strikethrough, task lists)
+- `mdx`: MDX-oriented output; JSX-like components are preserved as input text
+- `org-mode`: Org-mode-oriented output selector for converter integrations
 
 **Example:**
 ```nginx
@@ -902,7 +910,12 @@ Enables a metrics endpoint at this location. The endpoint returns either a human
 
 The endpoint reads shared-memory counters, so values are aggregated across workers rather than scoped to the worker that handled the metrics request.
 
-**Security:** The module handler enforces localhost-only access (`127.0.0.1`, `::1`). NGINX `allow`/`deny` rules can further restrict access, but they do not broaden access beyond localhost.
+**Security:** The module handler enforces localhost-only access (`127.0.0.1`,
+`::1`). NGINX `allow`/`deny` rules can further restrict access, but they do
+not broaden access beyond localhost.
+
+This differs from `markdown_diagnostics`: diagnostics defaults to loopback but
+can be exposed to selected CIDRs with `markdown_diagnostics_allow`.
 
 **Example:**
 ```nginx
@@ -1027,7 +1040,10 @@ When enabled, the endpoint exposes a JSON object containing:
 - `dynconf_state`: active mtime, config version, LKG mtime
 
 Access is restricted by default: only loopback addresses (127.0.0.1, ::1)
-are permitted unless `markdown_diagnostics_allow` is configured.
+are permitted unless `markdown_diagnostics_allow` is configured. Unlike
+`markdown_metrics`, diagnostics can be exposed to selected non-loopback CIDRs.
+Treat diagnostics output as sensitive operational data and prefer `internal`,
+VPN CIDRs, or management-network CIDRs instead of public exposure.
 
 #### markdown_diagnostics_allow
 

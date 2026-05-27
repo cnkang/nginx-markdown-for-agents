@@ -8,15 +8,16 @@ integrity verification via SHA256SUMS, and GPG signature verification.
 
 ## Distribution Channels
 
-| Channel | Format | Repository | Signing |
-|---------|--------|-----------|---------|
-| Self-hosted APT | .deb | `PLACEHOLDER: APT_REPO_URL` | GPG |
-| Self-hosted YUM | .rpm | `PLACEHOLDER: YUM_REPO_URL` | GPG |
-| GitHub Releases | .deb + .rpm | Attachments | GPG |
+| Channel | Format | Status | Signing |
+|---------|--------|--------|---------|
+| GitHub Releases | .deb + .rpm | Active for v0.7.0+ release artifacts | SHA256SUMS / GPG |
+| Self-hosted APT | .deb | Planned; no public repository URL yet | GPG |
+| Self-hosted YUM | .rpm | Planned; no public repository URL yet | GPG |
 
-> **PLACEHOLDER**: The self-hosted APT and YUM repository URLs are placeholders.
-> This project does not currently own the hosting domain. Replace with your
-> self-hosted repository URL when available. **(Placeholder — must be completed before distribution.)**
+APT/YUM repository publishing is intentionally tracked as a future distribution
+step. Until a real repository and signing key are published, installation docs
+must point users to GitHub Release package artifacts rather than bare
+`apt-get install` or `yum install` commands.
 
 ## Important Disclaimers
 

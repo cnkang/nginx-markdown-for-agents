@@ -1,39 +1,93 @@
 # Package Installation Guide
 
-## DEB-based Systems (Ubuntu, Debian)
+This guide covers installing DEB and RPM artifacts produced by the v0.7.0+
+release workflows. These are community-maintained dynamic-module packages, not
+official NGINX repository packages.
 
-### Install from Repository
+## Repository Publishing Status
 
-> **PLACEHOLDER**: The APT repository URL and GPG key URL below are placeholders.
-> This project does not currently own the domain. Replace with your self-hosted
-> repository URL when available. **(Placeholder — must be completed before distribution.)**
+GitHub Releases are the current distribution channel for DEB and RPM package
+artifacts. Public APT/YUM repositories are planned but not available yet.
 
-```bash
-# Add GPG key
-# PLACEHOLDER: Replace APT_REPO_URL with your actual repository base URL
-curl -fsSL https://APT_REPO_URL/gpg.key | sudo gpg --dearmor -o /usr/share/keyrings/nginx-markdown.gpg
+Bare package-manager installation commands only work after an operator
+publishes and configures a real APT or YUM repository. Until then, download the
+matching package artifact and its `SHA256SUMS` file from the same GitHub
+Release.
 
-# Add repository
-echo "deb [signed-by=/usr/share/keyrings/nginx-markdown.gpg] https://APT_REPO_URL $(lsb_release -cs) main" \
-  | sudo tee /etc/apt/sources.list.d/nginx-markdown.list
+## Select the Matching Artifact
 
-sudo apt-get update
-sudo apt-get install nginx-markdown-module
+Package filenames include the module version, target NGINX version, and CPU
+architecture. The target NGINX version must match the installed NGINX ABI.
+
+DEB format:
+
+```text
+nginx-module-markdown-for-agents_<VERSION>_nginx-<NGINX_VERSION>_<ARCH>.deb
 ```
 
-### Verify Installation
+RPM format:
+
+```text
+nginx-module-markdown-for-agents-<VERSION>-nginx<NGINX_VERSION>-1.<ARCH>.rpm
+```
+
+Architecture mapping:
+
+| Platform | DEB Arch | RPM Arch |
+|----------|----------|----------|
+| x86_64 | amd64 | x86_64 |
+| arm64 | arm64 | aarch64 |
+
+## DEB Artifacts (Ubuntu, Debian)
+
+```bash
+VERSION=0.7.0
+NGINX_VERSION=1.26.3
+ARCH=amd64
+BASE_URL="https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}"
+PKG="nginx-module-markdown-for-agents_${VERSION}_nginx-${NGINX_VERSION}_${ARCH}.deb"
+
+curl -fSLO "${BASE_URL}/SHA256SUMS"
+curl -fSLO "${BASE_URL}/${PKG}"
+grep " ${PKG}$" SHA256SUMS | sha256sum -c -
+sudo apt install "./${PKG}"
+```
+
+## RPM Artifacts (AlmaLinux, Amazon Linux, RHEL)
+
+```bash
+VERSION=0.7.0
+NGINX_VERSION=1.26.3
+ARCH=x86_64
+BASE_URL="https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}"
+PKG="nginx-module-markdown-for-agents-${VERSION}-nginx${NGINX_VERSION}-1.${ARCH}.rpm"
+
+curl -fSLO "${BASE_URL}/SHA256SUMS"
+curl -fSLO "${BASE_URL}/${PKG}"
+grep " ${PKG}$" SHA256SUMS | sha256sum -c -
+sudo rpm -Uvh "./${PKG}"
+```
+
+## Verify Installation
 
 ```bash
 nginx -V 2>&1 | grep markdown
-# Should show: --add-dynamic-module=.../nginx-markdown-module
-
-# Test module load
 nginx -t
 ```
 
-### Enable Module
+The module binary is installed using the canonical NGINX dynamic-module name:
 
-Add to your NGINX configuration (top-level context, before `http`):
+```text
+ngx_http_markdown_filter_module.so
+```
+
+Package names and artifact filenames use `nginx-module-markdown-for-agents`;
+the module filename remains `ngx_http_markdown_filter_module.so`.
+
+## Enable Module
+
+Add the matching `load_module` directive at the top level of the NGINX
+configuration, before `http`:
 
 ```nginx
 # DEB packages:
@@ -43,7 +97,7 @@ load_module /usr/lib/nginx/modules/ngx_http_markdown_filter_module.so;
 load_module /usr/lib64/nginx/modules/ngx_http_markdown_filter_module.so;
 ```
 
-Then configure in `http`, `server`, or `location` context:
+Then configure the filter in `http`, `server`, or `location` context:
 
 ```nginx
 location / {
@@ -51,64 +105,29 @@ location / {
 }
 ```
 
-## RPM-based Systems (RHEL, Amazon Linux)
-
-### Install from Repository
-
-> **PLACEHOLDER**: The YUM repository URL and GPG key URL below are placeholders.
-> This project does not currently own the domain. Replace with your self-hosted
-> repository URL when available. **(Placeholder — must be completed before distribution.)**
+Reload after validation:
 
 ```bash
-# Add GPG key
-# PLACEHOLDER: Replace YUM_REPO_URL with your actual repository base URL
-sudo rpm --import https://YUM_REPO_URL/gpg.key
-
-# Add repository
-sudo tee /etc/yum.repos.d/nginx-markdown.repo <<'EOF'
-[nginx-markdown]
-name=NGINX Markdown Module
-baseurl=https://YUM_REPO_URL/$releasever/$basearch
-enabled=1
-gpgcheck=1
-EOF
-
-sudo yum install nginx-markdown-module
+sudo nginx -t && sudo nginx -s reload
 ```
 
 ## Upgrade
 
-```bash
-# DEB
-sudo apt-get update && sudo apt-get install nginx-markdown-module
-sudo nginx -s reload
-
-# RPM
-sudo yum update nginx-markdown-module
-sudo nginx -s reload
-```
+Download the new artifact and matching `SHA256SUMS` file from the target
+release, verify the checksum, then reinstall the package with the same local
+artifact flow.
 
 ## Rollback
 
-```bash
-# DEB - install specific version
-sudo apt-get install nginx-markdown-module=<old_version>
-
-# RPM - downgrade
-sudo yum downgrade nginx-markdown-module
-```
+Download the previous release artifact that matches the installed NGINX
+version and architecture, verify it against that release's `SHA256SUMS`, then
+install it locally.
 
 ## Troubleshooting
 
-| Symptom | Cause | Fix |
-|---------|-------|-----|
-| `nginx: [emerg] module ... has wrong version` | ABI mismatch | Install package matching your NGINX version |
-| `nginx: [emerg] dlopen() failed` | Missing shared library | Check `ldd` on .so file |
-| GPG signature verification failed | Expired/rotated key | Re-import GPG key |
-| Module not loaded | Missing `load_module` | Add `load_module` directive |
-
-For Kubernetes and Helm deployments, see
-[`KUBERNETES_DEPLOYMENT.md`](./KUBERNETES_DEPLOYMENT.md). The Helm chart runs
-with stock NGINX by default; module-enabled installs require an image that
-contains `ngx_http_markdown_filter_module.so` and an explicit
-`markdown.loadModule` path.
+| Symptom | Cause | Solution |
+|---------|-------|----------|
+| `module is not binary compatible` | Package built for a different NGINX version | Install the artifact whose filename matches your NGINX version |
+| `cannot open shared object file` | `load_module` path does not match package family | Use `/usr/lib/nginx/modules/...` for DEB and `/usr/lib64/nginx/modules/...` for RPM |
+| Checksum verification fails | Package and `SHA256SUMS` came from different releases or the download is corrupt | Re-download both files from the same GitHub Release |
+| Bare APT/YUM install fails | Public package repositories are not published yet | Use the GitHub Release artifact workflow above |

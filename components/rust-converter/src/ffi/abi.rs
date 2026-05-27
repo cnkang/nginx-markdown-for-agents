@@ -94,8 +94,9 @@ pub const DECOMP_CATEGORY_INVALID_ARGS: u32 = 105;
 pub struct MarkdownOptions {
     /// Markdown flavor selector.
     ///
-    /// `0` selects CommonMark-compatible output and `1` selects the GFM
-    /// extension set. Other values are rejected during option decoding.
+    /// `0` selects CommonMark-compatible output, `1` selects the GFM
+    /// extension set, `2` selects MDX, and `3` selects Org-mode. Other values
+    /// are rejected during option decoding.
     pub flavor: u32,
     /// Cooperative conversion timeout in milliseconds.
     ///
