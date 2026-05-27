@@ -126,6 +126,8 @@ markdown:
 
 # Metrics endpoint
 metrics:
+  # Requires markdown.enabled=true because markdown_metrics* directives are
+  # provided by the markdown module.
   enabled: false
   uri: "/_markdown_metrics"
   format: "auto"

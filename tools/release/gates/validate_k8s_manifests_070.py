@@ -20,6 +20,7 @@ No user-supplied patterns are compiled at runtime.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 import shutil
 import subprocess
 import sys
@@ -53,6 +54,8 @@ HELM_VALUES_REQUIRED_SNIPPETS = [
 ]
 HELM_CONFIG_REQUIRED_SNIPPETS = [
     "markdown.loadModule is required when markdown.enabled=true",
+    "metrics.enabled=true requires markdown.enabled=true",
+    "and .Values.markdown.enabled .Values.metrics.enabled",
     "pid /var/run/nginx.pid;",
     "client_body_temp_path /var/cache/nginx/client_body_temp;",
     "proxy_temp_path /var/cache/nginx/proxy_temp;",
@@ -89,6 +92,7 @@ HELM_RENDER_REQUIRED_SNIPPETS = [
 HELM_RENDER_FORBIDDEN_DEFAULT_SNIPPETS = [
     "load_module",
     "markdown_filter on;",
+    "markdown_metrics",
 ]
 HELM_MODULE_LOAD_PATH = "/usr/lib/nginx/modules/ngx_http_markdown_filter_module.so"
 GATE4_LOCAL_REQUIRED_SNIPPETS = [
@@ -103,6 +107,11 @@ GATE4_LOCAL_REQUIRED_SNIPPETS = [
 
 _CHECK_HELM_LINT = "helm:lint"
 _CHECK_HELM_TEMPLATE = "helm:template"
+_CHECK_HELM_RENDER_YAML = "helm:render:yaml"
+_CHECK_HELM_RENDER_MODULE_MISSING = "helm:render-module-missing"
+_CHECK_HELM_RENDER_METRICS_WITHOUT_MODULE = "helm:render-metrics-without-module"
+_CHECK_HELM_RENDER_MODULE_ENABLED = "helm:render-module-enabled"
+_CHECK_HELM_RENDER_MODULE_METRICS = "helm:render-module-metrics"
 
 
 class ValidationResult:
@@ -303,6 +312,264 @@ def _truncate_output(text: str, limit: int = _MAX_HELM_OUTPUT) -> str:
     return text if len(text) <= limit else text[:limit] + "\n[output truncated]"
 
 
+def _run_helm(
+    result: ValidationResult,
+    check_id: str,
+    args: Sequence[str],
+) -> subprocess.CompletedProcess[str] | None:
+    """Run a Helm command and record timeout failures uniformly."""
+    try:
+        return subprocess.run(
+            list(args),
+            cwd=PROJECT_ROOT,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+            timeout=30,
+        )
+    except subprocess.TimeoutExpired as exc:
+        result.fail(check_id, f"helm command timed out: {exc}")
+        return None
+
+
+def _run_helm_template(
+    result: ValidationResult,
+    check_id: str,
+    helm: str,
+    chart_dir: Path,
+    extra_args: Sequence[str] = (),
+) -> subprocess.CompletedProcess[str] | None:
+    """Run helm template for the chart under test."""
+    return _run_helm(
+        result,
+        check_id,
+        [helm, "template", "test", str(chart_dir), *extra_args],
+    )
+
+
+def _validate_helm_lint(
+    result: ValidationResult,
+    helm: str,
+    chart_dir: Path,
+) -> bool:
+    """Validate helm lint succeeds before template-specific checks run."""
+    lint = _run_helm(result, _CHECK_HELM_LINT, [helm, "lint", str(chart_dir)])
+    if lint is None:
+        return False
+    if lint.returncode == 0:
+        result.pass_(_CHECK_HELM_LINT, "helm lint passed")
+        return True
+    result.fail(
+        _CHECK_HELM_LINT,
+        f"helm lint failed: {_truncate_output(lint.stdout.strip())}",
+    )
+    return False
+
+
+def _validate_default_helm_template(
+    result: ValidationResult,
+    helm: str,
+    chart_dir: Path,
+) -> str | None:
+    """Render default Helm output and validate stock-image-safe snippets."""
+    rendered = _run_helm_template(result, _CHECK_HELM_TEMPLATE, helm, chart_dir)
+    if rendered is None:
+        return None
+    if rendered.returncode != 0:
+        result.fail(
+            _CHECK_HELM_TEMPLATE,
+            f"helm template failed: {_truncate_output(rendered.stdout.strip())}",
+        )
+        return None
+    result.pass_(_CHECK_HELM_TEMPLATE, "helm template rendered successfully")
+    _validate_rendered_yaml(result, rendered.stdout)
+    _validate_rendered_required_snippets(result, rendered.stdout)
+    _validate_rendered_default_forbidden_snippets(result, rendered.stdout)
+    return rendered.stdout
+
+
+def _validate_rendered_yaml(result: ValidationResult, rendered: str) -> None:
+    """Validate Helm output remains parseable YAML."""
+    ok, err = try_parse_yaml(rendered)
+    if ok:
+        result.pass_(_CHECK_HELM_RENDER_YAML, "rendered Helm output is valid YAML")
+    else:
+        result.fail(_CHECK_HELM_RENDER_YAML, f"rendered Helm YAML error: {err}")
+
+
+def _validate_rendered_required_snippets(
+    result: ValidationResult,
+    rendered: str,
+) -> None:
+    """Validate required snippets in default rendered Helm output."""
+    for snippet in HELM_RENDER_REQUIRED_SNIPPETS:
+        sid = f"helm:render:{snippet[:24]}"
+        if snippet in rendered:
+            result.pass_(sid, f"rendered Helm output contains {snippet}")
+        else:
+            result.fail(sid, f"rendered Helm output missing {snippet}")
+
+
+def _validate_rendered_default_forbidden_snippets(
+    result: ValidationResult,
+    rendered: str,
+) -> None:
+    """Validate default Helm output omits optional module directives."""
+    for snippet in HELM_RENDER_FORBIDDEN_DEFAULT_SNIPPETS:
+        sid = f"helm:render-default-forbidden:{snippet[:24]}"
+        if snippet in rendered:
+            result.fail(sid, f"default Helm render must not contain {snippet}")
+        else:
+            result.pass_(sid, f"default Helm render omits {snippet}")
+
+
+def _validate_expected_helm_failure(
+    result: ValidationResult,
+    check_id: str,
+    rendered: subprocess.CompletedProcess[str] | None,
+    required_message: str,
+    pass_message: str,
+    fail_message: str,
+) -> None:
+    """Validate a deliberately invalid Helm values combination fails clearly."""
+    if rendered and rendered.returncode != 0 and required_message in rendered.stdout:
+        result.pass_(check_id, pass_message)
+    else:
+        result.fail(check_id, fail_message)
+
+
+def _validate_missing_module_guard(
+    result: ValidationResult,
+    helm: str,
+    chart_dir: Path,
+) -> None:
+    """Validate markdown.enabled requires markdown.loadModule."""
+    rendered = _run_helm_template(
+        result,
+        _CHECK_HELM_RENDER_MODULE_MISSING,
+        helm,
+        chart_dir,
+        ["--set", "markdown.enabled=true"],
+    )
+    if rendered is None:
+        return
+    _validate_expected_helm_failure(
+        result,
+        _CHECK_HELM_RENDER_MODULE_MISSING,
+        rendered,
+        "markdown.loadModule is required when markdown.enabled=true",
+        "markdown.enabled=true without loadModule fails clearly",
+        "markdown.enabled=true without loadModule must fail clearly",
+    )
+
+
+def _validate_metrics_without_module_guard(
+    result: ValidationResult,
+    helm: str,
+    chart_dir: Path,
+) -> None:
+    """Validate metrics cannot render without the markdown module enabled."""
+    rendered = _run_helm_template(
+        result,
+        _CHECK_HELM_RENDER_METRICS_WITHOUT_MODULE,
+        helm,
+        chart_dir,
+        ["--set", "metrics.enabled=true"],
+    )
+    if rendered is None:
+        return
+    _validate_expected_helm_failure(
+        result,
+        _CHECK_HELM_RENDER_METRICS_WITHOUT_MODULE,
+        rendered,
+        "metrics.enabled=true requires markdown.enabled=true",
+        "metrics.enabled=true without markdown.enabled fails clearly",
+        "metrics.enabled=true without markdown.enabled must fail clearly",
+    )
+
+
+def _module_enabled_args() -> list[str]:
+    """Return Helm args that enable the markdown dynamic module."""
+    return [
+        "--set",
+        "markdown.enabled=true",
+        "--set-string",
+        f"markdown.loadModule={HELM_MODULE_LOAD_PATH}",
+    ]
+
+
+def _validate_module_enabled_render(
+    result: ValidationResult,
+    helm: str,
+    chart_dir: Path,
+) -> None:
+    """Validate explicit module enablement renders module directives."""
+    rendered = _run_helm_template(
+        result,
+        _CHECK_HELM_RENDER_MODULE_ENABLED,
+        helm,
+        chart_dir,
+        _module_enabled_args(),
+    )
+    if rendered is None:
+        return
+    if rendered.returncode != 0:
+        result.fail(
+            _CHECK_HELM_RENDER_MODULE_ENABLED,
+            "module-enabled Helm template failed: "
+            f"{_truncate_output(rendered.stdout.strip())}",
+        )
+        return
+    if (
+        f"load_module {HELM_MODULE_LOAD_PATH};" in rendered.stdout
+        and "markdown_filter on;" in rendered.stdout
+    ):
+        result.pass_(
+            _CHECK_HELM_RENDER_MODULE_ENABLED,
+            "module-enabled Helm render includes load_module and markdown directives",
+        )
+    else:
+        result.fail(
+            _CHECK_HELM_RENDER_MODULE_ENABLED,
+            "module-enabled Helm render missing load_module or markdown directives",
+        )
+
+
+def _validate_module_metrics_render(
+    result: ValidationResult,
+    helm: str,
+    chart_dir: Path,
+) -> None:
+    """Validate metrics directives render when the module is enabled."""
+    rendered = _run_helm_template(
+        result,
+        _CHECK_HELM_RENDER_MODULE_METRICS,
+        helm,
+        chart_dir,
+        [*_module_enabled_args(), "--set", "metrics.enabled=true"],
+    )
+    if rendered is None:
+        return
+    if rendered.returncode != 0:
+        result.fail(
+            _CHECK_HELM_RENDER_MODULE_METRICS,
+            "module metrics Helm template failed: "
+            f"{_truncate_output(rendered.stdout.strip())}",
+        )
+        return
+    if "markdown_metrics on;" in rendered.stdout:
+        result.pass_(
+            _CHECK_HELM_RENDER_MODULE_METRICS,
+            "module-enabled metrics render includes markdown_metrics directives",
+        )
+    else:
+        result.fail(
+            _CHECK_HELM_RENDER_MODULE_METRICS,
+            "module-enabled metrics render missing markdown_metrics directives",
+        )
+
+
 def validate_helm_render(result: ValidationResult) -> None:
     """Run Helm render checks when helm is available in the local environment."""
     helm = shutil.which("helm")
@@ -314,134 +581,14 @@ def validate_helm_render(result: ValidationResult) -> None:
         return
 
     chart_dir = PROJECT_ROOT / "charts" / "nginx-markdown"
-    try:
-        lint = subprocess.run(
-            [helm, "lint", str(chart_dir)],
-            cwd=PROJECT_ROOT,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            check=False,
-            timeout=30,
-        )
-    except subprocess.TimeoutExpired as exc:
-        result.fail(_CHECK_HELM_LINT, f"helm lint timed out: {exc}")
+    if not _validate_helm_lint(result, helm, chart_dir):
         return
-    if lint.returncode != 0:
-        result.fail(
-            _CHECK_HELM_LINT,
-            f"helm lint failed: {_truncate_output(lint.stdout.strip())}",
-        )
+    if _validate_default_helm_template(result, helm, chart_dir) is None:
         return
-    result.pass_(_CHECK_HELM_LINT, "helm lint passed")
-
-    try:
-        rendered = subprocess.run(
-            [helm, "template", "test", str(chart_dir)],
-            cwd=PROJECT_ROOT,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            check=False,
-            timeout=30,
-        )
-    except subprocess.TimeoutExpired as exc:
-        result.fail(_CHECK_HELM_TEMPLATE, f"helm template timed out: {exc}")
-        return
-    if rendered.returncode != 0:
-        result.fail(
-            _CHECK_HELM_TEMPLATE,
-            f"helm template failed: {_truncate_output(rendered.stdout.strip())}",
-        )
-        return
-    result.pass_(_CHECK_HELM_TEMPLATE, "helm template rendered successfully")
-
-    ok, err = try_parse_yaml(rendered.stdout)
-    if ok:
-        result.pass_("helm:render:yaml", "rendered Helm output is valid YAML")
-    else:
-        result.fail("helm:render:yaml", f"rendered Helm YAML error: {err}")
-
-    for snippet in HELM_RENDER_REQUIRED_SNIPPETS:
-        sid = f"helm:render:{snippet[:24]}"
-        if snippet in rendered.stdout:
-            result.pass_(sid, f"rendered Helm output contains {snippet}")
-        else:
-            result.fail(sid, f"rendered Helm output missing {snippet}")
-    for snippet in HELM_RENDER_FORBIDDEN_DEFAULT_SNIPPETS:
-        sid = f"helm:render-default-forbidden:{snippet[:24]}"
-        if snippet in rendered.stdout:
-            result.fail(sid, f"default Helm render must not contain {snippet}")
-        else:
-            result.pass_(sid, f"default Helm render omits {snippet}")
-
-    try:
-        missing_module = subprocess.run(
-            [
-                helm, "template", "test", str(chart_dir),
-                "--set", "markdown.enabled=true",
-            ],
-            cwd=PROJECT_ROOT,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            check=False,
-            timeout=30,
-        )
-    except subprocess.TimeoutExpired as exc:
-        result.fail("helm:render-module-missing", f"helm template timed out: {exc}")
-        return
-    if (
-        missing_module.returncode != 0
-        and "markdown.loadModule is required when markdown.enabled=true"
-        in missing_module.stdout
-    ):
-        result.pass_(
-            "helm:render-module-missing",
-            "markdown.enabled=true without loadModule fails clearly",
-        )
-    else:
-        result.fail(
-            "helm:render-module-missing",
-            "markdown.enabled=true without loadModule must fail clearly",
-        )
-
-    try:
-        module_render = subprocess.run(
-            [
-                helm, "template", "test", str(chart_dir),
-                "--set", "markdown.enabled=true",
-                "--set-string", f"markdown.loadModule={HELM_MODULE_LOAD_PATH}",
-            ],
-            cwd=PROJECT_ROOT,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            check=False,
-            timeout=30,
-        )
-    except subprocess.TimeoutExpired as exc:
-        result.fail("helm:render-module-enabled", f"helm template timed out: {exc}")
-        return
-    if module_render.returncode != 0:
-        result.fail(
-            "helm:render-module-enabled",
-            "module-enabled Helm template failed: "
-            f"{_truncate_output(module_render.stdout.strip())}",
-        )
-    elif (
-        f"load_module {HELM_MODULE_LOAD_PATH};" in module_render.stdout
-        and "markdown_filter on;" in module_render.stdout
-    ):
-        result.pass_(
-            "helm:render-module-enabled",
-            "module-enabled Helm render includes load_module and markdown directives",
-        )
-    else:
-        result.fail(
-            "helm:render-module-enabled",
-            "module-enabled Helm render missing load_module or markdown directives",
-        )
+    _validate_missing_module_guard(result, helm, chart_dir)
+    _validate_metrics_without_module_guard(result, helm, chart_dir)
+    _validate_module_enabled_render(result, helm, chart_dir)
+    _validate_module_metrics_render(result, helm, chart_dir)
 
 
 def print_report(result: ValidationResult) -> None:

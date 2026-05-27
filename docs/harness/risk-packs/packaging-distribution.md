@@ -82,9 +82,10 @@ or packaging documentation.
   context, count structured pod fields without collapsed jsonpath output, and
   preserve pre-existing clusters.
 - Helm chart defaults must also remain renderable with stock images and no
-  module directives. Module-enabled renders must require an explicit
-  in-container module path and must not auto-create node `hostPath` mounts from
-  that path; custom mounts belong behind explicit opt-in values.
+  module directives. Any module directive family, including metrics directives,
+  must require module enablement plus an explicit in-container module path.
+  Module-enabled renders must not auto-create node `hostPath` mounts from that
+  path; custom mounts belong behind explicit opt-in values.
 - Homebrew formula repository and repo-owned formula template must stay in sync
   with release artifacts, tag timing, checksums, and post-release verification.
 - `docs/guides/INSTALLATION.md` must document all installation methods
@@ -115,3 +116,4 @@ make release-gates-check
 | 0.7.3 | 2026-05-26 | Codex | Added standalone DEB/RPM package-name, layout, and prebuilt-module contract coverage |
 | 0.7.4 | 2026-05-26 | Codex | Added GitHub Actions container shell coverage for standalone package workflows |
 | 0.7.5 | 2026-05-26 | Codex | Added package dependency satisfiability, version-input validation, distro-specific RPM repo selection, package script lifecycle args, module path/glibc runtime compatibility, and local K8s smoke context/module safety coverage |
+| 0.7.6 | 2026-05-27 | Codex | Added Helm metrics directive gating coverage for stock-image-safe chart renders |
