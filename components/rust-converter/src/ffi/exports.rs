@@ -725,11 +725,11 @@ pub unsafe extern "C" fn markdown_header_plan_init(result: *mut FFIHeaderPlan) {
 /// # Return Value
 ///
 /// Returns `0` on success. On failure, returns the error category code:
-/// - `5` = budget_exceeded
-/// - `6` = format_error
-/// - `7` = truncated_input
-/// - `8` = io_error
-/// - `9` = invalid arguments (NULL pointers, unknown format)
+/// - `101` = budget_exceeded (`DECOMP_CATEGORY_BUDGET_EXCEEDED`)
+/// - `102` = format_error (`DECOMP_CATEGORY_FORMAT_ERROR`)
+/// - `103` = truncated_input (`DECOMP_CATEGORY_TRUNCATED_INPUT`)
+/// - `104` = io_error (`DECOMP_CATEGORY_IO_ERROR`)
+/// - `105` = invalid arguments — NULL pointers, unknown format (`DECOMP_CATEGORY_INVALID_ARGS`)
 ///
 /// # Safety
 ///
