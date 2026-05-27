@@ -29,11 +29,26 @@
 #define NGX_HTTP_MARKDOWN_DIAG_MAX_CAPACITY      10000
 
 /*
- * Diagnostics JSON response sizing.
+ * Diagnostics JSON response sizing constants.
  *
- * The base size covers config snapshot, metrics, and dynconf sections.  The
- * per-decision estimate covers one compact recent_decisions JSON object plus
- * separators and indentation.
+ * Used by ngx_http_markdown_diagnostics_json_size() to pre-allocate the
+ * response buffer.  Both production code and tests must use the same
+ * function (or these constants) to compute expected buffer sizes.
+ *
+ * NGX_HTTP_MARKDOWN_DIAG_JSON_BASE_SIZE:
+ *   Covers the fixed-size JSON envelope: config_snapshot (dynconf
+ *   snapshot serialization), metrics_snapshot (4 counters), dynconf_state
+ *   (4 fields), section keys, braces, commas, and whitespace.  Must be
+ *   >= the maximum rendered size of all non-decision sections combined.
+ *
+ * NGX_HTTP_MARKDOWN_DIAG_JSON_DECISION_SIZE:
+ *   Covers one recent_decisions entry: {"timestamp": <ms>, "reason_code":
+ *   <int>, "duration_ms": <ms>} plus trailing comma and indentation.
+ *   Must be >= the maximum rendered size of a single decision object.
+ *
+ * If the JSON shape changes (new sections, wider fields), these constants
+ * must be updated.  Truncation is detected at runtime by build_json and
+ * returns NGX_ERROR (500) rather than serving incomplete JSON.
  */
 #define NGX_HTTP_MARKDOWN_DIAG_JSON_BASE_SIZE    32768
 #define NGX_HTTP_MARKDOWN_DIAG_JSON_DECISION_SIZE 128

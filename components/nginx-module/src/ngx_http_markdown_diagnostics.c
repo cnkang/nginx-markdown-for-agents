@@ -59,6 +59,59 @@ static size_t ngx_http_markdown_diagnostics_json_size(
 
 
 /*
+ * Validate ring buffer invariants for safe iteration.
+ *
+ * Centralizes the defensive checks that both the JSON sizing logic and
+ * the iteration logic must agree on.  Returns the number of valid entries
+ * that can be safely iterated, or 0 if the ring state is invalid or empty.
+ *
+ * When the ring exists (entries != NULL) but invariants are violated,
+ * sets *invalid to 1 so callers can distinguish "empty" from "broken".
+ *
+ * Invariants checked:
+ *   - state and entries pointer are non-NULL
+ *   - capacity is in (0, NGX_HTTP_MARKDOWN_DIAG_MAX_CAPACITY]
+ *   - count <= capacity (no overcount)
+ *   - head < capacity (valid write position)
+ *
+ * Parameters:
+ *   state   - diagnostics state to validate (may be NULL)
+ *   invalid - if non-NULL, set to 1 when ring exists but is invalid
+ *
+ * Returns:
+ *   Number of valid entries to iterate (state->ring.count), or 0 if
+ *   the ring is empty, NULL, or any invariant is violated.
+ */
+static ngx_inline ngx_uint_t
+ngx_http_markdown_diag_ring_valid_count(
+    const ngx_http_markdown_diag_state_t *state,
+    ngx_int_t *invalid)
+{
+    if (invalid != NULL) {
+        *invalid = 0;
+    }
+
+    if (state == NULL || state->ring.entries == NULL) {
+        return 0;
+    }
+
+    if (state->ring.capacity == 0
+        || state->ring.capacity > NGX_HTTP_MARKDOWN_DIAG_MAX_CAPACITY
+        || state->ring.count > state->ring.capacity
+        || state->ring.head >= state->ring.capacity
+        || state->ring.count > NGX_HTTP_MARKDOWN_DIAG_MAX_CAPACITY)
+    {
+        if (invalid != NULL) {
+            *invalid = 1;
+        }
+        return 0;
+    }
+
+    return state->ring.count;
+}
+
+
+/*
  * Initialize the diagnostics subsystem.
  *
  * Allocates the ring buffer entries array from the provided pool.
@@ -560,14 +613,16 @@ ngx_http_markdown_diagnostics_build_json(ngx_http_request_t *r,
     /* --- recent_decisions section --- */
     p = ngx_slprintf(p, last, "  \"recent_decisions\": [");
 
-    if (state != NULL && state->ring.entries != NULL
-        && state->ring.capacity > 0 && state->ring.count > 0)
     {
         ngx_uint_t                          idx;
         ngx_uint_t                          count;
         const ngx_http_markdown_diag_decision_t  *entry;
 
-        count = state->ring.count;
+        /*
+         * Use the same centralized ring validation as json_size so
+         * the iteration invariants cannot drift from the sizing logic.
+         */
+        count = ngx_http_markdown_diag_ring_valid_count(state, NULL);
 
         /*
          * Iterate newest-first (reverse chronological order).
@@ -663,20 +718,24 @@ ngx_http_markdown_diagnostics_json_size(
     const ngx_http_markdown_diag_state_t *state)
 {
     ngx_uint_t  decision_count;
+    ngx_int_t   invalid;
 
-    decision_count = 0;
+    /*
+     * Use the centralized ring validation helper.
+     *
+     * Sizing contract:
+     *   NGX_HTTP_MARKDOWN_DIAG_JSON_BASE_SIZE covers the fixed JSON
+     *   envelope (config_snapshot, metrics_snapshot, dynconf_state
+     *   sections, braces, keys, and whitespace).
+     *   NGX_HTTP_MARKDOWN_DIAG_JSON_DECISION_SIZE covers one compact
+     *   recent_decisions entry including separators and indentation.
+     *   The total must be >= the actual rendered output; truncation
+     *   is detected at the end of build_json and returns NGX_ERROR.
+     */
+    decision_count = ngx_http_markdown_diag_ring_valid_count(state, &invalid);
 
-    if (state != NULL && state->ring.entries != NULL) {
-        if (state->ring.capacity == 0
-            || state->ring.capacity > NGX_HTTP_MARKDOWN_DIAG_MAX_CAPACITY
-            || state->ring.count > state->ring.capacity
-            || state->ring.head >= state->ring.capacity
-            || state->ring.count > NGX_HTTP_MARKDOWN_DIAG_MAX_CAPACITY)
-        {
-            return 0;
-        }
-
-        decision_count = state->ring.count;
+    if (invalid) {
+        return 0;
     }
 
     return NGX_HTTP_MARKDOWN_DIAG_JSON_BASE_SIZE
