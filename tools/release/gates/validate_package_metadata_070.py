@@ -790,8 +790,8 @@ def validate_package_installation_docs(result: ValidationResult) -> None:
         _check_snippets(content, snippets, f"package-docs:{rel}", str(rel),
                         result)
 
-        for snippet in PACKAGE_DOC_FORBIDDEN_SNIPPETS:
-            sid = f"package-docs:no-repo-install:{rel}:{snippet[:12]}"
+        for idx, snippet in enumerate(PACKAGE_DOC_FORBIDDEN_SNIPPETS):
+            sid = f"package-docs:no-repo-install:{rel}:{idx}"
             if snippet in content:
                 result.fail(
                     sid,
