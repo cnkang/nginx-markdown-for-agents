@@ -233,6 +233,7 @@ harness-security-checks:
 	bash tools/harness/detect_ci_supply_chain.sh
 	bash tools/harness/detect_header_hash_filter.sh
 	bash tools/harness/detect_finalize_return.sh
+	bash tools/harness/detect_ffi_struct_init.sh
 
 license-check:
 	python3 tools/ci/check_c_licenses.py

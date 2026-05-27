@@ -30,6 +30,8 @@ GUARDED_STRUCTS=(
     "MarkdownOptions"
     "MarkdownResult"
     "FFIAcceptResult"
+    "FFIConditionalResult"
+    "FFIDecisionResult"
     "FFIHeaderPlan"
     "FFIDecompResult"
 )
