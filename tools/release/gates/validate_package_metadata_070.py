@@ -39,11 +39,15 @@ RELEASE_DEB_WORKFLOW = GITHUB_WORKFLOWS_DIR / "release-deb.yml"
 RELEASE_RPM_WORKFLOW = GITHUB_WORKFLOWS_DIR / "release-rpm.yml"
 SIGN_AND_PUBLISH_WORKFLOW = GITHUB_WORKFLOWS_DIR / "sign-and-publish.yml"
 CHECKSUMS_FILE = PROJECT_ROOT / "packaging" / "checksums.sha256"
-SMOKE_TEST_BASIC = PROJECT_ROOT / "packaging" / "scripts" / "smoke-test-basic.sh"
+SMOKE_TEST_BASIC_NAME = "smoke-test-basic.sh"
+NFPM_POSTINSTALL_NAME = "postinstall.sh"
+SMOKE_TEST_BASIC = PROJECT_ROOT / "packaging" / "scripts" / SMOKE_TEST_BASIC_NAME
 GATE3_LOCAL_PACKAGE_SMOKE = PROJECT_ROOT / "tools" / "release" / "gates" / (
     "gate3_local_package_smoke.sh"
 )
-NFPM_POSTINSTALL = PROJECT_ROOT / "packaging" / "nfpm" / "scripts" / "postinstall.sh"
+NFPM_POSTINSTALL = (
+    PROJECT_ROOT / "packaging" / "nfpm" / "scripts" / NFPM_POSTINSTALL_NAME
+)
 RELEASE_DOCKERFILES = [
     PROJECT_ROOT / "tools" / "build_release" / "Dockerfile.glibc",
     PROJECT_ROOT / "tools" / "build_release" / "Dockerfile.musl",
@@ -83,9 +87,9 @@ MODULE_NAME_SURFACES = [
     PROJECT_ROOT / "packaging" / "debian" / "postinst",
     PROJECT_ROOT / "packaging" / "snippets" / "mod-markdown-for-agents.conf",
     PROJECT_ROOT / "packaging" / "nfpm" / "modules-available" / "mod-markdown.conf",
-    PROJECT_ROOT / "packaging" / "nfpm" / "scripts" / "postinstall.sh",
+    NFPM_POSTINSTALL,
     PROJECT_ROOT / "packaging" / "scripts" / "build-deb.sh",
-    PROJECT_ROOT / "packaging" / "scripts" / "smoke-test-basic.sh",
+    SMOKE_TEST_BASIC,
     PROJECT_ROOT / "packaging" / "scripts" / "smoke-test-diagnostics.sh",
     PROJECT_ROOT / "tools" / "release" / "gates" / "check_install_layout.sh",
     PROJECT_ROOT / "README.md",
@@ -678,11 +682,11 @@ def validate_smoke_test_repo_selection(result: ValidationResult) -> None:
     """Validate RPM smoke tests select nginx.org repos by distro family."""
     content = read_safe(SMOKE_TEST_BASIC)
     if not content:
-        result.fail("smoke-repo:exists", "smoke-test-basic.sh not found")
+        result.fail("smoke-repo:exists", f"{SMOKE_TEST_BASIC_NAME} not found")
         return
     _check_snippets(
         content, SMOKE_RPM_REPO_SNIPPETS, "smoke-repo",
-        "smoke-test-basic.sh", result,
+        SMOKE_TEST_BASIC_NAME, result,
     )
 
 
@@ -702,18 +706,18 @@ def validate_nfpm_postinstall_lifecycle(result: ValidationResult) -> None:
     """Validate nFPM postinstall accepts DEB and RPM lifecycle arguments."""
     content = read_safe(NFPM_POSTINSTALL)
     if not content:
-        result.fail("nfpm-postinstall:exists", "postinstall.sh not found")
+        result.fail("nfpm-postinstall:exists", f"{NFPM_POSTINSTALL_NAME} not found")
         return
     _check_snippets(
         content, NFPM_POSTINSTALL_SNIPPETS, "nfpm-postinstall",
-        "postinstall.sh", result,
+        NFPM_POSTINSTALL_NAME, result,
     )
     for snippet in NFPM_POSTINSTALL_FORBIDDEN_SNIPPETS:
         sid = f"nfpm-postinstall-forbidden:{snippet[:24]}"
         if snippet in content:
-            result.fail(sid, f"postinstall.sh must not contain {snippet}")
+            result.fail(sid, f"{NFPM_POSTINSTALL_NAME} must not contain {snippet}")
         else:
-            result.pass_(sid, f"postinstall.sh omits {snippet}")
+            result.pass_(sid, f"{NFPM_POSTINSTALL_NAME} omits {snippet}")
 
 
 def validate_release_build_glibc_baseline(result: ValidationResult) -> None:
