@@ -667,7 +667,10 @@ ngx_http_markdown_diagnostics_json_size(
     decision_count = 0;
 
     if (state != NULL && state->ring.entries != NULL) {
-        if (state->ring.count > state->ring.capacity
+        if (state->ring.capacity == 0
+            || state->ring.capacity > NGX_HTTP_MARKDOWN_DIAG_MAX_CAPACITY
+            || state->ring.count > state->ring.capacity
+            || state->ring.head >= state->ring.capacity
             || state->ring.count > NGX_HTTP_MARKDOWN_DIAG_MAX_CAPACITY)
         {
             return 0;
