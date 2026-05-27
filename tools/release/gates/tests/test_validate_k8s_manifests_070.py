@@ -23,12 +23,25 @@ def test_helm_defaults_are_stock_nginx_safe() -> None:
     assert 'loadModule: ""' in HELM_VALUES_REQUIRED_SNIPPETS
     assert "load_module" in HELM_RENDER_FORBIDDEN_DEFAULT_SNIPPETS
     assert "markdown_filter on;" in HELM_RENDER_FORBIDDEN_DEFAULT_SNIPPETS
+    assert "markdown_metrics" in HELM_RENDER_FORBIDDEN_DEFAULT_SNIPPETS
 
 
 def test_helm_module_enablement_requires_explicit_module_path() -> None:
     """markdown.enabled=true must fail clearly when loadModule is absent."""
     assert (
         "markdown.loadModule is required when markdown.enabled=true"
+        in HELM_CONFIG_REQUIRED_SNIPPETS
+    )
+
+
+def test_helm_metrics_require_module_enablement() -> None:
+    """metrics.enabled=true must not render module directives without module."""
+    assert (
+        "metrics.enabled=true requires markdown.enabled=true"
+        in HELM_CONFIG_REQUIRED_SNIPPETS
+    )
+    assert (
+        "and .Values.markdown.enabled .Values.metrics.enabled"
         in HELM_CONFIG_REQUIRED_SNIPPETS
     )
 
