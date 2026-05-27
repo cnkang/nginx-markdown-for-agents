@@ -39,6 +39,10 @@ RELEASE_DEB_WORKFLOW = GITHUB_WORKFLOWS_DIR / "release-deb.yml"
 RELEASE_RPM_WORKFLOW = GITHUB_WORKFLOWS_DIR / "release-rpm.yml"
 SIGN_AND_PUBLISH_WORKFLOW = GITHUB_WORKFLOWS_DIR / "sign-and-publish.yml"
 CHECKSUMS_FILE = PROJECT_ROOT / "packaging" / "checksums.sha256"
+INSTALLATION_DOC = PROJECT_ROOT / "docs" / "guides" / "INSTALLATION.md"
+PACKAGE_INSTALLATION_DOC = PROJECT_ROOT / "docs" / "guides" / "PACKAGE_INSTALLATION.md"
+PACKAGE_DISTRIBUTION_DOC = PROJECT_ROOT / "docs" / "guides" / "PACKAGE_DISTRIBUTION.md"
+GPG_KEY_MANAGEMENT_DOC = PROJECT_ROOT / "docs" / "guides" / "GPG_KEY_MANAGEMENT.md"
 SMOKE_TEST_BASIC_NAME = "smoke-test-basic.sh"
 NFPM_POSTINSTALL_NAME = "postinstall.sh"
 SMOKE_TEST_BASIC = PROJECT_ROOT / "packaging" / "scripts" / SMOKE_TEST_BASIC_NAME
@@ -186,6 +190,42 @@ RELEASE_BUILD_GLIBC_SNIPPETS = {
 }
 
 _CHECK_CHECKSUMS_EXISTS = "checksums:exists"
+
+PACKAGE_DOC_REQUIRED_SNIPPETS = {
+    INSTALLATION_DOC: [
+        "## 4.2 Linux Package Artifacts",
+        "**Tier: Secondary** (v0.7.0+)",
+        "APT/YUM repository publishing is planned",
+        CANONICAL_PACKAGE_NAME,
+        CANONICAL_MODULE_SO,
+    ],
+    PACKAGE_INSTALLATION_DOC: [
+        "GitHub Releases are the current distribution channel",
+        "Public APT/YUM repositories are planned but not available yet",
+        CANONICAL_PACKAGE_NAME,
+        CANONICAL_MODULE_SO,
+        "SHA256SUMS",
+    ],
+    PACKAGE_DISTRIBUTION_DOC: [
+        "GitHub Releases",
+        "Active for v0.7.0+ release artifacts",
+        "APT/YUM repository publishing is intentionally tracked as a future",
+    ],
+    GPG_KEY_MANAGEMENT_DOC: [
+        "Public APT/YUM repositories are not available yet",
+        "future self-hosted repository publication",
+        "PACKAGE_INSTALLATION.md",
+    ],
+}
+
+PACKAGE_DOC_FORBIDDEN_SNIPPETS = [
+    "sudo apt-get install nginx-module-markdown",
+    "sudo yum install nginx-module-markdown",
+    "sudo apt-get install nginx-markdown-module",
+    "sudo yum install nginx-markdown-module",
+    "APT_REPO_URL",
+    "YUM_REPO_URL",
+]
 
 
 class ValidationResult:
@@ -738,6 +778,32 @@ def validate_release_build_glibc_baseline(result: ValidationResult) -> None:
         )
 
 
+def validate_package_installation_docs(result: ValidationResult) -> None:
+    """Validate public install docs match the current package channel state."""
+    for path, snippets in PACKAGE_DOC_REQUIRED_SNIPPETS.items():
+        rel = path.relative_to(PROJECT_ROOT)
+        content = read_safe(path)
+        if not content:
+            result.fail(f"package-docs:exists:{rel}", f"{rel} not found")
+            continue
+
+        _check_snippets(content, snippets, f"package-docs:{rel}", str(rel),
+                        result)
+
+        for snippet in PACKAGE_DOC_FORBIDDEN_SNIPPETS:
+            sid = f"package-docs:no-repo-install:{rel}:{snippet[:12]}"
+            if snippet in content:
+                result.fail(
+                    sid,
+                    f"{rel} advertises unpublished repository install: {snippet}",
+                )
+            else:
+                result.pass_(
+                    sid,
+                    f"{rel} omits unpublished repository install {snippet}",
+                )
+
+
 def print_report(result: ValidationResult) -> None:
     """Print a formatted validation report."""
     print("v0.7.0 Package Metadata Validation Report")
@@ -764,6 +830,7 @@ def main() -> int:
     validate_gate3_local_arch_selection(result)
     validate_nfpm_postinstall_lifecycle(result)
     validate_release_build_glibc_baseline(result)
+    validate_package_installation_docs(result)
     print_report(result)
     return 1 if result.has_failures else 0
 
