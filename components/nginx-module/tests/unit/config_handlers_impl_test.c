@@ -785,6 +785,20 @@ test_simple_enum_handlers(void)
         "flavor should be gfm");
 
     init_conf(&mcf);
+    set_arg(&values[1], "mdx");
+    rc = ngx_http_markdown_flavor(&cf, &cmd, &mcf);
+    TEST_ASSERT(rc == NGX_CONF_OK, "mdx should parse");
+    TEST_ASSERT(mcf.flavor == NGX_HTTP_MARKDOWN_FLAVOR_MDX,
+        "flavor should be mdx");
+
+    init_conf(&mcf);
+    set_arg(&values[1], "org-mode");
+    rc = ngx_http_markdown_flavor(&cf, &cmd, &mcf);
+    TEST_ASSERT(rc == NGX_CONF_OK, "org-mode should parse");
+    TEST_ASSERT(mcf.flavor == NGX_HTTP_MARKDOWN_FLAVOR_ORG_MODE,
+        "flavor should be org-mode");
+
+    init_conf(&mcf);
     set_arg(&values[1], "markdown");
     rc = ngx_http_markdown_flavor(&cf, &cmd, &mcf);
     TEST_ASSERT(rc == NGX_CONF_ERROR,

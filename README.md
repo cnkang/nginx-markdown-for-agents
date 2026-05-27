@@ -213,7 +213,7 @@ Neither approach is universally better. Edge-layer conversion is a good fit when
 | Cache-aware variants | Generates ETags and supports conditional requests |
 | Failure policy control | Choose fail-open or fail-closed behavior |
 | Resource limits | Bound conversion size and time with NGINX directives |
-| Security sanitization | Applies XSS, XXE, and SSRF-oriented protections in the converter |
+| Security hardening | Validates emitted links and base URLs, rejects unsafe forwarded-host inputs by default, bounds parser/decompression resources, and avoids executing external content |
 | Optional metadata | Supports token estimates and YAML front matter |
 | Metrics endpoint | Exposes module conversion counters for operations |
 | Variable-driven config | Use NGINX variables for per-request conversion control |
@@ -400,7 +400,7 @@ v0.7.0 is a correctness, distribution, and operability release:
 - **Bounded decompression** — `markdown_decompress_max_size` limits decompressed output independently, preventing zip-bomb attacks (error code 9: DecompressionBudgetExceeded)
 - **Accept negotiation** — Rust-side RFC 9110 q-value comparison between `text/markdown` and `text/html` determines conversion eligibility
 - **Parse timeout and budget** — `markdown_parse_timeout` (default 30s) and `markdown_parser_budget` (default 64m) prevent runaway parsing (error codes 10, 11)
-- **DEB/RPM packaging** — Pre-built packages for Ubuntu 22.04/24.04, Debian 12, AlmaLinux 9, Amazon Linux 2023 across amd64/arm64, with canonical install layout checks
+- **DEB/RPM package artifacts** — v0.7.0+ release workflows build GitHub Release artifacts for Ubuntu 22.04/24.04, Debian 12, AlmaLinux 9, Amazon Linux 2023 across amd64/arm64 families, with canonical install layout checks
 - **Kubernetes deployment examples** — Helm chart, manifests, and Ingress Controller custom image build path with secure stock-image defaults; module-enabled Helm installs require an image containing the module and an explicit `markdown.loadModule`
 - **Runtime diagnostics** — `/nginx-markdown/diagnostics` endpoint exposes config snapshot, recent decisions, and metrics
 - **Dynconf dry-run and rollback** — Validate configuration changes without applying them; roll back to last-known-good on failure
@@ -428,7 +428,7 @@ Current release (0.7.0):
 - Rust URL control character validation and link escaping
 - FFI ABI layout verification and header drift detection
 - New error codes: DecompressionBudgetExceeded(9), ParseTimeout(10), ParseBudgetExceeded(11)
-- DEB/RPM packaging with APT/YUM repository support
+- DEB/RPM packaging with GitHub Release artifacts; APT/YUM repository publishing is planned but not yet available
 - Package release gates for canonical module paths, artifact names, checksums, and architecture-matched smoke tests
 - Kubernetes deployment examples and Helm chart with secure stock-image defaults plus explicit module-enabled configuration
 - Runtime diagnostics endpoint

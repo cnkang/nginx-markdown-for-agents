@@ -94,7 +94,13 @@ gpg --keyserver keys.openpgp.org --send-keys <KEY_ID>
 
 ## 3. Key Import Instructions
 
-### APT Users (Debian/Ubuntu)
+Public APT/YUM repositories are not available yet. The examples below are for
+future self-hosted repository publication after the repository URL and signing
+key are real. For current v0.7.0+ package artifacts, download the package and
+`SHA256SUMS` file from the same GitHub Release and follow
+`PACKAGE_INSTALLATION.md`.
+
+### Future APT Repository Users (Debian/Ubuntu)
 
 ```bash
 # Download and install the GPG key into the system keyring
@@ -105,15 +111,11 @@ curl -fsSL https://pkg.example.com/nginx-markdown/gpg.key \
 echo "deb [signed-by=/usr/share/keyrings/nginx-markdown.gpg] \
   https://pkg.example.com/nginx-markdown/apt $(lsb_release -cs) main" \
   | sudo tee /etc/apt/sources.list.d/nginx-markdown.list
-
-# Update and install
-sudo apt-get update
-sudo apt-get install nginx-markdown-module
 ```
 
 <!-- TODO: Replace https://pkg.example.com/nginx-markdown/ with actual URL when available -->
 
-### YUM/DNF Users (RHEL, AlmaLinux, Amazon Linux)
+### Future YUM/DNF Repository Users (RHEL, AlmaLinux, Amazon Linux)
 
 ```bash
 # Import the GPG key
@@ -128,9 +130,6 @@ enabled=1
 gpgcheck=1
 gpgkey=https://pkg.example.com/nginx-markdown/gpg.key
 EOF
-
-# Install
-sudo yum install nginx-markdown-module
 ```
 
 <!-- TODO: Replace https://pkg.example.com/nginx-markdown/ with actual URL when available -->
