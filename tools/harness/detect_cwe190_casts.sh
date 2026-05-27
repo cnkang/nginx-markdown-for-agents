@@ -95,6 +95,28 @@ readonly SAFE_CAST_ALLOWLIST=(
     "ngx_http_markdown_conversion_impl.h:1336:size_t identity cast for debug log format"
     "ngx_http_markdown_conversion_impl.h:1352:size_t+size_t identity cast (out_len+markdown_len)"
     "ngx_http_markdown_conversion_impl.h:1363:size_t identity cast for debug log format"
+    "ngx_http_markdown_accept.c:137:bounded ternary produces 0 or 1 (always fits uint8_t)"
+    "ngx_http_markdown_diagnostics.c:742:ngx_uint_t(=uintptr_t) to size_t same-width identity cast"
+    "ngx_http_markdown_config_handlers_impl.h:72:NGX_ERROR sentinel return (not a data cast)"
+    "ngx_http_markdown_config_handlers_impl.h:77:NGX_ERROR sentinel return (not a data cast)"
+    "ngx_http_markdown_config_handlers_impl.h:105:NGX_ERROR sentinel return (not a data cast)"
+    "ngx_http_markdown_config_handlers_impl.h:108:strtoull result guarded by ERANGE+NGX_MAX_SIZE_T_VALUE check above"
+    "ngx_http_markdown_config_handlers_impl.h:679:NGX_ERROR sentinel comparison (not a data cast)"
+    "ngx_http_markdown_decompression.c:208:estimated already clamped by decompress_max_size (size_t) above"
+    "ngx_http_markdown_payload_impl.h:856:uintptr_t→size_t same-width cast (FFI output_len)"
+    "ngx_http_markdown_payload_impl.h:900:uintptr_t→size_t same-width cast (FFI output_len)"
+    "ngx_http_markdown_payload_impl.h:906:uintptr_t→size_t same-width cast (FFI output_len)"
+    "ngx_http_markdown_header_plan.c:152:uintptr_t→size_t same-width cast (FFI value_len for log)"
+    "ngx_http_markdown_header_plan.c:304:uintptr_t→size_t same-width cast (FFI value_len for log)"
+    "ngx_http_markdown_header_plan.c:428:uintptr_t→size_t same-width cast (FFI plan->count for log)"
+    "ngx_http_markdown_header_plan.c:440:uintptr_t→size_t same-width cast (FFI plan->count for log)"
+    "ngx_http_markdown_header_plan.c:484:uintptr_t→size_t same-width cast (loop index for log)"
+    "ngx_http_markdown_header_plan.c:504:uintptr_t→size_t same-width cast (plan->count for log)"
+    "ngx_http_markdown_conversion_impl.h:892:guarded by INT_MAX ternary on same line"
+    "ngx_http_markdown_conversion_impl.h:1282:uintptr_t→size_t same-width cast (FFI feed_len+markdown_len)"
+    "ngx_http_markdown_conversion_impl.h:1455:uintptr_t→size_t same-width cast (FFI peak_memory_estimate for log)"
+    "ngx_http_markdown_conversion_impl.h:1471:uintptr_t→size_t same-width cast (FFI out_len+markdown_len)"
+    "ngx_http_markdown_conversion_impl.h:1482:uintptr_t→size_t same-width cast (FFI markdown_len for log)"
 )
 
 # ── Pattern (c): direct ngx_parse_size() + (size_t) ──
@@ -163,6 +185,11 @@ while IFS= read -r match; do
     fi
     has_guard=0
     if sed -n "${context_start},${line}p" "$file" 2>/dev/null | grep -qiE 'UINT_MAX|UINT32_MAX|INT_MAX|>.*max|>.*limit|>.*bound'; then
+        has_guard=1
+    fi
+    # Bounded ternary: (type) (expr ? small_const : small_const)
+    # where both branches produce values that trivially fit the target type
+    if echo "$content" | grep -qE '\? [01] : [01]\)|\? 1U? : 0U?\)|\? 0U? : 1U?\)'; then
         has_guard=1
     fi
     if [[ "$has_guard" -eq 1 ]]; then
