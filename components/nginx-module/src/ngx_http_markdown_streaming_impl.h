@@ -1961,10 +1961,11 @@ ngx_http_markdown_streaming_finalize_request(
     ngx_http_markdown_conf_t *conf)
 {
     struct MarkdownResult  result;
-    ngx_memzero(&result, sizeof(result));
     uint32_t               rc_ffi;
     ngx_int_t              rc;
     ngx_int_t              final_send_rc;
+
+    markdown_result_init(&result);
 
     if (ctx->streaming.handle == NULL) {
         return ngx_http_markdown_streaming_send_output(
