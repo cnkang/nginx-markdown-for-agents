@@ -114,9 +114,9 @@ readonly SAFE_CAST_ALLOWLIST=(
     "ngx_http_markdown_header_plan.c:504:uintptr_t→size_t same-width cast (plan->count for log)"
     "ngx_http_markdown_conversion_impl.h:892:guarded by INT_MAX ternary on same line"
     "ngx_http_markdown_conversion_impl.h:1282:uintptr_t→size_t same-width cast (FFI feed_len+markdown_len)"
-    "ngx_http_markdown_conversion_impl.h:1455:uintptr_t→size_t same-width cast (FFI peak_memory_estimate for log)"
-    "ngx_http_markdown_conversion_impl.h:1471:uintptr_t→size_t same-width cast (FFI out_len+markdown_len)"
-    "ngx_http_markdown_conversion_impl.h:1482:uintptr_t→size_t same-width cast (FFI markdown_len for log)"
+    "ngx_http_markdown_conversion_impl.h:1454:uintptr_t→size_t same-width cast (FFI peak_memory_estimate for log)"
+    "ngx_http_markdown_conversion_impl.h:1470:uintptr_t→size_t same-width cast (FFI out_len+markdown_len)"
+    "ngx_http_markdown_conversion_impl.h:1481:uintptr_t→size_t same-width cast (FFI markdown_len for log)"
 )
 
 # ── Pattern (c): direct ngx_parse_size() + (size_t) ──
