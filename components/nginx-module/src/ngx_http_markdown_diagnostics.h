@@ -28,6 +28,16 @@
  */
 #define NGX_HTTP_MARKDOWN_DIAG_MAX_CAPACITY      10000
 
+/*
+ * Diagnostics JSON response sizing.
+ *
+ * The base size covers config snapshot, metrics, and dynconf sections.  The
+ * per-decision estimate covers one compact recent_decisions JSON object plus
+ * separators and indentation.
+ */
+#define NGX_HTTP_MARKDOWN_DIAG_JSON_BASE_SIZE    32768
+#define NGX_HTTP_MARKDOWN_DIAG_JSON_DECISION_SIZE 128
+
 
 /*
  * Single decision record stored in the ring buffer.
