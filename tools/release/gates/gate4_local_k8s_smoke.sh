@@ -136,7 +136,7 @@ check_prerequisites() {
         printf '╚══════════════════════════════════════════════════════════════╝\n' >&2
         printf '\n' >&2
         printf 'Missing tools:\n' >&2
-        printf "$MISSING_TOOLS" >&2
+        printf '%s' "$MISSING_TOOLS" >&2
         printf '\n' >&2
         printf 'Quick install (macOS with Homebrew):\n' >&2
         printf '  brew install --cask docker && brew install kind kubectl helm\n' >&2

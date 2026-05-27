@@ -468,14 +468,18 @@ def _line_has_make_build(line: str) -> bool:
 def _segment_is_make_build(segment: list[str]) -> bool:
     """Return True if a command segment is a make invocation with 'build' target."""
     cmd_token = segment[0]
-    if not _is_make_token(cmd_token):
-        return False
-    return "build" in segment[1:]
+    return "build" in segment[1:] if _is_make_token(cmd_token) else False
 
 
 def _is_make_token(token: str) -> bool:
-    """Return True if token looks like a make invocation."""
-    return token in {"make", "gmake"} or "make" in token.lower()
+    """Return True if token looks like a make invocation.
+
+    Accepts exact commands (make, gmake) and RPM-style macros (%make, %make_build, etc.).
+    Does not match unrelated commands that happen to contain 'make' (cmake, automake).
+    """
+    return bool(
+        re.match(r"^(?:make|gmake|%make\S*)$", token, re.IGNORECASE)
+    )
 
 
 def _unquote(value: str) -> str:
