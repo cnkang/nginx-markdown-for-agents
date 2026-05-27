@@ -503,6 +503,48 @@ test_json_buffer_scales_with_ring_count(void)
 }
 
 static void
+test_json_builder_rejects_invalid_ring_state(void)
+{
+    ngx_http_request_t r;
+    ngx_connection_t c;
+    ngx_http_markdown_conf_t conf;
+    struct sockaddr_in addr;
+    ngx_buf_t b;
+    ngx_int_t rc;
+
+    TEST_SUBSECTION("diagnostics JSON rejects invalid ring state");
+
+    reset_test_state();
+    init_request(&r, &c, &conf, &addr);
+
+    rc = ngx_http_markdown_diagnostics_init(
+        &ngx_http_markdown_g_diag_state, r.pool, 2);
+    TEST_ASSERT(rc == NGX_OK, "global init should succeed");
+
+    ngx_http_markdown_g_diag_state.ring.capacity = 0;
+    memset(&b, 0, sizeof(b));
+    rc = ngx_http_markdown_diagnostics_build_json(&r, &b);
+    TEST_ASSERT(rc == NGX_ERROR, "zero capacity with entries should fail");
+
+    rc = ngx_http_markdown_diagnostics_init(
+        &ngx_http_markdown_g_diag_state, r.pool, 2);
+    TEST_ASSERT(rc == NGX_OK, "global reinit should succeed");
+    ngx_http_markdown_g_diag_state.enabled = 1;
+    ngx_http_markdown_diagnostics_record(&ngx_http_markdown_g_diag_state,
+                                         7, 11);
+
+    ngx_http_markdown_g_diag_state.ring.head =
+        ngx_http_markdown_g_diag_state.ring.capacity;
+    memset(&b, 0, sizeof(b));
+    rc = ngx_http_markdown_diagnostics_build_json(&r, &b);
+    TEST_ASSERT(rc == NGX_ERROR, "out-of-range head should fail");
+
+    ngx_http_markdown_diagnostics_cleanup(&ngx_http_markdown_g_diag_state);
+
+    TEST_PASS("Invalid diagnostics ring state covered");
+}
+
+static void
 test_access_json_and_logging_failure_branches(void)
 {
     ngx_http_request_t r;
@@ -636,6 +678,7 @@ main(void)
     test_lifecycle_failure_branches();
     test_access_and_json_builder();
     test_json_buffer_scales_with_ring_count();
+    test_json_builder_rejects_invalid_ring_state();
     test_access_json_and_logging_failure_branches();
     test_handler_get_head_and_denials();
     test_handler_failure_branches();
