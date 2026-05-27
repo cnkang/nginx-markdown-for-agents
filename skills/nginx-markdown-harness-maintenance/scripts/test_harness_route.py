@@ -26,17 +26,20 @@ from harness_route import (
 
 
 def test_find_repo_root_from_repo_file() -> None:
+    """Verify _find_repo_root locates the repo root when called from a file inside the repo."""
     repo_root = _find_repo_root(Path(__file__))
     assert (repo_root / "AGENTS.md").exists()
 
 
 def test_find_repo_root_fails_without_agents() -> None:
+    """Verify _find_repo_root exits when AGENTS.md is not found in any ancestor."""
     with tempfile.TemporaryDirectory() as tmpdir:
         with pytest.raises(SystemExit, match="cannot locate repository root"):
             _find_repo_root(Path(tmpdir))
 
 
 def test_load_manifest_validates_required_keys() -> None:
+    """Verify _load_manifest exits when required top-level keys are missing."""
     with tempfile.TemporaryDirectory() as tmpdir:
         manifest_path = Path(tmpdir) / "manifest.json"
         manifest_path.write_text(json.dumps({"version": 1}), encoding="utf-8")
@@ -45,6 +48,7 @@ def test_load_manifest_validates_required_keys() -> None:
 
 
 def test_load_manifest_validates_types() -> None:
+    """Verify _load_manifest exits when top-level values have wrong types."""
     with tempfile.TemporaryDirectory() as tmpdir:
         manifest_path = Path(tmpdir) / "manifest.json"
         manifest_path.write_text(
@@ -56,6 +60,7 @@ def test_load_manifest_validates_types() -> None:
 
 
 def test_load_manifest_validates_risk_pack_shape() -> None:
+    """Verify _load_manifest exits when a risk pack entry is missing required keys."""
     with tempfile.TemporaryDirectory() as tmpdir:
         manifest_path = Path(tmpdir) / "manifest.json"
         manifest_path.write_text(
@@ -72,6 +77,7 @@ def test_load_manifest_validates_risk_pack_shape() -> None:
 
 
 def test_load_manifest_validates_verification_family_key_shape() -> None:
+    """Verify _load_manifest exits when verification_families has an empty-string key."""
     with tempfile.TemporaryDirectory() as tmpdir:
         manifest_path = Path(tmpdir) / "manifest.json"
         manifest_path.write_text(
@@ -129,6 +135,7 @@ def test_load_manifest_validates_risk_pack_field_types(
     pack: dict,
     error_match: str,
 ) -> None:
+    """Verify _load_manifest exits when risk pack fields have wrong types (parametrized)."""
     with tempfile.TemporaryDirectory() as tmpdir:
         manifest_path = Path(tmpdir) / "manifest.json"
         manifest_path.write_text(
@@ -179,6 +186,7 @@ def test_load_manifest_validates_risk_pack_entry_values(
     families: list[str],
     error_match: str,
 ) -> None:
+    """Verify _load_manifest exits when risk pack list entries contain invalid values (parametrized)."""
     with tempfile.TemporaryDirectory() as tmpdir:
         manifest_path = Path(tmpdir) / "manifest.json"
         manifest_path.write_text(
@@ -205,6 +213,7 @@ def test_load_manifest_validates_risk_pack_entry_values(
 
 
 def test_match_path_directory_glob_has_boundary() -> None:
+    """Verify _match_path directory globs enforce path boundaries to avoid false matches."""
     assert _match_path(
         "components/nginx-module/src/foo.c", "components/nginx-module/**"
     )
@@ -214,6 +223,7 @@ def test_match_path_directory_glob_has_boundary() -> None:
 
 
 def test_parse_status_output_keeps_old_and_new_on_rename() -> None:
+    """Verify _parse_status_output returns both old and new paths for renames."""
     output = "R  old/path.c -> new/path.c\n M docs/harness/README.md\n"
     assert _parse_status_output(output) == [
         "old/path.c",
@@ -223,6 +233,7 @@ def test_parse_status_output_keeps_old_and_new_on_rename() -> None:
 
 
 def test_parse_status_output_skips_deleted_entries() -> None:
+    """Verify _parse_status_output filters out deleted files from index and worktree."""
     output = (
         "D  removed/from-index.c\n"
         " D removed/from-worktree.c\n"
@@ -237,9 +248,11 @@ def test_parse_status_output_skips_deleted_entries() -> None:
 
 
 def test_git_diff_files_uses_delete_filter(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify _git_diff_files passes --diff-filter=d to exclude deleted files."""
     captured: dict[str, list[str]] = {}
 
     def fake_check_output(cmd, cwd, stderr, text):
+        """Capture the subprocess command and return a fake diff output line."""
         captured["cmd"] = cmd
         return "docs/harness/README.md\n"
 
@@ -250,6 +263,7 @@ def test_git_diff_files_uses_delete_filter(monkeypatch: pytest.MonkeyPatch) -> N
 
 
 def test_parse_args_validates_base_at_cli_boundary(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify _parse_args accepts a valid --base ref with --from-git."""
     monkeypatch.setattr(
         sys,
         "argv",
@@ -261,6 +275,7 @@ def test_parse_args_validates_base_at_cli_boundary(monkeypatch: pytest.MonkeyPat
 
 
 def test_parse_args_rejects_invalid_base_before_main(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify _parse_args rejects a --base ref containing shell injection characters."""
     monkeypatch.setattr(
         sys,
         "argv",
@@ -273,7 +288,9 @@ def test_parse_args_rejects_invalid_base_before_main(monkeypatch: pytest.MonkeyP
 def test_git_status_files_expands_directory_with_nested_files(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Verify _git_status_files expands untracked directories into their nested file list."""
     def fake_check_output(cmd, cwd, stderr, text):
+        """Return fake git status/ls-files output simulating an untracked directory with nested files."""
         if cmd[:2] == ["git", "status"]:
             return "?? some_dir\n"
         if cmd[:2] == ["git", "ls-files"]:
@@ -282,6 +299,7 @@ def test_git_status_files_expands_directory_with_nested_files(
         raise AssertionError(f"unexpected command: {cmd}")
 
     def fake_is_dir(path: Path) -> bool:
+        """Return True only for the test directory path."""
         return path.as_posix().endswith("/some_dir")
 
     monkeypatch.setattr(harness_route.subprocess, "check_output", fake_check_output)
@@ -296,7 +314,9 @@ def test_git_status_files_expands_directory_with_nested_files(
 def test_git_status_files_directory_without_nested_files_falls_back_to_dir(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Verify _git_status_files falls back to the directory path when ls-files returns empty."""
     def fake_check_output(cmd, cwd, stderr, text):
+        """Return fake git status output with empty ls-files to simulate no nested files."""
         if cmd[:2] == ["git", "status"]:
             return "?? some_dir\n"
         if cmd[:2] == ["git", "ls-files"]:
@@ -304,6 +324,7 @@ def test_git_status_files_directory_without_nested_files_falls_back_to_dir(
         raise AssertionError(f"unexpected command: {cmd}")
 
     def fake_is_dir(path: Path) -> bool:
+        """Return True only for the test directory path."""
         return path.as_posix().endswith("/some_dir")
 
     monkeypatch.setattr(harness_route.subprocess, "check_output", fake_check_output)
@@ -315,7 +336,9 @@ def test_git_status_files_directory_without_nested_files_falls_back_to_dir(
 def test_git_status_files_directory_ls_files_error_falls_back_to_dir(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Verify _git_status_files falls back to the directory path when ls-files raises an error."""
     def fake_check_output(cmd, cwd, stderr, text):
+        """Return fake git status output and raise CalledProcessError for ls-files."""
         if cmd[:2] == ["git", "status"]:
             return "?? some_dir\n"
         if cmd[:2] == ["git", "ls-files"]:
@@ -323,6 +346,7 @@ def test_git_status_files_directory_ls_files_error_falls_back_to_dir(
         raise AssertionError(f"unexpected command: {cmd}")
 
     def fake_is_dir(path: Path) -> bool:
+        """Return True only for the test directory path."""
         return path.as_posix().endswith("/some_dir")
 
     monkeypatch.setattr(harness_route.subprocess, "check_output", fake_check_output)
@@ -332,11 +356,13 @@ def test_git_status_files_directory_ls_files_error_falls_back_to_dir(
 
 
 def test_normalize_files_splits_commas_and_normalizes_backslashes() -> None:
+    """Verify _normalize_files splits comma-separated entries and converts backslashes to forward slashes."""
     raw = ["a/b.py, c\\d.py", "  e/f.py  "]
     assert _normalize_files(raw) == ["a/b.py", "c/d.py", "e/f.py"]
 
 
 def test_pack_matches_scores_path_hits_higher_than_keywords() -> None:
+    """Verify _pack_matches returns path hits, keyword hits, and a combined score."""
     pack = {
         "id": "docs-tooling-drift",
         "doc": "docs/harness/risk-packs/docs-tooling-drift.md",
@@ -354,6 +380,7 @@ def test_pack_matches_scores_path_hits_higher_than_keywords() -> None:
 
 
 def test_pack_matches_score_uses_unique_hits() -> None:
+    """Verify _pack_matches deduplicates path and keyword hits before scoring."""
     pack = {
         "id": "docs-tooling-drift",
         "doc": "docs/harness/risk-packs/docs-tooling-drift.md",
@@ -369,6 +396,7 @@ def test_pack_matches_score_uses_unique_hits() -> None:
 
 
 def test_pack_matches_returns_none_without_any_hit() -> None:
+    """Verify _pack_matches returns None when neither paths nor keywords match."""
     pack = {
         "id": "runtime-streaming",
         "doc": "docs/harness/risk-packs/runtime-streaming.md",
@@ -380,6 +408,7 @@ def test_pack_matches_returns_none_without_any_hit() -> None:
 
 
 def test_pack_matches_avoids_substring_keyword_false_positive() -> None:
+    """Verify _pack_matches does not match keywords as substrings within file paths."""
     pack = {
         "id": "docs-tooling-drift",
         "doc": "docs/harness/risk-packs/docs-tooling-drift.md",
@@ -391,6 +420,7 @@ def test_pack_matches_avoids_substring_keyword_false_positive() -> None:
 
 
 def test_verification_plan_dedupes_and_sorts_by_phase() -> None:
+    """Verify _verification_plan deduplicates families, sorts by phase, and reports unknown families."""
     manifest = {
         "verification_families": {
             "release-quality": {
@@ -454,6 +484,7 @@ def test_verification_plan_dedupes_and_sorts_by_phase() -> None:
     ],
 )
 def test_validate_git_ref_accepts_valid_refs(ref: str) -> None:
+    """Verify _validate_git_ref returns the ref unchanged for valid git ref formats (parametrized)."""
     assert _validate_git_ref(ref) == ref
 
 
@@ -475,14 +506,17 @@ def test_validate_git_ref_accepts_valid_refs(ref: str) -> None:
     ],
 )
 def test_validate_git_ref_rejects_invalid_refs(ref: str) -> None:
+    """Verify _validate_git_ref rejects refs containing shell injection or unsafe characters (parametrized)."""
     with pytest.raises(SystemExit, match="invalid base ref"):
         _validate_git_ref(ref)
 
 
 def test_git_diff_files_accepts_tilde_ref(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify _git_diff_files passes tilde-style refs (e.g. HEAD~3) to the git command."""
     captured: dict[str, list[str]] = {}
 
     def fake_check_output(cmd, cwd, stderr, text):
+        """Capture the subprocess command and return a fake diff output line."""
         captured["cmd"] = cmd
         return "some/file.py\n"
 
