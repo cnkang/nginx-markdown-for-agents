@@ -456,4 +456,32 @@ mod tests {
             104
         );
     }
+
+    /// Decompressing a gzip-compressed empty payload should succeed with
+    /// zero-length output.  This validates that the decompressor does not
+    /// treat a valid empty result as an error (regression test for F-02).
+    #[test]
+    fn gzip_empty_payload_decompresses_to_empty() {
+        let compressed = gzip_compress(b"");
+        let result = decompress_bounded(&compressed, Format::Gzip, 1024).unwrap();
+        assert_eq!(result.output.len(), 0);
+    }
+
+    /// Decompressing a deflate-compressed empty payload should succeed
+    /// with zero-length output.
+    #[test]
+    fn deflate_empty_payload_decompresses_to_empty() {
+        let compressed = deflate_compress(b"");
+        let result = decompress_bounded(&compressed, Format::Deflate, 1024).unwrap();
+        assert_eq!(result.output.len(), 0);
+    }
+
+    /// Decompressing a brotli-compressed empty payload should succeed
+    /// with zero-length output.
+    #[test]
+    fn brotli_empty_payload_decompresses_to_empty() {
+        let compressed = brotli_compress(b"");
+        let result = decompress_bounded(&compressed, Format::Brotli, 1024).unwrap();
+        assert_eq!(result.output.len(), 0);
+    }
 }

@@ -715,7 +715,17 @@ ngx_http_markdown_decompress_via_rust(
     input_size = 0;
     for (src = compressed_chain; src != NULL; src = src->next) {
         if (src->buf != NULL) {
-            input_size += (size_t) (src->buf->last - src->buf->pos);
+            size_t  len;
+
+            len = (size_t) (src->buf->last - src->buf->pos);
+            if (len > ((size_t) -1) - input_size) {
+                ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                             "markdown: rust decompress "
+                             "input size overflow, "
+                             "category=resource");
+                return NGX_ERROR;
+            }
+            input_size += len;
         }
     }
 
@@ -796,13 +806,53 @@ ngx_http_markdown_decompress_via_rust(
     /*
      * Success: copy the Rust-owned output to pool memory, then
      * free the Rust allocation.
+     *
+     * A zero-length output is valid (e.g. decompressing an empty
+     * compressed payload).  Only treat it as an error when the
+     * pointer is NULL but the length claims non-zero bytes.
      */
-    if (result.output == NULL || result.output_len == 0) {
+    if (result.output == NULL && result.output_len > 0) {
         markdown_decompress_free(&result);
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                      "markdown: rust decompress "
-                     "returned empty output");
+                     "returned NULL output with "
+                     "non-zero length=%uz",
+                     (size_t) result.output_len);
         return NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR;
+    }
+
+    if (result.output_len == 0) {
+        /*
+         * Valid empty decompression result.  Build a zero-length
+         * buffer chain so downstream sees an empty body rather
+         * than an error.
+         */
+        markdown_decompress_free(&result);
+
+        b = ngx_calloc_buf(r->pool);
+        if (b == NULL) {
+            return NGX_ERROR;
+        }
+
+        b->pos = NULL;
+        b->last = NULL;
+        b->memory = 1;
+        b->last_buf = 1;
+
+        cl = ngx_alloc_chain_link(r->pool);
+        if (cl == NULL) {
+            return NGX_ERROR;
+        }
+
+        cl->buf = b;
+        cl->next = NULL;
+        *decompressed_chain = cl;
+
+        ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                      "markdown: rust decompress "
+                      "succeeded with empty output, "
+                      "input=%uz", input_size);
+        return NGX_OK;
     }
 
     pool_copy = ngx_palloc(r->pool, (size_t) result.output_len);
