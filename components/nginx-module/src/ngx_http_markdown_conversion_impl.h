@@ -694,7 +694,7 @@ ngx_http_markdown_prepare_conversion_options(ngx_http_request_t *r,
 {
     ngx_str_t base_url;
 
-    ngx_memzero(options, sizeof(struct MarkdownOptions));
+    markdown_options_init(options);
     if (conf->flavor > UINT32_MAX) {
         ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
                      "markdown: flavor=%ui exceeds uint32 max, clamping",
@@ -1396,7 +1396,7 @@ ngx_http_markdown_shadow_compare(
      * result for shadow comparison.
      */
 
-    ngx_memzero(&st_result, sizeof(struct MarkdownResult));
+    markdown_result_init(&st_result);
     rc = markdown_streaming_finalize(handle, &st_result);
 
     tp = ngx_timeofday();
@@ -1594,7 +1594,7 @@ ngx_http_markdown_execute_conversion(ngx_http_request_t *r,
     tp = ngx_timeofday();
     start_time = (ngx_msec_t) (tp->sec * 1000 + tp->msec);
 
-    ngx_memzero(result, sizeof(struct MarkdownResult));
+    markdown_result_init(result);
 
 #ifdef MARKDOWN_INCREMENTAL_ENABLED
     if (ctx->processing_path == NGX_HTTP_MARKDOWN_PATH_INCREMENTAL) {
