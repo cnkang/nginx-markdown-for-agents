@@ -288,8 +288,44 @@ ngx_http_markdown_apply_decompressed_payload(ngx_http_request_t *r,
             NGX_HTTP_MARKDOWN_ERROR_SYSTEM, NULL);
     }
 
-    ctx->decompression.decompressed_size = decompressed_chain->buf->last - decompressed_chain->buf->pos;
-    decompressed_data = decompressed_chain->buf->pos;
+    /*
+     * Compute decompressed size defensively.  When both pos and last
+     * are NULL the buffer represents a valid zero-length payload (e.g.
+     * decompressing an empty compressed stream).  Pointer subtraction
+     * on two NULL pointers is undefined behaviour in C, so we handle
+     * this case explicitly.
+     */
+    if (decompressed_chain->buf->pos == NULL
+        && decompressed_chain->buf->last == NULL)
+    {
+        ctx->decompression.decompressed_size = 0;
+        decompressed_data = NULL;
+    } else if (decompressed_chain->buf->pos == NULL
+               || decompressed_chain->buf->last == NULL
+               || decompressed_chain->buf->last
+                  < decompressed_chain->buf->pos)
+    {
+        const ngx_str_t *compression_name;
+
+        compression_name = ngx_http_markdown_compression_name(
+            ctx->decompression.type);
+
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                     "markdown: decompression "
+                     "returned invalid buffer "
+                     "pointers, compression=%V, "
+                     "category=system",
+                     compression_name);
+
+        return ngx_http_markdown_handle_decompression_alloc_error(
+            r, ctx, conf,
+            NGX_HTTP_MARKDOWN_ERROR_SYSTEM, NULL);
+    } else {
+        ctx->decompression.decompressed_size =
+            decompressed_chain->buf->last - decompressed_chain->buf->pos;
+        decompressed_data = decompressed_chain->buf->pos;
+    }
+
     target_data = ctx->buffer.data;
 
     if (ctx->decompression.decompressed_size > ctx->buffer.capacity) {
@@ -723,7 +759,7 @@ ngx_http_markdown_decompress_via_rust(
                              "markdown: rust decompress "
                              "input size overflow, "
                              "category=resource");
-                return NGX_ERROR;
+                return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
             }
             input_size += len;
         }
