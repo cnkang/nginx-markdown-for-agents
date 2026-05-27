@@ -1332,7 +1332,6 @@ ngx_http_markdown_shadow_compare(
     struct StreamingConverterHandle  *handle;
     struct MarkdownOptions            options;
     struct MarkdownResult             st_result;
-    ngx_memzero(&st_result, sizeof(st_result));
     uint8_t                          *out_data;
     uintptr_t                         out_len;
     uint32_t                          init_rc;

@@ -779,7 +779,7 @@ ngx_http_markdown_body_filter_convert_and_output(ngx_http_request_t *r,
     ngx_msec_t            elapsed_ms;
     ngx_flag_t            has_result;
     struct MarkdownResult result;
-    ngx_memzero(&result, sizeof(result));
+    markdown_result_init(&result);
 
     /*
      * Deferred path selection for chunked/unknown-length
