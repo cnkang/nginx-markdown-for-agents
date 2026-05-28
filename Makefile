@@ -80,15 +80,17 @@ build: rust-lib copy-headers
 	@echo "Build complete for $(RUST_TARGET)"
 	@echo "Rust library: $(RUST_LIB)"
 
+RUST_RELEASE_FEATURES ?= streaming,incremental
+
 rust-lib:
 	@echo "Building Rust library for $(RUST_TARGET)..."
-	cd $(RUST_DIR) && cargo build --locked --target $(RUST_TARGET) --release
+	cd $(RUST_DIR) && cargo build --locked --target $(RUST_TARGET) --release --features $(RUST_RELEASE_FEATURES)
 	@echo "Generating C header with cbindgen..."
 	cd $(RUST_DIR) && mkdir -p include && cbindgen --quiet --config cbindgen.toml --crate nginx-markdown-converter --output include/markdown_converter.h
 
 rust-lib-debug:
 	@echo "Building Rust library (debug) for $(RUST_TARGET)..."
-	cd $(RUST_DIR) && cargo build --locked --target $(RUST_TARGET)
+	cd $(RUST_DIR) && cargo build --locked --target $(RUST_TARGET) --features $(RUST_RELEASE_FEATURES)
 
 copy-headers:
 	@echo "Copying headers to nginx module source..."
@@ -265,7 +267,11 @@ release-gates-check-070:
 	@if [ -n "$$NGINX_BIN" ]; then \
 	$(MAKE) verify-chunked-native-e2e-smoke; \
 	else \
-	echo "==> SKIP: verify-chunked-native-e2e-smoke (NGINX_BIN not set; requires pre-built NGINX binary)"; \
+	if [ "$${RELEASE_GATE_ALLOW_SKIP_NATIVE_E2E:-0}" = "1" ]; then \
+	echo "==> SKIP (non-release): verify-chunked-native-e2e-smoke (NGINX_BIN not set; RELEASE_GATE_ALLOW_SKIP_NATIVE_E2E=1)"; \
+	else \
+	echo "FAIL: verify-chunked-native-e2e-smoke requires NGINX_BIN; set RELEASE_GATE_ALLOW_SKIP_NATIVE_E2E=1 to skip for non-release validation" >&2; exit 1; \
+	fi; \
 	fi
 	$(MAKE) test-e2e-rust
 	python3 tools/release/gates/validate_release_gates_070.py --mode strict
@@ -342,7 +348,11 @@ release-gates-check-070:
 	echo "  [fuzz-build] cargo +nightly fuzz build..."; \
 	cd $(RUST_DIR) && cargo +nightly fuzz build; \
 	else \
-	echo "  [fuzz-build] SKIP: cargo nightly not available"; \
+	if [ "$${RELEASE_GATE_ALLOW_SKIP_FUZZ:-0}" = "1" ]; then \
+	echo "  [fuzz-build] SKIP (non-release): cargo nightly not available (RELEASE_GATE_ALLOW_SKIP_FUZZ=1)"; \
+	else \
+	echo "FAIL: fuzz build requires cargo +nightly; set RELEASE_GATE_ALLOW_SKIP_FUZZ=1 to skip for non-release validation" >&2; exit 1; \
+	fi; \
 	fi
 	@if cargo +nightly --version >/dev/null 2>&1; then \
 	echo "  [fuzz-smoke] Running fuzz smoke (10s × 3 representative targets)..."; \
@@ -351,7 +361,11 @@ release-gates-check-070:
 		cargo +nightly fuzz run "$$target" -- -max_total_time=10; \
 	done; \
 	else \
-	echo "  [fuzz-smoke] SKIP: cargo nightly not available"; \
+	if [ "$${RELEASE_GATE_ALLOW_SKIP_FUZZ:-0}" = "1" ]; then \
+	echo "  [fuzz-smoke] SKIP (non-release): cargo nightly not available (RELEASE_GATE_ALLOW_SKIP_FUZZ=1)"; \
+	else \
+	echo "FAIL: fuzz smoke requires cargo +nightly; set RELEASE_GATE_ALLOW_SKIP_FUZZ=1 to skip for non-release validation" >&2; exit 1; \
+	fi; \
 	fi
 	@echo "  [cflite-workflows] Checking ClusterFuzzLite workflow files..."
 	@test -f .github/workflows/cflite_pr.yml || { echo "FAIL: .github/workflows/cflite_pr.yml not found" >&2; exit 1; }
