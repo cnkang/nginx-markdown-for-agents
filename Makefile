@@ -263,7 +263,15 @@ release-gates-check-070:
 	$(MAKE) check-headers
 	$(MAKE) test-rust
 	$(MAKE) test-nginx-unit
-	$(MAKE) test-rust-fuzz-smoke
+	@if cargo +nightly --version >/dev/null 2>&1; then \
+	$(MAKE) test-rust-fuzz-smoke; \
+	else \
+	if [ "$${RELEASE_GATE_ALLOW_SKIP_FUZZ:-0}" = "1" ]; then \
+	echo "==> SKIP (non-release): test-rust-fuzz-smoke (cargo nightly not available; RELEASE_GATE_ALLOW_SKIP_FUZZ=1)"; \
+	else \
+	echo "FAIL: test-rust-fuzz-smoke requires cargo +nightly; set RELEASE_GATE_ALLOW_SKIP_FUZZ=1 to skip for non-release validation" >&2; exit 1; \
+	fi; \
+	fi
 	@if [ -n "$$NGINX_BIN" ]; then \
 	$(MAKE) verify-chunked-native-e2e-smoke; \
 	else \
@@ -300,6 +308,15 @@ release-gates-check-070:
 				exit 0; \
 			fi; \
 			if command -v nfpm >/dev/null 2>&1; then \
+				if ! test -f build/ngx_http_markdown_filter_module.so; then \
+					echo "FAIL: install-layout requires build/ngx_http_markdown_filter_module.so but it was not found." >&2; \
+					echo "  The 'make build' target only builds the Rust static library, not the NGINX dynamic module." >&2; \
+					echo "  To fix, either:" >&2; \
+					echo "    1. Place pre-built packages in dist/ (from release workflow artifacts), or" >&2; \
+					echo "    2. Build the NGINX module .so first (requires NGINX source), or" >&2; \
+					echo "    3. Set RELEASE_GATE_REQUIRE_PACKAGES=0 to skip install-layout validation." >&2; \
+					exit 1; \
+				fi; \
 				host_arch="$$(uname -m)"; \
 				if test "$$(uname -s)" = "Darwin" && \
 					test "$$(sysctl -n hw.optional.arm64 2>/dev/null || echo 0)" = "1"; then \
@@ -312,8 +329,6 @@ release-gates-check-070:
 				esac; \
 				echo "  [install-layout] No packages found; building local $$nfpm_arch DEB/RPM with nFPM..."; \
 				mkdir -p dist; \
-					test -f build/ngx_http_markdown_filter_module.so || \
-						{ echo "FAIL: build/ngx_http_markdown_filter_module.so not found" >&2; exit 1; }; \
 				PKG_VERSION=$${PKG_VERSION:-0.7.0} NGINX_VERSION=$${NGINX_VERSION:-1.26.3} NFPM_ARCH=$$nfpm_arch \
 					nfpm package --config packaging/nfpm/nfpm.yaml --packager deb \
 					--target dist/nginx-module-markdown-for-agents_$${PKG_VERSION:-0.7.0}_nginx-$${NGINX_VERSION:-1.26.3}_$${nfpm_arch}.deb; \
@@ -321,7 +336,11 @@ release-gates-check-070:
 					nfpm package --config packaging/nfpm/nfpm.yaml --packager rpm \
 					--target dist/nginx-module-markdown-for-agents-$${PKG_VERSION:-0.7.0}-nginx$${NGINX_VERSION:-1.26.3}-1.$${rpm_arch}.rpm; \
 			else \
-				echo "FAIL: no package files in dist/ and nfpm is unavailable" >&2; \
+				echo "FAIL: no package files in dist/ and nfpm is unavailable." >&2; \
+				echo "  To fix, either:" >&2; \
+				echo "    1. Place pre-built packages in dist/ (from release workflow artifacts), or" >&2; \
+				echo "    2. Install nfpm and build the NGINX module .so, or" >&2; \
+				echo "    3. Set RELEASE_GATE_REQUIRE_PACKAGES=0 to skip install-layout validation." >&2; \
 				exit 1; \
 			fi; \
 		fi; \
