@@ -47,6 +47,11 @@ Select the package that matches your exact NGINX version and architecture.
 Using a package built for a different NGINX version will result in a binary
 compatibility error at load time.
 
+After upgrading NGINX, install the package whose artifact name matches the new
+NGINX version and run `sudo nginx -t` before reloading the service. The package
+dependency floor allows installation, but runtime ABI compatibility is only
+validated for the tested NGINX version encoded in the package name.
+
 ---
 
 ## Installation Steps

@@ -59,6 +59,19 @@ Required:
     release package upload, smoke-test download, and signing workflows.
     Fail-closed signing is correct, but mismatched artifact names are still a
     release integration bug.
+  - Release workflows that inspect compiled binaries must explicitly install
+    the package that provides the inspection tool and run a preflight check
+    before using it.  For example, a workflow that calls `nm` must install
+    `binutils` and fail with a clear message if `command -v nm` fails.
+  - Release Rust builds must use a repository-pinned toolchain synchronized
+    with `components/rust-converter/Cargo.toml` `rust-version`.  Do not leave
+    release workflows on floating `stable` when the crate requires a specific
+    compiler version.
+  - Every workflow capable of producing release package artifacts must apply
+    the same Rust release build invariants: `--locked`, intended feature set,
+    explicit target triple, and the matching target output directory.  If a
+    workflow is retained only as a compatibility path, mark it as non-canonical
+    and validate that status in the release gate.
   - Standalone package workflows must use the same package name and install
     layout as the canonical nFPM path.  If a workflow packages a prebuilt
     `.so`, its SPEC/control metadata must not try to rebuild from missing

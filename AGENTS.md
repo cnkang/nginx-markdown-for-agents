@@ -205,6 +205,18 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
   Dockerfiles has a checked-in checksum, package artifact producer/consumer
   names match exactly, and architecture-specific smoke tests run on matching
   runner architecture [13]
+- Release workflows that perform binary symbol validation must explicitly
+  install the tool package that provides the validator (`binutils` for `nm`)
+  and fail early with a clear preflight check if the binary is unavailable [13]
+- Release Rust builds must use a repository-pinned toolchain synchronized with
+  `components/rust-converter/Cargo.toml` `rust-version`; release workflows must
+  not silently float on `stable` when the crate requires a specific compiler
+  version [13]
+- All workflows capable of producing release package artifacts must apply the
+  same Rust release build invariants: `--locked`, intended feature set,
+  explicit target triple, and the matching target output directory. If a
+  workflow is retained only for compatibility, mark it as non-canonical and
+  gate that status explicitly [13]
 - Standalone package workflows use the canonical package name and install
   layout, run `check_install_layout.sh` before upload, and do not ask RPM SPECs
   to rebuild when the workflow source tarball contains only a prebuilt module
@@ -386,3 +398,4 @@ remediation:
 | 0.7.6 | 2026-05-26 | Codex | Strengthened Rule 13 for stock-image-safe Helm defaults, explicit module-enabled Helm configuration, and no implicit module-derived hostPath mounts |
 | 0.7.7 | 2026-05-27 | Codex | Strengthened Rule 13 for gating Helm metrics directives behind module enablement |
 | 0.7.8 | 2026-05-27 | Codex | Strengthened Rule 13 for package-install docs matching the actually published GitHub Release artifact channel before APT/YUM repositories exist |
+| 0.7.9 | 2026-05-29 | Codex | Strengthened Rule 13 for release workflow tool preflights, Rust toolchain pinning, and consistent package build invariants across canonical and compatibility workflows |
