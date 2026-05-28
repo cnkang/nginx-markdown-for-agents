@@ -62,7 +62,7 @@ LICENSE_INSTALL_DIR := $(PREFIX)/share/licenses/nginx-markdown-for-agents
         test test-rust test-rust-doc test-nginx-unit test-nginx-unit-streaming test-nginx-unit-clang-smoke test-nginx-unit-sanitize-smoke \
         test-nginx-integration test-e2e test-e2e-rust test-all test-rust-fuzz-smoke fuzz-smoke sonar-compile-db \
         test-benchmark test-benchmark-compare test-benchmark-summary \
-        harness-check harness-check-full harness-security-checks \
+        harness-check harness-check-full harness-security-checks test-harness \
 	docs-check license-check release-gates-check release-gates-check-055 release-gates-check-060 release-gates-check-070 release-gates-check-070-docker release-gates-check-legacy release-gates-check-strict \
         verify-large-e2e verify-huge-native-e2e verify-huge-allowed-native-e2e \
         verify-chunked-native-e2e verify-chunked-native-e2e-smoke verify-chunked-native-e2e-stress \
@@ -222,6 +222,7 @@ harness-check-full:
 	python3 tools/harness/check_harness_sync.py --full
 	$(MAKE) release-gates-check
 	$(MAKE) harness-security-checks
+	$(MAKE) test-harness
 	$(MAKE) check-headers
 
 harness-security-checks:
@@ -234,6 +235,11 @@ harness-security-checks:
 	bash tools/harness/detect_header_hash_filter.sh
 	bash tools/harness/detect_finalize_return.sh
 	bash tools/harness/detect_ffi_struct_init.sh
+
+test-harness:
+	@echo "=== Harness Detector Unit Tests ==="
+	bash tools/harness/tests/test_detect_ffi_struct_init.sh
+	python3 -m pytest tools/harness/tests/ -q --tb=short -k "not check_harness_sync"
 
 license-check:
 	python3 tools/ci/check_c_licenses.py
@@ -542,6 +548,7 @@ help:
 	@echo "  harness-check            - Validate harness truth surfaces and optional local adapters"
 	@echo "  harness-check-full       - Run full harness validation plus docs/release checks"
 	@echo "  harness-security-checks  - Run CWE-190/CWE-22/effective-conf/shell-hygiene/const-correctness detection"
+	@echo "  test-harness             - Run unit tests for harness detector scripts"
 	@echo "  docs-check               - Validate documentation links/style"
 	@echo "  license-check            - Verify license policy and THIRD-PARTY-NOTICES coverage"
 	@echo "  release-gates-check      - Validate release gate framework (0.5.0 + 0.5.5)"
