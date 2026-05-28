@@ -133,6 +133,20 @@ jobs:
           "${HOME}/.cargo/bin/cargo" --version
         shell: bash
 
+      - name: Determine Rust target triple
+        run: |
+          case "${{ matrix.arch }}" in
+            amd64) RUST_TARGET="x86_64-unknown-linux-gnu" ;;
+            arm64) RUST_TARGET="aarch64-unknown-linux-gnu" ;;
+            *)
+              echo "ERROR: unsupported arch: ${{ matrix.arch }}" >&2
+              exit 1
+              ;;
+          esac
+          echo "RUST_TARGET=${RUST_TARGET}" >> "$GITHUB_ENV"
+          echo "Rust target triple: ${RUST_TARGET}"
+        shell: bash
+
       - name: Download NGINX source
         env:
           NGINX_VERSION: ${{ matrix.nginx_version }}
@@ -150,28 +164,24 @@ jobs:
 
       - name: Build Rust converter
         run: |
+          rustup target add "${RUST_TARGET}"
           cd components/rust-converter
-          cargo build --release --locked --features streaming,incremental
+          cargo build --release --locked --target "${RUST_TARGET}" --features streaming,incremental
         shell: bash
 
       - name: Verify required FFI symbols in Rust static library
         run: |
-          RUST_LIB_DIR="components/rust-converter/target/release"
-          if [ "$(uname -s)" = "Darwin" ]; then
-            LIB_EXT="a"
-          else
-            LIB_EXT="a"
-          fi
-          RUST_LIB="${RUST_LIB_DIR}/libnginx_markdown_converter.${LIB_EXT}"
+          RUST_LIB="components/rust-converter/target/${RUST_TARGET}/release/libnginx_markdown_converter.a"
           if [ ! -f "${RUST_LIB}" ]; then
             echo "ERROR: Rust static library not found: ${RUST_LIB}" >&2
             exit 1
           fi
           MISSING=0
           for sym in markdown_streaming_new markdown_incremental_new markdown_decompress_bounded; do
-            # macOS nm prefixes symbols with '_'; Linux does not.
-            # Use grep -E to match either form.
-            if ! nm -g "${RUST_LIB}" 2>/dev/null | grep -qE "(^|_)${sym}$"; then
+            # nm output: <address> <type> <symbol_name>
+            # macOS prefixes with '_', Linux does not.
+            # Extract the last field and match with optional '_' prefix.
+            if ! nm -g "${RUST_LIB}" 2>/dev/null | awk '{print $NF}' | grep -qx "_\?${sym}"; then
               echo "ERROR: Required symbol ${sym} not found in ${RUST_LIB}" >&2
               MISSING=1
             else
