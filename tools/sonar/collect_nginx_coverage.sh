@@ -482,6 +482,22 @@ http {
             markdown_auth_cookies "session*" "*_logged_in";
         }
 
+        # Proxy to backend with Cache-Control: private (exercises has_private no-op path)
+        location /proxy-private-cc {
+            proxy_pass http://127.0.0.1:${BACKEND_PORT}/with-private-cc/;
+            markdown_filter on;
+            markdown_auth_policy allow;
+            markdown_auth_cookies "session*" "*_logged_in";
+        }
+
+        # Proxy to backend with Cache-Control: private, no-store (preserve no-store)
+        location /proxy-private-nostore-cc {
+            proxy_pass http://127.0.0.1:${BACKEND_PORT}/with-private-nostore-cc/;
+            markdown_filter on;
+            markdown_auth_policy allow;
+            markdown_auth_cookies "session*" "*_logged_in";
+        }
+
         # ── Streaming engine locations (requires --features streaming) ──
         location /streaming {
             root html;
@@ -684,6 +700,18 @@ http {
         location /with-nostore-cc/ {
             alias html/;
             add_header Cache-Control "no-store";
+        }
+
+        # Serve with Cache-Control: private for CC has_private path testing
+        location /with-private-cc/ {
+            alias html/;
+            add_header Cache-Control "private, max-age=60";
+        }
+
+        # Serve with Cache-Control: private, no-store for CC preserve testing
+        location /with-private-nostore-cc/ {
+            alias html/;
+            add_header Cache-Control "private, no-store";
         }
 
         # Deliberately mislabeled encodings for decompression negative-path coverage.
@@ -1214,6 +1242,186 @@ curl -sS -H "${ACCEPT_MARKDOWN}" \
   -H "X-H16: 16" -H "X-H17: 17" -H "X-H18: 18" -H "X-H19: 19" -H "X-H20: 20" \
   -H "X-H21: 21" -H "X-H22: 22" -H "X-H23: 23" -H "X-H24: 24" -H "X-H25: 25" \
   "http://127.0.0.1:${PORT}/index.html" -o /dev/null -w "  multi-part headers: HTTP %{http_code}\n"
+
+# ── Extended auth Cache-Control scenarios (coverage for ngx_http_markdown_auth.c) ──
+
+# Auth + no existing CC header on auth-public-cc (exercises add-private path when no CC exists)
+# First request without expires header to establish baseline
+curl -sS -H "${ACCEPT_MARKDOWN}" -H 'Authorization: Bearer TOKEN_CC' \
+  "http://127.0.0.1:${PORT}/auth-allow/index.html" -o /dev/null -w "  auth bearer no-cc: HTTP %{http_code}\n"
+
+# Auth + cookie with session prefix + no CC (add-private path)
+curl -sS -H "${ACCEPT_MARKDOWN}" -H 'Cookie: session_new=xyz' \
+  "http://127.0.0.1:${PORT}/auth-allow/index.html" -o /dev/null -w "  auth session cookie no-cc: HTTP %{http_code}\n"
+
+# Auth + CC already has private (should be no-op)
+curl -sS -H "${ACCEPT_MARKDOWN}" -H "${AUTH_COOKIE_SESSION}" \
+  -H 'Cache-Control: private, max-age=60' \
+  "http://127.0.0.1:${PORT}/auth-allow/index.html" -o /dev/null -w "  auth cc-already-private: HTTP %{http_code}\n"
+
+# Auth + CC no-store (preserve, never downgrade)
+curl -sS -H "${ACCEPT_MARKDOWN}" -H "${AUTH_COOKIE_SESSION}" \
+  -H 'Cache-Control: no-store' \
+  "http://127.0.0.1:${PORT}/auth-allow/index.html" -o /dev/null -w "  auth cc-nostore-preserve: HTTP %{http_code}\n"
+
+# Auth + CC private, no-store (preserve no-store)
+curl -sS -H "${ACCEPT_MARKDOWN}" -H "${AUTH_COOKIE_SESSION}" \
+  -H 'Cache-Control: private, no-store' \
+  "http://127.0.0.1:${PORT}/auth-allow/index.html" -o /dev/null -w "  auth cc-private-nostore: HTTP %{http_code}\n"
+
+# Auth + multiple CC headers (exercises scan of multiple Cache-Control entries)
+curl -sS -H "${ACCEPT_MARKDOWN}" -H "${AUTH_COOKIE_SESSION}" \
+  -H 'Cache-Control: public, max-age=3600' \
+  -H 'Cache-Control: must-revalidate' \
+  "http://127.0.0.1:${PORT}/auth-allow/index.html" -o /dev/null -w "  auth multi-cc: HTTP %{http_code}\n"
+
+# Auth + CC public, max-age (strip public, append private)
+curl -sS -H "${ACCEPT_MARKDOWN}" -H "${AUTH_COOKIE_SESSION}" \
+  -H 'Cache-Control: public, max-age=3600' \
+  "http://127.0.0.1:${PORT}/auth-allow/index.html" -o /dev/null -w "  auth cc-public-rewrite: HTTP %{http_code}\n"
+
+# Proxy + auth + CC public from upstream (exercises strip-public-and-append-private)
+curl -sS -H "${ACCEPT_MARKDOWN}" -H "${AUTH_COOKIE_SESSION}" \
+  "http://127.0.0.1:${PORT}/proxy-public-cc/large.html" -o /dev/null -w "  proxy auth cc-public large: HTTP %{http_code}\n"
+
+# Proxy + auth + CC no-store from upstream (exercises preserve-nostore)
+curl -sS -H "${ACCEPT_MARKDOWN}" -H "${AUTH_COOKIE_SESSION}" \
+  "http://127.0.0.1:${PORT}/proxy-nostore-cc/large.html" -o /dev/null -w "  proxy auth cc-nostore large: HTTP %{http_code}\n"
+
+# Auth + no cookies, no authorization (not authenticated → no CC modification)
+curl -sS -H "${ACCEPT_MARKDOWN}" \
+  "http://127.0.0.1:${PORT}/auth-allow/index.html" -o /dev/null -w "  auth-allow unauthenticated: HTTP %{http_code}\n"
+
+# Proxy + auth + CC private from upstream (exercises has_private no-op path)
+curl -sS -H "${ACCEPT_MARKDOWN}" -H "${AUTH_COOKIE_SESSION}" \
+  "http://127.0.0.1:${PORT}/proxy-private-cc/index.html" -o /dev/null -w "  proxy auth cc-private: HTTP %{http_code}\n"
+
+# Proxy + auth + CC private,no-store from upstream (exercises preserve no-store)
+curl -sS -H "${ACCEPT_MARKDOWN}" -H "${AUTH_COOKIE_SESSION}" \
+  "http://127.0.0.1:${PORT}/proxy-private-nostore-cc/index.html" -o /dev/null -w "  proxy auth cc-private-nostore: HTTP %{http_code}\n"
+
+# Auth + PHPSESSID cookie (exact match for default pattern)
+curl -sS -H "${ACCEPT_MARKDOWN}" -H 'Cookie: PHPSESSID=abc123' \
+  "http://127.0.0.1:${PORT}/auth/index.html" -o /dev/null -w "  auth PHPSESSID cookie: HTTP %{http_code}\n"
+
+# Auth + empty cookie header (edge case: no cookie names)
+curl -sS -H "${ACCEPT_MARKDOWN}" -H 'Cookie: ' \
+  "http://127.0.0.1:${PORT}/auth/index.html" -o /dev/null -w "  auth empty cookie: HTTP %{http_code}\n"
+
+# Auth + multiple Cookie headers (exercises cookie header chain iteration)
+curl -sS -H "${ACCEPT_MARKDOWN}" \
+  -H 'Cookie: tracking=abc' -H 'Cookie: session_xyz=val' \
+  "http://127.0.0.1:${PORT}/auth/index.html" -o /dev/null -w "  auth multi-cookie-headers: HTTP %{http_code}\n"
+
+# ── Extended conditional request scenarios (coverage for ngx_http_markdown_conditional.c) ──
+
+# Conditional: If-None-Match + If-Modified-Since together (both present)
+curl -sS -H "${ACCEPT_MARKDOWN}" \
+  -H 'If-None-Match: "combined-etag"' \
+  -H 'If-Modified-Since: Thu, 01 Jan 2099 00:00:00 GMT' \
+  "http://127.0.0.1:${PORT}/index.html" -o /dev/null -w "  INM+IMS combined: HTTP %{http_code}\n"
+
+# Conditional: If-None-Match with empty value (should be treated as absent)
+curl -sS -H "${ACCEPT_MARKDOWN}" -H 'If-None-Match: ' \
+  "http://127.0.0.1:${PORT}/index.html" -o /dev/null -w "  INM empty value: HTTP %{http_code}\n"
+
+# Conditional: If-None-Match to ims-only (should skip INM, return 200)
+curl -sS -H "${ACCEPT_MARKDOWN}" -H 'If-None-Match: "any-etag"' \
+  "http://127.0.0.1:${PORT}/ims-only/index.html" -o /dev/null -w "  ims-only with INM: HTTP %{http_code}\n"
+
+# Conditional: If-Modified-Since to ims-only (should exercise IMS path)
+curl -sS -H "${ACCEPT_MARKDOWN}" -H 'If-Modified-Since: Thu, 01 Jan 2099 00:00:00 GMT' \
+  "http://127.0.0.1:${PORT}/ims-only/index.html" -o /dev/null -w "  ims-only with IMS future: HTTP %{http_code}\n"
+curl -sS -H "${ACCEPT_MARKDOWN}" -H 'If-Modified-Since: Mon, 01 Jan 2020 00:00:00 GMT' \
+  "http://127.0.0.1:${PORT}/ims-only/index.html" -o /dev/null -w "  ims-only with IMS past: HTTP %{http_code}\n"
+
+# Conditional: disabled mode + If-None-Match (should skip entirely)
+curl -sS -H "${ACCEPT_MARKDOWN}" -H 'If-None-Match: "disabled-etag"' \
+  "http://127.0.0.1:${PORT}/no-conditional/index.html" -o /dev/null -w "  disabled-conditional INM: HTTP %{http_code}\n"
+
+# Conditional: If-None-Match with multiple comma-separated ETags
+curl -sS -H "${ACCEPT_MARKDOWN}" -H 'If-None-Match: "etag1", "etag2", "etag3"' \
+  "http://127.0.0.1:${PORT}/index.html" -o /dev/null -w "  INM triple etag: HTTP %{http_code}\n"
+
+# Conditional: If-None-Match with W/ weak prefix + quoted
+curl -sS -H "${ACCEPT_MARKDOWN}" -H 'If-None-Match: W/"weak-etag-value"' \
+  "http://127.0.0.1:${PORT}/index.html" -o /dev/null -w "  INM weak quoted: HTTP %{http_code}\n"
+
+# Conditional: If-None-Match wildcard to no-etag (etag off, should bypass)
+curl -sS -H "${ACCEPT_MARKDOWN}" -H 'If-None-Match: *' \
+  "http://127.0.0.1:${PORT}/no-etag/index.html" -o /dev/null -w "  no-etag wildcard INM: HTTP %{http_code}\n"
+
+# ── Extended Accept negotiation scenarios (coverage for ngx_http_markdown_accept.c) ──
+
+# Accept: text/markdown;q=1.0, text/html;q=0.5 (markdown preferred)
+curl -sS -H 'Accept: text/markdown;q=1.0, text/html;q=0.5' \
+  "http://127.0.0.1:${PORT}/index.html" -o /dev/null -w "  accept md preferred: HTTP %{http_code}\n"
+
+# Accept: text/* (subtype wildcard with on_wildcard on)
+curl -sS -H 'Accept: text/*' \
+  "http://127.0.0.1:${PORT}/index.html" -o /dev/null -w "  accept text/* wildcard: HTTP %{http_code}\n"
+
+# Accept: */* with wildcard off (no-wildcard location)
+curl -sS -H 'Accept: */*' \
+  "http://127.0.0.1:${PORT}/no-wildcard/index.html" -o /dev/null -w "  accept */* no-wildcard: HTTP %{http_code}\n"
+
+# Accept: text/html;q=0.5, */*;q=0.1 (wildcard with low q)
+curl -sS -H 'Accept: text/html;q=0.5, */*;q=0.1' \
+  "http://127.0.0.1:${PORT}/index.html" -o /dev/null -w "  accept html+wildcard-lowq: HTTP %{http_code}\n"
+
+# Accept: text/markdown;q=0.001 (very low q but > 0)
+curl -sS -H 'Accept: text/markdown;q=0.001' \
+  "http://127.0.0.1:${PORT}/index.html" -o /dev/null -w "  accept md very-low-q: HTTP %{http_code}\n"
+
+# Accept: application/json (non-HTML, non-markdown → skip)
+curl -sS -H 'Accept: application/json' \
+  "http://127.0.0.1:${PORT}/index.html" -o /dev/null -w "  accept application/json: HTTP %{http_code}\n"
+
+# Accept: empty string (should be treated as no Accept)
+curl -sS -H 'Accept: ' \
+  "http://127.0.0.1:${PORT}/index.html" -o /dev/null -w "  accept empty: HTTP %{http_code}\n"
+
+# ── Extended Prometheus scenarios (coverage for ngx_http_markdown_prometheus_impl.h) ──
+
+# Prometheus: Accept text/plain; version=0.0.4 (explicit openmetrics)
+curl -sS -H 'Accept: text/plain; version=0.0.4' \
+  "http://127.0.0.1:${PORT}/metrics-prometheus" -o /dev/null -w "  prometheus openmetrics: HTTP %{http_code}\n"
+
+# Prometheus: Accept openmetrics-text (v1.0.0)
+curl -sS -H 'Accept: application/openmetrics-text; version=1.0.0' \
+  "http://127.0.0.1:${PORT}/metrics-prometheus" -o /dev/null -w "  prometheus openmetrics-v1: HTTP %{http_code}\n"
+
+# Prometheus: no Accept header (default text/plain for prometheus format)
+curl -sS "http://127.0.0.1:${PORT}/metrics-prometheus" -o /dev/null -w "  prometheus no-accept: HTTP %{http_code}\n"
+
+# Prometheus: after streaming conversion (populates streaming metrics)
+curl -sS -H "${ACCEPT_MARKDOWN}" \
+  "http://127.0.0.1:${PORT}/streaming/index.html" -o /dev/null -w "  pre-streaming convert: HTTP %{http_code}\n"
+curl -sS -H "${ACCEPT_MARKDOWN}" \
+  "http://127.0.0.1:${PORT}/streaming/large.html" -o /dev/null -w "  pre-streaming large: HTTP %{http_code}\n"
+curl -sS "http://127.0.0.1:${PORT}/metrics-prometheus" -o /dev/null -w "  prometheus after streaming: HTTP %{http_code}\n"
+
+# Prometheus: Accept application/json on prometheus endpoint (json override)
+curl -sS -H 'Accept: application/json' \
+  "http://127.0.0.1:${PORT}/metrics-prometheus" -o /dev/null -w "  prometheus json override: HTTP %{http_code}\n"
+
+# ── Extended error/reason code scenarios (coverage for ngx_http_markdown_error.c, reason.c) ──
+
+# Conversion that succeeds (exercises ELIGIBLE_CONVERTED reason code)
+curl -sS -H "${ACCEPT_MARKDOWN}" \
+  "http://127.0.0.1:${PORT}/index.html" -o /dev/null -w "  success conversion: HTTP %{http_code}\n"
+
+# Conversion with GFM flavor (exercises CT_ROUTE_DEFAULT reason code)
+curl -sS -H "${ACCEPT_MARKDOWN}" \
+  "http://127.0.0.1:${PORT}/gfm/large.html" -o /dev/null -w "  gfm large conversion: HTTP %{http_code}\n"
+
+# Conversion with CommonMark flavor
+curl -sS -H "${ACCEPT_MARKDOWN}" \
+  "http://127.0.0.1:${PORT}/commonmark/large.html" -o /dev/null -w "  commonmark large: HTTP %{http_code}\n"
+
+# Size-limit rejection (exercises SKIP_SIZE reason code)
+curl -sS -H "${ACCEPT_MARKDOWN}" \
+  "http://127.0.0.1:${PORT}/small-limit/large.html" -o /dev/null -w "  size-limit reject: HTTP %{http_code}\n"
 
 # IPv6 loopback probe (coverage-only):
 # - Purpose: exercise sockaddr_in6 branch in metrics_impl.h.
