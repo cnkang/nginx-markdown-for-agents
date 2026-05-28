@@ -192,7 +192,7 @@ RELEASE_BUILD_GLIBC_SNIPPETS = {
 RELEASE_RUST_BUILD_INVARIANTS = [
     "RUST_TARGET",
     'rustup target add "${RUST_TARGET}"',
-    'cargo build --release --locked --target "${RUST_TARGET}" --features streaming,incremental',
+    'cargo build --release --locked --target "${RUST_TARGET}" --features "${RUST_FEATURES}"',
     "target/${RUST_TARGET}/release/libnginx_markdown_converter.a",
     "markdown_streaming_new",
     "markdown_incremental_new",
