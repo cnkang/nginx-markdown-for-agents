@@ -151,7 +151,38 @@ jobs:
       - name: Build Rust converter
         run: |
           cd components/rust-converter
-          cargo build --release
+          cargo build --release --locked --features streaming,incremental
+        shell: bash
+
+      - name: Verify required FFI symbols in Rust static library
+        run: |
+          RUST_LIB_DIR="components/rust-converter/target/release"
+          if [ "$(uname -s)" = "Darwin" ]; then
+            LIB_EXT="a"
+          else
+            LIB_EXT="a"
+          fi
+          RUST_LIB="${RUST_LIB_DIR}/libnginx_markdown_converter.${LIB_EXT}"
+          if [ ! -f "${RUST_LIB}" ]; then
+            echo "ERROR: Rust static library not found: ${RUST_LIB}" >&2
+            exit 1
+          fi
+          MISSING=0
+          for sym in markdown_streaming_new markdown_incremental_new markdown_decompress_bounded; do
+            # macOS nm prefixes symbols with '_'; Linux does not.
+            # Use grep -E to match either form.
+            if ! nm -g "${RUST_LIB}" 2>/dev/null | grep -qE "(^|_)${sym}$"; then
+              echo "ERROR: Required symbol ${sym} not found in ${RUST_LIB}" >&2
+              MISSING=1
+            else
+              echo "  OK: ${sym}"
+            fi
+          done
+          if [ "${MISSING}" -ne 0 ]; then
+            echo "ERROR: One or more required FFI symbols missing from release build" >&2
+            exit 1
+          fi
+          echo "All required FFI symbols verified."
         shell: bash
 
       - name: Configure NGINX with dynamic module
