@@ -953,8 +953,9 @@ void markdown_header_plan_init(struct FFIHeaderPlan *result);
  * # Safety
  *
  * The caller must ensure that:
- * - `input` points to at least `input_len` readable bytes, or is NULL when
- *   `input_len == 0`
+ * - `input` points to at least `input_len` readable bytes; if `input` is
+ *   NULL, then `input_len` **must** be 0 (NULL with non-zero `input_len`
+ *   returns `DECOMP_CATEGORY_INVALID_ARGS`)
  * - `result` points to writable storage for an `FFIDecompResult`
  * - The output buffer in `result` is freed via `markdown_decompress_free`
  *   after use (only when return value is 0)

@@ -734,8 +734,9 @@ pub unsafe extern "C" fn markdown_header_plan_init(result: *mut FFIHeaderPlan) {
 /// # Safety
 ///
 /// The caller must ensure that:
-/// - `input` points to at least `input_len` readable bytes, or is NULL when
-///   `input_len == 0`
+/// - `input` points to at least `input_len` readable bytes; if `input` is
+///   NULL, then `input_len` **must** be 0 (NULL with non-zero `input_len`
+///   returns `DECOMP_CATEGORY_INVALID_ARGS`)
 /// - `result` points to writable storage for an `FFIDecompResult`
 /// - The output buffer in `result` is freed via `markdown_decompress_free`
 ///   after use (only when return value is 0)
@@ -766,8 +767,18 @@ pub unsafe extern "C" fn markdown_decompress_bounded(
         }
     };
 
-    // Build input slice
-    let input_slice = if input.is_null() || input_len == 0 {
+    // Validate input pointer/length consistency:
+    //   - NULL with non-zero length is invalid arguments
+    //   - NULL with zero length is valid (empty input)
+    //   - non-NULL with zero length is valid (empty input)
+    //   - non-NULL with non-zero length is valid (normal input)
+    let input_slice = if input.is_null() {
+        if input_len != 0 {
+            result_ref.error_category = DECOMP_CATEGORY_INVALID_ARGS;
+            return DECOMP_CATEGORY_INVALID_ARGS;
+        }
+        &[]
+    } else if input_len == 0 {
         &[]
     } else {
         unsafe { std::slice::from_raw_parts(input, input_len) }
@@ -1090,6 +1101,17 @@ mod tests {
             "Expected truncated_input (103) for empty input, got {rc}"
         );
         assert_eq!(result.error_category, 103);
+    }
+
+    #[test]
+    fn decompress_bounded_null_with_nonzero_len_returns_invalid_args() {
+        let mut result: FFIDecompResult = unsafe { std::mem::zeroed() };
+        let rc = unsafe { markdown_decompress_bounded(std::ptr::null(), 10, 0, 1024, &mut result) };
+        assert_eq!(
+            rc, 105,
+            "Expected invalid_args (105) for NULL input with non-zero length, got {rc}"
+        );
+        assert_eq!(result.error_category, 105);
     }
 
     #[test]
