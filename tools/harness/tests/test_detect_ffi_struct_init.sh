@@ -14,16 +14,21 @@ PASS_COUNT=0
 FAIL_COUNT=0
 
 pass() {
+    local msg="$1"
+
     PASS_COUNT=$((PASS_COUNT + 1))
-    printf '  PASS: %s\n' "$1"
+    printf '  PASS: %s\n' "${msg}"
     return 0
 }
 
 fail() {
+    local msg="$1"
+    local detail="${2:-}"
+
     FAIL_COUNT=$((FAIL_COUNT + 1))
-    printf '  FAIL: %s\n' "$1" >&2
-    if [[ -n "${2:-}" ]]; then
-        printf '        Detail: %s\n' "$2" >&2
+    printf '  FAIL: %s\n' "${msg}" >&2
+    if [[ -n "${detail}" ]]; then
+        printf '        Detail: %s\n' "${detail}" >&2
     fi
     return 0
 }
