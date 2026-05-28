@@ -628,6 +628,39 @@ test_should_convert_out_reason_null(void)
     TEST_PASS("NULL out_reason handled");
 }
 
+/*
+ * Verify that the markdown_options_init stub exposes the same defaults
+ * as the Rust implementation (timeout_ms=5000, generate_etag=1).
+ * This test ensures accept/production tests fail if the default FFI
+ * contract ever drifts from the Rust implementation.
+ */
+static void
+test_markdown_options_init_defaults(void)
+{
+    struct MarkdownOptions options;
+
+    /* Start with garbage to ensure init actually sets values. */
+    memset(&options, 0xFF, sizeof(options));
+
+    markdown_options_init(&options);
+
+    TEST_ASSERT(options.timeout_ms == 5000,
+        "markdown_options_init sets timeout_ms=5000");
+    TEST_ASSERT(options.generate_etag == 1,
+        "markdown_options_init sets generate_etag=1");
+    TEST_PASS("markdown_options_init production defaults verified");
+}
+
+/*
+ * Verify that markdown_options_init handles NULL safely.
+ */
+static void
+test_markdown_options_init_null(void)
+{
+    markdown_options_init(NULL);
+    TEST_PASS("markdown_options_init(NULL) does not crash");
+}
+
 int
 main(void)
 {
@@ -651,6 +684,8 @@ main(void)
     test_should_convert_ffi_convert();
     test_should_convert_ffi_skip();
     test_should_convert_out_reason_null();
+    test_markdown_options_init_defaults();
+    test_markdown_options_init_null();
 
     printf("\n========================================\n");
     printf("All tests passed!\n");

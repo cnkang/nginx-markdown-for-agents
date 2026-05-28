@@ -48,7 +48,7 @@ violations=0
 
 # ── Phase 1: Direct struct-name on memzero/memset line ──
 for struct in "${GUARDED_STRUCTS[@]}"; do
-    matches=$(grep -rn "ngx_memzero\|memset" "${SRC_DIR}" 2>/dev/null \
+    matches=$(grep -rn -E "ngx_memzero|memset" "${SRC_DIR}" 2>/dev/null \
         | grep -v "_test\\.c" \
         | grep -vE '(^|:)[0-9]+:[[:space:]]*(/\*|\*|//)' \
         | grep -i "${struct}" || true)
@@ -88,7 +88,7 @@ while IFS= read -r src_file; do
             # Look for: ngx_memzero(&varname, sizeof(varname)) or
             #           ngx_memzero(&varname, sizeof(*varname)) or
             #           memset(&varname, 0, sizeof(varname))
-            memzero_hits=$(grep -n "ngx_memzero\|memset" "${src_file}" 2>/dev/null \
+            memzero_hits=$(grep -n -E "ngx_memzero|memset" "${src_file}" 2>/dev/null \
                 | grep -v "_test\\.c" \
                 | grep -vE '(^|:)[0-9]+:[[:space:]]*(/\*|\*|//)' \
                 | grep -E "[&*][[:space:]]*${varname}([^a-zA-Z0-9_]|$)" \
