@@ -63,6 +63,12 @@ permissions: {}
 #
 # All third-party actions in jobs below MUST use full SHA pinning (Req 9.6).
 # Example: actions/checkout@<full-sha> # v4.x.x
+#
+# release-packages.yml is the canonical release package workflow and official release path.
+
+env:
+  RUST_TOOLCHAIN: 1.91.1
+  RUST_FEATURES: streaming,incremental
 
 jobs:
   build:
@@ -83,6 +89,7 @@ jobs:
           dnf install -y \
             gcc \
             make \
+            binutils \
             ca-certificates \
             curl-minimal \
             pcre2-devel \
@@ -127,7 +134,7 @@ jobs:
       - name: Install Rust toolchain
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
-            | sh -s -- -y --profile minimal --default-toolchain stable
+            | sh -s -- -y --profile minimal --default-toolchain "${RUST_TOOLCHAIN}"
           echo "${HOME}/.cargo/bin" >> "$GITHUB_PATH"
           "${HOME}/.cargo/bin/rustc" --version
           "${HOME}/.cargo/bin/cargo" --version
@@ -166,7 +173,7 @@ jobs:
         run: |
           rustup target add "${RUST_TARGET}"
           cd components/rust-converter
-          cargo build --release --locked --target "${RUST_TARGET}" --features streaming,incremental
+          cargo build --release --locked --target "${RUST_TARGET}" --features "${RUST_FEATURES}"
         shell: bash
 
       - name: Verify required FFI symbols in Rust static library
@@ -176,6 +183,10 @@ jobs:
             echo "ERROR: Rust static library not found: ${RUST_LIB}" >&2
             exit 1
           fi
+          command -v nm >/dev/null 2>&1 || {
+            echo "ERROR: nm not found; install binutils in the release build image" >&2
+            exit 1
+          }
           MISSING=0
           for sym in markdown_streaming_new markdown_incremental_new markdown_decompress_bounded; do
             # nm output: <address> <type> <symbol_name>

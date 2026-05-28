@@ -15,6 +15,10 @@ MAKEFILE = PROJECT_ROOT / "Makefile"
 FFI_CONTRACT_PATH = PROJECT_ROOT / "docs" / "architecture" / "FFI_MIGRATION_CONTRACT.md"
 CHANGELOG_PATH = PROJECT_ROOT / "CHANGELOG.md"
 CARGO_TOML_PATH = PROJECT_ROOT / "components" / "rust-converter" / "Cargo.toml"
+RUST_TOOLCHAIN_PATH = PROJECT_ROOT / "rust-toolchain.toml"
+RELEASE_PACKAGES_WORKFLOW = PROJECT_ROOT / ".github" / "workflows" / "release-packages.yml"
+RELEASE_DEB_WORKFLOW = PROJECT_ROOT / ".github" / "workflows" / "release-deb.yml"
+RELEASE_RPM_WORKFLOW = PROJECT_ROOT / ".github" / "workflows" / "release-rpm.yml"
 CONFIG_DIRECTIVES_H = PROJECT_ROOT / "components" / "nginx-module" / "src" / "ngx_http_markdown_config_directives_impl.h"
 ERROR_RS = PROJECT_ROOT / "components" / "rust-converter" / "src" / "error.rs"
 ABI_RS = PROJECT_ROOT / "components" / "rust-converter" / "src" / "ffi" / "abi.rs"
@@ -59,6 +63,66 @@ class ValidationResult:
 
 def read(path: Path) -> str:
     return path.read_text(encoding="utf-8") if path.is_file() else ""
+
+
+def _toml_document(path: Path) -> dict[str, object]:
+    text = read(path)
+    if not text:
+        return {}
+    return tomllib.loads(text)
+
+
+def _cargo_rust_version() -> str | None:
+    package = _toml_document(CARGO_TOML_PATH).get("package")
+    if not isinstance(package, dict):
+        return None
+    rust_version = package.get("rust-version")
+    return rust_version if isinstance(rust_version, str) else None
+
+
+def _rust_toolchain_channel() -> str | None:
+    toolchain = _toml_document(RUST_TOOLCHAIN_PATH).get("toolchain")
+    if not isinstance(toolchain, dict):
+        return None
+    channel = toolchain.get("channel")
+    return channel if isinstance(channel, str) else None
+
+
+def _toolchain_matches_cargo() -> bool:
+    rust_version = _cargo_rust_version()
+    channel = _rust_toolchain_channel()
+    if rust_version is None or channel is None:
+        return False
+    return channel == rust_version or channel.startswith(f"{rust_version}.")
+
+
+def _workflow_uses_pinned_toolchain(workflow: str) -> bool:
+    rust_version = _cargo_rust_version()
+    channel = _rust_toolchain_channel()
+    if rust_version is None or channel is None:
+        return False
+    return (
+        "RUST_TOOLCHAIN" in workflow
+        and channel in workflow
+        and "--default-toolchain \"${RUST_TOOLCHAIN}\"" in workflow
+        and "--default-toolchain stable" not in workflow
+    )
+
+
+def _workflow_has_release_build_invariants(workflow: str) -> bool:
+    return (
+        'rustup target add "${RUST_TARGET}"' in workflow
+        and 'cargo build --release --locked --target "${RUST_TARGET}" --features "${RUST_FEATURES}"'
+        in workflow
+        and "target/${RUST_TARGET}/release" in workflow
+    )
+
+
+def _workflow_identifies_release_path(workflow: str, *, official: bool) -> bool:
+    marker = "release-packages.yml is the canonical release package workflow"
+    if official:
+        return marker in workflow and "official release path" in workflow
+    return marker in workflow and "legacy compatibility workflow" in workflow
 
 
 def _check_gate_prerequisites(
@@ -226,6 +290,9 @@ def _build_blocking_items() -> dict[str, list[tuple[str, bool]]]:
     headers = read(HEADERS_IMPL_H)
     decomp = read(DECOMPRESSION_C)
     filter_h = read(FILTER_MODULE_H)
+    release_packages = read(RELEASE_PACKAGES_WORKFLOW)
+    release_deb = read(RELEASE_DEB_WORKFLOW)
+    release_rpm = read(RELEASE_RPM_WORKFLOW)
 
     unit_test_files = "\n".join(
         str(p) for p in (PROJECT_ROOT / "components" / "nginx-module" / "tests" / "unit").glob("*.c")
@@ -257,6 +324,17 @@ def _build_blocking_items() -> dict[str, list[tuple[str, bool]]]:
             ("make harness-check-full", "harness-check-full" in mk and "make harness-check-full" in gates),
             ("make docs-check", "docs-check" in mk and "make docs-check" in gates),
             ("release gates strict", "release-gates-check-strict" in mk),
+            ("release packages has nm preflight", "binutils" in release_packages and "command -v nm" in release_packages),
+            ("rust toolchain pinned", _toolchain_matches_cargo()),
+            ("release-packages pinned rust", _workflow_uses_pinned_toolchain(release_packages)),
+            ("release-deb pinned rust", _workflow_uses_pinned_toolchain(release_deb)),
+            ("release-rpm pinned rust", _workflow_uses_pinned_toolchain(release_rpm)),
+            ("release-packages build invariants", _workflow_has_release_build_invariants(release_packages)),
+            ("release-deb build invariants", _workflow_has_release_build_invariants(release_deb)),
+            ("release-rpm build invariants", _workflow_has_release_build_invariants(release_rpm)),
+            ("release-packages official marker", _workflow_identifies_release_path(release_packages, official=True)),
+            ("release-deb legacy marker", _workflow_identifies_release_path(release_deb, official=False)),
+            ("release-rpm legacy marker", _workflow_identifies_release_path(release_rpm, official=False)),
         ],
     }
 
