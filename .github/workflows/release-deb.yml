@@ -1,5 +1,8 @@
 name: Release DEB
 
+# release-packages.yml is the canonical release package workflow; this is a
+# legacy compatibility workflow kept for direct DEB artifact builds.
+
 on:
   workflow_dispatch:
     inputs:
@@ -15,6 +18,10 @@ on:
         type: string
 
 permissions: {}
+
+env:
+  RUST_TOOLCHAIN: 1.91.1
+  RUST_FEATURES: streaming,incremental
 
 jobs:
   build-deb:
@@ -55,7 +62,8 @@ jobs:
 
       - name: Install Rust toolchain
         run: |
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+            | sh -s -- -y --profile minimal --default-toolchain "${RUST_TOOLCHAIN}"
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
           . "$HOME/.cargo/env"
           rustc --version
@@ -104,9 +112,18 @@ jobs:
       - name: Build Rust library
         run: |
           . "$HOME/.cargo/env"
+          case "${{ matrix.arch }}" in
+            amd64) RUST_TARGET="x86_64-unknown-linux-gnu" ;;
+            arm64) RUST_TARGET="aarch64-unknown-linux-gnu" ;;
+            *)
+              echo "ERROR: unsupported arch: ${{ matrix.arch }}" >&2
+              exit 1
+              ;;
+          esac
+          rustup target add "${RUST_TARGET}"
           cd components/rust-converter
-          cargo build --release
-          echo "RUST_LIB_DIR=$(pwd)/target/release" >> "$GITHUB_ENV"
+          cargo build --release --locked --target "${RUST_TARGET}" --features "${RUST_FEATURES}"
+          echo "RUST_LIB_DIR=$(pwd)/target/${RUST_TARGET}/release" >> "$GITHUB_ENV"
 
       - name: Compile NGINX module
         env:
