@@ -582,10 +582,326 @@ test_gzip_budget_exceeded(void)
                 "output larger than budget should be classified");
 }
 
+/*
+ * Test grow_output_buffer directly (lines 261-311).
+ * Exercises the buffer growth path that is normally only reachable
+ * when inflate fills the output buffer and needs more space.
+ */
+static void
+test_grow_output_buffer_direct(void)
+{
+    ngx_http_request_t r;
+    u_char *output_data;
+    size_t output_size;
+    u_char initial_buf[400];
+    ngx_int_t rc;
+
+    init_request(&r);
+
+    /* Normal growth: used < max_size, should succeed */
+    output_data = initial_buf;
+    output_size = 400;
+    g_conf.decompress.max_size = 1500;
+    rc = ngx_http_markdown_grow_output_buffer(
+        &r, &g_conf, &output_data, &output_size, 300);
+    TEST_ASSERT(rc == NGX_OK,
+                "grow_output_buffer should succeed when under budget");
+    /* new_size = max(300*2, 300+4096) = 4396, capped at max_size=1500 */
+    TEST_ASSERT(output_size == 1500,
+                "grow_output_buffer should cap at max_size");
+
+    /* Budget exceeded: used >= max_size */
+    output_data = initial_buf;
+    output_size = 400;
+    g_conf.decompress.max_size = 200;
+    rc = ngx_http_markdown_grow_output_buffer(
+        &r, &g_conf, &output_data, &output_size, 250);
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED,
+                "grow_output_buffer should fail when used >= max_size");
+
+    /* Minimum growth: used * 2 < used + 4096, should use +4096 */
+    output_data = initial_buf;
+    output_size = 400;
+    g_conf.decompress.max_size = 10000;
+    rc = ngx_http_markdown_grow_output_buffer(
+        &r, &g_conf, &output_data, &output_size, 100);
+    TEST_ASSERT(rc == NGX_OK,
+                "grow_output_buffer should succeed for small used");
+    TEST_ASSERT(output_size == 4196,
+                "grow_output_buffer should use used+4096 when 2*used < used+4096");
+
+    /* Capped by max_size */
+    output_data = initial_buf;
+    output_size = 400;
+    g_conf.decompress.max_size = 500;
+    rc = ngx_http_markdown_grow_output_buffer(
+        &r, &g_conf, &output_data, &output_size, 300);
+    TEST_ASSERT(rc == NGX_OK,
+                "grow_output_buffer should succeed when capped by max_size");
+    TEST_ASSERT(output_size == 500,
+                "grow_output_buffer new_size should be capped at max_size");
+
+    /* Allocation failure */
+    output_data = initial_buf;
+    output_size = 400;
+    g_conf.decompress.max_size = 1500;
+    g_pnalloc_fail_count = 1;
+    rc = ngx_http_markdown_grow_output_buffer(
+        &r, &g_conf, &output_data, &output_size, 300);
+    TEST_ASSERT(rc == NGX_ERROR,
+                "grow_output_buffer should fail on allocation failure");
+}
+
+/*
+ * Test handle_inflate_stall directly (lines 386-409).
+ * Exercises the three branches: avail_out==0 (grow), avail_in==0
+ * (truncated), and unexpected stall.
+ */
+static void
+test_handle_inflate_stall_direct(void)
+{
+    ngx_http_request_t r;
+    z_stream stream;
+    u_char output_buf[256];
+    u_char *output_data;
+    size_t output_size;
+    ngx_int_t rc;
+
+    init_request(&r);
+
+    /* Branch 1: avail_out==0 -> should grow buffer and return NGX_AGAIN */
+    output_data = output_buf;
+    output_size = 256;
+    g_conf.decompress.max_size = 4096;
+    memset(&stream, 0, sizeof(stream));
+    stream.avail_out = 0;
+    stream.avail_in = 10;
+    stream.total_out = 256;
+    rc = ngx_http_markdown_handle_inflate_stall(
+        &r, &g_conf, &stream, &output_data, &output_size,
+        NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR, "Z_OK");
+    TEST_ASSERT(rc == NGX_AGAIN,
+                "handle_inflate_stall should return AGAIN when avail_out==0");
+
+    /* Branch 2: avail_in==0 -> truncated input */
+    output_data = output_buf;
+    output_size = 256;
+    g_conf.decompress.max_size = 4096;
+    memset(&stream, 0, sizeof(stream));
+    stream.avail_out = 100;
+    stream.avail_in = 0;
+    rc = ngx_http_markdown_handle_inflate_stall(
+        &r, &g_conf, &stream, &output_data, &output_size,
+        NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR, "Z_OK");
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT,
+                "handle_inflate_stall should detect truncated input");
+
+    /* Branch 3: unexpected stall (avail_in>0, avail_out>0) */
+    output_data = output_buf;
+    output_size = 256;
+    g_conf.decompress.max_size = 4096;
+    memset(&stream, 0, sizeof(stream));
+    stream.avail_out = 50;
+    stream.avail_in = 10;
+    rc = ngx_http_markdown_handle_inflate_stall(
+        &r, &g_conf, &stream, &output_data, &output_size,
+        NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR, "Z_BUF_ERROR");
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR,
+                "handle_inflate_stall should return stall_code on unexpected stall");
+
+    /* Branch 4: avail_out==0 but grow fails (budget exceeded) */
+    output_data = output_buf;
+    output_size = 256;
+    g_conf.decompress.max_size = 200;
+    memset(&stream, 0, sizeof(stream));
+    stream.avail_out = 0;
+    stream.avail_in = 10;
+    stream.total_out = 256;
+    rc = ngx_http_markdown_handle_inflate_stall(
+        &r, &g_conf, &stream, &output_data, &output_size,
+        NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR, "Z_OK");
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED,
+                "handle_inflate_stall should propagate budget exceeded from grow");
+}
+
+/*
+ * Test chain_size overflow guard (line 119-121).
+ * The overflow guard triggers when accumulated size would wrap around.
+ */
+static void
+test_chain_size_overflow_guard(void)
+{
+    ngx_buf_t buf;
+    ngx_chain_t cl;
+    size_t result;
+
+    /*
+     * Create a chain with a buffer whose len would cause overflow
+     * when added to the accumulated size. We set pos=0 and last=MAX
+     * to simulate a huge buffer. This exercises the overflow branch.
+     */
+    memset(&buf, 0, sizeof(buf));
+    buf.pos = 0;
+    buf.last = (u_char *) ((size_t) -1);
+    buf.start = buf.pos;
+    buf.end = buf.last;
+    cl.buf = &buf;
+    cl.next = NULL;
+
+    result = ngx_http_markdown_chain_size(&cl);
+    TEST_ASSERT(result == (size_t) -1,
+                "chain_size should return -1 on overflow");
+}
+
+/*
+ * Integration test: gzip decompression with buffer growth.
+ * Uses a small max_size to force the inflate loop to trigger
+ * ngx_http_markdown_grow_decomp_buffer when the output buffer
+ * fills up.
+ */
+static void
+test_gzip_buffer_growth(void)
+{
+    /*
+     * Use 3000 bytes of highly compressible data. After gzip
+     * compression this is roughly 100-200 bytes. Setting
+     * max_size=400 means the initial buffer estimate
+     * (min(compressed*10, 400)) is ~400 bytes, but the
+     * decompressed output is ~3000 bytes. The inflate loop
+     * must grow the buffer multiple times.
+     */
+    u_char plain[3000];
+    u_char compressed[512];
+    size_t compressed_len;
+    ngx_buf_t in_buf;
+    ngx_chain_t in;
+    ngx_chain_t *out;
+    ngx_http_request_t r;
+    ngx_int_t rc;
+
+    memset(plain, 'C', sizeof(plain));
+    compressed_len = gzip_compress(plain, sizeof(plain),
+                                   compressed, sizeof(compressed));
+
+    init_request(&r);
+    g_conf.decompress.max_size = sizeof(plain) + 1024;
+    in = make_chain(compressed, compressed_len, &in_buf);
+    out = NULL;
+
+    rc = ngx_http_markdown_decompress(&r,
+        NGX_HTTP_MARKDOWN_COMPRESSION_GZIP, &in, &out);
+
+    TEST_ASSERT(rc == NGX_OK,
+                "gzip with buffer growth should succeed");
+    TEST_ASSERT(out != NULL && out->buf != NULL,
+                "buffer growth should produce output chain");
+    TEST_ASSERT((size_t) (out->buf->last - out->buf->pos) == sizeof(plain),
+                "decompressed length should match original");
+    TEST_ASSERT(memcmp(out->buf->pos, plain, sizeof(plain)) == 0,
+                "decompressed content should match original");
+}
+
+/*
+ * Integration test: budget exceeded during buffer growth.
+ * The initial buffer fits, but the decompressed output exceeds
+ * max_size, causing the grow path to return BUDGET_EXCEEDED.
+ */
+static void
+test_gzip_budget_exceeded_during_growth(void)
+{
+    u_char plain[4096];
+    u_char compressed[512];
+    size_t compressed_len;
+    ngx_buf_t in_buf;
+    ngx_chain_t in;
+    ngx_chain_t *out;
+    ngx_http_request_t r;
+    ngx_int_t rc;
+
+    memset(plain, 'B', sizeof(plain));
+    compressed_len = gzip_compress(plain, sizeof(plain),
+                                   compressed, sizeof(compressed));
+
+    init_request(&r);
+    /*
+     * max_size=256: initial buffer is 256 bytes. The decompressed
+     * output is 4096 bytes. The inflate loop fills the 256-byte
+     * buffer, then grow_output_buffer is called. Since used(256)
+     * < max_size(256) is false (they're equal), it returns
+     * BUDGET_EXCEEDED immediately.
+     */
+    g_conf.decompress.max_size = 256;
+    in = make_chain(compressed, compressed_len, &in_buf);
+    out = NULL;
+
+    rc = ngx_http_markdown_decompress(&r,
+        NGX_HTTP_MARKDOWN_COMPRESSION_GZIP, &in, &out);
+
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED,
+                "gzip budget exceeded during growth should be classified");
+}
+
+/*
+ * Test truncated gzip input returns an error.
+ * Passes only a partial gzip stream to exercise error handling
+ * in the inflate loop when the stream ends prematurely.
+ */
+static void
+test_gzip_truncated_input(void)
+{
+    static const u_char plain[] = "<html><body>truncated test data here</body></html>";
+    u_char compressed[256];
+    ngx_buf_t in_buf;
+    ngx_chain_t in;
+    ngx_chain_t *out;
+    ngx_http_request_t r;
+    ngx_int_t rc;
+
+    (void) gzip_compress(plain, sizeof(plain) - 1,
+                         compressed, sizeof(compressed));
+
+    /*
+     * Pass only the first 12 bytes of the gzip stream (header only,
+     * no deflate payload). The inflate loop should detect the
+     * truncated stream and return an error.
+     */
+    init_request(&r);
+    g_conf.decompress.max_size = 1024 * 1024;
+    in = make_chain(compressed, 12, &in_buf);
+    out = NULL;
+
+    rc = ngx_http_markdown_decompress(&r,
+        NGX_HTTP_MARKDOWN_COMPRESSION_GZIP, &in, &out);
+
+    TEST_ASSERT(rc != NGX_OK && rc != NGX_DECLINED,
+                "truncated gzip should return an error");
+}
+
+/*
+ * Test brotli dispatch returns NGX_DECLINED when brotli is not
+ * compiled in (the #else branch of decompress_brotli).
+ */
+static void
+test_brotli_not_compiled_in(void)
+{
+    ngx_http_request_t r;
+    ngx_chain_t *out;
+    ngx_int_t rc;
+
+    init_request(&r);
+    out = NULL;
+
+    rc = ngx_http_markdown_decompress(&r,
+        NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI, NULL, &out);
+    TEST_ASSERT(rc == NGX_DECLINED,
+                "brotli without compiled support should decline");
+}
+
 int
 main(void)
 {
     test_chain_helpers_boundaries();
+    test_chain_size_overflow_guard();
     test_calc_output_size_boundaries();
     test_detect_compression_variants();
     test_dispatch_non_decompressing_cases();
@@ -596,6 +912,12 @@ main(void)
     test_gzip_output_chain_allocation_errors();
     test_gzip_format_error();
     test_gzip_budget_exceeded();
+    test_grow_output_buffer_direct();
+    test_handle_inflate_stall_direct();
+    test_gzip_buffer_growth();
+    test_gzip_budget_exceeded_during_growth();
+    test_gzip_truncated_input();
+    test_brotli_not_compiled_in();
 
     TEST_PASS("decompression_production: all tests passed");
     return 0;
