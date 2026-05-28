@@ -363,47 +363,205 @@ ngx_http_markdown_decompress_gzip(ngx_http_request_t *r,
     stream.next_out = output_data;
     stream.avail_out = (uInt) output_size;
     
-    /* Perform decompression using Z_FINISH flag (Requirement 2.3) */
-    zrc = inflate(&stream, Z_FINISH);
-    
-    /* Check for Z_STREAM_END (Requirement 6.5) */
-    if (zrc != Z_STREAM_END) {
-        /* Check if failure was due to insufficient output buffer space */
-        if (zrc == Z_BUF_ERROR && stream.total_out >= conf->decompress.max_size) {
-            /* Decompressed size would exceed limit (Requirement 9.3, 9.4) */
-            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                         "markdown: decompressed size exceeds decompression budget (%uz), "
-                         "category=resource_limit",
-                         conf->decompress.max_size);
-            inflateEnd(&stream);
-            return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
+    /*
+     * Perform decompression using incremental inflate with Z_NO_FLUSH.
+     * If the output buffer is exhausted before all input is consumed,
+     * reallocate up to decompress.max_size and continue. This avoids
+     * misclassifying high-compression-ratio payloads that exceed the
+     * 10x heuristic estimate but are still within budget.
+     */
+    for ( ;; ) {
+        zrc = inflate(&stream, Z_NO_FLUSH);
+
+        if (zrc == Z_STREAM_END) {
+            break;
         }
 
-        /*
-         * Z_BUF_ERROR with avail_out == 0 but total_out < budget means
-         * the initial output estimate was too small.  Classify as
-         * budget_exceeded since the true decompressed size is unknown
-         * and likely exceeds the budget.
-         */
-        if (zrc == Z_BUF_ERROR && stream.avail_out == 0
-            && stream.avail_in > 0)
-        {
+        if (zrc == Z_OK) {
+            /*
+             * Z_OK with avail_in > 0 and avail_out == 0: output buffer
+             * full, need more space. Reallocate if within budget.
+             */
+            if (stream.avail_out == 0 && stream.avail_in > 0) {
+                size_t   new_size;
+                size_t   used;
+                u_char  *new_data;
+
+                used = stream.total_out;
+                if (used >= conf->decompress.max_size) {
+                    ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                                 "markdown: decompressed size exceeds "
+                                 "decompression budget (%uz), "
+                                 "category=resource_limit",
+                                 conf->decompress.max_size);
+                    inflateEnd(&stream);
+                    return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
+                }
+
+                if (used > ((size_t) -1) / 2) {
+                    new_size = conf->decompress.max_size;
+                } else {
+                    new_size = used * 2;
+                }
+                if (new_size < used + 4096) {
+                    new_size = used + 4096;
+                }
+                if (new_size > conf->decompress.max_size) {
+                    new_size = conf->decompress.max_size;
+                }
+                if (new_size > (size_t) UINT_MAX) {
+                    new_size = (size_t) UINT_MAX;
+                }
+                if (new_size <= used) {
+                    ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                                 "markdown: decompressed size exceeds "
+                                 "decompression budget (%uz), "
+                                 "category=resource_limit",
+                                 conf->decompress.max_size);
+                    inflateEnd(&stream);
+                    return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
+                }
+
+                new_data = ngx_pnalloc(r->pool, new_size);
+                if (new_data == NULL) {
+                    ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                                 "markdown: failed to reallocate decompression "
+                                 "buffer, size=%uz, category=system",
+                                 new_size);
+                    inflateEnd(&stream);
+                    return NGX_ERROR;
+                }
+
+                ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                              "markdown: decompression buffer realloc "
+                              "used=%uz new_size=%uz (old buffer in pool)",
+                              used, new_size);
+
+                ngx_memcpy(new_data, output_data, used);
+                output_data = new_data;
+                output_size = new_size;
+                stream.next_out = output_data + used;
+                stream.avail_out = (uInt) (new_size - used);
+                continue;
+            }
+
+            /*
+             * Z_OK with avail_in == 0: all input consumed but stream
+             * not ended. This is truncated input.
+             */
+            if (stream.avail_in == 0) {
+                ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                             "markdown: decompression failed, "
+                             "truncated input (Z_OK with no remaining "
+                             "input), category=conversion");
+                inflateEnd(&stream);
+                return NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT;
+            }
+
+            /* Z_OK with remaining input and remaining output: unexpected */
             ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                         "markdown: decompression output buffer "
-                         "exhausted with remaining input, "
-                         "likely exceeds budget (%uz), "
-                         "category=resource_limit",
-                         conf->decompress.max_size);
+                         "markdown: decompression stalled, "
+                         "inflate returned Z_OK with avail_in=%d avail_out=%d, "
+                         "category=conversion",
+                         stream.avail_in, stream.avail_out);
             inflateEnd(&stream);
-            return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
+            return NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR;
         }
 
-        /*
-         * Classify zlib error into bounded decompression categories:
-         *   Z_DATA_ERROR → format_error (invalid compressed data)
-         *   Z_BUF_ERROR with incomplete input → truncated_input
-         *   Other errors → io_error
-         */
+        if (zrc == Z_BUF_ERROR) {
+            /*
+             * Z_BUF_ERROR: no progress possible. If we have consumed
+             * all input, this is truncated input. Otherwise, try
+             * expanding the output buffer.
+             */
+            if (stream.avail_in == 0) {
+                ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                             "markdown: decompression failed, "
+                             "truncated input (Z_BUF_ERROR with no "
+                             "remaining input), category=conversion");
+                inflateEnd(&stream);
+                return NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT;
+            }
+
+            if (stream.avail_out == 0) {
+                /*
+                 * Output buffer full with remaining input.
+                 * Attempt reallocation (same logic as Z_OK path above).
+                 */
+                size_t   new_size;
+                size_t   used;
+                u_char  *new_data;
+
+                used = stream.total_out;
+                if (used >= conf->decompress.max_size) {
+                    ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                                 "markdown: decompressed size exceeds "
+                                 "decompression budget (%uz), "
+                                 "category=resource_limit",
+                                 conf->decompress.max_size);
+                    inflateEnd(&stream);
+                    return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
+                }
+
+                if (used > ((size_t) -1) / 2) {
+                    new_size = conf->decompress.max_size;
+                } else {
+                    new_size = used * 2;
+                }
+                if (new_size < used + 4096) {
+                    new_size = used + 4096;
+                }
+                if (new_size > conf->decompress.max_size) {
+                    new_size = conf->decompress.max_size;
+                }
+                if (new_size > (size_t) UINT_MAX) {
+                    new_size = (size_t) UINT_MAX;
+                }
+                if (new_size <= used) {
+                    ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                                 "markdown: decompressed size exceeds "
+                                 "decompression budget (%uz), "
+                                 "category=resource_limit",
+                                 conf->decompress.max_size);
+                    inflateEnd(&stream);
+                    return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
+                }
+
+                new_data = ngx_pnalloc(r->pool, new_size);
+                if (new_data == NULL) {
+                    ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                                 "markdown: failed to reallocate decompression "
+                                 "buffer, size=%uz, category=system",
+                                 new_size);
+                    inflateEnd(&stream);
+                    return NGX_ERROR;
+                }
+
+                ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                              "markdown: decompression buffer realloc "
+                              "used=%uz new_size=%uz (old buffer in pool)",
+                              used, new_size);
+
+                ngx_memcpy(new_data, output_data, used);
+                output_data = new_data;
+                output_size = new_size;
+                stream.next_out = output_data + used;
+                stream.avail_out = (uInt) (new_size - used);
+                continue;
+            }
+
+            /* Z_BUF_ERROR with both avail_in > 0 and avail_out > 0:
+             * should not happen; treat as format error. */
+            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                         "markdown: decompression failed, "
+                         "Z_BUF_ERROR with avail_in=%d avail_out=%d, "
+                         "category=conversion",
+                         stream.avail_in, stream.avail_out);
+            inflateEnd(&stream);
+            return NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR;
+        }
+
+        /* All other zlib errors */
         if (zrc == Z_DATA_ERROR) {
             ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                          "markdown: decompression failed, "
@@ -411,20 +569,13 @@ ngx_http_markdown_decompress_gzip(ngx_http_request_t *r,
                          "category=conversion");
             inflateEnd(&stream);
             return NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR;
-        } else if (zrc == Z_BUF_ERROR && stream.avail_in > 0) {
-            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                         "markdown: decompression failed, "
-                         "truncated input (Z_BUF_ERROR with remaining "
-                         "input), category=conversion");
-            inflateEnd(&stream);
-            return NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT;
-        } else {
-            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                         "markdown: decompression failed, "
-                         "inflate error: %d, category=conversion", zrc);
-            inflateEnd(&stream);
-            return NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR;
         }
+
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                     "markdown: decompression failed, "
+                     "inflate error: %d, category=conversion", zrc);
+        inflateEnd(&stream);
+        return NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR;
     }
     
     /* Check if decompressed size exceeds decompression budget (Requirement 9.3, 9.4) */
@@ -603,54 +754,104 @@ ngx_http_markdown_decompress_brotli(ngx_http_request_t *r,
     next_out = output_data;
     total_out = 0;
     
-    /* Perform decompression (Requirement 3.2) */
-    result = BrotliDecoderDecompressStream(
-        decoder,
-        &available_in,
-        &next_in,
-        &available_out,
-        &next_out,
-        &total_out
-    );
-    
-    /* Check for errors (Requirement 3.2) */
-    if (result == BROTLI_DECODER_RESULT_ERROR) {
-        BrotliDecoderErrorCode error_code = BrotliDecoderGetErrorCode(decoder);
-        const char *error_str = BrotliDecoderErrorString(error_code);
-        
-        /*
-         * Classify brotli error into bounded decompression categories:
-         *   BROTLI_DECODER_RESULT_ERROR → format_error
-         *   (all brotli decode errors indicate invalid format)
-         */
-        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                     "markdown: brotli decompression failed, "
-                     "error: %s, category=conversion",
-                     error_str);
-        BrotliDecoderDestroyInstance(decoder);
-        return NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR;
-    }
-    
-    /* Check if decompression is complete */
-    if (result != BROTLI_DECODER_RESULT_SUCCESS) {
-        /* Check if failure was due to insufficient output buffer space */
-        if (result == BROTLI_DECODER_RESULT_NEEDS_MORE_OUTPUT) {
-            /* Calculate how much was decompressed so far */
-            total_out = output_size - available_out;
-            
-            /* Decompressed size would exceed limit (Requirement 9.3, 9.4) */
-            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                         "markdown: decompressed size exceeds decompression budget (%uz), "
-                         "category=resource_limit",
-                         conf->decompress.max_size);
-            BrotliDecoderDestroyInstance(decoder);
-            return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
+    /*
+     * Perform decompression in a loop. If the decoder signals
+     * NEEDS_MORE_OUTPUT, reallocate the output buffer (up to
+     * decompress.max_size) and continue, rather than immediately
+     * classifying as budget_exceeded. This avoids misclassifying
+     * high-compression-ratio payloads that exceed the 10x heuristic
+     * estimate but are still within budget.
+     */
+    for ( ;; ) {
+        result = BrotliDecoderDecompressStream(
+            decoder,
+            &available_in,
+            &next_in,
+            &available_out,
+            &next_out,
+            &total_out
+        );
+
+        if (result == BROTLI_DECODER_RESULT_SUCCESS) {
+            break;
         }
-        
-        /*
-         * BROTLI_DECODER_RESULT_NEEDS_MORE_INPUT → truncated input.
-         * Other unexpected result codes → io_error.
-         */
+
+        if (result == BROTLI_DECODER_RESULT_ERROR) {
+            BrotliDecoderErrorCode error_code = BrotliDecoderGetErrorCode(decoder);
+            const char *error_str = BrotliDecoderErrorString(error_code);
+
+            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                         "markdown: brotli decompression failed, "
+                         "error: %s, category=conversion",
+                         error_str);
+            BrotliDecoderDestroyInstance(decoder);
+            return NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR;
+        }
+
+        if (result == BROTLI_DECODER_RESULT_NEEDS_MORE_OUTPUT) {
+            size_t   used;
+            size_t   new_size;
+            u_char  *new_data;
+
+            used = output_size - available_out;
+
+            if (used >= conf->decompress.max_size) {
+                ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                             "markdown: decompressed size exceeds "
+                             "decompression budget (%uz), "
+                             "category=resource_limit",
+                             conf->decompress.max_size);
+                BrotliDecoderDestroyInstance(decoder);
+                return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
+            }
+
+            if (used > ((size_t) -1) / 2) {
+                new_size = conf->decompress.max_size;
+            } else {
+                new_size = used * 2;
+            }
+            if (new_size < used + 4096) {
+                new_size = used + 4096;
+            }
+            if (new_size > conf->decompress.max_size) {
+                new_size = conf->decompress.max_size;
+            }
+            if (new_size > (size_t) UINT_MAX) {
+                new_size = (size_t) UINT_MAX;
+            }
+            if (new_size <= used) {
+                ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                             "markdown: decompressed size exceeds "
+                             "decompression budget (%uz), "
+                             "category=resource_limit",
+                             conf->decompress.max_size);
+                BrotliDecoderDestroyInstance(decoder);
+                return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
+            }
+
+            new_data = ngx_pnalloc(r->pool, new_size);
+            if (new_data == NULL) {
+                ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                             "markdown: failed to reallocate decompression "
+                             "buffer, size=%uz, category=system",
+                             new_size);
+                BrotliDecoderDestroyInstance(decoder);
+                return NGX_ERROR;
+            }
+
+            ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                          "markdown: brotli decompression buffer realloc "
+                          "used=%uz new_size=%uz (old buffer in pool)",
+                          used, new_size);
+
+            ngx_memcpy(new_data, output_data, used);
+            output_data = new_data;
+            output_size = new_size;
+            available_out = new_size - used;
+            next_out = output_data + used;
+            continue;
+        }
+
         if (result == BROTLI_DECODER_RESULT_NEEDS_MORE_INPUT) {
             ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                          "markdown: brotli decompression "
@@ -658,14 +859,14 @@ ngx_http_markdown_decompress_brotli(ngx_http_request_t *r,
                          "category=conversion");
             BrotliDecoderDestroyInstance(decoder);
             return NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT;
-        } else {
-            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                         "markdown: brotli decompression "
-                         "incomplete, result=%d, category=conversion",
-                         result);
-            BrotliDecoderDestroyInstance(decoder);
-            return NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR;
         }
+
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                     "markdown: brotli decompression "
+                     "incomplete, result=%d, category=conversion",
+                     result);
+        BrotliDecoderDestroyInstance(decoder);
+        return NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR;
     }
     
     /* Calculate actual decompressed size */
