@@ -47,9 +47,11 @@ static ngx_int_t ngx_http_markdown_decompress_via_rust(
     const ngx_http_markdown_conf_t *conf,
     const ngx_chain_t *compressed_chain,
     ngx_chain_t **decompressed_chain);
+#ifndef NGX_HTTP_MARKDOWN_NO_RUST_DECOMPRESS
 static ngx_int_t ngx_http_markdown_linearize_chain(
     ngx_http_request_t *r, const ngx_chain_t *chain,
     u_char **out_buf, size_t *out_size);
+#endif
 static void ngx_http_markdown_log_decision_with_category(
     ngx_http_request_t *r, const ngx_http_markdown_conf_t *conf,
     const ngx_http_markdown_effective_conf_t *eff,
@@ -694,6 +696,7 @@ ngx_http_markdown_handle_decompression_conversion_error(
  *   NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED - size overflow
  *   NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT - empty input
  */
+#ifndef NGX_HTTP_MARKDOWN_NO_RUST_DECOMPRESS
 static ngx_int_t
 ngx_http_markdown_linearize_chain(ngx_http_request_t *r,
                                   const ngx_chain_t *chain,
@@ -764,6 +767,7 @@ ngx_http_markdown_linearize_chain(ngx_http_request_t *r,
     *out_size = total;
     return NGX_OK;
 }
+#endif /* !NGX_HTTP_MARKDOWN_NO_RUST_DECOMPRESS */
 
 
 /*
