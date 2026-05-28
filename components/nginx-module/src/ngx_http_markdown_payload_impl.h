@@ -302,8 +302,8 @@ ngx_http_markdown_apply_decompressed_payload(ngx_http_request_t *r,
         decompressed_data = NULL;
     } else if (decompressed_chain->buf->pos == NULL
                || decompressed_chain->buf->last == NULL
-               || decompressed_chain->buf->last
-                  < decompressed_chain->buf->pos)
+               || (uintptr_t) decompressed_chain->buf->last
+                  < (uintptr_t) decompressed_chain->buf->pos)
     {
         const ngx_str_t *compression_name;
 
@@ -862,12 +862,15 @@ ngx_http_markdown_decompress_via_rust(
      * pointer is NULL but the length claims non-zero bytes.
      */
     if (result.output == NULL && result.output_len > 0) {
+        size_t  saved_len;
+
+        saved_len = (size_t) result.output_len;
         markdown_decompress_free(&result);
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                      "markdown: rust decompress "
                      "returned NULL output with "
                      "non-zero length=%uz",
-                     (size_t) result.output_len);
+                     saved_len);
         return NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR;
     }
 
