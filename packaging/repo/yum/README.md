@@ -4,13 +4,15 @@ This is the YUM/DNF package repository for `nginx-module-markdown`, an NGINX
 dynamic filter module that serves Markdown to AI agents while keeping HTML for
 normal clients.
 
-> **Note**: This is a self-hosted, unofficial repository. It is not part of
-> Fedora, EPEL, AlmaLinux, Amazon Linux, or any other official distribution
-> archive.
+> **Note**: This is a self-hosted, unofficial repository template. It is not
+> part of Fedora, EPEL, AlmaLinux, Amazon Linux, or any other official
+> distribution archive. For the public v0.7.0 release channel, use the GitHub
+> Release RPM artifacts with `SHA256SUMS`; `pkg.example.com` and the commands
+> below are operator examples for repositories you publish yourself.
 
 ---
 
-## Quick Start
+## Self-Hosted Quick Start
 
 ### 1. Import the GPG signing key
 
@@ -45,14 +47,14 @@ sudo dnf config-manager --add-repo \
     https://pkg.example.com/nginx-markdown/yum/nginx-markdown.repo
 ```
 
-### 3. Install the module
+### 3. Install the module from your self-hosted repository
 
 ```bash
 # YUM (RHEL/CentOS/AlmaLinux/Amazon Linux)
-sudo yum install nginx-module-markdown
+sudo yum install <self-hosted-module-package-name>
 
 # DNF (Fedora)
-sudo dnf install nginx-module-markdown
+sudo dnf install <self-hosted-module-package-name>
 ```
 
 ### 4. Enable the module
@@ -209,7 +211,7 @@ If you encounter dependency errors:
 sudo rpm --import https://pkg.example.com/nginx-markdown/gpg.key
 
 # Retry installation
-sudo yum install nginx-module-markdown
+sudo yum install <self-hosted-module-package-name>
 ```
 
 ### "Signature verification failed" error
@@ -222,7 +224,7 @@ sudo rpm --import https://pkg.example.com/nginx-markdown/gpg.key
 
 # Clean YUM cache and retry
 sudo yum clean all
-sudo yum install nginx-module-markdown
+sudo yum install <self-hosted-module-package-name>
 ```
 
 ### "Nothing provides nginx-abi-X.Y" dependency error
@@ -235,7 +237,7 @@ NGINX version from the official NGINX repository:
 sudo yum install -y https://nginx.org/packages/mainline/centos/9/x86_64/RPMS/nginx-*.rpm
 
 # Then retry module installation
-sudo yum install nginx-module-markdown
+sudo yum install <self-hosted-module-package-name>
 ```
 
 ### Repository metadata errors

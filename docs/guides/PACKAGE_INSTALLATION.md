@@ -1,7 +1,7 @@
 # Package Installation Guide
 
-This guide covers installing DEB and RPM artifacts produced by the v0.7.0+
-release workflows. These are community-maintained dynamic-module packages, not
+This guide covers installing DEB and RPM artifacts produced by the v0.7.0 and
+later release workflows. These are community-maintained dynamic-module packages, not
 official NGINX repository packages.
 
 ## Repository Publishing Status

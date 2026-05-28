@@ -4,12 +4,15 @@ This is the APT package repository for `nginx-module-markdown`, an NGINX dynamic
 filter module that serves Markdown to AI agents while keeping HTML for normal
 clients.
 
-> **Note**: This is a self-hosted, unofficial repository. It is not part of the
-> Debian, Ubuntu, or any other official distribution archive.
+> **Note**: This is a self-hosted, unofficial repository template. It is not
+> part of the Debian, Ubuntu, or any other official distribution archive.
+> For the public v0.7.0 release channel, use the GitHub Release DEB artifacts
+> with `SHA256SUMS`; `pkg.example.com` and the commands below are operator
+> examples for repositories you publish yourself.
 
 ---
 
-## Quick Start
+## Self-Hosted Quick Start
 
 ### 1. Import the GPG signing key
 
@@ -28,11 +31,11 @@ echo "deb [signed-by=/usr/share/keyrings/nginx-markdown-archive-keyring.gpg arch
 
 For arm64 systems, replace `arch=amd64` with `arch=arm64`.
 
-### 3. Install the module
+### 3. Install the module from your self-hosted repository
 
 ```bash
 sudo apt-get update
-sudo apt-get install nginx-module-markdown
+sudo apt-get install <self-hosted-module-package-name>
 ```
 
 ### 4. Enable the module
@@ -211,7 +214,7 @@ NGINX version from the official NGINX repository:
 
 ```bash
 # Add official NGINX repository first, then retry
-sudo apt-get install nginx-module-markdown
+sudo apt-get install <self-hosted-module-package-name>
 ```
 
 ---
