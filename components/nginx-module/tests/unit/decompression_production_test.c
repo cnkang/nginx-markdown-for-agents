@@ -34,6 +34,9 @@
 #define ngx_log_debug1(level, log, err, fmt, a1) \
     do { (void) (level); (void) (log); (void) (err); (void) (fmt); \
          (void) (a1); } while (0)
+#define ngx_log_debug2(level, log, err, fmt, a1, a2) \
+    do { (void) (level); (void) (log); (void) (err); (void) (fmt); \
+         (void) (a1); (void) (a2); } while (0)
 #define ngx_log_debug3(level, log, err, fmt, a1, a2, a3) \
     do { (void) (level); (void) (log); (void) (err); (void) (fmt); \
          (void) (a1); (void) (a2); (void) (a3); } while (0)
