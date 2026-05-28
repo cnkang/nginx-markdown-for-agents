@@ -27,6 +27,7 @@ BACKEND_PORT=18200
 readonly ACCEPT_MARKDOWN='Accept: text/markdown'
 readonly AUTH_COOKIE_SESSION='Cookie: session_id=abc123'
 readonly HDR_X_FORWARDED_PROTO_HTTPS='X-Forwarded-Proto: https'
+readonly HDR_IF_MODIFIED_SINCE_FUTURE='If-Modified-Since: Thu, 01 Jan 2099 00:00:00 GMT'
 
 usage() {
   cat >&2 <<EOF
@@ -943,7 +944,7 @@ curl -sS -H "${ACCEPT_MARKDOWN}" -H 'If-None-Match: "etag1", "etag2"' \
   "http://127.0.0.1:${PORT}/index.html" -o /dev/null -w "  INM multi: HTTP %{http_code}\n"
 
 # If-Modified-Since
-curl -sS -H "${ACCEPT_MARKDOWN}" -H 'If-Modified-Since: Thu, 01 Jan 2099 00:00:00 GMT' \
+curl -sS -H "${ACCEPT_MARKDOWN}" -H "${HDR_IF_MODIFIED_SINCE_FUTURE}" \
   "http://127.0.0.1:${PORT}/index.html" -o /dev/null -w "  conditional IMS: HTTP %{http_code}\n"
 
 # If-None-Match to IMS-only location (bypass)
@@ -1105,7 +1106,7 @@ curl -sS -H "${ACCEPT_MARKDOWN}" -H 'Range: bytes=0-100' \
 # Streaming conditional modes
 curl -sS -H "${ACCEPT_MARKDOWN}" -H 'If-None-Match: "etag-value"' \
   "http://127.0.0.1:${PORT}/streaming-fullsupport/index.html" -o /dev/null -w "  streaming full_support INM: HTTP %{http_code}\n"
-curl -sS -H "${ACCEPT_MARKDOWN}" -H 'If-Modified-Since: Thu, 01 Jan 2099 00:00:00 GMT' \
+curl -sS -H "${ACCEPT_MARKDOWN}" -H "${HDR_IF_MODIFIED_SINCE_FUTURE}" \
   "http://127.0.0.1:${PORT}/streaming-ims-only/index.html" -o /dev/null -w "  streaming ims-only IMS: HTTP %{http_code}\n"
 
 # Streaming engine variable selection (on/off/auto/invalid)
@@ -1318,7 +1319,7 @@ curl -sS -H "${ACCEPT_MARKDOWN}" \
 # Conditional: If-None-Match + If-Modified-Since together (both present)
 curl -sS -H "${ACCEPT_MARKDOWN}" \
   -H 'If-None-Match: "combined-etag"' \
-  -H 'If-Modified-Since: Thu, 01 Jan 2099 00:00:00 GMT' \
+  -H "${HDR_IF_MODIFIED_SINCE_FUTURE}" \
   "http://127.0.0.1:${PORT}/index.html" -o /dev/null -w "  INM+IMS combined: HTTP %{http_code}\n"
 
 # Conditional: If-None-Match with empty value (should be treated as absent)
@@ -1330,7 +1331,7 @@ curl -sS -H "${ACCEPT_MARKDOWN}" -H 'If-None-Match: "any-etag"' \
   "http://127.0.0.1:${PORT}/ims-only/index.html" -o /dev/null -w "  ims-only with INM: HTTP %{http_code}\n"
 
 # Conditional: If-Modified-Since to ims-only (should exercise IMS path)
-curl -sS -H "${ACCEPT_MARKDOWN}" -H 'If-Modified-Since: Thu, 01 Jan 2099 00:00:00 GMT' \
+curl -sS -H "${ACCEPT_MARKDOWN}" -H "${HDR_IF_MODIFIED_SINCE_FUTURE}" \
   "http://127.0.0.1:${PORT}/ims-only/index.html" -o /dev/null -w "  ims-only with IMS future: HTTP %{http_code}\n"
 curl -sS -H "${ACCEPT_MARKDOWN}" -H 'If-Modified-Since: Mon, 01 Jan 2020 00:00:00 GMT' \
   "http://127.0.0.1:${PORT}/ims-only/index.html" -o /dev/null -w "  ims-only with IMS past: HTTP %{http_code}\n"
