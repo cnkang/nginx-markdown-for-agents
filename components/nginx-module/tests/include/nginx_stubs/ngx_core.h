@@ -59,6 +59,24 @@ typedef struct ngx_http_markdown_otel_span_s {
 } ngx_http_markdown_otel_span_t;
 
 #define ngx_string(str)     { sizeof(str) - 1, (u_char *) str }
+
+/* NGINX return codes — guarded so per-test overrides still work */
+#ifndef NGX_OK
+#define NGX_OK          0
+#endif
+#ifndef NGX_ERROR
+#define NGX_ERROR      -1
+#endif
+#ifndef NGX_AGAIN
+#define NGX_AGAIN      -2
+#endif
+#ifndef NGX_DONE
+#define NGX_DONE       -4
+#endif
+#ifndef NGX_DECLINED
+#define NGX_DECLINED   -5
+#endif
+
 #define NGX_LOG_ERR         1
 #define NGX_LOG_WARN        2
 
