@@ -181,7 +181,7 @@ jobs:
             # nm output: <address> <type> <symbol_name>
             # macOS prefixes with '_', Linux does not.
             # Extract the last field and match with optional '_' prefix.
-            if ! nm -g "${RUST_LIB}" 2>/dev/null | awk '{print $NF}' | grep -qx "_\?${sym}"; then
+            if ! nm -g "${RUST_LIB}" 2>/dev/null | awk '{print $NF}' | grep -Eq "^_?${sym}$"; then
               echo "ERROR: Required symbol ${sym} not found in ${RUST_LIB}" >&2
               MISSING=1
             else
