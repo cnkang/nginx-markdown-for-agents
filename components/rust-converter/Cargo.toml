@@ -43,7 +43,7 @@ libc = "0.2"
 toml = "1.1"
 
 [features]
-default = ["prune_noise_regions"]
+default = ["prune_noise_regions", "streaming", "incremental"]
 incremental = []
 streaming = []
 prune_noise_regions = []
