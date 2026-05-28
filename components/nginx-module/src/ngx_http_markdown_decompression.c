@@ -232,15 +232,18 @@ ngx_http_markdown_calc_output_size(ngx_http_request_t *r, size_t input_size,
 /*
  * Grow the decompression output buffer up to decompress.max_size.
  *
- * Called when inflate() returns Z_OK or Z_BUF_ERROR with avail_out == 0.
- * Doubles the buffer (minimum +4096) capped at the configured budget.
+ * Codec-agnostic buffer growth: computes a new size (double current used,
+ * minimum +4096, capped at budget and UINT_MAX), allocates from the pool,
+ * and copies existing data. The caller is responsible for updating any
+ * codec-specific pointers (z_stream, brotli next_out, etc.) after this
+ * function returns.
  *
  * Parameters:
  *   r           - nginx request structure (for pool allocation and logging)
  *   conf        - module configuration (provides decompress.max_size)
  *   output_data - pointer to current output buffer pointer (updated on success)
  *   output_size - pointer to current output buffer size (updated on success)
- *   stream      - zlib stream (next_out and avail_out updated on success)
+ *   used        - number of bytes already written to the buffer
  *
  * Returns:
  *   NGX_OK on successful reallocation
@@ -248,16 +251,13 @@ ngx_http_markdown_calc_output_size(ngx_http_request_t *r, size_t input_size,
  *   NGX_ERROR on allocation failure
  */
 static ngx_int_t
-ngx_http_markdown_grow_decomp_buffer(ngx_http_request_t *r,
+ngx_http_markdown_grow_output_buffer(ngx_http_request_t *r,
     const ngx_http_markdown_conf_t *conf,
-    u_char **output_data, size_t *output_size,
-    z_stream *stream)
+    u_char **output_data, size_t *output_size, size_t used)
 {
     size_t   new_size;
-    size_t   used;
     u_char  *new_data;
 
-    used = stream->total_out;
     if (used >= conf->decompress.max_size) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                      "markdown: decompressed size exceeds "
@@ -307,8 +307,47 @@ ngx_http_markdown_grow_decomp_buffer(ngx_http_request_t *r,
     ngx_memcpy(new_data, *output_data, used);
     *output_data = new_data;
     *output_size = new_size;
-    stream->next_out = new_data + used;
-    stream->avail_out = (uInt) (new_size - used);
+
+    return NGX_OK;
+}
+
+
+/*
+ * Grow the decompression output buffer up to decompress.max_size (zlib).
+ *
+ * Thin wrapper around ngx_http_markdown_grow_output_buffer that also
+ * updates the zlib stream's next_out and avail_out pointers.
+ *
+ * Parameters:
+ *   r           - nginx request structure (for pool allocation and logging)
+ *   conf        - module configuration (provides decompress.max_size)
+ *   output_data - pointer to current output buffer pointer (updated on success)
+ *   output_size - pointer to current output buffer size (updated on success)
+ *   stream      - zlib stream (next_out and avail_out updated on success)
+ *
+ * Returns:
+ *   NGX_OK on successful reallocation
+ *   NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED if budget would be exceeded
+ *   NGX_ERROR on allocation failure
+ */
+static ngx_int_t
+ngx_http_markdown_grow_decomp_buffer(ngx_http_request_t *r,
+    const ngx_http_markdown_conf_t *conf,
+    u_char **output_data, size_t *output_size,
+    z_stream *stream)
+{
+    size_t     used;
+    ngx_int_t  rc;
+
+    used = stream->total_out;
+    rc = ngx_http_markdown_grow_output_buffer(r, conf, output_data,
+                                             output_size, used);
+    if (rc != NGX_OK) {
+        return rc;
+    }
+
+    stream->next_out = *output_data + used;
+    stream->avail_out = (uInt) (*output_size - used);
 
     return NGX_OK;
 }
@@ -810,65 +849,17 @@ ngx_http_markdown_decompress_brotli(ngx_http_request_t *r,
         }
 
         if (result == BROTLI_DECODER_RESULT_NEEDS_MORE_OUTPUT) {
-            size_t   used;
-            size_t   new_size;
-            u_char  *new_data;
+            size_t     used;
+            ngx_int_t  grow_rc;
 
             used = output_size - available_out;
-
-            if (used >= conf->decompress.max_size) {
-                ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                             "markdown: decompressed size exceeds "
-                             "decompression budget (%uz), "
-                             "category=resource_limit",
-                             conf->decompress.max_size);
+            grow_rc = ngx_http_markdown_grow_output_buffer(
+                r, conf, &output_data, &output_size, used);
+            if (grow_rc != NGX_OK) {
                 BrotliDecoderDestroyInstance(decoder);
-                return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
+                return grow_rc;
             }
-
-            if (used > ((size_t) -1) / 2) {
-                new_size = conf->decompress.max_size;
-            } else {
-                new_size = used * 2;
-            }
-            if (new_size < used + 4096) {
-                new_size = used + 4096;
-            }
-            if (new_size > conf->decompress.max_size) {
-                new_size = conf->decompress.max_size;
-            }
-            if (new_size > (size_t) UINT_MAX) {
-                new_size = (size_t) UINT_MAX;
-            }
-            if (new_size <= used) {
-                ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                             "markdown: decompressed size exceeds "
-                             "decompression budget (%uz), "
-                             "category=resource_limit",
-                             conf->decompress.max_size);
-                BrotliDecoderDestroyInstance(decoder);
-                return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
-            }
-
-            new_data = ngx_pnalloc(r->pool, new_size);
-            if (new_data == NULL) {
-                ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                             "markdown: failed to reallocate decompression "
-                             "buffer, size=%uz, category=system",
-                             new_size);
-                BrotliDecoderDestroyInstance(decoder);
-                return NGX_ERROR;
-            }
-
-            ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                          "markdown: brotli decompression buffer realloc "
-                          "used=%uz new_size=%uz (old buffer in pool)",
-                          used, new_size);
-
-            ngx_memcpy(new_data, output_data, used);
-            output_data = new_data;
-            output_size = new_size;
-            available_out = new_size - used;
+            available_out = output_size - used;
             next_out = output_data + used;
             continue;
         }
