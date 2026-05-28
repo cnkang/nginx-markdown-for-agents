@@ -142,6 +142,13 @@ ngx_http_markdown_metrics_handler(ngx_http_request_t *r)
     return NGX_OK;
 }
 
+static ngx_int_t
+ngx_http_markdown_diagnostics_handler(ngx_http_request_t *r)
+{
+    UNUSED(r);
+    return NGX_OK;
+}
+
 /*
  * Case-insensitive comparison of the first n bytes.
  *
@@ -1505,6 +1512,120 @@ test_set_dynconf_path(void)
     TEST_PASS("set_dynconf_path branches covered");
 }
 
+/*
+ * Verify diagnostics directive handler: on/off, invalid value,
+ * handler installation, and duplicate content handler.
+ */
+static void
+test_diagnostics_handler(void)
+{
+    ngx_conf_t                 cf;
+    ngx_array_t                args;
+    ngx_str_t                  values[2];
+    ngx_command_t              cmd;
+    ngx_http_markdown_conf_t   mcf;
+    ngx_http_core_loc_conf_t   clcf;
+    const char                *rc;
+
+    TEST_SUBSECTION("diagnostics handler");
+
+    setup_cf(&cf, &args, values, 2);
+    set_arg(&cmd.name, "markdown_diagnostics");
+    set_arg(&values[0], "markdown_diagnostics");
+
+    /* Test "on" value */
+    init_conf(&mcf);
+    memset(&clcf, 0, sizeof(clcf));
+    g_clcf = &clcf;
+    set_arg(&values[1], "on");
+    rc = ngx_http_markdown_diagnostics_directive(&cf, &cmd, &mcf);
+    TEST_ASSERT(rc == NGX_CONF_OK, "on should parse");
+    TEST_ASSERT(mcf.ops.diagnostics_enabled == 1, "diagnostics should be enabled");
+    TEST_ASSERT(clcf.handler == ngx_http_markdown_diagnostics_handler,
+        "diagnostics handler should be registered");
+
+    /* Duplicate handler should fail */
+    rc = ngx_http_markdown_diagnostics_directive(&cf, &cmd, &mcf);
+    TEST_ASSERT(rc == NGX_CONF_ERROR, "duplicate handler should fail");
+
+    /* Test "off" value */
+    init_conf(&mcf);
+    set_arg(&values[1], "off");
+    rc = ngx_http_markdown_diagnostics_directive(&cf, &cmd, &mcf);
+    TEST_ASSERT(rc == NGX_CONF_OK, "off should parse");
+    TEST_ASSERT(mcf.ops.diagnostics_enabled == 0, "diagnostics should be disabled");
+
+    /* Test invalid value */
+    init_conf(&mcf);
+    set_arg(&values[1], "invalid");
+    rc = ngx_http_markdown_diagnostics_directive(&cf, &cmd, &mcf);
+    TEST_ASSERT(rc != NGX_CONF_OK, "invalid value should fail");
+
+    /* Test NULL clcf */
+    init_conf(&mcf);
+    g_clcf = NULL;
+    set_arg(&values[1], "on");
+    rc = ngx_http_markdown_diagnostics_directive(&cf, &cmd, &mcf);
+    TEST_ASSERT(rc == NGX_CONF_ERROR, "NULL clcf should fail");
+
+    g_clcf = &clcf;
+
+    TEST_PASS("diagnostics handler branches covered");
+}
+
+/*
+ * Verify content_types handler validation: empty type, no slash,
+ * leading slash, trailing slash, multiple slashes.
+ */
+static void
+test_content_types_validation(void)
+{
+    ngx_conf_t               cf;
+    ngx_array_t              args;
+    ngx_str_t                values[2];
+    ngx_command_t            cmd;
+    ngx_http_markdown_conf_t mcf;
+    const char              *rc;
+
+    TEST_SUBSECTION("content_types validation");
+
+    setup_cf(&cf, &args, values, 2);
+    set_arg(&cmd.name, "markdown_content_types");
+    set_arg(&values[0], "markdown_content_types");
+
+    /* Empty type should fail */
+    init_conf(&mcf);
+    set_arg(&values[1], "");
+    rc = ngx_http_markdown_content_types(&cf, &cmd, &mcf);
+    TEST_ASSERT(rc == NGX_CONF_ERROR, "empty content type should fail");
+
+    /* No slash should fail */
+    init_conf(&mcf);
+    set_arg(&values[1], "texthtml");
+    rc = ngx_http_markdown_content_types(&cf, &cmd, &mcf);
+    TEST_ASSERT(rc == NGX_CONF_ERROR, "no slash should fail");
+
+    /* Leading slash should fail */
+    init_conf(&mcf);
+    set_arg(&values[1], "/html");
+    rc = ngx_http_markdown_content_types(&cf, &cmd, &mcf);
+    TEST_ASSERT(rc == NGX_CONF_ERROR, "leading slash should fail");
+
+    /* Trailing slash should fail */
+    init_conf(&mcf);
+    set_arg(&values[1], "text/");
+    rc = ngx_http_markdown_content_types(&cf, &cmd, &mcf);
+    TEST_ASSERT(rc == NGX_CONF_ERROR, "trailing slash should fail");
+
+    /* Multiple slashes should fail */
+    init_conf(&mcf);
+    set_arg(&values[1], "text/html/xml");
+    rc = ngx_http_markdown_content_types(&cf, &cmd, &mcf);
+    TEST_ASSERT(rc == NGX_CONF_ERROR, "multiple slashes should fail");
+
+    TEST_PASS("content_types validation branches covered");
+}
+
 static void
 test_markdown_content_types_handler(void)
 {
@@ -1558,9 +1679,6 @@ test_markdown_content_types_handler(void)
 int
 main(void)
 {
-    /* Suppress -Wunused-function for functions not exercised by this test */
-    (void) ngx_http_markdown_diagnostics_directive;
-
     printf("\n========================================\n");
     printf("config_handlers_impl Tests\n");
     printf("========================================\n");
@@ -1581,6 +1699,8 @@ main(void)
     test_parse_size_edge_cases();
     test_markdown_filter_palloc_failure();
     test_set_dynconf_path();
+    test_diagnostics_handler();
+    test_content_types_validation();
     test_markdown_content_types_handler();
 
     printf("\n========================================\n");
