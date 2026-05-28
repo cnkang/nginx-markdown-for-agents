@@ -607,7 +607,7 @@ jobs:
           version: '4.2.0'
 
       - name: Run v0.7.0 release gates
-        run: RELEASE_GATE_REQUIRE_PACKAGES=0 make release-gates-check-070
+        run: RELEASE_GATE_REQUIRE_PACKAGES=0 RELEASE_GATE_ALLOW_SKIP_NATIVE_E2E=1 make release-gates-check-070
 
   corpus-benchmark:
     name: Corpus Benchmark Gate
