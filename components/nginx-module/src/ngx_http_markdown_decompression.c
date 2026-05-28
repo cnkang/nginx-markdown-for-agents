@@ -461,10 +461,14 @@ ngx_http_markdown_inflate_loop(ngx_http_request_t *r,
  *    - MAX_WBITS for deflate format
  * 3. Estimates output size (typically input_size * 10)
  * 4. Allocates output buffer using nginx memory pool
- * 5. Performs decompression using inflate() with Z_FINISH flag
- * 6. Checks for Z_STREAM_END return value
- * 7. Creates output chain with decompressed data
- * 8. Cleans up with inflateEnd()
+ * 5. Performs incremental decompression using inflate(..., Z_NO_FLUSH)
+ *    via ngx_http_markdown_inflate_loop()
+ * 6. Grows the output buffer up to decompress.max_size when avail_out
+ *    is exhausted
+ * 7. Returns classified decompression errors for budget, truncation,
+ *    format, and I/O failures
+ * 8. Creates output chain with decompressed data
+ * 9. Cleans up with inflateEnd()
  *
  * Parameters:
  *   r    - nginx request structure
@@ -473,7 +477,12 @@ ngx_http_markdown_inflate_loop(ngx_http_request_t *r,
  *   out  - output chain with decompressed data (output parameter)
  *
  * Returns:
- *   NGX_OK on success, NGX_ERROR on failure
+ *   NGX_OK on success
+ *   NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED if decompressed size exceeds budget
+ *   NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT if input stream is incomplete
+ *   NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR on invalid compressed data
+ *   NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR on unexpected zlib errors
+ *   NGX_ERROR on system failures (allocation, initialization)
  *
  * Requirements: 2.1, 2.2, 2.3, 9.1, 9.2, 13.1, 13.5, 14.1, 14.2
  */
