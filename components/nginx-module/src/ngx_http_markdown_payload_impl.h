@@ -47,6 +47,9 @@ static ngx_int_t ngx_http_markdown_decompress_via_rust(
     const ngx_http_markdown_conf_t *conf,
     const ngx_chain_t *compressed_chain,
     ngx_chain_t **decompressed_chain);
+static ngx_int_t ngx_http_markdown_linearize_chain(
+    ngx_http_request_t *r, const ngx_chain_t *chain,
+    u_char **out_buf, size_t *out_size);
 static void ngx_http_markdown_log_decision_with_category(
     ngx_http_request_t *r, const ngx_http_markdown_conf_t *conf,
     const ngx_http_markdown_effective_conf_t *eff,
@@ -673,6 +676,97 @@ ngx_http_markdown_handle_decompression_conversion_error(
 }
 
 /*
+ * Linearize a buffer chain into a single contiguous allocation.
+ *
+ * Validates each buffer's pos/last pointers (non-NULL, well-ordered via
+ * uintptr_t comparison) and accumulates total size with overflow checking.
+ * On success, allocates a pool buffer and copies all chain data into it.
+ *
+ * Parameters:
+ *   r        - NGINX request (pool allocation and logging)
+ *   chain    - input chain to linearize
+ *   out_buf  - output: pointer to the allocated contiguous buffer
+ *   out_size - output: total byte count
+ *
+ * Returns:
+ *   NGX_OK                                  - success
+ *   NGX_ERROR                               - invalid pointers or alloc failure
+ *   NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED - size overflow
+ *   NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT - empty input
+ */
+static ngx_int_t
+ngx_http_markdown_linearize_chain(ngx_http_request_t *r,
+                                  const ngx_chain_t *chain,
+                                  u_char **out_buf, size_t *out_size)
+{
+    const ngx_chain_t  *src;
+    size_t              total;
+    u_char             *buf;
+    u_char             *dst;
+
+    total = 0;
+    for (src = chain; src != NULL; src = src->next) {
+        if (src->buf == NULL) {
+            continue;
+        }
+
+        if (src->buf->pos == NULL || src->buf->last == NULL
+            || (uintptr_t) src->buf->last < (uintptr_t) src->buf->pos)
+        {
+            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                         "markdown: linearize chain "
+                         "invalid buffer pointers, "
+                         "category=system");
+            return NGX_ERROR;
+        }
+
+        {
+            size_t  len;
+
+            len = (size_t) (src->buf->last - src->buf->pos);
+            if (len > ((size_t) -1) - total) {
+                ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                             "markdown: linearize chain "
+                             "input size overflow, "
+                             "category=resource");
+                return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
+            }
+            total += len;
+        }
+    }
+
+    if (total == 0) {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                     "markdown: linearize chain "
+                     "called with empty input");
+        return NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT;
+    }
+
+    buf = ngx_palloc(r->pool, total);
+    if (buf == NULL) {
+        return NGX_ERROR;
+    }
+
+    dst = buf;
+    for (src = chain; src != NULL; src = src->next) {
+        if (src->buf != NULL) {
+            size_t  len;
+
+            len = (size_t) (src->buf->last - src->buf->pos);
+            if (len > 0) {
+                ngx_memcpy(dst, src->buf->pos, len);
+                dst += len;
+            }
+        }
+    }
+
+    *out_buf = buf;
+    *out_size = total;
+    return NGX_OK;
+}
+
+
+/*
  * Decompress via Rust FFI bounded decompressor.
  *
  * Linearizes the compressed chain into a contiguous buffer, maps the
@@ -723,7 +817,7 @@ ngx_http_markdown_decompress_via_rust(
     u_char                *pool_copy;
     ngx_buf_t             *b;
     ngx_chain_t           *cl;
-    const ngx_chain_t     *src;
+    ngx_int_t              rc_linear;
 
     /*
      * Map NGINX compression type to Rust format code:
@@ -748,62 +842,10 @@ ngx_http_markdown_decompress_via_rust(
      * prepare_compressed_chain is typically a single buffer, but we
      * handle multi-buffer chains defensively.
      */
-    input_size = 0;
-    for (src = compressed_chain; src != NULL; src = src->next) {
-        if (src->buf != NULL) {
-            size_t  len;
-
-            if (src->buf->pos == NULL || src->buf->last == NULL
-                || src->buf->last < src->buf->pos)
-            {
-                ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                             "markdown: rust decompress "
-                             "invalid buffer pointers, "
-                             "category=system");
-                return NGX_ERROR;
-            }
-
-            len = (size_t) (src->buf->last - src->buf->pos);
-            if (len > ((size_t) -1) - input_size) {
-                ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                             "markdown: rust decompress "
-                             "input size overflow, "
-                             "category=resource");
-                return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
-            }
-            input_size += len;
-        }
-    }
-
-    if (input_size == 0) {
-        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                     "markdown: rust decompress "
-                     "called with empty input");
-        return NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT;
-    }
-
-    input_buf = ngx_palloc(r->pool, input_size);
-    if (input_buf == NULL) {
-        return NGX_ERROR;
-    }
-
-    {
-        u_char  *dst;
-
-        dst = input_buf;
-        for (src = compressed_chain; src != NULL; src = src->next) {
-            if (src->buf != NULL
-                && src->buf->pos != NULL
-                && src->buf->last != NULL
-                && src->buf->last >= src->buf->pos)
-            {
-                size_t  len;
-
-                len = (size_t) (src->buf->last - src->buf->pos);
-                ngx_memcpy(dst, src->buf->pos, len);
-                dst += len;
-            }
-        }
+    rc_linear = ngx_http_markdown_linearize_chain(
+        r, compressed_chain, &input_buf, &input_size);
+    if (rc_linear != NGX_OK) {
+        return rc_linear;
     }
 
     /* Initialize the result struct before the FFI call. */
@@ -1099,6 +1141,21 @@ ngx_http_markdown_body_filter_decompress_if_needed(ngx_http_request_t *r,
             "markdown: fail-open strategy "
             "- returning original content after "
             "decompression I/O error");
+    }
+
+    /*
+     * NGX_ERROR indicates a system-level failure (invalid buffer
+     * pointers, allocation failure) rather than a data-format
+     * conversion error.  Route through the system-error handler
+     * so metrics reflect the correct category.
+     */
+    if (decompress_rc == NGX_ERROR) {
+        return ngx_http_markdown_handle_decompression_alloc_error(
+            r, ctx, conf,
+            NGX_HTTP_MARKDOWN_ERROR_SYSTEM,
+            "markdown: fail-open strategy "
+            "- returning original content after "
+            "decompression system error");
     }
 
     /*
