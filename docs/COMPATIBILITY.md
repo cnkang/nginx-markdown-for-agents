@@ -100,6 +100,11 @@ nginx-module-markdown-for-agents-0.7.0-nginx1.26.3-1.aarch64.rpm
 Always select the package that matches both your NGINX version and CPU
 architecture.
 
+The NGINX version embedded in the artifact name is the version tested by the
+release pipeline. After upgrading NGINX, install the package built for the new
+NGINX version before reloading the module, then run `nginx -t` to validate that
+the module still loads with the active NGINX binary.
+
 ---
 
 ## Unsupported Environments
