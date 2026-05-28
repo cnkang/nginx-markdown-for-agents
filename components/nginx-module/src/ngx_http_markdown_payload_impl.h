@@ -753,6 +753,16 @@ ngx_http_markdown_decompress_via_rust(
         if (src->buf != NULL) {
             size_t  len;
 
+            if (src->buf->pos == NULL || src->buf->last == NULL
+                || src->buf->last < src->buf->pos)
+            {
+                ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                             "markdown: rust decompress "
+                             "invalid buffer pointers, "
+                             "category=system");
+                return NGX_ERROR;
+            }
+
             len = (size_t) (src->buf->last - src->buf->pos);
             if (len > ((size_t) -1) - input_size) {
                 ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
@@ -782,7 +792,11 @@ ngx_http_markdown_decompress_via_rust(
 
         dst = input_buf;
         for (src = compressed_chain; src != NULL; src = src->next) {
-            if (src->buf != NULL) {
+            if (src->buf != NULL
+                && src->buf->pos != NULL
+                && src->buf->last != NULL
+                && src->buf->last >= src->buf->pos)
+            {
                 size_t  len;
 
                 len = (size_t) (src->buf->last - src->buf->pos);
