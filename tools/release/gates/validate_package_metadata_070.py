@@ -189,6 +189,16 @@ RELEASE_BUILD_GLIBC_SNIPPETS = {
     ],
 }
 
+RELEASE_RUST_BUILD_INVARIANTS = [
+    "RUST_TARGET",
+    'rustup target add "${RUST_TARGET}"',
+    'cargo build --release --locked --target "${RUST_TARGET}" --features streaming,incremental',
+    "target/${RUST_TARGET}/release/libnginx_markdown_converter.a",
+    "markdown_streaming_new",
+    "markdown_incremental_new",
+    "markdown_decompress_bounded",
+]
+
 _CHECK_CHECKSUMS_EXISTS = "checksums:exists"
 
 PACKAGE_DOC_REQUIRED_SNIPPETS = {
@@ -778,6 +788,28 @@ def validate_release_build_glibc_baseline(result: ValidationResult) -> None:
         )
 
 
+def validate_release_rust_build_invariants(result: ValidationResult) -> None:
+    """Validate release workflow contains Rust target/feature/symbol invariants.
+
+    Prevents regressions if the release workflow is refactored: the workflow
+    must set RUST_TARGET, cross-compile with the correct triple, and verify
+    that streaming/incremental/decompression FFI symbols are exported.
+    """
+    content = read_safe(RELEASE_PACKAGES_WORKFLOW)
+    if not content:
+        result.fail(
+            "rust-build-invariant:exists",
+            "release-packages.yml not found",
+        )
+        return
+    for snippet in RELEASE_RUST_BUILD_INVARIANTS:
+        sid = f"rust-build-invariant:{snippet[:28]}"
+        if snippet in content:
+            result.pass_(sid, f"release-packages.yml contains {snippet}")
+        else:
+            result.fail(sid, f"release-packages.yml missing {snippet}")
+
+
 def validate_package_installation_docs(result: ValidationResult) -> None:
     """Validate public install docs match the current package channel state."""
     for path, snippets in PACKAGE_DOC_REQUIRED_SNIPPETS.items():
@@ -830,6 +862,7 @@ def main() -> int:
     validate_gate3_local_arch_selection(result)
     validate_nfpm_postinstall_lifecycle(result)
     validate_release_build_glibc_baseline(result)
+    validate_release_rust_build_invariants(result)
     validate_package_installation_docs(result)
     print_report(result)
     return 1 if result.has_failures else 0
