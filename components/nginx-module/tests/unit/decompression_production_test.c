@@ -731,24 +731,56 @@ test_handle_inflate_stall_direct(void)
 static void
 test_chain_size_overflow_guard(void)
 {
-    ngx_buf_t buf;
-    ngx_chain_t cl;
+    /*
+     * Exercise the overflow guard in ngx_http_markdown_chain_size.
+     * Use two chain links with real backing arrays whose combined
+     * lengths would wrap around size_t.  The first link contributes
+     * a large length via pointer arithmetic on a real array, and the
+     * second link's length causes the overflow check to trigger.
+     *
+     * We rely on the fact that (buf.last - buf.pos) is computed as a
+     * size_t difference.  By placing pos at the start and last at
+     * (start + large_value) we get a valid subtraction within a real
+     * object for the first link, and the second link uses a separate
+     * real array with a crafted length that overflows when added.
+     */
+    u_char backing1[1];
+    u_char backing2[1];
+    ngx_buf_t buf1;
+    ngx_buf_t buf2;
+    ngx_chain_t cl1;
+    ngx_chain_t cl2;
     size_t result;
 
     /*
-     * Create a chain with a buffer whose len would cause overflow
-     * when added to the accumulated size. We set pos=0 and last=MAX
-     * to simulate a huge buffer. This exercises the overflow branch.
+     * First chain: length = SIZE_MAX / 2 + 1.
+     * We cannot create a real array this large, but we can set
+     * buf.last = buf.pos + (SIZE_MAX / 2 + 1) as pointer arithmetic
+     * within a notional object.  Since we never dereference these
+     * pointers (chain_size only subtracts them), this is the minimal
+     * UB-avoidance approach: use a real base address so the compiler
+     * does not optimize away the subtraction.
+     *
+     * Note: strictly, pointer arithmetic past one-past-the-end is UB
+     * in C, but this is a test-only path exercising a defensive guard.
+     * The alternative (mocking chain_size) would require production
+     * code changes.  We accept this pragmatic compromise for test
+     * coverage of the overflow branch.
      */
-    memset(&buf, 0, sizeof(buf));
-    buf.pos = 0;
-    buf.last = (u_char *) ((size_t) -1);
-    buf.start = buf.pos;
-    buf.end = buf.last;
-    cl.buf = &buf;
-    cl.next = NULL;
+    memset(&buf1, 0, sizeof(buf1));
+    buf1.pos = backing1;
+    buf1.last = backing1 + ((size_t) -1) / 2 + 1;
 
-    result = ngx_http_markdown_chain_size(&cl);
+    memset(&buf2, 0, sizeof(buf2));
+    buf2.pos = backing2;
+    buf2.last = backing2 + ((size_t) -1) / 2 + 1;
+
+    cl1.buf = &buf1;
+    cl1.next = &cl2;
+    cl2.buf = &buf2;
+    cl2.next = NULL;
+
+    result = ngx_http_markdown_chain_size(&cl1);
     TEST_ASSERT(result == (size_t) -1,
                 "chain_size should return -1 on overflow");
 }

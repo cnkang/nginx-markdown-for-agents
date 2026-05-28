@@ -1273,6 +1273,8 @@ test_metrics_handlers(void)
     TEST_ASSERT(rc == NGX_CONF_ERROR,
         "duplicate content handler should fail");
 
+    g_clcf = NULL;
+
     TEST_PASS("metrics handler branches covered");
 }
 
@@ -1568,7 +1570,7 @@ test_diagnostics_handler(void)
     rc = ngx_http_markdown_diagnostics_directive(&cf, &cmd, &mcf);
     TEST_ASSERT(rc == NGX_CONF_ERROR, "NULL clcf should fail");
 
-    g_clcf = &clcf;
+    g_clcf = NULL;
 
     TEST_PASS("diagnostics handler branches covered");
 }
