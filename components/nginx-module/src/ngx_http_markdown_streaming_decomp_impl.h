@@ -673,11 +673,11 @@ ngx_http_markdown_streaming_decomp_brotli_loop(
 
 
 /*
- * Prepare zlib state and run the inflate loop for a feed chunk.
+ * Run the zlib inflate loop after the caller has configured
+ * decomp->state.zlib.next_in and avail_in.
  *
- * Sets next_in/avail_in/next_out/avail_out on the zlib stream,
- * validates narrowing from size_t to uInt, then delegates to
- * the inflate loop.
+ * Sets next_out/avail_out on the zlib stream, validates narrowing
+ * from size_t to uInt, then delegates to the inflate loop.
  *
  * Returns:
  *   NGX_OK    - success (produced written to *out_produced)
@@ -687,28 +687,12 @@ ngx_http_markdown_streaming_decomp_brotli_loop(
 static ngx_int_t
 ngx_http_markdown_streaming_decomp_feed_zlib(
     ngx_http_markdown_streaming_decomp_t *decomp,
-    const u_char *in_data,
-    size_t in_len,
     u_char **buf_ptr,
     size_t *buf_size_ptr,
     size_t *out_produced,
     ngx_pool_t *pool,
     ngx_log_t *log)
 {
-    /* zlib's z_stream.next_in is typed Bytef* (non-const) in older headers,
-     * but inflate() never modifies the input buffer. The const-dropping cast
-     * is safe and matches NGINX's own zlib usage pattern. */
-    decomp->state.zlib.next_in = (Bytef *) in_data;
-    if (ngx_http_markdown_streaming_decomp_size_to_uint(
-            in_len, &decomp->state.zlib.avail_in))
-    {
-        ngx_log_error(NGX_LOG_ERR, log, 0,
-            "markdown: "
-            "input length %uz exceeds zlib uInt max",
-            in_len);
-        return NGX_ERROR;
-    }
-
     decomp->state.zlib.next_out = *buf_ptr;
     if (ngx_http_markdown_streaming_decomp_size_to_uint(
             *buf_size_ptr, &decomp->state.zlib.avail_out))
@@ -812,9 +796,21 @@ ngx_http_markdown_streaming_decomp_feed(
     {
         ngx_int_t  inflate_rc;
 
+        /* Configure zlib input (const-drop safe: inflate reads only) */
+        decomp->state.zlib.next_in = (Bytef *) in_data;
+        if (ngx_http_markdown_streaming_decomp_size_to_uint(
+                in_len, &decomp->state.zlib.avail_in))
+        {
+            ngx_log_error(NGX_LOG_ERR, log, 0,
+                "markdown: "
+                "input length %uz exceeds zlib uInt max",
+                in_len);
+            return NGX_ERROR;
+        }
+
         inflate_rc =
             ngx_http_markdown_streaming_decomp_feed_zlib(
-                decomp, in_data, in_len,
+                decomp,
                 &buf, &buf_size, &produced,
                 pool, log);
         if (inflate_rc != NGX_OK) {
