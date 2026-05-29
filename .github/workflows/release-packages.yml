@@ -1,6 +1,6 @@
 # Release Packages — Unified DEB/RPM build, test, sign, and publish pipeline
 #
-# Architecture: build (matrix) → package (matrix) → smoke-test (matrix) → integrity → publish
+# Architecture: prepare → build (matrix) → package (matrix) → smoke-test (matrix) → integrity → publish
 #
 # Triggers:
 #   - Tag push (v*): full pipeline ending with GitHub Release upload
@@ -13,9 +13,16 @@
 #   - GPG signing runs in a Protected Environment with required reviewers
 #   - workflow_dispatch input is validated before use (Req 9.7)
 #
+# Matrix generation:
+#   The prepare job reads tools/release-matrix.json and extracts all NGINX
+#   versions with support_tier=="full" and os_type=="glibc" (DEB/RPM targets).
+#   This ensures the release workflow always builds packages for every version
+#   declared in the release matrix, preventing matrix/workflow drift.
+#
 # Extension points (see also packaging/matrix.yaml for authoritative matrix reference):
-#   - Add new NGINX versions: update nginx_version in the build/package/smoke-test
-#     matrix arrays (and packaging/matrix.yaml). No structural workflow changes needed.
+#   - Add new NGINX versions: update tools/release-matrix.json with the new
+#     version entry (support_tier: "full", os_type: "glibc") and add its
+#     SHA256 checksum to packaging/checksums.sha256. No workflow changes needed.
 #   - Add new target platforms: add entries to the smoke-test matrix include list
 #     with the appropriate container image and format, then update
 #     packaging/matrix.yaml smoke_test_containers accordingly.
@@ -54,6 +61,7 @@ on:
 permissions: {}
 
 # Jobs:
+#   - prepare:             Resolve build matrix from tools/release-matrix.json
 #   - build:               Compile Rust library + NGINX dynamic module (matrix)
 #   - package:             Generate .deb/.rpm via nFPM (matrix)
 #   - smoke-test:          Container install + module load verification (matrix)
@@ -71,8 +79,82 @@ env:
   RUST_FEATURES: streaming,incremental
 
 jobs:
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Prepare Job: Resolve build matrix from tools/release-matrix.json
+  # Extracts unique NGINX versions with full glibc support to drive the
+  # build/package/smoke-test matrices dynamically.
+  # ─────────────────────────────────────────────────────────────────────────────
+  prepare:
+    name: Resolve Package Matrix
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      nginx_versions: ${{ steps.resolve.outputs.nginx_versions }}
+      smoke_matrix: ${{ steps.resolve.outputs.smoke_matrix }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Resolve matrix from release-matrix.json
+        id: resolve
+        run: |
+          python3 - <<'PY'
+          import json, os
+
+          with open("tools/release-matrix.json", "r") as f:
+              data = json.load(f)
+
+          # Extract unique NGINX versions with full support and glibc os_type
+          # (DEB/RPM packages target glibc-based distros)
+          glibc_full = [
+              e for e in data.get("matrix", [])
+              if e.get("support_tier") == "full" and e.get("os_type") == "glibc"
+          ]
+
+          versions = sorted(
+              set(e["nginx"] for e in glibc_full),
+              key=lambda v: tuple(int(p) for p in v.split("."))
+          )
+
+          # Build smoke-test matrix: each version × representative distros × archs
+          smoke_containers = {
+              "deb": [
+                  {"container": "ubuntu:22.04", "arch": "amd64"},
+                  {"container": "ubuntu:24.04", "arch": "amd64"},
+                  {"container": "debian:12", "arch": "amd64"},
+                  {"container": "ubuntu:24.04", "arch": "arm64"},
+              ],
+              "rpm": [
+                  {"container": "almalinux:9", "arch": "amd64"},
+                  {"container": "amazonlinux:2023", "arch": "amd64"},
+                  {"container": "almalinux:9", "arch": "arm64"},
+              ],
+          }
+
+          smoke_matrix = []
+          for version in versions:
+              for fmt, containers in smoke_containers.items():
+                  for entry in containers:
+                      smoke_matrix.append({
+                          "container": entry["container"],
+                          "format": fmt,
+                          "nginx_version": version,
+                          "arch": entry["arch"],
+                      })
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+              out.write(f"nginx_versions={json.dumps(versions)}\n")
+              out.write(f"smoke_matrix={json.dumps(smoke_matrix)}\n")
+
+          print(f"Resolved {len(versions)} NGINX versions: {versions}")
+          print(f"Smoke test matrix: {len(smoke_matrix)} entries")
+          PY
+        shell: bash
+
   build:
     name: Build - nginx-${{ matrix.nginx_version }} - ${{ matrix.arch }}
+    needs: prepare
     runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
     container: almalinux:9
     permissions:
@@ -80,7 +162,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        nginx_version: ["1.26.3"]
+        nginx_version: ${{ fromJson(needs.prepare.outputs.nginx_versions) }}
         arch: [amd64, arm64]
 
     steps:
@@ -99,7 +181,8 @@ jobs:
             gzip \
             findutils \
             file \
-            git
+            git \
+            binutils
           dnf clean all
         shell: bash
 
@@ -109,7 +192,7 @@ jobs:
           TAG_REF: ${{ github.ref }}
           INPUT_VERSION: ${{ inputs.version }}
         run: |
-          if [ -n "${INPUT_VERSION}" ]; then
+          if [[ -n "${INPUT_VERSION}" ]]; then
             VERSION="${INPUT_VERSION}"
           elif printf '%s' "${TAG_REF}" | grep -qE '^refs/tags/v'; then
             VERSION="${TAG_REF#refs/tags/v}"
@@ -121,7 +204,7 @@ jobs:
         shell: bash
 
       - name: Checkout
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - name: Validate version
         env:
@@ -179,7 +262,7 @@ jobs:
       - name: Verify required FFI symbols in Rust static library
         run: |
           RUST_LIB="components/rust-converter/target/${RUST_TARGET}/release/libnginx_markdown_converter.a"
-          if [ ! -f "${RUST_LIB}" ]; then
+          if [[ ! -f "${RUST_LIB}" ]]; then
             echo "ERROR: Rust static library not found: ${RUST_LIB}" >&2
             exit 1
           fi
@@ -188,22 +271,21 @@ jobs:
             exit 1
           }
           MISSING=0
-          for sym in markdown_streaming_new markdown_incremental_new markdown_decompress_bounded; do
-            # nm output: <address> <type> <symbol_name>
-            # macOS prefixes with '_', Linux does not.
-            # Extract the last field and match with optional '_' prefix.
+          for sym in markdown_streaming_new markdown_streaming_new_with_code \
+                     markdown_incremental_new markdown_incremental_new_with_code \
+                     markdown_decompress_bounded; do
             if ! nm -g "${RUST_LIB}" 2>/dev/null | awk '{print $NF}' | grep -Eq "^_?${sym}$"; then
               echo "ERROR: Required symbol ${sym} not found in ${RUST_LIB}" >&2
               MISSING=1
             else
-              echo "  OK: ${sym}"
+              echo "  OK: ${sym}" >&2
             fi
           done
-          if [ "${MISSING}" -ne 0 ]; then
+          if [[ "${MISSING}" -ne 0 ]]; then
             echo "ERROR: One or more required FFI symbols missing from release build" >&2
             exit 1
           fi
-          echo "All required FFI symbols verified."
+          echo "All required FFI symbols verified." >&2
         shell: bash
 
       - name: Configure NGINX with dynamic module
@@ -238,8 +320,45 @@ jobs:
           fi
         shell: bash
 
+      - name: Verify required FFI symbols
+        run: |
+          echo "=== Verifying required FFI symbols in module ===" >&2
+          REQUIRED_SYMBOLS=(
+            markdown_streaming_new
+            markdown_streaming_new_with_code
+            markdown_streaming_feed
+            markdown_streaming_finalize
+            markdown_streaming_free
+            markdown_streaming_abort
+            markdown_streaming_output_free
+            markdown_incremental_new
+            markdown_incremental_new_with_code
+            markdown_incremental_feed
+            markdown_incremental_finalize
+            markdown_incremental_free
+            markdown_decompress_bounded
+            markdown_decompress_free
+            markdown_convert
+            markdown_converter_new
+            markdown_converter_free
+            markdown_result_free
+          )
+          MISSING=()
+          for sym in "${REQUIRED_SYMBOLS[@]}"; do
+            if ! nm -D build/ngx_http_markdown_filter_module.so | grep -q " ${sym}$"; then
+              MISSING+=("${sym}")
+            fi
+          done
+          if [[ ${#MISSING[@]} -gt 0 ]]; then
+            echo "ERROR: Missing required FFI symbols:" >&2
+            printf '  - %s\n' "${MISSING[@]}" >&2
+            exit 1
+          fi
+          echo "All ${#REQUIRED_SYMBOLS[@]} required FFI symbols verified." >&2
+        shell: bash
+
       - name: Upload module artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: module-so-${{ matrix.nginx_version }}-${{ matrix.arch }}
           path: build/ngx_http_markdown_filter_module.so
@@ -252,22 +371,22 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────────────
   package:
     name: Package - nginx-${{ matrix.nginx_version }} - ${{ matrix.arch }}
-    needs: build
+    needs: [prepare, build]
     runs-on: ubuntu-24.04
     permissions:
       contents: read
     strategy:
       fail-fast: false
       matrix:
-        nginx_version: ["1.26.3"]
+        nginx_version: ${{ fromJson(needs.prepare.outputs.nginx_versions) }}
         arch: [amd64, arm64]
 
     steps:
       - name: Checkout
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - name: Download build artifact
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: module-so-${{ matrix.nginx_version }}-${{ matrix.arch }}
           path: build/
@@ -284,7 +403,7 @@ jobs:
             -i "nfpm-${NFPM_VERSION}-linux-x86_64"
           mkdir -p /tmp/nfpm-extract
           tar -xz -C /tmp/nfpm-extract -f "${NFPM_TARBALL}"
-          if [ ! -f /tmp/nfpm-extract/nfpm ]; then
+          if [[ ! -f /tmp/nfpm-extract/nfpm ]]; then
             echo "ERROR: nfpm binary not found in tarball" >&2; exit 1
           fi
           sudo cp /tmp/nfpm-extract/nfpm /usr/local/bin/nfpm
@@ -302,7 +421,7 @@ jobs:
           MATRIX_ARCH: ${{ matrix.arch }}
         run: |
           # Determine package version
-          if [ -n "${INPUT_VERSION}" ]; then
+          if [[ -n "${INPUT_VERSION}" ]]; then
             PKG_VERSION="${INPUT_VERSION}"
           elif printf '%s' "${TAG_REF}" | grep -qE '^refs/tags/v'; then
             PKG_VERSION="${TAG_REF#refs/tags/v}"
@@ -346,11 +465,11 @@ jobs:
             echo "rpm_filename=${RPM_FILENAME}"
           } >> "$GITHUB_OUTPUT"
 
-          echo "PKG_VERSION=${PKG_VERSION}"
-          echo "NGINX_VERSION=${NGINX_VERSION}"
-          echo "NFPM_ARCH=${NFPM_ARCH}"
-          echo "DEB_FILENAME=${DEB_FILENAME}"
-          echo "RPM_FILENAME=${RPM_FILENAME}"
+          echo "PKG_VERSION=${PKG_VERSION}" >&2
+          echo "NGINX_VERSION=${NGINX_VERSION}" >&2
+          echo "NFPM_ARCH=${NFPM_ARCH}" >&2
+          echo "DEB_FILENAME=${DEB_FILENAME}" >&2
+          echo "RPM_FILENAME=${RPM_FILENAME}" >&2
         shell: bash
 
       - name: Generate DEB package
@@ -360,7 +479,7 @@ jobs:
             --config packaging/nfpm/nfpm.yaml \
             --packager deb \
             --target "dist/${{ steps.pkg-env.outputs.deb_filename }}"
-          echo "Generated: dist/${{ steps.pkg-env.outputs.deb_filename }}"
+          echo "Generated: dist/${{ steps.pkg-env.outputs.deb_filename }}" >&2
           ls -la "dist/${{ steps.pkg-env.outputs.deb_filename }}"
         shell: bash
 
@@ -370,7 +489,7 @@ jobs:
             --config packaging/nfpm/nfpm.yaml \
             --packager rpm \
             --target "dist/${{ steps.pkg-env.outputs.rpm_filename }}"
-          echo "Generated: dist/${{ steps.pkg-env.outputs.rpm_filename }}"
+          echo "Generated: dist/${{ steps.pkg-env.outputs.rpm_filename }}" >&2
           ls -la "dist/${{ steps.pkg-env.outputs.rpm_filename }}"
         shell: bash
 
@@ -382,7 +501,7 @@ jobs:
         shell: bash
 
       - name: Upload DEB artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: pkg-deb-${{ matrix.nginx_version }}-${{ matrix.arch }}
           path: dist/${{ steps.pkg-env.outputs.deb_filename }}
@@ -390,7 +509,7 @@ jobs:
           retention-days: 5
 
       - name: Upload RPM artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: pkg-rpm-${{ matrix.nginx_version }}-${{ matrix.arch }}
           path: dist/${{ steps.pkg-env.outputs.rpm_filename }}
@@ -404,8 +523,8 @@ jobs:
   # This validates ABI compatibility across all supported platforms.
   # ─────────────────────────────────────────────────────────────────────────────
   smoke-test:
-    name: Smoke Test - ${{ matrix.container }} (${{ matrix.format }})
-    needs: package
+    name: Smoke Test - ${{ matrix.container }} - nginx-${{ matrix.nginx_version }} (${{ matrix.format }})
+    needs: [prepare, package]
     runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
     container: ${{ matrix.container }}
     permissions:
@@ -413,21 +532,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - { container: "ubuntu:22.04", format: "deb", nginx_version: "1.26.3", arch: "amd64" }
-          - { container: "ubuntu:24.04", format: "deb", nginx_version: "1.26.3", arch: "amd64" }
-          - { container: "debian:12", format: "deb", nginx_version: "1.26.3", arch: "amd64" }
-          - { container: "almalinux:9", format: "rpm", nginx_version: "1.26.3", arch: "amd64" }
-          - { container: "amazonlinux:2023", format: "rpm", nginx_version: "1.26.3", arch: "amd64" }
-          - { container: "ubuntu:24.04", format: "deb", nginx_version: "1.26.3", arch: "arm64" }
-          - { container: "almalinux:9", format: "rpm", nginx_version: "1.26.3", arch: "arm64" }
+        include: ${{ fromJson(needs.prepare.outputs.smoke_matrix) }}
 
     steps:
       - name: Checkout
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - name: Download package artifact
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: pkg-${{ matrix.format }}-${{ matrix.nginx_version }}-${{ matrix.arch }}
           path: dist/
@@ -437,7 +549,7 @@ jobs:
           NGINX_VERSION: ${{ matrix.nginx_version }}
         run: |
           PKG_FILE="$(find dist/ -name '*.${{ matrix.format }}' -print -quit)"
-          if [ -z "${PKG_FILE}" ]; then
+          if [[ -z "${PKG_FILE}" ]]; then
             echo "ERROR: No .${{ matrix.format }} file found in dist/" >&2
             exit 1
           fi
@@ -468,17 +580,17 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - name: Download all DEB artifacts
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: pkg-deb-*
           path: artifacts/
           merge-multiple: true
 
       - name: Download all RPM artifacts
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: pkg-rpm-*
           path: artifacts/
@@ -496,7 +608,7 @@ jobs:
         shell: bash
 
       - name: Upload SHA256SUMS
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: checksums
           path: artifacts/SHA256SUMS
@@ -523,10 +635,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - name: Download SHA256SUMS
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: checksums
           path: artifacts/
@@ -545,7 +657,7 @@ jobs:
         shell: bash
 
       - name: Upload SHA256SUMS.asc
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: checksums-signature
           path: artifacts/SHA256SUMS.asc
@@ -576,27 +688,27 @@ jobs:
 
     steps:
       - name: Download all DEB artifacts
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: pkg-deb-*
           path: release-assets/
           merge-multiple: true
 
       - name: Download all RPM artifacts
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: pkg-rpm-*
           path: release-assets/
           merge-multiple: true
 
       - name: Download SHA256SUMS
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: checksums
           path: release-assets/
 
       - name: Download SHA256SUMS.asc (if exists)
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         continue-on-error: true
         with:
           name: checksums-signature
@@ -610,13 +722,13 @@ jobs:
 
       - name: Upload to GitHub Release (tag push)
         if: github.ref_type == 'tag'
-        uses: softprops/action-gh-release@c95fe1489396fe8a9eb87c0abf8aa5b2ef267fda # v2.2.1
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           files: release-assets/*
 
       - name: Upload as workflow artifacts (workflow_dispatch)
         if: github.ref_type != 'tag'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-packages
           path: release-assets/
