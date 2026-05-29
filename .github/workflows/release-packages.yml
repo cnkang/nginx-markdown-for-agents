@@ -608,6 +608,17 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Install release gate dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            dpkg-dev \
+            file \
+            gzip \
+            rpm \
+            tar
+        shell: bash
+
       - name: Download all DEB artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
