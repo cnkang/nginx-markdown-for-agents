@@ -398,7 +398,7 @@ add the harness workflow to your default path:
 v0.7.0 is a correctness, distribution, and operability release:
 
 - **Bounded decompression** — `markdown_decompress_max_size` limits decompressed output independently, preventing zip-bomb attacks (error code 9: DecompressionBudgetExceeded)
-- **Accept negotiation** — Rust-side RFC 9110 q-value comparison between `text/markdown` and `text/html` determines conversion eligibility
+- **Accept negotiation** — Rust-side RFC 7231 §5.3.2 q-value comparison between `text/markdown` and `text/html` (with RFC 9110 tie-break rules) determines conversion eligibility
 - **Parse timeout and budget** — `markdown_parse_timeout` (default 30s) and `markdown_parser_budget` (default 64m) prevent runaway parsing (error codes 10, 11)
 - **DEB/RPM package artifacts** — v0.7.0+ release workflows build GitHub Release artifacts for Ubuntu 22.04/24.04, Debian 12, AlmaLinux 9, Amazon Linux 2023 across amd64/arm64 families, with canonical install layout checks
 - **Kubernetes deployment examples** — Helm chart, manifests, and Ingress Controller custom image build path with secure stock-image defaults; module-enabled Helm installs require an image containing the module and an explicit `markdown.loadModule`

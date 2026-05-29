@@ -319,7 +319,7 @@ extracted into Rust while the NGINX glue remains in C:
 
 ### Migration Strategy Notes
 
-1. **Phase 1 (v0.7.0)**: The Rust decision engine (`src/decision/engine.rs`)
+1. **Phase 1 (v0.7.0)**: The Rust decision engine (`src/decision/mod.rs`)
    already implements `make_decision()` which subsumes eligibility checks #3–#8.
    The C-side eligibility functions remain as a parallel path until the FFI
    integration is complete. No immediate removal needed.
