@@ -334,12 +334,16 @@ pub struct FFIConditionalResult {
 ///
 /// Fields:
 /// - `decision`: 0 = convert, 1 = skip
-/// - `reason_code`: Numeric reason code (matches SkipReason::code() values; 0 if convert)
+/// - `reason_code`: Canonical `ReasonCode` discriminant for the decision
+///   (e.g. `Converted` = 0, `SkippedAccept` = 1, `NotEligible` = 14,
+///   `Disabled` = 15). The value can be passed directly to
+///   `markdown_reason_code_str()` / `markdown_reason_code_metric_key()`.
 #[repr(C)]
 pub struct FFIDecisionResult {
     /// 0 = convert, 1 = skip
     pub decision: u8,
-    /// Reason code for the decision (0 if convert).
+    /// Canonical `ReasonCode` discriminant for the decision
+    /// (`Converted` = 0 when `decision` == 0).
     pub reason_code: u8,
 }
 
