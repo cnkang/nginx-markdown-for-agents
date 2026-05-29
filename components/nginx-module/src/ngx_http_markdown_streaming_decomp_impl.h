@@ -695,6 +695,9 @@ ngx_http_markdown_streaming_decomp_feed_zlib(
     ngx_pool_t *pool,
     ngx_log_t *log)
 {
+    /* zlib's z_stream.next_in is typed Bytef* (non-const) in older headers,
+     * but inflate() never modifies the input buffer. The const-dropping cast
+     * is safe and matches NGINX's own zlib usage pattern. */
     decomp->state.zlib.next_in = (Bytef *) in_data;
     if (ngx_http_markdown_streaming_decomp_size_to_uint(
             in_len, &decomp->state.zlib.avail_in))
