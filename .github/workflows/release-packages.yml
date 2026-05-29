@@ -1,6 +1,8 @@
 # Release Packages — Unified DEB/RPM build, test, sign, and publish pipeline
 #
-# Architecture: prepare → build (matrix) → package (matrix) → smoke-test (matrix) → release-gate (tag) → integrity → publish
+# Architecture: prepare → build (matrix) → package (matrix) → smoke-test (matrix) → integrity → publish
+# Tag releases also run release-gate after smoke-test; publish waits for both
+# release-gate and integrity to pass.
 #
 # Triggers:
 #   - Tag push (v*): full pipeline ending with GitHub Release upload

@@ -33,14 +33,18 @@ HEADERS_IMPL_H = PROJECT_ROOT / "components" / "nginx-module" / "src" / "ngx_htt
 DECOMPRESSION_C = PROJECT_ROOT / "components" / "nginx-module" / "src" / "ngx_http_markdown_decompression.c"
 FILTER_MODULE_H = PROJECT_ROOT / "components" / "nginx-module" / "src" / "ngx_http_markdown_filter_module.h"
 
+GATE_1 = "Gate 1"
+GATE_2 = "Gate 2"
 GATE_3 = "Gate 3"
 GATE_4 = "Gate 4"
+GATE_5 = "Gate 5"
 GATE_LOCAL_SCRIPTS = {
     GATE_3: "gate3_local_package_smoke.sh",
     GATE_4: "gate4_local_k8s_smoke.sh",
 }
 RELEASE_GATES_070_DOC_GATE = "release-gates:070-doc"
 CARGO_VERSION_070_GATE = "cargo:version-070"
+BlockingItems = list[tuple[str, bool]]
 
 
 class ValidationResult:
@@ -255,7 +259,7 @@ def check_structure(result: ValidationResult) -> None:
     if not gates:
         result.fail(RELEASE_GATES_070_DOC_GATE, "missing release gate doc")
         return
-    if "Gate 1" in gates and "Gate 2" in gates and "Gate 3" in gates and "Gate 4" in gates and "Gate 5" in gates:
+    if all(gate in gates for gate in (GATE_1, GATE_2, GATE_3, GATE_4, GATE_5)):
         result.pass_(RELEASE_GATES_070_DOC_GATE, "gate doc includes Gate 1..5")
     else:
         result.fail(RELEASE_GATES_070_DOC_GATE, "gate definitions incomplete")
@@ -280,7 +284,125 @@ def check_structure(result: ValidationResult) -> None:
         result.fail(CARGO_VERSION_070_GATE, "Cargo.toml missing")
 
 
-def _build_blocking_items() -> dict[str, list[tuple[str, bool]]]:
+def _gate_1_items(
+    gates: str,
+    mk: str,
+    docs: str,
+    cfg: str,
+    err: str,
+    abi: str,
+    exports: str,
+    payload: str,
+    decomp: str,
+    filter_h: str,
+) -> BlockingItems:
+    return [
+        ("make test-nginx-unit-streaming", "`make test-nginx-unit-streaming`" in gates and "test-nginx-unit-streaming" in mk),
+        ("make test-rust", "`make test-rust`" in gates and re.search(r"\btest-rust:", mk) is not None),
+        ("make build && make check-headers", "check-headers" in mk and "make check-headers" in docs),
+        ("bounded decompression", "markdown_decompress_max_size" in cfg and "DecompressionBudgetExceeded" in err),
+        ("accept negotiation", "FFIAcceptResult" in abi and "markdown_negotiate_accept" in exports),
+        ("decomp budget exceeded metric write", "NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.budget_exceeded_total)" in payload),
+        ("decomp budget exceeded return code", "NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED" in filter_h and "NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED" in decomp),
+        ("decomp budget exceeded resource_limit path", "NGX_HTTP_MARKDOWN_ERROR_RESOURCE_LIMIT" in payload and "DECOMP_BUDGET_EXCEEDED" in payload),
+    ]
+
+
+def _gate_2_items(
+    docs: str,
+    abi: str,
+    unit_test_files: str,
+    conversion: str,
+    payload: str,
+    decision_log: str,
+    headers: str,
+) -> BlockingItems:
+    return [
+        ("ffi boundary tests", "make test-nginx-unit" in docs and "make test-rust" in docs),
+        ("layout tests", "test_ffi_header_plan_layout" in abi and "test_ffi_accept_result_layout" in abi),
+        ("reason code source", "reason code" in read(FFI_CONTRACT_PATH).lower()),
+        ("delivery semantics tests", "delivery_counter_test.c" in unit_test_files),
+        ("delivery_count metric write", "NGX_HTTP_MARKDOWN_METRIC_INC(results.delivery_count)" in conversion or "NGX_HTTP_MARKDOWN_METRIC_INC(results.delivery_count)" in payload),
+        ("decision_count metric write", "NGX_HTTP_MARKDOWN_METRIC_INC(results.decision_count)" in decision_log),
+        ("parse_timeouts_total metric write", "parse_interrupts.parse_timeouts_total" in conversion),
+        ("parse_budget_exceeded_total metric write", "parse_interrupts.parse_budget_exceeded_total" in conversion),
+        ("header plan ffi integration", "markdown_build_header_plan" in headers and "ngx_http_markdown_apply_header_plan" in headers),
+    ]
+
+
+def _gate_3_items(release_packages: str) -> BlockingItems:
+    return [
+        (
+            "tag package workflow gate",
+            "release-gate:" in release_packages
+            and "github.ref_type == 'tag'" in release_packages
+            and "needs: smoke-test" in release_packages,
+        ),
+        (
+            "release gate package tools",
+            "Install release gate dependencies" in release_packages
+            and "dpkg-dev" in release_packages
+            and "rpm" in release_packages,
+        ),
+        (
+            "package smoke matrix",
+            "smoke-test:" in release_packages
+            and "packaging/scripts/smoke-test-basic.sh" in release_packages,
+        ),
+        (
+            "install layout validation",
+            "check_install_layout.sh" in release_packages
+            and "dist/*.deb dist/*.rpm" in release_packages,
+        ),
+        (
+            "publish waits for release gate",
+            "needs: [release-gate, integrity-checksums, integrity-signing]" in release_packages
+            and "needs.release-gate.result == 'success'" in release_packages,
+        ),
+    ]
+
+
+def _gate_4_items(gates: str, docs: str) -> BlockingItems:
+    return [
+        (
+            "helm lint/render final scope",
+            "helm lint charts/nginx-markdown" in gates
+            and "helm template test charts/nginx-markdown" in gates
+            and "Chart lint/render validation passes for 0.7.0 GA" in gates,
+        ),
+        (
+            "k8s release matrix final scope",
+            "K8s chart lint/render validation is a 0.7.0 gate" in docs,
+        ),
+    ]
+
+
+def _gate_5_items(
+    mk: str,
+    gates: str,
+    release_packages: str,
+    release_deb: str,
+    release_rpm: str,
+) -> BlockingItems:
+    return [
+        ("make harness-check-full", "harness-check-full" in mk and "make harness-check-full" in gates),
+        ("make docs-check", "docs-check" in mk and "make docs-check" in gates),
+        ("release gates strict", "release-gates-check-strict" in mk),
+        ("release packages has nm preflight", "binutils" in release_packages and "command -v nm" in release_packages),
+        ("rust toolchain pinned", _toolchain_matches_cargo()),
+        ("release-packages pinned rust", _workflow_uses_pinned_toolchain(release_packages)),
+        ("release-deb pinned rust", _workflow_uses_pinned_toolchain(release_deb)),
+        ("release-rpm pinned rust", _workflow_uses_pinned_toolchain(release_rpm)),
+        ("release-packages build invariants", _workflow_has_release_build_invariants(release_packages)),
+        ("release-deb build invariants", _workflow_has_release_build_invariants(release_deb)),
+        ("release-rpm build invariants", _workflow_has_release_build_invariants(release_rpm)),
+        ("release-packages official marker", _workflow_identifies_release_path(release_packages, official=True)),
+        ("release-deb legacy marker", _workflow_identifies_release_path(release_deb, official=False)),
+        ("release-rpm legacy marker", _workflow_identifies_release_path(release_rpm, official=False)),
+    ]
+
+
+def _build_blocking_items() -> dict[str, BlockingItems]:
     """Build the blocking items dictionary from source file contents."""
     gates = read(RELEASE_GATES_MD)
     mk = read(MAKEFILE)
@@ -304,78 +426,11 @@ def _build_blocking_items() -> dict[str, list[tuple[str, bool]]]:
     )
 
     return {
-        "Gate 1": [
-            ("make test-nginx-unit-streaming", "`make test-nginx-unit-streaming`" in gates and "test-nginx-unit-streaming" in mk),
-            ("make test-rust", "`make test-rust`" in gates and re.search(r"\btest-rust:", mk) is not None),
-            ("make build && make check-headers", "check-headers" in mk and "make check-headers" in docs),
-            ("bounded decompression", "markdown_decompress_max_size" in cfg and "DecompressionBudgetExceeded" in err),
-            ("accept negotiation", "FFIAcceptResult" in abi and "markdown_negotiate_accept" in exports),
-            ("decomp budget exceeded metric write", "NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.budget_exceeded_total)" in payload),
-            ("decomp budget exceeded return code", "NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED" in filter_h and "NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED" in decomp),
-            ("decomp budget exceeded resource_limit path", "NGX_HTTP_MARKDOWN_ERROR_RESOURCE_LIMIT" in payload and "DECOMP_BUDGET_EXCEEDED" in payload),
-        ],
-        "Gate 2": [
-            ("ffi boundary tests", "make test-nginx-unit" in docs and "make test-rust" in docs),
-            ("layout tests", "test_ffi_header_plan_layout" in abi and "test_ffi_accept_result_layout" in abi),
-            ("reason code source", "reason code" in read(FFI_CONTRACT_PATH).lower()),
-            ("delivery semantics tests", "delivery_counter_test.c" in unit_test_files),
-            ("delivery_count metric write", "NGX_HTTP_MARKDOWN_METRIC_INC(results.delivery_count)" in conversion or "NGX_HTTP_MARKDOWN_METRIC_INC(results.delivery_count)" in payload),
-            ("decision_count metric write", "NGX_HTTP_MARKDOWN_METRIC_INC(results.decision_count)" in decision_log),
-            ("parse_timeouts_total metric write", "parse_interrupts.parse_timeouts_total" in conversion),
-            ("parse_budget_exceeded_total metric write", "parse_interrupts.parse_budget_exceeded_total" in conversion),
-            ("header plan ffi integration", "markdown_build_header_plan" in headers and "ngx_http_markdown_apply_header_plan" in headers),
-        ],
-        "Gate 3": [
-            (
-                "tag package workflow gate",
-                "release-gate:" in release_packages
-                and "github.ref_type == 'tag'" in release_packages
-                and "needs: smoke-test" in release_packages,
-            ),
-            (
-                "package smoke matrix",
-                "smoke-test:" in release_packages
-                and "packaging/scripts/smoke-test-basic.sh" in release_packages,
-            ),
-            (
-                "install layout validation",
-                "check_install_layout.sh" in release_packages
-                and "dist/*.deb dist/*.rpm" in release_packages,
-            ),
-            (
-                "publish waits for release gate",
-                "needs: [release-gate, integrity-checksums, integrity-signing]" in release_packages
-                and "needs.release-gate.result == 'success'" in release_packages,
-            ),
-        ],
-        "Gate 4": [
-            (
-                "helm lint/render final scope",
-                "helm lint charts/nginx-markdown" in gates
-                and "helm template test charts/nginx-markdown" in gates
-                and "Chart lint/render validation passes for 0.7.0 GA" in gates,
-            ),
-            (
-                "k8s release matrix final scope",
-                "K8s chart lint/render validation is a 0.7.0 gate" in docs,
-            ),
-        ],
-        "Gate 5": [
-            ("make harness-check-full", "harness-check-full" in mk and "make harness-check-full" in gates),
-            ("make docs-check", "docs-check" in mk and "make docs-check" in gates),
-            ("release gates strict", "release-gates-check-strict" in mk),
-            ("release packages has nm preflight", "binutils" in release_packages and "command -v nm" in release_packages),
-            ("rust toolchain pinned", _toolchain_matches_cargo()),
-            ("release-packages pinned rust", _workflow_uses_pinned_toolchain(release_packages)),
-            ("release-deb pinned rust", _workflow_uses_pinned_toolchain(release_deb)),
-            ("release-rpm pinned rust", _workflow_uses_pinned_toolchain(release_rpm)),
-            ("release-packages build invariants", _workflow_has_release_build_invariants(release_packages)),
-            ("release-deb build invariants", _workflow_has_release_build_invariants(release_deb)),
-            ("release-rpm build invariants", _workflow_has_release_build_invariants(release_rpm)),
-            ("release-packages official marker", _workflow_identifies_release_path(release_packages, official=True)),
-            ("release-deb legacy marker", _workflow_identifies_release_path(release_deb, official=False)),
-            ("release-rpm legacy marker", _workflow_identifies_release_path(release_rpm, official=False)),
-        ],
+        GATE_1: _gate_1_items(gates, mk, docs, cfg, err, abi, exports, payload, decomp, filter_h),
+        GATE_2: _gate_2_items(docs, abi, unit_test_files, conversion, payload, decision_log, headers),
+        GATE_3: _gate_3_items(release_packages),
+        GATE_4: _gate_4_items(gates, docs),
+        GATE_5: _gate_5_items(mk, gates, release_packages, release_deb, release_rpm),
     }
 
 
