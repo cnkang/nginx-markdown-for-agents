@@ -167,28 +167,28 @@ impl MetadataExtractor {
 
     /// Locate the first matching element and return its text content.
     fn find_element_text(&self, dom: &RcDom, element_name: &str) -> Option<String> {
-        self.find_element_text_recursive(&dom.document, element_name)
+        Self::find_element_text_recursive(&dom.document, element_name)
     }
 
     /// Recursive helper for `find_element_text`.
-    fn find_element_text_recursive(&self, node: &Handle, element_name: &str) -> Option<String> {
+    fn find_element_text_recursive(node: &Handle, element_name: &str) -> Option<String> {
         match node.data {
             NodeData::Element { ref name, .. } => {
                 if name.local.as_ref() == element_name {
                     let mut text = String::new();
-                    self.extract_text_content(node, &mut text);
+                    Self::extract_text_content(node, &mut text);
                     return Some(text.trim().to_string());
                 }
 
                 for child in node.children.borrow().iter() {
-                    if let Some(text) = self.find_element_text_recursive(child, element_name) {
+                    if let Some(text) = Self::find_element_text_recursive(child, element_name) {
                         return Some(text);
                     }
                 }
             }
             NodeData::Document => {
                 for child in node.children.borrow().iter() {
-                    if let Some(text) = self.find_element_text_recursive(child, element_name) {
+                    if let Some(text) = Self::find_element_text_recursive(child, element_name) {
                         return Some(text);
                     }
                 }
@@ -243,14 +243,14 @@ impl MetadataExtractor {
     }
 
     /// Append all descendant text nodes into `output` in DOM order.
-    fn extract_text_content(&self, node: &Handle, output: &mut String) {
+    fn extract_text_content(node: &Handle, output: &mut String) {
         match node.data {
             NodeData::Text { ref contents } => {
                 output.push_str(&contents.borrow());
             }
             NodeData::Element { .. } | NodeData::Document => {
                 for child in node.children.borrow().iter() {
-                    self.extract_text_content(child, output);
+                    Self::extract_text_content(child, output);
                 }
             }
             _ => {}

@@ -308,6 +308,7 @@ pub unsafe extern "C" fn markdown_make_decision(
 
     let result_ref = unsafe { &mut *result };
 
+    use crate::decision::reason_code::ReasonCode;
     use crate::decision::{Decision, DecisionContext, SkipReason, make_decision};
     let ctx = DecisionContext {
         enabled: enabled != 0,
@@ -323,29 +324,33 @@ pub unsafe extern "C" fn markdown_make_decision(
     match make_decision(&ctx) {
         Decision::Convert => {
             result_ref.decision = 0;
-            result_ref.reason_code = 0;
+            /* Converted == ReasonCode::Converted (0). */
+            result_ref.reason_code = ReasonCode::Converted.discriminant() as u8;
         }
         Decision::Skip(reason) => {
             result_ref.decision = 1;
-            /* Legacy SkipReason (1-8) maps to ReasonCode (1-8) in the
-             * FFIDecisionResult.reason_code field. The new ReasonCode
-             * range (0-17) extends beyond this for streaming and
-             * decompression errors (9-17), but those are reported
-             * through separate FFI paths (streaming result codes,
-             * FFIDecompResult.error_category) rather than through
-             * this decision result. The SkipReason→reason_code
-             * mapping here covers only the pre-conversion decision
-             * outcomes, not post-conversion failure categories. */
-            result_ref.reason_code = match reason {
-                SkipReason::SkipAccept => 1,
-                SkipReason::SkipNoAccept => 2,
-                SkipReason::SkipConditional => 3,
-                SkipReason::FailDecompression => 4,
-                SkipReason::ParseTimeout => 5,
-                SkipReason::ParseBudgetExceeded => 6,
-                SkipReason::NotEligible => 7,
-                SkipReason::Disabled => 8,
+            /* Map the pre-conversion SkipReason onto the canonical
+             * ReasonCode discriminants (the single source of truth in
+             * decision::reason_code). This lets C callers feed
+             * reason_code directly into markdown_reason_code_str() /
+             * markdown_reason_code_metric_key() without a second
+             * translation table. Post-conversion failure categories
+             * (streaming/decompression codes) are reported through
+             * separate FFI paths (streaming result codes,
+             * FFIDecompResult.error_category), not this decision result.
+             * All mapped discriminants are <= 15, so they fit in the
+             * uint8_t reason_code field. */
+            let canonical = match reason {
+                SkipReason::SkipAccept => ReasonCode::SkippedAccept,
+                SkipReason::SkipNoAccept => ReasonCode::SkippedNoAccept,
+                SkipReason::SkipConditional => ReasonCode::SkippedConditional,
+                SkipReason::FailDecompression => ReasonCode::FailedDecompression,
+                SkipReason::ParseTimeout => ReasonCode::ParseTimeout,
+                SkipReason::ParseBudgetExceeded => ReasonCode::ParseBudgetExceeded,
+                SkipReason::NotEligible => ReasonCode::NotEligible,
+                SkipReason::Disabled => ReasonCode::Disabled,
             };
+            result_ref.reason_code = canonical.discriminant() as u8;
         }
     }
 }
