@@ -562,7 +562,9 @@ jobs:
   release-gates-070:
     name: v0.7.0 Release Gates
     needs: changes
-    if: needs.changes.outputs.nginx == 'true' || needs.changes.outputs.rust == 'true' || needs.changes.outputs.workflows == 'true' || needs.changes.outputs.docs == 'true'
+    if: >-
+      github.event_name != 'pull_request'
+      && (needs.changes.outputs.nginx == 'true' || needs.changes.outputs.rust == 'true' || needs.changes.outputs.workflows == 'true' || needs.changes.outputs.docs == 'true')
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:

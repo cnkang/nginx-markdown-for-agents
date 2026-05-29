@@ -142,6 +142,16 @@ jobs:
           cd components/rust-converter
           cargo build --release --locked --target "${RUST_TARGET}" --features "${RUST_FEATURES}"
 
+      - name: Verify Rust static library
+        run: |
+          RUST_LIB="components/rust-converter/target/${RUST_TARGET}/release/libnginx_markdown_converter.a"
+          if [[ ! -f "${RUST_LIB}" ]]; then
+            echo "ERROR: Rust static library not found: ${RUST_LIB}" >&2
+            exit 1
+          fi
+          echo "Rust static library verified: ${RUST_LIB}"
+        shell: bash
+
       - name: Compile NGINX module
         env:
           NGINX_VERSION: ${{ steps.nginx_version.outputs.version }}
