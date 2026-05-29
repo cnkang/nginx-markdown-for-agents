@@ -9,8 +9,11 @@
 # --- How to extend ---
 #
 # Add a new NGINX version:
-#   Append to the nginx_versions list below and update release-packages.yml.
-#   Example: nginx_versions: ["1.26.3", "1.28.0"]
+#   1. Add the entry to tools/release-matrix.json (support_tier: "full")
+#   2. Add the SHA256 checksum to packaging/checksums.sha256
+#   3. (Optional) Update this file for human reference
+#   The release-packages.yml workflow reads tools/release-matrix.json directly;
+#   no workflow file changes are needed.
 #
 # Add a new platform:
 #   Add a new entry under smoke_test_containers with the appropriate
@@ -21,7 +24,7 @@
 # Mainline support:
 #   nginx.org mainline versions (e.g. 1.27.x) are future work.
 #   Once mainline ABI compatibility is validated, add the version
-#   to nginx_versions. No structural changes are needed.
+#   to tools/release-matrix.json. No structural changes are needed.
 #
 # =============================================================================
 
