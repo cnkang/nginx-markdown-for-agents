@@ -13,7 +13,7 @@ set -euo pipefail
 #   11.2  Fail-open with large response (exercises pending_output chain)
 #   11.3  Fail-open preserves original Content-Type and Content-Length
 #   11.4  Fail-open with slow client (simulates backpressure via --limit-rate)
-#   11.5  Fail-open does not duplicate data on resume
+#   11.5  Fail-open byte-for-byte integrity under backpressure
 #
 # When NGINX_BIN is not set, exits with code 1 unless --plan is specified.
 
@@ -74,7 +74,7 @@ Test Plan: Fail-open Backpressure E2E
   11.2  Fail-open with large response (exercises pending_output chain)
   11.3  Fail-open preserves original Content-Type and Content-Length
   11.4  Fail-open with slow client (simulates backpressure via --limit-rate)
-  11.5  Fail-open does not duplicate data on resume
+  11.5  Fail-open byte-for-byte integrity under backpressure
 EOF
     return 0
 }
@@ -97,6 +97,16 @@ skip() {
     return 0
 }
 
+validate_numeric() {
+    local name="$1" value="$2"
+    if ! printf '%s' "${value}" | grep -qE '^[0-9]+$'; then
+        echo "ERROR: ${name} must be a positive integer, got: '${value}'" >&2
+        usage
+        exit 1
+    fi
+    return 0
+}
+
 cleanup() {
     if [[ -n "${UPSTREAM_PID}" ]] && kill -0 "${UPSTREAM_PID}" 2>/dev/null; then
         kill "${UPSTREAM_PID}" 2>/dev/null || true
@@ -112,16 +122,44 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Parse arguments
+# Parse arguments with validation
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --keep-artifacts)   KEEP_ARTIFACTS=1; shift ;;
-        --nginx-bin)        NGINX_BIN="$2"; shift 2 ;;
-        --nginx-version)    NGINX_VERSION="$2"; shift 2 ;;
+        --nginx-bin)
+            if [[ $# -lt 2 ]]; then
+                echo "ERROR: --nginx-bin requires an argument" >&2; exit 1
+            fi
+            NGINX_BIN="$2"; shift 2
+            ;;
+        --nginx-version)
+            if [[ $# -lt 2 ]]; then
+                echo "ERROR: --nginx-version requires an argument" >&2; exit 1
+            fi
+            NGINX_VERSION="$2"; shift 2
+            ;;
         --plan)             PLAN_ONLY=1; shift ;;
-        --port)             PORT="$2"; shift 2 ;;
-        --upstream-port)    UPSTREAM_PORT="$2"; shift 2 ;;
-        --markdown-max-size) MARKDOWN_MAX_SIZE="$2"; shift 2 ;;
+        --port)
+            if [[ $# -lt 2 ]]; then
+                echo "ERROR: --port requires an argument" >&2; exit 1
+            fi
+            validate_numeric "--port" "$2"
+            PORT="$2"; shift 2
+            ;;
+        --upstream-port)
+            if [[ $# -lt 2 ]]; then
+                echo "ERROR: --upstream-port requires an argument" >&2; exit 1
+            fi
+            validate_numeric "--upstream-port" "$2"
+            UPSTREAM_PORT="$2"; shift 2
+            ;;
+        --markdown-max-size)
+            if [[ $# -lt 2 ]]; then
+                echo "ERROR: --markdown-max-size requires an argument" >&2; exit 1
+            fi
+            validate_numeric "--markdown-max-size" "$2"
+            MARKDOWN_MAX_SIZE="$2"; shift 2
+            ;;
         -h|--help)          usage; exit 0 ;;
         *)
             echo "ERROR: Unknown option: $1" >&2
@@ -152,7 +190,7 @@ NGINX_EXECUTABLE="${NGINX_BIN}"
 # Setup: Create runtime directory and upstream server
 # ─────────────────────────────────────────────────────────────────────────────
 
-RUNTIME="$(mktemp -d)"
+RUNTIME="$(mktemp -d "${TMPDIR:-/tmp}/failopen-e2e.XXXXXXXX")"
 mkdir -p "${RUNTIME}/logs" "${RUNTIME}/html" "${RUNTIME}/conf"
 
 # Generate a large HTML file that exceeds markdown_max_size to trigger fail-open
@@ -213,19 +251,25 @@ if ! kill -0 "${UPSTREAM_PID}" 2>/dev/null; then
     exit 1
 fi
 
-# Determine module load directive
+# Determine module load directive — prefer well-known path, fall back to find
 MODULE_PATH="$(dirname "${NGINX_BIN}")/../modules/ngx_http_markdown_filter_module.so"
-if [[ -f "${MODULE_PATH}" ]]; then
-    LOAD_MODULE_LINE="load_module ${MODULE_PATH};"
-else
-    MODULE_PATH="$(find "$(dirname "${NGINX_BIN}")/.." -name 'ngx_http_markdown_filter_module.so' -print -quit 2>/dev/null || true)"
-    if [[ -n "${MODULE_PATH}" ]]; then
-        LOAD_MODULE_LINE="load_module ${MODULE_PATH};"
-    else
-        echo "ERROR: Cannot find ngx_http_markdown_filter_module.so" >&2
-        exit 1
-    fi
+if [[ ! -f "${MODULE_PATH}" ]]; then
+    # Use null-delimited find and validate the result
+    MODULE_PATH=""
+    while IFS= read -r -d '' candidate; do
+        if [[ -f "${candidate}" ]]; then
+            MODULE_PATH="${candidate}"
+            break
+        fi
+    done < <(find "$(dirname "${NGINX_BIN}")/.." -name 'ngx_http_markdown_filter_module.so' -print0 2>/dev/null)
 fi
+
+if [[ -z "${MODULE_PATH}" ]] || [[ ! -f "${MODULE_PATH}" ]]; then
+    echo "ERROR: Cannot find ngx_http_markdown_filter_module.so" >&2
+    exit 1
+fi
+
+LOAD_MODULE_LINE="load_module ${MODULE_PATH};"
 
 # Write NGINX config with small markdown_max_size to force fail-open
 cat > "${RUNTIME}/conf/nginx.conf" <<EOF
@@ -325,13 +369,29 @@ fi
 # Test 11.3: Fail-open preserves original Content-Type and Content-Length
 # ─────────────────────────────────────────────────────────────────────────────
 echo "" >&2
-echo "--- 11.3: Fail-open preserves original Content-Type ---" >&2
+echo "--- 11.3: Fail-open preserves original Content-Type and Content-Length ---" >&2
 
+# Verify Content-Type
 if grep -qi '^Content-Type:.*text/html' "${HEADERS_FILE}"; then
-    pass "11.3 Fail-open preserves Content-Type: text/html"
+    pass "11.3a Fail-open preserves Content-Type: text/html"
 else
     CT_LINE="$(grep -i '^Content-Type:' "${HEADERS_FILE}" || echo "(none)")"
-    fail "11.3 Expected Content-Type text/html, got: ${CT_LINE}"
+    fail "11.3a Expected Content-Type text/html, got: ${CT_LINE}"
+fi
+
+# Verify Content-Length matches actual body size
+CL_LINE="$(grep -i '^Content-Length:' "${HEADERS_FILE}" | tr -d '\r' || true)"
+if [[ -n "${CL_LINE}" ]]; then
+    CL_VALUE="$(printf '%s' "${CL_LINE}" | sed 's/[^0-9]//g')"
+    BODY_SIZE="$(wc -c < "${RESPONSE_FILE}" | tr -d ' ')"
+    if [[ "${CL_VALUE}" == "${BODY_SIZE}" ]]; then
+        pass "11.3b Fail-open preserves Content-Length (${CL_VALUE} == body size)"
+    else
+        fail "11.3b Content-Length mismatch: header=${CL_VALUE}, body=${BODY_SIZE}"
+    fi
+else
+    # Content-Length may be absent if chunked transfer; not a failure
+    skip "11.3b Content-Length header absent (chunked transfer)"
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -363,39 +423,32 @@ else
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Test 11.5: Fail-open does not duplicate data on resume
+# Test 11.5: Fail-open byte-for-byte integrity under backpressure
+# Performs a single slow request and compares the response byte-for-byte
+# against the upstream fixture to detect any data corruption or duplication.
 # ─────────────────────────────────────────────────────────────────────────────
 echo "" >&2
-echo "--- 11.5: Fail-open does not duplicate data on resume ---" >&2
+echo "--- 11.5: Fail-open byte-for-byte integrity under backpressure ---" >&2
 
 RESPONSE_FILE="${RUNTIME}/response_11_5.txt"
+EXPECTED_FILE="${RUNTIME}/html/large.html"
 
-# Make multiple requests to verify no data duplication across requests
-DUPLICATE_FOUND=0
-for i in 1 2 3; do
-    HTTP_CODE="$(curl -sS -o "${RESPONSE_FILE}" \
-        -H "${ACCEPT_MARKDOWN_HEADER}" \
-        --max-time 10 \
-        -w '%{http_code}' \
-        "http://127.0.0.1:${PORT}/failopen.html")"
+# Single slow request — forces NGINX to buffer and resume delivery
+HTTP_CODE="$(curl -sS -o "${RESPONSE_FILE}" \
+    -H "${ACCEPT_MARKDOWN_HEADER}" \
+    --limit-rate 512 \
+    --max-time 30 \
+    -w '%{http_code}' \
+    "http://127.0.0.1:${PORT}/large.html")"
 
-    if [[ "${HTTP_CODE}" != "200" ]]; then
-        fail "11.5 Request ${i}: Expected HTTP 200, got ${HTTP_CODE}"
-        DUPLICATE_FOUND=1
-        break
-    fi
-
-    # Check that the HTML title appears exactly once (no duplication)
-    TITLE_COUNT="$(grep -c '<h1>Fail-open Test Page</h1>' "${RESPONSE_FILE}" || true)"
-    if [[ "${TITLE_COUNT}" -ne 1 ]]; then
-        fail "11.5 Request ${i}: Expected 1 title occurrence, got ${TITLE_COUNT} (data duplication)"
-        DUPLICATE_FOUND=1
-        break
-    fi
-done
-
-if [[ "${DUPLICATE_FOUND}" -eq 0 ]]; then
-    pass "11.5 Fail-open does not duplicate data across multiple requests"
+if [[ "${HTTP_CODE}" != "200" ]]; then
+    fail "11.5 Expected HTTP 200, got ${HTTP_CODE}"
+elif cmp -s "${EXPECTED_FILE}" "${RESPONSE_FILE}"; then
+    pass "11.5 Fail-open response matches upstream fixture byte-for-byte"
+else
+    EXPECTED_SIZE="$(wc -c < "${EXPECTED_FILE}" | tr -d ' ')"
+    ACTUAL_SIZE="$(wc -c < "${RESPONSE_FILE}" | tr -d ' ')"
+    fail "11.5 Response differs from fixture (expected ${EXPECTED_SIZE} bytes, got ${ACTUAL_SIZE} bytes)"
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
