@@ -33,7 +33,7 @@ dynconf dry-run/rollback, and runtime diagnostics.
     with `FFIAcceptResult` struct and `markdown_negotiate_accept` FFI
     export. Accept negotiation fully in Rust. 22 unit tests.
   - `conditional` module: If-None-Match / If-Modified-Since conditional
-    request and ETag handling in Rust. 15 unit tests.
+    request and ETag handling in Rust. 20 unit tests.
   - `decision` module: pure decision engine with reason codes
     (CONVERT, SKIP_ACCEPT, SKIP_NO_ACCEPT, etc.). 11 unit tests.
   - `header_plan` module: declarative header mutation plan for atomic
