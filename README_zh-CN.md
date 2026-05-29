@@ -395,7 +395,7 @@ Makefile               顶层构建与测试入口
 v0.7.0 是一个正确性、分发和可运维性版本：
 
 - **有界解压** — `markdown_decompress_max_size` 独立限制解压输出大小，防止 zip bomb 攻击（错误码 9: DecompressionBudgetExceeded）
-- **Accept 协商** — Rust 侧 RFC 9110 q-value 比较，在 `text/markdown` 和 `text/html` 之间决定是否转换
+- **Accept 协商** — Rust 侧 RFC 7231 §5.3.2 q-value 比较（含 RFC 9110 tie-break 规则），在 `text/markdown` 和 `text/html` 之间决定是否转换
 - **解析超时与预算** — `markdown_parse_timeout`（默认 30s）和 `markdown_parser_budget`（默认 64m）防止解析失控（错误码 10、11）
 - **DEB/RPM 包分发** — 预构建包覆盖 Ubuntu 22.04/24.04、Debian 12、AlmaLinux 9、Amazon Linux 2023，支持 amd64/arm64，并校验 canonical install layout
 - **Kubernetes 部署示例** — Helm chart、manifest 和 Ingress Controller 自定义镜像构建路径；默认适配 stock NGINX 镜像，启用模块时需要包含模块的镜像和显式 `markdown.loadModule`

@@ -202,9 +202,10 @@ pure-logic decisions from C into Rust, improving testability and safety:
 
 ### Accept Negotiator (`negotiator.rs`)
 
-Parses `Accept` headers per RFC 9110, performs q-value comparison between
-`text/markdown` and `text/html`, and determines whether conversion should
-proceed. Exposed via `FFIAcceptResult` and `markdown_negotiate_accept` FFI.
+Parses `Accept` headers per RFC 7231 §5.3.2, performs q-value comparison
+between `text/markdown` and `text/html`, and determines whether conversion
+should proceed. Exposed via `FFIAcceptResult` and `markdown_negotiate_accept`
+FFI.
 
 ### Conditional Request Handler (`conditional.rs`)
 
@@ -212,11 +213,13 @@ Implements `If-None-Match` (ETag strong/weak comparison) and
 `If-Modified-Since` (HTTP-date parsing and time comparison) for 304 Not
 Modified responses. Used internally by the C conditional-request path.
 
-### Decision Engine (`decision.rs`)
+### Decision Engine (`decision/mod.rs` + `decision/reason_code.rs`)
 
-Pure function `make_decision(DecisionContext) -> (Decision, SkipReason)`
-that centralizes the conversion/skip/fail decision logic. Each decision
-path produces a reason code for logging and metrics.
+Pure function `make_decision(DecisionContext) -> Decision` (where `Decision`
+is `Convert` or `Skip(SkipReason)`) that centralizes the conversion/skip
+decision logic. Each decision path maps to a canonical `ReasonCode`
+discriminant (the single source of truth in `decision/reason_code.rs`) for
+logging and metrics.
 
 ### Header Plan (`header_plan.rs`)
 
@@ -265,10 +268,12 @@ only after successful application (Rule 35).
 ### Reason Code FFI Accessor (`reason_code.rs` + FFI)
 
 Reason codes are defined as a Rust enum (single source of truth). C
-accesses reason code values and display strings through
-`get_reason_code_string()` FFI. C-side independent `#define` constants
-are removed; all consumers go through the FFI accessor. This ensures
-Rust enum, C usage, docs, and metrics labels stay aligned.
+accesses reason code values and display strings through the
+`markdown_reason_code_str()` / `markdown_reason_code_metric_key()` FFI
+exports (wrapped C-side by `ngx_http_markdown_get_reason_code_str()` and
+`ngx_http_markdown_get_reason_code_metric_key()`). C-side independent
+`#define` constants are removed; all consumers go through the FFI accessor.
+This ensures Rust enum, C usage, docs, and metrics labels stay aligned.
 
 ### Header Plan Atomic Application (`ngx_http_markdown_ffi_helpers.c`)
 
