@@ -35,7 +35,6 @@ FILTER_MODULE_H = PROJECT_ROOT / "components" / "nginx-module" / "src" / "ngx_ht
 
 GATE_3 = "Gate 3"
 GATE_4 = "Gate 4"
-GATE_FUTURE = {GATE_3, GATE_4}
 GATE_LOCAL_SCRIPTS = {
     GATE_3: "gate3_local_package_smoke.sh",
     GATE_4: "gate4_local_k8s_smoke.sh",
@@ -326,6 +325,41 @@ def _build_blocking_items() -> dict[str, list[tuple[str, bool]]]:
             ("parse_budget_exceeded_total metric write", "parse_interrupts.parse_budget_exceeded_total" in conversion),
             ("header plan ffi integration", "markdown_build_header_plan" in headers and "ngx_http_markdown_apply_header_plan" in headers),
         ],
+        "Gate 3": [
+            (
+                "tag package workflow gate",
+                "release-gate:" in release_packages
+                and "github.ref_type == 'tag'" in release_packages
+                and "needs: smoke-test" in release_packages,
+            ),
+            (
+                "package smoke matrix",
+                "smoke-test:" in release_packages
+                and "packaging/scripts/smoke-test-basic.sh" in release_packages,
+            ),
+            (
+                "install layout validation",
+                "check_install_layout.sh" in release_packages
+                and "dist/*.deb dist/*.rpm" in release_packages,
+            ),
+            (
+                "publish waits for release gate",
+                "needs: [release-gate, integrity-checksums, integrity-signing]" in release_packages
+                and "needs.release-gate.result == 'success'" in release_packages,
+            ),
+        ],
+        "Gate 4": [
+            (
+                "helm lint/render final scope",
+                "helm lint charts/nginx-markdown" in gates
+                and "helm template test charts/nginx-markdown" in gates
+                and "Chart lint/render validation passes for 0.7.0 GA" in gates,
+            ),
+            (
+                "k8s release matrix final scope",
+                "K8s chart lint/render validation is a 0.7.0 gate" in docs,
+            ),
+        ],
         "Gate 5": [
             ("make harness-check-full", "harness-check-full" in mk and "make harness-check-full" in gates),
             ("make docs-check", "docs-check" in mk and "make docs-check" in gates),
@@ -350,14 +384,9 @@ def check_blocking_items(result: ValidationResult, mode: str) -> None:
     report = read(VALIDATION_MATRIX_MD) if mode == "evidence" else None
     _record_blocking_items(result, blocking_items, report)
 
-    for gate in sorted(GATE_FUTURE):
-        if os.environ.get("RELEASE_GATE_LOCAL_DOCKER") == "1":
+    if os.environ.get("RELEASE_GATE_LOCAL_DOCKER") == "1":
+        for gate in sorted(GATE_LOCAL_SCRIPTS):
             _run_local_gate(result, gate)
-        else:
-            result.skip(
-                f"{gate}:scope",
-                "future/feasibility gate; set RELEASE_GATE_LOCAL_DOCKER=1 to run locally via Docker",
-            )
 
 
 def print_report(result: ValidationResult) -> None:

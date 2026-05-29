@@ -27,8 +27,11 @@ Gate 5: Operability + Docs (depends on Gate 1; can run parallel to Gates 2-4)
 Gate 6: Fuzz & Packaging Infrastructure (depends on Gate 1; validates specs 29-32 artifacts)
 ```
 
-**Release-blocking scope**: Gates 1, 2, 5, and 6 are blocking for 0.7.0 GA.
-Gates 3 and 4 are tracked as future/feasibility unless explicitly promoted.
+**Release-blocking scope**: Gates 1 through 6 are blocking for 0.7.0 GA as
+defined in this document. Gate 3 is satisfied by the tag package workflow's
+build, install-layout, checksum, and smoke-test chain. Gate 4 is satisfied by
+chart lint/render validation, with live cluster smoke recorded when promoted
+for a tag.
 
 ---
 
