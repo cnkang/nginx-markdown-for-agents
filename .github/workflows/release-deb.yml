@@ -2,6 +2,7 @@ name: Release DEB
 
 # release-packages.yml is the canonical release package workflow; this is a
 # legacy compatibility workflow kept for direct DEB artifact builds.
+# Do not add new features here; route all changes to release-packages.yml.
 
 on:
   workflow_dispatch:
@@ -120,6 +121,7 @@ jobs:
               exit 1
               ;;
           esac
+          echo "RUST_TARGET=${RUST_TARGET}" >> "$GITHUB_ENV"
           rustup target add "${RUST_TARGET}"
           cd components/rust-converter
           cargo build --release --locked --target "${RUST_TARGET}" --features "${RUST_FEATURES}"

@@ -16,10 +16,9 @@
 #include <ngx_core.h>
 #include <ngx_http.h>
 
-#define NGX_OK         0
-#define NGX_ERROR     -1
-#define NGX_AGAIN     -2
-#define NGX_DECLINED  -5
+/* NGX_OK/NGX_ERROR/NGX_AGAIN/NGX_DECLINED are provided by the shared
+   ngx_core.h stub (guarded with #ifndef).  Do not redefine them here
+   to avoid macro-redefinition warnings. */
 
 #define NGX_LOG_DEBUG       8
 #define NGX_LOG_DEBUG_HTTP  NGX_LOG_DEBUG

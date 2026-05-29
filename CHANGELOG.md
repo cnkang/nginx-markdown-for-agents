@@ -55,8 +55,8 @@ dynconf dry-run/rollback, and runtime diagnostics.
   - `packaging/rpm/` directory with SPEC file and build scripts.
   - NGINX ABI dependency declarations for both package formats.
   - GPG signing pipeline for package artifacts and future repository metadata.
-  - APT repository metadata scaffolding (`dists/<codename>/...`).
-  - YUM repository metadata scaffolding (`repodata/repomd.xml`).
+  - APT repository metadata placeholder (`dists/<codename>/...`).
+  - YUM repository metadata placeholder (`repodata/repomd.xml`).
   - Public v0.7.0 package installation uses GitHub Release DEB/RPM artifacts
     plus `SHA256SUMS`; public APT/YUM repository publishing remains planned.
 

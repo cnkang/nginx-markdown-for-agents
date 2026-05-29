@@ -258,6 +258,16 @@ release-gates-check-055:
 release-gates-check-060:
 	python3 tools/release/gates/validate_release_gates_060.py
 
+# release-gates-check-070: comprehensive v0.7.0 release readiness gate.
+#
+# Environment variables:
+#   RELEASE_GATE_ALLOW_SKIP_FUZZ=1       - skip fuzz smoke/build when
+#                                           cargo +nightly is unavailable
+#   RELEASE_GATE_ALLOW_SKIP_NATIVE_E2E=1 - skip native E2E when NGINX_BIN
+#                                           is not set
+#   RELEASE_GATE_REQUIRE_PACKAGES=0      - skip install-layout validation
+#   PKG_VERSION / NGINX_VERSION          - override package/NGINX versions
+
 release-gates-check-070:
 	$(MAKE) build
 	$(MAKE) check-headers
