@@ -95,6 +95,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
 
       - name: Resolve matrix from release-matrix.json
         id: resolve
@@ -116,6 +118,10 @@ jobs:
               set(e["nginx"] for e in glibc_full),
               key=lambda v: tuple(int(p) for p in v.split("."))
           )
+
+          if len(versions) == 0:
+              print("ERROR: No NGINX versions with support_tier=full and os_type=glibc found in tools/release-matrix.json")
+              raise SystemExit(1)
 
           # Build smoke-test matrix: each version × representative distros × archs
           smoke_containers = {
@@ -181,8 +187,7 @@ jobs:
             gzip \
             findutils \
             file \
-            git \
-            binutils
+            git
           dnf clean all
         shell: bash
 
@@ -205,6 +210,8 @@ jobs:
 
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
 
       - name: Validate version
         env:
@@ -345,16 +352,17 @@ jobs:
           )
           MISSING=()
           for sym in "${REQUIRED_SYMBOLS[@]}"; do
-            if ! nm -D build/ngx_http_markdown_filter_module.so | grep -q " ${sym}$"; then
+            if ! nm -D build/ngx_http_markdown_filter_module.so \
+                | awk '$2 != "U" && $NF == "'"${sym}"'" {found=1} END {exit !found}'; then
               MISSING+=("${sym}")
             fi
           done
           if [[ ${#MISSING[@]} -gt 0 ]]; then
-            echo "ERROR: Missing required FFI symbols:" >&2
+            echo "ERROR: Missing required FFI symbols (defined exports):" >&2
             printf '  - %s\n' "${MISSING[@]}" >&2
             exit 1
           fi
-          echo "All ${#REQUIRED_SYMBOLS[@]} required FFI symbols verified." >&2
+          echo "All ${#REQUIRED_SYMBOLS[@]} required FFI symbols verified as defined exports." >&2
         shell: bash
 
       - name: Upload module artifact
@@ -384,6 +392,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
 
       - name: Download build artifact
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -484,6 +494,7 @@ jobs:
       - name: Generate DEB package
         run: |
           mkdir -p dist
+          sed -i "s/%%NGINX_VERSION%%/${NGINX_VERSION}/g" packaging/nfpm/scripts/preinstall.sh
           nfpm package \
             --config packaging/nfpm/nfpm.yaml \
             --packager deb \
@@ -546,6 +557,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
 
       - name: Download package artifact
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -590,6 +603,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
 
       - name: Download all DEB artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -645,6 +660,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
 
       - name: Download SHA256SUMS
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
