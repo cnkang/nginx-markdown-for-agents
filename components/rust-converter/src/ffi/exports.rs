@@ -351,6 +351,11 @@ pub unsafe extern "C" fn markdown_make_decision(
                 SkipReason::Disabled => ReasonCode::Disabled,
             };
             result_ref.reason_code = canonical.discriminant() as u8;
+            debug_assert!(
+                canonical.discriminant() <= u8::MAX as u32,
+                "ReasonCode discriminant {} exceeds u8 range",
+                canonical.discriminant()
+            );
         }
     }
 }

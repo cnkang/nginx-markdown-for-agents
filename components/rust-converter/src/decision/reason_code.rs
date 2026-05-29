@@ -29,6 +29,14 @@
 /// are accounted for in the `ALL` array. Update this when adding variants.
 pub const REASON_CODE_COUNT: usize = 18;
 
+/// Compile-time guard: all discriminants must fit in a `u8` because the
+/// FFI boundary (`FFIDecisionResult.reason_code`) transports them as `u8`.
+/// If the enum grows beyond 256 variants this assertion will fail the build.
+const _: () = assert!(
+    REASON_CODE_COUNT <= 256,
+    "ReasonCode discriminant range exceeds u8; FFIDecisionResult.reason_code would truncate"
+);
+
 /// Comprehensive reason code enum — single source of truth.
 ///
 /// Every conversion decision path produces exactly one `ReasonCode`.
