@@ -650,7 +650,7 @@ common_checks:
     if (r->headers_out.content_type.len >= 17
         && ngx_strncasecmp(
                r->headers_out.content_type.data,
-               (u_char *) "text/event-stream",
+               (u_char *) "text/event-stream", /* NOSONAR: ngx_strncasecmp API takes non-const u_char* */
                17) == 0)
     {
         ngx_http_markdown_log_decision(r, conf, eff,

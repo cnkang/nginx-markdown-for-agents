@@ -141,7 +141,6 @@ jobs:
           rustup target add "${RUST_TARGET}"
           cd components/rust-converter
           cargo build --release --locked --target "${RUST_TARGET}" --features "${RUST_FEATURES}"
-          echo "RUST_LIB_DIR=$(pwd)/target/${RUST_TARGET}/release" >> "$GITHUB_ENV"
 
       - name: Compile NGINX module
         env:
