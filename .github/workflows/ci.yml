@@ -20,6 +20,7 @@ on:
       - "README_zh-CN.md"
       - ".github/workflows/**"
       - "tools/ci/coverage_gate.py"
+      - "rust-toolchain.toml"
   push:
     branches: [main, master]
     paths:
@@ -38,6 +39,7 @@ on:
       - "README_zh-CN.md"
       - ".github/workflows/**"
       - "tools/ci/coverage_gate.py"
+      - "rust-toolchain.toml"
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -85,6 +87,7 @@ jobs:
             rust:
               - 'components/rust-converter/**'
               - 'Makefile'
+              - 'rust-toolchain.toml'
             nginx:
               - 'components/nginx-module/**'
               - 'Makefile'
