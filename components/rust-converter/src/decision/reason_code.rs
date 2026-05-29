@@ -8,9 +8,10 @@
 //!
 //! # FFI Boundary
 //!
-//! The enum uses `#[repr(C)]` so it can be passed directly across the
-//! Rust↔C FFI boundary without marshalling. Each variant has a stable
-//! numeric discriminant that must not change once assigned.
+//! The enum uses `#[repr(u8)]` so the compiler guarantees all discriminants
+//! fit in a single byte, matching the `u8` transport in `FFIDecisionResult`.
+//! Each variant has a stable numeric discriminant that must not change once
+//! assigned.
 //!
 //! # Adding New Reason Codes
 //!
@@ -44,8 +45,11 @@ const _: () = assert!(
 ///
 /// # Repr
 ///
-/// Uses `#[repr(C)]` for direct FFI passthrough without marshalling.
-#[repr(C)]
+/// Uses `#[repr(u8)]` so the compiler guarantees all discriminants fit in
+/// a single byte — matching the `u8` field in `FFIDecisionResult.reason_code`.
+/// The enum is never passed directly across FFI; only its discriminant value
+/// is transported as `u8`.
+#[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ReasonCode {
     /// Conversion completed successfully.
@@ -639,18 +643,18 @@ mod tests {
         assert_eq!(markdown_reason_code_count(), REASON_CODE_COUNT as u32);
     }
 
-    /// Verify the enum size is suitable for FFI (repr(C) u32-sized discriminant).
+    /// Verify the enum size is suitable for FFI (repr(u8) single-byte discriminant).
     #[test]
     fn test_enum_size_for_ffi() {
         assert_eq!(
             std::mem::size_of::<ReasonCode>(),
-            4,
-            "ReasonCode should be 4 bytes (u32 discriminant) for FFI"
+            1,
+            "ReasonCode should be 1 byte (u8 discriminant) for FFI"
         );
         assert_eq!(
             std::mem::align_of::<ReasonCode>(),
-            4,
-            "ReasonCode should have 4-byte alignment for FFI"
+            1,
+            "ReasonCode should have 1-byte alignment for FFI"
         );
     }
 
