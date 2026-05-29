@@ -28,10 +28,16 @@
 # ---------------------------------------------------------------------------
 # NGINX versions to build against
 # ---------------------------------------------------------------------------
-# Initial release targets stable only. Mainline (1.27.x) is deferred until
-# ABI compatibility validation is complete.
+# All versions listed here must have corresponding SHA256 checksums in
+# packaging/checksums.sha256 and entries in tools/release-matrix.json.
+# The release-packages.yml workflow reads tools/release-matrix.json directly
+# for its build matrix; this file serves as a human-readable reference.
 nginx_versions:
+  - "1.24.0"
   - "1.26.3"
+  - "1.28.3"
+  - "1.30.2"
+  - "1.31.1"
 
 # ---------------------------------------------------------------------------
 # Target architectures
