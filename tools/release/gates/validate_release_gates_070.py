@@ -38,6 +38,8 @@ GATE_2 = "Gate 2"
 GATE_3 = "Gate 3"
 GATE_4 = "Gate 4"
 GATE_5 = "Gate 5"
+GATE_6 = "Gate 6"
+ALL_GATES = (GATE_1, GATE_2, GATE_3, GATE_4, GATE_5, GATE_6)
 GATE_LOCAL_SCRIPTS = {
     GATE_3: "gate3_local_package_smoke.sh",
     GATE_4: "gate4_local_k8s_smoke.sh",
@@ -259,8 +261,8 @@ def check_structure(result: ValidationResult) -> None:
     if not gates:
         result.fail(RELEASE_GATES_070_DOC_GATE, "missing release gate doc")
         return
-    if all(gate in gates for gate in (GATE_1, GATE_2, GATE_3, GATE_4, GATE_5)):
-        result.pass_(RELEASE_GATES_070_DOC_GATE, "gate doc includes Gate 1..5")
+    if all(gate in gates for gate in ALL_GATES):
+        result.pass_(RELEASE_GATES_070_DOC_GATE, "gate doc includes Gate 1..6")
     else:
         result.fail(RELEASE_GATES_070_DOC_GATE, "gate definitions incomplete")
 
@@ -310,6 +312,7 @@ def _gate_1_items(
 
 def _gate_2_items(
     docs: str,
+    ffi_contract: str,
     abi: str,
     unit_test_files: str,
     conversion: str,
@@ -320,7 +323,7 @@ def _gate_2_items(
     return [
         ("ffi boundary tests", "make test-nginx-unit" in docs and "make test-rust" in docs),
         ("layout tests", "test_ffi_header_plan_layout" in abi and "test_ffi_accept_result_layout" in abi),
-        ("reason code source", "reason code" in read(FFI_CONTRACT_PATH).lower()),
+        ("reason code source", "reason code" in ffi_contract.lower()),
         ("delivery semantics tests", "delivery_counter_test.c" in unit_test_files),
         ("delivery_count metric write", "NGX_HTTP_MARKDOWN_METRIC_INC(results.delivery_count)" in conversion or "NGX_HTTP_MARKDOWN_METRIC_INC(results.delivery_count)" in payload),
         ("decision_count metric write", "NGX_HTTP_MARKDOWN_METRIC_INC(results.decision_count)" in decision_log),
@@ -402,6 +405,26 @@ def _gate_5_items(
     ]
 
 
+def _gate_6_items(
+    mk: str,
+    gates: str,
+    release_packages: str,
+) -> BlockingItems:
+    return [
+        ("fuzz packaging validator", "validate_fuzz_packaging_070.py" in mk and "validate_fuzz_packaging_070.py" in gates),
+        ("fuzz target coverage", "fuzz:targets-exist" in gates and "fuzz/Cargo.toml" in gates),
+        ("clusterfuzzlite workflows", "fuzz:cflite-pr-workflow" in gates and "fuzz:cflite-batch-workflow" in gates),
+        ("corpus pruning", "fuzz:corpus-pruning" in gates and "cflite_cron.yml" in gates),
+        ("fuzz guide rules", "fuzz:guide-rules" in gates and "FUZZ-001..007" in gates),
+        ("release package workflow", "pkg:release-workflow" in gates and "release-packages.yml" in gates),
+        ("artifact naming with nginx version", "pkg:artifact-naming-workflow" in gates and "NGINX_VERSION" in gates),
+        ("sha256sums generation", "pkg:sha256sums" in gates and "SHA256SUMS" in gates),
+        ("install compatibility docs", "docs:install" in gates and "docs:compatibility" in gates),
+        ("package smoke test job", "pkg:smoke-test-job" in gates and "smoke test job" in gates.lower()),
+        ("release workflow checksum logic", "SHA256SUMS" in release_packages),
+    ]
+
+
 def _build_blocking_items() -> dict[str, BlockingItems]:
     """Build the blocking items dictionary from source file contents."""
     gates = read(RELEASE_GATES_MD)
@@ -409,6 +432,7 @@ def _build_blocking_items() -> dict[str, BlockingItems]:
     docs = read(VALIDATION_MATRIX_MD)
     cfg = read(CONFIG_DIRECTIVES_H)
     err = read(ERROR_RS)
+    ffi_contract = read(FFI_CONTRACT_PATH)
     abi = read(ABI_RS)
     exports = read(EXPORTS_RS)
     payload = read(PAYLOAD_IMPL_H)
@@ -427,10 +451,20 @@ def _build_blocking_items() -> dict[str, BlockingItems]:
 
     return {
         GATE_1: _gate_1_items(gates, mk, docs, cfg, err, abi, exports, payload, decomp, filter_h),
-        GATE_2: _gate_2_items(docs, abi, unit_test_files, conversion, payload, decision_log, headers),
+        GATE_2: _gate_2_items(
+            docs,
+            ffi_contract,
+            abi,
+            unit_test_files,
+            conversion,
+            payload,
+            decision_log,
+            headers,
+        ),
         GATE_3: _gate_3_items(release_packages),
         GATE_4: _gate_4_items(gates, docs),
         GATE_5: _gate_5_items(mk, gates, release_packages, release_deb, release_rpm),
+        GATE_6: _gate_6_items(mk, gates, release_packages),
     }
 
 
