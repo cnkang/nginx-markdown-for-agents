@@ -6,8 +6,10 @@ official NGINX repository packages.
 
 ## Repository Publishing Status
 
-GitHub Releases are the 0.7.0 GA distribution channel for DEB and RPM package
-artifacts. Public APT/YUM repositories are not part of the 0.7.0 GA channel.
+GitHub Releases are the current distribution channel for DEB and RPM package
+artifacts, including the 0.7.0 GA channel.
+Public APT/YUM repositories are planned but not available yet.
+They are not part of the 0.7.0 GA channel.
 
 Bare package-manager installation commands only work after an operator
 publishes and configures a real APT or YUM repository. Until then, download the

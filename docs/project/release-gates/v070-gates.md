@@ -8,7 +8,7 @@
 | Source | design.md §14.0 |
 | Detailed Gates | [0.7.0-release-gates.md](./0.7.0-release-gates.md) |
 
-> This document defines the 5 release gates for v0.7.0 as specified in the
+> This document defines the 6 release gates for v0.7.0 as specified in the
 > technical design (§14.0). Each gate must pass before the release can proceed.
 > For detailed check items, verification commands, and Go/No-Go criteria, see
 > [0.7.0-release-gates.md](./0.7.0-release-gates.md).
@@ -79,7 +79,7 @@ for a tag.
 | 3.4 | Install smoke tests | `dpkg -i` + `rpm -i` + `nginx -V` + `curl` | Module loads and converts |
 | 3.5 | Upgrade/rollback tests | Version switch test | Upgrade and rollback succeed without service interruption |
 
-**Fail action**: Non-blocking for 0.7.0 GA (future scope). Track as P1 for next release.
+**Fail action**: Block release. Resolve package build, install-layout, checksum, smoke-test, or signature gaps before proceeding.
 
 ---
 
@@ -93,7 +93,7 @@ for a tag.
 | 4.2 | K8s smoke tests | Smoke script execution | Conversion, Accept negotiation, /metrics all pass |
 | 4.3 | F5 feasibility assessment | Documentation review | Assessment document complete with conclusions |
 
-**Fail action**: Non-blocking for 0.7.0 GA (feasibility scope). Track findings for future releases.
+**Fail action**: Block release. Resolve chart lint/render validation gaps before proceeding; record live cluster smoke when promoted for a tag.
 
 ---
 
