@@ -54,7 +54,7 @@ dynconf dry-run/rollback, and runtime diagnostics.
   - `packaging/debian/` directory with control, postinst, postrm, conffiles.
   - `packaging/rpm/` directory with SPEC file and build scripts.
   - NGINX ABI dependency declarations for both package formats.
-  - GPG signing pipeline for package artifacts and future repository metadata.
+  - GPG signing pipeline for package artifacts and repository metadata support.
   - APT repository metadata placeholder (`dists/<codename>/...`).
   - YUM repository metadata placeholder (`repodata/repomd.xml`).
   - Public v0.7.0 package installation uses GitHub Release DEB/RPM artifacts

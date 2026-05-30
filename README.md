@@ -428,7 +428,7 @@ Current release (0.7.0):
 - Rust URL control character validation and link escaping
 - FFI ABI layout verification and header drift detection
 - New error codes: DecompressionBudgetExceeded(9), ParseTimeout(10), ParseBudgetExceeded(11)
-- DEB/RPM packaging with GitHub Release artifacts; APT/YUM repository publishing is planned but not yet available
+- DEB/RPM packaging with GitHub Release artifacts; APT/YUM repository publishing is not part of the 0.7.0 GA channel
 - Package release gates for canonical module paths, artifact names, checksums, and architecture-matched smoke tests
 - Kubernetes deployment examples and Helm chart with secure stock-image defaults plus explicit module-enabled configuration
 - Runtime diagnostics endpoint
@@ -441,7 +441,7 @@ Near-term focus:
 - Strengthen cross-environment evidence automation for release gates
 - Continue tightening operator diagnostics for conversion drifts and degradations
 
-Future exploration:
+Post-0.7.0 exploration:
 
 - OpenTelemetry tracing integration
 - Additional Markdown flavors and output formats

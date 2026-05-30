@@ -94,9 +94,9 @@ gpg --keyserver keys.openpgp.org --send-keys <KEY_ID>
 
 ## 3. Key Import Instructions
 
-Public APT/YUM repositories are not available yet. The examples below are for
-future self-hosted repository publication after the repository URL and signing
-key are real. For current v0.7.0+ package artifacts, download the package and
+Public APT/YUM repositories are not part of the 0.7.0 GA channel. The examples
+below are for self-hosted repository publication after the repository URL and
+signing key are real. For current v0.7.0+ package artifacts, download the package and
 `SHA256SUMS` file from the same GitHub Release and follow
 `PACKAGE_INSTALLATION.md`.
 
