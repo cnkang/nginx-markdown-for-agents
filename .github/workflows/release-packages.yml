@@ -1,6 +1,8 @@
 # Release Packages — Unified DEB/RPM build, test, sign, and publish pipeline
 #
 # Architecture: prepare → build (matrix) → package (matrix) → smoke-test (matrix) → integrity → publish
+# Tag releases also run release-gate after smoke-test; publish waits for both
+# release-gate and integrity to pass.
 #
 # Triggers:
 #   - Tag push (v*): full pipeline ending with GitHub Release upload
@@ -65,6 +67,7 @@ permissions: {}
 #   - build:               Compile Rust library + NGINX dynamic module (matrix)
 #   - package:             Generate .deb/.rpm via nFPM (matrix)
 #   - smoke-test:          Container install + module load verification (matrix)
+#   - release-gate:        Tag-only release governance and artifact layout gate
 #   - integrity-checksums: SHA256SUMS generation (no protected environment)
 #   - integrity-signing:   Optional GPG signing (protected environment, tag only)
 #   - publish:             Upload to GitHub Release (tag) or workflow artifacts (dispatch)
@@ -589,6 +592,56 @@ jobs:
         shell: bash
 
   # ─────────────────────────────────────────────────────────────────────────────
+  # Release Gate Job: tag-only release governance gate
+  # Runs after package smoke tests and before publication. Pull requests and
+  # branch CI deliberately do not run release gates.
+  # ─────────────────────────────────────────────────────────────────────────────
+  release-gate:
+    name: Release Gate (tag only)
+    needs: smoke-test
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+
+      - name: Install release gate dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            dpkg-dev \
+            file \
+            gzip \
+            rpm \
+            tar
+        shell: bash
+
+      - name: Download all DEB artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: pkg-deb-*
+          path: dist/
+          merge-multiple: true
+
+      - name: Download all RPM artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: pkg-rpm-*
+          path: dist/
+          merge-multiple: true
+
+      - name: Run tag release gates
+        run: |
+          make release-gates-check-strict
+          bash tools/release/gates/check_install_layout.sh dist/*.deb dist/*.rpm
+        shell: bash
+
+  # ─────────────────────────────────────────────────────────────────────────────
   # Integrity Checksums Job: SHA256SUMS generation (no protected environment)
   # Generates checksums for all package artifacts. Does not require signing
   # secrets or protected environment approval.
@@ -702,10 +755,12 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────────────
   publish:
     name: Publish
-    needs: [integrity-checksums, integrity-signing]
+    needs: [release-gate, integrity-checksums, integrity-signing]
     if: >-
       always()
       && needs.integrity-checksums.result == 'success'
+      && (needs.release-gate.result == 'success'
+          || needs.release-gate.result == 'skipped')
       && (needs.integrity-signing.result == 'success'
           || needs.integrity-signing.result == 'skipped')
     runs-on: ubuntu-24.04

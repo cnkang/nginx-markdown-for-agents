@@ -425,7 +425,7 @@ v0.7.0 是一个正确性、分发和可运维性版本：
 - Rust URL 控制字符验证与 link 转义
 - FFI ABI 布局验证与 header 漂移检测
 - 新错误码：DecompressionBudgetExceeded(9)、ParseTimeout(10)、ParseBudgetExceeded(11)
-- DEB/RPM GitHub Release artifact 分发；APT/YUM 仓库发布仍为计划项
+- DEB/RPM GitHub Release artifact 分发；APT/YUM 仓库发布不属于 0.7.0 GA 渠道
 - Package release gate 覆盖 canonical module path、artifact name、checksum 与架构匹配的 smoke test
 - Kubernetes 部署示例与默认适配 stock NGINX、显式支持模块启用配置的 Helm chart
 - 运行时诊断端点
@@ -437,11 +437,11 @@ v0.7.0 是一个正确性、分发和可运维性版本：
 - 强化 release gate 的跨环境证据自动化
 - 持续增强 conversion drift/degradation 的运维诊断能力
 
-未来探索：
+0.7.0 后续探索：
 
 - OpenTelemetry tracing 集成
 - 更多 Markdown 风格与输出格式
-- 扩展分发形态（apt/yum/brew 及 ingress 侧交付）
+- 扩展分发形态（APT/YUM 仓库、Homebrew 及 ingress 侧交付）
 
 ## 许可证
 
