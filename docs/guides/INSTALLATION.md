@@ -171,7 +171,7 @@ If you need deterministic control over compiler flags or local patching, use [Ma
 
 Starting with v0.7.0, release workflows build DEB and RPM artifacts for
 supported Linux distributions and attach them to GitHub Releases. Public
-APT/YUM repository publishing is planned but is not available yet, so do not
+APT/YUM repository publishing is not part of the 0.7.0 GA channel, so do not
 use `apt-get install nginx-module-markdown` or `yum install
 nginx-module-markdown` unless you operate your own package repository.
 
@@ -222,7 +222,7 @@ channels. Package filenames include the target NGINX version because NGINX
 dynamic module packages are ABI-sensitive.
 
 For full details on artifact naming, checksum verification, upgrade, rollback,
-and the future repository-publishing model, see [Package Installation
+and repository-publishing prerequisites, see [Package Installation
 Guide](PACKAGE_INSTALLATION.md) and [Package Distribution
 Strategy](PACKAGE_DISTRIBUTION.md).
 
