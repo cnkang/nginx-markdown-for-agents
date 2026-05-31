@@ -12,6 +12,18 @@
  * on request-path orchestration.
  */
 
+/* Reset per-configuration-cycle state before nginx parses directives. */
+static ngx_int_t
+ngx_http_markdown_preconfiguration(ngx_conf_t *cf)
+{
+    (void) cf;
+
+    ngx_http_markdown_diagnostics_reset_recording_request();
+
+    return NGX_OK;
+}
+
+
 /* Wire this module into the header and body filter chains. */
 static ngx_int_t
 ngx_http_markdown_filter_init(ngx_conf_t *cf)

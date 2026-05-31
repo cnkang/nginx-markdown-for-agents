@@ -33,7 +33,7 @@
  * Defines callbacks for configuration creation and merging.
  */
 static ngx_http_module_t ngx_http_markdown_filter_module_ctx = {
-    NULL,                                   /* preconfiguration */
+    ngx_http_markdown_preconfiguration,     /* preconfiguration */
     ngx_http_markdown_filter_init,          /* postconfiguration */
     ngx_http_markdown_create_main_conf,     /* create main configuration */
     ngx_http_markdown_init_main_conf,       /* init main configuration */
