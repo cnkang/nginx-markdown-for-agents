@@ -153,7 +153,7 @@
         "rpm -qip dist/nginx-markdown-module.rpm",
         "helm lint charts/nginx-markdown"
       ],
-      "notes": "commands validate existing artifacts; build steps are in CI workflows release-apt.yml and release-yum.yml"
+      "notes": "commands validate existing artifacts; build steps are in CI workflows release-deb.yml, release-rpm.yml, and release-packages.yml"
     }
   },
   "risk_packs": [
@@ -355,6 +355,10 @@
         "tools/harness/detect_cwe190_casts.sh",
         "tools/harness/detect_shell_hygiene.sh",
         "tools/harness/detect_const_correctness.py",
+        "tools/harness/detect_ci_supply_chain.sh",
+        "tools/harness/detect_finalize_return.sh",
+        "tools/harness/detect_header_hash_filter.sh",
+        "tools/harness/detect_ffi_struct_init.sh",
         "skills/nginx-markdown-harness-maintenance/scripts/**"
       ],
       "keywords": [
@@ -508,15 +512,16 @@
         "release-governance"
       ],
       "paths": [
-        ".github/workflows/release-apt.yml",
-        ".github/workflows/release-yum.yml",
+        ".github/workflows/release-deb.yml",
+        ".github/workflows/release-rpm.yml",
+        ".github/workflows/release-packages.yml",
         ".github/workflows/homebrew-*.yml",
         "charts/nginx-markdown/**",
         "packaging/debian/**",
         "packaging/homebrew/**",
         "packaging/rpm/**",
         "docs/guides/HOMEBREW_TAP_RELEASE.md",
-        "docs/guides/kubernetes-deployment.md",
+        "docs/guides/KUBERNETES_DEPLOYMENT.md",
         "docs/guides/INSTALLATION.md",
         "README.md",
         "README_zh-CN.md",
