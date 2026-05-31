@@ -16,10 +16,26 @@
 #include <ngx_core.h>
 #include <ngx_http.h>
 
+/*
+ * Forward declaration of the NGINX cycle struct tag.
+ *
+ * The worker-init helper below takes a cycle pointer.  Real builds get the
+ * full type from <ngx_core.h>; lightweight unit-test stub headers may omit
+ * it.  Declaring the tag at file scope (rather than only inside the
+ * prototype) keeps the type visible without depending on the stub headers
+ * and avoids a -Wvisibility warning.  The helper itself is compiled only in
+ * the production translation unit, where the full type is available.
+ */
+struct ngx_cycle_s;
+
 
 /*
  * Default ring buffer capacity for recent decisions.
- * Configurable via markdown_diagnostics_capacity directive.
+ *
+ * The capacity is currently fixed at this default; there is no
+ * markdown_diagnostics_capacity directive.  If a configurable capacity is
+ * introduced later, pass the desired value to
+ * ngx_http_markdown_diagnostics_init() (0 selects this default).
  */
 #define NGX_HTTP_MARKDOWN_DIAG_DEFAULT_CAPACITY  100
 
@@ -143,10 +159,12 @@ void ngx_http_markdown_diagnostics_record(
  *   - metrics_snapshot: current metrics counters
  *   - dynconf_state: dynamic configuration watcher state
  *
- * Access control: returns NGX_HTTP_FORBIDDEN if the client
- * address is not a loopback address (127.0.0.1 or ::1).
- * For more granular control, operators should use NGINX's
- * native allow/deny directives in the location block.
+ * Access control: by default (no markdown_diagnostics_allow directives),
+ * only loopback clients (127.0.0.1 or ::1) are permitted.  When one or more
+ * markdown_diagnostics_allow CIDR entries are configured, access is granted
+ * to clients whose address matches the allow-list; non-matching clients
+ * receive NGX_HTTP_FORBIDDEN.  Requests with no/unknown peer address are
+ * denied.  Only GET and HEAD are accepted.
  *
  * Parameters:
  *   r - HTTP request
@@ -155,6 +173,53 @@ void ngx_http_markdown_diagnostics_record(
  *   NGX_OK, NGX_ERROR, or HTTP status code
  */
 ngx_int_t ngx_http_markdown_diagnostics_handler(ngx_http_request_t *r);
+
+
+/*
+ * Request that the per-worker diagnostics ring record decisions.
+ *
+ * Called at configuration parse time when a location enables the
+ * diagnostics endpoint (markdown_diagnostics on).  The ring itself is
+ * allocated and enabled later by
+ * ngx_http_markdown_diagnostics_init_worker() during worker startup.
+ */
+void ngx_http_markdown_diagnostics_enable_recording(void);
+
+
+/*
+ * Initialize the per-worker diagnostics ring during worker startup.
+ *
+ * No-op unless a location requested diagnostics via
+ * ngx_http_markdown_diagnostics_enable_recording().
+ *
+ * Parameters:
+ *   cycle - NGINX cycle (per-worker pool and log)
+ *
+ * Returns:
+ *   NGX_OK on success or no-op; NGX_ERROR on allocation failure.
+ */
+ngx_int_t ngx_http_markdown_diagnostics_init_worker(struct ngx_cycle_s *cycle);
+
+
+/*
+ * Whether the per-worker diagnostics ring is actively recording.
+ *
+ * Returns 1 when the ring is initialized and enabled, 0 otherwise.
+ */
+ngx_int_t ngx_http_markdown_diagnostics_recording_active(void);
+
+
+/*
+ * Map a decision-path reason code string to its canonical numeric
+ * ReasonCode discriminant (decision/reason_code.rs is the source of truth).
+ *
+ * Parameters:
+ *   reason - NUL-terminated reason code string (may be NULL)
+ *
+ * Returns:
+ *   Canonical discriminant (0..17), or -1 for NULL/unknown strings.
+ */
+ngx_int_t ngx_http_markdown_diagnostics_reason_to_code(const char *reason);
 
 
 /*

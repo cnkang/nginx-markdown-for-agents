@@ -188,6 +188,12 @@ typedef struct {
     ngx_http_markdown_dynconf_snapshot_t  staging_snapshot;
     ngx_http_markdown_dynconf_snapshot_t  last_known_good;
     ngx_uint_t    lkg_valid;
+    /* File mtime of the configuration captured as last_known_good.
+     * Distinct from last_mtime (most recently observed file mtime) and
+     * applied_mtime (mtime of the currently active config): this is the
+     * mtime of the *previous* active config preserved for rollback.  Set
+     * whenever last_known_good is captured. */
+    time_t        lkg_mtime;
     ngx_uint_t    version;
     ngx_http_markdown_conf_t             *conf;
 
@@ -1937,6 +1943,10 @@ ngx_http_markdown_dynconf_reload_normal(
     if (applied > 0) {
         watcher->last_known_good = watcher->active_snapshot;
         watcher->lkg_valid = 1;
+        /* The config being preserved as LKG is the one currently active,
+         * whose file mtime is applied_mtime (the caller overwrites
+         * applied_mtime with last_mtime only after this returns). */
+        watcher->lkg_mtime = watcher->applied_mtime;
 
         watcher->active_snapshot = watcher->staging_snapshot;
         watcher->version++;

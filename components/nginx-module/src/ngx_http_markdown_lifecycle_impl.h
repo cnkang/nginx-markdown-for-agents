@@ -68,6 +68,20 @@ ngx_http_markdown_init_worker(ngx_cycle_t *cycle)
                   "markdown: converter initialized in worker process (pid: %P)",
                   ngx_pid);
 
+    /*
+     * Initialize the per-worker diagnostics recent-decisions ring.  This is
+     * a no-op unless a location enabled markdown_diagnostics.  Allocation
+     * failure is non-fatal: the worker continues without the ring (the
+     * diagnostics endpoint will simply report an empty recent_decisions
+     * array) rather than refusing to start.
+     */
+    if (ngx_http_markdown_diagnostics_init_worker(cycle) != NGX_OK) {
+        ngx_log_error(NGX_LOG_WARN, cycle->log, 0,
+                      "markdown: diagnostics ring init failed; "
+                      "recent_decisions will be empty");
+        /* Non-fatal: worker continues without decision recording. */
+    }
+
 #ifdef NGX_HTTP_BROTLI
     ngx_log_error(NGX_LOG_INFO, cycle->log, 0,
                   "markdown: decompression support: gzip=yes, deflate=yes, brotli=yes");

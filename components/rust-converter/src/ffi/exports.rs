@@ -40,7 +40,8 @@ use std::ptr;
 use crate::error::ConversionError;
 
 use super::abi::{
-    DECOMP_CATEGORY_INVALID_ARGS, ERROR_INTERNAL, FFIAcceptResult, FFIConditionalResult,
+    DECOMP_CATEGORY_INVALID_ARGS, DECOMP_CATEGORY_IO_ERROR, ERROR_INTERNAL, FFIAcceptResult,
+    FFIConditionalResult,
     FFIDecisionResult, FFIDecompResult, FFIHeaderEntry, FFIHeaderPlan, FFIHeaderPlanHandle,
     MarkdownConverterHandle, MarkdownOptions, MarkdownResult, NEGOTIATE_REASON_CONVERT,
     NEGOTIATE_REASON_EXPLICIT_REJECT, NEGOTIATE_REASON_LOWER_Q, NEGOTIATE_REASON_MALFORMED,
@@ -171,7 +172,7 @@ pub unsafe extern "C" fn markdown_converter_free(handle: *mut MarkdownConverterH
 /// Perform Accept header content negotiation.
 ///
 /// Parses the client `Accept` header and determines whether the client
-/// prefers `text/markdown` over `text/html`, using RFC 7231 §5.3.2
+/// prefers `text/markdown` over `text/html`, using RFC 9110 §12.5.1
 /// q-value comparison.
 ///
 /// # Parameters
@@ -270,12 +271,19 @@ pub unsafe extern "C" fn markdown_check_conditional(
     let lm = unsafe { optional_str(last_modified, last_modified_len) };
 
     use crate::conditional::{ConditionalResult, evaluate_conditional};
-    match evaluate_conditional(inm, etag, ims, lm) {
-        ConditionalResult::NotModified => {
+    // Defense-in-depth: evaluate_conditional only operates on borrowed &str and
+    // is panic-free by design, but a panic must never unwind into C. On panic
+    // we default to Proceed (result_code = 1), the safe/fail-open outcome that
+    // delivers full content rather than a spurious 304.
+    let outcome = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+        evaluate_conditional(inm, etag, ims, lm)
+    }));
+    match outcome {
+        Ok(ConditionalResult::NotModified) => {
             result_ref.result_code = 0;
             result_ref.matched_etag_len = 0;
         }
-        ConditionalResult::Proceed => {
+        Ok(ConditionalResult::Proceed) | Err(_) => {
             result_ref.result_code = 1;
             result_ref.matched_etag_len = 0;
         }
@@ -351,9 +359,17 @@ pub unsafe extern "C" fn markdown_make_decision(
                 SkipReason::Disabled => ReasonCode::Disabled,
             };
             result_ref.reason_code = canonical.discriminant() as u8;
+            /* The pre-conversion skip reasons all map to canonical
+             * discriminants in the 0..=15 range (the C uint8_t reason_code
+             * contract). ReasonCode is repr(u8) so the cast itself can never
+             * truncate; this assert guards the stronger documented invariant
+             * that decision results stay within the pre-conversion subset, so
+             * adding a high-valued post-conversion variant to this match arm
+             * is caught in debug builds. */
             debug_assert!(
-                canonical.discriminant() <= u8::MAX as u32,
-                "ReasonCode discriminant {} exceeds u8 range",
+                canonical.discriminant() <= 15,
+                "decision ReasonCode discriminant {} exceeds the documented \
+                 pre-conversion range (0..=15)",
                 canonical.discriminant()
             );
         }
@@ -794,9 +810,15 @@ pub unsafe extern "C" fn markdown_decompress_bounded(
         unsafe { std::slice::from_raw_parts(input, input_len) }
     };
 
-    // Perform bounded decompression
-    match crate::decompress::decompress_bounded(input_slice, fmt, budget) {
-        Ok(decomp_result) => {
+    // Perform bounded decompression. Wrap in catch_unwind: the decoders
+    // (flate2/brotli) run attacker-controlled bytes and, while they normally
+    // return Err on bad input, a panic here would unwind into C (UB). On
+    // panic we report a generic io_error category and emit no output.
+    let outcome = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+        crate::decompress::decompress_bounded(input_slice, fmt, budget)
+    }));
+    match outcome {
+        Ok(Ok(decomp_result)) => {
             let mut boxed = decomp_result.output.into_boxed_slice();
             result_ref.output_len = boxed.len();
             result_ref.output = boxed.as_mut_ptr();
@@ -805,10 +827,17 @@ pub unsafe extern "C" fn markdown_decompress_bounded(
             std::mem::forget(boxed);
             0
         }
-        Err(e) => {
+        Ok(Err(e)) => {
             let code = e.error_category();
             result_ref.error_category = code;
             code
+        }
+        Err(_) => {
+            // Panic was caught; report io_error and emit no output.
+            result_ref.output = ptr::null_mut();
+            result_ref.output_len = 0;
+            result_ref.error_category = DECOMP_CATEGORY_IO_ERROR;
+            DECOMP_CATEGORY_IO_ERROR
         }
     }
 }

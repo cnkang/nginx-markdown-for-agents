@@ -168,27 +168,44 @@ fn is_modified_since(if_modified_since: &str, last_modified: &str) -> bool {
 fn parse_http_date(date: &str) -> Option<i64> {
     let date = date.trim();
 
-    // Quick validation: must end with "GMT" and have expected length
+    // Quick validation: must end with "GMT" and have the expected length.
     if !date.ends_with("GMT") {
         return None;
     }
 
     // Expected format: "Day, DD Mon YYYY HH:MM:SS GMT"
-    // Total length: 29 characters
-    if date.len() != 29 {
+    // Total length: 29 bytes. Because the format is pure ASCII, all field
+    // slicing below operates on bytes; we must therefore reject any input
+    // that is not entirely ASCII before indexing, otherwise byte-offset
+    // slicing could split a multi-byte UTF-8 scalar and panic. The length
+    // check alone is insufficient: a 29-byte string may contain multi-byte
+    // characters (e.g. a 4-byte emoji counts as 4 bytes but one char).
+    let bytes = date.as_bytes();
+    if bytes.len() != 29 || !date.is_ascii() {
         return None;
     }
 
-    let bytes = date.as_bytes();
+    // Helper: parse an ASCII byte range as an i64 (digits only). Returns None
+    // if any byte is a non-digit, avoiding str slicing entirely.
+    let parse_range = |start: usize, end: usize| -> Option<i64> {
+        let mut value: i64 = 0;
+        for &b in &bytes[start..end] {
+            if !b.is_ascii_digit() {
+                return None;
+            }
+            value = value * 10 + i64::from(b - b'0');
+        }
+        Some(value)
+    };
 
-    // Validate weekday (positions 0..3)
-    let weekday = &date[0..3];
-    match weekday {
-        "Mon" | "Tue" | "Wed" | "Thu" | "Fri" | "Sat" | "Sun" => {}
+    // Validate weekday (bytes 0..3).
+    match &bytes[0..3] {
+        b"Mon" | b"Tue" | b"Wed" | b"Thu" | b"Fri" | b"Sat" | b"Sun" => {}
         _ => return None,
     }
 
-    // Validate fixed separators: ", " at pos 3..5, spaces at 7,11,16, colons at 19,22
+    // Validate fixed separators: ", " at 3..5, spaces at 7,11,16, colons at
+    // 19,22, and the space before "GMT" at 25.
     if bytes[3] != b',' || bytes[4] != b' ' {
         return None;
     }
@@ -198,38 +215,30 @@ fn parse_http_date(date: &str) -> Option<i64> {
     if bytes[19] != b':' || bytes[22] != b':' {
         return None;
     }
-    // Space before "GMT" at position 25
     if bytes[25] != b' ' {
         return None;
     }
 
-    // Extract components
-    let day_str = &date[5..7];
-    let month_str = &date[8..11];
-    let year_str = &date[12..16];
-    let hour_str = &date[17..19];
-    let min_str = &date[20..22];
-    let sec_str = &date[23..25];
+    // Extract numeric components (byte ranges, ASCII-validated above).
+    let day: i64 = parse_range(5, 7)?;
+    let year: i64 = parse_range(12, 16)?;
+    let hour: i64 = parse_range(17, 19)?;
+    let min: i64 = parse_range(20, 22)?;
+    let sec: i64 = parse_range(23, 25)?;
 
-    let day: i64 = day_str.parse().ok()?;
-    let year: i64 = year_str.parse().ok()?;
-    let hour: i64 = hour_str.parse().ok()?;
-    let min: i64 = min_str.parse().ok()?;
-    let sec: i64 = sec_str.parse().ok()?;
-
-    let month: i64 = match month_str {
-        "Jan" => 1,
-        "Feb" => 2,
-        "Mar" => 3,
-        "Apr" => 4,
-        "May" => 5,
-        "Jun" => 6,
-        "Jul" => 7,
-        "Aug" => 8,
-        "Sep" => 9,
-        "Oct" => 10,
-        "Nov" => 11,
-        "Dec" => 12,
+    let month: i64 = match &bytes[8..11] {
+        b"Jan" => 1,
+        b"Feb" => 2,
+        b"Mar" => 3,
+        b"Apr" => 4,
+        b"May" => 5,
+        b"Jun" => 6,
+        b"Jul" => 7,
+        b"Aug" => 8,
+        b"Sep" => 9,
+        b"Oct" => 10,
+        b"Nov" => 11,
+        b"Dec" => 12,
         _ => return None,
     };
 
@@ -240,7 +249,7 @@ fn parse_http_date(date: &str) -> Option<i64> {
         || day < 1
         || hour > 23
         || min > 59
-        || sec > 60
+        || sec > 59
     {
         return None;
     }
@@ -420,6 +429,35 @@ mod tests {
         assert!(parse_http_date("Sun, 06 Nov 1994 08 49 37 GMT").is_none());
         // Feb 30 (invalid day for month)
         assert!(parse_http_date("Sun, 30 Feb 1994 08:49:37 GMT").is_none());
+        // Leap seconds are not accepted by the timestamp conversion path.
+        assert!(parse_http_date("Sun, 06 Nov 1994 08:49:60 GMT").is_none());
+    }
+
+    #[test]
+    fn test_parse_http_date_non_ascii_does_not_panic() {
+        /* Regression (FFI-1): a 29-byte string containing multi-byte UTF-8
+         * scalars must be rejected without panicking on a non-char-boundary
+         * byte slice. The emoji below is 4 bytes, so this string is 29 bytes
+         * but only 26 chars; previously byte-offset slicing (e.g. &date[0..3])
+         * could split it and panic. */
+        assert!(parse_http_date("😀aaaaaaaaaaaaaaaaaaaaa GMT").is_none());
+        /* Multi-byte char positioned exactly on a field boundary. */
+        assert!(parse_http_date("Su💥, 06 Nov 1994 08:49:37 GMT").is_none());
+        /* Non-ASCII digits (Arabic-Indic) must not be accepted. */
+        assert!(parse_http_date("Sun, ٠٦ Nov 1994 08:49:37 GMT").is_none());
+    }
+
+    #[test]
+    fn test_conditional_non_ascii_ims_does_not_panic() {
+        /* End-to-end: a crafted non-ASCII If-Modified-Since must yield
+         * Proceed (treated as unparseable → modified), never a panic. */
+        let r = evaluate_conditional(
+            None,
+            None,
+            Some("😀aaaaaaaaaaaaaaaaaaaaa GMT"),
+            Some("Sun, 04 Nov 1994 08:49:37 GMT"),
+        );
+        assert_eq!(r, ConditionalResult::Proceed);
     }
 
     #[test]

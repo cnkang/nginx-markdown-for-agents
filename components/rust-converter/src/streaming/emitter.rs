@@ -15,27 +15,10 @@
 //! - Single trailing newline on finalize
 
 use crate::error::ConversionError;
+use crate::security::escape_link_label;
 use crate::streaming::budget::MemoryBudget;
 use crate::streaming::sanitizer::is_dangerous_url;
 use crate::streaming::state_machine::{StateMachineAction, StructuralContext};
-
-/// Escape a link label for safe Markdown output.
-/// Mirrors [`crate::security::escape_link_label`] — keeps the logic local to
-/// the streaming emitter so the hot path avoids a cross-module call.
-pub(crate) fn escape_link_label(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() + 8);
-    for ch in s.chars() {
-        match ch {
-            '[' | ']' | '\\' => {
-                out.push('\\');
-                out.push(ch);
-            }
-            '\n' | '\r' => out.push(' '),
-            _ => out.push(ch),
-        }
-    }
-    out
-}
 
 fn longest_backtick_run(content: &str) -> usize {
     let mut max_run = 0;
@@ -147,12 +130,8 @@ pub struct IncrementalEmitter {
     flush_count: u32,
     /// Language for the current code block (may be updated after enter).
     code_fence_lang: Option<String>,
-    /// Whether the opening code fence has been emitted.
-    code_fence_emitted: bool,
     /// Longest backtick run seen in the current code block content.
     code_block_backtick_max: usize,
-    /// Length of the opening code fence (number of backticks).
-    code_fence_len: usize,
     /// Buffered code block content, accumulated until block ends so fence
     /// length can be chosen after seeing all backtick runs.
     code_block_buffer: Vec<u8>,
@@ -193,9 +172,7 @@ impl IncrementalEmitter {
             link_text_overflow: false,
             flush_count: 0,
             code_fence_lang: None,
-            code_fence_emitted: false,
             code_block_backtick_max: 0,
-            code_fence_len: 3,
             code_block_buffer: Vec::new(),
         }
     }
@@ -229,7 +206,7 @@ impl IncrementalEmitter {
         match action {
             StateMachineAction::Enter(ctx) => self.handle_enter(ctx, sm),
             StateMachineAction::Exit(ctx) => self.handle_exit(ctx, sm),
-            StateMachineAction::Text(text) => self.handle_text(text, sm),
+            StateMachineAction::Text(text) => self.handle_text(text),
             StateMachineAction::FallbackRequired | StateMachineAction::None => Ok(()),
         }
     }
@@ -294,7 +271,6 @@ impl IncrementalEmitter {
     pub fn finalize(&mut self) -> Result<Vec<u8>, ConversionError> {
         if self.in_code_block {
             let fence_len = (3usize).max(self.code_block_backtick_max + 1);
-            self.code_fence_len = fence_len;
             let fence_str = "`".repeat(fence_len);
             let lang = self.code_fence_lang.clone();
             let opening_fence = match lang {
@@ -302,15 +278,17 @@ impl IncrementalEmitter {
                 None => format!("{}\n", fence_str),
             };
             self.write_str(&opening_fence)?;
+            let needs_separator = self.code_block_needs_closing_newline();
             if !self.code_block_buffer.is_empty() {
                 self.check_buffer_budget(self.code_block_buffer.len())?;
                 self.buffer.extend_from_slice(&self.code_block_buffer);
             }
-            if !self.last_was_newline && !self.code_block_buffer.is_empty() {
+            if needs_separator {
                 self.write_raw(b"\n")?;
             }
             self.write_str(&format!("{}\n", fence_str))?;
             self.in_code_block = false;
+            self.code_block_buffer.clear();
         }
         // Move pending buffer to flushed (checked — bounded-memory contract
         // applies even in the terminal flush).
@@ -386,9 +364,7 @@ impl IncrementalEmitter {
                 // when the first text arrives or on exit.
                 self.in_code_block = true;
                 self.code_fence_lang = lang.clone();
-                self.code_fence_emitted = false;
                 self.code_block_backtick_max = 0;
-                self.code_fence_len = 3;
                 self.code_block_buffer.clear();
             }
             StructuralContext::InlineCode => {
@@ -479,7 +455,6 @@ impl IncrementalEmitter {
             }
             StructuralContext::CodeBlock(lang) => {
                 let fence_len = (3usize).max(self.code_block_backtick_max + 1);
-                self.code_fence_len = fence_len;
                 let fence_str = "`".repeat(fence_len);
                 let effective_lang = lang.clone().or_else(|| self.code_fence_lang.clone());
                 let opening_fence = match effective_lang {
@@ -487,19 +462,18 @@ impl IncrementalEmitter {
                     None => format!("{}\n", fence_str),
                 };
                 self.write_str(&opening_fence)?;
+                let needs_separator = self.code_block_needs_closing_newline();
                 if !self.code_block_buffer.is_empty() {
                     self.check_buffer_budget(self.code_block_buffer.len())?;
                     self.buffer.extend_from_slice(&self.code_block_buffer);
                 }
-                if !self.last_was_newline && !self.code_block_buffer.is_empty() {
+                if needs_separator {
                     self.write_str("\n")?;
                 }
                 self.write_str(&format!("{}\n", fence_str))?;
                 self.in_code_block = false;
-                self.code_fence_emitted = false;
                 self.code_fence_lang = None;
                 self.code_block_backtick_max = 0;
-                self.code_fence_len = 3;
                 self.code_block_buffer.clear();
                 self.last_was_newline = true;
                 self.needs_block_separator = true;
@@ -573,25 +547,18 @@ impl IncrementalEmitter {
     ///
     /// ```ignore
     /// use nginx_markdown_converter::streaming::emitter::IncrementalEmitter;
-    /// use nginx_markdown_converter::streaming::state_machine::StructuralStateMachine;
     /// use nginx_markdown_converter::streaming::MemoryBudget;
     ///
     /// let mut emitter = IncrementalEmitter::new(&MemoryBudget::default());
-    /// let mut sm = StructuralStateMachine::new();
     ///
     /// // Normalized emission (multiple spaces collapsed)
-    /// emitter.handle_text("Hello   world", &mut sm).unwrap();
+    /// emitter.handle_text("Hello   world").unwrap();
     ///
     /// // Inside a code block, whitespace is preserved
     /// // (assume earlier Enter(CodeBlock) was processed)
-    /// emitter.handle_text("  code line\n", &mut sm).unwrap();
+    /// emitter.handle_text("  code line\n").unwrap();
     /// ```
-    fn handle_text(
-        &mut self,
-        text: &str,
-        sm: &mut super::state_machine::StructuralStateMachine,
-    ) -> Result<(), ConversionError> {
-        let _ = sm;
+    fn handle_text(&mut self, text: &str) -> Result<(), ConversionError> {
         if self.in_link {
             self.append_link_text(text);
             return Ok(());
@@ -636,65 +603,6 @@ impl IncrementalEmitter {
     }
 
     // ── Internal helpers ────────────────────────────────────────────
-
-    /// Emit the deferred opening fenced code block using the current language from the state machine.
-    ///
-    /// This writes an opening triple-backtick fence (` ``` `) to the pending buffer, including the
-    /// language identifier if available from the current `StructuralContext` or the emitter's stored
-    /// `code_fence_lang`, and marks the fence as emitted. If the fence was already emitted this is a
-    /// no-op.
-    ///
-    /// Returns an error if writing the fence would exceed the configured output buffer budget.
-    ///
-    /// # Examples
-    ///
-    /// ```ignore
-    /// // Construct a state machine and emitter (helpers shown for clarity; actual constructors
-    /// // in tests create appropriate MemoryBudget and StructuralStateMachine instances).
-    /// let mut sm = super::state_machine::StructuralStateMachine::new();
-    /// let budget = super::MemoryBudget::default();
-    /// let mut emitter = super::IncrementalEmitter::new(&budget);
-    ///
-    /// // Simulate entering a code block with language "rust".
-    /// sm.push_context(super::state_machine::StructuralContext::CodeBlock(Some("rust".into())));
-    /// emitter.code_fence_lang = None; // no stored fallback
-    ///
-    /// emitter.emit_code_fence_if_needed(&sm).unwrap();
-    /// let out = String::from_utf8(emitter.take_flushed()).unwrap();
-    /// assert_eq!(out, "```rust\n");
-    /// ```
-    #[allow(dead_code)]
-    fn emit_code_fence_if_needed(
-        &mut self,
-        sm: &super::state_machine::StructuralStateMachine,
-    ) -> Result<(), ConversionError> {
-        if self.code_fence_emitted {
-            return Ok(());
-        }
-        // Check if the state machine has updated the language
-        let lang = sm
-            .current_context()
-            .and_then(|ctx| {
-                if let StructuralContext::CodeBlock(l) = ctx {
-                    l.clone()
-                } else {
-                    None
-                }
-            })
-            .or_else(|| self.code_fence_lang.clone());
-
-        let fence_len = (3usize).max(self.code_block_backtick_max + 1);
-        self.code_fence_len = fence_len;
-        let fence_str = "`".repeat(fence_len);
-
-        let fence = match lang {
-            Some(l) => format!("{}{}\n", fence_str, l),
-            None => format!("{}\n", fence_str),
-        };
-        self.write_str(&fence)?;
-        self.code_fence_emitted = true;
-        Ok(())
-    }
 
     /// Emit a single blank line when a block-level separator is required, then clear the separator flag.
     ///
@@ -898,27 +806,21 @@ impl IncrementalEmitter {
         Ok(())
     }
 
-    /// Write raw bytes with blockquote `> ` prefix on each new line.
+    /// Determine whether a separating newline must precede the closing code
+    /// fence.
     ///
-    /// Used for code block content inside blockquotes so each line
-    /// gets the correct `> ` prefix per nesting depth.
-    #[allow(dead_code)]
-    fn write_raw_with_blockquote_prefix(&mut self, bytes: &[u8]) -> Result<(), ConversionError> {
-        let prefix_per_line = 2 * self.blockquote_depth;
-        /* Worst case: every byte is a newline, each needing a prefix */
-        let max_extra = bytes.iter().filter(|&&b| b == b'\n').count() * prefix_per_line;
-        self.check_buffer_budget(bytes.len() + max_extra)?;
-
-        for &b in bytes {
-            self.buffer.push(b);
-            if b == b'\n' {
-                for _ in 0..self.blockquote_depth {
-                    self.buffer.extend_from_slice(b"> ");
-                }
-            }
+    /// The closing fence must begin on its own line per CommonMark.  The
+    /// decision is driven by the actual last byte of the buffered code-block
+    /// content rather than the emitter-wide `last_was_newline` flag, which is
+    /// stale here because the opening fence (written via `write_str`) sets it
+    /// to `true` and the buffered content is appended with `extend_from_slice`
+    /// (which does not update the flag).  Returns `true` when the buffer is
+    /// non-empty and does not already end with `\n`.
+    fn code_block_needs_closing_newline(&self) -> bool {
+        match self.code_block_buffer.last() {
+            None => false,
+            Some(&last) => last != b'\n',
         }
-        self.last_was_newline = bytes.last().copied() == Some(b'\n');
-        Ok(())
     }
 
     /// Check that adding `additional` bytes won't exceed the buffer budget.
@@ -2154,6 +2056,55 @@ mod tests {
         assert!(
             output.contains("````\n") && output.matches("````").count() >= 2,
             "closing fence must match opening fence length, got: {}",
+            output
+        );
+    }
+
+    #[test]
+    fn test_code_block_closing_fence_on_own_line() {
+        /* Regression (STR-1): the closing fence must begin on its own line
+         * even when the code content does not end with a newline.  Previously
+         * the stale `last_was_newline` flag (set true by the opening fence)
+         * caused the closing fence to be glued directly to the content, e.g.
+         * "```\ncode```" instead of "```\ncode\n```". */
+        let output = emit_html(&[
+            start_tag("pre"),
+            start_tag("code"),
+            text("code"),
+            end_tag("code"),
+            end_tag("pre"),
+        ]);
+        assert!(
+            output.contains("```\ncode\n```"),
+            "closing fence must be on its own line, got: {:?}",
+            output
+        );
+        assert!(
+            !output.contains("code```"),
+            "closing fence must not be glued to content, got: {:?}",
+            output
+        );
+    }
+
+    #[test]
+    fn test_code_block_closing_fence_no_double_newline() {
+        /* When the code content already ends with a newline, no extra
+         * separator newline should be inserted before the closing fence. */
+        let output = emit_html(&[
+            start_tag("pre"),
+            start_tag("code"),
+            text("line1\n"),
+            end_tag("code"),
+            end_tag("pre"),
+        ]);
+        assert!(
+            output.contains("```\nline1\n```"),
+            "closing fence must follow the existing trailing newline, got: {:?}",
+            output
+        );
+        assert!(
+            !output.contains("line1\n\n```"),
+            "must not insert a blank line before the closing fence, got: {:?}",
             output
         );
     }

@@ -1,42 +1,85 @@
 #![no_main]
 
-//! Fuzz target for bounded gzip decompression.
+//! Fuzz target for the production bounded decompression API.
 //!
-//! Takes arbitrary bytes as input and attempts to decompress them as gzip
-//! with a bounded budget. Verifies no panics or memory safety issues occur
-//! regardless of input content.
+//! Drives [`nginx_markdown_converter::decompress::decompress_bounded`] directly
+//! across all supported formats (gzip, deflate, brotli) and a range of budgets,
+//! exercising the real budget-enforcement, format-dispatch, and error
+//! classification code that ships in v0.7.0 — rather than re-implementing a
+//! decompression loop against a third-party crate.
+//!
+//! Invariants checked:
+//! - No panics or UB regardless of input.
+//! - On success, the decompressed output never exceeds the configured budget.
+//! - Every error maps to a known FFI error category code (101–104).
 
 use libfuzzer_sys::fuzz_target;
-use std::io::Read;
+use nginx_markdown_converter::decompress::{DecompError, Format, decompress_bounded};
 
-/// Maximum decompression budget in bytes (1 MiB).
-const DECOMPRESSION_BUDGET: usize = 1024 * 1024;
+/// Derive a `Format` from a seed byte, covering all valid codes plus the
+/// invalid-code rejection path of `Format::from_u8`.
+fn pick_format(seed: u8) -> Option<Format> {
+    /* Map most of the seed space onto valid formats while still exercising
+     * the `None` (invalid code) branch for out-of-range values. */
+    Format::from_u8(seed % 4)
+}
+
+/// Derive a decompression budget from a seed byte.
+///
+/// Spans tiny budgets (to exercise the `BudgetExceeded` path aggressively)
+/// up to a 1 MiB cap (to exercise successful decompression of small inputs).
+fn pick_budget(seed: u8) -> usize {
+    match seed % 4 {
+        0 => 0,
+        1 => 64,
+        2 => 4096,
+        _ => 1024 * 1024,
+    }
+}
 
 fuzz_target!(|data: &[u8]| {
-    /* Attempt bounded gzip decompression of arbitrary input. */
-    let mut decoder = flate2::read::GzDecoder::new(data);
-    let mut output = Vec::new();
-    let mut buf = [0u8; 4096];
-    let mut total_read: usize = 0;
+    /* Reserve the first two bytes as format/budget selectors; the remainder
+     * is the compressed payload. */
+    if data.len() < 2 {
+        return;
+    }
+    let format = match pick_format(data[0]) {
+        Some(f) => f,
+        None => return,
+    };
+    let budget = pick_budget(data[1]);
+    let payload = &data[2..];
 
-    loop {
-        match decoder.read(&mut buf) {
-            Ok(0) => break,
-            Ok(n) => {
-                total_read = total_read.saturating_add(n);
-                if total_read > DECOMPRESSION_BUDGET {
-                    /* Budget exceeded — stop decompressing. */
-                    break;
-                }
-                output.extend_from_slice(&buf[..n]);
-            }
-            Err(_) => {
-                /* Format error, truncated input, or I/O error — all acceptable. */
-                break;
-            }
+    match decompress_bounded(payload, format, budget) {
+        Ok(result) => {
+            /* Budget invariant: bounded decompression must never emit more
+             * than the configured budget. */
+            assert!(
+                result.output.len() <= budget,
+                "decompressed output {} exceeded budget {}",
+                result.output.len(),
+                budget
+            );
+        }
+        Err(err) => {
+            /* Every error must classify into a known FFI category code so the
+             * C caller can act on it. */
+            let category = err.error_category();
+            assert!(
+                (101..=104).contains(&category),
+                "unexpected error category {} for {:?}",
+                category,
+                err
+            );
+            /* Spot-check the variant/category mapping is internally
+             * consistent. */
+            let expected = match err {
+                DecompError::BudgetExceeded => 101,
+                DecompError::FormatError(_) => 102,
+                DecompError::TruncatedInput(_) => 103,
+                DecompError::IoError(_) => 104,
+            };
+            assert_eq!(category, expected, "category/variant mismatch");
         }
     }
-
-    /* No assertions needed: the goal is to verify no panics or UB occur. */
-    let _ = output;
 });

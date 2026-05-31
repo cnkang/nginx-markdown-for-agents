@@ -49,6 +49,7 @@ typedef struct {
     ngx_uint_t  version;
     time_t      last_mtime;
     ngx_flag_t  lkg_valid;
+    time_t      lkg_mtime;
 } ngx_http_markdown_dynconf_watcher_t;
 
 static ngx_http_markdown_dynconf_watcher_t ngx_http_markdown_dynconf_watcher;
@@ -181,7 +182,15 @@ test_get_dynconf_state_active(void)
     ngx_http_markdown_dynconf_watcher.active = 1;
     ngx_http_markdown_dynconf_watcher.applied_mtime = 1700000000;
     ngx_http_markdown_dynconf_watcher.version = 5;
+    /*
+     * Regression (CMOD-4): last_mtime is the most recently *observed* file
+     * mtime (updated even on a rejected reload); lkg_mtime is the mtime of
+     * the previous successfully-applied config.  They are deliberately
+     * different here so the test fails if the accessor reads last_mtime
+     * instead of lkg_mtime.
+     */
     ngx_http_markdown_dynconf_watcher.last_mtime = 1699999000;
+    ngx_http_markdown_dynconf_watcher.lkg_mtime = 1699998000;
     ngx_http_markdown_dynconf_watcher.lkg_valid = 1;
 
     ngx_http_markdown_diagnostics_get_dynconf_state(&out);
@@ -190,8 +199,9 @@ test_get_dynconf_state_active(void)
                 "active_mtime should match");
     TEST_ASSERT(out.config_version == 5,
                 "config_version should be 5");
-    TEST_ASSERT(out.last_known_good_mtime == 1699999000,
-                "lkg_mtime should match");
+    TEST_ASSERT(out.last_known_good_mtime == 1699998000,
+                "lkg_mtime should reflect the LKG config mtime, "
+                "not last_mtime");
     TEST_ASSERT(out.lkg_valid == 1, "lkg_valid should be 1");
 
     TEST_PASS("Active watcher state collected correctly");

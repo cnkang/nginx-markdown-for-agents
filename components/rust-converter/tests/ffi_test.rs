@@ -1509,3 +1509,292 @@ proptest! {
         ffi_markdown_converter_free(converter);
     }
 }
+
+/// Regression (TEST-2): the parser memory budget must be enforced at the
+/// conversion entry point, not merely classified at the error-code level.
+///
+/// Drives `markdown_convert` with a tiny `parser_memory_budget` against an
+/// input that exceeds it, asserting the conversion fails with
+/// `ERROR_PARSE_BUDGET_EXCEEDED`.
+#[test]
+fn test_parser_memory_budget_enforced() {
+    let converter = markdown_converter_new();
+    assert!(!converter.is_null(), "Converter should not be NULL");
+
+    let html = b"<h1>Hello World</h1><p>This input is larger than the budget.</p>";
+    let mut options = ffi_test_default_options();
+    /* Budget far smaller than the input length forces early rejection. */
+    options.parser_memory_budget = 8;
+
+    let mut result = ffi_test_empty_result();
+    ffi_markdown_convert(converter, html.as_ptr(), html.len(), &options, &mut result);
+
+    assert_eq!(
+        result.error_code, ERROR_PARSE_BUDGET_EXCEEDED,
+        "oversized input must be rejected with ERROR_PARSE_BUDGET_EXCEEDED"
+    );
+
+    ffi_markdown_result_free(&mut result);
+    ffi_markdown_converter_free(converter);
+}
+
+/// Verify that an input within the parser memory budget is NOT rejected,
+/// so the budget check does not over-trigger.
+#[test]
+fn test_parser_memory_budget_allows_small_input() {
+    let converter = markdown_converter_new();
+    assert!(!converter.is_null(), "Converter should not be NULL");
+
+    let html = b"<p>hi</p>";
+    let mut options = ffi_test_default_options();
+    /* Budget comfortably larger than the input. */
+    options.parser_memory_budget = 4096;
+
+    let mut result = ffi_test_empty_result();
+    ffi_markdown_convert(converter, html.as_ptr(), html.len(), &options, &mut result);
+
+    assert_eq!(
+        result.error_code, ERROR_SUCCESS,
+        "input within budget must convert successfully"
+    );
+
+    ffi_markdown_result_free(&mut result);
+    ffi_markdown_converter_free(converter);
+}
+
+/// Regression (TEST-2): a parse that overruns `parse_timeout` must fail with
+/// `ERROR_PARSE_TIMEOUT` rather than returning partial output.
+///
+/// A 1 ms deadline against a large document reliably overruns on CI hardware.
+/// To avoid flaking on unusually fast machines, the timeout assertion is only
+/// made when the call genuinely took longer than the deadline; otherwise the
+/// conversion legitimately completed in time and must report success.
+#[test]
+fn test_parse_timeout_enforced_when_overrun() {
+    use std::time::{Duration, Instant};
+
+    let converter = markdown_converter_new();
+    assert!(!converter.is_null(), "Converter should not be NULL");
+
+    let mut large_html = Vec::with_capacity(64 * 1024);
+    large_html.extend_from_slice(b"<html><body>");
+    for i in 0..2000 {
+        large_html.extend_from_slice(format!("<p>paragraph number {i} with text</p>").as_bytes());
+    }
+    large_html.extend_from_slice(b"</body></html>");
+
+    let mut options = ffi_test_default_options();
+    options.parse_timeout_ms = 1;
+    options.parser_memory_budget = 0;
+
+    let mut result = ffi_test_empty_result();
+    let start = Instant::now();
+    ffi_markdown_convert(
+        converter,
+        large_html.as_ptr(),
+        large_html.len(),
+        &options,
+        &mut result,
+    );
+    let elapsed = start.elapsed();
+
+    if elapsed > Duration::from_millis(1) {
+        assert_eq!(
+            result.error_code, ERROR_PARSE_TIMEOUT,
+            "conversion exceeding parse_timeout must fail with ERROR_PARSE_TIMEOUT"
+        );
+    } else {
+        assert_eq!(
+            result.error_code, ERROR_SUCCESS,
+            "conversion completed within the deadline must report success"
+        );
+    }
+
+    ffi_markdown_result_free(&mut result);
+    ffi_markdown_converter_free(converter);
+}
+
+// ── Decision/negotiation/conditional FFI boundary tests (FFI-3) ──────────
+//
+// These exercise the unsafe extern "C" wrappers directly — NULL result
+// handling, malformed UTF-8, optional_str empty-vs-null, and crafted inputs —
+// which the pure-Rust unit tests on the underlying modules do not cover.
+
+#[test]
+fn test_negotiate_accept_null_result_is_safe() {
+    /* A NULL result pointer must be a no-op, not a crash. */
+    let header = b"text/markdown";
+    unsafe {
+        markdown_negotiate_accept(
+            header.as_ptr(),
+            header.len(),
+            NEGOTIATE_WILDCARD_STRICT,
+            std::ptr::null_mut(),
+        );
+    }
+}
+
+#[test]
+fn test_negotiate_accept_markdown_preferred() {
+    let header = b"text/markdown";
+    let mut result = FFIAcceptResult {
+        should_convert: 9,
+        reason: 9,
+    };
+    unsafe {
+        markdown_negotiate_accept(
+            header.as_ptr(),
+            header.len(),
+            NEGOTIATE_WILDCARD_STRICT,
+            &mut result,
+        );
+    }
+    assert_eq!(result.should_convert, 1);
+    assert_eq!(result.reason, NEGOTIATE_REASON_CONVERT);
+}
+
+#[test]
+fn test_negotiate_accept_null_header_is_no_accept() {
+    /* NULL header with zero length is the documented empty-Accept case. */
+    let mut result = FFIAcceptResult {
+        should_convert: 9,
+        reason: 9,
+    };
+    unsafe {
+        markdown_negotiate_accept(
+            std::ptr::null(),
+            0,
+            NEGOTIATE_WILDCARD_STRICT,
+            &mut result,
+        );
+    }
+    assert_eq!(result.should_convert, 0);
+    assert_eq!(result.reason, NEGOTIATE_REASON_NO_ACCEPT);
+}
+
+#[test]
+fn test_negotiate_accept_malformed_utf8() {
+    /* Invalid UTF-8 in the Accept header must classify as malformed, not
+     * panic or read past the slice. */
+    let header = [0xff, 0xfe, 0x80];
+    let mut result = FFIAcceptResult {
+        should_convert: 9,
+        reason: 9,
+    };
+    unsafe {
+        markdown_negotiate_accept(
+            header.as_ptr(),
+            header.len(),
+            NEGOTIATE_WILDCARD_STRICT,
+            &mut result,
+        );
+    }
+    assert_eq!(result.should_convert, 0);
+    assert_eq!(result.reason, NEGOTIATE_REASON_MALFORMED);
+}
+
+#[test]
+fn test_check_conditional_null_result_is_safe() {
+    let inm = b"\"abc\"";
+    let etag = b"\"abc\"";
+    unsafe {
+        markdown_check_conditional(
+            inm.as_ptr(),
+            inm.len(),
+            etag.as_ptr(),
+            etag.len(),
+            std::ptr::null(),
+            0,
+            std::ptr::null(),
+            0,
+            std::ptr::null_mut(),
+        );
+    }
+}
+
+#[test]
+fn test_check_conditional_etag_match_not_modified() {
+    let inm = b"\"abc\"";
+    let etag = b"\"abc\"";
+    let mut result = FFIConditionalResult {
+        result_code: 9,
+        matched_etag_len: 9,
+    };
+    unsafe {
+        markdown_check_conditional(
+            inm.as_ptr(),
+            inm.len(),
+            etag.as_ptr(),
+            etag.len(),
+            std::ptr::null(),
+            0,
+            std::ptr::null(),
+            0,
+            &mut result,
+        );
+    }
+    assert_eq!(result.result_code, 0, "matching ETag must be NotModified");
+}
+
+#[test]
+fn test_check_conditional_non_ascii_ims_proceeds() {
+    /* Regression (FFI-1) at the boundary: a crafted 29-byte non-ASCII
+     * If-Modified-Since must not panic; with no If-None-Match and a
+     * Last-Modified present it falls through parse_http_date to Proceed. */
+    let ims = "😀aaaaaaaaaaaaaaaaaaaaa GMT".as_bytes();
+    let lm = b"Sun, 04 Nov 1994 08:49:37 GMT";
+    let mut result = FFIConditionalResult {
+        result_code: 9,
+        matched_etag_len: 9,
+    };
+    unsafe {
+        markdown_check_conditional(
+            std::ptr::null(),
+            0,
+            std::ptr::null(),
+            0,
+            ims.as_ptr(),
+            ims.len(),
+            lm.as_ptr(),
+            lm.len(),
+            &mut result,
+        );
+    }
+    assert_eq!(result.result_code, 1, "unparseable IMS must Proceed");
+}
+
+#[test]
+fn test_make_decision_null_result_is_safe() {
+    unsafe {
+        markdown_make_decision(1, 1, 1, 1, 0, 1, 0, 0, std::ptr::null_mut());
+    }
+}
+
+#[test]
+fn test_make_decision_convert_path() {
+    /* enabled, eligible, accept prefers markdown, accept present, not
+     * conditional-304, decompression ok, no timeout, no budget overrun. */
+    let mut result = FFIDecisionResult {
+        decision: 9,
+        reason_code: 9,
+    };
+    unsafe {
+        markdown_make_decision(1, 1, 1, 1, 0, 1, 0, 0, &mut result);
+    }
+    assert_eq!(result.decision, 0, "should convert");
+    assert_eq!(result.reason_code, 0, "Converted reason code is 0");
+}
+
+#[test]
+fn test_make_decision_disabled_skips() {
+    let mut result = FFIDecisionResult {
+        decision: 9,
+        reason_code: 9,
+    };
+    unsafe {
+        /* enabled = 0 → skip with Disabled (canonical discriminant 15). */
+        markdown_make_decision(0, 1, 1, 1, 0, 1, 0, 0, &mut result);
+    }
+    assert_eq!(result.decision, 1, "disabled must skip");
+    assert_eq!(result.reason_code, 15, "Disabled discriminant is 15");
+}

@@ -45,6 +45,30 @@ ngx_http_markdown_plan_name_eq(const u_char *left, const u_char *right,
 
 
 /*
+ * Determine whether a header name is "Content-Type" (case-insensitive).
+ *
+ * Content-Type is special: NGINX stores the response Content-Type in the
+ * dedicated r->headers_out.content_type field, which the header filter
+ * always emits, in addition to iterating the headers list.  A SET of
+ * Content-Type must therefore NOT push a list entry (that would emit a
+ * second, duplicate Content-Type header on the wire).  The dedicated field
+ * is owned by the caller (set after the plan commits); the plan only needs
+ * to ensure no stale Content-Type list entry survives.
+ */
+static ngx_int_t
+ngx_http_markdown_plan_is_content_type(const u_char *name, size_t name_len)
+{
+    static const u_char  content_type[] = "Content-Type";
+
+    if (name_len != sizeof(content_type) - 1) {
+        return 0;
+    }
+
+    return ngx_http_markdown_plan_name_eq(name, content_type, name_len);
+}
+
+
+/*
  * Saved state for a single header modification (for rollback).
  *
  * For SET operations on new headers: the pushed ngx_table_elt_t is
@@ -122,6 +146,13 @@ ngx_http_markdown_plan_find_header(ngx_http_request_t *r,
  * original for rollback as a MODIFY-style undo).  If it does not
  * exist, pushes a new entry onto the header list.
  *
+ * Special case: Content-Type is NOT stored as a list entry.  NGINX keeps
+ * the response Content-Type in r->headers_out.content_type (a dedicated
+ * field the header filter always emits).  A Content-Type SET therefore only
+ * invalidates any stale list entry; the caller writes the dedicated field
+ * after the plan commits.  This prevents a duplicate Content-Type header on
+ * the wire.
+ *
  * r     - current HTTP request
  * entry - plan entry with key/value to set
  * undo  - rollback record to populate
@@ -151,6 +182,40 @@ ngx_http_markdown_plan_apply_set(ngx_http_request_t *r,
             "with non-zero length %uz",
             (size_t) entry->value_len);
         return NGX_ERROR;
+    }
+
+    /*
+     * Content-Type is stored in r->headers_out.content_type (a dedicated
+     * field the header filter always emits), not in the headers list.  The
+     * caller sets that field after the plan commits.  If we pushed a list
+     * entry here, the wire response would carry two Content-Type headers.
+     * Instead, invalidate any stale Content-Type list entry (e.g. one a
+     * future upstream might place in the list) and treat the operation as a
+     * delete-style undo so rollback restores the original list state.  The
+     * dedicated field itself is the caller's responsibility, kept outside
+     * the plan's rollback scope by design.
+     */
+    if (ngx_http_markdown_plan_is_content_type(
+            (const u_char *) entry->key, entry->key_len))
+    {
+        h = ngx_http_markdown_plan_find_header(r,
+            (const u_char *) entry->key, entry->key_len);
+
+        if (h != NULL) {
+            undo->op_type = NGX_HTTP_MARKDOWN_PLAN_OP_DELETE;
+            undo->header = h;
+            undo->orig_hash = h->hash;
+            undo->orig_value = h->value;
+            h->hash = 0;
+        } else {
+            undo->op_type = NGX_HTTP_MARKDOWN_PLAN_OP_DELETE;
+            undo->header = NULL;
+            undo->orig_hash = 0;
+            undo->orig_value.data = NULL;
+            undo->orig_value.len = 0;
+        }
+
+        return NGX_OK;
     }
 
     h = ngx_http_markdown_plan_find_header(r,
