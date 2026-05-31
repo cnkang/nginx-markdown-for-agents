@@ -468,7 +468,7 @@ impl IncrementalEmitter {
                     self.buffer.extend_from_slice(&self.code_block_buffer);
                 }
                 if needs_separator {
-                    self.write_str("\n")?;
+                    self.write_raw(b"\n")?;
                 }
                 self.write_str(&format!("{}\n", fence_str))?;
                 self.in_code_block = false;

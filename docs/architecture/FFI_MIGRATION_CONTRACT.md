@@ -135,7 +135,7 @@ Corresponding cleanup/free functions release any Rust-owned resources:
 | `markdown_result_free()` | `MarkdownResult` | Frees output buffer; idempotent |
 | `markdown_header_plan_free()` | `FFIHeaderPlan` | Frees plan entries and handle |
 | `markdown_converter_free()` | `MarkdownConverterHandle` | Releases converter |
-| `markdown_streaming_free()` | `StreamingConverterHandle` | Releases streaming handle |
+| `markdown_streaming_free()` | `StreamingConverterHandle` | Releases streaming handle; pairs with both `markdown_streaming_new` and `markdown_streaming_new_with_code` |
 | `markdown_incremental_free()` | `IncrementalConverterHandle` | Releases incremental handle |
 | `markdown_streaming_output_free()` | streaming output buffer | Frees (data, len) pair |
 
