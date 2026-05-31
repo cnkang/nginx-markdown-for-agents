@@ -1661,12 +1661,7 @@ fn test_negotiate_accept_null_header_is_no_accept() {
         reason: 9,
     };
     unsafe {
-        markdown_negotiate_accept(
-            std::ptr::null(),
-            0,
-            NEGOTIATE_WILDCARD_STRICT,
-            &mut result,
-        );
+        markdown_negotiate_accept(std::ptr::null(), 0, NEGOTIATE_WILDCARD_STRICT, &mut result);
     }
     assert_eq!(result.should_convert, 0);
     assert_eq!(result.reason, NEGOTIATE_REASON_NO_ACCEPT);

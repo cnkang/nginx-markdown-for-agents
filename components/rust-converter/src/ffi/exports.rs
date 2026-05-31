@@ -41,11 +41,10 @@ use crate::error::ConversionError;
 
 use super::abi::{
     DECOMP_CATEGORY_INVALID_ARGS, DECOMP_CATEGORY_IO_ERROR, ERROR_INTERNAL, FFIAcceptResult,
-    FFIConditionalResult,
-    FFIDecisionResult, FFIDecompResult, FFIHeaderEntry, FFIHeaderPlan, FFIHeaderPlanHandle,
-    MarkdownConverterHandle, MarkdownOptions, MarkdownResult, NEGOTIATE_REASON_CONVERT,
-    NEGOTIATE_REASON_EXPLICIT_REJECT, NEGOTIATE_REASON_LOWER_Q, NEGOTIATE_REASON_MALFORMED,
-    NEGOTIATE_REASON_NO_ACCEPT,
+    FFIConditionalResult, FFIDecisionResult, FFIDecompResult, FFIHeaderEntry, FFIHeaderPlan,
+    FFIHeaderPlanHandle, MarkdownConverterHandle, MarkdownOptions, MarkdownResult,
+    NEGOTIATE_REASON_CONVERT, NEGOTIATE_REASON_EXPLICIT_REJECT, NEGOTIATE_REASON_LOWER_Q,
+    NEGOTIATE_REASON_MALFORMED, NEGOTIATE_REASON_NO_ACCEPT,
 };
 use super::convert::convert_inner;
 use super::memory::{free_buffer, reset_result, set_error_result, set_success_result};
