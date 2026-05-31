@@ -706,7 +706,7 @@ void markdown_converter_free(struct MarkdownConverterHandle *handle);
  * Perform Accept header content negotiation.
  *
  * Parses the client `Accept` header and determines whether the client
- * prefers `text/markdown` over `text/html`, using RFC 7231 §5.3.2
+ * prefers `text/markdown` over `text/html`, using RFC 9110 §12.5.1
  * q-value comparison.
  *
  * # Parameters

@@ -66,6 +66,49 @@ fn normalize_ordered_list_numbering(input: &str) -> String {
     normalize_whitespace_for_diff(&normalized)
 }
 
+/// Detect the streaming title/heading concatenation drift.
+///
+/// The streaming pre-commit emitter renders the leading page `<title>` text
+/// and then omits the block separator before the first body block, gluing the
+/// title to the next token (e.g. `Test\n\nA` from full-buffer becomes `TestA`,
+/// and `Test\n\n# Heading` becomes `Test# Heading`).
+///
+/// This predicate matches that signature precisely: after whitespace
+/// tokenization, the full-buffer output has exactly one extra leading split —
+/// its first two tokens, when concatenated, equal the streaming output's first
+/// token, and every later token is identical.  It additionally confirms that
+/// the separator dropped by streaming was a block separator (contained a
+/// newline) in the full-buffer output.
+///
+/// A genuine structural divergence (for example a code fence glued to its
+/// content, `` ```\ncode\n``` `` vs `` ```\ncode``` ``) merges a *non-leading*
+/// boundary and is therefore NOT matched here — it continues to surface as an
+/// unsuppressed `three-way-streaming-mismatch`.
+fn is_title_heading_concat_drift(full: &str, streaming: &str) -> bool {
+    let full_tokens: Vec<&str> = full.split_whitespace().collect();
+    let stream_tokens: Vec<&str> = streaming.split_whitespace().collect();
+
+    if full_tokens.len() < 2 || full_tokens.len() != stream_tokens.len() + 1 {
+        return false;
+    }
+
+    let merged = format!("{}{}", full_tokens[0], full_tokens[1]);
+    if stream_tokens[0] != merged || full_tokens[2..] != stream_tokens[1..] {
+        return false;
+    }
+
+    // Confirm the separator streaming dropped was a block separator (newline)
+    // in the full-buffer output, not inline spacing.
+    let after_first = full.trim_start();
+    match after_first.strip_prefix(full_tokens[0]) {
+        Some(rest) => rest
+            .chars()
+            .take_while(|c| c.is_whitespace())
+            .any(|c| c == '\n'),
+        None => false,
+    }
+}
+
 fn assert_streaming_matches_or_known(
     fixture_name: &str,
     full: &str,
@@ -80,10 +123,13 @@ fn assert_streaming_matches_or_known(
         normalize_whitespace_for_diff(full) == normalize_whitespace_for_diff(streaming);
     let ordered_list_numbering_drift =
         normalize_ordered_list_numbering(full) == normalize_ordered_list_numbering(streaming);
+    let title_heading_concat_drift = is_title_heading_concat_drift(full, streaming);
     let diff_marker = if whitespace_only_drift {
         "whitespace-only-parity-drift"
     } else if ordered_list_numbering_drift {
         "ordered-list-numbering-drift"
+    } else if title_heading_concat_drift {
+        "streaming-title-heading-concat-drift"
     } else {
         "three-way-streaming-mismatch"
     };
@@ -104,7 +150,7 @@ fn assert_streaming_matches_or_known(
         return;
     }
 
-    if whitespace_only_drift || ordered_list_numbering_drift {
+    if whitespace_only_drift || ordered_list_numbering_drift || title_heading_concat_drift {
         panic!(
             "{fixture_name}: known drift is not registered\n{}",
             diff_text
@@ -363,4 +409,36 @@ fn table_fallback_preserves_full_buffer_equivalence() {
         ),
         Err(err) => panic!("unexpected streaming error: {err}"),
     }
+}
+
+#[test]
+fn title_concat_predicate_matches_leading_drift() {
+    /* The registered title/heading concat drift: leading title glued to the
+     * first body block. The predicate must recognize both the heading and
+     * the plain-paragraph forms. */
+    assert!(is_title_heading_concat_drift(
+        "Test\n\n# Heading\n",
+        "Test# Heading\n"
+    ));
+    assert!(is_title_heading_concat_drift("Test\n\nA\n", "TestA\n"));
+}
+
+#[test]
+fn title_concat_predicate_rejects_structural_mismatch() {
+    /* Regression guard for TEST-1: the title/heading suppressor must NOT
+     * mask unrelated structural divergences such as the streaming code-fence
+     * regression (closing fence glued to content). Such a divergence must
+     * fall through to the generic "three-way-streaming-mismatch" marker and
+     * fail the parity proptest. */
+    assert!(!is_title_heading_concat_drift(
+        "```\ncode\n```\n",
+        "```\ncode```\n"
+    ));
+    /* A mid-document block-separator drop is also not a leading-title drift. */
+    assert!(!is_title_heading_concat_drift(
+        "# H\n\nAlpha\n\nBeta\n",
+        "# H\n\nAlphaBeta\n"
+    ));
+    /* Differing token content is never this drift. */
+    assert!(!is_title_heading_concat_drift("Test\n\nA\n", "OtherA\n"));
 }

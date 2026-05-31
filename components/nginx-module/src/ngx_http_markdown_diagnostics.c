@@ -42,6 +42,16 @@
 static ngx_http_markdown_diag_state_t  ngx_http_markdown_g_diag_state;
 static ngx_flag_t  ngx_http_markdown_g_diag_initialized = 0;
 
+/*
+ * Process-global flag indicating that at least one location enabled the
+ * diagnostics endpoint (markdown_diagnostics on).  Set at configuration
+ * parse time via ngx_http_markdown_diagnostics_enable_recording() and read
+ * once at worker init to decide whether the recent-decisions ring should
+ * record.  Recording is gated so the request path stays free of ring writes
+ * when diagnostics is never configured.
+ */
+static ngx_flag_t  ngx_http_markdown_g_diag_recording_requested = 0;
+
 
 /*
  * Forward declarations for static helper functions.
@@ -197,6 +207,144 @@ ngx_http_markdown_diagnostics_record(ngx_http_markdown_diag_state_t *state,
     if (state->ring.count < state->ring.capacity) {
         state->ring.count++;
     }
+}
+
+
+/*
+ * Request that the per-worker diagnostics ring record decisions.
+ *
+ * Called from the markdown_diagnostics directive handler at configuration
+ * parse time when a location enables the diagnostics endpoint.  The actual
+ * ring allocation and enabling happens later in
+ * ngx_http_markdown_diagnostics_init_worker() (worker init), because the
+ * cycle pool is the correct allocation arena for per-worker state.
+ */
+void
+ngx_http_markdown_diagnostics_enable_recording(void)
+{
+    ngx_http_markdown_g_diag_recording_requested = 1;
+}
+
+
+/*
+ * Initialize the per-worker diagnostics ring during worker startup.
+ *
+ * Allocates the global ring from the cycle pool and enables recording iff
+ * a location requested diagnostics (markdown_diagnostics on).  When no
+ * location enabled diagnostics, this is a no-op so the request path performs
+ * no ring writes.
+ *
+ * Parameters:
+ *   cycle - NGINX cycle (provides the per-worker allocation pool and log)
+ *
+ * Returns:
+ *   NGX_OK on success or when diagnostics is not requested (no-op);
+ *   NGX_ERROR if ring allocation fails.
+ */
+ngx_int_t
+ngx_http_markdown_diagnostics_init_worker(struct ngx_cycle_s *cycle)
+{
+    if (!ngx_http_markdown_g_diag_recording_requested) {
+        return NGX_OK;
+    }
+
+    if (cycle == NULL || cycle->pool == NULL) {
+        return NGX_ERROR;
+    }
+
+    if (ngx_http_markdown_diagnostics_init(
+            &ngx_http_markdown_g_diag_state, cycle->pool, 0)
+        != NGX_OK)
+    {
+        ngx_log_error(NGX_LOG_ERR, cycle->log, 0,
+            "markdown: failed to allocate diagnostics ring buffer");
+        return NGX_ERROR;
+    }
+
+    ngx_http_markdown_g_diag_state.enabled = 1;
+
+    ngx_log_error(NGX_LOG_INFO, cycle->log, 0,
+        "markdown: diagnostics recent-decisions ring initialized "
+        "(capacity %ui)",
+        ngx_http_markdown_g_diag_state.ring.capacity);
+
+    return NGX_OK;
+}
+
+
+/*
+ * Whether the per-worker diagnostics ring is actively recording.
+ *
+ * Returns 1 when the global ring has been initialized and enabled, 0
+ * otherwise.  Used by the decision-path logger to (a) decide whether to
+ * record a decision and (b) apply the diagnostics-enabled verbosity
+ * override.
+ */
+ngx_int_t
+ngx_http_markdown_diagnostics_recording_active(void)
+{
+    return (ngx_http_markdown_g_diag_initialized
+            && ngx_http_markdown_g_diag_state.enabled) ? 1 : 0;
+}
+
+
+/*
+ * Map a decision-path reason code string to its canonical numeric
+ * ReasonCode discriminant (decision/reason_code.rs is the source of truth).
+ *
+ * The decision path carries pre-formatted reason strings; the ring stores a
+ * compact numeric code.  Unknown/legacy strings map to -1 so the consumer
+ * can render them distinctly without guessing.
+ *
+ * Parameters:
+ *   reason - NUL-terminated reason code string (may be NULL)
+ *
+ * Returns:
+ *   Canonical discriminant (0..17), or -1 when the string is NULL or not a
+ *   canonical reason code.
+ */
+ngx_int_t
+ngx_http_markdown_diagnostics_reason_to_code(const char *reason)
+{
+    static const struct {
+        const char  *name;
+        ngx_int_t    code;
+    } map[] = {
+        { "CONVERTED",                     0 },
+        { "ELIGIBLE_CONVERTED",            0 },
+        { "SKIPPED_ACCEPT",                1 },
+        { "SKIPPED_NO_ACCEPT",             2 },
+        { "SKIPPED_CONDITIONAL",           3 },
+        { "FAILED_DECOMPRESSION",          4 },
+        { "DECOMPRESSION_BUDGET_EXCEEDED", 5 },
+        { "DECOMPRESSION_FORMAT_ERROR",    6 },
+        { "DECOMPRESSION_TRUNCATED_INPUT", 7 },
+        { "DECOMPRESSION_IO_ERROR",        8 },
+        { "PARSE_TIMEOUT",                 9 },
+        { "PARSE_BUDGET_EXCEEDED",        10 },
+        { "REPLAY_BUFFER_ERROR",          11 },
+        { "SKIPPED_ACCEPT_REJECT",        12 },
+        { "FFI_CALL_ERROR",               13 },
+        { "NOT_ELIGIBLE",                 14 },
+        { "DISABLED",                     15 },
+        { "FAILED_OPEN",                  16 },
+        { "ELIGIBLE_FAILED_OPEN",         16 },
+        { "FAILED_CLOSED",                17 },
+        { "ELIGIBLE_FAILED_CLOSED",       17 },
+    };
+    size_t  i;
+
+    if (reason == NULL) {
+        return -1;
+    }
+
+    for (i = 0; i < sizeof(map) / sizeof(map[0]); i++) {
+        if (ngx_strcmp(reason, map[i].name) == 0) {
+            return map[i].code;
+        }
+    }
+
+    return -1;
 }
 
 
@@ -600,9 +748,23 @@ ngx_http_markdown_diagnostics_build_json(ngx_http_request_t *r,
         rc = ngx_http_markdown_dynconf_snapshot_to_json(r->pool, conf,
                                                          &snap_buf,
                                                          &snap_len);
-        if (rc == NGX_OK && snap_buf != NULL && snap_len > 0
-            && p + snap_len < last)
-        {
+        if (rc == NGX_OK && snap_buf != NULL && snap_len > 0) {
+            /*
+             * Treat a non-fitting snapshot as a hard truncation error
+             * rather than silently emitting an empty config_snapshot.
+             * This keeps the guard symmetric with the final p >= last
+             * truncation check and avoids serving misleading JSON when
+             * the snapshot outgrows the pre-sized buffer.
+             */
+            if (p + snap_len >= last) {
+                ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                    "markdown: diagnostics config_snapshot (%uz bytes) "
+                    "does not fit in response buffer; increase "
+                    "NGX_HTTP_MARKDOWN_DIAG_JSON_BASE_SIZE",
+                    snap_len);
+                return NGX_ERROR;
+            }
+
             ngx_memcpy(p, snap_buf, snap_len);
             p += snap_len;
         }
@@ -844,17 +1006,31 @@ ngx_http_markdown_log_decision_path(ngx_http_request_t *r,
         path->conversion_status);
 
     /*
+     * Record the decision in the recent-decisions ring (best-effort).
+     * The ring is only active when a location enabled markdown_diagnostics;
+     * otherwise this is a cheap no-op.  Recorded unconditionally (regardless
+     * of log verbosity) so the diagnostics endpoint reflects all decisions,
+     * not just the ones that were logged.
+     */
+    if (ngx_http_markdown_diagnostics_recording_active()) {
+        ngx_http_markdown_diagnostics_record(
+            ngx_http_markdown_diagnostics_get_state(),
+            ngx_http_markdown_diagnostics_reason_to_code(path->reason_code),
+            path->duration_ms);
+    }
+
+    /*
      * Verbosity gating:
      * - error/warn: only emit for failure outcomes
      * - info/debug: emit for all outcomes
      *
-     * Exception: if diagnostics is enabled (state->enabled),
-     * always emit regardless of verbosity.  We check this via
-     * the conf pointer — if conf is NULL we cannot determine
-     * diagnostics state, so we rely on verbosity alone.
+     * Override: when the diagnostics endpoint is enabled, emit the decision
+     * log regardless of verbosity so the operator-facing log and the
+     * diagnostics ring stay consistent.
      */
     if (effective_verbosity <= NGX_HTTP_MARKDOWN_LOG_WARN
-        && !is_failure)
+        && !is_failure
+        && !ngx_http_markdown_diagnostics_recording_active())
     {
         return;
     }

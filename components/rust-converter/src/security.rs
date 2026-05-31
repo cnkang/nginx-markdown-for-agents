@@ -815,6 +815,10 @@ pub fn parse_forwarded_headers(
 /// Per CommonMark §4.7, link labels may contain backslash escapes.
 /// Escape: `[`, `]`, `\`. Newlines are replaced with spaces to prevent
 /// injection via line breaks within link labels.
+///
+/// This is the single canonical label-escaping implementation; the streaming
+/// emitter and the full-buffer traversal both delegate here so the escaping
+/// rule cannot drift between emission sites (AGENTS.md Rule 27).
 pub fn escape_link_label(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 8);
     for ch in s.chars() {
@@ -824,24 +828,6 @@ pub fn escape_link_label(s: &str) -> String {
                 out.push(ch);
             }
             '\n' | '\r' => out.push(' '),
-            _ => out.push(ch),
-        }
-    }
-    out
-}
-
-/// Escape a string for safe use as a Markdown link destination.
-///
-/// Per CommonMark §4.7, link destinations may contain backslash escapes.
-/// Escape: `[`, `]`, `\`, `(`, `)`.
-pub fn escape_link_destination(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() + 8);
-    for ch in s.chars() {
-        match ch {
-            '[' | ']' | '\\' | '(' | ')' => {
-                out.push('\\');
-                out.push(ch);
-            }
             _ => out.push(ch),
         }
     }
@@ -1035,10 +1021,5 @@ mod url_validation_tests {
         assert_eq!(escape_link_label("foo [bar] baz"), r"foo \[bar\] baz");
         assert_eq!(escape_link_label("a\nb"), "a b");
         assert_eq!(escape_link_label("a\rb"), "a b");
-    }
-
-    #[test]
-    fn test_escape_link_destination() {
-        assert_eq!(escape_link_destination("url?q=(1)"), r"url?q=\(1\)");
     }
 }

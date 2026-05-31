@@ -39,9 +39,19 @@
 //! - All output fields (markdown, etag) are NULL
 //!
 //! **Panic Safety:**
-//! - All FFI functions use `catch_unwind` to prevent panics from crossing the boundary
-//! - Panics are converted to error codes and messages
-//! - C code will never see Rust unwinding
+//! - FFI exports that invoke fallible or third-party logic guard against
+//!   panics crossing the C boundary. `markdown_convert` and the streaming /
+//!   incremental converters convert caught panics into error codes and
+//!   messages; `markdown_decompress_bounded` (which runs attacker-controlled
+//!   bytes through flate2/brotli) and `markdown_check_conditional` wrap their
+//!   fallible core in `catch_unwind` and fall back to a safe result on panic.
+//! - The remaining small exports (`markdown_negotiate_accept`,
+//!   `markdown_make_decision`, `markdown_build_header_plan`,
+//!   `markdown_validate_url`, `markdown_is_dangerous_url`,
+//!   `markdown_build_base_url`, and the `markdown_reason_code_*` accessors)
+//!   operate only on borrowed primitives / `&str` and contain no panicking
+//!   operations, so they are panic-free by construction.
+//! - In all cases, C code will never observe Rust unwinding.
 //!
 //! ## Pointer Validation
 //!
@@ -75,15 +85,19 @@ mod streaming;
 pub use abi::{
     ERROR_DECOMPRESSION_BUDGET_EXCEEDED, ERROR_ENCODING, ERROR_INTERNAL, ERROR_INVALID_INPUT,
     ERROR_MEMORY_LIMIT, ERROR_PARSE, ERROR_PARSE_BUDGET_EXCEEDED, ERROR_PARSE_TIMEOUT,
-    ERROR_SUCCESS, ERROR_TIMEOUT, FFIDecompResult, MarkdownConverterHandle, MarkdownOptions,
-    MarkdownResult,
+    ERROR_SUCCESS, ERROR_TIMEOUT, FFIAcceptResult, FFIConditionalResult, FFIDecisionResult,
+    FFIDecompResult, MarkdownConverterHandle, MarkdownOptions, MarkdownResult,
+    NEGOTIATE_REASON_CONVERT, NEGOTIATE_REASON_EXPLICIT_REJECT, NEGOTIATE_REASON_LOWER_Q,
+    NEGOTIATE_REASON_MALFORMED, NEGOTIATE_REASON_NO_ACCEPT, NEGOTIATE_WILDCARD_ALLOW,
+    NEGOTIATE_WILDCARD_STRICT,
 };
 
 #[cfg(feature = "streaming")]
 pub use abi::{ERROR_BUDGET_EXCEEDED, ERROR_POST_COMMIT, ERROR_STREAMING_FALLBACK};
 pub use exports::{
-    markdown_convert, markdown_converter_free, markdown_converter_new, markdown_decomp_result_init,
-    markdown_decompress_bounded, markdown_decompress_free, markdown_result_free,
+    markdown_check_conditional, markdown_convert, markdown_converter_free, markdown_converter_new,
+    markdown_decomp_result_init, markdown_decompress_bounded, markdown_decompress_free,
+    markdown_make_decision, markdown_negotiate_accept, markdown_result_free,
 };
 
 #[cfg(feature = "incremental")]

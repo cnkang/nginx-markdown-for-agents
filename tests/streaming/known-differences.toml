@@ -240,5 +240,5 @@ acceptable = true
 fix_version = "0.6.0"
 drift_type = "formatting"
 severity = "low"
-diff_contains = "three-way-streaming-mismatch"
-global_suppressor_justification = "Intentionally global: title/heading concatenation can occur in any generated HTML that has both a <title> and an <h1> in the pre-commit region, which is common across all fixture categories."
+diff_contains = "streaming-title-heading-concat-drift"
+global_suppressor_justification = "Intentionally global: title/heading concatenation can occur in any generated HTML that has both a <title> and an <h1> in the pre-commit region, which is common across all fixture categories. The diff_contains marker is title/heading-specific (the parity harness only emits it when the divergence normalizes to equality after inserting a space before the heading marker), so this entry no longer masks unrelated structural mismatches (which carry the generic 'three-way-streaming-mismatch' marker)."

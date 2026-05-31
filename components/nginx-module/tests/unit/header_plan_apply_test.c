@@ -305,8 +305,8 @@ test_set_new_header(void)
     FFIHeaderPlan plan;
     FFIHeaderPlanHandle handle;
     FFIHeaderEntry entry = { NGX_HTTP_MARKDOWN_PLAN_OP_SET,
-        (const uint8_t *)"Content-Type", 12,
-        (const uint8_t *)"text/markdown", 13 };
+        (const uint8_t *)"X-Test-Header", 13,
+        (const uint8_t *)"some-value", 10 };
     ngx_table_elt_t *h;
 
     TEST_SUBSECTION("SET new header");
@@ -319,12 +319,12 @@ test_set_new_header(void)
     TEST_ASSERT(apply_header_plan(&g_request, &plan) == NGX_OK,
                 "SET new header should succeed");
 
-    h = find_header((const u_char *)"Content-Type", 12);
+    h = find_header((const u_char *)"X-Test-Header", 13);
     TEST_ASSERT(h != NULL, "header should exist after SET");
     TEST_ASSERT(h->hash == 1, "header hash should be 1");
-    TEST_ASSERT(h->value.len == 13, "value length should be 13");
-    TEST_ASSERT(memcmp(h->value.data, "text/markdown", 13) == 0,
-                "value should be text/markdown");
+    TEST_ASSERT(h->value.len == 10, "value length should be 10");
+    TEST_ASSERT(memcmp(h->value.data, "some-value", 10) == 0,
+                "value should be some-value");
 
     TEST_PASS("SET new header correct");
 }
@@ -335,11 +335,81 @@ test_set_overwrite_existing(void)
     FFIHeaderPlan plan;
     FFIHeaderPlanHandle handle;
     FFIHeaderEntry entry = { NGX_HTTP_MARKDOWN_PLAN_OP_SET,
-        (const uint8_t *)"Content-Type", 12,
-        (const uint8_t *)"text/markdown", 13 };
+        (const uint8_t *)"X-Test-Header", 13,
+        (const uint8_t *)"new-value", 9 };
     ngx_table_elt_t *h;
 
     TEST_SUBSECTION("SET overwrite existing header");
+
+    setup_request();
+    add_existing_header("X-Test-Header", "old-value");
+
+    plan.handle = &handle;
+    plan.entries = &entry;
+    plan.count = 1;
+
+    TEST_ASSERT(apply_header_plan(&g_request, &plan) == NGX_OK,
+                "SET overwrite should succeed");
+
+    h = find_header((const u_char *)"X-Test-Header", 13);
+    TEST_ASSERT(h != NULL, "header should still exist");
+    TEST_ASSERT(h->value.len == 9, "value length should be updated");
+    TEST_ASSERT(memcmp(h->value.data, "new-value", 9) == 0,
+                "value should be updated to new-value");
+
+    TEST_PASS("SET overwrite existing correct");
+}
+
+static void
+test_set_content_type_no_list_entry(void)
+{
+    /*
+     * Regression (CMOD-1): a Content-Type SET must NOT push a list entry.
+     * NGINX emits Content-Type from the dedicated headers_out.content_type
+     * field; a list entry would duplicate the header on the wire. With no
+     * pre-existing Content-Type list entry, the list must stay empty.
+     */
+    FFIHeaderPlan plan;
+    FFIHeaderPlanHandle handle;
+    FFIHeaderEntry entry = { NGX_HTTP_MARKDOWN_PLAN_OP_SET,
+        (const uint8_t *)"Content-Type", 12,
+        (const uint8_t *)"text/markdown; charset=utf-8", 28 };
+    ngx_table_elt_t *h;
+
+    TEST_SUBSECTION("SET Content-Type does not push list entry");
+
+    setup_request();
+    plan.handle = &handle;
+    plan.entries = &entry;
+    plan.count = 1;
+
+    TEST_ASSERT(apply_header_plan(&g_request, &plan) == NGX_OK,
+                "Content-Type SET should succeed");
+    TEST_ASSERT(g_header_count == 0,
+                "Content-Type SET must not push a list entry");
+    h = find_header((const u_char *)"Content-Type", 12);
+    TEST_ASSERT(h == NULL,
+                "no Content-Type list entry should be visible");
+
+    TEST_PASS("Content-Type SET avoids duplicate list entry");
+}
+
+static void
+test_set_content_type_invalidates_stale_entry(void)
+{
+    /*
+     * Regression (CMOD-1): if a stale Content-Type already exists in the
+     * list (e.g. a future upstream placed one there), the Content-Type SET
+     * must invalidate it (hash=0) so only the dedicated field is emitted.
+     */
+    FFIHeaderPlan plan;
+    FFIHeaderPlanHandle handle;
+    FFIHeaderEntry entry = { NGX_HTTP_MARKDOWN_PLAN_OP_SET,
+        (const uint8_t *)"Content-Type", 12,
+        (const uint8_t *)"text/markdown; charset=utf-8", 28 };
+    ngx_table_elt_t *h;
+
+    TEST_SUBSECTION("SET Content-Type invalidates stale list entry");
 
     setup_request();
     add_existing_header("Content-Type", "text/html");
@@ -349,15 +419,12 @@ test_set_overwrite_existing(void)
     plan.count = 1;
 
     TEST_ASSERT(apply_header_plan(&g_request, &plan) == NGX_OK,
-                "SET overwrite should succeed");
-
+                "Content-Type SET should succeed");
     h = find_header((const u_char *)"Content-Type", 12);
-    TEST_ASSERT(h != NULL, "header should still exist");
-    TEST_ASSERT(h->value.len == 13, "value length should be updated");
-    TEST_ASSERT(memcmp(h->value.data, "text/markdown", 13) == 0,
-                "value should be updated to text/markdown");
+    TEST_ASSERT(h == NULL,
+                "stale Content-Type list entry must be invalidated");
 
-    TEST_PASS("SET overwrite existing correct");
+    TEST_PASS("Content-Type SET invalidates stale list entry");
 }
 
 static void
@@ -582,6 +649,8 @@ main(void)
     test_exceed_max_entries();
     test_set_new_header();
     test_set_overwrite_existing();
+    test_set_content_type_no_list_entry();
+    test_set_content_type_invalidates_stale_entry();
     test_delete_existing();
     test_delete_nonexistent();
     test_modify_existing();

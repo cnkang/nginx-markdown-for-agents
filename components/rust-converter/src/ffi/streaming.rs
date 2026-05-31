@@ -53,7 +53,11 @@ pub struct StreamingConverterHandle {
 
 fn budget_from_streaming_total(streaming_budget: u64) -> MemoryBudget {
     if streaming_budget > 0 {
-        MemoryBudget::for_total(streaming_budget as usize)
+        // Saturate rather than wrap when usize is narrower than u64 (e.g. on
+        // 32-bit targets); on 64-bit targets this is an identity conversion.
+        // Wrapping here would silently shrink the configured budget.
+        let total = usize::try_from(streaming_budget).unwrap_or(usize::MAX);
+        MemoryBudget::for_total(total)
     } else {
         MemoryBudget::default()
     }

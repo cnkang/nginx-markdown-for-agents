@@ -788,7 +788,9 @@ ngx_http_markdown_diagnostics_directive(ngx_conf_t *cf, ngx_command_t *cmd, void
 
     value = cf->args->elts;
 
-    if (value[1].len == 2 && strncasecmp((const char *) value[1].data, "on", 2) == 0) {
+    if (value[1].len == 2
+        && ngx_strncasecmp(value[1].data, (u_char *) "on", 2) == 0)
+    {
         mcf->ops.diagnostics_enabled = 1;
 
         clcf = ngx_http_conf_get_module_loc_conf(cf, ngx_http_core_module);
@@ -809,9 +811,17 @@ ngx_http_markdown_diagnostics_directive(ngx_conf_t *cf, ngx_command_t *cmd, void
 
         clcf->handler = ngx_http_markdown_diagnostics_handler;
 
+        /*
+         * Enabling the endpoint at any location also activates the
+         * per-worker recent-decisions ring (allocated in init_worker).
+         */
+        ngx_http_markdown_diagnostics_enable_recording();
+
         ngx_conf_log_error(NGX_LOG_INFO, cf, 0,
                            "markdown: diagnostics endpoint enabled at this location");
-    } else if (value[1].len == 3 && strncasecmp((const char *) value[1].data, "off", 3) == 0) {
+    } else if (value[1].len == 3
+               && ngx_strncasecmp(value[1].data, (u_char *) "off", 3) == 0)
+    {
         mcf->ops.diagnostics_enabled = 0;
     } else {
         return "invalid value";
