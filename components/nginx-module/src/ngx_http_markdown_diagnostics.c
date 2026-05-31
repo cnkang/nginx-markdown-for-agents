@@ -771,7 +771,7 @@ ngx_http_markdown_diagnostics_build_json(ngx_http_request_t *r,
              * truncation check and avoids serving misleading JSON when
              * the snapshot outgrows the pre-sized buffer.
              */
-            if (p + snap_len >= last) {
+            if (last <= p || (size_t) (last - p) <= snap_len) {
                 ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                     "markdown: diagnostics config_snapshot (%uz bytes) "
                     "does not fit in response buffer; increase "
