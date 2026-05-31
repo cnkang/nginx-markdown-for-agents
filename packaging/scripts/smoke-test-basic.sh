@@ -51,18 +51,49 @@ detect_rpm_repo_baseurl() {
 
     . /etc/os-release
 
+    local channel
+    channel="$(nginx_repo_channel "$NGINX_VERSION")"
+
     case "${ID:-}" in
         amzn)
-            printf 'http://nginx.org/packages/amzn/%s/$basearch/\n' \
-                "${VERSION_ID%%.*}"
+            printf 'http://nginx.org/packages/%samzn/%s/$basearch/\n' \
+                "$channel" "${VERSION_ID%%.*}"
             ;;
         almalinux|centos|rocky|rhel)
-            printf 'http://nginx.org/packages/centos/$releasever/$basearch/\n'
+            printf 'http://nginx.org/packages/%scentos/$releasever/$basearch/\n' \
+                "$channel"
             ;;
         *)
             die "Unsupported RPM smoke-test distribution: ID=${ID:-unknown}"
             ;;
     esac
+    return 0
+}
+
+# Select the nginx.org package channel based on the minor-version parity of
+# the target NGINX version.  nginx.org publishes even-minor releases (1.26,
+# 1.28, ...) in the stable repository and odd-minor releases (1.27, 1.31, ...)
+# in the mainline repository.  Emitting the wrong channel makes the package
+# un-installable (AGENTS.md Rule 13).
+#
+# Outputs the channel path segment: empty string for stable, or "mainline/"
+# for mainline.  Callers interpolate it directly into the repository base URL.
+nginx_repo_channel() {
+    local version="$1"
+    local minor
+
+    minor="$(printf '%s\n' "$version" | cut -d. -f2)"
+
+    if [[ -z "$minor" || ! "$minor" =~ ^[0-9]+$ ]]; then
+        die "cannot parse NGINX minor version from \"${version}\""
+    fi
+
+    if [[ $((minor % 2)) -eq 0 ]]; then
+        printf ''
+    else
+        printf 'mainline/'
+    fi
+    return 0
 }
 
 detect_nginx_modules_path() {
@@ -163,7 +194,8 @@ case "$PKG_FORMAT" in
             | gpg --dearmor -o /usr/share/keyrings/nginx-archive-keyring.gpg \
             2>>"${INSTALL_LOG}" || die "Failed to import nginx.org signing key"
 
-        # Add nginx.org stable repository — select path based on distro ID
+        # Add nginx.org repository — select path based on distro ID and
+        # channel (stable vs mainline) by NGINX minor-version parity.
         . /etc/os-release
         case "${ID:-}" in
             ubuntu)
@@ -176,8 +208,9 @@ case "$PKG_FORMAT" in
                 die "Unsupported DEB smoke-test distribution: ID=${ID:-unknown}"
                 ;;
         esac
-        printf 'deb [signed-by=/usr/share/keyrings/nginx-archive-keyring.gpg] https://nginx.org/packages/%s %s nginx\n' \
-            "$NGINX_REPO_DIST" "$VERSION_CODENAME" \
+        NGINX_REPO_CHANNEL="$(nginx_repo_channel "$NGINX_VERSION")"
+        printf 'deb [signed-by=/usr/share/keyrings/nginx-archive-keyring.gpg] https://nginx.org/packages/%s%s %s nginx\n' \
+            "$NGINX_REPO_CHANNEL" "$NGINX_REPO_DIST" "$VERSION_CODENAME" \
             > /etc/apt/sources.list.d/nginx.list \
             || die "Failed to add nginx.org repository"
 

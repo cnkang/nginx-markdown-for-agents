@@ -26,7 +26,8 @@ The FFI boundary is implemented in:
 | `markdown_negotiate_accept` | Rust | C | **v0.7.0 NEW** | Accept header negotiation |
 | `markdown_build_header_plan` | Rust | C | **v0.7.0 NEW** | Returns Rust-owned plan + opaque handle |
 | `markdown_header_plan_free` | Rust | C | **v0.7.0 NEW** | Releases plan handle and owned buffers |
-| `markdown_streaming_create` | Rust | C | **Stable** | Streaming converter handle |
+| `markdown_streaming_new` | Rust | C | **Stable** | Streaming converter handle |
+| `markdown_streaming_new_with_code` | Rust | C | **Stable** | Streaming converter handle with error code |
 | `markdown_streaming_feed` | Rust | C | **Stable** | Incremental input |
 | `markdown_streaming_finalize` | Rust | C | **Stable** | End-of-stream |
 | `markdown_streaming_abort` | Rust | C | **Stable** | Error cleanup |

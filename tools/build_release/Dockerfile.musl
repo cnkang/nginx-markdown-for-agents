@@ -27,14 +27,37 @@ RUN set -eux; \
         python3 \
         zlib-dev; \
     retry 5 curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs -o /tmp/rustup-init.sh; \
-    retry 5 sh /tmp/rustup-init.sh -y; \
-    rm -f /tmp/rustup-init.sh; \
-    retry 5 /root/.cargo/bin/cargo install cbindgen
+    retry 5 sh /tmp/rustup-init.sh -y --default-toolchain none; \
+    rm -f /tmp/rustup-init.sh
 ENV PATH="/root/.cargo/bin:${PATH}"
 
 RUN update-ca-certificates
 
 ARG NGINX_VERSION=1.26.3
+
+# Pin the Rust toolchain to the repository's rust-toolchain.toml so release
+# binaries are built with the same compiler as the package artifacts
+# (AGENTS.md Rule 13: release builds must not float on `stable`).  rustup
+# auto-installs the channel named in this file on first cargo invocation.
+COPY rust-toolchain.toml /src/rust-toolchain.toml
+RUN set -eux; \
+    retry() { \
+        attempts="$1"; \
+        shift; \
+        count=1; \
+        while :; do \
+            "$@" && break; \
+            if [ "$count" -ge "$attempts" ]; then \
+                echo "command failed after ${attempts} attempts: $*" >&2; \
+                exit 1; \
+            fi; \
+            sleep "$((count * 5))"; \
+            count=$((count + 1)); \
+        done; \
+    }; \
+    cd /src; \
+    retry 5 rustup toolchain install; \
+    retry 5 cargo install cbindgen
 
 WORKDIR /build
 COPY packaging/checksums.sha256 /src/packaging/checksums.sha256
