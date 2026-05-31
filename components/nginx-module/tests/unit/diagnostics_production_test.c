@@ -49,6 +49,11 @@ struct ngx_pool_s {
     int dummy;
 };
 
+struct ngx_cycle_s {
+    ngx_pool_t  *pool;
+    ngx_log_t   *log;
+};
+
 struct ngx_buf_s {
     u_char     *pos;
     u_char     *last;
@@ -305,6 +310,10 @@ reset_test_state(void)
     g_discard_rc = NGX_OK;
     g_alloc_fail_after = -1;
     ngx_current_msec = 1000;
+    memset(&ngx_http_markdown_g_diag_state, 0,
+           sizeof(ngx_http_markdown_g_diag_state));
+    ngx_http_markdown_g_diag_initialized = 0;
+    ngx_http_markdown_g_diag_recording_requested = 0;
 }
 
 static void
@@ -409,6 +418,34 @@ test_lifecycle_failure_branches(void)
 
     TEST_PASS("Lifecycle failure branches covered");
 }
+
+
+static void
+test_recording_request_resets_between_config_cycles(void)
+{
+    ngx_int_t rc;
+
+    TEST_SUBSECTION("diagnostics recording request resets per config cycle");
+
+    reset_test_state();
+
+    rc = ngx_http_markdown_diagnostics_init_worker(NULL);
+    TEST_ASSERT(rc == NGX_OK,
+                "unrequested diagnostics init should be a no-op");
+
+    ngx_http_markdown_diagnostics_enable_recording();
+    rc = ngx_http_markdown_diagnostics_init_worker(NULL);
+    TEST_ASSERT(rc == NGX_ERROR,
+                "requested diagnostics should validate worker cycle");
+
+    ngx_http_markdown_diagnostics_reset_recording_request();
+    rc = ngx_http_markdown_diagnostics_init_worker(NULL);
+    TEST_ASSERT(rc == NGX_OK,
+                "reset request should prevent stale worker init");
+
+    TEST_PASS("Recording request resets between config cycles");
+}
+
 
 static void
 test_access_and_json_builder(void)
@@ -676,6 +713,7 @@ main(void)
 
     test_lifecycle_and_ring_wrap();
     test_lifecycle_failure_branches();
+    test_recording_request_resets_between_config_cycles();
     test_access_and_json_builder();
     test_json_buffer_scales_with_ring_count();
     test_json_builder_rejects_invalid_ring_state();

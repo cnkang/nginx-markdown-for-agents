@@ -187,6 +187,16 @@ void ngx_http_markdown_diagnostics_enable_recording(void);
 
 
 /*
+ * Reset the parse-time diagnostics recording request for a new config cycle.
+ *
+ * Called from module preconfiguration before directives are parsed so reloads
+ * that remove markdown_diagnostics do not inherit a stale request flag from an
+ * earlier configuration.
+ */
+void ngx_http_markdown_diagnostics_reset_recording_request(void);
+
+
+/*
  * Initialize the per-worker diagnostics ring during worker startup.
  *
  * No-op unless a location requested diagnostics via
