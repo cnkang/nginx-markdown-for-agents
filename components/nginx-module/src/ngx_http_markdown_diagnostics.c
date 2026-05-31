@@ -227,6 +227,21 @@ ngx_http_markdown_diagnostics_enable_recording(void)
 
 
 /*
+ * Reset the configuration-cycle recording request flag.
+ *
+ * NGINX may parse a fresh configuration in a long-lived master process during
+ * reload.  The parse-time request flag must therefore start false for each
+ * cycle, otherwise a previous config with markdown_diagnostics on would keep
+ * future workers recording even after the endpoint is removed.
+ */
+void
+ngx_http_markdown_diagnostics_reset_recording_request(void)
+{
+    ngx_http_markdown_g_diag_recording_requested = 0;
+}
+
+
+/*
  * Initialize the per-worker diagnostics ring during worker startup.
  *
  * Allocates the global ring from the cycle pool and enables recording iff

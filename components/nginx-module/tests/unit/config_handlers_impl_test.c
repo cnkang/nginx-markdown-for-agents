@@ -123,6 +123,7 @@ static ngx_int_t g_compile_complex_rc;
  * ngx_http_markdown_set_dynconf_path.
  */
 static ngx_http_markdown_main_conf_t g_main_conf;
+static ngx_uint_t g_diagnostics_recording_requested;
 
 /*
  * No-op stub for the metrics content handler.
@@ -147,6 +148,12 @@ ngx_http_markdown_diagnostics_handler(ngx_http_request_t *r)
 {
     UNUSED(r);
     return NGX_OK;
+}
+
+void
+ngx_http_markdown_diagnostics_enable_recording(void)
+{
+    g_diagnostics_recording_requested = 1;
 }
 
 /*
@@ -1538,6 +1545,7 @@ test_diagnostics_handler(void)
     /* Test "on" value */
     init_conf(&mcf);
     memset(&clcf, 0, sizeof(clcf));
+    g_diagnostics_recording_requested = 0;
     g_clcf = &clcf;
     set_arg(&values[1], "on");
     rc = ngx_http_markdown_diagnostics_directive(&cf, &cmd, &mcf);
@@ -1545,6 +1553,8 @@ test_diagnostics_handler(void)
     TEST_ASSERT(mcf.ops.diagnostics_enabled == 1, "diagnostics should be enabled");
     TEST_ASSERT(clcf.handler == ngx_http_markdown_diagnostics_handler,
         "diagnostics handler should be registered");
+    TEST_ASSERT(g_diagnostics_recording_requested == 1,
+        "diagnostics on should request decision recording");
 
     /* Duplicate handler should fail */
     rc = ngx_http_markdown_diagnostics_directive(&cf, &cmd, &mcf);
