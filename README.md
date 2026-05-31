@@ -421,7 +421,7 @@ Current release (0.7.0):
 - P0 runtime correctness: pending chain on NGX_AGAIN, fail-open dedup, safe output ordering
 - Independent decompression budget (`markdown_decompress_max_size`)
 - Parse timeout and parser budget directives
-- Rust Accept header negotiation module (RFC 7231 q-value)
+- Rust Accept header negotiation module (RFC 9110 q-value semantics)
 - Rust conditional request module (If-None-Match, If-Modified-Since)
 - Rust decision engine with reason codes
 - Rust header mutation plan module

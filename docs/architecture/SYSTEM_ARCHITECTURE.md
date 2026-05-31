@@ -202,7 +202,7 @@ pure-logic decisions from C into Rust, improving testability and safety:
 
 ### Accept Negotiator (`negotiator.rs`)
 
-Parses `Accept` headers per RFC 7231 §5.3.2, performs q-value comparison
+Parses `Accept` headers per RFC 9110 §12.5.1, performs q-value comparison
 between `text/markdown` and `text/html`, and determines whether conversion
 should proceed. Exposed via `FFIAcceptResult` and `markdown_negotiate_accept`
 FFI.

@@ -1,6 +1,6 @@
 //! HTTP Accept header negotiation for markdown conversion.
 //!
-//! Implements content negotiation per RFC 7231 §5.3.2: parses the client
+//! Implements content negotiation per RFC 9110 §12.5.1: parses the client
 //! `Accept` header, extracts q-values for `text/markdown` and related MIME
 //! types, and determines whether conversion should proceed based on the
 //! client's expressed preferences.
@@ -99,7 +99,7 @@ fn parse_q_value(param: &str) -> Option<u16> {
     if let Ok(v) = value_str.parse::<f32>()
         && (0.0..=1.0).contains(&v)
     {
-        // Round to 3 decimal places (RFC 7231 limit).
+        // Round to 3 decimal places (RFC 9110 quality value precision).
         let scaled = (v * 1000.0).round() as u16;
         if scaled <= 1000 {
             return Some(scaled);
@@ -116,7 +116,7 @@ fn normalize_mime(mime: &str) -> String {
 
 /// Parse the Accept header into a list of (mime_type, q_value) entries.
 ///
-/// Per RFC 7231 §5.3.2, each entry is separated by comma,
+/// Per RFC 9110 §12.5.1, each entry is separated by comma,
 /// and parameters (including q) are separated by semicolon.
 /// The default q-value is 1.0 (1000) when not specified.
 fn parse_accept_header(header: &str) -> Vec<AcceptEntry> {

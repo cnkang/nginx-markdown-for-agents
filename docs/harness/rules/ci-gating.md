@@ -82,6 +82,9 @@ Required:
     package manager.  If the distro package appends a release suffix or epoch,
     do not exact-match only the upstream NGINX source version; use a
     distro-resolvable package EVR or a non-exact floor plus ABI smoke coverage.
+    Prebuilt dynamic-module packages must constrain the supported NGINX minor
+    ABI range with both a floor and an exclusive next-minor ceiling unless a
+    separate install-time ABI check is the only supported guard.
   - Container jobs that use Bash-only syntax (`[[ ... ]]`, brace expansion,
     arrays, `source`, or `set -o pipefail`) must set `defaults.run.shell:
     bash` at the job level or `shell: bash` on every affected run step.

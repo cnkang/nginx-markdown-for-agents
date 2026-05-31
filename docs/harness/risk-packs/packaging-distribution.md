@@ -95,7 +95,7 @@ or packaging documentation.
   release workflow are real and validated.
 - `docs/guides/HOMEBREW_TAP_RELEASE.md`, `README.md`, and `CHANGELOG.md`
   must stay consistent with Homebrew tap behavior when those surfaces exist.
-- `docs/guides/kubernetes-deployment.md` must document Helm chart usage
+- `docs/guides/KUBERNETES_DEPLOYMENT.md` must document Helm chart usage
 - `CHANGELOG.md` must record packaging changes
 
 ## Minimum Verification

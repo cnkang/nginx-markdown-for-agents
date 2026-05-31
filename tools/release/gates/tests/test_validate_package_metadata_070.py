@@ -368,14 +368,16 @@ class TestReleaseGateSnippetExpectations:
 
     def test_nfpm_dependency_uses_non_exact_floor(self) -> None:
         """Ensure NFPM dependency uses non-exact floor version and correct module path."""
-        assert 'nginx (>= ${NGINX_VERSION})' in NFPM_REQUIRED_SNIPPETS
+        assert 'nginx (>= ${NGINX_VERSION_FLOOR})' in NFPM_REQUIRED_SNIPPETS
+        assert 'nginx (<< ${NGINX_VERSION_CEIL})' in NFPM_REQUIRED_SNIPPETS
         assert 'nginx (= ${NGINX_VERSION})' not in NFPM_REQUIRED_SNIPPETS
         assert "/usr/lib64/nginx/modules/ngx_http_markdown_filter_module.so" in NFPM_REQUIRED_SNIPPETS
         assert "packager: deb" in NFPM_DEB_ONLY_MODULES_AVAILABLE_PATTERN
 
     def test_rpm_spec_dependency_uses_non_exact_floor(self) -> None:
         """Ensure RPM spec uses non-exact floor dependency and correct module path."""
-        assert "Requires:       nginx >= %{nginx_version}" in STANDALONE_RPM_SPEC_SNIPPETS
+        assert "Requires:       nginx >= %{nginx_version_floor}" in STANDALONE_RPM_SPEC_SNIPPETS
+        assert "Requires:       nginx < %{nginx_version_ceil}" in STANDALONE_RPM_SPEC_SNIPPETS
         assert "Requires:       nginx = %{nginx_version}" in FORBIDDEN_NAKED_EXACT_NGINX_DEPS
         assert "/usr/lib64/nginx/modules/ngx_http_markdown_filter_module.so" in STANDALONE_RPM_SPEC_SNIPPETS
 
@@ -401,8 +403,9 @@ class TestReleaseGateSnippetExpectations:
     def test_rpm_smoke_repo_selection_covers_amazon_linux(self) -> None:
         """Ensure RPM smoke repo selection includes Amazon Linux and CentOS paths."""
         assert "amzn)" in SMOKE_RPM_REPO_SNIPPETS
-        assert "packages/amzn/" in SMOKE_RPM_REPO_SNIPPETS
-        assert "packages/centos/" in SMOKE_RPM_REPO_SNIPPETS
+        assert "nginx_repo_channel()" in SMOKE_RPM_REPO_SNIPPETS
+        assert "packages/%samzn/" in SMOKE_RPM_REPO_SNIPPETS
+        assert "packages/%scentos/" in SMOKE_RPM_REPO_SNIPPETS
 
     def test_nfpm_postinstall_accepts_rpm_lifecycle_args(self) -> None:
         """Ensure postinstall script handles RPM lifecycle arguments."""
@@ -418,3 +421,6 @@ class TestReleaseGateSnippetExpectations:
         )
         assert "container: almalinux:9" in snippets
         assert "ARG OS_BASE=almalinux:9" in snippets
+        assert "rustup-init.sh -y --default-toolchain none" in snippets
+        assert "COPY rust-toolchain.toml /src/rust-toolchain.toml" in snippets
+        assert "rustup toolchain install" in snippets

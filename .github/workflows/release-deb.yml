@@ -188,10 +188,16 @@ jobs:
           cp LICENSE "${PKG_DIR}/usr/share/licenses/nginx-markdown-for-agents/LICENSE"
 
           # Generate control file from template
+          NGINX_MAJOR="$(printf '%s\n' "${NGINX_VERSION}" | cut -d. -f1)"
+          NGINX_MINOR="$(printf '%s\n' "${NGINX_VERSION}" | cut -d. -f2)"
+          NGINX_VERSION_FLOOR="${NGINX_MAJOR}.${NGINX_MINOR}.0"
+          NGINX_VERSION_CEIL="${NGINX_MAJOR}.$((NGINX_MINOR + 1)).0"
           sed \
             -e "s/@VERSION@/${PKG_VERSION}/g" \
             -e "s/@ARCH@/${PKG_ARCH}/g" \
             -e "s/@NGINX_VERSION@/${NGINX_VERSION}/g" \
+            -e "s/@NGINX_VERSION_FLOOR@/${NGINX_VERSION_FLOOR}/g" \
+            -e "s/@NGINX_VERSION_CEIL@/${NGINX_VERSION_CEIL}/g" \
             packaging/debian/control.in > "${PKG_DIR}/DEBIAN/control" 2>/dev/null || \
           cat > "${PKG_DIR}/DEBIAN/control" <<EOF
           Package: ${PKG_NAME}
@@ -201,7 +207,7 @@ jobs:
           Description: NGINX Markdown filter module for AI agents
            Converts HTML responses to Markdown when clients request text/markdown.
            Implements content negotiation, bounded decompression, and fail-open safety.
-          Depends: nginx (>= ${NGINX_VERSION})
+          Depends: nginx (>= ${NGINX_VERSION_FLOOR}), nginx (<< ${NGINX_VERSION_CEIL})
           Section: httpd
           Priority: optional
           Homepage: https://github.com/cnkang/nginx-markdown-for-agents
