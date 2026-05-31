@@ -609,37 +609,54 @@ def _extract_yaml_array_versions(value: str) -> set[str]:
     return versions
 
 
+def _extract_matrix_versions() -> set[str]:
+    """Extract NGINX versions from the release matrix JSON file."""
+    versions: set[str] = set()
+    if not RELEASE_MATRIX.exists():
+        return versions
+    try:
+        data = json.loads(read_safe(RELEASE_MATRIX))
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(
+            f"Malformed release matrix at {RELEASE_MATRIX}: {exc}"
+        ) from exc
+    for entry in data.get("matrix", []):
+        if entry.get("support_tier") == "full" and entry.get("os_type") == "glibc":
+            version = entry.get("nginx")
+            if isinstance(version, str) and _is_nginx_version(version):
+                versions.add(version)
+    return versions
+
+
+def _extract_line_versions(line: str) -> set[str]:
+    """Extract NGINX versions from a single configuration line."""
+    versions: set[str] = set()
+    if line.startswith("nginx_version:"):
+        value = line[len("nginx_version:"):].strip()
+        if value.startswith("["):
+            versions.update(_extract_yaml_array_versions(value))
+        return versions
+
+    assignment_value = _extract_nginx_assignment_value(line)
+    if assignment_value is not None:
+        version = _unquote(assignment_value)
+        if _is_nginx_version(version):
+            versions.add(version)
+    return versions
+
+
 def extract_nginx_versions(content: str) -> set[str]:
     """Extract NGINX source versions from active release configuration."""
     versions: set[str] = set()
 
-    if "tools/release-matrix.json" in content and RELEASE_MATRIX.exists():
-        try:
-            data = json.loads(read_safe(RELEASE_MATRIX))
-        except json.JSONDecodeError:
-            data = {}
-        for entry in data.get("matrix", []):
-            if entry.get("support_tier") == "full" and entry.get("os_type") == "glibc":
-                version = entry.get("nginx")
-                if isinstance(version, str) and _is_nginx_version(version):
-                    versions.add(version)
+    if "tools/release-matrix.json" in content:
+        versions.update(_extract_matrix_versions())
 
     for raw_line in content.splitlines():
         line = _strip_unquoted_comment(raw_line).strip()
         if not line:
             continue
-
-        if line.startswith("nginx_version:"):
-            value = line[len("nginx_version:"):].strip()
-            if value.startswith("["):
-                versions.update(_extract_yaml_array_versions(value))
-            continue
-
-        assignment_value = _extract_nginx_assignment_value(line)
-        if assignment_value is not None:
-            version = _unquote(assignment_value)
-            if _is_nginx_version(version):
-                versions.add(version)
+        versions.update(_extract_line_versions(line))
 
     return versions
 
