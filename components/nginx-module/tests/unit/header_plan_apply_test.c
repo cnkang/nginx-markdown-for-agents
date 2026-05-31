@@ -184,6 +184,29 @@ find_header(const u_char *name, size_t name_len)
     return NULL;
 }
 
+
+static ngx_uint_t
+count_active_headers(const u_char *name, size_t name_len)
+{
+    ngx_uint_t count;
+
+    count = 0;
+
+    for (ngx_uint_t i = 0; i < g_header_count; i++) {
+        if (g_headers[i].hash == 0) {
+            continue;
+        }
+        if (g_headers[i].key.len == name_len
+            && strncasecmp((char *) g_headers[i].key.data,
+                           (char *) name, name_len) == 0)
+        {
+            count++;
+        }
+    }
+
+    return count;
+}
+
 /* ── Setup helpers ────────────────────────────────────────────── */
 
 static void
@@ -427,6 +450,74 @@ test_set_content_type_invalidates_stale_entry(void)
     TEST_PASS("Content-Type SET invalidates stale list entry");
 }
 
+
+static void
+test_set_content_type_invalidates_all_stale_entries(void)
+{
+    /*
+     * Multiple stale Content-Type list entries must all be invalidated so
+     * NGINX emits only the dedicated headers_out.content_type field.
+     */
+    FFIHeaderPlan plan;
+    FFIHeaderPlanHandle handle;
+    FFIHeaderEntry entry = { NGX_HTTP_MARKDOWN_PLAN_OP_SET,
+        (const uint8_t *)"Content-Type", 12,
+        (const uint8_t *)"text/markdown; charset=utf-8", 28 };
+
+    TEST_SUBSECTION("SET Content-Type invalidates all stale list entries");
+
+    setup_request();
+    add_existing_header("Content-Type", "text/html");
+    add_existing_header("content-type", "application/xhtml+xml");
+
+    plan.handle = &handle;
+    plan.entries = &entry;
+    plan.count = 1;
+
+    TEST_ASSERT(apply_header_plan(&g_request, &plan) == NGX_OK,
+                "Content-Type SET should succeed");
+    TEST_ASSERT(count_active_headers((const u_char *)"Content-Type", 12) == 0,
+                "all stale Content-Type list entries must be invalidated");
+
+    TEST_PASS("Content-Type SET invalidates all stale list entries");
+}
+
+
+static void
+test_set_content_type_rollback_restores_all_stale_entries(void)
+{
+    /*
+     * The all-entry invalidation is still part of an atomic plan.  A later
+     * failure must restore every stale list entry, not just the first.
+     */
+    FFIHeaderPlan plan;
+    FFIHeaderPlanHandle handle;
+    FFIHeaderEntry entries[2] = {
+        { NGX_HTTP_MARKDOWN_PLAN_OP_SET,
+          (const uint8_t *)"Content-Type", 12,
+          (const uint8_t *)"text/markdown; charset=utf-8", 28 },
+        { 99, (const uint8_t *)"X-Bad", 5, NULL, 0 }
+    };
+
+    TEST_SUBSECTION("SET Content-Type rollback restores all stale entries");
+
+    setup_request();
+    add_existing_header("Content-Type", "text/html");
+    add_existing_header("content-type", "application/xhtml+xml");
+
+    plan.handle = &handle;
+    plan.entries = entries;
+    plan.count = 2;
+
+    TEST_ASSERT(apply_header_plan(&g_request, &plan) == NGX_ERROR,
+                "unknown later op should fail the plan");
+    TEST_ASSERT(count_active_headers((const u_char *)"Content-Type", 12) == 2,
+                "rollback must restore all stale Content-Type entries");
+
+    TEST_PASS("Content-Type rollback restores all stale entries");
+}
+
+
 static void
 test_delete_existing(void)
 {
@@ -651,6 +742,8 @@ main(void)
     test_set_overwrite_existing();
     test_set_content_type_no_list_entry();
     test_set_content_type_invalidates_stale_entry();
+    test_set_content_type_invalidates_all_stale_entries();
+    test_set_content_type_rollback_restores_all_stale_entries();
     test_delete_existing();
     test_delete_nonexistent();
     test_modify_existing();
