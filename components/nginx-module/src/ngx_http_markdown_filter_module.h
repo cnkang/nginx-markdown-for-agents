@@ -739,6 +739,8 @@ typedef struct {
         ngx_atomic_t  auth;          /* SKIP_AUTH */
         ngx_atomic_t  range;         /* SKIP_RANGE */
         ngx_atomic_t  accept;        /* SKIP_ACCEPT */
+        ngx_atomic_t  no_accept;     /* SKIPPED_NO_ACCEPT */
+        ngx_atomic_t  conditional;   /* SKIPPED_CONDITIONAL */
     } skips;
 
     /*

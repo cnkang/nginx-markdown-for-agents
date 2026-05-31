@@ -788,8 +788,8 @@ ngx_http_markdown_diagnostics_directive(ngx_conf_t *cf, ngx_command_t *cmd, void
 
     value = cf->args->elts;
 
-    if (value[1].len == 2
-        && ngx_strncasecmp(value[1].data, (u_char *) "on", 2) == 0)
+    if (ngx_http_markdown_arg_equals(&value[1],
+                                      (u_char *) "on", 2))
     {
         mcf->ops.diagnostics_enabled = 1;
 
@@ -819,8 +819,8 @@ ngx_http_markdown_diagnostics_directive(ngx_conf_t *cf, ngx_command_t *cmd, void
 
         ngx_conf_log_error(NGX_LOG_INFO, cf, 0,
                            "markdown: diagnostics endpoint enabled at this location");
-    } else if (value[1].len == 3
-               && ngx_strncasecmp(value[1].data, (u_char *) "off", 3) == 0)
+    } else if (ngx_http_markdown_arg_equals(&value[1],
+                                             (u_char *) "off", 3))
     {
         mcf->ops.diagnostics_enabled = 0;
     } else {
