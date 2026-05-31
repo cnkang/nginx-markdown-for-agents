@@ -22,6 +22,7 @@
 #define NGX_HTTP_MARKDOWN_PLAN_OP_SET     0
 #define NGX_HTTP_MARKDOWN_PLAN_OP_DELETE  1
 #define NGX_HTTP_MARKDOWN_PLAN_OP_MODIFY  2
+#define NGX_HTTP_MARKDOWN_PLAN_OP_DELETE_ALL  3
 
 /*
  * Maximum number of header plan entries supported for rollback.
@@ -79,6 +80,13 @@ ngx_http_markdown_plan_is_content_type(const u_char *name, size_t name_len)
  * For MODIFY operations: the original value is restored on rollback.
  */
 typedef struct {
+    ngx_table_elt_t     *header;
+    ngx_uint_t           orig_hash;
+    ngx_str_t            orig_value;
+} ngx_http_markdown_plan_saved_header_t;
+
+
+typedef struct {
     uint8_t              op_type;
 
     /*
@@ -90,6 +98,9 @@ typedef struct {
     /* Original state saved before modification. */
     ngx_uint_t           orig_hash;
     ngx_str_t            orig_value;
+
+    ngx_http_markdown_plan_saved_header_t  *saved;
+    ngx_uint_t                              saved_count;
 } ngx_http_markdown_plan_undo_t;
 
 
@@ -119,7 +130,7 @@ ngx_http_markdown_plan_find_header(ngx_http_request_t *r,
         headers = part->elts;
 
         for (ngx_uint_t i = 0; i < part->nelts; i++) {
-            if (headers[i].hash == 0) {
+            if (headers[i].hash == 0 || headers[i].key.data == NULL) {
                 continue;
             }
 
@@ -136,6 +147,118 @@ ngx_http_markdown_plan_find_header(ngx_http_request_t *r,
     }
 
     return NULL;
+}
+
+
+static ngx_uint_t
+ngx_http_markdown_plan_count_headers(ngx_http_request_t *r,
+    const u_char *name, size_t name_len)
+{
+    ngx_list_part_t  *part;
+    ngx_table_elt_t  *headers;
+    ngx_uint_t        count;
+
+    count = 0;
+    part = &r->headers_out.headers.part;
+
+    while (part != NULL) {
+        headers = part->elts;
+
+        for (ngx_uint_t i = 0; i < part->nelts; i++) {
+            if (headers[i].hash == 0 || headers[i].key.data == NULL) {
+                continue;
+            }
+
+            if (headers[i].key.len == name_len
+                && ngx_http_markdown_plan_name_eq(headers[i].key.data,
+                                                  name,
+                                                  name_len))
+            {
+                count++;
+            }
+        }
+
+        part = part->next;
+    }
+
+    return count;
+}
+
+
+static ngx_int_t
+ngx_http_markdown_plan_delete_all_headers(ngx_http_request_t *r,
+    const FFIHeaderEntry *entry,
+    ngx_http_markdown_plan_undo_t *undo)
+{
+    ngx_http_markdown_plan_saved_header_t  *saved;
+    ngx_list_part_t                        *part;
+    ngx_table_elt_t                        *headers;
+    ngx_uint_t                              count;
+    ngx_uint_t                              saved_count;
+
+    undo->op_type = NGX_HTTP_MARKDOWN_PLAN_OP_DELETE_ALL;
+    undo->header = NULL;
+    undo->orig_hash = 0;
+    undo->orig_value.data = NULL;
+    undo->orig_value.len = 0;
+    undo->saved = NULL;
+    undo->saved_count = 0;
+
+    count = ngx_http_markdown_plan_count_headers(r,
+        (const u_char *) entry->key, entry->key_len);
+
+    if (count == 0) {
+        return NGX_OK;
+    }
+
+    if (count > ((size_t) -1)
+                 / sizeof(ngx_http_markdown_plan_saved_header_t))
+    {
+        return NGX_ERROR;
+    }
+
+    saved = ngx_palloc(r->pool,
+        count * sizeof(ngx_http_markdown_plan_saved_header_t));
+    if (saved == NULL) {
+        return NGX_ERROR;
+    }
+
+    saved_count = 0;
+    part = &r->headers_out.headers.part;
+
+    while (part != NULL) {
+        headers = part->elts;
+
+        for (ngx_uint_t i = 0; i < part->nelts; i++) {
+            if (headers[i].hash == 0 || headers[i].key.data == NULL) {
+                continue;
+            }
+
+            if (headers[i].key.len == entry->key_len
+                && ngx_http_markdown_plan_name_eq(headers[i].key.data,
+                    (const u_char *) entry->key, entry->key_len))
+            {
+                if (saved_count >= count) {
+                    for (ngx_uint_t j = 0; j < saved_count; j++) {
+                        saved[j].header->hash = saved[j].orig_hash;
+                    }
+                    return NGX_ERROR;
+                }
+                saved[saved_count].header = &headers[i];
+                saved[saved_count].orig_hash = headers[i].hash;
+                saved[saved_count].orig_value = headers[i].value;
+                saved_count++;
+                headers[i].hash = 0;
+            }
+        }
+
+        part = part->next;
+    }
+
+    undo->saved = saved;
+    undo->saved_count = saved_count;
+
+    return NGX_OK;
 }
 
 
@@ -198,24 +321,7 @@ ngx_http_markdown_plan_apply_set(ngx_http_request_t *r,
     if (ngx_http_markdown_plan_is_content_type(
             (const u_char *) entry->key, entry->key_len))
     {
-        h = ngx_http_markdown_plan_find_header(r,
-            (const u_char *) entry->key, entry->key_len);
-
-        if (h != NULL) {
-            undo->op_type = NGX_HTTP_MARKDOWN_PLAN_OP_DELETE;
-            undo->header = h;
-            undo->orig_hash = h->hash;
-            undo->orig_value = h->value;
-            h->hash = 0;
-        } else {
-            undo->op_type = NGX_HTTP_MARKDOWN_PLAN_OP_DELETE;
-            undo->header = NULL;
-            undo->orig_hash = 0;
-            undo->orig_value.data = NULL;
-            undo->orig_value.len = 0;
-        }
-
-        return NGX_OK;
+        return ngx_http_markdown_plan_delete_all_headers(r, entry, undo);
     }
 
     h = ngx_http_markdown_plan_find_header(r,
@@ -423,7 +529,9 @@ ngx_http_markdown_plan_rollback(ngx_http_markdown_plan_undo_t *undo,
     while (i > 0) {
         i--;
 
-        if (undo[i].header == NULL) {
+        if (undo[i].header == NULL
+            && undo[i].op_type != NGX_HTTP_MARKDOWN_PLAN_OP_DELETE_ALL)
+        {
             /* No-op entry (header was not found); skip. */
             continue;
         }
@@ -441,6 +549,15 @@ ngx_http_markdown_plan_rollback(ngx_http_markdown_plan_undo_t *undo,
             /* Restore the original hash and value. */
             undo[i].header->hash = undo[i].orig_hash;
             undo[i].header->value = undo[i].orig_value;
+            break;
+
+        case NGX_HTTP_MARKDOWN_PLAN_OP_DELETE_ALL:
+            if (undo[i].saved != NULL) {
+                for (ngx_uint_t j = 0; j < undo[i].saved_count; j++) {
+                    undo[i].saved[j].header->hash = undo[i].saved[j].orig_hash;
+                    undo[i].saved[j].header->value = undo[i].saved[j].orig_value;
+                }
+            }
             break;
 
         default:
