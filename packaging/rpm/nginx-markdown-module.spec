@@ -14,8 +14,10 @@ BuildRequires:  rustc
 BuildRequires:  pcre-devel
 BuildRequires:  zlib-devel
 BuildRequires:  openssl-devel
-BuildRequires:  nginx-devel >= 1.26.3
-Requires:       nginx >= 1.26.3
+BuildRequires:  nginx-devel >= 1.26.0
+BuildRequires:  nginx-devel < 1.27.0
+Requires:       nginx >= 1.26.0
+Requires:       nginx < 1.27.0
 
 %description
 NGINX filter module that converts HTML responses to Markdown

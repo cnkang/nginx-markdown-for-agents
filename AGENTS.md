@@ -226,7 +226,9 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
 - Package dependency constraints must either use distro-resolvable package
   versions/EVRs or non-exact version floors. Do not exact-match a naked
   upstream NGINX source version when distro packages append release suffixes
-  or epochs [13]
+  or epochs. Prebuilt dynamic-module packages must constrain the supported
+  NGINX minor ABI range with both a floor and an exclusive next-minor ceiling
+  unless a separate install-time ABI check is the only supported guard [13]
 - Standalone package workflows must validate user-supplied package versions
   before using them in paths, package metadata, RPM macros, or artifact names
   [13]
@@ -399,3 +401,4 @@ remediation:
 | 0.7.7 | 2026-05-27 | Codex | Strengthened Rule 13 for gating Helm metrics directives behind module enablement |
 | 0.7.8 | 2026-05-27 | Codex | Strengthened Rule 13 for package-install docs matching the actually published GitHub Release artifact channel before APT/YUM repositories exist |
 | 0.7.9 | 2026-05-29 | Codex | Strengthened Rule 13 for release workflow tool preflights, Rust toolchain pinning, and consistent package build invariants across canonical and compatibility workflows |
+| 0.7.10 | 2026-05-31 | Codex | Strengthened Rule 13 for prebuilt dynamic-module package dependency ranges using a minor ABI floor plus exclusive next-minor ceiling |

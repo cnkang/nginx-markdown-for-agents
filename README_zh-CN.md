@@ -418,7 +418,7 @@ v0.7.0 是一个正确性、分发和可运维性版本：
 - P0 运行时正确性：NGX_AGAIN pending chain、fail-open 去重、安全输出排序
 - 独立解压预算（`markdown_decompress_max_size`）
 - 解析超时与解析器预算指令
-- Rust Accept 头协商模块（RFC 7231 q-value 比较）
+- Rust Accept 头协商模块（RFC 9110 q-value 语义）
 - Rust 条件请求模块（If-None-Match、If-Modified-Since）
 - Rust 决策引擎与 reason code
 - Rust 响应头计划模块

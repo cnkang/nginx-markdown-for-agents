@@ -331,7 +331,17 @@ jobs:
             debian) REPO_DISTRO="debian" ;;
             *)      REPO_DISTRO="ubuntu" ;;
           esac
-          echo "deb [signed-by=/usr/share/keyrings/nginx-archive-keyring.gpg] http://nginx.org/packages/${REPO_DISTRO}/ ${CODENAME} nginx" \
+          # nginx.org publishes even-minor releases (1.26, 1.28, ...) in the
+          # stable repository and odd-minor releases (1.27, 1.31, ...) in the
+          # mainline repository.  Select the channel by minor-version parity
+          # so an odd-minor target resolves (AGENTS.md Rule 13).
+          TARGET_MINOR=$(echo "${TARGET_NGINX}" | cut -d. -f2)
+          if [ $((TARGET_MINOR % 2)) -eq 0 ]; then
+            REPO_CHANNEL=""
+          else
+            REPO_CHANNEL="mainline/"
+          fi
+          echo "deb [signed-by=/usr/share/keyrings/nginx-archive-keyring.gpg] http://nginx.org/packages/${REPO_CHANNEL}${REPO_DISTRO}/ ${CODENAME} nginx" \
             | ${SUDO} tee /etc/apt/sources.list.d/nginx.list > /dev/null
           # Pin nginx.org packages above distro packages
           printf 'Package: nginx*\nPin: origin nginx.org\nPin-Priority: 900\n' \

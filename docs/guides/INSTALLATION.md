@@ -170,10 +170,10 @@ If you need deterministic control over compiler flags or local patching, use [Ma
 **Tier: Secondary** (v0.7.0+)
 
 Starting with v0.7.0, release workflows build DEB and RPM artifacts for
-supported Linux distributions and attach them to GitHub Releases. Public
-APT/YUM repository publishing is not part of the 0.7.0 GA channel, so do not
-use `apt-get install nginx-module-markdown` or `yum install
-nginx-module-markdown` unless you operate your own package repository.
+supported Linux distributions and attach them to GitHub Releases. APT/YUM repository publishing is planned, but public APT/YUM repository publishing is not
+part of the 0.7.0 GA channel. Do not use `apt-get install
+nginx-module-markdown` or `yum install nginx-module-markdown` unless you
+operate your own package repository.
 
 ### DEB Artifacts (Ubuntu / Debian)
 

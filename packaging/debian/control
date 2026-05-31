@@ -10,7 +10,7 @@ Vcs-Browser: https://github.com/cnkang/nginx-markdown-for-agents
 
 Package: nginx-module-markdown-for-agents
 Architecture: amd64 arm64
-Depends: nginx (>= 1.26.3), ${misc:Depends}, ${shlibs:Depends}
+Depends: nginx (>= 1.26.0), nginx (<< 1.27.0), ${misc:Depends}, ${shlibs:Depends}
 Description: NGINX module for serving Markdown to AI agents
  An NGINX dynamic filter module that converts HTML responses to Markdown
  format for AI agent consumption. Features include:

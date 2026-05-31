@@ -29,13 +29,13 @@ dynconf dry-run/rollback, and runtime diagnostics.
   - C-side error classification updated for new error codes.
 
 - **Rust-first Architecture**
-  - `negotiator` module: RFC 7231 Accept header q-value negotiation
+  - `negotiator` module: RFC 9110 Accept header q-value negotiation
     with `FFIAcceptResult` struct and `markdown_negotiate_accept` FFI
     export. Accept negotiation fully in Rust. 22 unit tests.
   - `conditional` module: If-None-Match / If-Modified-Since conditional
     request and ETag handling in Rust. 20 unit tests.
   - `decision` module: pure decision engine with reason codes
-    (CONVERT, SKIP_ACCEPT, SKIP_NO_ACCEPT, etc.). 11 unit tests.
+    (CONVERTED, SKIPPED_ACCEPT, SKIPPED_NO_ACCEPT, etc.). 11 unit tests.
   - `header_plan` module: declarative header mutation plan for atomic
     application. 5 unit tests.
   - `security` module extensions: `url_contains_control_chars`,

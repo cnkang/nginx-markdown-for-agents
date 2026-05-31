@@ -20,6 +20,6 @@ Description: NGINX Markdown filter module for AI agents
  .
  The module is installed as a dynamic module (.so) and must be explicitly
  enabled via load_module directive in nginx.conf.
-Depends: nginx (>= @NGINX_VERSION@)
+Depends: nginx (>= @NGINX_VERSION_FLOOR@), nginx (<< @NGINX_VERSION_CEIL@)
 Section: httpd
 Priority: optional

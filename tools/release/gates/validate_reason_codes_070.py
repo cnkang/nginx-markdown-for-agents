@@ -99,7 +99,7 @@ REASON_CODES = [
         "rust_variant": "DecompressionBudgetExceeded",
         "rust_as_str": "DECOMPRESSION_BUDGET_EXCEEDED",
         "c_define": "ERROR_DECOMPRESSION_BUDGET_EXCEEDED",
-        "doc_pattern": "DECOMP_BUDGET_EXCEEDED",
+        "doc_pattern": "DECOMPRESSION_BUDGET_EXCEEDED",
         "metric_name": "nginx_markdown_decompression_budget_exceeded_total",
         "metric_struct_field": "budget_exceeded_total",
         "description": "decompression output exceeded configured budget",

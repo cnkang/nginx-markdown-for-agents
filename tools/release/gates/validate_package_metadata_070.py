@@ -19,6 +19,7 @@ No user-supplied patterns are compiled at runtime.
 
 from __future__ import annotations
 
+import json
 import re
 import sys
 from pathlib import Path
@@ -39,6 +40,7 @@ RELEASE_DEB_WORKFLOW = GITHUB_WORKFLOWS_DIR / "release-deb.yml"
 RELEASE_RPM_WORKFLOW = GITHUB_WORKFLOWS_DIR / "release-rpm.yml"
 SIGN_AND_PUBLISH_WORKFLOW = GITHUB_WORKFLOWS_DIR / "sign-and-publish.yml"
 CHECKSUMS_FILE = PROJECT_ROOT / "packaging" / "checksums.sha256"
+RELEASE_MATRIX = PROJECT_ROOT / "tools" / "release-matrix.json"
 INSTALLATION_DOC = PROJECT_ROOT / "docs" / "guides" / "INSTALLATION.md"
 PACKAGE_INSTALLATION_DOC = PROJECT_ROOT / "docs" / "guides" / "PACKAGE_INSTALLATION.md"
 PACKAGE_DISTRIBUTION_DOC = PROJECT_ROOT / "docs" / "guides" / "PACKAGE_DISTRIBUTION.md"
@@ -66,7 +68,8 @@ NFPM_REQUIRED_SNIPPETS = [
     'name: "nginx-module-markdown-for-agents"',
     'version: "${PKG_VERSION}"',
     'arch: "${NFPM_ARCH}"',
-    'nginx (>= ${NGINX_VERSION})',
+    'nginx (>= ${NGINX_VERSION_FLOOR})',
+    'nginx (<< ${NGINX_VERSION_CEIL})',
     "/usr/lib/nginx/modules/ngx_http_markdown_filter_module.so",
     "packager: deb",
     "/usr/lib64/nginx/modules/ngx_http_markdown_filter_module.so",
@@ -136,6 +139,8 @@ STANDALONE_DEB_SNIPPETS = [
     "/usr/share/licenses/nginx-markdown-for-agents",
     "docs/guides/INSTALL.md",
     "docs/COMPATIBILITY.md",
+    'NGINX_VERSION_FLOOR="${NGINX_MAJOR}.${NGINX_MINOR}.0"',
+    'NGINX_VERSION_CEIL="${NGINX_MAJOR}.$((NGINX_MINOR + 1)).0"',
     "tools/release/gates/check_install_layout.sh dist/*.deb",
     '"dist/${PKG_NAME}_${PKG_VERSION}_nginx-${NGINX_VERSION}_${PKG_ARCH}.deb"',
 ]
@@ -144,11 +149,14 @@ STANDALONE_RPM_WORKFLOW_SNIPPETS = [
     f'PKG_NAME="{CANONICAL_PACKAGE_NAME}"',
     "docs/guides/INSTALL.md",
     "docs/COMPATIBILITY.md",
+    'NGINX_VERSION_FLOOR="${NGINX_MAJOR}.${NGINX_MINOR}.0"',
+    'NGINX_VERSION_CEIL="${NGINX_MAJOR}.$((NGINX_MINOR + 1)).0"',
     "tools/release/gates/check_install_layout.sh dist/*.rpm",
 ]
 STANDALONE_RPM_SPEC_SNIPPETS = [
     f"Name:           {CANONICAL_PACKAGE_NAME}",
-    "Requires:       nginx >= %{nginx_version}",
+    "Requires:       nginx >= %{nginx_version_floor}",
+    "Requires:       nginx < %{nginx_version_ceil}",
     "Source0:        %{name}-%{version}.tar.gz",
     f"%setup -q -n {CANONICAL_PACKAGE_NAME}-%{{version}}",
     "# No-op: release-rpm.yml packages a prebuilt dynamic module.",
@@ -161,10 +169,11 @@ FORBIDDEN_NAKED_EXACT_NGINX_DEPS = [
 ]
 SMOKE_RPM_REPO_SNIPPETS = [
     "detect_rpm_repo_baseurl()",
+    "nginx_repo_channel()",
     "amzn)",
-    "packages/amzn/",
+    "packages/%samzn/",
     "almalinux|centos|rocky|rhel)",
-    "packages/centos/",
+    "packages/%scentos/",
 ]
 GATE3_LOCAL_ARCH_SNIPPETS = [
     'pkg_pattern="*_${ARCH}.deb"',
@@ -186,6 +195,14 @@ RELEASE_BUILD_GLIBC_SNIPPETS = {
     PROJECT_ROOT / "tools" / "build_release" / "Dockerfile.glibc": [
         "ARG OS_BASE=almalinux:9",
         "dnf install -y",
+        "rustup-init.sh -y --default-toolchain none",
+        "COPY rust-toolchain.toml /src/rust-toolchain.toml",
+        "rustup toolchain install",
+    ],
+    PROJECT_ROOT / "tools" / "build_release" / "Dockerfile.musl": [
+        "rustup-init.sh -y --default-toolchain none",
+        "COPY rust-toolchain.toml /src/rust-toolchain.toml",
+        "rustup toolchain install",
     ],
 }
 
@@ -595,6 +612,17 @@ def _extract_yaml_array_versions(value: str) -> set[str]:
 def extract_nginx_versions(content: str) -> set[str]:
     """Extract NGINX source versions from active release configuration."""
     versions: set[str] = set()
+
+    if "tools/release-matrix.json" in content and RELEASE_MATRIX.exists():
+        try:
+            data = json.loads(read_safe(RELEASE_MATRIX))
+        except json.JSONDecodeError:
+            data = {}
+        for entry in data.get("matrix", []):
+            if entry.get("support_tier") == "full" and entry.get("os_type") == "glibc":
+                version = entry.get("nginx")
+                if isinstance(version, str) and _is_nginx_version(version):
+                    versions.add(version)
 
     for raw_line in content.splitlines():
         line = _strip_unquoted_comment(raw_line).strip()

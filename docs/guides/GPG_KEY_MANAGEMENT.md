@@ -7,6 +7,10 @@ Module packages (DEB/RPM) and repository metadata. It covers key generation,
 distribution, import instructions for end users, key rotation, CI/CD
 integration, and security considerations.
 
+Current public package channel: GitHub Release DEB/RPM artifacts with
+checksum verification. Public APT/YUM repositories are not available yet; GPG
+key publication for repository metadata applies to future self-hosted repository publication.
+
 ---
 
 ## 1. Key Generation
