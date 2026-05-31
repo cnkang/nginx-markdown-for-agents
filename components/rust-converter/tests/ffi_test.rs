@@ -1565,10 +1565,12 @@ fn test_parser_memory_budget_allows_small_input() {
 /// Regression (TEST-2): a parse that overruns `parse_timeout` must fail with
 /// `ERROR_PARSE_TIMEOUT` rather than returning partial output.
 ///
-/// A 1 ms deadline against a large document reliably overruns on CI hardware.
-/// To avoid flaking on unusually fast machines, the timeout assertion is only
-/// made when the call genuinely took longer than the deadline; otherwise the
-/// conversion legitimately completed in time and must report success.
+/// Uses a 10 ms deadline against a 500 KiB document to make timeout
+/// detection reliable on CI hardware while avoiding the 1 ms boundary
+/// flakiness.  To hedge against unusually fast machines, the timeout
+/// assertion is only made when the call genuinely took longer than the
+/// deadline; otherwise the conversion legitimately completed in time
+/// and must report success.
 #[test]
 fn test_parse_timeout_enforced_when_overrun() {
     use std::time::{Duration, Instant};
@@ -1576,15 +1578,18 @@ fn test_parse_timeout_enforced_when_overrun() {
     let converter = markdown_converter_new();
     assert!(!converter.is_null(), "Converter should not be NULL");
 
-    let mut large_html = Vec::with_capacity(64 * 1024);
+    let mut large_html = Vec::with_capacity(512 * 1024);
     large_html.extend_from_slice(b"<html><body>");
-    for i in 0..2000 {
-        large_html.extend_from_slice(format!("<p>paragraph number {i} with text</p>").as_bytes());
+    for i in 0..8000 {
+        large_html.extend_from_slice(
+            format!("<p>paragraph number {i} with enough text to ensure parsing cost</p>")
+                .as_bytes(),
+        );
     }
     large_html.extend_from_slice(b"</body></html>");
 
     let mut options = ffi_test_default_options();
-    options.parse_timeout_ms = 1;
+    options.parse_timeout_ms = 10;
     options.parser_memory_budget = 0;
 
     let mut result = ffi_test_empty_result();
@@ -1598,7 +1603,7 @@ fn test_parse_timeout_enforced_when_overrun() {
     );
     let elapsed = start.elapsed();
 
-    if elapsed > Duration::from_millis(1) {
+    if elapsed > Duration::from_millis(10) {
         assert_eq!(
             result.error_code, ERROR_PARSE_TIMEOUT,
             "conversion exceeding parse_timeout must fail with ERROR_PARSE_TIMEOUT"

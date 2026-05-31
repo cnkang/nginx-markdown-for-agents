@@ -123,7 +123,7 @@ The complete mapping from reason codes to eligibility enums, error categories, r
 | `SKIP_CONTENT_TYPE` | `NGX_HTTP_MARKDOWN_INELIGIBLE_CONTENT_TYPE` | — | SKIPPED | Content-Type not text/html |
 | `SKIP_SIZE` | `NGX_HTTP_MARKDOWN_INELIGIBLE_SIZE` | — | SKIPPED | Response exceeds `markdown_memory_budget` |
 | `SKIP_AUTH` | `NGX_HTTP_MARKDOWN_INELIGIBLE_AUTH` | — | SKIPPED | Auth policy denies conversion for authenticated requests |
-| `SKIP_ACCEPT` | _(Accept negotiation)_ | — | SKIPPED | Accept header does not request Markdown |
+| `SKIP_ACCEPT` | _(Accept negotiation)_ | — | SKIPPED | Accept header does not request Markdown (parent category; sub-cases: `SKIPPED_NO_ACCEPT`) |
 | `ELIGIBLE_CONVERTED` | `NGX_HTTP_MARKDOWN_ELIGIBLE` | — | CONVERTED | Conversion succeeded |
 | `ELIGIBLE_FAILED_OPEN` | `NGX_HTTP_MARKDOWN_ELIGIBLE` | _(any)_ | FAILED | Conversion failed, original HTML served |
 | `ELIGIBLE_FAILED_CLOSED` | `NGX_HTTP_MARKDOWN_ELIGIBLE` | _(any)_ | FAILED | Conversion failed, error returned |
@@ -143,7 +143,7 @@ The complete mapping from reason codes to eligibility enums, error categories, r
 | `DECOMPRESSION_IO_ERROR` | I/O error during decompression operation; classified as `FAIL_SYSTEM` |
 | `PARSE_TIMEOUT` | Parser execution exceeded `markdown_parse_timeout` (default 30s); classified as `FAIL_RESOURCE_LIMIT` |
 | `PARSE_BUDGET_EXCEEDED` | Parser memory exceeded `markdown_parser_budget` (default 64m); classified as `FAIL_RESOURCE_LIMIT` |
-| `SKIPPED_NO_ACCEPT` | No Accept header present and `markdown_on_wildcard` is off |
+| `SKIPPED_NO_ACCEPT` | Sub-case of `SKIP_ACCEPT`: no Accept header present and `markdown_on_wildcard` is off |
 | `SKIPPED_CONDITIONAL` | Conditional request matched (If-None-Match / If-Modified-Since) → 304 Not Modified |
 | Delivery vs Decision counter separation | `failopen_count` (delivery) increments only after downstream NGX_OK; decision counter increments on decision regardless of downstream status |
 

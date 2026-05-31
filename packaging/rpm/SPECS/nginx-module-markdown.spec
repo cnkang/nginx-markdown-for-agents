@@ -16,7 +16,8 @@ format for AI agent consumption.
 
 Built against nginx.org stable %{nginx_version}.
 
-WARNING: This module is ONLY compatible with nginx.org %{nginx_version}.
+WARNING: This module is compatible with nginx.org releases
+%{nginx_version_floor} (inclusive) through %{nginx_version_ceil} (exclusive).
 It will NOT work with distro-provided, vendor-patched, OpenResty, Tengine,
 or custom-built NGINX binaries. NGINX validates module binary compatibility
 signature at load time; mismatched versions will fail to load.
