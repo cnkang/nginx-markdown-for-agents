@@ -2100,6 +2100,7 @@ ngx_http_markdown_dynconf_rollback(
      * a no-op in effect but still logged).
      */
     watcher->active_snapshot = watcher->last_known_good;
+    watcher->applied_mtime = watcher->lkg_mtime;
     watcher->version++;
 
     /* Apply the restored snapshot to the live conf. */

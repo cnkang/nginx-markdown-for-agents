@@ -267,6 +267,8 @@ ngx_http_markdown_collect_metrics_snapshot(ngx_http_markdown_metrics_snapshot_t 
     snapshot->skips.auth = metrics->skips.auth;
     snapshot->skips.range = metrics->skips.range;
     snapshot->skips.accept = metrics->skips.accept;
+    snapshot->skips.no_accept = metrics->skips.no_accept;
+    snapshot->skips.conditional = metrics->skips.conditional;
     snapshot->results.failopen_count = metrics->results.failopen_count;
     snapshot->results.delivery_count = metrics->results.delivery_count;
     snapshot->results.decision_count = metrics->results.decision_count;
@@ -744,7 +746,9 @@ ngx_http_markdown_metrics_write_json(
         "    \"streaming\": %uA,\n"
         "    \"auth\": %uA,\n"
         "    \"range\": %uA,\n"
-        "    \"accept\": %uA\n"
+        "    \"accept\": %uA,\n"
+        "    \"no_accept\": %uA,\n"
+        "    \"conditional\": %uA\n"
         "  },\n"
 
         /* Operational totals and per-path aggregate counters */
@@ -832,6 +836,8 @@ ngx_http_markdown_metrics_write_json(
         snapshot->skips.auth,
         snapshot->skips.range,
         snapshot->skips.accept,
+        snapshot->skips.no_accept,
+        snapshot->skips.conditional,
         snapshot->results.failopen_count,
         snapshot->results.delivery_count,
         snapshot->results.decision_count,
@@ -1044,6 +1050,8 @@ ngx_http_markdown_metrics_write_text(
         "- Skips (Auth): %uA\n"
         "- Skips (Range): %uA\n"
         "- Skips (Accept): %uA\n"
+        "- Skips (No Accept): %uA\n"
+        "- Skips (Conditional): %uA\n"
         "- Fail-Open Count: %uA\n"
         "- Delivery Count: %uA\n"
         "- Decision Count: %uA\n"
@@ -1126,6 +1134,8 @@ ngx_http_markdown_metrics_write_text(
         snapshot->skips.auth,
         snapshot->skips.range,
         snapshot->skips.accept,
+        snapshot->skips.no_accept,
+        snapshot->skips.conditional,
         snapshot->results.failopen_count,
         snapshot->results.delivery_count,
         snapshot->results.decision_count,

@@ -186,6 +186,41 @@ ngx_http_markdown_plan_count_headers(ngx_http_request_t *r,
 
 
 static ngx_int_t
+ngx_http_markdown_plan_save_matching_header(
+    ngx_table_elt_t *h,
+    const FFIHeaderEntry *entry,
+    ngx_http_markdown_plan_saved_header_t *saved,
+    ngx_uint_t count, ngx_uint_t *saved_count)
+{
+    if (h->hash == 0 || h->key.data == NULL) {
+        return NGX_OK;
+    }
+
+    if (h->key.len != entry->key_len
+        || !ngx_http_markdown_plan_name_eq(h->key.data,
+               (const u_char *) entry->key, entry->key_len))
+    {
+        return NGX_OK;
+    }
+
+    if (*saved_count >= count) {
+        for (ngx_uint_t j = 0; j < *saved_count; j++) {
+            saved[j].header->hash = saved[j].orig_hash;
+        }
+        return NGX_ERROR;
+    }
+
+    saved[*saved_count].header = h;
+    saved[*saved_count].orig_hash = h->hash;
+    saved[*saved_count].orig_value = h->value;
+    (*saved_count)++;
+    h->hash = 0;
+
+    return NGX_OK;
+}
+
+
+static ngx_int_t
 ngx_http_markdown_plan_delete_all_headers(ngx_http_request_t *r,
     const FFIHeaderEntry *entry,
     ngx_http_markdown_plan_undo_t *undo)
@@ -211,6 +246,15 @@ ngx_http_markdown_plan_delete_all_headers(ngx_http_request_t *r,
         return NGX_OK;
     }
 
+    if (count > NGX_HTTP_MARKDOWN_PLAN_MAX_ENTRIES) {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+            "markdown: DELETE_ALL saved header count %uz exceeds "
+            "maximum %d",
+            (size_t) count,
+            NGX_HTTP_MARKDOWN_PLAN_MAX_ENTRIES);
+        return NGX_ERROR;
+    }
+
     if (count > ((size_t) -1)
                  / sizeof(ngx_http_markdown_plan_saved_header_t))
     {
@@ -230,25 +274,11 @@ ngx_http_markdown_plan_delete_all_headers(ngx_http_request_t *r,
         headers = part->elts;
 
         for (ngx_uint_t i = 0; i < part->nelts; i++) {
-            if (headers[i].hash == 0 || headers[i].key.data == NULL) {
-                continue;
-            }
-
-            if (headers[i].key.len == entry->key_len
-                && ngx_http_markdown_plan_name_eq(headers[i].key.data,
-                    (const u_char *) entry->key, entry->key_len))
+            if (ngx_http_markdown_plan_save_matching_header(
+                    &headers[i], entry, saved, count,
+                    &saved_count) != NGX_OK)
             {
-                if (saved_count >= count) {
-                    for (ngx_uint_t j = 0; j < saved_count; j++) {
-                        saved[j].header->hash = saved[j].orig_hash;
-                    }
-                    return NGX_ERROR;
-                }
-                saved[saved_count].header = &headers[i];
-                saved[saved_count].orig_hash = headers[i].hash;
-                saved[saved_count].orig_value = headers[i].value;
-                saved_count++;
-                headers[i].hash = 0;
+                return NGX_ERROR;
             }
         }
 
@@ -509,6 +539,21 @@ ngx_http_markdown_plan_apply_modify(ngx_http_request_t *r,
 }
 
 
+static void
+ngx_http_markdown_plan_rollback_saved(
+    ngx_http_markdown_plan_undo_t *entry)
+{
+    if (entry->saved == NULL) {
+        return;
+    }
+
+    for (ngx_uint_t j = 0; j < entry->saved_count; j++) {
+        entry->saved[j].header->hash = entry->saved[j].orig_hash;
+        entry->saved[j].header->value = entry->saved[j].orig_value;
+    }
+}
+
+
 /*
  * Roll back all previously applied operations.
  *
@@ -552,12 +597,7 @@ ngx_http_markdown_plan_rollback(ngx_http_markdown_plan_undo_t *undo,
             break;
 
         case NGX_HTTP_MARKDOWN_PLAN_OP_DELETE_ALL:
-            if (undo[i].saved != NULL) {
-                for (ngx_uint_t j = 0; j < undo[i].saved_count; j++) {
-                    undo[i].saved[j].header->hash = undo[i].saved[j].orig_hash;
-                    undo[i].saved[j].header->value = undo[i].saved[j].orig_value;
-                }
-            }
+            ngx_http_markdown_plan_rollback_saved(&undo[i]);
             break;
 
         default:
