@@ -555,13 +555,26 @@ ngx_http_markdown_remove_accept_ranges(ngx_http_request_t *r)
  *   The post-plan Content-Length set is guaranteed to execute only
  *   after successful plan application.
  *
+ *   Atomicity scope: the *plan* operations are atomic (apply-all or
+ *   rollback-all).  The post-plan operations (ETag, Vary, Content-Length,
+ *   token header, Accept-Ranges removal, Cache-Control) are NOT covered by
+ *   the rollback log; if one of them fails, earlier post-plan mutations
+ *   remain.  This is safe in practice because the sole caller
+ *   (ngx_http_markdown_execute_conversion) treats any NGX_ERROR from this
+ *   function as a hard failure and returns BEFORE forwarding the response
+ *   headers downstream — so a partially-mutated header set is never
+ *   delivered to the client.  Do NOT call this function from a path that
+ *   may forward headers after a non-NGX_OK return.
+ *
  * r      - current HTTP request
  * result - completed MarkdownResult from the Rust converter
  * conf   - location configuration
  *
  * Returns:
  *   NGX_OK    on success
- *   NGX_ERROR on NULL arguments or atomic plan failure
+ *   NGX_ERROR on NULL arguments, atomic plan failure, or a post-plan
+ *             operation failure (caller must discard the response, not
+ *             forward partially-mutated headers)
  */
 ngx_int_t
 ngx_http_markdown_update_headers(ngx_http_request_t *r,
@@ -613,10 +626,11 @@ ngx_http_markdown_update_headers(ngx_http_request_t *r,
      * Post-plan operations.  These execute only after the atomic
      * plan has committed successfully.
      *
-     * Content-Type was set by the plan via the generic SET path.
-     * Override with the static buffer for efficiency (the plan
-     * entry used pool-copied data which is correct but we prefer
-     * the static buffer for the well-known content type).
+     * Content-Type: the plan only invalidates any stale Content-Type
+     * list entry; it never writes one (NGINX emits Content-Type from
+     * the dedicated r->headers_out.content_type field, so a list entry
+     * would duplicate the header on the wire).  Set the dedicated field
+     * here to the well-known Markdown content type.
      */
     r->headers_out.content_type.data = ngx_http_markdown_content_type;
     r->headers_out.content_type.len = NGX_HTTP_MARKDOWN_CONTENT_TYPE_LEN;
