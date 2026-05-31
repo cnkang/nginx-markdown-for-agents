@@ -518,6 +518,7 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
         switch (accept_reason) {
 
         case NEGOTIATE_REASON_NO_ACCEPT:
+            NGX_HTTP_MARKDOWN_METRIC_INC(skips.no_accept);
             ngx_http_markdown_log_decision(r, conf, &early_eff,
                 ngx_http_markdown_reason_skip_no_accept());
             {
@@ -843,6 +844,7 @@ ngx_http_markdown_body_filter_convert_and_output(ngx_http_request_t *r,
             dp.conversion_status =
                 NGX_HTTP_MARKDOWN_CONV_SKIPPED;
             dp.reason_code = "SKIPPED_CONDITIONAL";
+            NGX_HTTP_MARKDOWN_METRIC_INC(skips.conditional);
             dp.duration_ms = elapsed_ms;
             ngx_http_markdown_log_decision_path(
                 r, conf, ctx->effective_conf, &dp);
