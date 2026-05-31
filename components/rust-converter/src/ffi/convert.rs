@@ -91,9 +91,14 @@ pub(crate) fn convert_inner(
     let input_size = html_slice.len();
     let parser_budget = decoded.parser_memory_budget;
     if parser_budget > 0 && input_size as u64 > parser_budget {
+        // `limit` is reported for diagnostics only. Use a saturating
+        // conversion so the u64 budget never silently truncates when usize is
+        // narrower than u64 (e.g. 32-bit targets); on 64-bit targets this is
+        // an identity conversion.
+        let limit = usize::try_from(parser_budget).unwrap_or(usize::MAX);
         return Err(ConversionError::ParseBudgetExceeded {
             used: input_size,
-            limit: parser_budget as usize,
+            limit,
         });
     }
 

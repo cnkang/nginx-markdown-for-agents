@@ -396,13 +396,11 @@ impl MarkdownConverter {
     ///
     /// Labels are enclosed in `[...]`; unescaped brackets or backslashes from
     /// attacker-controlled HTML text can break out of the label and inject a
-    /// new Markdown destination.
+    /// new Markdown destination.  Delegates to the canonical
+    /// [`crate::security::escape_link_label`] so all label-escaping sites
+    /// share a single implementation (AGENTS.md Rule 27).
     pub(super) fn escape_link_label(label: &str) -> String {
-        label
-            .replace('\\', "\\\\")
-            .replace('[', "\\[")
-            .replace(']', "\\]")
-            .replace(['\n', '\r'], " ")
+        crate::security::escape_link_label(label)
     }
 
     /// Emit a Markdown link `[label](url)\n` into `output`.

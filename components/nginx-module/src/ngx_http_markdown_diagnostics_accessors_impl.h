@@ -73,7 +73,7 @@ ngx_http_markdown_diagnostics_get_dynconf_state(
 
     out->active_mtime = ngx_http_markdown_dynconf_watcher.applied_mtime;
     out->config_version = ngx_http_markdown_dynconf_watcher.version;
-    out->last_known_good_mtime = ngx_http_markdown_dynconf_watcher.last_mtime;
+    out->last_known_good_mtime = ngx_http_markdown_dynconf_watcher.lkg_mtime;
     out->lkg_valid = ngx_http_markdown_dynconf_watcher.lkg_valid ? 1 : 0;
 }
 
