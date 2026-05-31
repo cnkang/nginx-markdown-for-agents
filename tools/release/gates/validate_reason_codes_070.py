@@ -164,6 +164,26 @@ REASON_CODES = [
         "metric_struct_field": "replay_buffer_errors_total",
         "description": "replay buffer init or append failure",
     },
+    {
+        "name": "SKIPPED_NO_ACCEPT",
+        "rust_variant": "SkippedNoAccept",
+        "rust_as_str": "SKIPPED_NO_ACCEPT",
+        "c_define": None,
+        "doc_pattern": "SKIPPED_NO_ACCEPT",
+        "metric_name": "SKIPPED_NO_ACCEPT",
+        "metric_struct_field": "no_accept",
+        "description": "no Accept header present with on_wildcard off",
+    },
+    {
+        "name": "SKIPPED_CONDITIONAL",
+        "rust_variant": "SkippedConditional",
+        "rust_as_str": "SKIPPED_CONDITIONAL",
+        "c_define": None,
+        "doc_pattern": "SKIPPED_CONDITIONAL",
+        "metric_name": "SKIPPED_CONDITIONAL",
+        "metric_struct_field": "conditional",
+        "description": "conditional request matched returning 304",
+    },
 ]
 
 
