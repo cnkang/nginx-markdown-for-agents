@@ -237,10 +237,12 @@ harness-security-checks:
 	bash tools/harness/detect_header_hash_filter.sh
 	bash tools/harness/detect_finalize_return.sh
 	bash tools/harness/detect_ffi_struct_init.sh
+	bash tools/harness/detect_c_pure_logic.sh
 
 test-harness:
 	@echo "=== Harness Detector Unit Tests ==="
 	bash tools/harness/tests/test_detect_ffi_struct_init.sh
+	bash tools/harness/tests/test_detect_c_pure_logic.sh
 	python3 -m pytest tools/harness/tests/ -q --tb=short -k "not check_harness_sync"
 
 license-check:
