@@ -347,13 +347,11 @@ ngx_http_markdown_diagnostics_reason_to_code(const char *reason)
         { "FAILED_CLOSED",                17 },
         { "ELIGIBLE_FAILED_CLOSED",       17 },
     };
-    size_t  i;
-
     if (reason == NULL) {
         return -1;
     }
 
-    for (i = 0; i < sizeof(map) / sizeof(map[0]); i++) {
+    for (size_t i = 0; i < sizeof(map) / sizeof(map[0]); i++) {
         if (ngx_strcmp(reason, map[i].name) == 0) {
             return map[i].code;
         }
