@@ -20,40 +20,16 @@ jobs:
           sanitizer: address
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Detect corpus repository
-        id: detect_corpus_repo
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -eu
-          repo="${GITHUB_REPOSITORY}-corpus"
-          status="$(curl -sS -o /dev/null -w '%{http_code}' \
-            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
-            -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/${repo}")"
-          case "$status" in
-            200)
-              echo "exists=true" >> "$GITHUB_OUTPUT"
-              ;;
-            404)
-              echo "exists=false" >> "$GITHUB_OUTPUT"
-              ;;
-            *)
-              echo "Failed to query corpus repo ${repo}, HTTP status: ${status}" >&2
-              exit 1
-              ;;
-          esac
-
       - uses: google/clusterfuzzlite/actions/run_fuzzers@884713a6c30a92e5e8544c39945cd7cb630abcd1  # v1
-        if: steps.detect_corpus_repo.outputs.exists == 'true'
+        if: vars.CFLITE_STORAGE_REPO != ''
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           mode: prune
           sanitizer: address
-          storage-repo: ${{ github.repository }}-corpus
-          storage-repo-branch: main
+          storage-repo: ${{ vars.CFLITE_STORAGE_REPO }}
+          storage-repo-branch: ${{ vars.CFLITE_STORAGE_REPO_BRANCH || 'main' }}
 
       - name: Skip prune when corpus repository is missing
-        if: steps.detect_corpus_repo.outputs.exists != 'true'
+        if: vars.CFLITE_STORAGE_REPO == ''
         run: |
-          echo "Skip corpus prune: ${GITHUB_REPOSITORY}-corpus does not exist."
+          echo "Skip corpus prune: vars.CFLITE_STORAGE_REPO is not configured."
