@@ -83,6 +83,8 @@ typedef struct { /* SONAR_NOTE: mirrors production snapshot */
         ngx_atomic_t  auth;
         ngx_atomic_t  range;
         ngx_atomic_t  accept;
+        ngx_atomic_t  no_accept;
+        ngx_atomic_t  conditional;
     } skips;
     struct {
         ngx_atomic_t  failopen_count;
