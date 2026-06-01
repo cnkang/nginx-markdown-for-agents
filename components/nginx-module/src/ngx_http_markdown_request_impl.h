@@ -13,6 +13,11 @@
  * evolve separately from payload buffering, decompression, and output shaping.
  */
 
+#include "ngx_http_markdown_payload_impl.h"
+#include "ngx_http_markdown_conversion_impl.h"
+#include "ngx_http_markdown_exports.h"
+#include "ngx_http_markdown_diagnostics.h"
+
 /*
  * Forward declarations for streaming functions defined in
  * ngx_http_markdown_streaming_impl.h (included after this header).
@@ -28,11 +33,6 @@ static ngx_int_t
 ngx_http_markdown_streaming_body_filter(
     ngx_http_request_t *r, ngx_chain_t *in);
 #endif
-
-#include "ngx_http_markdown_payload_impl.h"
-#include "ngx_http_markdown_conversion_impl.h"
-#include "ngx_http_markdown_exports.h"
-#include "ngx_http_markdown_diagnostics.h"
 
 /* Forward declarations for helpers defined in this file */
 static void ngx_http_markdown_bind_request_snapshot(
@@ -333,7 +333,7 @@ ngx_http_markdown_init_ctx(ngx_http_request_t *r,
     ctx->decompression.decompressed_size = 0;
 
 #ifdef MARKDOWN_STREAMING_ENABLED
-    ctx->streaming.failure_recorded = 0;
+    ctx->streaming.completion.failure_recorded = 0;
 #endif
 }
 
@@ -697,26 +697,29 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
     }
 #endif /* MARKDOWN_STREAMING_ENABLED */
 
+#ifdef MARKDOWN_INCREMENTAL_ENABLED
+    if (conf->large_body_threshold > 0
+        && r->method != NGX_HTTP_HEAD
+        && r->headers_out.status != NGX_HTTP_NOT_MODIFIED
+        && r->headers_out.content_length_n >= 0
+        && (size_t) r->headers_out.content_length_n
+           >= conf->large_body_threshold)
+    {
+        ctx->processing_path =
+            NGX_HTTP_MARKDOWN_PATH_INCREMENTAL;
+    }
+        /* else: no CL — deferred to body filter */
+#else
     if (conf->large_body_threshold > 0
         && r->method != NGX_HTTP_HEAD
         && r->headers_out.status != NGX_HTTP_NOT_MODIFIED)
     {
-#ifdef MARKDOWN_INCREMENTAL_ENABLED
-        if (r->headers_out.content_length_n >= 0
-            && (size_t) r->headers_out.content_length_n
-                >= conf->large_body_threshold)
-        {
-            ctx->processing_path =
-                NGX_HTTP_MARKDOWN_PATH_INCREMENTAL;
-        }
-        /* else: no CL — deferred to body filter */
-#else
         ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
                      "markdown: markdown_large_body_threshold is set, "
                      "but incremental support was not compiled in; using "
                      "full-buffer path");
-#endif
     }
+#endif
 
     /* Record path hit metric (only for eligible requests) */
 #ifdef MARKDOWN_STREAMING_ENABLED

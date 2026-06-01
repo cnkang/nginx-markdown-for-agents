@@ -547,19 +547,28 @@ typedef struct {
         ngx_http_markdown_buffer_t        failopen_replay_buf;
         ngx_flag_t                        failopen_replay_initialized;
 
-        /* Deferred terminal last_buf (backpressure during finalize) */
-        ngx_flag_t                        finalize_pending_lastbuf;
+        /*
+         * Finalize-path state latches.
+         *
+         * Grouped to keep the parent streaming struct below SonarCloud
+         * c:S1820 field-count threshold while preserving semantics.
+         */
+        struct {
+            /* Deferred terminal last_buf (backpressure during finalize) */
+            ngx_flag_t                    finalize_pending_lastbuf;
 
-        /* Metrics deferred for terminal last_buf (backpressure on
-         * terminal send — set when send_output(last_buf=1) returns
-         * NGX_AGAIN, cleared when resume drain succeeds or fails). */
-        ngx_flag_t                        pending_terminal_metrics;
+            /* Metrics deferred for terminal last_buf (backpressure on
+             * terminal send — set when send_output(last_buf=1)
+             * returns NGX_AGAIN, cleared when resume drain succeeds
+             * or fails). */
+            ngx_flag_t                    pending_terminal_metrics;
 
-        /* Post-commit failure metrics have been recorded for this request. */
-        ngx_flag_t                        failure_recorded;
+            /* Post-commit failure metrics recorded for this request. */
+            ngx_flag_t                    failure_recorded;
 
-        /* Continue finalize() after tail-output backpressure drains */
-        ngx_flag_t                        finalize_after_pending;
+            /* Continue finalize() after tail-output backpressure drains. */
+            ngx_flag_t                    finalize_after_pending;
+        } completion;
     } streaming;
 #endif
 } ngx_http_markdown_ctx_t;
