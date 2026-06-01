@@ -241,7 +241,7 @@ static ngx_int_t
 ngx_http_markdown_streaming_resume_pending(
     ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx,
-    ngx_http_markdown_conf_t *conf);
+    const ngx_http_markdown_conf_t *conf);
 
 /*
  * Record post-commit failure metrics for streaming conversion.
@@ -1049,7 +1049,7 @@ static ngx_int_t
 ngx_http_markdown_streaming_resume_pending(
     ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx,
-    ngx_http_markdown_conf_t *conf)
+    const ngx_http_markdown_conf_t *conf)
 {
     ngx_chain_t  *out;
     ngx_int_t     rc;
@@ -1518,7 +1518,7 @@ static ngx_int_t
 ngx_http_markdown_streaming_handle_feed_result(
     ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx,
-    ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_conf_t *conf,
     uint32_t rc_ffi,
     u_char *out_data,
     size_t out_len)
@@ -1669,7 +1669,7 @@ static ngx_int_t
 ngx_http_markdown_streaming_track_feed_budget(
     ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx,
-    ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_conf_t *conf,
     const u_char *feed_data,
     size_t feed_len)
 {
@@ -2289,7 +2289,7 @@ static ngx_int_t
 ngx_http_markdown_streaming_init_handle(
     ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx,
-    ngx_http_markdown_conf_t *conf)
+    const ngx_http_markdown_conf_t *conf)
 {
     struct MarkdownOptions  options;
     ngx_pool_cleanup_t     *cln;
