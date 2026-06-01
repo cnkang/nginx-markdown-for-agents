@@ -135,7 +135,10 @@ build_lcov_ignore_args() {
   # inconsistent: lcov limitation with branch tracking on multi-condition
   # if/else-if chains — line coverage is correct, only branch counts are
   # affected.  Known issue: https://github.com/linux-test-project/lcov/issues/296
-  args="--ignore-errors inconsistent"
+  #
+  # Repeat the same category twice to suppress message spam while still
+  # producing the report.
+  args="--ignore-errors inconsistent,inconsistent"
 
   if [[ "$(uname -s)" == "Darwin" ]]; then
     # mismatch: Apple Clang gcov produces version-mismatched .gcno/.gcda
