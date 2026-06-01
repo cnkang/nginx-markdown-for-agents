@@ -819,8 +819,35 @@ impl IncrementalEmitter {
     fn code_block_needs_closing_newline(&self) -> bool {
         match self.code_block_buffer.last() {
             None => false,
-            Some(&last) => last != b'\n',
+            Some(&last) if last == b'\n' => false,
+            Some(_) => !self.code_block_ends_with_blockquote_prefix(),
         }
+    }
+
+    /// Returns true when buffered code currently ends at a quoted line start
+    /// marker (`"> "` repeated for the current blockquote depth).
+    fn code_block_ends_with_blockquote_prefix(&self) -> bool {
+        let depth = self.blockquote_depth;
+        if depth == 0 {
+            return false;
+        }
+
+        let marker_len = depth.saturating_mul(2);
+        if self.code_block_buffer.len() < marker_len + 1 {
+            return false;
+        }
+
+        let start = self.code_block_buffer.len() - marker_len;
+        for i in 0..depth {
+            let pos = start + i * 2;
+            if self.code_block_buffer[pos] != b'>'
+                || self.code_block_buffer[pos + 1] != b' '
+            {
+                return false;
+            }
+        }
+
+        self.code_block_buffer[start - 1] == b'\n'
     }
 
     /// Check that adding `additional` bytes won't exceed the buffer budget.
@@ -2105,6 +2132,33 @@ mod tests {
         assert!(
             !output.contains("line1\n\n```"),
             "must not insert a blank line before the closing fence, got: {:?}",
+            output
+        );
+    }
+
+    #[test]
+    fn test_blockquote_code_block_no_blank_quoted_line_before_closing_fence() {
+        /* Regression (STR-1): for blockquote code blocks ending with '\n',
+         * do not emit an additional quoted blank line before the closing
+         * fence. */
+        let output = emit_html(&[
+            start_tag("blockquote"),
+            start_tag("pre"),
+            start_tag("code"),
+            text("x\n"),
+            end_tag("code"),
+            end_tag("pre"),
+            end_tag("blockquote"),
+        ]);
+
+        assert!(
+            output.contains("> ```\n> x\n> ```\n"),
+            "blockquote fenced code block should close on quoted line, got: {:?}",
+            output
+        );
+        assert!(
+            !output.contains("> x\n> \n```"),
+            "must not insert an extra blank quoted line before closing fence, got: {:?}",
             output
         );
     }
