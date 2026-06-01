@@ -64,9 +64,13 @@ ngx_http_markdown_convert_for_conditional(
     ngx_http_request_t *r,
     const ngx_http_markdown_ctx_t *ctx,
     struct MarkdownConverterHandle *converter,
-    struct MarkdownOptions *options,
+    const struct MarkdownOptions *options,
     struct MarkdownResult *conv_result)
 {
+    /* r is used only inside MARKDOWN_INCREMENTAL_ENABLED; suppress
+     * the unused-parameter warning in non-incremental builds. */
+    (void) r;
+
 #ifdef MARKDOWN_INCREMENTAL_ENABLED
     if (ctx->processing_path == NGX_HTTP_MARKDOWN_PATH_INCREMENTAL) {
         struct IncrementalConverterHandle *inc_handle;

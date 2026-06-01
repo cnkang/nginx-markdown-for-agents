@@ -1271,7 +1271,7 @@ ngx_http_markdown_handle_converter_not_initialized(
 
 #ifdef MARKDOWN_STREAMING_ENABLED
 static ngx_flag_t
-ngx_http_markdown_shadow_output_diff(struct MarkdownResult *fb_result,
+ngx_http_markdown_shadow_output_diff(const struct MarkdownResult *fb_result,
                                      const uint8_t *feed_data,
                                      uintptr_t feed_len,
                                      const struct MarkdownResult *st_result)
@@ -1326,7 +1326,7 @@ ngx_http_markdown_shadow_compare(
     ngx_http_request_t *r,
     const ngx_http_markdown_ctx_t *ctx,
     const ngx_http_markdown_conf_t *conf,
-    struct MarkdownResult *fb_result,
+    const struct MarkdownResult *fb_result,
     ngx_msec_t fb_elapsed_ms)
 {
     struct StreamingConverterHandle  *handle;
@@ -1564,7 +1564,7 @@ ngx_http_markdown_execute_incremental_conversion(
     ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx,
     const ngx_http_markdown_conf_t *conf,
-    struct MarkdownOptions *options,
+    const struct MarkdownOptions *options,
     struct MarkdownResult *result,
     ngx_msec_t start_time,
     ngx_msec_t *elapsed_ms)
