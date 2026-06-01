@@ -1326,7 +1326,7 @@ ngx_http_markdown_shadow_compare(
     ngx_http_request_t *r,
     const ngx_http_markdown_ctx_t *ctx,
     const ngx_http_markdown_conf_t *conf,
-    struct MarkdownResult *fb_result,
+    const struct MarkdownResult *fb_result,
     ngx_msec_t fb_elapsed_ms)
 {
     struct StreamingConverterHandle  *handle;

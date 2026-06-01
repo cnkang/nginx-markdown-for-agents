@@ -74,7 +74,7 @@ ngx_http_markdown_streaming_process_chunk(
     ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx,
     ngx_http_markdown_conf_t *conf,
-    ngx_buf_t *buf);
+    const ngx_buf_t *buf);
 
 /*
  * Send converted Markdown output downstream.
@@ -1755,7 +1755,7 @@ ngx_http_markdown_streaming_process_chunk(
     ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx,
     ngx_http_markdown_conf_t *conf,
-    ngx_buf_t *buf)
+    const ngx_buf_t *buf)
 {
     const u_char  *feed_data;
     size_t     feed_len;
@@ -1967,7 +1967,7 @@ static ngx_int_t
 ngx_http_markdown_streaming_handle_finalize_ffi_error(
     ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx,
-    ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_conf_t *conf,
     struct MarkdownResult *result,
     uint32_t rc_ffi)
 {
@@ -2010,7 +2010,7 @@ static ngx_int_t
 ngx_http_markdown_streaming_finalize_send_markdown(
     ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx,
-    ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_conf_t *conf,
     struct MarkdownResult *result,
     ngx_int_t *final_send_rc)
 {
@@ -2914,7 +2914,7 @@ static ngx_int_t
 ngx_http_markdown_streaming_append_replay_chunk(
     ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx,
-    ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_conf_t *conf,
     ngx_chain_t *cl)
 {
     ngx_int_t  rc;
