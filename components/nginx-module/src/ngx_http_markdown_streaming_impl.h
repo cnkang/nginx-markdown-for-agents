@@ -495,6 +495,8 @@ ngx_http_markdown_log_conditional_streaming(
     ngx_http_request_t *r,
     const ngx_http_markdown_conf_t *conf)
 {
+    /* r is used only inside ngx_log_debug0 which compiles to nothing
+     * in non-debug builds; suppress the unused-parameter warning. */
     (void) r;
 
     if (conf->policy.conditional_requests

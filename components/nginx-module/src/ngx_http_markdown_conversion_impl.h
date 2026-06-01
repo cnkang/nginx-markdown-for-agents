@@ -1405,8 +1405,6 @@ ngx_http_markdown_shadow_compare(
     } else {
         shadow_elapsed = 0;
     }
-    (void) shadow_elapsed;
-    (void) fb_elapsed_ms;
 
     ngx_log_debug2(NGX_LOG_DEBUG_HTTP,
         r->connection->log, 0,
@@ -1414,6 +1412,11 @@ ngx_http_markdown_shadow_compare(
         "shadow_streaming_latency_ms=%M "
         "shadow_fullbuffer_latency_ms=%M",
         shadow_elapsed, fb_elapsed_ms);
+
+    /* Suppress unused-variable warnings in non-debug builds where
+     * ngx_log_debug2 compiles to nothing. */
+    (void) shadow_elapsed;
+    (void) fb_elapsed_ms;
 
     if (rc != ERROR_SUCCESS) {
         ngx_log_debug1(NGX_LOG_DEBUG_HTTP,
