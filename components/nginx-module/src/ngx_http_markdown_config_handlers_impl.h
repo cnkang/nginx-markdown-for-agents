@@ -25,9 +25,9 @@
  *
  * Parameters:
  *   arg          - argument to compare
- *   expected     - expected string bytes (u_char * to match
+ *   expected     - expected string bytes (mutable type to match
  *                  ngx_strncasecmp signature; callers pass
- *                  static u_char[] literals)
+ *                  static u_char[] constants)
  *   expected_len - length of expected string
  *
  * Returns:
@@ -780,6 +780,8 @@ ngx_http_markdown_metrics_directive(ngx_conf_t *cf, ngx_command_t *cmd, void *co
 static char *
 ngx_http_markdown_diagnostics_directive(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
+    static u_char               on_str[]  = "on";
+    static u_char               off_str[] = "off";
     ngx_http_markdown_conf_t *mcf = conf;
     ngx_http_core_loc_conf_t *clcf;
     const ngx_str_t          *value;
@@ -789,7 +791,7 @@ ngx_http_markdown_diagnostics_directive(ngx_conf_t *cf, ngx_command_t *cmd, void
     value = cf->args->elts;
 
     if (ngx_http_markdown_arg_equals(&value[1],
-                                      (u_char *) "on", 2))
+                                      on_str, sizeof(on_str) - 1))
     {
         mcf->ops.diagnostics_enabled = 1;
 
@@ -820,7 +822,7 @@ ngx_http_markdown_diagnostics_directive(ngx_conf_t *cf, ngx_command_t *cmd, void
         ngx_conf_log_error(NGX_LOG_INFO, cf, 0,
                            "markdown: diagnostics endpoint enabled at this location");
     } else if (ngx_http_markdown_arg_equals(&value[1],
-                                             (u_char *) "off", 3))
+                                             off_str, sizeof(off_str) - 1))
     {
         mcf->ops.diagnostics_enabled = 0;
     } else {
