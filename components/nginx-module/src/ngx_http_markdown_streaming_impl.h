@@ -74,7 +74,7 @@ ngx_http_markdown_streaming_process_chunk(
     ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx,
     ngx_http_markdown_conf_t *conf,
-    ngx_buf_t *buf);
+    const ngx_buf_t *buf);
 
 /*
  * Send converted Markdown output downstream.
@@ -174,7 +174,7 @@ static ngx_int_t
 ngx_http_markdown_streaming_handle_postcommit_error(
     ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx,
-    ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_conf_t *conf,
     uint32_t error_code);
 
 /*
@@ -198,7 +198,7 @@ static ngx_int_t
 ngx_http_markdown_streaming_precommit_error(
     ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx,
-    ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_conf_t *conf,
     uint32_t error_code);
 
 /*
@@ -280,7 +280,7 @@ static ngx_int_t
 ngx_http_markdown_streaming_send_deferred_lastbuf(
     ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx,
-    ngx_http_markdown_conf_t *conf);
+    const ngx_http_markdown_conf_t *conf);
 
 /*
  * Pool cleanup handler for streaming resources.
@@ -977,7 +977,7 @@ static ngx_int_t
 ngx_http_markdown_streaming_send_deferred_lastbuf(
     ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx,
-    ngx_http_markdown_conf_t *conf)
+    const ngx_http_markdown_conf_t *conf)
 {
     ngx_int_t  rc;
 
@@ -1311,7 +1311,7 @@ static ngx_int_t
 ngx_http_markdown_streaming_handle_postcommit_error(
     ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx,
-    ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_conf_t *conf,
     uint32_t error_code)
 {
     ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
@@ -1393,7 +1393,7 @@ static ngx_int_t
 ngx_http_markdown_streaming_precommit_error(
     ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx,
-    ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_conf_t *conf,
     uint32_t error_code)
 {
     if (ctx->streaming.handle != NULL) {
@@ -1476,7 +1476,7 @@ static ngx_int_t
 ngx_http_markdown_streaming_commit(
     ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx,
-    ngx_http_markdown_conf_t *conf)
+    const ngx_http_markdown_conf_t *conf)
 {
     ngx_int_t  rc;
 
@@ -1628,7 +1628,7 @@ ngx_http_markdown_streaming_map_feed_decomp_error(ngx_int_t rc)
 
 static uint32_t
 ngx_http_markdown_streaming_map_finalize_decomp_error(
-    ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_ctx_t *ctx,
     ngx_int_t rc)
 {
     if (rc == NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED) {
@@ -1755,9 +1755,9 @@ ngx_http_markdown_streaming_process_chunk(
     ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx,
     ngx_http_markdown_conf_t *conf,
-    ngx_buf_t *buf)
+    const ngx_buf_t *buf)
 {
-    u_char    *feed_data;
+    const u_char  *feed_data;
     size_t     feed_len;
     u_char    *out_data;
     size_t     out_len;
@@ -1967,7 +1967,7 @@ static ngx_int_t
 ngx_http_markdown_streaming_handle_finalize_ffi_error(
     ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx,
-    ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_conf_t *conf,
     struct MarkdownResult *result,
     uint32_t rc_ffi)
 {
@@ -2010,7 +2010,7 @@ static ngx_int_t
 ngx_http_markdown_streaming_finalize_send_markdown(
     ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx,
-    ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_conf_t *conf,
     struct MarkdownResult *result,
     ngx_int_t *final_send_rc)
 {
@@ -2914,7 +2914,7 @@ static ngx_int_t
 ngx_http_markdown_streaming_append_replay_chunk(
     ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx,
-    ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_conf_t *conf,
     ngx_chain_t *cl)
 {
     ngx_int_t  rc;
