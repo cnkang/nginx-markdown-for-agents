@@ -1274,10 +1274,10 @@ static ngx_flag_t
 ngx_http_markdown_shadow_output_diff(struct MarkdownResult *fb_result,
                                      const uint8_t *feed_data,
                                      uintptr_t feed_len,
-                                     struct MarkdownResult *st_result)
+                                     const struct MarkdownResult *st_result)
 {
     size_t   total_len;
-    u_char  *fb_ptr;
+    const u_char  *fb_ptr;
 
     total_len = (size_t) feed_len + (size_t) st_result->markdown_len;
     if (total_len != fb_result->markdown_len) {
@@ -1324,7 +1324,7 @@ ngx_http_markdown_shadow_output_diff(struct MarkdownResult *fb_result,
 static void
 ngx_http_markdown_shadow_compare(
     ngx_http_request_t *r,
-    ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_ctx_t *ctx,
     const ngx_http_markdown_conf_t *conf,
     struct MarkdownResult *fb_result,
     ngx_msec_t fb_elapsed_ms)
@@ -1336,7 +1336,7 @@ ngx_http_markdown_shadow_compare(
     uintptr_t                         out_len;
     uint32_t                          init_rc;
     uint32_t                          rc;
-    ngx_time_t                       *tp;
+    const ngx_time_t                 *tp;
     ngx_msec_t                        shadow_start;
     ngx_msec_t                        shadow_elapsed;
 
@@ -1405,6 +1405,8 @@ ngx_http_markdown_shadow_compare(
     } else {
         shadow_elapsed = 0;
     }
+    (void) shadow_elapsed;
+    (void) fb_elapsed_ms;
 
     ngx_log_debug2(NGX_LOG_DEBUG_HTTP,
         r->connection->log, 0,
@@ -1518,6 +1520,103 @@ ngx_http_markdown_record_token_savings_if_enabled(
     }
 }
 
+static void
+ngx_http_markdown_otel_start_conversion_span(
+    ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_conf_t *conf)
+{
+    const ngx_str_t *flavor_name;
+    const ngx_str_t *engine_name;
+
+    ctx->otel_span = NULL;
+    if (!conf->ops.otel_enabled) {
+        return;
+    }
+
+    ctx->otel_span = ngx_http_markdown_otel_span_start(r, conf);
+    if (ctx->otel_span == NULL) {
+        return;
+    }
+
+    flavor_name = ngx_http_markdown_otel_flavor_name(conf->flavor);
+    engine_name = ngx_http_markdown_otel_engine_name(
+        ctx->processing_path);
+    ngx_http_markdown_otel_set_str_attr(ctx->otel_span,
+        (const u_char *) "flavor", 6,
+        flavor_name->data, flavor_name->len);
+    ngx_http_markdown_otel_set_str_attr(ctx->otel_span,
+        (const u_char *) "engine", 6,
+        engine_name->data, engine_name->len);
+    if (r->uri.len > 0) {
+        ngx_http_markdown_otel_set_str_attr(ctx->otel_span,
+            (const u_char *) "uri", 3,
+            r->uri.data, r->uri.len);
+    }
+}
+
+#ifdef MARKDOWN_INCREMENTAL_ENABLED
+static ngx_int_t
+ngx_http_markdown_execute_incremental_conversion(
+    ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_conf_t *conf,
+    struct MarkdownOptions *options,
+    struct MarkdownResult *result,
+    ngx_msec_t start_time,
+    ngx_msec_t *elapsed_ms)
+{
+    struct IncrementalConverterHandle *inc_handle;
+    uint32_t                           init_rc;
+    uint32_t                           feed_rc;
+    uint32_t                           fin_rc;
+    const ngx_time_t                  *tp;
+    ngx_msec_t                         end_time;
+
+    inc_handle = NULL;
+    init_rc = markdown_incremental_new_with_code(
+        options, &inc_handle);
+    if (init_rc != ERROR_SUCCESS || inc_handle == NULL) {
+        tp = ngx_timeofday();
+        end_time = (ngx_msec_t) (tp->sec * 1000 + tp->msec);
+        *elapsed_ms = (end_time >= start_time) ? end_time - start_time : 0;
+
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                     "markdown: "
+                     "markdown_incremental_new_with_code() "
+                     "failed rc=%ud", (ngx_uint_t) init_rc);
+
+        result->error_code = init_rc ? init_rc : ERROR_INVALID_INPUT;
+        result->error_message = NULL;
+        result->error_len = 0;
+        return ngx_http_markdown_handle_conversion_failure(
+            r, ctx, conf, result, *elapsed_ms);
+    }
+
+    feed_rc = markdown_incremental_feed(
+        inc_handle, ctx->buffer.data, ctx->buffer.size);
+    if (feed_rc != ERROR_SUCCESS) {
+        markdown_incremental_free(inc_handle);
+
+        tp = ngx_timeofday();
+        end_time = (ngx_msec_t) (tp->sec * 1000 + tp->msec);
+        *elapsed_ms = (end_time >= start_time) ? end_time - start_time : 0;
+
+        result->error_code = feed_rc;
+        result->error_message = NULL;
+        result->error_len = 0;
+        return ngx_http_markdown_handle_conversion_failure(
+            r, ctx, conf, result, *elapsed_ms);
+    }
+
+    /* finalize consumes the handle — do NOT call free after this */
+    fin_rc = markdown_incremental_finalize(inc_handle, result);
+    (void) fin_rc;  /* error_code is checked via result->error_code below */
+
+    return NGX_OK;
+}
+#endif
+
 
 /**
  * Execute the Markdown conversion via the Rust FFI and handle success or failure outcomes.
@@ -1557,29 +1656,7 @@ ngx_http_markdown_execute_conversion(ngx_http_request_t *r,
             r, ctx, conf);
     }
 
-    ctx->otel_span = NULL;
-    if (conf->ops.otel_enabled) {
-        const ngx_str_t *flavor_name;
-        const ngx_str_t *engine_name;
-
-        ctx->otel_span = ngx_http_markdown_otel_span_start(r, conf);
-        if (ctx->otel_span != NULL) {
-            flavor_name = ngx_http_markdown_otel_flavor_name(conf->flavor);
-            engine_name = ngx_http_markdown_otel_engine_name(
-                ctx->processing_path);
-            ngx_http_markdown_otel_set_str_attr(ctx->otel_span,
-                (const u_char *) "flavor", 6,
-                flavor_name->data, flavor_name->len);
-            ngx_http_markdown_otel_set_str_attr(ctx->otel_span,
-                (const u_char *) "engine", 6,
-                engine_name->data, engine_name->len);
-            if (r->uri.len > 0) {
-                ngx_http_markdown_otel_set_str_attr(ctx->otel_span,
-                    (const u_char *) "uri", 3,
-                    r->uri.data, r->uri.len);
-            }
-        }
-    }
+    ngx_http_markdown_otel_start_conversion_span(r, ctx, conf);
 
     rc = ngx_http_markdown_prepare_conversion_options(
         r, conf, ctx->effective_conf, &options);
@@ -1597,50 +1674,11 @@ ngx_http_markdown_execute_conversion(ngx_http_request_t *r,
 
 #ifdef MARKDOWN_INCREMENTAL_ENABLED
     if (ctx->processing_path == NGX_HTTP_MARKDOWN_PATH_INCREMENTAL) {
-        struct IncrementalConverterHandle *inc_handle;
-        uint32_t                          init_rc;
-        uint32_t                          feed_rc;
-        uint32_t                          fin_rc;
-
-        inc_handle = NULL;
-        init_rc = markdown_incremental_new_with_code(
-            &options, &inc_handle);
-        if (init_rc != ERROR_SUCCESS || inc_handle == NULL) {
-            tp = ngx_timeofday();
-            end_time = (ngx_msec_t) (tp->sec * 1000 + tp->msec);
-            *elapsed_ms = (end_time >= start_time) ? end_time - start_time : 0;
-
-            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                         "markdown: "
-                         "markdown_incremental_new_with_code() "
-                         "failed rc=%ud", (ngx_uint_t) init_rc);
-
-            result->error_code = init_rc ? init_rc : ERROR_INVALID_INPUT;
-            result->error_message = NULL;
-            result->error_len = 0;
-            return ngx_http_markdown_handle_conversion_failure(
-                r, ctx, conf, result, *elapsed_ms);
+        rc = ngx_http_markdown_execute_incremental_conversion(
+            r, ctx, conf, &options, result, start_time, elapsed_ms);
+        if (rc != NGX_OK) {
+            return rc;
         }
-
-        feed_rc = markdown_incremental_feed(
-            inc_handle, ctx->buffer.data, ctx->buffer.size);
-        if (feed_rc != ERROR_SUCCESS) {
-            markdown_incremental_free(inc_handle);
-
-            tp = ngx_timeofday();
-            end_time = (ngx_msec_t) (tp->sec * 1000 + tp->msec);
-            *elapsed_ms = (end_time >= start_time) ? end_time - start_time : 0;
-
-            result->error_code = feed_rc;
-            result->error_message = NULL;
-            result->error_len = 0;
-            return ngx_http_markdown_handle_conversion_failure(
-                r, ctx, conf, result, *elapsed_ms);
-        }
-
-        /* finalize consumes the handle — do NOT call free after this */
-        fin_rc = markdown_incremental_finalize(inc_handle, result);
-        (void) fin_rc;  /* error_code is checked via result->error_code below */
     } else
 #endif
     {
