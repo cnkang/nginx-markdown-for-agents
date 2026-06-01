@@ -171,6 +171,7 @@ REASON_CODES = [
         "c_define": None,
         "doc_pattern": "SKIPPED_NO_ACCEPT",
         "metric_name": "SKIPPED_NO_ACCEPT",
+        "rust_metric_key": "markdown_skipped_no_accept_total",
         "metric_struct_field": "no_accept",
         "description": "no Accept header present with on_wildcard off",
     },
@@ -181,6 +182,7 @@ REASON_CODES = [
         "c_define": None,
         "doc_pattern": "SKIPPED_CONDITIONAL",
         "metric_name": "SKIPPED_CONDITIONAL",
+        "rust_metric_key": "markdown_skipped_conditional_total",
         "metric_struct_field": "conditional",
         "description": "conditional request matched returning 304",
     },
@@ -254,19 +256,23 @@ def check_rust_metric_key(
     code: dict, rust_src: str, result: ValidationResult
 ) -> None:
     """Check that the reason code has a metric_key() mapping in Rust."""
-    metric = code["metric_name"]
+    metric = code.get("rust_metric_key", code["metric_name"].replace("nginx_", ""))
+    variant = code["rust_variant"]
     check_id = f"rust_metric:{code['name']}"
 
-    # The metric_key() in Rust uses the name without the nginx_ prefix
-    # but includes the markdown_ prefix
-    pattern = rf'"{re.escape(metric.replace("nginx_", ""))}"'
+    # Validate the specific match arm in ReasonCode::metric_key() instead of
+    # a global string search (which can be satisfied by as_str()).
+    pattern = (
+        rf"ReasonCode::{re.escape(variant)}\s*=>\s*\{{?\s*"
+        rf'"{re.escape(metric)}"'
+    )
     if re.search(pattern, rust_src):
-        result.pass_(check_id, f"metric_key() maps to '{metric}'")
+        result.pass_(check_id, f"metric_key() maps '{variant}' to '{metric}'")
     else:
         result.fail(
             check_id,
-            f"metric key '{metric.replace('nginx_', '')}' NOT found "
-            "in reason_code.rs metric_key()",
+            f"metric_key() mapping '{variant} => \"{metric}\"' "
+            "NOT found in reason_code.rs",
         )
 
 
