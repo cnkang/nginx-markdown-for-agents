@@ -87,6 +87,8 @@ typedef struct {
         ngx_atomic_uint_t auth;
         ngx_atomic_uint_t range;
         ngx_atomic_uint_t accept;
+        ngx_atomic_uint_t no_accept;
+        ngx_atomic_uint_t conditional;
     } skips;
 
     /* Conversion result counters */
