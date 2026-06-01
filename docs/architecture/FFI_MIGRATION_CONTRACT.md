@@ -212,7 +212,20 @@ NGINX API dependencies (pool alloc, chain ops, header list push, request
 finalize, etc.). Per the boundary contract §2.2, these belong on the Rust side
 and are candidates for migration.
 
+### Automated First-Pass Detector (advisory)
+
+`tools/harness/detect_c_pure_logic.sh` provides a fast, automated first-pass
+signal that complements this manual audit. It scans the C module sources and
+flags functions that reference no NGINX API as migration candidates. The
+detector runs in advisory mode as part of `make harness-security-checks`
+(it prints findings but never blocks CI) and has a `--check` strict mode for
+deliberate, scoped enforcement runs. **This audit table — not the detector —
+remains the authoritative source for migration decisions** (the detector is a
+heuristic and intentionally over-reports, since the contract permits a curated
+backlog of known C-side pure-logic functions).
+
 ### Audit Methodology
+
 
 1. Scanned all `.c` files under `components/nginx-module/src/`
 2. Classified each function by its dependency on NGINX APIs

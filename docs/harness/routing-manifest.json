@@ -359,6 +359,7 @@
         "tools/harness/detect_finalize_return.sh",
         "tools/harness/detect_header_hash_filter.sh",
         "tools/harness/detect_ffi_struct_init.sh",
+        "tools/harness/detect_c_pure_logic.sh",
         "skills/nginx-markdown-harness-maintenance/scripts/**"
       ],
       "keywords": [
