@@ -840,9 +840,7 @@ impl IncrementalEmitter {
         let start = self.code_block_buffer.len() - marker_len;
         for i in 0..depth {
             let pos = start + i * 2;
-            if self.code_block_buffer[pos] != b'>'
-                || self.code_block_buffer[pos + 1] != b' '
-            {
+            if self.code_block_buffer[pos] != b'>' || self.code_block_buffer[pos + 1] != b' ' {
                 return false;
             }
         }
