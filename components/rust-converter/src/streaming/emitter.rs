@@ -819,7 +819,7 @@ impl IncrementalEmitter {
     fn code_block_needs_closing_newline(&self) -> bool {
         match self.code_block_buffer.last() {
             None => false,
-            Some(&last) if last == b'\n' => false,
+            Some(&b'\n') => false,
             Some(_) => !self.code_block_ends_with_blockquote_prefix(),
         }
     }
