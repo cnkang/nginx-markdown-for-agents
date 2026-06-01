@@ -709,6 +709,53 @@ ngx_http_markdown_streaming_decomp_feed_zlib(
         pool, log);
 }
 
+static ngx_int_t
+ngx_http_markdown_streaming_decomp_feed_case_zlib(
+    ngx_http_markdown_streaming_decomp_t *decomp,
+    const u_char *in_data,
+    size_t in_len,
+    u_char **buf_ptr,
+    size_t *buf_size_ptr,
+    size_t *out_produced,
+    ngx_pool_t *pool,
+    ngx_log_t *log)
+{
+    /* Configure zlib input (const-drop safe: inflate reads only). */
+    decomp->state.zlib.next_in = (Bytef *) in_data;
+    if (ngx_http_markdown_streaming_decomp_size_to_uint(
+            in_len, &decomp->state.zlib.avail_in))
+    {
+        ngx_log_error(NGX_LOG_ERR, log, 0,
+            "markdown: "
+            "input length %uz exceeds zlib uInt max",
+            in_len);
+        return NGX_ERROR;
+    }
+
+    return ngx_http_markdown_streaming_decomp_feed_zlib(
+        decomp, buf_ptr, buf_size_ptr, out_produced, pool, log);
+}
+
+#ifdef NGX_HTTP_BROTLI
+static ngx_int_t
+ngx_http_markdown_streaming_decomp_feed_case_brotli(
+    ngx_http_markdown_streaming_decomp_t *decomp,
+    const u_char *in_data,
+    size_t in_len,
+    u_char **buf_ptr,
+    size_t *buf_size_ptr,
+    size_t *out_produced,
+    ngx_pool_t *pool,
+    ngx_log_t *log)
+{
+    decomp->brotli_next_in = in_data;
+    decomp->brotli_avail_in = in_len;
+
+    return ngx_http_markdown_streaming_decomp_brotli_loop(
+        decomp, buf_ptr, buf_size_ptr, out_produced, pool, log);
+}
+#endif
+
 
 /*
  * Feed a compressed chunk to the streaming decompressor.
@@ -796,23 +843,9 @@ ngx_http_markdown_streaming_decomp_feed(
     {
         ngx_int_t  inflate_rc;
 
-        /* Configure zlib input (const-drop safe: inflate reads only) */
-        decomp->state.zlib.next_in = (Bytef *) in_data;
-        if (ngx_http_markdown_streaming_decomp_size_to_uint(
-                in_len, &decomp->state.zlib.avail_in))
-        {
-            ngx_log_error(NGX_LOG_ERR, log, 0,
-                "markdown: "
-                "input length %uz exceeds zlib uInt max",
-                in_len);
-            return NGX_ERROR;
-        }
-
-        inflate_rc =
-            ngx_http_markdown_streaming_decomp_feed_zlib(
-                decomp,
-                &buf, &buf_size, &produced,
-                pool, log);
+        inflate_rc = ngx_http_markdown_streaming_decomp_feed_case_zlib(
+            decomp, in_data, in_len,
+            &buf, &buf_size, &produced, pool, log);
         if (inflate_rc != NGX_OK) {
             return inflate_rc;
         }
@@ -825,14 +858,9 @@ ngx_http_markdown_streaming_decomp_feed(
     {
         ngx_int_t  brotli_rc;
 
-        decomp->brotli_next_in = in_data;
-        decomp->brotli_avail_in = in_len;
-
-        brotli_rc =
-            ngx_http_markdown_streaming_decomp_brotli_loop(
-                decomp,
-                &buf, &buf_size, &produced,
-                pool, log);
+        brotli_rc = ngx_http_markdown_streaming_decomp_feed_case_brotli(
+            decomp, in_data, in_len,
+            &buf, &buf_size, &produced, pool, log);
         if (brotli_rc != NGX_OK) {
             return brotli_rc;
         }
