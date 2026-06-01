@@ -1604,11 +1604,11 @@ test_send_output_and_resume_paths(void)
     ngx_memzero(&c_ok, sizeof(c_ok));
     c_ok.buf = &b_ok;
     c_ok.next = NULL;
-    ctx.streaming.pending_terminal_metrics = 1;
+    ctx.streaming.completion.pending_terminal_metrics = 1;
     ctx.streaming.pending_output = &c_ok;
     rc = ngx_http_markdown_streaming_resume_pending(&r, &ctx, &conf);
     TEST_ASSERT(rc == NGX_OK, "terminal metric latch should not fail resume");
-    TEST_ASSERT(ctx.streaming.pending_terminal_metrics == 0,
+    TEST_ASSERT(ctx.streaming.completion.pending_terminal_metrics == 0,
         "resume should clear pending terminal metrics");
 
     ngx_memzero(&b_err, sizeof(b_err));
@@ -1621,10 +1621,10 @@ test_send_output_and_resume_paths(void)
     TEST_ASSERT(rc == NGX_ERROR, "resume should propagate downstream error");
     TEST_ASSERT(ctx.streaming.pending_has_data == 0,
         "resume error should clear pending_has_data");
-    TEST_ASSERT(ctx.streaming.failure_recorded == 1,
+    TEST_ASSERT(ctx.streaming.completion.failure_recorded == 1,
         "resume error should record post-commit failure");
 
-    ctx.streaming.finalize_pending_lastbuf = 1;
+    ctx.streaming.completion.finalize_pending_lastbuf = 1;
     ctx.streaming.pending_output = NULL;
     g_next_body_filter_rc = NGX_OK;
     rc = ngx_http_markdown_streaming_resume_pending(&r, &ctx, &conf);
@@ -1690,23 +1690,23 @@ test_send_output_error_and_deferred_paths(void)
     TEST_ASSERT((r.buffered & NGX_HTTP_MARKDOWN_BUFFERED) != 0,
         "backpressure helper should set buffered flag");
 
-    ctx.streaming.failure_recorded = 0;
+    ctx.streaming.completion.failure_recorded = 0;
     g_next_body_filter_rc = NGX_AGAIN;
     rc = ngx_http_markdown_streaming_send_deferred_lastbuf(
         &r, &ctx, &conf);
     TEST_ASSERT(rc == NGX_AGAIN,
         "deferred last_buf should propagate backpressure");
-    TEST_ASSERT(ctx.streaming.pending_terminal_metrics == 1,
+    TEST_ASSERT(ctx.streaming.completion.pending_terminal_metrics == 1,
         "deferred last_buf backpressure should latch terminal metrics");
 
-    ctx.streaming.pending_terminal_metrics = 0;
-    ctx.streaming.failure_recorded = 0;
+    ctx.streaming.completion.pending_terminal_metrics = 0;
+    ctx.streaming.completion.failure_recorded = 0;
     g_next_body_filter_rc = NGX_ERROR;
     rc = ngx_http_markdown_streaming_send_deferred_lastbuf(
         &r, &ctx, &conf);
     TEST_ASSERT(rc == NGX_ERROR,
         "deferred last_buf should propagate hard downstream errors");
-    TEST_ASSERT(ctx.streaming.failure_recorded == 1,
+    TEST_ASSERT(ctx.streaming.completion.failure_recorded == 1,
         "deferred last_buf hard error should record postcommit failure");
 
     TEST_PASS("send_output error/deferred branches covered");
@@ -1805,12 +1805,12 @@ test_postcommit_and_precommit_error_paths(void)
     rc = ngx_http_markdown_streaming_handle_postcommit_error(
         &r, &ctx, &conf, ERROR_MEMORY_LIMIT);
     TEST_ASSERT(rc == NGX_OK, "postcommit error should send terminal chunk");
-    TEST_ASSERT(ctx.streaming.failure_recorded == 1,
+    TEST_ASSERT(ctx.streaming.completion.failure_recorded == 1,
         "postcommit error should record failure once");
     TEST_ASSERT(metrics.streaming.budget_exceeded_total == 1,
         "memory-limit postcommit should classify budget exceeded");
 
-    ctx.streaming.failure_recorded = 0;
+    ctx.streaming.completion.failure_recorded = 0;
     ctx.streaming.handle = (struct StreamingConverterHandle *) (uintptr_t) 0x4;
     conf.streaming.on_error = NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_REJECT;
     rc = ngx_http_markdown_streaming_precommit_error(
@@ -2005,7 +2005,7 @@ test_null_input_tracking_and_body_filter_entry(void)
         "null-input handler should propagate resume backpressure");
 
     ctx.streaming.pending_output = NULL;
-    ctx.streaming.finalize_after_pending = 1;
+    ctx.streaming.completion.finalize_after_pending = 1;
     ctx.streaming.handle = NULL;
     g_next_body_filter_rc = NGX_OK;
     rc = ngx_http_markdown_streaming_handle_null_input(
@@ -2331,11 +2331,11 @@ test_commit_feed_and_finalize_core_paths(void)
         &r, &ctx, &conf, ERROR_INTERNAL, NULL, 0);
     TEST_ASSERT(rc == NGX_ERROR,
         "post-commit feed errors should terminate with downstream rc");
-    TEST_ASSERT(ctx.streaming.failure_recorded == 1,
+    TEST_ASSERT(ctx.streaming.completion.failure_recorded == 1,
         "post-commit feed errors should record failure once");
 
     ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_PRE;
-    ctx.streaming.failure_recorded = 0;
+    ctx.streaming.completion.failure_recorded = 0;
     ctx.eligible = 1;
     g_next_body_filter_rc = NGX_OK;
     rc = ngx_http_markdown_streaming_handle_feed_result(
@@ -2419,7 +2419,7 @@ test_commit_feed_and_finalize_core_paths(void)
     ctx.streaming.handle = (struct StreamingConverterHandle *)
         (uintptr_t) 0x18;
     ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
-    ctx.streaming.finalize_pending_lastbuf = 0;
+    ctx.streaming.completion.finalize_pending_lastbuf = 0;
     g_streaming_finalize_rc = ERROR_SUCCESS;
     g_streaming_finalize_result.markdown = out_data;
     g_streaming_finalize_result.markdown_len = 3;
@@ -2430,13 +2430,13 @@ test_commit_feed_and_finalize_core_paths(void)
     rc = ngx_http_markdown_streaming_finalize_request(&r, &ctx, &conf);
     TEST_ASSERT(rc == NGX_AGAIN,
         "finalize should defer terminal last_buf when markdown send is NGX_AGAIN");
-    TEST_ASSERT(ctx.streaming.finalize_pending_lastbuf == 1,
+    TEST_ASSERT(ctx.streaming.completion.finalize_pending_lastbuf == 1,
         "finalize should latch deferred terminal last_buf");
 
     ctx.streaming.handle = (struct StreamingConverterHandle *)
         (uintptr_t) 0x19;
     ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
-    ctx.streaming.pending_terminal_metrics = 0;
+    ctx.streaming.completion.pending_terminal_metrics = 0;
     g_streaming_finalize_rc = ERROR_SUCCESS;
     g_streaming_finalize_result.markdown = out_data;
     g_streaming_finalize_result.markdown_len = 3;
@@ -2447,14 +2447,14 @@ test_commit_feed_and_finalize_core_paths(void)
     rc = ngx_http_markdown_streaming_finalize_request(&r, &ctx, &conf);
     TEST_ASSERT(rc == NGX_AGAIN,
         "terminal last_buf backpressure should propagate NGX_AGAIN");
-    TEST_ASSERT(ctx.streaming.pending_terminal_metrics == 1,
+    TEST_ASSERT(ctx.streaming.completion.pending_terminal_metrics == 1,
         "terminal backpressure should latch pending terminal metrics");
 
     ctx.streaming.handle = (struct StreamingConverterHandle *)
         (uintptr_t) 0x1A;
     ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
-    ctx.streaming.pending_terminal_metrics = 0;
-    ctx.streaming.failure_recorded = 0;
+    ctx.streaming.completion.pending_terminal_metrics = 0;
+    ctx.streaming.completion.failure_recorded = 0;
     g_streaming_finalize_rc = ERROR_SUCCESS;
     g_streaming_finalize_result.markdown = out_data;
     g_streaming_finalize_result.markdown_len = 3;
@@ -2465,7 +2465,7 @@ test_commit_feed_and_finalize_core_paths(void)
     rc = ngx_http_markdown_streaming_finalize_request(&r, &ctx, &conf);
     TEST_ASSERT(rc == NGX_ERROR,
         "terminal last_buf hard errors should propagate");
-    TEST_ASSERT(ctx.streaming.failure_recorded == 1,
+    TEST_ASSERT(ctx.streaming.completion.failure_recorded == 1,
         "terminal last_buf hard errors should record failure");
 
     TEST_PASS("commit/feed-result/finalize core branches covered");
@@ -2833,7 +2833,7 @@ test_streaming_gap_branches(void)
     TEST_ASSERT(selected_path == NGX_HTTP_MARKDOWN_PATH_FULLBUFFER,
         "selector should use full-buffer when conf is NULL");
 
-    ctx.streaming.finalize_pending_lastbuf = 1;
+    ctx.streaming.completion.finalize_pending_lastbuf = 1;
     g_next_body_filter_rc = NGX_OK;
     rc = ngx_http_markdown_streaming_resume_pending(&r, &ctx, &conf);
     TEST_ASSERT(rc == NGX_OK,
@@ -2846,7 +2846,7 @@ test_streaming_gap_branches(void)
     pending_cl.buf = &pending_buf;
     pending_cl.next = NULL;
     ctx.streaming.pending_output = &pending_cl;
-    ctx.streaming.finalize_pending_lastbuf = 1;
+    ctx.streaming.completion.finalize_pending_lastbuf = 1;
     g_next_body_filter_rc = NGX_OK;
     rc = ngx_http_markdown_streaming_resume_pending(&r, &ctx, &conf);
     TEST_ASSERT(rc == NGX_OK,
@@ -2899,7 +2899,7 @@ test_streaming_gap_branches(void)
         (uintptr_t) 0x33;
     ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
     ctx.streaming.total_output_bytes = NGX_MAX_SIZE_T_VALUE;
-    ctx.streaming.failure_recorded = 0;
+    ctx.streaming.completion.failure_recorded = 0;
     g_streaming_finalize_rc = ERROR_SUCCESS;
     g_streaming_finalize_result.markdown = out_data;
     g_streaming_finalize_result.markdown_len = 2;
@@ -2912,7 +2912,7 @@ test_streaming_gap_branches(void)
         "finalize should propagate markdown send errors");
     TEST_ASSERT(ctx.streaming.total_output_bytes == NGX_MAX_SIZE_T_VALUE,
         "finalize markdown send should preserve saturated output counter");
-    TEST_ASSERT(ctx.streaming.failure_recorded == 1,
+    TEST_ASSERT(ctx.streaming.completion.failure_recorded == 1,
         "finalize markdown send error should record failure");
 
     ctx.streaming.handle = (struct StreamingConverterHandle *)
@@ -2994,7 +2994,7 @@ test_streaming_gap_branches(void)
     ctx.streaming.handle = (struct StreamingConverterHandle *)
         (uintptr_t) 0x35;
     ctx.streaming.pending_output = NULL;
-    ctx.streaming.finalize_after_pending = 0;
+    ctx.streaming.completion.finalize_after_pending = 0;
     rc = ngx_http_markdown_streaming_body_filter(&r, NULL);
     TEST_ASSERT(rc == NGX_OK,
         "body_filter NULL input should use null-input helper success path");
