@@ -155,7 +155,7 @@ ngx_http_markdown_plan_count_headers(ngx_http_request_t *r,
     const u_char *name, size_t name_len)
 {
     ngx_list_part_t  *part;
-    ngx_table_elt_t  *headers;
+    const ngx_table_elt_t  *headers;
     ngx_uint_t        count;
 
     count = 0;
@@ -252,12 +252,6 @@ ngx_http_markdown_plan_delete_all_headers(ngx_http_request_t *r,
             "maximum %d",
             (size_t) count,
             NGX_HTTP_MARKDOWN_PLAN_MAX_ENTRIES);
-        return NGX_ERROR;
-    }
-
-    if (count > ((size_t) -1)
-                 / sizeof(ngx_http_markdown_plan_saved_header_t))
-    {
         return NGX_ERROR;
     }
 
