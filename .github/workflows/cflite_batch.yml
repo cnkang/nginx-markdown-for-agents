@@ -22,14 +22,23 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: google/clusterfuzzlite/actions/run_fuzzers@884713a6c30a92e5e8544c39945cd7cb630abcd1  # v1
+        if: vars.CFLITE_STORAGE_REPO != ''
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           mode: batch
           fuzz-seconds: 3600
           sanitizer: address
-          storage-repo: ${{ github.repository }}-corpus
-          storage-repo-branch: main
-          storage-repo-branch-coverage: coverage
+          storage-repo: ${{ vars.CFLITE_STORAGE_REPO }}
+          storage-repo-branch: ${{ vars.CFLITE_STORAGE_REPO_BRANCH || 'main' }}
+          storage-repo-branch-coverage: ${{ vars.CFLITE_STORAGE_REPO_BRANCH_COVERAGE || 'coverage' }}
+
+      - uses: google/clusterfuzzlite/actions/run_fuzzers@884713a6c30a92e5e8544c39945cd7cb630abcd1  # v1
+        if: vars.CFLITE_STORAGE_REPO == ''
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          mode: batch
+          fuzz-seconds: 3600
+          sanitizer: address
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         if: failure()

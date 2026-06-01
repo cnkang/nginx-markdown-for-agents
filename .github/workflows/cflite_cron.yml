@@ -21,9 +21,15 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: google/clusterfuzzlite/actions/run_fuzzers@884713a6c30a92e5e8544c39945cd7cb630abcd1  # v1
+        if: vars.CFLITE_STORAGE_REPO != ''
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           mode: prune
           sanitizer: address
-          storage-repo: ${{ github.repository }}-corpus
-          storage-repo-branch: main
+          storage-repo: ${{ vars.CFLITE_STORAGE_REPO }}
+          storage-repo-branch: ${{ vars.CFLITE_STORAGE_REPO_BRANCH || 'main' }}
+
+      - name: Skip prune when corpus repository is missing
+        if: vars.CFLITE_STORAGE_REPO == ''
+        run: |
+          echo "Skip corpus prune: vars.CFLITE_STORAGE_REPO is not configured."
