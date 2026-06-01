@@ -73,7 +73,7 @@ static ngx_int_t
 ngx_http_markdown_streaming_process_chunk(
     ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx,
-    ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_conf_t *conf,
     const ngx_buf_t *buf);
 
 /*
@@ -360,7 +360,7 @@ static ngx_int_t
 ngx_http_markdown_streaming_ensure_handle(
     ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx,
-    ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_conf_t *conf,
     ngx_chain_t *in);
 
 /*
@@ -492,7 +492,7 @@ ngx_http_markdown_is_excluded_stream_type(
  */
 static void
 ngx_http_markdown_log_conditional_streaming(
-    ngx_http_request_t *r,
+    const ngx_http_request_t *r,
     const ngx_http_markdown_conf_t *conf)
 {
     /* r is used only inside ngx_log_debug0 which compiles to nothing
@@ -1754,7 +1754,7 @@ static ngx_int_t
 ngx_http_markdown_streaming_process_chunk(
     ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx,
-    ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_conf_t *conf,
     const ngx_buf_t *buf)
 {
     const u_char  *feed_data;
@@ -1878,7 +1878,7 @@ static ngx_int_t
 ngx_http_markdown_streaming_finalize_decomp(
     ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx,
-    ngx_http_markdown_conf_t *conf)
+    const ngx_http_markdown_conf_t *conf)
 {
     u_char    *decomp_data;
     size_t     decomp_len;
@@ -2798,7 +2798,7 @@ static ngx_int_t
 ngx_http_markdown_streaming_ensure_handle(
     ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx,
-    ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_conf_t *conf,
     ngx_chain_t *in)
 {
     ngx_int_t  rc;
