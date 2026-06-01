@@ -708,7 +708,7 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
         ctx->processing_path =
             NGX_HTTP_MARKDOWN_PATH_INCREMENTAL;
     }
-        /* else: no CL — deferred to body filter */
+    /* else: unknown Content-Length — path deferred to body filter */
 #else
     if (conf->large_body_threshold > 0
         && r->method != NGX_HTTP_HEAD
