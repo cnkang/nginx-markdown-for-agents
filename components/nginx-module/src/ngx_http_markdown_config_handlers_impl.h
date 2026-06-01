@@ -855,7 +855,7 @@ ngx_http_markdown_streaming_engine(ngx_conf_t *cf,
     ngx_http_compile_complex_value_t   ccv;
     ngx_http_complex_value_t          *cv;
     ngx_str_t                         *value;
-    u_char                            *var_marker;
+    const u_char                      *var_marker;
 
     if (mcf->streaming.engine != NULL) {
         return "is duplicate";
@@ -868,26 +868,25 @@ ngx_http_markdown_streaming_engine(ngx_conf_t *cf,
                              value[1].data + value[1].len,
                              '$');
 
-    if (var_marker == NULL) {
-        /* Static value: must be "off", "on", or "auto" */
-        if (!ngx_http_markdown_arg_equals(
-                &value[1], off_str,
-                sizeof(off_str) - 1)
-            && !ngx_http_markdown_arg_equals(
-                &value[1], on_str,
-                sizeof(on_str) - 1)
-            && !ngx_http_markdown_arg_equals(
-                &value[1], auto_str,
-                sizeof(auto_str) - 1))
-        {
-            ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
-                "invalid value \"%V\" in \"%V\" "
-                "directive, it must be \"off\", "
-                "\"on\", \"auto\", or contain "
-                "a variable",
-                &value[1], &cmd->name);
-            return NGX_CONF_ERROR;
-        }
+    /* Static value: must be "off", "on", or "auto" */
+    if (var_marker == NULL
+        && !ngx_http_markdown_arg_equals(
+               &value[1], off_str,
+               sizeof(off_str) - 1)
+        && !ngx_http_markdown_arg_equals(
+               &value[1], on_str,
+               sizeof(on_str) - 1)
+        && !ngx_http_markdown_arg_equals(
+               &value[1], auto_str,
+               sizeof(auto_str) - 1))
+    {
+        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+            "invalid value \"%V\" in \"%V\" "
+            "directive, it must be \"off\", "
+            "\"on\", \"auto\", or contain "
+            "a variable",
+            &value[1], &cmd->name);
+        return NGX_CONF_ERROR;
     }
 
     cv = ngx_palloc(cf->pool,

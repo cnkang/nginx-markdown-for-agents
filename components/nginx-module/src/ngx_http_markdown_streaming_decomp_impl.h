@@ -490,14 +490,13 @@ ngx_http_markdown_streaming_decomp_inflate_loop(
         }
     }
 
-    if (using_heap) {
-        if (ngx_http_markdown_streaming_decomp_finalize_buf(
-                heap_buf, buf_ptr, buf_size_ptr,
-                *out_produced, pool)
-            != NGX_OK)
-        {
-            return NGX_ERROR;
-        }
+    if (using_heap
+        && ngx_http_markdown_streaming_decomp_finalize_buf(
+               heap_buf, buf_ptr, buf_size_ptr,
+               *out_produced, pool)
+           != NGX_OK)
+    {
+        return NGX_ERROR;
     }
 
     return NGX_OK;
@@ -724,8 +723,12 @@ ngx_http_markdown_streaming_decomp_feed_case_zlib(
     size_t in_len,
     const ngx_http_markdown_streaming_decomp_feed_ctx_t *ctx)
 {
-    /* Configure zlib input (const-drop safe: inflate reads only). */
-    decomp->state.zlib.next_in = (Bytef *) in_data;
+    /*
+     * zlib's z_stream.next_in type depends on ZLIB_CONST.
+     * On builds without ZLIB_CONST it is Bytef *, but inflate()
+     * reads from the buffer only.
+     */
+    decomp->state.zlib.next_in = (Bytef *) in_data; /* NOSONAR */
     if (ngx_http_markdown_streaming_decomp_size_to_uint(
             in_len, &decomp->state.zlib.avail_in))
     {

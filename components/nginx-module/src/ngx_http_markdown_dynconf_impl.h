@@ -1015,6 +1015,58 @@ ngx_http_markdown_dynconf_parse_size_safe(const u_char *value, size_t value_len,
     return NGX_OK;
 }
 
+static ngx_int_t
+ngx_http_markdown_dynconf_parse_on_off(u_char *value, size_t value_len,
+                                       ngx_flag_t *out)
+{
+    static u_char  on_value[] = "on";
+    static u_char  off_value[] = "off";
+
+    if (value_len == 2 && ngx_strncasecmp(value, on_value, 2) == 0) {
+        *out = 1;
+        return NGX_OK;
+    }
+
+    if (value_len == 3 && ngx_strncasecmp(value, off_value, 3) == 0) {
+        *out = 0;
+        return NGX_OK;
+    }
+
+    return NGX_ERROR;
+}
+
+static ngx_int_t
+ngx_http_markdown_dynconf_parse_verbosity(u_char *value, size_t value_len,
+                                          ngx_uint_t *out)
+{
+    static u_char  error_value[] = "error";
+    static u_char  warn_value[] = "warn";
+    static u_char  info_value[] = "info";
+    static u_char  debug_value[] = "debug";
+
+    if (value_len == 5 && ngx_strncasecmp(value, error_value, 5) == 0) {
+        *out = NGX_HTTP_MARKDOWN_LOG_ERROR;
+        return NGX_OK;
+    }
+
+    if (value_len == 4 && ngx_strncasecmp(value, warn_value, 4) == 0) {
+        *out = NGX_HTTP_MARKDOWN_LOG_WARN;
+        return NGX_OK;
+    }
+
+    if (value_len == 4 && ngx_strncasecmp(value, info_value, 4) == 0) {
+        *out = NGX_HTTP_MARKDOWN_LOG_INFO;
+        return NGX_OK;
+    }
+
+    if (value_len == 5 && ngx_strncasecmp(value, debug_value, 5) == 0) {
+        *out = NGX_HTTP_MARKDOWN_LOG_DEBUG;
+        return NGX_OK;
+    }
+
+    return NGX_ERROR;
+}
+
 
 /*
  * Apply a single parsed key=value pair to a staging snapshot.
@@ -1041,15 +1093,6 @@ ngx_http_markdown_dynconf_apply(ngx_http_markdown_dynconf_snapshot_t *snapshot,
                                 u_char *value, size_t value_len,
                                 ngx_log_t *log)
 {
-    /* Canonical string constants for on/off and log-level matching.
-     * Length-bounded ngx_strncasecmp avoids NUL-termination dependency. */
-    static u_char  on_value[] = "on";
-    static u_char  off_value[] = "off";
-    static u_char  error_value[] = "error";
-    static u_char  warn_value[] = "warn";
-    static u_char  info_value[] = "info";
-    static u_char  debug_value[] = "debug";
-
     switch (key) {
 
     /* Toggle the markdown filter on or off for the current location.
@@ -1061,29 +1104,25 @@ ngx_http_markdown_dynconf_apply(ngx_http_markdown_dynconf_snapshot_t *snapshot,
      * ngx_http_markdown_is_enabled() to re-evaluate the variable
      * and ignore the dynconf change entirely. */
     case NGX_HTTP_MARKDOWN_DYNCONF_KEY_FILTER:
-        if (value_len == 2 && ngx_strncasecmp(value, on_value, 2) == 0) {
-            snapshot->enabled = 1;
-            snapshot->enabled_source = NGX_HTTP_MARKDOWN_ENABLED_STATIC;
-            snapshot->enabled_complex = NULL;
-        } else if (value_len == 3 && ngx_strncasecmp(value, off_value, 3) == 0) {
-            snapshot->enabled = 0;
-            snapshot->enabled_source = NGX_HTTP_MARKDOWN_ENABLED_STATIC;
-            snapshot->enabled_complex = NULL;
-        } else {
+        if (ngx_http_markdown_dynconf_parse_on_off(
+                value, value_len, &snapshot->enabled)
+            != NGX_OK)
+        {
             ngx_log_error(NGX_LOG_WARN, log, 0,
                           "markdown: invalid markdown_filter value \"%*s\"",
                           (int) value_len, value);
             return NGX_ERROR;
         }
+        snapshot->enabled_source = NGX_HTTP_MARKDOWN_ENABLED_STATIC;
+        snapshot->enabled_complex = NULL;
         break;
 
     /* Toggle noise pruning (boilerplate removal) on or off. */
     case NGX_HTTP_MARKDOWN_DYNCONF_KEY_PRUNE_NOISE:
-        if (value_len == 2 && ngx_strncasecmp(value, on_value, 2) == 0) {
-            snapshot->prune_noise = 1;
-        } else if (value_len == 3 && ngx_strncasecmp(value, off_value, 3) == 0) {
-            snapshot->prune_noise = 0;
-        } else {
+        if (ngx_http_markdown_dynconf_parse_on_off(
+                value, value_len, &snapshot->prune_noise)
+            != NGX_OK)
+        {
             ngx_log_error(NGX_LOG_WARN, log, 0,
                           "markdown: invalid prune_noise value \"%*s\"",
                           (int) value_len, value);
@@ -1097,15 +1136,10 @@ ngx_http_markdown_dynconf_apply(ngx_http_markdown_dynconf_snapshot_t *snapshot,
      * The bridge function ngx_http_markdown_log_verbosity_to_ngx_level()
      * converts to NGX_LOG_* at the actual ngx_log_error() call site. */
     case NGX_HTTP_MARKDOWN_DYNCONF_KEY_LOG_VERBOSITY:
-        if (value_len == 5 && ngx_strncasecmp(value, error_value, 5) == 0) {
-            snapshot->log_verbosity = NGX_HTTP_MARKDOWN_LOG_ERROR;
-        } else if (value_len == 4 && ngx_strncasecmp(value, warn_value, 4) == 0) {
-            snapshot->log_verbosity = NGX_HTTP_MARKDOWN_LOG_WARN;
-        } else if (value_len == 4 && ngx_strncasecmp(value, info_value, 4) == 0) {
-            snapshot->log_verbosity = NGX_HTTP_MARKDOWN_LOG_INFO;
-        } else if (value_len == 5 && ngx_strncasecmp(value, debug_value, 5) == 0) {
-            snapshot->log_verbosity = NGX_HTTP_MARKDOWN_LOG_DEBUG;
-        } else {
+        if (ngx_http_markdown_dynconf_parse_verbosity(
+                value, value_len, &snapshot->log_verbosity)
+            != NGX_OK)
+        {
             ngx_log_error(NGX_LOG_WARN, log, 0,
                           "markdown: invalid log_verbosity value \"%*s\"",
                           (int) value_len, value);

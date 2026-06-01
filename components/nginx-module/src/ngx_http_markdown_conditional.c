@@ -59,6 +59,65 @@ ngx_http_markdown_find_request_header(ngx_http_request_t *r, u_char *name, size_
     return NULL;
 }
 
+static ngx_int_t
+ngx_http_markdown_convert_for_conditional(
+    ngx_http_request_t *r,
+    const ngx_http_markdown_ctx_t *ctx,
+    struct MarkdownConverterHandle *converter,
+    struct MarkdownOptions *options,
+    struct MarkdownResult *conv_result)
+{
+#ifdef MARKDOWN_INCREMENTAL_ENABLED
+    if (ctx->processing_path == NGX_HTTP_MARKDOWN_PATH_INCREMENTAL) {
+        struct IncrementalConverterHandle *inc_handle;
+        uint32_t                          init_rc;
+        uint32_t                          feed_rc;
+        uint32_t                          fin_rc;
+
+        inc_handle = NULL;
+        init_rc = markdown_incremental_new_with_code(
+            options, &inc_handle);
+        if (init_rc != ERROR_SUCCESS || inc_handle == NULL) {
+            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                         "markdown: incremental converter init "
+                         "failed during If-None-Match check, "
+                         "error_code=%ud", (ngx_uint_t) init_rc);
+            return NGX_ERROR;
+        }
+
+        feed_rc = markdown_incremental_feed(
+            inc_handle, ctx->buffer.data, ctx->buffer.size);
+        if (feed_rc != 0) {
+            markdown_incremental_free(inc_handle);
+            ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
+                         "markdown: incremental feed failed during "
+                         "If-None-Match check, error_code=%ud", feed_rc);
+            return NGX_ERROR;
+        }
+
+        fin_rc = markdown_incremental_finalize(inc_handle, conv_result);
+        if (fin_rc != ERROR_SUCCESS) {
+            ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
+                         "markdown: incremental finalize failed during "
+                         "If-None-Match check, error_code=%ud", fin_rc);
+            /*
+             * finalize consumes the handle regardless of success/failure,
+             * so do NOT call markdown_incremental_free().  Clean up the
+             * result struct (which may hold partial Rust-owned fields).
+             */
+            markdown_result_free(conv_result);
+            return NGX_ERROR;
+        }
+
+        return NGX_OK;
+    }
+#endif
+
+    markdown_convert(converter, ctx->buffer.data, ctx->buffer.size,
+                     options, conv_result);
+    return NGX_OK;
+}
+
 /**
  * Evaluate and handle an If-None-Match conditional request for a Markdown response.
  *
@@ -161,54 +220,12 @@ ngx_http_markdown_handle_if_none_match(ngx_http_request_t *r,
         return NGX_ERROR;
     }
 
-#ifdef MARKDOWN_INCREMENTAL_ENABLED
-    if (ctx->processing_path == NGX_HTTP_MARKDOWN_PATH_INCREMENTAL) {
-        struct IncrementalConverterHandle *inc_handle;
-        uint32_t                          init_rc;
-        uint32_t                          feed_rc;
-        uint32_t                          fin_rc;
-
-        inc_handle = NULL;
-        init_rc = markdown_incremental_new_with_code(
-            &options, &inc_handle);
-        if (init_rc != ERROR_SUCCESS || inc_handle == NULL) {
-            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                         "markdown: incremental converter init "
-                         "failed during If-None-Match check, "
-                         "error_code=%ud", (ngx_uint_t) init_rc);
-            ngx_pfree(r->pool, conv_result);
-            return NGX_ERROR;
-        }
-
-        feed_rc = markdown_incremental_feed(
-            inc_handle, ctx->buffer.data, ctx->buffer.size);
-        if (feed_rc != 0) {
-            markdown_incremental_free(inc_handle);
-            ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-                         "markdown: incremental feed failed during "
-                         "If-None-Match check, error_code=%ud", feed_rc);
-            ngx_pfree(r->pool, conv_result);
-            return NGX_ERROR;
-        }
-
-        fin_rc = markdown_incremental_finalize(inc_handle, conv_result);
-        if (fin_rc != ERROR_SUCCESS) {
-            ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-                         "markdown: incremental finalize failed during "
-                         "If-None-Match check, error_code=%ud", fin_rc);
-            /*
-             * finalize consumes the handle regardless of success/failure,
-             * so do NOT call markdown_incremental_free().  Clean up the
-             * result struct (which may hold partial Rust-owned fields).
-             */
-            markdown_result_free(conv_result);
-            return NGX_ERROR;
-        }
-    } else
-#endif
+    if (ngx_http_markdown_convert_for_conditional(
+            r, ctx, converter, &options, conv_result)
+        != NGX_OK)
     {
-        markdown_convert(converter, ctx->buffer.data, ctx->buffer.size,
-                         &options, conv_result);
+        ngx_pfree(r->pool, conv_result);
+        return NGX_ERROR;
     }
 
     if (conv_result->error_code != 0) {
