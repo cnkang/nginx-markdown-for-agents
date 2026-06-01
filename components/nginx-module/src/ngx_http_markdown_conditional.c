@@ -64,7 +64,7 @@ ngx_http_markdown_convert_for_conditional(
     ngx_http_request_t *r,
     const ngx_http_markdown_ctx_t *ctx,
     struct MarkdownConverterHandle *converter,
-    struct MarkdownOptions *options,
+    const struct MarkdownOptions *options,
     struct MarkdownResult *conv_result)
 {
 #ifdef MARKDOWN_INCREMENTAL_ENABLED
