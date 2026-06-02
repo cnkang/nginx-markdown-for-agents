@@ -27,7 +27,7 @@
 #   0  Repository built successfully
 #   1  Error (missing arguments, missing tools, build failure)
 
-set -e
+set -euo pipefail
 
 ##############################################################################
 # Helpers
@@ -58,15 +58,15 @@ warn() {
 INPUT_DIR=""
 OUTPUT_DIR=""
 
-while [ $# -gt 0 ]; do
+while [[ $# -gt 0 ]]; do
     case "$1" in
         --input-dir)
-            [ -n "${2:-}" ] || die "--input-dir requires a value"
+            [[ -n "${2:-}" ]] || die "--input-dir requires a value"
             INPUT_DIR="$2"
             shift 2
             ;;
         --output-dir)
-            [ -n "${2:-}" ] || die "--output-dir requires a value"
+            [[ -n "${2:-}" ]] || die "--output-dir requires a value"
             OUTPUT_DIR="$2"
             shift 2
             ;;
@@ -84,15 +84,15 @@ done
 # Validation
 ##############################################################################
 
-if [ -z "$INPUT_DIR" ]; then
+if [[ -z "$INPUT_DIR" ]]; then
     die "Missing required option: --input-dir"
 fi
 
-if [ -z "$OUTPUT_DIR" ]; then
+if [[ -z "$OUTPUT_DIR" ]]; then
     die "Missing required option: --output-dir"
 fi
 
-if [ ! -d "$INPUT_DIR" ]; then
+if [[ ! -d "$INPUT_DIR" ]]; then
     die "Input directory does not exist: $INPUT_DIR"
 fi
 
@@ -128,11 +128,11 @@ info "Using repository tool: $CREATEREPO_CMD"
 # Check for .rpm files in input directory
 RPM_COUNT=0
 for f in "$INPUT_DIR"/*.rpm; do
-    [ -e "$f" ] || continue
+    [[ -e "$f" ]] || continue
     RPM_COUNT=$((RPM_COUNT + 1))
 done
 
-if [ "$RPM_COUNT" -eq 0 ]; then
+if [[ "$RPM_COUNT" -eq 0 ]]; then
     die "No .rpm packages found in: $INPUT_DIR"
 fi
 
@@ -148,7 +148,7 @@ PACKAGES_DIR="${REPO_ROOT}/packages"
 info "Creating YUM repository structure at: $REPO_ROOT"
 
 # Clean previous output if it exists
-if [ -d "$REPO_ROOT" ]; then
+if [[ -d "$REPO_ROOT" ]]; then
     info "Removing existing repository at $REPO_ROOT"
     rm -rf "$REPO_ROOT"
 fi
@@ -162,7 +162,7 @@ mkdir -p "$PACKAGES_DIR"
 info "Copying .rpm packages to packages/"
 
 for pkg in "$INPUT_DIR"/*.rpm; do
-    [ -e "$pkg" ] || continue
+    [[ -e "$pkg" ]] || continue
     cp "$pkg" "$PACKAGES_DIR/"
     info "  Added: $(basename "$pkg")"
 done
@@ -176,7 +176,7 @@ info "Generating repository metadata..."
 "$CREATEREPO_CMD" --database "$REPO_ROOT"
 
 # Verify repomd.xml was created
-if [ ! -f "${REPO_ROOT}/repodata/repomd.xml" ]; then
+if [[ ! -f "${REPO_ROOT}/repodata/repomd.xml" ]]; then
     die "Failed to generate repomd.xml"
 fi
 
@@ -190,7 +190,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 README_SRC="${PROJECT_ROOT}/packaging/repo/yum/README.md"
 
-if [ -f "$README_SRC" ]; then
+if [[ -f "$README_SRC" ]]; then
     cp "$README_SRC" "${REPO_ROOT}/README.md"
     info "Copied README.md to repository root"
 else

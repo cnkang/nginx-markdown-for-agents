@@ -1,5 +1,7 @@
 # Prebuilt Package Installation Guide
 
+> Looking for the full development/deployment guide? See [INSTALLATION.md](INSTALLATION.md).
+
 ## Overview
 
 This guide covers installing the nginx-markdown-for-agents module from

@@ -971,6 +971,13 @@ ngx_http_markdown_dynconf_parse_size_safe(const u_char *value, size_t value_len,
     u_char     *scratch;
     ssize_t     parsed;
 
+    if (value_len == 0) {
+        ngx_log_error(NGX_LOG_WARN, log, 0,
+                      "markdown: dynconf %s value is empty",
+                      key_name);
+        return NGX_ERROR;
+    }
+
     if (value_len > NGX_HTTP_MARKDOWN_DYNCONF_MAX_LINE) {
         ngx_log_error(NGX_LOG_WARN, log, 0,
                       "markdown: dynconf %s value too long "
@@ -1991,7 +1998,34 @@ ngx_http_markdown_dynconf_reload_normal(
          * applied_mtime with last_mtime only after this returns). */
         watcher->lkg_mtime = watcher->applied_mtime;
 
+        /*
+         * SHALLOW COPY: active_snapshot = staging_snapshot is a C struct
+         * assignment (bitwise copy).  NGINX worker event-loop ordering
+         * makes a plain assignment the correct lifecycle primitive here;
+         * do not use atomic builtins on this aggregate snapshot because
+         * coverage builds treat large/misaligned atomic struct access as
+         * a compile error.  The only pointer field
+         * (enabled_complex) points into the cycle-level ngx_conf_t
+         * which outlives both snapshots.  If a new pointer field is
+         * added to ngx_http_markdown_dynconf_snapshot_t that references
+         * staging-local memory, this assignment must be reviewed for
+         * use-after-free.
+         *
+         * Compile-time guard: if a field is added, sizeof changes and
+         * this assertion fires, forcing a review of shallow-copy safety.
+         */
         watcher->active_snapshot = watcher->staging_snapshot;
+#ifdef MARKDOWN_STREAMING_ENABLED
+        _Static_assert(
+            sizeof(ngx_http_markdown_dynconf_snapshot_t)
+                == 8 * sizeof(void *),
+            "dynconf_snapshot_t layout changed, review shallow copy");
+#else
+        _Static_assert(
+            sizeof(ngx_http_markdown_dynconf_snapshot_t)
+                == 7 * sizeof(void *),
+            "dynconf_snapshot_t layout changed, review shallow copy");
+#endif
         watcher->version++;
 
         ngx_http_markdown_dynconf_apply_snapshot(conf,

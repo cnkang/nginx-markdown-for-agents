@@ -23,6 +23,15 @@ pub enum Decision {
 }
 
 /// Reason for skipping conversion.
+///
+/// # Architecture note
+///
+/// `SkipReason` only describes reasons that originate inside
+/// [`make_decision()`]. Cross-layer skip reasons raised by the C module
+/// (e.g. `SkippedAcceptReject` from FFI negotiate results) are encoded
+/// in [`crate::decision::reason_code::ReasonCode`] and never appear in
+/// this enum. If you add a new skip reason, decide first whether it
+/// originates in Rust (add here) or C (add to `ReasonCode` only).
 #[derive(Debug, Clone, PartialEq)]
 pub enum SkipReason {
     /// Accept header indicates client does not prefer text/markdown.
