@@ -494,12 +494,28 @@ jobs:
           echo "RPM_FILENAME=${RPM_FILENAME}" >&2
         shell: bash
 
+      - name: Prepare nFPM config with version-stamped preinstall
+        run: |
+          # Copy preinstall.sh to a temp directory and substitute the version
+          # placeholder there, keeping the tracked checkout unmodified.
+          NFPM_TMP="$(mktemp -d)"
+          cp packaging/nfpm/scripts/preinstall.sh "${NFPM_TMP}/preinstall.sh"
+          sed -i "s/%%NGINX_VERSION%%/${NGINX_VERSION}/g" "${NFPM_TMP}/preinstall.sh"
+
+          # Generate a temporary nfpm config that references the temp preinstall
+          # while keeping all other paths relative to the workspace root.
+          sed "s|./packaging/nfpm/scripts/preinstall.sh|${NFPM_TMP}/preinstall.sh|" \
+            packaging/nfpm/nfpm.yaml > "${NFPM_TMP}/nfpm.yaml"
+
+          echo "NFPM_TMP=${NFPM_TMP}" >> "$GITHUB_ENV"
+          echo "Version-stamped preinstall.sh written to ${NFPM_TMP}/preinstall.sh" >&2
+        shell: bash
+
       - name: Generate DEB package
         run: |
           mkdir -p dist
-          sed -i "s/%%NGINX_VERSION%%/${NGINX_VERSION}/g" packaging/nfpm/scripts/preinstall.sh
           nfpm package \
-            --config packaging/nfpm/nfpm.yaml \
+            --config "${NFPM_TMP}/nfpm.yaml" \
             --packager deb \
             --target "dist/${{ steps.pkg-env.outputs.deb_filename }}"
           echo "Generated: dist/${{ steps.pkg-env.outputs.deb_filename }}" >&2
@@ -509,7 +525,7 @@ jobs:
       - name: Generate RPM package
         run: |
           nfpm package \
-            --config packaging/nfpm/nfpm.yaml \
+            --config "${NFPM_TMP}/nfpm.yaml" \
             --packager rpm \
             --target "dist/${{ steps.pkg-env.outputs.rpm_filename }}"
           echo "Generated: dist/${{ steps.pkg-env.outputs.rpm_filename }}" >&2
