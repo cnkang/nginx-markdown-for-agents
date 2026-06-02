@@ -622,7 +622,8 @@ compress_payload(const u_char *in, size_t in_len,
     if (type == NGX_HTTP_MARKDOWN_COMPRESSION_GZIP) {
         window_bits = MAX_WBITS + 16;
     } else if (type == NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE) {
-        window_bits = -MAX_WBITS;
+        /* zlib-wrapped deflate: matches both buffered and streaming paths */
+        window_bits = MAX_WBITS;
     } else {
         return NGX_ERROR;
     }

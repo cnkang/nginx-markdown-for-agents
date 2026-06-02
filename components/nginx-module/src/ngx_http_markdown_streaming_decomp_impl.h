@@ -172,8 +172,8 @@ ngx_http_markdown_streaming_decomp_create(
         break;
 
     case NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE:
-        /* deflate: -MAX_WBITS for raw deflate */
-        window_bits = -MAX_WBITS;
+        /* deflate: MAX_WBITS for zlib-wrapped (matches buffered path) */
+        window_bits = MAX_WBITS;
         decomp->state.zlib.zalloc = Z_NULL;
         decomp->state.zlib.zfree = Z_NULL;
         decomp->state.zlib.opaque = Z_NULL;

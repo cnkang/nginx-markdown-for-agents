@@ -971,6 +971,15 @@ ngx_http_markdown_dynconf_parse_size_safe(const u_char *value, size_t value_len,
     u_char     *scratch;
     ssize_t     parsed;
 
+    if (value_len > NGX_HTTP_MARKDOWN_DYNCONF_MAX_LINE) {
+        ngx_log_error(NGX_LOG_WARN, log, 0,
+                      "markdown: dynconf %s value too long "
+                      "(%uz > %uz limit)", key_name,
+                      value_len,
+                      (size_t) NGX_HTTP_MARKDOWN_DYNCONF_MAX_LINE);
+        return NGX_ERROR;
+    }
+
     scratch = malloc(value_len);
     if (scratch == NULL) {
         ngx_log_error(NGX_LOG_WARN, log, 0,
