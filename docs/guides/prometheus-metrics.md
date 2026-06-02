@@ -234,15 +234,19 @@ When `MARKDOWN_STREAMING_ENABLED` is compiled in, an additional 12 streaming tim
 - 1 TTFB gauge
 - 1 peak memory gauge
 
-v0.7.0 adds 5 runtime correctness counters:
+v0.7.0 adds 9 runtime correctness counters:
 
 - 1 delivery counter
 - 1 decision counter
 - 1 decompression budget exceeded counter
+- 1 decompression format error counter
+- 1 decompression truncated input counter
+- 1 decompression I/O error counter
+- 1 replay buffer errors counter
 - 1 parse timeouts counter
 - 1 parse budget exceeded counter
 
-**Total with streaming + v0.7.0: 45 time series.** This count is deterministic and bounded. No request-specific or high-cardinality labels are used.
+**Total with streaming + v0.7.0: 49 time series.** This count is deterministic and bounded. No request-specific or high-cardinality labels are used.
 
 ---
 
@@ -545,7 +549,6 @@ are covered by the stability policy above.
 | `nginx_markdown_replay_buffer_errors_total` | counter | — | Stable |
 | `nginx_markdown_parse_timeouts_total` | counter | — | Stable |
 | `nginx_markdown_parse_budget_exceeded_total` | counter | — | Stable |
-| `nginx_markdown_replay_buffer_errors_total` | counter | — | Stable |
 
 ### Delivery vs Decision Counter Semantics (v0.7.0)
 
