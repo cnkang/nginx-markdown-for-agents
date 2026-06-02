@@ -201,38 +201,48 @@ pub unsafe extern "C" fn markdown_negotiate_accept(
 
     let result_ref = unsafe { &mut *result };
 
-    let header_str = if accept_header.is_null() || accept_header_len == 0 {
-        ""
-    } else {
-        match std::str::from_utf8(unsafe {
-            std::slice::from_raw_parts(accept_header, accept_header_len)
-        }) {
-            Ok(s) => s,
-            Err(_) => {
+    // Defense-in-depth: negotiate() operates on borrowed &str and is panic-free
+    // by design, but a panic must never unwind into C. On panic we default to
+    // "do not convert" with MALFORMED reason (safe fail-open outcome).
+    let outcome = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+        let header_str = if accept_header.is_null() || accept_header_len == 0 {
+            ""
+        } else {
+            match std::str::from_utf8(unsafe {
+                std::slice::from_raw_parts(accept_header, accept_header_len)
+            }) {
+                Ok(s) => s,
+                Err(_) => {
+                    result_ref.should_convert = 0;
+                    result_ref.reason = NEGOTIATE_REASON_MALFORMED;
+                    return;
+                }
+            }
+        };
+
+        let wildcard = on_wildcard != 0;
+
+        use crate::negotiator::{NegotiationResult, PassthroughReason, negotiate};
+        match negotiate(header_str, wildcard) {
+            NegotiationResult::Convert => {
+                result_ref.should_convert = 1;
+                result_ref.reason = NEGOTIATE_REASON_CONVERT;
+            }
+            NegotiationResult::Passthrough { reason } => {
                 result_ref.should_convert = 0;
-                result_ref.reason = NEGOTIATE_REASON_MALFORMED;
-                return;
+                result_ref.reason = match reason {
+                    PassthroughReason::NoAcceptHeader => NEGOTIATE_REASON_NO_ACCEPT,
+                    PassthroughReason::LowerQValue => NEGOTIATE_REASON_LOWER_Q,
+                    PassthroughReason::ExplicitReject => NEGOTIATE_REASON_EXPLICIT_REJECT,
+                    PassthroughReason::MalformedHeader => NEGOTIATE_REASON_MALFORMED,
+                };
             }
         }
-    };
+    }));
 
-    let wildcard = on_wildcard != 0;
-
-    use crate::negotiator::{NegotiationResult, PassthroughReason, negotiate};
-    match negotiate(header_str, wildcard) {
-        NegotiationResult::Convert => {
-            result_ref.should_convert = 1;
-            result_ref.reason = NEGOTIATE_REASON_CONVERT;
-        }
-        NegotiationResult::Passthrough { reason } => {
-            result_ref.should_convert = 0;
-            result_ref.reason = match reason {
-                PassthroughReason::NoAcceptHeader => NEGOTIATE_REASON_NO_ACCEPT,
-                PassthroughReason::LowerQValue => NEGOTIATE_REASON_LOWER_Q,
-                PassthroughReason::ExplicitReject => NEGOTIATE_REASON_EXPLICIT_REJECT,
-                PassthroughReason::MalformedHeader => NEGOTIATE_REASON_MALFORMED,
-            };
-        }
+    if outcome.is_err() {
+        result_ref.should_convert = 0;
+        result_ref.reason = NEGOTIATE_REASON_MALFORMED;
     }
 }
 
@@ -407,77 +417,91 @@ pub unsafe extern "C" fn markdown_build_header_plan(
         unsafe { drop(Box::from_raw(old_handle as *mut HeaderPlanOwned)) };
     }
 
-    let ct = if content_type.is_null() || content_type_len == 0 {
-        "text/markdown; charset=utf-8"
-    } else {
-        std::str::from_utf8(unsafe { std::slice::from_raw_parts(content_type, content_type_len) })
+    // Defense-in-depth: header plan construction allocates and builds string
+    // buffers. A panic must never unwind into C. On panic we leave the output
+    // struct zeroed (count=0, entries=null, handle=null) — the safe empty plan.
+    let outcome = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+        let ct = if content_type.is_null() || content_type_len == 0 {
+            "text/markdown; charset=utf-8"
+        } else {
+            std::str::from_utf8(unsafe {
+                std::slice::from_raw_parts(content_type, content_type_len)
+            })
             .unwrap_or("text/markdown; charset=utf-8")
-    };
+        };
 
-    use crate::header_plan::{HeaderOp, HeaderPlan};
-    let plan = HeaderPlan::for_markdown_conversion(ct, has_etag != 0);
+        use crate::header_plan::{HeaderOp, HeaderPlan};
+        let plan = HeaderPlan::for_markdown_conversion(ct, has_etag != 0);
 
-    let mut owned = HeaderPlanOwned {
-        entries: Vec::with_capacity(plan.ops.len()),
-        key_storage: Vec::with_capacity(plan.ops.len()),
-        value_storage: Vec::with_capacity(plan.ops.len()),
-    };
+        let mut owned = HeaderPlanOwned {
+            entries: Vec::with_capacity(plan.ops.len()),
+            key_storage: Vec::with_capacity(plan.ops.len()),
+            value_storage: Vec::with_capacity(plan.ops.len()),
+        };
 
-    for op in &plan.ops {
-        match op {
-            HeaderOp::Set { name, value } => {
-                let mut key_vec = name.as_bytes().to_vec();
-                key_vec.push(0); /* NUL-terminate per FFI contract */
-                let mut val_vec = value.as_bytes().to_vec();
-                val_vec.push(0); /* NUL-terminate per FFI contract */
-                let key_len = key_vec.len() - 1; /* exclude NUL from len */
-                let val_len = val_vec.len() - 1;
-                owned.key_storage.push(key_vec.into_boxed_slice());
-                owned.value_storage.push(val_vec.into_boxed_slice());
-                let key = &owned.key_storage[owned.key_storage.len() - 1];
-                let val = &owned.value_storage[owned.value_storage.len() - 1];
-                owned.entries.push(FFIHeaderEntry {
-                    op_type: 0,
-                    key: key.as_ptr(),
-                    key_len,
-                    value: val.as_ptr(),
-                    value_len: val_len,
-                });
-            }
-            HeaderOp::Delete { name } => {
-                let mut key_vec = name.as_bytes().to_vec();
-                key_vec.push(0); /* NUL-terminate per FFI contract */
-                let key_len = key_vec.len() - 1;
-                owned.key_storage.push(key_vec.into_boxed_slice());
-                let key = &owned.key_storage[owned.key_storage.len() - 1];
-                owned.entries.push(FFIHeaderEntry {
-                    op_type: 1,
-                    key: key.as_ptr(),
-                    key_len,
-                    value: std::ptr::null(),
-                    value_len: 0,
-                });
-            }
-            HeaderOp::SetEtagPlaceholder => {
-                owned.entries.push(FFIHeaderEntry {
-                    op_type: 2,
-                    key: std::ptr::null(),
-                    key_len: 0,
-                    value: std::ptr::null(),
-                    value_len: 0,
-                });
+        for op in &plan.ops {
+            match op {
+                HeaderOp::Set { name, value } => {
+                    let mut key_vec = name.as_bytes().to_vec();
+                    key_vec.push(0); /* NUL-terminate per FFI contract */
+                    let mut val_vec = value.as_bytes().to_vec();
+                    val_vec.push(0); /* NUL-terminate per FFI contract */
+                    let key_len = key_vec.len() - 1; /* exclude NUL from len */
+                    let val_len = val_vec.len() - 1;
+                    owned.key_storage.push(key_vec.into_boxed_slice());
+                    owned.value_storage.push(val_vec.into_boxed_slice());
+                    let key = &owned.key_storage[owned.key_storage.len() - 1];
+                    let val = &owned.value_storage[owned.value_storage.len() - 1];
+                    owned.entries.push(FFIHeaderEntry {
+                        op_type: 0,
+                        key: key.as_ptr(),
+                        key_len,
+                        value: val.as_ptr(),
+                        value_len: val_len,
+                    });
+                }
+                HeaderOp::Delete { name } => {
+                    let mut key_vec = name.as_bytes().to_vec();
+                    key_vec.push(0); /* NUL-terminate per FFI contract */
+                    let key_len = key_vec.len() - 1;
+                    owned.key_storage.push(key_vec.into_boxed_slice());
+                    let key = &owned.key_storage[owned.key_storage.len() - 1];
+                    owned.entries.push(FFIHeaderEntry {
+                        op_type: 1,
+                        key: key.as_ptr(),
+                        key_len,
+                        value: std::ptr::null(),
+                        value_len: 0,
+                    });
+                }
+                HeaderOp::SetEtagPlaceholder => {
+                    owned.entries.push(FFIHeaderEntry {
+                        op_type: 2,
+                        key: std::ptr::null(),
+                        key_len: 0,
+                        value: std::ptr::null(),
+                        value_len: 0,
+                    });
+                }
             }
         }
-    }
 
-    if owned.entries.is_empty() {
+        if owned.entries.is_empty() {
+            result_ref.handle = std::ptr::null_mut();
+            result_ref.entries = std::ptr::null();
+            result_ref.count = 0;
+        } else {
+            result_ref.entries = owned.entries.as_ptr();
+            result_ref.count = owned.entries.len();
+            result_ref.handle = Box::into_raw(Box::new(owned)) as *mut FFIHeaderPlanHandle;
+        }
+    }));
+
+    if outcome.is_err() {
+        /* Panic caught — ensure a safe zeroed state (empty plan). */
         result_ref.handle = std::ptr::null_mut();
         result_ref.entries = std::ptr::null();
         result_ref.count = 0;
-    } else {
-        result_ref.entries = owned.entries.as_ptr();
-        result_ref.count = owned.entries.len();
-        result_ref.handle = Box::into_raw(Box::new(owned)) as *mut FFIHeaderPlanHandle;
     }
 }
 
@@ -563,32 +587,44 @@ pub unsafe extern "C" fn markdown_build_base_url(
         return 0;
     }
 
-    let host_str = if x_forwarded_host.is_null() || host_len == 0 {
-        None
-    } else {
-        std::str::from_utf8(unsafe { std::slice::from_raw_parts(x_forwarded_host, host_len) }).ok()
-    };
-
-    let proto_str = if x_forwarded_proto.is_null() || proto_len == 0 {
-        None
-    } else {
-        std::str::from_utf8(unsafe { std::slice::from_raw_parts(x_forwarded_proto, proto_len) })
+    // Defense-in-depth: parse_forwarded_headers operates on borrowed &str and
+    // is panic-free by design, but a panic must never unwind into C. On panic
+    // we return 0 (no bytes written), the safe default.
+    let outcome = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+        let host_str = if x_forwarded_host.is_null() || host_len == 0 {
+            None
+        } else {
+            std::str::from_utf8(unsafe {
+                std::slice::from_raw_parts(x_forwarded_host, host_len)
+            })
             .ok()
-    };
+        };
 
-    use crate::security::parse_forwarded_headers;
-    match parse_forwarded_headers(host_str, proto_str) {
-        Some((scheme, host)) => {
-            let url = format!("{scheme}://{host}");
-            let bytes = url.as_bytes();
-            if bytes.len() > out_buf_cap {
-                return 0;
+        let proto_str = if x_forwarded_proto.is_null() || proto_len == 0 {
+            None
+        } else {
+            std::str::from_utf8(unsafe {
+                std::slice::from_raw_parts(x_forwarded_proto, proto_len)
+            })
+            .ok()
+        };
+
+        use crate::security::parse_forwarded_headers;
+        match parse_forwarded_headers(host_str, proto_str) {
+            Some((scheme, host)) => {
+                let url = format!("{scheme}://{host}");
+                let bytes = url.as_bytes();
+                if bytes.len() > out_buf_cap {
+                    return 0;
+                }
+                unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), out_buf, bytes.len()) };
+                bytes.len()
             }
-            unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), out_buf, bytes.len()) };
-            bytes.len()
+            None => 0,
         }
-        None => 0,
-    }
+    }));
+
+    outcome.unwrap_or_default()
 }
 
 /// Release a header plan previously returned by `markdown_build_header_plan`.
@@ -605,11 +641,15 @@ pub unsafe extern "C" fn markdown_header_plan_free(plan: *mut FFIHeaderPlan) {
 
     let plan_ref = unsafe { &mut *plan };
     if !plan_ref.handle.is_null() {
-        unsafe { drop(Box::from_raw(plan_ref.handle as *mut HeaderPlanOwned)) };
+        /* Save the old handle before clearing external fields */
+        let old_handle = plan_ref.handle;
+        /* Zero all externally-visible fields FIRST */
+        plan_ref.handle = std::ptr::null_mut();
+        plan_ref.entries = std::ptr::null();
+        plan_ref.count = 0;
+        /* Now drop — no external field points to freed memory */
+        unsafe { drop(Box::from_raw(old_handle as *mut HeaderPlanOwned)) };
     }
-    plan_ref.handle = std::ptr::null_mut();
-    plan_ref.entries = std::ptr::null();
-    plan_ref.count = 0;
 }
 
 unsafe fn optional_str<'a>(ptr: *const u8, len: usize) -> Option<&'a str> {
