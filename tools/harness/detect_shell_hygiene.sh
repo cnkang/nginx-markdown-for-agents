@@ -39,7 +39,7 @@
 #
 # Exit codes:
 #   0 — no findings (or only allowlisted patterns)
-#   1 — one or more findings requiring review
+#   1 — one or more non-allowlisted findings requiring fix
 #
 
 set -euo pipefail
@@ -51,24 +51,71 @@ readonly MSG_NONE_FOUND="  (none found)"
 errors=0
 warnings=0
 
-# Files where specific violations are known and accepted.
-# Format: "relative/path:check_id:line_or_pattern:description"
+# ── Warning Allowlist ──
 #
-# (a) return-statement exemptions: one-liner functions where the
-#     implicit return of the sole command is intentional and documented.
-# (b) stdout-echo exemptions: progress output that is intentionally
-#     on stdout (e.g. --json output mode).
-# (c) -X HEAD exemptions: none expected; --head is always preferred.
-readonly RETURN_EXEMPT_FILES=(
+# Format: "filepath:pattern_id:func_or_detail:justification"
+#
+# Each entry exempts a specific warning from causing a non-zero exit.
+# filepath is matched as a substring; pattern_id identifies the check
+# (return, stderr, bracket, case, curl_head). Justification is mandatory.
+#
+# These are functions that are trivial logging wrappers (1-2 lines) or
+# test helpers where the implicit return of echo/printf >&2 is always 0.
+# They are tracked for future remediation but do not block CI.
+readonly WARNING_ALLOWLIST=(
+    # ── tools/compat-check/nginx-markdown-compat-check.sh ──
+    # Trivial single-statement logging functions; echo return is always 0
+    "tools/compat-check/nginx-markdown-compat-check.sh:return:log_info:trivial echo-only logger; implicit return is always 0"
+    "tools/compat-check/nginx-markdown-compat-check.sh:return:log_warn:trivial echo-only logger; implicit return is always 0"
+    "tools/compat-check/nginx-markdown-compat-check.sh:return:log_error:trivial echo-only logger; implicit return is always 0"
+    # ── tools/compat-check/test_compat_check.sh ──
+    # Test helper functions under set -e; implicit return safe for test harness
+    "tools/compat-check/test_compat_check.sh:return:setup_mock_dir:test setup helper under set -e; mkdir return is meaningful"
+    "tools/compat-check/test_compat_check.sh:return:cleanup_mock_dir:test cleanup helper under set -e; rm return is meaningful"
+    "tools/compat-check/test_compat_check.sh:return:create_mock_nginx:test fixture creator under set -e; last statement is redirect"
+    "tools/compat-check/test_compat_check.sh:return:create_mock_uname:test fixture creator under set -e; last statement is redirect"
+    "tools/compat-check/test_compat_check.sh:return:run_helper:test runner under set -e; captures exit code explicitly"
+    "tools/compat-check/test_compat_check.sh:return:run_test:test runner under set -e; orchestrates test assertions"
+    # ── tools/release/gates/check_artifact_naming.sh ──
+    # Single-statement logging functions; echo >&2 always returns 0
+    "tools/release/gates/check_artifact_naming.sh:return:log_info:trivial echo-only logger; implicit return is always 0"
+    "tools/release/gates/check_artifact_naming.sh:return:log_pass:trivial echo-only logger; implicit return is always 0"
+    "tools/release/gates/check_artifact_naming.sh:return:log_fail:trivial echo-only logger; implicit return is always 0"
+    "tools/release/gates/check_artifact_naming.sh:return:log_error:trivial echo-only logger; implicit return is always 0"
+    # ── tools/release/gates/check_install_layout.sh ──
+    # Single-statement logging functions; echo >&2 always returns 0
+    "tools/release/gates/check_install_layout.sh:return:log_info:trivial echo-only logger; implicit return is always 0"
+    "tools/release/gates/check_install_layout.sh:return:log_pass:trivial echo-only logger; implicit return is always 0"
+    "tools/release/gates/check_install_layout.sh:return:log_fail:trivial echo-only logger; implicit return is always 0"
+    "tools/release/gates/check_install_layout.sh:return:log_error:trivial echo-only logger; implicit return is always 0"
+    # ── tools/release/gates/check_postinst_safety.sh ──
+    # Single-statement logging functions; echo >&2 always returns 0
+    "tools/release/gates/check_postinst_safety.sh:return:log_info:trivial echo-only logger; implicit return is always 0"
+    "tools/release/gates/check_postinst_safety.sh:return:log_warn:trivial echo-only logger; implicit return is always 0"
+    "tools/release/gates/check_postinst_safety.sh:return:log_error:trivial echo-only logger; implicit return is always 0"
+    "tools/release/gates/check_postinst_safety.sh:return:log_violation:trivial echo-only logger; implicit return is always 0"
+    # ── tools/release/gates/gate3_local_package_smoke.sh ──
+    # die() calls exit 1 — never actually returns; implicit return is unreachable
+    "tools/release/gates/gate3_local_package_smoke.sh:return:die:function calls exit 1; return is unreachable"
+    # ── tools/release/gates/gate4_local_k8s_smoke.sh ──
+    # die() calls exit 1 — never actually returns; implicit return is unreachable
+    "tools/release/gates/gate4_local_k8s_smoke.sh:return:die:function calls exit 1; return is unreachable"
 )
 
-# Some scripts use set -e which makes implicit return safe in
-# trivial functions.  Still flag them as warnings per AGENTS.md
-# Rule 18 strict requirement.
+# Files where specific violations are known and accepted.
+# Format: "relative/path"
+# (Legacy array kept for backward compat with scanning loop)
+readonly RETURN_EXEMPT_FILES=(
+)
 
 echo "=== Shell Hygiene Detection (S7682 / S7688 / S131 / S1066 / Rule 18) ===" >&2
 echo "Scanning: ${SCAN_DIR}" >&2
 echo "" >&2
+
+# ── Collector for warning entries (used for allowlist filtering) ──
+# Each entry: "filepath:pattern_id:detail"
+WARNING_ENTRIES=()
+WARNING_ENTRY_COUNT=0
 
 # ── Pattern (a): Functions without explicit return ──
 #
@@ -102,6 +149,8 @@ while IFS= read -r script_file; do
             echo "  WARNING ${script_file}:${func_line} — function '${func_name}' has no explicit return statement" >&2
             warnings=$((warnings + 1))
             return_hits=$((return_hits + 1))
+            WARNING_ENTRIES+=("${script_file}:return:${func_name}")
+            WARNING_ENTRY_COUNT=$((WARNING_ENTRY_COUNT + 1))
         fi
     done < <(awk '
         /^[a-zA-Z_][a-zA-Z0-9_]*\(\)[[:space:]]*\{/ {
@@ -189,6 +238,8 @@ while IFS= read -r match; do
     echo "  WARNING ${file}:${line} — diagnostic message on stdout, add >&2: ${content}" >&2
     warnings=$((warnings + 1))
     stderr_hits=$((stderr_hits + 1))
+    WARNING_ENTRIES+=("${file}:stderr:line${line}")
+    WARNING_ENTRY_COUNT=$((WARNING_ENTRY_COUNT + 1))
 done < <(grep -rnE '(echo|printf)[[:space:]].*\b(INFO|WARN|WARNING|DEBUG|ERROR|SUGGEST)\b' "$SCAN_DIR" --include='*.sh' 2>/dev/null | grep -vE '>&2' || true)
 
 if [[ "$stderr_hits" -eq 0 ]]; then
@@ -333,10 +384,48 @@ if [[ "$curl_head_hits" -eq 0 ]]; then
 fi
 echo "" >&2
 
+# ── Allowlist filtering ──
+#
+# Filter collected warning entries against the allowlist. A warning is
+# exempt if its filepath, pattern_id, and detail all match an allowlist
+# entry (substring match on filepath, exact match on pattern_id,
+# substring match on detail/function name).
+
+non_exempt_warnings=0
+
+for entry in ${WARNING_ENTRIES[@]+"${WARNING_ENTRIES[@]}"}; do
+    # Parse entry: "filepath:pattern_id:detail"
+    entry_file="${entry%%:*}"
+    entry_rest="${entry#*:}"
+    entry_pattern="${entry_rest%%:*}"
+    entry_detail="${entry_rest#*:}"
+
+    exempt=0
+    for allow in ${WARNING_ALLOWLIST[@]+"${WARNING_ALLOWLIST[@]}"}; do
+        # Parse allowlist: "filepath:pattern_id:func_or_detail:justification"
+        allow_file="${allow%%:*}"
+        allow_rest="${allow#*:}"
+        allow_pattern="${allow_rest%%:*}"
+        allow_rest2="${allow_rest#*:}"
+        allow_detail="${allow_rest2%%:*}"
+
+        # Match: filepath substring, pattern_id exact, detail substring
+        if [[ "$entry_file" == *"$allow_file"* ]] \
+            && [[ "$entry_pattern" == "$allow_pattern" ]] \
+            && [[ "$entry_detail" == *"$allow_detail"* ]]; then
+            exempt=1
+            break
+        fi
+    done
+    if [[ "$exempt" -eq 0 ]]; then
+        non_exempt_warnings=$((non_exempt_warnings + 1))
+    fi
+done
+
 # ── Summary ──
 echo "=== Summary ===" >&2
 echo "  Errors:   ${errors}" >&2
-echo "  Warnings: ${warnings}" >&2
+echo "  Warnings: ${warnings} (${non_exempt_warnings} non-allowlisted)" >&2
 echo "" >&2
 
 if [[ "$errors" -gt 0 ]]; then
@@ -344,8 +433,13 @@ if [[ "$errors" -gt 0 ]]; then
     exit 1
 fi
 
+if [[ "$non_exempt_warnings" -gt 0 ]]; then
+    echo "FAIL: ${non_exempt_warnings} non-allowlisted warning(s) — fix or add to allowlist with justification" >&2
+    exit 1
+fi
+
 if [[ "$warnings" -gt 0 ]]; then
-    echo "PASS with warnings: ${warnings} warning(s) — review recommended" >&2
+    echo "PASS: ${warnings} warning(s) all allowlisted" >&2
     exit 0
 fi
 
