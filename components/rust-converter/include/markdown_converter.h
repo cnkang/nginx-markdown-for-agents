@@ -356,6 +356,13 @@ typedef struct MarkdownOptions {
    * provider-specific ratio.  Stored as a fixed-point value: actual
    * ratio = `chars_per_token_fixed / 10.0` (e.g., 38 = 3.8 chars/token).
    * Populated from the `markdown_chars_per_token` NGINX directive.
+   *
+   * # Type rationale
+   *
+   * `u8` is intentional for FFI ABI compactness (single byte, no padding).
+   * Valid range: 1–255, representing ratios 0.1–25.5 chars/token.
+   * Value 0 means "use default".  All practical LLM tokenizer ratios
+   * (GPT-4: ~3.5, Claude: ~4.0, Gemini: ~3.8) fit within this range.
    */
   uint8_t chars_per_token_fixed;
   /**

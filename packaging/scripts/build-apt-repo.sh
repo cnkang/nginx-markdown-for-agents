@@ -35,7 +35,7 @@
 #   0  Repository built successfully
 #   1  Error (missing arguments, missing tools, build failure)
 
-set -e
+set -euo pipefail
 
 ##############################################################################
 # Helpers
@@ -67,20 +67,20 @@ INPUT_DIR=""
 OUTPUT_DIR=""
 CODENAME="stable"
 
-while [ $# -gt 0 ]; do
+while [[ $# -gt 0 ]]; do
     case "$1" in
         --input-dir)
-            [ -n "${2:-}" ] || die "--input-dir requires a value"
+            [[ -n "${2:-}" ]] || die "--input-dir requires a value"
             INPUT_DIR="$2"
             shift 2
             ;;
         --output-dir)
-            [ -n "${2:-}" ] || die "--output-dir requires a value"
+            [[ -n "${2:-}" ]] || die "--output-dir requires a value"
             OUTPUT_DIR="$2"
             shift 2
             ;;
         --codename)
-            [ -n "${2:-}" ] || die "--codename requires a value"
+            [[ -n "${2:-}" ]] || die "--codename requires a value"
             CODENAME="$2"
             shift 2
             ;;
@@ -98,15 +98,15 @@ done
 # Validation
 ##############################################################################
 
-if [ -z "$INPUT_DIR" ]; then
+if [[ -z "$INPUT_DIR" ]]; then
     die "Missing required option: --input-dir"
 fi
 
-if [ -z "$OUTPUT_DIR" ]; then
+if [[ -z "$OUTPUT_DIR" ]]; then
     die "Missing required option: --output-dir"
 fi
 
-if [ ! -d "$INPUT_DIR" ]; then
+if [[ ! -d "$INPUT_DIR" ]]; then
     die "Input directory does not exist: $INPUT_DIR"
 fi
 
@@ -134,11 +134,11 @@ fi
 # Check for .deb files in input directory
 DEB_COUNT=0
 for f in "$INPUT_DIR"/*.deb; do
-    [ -e "$f" ] || continue
+    [[ -e "$f" ]] || continue
     DEB_COUNT=$((DEB_COUNT + 1))
 done
 
-if [ "$DEB_COUNT" -eq 0 ]; then
+if [[ "$DEB_COUNT" -eq 0 ]]; then
     die "No .deb packages found in: $INPUT_DIR"
 fi
 
@@ -162,7 +162,7 @@ info "Creating APT repository structure at: $REPO_ROOT"
 info "Codename: $CODENAME"
 
 # Clean previous output if it exists
-if [ -d "$REPO_ROOT" ]; then
+if [[ -d "$REPO_ROOT" ]]; then
     info "Removing existing repository at $REPO_ROOT"
     rm -rf "$REPO_ROOT"
 fi
@@ -181,7 +181,7 @@ done
 info "Copying .deb packages to pool/main/"
 
 for pkg in "$INPUT_DIR"/*.deb; do
-    [ -e "$pkg" ] || continue
+    [[ -e "$pkg" ]] || continue
     cp "$pkg" "$POOL_DIR/"
     info "  Added: $(basename "$pkg")"
 done
@@ -209,7 +209,7 @@ for arch in $ARCHITECTURES; do
     done > "$PACKAGES_FILE"
 
     # If dpkg-scanpackages does not support --arch, filter manually
-    if [ ! -s "$PACKAGES_FILE" ]; then
+    if [[ ! -s "$PACKAGES_FILE" ]]; then
         info "  Fallback: scanning all packages for arch=$arch"
         (
             cd "$REPO_ROOT"
@@ -257,7 +257,7 @@ DATE_STR="$(date -u '+%a, %d %b %Y %H:%M:%S UTC')"
 # Build architectures and components strings
 ARCH_LIST=""
 for arch in $ARCHITECTURES; do
-    if [ -n "$ARCH_LIST" ]; then
+    if [[ -n "$ARCH_LIST" ]]; then
         ARCH_LIST="${ARCH_LIST} ${arch}"
     else
         ARCH_LIST="$arch"
@@ -328,7 +328,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 README_SRC="${PROJECT_ROOT}/packaging/repo/apt/README.md"
 
-if [ -f "$README_SRC" ]; then
+if [[ -f "$README_SRC" ]]; then
     cp "$README_SRC" "${REPO_ROOT}/README.md"
     info "Copied README.md to repository root"
 else
