@@ -196,11 +196,11 @@ def main(argv: Optional[list[str]] = None) -> int:
         Exit code: 0 on success, 1 on failure.
     """
     args = build_cli_parser().parse_args(argv)
-    report_path = validate_read_path(args.report, purpose="unified report")
 
     try:
+        report_path = validate_read_path(args.report, purpose="unified report")
         report = load_json(str(report_path))  # type: ignore[assignment]
-    except (IOError, json.JSONDecodeError) as e:
+    except (IOError, json.JSONDecodeError, ValueError) as e:
         print(f"ERROR: failed to load report: {e}", file=sys.stderr)
         return 1
 

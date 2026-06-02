@@ -15,6 +15,7 @@ This page is the readable overlay, not the machine-owned truth.
 | `nginx-protocol` | focused semantic | `make test-nginx-unit`, `make test-nginx-integration` |
 | `ffi-boundary` | focused semantic | `make build`, `make test-rust` |
 | `observability-metrics` | focused semantic | `make docs-check`, `make release-gates-check` |
+| `v070-gates` | focused semantic | `make release-gates-check-070`, `make test-rust`, `make check-headers` |
 | `release-governance` | focused semantic | `make release-gates-check`, `make release-gates-check-strict`, `make release-gates-check-055` |
 | `runtime-e2e` | umbrella | `make verify-chunked-native-e2e-smoke`, `make verify-streaming-failure-cache-e2e` |
 | `release-quality` | umbrella | `make harness-check-full` |
@@ -91,3 +92,4 @@ Safety/engineering invariants always win; user-task controls scope and approach.
 | 0.6.3 | 2026-05-12 | Kang | Added e2e-harness-rust verification family, e2e-migration risk pack, and tools/e2e-harness/** paths to runtime-streaming and nginx-protocol-safety packs |
 | 0.6.3 | 2026-05-14 | Kang | Added shell-hygiene (S7682/S1066/Rule 18) and const-correctness detection scripts; extended tooling-path-security pack paths and keywords; updated harness-security family description |
 | 0.6.6 | 2026-05-16 | Kang | Added replay buffer keywords (replay buffer, failopen_completed, precommit_error) to runtime-streaming risk pack; updated primary surfaces to include replay buffer integrity; introduced Spec Resolver Priority section (priority-ordered resolution: agents-baseline > user-task > active-spec-pointer > agents-workflow > harness-core > replay-calibration) ensuring safety/engineering invariants always win over user-task scope |
+| 0.7.0 | 2026-05-31 | Kiro | Added v070-gates verification family (release-gates-check-070, test-rust, check-headers) to sync with JSON manifest |
