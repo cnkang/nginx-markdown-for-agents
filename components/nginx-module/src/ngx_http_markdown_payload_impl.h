@@ -571,7 +571,7 @@ ngx_http_markdown_append_buffered_chunk(ngx_http_request_t *r,
         return NGX_OK;
     }
 
-    chunk_size = cl->buf->last - cl->buf->pos;
+    chunk_size = ngx_http_markdown_buf_len_safe(cl->buf);
     if (chunk_size == 0) {
         return NGX_OK;
     }

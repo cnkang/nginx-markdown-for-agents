@@ -115,7 +115,7 @@ ngx_http_markdown_chain_size(const ngx_chain_t *in)
     
     for (const ngx_chain_t *cl = in; cl != NULL; cl = cl->next) {
         if (cl->buf != NULL) {
-            len = cl->buf->last - cl->buf->pos;
+            len = ngx_http_markdown_buf_len_safe(cl->buf);
             if (len > ((size_t) -1) - size) {
                 return (size_t) -1;
             }
@@ -153,7 +153,7 @@ ngx_http_markdown_chain_to_buffer(const ngx_chain_t *in, u_char *dest,
             continue;
         }
         
-        len = cl->buf->last - cl->buf->pos;
+        len = ngx_http_markdown_buf_len_safe(cl->buf);
         
         if (copied > size || len > size - copied) {
             return NGX_ERROR;
@@ -538,6 +538,7 @@ ngx_http_markdown_decompress_gzip(ngx_http_request_t *r,
     size_t                             input_size;
     u_char                            *output_data;
     size_t                             output_size;
+    size_t                             total_decompressed;
     ngx_int_t                          chain_rc;
     ngx_int_t                          loop_rc;
     int                                zrc;
@@ -679,14 +680,20 @@ ngx_http_markdown_decompress_gzip(ngx_http_request_t *r,
     cl->next = NULL;
     *out = cl;
     
+    /* Save total_out before inflateEnd releases the stream (Rule 15) */
+    total_decompressed = stream.total_out;
+
     /* Clean up with inflateEnd() */
     inflateEnd(&stream);
     
     ngx_log_debug3(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                   "markdown: decompression succeeded, "
                   "compressed=%uz bytes, decompressed=%uz bytes, ratio=%.1f",
-                  input_size, stream.total_out,
-                  (float)stream.total_out / input_size);
+                  input_size, total_decompressed,
+                  (float)total_decompressed / input_size);
+
+    /* Suppress -Wunused-but-set-variable when NGX_DEBUG is not enabled */
+    (void) total_decompressed;
     
     return NGX_OK;
 }

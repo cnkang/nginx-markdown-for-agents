@@ -363,10 +363,9 @@ ngx_http_markdown_send_304(ngx_http_request_t *r,
         return rc;
     }
 
-    ngx_http_finalize_request(r, NGX_HTTP_NOT_MODIFIED);
-
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                   "markdown: 304 Not Modified response sent");
 
+    ngx_http_finalize_request(r, NGX_HTTP_NOT_MODIFIED);
     return NGX_DONE;
 }
