@@ -142,18 +142,7 @@ struct ngx_pool_s {
  * Divergence risk: if streaming inspects additional buffer flags
  * (e.g. recycled, file, in_file), this stub must be extended.
  */
-struct ngx_buf_s {
-    u_char   *pos;
-    u_char   *last;
-    u_char   *start;
-    u_char   *end;
-    unsigned  temporary:1;
-    unsigned  memory:1;
-    unsigned  last_buf:1;
-    unsigned  last_in_chain:1;
-    unsigned  flush:1;
-    unsigned  sync:1;
-};
+/* struct ngx_buf_s provided by nginx_stubs/ngx_core.h */
 
 /* Minimal chain node; buf/next are used throughout streaming send paths. */
 struct ngx_chain_s {
@@ -2388,6 +2377,7 @@ test_commit_feed_and_finalize_core_paths(void)
     ctx.streaming.handle = (struct StreamingConverterHandle *)
         (uintptr_t) 0x16;
     ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
+    ctx.streaming.pending_output = NULL;
     g_streaming_finalize_rc = ERROR_INTERNAL;
     g_next_body_filter_rc = NGX_ERROR;
     rc = ngx_http_markdown_streaming_finalize_request(&r, &ctx, &conf);
@@ -2397,6 +2387,7 @@ test_commit_feed_and_finalize_core_paths(void)
     ctx.streaming.handle = (struct StreamingConverterHandle *)
         (uintptr_t) 0x17;
     ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
+    ctx.streaming.pending_output = NULL;
     g_streaming_finalize_rc = ERROR_SUCCESS;
     g_streaming_finalize_result.markdown = out_data;
     g_streaming_finalize_result.markdown_len = 3;
@@ -2420,6 +2411,7 @@ test_commit_feed_and_finalize_core_paths(void)
         (uintptr_t) 0x18;
     ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
     ctx.streaming.completion.finalize_pending_lastbuf = 0;
+    ctx.streaming.pending_output = NULL;
     g_streaming_finalize_rc = ERROR_SUCCESS;
     g_streaming_finalize_result.markdown = out_data;
     g_streaming_finalize_result.markdown_len = 3;
@@ -2437,6 +2429,7 @@ test_commit_feed_and_finalize_core_paths(void)
         (uintptr_t) 0x19;
     ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
     ctx.streaming.completion.pending_terminal_metrics = 0;
+    ctx.streaming.pending_output = NULL;
     g_streaming_finalize_rc = ERROR_SUCCESS;
     g_streaming_finalize_result.markdown = out_data;
     g_streaming_finalize_result.markdown_len = 3;
@@ -2455,6 +2448,7 @@ test_commit_feed_and_finalize_core_paths(void)
     ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
     ctx.streaming.completion.pending_terminal_metrics = 0;
     ctx.streaming.completion.failure_recorded = 0;
+    ctx.streaming.pending_output = NULL;
     g_streaming_finalize_rc = ERROR_SUCCESS;
     g_streaming_finalize_result.markdown = out_data;
     g_streaming_finalize_result.markdown_len = 3;
@@ -2900,6 +2894,7 @@ test_streaming_gap_branches(void)
     ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
     ctx.streaming.total_output_bytes = NGX_MAX_SIZE_T_VALUE;
     ctx.streaming.completion.failure_recorded = 0;
+    ctx.streaming.pending_output = NULL;
     g_streaming_finalize_rc = ERROR_SUCCESS;
     g_streaming_finalize_result.markdown = out_data;
     g_streaming_finalize_result.markdown_len = 2;
@@ -3029,6 +3024,7 @@ test_streaming_gap_branches(void)
     ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
     ctx.streaming.failopen_replay_initialized = 0;
     in_buf.last_buf = 1;
+    ctx.streaming.pending_output = NULL;
     g_streaming_finalize_rc = ERROR_SUCCESS;
     g_streaming_finalize_result.markdown = NULL;
     g_streaming_finalize_result.markdown_len = 0;
@@ -3041,6 +3037,7 @@ test_streaming_gap_branches(void)
         (uintptr_t) 0x38;
     ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
     ctx.streaming.total_output_bytes = 0;
+    ctx.streaming.pending_output = NULL;
     g_streaming_finalize_rc = ERROR_SUCCESS;
     g_streaming_finalize_result.markdown = NULL;
     g_streaming_finalize_result.markdown_len = 0;

@@ -71,15 +71,7 @@ struct ngx_pool_s {
     int dummy;
 };
 
-struct ngx_buf_s {
-    u_char *pos;
-    u_char *last;
-    off_t   file_pos;
-    off_t   file_last;
-    u_char *start;
-    u_char *end;
-    size_t  size;
-};
+/* struct ngx_buf_s provided by nginx_stubs/ngx_core.h */
 
 typedef struct {
     ngx_str_t key;

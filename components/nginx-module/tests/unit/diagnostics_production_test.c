@@ -54,15 +54,7 @@ struct ngx_cycle_s {
     ngx_log_t   *log;
 };
 
-struct ngx_buf_s {
-    u_char     *pos;
-    u_char     *last;
-    u_char     *start;
-    u_char     *end;
-    unsigned    last_buf:1;
-    unsigned    last_in_chain:1;
-    unsigned    memory:1;
-};
+/* struct ngx_buf_s provided by nginx_stubs/ngx_core.h */
 
 struct ngx_chain_s {
     ngx_buf_t    *buf;
