@@ -890,6 +890,19 @@ ngx_http_markdown_streaming_send_output(
 
     if (rc == NGX_AGAIN) {
         /*
+         * Guard: if a pending chain already exists, this is an
+         * unexpected re-entry.  Log and return error rather than
+         * silently leaking the old chain's Rust-owned buffers.
+         */
+        if (ctx->streaming.pending_output != NULL) {
+            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                          "markdown: streaming pending output "
+                          "re-entry detected, refusing to overwrite "
+                          "existing pending chain");
+            return NGX_ERROR;
+        }
+
+        /*
          * Keep exactly one outstanding pending chain owned by this
          * request context. The retry path (resume_pending) will submit
          * this same chain again once downstream write readiness returns.
@@ -2927,7 +2940,7 @@ ngx_http_markdown_streaming_append_replay_chunk(
         return NGX_OK;
     }
 
-    chunk_len = cl->buf->last - cl->buf->pos;
+    chunk_len = ngx_http_markdown_buf_len_safe(cl->buf);
     if (chunk_len == 0) {
         return NGX_OK;
     }

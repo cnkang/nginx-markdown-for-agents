@@ -1087,4 +1087,32 @@ ngx_http_markdown_decompress(ngx_http_request_t *r,
 #define NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT  -102
 #define NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR         -103
 
+/*
+ * Safe buffer length helper.
+ *
+ * Computes the number of bytes between buf->pos and buf->last
+ * with full NULL/validity guards.  Returns 0 on any validation
+ * failure rather than invoking undefined behaviour on NULL or
+ * invalid pointer arithmetic.
+ *
+ * Parameters:
+ *   buf - pointer to an ngx_buf_t (may be NULL)
+ *
+ * Returns:
+ *   (size_t)(buf->last - buf->pos) on success, 0 otherwise.
+ */
+static ngx_inline size_t
+ngx_http_markdown_buf_len_safe(const ngx_buf_t *buf)
+{
+    if (buf == NULL
+        || buf->pos == NULL
+        || buf->last == NULL
+        || buf->last < buf->pos)
+    {
+        return 0;
+    }
+
+    return (size_t) (buf->last - buf->pos);
+}
+
 #endif /* NGX_HTTP_MARKDOWN_FILTER_MODULE_H */

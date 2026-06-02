@@ -22,6 +22,19 @@ typedef struct ngx_shm_zone_s     ngx_shm_zone_t;
 typedef struct ngx_chain_s        ngx_chain_t;
 typedef struct ngx_array_s        ngx_array_t;
 typedef struct ngx_buf_s          ngx_buf_t;
+
+struct ngx_buf_s {
+    u_char     *pos;
+    u_char     *last;
+    u_char     *start;
+    u_char     *end;
+    unsigned    temporary:1;
+    unsigned    memory:1;
+    unsigned    last_buf:1;
+    unsigned    last_in_chain:1;
+    unsigned    flush:1;
+    unsigned    sync:1;
+};
 typedef struct ngx_http_complex_value_s ngx_http_complex_value_t;
 
 typedef struct ngx_rbtree_node_s  ngx_rbtree_node_t;
