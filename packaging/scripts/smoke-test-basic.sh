@@ -21,7 +21,7 @@
 #
 # Requirements: 5.1, 5.2, 5.3, 5.5, 5.6
 
-set -e
+set -euo pipefail
 
 ##############################################################################
 # Helpers
@@ -125,7 +125,7 @@ run_diagnostics() {
 # Argument parsing
 ##############################################################################
 
-if [ $# -lt 2 ]; then
+if [[ $# -lt 2 ]]; then
     printf 'ERROR: Missing required arguments\n' >&2
     usage
     exit 1
@@ -138,15 +138,15 @@ NGINX_VERSION="$2"
 # Validation
 ##############################################################################
 
-if [ -z "$PACKAGE_FILE" ]; then
+if [[ -z "$PACKAGE_FILE" ]]; then
     die "PACKAGE_FILE argument is empty"
 fi
 
-if [ -z "$NGINX_VERSION" ]; then
+if [[ -z "$NGINX_VERSION" ]]; then
     die "NGINX_VERSION argument is empty"
 fi
 
-if [ ! -f "$PACKAGE_FILE" ]; then
+if [[ ! -f "$PACKAGE_FILE" ]]; then
     die "Package file not found: ${PACKAGE_FILE}"
 fi
 
@@ -233,7 +233,7 @@ case "$PKG_FORMAT" in
         # --- DEB: Verify .so exists ---
         MODULE_PATH="$(detect_nginx_modules_path)/ngx_http_markdown_filter_module.so"
         info "Verifying module .so at: ${MODULE_PATH}"
-        if [ ! -f "${MODULE_PATH}" ]; then
+        if [[ ! -f "${MODULE_PATH}" ]]; then
             die "Module .so not found at expected path: ${MODULE_PATH}"
         fi
         info "Module .so exists: $(ls -la "${MODULE_PATH}" 2>&1)"
@@ -302,7 +302,7 @@ REPO
         # --- RPM: Verify .so exists ---
         MODULE_PATH="$(detect_nginx_modules_path)/ngx_http_markdown_filter_module.so"
         info "Verifying module .so at: ${MODULE_PATH}"
-        if [ ! -f "${MODULE_PATH}" ]; then
+        if [[ ! -f "${MODULE_PATH}" ]]; then
             die "Module .so not found at expected path: ${MODULE_PATH}"
         fi
         info "Module .so exists: $(ls -la "${MODULE_PATH}" 2>&1)"

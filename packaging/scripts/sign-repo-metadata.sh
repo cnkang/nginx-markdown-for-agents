@@ -18,7 +18,7 @@
 #   0  All metadata signed and verified successfully
 #   1  Error (missing key, missing files, signing/verification failure)
 
-set -e
+set -euo pipefail
 
 ##############################################################################
 # Helpers
@@ -68,7 +68,7 @@ shift $((OPTIND - 1))
 # Validation
 ##############################################################################
 
-if [ -z "$KEY_ID" ]; then
+if [[ -z "$KEY_ID" ]]; then
     die "GPG key ID not specified. Use -k KEY_ID or set GPG_KEY_ID env var."
 fi
 
@@ -123,7 +123,7 @@ sign_apt_release() {
 }
 
 sign_apt() {
-    if [ ! -d "$APT_DIR" ]; then
+    if [[ ! -d "$APT_DIR" ]]; then
         info "APT directory '$APT_DIR' not found, skipping APT signing."
         return 0
     fi
@@ -132,15 +132,15 @@ sign_apt() {
 
     # Find all Release files under dists/
     while IFS= read -r release_file; do
-        [ -e "$release_file" ] || continue
+        [[ -e "$release_file" ]] || continue
         sign_apt_release "$release_file"
         found=$((found + 1))
     done <<EOF
 $(find "$APT_DIR/dists" -name "Release" -not -name "InRelease" 2>/dev/null || true)
 EOF
 
-    if [ "$found" -eq 0 ]; then
-        if [ "$REQUIRE_METADATA" -eq 1 ]; then
+    if [[ "$found" -eq 0 ]]; then
+        if [[ "$REQUIRE_METADATA" -eq 1 ]]; then
             die "No Release files found under $APT_DIR/dists/ (--require-metadata mode)"
         fi
         info "WARNING: No Release files found under $APT_DIR/dists/"
@@ -180,7 +180,7 @@ sign_yum_repomd() {
 }
 
 sign_yum() {
-    if [ ! -d "$YUM_DIR" ]; then
+    if [[ ! -d "$YUM_DIR" ]]; then
         info "YUM directory '$YUM_DIR' not found, skipping YUM signing."
         return 0
     fi
@@ -189,15 +189,15 @@ sign_yum() {
 
     # Find all repomd.xml files under repodata/
     while IFS= read -r repomd_file; do
-        [ -e "$repomd_file" ] || continue
+        [[ -e "$repomd_file" ]] || continue
         sign_yum_repomd "$repomd_file"
         found=$((found + 1))
     done <<EOF
 $(find "$YUM_DIR" -path "*/repodata/repomd.xml" 2>/dev/null || true)
 EOF
 
-    if [ "$found" -eq 0 ]; then
-        if [ "$REQUIRE_METADATA" -eq 1 ]; then
+    if [[ "$found" -eq 0 ]]; then
+        if [[ "$REQUIRE_METADATA" -eq 1 ]]; then
             die "No repomd.xml files found under $YUM_DIR (--require-metadata mode)"
         fi
         info "WARNING: No repomd.xml files found under $YUM_DIR"

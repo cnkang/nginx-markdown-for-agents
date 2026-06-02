@@ -1668,9 +1668,11 @@ test_send_output_error_and_deferred_paths(void)
 
     g_alloc_chain_fail_once = 1;
     rc = ngx_http_markdown_streaming_send_output(
-        &r, &ctx, NULL, 0, 0);
+        &r, &ctx, NULL, 0, 1);
     TEST_ASSERT(rc == NGX_ERROR,
         "send_output should fail when chain-link allocation fails");
+    TEST_ASSERT(ctx.streaming.main_terminal_sent == 0,
+        "chain-link allocation failure must not latch terminal sent");
 
     r.buffered = 0;
     rc = ngx_http_markdown_streaming_handle_backpressure(&r, &ctx);
@@ -1685,16 +1687,22 @@ test_send_output_error_and_deferred_paths(void)
         &r, &ctx, &conf);
     TEST_ASSERT(rc == NGX_AGAIN,
         "deferred last_buf should propagate backpressure");
+    TEST_ASSERT(ctx.streaming.main_terminal_sent == 1,
+        "deferred last_buf backpressure should latch terminal sent");
     TEST_ASSERT(ctx.streaming.completion.pending_terminal_metrics == 1,
         "deferred last_buf backpressure should latch terminal metrics");
 
     ctx.streaming.completion.pending_terminal_metrics = 0;
     ctx.streaming.completion.failure_recorded = 0;
+    ctx.streaming.pending_output = NULL;
+    ctx.streaming.main_terminal_sent = 0;
     g_next_body_filter_rc = NGX_ERROR;
     rc = ngx_http_markdown_streaming_send_deferred_lastbuf(
         &r, &ctx, &conf);
     TEST_ASSERT(rc == NGX_ERROR,
         "deferred last_buf should propagate hard downstream errors");
+    TEST_ASSERT(ctx.streaming.main_terminal_sent == 0,
+        "deferred last_buf hard error must not latch terminal sent");
     TEST_ASSERT(ctx.streaming.completion.failure_recorded == 1,
         "deferred last_buf hard error should record postcommit failure");
 

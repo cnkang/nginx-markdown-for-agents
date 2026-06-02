@@ -17,6 +17,7 @@
 #
 # Requirements: 8.1, 8.2, 8.3, 8.4, 8.5, 8.6, 8.7, 8.8, 8.9
 
+set -uo pipefail
 set -x
 
 ##############################################################################
@@ -67,7 +68,7 @@ section "Module .so Path Check"
 MODULE_FOUND=""
 
 diag "Checking DEB path: ${MODULE_PATH_DEB}"
-if [ -f "${MODULE_PATH_DEB}" ]; then
+if [[ -f "${MODULE_PATH_DEB}" ]]; then
     diag "  File EXISTS"
     ls -la "${MODULE_PATH_DEB}" >&2
     MODULE_FOUND="${MODULE_PATH_DEB}"
@@ -76,7 +77,7 @@ else
 fi
 
 diag "Checking RPM path: ${MODULE_PATH_RPM}"
-if [ -f "${MODULE_PATH_RPM}" ]; then
+if [[ -f "${MODULE_PATH_RPM}" ]]; then
     diag "  File EXISTS"
     ls -la "${MODULE_PATH_RPM}" >&2
     MODULE_FOUND="${MODULE_PATH_RPM}"
@@ -85,20 +86,20 @@ else
 fi
 
 diag "Checking legacy RPM path: ${MODULE_PATH_LEGACY_RPM}"
-if [ -f "${MODULE_PATH_LEGACY_RPM}" ]; then
+if [[ -f "${MODULE_PATH_LEGACY_RPM}" ]]; then
     diag "  File EXISTS"
     ls -la "${MODULE_PATH_LEGACY_RPM}" >&2
 else
     diag "  File NOT FOUND"
 fi
 
-if [ -z "${MODULE_FOUND}" ]; then
+if [[ -z "${MODULE_FOUND}" ]]; then
     diag "WARNING: Module .so not found at either expected path"
 fi
 
 # Requirement 8.4: ldd dependency check
 section "ldd Dependency Check"
-if [ -n "${MODULE_FOUND}" ]; then
+if [[ -n "${MODULE_FOUND}" ]]; then
     if command -v ldd >/dev/null 2>&1; then
         ldd "${MODULE_FOUND}" >&2 || diag "ldd exited with code $?"
     else
@@ -110,10 +111,10 @@ fi
 
 # Requirement 8.5: Package manager install log
 section "Package Manager Install Log"
-if [ -n "${INSTALL_LOG:-}" ] && [ -f "${INSTALL_LOG}" ]; then
+if [[ -n "${INSTALL_LOG:-}" ]] && [[ -f "${INSTALL_LOG}" ]]; then
     diag "Install log (${INSTALL_LOG}):"
     cat "${INSTALL_LOG}" >&2
-elif [ -n "${INSTALL_LOG:-}" ]; then
+elif [[ -n "${INSTALL_LOG:-}" ]]; then
     diag "INSTALL_LOG set to '${INSTALL_LOG}' but file does not exist"
 else
     diag "INSTALL_LOG not set; no install log available"

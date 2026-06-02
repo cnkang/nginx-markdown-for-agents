@@ -61,32 +61,32 @@ shift $((OPTIND - 1))
 # Validation
 ##############################################################################
 
-if [ -z "$FILE" ]; then
+if [[ -z "$FILE" ]]; then
     die "File path not specified (-f FILE)"
 fi
 
-if [ -z "$IDENTIFIER" ]; then
+if [[ -z "$IDENTIFIER" ]]; then
     die "Identifier not specified (-i IDENTIFIER)"
 fi
 
-if [ ! -f "$FILE" ]; then
+if [[ ! -f "$FILE" ]]; then
     die "File not found: $FILE"
 fi
 
 # Locate checksums file
-if [ -z "$CHECKSUMS_FILE" ]; then
+if [[ -z "$CHECKSUMS_FILE" ]]; then
     # Try relative to script location, then relative to working directory
     SCRIPT_DIR="$(dirname "$0")"
-    if [ -f "${SCRIPT_DIR}/../checksums.sha256" ]; then
+    if [[ -f "${SCRIPT_DIR}/../checksums.sha256" ]]; then
         CHECKSUMS_FILE="${SCRIPT_DIR}/../checksums.sha256"
-    elif [ -f "packaging/checksums.sha256" ]; then
+    elif [[ -f "packaging/checksums.sha256" ]]; then
         CHECKSUMS_FILE="packaging/checksums.sha256"
     else
         die "Checksums file not found. Specify with -c or ensure packaging/checksums.sha256 exists."
     fi
 fi
 
-if [ ! -f "$CHECKSUMS_FILE" ]; then
+if [[ ! -f "$CHECKSUMS_FILE" ]]; then
     die "Checksums file not found: $CHECKSUMS_FILE"
 fi
 
@@ -104,13 +104,13 @@ while IFS= read -r line; do
     # Format: HASH  IDENTIFIER (two spaces)
     line_hash="${line%%  *}"
     line_id="${line#*  }"
-    if [ "$line_id" = "$IDENTIFIER" ]; then
+    if [[ "$line_id" = "$IDENTIFIER" ]]; then
         EXPECTED_SHA256="$line_hash"
         break
     fi
 done < "$CHECKSUMS_FILE"
 
-if [ -z "$EXPECTED_SHA256" ]; then
+if [[ -z "$EXPECTED_SHA256" ]]; then
     die "No checksum found for identifier '$IDENTIFIER' in $CHECKSUMS_FILE"
 fi
 
@@ -138,7 +138,7 @@ else
     die "Neither sha256sum nor shasum found — cannot verify checksum"
 fi
 
-if [ "$ACTUAL_SHA256" != "$EXPECTED_SHA256" ]; then
+if [[ "$ACTUAL_SHA256" != "$EXPECTED_SHA256" ]]; then
     die "SHA256 mismatch for $FILE (id: $IDENTIFIER): expected $EXPECTED_SHA256, got $ACTUAL_SHA256"
 fi
 

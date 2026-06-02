@@ -21,7 +21,7 @@
 #   - Imported key is removed from the keyring after signing
 #   - All GPG operations use --batch and --pinentry-mode loopback
 
-set -e
+set -euo pipefail
 
 ##############################################################################
 # Helpers
@@ -71,15 +71,15 @@ esac
 # Validation
 ##############################################################################
 
-if [ ! -f "$CHECKSUMS_FILE" ]; then
+if [[ ! -f "$CHECKSUMS_FILE" ]]; then
     die "SHA256SUMS file not found: $CHECKSUMS_FILE"
 fi
 
-if [ -z "${GPG_PRIVATE_KEY:-}" ]; then
+if [[ -z "${GPG_PRIVATE_KEY:-}" ]]; then
     die "GPG_PRIVATE_KEY environment variable is not set or empty."
 fi
 
-if [ -z "${GPG_PASSPHRASE:-}" ]; then
+if [[ -z "${GPG_PASSPHRASE:-}" ]]; then
     die "GPG_PASSPHRASE environment variable is not set or empty."
 fi
 
@@ -149,7 +149,7 @@ FINGERPRINT=""
 FINGERPRINT="$(gpg --batch --with-colons --list-secret-keys "$GPG_KEY_ID" 2>/dev/null \
     | grep '^fpr:' | head -n1 | cut -d: -f10)" || true
 
-if [ -n "$FINGERPRINT" ]; then
+if [[ -n "$FINGERPRINT" ]]; then
     # Delete the secret key first, then the public key
     gpg --batch --yes --delete-secret-keys "$FINGERPRINT" >/dev/null 2>&1 || true
     gpg --batch --yes --delete-keys "$FINGERPRINT" >/dev/null 2>&1 || true

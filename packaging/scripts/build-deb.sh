@@ -20,7 +20,7 @@
 #   0  Package built successfully
 #   1  Error (missing arguments, missing files, build failure)
 
-set -e
+set -euo pipefail
 
 ##############################################################################
 # Helpers
@@ -50,30 +50,30 @@ NGINX_VERSION=""
 OUTPUT_DIR=""
 MODULE_SO=""
 
-while [ $# -gt 0 ]; do
+while [[ $# -gt 0 ]]; do
     case "$1" in
         --version)
-            [ -n "${2:-}" ] || die "--version requires a value"
+            [[ -n "${2:-}" ]] || die "--version requires a value"
             PKG_VERSION="$2"
             shift 2
             ;;
         --arch)
-            [ -n "${2:-}" ] || die "--arch requires a value"
+            [[ -n "${2:-}" ]] || die "--arch requires a value"
             PKG_ARCH="$2"
             shift 2
             ;;
         --nginx-version)
-            [ -n "${2:-}" ] || die "--nginx-version requires a value"
+            [[ -n "${2:-}" ]] || die "--nginx-version requires a value"
             NGINX_VERSION="$2"
             shift 2
             ;;
         --output-dir)
-            [ -n "${2:-}" ] || die "--output-dir requires a value"
+            [[ -n "${2:-}" ]] || die "--output-dir requires a value"
             OUTPUT_DIR="$2"
             shift 2
             ;;
         --module-so)
-            [ -n "${2:-}" ] || die "--module-so requires a value"
+            [[ -n "${2:-}" ]] || die "--module-so requires a value"
             MODULE_SO="$2"
             shift 2
             ;;
@@ -91,23 +91,23 @@ done
 # Validation
 ##############################################################################
 
-if [ -z "$PKG_VERSION" ]; then
+if [[ -z "$PKG_VERSION" ]]; then
     die "Missing required option: --version"
 fi
 
-if [ -z "$PKG_ARCH" ]; then
+if [[ -z "$PKG_ARCH" ]]; then
     die "Missing required option: --arch"
 fi
 
-if [ -z "$NGINX_VERSION" ]; then
+if [[ -z "$NGINX_VERSION" ]]; then
     die "Missing required option: --nginx-version"
 fi
 
-if [ -z "$OUTPUT_DIR" ]; then
+if [[ -z "$OUTPUT_DIR" ]]; then
     die "Missing required option: --output-dir"
 fi
 
-if [ -z "$MODULE_SO" ]; then
+if [[ -z "$MODULE_SO" ]]; then
     die "Missing required option: --module-so"
 fi
 
@@ -124,7 +124,7 @@ case "$PKG_VERSION" in
 esac
 
 # Validate module .so exists
-if [ ! -f "$MODULE_SO" ]; then
+if [[ ! -f "$MODULE_SO" ]]; then
     die "Module .so file not found: $MODULE_SO"
 fi
 
@@ -138,7 +138,7 @@ DEBIAN_DIR="${PROJECT_ROOT}/packaging/debian"
 
 # Validate debian template files exist
 for tmpl_file in postinst postrm conffiles; do
-    if [ ! -f "${DEBIAN_DIR}/${tmpl_file}" ]; then
+    if [[ ! -f "${DEBIAN_DIR}/${tmpl_file}" ]]; then
         die "Missing debian template: ${DEBIAN_DIR}/${tmpl_file}"
     fi
 done
@@ -266,7 +266,7 @@ dpkg-deb --build "${BUILD_DIR}" "${DEB_OUTPUT}"
 # Verification
 ##############################################################################
 
-if [ ! -f "${DEB_OUTPUT}" ]; then
+if [[ ! -f "${DEB_OUTPUT}" ]]; then
     die "Build failed: output file not created at ${DEB_OUTPUT}"
 fi
 

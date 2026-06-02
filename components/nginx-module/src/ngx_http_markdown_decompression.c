@@ -158,6 +158,10 @@ ngx_http_markdown_chain_to_buffer(const ngx_chain_t *in, u_char *dest,
         if (copied > size || len > size - copied) {
             return NGX_ERROR;
         }
+
+        if (len == 0) {
+            continue;
+        }
         
         ngx_memcpy(dest + copied, cl->buf->pos, len);
         copied += len;
@@ -488,6 +492,11 @@ ngx_http_markdown_inflate_loop(ngx_http_request_t *r,
 /*
  * Decompress gzip/deflate compressed data using zlib
  *
+ * Despite the "gzip" in the function name, this function handles both
+ * gzip (Content-Encoding: gzip) and deflate (Content-Encoding: deflate)
+ * formats via the `type` parameter.  The name is a historical artifact
+ * from when only gzip was supported.
+ *
  * This function implements automatic decompression of gzip and deflate
  * compressed content using nginx's standard zlib dependency. It provides
  * a fully automatic "technical fallback" solution when upstream servers
@@ -635,8 +644,49 @@ ngx_http_markdown_decompress_gzip(ngx_http_request_t *r,
     loop_rc = ngx_http_markdown_inflate_loop(r, conf, &stream,
                                              &output_data, &output_size);
     if (loop_rc != NGX_OK) {
-        inflateEnd(&stream);
-        return loop_rc;
+        /*
+         * Fallback: if deflate decompression fails with FORMAT_ERROR,
+         * retry with raw deflate (-MAX_WBITS).  Some legacy servers
+         * (Microsoft IIS 5/6, older Java servlets) send raw deflate
+         * (RFC 1951 only) under Content-Encoding: deflate instead of
+         * zlib-wrapped (RFC 1950).  For gzip, no fallback is attempted.
+         */
+        if (loop_rc == NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR
+            && type == NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE)
+        {
+            ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                           "markdown: deflate zlib-wrapped failed, "
+                           "retrying with raw deflate (-MAX_WBITS)");
+
+            inflateEnd(&stream);
+
+            ngx_memzero(&stream, sizeof(z_stream));
+            stream.next_in = input_data;
+            stream.avail_in = (uInt) input_size;
+
+            zrc = inflateInit2(&stream, -MAX_WBITS);
+            if (zrc != Z_OK) {
+                ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                             "markdown: raw deflate inflateInit2 "
+                             "error: %d, category=conversion", zrc);
+                return NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR;
+            }
+
+            stream.next_out = output_data;
+            stream.avail_out = (uInt) output_size;
+
+            loop_rc = ngx_http_markdown_inflate_loop(r, conf, &stream,
+                                                     &output_data,
+                                                     &output_size);
+            if (loop_rc != NGX_OK) {
+                inflateEnd(&stream);
+                return loop_rc;
+            }
+            /* fallthrough to success path below */
+        } else {
+            inflateEnd(&stream);
+            return loop_rc;
+        }
     }
     
     /* Check if decompressed size exceeds decompression budget (Requirement 9.3, 9.4) */
@@ -690,7 +740,8 @@ ngx_http_markdown_decompress_gzip(ngx_http_request_t *r,
                   "markdown: decompression succeeded, "
                   "compressed=%uz bytes, decompressed=%uz bytes, ratio=%.1f",
                   input_size, total_decompressed,
-                  (float)total_decompressed / input_size);
+                  input_size > 0
+                      ? (float)total_decompressed / input_size : 0.0f);
 
     /* Suppress -Wunused-but-set-variable when NGX_DEBUG is not enabled */
     (void) total_decompressed;
@@ -939,7 +990,8 @@ ngx_http_markdown_decompress_brotli(ngx_http_request_t *r,
                   "markdown: brotli decompression succeeded, "
                   "compressed=%uz bytes, decompressed=%uz bytes, ratio=%.1f",
                   input_size, total_out,
-                  (float)total_out / input_size);
+                  input_size > 0
+                      ? (float)total_out / input_size : 0.0f);
     
     return NGX_OK;
     

@@ -56,7 +56,7 @@ while IFS= read -r file; do
     # and lacks hash == 0 filtering
     if grep -q 'part->nelts\|part\.nelts' "$file" 2>/dev/null \
         && grep -q 'headers\|ngx_table_elt_t' "$file" 2>/dev/null \
-        && ! grep -q 'hash == 0\|hash==0\|\.hash\s*==\s*0\|->hash\s*==\s*0' "$file" 2>/dev/null; then
+        && ! grep -q 'hash == 0\|hash==0\|\.hash[[:space:]]*==[[:space:]]*0\|->hash[[:space:]]*==[[:space:]]*0' "$file" 2>/dev/null; then
         VIOLATION_FILES+=("$file")
         VIOLATION_COUNT=$((VIOLATION_COUNT + 1))
     fi

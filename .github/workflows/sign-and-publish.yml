@@ -43,6 +43,9 @@ jobs:
     name: Sign DEB/RPM Packages
     runs-on: ubuntu-latest
     environment: release-signing
+    defaults:
+      run:
+        shell: bash
     permissions:
       contents: read
     steps:
@@ -76,7 +79,7 @@ jobs:
           # Preset passphrase for the key
           KEYGRIP=$(gpg --list-keys --with-colons --with-keygrip "${GPG_KEY_ID}" \
             | grep '^grp' | head -1 | cut -d: -f10)
-          if [ -n "${KEYGRIP}" ] && [ -n "${GPG_PASSPHRASE}" ]; then
+          if [[ -n "${KEYGRIP}" ]] && [[ -n "${GPG_PASSPHRASE}" ]]; then
             echo "${GPG_PASSPHRASE}" \
               | /usr/lib/gnupg/gpg-preset-passphrase --preset "${KEYGRIP}"
           fi
@@ -104,6 +107,9 @@ jobs:
     needs: sign-packages
     runs-on: ubuntu-latest
     environment: release-signing
+    defaults:
+      run:
+        shell: bash
     permissions:
       contents: read
     steps:
@@ -133,7 +139,7 @@ jobs:
           gpgconf --launch gpg-agent
           KEYGRIP=$(gpg --list-keys --with-colons --with-keygrip "${GPG_KEY_ID}" \
             | grep '^grp' | head -1 | cut -d: -f10)
-          if [ -n "${KEYGRIP}" ] && [ -n "${GPG_PASSPHRASE}" ]; then
+          if [[ -n "${KEYGRIP}" ]] && [[ -n "${GPG_PASSPHRASE}" ]]; then
             echo "${GPG_PASSPHRASE}" \
               | /usr/lib/gnupg/gpg-preset-passphrase --preset "${KEYGRIP}"
           fi
@@ -189,6 +195,9 @@ jobs:
     needs: sign-repo-metadata
     if: inputs.dry_run != 'true'
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
     permissions:
       contents: write
     steps:

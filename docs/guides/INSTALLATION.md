@@ -1,5 +1,7 @@
 # NGINX Markdown Filter Module — Installation Guide
 
+> For a quick package-only install, see [INSTALL.md](INSTALL.md).
+
 ## Table of Contents
 
 1. [Overview](#1-overview)

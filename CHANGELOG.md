@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.7.0] - 2026-05-26
+## [0.7.0] - 2026-06-02
 
 P0 runtime correctness fixes, Rust-first architecture modules, independent
 decompression budget, Accept header negotiation, parse timeout/budget,
@@ -104,6 +104,8 @@ dynconf dry-run/rollback, and runtime diagnostics.
 - `harness-check-full` now includes `check-headers`.
 - Cargo.toml version bumped to 0.7.0.
 - Helm chart version and appVersion bumped to 0.7.0.
+- ci: upgrade `softprops/action-gh-release` from v2.6.2 to v3 across
+  3 release workflows (release-binaries, release-packages, sign-and-publish).
 - SECURITY.md supported version updated to 0.7.x.
 - Resolve actionable SonarQube findings in C unit tests: const-qualify
   read-only locals (S5350), move loop variables into for-statements (S5955),

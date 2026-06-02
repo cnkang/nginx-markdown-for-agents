@@ -1,6 +1,6 @@
 ---
 domain: c-safety
-rules: [24]
+rules: [24, 42]
 paths:
   - "components/nginx-module/src/**"
   - "components/nginx-module/include/**"
@@ -61,3 +61,27 @@ Required:
   code; do not defer as cosmetic cleanup.
 - When fixing declaration/type-safety findings, run at least one compile+unit
   target for the touched C area and report residual warnings explicitly.
+
+
+### Rule 42 — volatile vs atomic memory visibility
+
+- `volatile` is acceptable **only** for single-threaded compiler-barrier
+  scenarios where the code path is explicitly documented as
+  "single-threaded by design" (e.g. NGINX event loop with no thread pool).
+- Do not use GCC `__atomic_load` / `__atomic_store` directly on aggregate
+  structs or snapshots.  Clang can diagnose those accesses as large or
+  misaligned atomic operations, and coverage builds promote that warning to a
+  hard failure.
+- If shared state truly needs cross-thread publication, publish a scalar,
+  pointer, or version word through a reviewed helper with documented
+  alignment, lock-free size, and explicit memory ordering.  Request-lifetime
+  NGINX worker event-loop snapshots should use a plain struct copy with the
+  single-threaded lifecycle assumption documented at the copy site.
+- Rationale: `volatile` prevents compiler reordering but provides no
+  happens-before semantics.  Direct `__atomic_*` builtins on aggregate state
+  are not a safe fallback; use a reviewed scalar/pointer publication strategy
+  if the code path actually becomes cross-threaded.
+- Verification:
+  1. `grep -rn 'volatile' components/nginx-module/src/` should return zero
+     hits, OR each hit must have an adjacent comment justifying single-threaded use.
+  2. `bash tools/harness/detect_volatile_atomic.sh` exits 0.

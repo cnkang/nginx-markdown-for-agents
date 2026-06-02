@@ -1,6 +1,6 @@
 ---
 domain: memory-budget
-rules: [3]
+rules: [3, 43]
 paths:
   - "components/nginx-module/src/**"
   - "components/rust-converter/src/**"
@@ -27,3 +27,24 @@ Required:
 - Never apply hidden floor/ceiling behavior that weakens a configured budget
   (for example enforcing a minimum depth that exceeds `state_stack` for small
   budgets) unless explicitly documented in spec and tested as intended behavior.
+
+
+### Rule 43 — Resizable buffer backing store allocation
+
+- `ngx_http_markdown_buffer_t::data` is a resizable backing store
+  allocated exclusively with `ngx_alloc()` (NOT pool allocation).
+  Always release with `ngx_free()`.
+- The design rationale (documented in `buffer.c:36-39` and
+  `buffer.c:220-224`): pool allocations cannot be individually freed,
+  so repeated buffer expansions on large responses would grow the pool
+  indefinitely.  `ngx_alloc/ngx_free` allows superseded buffers to be
+  released immediately.
+- A pool cleanup handler (`ngx_pool_cleanup_add`) is registered at
+  `buffer_init` time to ensure the backing store is freed when the
+  request pool is destroyed, even if no explicit `ngx_free` is called.
+- When code outside `buffer.c` needs to replace `ctx->buffer.data`
+  (e.g. decompression output exceeds capacity), it MUST use `ngx_alloc`
+  for the new allocation and `ngx_free` for the old — never `ngx_palloc`
+  or `ngx_pfree`.
+- Verification: `grep -n 'ngx_p.*alloc.*buffer\\.data\|ngx_pfree.*buffer'
+  components/nginx-module/src/` must return zero hits.

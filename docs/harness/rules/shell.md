@@ -1,6 +1,6 @@
 ---
 domain: shell
-rules: [11, 18]
+rules: [11, 18, 41]
 paths:
   - "tools/**/*.sh"
   - "tools/e2e/**"
@@ -79,3 +79,16 @@ Required:
 - For HTTP HEAD validation in curl-based harness scripts, use `curl --head`
   (or `-I`) instead of `-X HEAD`, and create any expected empty body artifact
   explicitly when downstream checks read a body file.
+
+
+### Rule 41 — Shell harness detectors must use POSIX ERE
+
+- `tools/harness/detect_*.sh` scripts must use POSIX Extended Regular
+  Expressions.  Use `[[:space:]]` instead of `\s`, `[[:digit:]]` instead
+  of `\d`, and avoid BRE-only `\(...\)` backreference syntax.
+- When extended patterns are needed, pass `grep -E` explicitly.
+- Rationale: BRE/ERE confusion caused the `detect_header_hash_filter.sh`
+  detector to silently produce false negatives (the `\s` pattern matched
+  nothing on macOS BSD grep), allowing Rule 40 violations to go undetected.
+- Verification: `grep -rn '\\s\|\\d\|\\w' tools/harness/detect_*.sh` must
+  return zero hits.

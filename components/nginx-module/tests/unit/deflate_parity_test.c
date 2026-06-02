@@ -350,6 +350,177 @@ test_deflate_parity_mixed_content(void)
     TEST_PASS("Mixed HTML content produces identical output");
 }
 
+/*
+ * Compress using raw deflate (window_bits = -MAX_WBITS).
+ * This simulates legacy servers (IIS 5/6) that send raw deflate
+ * under Content-Encoding: deflate.
+ */
+static int
+compress_deflate_raw(const unsigned char *in, size_t in_len,
+    unsigned char **out, size_t *out_len)
+{
+    z_stream  s;
+    int       rc;
+    size_t    cap;
+
+    if (in == NULL || in_len == 0 || out == NULL || out_len == NULL) {
+        return NGX_ERROR;
+    }
+
+    memset(&s, 0, sizeof(s));
+
+    /* -MAX_WBITS = raw deflate (no zlib header/trailer) */
+    rc = deflateInit2(&s, Z_DEFAULT_COMPRESSION, Z_DEFLATED,
+                      -MAX_WBITS, 8, Z_DEFAULT_STRATEGY);
+    if (rc != Z_OK) {
+        return NGX_ERROR;
+    }
+
+    cap = in_len + (in_len / 8) + 64;
+    *out = (unsigned char *) malloc(cap);
+    if (*out == NULL) {
+        deflateEnd(&s);
+        return NGX_ERROR;
+    }
+
+    s.next_in = (unsigned char *) in;
+    s.avail_in = (uInt) in_len;
+    s.next_out = *out;
+    s.avail_out = (uInt) cap;
+
+    rc = deflate(&s, Z_FINISH);
+    if (rc != Z_STREAM_END) {
+        free(*out);
+        *out = NULL;
+        deflateEnd(&s);
+        return NGX_ERROR;
+    }
+
+    *out_len = s.total_out;
+    deflateEnd(&s);
+    return NGX_OK;
+}
+
+/*
+ * Decompress using the buffered path with raw-deflate fallback.
+ * Mimics the production logic: try MAX_WBITS first, on Z_DATA_ERROR
+ * retry with -MAX_WBITS.
+ */
+static int
+decompress_buffered_with_fallback(const unsigned char *in, size_t in_len,
+    unsigned char **out, size_t *out_len, size_t max_size)
+{
+    z_stream  s;
+    int       rc;
+
+    if (in == NULL || in_len == 0 || out == NULL || out_len == NULL) {
+        return NGX_ERROR;
+    }
+
+    memset(&s, 0, sizeof(s));
+
+    /* First attempt: zlib-wrapped */
+    rc = inflateInit2(&s, MAX_WBITS);
+    if (rc != Z_OK) {
+        return NGX_ERROR;
+    }
+
+    *out = (unsigned char *) malloc(max_size);
+    if (*out == NULL) {
+        inflateEnd(&s);
+        return NGX_ERROR;
+    }
+
+    s.next_in = (unsigned char *) in;
+    s.avail_in = (uInt) in_len;
+    s.next_out = *out;
+    s.avail_out = (uInt) max_size;
+
+    rc = inflate(&s, Z_FINISH);
+    if (rc == Z_STREAM_END) {
+        *out_len = s.total_out;
+        inflateEnd(&s);
+        return NGX_OK;
+    }
+
+    /* Fallback: raw deflate on data error */
+    if (rc == Z_DATA_ERROR) {
+        inflateEnd(&s);
+        memset(&s, 0, sizeof(s));
+
+        rc = inflateInit2(&s, -MAX_WBITS);
+        if (rc != Z_OK) {
+            free(*out);
+            *out = NULL;
+            return NGX_ERROR;
+        }
+
+        s.next_in = (unsigned char *) in;
+        s.avail_in = (uInt) in_len;
+        s.next_out = *out;
+        s.avail_out = (uInt) max_size;
+
+        rc = inflate(&s, Z_FINISH);
+        if (rc == Z_STREAM_END) {
+            *out_len = s.total_out;
+            inflateEnd(&s);
+            return NGX_OK;
+        }
+    }
+
+    free(*out);
+    *out = NULL;
+    inflateEnd(&s);
+    return NGX_ERROR;
+}
+
+/*
+ * test_deflate_raw_fallback - Verify raw deflate can be decompressed
+ * via the buffered path's automatic fallback mechanism.
+ *
+ * This tests the N-01 fix: when a server sends raw deflate (RFC 1951
+ * without zlib header), the buffered path retries with -MAX_WBITS.
+ */
+static void
+test_deflate_raw_fallback(void)
+{
+    const char     *text;
+    unsigned char  *compressed;
+    size_t          compressed_len;
+    unsigned char  *decompressed;
+    size_t          decompressed_len;
+    int             rc;
+
+    text = "<h1>Raw Deflate Test</h1><p>Legacy server content.</p>";
+
+    rc = compress_deflate_raw((const unsigned char *) text,
+                              strlen(text),
+                              &compressed, &compressed_len);
+    TEST_ASSERT(rc == NGX_OK, "raw deflate compression should succeed");
+
+    /* Verify zlib-wrapped fails (raw deflate has no zlib header) */
+    rc = decompress_buffered_path(compressed, compressed_len,
+                                  &decompressed, &decompressed_len,
+                                  65536);
+    TEST_ASSERT(rc == NGX_ERROR,
+                "zlib-wrapped path should reject raw deflate");
+
+    /* Verify fallback succeeds */
+    rc = decompress_buffered_with_fallback(compressed, compressed_len,
+                                           &decompressed, &decompressed_len,
+                                           65536);
+    TEST_ASSERT(rc == NGX_OK,
+                "fallback path should decompress raw deflate");
+    TEST_ASSERT(decompressed_len == strlen(text),
+                "decompressed length should match original");
+    TEST_ASSERT(memcmp(decompressed, text, decompressed_len) == 0,
+                "decompressed content should match original");
+
+    free(compressed);
+    free(decompressed);
+    TEST_PASS("Raw deflate fallback produces correct output");
+}
+
 int
 main(void)
 {
@@ -360,6 +531,7 @@ main(void)
     test_deflate_parity_short();
     test_deflate_parity_repeated();
     test_deflate_parity_mixed_content();
+    test_deflate_raw_fallback();
 
     printf("\n========================================\n");
     printf("All tests passed!\n");

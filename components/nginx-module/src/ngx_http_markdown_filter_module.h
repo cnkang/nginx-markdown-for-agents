@@ -520,6 +520,8 @@ typedef struct {
         ngx_uint_t                        flushes_sent;
         size_t                            total_input_bytes;
         size_t                            total_output_bytes;
+        unsigned                          total_output_bytes_overflowed:1;
+        unsigned                          main_terminal_sent:1;
 
         /* TTFB tracking (from first feed to first non-empty output) */
         ngx_msec_t                        feed_start_ms;
@@ -1104,15 +1106,18 @@ ngx_http_markdown_decompress(ngx_http_request_t *r,
 static ngx_inline size_t
 ngx_http_markdown_buf_len_safe(const ngx_buf_t *buf)
 {
-    if (buf == NULL
-        || buf->pos == NULL
-        || buf->last == NULL
-        || buf->last < buf->pos)
-    {
+    ptrdiff_t diff;
+
+    if (buf == NULL || buf->pos == NULL || buf->last == NULL) {
         return 0;
     }
 
-    return (size_t) (buf->last - buf->pos);
+    diff = buf->last - buf->pos;
+    if (diff < 0) {
+        return 0;
+    }
+
+    return (size_t) diff;
 }
 
 #endif /* NGX_HTTP_MARKDOWN_FILTER_MODULE_H */

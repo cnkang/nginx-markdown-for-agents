@@ -652,6 +652,18 @@ pub unsafe extern "C" fn markdown_header_plan_free(plan: *mut FFIHeaderPlan) {
     }
 }
 
+/// Convert a C pointer + length pair to an optional UTF-8 `&str`.
+///
+/// Returns `None` if the pointer is null, the length is zero, or
+/// the bytes are not valid UTF-8.
+///
+/// # Safety
+///
+/// - `ptr` must be either NULL or point to `len` consecutive,
+///   properly initialized bytes.
+/// - If `ptr` is non-NULL, the memory must remain valid for the
+///   lifetime `'a`.
+/// - `len` must not exceed `isize::MAX`.
 unsafe fn optional_str<'a>(ptr: *const u8, len: usize) -> Option<&'a str> {
     if ptr.is_null() || len == 0 {
         return None;

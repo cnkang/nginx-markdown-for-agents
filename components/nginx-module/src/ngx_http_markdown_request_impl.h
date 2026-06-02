@@ -411,6 +411,15 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
      * never re-read the global active_snapshot.
      */
     ngx_memzero(&snap_copy, sizeof(snap_copy));
+
+    /*
+     * Copy the global snapshot exactly once.  NGINX runs timer reloads
+     * and request header filters on the worker event loop, not
+     * concurrently on separate threads, so a plain struct copy is the
+     * correct lifecycle primitive here.  Do not use atomic builtins on
+     * the aggregate snapshot: coverage builds promote clang's
+     * large/misaligned atomic-struct warning to a compile error.
+     */
     snap_copy = ngx_http_markdown_dynconf_watcher.active_snapshot;
 
     /*

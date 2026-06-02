@@ -17,7 +17,7 @@
 #   0  All packages signed successfully
 #   1  Error (missing key, missing tools, signing failure)
 
-set -e
+set -euo pipefail
 
 ##############################################################################
 # Helpers
@@ -65,7 +65,7 @@ shift $((OPTIND - 1))
 # Validation
 ##############################################################################
 
-if [ -z "$KEY_ID" ]; then
+if [[ -z "$KEY_ID" ]]; then
     die "GPG key ID not specified. Use -k KEY_ID or set GPG_KEY_ID env var."
 fi
 
@@ -74,7 +74,7 @@ if ! gpg --list-keys "$KEY_ID" >/dev/null 2>&1; then
     die "GPG key '$KEY_ID' not found in keyring."
 fi
 
-if [ ! -d "$PKG_DIR" ]; then
+if [[ ! -d "$PKG_DIR" ]]; then
     die "Package directory '$PKG_DIR' does not exist."
 fi
 
@@ -132,7 +132,7 @@ SUCCESS_COUNT=0
 
 # Sign .deb packages
 for pkg in "$PKG_DIR"/*.deb; do
-    [ -e "$pkg" ] || continue
+    [[ -e "$pkg" ]] || continue
     if sign_deb "$pkg"; then
         SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
     else
@@ -142,7 +142,7 @@ done
 
 # Sign .rpm packages
 for pkg in "$PKG_DIR"/*.rpm; do
-    [ -e "$pkg" ] || continue
+    [[ -e "$pkg" ]] || continue
     if sign_rpm "$pkg"; then
         SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
     else
@@ -156,12 +156,12 @@ done
 
 info "Signing complete: $SUCCESS_COUNT succeeded, $FAIL_COUNT failed"
 
-if [ "$FAIL_COUNT" -gt 0 ]; then
+if [[ "$FAIL_COUNT" -gt 0 ]]; then
     die "One or more packages failed to sign."
 fi
 
-if [ "$SUCCESS_COUNT" -eq 0 ]; then
-    if [ "$REQUIRE_PACKAGES" -eq 1 ]; then
+if [[ "$SUCCESS_COUNT" -eq 0 ]]; then
+    if [[ "$REQUIRE_PACKAGES" -eq 1 ]]; then
         die "No packages found in '$PKG_DIR' (--require-packages mode)"
     fi
     info "WARNING: No packages found in '$PKG_DIR'"

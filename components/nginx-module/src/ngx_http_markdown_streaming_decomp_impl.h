@@ -172,7 +172,17 @@ ngx_http_markdown_streaming_decomp_create(
         break;
 
     case NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE:
-        /* deflate: MAX_WBITS for zlib-wrapped (matches buffered path) */
+        /*
+         * deflate: MAX_WBITS for zlib-wrapped (RFC 1950 + 1951).
+         * Matches the buffered path primary attempt (decompression.c).
+         *
+         * Design decision: the streaming path does NOT fallback to
+         * -MAX_WBITS (raw deflate) because streaming cannot "retry"
+         * after consuming chunks.  The buffered path has an automatic
+         * raw-deflate retry.  If a server sends raw deflate and the
+         * streaming engine is active, the format error triggers
+         * fail-open (original compressed response delivered to client).
+         */
         window_bits = MAX_WBITS;
         decomp->state.zlib.zalloc = Z_NULL;
         decomp->state.zlib.zfree = Z_NULL;

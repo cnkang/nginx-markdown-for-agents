@@ -420,18 +420,23 @@ ngx_http_markdown_streaming_cleanup(void *data)
      * Pending output chains that hold Rust-allocated buffers
      * would leak if not freed. Walk the chain and release
      * each Rust buffer.
+     *
+     * Ownership discriminator: buffers created in send_output use
+     * ngx_palloc (b->memory=1, b->temporary=0) and are freed with
+     * the request pool.  Only buffers with b->temporary=1 are
+     * Rust-owned and require markdown_streaming_output_free().
+     * The ngx_calloc_buf zeroing guarantees temporary=0 for
+     * pool-copied buffers.
      */
     {
         for (ngx_chain_t *cl = ctx->streaming.pending_output;
              cl != NULL; cl = cl->next)
         {
-            if (cl->buf != NULL
-                && cl->buf->pos != NULL
-                && cl->buf->temporary)
-            {
-                markdown_streaming_output_free(
-                    cl->buf->pos,
-                    cl->buf->last - cl->buf->pos);
+            if (cl->buf != NULL && cl->buf->temporary) {
+                size_t len = ngx_http_markdown_buf_len_safe(cl->buf);
+                if (len > 0) {
+                    markdown_streaming_output_free(cl->buf->pos, len);
+                }
                 cl->buf->pos = NULL;
                 cl->buf->last = NULL;
             }
@@ -796,6 +801,7 @@ ngx_http_markdown_streaming_send_output(
     ngx_buf_t    *b;
     ngx_chain_t  *out;
     ngx_int_t     rc;
+    ngx_flag_t    terminal_last_buf;
 
     b = ngx_calloc_buf(r->pool);
     if (b == NULL) {
@@ -834,6 +840,17 @@ ngx_http_markdown_streaming_send_output(
     b->last_buf = (last_buf && r == r->main) ? 1 : 0;
     b->last_in_chain = last_buf ? 1 : 0;
 
+    /*
+     * Latch: prevent duplicate terminal signals.  Once the main
+     * request's last_buf has been sent downstream, further calls
+     * with last_buf=1 are silently deduplicated.
+     */
+    terminal_last_buf = b->last_buf;
+    if (terminal_last_buf && ctx->streaming.main_terminal_sent) {
+        b->last_buf = 0;
+        terminal_last_buf = 0;
+    }
+
     out = ngx_alloc_chain_link(r->pool);
     if (out == NULL) {
         return NGX_ERROR;
@@ -842,6 +859,12 @@ ngx_http_markdown_streaming_send_output(
     out->next = NULL;
 
     rc = ngx_http_next_body_filter(r, out);
+
+    if (terminal_last_buf
+        && (rc == NGX_OK || rc == NGX_DONE || rc == NGX_AGAIN))
+    {
+        ctx->streaming.main_terminal_sent = 1;
+    }
 
     /*
      * Record TTFB on first successful non-empty output send.
@@ -896,10 +919,28 @@ ngx_http_markdown_streaming_send_output(
          * silently leaking the old chain's Rust-owned buffers.
          */
         if (ctx->streaming.pending_output != NULL) {
+            ngx_chain_t *old;
+
             ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                           "markdown: streaming pending output "
                           "re-entry detected, refusing to overwrite "
                           "existing pending chain");
+
+            /* Free Rust-owned buffers in the old chain to prevent leaks */
+            for (old = ctx->streaming.pending_output;
+                 old != NULL; old = old->next)
+            {
+                if (old->buf != NULL && old->buf->temporary) {
+                    size_t len = ngx_http_markdown_buf_len_safe(old->buf);
+                    if (len > 0) {
+                        markdown_streaming_output_free(old->buf->pos, len);
+                    }
+                    old->buf->pos = NULL;
+                    old->buf->last = NULL;
+                }
+            }
+            ctx->streaming.pending_output = NULL;
+
             return NGX_ERROR;
         }
 
@@ -1587,10 +1628,13 @@ ngx_http_markdown_streaming_handle_feed_result(
             }
         }
 
-        if (out_len > (size_t) -1
-                     - ctx->streaming.total_output_bytes)
+        if (ctx->streaming.total_output_bytes_overflowed) {
+            /* latch is sticky: skip all further additions */
+        } else if (out_len > (size_t) -1
+                            - ctx->streaming.total_output_bytes)
         {
             ctx->streaming.total_output_bytes = (size_t) -1;
+            ctx->streaming.total_output_bytes_overflowed = 1;
         } else {
             ctx->streaming.total_output_bytes += out_len;
         }
@@ -1782,19 +1826,11 @@ ngx_http_markdown_streaming_process_chunk(
         return NGX_OK;
     }
 
-    if (buf->pos == NULL
-        || buf->last == NULL
-        || buf->last < buf->pos)
-    {
-        return NGX_OK;
-    }
-
-    feed_data = buf->pos;
-    feed_len = (size_t) (buf->last - buf->pos);
-
+    feed_len = ngx_http_markdown_buf_len_safe(buf);
     if (feed_len == 0) {
         return NGX_OK;
     }
+    feed_data = buf->pos;
 
     /* Step 1: Decompress if needed */
     if (ctx->decompression.needed
@@ -2035,10 +2071,13 @@ ngx_http_markdown_streaming_finalize_send_markdown(
         return NGX_OK;
     }
 
-    if (result->markdown_len > (size_t) -1
-            - ctx->streaming.total_output_bytes)
+    if (ctx->streaming.total_output_bytes_overflowed) {
+        /* latch is sticky: skip all further additions */
+    } else if (result->markdown_len > (size_t) -1
+                - ctx->streaming.total_output_bytes)
     {
         ctx->streaming.total_output_bytes = (size_t) -1;
+        ctx->streaming.total_output_bytes_overflowed = 1;
     } else {
         ctx->streaming.total_output_bytes += result->markdown_len;
     }
