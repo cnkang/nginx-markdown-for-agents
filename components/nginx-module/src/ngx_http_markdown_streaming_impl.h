@@ -649,6 +649,7 @@ common_checks:
 
     /* Rule 6: text/event-stream */
     if (r->headers_out.content_type.len >= 17
+        && r->headers_out.content_type.data != NULL
         && ngx_strncasecmp(
                r->headers_out.content_type.data,
                (u_char *) "text/event-stream", /* NOSONAR: ngx_strncasecmp API takes non-const u_char* */
