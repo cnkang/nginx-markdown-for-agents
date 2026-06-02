@@ -63,14 +63,7 @@ typedef struct {
     ngx_log_t  *log;
 } ngx_connection_t;
 
-struct ngx_buf_s {
-    u_char      *pos;
-    u_char      *last;
-    u_char      *start;
-    u_char      *end;
-    unsigned     temporary:1;
-    unsigned     last_buf:1;
-};
+/* struct ngx_buf_s provided by nginx_stubs/ngx_core.h */
 
 struct ngx_chain_s {
     ngx_buf_t    *buf;

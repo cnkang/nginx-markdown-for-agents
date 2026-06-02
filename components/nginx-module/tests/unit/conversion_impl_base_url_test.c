@@ -234,15 +234,7 @@ struct ngx_pool_s {
     int dummy;
 };
 
-struct ngx_buf_s {
-    u_char *pos;
-    u_char *last;
-    u_char *end;
-    unsigned memory;
-    unsigned last_buf;
-    unsigned last_in_chain;
-    void *tag;
-};
+/* struct ngx_buf_s provided by nginx_stubs/ngx_core.h */
 
 struct ngx_chain_s {
     ngx_buf_t *buf;
