@@ -334,6 +334,12 @@ ngx_http_markdown_apply_decompressed_payload(ngx_http_request_t *r,
     target_data = ctx->buffer.data;
 
     if (ctx->decompression.decompressed_size > ctx->buffer.capacity) {
+        /*
+         * buffer.data is allocated via ngx_alloc() (see buffer.c:36-39
+         * contract) and must be released with ngx_free(). Do NOT switch
+         * to ngx_pfree/ngx_pnalloc without coordinating with the
+         * resizable buffer design in ngx_http_markdown_buffer.c.
+         */
         u_char *new_data = ngx_alloc(ctx->decompression.decompressed_size, r->connection->log);
         if (new_data == NULL) {
             const ngx_str_t *compression_name;
@@ -713,9 +719,7 @@ ngx_http_markdown_linearize_chain(ngx_http_request_t *r,
             continue;
         }
 
-        if (src->buf->pos == NULL || src->buf->last == NULL
-            || (uintptr_t) src->buf->last < (uintptr_t) src->buf->pos)
-        {
+        if (src->buf->pos == NULL || src->buf->last == NULL) {
             ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                          "markdown: linearize chain "
                          "invalid buffer pointers, "
@@ -726,7 +730,10 @@ ngx_http_markdown_linearize_chain(ngx_http_request_t *r,
         {
             size_t  len;
 
-            len = (size_t) (src->buf->last - src->buf->pos);
+            len = ngx_http_markdown_buf_len_safe(src->buf);
+            if (len == 0) {
+                continue;
+            }
             if (len > ((size_t) -1) - total) {
                 ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                              "markdown: linearize chain "

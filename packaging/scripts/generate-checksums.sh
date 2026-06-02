@@ -16,7 +16,7 @@
 #   0  SHA256SUMS generated and verified successfully
 #   1  Error (missing directory, no artifacts, format validation failure)
 
-set -e
+set -euo pipefail
 
 ##############################################################################
 # Helpers
@@ -54,7 +54,7 @@ done
 shift $((OPTIND - 1))
 
 # Support positional argument as artifact directory for convenience
-if [ -z "$ARTIFACT_DIR" ] && [ $# -ge 1 ]; then
+if [[ -z "$ARTIFACT_DIR" ]] && [[ $# -ge 1 ]]; then
     ARTIFACT_DIR="$1"
 fi
 
@@ -62,11 +62,11 @@ fi
 # Validation
 ##############################################################################
 
-if [ -z "$ARTIFACT_DIR" ]; then
+if [[ -z "$ARTIFACT_DIR" ]]; then
     die "Artifact directory not specified. Use -d DIR or pass as first argument."
 fi
 
-if [ ! -d "$ARTIFACT_DIR" ]; then
+if [[ ! -d "$ARTIFACT_DIR" ]]; then
     die "Artifact directory '$ARTIFACT_DIR' does not exist."
 fi
 
@@ -81,18 +81,18 @@ DEB_FILES=()
 RPM_FILES=()
 
 for f in *.deb; do
-    [ -e "$f" ] || continue
+    [[ -e "$f" ]] || continue
     DEB_FILES+=("$f")
 done
 
 for f in *.rpm; do
-    [ -e "$f" ] || continue
+    [[ -e "$f" ]] || continue
     RPM_FILES+=("$f")
 done
 
-ALL_FILES=("${DEB_FILES[@]}" "${RPM_FILES[@]}")
+ALL_FILES=(${DEB_FILES[@]+"${DEB_FILES[@]}"} ${RPM_FILES[@]+"${RPM_FILES[@]}"})
 
-if [ ${#ALL_FILES[@]} -eq 0 ]; then
+if [[ ${#ALL_FILES[@]} -eq 0 ]]; then
     die "No .deb or .rpm files found in '$ARTIFACT_DIR'."
 fi
 
@@ -111,7 +111,7 @@ info "Generated $OUTPUT_FILE with ${#ALL_FILES[@]} entries"
 ##############################################################################
 
 # SHA256SUMS must be non-empty
-if [ ! -s "$OUTPUT_FILE" ]; then
+if [[ ! -s "$OUTPUT_FILE" ]]; then
     die "Generated $OUTPUT_FILE is empty."
 fi
 
@@ -129,7 +129,7 @@ while IFS= read -r line; do
     esac
 done < "$OUTPUT_FILE"
 
-if [ "$LINE_COUNT" -ne ${#ALL_FILES[@]} ]; then
+if [[ "$LINE_COUNT" -ne ${#ALL_FILES[@]} ]]; then
     die "Expected ${#ALL_FILES[@]} entries but found $LINE_COUNT lines in $OUTPUT_FILE."
 fi
 

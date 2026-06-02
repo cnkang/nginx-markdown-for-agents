@@ -55,8 +55,12 @@ impl HeaderPlan {
     /// - Delete Content-Encoding (response is no longer compressed)
     /// - Delete Content-Length (original length is invalid after conversion;
     ///   the C caller sets the new Content-Length after atomic plan application)
-    /// - Set Vary: Accept
     /// - Optionally set ETag placeholder (resolved by C caller)
+    ///
+    /// Note: Vary: Accept is handled as a post-plan operation by the C module
+    /// using `ngx_http_markdown_add_vary_accept()`, not by this plan, because
+    /// it requires NGINX-specific `ngx_list_push` which cannot be expressed
+    /// in the platform-independent plan structure.
     ///
     /// The plan is applied atomically: all operations succeed or all are
     /// rolled back.  Content-Length is deleted here to invalidate the stale

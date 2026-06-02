@@ -13,6 +13,14 @@ Automatic decompression is the built-in fallback path for this scenario.
 - Detects upstream `Content-Encoding` in the header filter.
 - Decompresses in the body filter before conversion when needed.
 - Supports `gzip` and `deflate` via zlib.
+  - **Note**: `Content-Encoding: deflate` is first attempted as zlib-wrapped
+    deflate (RFC 1950 + RFC 1951), matching the HTTP/1.1 specification
+    (RFC 7230 §4.2.2). If the zlib-wrapped attempt fails with a format
+    error, the buffered path automatically retries with raw deflate
+    (RFC 1951 only) for compatibility with older servers (Microsoft IIS,
+    older Java servlets). The streaming path supports only zlib-wrapped
+    deflate; raw deflate responses in streaming mode will trigger the
+    configured `markdown_on_error` strategy (fail-open by default).
 - Supports `br` when Brotli support is compiled in.
 - Uses a fast path for uncompressed responses (no decompression work).
 - Applies `markdown_on_error` strategy on decompression failures.

@@ -93,6 +93,21 @@ test_null_last(void)
 }
 
 static void
+test_both_null(void)
+{
+    ngx_buf_t  buf;
+    size_t     len;
+
+    memset(&buf, 0, sizeof(buf));
+    buf.pos = NULL;
+    buf.last = NULL;
+
+    len = ngx_http_markdown_buf_len_safe(&buf);
+    TEST_ASSERT(len == 0, "both pos and last NULL returns 0");
+    TEST_PASS("both pos and last NULL returns 0");
+}
+
+static void
 test_last_before_pos(void)
 {
     u_char     data[16];
@@ -148,6 +163,7 @@ main(void)
     test_null_buf();
     test_null_pos();
     test_null_last();
+    test_both_null();
     test_last_before_pos();
     test_valid_buffer();
     test_empty_buffer();
