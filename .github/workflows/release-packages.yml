@@ -87,6 +87,10 @@ permissions: {}
 env:
   RUST_TOOLCHAIN: 1.91.1
   RUST_FEATURES: streaming,incremental
+  # Release package builds link the Rust staticlib into an NGINX C module and
+  # validate exported symbols with GNU binutils. Keep LTO disabled here so the
+  # archive contains native objects that nm/ld can inspect and link reliably.
+  CARGO_PROFILE_RELEASE_LTO: "false"
 
 jobs:
   # ─────────────────────────────────────────────────────────────────────────────
