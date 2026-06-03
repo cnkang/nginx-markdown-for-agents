@@ -1,5 +1,6 @@
-name: Release RPM
+name: "Legacy: Release RPM (nginx 1.26.3 only)"
 
+# ⚠️ LEGACY COMPATIBILITY WORKFLOW — DO NOT USE FOR OFFICIAL RELEASES ⚠️
 # release-packages.yml is the canonical release package workflow; this is a
 # legacy compatibility workflow kept for direct RPM artifact builds.
 # Do not add new features here; route all changes to release-packages.yml.
