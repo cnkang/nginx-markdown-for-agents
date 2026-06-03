@@ -1597,59 +1597,12 @@ lcov --summary "${OUTPUT_LCOV}" --rc branch_coverage=1 \
   ${LCOV_IGNORE} 2>&1 | grep -E 'lines|functions|branches' || true
 
 # ── Advisory per-file coverage threshold checks ────────────────────
-# These thresholds are advisory (warnings only, not blocking).
-# The lcov report is always produced regardless of coverage level.
-echo "==> Checking advisory coverage thresholds"
+# NOTE: These thresholds are checked against E2E coverage only.
+# The combined (e2e + unit) report is checked by the Makefile
+# coverage-c target after merging both data sources.  Thresholds
+# here are informational for e2e-only coverage; the authoritative
+# advisory check runs against the merged report.
+echo "==> E2E-only coverage summary (unit tests merged later by Makefile)"
 # shellcheck disable=SC2086
-lcov --list "${OUTPUT_LCOV}" --rc branch_coverage=1 \
-  ${LCOV_IGNORE} 2>/dev/null | while IFS= read -r line; do
-  # Extract file path and line coverage percentage.
-  # lcov --list output is pipe-delimited; the Lines rate is in the second
-  # pipe-delimited column (e.g. "60.0%   38").  Extract the percentage
-  # from that column rather than using $NF which may pick up branch counts.
-  file="$(echo "${line}" | awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/, "", $1); print $1}')"
-  pct="$(echo "${line}" | awk -F'|' '{gsub(/%/, "", $2); gsub(/^[ \t]+/, "", $2); split($2, a, " "); print a[1]}')"
-  # Remove trailing % if present
-  pct="${pct%\%}"
-
-  # Skip non-data lines
-  case "${file}" in
-    ngx_http_markdown_*) ;;
-    *) continue ;;
-  esac
-
-  # Advisory thresholds per file (Req 13)
-  threshold=""
-  case "${file}" in
-    ngx_http_markdown_auth.c)                threshold=60 ;;
-    ngx_http_markdown_conditional.c)         threshold=40 ;;
-    ngx_http_markdown_error.c)               threshold=50 ;;
-    ngx_http_markdown_prometheus_impl.h)     threshold=50 ;;
-    ngx_http_markdown_reason.c)              threshold=50 ;;
-    ngx_http_markdown_accept.c)              threshold=70 ;;
-    ngx_http_markdown_config_handlers_impl.h) threshold=40 ;;
-    *) ;;
-  esac
-
-  if [[ -n "${threshold}" ]] && [[ -n "${pct}" ]]; then
-    # Compare as integers (truncate decimal); skip non-numeric values
-    pct_int="${pct%%.*}"
-    if [[ -n "${pct_int}" ]] && [[ "${pct_int}" =~ ^[0-9]+$ ]] \
-       && [[ "${pct_int}" -lt "${threshold}" ]]; then
-      echo "  WARNING: ${file} line coverage ${pct}% below advisory threshold ${threshold}%" >&2
-    fi
-  fi
-done || true
-
-# Aggregate line coverage advisory check (80% minimum)
-# shellcheck disable=SC2086
-aggregate="$(lcov --summary "${OUTPUT_LCOV}" --rc branch_coverage=1 \
-  ${LCOV_IGNORE} 2>&1 | awk '/lines\.\.\.\./{print $2}' || true)"
-if [[ -n "${aggregate}" ]]; then
-  aggregate_int="${aggregate%%.*}"
-  if [[ -n "${aggregate_int}" ]] && [[ "${aggregate_int}" -lt 80 ]]; then
-    echo "  WARNING: Aggregate line coverage ${aggregate}% below 80% minimum" >&2
-  else
-    echo "  Aggregate line coverage: ${aggregate}% (meets 80% minimum)"
-  fi
-fi
+lcov --summary "${OUTPUT_LCOV}" --rc branch_coverage=1 \
+  ${LCOV_IGNORE} 2>&1 | grep -E 'lines|functions|branches' || true
