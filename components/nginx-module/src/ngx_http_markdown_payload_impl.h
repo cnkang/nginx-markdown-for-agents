@@ -762,7 +762,7 @@ ngx_http_markdown_linearize_chain(ngx_http_request_t *r,
         if (src->buf != NULL) {
             size_t  len;
 
-            len = (size_t) (src->buf->last - src->buf->pos);
+            len = ngx_http_markdown_buf_len_safe(src->buf);
             if (len > 0) {
                 ngx_memcpy(dst, src->buf->pos, len);
                 dst += len;
