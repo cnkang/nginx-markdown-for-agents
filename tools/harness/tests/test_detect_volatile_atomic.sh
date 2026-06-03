@@ -5,7 +5,7 @@
 # Validates Rule 42 detector coverage: volatile with and without
 # justification comments, plus direct __atomic_* usage.
 
-set -uo pipefail
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DETECTOR="${SCRIPT_DIR}/../detect_volatile_atomic.sh"
