@@ -94,6 +94,11 @@ Required:
     bash` at the job level or `shell: bash` on every affected run step.
   - Package smoke tests for architecture-specific artifacts must run on a
     matching runner architecture or an explicit emulation path.
+  - Container-job package smoke images must contain prerequisites needed before
+    the first workflow step, including `tar` or `git` for `actions/checkout`.
+    Minimal images that lack checkout prerequisites must be exercised through a
+    host-checkout plus `docker run` smoke pattern instead of as the job
+    container.
   - Package smoke tests must select external package repositories from
     `/etc/os-release` or equivalent target-distro evidence.  Do not route
     Amazon Linux through CentOS repository paths.
