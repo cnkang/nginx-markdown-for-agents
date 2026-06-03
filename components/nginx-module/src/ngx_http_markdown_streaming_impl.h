@@ -855,6 +855,46 @@ ngx_http_markdown_streaming_record_ttfb(
 
 
 /*
+ * Save output chain as pending on downstream backpressure (NGX_AGAIN).
+ *
+ * Guards against unexpected re-entry by freeing any existing pending
+ * chain before saving the new one.  Sets the buffered flag so NGINX
+ * event machinery knows to retry the downstream write.
+ *
+ * Returns:
+ *   NGX_AGAIN  - pending saved successfully
+ *   NGX_ERROR  - re-entry detected (old chain freed, request aborted)
+ */
+static ngx_int_t
+ngx_http_markdown_streaming_save_pending(
+    ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx,
+    ngx_chain_t *out,
+    const u_char *data, size_t len)
+{
+    if (ctx->streaming.pending_output != NULL) {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                      "markdown: streaming pending output "
+                      "re-entry detected, refusing to overwrite "
+                      "existing pending chain");
+
+        ngx_http_markdown_streaming_free_pending_chain(
+            ctx->streaming.pending_output);
+        ctx->streaming.pending_output = NULL;
+
+        return NGX_ERROR;
+    }
+
+    ctx->streaming.pending_output = out;
+    ctx->streaming.pending_has_data =
+        (data != NULL && len > 0) ? 1 : 0;
+    r->buffered |= NGX_HTTP_MARKDOWN_BUFFERED;
+
+    return NGX_AGAIN;
+}
+
+
+/*
  * Send Markdown output downstream.
  *
  * Constructs an output chain from the provided data and
@@ -951,38 +991,8 @@ ngx_http_markdown_streaming_send_output(
     }
 
     if (rc == NGX_AGAIN) {
-        /*
-         * Guard: if a pending chain already exists, this is an
-         * unexpected re-entry.  Log and return error rather than
-         * silently leaking the old chain's Rust-owned buffers.
-         */
-        if (ctx->streaming.pending_output != NULL) {
-            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                          "markdown: streaming pending output "
-                          "re-entry detected, refusing to overwrite "
-                          "existing pending chain");
-
-            ngx_http_markdown_streaming_free_pending_chain(
-                ctx->streaming.pending_output);
-            ctx->streaming.pending_output = NULL;
-
-            return NGX_ERROR;
-        }
-
-        /*
-         * Keep exactly one outstanding pending chain owned by this
-         * request context. The retry path (resume_pending) will submit
-         * this same chain again once downstream write readiness returns.
-         */
-        ctx->streaming.pending_output = out;
-        /*
-         * Record whether the pending chain carries actual data
-         * (non-empty buffer) so the resume path can decide TTFB
-         * sampling without dereferencing pos/last pointers.
-         */
-        ctx->streaming.pending_has_data =
-            (data != NULL && len > 0) ? 1 : 0;
-        r->buffered |= NGX_HTTP_MARKDOWN_BUFFERED;
+        rc = ngx_http_markdown_streaming_save_pending(
+            r, ctx, out, data, len);
     }
 
     return rc;
