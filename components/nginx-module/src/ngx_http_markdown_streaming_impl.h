@@ -785,6 +785,78 @@ ngx_http_markdown_streaming_update_headers(
 
 
 /*
+ * Free Rust-owned buffers in a pending chain.
+ *
+ * Iterates chain links, releasing any temporary buffer data
+ * via markdown_streaming_output_free() and NULLing pointers
+ * to prevent use-after-free.
+ */
+static void
+ngx_http_markdown_streaming_free_pending_chain(ngx_chain_t *chain)
+{
+    ngx_chain_t  *cl;
+
+    for (cl = chain; cl != NULL; cl = cl->next) {
+        if (cl->buf == NULL || !cl->buf->temporary) {
+            continue;
+        }
+
+        {
+            size_t  buf_len;
+
+            buf_len = ngx_http_markdown_buf_len_safe(cl->buf);
+            if (buf_len > 0) {
+                markdown_streaming_output_free(cl->buf->pos, buf_len);
+            }
+        }
+
+        cl->buf->pos = NULL;
+        cl->buf->last = NULL;
+    }
+}
+
+
+/*
+ * Record TTFB (time-to-first-byte) on first successful output.
+ *
+ * One-shot latch: only fires once, only when downstream confirmed
+ * delivery (NGX_OK or NGX_DONE).
+ */
+static void
+ngx_http_markdown_streaming_record_ttfb(
+    ngx_http_markdown_ctx_t *ctx)
+{
+    const ngx_time_t  *tp;
+    ngx_msec_t         now_ms;
+    ngx_msec_t         elapsed_ms;
+
+    if (ctx->streaming.ttfb_recorded
+        || ctx->streaming.feed_start_ms == 0
+        || ngx_http_markdown_metrics == NULL)
+    {
+        return;
+    }
+
+    tp = ngx_timeofday();
+    now_ms = (ngx_msec_t) (tp->sec * 1000 + tp->msec);
+    elapsed_ms = (now_ms >= ctx->streaming.feed_start_ms)
+        ? (now_ms - ctx->streaming.feed_start_ms) : 0;
+
+    /*
+     * Gauge store: latest-value-wins semantics.
+     *
+     * Direct assignment to ngx_atomic_t is not formally
+     * atomic per C11, but ngx_atomic_t is intptr_t-sized
+     * and naturally aligned, making the store word-atomic
+     * in practice on all NGINX platforms.
+     */
+    ngx_http_markdown_metrics->streaming.last_ttfb_ms =
+        (ngx_atomic_t) elapsed_ms;
+    ctx->streaming.ttfb_recorded = 1;
+}
+
+
+/*
  * Send Markdown output downstream.
  *
  * Constructs an output chain from the provided data and
@@ -868,44 +940,14 @@ ngx_http_markdown_streaming_send_output(
 
     /*
      * Record TTFB on first successful non-empty output send.
-     * One-shot latch: only fires once, and only when the
-     * downstream filter confirmed delivery (NGX_OK or NGX_DONE).
-     *
      * NGX_AGAIN means backpressure — bytes are not yet sent.
      * TTFB will be recorded later in resume_pending() when
      * the pending chain drains successfully.
      */
     if (data != NULL && len > 0
-        && !ctx->streaming.ttfb_recorded
-        && ctx->streaming.feed_start_ms > 0
-        && ngx_http_markdown_metrics != NULL
         && (rc == NGX_OK || rc == NGX_DONE))
     {
-        const ngx_time_t  *tp_ttfb;
-        ngx_msec_t   now_ms;
-        ngx_msec_t   elapsed_ms;
-
-        tp_ttfb = ngx_timeofday();
-        now_ms = (ngx_msec_t) (tp_ttfb->sec * 1000
-            + tp_ttfb->msec);
-        elapsed_ms = (now_ms >= ctx->streaming.feed_start_ms)
-            ? (now_ms - ctx->streaming.feed_start_ms) : 0;
-
-        /*
-         * Gauge store: latest-value-wins semantics.
-         *
-         * Direct assignment to ngx_atomic_t is not formally
-         * atomic per C11 §7.1.4¶1, but ngx_atomic_t is
-         * intptr_t-sized and naturally aligned on all NGINX
-         * platforms (x86_64, ARM64, x86), making the store
-         * word-atomic in practice.  A torn read by the
-         * metrics snapshot collector would produce a stale
-         * or slightly wrong millisecond value — acceptable
-         * for a diagnostic gauge.
-         */
-        ngx_http_markdown_metrics->streaming.last_ttfb_ms =
-            (ngx_atomic_t) elapsed_ms;
-        ctx->streaming.ttfb_recorded = 1;
+        ngx_http_markdown_streaming_record_ttfb(ctx);
     }
 
     if (rc == NGX_OK || rc == NGX_DONE) {
@@ -919,26 +961,13 @@ ngx_http_markdown_streaming_send_output(
          * silently leaking the old chain's Rust-owned buffers.
          */
         if (ctx->streaming.pending_output != NULL) {
-            ngx_chain_t *old;
-
             ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                           "markdown: streaming pending output "
                           "re-entry detected, refusing to overwrite "
                           "existing pending chain");
 
-            /* Free Rust-owned buffers in the old chain to prevent leaks */
-            for (old = ctx->streaming.pending_output;
-                 old != NULL; old = old->next)
-            {
-                if (old->buf != NULL && old->buf->temporary) {
-                    size_t old_len = ngx_http_markdown_buf_len_safe(old->buf);
-                    if (old_len > 0) {
-                        markdown_streaming_output_free(old->buf->pos, old_len);
-                    }
-                    old->buf->pos = NULL;
-                    old->buf->last = NULL;
-                }
-            }
+            ngx_http_markdown_streaming_free_pending_chain(
+                ctx->streaming.pending_output);
             ctx->streaming.pending_output = NULL;
 
             return NGX_ERROR;
