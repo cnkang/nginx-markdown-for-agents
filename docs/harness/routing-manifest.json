@@ -377,7 +377,9 @@
         "shell hygiene",
         "return statement",
         "stderr redirect",
-        "const correctness"
+        "const correctness",
+        "volatile",
+        "atomic"
       ],
       "verification_families": [
         "harness-sync",
