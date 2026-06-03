@@ -190,7 +190,7 @@ has its own corpus directory under `components/rust-converter/fuzz/corpus/<targe
 
 ### Directory layout
 
-```
+```text
 components/rust-converter/fuzz/corpus/
 ├── convert_html/
 │   ├── basic_heading.html          # Simple heading
