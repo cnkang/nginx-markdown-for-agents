@@ -670,18 +670,22 @@ jobs:
 
       - name: Run tag release gates
         run: |
-          make release-gates-check-strict
           # Run the full 0.7.0 gate validators that are not already covered
           # by the build/package/smoke-test jobs above. The full
           # release-gates-check-070 target includes build/test/fuzz which are
           # redundant here (the build and smoke-test jobs already verified
           # those), but we must run the Python gate validators and package
-          # layout checks to ensure complete 0.7.0 gate coverage.
+          # layout checks to ensure complete 0.7.0 gate coverage. Do not run
+          # legacy local-spec validators here; tag release CI checkouts do not
+          # include user-local Kiro spec directories.
+          python3 tools/release/gates/validate_naming.py
+          python3 tools/release/gates/validate_release_gates_070.py --mode strict
           python3 tools/release/gates/validate_config_directives_070.py
           python3 tools/release/gates/validate_metrics_070.py
           python3 tools/release/gates/validate_reason_codes_070.py
           python3 tools/release/gates/validate_package_metadata_070.py
           python3 tools/release/gates/validate_k8s_manifests_070.py
+          python3 tools/release/gates/validate_fuzz_packaging_070.py
           bash tools/release/gates/check_install_layout.sh dist/*.deb dist/*.rpm
         shell: bash
 

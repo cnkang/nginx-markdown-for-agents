@@ -120,13 +120,18 @@ def _workflow_uses_pinned_toolchain(workflow: str) -> bool:
     )
 
 
-def _workflow_has_release_build_invariants(workflow: str) -> bool:
-    return (
+def _workflow_has_release_build_invariants(
+    workflow: str, require_lto_config: bool = False
+) -> bool:
+    base_ok = (
         'rustup target add "${RUST_TARGET}"' in workflow
-        and 'cargo build --release --locked --target "${RUST_TARGET}" --features "${RUST_FEATURES}"'
-        in workflow
+        and 'cargo build --release --locked --target "${RUST_TARGET}"' in workflow
+        and '--features "${RUST_FEATURES}"' in workflow
         and "target/${RUST_TARGET}/release" in workflow
     )
+    if require_lto_config:
+        return base_ok and "--config profile.release.lto=false" in workflow
+    return base_ok
 
 
 def _workflow_identifies_release_path(workflow: str, *, official: bool) -> bool:
@@ -396,7 +401,12 @@ def _gate_5_items(
         ("release-packages pinned rust", _workflow_uses_pinned_toolchain(release_packages)),
         ("release-deb pinned rust", _workflow_uses_pinned_toolchain(release_deb)),
         ("release-rpm pinned rust", _workflow_uses_pinned_toolchain(release_rpm)),
-        ("release-packages build invariants", _workflow_has_release_build_invariants(release_packages)),
+        (
+            "release-packages build invariants",
+            _workflow_has_release_build_invariants(
+                release_packages, require_lto_config=True
+            ),
+        ),
         ("release-deb build invariants", _workflow_has_release_build_invariants(release_deb)),
         ("release-rpm build invariants", _workflow_has_release_build_invariants(release_rpm)),
         ("release-packages official marker", _workflow_identifies_release_path(release_packages, official=True)),
