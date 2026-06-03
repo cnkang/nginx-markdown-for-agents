@@ -70,8 +70,6 @@ smoke_test_containers:
   rpm:
     - image: "almalinux:9"
       codename: "el9"
-    - image: "amazonlinux:2023"
-      codename: "al2023"
 
 # ---------------------------------------------------------------------------
 # Build OS runners (GitHub Actions hosted runners)

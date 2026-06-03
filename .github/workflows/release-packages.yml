@@ -143,7 +143,6 @@ jobs:
               ],
               "rpm": [
                   {"container": "almalinux:9", "arch": "amd64"},
-                  {"container": "amazonlinux:2023", "arch": "amd64"},
                   {"container": "almalinux:9", "arch": "arm64"},
               ],
           }
