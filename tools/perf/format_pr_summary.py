@@ -200,7 +200,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     try:
         report_path = validate_read_path(args.report, purpose="unified report")
         report = load_json(str(report_path))  # type: ignore[assignment]
-    except (IOError, json.JSONDecodeError, ValueError) as e:
+    except (IOError, ValueError) as e:
         print(f"ERROR: failed to load report: {e}", file=sys.stderr)
         return 1
 
