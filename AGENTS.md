@@ -211,6 +211,11 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
 - Release workflows that perform binary symbol validation must explicitly
   install the tool package that provides the validator (`binutils` for `nm`)
   and fail early with a clear preflight check if the binary is unavailable [13]
+- Shell-based release symbol validation running under `pipefail` must not put
+  whole-archive `nm` directly in each per-symbol grep pipeline; capture or
+  normalize the symbol table once, tolerate non-fatal per-member archive
+  diagnostics, and fail only when the captured symbol table is empty or a
+  required exported symbol is absent [13]
 - Release Rust static libraries that are validated with GNU binutils and linked
   into the NGINX C module must be emitted as native target objects that the
   target `nm`/linker can inspect; do not enable an LTO/archive format that makes
@@ -414,3 +419,4 @@ remediation:
 | 0.7.10 | 2026-05-31 | Codex | Strengthened Rule 13 for prebuilt dynamic-module package dependency ranges using a minor ABI floor plus exclusive next-minor ceiling |
 | 0.7.11 | 2026-06-03 | Kang | Added Rules 41 (shell ERE), 42 (volatile vs atomic), 43 (buffer backing store allocation); code review remediation closeout |
 | 0.7.12 | 2026-06-03 | Codex | Strengthened Rule 13 for release Rust staticlib archive formats that must remain visible to GNU binutils and NGINX module linking |
+| 0.7.13 | 2026-06-03 | Codex | Strengthened Rule 13 for shell release symbol checks under pipefail with whole-archive nm output |
