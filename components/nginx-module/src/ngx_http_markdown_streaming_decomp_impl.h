@@ -120,6 +120,40 @@ ngx_http_markdown_streaming_decomp_cleanup(void *data)
 
 
 /*
+ * Initialize zlib inflate state for gzip or raw deflate.
+ *
+ * Arguments:
+ *   decomp      — target decompressor (z_stream zeroed on entry)
+ *   window_bits — zlib window size (MAX_WBITS+16 for gzip, -MAX_WBITS for raw deflate)
+ *
+ * Returns:
+ *   NGX_OK    — inflateInit2 succeeded, decomp->initialized set
+ *   NGX_ERROR — inflateInit2 failed
+ */
+static ngx_int_t
+ngx_http_markdown_streaming_decomp_init_zlib(
+    ngx_http_markdown_streaming_decomp_t *decomp,
+    int window_bits)
+{
+    int  zrc;
+
+    decomp->state.zlib.zalloc = Z_NULL;
+    decomp->state.zlib.zfree = Z_NULL;
+    decomp->state.zlib.opaque = Z_NULL;
+    decomp->state.zlib.avail_in = 0;
+    decomp->state.zlib.next_in = Z_NULL;
+
+    zrc = inflateInit2(&decomp->state.zlib, window_bits);
+    if (zrc != Z_OK) {
+        return NGX_ERROR;
+    }
+
+    decomp->initialized = 1;
+    return NGX_OK;
+}
+
+
+/*
  * Create a streaming decompressor for the given compression type.
  *
  * Returns NULL on allocation failure or unsupported type.
@@ -133,8 +167,6 @@ ngx_http_markdown_streaming_decomp_create(
 {
     ngx_http_markdown_streaming_decomp_t  *decomp;
     ngx_pool_cleanup_t                    *cln;
-    int                                    zrc;
-    int                                    window_bits;
 
     if (pool == NULL) {
         return NULL;
@@ -156,48 +188,32 @@ ngx_http_markdown_streaming_decomp_create(
 
     case NGX_HTTP_MARKDOWN_COMPRESSION_GZIP:
         /* gzip: MAX_WBITS + 16 for automatic gzip header detection */
-        window_bits = MAX_WBITS + 16;
-        decomp->state.zlib.zalloc = Z_NULL;
-        decomp->state.zlib.zfree = Z_NULL;
-        decomp->state.zlib.opaque = Z_NULL;
-        decomp->state.zlib.avail_in = 0;
-        decomp->state.zlib.next_in = Z_NULL;
-
-        zrc = inflateInit2(&decomp->state.zlib,
-                           window_bits);
-        if (zrc != Z_OK) {
+        if (ngx_http_markdown_streaming_decomp_init_zlib(
+                decomp, MAX_WBITS + 16)
+            != NGX_OK)
+        {
             return NULL;
         }
-        decomp->initialized = 1;
         break;
 
     case NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE:
         /*
-         * deflate: -MAX_WBITS for raw deflate (RFC 1951).
+         * Raw deflate: -MAX_WBITS (RFC 1951).
          *
-         * Most servers in practice send raw deflate under
-         * Content-Encoding: deflate (the de facto standard),
-         * even though RFC 2616 §3.5 technically specified
-         * zlib-wrapped (RFC 1950).  The buffered path tries
-         * zlib-wrapped first and retries with raw deflate,
-         * but the streaming path cannot retry once chunks
-         * are consumed.  Using raw deflate (-MAX_WBITS)
-         * covers the common case; the rare zlib-wrapped
-         * server will trigger fail-open.
+         * Most servers send raw deflate under Content-Encoding:
+         * deflate (de facto standard), even though RFC 2616 §3.5
+         * technically specified zlib-wrapped (RFC 1950).  The
+         * buffered path retries with raw deflate on failure, but
+         * the streaming path cannot retry once chunks are consumed.
+         * Using raw deflate covers the common case; the rare
+         * zlib-wrapped server triggers fail-open.
          */
-        window_bits = -MAX_WBITS;
-        decomp->state.zlib.zalloc = Z_NULL;
-        decomp->state.zlib.zfree = Z_NULL;
-        decomp->state.zlib.opaque = Z_NULL;
-        decomp->state.zlib.avail_in = 0;
-        decomp->state.zlib.next_in = Z_NULL;
-
-        zrc = inflateInit2(&decomp->state.zlib,
-                           window_bits);
-        if (zrc != Z_OK) {
+        if (ngx_http_markdown_streaming_decomp_init_zlib(
+                decomp, -MAX_WBITS)
+            != NGX_OK)
+        {
             return NULL;
         }
-        decomp->initialized = 1;
         break;
 
 #ifdef NGX_HTTP_BROTLI

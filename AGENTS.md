@@ -406,4 +406,4 @@ remediation:
 | 0.7.8 | 2026-05-27 | Codex | Strengthened Rule 13 for package-install docs matching the actually published GitHub Release artifact channel before APT/YUM repositories exist |
 | 0.7.9 | 2026-05-29 | Codex | Strengthened Rule 13 for release workflow tool preflights, Rust toolchain pinning, and consistent package build invariants across canonical and compatibility workflows |
 | 0.7.10 | 2026-05-31 | Codex | Strengthened Rule 13 for prebuilt dynamic-module package dependency ranges using a minor ABI floor plus exclusive next-minor ceiling |
-| 0.7.11 | 2026-06-02 | Kang | Added Rules 41 (shell ERE), 42 (volatile vs atomic), 43 (buffer backing store allocation); code review remediation closeout |
+| 0.7.11 | 2026-06-03 | Kang | Added Rules 41 (shell ERE), 42 (volatile vs atomic), 43 (buffer backing store allocation); code review remediation closeout |
