@@ -794,9 +794,7 @@ ngx_http_markdown_streaming_update_headers(
 static void
 ngx_http_markdown_streaming_free_pending_chain(ngx_chain_t *chain)
 {
-    ngx_chain_t  *cl;
-
-    for (cl = chain; cl != NULL; cl = cl->next) {
+    for (ngx_chain_t *cl = chain; cl != NULL; cl = cl->next) {
         if (cl->buf == NULL || !cl->buf->temporary) {
             continue;
         }
@@ -944,14 +942,12 @@ ngx_http_markdown_streaming_send_output(
      * TTFB will be recorded later in resume_pending() when
      * the pending chain drains successfully.
      */
-    if (data != NULL && len > 0
-        && (rc == NGX_OK || rc == NGX_DONE))
-    {
-        ngx_http_markdown_streaming_record_ttfb(ctx);
-    }
-
     if (rc == NGX_OK || rc == NGX_DONE) {
         ctx->streaming.flushes_sent++;
+
+        if (data != NULL && len > 0) {
+            ngx_http_markdown_streaming_record_ttfb(ctx);
+        }
     }
 
     if (rc == NGX_AGAIN) {
