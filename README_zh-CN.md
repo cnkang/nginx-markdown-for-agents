@@ -425,7 +425,7 @@ v0.7.0 是一个正确性、分发和可运维性版本：
 - Rust URL 控制字符验证与 link 转义
 - FFI ABI 布局验证与 header 漂移检测
 - 新错误码：DecompressionBudgetExceeded(9)、ParseTimeout(10)、ParseBudgetExceeded(11)
-- DEB/RPM GitHub Release artifact 分发；APT/YUM 仓库发布不属于 0.7.0 GA 渠道
+- DEB/RPM GitHub Release artifact 分发（仅 glibc 发行版）；musl 目标（Alpine 等）通过 release-binaries 提供静态二进制 tarball；APT/YUM 仓库发布不属于 0.7.0 GA 渠道
 - Package release gate 覆盖 canonical module path、artifact name、checksum 与架构匹配的 smoke test
 - Kubernetes 部署示例与默认适配 stock NGINX、显式支持模块启用配置的 Helm chart
 - 运行时诊断端点
@@ -451,7 +451,7 @@ BSD 2-Clause "Simplified" License。详见 [LICENSE](LICENSE)。
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 0.7.0 | 2026-05-17 | Kang | P0 正确性修复、Rust-first 架构、独立解压预算、Accept 协商、解析超时/预算、DEB/RPM 包分发、K8s 示例、运行时诊断、dynconf dry-run/回滚 |
+| 0.7.0 | 2026-06-03 | Kang | P0 正确性修复、Rust-first 架构、独立解压预算、Accept 协商、解析超时/预算、DEB/RPM 包分发、K8s 示例、运行时诊断、dynconf dry-run/回滚 |
 | 0.6.3 | 2026-05-14 | Kang | 版本号更新至 0.6.3，并补充 release matrix 与发布前最终加固说明 |
 | 0.6.2 | 2026-05-08 | Kang | 版本号更新至 0.6.2 以配合发布 |
 | 0.5.0 | 2026-04-21 | docs-standardization | Synchronized Quick Start steps between English and Chinese versions; added update tracking section |
