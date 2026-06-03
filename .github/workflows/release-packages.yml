@@ -293,11 +293,16 @@ jobs:
             echo "ERROR: nm not found; install binutils in the release build image" >&2
             exit 1
           }
+          SYMBOLS="$(nm -g "${RUST_LIB}" 2>/dev/null | awk '{print $NF}' || true)"
+          if [[ -z "${SYMBOLS}" ]]; then
+            echo "ERROR: nm produced no symbol output for ${RUST_LIB}" >&2
+            exit 1
+          fi
           MISSING=0
           for sym in markdown_streaming_new markdown_streaming_new_with_code \
                      markdown_incremental_new markdown_incremental_new_with_code \
                      markdown_decompress_bounded; do
-            if ! nm -g "${RUST_LIB}" 2>/dev/null | awk '{print $NF}' | grep -Eq "^_?${sym}$"; then
+            if ! grep -Eq "^_?${sym}$" <<<"${SYMBOLS}"; then
               echo "ERROR: Required symbol ${sym} not found in ${RUST_LIB}" >&2
               MISSING=1
             else
