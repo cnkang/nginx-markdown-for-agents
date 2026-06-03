@@ -243,10 +243,10 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
   or epochs. Prebuilt dynamic-module packages must constrain the supported
   NGINX minor ABI range with both a floor and an exclusive next-minor ceiling
   unless a separate install-time ABI check is the only supported guard [13]
-- RPM constraints for nginx.org `nginx` packages must include the package epoch
-  in both the floor and exclusive ceiling EVR (for example
-  `nginx >= 1:1.26.0` and `nginx < 1:1.27.0`) so installed nginx.org RPMs
-  satisfy the same minor ABI range that smoke tests install [13]
+- RPM constraints for nginx.org `nginx` packages must use an epoch-aware,
+  distro-satisfiable floor and rely on the package preinstall ABI branch guard
+  plus smoke tests for the upper-bound check when nginx.org epochs vary across
+  minor branches [13]
 - Standalone package workflows must validate user-supplied package versions
   before using them in paths, package metadata, RPM macros, or artifact names
   [13]
@@ -424,4 +424,4 @@ remediation:
 | 0.7.11 | 2026-06-03 | Kang | Added Rules 41 (shell ERE), 42 (volatile vs atomic), 43 (buffer backing store allocation); code review remediation closeout |
 | 0.7.12 | 2026-06-03 | Codex | Strengthened Rule 13 for release Rust staticlib archive formats that must remain visible to GNU binutils and NGINX module linking |
 | 0.7.13 | 2026-06-03 | Codex | Strengthened Rule 13 for shell release symbol checks under pipefail with whole-archive nm output |
-| 0.7.14 | 2026-06-03 | Codex | Strengthened Rule 13 for nginx.org RPM epoch-aware minor ABI dependency ranges |
+| 0.7.14 | 2026-06-03 | Codex | Strengthened Rule 13 for nginx.org RPM epoch-aware dependency floors plus preinstall ABI branch guards |
