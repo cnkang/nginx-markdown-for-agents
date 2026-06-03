@@ -211,6 +211,12 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
 - Release workflows that perform binary symbol validation must explicitly
   install the tool package that provides the validator (`binutils` for `nm`)
   and fail early with a clear preflight check if the binary is unavailable [13]
+- Release Rust static libraries that are validated with GNU binutils and linked
+  into the NGINX C module must be emitted as native target objects that the
+  target `nm`/linker can inspect; do not enable an LTO/archive format that makes
+  required exported FFI symbols invisible to the release validation toolchain
+  unless the workflow also installs and uses a compatible symbol validator and
+  linker for that format [13]
 - Release Rust builds must use a repository-pinned toolchain synchronized with
   `components/rust-converter/Cargo.toml` `rust-version`; release workflows must
   not silently float on `stable` when the crate requires a specific compiler
@@ -407,3 +413,4 @@ remediation:
 | 0.7.9 | 2026-05-29 | Codex | Strengthened Rule 13 for release workflow tool preflights, Rust toolchain pinning, and consistent package build invariants across canonical and compatibility workflows |
 | 0.7.10 | 2026-05-31 | Codex | Strengthened Rule 13 for prebuilt dynamic-module package dependency ranges using a minor ABI floor plus exclusive next-minor ceiling |
 | 0.7.11 | 2026-06-03 | Kang | Added Rules 41 (shell ERE), 42 (volatile vs atomic), 43 (buffer backing store allocation); code review remediation closeout |
+| 0.7.12 | 2026-06-03 | Codex | Strengthened Rule 13 for release Rust staticlib archive formats that must remain visible to GNU binutils and NGINX module linking |
