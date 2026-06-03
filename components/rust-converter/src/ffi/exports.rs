@@ -594,19 +594,15 @@ pub unsafe extern "C" fn markdown_build_base_url(
         let host_str = if x_forwarded_host.is_null() || host_len == 0 {
             None
         } else {
-            std::str::from_utf8(unsafe {
-                std::slice::from_raw_parts(x_forwarded_host, host_len)
-            })
-            .ok()
+            std::str::from_utf8(unsafe { std::slice::from_raw_parts(x_forwarded_host, host_len) })
+                .ok()
         };
 
         let proto_str = if x_forwarded_proto.is_null() || proto_len == 0 {
             None
         } else {
-            std::str::from_utf8(unsafe {
-                std::slice::from_raw_parts(x_forwarded_proto, proto_len)
-            })
-            .ok()
+            std::str::from_utf8(unsafe { std::slice::from_raw_parts(x_forwarded_proto, proto_len) })
+                .ok()
         };
 
         use crate::security::parse_forwarded_headers;
