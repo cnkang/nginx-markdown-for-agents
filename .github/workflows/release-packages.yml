@@ -738,7 +738,7 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────────────
   integrity-signing:
     name: Integrity - GPG Sign
-    needs: integrity-checksums
+    needs: [integrity-checksums, release-gate]
     if: github.ref_type == 'tag'
     runs-on: ubuntu-24.04
     permissions:
