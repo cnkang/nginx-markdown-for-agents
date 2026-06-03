@@ -14,7 +14,6 @@
 #include "ngx_http_markdown_filter_module.h"
 #include "markdown_converter.h"
 
-static u_char ngx_http_markdown_empty_string[] = "";
 
 /*
  * Find a request header by name in nginx's generic linked-list container.
@@ -238,7 +237,7 @@ ngx_http_markdown_handle_if_none_match(ngx_http_request_t *r,
                      "error_code=%ud message=\"%*s\"",
                      conv_result->error_code,
                      (conv_result->error_message != NULL) ? (ngx_int_t) conv_result->error_len : 0,
-                     (conv_result->error_message != NULL) ? conv_result->error_message : ngx_http_markdown_empty_string);
+                     (conv_result->error_message != NULL) ? conv_result->error_message : (u_char *) "");
 
         markdown_result_free(conv_result);
 
