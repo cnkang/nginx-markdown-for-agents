@@ -70,6 +70,8 @@ NFPM_REQUIRED_SNIPPETS = [
     'arch: "${NFPM_ARCH}"',
     'nginx (>= ${NGINX_VERSION_FLOOR})',
     'nginx (<< ${NGINX_VERSION_CEIL})',
+    "nginx >= 1:${NGINX_VERSION_FLOOR}",
+    "nginx < 1:${NGINX_VERSION_CEIL}",
     "/usr/lib/nginx/modules/ngx_http_markdown_filter_module.so",
     "packager: deb",
     "/usr/lib64/nginx/modules/ngx_http_markdown_filter_module.so",
@@ -155,8 +157,8 @@ STANDALONE_RPM_WORKFLOW_SNIPPETS = [
 ]
 STANDALONE_RPM_SPEC_SNIPPETS = [
     f"Name:           {CANONICAL_PACKAGE_NAME}",
-    "Requires:       nginx >= %{nginx_version_floor}",
-    "Requires:       nginx < %{nginx_version_ceil}",
+    "Requires:       nginx >= 1:%{nginx_version_floor}",
+    "Requires:       nginx < 1:%{nginx_version_ceil}",
     "Source0:        %{name}-%{version}.tar.gz",
     f"%setup -q -n {CANONICAL_PACKAGE_NAME}-%{{version}}",
     "# No-op: release-rpm.yml packages a prebuilt dynamic module.",
@@ -209,7 +211,9 @@ RELEASE_BUILD_GLIBC_SNIPPETS = {
 RELEASE_RUST_BUILD_INVARIANTS = [
     "RUST_TARGET",
     'rustup target add "${RUST_TARGET}"',
-    'cargo build --release --locked --target "${RUST_TARGET}" --features "${RUST_FEATURES}"',
+    'cargo build --release --locked --target "${RUST_TARGET}"',
+    '--features "${RUST_FEATURES}"',
+    "--config profile.release.lto=false",
     "target/${RUST_TARGET}/release/libnginx_markdown_converter.a",
     "markdown_streaming_new",
     "markdown_incremental_new",
