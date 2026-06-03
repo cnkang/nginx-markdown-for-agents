@@ -519,6 +519,7 @@ coverage-c:
 	@echo "==> Combined C coverage report: $(COVERAGE_DIR)/c-coverage.lcov"
 	lcov --summary $(COVERAGE_DIR)/c-coverage.lcov --rc branch_coverage=1 \
 	--ignore-errors inconsistent,inconsistent
+	@tools/sonar/check_advisory_coverage.sh $(COVERAGE_DIR)/c-coverage.lcov
 
 coverage-rust:
 	@mkdir -p $(COVERAGE_DIR)
