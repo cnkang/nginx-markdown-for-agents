@@ -21,6 +21,18 @@ Release.
 Package filenames include the module version, target NGINX version, and CPU
 architecture. The target NGINX version must match the installed NGINX ABI.
 
+### Platform Availability
+
+| Platform | Format | Source |
+|----------|--------|--------|
+| glibc-based Linux (Ubuntu, Debian, RHEL, AlmaLinux, Amazon Linux) | DEB/RPM | `release-packages.yml` (GitHub Releases) |
+| musl-based Linux (Alpine, etc.) | Static binary tarball | `release-binaries.yml` (GitHub Releases) |
+
+DEB and RPM packages are built on glibc-based build images and target
+glibc-based distributions only. For musl-based environments (Alpine Linux,
+etc.), use the pre-built binary tarball from the Release Binaries workflow or
+build from source.
+
 DEB format:
 
 ```text

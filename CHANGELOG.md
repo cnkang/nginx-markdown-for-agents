@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.7.0] - 2026-06-02
+## [0.7.0] - 2026-06-03
 
 P0 runtime correctness fixes, Rust-first architecture modules, independent
 decompression budget, Accept header negotiation, parse timeout/budget,
@@ -59,6 +59,9 @@ dynconf dry-run/rollback, and runtime diagnostics.
   - YUM repository metadata placeholder (`repodata/repomd.xml`).
   - Public v0.7.0 package installation uses GitHub Release DEB/RPM artifacts
     plus `SHA256SUMS`; public APT/YUM repository publishing remains planned.
+  - DEB/RPM packages target glibc-based distributions only. Musl-based targets
+    (Alpine, etc.) are available as static binary tarballs via the separate
+    `release-binaries.yml` workflow.
 
 - **Kubernetes Deployment Examples**
   - `examples/kubernetes/Dockerfile.ingress`: parameterized Ingress
@@ -106,6 +109,10 @@ dynconf dry-run/rollback, and runtime diagnostics.
 - Helm chart version and appVersion bumped to 0.7.0.
 - ci: upgrade `softprops/action-gh-release` from v2.6.2 to v3 across
   3 release workflows (release-binaries, release-packages, sign-and-publish).
+- ci(cflite): reduce batch fuzz duration from 3600s to 1800s. This is an
+  intentional trade-off to reduce CI costs; nightly fuzz and periodic batch
+  runs still provide sufficient coverage. Verify the latest nightly/batch fuzz
+  run passed before each release.
 - SECURITY.md supported version updated to 0.7.x.
 - Resolve actionable SonarQube findings in C unit tests: const-qualify
   read-only locals (S5350), move loop variables into for-statements (S5955),
