@@ -30,7 +30,15 @@
 #     packaging/matrix.yaml smoke_test_containers accordingly.
 #   - Enable GPG signing: configure GPG_PRIVATE_KEY, GPG_PASSPHRASE, GPG_KEY_ID secrets
 #     and create a Protected Environment "release-signing" with required reviewers.
-#     The integrity job auto-detects secret presence and enables signing.
+#     Set the repository variable ENABLE_GPG_SIGNING=true.
+#     The integrity-signing job auto-detects secret presence and enables signing.
+#
+# GPG Signing Policy (v0.7.0):
+#   For tag releases: if ENABLE_GPG_SIGNING == 'true', signing MUST succeed for
+#   the publish job to proceed. This prevents publishing unsigned packages to
+#   GitHub Releases when signing is required.
+#   For workflow_dispatch runs: signing is skipped and publish proceeds with
+#   SHA256SUMS-only integrity verification.
 #
 # Path filters note:
 #   GitHub Actions path filters only apply to push events on branches, NOT tag pushes.
@@ -654,6 +662,17 @@ jobs:
       - name: Run tag release gates
         run: |
           make release-gates-check-strict
+          # Run the full 0.7.0 gate validators that are not already covered
+          # by the build/package/smoke-test jobs above. The full
+          # release-gates-check-070 target includes build/test/fuzz which are
+          # redundant here (the build and smoke-test jobs already verified
+          # those), but we must run the Python gate validators and package
+          # layout checks to ensure complete 0.7.0 gate coverage.
+          python3 tools/release/gates/validate_config_directives_070.py
+          python3 tools/release/gates/validate_metrics_070.py
+          python3 tools/release/gates/validate_reason_codes_070.py
+          python3 tools/release/gates/validate_package_metadata_070.py
+          python3 tools/release/gates/validate_k8s_manifests_070.py
           bash tools/release/gates/check_install_layout.sh dist/*.deb dist/*.rpm
         shell: bash
 
@@ -772,13 +791,17 @@ jobs:
   publish:
     name: Publish
     needs: [release-gate, integrity-checksums, integrity-signing]
+    # For tag releases with GPG signing enabled (ENABLE_GPG_SIGNING == 'true'),
+    # signing MUST succeed — skipped signing means publish is blocked.
+    # For workflow_dispatch or when signing is not enabled, skipped is acceptable.
     if: >-
       always()
       && needs.integrity-checksums.result == 'success'
       && (needs.release-gate.result == 'success'
           || needs.release-gate.result == 'skipped')
       && (needs.integrity-signing.result == 'success'
-          || needs.integrity-signing.result == 'skipped')
+          || (needs.integrity-signing.result == 'skipped'
+              && github.ref_type != 'tag'))
     runs-on: ubuntu-24.04
     permissions:
       contents: write
