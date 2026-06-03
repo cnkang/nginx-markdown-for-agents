@@ -93,6 +93,12 @@ fi
 
 info "Importing GPG key..."
 
+# Use an isolated temporary GNUPGHOME so the runner's default keyring
+# is never modified.  The trap ensures cleanup on any exit path.
+GNUPGHOME="$(mktemp -d)"
+export GNUPGHOME
+trap 'rm -rf "$GNUPGHOME"' EXIT
+
 # Import the private key from environment variable.
 # All output is suppressed to prevent any key material from leaking.
 if ! printf '%s' "$GPG_PRIVATE_KEY" | gpg --batch --yes --import >/dev/null 2>&1; then
@@ -137,29 +143,6 @@ if ! gpg --batch --verify "$SIGNATURE_FILE" "$CHECKSUMS_FILE" >/dev/null 2>&1; t
 fi
 
 info "Signature verified successfully."
-
-##############################################################################
-# Cleanup: remove imported private key from keyring
-##############################################################################
-
-info "Cleaning up GPG keyring..."
-
-# Get the keygrip(s) for the imported key to delete from the agent
-FINGERPRINT=""
-FINGERPRINT="$(gpg --batch --with-colons --list-secret-keys "$GPG_KEY_ID" 2>/dev/null \
-    | grep '^fpr:' | head -n1 | cut -d: -f10)" || true
-
-if [[ -n "$FINGERPRINT" ]]; then
-    # Delete the secret key first, then the public key
-    gpg --batch --yes --delete-secret-keys "$FINGERPRINT" >/dev/null 2>&1 || true
-    gpg --batch --yes --delete-keys "$FINGERPRINT" >/dev/null 2>&1 || true
-    info "GPG key material removed from keyring."
-else
-    # Fallback: try deleting by key ID directly
-    gpg --batch --yes --delete-secret-keys "$GPG_KEY_ID" >/dev/null 2>&1 || true
-    gpg --batch --yes --delete-keys "$GPG_KEY_ID" >/dev/null 2>&1 || true
-    info "GPG key material cleanup attempted (fallback method)."
-fi
 
 ##############################################################################
 # Done
