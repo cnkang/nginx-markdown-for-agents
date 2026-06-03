@@ -258,6 +258,11 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
   Minimal images that lack checkout prerequisites must be tested through a
   host-checkout plus `docker run` smoke pattern instead of as the job container
   [13]
+- Tag release gates in GitHub Actions must run only repository-owned validators
+  and artifacts available in a clean CI checkout. Do not call legacy or
+  local-spec validators that require user-local Kiro/spec directories unless
+  those inputs are checked into the repository or explicitly downloaded first
+  [13]
 - Release package build environments must not require a newer glibc than any
   supported smoke-test/runtime distro for the same artifact family; build Linux
   module artifacts on the oldest supported glibc baseline or split artifacts by
@@ -431,3 +436,4 @@ remediation:
 | 0.7.13 | 2026-06-03 | Codex | Strengthened Rule 13 for shell release symbol checks under pipefail with whole-archive nm output |
 | 0.7.14 | 2026-06-03 | Codex | Strengthened Rule 13 for nginx.org RPM epoch-aware dependency floors plus preinstall ABI branch guards |
 | 0.7.15 | 2026-06-03 | Codex | Strengthened Rule 13 for package smoke job-container checkout prerequisites |
+| 0.7.16 | 2026-06-03 | Codex | Strengthened Rule 13 for tag release gates avoiding user-local spec dependencies in clean CI checkouts |

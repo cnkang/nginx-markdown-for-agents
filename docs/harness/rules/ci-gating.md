@@ -99,6 +99,11 @@ Required:
     Minimal images that lack checkout prerequisites must be exercised through a
     host-checkout plus `docker run` smoke pattern instead of as the job
     container.
+  - Tag release gates in GitHub Actions must run only repository-owned
+    validators and artifacts available in a clean CI checkout.  Legacy or
+    local-spec validators that require user-local Kiro/spec directories must not
+    run in tag release CI unless those inputs are checked into the repository or
+    explicitly downloaded first.
   - Package smoke tests must select external package repositories from
     `/etc/os-release` or equivalent target-distro evidence.  Do not route
     Amazon Linux through CentOS repository paths.
