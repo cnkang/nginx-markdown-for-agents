@@ -931,9 +931,9 @@ ngx_http_markdown_streaming_send_output(
                  old != NULL; old = old->next)
             {
                 if (old->buf != NULL && old->buf->temporary) {
-                    size_t len = ngx_http_markdown_buf_len_safe(old->buf);
-                    if (len > 0) {
-                        markdown_streaming_output_free(old->buf->pos, len);
+                    size_t old_len = ngx_http_markdown_buf_len_safe(old->buf);
+                    if (old_len > 0) {
+                        markdown_streaming_output_free(old->buf->pos, old_len);
                     }
                     old->buf->pos = NULL;
                     old->buf->last = NULL;
