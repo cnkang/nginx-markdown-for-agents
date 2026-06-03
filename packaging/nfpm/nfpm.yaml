@@ -16,9 +16,10 @@
 #
 # ABI safety:
 #   NGINX dynamic modules require ABI compatibility with the exact NGINX
-#   version they were compiled against. The dependency constraints pin the
-#   package to the same NGINX minor branch (e.g. 1.26.x) and the preinstall
-#   script performs an exact version check at install time.
+#   version they were compiled against. DEB dependencies constrain the minor
+#   branch directly. RPM uses an epoch-aware floor because nginx.org RPM epochs
+#   vary across minor branches; the preinstall script enforces the minor branch
+#   ABI guard at install time.
 
 name: "nginx-module-markdown-for-agents"
 arch: "${NFPM_ARCH}"
@@ -42,7 +43,6 @@ overrides:
   rpm:
     depends:
       - "nginx >= 1:${NGINX_VERSION_FLOOR}"
-      - "nginx < 1:${NGINX_VERSION_CEIL}"
 
 contents:
   - src: "./build/ngx_http_markdown_filter_module.so"

@@ -8,7 +8,6 @@ URL:            https://github.com/cnkang/nginx-markdown-for-agents
 Source0:        %{name}-%{version}.tar.gz
 
 Requires:       nginx >= 1:%{nginx_version_floor}
-Requires:       nginx < 1:%{nginx_version_ceil}
 
 %description
 NGINX dynamic filter module that converts HTML responses to Markdown
@@ -16,8 +15,9 @@ format for AI agent consumption.
 
 Built against nginx.org stable %{nginx_version}.
 
-WARNING: This module is compatible with nginx.org releases
-%{nginx_version_floor} (inclusive) through %{nginx_version_ceil} (exclusive).
+WARNING: This module is built for nginx.org %{nginx_version}. The RPM
+dependency uses an epoch-aware floor and the preinstall script enforces the
+target minor branch at install time.
 It will NOT work with distro-provided, vendor-patched, OpenResty, Tengine,
 or custom-built NGINX binaries. NGINX validates module binary compatibility
 signature at load time; mismatched versions will fail to load.
