@@ -41,8 +41,8 @@ overrides:
       - "nginx (<< ${NGINX_VERSION_CEIL})"
   rpm:
     depends:
-      - "nginx >= ${NGINX_VERSION_FLOOR}"
-      - "nginx < ${NGINX_VERSION_CEIL}"
+      - "nginx >= 1:${NGINX_VERSION_FLOOR}"
+      - "nginx < 1:${NGINX_VERSION_CEIL}"
 
 contents:
   - src: "./build/ngx_http_markdown_filter_module.so"
