@@ -82,3 +82,5 @@ if [[ -n "${aggregate}" ]]; then
         echo "  Aggregate line coverage: ${aggregate}% (meets 80% minimum)"
     fi
 fi
+
+exit 0
