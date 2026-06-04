@@ -220,6 +220,48 @@ Cloudflare 的 [Markdown for Agents](https://blog.cloudflare.com/markdown-for-ag
 | 性能基线门禁 | 自动化回归检测，采用双阈值体系（警告/阻断），覆盖 PR 和 Nightly CI |
 | 矩阵驱动的发布自动化 | 自动化发布流水线，支持平台矩阵管理与制品完整性验证 |
 
+## 平台支持
+
+<!-- BEGIN:release-matrix:support-matrix -->
+
+| NGINX | Channel | OS | libc | Arch | Artifact | Tier | Blocking |
+|-------|---------|-----|------|------|----------|------|----------|
+| 1.31.1 | mainline | linux | glibc | arm64 | dynamic-module | supported | Yes |
+| 1.31.1 | mainline | linux | musl | arm64 | dynamic-module | supported | No |
+| 1.31.1 | mainline | linux | glibc | amd64 | dynamic-module | supported | Yes |
+| 1.31.1 | mainline | linux | musl | amd64 | dynamic-module | supported | No |
+| 1.31.1 | mainline | debian12 | glibc | arm64 | docker-image | supported | Yes |
+| 1.31.1 | mainline | debian12 | glibc | amd64 | docker-image | supported | Yes |
+| 1.31.1 | mainline | alpine3.20 | musl | arm64 | docker-image | supported | Yes |
+| 1.31.1 | mainline | alpine3.20 | musl | amd64 | docker-image | supported | Yes |
+| 1.30.2 | stable | linux | glibc | arm64 | dynamic-module | supported | Yes |
+| 1.30.2 | stable | linux | musl | arm64 | dynamic-module | supported | No |
+| 1.30.2 | stable | linux | glibc | amd64 | dynamic-module | supported | Yes |
+| 1.30.2 | stable | linux | musl | amd64 | dynamic-module | supported | No |
+| 1.28.3 | stable | linux | glibc | arm64 | dynamic-module | supported | Yes |
+| 1.28.3 | stable | linux | musl | arm64 | dynamic-module | supported | No |
+| 1.28.3 | stable | linux | glibc | amd64 | dynamic-module | supported | Yes |
+| 1.28.3 | stable | linux | musl | amd64 | dynamic-module | supported | No |
+| 1.26.3 | stable | macos | glibc | arm64 | homebrew-formula | experimental | No |
+| 1.26.3 | stable | linux | glibc | arm64 | dynamic-module | supported | Yes |
+| 1.26.3 | stable | linux | musl | arm64 | dynamic-module | supported | No |
+| 1.26.3 | stable | linux | glibc | amd64 | dynamic-module | supported | Yes |
+| 1.26.3 | stable | linux | musl | amd64 | dynamic-module | supported | No |
+| 1.26.3 | stable | debian12 | glibc | arm64 | docker-image | supported | Yes |
+| 1.26.3 | stable | debian12 | glibc | arm64 | deb-package | supported | Yes |
+| 1.26.3 | stable | debian12 | glibc | amd64 | docker-image | supported | Yes |
+| 1.26.3 | stable | debian12 | glibc | amd64 | deb-package | supported | Yes |
+| 1.26.3 | stable | any | glibc | amd64 | source | best-effort | No |
+| 1.26.3 | stable | alpine3.20 | musl | arm64 | docker-image | supported | Yes |
+| 1.26.3 | stable | alpine3.20 | musl | amd64 | docker-image | supported | Yes |
+| 1.26.3 | stable | almalinux9 | glibc | arm64 | rpm-package | supported | Yes |
+| 1.26.3 | stable | almalinux9 | glibc | amd64 | rpm-package | supported | Yes |
+| 1.24.0 | oldstable | linux | glibc | arm64 | dynamic-module | supported | Yes |
+| 1.24.0 | oldstable | linux | musl | arm64 | dynamic-module | supported | No |
+| 1.24.0 | oldstable | linux | glibc | amd64 | dynamic-module | supported | Yes |
+| 1.24.0 | oldstable | linux | musl | amd64 | dynamic-module | supported | No |
+<!-- END:release-matrix:support-matrix -->
+
 ## 工作原理
 
 ```mermaid
