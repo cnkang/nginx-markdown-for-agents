@@ -7,7 +7,6 @@ import textwrap
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
 
 import sys
 
@@ -22,7 +21,6 @@ from validate_workflow_matrix_consumers import (
     load_matrix_versions,
     validate_canonical_workflows,
     validate_legacy_workflows,
-    validate_other_workflows,
     validate_owner_workflow_refs,
 )
 
@@ -84,17 +82,15 @@ class TestExtractHardcodedVersions:
         assert "1.26.3" in versions
 
     def test_skips_rust_toolchain(self) -> None:
-        content = "  RUST_TOOLCHAIN: 1.91.1"
-        found = extract_hardcoded_versions(content)
-        assert len(found) == 0
+        self._assert_no_hardcoded_versions("  RUST_TOOLCHAIN: 1.91.1")
 
     def test_skips_commented_versions(self) -> None:
-        content = "  # NGINX_VERSION=1.26.3"
-        found = extract_hardcoded_versions(content)
-        assert len(found) == 0
+        self._assert_no_hardcoded_versions("  # NGINX_VERSION=1.26.3")
 
     def test_skips_description_versions(self) -> None:
-        content = '  description: "e.g. v1.26.3"'
+        self._assert_no_hardcoded_versions('  description: "e.g. v1.26.3"')
+
+    def _assert_no_hardcoded_versions(self, content):
         found = extract_hardcoded_versions(content)
         assert len(found) == 0
 
@@ -109,19 +105,20 @@ class TestLoadMatrixVersions:
                 {"nginx": "1.26.3", "nginx_version": "1.26.3"},
             ]
         }
-        matrix_file = tmp_path / "release-matrix.json"
-        matrix_file.write_text(json.dumps(matrix))
-
-        versions = load_matrix_versions(matrix_file)
+        versions = self._write_matrix_file_and_load_versions(tmp_path, matrix)
         assert versions == {"1.24.0", "1.26.3"}
 
     def test_empty_matrix(self, tmp_path: Path) -> None:
         matrix = {"matrix": []}
+        versions = self._write_matrix_file_and_load_versions(tmp_path, matrix)
+        assert versions == set()
+
+    def _write_matrix_file_and_load_versions(
+        self, tmp_path: Path, matrix: dict
+    ) -> set[str]:
         matrix_file = tmp_path / "release-matrix.json"
         matrix_file.write_text(json.dumps(matrix))
-
-        versions = load_matrix_versions(matrix_file)
-        assert versions == set()
+        return load_matrix_versions(matrix_file)
 
 
 class TestValidateCanonicalWorkflows:
@@ -139,41 +136,67 @@ class TestValidateCanonicalWorkflows:
                 "  data = json.load(f)\n"
             )
 
-        matrix_versions = {"1.24.0", "1.26.3", "1.31.1"}
-
         with patch(
             "validate_workflow_matrix_consumers.WORKFLOWS_DIR", wf_dir
         ):
-            errors, warnings = validate_canonical_workflows(matrix_versions)
+            errors, warnings = validate_canonical_workflows()
 
         assert errors == []
+        assert warnings == []
 
     def test_fails_when_canonical_workflow_missing_dynamic_resolution(
         self, tmp_path: Path
     ) -> None:
+        wf_dir = self._make_canonical_workflow_dir(
+            tmp_path, 'NGINX_VERSION="1.26.3"\n'
+        )
+
+        errors = self._validate_canonical_workflows_in_dir(
+            wf_dir, "does not reference"
+        )
+        assert "1.26.3" not in errors[0]
+
+    def test_fails_when_canonical_workflow_has_dynamic_and_hardcoded(
+        self, tmp_path: Path
+    ) -> None:
+        """Canonical workflows must not hardcode versions even if they also
+        reference the matrix dynamically and the version exists in the matrix."""
+        wf_dir = self._make_canonical_workflow_dir(
+            tmp_path,
+            'open("tools/release-matrix.json") as f:\n'
+            '  data = json.load(f)\n'
+            'NGINX_VERSION="1.26.3"\n',
+        )
+
+        errors = self._validate_canonical_workflows_in_dir(
+            wf_dir, "canonical workflow must not hardcode"
+        )
+        assert "1.26.3" in errors[0]
+
+    def _validate_canonical_workflows_in_dir(
+        self, wf_dir: Path, expected_fragment: str
+    ) -> list[str]:
+        with patch("validate_workflow_matrix_consumers.WORKFLOWS_DIR", wf_dir):
+            errors, warnings = validate_canonical_workflows()
+        assert warnings == []
+        assert len(errors) == 1
+        assert "release-packages.yml" in errors[0]
+        assert expected_fragment in errors[0]
+        return errors
+
+    def _make_canonical_workflow_dir(
+        self, tmp_path: Path, release_packages_content: str
+    ) -> Path:
         wf_dir = tmp_path / ".github" / "workflows"
         wf_dir.mkdir(parents=True)
-
-        (wf_dir / "release-packages.yml").write_text(
-            'NGINX_VERSION="1.26.3"\n'
-        )
+        (wf_dir / "release-packages.yml").write_text(release_packages_content)
         (wf_dir / "release-binaries.yml").write_text(
             'open("tools/release-matrix.json")\n'
         )
         (wf_dir / "install-verify.yml").write_text(
             'open("tools/release-matrix.json")\n'
         )
-
-        matrix_versions = {"1.26.3"}
-
-        with patch(
-            "validate_workflow_matrix_consumers.WORKFLOWS_DIR", wf_dir
-        ):
-            errors, warnings = validate_canonical_workflows(matrix_versions)
-
-        assert len(errors) == 1
-        assert "release-packages.yml" in errors[0]
-        assert "does not reference" in errors[0]
+        return wf_dir
 
 
 class TestValidateLegacyWorkflows:
@@ -218,7 +241,7 @@ class TestValidateLegacyWorkflows:
         with patch(
             "validate_workflow_matrix_consumers.WORKFLOWS_DIR", wf_dir
         ):
-            errors, warnings = validate_legacy_workflows(matrix_versions)
+            errors, _ = validate_legacy_workflows(matrix_versions)
 
         assert len(errors) == 1
         assert "1.22.0" in errors[0]
@@ -232,44 +255,28 @@ class TestValidateOwnerWorkflowRefs:
         wf_dir.mkdir(parents=True)
         (wf_dir / "release-packages.yml").write_text("")
 
-        matrix = {
-            "matrix": [
-                {
-                    "nginx": "1.26.3",
-                    "owner_workflow": ".github/workflows/release-packages.yml",
-                }
-            ],
-            "additional_artifacts": [],
-        }
-        matrix_file = tmp_path / "tools" / "release-matrix.json"
-        matrix_file.parent.mkdir(parents=True)
-        matrix_file.write_text(json.dumps(matrix))
-
-        with patch(
-            "validate_workflow_matrix_consumers.REPO_ROOT", tmp_path
-        ):
-            errors = validate_owner_workflow_refs(matrix_file)
-
+        errors = self._write_matrix_with_owner_workflow(
+            ".github/workflows/release-packages.yml", tmp_path
+        )
         assert errors == []
 
     def test_fails_when_workflow_missing(self, tmp_path: Path) -> None:
+        errors = self._write_matrix_with_owner_workflow(
+            ".github/workflows/nonexistent.yml", tmp_path
+        )
+        assert len(errors) == 1
+        assert "nonexistent.yml" in errors[0]
+
+    def _write_matrix_with_owner_workflow(
+        self, owner_workflow: str, tmp_path: Path
+    ) -> list[str]:
         matrix = {
-            "matrix": [
-                {
-                    "nginx": "1.26.3",
-                    "owner_workflow": ".github/workflows/nonexistent.yml",
-                }
-            ],
+            "matrix": [{"nginx": "1.26.3", "owner_workflow": owner_workflow}],
             "additional_artifacts": [],
         }
         matrix_file = tmp_path / "tools" / "release-matrix.json"
         matrix_file.parent.mkdir(parents=True)
         matrix_file.write_text(json.dumps(matrix))
-
-        with patch(
-            "validate_workflow_matrix_consumers.REPO_ROOT", tmp_path
-        ):
-            errors = validate_owner_workflow_refs(matrix_file)
-
-        assert len(errors) == 1
-        assert "nonexistent.yml" in errors[0]
+        with patch("validate_workflow_matrix_consumers.REPO_ROOT", tmp_path):
+            result = validate_owner_workflow_refs(matrix_file)
+        return result

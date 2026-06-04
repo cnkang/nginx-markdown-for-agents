@@ -139,9 +139,7 @@ def extract_hardcoded_versions(content: str) -> list[tuple[int, str, str]]:
     return found
 
 
-def validate_canonical_workflows(
-    matrix_versions: set[str],
-) -> tuple[list[str], list[str]]:
+def validate_canonical_workflows() -> tuple[list[str], list[str]]:
     """Validate canonical workflows use dynamic resolution.
 
     Returns (errors, warnings) lists.
@@ -164,16 +162,14 @@ def validate_canonical_workflows(
             )
             continue
 
-        # Even though dynamic, check for hardcoded versions that might conflict
+        # Even though dynamic, canonical workflows must not hardcode any
+        # NGINX version — all versions must come from the matrix.
         hardcoded = extract_hardcoded_versions(content)
-        for lineno, version, line_ctx in hardcoded:
-            if version not in matrix_versions:
-                errors.append(
-                    f"{wf_name}:{lineno}: hardcoded version '{version}' "
-                    f"not found in release-matrix.json "
-                    f"(line: {line_ctx!r})"
-                )
-
+        errors.extend(
+            f"{wf_name}:{lineno}: canonical workflow must not hardcode "
+            f"version '{version}' (line: {line_ctx!r})"
+            for lineno, version, line_ctx in hardcoded
+        )
     return errors, warnings
 
 
@@ -236,14 +232,11 @@ def validate_other_workflows(
         content = wf_path.read_text(encoding="utf-8")
         hardcoded = extract_hardcoded_versions(content)
 
-        for lineno, version, line_ctx in hardcoded:
-            if version not in matrix_versions:
-                errors.append(
-                    f"{wf_path.name}:{lineno}: references version "
-                    f"'{version}' not in release-matrix.json "
-                    f"(line: {line_ctx!r})"
-                )
-
+        errors.extend(
+            f"{wf_path.name}:{lineno}: references version '{version}' not in release-matrix.json (line: {line_ctx!r})"
+            for lineno, version, line_ctx in hardcoded
+            if version not in matrix_versions
+        )
     return errors, warnings
 
 
@@ -302,7 +295,7 @@ def main() -> int:
     all_warnings: list[str] = []
 
     # 1. Canonical workflows must use dynamic resolution
-    errors, warnings = validate_canonical_workflows(matrix_versions)
+    errors, warnings = validate_canonical_workflows()
     all_errors.extend(errors)
     all_warnings.extend(warnings)
 
