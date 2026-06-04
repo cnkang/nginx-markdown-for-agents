@@ -306,7 +306,7 @@ def test_generate_distribution_matrix():
     """Distribution matrix shows package types and workflows."""
     entries = _get_entries()
     result = rmd._generate_distribution_matrix(entries, MINIMAL_MATRIX)
-    assert "## Distribution Channels" in result
+    assert "### Release Matrix Distribution Overview" in result
     assert "### Package Types" in result
     assert "### Build Workflows" in result
 
@@ -353,6 +353,16 @@ def test_section_registry_matches_task_spec():
     assert rmd.SECTION_REGISTRY["docs/project/PROJECT_STATUS.md"] == ["status-matrix"]
     assert rmd.SECTION_REGISTRY["README_zh-CN.md"] == ["support-matrix"]
     assert rmd.SECTION_REGISTRY["docs/guides/PACKAGE_DISTRIBUTION.md"] == ["distribution-matrix"]
+
+
+def test_resolve_section_doc_path_blocks_escape():
+    """Section doc paths must stay inside the repository root."""
+    outside_path = rmd.ROOT.parent / "render-release-matrix-doc.md"
+    try:
+        rmd._resolve_section_doc_path(outside_path)
+        assert False, "Should have rejected an out-of-root path"
+    except ValueError as e:
+        assert "escapes root" in str(e)
 
 
 # ---------------------------------------------------------------------------
@@ -488,6 +498,7 @@ def run_tests():
         test_section_registry_coverage,
         test_known_sections_complete,
         test_section_registry_matches_task_spec,
+        test_resolve_section_doc_path_blocks_escape,
         test_write_then_check_idempotent,
         test_write_preserves_surrounding_content,
         test_full_cycle_all_sections,
