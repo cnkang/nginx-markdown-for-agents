@@ -777,10 +777,19 @@ def _generate_distribution_matrix(
 
 
 def _resolve_section_doc_path(file_path: Path) -> Path:
-    """Resolve a target doc path and keep writes inside the repo root."""
-    return validate_write_path_within_root(
+    """Resolve and restrict documentation target paths."""
+    validated = validate_write_path_within_root(
         file_path, ROOT, purpose="release matrix doc"
     )
+    allowed_targets = {
+        (ROOT / rel_path).resolve() for rel_path in SECTION_REGISTRY
+    }
+    if validated not in allowed_targets:
+        raise ValueError(
+            f"Refusing to write unregistered release matrix documentation "
+            f"target: {validated}"
+        )
+    return validated
 
 
 # Section name -> generator function mapping
@@ -1194,7 +1203,12 @@ def write_file(
     Returns list of errors encountered.
     """
     errors: list[str] = []
-    file_path = _resolve_section_doc_path(file_path)
+    try:
+        file_path = _resolve_section_doc_path(file_path)
+    except ValueError as e:
+        errors.append(str(e))
+        return errors
+
     rel_path = file_path.relative_to(ROOT).as_posix()
 
     if not file_path.exists():
@@ -1233,6 +1247,7 @@ def write_file(
             errors.append(f"{rel_path}: {e}")
             return errors
 
+    # SONAR_NOTE(S6553): file_path is resolved and allowlisted above.
     file_path.write_text(content, encoding="utf-8")
     # SONAR_NOTE(S2083): Target doc paths are validated to stay within ROOT.
     if verbose:

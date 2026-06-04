@@ -454,6 +454,27 @@ def test_full_cycle_all_sections():
         )
 
 
+def test_write_file_rejects_unregistered_target():
+    """write_file refuses paths outside the registered doc target set."""
+    content = (
+        "<!-- BEGIN:release-matrix:support-matrix -->\n"
+        "<!-- END:release-matrix:support-matrix -->\n"
+    )
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".md", dir=rmd.ROOT, delete=False, encoding="utf-8"
+    ) as f:
+        f.write(content)
+        tmp_path = Path(f.name)
+
+    try:
+        errors = rmd.write_file(tmp_path, _get_entries(), MINIMAL_MATRIX)
+        assert errors
+        assert "unregistered release matrix documentation target" in errors[0]
+        assert tmp_path.read_text(encoding="utf-8") == content
+    finally:
+        tmp_path.unlink()
+
+
 # ---------------------------------------------------------------------------
 # Release notes generation
 # ---------------------------------------------------------------------------
@@ -502,6 +523,7 @@ def run_tests():
         test_write_then_check_idempotent,
         test_write_preserves_surrounding_content,
         test_full_cycle_all_sections,
+        test_write_file_rejects_unregistered_target,
         test_release_notes_output,
     ]
 
