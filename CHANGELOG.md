@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+Target: 0.8.0 development direction. All items below are in development and
+not yet implemented.
+
+### Development Direction
+
+- **True streaming contract** (RFC 0008, ADR-0011): formalizing incremental
+  input processing, incremental output emission, and bounded memory as a
+  verifiable contract for the streaming engine.
+- **Streaming configuration** (ADR-0013): aligning the auto-mode default
+  policy with the true streaming contract definition.
+- **Fallback state machine** (ADR-0012): introducing pre-commit/post-commit
+  two-phase error handling with deterministic recovery semantics.
+- **Release matrix source of truth** (ADR-0014): consolidating platform and
+  version support declarations into a single machine-readable file consumed
+  by CI, documentation, and packaging workflows.
+
+### Documentation
+
+- Added RFC 0008: Streaming Conversion and Support Contract.
+- Added ADRs 0011–0014 documenting 0.8.0 architectural decisions.
+- Updated `PROJECT_STATUS.md` with 0.8.0 target goals and non-goals.
+
 ## [0.7.0] - 2026-06-03
 
 P0 runtime correctness fixes, Rust-first architecture modules, independent

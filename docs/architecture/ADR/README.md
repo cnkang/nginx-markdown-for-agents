@@ -64,6 +64,10 @@ What other options were considered and why were they not chosen?
 | [0008](0008-noise-pruning-default.md) | Noise Pruning Enabled by Default | Proposed | 2026-04-28 |
 | [0009](0009-rust-first-e2e-test-architecture.md) | Rust-First E2E Test Architecture with Hybrid Runtime Coverage | Accepted | 2026-05-13 |
 | [0010](0010-v070-rust-first-boundary-evolution.md) | v0.7.0 Rust-First Boundary Evolution | Accepted | 2026-05-17 |
+| [0011](0011-true-streaming-contract.md) | True Streaming Contract | Proposed | 2026-06-04 |
+| [0012](0012-fallback-state-machine.md) | Fallback State Machine | Proposed | 2026-06-04 |
+| [0013](0013-streaming-default-policy.md) | Streaming Default Policy | Proposed | 2026-06-04 |
+| [0014](0014-release-matrix-source-of-truth.md) | Release Matrix Source of Truth | Proposed | 2026-06-04 |
 
 ## Creating a New ADR
 
