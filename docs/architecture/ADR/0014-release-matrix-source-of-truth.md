@@ -29,10 +29,10 @@ Establish a single machine-readable release matrix per RFC 0008 section 4:
    be manually maintained in parallel.
 
 The matrix covers at minimum:
-- Supported NGINX version range (floor and ceiling)
-- Supported Rust toolchain version (MSRV)
-- Supported OS/architecture combinations
-- Package format availability (DEB, RPM, tarball, Homebrew, container)
+- Target NGINX version range (floor and ceiling)
+- Target Rust toolchain version (MSRV)
+- Target OS/architecture combinations
+- Package format coverage (DEB, RPM, tarball, Homebrew, container)
 - Deployment tier classifications
 
 ## Consequences

@@ -63,3 +63,17 @@ as "true streaming."
 
 - [RFC 0008 section 1](../RFC-0008-streaming-conversion-support-contract.md)
 - [ADR-0004: Streaming Bounded Memory Conversion](0004-streaming-bounded-memory-conversion.md)
+
+## Date
+
+2026-06-04
+
+## Authors
+
+Project Team
+
+## Document Updates
+
+| Version | Date | Author | Changes |
+|---------|------|--------|---------|
+| 0.8.0 | 2026-06-04 | Kang | Initial ADR for 0.8.0 true streaming contract |
