@@ -39,6 +39,18 @@ fn longest_backtick_run(content: &str) -> usize {
     max_run
 }
 
+fn leading_backtick_run(content: &str) -> usize {
+    content.bytes().take_while(|&byte| byte == b'`').count()
+}
+
+fn trailing_backtick_run(content: &str) -> usize {
+    content
+        .bytes()
+        .rev()
+        .take_while(|&byte| byte == b'`')
+        .count()
+}
+
 /// Escape a URL for use as a Markdown link/image destination.
 ///
 /// CommonMark requires that link destinations containing spaces, parentheses,
@@ -132,6 +144,8 @@ pub struct IncrementalEmitter {
     code_fence_lang: Option<String>,
     /// Longest backtick run seen in the current code block content.
     code_block_backtick_max: usize,
+    /// Trailing backtick run from the previous code-block text event.
+    code_block_trailing_backticks: usize,
     /// Buffered code block content, accumulated until block ends so fence
     /// length can be chosen after seeing all backtick runs.
     code_block_buffer: Vec<u8>,
@@ -173,6 +187,7 @@ impl IncrementalEmitter {
             flush_count: 0,
             code_fence_lang: None,
             code_block_backtick_max: 0,
+            code_block_trailing_backticks: 0,
             code_block_buffer: Vec::new(),
         }
     }
@@ -289,6 +304,7 @@ impl IncrementalEmitter {
             self.write_str(&format!("{}\n", fence_str))?;
             self.in_code_block = false;
             self.code_block_buffer.clear();
+            self.code_block_trailing_backticks = 0;
         }
         // Move pending buffer to flushed (checked — bounded-memory contract
         // applies even in the terminal flush).
@@ -365,6 +381,7 @@ impl IncrementalEmitter {
                 self.in_code_block = true;
                 self.code_fence_lang = lang.clone();
                 self.code_block_backtick_max = 0;
+                self.code_block_trailing_backticks = 0;
                 self.code_block_buffer.clear();
             }
             StructuralContext::InlineCode => {
@@ -474,6 +491,7 @@ impl IncrementalEmitter {
                 self.in_code_block = false;
                 self.code_fence_lang = None;
                 self.code_block_backtick_max = 0;
+                self.code_block_trailing_backticks = 0;
                 self.code_block_buffer.clear();
                 self.last_was_newline = true;
                 self.needs_block_separator = true;
@@ -566,8 +584,21 @@ impl IncrementalEmitter {
 
         if self.in_code_block {
             let backtick_run = longest_backtick_run(text);
-            if backtick_run > self.code_block_backtick_max {
-                self.code_block_backtick_max = backtick_run;
+            let leading_run = leading_backtick_run(text);
+            let trailing_run = trailing_backtick_run(text);
+            let bridged_run = self
+                .code_block_trailing_backticks
+                .saturating_add(leading_run);
+            self.code_block_backtick_max = self
+                .code_block_backtick_max
+                .max(backtick_run)
+                .max(bridged_run);
+            if !text.is_empty() {
+                self.code_block_trailing_backticks = if leading_run == text.len() {
+                    bridged_run
+                } else {
+                    trailing_run
+                };
             }
             if self.blockquote_depth > 0 {
                 let mut prefixed = Vec::new();
@@ -2080,6 +2111,21 @@ mod tests {
         );
         assert!(
             output.contains("````\n") && output.matches("````").count() >= 2,
+            "closing fence must match opening fence length, got: {}",
+            output
+        );
+    }
+
+    #[test]
+    fn test_code_fence_backtick_run_across_text_events() {
+        let output = emit_html(&[start_tag("pre"), text("``"), text("``"), end_tag("pre")]);
+        assert!(
+            output.contains("`````\n"),
+            "fence must exceed split backtick run, got: {}",
+            output
+        );
+        assert!(
+            output.matches("`````").count() >= 2,
             "closing fence must match opening fence length, got: {}",
             output
         );

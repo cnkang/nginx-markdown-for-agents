@@ -26,6 +26,9 @@ Historical issues: `1688e80`, `77a46d6`, `2c7d6a9`.
 Required:
 - In-link formatting markers (bold/italic/inline-code) must be accumulated in link text, not flushed outside link context.
 - Code-block output must preserve raw content (blank lines/trailing spaces) and bypass generic normalization.
+- Streaming code-block emitters must carry delimiter state across text-event
+  boundaries.  Fence length must be chosen from the longest backtick run across
+  the whole block, including runs split across adjacent tokenizer events.
 - Blockquote markers must be emitted consistently on entry and after newline boundaries.
 - URL extraction parity must include media-bearing elements, not only `img`
   (at minimum `video`, `audio`, `source`, `track`, and `area` where

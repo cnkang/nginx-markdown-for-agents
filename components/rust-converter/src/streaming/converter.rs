@@ -1138,41 +1138,38 @@ fn split_utf8_tail(bytes: &[u8]) -> (&[u8], &[u8]) {
         return (bytes, &[]);
     }
 
-    // Walk backwards (at most 3 bytes) to find the start of an incomplete
-    // multibyte sequence at the end.
+    fn utf8_sequence_len(lead: u8) -> Option<usize> {
+        match lead {
+            0xC2..=0xDF => Some(2),
+            0xE0..=0xEF => Some(3),
+            0xF0..=0xF4 => Some(4),
+            _ => None,
+        }
+    }
+
+    fn is_continuation(byte: u8) -> bool {
+        (byte & 0xC0) == 0x80
+    }
+
+    // Walk backwards (at most 3 bytes) to find the start of a repairable
+    // incomplete multibyte sequence at the end. Invalid byte regions are not
+    // deferred: they must be converted lossy in the current tokenizer state so
+    // chunked conversion remains confluent with single-pass conversion.
     let len = bytes.len();
     let check_from = len.saturating_sub(3);
     for i in (check_from..len).rev() {
         let b = bytes[i];
-        // Leading byte of a multibyte sequence?
-        if b >= 0xC0 {
-            let expected_len = if b < 0xE0 {
-                2
-            } else if b < 0xF0 {
-                3
-            } else {
-                4
-            };
+        if let Some(expected_len) = utf8_sequence_len(b) {
             let available = len - i;
-            if available < expected_len {
+            if available < expected_len && bytes[i + 1..].iter().all(|&c| is_continuation(c)) {
                 // Incomplete sequence — split here
                 return (&bytes[..i], &bytes[i..]);
             }
-            // Sequence is complete; check if it's valid
-            if std::str::from_utf8(&bytes[i..i + expected_len]).is_ok() {
-                // The incomplete part must be after this sequence
-                break;
-            }
-            // Invalid complete sequence. If it starts at offset 0, it cannot
-            // be repaired by appending future bytes; keep it in `valid` so the
-            // caller can recover via lossy conversion now instead of carrying
-            // an ever-growing deferred tail across chunks.
-            if i == 0 {
-                return (bytes, &[]);
-            }
-            // Otherwise split before the invalid region so the valid prefix can
-            // still be emitted immediately.
-            return (&bytes[..i], &bytes[i..]);
+            break;
+        }
+
+        if !is_continuation(b) {
+            break;
         }
     }
 
@@ -1206,6 +1203,31 @@ mod tests {
         // without waiting for the 1024-byte sniff buffer to fill.
         conv.set_content_type(Some("text/html; charset=UTF-8".to_string()));
         conv
+    }
+
+    fn convert_with_splits(html: &[u8], split_sizes: &[usize]) -> Vec<u8> {
+        let mut conv = make_converter();
+        let mut out = Vec::new();
+        let mut cursor = 0;
+
+        for &size in split_sizes {
+            if cursor >= html.len() {
+                break;
+            }
+            let end = cursor.saturating_add(size).min(html.len());
+            let chunk = conv.feed_chunk(&html[cursor..end]).unwrap();
+            out.extend_from_slice(&chunk.markdown);
+            cursor = end;
+        }
+
+        if cursor < html.len() {
+            let chunk = conv.feed_chunk(&html[cursor..]).unwrap();
+            out.extend_from_slice(&chunk.markdown);
+        }
+
+        let result = conv.finalize().unwrap();
+        out.extend_from_slice(&result.final_markdown);
+        out
     }
 
     #[test]
@@ -2393,11 +2415,12 @@ mod tests {
 
     #[test]
     fn test_split_utf8_tail_invalid_interior_fallback() {
-        // Interior invalid byte can be isolated: split occurs before it.
+        // Invalid bytes are not repairable by future chunks, so they must be
+        // handled by lossy conversion in the current tokenizer state.
         let bytes = [0x48, 0x65, 0xFF, 0x6C, 0x6F];
         let (valid, tail) = split_utf8_tail(&bytes);
-        assert_eq!(valid, b"He");
-        assert_eq!(tail, &[0xFF, 0x6C, 0x6F]);
+        assert_eq!(valid, &bytes);
+        assert!(tail.is_empty());
 
         // No lead byte candidate near the tail: fallback returns the full slice.
         let continuation_only = [0x80, 0x80];
@@ -2435,5 +2458,43 @@ mod tests {
 
         assert_eq!(valid, &bytes);
         assert!(tail.is_empty());
+    }
+
+    #[test]
+    fn test_streaming_invalid_utf8_tail_matches_single_pass() {
+        let html = &[
+            0x50, 0x3C, 0x7E, 0x32, 0x7C, 0x00, 0x2D, 0xCF, 0x37, 0x7C, 0x20, 0x2D, 0x2D, 0x20,
+            0x7C, 0x5E, 0x5E, 0x45, 0x05, 0x45, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00,
+            0x00, 0x01, 0x45, 0x7C, 0x00, 0x2D, 0xCF, 0x37, 0x7C, 0x20, 0x2D, 0x7C, 0x20, 0x7C,
+            0x7C, 0x0A, 0x20, 0x2D, 0x2F, 0x20, 0x61, 0x20, 0x74, 0x20, 0x5D, 0x3F, 0x3C, 0x70,
+            0x72, 0x65, 0x20, 0x7C, 0x20, 0x32, 0x3E, 0x60, 0x60, 0x60, 0x60, 0x60, 0x60, 0x60,
+            0x60, 0x60, 0x60, 0x60, 0x60, 0x60, 0x60, 0x60, 0x60, 0x60, 0x60, 0x60, 0x60, 0x60,
+            0x60, 0x60, 0x60, 0x60, 0x60, 0x60, 0x60, 0x60, 0x60, 0x60, 0x60, 0x60, 0x60, 0x60,
+            0x60, 0x60, 0x60, 0x60, 0x60, 0x60, 0x60, 0x60, 0x60, 0x60, 0x45, 0x45, 0x45, 0x00,
+            0x00, 0x00, 0x34, 0x45, 0x60, 0x60, 0x60, 0x60, 0x60, 0x60, 0x60, 0x60, 0x60, 0x60,
+            0x60, 0x60, 0x60, 0x00, 0x00, 0x00, 0x42, 0x00, 0x50, 0x60, 0x60, 0x60, 0x3E, 0x3E,
+            0x3E, 0x3E, 0x3E, 0x81, 0xA5, 0xA5, 0xA5, 0xA5, 0xA5, 0xA5, 0xA5, 0xA5, 0xA5, 0x7B,
+            0x7B, 0x7B, 0x7B,
+        ];
+        let single = convert_with_splits(html, &[html.len()]);
+        let chunked = convert_with_splits(html, &[1, 24, 28, 5, 5, 1, 1, 5, 88]);
+
+        if single != chunked {
+            let first_diff = single
+                .iter()
+                .zip(chunked.iter())
+                .position(|(left, right)| left != right)
+                .unwrap_or_else(|| single.len().min(chunked.len()));
+            let start = first_diff.saturating_sub(16);
+            let single_end = first_diff.saturating_add(48).min(single.len());
+            let chunked_end = first_diff.saturating_add(48).min(chunked.len());
+            panic!(
+                "first_diff={first_diff}, single_len={}, chunked_len={}, single={:?}, chunked={:?}",
+                single.len(),
+                chunked.len(),
+                String::from_utf8_lossy(&single[start..single_end]),
+                String::from_utf8_lossy(&chunked[start..chunked_end])
+            );
+        }
     }
 }
