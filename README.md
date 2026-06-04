@@ -242,7 +242,7 @@ Neither approach is universally better. Edge-layer conversion is a good fit when
 | 1.28.3 | stable | linux | musl | arm64 | dynamic-module | supported | No |
 | 1.28.3 | stable | linux | glibc | amd64 | dynamic-module | supported | Yes |
 | 1.28.3 | stable | linux | musl | amd64 | dynamic-module | supported | No |
-| 1.26.3 | stable | macos | glibc | arm64 | homebrew-formula | experimental | No |
+| 1.26.3 | stable | macos | darwin | arm64 | homebrew-formula | experimental | No |
 | 1.26.3 | stable | linux | glibc | arm64 | dynamic-module | supported | Yes |
 | 1.26.3 | stable | linux | musl | arm64 | dynamic-module | supported | No |
 | 1.26.3 | stable | linux | glibc | amd64 | dynamic-module | supported | Yes |
@@ -251,7 +251,7 @@ Neither approach is universally better. Edge-layer conversion is a good fit when
 | 1.26.3 | stable | debian12 | glibc | arm64 | deb-package | supported | Yes |
 | 1.26.3 | stable | debian12 | glibc | amd64 | docker-image | supported | Yes |
 | 1.26.3 | stable | debian12 | glibc | amd64 | deb-package | supported | Yes |
-| 1.26.3 | stable | any | glibc | amd64 | source | best-effort | No |
+| 1.26.3 | stable | any | n/a | any | source | best-effort | No |
 | 1.26.3 | stable | alpine3.20 | musl | arm64 | docker-image | supported | Yes |
 | 1.26.3 | stable | alpine3.20 | musl | amd64 | docker-image | supported | Yes |
 | 1.26.3 | stable | almalinux9 | glibc | arm64 | rpm-package | supported | Yes |

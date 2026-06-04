@@ -15,8 +15,8 @@ specified in the build matrix and is not a universal shared library.
 
 Key points:
 
-- Only nginx.org stable branch releases are supported in the initial scope.
-- nginx.org mainline support is reserved for future extension.
+- Both nginx.org stable and selected mainline releases are supported as shown
+  in the build matrix below.
 - Each prebuilt package targets a specific NGINX version and CPU architecture.
 - Users with unsupported NGINX versions must build from source (see below).
 
@@ -316,7 +316,7 @@ the module from source against your local NGINX installation.
 | 1.28.3 | stable | linux | musl | arm64 | dynamic-module | docker-validation | supported | No | `.github/workflows/release-binaries.yml` |
 | 1.28.3 | stable | linux | glibc | amd64 | dynamic-module | smoke-test | supported | Yes | `.github/workflows/release-packages.yml` |
 | 1.28.3 | stable | linux | musl | amd64 | dynamic-module | docker-validation | supported | No | `.github/workflows/release-binaries.yml` |
-| 1.26.3 | stable | macos | glibc | arm64 | homebrew-formula | formula-gate | experimental | No | `.github/workflows/homebrew-formula-gate.yml` |
+| 1.26.3 | stable | macos | darwin | arm64 | homebrew-formula | formula-gate | experimental | No | `.github/workflows/homebrew-formula-gate.yml` |
 | 1.26.3 | stable | linux | glibc | arm64 | dynamic-module | smoke-test | supported | Yes | `.github/workflows/release-packages.yml` |
 | 1.26.3 | stable | linux | musl | arm64 | dynamic-module | docker-validation | supported | No | `.github/workflows/release-binaries.yml` |
 | 1.26.3 | stable | linux | glibc | amd64 | dynamic-module | smoke-test | supported | Yes | `.github/workflows/release-packages.yml` |
@@ -325,7 +325,7 @@ the module from source against your local NGINX installation.
 | 1.26.3 | stable | debian12 | glibc | arm64 | deb-package | smoke-test | supported | Yes | `.github/workflows/release-packages.yml` |
 | 1.26.3 | stable | debian12 | glibc | amd64 | docker-image | functional-check | supported | Yes | `.github/workflows/official-nginx-docker.yml` |
 | 1.26.3 | stable | debian12 | glibc | amd64 | deb-package | smoke-test | supported | Yes | `.github/workflows/release-packages.yml` |
-| 1.26.3 | stable | any | glibc | amd64 | source | ci-only | best-effort | No | `.github/workflows/ci.yml` |
+| 1.26.3 | stable | any | n/a | any | source | ci-only | best-effort | No | `.github/workflows/ci.yml` |
 | 1.26.3 | stable | alpine3.20 | musl | arm64 | docker-image | functional-check | supported | Yes | `.github/workflows/official-nginx-docker.yml` |
 | 1.26.3 | stable | alpine3.20 | musl | amd64 | docker-image | functional-check | supported | Yes | `.github/workflows/official-nginx-docker.yml` |
 | 1.26.3 | stable | almalinux9 | glibc | arm64 | rpm-package | smoke-test | supported | Yes | `.github/workflows/release-packages.yml` |
