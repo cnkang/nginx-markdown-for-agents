@@ -24,6 +24,22 @@ fuzz-oriented validation entrypoints, and harness-specific validation
 entrypoints, along with documentation covering installation, configuration,
 operations, architecture, and contributor-facing harness maintenance.
 
+### Release 0.8.0 (In Development)
+
+**Status:** In development
+
+Version 0.8.0 targets the formalization of true streaming semantics as a
+first-class, verifiable contract. Development focuses on four areas: a true
+streaming contract defining incremental input/output with bounded memory
+(RFC 0008), a two-phase fallback state machine for deterministic error
+recovery, alignment of the default-auto engine policy with the streaming
+contract, and consolidation of the support matrix into a single
+machine-readable source of truth consumed by CI, documentation, and packaging.
+
+> All 0.8.0 items are in development. No features described in this section
+> are implemented or available until the corresponding specs are executed and
+> verified.
+
 ### Release 0.7.0 Updates
 
 - P0 runtime correctness:
