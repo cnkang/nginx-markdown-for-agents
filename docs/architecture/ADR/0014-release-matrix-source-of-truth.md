@@ -20,11 +20,13 @@ canonical source of truth for all support declarations.
 
 Establish a single machine-readable release matrix per RFC 0008 section 4:
 
-1. The matrix is a structured data file (YAML or JSON) checked into the
-   repository at a well-known path.
+1. The canonical release matrix is a JSON file at
+   `tools/release-matrix.json`. If a `packaging/matrix.yaml` exists for
+   packaging tooling, it MUST be generated from or validated against the
+   canonical JSON via `python3 tools/render_release_matrix_docs.py --check`.
 2. CI workflows, documentation generators, packaging scripts, and release-gate
-   validators MUST consume this matrix as their authoritative source for
-   platform and version support declarations.
+   validators MUST consume `tools/release-matrix.json` as their authoritative
+   source for platform and version support declarations.
 3. Human-readable documentation MAY be generated from the matrix but MUST NOT
    be manually maintained in parallel.
 

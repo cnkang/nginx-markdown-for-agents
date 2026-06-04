@@ -338,7 +338,7 @@ When an error occurs post-commit:
 
 **Suggested error log fields**:
 
-```
+```text
 phase=postcommit engine=streaming committed=true fallback_available=false reason=<reason_code>
 ```
 

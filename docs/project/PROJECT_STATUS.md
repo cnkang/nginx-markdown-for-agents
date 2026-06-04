@@ -29,16 +29,8 @@ operations, architecture, and contributor-facing harness maintenance.
 **Status:** In development
 
 Version 0.8.0 targets the formalization of true streaming semantics as a
-first-class, verifiable contract. Development focuses on four areas: a true
-streaming contract defining incremental input/output with bounded memory
-(RFC 0008), a two-phase fallback state machine for deterministic error
-recovery, alignment of the default-auto engine policy with the streaming
-contract, and consolidation of the support matrix into a single
-machine-readable source of truth consumed by CI, documentation, and packaging.
-
-> All 0.8.0 items are in development. No features described in this section
-> are implemented or available until the corresponding specs are executed and
-> verified.
+first-class, verifiable contract. See the [Target Release 0.8.0](#target-release-080-in-development)
+section below for detailed goals, non-goals, and the implementation caveat.
 
 ### Release 0.7.0 Updates
 
@@ -426,8 +418,9 @@ See [DEPLOYMENT_EXAMPLES.md](../guides/DEPLOYMENT_EXAMPLES.md) for configuration
 - Edge-CDN deployment model (origin-near architecture retained)
 
 > Note: 0.8.0 features are in development. No streaming contract, fallback
-> state machine, or release matrix changes are implemented until the
-> corresponding specs are executed and verified.
+> state machine, default-auto engine policy alignment, or release matrix
+> changes are implemented until the corresponding specs are executed and
+> verified.
 
 ### Near-Term
 - Expand streaming rollout samples across mixed traffic profiles
@@ -579,3 +572,4 @@ For questions, issues, or feature requests, use the [GitHub issue tracker](https
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
 | 0.6.3 | 2026-05-13 | Kang | Version bump to 0.6.3 for release |
 | 0.7.0 | 2026-06-03 | Kang | Version bump to 0.7.0; add Rust-first architecture, decompression budget, diagnostics, dynconf dry-run, DEB/RPM, K8s, FFI ABI verification, CI supply-chain hardening |
+| 0.8.0 | 2026-06-04 | Kang | Added 0.8.0 target section with streaming contract goals, non-goals, and ADR-0011–0014 references |
