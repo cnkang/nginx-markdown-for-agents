@@ -357,7 +357,7 @@ def test_section_registry_matches_task_spec():
 
 def test_resolve_section_doc_path_blocks_escape():
     """Section doc paths must stay inside the repository root."""
-    outside_path = Path(tempfile.gettempdir()) / "render-release-matrix-doc.md"
+    outside_path = rmd.ROOT.parent / "render-release-matrix-doc.md"
     try:
         rmd._resolve_section_doc_path(outside_path)
         assert False, "Should have rejected an out-of-root path"
