@@ -25,9 +25,9 @@ Key points:
 The package manager dependency `nginx (>= ${NGINX_VERSION})` allows
 installation alongside any NGINX version at or above the build target.
 However, **runtime compatibility is only verified for the exact NGINX
-version in the build matrix** (currently 1.26.3). Loading the module on a
-different NGINX version will likely fail with a binary compatibility
-signature mismatch (see "Version Mismatch Error Troubleshooting" below).
+versions listed in the build matrix below**. Loading the module on any other
+NGINX version will likely fail with a binary compatibility signature mismatch
+(see "Version Mismatch Error Troubleshooting" below).
 Install the package only on the NGINX version matching the artifact
 filename.
 

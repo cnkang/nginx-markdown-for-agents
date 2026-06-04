@@ -113,7 +113,9 @@ def normalize_entry(raw: dict[str, Any]) -> dict[str, Any]:
         entry["nginx_version"] = entry["nginx"]
 
     # Normalize libc field
-    if "libc" not in entry and "os_type" in entry:
+    if entry.get("os") == "macos":
+        entry["libc"] = "darwin"
+    elif "libc" not in entry and "os_type" in entry:
         entry["libc"] = entry["os_type"]
 
     # Normalize arch (x86_64->amd64, aarch64->arm64)
@@ -776,19 +778,17 @@ def _generate_distribution_matrix(
     return "\n".join(lines)
 
 
-def _resolve_section_doc_path(file_path: Path) -> Path:
-    """Resolve and restrict documentation target paths."""
+def _resolve_section_doc_path(rel_path: str) -> Path:
+    """Resolve a registered documentation target path."""
+    if rel_path not in SECTION_REGISTRY:
+        raise ValueError(
+            f"Refusing unregistered release matrix documentation target: "
+            f"{rel_path}"
+        )
+    file_path = ROOT / rel_path
     validated = validate_write_path_within_root(
         file_path, ROOT, purpose="release matrix doc"
     )
-    allowed_targets = {
-        (ROOT / rel_path).resolve() for rel_path in SECTION_REGISTRY
-    }
-    if validated not in allowed_targets:
-        raise ValueError(
-            f"Refusing to write unregistered release matrix documentation "
-            f"target: {validated}"
-        )
     return validated
 
 
@@ -1114,7 +1114,7 @@ def _rn_detect_tier_changes(
 
 
 def check_file(
-    file_path: Path,
+    rel_path: str,
     entries: list[dict[str, Any]],
     data: dict[str, Any],
     _verbose: bool = False,  # noqa: ARG001 — kept for API symmetry with write_file
@@ -1126,8 +1126,11 @@ def check_file(
     a non-zero exit, since markers may not have been added yet (wave 2).
     """
     errors: list[str] = []
-    file_path = _resolve_section_doc_path(file_path)
-    rel_path = file_path.relative_to(ROOT).as_posix()
+    try:
+        file_path = _resolve_section_doc_path(rel_path)
+    except ValueError as e:
+        errors.append(str(e))
+        return errors
 
     if not file_path.exists():
         print(
@@ -1193,7 +1196,7 @@ def check_file(
 
 
 def write_file(
-    file_path: Path,
+    rel_path: str,
     entries: list[dict[str, Any]],
     data: dict[str, Any],
     verbose: bool = False,
@@ -1204,12 +1207,10 @@ def write_file(
     """
     errors: list[str] = []
     try:
-        file_path = _resolve_section_doc_path(file_path)
+        file_path = _resolve_section_doc_path(rel_path)
     except ValueError as e:
         errors.append(str(e))
         return errors
-
-    rel_path = file_path.relative_to(ROOT).as_posix()
 
     if not file_path.exists():
         errors.append(f"{rel_path}: file does not exist (cannot write)")
@@ -1247,9 +1248,12 @@ def write_file(
             errors.append(f"{rel_path}: {e}")
             return errors
 
-    # SONAR_NOTE(S6553): file_path is resolved and allowlisted above.
-    file_path.write_text(content, encoding="utf-8")
-    # SONAR_NOTE(S2083): Target doc paths are validated to stay within ROOT.
+    validated_path = validate_read_path(
+        file_path,
+        purpose="release matrix doc write target",
+    )
+    with open(validated_path, "w", encoding="utf-8") as f:
+        f.write(content)
     if verbose:
         print(f"  Updated: {rel_path}", file=sys.stderr)
 
@@ -1317,7 +1321,7 @@ def _handle_release_notes(
             return 1
         try:
             previous_data = load_matrix(previous_path)
-        except (json.JSONDecodeError, FileNotFoundError) as e:
+        except (json.JSONDecodeError, FileNotFoundError, OSError, ValueError) as e:
             print(
                 f"ERROR: Failed to load previous matrix: {e}",
                 file=sys.stderr,
@@ -1338,11 +1342,10 @@ def _handle_check_or_write(
     all_errors: list[str] = []
 
     for rel_path in SECTION_REGISTRY:
-        file_path = ROOT / rel_path
         if check:
-            errors = check_file(file_path, entries, matrix_data, _verbose=verbose)
+            errors = check_file(rel_path, entries, matrix_data, _verbose=verbose)
         else:
-            errors = write_file(file_path, entries, matrix_data, verbose=verbose)
+            errors = write_file(rel_path, entries, matrix_data, verbose=verbose)
         all_errors.extend(errors)
 
     if all_errors:
@@ -1375,7 +1378,7 @@ def main() -> int:
     # Load matrix
     try:
         matrix_data = load_matrix(args.matrix)
-    except (json.JSONDecodeError, FileNotFoundError) as e:
+    except (json.JSONDecodeError, FileNotFoundError, OSError, ValueError) as e:
         print(f"ERROR: Failed to load matrix: {e}", file=sys.stderr)
         return 2
 

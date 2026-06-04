@@ -323,6 +323,28 @@ def test_tier_mapping_passthrough():
     assert result == "experimental"
 
 
+def test_normalize_macos_uses_darwin_libc():
+    """macOS legacy entries must not inherit Linux libc values."""
+    raw = {
+        "nginx": "1.26.3",
+        "nginx_channel": "stable",
+        "os": "macos",
+        "os_type": "glibc",
+        "arch": "aarch64",
+        "artifact_type": "homebrew-formula",
+        "test_level": "formula-gate",
+        "support_tier": "experimental",
+        "release_blocking": False,
+        "owner_workflow": ".github/workflows/homebrew-formula-gate.yml",
+    }
+
+    entry = rmd.normalize_entry(raw)
+
+    assert entry["nginx_version"] == "1.26.3"
+    assert entry["libc"] == "darwin"
+    assert entry["arch"] == "arm64"
+
+
 # ---------------------------------------------------------------------------
 # Section registry tests
 # ---------------------------------------------------------------------------
@@ -356,13 +378,12 @@ def test_section_registry_matches_task_spec():
 
 
 def test_resolve_section_doc_path_blocks_escape():
-    """Section doc paths must stay inside the repository root."""
-    outside_path = rmd.ROOT.parent / "render-release-matrix-doc.md"
+    """Section doc paths must come from the registered target set."""
     try:
-        rmd._resolve_section_doc_path(outside_path)
-        assert False, "Should have rejected an out-of-root path"
+        rmd._resolve_section_doc_path("../README.md")
+        assert False, "Should have rejected an unregistered path"
     except ValueError as e:
-        assert "escapes root" in str(e)
+        assert "unregistered release matrix documentation target" in str(e)
 
 
 # ---------------------------------------------------------------------------
@@ -456,23 +477,25 @@ def test_full_cycle_all_sections():
 
 def test_write_file_rejects_unregistered_target():
     """write_file refuses paths outside the registered doc target set."""
-    content = (
-        "<!-- BEGIN:release-matrix:support-matrix -->\n"
-        "<!-- END:release-matrix:support-matrix -->\n"
-    )
-    with tempfile.NamedTemporaryFile(
-        mode="w", suffix=".md", dir=rmd.ROOT, delete=False, encoding="utf-8"
-    ) as f:
-        f.write(content)
-        tmp_path = Path(f.name)
+    errors = rmd.write_file("scratch.md", _get_entries(), MINIMAL_MATRIX)
+    assert errors
+    assert "unregistered release matrix documentation target" in errors[0]
 
+
+def test_main_reports_matrix_validation_error():
+    """CLI matrix path validation failures return a controlled exit code."""
+    old_argv = sys.argv[:]
+    suspicious_matrix = rmd.ROOT / "tools" / ".." / "tools" / "release-matrix.json"
     try:
-        errors = rmd.write_file(tmp_path, _get_entries(), MINIMAL_MATRIX)
-        assert errors
-        assert "unregistered release matrix documentation target" in errors[0]
-        assert tmp_path.read_text(encoding="utf-8") == content
+        sys.argv = [
+            "render_release_matrix_docs.py",
+            "--check",
+            "--matrix",
+            str(suspicious_matrix),
+        ]
+        assert rmd.main() == 2
     finally:
-        tmp_path.unlink()
+        sys.argv = old_argv
 
 
 # ---------------------------------------------------------------------------
@@ -516,6 +539,7 @@ def run_tests():
         test_generate_distribution_matrix,
         test_tier_mapping_resolved,
         test_tier_mapping_passthrough,
+        test_normalize_macos_uses_darwin_libc,
         test_section_registry_coverage,
         test_known_sections_complete,
         test_section_registry_matches_task_spec,
@@ -524,6 +548,7 @@ def run_tests():
         test_write_preserves_surrounding_content,
         test_full_cycle_all_sections,
         test_write_file_rejects_unregistered_target,
+        test_main_reports_matrix_validation_error,
         test_release_notes_output,
     ]
 
