@@ -21,6 +21,12 @@ Use it when you need more than deployment guidance but less than source-level im
 | Why 0.6.3 E2E testing moved to a Rust-first hybrid architecture | [ADR/0009-rust-first-e2e-test-architecture.md](ADR/0009-rust-first-e2e-test-architecture.md) |
 | The full ADR index | [ADR/README.md](ADR/README.md) |
 
+## RFCs
+
+| RFC | Title | Status | Target Version |
+|-----|-------|--------|----------------|
+| [RFC-0008](RFC-0008-streaming-conversion-support-contract.md) | Streaming Conversion and Support Contract | Draft | 0.8.0 |
+
 ## Scope
 
 - `SYSTEM_ARCHITECTURE.md` explains the runtime design in product and engineering terms.

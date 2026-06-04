@@ -390,6 +390,29 @@ See [DEPLOYMENT_EXAMPLES.md](../guides/DEPLOYMENT_EXAMPLES.md) for configuration
 - Rollout and rollback guides with executable operator procedures
 - Performance baseline gating system and hardened CI/CD validation
 
+### Target Release 0.8.0 (In Development)
+
+**Goals:**
+- True streaming contract: formalize incremental input processing, incremental
+  output emission, and bounded memory as a single verifiable contract
+  (RFC 0008, ADR-0011)
+- Fallback state machine: implement pre-commit/post-commit two-phase error
+  handling with deterministic recovery semantics (ADR-0012)
+- Default-auto engine: align the auto-mode streaming policy with the true
+  streaming contract definition (ADR-0013)
+- Support matrix source of truth: consolidate platform, version, and package
+  support declarations into a single machine-readable matrix consumed by CI,
+  docs, and packaging (ADR-0014)
+
+**Non-goals for 0.8.0:**
+- SSE/NDJSON conversion (out of scope for this release)
+- Full parser rewrite (incremental improvements only)
+- Edge-CDN deployment model (origin-near architecture retained)
+
+> Note: 0.8.0 features are in development. No streaming contract, fallback
+> state machine, or release matrix changes are implemented until the
+> corresponding specs are executed and verified.
+
 ### Near-Term
 - Expand streaming rollout samples across mixed traffic profiles
 - Increase automated evidence collection for release-gate checks
