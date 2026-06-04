@@ -32,13 +32,15 @@ ROOT = Path(__file__).resolve().parents[2]
 PACKAGING_MATRIX = ROOT / "packaging" / "matrix.yaml"
 RELEASE_MATRIX = ROOT / "tools" / "release-matrix.json"
 
-# Tier ordering from lowest to highest privilege
+# Tier ordering from lowest to highest privilege.
+# "source_only" is a backward-compat alias for "best-effort";
+# "full" is a backward-compat alias for "supported".
 TIER_ORDER: dict[str, int] = {
     "unsupported": 0,
     "best-effort": 1,
-    "source_only": 1,
+    "source_only": 1,  # alias: same level as best-effort
     "experimental": 2,
-    "full": 3,
+    "full": 3,          # alias: same level as supported
     "supported": 3,
 }
 
@@ -62,8 +64,7 @@ def get_release_matrix_versions(data: dict) -> set[str]:
     # Check 'entries' array first (canonical format), then 'matrix' (legacy)
     entries = data.get("entries") or data.get("matrix", [])
     for entry in entries:
-        version = entry.get("nginx_version") or entry.get("nginx", "")
-        if version:
+        if version := entry.get("nginx_version") or entry.get("nginx", ""):
             versions.add(version)
 
     return versions
@@ -115,15 +116,11 @@ def validate() -> list[str]:
         # No nginx_versions key or empty list — nothing to validate
         return errors
 
-    extra_versions = packaging_versions - release_versions
-    if extra_versions:
-        for v in sorted(extra_versions):
-            errors.append(
-                f"packaging/matrix.yaml lists NGINX version '{v}' which is "
-                f"not present in tools/release-matrix.json "
-                f"(known versions: {sorted(release_versions)})"
-            )
-
+    if extra_versions := packaging_versions - release_versions:
+        errors.extend(
+            f"packaging/matrix.yaml lists NGINX version '{v}' which is not present in tools/release-matrix.json (known versions: {sorted(release_versions)})"
+            for v in sorted(extra_versions)
+        )
     # --- Check 2: No tier escalation ---
     # packaging/matrix.yaml doesn't directly declare tiers per-version,
     # but if a tier_overrides or support_tiers section exists, validate it
@@ -163,9 +160,7 @@ def main() -> int:
         )
         return 0
 
-    errors = validate()
-
-    if errors:
+    if errors := validate():
         print("packaging/matrix.yaml consistency check FAILED:")
         for err in errors:
             print(f"  - {err}")
@@ -173,12 +168,9 @@ def main() -> int:
 
     print("packaging/matrix.yaml consistency check passed:")
     print(
-        f"  - All NGINX versions in packaging/matrix.yaml are present in "
-        f"tools/release-matrix.json"
+        '  - All NGINX versions in packaging/matrix.yaml are present in tools/release-matrix.json'
     )
-    print(
-        f"  - No tier escalation detected"
-    )
+    print("  - No tier escalation detected")
     return 0
 
 

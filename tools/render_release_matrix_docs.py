@@ -39,6 +39,9 @@ import sys
 from pathlib import Path
 from typing import Any
 
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+from path_validation import validate_read_path  # noqa: E402
+
 
 ROOT = Path(__file__).resolve().parents[1]
 MATRIX_PATH = ROOT / "tools" / "release-matrix.json"
@@ -90,7 +93,8 @@ TIER_ALIASES: dict[str, str] = {
 def load_matrix(path: Path | None = None) -> dict[str, Any]:
     """Load and return the release matrix JSON."""
     p = path or MATRIX_PATH
-    with open(p, encoding="utf-8") as f:
+    validated = validate_read_path(p, purpose="release matrix loading")
+    with open(validated, encoding="utf-8") as f:
         return json.load(f)
 
 
@@ -168,19 +172,7 @@ def validate_schema(data: dict[str, Any]) -> list[str]:
         import jsonschema  # type: ignore[import-untyped]
 
         if SCHEMA_PATH.exists():
-            with open(SCHEMA_PATH, encoding="utf-8") as f:
-                schema = json.load(f)
-            # Build a normalized entries-format document for validation
-            entries = get_entries(data)
-            validate_data = {
-                "schema_version": data.get("schema_version", "1.0"),
-                "entries": entries,
-            }
-            try:
-                jsonschema.validate(validate_data, schema)
-            except jsonschema.ValidationError as e:
-                errors.append(f"Schema validation: {e.message}")
-            return errors
+            return _validate_against_jsonschema(data, jsonschema, errors)
     # Fallback: basic structural checks (no jsonschema available)
     if "schema_version" not in data:
         errors.append("Missing required field: schema_version")
@@ -227,6 +219,24 @@ def validate_schema(data: dict[str, Any]) -> list[str]:
     return errors
 
 
+def _validate_against_jsonschema(data, jsonschema, errors):
+    """Validate matrix entries against the JSON schema file."""
+    schema_validated = validate_read_path(SCHEMA_PATH, purpose="release matrix schema")
+    with open(schema_validated, encoding="utf-8") as f:
+        schema = json.load(f)
+    # Build a normalized entries-format document for validation
+    entries = get_entries(data)
+    validate_data = {
+        "schema_version": data.get("schema_version", "1.0"),
+        "entries": entries,
+    }
+    try:
+        jsonschema.validate(validate_data, schema)
+    except jsonschema.ValidationError as e:
+        errors.append(f"Schema validation: {e.message}")
+    return errors
+
+
 # ---------------------------------------------------------------------------
 # Marker parsing
 # ---------------------------------------------------------------------------
@@ -234,6 +244,51 @@ def validate_schema(data: dict[str, Any]) -> list[str]:
 
 class MarkerError(Exception):
     """Raised for malformed marker structure."""
+
+
+def _handle_begin_marker(
+    section_name: str,
+    i: int,
+    open_section: str | None,
+    open_start: int,
+    sections: dict[str, tuple[int, int, str]],
+) -> tuple[str, int]:
+    """Validate and register a BEGIN marker. Returns (section_name, line_index)."""
+    if open_section is not None:
+        raise MarkerError(
+            f"Nested BEGIN marker for '{section_name}' at line {i + 1} "
+            f"while '{open_section}' is still open "
+            f"(started at line {open_start + 1})"
+        )
+    if section_name in sections:
+        raise MarkerError(
+            f"Duplicate section '{section_name}' at line {i + 1}"
+        )
+    return section_name, i
+
+
+def _handle_end_marker(
+    section_name: str,
+    i: int,
+    open_section: str | None,
+    open_start: int,
+    lines: list[str],
+    sections: dict[str, tuple[int, int, str]],
+) -> None:
+    """Validate and close an END marker."""
+    if open_section is None:
+        raise MarkerError(
+            f"END marker for '{section_name}' at line {i + 1} "
+            f"without matching BEGIN"
+        )
+    if section_name != open_section:
+        raise MarkerError(
+            f"END marker for '{section_name}' at line {i + 1} "
+            f"does not match open section '{open_section}' "
+            f"(started at line {open_start + 1})"
+        )
+    inner_lines = lines[open_start + 1 : i]
+    sections[section_name] = (open_start, i, "".join(inner_lines))
 
 
 def parse_markers(content: str) -> dict[str, tuple[int, int, str]]:
@@ -255,34 +310,13 @@ def parse_markers(content: str) -> dict[str, tuple[int, int, str]]:
         end_m = END_RE.match(line)
 
         if begin_m:
-            section_name = begin_m.group(2)
-            if open_section is not None:
-                raise MarkerError(
-                    f"Nested BEGIN marker for '{section_name}' at line {i + 1} "
-                    f"while '{open_section}' is still open "
-                    f"(started at line {open_start + 1})"
-                )
-            if section_name in sections:
-                raise MarkerError(
-                    f"Duplicate section '{section_name}' at line {i + 1}"
-                )
-            open_section = section_name
-            open_start = i
+            open_section, open_start = _handle_begin_marker(
+                begin_m.group(2), i, open_section, open_start, sections
+            )
         elif end_m:
-            section_name = end_m.group(2)
-            if open_section is None:
-                raise MarkerError(
-                    f"END marker for '{section_name}' at line {i + 1} "
-                    f"without matching BEGIN"
-                )
-            if section_name != open_section:
-                raise MarkerError(
-                    f"END marker for '{section_name}' at line {i + 1} "
-                    f"does not match open section '{open_section}' "
-                    f"(started at line {open_start + 1})"
-                )
-            inner_lines = lines[open_start + 1 : i]
-            sections[section_name] = (open_start, i, "".join(inner_lines))
+            _handle_end_marker(
+                end_m.group(2), i, open_section, open_start, lines, sections
+            )
             open_section = None
 
     if open_section is not None:
@@ -542,11 +576,11 @@ def _generate_compatibility_matrix(
             f"| `{entry.get('owner_workflow', '')}` |"
         )
 
-    lines.append("")
-    lines.append("### Tier Definitions")
-    lines.append("")
-    for tier_name, definition in TIER_DEFINITIONS.items():
-        lines.append(f"- **{tier_name}**: {definition}")
+    lines.extend(("", "### Tier Definitions", ""))
+    lines.extend(
+        f"- **{tier_name}**: {definition}"
+        for tier_name, definition in TIER_DEFINITIONS.items()
+    )
     lines.append("")
 
     return "\n".join(lines)
@@ -584,10 +618,14 @@ def _generate_installation_matrix(
             ),
             reverse=True,
         )
-        lines.append(f"### {atype}")
-        lines.append("")
-        lines.append("| NGINX | Channel | OS | libc | Arch | Tier |")
-        lines.append("|-------|---------|-----|------|------|------|")
+        lines.extend(
+            (
+                f"### {atype}",
+                "",
+                "| NGINX | Channel | OS | libc | Arch | Tier |",
+                "|-------|---------|-----|------|------|------|",
+            )
+        )
         for entry in aentries:
             tier = resolve_tier(data, entry.get("support_tier", ""))
             lines.append(
@@ -601,8 +639,7 @@ def _generate_installation_matrix(
         lines.append("")
 
     if additional:
-        lines.append("### Additional Distribution Channels")
-        lines.append("")
+        lines.extend(("### Additional Distribution Channels", ""))
         for art in additional:
             tier = resolve_tier(data, art.get("support_tier", ""))
             lines.append(
@@ -614,27 +651,45 @@ def _generate_installation_matrix(
     return "\n".join(lines)
 
 
-def _generate_status_matrix(
-    entries: list[dict[str, Any]], data: dict[str, Any]
-) -> str:
-    """Generate tier summary and release-blocking entries for PROJECT_STATUS.md."""
-    additional = data.get("additional_artifacts", [])
-
-    # Count by tier
+def _count_tiers_and_blocking(
+    entries: list[dict[str, Any]],
+    additional: list[dict[str, Any]],
+    data: dict[str, Any],
+) -> tuple[dict[str, int], list[dict[str, Any]]]:
+    """Count entries per tier and collect release-blocking entries."""
     tier_counts: dict[str, int] = {}
     blocking_entries: list[dict[str, Any]] = []
 
-    for entry in entries:
+    for entry in (*entries, *additional):
         tier = resolve_tier(data, entry.get("support_tier", ""))
         tier_counts[tier] = tier_counts.get(tier, 0) + 1
         if entry.get("release_blocking"):
             blocking_entries.append(entry)
 
-    for art in additional:
-        tier = resolve_tier(data, art.get("support_tier", ""))
-        tier_counts[tier] = tier_counts.get(tier, 0) + 1
-        if art.get("release_blocking"):
-            blocking_entries.append(art)
+    return tier_counts, blocking_entries
+
+
+def _blocking_entry_desc(entry: dict[str, Any]) -> str:
+    """Build a human-readable description for a blocking entry."""
+    if "nginx_version" in entry:
+        return (
+            f"{entry.get('nginx_version', '')} "
+            f"{entry.get('os', '')} "
+            f"{entry.get('libc', '')} "
+            f"{entry.get('arch', '')} "
+            f"{entry.get('artifact_type', '')}"
+        )
+    return entry.get("note", entry.get("artifact_type", ""))
+
+
+def _generate_status_matrix(
+    entries: list[dict[str, Any]], data: dict[str, Any]
+) -> str:
+    """Generate tier summary and release-blocking entries for PROJECT_STATUS.md."""
+    additional = data.get("additional_artifacts", [])
+    tier_counts, blocking_entries = _count_tiers_and_blocking(
+        entries, additional, data
+    )
 
     lines = [
         "",
@@ -649,24 +704,11 @@ def _generate_status_matrix(
         count = tier_counts.get(tier_name, 0)
         if count > 0:
             lines.append(f"| {tier_name} | {count} |")
-    lines.append("")
-
-    lines.append("### Release-Blocking Entries")
-    lines.append("")
+    lines.extend(("", "### Release-Blocking Entries", ""))
     if blocking_entries:
-        lines.append("| Entry | Workflow |")
-        lines.append("|-------|----------|")
+        lines.extend(("| Entry | Workflow |", "|-------|----------|"))
         for entry in blocking_entries:
-            if "nginx_version" in entry:
-                desc = (
-                    f"{entry.get('nginx_version', '')} "
-                    f"{entry.get('os', '')} "
-                    f"{entry.get('libc', '')} "
-                    f"{entry.get('arch', '')} "
-                    f"{entry.get('artifact_type', '')}"
-                )
-            else:
-                desc = entry.get("note", entry.get("artifact_type", ""))
+            desc = _blocking_entry_desc(entry)
             lines.append(f"| {desc} | `{entry.get('owner_workflow', '')}` |")
     else:
         lines.append("No release-blocking entries defined.")
@@ -689,15 +731,19 @@ def _generate_distribution_matrix(
 
     lines = [
         "",
-        "## Distribution Channels",
+        "### Release Matrix Distribution Overview",
         "",
     ]
 
     if additional:
-        lines.append("### Package Types")
-        lines.append("")
-        lines.append("| Type | Channel | Tier | Blocking | Details |")
-        lines.append("|------|---------|------|----------|---------|")
+        lines.extend(
+            (
+                "### Package Types",
+                "",
+                "| Type | Channel | Tier | Blocking | Details |",
+                "|------|---------|------|----------|---------|",
+            )
+        )
         for art in additional:
             tier = resolve_tier(data, art.get("support_tier", ""))
             blocking = "Yes" if art.get("release_blocking") else "No"
@@ -711,16 +757,17 @@ def _generate_distribution_matrix(
             )
         lines.append("")
 
-    lines.append("### Build Workflows")
-    lines.append("")
-    lines.append("| Workflow | Entries | Tiers |")
-    lines.append("|----------|---------|-------|")
+    lines.extend(
+        (
+            "### Build Workflows",
+            "",
+            "| Workflow | Entries | Tiers |",
+            "|----------|---------|-------|",
+        )
+    )
     for wf, wf_entries in sorted(by_workflow.items()):
         tiers = sorted(
-            set(
-                resolve_tier(data, e.get("support_tier", ""))
-                for e in wf_entries
-            )
+            {resolve_tier(data, e.get("support_tier", "")) for e in wf_entries}
         )
         lines.append(f"| `{wf}` | {len(wf_entries)} | {', '.join(tiers)} |")
     lines.append("")
@@ -973,14 +1020,14 @@ def _rn_generate_changes(
     removed_keys = prev_keys - cur_keys
 
     # Detect tier changes for entries present in both
-    tier_changes = _rn_detect_tier_changes(data, current_entries, prev_entries)
+    tier_changes = _rn_detect_tier_changes(data, current_entries, prev_entries, previous_data=previous_data)
 
     if added_versions:
-        _extracted_from__rn_generate_changes_41(
+        _rn_append_change_bullets(
             lines, "**Added versions:**", added_versions
         )
     if removed_versions:
-        _extracted_from__rn_generate_changes_41(
+        _rn_append_change_bullets(
             lines, "**Removed versions:**", removed_versions
         )
     # Platform-level adds/removes (excluding version-level changes)
@@ -997,7 +1044,7 @@ def _rn_generate_changes(
             )
         )
     if tier_changes:
-        _extracted_from__rn_generate_changes_41(
+        _rn_append_change_bullets(
             lines, "**Tier changes:**", tier_changes
         )
     if not (added_versions or removed_versions or platform_added
@@ -1006,11 +1053,13 @@ def _rn_generate_changes(
     return lines
 
 
-# TODO Rename this here and in `_rn_generate_changes`
-def _extracted_from__rn_generate_changes_41(lines, arg1, arg2):
-    lines.append(arg1)
-    for v in arg2:
-        lines.append(f"- {v}")
+def _rn_append_change_bullets(
+    lines: list[str],
+    heading: str,
+    items: list[str],
+) -> None:
+    lines.append(heading)
+    lines.extend(f"- {item}" for item in items)
     lines.append("")
 
 
@@ -1018,13 +1067,15 @@ def _rn_detect_tier_changes(
     data: dict[str, Any],
     current_entries: list[dict[str, Any]],
     previous_entries: list[dict[str, Any]],
+    previous_data: dict[str, Any] | None = None,
 ) -> list[str]:
     """Detect tier changes for entries present in both matrices."""
     changes: list[str] = []
+    prev_resolve_data = previous_data if previous_data is not None else data
     prev_map: dict[tuple[str, ...], str] = {}
     for entry in previous_entries:
         key = _rn_entry_key(entry)
-        prev_map[key] = resolve_tier(data, entry.get("support_tier", "unknown"))
+        prev_map[key] = resolve_tier(prev_resolve_data, entry.get("support_tier", "unknown"))
 
     for entry in current_entries:
         key = _rn_entry_key(entry)
@@ -1049,7 +1100,7 @@ def check_file(
     file_path: Path,
     entries: list[dict[str, Any]],
     data: dict[str, Any],
-    verbose: bool = False,
+    _verbose: bool = False,  # noqa: ARG001 — kept for API symmetry with write_file
 ) -> list[str]:
     """Check a single file for marker consistency.
 
@@ -1184,8 +1235,8 @@ def write_file(
 # ---------------------------------------------------------------------------
 
 
-def main() -> int:
-    """Main entry point."""
+def _build_arg_parser() -> argparse.ArgumentParser:
+    """Build the CLI argument parser."""
     parser = argparse.ArgumentParser(
         description="Generate/validate documentation sections from release-matrix.json.",
         epilog="Part of spec 40: Release Matrix Source of Truth.",
@@ -1221,8 +1272,79 @@ def main() -> int:
         default=None,
         help="Path to a previous release-matrix.json for change comparison (--release-notes only).",
     )
+    return parser
 
-    args = parser.parse_args()
+
+def _handle_release_notes(
+    matrix_data: dict[str, Any],
+    entries: list[dict[str, Any]],
+    previous_path: Path | None,
+) -> int:
+    """Handle --release-notes mode. Returns exit code."""
+    previous_data = None
+    if previous_path:
+        if not previous_path.exists():
+            print(
+                f"ERROR: Previous matrix not found: {previous_path}",
+                file=sys.stderr,
+            )
+            return 1
+        try:
+            previous_data = load_matrix(previous_path)
+        except (json.JSONDecodeError, FileNotFoundError) as e:
+            print(
+                f"ERROR: Failed to load previous matrix: {e}",
+                file=sys.stderr,
+            )
+            return 1
+    print(generate_release_notes(matrix_data, entries, previous_data))
+    return 0
+
+
+def _handle_check_or_write(
+    matrix_data: dict[str, Any],
+    entries: list[dict[str, Any]],
+    *,
+    check: bool,
+    verbose: bool,
+) -> int:
+    """Handle --check or --write mode. Returns exit code."""
+    all_errors: list[str] = []
+
+    for rel_path in SECTION_REGISTRY:
+        file_path = ROOT / rel_path
+        if check:
+            errors = check_file(file_path, entries, matrix_data, _verbose=verbose)
+        else:
+            errors = write_file(file_path, entries, matrix_data, verbose=verbose)
+        all_errors.extend(errors)
+
+    if all_errors:
+        mode_label = "CHECK" if check else "WRITE"
+        print(
+            f"{mode_label} FAILED ({len(all_errors)} error(s)):",
+            file=sys.stderr,
+        )
+        for err in all_errors:
+            print(f"  - {err}", file=sys.stderr)
+        if check:
+            print(
+                "\nRun 'python3 tools/render_release_matrix_docs.py --write' "
+                "to update.",
+                file=sys.stderr,
+            )
+        return 1
+
+    if check:
+        print("CHECK PASSED: all sections consistent with matrix.", file=sys.stderr)
+    else:
+        print("WRITE COMPLETE: all sections updated.", file=sys.stderr)
+    return 0
+
+
+def main() -> int:
+    """Main entry point."""
+    args = _build_arg_parser().parse_args()
 
     # Load matrix
     try:
@@ -1244,63 +1366,11 @@ def main() -> int:
 
     # Dispatch mode
     if args.release_notes:
-        previous_data = None
-        if args.previous:
-            if not args.previous.exists():
-                print(
-                    f"ERROR: Previous matrix not found: {args.previous}",
-                    file=sys.stderr,
-                )
-                return 1
-            try:
-                previous_data = load_matrix(args.previous)
-            except (json.JSONDecodeError, FileNotFoundError) as e:
-                print(
-                    f"ERROR: Failed to load previous matrix: {e}",
-                    file=sys.stderr,
-                )
-                return 1
-        print(generate_release_notes(matrix_data, entries, previous_data))
-        return 0
+        return _handle_release_notes(matrix_data, entries, args.previous)
 
-    all_errors: list[str] = []
-
-    for rel_path in SECTION_REGISTRY:
-        file_path = ROOT / rel_path
-
-        if args.check:
-            errors = check_file(
-                file_path, entries, matrix_data, verbose=args.verbose
-            )
-        else:  # --write
-            errors = write_file(
-                file_path, entries, matrix_data, verbose=args.verbose
-            )
-
-        all_errors.extend(errors)
-
-    if all_errors:
-        mode_label = "CHECK" if args.check else "WRITE"
-        print(
-            f"{mode_label} FAILED ({len(all_errors)} error(s)):",
-            file=sys.stderr,
-        )
-        for err in all_errors:
-            print(f"  - {err}", file=sys.stderr)
-        if args.check:
-            print(
-                "\nRun 'python3 tools/render_release_matrix_docs.py --write' "
-                "to update.",
-                file=sys.stderr,
-            )
-        return 1
-
-    if args.check:
-        print("CHECK PASSED: all sections consistent with matrix.", file=sys.stderr)
-    else:
-        print("WRITE COMPLETE: all sections updated.", file=sys.stderr)
-
-    return 0
+    return _handle_check_or_write(
+        matrix_data, entries, check=args.check, verbose=args.verbose
+    )
 
 
 if __name__ == "__main__":
