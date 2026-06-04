@@ -156,6 +156,8 @@ pub struct StreamingTokenizer {
     /// html5ever tokenizer instance.
     /// Wrapped in `Option` so we can take ownership in `finish`.
     tokenizer: Option<Tokenizer<TokenSinkAdapter>>,
+    /// Persistent input queue so partial tags/tokens survive chunk boundaries.
+    queue: BufferQueue,
 }
 
 impl Default for StreamingTokenizer {
@@ -187,6 +189,7 @@ impl StreamingTokenizer {
         let tokenizer = Tokenizer::new(sink, opts);
         Self {
             tokenizer: Some(tokenizer),
+            queue: BufferQueue::default(),
         }
     }
 
@@ -213,12 +216,11 @@ impl StreamingTokenizer {
         })?;
 
         let tendril = StrTendril::from(data);
-        let queue = BufferQueue::default();
-        queue.push_back(tendril);
+        self.queue.push_back(tendril);
 
         // Wrap html5ever call in catch_unwind for panic safety.
         let result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
-            let _ = tokenizer.feed(&queue);
+            let _ = tokenizer.feed(&self.queue);
         }));
 
         match result {

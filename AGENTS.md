@@ -79,7 +79,7 @@ Full rule text, historical issues, and verification commands: `docs/harness/rule
 | 3 | memory-budget | Enforce all budgets; free auxiliary buffers on all exits; track peak memory |
 | 4 | encoding-charset | Preserve incomplete UTF-8 tails across chunks; flush decoders at EOF |
 | 5 | html-sanitizer | Void elements self-closing; skip-mode name-aware; nesting-depth saturation-safe |
-| 6 | html-sanitizer | In-link markers accumulated; code-block raw preserved; blockquote consistent; URL extraction includes media elements |
+| 6 | html-sanitizer | In-link markers accumulated; code-block raw/fence state preserved across text-event boundaries; blockquote consistent; URL extraction includes media elements |
 | 7 | observability-metrics | Explicit skip-reason mapping; reason-code tests aligned; new reason codes need log_decision() callsite |
 | 8 | observability-metrics | Fail on truncation; SHM layout version; non-overlapping Prometheus families; every metric has runtime write; delivery counters after success; format string argument matching |
 | 8b | observability-metrics | Config nesting matches code; consumer accepts both key names; combined report reads streaming_metrics first |
@@ -180,7 +180,7 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
 
 **HTML Sanitizer & Output Safety** (C, R, D)
 - Void elements self-closing; skip-mode name-aware [5]
-- In-link markers accumulated; code-block raw preserved; media URL extraction [6]
+- In-link markers accumulated; code-block raw/fence state preserved across text-event boundaries; media URL extraction [6]
 - Link/URL escaping at every emission site; reject control chars [27]
 
 **Testing & Coverage** (C, T, R)
@@ -437,3 +437,4 @@ remediation:
 | 0.7.14 | 2026-06-03 | Codex | Strengthened Rule 13 for nginx.org RPM epoch-aware dependency floors plus preinstall ABI branch guards |
 | 0.7.15 | 2026-06-03 | Codex | Strengthened Rule 13 for package smoke job-container checkout prerequisites |
 | 0.7.16 | 2026-06-03 | Codex | Strengthened Rule 13 for tag release gates avoiding user-local spec dependencies in clean CI checkouts |
+| 0.7.17 | 2026-06-04 | Codex | Strengthened Rule 6 for streaming code-block fence state across split text events |
