@@ -1248,8 +1248,9 @@ def write_file(
             errors.append(f"{rel_path}: {e}")
             return errors
 
-    validated_path = validate_read_path(
+    validated_path = validate_write_path_within_root(
         file_path,
+        ROOT,
         purpose="release matrix doc write target",
     )
     with open(validated_path, "w", encoding="utf-8") as f:
@@ -1321,7 +1322,7 @@ def _handle_release_notes(
             return 1
         try:
             previous_data = load_matrix(previous_path)
-        except (json.JSONDecodeError, FileNotFoundError, OSError, ValueError) as e:
+        except (OSError, ValueError) as e:
             print(
                 f"ERROR: Failed to load previous matrix: {e}",
                 file=sys.stderr,
@@ -1378,7 +1379,7 @@ def main() -> int:
     # Load matrix
     try:
         matrix_data = load_matrix(args.matrix)
-    except (json.JSONDecodeError, FileNotFoundError, OSError, ValueError) as e:
+    except (OSError, ValueError) as e:
         print(f"ERROR: Failed to load matrix: {e}", file=sys.stderr)
         return 2
 

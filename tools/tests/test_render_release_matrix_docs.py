@@ -381,7 +381,7 @@ def test_resolve_section_doc_path_blocks_escape():
     """Section doc paths must come from the registered target set."""
     try:
         rmd._resolve_section_doc_path("../README.md")
-        assert False, "Should have rejected an unregistered path"
+        raise AssertionError("Should have rejected an unregistered path")
     except ValueError as e:
         assert "unregistered release matrix documentation target" in str(e)
 
