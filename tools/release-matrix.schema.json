@@ -54,13 +54,13 @@
         },
         "libc": {
           "type": "string",
-          "description": "C library variant.",
-          "enum": ["glibc", "musl"]
+          "description": "C library variant (use \"n/a\" for platform-independent artifacts like source, \"darwin\" for macOS).",
+          "enum": ["glibc", "musl", "darwin", "n/a"]
         },
         "arch": {
           "type": "string",
-          "description": "CPU architecture.",
-          "enum": ["amd64", "arm64"]
+          "description": "CPU architecture (use \"any\" for platform-independent artifacts like source).",
+          "enum": ["amd64", "arm64", "any"]
         },
         "artifact_type": {
           "type": "string",

@@ -21,7 +21,7 @@ must point users to GitHub Release package artifacts rather than bare
 
 <!-- BEGIN:release-matrix:distribution-matrix -->
 
-## Distribution Channels
+### Release Matrix Distribution Overview
 
 ### Build Workflows
 

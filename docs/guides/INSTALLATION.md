@@ -740,7 +740,7 @@ If your NGINX version is >= 1.24.0 but not listed in the matrix below, use the [
 
 | NGINX | Channel | OS | libc | Arch | Tier |
 |-------|---------|-----|------|------|------|
-| 1.26.3 | stable | macos | glibc | arm64 | experimental |
+| 1.26.3 | stable | macos | darwin | arm64 | experimental |
 
 ### rpm-package
 
@@ -753,7 +753,7 @@ If your NGINX version is >= 1.24.0 but not listed in the matrix below, use the [
 
 | NGINX | Channel | OS | libc | Arch | Tier |
 |-------|---------|-----|------|------|------|
-| 1.26.3 | stable | any | glibc | amd64 | best-effort |
+| 1.26.3 | stable | any | n/a | any | best-effort |
 <!-- END:release-matrix:installation-matrix -->
 
 ---
