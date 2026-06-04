@@ -41,6 +41,7 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 from path_validation import validate_read_path  # noqa: E402
+from path_validation import validate_write_path_within_root  # noqa: E402
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -775,6 +776,13 @@ def _generate_distribution_matrix(
     return "\n".join(lines)
 
 
+def _resolve_section_doc_path(file_path: Path) -> Path:
+    """Resolve a target doc path and keep writes inside the repo root."""
+    return validate_write_path_within_root(
+        file_path, ROOT, purpose="release matrix doc"
+    )
+
+
 # Section name -> generator function mapping
 SECTION_GENERATORS: dict[
     str,
@@ -1109,6 +1117,7 @@ def check_file(
     a non-zero exit, since markers may not have been added yet (wave 2).
     """
     errors: list[str] = []
+    file_path = _resolve_section_doc_path(file_path)
     rel_path = file_path.relative_to(ROOT).as_posix()
 
     if not file_path.exists():
@@ -1185,6 +1194,7 @@ def write_file(
     Returns list of errors encountered.
     """
     errors: list[str] = []
+    file_path = _resolve_section_doc_path(file_path)
     rel_path = file_path.relative_to(ROOT).as_posix()
 
     if not file_path.exists():
@@ -1224,6 +1234,7 @@ def write_file(
             return errors
 
     file_path.write_text(content, encoding="utf-8")
+    # SONAR_NOTE(S2083): Target doc paths are validated to stay within ROOT.
     if verbose:
         print(f"  Updated: {rel_path}", file=sys.stderr)
 
