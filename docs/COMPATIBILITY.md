@@ -294,6 +294,55 @@ the module from source against your local NGINX installation.
 
 ---
 
+<!-- BEGIN:release-matrix:compatibility-matrix -->
+
+## Platform Compatibility Matrix
+
+| NGINX Version | Channel | OS | libc | Arch | Artifact | Test Level | Tier | Blocking | Workflow |
+|---------------|---------|-----|------|------|----------|------------|------|----------|----------|
+| 1.31.1 | mainline | linux | glibc | arm64 | dynamic-module | smoke-test | supported | Yes | `.github/workflows/release-packages.yml` |
+| 1.31.1 | mainline | linux | musl | arm64 | dynamic-module | docker-validation | supported | No | `.github/workflows/release-binaries.yml` |
+| 1.31.1 | mainline | linux | glibc | amd64 | dynamic-module | smoke-test | supported | Yes | `.github/workflows/release-packages.yml` |
+| 1.31.1 | mainline | linux | musl | amd64 | dynamic-module | docker-validation | supported | No | `.github/workflows/release-binaries.yml` |
+| 1.31.1 | mainline | debian12 | glibc | arm64 | docker-image | functional-check | supported | Yes | `.github/workflows/official-nginx-docker.yml` |
+| 1.31.1 | mainline | debian12 | glibc | amd64 | docker-image | functional-check | supported | Yes | `.github/workflows/official-nginx-docker.yml` |
+| 1.31.1 | mainline | alpine3.20 | musl | arm64 | docker-image | functional-check | supported | Yes | `.github/workflows/official-nginx-docker.yml` |
+| 1.31.1 | mainline | alpine3.20 | musl | amd64 | docker-image | functional-check | supported | Yes | `.github/workflows/official-nginx-docker.yml` |
+| 1.30.2 | stable | linux | glibc | arm64 | dynamic-module | smoke-test | supported | Yes | `.github/workflows/release-packages.yml` |
+| 1.30.2 | stable | linux | musl | arm64 | dynamic-module | docker-validation | supported | No | `.github/workflows/release-binaries.yml` |
+| 1.30.2 | stable | linux | glibc | amd64 | dynamic-module | smoke-test | supported | Yes | `.github/workflows/release-packages.yml` |
+| 1.30.2 | stable | linux | musl | amd64 | dynamic-module | docker-validation | supported | No | `.github/workflows/release-binaries.yml` |
+| 1.28.3 | stable | linux | glibc | arm64 | dynamic-module | smoke-test | supported | Yes | `.github/workflows/release-packages.yml` |
+| 1.28.3 | stable | linux | musl | arm64 | dynamic-module | docker-validation | supported | No | `.github/workflows/release-binaries.yml` |
+| 1.28.3 | stable | linux | glibc | amd64 | dynamic-module | smoke-test | supported | Yes | `.github/workflows/release-packages.yml` |
+| 1.28.3 | stable | linux | musl | amd64 | dynamic-module | docker-validation | supported | No | `.github/workflows/release-binaries.yml` |
+| 1.26.3 | stable | macos | glibc | arm64 | homebrew-formula | formula-gate | experimental | No | `.github/workflows/homebrew-formula-gate.yml` |
+| 1.26.3 | stable | linux | glibc | arm64 | dynamic-module | smoke-test | supported | Yes | `.github/workflows/release-packages.yml` |
+| 1.26.3 | stable | linux | musl | arm64 | dynamic-module | docker-validation | supported | No | `.github/workflows/release-binaries.yml` |
+| 1.26.3 | stable | linux | glibc | amd64 | dynamic-module | smoke-test | supported | Yes | `.github/workflows/release-packages.yml` |
+| 1.26.3 | stable | linux | musl | amd64 | dynamic-module | docker-validation | supported | No | `.github/workflows/release-binaries.yml` |
+| 1.26.3 | stable | debian12 | glibc | arm64 | docker-image | functional-check | supported | Yes | `.github/workflows/official-nginx-docker.yml` |
+| 1.26.3 | stable | debian12 | glibc | arm64 | deb-package | smoke-test | supported | Yes | `.github/workflows/release-packages.yml` |
+| 1.26.3 | stable | debian12 | glibc | amd64 | docker-image | functional-check | supported | Yes | `.github/workflows/official-nginx-docker.yml` |
+| 1.26.3 | stable | debian12 | glibc | amd64 | deb-package | smoke-test | supported | Yes | `.github/workflows/release-packages.yml` |
+| 1.26.3 | stable | any | glibc | amd64 | source | ci-only | best-effort | No | `.github/workflows/ci.yml` |
+| 1.26.3 | stable | alpine3.20 | musl | arm64 | docker-image | functional-check | supported | Yes | `.github/workflows/official-nginx-docker.yml` |
+| 1.26.3 | stable | alpine3.20 | musl | amd64 | docker-image | functional-check | supported | Yes | `.github/workflows/official-nginx-docker.yml` |
+| 1.26.3 | stable | almalinux9 | glibc | arm64 | rpm-package | smoke-test | supported | Yes | `.github/workflows/release-packages.yml` |
+| 1.26.3 | stable | almalinux9 | glibc | amd64 | rpm-package | smoke-test | supported | Yes | `.github/workflows/release-packages.yml` |
+| 1.24.0 | oldstable | linux | glibc | arm64 | dynamic-module | smoke-test | supported | Yes | `.github/workflows/release-packages.yml` |
+| 1.24.0 | oldstable | linux | musl | arm64 | dynamic-module | docker-validation | supported | No | `.github/workflows/release-binaries.yml` |
+| 1.24.0 | oldstable | linux | glibc | amd64 | dynamic-module | smoke-test | supported | Yes | `.github/workflows/release-packages.yml` |
+| 1.24.0 | oldstable | linux | musl | amd64 | dynamic-module | docker-validation | supported | No | `.github/workflows/release-binaries.yml` |
+
+### Tier Definitions
+
+- **supported**: CI passes, artifact produced, install verified, release gate blocks.
+- **experimental**: Available, not guaranteed, CI non-blocking, noted in release notes.
+- **best-effort**: Source only, docs only, not a gate.
+- **unsupported**: No artifacts, no commitment.
+<!-- END:release-matrix:compatibility-matrix -->
+
 ## Document Updates
 
 | Version | Date | Author | Changes |

@@ -19,6 +19,21 @@ step. Until a real repository and signing key are published, installation docs
 must point users to GitHub Release package artifacts rather than bare
 `apt-get install` or `yum install` commands.
 
+<!-- BEGIN:release-matrix:distribution-matrix -->
+
+## Distribution Channels
+
+### Build Workflows
+
+| Workflow | Entries | Tiers |
+|----------|---------|-------|
+| `.github/workflows/ci.yml` | 1 | best-effort |
+| `.github/workflows/homebrew-formula-gate.yml` | 1 | experimental |
+| `.github/workflows/official-nginx-docker.yml` | 8 | supported |
+| `.github/workflows/release-binaries.yml` | 10 | supported |
+| `.github/workflows/release-packages.yml` | 14 | supported |
+<!-- END:release-matrix:distribution-matrix -->
+
 ## Important Disclaimers
 
 1. **These are NOT official NGINX repository packages.** They are community-maintained.

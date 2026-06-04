@@ -314,9 +314,7 @@ def _release_asset_version(name: object) -> str | None:
     version, os_type, arch = parts
     if not _is_dotted_version(version):
         return None
-    if not os_type or not arch:
-        return None
-    return version
+    return None if not os_type or not arch else version
 
 
 def _is_dotted_version(version: str) -> bool:
@@ -926,12 +924,12 @@ def _collect_supported_versions() -> list[str]:
         )
 
     min_version = read_min_version(INSTALL_SCRIPT_PATH)
-    versions = filter_versions(sorted(download_versions), min_version)
-    if not versions:
+    if versions := filter_versions(sorted(download_versions), min_version):
+        return versions
+    else:
         raise RuntimeError(
             "Error: no nginx.org versions satisfy the minimum supported NGINX version"
         )
-    return versions
 
 
 def main(
@@ -965,7 +963,7 @@ def main(
     try:
         versions = _collect_supported_versions()
     except RuntimeError as exc:
-        print(str(exc), file=sys.stderr)
+        print(exc, file=sys.stderr)
         return 1
 
     # --- Load existing matrix ------------------------------------------------
@@ -984,16 +982,14 @@ def main(
     # --- Handle based on mode ------------------------------------------------
     if not diff.has_changes:
         print("Matrix is up to date — no changes needed.")
-        exit_code = 0
+        return 0
     elif args.check_only:
-        exit_code = _handle_check_only(diff)
+        return _handle_check_only(diff)
     elif args.dry_run:
-        exit_code = _handle_dry_run(diff)
+        return _handle_dry_run(diff)
     else:
         # --- Normal write mode -----------------------------------------------
-        exit_code = _run_write_mode(data, merged, diff)
-
-    return exit_code
+        return _run_write_mode(data, merged, diff)
 
 
 if __name__ == "__main__":

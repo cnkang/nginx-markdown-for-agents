@@ -687,6 +687,75 @@ If your NGINX version is >= 1.24.0 but not listed in the matrix below, use the [
 | 1.31.1 | musl | x86_64 | Full |
 <!-- END AUTO-GENERATED MATRIX -->
 
+<!-- BEGIN:release-matrix:installation-matrix -->
+
+## Available Packages by Platform
+
+### deb-package
+
+| NGINX | Channel | OS | libc | Arch | Tier |
+|-------|---------|-----|------|------|------|
+| 1.26.3 | stable | debian12 | glibc | arm64 | supported |
+| 1.26.3 | stable | debian12 | glibc | amd64 | supported |
+
+### docker-image
+
+| NGINX | Channel | OS | libc | Arch | Tier |
+|-------|---------|-----|------|------|------|
+| 1.31.1 | mainline | debian12 | glibc | arm64 | supported |
+| 1.31.1 | mainline | debian12 | glibc | amd64 | supported |
+| 1.31.1 | mainline | alpine3.20 | musl | arm64 | supported |
+| 1.31.1 | mainline | alpine3.20 | musl | amd64 | supported |
+| 1.26.3 | stable | debian12 | glibc | arm64 | supported |
+| 1.26.3 | stable | debian12 | glibc | amd64 | supported |
+| 1.26.3 | stable | alpine3.20 | musl | arm64 | supported |
+| 1.26.3 | stable | alpine3.20 | musl | amd64 | supported |
+
+### dynamic-module
+
+| NGINX | Channel | OS | libc | Arch | Tier |
+|-------|---------|-----|------|------|------|
+| 1.31.1 | mainline | linux | glibc | arm64 | supported |
+| 1.31.1 | mainline | linux | musl | arm64 | supported |
+| 1.31.1 | mainline | linux | glibc | amd64 | supported |
+| 1.31.1 | mainline | linux | musl | amd64 | supported |
+| 1.30.2 | stable | linux | glibc | arm64 | supported |
+| 1.30.2 | stable | linux | musl | arm64 | supported |
+| 1.30.2 | stable | linux | glibc | amd64 | supported |
+| 1.30.2 | stable | linux | musl | amd64 | supported |
+| 1.28.3 | stable | linux | glibc | arm64 | supported |
+| 1.28.3 | stable | linux | musl | arm64 | supported |
+| 1.28.3 | stable | linux | glibc | amd64 | supported |
+| 1.28.3 | stable | linux | musl | amd64 | supported |
+| 1.26.3 | stable | linux | glibc | arm64 | supported |
+| 1.26.3 | stable | linux | musl | arm64 | supported |
+| 1.26.3 | stable | linux | glibc | amd64 | supported |
+| 1.26.3 | stable | linux | musl | amd64 | supported |
+| 1.24.0 | oldstable | linux | glibc | arm64 | supported |
+| 1.24.0 | oldstable | linux | musl | arm64 | supported |
+| 1.24.0 | oldstable | linux | glibc | amd64 | supported |
+| 1.24.0 | oldstable | linux | musl | amd64 | supported |
+
+### homebrew-formula
+
+| NGINX | Channel | OS | libc | Arch | Tier |
+|-------|---------|-----|------|------|------|
+| 1.26.3 | stable | macos | glibc | arm64 | experimental |
+
+### rpm-package
+
+| NGINX | Channel | OS | libc | Arch | Tier |
+|-------|---------|-----|------|------|------|
+| 1.26.3 | stable | almalinux9 | glibc | arm64 | supported |
+| 1.26.3 | stable | almalinux9 | glibc | amd64 | supported |
+
+### source
+
+| NGINX | Channel | OS | libc | Arch | Tier |
+|-------|---------|-----|------|------|------|
+| 1.26.3 | stable | any | glibc | amd64 | best-effort |
+<!-- END:release-matrix:installation-matrix -->
+
 ---
 
 ## 8. Release Artifact Naming
