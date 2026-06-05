@@ -113,22 +113,35 @@ static struct ngx_pool_s     test_pool;
 static ngx_connection_impl_t test_connection;
 static ngx_http_request_t    test_request;
 
+/* Track output_filter calls */
+static int test_output_filter_called;
+static int test_output_filter_rc;
+
 /* Mock: ngx_http_output_filter (needed by postcommit) */
 ngx_int_t
 ngx_http_output_filter(ngx_http_request_t *r, ngx_chain_t *in)
 {
     UNUSED(r); UNUSED(in);
-    return NGX_OK;
+    test_output_filter_called++;
+    return test_output_filter_rc;
 }
+
+/* Track ngx_calloc_buf behavior */
+static int test_calloc_buf_called;
+static ngx_buf_t *test_calloc_buf_result;
+static ngx_buf_t  test_calloc_buf_storage;
 
 /* Mock: ngx_calloc_buf */
 ngx_buf_t *
 ngx_calloc_buf(ngx_pool_t *pool)
 {
     UNUSED(pool);
-    static ngx_buf_t mock_buf;
-    memset(&mock_buf, 0, sizeof(mock_buf));
-    return &mock_buf;
+    test_calloc_buf_called++;
+    if (test_calloc_buf_result != NULL) {
+        return test_calloc_buf_result;
+    }
+    memset(&test_calloc_buf_storage, 0, sizeof(test_calloc_buf_storage));
+    return &test_calloc_buf_storage;
 }
 
 /* Stub: ngx_log_error_core */
@@ -154,6 +167,11 @@ static void test_setup(void)
     test_request.connection = &test_connection;
     test_request.pool = &test_pool;
     test_request.main = &test_request;
+    test_output_filter_called = 0;
+    test_output_filter_rc = NGX_OK;
+    test_calloc_buf_called = 0;
+    test_calloc_buf_result = NULL;
+    memset(&test_calloc_buf_storage, 0, sizeof(test_calloc_buf_storage));
 }
 
 
@@ -414,6 +432,404 @@ static void test_guard_null_params(void)
 }
 
 
+/* --- safe_finish tests --- */
+
+static void test_safe_finish_happy_path(void)
+{
+    ngx_http_markdown_ctx_t ctx;
+    ngx_int_t rc;
+
+    test_setup();
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
+
+    rc = ngx_http_markdown_stream_postcommit_safe_finish(
+        &test_request, &ctx);
+
+    TEST_ASSERT(rc == NGX_OK, "safe_finish returns NGX_OK");
+    TEST_ASSERT(ctx.stream_sm.state
+                == NGX_HTTP_MD_STATE_POST_COMMIT_SAFE_FINISH,
+                "state = POST_COMMIT_SAFE_FINISH");
+    TEST_ASSERT(test_output_filter_called == 1,
+                "send_terminal called output_filter");
+    TEST_PASS("safe_finish happy path");
+}
+
+static void test_safe_finish_idempotent_reentry(void)
+{
+    ngx_http_markdown_ctx_t ctx;
+    ngx_int_t rc;
+
+    test_setup();
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_POST_COMMIT_SAFE_FINISH;
+
+    rc = ngx_http_markdown_stream_postcommit_safe_finish(
+        &test_request, &ctx);
+
+    TEST_ASSERT(rc == NGX_OK,
+                "safe_finish idempotent returns NGX_OK");
+    TEST_ASSERT(ctx.stream_sm.state
+                == NGX_HTTP_MD_STATE_POST_COMMIT_SAFE_FINISH,
+                "state stays POST_COMMIT_SAFE_FINISH");
+    TEST_PASS("safe_finish idempotent re-entry");
+}
+
+static void test_safe_finish_invalid_state(void)
+{
+    ngx_http_markdown_ctx_t ctx;
+    ngx_int_t rc;
+
+    test_setup();
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_PRE_COMMIT;
+
+    rc = ngx_http_markdown_stream_postcommit_safe_finish(
+        &test_request, &ctx);
+
+    TEST_ASSERT(rc == NGX_ERROR,
+                "safe_finish from PRE_COMMIT -> NGX_ERROR");
+
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_PASSTHROUGH;
+    rc = ngx_http_markdown_stream_postcommit_safe_finish(
+        &test_request, &ctx);
+
+    TEST_ASSERT(rc == NGX_ERROR,
+                "safe_finish from PASSTHROUGH -> NGX_ERROR");
+    TEST_PASS("safe_finish invalid state returns NGX_ERROR");
+}
+
+static void test_safe_finish_null_params(void)
+{
+    ngx_http_markdown_ctx_t ctx;
+    ngx_int_t rc;
+
+    test_setup();
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
+
+    rc = ngx_http_markdown_stream_postcommit_safe_finish(NULL, &ctx);
+    TEST_ASSERT(rc == NGX_ERROR, "safe_finish NULL r -> ERROR");
+
+    rc = ngx_http_markdown_stream_postcommit_safe_finish(&test_request, NULL);
+    TEST_ASSERT(rc == NGX_ERROR, "safe_finish NULL ctx -> ERROR");
+    TEST_PASS("safe_finish NULL parameters return NGX_ERROR");
+}
+
+static void test_safe_finish_send_terminal_fails(void)
+{
+    ngx_http_markdown_ctx_t ctx;
+    ngx_int_t rc;
+
+    test_setup();
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
+
+    /* Make send_terminal fail */
+    test_output_filter_rc = NGX_ERROR;
+
+    rc = ngx_http_markdown_stream_postcommit_safe_finish(
+        &test_request, &ctx);
+
+    TEST_ASSERT(rc == NGX_ERROR,
+                "safe_finish send_terminal fails -> NGX_ERROR");
+    TEST_PASS("safe_finish send_terminal failure propagates");
+}
+
+/* --- abort tests --- */
+
+static void test_abort_happy_path(void)
+{
+    ngx_http_markdown_ctx_t ctx;
+    ngx_int_t rc;
+
+    test_setup();
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
+
+    rc = ngx_http_markdown_stream_postcommit_abort(&test_request, &ctx);
+
+    TEST_ASSERT(rc == NGX_OK, "abort returns NGX_OK");
+    TEST_ASSERT(ctx.stream_sm.state == NGX_HTTP_MD_STATE_POST_COMMIT_ABORT,
+                "state = POST_COMMIT_ABORT");
+    TEST_ASSERT(test_output_filter_called == 1,
+                "send_terminal called output_filter");
+    TEST_PASS("abort happy path");
+}
+
+static void test_abort_from_safe_finish_state(void)
+{
+    ngx_http_markdown_ctx_t ctx;
+    ngx_int_t rc;
+
+    test_setup();
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_POST_COMMIT_SAFE_FINISH;
+
+    rc = ngx_http_markdown_stream_postcommit_abort(&test_request, &ctx);
+
+    TEST_ASSERT(rc == NGX_OK, "abort from SAFE_FINISH returns NGX_OK");
+    TEST_ASSERT(ctx.stream_sm.state == NGX_HTTP_MD_STATE_POST_COMMIT_ABORT,
+                "state = POST_COMMIT_ABORT");
+    TEST_PASS("abort from POST_COMMIT_SAFE_FINISH state");
+}
+
+static void test_abort_idempotent_reentry(void)
+{
+    ngx_http_markdown_ctx_t ctx;
+    ngx_int_t rc;
+
+    test_setup();
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_POST_COMMIT_ABORT;
+
+    rc = ngx_http_markdown_stream_postcommit_abort(&test_request, &ctx);
+
+    TEST_ASSERT(rc == NGX_OK, "abort idempotent returns NGX_OK");
+    TEST_ASSERT(ctx.stream_sm.state == NGX_HTTP_MD_STATE_POST_COMMIT_ABORT,
+                "state stays POST_COMMIT_ABORT");
+    TEST_PASS("abort idempotent re-entry");
+}
+
+static void test_abort_invalid_state(void)
+{
+    ngx_http_markdown_ctx_t ctx;
+    ngx_int_t rc;
+
+    test_setup();
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_PRE_COMMIT;
+
+    rc = ngx_http_markdown_stream_postcommit_abort(&test_request, &ctx);
+
+    TEST_ASSERT(rc == NGX_ERROR,
+                "abort from PRE_COMMIT -> NGX_ERROR");
+
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_NOT_ELIGIBLE;
+    rc = ngx_http_markdown_stream_postcommit_abort(&test_request, &ctx);
+
+    TEST_ASSERT(rc == NGX_ERROR,
+                "abort from NOT_ELIGIBLE -> NGX_ERROR");
+    TEST_PASS("abort invalid state returns NGX_ERROR");
+}
+
+static void test_abort_null_params(void)
+{
+    ngx_http_markdown_ctx_t ctx;
+    ngx_int_t rc;
+
+    test_setup();
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
+
+    rc = ngx_http_markdown_stream_postcommit_abort(NULL, &ctx);
+    TEST_ASSERT(rc == NGX_ERROR, "abort NULL r -> ERROR");
+
+    rc = ngx_http_markdown_stream_postcommit_abort(&test_request, NULL);
+    TEST_ASSERT(rc == NGX_ERROR, "abort NULL ctx -> ERROR");
+    TEST_PASS("abort NULL parameters return NGX_ERROR");
+}
+
+static void test_abort_send_terminal_fails(void)
+{
+    ngx_http_markdown_ctx_t ctx;
+    ngx_int_t rc;
+
+    test_setup();
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
+
+    /* Make send_terminal fail */
+    test_output_filter_rc = NGX_ERROR;
+
+    rc = ngx_http_markdown_stream_postcommit_abort(&test_request, &ctx);
+
+    TEST_ASSERT(rc == NGX_ERROR,
+                "abort send_terminal fails -> NGX_ERROR");
+    TEST_PASS("abort send_terminal failure propagates");
+}
+
+/* --- postcommit_log tests --- */
+
+static void test_postcommit_log_null_params(void)
+{
+    test_setup();
+
+    /* Should not crash with NULL params */
+    ngx_http_markdown_stream_postcommit_log(NULL, NULL, NULL,
+        NGX_HTTP_MD_REASON_POST_COMMIT_ERROR);
+    ngx_http_markdown_stream_postcommit_log(&test_request, NULL, "abort",
+        NGX_HTTP_MD_REASON_POST_COMMIT_ERROR);
+    TEST_PASS("postcommit_log NULL params handled safely");
+}
+
+static void test_postcommit_log_happy_path(void)
+{
+    ngx_http_markdown_ctx_t ctx;
+
+    test_setup();
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_POST_COMMIT_ABORT;
+
+    /* Should not crash */
+    ngx_http_markdown_stream_postcommit_log(
+        &test_request, &ctx, "safe_finish",
+        NGX_HTTP_MD_REASON_POST_COMMIT_ERROR);
+
+    ngx_http_markdown_stream_postcommit_log(
+        &test_request, &ctx, "abort",
+        NGX_HTTP_MD_REASON_POST_COMMIT_ERROR);
+
+    TEST_PASS("postcommit_log emits log without crashing");
+}
+
+/* --- send_terminal subrequest test --- */
+
+static void test_send_terminal_subrequest(void)
+{
+    ngx_http_request_t subrequest;
+    ngx_http_markdown_ctx_t ctx;
+    ngx_int_t rc;
+
+    test_setup();
+    memset(&subrequest, 0, sizeof(subrequest));
+    memset(&ctx, 0, sizeof(ctx));
+
+    subrequest.connection = &test_connection;
+    subrequest.pool = &test_pool;
+    /* subrequest.main points to a different request */
+    subrequest.main = &test_request;
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
+
+    rc = ngx_http_markdown_stream_postcommit_abort(&subrequest, &ctx);
+
+    TEST_ASSERT(rc == NGX_OK, "subrequest abort returns NGX_OK");
+    /* For subrequest, last_buf should be 0 (not main request) */
+    TEST_ASSERT(test_calloc_buf_storage.last_buf == 0,
+                "subrequest: last_buf = 0");
+    TEST_ASSERT(test_calloc_buf_storage.last_in_chain == 1,
+                "subrequest: last_in_chain = 1");
+    TEST_PASS("send_terminal handles subrequest correctly");
+}
+
+/* --- Guard with multi-buffer chain --- */
+
+static void test_guard_multi_buffer_chain(void)
+{
+    ngx_http_markdown_ctx_t ctx;
+    ngx_buf_t buf1, buf2;
+    ngx_chain_t chain1, chain2;
+    ngx_int_t rc;
+    u_char data1[] = "# Markdown content";
+    u_char data2[] = "<!DOCTYPE html>";
+
+    test_setup();
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
+
+    memset(&buf1, 0, sizeof(buf1));
+    buf1.pos = data1;
+    buf1.last = data1 + sizeof(data1) - 1;
+    buf1.memory = 1;
+    chain1.buf = &buf1;
+    chain1.next = &chain2;
+
+    memset(&buf2, 0, sizeof(buf2));
+    buf2.pos = data2;
+    buf2.last = data2 + sizeof(data2) - 1;
+    buf2.memory = 1;
+    chain2.buf = &buf2;
+    chain2.next = NULL;
+
+    rc = ngx_http_markdown_stream_postcommit_guard(
+        &test_request, &ctx, &chain1);
+
+    TEST_ASSERT(rc == NGX_ERROR,
+                "guard detects DOCTYPE in second buffer");
+    TEST_PASS("Guard detects HTML in multi-buffer chain");
+}
+
+/* --- Guard with short buffer --- */
+
+static void test_guard_short_buffer(void)
+{
+    ngx_http_markdown_ctx_t ctx;
+    ngx_buf_t buf;
+    ngx_chain_t chain;
+    ngx_int_t rc;
+    u_char data[] = "<htm";
+
+    test_setup();
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
+
+    memset(&buf, 0, sizeof(buf));
+    buf.pos = data;
+    buf.last = data + 4;
+    buf.memory = 1;
+    chain.buf = &buf;
+    chain.next = NULL;
+
+    rc = ngx_http_markdown_stream_postcommit_guard(
+        &test_request, &ctx, &chain);
+
+    TEST_ASSERT(rc == NGX_OK,
+                "guard passes for short buffer (< 5 bytes)");
+    TEST_PASS("Guard passes for buffer shorter than signature");
+}
+
+/* --- Guard with NULL buf in chain --- */
+
+static void test_guard_null_buf_in_chain(void)
+{
+    ngx_http_markdown_ctx_t ctx;
+    ngx_chain_t chain;
+    ngx_int_t rc;
+
+    test_setup();
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
+
+    chain.buf = NULL;
+    chain.next = NULL;
+
+    rc = ngx_http_markdown_stream_postcommit_guard(
+        &test_request, &ctx, &chain);
+
+    TEST_ASSERT(rc == NGX_OK, "guard passes with NULL buf");
+    TEST_PASS("Guard handles NULL buf in chain");
+}
+
+/* --- Guard case-insensitive DOCTYPE --- */
+
+static void test_guard_case_insensitive_doctype(void)
+{
+    ngx_http_markdown_ctx_t ctx;
+    ngx_buf_t buf;
+    ngx_chain_t chain;
+    ngx_int_t rc;
+    u_char data[] = "<!doctype HTML>";
+
+    test_setup();
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
+
+    memset(&buf, 0, sizeof(buf));
+    buf.pos = data;
+    buf.last = data + sizeof(data) - 1;
+    buf.memory = 1;
+    chain.buf = &buf;
+    chain.next = NULL;
+
+    rc = ngx_http_markdown_stream_postcommit_guard(
+        &test_request, &ctx, &chain);
+
+    TEST_ASSERT(rc == NGX_ERROR,
+                "guard detects lowercase <!doctype");
+    TEST_PASS("Guard case-insensitive DOCTYPE detection");
+}
+
+
 int main(void)
 {
     TEST_SECTION("Post-commit Safety Property (Spec 37, Task 7.4)");
@@ -425,6 +841,30 @@ int main(void)
     test_guard_fails_html_tag();
     test_guard_passes_non_committed_state();
     test_guard_null_params();
+    test_guard_multi_buffer_chain();
+    test_guard_short_buffer();
+    test_guard_null_buf_in_chain();
+    test_guard_case_insensitive_doctype();
+
+    TEST_SECTION("Post-commit safe_finish (Task 5.1)");
+    test_safe_finish_happy_path();
+    test_safe_finish_idempotent_reentry();
+    test_safe_finish_invalid_state();
+    test_safe_finish_null_params();
+    test_safe_finish_send_terminal_fails();
+
+    TEST_SECTION("Post-commit abort (Task 5.2)");
+    test_abort_happy_path();
+    test_abort_from_safe_finish_state();
+    test_abort_idempotent_reentry();
+    test_abort_invalid_state();
+    test_abort_null_params();
+    test_abort_send_terminal_fails();
+
+    TEST_SECTION("Post-commit log and send_terminal");
+    test_postcommit_log_null_params();
+    test_postcommit_log_happy_path();
+    test_send_terminal_subrequest();
 
     printf("\n  All post-commit safety tests passed\n\n");
     return 0;

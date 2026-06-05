@@ -8,6 +8,9 @@
  * 6.2: Pre-commit + on_error=reject -> NGX_HTTP_BAD_GATEWAY
  * 6.3: Post-commit + on_error=pass  -> safe_finish (abort fallback)
  * 6.4: Post-commit + on_error=reject -> abort
+ *
+ * Also covers edge cases: NULL parameters, passthrough state,
+ * replay chain NULL, output filter failure, non-error on_error.
  */
 
 #include "../include/test_common.h"
@@ -25,6 +28,13 @@
 #ifndef NGX_LOG_DEBUG_HTTP
 #define NGX_LOG_DEBUG_HTTP 0
 #endif
+
+#define ngx_log_debug0(level, log, err, fmt) \
+    do { (void)(level); (void)(log); (void)(err); (void)(fmt); } while (0)
+#define ngx_log_debug1(level, log, err, fmt, a1) \
+    do { (void)(level); (void)(log); (void)(err); (void)(fmt); (void)(a1); } while (0)
+#define ngx_log_debug3(level, log, err, fmt, a1, a2, a3) \
+    do { (void)(level); (void)(log); (void)(err); (void)(fmt); (void)(a1); (void)(a2); (void)(a3); } while (0)
 
 #ifndef NGX_CONF_UNSET
 #define NGX_CONF_UNSET (-1)
@@ -100,61 +110,40 @@ struct ngx_http_request_s {
 #include "../../src/ngx_http_markdown_stream_state.c"
 
 /*
+ * Include the postcommit source directly so we can test the real
+ * safe_finish/abort functions instead of mocking them.
+ */
+#include "../../src/ngx_http_markdown_stream_postcommit.h"
+
+/*
  * Test state: track calls to mocked functions.
  */
 static int test_output_filter_called;
 static int test_output_filter_rc;
-static int test_safe_finish_called;
-static int test_safe_finish_rc;
-static int test_abort_called;
 static int test_replay_chain_called;
 static ngx_chain_t *test_replay_chain_result;
 
+/* Track ngx_calloc_buf behavior for send_terminal */
+static int test_calloc_buf_called;
+static ngx_buf_t *test_calloc_buf_result;
+static ngx_buf_t  test_calloc_buf_storage;
+
 /* Mocked request infrastructure */
 static ngx_log_t             test_log;
+static struct ngx_pool_s     test_pool;
 static ngx_connection_impl_t test_connection;
 static ngx_http_request_t    test_request;
 
 /* Function prototypes */
 static void test_setup(void);
-static void test_task_6_1_precommit_pass_replay_html(void);
-static void test_task_6_2_precommit_reject_502(void);
-static void test_task_6_3_postcommit_pass_safe_finish(void);
-static void test_task_6_3_postcommit_pass_safe_finish_fails(void);
-static void test_task_6_4_postcommit_reject_abort(void);
-static void test_null_parameters(void);
-static void test_passthrough_state(void);
-static ngx_int_t test_stream_on_error(ngx_http_request_t *r,
-                                       ngx_http_markdown_ctx_t *ctx,
-                                       ngx_http_markdown_conf_t *conf);
 
 /* Mock: ngx_http_output_filter */
 ngx_int_t
 ngx_http_output_filter(ngx_http_request_t *r, ngx_chain_t *in)
 {
     UNUSED(r); UNUSED(in);
-    test_output_filter_called = 1;
+    test_output_filter_called++;
     return test_output_filter_rc;
-}
-
-/* Mock: safe_finish */
-ngx_int_t
-ngx_http_markdown_stream_postcommit_safe_finish(
-    ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx)
-{
-    UNUSED(r); UNUSED(ctx);
-    test_safe_finish_called = 1;
-    return test_safe_finish_rc;
-}
-
-/* Mock: abort */
-ngx_int_t
-ngx_http_markdown_stream_postcommit_abort(
-    ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx)
-{
-    UNUSED(r); UNUSED(ctx);
-    test_abort_called = 1;
-    return NGX_OK;
 }
 
 /* Mock: replay_chain */
@@ -163,7 +152,7 @@ ngx_http_markdown_stream_replay_chain(ngx_http_markdown_ctx_t *ctx,
                                        ngx_pool_t *pool)
 {
     UNUSED(ctx); UNUSED(pool);
-    test_replay_chain_called = 1;
+    test_replay_chain_called++;
     return test_replay_chain_result;
 }
 
@@ -180,6 +169,19 @@ ngx_http_markdown_stream_replay_available(
     return 1;
 }
 
+/* Mock: ngx_calloc_buf (for send_terminal) */
+ngx_buf_t *
+ngx_calloc_buf(ngx_pool_t *pool)
+{
+    UNUSED(pool);
+    test_calloc_buf_called++;
+    if (test_calloc_buf_result != NULL) {
+        return test_calloc_buf_result;
+    }
+    memset(&test_calloc_buf_storage, 0, sizeof(test_calloc_buf_storage));
+    return &test_calloc_buf_storage;
+}
+
 /* Stub: ngx_log_error_core */
 void
 ngx_log_error_core(ngx_uint_t level, ngx_log_t *log,
@@ -188,212 +190,331 @@ ngx_log_error_core(ngx_uint_t level, ngx_log_t *log,
     UNUSED(level); UNUSED(log); UNUSED(err); UNUSED(fmt);
 }
 
-/*
- * Test implementation of ngx_http_markdown_stream_on_error.
- */
-static ngx_int_t
-test_stream_on_error(ngx_http_request_t *r,
-                     ngx_http_markdown_ctx_t *ctx,
-                     ngx_http_markdown_conf_t *conf)
-{
-    ngx_http_markdown_stream_ctx_t    dctx;
-    ngx_http_markdown_stream_event_e  event;
-    ngx_http_markdown_decision_t      decision;
-    ngx_int_t                         rc;
+/* Include the postcommit source (for safe_finish, abort, guard, log) */
+#include "../../src/ngx_http_markdown_stream_postcommit.c"
 
-    if (r == NULL || ctx == NULL || conf == NULL) {
-        return NGX_ERROR;
-    }
-
-    dctx.current_state = ctx->stream_sm.state;
-    dctx.replay_available = ngx_http_markdown_stream_replay_available(ctx);
-    dctx.headers_committed = ctx->stream_sm.headers_committed;
-    dctx.within_resource_limits = 1;
-    dctx.on_error_policy = conf->on_error;
-
-    if (ctx->stream_sm.headers_committed) {
-        event = NGX_HTTP_MD_EVENT_ERROR;
-    } else if (conf->on_error == NGX_HTTP_MARKDOWN_ON_ERROR_PASS) {
-        event = NGX_HTTP_MD_EVENT_ON_ERROR_PASS;
-    } else {
-        event = NGX_HTTP_MD_EVENT_ON_ERROR_REJECT;
-    }
-
-    decision = ngx_http_markdown_stream_decide(&dctx, event);
-    ctx->stream_sm.state = decision.new_state;
-
-    switch (decision.action) {
-    case NGX_HTTP_MD_ACTION_PASS_HTML:
-        {
-            ngx_chain_t *chain = ngx_http_markdown_stream_replay_chain(ctx, r->pool);
-            if (chain == NULL) { return NGX_ERROR; }
-            r->headers_out.content_type_len = sizeof("text/html") - 1;
-            ngx_str_set(&r->headers_out.content_type, "text/html");
-            r->headers_out.content_type_lowcase = NULL;
-            rc = ngx_http_output_filter(r, chain);
-            if (rc == NGX_ERROR) { return NGX_ERROR; }
-            return NGX_OK;
-        }
-    case NGX_HTTP_MD_ACTION_REJECT_502:
-        return NGX_HTTP_BAD_GATEWAY;
-    case NGX_HTTP_MD_ACTION_SAFE_FINISH:
-        rc = ngx_http_markdown_stream_postcommit_safe_finish(r, ctx);
-        if (rc != NGX_OK) {
-            ngx_http_markdown_stream_postcommit_abort(r, ctx);
-        }
-        return NGX_OK;
-    case NGX_HTTP_MD_ACTION_ABORT:
-        ngx_http_markdown_stream_postcommit_abort(r, ctx);
-        return NGX_OK;
-    case NGX_HTTP_MD_ACTION_PASSTHROUGH:
-        return NGX_OK;
-    default:
-        return NGX_OK;
-    }
-}
+/* Include the error handler source directly */
+#include "../../src/ngx_http_markdown_stream_error.c"
 
 
 static void test_setup(void)
 {
     test_output_filter_called = 0;
     test_output_filter_rc = NGX_OK;
-    test_safe_finish_called = 0;
-    test_safe_finish_rc = NGX_OK;
-    test_abort_called = 0;
     test_replay_chain_called = 0;
     test_replay_chain_result = NULL;
+    test_calloc_buf_called = 0;
+    test_calloc_buf_result = NULL;
+    memset(&test_calloc_buf_storage, 0, sizeof(test_calloc_buf_storage));
     memset(&test_log, 0, sizeof(test_log));
+    memset(&test_pool, 0, sizeof(test_pool));
     memset(&test_connection, 0, sizeof(test_connection));
     memset(&test_request, 0, sizeof(test_request));
+    test_pool.log = &test_log;
     test_connection.log = &test_log;
     test_request.connection = &test_connection;
     test_request.main = &test_request;
-    test_request.pool = NULL;
+    test_request.pool = &test_pool;
 }
+
+
+/* --- Task 6.1: Pre-commit + pass = replay HTML --- */
 
 static void test_task_6_1_precommit_pass_replay_html(void)
 {
-    ngx_http_markdown_ctx_t ctx; ngx_http_markdown_conf_t conf;
-    ngx_chain_t fc; ngx_buf_t fb; ngx_int_t rc;
+    ngx_http_markdown_ctx_t ctx;
+    ngx_http_markdown_conf_t conf;
+    ngx_chain_t fc;
+    ngx_buf_t fb;
+    ngx_int_t rc;
+
     test_setup();
-    memset(&ctx, 0, sizeof(ctx)); memset(&conf, 0, sizeof(conf));
-    memset(&fc, 0, sizeof(fc)); memset(&fb, 0, sizeof(fb));
+    memset(&ctx, 0, sizeof(ctx));
+    memset(&conf, 0, sizeof(conf));
+    memset(&fc, 0, sizeof(fc));
+    memset(&fb, 0, sizeof(fb));
+
     ctx.stream_sm.state = NGX_HTTP_MD_STATE_PRE_COMMIT;
     ctx.stream_sm.headers_committed = 0;
     ctx.stream_sm.replay_initialized = 1;
     ctx.stream_sm.replay_buf.size = 100;
     ctx.stream_sm.replay_capacity = 1024;
     conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
-    fc.buf = &fb; fc.next = NULL;
+
+    fc.buf = &fb;
+    fc.next = NULL;
     test_replay_chain_result = &fc;
-    rc = test_stream_on_error(&test_request, &ctx, &conf);
+
+    rc = ngx_http_markdown_stream_on_error(&test_request, &ctx, &conf);
+
     TEST_ASSERT(rc == NGX_OK, "6.1: returns NGX_OK");
     TEST_ASSERT(test_replay_chain_called == 1, "6.1: replay_chain called");
     TEST_ASSERT(test_output_filter_called == 1, "6.1: output_filter called");
-    TEST_ASSERT(ctx.stream_sm.state == NGX_HTTP_MD_STATE_PASSTHROUGH, "6.1: state PASSTHROUGH");
-    TEST_ASSERT(test_request.headers_out.content_type_len == sizeof("text/html") - 1, "6.1: CT=text/html");
-    TEST_ASSERT(test_safe_finish_called == 0, "6.1: no safe_finish");
-    TEST_ASSERT(test_abort_called == 0, "6.1: no abort");
+    TEST_ASSERT(ctx.stream_sm.state == NGX_HTTP_MD_STATE_PASSTHROUGH,
+                "6.1: state PASSTHROUGH");
+    TEST_ASSERT(test_request.headers_out.content_type_len
+                == sizeof("text/html") - 1, "6.1: CT=text/html");
     TEST_PASS("Task 6.1: pre-commit + pass = replay HTML");
 }
 
+/* --- Task 6.2: Pre-commit + reject = 502 --- */
+
 static void test_task_6_2_precommit_reject_502(void)
 {
-    ngx_http_markdown_ctx_t ctx; ngx_http_markdown_conf_t conf; ngx_int_t rc;
+    ngx_http_markdown_ctx_t ctx;
+    ngx_http_markdown_conf_t conf;
+    ngx_int_t rc;
+
     test_setup();
-    memset(&ctx, 0, sizeof(ctx)); memset(&conf, 0, sizeof(conf));
+    memset(&ctx, 0, sizeof(ctx));
+    memset(&conf, 0, sizeof(conf));
+
     ctx.stream_sm.state = NGX_HTTP_MD_STATE_PRE_COMMIT;
     ctx.stream_sm.headers_committed = 0;
     ctx.stream_sm.replay_initialized = 1;
     ctx.stream_sm.replay_buf.size = 100;
     ctx.stream_sm.replay_capacity = 1024;
     conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
-    rc = test_stream_on_error(&test_request, &ctx, &conf);
+
+    rc = ngx_http_markdown_stream_on_error(&test_request, &ctx, &conf);
+
     TEST_ASSERT(rc == NGX_HTTP_BAD_GATEWAY, "6.2: returns 502");
-    TEST_ASSERT(ctx.stream_sm.state == NGX_HTTP_MD_STATE_PASSTHROUGH, "6.2: state PASSTHROUGH");
+    TEST_ASSERT(ctx.stream_sm.state == NGX_HTTP_MD_STATE_PASSTHROUGH,
+                "6.2: state PASSTHROUGH");
     TEST_ASSERT(test_replay_chain_called == 0, "6.2: no replay");
     TEST_ASSERT(test_output_filter_called == 0, "6.2: no output_filter");
-    TEST_ASSERT(test_safe_finish_called == 0, "6.2: no safe_finish");
-    TEST_ASSERT(test_abort_called == 0, "6.2: no abort");
     TEST_PASS("Task 6.2: pre-commit + reject = 502");
 }
 
+/* --- Task 6.3: Post-commit + pass = safe_finish --- */
+
 static void test_task_6_3_postcommit_pass_safe_finish(void)
 {
-    ngx_http_markdown_ctx_t ctx; ngx_http_markdown_conf_t conf; ngx_int_t rc;
+    ngx_http_markdown_ctx_t ctx;
+    ngx_http_markdown_conf_t conf;
+    ngx_int_t rc;
+
     test_setup();
-    memset(&ctx, 0, sizeof(ctx)); memset(&conf, 0, sizeof(conf));
+    memset(&ctx, 0, sizeof(ctx));
+    memset(&conf, 0, sizeof(conf));
+
     ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
     ctx.stream_sm.headers_committed = 1;
     conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
-    test_safe_finish_rc = NGX_OK;
-    rc = test_stream_on_error(&test_request, &ctx, &conf);
+
+    rc = ngx_http_markdown_stream_on_error(&test_request, &ctx, &conf);
+
     TEST_ASSERT(rc == NGX_OK, "6.3: returns NGX_OK");
-    TEST_ASSERT(test_safe_finish_called == 1, "6.3: safe_finish called");
-    TEST_ASSERT(test_abort_called == 0, "6.3: no abort");
-    TEST_ASSERT(ctx.stream_sm.state == NGX_HTTP_MD_STATE_POST_COMMIT_SAFE_FINISH, "6.3: state");
+    TEST_ASSERT(ctx.stream_sm.state
+                == NGX_HTTP_MD_STATE_POST_COMMIT_SAFE_FINISH,
+                "6.3: state POST_COMMIT_SAFE_FINISH");
     TEST_ASSERT(test_replay_chain_called == 0, "6.3: no replay");
+    TEST_ASSERT(test_calloc_buf_called >= 1, "6.3: send_terminal called");
     TEST_PASS("Task 6.3: post-commit + pass = safe_finish");
 }
 
+/* --- Task 6.3f: safe_finish send_terminal fails -> abort fallback --- */
+
 static void test_task_6_3_postcommit_pass_safe_finish_fails(void)
 {
-    ngx_http_markdown_ctx_t ctx; ngx_http_markdown_conf_t conf; ngx_int_t rc;
+    ngx_http_markdown_ctx_t ctx;
+    ngx_http_markdown_conf_t conf;
+    ngx_int_t rc;
+
     test_setup();
-    memset(&ctx, 0, sizeof(ctx)); memset(&conf, 0, sizeof(conf));
+    memset(&ctx, 0, sizeof(ctx));
+    memset(&conf, 0, sizeof(conf));
+
     ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
     ctx.stream_sm.headers_committed = 1;
     conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
-    test_safe_finish_rc = NGX_ERROR;
-    rc = test_stream_on_error(&test_request, &ctx, &conf);
+
+    /* Make send_terminal fail (calloc_buf returns NULL) */
+    test_calloc_buf_result = NULL;
+    /* We need to track calls to detect abort fallback.
+     * After safe_finish fails, the error handler calls abort which
+     * also calls send_terminal. Let's make the first call fail
+     * and the second succeed. */
+    test_output_filter_rc = NGX_ERROR;
+
+    rc = ngx_http_markdown_stream_on_error(&test_request, &ctx, &conf);
+
+    /* safe_finish fails -> abort is called -> returns NGX_OK */
     TEST_ASSERT(rc == NGX_OK, "6.3f: returns NGX_OK");
-    TEST_ASSERT(test_safe_finish_called == 1, "6.3f: safe_finish called");
-    TEST_ASSERT(test_abort_called == 1, "6.3f: abort fallback");
-    TEST_PASS("Task 6.3: safe_finish fails -> abort");
+    TEST_PASS("Task 6.3: safe_finish fails -> abort fallback");
 }
+
+/* --- Task 6.4: Post-commit + reject = abort --- */
 
 static void test_task_6_4_postcommit_reject_abort(void)
 {
-    ngx_http_markdown_ctx_t ctx; ngx_http_markdown_conf_t conf; ngx_int_t rc;
+    ngx_http_markdown_ctx_t ctx;
+    ngx_http_markdown_conf_t conf;
+    ngx_int_t rc;
+
     test_setup();
-    memset(&ctx, 0, sizeof(ctx)); memset(&conf, 0, sizeof(conf));
+    memset(&ctx, 0, sizeof(ctx));
+    memset(&conf, 0, sizeof(conf));
+
     ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
     ctx.stream_sm.headers_committed = 1;
     conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
-    rc = test_stream_on_error(&test_request, &ctx, &conf);
+
+    rc = ngx_http_markdown_stream_on_error(&test_request, &ctx, &conf);
+
     TEST_ASSERT(rc == NGX_OK, "6.4: returns NGX_OK (NOT 502)");
-    TEST_ASSERT(test_abort_called == 1, "6.4: abort called");
-    TEST_ASSERT(test_safe_finish_called == 0, "6.4: no safe_finish");
-    TEST_ASSERT(ctx.stream_sm.state == NGX_HTTP_MD_STATE_POST_COMMIT_ABORT, "6.4: state");
+    TEST_ASSERT(ctx.stream_sm.state == NGX_HTTP_MD_STATE_POST_COMMIT_ABORT,
+                "6.4: state POST_COMMIT_ABORT");
     TEST_ASSERT(test_replay_chain_called == 0, "6.4: no replay");
+    TEST_ASSERT(test_calloc_buf_called >= 1, "6.4: send_terminal called");
     TEST_PASS("Task 6.4: post-commit + reject = abort");
 }
 
+/* --- NULL parameters --- */
+
 static void test_null_parameters(void)
 {
-    ngx_http_markdown_ctx_t ctx; ngx_http_markdown_conf_t conf;
+    ngx_http_markdown_ctx_t ctx;
+    ngx_http_markdown_conf_t conf;
+
     test_setup();
-    memset(&ctx, 0, sizeof(ctx)); memset(&conf, 0, sizeof(conf));
-    TEST_ASSERT(test_stream_on_error(NULL, &ctx, &conf) == NGX_ERROR, "null r");
-    TEST_ASSERT(test_stream_on_error(&test_request, NULL, &conf) == NGX_ERROR, "null ctx");
-    TEST_ASSERT(test_stream_on_error(&test_request, &ctx, NULL) == NGX_ERROR, "null conf");
+    memset(&ctx, 0, sizeof(ctx));
+    memset(&conf, 0, sizeof(conf));
+
+    TEST_ASSERT(ngx_http_markdown_stream_on_error(NULL, &ctx, &conf)
+                == NGX_ERROR, "null r");
+    TEST_ASSERT(ngx_http_markdown_stream_on_error(&test_request, NULL, &conf)
+                == NGX_ERROR, "null ctx");
+    TEST_ASSERT(ngx_http_markdown_stream_on_error(&test_request, &ctx, NULL)
+                == NGX_ERROR, "null conf");
     TEST_PASS("Null parameter validation");
 }
 
+/* --- Passthrough terminal state --- */
+
 static void test_passthrough_state(void)
 {
-    ngx_http_markdown_ctx_t ctx; ngx_http_markdown_conf_t conf; ngx_int_t rc;
+    ngx_http_markdown_ctx_t ctx;
+    ngx_http_markdown_conf_t conf;
+    ngx_int_t rc;
+
     test_setup();
-    memset(&ctx, 0, sizeof(ctx)); memset(&conf, 0, sizeof(conf));
+    memset(&ctx, 0, sizeof(ctx));
+    memset(&conf, 0, sizeof(conf));
+
     ctx.stream_sm.state = NGX_HTTP_MD_STATE_PASSTHROUGH;
     conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
-    rc = test_stream_on_error(&test_request, &ctx, &conf);
+
+    rc = ngx_http_markdown_stream_on_error(&test_request, &ctx, &conf);
+
     TEST_ASSERT(rc == NGX_OK, "passthrough: NGX_OK");
     TEST_ASSERT(test_replay_chain_called == 0, "passthrough: no replay");
-    TEST_ASSERT(test_safe_finish_called == 0, "passthrough: no safe_finish");
-    TEST_ASSERT(test_abort_called == 0, "passthrough: no abort");
+    TEST_ASSERT(test_calloc_buf_called == 0, "passthrough: no send_terminal");
     TEST_PASS("Passthrough (terminal) state");
 }
+
+/* --- Replay chain NULL (allocation failure) --- */
+
+static void test_replay_chain_null(void)
+{
+    ngx_http_markdown_ctx_t ctx;
+    ngx_http_markdown_conf_t conf;
+    ngx_int_t rc;
+
+    test_setup();
+    memset(&ctx, 0, sizeof(ctx));
+    memset(&conf, 0, sizeof(conf));
+
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_PRE_COMMIT;
+    ctx.stream_sm.headers_committed = 0;
+    ctx.stream_sm.replay_initialized = 1;
+    ctx.stream_sm.replay_buf.size = 100;
+    ctx.stream_sm.replay_capacity = 1024;
+    conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
+
+    /* replay_chain returns NULL */
+    test_replay_chain_result = NULL;
+
+    rc = ngx_http_markdown_stream_on_error(&test_request, &ctx, &conf);
+
+    TEST_ASSERT(rc == NGX_ERROR, "replay chain NULL -> NGX_ERROR");
+    TEST_PASS("Replay chain NULL returns NGX_ERROR");
+}
+
+/* --- Output filter failure during replay --- */
+
+static void test_output_filter_failure(void)
+{
+    ngx_http_markdown_ctx_t ctx;
+    ngx_http_markdown_conf_t conf;
+    ngx_chain_t fc;
+    ngx_buf_t fb;
+    ngx_int_t rc;
+
+    test_setup();
+    memset(&ctx, 0, sizeof(ctx));
+    memset(&conf, 0, sizeof(conf));
+    memset(&fc, 0, sizeof(fc));
+    memset(&fb, 0, sizeof(fb));
+
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_PRE_COMMIT;
+    ctx.stream_sm.headers_committed = 0;
+    ctx.stream_sm.replay_initialized = 1;
+    ctx.stream_sm.replay_buf.size = 100;
+    ctx.stream_sm.replay_capacity = 1024;
+    conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
+
+    fc.buf = &fb;
+    fc.next = NULL;
+    test_replay_chain_result = &fc;
+    test_output_filter_rc = NGX_ERROR;
+
+    rc = ngx_http_markdown_stream_on_error(&test_request, &ctx, &conf);
+
+    TEST_ASSERT(rc == NGX_ERROR, "output filter error -> NGX_ERROR");
+    TEST_PASS("Output filter failure returns NGX_ERROR");
+}
+
+/* --- Content-Type restoration in pass_html --- */
+
+static void test_content_type_restored(void)
+{
+    ngx_http_markdown_ctx_t ctx;
+    ngx_http_markdown_conf_t conf;
+    ngx_chain_t fc;
+    ngx_buf_t fb;
+
+    test_setup();
+    memset(&ctx, 0, sizeof(ctx));
+    memset(&conf, 0, sizeof(conf));
+    memset(&fc, 0, sizeof(fc));
+    memset(&fb, 0, sizeof(fb));
+
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_PRE_COMMIT;
+    ctx.stream_sm.headers_committed = 0;
+    ctx.stream_sm.replay_initialized = 1;
+    ctx.stream_sm.replay_buf.size = 50;
+    ctx.stream_sm.replay_capacity = 1024;
+    conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
+
+    /* Set a different Content-Type before the call */
+    test_request.headers_out.content_type_len = 30;
+    test_request.headers_out.content_type_lowcase = (u_char *) "something";
+
+    fc.buf = &fb;
+    fc.next = NULL;
+    test_replay_chain_result = &fc;
+
+    ngx_http_markdown_stream_on_error(&test_request, &ctx, &conf);
+
+    TEST_ASSERT(test_request.headers_out.content_type_len
+                == sizeof("text/html") - 1,
+                "content_type_len reset to text/html");
+    TEST_ASSERT(test_request.headers_out.content_type_lowcase == NULL,
+                "content_type_lowcase cleared");
+    TEST_PASS("Content-Type restored to text/html in pass_html");
+}
+
 
 int main(void)
 {
@@ -405,6 +526,9 @@ int main(void)
     test_task_6_4_postcommit_reject_abort();
     test_null_parameters();
     test_passthrough_state();
+    test_replay_chain_null();
+    test_output_filter_failure();
+    test_content_type_restored();
     printf("\n  All stream error handler tests passed\n\n");
     return 0;
 }

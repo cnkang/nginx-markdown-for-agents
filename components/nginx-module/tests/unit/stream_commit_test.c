@@ -334,6 +334,84 @@ static void test_commit_from_replay_unavailable(void)
     TEST_PASS("Commit from PRE_COMMIT_REPLAY_UNAVAILABLE");
 }
 
+/* --- Vary header failure aborts commit --- */
+
+static void test_commit_vary_failure_aborts(void)
+{
+    ngx_http_markdown_ctx_t ctx;
+    ngx_int_t rc;
+
+    test_setup();
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_PRE_COMMIT;
+    ctx.stream_sm.headers_committed = 0;
+
+    /* Make vary accept fail */
+    test_vary_accept_rc = NGX_ERROR;
+
+    rc = ngx_http_markdown_stream_commit_headers(&test_request, &ctx);
+
+    TEST_ASSERT(rc == NGX_ERROR,
+                "commit fails when vary fails");
+    TEST_ASSERT(ctx.stream_sm.headers_committed == 0,
+                "headers_committed stays 0 on failure");
+    TEST_ASSERT(ctx.stream_sm.state == NGX_HTTP_MD_STATE_PRE_COMMIT,
+                "state stays PRE_COMMIT on failure");
+    TEST_ASSERT(test_set_etag_called == 0,
+                "ETag mutation NOT executed after vary failure");
+    TEST_PASS("Commit atomicity: vary failure aborts before ETag");
+}
+
+/* --- ETag removal failure aborts commit --- */
+
+static void test_commit_etag_failure_aborts(void)
+{
+    ngx_http_markdown_ctx_t ctx;
+    ngx_int_t rc;
+
+    test_setup();
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_PRE_COMMIT;
+    ctx.stream_sm.headers_committed = 0;
+
+    /* Make etag removal fail */
+    test_set_etag_rc = NGX_ERROR;
+
+    rc = ngx_http_markdown_stream_commit_headers(&test_request, &ctx);
+
+    TEST_ASSERT(rc == NGX_ERROR,
+                "commit fails when etag fails");
+    TEST_ASSERT(ctx.stream_sm.headers_committed == 0,
+                "headers_committed stays 0 on failure");
+    TEST_ASSERT(ctx.stream_sm.state == NGX_HTTP_MD_STATE_PRE_COMMIT,
+                "state stays PRE_COMMIT on failure");
+    TEST_PASS("Commit atomicity: etag failure aborts commit");
+}
+
+/* --- Content-Length absent (no header entry) --- */
+
+static void test_commit_content_length_absent(void)
+{
+    ngx_http_markdown_ctx_t ctx;
+
+    test_setup();
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_PRE_COMMIT;
+    ctx.stream_sm.headers_committed = 0;
+
+    /* Remove the content_length header entry */
+    test_request.headers_out.content_length = NULL;
+    test_request.headers_out.content_length_n = -1;
+
+    ngx_http_markdown_stream_commit_headers(&test_request, &ctx);
+
+    TEST_ASSERT(test_request.headers_out.content_length_n == -1,
+                "content_length_n stays -1");
+    TEST_ASSERT(test_request.headers_out.content_length == NULL,
+                "content_length stays NULL");
+    TEST_PASS("Commit handles absent Content-Length header");
+}
+
 
 int main(void)
 {
@@ -346,6 +424,9 @@ int main(void)
     test_content_type_set();
     test_content_length_cleared();
     test_commit_from_replay_unavailable();
+    test_commit_vary_failure_aborts();
+    test_commit_etag_failure_aborts();
+    test_commit_content_length_absent();
 
     printf("\n  All stream commit tests passed\n\n");
     return 0;
