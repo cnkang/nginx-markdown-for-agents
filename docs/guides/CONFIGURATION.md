@@ -741,6 +741,199 @@ markdown_streaming_shadow on;
 markdown_streaming_shadow off;
 ```
 
+#### Streaming Candidacy Directives (v0.8.0)
+
+The following directives were introduced in v0.8.0 to give operators fine-grained
+control over which responses enter the streaming conversion path and how the
+streaming engine batches output. They complement `markdown_streaming_engine` and
+`markdown_streaming_budget` defined above.
+
+##### markdown_stream_threshold
+
+**Syntax:** `markdown_stream_threshold <size>;`
+**Default:** `1m`
+**Context:** http, server, location
+
+Minimum response size for streaming candidacy. Only responses whose body size
+meets or exceeds this threshold are considered for streaming conversion. Responses
+below the threshold always use the full-buffer path.
+
+The value must be greater than zero; `0` is rejected by `nginx -t`.
+
+**Valid Units:** `k` (kilobytes), `m` (megabytes)
+
+**Example:**
+```nginx
+# Default: 1 megabyte threshold
+markdown_stream_threshold 1m;
+
+# Lower threshold for faster streaming engagement
+markdown_stream_threshold 512k;
+
+# Higher threshold — only very large responses stream
+markdown_stream_threshold 5m;
+```
+
+##### markdown_stream_precommit_buffer
+
+**Syntax:** `markdown_stream_precommit_buffer <size>;`
+**Default:** `256k`
+**Context:** http, server, location
+
+Size of the pre-commit replay buffer. During the streaming pre-commit phase, the
+module buffers converted output up to this size. If an error occurs before the
+commit boundary is crossed, the buffered content is discarded and the original
+HTML is replayed to the client (fail-open behavior controlled by
+`markdown_streaming_on_error`).
+
+Setting this to `0` disables the pre-commit HTML fallback capability — errors
+during the pre-commit phase immediately trigger the configured error policy
+without replay.
+
+**Valid Units:** `k` (kilobytes), `m` (megabytes)
+
+**Example:**
+```nginx
+# Default: 256 KB replay buffer
+markdown_stream_precommit_buffer 256k;
+
+# Larger buffer for more replay safety margin
+markdown_stream_precommit_buffer 512k;
+
+# Disable pre-commit replay (zero allowed)
+markdown_stream_precommit_buffer 0;
+```
+
+##### markdown_stream_flush_min
+
+**Syntax:** `markdown_stream_flush_min <size>;`
+**Default:** `16k`
+**Context:** http, server, location
+
+Minimum Markdown output batch size before the streaming engine flushes data
+downstream. The engine accumulates converted output until at least this many
+bytes are ready, then flushes the batch. This reduces per-byte overhead and
+backpressure amplification from many small writes.
+
+The value must be greater than zero; `0` is rejected by `nginx -t` to prevent
+pathological per-byte flushing.
+
+**Valid Units:** `k` (kilobytes), `m` (megabytes)
+
+**Example:**
+```nginx
+# Default: 16 KB flush minimum
+markdown_stream_flush_min 16k;
+
+# Smaller batches for lower latency
+markdown_stream_flush_min 4k;
+
+# Larger batches for higher throughput
+markdown_stream_flush_min 64k;
+```
+
+##### markdown_stream_excluded_types
+
+**Syntax:** `markdown_stream_excluded_types <type> [<type> ...];`
+**Default:** none (only built-in hard exclusions apply)
+**Context:** http, server, location
+
+Space-separated list of MIME types to exclude from streaming conversion. These
+types are added to the built-in hard exclusions and never enter the streaming
+path, regardless of `markdown_streaming_engine` setting.
+
+User-configured exclusions are **additive** to the built-in hard exclusions:
+
+- `text/event-stream`
+- `application/x-ndjson`
+- `application/stream+json`
+
+The built-in hard exclusions cannot be removed by user configuration. Matching
+is case-insensitive and ignores Content-Type parameters (e.g.,
+`text/event-stream; charset=utf-8` remains excluded).
+
+**Example:**
+```nginx
+# Exclude additional types from streaming
+markdown_stream_excluded_types text/csv application/xml;
+
+# Multiple custom exclusions
+markdown_stream_excluded_types text/csv application/xml application/rss+xml;
+```
+
+##### Configuration Examples (v0.8.0 Streaming)
+
+**Basic streaming enablement:**
+```nginx
+http {
+    markdown_filter on;
+    markdown_streaming_engine on;
+    markdown_stream_threshold 1m;
+
+    server {
+        listen 80;
+        server_name docs.example.com;
+
+        location / {
+            proxy_pass http://backend;
+        }
+    }
+}
+```
+
+**Threshold tuning for large responses:**
+```nginx
+location /large-docs {
+    # Only stream responses >= 2 MB
+    markdown_streaming_engine auto;
+    markdown_stream_threshold 2m;
+
+    # Larger pre-commit buffer for complex pages
+    markdown_stream_precommit_buffer 512k;
+
+    # Bigger flush batches for throughput
+    markdown_stream_flush_min 32k;
+
+    proxy_pass http://backend;
+}
+```
+
+**Adding custom excluded types:**
+```nginx
+location /api {
+    markdown_streaming_engine auto;
+
+    # Exclude CSV and XML feeds from streaming
+    markdown_stream_excluded_types text/csv application/atom+xml;
+
+    proxy_pass http://backend;
+}
+```
+
+**Disabling streaming for a specific location:**
+```nginx
+location /legacy {
+    # Force full-buffer path regardless of response size
+    markdown_streaming_engine off;
+    proxy_pass http://backend;
+}
+```
+
+##### Reserved Directive: `markdown_stream_flush_interval`
+
+> **Status:** Reserved for future 0.8.x releases. NOT accepted in the current
+> version.
+
+The `markdown_stream_flush_interval` directive is defined in RFC 0008 for
+time-based flush control but is **not implemented** in v0.8.0. It is not
+registered in the module command table.
+
+- Using `markdown_stream_flush_interval` in configuration causes `nginx -t` to
+  fail with `unknown directive "markdown_stream_flush_interval"`.
+- Do not include this directive in configuration files for v0.8.0 deployments.
+- A future 0.8.x release will register this directive when time-based flush
+  semantics are finalized.
+
 ---
 
 ### Dynamic Configuration (0.6.1+)

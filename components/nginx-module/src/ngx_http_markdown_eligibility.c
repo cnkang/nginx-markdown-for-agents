@@ -340,6 +340,111 @@ ngx_http_markdown_check_eligibility(const ngx_http_request_t *r,
 }
 
 /*
+ * Check whether a content type is excluded from streaming conversion.
+ *
+ * Returns the union of built-in hard exclusions (text/event-stream,
+ * application/x-ndjson, application/stream+json) and the user-configured
+ * conf->stream.excluded_types array.
+ *
+ * Matching is case-insensitive and ignores Content-Type parameters
+ * (anything after the first ';').  NULL or empty content_type is
+ * treated as not excluded.
+ *
+ * Requirements: Spec 36 Requirement 5 AC 2, AC 3, AC 4
+ *
+ * Parameters:
+ *   content_type - Content-Type string to check (may be NULL)
+ *   conf         - Module location configuration
+ *
+ * Returns:
+ *   1 if the content type is excluded from streaming
+ *   0 if the content type is not excluded
+ */
+ngx_int_t
+ngx_http_markdown_stream_type_excluded(const ngx_str_t *content_type,
+    const ngx_http_markdown_conf_t *conf)
+{
+    static u_char  text_event_stream[] = "text/event-stream";
+    static u_char  application_x_ndjson[] = "application/x-ndjson";
+    static u_char  application_stream_json[] = "application/stream+json";
+
+    size_t               type_len;
+    ngx_uint_t           i;
+    const ngx_str_t     *entry;
+    u_char              *p;
+
+    /* NULL or empty content type is not excluded */
+    if (content_type == NULL || content_type->len == 0
+        || content_type->data == NULL)
+    {
+        return 0;
+    }
+
+    /*
+     * Normalize: determine the effective type length by stripping
+     * Content-Type parameters (everything after ';').
+     */
+    type_len = content_type->len;
+    p = ngx_strlchr(content_type->data,
+                    content_type->data + content_type->len, ';');
+    if (p != NULL) {
+        type_len = (size_t) (p - content_type->data);
+    }
+
+    /* Strip trailing whitespace from the type portion */
+    while (type_len > 0 && content_type->data[type_len - 1] == ' ') {
+        type_len--;
+    }
+
+    if (type_len == 0) {
+        return 0;
+    }
+
+    /* Check built-in hard exclusions (cannot be removed by user config) */
+
+    /* text/event-stream (17 chars) */
+    if (type_len == 17
+        && ngx_strncasecmp(content_type->data, text_event_stream, 17) == 0)
+    {
+        return 1;
+    }
+
+    /* application/x-ndjson (20 chars) */
+    if (type_len == 20
+        && ngx_strncasecmp(content_type->data,
+                           application_x_ndjson, 20) == 0)
+    {
+        return 1;
+    }
+
+    /* application/stream+json (23 chars) */
+    if (type_len == 23
+        && ngx_strncasecmp(content_type->data,
+                           application_stream_json, 23) == 0)
+    {
+        return 1;
+    }
+
+    /* Check user-configured exclusion array */
+    if (conf != NULL && conf->stream.excluded_types != NULL) {
+        entry = conf->stream.excluded_types->elts;
+
+        for (i = 0; i < conf->stream.excluded_types->nelts; i++) {
+            if (type_len == entry[i].len
+                && ngx_strncasecmp(content_type->data,
+                                   entry[i].data,
+                                   entry[i].len) == 0)
+            {
+                return 1;
+            }
+        }
+    }
+
+    return 0;
+}
+
+
+/*
  * Get human-readable string for eligibility result
  *
  * Useful for logging and debugging.
