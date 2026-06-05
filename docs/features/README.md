@@ -23,6 +23,8 @@ If you need rollout steps, operator checklists, or directive syntax, go back to:
 ### Input handling and safety
 
 - [AUTOMATIC_DECOMPRESSION.md](AUTOMATIC_DECOMPRESSION.md)
+- [DECOMPRESSION.md](DECOMPRESSION.md)
+- [streaming-compression-strategy.md](streaming-compression-strategy.md)
 - [charset-detection.md](charset-detection.md)
 - [security.md](security.md)
 

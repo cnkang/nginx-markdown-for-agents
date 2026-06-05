@@ -301,6 +301,9 @@ fn markdown_streaming_new_impl(
     if !decoded.timeout.is_zero() {
         converter.set_timeout(decoded.timeout);
     }
+    if decoded.parser_memory_budget > 0 {
+        converter.set_parser_budget(decoded.parser_memory_budget);
+    }
 
     Ok(Box::into_raw(Box::new(StreamingConverterHandle {
         inner: converter,

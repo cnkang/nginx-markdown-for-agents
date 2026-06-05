@@ -1039,6 +1039,15 @@ ngx_http_markdown_streaming_record_postcommit_failure(
     if (!ctx->streaming.completion.failure_recorded) {
         NGX_HTTP_MARKDOWN_METRIC_INC(streaming.postcommit_error_total);
         NGX_HTTP_MARKDOWN_METRIC_INC(streaming.failed_total);
+
+        /*
+         * Increment global conversions_failed so the aggregate
+         * attempted >= succeeded + failed invariant holds.
+         * The resource-limit sub-classification is handled by
+         * handle_postcommit_error() before this call.
+         */
+        NGX_HTTP_MARKDOWN_METRIC_INC(conversions_failed);
+
         ctx->streaming.completion.failure_recorded = 1;
     }
 
@@ -1426,8 +1435,11 @@ ngx_http_markdown_streaming_handle_postcommit_error(
     {
         NGX_HTTP_MARKDOWN_METRIC_INC(
             streaming.budget_exceeded_total);
+        NGX_HTTP_MARKDOWN_METRIC_INC(failures_resource_limit);
         ngx_http_markdown_log_decision(r, conf, ctx->effective_conf,
             ngx_http_markdown_reason_streaming_budget_exceeded());
+    } else if (!ctx->streaming.completion.failure_recorded) {
+        NGX_HTTP_MARKDOWN_METRIC_INC(failures_conversion);
     }
 
     ngx_http_markdown_streaming_record_postcommit_failure(
@@ -1530,6 +1542,30 @@ ngx_http_markdown_streaming_precommit_error(
     }
 
     NGX_HTTP_MARKDOWN_METRIC_INC(streaming.failed_total);
+
+    /*
+     * Increment global conversions_failed to maintain consistency
+     * with the full-buffer path.  The streaming path increments
+     * conversions_attempted at init; every terminal failure must
+     * have a matching conversions_failed increment so that
+     * attempted >= succeeded + failed holds.
+     *
+     * For resource-limit errors, also increment
+     * failures_resource_limit for the global failure-reason
+     * breakdown (spec-41 eligibility audit §3.1).
+     */
+    NGX_HTTP_MARKDOWN_METRIC_INC(conversions_failed);
+
+    if (error_code == ERROR_MEMORY_LIMIT
+        || error_code == ERROR_BUDGET_EXCEEDED
+        || error_code == ERROR_DECOMPRESSION_BUDGET_EXCEEDED
+        || error_code == ERROR_PARSE_TIMEOUT
+        || error_code == ERROR_PARSE_BUDGET_EXCEEDED)
+    {
+        NGX_HTTP_MARKDOWN_METRIC_INC(failures_resource_limit);
+    } else {
+        NGX_HTTP_MARKDOWN_METRIC_INC(failures_conversion);
+    }
 
     if (conf->streaming.on_error
         == NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_REJECT)
@@ -1811,6 +1847,40 @@ ngx_http_markdown_streaming_track_feed_budget(
             r, ctx, conf, ERROR_MEMORY_LIMIT);
     }
 
+    /*
+     * Parser budget enforcement (Requirement 1 AC 1).
+     *
+     * Use cumulative input bytes as a proxy for parser memory
+     * pressure — matching the full-buffer path which rejects when
+     * input_size > parser_memory_budget (html5ever does not expose
+     * internal memory tracking).
+     *
+     * parser_budget == 0 means unlimited (no enforcement).
+     */
+    if (conf->decompress.parser_budget > 0
+        && ctx->streaming.total_input_bytes
+           > conf->decompress.parser_budget)
+    {
+        ngx_log_error(NGX_LOG_WARN,
+            r->connection->log, 0,
+            "markdown: parser budget "
+            "exceeded, total=%uz, budget=%uz",
+            ctx->streaming.total_input_bytes,
+            conf->decompress.parser_budget);
+
+        if (ctx->streaming.commit_state
+            == NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST)
+        {
+            return
+                ngx_http_markdown_streaming_handle_postcommit_error(
+                    r, ctx, conf,
+                    ERROR_PARSE_BUDGET_EXCEEDED);
+        }
+
+        return ngx_http_markdown_streaming_precommit_error(
+            r, ctx, conf, ERROR_PARSE_BUDGET_EXCEEDED);
+    }
+
     if (ctx->streaming.commit_state
         == NGX_HTTP_MARKDOWN_STREAMING_COMMIT_PRE
         && ctx->streaming.prebuffer_initialized)
@@ -2015,6 +2085,19 @@ ngx_http_markdown_streaming_finalize_decomp(
 
         out_data = NULL;
         out_len = 0;
+
+        /*
+         * Budget check: tail decompression bytes count toward
+         * total_input_bytes the same as normal feed data.
+         * Without this, a crafted compressed stream could hide
+         * excess data in the decompression tail and bypass the
+         * max_size limit (Property 2: Budget Monotonicity).
+         */
+        rc = ngx_http_markdown_streaming_track_feed_budget(
+            r, ctx, conf, decomp_data, decomp_len);
+        if (rc != NGX_OK) {
+            return rc;
+        }
 
         /*
          * Record feed_start_ms if this is the first feed

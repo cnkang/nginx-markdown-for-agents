@@ -121,6 +121,8 @@ ngx_http_markdown_metrics_write_prometheus(
         "{reason=\"SKIPPED_NO_ACCEPT\"} %uA\n"
         "nginx_markdown_skips_total"
         "{reason=\"SKIPPED_CONDITIONAL\"} %uA\n"
+        "nginx_markdown_skips_total"
+        "{reason=\"SKIP_COMPRESSION_PASSTHROUGH\"} %uA\n"
         "\n",
         snapshot->skips.method,
         snapshot->skips.status,
@@ -132,7 +134,8 @@ ngx_http_markdown_metrics_write_prometheus(
         snapshot->skips.accept,
         snapshot->skips.config,
         snapshot->skips.no_accept,
-        snapshot->skips.conditional);
+        snapshot->skips.conditional,
+        snapshot->skips.compression_passthrough);
 
     /* failures_total{stage=...} */
     p = ngx_slprintf(p, end,

@@ -622,18 +622,45 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
     r->ctx[ngx_http_markdown_filter_module.ctx_index] = ctx;
 
     /*
-     * Detect compression type if auto_decompress is enabled (Task 2.1, 4.2)
-     * 
-     * Fast path: If compression_type == NONE, decompression_needed stays 0
-     * Slow path: If compression detected, decompression_needed is set to 1
-     * Special case: If compression_type == UNKNOWN, trigger fail-open immediately
-     * 
+     * Detect Content-Encoding ALWAYS, before streaming candidate
+     * evaluation (Spec 41, Requirement 3 AC 1).
+     *
+     * Compressed responses MUST NOT enter the streaming parser
+     * directly.  Detection runs unconditionally so that:
+     *
+     *  - auto_decompress ON + known format: decompress via
+     *    full-buffer or streaming decompression path.
+     *  - auto_decompress ON + unknown format: passthrough or
+     *    reject per on_error policy.
+     *  - auto_decompress OFF + any encoding present: passthrough
+     *    (compressed data must not enter parser).
+     *
      * Requirements: 1.1, 1.6, 4.2, 8.1, 10.3, 11.1, 11.5
+     * Spec 41 Req 3 AC 1, AC 4, AC 5
      */
-    if (conf->decompress.auto_decompress) {
-        ctx->decompression.type = ngx_http_markdown_detect_compression(r);
-        
-        if (ctx->decompression.type == NGX_HTTP_MARKDOWN_COMPRESSION_UNKNOWN) {
+    ctx->decompression.type = ngx_http_markdown_detect_compression(r);
+
+    if (ctx->decompression.type != NGX_HTTP_MARKDOWN_COMPRESSION_NONE) {
+        if (!conf->decompress.auto_decompress) {
+            /*
+             * auto_decompress is OFF but Content-Encoding is present.
+             * Cannot safely parse compressed content — passthrough.
+             * (Spec 41 Requirement 3 AC 5)
+             */
+            ngx_log_error(NGX_LOG_INFO, r->connection->log, 0,
+                         "markdown: Content-Encoding present "
+                         "(type=%d) but auto_decompress is off, "
+                         "passing through original content",
+                         ctx->decompression.type);
+            ctx->eligible = 0;
+            ctx->headers_forwarded = 1;
+            NGX_HTTP_MARKDOWN_METRIC_INC(
+                skips.compression_passthrough);
+            return ngx_http_next_header_filter(r);
+
+        } else if (ctx->decompression.type
+                   == NGX_HTTP_MARKDOWN_COMPRESSION_UNKNOWN)
+        {
             /*
              * Unsupported compression format detected (Task 4.2)
              *
@@ -650,12 +677,13 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
             return ngx_http_markdown_handle_unsupported_compression(
                 r, ctx, conf);
 
-        } else if (ctx->decompression.type != NGX_HTTP_MARKDOWN_COMPRESSION_NONE) {
+        } else {
             /* Supported compression format - set flag for decompression */
             ctx->decompression.needed = 1;
-            
+
             ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                          "markdown: decompression detected compression type: %d",
+                          "markdown: decompression detected "
+                          "compression type: %d",
                           ctx->decompression.type);
         }
     }
@@ -690,6 +718,39 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
     ctx->processing_path =
         ngx_http_markdown_select_processing_path(
             r, conf, ctx->effective_conf);
+
+    /*
+     * Compression guard (Requirement 3 AC 1, spec 41):
+     *
+     * Compressed responses MUST NOT enter the streaming parser
+     * directly.  When Content-Encoding is detected, override the
+     * engine selector result and force full-buffer path.  The
+     * full-buffer path has existing safe decompression support
+     * with budget enforcement (markdown_decompress_max_size).
+     *
+     * This check runs after select_processing_path() so that
+     * compression routing is enforced regardless of engine mode
+     * (on, auto, or variable-evaluated).
+     */
+    if (ctx->decompression.needed
+        && ctx->processing_path
+           == NGX_HTTP_MARKDOWN_PATH_STREAMING)
+    {
+        ctx->processing_path =
+            NGX_HTTP_MARKDOWN_PATH_FULLBUFFER;
+
+        ngx_log_debug0(NGX_LOG_DEBUG_HTTP,
+            r->connection->log, 0,
+            "markdown: streaming path overridden: "
+            "compressed response routed to "
+            "full-buffer for safe decompression");
+
+        ngx_http_markdown_log_decision(
+            r, conf, ctx->effective_conf,
+            ngx_http_markdown_reason_streaming_skip_compressed());
+
+        goto path_selected;
+    }
 
     if (ctx->processing_path
         == NGX_HTTP_MARKDOWN_PATH_STREAMING)
