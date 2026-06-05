@@ -372,8 +372,9 @@ impl StreamingConverter {
         // the configured parser_budget. Uses input size as a proxy for
         // parser memory pressure (matching the full-buffer path).
         if self.parser_budget > 0 {
-            self.cumulative_input_bytes =
-                self.cumulative_input_bytes.saturating_add(data.len() as u64);
+            self.cumulative_input_bytes = self
+                .cumulative_input_bytes
+                .saturating_add(data.len() as u64);
             if self.cumulative_input_bytes > self.parser_budget {
                 let err = ConversionError::ParseBudgetExceeded {
                     used: self.cumulative_input_bytes as usize,
@@ -2917,9 +2918,16 @@ mod tests {
         // Feed more than 50 bytes total
         let chunk = b"<p>Hello world, this is a paragraph that exceeds the parser budget.</p>";
         let result = conv.feed_chunk(chunk);
-        assert!(result.is_err(), "feed_chunk should fail when parser budget exceeded");
+        assert!(
+            result.is_err(),
+            "feed_chunk should fail when parser budget exceeded"
+        );
         let err = result.unwrap_err();
-        assert_eq!(err.code(), 11, "Error code should be ERROR_PARSE_BUDGET_EXCEEDED (11)");
+        assert_eq!(
+            err.code(),
+            11,
+            "Error code should be ERROR_PARSE_BUDGET_EXCEEDED (11)"
+        );
     }
 
     /// Parser budget enforcement: when parser_budget is 0, enforcement is
@@ -2947,9 +2955,13 @@ mod tests {
         assert!(r1.is_ok(), "First chunk within budget should succeed");
 
         // Second chunk: pushes total over 100 bytes (still pre-commit)
-        let chunk2 = b"<body><p>Second chunk of data that exceeds the cumulative budget limit here.</p>";
+        let chunk2 =
+            b"<body><p>Second chunk of data that exceeds the cumulative budget limit here.</p>";
         let r2 = conv.feed_chunk(chunk2);
-        assert!(r2.is_err(), "Second chunk should exceed cumulative parser budget");
+        assert!(
+            r2.is_err(),
+            "Second chunk should exceed cumulative parser budget"
+        );
         let err = r2.unwrap_err();
         // In pre-commit state, the raw ParseBudgetExceeded error is returned
         assert_eq!(err.code(), 11);
@@ -2973,9 +2985,16 @@ mod tests {
         chunk2.extend_from_slice(&chunk2_data);
         chunk2.extend_from_slice(b"</p>");
         let r2 = conv.feed_chunk(&chunk2);
-        assert!(r2.is_err(), "Should fail after exceeding parser budget post-commit");
+        assert!(
+            r2.is_err(),
+            "Should fail after exceeding parser budget post-commit"
+        );
         let err = r2.unwrap_err();
         // Post-commit errors are wrapped as ERROR_POST_COMMIT (8)
-        assert_eq!(err.code(), 8, "Post-commit parser budget error should be code 8");
+        assert_eq!(
+            err.code(),
+            8,
+            "Post-commit parser budget error should be code 8"
+        );
     }
 }

@@ -586,18 +586,9 @@ fn multiple_xss_vectors_chunked() {
     )
     .expect("conversion should succeed");
 
-    assert!(
-        !result.markdown.contains("alert"),
-        "script payload leaked"
-    );
-    assert!(
-        !result.markdown.contains("onclick"),
-        "event handler leaked"
-    );
-    assert!(
-        !result.markdown.contains("javascript:"),
-        "js URL leaked"
-    );
+    assert!(!result.markdown.contains("alert"), "script payload leaked");
+    assert!(!result.markdown.contains("onclick"), "event handler leaked");
+    assert!(!result.markdown.contains("javascript:"), "js URL leaked");
     assert!(!result.markdown.contains("data:"), "data: URL leaked");
     assert!(
         !result.markdown.to_lowercase().contains("<style"),
@@ -672,7 +663,9 @@ fn empty_input_handled_gracefully() {
     let mut conv = make_default_converter();
     let output = conv.feed_chunk(b"").expect("empty input should not error");
     assert!(output.markdown.is_empty());
-    let result = conv.finalize().expect("finalize after empty should succeed");
+    let result = conv
+        .finalize()
+        .expect("finalize after empty should succeed");
     /* Empty or minimal output is fine */
     assert!(result.final_markdown.len() < 100);
 }
@@ -686,9 +679,9 @@ fn non_html_input_no_panic() {
     let inputs: &[&[u8]] = &[
         b"This is just plain text with no HTML",
         b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR", /* PNG header */
-        b"%PDF-1.4 \n1 0 obj\n",                  /* PDF header */
-        b"\x00\x00\x00\x1cftypisom",              /* MP4 header */
-        &vec![0xAA; 8192],                         /* Repeated byte pattern */
+        b"%PDF-1.4 \n1 0 obj\n",                /* PDF header */
+        b"\x00\x00\x00\x1cftypisom",            /* MP4 header */
+        &vec![0xAA; 8192],                      /* Repeated byte pattern */
     ];
 
     for input in inputs {
