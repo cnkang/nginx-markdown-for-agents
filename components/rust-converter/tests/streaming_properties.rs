@@ -665,8 +665,7 @@ fn test_cross_boundary_attribute_value_split() {
 /// Validates: Requirements 2.1, 2.2
 #[test]
 fn test_cross_boundary_link_text_split() {
-    let html =
-        b"<html><body><p><a href=\"https://example.com\">Link text</a></p></body></html>";
+    let html = b"<html><body><p><a href=\"https://example.com\">Link text</a></p></body></html>";
     // Split inside the link text "Link text" — between "Lin" and "k text"
     let offset = html.windows(9).position(|w| w == b"Link text").unwrap();
     assert_split_invariant(html, offset + 3); // split: "Lin" | "k text"
@@ -679,10 +678,7 @@ fn test_cross_boundary_link_text_split() {
 fn test_cross_boundary_link_href_split() {
     let html = b"<html><body><p><a href=\"https://example.com\">Link text</a></p></body></html>";
     // Split inside the href URL — between "https://exa" and "mple.com"
-    let offset = html
-        .windows(11)
-        .position(|w| w == b"example.com")
-        .unwrap();
+    let offset = html.windows(11).position(|w| w == b"example.com").unwrap();
     assert_split_invariant(html, offset + 3); // split: "exa" | "mple.com"
 }
 
@@ -690,13 +686,9 @@ fn test_cross_boundary_link_href_split() {
 /// Validates: Requirements 2.1, 2.2
 #[test]
 fn test_cross_boundary_link_between_attr_and_content() {
-    let html =
-        b"<html><body><p><a href=\"https://example.com\">Link text</a></p></body></html>";
+    let html = b"<html><body><p><a href=\"https://example.com\">Link text</a></p></body></html>";
     // Split right after the closing quote of href, before the ">"
-    let offset = html
-        .windows(6)
-        .position(|w| w == b".com\">")
-        .unwrap();
+    let offset = html.windows(6).position(|w| w == b".com\">").unwrap();
     assert_split_invariant(html, offset + 5); // split: `.com"` | `>Link text</a>`
 }
 
@@ -769,12 +761,10 @@ fn test_cross_boundary_text_content_split() {
 /// Validates: Requirements 2.1, 2.2
 #[test]
 fn test_cross_boundary_text_multinode_split() {
-    let html = b"<html><body><p>First sentence. Second sentence.</p><p>Third paragraph.</p></body></html>";
+    let html =
+        b"<html><body><p>First sentence. Second sentence.</p><p>Third paragraph.</p></body></html>";
     // Split inside the first text content
-    let offset = html
-        .windows(8)
-        .position(|w| w == b"sentence")
-        .unwrap();
+    let offset = html.windows(8).position(|w| w == b"sentence").unwrap();
     assert_split_invariant(html, offset + 4); // split inside "sentence"
 }
 
@@ -786,10 +776,7 @@ fn test_cross_boundary_list_item_text_split() {
     let html =
         b"<html><body><ul><li>Item one</li><li>Item two</li><li>Item three</li></ul></body></html>";
     // Split inside "Item one" text — find the 'o' of "one"
-    let offset = html
-        .windows(8)
-        .position(|w| w == b"Item one")
-        .unwrap();
+    let offset = html.windows(8).position(|w| w == b"Item one").unwrap();
     assert_split_invariant(html, offset + 5); // split inside "Item one" → "Item " | "one..."
 }
 
@@ -797,13 +784,9 @@ fn test_cross_boundary_list_item_text_split() {
 /// Validates: Requirements 2.1, 2.2
 #[test]
 fn test_cross_boundary_list_between_items() {
-    let html =
-        b"<html><body><ul><li>First</li><li>Second</li><li>Third</li></ul></body></html>";
+    let html = b"<html><body><ul><li>First</li><li>Second</li><li>Third</li></ul></body></html>";
     // Split between </li> and <li>
-    let offset = html
-        .windows(10)
-        .position(|w| w == b"</li><li>S")
-        .unwrap();
+    let offset = html.windows(10).position(|w| w == b"</li><li>S").unwrap();
     assert_split_invariant(html, offset + 5); // split: "</li>" | "<li>Second..."
 }
 
@@ -811,8 +794,7 @@ fn test_cross_boundary_list_between_items() {
 /// Validates: Requirements 2.1, 2.2
 #[test]
 fn test_cross_boundary_ordered_list_split() {
-    let html =
-        b"<html><body><ol><li>Alpha</li><li>Beta</li><li>Gamma</li></ol></body></html>";
+    let html = b"<html><body><ol><li>Alpha</li><li>Beta</li><li>Gamma</li></ol></body></html>";
     // Split inside the second list item's text "Beta"
     let offset = html.windows(4).position(|w| w == b"Beta").unwrap();
     assert_split_invariant(html, offset + 2); // split inside "Beta" → "Be" | "ta..."
