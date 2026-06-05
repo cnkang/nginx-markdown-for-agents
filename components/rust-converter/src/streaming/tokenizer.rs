@@ -477,6 +477,344 @@ mod tests {
         assert_eq!(err.code(), 99); // InternalError
     }
 
+    // --- Entity recognition tests ---
+
+    /// Named HTML entities (&amp;, &lt;, &gt;, &eacute;) are decoded to
+    /// their Unicode characters in emitted Text events.
+    #[test]
+    fn test_named_entity_decoded() {
+        let mut tok = StreamingTokenizer::new();
+        let events = tok.feed("<p>&amp; &lt; &gt; &eacute;</p>").unwrap();
+        let text: String = events
+            .iter()
+            .filter_map(|e| {
+                if let StreamEvent::Text(t) = e {
+                    Some(t.as_str())
+                } else {
+                    None
+                }
+            })
+            .collect();
+        assert!(text.contains('&'), "Expected decoded '&' in {:?}", text);
+        assert!(text.contains('<'), "Expected decoded '<' in {:?}", text);
+        assert!(text.contains('>'), "Expected decoded '>' in {:?}", text);
+        assert!(text.contains('é'), "Expected decoded 'é' in {:?}", text);
+    }
+
+    /// Decimal numeric entities (&#169;, &#123;) are decoded correctly.
+    #[test]
+    fn test_decimal_numeric_entity_decoded() {
+        let mut tok = StreamingTokenizer::new();
+        let events = tok.feed("<p>&#169; &#123;</p>").unwrap();
+        let text: String = events
+            .iter()
+            .filter_map(|e| {
+                if let StreamEvent::Text(t) = e {
+                    Some(t.as_str())
+                } else {
+                    None
+                }
+            })
+            .collect();
+        // &#169; = © (copyright), &#123; = { (left curly brace)
+        assert!(text.contains('©'), "Expected decoded '©' in {:?}", text);
+        assert!(text.contains('{'), "Expected decoded '{{' in {:?}", text);
+    }
+
+    /// Hex numeric entities (&#x00A9;, &#x1F4A9;) are decoded correctly.
+    #[test]
+    fn test_hex_numeric_entity_decoded() {
+        let mut tok = StreamingTokenizer::new();
+        let events = tok.feed("<p>&#x00A9; &#x1F4A9;</p>").unwrap();
+        let text: String = events
+            .iter()
+            .filter_map(|e| {
+                if let StreamEvent::Text(t) = e {
+                    Some(t.as_str())
+                } else {
+                    None
+                }
+            })
+            .collect();
+        // &#x00A9; = © (copyright), &#x1F4A9; = 💩 (pile of poo)
+        assert!(text.contains('©'), "Expected decoded '©' in {:?}", text);
+        assert!(text.contains('💩'), "Expected decoded '💩' in {:?}", text);
+    }
+
+    /// Named entity split across chunk boundary: "&am" | "p;" is correctly
+    /// merged and decoded to '&'.
+    #[test]
+    fn test_named_entity_split_across_chunks() {
+        let mut tok = StreamingTokenizer::new();
+        let ev1 = tok.feed("<p>A &am").unwrap();
+        let ev2 = tok.feed("p; B</p>").unwrap();
+        let text: String = ev1
+            .iter()
+            .chain(ev2.iter())
+            .filter_map(|e| {
+                if let StreamEvent::Text(t) = e {
+                    Some(t.as_str())
+                } else {
+                    None
+                }
+            })
+            .collect();
+        // Combined text should contain the decoded ampersand
+        assert!(
+            text.contains('&'),
+            "Expected '&' character in combined text: {:?}",
+            text
+        );
+    }
+
+    /// Decimal numeric entity split across chunks: "&#16" | "9;" is
+    /// correctly merged and decoded to '©'.
+    #[test]
+    fn test_decimal_entity_split_across_chunks() {
+        let mut tok = StreamingTokenizer::new();
+        let ev1 = tok.feed("<p>Copyright &#16").unwrap();
+        let ev2 = tok.feed("9; symbol</p>").unwrap();
+        let text: String = ev1
+            .iter()
+            .chain(ev2.iter())
+            .filter_map(|e| {
+                if let StreamEvent::Text(t) = e {
+                    Some(t.as_str())
+                } else {
+                    None
+                }
+            })
+            .collect();
+        assert!(
+            text.contains('©'),
+            "Expected decoded '©' from split numeric entity, got: {:?}",
+            text
+        );
+    }
+
+    /// Hex numeric entity split across chunks: "&#x1F4" | "A9;" is
+    /// correctly merged and decoded to '💩'.
+    #[test]
+    fn test_hex_entity_split_across_chunks() {
+        let mut tok = StreamingTokenizer::new();
+        let ev1 = tok.feed("<p>Emoji: &#x1F4").unwrap();
+        let ev2 = tok.feed("A9;</p>").unwrap();
+        let text: String = ev1
+            .iter()
+            .chain(ev2.iter())
+            .filter_map(|e| {
+                if let StreamEvent::Text(t) = e {
+                    Some(t.as_str())
+                } else {
+                    None
+                }
+            })
+            .collect();
+        assert!(
+            text.contains('💩'),
+            "Expected decoded '💩' from split hex entity, got: {:?}",
+            text
+        );
+    }
+
+    // --- Attribute cross-chunk tests ---
+
+    /// Attribute name split across chunks: `<a hr` | `ef="url">` still
+    /// produces the correct href attribute.
+    #[test]
+    fn test_attribute_name_split_across_chunks() {
+        let mut tok = StreamingTokenizer::new();
+        let ev1 = tok.feed(r#"<a hr"#).unwrap();
+        let ev2 = tok.feed(r#"ef="https://example.com">link</a>"#).unwrap();
+        let all_events: Vec<_> = ev1.into_iter().chain(ev2).collect();
+        let link = all_events
+            .iter()
+            .find(|e| matches!(e, StreamEvent::StartTag { name, .. } if name == "a"));
+        if let Some(StreamEvent::StartTag { attrs, .. }) = link {
+            let href = attrs.iter().find(|(k, _)| k == "href");
+            assert!(href.is_some(), "Expected href attribute in {:?}", attrs);
+            assert_eq!(href.unwrap().1, "https://example.com");
+        } else {
+            panic!("Expected <a> start tag in {:?}", all_events);
+        }
+    }
+
+    /// Attribute value split across chunks: `<a href="https://exa` | `mple.com">`
+    /// produces the correct full URL.
+    #[test]
+    fn test_attribute_value_split_across_chunks() {
+        let mut tok = StreamingTokenizer::new();
+        let ev1 = tok.feed(r#"<a href="https://exa"#).unwrap();
+        let ev2 = tok.feed(r#"mple.com">link</a>"#).unwrap();
+        let all_events: Vec<_> = ev1.into_iter().chain(ev2).collect();
+        let link = all_events
+            .iter()
+            .find(|e| matches!(e, StreamEvent::StartTag { name, .. } if name == "a"));
+        if let Some(StreamEvent::StartTag { attrs, .. }) = link {
+            let href = attrs.iter().find(|(k, _)| k == "href");
+            assert!(href.is_some(), "Expected href attribute in {:?}", attrs);
+            assert_eq!(href.unwrap().1, "https://example.com");
+        } else {
+            panic!("Expected <a> start tag in {:?}", all_events);
+        }
+    }
+
+    /// Multiple attributes preserved when tag is split across chunks.
+    #[test]
+    fn test_multiple_attributes_split_across_chunks() {
+        let mut tok = StreamingTokenizer::new();
+        let ev1 = tok.feed(r#"<a href="https://example.com" cl"#).unwrap();
+        let ev2 = tok.feed(r#"ass="external" id="link1">text</a>"#).unwrap();
+        let all_events: Vec<_> = ev1.into_iter().chain(ev2).collect();
+        let link = all_events
+            .iter()
+            .find(|e| matches!(e, StreamEvent::StartTag { name, .. } if name == "a"));
+        if let Some(StreamEvent::StartTag { attrs, .. }) = link {
+            let href = attrs.iter().find(|(k, _)| k == "href");
+            let class = attrs.iter().find(|(k, _)| k == "class");
+            let id = attrs.iter().find(|(k, _)| k == "id");
+            assert_eq!(
+                href.map(|(_, v)| v.as_str()),
+                Some("https://example.com"),
+                "href mismatch"
+            );
+            assert_eq!(
+                class.map(|(_, v)| v.as_str()),
+                Some("external"),
+                "class mismatch"
+            );
+            assert_eq!(id.map(|(_, v)| v.as_str()), Some("link1"), "id mismatch");
+        } else {
+            panic!("Expected <a> start tag in {:?}", all_events);
+        }
+    }
+
+    // --- Tag recognition cross-chunk tests ---
+
+    /// Tag name split across chunks: `<str` | `ong>` is recognized as
+    /// a <strong> start tag.
+    #[test]
+    fn test_tag_name_split_across_chunks() {
+        let mut tok = StreamingTokenizer::new();
+        let ev1 = tok.feed("<str").unwrap();
+        let ev2 = tok.feed("ong>bold</strong>").unwrap();
+        let all_events: Vec<_> = ev1.into_iter().chain(ev2).collect();
+        let has_strong_start = all_events
+            .iter()
+            .any(|e| matches!(e, StreamEvent::StartTag { name, .. } if name == "strong"));
+        let has_strong_end = all_events
+            .iter()
+            .any(|e| matches!(e, StreamEvent::EndTag { name } if name == "strong"));
+        assert!(
+            has_strong_start,
+            "Expected <strong> start tag in {:?}",
+            all_events
+        );
+        assert!(
+            has_strong_end,
+            "Expected </strong> end tag in {:?}",
+            all_events
+        );
+    }
+
+    /// Closing tag split across chunks: `</str` | `ong>` is recognized.
+    #[test]
+    fn test_closing_tag_split_across_chunks() {
+        let mut tok = StreamingTokenizer::new();
+        let ev1 = tok.feed("<strong>bold</str").unwrap();
+        let ev2 = tok.feed("ong>").unwrap();
+        let all_events: Vec<_> = ev1.into_iter().chain(ev2).collect();
+        let has_strong_end = all_events
+            .iter()
+            .any(|e| matches!(e, StreamEvent::EndTag { name } if name == "strong"));
+        assert!(
+            has_strong_end,
+            "Expected </strong> end tag in {:?}",
+            all_events
+        );
+    }
+
+    /// Self-closing tag split across chunks: `<br/` | `>` or `<br` | `/>`
+    #[test]
+    fn test_self_closing_split_across_chunks() {
+        let mut tok = StreamingTokenizer::new();
+        let ev1 = tok.feed("<br/").unwrap();
+        let ev2 = tok.feed(">").unwrap();
+        let all_events: Vec<_> = ev1.into_iter().chain(ev2).collect();
+        let has_br = all_events
+            .iter()
+            .any(|e| matches!(e, StreamEvent::StartTag { name, .. } if name == "br"));
+        assert!(has_br, "Expected <br> tag in {:?}", all_events);
+    }
+
+    /// Entity in attribute value is decoded correctly.
+    #[test]
+    fn test_entity_in_attribute_value() {
+        let mut tok = StreamingTokenizer::new();
+        let events = tok.feed(r#"<a href="page?a=1&amp;b=2">link</a>"#).unwrap();
+        let link = events
+            .iter()
+            .find(|e| matches!(e, StreamEvent::StartTag { name, .. } if name == "a"));
+        if let Some(StreamEvent::StartTag { attrs, .. }) = link {
+            let href = attrs.iter().find(|(k, _)| k == "href");
+            assert!(href.is_some(), "Expected href attribute");
+            // html5ever decodes entities in attribute values
+            assert_eq!(href.unwrap().1, "page?a=1&b=2");
+        } else {
+            panic!("Expected <a> start tag in {:?}", events);
+        }
+    }
+
+    // --- Edge case tests ---
+
+    /// Malformed/unclosed entity is passed through without panic.
+    #[test]
+    fn test_malformed_entity_no_panic() {
+        let mut tok = StreamingTokenizer::new();
+        let events = tok.feed("<p>&invalid; &amp &; &#; &#x;</p>").unwrap();
+        // Should not panic; text content may vary based on html5ever's
+        // error recovery, but events should be produced.
+        assert!(
+            !events.is_empty(),
+            "Expected some events for malformed entities"
+        );
+        let _ = tok.finish().unwrap();
+    }
+
+    /// Tag split at the opening angle bracket: everything before `<` is text,
+    /// the tag completes in the next chunk.
+    #[test]
+    fn test_split_at_angle_bracket() {
+        let mut tok = StreamingTokenizer::new();
+        let ev1 = tok.feed("Hello <").unwrap();
+        let ev2 = tok.feed("em>world</em>").unwrap();
+        let all_events: Vec<_> = ev1.into_iter().chain(ev2).collect();
+        let texts: String = all_events
+            .iter()
+            .filter_map(|e| {
+                if let StreamEvent::Text(t) = e {
+                    Some(t.as_str())
+                } else {
+                    None
+                }
+            })
+            .collect();
+        assert!(
+            texts.contains("Hello"),
+            "Expected 'Hello' in text: {:?}",
+            texts
+        );
+        assert!(
+            texts.contains("world"),
+            "Expected 'world' in text: {:?}",
+            texts
+        );
+        let has_em_start = all_events
+            .iter()
+            .any(|e| matches!(e, StreamEvent::StartTag { name, .. } if name == "em"));
+        assert!(has_em_start, "Expected <em> start tag in {:?}", all_events);
+    }
+
     // --- Regression tests ---
 
     /// Regression: after html5ever panics inside feed(), the tokenizer must

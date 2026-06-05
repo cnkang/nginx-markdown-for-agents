@@ -274,6 +274,29 @@ impl StreamingConverter {
         self.deadline = Instant::now().checked_add(timeout);
     }
 
+    /// Set the flush threshold for the emitter.
+    ///
+    /// Controls the minimum number of accumulated Markdown bytes before the
+    /// emitter flushes output at block boundaries. A threshold of 0 (the
+    /// default) means "flush immediately at every block boundary" — lowest
+    /// latency. Larger values batch output to reduce FFI round-trip overhead.
+    ///
+    /// # Arguments
+    ///
+    /// * `threshold` - Minimum pending bytes before flushing. 0 = immediate.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use nginx_markdown_converter::streaming::StreamingConverter;
+    ///
+    /// let mut conv = StreamingConverter::new(Default::default(), Default::default());
+    /// conv.set_flush_threshold(512); // batch until at least 512 bytes accumulated
+    /// ```
+    pub fn set_flush_threshold(&mut self, threshold: usize) {
+        self.emitter.set_flush_threshold(threshold);
+    }
+
     /// Process an incoming chunk of HTML bytes and return any ready Markdown output.
     ///
     /// This incrementally feeds the pipeline (charset detection/transcoding, tokenization,
@@ -509,6 +532,61 @@ impl StreamingConverter {
         })
     }
 
+    /// Attempt a post-commit safe finish: close all open Markdown structures
+    /// without emitting raw HTML.
+    ///
+    /// This method is intended for use after `feed_chunk` returns a
+    /// `PostCommitError`. It attempts to gracefully close all open Markdown
+    /// constructs (headings, paragraphs, lists, code blocks, blockquotes,
+    /// inline formatting) so that the already-emitted output forms valid
+    /// Markdown, even though the conversion could not complete normally.
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(closing_bytes)` — all open structures were successfully closed.
+    ///   The returned bytes are the Markdown closure text (e.g., closing
+    ///   fences, trailing newlines). The caller should append these after
+    ///   the already-committed output.
+    /// - `Err(ConversionError)` — structures could not be safely closed
+    ///   (e.g., emitter budget exceeded during closure). The caller must
+    ///   abort and discard or truncate the partial output.
+    ///
+    /// # Ownership
+    ///
+    /// This method consumes `self`. After calling, the converter is dropped.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// // After feed_chunk returns PostCommitError:
+    /// match converter.safe_finish() {
+    ///     Ok(closing) => { /* append `closing` to committed output */ }
+    ///     Err(_) => { /* abort: discard partial output */ }
+    /// }
+    /// ```
+    pub fn safe_finish(mut self) -> Result<Vec<u8>, ConversionError> {
+        // Use the state machine to identify all unclosed structural contexts,
+        // then ask the emitter to close each one in reverse order (inner-most
+        // first). This mirrors the `finalize` path but without processing any
+        // remaining input — we only close what is already open.
+
+        // 1. Finalize state machine: pops all contexts from the stack.
+        let unclosed = self.state_machine.finalize();
+
+        // 2. Ask the emitter to close each open context.
+        for ctx in &unclosed {
+            let action = StateMachineAction::Exit(ctx.clone());
+            self.emitter
+                .process_action(&action, &mut self.state_machine)?;
+        }
+
+        // 3. Finalize the emitter to flush any remaining buffered output
+        //    (e.g., pending code block fences).
+        let closing_bytes = self.emitter.finalize()?;
+
+        Ok(closing_bytes)
+    }
+
     // ── Internal helpers ────────────────────────────────────────────
 
     /// Processes a single `StreamEvent` through the sanitizer, state machine, and emitter.
@@ -552,6 +630,33 @@ impl StreamingConverter {
             }
         }
 
+        // Check for unsupported structures BEFORE sanitization.
+        // The sanitizer strips elements like <form>, <iframe> (converting them
+        // to text or extracting URLs). Those are adequately handled by stripping.
+        // However, SVG, MathML, and canvas elements represent content that cannot
+        // be meaningfully converted to Markdown by the streaming path — they
+        // require full-buffer conversion.
+        if let StreamEvent::StartTag { ref name, .. } = event {
+            let fallback_structure = match name.as_str() {
+                "svg" => Some("svg".to_string()),
+                "math" => Some("math".to_string()),
+                "canvas" => Some("canvas".to_string()),
+                _ => None,
+            };
+            if let Some(structure) = fallback_structure {
+                let reason = FallbackReason::UnsupportedStructure(structure.clone());
+                if matches!(self.commit_state, CommitState::PreCommit) {
+                    return Err(ConversionError::StreamingFallback { reason });
+                } else {
+                    return Err(ConversionError::PostCommitError {
+                        reason: format!("{} detected after commit", structure),
+                        bytes_emitted: self.bytes_emitted,
+                        original_code: 99,
+                    });
+                }
+            }
+        }
+
         // Sanitize
         let decision = self.sanitizer.process_event(event);
 
@@ -571,15 +676,18 @@ impl StreamingConverter {
             .process_event(&sanitized_event)
             .map_err(|e| self.wrap_error(e))?;
 
-        // Check for table fallback
-        if matches!(action, StateMachineAction::FallbackRequired) {
+        // Check for unsupported structure fallback
+        if let StateMachineAction::FallbackRequired(ref structure) = action {
+            let reason = if structure == "table" {
+                FallbackReason::TableDetected
+            } else {
+                FallbackReason::UnsupportedStructure(structure.clone())
+            };
             if matches!(self.commit_state, CommitState::PreCommit) {
-                return Err(ConversionError::StreamingFallback {
-                    reason: FallbackReason::TableDetected,
-                });
+                return Err(ConversionError::StreamingFallback { reason });
             } else {
                 return Err(ConversionError::PostCommitError {
-                    reason: "table detected after commit".to_string(),
+                    reason: format!("{} detected after commit", structure),
                     bytes_emitted: self.bytes_emitted,
                     original_code: 99, /* internal: no pre-existing error */
                 });
@@ -1490,6 +1598,254 @@ mod tests {
             }
             other => panic!("Expected StreamingFallback, got: {:?}", other),
         }
+    }
+
+    #[test]
+    fn test_svg_triggers_fallback_precommit() {
+        let mut conv = make_converter();
+        let result = conv.feed_chunk(b"<svg><circle cx='50' cy='50' r='40'/></svg>");
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            ConversionError::StreamingFallback { reason } => {
+                assert_eq!(
+                    reason,
+                    FallbackReason::UnsupportedStructure("svg".to_string())
+                );
+            }
+            other => panic!("Expected StreamingFallback(svg), got: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_form_handled_by_stripping() {
+        // Forms are handled by the streaming sanitizer (stripped) rather
+        // than triggering full-buffer fallback. This verifies no error is
+        // returned — the form tags are stripped and content is preserved.
+        let mut conv = make_converter();
+        let result = conv.feed_chunk(b"<form action='/submit'><input type='text'/></form>");
+        assert!(
+            result.is_ok(),
+            "Form should be handled by stripping, not fallback"
+        );
+    }
+
+    #[test]
+    fn test_iframe_handled_by_stripping() {
+        // Iframes are handled by the streaming sanitizer (URL extracted,
+        // tags stripped) rather than triggering full-buffer fallback.
+        let mut conv = make_converter();
+        let result = conv.feed_chunk(b"<iframe src='https://example.com'></iframe>");
+        assert!(
+            result.is_ok(),
+            "Iframe should be handled by stripping, not fallback"
+        );
+    }
+
+    #[test]
+    fn test_math_triggers_fallback_precommit() {
+        let mut conv = make_converter();
+        let result = conv.feed_chunk(b"<math><mi>x</mi></math>");
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            ConversionError::StreamingFallback { reason } => {
+                assert_eq!(
+                    reason,
+                    FallbackReason::UnsupportedStructure("math".to_string())
+                );
+            }
+            other => panic!("Expected StreamingFallback(math), got: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_canvas_triggers_fallback_precommit() {
+        let mut conv = make_converter();
+        let result = conv.feed_chunk(b"<canvas id='myCanvas'></canvas>");
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            ConversionError::StreamingFallback { reason } => {
+                assert_eq!(
+                    reason,
+                    FallbackReason::UnsupportedStructure("canvas".to_string())
+                );
+            }
+            other => panic!("Expected StreamingFallback(canvas), got: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_unsupported_structure_postcommit() {
+        let mut conv = make_converter();
+        // Feed content to transition to PostCommit
+        let output = conv.feed_chunk(b"<h1>Title</h1>").unwrap();
+        assert!(!output.markdown.is_empty());
+        // Now feed a table after commit
+        let result = conv.feed_chunk(b"<table><tr><td>Cell</td></tr></table>");
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            ConversionError::PostCommitError {
+                reason,
+                bytes_emitted,
+                ..
+            } => {
+                assert!(reason.contains("table"));
+                assert!(bytes_emitted > 0);
+            }
+            other => panic!("Expected PostCommitError, got: {:?}", other),
+        }
+    }
+
+    /// Validates: Requirements 3.2, 4.5 — SVG detected after commit returns
+    /// ERROR_POST_COMMIT (8), not fallback (7).
+    #[test]
+    fn test_svg_postcommit_returns_error_code_8() {
+        let mut conv = make_converter();
+        // Emit enough content to transition to PostCommit
+        let output = conv.feed_chunk(b"<h1>Title</h1><p>Body text</p>").unwrap();
+        assert!(!output.markdown.is_empty());
+        assert_eq!(conv.commit_state, CommitState::PostCommit);
+
+        // Now feed SVG — must return PostCommitError (code 8), not fallback (7)
+        let result = conv.feed_chunk(b"<svg><circle cx='50' cy='50' r='40'/></svg>");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(
+            err.code(),
+            8,
+            "SVG after commit must return code 8 (PostCommitError), got {}",
+            err.code()
+        );
+        match err {
+            ConversionError::PostCommitError {
+                reason,
+                bytes_emitted,
+                ..
+            } => {
+                assert!(
+                    reason.contains("svg"),
+                    "reason should mention svg: {}",
+                    reason
+                );
+                assert!(bytes_emitted > 0, "bytes_emitted should be > 0");
+            }
+            other => panic!("Expected PostCommitError, got: {:?}", other),
+        }
+    }
+
+    /// Validates: Requirements 3.2, 4.5 — Math element detected after commit returns
+    /// ERROR_POST_COMMIT (8), not fallback (7).
+    #[test]
+    fn test_math_postcommit_returns_error_code_8() {
+        let mut conv = make_converter();
+        let output = conv.feed_chunk(b"<h1>Title</h1><p>Body text</p>").unwrap();
+        assert!(!output.markdown.is_empty());
+        assert_eq!(conv.commit_state, CommitState::PostCommit);
+
+        let result = conv.feed_chunk(b"<math><mi>x</mi><mo>=</mo><mn>2</mn></math>");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(
+            err.code(),
+            8,
+            "Math after commit must return code 8, got {}",
+            err.code()
+        );
+        match err {
+            ConversionError::PostCommitError {
+                reason,
+                bytes_emitted,
+                ..
+            } => {
+                assert!(
+                    reason.contains("math"),
+                    "reason should mention math: {}",
+                    reason
+                );
+                assert!(bytes_emitted > 0);
+            }
+            other => panic!("Expected PostCommitError, got: {:?}", other),
+        }
+    }
+
+    /// Validates: Requirements 3.2, 4.5 — Canvas element detected after commit returns
+    /// ERROR_POST_COMMIT (8), not fallback (7).
+    #[test]
+    fn test_canvas_postcommit_returns_error_code_8() {
+        let mut conv = make_converter();
+        let output = conv.feed_chunk(b"<h1>Title</h1><p>Body text</p>").unwrap();
+        assert!(!output.markdown.is_empty());
+        assert_eq!(conv.commit_state, CommitState::PostCommit);
+
+        let result = conv.feed_chunk(b"<canvas id='myCanvas' width='200' height='100'></canvas>");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(
+            err.code(),
+            8,
+            "Canvas after commit must return code 8, got {}",
+            err.code()
+        );
+        match err {
+            ConversionError::PostCommitError {
+                reason,
+                bytes_emitted,
+                ..
+            } => {
+                assert!(
+                    reason.contains("canvas"),
+                    "reason should mention canvas: {}",
+                    reason
+                );
+                assert!(bytes_emitted > 0);
+            }
+            other => panic!("Expected PostCommitError, got: {:?}", other),
+        }
+    }
+
+    /// Validates: Requirements 3.2, 4.5 — After post-commit error, safe_finish
+    /// gracefully closes open structures, producing valid closing Markdown.
+    #[test]
+    fn test_safe_finish_after_postcommit_unsupported_content() {
+        let mut conv = make_converter();
+        // Emit content and open structures to reach PostCommit
+        let output = conv
+            .feed_chunk(b"<h1>Title</h1><p>First paragraph</p>")
+            .unwrap();
+        assert!(!output.markdown.is_empty());
+        assert_eq!(conv.commit_state, CommitState::PostCommit);
+
+        // Trigger post-commit error with SVG
+        let result = conv.feed_chunk(b"<svg><rect/></svg>");
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().code(), 8);
+
+        // Call safe_finish — should succeed, closing any open structures
+        let closing = conv.safe_finish();
+        assert!(
+            closing.is_ok(),
+            "safe_finish should succeed after post-commit error"
+        );
+        // Closing bytes may be empty or contain closing markup; either is valid
+    }
+
+    /// Validates: Requirements 3.2, 4.5 — Commit state transition only happens
+    /// once non-empty output is produced. Empty output does NOT trigger PostCommit.
+    #[test]
+    fn test_commit_state_stays_precommit_on_empty_output() {
+        let mut conv = make_converter();
+        // Feed only a comment — should not produce output
+        let output = conv.feed_chunk(b"<!-- comment -->").unwrap();
+        assert!(output.markdown.is_empty());
+        assert_eq!(conv.commit_state, CommitState::PreCommit);
+
+        // Now feed unsupported content — should return fallback (code 7), not post-commit (8)
+        let result = conv.feed_chunk(b"<table><tr><td>Cell</td></tr></table>");
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err().code(),
+            7,
+            "Should be fallback (7) in PreCommit state"
+        );
     }
 
     #[test]

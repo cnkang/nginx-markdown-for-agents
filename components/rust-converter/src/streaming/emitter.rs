@@ -109,6 +109,15 @@ const FLUSH_TAGS: &[&str] = &[
 /// The emitter accumulates pending Markdown bytes in `buffer` and moves
 /// them to `flushed` at each flush point. The caller retrieves ready
 /// output via [`take_flushed`](Self::take_flushed).
+///
+/// # Flush Threshold
+///
+/// The `flush_threshold` controls the minimum number of accumulated pending
+/// bytes before a block-boundary flush actually moves output to the ready
+/// buffer. A threshold of 0 (the default) means "flush immediately at every
+/// block boundary" — lowest latency. Larger thresholds batch output across
+/// multiple block elements, reducing per-flush overhead at the cost of
+/// slightly delayed delivery.
 pub struct IncrementalEmitter {
     /// Memory budget used for output-buffer enforcement.
     budget: MemoryBudget,
@@ -118,6 +127,10 @@ pub struct IncrementalEmitter {
     max_buffer_size: usize,
     /// Ready-to-deliver output bytes.
     flushed: Vec<u8>,
+    /// Flush threshold: minimum pending bytes before a block-boundary flush
+    /// moves output to the ready buffer. 0 = flush immediately at every
+    /// block boundary (lowest latency, default).
+    flush_threshold: usize,
     /// Whether we are currently inside a code block (`<pre>`).
     in_code_block: bool,
     /// Count of consecutive blank lines emitted (for compression).
@@ -175,6 +188,7 @@ impl IncrementalEmitter {
             buffer: Vec::new(),
             max_buffer_size: budget.output_buffer,
             flushed: Vec::new(),
+            flush_threshold: 0,
             in_code_block: false,
             consecutive_blank_lines: 0,
             last_was_newline: false,
@@ -194,7 +208,7 @@ impl IncrementalEmitter {
 
     /// Dispatches a `StateMachineAction` to the corresponding handler and emits the resulting Markdown fragments.
     ///
-    /// This forwards `Enter`, `Exit`, and `Text` actions to `handle_enter`, `handle_exit`, and `handle_text` respectively; `FallbackRequired` and `None` are ignored.
+    /// This forwards `Enter`, `Exit`, and `Text` actions to `handle_enter`, `handle_exit`, and `handle_text` respectively; `FallbackRequired(_)` and `None` are ignored.
     ///
     /// # Errors
     ///
@@ -222,7 +236,7 @@ impl IncrementalEmitter {
             StateMachineAction::Enter(ctx) => self.handle_enter(ctx, sm),
             StateMachineAction::Exit(ctx) => self.handle_exit(ctx, sm),
             StateMachineAction::Text(text) => self.handle_text(text),
-            StateMachineAction::FallbackRequired | StateMachineAction::None => Ok(()),
+            StateMachineAction::FallbackRequired(_) | StateMachineAction::None => Ok(()),
         }
     }
 
@@ -234,6 +248,20 @@ impl IncrementalEmitter {
     /// internal flushed buffer is cleared.
     pub fn take_flushed(&mut self) -> Vec<u8> {
         std::mem::take(&mut self.flushed)
+    }
+
+    /// Set the flush threshold (minimum pending bytes before a block-boundary
+    /// flush moves output to the ready buffer).
+    ///
+    /// - `0` means flush immediately at every block boundary (lowest latency).
+    /// - Larger values batch output across multiple block elements, reducing
+    ///   per-flush overhead at the cost of slightly delayed delivery.
+    ///
+    /// # Arguments
+    ///
+    /// * `threshold` - Minimum pending bytes required before flushing.
+    pub fn set_flush_threshold(&mut self, threshold: usize) {
+        self.flush_threshold = threshold;
     }
 
     /// Current count of emitted flush points.
@@ -907,10 +935,15 @@ impl IncrementalEmitter {
             .check_output_buffer(effective_current, additional)
     }
 
-    /// Flushes pending output into the ready/flushed buffer and records a flush point.
+    /// Flushes pending output into the ready/flushed buffer when the flush
+    /// threshold is met (or threshold is 0 for immediate flush at every
+    /// block boundary).
     ///
-    /// Attempts to move any pending bytes into the ready buffer while respecting the configured
-    /// output budget; on success increments the emitter's flush counter.
+    /// When `flush_threshold > 0`, output is only moved to the ready buffer
+    /// if the pending buffer has accumulated at least `flush_threshold` bytes.
+    /// This batches output across multiple block elements to reduce per-flush
+    /// overhead. When `flush_threshold == 0`, every block boundary triggers
+    /// an immediate flush (lowest latency).
     ///
     /// # Returns
     ///
@@ -926,6 +959,11 @@ impl IncrementalEmitter {
     /// assert_eq!(emitter.flush_count(), 1);
     /// ```
     fn trigger_flush(&mut self) -> Result<(), ConversionError> {
+        // When threshold is 0, flush immediately at every block boundary.
+        // When threshold > 0, only flush when accumulated bytes meet the threshold.
+        if self.flush_threshold > 0 && self.buffer.len() < self.flush_threshold {
+            return Ok(());
+        }
         self.flush_to_ready()?;
         self.flush_count = self.flush_count.saturating_add(1);
         Ok(())
@@ -1427,6 +1465,239 @@ mod tests {
         );
     }
 
+    // ── Deep nesting list tests ────────────────────────────────────
+
+    /// 3-level deep nesting: ul > ul > ul with correct indentation.
+    #[test]
+    fn test_three_level_nested_unordered_lists() {
+        let output = emit_html(&[
+            start_tag("ul"),
+            start_tag("li"),
+            text("Level 1"),
+            start_tag("ul"),
+            start_tag("li"),
+            text("Level 2"),
+            start_tag("ul"),
+            start_tag("li"),
+            text("Level 3"),
+            end_tag("li"),
+            end_tag("ul"),
+            end_tag("li"),
+            end_tag("ul"),
+            end_tag("li"),
+            end_tag("ul"),
+        ]);
+        assert!(
+            output.contains("- Level 1"),
+            "level 1 should have no indent, got: {}",
+            output
+        );
+        assert!(
+            output.contains("  - Level 2"),
+            "level 2 should have 2-space indent, got: {}",
+            output
+        );
+        assert!(
+            output.contains("    - Level 3"),
+            "level 3 should have 4-space indent, got: {}",
+            output
+        );
+    }
+
+    /// 3-level deep nesting: ol > ol > ol with correct indentation and counters.
+    #[test]
+    fn test_three_level_nested_ordered_lists() {
+        let output = emit_html(&[
+            start_tag("ol"),
+            start_tag("li"),
+            text("L1 Item 1"),
+            start_tag("ol"),
+            start_tag("li"),
+            text("L2 Item 1"),
+            start_tag("ol"),
+            start_tag("li"),
+            text("L3 Item 1"),
+            end_tag("li"),
+            start_tag("li"),
+            text("L3 Item 2"),
+            end_tag("li"),
+            end_tag("ol"),
+            end_tag("li"),
+            end_tag("ol"),
+            end_tag("li"),
+            start_tag("li"),
+            text("L1 Item 2"),
+            end_tag("li"),
+            end_tag("ol"),
+        ]);
+        assert!(
+            output.contains("1. L1 Item 1"),
+            "level 1 first item, got: {}",
+            output
+        );
+        assert!(
+            output.contains("  1. L2 Item 1"),
+            "level 2 first item with indent, got: {}",
+            output
+        );
+        assert!(
+            output.contains("    1. L3 Item 1"),
+            "level 3 first item with indent, got: {}",
+            output
+        );
+        assert!(
+            output.contains("    2. L3 Item 2"),
+            "level 3 second item counter increments, got: {}",
+            output
+        );
+        assert!(
+            output.contains("2. L1 Item 2"),
+            "level 1 second item counter increments, got: {}",
+            output
+        );
+    }
+
+    /// Mixed 3-level: ol > ul > ol ensures each level uses the correct marker.
+    #[test]
+    fn test_three_level_mixed_ol_ul_ol() {
+        let output = emit_html(&[
+            start_tag("ol"),
+            start_tag("li"),
+            text("Ordered L1"),
+            start_tag("ul"),
+            start_tag("li"),
+            text("Unordered L2"),
+            start_tag("ol"),
+            start_tag("li"),
+            text("Ordered L3"),
+            end_tag("li"),
+            end_tag("ol"),
+            end_tag("li"),
+            end_tag("ul"),
+            end_tag("li"),
+            end_tag("ol"),
+        ]);
+        assert!(
+            output.contains("1. Ordered L1"),
+            "level 1 ordered marker, got: {}",
+            output
+        );
+        assert!(
+            output.contains("  - Unordered L2"),
+            "level 2 unordered marker with indent, got: {}",
+            output
+        );
+        assert!(
+            output.contains("    1. Ordered L3"),
+            "level 3 ordered marker with indent, got: {}",
+            output
+        );
+    }
+
+    /// Ordered list counter increments correctly across multiple items.
+    #[test]
+    fn test_ordered_list_counter_increments() {
+        let output = emit_html(&[
+            start_tag("ol"),
+            start_tag("li"),
+            text("First"),
+            end_tag("li"),
+            start_tag("li"),
+            text("Second"),
+            end_tag("li"),
+            start_tag("li"),
+            text("Third"),
+            end_tag("li"),
+            start_tag("li"),
+            text("Fourth"),
+            end_tag("li"),
+            end_tag("ol"),
+        ]);
+        assert!(output.contains("1. First"), "got: {}", output);
+        assert!(output.contains("2. Second"), "got: {}", output);
+        assert!(output.contains("3. Third"), "got: {}", output);
+        assert!(output.contains("4. Fourth"), "got: {}", output);
+    }
+
+    /// List item containing a link: `<li><a href="...">text</a></li>`.
+    #[test]
+    fn test_list_item_with_link() {
+        let output = emit_html(&[
+            start_tag("ul"),
+            start_tag("li"),
+            start_tag_with_attrs("a", vec![("href", "https://example.com")]),
+            text("A link"),
+            end_tag("a"),
+            end_tag("li"),
+            end_tag("ul"),
+        ]);
+        assert!(
+            output.contains("- [A link](https://example.com)"),
+            "list item should contain markdown link, got: {}",
+            output
+        );
+    }
+
+    /// List item containing emphasis: `<li><em>text</em></li>`.
+    #[test]
+    fn test_list_item_with_emphasis() {
+        let output = emit_html(&[
+            start_tag("ul"),
+            start_tag("li"),
+            start_tag("em"),
+            text("italic"),
+            end_tag("em"),
+            text(" text"),
+            end_tag("li"),
+            end_tag("ul"),
+        ]);
+        assert!(
+            output.contains("- *italic* text"),
+            "list item should contain emphasis, got: {}",
+            output
+        );
+    }
+
+    /// List item containing strong: `<li><strong>text</strong></li>`.
+    #[test]
+    fn test_list_item_with_strong() {
+        let output = emit_html(&[
+            start_tag("ol"),
+            start_tag("li"),
+            start_tag("strong"),
+            text("bold"),
+            end_tag("strong"),
+            text(" text"),
+            end_tag("li"),
+            end_tag("ol"),
+        ]);
+        assert!(
+            output.contains("1. **bold** text"),
+            "list item should contain strong, got: {}",
+            output
+        );
+    }
+
+    /// List item containing inline code: `<li><code>x</code></li>`.
+    #[test]
+    fn test_list_item_with_inline_code() {
+        let output = emit_html(&[
+            start_tag("ul"),
+            start_tag("li"),
+            text("Use "),
+            start_tag("code"),
+            text("println!"),
+            end_tag("code"),
+            end_tag("li"),
+            end_tag("ul"),
+        ]);
+        assert!(
+            output.contains("- Use `println!`"),
+            "list item should contain inline code, got: {}",
+            output
+        );
+    }
+
     // ── Link tests ──────────────────────────────────────────────────
 
     #[test]
@@ -1591,6 +1862,113 @@ mod tests {
         assert!(
             output.lines().any(|line| line.starts_with("> ")),
             "Expected blockquote prefix '> ' in output, got: {}",
+            output
+        );
+    }
+
+    #[test]
+    fn test_nested_blockquote() {
+        let output = emit_html(&[
+            start_tag("blockquote"),
+            start_tag("blockquote"),
+            start_tag("p"),
+            text("Nested quote"),
+            end_tag("p"),
+            end_tag("blockquote"),
+            end_tag("blockquote"),
+        ]);
+        assert!(
+            output.lines().any(|line| line.starts_with("> > ")),
+            "Expected nested blockquote prefix '> > ' in output, got: {:?}",
+            output
+        );
+        assert!(
+            output.contains("Nested quote"),
+            "Nested blockquote text must be preserved, got: {:?}",
+            output
+        );
+    }
+
+    #[test]
+    fn test_blockquote_multiline_prefix() {
+        let output = emit_html(&[
+            start_tag("blockquote"),
+            start_tag("p"),
+            text("Line one"),
+            end_tag("p"),
+            start_tag("p"),
+            text("Line two"),
+            end_tag("p"),
+            end_tag("blockquote"),
+        ]);
+        let prefixed_lines: Vec<&str> = output.lines().filter(|l| l.starts_with("> ")).collect();
+        assert!(
+            prefixed_lines.len() >= 2,
+            "Each line within a blockquote should start with '> ', got: {:?}",
+            output
+        );
+    }
+
+    #[test]
+    fn test_code_block_verbatim_special_chars() {
+        // Code block content must NOT be Markdown-escaped
+        let output = emit_html(&[
+            start_tag("pre"),
+            start_tag("code"),
+            text("**not bold** [not link](url) *not italic*"),
+            end_tag("code"),
+            end_tag("pre"),
+        ]);
+        assert!(
+            output.contains("**not bold** [not link](url) *not italic*"),
+            "Code block content must be preserved verbatim without escaping, got: {:?}",
+            output
+        );
+    }
+
+    #[test]
+    fn test_code_block_verbatim_whitespace_preserved() {
+        // Multiple spaces and tabs in code blocks must be preserved verbatim
+        let output = emit_html(&[
+            start_tag("pre"),
+            start_tag("code"),
+            text("  indented\n\ttabbed\n    four spaces"),
+            end_tag("code"),
+            end_tag("pre"),
+        ]);
+        assert!(
+            output.contains("  indented"),
+            "Leading spaces must be preserved in code blocks, got: {:?}",
+            output
+        );
+        assert!(
+            output.contains("\ttabbed"),
+            "Tabs must be preserved in code blocks, got: {:?}",
+            output
+        );
+        assert!(
+            output.contains("    four spaces"),
+            "Four-space indentation must be preserved in code blocks, got: {:?}",
+            output
+        );
+    }
+
+    #[test]
+    fn test_code_block_content_across_multiple_text_events() {
+        // Verify code block accumulates content correctly across split text events
+        let output = emit_html(&[
+            start_tag("pre"),
+            start_tag("code"),
+            text("fn main"),
+            text("() {\n"),
+            text("    println!(\"hello\");\n"),
+            text("}"),
+            end_tag("code"),
+            end_tag("pre"),
+        ]);
+        assert!(
+            output.contains("fn main() {\n    println!(\"hello\");\n}"),
+            "Code block must accumulate content across text events, got: {:?}",
             output
         );
     }
@@ -2222,6 +2600,151 @@ mod tests {
         assert_eq!(escape_link_label("a\nb"), "a b");
     }
 
+    // ── Nested inline formatting tests (Task 3.2) ─────────────────
+
+    #[test]
+    fn test_bold_inside_link() {
+        let output = emit_html(&[
+            start_tag("p"),
+            start_tag_with_attrs("a", vec![("href", "https://example.com")]),
+            start_tag("strong"),
+            text("bold link"),
+            end_tag("strong"),
+            end_tag("a"),
+            end_tag("p"),
+        ]);
+        assert!(
+            output.contains("[**bold link**](https://example.com)"),
+            "bold inside link should produce [**text**](url), got: {}",
+            output
+        );
+    }
+
+    #[test]
+    fn test_italic_inside_link() {
+        let output = emit_html(&[
+            start_tag("p"),
+            start_tag_with_attrs("a", vec![("href", "https://example.com")]),
+            start_tag("em"),
+            text("italic link"),
+            end_tag("em"),
+            end_tag("a"),
+            end_tag("p"),
+        ]);
+        assert!(
+            output.contains("[*italic link*](https://example.com)"),
+            "italic inside link should produce [*text*](url), got: {}",
+            output
+        );
+    }
+
+    #[test]
+    fn test_code_span_inside_link() {
+        let output = emit_html(&[
+            start_tag("p"),
+            start_tag_with_attrs("a", vec![("href", "https://example.com")]),
+            start_tag("code"),
+            text("code_fn"),
+            end_tag("code"),
+            end_tag("a"),
+            end_tag("p"),
+        ]);
+        assert!(
+            output.contains("[`code_fn`](https://example.com)"),
+            "code span inside link should produce [`text`](url), got: {}",
+            output
+        );
+    }
+
+    #[test]
+    fn test_bold_and_italic_inside_link() {
+        let output = emit_html(&[
+            start_tag("p"),
+            start_tag_with_attrs("a", vec![("href", "https://example.com")]),
+            start_tag("strong"),
+            start_tag("em"),
+            text("both"),
+            end_tag("em"),
+            end_tag("strong"),
+            end_tag("a"),
+            end_tag("p"),
+        ]);
+        assert!(
+            output.contains("[***both***](https://example.com)"),
+            "bold+italic inside link should produce [***text***](url), got: {}",
+            output
+        );
+    }
+
+    #[test]
+    fn test_mixed_text_and_bold_inside_link() {
+        let output = emit_html(&[
+            start_tag("p"),
+            start_tag_with_attrs("a", vec![("href", "https://example.com")]),
+            text("click "),
+            start_tag("strong"),
+            text("here"),
+            end_tag("strong"),
+            end_tag("a"),
+            end_tag("p"),
+        ]);
+        assert!(
+            output.contains("[click **here**](https://example.com)"),
+            "mixed text+bold inside link should combine, got: {}",
+            output
+        );
+    }
+
+    #[test]
+    fn test_b_tag_emits_bold() {
+        let output = emit_html(&[
+            start_tag("p"),
+            start_tag("b"),
+            text("bold"),
+            end_tag("b"),
+            end_tag("p"),
+        ]);
+        assert!(
+            output.contains("**bold**"),
+            "<b> should emit ** markers, got: {}",
+            output
+        );
+    }
+
+    #[test]
+    fn test_i_tag_emits_italic() {
+        let output = emit_html(&[
+            start_tag("p"),
+            start_tag("i"),
+            text("italic"),
+            end_tag("i"),
+            end_tag("p"),
+        ]);
+        assert!(
+            output.contains("*italic*"),
+            "<i> should emit * markers, got: {}",
+            output
+        );
+    }
+
+    #[test]
+    fn test_italic_wrapping_bold() {
+        let output = emit_html(&[
+            start_tag("p"),
+            start_tag("em"),
+            start_tag("strong"),
+            text("nested"),
+            end_tag("strong"),
+            end_tag("em"),
+            end_tag("p"),
+        ]);
+        assert!(
+            output.contains("***nested***"),
+            "italic wrapping bold should produce nested markers, got: {}",
+            output
+        );
+    }
+
     #[test]
     fn test_code_block_budget_exceeded_during_accumulation() {
         /* Verify that an oversized <pre><code> block triggers BudgetExceeded
@@ -2271,5 +2794,146 @@ mod tests {
             "Expected BudgetExceeded during code block text accumulation, \
              but all 1000 bytes were accepted into a 256-byte budget"
         );
+    }
+
+    // ── Flush threshold tests ───────────────────────────────────────
+
+    #[test]
+    fn test_flush_threshold_zero_flushes_immediately() {
+        let budget = MemoryBudget::default();
+        let mut emitter = IncrementalEmitter::new(&budget);
+        let mut sm = StructuralStateMachine::new(&budget);
+        // threshold 0 is the default — every block boundary flushes
+        assert_eq!(emitter.flush_threshold, 0);
+
+        let events = vec![start_tag("p"), text("Short"), end_tag("p")];
+        for ev in &events {
+            let action = sm.process_event(ev).unwrap();
+            emitter.process_action(&action, &mut sm).unwrap();
+        }
+        let flushed = emitter.take_flushed();
+        assert!(
+            !flushed.is_empty(),
+            "threshold=0 should flush at paragraph end"
+        );
+        assert!(emitter.flush_count() >= 1);
+    }
+
+    #[test]
+    fn test_flush_threshold_batches_small_output() {
+        let budget = MemoryBudget::default();
+        let mut emitter = IncrementalEmitter::new(&budget);
+        let mut sm = StructuralStateMachine::new(&budget);
+        // Set a high threshold — small paragraphs won't trigger flush
+        emitter.set_flush_threshold(1024);
+
+        let events = vec![start_tag("p"), text("Hi"), end_tag("p")];
+        for ev in &events {
+            let action = sm.process_event(ev).unwrap();
+            emitter.process_action(&action, &mut sm).unwrap();
+        }
+        let flushed = emitter.take_flushed();
+        // With a 1024-byte threshold, "Hi\n" (3 bytes) is below threshold
+        assert!(
+            flushed.is_empty(),
+            "threshold=1024 should not flush 3 bytes, got {} bytes",
+            flushed.len()
+        );
+        assert_eq!(emitter.flush_count(), 0);
+        // Content is still in the pending buffer
+        assert!(emitter.pending_bytes() > 0);
+    }
+
+    #[test]
+    fn test_flush_threshold_flushes_when_exceeded() {
+        let budget = MemoryBudget::default();
+        let mut emitter = IncrementalEmitter::new(&budget);
+        let mut sm = StructuralStateMachine::new(&budget);
+        // Set a threshold of 10 bytes
+        emitter.set_flush_threshold(10);
+
+        // First paragraph: "Hi\n" = 3 bytes — below threshold
+        let events = vec![start_tag("p"), text("Hi"), end_tag("p")];
+        for ev in &events {
+            let action = sm.process_event(ev).unwrap();
+            emitter.process_action(&action, &mut sm).unwrap();
+        }
+        assert_eq!(emitter.flush_count(), 0, "3 bytes < 10 threshold");
+
+        // Second paragraph: adds more bytes; "\nHello World\n" pushes over 10
+        let events2 = vec![start_tag("p"), text("Hello World"), end_tag("p")];
+        for ev in &events2 {
+            let action = sm.process_event(ev).unwrap();
+            emitter.process_action(&action, &mut sm).unwrap();
+        }
+        // "Hi\n" + "\n" (block sep) + "Hello World\n" = 16 bytes >= 10 threshold
+        assert!(
+            emitter.flush_count() >= 1,
+            "accumulated bytes should exceed threshold and trigger flush"
+        );
+        let flushed = emitter.take_flushed();
+        assert!(!flushed.is_empty());
+    }
+
+    #[test]
+    fn test_flush_threshold_finalize_flushes_remaining() {
+        let budget = MemoryBudget::default();
+        let mut emitter = IncrementalEmitter::new(&budget);
+        let mut sm = StructuralStateMachine::new(&budget);
+        // High threshold: nothing flushes during processing
+        emitter.set_flush_threshold(10000);
+
+        let events = vec![
+            start_tag("h1"),
+            text("Title"),
+            end_tag("h1"),
+            start_tag("p"),
+            text("Body"),
+            end_tag("p"),
+        ];
+        for ev in &events {
+            let action = sm.process_event(ev).unwrap();
+            emitter.process_action(&action, &mut sm).unwrap();
+        }
+        // Nothing flushed yet because threshold is very high
+        assert_eq!(emitter.flush_count(), 0);
+        assert!(emitter.take_flushed().is_empty());
+
+        // Finalize must flush remaining pending output regardless of threshold
+        let final_output = emitter.finalize().unwrap();
+        assert!(
+            !final_output.is_empty(),
+            "finalize must flush remaining output"
+        );
+        let s = String::from_utf8(final_output).unwrap();
+        assert!(s.contains("# Title"), "got: {}", s);
+        assert!(s.contains("Body"), "got: {}", s);
+    }
+
+    #[test]
+    fn test_flush_threshold_set_via_converter() {
+        use crate::converter::ConversionOptions;
+        use crate::streaming::converter::StreamingConverter;
+
+        let budget = MemoryBudget::default();
+        let mut conv = StreamingConverter::new(ConversionOptions::default(), budget);
+        conv.set_flush_threshold(512);
+
+        // Feed a small paragraph — should not produce output with threshold=512
+        let out = conv.feed_chunk(b"<p>Hi</p>").unwrap();
+        assert!(
+            out.markdown.is_empty(),
+            "small paragraph should be batched with threshold=512, got {} bytes",
+            out.markdown.len()
+        );
+
+        // Finalize must produce all accumulated output
+        let result = conv.finalize().unwrap();
+        assert!(
+            !result.final_markdown.is_empty(),
+            "finalize must flush all remaining output"
+        );
+        let s = String::from_utf8(result.final_markdown).unwrap();
+        assert!(s.contains("Hi"), "got: {}", s);
     }
 }

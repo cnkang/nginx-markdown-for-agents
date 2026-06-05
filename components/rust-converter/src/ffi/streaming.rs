@@ -1,16 +1,19 @@
 //! Feature-gated FFI functions for the streaming processing API.
 //!
 //! This module exposes the [`StreamingConverter`] to C callers through an
-//! opaque handle and six lifecycle functions:
+//! opaque handle and nine lifecycle functions:
 //!
 //! | Function | Purpose |
 //! |---|---|
 //! | [`markdown_streaming_new`] | Create a streaming converter handle |
 //! | [`markdown_streaming_feed`] | Feed a chunk, receive Markdown output |
-//! | [`markdown_streaming_finalize`] | Finalize conversion, write result |
+//! | [`markdown_streaming_finish`] | Signal EOF, flush output, consume handle (lightweight) |
+//! | [`markdown_streaming_finalize`] | Finalize conversion, write full result struct |
+//! | [`markdown_streaming_safe_finish`] | Post-commit safe finish: close open structures |
 //! | [`markdown_streaming_abort`] | Abort conversion, release resources |
 //! | [`markdown_streaming_free`] | Free handle without finalizing |
-//! | [`markdown_streaming_output_free`] | Free feed output buffer |
+//! | [`markdown_streaming_output_free`] | Free feed/finish output buffer |
+//! | [`markdown_streaming_reason`] | Get fallback/error reason string |
 //!
 //! All functions are compiled only when the `streaming` Cargo feature is
 //! enabled. When the feature is disabled the crate's public ABI remains
@@ -20,18 +23,61 @@
 //!
 //! The handle returned by [`markdown_streaming_new`] is owned by the C
 //! caller. The caller must eventually pass it to exactly one of
-//! [`markdown_streaming_finalize`] (which consumes it and writes the result),
+//! [`markdown_streaming_finish`] (which consumes it and returns flushed output),
+//! [`markdown_streaming_finalize`] (which consumes it and writes the full result),
+//! [`markdown_streaming_safe_finish`] (which consumes it and attempts post-commit closure),
 //! [`markdown_streaming_abort`] (which consumes it without output), or
 //! [`markdown_streaming_free`] (which drops it without producing output).
 //!
-//! Output buffers returned by [`markdown_streaming_feed`] are owned by the
-//! C caller and must be freed via [`markdown_streaming_output_free`].
+//! **Important:** Both [`markdown_streaming_finish`] and
+//! [`markdown_streaming_finalize`] always consume the handle, regardless
+//! of whether they return success or failure. After either returns, the
+//! handle is invalid and must not be passed to any other function.
+//! Violating this rule causes a double-free (CWE-415).
 //!
-//! **Important:** [`markdown_streaming_finalize`] always consumes the
-//! handle, regardless of whether it returns success or failure. After
-//! `finalize` returns, the handle is invalid and must not be passed to
-//! any other function. Violating this rule causes a double-free (CWE-415).
+//! # Output buffer ownership contract
+//!
+//! Output buffers returned by [`markdown_streaming_feed`] and
+//! [`markdown_streaming_finish`] are Rust-allocated heap memory. The
+//! following rules govern their lifetime:
+//!
+//! 1. **Ownership transfer:** When `feed` or `finish` returns
+//!    `ERROR_SUCCESS` with non-NULL `out_data`, ownership of the buffer
+//!    transfers to the C caller. Rust retains no reference to it.
+//!
+//! 2. **Required free path:** The C caller MUST release the buffer by
+//!    calling [`markdown_streaming_output_free`] with the exact `(data, len)`
+//!    pair returned by `feed` or `finish`. No other deallocation method is
+//!    valid.
+//!
+//! 3. **Forbidden allocator pairing:** C MUST NOT free these buffers with
+//!    `ngx_pfree`, `free()`, or any allocator other than
+//!    [`markdown_streaming_output_free`]. The buffers are allocated by the
+//!    Rust global allocator; using a mismatched deallocator (libc `free`,
+//!    NGINX pool free, etc.) is undefined behaviour.
+//!
+//! 4. **Single-free rule:** Each `(data, len)` pair MUST be freed exactly
+//!    once. Double-free is undefined behaviour (CWE-415).
+//!
+//! 5. **No pointer retention across calls:** C MUST NOT retain or
+//!    dereference the output buffer pointer after calling
+//!    [`markdown_streaming_output_free`]. After free, the pointer is
+//!    dangling.
+//!
+//! 6. **Typical NGINX integration pattern:** C copies the output bytes
+//!    into an NGINX pool-owned chain buffer immediately after a successful
+//!    `feed`/`finish` call, then frees the Rust buffer before the next
+//!    FFI call. This ensures Rust-owned memory is short-lived and does not
+//!    outlive the FFI call boundary.
+//!
+//! 7. **NULL safety:** Passing `(NULL, 0)` to `output_free` is a safe
+//!    no-op, which simplifies error-path cleanup.
+//!
+//! 8. **Lifetime:** The output buffer remains valid from the moment
+//!    `feed`/`finish` returns until `output_free` is called. Rust does
+//!    not invalidate or reuse the memory between calls.
 
+use std::ffi::{CString, c_char};
 use std::panic::{self, AssertUnwindSafe};
 use std::ptr;
 
@@ -44,11 +90,181 @@ use super::abi::{
 use super::memory::{free_buffer, reset_result, set_error_result};
 use super::options::decode_options;
 
+/// Configuration options for the streaming converter, passed from C to Rust.
+///
+/// This `#[repr(C)]` struct is the purpose-built configuration interface for
+/// the streaming (incremental) conversion path. C callers populate this struct
+/// and pass a pointer to [`markdown_streaming_new`] (or a future overload that
+/// accepts `StreamingOptions` directly) to create a converter instance.
+///
+/// # Memory Budget
+///
+/// The `streaming_budget` field controls the total memory ceiling for the
+/// streaming converter. When non-zero it overrides the compiled-in default
+/// (2 MiB). Peak working-set memory is bounded to `O(streaming_budget)`,
+/// not `O(input_size)`, for supported content.
+///
+/// # Flush Behaviour
+///
+/// `flush_threshold` controls the minimum number of accumulated Markdown bytes
+/// before the converter flushes output. A threshold of 0 means "flush as soon
+/// as any complete element is emitted" (lowest latency). Larger values reduce
+/// per-chunk FFI call overhead at the cost of slightly delayed output.
+///
+/// # Pointer Fields
+///
+/// Pointer/length pairs (`base_url`, `content_type`) are borrowed from the
+/// C caller for the duration of the `markdown_streaming_new` call only. Rust
+/// copies any values it needs to retain. The caller must not free these
+/// buffers until `markdown_streaming_new` returns.
+///
+/// # ABI Stability
+///
+/// Adding fields to this struct is a breaking ABI change. Both copies of
+/// `markdown_converter.h` (in `components/rust-converter/include/` and
+/// `components/nginx-module/src/`) must be updated in the same change set.
+/// See AGENTS.md Rule 15.
+#[repr(C)]
+pub struct StreamingOptions {
+    /// Markdown flavor selector.
+    ///
+    /// - `0` = CommonMark (default)
+    /// - `1` = GitHub Flavored Markdown (GFM)
+    /// - `2` = MDX (experimental)
+    /// - `3` = Org-mode (experimental)
+    ///
+    /// Other values are rejected during option decoding.
+    pub flavor: u32,
+
+    /// Cooperative conversion timeout in milliseconds.
+    ///
+    /// The streaming converter checks the deadline after processing each
+    /// chunk. If the elapsed wall-clock time exceeds this value, `feed`
+    /// returns `ERROR_TIMEOUT`. A value of `0` disables the timeout.
+    pub timeout_ms: u32,
+
+    /// Total streaming memory budget in bytes (0 = use compiled-in default).
+    ///
+    /// Controls the peak memory ceiling for the streaming path. The
+    /// converter distributes this budget across its internal subsystems
+    /// (token buffer, nesting stack, pending output, charset sniff).
+    /// Exceeding this budget causes `feed` to return `ERROR_BUDGET_EXCEEDED`.
+    ///
+    /// Populated from the `markdown_streaming_budget` NGINX directive.
+    pub streaming_budget: u64,
+
+    /// Flush threshold in bytes (0 = flush immediately on element completion).
+    ///
+    /// Controls the minimum number of accumulated output bytes before
+    /// `feed` returns non-empty output to the caller. A value of 0 means
+    /// "flush as soon as any complete Markdown element is emitted" — this
+    /// provides lowest latency but may increase per-chunk overhead.
+    ///
+    /// Larger values allow the emitter to batch output across multiple
+    /// elements, reducing FFI round-trip frequency at the cost of slightly
+    /// delayed delivery to the downstream filter chain.
+    pub flush_threshold: u32,
+
+    /// Non-zero when Rust should generate a streaming Markdown-variant ETag.
+    ///
+    /// When enabled, the converter maintains an incremental BLAKE3 hash
+    /// over emitted Markdown bytes. The final ETag is available after
+    /// `markdown_streaming_finalize` completes successfully.
+    pub generate_etag: u8,
+
+    /// Non-zero when Rust should estimate token count for the output.
+    ///
+    /// Token estimation uses a character-counting heuristic with the
+    /// configured `chars_per_token` ratio. The estimate is available
+    /// in `MarkdownResult.token_estimate` after finalize.
+    pub estimate_tokens: u8,
+
+    /// Non-zero when Rust should extract YAML front matter metadata.
+    ///
+    /// Enables extraction of title, description, canonical URL and other
+    /// metadata from `<head>` during streaming. Front matter is prepended
+    /// to the final Markdown output on finalize.
+    pub front_matter: u8,
+
+    /// Non-zero when noise region pruning is enabled.
+    ///
+    /// When enabled, structural HTML regions matching the configured prune
+    /// selectors (e.g. `<nav>`, `<footer>`, `<aside>`) are excluded from
+    /// the Markdown output. Protection selectors override prune selectors.
+    pub prune_noise: u8,
+
+    /// Borrowed Content-Type bytes from the C caller (charset detection hint).
+    ///
+    /// Must either be NULL with `content_type_len == 0` or point to
+    /// `content_type_len` readable bytes for the duration of the FFI call.
+    /// Rust copies the value if needed. Used for charset sniffing when the
+    /// upstream response declares a non-UTF-8 encoding.
+    pub content_type: *const u8,
+
+    /// Length in bytes of the `content_type` field.
+    pub content_type_len: usize,
+
+    /// Borrowed base URL for resolving relative links in the HTML.
+    ///
+    /// Must either be NULL with `base_url_len == 0` or point to
+    /// `base_url_len` readable UTF-8 bytes for the duration of the FFI call.
+    /// Rust copies the value for internal use. When set, relative URLs in
+    /// `<a href>`, `<img src>`, and similar attributes are resolved against
+    /// this base before emission.
+    pub base_url: *const u8,
+
+    /// Length in bytes of the `base_url` field.
+    pub base_url_len: usize,
+
+    /// Borrowed prune selector string (space-separated tag names to prune).
+    ///
+    /// Example: `"nav footer aside"`. Must either be NULL with
+    /// `prune_selector_len == 0` or point to `prune_selector_len` readable
+    /// UTF-8 bytes. Rust copies the value for internal use.
+    pub prune_selectors: *const u8,
+
+    /// Length in bytes of the `prune_selectors` field.
+    pub prune_selector_len: usize,
+
+    /// Borrowed protection selector string (space-separated tag names to protect).
+    ///
+    /// Elements matching both a prune selector and a protection selector are
+    /// kept (protection wins). Must either be NULL with
+    /// `prune_protection_selector_len == 0` or point to
+    /// `prune_protection_selector_len` readable UTF-8 bytes.
+    pub prune_protection_selectors: *const u8,
+
+    /// Length in bytes of the `prune_protection_selectors` field.
+    pub prune_protection_selector_len: usize,
+
+    /// LLM provider for token estimation.
+    ///
+    /// - `0` = default (4.0 chars/token)
+    /// - `1` = OpenAI GPT
+    /// - `2` = Anthropic Claude
+    /// - `3` = Google Gemini
+    /// - `4` = Meta Llama
+    ///
+    /// Overridden by `chars_per_token_fixed` when that field is non-zero.
+    pub llm_provider: u8,
+
+    /// Explicit chars-per-token ratio (fixed-point: actual = value / 10.0).
+    ///
+    /// When non-zero, overrides both the default 4.0 and the provider-specific
+    /// ratio. Valid range: 1–255, representing ratios 0.1–25.5 chars/token.
+    /// Value `0` means "use default or provider ratio".
+    pub chars_per_token_fixed: u8,
+}
+
 /// Opaque handle wrapping a [`StreamingConverter`] for the C ABI.
 pub struct StreamingConverterHandle {
     inner: StreamingConverter,
     generate_etag: bool,
     estimate_tokens: bool,
+    /// NUL-terminated reason string from the last `feed` or `finish` call
+    /// that returned a fallback or error code. Valid until the handle is
+    /// freed or the next `feed`/`finish` call.
+    last_reason: Option<CString>,
 }
 
 fn budget_from_streaming_total(streaming_budget: u64) -> MemoryBudget {
@@ -90,6 +306,7 @@ fn markdown_streaming_new_impl(
         inner: converter,
         generate_etag: decoded.generate_etag,
         estimate_tokens: decoded.estimate_tokens,
+        last_reason: None,
     })))
 }
 
@@ -231,10 +448,104 @@ pub unsafe extern "C" fn markdown_streaming_feed(
 
         match handle_ref.inner.feed_chunk(chunk) {
             Ok(output) => {
+                handle_ref.last_reason = None;
                 if !output.markdown.is_empty() {
                     let boxed = output.markdown.into_boxed_slice();
                     let len = boxed.len();
                     let raw = Box::into_raw(boxed) as *mut u8;
+                    // SAFETY: out_data and out_len validated as non-NULL above.
+                    unsafe {
+                        *out_data = raw;
+                        *out_len = len;
+                    }
+                }
+                ERROR_SUCCESS
+            }
+            Err(e) => {
+                let code = e.code();
+                // Store the error description as a NUL-terminated C string
+                // so C callers can retrieve it via markdown_streaming_reason.
+                let msg = e.to_string();
+                handle_ref.last_reason = CString::new(msg).ok();
+                code
+            }
+        }
+    }));
+
+    result.unwrap_or(ERROR_INTERNAL)
+}
+
+/// Signal end-of-input to the streaming converter, flush remaining output,
+/// and consume the handle.
+///
+/// This is a lightweight finish path for C callers that only need the final
+/// flushed Markdown bytes and a status code — without the full
+/// [`MarkdownResult`] metadata (ETag, token estimate, peak memory) that
+/// [`markdown_streaming_finalize`] provides.
+///
+/// On success (`ERROR_SUCCESS`), `*out_data` and `*out_len` are set to the
+/// final Markdown output buffer allocated by Rust. The caller must free this
+/// buffer via [`markdown_streaming_output_free`]. If the final flush produces
+/// no additional output, `*out_data` is NULL and `*out_len` is 0.
+///
+/// This call always consumes the provided `handle`; after this function
+/// returns (whether success, failure, or internal panic) the handle is
+/// invalid and must not be passed to any other `markdown_streaming_*`
+/// function. Violating this rule causes a double-free (CWE-415).
+///
+/// # Safety
+///
+/// - `handle` must be a live pointer returned by [`markdown_streaming_new`]
+///   that has not already been finalized, aborted, freed, or finished.
+/// - `out_data` must be a valid, writable pointer to `*mut u8`.
+/// - `out_len` must be a valid, writable pointer to `usize`.
+///
+/// # Returns
+///
+/// - `ERROR_SUCCESS` (0) — conversion completed normally, output available
+/// - `ERROR_STREAMING_FALLBACK` (7) — unsupported content detected (pre-commit)
+/// - `ERROR_POST_COMMIT` (8) — error after partial output committed
+/// - `ERROR_TIMEOUT` (3) — cooperative timeout exceeded during flush
+/// - `ERROR_BUDGET_EXCEEDED` (6) — memory budget exceeded during flush
+/// - `ERROR_INVALID_INPUT` (5) — NULL handle or output pointers
+/// - `ERROR_INTERNAL` (99) — caught panic
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn markdown_streaming_finish(
+    handle: *mut StreamingConverterHandle,
+    out_data: *mut *mut u8,
+    out_len: *mut usize,
+) -> u32 {
+    let result = panic::catch_unwind(AssertUnwindSafe(|| -> u32 {
+        // Validate output pointers first so we can safely write to them.
+        if out_data.is_null() || out_len.is_null() {
+            return ERROR_INVALID_INPUT;
+        }
+
+        // Initialize output to empty.
+        // SAFETY: pointers validated as non-NULL above.
+        unsafe {
+            *out_data = ptr::null_mut();
+            *out_len = 0;
+        }
+
+        if handle.is_null() {
+            return ERROR_INVALID_INPUT;
+        }
+
+        // SAFETY: caller guarantees `handle` is a live, unconsumed pointer.
+        // `Box::from_raw` takes ownership — the handle is always freed
+        // regardless of success or panic (Box drops during unwinding).
+        let boxed = unsafe { Box::from_raw(handle) };
+
+        // Finalize the inner converter: signals EOF, flushes tokenizer,
+        // closes unclosed contexts, and returns the final markdown.
+        match boxed.inner.finalize() {
+            Ok(streaming_result) => {
+                let final_md = streaming_result.final_markdown;
+                if !final_md.is_empty() {
+                    let boxed_md = final_md.into_boxed_slice();
+                    let len = boxed_md.len();
+                    let raw = Box::into_raw(boxed_md) as *mut u8;
                     // SAFETY: out_data and out_len validated as non-NULL above.
                     unsafe {
                         *out_data = raw;
@@ -370,6 +681,100 @@ pub unsafe extern "C" fn markdown_streaming_abort(handle: *mut StreamingConverte
     }));
 }
 
+/// Attempt a post-commit safe finish: close all open Markdown structures
+/// without emitting raw HTML, then consume the handle.
+///
+/// This function is designed to be called after `markdown_streaming_feed`
+/// returns `ERROR_POST_COMMIT` (8). It attempts to gracefully close all
+/// open Markdown constructs (headings, paragraphs, lists, code blocks,
+/// blockquotes, inline formatting) so that the already-emitted output
+/// forms valid Markdown.
+///
+/// On success (`POST_COMMIT_SAFE_FINISH` = 3), `*out_data` and `*out_len`
+/// are set to the Markdown closure bytes (e.g., closing fences, trailing
+/// newlines). The caller must free this buffer via
+/// [`markdown_streaming_output_free`]. The caller should append these
+/// bytes after the already-committed output.
+///
+/// On failure (`POST_COMMIT_ABORT` = 4), structures could not be safely
+/// closed. The output buffer is set to NULL/0. The caller must abort and
+/// discard or truncate the partial output. **C MUST NOT infer or synthesize
+/// Markdown closure for Rust-owned parser/emitter state** (Requirement 1.8).
+///
+/// This call always consumes the handle; after this function returns the
+/// handle is invalid and must not be passed to any other function.
+///
+/// # Safety
+///
+/// - `handle` must be a live pointer returned by [`markdown_streaming_new`]
+///   that has not already been finalized, aborted, freed, or finished.
+/// - `out_data` must be a valid, writable pointer to `*mut u8`.
+/// - `out_len` must be a valid, writable pointer to `usize`.
+///
+/// # Returns
+///
+/// - `POST_COMMIT_SAFE_FINISH` (3) — all open structures were closed
+///   successfully; output buffer contains closure Markdown.
+/// - `POST_COMMIT_ABORT` (4) — safe finish failed; output is NULL/0.
+///   Caller must abort (discard partial output).
+/// - `ERROR_INVALID_INPUT` (5) — NULL handle or output pointers.
+/// - `ERROR_INTERNAL` (99) — caught panic.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn markdown_streaming_safe_finish(
+    handle: *mut StreamingConverterHandle,
+    out_data: *mut *mut u8,
+    out_len: *mut usize,
+) -> u32 {
+    use super::abi::{POST_COMMIT_ABORT, POST_COMMIT_SAFE_FINISH};
+
+    let result = panic::catch_unwind(AssertUnwindSafe(|| -> u32 {
+        // Validate output pointers first.
+        if out_data.is_null() || out_len.is_null() {
+            return ERROR_INVALID_INPUT;
+        }
+
+        // Initialize output to empty.
+        // SAFETY: pointers validated as non-NULL above.
+        unsafe {
+            *out_data = ptr::null_mut();
+            *out_len = 0;
+        }
+
+        if handle.is_null() {
+            return ERROR_INVALID_INPUT;
+        }
+
+        // SAFETY: caller guarantees `handle` is a live, unconsumed pointer.
+        // `Box::from_raw` takes ownership — the handle is always freed
+        // regardless of success or failure.
+        let boxed = unsafe { Box::from_raw(handle) };
+
+        // Attempt safe finish on the inner converter.
+        match boxed.inner.safe_finish() {
+            Ok(closing_bytes) => {
+                if !closing_bytes.is_empty() {
+                    let boxed_md = closing_bytes.into_boxed_slice();
+                    let len = boxed_md.len();
+                    let raw = Box::into_raw(boxed_md) as *mut u8;
+                    // SAFETY: out_data and out_len validated as non-NULL above.
+                    unsafe {
+                        *out_data = raw;
+                        *out_len = len;
+                    }
+                }
+                POST_COMMIT_SAFE_FINISH
+            }
+            Err(_) => {
+                // Safe finish failed — structures cannot be closed gracefully.
+                // Caller must abort. Handle is already consumed (boxed dropped).
+                POST_COMMIT_ABORT
+            }
+        }
+    }));
+
+    result.unwrap_or(ERROR_INTERNAL)
+}
+
 /// Free a streaming converter handle without finalizing.
 ///
 /// Use this function to release resources when the conversion is being
@@ -393,18 +798,40 @@ pub unsafe extern "C" fn markdown_streaming_free(handle: *mut StreamingConverter
     unsafe { markdown_streaming_abort(handle) };
 }
 
-/// Free a Markdown output buffer returned by [`markdown_streaming_feed`].
+/// Free a Markdown output buffer returned by [`markdown_streaming_feed`]
+/// or [`markdown_streaming_finish`].
+///
+/// This is the **only** valid way to release output buffers produced by the
+/// streaming FFI. The buffer is allocated by the Rust global allocator; C
+/// callers MUST NOT free it with `free()`, `ngx_pfree()`, or any other
+/// deallocator — doing so is undefined behaviour due to allocator mismatch.
 ///
 /// The `data` pointer and `len` must be exactly the values written to
-/// `out_data` and `out_len` by a previous `feed` call. Passing NULL/0
-/// is a safe no-op.
+/// `out_data` and `out_len` by a previous `feed` or `finish` call.
+/// Passing `(NULL, 0)` is a safe no-op, which simplifies error-path cleanup.
+///
+/// # Typical usage pattern (NGINX integration)
+///
+/// ```text
+/// // C pseudo-code: copy into NGINX chain, then free Rust buffer
+/// rc = markdown_streaming_feed(handle, chunk, len, &out_data, &out_len);
+/// if (rc == 0 && out_data != NULL) {
+///     ngx_memcpy(pool_buf->last, out_data, out_len);
+///     pool_buf->last += out_len;
+///     markdown_streaming_output_free(out_data, out_len);
+/// }
+/// ```
 ///
 /// # Safety
 ///
 /// - `data` must be NULL or a pointer previously returned via
-///   `markdown_streaming_feed`'s `out_data` parameter.
-/// - `len` must be the corresponding `out_len` value.
-/// - Each (data, len) pair must be freed exactly once.
+///   `markdown_streaming_feed`'s or `markdown_streaming_finish`'s
+///   `out_data` parameter.
+/// - `len` must be the corresponding `out_len` value from the same call.
+/// - Each `(data, len)` pair must be freed exactly once. Double-free is
+///   undefined behaviour (CWE-415).
+/// - After this call, `data` is a dangling pointer and must not be
+///   dereferenced.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn markdown_streaming_output_free(data: *mut u8, len: usize) {
     if data.is_null() {
@@ -417,6 +844,40 @@ pub unsafe extern "C" fn markdown_streaming_output_free(data: *mut u8, len: usiz
         // in `markdown_streaming_feed`, and `len` is the original length.
         unsafe { drop(Box::from_raw(raw_slice)) };
     }));
+}
+
+/// Return the NUL-terminated reason string from the last `feed` or `finish`
+/// call that signalled fallback or error.
+///
+/// The returned pointer is owned by Rust and valid until the converter handle
+/// is freed or the next `feed`/`finish` call (whichever comes first). The C
+/// caller must not free or modify the returned pointer.
+///
+/// Returns NULL when no reason is available (i.e. the last call returned
+/// `ERROR_SUCCESS` or the handle is NULL).
+///
+/// # Safety
+///
+/// - `handle` must be NULL or a live pointer returned by
+///   [`markdown_streaming_new`] that has not been finalized, aborted,
+///   or freed.
+/// - The returned `*const c_char` must not be used after the next `feed`,
+///   `finish`, `abort`, or `free` call on the same handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn markdown_streaming_reason(
+    handle: *const StreamingConverterHandle,
+) -> *const c_char {
+    if handle.is_null() {
+        return ptr::null();
+    }
+
+    // SAFETY: caller guarantees `handle` is a live pointer from `_new`.
+    let handle_ref = unsafe { &*handle };
+
+    match &handle_ref.last_reason {
+        Some(cstr) => cstr.as_ptr(),
+        None => ptr::null(),
+    }
 }
 
 #[cfg(test)]
@@ -909,5 +1370,663 @@ mod tests {
 
         assert_eq!(budget.total, 64 * 1024);
         assert_eq!(sum, budget.total);
+    }
+
+    // ================================================================
+    // StreamingOptions layout tests
+    // ================================================================
+
+    #[test]
+    fn test_streaming_options_is_repr_c() {
+        use std::mem::{align_of, size_of};
+
+        /* Verify the struct has predictable C layout (no Rust reordering) */
+        assert_eq!(align_of::<StreamingOptions>(), 8);
+        /* Size depends on field count and padding; just verify it is stable */
+        assert!(
+            size_of::<StreamingOptions>() > 0,
+            "StreamingOptions must have non-zero size"
+        );
+    }
+
+    #[test]
+    fn test_streaming_options_field_offsets() {
+        use std::mem::offset_of;
+
+        /* Verify field ordering matches the declared layout */
+        assert_eq!(offset_of!(StreamingOptions, flavor), 0);
+        assert_eq!(offset_of!(StreamingOptions, timeout_ms), 4);
+        assert_eq!(offset_of!(StreamingOptions, streaming_budget), 8);
+        assert_eq!(offset_of!(StreamingOptions, flush_threshold), 16);
+        assert_eq!(offset_of!(StreamingOptions, generate_etag), 20);
+        assert_eq!(offset_of!(StreamingOptions, estimate_tokens), 21);
+        assert_eq!(offset_of!(StreamingOptions, front_matter), 22);
+        assert_eq!(offset_of!(StreamingOptions, prune_noise), 23);
+        assert_eq!(offset_of!(StreamingOptions, content_type), 24);
+        assert_eq!(offset_of!(StreamingOptions, content_type_len), 32);
+        assert_eq!(offset_of!(StreamingOptions, base_url), 40);
+        assert_eq!(offset_of!(StreamingOptions, base_url_len), 48);
+        assert_eq!(offset_of!(StreamingOptions, prune_selectors), 56);
+        assert_eq!(offset_of!(StreamingOptions, prune_selector_len), 64);
+        assert_eq!(offset_of!(StreamingOptions, prune_protection_selectors), 72);
+        assert_eq!(
+            offset_of!(StreamingOptions, prune_protection_selector_len),
+            80
+        );
+        assert_eq!(offset_of!(StreamingOptions, llm_provider), 88);
+        assert_eq!(offset_of!(StreamingOptions, chars_per_token_fixed), 89);
+    }
+
+    #[test]
+    fn test_streaming_options_size() {
+        use std::mem::size_of;
+
+        /* 96 bytes: 4+4+8+4+(1*4)+ptr+usize+ptr+usize+ptr+usize+ptr+usize+1+1+padding */
+        assert_eq!(size_of::<StreamingOptions>(), 96);
+    }
+
+    #[test]
+    fn test_streaming_options_default_zeroed() {
+        /* Verify that a zeroed struct produces valid "use defaults" semantics */
+        let opts: StreamingOptions = unsafe { std::mem::zeroed() };
+        assert_eq!(opts.flavor, 0); /* CommonMark */
+        assert_eq!(opts.timeout_ms, 0); /* no timeout */
+        assert_eq!(opts.streaming_budget, 0); /* use default */
+        assert_eq!(opts.flush_threshold, 0); /* immediate flush */
+        assert_eq!(opts.generate_etag, 0); /* disabled */
+        assert_eq!(opts.estimate_tokens, 0); /* disabled */
+        assert_eq!(opts.front_matter, 0); /* disabled */
+        assert_eq!(opts.prune_noise, 0); /* disabled */
+        assert!(opts.content_type.is_null());
+        assert_eq!(opts.content_type_len, 0);
+        assert!(opts.base_url.is_null());
+        assert_eq!(opts.base_url_len, 0);
+        assert!(opts.prune_selectors.is_null());
+        assert_eq!(opts.prune_selector_len, 0);
+        assert!(opts.prune_protection_selectors.is_null());
+        assert_eq!(opts.prune_protection_selector_len, 0);
+        assert_eq!(opts.llm_provider, 0); /* default */
+        assert_eq!(opts.chars_per_token_fixed, 0); /* use default */
+    }
+
+    // ================================================================
+    // Streaming FFI finish function tests
+    // Feature: streaming-engine-skeleton, Requirement 1.1 (signal EOF)
+    // ================================================================
+
+    #[test]
+    fn test_streaming_finish_lifecycle() {
+        let opts = test_options();
+        let handle = unsafe { markdown_streaming_new(&opts) };
+        assert!(!handle.is_null());
+
+        let html = b"<h1>Hello</h1><p>World</p>";
+        let mut out_data: *mut u8 = ptr::null_mut();
+        let mut out_len: usize = 0;
+
+        let rc = unsafe {
+            markdown_streaming_feed(
+                handle,
+                html.as_ptr(),
+                html.len(),
+                &mut out_data,
+                &mut out_len,
+            )
+        };
+        assert_eq!(rc, ERROR_SUCCESS);
+
+        if !out_data.is_null() {
+            unsafe { markdown_streaming_output_free(out_data, out_len) };
+        }
+
+        /* Call finish to signal EOF and get final flushed output */
+        let mut finish_data: *mut u8 = ptr::null_mut();
+        let mut finish_len: usize = 0;
+
+        let rc = unsafe { markdown_streaming_finish(handle, &mut finish_data, &mut finish_len) };
+        assert_eq!(rc, ERROR_SUCCESS, "finish() should return SUCCESS");
+
+        /* Verify finish produced some output (final flush) */
+        if !finish_data.is_null() && finish_len > 0 {
+            let md = unsafe { std::slice::from_raw_parts(finish_data, finish_len) };
+            let md_str = std::str::from_utf8(md).unwrap();
+            assert!(
+                md_str.contains("Hello") || md_str.contains("World"),
+                "Finish output should contain converted content"
+            );
+            unsafe { markdown_streaming_output_free(finish_data, finish_len) };
+        }
+
+        /* Handle is consumed — no free/abort needed */
+    }
+
+    #[test]
+    fn test_streaming_finish_null_handle() {
+        let mut out_data: *mut u8 = ptr::null_mut();
+        let mut out_len: usize = 0;
+
+        let rc = unsafe { markdown_streaming_finish(ptr::null_mut(), &mut out_data, &mut out_len) };
+        assert_eq!(
+            rc, ERROR_INVALID_INPUT,
+            "NULL handle should return INVALID_INPUT"
+        );
+    }
+
+    #[test]
+    fn test_streaming_finish_null_output_pointers() {
+        let opts = test_options();
+        let handle = unsafe { markdown_streaming_new(&opts) };
+        assert!(!handle.is_null());
+
+        let rc = unsafe { markdown_streaming_finish(handle, ptr::null_mut(), ptr::null_mut()) };
+        assert_eq!(
+            rc, ERROR_INVALID_INPUT,
+            "NULL output pointers should return INVALID_INPUT"
+        );
+
+        /* Handle was NOT consumed (NULL output check is before Box::from_raw) */
+        unsafe { markdown_streaming_abort(handle) };
+    }
+
+    #[test]
+    fn test_streaming_finish_empty_input() {
+        let opts = test_options();
+        let handle = unsafe { markdown_streaming_new(&opts) };
+        assert!(!handle.is_null());
+
+        /* Finish immediately without feeding any data */
+        let mut out_data: *mut u8 = ptr::null_mut();
+        let mut out_len: usize = 0;
+
+        let rc = unsafe { markdown_streaming_finish(handle, &mut out_data, &mut out_len) };
+        assert_eq!(rc, ERROR_SUCCESS, "finish() with no input should succeed");
+
+        if !out_data.is_null() {
+            unsafe { markdown_streaming_output_free(out_data, out_len) };
+        }
+        /* Handle is consumed */
+    }
+
+    // ================================================================
+    // Streaming FFI reason function tests
+    // Feature: streaming-engine-skeleton, Requirement 4.4
+    // ================================================================
+
+    #[test]
+    fn test_streaming_reason_null_handle() {
+        let reason = unsafe { markdown_streaming_reason(ptr::null()) };
+        assert!(reason.is_null(), "NULL handle should return NULL reason");
+    }
+
+    #[test]
+    fn test_streaming_reason_after_success() {
+        let opts = test_options();
+        let handle = unsafe { markdown_streaming_new(&opts) };
+        assert!(!handle.is_null());
+
+        /* After creation, no reason is set */
+        let reason = unsafe { markdown_streaming_reason(handle) };
+        assert!(reason.is_null(), "reason should be NULL before any error");
+
+        let html = b"<p>hello</p>";
+        let mut out_data: *mut u8 = ptr::null_mut();
+        let mut out_len: usize = 0;
+
+        let rc = unsafe {
+            markdown_streaming_feed(
+                handle,
+                html.as_ptr(),
+                html.len(),
+                &mut out_data,
+                &mut out_len,
+            )
+        };
+        assert_eq!(rc, ERROR_SUCCESS);
+
+        /* After successful feed, reason should be NULL */
+        let reason = unsafe { markdown_streaming_reason(handle) };
+        assert!(reason.is_null(), "reason should be NULL after SUCCESS");
+
+        if !out_data.is_null() {
+            unsafe { markdown_streaming_output_free(out_data, out_len) };
+        }
+        unsafe { markdown_streaming_abort(handle) };
+    }
+
+    #[test]
+    fn test_streaming_reason_after_fallback() {
+        let opts = test_options();
+        let handle = unsafe { markdown_streaming_new(&opts) };
+        assert!(!handle.is_null());
+
+        /* Feed a table to trigger fallback */
+        let html_with_table = b"<table><tr><td>cell</td></tr></table>";
+        let mut out_data: *mut u8 = ptr::null_mut();
+        let mut out_len: usize = 0;
+
+        let rc = unsafe {
+            markdown_streaming_feed(
+                handle,
+                html_with_table.as_ptr(),
+                html_with_table.len(),
+                &mut out_data,
+                &mut out_len,
+            )
+        };
+
+        if !out_data.is_null() {
+            unsafe { markdown_streaming_output_free(out_data, out_len) };
+        }
+
+        if rc == ERROR_STREAMING_FALLBACK {
+            /* Reason should be non-NULL and contain descriptive text */
+            let reason = unsafe { markdown_streaming_reason(handle) };
+            assert!(
+                !reason.is_null(),
+                "reason should be non-NULL after fallback"
+            );
+            let cstr = unsafe { std::ffi::CStr::from_ptr(reason) };
+            let reason_str = cstr.to_str().unwrap();
+            assert!(!reason_str.is_empty(), "reason string should be non-empty");
+            assert!(
+                reason_str.contains("table") || reason_str.contains("fallback"),
+                "reason should mention the cause: got '{}'",
+                reason_str
+            );
+        }
+
+        unsafe { markdown_streaming_abort(handle) };
+    }
+
+    // ================================================================
+    // Output buffer ownership contract tests
+    // Feature: streaming-engine-skeleton, Requirement 1.5, 1.6
+    //
+    // These tests validate the output buffer ownership, lifetime, and
+    // free rules documented in the module-level "Output buffer ownership
+    // contract" section.
+    // ================================================================
+
+    /// Validates: Requirements 1.5 — output_free correctly releases feed output.
+    ///
+    /// Verifies that `markdown_streaming_output_free` can safely release
+    /// a buffer returned by `markdown_streaming_feed`. The buffer contents
+    /// are readable between the feed return and the free call (lifetime rule).
+    #[test]
+    fn test_output_free_releases_feed_buffer() {
+        let opts = test_options();
+        let handle = unsafe { markdown_streaming_new(&opts) };
+        assert!(!handle.is_null());
+
+        /* Feed enough content to guarantee non-empty output */
+        let html = b"<h1>Ownership</h1><p>Buffer is Rust-owned until freed.</p>";
+        let mut out_data: *mut u8 = ptr::null_mut();
+        let mut out_len: usize = 0;
+
+        let rc = unsafe {
+            markdown_streaming_feed(
+                handle,
+                html.as_ptr(),
+                html.len(),
+                &mut out_data,
+                &mut out_len,
+            )
+        };
+        assert_eq!(rc, ERROR_SUCCESS);
+
+        /* If output was produced, verify it is readable before free */
+        if !out_data.is_null() {
+            assert!(out_len > 0, "non-NULL output must have non-zero length");
+
+            /* Read the buffer to prove it's valid between feed and free */
+            let slice = unsafe { std::slice::from_raw_parts(out_data, out_len) };
+            assert!(
+                std::str::from_utf8(slice).is_ok(),
+                "output should be valid UTF-8"
+            );
+
+            /* Free via the documented Rust free function */
+            unsafe { markdown_streaming_output_free(out_data, out_len) };
+            /* After this point, out_data is dangling — no dereference allowed */
+        }
+
+        unsafe { markdown_streaming_abort(handle) };
+    }
+
+    /// Validates: Requirements 1.5 — output_free correctly releases finish output.
+    ///
+    /// Verifies that `markdown_streaming_output_free` works for buffers
+    /// returned by `markdown_streaming_finish` (not just `feed`).
+    #[test]
+    fn test_output_free_releases_finish_buffer() {
+        let opts = test_options();
+        let handle = unsafe { markdown_streaming_new(&opts) };
+        assert!(!handle.is_null());
+
+        let html = b"<p>Content for finish test.</p>";
+        let mut out_data: *mut u8 = ptr::null_mut();
+        let mut out_len: usize = 0;
+
+        let rc = unsafe {
+            markdown_streaming_feed(
+                handle,
+                html.as_ptr(),
+                html.len(),
+                &mut out_data,
+                &mut out_len,
+            )
+        };
+        assert_eq!(rc, ERROR_SUCCESS);
+
+        /* Free feed output if any */
+        if !out_data.is_null() {
+            unsafe { markdown_streaming_output_free(out_data, out_len) };
+        }
+
+        /* Now finish — this also returns output via the same contract */
+        let mut finish_data: *mut u8 = ptr::null_mut();
+        let mut finish_len: usize = 0;
+
+        let rc = unsafe { markdown_streaming_finish(handle, &mut finish_data, &mut finish_len) };
+        assert_eq!(rc, ERROR_SUCCESS);
+
+        /* Finish output uses the same ownership contract as feed output */
+        if !finish_data.is_null() {
+            assert!(finish_len > 0);
+            let slice = unsafe { std::slice::from_raw_parts(finish_data, finish_len) };
+            assert!(std::str::from_utf8(slice).is_ok());
+
+            /* Free via the same output_free function */
+            unsafe { markdown_streaming_output_free(finish_data, finish_len) };
+        }
+        /* Handle consumed by finish — no abort needed */
+    }
+
+    /// Validates: Requirements 1.5 — NULL/0 free is a safe no-op.
+    ///
+    /// The contract states that `(NULL, 0)` is a safe no-op for
+    /// error-path cleanup convenience.
+    #[test]
+    fn test_output_free_null_is_noop() {
+        /* Multiple NULL frees must not panic or crash */
+        unsafe { markdown_streaming_output_free(ptr::null_mut(), 0) };
+        unsafe { markdown_streaming_output_free(ptr::null_mut(), 0) };
+        unsafe { markdown_streaming_output_free(ptr::null_mut(), 0) };
+    }
+
+    /// Validates: Requirements 1.5 — multiple independent buffers can be freed.
+    ///
+    /// When multiple `feed` calls each produce output, each buffer is
+    /// independently freeable without interfering with others.
+    #[test]
+    fn test_output_free_multiple_independent_buffers() {
+        let opts = test_options();
+        let handle = unsafe { markdown_streaming_new(&opts) };
+        assert!(!handle.is_null());
+
+        let chunks: &[&[u8]] = &[
+            b"<h1>First</h1>",
+            b"<p>Second paragraph.</p>",
+            b"<p>Third paragraph.</p>",
+        ];
+
+        let mut buffers: Vec<(*mut u8, usize)> = Vec::new();
+
+        for chunk in chunks {
+            let mut out_data: *mut u8 = ptr::null_mut();
+            let mut out_len: usize = 0;
+
+            let rc = unsafe {
+                markdown_streaming_feed(
+                    handle,
+                    chunk.as_ptr(),
+                    chunk.len(),
+                    &mut out_data,
+                    &mut out_len,
+                )
+            };
+            assert_eq!(rc, ERROR_SUCCESS);
+
+            if !out_data.is_null() {
+                buffers.push((out_data, out_len));
+            }
+        }
+
+        /* Free all collected buffers — each is independently valid */
+        for (data, len) in buffers {
+            unsafe { markdown_streaming_output_free(data, len) };
+        }
+
+        unsafe { markdown_streaming_abort(handle) };
+    }
+
+    /// Validates: Requirements 1.6 — output buffer does not outlive the free call.
+    ///
+    /// Demonstrates the correct pattern: read buffer contents, then free.
+    /// After free, no further access is made (this is a compile-time
+    /// discipline enforced by documentation, not by the type system across
+    /// FFI boundaries).
+    #[test]
+    fn test_output_buffer_lifetime_read_then_free() {
+        let opts = test_options();
+        let handle = unsafe { markdown_streaming_new(&opts) };
+        assert!(!handle.is_null());
+
+        let html = b"<h1>Lifetime</h1><p>Read then free pattern.</p>";
+        let mut out_data: *mut u8 = ptr::null_mut();
+        let mut out_len: usize = 0;
+
+        let rc = unsafe {
+            markdown_streaming_feed(
+                handle,
+                html.as_ptr(),
+                html.len(),
+                &mut out_data,
+                &mut out_len,
+            )
+        };
+        assert_eq!(rc, ERROR_SUCCESS);
+
+        if !out_data.is_null() {
+            /* Step 1: Read (simulating memcpy into NGINX pool buffer) */
+            let copied: Vec<u8> = unsafe { std::slice::from_raw_parts(out_data, out_len) }.to_vec();
+
+            /* Step 2: Free the Rust buffer immediately after copy */
+            unsafe { markdown_streaming_output_free(out_data, out_len) };
+
+            /* Step 3: The copied data remains valid (owned by Vec now) */
+            assert!(!copied.is_empty());
+            assert!(std::str::from_utf8(&copied).is_ok());
+        }
+
+        unsafe { markdown_streaming_abort(handle) };
+    }
+
+    // ================================================================
+    // Post-commit safe-finish API tests
+    // Feature: streaming-engine-skeleton, Requirement 1.7, 1.8
+    //
+    // These tests validate the post-commit safe-finish/abort API that
+    // allows C to handle errors after output has been committed.
+    // ================================================================
+
+    /// Validates: Requirements 1.7 — safe finish closes open structures.
+    ///
+    /// Feeds enough HTML to commit output, then calls safe_finish to
+    /// verify that open Markdown structures are gracefully closed and
+    /// the return code is POST_COMMIT_SAFE_FINISH (3).
+    #[test]
+    fn test_safe_finish_closes_open_structures() {
+        use crate::ffi::abi::POST_COMMIT_SAFE_FINISH;
+
+        let opts = test_options();
+        let handle = unsafe { markdown_streaming_new(&opts) };
+        assert!(!handle.is_null());
+
+        /* Feed content that produces output (transitions to PostCommit) */
+        let html = b"<h1>Title</h1><p>Paragraph content here.</p>";
+        let mut out_data: *mut u8 = ptr::null_mut();
+        let mut out_len: usize = 0;
+
+        let rc = unsafe {
+            markdown_streaming_feed(
+                handle,
+                html.as_ptr(),
+                html.len(),
+                &mut out_data,
+                &mut out_len,
+            )
+        };
+        assert_eq!(rc, ERROR_SUCCESS);
+
+        if !out_data.is_null() {
+            unsafe { markdown_streaming_output_free(out_data, out_len) };
+        }
+
+        /* Call safe_finish — should succeed even when called on a healthy converter */
+        let mut finish_data: *mut u8 = ptr::null_mut();
+        let mut finish_len: usize = 0;
+
+        let rc =
+            unsafe { markdown_streaming_safe_finish(handle, &mut finish_data, &mut finish_len) };
+        assert_eq!(
+            rc, POST_COMMIT_SAFE_FINISH,
+            "safe_finish should return POST_COMMIT_SAFE_FINISH (3)"
+        );
+
+        /* Output may be empty or contain closing bytes — either is valid */
+        if !finish_data.is_null() && finish_len > 0 {
+            let md = unsafe { std::slice::from_raw_parts(finish_data, finish_len) };
+            /* Closing bytes must be valid UTF-8 */
+            assert!(
+                std::str::from_utf8(md).is_ok(),
+                "safe_finish output must be valid UTF-8"
+            );
+            unsafe { markdown_streaming_output_free(finish_data, finish_len) };
+        }
+
+        /* Handle is consumed — no free/abort needed */
+    }
+
+    /// Validates: Requirements 1.8 — NULL handle returns INVALID_INPUT.
+    #[test]
+    fn test_safe_finish_null_handle() {
+        let mut out_data: *mut u8 = ptr::null_mut();
+        let mut out_len: usize = 0;
+
+        let rc =
+            unsafe { markdown_streaming_safe_finish(ptr::null_mut(), &mut out_data, &mut out_len) };
+        assert_eq!(
+            rc, ERROR_INVALID_INPUT,
+            "NULL handle should return INVALID_INPUT"
+        );
+    }
+
+    /// Validates: Requirements 1.8 — NULL output pointers return INVALID_INPUT.
+    #[test]
+    fn test_safe_finish_null_output_pointers() {
+        let opts = test_options();
+        let handle = unsafe { markdown_streaming_new(&opts) };
+        assert!(!handle.is_null());
+
+        let rc =
+            unsafe { markdown_streaming_safe_finish(handle, ptr::null_mut(), ptr::null_mut()) };
+        assert_eq!(
+            rc, ERROR_INVALID_INPUT,
+            "NULL output pointers should return INVALID_INPUT"
+        );
+
+        /* Handle was NOT consumed (NULL check is before Box::from_raw) */
+        unsafe { markdown_streaming_abort(handle) };
+    }
+
+    /// Validates: Requirements 1.7 — safe finish on empty converter succeeds.
+    #[test]
+    fn test_safe_finish_empty_converter() {
+        use crate::ffi::abi::POST_COMMIT_SAFE_FINISH;
+
+        let opts = test_options();
+        let handle = unsafe { markdown_streaming_new(&opts) };
+        assert!(!handle.is_null());
+
+        /* Call safe_finish immediately without feeding any data */
+        let mut out_data: *mut u8 = ptr::null_mut();
+        let mut out_len: usize = 0;
+
+        let rc = unsafe { markdown_streaming_safe_finish(handle, &mut out_data, &mut out_len) };
+        assert_eq!(
+            rc, POST_COMMIT_SAFE_FINISH,
+            "safe_finish on empty converter should succeed"
+        );
+
+        if !out_data.is_null() {
+            unsafe { markdown_streaming_output_free(out_data, out_len) };
+        }
+        /* Handle consumed */
+    }
+
+    /// Validates: Requirements 1.7 — safe finish with open code block.
+    ///
+    /// Feeds partial code block HTML (opening but not closing), then
+    /// calls safe_finish to verify the code fence is properly closed.
+    #[test]
+    fn test_safe_finish_with_open_code_block() {
+        use crate::ffi::abi::POST_COMMIT_SAFE_FINISH;
+
+        let opts = test_options();
+        let handle = unsafe { markdown_streaming_new(&opts) };
+        assert!(!handle.is_null());
+
+        /* Feed a code block opening without the closing tag */
+        let html = b"<pre><code>fn main() {\n    println!(\"hello\");\n";
+        let mut out_data: *mut u8 = ptr::null_mut();
+        let mut out_len: usize = 0;
+
+        let rc = unsafe {
+            markdown_streaming_feed(
+                handle,
+                html.as_ptr(),
+                html.len(),
+                &mut out_data,
+                &mut out_len,
+            )
+        };
+        assert_eq!(rc, ERROR_SUCCESS);
+
+        if !out_data.is_null() {
+            unsafe { markdown_streaming_output_free(out_data, out_len) };
+        }
+
+        /* Call safe_finish — should close the code fence */
+        let mut finish_data: *mut u8 = ptr::null_mut();
+        let mut finish_len: usize = 0;
+
+        let rc =
+            unsafe { markdown_streaming_safe_finish(handle, &mut finish_data, &mut finish_len) };
+        assert_eq!(
+            rc, POST_COMMIT_SAFE_FINISH,
+            "safe_finish with open code block should succeed"
+        );
+
+        /* Output should contain closing fence (```) */
+        if !finish_data.is_null() && finish_len > 0 {
+            let md = unsafe { std::slice::from_raw_parts(finish_data, finish_len) };
+            let md_str = std::str::from_utf8(md).unwrap();
+            assert!(
+                md_str.contains("```"),
+                "safe_finish should produce closing code fence, got: '{}'",
+                md_str
+            );
+            unsafe { markdown_streaming_output_free(finish_data, finish_len) };
+        }
+    }
+
+    /// Validates: Requirements 1.7, 1.8 — return code constants are correct.
+    #[test]
+    fn test_safe_finish_return_code_constants() {
+        use crate::ffi::abi::{POST_COMMIT_ABORT, POST_COMMIT_SAFE_FINISH};
+
+        assert_eq!(POST_COMMIT_SAFE_FINISH, 3);
+        assert_eq!(POST_COMMIT_ABORT, 4);
     }
 }
