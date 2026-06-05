@@ -113,6 +113,70 @@ typedef struct ngx_http_markdown_otel_span_s  ngx_http_markdown_otel_span_t;
 #endif /* MARKDOWN_STREAMING_ENABLED */
 
 /*
+ * Streaming fallback state machine types (spec 37).
+ *
+ * These types implement the pure-function decision engine defined in
+ * RFC 0008 section 3.  The state machine governs runtime transitions
+ * between streaming, full-buffer, passthrough, and failure modes.
+ *
+ * Placement: unconditionally available (not gated by
+ * MARKDOWN_STREAMING_ENABLED) because the v0.8.0 streaming architecture
+ * uses these types regardless of the legacy compile-time feature flag.
+ */
+
+/* State enum: every request follows exactly one deterministic path */
+typedef enum {
+    NGX_HTTP_MD_STATE_NOT_ELIGIBLE = 0,
+    NGX_HTTP_MD_STATE_STREAMING_CANDIDATE,
+    NGX_HTTP_MD_STATE_PRE_COMMIT,
+    NGX_HTTP_MD_STATE_PRE_COMMIT_REPLAY_UNAVAILABLE,
+    NGX_HTTP_MD_STATE_FULL_BUFFER_FALLBACK,
+    NGX_HTTP_MD_STATE_PASSTHROUGH,
+    NGX_HTTP_MD_STATE_COMMITTED,
+    NGX_HTTP_MD_STATE_POST_COMMIT_SAFE_FINISH,
+    NGX_HTTP_MD_STATE_POST_COMMIT_ABORT
+} ngx_http_markdown_stream_state_e;
+
+/* Action enum: what the module does on each state transition */
+typedef enum {
+    NGX_HTTP_MD_ACTION_NONE = 0,
+    NGX_HTTP_MD_ACTION_PASS_HTML,
+    NGX_HTTP_MD_ACTION_REJECT_502,
+    NGX_HTTP_MD_ACTION_COMMIT_HEADERS,
+    NGX_HTTP_MD_ACTION_CONTINUE_STREAMING,
+    NGX_HTTP_MD_ACTION_SWITCH_FULL_BUFFER,
+    NGX_HTTP_MD_ACTION_SAFE_FINISH,
+    NGX_HTTP_MD_ACTION_ABORT,
+    NGX_HTTP_MD_ACTION_PASSTHROUGH
+} ngx_http_markdown_action_e;
+
+/* Reason code enum: why the transition occurred (metrics/logging) */
+typedef enum {
+    NGX_HTTP_MD_REASON_ELIGIBLE = 0,
+    NGX_HTTP_MD_REASON_NOT_ELIGIBLE,
+    NGX_HTTP_MD_REASON_PARSER_UNSUITABLE,
+    NGX_HTTP_MD_REASON_HARD_EXCLUDED,
+    NGX_HTTP_MD_REASON_FULL_DOC_FEATURE,
+    NGX_HTTP_MD_REASON_BUDGET_INIT_FAILURE,
+    NGX_HTTP_MD_REASON_REPLAY_OVERFLOW,
+    NGX_HTTP_MD_REASON_RESOURCE_LIMIT_EXCEEDED,
+    NGX_HTTP_MD_REASON_STRICT_ETAG,
+    NGX_HTTP_MD_REASON_LOOK_BEHIND_OVERFLOW,
+    NGX_HTTP_MD_REASON_AUTO_RISK,
+    NGX_HTTP_MD_REASON_COMMIT_SUCCESS,
+    NGX_HTTP_MD_REASON_POST_COMMIT_ERROR,
+    NGX_HTTP_MD_REASON_ON_ERROR_PASS,
+    NGX_HTTP_MD_REASON_ON_ERROR_REJECT
+} ngx_http_markdown_reason_code_e;
+
+/* Decision struct: output of the pure decision engine */
+typedef struct {
+    ngx_http_markdown_stream_state_e  new_state;
+    ngx_http_markdown_action_e        action;
+    ngx_http_markdown_reason_code_e   reason;
+} ngx_http_markdown_decision_t;
+
+/*
  * v0.8.0 streaming engine mode constants (markdown_streaming_engine directive).
  *
  * These are distinct from the v0.6.0 MARKDOWN_STREAMING_ENABLED constants
@@ -527,6 +591,22 @@ typedef struct {
 
     /* OpenTelemetry span for per-request conversion tracing */
     ngx_http_markdown_otel_span_t        *otel_span;
+
+    /*
+     * v0.8.0 streaming state machine context (spec 37).
+     *
+     * Unconditional (not feature-gated) because the state machine
+     * governs all requests regardless of the streaming converter
+     * feature flag.  Grouped into a sub-struct for SonarCloud
+     * c:S1820 compliance.
+     */
+    struct {
+        ngx_http_markdown_stream_state_e  state;           /* Current state machine state */
+        ngx_http_markdown_buffer_t        replay_buf;      /* Replay buffer for pre-commit fallback */
+        size_t                            replay_capacity; /* Max replay buffer size (from config) */
+        ngx_flag_t                        replay_initialized;
+        ngx_flag_t                        headers_committed; /* Headers sent downstream */
+    } stream_sm;
 
 #ifdef MARKDOWN_STREAMING_ENABLED
     /*
