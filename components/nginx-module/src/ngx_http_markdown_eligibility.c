@@ -369,9 +369,8 @@ ngx_http_markdown_stream_type_excluded(const ngx_str_t *content_type,
     static u_char  application_stream_json[] = "application/stream+json";
 
     size_t               type_len;
-    ngx_uint_t           i;
     const ngx_str_t     *entry;
-    u_char              *p;
+    const u_char        *p;
 
     /* NULL or empty content type is not excluded */
     if (content_type == NULL || content_type->len == 0
@@ -429,7 +428,7 @@ ngx_http_markdown_stream_type_excluded(const ngx_str_t *content_type,
     if (conf != NULL && conf->stream.excluded_types != NULL) {
         entry = conf->stream.excluded_types->elts;
 
-        for (i = 0; i < conf->stream.excluded_types->nelts; i++) {
+        for (ngx_uint_t i = 0; i < conf->stream.excluded_types->nelts; i++) {
             if (type_len == entry[i].len
                 && ngx_strncasecmp(content_type->data,
                                    entry[i].data,

@@ -284,7 +284,6 @@ typedef struct {
     ngx_uint_t   enabled_source;       /* markdown_filter source (static|complex|unset) */
     ngx_http_complex_value_t *enabled_complex; /* markdown_filter variable/complex expression */
     size_t       max_size;             /* markdown_max_size (default: 10MB) */
-    ngx_flag_t   max_size_explicit;    /* 1 if operator set markdown_max_size at this or parent level */
     ngx_msec_t   timeout;              /* markdown_timeout (default: 5000ms) */
     ngx_uint_t   on_error;             /* markdown_on_error pass|reject (default: pass) */
     ngx_uint_t   flavor;               /* markdown_flavor commonmark|gfm (default: commonmark) */
@@ -309,6 +308,7 @@ typedef struct {
         size_t       max_size;             /* markdown_decompress_max_size (default: same as max_size) */
         ngx_msec_t   parse_timeout;        /* markdown_parse_timeout (default: 30000ms) */
         size_t       parser_budget;        /* markdown_parser_budget (default: 64MB) */
+        ngx_flag_t   max_size_explicit;    /* 1 if operator set markdown_max_size at this or parent level */
     } decompress;
 
     /*
