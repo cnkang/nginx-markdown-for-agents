@@ -49,6 +49,7 @@ build/unit/%: unit/%_test.c include/test_common.h include/test_metrics_snapshot.
 	  buf_len_safe) extra_cflags="-I../src -Iinclude/nginx_stubs" ;; \
 	  streaming_decomp) extra_cflags="-I../src -Iinclude/nginx_stubs -DMARKDOWN_STREAMING_ENABLED"; extra_ldflags="-lz" ;; \
 	  streaming) extra_cflags="-DMARKDOWN_STREAMING_ENABLED" ;; \
+	  stream_error|stream_state|stream_postcommit|stream_replay|stream_commit|stream_e2e) extra_cflags="-I../src -Iinclude/nginx_stubs -DMARKDOWN_STREAMING_ENABLED" ;; \
 	  streaming_impl) extra_cflags="-I../src -Iinclude/nginx_stubs -I../../rust-converter/include -DMARKDOWN_STREAMING_ENABLED -ffunction-sections" ; extra_ldflags="$(SECTION_GC_LDFLAGS) -lz" ;; \
 	  conversion_impl_base_url) extra_cflags="-Iinclude/nginx_stubs -ffunction-sections" ; extra_ldflags="$(SECTION_GC_LDFLAGS)" ;; \
 	  config_handlers_impl) extra_cflags="-Iinclude/nginx_stubs -ffunction-sections" ; extra_ldflags="$(SECTION_GC_LDFLAGS)" ;; \

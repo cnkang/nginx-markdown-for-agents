@@ -11,4 +11,8 @@ typedef intptr_t        ngx_int_t;
 typedef uintptr_t       ngx_uint_t;
 typedef intptr_t        ngx_flag_t;
 
+#ifndef ngx_inline
+#define ngx_inline inline
+#endif
+
 #endif
