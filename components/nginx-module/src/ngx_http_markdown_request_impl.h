@@ -338,6 +338,47 @@ ngx_http_markdown_init_ctx(ngx_http_request_t *r,
 }
 
 
+static void
+ngx_http_markdown_log_accept_skip(ngx_http_request_t *r,
+    const ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_effective_conf_t *eff,
+    ngx_uint_t accept_reason)
+{
+    ngx_http_markdown_decision_path_t  dp;
+
+    dp.conditional_result = NGX_HTTP_MARKDOWN_COND_SKIPPED;
+    dp.conversion_status = NGX_HTTP_MARKDOWN_CONV_SKIPPED;
+    dp.duration_ms = 0;
+
+    switch (accept_reason) {
+
+    case NEGOTIATE_REASON_NO_ACCEPT:
+        NGX_HTTP_MARKDOWN_METRIC_INC(skips.no_accept);
+        ngx_http_markdown_log_decision(r, conf, eff,
+            ngx_http_markdown_reason_skip_no_accept());
+        dp.accept_result = NGX_HTTP_MARKDOWN_ACCEPT_NONE;
+        dp.reason_code = "SKIPPED_NO_ACCEPT";
+        break;
+
+    case NEGOTIATE_REASON_EXPLICIT_REJECT:
+        ngx_http_markdown_log_decision(r, conf, eff,
+            ngx_http_markdown_reason_skip_accept_reject());
+        dp.accept_result = NGX_HTTP_MARKDOWN_ACCEPT_REJECT;
+        dp.reason_code = "SKIPPED_ACCEPT_REJECT";
+        break;
+
+    default:
+        ngx_http_markdown_log_decision(r, conf, eff,
+            ngx_http_markdown_reason_skip_accept());
+        dp.accept_result = NGX_HTTP_MARKDOWN_ACCEPT_SKIP;
+        dp.reason_code = "SKIPPED_ACCEPT";
+        break;
+    }
+
+    ngx_http_markdown_log_decision_path(r, conf, eff, &dp);
+}
+
+
 /**
  * Determine whether the response should be converted and, if eligible,
  * initialize a per-request Markdown conversion context for body buffering.
@@ -524,67 +565,8 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
          * NEGOTIATE_REASON_EXPLICIT_REJECT (3) → SKIPPED_ACCEPT_REJECT, REJECT
          * NEGOTIATE_REASON_MALFORMED (4) → SKIPPED_ACCEPT, SKIP
          */
-        switch (accept_reason) {
-
-        case NEGOTIATE_REASON_NO_ACCEPT:
-            NGX_HTTP_MARKDOWN_METRIC_INC(skips.no_accept);
-            ngx_http_markdown_log_decision(r, conf, &early_eff,
-                ngx_http_markdown_reason_skip_no_accept());
-            {
-                ngx_http_markdown_decision_path_t  dp;
-
-                dp.accept_result =
-                    NGX_HTTP_MARKDOWN_ACCEPT_NONE;
-                dp.conditional_result =
-                    NGX_HTTP_MARKDOWN_COND_SKIPPED;
-                dp.conversion_status =
-                    NGX_HTTP_MARKDOWN_CONV_SKIPPED;
-                dp.reason_code = "SKIPPED_NO_ACCEPT";
-                dp.duration_ms = 0;
-                ngx_http_markdown_log_decision_path(
-                    r, conf, &early_eff, &dp);
-            }
-            break;
-
-        case NEGOTIATE_REASON_EXPLICIT_REJECT:
-            ngx_http_markdown_log_decision(r, conf, &early_eff,
-                ngx_http_markdown_reason_skip_accept_reject());
-            {
-                ngx_http_markdown_decision_path_t  dp;
-
-                dp.accept_result =
-                    NGX_HTTP_MARKDOWN_ACCEPT_REJECT;
-                dp.conditional_result =
-                    NGX_HTTP_MARKDOWN_COND_SKIPPED;
-                dp.conversion_status =
-                    NGX_HTTP_MARKDOWN_CONV_SKIPPED;
-                dp.reason_code = "SKIPPED_ACCEPT_REJECT";
-                dp.duration_ms = 0;
-                ngx_http_markdown_log_decision_path(
-                    r, conf, &early_eff, &dp);
-            }
-            break;
-
-        default:
-            /* NEGOTIATE_REASON_LOWER_Q or MALFORMED */
-            ngx_http_markdown_log_decision(r, conf, &early_eff,
-                ngx_http_markdown_reason_skip_accept());
-            {
-                ngx_http_markdown_decision_path_t  dp;
-
-                dp.accept_result =
-                    NGX_HTTP_MARKDOWN_ACCEPT_SKIP;
-                dp.conditional_result =
-                    NGX_HTTP_MARKDOWN_COND_SKIPPED;
-                dp.conversion_status =
-                    NGX_HTTP_MARKDOWN_CONV_SKIPPED;
-                dp.reason_code = "SKIPPED_ACCEPT";
-                dp.duration_ms = 0;
-                ngx_http_markdown_log_decision_path(
-                    r, conf, &early_eff, &dp);
-            }
-            break;
-        }
+        ngx_http_markdown_log_accept_skip(r, conf, &early_eff,
+            accept_reason);
 
         return ngx_http_next_header_filter(r);
     }
