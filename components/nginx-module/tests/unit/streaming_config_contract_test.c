@@ -3,7 +3,10 @@
  *
  * Validates the v0.8.0 streaming configuration directives (spec 36):
  * - Valid values for each directive (5.1)
+ * - v0.8.0 stream_engine_handler direct tests (5.1b)
  * - Invalid values rejected (5.2)
+ * - v0.8.0 stream_engine_handler rejection tests (5.2b)
+ * - Allocation failure paths (5.2c)
  * - Default inheritance (5.3)
  * - Reserved directive rejected (5.4)
  * - Hard exclusions always present (5.5)
@@ -64,6 +67,19 @@ static char ngx_conf_error_val[] = "ERROR";
 #define NGX_MAX_SIZE_T_VALUE ((size_t) -1)
 #endif
 
+#ifndef NGX_HTTP_GET
+#define NGX_HTTP_GET  0
+#endif
+#ifndef NGX_HTTP_HEAD
+#define NGX_HTTP_HEAD 1
+#endif
+#ifndef NGX_HTTP_OK
+#define NGX_HTTP_OK  200
+#endif
+#ifndef NGX_HTTP_PARTIAL_CONTENT
+#define NGX_HTTP_PARTIAL_CONTENT 206
+#endif
+
 #define ngx_strncmp(s1, s2, n) \
     strncmp((const char *) (s1), (const char *) (s2), (n))
 
@@ -81,8 +97,32 @@ struct ngx_array_s {
     ngx_pool_t *pool;
 };
 
+typedef struct ngx_table_elt_s ngx_table_elt_t;
+
+struct ngx_table_elt_s {
+    ngx_str_t   key;
+    ngx_str_t   value;
+    ngx_uint_t  hash;
+};
+
+typedef struct ngx_http_headers_in_s ngx_http_headers_in_t;
+
+struct ngx_http_headers_in_s {
+    ngx_table_elt_t *range;
+};
+
+typedef struct ngx_http_headers_out_s ngx_http_headers_out_t;
+
+struct ngx_http_headers_out_s {
+    ngx_str_t   content_type;
+    ngx_uint_t  status;
+    off_t       content_length_n;
+};
+
 struct ngx_http_request_s {
-    int dummy;
+    ngx_uint_t              method;
+    ngx_http_headers_out_t  headers_out;
+    ngx_http_headers_in_t   headers_in;
 };
 
 struct ngx_http_complex_value_s {
@@ -217,6 +257,11 @@ ngx_array_create(ngx_pool_t *pool, ngx_uint_t n, size_t size)
     ngx_array_t *a;
     UNUSED(pool);
 
+    if (g_next_palloc_fails > 0) {
+        g_next_palloc_fails--;
+        return NULL;
+    }
+
     a = calloc(1, sizeof(ngx_array_t));
     if (a == NULL) {
         return NULL;
@@ -298,6 +343,13 @@ ngx_http_conf_get_module_main_conf(ngx_conf_t *cf, ngx_module_t module)
 }
 
 #include "../../src/ngx_http_markdown_config_handlers_impl.h"
+
+/*
+ * Include the production eligibility source so we test the real
+ * ngx_http_markdown_stream_type_excluded() instead of a local
+ * reimplementation.  All required stubs are defined above.
+ */
+#include "../../src/ngx_http_markdown_eligibility.c"
 
 static ngx_pool_t g_pool;
 
@@ -471,6 +523,55 @@ test_valid_values(void)
 }
 
 /* ================================================================
+ * 5.1b v0.8.0 stream_engine_handler direct
+ * ================================================================ */
+static void
+test_stream_engine_handler_valid(void)
+{
+    ngx_conf_t               cf;
+    ngx_array_t              args;
+    ngx_str_t                values[2];
+    ngx_command_t            cmd;
+    ngx_http_markdown_conf_t mcf;
+    char                    *rc;
+
+    TEST_SUBSECTION("5.1b v0.8.0 stream_engine_handler direct");
+
+    setup_cf(&cf, &args, values, 2);
+    set_arg(&cmd.name, "markdown_streaming_engine");
+    set_arg(&values[0], "markdown_streaming_engine");
+
+    /* off -> STREAM_ENGINE_OFF */
+    init_conf(&mcf);
+    set_arg(&values[1], "off");
+    rc = ngx_http_markdown_stream_engine_handler(&cf, &cmd, &mcf);
+    TEST_ASSERT(rc == NGX_CONF_OK,
+        "stream_engine_handler 'off' should return NGX_CONF_OK");
+    TEST_ASSERT(mcf.stream.engine == NGX_HTTP_MARKDOWN_STREAM_ENGINE_OFF,
+        "stream_engine_handler 'off' should set engine to OFF (0)");
+
+    /* auto -> STREAM_ENGINE_AUTO */
+    init_conf(&mcf);
+    set_arg(&values[1], "auto");
+    rc = ngx_http_markdown_stream_engine_handler(&cf, &cmd, &mcf);
+    TEST_ASSERT(rc == NGX_CONF_OK,
+        "stream_engine_handler 'auto' should return NGX_CONF_OK");
+    TEST_ASSERT(mcf.stream.engine == NGX_HTTP_MARKDOWN_STREAM_ENGINE_AUTO,
+        "stream_engine_handler 'auto' should set engine to AUTO (1)");
+
+    /* on -> STREAM_ENGINE_ON */
+    init_conf(&mcf);
+    set_arg(&values[1], "on");
+    rc = ngx_http_markdown_stream_engine_handler(&cf, &cmd, &mcf);
+    TEST_ASSERT(rc == NGX_CONF_OK,
+        "stream_engine_handler 'on' should return NGX_CONF_OK");
+    TEST_ASSERT(mcf.stream.engine == NGX_HTTP_MARKDOWN_STREAM_ENGINE_ON,
+        "stream_engine_handler 'on' should set engine to ON (2)");
+
+    TEST_PASS("5.1b v0.8.0 stream_engine_handler accepts valid values");
+}
+
+/* ================================================================
  * 5.2 Invalid values rejected
  * ================================================================ */
 static void
@@ -570,11 +671,109 @@ test_invalid_values(void)
 }
 
 /* ================================================================
+ * 5.2b v0.8.0 stream_engine_handler rejection
+ * ================================================================ */
+static void
+test_stream_engine_handler_rejection(void)
+{
+    ngx_conf_t               cf;
+    ngx_array_t              args;
+    ngx_str_t                values[2];
+    ngx_command_t            cmd;
+    ngx_http_markdown_conf_t mcf;
+    char                    *rc;
+
+    TEST_SUBSECTION("5.2b v0.8.0 stream_engine_handler rejection");
+
+    setup_cf(&cf, &args, values, 2);
+    set_arg(&cmd.name, "markdown_streaming_engine");
+    set_arg(&values[0], "markdown_streaming_engine");
+
+    /* Invalid value: "yes" */
+    init_conf(&mcf);
+    set_arg(&values[1], "yes");
+    rc = ngx_http_markdown_stream_engine_handler(&cf, &cmd, &mcf);
+    TEST_ASSERT(rc == NGX_CONF_ERROR,
+        "stream_engine_handler 'yes' should return NGX_CONF_ERROR");
+    TEST_ASSERT(mcf.stream.engine == NGX_CONF_UNSET_UINT,
+        "stream_engine_handler 'yes' should leave engine unchanged");
+
+    /* Invalid value: "always" */
+    init_conf(&mcf);
+    set_arg(&values[1], "always");
+    rc = ngx_http_markdown_stream_engine_handler(&cf, &cmd, &mcf);
+    TEST_ASSERT(rc == NGX_CONF_ERROR,
+        "stream_engine_handler 'always' should return NGX_CONF_ERROR");
+
+    /* Invalid value: empty string */
+    init_conf(&mcf);
+    set_arg(&values[1], "");
+    rc = ngx_http_markdown_stream_engine_handler(&cf, &cmd, &mcf);
+    TEST_ASSERT(rc == NGX_CONF_ERROR,
+        "stream_engine_handler '' should return NGX_CONF_ERROR");
+
+    /* Duplicate detection: call twice, second should return "is duplicate" */
+    init_conf(&mcf);
+    set_arg(&values[1], "on");
+    rc = ngx_http_markdown_stream_engine_handler(&cf, &cmd, &mcf);
+    TEST_ASSERT(rc == NGX_CONF_OK,
+        "stream_engine_handler first call should succeed");
+    TEST_ASSERT(mcf.stream.engine == NGX_HTTP_MARKDOWN_STREAM_ENGINE_ON,
+        "stream_engine_handler first call should set engine");
+
+    /* Second call with engine already set -> "is duplicate" */
+    set_arg(&values[1], "off");
+    rc = ngx_http_markdown_stream_engine_handler(&cf, &cmd, &mcf);
+    TEST_ASSERT(rc != NGX_CONF_OK && rc != NGX_CONF_ERROR,
+        "stream_engine_handler duplicate should return error string");
+    TEST_ASSERT(strcmp(rc, "is duplicate") == 0,
+        "stream_engine_handler duplicate should return 'is duplicate'");
+
+    TEST_PASS("5.2b v0.8.0 stream_engine_handler rejects invalid/duplicate");
+}
+
+/* ================================================================
+ * 5.2c Allocation failure paths
+ * ================================================================ */
+static void
+test_allocation_failure(void)
+{
+    ngx_conf_t               cf;
+    ngx_array_t              args;
+    ngx_str_t                values[2];
+    ngx_command_t            cmd;
+    ngx_http_markdown_conf_t mcf;
+    char                    *rc;
+
+    TEST_SUBSECTION("5.2c Allocation failure paths");
+
+    setup_cf(&cf, &args, values, 2);
+    set_arg(&cmd.name, "markdown_stream_excluded_types");
+    set_arg(&values[0], "markdown_stream_excluded_types");
+    set_arg(&values[1], "text/csv");
+
+    /* Force the next allocation call to fail */
+    init_conf(&mcf);
+    g_next_palloc_fails = 1;
+    rc = ngx_http_markdown_stream_excluded_types_handler(&cf, &cmd, &mcf);
+    TEST_ASSERT(rc == NGX_CONF_ERROR,
+        "excluded_types handler should return NGX_CONF_ERROR on alloc failure");
+    TEST_ASSERT(mcf.stream.excluded_types == NULL,
+        "excluded_types should be NULL after array allocation failure");
+    g_next_palloc_fails = 0;
+
+    TEST_PASS("5.2c Allocation failure correctly handled");
+}
+
+/* ================================================================
  * 5.3 Default inheritance
  * ================================================================ */
 
 /*
- * Simulates ngx_conf_merge_uint_value macro behavior.
+ * Local merge helpers mirror the standard ngx_conf_merge_* macros.
+ * These are trivial NGINX patterns unlikely to diverge from production.
+ * Production merge function: ngx_http_markdown_merge_stream_values()
+ * in src/ngx_http_markdown_config_core_impl.h.
  */
 static void
 merge_uint_value(ngx_uint_t *conf, ngx_uint_t prev, ngx_uint_t def)
@@ -584,9 +783,6 @@ merge_uint_value(ngx_uint_t *conf, ngx_uint_t prev, ngx_uint_t def)
     }
 }
 
-/*
- * Simulates ngx_conf_merge_size_value macro behavior.
- */
 static void
 merge_size_value(size_t *conf, size_t prev, size_t def)
 {
@@ -595,9 +791,6 @@ merge_size_value(size_t *conf, size_t prev, size_t def)
     }
 }
 
-/*
- * Simulates ngx_conf_merge_ptr_value macro behavior.
- */
 static void
 merge_ptr_value(ngx_array_t **conf, ngx_array_t *prev, ngx_array_t *def)
 {
@@ -743,88 +936,6 @@ test_reserved_directive_rejected(void)
 /* ================================================================
  * 5.5 Hard exclusions always present
  * ================================================================ */
-
-/*
- * Local re-implementation of the production exclusion check for unit
- * testing.  Mirrors ngx_http_markdown_stream_type_excluded() from
- * ngx_http_markdown_eligibility.c exactly.
- */
-static ngx_int_t
-test_stream_type_excluded(const ngx_str_t *content_type,
-    const ngx_http_markdown_conf_t *conf)
-{
-    static u_char  text_event_stream[] = "text/event-stream";
-    static u_char  application_x_ndjson[] = "application/x-ndjson";
-    static u_char  application_stream_json[] = "application/stream+json";
-
-    size_t               type_len;
-    ngx_uint_t           i;
-    const ngx_str_t     *entry;
-    u_char              *p;
-
-    if (content_type == NULL || content_type->len == 0
-        || content_type->data == NULL)
-    {
-        return 0;
-    }
-
-    type_len = content_type->len;
-    p = ngx_strlchr(content_type->data,
-                    content_type->data + content_type->len, ';');
-    if (p != NULL) {
-        type_len = (size_t) (p - content_type->data);
-    }
-
-    /* Strip trailing whitespace from type portion */
-    while (type_len > 0 && content_type->data[type_len - 1] == ' ') {
-        type_len--;
-    }
-
-    if (type_len == 0) {
-        return 0;
-    }
-
-    /* text/event-stream (17 chars) */
-    if (type_len == 17
-        && ngx_strncasecmp(content_type->data, text_event_stream, 17) == 0)
-    {
-        return 1;
-    }
-
-    /* application/x-ndjson (20 chars) */
-    if (type_len == 20
-        && ngx_strncasecmp(content_type->data,
-                           application_x_ndjson, 20) == 0)
-    {
-        return 1;
-    }
-
-    /* application/stream+json (23 chars) */
-    if (type_len == 23
-        && ngx_strncasecmp(content_type->data,
-                           application_stream_json, 23) == 0)
-    {
-        return 1;
-    }
-
-    /* Check user-configured exclusion array */
-    if (conf != NULL && conf->stream.excluded_types != NULL) {
-        entry = conf->stream.excluded_types->elts;
-
-        for (i = 0; i < conf->stream.excluded_types->nelts; i++) {
-            if (type_len == entry[i].len
-                && ngx_strncasecmp(content_type->data,
-                                   entry[i].data,
-                                   entry[i].len) == 0)
-            {
-                return 1;
-            }
-        }
-    }
-
-    return 0;
-}
-
 static void
 test_hard_exclusions_always_present(void)
 {
@@ -838,32 +949,32 @@ test_hard_exclusions_always_present(void)
 
     /* text/event-stream */
     set_arg(&ct, "text/event-stream");
-    TEST_ASSERT(test_stream_type_excluded(&ct, &conf) == 1,
+    TEST_ASSERT(ngx_http_markdown_stream_type_excluded(&ct, &conf) == 1,
         "text/event-stream should be hard-excluded");
 
     /* application/x-ndjson */
     set_arg(&ct, "application/x-ndjson");
-    TEST_ASSERT(test_stream_type_excluded(&ct, &conf) == 1,
+    TEST_ASSERT(ngx_http_markdown_stream_type_excluded(&ct, &conf) == 1,
         "application/x-ndjson should be hard-excluded");
 
     /* application/stream+json */
     set_arg(&ct, "application/stream+json");
-    TEST_ASSERT(test_stream_type_excluded(&ct, &conf) == 1,
+    TEST_ASSERT(ngx_http_markdown_stream_type_excluded(&ct, &conf) == 1,
         "application/stream+json should be hard-excluded");
 
     /* Non-excluded type should not be excluded */
     set_arg(&ct, "text/html");
-    TEST_ASSERT(test_stream_type_excluded(&ct, &conf) == 0,
+    TEST_ASSERT(ngx_http_markdown_stream_type_excluded(&ct, &conf) == 0,
         "text/html should NOT be excluded");
 
     /* NULL content_type should return 0 */
-    TEST_ASSERT(test_stream_type_excluded(NULL, &conf) == 0,
+    TEST_ASSERT(ngx_http_markdown_stream_type_excluded(NULL, &conf) == 0,
         "NULL content_type should not be excluded");
 
     /* Empty content_type should return 0 */
     ct.data = NULL;
     ct.len = 0;
-    TEST_ASSERT(test_stream_type_excluded(&ct, &conf) == 0,
+    TEST_ASSERT(ngx_http_markdown_stream_type_excluded(&ct, &conf) == 0,
         "empty content_type should not be excluded");
 
     /* User cannot remove hard exclusions */
@@ -882,20 +993,20 @@ test_hard_exclusions_always_present(void)
 
         /* Hard exclusion still present with user config */
         set_arg(&ct, "text/event-stream");
-        TEST_ASSERT(test_stream_type_excluded(&ct, &conf) == 1,
+        TEST_ASSERT(ngx_http_markdown_stream_type_excluded(&ct, &conf) == 1,
             "hard exclusion preserved with user config");
 
         set_arg(&ct, "application/x-ndjson");
-        TEST_ASSERT(test_stream_type_excluded(&ct, &conf) == 1,
+        TEST_ASSERT(ngx_http_markdown_stream_type_excluded(&ct, &conf) == 1,
             "application/x-ndjson hard exclusion preserved");
 
         set_arg(&ct, "application/stream+json");
-        TEST_ASSERT(test_stream_type_excluded(&ct, &conf) == 1,
+        TEST_ASSERT(ngx_http_markdown_stream_type_excluded(&ct, &conf) == 1,
             "application/stream+json hard exclusion preserved");
 
         /* User-configured type also excluded */
         set_arg(&ct, "text/csv");
-        TEST_ASSERT(test_stream_type_excluded(&ct, &conf) == 1,
+        TEST_ASSERT(ngx_http_markdown_stream_type_excluded(&ct, &conf) == 1,
             "user-configured type should also be excluded");
     }
 
@@ -963,52 +1074,52 @@ test_hard_exclusions_with_parameters(void)
 
     /* text/event-stream; charset=utf-8 */
     set_arg(&ct, "text/event-stream; charset=utf-8");
-    TEST_ASSERT(test_stream_type_excluded(&ct, &conf) == 1,
+    TEST_ASSERT(ngx_http_markdown_stream_type_excluded(&ct, &conf) == 1,
         "text/event-stream; charset=utf-8 should be excluded");
 
     /* TEXT/EVENT-STREAM (case variation) */
     set_arg(&ct, "TEXT/EVENT-STREAM");
-    TEST_ASSERT(test_stream_type_excluded(&ct, &conf) == 1,
+    TEST_ASSERT(ngx_http_markdown_stream_type_excluded(&ct, &conf) == 1,
         "TEXT/EVENT-STREAM (uppercase) should be excluded");
 
     /* Text/Event-Stream (mixed case) */
     set_arg(&ct, "Text/Event-Stream");
-    TEST_ASSERT(test_stream_type_excluded(&ct, &conf) == 1,
+    TEST_ASSERT(ngx_http_markdown_stream_type_excluded(&ct, &conf) == 1,
         "Text/Event-Stream (mixed case) should be excluded");
 
     /* application/x-ndjson; boundary=something */
     set_arg(&ct, "application/x-ndjson; boundary=something");
-    TEST_ASSERT(test_stream_type_excluded(&ct, &conf) == 1,
+    TEST_ASSERT(ngx_http_markdown_stream_type_excluded(&ct, &conf) == 1,
         "application/x-ndjson; boundary=something should be excluded");
 
     /* APPLICATION/X-NDJSON */
     set_arg(&ct, "APPLICATION/X-NDJSON");
-    TEST_ASSERT(test_stream_type_excluded(&ct, &conf) == 1,
+    TEST_ASSERT(ngx_http_markdown_stream_type_excluded(&ct, &conf) == 1,
         "APPLICATION/X-NDJSON (uppercase) should be excluded");
 
     /* application/stream+json; charset=utf-8 */
     set_arg(&ct, "application/stream+json; charset=utf-8");
-    TEST_ASSERT(test_stream_type_excluded(&ct, &conf) == 1,
+    TEST_ASSERT(ngx_http_markdown_stream_type_excluded(&ct, &conf) == 1,
         "application/stream+json with params should be excluded");
 
     /* APPLICATION/STREAM+JSON */
     set_arg(&ct, "APPLICATION/STREAM+JSON");
-    TEST_ASSERT(test_stream_type_excluded(&ct, &conf) == 1,
+    TEST_ASSERT(ngx_http_markdown_stream_type_excluded(&ct, &conf) == 1,
         "APPLICATION/STREAM+JSON (uppercase) should be excluded");
 
     /* text/event-stream with trailing space before semicolon */
     set_arg(&ct, "text/event-stream ;charset=utf-8");
-    TEST_ASSERT(test_stream_type_excluded(&ct, &conf) == 1,
+    TEST_ASSERT(ngx_http_markdown_stream_type_excluded(&ct, &conf) == 1,
         "text/event-stream with space before params should be excluded");
 
     /* Non-excluded type with parameters should not be excluded */
     set_arg(&ct, "text/html; charset=utf-8");
-    TEST_ASSERT(test_stream_type_excluded(&ct, &conf) == 0,
+    TEST_ASSERT(ngx_http_markdown_stream_type_excluded(&ct, &conf) == 0,
         "text/html; charset=utf-8 should NOT be excluded");
 
     /* Partial match should not be excluded */
     set_arg(&ct, "text/event-streaming");
-    TEST_ASSERT(test_stream_type_excluded(&ct, &conf) == 0,
+    TEST_ASSERT(ngx_http_markdown_stream_type_excluded(&ct, &conf) == 0,
         "text/event-streaming (longer) should NOT be excluded");
 
     TEST_PASS("5.7 Hard exclusions match with parameters and case");
@@ -1025,7 +1136,10 @@ main(void)
     memset(&g_main_conf, 0, sizeof(g_main_conf));
 
     test_valid_values();
+    test_stream_engine_handler_valid();
     test_invalid_values();
+    test_stream_engine_handler_rejection();
+    test_allocation_failure();
     test_default_inheritance();
     test_reserved_directive_rejected();
     test_hard_exclusions_always_present();
