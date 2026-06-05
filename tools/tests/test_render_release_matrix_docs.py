@@ -412,13 +412,12 @@ def test_write_then_check_idempotent():
         tmp_path = Path(f.name)
 
     try:
-        _extracted_from_test_write_then_check_idempotent_23(entries, tmp_path)
+        _assert_support_matrix_write_idempotent(entries, tmp_path)
     finally:
         tmp_path.unlink()
 
 
-# TODO Rename this here and in `test_write_then_check_idempotent`
-def _extracted_from_test_write_then_check_idempotent_23(entries, tmp_path):
+def _assert_support_matrix_write_idempotent(entries, tmp_path):
     # Generate expected content
     generated = rmd.generate_section("support-matrix", entries, MINIMAL_MATRIX)
 
