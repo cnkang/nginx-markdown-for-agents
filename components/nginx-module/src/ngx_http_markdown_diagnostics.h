@@ -54,8 +54,10 @@ struct ngx_cycle_s;
  * NGX_HTTP_MARKDOWN_DIAG_JSON_BASE_SIZE:
  *   Covers the fixed-size JSON envelope: config_snapshot (dynconf
  *   snapshot serialization), metrics_snapshot (4 counters), dynconf_state
- *   (4 fields), section keys, braces, commas, and whitespace.  Must be
- *   >= the maximum rendered size of all non-decision sections combined.
+ *   (4 fields), streaming_config (3 fields), streaming_metrics
+ *   (8 counters), section keys, braces, commas, and whitespace.
+ *   Must be >= the maximum rendered size of all non-decision sections
+ *   combined.
  *
  * NGX_HTTP_MARKDOWN_DIAG_JSON_DECISION_SIZE:
  *   Covers one recent_decisions entry: {"timestamp": <ms>, "reason_code":
@@ -66,7 +68,7 @@ struct ngx_cycle_s;
  * must be updated.  Truncation is detected at runtime by build_json and
  * returns NGX_ERROR (500) rather than serving incomplete JSON.
  */
-#define NGX_HTTP_MARKDOWN_DIAG_JSON_BASE_SIZE    32768
+#define NGX_HTTP_MARKDOWN_DIAG_JSON_BASE_SIZE    33368
 #define NGX_HTTP_MARKDOWN_DIAG_JSON_DECISION_SIZE 128
 
 
@@ -158,6 +160,7 @@ void ngx_http_markdown_diagnostics_record(
  *   - recent_decisions: ring buffer contents (newest first)
  *   - metrics_snapshot: current metrics counters
  *   - dynconf_state: dynamic configuration watcher state
+ *   - streaming_config: streaming engine configuration
  *
  * Access control: by default (no markdown_diagnostics_allow directives),
  * only loopback clients (127.0.0.1 or ::1) are permitted.  When one or more
@@ -270,6 +273,17 @@ typedef struct {
     ngx_atomic_uint_t  delivery_total;
     ngx_atomic_uint_t  requests_total;
     ngx_atomic_uint_t  failopen_total;
+#ifdef MARKDOWN_STREAMING_ENABLED
+    /* Streaming metrics (spec-39) */
+    ngx_atomic_uint_t  streaming_requests_total;
+    ngx_atomic_uint_t  streaming_succeeded_total;
+    ngx_atomic_uint_t  streaming_failed_total;
+    ngx_atomic_uint_t  streaming_fallback_total;
+    ngx_atomic_uint_t  streaming_candidate_total;
+    ngx_atomic_uint_t  streaming_output_bytes_total;
+    ngx_atomic_uint_t  engine_choice_streaming;
+    ngx_atomic_uint_t  engine_choice_full_buffer;
+#endif
 } ngx_http_markdown_diag_metrics_t;
 
 

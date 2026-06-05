@@ -110,6 +110,93 @@ typedef struct ngx_http_markdown_otel_span_s  ngx_http_markdown_otel_span_t;
  */
 #define NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_PASS    0
 #define NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_REJECT  1
+
+/*
+ * Streaming engine reason codes (spec-39).
+ *
+ * Stable identifiers explaining why a particular engine path was chosen.
+ * Additive only — removal requires major version bump.
+ */
+typedef enum {
+    /* Engine choice: true streaming */
+    NGX_HTTP_MARKDOWN_STREAM_REASON_ELIGIBLE = 0,
+
+    /* Engine choice: full buffer */
+    NGX_HTTP_MARKDOWN_STREAM_REASON_CONTENT_LENGTH_KNOWN,
+    NGX_HTTP_MARKDOWN_STREAM_REASON_BELOW_THRESHOLD,
+    NGX_HTTP_MARKDOWN_STREAM_REASON_CONFIG_DISABLED,
+
+    /* Engine choice: passthrough */
+    NGX_HTTP_MARKDOWN_STREAM_REASON_EXCLUDED_CONTENT_TYPE,
+    NGX_HTTP_MARKDOWN_STREAM_REASON_NOT_HTML,
+
+    /* Engine choice: not eligible */
+    NGX_HTTP_MARKDOWN_STREAM_REASON_NOT_CANDIDATE,
+    NGX_HTTP_MARKDOWN_STREAM_REASON_ACCEPT_MISMATCH,
+
+    /* Fallback reasons */
+    NGX_HTTP_MARKDOWN_STREAM_REASON_PRECOMMIT_HTML_ERROR,
+    NGX_HTTP_MARKDOWN_STREAM_REASON_PRECOMMIT_BUDGET,
+    NGX_HTTP_MARKDOWN_STREAM_REASON_PRECOMMIT_TIMEOUT,
+
+    /* Post-commit failure reasons */
+    NGX_HTTP_MARKDOWN_STREAM_REASON_POSTCOMMIT_PARSE_ERROR,
+    NGX_HTTP_MARKDOWN_STREAM_REASON_POSTCOMMIT_BUDGET_EXCEEDED,
+    NGX_HTTP_MARKDOWN_STREAM_REASON_POSTCOMMIT_IO_ERROR,
+
+    /* Sentinel — must be last */
+    NGX_HTTP_MARKDOWN_STREAM_REASON_COUNT
+} ngx_http_markdown_stream_reason_e;
+
+/*
+ * Map streaming reason code to its stable string identifier.
+ *
+ * Returns a static NUL-terminated string suitable for logs,
+ * JSON output, and Prometheus labels.  Unknown values return
+ * "unknown".
+ */
+static ngx_inline const char *
+ngx_http_markdown_stream_reason_str(
+    ngx_http_markdown_stream_reason_e reason)
+{
+    static const char *reason_strings[] = {
+        /* NGX_HTTP_MARKDOWN_STREAM_REASON_ELIGIBLE */
+        "eligible",
+        /* NGX_HTTP_MARKDOWN_STREAM_REASON_CONTENT_LENGTH_KNOWN */
+        "content_length_known",
+        /* NGX_HTTP_MARKDOWN_STREAM_REASON_BELOW_THRESHOLD */
+        "below_threshold",
+        /* NGX_HTTP_MARKDOWN_STREAM_REASON_CONFIG_DISABLED */
+        "config_disabled",
+        /* NGX_HTTP_MARKDOWN_STREAM_REASON_EXCLUDED_CONTENT_TYPE */
+        "excluded_content_type",
+        /* NGX_HTTP_MARKDOWN_STREAM_REASON_NOT_HTML */
+        "not_html",
+        /* NGX_HTTP_MARKDOWN_STREAM_REASON_NOT_CANDIDATE */
+        "not_candidate",
+        /* NGX_HTTP_MARKDOWN_STREAM_REASON_ACCEPT_MISMATCH */
+        "accept_mismatch",
+        /* NGX_HTTP_MARKDOWN_STREAM_REASON_PRECOMMIT_HTML_ERROR */
+        "precommit_html_error",
+        /* NGX_HTTP_MARKDOWN_STREAM_REASON_PRECOMMIT_BUDGET */
+        "precommit_budget",
+        /* NGX_HTTP_MARKDOWN_STREAM_REASON_PRECOMMIT_TIMEOUT */
+        "precommit_timeout",
+        /* NGX_HTTP_MARKDOWN_STREAM_REASON_POSTCOMMIT_PARSE_ERROR */
+        "postcommit_parse_error",
+        /* NGX_HTTP_MARKDOWN_STREAM_REASON_POSTCOMMIT_BUDGET_EXCEEDED */
+        "postcommit_budget_exceeded",
+        /* NGX_HTTP_MARKDOWN_STREAM_REASON_POSTCOMMIT_IO_ERROR */
+        "postcommit_io_error"
+    };
+
+    if ((unsigned) reason >= NGX_HTTP_MARKDOWN_STREAM_REASON_COUNT) {
+        return "unknown";
+    }
+
+    return reason_strings[(unsigned) reason];
+}
+
 #endif /* MARKDOWN_STREAMING_ENABLED */
 
 /*
@@ -622,6 +709,9 @@ typedef struct {
         /* Commit state: PRE or POST */
         ngx_uint_t                        commit_state;
 
+        /* Engine choice reason code (spec-39 observability) */
+        ngx_http_markdown_stream_reason_e reason;
+
         /* Pending output chain for backpressure */
         ngx_chain_t                      *pending_output;
 
@@ -642,6 +732,9 @@ typedef struct {
 
         /* Pending output chain has non-empty data (for TTFB resume path) */
         ngx_flag_t                        pending_has_data;
+
+        /* Pending output byte count (for deferred metric accounting) */
+        size_t                            pending_output_bytes;
 
         /* Pending output is a fail-open delivery; resume_pending should
            increment results.failopen_count on downstream success. */
@@ -841,6 +934,24 @@ typedef struct {
         ngx_atomic_t  shadow_diff_total;         /* Shadow output diffs */
         ngx_atomic_t  last_ttfb_ms;              /* Last streaming TTFB (milliseconds) */
         ngx_atomic_t  last_peak_memory_bytes;    /* Last streaming peak estimate (bytes; not RSS) */
+
+        /* Engine choice counters (v0.8.0 observability) */
+        ngx_atomic_t  engine_choice_streaming;   /* Chose true streaming engine */
+        ngx_atomic_t  engine_choice_full_buffer; /* Chose full-buffer engine */
+        ngx_atomic_t  engine_choice_passthrough; /* Marked passthrough */
+        ngx_atomic_t  engine_choice_not_eligible; /* Not eligible for streaming */
+
+        /* Fallback/failure counters */
+        ngx_atomic_t  streaming_fallback_precommit_pass;  /* Pre-commit HTML pass-through */
+        ngx_atomic_t  streaming_fallback_precommit_reject; /* Pre-commit rejection */
+        ngx_atomic_t  streaming_failure_postcommit_abort;  /* Post-commit abort */
+        ngx_atomic_t  streaming_failure_postcommit_safe_finish; /* Post-commit safe finish */
+
+        /* Candidate and selection counters */
+        ngx_atomic_t  streaming_candidate_total;       /* Total candidates evaluated */
+        ngx_atomic_t  true_streaming_selected_total;   /* Final true streaming selections */
+        ngx_atomic_t  streaming_output_bytes_total;    /* Total Markdown bytes via streaming */
+        ngx_atomic_t  excluded_content_type_total;     /* Excluded due to content type */
     } streaming;
 #endif
 

@@ -669,6 +669,8 @@ common_checks:
     if (ngx_http_markdown_is_excluded_stream_type(
             r, conf))
     {
+        NGX_HTTP_MARKDOWN_METRIC_INC(
+            streaming.excluded_content_type_total);
         ngx_http_markdown_log_decision(r, conf, eff,
             ngx_http_markdown_reason_streaming_skip_unsupported());
         return NGX_HTTP_MARKDOWN_PATH_FULLBUFFER;
@@ -888,6 +890,7 @@ ngx_http_markdown_streaming_save_pending(
     ctx->streaming.pending_output = out;
     ctx->streaming.pending_has_data =
         (data != NULL && len > 0) ? 1 : 0;
+    ctx->streaming.pending_output_bytes = len;
     r->buffered |= NGX_HTTP_MARKDOWN_BUFFERED;
 
     return NGX_AGAIN;
@@ -987,6 +990,9 @@ ngx_http_markdown_streaming_send_output(
 
         if (data != NULL && len > 0) {
             ngx_http_markdown_streaming_record_ttfb(ctx);
+            NGX_HTTP_MARKDOWN_METRIC_ADD(
+                streaming.streaming_output_bytes_total,
+                (ngx_atomic_int_t) len);
         }
     }
 
@@ -1037,6 +1043,8 @@ ngx_http_markdown_streaming_record_postcommit_failure(
     const ngx_http_markdown_conf_t *conf)
 {
     if (!ctx->streaming.completion.failure_recorded) {
+        ctx->streaming.reason =
+            NGX_HTTP_MARKDOWN_STREAM_REASON_POSTCOMMIT_PARSE_ERROR;
         NGX_HTTP_MARKDOWN_METRIC_INC(streaming.postcommit_error_total);
         NGX_HTTP_MARKDOWN_METRIC_INC(streaming.failed_total);
 
@@ -1047,6 +1055,31 @@ ngx_http_markdown_streaming_record_postcommit_failure(
          * handle_postcommit_error() before this call.
          */
         NGX_HTTP_MARKDOWN_METRIC_INC(conversions_failed);
+
+        /*
+         * Post-commit failures always take the abort path
+         * (protocol-safe disconnect).  The safe_finish counter
+         * is incremented separately if the graceful closure
+         * path itself fails.
+         */
+        NGX_HTTP_MARKDOWN_METRIC_INC(
+            streaming.streaming_failure_postcommit_abort);
+
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+            "markdown: streaming post-commit failure: "
+            "engine=streaming phase=postcommit "
+            "committed=1 fallback_available=0 "
+            "reason=%s content_type=%V "
+            "content_length_known=%d chunked=%d "
+            "markdown_on_error=%s",
+            ngx_http_markdown_stream_reason_str(
+                ctx->streaming.reason),
+            &r->headers_out.content_type,
+            (r->headers_out.content_length_n >= 0) ? 1 : 0,
+            (r->headers_out.content_length_n < 0) ? 1 : 0,
+            (conf->streaming.on_error
+             == NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_REJECT)
+                ? "reject" : "pass");
 
         ctx->streaming.completion.failure_recorded = 1;
     }
@@ -1226,6 +1259,19 @@ ngx_http_markdown_streaming_resume_pending(
     ctx->streaming.pending_has_data = 0;
 
     /*
+     * Account for deferred output bytes that were saved on
+     * NGX_AGAIN in send_output and now confirmed delivered.
+     */
+    if ((rc == NGX_OK || rc == NGX_DONE)
+        && ctx->streaming.pending_output_bytes > 0)
+    {
+        NGX_HTTP_MARKDOWN_METRIC_ADD(
+            streaming.streaming_output_bytes_total,
+            (ngx_atomic_int_t) ctx->streaming.pending_output_bytes);
+    }
+    ctx->streaming.pending_output_bytes = 0;
+
+    /*
      * Pending output drained. Check if resume failed before
      * proceeding to deferred lastbuf, to avoid the failure
      * branch being short-circuited.
@@ -1359,9 +1405,22 @@ ngx_http_markdown_streaming_fallback_to_fullbuffer(
     }
     NGX_HTTP_MARKDOWN_METRIC_INC(path_hits.fullbuffer);
     NGX_HTTP_MARKDOWN_METRIC_INC(streaming.fallback_total);
+    NGX_HTTP_MARKDOWN_METRIC_INC(
+        streaming.streaming_fallback_precommit_pass);
 
     ngx_http_markdown_log_decision(r, conf, ctx->effective_conf,
         ngx_http_markdown_reason_streaming_fallback());
+
+    ngx_log_error(NGX_LOG_INFO, r->connection->log, 0,
+        "markdown: streaming fallback: "
+        "engine=full_buffer phase=precommit "
+        "committed=0 fallback_available=1 "
+        "reason=precommit_html_error "
+        "content_type=%V "
+        "content_length_known=%d "
+        "markdown_on_error=pass",
+        &r->headers_out.content_type,
+        (r->headers_out.content_length_n >= 0) ? 1 : 0);
 
     /*
      * Transfer prebuffer data to the main buffer for
@@ -1571,19 +1630,49 @@ ngx_http_markdown_streaming_precommit_error(
         == NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_REJECT)
     {
         /* Fail-closed: record reject metrics and reason */
+        ctx->streaming.reason =
+            NGX_HTTP_MARKDOWN_STREAM_REASON_PRECOMMIT_HTML_ERROR;
         NGX_HTTP_MARKDOWN_METRIC_INC(
             streaming.precommit_reject_total);
+        NGX_HTTP_MARKDOWN_METRIC_INC(
+            streaming.streaming_fallback_precommit_reject);
         ngx_http_markdown_log_decision(r, conf, ctx->effective_conf,
             ngx_http_markdown_reason_streaming_precommit_reject());
+        ngx_log_error(NGX_LOG_INFO, r->connection->log, 0,
+            "markdown: streaming fallback: "
+            "engine=rejected phase=precommit "
+            "committed=0 fallback_available=0 "
+            "reason=%s content_type=%V "
+            "content_length_known=%d "
+            "markdown_on_error=reject",
+            ngx_http_markdown_stream_reason_str(
+                ctx->streaming.reason),
+            &r->headers_out.content_type,
+            (r->headers_out.content_length_n >= 0) ? 1 : 0);
         return NGX_ERROR;
     }
 
     /* Fail-open: pass original content */
+    ctx->streaming.reason =
+        NGX_HTTP_MARKDOWN_STREAM_REASON_PRECOMMIT_HTML_ERROR;
     ctx->eligible = 0;
     NGX_HTTP_MARKDOWN_METRIC_INC(
         streaming.precommit_failopen_total);
+    NGX_HTTP_MARKDOWN_METRIC_INC(
+        streaming.streaming_fallback_precommit_pass);
     ngx_http_markdown_log_decision(r, conf, ctx->effective_conf,
         ngx_http_markdown_reason_streaming_precommit_failopen());
+    ngx_log_error(NGX_LOG_INFO, r->connection->log, 0,
+        "markdown: streaming fallback: "
+        "engine=passthrough phase=precommit "
+        "committed=0 fallback_available=1 "
+        "reason=%s content_type=%V "
+        "content_length_known=%d "
+        "markdown_on_error=pass",
+        ngx_http_markdown_stream_reason_str(
+            ctx->streaming.reason),
+        &r->headers_out.content_type,
+        (r->headers_out.content_length_n >= 0) ? 1 : 0);
     return NGX_DECLINED;
 }
 

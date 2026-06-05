@@ -715,6 +715,8 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
      * once and cache the result. If streaming is selected,
      * skip the threshold router entirely.
      */
+    NGX_HTTP_MARKDOWN_METRIC_INC(streaming.streaming_candidate_total);
+
     ctx->processing_path =
         ngx_http_markdown_select_processing_path(
             r, conf, ctx->effective_conf);
@@ -738,12 +740,28 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
     {
         ctx->processing_path =
             NGX_HTTP_MARKDOWN_PATH_FULLBUFFER;
+        ctx->streaming.reason =
+            NGX_HTTP_MARKDOWN_STREAM_REASON_EXCLUDED_CONTENT_TYPE;
 
-        ngx_log_debug0(NGX_LOG_DEBUG_HTTP,
+        NGX_HTTP_MARKDOWN_METRIC_INC(
+            streaming.engine_choice_full_buffer);
+
+        ngx_log_debug5(NGX_LOG_DEBUG_HTTP,
             r->connection->log, 0,
-            "markdown: streaming path overridden: "
-            "compressed response routed to "
-            "full-buffer for safe decompression");
+            "markdown: streaming decision: "
+            "engine=full_buffer phase=header_filter "
+            "committed=0 fallback_available=1 "
+            "reason=%s content_type=%V "
+            "content_length_known=%d chunked=%d "
+            "markdown_on_error=%s",
+            ngx_http_markdown_stream_reason_str(
+                ctx->streaming.reason),
+            &r->headers_out.content_type,
+            (r->headers_out.content_length_n >= 0) ? 1 : 0,
+            (r->headers_out.content_length_n < 0) ? 1 : 0,
+            (conf->streaming.on_error
+             == NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_PASS)
+                ? "pass" : "reject");
 
         ngx_http_markdown_log_decision(
             r, conf, ctx->effective_conf,
@@ -755,16 +773,62 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
     if (ctx->processing_path
         == NGX_HTTP_MARKDOWN_PATH_STREAMING)
     {
-        ngx_log_debug0(NGX_LOG_DEBUG_HTTP,
+        ctx->streaming.reason =
+            NGX_HTTP_MARKDOWN_STREAM_REASON_ELIGIBLE;
+
+        NGX_HTTP_MARKDOWN_METRIC_INC(
+            streaming.engine_choice_streaming);
+        NGX_HTTP_MARKDOWN_METRIC_INC(
+            streaming.true_streaming_selected_total);
+
+        ngx_log_debug5(NGX_LOG_DEBUG_HTTP,
             r->connection->log, 0,
-            "markdown: streaming path "
-            "selected by engine selector");
+            "markdown: streaming decision: "
+            "engine=streaming phase=header_filter "
+            "committed=0 fallback_available=1 "
+            "reason=%s content_type=%V "
+            "content_length_known=%d chunked=%d "
+            "markdown_on_error=%s",
+            ngx_http_markdown_stream_reason_str(
+                ctx->streaming.reason),
+            &r->headers_out.content_type,
+            (r->headers_out.content_length_n >= 0) ? 1 : 0,
+            (r->headers_out.content_length_n < 0) ? 1 : 0,
+            (conf->streaming.on_error
+             == NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_PASS)
+                ? "pass" : "reject");
 
         ngx_http_markdown_log_decision(r, conf, ctx->effective_conf,
             ngx_http_markdown_reason_engine_streaming());
 
         goto path_selected;
     }
+
+    /*
+     * select_processing_path() returned FULLBUFFER without
+     * compression override — record engine choice here.
+     */
+    ctx->streaming.reason =
+        NGX_HTTP_MARKDOWN_STREAM_REASON_BELOW_THRESHOLD;
+    NGX_HTTP_MARKDOWN_METRIC_INC(
+        streaming.engine_choice_full_buffer);
+
+    ngx_log_debug5(NGX_LOG_DEBUG_HTTP,
+        r->connection->log, 0,
+        "markdown: streaming decision: "
+        "engine=full_buffer phase=header_filter "
+        "committed=0 fallback_available=1 "
+        "reason=%s content_type=%V "
+        "content_length_known=%d chunked=%d "
+        "markdown_on_error=%s",
+        ngx_http_markdown_stream_reason_str(
+            ctx->streaming.reason),
+        &r->headers_out.content_type,
+        (r->headers_out.content_length_n >= 0) ? 1 : 0,
+        (r->headers_out.content_length_n < 0) ? 1 : 0,
+        (conf->streaming.on_error
+         == NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_PASS)
+            ? "pass" : "reject");
 #endif /* MARKDOWN_STREAMING_ENABLED */
 
 #ifdef MARKDOWN_INCREMENTAL_ENABLED

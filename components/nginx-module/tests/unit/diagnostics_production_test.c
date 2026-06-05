@@ -32,6 +32,20 @@
 #define NGX_HTTP_MARKDOWN_LOG_INFO   2
 #define NGX_HTTP_MARKDOWN_LOG_DEBUG  3
 
+#ifdef MARKDOWN_STREAMING_ENABLED
+#define NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_PASS    0
+#define NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_REJECT  1
+
+typedef struct {
+    ngx_http_complex_value_t  *engine;
+    size_t                     budget;
+    ngx_flag_t                 budget_explicit;
+    ngx_uint_t                 on_error;
+    ngx_flag_t                 shadow;
+    size_t                     auto_threshold;
+} ngx_http_markdown_streaming_cfg_t;
+#endif
+
 #define ngx_memcpy(dst, src, n)      memcpy(dst, src, n)
 #define ngx_strcmp(s1, s2)           strcmp((const char *) (s1), (const char *) (s2))
 
@@ -109,6 +123,9 @@ typedef struct {
 typedef struct ngx_http_markdown_conf_s {
     ngx_http_markdown_ops_cfg_t     ops;
     ngx_http_markdown_policy_cfg_t  policy;
+#ifdef MARKDOWN_STREAMING_ENABLED
+    ngx_http_markdown_streaming_cfg_t streaming;
+#endif
 } ngx_http_markdown_conf_t;
 
 typedef struct ngx_http_markdown_effective_conf_s {
