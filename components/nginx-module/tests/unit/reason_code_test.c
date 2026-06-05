@@ -310,6 +310,10 @@ test_streaming_reason_codes(void)
     TEST_ASSERT(ngx_str_eq(rc, "STREAMING_SKIP_UNSUPPORTED"),
         "streaming_skip_unsupported() -> STREAMING_SKIP_UNSUPPORTED");
 
+    rc = ngx_http_markdown_reason_streaming_skip_compressed();
+    TEST_ASSERT(ngx_str_eq(rc, "STREAMING_SKIP_COMPRESSED"),
+        "streaming_skip_compressed() -> STREAMING_SKIP_COMPRESSED");
+
     rc = ngx_http_markdown_reason_streaming_budget_exceeded();
     TEST_ASSERT(ngx_str_eq(rc, "STREAMING_BUDGET_EXCEEDED"),
         "streaming_budget_exceeded() -> STREAMING_BUDGET_EXCEEDED");
