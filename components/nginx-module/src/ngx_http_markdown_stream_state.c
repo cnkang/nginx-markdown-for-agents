@@ -21,32 +21,32 @@
 
 static ngx_http_markdown_decision_t
 ngx_http_markdown_stream_decide_not_eligible(
-    ngx_http_markdown_stream_ctx_t *ctx,
+    const ngx_http_markdown_stream_ctx_t *ctx,
     ngx_http_markdown_stream_event_e event);
 
 static ngx_http_markdown_decision_t
 ngx_http_markdown_stream_decide_streaming_candidate(
-    ngx_http_markdown_stream_ctx_t *ctx,
+    const ngx_http_markdown_stream_ctx_t *ctx,
     ngx_http_markdown_stream_event_e event);
 
 static ngx_http_markdown_decision_t
 ngx_http_markdown_stream_decide_pre_commit(
-    ngx_http_markdown_stream_ctx_t *ctx,
+    const ngx_http_markdown_stream_ctx_t *ctx,
     ngx_http_markdown_stream_event_e event);
 
 static ngx_http_markdown_decision_t
 ngx_http_markdown_stream_decide_pre_commit_replay_unavailable(
-    ngx_http_markdown_stream_ctx_t *ctx,
+    const ngx_http_markdown_stream_ctx_t *ctx,
     ngx_http_markdown_stream_event_e event);
 
 static ngx_http_markdown_decision_t
 ngx_http_markdown_stream_decide_committed(
-    ngx_http_markdown_stream_ctx_t *ctx,
+    const ngx_http_markdown_stream_ctx_t *ctx,
     ngx_http_markdown_stream_event_e event);
 
 static ngx_http_markdown_decision_t
 ngx_http_markdown_stream_decide_full_buffer(
-    ngx_http_markdown_stream_ctx_t *ctx,
+    const ngx_http_markdown_stream_ctx_t *ctx,
     ngx_http_markdown_stream_event_e event);
 
 
@@ -78,7 +78,7 @@ ngx_http_markdown_make_decision(
  */
 static ngx_http_markdown_decision_t
 ngx_http_markdown_try_full_buffer(
-    ngx_http_markdown_stream_ctx_t *ctx,
+    const ngx_http_markdown_stream_ctx_t *ctx,
     ngx_http_markdown_reason_code_e reason)
 {
     if (ctx->within_resource_limits) {
@@ -103,7 +103,7 @@ ngx_http_markdown_try_full_buffer(
  * a safe PASSTHROUGH decision.
  */
 ngx_http_markdown_decision_t
-ngx_http_markdown_stream_decide(ngx_http_markdown_stream_ctx_t *ctx,
+ngx_http_markdown_stream_decide(const ngx_http_markdown_stream_ctx_t *ctx,
                                 ngx_http_markdown_stream_event_e event)
 {
     if (ctx == NULL) {
@@ -181,7 +181,7 @@ ngx_http_markdown_stream_decide(ngx_http_markdown_stream_ctx_t *ctx,
  */
 static ngx_http_markdown_decision_t
 ngx_http_markdown_stream_decide_not_eligible(
-    ngx_http_markdown_stream_ctx_t *ctx,
+    const ngx_http_markdown_stream_ctx_t *ctx,
     ngx_http_markdown_stream_event_e event)
 {
     (void) ctx;
@@ -222,7 +222,7 @@ ngx_http_markdown_stream_decide_not_eligible(
  */
 static ngx_http_markdown_decision_t
 ngx_http_markdown_stream_decide_streaming_candidate(
-    ngx_http_markdown_stream_ctx_t *ctx,
+    const ngx_http_markdown_stream_ctx_t *ctx,
     ngx_http_markdown_stream_event_e event)
 {
     switch (event) {
@@ -283,7 +283,7 @@ ngx_http_markdown_stream_decide_streaming_candidate(
  */
 static ngx_http_markdown_decision_t
 ngx_http_markdown_stream_decide_pre_commit(
-    ngx_http_markdown_stream_ctx_t *ctx,
+    const ngx_http_markdown_stream_ctx_t *ctx,
     ngx_http_markdown_stream_event_e event)
 {
     /*
@@ -403,7 +403,7 @@ ngx_http_markdown_stream_decide_pre_commit(
  */
 static ngx_http_markdown_decision_t
 ngx_http_markdown_stream_decide_pre_commit_replay_unavailable(
-    ngx_http_markdown_stream_ctx_t *ctx,
+    const ngx_http_markdown_stream_ctx_t *ctx,
     ngx_http_markdown_stream_event_e event)
 {
     switch (event) {
@@ -472,12 +472,10 @@ ngx_http_markdown_stream_decide_pre_commit_replay_unavailable(
  */
 static ngx_http_markdown_decision_t
 ngx_http_markdown_stream_decide_committed(
-    ngx_http_markdown_stream_ctx_t *ctx,
+    const ngx_http_markdown_stream_ctx_t *ctx,
     ngx_http_markdown_stream_event_e event)
 {
-    switch (event) {
-
-    case NGX_HTTP_MD_EVENT_ERROR:
+    if (event == NGX_HTTP_MD_EVENT_ERROR) {
         if (ctx->on_error_policy == NGX_HTTP_MARKDOWN_ON_ERROR_PASS) {
             return ngx_http_markdown_make_decision(
                 NGX_HTTP_MD_STATE_POST_COMMIT_SAFE_FINISH,
@@ -489,17 +487,16 @@ ngx_http_markdown_stream_decide_committed(
             NGX_HTTP_MD_STATE_POST_COMMIT_ABORT,
             NGX_HTTP_MD_ACTION_ABORT,
             NGX_HTTP_MD_REASON_POST_COMMIT_ERROR);
-
-    default:
-        /*
-         * Non-error events in COMMITTED: streaming continues.
-         * Stay in COMMITTED state with no action change.
-         */
-        return ngx_http_markdown_make_decision(
-            NGX_HTTP_MD_STATE_COMMITTED,
-            NGX_HTTP_MD_ACTION_CONTINUE_STREAMING,
-            NGX_HTTP_MD_REASON_COMMIT_SUCCESS);
     }
+
+    /*
+     * Non-error events in COMMITTED: streaming continues.
+     * Stay in COMMITTED state with no action change.
+     */
+    return ngx_http_markdown_make_decision(
+        NGX_HTTP_MD_STATE_COMMITTED,
+        NGX_HTTP_MD_ACTION_CONTINUE_STREAMING,
+        NGX_HTTP_MD_REASON_COMMIT_SUCCESS);
 }
 
 
@@ -513,24 +510,21 @@ ngx_http_markdown_stream_decide_committed(
  */
 static ngx_http_markdown_decision_t
 ngx_http_markdown_stream_decide_full_buffer(
-    ngx_http_markdown_stream_ctx_t *ctx,
+    const ngx_http_markdown_stream_ctx_t *ctx,
     ngx_http_markdown_stream_event_e event)
 {
     (void) ctx;
 
-    switch (event) {
-
-    case NGX_HTTP_MD_EVENT_RESOURCE_LIMIT:
+    if (event == NGX_HTTP_MD_EVENT_RESOURCE_LIMIT) {
         return ngx_http_markdown_make_decision(
             NGX_HTTP_MD_STATE_PASSTHROUGH,
             NGX_HTTP_MD_ACTION_PASSTHROUGH,
             NGX_HTTP_MD_REASON_RESOURCE_LIMIT_EXCEEDED);
-
-    default:
-        /* Stay in full-buffer mode */
-        return ngx_http_markdown_make_decision(
-            NGX_HTTP_MD_STATE_FULL_BUFFER_FALLBACK,
-            NGX_HTTP_MD_ACTION_SWITCH_FULL_BUFFER,
-            NGX_HTTP_MD_REASON_FULL_DOC_FEATURE);
     }
+
+    /* Stay in full-buffer mode */
+    return ngx_http_markdown_make_decision(
+        NGX_HTTP_MD_STATE_FULL_BUFFER_FALLBACK,
+        NGX_HTTP_MD_ACTION_SWITCH_FULL_BUFFER,
+        NGX_HTTP_MD_REASON_FULL_DOC_FEATURE);
 }

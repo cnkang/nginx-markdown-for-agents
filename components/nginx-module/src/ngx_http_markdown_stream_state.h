@@ -75,7 +75,7 @@ typedef struct {
  *   NOT_ELIGIBLE.
  */
 ngx_http_markdown_decision_t
-ngx_http_markdown_stream_decide(ngx_http_markdown_stream_ctx_t *ctx,
+ngx_http_markdown_stream_decide(const ngx_http_markdown_stream_ctx_t *ctx,
                                 ngx_http_markdown_stream_event_e event);
 
 
