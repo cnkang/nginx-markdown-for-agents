@@ -989,6 +989,8 @@ ngx_http_markdown_set_dynconf_path(ngx_conf_t *cf, ngx_command_t *cmd,
  * time and reject invalid input with clear error messages.
  */
 
+#if !defined(MARKDOWN_STREAMING_ENABLED)                                      \
+    || defined(NGX_HTTP_MARKDOWN_TEST_LEGACY_STREAM_ENGINE_HANDLER)
 /*
  * Configuration directive handler: markdown_streaming_engine (v0.8.0)
  *
@@ -1041,6 +1043,7 @@ ngx_http_markdown_stream_engine_handler(ngx_conf_t *cf,
 
     return NGX_CONF_OK;
 }
+#endif
 
 /*
  * Configuration directive handler: markdown_stream_threshold (v0.8.0)

@@ -22,6 +22,7 @@
 #include <stdarg.h>
 
 #define MARKDOWN_STREAMING_ENABLED 1
+#define NGX_HTTP_MARKDOWN_TEST_LEGACY_STREAM_ENGINE_HANDLER 1
 
 #include "../../src/ngx_http_markdown_filter_module.h"
 
