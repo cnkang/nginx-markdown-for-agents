@@ -81,8 +81,8 @@ ngx_http_markdown_stream_postcommit_safe_finish(
     ctx->stream_sm.state = NGX_HTTP_MD_STATE_POST_COMMIT_SAFE_FINISH;
 
     /*
-     * TODO(spec-38): Call Rust finish-mode API here to emit
-     * closing markers for open Markdown structures.  If the
+     * Spec 38 follow-up: call the Rust finish-mode API here to
+     * emit closing markers for open Markdown structures.  If the
      * Rust converter handle is NULL or returns error, return
      * NGX_ERROR so the caller falls through to abort.
      *
@@ -205,13 +205,14 @@ ngx_http_markdown_stream_postcommit_abort(
 ngx_int_t
 ngx_http_markdown_stream_postcommit_guard(
     ngx_http_request_t *r,
-    ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_ctx_t *ctx,
     ngx_chain_t *chain)
 {
-    ngx_chain_t  *cl;
     ngx_buf_t    *buf;
     size_t        len;
     u_char       *p;
+    u_char        doctype[] = "DOCTYPE";
+    u_char        html_tag[] = "html";
 
     if (r == NULL || ctx == NULL) {
         return NGX_ERROR;
@@ -242,7 +243,7 @@ ngx_http_markdown_stream_postcommit_guard(
      * This is a lightweight heuristic.  The full body filter
      * integration (spec 38+) will provide complete detection.
      */
-    for (cl = chain; cl != NULL; cl = cl->next) {
+    for (ngx_chain_t *cl = chain; cl != NULL; cl = cl->next) {
         buf = cl->buf;
 
         if (buf == NULL) {
@@ -261,31 +262,25 @@ ngx_http_markdown_stream_postcommit_guard(
          * of each buffer for performance (HTML content typically
          * starts at the beginning of a response or chunk).
          */
-        if (len >= 9) {
-            /* Check for "<!DOCTYPE" (case-insensitive) */
-            if ((p[0] == '<')
-                && (p[1] == '!' || p[1] == '?')
-                && (ngx_strncasecmp(p + 2, (u_char *) "DOCTYPE",
-                                    7) == 0))
-            {
-                ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                              "markdown postcommit guard: "
-                              "HTML DOCTYPE detected post-commit");
-                return NGX_ERROR;
-            }
+        if (len >= 9
+            && p[0] == '<'
+            && (p[1] == '!' || p[1] == '?')
+            && ngx_strncasecmp(p + 2, doctype, 7) == 0)
+        {
+            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                          "markdown postcommit guard: "
+                          "HTML DOCTYPE detected post-commit");
+            return NGX_ERROR;
         }
 
-        if (len >= 5) {
-            /* Check for "<html" (case-insensitive) */
-            if (p[0] == '<'
-                && ngx_strncasecmp(p + 1, (u_char *) "html", 4)
-                   == 0)
-            {
-                ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                              "markdown postcommit guard: "
-                              "HTML tag detected post-commit");
-                return NGX_ERROR;
-            }
+        if (len >= 5
+            && p[0] == '<'
+            && ngx_strncasecmp(p + 1, html_tag, 4) == 0)
+        {
+            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                          "markdown postcommit guard: "
+                          "HTML tag detected post-commit");
+            return NGX_ERROR;
         }
     }
 
@@ -306,7 +301,7 @@ ngx_http_markdown_stream_postcommit_guard(
 void
 ngx_http_markdown_stream_postcommit_log(
     ngx_http_request_t *r,
-    ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_ctx_t *ctx,
     const char *action,
     ngx_http_markdown_reason_code_e reason)
 {

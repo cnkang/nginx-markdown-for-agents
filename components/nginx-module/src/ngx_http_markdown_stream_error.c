@@ -49,7 +49,7 @@ ngx_http_markdown_stream_error_pass_html(ngx_http_request_t *r,
 ngx_int_t
 ngx_http_markdown_stream_on_error(ngx_http_request_t *r,
                                    ngx_http_markdown_ctx_t *ctx,
-                                   ngx_http_markdown_conf_t *conf)
+                                   const ngx_http_markdown_conf_t *conf)
 {
     ngx_http_markdown_stream_ctx_t    dctx;
     ngx_http_markdown_stream_event_e  event;

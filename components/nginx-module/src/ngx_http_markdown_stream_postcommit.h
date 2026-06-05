@@ -106,7 +106,7 @@ ngx_http_markdown_stream_postcommit_abort(
 ngx_int_t
 ngx_http_markdown_stream_postcommit_guard(
     ngx_http_request_t *r,
-    ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_ctx_t *ctx,
     ngx_chain_t *chain);
 
 
@@ -126,7 +126,7 @@ ngx_http_markdown_stream_postcommit_guard(
 void
 ngx_http_markdown_stream_postcommit_log(
     ngx_http_request_t *r,
-    ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_ctx_t *ctx,
     const char *action,
     ngx_http_markdown_reason_code_e reason);
 
