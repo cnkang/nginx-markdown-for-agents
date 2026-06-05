@@ -72,6 +72,8 @@ EOF
 #   body_file: response body artifact path
 #   heading: required markdown heading token in body
 #   end_token: optional tail token expected in body
+#   require_chunked: optional, defaults to 1; set to 0 for decompression
+#     cases that complete through the known-length full-body path.
 # Output/exit:
 #   emits diagnostics to stderr and exits non-zero on assertion failure;
 #   returns 0 when all assertions pass.
@@ -82,19 +84,22 @@ assert_streaming_markdown_response() {
   local body_file="$3"
   local heading="$4"
   local end_token="${5:-}"
+  local require_chunked="${6:-1}"
 
   grep -qi "${PATTERN_CT_MARKDOWN}" "${hdr_file}" || {
     echo "${case_name} expected markdown Content-Type" >&2
     exit 1
   }
-  grep -qi "${PATTERN_TRANSFER_CHUNKED}" "${hdr_file}" || {
-    echo "${case_name} missing chunked transfer encoding header" >&2
-    exit 1
-  }
-  grep -qi "${PATTERN_CONTENT_LENGTH}" "${hdr_file}" && {
-    echo "${case_name} unexpected Content-Length in streaming response" >&2
-    exit 1
-  }
+  if [[ "${require_chunked}" == "1" ]]; then
+    grep -qi "${PATTERN_CONTENT_LENGTH}" "${hdr_file}" && {
+      echo "${case_name} unexpected Content-Length in streaming response" >&2
+      exit 1
+    }
+    grep -qi "${PATTERN_TRANSFER_CHUNKED}" "${hdr_file}" || {
+      echo "${case_name} missing chunked transfer encoding header" >&2
+      exit 1
+    }
+  fi
   grep -qi "${PATTERN_CONTENT_ENCODING}" "${hdr_file}" && {
     echo "${case_name} response leaked Content-Encoding header" >&2
     exit 1
@@ -275,9 +280,7 @@ DEFLATE_SOURCE_BODY = build_payload(
 GZIP_BODY = compress_payload(GZIP_SOURCE_BODY, "gzip")
 DEFLATE_BODY = compress_payload(DEFLATE_SOURCE_BODY, "deflate")
 TRUNCATED_GZIP_BODY = GZIP_BODY[:-8] if len(GZIP_BODY) > 8 else GZIP_BODY
-TRUNCATED_DEFLATE_BODY = (
-    DEFLATE_BODY[:-4] if len(DEFLATE_BODY) > 4 else DEFLATE_BODY
-)
+TRUNCATED_DEFLATE_BODY = DEFLATE_BODY[: max(1, len(DEFLATE_BODY) // 2)]
 
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
@@ -562,7 +565,7 @@ echo "${gzip_line}" | tee "${RAW_DIR}/gzip.metrics" >/dev/null
 echo "${gzip_line}" | grep -q "${PATTERN_HTTP_200}" || { echo "small-gzip failed: ${gzip_line}" >&2; exit 1; }
 assert_streaming_markdown_response \
   "small-gzip" "${RAW_DIR}/gzip.hdr" "${RAW_DIR}/gzip.body" \
-  "# Chunked Gzip" "${GZIP_END_TOKEN}"
+  "# Chunked Gzip" "${GZIP_END_TOKEN}" 0
 
 echo "==> Case 4: streaming deflate decompression should convert to Markdown"
 deflate_line="$(curl -sS -D "${RAW_DIR}/deflate.hdr" -o "${RAW_DIR}/deflate.body" \
@@ -573,13 +576,13 @@ echo "${deflate_line}" | tee "${RAW_DIR}/deflate.metrics" >/dev/null
 echo "${deflate_line}" | grep -q "${PATTERN_HTTP_200}" || { echo "small-deflate failed: ${deflate_line}" >&2; exit 1; }
 assert_streaming_markdown_response \
   "small-deflate" "${RAW_DIR}/deflate.hdr" "${RAW_DIR}/deflate.body" \
-  "# Chunked Deflate" "${DEFLATE_END_TOKEN}"
+  "# Chunked Deflate" "${DEFLATE_END_TOKEN}" 0
 
-echo "==> Case 5: truncated gzip should trigger post-commit failure"
+echo "==> Case 5: truncated gzip should fail-open before Markdown commit"
 # The upstream sends a gzip stream with the final 8 bytes removed, so
-# decompression succeeds incrementally but fails at finalize.  Because
-# headers were already committed, the module must emit partial Markdown
-# (post-commit fail-open) rather than switching to HTML pass-through.
+# decompression fails before the compressed full-body path can commit
+# Markdown headers. The module must fail open by preserving the upstream
+# compressed HTML payload and Content-Encoding.
 trunc_gzip_line="$(curl -sS -D "${RAW_DIR}/trunc_gzip.hdr" -o "${RAW_DIR}/trunc_gzip.body" \
   -H "${ACCEPT_MARKDOWN_HEADER}" --max-time 180 \
   "http://127.0.0.1:${PORT}/streaming/truncated-gzip" \
@@ -588,18 +591,24 @@ trunc_gzip_line="$(curl -sS -D "${RAW_DIR}/trunc_gzip.hdr" -o "${RAW_DIR}/trunc_
 # the connection after a truncated stream; suppress so assertions can run.
 echo "${trunc_gzip_line}" | tee "${RAW_DIR}/trunc_gzip.metrics" >/dev/null
 echo "${trunc_gzip_line}" | grep -q "${PATTERN_HTTP_200}" || { echo "truncated-gzip failed: ${trunc_gzip_line}" >&2; exit 1; }
-grep -qi "${PATTERN_CT_MARKDOWN}" "${RAW_DIR}/trunc_gzip.hdr" || {
-  echo "truncated-gzip expected markdown Content-Type (post-commit path)" >&2
+grep -qi "${PATTERN_CT_HTML}" "${RAW_DIR}/trunc_gzip.hdr" || {
+  echo "truncated-gzip expected HTML Content-Type after fail-open" >&2
   exit 1
 }
-grep -q '# Chunked Gzip' "${RAW_DIR}/trunc_gzip.body" || {
-  echo "truncated-gzip missing converted heading marker" >&2
+grep -qi '^Content-Encoding: gzip' "${RAW_DIR}/trunc_gzip.hdr" || {
+  echo "truncated-gzip expected preserved gzip Content-Encoding" >&2
   exit 1
 }
+actual_trunc_gzip_bytes="$(wc -c < "${RAW_DIR}/trunc_gzip.body" | tr -d '[:space:]')"
+if [[ "${actual_trunc_gzip_bytes}" != "${TRUNCATED_GZIP_COMPRESSED_LEN}" ]]; then
+  echo "truncated-gzip compressed length mismatch: expected ${TRUNCATED_GZIP_COMPRESSED_LEN}, got ${actual_trunc_gzip_bytes}" >&2
+  exit 1
+fi
 
-echo "==> Case 6: truncated deflate should trigger post-commit failure"
-# Same rationale as case 5 but for deflate: the final 4 bytes are
-# stripped so the deflate finalizer fails after the commit boundary.
+echo "==> Case 6: truncated deflate should fail-open before Markdown commit"
+# Same rationale as case 5 but for deflate: the fixture is cut in the
+# middle of the compressed stream so decompression fails before Markdown
+# headers are committed.
 trunc_deflate_line="$(curl -sS -D "${RAW_DIR}/trunc_deflate.hdr" -o "${RAW_DIR}/trunc_deflate.body" \
   -H "${ACCEPT_MARKDOWN_HEADER}" --max-time 180 \
   "http://127.0.0.1:${PORT}/streaming/truncated-deflate" \
@@ -607,14 +616,19 @@ trunc_deflate_line="$(curl -sS -D "${RAW_DIR}/trunc_deflate.hdr" -o "${RAW_DIR}/
 # || true: same rationale as truncated-gzip case above.
 echo "${trunc_deflate_line}" | tee "${RAW_DIR}/trunc_deflate.metrics" >/dev/null
 echo "${trunc_deflate_line}" | grep -q "${PATTERN_HTTP_200}" || { echo "truncated-deflate failed: ${trunc_deflate_line}" >&2; exit 1; }
-grep -qi "${PATTERN_CT_MARKDOWN}" "${RAW_DIR}/trunc_deflate.hdr" || {
-  echo "truncated-deflate expected markdown Content-Type (post-commit path)" >&2
+grep -qi "${PATTERN_CT_HTML}" "${RAW_DIR}/trunc_deflate.hdr" || {
+  echo "truncated-deflate expected HTML Content-Type after fail-open" >&2
   exit 1
 }
-grep -q '# Chunked Deflate' "${RAW_DIR}/trunc_deflate.body" || {
-  echo "truncated-deflate missing converted heading marker" >&2
+grep -qi '^Content-Encoding: deflate' "${RAW_DIR}/trunc_deflate.hdr" || {
+  echo "truncated-deflate expected preserved deflate Content-Encoding" >&2
   exit 1
 }
+actual_trunc_deflate_bytes="$(wc -c < "${RAW_DIR}/trunc_deflate.body" | tr -d '[:space:]')"
+if [[ "${actual_trunc_deflate_bytes}" != "${TRUNCATED_DEFLATE_COMPRESSED_LEN}" ]]; then
+  echo "truncated-deflate compressed length mismatch: expected ${TRUNCATED_DEFLATE_COMPRESSED_LEN}, got ${actual_trunc_deflate_bytes}" >&2
+  exit 1
+fi
 
 echo "==> Log sanity checks"
 grep -q 'response size exceeds limit' "${RUNTIME}/logs/error.log" || {
@@ -622,16 +636,16 @@ grep -q 'response size exceeds limit' "${RUNTIME}/logs/error.log" || {
   exit 1
 }
 # Verify that the truncated compressed streams produced the expected
-# internal diagnostics: a decompression finalize failure and a
-# STREAMING_FAIL_POSTCOMMIT decision log entry.
-decomp_finalize_count="$(grep -Fc 'decomp_finish failed in finalize' "${RUNTIME}/logs/error.log" || true)"
-postcommit_count="$(grep -Fc 'reason=STREAMING_FAIL_POSTCOMMIT' "${RUNTIME}/logs/error.log" || true)"
-if [[ "${decomp_finalize_count}" -lt 2 ]]; then
-  echo "missing decomp finalize failure logs for truncated gzip/deflate cases: ${decomp_finalize_count}" >&2
+# internal diagnostics: decompression failure followed by pre-commit
+# conversion fail-open.
+decompress_failed_count="$(grep -Fc 'markdown: rust decompress failed' "${RUNTIME}/logs/error.log" || true)"
+conversion_failopen_count="$(grep -Fc 'reason=ELIGIBLE_FAILED_OPEN category=FAIL_CONVERSION' "${RUNTIME}/logs/error.log" || true)"
+if [[ "${decompress_failed_count}" -lt 2 ]]; then
+  echo "missing Rust decompression failure logs for truncated gzip/deflate cases: ${decompress_failed_count}" >&2
   exit 1
 fi
-if [[ "${postcommit_count}" -lt 2 ]]; then
-  echo "missing STREAMING_FAIL_POSTCOMMIT decision logs for truncated gzip/deflate cases: ${postcommit_count}" >&2
+if [[ "${conversion_failopen_count}" -lt 2 ]]; then
+  echo "missing conversion fail-open logs for truncated gzip/deflate cases: ${conversion_failopen_count}" >&2
   exit 1
 fi
 
