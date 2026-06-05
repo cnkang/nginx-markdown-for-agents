@@ -981,4 +981,254 @@ ngx_http_markdown_set_dynconf_path(ngx_conf_t *cf, ngx_command_t *cmd,
     return NGX_CONF_OK;
 }
 
+/*
+ * v0.8.0 streaming directive handlers (spec 36).
+ *
+ * These handlers parse the new streaming configuration directives
+ * defined in RFC 0008 section 2.  They validate values at config-parse
+ * time and reject invalid input with clear error messages.
+ */
+
+/*
+ * Configuration directive handler: markdown_streaming_engine (v0.8.0)
+ *
+ * Accepts exactly: off, auto, on.
+ * Stores as ngx_uint_t enum in conf->stream.engine.
+ *
+ * Parameters:
+ *   cf   - configuration context
+ *   cmd  - directive definition
+ *   conf - location configuration pointer
+ *
+ * Returns:
+ *   NGX_CONF_OK on success, NGX_CONF_ERROR on invalid value
+ */
+static char *
+ngx_http_markdown_stream_engine_handler(ngx_conf_t *cf,
+    ngx_command_t *cmd, void *conf)
+{
+    ngx_http_markdown_conf_t *mcf = conf;
+    ngx_str_t                *value;
+
+    (void) cmd;
+
+    value = cf->args->elts;
+
+    if (mcf->stream.engine != NGX_CONF_UNSET_UINT) {
+        return "is duplicate";
+    }
+
+    if (value[1].len == 3
+        && ngx_strncmp(value[1].data, "off", 3) == 0)
+    {
+        mcf->stream.engine = NGX_HTTP_MARKDOWN_STREAM_ENGINE_OFF;
+    } else if (value[1].len == 4
+               && ngx_strncmp(value[1].data, "auto", 4) == 0)
+    {
+        mcf->stream.engine = NGX_HTTP_MARKDOWN_STREAM_ENGINE_AUTO;
+    } else if (value[1].len == 2
+               && ngx_strncmp(value[1].data, "on", 2) == 0)
+    {
+        mcf->stream.engine = NGX_HTTP_MARKDOWN_STREAM_ENGINE_ON;
+    } else {
+        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+            "invalid value \"%V\" in "
+            "\"markdown_streaming_engine\" directive, "
+            "it must be \"off\", \"auto\", or \"on\"",
+            &value[1]);
+        return NGX_CONF_ERROR;
+    }
+
+    return NGX_CONF_OK;
+}
+
+/*
+ * Configuration directive handler: markdown_stream_threshold (v0.8.0)
+ *
+ * Accepts NGINX size values (e.g. 1m, 512k).
+ * Rejects zero or negative values.
+ *
+ * Parameters:
+ *   cf   - configuration context
+ *   cmd  - directive definition
+ *   conf - location configuration pointer
+ *
+ * Returns:
+ *   NGX_CONF_OK on success, NGX_CONF_ERROR on invalid value
+ */
+static char *
+ngx_http_markdown_stream_threshold_handler(ngx_conf_t *cf,
+    ngx_command_t *cmd, void *conf)
+{
+    ngx_http_markdown_conf_t *mcf = conf;
+    ngx_str_t                *value;
+    size_t                    parsed;
+
+    (void) cmd;
+
+    value = cf->args->elts;
+
+    if (mcf->stream.threshold != NGX_CONF_UNSET_SIZE) {
+        return "is duplicate";
+    }
+
+    parsed = ngx_http_markdown_parse_size(&value[1]);
+    if (parsed == (size_t) NGX_ERROR) {
+        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+            "invalid value \"%V\" in "
+            "\"markdown_stream_threshold\" directive",
+            &value[1]);
+        return NGX_CONF_ERROR;
+    }
+
+    if (parsed == 0) {
+        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+            "\"markdown_stream_threshold\" must be "
+            "greater than zero");
+        return NGX_CONF_ERROR;
+    }
+
+    mcf->stream.threshold = parsed;
+    return NGX_CONF_OK;
+}
+
+/*
+ * Configuration directive handler: markdown_stream_flush_min (v0.8.0)
+ *
+ * Accepts NGINX size values (e.g. 16k, 32k).
+ * Value MUST be greater than zero to avoid pathological
+ * per-byte flushing and backpressure amplification.
+ *
+ * Parameters:
+ *   cf   - configuration context
+ *   cmd  - directive definition
+ *   conf - location configuration pointer
+ *
+ * Returns:
+ *   NGX_CONF_OK on success, NGX_CONF_ERROR on invalid value
+ */
+static char *
+ngx_http_markdown_stream_flush_min_handler(ngx_conf_t *cf,
+    ngx_command_t *cmd, void *conf)
+{
+    ngx_http_markdown_conf_t *mcf = conf;
+    ngx_str_t                *value;
+    size_t                    parsed;
+
+    (void) cmd;
+
+    value = cf->args->elts;
+
+    if (mcf->stream.flush_min != NGX_CONF_UNSET_SIZE) {
+        return "is duplicate";
+    }
+
+    parsed = ngx_http_markdown_parse_size(&value[1]);
+    if (parsed == (size_t) NGX_ERROR) {
+        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+            "invalid value \"%V\" in "
+            "\"markdown_stream_flush_min\" directive",
+            &value[1]);
+        return NGX_CONF_ERROR;
+    }
+
+    if (parsed == 0) {
+        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+            "\"markdown_stream_flush_min\" must be "
+            "greater than zero");
+        return NGX_CONF_ERROR;
+    }
+
+    mcf->stream.flush_min = parsed;
+    return NGX_CONF_OK;
+}
+
+/*
+ * Configuration directive handler: markdown_stream_excluded_types (v0.8.0)
+ *
+ * Parses a space-separated list of MIME types and stores them in
+ * conf->stream.excluded_types array.  Each type must be in
+ * "type/subtype" format.
+ *
+ * Parameters:
+ *   cf   - configuration context
+ *   cmd  - directive definition
+ *   conf - location configuration pointer
+ *
+ * Returns:
+ *   NGX_CONF_OK on success, NGX_CONF_ERROR on allocation or
+ *   validation failure
+ */
+static char *
+ngx_http_markdown_stream_excluded_types_handler(ngx_conf_t *cf,
+    ngx_command_t *cmd, void *conf)
+{
+    ngx_http_markdown_conf_t *mcf = conf;
+    ngx_str_t                *value;
+    ngx_str_t                *type;
+    u_char                   *slash;
+    const u_char             *next_slash;
+    ngx_uint_t                i;
+
+    (void) cmd;
+
+    value = cf->args->elts;
+
+    if (mcf->stream.excluded_types != NGX_CONF_UNSET_PTR) {
+        return "is duplicate";
+    }
+
+    mcf->stream.excluded_types = ngx_array_create(cf->pool,
+        cf->args->nelts - 1, sizeof(ngx_str_t));
+    if (mcf->stream.excluded_types == NULL) {
+        return NGX_CONF_ERROR;
+    }
+
+    for (i = 1; i < cf->args->nelts; i++) {
+        if (value[i].len == 0) {
+            ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+                "empty content type in "
+                "\"markdown_stream_excluded_types\" "
+                "directive");
+            return NGX_CONF_ERROR;
+        }
+
+        slash = ngx_strlchr(value[i].data,
+            value[i].data + value[i].len, '/');
+        next_slash = NULL;
+
+        if (slash != NULL
+            && (size_t) ((slash - value[i].data) + 1)
+               < value[i].len)
+        {
+            next_slash = ngx_strlchr(slash + 1,
+                value[i].data + value[i].len, '/');
+        }
+
+        if (slash == NULL
+            || slash == value[i].data
+            || (size_t) (slash - value[i].data)
+               == value[i].len - 1
+            || next_slash != NULL)
+        {
+            ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+                "invalid content type \"%V\" in "
+                "\"markdown_stream_excluded_types\" "
+                "directive, must be in format "
+                "\"type/subtype\"",
+                &value[i]);
+            return NGX_CONF_ERROR;
+        }
+
+        type = ngx_array_push(mcf->stream.excluded_types);
+        if (type == NULL) {
+            return NGX_CONF_ERROR;
+        }
+
+        *type = value[i];
+    }
+
+    return NGX_CONF_OK;
+}
+
 #endif /* NGX_HTTP_MARKDOWN_CONFIG_HANDLERS_IMPL_H */

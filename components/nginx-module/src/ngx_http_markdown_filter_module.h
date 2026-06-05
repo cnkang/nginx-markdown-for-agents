@@ -113,6 +113,17 @@ typedef struct ngx_http_markdown_otel_span_s  ngx_http_markdown_otel_span_t;
 #endif /* MARKDOWN_STREAMING_ENABLED */
 
 /*
+ * v0.8.0 streaming engine mode constants (markdown_streaming_engine directive).
+ *
+ * These are distinct from the v0.6.0 MARKDOWN_STREAMING_ENABLED constants
+ * above.  The 0.8.0 directive uses a simple enum stored as ngx_uint_t
+ * rather than a complex value.
+ */
+#define NGX_HTTP_MARKDOWN_STREAM_ENGINE_OFF   0
+#define NGX_HTTP_MARKDOWN_STREAM_ENGINE_AUTO  1
+#define NGX_HTTP_MARKDOWN_STREAM_ENGINE_ON    2
+
+/*
  * Threshold off sentinel — used in merge and path selection logic.
  */
 #define NGX_HTTP_MARKDOWN_THRESHOLD_OFF     0
@@ -222,6 +233,13 @@ typedef enum {
  * - streaming_on_error: NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_PASS
  * - streaming_shadow: 0 (off by default)
  * - streaming_auto_threshold: NGX_HTTP_MARKDOWN_STREAMING_AUTO_THRESHOLD_DEFAULT
+ *
+ * v0.8.0 streaming config defaults (spec 36):
+ * - stream.engine: auto (1)
+ * - stream.threshold: 1048576 (1m)
+ * - stream.precommit_buffer: 262144 (256k)
+ * - stream.flush_min: 16384 (16k)
+ * - stream.excluded_types: NULL
  */
 /* sonarcloud-c:S1820: intentionally exceeded; fields are already logically
  * grouped via the ops sub-struct and #ifdef-gated streaming section.  Further
@@ -318,6 +336,21 @@ typedef struct {
 #ifdef MARKDOWN_STREAMING_ENABLED
     ngx_http_markdown_streaming_cfg_t streaming;
 #endif
+
+    /*
+     * v0.8.0 streaming configuration directives (spec 36).
+     *
+     * These fields implement the RFC 0008 section 2 streaming control
+     * directives.  They are parsed but not acted upon until specs 37-38
+     * implement runtime streaming logic.
+     */
+    struct {
+        ngx_uint_t    engine;              /* markdown_streaming_engine off|auto|on */
+        size_t        threshold;           /* markdown_stream_threshold (default: 1m) */
+        size_t        precommit_buffer;    /* markdown_stream_precommit_buffer (default: 256k) */
+        size_t        flush_min;           /* markdown_stream_flush_min (default: 16k) */
+        ngx_array_t  *excluded_types;      /* markdown_stream_excluded_types (default: NULL) */
+    } stream;
 
     /*
      * Noise pruning configuration (v0.6.0).
@@ -889,6 +922,11 @@ ngx_http_markdown_eligibility_t ngx_http_markdown_check_eligibility(
 /* Get human-readable string for eligibility result */
 const ngx_str_t *ngx_http_markdown_eligibility_string(
     ngx_http_markdown_eligibility_t eligibility);
+
+/* Check whether a content type is excluded from streaming (spec 36) */
+ngx_int_t ngx_http_markdown_stream_type_excluded(
+    const ngx_str_t *content_type,
+    const ngx_http_markdown_conf_t *conf);
 
 /*
  * Reason code lookup functions

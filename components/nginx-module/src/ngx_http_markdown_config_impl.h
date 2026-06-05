@@ -52,6 +52,14 @@ static char *ngx_http_markdown_log_verbosity(ngx_conf_t *cf, ngx_command_t *cmd,
 static char *ngx_http_markdown_stream_types(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 /* Parse content types eligible for Markdown conversion (positive allowlist). */
 static char *ngx_http_markdown_content_types(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
+/* Parse v0.8.0 markdown_streaming_engine enum: off, auto, on. */
+static char *ngx_http_markdown_stream_engine_handler(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
+/* Parse v0.8.0 markdown_stream_threshold with zero-rejection. */
+static char *ngx_http_markdown_stream_threshold_handler(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
+/* Parse v0.8.0 markdown_stream_flush_min with zero-rejection. */
+static char *ngx_http_markdown_stream_flush_min_handler(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
+/* Parse v0.8.0 markdown_stream_excluded_types MIME list. */
+static char *ngx_http_markdown_stream_excluded_types_handler(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 /* Parse large body threshold for incremental path routing. */
 static char *ngx_http_markdown_large_body_threshold(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 /* Parse metrics endpoint enablement and URI settings. */
