@@ -294,6 +294,13 @@ ngx_http_markdown_create_conf(ngx_conf_t *cf)
     conf->streaming.auto_threshold = NGX_CONF_UNSET_SIZE;
 #endif
 
+    /* v0.8.0 streaming config (spec 36) */
+    conf->stream.engine = NGX_CONF_UNSET_UINT;
+    conf->stream.threshold = NGX_CONF_UNSET_SIZE;
+    conf->stream.precommit_buffer = NGX_CONF_UNSET_SIZE;
+    conf->stream.flush_min = NGX_CONF_UNSET_SIZE;
+    conf->stream.excluded_types = NGX_CONF_UNSET_PTR;
+
     conf->advanced.prune_noise = NGX_CONF_UNSET;
     conf->advanced.prune_selectors = NGX_CONF_UNSET_PTR;
     conf->advanced.prune_protection_selectors = NGX_CONF_UNSET_PTR;
@@ -504,6 +511,30 @@ ngx_http_markdown_merge_streaming_values(ngx_http_markdown_conf_t *conf,
 #endif
 
 /*
+ * Merge v0.8.0 streaming configuration (spec 36).
+ *
+ * Provides http→server→location inheritance for the streaming
+ * directives added in 0.8.0.  These are independent of the older
+ * MARKDOWN_STREAMING_ENABLED feature-gated fields.
+ */
+static void
+ngx_http_markdown_merge_stream_values(ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_conf_t *prev)
+{
+    ngx_conf_merge_uint_value(conf->stream.engine,
+                              prev->stream.engine,
+                              NGX_HTTP_MARKDOWN_STREAM_ENGINE_AUTO);
+    ngx_conf_merge_size_value(conf->stream.threshold,
+                              prev->stream.threshold, 1048576);
+    ngx_conf_merge_size_value(conf->stream.precommit_buffer,
+                              prev->stream.precommit_buffer, 262144);
+    ngx_conf_merge_size_value(conf->stream.flush_min,
+                              prev->stream.flush_min, 16384);
+    ngx_conf_merge_ptr_value(conf->stream.excluded_types,
+                             prev->stream.excluded_types, NULL);
+}
+
+/*
  * Merge v0.6.0-specific configuration surfaces.
  */
 static void
@@ -561,6 +592,9 @@ ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
 #ifdef MARKDOWN_STREAMING_ENABLED
     ngx_http_markdown_merge_streaming_values(conf, prev, streaming_budget_set);
 #endif
+
+    /* v0.8.0 streaming config (spec 36) */
+    ngx_http_markdown_merge_stream_values(conf, prev);
 
     ngx_http_markdown_merge_v060_values(conf, prev);
 

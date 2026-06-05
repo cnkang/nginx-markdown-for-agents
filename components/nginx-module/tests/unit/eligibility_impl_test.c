@@ -79,6 +79,19 @@ ngx_strncasecmp(const u_char *s1, const u_char *s2, size_t n)
     return 0;
 }
 
+static u_char *
+ngx_strlchr(u_char *p, u_char *last, u_char c)
+{
+    while (p < last) {
+        if (*p == c) {
+            return p;
+        }
+        p++;
+    }
+
+    return NULL;
+}
+
 #include "../../src/ngx_http_markdown_eligibility.c"
 
 
