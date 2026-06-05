@@ -250,7 +250,7 @@ ngx_http_markdown_create_conf(ngx_conf_t *cf)
     conf->enabled_source = NGX_HTTP_MARKDOWN_ENABLED_UNSET;
     conf->enabled_complex = NULL;
     conf->max_size = NGX_CONF_UNSET_SIZE;
-    conf->max_size_explicit = 0;
+    conf->decompress.max_size_explicit = 0;
     conf->timeout = NGX_CONF_UNSET_MSEC;
     conf->on_error = NGX_CONF_UNSET_UINT;
     conf->flavor = NGX_CONF_UNSET_UINT;
@@ -366,10 +366,10 @@ static void
 ngx_http_markdown_apply_memory_budget_override(ngx_http_markdown_conf_t *conf,
     const ngx_http_markdown_conf_t *prev, ngx_flag_t max_size_set)
 {
-    conf->max_size_explicit = max_size_set || prev->max_size_explicit;
+    conf->decompress.max_size_explicit = max_size_set || prev->decompress.max_size_explicit;
 
     if (conf->advanced.memory_budget != NGX_CONF_UNSET_SIZE
-        && !conf->max_size_explicit)
+        && !conf->decompress.max_size_explicit)
     {
         conf->max_size = conf->advanced.memory_budget;
     }

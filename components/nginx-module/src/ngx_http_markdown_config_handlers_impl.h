@@ -1061,7 +1061,7 @@ ngx_http_markdown_stream_engine_handler(ngx_conf_t *cf,
  */
 static char *
 ngx_http_markdown_stream_threshold_handler(ngx_conf_t *cf,
-    ngx_command_t *cmd, void *conf)
+    ngx_command_t *cmd, void *conf) /* NOSONAR: NGINX callback signature */
 {
     ngx_http_markdown_conf_t *mcf = conf;
     ngx_str_t                *value;
@@ -1112,7 +1112,7 @@ ngx_http_markdown_stream_threshold_handler(ngx_conf_t *cf,
  */
 static char *
 ngx_http_markdown_stream_flush_min_handler(ngx_conf_t *cf,
-    ngx_command_t *cmd, void *conf)
+    ngx_command_t *cmd, void *conf) /* NOSONAR: NGINX callback signature */
 {
     ngx_http_markdown_conf_t *mcf = conf;
     ngx_str_t                *value;
@@ -1164,14 +1164,13 @@ ngx_http_markdown_stream_flush_min_handler(ngx_conf_t *cf,
  */
 static char *
 ngx_http_markdown_stream_excluded_types_handler(ngx_conf_t *cf,
-    ngx_command_t *cmd, void *conf)
+    ngx_command_t *cmd, void *conf) /* NOSONAR: NGINX callback signature */
 {
     ngx_http_markdown_conf_t *mcf = conf;
     ngx_str_t                *value;
     ngx_str_t                *type;
     u_char                   *slash;
     const u_char             *next_slash;
-    ngx_uint_t                i;
 
     (void) cmd;
 
@@ -1187,7 +1186,7 @@ ngx_http_markdown_stream_excluded_types_handler(ngx_conf_t *cf,
         return NGX_CONF_ERROR;
     }
 
-    for (i = 1; i < cf->args->nelts; i++) {
+    for (ngx_uint_t i = 1; i < cf->args->nelts; i++) {
         if (value[i].len == 0) {
             ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
                 "empty content type in "
