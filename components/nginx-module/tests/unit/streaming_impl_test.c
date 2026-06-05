@@ -997,6 +997,14 @@ ngx_http_markdown_reason_streaming_skip_unsupported(void)
 }
 
 const ngx_str_t *
+ngx_http_markdown_reason_streaming_skip_compressed(void)
+{
+    static ngx_str_t s = { sizeof("STREAMING_SKIP_COMPRESSED") - 1,
+        (u_char *) "STREAMING_SKIP_COMPRESSED" };
+    return &s;
+}
+
+const ngx_str_t *
 ngx_http_markdown_reason_streaming_budget_exceeded(void)
 {
     static ngx_str_t s = { sizeof("STREAMING_BUDGET_EXCEEDED") - 1,

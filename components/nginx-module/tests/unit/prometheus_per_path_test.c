@@ -85,6 +85,7 @@ typedef struct { /* SONAR_NOTE: mirrors production snapshot */
         ngx_atomic_t  accept;
         ngx_atomic_t  no_accept;
         ngx_atomic_t  conditional;
+        ngx_atomic_t  compression_passthrough;
     } skips;
     struct {
         ngx_atomic_t  failopen_count;
