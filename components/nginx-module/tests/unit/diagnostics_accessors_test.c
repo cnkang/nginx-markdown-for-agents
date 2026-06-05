@@ -35,6 +35,34 @@ typedef struct {
         ngx_atomic_t  failopen_count;
     } results;
     ngx_atomic_t  requests_entered;
+#ifdef MARKDOWN_STREAMING_ENABLED
+    struct {
+        ngx_atomic_t  requests_total;
+        ngx_atomic_t  fallback_total;
+        ngx_atomic_t  succeeded_total;
+        ngx_atomic_t  failed_total;
+        ngx_atomic_t  postcommit_error_total;
+        ngx_atomic_t  precommit_failopen_total;
+        ngx_atomic_t  precommit_reject_total;
+        ngx_atomic_t  budget_exceeded_total;
+        ngx_atomic_t  shadow_total;
+        ngx_atomic_t  shadow_diff_total;
+        ngx_atomic_t  last_ttfb_ms;
+        ngx_atomic_t  last_peak_memory_bytes;
+        ngx_atomic_t  engine_choice_streaming;
+        ngx_atomic_t  engine_choice_full_buffer;
+        ngx_atomic_t  engine_choice_passthrough;
+        ngx_atomic_t  engine_choice_not_eligible;
+        ngx_atomic_t  streaming_fallback_precommit_pass;
+        ngx_atomic_t  streaming_fallback_precommit_reject;
+        ngx_atomic_t  streaming_failure_postcommit_abort;
+        ngx_atomic_t  streaming_failure_postcommit_safe_finish;
+        ngx_atomic_t  streaming_candidate_total;
+        ngx_atomic_t  true_streaming_selected_total;
+        ngx_atomic_t  streaming_output_bytes_total;
+        ngx_atomic_t  excluded_content_type_total;
+    } streaming;
+#endif
 } ngx_http_markdown_metrics_t;
 
 /* Global metrics pointer (mirrors production) */
@@ -136,6 +164,53 @@ test_collect_metrics_with_data(void)
 
     TEST_PASS("Metrics collected correctly");
 }
+
+#ifdef MARKDOWN_STREAMING_ENABLED
+static void
+test_collect_metrics_streaming(void)
+{
+    ngx_http_markdown_diag_metrics_t out;
+
+    TEST_SUBSECTION("collect_metrics with streaming counters");
+
+    memset(&g_metrics_data, 0, sizeof(g_metrics_data));
+    g_metrics_data.conversions_succeeded = 10;
+    g_metrics_data.results.delivery_count = 50;
+    g_metrics_data.requests_entered = 100;
+    g_metrics_data.results.failopen_count = 1;
+    g_metrics_data.streaming.requests_total = 30;
+    g_metrics_data.streaming.succeeded_total = 25;
+    g_metrics_data.streaming.failed_total = 5;
+    g_metrics_data.streaming.fallback_total = 2;
+    g_metrics_data.streaming.streaming_candidate_total = 35;
+    g_metrics_data.streaming.streaming_output_bytes_total = 1024000;
+    g_metrics_data.streaming.engine_choice_streaming = 20;
+    g_metrics_data.streaming.engine_choice_full_buffer = 10;
+    ngx_http_markdown_metrics = &g_metrics_data;
+
+    ngx_http_markdown_diagnostics_collect_metrics(&out);
+
+    TEST_ASSERT(out.conversions_total == 10, "conversions should be 10");
+    TEST_ASSERT(out.streaming_requests_total == 30,
+                "streaming_requests should be 30");
+    TEST_ASSERT(out.streaming_succeeded_total == 25,
+                "streaming_succeeded should be 25");
+    TEST_ASSERT(out.streaming_failed_total == 5,
+                "streaming_failed should be 5");
+    TEST_ASSERT(out.streaming_fallback_total == 2,
+                "streaming_fallback should be 2");
+    TEST_ASSERT(out.streaming_candidate_total == 35,
+                "streaming_candidate should be 35");
+    TEST_ASSERT(out.streaming_output_bytes_total == 1024000,
+                "streaming_output_bytes should be 1024000");
+    TEST_ASSERT(out.engine_choice_streaming == 20,
+                "engine_choice_streaming should be 20");
+    TEST_ASSERT(out.engine_choice_full_buffer == 10,
+                "engine_choice_full_buffer should be 10");
+
+    TEST_PASS("Streaming metrics collected correctly");
+}
+#endif
 
 static void
 test_get_dynconf_state_null_output(void)
@@ -275,6 +350,9 @@ main(void)
     test_collect_metrics_null_output();
     test_collect_metrics_null_zone();
     test_collect_metrics_with_data();
+#ifdef MARKDOWN_STREAMING_ENABLED
+    test_collect_metrics_streaming();
+#endif
     test_get_dynconf_state_null_output();
     test_get_dynconf_state_inactive();
     test_get_dynconf_state_active();

@@ -695,11 +695,12 @@ ngx_http_markdown_diagnostics_check_access(ngx_http_request_t *r)
 /*
  * Build the JSON diagnostics response.
  *
- * Constructs a JSON document with four top-level sections:
+ * Constructs a JSON document with five top-level sections:
  *   - config_snapshot
  *   - recent_decisions
  *   - metrics_snapshot
  *   - dynconf_state
+ *   - streaming_config
  *
  * Allocates the output buffer from the request pool.
  *
@@ -851,6 +852,29 @@ ngx_http_markdown_diagnostics_build_json(ngx_http_request_t *r,
         metrics.requests_total,
         metrics.failopen_total);
 
+#ifdef MARKDOWN_STREAMING_ENABLED
+    /* --- streaming_metrics section (spec-39) --- */
+    p = ngx_slprintf(p, last,
+        "  \"streaming_metrics\": {\n"
+        "    \"requests_total\": %uA,\n"
+        "    \"succeeded_total\": %uA,\n"
+        "    \"failed_total\": %uA,\n"
+        "    \"fallback_total\": %uA,\n"
+        "    \"candidate_total\": %uA,\n"
+        "    \"output_bytes_total\": %uA,\n"
+        "    \"engine_choice_streaming\": %uA,\n"
+        "    \"engine_choice_full_buffer\": %uA\n"
+        "  },\n",
+        metrics.streaming_requests_total,
+        metrics.streaming_succeeded_total,
+        metrics.streaming_failed_total,
+        metrics.streaming_fallback_total,
+        metrics.streaming_candidate_total,
+        metrics.streaming_output_bytes_total,
+        metrics.engine_choice_streaming,
+        metrics.engine_choice_full_buffer);
+#endif
+
     /* --- dynconf_state section --- */
     ngx_http_markdown_diagnostics_get_dynconf_state(&dynconf);
 
@@ -860,11 +884,32 @@ ngx_http_markdown_diagnostics_build_json(ngx_http_request_t *r,
         "    \"config_version\": %ui,\n"
         "    \"last_known_good_mtime\": \"%T\",\n"
         "    \"lkg_valid\": %s\n"
-        "  }\n",
+        "  },\n",
         dynconf.active_mtime,
         dynconf.config_version,
         dynconf.last_known_good_mtime,
         dynconf.lkg_valid ? "true" : "false");
+
+#ifdef MARKDOWN_STREAMING_ENABLED
+    /* --- streaming_config section (spec-39) --- */
+    p = ngx_slprintf(p, last,
+        "  \"streaming_config\": {\n"
+        "    \"engine\": \"%s\",\n"
+        "    \"on_error\": \"%s\",\n"
+        "    \"auto_threshold\": %uz\n"
+        "  }\n",
+        (conf != NULL && conf->streaming.engine != NULL)
+            ? "configured" : "auto",
+        (conf != NULL
+         && conf->streaming.on_error
+            == NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_REJECT)
+            ? "reject" : "pass",
+        (conf != NULL) ? conf->streaming.auto_threshold : 0);
+#else
+    /* Non-streaming build: empty placeholder */
+    p = ngx_slprintf(p, last,
+        "  \"streaming_config\": null\n");
+#endif
 
     /* Closing brace */
     p = ngx_slprintf(p, last, "}\n");
@@ -900,8 +945,8 @@ ngx_http_markdown_diagnostics_json_size(
      *
      * Sizing contract:
      *   NGX_HTTP_MARKDOWN_DIAG_JSON_BASE_SIZE covers the fixed JSON
-     *   envelope (config_snapshot, metrics_snapshot, dynconf_state
-     *   sections, braces, keys, and whitespace).
+     *   envelope (config_snapshot, metrics_snapshot, dynconf_state,
+     *   streaming_config sections, braces, keys, and whitespace).
      *   NGX_HTTP_MARKDOWN_DIAG_JSON_DECISION_SIZE covers one compact
      *   recent_decisions entry including separators and indentation.
      *   The total must be >= the actual rendered output; truncation

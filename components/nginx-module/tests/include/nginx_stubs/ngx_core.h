@@ -11,6 +11,7 @@ typedef struct {
 typedef ngx_uint_t ngx_msec_t;
 typedef int ngx_atomic_t;
 typedef ngx_uint_t ngx_atomic_uint_t;
+typedef ngx_int_t ngx_atomic_int_t;
 
 typedef struct ngx_http_request_s ngx_http_request_t;
 typedef struct ngx_module_s       ngx_module_t;

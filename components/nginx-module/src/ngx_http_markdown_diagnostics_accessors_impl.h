@@ -47,6 +47,25 @@ ngx_http_markdown_diagnostics_collect_metrics(
         ngx_http_markdown_metrics->requests_entered;
     out->failopen_total =
         ngx_http_markdown_metrics->results.failopen_count;
+
+#ifdef MARKDOWN_STREAMING_ENABLED
+    out->streaming_requests_total =
+        ngx_http_markdown_metrics->streaming.requests_total;
+    out->streaming_succeeded_total =
+        ngx_http_markdown_metrics->streaming.succeeded_total;
+    out->streaming_failed_total =
+        ngx_http_markdown_metrics->streaming.failed_total;
+    out->streaming_fallback_total =
+        ngx_http_markdown_metrics->streaming.fallback_total;
+    out->streaming_candidate_total =
+        ngx_http_markdown_metrics->streaming.streaming_candidate_total;
+    out->streaming_output_bytes_total =
+        ngx_http_markdown_metrics->streaming.streaming_output_bytes_total;
+    out->engine_choice_streaming =
+        ngx_http_markdown_metrics->streaming.engine_choice_streaming;
+    out->engine_choice_full_buffer =
+        ngx_http_markdown_metrics->streaming.engine_choice_full_buffer;
+#endif
 }
 
 

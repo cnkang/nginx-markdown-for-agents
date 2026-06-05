@@ -43,11 +43,13 @@ build/unit/%: unit/%_test.c include/test_common.h include/test_metrics_snapshot.
 	case "$*" in \
 	  headers) extra_srcs="helpers/headers_standalone.c" ;; \
 	  header_compile|reason_code|error_impl|error_classification|reason_code_ffi|diagnostics_accessors|diagnostics_production|header_plan_apply) extra_cflags="-I../src -Iinclude/nginx_stubs -DMARKDOWN_STREAMING_ENABLED" ;; \
+	  diagnostics_streaming_response) extra_cflags="-DMARKDOWN_STREAMING_ENABLED" ;; \
 	  ffi_layout_check) extra_cflags="-I../src -Iinclude/nginx_stubs -DMARKDOWN_STREAMING_ENABLED" ;; \
 	  gzip_deflate_decompression|decompression_production) extra_cflags="-I../src -Iinclude/nginx_stubs -ffunction-sections" ; extra_ldflags="$(SECTION_GC_LDFLAGS) -lz" ;; \
 	  deflate_parity) extra_cflags="-I../src -Iinclude/nginx_stubs -ffunction-sections" ; extra_ldflags="$(SECTION_GC_LDFLAGS) -lz" ;; \
 	  buf_len_safe) extra_cflags="-I../src -Iinclude/nginx_stubs" ;; \
 	  streaming_decomp) extra_cflags="-I../src -Iinclude/nginx_stubs -DMARKDOWN_STREAMING_ENABLED"; extra_ldflags="-lz" ;; \
+	  streaming_metrics_increment) extra_cflags="-I../src -Iinclude/nginx_stubs -DMARKDOWN_STREAMING_ENABLED" ;; \
 	  streaming) extra_cflags="-DMARKDOWN_STREAMING_ENABLED" ;; \
 	  stream_error|stream_state|stream_postcommit|stream_replay|stream_commit|stream_e2e|streaming_replay_overflow_security) extra_cflags="-I../src -Iinclude/nginx_stubs -DMARKDOWN_STREAMING_ENABLED" ;; \
 	  streaming_impl) extra_cflags="-I../src -Iinclude/nginx_stubs -I../../rust-converter/include -DMARKDOWN_STREAMING_ENABLED -ffunction-sections" ; extra_ldflags="$(SECTION_GC_LDFLAGS) -lz" ;; \

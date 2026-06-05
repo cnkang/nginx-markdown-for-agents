@@ -279,6 +279,115 @@ ngx_http_markdown_metrics_write_prometheus(
         "%uA\n"
         "\n",
         snapshot->streaming.last_peak_memory_bytes);
+
+    /* streaming_engine_choice_total{engine=...} */
+    p = ngx_slprintf(p, end,
+        "# HELP "
+        "nginx_markdown_streaming_engine_choice_total "
+        "Engine choice decisions for "
+        "streaming-eligible requests.\n"
+        "# TYPE "
+        "nginx_markdown_streaming_engine_choice_total "
+        "counter\n"
+        "nginx_markdown_streaming_engine_choice_total"
+        "{engine=\"streaming\"} %uA\n"
+        "nginx_markdown_streaming_engine_choice_total"
+        "{engine=\"full_buffer\"} %uA\n"
+        "nginx_markdown_streaming_engine_choice_total"
+        "{engine=\"passthrough\"} %uA\n"
+        "nginx_markdown_streaming_engine_choice_total"
+        "{engine=\"not_eligible\"} %uA\n"
+        "\n",
+        snapshot->streaming.engine_choice_streaming,
+        snapshot->streaming.engine_choice_full_buffer,
+        snapshot->streaming.engine_choice_passthrough,
+        snapshot->streaming.engine_choice_not_eligible);
+
+    /* streaming_fallback_total{phase,action} */
+    p = ngx_slprintf(p, end,
+        "# HELP "
+        "nginx_markdown_streaming_fallback_total "
+        "Pre-commit fallback events.\n"
+        "# TYPE "
+        "nginx_markdown_streaming_fallback_total "
+        "counter\n"
+        "nginx_markdown_streaming_fallback_total"
+        "{phase=\"precommit\",action=\"pass\"} %uA\n"
+        "nginx_markdown_streaming_fallback_total"
+        "{phase=\"precommit\",action=\"reject\"} %uA\n"
+        "\n",
+        snapshot->streaming.streaming_fallback_precommit_pass,
+        snapshot->streaming.streaming_fallback_precommit_reject);
+
+    /* streaming_failure_total{phase,action} */
+    p = ngx_slprintf(p, end,
+        "# HELP "
+        "nginx_markdown_streaming_failure_total "
+        "Post-commit failure events.\n"
+        "# TYPE "
+        "nginx_markdown_streaming_failure_total "
+        "counter\n"
+        "nginx_markdown_streaming_failure_total"
+        "{phase=\"postcommit\",action=\"abort\"} %uA\n"
+        "nginx_markdown_streaming_failure_total"
+        "{phase=\"postcommit\",action=\"safe_finish\"}"
+        " %uA\n"
+        "\n",
+        snapshot->streaming.streaming_failure_postcommit_abort,
+        snapshot->streaming.streaming_failure_postcommit_safe_finish);
+
+    /* streaming_candidate_total */
+    p = ngx_slprintf(p, end,
+        "# HELP "
+        "nginx_markdown_streaming_candidate_total "
+        "Total requests evaluated as "
+        "streaming candidates.\n"
+        "# TYPE "
+        "nginx_markdown_streaming_candidate_total "
+        "counter\n"
+        "nginx_markdown_streaming_candidate_total %uA\n"
+        "\n",
+        snapshot->streaming.streaming_candidate_total);
+
+    /* true_streaming_selected_total */
+    p = ngx_slprintf(p, end,
+        "# HELP "
+        "nginx_markdown_true_streaming_selected_total "
+        "Requests that completed streaming "
+        "engine selection.\n"
+        "# TYPE "
+        "nginx_markdown_true_streaming_selected_total "
+        "counter\n"
+        "nginx_markdown_true_streaming_selected_total"
+        " %uA\n"
+        "\n",
+        snapshot->streaming.true_streaming_selected_total);
+
+    /* streaming_output_bytes_total */
+    p = ngx_slprintf(p, end,
+        "# HELP "
+        "nginx_markdown_streaming_output_bytes_total "
+        "Total Markdown bytes emitted via streaming.\n"
+        "# TYPE "
+        "nginx_markdown_streaming_output_bytes_total "
+        "counter\n"
+        "nginx_markdown_streaming_output_bytes_total"
+        " %uA\n"
+        "\n",
+        snapshot->streaming.streaming_output_bytes_total);
+
+    /* excluded_content_type_total */
+    p = ngx_slprintf(p, end,
+        "# HELP "
+        "nginx_markdown_excluded_content_type_total "
+        "Requests excluded due to content type.\n"
+        "# TYPE "
+        "nginx_markdown_excluded_content_type_total "
+        "counter\n"
+        "nginx_markdown_excluded_content_type_total"
+        " %uA\n"
+        "\n",
+        snapshot->streaming.excluded_content_type_total);
 #endif
 
     /* input_bytes_total */
