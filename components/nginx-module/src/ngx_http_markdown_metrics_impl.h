@@ -89,6 +89,7 @@ typedef struct {
         ngx_atomic_uint_t accept;
         ngx_atomic_uint_t no_accept;
         ngx_atomic_uint_t conditional;
+        ngx_atomic_uint_t compression_passthrough;
     } skips;
 
     /* Conversion result counters */
@@ -271,6 +272,8 @@ ngx_http_markdown_collect_metrics_snapshot(ngx_http_markdown_metrics_snapshot_t 
     snapshot->skips.accept = metrics->skips.accept;
     snapshot->skips.no_accept = metrics->skips.no_accept;
     snapshot->skips.conditional = metrics->skips.conditional;
+    snapshot->skips.compression_passthrough =
+        metrics->skips.compression_passthrough;
     snapshot->results.failopen_count = metrics->results.failopen_count;
     snapshot->results.delivery_count = metrics->results.delivery_count;
     snapshot->results.decision_count = metrics->results.decision_count;
@@ -750,7 +753,8 @@ ngx_http_markdown_metrics_write_json(
         "    \"range\": %uA,\n"
         "    \"accept\": %uA,\n"
         "    \"no_accept\": %uA,\n"
-        "    \"conditional\": %uA\n"
+        "    \"conditional\": %uA,\n"
+        "    \"compression_passthrough\": %uA\n"
         "  },\n"
 
         /* Operational totals and per-path aggregate counters */
@@ -840,6 +844,7 @@ ngx_http_markdown_metrics_write_json(
         snapshot->skips.accept,
         snapshot->skips.no_accept,
         snapshot->skips.conditional,
+        snapshot->skips.compression_passthrough,
         snapshot->results.failopen_count,
         snapshot->results.delivery_count,
         snapshot->results.decision_count,
@@ -1054,6 +1059,7 @@ ngx_http_markdown_metrics_write_text(
         "- Skips (Accept): %uA\n"
         "- Skips (No Accept): %uA\n"
         "- Skips (Conditional): %uA\n"
+        "- Skips (Compression Passthrough): %uA\n"
         "- Fail-Open Count: %uA\n"
         "- Delivery Count: %uA\n"
         "- Decision Count: %uA\n"
@@ -1138,6 +1144,7 @@ ngx_http_markdown_metrics_write_text(
         snapshot->skips.accept,
         snapshot->skips.no_accept,
         snapshot->skips.conditional,
+        snapshot->skips.compression_passthrough,
         snapshot->results.failopen_count,
         snapshot->results.delivery_count,
         snapshot->results.decision_count,

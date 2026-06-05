@@ -865,6 +865,7 @@ typedef struct {
         ngx_atomic_t  accept;        /* SKIP_ACCEPT */
         ngx_atomic_t  no_accept;     /* SKIPPED_NO_ACCEPT */
         ngx_atomic_t  conditional;   /* SKIPPED_CONDITIONAL */
+        ngx_atomic_t  compression_passthrough; /* SKIP_COMPRESSION_PASSTHROUGH */
     } skips;
 
     /*
@@ -1054,6 +1055,7 @@ const ngx_str_t *ngx_http_markdown_reason_streaming_convert(void);
 const ngx_str_t *ngx_http_markdown_reason_streaming_fallback(void);
 const ngx_str_t *ngx_http_markdown_reason_streaming_fail_postcommit(void);
 const ngx_str_t *ngx_http_markdown_reason_streaming_skip_unsupported(void);
+const ngx_str_t *ngx_http_markdown_reason_streaming_skip_compressed(void);
 const ngx_str_t *ngx_http_markdown_reason_streaming_budget_exceeded(void);
 const ngx_str_t *ngx_http_markdown_reason_streaming_precommit_failopen(void);
 const ngx_str_t *ngx_http_markdown_reason_streaming_precommit_reject(void);
