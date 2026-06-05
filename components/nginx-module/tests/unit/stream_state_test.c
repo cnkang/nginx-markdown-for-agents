@@ -512,6 +512,381 @@ static void test_pre_commit_no_replay_delegates(void)
     TEST_PASS("PRE_COMMIT (no replay) delegates to replay-unavailable");
 }
 
+/* --- Additional coverage tests --- */
+
+static void test_not_eligible_default_event(void)
+{
+    ngx_http_markdown_stream_ctx_t ctx;
+    ngx_http_markdown_decision_t   d;
+
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.current_state = NGX_HTTP_MD_STATE_NOT_ELIGIBLE;
+
+    d = ngx_http_markdown_stream_decide(&ctx,
+            NGX_HTTP_MD_EVENT_STREAMING_START);
+
+    TEST_ASSERT(d.new_state == NGX_HTTP_MD_STATE_PASSTHROUGH,
+                "NOT_ELIGIBLE + default -> PASSTHROUGH");
+    TEST_ASSERT(d.action == NGX_HTTP_MD_ACTION_PASSTHROUGH,
+                "action = PASSTHROUGH");
+    TEST_PASS("NOT_ELIGIBLE + default event -> PASSTHROUGH");
+}
+
+static void test_candidate_default_event(void)
+{
+    ngx_http_markdown_stream_ctx_t ctx;
+    ngx_http_markdown_decision_t   d;
+
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.current_state = NGX_HTTP_MD_STATE_STREAMING_CANDIDATE;
+
+    d = ngx_http_markdown_stream_decide(&ctx,
+            NGX_HTTP_MD_EVENT_NOT_ELIGIBLE);
+
+    TEST_ASSERT(d.new_state == NGX_HTTP_MD_STATE_PASSTHROUGH,
+                "STREAMING_CANDIDATE + default -> PASSTHROUGH");
+    TEST_ASSERT(d.action == NGX_HTTP_MD_ACTION_PASSTHROUGH,
+                "action = PASSTHROUGH");
+    TEST_PASS("STREAMING_CANDIDATE + default event -> PASSTHROUGH");
+}
+
+static void test_candidate_look_behind_overflow_with_limits(void)
+{
+    ngx_http_markdown_stream_ctx_t ctx;
+    ngx_http_markdown_decision_t   d;
+
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.current_state = NGX_HTTP_MD_STATE_STREAMING_CANDIDATE;
+    ctx.within_resource_limits = 1;
+
+    d = ngx_http_markdown_stream_decide(&ctx,
+            NGX_HTTP_MD_EVENT_LOOK_BEHIND_OVERFLOW);
+
+    TEST_ASSERT(d.new_state == NGX_HTTP_MD_STATE_FULL_BUFFER_FALLBACK,
+                "CANDIDATE + LOOK_BEHIND (limits) -> FULL_BUFFER");
+    TEST_ASSERT(d.action == NGX_HTTP_MD_ACTION_SWITCH_FULL_BUFFER,
+                "action = SWITCH_FULL_BUFFER");
+    TEST_PASS("CANDIDATE + LOOK_BEHIND_OVERFLOW (within limits)");
+}
+
+static void test_candidate_auto_risk_with_limits(void)
+{
+    ngx_http_markdown_stream_ctx_t ctx;
+    ngx_http_markdown_decision_t   d;
+
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.current_state = NGX_HTTP_MD_STATE_STREAMING_CANDIDATE;
+    ctx.within_resource_limits = 1;
+
+    d = ngx_http_markdown_stream_decide(&ctx,
+            NGX_HTTP_MD_EVENT_AUTO_RISK);
+
+    TEST_ASSERT(d.new_state == NGX_HTTP_MD_STATE_FULL_BUFFER_FALLBACK,
+                "CANDIDATE + AUTO_RISK (limits) -> FULL_BUFFER");
+    TEST_ASSERT(d.action == NGX_HTTP_MD_ACTION_SWITCH_FULL_BUFFER,
+                "action = SWITCH_FULL_BUFFER");
+    TEST_PASS("CANDIDATE + AUTO_RISK (within limits)");
+}
+
+static void test_candidate_full_doc_feature_with_limits(void)
+{
+    ngx_http_markdown_stream_ctx_t ctx;
+    ngx_http_markdown_decision_t   d;
+
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.current_state = NGX_HTTP_MD_STATE_STREAMING_CANDIDATE;
+    ctx.within_resource_limits = 1;
+
+    d = ngx_http_markdown_stream_decide(&ctx,
+            NGX_HTTP_MD_EVENT_FULL_DOC_FEATURE);
+
+    TEST_ASSERT(d.new_state == NGX_HTTP_MD_STATE_FULL_BUFFER_FALLBACK,
+                "CANDIDATE + FULL_DOC (limits) -> FULL_BUFFER");
+    TEST_ASSERT(d.action == NGX_HTTP_MD_ACTION_SWITCH_FULL_BUFFER,
+                "action = SWITCH_FULL_BUFFER");
+    TEST_PASS("CANDIDATE + FULL_DOC_FEATURE (within limits)");
+}
+
+static void test_candidate_look_behind_overflow_no_limits(void)
+{
+    ngx_http_markdown_stream_ctx_t ctx;
+    ngx_http_markdown_decision_t   d;
+
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.current_state = NGX_HTTP_MD_STATE_STREAMING_CANDIDATE;
+    ctx.within_resource_limits = 0;
+
+    d = ngx_http_markdown_stream_decide(&ctx,
+            NGX_HTTP_MD_EVENT_LOOK_BEHIND_OVERFLOW);
+
+    TEST_ASSERT(d.new_state == NGX_HTTP_MD_STATE_PASSTHROUGH,
+                "CANDIDATE + LOOK_BEHIND (no limits) -> PASSTHROUGH");
+    TEST_ASSERT(d.action == NGX_HTTP_MD_ACTION_PASSTHROUGH,
+                "action = PASSTHROUGH");
+    TEST_PASS("CANDIDATE + LOOK_BEHIND_OVERFLOW (exceeded limits)");
+}
+
+static void test_candidate_auto_risk_no_limits(void)
+{
+    ngx_http_markdown_stream_ctx_t ctx;
+    ngx_http_markdown_decision_t   d;
+
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.current_state = NGX_HTTP_MD_STATE_STREAMING_CANDIDATE;
+    ctx.within_resource_limits = 0;
+
+    d = ngx_http_markdown_stream_decide(&ctx,
+            NGX_HTTP_MD_EVENT_AUTO_RISK);
+
+    TEST_ASSERT(d.new_state == NGX_HTTP_MD_STATE_PASSTHROUGH,
+                "CANDIDATE + AUTO_RISK (no limits) -> PASSTHROUGH");
+    TEST_ASSERT(d.action == NGX_HTTP_MD_ACTION_PASSTHROUGH,
+                "action = PASSTHROUGH");
+    TEST_PASS("CANDIDATE + AUTO_RISK (exceeded limits)");
+}
+
+static void test_candidate_full_doc_feature_no_limits(void)
+{
+    ngx_http_markdown_stream_ctx_t ctx;
+    ngx_http_markdown_decision_t   d;
+
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.current_state = NGX_HTTP_MD_STATE_STREAMING_CANDIDATE;
+    ctx.within_resource_limits = 0;
+
+    d = ngx_http_markdown_stream_decide(&ctx,
+            NGX_HTTP_MD_EVENT_FULL_DOC_FEATURE);
+
+    TEST_ASSERT(d.new_state == NGX_HTTP_MD_STATE_PASSTHROUGH,
+                "CANDIDATE + FULL_DOC (no limits) -> PASSTHROUGH");
+    TEST_ASSERT(d.action == NGX_HTTP_MD_ACTION_PASSTHROUGH,
+                "action = PASSTHROUGH");
+    TEST_PASS("CANDIDATE + FULL_DOC_FEATURE (exceeded limits)");
+}
+
+/* --- PRE_COMMIT additional transitions --- */
+
+static void test_pre_commit_on_error_pass(void)
+{
+    ngx_http_markdown_stream_ctx_t ctx;
+    ngx_http_markdown_decision_t   d;
+
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.current_state = NGX_HTTP_MD_STATE_PRE_COMMIT;
+    ctx.replay_available = 1;
+    ctx.headers_committed = 0;
+
+    d = ngx_http_markdown_stream_decide(&ctx,
+            NGX_HTTP_MD_EVENT_ON_ERROR_PASS);
+
+    TEST_ASSERT(d.new_state == NGX_HTTP_MD_STATE_PASSTHROUGH,
+                "PRE_COMMIT + ON_ERROR_PASS -> PASSTHROUGH");
+    TEST_ASSERT(d.action == NGX_HTTP_MD_ACTION_PASS_HTML,
+                "action = PASS_HTML");
+    TEST_PASS("PRE_COMMIT + ON_ERROR_PASS -> PASS_HTML");
+}
+
+static void test_pre_commit_on_error_reject(void)
+{
+    ngx_http_markdown_stream_ctx_t ctx;
+    ngx_http_markdown_decision_t   d;
+
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.current_state = NGX_HTTP_MD_STATE_PRE_COMMIT;
+    ctx.replay_available = 1;
+    ctx.headers_committed = 0;
+
+    d = ngx_http_markdown_stream_decide(&ctx,
+            NGX_HTTP_MD_EVENT_ON_ERROR_REJECT);
+
+    TEST_ASSERT(d.new_state == NGX_HTTP_MD_STATE_PASSTHROUGH,
+                "PRE_COMMIT + ON_ERROR_REJECT -> PASSTHROUGH");
+    TEST_ASSERT(d.action == NGX_HTTP_MD_ACTION_REJECT_502,
+                "action = REJECT_502");
+    TEST_PASS("PRE_COMMIT + ON_ERROR_REJECT -> REJECT_502");
+}
+
+static void test_pre_commit_resource_limit(void)
+{
+    ngx_http_markdown_stream_ctx_t ctx;
+    ngx_http_markdown_decision_t   d;
+
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.current_state = NGX_HTTP_MD_STATE_PRE_COMMIT;
+    ctx.replay_available = 1;
+    ctx.headers_committed = 0;
+
+    d = ngx_http_markdown_stream_decide(&ctx,
+            NGX_HTTP_MD_EVENT_RESOURCE_LIMIT);
+
+    TEST_ASSERT(d.new_state == NGX_HTTP_MD_STATE_PASSTHROUGH,
+                "PRE_COMMIT + RESOURCE_LIMIT -> PASSTHROUGH");
+    TEST_ASSERT(d.action == NGX_HTTP_MD_ACTION_PASSTHROUGH,
+                "action = PASSTHROUGH");
+    TEST_PASS("PRE_COMMIT + RESOURCE_LIMIT -> PASSTHROUGH");
+}
+
+static void test_pre_commit_default_event(void)
+{
+    ngx_http_markdown_stream_ctx_t ctx;
+    ngx_http_markdown_decision_t   d;
+
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.current_state = NGX_HTTP_MD_STATE_PRE_COMMIT;
+    ctx.replay_available = 1;
+    ctx.headers_committed = 0;
+
+    d = ngx_http_markdown_stream_decide(&ctx,
+            NGX_HTTP_MD_EVENT_NOT_ELIGIBLE);
+
+    TEST_ASSERT(d.new_state == NGX_HTTP_MD_STATE_PASSTHROUGH,
+                "PRE_COMMIT + default -> PASSTHROUGH");
+    TEST_ASSERT(d.action == NGX_HTTP_MD_ACTION_PASSTHROUGH,
+                "action = PASSTHROUGH");
+    TEST_PASS("PRE_COMMIT + default event -> PASSTHROUGH");
+}
+
+static void test_pre_commit_strict_etag_with_limits(void)
+{
+    ngx_http_markdown_stream_ctx_t ctx;
+    ngx_http_markdown_decision_t   d;
+
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.current_state = NGX_HTTP_MD_STATE_PRE_COMMIT;
+    ctx.replay_available = 1;
+    ctx.headers_committed = 0;
+    ctx.within_resource_limits = 1;
+
+    d = ngx_http_markdown_stream_decide(&ctx,
+            NGX_HTTP_MD_EVENT_STRICT_ETAG);
+
+    TEST_ASSERT(d.new_state == NGX_HTTP_MD_STATE_FULL_BUFFER_FALLBACK,
+                "PRE_COMMIT + STRICT_ETAG (limits) -> FULL_BUFFER");
+    TEST_ASSERT(d.action == NGX_HTTP_MD_ACTION_SWITCH_FULL_BUFFER,
+                "action = SWITCH_FULL_BUFFER");
+    TEST_PASS("PRE_COMMIT + STRICT_ETAG (within limits)");
+}
+
+static void test_pre_commit_headers_committed_passthrough(void)
+{
+    ngx_http_markdown_stream_ctx_t ctx;
+    ngx_http_markdown_decision_t   d;
+
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.current_state = NGX_HTTP_MD_STATE_PRE_COMMIT;
+    ctx.replay_available = 1;
+    ctx.headers_committed = 1;
+
+    d = ngx_http_markdown_stream_decide(&ctx,
+            NGX_HTTP_MD_EVENT_PARSER_UNSUITABLE);
+
+    TEST_ASSERT(d.new_state == NGX_HTTP_MD_STATE_PASSTHROUGH,
+                "PRE_COMMIT + headers_committed -> PASSTHROUGH");
+    TEST_ASSERT(d.action == NGX_HTTP_MD_ACTION_PASSTHROUGH,
+                "action = PASSTHROUGH (fallthrough)");
+    TEST_PASS("PRE_COMMIT with headers_committed falls through");
+}
+
+/* --- PRE_COMMIT_REPLAY_UNAVAILABLE additional --- */
+
+static void test_pre_commit_replay_unavail_resource_limit(void)
+{
+    ngx_http_markdown_stream_ctx_t ctx;
+    ngx_http_markdown_decision_t   d;
+
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.current_state = NGX_HTTP_MD_STATE_PRE_COMMIT_REPLAY_UNAVAILABLE;
+    ctx.replay_available = 0;
+    ctx.headers_committed = 0;
+
+    d = ngx_http_markdown_stream_decide(&ctx,
+            NGX_HTTP_MD_EVENT_RESOURCE_LIMIT);
+
+    TEST_ASSERT(d.new_state == NGX_HTTP_MD_STATE_PASSTHROUGH,
+                "REPLAY_UNAVAIL + RESOURCE_LIMIT -> PASSTHROUGH");
+    TEST_ASSERT(d.action == NGX_HTTP_MD_ACTION_REJECT_502,
+                "action = REJECT_502");
+    TEST_PASS("REPLAY_UNAVAILABLE + RESOURCE_LIMIT -> REJECT_502");
+}
+
+static void test_pre_commit_replay_unavail_default_event(void)
+{
+    ngx_http_markdown_stream_ctx_t ctx;
+    ngx_http_markdown_decision_t   d;
+
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.current_state = NGX_HTTP_MD_STATE_PRE_COMMIT_REPLAY_UNAVAILABLE;
+    ctx.replay_available = 0;
+    ctx.headers_committed = 0;
+
+    d = ngx_http_markdown_stream_decide(&ctx,
+            NGX_HTTP_MD_EVENT_NOT_ELIGIBLE);
+
+    TEST_ASSERT(d.new_state == NGX_HTTP_MD_STATE_PASSTHROUGH,
+                "REPLAY_UNAVAIL + default -> PASSTHROUGH");
+    TEST_ASSERT(d.action == NGX_HTTP_MD_ACTION_REJECT_502,
+                "action = REJECT_502");
+    TEST_PASS("REPLAY_UNAVAILABLE + default -> REJECT_502");
+}
+
+/* --- FULL_BUFFER transitions --- */
+
+static void test_full_buffer_resource_limit(void)
+{
+    ngx_http_markdown_stream_ctx_t ctx;
+    ngx_http_markdown_decision_t   d;
+
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.current_state = NGX_HTTP_MD_STATE_FULL_BUFFER_FALLBACK;
+
+    d = ngx_http_markdown_stream_decide(&ctx,
+            NGX_HTTP_MD_EVENT_RESOURCE_LIMIT);
+
+    TEST_ASSERT(d.new_state == NGX_HTTP_MD_STATE_PASSTHROUGH,
+                "FULL_BUFFER + RESOURCE_LIMIT -> PASSTHROUGH");
+    TEST_ASSERT(d.action == NGX_HTTP_MD_ACTION_PASSTHROUGH,
+                "action = PASSTHROUGH");
+    TEST_PASS("FULL_BUFFER + RESOURCE_LIMIT -> PASSTHROUGH");
+}
+
+static void test_full_buffer_other_event(void)
+{
+    ngx_http_markdown_stream_ctx_t ctx;
+    ngx_http_markdown_decision_t   d;
+
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.current_state = NGX_HTTP_MD_STATE_FULL_BUFFER_FALLBACK;
+
+    d = ngx_http_markdown_stream_decide(&ctx,
+            NGX_HTTP_MD_EVENT_STREAMING_START);
+
+    TEST_ASSERT(d.new_state == NGX_HTTP_MD_STATE_FULL_BUFFER_FALLBACK,
+                "FULL_BUFFER + other -> stays FULL_BUFFER");
+    TEST_ASSERT(d.action == NGX_HTTP_MD_ACTION_SWITCH_FULL_BUFFER,
+                "action = SWITCH_FULL_BUFFER");
+    TEST_PASS("FULL_BUFFER + non-limit event stays FULL_BUFFER");
+}
+
+/* --- Unknown state default --- */
+
+static void test_unknown_state_passthrough(void)
+{
+    ngx_http_markdown_stream_ctx_t ctx;
+    ngx_http_markdown_decision_t   d;
+
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.current_state = (ngx_http_markdown_stream_state_e) 9999;
+
+    d = ngx_http_markdown_stream_decide(&ctx,
+            NGX_HTTP_MD_EVENT_COMMIT);
+
+    TEST_ASSERT(d.new_state == NGX_HTTP_MD_STATE_PASSTHROUGH,
+                "unknown state -> PASSTHROUGH");
+    TEST_ASSERT(d.action == NGX_HTTP_MD_ACTION_PASSTHROUGH,
+                "action = PASSTHROUGH");
+    TEST_PASS("Unknown state -> safe PASSTHROUGH");
+}
+
 
 int main(void)
 {
@@ -519,17 +894,33 @@ int main(void)
 
     test_not_eligible_to_streaming_candidate();
     test_not_eligible_to_passthrough();
+    test_not_eligible_default_event();
     test_candidate_to_pre_commit();
     test_candidate_to_full_buffer_with_limits();
     test_candidate_to_passthrough_no_limits();
+    test_candidate_default_event();
+    test_candidate_look_behind_overflow_with_limits();
+    test_candidate_auto_risk_with_limits();
+    test_candidate_full_doc_feature_with_limits();
+    test_candidate_look_behind_overflow_no_limits();
+    test_candidate_auto_risk_no_limits();
+    test_candidate_full_doc_feature_no_limits();
     test_pre_commit_to_passthrough_pass_html();
     test_pre_commit_hard_excluded_pass_html();
     test_pre_commit_budget_failure_pass_html();
     test_pre_commit_to_committed();
     test_pre_commit_to_full_buffer();
+    test_pre_commit_on_error_pass();
+    test_pre_commit_on_error_reject();
+    test_pre_commit_resource_limit();
+    test_pre_commit_default_event();
+    test_pre_commit_strict_etag_with_limits();
+    test_pre_commit_headers_committed_passthrough();
     test_pre_commit_replay_unavail_to_committed();
     test_pre_commit_replay_unavail_overflow_with_limits();
     test_pre_commit_replay_unavail_overflow_no_limits();
+    test_pre_commit_replay_unavail_resource_limit();
+    test_pre_commit_replay_unavail_default_event();
     test_committed_error_pass_to_safe_finish();
     test_committed_error_reject_to_abort();
     test_committed_non_error_stays();
@@ -538,6 +929,9 @@ int main(void)
     test_post_commit_abort_terminal();
     test_null_ctx_passthrough();
     test_pre_commit_no_replay_delegates();
+    test_full_buffer_resource_limit();
+    test_full_buffer_other_event();
+    test_unknown_state_passthrough();
 
     printf("\n  All stream state transition tests passed\n\n");
     return 0;

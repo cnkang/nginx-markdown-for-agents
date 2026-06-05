@@ -416,6 +416,166 @@ static void test_null_parameters(void)
     TEST_PASS("NULL parameter handling");
 }
 
+/* --- Append with NULL data and non-zero len --- */
+
+static void test_append_null_data_nonzero_len(void)
+{
+    ngx_http_markdown_ctx_t ctx;
+    ngx_int_t rc;
+
+    test_setup();
+    memset(&ctx, 0, sizeof(ctx));
+    ngx_http_markdown_stream_replay_init(&ctx, &test_pool, 1024);
+
+    rc = ngx_http_markdown_stream_replay_append(&ctx, NULL, 10);
+
+    TEST_ASSERT(rc == NGX_ERROR,
+                "NULL data with non-zero len -> NGX_ERROR");
+    TEST_PASS("Append NULL data with non-zero len returns NGX_ERROR");
+}
+
+/* --- Append with zero length --- */
+
+static void test_append_zero_length(void)
+{
+    ngx_http_markdown_ctx_t ctx;
+    ngx_int_t rc;
+
+    test_setup();
+    memset(&ctx, 0, sizeof(ctx));
+    ngx_http_markdown_stream_replay_init(&ctx, &test_pool, 1024);
+
+    rc = ngx_http_markdown_stream_replay_append(&ctx,
+            (u_char *) "x", 0);
+
+    TEST_ASSERT(rc == NGX_OK, "zero-length append returns NGX_OK");
+    TEST_ASSERT(ctx.stream_sm.replay_buf.size == 0,
+                "buffer size unchanged");
+    TEST_PASS("Zero-length append is a no-op");
+}
+
+/* --- Chain not initialized --- */
+
+static void test_chain_not_initialized(void)
+{
+    ngx_http_markdown_ctx_t ctx;
+    ngx_chain_t *chain;
+
+    test_setup();
+    memset(&ctx, 0, sizeof(ctx));
+    /* replay_initialized = 0 by default */
+
+    chain = ngx_http_markdown_stream_replay_chain(&ctx, &test_pool);
+
+    TEST_ASSERT(chain == NULL, "chain not initialized -> NULL");
+    TEST_PASS("Chain returns NULL when not initialized");
+}
+
+/* --- Available with NULL ctx --- */
+
+static void test_available_null_ctx(void)
+{
+    ngx_flag_t avail;
+
+    avail = ngx_http_markdown_stream_replay_available(NULL);
+    TEST_ASSERT(avail == 0, "available NULL ctx -> 0");
+    TEST_PASS("Available returns 0 for NULL ctx");
+}
+
+/* --- Cleanup function coverage --- */
+
+static void test_cleanup_with_data(void)
+{
+    ngx_http_markdown_ctx_t ctx;
+
+    test_setup();
+    memset(&ctx, 0, sizeof(ctx));
+    ngx_http_markdown_stream_replay_init(&ctx, &test_pool, 1024);
+
+    /* Append some data to allocate backing store */
+    u_char data[] = "test data for cleanup";
+    ngx_http_markdown_stream_replay_append(&ctx, data, sizeof(data) - 1);
+
+    TEST_ASSERT(ctx.stream_sm.replay_buf.data != NULL,
+                "backing store allocated");
+
+    /* Invoke the cleanup handler directly to cover the cleanup path */
+    if (test_cleanup_count > 0 && test_cleanup_slots[0].handler != NULL) {
+        test_cleanup_slots[0].handler(test_cleanup_slots[0].data);
+    }
+
+    TEST_ASSERT(ctx.stream_sm.replay_buf.data == NULL,
+                "backing store freed by cleanup");
+    TEST_ASSERT(ctx.stream_sm.replay_buf.size == 0,
+                "size reset by cleanup");
+    TEST_PASS("Cleanup frees backing store");
+}
+
+/* --- Cleanup with NULL buf->data --- */
+
+static void test_cleanup_null_buf_data(void)
+{
+    ngx_http_markdown_ctx_t ctx;
+
+    test_setup();
+    memset(&ctx, 0, sizeof(ctx));
+    ngx_http_markdown_stream_replay_init(&ctx, &test_pool, 1024);
+
+    /* Manually set data to NULL but size/capacity non-zero */
+    ctx.stream_sm.replay_buf.data = NULL;
+    ctx.stream_sm.replay_buf.size = 100;
+    ctx.stream_sm.replay_buf.capacity = 200;
+
+    /* Invoke cleanup - should not crash on NULL data */
+    if (test_cleanup_count > 0 && test_cleanup_slots[0].handler != NULL) {
+        test_cleanup_slots[0].handler(test_cleanup_slots[0].data);
+    }
+
+    TEST_ASSERT(ctx.stream_sm.replay_buf.size == 0,
+                "size reset even with NULL data");
+    TEST_PASS("Cleanup handles NULL buf->data safely");
+}
+
+/* --- Init pool cleanup registration failure --- */
+
+static void test_init_cleanup_registration_failure(void)
+{
+    ngx_http_markdown_ctx_t ctx;
+    ngx_int_t rc;
+
+    test_setup();
+    memset(&ctx, 0, sizeof(ctx));
+
+    /* Exhaust cleanup slots */
+    test_cleanup_count = TEST_MAX_CLEANUPS;
+
+    rc = ngx_http_markdown_stream_replay_init(&ctx, &test_pool, 1024);
+
+    TEST_ASSERT(rc == NGX_ERROR,
+                "init cleanup registration failure -> NGX_ERROR");
+    TEST_PASS("Init fails when cleanup registration fails");
+}
+
+/* --- Overflow detection (size > capacity) --- */
+
+static void test_available_size_exceeds_capacity(void)
+{
+    ngx_http_markdown_ctx_t ctx;
+    ngx_flag_t avail;
+
+    test_setup();
+    memset(&ctx, 0, sizeof(ctx));
+    ngx_http_markdown_stream_replay_init(&ctx, &test_pool, 100);
+    ctx.stream_sm.replay_buf.size = 150;
+    ctx.stream_sm.replay_buf.capacity = 100;
+
+    avail = ngx_http_markdown_stream_replay_available(&ctx);
+
+    TEST_ASSERT(avail == 0,
+                "not available when size > capacity");
+    TEST_PASS("Available returns 0 when size exceeds capacity");
+}
+
 
 int main(void)
 {
@@ -423,15 +583,23 @@ int main(void)
 
     test_init_zero_capacity();
     test_init_valid_capacity();
+    test_init_cleanup_registration_failure();
     test_append_within_capacity();
     test_append_overflow();
     test_append_accumulate_to_capacity();
+    test_append_null_data_nonzero_len();
+    test_append_zero_length();
     test_available_within_capacity();
     test_available_overflowed();
     test_available_not_initialized();
+    test_available_null_ctx();
+    test_available_size_exceeds_capacity();
     test_chain_builds_correctly();
     test_chain_returns_null_when_empty();
+    test_chain_not_initialized();
     test_null_parameters();
+    test_cleanup_with_data();
+    test_cleanup_null_buf_data();
 
     printf("\n  All stream replay buffer tests passed\n\n");
     return 0;
