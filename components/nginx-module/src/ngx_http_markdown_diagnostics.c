@@ -886,7 +886,7 @@ ngx_http_markdown_diagnostics_build_json(ngx_http_request_t *r,
         metrics.failopen_total);
 
 #ifdef MARKDOWN_STREAMING_ENABLED
-    /* --- streaming_metrics section (spec-39) --- */
+    /* Streaming metrics JSON section */
     p = ngx_slprintf(p, last,
         "  \"streaming_metrics\": {\n"
         "    \"requests_total\": %uA,\n"

@@ -303,7 +303,7 @@ ngx_http_markdown_metrics_write_prometheus(
         snapshot->streaming.engine_choice.passthrough,
         snapshot->streaming.engine_choice.not_eligible);
 
-    /* streaming_fallback_total{phase,action} */
+    /* Streaming fallback events by phase and action */
     p = ngx_slprintf(p, end,
         "# HELP "
         "nginx_markdown_streaming_fallback_total "
@@ -319,7 +319,7 @@ ngx_http_markdown_metrics_write_prometheus(
         snapshot->streaming.streaming_fallback_precommit_pass,
         snapshot->streaming.streaming_fallback_precommit_reject);
 
-    /* streaming_failure_total{phase,action} */
+    /* Streaming failure events by phase and action */
     p = ngx_slprintf(p, end,
         "# HELP "
         "nginx_markdown_streaming_failure_total "

@@ -1114,10 +1114,6 @@ ngx_http_markdown_body_filter_resume_pending(ngx_http_request_t *r,
     ctx->fullbuffer.pending_has_data = 0;
     r->buffered &= ~NGX_HTTP_MARKDOWN_BUFFERED;
 
-    if (rc != NGX_OK && rc != NGX_DONE) {
-        return rc;
-    }
-
     return rc;
 }
 
