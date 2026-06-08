@@ -711,6 +711,39 @@ ngx_http_markdown_diagnostics_check_access(ngx_http_request_t *r)
  * Returns:
  *   NGX_OK on success, NGX_ERROR on failure
  */
+static u_char *
+ngx_http_markdown_diagnostics_fmt_streaming_config(
+    u_char *p, u_char *last, const ngx_http_markdown_conf_t *conf)
+{
+#ifdef MARKDOWN_STREAMING_ENABLED
+    const char  *engine_str;
+    const char  *on_error_str;
+    size_t       auto_threshold;
+
+    engine_str = (conf != NULL && conf->streaming.engine != NULL)
+        ? "configured" : "auto";
+    on_error_str = (conf != NULL
+         && conf->streaming.on_error
+            == NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_REJECT)
+        ? "reject" : "pass";
+    auto_threshold = (conf != NULL)
+        ? conf->streaming.auto_threshold : 0;
+
+    p = ngx_slprintf(p, last,
+        "  \"streaming_config\": {\n"
+        "    \"engine\": \"%s\",\n"
+        "    \"on_error\": \"%s\",\n"
+        "    \"auto_threshold\": %uz\n"
+        "  }\n",
+        engine_str, on_error_str, auto_threshold);
+#else
+    p = ngx_slprintf(p, last,
+        "  \"streaming_config\": null\n");
+#endif
+
+    return p;
+}
+
 static ngx_int_t
 ngx_http_markdown_diagnostics_build_json(ngx_http_request_t *r,
     ngx_buf_t *b)
@@ -890,26 +923,8 @@ ngx_http_markdown_diagnostics_build_json(ngx_http_request_t *r,
         dynconf.last_known_good_mtime,
         dynconf.lkg_valid ? "true" : "false");
 
-#ifdef MARKDOWN_STREAMING_ENABLED
-    /* --- streaming_config section (spec-39) --- */
-    p = ngx_slprintf(p, last,
-        "  \"streaming_config\": {\n"
-        "    \"engine\": \"%s\",\n"
-        "    \"on_error\": \"%s\",\n"
-        "    \"auto_threshold\": %uz\n"
-        "  }\n",
-        (conf != NULL && conf->streaming.engine != NULL)
-            ? "configured" : "auto",
-        (conf != NULL
-         && conf->streaming.on_error
-            == NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_REJECT)
-            ? "reject" : "pass",
-        (conf != NULL) ? conf->streaming.auto_threshold : 0);
-#else
-    /* Non-streaming build: empty placeholder */
-    p = ngx_slprintf(p, last,
-        "  \"streaming_config\": null\n");
-#endif
+    p = ngx_http_markdown_diagnostics_fmt_streaming_config(
+            p, last, conf);
 
     /* Closing brace */
     p = ngx_slprintf(p, last, "}\n");
