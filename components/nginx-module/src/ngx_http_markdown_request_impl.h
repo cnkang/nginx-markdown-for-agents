@@ -1100,6 +1100,28 @@ ngx_http_markdown_body_filter_convert_and_output(ngx_http_request_t *r,
  * @return    NGX_OK on success, NGX_ERROR on error
  */
 static ngx_int_t
+ngx_http_markdown_body_filter_resume_pending(ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx)
+{
+    ngx_int_t  rc;
+
+    rc = ngx_http_next_body_filter(r, ctx->fullbuffer.pending_output);
+    if (rc == NGX_AGAIN) {
+        return NGX_AGAIN;
+    }
+
+    ctx->fullbuffer.pending_output = NULL;
+    ctx->fullbuffer.pending_has_data = 0;
+    r->buffered &= ~NGX_HTTP_MARKDOWN_BUFFERED;
+
+    if (rc != NGX_OK && rc != NGX_DONE) {
+        return rc;
+    }
+
+    return rc;
+}
+
+static ngx_int_t
 ngx_http_markdown_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
 {
     ngx_http_markdown_ctx_t   *ctx;
@@ -1141,30 +1163,7 @@ ngx_http_markdown_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
      * after the downstream filter becomes writable again.
      */
     if (ctx->fullbuffer.pending_has_data) {
-        rc = ngx_http_next_body_filter(r, ctx->fullbuffer.pending_output);
-        if (rc == NGX_AGAIN) {
-            /* Still backpressured, keep pending chain */
-            return NGX_AGAIN;
-        }
-        /* Downstream consumed the pending output */
-        ctx->fullbuffer.pending_output = NULL;
-        ctx->fullbuffer.pending_has_data = 0;
-        r->buffered &= ~NGX_HTTP_MARKDOWN_BUFFERED;
-
-        if (rc != NGX_OK && rc != NGX_DONE) {
-            return rc;
-        }
-
-        if (rc == NGX_DONE) {
-            return NGX_DONE;
-        }
-
-        /*
-         * Pending converted output drained successfully.  The original input
-         * chain was already consumed when conversion_attempted was set, so do
-         * not forward a re-delivered input chain after the converted response.
-         */
-        return NGX_OK;
+        return ngx_http_markdown_body_filter_resume_pending(r, ctx);
     }
 
     /* If not eligible for conversion, pass through */
