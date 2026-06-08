@@ -24,7 +24,6 @@ If you need rollout steps, operator checklists, or directive syntax, go back to:
 
 - [AUTOMATIC_DECOMPRESSION.md](AUTOMATIC_DECOMPRESSION.md)
 - [DECOMPRESSION.md](DECOMPRESSION.md)
-- [streaming-compression-strategy.md](streaming-compression-strategy.md)
 - [charset-detection.md](charset-detection.md)
 - [security.md](security.md)
 
@@ -36,6 +35,12 @@ If you need rollout steps, operator checklists, or directive syntax, go back to:
 ### Decision chain and rollout safety
 
 - [DECISION_CHAIN.md](DECISION_CHAIN.md)
+
+### Streaming
+
+- [STREAMING_COMPATIBILITY.md](STREAMING_COMPATIBILITY.md)
+- [streaming-observability.md](streaming-observability.md)
+- [streaming-compression-strategy.md](streaming-compression-strategy.md)
 
 ### Metadata and enrichment
 
