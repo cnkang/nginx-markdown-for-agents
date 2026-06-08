@@ -141,7 +141,7 @@ If `streaming_fallback_total` is high relative to `streaming_candidate_total`:
 
 1. Check `reason` field in info-level logs for common patterns.
 2. Common causes: malformed HTML, exceeded budgets, excluded content types.
-3. Consider adjusting `markdown_streaming_auto_threshold` or
+3. Consider adjusting `markdown_stream_threshold` or
    `markdown_streaming_on_error`.
 
 ### Post-commit failures

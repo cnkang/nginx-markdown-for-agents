@@ -508,7 +508,7 @@ markdown_trust_forwarded_headers on;
 These directives control the streaming conversion path introduced in 0.5.0.
 In v0.6.0, the default changed from `off` to `auto`: responses are
 automatically routed to streaming or full-buffer based on Content-Length
-and `markdown_streaming_auto_threshold`. Set `markdown_streaming_engine off`
+and `markdown_stream_threshold`. Set `markdown_streaming_engine off`
 explicitly to restore 0.5.x behavior.
 
 
@@ -919,20 +919,127 @@ location /legacy {
 }
 ```
 
-##### Reserved Directive: `markdown_stream_flush_interval`
+##### Reserved Directives (NOT Implemented)
 
-> **Status:** Reserved for future 0.8.x releases. NOT accepted in the current
-> version.
+The following directives are defined in design RFCs but are **not implemented**
+in the current release. They are **not registered** in the module command table.
 
-The `markdown_stream_flush_interval` directive is defined in RFC 0008 for
-time-based flush control but is **not implemented** in v0.8.0. It is not
-registered in the module command table.
+> ⚠️ **Do NOT use any reserved directive in your configuration.** Adding a
+> reserved directive causes `nginx -t` to fail, preventing NGINX from
+> starting or reloading.
 
-- Using `markdown_stream_flush_interval` in configuration causes `nginx -t` to
-  fail with `unknown directive "markdown_stream_flush_interval"`.
-- Do not include this directive in configuration files for v0.8.0 deployments.
-- A future 0.8.x release will register this directive when time-based flush
-  semantics are finalized.
+---
+
+###### `markdown_stream_flush_interval`
+
+> **RESERVED — Not implemented in v0.8.0**
+>
+> Using this directive in any configuration context will cause:
+> ```
+> nginx: [emerg] unknown directive "markdown_stream_flush_interval"
+> nginx -t: configuration file test failed
+> ```
+
+| Field | Value |
+|-------|-------|
+| **Status** | Reserved — not available |
+| **Intended purpose** | Time-based flush control for streaming output (flush after N milliseconds even if `markdown_stream_flush_min` bytes have not accumulated) |
+| **Planned version** | Future 0.8.x release (pending finalization of time-based flush semantics) |
+| **Defined in** | RFC 0008 |
+| **Current behavior** | Not registered; NGINX rejects the directive at configuration parse time |
+
+**What operators should know:**
+
+- This directive does **not exist** in the v0.8.0 module binary.
+- There is no workaround or feature flag to enable it.
+- Size-based flushing (`markdown_stream_flush_min`) is the only flush control
+  available in v0.8.0.
+- Do not include `markdown_stream_flush_interval` in configuration files,
+  templates, or automation scripts targeting v0.8.0 deployments.
+- When this directive becomes available in a future release, it will be
+  documented in the implemented streaming directives section above and
+  removed from this reserved section.
+
+##### Directive Interactions
+
+Streaming directives interact with other module directives in ways that may
+not be immediately obvious. This section documents the key interactions to
+help operators understand the full picture when multiple directives are
+configured together.
+
+| Directive Pair | Interaction Summary |
+|----------------|---------------------|
+| `markdown_streaming_engine` + `markdown_filter` | Streaming only applies when `markdown_filter` is `on` (or resolves to a truthy value). If the filter is disabled, the streaming engine setting is irrelevant — no conversion of any kind occurs. |
+| `markdown_streaming_engine` + `markdown_memory_budget` | The unified `markdown_memory_budget` sets the ceiling for both engines unless a path-specific directive overrides it. For streaming, `markdown_streaming_budget` takes precedence when explicitly set; otherwise the unified budget applies. |
+| `markdown_streaming_engine` + `markdown_on_error` | These error policies are **independent**. `markdown_on_error` governs full-buffer failures; `markdown_streaming_on_error` governs streaming pre-commit failures. Changing one never affects the other. See the [error policy table](#relationship-between-markdown_on_error-and-markdown_streaming_on_error) above. |
+| `markdown_streaming_engine` + `markdown_etag` | ETags are generated from converted output. For full-buffer responses, the complete Markdown is available before headers are sent, so ETag generation works normally. For streaming responses that have crossed the commit boundary, response headers (including `Content-Type: text/markdown`) are already sent — ETag cannot be retroactively added. Streaming responses do **not** carry an ETag header. |
+| `markdown_streaming_engine` + `markdown_conditional_requests` | Conditional request handling (`If-None-Match` / 304) works for full-buffer responses where an ETag is available. Streaming responses bypass 304 logic because no ETag is produced. If `markdown_streaming_engine auto` routes a response to full-buffer (e.g., below threshold), conditional requests still work for that response. |
+| `markdown_stream_threshold` + `Content-Length` | When the upstream response includes a `Content-Length` header and the value is below `markdown_stream_threshold`, the response always uses the full-buffer path regardless of `markdown_streaming_engine on`. This is a size-based eligibility gate, not an error. |
+| `markdown_stream_excluded_types` + `markdown_content_types` | Both must permit the content type for streaming conversion. `markdown_content_types` controls whether the module processes a response at all (any path). `markdown_stream_excluded_types` is an additional filter that prevents specific types from entering the streaming path. A type excluded from streaming may still be converted via full-buffer if it passes the general eligibility checks. |
+| `markdown_stream_precommit_buffer` + `markdown_streaming_on_error` | The pre-commit buffer enables fail-open replay: if an error occurs before the commit boundary, the buffered original HTML is replayed to the client. When `markdown_stream_precommit_buffer 0` (replay disabled), any pre-commit error immediately triggers the `markdown_streaming_on_error` policy without replay capability. |
+| `markdown_streaming_engine auto` + variable usage | When `markdown_streaming_engine` is set to a variable (`$variable`), the variable is resolved at request time. The resolved value (`on`, `off`, or `auto`) applies for the entire request lifecycle. Combine with `map` directives for percentage-based rollout or per-path control. |
+
+**Non-obvious behaviors to watch for:**
+
+1. **No ETag on streaming responses.** If your caching layer depends on ETags
+   for revalidation, streaming responses will not benefit from 304 short-circuits.
+   Consider setting `markdown_stream_threshold` high enough that commonly cached
+   small responses stay on the full-buffer path.
+
+2. **Unified budget resolution order.** The effective streaming budget is:
+   `markdown_streaming_budget` (if set) → `markdown_memory_budget` (if set) →
+   built-in default (`2m`). An operator who sets only `markdown_memory_budget 1m`
+   may inadvertently lower the streaming budget below the `2m` default.
+
+3. **Excluded types are additive.** `markdown_stream_excluded_types` adds to
+   the built-in hard exclusions (`text/event-stream`, `application/x-ndjson`,
+   `application/stream+json`). You cannot remove the built-in exclusions.
+
+4. **Pre-commit buffer size vs. streaming budget.** The pre-commit buffer is
+   drawn from the overall streaming budget. Setting `markdown_stream_precommit_buffer`
+   close to `markdown_streaming_budget` leaves little room for converter working
+   memory and may trigger budget-exceeded errors.
+
+5. **Variable-driven streaming + inheritance.** A `markdown_streaming_engine $var`
+   at the `http` level is inherited by all `server`/`location` blocks. The variable
+   itself is resolved per-request in the innermost matching context. Override with
+   an explicit value (`off`, `on`, `auto`) in specific locations to exclude them
+   from variable-driven rollout.
+
+**Example — interactions in practice:**
+
+```nginx
+http {
+    markdown_filter on;
+    markdown_memory_budget 4m;           # Applies to both paths
+    markdown_streaming_engine auto;
+    markdown_stream_threshold 1m;
+    markdown_etag on;                    # Works for full-buffer only
+
+    server {
+        listen 80;
+
+        location /docs {
+            # Responses < 1m: full-buffer path, ETag generated, 304 works
+            # Responses >= 1m: streaming path, no ETag, no 304
+            markdown_streaming_budget 3m;   # Overrides unified budget for streaming
+            markdown_streaming_on_error pass;
+            proxy_pass http://backend;
+        }
+
+        location /api-reference {
+            # Exclude XML from streaming but still convert via full-buffer
+            markdown_stream_excluded_types application/xml;
+            proxy_pass http://backend;
+        }
+    }
+}
+```
+
+> **Inheritance note:** All streaming directives follow standard NGINX inheritance:
+> `http` → `server` → `location`. A value set at the `http` level applies to all
+> enclosed contexts unless explicitly overridden. When troubleshooting unexpected
+> streaming behavior, check for inherited values from outer scopes.
 
 ---
 
@@ -2391,3 +2498,4 @@ tail -f /var/log/nginx/error.log | grep "conversion time"
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
 | 0.7.0 | 2026-05-17 | Kang | Added `markdown_dynconf_dry_run` directive documentation |
 | 0.7.0 | 2026-05-18 | Kang | Added `markdown_diagnostics` directive documentation |
+| 0.8.0 | 2026-06-04 | spec-42 | Cross-reference audit: fixed stale `markdown_streaming_auto_threshold` reference in streaming section intro to use `markdown_stream_threshold` |
