@@ -46,18 +46,22 @@ typedef struct {
     unsigned long shadow_diff_total;
     unsigned long last_ttfb_ms;
     unsigned long last_peak_memory_bytes;
-    unsigned long engine_choice_streaming;
-    unsigned long engine_choice_full_buffer;
-    unsigned long engine_choice_passthrough;
-    unsigned long engine_choice_not_eligible;
+    struct {
+        unsigned long streaming;
+        unsigned long full_buffer;
+        unsigned long passthrough;
+        unsigned long not_eligible;
+    } engine_choice;
     unsigned long streaming_fallback_precommit_pass;
     unsigned long streaming_fallback_precommit_reject;
     unsigned long streaming_failure_postcommit_abort;
     unsigned long streaming_failure_postcommit_safe_finish;
-    unsigned long streaming_candidate_total;
-    unsigned long true_streaming_selected_total;
-    unsigned long streaming_output_bytes_total;
-    unsigned long excluded_content_type_total;
+    struct {
+        unsigned long candidate_total;
+        unsigned long true_streaming_selected_total;
+        unsigned long output_bytes_total;
+        unsigned long excluded_content_type_total;
+    } selection;
 } test_streaming_metrics_t;
 
 static test_streaming_metrics_t *g_streaming = NULL;
@@ -90,10 +94,10 @@ collect_streaming_snapshot(test_streaming_metrics_t *snap)
     snap->shadow_diff_total = m->shadow_diff_total;
     snap->last_ttfb_ms = m->last_ttfb_ms;
     snap->last_peak_memory_bytes = m->last_peak_memory_bytes;
-    snap->engine_choice_streaming = m->engine_choice_streaming;
-    snap->engine_choice_full_buffer = m->engine_choice_full_buffer;
-    snap->engine_choice_passthrough = m->engine_choice_passthrough;
-    snap->engine_choice_not_eligible = m->engine_choice_not_eligible;
+    snap->engine_choice.streaming = m->engine_choice.streaming;
+    snap->engine_choice.full_buffer = m->engine_choice.full_buffer;
+    snap->engine_choice.passthrough = m->engine_choice.passthrough;
+    snap->engine_choice.not_eligible = m->engine_choice.not_eligible;
     snap->streaming_fallback_precommit_pass =
         m->streaming_fallback_precommit_pass;
     snap->streaming_fallback_precommit_reject =
@@ -102,10 +106,10 @@ collect_streaming_snapshot(test_streaming_metrics_t *snap)
         m->streaming_failure_postcommit_abort;
     snap->streaming_failure_postcommit_safe_finish =
         m->streaming_failure_postcommit_safe_finish;
-    snap->streaming_candidate_total = m->streaming_candidate_total;
-    snap->true_streaming_selected_total = m->true_streaming_selected_total;
-    snap->streaming_output_bytes_total = m->streaming_output_bytes_total;
-    snap->excluded_content_type_total = m->excluded_content_type_total;
+    snap->selection.candidate_total = m->selection.candidate_total;
+    snap->selection.true_streaming_selected_total = m->selection.true_streaming_selected_total;
+    snap->selection.output_bytes_total = m->selection.output_bytes_total;
+    snap->selection.excluded_content_type_total = m->selection.excluded_content_type_total;
 }
 
 /* ── Test: reason code enum count ─────────────────────────────── */
@@ -283,21 +287,21 @@ test_snapshot_null_zeroes_streaming_fields(void)
                 "succeeded_total should be zero");
     TEST_ASSERT(snap.failed_total == 0,
                 "failed_total should be zero");
-    TEST_ASSERT(snap.engine_choice_streaming == 0,
+    TEST_ASSERT(snap.engine_choice.streaming == 0,
                 "engine_choice_streaming should be zero");
-    TEST_ASSERT(snap.engine_choice_full_buffer == 0,
+    TEST_ASSERT(snap.engine_choice.full_buffer == 0,
                 "engine_choice_full_buffer should be zero");
-    TEST_ASSERT(snap.engine_choice_passthrough == 0,
+    TEST_ASSERT(snap.engine_choice.passthrough == 0,
                 "engine_choice_passthrough should be zero");
-    TEST_ASSERT(snap.engine_choice_not_eligible == 0,
+    TEST_ASSERT(snap.engine_choice.not_eligible == 0,
                 "engine_choice_not_eligible should be zero");
-    TEST_ASSERT(snap.streaming_candidate_total == 0,
+    TEST_ASSERT(snap.selection.candidate_total == 0,
                 "streaming_candidate_total should be zero");
-    TEST_ASSERT(snap.true_streaming_selected_total == 0,
+    TEST_ASSERT(snap.selection.true_streaming_selected_total == 0,
                 "true_streaming_selected_total should be zero");
-    TEST_ASSERT(snap.streaming_output_bytes_total == 0,
+    TEST_ASSERT(snap.selection.output_bytes_total == 0,
                 "streaming_output_bytes_total should be zero");
-    TEST_ASSERT(snap.excluded_content_type_total == 0,
+    TEST_ASSERT(snap.selection.excluded_content_type_total == 0,
                 "excluded_content_type_total should be zero");
 
     TEST_PASS("All streaming fields are zeroed when source is NULL");
@@ -327,18 +331,18 @@ test_snapshot_copies_streaming_fields(void)
     live.shadow_diff_total = 8;
     live.last_ttfb_ms = 42;
     live.last_peak_memory_bytes = 65536;
-    live.engine_choice_streaming = 50;
-    live.engine_choice_full_buffer = 30;
-    live.engine_choice_passthrough = 15;
-    live.engine_choice_not_eligible = 5;
+    live.engine_choice.streaming = 50;
+    live.engine_choice.full_buffer = 30;
+    live.engine_choice.passthrough = 15;
+    live.engine_choice.not_eligible = 5;
     live.streaming_fallback_precommit_pass = 3;
     live.streaming_fallback_precommit_reject = 1;
     live.streaming_failure_postcommit_abort = 2;
     live.streaming_failure_postcommit_safe_finish = 1;
-    live.streaming_candidate_total = 80;
-    live.true_streaming_selected_total = 50;
-    live.streaming_output_bytes_total = 1048576;
-    live.excluded_content_type_total = 10;
+    live.selection.candidate_total = 80;
+    live.selection.true_streaming_selected_total = 50;
+    live.selection.output_bytes_total = 1048576;
+    live.selection.excluded_content_type_total = 10;
 
     g_streaming = &live;
     collect_streaming_snapshot(&snap);
@@ -368,13 +372,13 @@ test_snapshot_copies_streaming_fields(void)
                 "last_ttfb_ms should be copied");
     TEST_ASSERT(snap.last_peak_memory_bytes == 65536,
                 "last_peak_memory_bytes should be copied");
-    TEST_ASSERT(snap.engine_choice_streaming == 50,
+    TEST_ASSERT(snap.engine_choice.streaming == 50,
                 "engine_choice_streaming should be copied");
-    TEST_ASSERT(snap.engine_choice_full_buffer == 30,
+    TEST_ASSERT(snap.engine_choice.full_buffer == 30,
                 "engine_choice_full_buffer should be copied");
-    TEST_ASSERT(snap.engine_choice_passthrough == 15,
+    TEST_ASSERT(snap.engine_choice.passthrough == 15,
                 "engine_choice_passthrough should be copied");
-    TEST_ASSERT(snap.engine_choice_not_eligible == 5,
+    TEST_ASSERT(snap.engine_choice.not_eligible == 5,
                 "engine_choice_not_eligible should be copied");
     TEST_ASSERT(snap.streaming_fallback_precommit_pass == 3,
                 "streaming_fallback_precommit_pass should be copied");
@@ -385,13 +389,13 @@ test_snapshot_copies_streaming_fields(void)
     TEST_ASSERT(snap.streaming_failure_postcommit_safe_finish == 1,
                 "streaming_failure_postcommit_safe_finish "
                 "should be copied");
-    TEST_ASSERT(snap.streaming_candidate_total == 80,
+    TEST_ASSERT(snap.selection.candidate_total == 80,
                 "streaming_candidate_total should be copied");
-    TEST_ASSERT(snap.true_streaming_selected_total == 50,
+    TEST_ASSERT(snap.selection.true_streaming_selected_total == 50,
                 "true_streaming_selected_total should be copied");
-    TEST_ASSERT(snap.streaming_output_bytes_total == 1048576,
+    TEST_ASSERT(snap.selection.output_bytes_total == 1048576,
                 "streaming_output_bytes_total should be copied");
-    TEST_ASSERT(snap.excluded_content_type_total == 10,
+    TEST_ASSERT(snap.selection.excluded_content_type_total == 10,
                 "excluded_content_type_total should be copied");
 
     TEST_PASS("All streaming fields are copied correctly");
@@ -411,30 +415,30 @@ test_engine_choice_increment(void)
     memset(&m, 0, sizeof(m));
 
     /* Simulate: 3 streaming, 2 full_buffer, 1 passthrough, 1 not_eligible */
-    m.engine_choice_streaming = 3;
-    m.engine_choice_full_buffer = 2;
-    m.engine_choice_passthrough = 1;
-    m.engine_choice_not_eligible = 1;
+    m.engine_choice.streaming = 3;
+    m.engine_choice.full_buffer = 2;
+    m.engine_choice.passthrough = 1;
+    m.engine_choice.not_eligible = 1;
 
     g_streaming = &m;
     collect_streaming_snapshot(&snap);
     g_streaming = NULL;
 
-    TEST_ASSERT(snap.engine_choice_streaming == 3,
+    TEST_ASSERT(snap.engine_choice.streaming == 3,
                 "engine_choice_streaming should be 3");
-    TEST_ASSERT(snap.engine_choice_full_buffer == 2,
+    TEST_ASSERT(snap.engine_choice.full_buffer == 2,
                 "engine_choice_full_buffer should be 2");
-    TEST_ASSERT(snap.engine_choice_passthrough == 1,
+    TEST_ASSERT(snap.engine_choice.passthrough == 1,
                 "engine_choice_passthrough should be 1");
-    TEST_ASSERT(snap.engine_choice_not_eligible == 1,
+    TEST_ASSERT(snap.engine_choice.not_eligible == 1,
                 "engine_choice_not_eligible should be 1");
 
     /* Sum equals total requests processed */
     TEST_ASSERT(
-        (snap.engine_choice_streaming +
-         snap.engine_choice_full_buffer +
-         snap.engine_choice_passthrough +
-         snap.engine_choice_not_eligible) == 7,
+        (snap.engine_choice.streaming +
+         snap.engine_choice.full_buffer +
+         snap.engine_choice.passthrough +
+         snap.engine_choice.not_eligible) == 7,
         "sum of engine choice counters should match total");
 
     TEST_PASS("Engine choice counters increment independently");

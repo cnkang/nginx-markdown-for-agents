@@ -697,7 +697,7 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
      * once and cache the result. If streaming is selected,
      * skip the threshold router entirely.
      */
-    NGX_HTTP_MARKDOWN_METRIC_INC(streaming.streaming_candidate_total);
+    NGX_HTTP_MARKDOWN_METRIC_INC(streaming.selection.candidate_total);
 
     ctx->processing_path =
         ngx_http_markdown_select_processing_path(
@@ -726,7 +726,7 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
             NGX_HTTP_MARKDOWN_STREAM_REASON_EXCLUDED_CONTENT_TYPE;
 
         NGX_HTTP_MARKDOWN_METRIC_INC(
-            streaming.engine_choice_full_buffer);
+            streaming.engine_choice.full_buffer);
 
         ngx_log_debug5(NGX_LOG_DEBUG_HTTP,
             r->connection->log, 0,
@@ -759,9 +759,9 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
             NGX_HTTP_MARKDOWN_STREAM_REASON_ELIGIBLE;
 
         NGX_HTTP_MARKDOWN_METRIC_INC(
-            streaming.engine_choice_streaming);
+            streaming.engine_choice.streaming);
         NGX_HTTP_MARKDOWN_METRIC_INC(
-            streaming.true_streaming_selected_total);
+            streaming.selection.true_streaming_selected_total);
 
         ngx_log_debug5(NGX_LOG_DEBUG_HTTP,
             r->connection->log, 0,
@@ -793,7 +793,7 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
     ctx->streaming.reason =
         NGX_HTTP_MARKDOWN_STREAM_REASON_BELOW_THRESHOLD;
     NGX_HTTP_MARKDOWN_METRIC_INC(
-        streaming.engine_choice_full_buffer);
+        streaming.engine_choice.full_buffer);
 
     ngx_log_debug5(NGX_LOG_DEBUG_HTTP,
         r->connection->log, 0,

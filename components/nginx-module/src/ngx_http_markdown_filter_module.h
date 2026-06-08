@@ -727,8 +727,10 @@ typedef struct {
         unsigned                          main_terminal_sent:1;
 
         /* TTFB tracking (from first feed to first non-empty output) */
-        ngx_msec_t                        feed_start_ms;
-        ngx_flag_t                        ttfb_recorded;
+        struct {
+            ngx_msec_t                        feed_start_ms;
+            ngx_flag_t                        recorded;
+        } ttfb;
 
         /* Pending output chain has non-empty data (for TTFB resume path) */
         ngx_flag_t                        pending_has_data;
@@ -935,23 +937,27 @@ typedef struct {
         ngx_atomic_t  last_ttfb_ms;              /* Last streaming TTFB (milliseconds) */
         ngx_atomic_t  last_peak_memory_bytes;    /* Last streaming peak estimate (bytes; not RSS) */
 
-        /* Engine choice counters (v0.8.0 observability) */
-        ngx_atomic_t  engine_choice_streaming;   /* Chose true streaming engine */
-        ngx_atomic_t  engine_choice_full_buffer; /* Chose full-buffer engine */
-        ngx_atomic_t  engine_choice_passthrough; /* Marked passthrough */
-        ngx_atomic_t  engine_choice_not_eligible; /* Not eligible for streaming */
-
         /* Fallback/failure counters */
         ngx_atomic_t  streaming_fallback_precommit_pass;  /* Pre-commit HTML pass-through */
         ngx_atomic_t  streaming_fallback_precommit_reject; /* Pre-commit rejection */
         ngx_atomic_t  streaming_failure_postcommit_abort;  /* Post-commit abort */
         ngx_atomic_t  streaming_failure_postcommit_safe_finish; /* Post-commit safe finish */
 
+        /* Engine choice counters (v0.8.0 observability) */
+        struct {
+            ngx_atomic_t  streaming;   /* Chose true streaming engine */
+            ngx_atomic_t  full_buffer; /* Chose full-buffer engine */
+            ngx_atomic_t  passthrough; /* Marked passthrough */
+            ngx_atomic_t  not_eligible; /* Not eligible for streaming */
+        } engine_choice;
+
         /* Candidate and selection counters */
-        ngx_atomic_t  streaming_candidate_total;       /* Total candidates evaluated */
-        ngx_atomic_t  true_streaming_selected_total;   /* Final true streaming selections */
-        ngx_atomic_t  streaming_output_bytes_total;    /* Total Markdown bytes via streaming */
-        ngx_atomic_t  excluded_content_type_total;     /* Excluded due to content type */
+        struct {
+            ngx_atomic_t  candidate_total;       /* Total candidates evaluated */
+            ngx_atomic_t  true_streaming_selected_total;   /* Final true streaming selections */
+            ngx_atomic_t  output_bytes_total;    /* Total Markdown bytes via streaming */
+            ngx_atomic_t  excluded_content_type_total;     /* Excluded due to content type */
+        } selection;
     } streaming;
 #endif
 

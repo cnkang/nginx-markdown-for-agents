@@ -123,23 +123,27 @@ typedef struct {
         ngx_atomic_uint_t last_ttfb_ms;
         ngx_atomic_uint_t last_peak_memory_bytes;
 
-        /* Engine choice counters (v0.8.0 observability) */
-        ngx_atomic_uint_t engine_choice_streaming;
-        ngx_atomic_uint_t engine_choice_full_buffer;
-        ngx_atomic_uint_t engine_choice_passthrough;
-        ngx_atomic_uint_t engine_choice_not_eligible;
-
         /* Fallback/failure counters */
         ngx_atomic_uint_t streaming_fallback_precommit_pass;
         ngx_atomic_uint_t streaming_fallback_precommit_reject;
         ngx_atomic_uint_t streaming_failure_postcommit_abort;
         ngx_atomic_uint_t streaming_failure_postcommit_safe_finish;
 
+        /* Engine choice counters (v0.8.0 observability) */
+        struct {
+            ngx_atomic_uint_t streaming;
+            ngx_atomic_uint_t full_buffer;
+            ngx_atomic_uint_t passthrough;
+            ngx_atomic_uint_t not_eligible;
+        } engine_choice;
+
         /* Candidate and selection counters */
-        ngx_atomic_uint_t streaming_candidate_total;
-        ngx_atomic_uint_t true_streaming_selected_total;
-        ngx_atomic_uint_t streaming_output_bytes_total;
-        ngx_atomic_uint_t excluded_content_type_total;
+        struct {
+            ngx_atomic_uint_t candidate_total;
+            ngx_atomic_uint_t true_streaming_selected_total;
+            ngx_atomic_uint_t output_bytes_total;
+            ngx_atomic_uint_t excluded_content_type_total;
+        } selection;
     } streaming;
 #endif
 
@@ -320,14 +324,14 @@ ngx_http_markdown_collect_metrics_snapshot(ngx_http_markdown_metrics_snapshot_t 
         metrics->streaming.last_ttfb_ms;
     snapshot->streaming.last_peak_memory_bytes =
         metrics->streaming.last_peak_memory_bytes;
-    snapshot->streaming.engine_choice_streaming =
-        metrics->streaming.engine_choice_streaming;
-    snapshot->streaming.engine_choice_full_buffer =
-        metrics->streaming.engine_choice_full_buffer;
-    snapshot->streaming.engine_choice_passthrough =
-        metrics->streaming.engine_choice_passthrough;
-    snapshot->streaming.engine_choice_not_eligible =
-        metrics->streaming.engine_choice_not_eligible;
+    snapshot->streaming.engine_choice.streaming =
+        metrics->streaming.engine_choice.streaming;
+    snapshot->streaming.engine_choice.full_buffer =
+        metrics->streaming.engine_choice.full_buffer;
+    snapshot->streaming.engine_choice.passthrough =
+        metrics->streaming.engine_choice.passthrough;
+    snapshot->streaming.engine_choice.not_eligible =
+        metrics->streaming.engine_choice.not_eligible;
     snapshot->streaming.streaming_fallback_precommit_pass =
         metrics->streaming.streaming_fallback_precommit_pass;
     snapshot->streaming.streaming_fallback_precommit_reject =
@@ -336,14 +340,14 @@ ngx_http_markdown_collect_metrics_snapshot(ngx_http_markdown_metrics_snapshot_t 
         metrics->streaming.streaming_failure_postcommit_abort;
     snapshot->streaming.streaming_failure_postcommit_safe_finish =
         metrics->streaming.streaming_failure_postcommit_safe_finish;
-    snapshot->streaming.streaming_candidate_total =
-        metrics->streaming.streaming_candidate_total;
-    snapshot->streaming.true_streaming_selected_total =
-        metrics->streaming.true_streaming_selected_total;
-    snapshot->streaming.streaming_output_bytes_total =
-        metrics->streaming.streaming_output_bytes_total;
-    snapshot->streaming.excluded_content_type_total =
-        metrics->streaming.excluded_content_type_total;
+    snapshot->streaming.selection.candidate_total =
+        metrics->streaming.selection.candidate_total;
+    snapshot->streaming.selection.true_streaming_selected_total =
+        metrics->streaming.selection.true_streaming_selected_total;
+    snapshot->streaming.selection.output_bytes_total =
+        metrics->streaming.selection.output_bytes_total;
+    snapshot->streaming.selection.excluded_content_type_total =
+        metrics->streaming.selection.excluded_content_type_total;
 #endif
     snapshot->results.estimated_token_savings = metrics->results.estimated_token_savings;
 
