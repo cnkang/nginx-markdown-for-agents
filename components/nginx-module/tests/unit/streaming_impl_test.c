@@ -1563,7 +1563,7 @@ test_send_output_and_resume_paths(void)
     ngx_memzero(&metrics, sizeof(metrics));
     ngx_http_markdown_metrics = &metrics;
 
-    ctx.streaming.feed_start_ms = 10;
+    ctx.streaming.ttfb.feed_start_ms = 10;
     g_now.sec = 11;
     g_now.msec = 0;
 
@@ -1573,11 +1573,11 @@ test_send_output_and_resume_paths(void)
     TEST_ASSERT(rc == NGX_OK, "send_output should succeed");
     TEST_ASSERT(ctx.streaming.flushes_sent == 1,
         "flush counter should increment on success");
-    TEST_ASSERT(ctx.streaming.ttfb_recorded == 1,
+    TEST_ASSERT(ctx.streaming.ttfb.recorded == 1,
         "successful first send should record TTFB");
 
-    ctx.streaming.feed_start_ms = 20;
-    ctx.streaming.ttfb_recorded = 0;
+    ctx.streaming.ttfb.feed_start_ms = 20;
+    ctx.streaming.ttfb.recorded = 0;
     g_next_body_filter_rc = NGX_AGAIN;
     rc = ngx_http_markdown_streaming_send_output(
         &r, &ctx, data, sizeof(data) - 1, 0);

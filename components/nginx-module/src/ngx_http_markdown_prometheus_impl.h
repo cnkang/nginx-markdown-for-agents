@@ -298,10 +298,10 @@ ngx_http_markdown_metrics_write_prometheus(
         "nginx_markdown_streaming_engine_choice_total"
         "{engine=\"not_eligible\"} %uA\n"
         "\n",
-        snapshot->streaming.engine_choice_streaming,
-        snapshot->streaming.engine_choice_full_buffer,
-        snapshot->streaming.engine_choice_passthrough,
-        snapshot->streaming.engine_choice_not_eligible);
+        snapshot->streaming.engine_choice.streaming,
+        snapshot->streaming.engine_choice.full_buffer,
+        snapshot->streaming.engine_choice.passthrough,
+        snapshot->streaming.engine_choice.not_eligible);
 
     /* streaming_fallback_total{phase,action} */
     p = ngx_slprintf(p, end,
@@ -347,7 +347,7 @@ ngx_http_markdown_metrics_write_prometheus(
         "counter\n"
         "nginx_markdown_streaming_candidate_total %uA\n"
         "\n",
-        snapshot->streaming.streaming_candidate_total);
+        snapshot->streaming.selection.candidate_total);
 
     /* true_streaming_selected_total */
     p = ngx_slprintf(p, end,
@@ -361,7 +361,7 @@ ngx_http_markdown_metrics_write_prometheus(
         "nginx_markdown_true_streaming_selected_total"
         " %uA\n"
         "\n",
-        snapshot->streaming.true_streaming_selected_total);
+        snapshot->streaming.selection.true_streaming_selected_total);
 
     /* streaming_output_bytes_total */
     p = ngx_slprintf(p, end,
@@ -374,7 +374,7 @@ ngx_http_markdown_metrics_write_prometheus(
         "nginx_markdown_streaming_output_bytes_total"
         " %uA\n"
         "\n",
-        snapshot->streaming.streaming_output_bytes_total);
+        snapshot->streaming.selection.output_bytes_total);
 
     /* excluded_content_type_total */
     p = ngx_slprintf(p, end,
@@ -387,7 +387,7 @@ ngx_http_markdown_metrics_write_prometheus(
         "nginx_markdown_excluded_content_type_total"
         " %uA\n"
         "\n",
-        snapshot->streaming.excluded_content_type_total);
+        snapshot->streaming.selection.excluded_content_type_total);
 #endif
 
     /* input_bytes_total */

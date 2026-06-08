@@ -670,7 +670,7 @@ common_checks:
             r, conf))
     {
         NGX_HTTP_MARKDOWN_METRIC_INC(
-            streaming.excluded_content_type_total);
+            streaming.selection.excluded_content_type_total);
         ngx_http_markdown_log_decision(r, conf, eff,
             ngx_http_markdown_reason_streaming_skip_unsupported());
         return NGX_HTTP_MARKDOWN_PATH_FULLBUFFER;
@@ -830,8 +830,8 @@ ngx_http_markdown_streaming_record_ttfb(
     ngx_msec_t         now_ms;
     ngx_msec_t         elapsed_ms;
 
-    if (ctx->streaming.ttfb_recorded
-        || ctx->streaming.feed_start_ms == 0
+    if (ctx->streaming.ttfb.recorded
+        || ctx->streaming.ttfb.feed_start_ms == 0
         || ngx_http_markdown_metrics == NULL)
     {
         return;
@@ -839,8 +839,8 @@ ngx_http_markdown_streaming_record_ttfb(
 
     tp = ngx_timeofday();
     now_ms = (ngx_msec_t) (tp->sec * 1000 + tp->msec);
-    elapsed_ms = (now_ms >= ctx->streaming.feed_start_ms)
-        ? (now_ms - ctx->streaming.feed_start_ms) : 0;
+    elapsed_ms = (now_ms >= ctx->streaming.ttfb.feed_start_ms)
+        ? (now_ms - ctx->streaming.ttfb.feed_start_ms) : 0;
 
     /*
      * Gauge store: latest-value-wins semantics.
@@ -852,7 +852,7 @@ ngx_http_markdown_streaming_record_ttfb(
      */
     ngx_http_markdown_metrics->streaming.last_ttfb_ms =
         (ngx_atomic_t) elapsed_ms;
-    ctx->streaming.ttfb_recorded = 1;
+    ctx->streaming.ttfb.recorded = 1;
 }
 
 
@@ -991,7 +991,7 @@ ngx_http_markdown_streaming_send_output(
         if (data != NULL && len > 0) {
             ngx_http_markdown_streaming_record_ttfb(ctx);
             NGX_HTTP_MARKDOWN_METRIC_ADD(
-                streaming.streaming_output_bytes_total,
+                streaming.selection.output_bytes_total,
                 (ngx_atomic_int_t) len);
         }
     }
@@ -1229,8 +1229,8 @@ ngx_http_markdown_streaming_resume_pending(
      * Using the explicit flag avoids undefined pointer comparison
      * (out->buf->last > out->buf->pos) when pos/last may be NULL.
      */
-    if (!ctx->streaming.ttfb_recorded
-        && ctx->streaming.feed_start_ms > 0
+    if (!ctx->streaming.ttfb.recorded
+        && ctx->streaming.ttfb.feed_start_ms > 0
         && ngx_http_markdown_metrics != NULL
         && (rc == NGX_OK || rc == NGX_DONE)
         && ctx->streaming.pending_has_data)
@@ -1242,13 +1242,13 @@ ngx_http_markdown_streaming_resume_pending(
         tp_ttfb = ngx_timeofday();
         now_ms = (ngx_msec_t) (tp_ttfb->sec * 1000
             + tp_ttfb->msec);
-        elapsed_ms = (now_ms >= ctx->streaming.feed_start_ms)
-            ? (now_ms - ctx->streaming.feed_start_ms) : 0;
+        elapsed_ms = (now_ms >= ctx->streaming.ttfb.feed_start_ms)
+            ? (now_ms - ctx->streaming.ttfb.feed_start_ms) : 0;
 
         /* Gauge store: see send_output TTFB comment for rationale. */
         ngx_http_markdown_metrics->streaming.last_ttfb_ms =
             (ngx_atomic_t) elapsed_ms;
-        ctx->streaming.ttfb_recorded = 1;
+        ctx->streaming.ttfb.recorded = 1;
     }
 
     /*
@@ -1266,7 +1266,7 @@ ngx_http_markdown_streaming_resume_pending(
         && ctx->streaming.pending_output_bytes > 0)
     {
         NGX_HTTP_MARKDOWN_METRIC_ADD(
-            streaming.streaming_output_bytes_total,
+            streaming.selection.output_bytes_total,
             (ngx_atomic_int_t) ctx->streaming.pending_output_bytes);
     }
     ctx->streaming.pending_output_bytes = 0;
@@ -2088,11 +2088,11 @@ ngx_http_markdown_streaming_process_chunk(
      * processing time, not idle time between handle creation
      * and the first upstream chunk.
      */
-    if (ctx->streaming.feed_start_ms == 0) {
+    if (ctx->streaming.ttfb.feed_start_ms == 0) {
         const ngx_time_t  *tp_feed;
 
         tp_feed = ngx_timeofday();
-        ctx->streaming.feed_start_ms =
+        ctx->streaming.ttfb.feed_start_ms =
             (ngx_msec_t) (tp_feed->sec * 1000
                 + tp_feed->msec);
     }
@@ -2193,11 +2193,11 @@ ngx_http_markdown_streaming_finalize_decomp(
          * (EOF-only decompressor path where process_chunk
          * was never called with non-empty data).
          */
-        if (ctx->streaming.feed_start_ms == 0) {
+        if (ctx->streaming.ttfb.feed_start_ms == 0) {
             const ngx_time_t  *tp_feed;
 
             tp_feed = ngx_timeofday();
-            ctx->streaming.feed_start_ms =
+            ctx->streaming.ttfb.feed_start_ms =
                 (ngx_msec_t) (tp_feed->sec * 1000
                     + tp_feed->msec);
         }
@@ -2588,7 +2588,7 @@ ngx_http_markdown_streaming_init_handle(
      * markdown_streaming_feed() call via a one-shot guard
      * in process_chunk.  Initialize to 0 so the guard fires.
      */
-    ctx->streaming.feed_start_ms = 0;
+    ctx->streaming.ttfb.feed_start_ms = 0;
     ctx->streaming.completion.failure_recorded = 0;
 
     /* Register cleanup handler */
