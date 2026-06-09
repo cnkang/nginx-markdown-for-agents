@@ -129,6 +129,7 @@ typedef enum {
     /* Engine choice: passthrough */
     NGX_HTTP_MARKDOWN_STREAM_REASON_EXCLUDED_CONTENT_TYPE,
     NGX_HTTP_MARKDOWN_STREAM_REASON_NOT_HTML,
+    NGX_HTTP_MARKDOWN_STREAM_REASON_COMPRESSED,
 
     /* Engine choice: not eligible */
     NGX_HTTP_MARKDOWN_STREAM_REASON_NOT_CANDIDATE,
@@ -172,6 +173,8 @@ ngx_http_markdown_stream_reason_str(
         "excluded_content_type",
         /* NGX_HTTP_MARKDOWN_STREAM_REASON_NOT_HTML */
         "not_html",
+        /* NGX_HTTP_MARKDOWN_STREAM_REASON_COMPRESSED */
+        "compressed",
         /* NGX_HTTP_MARKDOWN_STREAM_REASON_NOT_CANDIDATE */
         "not_candidate",
         /* NGX_HTTP_MARKDOWN_STREAM_REASON_ACCEPT_MISMATCH */
@@ -195,6 +198,23 @@ ngx_http_markdown_stream_reason_str(
     }
 
     return reason_strings[(unsigned) reason];
+}
+
+typedef struct {
+    ngx_uint_t                         path;
+    ngx_http_markdown_stream_reason_e  reason;
+} ngx_http_markdown_path_selection_t;
+
+static ngx_inline ngx_http_markdown_path_selection_t
+ngx_http_markdown_path_selection(ngx_uint_t path,
+    ngx_http_markdown_stream_reason_e reason)
+{
+    ngx_http_markdown_path_selection_t selection;
+
+    selection.path = path;
+    selection.reason = reason;
+
+    return selection;
 }
 
 #endif /* MARKDOWN_STREAMING_ENABLED */
@@ -508,6 +528,43 @@ typedef struct {
      */
     ngx_http_markdown_advanced_cfg_t advanced;
 } ngx_http_markdown_conf_t;
+
+static ngx_inline void
+ngx_http_markdown_merge_stream_values(ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_conf_t *prev)
+{
+    if (conf->stream.engine == (ngx_uint_t) -1) {
+        conf->stream.engine = (prev->stream.engine == (ngx_uint_t) -1)
+            ? NGX_HTTP_MARKDOWN_STREAM_ENGINE_AUTO
+            : prev->stream.engine;
+    }
+
+    if (conf->stream.threshold == (size_t) -1) {
+        conf->stream.threshold = (prev->stream.threshold == (size_t) -1)
+            ? 1048576
+            : prev->stream.threshold;
+    }
+
+    if (conf->stream.precommit_buffer == (size_t) -1) {
+        conf->stream.precommit_buffer =
+            (prev->stream.precommit_buffer == (size_t) -1)
+                ? 262144
+                : prev->stream.precommit_buffer;
+    }
+
+    if (conf->stream.flush_min == (size_t) -1) {
+        conf->stream.flush_min = (prev->stream.flush_min == (size_t) -1)
+            ? 16384
+            : prev->stream.flush_min;
+    }
+
+    if (conf->stream.excluded_types == (ngx_array_t *) -1) {
+        conf->stream.excluded_types =
+            (prev->stream.excluded_types == (ngx_array_t *) -1)
+                ? NULL
+                : prev->stream.excluded_types;
+    }
+}
 
 /*
  * Main configuration structure

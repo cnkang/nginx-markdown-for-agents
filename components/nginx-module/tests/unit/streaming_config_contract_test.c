@@ -63,6 +63,44 @@ static char ngx_conf_error_val[] = "ERROR";
 #ifndef NGX_LOG_INFO
 #define NGX_LOG_INFO 3
 #endif
+#ifndef NGX_LOG_WARN
+#define NGX_LOG_WARN 4
+#endif
+
+#ifndef NGX_DONE
+#define NGX_DONE -4
+#endif
+
+#ifndef NGX_HTTP_MAIN_CONF
+#define NGX_HTTP_MAIN_CONF 0x02000000
+#endif
+#ifndef NGX_HTTP_SRV_CONF
+#define NGX_HTTP_SRV_CONF 0x04000000
+#endif
+#ifndef NGX_HTTP_LOC_CONF
+#define NGX_HTTP_LOC_CONF 0x08000000
+#endif
+#ifndef NGX_CONF_TAKE1
+#define NGX_CONF_TAKE1 0x00000002
+#endif
+#ifndef NGX_CONF_NOARGS
+#define NGX_CONF_NOARGS 0x00000001
+#endif
+#ifndef NGX_CONF_1MORE
+#define NGX_CONF_1MORE 0x00000800
+#endif
+#ifndef NGX_CONF_FLAG
+#define NGX_CONF_FLAG 0x00000200
+#endif
+#ifndef NGX_HTTP_MAIN_CONF_OFFSET
+#define NGX_HTTP_MAIN_CONF_OFFSET 0
+#endif
+#ifndef NGX_HTTP_LOC_CONF_OFFSET
+#define NGX_HTTP_LOC_CONF_OFFSET 0
+#endif
+#ifndef ngx_null_string
+#define ngx_null_string { 0, NULL }
+#endif
 
 #ifndef NGX_MAX_SIZE_T_VALUE
 #define NGX_MAX_SIZE_T_VALUE ((size_t) -1)
@@ -85,6 +123,15 @@ static char ngx_conf_error_val[] = "ERROR";
     strncmp((const char *) (s1), (const char *) (s2), (n))
 
 typedef intptr_t ngx_err_t;
+
+typedef struct {
+    ngx_str_t   name;
+    ngx_uint_t  value;
+} ngx_conf_enum_t;
+
+typedef struct {
+    int dummy;
+} ngx_cidr_t;
 
 struct ngx_pool_s {
     int dummy;
@@ -142,8 +189,17 @@ struct ngx_conf_s {
 };
 
 struct ngx_command_s {
-    ngx_str_t  name;
+    ngx_str_t   name;
+    ngx_uint_t  type;
+    char       *(*set)(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
+    ngx_uint_t  conf;
+    ngx_uint_t  offset;
+    void       *post;
 };
+
+#ifndef ngx_null_command
+#define ngx_null_command { ngx_null_string, 0, NULL, 0, 0, NULL }
+#endif
 
 struct ngx_module_s {
     int dummy;
@@ -239,6 +295,14 @@ ngx_memzero(void *p, size_t n)
     memset(p, 0, n);
 }
 
+static ngx_int_t
+ngx_ptocidr(ngx_str_t *text, ngx_cidr_t *cidr)
+{
+    UNUSED(text);
+    UNUSED(cidr);
+    return NGX_OK;
+}
+
 static int g_next_palloc_fails;
 
 static void *
@@ -327,6 +391,60 @@ ngx_conf_log_error(ngx_uint_t level, ngx_conf_t *cf, ngx_err_t err,
     va_end(ap);
 }
 
+static char *
+ngx_conf_set_size_slot(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
+{
+    UNUSED(cf);
+    UNUSED(cmd);
+    UNUSED(conf);
+    return NGX_CONF_OK;
+}
+
+static char *
+ngx_conf_set_msec_slot(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
+{
+    UNUSED(cf);
+    UNUSED(cmd);
+    UNUSED(conf);
+    return NGX_CONF_OK;
+}
+
+static char *
+ngx_conf_set_flag_slot(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
+{
+    UNUSED(cf);
+    UNUSED(cmd);
+    UNUSED(conf);
+    return NGX_CONF_OK;
+}
+
+static char *
+ngx_conf_set_num_slot(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
+{
+    UNUSED(cf);
+    UNUSED(cmd);
+    UNUSED(conf);
+    return NGX_CONF_OK;
+}
+
+static char *
+ngx_conf_set_enum_slot(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
+{
+    UNUSED(cf);
+    UNUSED(cmd);
+    UNUSED(conf);
+    return NGX_CONF_OK;
+}
+
+static char *
+ngx_conf_set_str_slot(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
+{
+    UNUSED(cf);
+    UNUSED(cmd);
+    UNUSED(conf);
+    return NGX_CONF_OK;
+}
+
 static void *
 ngx_http_conf_get_module_loc_conf(ngx_conf_t *cf, ngx_module_t module)
 {
@@ -344,6 +462,7 @@ ngx_http_conf_get_module_main_conf(ngx_conf_t *cf, ngx_module_t module)
 }
 
 #include "../../src/ngx_http_markdown_config_handlers_impl.h"
+#include "../../src/ngx_http_markdown_config_directives_impl.h"
 
 /*
  * Include the production eligibility source so we test the real
@@ -770,54 +889,29 @@ test_allocation_failure(void)
  * 5.3 Default inheritance
  * ================================================================ */
 
-/*
- * Local merge helpers mirror the standard ngx_conf_merge_* macros.
- * These are trivial NGINX patterns unlikely to diverge from production.
- * Production merge function: ngx_http_markdown_merge_stream_values()
- * in src/ngx_http_markdown_config_core_impl.h.
- */
-static void
-merge_uint_value(ngx_uint_t *conf, ngx_uint_t prev, ngx_uint_t def)
-{
-    if (*conf == NGX_CONF_UNSET_UINT) {
-        *conf = (prev == NGX_CONF_UNSET_UINT) ? def : prev;
-    }
-}
-
-static void
-merge_size_value(size_t *conf, size_t prev, size_t def)
-{
-    if (*conf == NGX_CONF_UNSET_SIZE) {
-        *conf = (prev == NGX_CONF_UNSET_SIZE) ? def : prev;
-    }
-}
-
-static void
-merge_ptr_value(ngx_array_t **conf, ngx_array_t *prev, ngx_array_t *def)
-{
-    if (*conf == NGX_CONF_UNSET_PTR) {
-        *conf = (prev == NGX_CONF_UNSET_PTR) ? def : prev;
-    }
-}
-
-/*
- * Merge v0.8.0 stream config (mirrors production merge function).
- */
 static void
 merge_stream_config(ngx_http_markdown_conf_t *child,
     const ngx_http_markdown_conf_t *parent)
 {
-    merge_uint_value(&child->stream.engine,
-                     parent->stream.engine,
-                     NGX_HTTP_MARKDOWN_STREAM_ENGINE_AUTO);
-    merge_size_value(&child->stream.threshold,
-                     parent->stream.threshold, 1048576);
-    merge_size_value(&child->stream.precommit_buffer,
-                     parent->stream.precommit_buffer, 262144);
-    merge_size_value(&child->stream.flush_min,
-                     parent->stream.flush_min, 16384);
-    merge_ptr_value(&child->stream.excluded_types,
-                    parent->stream.excluded_types, NULL);
+    ngx_http_markdown_merge_stream_values(child, parent);
+}
+
+static int
+command_table_contains(const char *name)
+{
+    for (ngx_command_t *cmd = ngx_http_markdown_filter_commands;
+         cmd->name.len != 0;
+         cmd++)
+    {
+        if (cmd->name.len == strlen(name)
+            && ngx_strncmp(cmd->name.data, (u_char *) name,
+                           cmd->name.len) == 0)
+        {
+            return 1;
+        }
+    }
+
+    return 0;
 }
 
 static void
@@ -900,13 +994,8 @@ test_reserved_directive_rejected(void)
 
     /*
      * The reserved directive markdown_stream_flush_interval is NOT
-     * registered in the module's command array.  In production, using
-     * it would cause nginx -t to fail with "unknown directive".
-     *
-     * We verify this by confirming:
-     * 1. No handler function is callable with this name
-     * 2. The name is distinct from all implemented directives
-     * 3. parse_size rejects non-numeric values like "flush_interval"
+     * registered in the production module command array. In production,
+     * using it would cause nginx -t to fail with "unknown directive".
      */
 
     set_arg(&bad_directive, "flush_interval");
@@ -914,22 +1003,8 @@ test_reserved_directive_rejected(void)
     TEST_ASSERT(result == (size_t) NGX_ERROR,
         "parse_size should reject non-numeric 'flush_interval'");
 
-    /* Static assertion: reserved name differs from all implemented ones */
-    TEST_ASSERT(strcmp("markdown_stream_flush_interval",
-                       "markdown_stream_flush_min") != 0,
-        "reserved directive name differs from flush_min");
-    TEST_ASSERT(strcmp("markdown_stream_flush_interval",
-                       "markdown_stream_threshold") != 0,
-        "reserved directive name differs from threshold");
-    TEST_ASSERT(strcmp("markdown_stream_flush_interval",
-                       "markdown_streaming_engine") != 0,
-        "reserved directive name differs from streaming_engine");
-    TEST_ASSERT(strcmp("markdown_stream_flush_interval",
-                       "markdown_stream_precommit_buffer") != 0,
-        "reserved directive name differs from precommit_buffer");
-    TEST_ASSERT(strcmp("markdown_stream_flush_interval",
-                       "markdown_stream_excluded_types") != 0,
-        "reserved directive name differs from excluded_types");
+    TEST_ASSERT(!command_table_contains("markdown_stream_flush_interval"),
+        "reserved directive name absent from production command table");
 
     TEST_PASS("5.4 Reserved directive is not registered");
 }
@@ -1025,30 +1100,8 @@ test_reserved_directive_absent_from_inventory(void)
 
     TEST_SUBSECTION("5.6 Reserved directive absent from inventory");
 
-    /*
-     * Enumerate known v0.8.0 handler function names and confirm
-     * that markdown_stream_flush_interval has no corresponding handler.
-     */
-    static const char *registered_handlers[] = {
-        "ngx_http_markdown_streaming_engine",
-        "ngx_http_markdown_stream_threshold_handler",
-        "ngx_http_markdown_stream_flush_min_handler",
-        "ngx_http_markdown_stream_excluded_types_handler",
-        NULL
-    };
-
-    const char *reserved = "ngx_http_markdown_stream_flush_interval_handler";
-    int found = 0;
-
-    for (int i = 0; registered_handlers[i] != NULL; i++) {
-        if (strcmp(registered_handlers[i], reserved) == 0) {
-            found = 1;
-            break;
-        }
-    }
-
-    TEST_ASSERT(found == 0,
-        "reserved directive handler NOT in inventory");
+    TEST_ASSERT(!command_table_contains("markdown_stream_flush_interval"),
+        "reserved directive NOT in production command table");
 
     /* Verify "flush_interval" is not a parseable size token */
     set_arg(&fi_str, "flush_interval");

@@ -24,7 +24,7 @@
  * Required so call sites in this header see proper prototypes.
  */
 #ifdef MARKDOWN_STREAMING_ENABLED
-static ngx_uint_t
+static ngx_http_markdown_path_selection_t
 ngx_http_markdown_select_processing_path(
     ngx_http_request_t *r,
     const ngx_http_markdown_conf_t *conf,
@@ -638,6 +638,9 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
             ctx->headers_forwarded = 1;
             NGX_HTTP_MARKDOWN_METRIC_INC(
                 skips.compression_passthrough);
+            ngx_http_markdown_log_decision(r, conf,
+                ctx->effective_conf,
+                ngx_http_markdown_reason_streaming_skip_compressed());
             return ngx_http_next_header_filter(r);
 
         } else if (ctx->decompression.type
@@ -699,9 +702,11 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
      */
     NGX_HTTP_MARKDOWN_METRIC_INC(streaming.selection.candidate_total);
 
-    ctx->processing_path =
+    ngx_http_markdown_path_selection_t selection =
         ngx_http_markdown_select_processing_path(
             r, conf, ctx->effective_conf);
+    ctx->processing_path = selection.path;
+    ctx->streaming.reason = selection.reason;
 
     /*
      * Compression guard (Requirement 3 AC 1, spec 41):
@@ -723,7 +728,7 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
         ctx->processing_path =
             NGX_HTTP_MARKDOWN_PATH_FULLBUFFER;
         ctx->streaming.reason =
-            NGX_HTTP_MARKDOWN_STREAM_REASON_EXCLUDED_CONTENT_TYPE;
+            NGX_HTTP_MARKDOWN_STREAM_REASON_COMPRESSED;
 
         NGX_HTTP_MARKDOWN_METRIC_INC(
             streaming.engine_choice.full_buffer);
@@ -790,8 +795,6 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
      * select_processing_path() returned FULLBUFFER without
      * compression override — record engine choice here.
      */
-    ctx->streaming.reason =
-        NGX_HTTP_MARKDOWN_STREAM_REASON_BELOW_THRESHOLD;
     NGX_HTTP_MARKDOWN_METRIC_INC(
         streaming.engine_choice.full_buffer);
 
