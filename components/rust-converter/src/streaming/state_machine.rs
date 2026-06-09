@@ -53,7 +53,7 @@ pub enum StateMachineAction {
     /// An unsupported HTML structure was detected — signal fallback.
     ///
     /// The embedded string identifies the structure (e.g. `"table"`,
-    /// `"svg"`, `"form"`) for diagnostic reporting via
+    /// `"svg"`, `"canvas"`) for diagnostic reporting via
     /// [`markdown_streaming_reason`](crate::ffi::streaming::markdown_streaming_reason).
     FallbackRequired(String),
     /// No action needed (e.g., for ignored events).
@@ -159,7 +159,7 @@ impl StructuralStateMachine {
     ///
     /// Recognizes common structural and inline tags, updates nesting trackers (lists, blockquotes, preformatted/head), extracts
     /// attributes for links/images/ordered lists/code languages, and either pushes a corresponding `StructuralContext` or
-    /// returns an immediate action. Unsupported start tags (table, svg, form, iframe, math, canvas) produce
+    /// returns an immediate action. Unsupported start tags (table, svg, math, canvas) produce
     /// `StateMachineAction::FallbackRequired(structure)`. Some tags
     /// (structural wrappers, unknown tags, and `head`) are ignored and produce `StateMachineAction::None`. A self-closing
     /// `img` produces an `Enter(Image { .. })` without pushing an additional inline context.
