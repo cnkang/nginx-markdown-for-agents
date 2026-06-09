@@ -1043,8 +1043,19 @@ ngx_http_markdown_streaming_record_postcommit_failure(
     const ngx_http_markdown_conf_t *conf)
 {
     if (!ctx->streaming.completion.failure_recorded) {
-        ctx->streaming.reason =
-            NGX_HTTP_MARKDOWN_STREAM_REASON_POSTCOMMIT_PARSE_ERROR;
+        /*
+         * Preserve caller-set specific post-commit reason (e.g.,
+         * POSTCOMMIT_BUDGET_EXCEEDED, POSTCOMMIT_IO_ERROR) if already
+         * assigned by the error classifier.  Fall back to the generic
+         * POSTCOMMIT_PARSE_ERROR only when no post-commit reason was
+         * set upstream (reason still reflects the initial engine choice).
+         */
+        if (ctx->streaming.reason
+            < NGX_HTTP_MARKDOWN_STREAM_REASON_PRECOMMIT_HTML_ERROR)
+        {
+            ctx->streaming.reason =
+                NGX_HTTP_MARKDOWN_STREAM_REASON_POSTCOMMIT_PARSE_ERROR;
+        }
         NGX_HTTP_MARKDOWN_METRIC_INC(streaming.postcommit_error_total);
         NGX_HTTP_MARKDOWN_METRIC_INC(streaming.failed_total);
 
@@ -1492,6 +1503,8 @@ ngx_http_markdown_streaming_handle_postcommit_error(
         || error_code == ERROR_PARSE_BUDGET_EXCEEDED)
     )
     {
+        ctx->streaming.reason =
+            NGX_HTTP_MARKDOWN_STREAM_REASON_POSTCOMMIT_BUDGET_EXCEEDED;
         NGX_HTTP_MARKDOWN_METRIC_INC(
             streaming.budget_exceeded_total);
         NGX_HTTP_MARKDOWN_METRIC_INC(failures_resource_limit);
