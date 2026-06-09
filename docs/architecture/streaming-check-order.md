@@ -26,7 +26,7 @@ The header filter (`ngx_http_markdown_header_filter` in
 full-buffer and streaming paths. The decision chain executes in strict
 sequence:
 
-```
+```text
 header_filter entry
   |
   +-- 1. conf == NULL check -> passthrough

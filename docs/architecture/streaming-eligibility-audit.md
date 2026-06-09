@@ -239,7 +239,7 @@ These checks apply **during buffering/conversion** in the body filter path.
 
 The documented decision chain (Requirement 2.1) enforces this sequence:
 
-```
+```text
 scope (config enabled)
   -> method (GET/HEAD)
     -> status (200 only)
