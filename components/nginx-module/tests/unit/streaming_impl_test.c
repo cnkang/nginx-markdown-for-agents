@@ -1352,7 +1352,7 @@ test_select_processing_path(void)
     ngx_event_t             read_event;
     ngx_str_t               excluded[1];
     ngx_array_t             arr;
-    ngx_uint_t              path;
+    ngx_http_markdown_path_selection_t selection;
 
     TEST_SUBSECTION("select_processing_path engine and skip branches");
     reset_globals();
@@ -1366,91 +1366,101 @@ test_select_processing_path(void)
     r.headers_out.content_length_n = 2048;
 
     g_complex_value = (ngx_str_t) { 3, (u_char *) "off" };
-    path = ngx_http_markdown_select_processing_path(&r, &conf, NULL);
-    TEST_ASSERT(path == NGX_HTTP_MARKDOWN_PATH_FULLBUFFER,
+    selection = ngx_http_markdown_select_processing_path(&r, &conf, NULL);
+    TEST_ASSERT(selection.path == NGX_HTTP_MARKDOWN_PATH_FULLBUFFER,
         "engine=off should route full-buffer");
+    TEST_ASSERT(selection.reason == NGX_HTTP_MARKDOWN_STREAM_REASON_CONFIG_DISABLED,
+        "engine=off should preserve config_disabled reason");
 
     g_complex_value = (ngx_str_t) { 2, (u_char *) "on" };
     r.method = NGX_HTTP_HEAD;
-    path = ngx_http_markdown_select_processing_path(&r, &conf, NULL);
-    TEST_ASSERT(path == NGX_HTTP_MARKDOWN_PATH_FULLBUFFER,
+    selection = ngx_http_markdown_select_processing_path(&r, &conf, NULL);
+    TEST_ASSERT(selection.path == NGX_HTTP_MARKDOWN_PATH_FULLBUFFER,
         "HEAD should route full-buffer");
+    TEST_ASSERT(selection.reason == NGX_HTTP_MARKDOWN_STREAM_REASON_NOT_CANDIDATE,
+        "HEAD should preserve not_candidate reason");
     r.method = 0;
 
     r.headers_out.status = NGX_HTTP_NOT_MODIFIED;
-    path = ngx_http_markdown_select_processing_path(&r, &conf, NULL);
-    TEST_ASSERT(path == NGX_HTTP_MARKDOWN_PATH_FULLBUFFER,
+    selection = ngx_http_markdown_select_processing_path(&r, &conf, NULL);
+    TEST_ASSERT(selection.path == NGX_HTTP_MARKDOWN_PATH_FULLBUFFER,
         "304 should route full-buffer");
     r.headers_out.status = 200;
 
     conf.policy.conditional_requests = NGX_HTTP_MARKDOWN_CONDITIONAL_FULL_SUPPORT;
-    path = ngx_http_markdown_select_processing_path(&r, &conf, NULL);
-    TEST_ASSERT(path == NGX_HTTP_MARKDOWN_PATH_FULLBUFFER,
+    selection = ngx_http_markdown_select_processing_path(&r, &conf, NULL);
+    TEST_ASSERT(selection.path == NGX_HTTP_MARKDOWN_PATH_FULLBUFFER,
         "full_support should route full-buffer");
     conf.policy.conditional_requests = NGX_HTTP_MARKDOWN_CONDITIONAL_DISABLED;
 
     r.headers_out.content_type = (ngx_str_t) { 17, (u_char *) "text/event-stream" };
-    path = ngx_http_markdown_select_processing_path(&r, &conf, NULL);
-    TEST_ASSERT(path == NGX_HTTP_MARKDOWN_PATH_FULLBUFFER,
+    selection = ngx_http_markdown_select_processing_path(&r, &conf, NULL);
+    TEST_ASSERT(selection.path == NGX_HTTP_MARKDOWN_PATH_FULLBUFFER,
         "SSE should route full-buffer");
+    TEST_ASSERT(selection.reason == NGX_HTTP_MARKDOWN_STREAM_REASON_EXCLUDED_CONTENT_TYPE,
+        "SSE should preserve excluded_content_type reason");
 
     r.headers_out.content_type = (ngx_str_t) { 9, (u_char *) "text/html" };
     excluded[0] = (ngx_str_t) { 4, (u_char *) "text" };
     arr.elts = excluded;
     arr.nelts = 1;
     conf.stream_types = &arr;
-    path = ngx_http_markdown_select_processing_path(&r, &conf, NULL);
-    TEST_ASSERT(path == NGX_HTTP_MARKDOWN_PATH_FULLBUFFER,
+    selection = ngx_http_markdown_select_processing_path(&r, &conf, NULL);
+    TEST_ASSERT(selection.path == NGX_HTTP_MARKDOWN_PATH_FULLBUFFER,
         "excluded stream_types should route full-buffer");
 
     conf.stream_types = NULL;
-    path = ngx_http_markdown_select_processing_path(&r, &conf, NULL);
-    TEST_ASSERT(path == NGX_HTTP_MARKDOWN_PATH_STREAMING,
+    selection = ngx_http_markdown_select_processing_path(&r, &conf, NULL);
+    TEST_ASSERT(selection.path == NGX_HTTP_MARKDOWN_PATH_STREAMING,
         "engine=on should route streaming");
+    TEST_ASSERT(selection.reason == NGX_HTTP_MARKDOWN_STREAM_REASON_ELIGIBLE,
+        "engine=on should preserve eligible reason");
 
     excluded[0] = (ngx_str_t) { 11, (u_char *) "application" };
     arr.elts = excluded;
     arr.nelts = 1;
     conf.stream_types = &arr;
     r.headers_out.content_type = (ngx_str_t) { 9, (u_char *) "text/html" };
-    path = ngx_http_markdown_select_processing_path(&r, &conf, NULL);
-    TEST_ASSERT(path == NGX_HTTP_MARKDOWN_PATH_STREAMING,
+    selection = ngx_http_markdown_select_processing_path(&r, &conf, NULL);
+    TEST_ASSERT(selection.path == NGX_HTTP_MARKDOWN_PATH_STREAMING,
         "non-matching stream_types should keep streaming enabled");
 
     r.headers_out.content_type = (ngx_str_t) { 0, NULL };
-    path = ngx_http_markdown_select_processing_path(&r, &conf, NULL);
-    TEST_ASSERT(path == NGX_HTTP_MARKDOWN_PATH_STREAMING,
+    selection = ngx_http_markdown_select_processing_path(&r, &conf, NULL);
+    TEST_ASSERT(selection.path == NGX_HTTP_MARKDOWN_PATH_STREAMING,
         "NULL content-type data should not trigger exclusions");
 
     conf.stream_types = NULL;
     r.headers_out.content_type = (ngx_str_t) { 9, (u_char *) "text/html" };
     conf.policy.conditional_requests =
         NGX_HTTP_MARKDOWN_CONDITIONAL_IF_MODIFIED_SINCE;
-    path = ngx_http_markdown_select_processing_path(&r, &conf, NULL);
-    TEST_ASSERT(path == NGX_HTTP_MARKDOWN_PATH_STREAMING,
+    selection = ngx_http_markdown_select_processing_path(&r, &conf, NULL);
+    TEST_ASSERT(selection.path == NGX_HTTP_MARKDOWN_PATH_STREAMING,
         "if_modified_since_only should keep streaming path");
     conf.policy.conditional_requests = NGX_HTTP_MARKDOWN_CONDITIONAL_DISABLED;
 
     g_complex_value = (ngx_str_t) { 4, (u_char *) "auto" };
     r.headers_out.content_length_n = 10;
-    path = ngx_http_markdown_select_processing_path(&r, &conf, NULL);
-    TEST_ASSERT(path == NGX_HTTP_MARKDOWN_PATH_FULLBUFFER,
+    selection = ngx_http_markdown_select_processing_path(&r, &conf, NULL);
+    TEST_ASSERT(selection.path == NGX_HTTP_MARKDOWN_PATH_FULLBUFFER,
         "auto with small content-length should route full-buffer");
+    TEST_ASSERT(selection.reason == NGX_HTTP_MARKDOWN_STREAM_REASON_BELOW_THRESHOLD,
+        "auto with small content-length should preserve below_threshold reason");
 
     r.headers_out.content_length_n = -1;
-    path = ngx_http_markdown_select_processing_path(&r, &conf, NULL);
-    TEST_ASSERT(path == NGX_HTTP_MARKDOWN_PATH_STREAMING,
+    selection = ngx_http_markdown_select_processing_path(&r, &conf, NULL);
+    TEST_ASSERT(selection.path == NGX_HTTP_MARKDOWN_PATH_STREAMING,
         "auto without content-length should route streaming");
 
     g_complex_value_rc = NGX_ERROR;
-    path = ngx_http_markdown_select_processing_path(&r, &conf, NULL);
-    TEST_ASSERT(path == NGX_HTTP_MARKDOWN_PATH_FULLBUFFER,
+    selection = ngx_http_markdown_select_processing_path(&r, &conf, NULL);
+    TEST_ASSERT(selection.path == NGX_HTTP_MARKDOWN_PATH_FULLBUFFER,
         "complex-value failure should route full-buffer");
     g_complex_value_rc = NGX_OK;
 
     g_complex_value = (ngx_str_t) { 3, (u_char *) "bad" };
-    path = ngx_http_markdown_select_processing_path(&r, &conf, NULL);
-    TEST_ASSERT(path == NGX_HTTP_MARKDOWN_PATH_FULLBUFFER,
+    selection = ngx_http_markdown_select_processing_path(&r, &conf, NULL);
+    TEST_ASSERT(selection.path == NGX_HTTP_MARKDOWN_PATH_FULLBUFFER,
         "invalid engine value should route full-buffer");
 
     /*
@@ -1462,18 +1472,18 @@ test_select_processing_path(void)
     conf.streaming.engine = NULL;
     conf.streaming.auto_threshold = 1024;
     r.headers_out.content_length_n = 10;
-    path = ngx_http_markdown_select_processing_path(&r, &conf, NULL);
-    TEST_ASSERT(path == NGX_HTTP_MARKDOWN_PATH_FULLBUFFER,
+    selection = ngx_http_markdown_select_processing_path(&r, &conf, NULL);
+    TEST_ASSERT(selection.path == NGX_HTTP_MARKDOWN_PATH_FULLBUFFER,
         "NULL engine (auto default) with small CL should route full-buffer");
 
     r.headers_out.content_length_n = 2048;
-    path = ngx_http_markdown_select_processing_path(&r, &conf, NULL);
-    TEST_ASSERT(path == NGX_HTTP_MARKDOWN_PATH_STREAMING,
+    selection = ngx_http_markdown_select_processing_path(&r, &conf, NULL);
+    TEST_ASSERT(selection.path == NGX_HTTP_MARKDOWN_PATH_STREAMING,
         "NULL engine (auto default) with large CL should route streaming");
 
     r.headers_out.content_length_n = -1;
-    path = ngx_http_markdown_select_processing_path(&r, &conf, NULL);
-    TEST_ASSERT(path == NGX_HTTP_MARKDOWN_PATH_STREAMING,
+    selection = ngx_http_markdown_select_processing_path(&r, &conf, NULL);
+    TEST_ASSERT(selection.path == NGX_HTTP_MARKDOWN_PATH_STREAMING,
         "NULL engine (auto default) without CL should route streaming");
 
     /* Restore streaming_engine for subsequent tests */
@@ -2829,7 +2839,7 @@ test_streaming_gap_branches(void)
     u_char                  out_data[] = "zz";
     ngx_buf_t               pending_buf;
     ngx_chain_t             pending_cl;
-    ngx_uint_t              selected_path;
+    ngx_http_markdown_path_selection_t selection;
     ngx_uint_t              free_before;
 
     TEST_SUBSECTION("streaming helper gap branches");
@@ -2839,9 +2849,11 @@ test_streaming_gap_branches(void)
     conf.streaming.on_error = NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_PASS;
     conf.max_size = 64;
 
-    selected_path = ngx_http_markdown_select_processing_path(&r, NULL, NULL);
-    TEST_ASSERT(selected_path == NGX_HTTP_MARKDOWN_PATH_FULLBUFFER,
+    selection = ngx_http_markdown_select_processing_path(&r, NULL, NULL);
+    TEST_ASSERT(selection.path == NGX_HTTP_MARKDOWN_PATH_FULLBUFFER,
         "selector should use full-buffer when conf is NULL");
+    TEST_ASSERT(selection.reason == NGX_HTTP_MARKDOWN_STREAM_REASON_CONFIG_DISABLED,
+        "selector should report config_disabled when conf is NULL");
 
     ctx.streaming.completion.finalize_pending_lastbuf = 1;
     g_next_body_filter_rc = NGX_OK;

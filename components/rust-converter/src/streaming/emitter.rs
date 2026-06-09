@@ -250,6 +250,36 @@ impl IncrementalEmitter {
         std::mem::take(&mut self.flushed)
     }
 
+    /// Discard output that has not been handed back to the caller.
+    ///
+    /// Used by post-commit safe-finish handling after an error aborts the
+    /// current feed call. Both pending bytes and ready-but-unreturned bytes are
+    /// uncommitted from the caller's perspective and must not be appended to
+    /// the already-delivered response.
+    pub(crate) fn discard_uncommitted_output(&mut self) {
+        self.buffer.clear();
+        self.flushed.clear();
+        self.code_block_buffer.clear();
+        self.link_text.clear();
+        self.link_text_overflow = false;
+    }
+
+    /// Flush and return only output produced after uncommitted bytes were
+    /// discarded.
+    pub(crate) fn take_closure_output(&mut self) -> Result<Vec<u8>, ConversionError> {
+        self.flush_to_ready()?;
+        let mut output = self.take_flushed();
+
+        while output.ends_with(b"\n\n") {
+            output.pop();
+        }
+        if !output.is_empty() && !output.ends_with(b"\n") {
+            output.push(b'\n');
+        }
+
+        Ok(output)
+    }
+
     /// Set the flush threshold (minimum pending bytes before a block-boundary
     /// flush moves output to the ready buffer).
     ///

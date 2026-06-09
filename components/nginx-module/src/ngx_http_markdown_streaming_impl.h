@@ -310,7 +310,7 @@ ngx_http_markdown_streaming_cleanup(void *data);
  *   NGX_HTTP_MARKDOWN_PATH_STREAMING   for streaming path
  *   NGX_HTTP_MARKDOWN_PATH_FULLBUFFER  for full-buffer path
  */
-static ngx_uint_t
+static ngx_http_markdown_path_selection_t
 ngx_http_markdown_select_processing_path(
     ngx_http_request_t *r,
     const ngx_http_markdown_conf_t *conf,
@@ -544,7 +544,7 @@ ngx_http_markdown_log_conditional_streaming(
  *
  * Default (no markdown_streaming_engine directive): auto mode.
  */
-static ngx_uint_t
+static ngx_http_markdown_path_selection_t
 ngx_http_markdown_select_processing_path(
     ngx_http_request_t *r,
     const ngx_http_markdown_conf_t *conf,
@@ -554,7 +554,9 @@ ngx_http_markdown_select_processing_path(
     ngx_uint_t   engine_mode;
 
     if (conf == NULL) {
-        return NGX_HTTP_MARKDOWN_PATH_FULLBUFFER;
+        return ngx_http_markdown_path_selection(
+            NGX_HTTP_MARKDOWN_PATH_FULLBUFFER,
+            NGX_HTTP_MARKDOWN_STREAM_REASON_CONFIG_DISABLED);
     }
 
     /*
@@ -576,7 +578,9 @@ ngx_http_markdown_select_processing_path(
             "markdown: failed to evaluate "
             "markdown_streaming_engine, "
             "falling back to full-buffer");
-        return NGX_HTTP_MARKDOWN_PATH_FULLBUFFER;
+        return ngx_http_markdown_path_selection(
+            NGX_HTTP_MARKDOWN_PATH_FULLBUFFER,
+            NGX_HTTP_MARKDOWN_STREAM_REASON_CONFIG_DISABLED);
     }
 
     /* Parse the evaluated string */
@@ -589,7 +593,9 @@ ngx_http_markdown_select_processing_path(
             && ngx_strncasecmp(val.data, str_off,
                                3) == 0)
         {
-            return NGX_HTTP_MARKDOWN_PATH_FULLBUFFER;
+            return ngx_http_markdown_path_selection(
+                NGX_HTTP_MARKDOWN_PATH_FULLBUFFER,
+                NGX_HTTP_MARKDOWN_STREAM_REASON_CONFIG_DISABLED);
         }
 
         if (val.len == 2
@@ -613,7 +619,9 @@ ngx_http_markdown_select_processing_path(
                 "markdown: invalid "
                 "markdown_streaming_engine value "
                 "\"%V\", falling back to off", &val);
-            return NGX_HTTP_MARKDOWN_PATH_FULLBUFFER;
+            return ngx_http_markdown_path_selection(
+                NGX_HTTP_MARKDOWN_PATH_FULLBUFFER,
+                NGX_HTTP_MARKDOWN_STREAM_REASON_CONFIG_DISABLED);
         }
     }
 
@@ -625,7 +633,9 @@ common_checks:
             r->connection->log, 0,
             "markdown: streaming skip: "
             "HEAD request");
-        return NGX_HTTP_MARKDOWN_PATH_FULLBUFFER;
+        return ngx_http_markdown_path_selection(
+            NGX_HTTP_MARKDOWN_PATH_FULLBUFFER,
+            NGX_HTTP_MARKDOWN_STREAM_REASON_NOT_CANDIDATE);
     }
 
     /* Rule 4: 304 Not Modified */
@@ -634,7 +644,9 @@ common_checks:
             r->connection->log, 0,
             "markdown: streaming skip: "
             "304 response");
-        return NGX_HTTP_MARKDOWN_PATH_FULLBUFFER;
+        return ngx_http_markdown_path_selection(
+            NGX_HTTP_MARKDOWN_PATH_FULLBUFFER,
+            NGX_HTTP_MARKDOWN_STREAM_REASON_NOT_CANDIDATE);
     }
 
     /* Rule 5: conditional_requests full_support */
@@ -646,7 +658,9 @@ common_checks:
             "markdown: streaming skip: "
             "conditional_requests full_support "
             "requires full ETag before headers");
-        return NGX_HTTP_MARKDOWN_PATH_FULLBUFFER;
+        return ngx_http_markdown_path_selection(
+            NGX_HTTP_MARKDOWN_PATH_FULLBUFFER,
+            NGX_HTTP_MARKDOWN_STREAM_REASON_NOT_CANDIDATE);
     }
 
     /* Rule 5b: log streaming-allowed decision */
@@ -662,7 +676,9 @@ common_checks:
     {
         ngx_http_markdown_log_decision(r, conf, eff,
             ngx_http_markdown_reason_streaming_skip_unsupported());
-        return NGX_HTTP_MARKDOWN_PATH_FULLBUFFER;
+        return ngx_http_markdown_path_selection(
+            NGX_HTTP_MARKDOWN_PATH_FULLBUFFER,
+            NGX_HTTP_MARKDOWN_STREAM_REASON_EXCLUDED_CONTENT_TYPE);
     }
 
     /* Rule 7: stream_types exclusion list */
@@ -673,14 +689,18 @@ common_checks:
             streaming.selection.excluded_content_type_total);
         ngx_http_markdown_log_decision(r, conf, eff,
             ngx_http_markdown_reason_streaming_skip_unsupported());
-        return NGX_HTTP_MARKDOWN_PATH_FULLBUFFER;
+        return ngx_http_markdown_path_selection(
+            NGX_HTTP_MARKDOWN_PATH_FULLBUFFER,
+            NGX_HTTP_MARKDOWN_STREAM_REASON_EXCLUDED_CONTENT_TYPE);
     }
 
     /* Rule 8: engine == on */
     if (engine_mode
         == NGX_HTTP_MARKDOWN_STREAMING_ENGINE_ON)
     {
-        return NGX_HTTP_MARKDOWN_PATH_STREAMING;
+        return ngx_http_markdown_path_selection(
+            NGX_HTTP_MARKDOWN_PATH_STREAMING,
+            NGX_HTTP_MARKDOWN_STREAM_REASON_ELIGIBLE);
     }
 
     /* Rules 9-11: engine == auto */
@@ -691,13 +711,17 @@ common_checks:
         /* CL < auto_threshold: use full-buffer */
         ngx_http_markdown_log_decision(r, conf, eff,
             ngx_http_markdown_reason_eligible_fullbuffer_auto());
-        return NGX_HTTP_MARKDOWN_PATH_FULLBUFFER;
+        return ngx_http_markdown_path_selection(
+            NGX_HTTP_MARKDOWN_PATH_FULLBUFFER,
+            NGX_HTTP_MARKDOWN_STREAM_REASON_BELOW_THRESHOLD);
     }
 
     /* auto + CL >= auto_threshold or chunked (no CL) */
     ngx_http_markdown_log_decision(r, conf, eff,
         ngx_http_markdown_reason_eligible_streaming_auto());
-    return NGX_HTTP_MARKDOWN_PATH_STREAMING;
+    return ngx_http_markdown_path_selection(
+        NGX_HTTP_MARKDOWN_PATH_STREAMING,
+        NGX_HTTP_MARKDOWN_STREAM_REASON_ELIGIBLE);
 }
 
 
@@ -1535,6 +1559,32 @@ ngx_http_markdown_streaming_handle_postcommit_error(
         r, ctx, NULL, 0, /* last_buf */ 1);
 }
 
+static ngx_http_markdown_stream_reason_e
+ngx_http_markdown_streaming_precommit_reason(
+    const ngx_http_markdown_ctx_t *ctx, uint32_t error_code)
+{
+    if (ctx->streaming.reason
+        >= NGX_HTTP_MARKDOWN_STREAM_REASON_PRECOMMIT_HTML_ERROR
+        && ctx->streaming.reason
+           < NGX_HTTP_MARKDOWN_STREAM_REASON_POSTCOMMIT_PARSE_ERROR)
+    {
+        return ctx->streaming.reason;
+    }
+
+    if (error_code == ERROR_PARSE_TIMEOUT) {
+        return NGX_HTTP_MARKDOWN_STREAM_REASON_PRECOMMIT_TIMEOUT;
+    }
+
+    if (error_code == ERROR_MEMORY_LIMIT
+        || error_code == ERROR_BUDGET_EXCEEDED
+        || error_code == ERROR_DECOMPRESSION_BUDGET_EXCEEDED
+        || error_code == ERROR_PARSE_BUDGET_EXCEEDED)
+    {
+        return NGX_HTTP_MARKDOWN_STREAM_REASON_PRECOMMIT_BUDGET;
+    }
+
+    return NGX_HTTP_MARKDOWN_STREAM_REASON_PRECOMMIT_HTML_ERROR;
+}
 
 /*
  * Pre-Commit error handler: apply streaming_on_error policy.
@@ -1570,6 +1620,8 @@ ngx_http_markdown_streaming_precommit_error(
     const ngx_http_markdown_conf_t *conf,
     uint32_t error_code)
 {
+    ngx_http_markdown_stream_reason_e  mapped_reason;
+
     if (ctx->streaming.handle != NULL) {
         markdown_streaming_abort(ctx->streaming.handle);
         ctx->streaming.handle = NULL;
@@ -1583,6 +1635,9 @@ ngx_http_markdown_streaming_precommit_error(
         return ngx_http_markdown_streaming_fallback_to_fullbuffer(
             r, ctx, conf);
     }
+
+    mapped_reason = ngx_http_markdown_streaming_precommit_reason(
+        ctx, error_code);
 
     /*
      * Track budget exceeded as auxiliary classification.
@@ -1643,8 +1698,7 @@ ngx_http_markdown_streaming_precommit_error(
         == NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_REJECT)
     {
         /* Fail-closed: record reject metrics and reason */
-        ctx->streaming.reason =
-            NGX_HTTP_MARKDOWN_STREAM_REASON_PRECOMMIT_HTML_ERROR;
+        ctx->streaming.reason = mapped_reason;
         NGX_HTTP_MARKDOWN_METRIC_INC(
             streaming.precommit_reject_total);
         NGX_HTTP_MARKDOWN_METRIC_INC(
@@ -1666,8 +1720,7 @@ ngx_http_markdown_streaming_precommit_error(
     }
 
     /* Fail-open: pass original content */
-    ctx->streaming.reason =
-        NGX_HTTP_MARKDOWN_STREAM_REASON_PRECOMMIT_HTML_ERROR;
+    ctx->streaming.reason = mapped_reason;
     ctx->eligible = 0;
     NGX_HTTP_MARKDOWN_METRIC_INC(
         streaming.precommit_failopen_total);

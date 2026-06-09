@@ -623,6 +623,7 @@ impl StreamingConverter {
         // then ask the emitter to close each one in reverse order (inner-most
         // first). This mirrors the `finalize` path but without processing any
         // remaining input — we only close what is already open.
+        self.emitter.discard_uncommitted_output();
 
         // 1. Finalize state machine: pops all contexts from the stack.
         let unclosed = self.state_machine.finalize();
@@ -634,9 +635,10 @@ impl StreamingConverter {
                 .process_action(&action, &mut self.state_machine)?;
         }
 
-        // 3. Finalize the emitter to flush any remaining buffered output
-        //    (e.g., pending code block fences).
-        let closing_bytes = self.emitter.finalize()?;
+        // 3. Return only closure bytes produced after uncommitted output was
+        //    discarded. Do not call finalize(), which flushes all pending
+        //    content and can leak bytes from the failed feed call.
+        let closing_bytes = self.emitter.take_closure_output()?;
 
         Ok(closing_bytes)
     }
@@ -1880,6 +1882,43 @@ mod tests {
             "safe_finish should succeed after post-commit error"
         );
         // Closing bytes may be empty or contain closing markup; either is valid
+    }
+
+    #[test]
+    fn test_safe_finish_discards_ready_unreturned_output() {
+        let mut conv = make_converter();
+        let output = conv.feed_chunk(b"<h1>Title</h1>").unwrap();
+        assert!(!output.markdown.is_empty());
+        assert_eq!(conv.commit_state, CommitState::PostCommit);
+
+        let result = conv.feed_chunk(b"<p>uncommitted ready</p><svg></svg>");
+        assert!(result.is_err());
+
+        let closing = conv.safe_finish().expect("safe_finish should succeed");
+        let closing_text = String::from_utf8(closing).expect("valid utf8");
+        assert!(
+            !closing_text.contains("uncommitted ready"),
+            "safe_finish leaked ready-but-unreturned output: {closing_text:?}"
+        );
+    }
+
+    #[test]
+    fn test_safe_finish_discards_pending_unreturned_output() {
+        let mut conv = make_converter();
+        let output = conv.feed_chunk(b"<h1>Title</h1>").unwrap();
+        assert!(!output.markdown.is_empty());
+        assert_eq!(conv.commit_state, CommitState::PostCommit);
+
+        conv.set_flush_threshold(1024);
+        let result = conv.feed_chunk(b"<p>uncommitted pending</p><svg></svg>");
+        assert!(result.is_err());
+
+        let closing = conv.safe_finish().expect("safe_finish should succeed");
+        let closing_text = String::from_utf8(closing).expect("valid utf8");
+        assert!(
+            !closing_text.contains("uncommitted pending"),
+            "safe_finish leaked pending output: {closing_text:?}"
+        );
     }
 
     /// Validates: Requirements 3.2, 4.5 — Commit state transition only happens

@@ -117,12 +117,12 @@ collect_streaming_snapshot(test_streaming_metrics_t *snap)
 static void
 test_reason_code_enum_count(void)
 {
-    TEST_SUBSECTION("Reason code enum count equals 14");
+    TEST_SUBSECTION("Reason code enum count equals 15");
 
-    TEST_ASSERT(NGX_HTTP_MARKDOWN_STREAM_REASON_COUNT == 14,
-                "NGX_HTTP_MARKDOWN_STREAM_REASON_COUNT should be 14");
+    TEST_ASSERT(NGX_HTTP_MARKDOWN_STREAM_REASON_COUNT == 15,
+                "NGX_HTTP_MARKDOWN_STREAM_REASON_COUNT should be 15");
 
-    TEST_PASS("Reason code enum count is 14");
+    TEST_PASS("Reason code enum count is 15");
 }
 
 /* ── Test: string mapping for all valid enum values ───────────── */
@@ -186,6 +186,12 @@ test_reason_string_mapping_valid(void)
             NGX_HTTP_MARKDOWN_STREAM_REASON_NOT_HTML),
             "not_html") == 0,
         "NOT_HTML -> \"not_html\"");
+
+    TEST_ASSERT(
+        strcmp(ngx_http_markdown_stream_reason_str(
+            NGX_HTTP_MARKDOWN_STREAM_REASON_COMPRESSED),
+            "compressed") == 0,
+        "COMPRESSED -> \"compressed\"");
 
     TEST_ASSERT(
         strcmp(ngx_http_markdown_stream_reason_str(
