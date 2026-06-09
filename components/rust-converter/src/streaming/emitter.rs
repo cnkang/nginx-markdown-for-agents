@@ -256,12 +256,19 @@ impl IncrementalEmitter {
     /// - `0` means flush immediately at every block boundary (lowest latency).
     /// - Larger values batch output across multiple block elements, reducing
     ///   per-flush overhead at the cost of slightly delayed delivery.
+    /// - Values at or above `max_buffer_size` are clamped to
+    ///   `max_buffer_size - 1` so that `trigger_flush` can fire before
+    ///   `check_buffer_budget` fails.
     ///
     /// # Arguments
     ///
     /// * `threshold` - Minimum pending bytes required before flushing.
     pub fn set_flush_threshold(&mut self, threshold: usize) {
-        self.flush_threshold = threshold;
+        if threshold >= self.max_buffer_size && self.max_buffer_size > 0 {
+            self.flush_threshold = self.max_buffer_size.saturating_sub(1);
+        } else {
+            self.flush_threshold = threshold;
+        }
     }
 
     /// Current count of emitted flush points.

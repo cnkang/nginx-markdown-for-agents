@@ -491,10 +491,13 @@ pub unsafe extern "C" fn markdown_streaming_feed(
 /// buffer via [`markdown_streaming_output_free`]. If the final flush produces
 /// no additional output, `*out_data` is NULL and `*out_len` is 0.
 ///
-/// This call always consumes the provided `handle`; after this function
-/// returns (whether success, failure, or internal panic) the handle is
-/// invalid and must not be passed to any other `markdown_streaming_*`
-/// function. Violating this rule causes a double-free (CWE-415).
+/// This call always consumes the provided `handle` when validation passes
+/// (handle is non-NULL and output pointers are non-NULL); after this function
+/// returns successfully the handle is invalid and must not be passed to any
+/// other `markdown_streaming_*` function. If validation fails (NULL handle or
+/// NULL output pointers), `ERROR_INVALID_INPUT` is returned and the handle is
+/// NOT consumed — the caller remains responsible for freeing or aborting it.
+/// Violating this rule causes a double-free (CWE-415).
 ///
 /// # Safety
 ///
@@ -566,9 +569,12 @@ pub unsafe extern "C" fn markdown_streaming_finish(
 
 /// Finalize a streaming conversion, consume the handle, and write the result.
 ///
-/// This call always consumes the provided `handle`; after this function
-/// returns (whether success, failure, or internal panic) the handle is
-/// invalid and must not be used again or freed by the caller.
+/// This call consumes the provided `handle` when validation passes (both
+/// `handle` and `result` are non-NULL); after successful consumption the
+/// handle is invalid and must not be used again or freed by the caller.
+/// If validation fails (NULL `handle` or NULL `result`), `ERROR_INVALID_INPUT`
+/// is returned and the handle is NOT consumed — the caller remains responsible
+/// for freeing or aborting it.
 ///
 /// # Safety
 ///
