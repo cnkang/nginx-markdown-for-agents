@@ -16,20 +16,20 @@ configuration directives.
 - **True streaming contract** (RFC 0008, ADR-0011): formalize incremental
   input processing, incremental output emission, and bounded memory as a
   verifiable contract for the streaming engine.
-- **Streaming fallback state machine** (streaming fallback state machine, ADR-0012): pre-commit/post-commit
+- **Streaming fallback state machine** (ADR-0012): pre-commit/post-commit
   two-phase error handling with deterministic recovery semantics.
-- **Body filter streaming integration** (streaming converter FFI and body filter integration): wire the streaming converter
+- **Body filter streaming integration**: wire the streaming converter
   into the NGINX body filter chain with chunked transfer encoding output.
-- **Streaming converter FFI** (streaming converter FFI and body filter integration): Rust streaming converter ABI and C
+- **Streaming converter FFI**: Rust streaming converter ABI and C
   headers for incremental conversion across chunk boundaries.
 - **Streaming configuration directives** (#137, ADR-0013):
   `markdown_stream_threshold`, `markdown_stream_precommit_buffer`,
   `markdown_stream_flush_min`, `markdown_stream_excluded_types`.
-- **Streaming observability** (streaming observability): engine selection counters, fallback
+- **Streaming observability**: engine selection counters, fallback
   and failure counters, streaming reason codes for diagnostics.
-- **Streaming security enforcement** (streaming security enforcement): hard-excluded content types
+- **Streaming security enforcement**: hard-excluded content types
   that bypass streaming regardless of configuration, with security test suite.
-- **Release matrix source of truth** (release matrix source of truth, ADR-0014): `tools/release-matrix.json`,
+- **Release matrix source of truth** (ADR-0014): `tools/release-matrix.json`,
   JSON schema, validation tooling, and documentation rendering script.
 - **v0.8.0 release gate**: `make release-gates-check-080` for pre-release
   validation.
@@ -75,9 +75,10 @@ configuration directives.
 
 ### Changed
 
-- **BREAKING**: `markdown_streaming_auto_threshold` directive removed — replaced
-  by `markdown_stream_threshold`. Existing configurations using
-  `markdown_streaming_auto_threshold` will be rejected by `nginx -t`.
+- `markdown_streaming_auto_threshold` is now a deprecated compatibility
+  directive. Existing configurations still parse, and explicit values are
+  bridged to `markdown_stream_threshold` unless the new directive is also
+  explicitly configured.
 - **BREAKING**: Streaming engine now produces `Transfer-Encoding: chunked`
   output instead of `Content-Length` for streaming responses.
 - **BREAKING**: `MarkdownOptions` FFI layout now includes
@@ -97,12 +98,14 @@ configuration directives.
 - `markdown_max_size`: emits info-level deprecation warning; use
   `markdown_stream_threshold` and `markdown_stream_precommit_buffer` instead.
   Scheduled for removal in a future release.
+- `markdown_streaming_auto_threshold`: accepted for compatibility and mapped
+  to `markdown_stream_threshold` when explicitly configured. New
+  configurations should use `markdown_stream_threshold` directly.
 
 ### Removed
 
-- `markdown_streaming_auto_threshold` directive: replaced by
-  `markdown_stream_threshold`. Configurations referencing the old directive
-  will fail `nginx -t` validation.
+- None. The legacy `markdown_streaming_auto_threshold` directive remains
+  registered for compatibility in 0.8.0.
 
 ### Fixed
 

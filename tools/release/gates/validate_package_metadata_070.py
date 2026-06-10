@@ -622,8 +622,21 @@ def _extract_matrix_versions() -> set[str]:
         raise RuntimeError(
             f"Malformed release matrix at {RELEASE_MATRIX}: {exc}"
         ) from exc
+    for entry in data.get("entries", []):
+        if (
+            entry.get("support_tier") == "supported"
+            and entry.get("libc") == "glibc"
+            and entry.get("release_blocking") is True
+        ):
+            version = entry.get("nginx_version")
+            if isinstance(version, str) and _is_nginx_version(version):
+                versions.add(version)
+
     for entry in data.get("matrix", []):
-        if entry.get("support_tier") == "full" and entry.get("os_type") == "glibc":
+        if (
+            entry.get("support_tier") == "full"
+            and entry.get("os_type") == "glibc"
+        ):
             version = entry.get("nginx")
             if isinstance(version, str) and _is_nginx_version(version):
                 versions.add(version)

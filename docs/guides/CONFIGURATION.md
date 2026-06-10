@@ -760,6 +760,12 @@ below the threshold always use the full-buffer path.
 
 The value must be greater than zero; `0` is rejected by `nginx -t`.
 
+Compatibility: legacy `markdown_streaming_auto_threshold` remains accepted in
+v0.8.0. When it is explicitly configured and `markdown_stream_threshold` is
+not, the module maps the legacy value into `markdown_stream_threshold`. If both
+directives are configured, `markdown_stream_threshold` wins. New
+configurations should use `markdown_stream_threshold` directly.
+
 **Valid Units:** `k` (kilobytes), `m` (megabytes)
 
 **Example:**

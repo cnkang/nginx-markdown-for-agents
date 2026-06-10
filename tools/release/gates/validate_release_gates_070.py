@@ -49,6 +49,10 @@ CARGO_VERSION_070_GATE = "cargo:version-070"
 BlockingItems = list[tuple[str, bool]]
 
 
+def _expected_cargo_version() -> str:
+    return os.environ.get("RELEASE_GATE_EXPECTED_CARGO_VERSION", "0.7.0")
+
+
 class ValidationResult:
     def __init__(self) -> None:
         self.results: list[tuple[str, str, str]] = []
@@ -282,10 +286,17 @@ def check_structure(result: ValidationResult) -> None:
         except tomllib.TOMLDecodeError as exc:
             result.fail(CARGO_VERSION_070_GATE, f"Cargo.toml parse error: {exc}")
         else:
-            if version == "0.7.0":
-                result.pass_(CARGO_VERSION_070_GATE, "Cargo version is 0.7.0")
+            expected_version = _expected_cargo_version()
+            if version == expected_version:
+                result.pass_(
+                    CARGO_VERSION_070_GATE,
+                    f"Cargo version is {expected_version}",
+                )
             else:
-                result.fail(CARGO_VERSION_070_GATE, f"version is {version}")
+                result.fail(
+                    CARGO_VERSION_070_GATE,
+                    f"version is {version}, expected {expected_version}",
+                )
 
     else:
         result.fail(CARGO_VERSION_070_GATE, "Cargo.toml missing")

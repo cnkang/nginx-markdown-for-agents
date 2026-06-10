@@ -625,7 +625,9 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      * Streaming engine selection mode.
      * Supports per-request variable-driven rollout.
      * Default: auto (per-request selection based on
-     *          markdown_streaming_auto_threshold)
+     *          markdown_stream_threshold in v0.8.0; explicit legacy
+     *          markdown_streaming_auto_threshold values are bridged
+     *          only when the new directive is not set)
      * Context: http, server, location
      *
      * Example:
