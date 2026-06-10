@@ -309,6 +309,7 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
 Follow evidence-first verification (no completion claim without fresh command output):
 - Docs/tools changes: `make docs-check`
 - Release-gate tooling: `make release-gates-check`
+- Release gates 0.8.0: `make release-gates-check-080` (comprehensive v0.8.0 release readiness gate)
 - Rust converter/streaming changes: `make test-rust`
 - Rust example/benchmark changes: `cargo check --all-targets` in the crate
   directory to catch edition-specific errors (examples are only compiled
@@ -317,7 +318,7 @@ Follow evidence-first verification (no completion claim without fresh command ou
 - NGINX C module changes: `make test-nginx-unit`
 - C module production source changes: `make coverage-c` (verify coverage bar)
 - Rust converter production source changes: `make coverage-rust` (verify coverage bar)
-- Streaming runtime/e2e changes: `make verify-chunked-native-e2e-smoke` (or stronger profile when required)
+- Streaming runtime/e2e changes: `make verify-chunked-native-e2e-smoke` (or stronger profile when required; requires `NGINX_BIN` pointing to a locally-compiled NGINX binary with the module loaded)
 - C module volatile/atomic usage changes: `bash tools/harness/detect_volatile_atomic.sh` (Rule 42)
 - New `#[ignore]` tests introduced in this change: run targeted
   `cargo test ... -- --ignored` at least once and report result.
@@ -438,3 +439,4 @@ remediation:
 | 0.7.15 | 2026-06-03 | Codex | Strengthened Rule 13 for package smoke job-container checkout prerequisites |
 | 0.7.16 | 2026-06-03 | Codex | Strengthened Rule 13 for tag release gates avoiding user-local spec dependencies in clean CI checkouts |
 | 0.7.17 | 2026-06-04 | Codex | Strengthened Rule 6 for streaming code-block fence state across split text events |
+| 0.8.0 | 2026-06-04 | Kang | 0.8.0 release gate target (release-gates-check-080) with streaming, coverage, matrix, and clean-checkout gates |
