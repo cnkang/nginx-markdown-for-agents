@@ -720,10 +720,17 @@ ngx_http_markdown_diagnostics_fmt_streaming_config(
     const char  *on_error_str;
     size_t       auto_threshold;
 
-    engine_str = (conf != NULL && conf->streaming.engine != NULL)
-        ? "configured"
-        : ((conf != NULL && conf->stream.engine != NGX_HTTP_MARKDOWN_STREAM_ENGINE_AUTO)
-            ? "static" : "auto");
+    if (conf != NULL && conf->streaming.engine != NULL) {
+        engine_str = "configured";
+    } else if (conf != NULL
+               && conf->stream.engine
+                  != NGX_HTTP_MARKDOWN_STREAM_ENGINE_AUTO)
+    {
+        engine_str = "static";
+    } else {
+        engine_str = "auto";
+    }
+
     on_error_str = (conf != NULL
          && conf->stream.on_error
             == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT)
