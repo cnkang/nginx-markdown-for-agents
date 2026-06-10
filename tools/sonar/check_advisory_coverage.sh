@@ -32,6 +32,7 @@ if lcov --help 2>&1 | grep -q -- '--ignore-errors'; then
 fi
 
 echo "==> Checking advisory coverage thresholds (combined report)"
+echo "    Policy source: AGENTS.md Rule 25 — 80% aggregate minimum; 90% target for critical paths"
 
 # shellcheck disable=SC2086
 lcov --list "${LCOV_FILE}" --rc branch_coverage=1 \
